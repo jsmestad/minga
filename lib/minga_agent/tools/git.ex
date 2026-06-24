@@ -156,18 +156,28 @@ defmodule MingaAgent.Tools.Git do
   @spec effective_diff(String.t(), diff_opts(), Context.t()) :: result()
   defp effective_diff(project_root, opts, %Context{} = context) do
     if Keyword.get(opts, :staged, false) do
-      {:error,
-       "git_diff staged=true is unavailable in routed overlay contexts; apply/export the overlay first"}
+      staged_overlay_error()
     else
-      max_input_bytes = Keyword.get(opts, :max_input_bytes, @max_input_bytes)
+      effective_unstaged_diff(project_root, opts, context)
+    end
+  end
 
-      with {:ok, path_filter} <- path_filter(project_root, Keyword.get(opts, :path)),
-           {:ok, entries, new_root} <-
-             routed_entries_and_root(project_root, context, max_input_bytes),
-           {:ok, entries} <- filter_entries(project_root, entries, path_filter),
-           {:ok, output} <- render_effective_diff(project_root, new_root, entries, opts) do
-        if output == "", do: {:ok, "No differences."}, else: {:ok, output}
-      end
+  @spec staged_overlay_error() :: {:error, String.t()}
+  defp staged_overlay_error do
+    {:error,
+     "git_diff staged=true is unavailable in routed overlay contexts; apply/export the overlay first"}
+  end
+
+  @spec effective_unstaged_diff(String.t(), diff_opts(), Context.t()) :: result()
+  defp effective_unstaged_diff(project_root, opts, %Context{} = context) do
+    max_input_bytes = Keyword.get(opts, :max_input_bytes, @max_input_bytes)
+
+    with {:ok, path_filter} <- path_filter(project_root, Keyword.get(opts, :path)),
+         {:ok, entries, new_root} <-
+           routed_entries_and_root(project_root, context, max_input_bytes),
+         {:ok, entries} <- filter_entries(project_root, entries, path_filter),
+         {:ok, output} <- render_effective_diff(project_root, new_root, entries, opts) do
+      if output == "", do: {:ok, "No differences."}, else: {:ok, output}
     end
   end
 
@@ -224,8 +234,6 @@ defmodule MingaAgent.Tools.Git do
     case ProjectView.diff(view) do
       {:ok, entries} -> normalize_entries(entries)
       {:error, reason} -> {:error, "project_view_unavailable: diff failed: #{inspect(reason)}"}
-      entries when is_list(entries) -> normalize_entries(entries)
-      other -> {:error, "project view diff returned invalid value: #{inspect(other)}"}
     end
   catch
     :exit, reason -> {:error, "project_view_unavailable: diff failed: #{inspect(reason)}"}
@@ -261,20 +269,35 @@ defmodule MingaAgent.Tools.Git do
   defp materialize_forks_for_changeset(%Context{fork_store: nil}, _max_input_bytes), do: :ok
 
   defp materialize_forks_for_changeset(%Context{fork_store: fs, changeset: cs}, max_input_bytes) do
-    with {:ok, forks} <- fork_map(fs) do
-      Enum.reduce_while(forks, :ok, fn {path, fork_pid}, :ok ->
-        relative_path = Path.relative_to(path, Changeset.project_root(cs))
-        content = Minga.Buffer.Fork.content(fork_pid)
+    case fork_map(fs) do
+      {:ok, forks} ->
+        materialize_fork_entries(forks, Changeset.project_root(cs), cs, max_input_bytes)
 
-        with {:ok, content} <- validate_input_size(relative_path, content, max_input_bytes) do
-          case Changeset.materialize_command_file(cs, relative_path, content) do
-            :ok -> {:cont, :ok}
-            {:error, reason} -> {:halt, {:error, reason}}
-          end
-        else
-          {:error, _reason} = error -> {:halt, error}
-        end
-      end)
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  @spec materialize_fork_entries(%{String.t() => pid()}, String.t(), pid(), pos_integer()) ::
+          :ok | {:error, term()}
+  defp materialize_fork_entries(forks, project_root, changeset, max_input_bytes) do
+    Enum.reduce_while(forks, :ok, fn {path, fork_pid}, :ok ->
+      relative_path = Path.relative_to(path, project_root)
+      content = Minga.Buffer.Fork.content(fork_pid)
+
+      case validate_input_size(relative_path, content, max_input_bytes) do
+        {:ok, content} -> materialize_fork_entry(changeset, relative_path, content)
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  @spec materialize_fork_entry(pid(), String.t(), binary()) ::
+          {:cont, :ok} | {:halt, {:error, term()}}
+  defp materialize_fork_entry(changeset, relative_path, content) do
+    case Changeset.materialize_command_file(changeset, relative_path, content) do
+      :ok -> {:cont, :ok}
+      {:error, reason} -> {:halt, {:error, reason}}
     end
   end
 
@@ -322,19 +345,26 @@ defmodule MingaAgent.Tools.Git do
 
   @spec validate_fork_inputs(String.t(), pid(), pos_integer()) :: :ok | {:error, String.t()}
   defp validate_fork_inputs(project_root, fork_store, max_input_bytes) do
-    with {:ok, forks} <- fork_map(fork_store) do
-      Enum.reduce_while(forks, :ok, fn {path, fork_pid}, :ok ->
-        relative_path = Path.relative_to(path, project_root)
-        content = Minga.Buffer.Fork.content(fork_pid)
-
-        case validate_input_size(relative_path, content, max_input_bytes) do
-          {:ok, _content} -> {:cont, :ok}
-          {:error, _reason} = error -> {:halt, error}
-        end
-      end)
+    case fork_map(fork_store) do
+      {:ok, forks} -> validate_fork_entry_inputs(forks, project_root, max_input_bytes)
+      {:error, _reason} = error -> error
     end
   catch
     :exit, reason -> {:error, "fork diff unavailable: #{inspect(reason)}"}
+  end
+
+  @spec validate_fork_entry_inputs(%{String.t() => pid()}, String.t(), pos_integer()) ::
+          :ok | {:error, String.t()}
+  defp validate_fork_entry_inputs(forks, project_root, max_input_bytes) do
+    Enum.reduce_while(forks, :ok, fn {path, fork_pid}, :ok ->
+      relative_path = Path.relative_to(path, project_root)
+      content = Minga.Buffer.Fork.content(fork_pid)
+
+      case validate_input_size(relative_path, content, max_input_bytes) do
+        {:ok, _content} -> {:cont, :ok}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
   end
 
   @spec fork_content_by_relative_path(String.t(), pid()) ::
@@ -505,9 +535,9 @@ defmodule MingaAgent.Tools.Git do
     old_content = safe_read_diff_file(project_root, relative_path, max_input_bytes)
     new_content = routed_content(new_root, relative_path, kind, max_input_bytes)
 
-    with :ok <- maybe_write_diff_file(old_dir, relative_path, old_content),
-         :ok <- maybe_write_diff_file(new_dir, relative_path, new_content) do
-      :ok
+    case maybe_write_diff_file(old_dir, relative_path, old_content) do
+      :ok -> maybe_write_diff_file(new_dir, relative_path, new_content)
+      {:error, _reason} = error -> error
     end
   end
 

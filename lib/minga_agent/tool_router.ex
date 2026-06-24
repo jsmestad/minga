@@ -497,16 +497,20 @@ defmodule MingaAgent.ToolRouter do
 
   defp materialize_forks_for_command(%Context{fork_store: fs, changeset: cs})
        when fs != nil and cs != nil do
-    with :ok <- fork_store_available(fs) do
-      fs
-      |> BufferForkStore.all()
-      |> Enum.reduce_while(:ok, fn {path, fork_pid}, :ok ->
-        case materialize_fork_for_command(cs, path, fork_pid) do
-          :ok -> {:cont, :ok}
-          {:error, _reason} = error -> {:halt, error}
-        end
-      end)
+    case fork_store_available(fs) do
+      :ok -> materialize_command_forks(BufferForkStore.all(fs), cs)
+      {:error, _reason} = error -> error
     end
+  end
+
+  @spec materialize_command_forks(%{String.t() => pid()}, pid()) :: :ok | {:error, term()}
+  defp materialize_command_forks(forks, changeset) do
+    Enum.reduce_while(forks, :ok, fn {path, fork_pid}, :ok ->
+      case materialize_fork_for_command(changeset, path, fork_pid) do
+        :ok -> {:cont, :ok}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
   end
 
   @spec materialize_fork_for_command(pid(), String.t(), pid()) :: :ok | {:error, term()}
