@@ -50,7 +50,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentContextEncoderTest do
         visible: true,
         task: "Done",
         dispatch_timestamp: ts,
-        status: :done,
+        status: :needs_you,
         can_approve: true
       }
 
@@ -62,7 +62,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentContextEncoderTest do
 
       assert <<@op_gui_agent_context, payload_len::16, payload::binary-size(payload_len)>> = cmd
 
-      assert <<1::8, ^task_len::16, "Done", ^timestamp_unix::64, 4::8, 1::8,
+      assert <<1::8, ^task_len::16, "Done", ^timestamp_unix::64, 3::8, 1::8,
                _progress_and_todos::binary>> = payload
     end
 
@@ -73,7 +73,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentContextEncoderTest do
         visible: true,
         task: "Done",
         dispatch_timestamp: ts,
-        status: :done,
+        status: :needs_you,
         can_approve: true,
         progress: %Progress{
           active_action: "shell",
@@ -93,7 +93,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentContextEncoderTest do
       task_len = byte_size("Done")
       timestamp_unix = DateTime.to_unix(ts)
 
-      assert <<1::8, ^task_len::16, "Done", ^timestamp_unix::64, 4::8, 1::8, 5::16, "shell",
+      assert <<1::8, ^task_len::16, "Done", ^timestamp_unix::64, 3::8, 1::8, 5::16, "shell",
                2::16, 1::16, 33::16, "Review: approve or reject changes", 2::8, 2::8, 13::16,
                "Inspect files", 1::8, 9::16, "Run tests">> = payload
     end

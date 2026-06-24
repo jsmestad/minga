@@ -53,6 +53,14 @@ defmodule MingaEditor.Agent.Activity do
     %{activity | active_action: "", started_at: nil}
   end
 
+  @doc "Seeds the first visible timestamp without resetting the turn state."
+  @spec ensure_started_at(t()) :: t()
+  def ensure_started_at(%__MODULE__{started_at: nil} = activity) do
+    %{activity | started_at: DateTime.utc_now()}
+  end
+
+  def ensure_started_at(%__MODULE__{} = activity), do: activity
+
   @doc "Replaces the visible todo plan."
   @spec set_todos(t(), [TodoItem.t()]) :: t()
   def set_todos(%__MODULE__{} = activity, todos) when is_list(todos) do

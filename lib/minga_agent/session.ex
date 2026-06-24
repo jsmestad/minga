@@ -2517,6 +2517,9 @@ defmodule MingaAgent.Session do
   defp event_log_entry({:approval_pending, approval}),
     do: {:approval_requested, Map.put(approval, :approval_id, approval.tool_call_id)}
 
+  defp event_log_entry({:todo_plan_updated, todos}),
+    do: {:todo_plan_updated, %{todos: todo_items_payload(todos)}}
+
   defp event_log_entry({:approval_resolved, _decision}), do: nil
 
   defp event_log_entry({:system_message, _message, _level}), do: nil
@@ -2551,6 +2554,32 @@ defmodule MingaAgent.Session do
        }}
 
   defp event_log_entry(_event), do: nil
+
+  @spec todo_items_payload(term()) :: [map()]
+  defp todo_items_payload(todos) when is_list(todos) do
+    Enum.map(todos, &todo_item_payload/1)
+  end
+
+  defp todo_items_payload(_todos), do: []
+
+  @spec todo_item_payload(map()) :: map()
+  defp todo_item_payload(todo) do
+    %{
+      "id" => todo_value(todo, :id),
+      "description" => todo_value(todo, :description),
+      "status" => todo_status_payload(todo_value(todo, :status))
+    }
+  end
+
+  @spec todo_value(map(), atom()) :: term()
+  defp todo_value(todo, key) do
+    Map.get(todo, key) || Map.get(todo, Atom.to_string(key))
+  end
+
+  @spec todo_status_payload(term()) :: String.t()
+  defp todo_status_payload(status) when is_binary(status), do: status
+  defp todo_status_payload(status) when is_atom(status), do: Atom.to_string(status)
+  defp todo_status_payload(status), do: to_string(status)
 
   # When content is a ContentPart list (images attached), extract the text
   # for the chat message and pass the full parts to the provider.

@@ -20,12 +20,17 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.SystemObserver.ProcessSnapshot
   alias Minga.SystemObserver.TreeNode
+  alias MingaEditor.Agent.Activity
   alias MingaEditor.Agent.EditTimeline
+  alias MingaEditor.Agent.Events, as: AgentEvents
+  alias MingaEditor.Agent.UIState
   alias MingaEditor.FocusTree
   alias MingaEditor.Input.Router
   alias MingaEditor.Layout
   alias MingaEditor.Layout.OverlayBand
   alias MingaEditor.Layout.SurfaceRegistry
+  alias MingaEditor.State.Agent, as: AgentState
+  alias MingaEditor.State.AgentAccess
   alias MingaEditor.UI.Notification
   alias MingaEditor.UI.NotificationCenter
 
@@ -44,6 +49,25 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
 
   defp with_observatory(state) do
     put_in(state.shell_state.observatory_visible, true)
+  end
+
+  defp with_agent_context(state) do
+    approval = %{tool_call_id: "tc1", name: "shell", args: %{}}
+
+    state =
+      %{
+        state
+        | shell_state: %{
+            state.shell_state
+            | agent: AgentState.set_pending_approval(state.shell_state.agent, approval)
+          }
+      }
+      |> AgentAccess.update_agent_ui(fn ui ->
+        UIState.update_activity(ui, fn _ -> Activity.new() end)
+      end)
+
+    {state, _effects} = AgentEvents.handle(state, {:approval_pending, approval})
+    state
   end
 
   # Builds an observatory tree with `count` nodes (one root plus count-1 direct
@@ -180,6 +204,21 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
       {row, _col, _width, height} = SurfaceRegistry.rect_for(state, :edit_timeline)
 
       assert height == 3
+      assert row + height == 24
+    end
+
+    test "pending approval alone places the agent context band" do
+      state = with_agent_context(base_state(rows: 24, cols: 80))
+
+      assert AgentAccess.agent(state).pending_approval != nil
+      assert AgentAccess.view(state).activity.todos == []
+      assert AgentAccess.view(state).activity.tool_count == 0
+
+      {row, _col, _width, height} = SurfaceRegistry.rect_for(state, :agent_context)
+      ids = state |> SurfaceRegistry.placements() |> Enum.map(& &1.surface_id)
+
+      assert :agent_context in ids
+      assert height > 0
       assert row + height == 24
     end
 

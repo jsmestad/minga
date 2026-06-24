@@ -34,37 +34,33 @@ defmodule MingaEditor.Layout.FooterOverlays do
       conservative slack: e.g. a notification item with no body draws 1 line where
       the count budgets 2).
 
-    * **Wrap-dependent surfaces** (float_popup, extension_panel, and the dormant
-      agent_context / tool_manager): these wrap text frontend-side where the BEAM
-      only knows an item count, not a wrapped line count, so `content_height` stays
-      `:max` (the clamp ceiling). Go bottom-aligns the rendered content within the
-      band (`Y = rect.Row + bandHeight - contentLines`), so the overlay still hugs
-      the screen bottom; the residual phantom zone (clamp ceiling minus rendered
-      lines) sits ABOVE the content, between the buffer and the overlay, not below
-      it. Per surface, the phantom band is at most `band_height - rendered_lines`
-      rows tall: float_popup renders `1 + min(line_count, ceiling-1)` lines so its
-      phantom zone is the remaining ceiling rows above; extension_panel renders a
-      title plus up to two blocks per visible panel until it fills the band, so its
-      phantom zone shrinks as panels are added; agent_context and tool_manager are
-      dormant (never visible today) so their phantom zone is moot until a future
-      child gives them a render-model source.
+    * **Wrap-dependent surfaces** (float_popup, agent_context, and extension_panel): these wrap
+      text frontend-side where the BEAM only knows an item count, not a wrapped
+      line count, so `content_height` stays `:max` (the clamp ceiling). Go
+      bottom-aligns the rendered content within the band (`Y = rect.Row +
+      bandHeight - contentLines`), so the overlay still hugs the screen bottom;
+      the residual phantom zone (clamp ceiling minus rendered lines) sits ABOVE
+      the content, between the buffer and the overlay, not below it. Per surface,
+      the phantom band is at most `band_height - rendered_lines` rows tall:
+      float_popup renders `1 + min(line_count, ceiling-1)` lines so its phantom
+      zone is the remaining ceiling rows above; agent_context renders the live
+      activity spine and may wrap the visible task or todo text; extension_panel
+      renders a title plus up to two blocks per visible panel until it fills the
+      band, so its phantom zone shrinks as panels are added.
 
   ## Live vs dormant sources (honesty, #2281)
 
-  Six surfaces have a live BEAM content source in the render-model path and so can
-  actually become visible here: float popup, extension panel, observatory, edit
-  timeline, notifications, extension overlay. Two are dormant on that path: the
-  agent-context builder is a permanent `visible: false` stub
-  (`MingaEditor.RenderModel.UI.AgentContextBuilder`, fed by `gui_payload/1` which
-  the traditional shell always returns `nil` for), and the tool manager is not in
-  the render-model UI at all (it ships only via the legacy `protocol/gui.ex`
-  path). Their predicates here are wired to the same future sources, so they are
-  placement-ready and will light up automatically when an epic child gives them a
-  BEAM render-model source. Today their predicates never fire, which is correct:
-  an overlay the BEAM never renders must not claim a footer band.
+  Seven surfaces have a live BEAM content source in the render-model path and so
+  can actually become visible here: float popup, extension panel, observatory,
+  edit timeline, notifications, extension overlay, and agent context. One is
+  dormant on that path: the tool manager is not in the render-model UI at all (it
+  ships only via the legacy `protocol/gui.ex` path). Their predicates here are
+  wired to the same future sources, so they are placement-ready and will light up
+  automatically when an epic child gives them a BEAM render-model source. Today
+  the tool manager predicate never fires, which is correct: an overlay the BEAM
+  never renders must not claim a footer band.
   """
 
-  alias Minga.RenderModel.UI.AgentContext
   alias MingaEditor.RenderModel.UI.AgentContextBuilder
 
   @typedoc "A visible footer overlay: its registry surface id and its band content height."
@@ -189,14 +185,12 @@ defmodule MingaEditor.Layout.FooterOverlays do
 
   defp float_popup_visible?(_state), do: false
 
-  # Agent context: dormant on the render-model path (builder is a permanent stub,
-  # see moduledoc). Driving it through the builder keeps the predicate honest and
-  # ready to light up if a future child supplies a real gui_payload-backed model.
+  # Agent context: live BEAM-owned agent activity projection. The builder's
+  # visibility predicate reads the same live editor state as the render model but
+  # avoids building the full emit context, so this check stays cheap and non-recursive.
   @spec agent_context_visible?(map()) :: boolean()
-  defp agent_context_visible?(_state) do
-    case AgentContextBuilder.build(nil) do
-      %AgentContext{visible: visible?} -> visible?
-    end
+  defp agent_context_visible?(state) do
+    AgentContextBuilder.visible?(state)
   end
 
   # Tool manager: not in the render-model UI; no BEAM content source on this path.

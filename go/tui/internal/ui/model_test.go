@@ -1287,11 +1287,11 @@ func TestOverlayLinesRenderRemainingSemanticSurfaces(t *testing.T) {
 	// Every overlay surface is registry-placed now (#2281): a surface renders only
 	// when the BEAM emits its placement, so each case provides one.
 	model := New(60, 12, nil)
-	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiAgentContext: {AgentContext: protocol.AgentContext{Visible: true, Task: "Review diff", Status: 1, CanApprove: true}}}
+	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiAgentContext: {AgentContext: protocol.AgentContext{Visible: true, Task: "Review diff", Status: 3, CanApprove: true, Progress: protocol.AgentProgress{ActiveAction: "Running shell", ToolCount: 2, FileCount: 1, ReviewHint: "Review: approve or reject changes"}, Todos: []protocol.AgentTodo{{Status: 1, Description: "Inspect files"}}}}}
 	model.surfacePlacements = []generated.SurfacePlacement{
 		{SurfaceID: surfaceIDAgentContext, Z: 260, HitKind: 8},
 	}
-	if got := strings.Join(model.overlayLines(), "\n"); !strings.Contains(got, "Review diff") {
+	if got := strings.Join(model.overlayLines(), "\n"); !strings.Contains(got, "needs you") || !strings.Contains(got, "Review diff") {
 		t.Fatalf("agent context overlay missing content: %q", got)
 	}
 
@@ -2181,6 +2181,20 @@ func TestSemanticMouseRoutesEditTimelineEntryZones(t *testing.T) {
 	// OverlaySink containment swallows it (AC 2 containment fallback).
 	if _, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: entry.EndX + 40, Y: entry.EndY + 30})); ok {
 		t.Fatalf("out-of-bounds timeline clicks should fall back to BEAM containment")
+	}
+}
+
+func TestOverlayLinesRenderEditTimelineFiles(t *testing.T) {
+	model := New(60, 12, nil)
+	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiEditTimeline: {Timeline: protocol.EditTimeline{
+		Visible:      true,
+		ViewingIndex: 0xFFFF,
+		Files:        []protocol.TimelineFile{{Path: "lib/a.ex", EntryCount: 2, LinesAdded: 10, LinesRemoved: 3, ReviewStatus: 1}},
+	}}}
+	model.surfacePlacements = []generated.SurfacePlacement{{SurfaceID: surfaceIDEditTimeline, Z: 170, HitKind: 8}}
+
+	if got := strings.Join(model.overlayLines(), "\n"); !strings.Contains(got, "lib/a.ex") || !strings.Contains(got, "+10/-3") {
+		t.Fatalf("edit timeline file summary overlay missing content: %q", got)
 	}
 }
 

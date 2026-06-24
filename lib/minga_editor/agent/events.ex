@@ -255,6 +255,10 @@ defmodule MingaEditor.Agent.Events do
     cached = Map.take(approval, [:tool_call_id, :name, :args, :preview])
     state = AgentAccess.update_agent(state, &AgentState.set_pending_approval(&1, cached))
 
+    # Seed the visible activity timestamp once so approval-only agent context
+    # remains stable across renders without falling back to "now" every frame.
+    state = update_activity(state, &Activity.ensure_started_at/1)
+
     # Unfocus the prompt input so the ToolApproval input handler can
     # intercept y/n keys. The user needs to see and respond to the
     # approval prompt, not keep typing in the input field.
@@ -1043,6 +1047,8 @@ defmodule MingaEditor.Agent.Events do
       else: elem(handle(state, event), 0)
   end
 
+  defp replay_one_catchup_event(event, state), do: elem(handle(state, event), 0)
+
   @spec catchup_already_applied?(EditorState.t(), String.t(), String.t()) :: boolean()
   defp catchup_already_applied?(state, path, tool_call_id) do
     state
@@ -1058,5 +1064,58 @@ defmodule MingaEditor.Agent.Events do
      payload["tool_call_id"], payload["tool_name"]}
   end
 
+  defp event_record_to_editor_event(%{event_type: :todo_plan_updated, payload: payload}) do
+    {:todo_plan_updated, todo_items_from_payload(Map.get(payload, "todos", []))}
+  end
+
   defp event_record_to_editor_event(_event), do: nil
+
+  @spec todo_items_from_payload(term()) :: [MingaAgent.TodoItem.t()]
+  defp todo_items_from_payload(items) when is_list(items) do
+    Enum.flat_map(items, fn
+      %{} = item ->
+        case todo_item_from_payload(item) do
+          nil -> []
+          todo -> [todo]
+        end
+
+      _ ->
+        []
+    end)
+  end
+
+  defp todo_items_from_payload(_items), do: []
+
+  @spec todo_item_from_payload(map()) :: MingaAgent.TodoItem.t() | nil
+  defp todo_item_from_payload(item) do
+    id = payload_string(item, "id")
+    description = payload_string(item, "description")
+
+    if id != "" and description != "" do
+      %MingaAgent.TodoItem{
+        id: id,
+        description: description,
+        status: todo_status_payload(item)
+      }
+    end
+  end
+
+  @spec todo_status_payload(map()) :: MingaAgent.TodoItem.status()
+  defp todo_status_payload(item) do
+    case payload_string(item, "status") do
+      "in_progress" -> :in_progress
+      "done" -> :done
+      _ -> :pending
+    end
+  end
+
+  @spec payload_string(map(), String.t()) :: String.t()
+  defp payload_string(payload, key) do
+    case Map.get(payload, key) || Map.get(payload, String.to_atom(key)) do
+      nil -> ""
+      value when is_binary(value) -> value
+      value when is_atom(value) -> Atom.to_string(value)
+      value -> to_string(value)
+    end
+  end
 end

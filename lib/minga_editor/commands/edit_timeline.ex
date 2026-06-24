@@ -18,14 +18,16 @@ defmodule MingaEditor.Commands.EditTimeline do
   @command_specs [
     {:timeline_next_edit, "Next agent edit", true},
     {:timeline_prev_edit, "Previous agent edit", true},
-    {:timeline_next_file, "Next agent-changed file", true},
-    {:timeline_prev_file, "Previous agent-changed file", true},
+    {:timeline_next_file, "Next agent-changed file", false},
+    {:timeline_prev_file, "Previous agent-changed file", false},
     {:timeline_toggle, "Toggle edit timeline visibility", false},
     {:timeline_go_live, "Return to current file state", true}
   ]
 
   @spec execute(EditorState.t(), atom()) :: EditorState.t()
-  def execute(%{workspace: %{buffers: %{active: nil}}} = state, _cmd), do: state
+  def execute(%{workspace: %{buffers: %{active: nil}}} = state, cmd)
+      when cmd in [:timeline_next_edit, :timeline_prev_edit, :timeline_go_live],
+      do: state
 
   def execute(state, :timeline_next_edit) do
     with_timeline(state, fn path, timeline ->
@@ -119,9 +121,16 @@ defmodule MingaEditor.Commands.EditTimeline do
         current_path = active_path(state)
         target_path = next_path(paths, current_path, direction)
 
-        state
-        |> BufferRegistry.open_file_by_path(target_path)
-        |> EditorState.set_status("Agent change file: #{target_path}")
+        case BufferRegistry.open_file_by_path_result(state, target_path) do
+          {:ok, new_state} ->
+            EditorState.set_status(new_state, "Agent change file: #{target_path}")
+
+          {:error, reason} ->
+            EditorState.set_status(
+              state,
+              "Could not open agent change file #{target_path}: #{inspect(reason)}"
+            )
+        end
     end
   end
 
