@@ -61,4 +61,21 @@ defmodule MingaAgent.TurnUsage do
   def format_short(%__MODULE__{} = u) do
     "↑#{u.input} ↓#{u.output} $#{u.cost}"
   end
+
+  @doc "Returns the share of input tokens served from prompt cache."
+  @spec cache_hit_rate(t()) :: float()
+  def cache_hit_rate(%__MODULE__{input: 0}), do: 0.0
+
+  def cache_hit_rate(%__MODULE__{} = u) do
+    u.cache_read / u.input
+  end
+
+  @doc "Formats a stable one-line report for token spend comparisons."
+  @spec format_cost_report(t()) :: String.t()
+  def format_cost_report(%__MODULE__{} = u) do
+    rate = Float.round(cache_hit_rate(u) * 100, 1)
+
+    "input=#{u.input} output=#{u.output} cache_read=#{u.cache_read} " <>
+      "cache_write=#{u.cache_write} cache_hit_rate=#{rate}% cost=$#{u.cost}"
+  end
 end

@@ -72,6 +72,19 @@ defmodule MingaAgent.Tools.GrepTest do
       assert output =~ "nested"
     end
 
+    test "ignores generated and dependency directories", %{dir: dir} do
+      File.write!(Path.join(dir, "visible.txt"), "expensive_token")
+      File.mkdir_p!(Path.join([dir, "node_modules", "pkg"]))
+      File.mkdir_p!(Path.join([dir, "_build", "test"]))
+      File.write!(Path.join([dir, "node_modules", "pkg", "leaked.txt"]), "expensive_token")
+      File.write!(Path.join([dir, "_build", "test", "compiled.txt"]), "expensive_token")
+
+      assert {:ok, output} = Grep.execute("expensive_token", dir)
+      assert output =~ "visible.txt"
+      refute output =~ "node_modules"
+      refute output =~ "_build"
+    end
+
     test "returns error for invalid path", %{dir: dir} do
       bad_path = Path.join(dir, "nonexistent_dir")
       result = Grep.execute("test", bad_path)

@@ -19,6 +19,7 @@ defmodule MingaAgent.Tools.Shell do
 
   @debounce_ms 200
   @running_indicator_ms 3_000
+  @max_output_bytes 64_000
 
   @doc """
   Runs `command` in the given `cwd` with a `timeout_secs` limit.
@@ -119,7 +120,12 @@ defmodule MingaAgent.Tools.Shell do
         # Flush any remaining pending output
         if on_output != nil and pending != [], do: flush_pending(on_output, pending)
 
-        output = acc |> Enum.reverse() |> IO.iodata_to_binary() |> String.trim_trailing()
+        output =
+          acc
+          |> Enum.reverse()
+          |> IO.iodata_to_binary()
+          |> String.trim_trailing()
+          |> truncate_output()
 
         result =
           if exit_code == 0 do
@@ -191,6 +197,14 @@ defmodule MingaAgent.Tools.Shell do
     batch = pending |> Enum.reverse() |> IO.iodata_to_binary()
     on_output.(batch)
     :ok
+  end
+
+  @spec truncate_output(String.t()) :: String.t()
+  defp truncate_output(output) when byte_size(output) <= @max_output_bytes, do: output
+
+  defp truncate_output(output) do
+    truncated = binary_part(output, 0, @max_output_bytes)
+    truncated <> "\n\n[truncated at #{div(@max_output_bytes, 1000)}KB]"
   end
 
   # Port env requires charlist tuples, not string tuples.

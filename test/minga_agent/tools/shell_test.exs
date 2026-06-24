@@ -127,6 +127,14 @@ defmodule MingaAgent.Tools.ShellTest do
       assert output =~ "error"
     end
 
+    test "truncates verbose command output before returning it to the model", %{tmp_dir: dir} do
+      assert {:ok, output} =
+               Shell.execute("awk 'BEGIN { for (i = 0; i < 70000; i++) printf \"x\" }'", dir, 5)
+
+      assert byte_size(output) < 70_000
+      assert output =~ "[truncated at"
+    end
+
     test "runs in the specified directory", %{tmp_dir: dir} do
       assert {:ok, output} = Shell.execute("pwd", dir, 5)
       # Resolve symlinks (macOS /private/var vs /var)

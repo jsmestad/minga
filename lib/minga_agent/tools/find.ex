@@ -7,6 +7,8 @@ defmodule MingaAgent.Tools.Find do
   directory, truncated at a configurable limit.
   """
 
+  alias MingaAgent.Tools.DirectoryListing
+
   @max_results 200
 
   @doc """
@@ -75,6 +77,7 @@ defmodule MingaAgent.Tools.Find do
           {String.t(), [String.t()]}
   defp build_fd_command(fd, pattern, type, max_depth) do
     args = ["--color", "never", "--glob", "--max-depth", Integer.to_string(max_depth)]
+    args = args ++ fd_ignore_args()
 
     args =
       case type do
@@ -83,7 +86,7 @@ defmodule MingaAgent.Tools.Find do
         _ -> args
       end
 
-    args = args ++ ["--max-results", Integer.to_string(@max_results), pattern, "."]
+    args = args ++ ["--max-results", Integer.to_string(@max_results + 1), pattern, "."]
     {fd, args}
   end
 
@@ -93,6 +96,7 @@ defmodule MingaAgent.Tools.Find do
     find = System.find_executable("find") || "find"
 
     args = [".", "-maxdepth", Integer.to_string(max_depth)]
+    args = args ++ find_prune_args()
 
     args =
       case type do
@@ -101,9 +105,27 @@ defmodule MingaAgent.Tools.Find do
         _ -> args
       end
 
-    # Use -name for glob matching
-    args = args ++ ["-name", pattern]
+    args = args ++ ["-name", pattern, "-print"]
     {find, args}
+  end
+
+  @spec fd_ignore_args() :: [String.t()]
+  defp fd_ignore_args do
+    Enum.flat_map(DirectoryListing.ignored_names(), fn name -> ["--exclude", name] end)
+  end
+
+  @spec find_prune_args() :: [String.t()]
+  defp find_prune_args do
+    ignored_names = DirectoryListing.ignored_names()
+
+    ["("] ++ find_name_expression(ignored_names) ++ [")", "-prune", "-o"]
+  end
+
+  @spec find_name_expression([String.t()]) :: [String.t()]
+  defp find_name_expression([name]), do: ["-name", name]
+
+  defp find_name_expression([name | rest]) do
+    ["-name", name, "-o"] ++ find_name_expression(rest)
   end
 
   @spec format_output(String.t()) :: String.t()
@@ -115,7 +137,7 @@ defmodule MingaAgent.Tools.Find do
 
     if length(lines) > @max_results do
       truncated = Enum.take(lines, @max_results) |> Enum.join("\n")
-      truncated <> "\n\n... (truncated, #{length(lines) - @max_results} more results)"
+      truncated <> "\n\n... (truncated, refine the pattern or path for fewer results)"
     else
       Enum.join(lines, "\n")
     end

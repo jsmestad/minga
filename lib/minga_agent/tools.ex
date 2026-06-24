@@ -47,6 +47,7 @@ defmodule MingaAgent.Tools do
   alias MingaAgent.Tool.Spec
   alias MingaAgent.ToolRouter
   alias MingaAgent.Tools.DeleteFile
+  alias MingaAgent.Tools.DirectoryListing
   alias MingaAgent.Tools.ApplyDiff
   alias MingaAgent.Tools.DiagnosticFeedback
   alias MingaAgent.Tools.EditFile
@@ -661,9 +662,7 @@ defmodule MingaAgent.Tools do
     Tool.new!(
       name: "list_directory",
       description: """
-      List files and directories at a path. Returns one entry per line.
-      Directories have a trailing slash. Hidden files (starting with .)
-      are included.
+      List files and directories at a known-small path. Returns at most 200 entries, one per line. Directories have a trailing slash. Generated, dependency, build, cache, and secret env files are omitted. Use find for broad file discovery instead of walking directories.
       """,
       parameter_schema: %{
         "type" => "object",
@@ -698,9 +697,10 @@ defmodule MingaAgent.Tools do
     Tool.new!(
       name: "find",
       description: """
-      Find files and directories by name pattern (glob). Returns a sorted list
-      of matching paths relative to the project root. Use this to discover files
-      by name or extension. The tool is read-only and does not require approval.
+      Find files and directories by name pattern (glob). Returns at most 200
+      sorted matching paths relative to the project root. Generated, dependency,
+      build, cache, and secret env paths are omitted. Use this for broad file
+      discovery instead of shell + find.
       """,
       parameter_schema: %{
         "type" => "object",
@@ -745,10 +745,10 @@ defmodule MingaAgent.Tools do
     Tool.new!(
       name: "grep",
       description: """
-      Search file contents for a pattern. Returns matching lines with file paths
-      and line numbers. Use this instead of shell + grep for structured, reliable
-      search results. The tool is read-only and does not require approval.
-      Prefer this over shell for searching code.
+      Search file contents for a pattern. Returns at most 100 matching lines with
+      file paths and line numbers. Generated, dependency, build, cache, and secret
+      env paths are omitted. Use this instead of shell + grep for structured,
+      bounded search results.
       """,
       parameter_schema: %{
         "type" => "object",
@@ -797,8 +797,9 @@ defmodule MingaAgent.Tools do
       name: "shell",
       description: """
       Run a shell command in the project root directory. Returns the combined
-      stdout and stderr output. Commands time out after 30 seconds.
-      Use this for running tests, linters, git commands, etc.
+      stdout and stderr output, capped at 64KB for the model. Commands time out
+      after 30 seconds. Use this for running tests, linters, git commands, etc.
+      Use find and grep for broad file discovery and content search.
       Do not use for interactive commands that require user input.
       """,
       parameter_schema: %{
@@ -1449,14 +1450,7 @@ defmodule MingaAgent.Tools do
 
   @spec format_project_view_entries([ProjectView.Backend.directory_entry()]) :: String.t()
   defp format_project_view_entries(entries) do
-    entries
-    |> Enum.sort_by(fn %{name: name, type: type} ->
-      {if(type == :directory, do: 0, else: 1), name}
-    end)
-    |> Enum.map_join("\n", fn
-      %{name: name, type: :directory} -> name <> "/"
-      %{name: name} -> name
-    end)
+    DirectoryListing.format_entries(entries)
   end
 
   # ── Path safety ─────────────────────────────────────────────────────────────

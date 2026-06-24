@@ -7,6 +7,8 @@ defmodule MingaAgent.Tools.Grep do
   at a configurable match limit to avoid flooding the context window.
   """
 
+  alias MingaAgent.Tools.DirectoryListing
+
   @max_matches 100
 
   @doc """
@@ -79,6 +81,7 @@ defmodule MingaAgent.Tools.Grep do
         else: args
 
     args = if glob, do: args ++ ["--glob", glob], else: args
+    args = args ++ rg_ignore_args()
     args = args ++ ["--max-count", Integer.to_string(@max_matches), pattern, "."]
     {rg, args}
   end
@@ -91,8 +94,23 @@ defmodule MingaAgent.Tools.Grep do
     args = if case_sensitive, do: args, else: args ++ ["-i"]
     args = if context_lines > 0, do: args ++ ["-C", Integer.to_string(context_lines)], else: args
     args = if glob, do: args ++ ["--include", glob], else: args
+    args = args ++ grep_ignore_args()
     args = args ++ [pattern, "."]
     {grep, args}
+  end
+
+  @spec rg_ignore_args() :: [String.t()]
+  defp rg_ignore_args do
+    Enum.flat_map(DirectoryListing.ignored_names(), fn name ->
+      ["--glob", "!#{name}", "--glob", "!#{name}/**"]
+    end)
+  end
+
+  @spec grep_ignore_args() :: [String.t()]
+  defp grep_ignore_args do
+    Enum.flat_map(DirectoryListing.ignored_names(), fn name ->
+      ["--exclude", name, "--exclude-dir", name]
+    end)
   end
 
   @spec truncate_output(String.t()) :: String.t()

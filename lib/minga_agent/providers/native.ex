@@ -2781,10 +2781,12 @@ defmodule MingaAgent.Providers.Native do
   defp do_maybe_compact(lctx, context) do
     compact_opts = [
       model: lctx.model,
-      llm_client: summary_client(lctx.llm_client, lctx.config)
+      llm_client: summary_client(lctx.llm_client, lctx.config),
+      threshold: lctx.config.compaction_threshold,
+      keep_recent: lctx.config.compaction_keep_recent
     ]
 
-    case Compaction.maybe_compact(context, compact_opts) do
+    case maybe_compact_with_opts(context, compact_opts) do
       {:compacted, new_context, summary_info} ->
         send(
           lctx.provider_pid,
@@ -2804,6 +2806,16 @@ defmodule MingaAgent.Providers.Native do
   @spec summary_client(llm_client(), AgentConfig.t()) :: Compaction.summary_fn()
   defp summary_client(llm_client, config) do
     ReqLLMAdapter.summary_client(llm_client, config)
+  end
+
+  @spec maybe_compact_with_opts(Context.t(), keyword()) ::
+          {:compacted, Context.t(), String.t()} | {:ok, Context.t()}
+  defp maybe_compact_with_opts(context, opts) do
+    if Keyword.get(opts, :threshold) == nil do
+      {:ok, context}
+    else
+      Compaction.maybe_compact(context, opts)
+    end
   end
 
   @spec refresh_tool_registry_contributions(state()) :: state()
@@ -3033,10 +3045,10 @@ defmodule MingaAgent.Providers.Native do
   write_file: Create/overwrite files. Auto-creates parent dirs.
   edit_file: Find-and-replace exact text. Read file first for exact match.
   apply_diff: Apply unified diffs to a file. Use for large or multi-hunk edits.
-  list_directory: List entries at a path.
-  find: Find files by name/glob. Prefer over shell+find.
-  grep: Search file contents by pattern. Prefer over shell+grep.
-  shell: Run shell commands in project root. Timeout: 30s.
+  list_directory: List entries at a known-small path. Bounded and ignores generated trees.
+  find: Find files by name/glob. Bounded and ignores generated trees. Prefer over shell+find.
+  grep: Search file contents by pattern. Bounded and ignores generated trees. Prefer over shell+grep.
+  shell: Run shell commands in project root. Timeout: 30s. Output capped for the model.
   </tools>
 
   multi_edit_file: Apply multiple edits to one file in a single call.
@@ -3045,7 +3057,8 @@ defmodule MingaAgent.Providers.Native do
   - Always read a file before editing it. old_text must match exactly.
   - Prefer apply_diff for large changes that are easiest to express as unified diff hunks.
   - Prefer multi_edit_file when making several exact replacements in the same file.
-  - Use find for file discovery, grep for content search.
+  - Use find for file discovery, grep for content search, and list_directory only for known-small directories.
+  - Do not use shell to recursively list or search files when find or grep can answer the question.
   - Verify changes by reading the result or running tests.
   - Be concise. Show file paths clearly.
   </rules>
@@ -3064,11 +3077,9 @@ defmodule MingaAgent.Providers.Native do
         @default_system_prompt_template
       end
 
-    # Always append environment info
     base <>
       "\n## Environment\n\n" <>
-      "- Project root: #{project_root}\n" <>
-      "- Current time: #{DateTime.utc_now() |> DateTime.to_iso8601()}"
+      "- Project root: #{project_root}"
   end
 
   # If the value looks like a file path, read it. Otherwise return as-is.

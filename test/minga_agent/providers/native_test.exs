@@ -179,6 +179,48 @@ defmodule MingaAgent.Providers.NativeTest do
       assert session_state.system_prompt =~ "PROJECT RULE 1419"
     end
 
+    test "system prompt keeps cacheable environment prefix stable within a session", %{
+      tmp_dir: dir
+    } do
+      {:ok, pid} = start_provider(tmp_dir: dir)
+
+      assert {:ok, session_state} = Native.get_state(pid)
+      assert session_state.system_prompt =~ "Project root: #{dir}"
+      refute session_state.system_prompt =~ "Current time:"
+    end
+
+    test "auto compaction honors configured threshold", %{tmp_dir: dir} do
+      parent = self()
+
+      client = fn _model, messages, _opts ->
+        if Enum.any?(messages, &(text_content(&1) =~ "Summarize this conversation")) do
+          send(parent, :summary_called)
+          build_stream_response([ReqLLM.StreamChunk.text("summary")])
+        else
+          send(parent, :agent_called)
+          build_stream_response([ReqLLM.StreamChunk.text("answer")])
+        end
+      end
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: client,
+          config: agent_config(compaction_threshold: 0.0, compaction_keep_recent: 1)
+        )
+
+      assert :ok =
+               Native.seed_messages(pid, [
+                 {:user, String.duplicate("user ", 200)},
+                 {:assistant, String.duplicate("assistant ", 200)}
+               ])
+
+      assert :ok = Native.send_prompt(pid, "continue")
+
+      assert_receive :summary_called, 1_000
+      assert_receive :agent_called, 1_000
+    end
+
     test "thinking level accepts known values, rejects unknown values, and cycles in order", %{
       tmp_dir: dir
     } do
