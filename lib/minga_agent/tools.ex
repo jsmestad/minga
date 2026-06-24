@@ -683,7 +683,8 @@ defmodule MingaAgent.Tools do
             ListDirectory.execute(path)
 
           {:ok, entries} ->
-            {:ok, append_workspace_context(router_ctx, format_project_view_entries(entries))}
+            {:ok,
+             append_workspace_context(router_ctx, format_project_view_entries(path, entries))}
 
           {:error, reason} ->
             {:error, inspect(reason)}
@@ -731,7 +732,10 @@ defmodule MingaAgent.Tools do
 
         case ToolRouter.filesystem_path_result(router_ctx, path) do
           {:ok, search_path} ->
-            routed_result(router_ctx, Find.execute(args["pattern"], search_path, args))
+            routed_result(
+              router_ctx,
+              Find.execute(args["pattern"], search_path, Map.put(args, "_filter_root", path))
+            )
 
           {:error, reason} ->
             {:error, inspect(reason)}
@@ -782,7 +786,10 @@ defmodule MingaAgent.Tools do
 
         case ToolRouter.filesystem_path_result(router_ctx, path) do
           {:ok, search_path} ->
-            routed_result(router_ctx, Grep.execute(args["pattern"], search_path, args))
+            routed_result(
+              router_ctx,
+              Grep.execute(args["pattern"], search_path, Map.put(args, "_filter_root", path))
+            )
 
           {:error, reason} ->
             {:error, inspect(reason)}
@@ -1448,9 +1455,10 @@ defmodule MingaAgent.Tools do
   defp route_name(false, fork_store) when fork_store != nil, do: "fork"
   defp route_name(false, nil), do: "changeset"
 
-  @spec format_project_view_entries([ProjectView.Backend.directory_entry()]) :: String.t()
-  defp format_project_view_entries(entries) do
-    DirectoryListing.format_entries(entries)
+  @spec format_project_view_entries(String.t(), [ProjectView.Backend.directory_entry()]) ::
+          String.t()
+  defp format_project_view_entries(path, entries) do
+    DirectoryListing.format_entries(path, entries)
   end
 
   # ── Path safety ─────────────────────────────────────────────────────────────

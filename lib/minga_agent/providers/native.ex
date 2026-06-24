@@ -3434,16 +3434,36 @@ defmodule MingaAgent.Providers.Native do
 
   defp normalize_usage(usage, model) when is_map(usage) do
     normalized = %MingaAgent.TurnUsage{
-      input: Map.get(usage, :input_tokens, 0) || Map.get(usage, :input, 0),
-      output: Map.get(usage, :output_tokens, 0) || Map.get(usage, :output, 0),
-      cache_read: Map.get(usage, :cache_read_input_tokens, 0) || Map.get(usage, :cache_read, 0),
+      input: usage_value(usage, [:input_tokens, :input], 0),
+      output: usage_value(usage, [:output_tokens, :output], 0),
+      cache_read:
+        usage_value(
+          usage,
+          [:cache_read_input_tokens, :cached_input, :cached_tokens, :cache_read],
+          0
+        ),
       cache_write:
-        Map.get(usage, :cache_creation_input_tokens, 0) || Map.get(usage, :cache_write, 0),
-      cost: Map.get(usage, :total_cost, 0.0) || 0.0
+        usage_value(
+          usage,
+          [:cache_creation_input_tokens, :cache_creation, :cache_creation_tokens, :cache_write],
+          0
+        ),
+      cost: usage_value(usage, [:total_cost, :cost], 0.0)
     }
 
     {provider_atom, model_id} = parse_model_string(model)
     CostCalculator.ensure_cost(normalized, model_id, provider_atom)
+  end
+
+  @spec usage_value(map(), [atom()], term()) :: term()
+  defp usage_value(_usage, [], default), do: default
+
+  defp usage_value(usage, [key | rest], default) do
+    case Map.fetch(usage, key) do
+      {:ok, nil} -> usage_value(usage, rest, default)
+      {:ok, value} -> value
+      :error -> usage_value(usage, rest, default)
+    end
   end
 
   @spec parse_model_string(String.t()) :: {atom(), String.t()}

@@ -29,9 +29,14 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
           optional(:output) => non_neg_integer(),
           optional(:cache_read_input_tokens) => non_neg_integer(),
           optional(:cache_creation_input_tokens) => non_neg_integer(),
+          optional(:cached_input) => non_neg_integer(),
+          optional(:cached_tokens) => non_neg_integer(),
+          optional(:cache_creation) => non_neg_integer(),
+          optional(:cache_creation_tokens) => non_neg_integer(),
           optional(:cache_read) => non_neg_integer(),
           optional(:cache_write) => non_neg_integer(),
-          optional(:total_cost) => number()
+          optional(:total_cost) => number(),
+          optional(:cost) => number()
         }
 
   @typedoc "Callbacks used while streaming a provider response."

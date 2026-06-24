@@ -1,5 +1,6 @@
 defmodule MingaAgent.Tools.ShellTest do
-  use ExUnit.Case, async: true
+  # Spawns shell OS processes, which must not run async.
+  use ExUnit.Case, async: false
 
   alias MingaAgent.Tools.Shell
 
@@ -105,6 +106,48 @@ defmodule MingaAgent.Tools.ShellTest do
       assert combined =~ "done"
     end
 
+    test "truncates streamed command output once", %{tmp_dir: dir} do
+      test_pid = self()
+
+      on_output = fn chunk ->
+        send(test_pid, {:shell_chunk, chunk})
+        :ok
+      end
+
+      assert {:ok, _output} =
+               Shell.execute("elixir -e 'IO.write(String.duplicate(\"x\", 70000))'", dir, 5,
+                 on_output: on_output
+               )
+
+      combined = collect_shell_chunks() |> IO.iodata_to_binary()
+      marker = "\n\n[stream truncated at 64KB]\n"
+
+      assert String.ends_with?(combined, marker)
+      assert byte_size(String.replace_suffix(combined, marker, "")) == 64_000
+      assert length(:binary.matches(combined, marker)) == 1
+    end
+
+    test "stream truncation preserves valid UTF-8 at the cap", %{tmp_dir: dir} do
+      test_pid = self()
+
+      on_output = fn chunk ->
+        send(test_pid, {:shell_chunk, chunk})
+        :ok
+      end
+
+      assert {:ok, _output} =
+               Shell.execute("elixir -e 'IO.write(String.duplicate(\"€\", 30000))'", dir, 5,
+                 on_output: on_output
+               )
+
+      combined = collect_shell_chunks() |> IO.iodata_to_binary()
+
+      assert String.valid?(combined)
+      assert combined =~ "€"
+      assert combined =~ "[stream truncated at 64KB]"
+      assert is_binary(JSON.encode!(%{output: combined}))
+    end
+
     test "works without on_output callback", %{tmp_dir: dir} do
       assert {:ok, output} = Shell.execute("echo hello", dir, 5, [])
       assert output == "hello"
@@ -129,10 +172,21 @@ defmodule MingaAgent.Tools.ShellTest do
 
     test "truncates verbose command output before returning it to the model", %{tmp_dir: dir} do
       assert {:ok, output} =
-               Shell.execute("awk 'BEGIN { for (i = 0; i < 70000; i++) printf \"x\" }'", dir, 5)
+               Shell.execute("elixir -e 'IO.write(String.duplicate(\"x\", 70000))'", dir, 5)
 
-      assert byte_size(output) < 70_000
-      assert output =~ "[truncated at"
+      marker = "\n\n[truncated at 64KB]"
+      assert String.ends_with?(output, marker)
+      assert byte_size(String.replace_suffix(output, marker, "")) == 64_000
+    end
+
+    test "preserves valid UTF-8 when truncating multibyte output", %{tmp_dir: dir} do
+      assert {:ok, output} =
+               Shell.execute("elixir -e 'IO.write(String.duplicate(\"€\", 30000))'", dir, 5)
+
+      assert String.valid?(output)
+      assert output =~ "€"
+      assert output =~ "[truncated at 64KB]"
+      assert is_binary(JSON.encode!(%{output: output}))
     end
 
     test "runs in the specified directory", %{tmp_dir: dir} do

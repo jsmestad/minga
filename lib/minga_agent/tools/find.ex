@@ -8,8 +8,11 @@ defmodule MingaAgent.Tools.Find do
   """
 
   alias MingaAgent.Tools.DirectoryListing
+  alias MingaAgent.Tools.OutputLimit
+  alias MingaAgent.Tools.PathIgnore
 
   @max_results 200
+  @max_output_bytes OutputLimit.default_max_bytes()
 
   @doc """
   Searches for files matching `pattern` under `path`.
@@ -23,38 +26,41 @@ defmodule MingaAgent.Tools.Find do
   @spec execute(String.t(), String.t(), map()) :: {:ok, String.t()} | {:error, String.t()}
   def execute(pattern, path, opts \\ %{}) when is_binary(pattern) and is_binary(path) do
     if File.dir?(path) do
-      do_execute(pattern, path, opts)
+      if ignored_search_root?(path),
+        do: {:ok, "No matches found."},
+        else: do_execute(pattern, path, opts)
     else
       {:error, "Directory does not exist: #{path}"}
     end
+  end
+
+  @spec ignored_search_root?(String.t()) :: boolean()
+  defp ignored_search_root?(path) do
+    PathIgnore.ignored_name?(Path.basename(Path.expand(path))) or
+      PathIgnore.ignored_directory?(path)
   end
 
   @spec do_execute(String.t(), String.t(), map()) :: {:ok, String.t()} | {:error, String.t()}
   defp do_execute(pattern, path, opts) do
     type = Map.get(opts, "type", "file")
     max_depth = Map.get(opts, "max_depth", 10)
+    filter_root = Map.get(opts, "_filter_root", path)
 
     {cmd, args} = build_command(pattern, path, type, max_depth)
 
-    case System.cmd(cmd, args, stderr_to_stdout: true, cd: path) do
-      {output, 0} ->
-        if String.trim(output) == "" do
-          {:ok, "No matches found."}
-        else
-          {:ok, format_output(output)}
-        end
+    case OutputLimit.collect_command(cmd, args,
+           cd: path,
+           stderr_to_stdout: true,
+           max_bytes: @max_output_bytes
+         ) do
+      {output, 0, truncated?} ->
+        {:ok, format_output(filter_root, output, truncated?)}
 
-      {output, 1} ->
+      {output, 1, truncated?} ->
         # Exit code 1 means no matches for fd/find
-        trimmed = String.trim(output)
+        {:ok, format_output(filter_root, output, truncated?)}
 
-        if trimmed == "" do
-          {:ok, "No matches found."}
-        else
-          {:ok, format_output(output)}
-        end
-
-      {output, _code} ->
+      {output, _code, _truncated?} ->
         {:error, "Find failed: #{String.trim(output)}"}
     end
   rescue
@@ -128,18 +134,39 @@ defmodule MingaAgent.Tools.Find do
     ["-name", name, "-o"] ++ find_name_expression(rest)
   end
 
-  @spec format_output(String.t()) :: String.t()
-  defp format_output(output) do
+  @spec format_output(String.t(), String.t(), boolean()) :: String.t()
+  defp format_output(root, output, command_truncated?) do
     lines =
       output
       |> String.split("\n", trim: true)
+      |> then(&PathIgnore.filter_paths(root, &1))
       |> Enum.sort()
+
+    if lines == [] do
+      "No matches found."
+    else
+      lines
+      |> bounded_lines(command_truncated?)
+      |> OutputLimit.truncate_utf8(
+        @max_output_bytes,
+        "\n\n... (truncated at #{div(@max_output_bytes, 1000)}KB, refine the pattern or path for fewer results)"
+      )
+    end
+  end
+
+  @spec bounded_lines([String.t()], boolean()) :: String.t()
+  defp bounded_lines(lines, command_truncated?) do
+    marker =
+      if command_truncated?,
+        do:
+          "\n\n... (truncated at #{div(@max_output_bytes, 1000)}KB, refine the pattern or path for fewer results)",
+        else: ""
 
     if length(lines) > @max_results do
       truncated = Enum.take(lines, @max_results) |> Enum.join("\n")
-      truncated <> "\n\n... (truncated, refine the pattern or path for fewer results)"
+      truncated <> "\n\n... (truncated, refine the pattern or path for fewer results)" <> marker
     else
-      Enum.join(lines, "\n")
+      Enum.join(lines, "\n") <> marker
     end
   end
 end

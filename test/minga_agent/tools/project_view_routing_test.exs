@@ -15,11 +15,23 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     working_dir = Path.join(dir, "view")
     File.mkdir_p!(Path.join(root, "lib"))
     File.mkdir_p!(Path.join(working_dir, "lib"))
+    {_out, 0} = System.cmd("git", ["init"], cd: root, stderr_to_stdout: true)
+    {_out, 0} = System.cmd("git", ["init"], cd: working_dir, stderr_to_stdout: true)
+    File.write!(Path.join(root, ".gitignore"), "ignored_dir/\n")
     File.write!(Path.join(root, "lib/file.txt"), "root text\n")
     File.write!(Path.join(root, "lib/root_only.txt"), "root only\n")
     File.write!(Path.join(root, "lib/edit_target.txt"), "editable root text\n")
     File.write!(Path.join(working_dir, "lib/file.txt"), "view text\n")
     File.write!(Path.join(working_dir, "lib/overlay_only.txt"), "needle\n")
+    File.write!(Path.join(working_dir, "visible_secret.txt"), "shared_secret_token\n")
+    File.write!(Path.join(working_dir, ".env.local"), "shared_secret_token\n")
+    File.write!(Path.join(working_dir, ".npmrc"), "shared_secret_token\n")
+    File.mkdir_p!(Path.join(root, "ignored_dir"))
+    File.mkdir_p!(Path.join(working_dir, "ignored_dir"))
+    File.write!(Path.join(working_dir, "ignored_dir/leaked.txt"), "shared_secret_token\n")
+    File.mkdir_p!(Path.join(root, "node_modules"))
+    File.mkdir_p!(Path.join(working_dir, "node_modules"))
+    File.write!(Path.join(working_dir, "node_modules/leaked.txt"), "shared_secret_token\n")
 
     {:ok, view} =
       RecordingBackend.create(root,
@@ -141,6 +153,19 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     assert list_result =~ "ProjectView workspace 42"
     assert_receive {:project_view_call, {:list_directory, "lib"}}
 
+    assert {:ok, root_list_result} = call_tool(tools, "list_directory", %{"path" => "."})
+    refute root_list_result =~ ".env.local"
+    refute root_list_result =~ ".npmrc"
+    refute root_list_result =~ "ignored_dir"
+    assert_receive {:project_view_call, {:list_directory, ""}}
+
+    assert {:ok, ignored_root_result} =
+             call_tool(tools, "list_directory", %{"path" => "node_modules"})
+
+    assert ignored_root_result =~ "ProjectView workspace 42"
+    refute ignored_root_result =~ "leaked.txt"
+    assert_receive {:project_view_call, {:list_directory, "node_modules"}}
+
     assert {:ok, find_result} =
              call_tool(tools, "find", %{
                "pattern" => "overlay_only.txt",
@@ -151,11 +176,29 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     assert find_result =~ "overlay_only.txt"
     assert find_result =~ "ProjectView workspace 42"
 
+    assert {:ok, broad_find_result} =
+             call_tool(tools, "find", %{"pattern" => "*", "path" => ".", "type" => "file"})
+
+    assert broad_find_result =~ "visible_secret.txt"
+    refute broad_find_result =~ ".env.local"
+    refute broad_find_result =~ ".npmrc"
+    refute broad_find_result =~ "node_modules"
+    refute broad_find_result =~ "ignored_dir"
+
     assert {:ok, grep_result} =
              call_tool(tools, "grep", %{"pattern" => "needle", "path" => "lib"})
 
     assert grep_result =~ "overlay_only.txt"
     assert grep_result =~ "ProjectView workspace 42"
+
+    assert {:ok, broad_grep_result} =
+             call_tool(tools, "grep", %{"pattern" => "shared_secret_token", "path" => "."})
+
+    assert broad_grep_result =~ "visible_secret.txt"
+    refute broad_grep_result =~ ".env.local"
+    refute broad_grep_result =~ ".npmrc"
+    refute broad_grep_result =~ "node_modules"
+    refute broad_grep_result =~ "ignored_dir"
 
     assert {:ok, shell_result} =
              call_tool(tools, "shell", %{
@@ -268,6 +311,51 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     assert {:ok, changed} = Changeset.read_file(changeset, "lib/diff_target.txt")
     assert changed == "one\nTWO\n"
     assert File.read!(target_path) == "one\ntwo\n"
+  end
+
+  test "list_directory through changeset suppresses secret entries and ignored roots",
+       %{tmp_dir: root} do
+    File.mkdir_p!(root)
+    {_out, 0} = System.cmd("git", ["init"], cd: root, stderr_to_stdout: true)
+    File.write!(Path.join(root, ".gitignore"), "ignored_dir/\n")
+    File.write!(Path.join(root, "visible.txt"), "visible\n")
+    File.write!(Path.join(root, "visible_secret.txt"), "shared_secret_token\n")
+    File.write!(Path.join(root, ".env.local"), "shared_secret_token\n")
+    File.write!(Path.join(root, ".npmrc"), "shared_secret_token\n")
+    File.mkdir_p!(Path.join(root, "ignored_dir"))
+    File.write!(Path.join(root, "ignored_dir/leaked.txt"), "shared_secret_token\n")
+    File.mkdir_p!(Path.join(root, "node_modules"))
+    File.write!(Path.join(root, "node_modules/leaked.txt"), "shared_secret_token\n")
+
+    {:ok, changeset} = start_supervised({Changeset.Server, project_root: root})
+    tools = Tools.all(project_root: root, changeset: changeset)
+
+    assert {:ok, result} = call_tool(tools, "list_directory", %{"path" => "."})
+    assert result =~ "visible.txt"
+    refute result =~ ".env.local"
+    refute result =~ ".npmrc"
+    refute result =~ "ignored_dir"
+
+    assert {:ok, ignored_root_result} =
+             call_tool(tools, "list_directory", %{"path" => "node_modules"})
+
+    refute ignored_root_result =~ "leaked.txt"
+
+    assert {:ok, find_result} = call_tool(tools, "find", %{"pattern" => "*", "path" => "."})
+    assert find_result =~ "visible_secret.txt"
+    refute find_result =~ ".env.local"
+    refute find_result =~ ".npmrc"
+    refute find_result =~ "ignored_dir"
+    refute find_result =~ "node_modules"
+
+    assert {:ok, grep_result} =
+             call_tool(tools, "grep", %{"pattern" => "shared_secret_token", "path" => "."})
+
+    assert grep_result =~ "visible_secret.txt"
+    refute grep_result =~ ".env.local"
+    refute grep_result =~ ".npmrc"
+    refute grep_result =~ "ignored_dir"
+    refute grep_result =~ "node_modules"
   end
 
   test "dead changeset multi_edit_file returns an unavailable error without mutating the project",

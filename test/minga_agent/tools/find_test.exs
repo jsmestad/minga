@@ -1,11 +1,18 @@
 defmodule MingaAgent.Tools.FindTest do
-  use ExUnit.Case, async: true
+  # Spawns OS processes through fd/find/git-backed ignore checks, which must not run async.
+  use ExUnit.Case, async: false
 
   alias MingaAgent.Tools.Find
 
-  @moduletag :tmp_dir
+  setup do
+    dir =
+      Path.join(System.tmp_dir!(), "minga-find-") <>
+        Integer.to_string(:erlang.unique_integer([:positive]))
 
-  setup %{tmp_dir: dir} do
+    File.rm_rf!(dir)
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf!(dir) end)
+
     File.write!(Path.join(dir, "hello.ex"), "defmodule Hello")
     File.write!(Path.join(dir, "world.ex"), "defmodule World")
     File.write!(Path.join(dir, "README.md"), "# Readme")
@@ -14,7 +21,7 @@ defmodule MingaAgent.Tools.FindTest do
     File.mkdir_p!(Path.join([dir, "lib", "sub"]))
     File.write!(Path.join([dir, "lib", "sub", "nested.ex"]), "defmodule Nested")
 
-    %{dir: dir}
+    {:ok, dir: dir}
   end
 
   describe "execute/3" do
@@ -56,6 +63,17 @@ defmodule MingaAgent.Tools.FindTest do
       refute output =~ "_build"
     end
 
+    test "suppresses secret env files while keeping visible matches", %{dir: dir} do
+      File.write!(Path.join(dir, ".env.local"), "secret")
+      File.write!(Path.join(dir, ".npmrc"), "secret")
+      File.write!(Path.join(dir, "visible_secret.txt"), "visible")
+
+      assert {:ok, output} = Find.execute("*", dir, %{"type" => "file"})
+      assert output =~ "visible_secret.txt"
+      refute output =~ ".env.local"
+      refute output =~ ".npmrc"
+    end
+
     test "respects project gitignore when discovering files", %{dir: dir} do
       {_out, 0} = System.cmd("git", ["init"], cd: dir, stderr_to_stdout: true)
       File.write!(Path.join(dir, ".gitignore"), "ignored_dir/\n")
@@ -67,6 +85,16 @@ defmodule MingaAgent.Tools.FindTest do
       refute output =~ "leaked.ex"
     end
 
+    test "does not walk a directly requested ignored search root", %{dir: dir} do
+      {_out, 0} = System.cmd("git", ["init"], cd: dir, stderr_to_stdout: true)
+      File.write!(Path.join(dir, ".gitignore"), "ignored_dir/\n")
+      ignored_dir = Path.join(dir, "ignored_dir")
+      File.mkdir_p!(ignored_dir)
+      File.write!(Path.join(ignored_dir, "leaked.ex"), "defmodule Leaked")
+
+      assert {:ok, "No matches found."} = Find.execute("*.ex", ignored_dir)
+    end
+
     test "marks truncated results when more matches exist than the model result cap", %{dir: dir} do
       for index <- 1..205 do
         File.write!(Path.join(dir, "many_#{index}.txt"), "many")
@@ -76,6 +104,21 @@ defmodule MingaAgent.Tools.FindTest do
       lines = String.split(output, "\n", trim: true)
       assert length(Enum.reject(lines, &String.starts_with?(&1, "... (truncated"))) == 200
       assert List.last(lines) == "... (truncated, refine the pattern or path for fewer results)"
+    end
+
+    test "byte-caps very long result paths without splitting UTF-8", %{dir: dir} do
+      segment = String.duplicate("é", 60)
+      long_dir = Path.join([dir, segment, segment, segment, segment])
+      File.mkdir_p!(long_dir)
+
+      for index <- 1..205 do
+        File.write!(Path.join(long_dir, "long_#{index}.txt"), "many")
+      end
+
+      assert {:ok, output} = Find.execute("long_*.txt", dir, %{"max_depth" => 5})
+      assert byte_size(output) < 65_000
+      assert String.valid?(output)
+      assert output =~ "truncated at 64KB"
     end
 
     test "results are sorted", %{dir: dir} do

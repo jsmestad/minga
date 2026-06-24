@@ -1,9 +1,19 @@
 defmodule MingaAgent.Tools.ListDirectoryTest do
-  use ExUnit.Case, async: true
+  # Spawns OS processes through git-backed ignore checks, which must not run async.
+  use ExUnit.Case, async: false
 
   alias MingaAgent.Tools.ListDirectory
 
-  @moduletag :tmp_dir
+  setup do
+    dir =
+      Path.join(System.tmp_dir!(), "minga-list-directory-") <>
+        Integer.to_string(:erlang.unique_integer([:positive]))
+
+    File.rm_rf!(dir)
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf!(dir) end)
+    {:ok, tmp_dir: dir}
+  end
 
   describe "execute/1" do
     test "lists files and directories", %{tmp_dir: dir} do
@@ -53,7 +63,8 @@ defmodule MingaAgent.Tools.ListDirectoryTest do
       end
 
       File.mkdir_p!(Path.join(dir, "lib"))
-      File.write!(Path.join(dir, ".env"), "")
+      File.write!(Path.join(dir, ".env.local"), "")
+      File.write!(Path.join(dir, ".npmrc"), "")
       File.write!(Path.join(dir, ".hidden"), "")
 
       assert {:ok, listing} = ListDirectory.execute(dir)
@@ -61,7 +72,8 @@ defmodule MingaAgent.Tools.ListDirectoryTest do
 
       assert "lib/" in lines
       assert ".hidden" in lines
-      refute ".env" in lines
+      refute ".env.local" in lines
+      refute ".npmrc" in lines
 
       for ignored <- [
             "_build/",
@@ -90,21 +102,24 @@ defmodule MingaAgent.Tools.ListDirectoryTest do
       assert List.last(lines) == "... (truncated, 5 more entries)"
     end
 
-    test "omits entries ignored by project gitignore", %{tmp_dir: dir} do
+    test "returns an empty listing for statically ignored directory roots", %{tmp_dir: dir} do
+      for ignored <- ["node_modules", ".env.local"] do
+        ignored_dir = Path.join(dir, ignored)
+        File.mkdir_p!(ignored_dir)
+        File.write!(Path.join(ignored_dir, "leaked.txt"), "")
+
+        assert {:ok, ""} = ListDirectory.execute(ignored_dir)
+      end
+    end
+
+    test "returns an empty listing for a gitignored directory", %{tmp_dir: dir} do
       {_out, 0} = System.cmd("git", ["init"], cd: dir, stderr_to_stdout: true)
-      File.write!(Path.join(dir, ".gitignore"), "ignored_dir/\nignored_file.txt\n")
-      File.mkdir_p!(Path.join(dir, "ignored_dir"))
-      File.write!(Path.join(dir, "ignored_file.txt"), "")
-      File.mkdir_p!(Path.join(dir, "visible_dir"))
-      File.write!(Path.join(dir, "visible_file.txt"), "")
+      File.write!(Path.join(dir, ".gitignore"), "ignored_dir/\n")
+      ignored_dir = Path.join(dir, "ignored_dir")
+      File.mkdir_p!(ignored_dir)
+      File.write!(Path.join(ignored_dir, "leaked.txt"), "")
 
-      assert {:ok, listing} = ListDirectory.execute(dir)
-      lines = String.split(listing, "\n")
-
-      assert "visible_dir/" in lines
-      assert "visible_file.txt" in lines
-      refute "ignored_dir/" in lines
-      refute "ignored_file.txt" in lines
+      assert {:ok, ""} = ListDirectory.execute(ignored_dir)
     end
 
     test "returns error for nonexistent directory" do
