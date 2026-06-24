@@ -60,32 +60,29 @@ defmodule MingaAgent.Tools.Shell do
         ]
       )
 
-    deadline = System.monotonic_time(:millisecond) + timeout_ms
     now = System.monotonic_time(:millisecond)
+    deadline = now + timeout_ms
 
     collect_output(
       port,
       deadline,
       on_output,
       indicator_ms,
-      {[], 0, false},
-      [],
+      empty_output_state(),
+      empty_output_state(),
       now,
       now,
-      {0, false}
+      {0, false, ""}
     )
   rescue
     e ->
       {:error, "command failed: #{Exception.message(e)}"}
   end
 
-  # Collect output from the Port until it exits or times out.
-  # `pending` accumulates chunks between flushes. `last_flush` tracks
-  # when we last called on_output. `last_data` tracks when we last
-  # received any data (for the "running..." indicator).
   @typep output_state ::
-           {chunks :: [String.t()], retained_bytes :: non_neg_integer(), truncated? :: boolean()}
-  @typep stream_state :: {sent_bytes :: non_neg_integer(), truncated? :: boolean()}
+           {chunks :: [binary()], retained_bytes :: non_neg_integer(), truncated? :: boolean()}
+  @typep stream_state ::
+           {sent_bytes :: non_neg_integer(), truncated? :: boolean(), utf8_tail :: binary()}
 
   @spec collect_output(
           port(),
@@ -93,7 +90,7 @@ defmodule MingaAgent.Tools.Shell do
           (String.t() -> :ok) | nil,
           pos_integer(),
           output_state(),
-          [String.t()],
+          output_state(),
           integer(),
           integer(),
           stream_state()
@@ -110,51 +107,60 @@ defmodule MingaAgent.Tools.Shell do
          stream_state
        ) do
     remaining = max(deadline - System.monotonic_time(:millisecond), 0)
-    # Wake up at the sooner of: deadline, next debounce window, or running indicator
     wait_ms = min(remaining, @debounce_ms)
 
     receive do
       {^port, {:data, data}} ->
         now = System.monotonic_time(:millisecond)
-        acc = retain_output(acc, data)
-        new_pending = if on_output == nil, do: [], else: [data | pending]
 
-        if on_output != nil and now - last_flush >= @debounce_ms do
-          stream_state = flush_pending(on_output, new_pending, stream_state)
+        if now >= deadline do
+          if on_output != nil and not output_state_empty?(pending),
+            do: flush_pending(on_output, pending, stream_state)
 
-          collect_output(
-            port,
-            deadline,
-            on_output,
-            indicator_ms,
-            acc,
-            [],
-            now,
-            now,
-            stream_state
-          )
+          close_port(port)
+          {:error, "command timed out"}
         else
-          collect_output(
-            port,
-            deadline,
-            on_output,
-            indicator_ms,
-            acc,
-            new_pending,
-            last_flush,
-            now,
-            stream_state
-          )
+          acc = retain_output(acc, data)
+
+          new_pending =
+            if on_output == nil,
+              do: pending,
+              else: retain_output(pending, data, pending_limit(stream_state))
+
+          if on_output != nil and now - last_flush >= @debounce_ms do
+            stream_state = flush_pending(on_output, new_pending, stream_state)
+
+            collect_output(
+              port,
+              deadline,
+              on_output,
+              indicator_ms,
+              acc,
+              empty_output_state(),
+              now,
+              now,
+              stream_state
+            )
+          else
+            collect_output(
+              port,
+              deadline,
+              on_output,
+              indicator_ms,
+              acc,
+              new_pending,
+              last_flush,
+              now,
+              stream_state
+            )
+          end
         end
 
       {^port, {:exit_status, exit_code}} ->
-        # Flush any remaining pending output
-        if on_output != nil and pending != [], do: flush_pending(on_output, pending, stream_state)
+        if on_output != nil and not output_state_empty?(pending),
+          do: flush_pending(on_output, pending, stream_state)
 
-        output =
-          acc
-          |> output_state_to_binary()
-          |> String.trim_trailing()
+        output = acc |> output_state_to_binary() |> String.trim_trailing()
 
         result =
           if exit_code == 0 do
@@ -169,15 +175,12 @@ defmodule MingaAgent.Tools.Shell do
         now = System.monotonic_time(:millisecond)
 
         if now >= deadline do
-          # Flush before timing out
-          if on_output != nil and pending != [],
+          if on_output != nil and not output_state_empty?(pending),
             do: flush_pending(on_output, pending, stream_state)
 
-          Port.close(port)
-          elapsed_s = div(now - (deadline - remaining), 1_000)
-          {:error, "command timed out after #{elapsed_s}s"}
+          close_port(port)
+          {:error, "command timed out"}
         else
-          # Check if we should flush pending output or send a running indicator
           {new_pending, new_flush, new_data, stream_state} =
             maybe_flush_or_indicate(
               on_output,
@@ -206,13 +209,13 @@ defmodule MingaAgent.Tools.Shell do
 
   @spec maybe_flush_or_indicate(
           (String.t() -> :ok) | nil,
-          [String.t()],
+          output_state(),
           integer(),
           integer(),
           integer(),
           pos_integer(),
           stream_state()
-        ) :: {[String.t()], integer(), integer(), stream_state()}
+        ) :: {output_state(), integer(), integer(), stream_state()}
   defp maybe_flush_or_indicate(
          nil,
          pending,
@@ -234,68 +237,119 @@ defmodule MingaAgent.Tools.Shell do
          indicator_ms,
          stream_state
        ) do
-    if pending != [] and now - last_flush >= @debounce_ms do
-      # Flush accumulated output
+    if not output_state_empty?(pending) and now - last_flush >= @debounce_ms do
       stream_state = flush_pending(on_output, pending, stream_state)
-      {[], now, last_data, stream_state}
+      {empty_output_state(), now, last_data, stream_state}
     else
-      if pending == [] and now - last_data >= indicator_ms do
-        # No output for a while, send a running indicator
+      if output_state_empty?(pending) and now - last_data >= indicator_ms do
         stream_state = emit_stream_chunk(on_output, "[running...]\n", stream_state)
-        {[], now, now, stream_state}
+        {empty_output_state(), now, now, stream_state}
       else
         {pending, last_flush, last_data, stream_state}
       end
     end
   end
 
-  @spec flush_pending((String.t() -> :ok), [String.t()], stream_state()) :: stream_state()
+  @spec flush_pending((String.t() -> :ok), output_state(), stream_state()) :: stream_state()
   defp flush_pending(on_output, pending, stream_state) do
-    batch = pending |> Enum.reverse() |> IO.iodata_to_binary()
-    emit_stream_chunk(on_output, batch, stream_state)
+    stream_state = emit_stream_chunk(on_output, output_state_content(pending), stream_state)
+    maybe_emit_stream_truncation(on_output, stream_state, elem(pending, 2))
   end
 
-  @spec emit_stream_chunk((String.t() -> :ok), String.t(), stream_state()) :: stream_state()
-  defp emit_stream_chunk(_on_output, _batch, {_sent_bytes, true} = stream_state), do: stream_state
+  @spec maybe_emit_stream_truncation((String.t() -> :ok), stream_state(), boolean()) ::
+          stream_state()
+  defp maybe_emit_stream_truncation(_on_output, stream_state, false), do: stream_state
 
-  defp emit_stream_chunk(on_output, batch, {sent_bytes, false}) do
+  defp maybe_emit_stream_truncation(_on_output, {_sent_bytes, true, _tail} = stream_state, true),
+    do: stream_state
+
+  defp maybe_emit_stream_truncation(on_output, _stream_state, true) do
+    on_output.("\n\n[stream truncated at #{div(@max_output_bytes, 1000)}KB]\n")
+    {@max_output_bytes, true, ""}
+  end
+
+  @spec emit_stream_chunk((String.t() -> :ok), binary(), stream_state()) :: stream_state()
+  defp emit_stream_chunk(_on_output, _batch, {_sent_bytes, true, _tail} = stream_state),
+    do: stream_state
+
+  defp emit_stream_chunk(on_output, batch, {sent_bytes, false, tail}) do
+    batch = tail <> batch
     remaining = @max_output_bytes - sent_bytes
 
     if byte_size(batch) <= remaining do
-      on_output.(batch)
-      {sent_bytes + byte_size(batch), false}
+      {prefix, tail} = split_valid_prefix(batch)
+      if prefix != "", do: on_output.(prefix)
+      {sent_bytes + byte_size(prefix), false, tail}
     else
       chunk = OutputLimit.utf8_prefix(batch, remaining)
       if chunk != "", do: on_output.(chunk)
       on_output.("\n\n[stream truncated at #{div(@max_output_bytes, 1000)}KB]\n")
-      {@max_output_bytes, true}
+      {@max_output_bytes, true, ""}
     end
   end
 
-  @spec retain_output(output_state(), String.t()) :: output_state()
-  defp retain_output({_chunks, _retained_bytes, true} = output_state, _data), do: output_state
+  @spec split_valid_prefix(binary()) :: {String.t(), binary()}
+  defp split_valid_prefix(batch) do
+    prefix = OutputLimit.utf8_prefix(batch, byte_size(batch))
+    tail_size = byte_size(batch) - byte_size(prefix)
+    tail = binary_part(batch, byte_size(prefix), tail_size)
+    {prefix, tail}
+  end
 
-  defp retain_output({chunks, retained_bytes, false}, data) do
-    remaining = @max_output_bytes - retained_bytes
+  @spec empty_output_state() :: output_state()
+  defp empty_output_state, do: {[], 0, false}
+
+  @spec output_state_empty?(output_state()) :: boolean()
+  defp output_state_empty?({[], 0, false}), do: true
+  defp output_state_empty?(_output_state), do: false
+
+  @spec pending_limit(stream_state()) :: non_neg_integer()
+  defp pending_limit({sent_bytes, _truncated?, _tail}), do: max(@max_output_bytes - sent_bytes, 0)
+
+  @spec retain_output(output_state(), binary()) :: output_state()
+  defp retain_output(output_state, data), do: retain_output(output_state, data, @max_output_bytes)
+
+  @spec retain_output(output_state(), binary(), non_neg_integer()) :: output_state()
+  defp retain_output({_chunks, _retained_bytes, true} = output_state, _data, _max_bytes),
+    do: output_state
+
+  defp retain_output({chunks, retained_bytes, false}, data, max_bytes) do
+    remaining = max(max_bytes - retained_bytes, 0)
 
     if byte_size(data) <= remaining do
       {[data | chunks], retained_bytes + byte_size(data), false}
     else
-      prefix = OutputLimit.utf8_prefix(data, remaining)
-      marker = "\n\n[truncated at #{div(@max_output_bytes, 1000)}KB]"
-      chunks = if prefix == "", do: [marker | chunks], else: [marker, prefix | chunks]
-      {chunks, @max_output_bytes, true}
+      prefix = binary_part(data, 0, remaining)
+      chunks = if prefix == "", do: chunks, else: [prefix | chunks]
+      {chunks, max_bytes, true}
     end
   end
 
-  @spec output_state_to_binary(output_state()) :: String.t()
-  defp output_state_to_binary({chunks, _retained_bytes, _truncated?}) do
-    chunks
-    |> Enum.reverse()
-    |> IO.iodata_to_binary()
+  @spec output_state_content(output_state()) :: binary()
+  defp output_state_content({chunks, _retained_bytes, _truncated?}) do
+    chunks |> Enum.reverse() |> IO.iodata_to_binary()
   end
 
-  # Port env requires charlist tuples, not string tuples.
+  @spec output_state_to_binary(output_state()) :: String.t()
+  defp output_state_to_binary({_chunks, _retained_bytes, truncated?} = output_state) do
+    output = output_state_content(output_state)
+
+    if truncated? do
+      OutputLimit.utf8_prefix(output, byte_size(output)) <>
+        "\n\n[truncated at #{div(@max_output_bytes, 1000)}KB]"
+    else
+      output
+    end
+  end
+
+  @spec close_port(port()) :: :ok
+  defp close_port(port) do
+    Port.close(port)
+    :ok
+  rescue
+    ArgumentError -> :ok
+  end
+
   @spec safe_env_charlist([{String.t(), String.t()}]) :: [{charlist(), charlist()}]
   defp safe_env_charlist(extra_env) do
     base = [

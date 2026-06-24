@@ -79,6 +79,7 @@ defmodule MingaAgent.Tools.ShellTest do
       # At minimum 1 callback, but definitely not 20 separate ones
       count = :counters.get(callback_count, 1)
       assert count >= 1
+      assert count < 20
     end
 
     test "sends running indicator for silent commands", %{tmp_dir: dir} do
@@ -148,6 +149,28 @@ defmodule MingaAgent.Tools.ShellTest do
       assert is_binary(JSON.encode!(%{output: combined}))
     end
 
+    test "stream truncation stays valid when the cap splits a UTF-8 character across chunks", %{
+      tmp_dir: dir
+    } do
+      test_pid = self()
+
+      on_output = fn chunk ->
+        send(test_pid, {:shell_chunk, chunk})
+        :ok
+      end
+
+      command =
+        "elixir -e 'IO.write(String.duplicate(\"x\", 63999)); IO.binwrite(:stdio, <<226>>); Process.sleep(50); IO.binwrite(:stdio, <<130, 172>>)'"
+
+      assert {:ok, _output} = Shell.execute(command, dir, 5, on_output: on_output)
+
+      combined = collect_shell_chunks() |> IO.iodata_to_binary()
+
+      assert String.valid?(combined)
+      assert combined =~ "[stream truncated at 64KB]"
+      assert is_binary(JSON.encode!(%{output: combined}))
+    end
+
     test "works without on_output callback", %{tmp_dir: dir} do
       assert {:ok, output} = Shell.execute("echo hello", dir, 5, [])
       assert output == "hello"
@@ -189,6 +212,19 @@ defmodule MingaAgent.Tools.ShellTest do
       assert is_binary(JSON.encode!(%{output: output}))
     end
 
+    test "final truncation stays valid when the cap splits a UTF-8 character across chunks", %{
+      tmp_dir: dir
+    } do
+      command =
+        "elixir -e 'IO.write(String.duplicate(\"x\", 63999)); IO.binwrite(:stdio, <<226>>); Process.sleep(50); IO.binwrite(:stdio, <<130, 172>>)'"
+
+      assert {:ok, output} = Shell.execute(command, dir, 5)
+
+      assert String.valid?(output)
+      assert output =~ "[truncated at 64KB]"
+      assert is_binary(JSON.encode!(%{output: output}))
+    end
+
     test "runs in the specified directory", %{tmp_dir: dir} do
       assert {:ok, output} = Shell.execute("pwd", dir, 5)
       # Resolve symlinks (macOS /private/var vs /var)
@@ -197,6 +233,11 @@ defmodule MingaAgent.Tools.ShellTest do
 
     test "times out long-running commands", %{tmp_dir: dir} do
       assert {:error, msg} = Shell.execute("sleep 60", dir, 1)
+      assert msg =~ "timed out"
+    end
+
+    test "times out commands that continuously write output", %{tmp_dir: dir} do
+      assert {:error, msg} = Shell.execute("yes x", dir, 1)
       assert msg =~ "timed out"
     end
 

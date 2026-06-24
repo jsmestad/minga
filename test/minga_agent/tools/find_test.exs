@@ -4,6 +4,35 @@ defmodule MingaAgent.Tools.FindTest do
 
   alias MingaAgent.Tools.Find
 
+  defp with_fake_path(executables, fun) do
+    old_path = System.get_env("PATH") || ""
+
+    bin_dir =
+      Path.join(System.tmp_dir!(), "minga-find-bin-#{:erlang.unique_integer([:positive])}")
+
+    File.mkdir_p!(bin_dir)
+
+    for {name, contents} <- executables do
+      path = Path.join(bin_dir, name)
+      File.write!(path, contents)
+      File.chmod!(path, 0o755)
+    end
+
+    git = System.find_executable("git")
+    if git, do: File.ln_s!(git, Path.join(bin_dir, "git"))
+
+    sleep = System.find_executable("sleep")
+    if sleep, do: File.ln_s!(sleep, Path.join(bin_dir, "sleep"))
+
+    try do
+      System.put_env("PATH", bin_dir)
+      fun.()
+    after
+      System.put_env("PATH", old_path)
+      File.rm_rf!(bin_dir)
+    end
+  end
+
   setup do
     dir =
       Path.join(System.tmp_dir!(), "minga-find-") <>
@@ -119,6 +148,66 @@ defmodule MingaAgent.Tools.FindTest do
       assert byte_size(output) < 65_000
       assert String.valid?(output)
       assert output =~ "truncated at 64KB"
+    end
+
+    test "drops a truncated final line before ignore filtering", %{dir: dir} do
+      {_out, 0} = System.cmd("git", ["init"], cd: dir, stderr_to_stdout: true)
+      File.write!(Path.join(dir, ".gitignore"), "ignored_secret_file.txt\n")
+
+      fd = """
+      #!/bin/sh
+      printf 'visible.txt\nignored_secret_file.txt\n'
+      """
+
+      with_fake_path(%{"fd" => fd}, fn ->
+        assert {:ok, output} = Find.execute("*", dir, %{}, max_output_bytes: 20)
+        assert output =~ "visible.txt"
+        refute output =~ "ignored_"
+        refute output =~ "ignored_secret_file"
+      end)
+    end
+
+    test "returns timeout-specific errors for slow discovery commands", %{dir: dir} do
+      fd = """
+      #!/bin/sh
+      printf 'partial.txt\n'
+      sleep 2
+      """
+
+      with_fake_path(%{"fd" => fd}, fn ->
+        assert {:error, message} = Find.execute("*", dir, %{}, timeout_ms: 50)
+        assert message == "Find timed out"
+        refute message =~ "partial"
+      end)
+    end
+
+    test "model-supplied hidden args cannot raise trusted caps or timeouts", %{dir: dir} do
+      capped_fd = """
+      #!/bin/sh
+      printf 'visible.txt\nprivate_tail.txt\n'
+      """
+
+      with_fake_path(%{"fd" => capped_fd}, fn ->
+        assert {:ok, output} =
+                 Find.execute("*", dir, %{"_max_output_bytes" => 100_000}, max_output_bytes: 15)
+
+        assert output =~ "visible.txt"
+        refute output =~ "private"
+      end)
+
+      slow_fd = """
+      #!/bin/sh
+      printf 'visible.txt\nignored_secret_file.txt\n'
+      sleep 2
+      """
+
+      with_fake_path(%{"fd" => slow_fd}, fn ->
+        assert {:error, message} =
+                 Find.execute("*", dir, %{"_timeout_ms" => 100_000}, timeout_ms: 50)
+
+        assert message == "Find timed out"
+        refute message =~ "visible"
+      end)
     end
 
     test "results are sorted", %{dir: dir} do

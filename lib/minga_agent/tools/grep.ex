@@ -24,12 +24,20 @@ defmodule MingaAgent.Tools.Grep do
 
   Returns structured output with file path, line number, and matching line.
   """
-  @spec execute(String.t(), String.t(), map()) :: {:ok, String.t()} | {:error, String.t()}
-  def execute(pattern, path, opts \\ %{}) when is_binary(pattern) and is_binary(path) do
+  @type exec_opts :: [
+          filter_root: String.t(),
+          max_output_bytes: pos_integer(),
+          timeout_ms: pos_integer()
+        ]
+
+  @spec execute(String.t(), String.t(), map(), exec_opts()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  def execute(pattern, path, opts \\ %{}, exec_opts \\ [])
+      when is_binary(pattern) and is_binary(path) do
     if File.dir?(path) do
       if ignored_search_root?(path),
         do: {:ok, "No matches found."},
-        else: do_execute(pattern, path, opts)
+        else: do_execute(pattern, path, public_opts(opts), exec_opts)
     else
       {:error, "Directory does not exist: #{path}"}
     end
@@ -41,19 +49,28 @@ defmodule MingaAgent.Tools.Grep do
       PathIgnore.ignored_directory?(path)
   end
 
-  @spec do_execute(String.t(), String.t(), map()) :: {:ok, String.t()} | {:error, String.t()}
-  defp do_execute(pattern, path, opts) do
+  @spec public_opts(map()) :: map()
+  defp public_opts(opts) when is_map(opts) do
+    Map.take(opts, ["glob", "case_sensitive", "context_lines"])
+  end
+
+  @spec do_execute(String.t(), String.t(), map(), exec_opts()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  defp do_execute(pattern, path, opts, exec_opts) do
     glob = Map.get(opts, "glob")
     case_sensitive = Map.get(opts, "case_sensitive", true)
     context_lines = Map.get(opts, "context_lines", 0)
-    filter_root = Map.get(opts, "_filter_root", path)
+    filter_root = Keyword.get(exec_opts, :filter_root, path)
+    max_output_bytes = Keyword.get(exec_opts, :max_output_bytes, @max_output_bytes)
+    timeout_ms = Keyword.get(exec_opts, :timeout_ms, OutputLimit.default_timeout_ms())
 
     {cmd, args} = build_command(pattern, path, glob, case_sensitive, context_lines)
 
     case OutputLimit.collect_command(cmd, args,
            cd: path,
            stderr_to_stdout: true,
-           max_bytes: @max_output_bytes
+           max_bytes: max_output_bytes,
+           timeout_ms: timeout_ms
          ) do
       {output, 0, truncated?} ->
         {:ok, truncate_output(filter_root, output, truncated?)}
@@ -65,6 +82,9 @@ defmodule MingaAgent.Tools.Grep do
         else
           {:ok, truncate_output(filter_root, output, truncated?)}
         end
+
+      {_output, :timeout, _truncated?} ->
+        {:error, "Search timed out"}
 
       {output, _code, _truncated?} ->
         {:error, "Search failed: #{String.trim(output)}"}
@@ -133,7 +153,7 @@ defmodule MingaAgent.Tools.Grep do
   defp truncate_output(root, output, command_truncated?) do
     lines =
       output
-      |> String.split("\n", trim: true)
+      |> grep_lines(command_truncated?)
       |> then(&PathIgnore.filter_grep_lines(root, &1))
 
     if Enum.any?(lines, &grep_result_line?/1) do
@@ -146,6 +166,13 @@ defmodule MingaAgent.Tools.Grep do
     else
       "No matches found."
     end
+  end
+
+  @spec grep_lines(String.t(), boolean()) :: [String.t()]
+  defp grep_lines(output, false), do: String.split(output, "\n", trim: true)
+
+  defp grep_lines(output, true) do
+    OutputLimit.complete_lines(output, true)
   end
 
   @spec bounded_lines([String.t()], boolean()) :: String.t()

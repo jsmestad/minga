@@ -79,8 +79,21 @@ defmodule MingaAgent.Tools.PathIgnore do
     root = Path.expand(root)
 
     case git_root(root) do
-      {:ok, repo_root} -> Enum.reject(paths, &ignored_result_path?(repo_root, root, &1))
-      :error -> Enum.reject(paths, &ignored_path_name?/1)
+      {:ok, repo_root} ->
+        paths_with_normalized =
+          Enum.map(paths, fn path -> {path, normalize_result_path(repo_root, root, path)} end)
+
+        ignored =
+          git_ignored_relative_paths(repo_root, Enum.map(paths_with_normalized, &elem(&1, 1)))
+
+        paths_with_normalized
+        |> Enum.reject(fn {_path, normalized} ->
+          ignored_path_name?(normalized) or MapSet.member?(ignored, normalized)
+        end)
+        |> Enum.map(&elem(&1, 0))
+
+      :error ->
+        Enum.reject(paths, &ignored_path_name?/1)
     end
   end
 
@@ -90,8 +103,27 @@ defmodule MingaAgent.Tools.PathIgnore do
     root = Path.expand(root)
 
     case git_root(root) do
-      {:ok, repo_root} -> Enum.reject(lines, &ignored_grep_line?(repo_root, root, &1))
-      :error -> Enum.reject(lines, &(grep_line_path(&1) |> ignored_path_name?()))
+      {:ok, repo_root} ->
+        lines_with_paths =
+          Enum.map(lines, fn line -> {line, grep_line_path(line)} end)
+
+        normalized_paths =
+          Enum.flat_map(lines_with_paths, fn
+            {_line, nil} -> []
+            {_line, path} -> [normalize_result_path(repo_root, root, path)]
+          end)
+
+        ignored = git_ignored_relative_paths(repo_root, normalized_paths)
+
+        lines_with_paths
+        |> Enum.reject(fn
+          {_line, nil} -> false
+          {_line, path} -> ignored_normalized_path?(repo_root, root, path, ignored)
+        end)
+        |> Enum.map(&elem(&1, 0))
+
+      :error ->
+        Enum.reject(lines, &(grep_line_path(&1) |> ignored_path_name?()))
     end
   end
 
@@ -101,8 +133,17 @@ defmodule MingaAgent.Tools.PathIgnore do
   defp reject_gitignored_children(names, dir) do
     case git_root(dir) do
       {:ok, root} ->
-        ignored = git_ignored_child_names(root, dir, names)
-        Enum.reject(names, &MapSet.member?(ignored, &1))
+        names_with_rel_paths =
+          Enum.map(names, fn name ->
+            rel_path = dir |> Path.join(name) |> Path.relative_to(root)
+            {name, rel_path}
+          end)
+
+        ignored = git_ignored_relative_paths(root, Enum.map(names_with_rel_paths, &elem(&1, 1)))
+
+        names_with_rel_paths
+        |> Enum.reject(fn {_name, rel_path} -> MapSet.member?(ignored, rel_path) end)
+        |> Enum.map(&elem(&1, 0))
 
       :error ->
         names
@@ -119,25 +160,6 @@ defmodule MingaAgent.Tools.PathIgnore do
     ErlangError -> :error
   end
 
-  @spec git_ignored_child_names(String.t(), String.t(), [String.t()]) :: MapSet.t(String.t())
-  defp git_ignored_child_names(root, dir, names) do
-    names
-    |> Enum.filter(&git_ignored_child?(root, dir, &1))
-    |> MapSet.new()
-  rescue
-    ErlangError -> MapSet.new()
-  end
-
-  @spec git_ignored_child?(String.t(), String.t(), String.t()) :: boolean()
-  defp git_ignored_child?(root, dir, name) do
-    rel_path =
-      dir
-      |> Path.join(name)
-      |> Path.relative_to(root)
-
-    git_ignored_relative_path?(root, rel_path)
-  end
-
   @spec git_ignored_path?(String.t(), String.t()) :: boolean()
   defp git_ignored_path?(root, dir) do
     case Path.relative_to(dir, root) do
@@ -148,25 +170,44 @@ defmodule MingaAgent.Tools.PathIgnore do
 
   @spec git_ignored_relative_path?(String.t(), String.t()) :: boolean()
   defp git_ignored_relative_path?(root, rel_path) do
-    case System.cmd("git", ["-C", root, "check-ignore", "--", rel_path]) do
-      {_output, 0} -> true
-      {_output, _code} -> false
+    root
+    |> git_ignored_relative_paths([rel_path])
+    |> MapSet.member?(rel_path)
+  end
+
+  @spec git_ignored_relative_paths(String.t(), [String.t()]) :: MapSet.t(String.t())
+  defp git_ignored_relative_paths(_root, []), do: MapSet.new()
+
+  defp git_ignored_relative_paths(root, rel_paths) do
+    rel_paths = rel_paths |> Enum.reject(&(&1 in ["", "."])) |> Enum.uniq()
+
+    case rel_paths do
+      [] ->
+        MapSet.new()
+
+      [_ | _] ->
+        rel_paths
+        |> Enum.chunk_every(100)
+        |> Enum.reduce(MapSet.new(), &MapSet.union(&2, git_ignored_relative_path_batch(root, &1)))
+    end
+  rescue
+    ErlangError -> MapSet.new(rel_paths)
+  end
+
+  @spec git_ignored_relative_path_batch(String.t(), [String.t()]) :: MapSet.t(String.t())
+  defp git_ignored_relative_path_batch(root, rel_paths) do
+    case System.cmd("git", ["-C", root, "check-ignore", "--"] ++ rel_paths) do
+      {output, 0} -> output |> String.split("\n", trim: true) |> MapSet.new()
+      {_output, 1} -> MapSet.new()
+      {_output, _code} -> MapSet.new(rel_paths)
     end
   end
 
-  @spec ignored_result_path?(String.t(), String.t(), String.t()) :: boolean()
-  defp ignored_result_path?(repo_root, root, path) do
+  @spec ignored_normalized_path?(String.t(), String.t(), String.t(), MapSet.t(String.t())) ::
+          boolean()
+  defp ignored_normalized_path?(repo_root, root, path, ignored) do
     normalized_path = normalize_result_path(repo_root, root, path)
-
-    ignored_path_name?(normalized_path) or git_ignored_relative_path?(repo_root, normalized_path)
-  end
-
-  @spec ignored_grep_line?(String.t(), String.t(), String.t()) :: boolean()
-  defp ignored_grep_line?(repo_root, root, line) do
-    case grep_line_path(line) do
-      nil -> false
-      path -> ignored_result_path?(repo_root, root, path)
-    end
+    ignored_path_name?(normalized_path) or MapSet.member?(ignored, normalized_path)
   end
 
   @spec grep_line_path(String.t()) :: String.t() | nil

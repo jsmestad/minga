@@ -23,12 +23,20 @@ defmodule MingaAgent.Tools.Find do
 
   Returns a sorted list of matching paths, one per line.
   """
-  @spec execute(String.t(), String.t(), map()) :: {:ok, String.t()} | {:error, String.t()}
-  def execute(pattern, path, opts \\ %{}) when is_binary(pattern) and is_binary(path) do
+  @type exec_opts :: [
+          filter_root: String.t(),
+          max_output_bytes: pos_integer(),
+          timeout_ms: pos_integer()
+        ]
+
+  @spec execute(String.t(), String.t(), map(), exec_opts()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  def execute(pattern, path, opts \\ %{}, exec_opts \\ [])
+      when is_binary(pattern) and is_binary(path) do
     if File.dir?(path) do
       if ignored_search_root?(path),
         do: {:ok, "No matches found."},
-        else: do_execute(pattern, path, opts)
+        else: do_execute(pattern, path, public_opts(opts), exec_opts)
     else
       {:error, "Directory does not exist: #{path}"}
     end
@@ -40,18 +48,27 @@ defmodule MingaAgent.Tools.Find do
       PathIgnore.ignored_directory?(path)
   end
 
-  @spec do_execute(String.t(), String.t(), map()) :: {:ok, String.t()} | {:error, String.t()}
-  defp do_execute(pattern, path, opts) do
+  @spec public_opts(map()) :: map()
+  defp public_opts(opts) when is_map(opts) do
+    Map.take(opts, ["type", "max_depth"])
+  end
+
+  @spec do_execute(String.t(), String.t(), map(), exec_opts()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  defp do_execute(pattern, path, opts, exec_opts) do
     type = Map.get(opts, "type", "file")
     max_depth = Map.get(opts, "max_depth", 10)
-    filter_root = Map.get(opts, "_filter_root", path)
+    filter_root = Keyword.get(exec_opts, :filter_root, path)
+    max_output_bytes = Keyword.get(exec_opts, :max_output_bytes, @max_output_bytes)
+    timeout_ms = Keyword.get(exec_opts, :timeout_ms, OutputLimit.default_timeout_ms())
 
     {cmd, args} = build_command(pattern, path, type, max_depth)
 
     case OutputLimit.collect_command(cmd, args,
            cd: path,
            stderr_to_stdout: true,
-           max_bytes: @max_output_bytes
+           max_bytes: max_output_bytes,
+           timeout_ms: timeout_ms
          ) do
       {output, 0, truncated?} ->
         {:ok, format_output(filter_root, output, truncated?)}
@@ -59,6 +76,9 @@ defmodule MingaAgent.Tools.Find do
       {output, 1, truncated?} ->
         # Exit code 1 means no matches for fd/find
         {:ok, format_output(filter_root, output, truncated?)}
+
+      {_output, :timeout, _truncated?} ->
+        {:error, "Find timed out"}
 
       {output, _code, _truncated?} ->
         {:error, "Find failed: #{String.trim(output)}"}
@@ -138,7 +158,7 @@ defmodule MingaAgent.Tools.Find do
   defp format_output(root, output, command_truncated?) do
     lines =
       output
-      |> String.split("\n", trim: true)
+      |> OutputLimit.complete_lines(command_truncated?)
       |> then(&PathIgnore.filter_paths(root, &1))
       |> Enum.sort()
 
