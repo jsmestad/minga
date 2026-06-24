@@ -47,6 +47,7 @@ defmodule MingaAgent.Tools do
   alias MingaAgent.Tool.Spec
   alias MingaAgent.ToolRouter
   alias MingaAgent.Tools.DeleteFile
+  alias MingaAgent.Tools.DirectoryListing
   alias MingaAgent.Tools.ApplyDiff
   alias MingaAgent.Tools.DiagnosticFeedback
   alias MingaAgent.Tools.EditFile
@@ -158,7 +159,7 @@ defmodule MingaAgent.Tools do
       shell(root, router_ctx, shell_output_callback),
       subagent(root, parent_session),
       git_status(root),
-      git_diff(root),
+      git_diff(root, router_ctx),
       git_log(root),
       git_stage(root),
       git_commit(root),
@@ -661,9 +662,7 @@ defmodule MingaAgent.Tools do
     Tool.new!(
       name: "list_directory",
       description: """
-      List files and directories at a path. Returns one entry per line.
-      Directories have a trailing slash. Hidden files (starting with .)
-      are included.
+      List files and directories at a known-small path. Returns at most 200 entries, one per line. Directories have a trailing slash. Generated, dependency, build, cache, and secret env files are omitted. Use find for broad file discovery instead of walking directories.
       """,
       parameter_schema: %{
         "type" => "object",
@@ -684,7 +683,8 @@ defmodule MingaAgent.Tools do
             ListDirectory.execute(path)
 
           {:ok, entries} ->
-            {:ok, append_workspace_context(router_ctx, format_project_view_entries(entries))}
+            {:ok,
+             append_workspace_context(router_ctx, format_project_view_entries(path, entries))}
 
           {:error, reason} ->
             {:error, inspect(reason)}
@@ -698,9 +698,10 @@ defmodule MingaAgent.Tools do
     Tool.new!(
       name: "find",
       description: """
-      Find files and directories by name pattern (glob). Returns a sorted list
-      of matching paths relative to the project root. Use this to discover files
-      by name or extension. The tool is read-only and does not require approval.
+      Find files and directories by name pattern (glob). Returns at most 200
+      sorted matching paths relative to the project root. Generated, dependency,
+      build, cache, and secret env paths are omitted. Use this for broad file
+      discovery instead of shell + find.
       """,
       parameter_schema: %{
         "type" => "object",
@@ -729,9 +730,16 @@ defmodule MingaAgent.Tools do
       callback: fn args ->
         path = resolve_and_validate_path!(root, args["path"] || ".")
 
-        case ToolRouter.filesystem_path_result(router_ctx, path) do
-          {:ok, search_path} ->
-            routed_result(router_ctx, Find.execute(args["pattern"], search_path, args))
+        case ToolRouter.search_context(router_ctx, path) do
+          {:ok, search} ->
+            public_args = Map.take(args, ["type", "max_depth"])
+
+            routed_result(
+              router_ctx,
+              Find.execute(args["pattern"], search.exec_path, public_args,
+                filter_root: search.filter_root
+              )
+            )
 
           {:error, reason} ->
             {:error, inspect(reason)}
@@ -745,10 +753,10 @@ defmodule MingaAgent.Tools do
     Tool.new!(
       name: "grep",
       description: """
-      Search file contents for a pattern. Returns matching lines with file paths
-      and line numbers. Use this instead of shell + grep for structured, reliable
-      search results. The tool is read-only and does not require approval.
-      Prefer this over shell for searching code.
+      Search file contents for a pattern. Returns at most 100 matching lines with
+      file paths and line numbers. Generated, dependency, build, cache, and secret
+      env paths are omitted. Use this instead of shell + grep for structured,
+      bounded search results.
       """,
       parameter_schema: %{
         "type" => "object",
@@ -780,9 +788,16 @@ defmodule MingaAgent.Tools do
       callback: fn args ->
         path = resolve_and_validate_path!(root, args["path"] || ".")
 
-        case ToolRouter.filesystem_path_result(router_ctx, path) do
-          {:ok, search_path} ->
-            routed_result(router_ctx, Grep.execute(args["pattern"], search_path, args))
+        case ToolRouter.search_context(router_ctx, path) do
+          {:ok, search} ->
+            public_args = Map.take(args, ["glob", "case_sensitive", "context_lines"])
+
+            routed_result(
+              router_ctx,
+              Grep.execute(args["pattern"], search.exec_path, public_args,
+                filter_root: search.filter_root
+              )
+            )
 
           {:error, reason} ->
             {:error, inspect(reason)}
@@ -797,8 +812,9 @@ defmodule MingaAgent.Tools do
       name: "shell",
       description: """
       Run a shell command in the project root directory. Returns the combined
-      stdout and stderr output. Commands time out after 30 seconds.
-      Use this for running tests, linters, git commands, etc.
+      stdout and stderr output, capped at 64KB for the model. Commands time out
+      after 30 seconds. Use this for running tests, linters, git commands, etc.
+      Use find and grep for broad file discovery and content search.
       Do not use for interactive commands that require user input.
       """,
       parameter_schema: %{
@@ -914,8 +930,8 @@ defmodule MingaAgent.Tools do
     )
   end
 
-  @spec git_diff(String.t()) :: Tool.t()
-  defp git_diff(root) do
+  @spec git_diff(String.t(), ToolRouter.context()) :: Tool.t()
+  defp git_diff(root, router_ctx) do
     Tool.new!(
       name: "git_diff",
       description: """
@@ -938,7 +954,7 @@ defmodule MingaAgent.Tools do
         opts = []
         opts = if args["path"], do: [{:path, args["path"]} | opts], else: opts
         opts = if args["staged"], do: [{:staged, args["staged"]} | opts], else: opts
-        GitTools.diff(root, opts)
+        GitTools.diff(root, opts, router_ctx)
       end
     )
   end
@@ -1447,16 +1463,10 @@ defmodule MingaAgent.Tools do
   defp route_name(false, fork_store) when fork_store != nil, do: "fork"
   defp route_name(false, nil), do: "changeset"
 
-  @spec format_project_view_entries([ProjectView.Backend.directory_entry()]) :: String.t()
-  defp format_project_view_entries(entries) do
-    entries
-    |> Enum.sort_by(fn %{name: name, type: type} ->
-      {if(type == :directory, do: 0, else: 1), name}
-    end)
-    |> Enum.map_join("\n", fn
-      %{name: name, type: :directory} -> name <> "/"
-      %{name: name} -> name
-    end)
+  @spec format_project_view_entries(String.t(), [ProjectView.Backend.directory_entry()]) ::
+          String.t()
+  defp format_project_view_entries(path, entries) do
+    DirectoryListing.format_entries(path, entries)
   end
 
   # ── Path safety ─────────────────────────────────────────────────────────────

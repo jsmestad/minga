@@ -7,6 +7,7 @@ defmodule MingaAgent.Providers.NativeTest do
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.ProjectView
   alias MingaAgent.Event
+  alias MingaAgent.TurnUsage
   alias MingaAgent.ProjectView.RecordingBackend
   alias MingaAgent.Providers.Native
   alias MingaAgent.ToolCall
@@ -177,6 +178,55 @@ defmodule MingaAgent.Providers.NativeTest do
       assert session_state.project_root == dir
       assert session_state.system_prompt =~ "PLAN SKILL 1419"
       assert session_state.system_prompt =~ "PROJECT RULE 1419"
+    end
+
+    test "system prompt keeps cacheable environment prefix stable within a session", %{
+      tmp_dir: dir
+    } do
+      {:ok, pid} = start_provider(tmp_dir: dir)
+
+      assert {:ok, session_state} = Native.get_state(pid)
+      assert session_state.system_prompt =~ "Project root: #{dir}"
+
+      assert session_state.system_prompt =~
+               "list_directory: List entries at a known-small path. Bounded and ignores generated trees."
+
+      assert session_state.system_prompt =~
+               "Do not use shell to recursively list or search files when find or grep can answer the question."
+
+      refute session_state.system_prompt =~ "Current time:"
+    end
+
+    test "auto compaction honors configured threshold", %{tmp_dir: dir} do
+      parent = self()
+
+      client = fn _model, messages, _opts ->
+        if Enum.any?(messages, &(text_content(&1) =~ "Summarize this conversation")) do
+          send(parent, :summary_called)
+          build_stream_response([ReqLLM.StreamChunk.text("summary")])
+        else
+          send(parent, :agent_called)
+          build_stream_response([ReqLLM.StreamChunk.text("answer")])
+        end
+      end
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: client,
+          config: agent_config(compaction_threshold: 0.0, compaction_keep_recent: 1)
+        )
+
+      assert :ok =
+               Native.seed_messages(pid, [
+                 {:user, String.duplicate("user ", 200)},
+                 {:assistant, String.duplicate("assistant ", 200)}
+               ])
+
+      assert :ok = Native.send_prompt(pid, "continue")
+
+      assert_receive :summary_called, 1_000
+      assert_receive :agent_called, 1_000
     end
 
     test "thinking level accepts known values, rejects unknown values, and cycles in order", %{
@@ -1856,6 +1906,119 @@ defmodule MingaAgent.Providers.NativeTest do
   # ── Cost budget tests (#404) ────────────────────────────────────────────────
 
   describe "cost budget" do
+    test "normalizes raw usage and reports prompt guidance", %{tmp_dir: dir} do
+      usage = %{
+        input_tokens: 1000,
+        output_tokens: 500,
+        cache_read_input_tokens: 750,
+        cache_creation_input_tokens: 100,
+        total_cost: 0.05
+      }
+
+      client =
+        fake_llm_client(
+          [ReqLLM.StreamChunk.text("Hello"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})],
+          usage
+        )
+
+      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_cost: 5.0)
+
+      assert {:ok, session_state} = Native.get_state(pid)
+
+      assert session_state.system_prompt =~
+               "list_directory: List entries at a known-small path. Bounded and ignores generated trees."
+
+      assert session_state.system_prompt =~
+               "Do not use shell to recursively list or search files when find or grep can answer the question."
+
+      :ok = Native.send_prompt(pid, "test")
+      events = collect_events(1_000)
+
+      assert %Event.AgentEnd{
+               usage: %TurnUsage{
+                 input: 1000,
+                 output: 500,
+                 cache_read: 750,
+                 cache_write: 100,
+                 cost: 0.05
+               }
+             } =
+               Enum.find(events, &match?(%Event.AgentEnd{}, &1))
+    end
+
+    test "normalizes ReqLLM canonical cache usage fields", %{tmp_dir: dir} do
+      usage = %{
+        input_tokens: 1100,
+        output_tokens: 550,
+        cached_input: 800,
+        cache_creation: 120,
+        total_cost: 0.06
+      }
+
+      client =
+        fake_llm_client(
+          [ReqLLM.StreamChunk.text("Hello"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})],
+          usage
+        )
+
+      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_cost: 5.0)
+      :ok = Native.send_prompt(pid, "test")
+      events = collect_events(1_000)
+
+      assert %Event.AgentEnd{
+               usage: %TurnUsage{
+                 input: 1100,
+                 output: 550,
+                 cache_read: 800,
+                 cache_write: 120,
+                 cost: 0.06
+               }
+             } = Enum.find(events, &match?(%Event.AgentEnd{}, &1))
+    end
+
+    test "normalizes fallback usage fields", %{tmp_dir: dir} do
+      usage = %{input: 1100, output: 550, cache_write: 120, cost: 0.06}
+
+      client =
+        fake_llm_client(
+          [ReqLLM.StreamChunk.text("Hello"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})],
+          usage
+        )
+
+      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_cost: 5.0)
+      :ok = Native.send_prompt(pid, "test")
+      events = collect_events(1_000)
+
+      assert %Event.AgentEnd{
+               usage: %TurnUsage{
+                 input: 1100,
+                 output: 550,
+                 cache_read: 0,
+                 cache_write: 120,
+                 cost: 0.06
+               }
+             } = Enum.find(events, &match?(%Event.AgentEnd{}, &1))
+    end
+
+    test "keeps explicit zero usage values", %{tmp_dir: dir} do
+      usage = %{input_tokens: 0, input: 1100, output_tokens: 0, output: 550, total_cost: 0.0}
+
+      client =
+        fake_llm_client(
+          [ReqLLM.StreamChunk.text("Hello"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})],
+          usage
+        )
+
+      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_cost: 5.0)
+      :ok = Native.send_prompt(pid, "test")
+      events = collect_events(1_000)
+
+      assert %Event.AgentEnd{usage: %TurnUsage{input: 0, output: 0, cost: cost}} =
+               Enum.find(events, &match?(%Event.AgentEnd{}, &1))
+
+      assert cost == 0.0
+    end
+
     test "budget can be read, changed, disabled, and reset by new_session", %{tmp_dir: dir} do
       usage = %{input_tokens: 1000, output_tokens: 500, total_cost: 0.05}
 

@@ -51,4 +51,24 @@ defmodule MingaAgent.TurnUsageTest do
       assert TurnUsage.format_short(u) == "↑100 ↓50 $0.01"
     end
   end
+
+  describe "cache_hit_rate/1" do
+    test "reports the cached share of input tokens" do
+      u = TurnUsage.new(1_000, 50, 750, 100, 0.01)
+      assert TurnUsage.cache_hit_rate(u) == 0.75
+    end
+
+    test "returns zero when no input tokens were reported" do
+      assert TurnUsage.cache_hit_rate(TurnUsage.new()) == 0.0
+    end
+  end
+
+  describe "format_cost_report/1" do
+    test "includes input output cache and cost fields for parity comparisons" do
+      u = TurnUsage.new(1_000, 50, 750, 100, 0.01)
+
+      assert TurnUsage.format_cost_report(u) ==
+               "input=1000 output=50 cache_read=750 cache_write=100 cache_hit_rate=75.0% cost=$0.01"
+    end
+  end
 end

@@ -19,7 +19,8 @@ defmodule MingaAgent.ProjectView.RecordingBackend do
     ref = %{
       parent: Keyword.fetch!(opts, :parent),
       working_dir: working_dir,
-      env: Keyword.get(opts, :env, [])
+      env: Keyword.get(opts, :env, []),
+      diff: Keyword.get(opts, :diff, [])
     }
 
     {:ok, ProjectView.new(__MODULE__, project_root, ref, opts)}
@@ -97,7 +98,7 @@ defmodule MingaAgent.ProjectView.RecordingBackend do
   @spec diff(ProjectView.t()) :: {:ok, [map()]} | {:error, term()}
   def diff(%ProjectView{} = view) do
     record(view, :diff)
-    {:ok, []}
+    {:ok, view.ref.diff}
   end
 
   @impl true

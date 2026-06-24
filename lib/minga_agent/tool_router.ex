@@ -27,6 +27,7 @@ defmodule MingaAgent.ToolRouter do
   alias MingaAgent.Changeset
   alias MingaAgent.ProjectView
   alias MingaAgent.ToolRouter.Context
+  alias MingaAgent.ToolRouter.SearchContext
 
   @typedoc "Fork store reference (nil when fork routing is disabled)."
   @type fork_store :: pid() | nil
@@ -36,6 +37,9 @@ defmodule MingaAgent.ToolRouter do
 
   @typedoc "Routing context passed by tool callbacks."
   @type context :: Context.t()
+
+  @typedoc "Trusted execution and filtering context for search tools."
+  @type search_context :: SearchContext.t()
 
   @doc """
   Builds a routing context from the fork store and changeset pids.
@@ -230,9 +234,10 @@ defmodule MingaAgent.ToolRouter do
     end
   end
 
-  def filesystem_path_result(%Context{changeset: cs}, path) when cs != nil and is_pid(cs) do
+  def filesystem_path_result(%Context{changeset: cs} = ctx, path) when cs != nil and is_pid(cs) do
     try do
-      with {:ok, cwd} <- Changeset.prepare_working_dir(cs),
+      with :ok <- materialize_forks_for_command(ctx),
+           {:ok, cwd} <- Changeset.prepare_working_dir(cs),
            {:ok, relative_path} <- normalize_changeset_path(cs, path, true) do
         {:ok, Path.expand(relative_path, cwd)}
       end
@@ -242,6 +247,40 @@ defmodule MingaAgent.ToolRouter do
   end
 
   def filesystem_path_result(%Context{}, path), do: {:ok, path}
+
+  @doc "Returns the trusted execution and logical filtering context for search tools."
+  @spec search_context(context(), String.t()) :: {:ok, search_context()} | {:error, term()}
+  def search_context(%Context{project_view: %ProjectView{} = view}, path) do
+    case project_view_result(fn -> ProjectView.prepare_working_dir(view) end) do
+      {:ok, cwd} ->
+        {:ok,
+         %SearchContext{
+           exec_path: Path.expand(project_view_relative_path(view, path), cwd),
+           filter_root: path
+         }}
+
+      {:error, {:project_view_unavailable, _}} = error ->
+        error
+
+      {:error, reason} ->
+        {:error, {:project_view_unavailable, {:working_dir_failed, reason}}}
+    end
+  end
+
+  def search_context(%Context{changeset: cs} = ctx, path) when cs != nil and is_pid(cs) do
+    try do
+      with :ok <- materialize_forks_for_command(ctx),
+           {:ok, cwd} <- Changeset.prepare_working_dir(cs),
+           {:ok, relative_path} <- normalize_changeset_path(cs, path, true) do
+        {:ok, %SearchContext{exec_path: Path.expand(relative_path, cwd), filter_root: path}}
+      end
+    catch
+      :exit, reason -> {:error, {:changeset_unavailable, reason}}
+    end
+  end
+
+  def search_context(%Context{}, path),
+    do: {:ok, %SearchContext{exec_path: path, filter_root: path}}
 
   @doc "Returns the working directory for shell commands, or a tagged error if ProjectView is unavailable."
   @spec working_dir_result(context()) :: {:ok, String.t() | nil} | {:error, term()}
@@ -253,9 +292,11 @@ defmodule MingaAgent.ToolRouter do
     end
   end
 
-  def working_dir_result(%Context{changeset: cs}) when cs != nil and is_pid(cs) do
+  def working_dir_result(%Context{changeset: cs} = ctx) when cs != nil and is_pid(cs) do
     try do
-      Changeset.prepare_working_dir(cs)
+      with :ok <- materialize_forks_for_command(ctx) do
+        Changeset.prepare_working_dir(cs)
+      end
     catch
       :exit, reason -> {:error, {:changeset_unavailable, reason}}
     end
@@ -448,6 +489,38 @@ defmodule MingaAgent.ToolRouter do
       :ok
     catch
       :exit, reason -> {:error, {:changeset_unavailable, reason}}
+    end
+  end
+
+  @spec materialize_forks_for_command(context()) :: :ok | {:error, term()}
+  defp materialize_forks_for_command(%Context{fork_store: nil}), do: :ok
+
+  defp materialize_forks_for_command(%Context{fork_store: fs, changeset: cs})
+       when fs != nil and cs != nil do
+    case fork_store_available(fs) do
+      :ok -> materialize_command_forks(BufferForkStore.all(fs), cs)
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @spec materialize_command_forks(%{String.t() => pid()}, pid()) :: :ok | {:error, term()}
+  defp materialize_command_forks(forks, changeset) do
+    Enum.reduce_while(forks, :ok, fn {path, fork_pid}, :ok ->
+      case materialize_fork_for_command(changeset, path, fork_pid) do
+        :ok -> {:cont, :ok}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  @spec materialize_fork_for_command(pid(), String.t(), pid()) :: :ok | {:error, term()}
+  defp materialize_fork_for_command(changeset, path, fork_pid) do
+    with {:ok, relative_path} <- normalize_changeset_path(changeset, path, false) do
+      Changeset.materialize_command_file(
+        changeset,
+        relative_path,
+        Minga.Buffer.Fork.content(fork_pid)
+      )
     end
   end
 
