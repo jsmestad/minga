@@ -61,6 +61,7 @@ defmodule Minga.Application do
   alias MingaAgent.SessionStore
   alias Minga.Config
   alias Minga.Telemetry.DevHandler
+  alias Minga.Telemetry.StartupTimer
   alias Minga.Tool.Manager, as: ToolManager
   alias Minga.Language.Grammar
 
@@ -71,6 +72,8 @@ defmodule Minga.Application do
     # Booting it spins up the event recorder, extensions, and watchdog just to
     # print a string, which can add seconds of startup. Short-circuit first.
     maybe_print_info_and_halt()
+
+    StartupTimer.start()
 
     # Create the log buffer ETS table owned by the supervisor process.
     # This table survives process crashes so LoggerHandler can queue messages
@@ -97,6 +100,8 @@ defmodule Minga.Application do
     # via the same path as logs from a running editor.
     Minga.LoggerHandler.install_messages_handler()
     store_startup_safe_mode()
+
+    StartupTimer.mark(:pre_supervisor_setup)
 
     minimal? = minimal_mode?()
 
@@ -134,12 +139,19 @@ defmodule Minga.Application do
     children = base_children ++ Enum.concat(editor_children, [Minga.SystemObserver])
 
     opts = [strategy: :rest_for_one, name: Minga.Supervisor]
+    StartupTimer.mark(:children_built)
     result = Supervisor.start_link(children, opts)
+    StartupTimer.mark(:supervision_tree_started)
 
     unless minimal? do
       if match?({:ok, _}, result) do
         Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, &prune_old_sessions/0)
       end
+    end
+
+    unless start_editor?() do
+      StartupTimer.mark(:app_start_complete)
+      StartupTimer.report()
     end
 
     if Burrito.Util.running_standalone?() do

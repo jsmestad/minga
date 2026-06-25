@@ -33,20 +33,34 @@ defmodule Minga.Services.Independent do
   @impl true
   @spec init(keyword()) :: {:ok, {Supervisor.sup_flags(), [Supervisor.child_spec()]}}
   def init(_opts) do
+    alias Minga.Telemetry.StartupTimer
+
     children = [
-      {Registry, keys: :unique, name: Minga.Git.Repo.Registry},
-      {DynamicSupervisor, name: Minga.Git.Repo.Supervisor, strategy: :one_for_one},
-      Minga.Git.Tracker,
-      {Registry, keys: :unique, name: Minga.CommandOutput.Registry},
-      {Task.Supervisor, name: Minga.Eval.TaskSupervisor},
-      Minga.Command.Registry,
-      MingaAgent.StatusCommand,
-      Minga.Distribution.ConnectionManager,
-      Minga.Diagnostics,
-      Minga.Session.EventRecorder,
-      MingaAgent.EventLog,
-      MingaAgent.OAuth.PendingFlow,
-      Minga.Tool.Manager
+      StartupTimer.timed_child_spec(
+        :ind_git_repo_reg,
+        {Registry, keys: :unique, name: Minga.Git.Repo.Registry}
+      ),
+      StartupTimer.timed_child_spec(
+        :ind_git_repo_sup,
+        {DynamicSupervisor, name: Minga.Git.Repo.Supervisor, strategy: :one_for_one}
+      ),
+      StartupTimer.timed_child_spec(:ind_git_tracker, Minga.Git.Tracker),
+      StartupTimer.timed_child_spec(
+        :ind_cmd_out_reg,
+        {Registry, keys: :unique, name: Minga.CommandOutput.Registry}
+      ),
+      StartupTimer.timed_child_spec(
+        :ind_eval_sup,
+        {Task.Supervisor, name: Minga.Eval.TaskSupervisor}
+      ),
+      StartupTimer.timed_child_spec(:ind_cmd_registry, Minga.Command.Registry),
+      StartupTimer.timed_child_spec(:ind_status_cmd, MingaAgent.StatusCommand),
+      StartupTimer.timed_child_spec(:ind_conn_mgr, Minga.Distribution.ConnectionManager),
+      StartupTimer.timed_child_spec(:ind_diagnostics, Minga.Diagnostics),
+      StartupTimer.timed_child_spec(:ind_event_recorder, Minga.Session.EventRecorder),
+      StartupTimer.timed_child_spec(:ind_agent_event_log, MingaAgent.EventLog),
+      StartupTimer.timed_child_spec(:ind_oauth_flow, MingaAgent.OAuth.PendingFlow),
+      StartupTimer.timed_child_spec(:ind_tool_manager, Minga.Tool.Manager)
     ]
 
     Supervisor.init(children, strategy: :one_for_one)

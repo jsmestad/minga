@@ -157,14 +157,20 @@ defmodule Minga.Command.Registry do
   # ── GenServer callbacks ──────────────────────────────────────────────────
 
   @impl true
-  @spec init(atom()) :: {:ok, atom()}
+  @spec init(atom()) :: {:ok, atom(), {:continue, :populate}}
   def init(name) do
     table = ets_table_name(name)
     sources = source_table_for_table(table)
     :ets.new(table, [:named_table, :set, :protected, read_concurrency: true])
     :ets.new(sources, [:named_table, :set, :protected, read_concurrency: true])
+    {:ok, table, {:continue, :populate}}
+  end
+
+  @impl true
+  def handle_continue(:populate, table) do
+    sources = source_table_for_table(table)
     populate_from_providers(table, sources)
-    {:ok, table}
+    {:noreply, table}
   end
 
   @impl true

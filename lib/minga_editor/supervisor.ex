@@ -35,6 +35,7 @@ defmodule MingaEditor.Supervisor do
   @impl true
   @spec init(keyword()) :: {:ok, {Supervisor.sup_flags(), [Supervisor.child_spec()]}}
   def init(opts) do
+    Minga.Telemetry.StartupTimer.mark(:editor_supervisor_init)
     backend = Keyword.get(opts, :backend, :tui)
 
     children =

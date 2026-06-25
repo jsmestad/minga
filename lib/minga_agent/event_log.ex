@@ -19,14 +19,15 @@ defmodule MingaAgent.EventLog do
 
   defmodule State do
     @moduledoc false
-    @enforce_keys [:db, :path, :retention_days]
-    defstruct [:db, :path, :retention_days, :sweep_ref]
+    @enforce_keys [:path, :retention_days]
+    defstruct [:db, :path, :retention_days, :sweep_ref, pending_events: []]
 
     @type t :: %__MODULE__{
-            db: Store.db(),
+            db: Store.db() | nil,
             path: String.t(),
             retention_days: pos_integer(),
-            sweep_ref: reference() | nil
+            sweep_ref: reference() | nil,
+            pending_events: [{String.t(), EventRecord.event_type(), map()}]
           }
   end
 
@@ -75,27 +76,43 @@ defmodule MingaAgent.EventLog do
   defdelegate latest_id(db, session_id), to: Store
 
   @impl true
-  @spec init(keyword()) :: {:ok, State.t()} | {:stop, term()}
+  @spec init(keyword()) :: {:ok, State.t(), {:continue, {:open_db, keyword()}}}
   def init(opts) do
     path = db_path(opts)
 
     retention_days =
       Keyword.get_lazy(opts, :retention_days, fn -> Minga.Config.get(:event_retention_days) end)
 
-    case open_or_recreate(path) do
+    {:ok, %State{path: path, retention_days: retention_days}, {:continue, {:open_db, opts}}}
+  end
+
+  @impl true
+  def handle_continue({:open_db, opts}, state) do
+    case open_or_recreate(state.path) do
       {:ok, db} ->
         sweep_ref = schedule_initial_retention_sweep(opts)
         schedule_health_check(Keyword.get(opts, :health_check, @default_health_check), opts)
-        Minga.Log.info(:agent, "[AgentEventLog] started, logging to #{path}")
-        {:ok, %State{db: db, path: path, retention_days: retention_days, sweep_ref: sweep_ref}}
+        Minga.Log.info(:agent, "[AgentEventLog] started, logging to #{state.path}")
+
+        Enum.each(Enum.reverse(state.pending_events), fn {sid, etype, payload} ->
+          record = EventRecord.new(sid, etype, payload)
+          Store.insert(db, record)
+        end)
+
+        {:noreply, %{state | db: db, sweep_ref: sweep_ref, pending_events: []}}
 
       {:error, reason} ->
         Minga.Log.warning(:agent, "[AgentEventLog] failed to open database: #{inspect(reason)}")
-        {:stop, reason}
+        {:stop, reason, state}
     end
   end
 
   @impl true
+  def handle_cast({:record, session_id, event_type, payload}, %State{db: nil} = state) do
+    {:noreply,
+     %{state | pending_events: [{session_id, event_type, payload} | state.pending_events]}}
+  end
+
   def handle_cast({:record, session_id, event_type, payload}, state) do
     record = EventRecord.new(session_id, event_type, payload)
 
@@ -138,6 +155,8 @@ defmodule MingaAgent.EventLog do
   end
 
   @impl true
+  def terminate(_reason, %State{db: nil}), do: :ok
+
   def terminate(_reason, state) do
     Store.close(state.db)
     :ok

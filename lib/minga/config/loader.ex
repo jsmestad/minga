@@ -325,11 +325,17 @@ defmodule Minga.Config.Loader do
       if safe_mode? do
         safe_mode_state(config_path, config_dir, keymap_server, options_server, cleanup_callbacks)
       else
+        alias Minga.Telemetry.StartupTimer
+
+        StartupTimer.mark(:config_loader_start)
+
         # 1. Compile user modules
         {loaded_modules, modules_errors} = compile_user_modules(config_dir)
+        StartupTimer.mark(:config_user_modules)
 
         # 2. Load user themes (before config eval so `set :theme, :my_custom` works)
         load_user_themes()
+        StartupTimer.mark(:config_user_themes)
 
         # 3. Eval global config
         custom_config? = cli_config_file() != nil
@@ -350,10 +356,13 @@ defmodule Minga.Config.Loader do
             load_error
           end
 
+        StartupTimer.mark(:config_global_eval)
+
         # 4. Eval project-local config
         project_path = resolve_project_config_path()
         project_config_error = eval_if_exists(project_path)
         project_mcp_error = load_project_mcp_json()
+        StartupTimer.mark(:config_project_eval)
 
         # 5. Eval generated GUI settings overlay
         gui_settings_path = Path.join(config_dir, "gui_settings.exs")
@@ -368,6 +377,8 @@ defmodule Minga.Config.Loader do
         # 7. Apply log level from config
         apply_log_level(options_server)
 
+        StartupTimer.mark(:config_after_and_settings)
+
         # 8. Register bundled extensions, then discover plugins, then start extensions only after all
         # config sources have had a chance to declare them.
         register_bundled_extensions()
@@ -378,6 +389,8 @@ defmodule Minga.Config.Loader do
                Application.get_env(:minga, :load_extensions, true) do
             start_all_extensions(cleanup_callbacks)
           end
+
+        StartupTimer.mark(:config_extensions_started)
 
         load_error =
           merge_error_messages([

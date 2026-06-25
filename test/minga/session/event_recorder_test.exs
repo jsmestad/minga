@@ -17,6 +17,8 @@ defmodule Minga.Session.EventRecorderTest do
          subscribe: false}
       )
 
+    :sys.get_state(recorder)
+
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
 
     %{recorder: recorder, db_dir: tmp_dir}

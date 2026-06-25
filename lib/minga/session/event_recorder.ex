@@ -80,16 +80,25 @@ defmodule Minga.Session.EventRecorder do
 
   defmodule State do
     @moduledoc false
-    @enforce_keys [:db, :path]
-    defstruct [:db, :path, :retention_days, :sweep_ref, persist_all: false, size_cap_bytes: 0]
+    @enforce_keys [:path]
+    defstruct [
+      :db,
+      :path,
+      :retention_days,
+      :sweep_ref,
+      persist_all: false,
+      size_cap_bytes: 0,
+      pending_events: []
+    ]
 
     @type t :: %__MODULE__{
-            db: Exqlite.Sqlite3.db(),
+            db: Exqlite.Sqlite3.db() | nil,
             path: String.t(),
             retention_days: pos_integer(),
             sweep_ref: reference() | nil,
             persist_all: boolean(),
-            size_cap_bytes: non_neg_integer()
+            size_cap_bytes: non_neg_integer(),
+            pending_events: [EventRecord.t()]
           }
   end
 
@@ -133,7 +142,7 @@ defmodule Minga.Session.EventRecorder do
   # ── GenServer callbacks ───────────────────────────────────────────────
 
   @impl true
-  @spec init(keyword()) :: {:ok, State.t()} | {:stop, term()}
+  @spec init(keyword()) :: {:ok, State.t(), {:continue, {:open_db, keyword()}}}
   def init(opts) do
     db_dir = Keyword.get(opts, :db_dir, @default_db_dir)
 
@@ -154,31 +163,46 @@ defmodule Minga.Session.EventRecorder do
 
     path = Path.join(db_dir, @db_filename)
 
-    case open_or_recreate(path) do
+    if Keyword.get(opts, :subscribe, true), do: subscribe_to_events()
+
+    {:ok,
+     %State{
+       path: path,
+       retention_days: retention_days,
+       persist_all: persist_all,
+       size_cap_bytes: size_cap_mb * 1_048_576
+     }, {:continue, {:open_db, opts}}}
+  end
+
+  @impl true
+  def handle_continue({:open_db, opts}, state) do
+    case open_or_recreate(state.path) do
       {:ok, db} ->
-        if Keyword.get(opts, :subscribe, true), do: subscribe_to_events()
         sweep_ref = schedule_initial_retention_sweep(opts)
         schedule_health_check(Keyword.get(opts, :health_check, @default_health_check), opts)
+        Log.info(:editor, "[EventRecorder] started, logging to #{state.path}")
 
-        Log.info(:editor, "[EventRecorder] started, logging to #{path}")
+        buffered = Enum.reverse(state.pending_events)
+        Enum.each(buffered, fn record -> Store.insert(db, record) end)
 
-        {:ok,
-         %State{
-           db: db,
-           path: path,
-           retention_days: retention_days,
-           sweep_ref: sweep_ref,
-           persist_all: persist_all,
-           size_cap_bytes: size_cap_mb * 1_048_576
-         }}
+        {:noreply, %{state | db: db, sweep_ref: sweep_ref, pending_events: []}}
 
       {:error, reason} ->
         Log.warning(:editor, "[EventRecorder] failed to open database: #{inspect(reason)}")
-        {:stop, reason}
+        {:stop, reason, state}
     end
   end
 
   @impl true
+  def handle_info({:minga_event, topic, payload}, %State{db: nil} = state) do
+    if persist_event?(topic, state) do
+      record = build_record(topic, payload)
+      {:noreply, %{state | pending_events: [record | state.pending_events]}}
+    else
+      {:noreply, state}
+    end
+  end
+
   def handle_info({:minga_event, topic, payload}, state) do
     if persist_event?(topic, state) do
       record = build_record(topic, payload)
@@ -274,6 +298,8 @@ defmodule Minga.Session.EventRecorder do
   end
 
   @impl true
+  def terminate(_reason, %State{db: nil}), do: :ok
+
   def terminate(_reason, state) do
     Store.close(state.db)
     :ok
