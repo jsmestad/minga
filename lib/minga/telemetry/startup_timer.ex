@@ -2,25 +2,24 @@ defmodule Minga.Telemetry.StartupTimer do
   @moduledoc """
   Measures wall-clock time for each phase of the application startup path.
 
-  Writes a summary table to stderr when the editor signals ready, so the
-  output appears in Console.app (macOS GUI) or the terminal (TUI dev mode).
+  Disabled by default. Enable with `MINGA_STARTUP_TIMER=1` or
+  `config :minga, startup_timer: true`. When disabled, all functions
+  are no-ops and `timed_child_spec/2` returns the unmodified spec,
+  so there is zero overhead in production.
 
-  ## Usage
-
-  Called from `Minga.Application.start/2` and key supervisor init callbacks.
-  Each call to `mark/1` records a monotonic timestamp under the given label.
-  When the editor handles the `:ready` signal, `report/0` prints the
-  cumulative and per-phase durations, then clears state.
-
-  Zero overhead when not measured: all state is process-dictionary-free,
-  stored in a single :persistent_term that is cleaned up after report.
+  When enabled, writes a summary table to stderr when the editor
+  signals ready, so the output appears in Console.app (macOS GUI)
+  or the terminal (TUI dev mode).
   """
 
   @key {__MODULE__, :marks}
 
   @spec start() :: :ok
   def start do
-    :persistent_term.put(@key, [{:app_start, System.monotonic_time(:microsecond)}])
+    if enabled?() do
+      :persistent_term.put(@key, [{:app_start, System.monotonic_time(:microsecond)}])
+    end
+
     :ok
   end
 
@@ -48,12 +47,14 @@ defmodule Minga.Telemetry.StartupTimer do
 
   @spec schedule_fallback_report(non_neg_integer()) :: :ok
   def schedule_fallback_report(delay_ms \\ 3000) do
-    spawn(fn ->
-      receive do
-      after
-        delay_ms -> report()
-      end
-    end)
+    if safe_get() do
+      spawn(fn ->
+        receive do
+        after
+          delay_ms -> report()
+        end
+      end)
+    end
 
     :ok
   end
@@ -62,10 +63,12 @@ defmodule Minga.Telemetry.StartupTimer do
           Supervisor.child_spec()
   def timed_child_spec(label, child) do
     spec = Supervisor.child_spec(child, [])
-    original_start = spec.start
 
-    spec
-    |> Map.put(:start, {__MODULE__, :timed_start, [label, original_start]})
+    if safe_get() do
+      Map.put(spec, :start, {__MODULE__, :timed_start, [label, spec.start]})
+    else
+      spec
+    end
   end
 
   @doc false
@@ -75,6 +78,12 @@ defmodule Minga.Telemetry.StartupTimer do
     result = apply(mod, fun, args)
     mark(:"#{label}_done")
     result
+  end
+
+  @spec enabled?() :: boolean()
+  defp enabled? do
+    System.get_env("MINGA_STARTUP_TIMER") in ["1", "true"] or
+      Application.get_env(:minga, :startup_timer, false)
   end
 
   defp safe_get do
