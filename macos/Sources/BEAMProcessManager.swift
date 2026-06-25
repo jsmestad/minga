@@ -127,10 +127,6 @@ final class BEAMProcessManager {
         environment: [String: String],
         bundleURL: URL?
     ) -> Bool {
-        guard environment["TERM"] == nil || environment["TERM"]?.isEmpty == true else {
-            return false
-        }
-
         let currentPath = URL(fileURLWithPath: currentDirectoryPath).standardizedFileURL.path
 
         if currentPath == "/" || currentPath == "/Applications" || currentPath == "/System/Applications" {
