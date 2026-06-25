@@ -440,17 +440,23 @@ defmodule Minga.Config.Loader do
 
   @spec register_bundled_extensions() :: :ok
   defp register_bundled_extensions do
-    if Application.get_env(:minga, :load_git_porcelain_extension, true) do
-      ExtRegistry.register(:minga_git_porcelain, bundled_extension_path("git_porcelain"), [])
-    end
+    ExtRegistry.register(
+      :minga_git_porcelain,
+      bundled_extension_path("git_porcelain"),
+      load_policy: :deferred
+    )
 
-    if Application.get_env(:minga, :load_knowledge_graph_extension, true) do
-      ExtRegistry.register(:minga_knowledge_graph, bundled_extension_path("knowledge_graph"), [])
-    end
+    ExtRegistry.register(
+      :minga_knowledge_graph,
+      bundled_extension_path("knowledge_graph"),
+      load_policy: :deferred
+    )
 
-    if Application.get_env(:minga, :load_adversarial_extension, true) do
-      ExtRegistry.register(:minga_adversarial, bundled_extension_path("adversarial"), [])
-    end
+    ExtRegistry.register(
+      :minga_adversarial,
+      bundled_extension_path("adversarial"),
+      load_policy: :deferred
+    )
 
     :ok
   end
