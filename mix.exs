@@ -241,9 +241,9 @@ defmodule Minga.MixProject do
 
   defp deps do
     [
-      # TODO: revert to {:burrito, "~> 1.6"} once Zig 0.16.0 support is merged upstream
-      # Pinned to the lazy-load fix commit (burrito#1); revert to branch: "zig-0.16.0" once that PR merges.
-      {:burrito, github: "jsmestad/burrito", ref: "d03c88ca93f24e746c0159a19f5690f3cb4c99b0"},
+      # TODO: revert to {:burrito, "~> 1.6"} once burrito-elixir/burrito#225 merges
+      {:burrito,
+       github: "gilbertwong96/burrito", ref: "37db26f367613669f0a61ef35446480ad0ee23a1"},
       {:file_system, "~> 1.0"},
       {:stream_data, "~> 1.0", only: [:test, :dev]},
       {:propcheck, "~> 1.5", only: :test},
