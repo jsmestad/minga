@@ -50,7 +50,6 @@ defmodule MingaEditor.Agent.SlashCommand.Registry do
   @spec unregister_source(source()) :: :ok
   def unregister_source(source), do: unregister_source(__MODULE__, source)
 
-  @doc false
   @spec unregister_source(GenServer.server(), source()) :: :ok
   def unregister_source(server, source) do
     GenServer.call(server, {:unregister_source, source})
@@ -62,7 +61,6 @@ defmodule MingaEditor.Agent.SlashCommand.Registry do
   @spec commands() :: [Command.t()]
   def commands, do: commands(__MODULE__)
 
-  @doc false
   @spec commands(GenServer.server()) :: [Command.t()]
   def commands(server) do
     GenServer.call(server, :commands)
@@ -74,7 +72,6 @@ defmodule MingaEditor.Agent.SlashCommand.Registry do
   @spec entries() :: [entry()]
   def entries, do: entries(__MODULE__)
 
-  @doc false
   @spec entries(GenServer.server()) :: [entry()]
   def entries(server) do
     GenServer.call(server, :entries)

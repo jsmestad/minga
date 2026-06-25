@@ -202,10 +202,10 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoderTest do
       binary = encode(%AgentChat{visible?: true, messages: messages})
       encoded_messages = messages!(binary)
 
-      assert length(encoded_messages) == 100
+      assert Enum.count(encoded_messages) == 100
       assert [first | _] = encoded_messages
       assert <<6::32, 0x02::8, _rest::binary>> = first
-      assert last = List.last(encoded_messages)
+      assert last = Enum.at(encoded_messages, -1)
       assert <<105::32, 0x02::8, _rest::binary>> = last
     end
 

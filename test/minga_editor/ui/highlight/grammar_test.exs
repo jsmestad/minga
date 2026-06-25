@@ -29,7 +29,7 @@ defmodule MingaEditor.UI.Highlight.GrammarTest do
       # At least 40 compile-time filetype entries (extensions may add more at runtime)
       assert map_size(supported) >= 40
       # At least 39 unique languages (javascript_react → javascript share one)
-      assert supported |> Map.values() |> Enum.uniq() |> length() >= 39
+      assert supported |> Map.values() |> Enum.uniq() |> Enum.count() >= 39
     end
   end
 

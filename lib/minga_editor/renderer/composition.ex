@@ -18,6 +18,7 @@ defmodule MingaEditor.Renderer.Composition do
   alias Minga.Core.Decorations.ConcealRange
   alias Minga.Core.Face
   alias Minga.Core.Unicode
+  alias MingaEditor.UI.FontRegistry
 
   @type styled_segment :: {String.t(), Face.t()}
 
@@ -153,15 +154,15 @@ defmodule MingaEditor.Renderer.Composition do
   defp font_id_for_face(%Face{font_family: nil}), do: 0
 
   defp font_id_for_face(%Face{font_family: family}) when is_binary(family) do
-    case MingaEditor.UI.FontRegistry.process_registry() do
+    case FontRegistry.process_registry() do
       nil ->
         0
 
       registry ->
         {font_id, updated_registry, _new?} =
-          MingaEditor.UI.FontRegistry.get_or_register(registry, family)
+          FontRegistry.get_or_register(registry, family)
 
-        MingaEditor.UI.FontRegistry.put_process_registry(updated_registry)
+        FontRegistry.put_process_registry(updated_registry)
         font_id
     end
   end
@@ -314,7 +315,7 @@ defmodule MingaEditor.Renderer.Composition do
     split_at = anchor_col - col
     {before_text, after_text} = split_text_at_display_col(seg_text, split_at)
     after_part = if after_text != "", do: [{after_text, seg_style}], else: []
-    new_acc = after_part ++ vt.segments ++ [{before_text, seg_style} | acc]
+    new_acc = after_part ++ Enum.concat(vt.segments, [{before_text, seg_style} | acc])
     do_inject_inline(rest_segs, rest_vts, seg_end, new_acc)
   end
 

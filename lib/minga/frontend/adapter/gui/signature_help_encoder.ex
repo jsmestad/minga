@@ -25,7 +25,7 @@ defmodule Minga.Frontend.Adapter.GUI.SignatureHelpEncoder do
 
   def encode_command(%SignatureHelp{} = model) do
     signatures = Enum.take(model.signatures, 255)
-    active_signature = clamp_index(model.active_signature, length(signatures))
+    active_signature = clamp_index(model.active_signature, Enum.count(signatures))
 
     active_parameter =
       clamp_active_parameter(model.active_parameter, Enum.at(signatures, active_signature))
@@ -34,7 +34,7 @@ defmodule Minga.Frontend.Adapter.GUI.SignatureHelpEncoder do
 
     IO.iodata_to_binary([
       <<@op_gui_signature_help, 1::8, model.anchor_row::16, model.anchor_col::16,
-        active_signature::8, active_parameter::8, length(signatures)::8>>
+        active_signature::8, active_parameter::8, Enum.count(signatures)::8>>
       | sig_data
     ])
   end
@@ -56,7 +56,7 @@ defmodule Minga.Frontend.Adapter.GUI.SignatureHelpEncoder do
 
     [
       <<byte_size(label_bytes)::16, label_bytes::binary, byte_size(doc_bytes)::16,
-        doc_bytes::binary, length(parameters)::8>>
+        doc_bytes::binary, Enum.count(parameters)::8>>
       | param_data
     ]
   end
@@ -74,7 +74,7 @@ defmodule Minga.Frontend.Adapter.GUI.SignatureHelpEncoder do
   defp clamp_active_parameter(_active_parameter, nil), do: 0
 
   defp clamp_active_parameter(active_parameter, %Signature{} = signature) do
-    clamp_index(active_parameter, min(length(signature.parameters), 255))
+    clamp_index(active_parameter, min(Enum.count(signature.parameters), 255))
   end
 
   @spec clamp_index(non_neg_integer(), non_neg_integer()) :: non_neg_integer()

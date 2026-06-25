@@ -586,7 +586,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   defp cursor_line_text(lines, cursor_line, first_line) do
     index = cursor_line - first_line
 
-    if index >= 0 and index < length(lines) do
+    if index >= 0 and index < Enum.count(lines) do
       Enum.at(lines, index)
     else
       ""

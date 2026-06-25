@@ -55,7 +55,7 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoder do
           encode_file_tree_status(model.status)::8>>,
         Wire.encode_string16(model.selected_id),
         Wire.encode_string16(root),
-        <<model.tree_width::16, length(model.rows)::16>>,
+        <<model.tree_width::16, Enum.count(model.rows)::16>>,
         Wire.encode_string16(error_reason),
         Enum.map(model.rows, &encode_row(&1, root, model))
       ])
@@ -113,7 +113,7 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoder do
     [
       <<:erlang.phash2(row.id, 0xFFFFFFFF)::32, file_tree_row_flags(row, model)::16, row.depth::8,
         encode_git_status(row.git_status)::8, errors::16, warnings::16, info::16, hints::16,
-        length(row.guides)::8>>,
+        Enum.count(row.guides)::8>>,
       guides,
       Wire.encode_string16(row.id),
       Wire.encode_string16(row.path),

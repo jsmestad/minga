@@ -14,23 +14,23 @@ defmodule MingaEditor.UI do
 
   @doc "Returns the theme struct for the given name. Raises on unknown theme."
   @spec get_theme!(atom()) :: MingaEditor.UI.Theme.t()
-  defdelegate get_theme!(name), to: MingaEditor.UI.Theme, as: :get!
+  def get_theme!(name), do: MingaEditor.UI.Theme.get!(name)
 
   @doc "Returns a list of all available theme names."
   @spec list_themes() :: [atom()]
-  defdelegate list_themes, to: MingaEditor.UI.Theme, as: :available
+  def list_themes, do: MingaEditor.UI.Theme.available()
 
   @doc "Returns the default theme name."
   @spec default_theme() :: atom()
-  defdelegate default_theme, to: MingaEditor.UI.Theme, as: :default
+  def default_theme, do: MingaEditor.UI.Theme.default()
 
   @doc "Registers user-defined themes from a map of `%{name => theme_struct}`."
   @spec register_user_themes(map()) :: :ok | {:error, MingaEditor.UI.Theme.register_error()}
-  defdelegate register_user_themes(themes), to: MingaEditor.UI.Theme
+  def register_user_themes(themes), do: MingaEditor.UI.Theme.register_user_themes(themes)
 
   # ── Devicon ───────────────────────────────────────────────────────────────
 
   @doc "Returns the icon character and hex color for a filetype."
   @spec icon_and_color(atom()) :: {String.t(), non_neg_integer()}
-  defdelegate icon_and_color(filetype), to: Minga.Language.Devicon
+  def icon_and_color(filetype), do: Minga.Language.Devicon.icon_and_color(filetype)
 end

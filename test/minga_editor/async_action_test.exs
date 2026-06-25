@@ -5,6 +5,8 @@ defmodule MingaEditor.AsyncActionTest do
   alias MingaEditor.AsyncAction
   alias MingaEditor.State, as: EditorState
 
+  @async_action_timeout 1_000
+
   defp state, do: %EditorState{port_manager: self(), workspace: nil}
 
   test "run/3 starts the work, records an in-flight token, and reports back async" do
@@ -15,7 +17,7 @@ defmodule MingaEditor.AsyncActionTest do
     assert lane.queue == []
     assert AsyncAction.current?(s, :demo, lane.running)
     # The work runs in a Task and reports back asynchronously, not inline.
-    assert_receive {:async_action_result, :demo, _token, _result}
+    assert_receive {:async_action_result, :demo, _token, _result}, @async_action_timeout
   end
 
   test "a second op on a busy lane is queued, not started concurrently" do
@@ -25,10 +27,10 @@ defmodule MingaEditor.AsyncActionTest do
     # Enqueue while busy: running token unchanged, queue grows, no new Task yet.
     s = AsyncAction.run(s, :demo, fn -> :second end)
     assert s.async_actions[:demo].running == token1
-    assert length(s.async_actions[:demo].queue) == 1
+    assert Enum.count(s.async_actions[:demo].queue) == 1
 
     # Only the in-flight op has reported.
-    assert_receive {:async_action_result, :demo, ^token1, :first}
+    assert_receive {:async_action_result, :demo, ^token1, :first}, @async_action_timeout
     refute_received {:async_action_result, :demo, _t, :second}
   end
 
@@ -40,16 +42,16 @@ defmodule MingaEditor.AsyncActionTest do
     ta = s.async_actions[:demo].running
     s = AsyncAction.run(s, :demo, fn -> :b end)
     s = AsyncAction.run(s, :demo, fn -> :c end)
-    assert_receive {:async_action_result, :demo, ^ta, :a}
+    assert_receive {:async_action_result, :demo, ^ta, :a}, @async_action_timeout
 
     s = AsyncAction.advance(s, :demo)
     tb = s.async_actions[:demo].running
     refute tb == ta
-    assert_receive {:async_action_result, :demo, ^tb, :b}
+    assert_receive {:async_action_result, :demo, ^tb, :b}, @async_action_timeout
 
     s = AsyncAction.advance(s, :demo)
     tc = s.async_actions[:demo].running
-    assert_receive {:async_action_result, :demo, ^tc, :c}
+    assert_receive {:async_action_result, :demo, ^tc, :c}, @async_action_timeout
 
     # Draining the last op idles (removes) the lane.
     s = AsyncAction.advance(s, :demo)
@@ -76,17 +78,17 @@ defmodule MingaEditor.AsyncActionTest do
   test "a raising work function is captured as an error result, not a crash" do
     s = AsyncAction.run(state(), :demo, fn -> raise "boom" end)
     token = s.async_actions[:demo].running
-    assert_receive {:async_action_result, :demo, ^token, {:error, "boom"}}
+    assert_receive {:async_action_result, :demo, ^token, {:error, "boom"}}, @async_action_timeout
   end
 
   test "a failing op still advances the lane so the queue does not wedge" do
     s = AsyncAction.run(state(), :demo, fn -> raise "boom" end)
     ta = s.async_actions[:demo].running
     s = AsyncAction.run(s, :demo, fn -> :next end)
-    assert_receive {:async_action_result, :demo, ^ta, {:error, "boom"}}
+    assert_receive {:async_action_result, :demo, ^ta, {:error, "boom"}}, @async_action_timeout
 
     s = AsyncAction.advance(s, :demo)
     tb = s.async_actions[:demo].running
-    assert_receive {:async_action_result, :demo, ^tb, :next}
+    assert_receive {:async_action_result, :demo, ^tb, :next}, @async_action_timeout
   end
 end

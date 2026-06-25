@@ -30,7 +30,7 @@ defmodule Minga.Frontend.Adapter.GUI.EditTimelineEncoder do
     viewing_u16 =
       if model.viewing_index == nil, do: 0xFFFF, else: min(model.viewing_index, 0xFFFE)
 
-    count = min(length(model.entries), @max_u8)
+    count = min(Enum.count(model.entries), @max_u8)
 
     entry_binaries =
       model.entries
@@ -57,7 +57,7 @@ defmodule Minga.Frontend.Adapter.GUI.EditTimelineEncoder do
 
   @spec encode_files([EditTimeline.FileEntry.t()]) :: iodata()
   defp encode_files(files) do
-    count = min(length(files), @max_u8)
+    count = min(Enum.count(files), @max_u8)
 
     entries =
       files

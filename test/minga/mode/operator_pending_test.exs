@@ -50,7 +50,7 @@ defmodule Minga.Mode.OperatorPendingTest do
       assert {:execute_then_transition, commands, :normal, _state} =
                OperatorPending.handle_key({?w, 0}, counted_motion)
 
-      assert length(commands) == 6
+      assert Enum.count(commands) == 6
       assert Enum.all?(commands, &(&1 == {:delete_motion, :word_forward}))
     end
   end

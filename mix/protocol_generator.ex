@@ -57,14 +57,12 @@ defmodule Minga.Mix.ProtocolGenerator do
     schema = load_schema!()
     files = generated_files(schema)
 
-    case Keyword.get(opts, :check, false) do
-      true ->
-        check_files!(files)
-        check_zig_protocol_exports!(schema)
-
-      false ->
-        write_files!(files)
-        sync_zig_protocol_exports!(schema)
+    if Keyword.get(opts, :check, false) do
+      check_files!(files)
+      check_zig_protocol_exports!(schema)
+    else
+      write_files!(files)
+      sync_zig_protocol_exports!(schema)
     end
   end
 
@@ -290,9 +288,10 @@ defmodule Minga.Mix.ProtocolGenerator do
     expected = zig_protocol_export_block(schema)
     current = read_protocol_zig!()
 
-    case current == replace_zig_protocol_export_block!(current, expected) do
-      true -> :ok
-      false -> Mix.raise(outdated_zig_protocol_exports_message())
+    if current == replace_zig_protocol_export_block!(current, expected) do
+      :ok
+    else
+      Mix.raise(outdated_zig_protocol_exports_message())
     end
   end
 
@@ -590,8 +589,7 @@ defmodule Minga.Mix.ProtocolGenerator do
   @spec go_const_width([map()], (map() -> String.t())) :: non_neg_integer()
   defp go_const_width(entries, name_fun) do
     entries
-    |> Enum.map(name_fun)
-    |> Enum.map(&String.length/1)
+    |> Enum.map(fn entry -> String.length(name_fun.(entry)) end)
     |> Enum.max(fn -> 0 end)
   end
 
@@ -695,7 +693,7 @@ defmodule Minga.Mix.ProtocolGenerator do
     duplicates =
       entries
       |> Enum.group_by(& &1["value"])
-      |> Enum.filter(fn {_value, grouped} -> length(grouped) > 1 end)
+      |> Enum.filter(fn {_value, grouped} -> Enum.count(grouped) > 1 end)
       |> Enum.map_join(", ", fn {value, grouped} ->
         names = Enum.map_join(grouped, ", ", & &1["name"])
         "#{hex(value)}: #{names}"
@@ -741,18 +739,21 @@ defmodule Minga.Mix.ProtocolGenerator do
     {groups, order} =
       Enum.reduce(opcodes, {%{}, []}, fn %{"category" => category} = opcode, {groups, order} ->
         order = add_category_order(order, category)
-        groups = Map.update(groups, category, [opcode], &(&1 ++ [opcode]))
+        groups = Map.update(groups, category, [opcode], &[opcode | &1])
         {groups, order}
       end)
 
-    Enum.map(order, fn category -> {category, Map.fetch!(groups, category)} end)
+    Enum.map(order, fn category ->
+      {category, groups |> Map.fetch!(category) |> Enum.reverse()}
+    end)
   end
 
   @spec add_category_order([String.t()], String.t()) :: [String.t()]
   defp add_category_order(order, category) do
-    case category in order do
-      true -> order
-      false -> order ++ [category]
+    if category in order do
+      order
+    else
+      List.insert_at(order, -1, category)
     end
   end
 
@@ -912,14 +913,12 @@ defmodule Minga.Mix.ProtocolGenerator do
   defp validate_enum_default!(%{"name" => name, "default" => default} = enum) do
     value_names = enum |> Map.get("values", []) |> MapSet.new(& &1["name"])
 
-    case MapSet.member?(value_names, default) do
-      true ->
-        :ok
-
-      false ->
-        Mix.raise(
-          "Enum #{name} default #{inspect(default)} is not a declared value in #{@schema_path}"
-        )
+    if MapSet.member?(value_names, default) do
+      :ok
+    else
+      Mix.raise(
+        "Enum #{name} default #{inspect(default)} is not a declared value in #{@schema_path}"
+      )
     end
   end
 
@@ -1469,7 +1468,7 @@ defmodule Minga.Mix.ProtocolGenerator do
       |> Enum.flat_map(fn {opcode, secs} ->
         secs
         |> Enum.group_by(& &1["id"])
-        |> Enum.filter(fn {_id, grouped} -> length(grouped) > 1 end)
+        |> Enum.filter(fn {_id, grouped} -> Enum.count(grouped) > 1 end)
         |> Enum.map(fn {id, _grouped} -> "#{opcode}:#{hex(id)}" end)
       end)
       |> Enum.join(", ")
@@ -3053,7 +3052,7 @@ defmodule Minga.Mix.ProtocolGenerator do
 
   @spec swift_struct_initializer_args([map()]) :: iodata()
   defp swift_struct_initializer_args(fields) do
-    last = length(fields) - 1
+    last = Enum.count(fields) - 1
 
     fields
     |> Enum.with_index()
@@ -3576,7 +3575,7 @@ defmodule Minga.Mix.ProtocolGenerator do
     [
       "  @spec #{fn_name}([term()]) :: iodata()\n",
       "  def #{fn_name}(items) when is_list(items) do\n",
-      "    [<<length(items)::#{bits}>> | Enum.map(items, #{element_encoder})]\n",
+      "    [<<Enum.count(items)::#{bits}>> | Enum.map(items, #{element_encoder})]\n",
       "  end\n\n"
     ]
   end
@@ -3693,7 +3692,7 @@ defmodule Minga.Mix.ProtocolGenerator do
     bits = @primitive_sizes[count_type] * 8
     list = field_read(source, name)
     element_encoder = elixir_array_element_encoder(element, smap)
-    "[<<length(#{list})::#{bits}>> | Enum.map(#{list}, #{element_encoder})]"
+    "[<<Enum.count(#{list})::#{bits}>> | Enum.map(#{list}, #{element_encoder})]"
   end
 
   # A counted_array element is either a bare wire type or a named structure. Bare

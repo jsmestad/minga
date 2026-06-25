@@ -682,18 +682,16 @@ defmodule Minga.Parser.Manager do
 
   @spec broadcast_or_drop_snippet_event(term(), State.t()) :: {:noreply, State.t()}
   defp broadcast_or_drop_snippet_event(event, state) do
-    case snippet_buffer_event?(event) do
-      true ->
-        Minga.Log.debug(
-          :port,
-          "Parser: dropping late snippet event #{inspect(event_name(event))}"
-        )
+    if snippet_buffer_event?(event) do
+      Minga.Log.debug(
+        :port,
+        "Parser: dropping late snippet event #{inspect(event_name(event))}"
+      )
 
-        {:noreply, state}
-
-      false ->
-        broadcast(state.subscribers, {:minga_highlight, event})
-        {:noreply, state}
+      {:noreply, state}
+    else
+      broadcast(state.subscribers, {:minga_highlight, event})
+      {:noreply, state}
     end
   end
 
@@ -806,7 +804,7 @@ defmodule Minga.Parser.Manager do
     recent = Enum.filter(state.restart_timestamps, fn ts -> now - ts < @restart_window_ms end)
     recent = [now | recent]
 
-    if length(recent) >= @max_restart_attempts do
+    if Enum.count(recent) >= @max_restart_attempts do
       Minga.Log.error(
         :port,
         "Parser crashed repeatedly (#{@max_restart_attempts} times in #{div(@restart_window_ms, 1000)}s), syntax highlighting disabled. Use :parser-restart to retry."
@@ -825,7 +823,7 @@ defmodule Minga.Parser.Manager do
 
       Minga.Log.info(
         :port,
-        "Parser: scheduling restart in #{backoff}ms (attempt #{length(recent)}/#{@max_restart_attempts})"
+        "Parser: scheduling restart in #{backoff}ms (attempt #{Enum.count(recent)}/#{@max_restart_attempts})"
       )
 
       Process.send_after(self(), :restart_parser, backoff)

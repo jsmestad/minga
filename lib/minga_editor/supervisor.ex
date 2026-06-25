@@ -41,16 +41,16 @@ defmodule MingaEditor.Supervisor do
       [
         Minga.Parser.Manager,
         {MingaEditor.Frontend.Manager, [backend: backend]}
-      ] ++
-        renderer_children() ++
-        [
-          {MingaEditor,
-           [
-             backend: backend,
-             swap_dir: Minga.Session.swap_dir(),
-             session_dir: Path.dirname(Minga.Session.session_file())
-           ]}
-        ]
+      ]
+      |> Enum.concat(renderer_children())
+      |> Enum.concat([
+        {MingaEditor,
+         [
+           backend: backend,
+           swap_dir: Minga.Session.swap_dir(),
+           session_dir: Path.dirname(Minga.Session.session_file())
+         ]}
+      ])
 
     Supervisor.init(children, strategy: :rest_for_one)
   end

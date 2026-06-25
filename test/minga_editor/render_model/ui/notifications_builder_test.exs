@@ -29,7 +29,7 @@ defmodule MingaEditor.RenderModel.UI.NotificationsBuilderTest do
       center = NotificationCenter.upsert(NotificationCenter.new(), notification)
       model = NotificationsBuilder.build(center)
 
-      assert length(model.items) == 1
+      assert Enum.count(model.items) == 1
       item = hd(model.items)
       assert item.id == "test-1"
       assert item.level == :warning
@@ -71,7 +71,7 @@ defmodule MingaEditor.RenderModel.UI.NotificationsBuilderTest do
       model = NotificationsBuilder.build(center)
 
       item = hd(model.items)
-      assert length(item.actions) == 1
+      assert Enum.count(item.actions) == 1
       assert hd(item.actions).id == "retry"
       assert hd(item.actions).label == "Retry"
     end

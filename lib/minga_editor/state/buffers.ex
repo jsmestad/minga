@@ -23,7 +23,7 @@ defmodule MingaEditor.State.Buffers do
   def add(%__MODULE__{} = bs, pid) do
     # credo:disable-for-next-line Credo.Check.Refactor.AppendSingleItem
     buffers = bs.list ++ [pid]
-    idx = length(buffers) - 1
+    idx = Enum.count(buffers) - 1
     %{bs | list: buffers, active_index: idx, active: pid}
   end
 
@@ -37,7 +37,7 @@ defmodule MingaEditor.State.Buffers do
   @doc "Switches to the buffer at `idx`, wrapping around."
   @spec switch_to(t(), non_neg_integer()) :: t()
   def switch_to(%__MODULE__{list: [_ | _] = buffers} = bs, idx) do
-    len = length(buffers)
+    len = Enum.count(buffers)
     idx = rem(idx, len)
     idx = if idx < 0, do: idx + len, else: idx
     pid = Enum.at(buffers, idx)
@@ -78,7 +78,7 @@ defmodule MingaEditor.State.Buffers do
             {nil, 0}
 
           _ ->
-            idx = min(bs.active_index, length(live_list) - 1)
+            idx = min(bs.active_index, Enum.count(live_list) - 1)
             {Enum.at(live_list, idx), idx}
         end
 
@@ -98,7 +98,7 @@ defmodule MingaEditor.State.Buffers do
           {nil, 0}
 
         _ ->
-          idx = min(bs.active_index, length(new_list) - 1)
+          idx = min(bs.active_index, Enum.count(new_list) - 1)
           {Enum.at(new_list, idx), idx}
       end
 

@@ -111,7 +111,7 @@ defmodule Minga.LSP.JsonRpc do
 
       iex> encoded = IO.iodata_to_binary(Minga.LSP.JsonRpc.encode_notification("test", %{"a" => 1}))
       iex> {messages, rest} = Minga.LSP.JsonRpc.decode(encoded)
-      iex> length(messages)
+      iex> Enum.count(messages)
       1
       iex> hd(messages)["method"]
       "test"

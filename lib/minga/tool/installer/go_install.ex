@@ -75,7 +75,7 @@ defmodule Minga.Tool.Installer.GoInstall do
 
   @spec detect_version(String.t(), String.t()) :: String.t()
   defp detect_version(bin_dir, package) do
-    bin_name = package |> String.split("/") |> List.last()
+    bin_name = package |> String.split("/") |> Enum.at(-1)
     bin_path = Path.join(bin_dir, bin_name)
 
     case extract_binary_version(bin_path, ["version"]) do

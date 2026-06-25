@@ -89,7 +89,6 @@ defmodule Minga.Language.TreeSitterTest do
 
   describe "register_grammar/3" do
     setup do
-      # Ensure the ETS table exists for tests
       HLGrammar.init_registry()
       :ok
     end

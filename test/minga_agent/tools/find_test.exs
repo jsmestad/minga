@@ -25,9 +25,11 @@ defmodule MingaAgent.Tools.FindTest do
     if sleep, do: File.ln_s!(sleep, Path.join(bin_dir, "sleep"))
 
     try do
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       System.put_env("PATH", bin_dir)
       fun.()
     after
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       System.put_env("PATH", old_path)
       File.rm_rf!(bin_dir)
     end
@@ -154,8 +156,8 @@ defmodule MingaAgent.Tools.FindTest do
 
       assert {:ok, output} = Find.execute("many_*.txt", dir)
       lines = String.split(output, "\n", trim: true)
-      assert length(Enum.reject(lines, &String.starts_with?(&1, "... (truncated"))) == 1_000
-      assert List.last(lines) == "... (truncated, refine the pattern or path for fewer results)"
+      assert Enum.count(Enum.reject(lines, &String.starts_with?(&1, "... (truncated"))) == 1_000
+      assert Enum.at(lines, -1) == "... (truncated, refine the pattern or path for fewer results)"
     end
 
     test "byte-caps very long result paths without splitting UTF-8", %{dir: dir} do

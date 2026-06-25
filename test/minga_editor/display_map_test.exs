@@ -34,7 +34,7 @@ defmodule MingaEditor.DisplayMapTest do
       # Lines 0-4 normal, line 5 is fold start (hiding 5 lines), then 11-15
       folds = Enum.filter(entries, fn {_, type} -> match?({:fold_start, _}, type) end)
 
-      assert length(folds) == 1
+      assert Enum.count(folds) == 1
       {5, {:fold_start, 5}} = hd(folds)
 
       # Line 6-10 should not appear
@@ -73,7 +73,7 @@ defmodule MingaEditor.DisplayMapTest do
       dec_folds =
         Enum.filter(entries, fn {_, type} -> match?({:decoration_fold, _}, type) end)
 
-      assert length(dec_folds) == 1
+      assert Enum.count(dec_folds) == 1
       {5, {:decoration_fold, %FoldRegion{start_line: 5, end_line: 10}}} = hd(dec_folds)
 
       visible_lines = Enum.map(entries, fn {line, _} -> line end)
@@ -211,7 +211,7 @@ defmodule MingaEditor.DisplayMapTest do
       vl_entries =
         Enum.filter(entries, fn {_, type} -> match?({:virtual_line, _}, type) end)
 
-      assert length(vl_entries) == 1
+      assert Enum.count(vl_entries) == 1
       {5, {:virtual_line, _vt}} = hd(vl_entries)
 
       # The virtual line should appear before the normal line 5 entry
@@ -278,7 +278,7 @@ defmodule MingaEditor.DisplayMapTest do
 
       # 10 display rows: 5 normal lines (0-4) + 3 virtual lines + 2 more lines
       # Total entries should be 10
-      assert length(entries) == 10
+      assert Enum.count(entries) == 10
     end
   end
 

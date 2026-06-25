@@ -248,13 +248,11 @@ defmodule Minga.Buffer.Lines do
   def update_after_delete_before(nil, _cursor_line, _char_size, _newline?), do: nil
 
   def update_after_delete_before(ls, cursor_line, char_size, newline?) do
-    case newline? do
-      false ->
-        accumulate_delta(ls, cursor_line, -char_size)
-
-      true ->
-        clean = ensure_clean(ls)
-        remove_and_shift(clean, cursor_line, char_size)
+    if newline? do
+      clean = ensure_clean(ls)
+      remove_and_shift(clean, cursor_line, char_size)
+    else
+      accumulate_delta(ls, cursor_line, -char_size)
     end
   end
 
@@ -269,13 +267,11 @@ defmodule Minga.Buffer.Lines do
   def update_after_delete_at(nil, _cursor_line, _char_size, _newline?), do: nil
 
   def update_after_delete_at(ls, cursor_line, char_size, newline?) do
-    case newline? do
-      false ->
-        accumulate_delta(ls, cursor_line, -char_size)
-
-      true ->
-        clean = ensure_clean(ls)
-        remove_and_shift(clean, cursor_line + 1, char_size)
+    if newline? do
+      clean = ensure_clean(ls)
+      remove_and_shift(clean, cursor_line + 1, char_size)
+    else
+      accumulate_delta(ls, cursor_line, -char_size)
     end
   end
 
@@ -409,7 +405,7 @@ defmodule Minga.Buffer.Lines do
   defp last_line_start(text) do
     case :binary.matches(text, "\n") do
       [] -> 0
-      matches -> elem(List.last(matches), 0) + 1
+      matches -> elem(Enum.at(matches, -1), 0) + 1
     end
   end
 end

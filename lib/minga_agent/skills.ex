@@ -65,7 +65,7 @@ defmodule MingaAgent.Skills do
     # Later sources override earlier: global < extension < project
     (global ++ extension ++ project)
     |> Enum.group_by(& &1.name)
-    |> Enum.map(fn {_name, skills} -> List.last(skills) end)
+    |> Enum.map(fn {_name, skills} -> Enum.at(skills, -1) end)
     |> Enum.sort_by(& &1.name)
   end
 
@@ -124,7 +124,7 @@ defmodule MingaAgent.Skills do
     if skills == [] do
       "No skills found. Create skills in ~/.config/minga/skills/ or .minga/skills/."
     else
-      header = "Available skills (#{length(skills)}):\n"
+      header = "Available skills (#{Enum.count(skills)}):\n"
       lines = Enum.map_join(skills, "\n", &format_skill_line/1)
       header <> lines
     end
@@ -245,7 +245,7 @@ defmodule MingaAgent.Skills do
 
   defp parse_yaml_lines(["  - " <> item | rest], acc, current_key) when is_binary(current_key) do
     existing = Map.get(acc, current_key, [])
-    acc = Map.put(acc, current_key, existing ++ [String.trim(item)])
+    acc = Map.put(acc, current_key, Enum.concat(existing, [String.trim(item)]))
     parse_yaml_lines(rest, acc, current_key)
   end
 

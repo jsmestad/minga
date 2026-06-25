@@ -85,7 +85,7 @@ defmodule Minga.Extension.EditorTest do
 
     test "generates __command_schema__/0 with all declared commands" do
       schema = CommandExtension.__command_schema__()
-      assert length(schema) == 2
+      assert Enum.count(schema) == 2
 
       {name1, desc1, opts1} = Enum.at(schema, 0)
       assert name1 == :test_cmd_one
@@ -129,7 +129,7 @@ defmodule Minga.Extension.EditorTest do
 
     test "generates __keybind_schema__/0 with all declared keybindings" do
       schema = KeybindExtension.__keybind_schema__()
-      assert length(schema) == 3
+      assert Enum.count(schema) == 3
 
       assert Enum.at(schema, 0) == {:normal, "SPC m t", :test_cmd, "Test command", []}
       assert Enum.at(schema, 1) == {:normal, "M-h", :promote, "Promote heading", [filetype: :org]}
@@ -173,7 +173,7 @@ defmodule Minga.Extension.EditorTest do
 
     test "generates __modeline_segment_schema__/0 with all declared segments" do
       schema = ModelineExtension.__modeline_segment_schema__()
-      assert length(schema) == 2
+      assert Enum.count(schema) == 2
 
       {name1, opts1, {mod1, fun1}} = Enum.at(schema, 0)
       assert name1 == :word_count
@@ -344,11 +344,11 @@ defmodule Minga.Extension.EditorTest do
     end
 
     test "all five schemas are populated" do
-      assert length(FullExtension.__option_schema__()) == 1
-      assert length(FullExtension.__command_schema__()) == 1
-      assert length(FullExtension.__keybind_schema__()) == 1
-      assert length(FullExtension.__modeline_segment_schema__()) == 1
-      assert length(FullExtension.__capability_schema__()) == 1
+      assert Enum.count(FullExtension.__option_schema__()) == 1
+      assert Enum.count(FullExtension.__command_schema__()) == 1
+      assert Enum.count(FullExtension.__keybind_schema__()) == 1
+      assert Enum.count(FullExtension.__modeline_segment_schema__()) == 1
+      assert Enum.count(FullExtension.__capability_schema__()) == 1
     end
   end
 

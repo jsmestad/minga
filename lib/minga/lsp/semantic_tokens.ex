@@ -71,7 +71,7 @@ defmodule Minga.LSP.SemanticTokens do
       iex> mods = ["declaration", "readonly"]
       iex> data = [0, 5, 3, 2, 0, 1, 0, 4, 1, 2]
       iex> tokens = SemanticTokens.decode(data, types, mods)
-      iex> length(tokens)
+      iex> Enum.count(tokens)
       2
       iex> hd(tokens).line
       0

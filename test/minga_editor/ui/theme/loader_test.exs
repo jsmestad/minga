@@ -359,7 +359,7 @@ defmodule MingaEditor.UI.Theme.LoaderTest do
       {themes, errors} = Loader.load_all(dir)
 
       assert Map.has_key?(themes, :good)
-      assert length(errors) == 1
+      assert Enum.count(errors) == 1
     end
 
     test "returns empty for nonexistent directory" do

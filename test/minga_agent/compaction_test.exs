@@ -60,7 +60,7 @@ defmodule MingaAgent.CompactionTest do
       assert is_binary(summary_info)
       assert summary_info =~ "compacted"
       # Compacted context should have fewer messages
-      assert length(new_context.messages) < length(context.messages)
+      assert Enum.count(new_context.messages) < Enum.count(context.messages)
     end
   end
 
@@ -111,7 +111,7 @@ defmodule MingaAgent.CompactionTest do
       assert {:compacted, new_context, _info} = Compaction.compact(context, opts)
 
       # Should have: system + summary + 4 kept = 6 messages
-      assert length(new_context.messages) == 6
+      assert Enum.count(new_context.messages) == 6
 
       # Second message should be the summary
       summary = Enum.at(new_context.messages, 1)

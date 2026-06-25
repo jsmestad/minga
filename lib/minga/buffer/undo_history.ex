@@ -161,11 +161,9 @@ defmodule Minga.Buffer.UndoHistory do
   def last_redo_source(%__MODULE__{redo_entries: []}), do: nil
   def last_redo_source(%__MODULE__{redo_entries: [{_version, _patches, source} | _]}), do: source
 
-  @doc false
   @spec undo_count(t()) :: non_neg_integer()
   def undo_count(%__MODULE__{} = history), do: length(history.undo_entries)
 
-  @doc false
   @spec redo_count(t()) :: non_neg_integer()
   def redo_count(%__MODULE__{} = history), do: length(history.redo_entries)
 

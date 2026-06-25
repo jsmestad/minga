@@ -101,7 +101,7 @@ defmodule MingaEditor.BottomPanel do
   @spec next_tab(t()) :: t()
   def next_tab(%__MODULE__{tabs: tabs, active_tab: current} = panel) do
     current_index = Enum.find_index(tabs, &(&1 == current)) || 0
-    next_index = rem(current_index + 1, length(tabs))
+    next_index = rem(current_index + 1, Enum.count(tabs))
     %{panel | active_tab: Enum.at(tabs, next_index), filter: nil}
   end
 
@@ -109,7 +109,7 @@ defmodule MingaEditor.BottomPanel do
   @spec prev_tab(t()) :: t()
   def prev_tab(%__MODULE__{tabs: tabs, active_tab: current} = panel) do
     current_index = Enum.find_index(tabs, &(&1 == current)) || 0
-    prev_index = rem(current_index - 1 + length(tabs), length(tabs))
+    prev_index = rem(current_index - 1 + Enum.count(tabs), Enum.count(tabs))
     %{panel | active_tab: Enum.at(tabs, prev_index), filter: nil}
   end
 

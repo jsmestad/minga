@@ -153,7 +153,7 @@ defmodule Minga.Core.Diff do
   def prev_hunk_line(hunks, line) do
     hunks
     |> Enum.filter(fn h -> h.start_line < line end)
-    |> List.last()
+    |> Enum.at(-1)
     |> case do
       nil -> nil
       hunk -> hunk.start_line
@@ -196,8 +196,8 @@ defmodule Minga.Core.Diff do
     # Context lines around the hunk (standard 3 lines)
     ctx = 3
 
-    {old_start, old_end} = base_range(hunk, length(base_lines), ctx)
-    {new_start, new_end} = current_range(hunk, length(current_lines), ctx)
+    {old_start, old_end} = base_range(hunk, Enum.count(base_lines), ctx)
+    {new_start, new_end} = current_range(hunk, Enum.count(current_lines), ctx)
 
     old_context_lines = Enum.slice(base_lines, old_start..(old_end - 1)//1)
     new_context_lines = Enum.slice(current_lines, new_start..(new_end - 1)//1)
@@ -251,7 +251,7 @@ defmodule Minga.Core.Diff do
   defp build_hunks([], _cur, _base, acc), do: acc
 
   defp build_hunks([{:eq, lines} | rest], cur, base, acc) do
-    len = length(lines)
+    len = Enum.count(lines)
     build_hunks(rest, cur + len, base + len, acc)
   end
 
@@ -260,13 +260,13 @@ defmodule Minga.Core.Diff do
     hunk = %{
       type: :modified,
       start_line: cur,
-      count: length(ins_lines),
+      count: Enum.count(ins_lines),
       old_start: base,
-      old_count: length(del_lines),
+      old_count: Enum.count(del_lines),
       old_lines: del_lines
     }
 
-    build_hunks(rest, cur + length(ins_lines), base + length(del_lines), [hunk | acc])
+    build_hunks(rest, cur + Enum.count(ins_lines), base + Enum.count(del_lines), [hunk | acc])
   end
 
   # Pure deletion
@@ -276,11 +276,11 @@ defmodule Minga.Core.Diff do
       start_line: cur,
       count: 0,
       old_start: base,
-      old_count: length(del_lines),
+      old_count: Enum.count(del_lines),
       old_lines: del_lines
     }
 
-    build_hunks(rest, cur, base + length(del_lines), [hunk | acc])
+    build_hunks(rest, cur, base + Enum.count(del_lines), [hunk | acc])
   end
 
   # Pure insertion
@@ -288,13 +288,13 @@ defmodule Minga.Core.Diff do
     hunk = %{
       type: :added,
       start_line: cur,
-      count: length(ins_lines),
+      count: Enum.count(ins_lines),
       old_start: base,
       old_count: 0,
       old_lines: []
     }
 
-    build_hunks(rest, cur + length(ins_lines), base, [hunk | acc])
+    build_hunks(rest, cur + Enum.count(ins_lines), base, [hunk | acc])
   end
 
   # ── Three-way merge ─────────────────────────────────────────────────────────
@@ -357,10 +357,10 @@ defmodule Minga.Core.Diff do
     {edits, _pos} =
       Enum.reduce(ops, {[], 0}, fn
         {:eq, lines}, {acc, pos} ->
-          {acc, pos + length(lines)}
+          {acc, pos + Enum.count(lines)}
 
         {:del, del_lines}, {acc, pos} ->
-          {[{pos, length(del_lines), :pending_del} | acc], pos + length(del_lines)}
+          {[{pos, Enum.count(del_lines), :pending_del} | acc], pos + Enum.count(del_lines)}
 
         {:ins, ins_lines}, {[{start, count, :pending_del} | rest], pos} ->
           # del followed by ins = replacement

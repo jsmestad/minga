@@ -42,7 +42,7 @@ defmodule MingaAgent.EphemeralSession do
     pid
     |> Session.messages()
     |> Enum.filter(&match?({:assistant, _}, &1))
-    |> List.last()
+    |> Enum.at(-1)
     |> assistant_text()
   catch
     :exit, _ -> ""
@@ -58,7 +58,7 @@ defmodule MingaAgent.EphemeralSession do
   @doc "Builds the constrained tool list for inline edit rewrite sessions."
   @spec rewrite_tools(String.t()) :: [Tool.t()]
   def rewrite_tools(project_root) when is_binary(project_root) do
-    Tools.file_read(project_root: project_root) ++ [produce_rewrite_tool()]
+    Enum.concat(Tools.file_read(project_root: project_root), [produce_rewrite_tool()])
   end
 
   @spec start(String.t(), String.t(), String.t(), [Tool.t()], atom(), keyword()) ::

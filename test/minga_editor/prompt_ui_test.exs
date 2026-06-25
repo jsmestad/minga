@@ -355,17 +355,14 @@ defmodule MingaEditor.PromptUITest do
   describe "composability — picker then prompt" do
     test "on_select can open a prompt for multi-step flow" do
       # Simulate: picker selects a template, then prompt opens for title input
-      # Step 1: open prompt with empty default (simulating a picker's on_select)
       state = base_state() |> PromptUI.open(RenameHandler)
 
-      # Step 2: type new name
       state =
         Enum.reduce(String.to_charlist("NewName"), state, fn char, acc ->
           {new_state, nil} = PromptUI.handle_key(acc, char, 0)
           new_state
         end)
 
-      # Step 3: submit
       {state, nil} = PromptUI.handle_key(state, @enter, 0)
 
       assert Process.get(:new_name) == "NewName"

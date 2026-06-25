@@ -72,15 +72,13 @@ defmodule Minga.Config.ModelineSegments do
           :ok | {:error, register_error()}
   def register(table, name, opts, render, source)
       when is_atom(table) and is_atom(name) and is_list(opts) and is_function(render, 1) do
-    case reserved_name?(name) do
-      true ->
-        {:error, {:reserved_name, name}}
-
-      false ->
-        case ModelineSegment.new(name, opts, render, source) do
-          {:ok, segment} -> insert_segment(table, name, segment, source)
-          {:error, reason} -> {:error, reason}
-        end
+    if reserved_name?(name) do
+      {:error, {:reserved_name, name}}
+    else
+      case ModelineSegment.new(name, opts, render, source) do
+        {:ok, segment} -> insert_segment(table, name, segment, source)
+        {:error, reason} -> {:error, reason}
+      end
     end
   end
 
@@ -208,9 +206,10 @@ defmodule Minga.Config.ModelineSegments do
     warnings_table = warnings_table(table)
 
     with_writable_table(warnings_table, fn ->
-      case :ets.insert_new(warnings_table, {key, true}) do
-        true -> Minga.Log.warning(:config, message)
-        false -> :ok
+      if :ets.insert_new(warnings_table, {key, true}) do
+        Minga.Log.warning(:config, message)
+      else
+        :ok
       end
     end)
   end
@@ -221,9 +220,10 @@ defmodule Minga.Config.ModelineSegments do
 
   @spec lookup(table(), atom()) :: ModelineSegment.t() | nil
   def lookup(table, name) when is_atom(table) and is_atom(name) do
-    case table_ready?(table) do
-      true -> lookup_existing(table, name)
-      false -> nil
+    if table_ready?(table) do
+      lookup_existing(table, name)
+    else
+      nil
     end
   end
 
@@ -246,9 +246,10 @@ defmodule Minga.Config.ModelineSegments do
 
   @spec list(table()) :: [ModelineSegment.t()]
   def list(table) when is_atom(table) do
-    case table_ready?(table) do
-      true -> list_existing(table)
-      false -> []
+    if table_ready?(table) do
+      list_existing(table)
+    else
+      []
     end
   end
 
@@ -286,16 +287,18 @@ defmodule Minga.Config.ModelineSegments do
 
   @spec ensure_writable_table(table()) :: :ok | :missing
   defp ensure_writable_table(@table) do
-    case table_ready?(@table) do
-      true -> :ok
-      false -> :missing
+    if table_ready?(@table) do
+      :ok
+    else
+      :missing
     end
   end
 
   defp ensure_writable_table(table) do
-    case table_ready?(table) do
-      true -> :ok
-      false -> create_owned_table(table)
+    if table_ready?(table) do
+      :ok
+    else
+      create_owned_table(table)
     end
   end
 
@@ -315,9 +318,10 @@ defmodule Minga.Config.ModelineSegments do
 
   @spec delete_existing_table(table()) :: :ok
   defp delete_existing_table(table) do
-    case table_ready?(table) do
-      true -> delete_existing_table!(table)
-      false -> :ok
+    if table_ready?(table) do
+      delete_existing_table!(table)
+    else
+      :ok
     end
   end
 

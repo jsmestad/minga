@@ -183,7 +183,7 @@ defmodule MingaAgent.SessionManagerTest do
       {:ok, id2, pid2} = SessionManager.start_session(manager, [])
 
       sessions = SessionManager.list_sessions(manager)
-      assert length(sessions) == 2
+      assert Enum.count(sessions) == 2
 
       ids = Enum.map(sessions, &elem(&1, 0))
       pids = Enum.map(sessions, &elem(&1, 1))

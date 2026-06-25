@@ -332,8 +332,8 @@ defmodule MingaEditor.State.TabBarTest do
       assert TabBar.find_by_kind(tb, :agent).label == "Agent"
       assert TabBar.find_by_kind(tb, :file).label == "a"
       assert TabBar.find_by_kind(TabBar.new(file_tab(1)), :agent) == nil
-      assert length(TabBar.filter_by_kind(tb, :file)) == 2
-      assert length(TabBar.filter_by_kind(tb, :agent)) == 1
+      assert Enum.count(TabBar.filter_by_kind(tb, :file)) == 2
+      assert Enum.count(TabBar.filter_by_kind(tb, :agent)) == 1
     end
   end
 
@@ -467,8 +467,8 @@ defmodule MingaEditor.State.TabBarTest do
       assert TabBar.active_workspace_id(tb) == 0
       assert TabBar.get(tb, 2).group_id == 0
 
-      initial_count = length(tb.workspaces)
-      assert length(TabBar.remove_workspace(tb, 999).workspaces) == initial_count
+      initial_count = Enum.count(tb.workspaces)
+      assert Enum.count(TabBar.remove_workspace(tb, 999).workspaces) == initial_count
     end
   end
 

@@ -83,9 +83,10 @@ defmodule Minga.Project.FileFind do
 
   @spec detect_find_strategy() :: strategy()
   defp detect_find_strategy do
-    case executable_available?("find") do
-      true -> :find
-      false -> :none
+    if executable_available?("find") do
+      :find
+    else
+      :none
     end
   end
 
@@ -104,7 +105,7 @@ defmodule Minga.Project.FileFind do
   @spec fd_args([String.t()]) :: [String.t()]
   def fd_args(exclude_list \\ excludes()) do
     exclude_args = Enum.flat_map(exclude_list, &["--exclude", &1])
-    ["--type", "f", "--hidden"] ++ exclude_args ++ ["."]
+    ["--type", "f", "--hidden"] ++ Enum.concat(exclude_args, ["."])
   end
 
   @spec list_with_fd(String.t()) :: result()

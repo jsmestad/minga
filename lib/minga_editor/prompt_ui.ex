@@ -198,14 +198,14 @@ defmodule MingaEditor.PromptUI do
   end
 
   @spec do_delete_grapheme(state(), PromptState.t(), [String.t()]) :: state()
-  defp do_delete_grapheme(state, %{cursor: cursor}, graphemes)
-       when cursor >= length(graphemes),
-       do: state
-
-  defp do_delete_grapheme(state, prompt, graphemes) do
-    {before, [_deleted | after_]} = Enum.split(graphemes, prompt.cursor)
-    new_text = Enum.join(before) <> Enum.join(after_)
-    update_prompt(state, &%{&1 | text: new_text})
+  defp do_delete_grapheme(state, %{cursor: cursor}, graphemes) do
+    if cursor >= Enum.count(graphemes) do
+      state
+    else
+      {before, [_deleted | after_]} = Enum.split(graphemes, cursor)
+      new_text = Enum.join(before) <> Enum.join(after_)
+      update_prompt(state, &%{&1 | text: new_text})
+    end
   end
 
   @spec do_insert(state(), PromptState.t(), non_neg_integer()) :: state()

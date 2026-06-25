@@ -21,7 +21,7 @@ defmodule Minga.Extensions.RecipePacks.Python do
   @spec init(keyword()) :: {:ok, map()} | {:error, term()}
   def init(_config) do
     case Minga.Extensions.RecipePacks.register_pack(__MODULE__) do
-      :ok -> {:ok, %{recipes: length(recipes())}}
+      :ok -> {:ok, %{recipes: Enum.count(recipes())}}
       {:error, reason} -> {:error, reason}
     end
   end

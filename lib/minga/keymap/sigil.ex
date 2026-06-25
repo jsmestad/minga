@@ -69,7 +69,7 @@ defmodule Minga.Keymap.Sigil do
 
       keys ->
         raise ArgumentError,
-              "~K requires exactly one key, but #{inspect(string)} parsed to #{length(keys)} keys"
+              "~K requires exactly one key, but #{inspect(string)} parsed to #{Enum.count(keys)} keys"
     end
   end
 

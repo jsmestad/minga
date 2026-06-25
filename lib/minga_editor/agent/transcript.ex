@@ -33,7 +33,7 @@ defmodule MingaEditor.Agent.Transcript do
     message_id_pairs = Keyword.get(opts, :message_ids, [])
     empty_state = Keyword.get(opts, :empty_state)
 
-    hidden_count = min(display_start, length(messages))
+    hidden_count = min(display_start, Enum.count(messages))
 
     visible_entries =
       messages
@@ -96,7 +96,7 @@ defmodule MingaEditor.Agent.Transcript do
       |> Enum.with_index()
       |> Enum.reduce({[], [], 0}, fn {msg, idx}, {parts, offsets, line} ->
         md = message_to_markdown(msg)
-        line_count = md |> String.split("\n") |> length()
+        line_count = md |> String.split("\n") |> Enum.count()
         separator_lines = if parts == [], do: 0, else: 1
         start = line + separator_lines
 
@@ -150,7 +150,7 @@ defmodule MingaEditor.Agent.Transcript do
   defp build_line_index(_messages, [], _line_offsets), do: []
 
   defp build_line_index(messages, text_lines, line_offsets) do
-    total_lines = length(text_lines)
+    total_lines = Enum.count(text_lines)
 
     line_to_msg =
       line_offsets
@@ -319,8 +319,9 @@ defmodule MingaEditor.Agent.Transcript do
   defp build_display_text(visible_entries, pinned_entries, hidden_count, message_id_pairs) do
     prefix_entries =
       if pinned_entries != [] do
-        pinned_entries ++
-          [{separator_index(pinned_entries, visible_entries), {:system, "── pinned ──", :info}}]
+        Enum.concat(pinned_entries, [
+          {separator_index(pinned_entries, visible_entries), {:system, "── pinned ──", :info}}
+        ])
       else
         []
       end

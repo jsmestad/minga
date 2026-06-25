@@ -631,7 +631,7 @@ defmodule Minga.Extension.LazyTest do
         Minga.Extension.Manifest.from_module(Minga.TestExtensions.ManifestPolicy, :path)
 
       assert manifest.load_policy == {:on_command, [:manifest_cmd]}
-      assert length(manifest.commands) == 1
+      assert Enum.count(manifest.commands) == 1
     end
   end
 

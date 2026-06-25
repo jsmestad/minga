@@ -212,7 +212,7 @@ defmodule MingaEditor.Input.ScopedTest do
     test "modified Enter inserts newline", %{state: state} do
       for mods <- [0x01, 0x04] do
         {:handled, new_state} = walk_surface_handlers(state, 13, mods)
-        assert length(UIState.input_lines(AgentAccess.panel(new_state))) > 1
+        assert Enum.count(UIState.input_lines(AgentAccess.panel(new_state))) > 1
       end
     end
   end
@@ -507,9 +507,9 @@ defmodule MingaEditor.Input.ScopedTest do
       File.write!(Path.join(tmp_dir, ".hidden"), "")
       state = make_tree_state(tmp_dir, 0)
 
-      entries_before = length(FileTree.visible_entries(ft(state).tree))
+      entries_before = Enum.count(FileTree.visible_entries(ft(state).tree))
       {:handled, new_state} = FileTreeHandler.handle_key(state, ?H, 0)
-      entries_after = length(FileTree.visible_entries(ft(new_state).tree))
+      entries_after = Enum.count(FileTree.visible_entries(ft(new_state).tree))
 
       assert entries_after != entries_before
     end
@@ -686,8 +686,8 @@ defmodule MingaEditor.Input.ScopedTest do
       comp = AgentAccess.panel(new_state).mention_completion
 
       if comp != nil do
-        assert length(comp.candidates) <=
-                 length(AgentAccess.panel(state).mention_completion.candidates)
+        assert Enum.count(comp.candidates) <=
+                 Enum.count(AgentAccess.panel(state).mention_completion.candidates)
       end
     end
 

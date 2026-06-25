@@ -102,7 +102,7 @@ defmodule Minga.LSP.SupervisorTest do
       await_ready(pid2)
 
       clients = LSPSupervisor.all_clients(sup)
-      assert length(clients) == 2
+      assert Enum.count(clients) == 2
       assert pid1 in clients
       assert pid2 in clients
     end

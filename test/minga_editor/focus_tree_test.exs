@@ -88,7 +88,7 @@ defmodule MingaEditor.FocusTreeTest do
       tree = FocusTree.from_layout(split_layout())
       editor = Enum.find(tree.children, &(&1.content_type == :editor_area))
 
-      assert length(editor.children) == 2
+      assert Enum.count(editor.children) == 2
       assert Enum.all?(editor.children, &(&1.content_type == :window))
       refs = Enum.map(editor.children, & &1.ref)
       assert refs == [1, 2]

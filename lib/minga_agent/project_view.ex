@@ -129,7 +129,6 @@ defmodule MingaAgent.ProjectView do
     :exit, _ -> false
   end
 
-  @doc false
   @spec new(module(), String.t(), ProjectView.Backend.ref(), keyword()) :: t()
   def new(backend, project_root, ref, opts) when is_atom(backend) and is_binary(project_root) do
     %__MODULE__{
@@ -141,7 +140,6 @@ defmodule MingaAgent.ProjectView do
     }
   end
 
-  @doc false
   @spec normalize_relative_path(String.t(), keyword()) ::
           {:ok, String.t()} | {:error, :invalid_path | :path_traversal}
   def normalize_relative_path(path, opts \\ []) when is_binary(path) do

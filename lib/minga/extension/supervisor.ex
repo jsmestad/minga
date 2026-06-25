@@ -22,6 +22,7 @@ defmodule Minga.Extension.Supervisor do
   alias Minga.Extension.Lazy
   alias Minga.Extension.Manifest
   alias Minga.Extension.Registry, as: ExtRegistry
+  alias Minga.Log
 
   # ── Client API ──────────────────────────────────────────────────────────────
 
@@ -60,7 +61,7 @@ defmodule Minga.Extension.Supervisor do
           nil
 
         {:error, reason} ->
-          Minga.Log.warning(:config, reason)
+          Log.warning(:config, reason)
           mark_hex_entries_load_error(registry)
           %{extension: :hex_install, reason: reason}
       end
@@ -121,7 +122,7 @@ defmodule Minga.Extension.Supervisor do
     if MapSet.member?(failed_git_names, name) do
       {failures, deferred}
     else
-      {failures ++ [%{extension: name, reason: :clone_failed}], deferred}
+      {Enum.concat(failures, [%{extension: name, reason: :clone_failed}]), deferred}
     end
   end
 
@@ -155,8 +156,11 @@ defmodule Minga.Extension.Supervisor do
 
       :deferred ->
         case validate_deferred_extension(name, entry) do
-          :ok -> {failures, [{name, entry} | deferred]}
-          {:error, reason} -> {failures ++ [%{extension: name, reason: reason}], deferred}
+          :ok ->
+            {failures, [{name, entry} | deferred]}
+
+          {:error, reason} ->
+            {Enum.concat(failures, [%{extension: name, reason: reason}]), deferred}
         end
 
       {:on_command, _} ->
@@ -191,7 +195,7 @@ defmodule Minga.Extension.Supervisor do
   defp validate_load_policy({tag, _} = policy) when tag in @valid_trigger_tags, do: policy
 
   defp validate_load_policy(invalid) do
-    Minga.Log.warning(
+    Log.warning(
       :config,
       "Invalid load_policy #{inspect(invalid)}, falling back to :eager"
     )
@@ -201,7 +205,7 @@ defmodule Minga.Extension.Supervisor do
 
   @spec log_reserved_trigger(atom(), atom()) :: :ok
   defp log_reserved_trigger(name, trigger) do
-    Minga.Log.warning(
+    Log.warning(
       :config,
       "Extension #{name}: #{trigger} trigger is reserved; stub commands autoload on invocation but the event hook is not yet wired"
     )
@@ -219,7 +223,7 @@ defmodule Minga.Extension.Supervisor do
   defp register_lazy_or_fail(supervisor, registry, name, entry, opts, failures, deferred) do
     case register_lazy_stubs(supervisor, registry, name, entry, opts) do
       :ok -> {failures, deferred}
-      {:error, reason} -> {failures ++ [%{extension: name, reason: reason}], deferred}
+      {:error, reason} -> {Enum.concat(failures, [%{extension: name, reason: reason}]), deferred}
     end
   end
 
@@ -232,7 +236,7 @@ defmodule Minga.Extension.Supervisor do
         end
 
       {:error, reason} ->
-        Minga.Log.warning(
+        Log.warning(
           :config,
           "Extension #{name} deferred validation failed: #{inspect(reason)}"
         )
@@ -268,7 +272,7 @@ defmodule Minga.Extension.Supervisor do
   defp start_eager(supervisor, registry, name, entry, opts, failures, deferred) do
     case start_extension(supervisor, registry, name, entry, opts) do
       {:ok, _pid} -> {failures, deferred}
-      {:error, reason} -> {failures ++ [%{extension: name, reason: reason}], deferred}
+      {:error, reason} -> {Enum.concat(failures, [%{extension: name, reason: reason}]), deferred}
     end
   end
 
@@ -437,7 +441,7 @@ defmodule Minga.Extension.Supervisor do
     else
       {:error, reason} ->
         msg = "Extension #{name} load error: #{inspect(reason)}"
-        Minga.Log.warning(:config, msg)
+        Log.warning(:config, msg)
         ExtRegistry.update(registry, name, status: :load_error, pid: nil, lifecycle_ref: nil)
         wrap_start_failure(name, reason, cmd_registry, keymap, opts)
     end
@@ -486,7 +490,7 @@ defmodule Minga.Extension.Supervisor do
     else
       {:error, reason} ->
         msg = "Extension #{name} load error: #{inspect(reason)}"
-        Minga.Log.warning(:config, msg)
+        Log.warning(:config, msg)
         ExtRegistry.update(registry, name, status: :load_error, pid: nil, lifecycle_ref: nil)
         wrap_start_failure(name, reason, cmd_registry, keymap, opts)
     end
@@ -595,7 +599,7 @@ defmodule Minga.Extension.Supervisor do
         :ok
 
       {:error, reason} = error ->
-        Minga.Log.warning(
+        Log.warning(
           :config,
           "Extension child #{inspect(pid)} termination failed: #{inspect(reason)}"
         )
@@ -604,7 +608,7 @@ defmodule Minga.Extension.Supervisor do
     end
   catch
     :exit, reason ->
-      Minga.Log.warning(
+      Log.warning(
         :config,
         "Extension child #{inspect(pid)} termination exited: #{inspect(reason)}"
       )
@@ -626,7 +630,7 @@ defmodule Minga.Extension.Supervisor do
   defp finalize_extension_start({:error, reason}, registry, name, cmd_registry, keymap, opts) do
     cleanup_result = cleanup_extension_contributions(name, cmd_registry, keymap, opts)
     msg = "Extension #{name} load error: #{inspect(reason)}"
-    Minga.Log.warning(:config, msg)
+    Log.warning(:config, msg)
     ExtRegistry.update(registry, name, status: :load_error, pid: nil, lifecycle_ref: nil)
 
     case cleanup_result do
@@ -681,12 +685,12 @@ defmodule Minga.Extension.Supervisor do
         )
 
         broadcast_agent_contributions_started(registry, name)
-        Minga.Log.info(:config, "Extension #{name} started (#{module})")
+        Log.info(:config, "Extension #{name} started (#{module})")
         {:ok, pid}
 
       {:error, reason} ->
         msg = "Extension #{name} failed to start: #{inspect(reason)}"
-        Minga.Log.warning(:config, msg)
+        Log.warning(:config, msg)
 
         ExtRegistry.update(
           registry,
@@ -806,7 +810,7 @@ defmodule Minga.Extension.Supervisor do
         :ok
 
       {:error, reason} = error ->
-        Minga.Log.warning(
+        Log.warning(
           :config,
           "Extension #{name} unload rejected because callback module #{inspect(module)} is still leased: #{inspect(reason)}"
         )
@@ -834,7 +838,7 @@ defmodule Minga.Extension.Supervisor do
             entry.module.version()
           rescue
             e ->
-              Minga.Log.warning(
+              Log.warning(
                 :config,
                 "Extension #{name} version() failed: #{Exception.message(e)}"
               )
@@ -995,7 +999,7 @@ defmodule Minga.Extension.Supervisor do
         reconcile_dead_running_entry(supervisor, registry, name, entry)
 
       {:error, reason} ->
-        Minga.Log.warning(
+        Log.warning(
           :config,
           "Extension #{name} running child validation failed: #{inspect(reason)}"
         )
@@ -1023,7 +1027,7 @@ defmodule Minga.Extension.Supervisor do
         {:ok, entry}
 
       {:error, reason} ->
-        Minga.Log.warning(
+        Log.warning(
           :config,
           "Extension #{name} restart reconciliation failed: #{inspect(reason)}"
         )
@@ -1098,7 +1102,6 @@ defmodule Minga.Extension.Supervisor do
     :ok
   end
 
-  @doc false
   @spec handle_slow_lifecycle_event([atom()], map(), map(), map()) :: :ok
   def handle_slow_lifecycle_event(
         _event,
@@ -1115,15 +1118,13 @@ defmodule Minga.Extension.Supervisor do
   defp maybe_log_slow_lifecycle_phase(name, phase, duration, threshold_ms) do
     duration_ms = System.convert_time_unit(duration, :native, :millisecond)
 
-    case duration_ms >= threshold_ms do
-      true ->
-        Minga.Log.warning(
-          :config,
-          "Extension #{name} lifecycle phase #{phase} took #{duration_ms}ms"
-        )
-
-      false ->
-        :ok
+    if duration_ms >= threshold_ms do
+      Log.warning(
+        :config,
+        "Extension #{name} lifecycle phase #{phase} took #{duration_ms}ms"
+      )
+    else
+      :ok
     end
   end
 
@@ -1253,9 +1254,10 @@ defmodule Minga.Extension.Supervisor do
         ) ::
           :ok
   defp wait_for_restarted_child(monitor, excluded_pid, reason, count, attempts) do
-    case lifecycle_monitor_active?(monitor.registry, monitor.name, monitor.lifecycle_ref) do
-      true -> wait_for_active_monitor_child(monitor, excluded_pid, reason, count, attempts)
-      false -> :ok
+    if lifecycle_monitor_active?(monitor.registry, monitor.name, monitor.lifecycle_ref) do
+      wait_for_active_monitor_child(monitor, excluded_pid, reason, count, attempts)
+    else
+      :ok
     end
   end
 
@@ -1277,7 +1279,7 @@ defmodule Minga.Extension.Supervisor do
         wait_for_missing_restarted_child(monitor, excluded_pid, reason, count, attempts)
 
       {:error, lookup_reason} ->
-        Minga.Log.warning(
+        Log.warning(
           :config,
           "Extension #{monitor.name} restart reconciliation failed: #{inspect(lookup_reason)}"
         )
@@ -1294,24 +1296,22 @@ defmodule Minga.Extension.Supervisor do
           non_neg_integer()
         ) :: :ok
   defp wait_for_missing_restarted_child(monitor, excluded_pid, reason, count, attempts) do
-    case restart_terminal_exit?(monitor.restart, reason) do
-      true ->
+    if restart_terminal_exit?(monitor.restart, reason) do
+      finalize_terminal_child_exit(monitor, reason)
+    else
+      if attempts >= restart_reconcile_attempt_limit() do
+        Log.warning(
+          :config,
+          "Extension #{monitor.name} restart reconciliation timed out after #{attempts} attempt(s)"
+        )
+
         finalize_terminal_child_exit(monitor, reason)
-
-      false ->
-        if attempts >= restart_reconcile_attempt_limit() do
-          Minga.Log.warning(
-            :config,
-            "Extension #{monitor.name} restart reconciliation timed out after #{attempts} attempt(s)"
-          )
-
-          finalize_terminal_child_exit(monitor, reason)
-        else
-          receive do
-          after
-            10 -> wait_for_restarted_child(monitor, excluded_pid, reason, count, attempts + 1)
-          end
+      else
+        receive do
+        after
+          10 -> wait_for_restarted_child(monitor, excluded_pid, reason, count, attempts + 1)
         end
+      end
     end
   end
 
@@ -1353,14 +1353,12 @@ defmodule Minga.Extension.Supervisor do
           :monitor | :stale
   defp reconcile_restarted_child(monitor, pid, count) do
     with_lifecycle_lock(monitor.registry, monitor.name, fn ->
-      case lifecycle_monitor_active?(monitor.registry, monitor.name, monitor.lifecycle_ref) do
-        true ->
-          ExtRegistry.update(monitor.registry, monitor.name, pid: pid)
-          emit_restart_count(monitor.name, count)
-          :monitor
-
-        false ->
-          :stale
+      if lifecycle_monitor_active?(monitor.registry, monitor.name, monitor.lifecycle_ref) do
+        ExtRegistry.update(monitor.registry, monitor.name, pid: pid)
+        emit_restart_count(monitor.name, count)
+        :monitor
+      else
+        :stale
       end
     end)
   end
@@ -1376,19 +1374,17 @@ defmodule Minga.Extension.Supervisor do
         ) :: :ok
   defp mark_terminal_child_exit(registry, name, lifecycle_ref, cmd_registry, keymap, opts, reason) do
     with_lifecycle_lock(registry, name, fn ->
-      case crash_reason?(reason) do
-        true ->
-          mark_crashed_without_replacement(registry, name, lifecycle_ref)
-
-        false ->
-          mark_stopped_without_replacement(
-            registry,
-            name,
-            lifecycle_ref,
-            cmd_registry,
-            keymap,
-            opts
-          )
+      if crash_reason?(reason) do
+        mark_crashed_without_replacement(registry, name, lifecycle_ref)
+      else
+        mark_stopped_without_replacement(
+          registry,
+          name,
+          lifecycle_ref,
+          cmd_registry,
+          keymap,
+          opts
+        )
       end
     end)
   end
@@ -1525,7 +1521,7 @@ defmodule Minga.Extension.Supervisor do
         failures
 
       {:error, reason} ->
-        Minga.Log.warning(:config, "Extension #{name}: #{reason}")
+        Log.warning(:config, "Extension #{name}: #{reason}")
         mark_start_load_error(registry, name)
         [%{extension: name, reason: reason} | failures]
     end
@@ -1576,7 +1572,7 @@ defmodule Minga.Extension.Supervisor do
     else
       {:error, reason} ->
         msg = "Extension #{name} load error: #{inspect(reason)}"
-        Minga.Log.warning(:config, msg)
+        Log.warning(:config, msg)
         ExtRegistry.update(registry, name, status: :load_error, pid: nil, lifecycle_ref: nil)
         wrap_start_failure(name, reason, cmd_registry, keymap, opts)
     end
@@ -1697,13 +1693,13 @@ defmodule Minga.Extension.Supervisor do
 
       case severity do
         :error ->
-          Minga.Log.warning(:editor, "[ext:error] #{short_file}:#{pos_str}: #{message}")
+          Log.warning(:editor, "[ext:error] #{short_file}:#{pos_str}: #{message}")
 
         :warning ->
-          Minga.Log.warning(:editor, "[ext] #{short_file}:#{pos_str}: #{message}")
+          Log.warning(:editor, "[ext] #{short_file}:#{pos_str}: #{message}")
 
         _ ->
-          Minga.Log.debug(:editor, "[ext] #{short_file}:#{pos_str}: #{message}")
+          Log.debug(:editor, "[ext] #{short_file}:#{pos_str}: #{message}")
       end
     end
 
@@ -1717,7 +1713,6 @@ defmodule Minga.Extension.Supervisor do
   defp format_position(line) when is_integer(line), do: "#{line}"
   defp format_position(_), do: "?"
 
-  @doc false
   @spec implements_extension?(module()) :: boolean()
   def implements_extension?(module) do
     Code.ensure_loaded?(module) &&
@@ -1727,7 +1722,6 @@ defmodule Minga.Extension.Supervisor do
       function_exported?(module, :init, 1)
   end
 
-  @doc false
   @spec validate_behaviour(module(), atom()) :: :ok | {:error, String.t()}
   def validate_behaviour(module, name) do
     missing =
@@ -1743,7 +1737,6 @@ defmodule Minga.Extension.Supervisor do
     end
   end
 
-  @doc false
   @spec cleanup_extension_contributions(
           atom(),
           GenServer.server(),
@@ -1765,7 +1758,7 @@ defmodule Minga.Extension.Supervisor do
         :ok
 
       {:error, failures} = error ->
-        Minga.Log.warning(
+        Log.warning(
           :config,
           "Extension #{name} contribution cleanup failed: #{format_cleanup_failures(failures)}"
         )
@@ -1827,7 +1820,7 @@ defmodule Minga.Extension.Supervisor do
     if match?({:error, _reason}, purge_result) do
       {:error, reason} = purge_result
 
-      Minga.Log.warning(
+      Log.warning(
         :config,
         "Extension #{name} module purge skipped: #{inspect(reason)}"
       )
@@ -1836,10 +1829,7 @@ defmodule Minga.Extension.Supervisor do
     update_fields = stopped_update_fields(entry, purge_result)
     ExtRegistry.update(registry, name, update_fields)
 
-    case purge_result do
-      :ok -> :ok
-      {:error, reason} -> {:error, reason}
-    end
+    purge_result
   end
 
   @spec stopped_update_fields(ExtRegistry.entry(), :ok | {:error, term()}) :: keyword()
@@ -1909,7 +1899,7 @@ defmodule Minga.Extension.Supervisor do
     end
   rescue
     e ->
-      Minga.Log.warning(
+      Log.warning(
         :config,
         "Extension #{ext_name} command registration failed: #{Exception.message(e)}"
       )
@@ -1934,9 +1924,10 @@ defmodule Minga.Extension.Supervisor do
 
   @spec command_schema(module()) :: [Minga.Extension.command_spec()]
   defp command_schema(module) do
-    case function_exported?(module, :__command_schema__, 0) do
-      true -> module.__command_schema__()
-      false -> []
+    if function_exported?(module, :__command_schema__, 0) do
+      module.__command_schema__()
+    else
+      []
     end
   end
 
@@ -1956,7 +1947,7 @@ defmodule Minga.Extension.Supervisor do
         :ok
 
       {:error, reason} = error ->
-        Minga.Log.warning(:config, "Extension #{ext_name} command rejected: #{inspect(reason)}")
+        Log.warning(:config, "Extension #{ext_name} command rejected: #{inspect(reason)}")
         error
     end
   end
@@ -1965,7 +1956,7 @@ defmodule Minga.Extension.Supervisor do
   defp log_registered_commands(_ext_name, []), do: :ok
 
   defp log_registered_commands(ext_name, schema) do
-    Minga.Log.debug(:config, "Extension #{ext_name}: registered #{length(schema)} commands")
+    Log.debug(:config, "Extension #{ext_name}: registered #{length(schema)} commands")
   end
 
   @spec build_command_from_spec(Minga.Extension.command_spec(), atom(), start_opts()) ::
@@ -1988,22 +1979,20 @@ defmodule Minga.Extension.Supervisor do
   @spec register_extension_modeline_segments(module(), atom(), start_opts()) ::
           :ok | {:error, term()}
   defp register_extension_modeline_segments(module, ext_name, opts) do
-    case function_exported?(module, :__modeline_segment_schema__, 0) do
-      true ->
-        register_extension_modeline_segment_schema(
-          module.__modeline_segment_schema__(),
-          ext_name,
-          opts
-        )
-
-      false ->
-        :ok
+    if function_exported?(module, :__modeline_segment_schema__, 0) do
+      register_extension_modeline_segment_schema(
+        module.__modeline_segment_schema__(),
+        ext_name,
+        opts
+      )
+    else
+      :ok
     end
   rescue
     e ->
       reason = {:modeline_segment_registration_failed, Exception.message(e)}
 
-      Minga.Log.warning(
+      Log.warning(
         :config,
         "Extension #{ext_name} modeline segment registration failed: #{Exception.message(e)}"
       )
@@ -2044,7 +2033,7 @@ defmodule Minga.Extension.Supervisor do
 
       {:error, reason} ->
         msg = Minga.Config.ModelineSegments.register_error_message(name, reason)
-        Minga.Log.warning(:config, "Extension #{ext_name} modeline segment rejected: #{msg}")
+        Log.warning(:config, "Extension #{ext_name} modeline segment rejected: #{msg}")
         {:error, {:modeline_segment_rejected, name, reason}}
     end
   end
@@ -2060,13 +2049,14 @@ defmodule Minga.Extension.Supervisor do
   @spec register_extension_keybinds(module(), atom(), GenServer.server()) ::
           :ok | {:error, term()}
   defp register_extension_keybinds(module, ext_name, keymap) do
-    case function_exported?(module, :__keybind_schema__, 0) do
-      true -> register_extension_keybind_schema(module.__keybind_schema__(), ext_name, keymap)
-      false -> :ok
+    if function_exported?(module, :__keybind_schema__, 0) do
+      register_extension_keybind_schema(module.__keybind_schema__(), ext_name, keymap)
+    else
+      :ok
     end
   rescue
     e ->
-      Minga.Log.warning(
+      Log.warning(
         :config,
         "Extension #{ext_name} keybind registration failed: #{Exception.message(e)}"
       )
@@ -2098,7 +2088,7 @@ defmodule Minga.Extension.Supervisor do
         :ok
 
       {:error, reason} ->
-        Minga.Log.warning(
+        Log.warning(
           :config,
           "Extension #{ext_name}: keybind #{inspect(key_str)} failed: #{reason}"
         )
@@ -2107,7 +2097,6 @@ defmodule Minga.Extension.Supervisor do
     end
   end
 
-  @doc false
   @spec register_and_validate_options(atom(), module(), keyword()) ::
           :ok | {:error, String.t()}
   def register_and_validate_options(name, module, config) do

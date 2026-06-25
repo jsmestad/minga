@@ -108,7 +108,7 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
       candidates = AgentSessionSource.candidates(ctx)
 
       tab_entries = Enum.filter(candidates, fn %Item{id: {_, tag}} -> match?({:tab, _}, tag) end)
-      assert length(tab_entries) >= 2
+      assert Enum.count(tab_entries) >= 2
 
       target =
         Enum.find(tab_entries, fn %Item{id: {_, {:tab, id}}} ->

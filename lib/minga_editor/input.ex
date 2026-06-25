@@ -190,7 +190,7 @@ defmodule MingaEditor.Input do
   def surface_handlers(state) do
     bottom_handler = editing_dispatch_handler(state)
 
-    registered_surface_handlers() ++ [bottom_handler]
+    Enum.concat(registered_surface_handlers(), [bottom_handler])
   end
 
   @doc """

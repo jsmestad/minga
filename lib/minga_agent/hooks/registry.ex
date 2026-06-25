@@ -50,7 +50,6 @@ defmodule MingaAgent.Hooks.Registry do
   @spec unregister_source(source()) :: :ok
   def unregister_source(source), do: unregister_source(__MODULE__, source)
 
-  @doc false
   @spec unregister_source(GenServer.server(), source()) :: :ok
   def unregister_source(server, source) do
     GenServer.call(server, {:unregister_source, source})
@@ -62,7 +61,6 @@ defmodule MingaAgent.Hooks.Registry do
   @spec all() :: [Hook.t()]
   def all, do: all(__MODULE__)
 
-  @doc false
   @spec all(GenServer.server()) :: [Hook.t()]
   def all(server) do
     GenServer.call(server, :all)
@@ -74,7 +72,6 @@ defmodule MingaAgent.Hooks.Registry do
   @spec entries() :: [entry()]
   def entries, do: entries(__MODULE__)
 
-  @doc false
   @spec entries(GenServer.server()) :: [entry()]
   def entries(server) do
     GenServer.call(server, :entries)

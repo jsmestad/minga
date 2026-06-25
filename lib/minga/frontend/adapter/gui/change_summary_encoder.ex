@@ -32,7 +32,7 @@ defmodule Minga.Frontend.Adapter.GUI.ChangeSummaryEncoder do
       end)
 
     IO.iodata_to_binary([
-      <<@op_gui_change_summary, visible::8, selected_index::16, length(entries)::16>>
+      <<@op_gui_change_summary, visible::8, selected_index::16, Enum.count(entries)::16>>
       | entry_binaries
     ])
   end

@@ -25,7 +25,7 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionOverlayEncoder do
     {overlay_binaries, _remaining_budget} =
       Wire.bounded_entries(model.entries, &encode_entry/1, Wire.max_u8(), Wire.max_u16() - 1)
 
-    payload = IO.iodata_to_binary([<<length(overlay_binaries)::8>> | overlay_binaries])
+    payload = IO.iodata_to_binary([<<Enum.count(overlay_binaries)::8>> | overlay_binaries])
     <<@op_gui_extension_overlay, byte_size(payload)::16, payload::binary>>
   end
 

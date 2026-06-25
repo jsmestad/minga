@@ -336,7 +336,7 @@ defmodule MingaEditor.Frontend.GUISearchTest do
     test "case-insensitive finds all case variants" do
       lines = ["Hello hello HELLO"]
       matches = Search.find_all_in_range(lines, "hello", 0, case_sensitive: false)
-      assert length(matches) == 3
+      assert Enum.count(matches) == 3
     end
 
     test "whole-word skips partial matches" do
@@ -348,7 +348,7 @@ defmodule MingaEditor.Frontend.GUISearchTest do
     test "regex finds pattern matches" do
       lines = ["abc 1 def 2"]
       matches = Search.find_all_in_range(lines, "\\d+", 0, regex: true)
-      assert length(matches) == 2
+      assert Enum.count(matches) == 2
     end
   end
 

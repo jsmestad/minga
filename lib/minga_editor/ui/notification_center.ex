@@ -33,7 +33,7 @@ defmodule MingaEditor.UI.NotificationCenter do
         %{center | items: prefix ++ [updated] ++ suffix}
 
       {_all, []} ->
-        %{center | items: items ++ [notification]}
+        %{center | items: Enum.concat(items, [notification])}
     end
   end
 

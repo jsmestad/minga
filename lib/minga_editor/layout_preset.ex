@@ -114,7 +114,6 @@ defmodule MingaEditor.LayoutPreset do
     if has_agent_chat?(state) do
       state
     else
-      # Create a new agent chat window
       {next_id, windows} = Windows.allocate_id(state.workspace.windows)
       rows = state.terminal_viewport.rows
       cols = state.terminal_viewport.cols

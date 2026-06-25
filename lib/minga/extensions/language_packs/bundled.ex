@@ -83,7 +83,7 @@ defmodule Minga.Extensions.LanguagePacks.Bundled do
   @spec init(keyword()) :: {:ok, map()} | {:error, term()}
   def init(_config) do
     case Minga.Extensions.LanguagePacks.register_pack(__MODULE__) do
-      :ok -> {:ok, %{languages: length(@language_modules)}}
+      :ok -> {:ok, %{languages: Enum.count(@language_modules)}}
       {:error, reason} -> {:error, reason}
     end
   end

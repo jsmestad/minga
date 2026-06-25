@@ -49,7 +49,7 @@ defmodule MingaEditor.Agent.WorkspaceAssociationTest do
 
       assert TabBar.get(tb, 1).group_id == ws.id
       assert TabBar.get(tb, 2).group_id == 0
-      assert length(TabBar.tabs_in_workspace(tb, ws.id)) == 2
+      assert Enum.count(TabBar.tabs_in_workspace(tb, ws.id)) == 2
     end
 
     test "tabs_in_workspace returns correct split after association" do
@@ -60,9 +60,9 @@ defmodule MingaEditor.Agent.WorkspaceAssociationTest do
       manual_tabs = TabBar.tabs_in_workspace(tb, 0)
       agent_tabs = TabBar.tabs_in_workspace(tb, ws.id)
 
-      assert length(manual_tabs) == 1
+      assert Enum.count(manual_tabs) == 1
       assert hd(manual_tabs).label == "main.ex"
-      assert length(agent_tabs) == 2
+      assert Enum.count(agent_tabs) == 2
       assert Enum.any?(agent_tabs, &(&1.label == "editor.ex"))
       assert Enum.any?(agent_tabs, &(&1.label == "Agent"))
     end
@@ -86,14 +86,14 @@ defmodule MingaEditor.Agent.WorkspaceAssociationTest do
       tb = TabBar.move_tab_to_workspace(tb, 2, ws.id)
 
       # All three tabs in agent workspace
-      assert length(TabBar.tabs_in_workspace(tb, ws.id)) == 3
+      assert Enum.count(TabBar.tabs_in_workspace(tb, ws.id)) == 3
 
       # Remove workspace
       tb = TabBar.remove_workspace(tb, ws.id)
 
       # All tabs back in manual
       assert Enum.all?(tb.tabs, &(&1.group_id == 0))
-      assert length(TabBar.tabs_in_workspace(tb, 0)) == 3
+      assert Enum.count(TabBar.tabs_in_workspace(tb, 0)) == 3
     end
 
     test "workspace status tracks agent activity" do

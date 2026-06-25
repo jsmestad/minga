@@ -15,7 +15,7 @@ defmodule MingaAgent.BranchTest do
       branch = Branch.new("test-branch", msgs)
 
       assert branch.name == "test-branch"
-      assert length(branch.messages) == 3
+      assert Enum.count(branch.messages) == 3
       assert %DateTime{} = branch.created_at
     end
   end
@@ -26,10 +26,10 @@ defmodule MingaAgent.BranchTest do
 
       {:ok, truncated, branches} = Branch.branch_at(msgs, 2, "b1", [])
 
-      assert length(truncated) == 3
-      assert length(branches) == 1
+      assert Enum.count(truncated) == 3
+      assert Enum.count(branches) == 1
       assert hd(branches).name == "b1"
-      assert length(hd(branches).messages) == 5
+      assert Enum.count(hd(branches).messages) == 5
     end
 
     test "returns error for out-of-bounds index" do
@@ -44,7 +44,7 @@ defmodule MingaAgent.BranchTest do
 
       {:ok, _truncated, branches} = Branch.branch_at(msgs, 1, "b1", existing)
 
-      assert length(branches) == 2
+      assert Enum.count(branches) == 2
       assert Enum.at(branches, 0).name == "b0"
       assert Enum.at(branches, 1).name == "b1"
     end

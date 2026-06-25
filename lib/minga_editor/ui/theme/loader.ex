@@ -256,21 +256,20 @@ defmodule MingaEditor.UI.Theme.Loader do
 
   @spec apply_editor_override(Theme.Editor.t(), atom(), term()) :: Theme.Editor.t()
   defp apply_editor_override(ed, key, value) do
-    case MapSet.member?(@editor_fields, key) do
-      true -> validate_editor_override(ed, key, value)
-      false -> raise ArgumentError, "unknown theme editor override field: #{inspect(key)}"
+    if MapSet.member?(@editor_fields, key) do
+      validate_editor_override(ed, key, value)
+    else
+      raise ArgumentError, "unknown theme editor override field: #{inspect(key)}"
     end
   end
 
   @spec validate_editor_override(Theme.Editor.t(), atom(), term()) :: Theme.Editor.t()
   defp validate_editor_override(ed, key, value) do
-    case valid_color?(value) do
-      true ->
-        %{ed | key => value}
-
-      false ->
-        raise ArgumentError,
-              "theme editor override #{Atom.to_string(key)} must be a color, got: #{inspect(value)}"
+    if valid_color?(value) do
+      %{ed | key => value}
+    else
+      raise ArgumentError,
+            "theme editor override #{Atom.to_string(key)} must be a color, got: #{inspect(value)}"
     end
   end
 end

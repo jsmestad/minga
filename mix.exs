@@ -251,6 +251,7 @@ defmodule Minga.MixProject do
       {:req_llm, "~> 1.16"},
       {:req, "~> 0.6.2"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:ex_slop, "~> 0.1", only: [:dev, :test], runtime: false},
       {:hammox, "~> 0.7", only: :test},
       {:telemetry, "~> 1.0"},
       {:toml, "~> 0.7.0"},

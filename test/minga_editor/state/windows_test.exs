@@ -169,7 +169,7 @@ defmodule MingaEditor.State.WindowsTest do
       ws = %{new_windows() | map: Map.put(new_windows().map, 3, popup_win)}
       popups = Windows.popup_windows(ws)
 
-      assert length(popups) == 1
+      assert Enum.count(popups) == 1
       assert [{3, %Window{popup_meta: %PopupActive{}}}] = popups
     end
 
@@ -182,7 +182,7 @@ defmodule MingaEditor.State.WindowsTest do
       ws = %{ws | map: Map.put(ws.map, 3, popup_win)}
 
       popups = Windows.popup_windows(ws)
-      assert length(popups) == 1
+      assert Enum.count(popups) == 1
       assert [{3, _}] = popups
     end
   end

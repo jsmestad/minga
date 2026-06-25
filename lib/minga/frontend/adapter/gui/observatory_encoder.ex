@@ -33,7 +33,7 @@ defmodule Minga.Frontend.Adapter.GUI.ObservatoryEncoder do
     sparkline_entries = Enum.map(model.nodes, &encode_observatory_sparkline/1)
 
     sections = [
-      Wire.encode_section(0x01, <<1::8, length(model.nodes)::16>>),
+      Wire.encode_section(0x01, <<1::8, Enum.count(model.nodes)::16>>),
       encode_chunked_sections(0x02, node_entries),
       encode_chunked_sections(0x03, sparkline_entries)
     ]
@@ -117,7 +117,7 @@ defmodule Minga.Frontend.Adapter.GUI.ObservatoryEncoder do
     values = Enum.take(node.sparkline_values, 255)
     sample_bytes = Enum.map(values, &encode_float16/1)
 
-    <<byte_size(pid_bytes)::8, pid_bytes::binary, length(values)::8,
+    <<byte_size(pid_bytes)::8, pid_bytes::binary, Enum.count(values)::8,
       IO.iodata_to_binary(sample_bytes)::binary>>
   end
 

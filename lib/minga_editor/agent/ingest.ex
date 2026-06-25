@@ -220,7 +220,7 @@ defmodule MingaEditor.Agent.Ingest do
   defp forward_batch(%{editor: editor}, session_pid, batch, edge) do
     # A flush is a point event, not a spanned operation, so execute/3 rather
     # than span/3 is the right telemetry shape here.
-    Minga.Telemetry.execute(@telemetry_flush, %{delta_count: length(batch)}, %{edge: edge})
+    Minga.Telemetry.execute(@telemetry_flush, %{delta_count: Enum.count(batch)}, %{edge: edge})
     send(editor, {:agent_stream_batch, session_pid, batch})
     :ok
   end

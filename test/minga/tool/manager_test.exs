@@ -11,7 +11,6 @@ defmodule Minga.Tool.ManagerTest do
   @moduletag :heavy
 
   setup do
-    # Initialize the stub installer
     Stub.reset()
 
     # Subscribe to install events so we can await completion without sleeping
@@ -130,7 +129,7 @@ defmodule Minga.Tool.ManagerTest do
   describe "tool_status_list/0" do
     test "returns statuses for all known recipes" do
       statuses = Manager.tool_status_list()
-      assert length(statuses) >= 12
+      assert Enum.count(statuses) >= 12
 
       # All should have recipe and status
       for s <- statuses do

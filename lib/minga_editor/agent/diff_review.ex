@@ -91,7 +91,7 @@ defmodule MingaEditor.Agent.DiffReview do
   @doc "Moves to the next unresolved hunk. Wraps around to the first."
   @spec next_hunk(t()) :: t()
   def next_hunk(%__MODULE__{hunks: hunks, current_hunk_index: idx} = review) do
-    count = length(hunks)
+    count = Enum.count(hunks)
 
     case count do
       0 ->
@@ -106,7 +106,7 @@ defmodule MingaEditor.Agent.DiffReview do
   @doc "Moves to the previous unresolved hunk. Wraps around to the last."
   @spec prev_hunk(t()) :: t()
   def prev_hunk(%__MODULE__{hunks: hunks, current_hunk_index: idx} = review) do
-    count = length(hunks)
+    count = Enum.count(hunks)
 
     case count do
       0 ->
@@ -165,7 +165,7 @@ defmodule MingaEditor.Agent.DiffReview do
   def resolved?(%__MODULE__{hunks: [], resolutions: _}), do: false
 
   def resolved?(%__MODULE__{hunks: hunks, resolutions: resolutions}) do
-    hunk_count = length(hunks)
+    hunk_count = Enum.count(hunks)
     map_size(resolutions) == hunk_count
   end
 
@@ -246,7 +246,7 @@ defmodule MingaEditor.Agent.DiffReview do
     new_resolutions =
       preserve_matching_resolutions(old_hunk_sigs, new_hunk_sigs, review.resolutions)
 
-    max_idx = max(length(new_hunks) - 1, 0)
+    max_idx = max(Enum.count(new_hunks) - 1, 0)
     clamped_idx = min(review.current_hunk_index, max_idx)
 
     %__MODULE__{
@@ -420,7 +420,9 @@ defmodule MingaEditor.Agent.DiffReview do
     after_start = hunk.start_line + hunk.count
 
     after_end =
-      (after_start + ctx) |> min(length(after_lines)) |> cap_context_before_next_hunk(next_hunk)
+      (after_start + ctx)
+      |> min(Enum.count(after_lines))
+      |> cap_context_before_next_hunk(next_hunk)
 
     after_ctx_lines = Enum.slice(after_lines, after_start, after_end - after_start)
     after_ctx = Enum.map(after_ctx_lines, fn line -> {line, :context, nil} end)

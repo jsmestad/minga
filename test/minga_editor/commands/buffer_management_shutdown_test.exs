@@ -16,13 +16,16 @@ defmodule MingaEditor.Commands.BufferManagementShutdownTest do
     previous_shutdown_fn = Application.fetch_env(:minga, :shutdown_fn)
     test_pid = self()
 
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Application.put_env(:minga, :shutdown_fn, fn status ->
       send(test_pid, {:shutdown_called, status})
     end)
 
     on_exit(fn ->
       case previous_shutdown_fn do
+        # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
         {:ok, shutdown_fn} -> Application.put_env(:minga, :shutdown_fn, shutdown_fn)
+        # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
         :error -> Application.delete_env(:minga, :shutdown_fn)
       end
     end)

@@ -11,6 +11,7 @@ defmodule MingaAgent.Tools.SubagentTest do
   alias MingaAgent.Subagent.Handle
   alias MingaAgent.Tools.Subagent
   alias ReqLLM.StreamResponse.MetadataHandle
+  alias ReqLLM.StreamChunk
 
   @moduletag :tmp_dir
 
@@ -993,22 +994,22 @@ defmodule MingaAgent.Tools.SubagentTest do
       chunks =
         if count == 0 do
           [
-            ReqLLM.StreamChunk.tool_call(
+            StreamChunk.tool_call(
               "write_file",
               %{"path" => path, "content" => content},
               %{id: "tc_write_file", index: 0}
             ),
-            ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+            StreamChunk.meta(%{finish_reason: :tool_use})
           ]
         else
-          [ReqLLM.StreamChunk.text(final_text), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
+          [StreamChunk.text(final_text), StreamChunk.meta(%{finish_reason: :stop})]
         end
 
       build_stream_response(chunks)
     end
   end
 
-  @spec build_stream_response([ReqLLM.StreamChunk.t()]) ::
+  @spec build_stream_response([StreamChunk.t()]) ::
           {:ok, ReqLLM.StreamResponse.t()}
   defp build_stream_response(chunks) do
     {:ok, handle} =

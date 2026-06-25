@@ -56,8 +56,7 @@ defmodule MingaEditor.InlineEdit.Render do
       |> Enum.map(&{"+ " <> &1, status_face(edit.status)})
 
     (removed ++ added)
-    |> Enum.drop(edit.scroll)
-    |> Enum.take(10)
+    |> Enum.slice(edit.scroll, 10)
     |> Enum.map(fn {text, face} -> {String.slice(text, 0, content_width), face} end)
   end
 

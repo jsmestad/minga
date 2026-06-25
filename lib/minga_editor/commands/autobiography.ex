@@ -107,13 +107,11 @@ defmodule MingaEditor.Commands.Autobiography do
   defp maybe_open_action(popup, nil), do: popup
   defp maybe_open_action(popup, action), do: HoverPopup.with_open_action(popup, action)
 
-  @doc false
   @spec why_markdown(Entry.t(), String.t()) :: String.t()
   def why_markdown(%Entry{} = entry, path) do
     why_markdown(entry, path, @why_excerpt, why_hint(entry, :collapsed))
   end
 
-  @doc false
   @spec why_expanded_markdown(Entry.t(), String.t()) :: String.t()
   def why_expanded_markdown(%Entry{} = entry, path) do
     why_markdown(entry, path, :full, why_hint(entry, :expanded))
@@ -154,7 +152,6 @@ defmodule MingaEditor.Commands.Autobiography do
     end
   end
 
-  @doc false
   @spec autobiography_markdown([Entry.t()], String.t()) :: String.t()
   def autobiography_markdown(entries, path) do
     shown = Enum.take(entries, @max_timeline_entries)

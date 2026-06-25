@@ -19,7 +19,7 @@ defmodule Minga.Extensions.ThemePacks.Catppuccin do
   @spec init(keyword()) :: {:ok, map()} | {:error, term()}
   def init(_config) do
     case Minga.Extensions.ThemePacks.register_pack(__MODULE__) do
-      :ok -> {:ok, %{themes: length(theme_modules())}}
+      :ok -> {:ok, %{themes: Enum.count(theme_modules())}}
       {:error, reason} -> {:error, reason}
     end
   end

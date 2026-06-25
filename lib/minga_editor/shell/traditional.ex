@@ -161,17 +161,24 @@ defmodule MingaEditor.Shell.Traditional do
 
   @impl true
   @spec compute_layout(term()) :: MingaEditor.Layout.t()
-  defdelegate compute_layout(editor_state), to: MingaEditor.Shell.Traditional.Layout, as: :compute
+  def compute_layout(editor_state), do: MingaEditor.Shell.Traditional.Layout.compute(editor_state)
 
   @impl true
   @spec build_chrome(term(), MingaEditor.Layout.t(), map(), term()) ::
           MingaEditor.RenderPipeline.Chrome.t()
-  defdelegate build_chrome(editor_state, layout, scrolls, cursor_info),
-    to: MingaEditor.Shell.Traditional.Chrome
+  def build_chrome(editor_state, layout, scrolls, cursor_info),
+    do:
+      MingaEditor.Shell.Traditional.Chrome.build_chrome(
+        editor_state,
+        layout,
+        scrolls,
+        cursor_info
+      )
 
   @impl true
   @spec chrome_fingerprint(term()) :: term()
-  defdelegate chrome_fingerprint(editor_state), to: MingaEditor.Shell.Traditional.Chrome
+  def chrome_fingerprint(editor_state),
+    do: MingaEditor.Shell.Traditional.Chrome.chrome_fingerprint(editor_state)
 
   @impl true
   @spec async_render?(term()) :: boolean()

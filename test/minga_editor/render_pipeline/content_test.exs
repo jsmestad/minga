@@ -180,7 +180,7 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
         )
         |> hd()
 
-      assert length(wrap_entry) > 2
+      assert Enum.count(wrap_entry) > 2
 
       target_idx = 2
       target_row = Enum.at(wrap_entry, target_idx)

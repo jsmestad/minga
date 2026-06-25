@@ -201,7 +201,6 @@ defmodule MingaEditor.UI.PrettifySymbols do
           [String.t()]
         ) :: [{position(), position(), String.t()}]
   defp find_conceals(spans, rules, capture_names, content, lines) do
-    # Build a lookup: capture_name -> [rule]
     rule_index = build_rule_index(rules)
 
     spans

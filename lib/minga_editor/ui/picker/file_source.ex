@@ -275,7 +275,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
   defp sort_by_score(items, score_map) do
     Enum.sort_by(items, fn %Item{id: path} ->
       score = Map.get(score_map, path, 0)
-      depth = length(Path.split(path)) - 1
+      depth = Enum.count(Path.split(path)) - 1
       {-score, depth, path}
     end)
   end

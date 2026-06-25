@@ -15,7 +15,6 @@ defmodule MingaEditor.State.Workspace.Persistence do
   @spec write(Workspace.t(), String.t() | nil) :: :ok | {:error, term()}
   def write(workspace, project_root), do: write(workspace, project_root, [])
 
-  @doc false
   @spec write(Workspace.t(), String.t() | nil, [write_opt()]) :: :ok | {:error, term()}
   def write(%Workspace{} = workspace, project_root, opts) do
     with {:ok, root} <- normalize_project_root(project_root),
@@ -62,7 +61,6 @@ defmodule MingaEditor.State.Workspace.Persistence do
     end
   end
 
-  @doc false
   @spec path_for(String.t(), non_neg_integer()) :: Path.t()
   def path_for(project_root, id) when is_binary(project_root) and is_integer(id) and id >= 0 do
     project_root

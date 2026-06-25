@@ -45,8 +45,9 @@ defmodule MingaEditor.Commands.Provider do
     opts = numbered_opts!(prefix, opts_ast, env)
 
     range
-    |> Enum.map(&numbered_definition(prefix, &1, description, opts))
-    |> Enum.map(&define/1)
+    |> Enum.map(fn number ->
+      prefix |> numbered_definition(number, description, opts) |> define()
+    end)
     |> then(&{:__block__, [], &1})
   end
 
@@ -297,7 +298,8 @@ defmodule MingaEditor.Commands.Provider do
     indexes
   end
 
-  defp one_arity_clause?({:->, _meta, [args, _body]}) when is_list(args), do: length(args) == 1
+  defp one_arity_clause?({:->, _meta, [[_arg], _body]}), do: true
+  defp one_arity_clause?({:->, _meta, [args, _body]}) when is_list(args), do: false
   defp one_arity_clause?(_clause), do: false
 
   @spec invalid_execute!(atom(), Macro.t(), Macro.Env.t()) :: no_return()

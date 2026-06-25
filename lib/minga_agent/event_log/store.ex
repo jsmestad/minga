@@ -3,8 +3,9 @@ defmodule MingaAgent.EventLog.Store do
 
   alias MingaAgent.EventLog.EventRecord
   alias MingaAgent.EventLog.Taxonomy
+  alias Exqlite.Sqlite3
 
-  @type db :: Exqlite.Sqlite3.db()
+  @type db :: Sqlite3.db()
 
   @schema_version 1
 
@@ -12,7 +13,7 @@ defmodule MingaAgent.EventLog.Store do
   @spec open(String.t()) :: {:ok, db()} | {:error, term()}
   def open(db_path) do
     with :ok <- ensure_database_directory(db_path) do
-      case Exqlite.Sqlite3.open(db_path) do
+      case Sqlite3.open(db_path) do
         {:ok, db} -> setup_opened(db, db_path)
         {:error, reason} -> {:error, reason}
       end
@@ -22,7 +23,7 @@ defmodule MingaAgent.EventLog.Store do
   @doc "Opens an in-memory database for tests."
   @spec open_memory() :: {:ok, db()} | {:error, term()}
   def open_memory do
-    case Exqlite.Sqlite3.open(":memory:") do
+    case Sqlite3.open(":memory:") do
       {:ok, db} -> setup_opened(db)
       {:error, reason} -> {:error, reason}
     end
@@ -30,7 +31,7 @@ defmodule MingaAgent.EventLog.Store do
 
   @doc "Closes the database connection."
   @spec close(db()) :: :ok | {:error, term()}
-  def close(db), do: Exqlite.Sqlite3.close(db)
+  def close(db), do: Sqlite3.close(db)
 
   @doc "Inserts an append-only event record."
   @spec insert(db(), EventRecord.t()) :: {:ok, pos_integer()} | {:error, term()}
@@ -48,15 +49,15 @@ defmodule MingaAgent.EventLog.Store do
       record.monotonic_ts
     ]
 
-    case Exqlite.Sqlite3.prepare(db, sql) do
+    case Sqlite3.prepare(db, sql) do
       {:ok, stmt} ->
         result =
-          with :ok <- Exqlite.Sqlite3.bind(stmt, params),
-               :done <- Exqlite.Sqlite3.step(db, stmt) do
+          with :ok <- Sqlite3.bind(stmt, params),
+               :done <- Sqlite3.step(db, stmt) do
             :ok
           end
 
-        Exqlite.Sqlite3.release(db, stmt)
+        Sqlite3.release(db, stmt)
 
         case result do
           :ok -> private_last_insert_rowid(db)
@@ -90,13 +91,11 @@ defmodule MingaAgent.EventLog.Store do
   def latest_id(db, session_id) when is_binary(session_id) do
     sql = "SELECT COALESCE(MAX(id), 0) FROM events WHERE session_id = ?1"
 
-    with {:ok, stmt} <- Exqlite.Sqlite3.prepare(db, sql),
-         :ok <- Exqlite.Sqlite3.bind(stmt, [session_id]),
-         {:row, [latest_id]} <- Exqlite.Sqlite3.step(db, stmt),
-         :ok <- Exqlite.Sqlite3.release(db, stmt) do
+    with {:ok, stmt} <- Sqlite3.prepare(db, sql),
+         :ok <- Sqlite3.bind(stmt, [session_id]),
+         {:row, [latest_id]} <- Sqlite3.step(db, stmt),
+         :ok <- Sqlite3.release(db, stmt) do
       {:ok, latest_id}
-    else
-      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -124,10 +123,10 @@ defmodule MingaAgent.EventLog.Store do
   @doc "Returns the total number of agent events."
   @spec count(db()) :: {:ok, non_neg_integer()} | {:error, term()}
   def count(db) do
-    case Exqlite.Sqlite3.prepare(db, "SELECT COUNT(*) FROM events") do
+    case Sqlite3.prepare(db, "SELECT COUNT(*) FROM events") do
       {:ok, stmt} ->
-        result = Exqlite.Sqlite3.step(db, stmt)
-        Exqlite.Sqlite3.release(db, stmt)
+        result = Sqlite3.step(db, stmt)
+        Sqlite3.release(db, stmt)
 
         case result do
           {:row, [count]} -> {:ok, count}
@@ -145,15 +144,15 @@ defmodule MingaAgent.EventLog.Store do
   def delete_before(db, cutoff) do
     sql = "DELETE FROM events WHERE wall_clock < ?1"
 
-    case Exqlite.Sqlite3.prepare(db, sql) do
+    case Sqlite3.prepare(db, sql) do
       {:ok, stmt} ->
         result =
-          with :ok <- Exqlite.Sqlite3.bind(stmt, [DateTime.to_iso8601(cutoff)]),
-               :done <- Exqlite.Sqlite3.step(db, stmt) do
+          with :ok <- Sqlite3.bind(stmt, [DateTime.to_iso8601(cutoff)]),
+               :done <- Sqlite3.step(db, stmt) do
             :ok
           end
 
-        Exqlite.Sqlite3.release(db, stmt)
+        Sqlite3.release(db, stmt)
 
         case result do
           :ok -> changes(db)
@@ -170,9 +169,9 @@ defmodule MingaAgent.EventLog.Store do
   def integrity_check(db, mode \\ :quick) do
     sql = if mode == :full, do: "PRAGMA integrity_check", else: "PRAGMA quick_check"
 
-    with {:ok, stmt} <- Exqlite.Sqlite3.prepare(db, sql) do
+    with {:ok, stmt} <- Sqlite3.prepare(db, sql) do
       rows = collect_rows(db, stmt)
-      Exqlite.Sqlite3.release(db, stmt)
+      Sqlite3.release(db, stmt)
 
       case rows do
         [["ok"]] -> {:ok, :healthy}
@@ -226,9 +225,9 @@ defmodule MingaAgent.EventLog.Store do
 
   @spec ensure_schema_version(db()) :: :ok | {:error, term()}
   defp ensure_schema_version(db) do
-    with {:ok, stmt} <- Exqlite.Sqlite3.prepare(db, "SELECT version FROM schema_version LIMIT 1") do
-      result = Exqlite.Sqlite3.step(db, stmt)
-      Exqlite.Sqlite3.release(db, stmt)
+    with {:ok, stmt} <- Sqlite3.prepare(db, "SELECT version FROM schema_version LIMIT 1") do
+      result = Sqlite3.step(db, stmt)
+      Sqlite3.release(db, stmt)
 
       case result do
         :done -> execute(db, "INSERT INTO schema_version (version) VALUES (#{@schema_version})")
@@ -250,10 +249,10 @@ defmodule MingaAgent.EventLog.Store do
 
   @spec execute(db(), String.t()) :: :ok | {:error, term()}
   defp execute(db, sql) do
-    case Exqlite.Sqlite3.prepare(db, sql) do
+    case Sqlite3.prepare(db, sql) do
       {:ok, stmt} ->
         result = step_until_done(db, stmt)
-        Exqlite.Sqlite3.release(db, stmt)
+        Sqlite3.release(db, stmt)
 
         case result do
           :done -> :ok
@@ -316,10 +315,10 @@ defmodule MingaAgent.EventLog.Store do
 
   @spec database_path(db()) :: {:ok, String.t() | nil} | {:error, term()}
   defp database_path(db) do
-    case Exqlite.Sqlite3.prepare(db, "PRAGMA database_list") do
+    case Sqlite3.prepare(db, "PRAGMA database_list") do
       {:ok, stmt} ->
-        result = Exqlite.Sqlite3.step(db, stmt)
-        Exqlite.Sqlite3.release(db, stmt)
+        result = Sqlite3.step(db, stmt)
+        Sqlite3.release(db, stmt)
 
         case result do
           {:row, [_seq, "main", ""]} -> {:ok, nil}
@@ -348,21 +347,19 @@ defmodule MingaAgent.EventLog.Store do
   @spec chmod_existing_file(String.t(), non_neg_integer()) ::
           {:cont, :ok} | {:halt, {:error, term()}}
   defp chmod_existing_file(path, mode) do
-    case File.exists?(path) do
-      true ->
-        case File.chmod(path, mode) do
-          :ok -> {:cont, :ok}
-          {:error, reason} -> {:halt, {:error, reason}}
-        end
-
-      false ->
-        {:cont, :ok}
+    if File.exists?(path) do
+      case File.chmod(path, mode) do
+        :ok -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    else
+      {:cont, :ok}
     end
   end
 
-  @spec step_until_done(db(), Exqlite.Sqlite3.statement()) :: :done | {:error, term()}
+  @spec step_until_done(db(), Sqlite3.statement()) :: :done | {:error, term()}
   defp step_until_done(db, stmt) do
-    case Exqlite.Sqlite3.step(db, stmt) do
+    case Sqlite3.step(db, stmt) do
       :done -> :done
       {:row, _row} -> step_until_done(db, stmt)
       {:error, reason} -> {:error, reason}
@@ -371,11 +368,11 @@ defmodule MingaAgent.EventLog.Store do
 
   @spec query_events(db(), String.t(), [term()]) :: {:ok, [EventRecord.t()]} | {:error, term()}
   defp query_events(db, sql, params) do
-    case Exqlite.Sqlite3.prepare(db, sql) do
+    case Sqlite3.prepare(db, sql) do
       {:ok, stmt} ->
-        :ok = Exqlite.Sqlite3.bind(stmt, params)
+        :ok = Sqlite3.bind(stmt, params)
         rows = collect_rows(db, stmt)
-        Exqlite.Sqlite3.release(db, stmt)
+        Sqlite3.release(db, stmt)
         {:ok, rows |> Enum.map(&row_to_record/1) |> Enum.reject(&is_nil/1)}
 
       {:error, reason} ->
@@ -383,9 +380,9 @@ defmodule MingaAgent.EventLog.Store do
     end
   end
 
-  @spec collect_rows(db(), Exqlite.Sqlite3.statement()) :: [list()]
+  @spec collect_rows(db(), Sqlite3.statement()) :: [list()]
   defp collect_rows(db, stmt) do
-    case Exqlite.Sqlite3.step(db, stmt) do
+    case Sqlite3.step(db, stmt) do
       {:row, row} -> [row | collect_rows(db, stmt)]
       :done -> []
     end
@@ -413,10 +410,10 @@ defmodule MingaAgent.EventLog.Store do
 
   @spec last_insert_rowid(db()) :: {:ok, pos_integer()} | {:error, term()}
   defp last_insert_rowid(db) do
-    case Exqlite.Sqlite3.prepare(db, "SELECT last_insert_rowid()") do
+    case Sqlite3.prepare(db, "SELECT last_insert_rowid()") do
       {:ok, stmt} ->
-        result = Exqlite.Sqlite3.step(db, stmt)
-        Exqlite.Sqlite3.release(db, stmt)
+        result = Sqlite3.step(db, stmt)
+        Sqlite3.release(db, stmt)
 
         case result do
           {:row, [id]} -> {:ok, id}
@@ -431,10 +428,10 @@ defmodule MingaAgent.EventLog.Store do
 
   @spec changes(db()) :: {:ok, non_neg_integer()} | {:error, term()}
   defp changes(db) do
-    case Exqlite.Sqlite3.prepare(db, "SELECT changes()") do
+    case Sqlite3.prepare(db, "SELECT changes()") do
       {:ok, stmt} ->
-        result = Exqlite.Sqlite3.step(db, stmt)
-        Exqlite.Sqlite3.release(db, stmt)
+        result = Sqlite3.step(db, stmt)
+        Sqlite3.release(db, stmt)
 
         case result do
           {:row, [count]} -> {:ok, count}

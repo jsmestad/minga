@@ -78,7 +78,7 @@ defmodule MingaEditor.Input.AgentMouseTest do
       |> Enum.with_index()
       |> Enum.map(fn {_line, idx} -> {idx, :assistant} end)
 
-    total_lines = length(line_index)
+    total_lines = Enum.count(line_index)
 
     AgentAccess.update_panel(state, fn panel ->
       %{

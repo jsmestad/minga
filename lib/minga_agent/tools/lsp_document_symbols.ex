@@ -57,7 +57,7 @@ defmodule MingaAgent.Tools.LspDocumentSymbols do
         ) :: String.t()
   defp format_symbols(path, items) do
     rel = relative_path(path)
-    header = "#{rel} symbols (#{length(items)}):"
+    header = "#{rel} symbols (#{Enum.count(items)}):"
 
     details =
       Enum.map(items, fn {_path, line, _col, label} ->

@@ -33,11 +33,14 @@ defmodule Minga.Chaos.EditorFuzzerTest do
   # System.stop call site.
   setup do
     prev = Application.get_env(:minga, :shutdown_fn)
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Application.put_env(:minga, :shutdown_fn, fn _status -> :ok end)
 
     on_exit(fn ->
       case prev do
+        # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
         nil -> Application.delete_env(:minga, :shutdown_fn)
+        # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
         fun -> Application.put_env(:minga, :shutdown_fn, fun)
       end
     end)
@@ -370,7 +373,7 @@ defmodule Minga.Chaos.EditorFuzzerTest do
 
   defp content_and_commands do
     let content <- content_gen() do
-      line_count = length(String.split(content, "\n"))
+      line_count = Enum.count(String.split(content, "\n"))
       initial = %Model{line_count: line_count}
 
       let cmds <- commands(__MODULE__, initial) do

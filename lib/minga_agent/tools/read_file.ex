@@ -104,7 +104,7 @@ defmodule MingaAgent.Tools.ReadFile do
 
   defp format_content(_path, content, offset, limit) do
     all_lines = String.split(content, "\n")
-    total_lines = length(all_lines)
+    total_lines = Enum.count(all_lines)
     read_partial(all_lines, total_lines, offset, limit)
   end
 
@@ -112,29 +112,25 @@ defmodule MingaAgent.Tools.ReadFile do
           {:ok, String.t()} | {:error, String.t()}
   defp validate_and_read(path, content, nil, nil) do
     # No offset/limit: original behavior
-    case String.valid?(content) do
-      false ->
-        {:error, "#{path} is a binary file, not a text file"}
-
-      true ->
-        if byte_size(content) > @max_bytes do
-          truncated = binary_part(content, 0, @max_bytes)
-          {:ok, truncated <> "\n\n[truncated at #{div(@max_bytes, 1000)}KB]"}
-        else
-          {:ok, content}
-        end
+    if String.valid?(content) do
+      if byte_size(content) > @max_bytes do
+        truncated = binary_part(content, 0, @max_bytes)
+        {:ok, truncated <> "\n\n[truncated at #{div(@max_bytes, 1000)}KB]"}
+      else
+        {:ok, content}
+      end
+    else
+      {:error, "#{path} is a binary file, not a text file"}
     end
   end
 
   defp validate_and_read(path, content, offset, limit) do
-    case String.valid?(content) do
-      false ->
-        {:error, "#{path} is a binary file, not a text file"}
-
-      true ->
-        all_lines = String.split(content, "\n")
-        total_lines = length(all_lines)
-        read_partial(all_lines, total_lines, offset, limit)
+    if String.valid?(content) do
+      all_lines = String.split(content, "\n")
+      total_lines = Enum.count(all_lines)
+      read_partial(all_lines, total_lines, offset, limit)
+    else
+      {:error, "#{path} is a binary file, not a text file"}
     end
   end
 
@@ -166,7 +162,7 @@ defmodule MingaAgent.Tools.ReadFile do
         _ -> Enum.slice(all_lines, start_idx..-1//1)
       end
 
-    end_line = start_idx + length(sliced)
+    end_line = start_idx + Enum.count(sliced)
     start_line = start_idx + 1
 
     header = "[lines #{start_line}-#{end_line} of #{total_lines}]\n"

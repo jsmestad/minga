@@ -53,16 +53,21 @@ defmodule Minga.Remote.CLITest do
 
   setup do
     old = Application.get_env(:minga, :remote_bootstrap)
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Application.put_env(:minga, :remote_bootstrap, StubBootstrap)
 
     on_exit(fn ->
       if old == nil do
+        # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
         Application.delete_env(:minga, :remote_bootstrap)
       else
+        # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
         Application.put_env(:minga, :remote_bootstrap, old)
       end
 
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :pending_remote_attach)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :local_control_endpoint_path)
     end)
 
@@ -96,6 +101,7 @@ defmodule Minga.Remote.CLITest do
       workdir: "/work/app"
     }
 
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Application.put_env(:minga, :pending_remote_attach, result)
 
     assert :ok = CLI.connect_pending_editor_attach()
@@ -121,6 +127,7 @@ defmodule Minga.Remote.CLITest do
     control_path =
       Path.join(System.tmp_dir!(), "minga-control-#{System.unique_integer([:positive])}.node")
 
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Application.put_env(:minga, :local_control_endpoint_path, control_path)
     File.write!(control_path, "#{peer.node}\n")
     on_exit(fn -> File.rm(control_path) end)
@@ -142,6 +149,7 @@ defmodule Minga.Remote.CLITest do
         "missing-minga-control-#{System.unique_integer([:positive])}.node"
       )
 
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Application.put_env(:minga, :local_control_endpoint_path, control_path)
 
     assert {:error, message} = CLI.detach()

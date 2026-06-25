@@ -90,7 +90,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentContextEncoder do
 
   @spec encode_todos([AgentContext.Todo.t()]) :: iodata()
   defp encode_todos(todos) do
-    count = min(length(todos), 0xFF)
+    count = min(Enum.count(todos), 0xFF)
 
     entries =
       todos

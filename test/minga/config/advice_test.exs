@@ -314,7 +314,6 @@ defmodule Minga.Config.AdviceTest do
 
       # 3 more failures should NOT trip the breaker (counter was reset)
       # Reset invocation counter so the function crashes again
-      # Verify the counter was reset by checking it's not disabled
       refute Advice.disabled?(table, :before, :save, flaky)
     end
 

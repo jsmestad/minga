@@ -1174,8 +1174,8 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       node_sections = sections_by_id(sections, 0x02)
       sparkline_sections = sections_by_id(sections, 0x03)
 
-      assert length(node_sections) > 1
-      assert length(sparkline_sections) > 1
+      assert Enum.count(node_sections) > 1
+      assert Enum.count(sparkline_sections) > 1
       assert Enum.all?(node_sections, &(byte_size(&1) < 65_535))
       assert Enum.all?(sparkline_sections, &(byte_size(&1) < 65_535))
 

@@ -79,7 +79,7 @@ defmodule Minga.Project.FileTree do
   @spec move_down(t()) :: t()
   def move_down(%__MODULE__{} = tree) do
     tree = ensure_entries(tree)
-    max_idx = max(length(tree.entries) - 1, 0)
+    max_idx = max(Enum.count(tree.entries) - 1, 0)
     %{tree | cursor: min(tree.cursor + 1, max_idx)}
   end
 
@@ -87,7 +87,7 @@ defmodule Minga.Project.FileTree do
   @spec select(t(), integer()) :: t()
   def select(%__MODULE__{} = tree, index) when is_integer(index) do
     tree = ensure_entries(tree)
-    max_idx = max(length(tree.entries) - 1, 0)
+    max_idx = max(Enum.count(tree.entries) - 1, 0)
     %{tree | cursor: index |> max(0) |> min(max_idx)}
   end
 
@@ -173,7 +173,7 @@ defmodule Minga.Project.FileTree do
       # Entries are already cached and valid (no structural change).
       child_idx = tree.cursor + 1
 
-      if child_idx < length(tree.entries), do: %{tree | cursor: child_idx}, else: tree
+      if child_idx < Enum.count(tree.entries), do: %{tree | cursor: child_idx}, else: tree
     else
       invalidate_entries(%{tree | expanded: MapSet.put(tree.expanded, path)})
     end
@@ -187,7 +187,7 @@ defmodule Minga.Project.FileTree do
     new_tree = invalidate_entries(%{tree | show_hidden: not tree.show_hidden})
     new_tree = ensure_entries(new_tree)
     # Clamp cursor to valid range after toggling
-    max_idx = max(length(new_tree.entries) - 1, 0)
+    max_idx = max(Enum.count(new_tree.entries) - 1, 0)
     %{new_tree | cursor: min(new_tree.cursor, max_idx)}
   end
 
@@ -253,7 +253,7 @@ defmodule Minga.Project.FileTree do
         %{root: tree.root},
         fn ->
           entries = tree.root |> walk(0, tree, []) |> filter_entries(tree)
-          {entries, %{entry_count: length(entries)}}
+          {entries, %{entry_count: Enum.count(entries)}}
         end
       )
 
@@ -293,7 +293,7 @@ defmodule Minga.Project.FileTree do
       |> maybe_filter_hidden_paths(tree.show_hidden)
       |> Enum.sort()
 
-    last_idx = length(matches) - 1
+    last_idx = Enum.count(matches) - 1
 
     matches
     |> Enum.with_index()
@@ -343,7 +343,7 @@ defmodule Minga.Project.FileTree do
   @doc "Replaces the cached visible entries with a precomputed list (clamps the cursor)."
   @spec put_entries(t(), [entry()]) :: t()
   def put_entries(%__MODULE__{} = tree, entries) when is_list(entries) do
-    max_idx = max(length(entries) - 1, 0)
+    max_idx = max(Enum.count(entries) - 1, 0)
     %{tree | entries: entries, cursor: min(tree.cursor, max_idx)}
   end
 
@@ -351,7 +351,7 @@ defmodule Minga.Project.FileTree do
   @spec refresh(t()) :: t()
   def refresh(%__MODULE__{} = tree) do
     tree = invalidate_entries(tree) |> ensure_entries()
-    max_idx = max(length(tree.entries) - 1, 0)
+    max_idx = max(Enum.count(tree.entries) - 1, 0)
     %{tree | cursor: min(tree.cursor, max_idx)}
   end
 
@@ -431,7 +431,7 @@ defmodule Minga.Project.FileTree do
             {if(dir?, do: 0, else: 1), String.downcase(name)}
           end)
 
-        last_idx = length(sorted) - 1
+        last_idx = Enum.count(sorted) - 1
 
         sorted
         |> Enum.with_index()
@@ -491,7 +491,7 @@ defmodule Minga.Project.FileTree do
     if dir? and not symlink? and descend_into_directory?(tree, full) do
       # Children need to know: at this entry's depth, are there more siblings?
       # If this entry is NOT the last child, its depth column should draw │.
-      child_guides = parent_guides ++ [not is_last]
+      child_guides = Enum.concat(parent_guides, [not is_last])
       [entry | walk(full, depth + 1, tree, child_guides)]
     else
       [entry]

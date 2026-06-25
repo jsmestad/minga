@@ -123,7 +123,7 @@ defmodule MingaEditor.Layout.FooterOverlays do
 
   @spec content_height_notifications(map()) :: non_neg_integer()
   defp content_height_notifications(%{notifications: %{items: items}}) when is_list(items) do
-    1 + 2 * length(items) + Enum.count(items, &notification_actions?/1)
+    1 + 2 * Enum.count(items) + Enum.count(items, &notification_actions?/1)
   end
 
   defp content_height_notifications(_state), do: 1
@@ -134,7 +134,7 @@ defmodule MingaEditor.Layout.FooterOverlays do
 
   @spec content_height_observatory(map()) :: non_neg_integer()
   defp content_height_observatory(%{shell_state: %{observatory_data: %{tree: tree}}}) do
-    1 + length(Minga.SystemObserver.TreeNode.flatten(tree))
+    1 + Enum.count(Minga.SystemObserver.TreeNode.flatten(tree))
   end
 
   defp content_height_observatory(_state), do: 1
@@ -149,7 +149,7 @@ defmodule MingaEditor.Layout.FooterOverlays do
         file_summaries = MingaEditor.Agent.EditTimeline.file_summaries(timeline)
 
         if file_summaries != [] do
-          1 + length(file_summaries)
+          1 + Enum.count(file_summaries)
         else
           active_entries_count(state, timeline)
         end
@@ -158,7 +158,7 @@ defmodule MingaEditor.Layout.FooterOverlays do
 
   @spec content_height_extension_overlay(map()) :: non_neg_integer()
   defp content_height_extension_overlay(_state) do
-    1 + length(Minga.Extension.Overlay.all())
+    1 + Enum.count(Minga.Extension.Overlay.all())
   end
 
   # ── Per-surface visibility, each reading the builder's underlying source ──────
@@ -230,7 +230,7 @@ defmodule MingaEditor.Layout.FooterOverlays do
   defp active_entries_count(state, timeline) do
     case active_buffer_path(state) do
       path when is_binary(path) ->
-        1 + length(MingaEditor.Agent.EditTimeline.entries_for(timeline, path))
+        1 + Enum.count(MingaEditor.Agent.EditTimeline.entries_for(timeline, path))
 
       _ ->
         1

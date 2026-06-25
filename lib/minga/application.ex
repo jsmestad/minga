@@ -131,7 +131,7 @@ defmodule Minga.Application do
     # the full tree to be up. With rest_for_one, its crash restarts nothing
     # (nothing comes after it), and any upstream crash restarts it too
     # (correct: re-establishes monitors).
-    children = base_children ++ editor_children ++ [Minga.SystemObserver]
+    children = base_children ++ Enum.concat(editor_children, [Minga.SystemObserver])
 
     opts = [strategy: :rest_for_one, name: Minga.Supervisor]
     result = Supervisor.start_link(children, opts)

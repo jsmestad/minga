@@ -515,13 +515,11 @@ defmodule Minga.Keymap.Active do
   defp validate_untracked_binding_source(_server, :config, _mode, _key_str, _opts), do: :ok
 
   defp validate_untracked_binding_source(server, source, mode, key_str, opts) do
-    case binding_resolves?(server, mode, key_str, opts) do
-      true ->
-        {:error,
-         "key binding #{inspect(key_str)} for #{inspect(mode)} already exists and cannot be replaced by #{inspect(source)}"}
-
-      false ->
-        :ok
+    if binding_resolves?(server, mode, key_str, opts) do
+      {:error,
+       "key binding #{inspect(key_str)} for #{inspect(mode)} already exists and cannot be replaced by #{inspect(source)}"}
+    else
+      :ok
     end
   end
 

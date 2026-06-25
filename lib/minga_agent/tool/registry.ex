@@ -44,7 +44,6 @@ defmodule MingaAgent.Tool.Registry do
   @spec register(Spec.t() | keyword() | map()) :: :ok | {:error, register_error()}
   def register(spec), do: register(@table, spec)
 
-  @doc false
   @spec register(atom(), Spec.t() | keyword() | map()) :: :ok | {:error, register_error()}
   def register(table, %Spec{} = spec) when is_atom(table) do
     register_validated(table, Map.from_struct(spec))
@@ -75,7 +74,6 @@ defmodule MingaAgent.Tool.Registry do
   @spec lookup(String.t()) :: {:ok, Spec.t()} | :error
   def lookup(name) when is_binary(name), do: lookup(@table, name)
 
-  @doc false
   @spec lookup(atom(), String.t()) :: {:ok, Spec.t()} | :error
   def lookup(table, name) when is_atom(table) and is_binary(name) do
     case :ets.lookup(table, name) do
@@ -90,7 +88,6 @@ defmodule MingaAgent.Tool.Registry do
   @spec all() :: [Spec.t()]
   def all, do: all(@table)
 
-  @doc false
   @spec all(atom()) :: [Spec.t()]
   def all(table) when is_atom(table) do
     table
@@ -105,7 +102,6 @@ defmodule MingaAgent.Tool.Registry do
   @spec registered?(String.t()) :: boolean()
   def registered?(name) when is_binary(name), do: registered?(@table, name)
 
-  @doc false
   @spec registered?(atom(), String.t()) :: boolean()
   def registered?(table, name) when is_atom(table) and is_binary(name) do
     :ets.member(table, name)

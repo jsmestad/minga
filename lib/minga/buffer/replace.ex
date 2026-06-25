@@ -81,7 +81,7 @@ defmodule Minga.Buffer.Replace do
     case :binary.matches(content, old_text) do
       [] -> {:error, "old_text not found"}
       [match] -> {:ok, match}
-      matches -> {:error, "old_text found #{length(matches)} times (ambiguous)"}
+      matches -> {:error, "old_text found #{Enum.count(matches)} times (ambiguous)"}
     end
   end
 
@@ -108,7 +108,7 @@ defmodule Minga.Buffer.Replace do
   defp count_newlines(binary) do
     binary
     |> :binary.matches("\n")
-    |> length()
+    |> Enum.count()
   end
 
   @spec replacement_delta(

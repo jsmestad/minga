@@ -127,7 +127,7 @@ defmodule Minga.Core.DiffMerge3Test do
       assert {:ok, merged} = Diff.merge3(ancestor, fork, parent)
       assert Enum.at(merged, 2) == "fork_change"
       assert Enum.at(merged, 18) == "parent_change"
-      assert length(merged) == 20
+      assert Enum.count(merged) == 20
     end
 
     test "multiple non-overlapping edits from both sides" do

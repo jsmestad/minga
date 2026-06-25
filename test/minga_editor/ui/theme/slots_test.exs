@@ -9,7 +9,7 @@ defmodule MingaEditor.UI.Theme.SlotsTest do
       pairs = Slots.to_color_pairs(theme)
 
       assert is_list(pairs)
-      assert length(pairs) > 30
+      assert Enum.count(pairs) > 30
 
       # Every entry is a {integer, integer | nil} tuple
       for {slot_id, color} <- pairs do
@@ -54,7 +54,6 @@ defmodule MingaEditor.UI.Theme.SlotsTest do
 
     test "mode colors use fallback when mode_colors map is empty" do
       theme = MingaEditor.UI.Theme.get!(:doom_one)
-      # Create a theme with empty mode_colors to test fallback
       modeline = %{theme.modeline | mode_colors: %{}}
       theme = %{theme | modeline: modeline}
 
@@ -159,7 +158,7 @@ defmodule MingaEditor.UI.Theme.SlotsTest do
       pairs = Slots.to_color_pairs(theme)
       slot_ids = Enum.map(pairs, fn {slot, _} -> slot end)
 
-      assert length(slot_ids) == length(Enum.uniq(slot_ids)),
+      assert Enum.count(slot_ids) == Enum.count(Enum.uniq(slot_ids)),
              "duplicate slot IDs found: #{inspect(slot_ids -- Enum.uniq(slot_ids))}"
     end
 
@@ -167,7 +166,7 @@ defmodule MingaEditor.UI.Theme.SlotsTest do
       for theme_name <- [:doom_one, :catppuccin_mocha, :one_dark, :one_light] do
         theme = MingaEditor.UI.Theme.get!(theme_name)
         pairs = Slots.to_color_pairs(theme)
-        assert length(pairs) > 30, "#{theme_name} should produce 30+ color pairs"
+        assert Enum.count(pairs) > 30, "#{theme_name} should produce 30+ color pairs"
       end
     end
   end

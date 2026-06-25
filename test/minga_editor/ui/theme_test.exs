@@ -17,7 +17,7 @@ defmodule Minga.ThemeTest do
       assert :catppuccin_mocha in themes
       assert :one_dark in themes
       assert :one_light in themes
-      assert length(themes) >= 8
+      assert Enum.count(themes) >= 8
     end
   end
 
@@ -264,8 +264,8 @@ defmodule Minga.ThemeTest do
 
         unique_colors = Enum.uniq(heading_colors)
         # At least 4 distinct colors across 6 heading levels
-        assert length(unique_colors) >= 4,
-               "expected at least 4 distinct heading colors in #{unquote(theme_name)}, got #{length(unique_colors)}: #{inspect(heading_colors)}"
+        assert Enum.count(unique_colors) >= 4,
+               "expected at least 4 distinct heading colors in #{unquote(theme_name)}, got #{Enum.count(unique_colors)}: #{inspect(heading_colors)}"
       end
 
       test "#{theme_name} color groups are proper structs" do

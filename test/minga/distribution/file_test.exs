@@ -35,7 +35,7 @@ defmodule Minga.Distribution.FileTest do
     File.write!(Path.join(nested, "c.ex"), "c")
 
     assert {:ok, one_path} = RemoteFile.list_local_files(dir, 1, 12)
-    assert length(one_path) == 1
+    assert Enum.count(one_path) == 1
 
     assert {:ok, shallow_paths} = RemoteFile.list_local_files(dir, 10, 0)
     refute Path.join(nested, "c.ex") in shallow_paths

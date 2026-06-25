@@ -113,13 +113,13 @@ defmodule Minga.Editing.Search do
   def find_next(content, pattern, cursor, :forward, opts) do
     lines = :binary.split(content, "\n", [:global])
     matcher = compile_matcher(pattern, opts)
-    find_forward(lines, matcher, cursor, length(lines))
+    find_forward(lines, matcher, cursor, Enum.count(lines))
   end
 
   def find_next(content, pattern, cursor, :backward, opts) do
     lines = :binary.split(content, "\n", [:global])
     matcher = compile_matcher(pattern, opts)
-    find_backward(lines, matcher, cursor, length(lines))
+    find_backward(lines, matcher, cursor, Enum.count(lines))
   end
 
   # ── Find all matches in visible range ────────────────────────────────────
@@ -261,21 +261,19 @@ defmodule Minga.Editing.Search do
   @spec substitute_line(String.t(), matcher(), String.t(), boolean()) ::
           {String.t(), non_neg_integer()}
   def substitute_line(line, matcher, replacement, global?) do
-    case global? do
-      true ->
-        matches = matches_in(line, matcher)
-        do_substitute_all(line, matches, replacement, 0, 0, [])
+    if global? do
+      matches = matches_in(line, matcher)
+      do_substitute_all(line, matches, replacement, 0, 0, [])
+    else
+      case match_in(line, matcher) do
+        nil ->
+          {line, 0}
 
-      false ->
-        case match_in(line, matcher) do
-          nil ->
-            {line, 0}
-
-          {pos, len} ->
-            before = binary_part(line, 0, pos)
-            after_match = binary_part(line, pos + len, byte_size(line) - pos - len)
-            {before <> replacement <> after_match, 1}
-        end
+        {pos, len} ->
+          before = binary_part(line, 0, pos)
+          after_match = binary_part(line, pos + len, byte_size(line) - pos - len)
+          {before <> replacement <> after_match, 1}
+      end
     end
   end
 
@@ -317,31 +315,29 @@ defmodule Minga.Editing.Search do
     matcher = compile_matcher(pattern, opts)
     rep_len = byte_size(replacement)
 
-    case global? do
-      true ->
-        matches = matches_in(line, matcher)
+    if global? do
+      matches = matches_in(line, matcher)
 
-        sub_acc = %{
-          rep: replacement,
-          rep_len: rep_len,
-          prev_end: 0,
-          count: 0,
-          output: [],
-          spans: []
-        }
+      sub_acc = %{
+        rep: replacement,
+        rep_len: rep_len,
+        prev_end: 0,
+        count: 0,
+        output: [],
+        spans: []
+      }
 
-        do_sub_spans_all(line, matches, sub_acc)
+      do_sub_spans_all(line, matches, sub_acc)
+    else
+      case match_in(line, matcher) do
+        nil ->
+          {line, 0, []}
 
-      false ->
-        case match_in(line, matcher) do
-          nil ->
-            {line, 0, []}
-
-          {pos, len} ->
-            before = binary_part(line, 0, pos)
-            after_match = binary_part(line, pos + len, byte_size(line) - pos - len)
-            {before <> replacement <> after_match, 1, [{pos, rep_len}]}
-        end
+        {pos, len} ->
+          before = binary_part(line, 0, pos)
+          after_match = binary_part(line, pos + len, byte_size(line) - pos - len)
+          {before <> replacement <> after_match, 1, [{pos, rep_len}]}
+      end
     end
   end
 
@@ -451,7 +447,7 @@ defmodule Minga.Editing.Search do
         search_backward_from(lines, matcher, line - 1, :end)
 
       matches ->
-        {last_pos, _len} = List.last(matches)
+        {last_pos, _len} = Enum.at(matches, -1)
         {line, last_pos}
     end
   end

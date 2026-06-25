@@ -174,7 +174,7 @@ defmodule Minga.Git.Buffer do
   end
 
   def handle_call(:conflict_count, _from, state) do
-    {:reply, length(state.conflicts), state}
+    {:reply, Enum.count(state.conflicts), state}
   end
 
   def handle_call(:summary, _from, state) do

@@ -365,7 +365,7 @@ defmodule MingaEditor.State.TabBar do
   def most_recent_of_kind(%__MODULE__{tabs: tabs, active_id: active_id}, kind) do
     tabs
     |> Enum.filter(&(&1.kind == kind and &1.id != active_id))
-    |> List.last()
+    |> Enum.at(-1)
   end
 
   @doc """
@@ -996,7 +996,7 @@ defmodule MingaEditor.State.TabBar do
         |> Tab.new_agent(label)
         |> Tab.set_group(workspace_id)
 
-      {tabs ++ [restored_tab], next_id + 1}
+      {Enum.concat(tabs, [restored_tab]), next_id + 1}
     end
   end
 

@@ -81,6 +81,7 @@ defmodule Minga.Git.Repo.ProfileTest do
   test "applies per-repo config overrides", %{tmp_dir: dir} do
     old = Application.get_env(:minga, :git_repo_overrides)
 
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Application.put_env(:minga, :git_repo_overrides, %{
       dir => %{sparse?: true, size_class: :huge, untracked_mode: :all, timeout_ms: 123}
     })
@@ -137,7 +138,9 @@ defmodule Minga.Git.Repo.ProfileTest do
   end
 
   @spec restore_overrides(term()) :: :ok
+  # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
   defp restore_overrides(nil), do: Application.delete_env(:minga, :git_repo_overrides)
+  # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
   defp restore_overrides(value), do: Application.put_env(:minga, :git_repo_overrides, value)
 
   # Writes a `.git/index` of the given byte size so size classification has a

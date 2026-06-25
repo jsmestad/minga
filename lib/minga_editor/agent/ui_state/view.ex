@@ -311,7 +311,7 @@ defmodule MingaEditor.Agent.UIState.View do
   def next_search_match(%__MODULE__{search: %{matches: []}} = view), do: view
 
   def next_search_match(%__MODULE__{search: search} = view) do
-    next = rem(search.current + 1, length(search.matches))
+    next = rem(search.current + 1, Enum.count(search.matches))
     %{view | search: %{search | current: next}}
   end
 
@@ -321,7 +321,7 @@ defmodule MingaEditor.Agent.UIState.View do
   def prev_search_match(%__MODULE__{search: %{matches: []}} = view), do: view
 
   def prev_search_match(%__MODULE__{search: search} = view) do
-    count = length(search.matches)
+    count = Enum.count(search.matches)
     prev = rem(search.current - 1 + count, count)
     %{view | search: %{search | current: prev}}
   end

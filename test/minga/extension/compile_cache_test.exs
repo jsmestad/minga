@@ -133,7 +133,7 @@ defmodule Minga.Extension.CompileCacheTest do
                CompileCache.load_or_compile(src_dir, [file], opts(cache_dir))
 
       [ext_dir] = Path.wildcard(Path.join(cache_dir, "*"))
-      assert length(File.ls!(ext_dir)) == 1
+      assert Enum.count(File.ls!(ext_dir)) == 1
 
       write.(":v2")
 
@@ -142,7 +142,7 @@ defmodule Minga.Extension.CompileCacheTest do
 
       assert module.marker() == :v2
       # Old key pruned: still exactly one entry for this extension.
-      assert length(File.ls!(ext_dir)) == 1
+      assert Enum.count(File.ls!(ext_dir)) == 1
       assert module in modules
     end
 

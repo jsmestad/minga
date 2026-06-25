@@ -161,7 +161,7 @@ defmodule Minga.Git.System do
     staged = Keyword.get(opts, :staged, false)
 
     args = ["diff"]
-    args = if staged, do: args ++ ["--cached"], else: args
+    args = if staged, do: Enum.concat(args, ["--cached"]), else: args
     if path, do: args ++ ["--", path], else: args
   end
 
@@ -219,7 +219,7 @@ defmodule Minga.Git.System do
   def commit(git_root, message, opts \\ [])
       when is_binary(git_root) and is_binary(message) do
     args = ["commit", "-m", message]
-    args = if Keyword.get(opts, :amend, false), do: args ++ ["--amend"], else: args
+    args = if Keyword.get(opts, :amend, false), do: Enum.concat(args, ["--amend"]), else: args
 
     case git_cmd(args, cd: git_root, stderr_to_stdout: true) do
       {output, 0} ->
@@ -404,7 +404,7 @@ defmodule Minga.Git.System do
 
     args =
       if Keyword.get(opts, :include_untracked, false),
-        do: args ++ ["--include-untracked"],
+        do: Enum.concat(args, ["--include-untracked"]),
         else: args
 
     case git_cmd(args, cd: git_root, stderr_to_stdout: true) do
@@ -475,8 +475,11 @@ defmodule Minga.Git.System do
   @spec push(String.t(), keyword()) :: :ok | {:error, String.t()}
   def push(git_root, opts \\ []) when is_binary(git_root) do
     args = ["push"]
-    args = if Keyword.get(opts, :set_upstream), do: args ++ ["--set-upstream"], else: args
-    args = if Keyword.get(opts, :force), do: args ++ ["--force-with-lease"], else: args
+
+    args =
+      if Keyword.get(opts, :set_upstream), do: Enum.concat(args, ["--set-upstream"]), else: args
+
+    args = if Keyword.get(opts, :force), do: Enum.concat(args, ["--force-with-lease"]), else: args
 
     case git_cmd(args, cd: git_root, stderr_to_stdout: true) do
       {_, 0} -> :ok
@@ -490,7 +493,7 @@ defmodule Minga.Git.System do
   @spec pull(String.t(), keyword()) :: :ok | {:error, String.t()}
   def pull(git_root, opts \\ []) when is_binary(git_root) do
     args = ["pull"]
-    args = if Keyword.get(opts, :rebase), do: args ++ ["--rebase"], else: args
+    args = if Keyword.get(opts, :rebase), do: Enum.concat(args, ["--rebase"]), else: args
 
     case git_cmd(args, cd: git_root, stderr_to_stdout: true) do
       {_, 0} -> :ok

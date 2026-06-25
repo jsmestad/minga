@@ -343,7 +343,6 @@ defmodule MingaEditor.Input.FileTreeHandler do
     if editing.text == "" do
       Commands.FileTree.cancel_editing(state)
     else
-      # Delete the last grapheme from the editing text.
       # Use String.slice/3 (start, length) to avoid negative index issues.
       new_text = String.slice(editing.text, 0, max(String.length(editing.text) - 1, 0))
       ft = FileTreeState.update_editing_text(file_tree_state(state), new_text)

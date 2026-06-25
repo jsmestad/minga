@@ -28,21 +28,21 @@ defmodule Minga.Extension.PanelTest do
         })
 
       panels = Panel.all()
-      assert length(panels) == 1
+      assert Enum.count(panels) == 1
 
       [panel] = panels
       assert panel.extension == :test_ext
       assert panel.title == "Test Panel"
       assert panel.position == :bottom
       assert panel.visible == true
-      assert length(panel.content) == 3
+      assert Enum.count(panel.content) == 3
     end
 
     test "replaces panel with same key" do
       :ok = Panel.set(:test_ext, "main", %{title: "v1"})
       :ok = Panel.set(:test_ext, "main", %{title: "v2"})
 
-      assert length(Panel.all()) == 1
+      assert Enum.count(Panel.all()) == 1
       assert hd(Panel.all()).title == "v2"
     end
   end
@@ -53,7 +53,7 @@ defmodule Minga.Extension.PanelTest do
       :ok = Panel.set(:test_ext, "b", %{visible: false, title: "Hidden"})
 
       visible = Panel.visible()
-      assert length(visible) == 1
+      assert Enum.count(visible) == 1
       assert hd(visible).title == "Visible"
     end
   end
@@ -61,13 +61,13 @@ defmodule Minga.Extension.PanelTest do
   describe "hide/2 and show/2" do
     test "toggles panel visibility" do
       :ok = Panel.set(:test_ext, "main", %{visible: true, title: "Panel"})
-      assert length(Panel.visible()) == 1
+      assert Enum.count(Panel.visible()) == 1
 
       :ok = Panel.hide(:test_ext, "main")
       assert Panel.visible() == []
 
       :ok = Panel.show(:test_ext, "main")
-      assert length(Panel.visible()) == 1
+      assert Enum.count(Panel.visible()) == 1
     end
   end
 
@@ -78,7 +78,7 @@ defmodule Minga.Extension.PanelTest do
       :ok = Panel.remove(:test_ext, "a")
 
       panels = Panel.all()
-      assert length(panels) == 1
+      assert Enum.count(panels) == 1
       assert hd(panels).panel_id == "b"
     end
 
@@ -88,7 +88,7 @@ defmodule Minga.Extension.PanelTest do
       :ok = Panel.remove_all(:test_ext)
 
       panels = Panel.all()
-      assert length(panels) == 1
+      assert Enum.count(panels) == 1
       assert hd(panels).extension == :other_ext
     end
   end
@@ -143,7 +143,7 @@ defmodule Minga.Extension.PanelTest do
 
       [panel] = Panel.all()
       [{:tree, tree}] = panel.content
-      assert length(tree.nodes) == 1
+      assert Enum.count(tree.nodes) == 1
       assert hd(tree.nodes).label == "Root"
     end
   end

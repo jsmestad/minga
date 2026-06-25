@@ -27,7 +27,6 @@ defmodule MingaEditor.Agent.DiffSnapshotTest do
 
   describe "file-backed snapshots" do
     test "file snapshot can be read back" do
-      # Create a file snapshot directly
       dir = System.tmp_dir!()
       path = Path.join(dir, "test_snap_#{:erlang.unique_integer([:positive])}.tmp")
       content = "line1\nline2\nline3"

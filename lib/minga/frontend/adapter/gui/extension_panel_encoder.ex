@@ -35,7 +35,7 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionPanelEncoder do
     {panel_binaries, _remaining_budget} =
       Wire.bounded_entries(model.panels, &encode_panel/1, Wire.max_u8(), Wire.max_u16() - 1)
 
-    payload = IO.iodata_to_binary([<<length(panel_binaries)::8>> | panel_binaries])
+    payload = IO.iodata_to_binary([<<Enum.count(panel_binaries)::8>> | panel_binaries])
     <<@op_gui_extension_panel, byte_size(payload)::16, payload::binary>>
   end
 
@@ -71,7 +71,7 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionPanelEncoder do
     {block_binaries, _remaining_budget} =
       Wire.bounded_entries(blocks, &encode_content_block/1, Wire.max_u8(), Wire.max_u16())
 
-    {IO.iodata_to_binary(block_binaries), length(block_binaries)}
+    {IO.iodata_to_binary(block_binaries), Enum.count(block_binaries)}
   end
 
   @spec encode_content_block(Panel.content_block()) :: binary()
@@ -85,7 +85,7 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionPanelEncoder do
       Wire.bounded_entries(runs, &encode_styled_run/1, Wire.max_u8(), Wire.max_u16())
 
     run_data = IO.iodata_to_binary(run_binaries)
-    <<1::8, length(run_binaries)::8, run_data::binary>>
+    <<1::8, Enum.count(run_binaries)::8, run_data::binary>>
   end
 
   defp encode_content_block(%Table{} = table) do
@@ -104,7 +104,7 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionPanelEncoder do
 
     selected = encode_selected(table.selected)
 
-    <<2::8, length(columns)::8, length(rows)::16, selected::16, col_data::binary,
+    <<2::8, Enum.count(columns)::8, Enum.count(rows)::16, selected::16, col_data::binary,
       row_data::binary>>
   end
 
@@ -118,7 +118,7 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionPanelEncoder do
         end)
       )
 
-    <<3::8, length(pairs)::8, pair_data::binary>>
+    <<3::8, Enum.count(pairs)::8, pair_data::binary>>
   end
 
   defp encode_content_block(%Separator{}) do
@@ -166,7 +166,7 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionPanelEncoder do
     {node_binaries, _remaining_budget} =
       Wire.bounded_entries(nodes, &encode_tree_node/1, Wire.max_u8(), max(budget - 1, 0))
 
-    {IO.iodata_to_binary(node_binaries), length(node_binaries)}
+    {IO.iodata_to_binary(node_binaries), Enum.count(node_binaries)}
   end
 
   @spec encode_tree_node(TreeNode.t()) :: binary()

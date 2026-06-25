@@ -609,7 +609,7 @@ defmodule MingaEditor.HighlightSync do
 
     Minga.Log.debug(
       :editor,
-      "Parser LRU: evicted #{length(evicted_ids)} inactive buffer tree(s)"
+      "Parser LRU: evicted #{Enum.count(evicted_ids)} inactive buffer tree(s)"
     )
 
     # Calculation: compute the new highlighting state with evicted entries removed.

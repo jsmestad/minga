@@ -165,7 +165,7 @@ defmodule MingaAgent.Tools.LspBridgeTest do
       ]
 
       items = LspBridge.flatten_document_symbols(symbols)
-      assert length(items) == 2
+      assert Enum.count(items) == 2
 
       [module_item, func_item] = items
       {_, 0, 0, module_label} = module_item

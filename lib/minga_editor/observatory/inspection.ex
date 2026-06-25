@@ -22,7 +22,7 @@ defmodule MingaEditor.Observatory.Inspection do
       title: title,
       lines: lines,
       width: 82,
-      height: min(max(length(lines) + 4, 10), 30)
+      height: min(max(Enum.count(lines) + 4, 10), 30)
     }
   end
 end

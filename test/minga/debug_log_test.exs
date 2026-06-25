@@ -58,19 +58,23 @@ defmodule Minga.DebugLogTest do
 
   test "DebugLog.flush/0 reports when a configured path has no running writer", %{dir: dir} do
     path = Path.join(dir, "debug-log-missing.log")
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Application.put_env(:minga, :debug_log_path, path)
 
     assert {:error, {:debug_log_not_running, ^path}} = DebugLog.flush()
   after
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Application.delete_env(:minga, :debug_log_path)
   end
 
   test "DebugLog.stop/0 reports when a configured path has no running writer", %{dir: dir} do
     path = Path.join(dir, "debug-log-stop-missing.log")
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Application.put_env(:minga, :debug_log_path, path)
 
     assert {:error, {:debug_log_not_running, ^path}} = DebugLog.stop()
   after
+    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Application.delete_env(:minga, :debug_log_path)
   end
 

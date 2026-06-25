@@ -44,7 +44,7 @@ defmodule Minga.RenderModel.UI.AgentChatTest do
       assert model.visible?
       assert model.status == :thinking
       assert model.prompt_vim_mode == :insert
-      assert length(model.messages) == 2
+      assert Enum.count(model.messages) == 2
     end
 
     test "holds a prompt completion popup" do

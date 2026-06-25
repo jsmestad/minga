@@ -41,8 +41,8 @@ defmodule Minga.Buffer.BlockDecorationTest do
         )
 
       {above, below} = Decorations.blocks_for_line(decs, 5)
-      assert length(above) == 1
-      assert length(below) == 1
+      assert Enum.count(above) == 1
+      assert Enum.count(below) == 1
     end
 
     test "increments version" do
@@ -232,7 +232,7 @@ defmodule Minga.Buffer.BlockDecorationTest do
       block_entries =
         Enum.filter(entries, fn {_, type} -> match?({:block, _, _}, type) end)
 
-      assert length(block_entries) == 3
+      assert Enum.count(block_entries) == 3
 
       # Each entry has a different line_index
       indices = Enum.map(block_entries, fn {_, {:block, _, idx}} -> idx end)
@@ -276,14 +276,14 @@ defmodule Minga.Buffer.BlockDecorationTest do
       block_entries =
         Enum.filter(entries, fn {_, type} -> match?({:block, _, _}, type) end)
 
-      assert length(block_entries) == 1
+      assert Enum.count(block_entries) == 1
       {5, {:block, _, 0}} = hd(block_entries)
 
       # And line 5 shows as fold start
       fold_entries =
         Enum.filter(entries, fn {_, type} -> match?({:fold_start, _}, type) end)
 
-      assert length(fold_entries) == 1
+      assert Enum.count(fold_entries) == 1
     end
 
     test "next_visible_line skips block entries" do
@@ -334,7 +334,7 @@ defmodule Minga.Buffer.BlockDecorationTest do
       entries = DisplayMap.to_visible_line_map(dm)
 
       # 10 display rows: 1 block + 9 normal lines (0-8)
-      assert length(entries) == 10
+      assert Enum.count(entries) == 10
     end
   end
 

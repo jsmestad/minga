@@ -18,7 +18,7 @@ defmodule Minga.Editing.Motion.MotionPropertyTest do
 
   defp assert_in_bounds({line, col}, content) do
     lines = String.split(content, "\n")
-    line_count = length(lines)
+    line_count = Enum.count(lines)
     assert line >= 0, "line #{line} is negative"
     assert line < line_count, "line #{line} >= line_count #{line_count}"
     line_text = Enum.at(lines, line, "")

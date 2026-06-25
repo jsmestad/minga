@@ -16,7 +16,6 @@ defmodule Minga.RuntimeHeadlessTest do
   # application tree which has the same base children.
 
   test "headless runtime does not require MingaEditor processes" do
-    # Verify the editor is NOT running in the test environment
     # (tests run without :start_editor)
     refute Process.whereis(MingaEditor)
     refute Process.whereis(MingaEditor.Frontend.Manager)

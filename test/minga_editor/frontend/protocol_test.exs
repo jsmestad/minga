@@ -541,7 +541,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       payload = <<0x30, 5::32, 42::32, 2::32>> <> spans_binary
 
       assert {:ok, {:highlight_spans, 5, 42, spans}} = Protocol.decode_event(payload)
-      assert length(spans) == 2
+      assert Enum.count(spans) == 2
 
       assert hd(spans) == %Minga.Language.Highlight.Span{
                start_byte: 0,
@@ -551,7 +551,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
                layer: 0
              }
 
-      assert List.last(spans) == %Minga.Language.Highlight.Span{
+      assert Enum.at(spans, -1) == %Minga.Language.Highlight.Span{
                start_byte: 10,
                end_byte: 15,
                capture_id: 1,

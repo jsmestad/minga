@@ -32,7 +32,7 @@ defmodule MingaEditor.Agent.MarkdownHighlightTest do
       text = "Hello world"
       result = MarkdownHighlight.stylize(text, nil, @theme_syntax)
 
-      assert length(result) == 1
+      assert Enum.count(result) == 1
       [{run_text, fg, bg, flags}] = hd(result)
       assert run_text == "Hello world"
       assert fg == 0xBBC2CF
@@ -44,7 +44,7 @@ defmodule MingaEditor.Agent.MarkdownHighlightTest do
       text = "**bold text**"
       result = MarkdownHighlight.stylize(text, nil, @theme_syntax)
 
-      assert length(result) == 1
+      assert Enum.count(result) == 1
       line = hd(result)
 
       bold_run =
@@ -60,7 +60,7 @@ defmodule MingaEditor.Agent.MarkdownHighlightTest do
       text = "# My Header"
       result = MarkdownHighlight.stylize(text, nil, @theme_syntax)
 
-      assert length(result) == 1
+      assert Enum.count(result) == 1
       [{header_text, fg, _bg, flags}] = hd(result)
       # Regex parser strips the # marker
       assert header_text == "My Header"
@@ -72,7 +72,7 @@ defmodule MingaEditor.Agent.MarkdownHighlightTest do
       text = "use `GenServer` here"
       result = MarkdownHighlight.stylize(text, nil, @theme_syntax)
 
-      assert length(result) == 1
+      assert Enum.count(result) == 1
       line = hd(result)
       code_run = Enum.find(line, fn {t, _fg, _bg, _flags} -> t == "GenServer" end)
       assert code_run != nil
@@ -103,7 +103,7 @@ defmodule MingaEditor.Agent.MarkdownHighlightTest do
       text = "line one\nline two\nline three"
       result = MarkdownHighlight.stylize(text, nil, @theme_syntax)
 
-      assert length(result) == 3
+      assert Enum.count(result) == 3
     end
 
     test "fenced code block lines have code styling" do
@@ -111,7 +111,7 @@ defmodule MingaEditor.Agent.MarkdownHighlightTest do
       result = MarkdownHighlight.stylize(text, nil, @theme_syntax)
 
       # Three lines: header, code content, footer
-      assert length(result) == 3
+      assert Enum.count(result) == 3
       [{_text, _fg, _bg, flags}] = Enum.at(result, 1)
       assert Bitwise.band(flags, 0x10) != 0
     end
@@ -136,7 +136,7 @@ defmodule MingaEditor.Agent.MarkdownHighlightTest do
       # Line 0: code header from regex parser
       # Line 1: code content - should have tree-sitter overlay
       # Line 2: code footer from regex parser
-      assert length(result) == 3
+      assert Enum.count(result) == 3
 
       code_line = Enum.at(result, 1)
       # The tree-sitter overlay must produce "def" with keyword coloring
@@ -182,7 +182,7 @@ defmodule MingaEditor.Agent.MarkdownHighlightTest do
 
       result = MarkdownHighlight.stylize(text, highlight, @theme_syntax, 0)
 
-      assert length(result) == 1
+      assert Enum.count(result) == 1
       [{header_text, fg, _bg, flags}] = hd(result)
       # Still uses regex parser - strips # and applies header style
       assert header_text == "My Header"
@@ -216,7 +216,7 @@ defmodule MingaEditor.Agent.MarkdownHighlightTest do
 
       result = MarkdownHighlight.stylize(text, highlight, @theme_syntax)
 
-      assert length(result) == 1
+      assert Enum.count(result) == 1
       line = hd(result)
       bold_run = Enum.find(line, fn {t, _fg, _bg, _flags} -> t == "bold" end)
       assert bold_run != nil

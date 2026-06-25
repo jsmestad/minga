@@ -1370,7 +1370,7 @@ defmodule MingaEditor.State do
           {:ok, term()} | :missing
   defp apply_optional_shell_callback(module, shell_state, callback, args)
        when is_atom(module) and not is_nil(module) do
-    arity = length(args) + 1
+    arity = Enum.count(args) + 1
 
     if shell_callback_exported?(module, callback, arity) do
       {:ok, apply(module, callback, [shell_state | args])}
@@ -1850,7 +1850,7 @@ defmodule MingaEditor.State do
         state
 
       {win_id, window} ->
-        total_lines = length(state.workspace.agent_ui.panel.cached_line_index)
+        total_lines = Enum.count(state.workspace.agent_ui.panel.cached_line_index)
         updated = Window.scroll_viewport(window, delta, total_lines)
         update_window(state, win_id, fn _ -> updated end)
     end
@@ -2251,7 +2251,8 @@ defmodule MingaEditor.State do
   """
   @spec scope_for_content(Content.t(), Minga.Keymap.Scope.scope_name()) ::
           Minga.Keymap.Scope.scope_name()
-  defdelegate scope_for_content(content, current_scope), to: SessionState
+  def scope_for_content(content, current_scope),
+    do: SessionState.scope_for_content(content, current_scope)
 
   @doc """
   Returns the appropriate keymap scope for the active window's content type.

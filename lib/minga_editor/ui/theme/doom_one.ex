@@ -4,6 +4,7 @@ defmodule MingaEditor.UI.Theme.DoomOne do
 
   A dark theme with vibrant accent colors on a muted background.
   """
+  alias Minga.Core.Face
 
   # ── Doom One palette ──────────────────────────────────────────────────
   @blue 0x51AFEF
@@ -36,12 +37,12 @@ defmodule MingaEditor.UI.Theme.DoomOne do
       name: :doom_one,
       syntax: syntax(),
       hl_todo: %{
-        todo: Minga.Core.Face.new(fg: @yellow, bold: true),
-        fixme: Minga.Core.Face.new(fg: @red, bold: true),
-        note: Minga.Core.Face.new(fg: @blue, bold: true),
-        hack: Minga.Core.Face.new(fg: @orange, bold: true),
-        review: Minga.Core.Face.new(fg: @magenta, bold: true),
-        deprecated: Minga.Core.Face.new(fg: @grey, strikethrough: true)
+        todo: Face.new(fg: @yellow, bold: true),
+        fixme: Face.new(fg: @red, bold: true),
+        note: Face.new(fg: @blue, bold: true),
+        hack: Face.new(fg: @orange, bold: true),
+        review: Face.new(fg: @magenta, bold: true),
+        deprecated: Face.new(fg: @grey, strikethrough: true)
       },
       editor: %MingaEditor.UI.Theme.Editor{
         bg: @bg,

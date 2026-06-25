@@ -18,7 +18,7 @@ defmodule Minga.Extension.BadgeTest do
       :ok = Badge.set_file(:test_ext, "/tmp/test.ex", color: 0xFF0000, animation: :pulse)
 
       badges = Badge.badges_for_path("/tmp/test.ex")
-      assert length(badges) == 1
+      assert Enum.count(badges) == 1
       assert hd(badges).color == 0xFF0000
       assert hd(badges).animation == :pulse
     end
@@ -28,7 +28,7 @@ defmodule Minga.Extension.BadgeTest do
       :ok = Badge.set_file(:other_ext, "/tmp/test.ex", color: 0x00FF00)
 
       badges = Badge.badges_for_path("/tmp/test.ex")
-      assert length(badges) == 2
+      assert Enum.count(badges) == 2
     end
 
     test "replaces badge with same extension + path" do
@@ -36,7 +36,7 @@ defmodule Minga.Extension.BadgeTest do
       :ok = Badge.set_file(:test_ext, "/tmp/test.ex", color: 0x00FF00)
 
       badges = Badge.badges_for_path("/tmp/test.ex")
-      assert length(badges) == 1
+      assert Enum.count(badges) == 1
       assert hd(badges).color == 0x00FF00
     end
   end
@@ -47,7 +47,7 @@ defmodule Minga.Extension.BadgeTest do
       :ok = Badge.set_tab(:test_ext, pid, color: 0xFF0000)
 
       badges = Badge.badges_for_buffer(pid)
-      assert length(badges) == 1
+      assert Enum.count(badges) == 1
       assert hd(badges).color == 0xFF0000
 
       Process.exit(pid, :kill)
@@ -60,7 +60,7 @@ defmodule Minga.Extension.BadgeTest do
       :ok = Badge.set_file(:test_ext, "/tmp/b.ex")
       :ok = Badge.remove_file(:test_ext, "/tmp/a.ex")
 
-      assert Badge.all_file_badges() |> length() == 1
+      assert Badge.all_file_badges() |> Enum.count() == 1
     end
 
     test "removes a tab badge" do
@@ -79,7 +79,7 @@ defmodule Minga.Extension.BadgeTest do
       :ok = Badge.set_file(:other_ext, "/tmp/b.ex")
       :ok = Badge.remove_all(:test_ext)
 
-      assert length(Badge.all_file_badges()) == 1
+      assert Enum.count(Badge.all_file_badges()) == 1
       assert hd(Badge.all_file_badges()).extension == :other_ext
     end
 

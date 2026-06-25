@@ -6,6 +6,8 @@ defmodule MingaEditor.UI.Popup.Rule do
   Prefer `Minga.Popup.Rule` for new code.
   """
 
-  defdelegate new(pattern, opts \\ []), to: Minga.Popup.Rule
-  defdelegate matches?(rule, buffer_name), to: Minga.Popup.Rule
+  @spec new(term(), term()) :: term()
+  def new(pattern, opts \\ []), do: Minga.Popup.Rule.new(pattern, opts)
+  @spec matches?(term(), term()) :: term()
+  def matches?(rule, buffer_name), do: Minga.Popup.Rule.matches?(rule, buffer_name)
 end

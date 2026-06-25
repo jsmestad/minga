@@ -65,11 +65,11 @@ defmodule MingaEditor.UI.Panel.MessageStore do
       file_path: file_path
     }
 
-    entries = store.entries ++ [entry]
+    entries = Enum.concat(store.entries, [entry])
 
     trimmed =
-      if length(entries) > @max_entries,
-        do: Enum.drop(entries, length(entries) - @max_entries),
+      if Enum.count(entries) > @max_entries,
+        do: Enum.drop(entries, Enum.count(entries) - @max_entries),
         else: entries
 
     %{store | entries: trimmed, next_id: store.next_id + 1}

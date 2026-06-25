@@ -99,7 +99,7 @@ defmodule MingaEditor.UI.PickerTest do
       picker = Picker.new(items) |> Picker.filter("config")
 
       assert Enum.all?(picker.filtered, &(&1.match_positions != []))
-      assert length(picker.filtered) == @result_limit
+      assert Enum.count(picker.filtered) == @result_limit
     end
   end
 
@@ -351,7 +351,7 @@ defmodule MingaEditor.UI.PickerTest do
     test "returns all items when count <= max_visible" do
       picker = Picker.new(@items, max_visible: 10)
       {visible, offset} = Picker.visible_items(picker)
-      assert length(visible) == 4
+      assert Enum.count(visible) == 4
       assert offset == 0
     end
 
@@ -364,7 +364,7 @@ defmodule MingaEditor.UI.PickerTest do
       assert picker.selected == 9
 
       {visible, offset} = Picker.visible_items(picker)
-      assert length(visible) == 5
+      assert Enum.count(visible) == 5
       # Selected item should be within the visible window
       assert offset >= 0 and offset < 5
     end

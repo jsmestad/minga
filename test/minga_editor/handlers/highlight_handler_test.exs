@@ -294,7 +294,7 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
           {:minga_highlight, {:fold_ranges, 1, 1, [{0, 5}, {10, 15}]}}
         )
 
-      assert length(active_window(new_state).fold_ranges) == 2
+      assert Enum.count(active_window(new_state).fold_ranges) == 2
 
       positions = %{function: [{0, 5}]}
 

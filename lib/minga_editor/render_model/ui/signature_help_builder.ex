@@ -20,7 +20,7 @@ defmodule MingaEditor.RenderModel.UI.SignatureHelpBuilder do
     signatures = Enum.map(sh.signatures, &signature_model/1)
 
     active_signature =
-      clamp_index(sh.active_signature, min(length(signatures), @max_encoded_items))
+      clamp_index(sh.active_signature, min(Enum.count(signatures), @max_encoded_items))
 
     active_parameter =
       clamp_active_parameter(sh.active_parameter, Enum.at(signatures, active_signature))
@@ -56,7 +56,7 @@ defmodule MingaEditor.RenderModel.UI.SignatureHelpBuilder do
   defp clamp_active_parameter(_active_parameter, nil), do: 0
 
   defp clamp_active_parameter(active_parameter, %Signature{} = signature) do
-    clamp_index(active_parameter, min(length(signature.parameters), @max_encoded_items))
+    clamp_index(active_parameter, min(Enum.count(signature.parameters), @max_encoded_items))
   end
 
   @spec clamp_index(term(), non_neg_integer()) :: non_neg_integer()

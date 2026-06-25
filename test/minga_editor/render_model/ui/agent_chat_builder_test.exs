@@ -211,7 +211,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
       |> Enum.map(fn {name, args, _summary} ->
         {:tool_call, ToolCall.new("tc-#{name}", name, args) |> ToolCall.complete("ok")}
       end)
-      |> synced_panel(styled_messages: List.duplicate(nil, length(read_only_calls)))
+      |> synced_panel(styled_messages: List.duplicate(nil, Enum.count(read_only_calls)))
 
     model =
       context(session, panel)

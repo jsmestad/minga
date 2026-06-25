@@ -80,7 +80,7 @@ defmodule Minga.Session.EventRecorder.StoreTest do
       :ok = Store.insert(db, make_record(%{wall_clock: t4}))
 
       {:ok, events} = Store.events_in_range(db, t2, t3)
-      assert length(events) == 2
+      assert Enum.count(events) == 2
     end
 
     test "filters by event_type", %{db: db} do
@@ -96,7 +96,7 @@ defmodule Minga.Session.EventRecorder.StoreTest do
           event_type: :buffer_saved
         )
 
-      assert length(events) == 2
+      assert Enum.count(events) == 2
       assert Enum.all?(events, &(&1.event_type == :buffer_saved))
     end
 
@@ -111,7 +111,7 @@ defmodule Minga.Session.EventRecorder.StoreTest do
           source: "agent:pid:call1"
         )
 
-      assert length(events) == 1
+      assert Enum.count(events) == 1
       assert hd(events).source == "agent:pid:call1"
     end
 
@@ -143,7 +143,7 @@ defmodule Minga.Session.EventRecorder.StoreTest do
       {:ok, events} =
         Store.events_in_range(db, ~U[2025-01-01 00:00:00Z], ~U[2025-01-02 00:00:00Z], limit: 5)
 
-      assert length(events) == 5
+      assert Enum.count(events) == 5
     end
   end
 
@@ -154,7 +154,7 @@ defmodule Minga.Session.EventRecorder.StoreTest do
       :ok = Store.insert(db, make_record(%{source: "lsp:elixir_ls"}))
 
       {:ok, events} = Store.events_by_source(db, "user")
-      assert length(events) == 2
+      assert Enum.count(events) == 2
     end
   end
 
@@ -165,7 +165,7 @@ defmodule Minga.Session.EventRecorder.StoreTest do
       :ok = Store.insert(db, make_record(%{scope: {:buffer, "/tmp/b.ex"}}))
 
       {:ok, events} = Store.events_by_scope(db, "buffer:/tmp/a.ex")
-      assert length(events) == 2
+      assert Enum.count(events) == 2
     end
   end
 
@@ -176,7 +176,7 @@ defmodule Minga.Session.EventRecorder.StoreTest do
       :ok = Store.insert(db, make_record(%{event_type: :buffer_saved}))
 
       {:ok, events} = Store.events_by_type(db, :buffer_saved)
-      assert length(events) == 2
+      assert Enum.count(events) == 2
     end
   end
 

@@ -615,10 +615,7 @@ defmodule Minga.Git.Repo do
 
   @spec fetch_branch(String.t()) :: fetch_result(String.t() | nil)
   defp fetch_branch(git_root) do
-    case Git.current_branch(git_root) do
-      {:ok, branch} -> {:ok, branch}
-      :error -> :error
-    end
+    Git.current_branch(git_root)
   end
 
   @spec fetch_ahead_behind(String.t()) :: fetch_result({non_neg_integer(), non_neg_integer()})
@@ -631,16 +628,13 @@ defmodule Minga.Git.Repo do
 
   @spec fetch_last_commit_message(String.t()) :: fetch_result(String.t())
   defp fetch_last_commit_message(git_root) do
-    case Git.last_commit_message(git_root) do
-      {:ok, message} -> {:ok, message}
-      :error -> :error
-    end
+    Git.last_commit_message(git_root)
   end
 
   @spec fetch_stash_count(String.t()) :: fetch_result(non_neg_integer())
   defp fetch_stash_count(git_root) do
     case Git.stash_list(git_root) do
-      {:ok, entries} -> {:ok, length(entries)}
+      {:ok, entries} -> {:ok, Enum.count(entries)}
       {:error, reason} -> log_stash_count_failure(reason)
     end
   end

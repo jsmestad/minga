@@ -34,7 +34,7 @@ defmodule MingaEditor.Sidebar.BuiltinSurfaces do
     do: register_git_status(false, 0, sidebar_registry)
 
   def sync_git_status_panel(%GitStatusPanel{} = panel, sidebar_registry) do
-    register_git_status(true, length(panel.entries), sidebar_registry)
+    register_git_status(true, Enum.count(panel.entries), sidebar_registry)
   end
 
   def sync_git_status_panel(%{} = panel, sidebar_registry) do

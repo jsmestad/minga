@@ -274,7 +274,7 @@ defmodule MingaAgent.RemoteAPI do
   defp safe_latest_event_id([], latest_event_id), do: latest_event_id
 
   defp safe_latest_event_id(events, latest_event_id) do
-    delivered_latest_id = events |> List.last() |> Map.fetch!(:id)
+    delivered_latest_id = events |> Enum.at(-1) |> Map.fetch!(:id)
     min(delivered_latest_id, latest_event_id)
   end
 

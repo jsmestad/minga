@@ -210,7 +210,7 @@ defmodule MingaEditor.Commands.Help do
       |> ordered_normal_sections()
 
     text_objects = format_section("Text objects", text_object_entries())
-    normal_entries ++ [text_objects]
+    Enum.concat(normal_entries, [text_objects])
   end
 
   @spec active_leader_entries(state(), %{[Bindings.key()] => {atom() | tuple(), String.t()}}) :: [
@@ -221,8 +221,9 @@ defmodule MingaEditor.Commands.Help do
 
     trie
     |> flatten_trie([])
-    |> Enum.map(&mark_entry_source(&1, default_map))
-    |> Enum.map(&prefix_keys(&1, [Defaults.leader_key()]))
+    |> Enum.map(fn entry ->
+      entry |> mark_entry_source(default_map) |> prefix_keys([Defaults.leader_key()])
+    end)
     |> Enum.sort_by(&format_key_sequence(&1.keys))
   catch
     :exit, _ ->
@@ -246,8 +247,11 @@ defmodule MingaEditor.Commands.Help do
 
     trie
     |> flatten_trie([])
-    |> Enum.map(&mark_entry_source(&1, default_map))
-    |> Enum.map(&prefix_keys(&1, [Defaults.leader_key(), {?m, 0}]))
+    |> Enum.map(fn entry ->
+      entry
+      |> mark_entry_source(default_map)
+      |> prefix_keys([Defaults.leader_key(), {?m, 0}])
+    end)
     |> Enum.sort_by(&format_key_sequence(&1.keys))
   catch
     :exit, _ -> []
@@ -279,7 +283,7 @@ defmodule MingaEditor.Commands.Help do
 
     children =
       node.children
-      |> Enum.flat_map(fn {key, child} -> flatten_trie(child, prefix ++ [key]) end)
+      |> Enum.flat_map(fn {key, child} -> flatten_trie(child, Enum.concat(prefix, [key])) end)
 
     current ++ children
   end
@@ -444,7 +448,9 @@ defmodule MingaEditor.Commands.Help do
   @spec ordered_group_sections(%{String.t() => [binding_entry()]}) :: [String.t()]
   defp ordered_group_sections(grouped) do
     ordered_labels =
-      Enum.map(Defaults.group_prefixes(), fn {_keys, label} -> label end) ++ ["Ungrouped"]
+      Enum.concat(Enum.map(Defaults.group_prefixes(), fn {_keys, label} -> label end), [
+        "Ungrouped"
+      ])
 
     ordered_sections(grouped, ordered_labels)
   end
@@ -608,7 +614,7 @@ defmodule MingaEditor.Commands.Help do
   end
 
   @spec maybe_append_buffer_local([String.t()], boolean()) :: [String.t()]
-  defp maybe_append_buffer_local(provenance, true), do: provenance ++ ["buffer-local"]
+  defp maybe_append_buffer_local(provenance, true), do: Enum.concat(provenance, ["buffer-local"])
   defp maybe_append_buffer_local(provenance, false), do: provenance
 
   @spec buffer_local_override?(pid() | nil, atom()) :: boolean()
@@ -690,7 +696,7 @@ defmodule MingaEditor.Commands.Help do
 
   defp keystroke_chunk_fun(entry, %{kind: :insert_run} = group) do
     if entry.mode_before == :insert and entry.mode_after == :insert do
-      {:cont, %{group | entries: group.entries ++ [entry]}}
+      {:cont, %{group | entries: Enum.concat(group.entries, [entry])}}
     else
       {:cont, group, start_group(entry)}
     end
@@ -698,7 +704,7 @@ defmodule MingaEditor.Commands.Help do
 
   defp keystroke_chunk_fun(entry, %{kind: :operator_sequence} = group) do
     if entry.mode_before == :operator_pending do
-      {:cont, %{group | entries: group.entries ++ [entry]}}
+      {:cont, %{group | entries: Enum.concat(group.entries, [entry])}}
     else
       {:cont, group, start_group(entry)}
     end
@@ -707,7 +713,7 @@ defmodule MingaEditor.Commands.Help do
   defp keystroke_chunk_fun(entry, %{kind: :single} = group) do
     if entry.mode_before == :operator_pending do
       prev = %{group | kind: :operator_sequence}
-      {:cont, %{prev | entries: prev.entries ++ [entry]}}
+      {:cont, %{prev | entries: Enum.concat(prev.entries, [entry])}}
     else
       {:cont, group, start_group(entry)}
     end
@@ -742,7 +748,7 @@ defmodule MingaEditor.Commands.Help do
           []
         end
 
-      last_entry = List.last(group.entries)
+      last_entry = Enum.at(group.entries, -1)
       next_mode = last_entry.mode_after
       group_lines = format_group(group)
 
@@ -752,24 +758,28 @@ defmodule MingaEditor.Commands.Help do
   end
 
   @spec format_group(keystroke_group()) :: [String.t()]
-  defp format_group(%{kind: :insert_run, entries: entries}) when length(entries) > 3 do
-    first = hd(entries)
-    count = length(entries)
-    keys = Enum.map_join(entries, "", fn e -> format_insert_char(e.key) end)
-    display = if String.length(keys) > 18, do: String.slice(keys, 0, 15) <> "...", else: keys
+  defp format_group(%{kind: :insert_run, entries: entries}) do
+    if Enum.count(entries) > 3 do
+      first = hd(entries)
+      count = Enum.count(entries)
+      keys = Enum.map_join(entries, "", fn e -> format_insert_char(e.key) end)
+      display = if String.length(keys) > 18, do: String.slice(keys, 0, 15) <> "...", else: keys
 
-    [
-      String.pad_trailing(format_timestamp(first.timestamp), 13) <>
-        String.pad_trailing("insert", 18) <>
-        String.pad_trailing(inspect(display), 20) <>
-        "(#{count} chars)"
-    ]
+      [
+        String.pad_trailing(format_timestamp(first.timestamp), 13) <>
+          String.pad_trailing("insert", 18) <>
+          String.pad_trailing(inspect(display), 20) <>
+          "(#{count} chars)"
+      ]
+    else
+      format_entries(entries)
+    end
   end
 
   defp format_group(%{kind: :operator_sequence, entries: entries}) do
     first = hd(entries)
     keys = Enum.map_join(entries, " ", fn e -> Bindings.format_key(e.key) end)
-    last = List.last(entries)
+    last = Enum.at(entries, -1)
     mode_note = if first.mode_before != last.mode_after, do: "→ #{last.mode_after}", else: ""
 
     [
@@ -780,7 +790,10 @@ defmodule MingaEditor.Commands.Help do
     ]
   end
 
-  defp format_group(%{entries: entries}) do
+  defp format_group(%{entries: entries}), do: format_entries(entries)
+
+  @spec format_entries([KeystrokeHistory.entry()]) :: [String.t()]
+  defp format_entries(entries) do
     Enum.map(entries, fn entry ->
       key_str = Bindings.format_key(entry.key)
       mode_note = if entry.mode_before != entry.mode_after, do: "→ #{entry.mode_after}", else: ""

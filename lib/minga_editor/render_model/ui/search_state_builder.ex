@@ -47,7 +47,7 @@ defmodule MingaEditor.RenderModel.UI.SearchStateBuilder do
     content = Buffer.content(buf)
     lines = :binary.split(content, "\n", [:global])
     all_matches = Search.find_all_in_range(lines, pattern, 0, opts)
-    match_count = length(all_matches)
+    match_count = Enum.count(all_matches)
 
     if match_count > 0 do
       cursor = Buffer.cursor(buf)

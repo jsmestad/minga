@@ -100,7 +100,7 @@ defmodule Minga.Core.IntervalTree do
   defp build_balanced([single]), do: make_leaf(single)
 
   defp build_balanced(sorted) do
-    mid = div(length(sorted), 2)
+    mid = div(Enum.count(sorted), 2)
     {left_list, [pivot | right_list]} = Enum.split(sorted, mid)
 
     left = build_balanced(left_list)

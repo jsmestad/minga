@@ -179,12 +179,12 @@ defmodule MingaEditor.Agent.UIStateTest do
                "helloworld"
 
       collapsed = ui_with_input([""]) |> UIState.insert_paste("a\nb\nc")
-      assert length(collapsed.panel.pasted_blocks) == 1
+      assert Enum.count(collapsed.panel.pasted_blocks) == 1
       assert hd(collapsed.panel.pasted_blocks).text == "a\nb\nc"
       assert UIState.prompt_text(collapsed) == "a\nb\nc"
 
       multi = collapsed |> UIState.insert_paste("d\ne\nf")
-      assert length(multi.panel.pasted_blocks) == 2
+      assert Enum.count(multi.panel.pasted_blocks) == 2
     end
 
     test "toggle_paste_expand expands, collapses, and no-ops outside paste blocks" do

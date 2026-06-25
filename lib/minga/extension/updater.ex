@@ -12,7 +12,7 @@ defmodule Minga.Extension.Updater do
      git repos or reinstall hex packages, recompile, and rollback on failure.
 
   All check functions run in a background `Task` so they don't block the
-  editor. Results are communicated back via `Minga.Events` broadcasts.
+  editor. Results are communicated back via `Events` broadcasts.
   """
 
   alias Minga.Extension.Git, as: ExtGit
@@ -20,6 +20,7 @@ defmodule Minga.Extension.Updater do
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Extension.Supervisor, as: ExtSupervisor
   alias Minga.Mode.ExtensionConfirmState
+  alias Minga.Events
 
   @typedoc "Result of a single extension update attempt."
   @type update_result ::
@@ -45,13 +46,13 @@ defmodule Minga.Extension.Updater do
 
     case updates do
       [] ->
-        Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{
+        Events.broadcast(:log_message, %Events.LogMessageEvent{
           text: "All extensions are up to date.",
           level: :info
         })
 
       _ ->
-        Minga.Events.broadcast(
+        Events.broadcast(
           :extension_updates_available,
           %Minga.Extension.UpdatesAvailableEvent{updates: updates}
         )
@@ -72,20 +73,20 @@ defmodule Minga.Extension.Updater do
 
         case updates do
           [] ->
-            Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{
+            Events.broadcast(:log_message, %Events.LogMessageEvent{
               text: "#{name}: already up to date.",
               level: :info
             })
 
           _ ->
-            Minga.Events.broadcast(
+            Events.broadcast(
               :extension_updates_available,
               %Minga.Extension.UpdatesAvailableEvent{updates: updates}
             )
         end
 
       :error ->
-        Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{
+        Events.broadcast(:log_message, %Events.LogMessageEvent{
           text: "Extension #{name} not found in registry.",
           level: :info
         })
@@ -299,7 +300,7 @@ defmodule Minga.Extension.Updater do
 
   @spec report_results([update_result()]) :: :ok
   defp report_results([]) do
-    Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{
+    Events.broadcast(:log_message, %Events.LogMessageEvent{
       text: "No updates applied.",
       level: :info
     })
@@ -308,7 +309,7 @@ defmodule Minga.Extension.Updater do
   defp report_results(results) do
     lines = Enum.map(results, &format_result/1)
     msg = Enum.join(["Extension update results:" | lines], "\n")
-    Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{text: msg, level: :info})
+    Events.broadcast(:log_message, %Events.LogMessageEvent{text: msg, level: :info})
   end
 
   @spec format_result(update_result()) :: String.t()

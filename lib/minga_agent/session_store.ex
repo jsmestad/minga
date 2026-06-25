@@ -177,7 +177,7 @@ defmodule MingaAgent.SessionStore do
       |> Enum.filter(fn meta -> meta.timestamp < cutoff_str end)
 
     Enum.each(pruned, fn meta -> delete(meta.id, config_dir) end)
-    length(pruned)
+    Enum.count(pruned)
   end
 
   # ── Private: serialization ─────────────────────────────────────────────────
@@ -269,7 +269,7 @@ defmodule MingaAgent.SessionStore do
       model_name: data["model_name"] || "unknown",
       provider_name: data["provider_name"] || "unknown",
       messages: messages,
-      message_ids: deserialize_message_ids(data["message_ids"], length(messages)),
+      message_ids: deserialize_message_ids(data["message_ids"], Enum.count(messages)),
       pinned_ids: deserialize_pinned_ids(data["pinned_ids"]),
       usage: deserialize_turn_usage(data["usage"] || %{}),
       branches: Enum.map(data["branches"] || [], &deserialize_branch/1)
@@ -331,9 +331,11 @@ defmodule MingaAgent.SessionStore do
 
   @spec deserialize_attachment(map()) :: MingaAgent.Message.image_attachment()
   defp deserialize_attachment(attachment) do
+    attachment = Map.new(attachment, fn {key, value} -> {to_string(key), value} end)
+
     %{
-      filename: attachment["filename"] || attachment[:filename] || "image",
-      size_kb: attachment["size_kb"] || attachment[:size_kb] || 0
+      filename: Map.get(attachment, "filename", "image"),
+      size_kb: Map.get(attachment, "size_kb", 0)
     }
   end
 
@@ -452,7 +454,7 @@ defmodule MingaAgent.SessionStore do
         provider_name: data["provider_name"] || "unknown",
         preview: preview,
         recent_messages: recent_messages(messages),
-        message_count: length(messages),
+        message_count: Enum.count(messages),
         turn_count: count_user_messages(messages),
         cost: total_cost(data, messages)
       }

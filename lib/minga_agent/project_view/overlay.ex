@@ -152,10 +152,7 @@ defmodule MingaAgent.ProjectView.Overlay do
   @spec open_buffer_pid(ProjectView.t(), String.t()) ::
           {:ok, pid()} | :not_found | {:error, term()}
   defp open_buffer_pid(%ProjectView{} = view, relative_path) do
-    case Minga.Buffer.pid_for_path(buffer_path(view, relative_path)) do
-      {:ok, buf_pid} -> {:ok, buf_pid}
-      :not_found -> :not_found
-    end
+    Minga.Buffer.pid_for_path(buffer_path(view, relative_path))
   rescue
     _ -> {:error, {:buffer_lookup_failed, relative_path}}
   end

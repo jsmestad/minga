@@ -30,7 +30,7 @@ defmodule Minga.SessionTest do
       assert loaded.version == snapshot.version
       assert loaded.active_file == snapshot.active_file
       assert loaded.clean_shutdown == snapshot.clean_shutdown
-      assert length(loaded.buffers) == length(snapshot.buffers)
+      assert Enum.count(loaded.buffers) == Enum.count(snapshot.buffers)
 
       for {expected, actual} <- Enum.zip(snapshot.buffers, loaded.buffers) do
         assert actual.file == expected.file

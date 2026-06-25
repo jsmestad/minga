@@ -31,7 +31,7 @@ defmodule MingaEditor.UI.Picker.OptionScopeSourceTest do
   describe "candidates/1" do
     test "returns two scope choices when context is present" do
       items = OptionScopeSource.candidates(picker_context(@ctx))
-      assert length(items) == 2
+      assert Enum.count(items) == 2
       assert Enum.any?(items, fn %Item{id: {scope, _}} -> scope == :buffer end)
       assert Enum.any?(items, fn %Item{id: {scope, _}} -> scope == :global end)
     end

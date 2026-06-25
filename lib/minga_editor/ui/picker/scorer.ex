@@ -110,25 +110,28 @@ defmodule MingaEditor.UI.Picker.Scorer do
 
   @spec score_segment(String.t(), String.t()) :: non_neg_integer()
   defp score_segment(text, segment) do
-    case String.starts_with?(text, segment) do
-      true -> @prefix_score
-      false -> score_non_prefix_segment(text, segment)
+    if String.starts_with?(text, segment) do
+      @prefix_score
+    else
+      score_non_prefix_segment(text, segment)
     end
   end
 
   @spec score_non_prefix_segment(String.t(), String.t()) :: non_neg_integer()
   defp score_non_prefix_segment(text, segment) do
-    case String.contains?(text, segment) do
-      true -> @substring_score
-      false -> score_fuzzy_segment(text, segment)
+    if String.contains?(text, segment) do
+      @substring_score
+    else
+      score_fuzzy_segment(text, segment)
     end
   end
 
   @spec score_fuzzy_segment(String.t(), String.t()) :: non_neg_integer()
   defp score_fuzzy_segment(text, segment) do
-    case fuzzy_match?(text, segment) do
-      true -> @fuzzy_score
-      false -> 0
+    if fuzzy_match?(text, segment) do
+      @fuzzy_score
+    else
+      0
     end
   end
 

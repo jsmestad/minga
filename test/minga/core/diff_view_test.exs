@@ -267,7 +267,7 @@ defmodule Minga.Core.DiffViewTest do
       result = DiffView.build(base, current)
       changed_meta = Enum.filter(result.line_metadata, fn m -> m.type in [:added, :removed] end)
 
-      assert length(changed_meta) == 41
+      assert Enum.count(changed_meta) == 41
       assert Enum.all?(changed_meta, fn m -> m.word_changes == nil end)
     end
 

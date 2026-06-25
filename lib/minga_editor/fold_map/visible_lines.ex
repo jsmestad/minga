@@ -83,7 +83,7 @@ defmodule MingaEditor.FoldMap.VisibleLines do
 
   def buffer_range(entries) do
     {first, _} = List.first(entries)
-    {last, _} = List.last(entries)
+    {last, _} = Enum.at(entries, -1)
     {first, last}
   end
 end

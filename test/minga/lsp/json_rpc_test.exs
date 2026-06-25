@@ -132,7 +132,7 @@ defmodule Minga.LSP.JsonRpcTest do
 
       {messages, rest} = JsonRpc.decode(encoded)
 
-      assert length(messages) == 1
+      assert Enum.count(messages) == 1
       assert hd(messages)["method"] == "test/method"
       assert hd(messages)["params"]["key"] == "val"
       assert rest == ""
@@ -145,7 +145,7 @@ defmodule Minga.LSP.JsonRpcTest do
 
       {messages, rest} = JsonRpc.decode(buffer)
 
-      assert length(messages) == 2
+      assert Enum.count(messages) == 2
       assert Enum.at(messages, 0)["method"] == "first"
       assert Enum.at(messages, 1)["method"] == "second"
       assert rest == ""
@@ -217,7 +217,7 @@ defmodule Minga.LSP.JsonRpcTest do
 
       {messages, rest} = JsonRpc.decode(buffer)
 
-      assert length(messages) == 1
+      assert Enum.count(messages) == 1
       assert hd(messages)["method"] == "complete"
       assert rest == partial
     end

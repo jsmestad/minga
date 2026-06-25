@@ -64,9 +64,9 @@ defmodule Minga.Frontend.Adapter.GUI.WorkspacesEncoder do
 
     IO.iodata_to_binary([
       <<2::8, model.active_workspace_id::16, encode_workspace_mode(model.mode)::8,
-        encode_workspace_flags(model)::8, length(workspace_entries)::8>>,
+        encode_workspace_flags(model)::8, Enum.count(workspace_entries)::8>>,
       workspace_entries,
-      <<length(visible_tab_entries)::16>>,
+      <<Enum.count(visible_tab_entries)::16>>,
       visible_tab_entries
     ])
   end

@@ -82,7 +82,7 @@ defmodule Minga.Core.DiffPropertyTest do
       Enum.each(added_hunks, fn hunk ->
         reverted = Diff.revert_hunk(current, hunk)
 
-        assert length(reverted) < length(current),
+        assert Enum.count(reverted) < Enum.count(current),
                "Reverting added hunk should reduce line count"
       end)
     end
@@ -103,7 +103,7 @@ defmodule Minga.Core.DiffPropertyTest do
         assert hunks != [], "Non-empty current vs empty base should produce hunks"
 
         total_added = Enum.sum(Enum.map(hunks, & &1.count))
-        assert total_added == length(current)
+        assert total_added == Enum.count(current)
       end
     end
   end

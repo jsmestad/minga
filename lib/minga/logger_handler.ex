@@ -181,20 +181,16 @@ defmodule Minga.LoggerHandler do
 
   # ── :logger handler callbacks (OTP 21+) ────────────────────────────────────
 
-  @doc false
   @spec adding_handler(:logger.handler_config()) :: {:ok, :logger.handler_config()}
   def adding_handler(config), do: {:ok, config}
 
-  @doc false
   @spec removing_handler(:logger.handler_config()) :: :ok
   def removing_handler(_config), do: :ok
 
-  @doc false
   @spec changing_config(:update | :set, :logger.handler_config(), :logger.handler_config()) ::
           {:ok, :logger.handler_config()}
   def changing_config(_action, _old, new), do: {:ok, new}
 
-  @doc false
   @spec log(:logger.log_event(), :logger.handler_config()) :: :ok
   def log(%{level: level, msg: msg, meta: meta}, _config) do
     text = format_message(level, msg, meta)

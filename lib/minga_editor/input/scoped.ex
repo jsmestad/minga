@@ -246,7 +246,6 @@ defmodule MingaEditor.Input.Scoped do
         {:handled, Commands.execute(state, command)}
 
       {:prefix, prefix_node} ->
-        # Store the prefix node for the next key
         {:handled, AgentAccess.update_agent_ui(state, &UIState.set_prefix(&1, prefix_node))}
 
       :not_found ->
@@ -318,8 +317,8 @@ defmodule MingaEditor.Input.Scoped do
           boolean()
   defp expanded_block_spans_cursor?(block, lines, cursor_line) do
     text_lines = String.split(block.text, "\n")
-    text_len = length(text_lines)
-    max_start = length(lines) - text_len
+    text_len = Enum.count(text_lines)
+    max_start = Enum.count(lines) - text_len
 
     max_start >= 0 and
       Enum.any?(0..max_start//1, fn start ->

@@ -152,7 +152,7 @@ defmodule Minga.Language.RegistryTest do
     test "returns all registered languages" do
       langs = Registry.all()
       assert is_list(langs)
-      assert length(langs) > 40
+      assert Enum.count(langs) > 40
       names = Enum.map(langs, & &1.name)
       assert :elixir in names
       assert :ruby in names

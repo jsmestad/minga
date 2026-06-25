@@ -1689,7 +1689,7 @@ defmodule MingaAgent.Tools do
 
   defp apply_read_slice(content, path, opts) do
     lines = String.split(content, "\n")
-    total = length(lines)
+    total = Enum.count(lines)
     offset = Keyword.get(opts, :offset, 1)
     limit = Keyword.get(opts, :limit, total)
 
@@ -1836,7 +1836,7 @@ defmodule MingaAgent.Tools do
         ) :: String.t()
   defp format_multi_edit_result(router_ctx, path, results, ok_count) do
     base =
-      "applied #{ok_count}/#{length(results)} edits to #{path} (via #{route_name(router_ctx)})"
+      "applied #{ok_count}/#{Enum.count(results)} edits to #{path} (via #{route_name(router_ctx)})"
 
     failed =
       results

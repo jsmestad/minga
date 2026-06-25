@@ -40,10 +40,10 @@ defmodule Minga.LSP.WorkspaceEditTest do
       }
 
       result = WorkspaceEdit.parse(edit)
-      assert length(result) == 1
+      assert Enum.count(result) == 1
       {path, edits} = hd(result)
       assert String.ends_with?(path, "lib/foo.ex")
-      assert length(edits) == 2
+      assert Enum.count(edits) == 2
 
       # Edits should be in reverse document order (line 5 before line 2)
       [first, second] = edits
@@ -77,7 +77,7 @@ defmodule Minga.LSP.WorkspaceEditTest do
       }
 
       result = WorkspaceEdit.parse(edit)
-      assert length(result) == 2
+      assert Enum.count(result) == 2
       paths = Enum.map(result, fn {path, _} -> path end) |> Enum.sort()
       assert Enum.any?(paths, &String.ends_with?(&1, "a.ex"))
       assert Enum.any?(paths, &String.ends_with?(&1, "b.ex"))
@@ -105,7 +105,7 @@ defmodule Minga.LSP.WorkspaceEditTest do
       }
 
       result = WorkspaceEdit.parse(edit)
-      assert length(result) == 1
+      assert Enum.count(result) == 1
       {path, edits} = hd(result)
       assert String.ends_with?(path, "lib/bar.ex")
       assert [{{10, 2}, {10, 8}, "renamed"}] = edits
@@ -142,7 +142,7 @@ defmodule Minga.LSP.WorkspaceEditTest do
 
       # documentChanges should take priority
       result = WorkspaceEdit.parse(edit)
-      assert length(result) == 1
+      assert Enum.count(result) == 1
       {path, _} = hd(result)
       assert String.ends_with?(path, "a.ex")
     end
@@ -228,7 +228,7 @@ defmodule Minga.LSP.WorkspaceEditTest do
       }
 
       result = WorkspaceEdit.parse(edit)
-      assert length(result) == 1
+      assert Enum.count(result) == 1
       {path, _} = hd(result)
       assert String.ends_with?(path, "a.ex")
     end

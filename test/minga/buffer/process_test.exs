@@ -895,7 +895,7 @@ defmodule Minga.Buffer.ProcessTest do
       BufferProcess.insert_char(pid, "c")
       BufferProcess.insert_char(pid, "d")
       edits = consume_edit_deltas(pid, :test)
-      assert length(edits) == 2
+      assert Enum.count(edits) == 2
       assert [first, second] = edits
       assert first.inserted_text == "c"
       assert second.inserted_text == "d"
@@ -975,8 +975,8 @@ defmodule Minga.Buffer.ProcessTest do
       lsp_deltas = consume_edit_deltas(pid, :lsp)
       hl_deltas = consume_edit_deltas(pid, :highlight)
 
-      assert length(lsp_deltas) == 2
-      assert length(hl_deltas) == 2
+      assert Enum.count(lsp_deltas) == 2
+      assert Enum.count(hl_deltas) == 2
       assert Enum.map(lsp_deltas, & &1.inserted_text) == ["x", "y"]
       assert Enum.map(hl_deltas, & &1.inserted_text) == ["x", "y"]
     end
@@ -1008,7 +1008,7 @@ defmodule Minga.Buffer.ProcessTest do
 
       # :lsp reads all 3
       lsp_first = consume_edit_deltas(pid, :lsp)
-      assert length(lsp_first) == 3
+      assert Enum.count(lsp_first) == 3
 
       # More edits
       BufferProcess.insert_char(pid, "d")
@@ -1016,12 +1016,12 @@ defmodule Minga.Buffer.ProcessTest do
 
       # :highlight hasn't read yet, should get all 5
       hl_all = consume_edit_deltas(pid, :highlight)
-      assert length(hl_all) == 5
+      assert Enum.count(hl_all) == 5
       assert Enum.map(hl_all, & &1.inserted_text) == ["a", "b", "c", "d", "e"]
 
       # :lsp should get only the 2 new ones
       lsp_second = consume_edit_deltas(pid, :lsp)
-      assert length(lsp_second) == 2
+      assert Enum.count(lsp_second) == 2
       assert Enum.map(lsp_second, & &1.inserted_text) == ["d", "e"]
     end
 

@@ -82,7 +82,7 @@ defmodule MingaEditor.UI.Theme.CaptureCoverageTest do
       # `"` inside a comment can't pair across newlines and swallow captures.
       # Lock the count so a future parse regression that silently drops a
       # capture (and lets it escape the coverage guard) fails loudly here.
-      assert length(all_query_captures()) == 113
+      assert Enum.count(all_query_captures()) == 113
     end
 
     test "astrodark styles all captures except its documented plain set" do

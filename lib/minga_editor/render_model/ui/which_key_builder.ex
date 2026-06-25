@@ -19,12 +19,11 @@ defmodule MingaEditor.RenderModel.UI.WhichKeyBuilder do
   def build(%WhichKeyState{show: true, node: node, prefix_keys: prefix_keys, page: page}) do
     bindings = WhichKeyUI.bindings_from_node(node)
     prefix = prefix_keys |> Enum.join(" ")
-    page_count = max(div(length(bindings) + @page_size - 1, @page_size), 1)
+    page_count = max(div(Enum.count(bindings) + @page_size - 1, @page_size), 1)
 
     page_bindings =
       bindings
-      |> Enum.drop(page * @page_size)
-      |> Enum.take(@page_size)
+      |> Enum.slice(page * @page_size, @page_size)
       |> Enum.map(fn b ->
         %{key: b.key, description: b.description, kind: b.kind, icon: b.icon}
       end)

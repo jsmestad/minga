@@ -221,7 +221,7 @@ defmodule MingaEditor.PickerUI do
       when (cp == ?j and band(mods, @ctrl) != 0) or
              (cp == ?n and band(mods, @ctrl) != 0) or
              cp == @arrow_down do
-    new_sel = rem(sel + 1, length(actions))
+    new_sel = rem(sel + 1, Enum.count(actions))
     update_picker(state, &%{&1 | action_menu: {actions, new_sel}})
   end
 
@@ -234,7 +234,7 @@ defmodule MingaEditor.PickerUI do
       when (cp == ?k and band(mods, @ctrl) != 0) or
              (cp == ?p and band(mods, @ctrl) != 0) or
              cp == @arrow_up do
-    new_sel = if sel == 0, do: length(actions) - 1, else: sel - 1
+    new_sel = if sel == 0, do: Enum.count(actions) - 1, else: sel - 1
     update_picker(state, &%{&1 | action_menu: {actions, new_sel}})
   end
 
@@ -619,7 +619,7 @@ defmodule MingaEditor.PickerUI do
     refreshed = Picker.filter(refreshed, picker.query)
 
     # Clamp selection to new item count
-    max_sel = max(length(refreshed.filtered) - 1, 0)
+    max_sel = max(Enum.count(refreshed.filtered) - 1, 0)
     refreshed = %{refreshed | selected: min(picker.selected, max_sel)}
 
     update_picker(state, &%{&1 | picker: refreshed})

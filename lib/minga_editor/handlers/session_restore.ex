@@ -18,7 +18,6 @@ defmodule MingaEditor.Handlers.SessionRestore do
 
   # ── Public functions ──────────────────────────────────────────────────
 
-  @doc false
   @spec restore_session(state()) :: state()
   def restore_session(state) do
     case Session.load(EditorSessionState.session_opts(state.session)) do
@@ -31,7 +30,6 @@ defmodule MingaEditor.Handlers.SessionRestore do
     end
   end
 
-  @doc false
   @spec recover_swap_entries(state(), [Minga.Session.swap_entry()]) :: state()
   def recover_swap_entries(state, entries) do
     count = length(entries)
@@ -44,7 +42,6 @@ defmodule MingaEditor.Handlers.SessionRestore do
     Enum.reduce(entries, state, &recover_swap_entry/2)
   end
 
-  @doc false
   @spec maybe_check_swap_recovery(state()) :: :ok
   def maybe_check_swap_recovery(state) do
     if EditorSessionState.swap_enabled?(state.session) and state.backend != :headless do

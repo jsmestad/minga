@@ -38,7 +38,7 @@ defmodule Minga.Mode.SubstituteConfirm do
 
   # a → accept all remaining, finish
   def handle_key({?a, _mods}, %SubstituteConfirmState{} = state) do
-    remaining = Enum.to_list(state.current..(length(state.matches) - 1)//1)
+    remaining = Enum.to_list(state.current..(Enum.count(state.matches) - 1)//1)
     new_accepted = remaining ++ state.accepted
 
     {:execute_then_transition, [:apply_substitute_confirm], :normal,
@@ -62,7 +62,7 @@ defmodule Minga.Mode.SubstituteConfirm do
   defp advance(%SubstituteConfirmState{current: current, matches: matches} = state) do
     next = current + 1
 
-    if next >= length(matches) do
+    if next >= Enum.count(matches) do
       # Last match — finish
       {:execute_then_transition, [:apply_substitute_confirm], :normal, state}
     else

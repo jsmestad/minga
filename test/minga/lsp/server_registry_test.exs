@@ -6,7 +6,7 @@ defmodule Minga.LSP.ServerRegistryTest do
   describe "servers_for/1" do
     test "returns server configs for Elixir" do
       configs = ServerRegistry.servers_for(:elixir)
-      assert length(configs) == 1
+      assert Enum.count(configs) == 1
 
       [config] = configs
       assert config.name == :expert
@@ -160,7 +160,7 @@ defmodule Minga.LSP.ServerRegistryTest do
       all = ServerRegistry.servers_for(:elixir)
       available = ServerRegistry.available_servers_for(:elixir)
 
-      assert length(available) <= length(all)
+      assert Enum.count(available) <= Enum.count(all)
       assert Enum.all?(available, &ServerRegistry.available?/1)
     end
   end

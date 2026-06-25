@@ -34,7 +34,7 @@ defmodule Minga.Frontend.Adapter.GUI.HoverPopupEncoder do
     hover =
       IO.iodata_to_binary([
         <<@op_gui_hover_popup, 1::8, model.anchor_row::16, model.anchor_col::16, focused_byte::8,
-          model.scroll_offset::16, length(model.content_lines)::16>>
+          model.scroll_offset::16, Enum.count(model.content_lines)::16>>
         | line_data
       ])
 
@@ -53,7 +53,7 @@ defmodule Minga.Frontend.Adapter.GUI.HoverPopupEncoder do
   defp encode_line(%Line{} = line) do
     segment_data = Enum.map(line.segments, &encode_markdown_segment/1)
     line_type_byte = encode_line_type(line.line_type)
-    [<<line_type_byte::8, length(line.segments)::16>> | segment_data]
+    [<<line_type_byte::8, Enum.count(line.segments)::16>> | segment_data]
   end
 
   @spec encode_hover_action(String.t() | nil) :: binary()

@@ -221,7 +221,6 @@ defmodule Minga.Session.EventRecorderTest do
 
   describe "retention sweep" do
     test "deletes old events and keeps recent ones", %{recorder: recorder, db_dir: db_dir} do
-      # Insert an old event directly via Store
       db = open_db(db_dir)
 
       old_record = %Minga.Session.EventRecorder.EventRecord{

@@ -61,7 +61,7 @@ defmodule MingaEditor.FocusTree do
   @spec with_overlay(t(), TreeNode.content_type(), TreeNode.rect(), keyword()) :: t()
   def with_overlay(%TreeNode{children: children} = root, content_type, rect, opts \\ []) do
     overlay = TreeNode.new(content_type, rect, opts)
-    %{root | children: children ++ [overlay]} |> link_tree()
+    %{root | children: Enum.concat(children, [overlay])} |> link_tree()
   end
 
   @doc "Hit-tests `(row, col)` and returns the deepest node whose rect contains the point."
@@ -120,7 +120,7 @@ defmodule MingaEditor.FocusTree do
 
   @spec append_node_to_path(path() | nil, TreeNode.t()) :: path()
   defp append_node_to_path(nil, node), do: [node]
-  defp append_node_to_path(path, node), do: path ++ [node]
+  defp append_node_to_path(path, node), do: Enum.concat(path, [node])
 
   @spec link_node(TreeNode.t(), TreeNode.id() | nil, TreeNode.id() | nil, TreeNode.id() | nil) ::
           TreeNode.t()
@@ -315,13 +315,13 @@ defmodule MingaEditor.FocusTree do
   defp maybe_modeline(children, %{modeline: {_, _, _, 0}}, _win_id), do: children
 
   defp maybe_modeline(children, %{modeline: rect}, win_id) do
-    children ++ [TreeNode.new(:modeline, rect, handler: Input.ModeFSM, ref: win_id)]
+    Enum.concat(children, [TreeNode.new(:modeline, rect, handler: Input.ModeFSM, ref: win_id)])
   end
 
   @spec maybe_add([TreeNode.t()], Layout.rect() | nil, (Layout.rect() -> TreeNode.t())) ::
           [TreeNode.t()]
   defp maybe_add(children, nil, _build), do: children
-  defp maybe_add(children, rect, build), do: children ++ [build.(rect)]
+  defp maybe_add(children, rect, build), do: Enum.concat(children, [build.(rect)])
 
   # ── Footer-band overlay builders ──────────────────────────────────────────
   #
@@ -511,7 +511,7 @@ defmodule MingaEditor.FocusTree do
 
   @spec append_root_child(t(), TreeNode.t()) :: t()
   defp append_root_child(%TreeNode{children: children} = root, child) do
-    %{root | children: children ++ [child]}
+    %{root | children: Enum.concat(children, [child])}
   end
 
   @spec centered_picker_rect(Layout.t(), PickerData.t()) :: Layout.rect()
@@ -520,7 +520,7 @@ defmodule MingaEditor.FocusTree do
     item_capacity = max_height - 3
     {visible, _selected_offset} = PickerData.visible_items(picker, item_capacity)
     width = max(div(cols * 60, 100), 1)
-    height = min(length(visible) + 3, max_height) |> min(rows) |> max(1)
+    height = min(Enum.count(visible) + 3, max_height) |> min(rows) |> max(1)
     row = max(div(rows - height, 2), 0)
     col = max(div(cols - width, 2), 0)
     {row, col, width, height}
@@ -529,7 +529,7 @@ defmodule MingaEditor.FocusTree do
   @spec bottom_picker_rect(Layout.t(), PickerData.t()) :: Layout.rect()
   defp bottom_picker_rect(%Layout{terminal: {_row, _col, cols, rows}}, picker) do
     {visible, _selected_offset} = PickerData.visible_items(picker, max(rows - 3, 1))
-    item_count = length(visible)
+    item_count = Enum.count(visible)
     prompt_row = rows - 1
     separator_row = prompt_row - item_count - 1
     first_row = max(separator_row, 0)

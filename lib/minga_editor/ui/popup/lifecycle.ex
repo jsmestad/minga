@@ -178,7 +178,6 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
   defp apply_rule(%{workspace: %{windows: ws}} = state, %Rule{display: :split} = rule, buffer_pid) do
     previous_active = ws.active
 
-    # Create the popup window
     {next_id, ws} = Windows.allocate_id(ws)
     {rows, cols} = viewport_size(state)
     popup_window = Window.new(next_id, buffer_pid, rows, cols)

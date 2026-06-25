@@ -92,7 +92,7 @@ defmodule Minga.Integration.GUIProtocolTest do
 
       assert decoded["type"] == "gui_theme"
       assert is_list(decoded["slots"])
-      assert length(decoded["slots"]) > 20
+      assert Enum.count(decoded["slots"]) > 20
 
       # Verify a specific slot (editor_bg = slot 0x01)
       editor_bg_slot = Enum.find(decoded["slots"], fn s -> s["slot"] == 1 end)
@@ -115,7 +115,7 @@ defmodule Minga.Integration.GUIProtocolTest do
 
       assert decoded["type"] == "gui_tab_bar"
       assert decoded["active_index"] == 0
-      assert length(decoded["tabs"]) == 1
+      assert Enum.count(decoded["tabs"]) == 1
 
       [t1] = decoded["tabs"]
       assert t1["id"] == 1
@@ -302,7 +302,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["visible"] == true
       assert decoded["model"] == "claude"
       assert decoded["prompt"] == "test prompt"
-      assert length(decoded["messages"]) == 2
+      assert Enum.count(decoded["messages"]) == 2
 
       [msg1, msg2] = decoded["messages"]
       assert msg1["kind"] == "user"
@@ -343,7 +343,7 @@ defmodule Minga.Integration.GUIProtocolTest do
 
       assert decoded["type"] == "gui_agent_chat"
       assert decoded["visible"] == true
-      assert length(decoded["messages"]) == 1
+      assert Enum.count(decoded["messages"]) == 1
 
       [msg] = decoded["messages"]
       assert msg["kind"] == "styled_tool_call"
@@ -353,7 +353,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert msg["collapsed"] == false
       assert msg["auto_approved_scope"] == 2
       assert msg["duration_ms"] == 1500
-      assert length(msg["result_lines"]) == 2
+      assert Enum.count(msg["result_lines"]) == 2
 
       [[run1], [run2]] = msg["result_lines"]
       assert run1["text"] == "$ ls -la"
@@ -389,7 +389,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       decoded = JSON.decode!(json)
 
       assert decoded["type"] == "gui_agent_chat"
-      assert length(decoded["messages"]) == 1
+      assert Enum.count(decoded["messages"]) == 1
 
       [msg] = decoded["messages"]
       assert msg["kind"] == "tool_call"
@@ -421,11 +421,11 @@ defmodule Minga.Integration.GUIProtocolTest do
 
       assert decoded["type"] == "gui_agent_chat"
       assert decoded["help_visible"] == true
-      assert length(decoded["help_groups"]) == 2
+      assert Enum.count(decoded["help_groups"]) == 2
 
       [nav, copy] = decoded["help_groups"]
       assert nav["title"] == "Navigation"
-      assert length(nav["bindings"]) == 2
+      assert Enum.count(nav["bindings"]) == 2
 
       [b1, b2] = nav["bindings"]
       assert b1["key"] == "j / k"
@@ -434,7 +434,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert b2["description"] == "Top / bottom"
 
       assert copy["title"] == "Copy"
-      assert length(copy["bindings"]) == 1
+      assert Enum.count(copy["bindings"]) == 1
       assert hd(copy["bindings"])["key"] == "y"
     end
 
@@ -463,7 +463,6 @@ defmodule Minga.Integration.GUIProtocolTest do
     test "tab bar triggers harness to send select_tab gui_action back", %{port: port} do
       alias MingaEditor.Frontend.Protocol
 
-      # Step 1: Send a gui_tab_bar with 2 tabs. The harness will decode it
       # and automatically send a gui_action select_tab for the second tab.
       tab1 = %MingaEditor.State.Tab{id: 1, kind: :file, label: "main.ex"}
       tab2 = %MingaEditor.State.Tab{id: 2, kind: :file, label: "test.ex"}
@@ -472,7 +471,6 @@ defmodule Minga.Integration.GUIProtocolTest do
       cmd = ProtocolGUI.encode_gui_tab_bar(tb)
       Port.command(port, cmd)
 
-      # Step 2: We should receive two messages:
       # (a) The JSON report of the decoded gui_tab_bar
       # (b) The raw gui_action binary (select_tab for tab id=2)
       # Order may vary, so collect both.
@@ -487,7 +485,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert json_msg != nil
       tab_decoded = JSON.decode!(json_msg)
       assert tab_decoded["type"] == "gui_tab_bar"
-      assert length(tab_decoded["tabs"]) == 2
+      assert Enum.count(tab_decoded["tabs"]) == 2
 
       # Find the gui_action binary and decode it on the BEAM side.
       action_msg = Enum.find(messages, fn d -> not String.starts_with?(d, "{") end)
@@ -592,7 +590,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["line_number_style"] == 0
       assert decoded["line_number_width"] == 4
       assert decoded["sign_col_width"] == 1
-      assert length(decoded["entries"]) == 3
+      assert Enum.count(decoded["entries"]) == 3
 
       [e1, e2, e3] = decoded["entries"]
       assert e1["buf_line"] == 8
@@ -671,7 +669,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["anchor_row"] == 5
       assert decoded["anchor_col"] == 0
       assert decoded["selected_index"] == 0
-      assert length(decoded["items"]) == 2
+      assert Enum.count(decoded["items"]) == 2
       assert hd(decoded["items"])["label"] == "def"
       assert decoded["documentation"] == "Defines a function."
     end
@@ -702,7 +700,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["prefix"] == "SPC"
       assert decoded["page"] == 0
       assert decoded["page_count"] == 2
-      assert length(decoded["bindings"]) == 2
+      assert Enum.count(decoded["bindings"]) == 2
 
       [b1, b2] = decoded["bindings"]
       assert b1["kind"] == 0
@@ -758,7 +756,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["filtered_count"] == 1
       assert decoded["total_count"] == 2
       assert decoded["marked_count"] == 1
-      assert length(decoded["items"]) == 1
+      assert Enum.count(decoded["items"]) == 1
 
       item = hd(decoded["items"])
       assert item["label"] == "editor.ex"
@@ -785,7 +783,7 @@ defmodule Minga.Integration.GUIProtocolTest do
 
       assert decoded["type"] == "gui_picker_preview"
       assert decoded["visible"] == true
-      assert length(decoded["lines"]) == 2
+      assert Enum.count(decoded["lines"]) == 2
 
       [[s1, s2], [s3]] = decoded["lines"]
       assert s1["text"] == "def "
@@ -823,9 +821,9 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["visible"] == true
       assert decoded["active_tab_index"] == 0
       assert decoded["height_percent"] == 30
-      assert length(decoded["tabs"]) == 1
+      assert Enum.count(decoded["tabs"]) == 1
       assert hd(decoded["tabs"])["name"] == "Messages"
-      assert length(decoded["entries"]) == 1
+      assert Enum.count(decoded["entries"]) == 1
 
       entry_decoded = hd(decoded["entries"])
       assert entry_decoded["id"] == 42
@@ -865,7 +863,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["type"] == "gui_tool_manager"
       assert decoded["visible"] == true
       assert decoded["filter"] == 0
-      assert length(decoded["tools"]) == 1
+      assert Enum.count(decoded["tools"]) == 1
 
       t = hd(decoded["tools"])
       assert t["name"] == "elixir_ls"
@@ -987,7 +985,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["selected_id"] == "/project/lib"
       assert decoded["tree_width"] == 30
       assert decoded["root_path"] == "/project"
-      assert length(decoded["entries"]) == 2
+      assert Enum.count(decoded["entries"]) == 2
 
       [e1, e2] = decoded["entries"]
       assert e1["id"] == "/project/lib"
@@ -1090,14 +1088,14 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["cursor_row"] == 1
       assert decoded["cursor_col"] == 3
       assert decoded["cursor_shape"] == 1
-      assert length(decoded["rows"]) == 2
+      assert Enum.count(decoded["rows"]) == 2
 
       [r1, r2] = decoded["rows"]
       assert r1["text"] == "def foo do"
       assert r1["row_type"] == 0
       assert r1["row_id"] == Row.stable_id(:normal, 0)
       assert r1["buf_line"] == 0
-      assert length(r1["spans"]) == 1
+      assert Enum.count(r1["spans"]) == 1
       assert hd(r1["spans"])["fg"] == 0x51AFEF
       assert r2["row_type"] == 1
       assert r2["row_id"] == Row.stable_id(:fold_start, 1)

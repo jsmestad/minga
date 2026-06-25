@@ -109,10 +109,10 @@ defmodule MingaEditor.Frontend.Emit.SurfaceLayoutEmitTest do
 
     commit = <<Opcodes.commit_frame(), 0::32, 0::32>>
     # The layout packet rides inside the transaction, immediately before commit.
-    assert List.last(commands) |> binary_part(0, 1) == <<Opcodes.commit_frame()>>
+    assert Enum.at(commands, -1) |> binary_part(0, 1) == <<Opcodes.commit_frame()>>
     refute commit == cmd
     surface_idx = Enum.find_index(commands, &(&1 == cmd))
-    commit_idx = length(commands) - 1
+    commit_idx = Enum.count(commands) - 1
     assert surface_idx < commit_idx
   end
 

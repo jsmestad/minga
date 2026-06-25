@@ -35,7 +35,7 @@ defmodule MingaEditor.UINotificationCenterTest do
       assert notification.updated_at == 2_000
       assert notification.level == :error
       assert notification.title == "Build failed"
-      assert length(NotificationCenter.list(center)) == 1
+      assert Enum.count(NotificationCenter.list(center)) == 1
     end
   end
 

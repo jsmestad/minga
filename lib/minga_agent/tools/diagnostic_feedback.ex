@@ -48,14 +48,12 @@ defmodule MingaAgent.Tools.DiagnosticFeedback do
     quiet_ms = Keyword.get(opts, :quiet_period, @default_quiet_period)
     abs_path = Path.expand(file_path)
 
-    case has_lsp_client?(abs_path) do
-      true ->
-        uri = LspBridge.path_to_uri(abs_path)
-        summary = do_await(uri, timeout, quiet_ms)
-        {:ok, summary}
-
-      false ->
-        {:skip, "No LSP diagnostics available for this file."}
+    if has_lsp_client?(abs_path) do
+      uri = LspBridge.path_to_uri(abs_path)
+      summary = do_await(uri, timeout, quiet_ms)
+      {:ok, summary}
+    else
+      {:skip, "No LSP diagnostics available for this file."}
     end
   end
 
@@ -135,7 +133,7 @@ defmodule MingaAgent.Tools.DiagnosticFeedback do
       diagnostics ->
         counts = count_by_severity(diagnostics)
         summary = format_counts(counts)
-        header = "Diagnostics: #{length(diagnostics)} issues (#{summary})#{timeout_note}"
+        header = "Diagnostics: #{Enum.count(diagnostics)} issues (#{summary})#{timeout_note}"
 
         details =
           diagnostics
@@ -144,11 +142,11 @@ defmodule MingaAgent.Tools.DiagnosticFeedback do
             "  #{diag.severity} line #{diag.range.start_line + 1}: #{diag.message}"
           end)
 
-        remaining = length(diagnostics) - 10
+        remaining = Enum.count(diagnostics) - 10
 
         details =
           if remaining > 0 do
-            details ++ ["  ... and #{remaining} more"]
+            Enum.concat(details, ["  ... and #{remaining} more"])
           else
             details
           end

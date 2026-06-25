@@ -306,7 +306,7 @@ defmodule MingaEditor.State.Workspace do
       workspace
     else
       workspace
-      |> Map.put(:files, workspace.files ++ [file_ref])
+      |> Map.put(:files, Enum.concat(workspace.files, [file_ref]))
       |> persist()
     end
   end
@@ -657,6 +657,6 @@ defmodule MingaEditor.State.Workspace do
 
   @spec agent_color(pos_integer()) :: non_neg_integer()
   defp agent_color(id) do
-    Enum.at(@workspace_colors, rem(id - 1, length(@workspace_colors)))
+    Enum.at(@workspace_colors, rem(id - 1, Enum.count(@workspace_colors)))
   end
 end

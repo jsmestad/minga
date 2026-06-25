@@ -166,7 +166,7 @@ defmodule MingaAgent.RemoteAPITest do
     {:ok, events} = EventLog.events_after(db, session_id, last_seen_event_id, 100)
     MingaAgent.EventLog.Store.close(db)
 
-    if length(events) >= count do
+    if Enum.count(events) >= count do
       events
     else
       wait_for_events(session_id, last_seen_event_id, count, attempts - 1)

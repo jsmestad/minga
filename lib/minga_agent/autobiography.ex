@@ -229,7 +229,7 @@ defmodule MingaAgent.Autobiography do
 
   @spec last_event([EventRecord.t()], EventRecord.event_type()) :: EventRecord.t() | nil
   defp last_event(events, type) do
-    events |> Enum.filter(&(&1.event_type == type)) |> List.last()
+    events |> Enum.filter(&(&1.event_type == type)) |> Enum.at(-1)
   end
 
   @spec concat_deltas([EventRecord.t()], EventRecord.event_type()) :: String.t() | nil

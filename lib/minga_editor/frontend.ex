@@ -30,8 +30,8 @@ defmodule MingaEditor.Frontend do
 
   @doc "Sends a list of pre-encoded commands to the frontend process."
   @spec send_commands(GenServer.server(), [binary()]) :: :ok
-  defdelegate send_commands(server \\ MingaEditor.Frontend.Manager, commands),
-    to: MingaEditor.Frontend.Manager
+  def send_commands(server \\ MingaEditor.Frontend.Manager, commands),
+    do: MingaEditor.Frontend.Manager.send_commands(server, commands)
 
   @doc """
   Sends the per-frame render batch and stamps a monotonic send time so the
@@ -39,40 +39,42 @@ defmodule MingaEditor.Frontend do
   sample for the Renderer.Server → Port.Manager scheduling delay.
   """
   @spec send_render_commands(GenServer.server(), [binary()]) :: :ok
-  defdelegate send_render_commands(server \\ MingaEditor.Frontend.Manager, commands),
-    to: MingaEditor.Frontend.Manager
+  def send_render_commands(server \\ MingaEditor.Frontend.Manager, commands),
+    do: MingaEditor.Frontend.Manager.send_render_commands(server, commands)
 
   @doc "Subscribes the calling process to frontend events."
   @spec subscribe(GenServer.server()) :: :ok
-  defdelegate subscribe(server \\ MingaEditor.Frontend.Manager), to: MingaEditor.Frontend.Manager
+  def subscribe(server \\ MingaEditor.Frontend.Manager),
+    do: MingaEditor.Frontend.Manager.subscribe(server)
 
   @doc "Returns the terminal dimensions {width, height}."
   @spec terminal_size(GenServer.server()) :: {pos_integer(), pos_integer()} | nil
-  defdelegate terminal_size(server \\ MingaEditor.Frontend.Manager),
-    to: MingaEditor.Frontend.Manager
+  def terminal_size(server \\ MingaEditor.Frontend.Manager),
+    do: MingaEditor.Frontend.Manager.terminal_size(server)
 
   @doc "Returns true if the frontend is ready to receive commands."
   @spec ready?(GenServer.server()) :: boolean()
-  defdelegate ready?(server \\ MingaEditor.Frontend.Manager), to: MingaEditor.Frontend.Manager
+  def ready?(server \\ MingaEditor.Frontend.Manager),
+    do: MingaEditor.Frontend.Manager.ready?(server)
 
   @doc "Returns the frontend capabilities struct."
   @spec capabilities(GenServer.server()) :: MingaEditor.Frontend.Capabilities.t()
-  defdelegate capabilities(server \\ MingaEditor.Frontend.Manager),
-    to: MingaEditor.Frontend.Manager
+  def capabilities(server \\ MingaEditor.Frontend.Manager),
+    do: MingaEditor.Frontend.Manager.capabilities(server)
 
   # ── Capabilities ─────────────────────────────────────────────────────────
 
   @doc "Returns true if the frontend supports GUI chrome opcodes."
   @spec gui?(MingaEditor.Frontend.Capabilities.t()) :: boolean()
-  defdelegate gui?(caps), to: MingaEditor.Frontend.Capabilities
+  def gui?(caps), do: MingaEditor.Frontend.Capabilities.gui?(caps)
 
   @doc "Returns true if the frontend supports semantic render-model opcodes."
   @spec semantic_ui?(MingaEditor.Frontend.Capabilities.t()) :: boolean()
-  defdelegate semantic_ui?(caps), to: MingaEditor.Frontend.Capabilities
+  def semantic_ui?(caps), do: MingaEditor.Frontend.Capabilities.semantic_ui?(caps)
 
   @doc "Returns the default capabilities struct."
   @spec default_capabilities() :: MingaEditor.Frontend.Capabilities.t()
-  defdelegate default_capabilities, to: MingaEditor.Frontend.Capabilities, as: :default
+  def default_capabilities, do: MingaEditor.Frontend.Capabilities.default()
 
   @doc """
   Sends a bare, content-free frame transaction to the frontend (#2219).
@@ -120,7 +122,7 @@ defmodule MingaEditor.Frontend do
 
     cmds =
       if fallbacks != [] do
-        cmds ++ [Protocol.encode_set_font_fallback(fallbacks)]
+        Enum.concat(cmds, [Protocol.encode_set_font_fallback(fallbacks)])
       else
         cmds
       end
@@ -225,7 +227,7 @@ defmodule MingaEditor.Frontend do
   @spec decode_event(binary()) ::
           {:ok, MingaEditor.Frontend.Protocol.input_event()}
           | {:error, :unknown_opcode | :malformed}
-  defdelegate decode_event(data), to: Protocol
+  def decode_event(data), do: Protocol.decode_event(data)
 
   # ── GUI Chrome ───────────────────────────────────────────────────────────
 

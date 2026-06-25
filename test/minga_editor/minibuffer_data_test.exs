@@ -363,7 +363,7 @@ defmodule MingaEditor.MinibufferDataTest do
 
     test "candidates capped at 15" do
       {candidates, _total} = MinibufferData.complete_ex_command("")
-      assert length(candidates) <= 15
+      assert Enum.count(candidates) <= 15
     end
 
     test "all candidates have required fields" do
@@ -403,9 +403,9 @@ defmodule MingaEditor.MinibufferDataTest do
     test "total_candidates reflects uncapped match count" do
       {candidates, total} = MinibufferData.complete_ex_command("")
       # Empty query returns popular commands (capped at 15)
-      assert length(candidates) <= 15
+      assert Enum.count(candidates) <= 15
       # Total should be >= candidates since it's the uncapped count
-      assert total >= length(candidates)
+      assert total >= Enum.count(candidates)
     end
   end
 end

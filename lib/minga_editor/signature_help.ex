@@ -81,13 +81,13 @@ defmodule MingaEditor.SignatureHelp do
   @doc "Cycle to the next signature overload."
   @spec next_signature(t()) :: t()
   def next_signature(%__MODULE__{signatures: sigs, active_signature: idx} = sh) do
-    %{sh | active_signature: rem(idx + 1, length(sigs))}
+    %{sh | active_signature: rem(idx + 1, Enum.count(sigs))}
   end
 
   @doc "Cycle to the previous signature overload."
   @spec prev_signature(t()) :: t()
   def prev_signature(%__MODULE__{signatures: sigs, active_signature: idx} = sh) do
-    total = length(sigs)
+    total = Enum.count(sigs)
     %{sh | active_signature: rem(idx - 1 + total, total)}
   end
 
@@ -189,7 +189,7 @@ defmodule MingaEditor.SignatureHelp do
         do: 1,
         else:
           2 +
-            length(
+            Enum.count(
               Markdown.parse(
                 Enum.at(sig.parameters, sh.active_parameter, %{documentation: ""}).documentation
               )
@@ -197,8 +197,8 @@ defmodule MingaEditor.SignatureHelp do
 
     # Counter for multiple signatures
     counter =
-      if length(sh.signatures) > 1 do
-        "#{sh.active_signature + 1}/#{length(sh.signatures)}"
+      if Enum.count(sh.signatures) > 1 do
+        "#{sh.active_signature + 1}/#{Enum.count(sh.signatures)}"
       else
         nil
       end

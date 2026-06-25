@@ -25,7 +25,6 @@ defmodule MingaEditor.Handlers.BufferRegistry do
 
   # ── Public functions ──────────────────────────────────────────────────
 
-  @doc false
   @spec do_file_tree_open(state(), pid(), String.t(), FileTree.t()) :: state()
   def do_file_tree_open(state, pid, path, tree) do
     new_state = register_buffer(state, pid, path)
@@ -35,7 +34,6 @@ defmodule MingaEditor.Handlers.BufferRegistry do
     end)
   end
 
-  @doc false
   @spec open_file_by_path(state(), String.t()) :: state()
   def open_file_by_path(state, abs_path) do
     case open_file_by_path_result(state, abs_path) do
@@ -44,7 +42,6 @@ defmodule MingaEditor.Handlers.BufferRegistry do
     end
   end
 
-  @doc false
   @spec open_file_by_path_result(state(), String.t()) :: {:ok, state()} | {:error, term()}
   def open_file_by_path_result(state, abs_path) do
     case file_tab_for_path_in_active_workspace(state, abs_path) do
@@ -53,7 +50,6 @@ defmodule MingaEditor.Handlers.BufferRegistry do
     end
   end
 
-  @doc false
   @spec start_and_register_file(state(), String.t()) :: {:ok, state()} | {:error, term()}
   def start_and_register_file(state, abs_path) do
     case Commands.start_buffer(abs_path, EditorState.options_server(state)) do
@@ -66,7 +62,6 @@ defmodule MingaEditor.Handlers.BufferRegistry do
     end
   end
 
-  @doc false
   @spec file_tab_for_path_in_active_workspace(state(), String.t()) :: Tab.t() | nil
   def file_tab_for_path_in_active_workspace(
         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
@@ -83,7 +78,6 @@ defmodule MingaEditor.Handlers.BufferRegistry do
 
   def file_tab_for_path_in_active_workspace(_state, _path), do: nil
 
-  @doc false
   @spec buffer_tracked?(state(), pid()) :: boolean()
   def buffer_tracked?(state, pid) when is_pid(pid) do
     pid in state.workspace.buffers.list or buffer_tracked_in_tabs?(state, pid)
@@ -94,7 +88,6 @@ defmodule MingaEditor.Handlers.BufferRegistry do
   # edits don't yank the user away from their current file.
   # Skips code_lens/inlay_hint scheduling; those are lazy-loaded when
   # the user explicitly opens the buffer.
-  @doc false
   @spec register_buffer_background(state(), pid(), String.t()) :: state()
   def register_buffer_background(state, buffer_pid, file_path) do
     state =
@@ -108,7 +101,6 @@ defmodule MingaEditor.Handlers.BufferRegistry do
   # Shared buffer registration: adds buffer to the list, logs, refreshes
   # LSP status, and broadcasts :buffer_opened so event bus subscribers
   # (Git.Tracker, FileWatcher, Project, SyncServer, Config.Hooks) react.
-  @doc false
   @spec register_buffer(state(), pid(), String.t()) :: state()
   def register_buffer(state, buffer_pid, file_path) do
     state = Commands.add_buffer(state, buffer_pid)

@@ -44,7 +44,7 @@ defmodule MingaAgent.SessionExport do
 
       - **Date:** #{date}
       - **Model:** #{model}
-      - **Messages:** #{length(exportable)}
+      - **Messages:** #{Enum.count(exportable)}
 
       ---
       """
@@ -129,17 +129,16 @@ defmodule MingaAgent.SessionExport do
 
     parts =
       if thinking != "" do
-        parts ++
-          [
-            "## 🤖 Assistant\n\n<details>\n<summary>💭 Thinking</summary>\n\n#{thinking}\n\n</details>"
-          ]
+        Enum.concat(parts, [
+          "## 🤖 Assistant\n\n<details>\n<summary>💭 Thinking</summary>\n\n#{thinking}\n\n</details>"
+        ])
       else
-        parts ++ ["## 🤖 Assistant"]
+        Enum.concat(parts, ["## 🤖 Assistant"])
       end
 
     parts =
       if text != "" do
-        parts ++ [text]
+        Enum.concat(parts, [text])
       else
         parts
       end
@@ -174,14 +173,16 @@ defmodule MingaAgent.SessionExport do
 
     parts =
       if thinking != "" do
-        parts ++ ["<details>\n<summary>💭 Thinking</summary>\n\n#{thinking}\n\n</details>"]
+        Enum.concat(parts, [
+          "<details>\n<summary>💭 Thinking</summary>\n\n#{thinking}\n\n</details>"
+        ])
       else
         parts
       end
 
     parts =
       if text != "" do
-        parts ++ [text]
+        Enum.concat(parts, [text])
       else
         parts
       end

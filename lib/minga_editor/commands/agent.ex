@@ -587,9 +587,10 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec prompt_readiness(state(), Panel.t(), pid() | nil) :: prompt_readiness()
   defp prompt_readiness(state, %Panel{} = panel, session) do
-    case model_configured?(panel.model_name) do
-      true -> prompt_readiness_with_model(state, panel, session)
-      false -> :no_model
+    if model_configured?(panel.model_name) do
+      prompt_readiness_with_model(state, panel, session)
+    else
+      :no_model
     end
   end
 
@@ -746,7 +747,7 @@ defmodule MingaEditor.Commands.Agent do
     msg_count =
       if AgentAccess.session(state) do
         try do
-          length(Session.messages(AgentAccess.session(state)))
+          Enum.count(Session.messages(AgentAccess.session(state)))
         catch
           :exit, _ -> 0
         end
@@ -945,7 +946,7 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Clears all saved agent sessions from disk."
   @spec clear_session_history(state()) :: state()
   def clear_session_history(state) do
-    count = length(SessionStore.list())
+    count = Enum.count(SessionStore.list())
     SessionStore.clear_all()
 
     msg =
@@ -1797,7 +1798,7 @@ defmodule MingaEditor.Commands.Agent do
   defp do_dequeue_to_editor(state, []), do: EditorState.set_status(state, "No queued messages")
 
   defp do_dequeue_to_editor(state, all_queued) do
-    count = length(all_queued)
+    count = Enum.count(all_queued)
     label = if count == 1, do: "message", else: "messages"
     state = restore_queued_to_prompt(state, all_queued)
     EditorState.set_status(state, "Restored #{count} queued #{label} to editor")
@@ -1850,7 +1851,7 @@ defmodule MingaEditor.Commands.Agent do
           cached -> cached
         end
 
-      total = length(line_map)
+      total = Enum.count(line_map)
       target = Minga.Editing.resolve_scroll(panel.scroll, total, 1)
 
       case Enum.at(line_map, target) do
@@ -1907,7 +1908,7 @@ defmodule MingaEditor.Commands.Agent do
 
     line_map = cached_or_compute_line_index(panel, messages)
 
-    total = length(line_map)
+    total = Enum.count(line_map)
     target = Minga.Editing.resolve_scroll(panel.scroll, total, 1)
 
     {msg_idx, _type} =
@@ -1926,7 +1927,7 @@ defmodule MingaEditor.Commands.Agent do
 
     relative = target - msg_start
     idx = count_code_block_at(lines_for_msg, relative)
-    min(idx, length(blocks) - 1)
+    min(idx, Enum.count(blocks) - 1)
   end
 
   @spec count_code_block_at(

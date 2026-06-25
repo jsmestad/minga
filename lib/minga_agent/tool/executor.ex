@@ -39,7 +39,6 @@ defmodule MingaAgent.Tool.Executor do
     execute(name, args, registry_table, mode, [])
   end
 
-  @doc false
   @spec execute(String.t(), map(), atom(), execution_mode(), keyword()) :: result()
   def execute(name, args, registry_table, mode, opts)
       when is_binary(name) and is_map(args) and is_atom(registry_table) and mode in [:exec, :plan] and
@@ -71,7 +70,6 @@ defmodule MingaAgent.Tool.Executor do
     execute_approved(spec, args, mode, [])
   end
 
-  @doc false
   @spec execute_approved(Spec.t(), map(), execution_mode(), keyword()) ::
           {:ok, term()} | {:error, term()}
   def execute_approved(%Spec{} = spec, args, mode, opts)

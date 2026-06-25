@@ -74,7 +74,7 @@ defmodule Minga.Extension.JsonLoaderTest do
       assert {:ok, module} = JsonLoader.load(dir)
 
       hooks = module.__hook_schema__()
-      assert length(hooks) == 1
+      assert Enum.count(hooks) == 1
       assert {:session_start, opts} = hd(hooks)
       assert Keyword.get(opts, :command) == Path.join(dir, "hooks/hello.sh")
     end
@@ -94,7 +94,7 @@ defmodule Minga.Extension.JsonLoaderTest do
       assert {:ok, module} = JsonLoader.load(dir)
 
       servers = module.__mcp_server_schema__()
-      assert length(servers) == 1
+      assert Enum.count(servers) == 1
       assert {"my_mcp", opts} = hd(servers)
       assert Keyword.get(opts, :command) == Path.join(dir, "servers/my-mcp")
       assert Keyword.get(opts, :args) == ["--port", "3000"]
@@ -106,7 +106,7 @@ defmodule Minga.Extension.JsonLoaderTest do
       assert {:ok, module} = JsonLoader.load(dir)
 
       commands = module.__slash_command_schema__()
-      assert length(commands) == 1
+      assert Enum.count(commands) == 1
       assert {"greet", "Say hello", opts} = hd(commands)
       assert Keyword.get(opts, :command) == Path.join(dir, "commands/greet.sh")
     end
@@ -275,7 +275,7 @@ defmodule Minga.Extension.JsonLoaderTest do
       assert {:ok, module} = JsonLoader.load(dir)
 
       hooks = module.__hook_schema__()
-      assert length(hooks) == 2
+      assert Enum.count(hooks) == 2
       assert {:session_start, _} = Enum.at(hooks, 0)
       assert {:pre_tool_use, opts} = Enum.at(hooks, 1)
       assert Keyword.get(opts, :tool) == "write_*"
@@ -304,10 +304,10 @@ defmodule Minga.Extension.JsonLoaderTest do
       assert manifest.name == module
       assert manifest.description == "A simple greeting plugin"
       assert manifest.version == "0.1.0"
-      assert length(manifest.hooks) == 1
-      assert length(manifest.skills) == 1
-      assert length(manifest.mcp_servers) == 1
-      assert length(manifest.slash_commands) == 1
+      assert Enum.count(manifest.hooks) == 1
+      assert Enum.count(manifest.skills) == 1
+      assert Enum.count(manifest.mcp_servers) == 1
+      assert Enum.count(manifest.slash_commands) == 1
     end
   end
 

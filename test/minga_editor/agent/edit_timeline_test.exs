@@ -38,7 +38,7 @@ defmodule MingaEditor.Agent.EditTimelineTest do
         |> EditTimeline.record_edit("lib/foo.ex", "tc3", "edit_file", "v2", "v3")
 
       entries = EditTimeline.entries_for(timeline, "lib/foo.ex")
-      assert length(entries) == 3
+      assert Enum.count(entries) == 3
       assert Enum.map(entries, & &1.index) == [0, 1, 2]
       assert Enum.map(entries, & &1.tool_call_id) == ["tc1", "tc2", "tc3"]
       assert Enum.map(entries, & &1.tool_name) == ["edit_file", "write_file", "edit_file"]

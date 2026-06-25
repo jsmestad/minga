@@ -179,7 +179,7 @@ defmodule MingaEditor.AgentLifecycle do
 
     Minga.Log.debug(
       :agent,
-      "[sync] styled cache: #{length(styled)} entries, #{styled_assistant_count} with content (#{length(messages)} messages)"
+      "[sync] styled cache: #{Enum.count(styled)} entries, #{styled_assistant_count} with content (#{Enum.count(messages)} messages)"
     )
 
     # Cache the line index and styled messages in the UI state so

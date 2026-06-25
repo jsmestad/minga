@@ -60,7 +60,7 @@ defmodule Minga.Mode.ExtensionConfirm do
   defp advance(%ExtensionConfirmState{current: current, updates: updates} = state) do
     next = current + 1
 
-    if next >= length(updates) do
+    if next >= Enum.count(updates) do
       # Last update — finish and apply accepted
       {:execute_then_transition, [:apply_extension_updates], :normal, state}
     else

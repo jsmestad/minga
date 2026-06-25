@@ -81,7 +81,7 @@ defmodule Minga.Core.WrapMap do
   """
   @spec visual_row_count(t()) :: non_neg_integer()
   def visual_row_count(wrap_map) do
-    Enum.reduce(wrap_map, 0, fn entry, acc -> acc + length(entry) end)
+    Enum.reduce(wrap_map, 0, fn entry, acc -> acc + Enum.count(entry) end)
   end
 
   @doc """
@@ -92,7 +92,7 @@ defmodule Minga.Core.WrapMap do
   def logical_to_visual(wrap_map, logical_line) do
     wrap_map
     |> Enum.take(logical_line)
-    |> Enum.reduce(0, fn entry, acc -> acc + length(entry) end)
+    |> Enum.reduce(0, fn entry, acc -> acc + Enum.count(entry) end)
   end
 
   # ── Line wrapping ──────────────────────────────────────────────────────────
@@ -228,7 +228,7 @@ defmodule Minga.Core.WrapMap do
       taken
       |> Enum.with_index()
       |> Enum.filter(fn {g, _i} -> whitespace?(g) end)
-      |> List.last()
+      |> Enum.at(-1)
 
     case last_space do
       {_g, idx} when idx > 0 ->

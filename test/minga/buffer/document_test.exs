@@ -508,15 +508,15 @@ defmodule Minga.Buffer.DocumentTest do
          line_offsets: ls
        }) do
     lines_before = :binary.split(before, "\n", [:global])
-    expected_line = length(lines_before) - 1
-    expected_col = lines_before |> List.last() |> byte_size()
+    expected_line = Enum.count(lines_before) - 1
+    expected_col = lines_before |> Enum.at(-1) |> byte_size()
 
     text = before <> after_
 
     expected_lc =
       case text do
         "" -> 1
-        _ -> length(:binary.matches(text, "\n")) + 1
+        _ -> Enum.count(:binary.matches(text, "\n")) + 1
       end
 
     assert cl == expected_line,
@@ -552,8 +552,8 @@ defmodule Minga.Buffer.DocumentTest do
   defp byte_offset_to_position(text, byte_offset) do
     before_cursor = binary_part(text, 0, min(byte_offset, byte_size(text)))
     lines = :binary.split(before_cursor, "\n", [:global])
-    line = length(lines) - 1
-    col = lines |> List.last() |> byte_size()
+    line = Enum.count(lines) - 1
+    col = lines |> Enum.at(-1) |> byte_size()
     {line, col}
   end
 end

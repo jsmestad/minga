@@ -403,27 +403,21 @@ defmodule Minga.Extension do
       read_extension_attributes(env.module)
 
     quote do
-      @doc false
       @spec __option_schema__() :: [Minga.Extension.option_spec()]
       def __option_schema__, do: unquote(Macro.escape(options))
 
-      @doc false
       @spec __command_schema__() :: [Minga.Extension.command_spec()]
       def __command_schema__, do: unquote(Macro.escape(commands))
 
-      @doc false
       @spec __keybind_schema__() :: [Minga.Extension.keybind_spec()]
       def __keybind_schema__, do: unquote(Macro.escape(keybinds))
 
-      @doc false
       @spec __modeline_segment_schema__() :: [Minga.Extension.modeline_segment_spec()]
       def __modeline_segment_schema__, do: unquote(Macro.escape(modeline_segments))
 
-      @doc false
       @spec __capability_schema__() :: [Minga.Extension.capability_spec()]
       def __capability_schema__, do: unquote(Macro.escape(capabilities))
 
-      @doc false
       @spec __load_policy__() :: Minga.Extension.load_policy()
       def __load_policy__, do: unquote(Macro.escape(load_policy))
     end

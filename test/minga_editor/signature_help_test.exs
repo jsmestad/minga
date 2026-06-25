@@ -33,7 +33,7 @@ defmodule MingaEditor.SignatureHelpTest do
     test "parses a valid response" do
       sh = SignatureHelp.from_response(@sample_response, 10, 20)
       assert %SignatureHelp{} = sh
-      assert length(sh.signatures) == 2
+      assert Enum.count(sh.signatures) == 2
       assert sh.active_signature == 0
       assert sh.active_parameter == 0
     end
@@ -46,7 +46,7 @@ defmodule MingaEditor.SignatureHelpTest do
     test "parses parameter labels" do
       sh = SignatureHelp.from_response(@sample_response, 10, 20)
       [sig | _] = sh.signatures
-      assert length(sig.parameters) == 3
+      assert Enum.count(sig.parameters) == 3
       assert hd(sig.parameters).label == "bar"
     end
 

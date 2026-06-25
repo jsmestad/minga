@@ -26,7 +26,6 @@ defmodule MingaEditor.Session.StateTest do
       win_id = ws.windows.active
       original_buf = ws.buffers.active
 
-      # Create a new buffer to switch to
       {:ok, new_buf} = Minga.Buffer.Process.start_link(content: "new content")
 
       # Update buffers.active to the new buffer, but leave the window pointing at the old one
@@ -50,7 +49,6 @@ defmodule MingaEditor.Session.StateTest do
       ws = state.workspace
       win_id = ws.windows.active
 
-      # Set the window's content to semantic agent_chat
       window = Map.get(ws.windows.map, win_id)
       agent_window = %{window | content: Content.agent_chat(), buffer: nil}
       ws = %{ws | windows: %{ws.windows | map: Map.put(ws.windows.map, win_id, agent_window)}}

@@ -121,7 +121,7 @@ defmodule MingaAgent.RetryTest do
       )
 
       entries = :ets.tab2list(callback_log)
-      assert length(entries) == 2
+      assert Enum.count(entries) == 2
 
       [{1, delay1, reason1}, {2, delay2, reason2}] = entries
       assert reason1 == "HTTP 500"

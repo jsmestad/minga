@@ -398,7 +398,6 @@ defmodule Minga.Tool.Manager do
       File.rm(link_path)
     end
 
-    # Remove the tool directory
     installer = Installer.for_method(recipe.method)
     installer.uninstall(recipe, dest_dir)
   end

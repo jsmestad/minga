@@ -90,25 +90,25 @@ defmodule MingaEditor.State.InlineEdit do
   # MingaEditor.InlineOverlay.Store and MingaEditor.InlineOverlay.Prompt.
 
   @spec active(store(), pid() | nil) :: t() | nil
-  defdelegate active(store, buffer_pid), to: Store
+  def active(store, buffer_pid), do: Store.active(store, buffer_pid)
 
   @spec session?(store(), pid()) :: boolean()
-  defdelegate session?(store, session_pid), to: Store
+  def session?(store, session_pid), do: Store.session?(store, session_pid)
 
   @spec put(store(), t()) :: store()
-  defdelegate put(store, edit), to: Store
+  def put(store, edit), do: Store.put(store, edit)
 
   @spec dismiss(store(), pid() | nil) :: {store(), pid() | nil}
-  defdelegate dismiss(store, buffer_pid), to: Store
+  def dismiss(store, buffer_pid), do: Store.dismiss(store, buffer_pid)
 
   @spec append_input(t(), String.t()) :: t()
-  defdelegate append_input(edit, text), to: Prompt
+  def append_input(edit, text), do: Prompt.append_input(edit, text)
 
   @spec backspace(t()) :: t()
-  defdelegate backspace(edit), to: Prompt
+  def backspace(edit), do: Prompt.backspace(edit)
 
   @spec scroll(t(), integer()) :: t()
-  defdelegate scroll(edit, delta), to: Prompt
+  def scroll(edit, delta), do: Prompt.scroll(edit, delta)
 
   @doc "Marks the edit as thinking."
   @spec thinking(t(), pid()) :: t()

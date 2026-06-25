@@ -477,7 +477,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
            cursor_line: cursor_line
          } = params
        ) do
-    if cursor_line < first_line or cursor_line >= first_line + length(lines) do
+    if cursor_line < first_line or cursor_line >= first_line + Enum.count(lines) do
       refetch_wrapped_viewport(Map.merge(params, %{top: cursor_line, offset: 0}))
     else
       adjust_wrapped_viewport_from_map(params)
@@ -578,7 +578,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     top_count =
       wrap_map
       |> List.first([%{byte_offset: 0, text: "", source_text: "", indent_width: 0}])
-      |> length()
+      |> Enum.count()
       |> max(1)
 
     viewport = Viewport.put_top_visual(viewport, top, offset, top_count)
@@ -620,7 +620,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   defp do_visual_start_to_top([], first_line, _desired_start), do: {first_line, 0, 1}
 
   defp do_visual_start_to_top([entry | rest], line, desired_start) do
-    count = max(length(entry), 1)
+    count = max(Enum.count(entry), 1)
 
     if desired_start < count do
       {line, desired_start, count}
@@ -664,7 +664,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     wrap_entry
     |> Enum.with_index()
     |> Enum.filter(fn {row, _idx} -> row.byte_offset <= cursor_byte_col end)
-    |> List.last({%{byte_offset: 0}, 0})
+    |> Enum.at(-1, {%{byte_offset: 0}, 0})
     |> elem(1)
   end
 

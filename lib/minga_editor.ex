@@ -18,6 +18,7 @@ defmodule MingaEditor do
   alias Minga.Buffer
   alias Minga.Config
   alias Minga.Editing.Completion
+  alias Minga.Events, as: EventBus
   alias Minga.Git
 
   alias Minga.Diagnostics.Decorations, as: DiagDecorations
@@ -58,6 +59,7 @@ defmodule MingaEditor do
   alias MingaEditor.Input
   alias Minga.LSP.SyncServer, as: LspSyncServer
   alias Minga.Mode
+  alias Minga.Log
   # PopupLifecycle alias removed: warnings popup replaced by bottom panel (#825)
 
   @typedoc "Options for starting the editor."
@@ -68,7 +70,7 @@ defmodule MingaEditor do
           | {:parser_manager, GenServer.server()}
           | {:keymap_server, GenServer.server()}
           | {:options_server, GenServer.server() | nil}
-          | {:events_registry, Minga.Events.registry()}
+          | {:events_registry, EventBus.registry()}
           | {:buffer, pid()}
           | {:width, pos_integer()}
           | {:height, pos_integer()}
@@ -185,7 +187,7 @@ defmodule MingaEditor do
     renderer_pid = renderer_pid_for_backend(state.backend)
 
     if state.backend != :headless and is_nil(renderer_pid) do
-      Minga.Log.warning(:editor, "Renderer.Server not found at init; rendering synchronously")
+      Log.warning(:editor, "Renderer.Server not found at init; rendering synchronously")
     end
 
     state = EditorState.set_renderer(state, renderer_pid)
@@ -200,42 +202,42 @@ defmodule MingaEditor do
     # Logger redirect and startup messages
     if state.backend != :headless do
       log_path = Minga.LoggerHandler.install()
-      Minga.Log.info(:editor, "Editor started")
-      Minga.Log.info(:editor, "Log file: #{log_path}")
+      Log.info(:editor, "Editor started")
+      Log.info(:editor, "Log file: #{log_path}")
     else
-      Minga.Log.info(:editor, "Editor started")
+      Log.info(:editor, "Editor started")
     end
 
     state = Startup.apply_config_options(state)
     events_registry = EditorState.events_registry(state)
-    Minga.Events.subscribe(:diagnostics_updated, events_registry)
-    Minga.Events.subscribe(:lsp_status_changed, events_registry)
+    EventBus.subscribe(:diagnostics_updated, events_registry)
+    EventBus.subscribe(:lsp_status_changed, events_registry)
 
     # Refresh file tree state when buffers, project files, git, diagnostics, or project roots change.
-    Minga.Events.subscribe(:buffer_saved, events_registry)
-    Minga.Events.subscribe(:buffer_changed, events_registry)
-    Minga.Events.subscribe(:file_written, events_registry)
-    Minga.Events.subscribe(:project_rebuilt, events_registry)
-    Minga.Events.subscribe(:git_status_changed, events_registry)
-    Minga.Events.subscribe(:command_done, events_registry)
+    EventBus.subscribe(:buffer_saved, events_registry)
+    EventBus.subscribe(:buffer_changed, events_registry)
+    EventBus.subscribe(:file_written, events_registry)
+    EventBus.subscribe(:project_rebuilt, events_registry)
+    EventBus.subscribe(:git_status_changed, events_registry)
+    EventBus.subscribe(:command_done, events_registry)
 
     # Tool manager progress: show install/update status in the status line.
-    Minga.Events.subscribe(:tool_install_started, events_registry)
-    Minga.Events.subscribe(:tool_install_progress, events_registry)
-    Minga.Events.subscribe(:tool_install_complete, events_registry)
-    Minga.Events.subscribe(:tool_install_failed, events_registry)
-    Minga.Events.subscribe(:tool_uninstall_complete, events_registry)
-    Minga.Events.subscribe(:tool_missing, events_registry)
-    Minga.Events.subscribe(:log_message, events_registry)
-    Minga.Events.subscribe(:face_overrides_changed, events_registry)
-    Minga.Events.subscribe(:agent_session_stopped, events_registry)
-    Minga.Events.subscribe(:agent_session_restarted, events_registry)
-    Minga.Events.subscribe(:background_subagent_started, events_registry)
-    Minga.Events.subscribe(:node_connected, events_registry)
-    Minga.Events.subscribe(:node_disconnected, events_registry)
-    Minga.Events.subscribe(:load_user_themes, events_registry)
-    Minga.Events.subscribe(:option_changed, events_registry)
-    Minga.Events.subscribe(:extension_updates_available, events_registry)
+    EventBus.subscribe(:tool_install_started, events_registry)
+    EventBus.subscribe(:tool_install_progress, events_registry)
+    EventBus.subscribe(:tool_install_complete, events_registry)
+    EventBus.subscribe(:tool_install_failed, events_registry)
+    EventBus.subscribe(:tool_uninstall_complete, events_registry)
+    EventBus.subscribe(:tool_missing, events_registry)
+    EventBus.subscribe(:log_message, events_registry)
+    EventBus.subscribe(:face_overrides_changed, events_registry)
+    EventBus.subscribe(:agent_session_stopped, events_registry)
+    EventBus.subscribe(:agent_session_restarted, events_registry)
+    EventBus.subscribe(:background_subagent_started, events_registry)
+    EventBus.subscribe(:node_connected, events_registry)
+    EventBus.subscribe(:node_disconnected, events_registry)
+    EventBus.subscribe(:load_user_themes, events_registry)
+    EventBus.subscribe(:option_changed, events_registry)
+    EventBus.subscribe(:extension_updates_available, events_registry)
 
     # Monitor all initial buffers so we get :DOWN when they die.
     all_initial_pids =
@@ -326,7 +328,7 @@ defmodule MingaEditor do
     result = Buffer.save(buf)
 
     if result == :ok do
-      Minga.Log.info(:editor, "Saved: #{Commands.Helpers.buffer_display_name(buf)}")
+      Log.info(:editor, "Saved: #{Commands.Helpers.buffer_display_name(buf)}")
     end
 
     new_state = Renderer.render_or_async(state)
@@ -424,7 +426,7 @@ defmodule MingaEditor do
   end
 
   def handle_info({:minga_input, {:capabilities_updated, caps}}, state) do
-    Minga.Log.info(
+    Log.info(
       :editor,
       "Frontend capabilities updated: #{inspect(caps.frontend_type)}, color: #{inspect(caps.color_depth)}"
     )
@@ -486,7 +488,7 @@ defmodule MingaEditor do
   # ── File watcher notification ──
   def handle_info({:file_changed_on_disk, path} = msg, state) do
     new_state = FileWatcherHelpers.handle_file_change(state, path)
-    Minga.Log.info(:editor, "External change detected: #{path}")
+    Log.info(:editor, "External change detected: #{path}")
     {new_state, effects} = FileEventHandler.handle(new_state, msg)
     {:noreply, EffectHandler.apply_effects(new_state, effects)}
   end
@@ -700,7 +702,7 @@ defmodule MingaEditor do
   # writes agent/agentic fields on EditorState directly.
 
   def handle_info({:agent_event, session_pid, event}, state) do
-    Minga.Log.debug(:agent, "[event] #{inspect(event)}")
+    Log.debug(:agent, "[event] #{inspect(event)}")
     route_agent_event(state, session_pid, event)
   end
 
@@ -737,7 +739,7 @@ defmodule MingaEditor do
   def handle_info({:DOWN, ref, :process, pid, reason}, state) do
     case classify_down(state, ref, pid, reason) do
       :buffer ->
-        Minga.Log.info(:editor, "Buffer process #{inspect(pid)} died, removing from state")
+        Log.info(:editor, "Buffer process #{inspect(pid)} died, removing from state")
         state = EditorState.remove_dead_buffer(state, pid)
         {:noreply, Renderer.render_or_async(state)}
 
@@ -897,7 +899,7 @@ defmodule MingaEditor do
   # Defensive fallthrough: a lane with no apply handler degrades to a logged
   # no-op rather than crashing the editor GenServer.
   defp apply_async_result(state, lane, _result) do
-    Minga.Log.warning(:editor, "[async_action] no apply handler for lane #{inspect(lane)}")
+    Log.warning(:editor, "[async_action] no apply handler for lane #{inspect(lane)}")
     state
   end
 
@@ -1080,7 +1082,6 @@ defmodule MingaEditor do
     :exit, _ -> state
   end
 
-  @doc false
   @spec apply_runtime_config_option(EditorState.t(), atom(), term()) :: EditorState.t()
   def apply_runtime_config_option(state, :theme, theme_name) when is_atom(theme_name) do
     theme = MingaEditor.UI.Theme.get!(theme_name)
@@ -1333,14 +1334,12 @@ defmodule MingaEditor do
   #    so the next delta can schedule again.
   # apply_textobject_positions moved to HighlightHandler
 
-  @doc false
   @spec schedule_render_delay_ms(state(), non_neg_integer()) :: non_neg_integer()
   def schedule_render_delay_ms(%EditorState{} = state, delay_ms)
       when is_integer(delay_ms) and delay_ms >= 0 do
     max(delay_ms, ResourcePressure.render_delay_ms(state.resource_pressure))
   end
 
-  @doc false
   @spec schedule_render(state(), non_neg_integer()) :: state()
   def schedule_render(%{render_timer: ref} = state, _delay_ms) when is_reference(ref), do: state
 
@@ -1365,7 +1364,6 @@ defmodule MingaEditor do
 
   # Applies diagnostic underline decorations to the buffer matching the URI.
   # Called when {:minga_event, :diagnostics_updated, ...} arrives via the event bus.
-  @doc false
   @spec apply_diagnostic_decorations(state(), String.t()) :: :ok
   def apply_diagnostic_decorations(state, uri) do
     path = LspSyncServer.uri_to_path(uri)
@@ -1391,7 +1389,6 @@ defmodule MingaEditor do
   # Resets nav-flash tracking after a buffer switch so the cursor
   # position of the new buffer doesn't trigger a false-positive flash
   # from the old buffer's cursor line.
-  @doc false
   @spec reset_nav_flash_tracking(state()) :: state()
   def reset_nav_flash_tracking(state) do
     state = cancel_nav_flash(state)
@@ -1399,7 +1396,6 @@ defmodule MingaEditor do
   end
 
   # Cancels any active nav-flash. Called on every keypress.
-  @doc false
   @spec cancel_nav_flash(state()) :: state()
   def cancel_nav_flash(%{shell_state: %{nav_flash: nil}} = state), do: state
 
@@ -1409,7 +1405,6 @@ defmodule MingaEditor do
     EditorState.cancel_nav_flash(state)
   end
 
-  @doc false
   @spec cancel_yank_flash(state()) :: state()
   def cancel_yank_flash(%{shell_state: %{yank_flash: nil}} = state), do: state
 
@@ -1469,7 +1464,7 @@ defmodule MingaEditor do
   end
 
   defp handle_paste_event_editor(state, _text) do
-    Minga.Log.info(:editor, "Paste ignored (no active buffer)")
+    Log.info(:editor, "Paste ignored (no active buffer)")
     state
   end
 
@@ -1478,7 +1473,6 @@ defmodule MingaEditor do
   # Refreshes the tool manager picker items if it's currently open.
   # Called when tool install events change tool status so the user
   # sees live updates (spinner -> checkmark, etc.).
-  @doc false
   @spec maybe_refresh_tool_picker(state()) :: state()
   def maybe_refresh_tool_picker(
         %{
@@ -1492,7 +1486,6 @@ defmodule MingaEditor do
 
   def maybe_refresh_tool_picker(state), do: state
 
-  @doc false
   @spec resolve_git_root() :: String.t() | nil
   def resolve_git_root do
     root = Minga.Project.resolve_root()
@@ -1503,7 +1496,6 @@ defmodule MingaEditor do
     end
   end
 
-  @doc false
   @spec refresh_git_repo(String.t()) :: :ok
   def refresh_git_repo(git_root) do
     case Git.lookup_repo(git_root) do
@@ -1516,7 +1508,6 @@ defmodule MingaEditor do
 
   @warning_popup_debounce_ms 200
 
-  @doc false
   @spec maybe_schedule_warning_popup(state()) :: state()
   def maybe_schedule_warning_popup(%{shell_state: %{warning_popup_timer: ref}} = state)
       when is_reference(ref) do
@@ -1567,7 +1558,6 @@ defmodule MingaEditor do
     to: CompletionHandling,
     as: :maybe_handle
 
-  @doc false
   @spec do_render(state()) :: state()
   def do_render(state) do
     Renderer.render_or_async(state)

@@ -145,7 +145,7 @@ defmodule MingaEditor.Commands.EditTimeline do
 
   @spec next_path([String.t()], String.t() | nil, 1 | -1) :: String.t()
   defp next_path(paths, nil, 1), do: hd(paths)
-  defp next_path(paths, nil, -1), do: List.last(paths)
+  defp next_path(paths, nil, -1), do: Enum.at(paths, -1)
 
   defp next_path(paths, current_path, direction) do
     count = length(paths)

@@ -189,7 +189,7 @@ defmodule MingaAgent.MarkdownTest do
       text = "```elixir\ndef hello, do: :world"
       result = Markdown.parse(text)
       # Should not crash, just treat remaining lines as code
-      assert length(result) == 2
+      assert Enum.count(result) == 2
     end
 
     test "parses indented code blocks outside lists" do
@@ -227,7 +227,7 @@ defmodule MingaAgent.MarkdownTest do
     test "parses multiple paragraphs" do
       text = "First line\n\nSecond line"
       result = Markdown.parse(text)
-      assert length(result) == 3
+      assert Enum.count(result) == 3
     end
 
     test "handles mixed formatting in one line" do
@@ -345,7 +345,7 @@ defmodule MingaAgent.MarkdownTest do
       """
 
       blocks = Markdown.extract_code_blocks(md)
-      assert length(blocks) == 2
+      assert Enum.count(blocks) == 2
       assert Enum.at(blocks, 0).language == "python"
       assert Enum.at(blocks, 0).content == "print(\"hello\")"
       assert Enum.at(blocks, 1).language == "bash"

@@ -196,7 +196,7 @@ defmodule Minga.DiredTest do
       listing = Dired.format_listing(dired)
       lines = String.split(listing, "\n", trim: true)
 
-      assert length(lines) == 2
+      assert Enum.count(lines) == 2
     end
   end
 
@@ -299,7 +299,7 @@ defmodule Minga.DiredTest do
       ]
 
       ops = Dired.diff_operations(entries, [], "/d")
-      assert length(ops) == 2
+      assert Enum.count(ops) == 2
       assert {:delete, "/d/a.txt"} in ops
       assert {:delete, "/d/b.txt"} in ops
     end

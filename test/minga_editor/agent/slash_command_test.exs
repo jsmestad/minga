@@ -139,7 +139,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
   describe "completions/1" do
     test "returns all commands for empty prefix" do
       all = SlashCommand.completions("")
-      assert length(all) == length(SlashCommand.commands())
+      assert Enum.count(all) == Enum.count(SlashCommand.commands())
     end
 
     test "filters by prefix" do
@@ -212,7 +212,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
         labels =
           SlashCommand.completion_candidates(mock_state(), "model zz") |> Enum.map(& &1.label)
 
-        assert length(labels) == 25
+        assert Enum.count(labels) == 25
         assert MapSet.new(labels) == MapSet.new(models)
       after
         Minga.Config.set_option(:agent_models, [])
@@ -221,7 +221,6 @@ defmodule MingaEditor.Agent.SlashCommandTest do
   end
 
   describe "execute/2" do
-    # Build a minimal state that the slash commands can work with
     defp mock_state(opts \\ []) do
       session = Keyword.get(opts, :session)
 

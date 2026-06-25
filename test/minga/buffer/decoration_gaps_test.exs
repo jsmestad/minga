@@ -10,7 +10,6 @@ defmodule Minga.Buffer.DecorationGapsTest do
     test "replace_generated_content resets decorations" do
       {:ok, pid} = BufferProcess.start_link(content: "hello world")
 
-      # Add a decoration
       :ok =
         BufferProcess.batch_decorations(pid, fn decs ->
           {_id, decs} =
@@ -53,7 +52,7 @@ defmodule Minga.Buffer.DecorationGapsTest do
       end)
 
       decs = BufferProcess.decorations(pid)
-      assert length(decs.virtual_texts) == 1
+      assert Enum.count(decs.virtual_texts) == 1
 
       # Reload
       File.write!(path, "updated")
@@ -111,7 +110,7 @@ defmodule Minga.Buffer.DecorationGapsTest do
 
       # other_group highlight survives
       highlights = IntervalTree.to_list(decs.highlights)
-      assert length(highlights) == 1
+      assert Enum.count(highlights) == 1
     end
 
     test "remove_group with term() key" do
@@ -131,7 +130,7 @@ defmodule Minga.Buffer.DecorationGapsTest do
 
       decs = Decorations.remove_group(decs, {:lsp, :elixir_ls})
       highlights = IntervalTree.to_list(decs.highlights)
-      assert length(highlights) == 1
+      assert Enum.count(highlights) == 1
     end
   end
 
@@ -155,7 +154,7 @@ defmodule Minga.Buffer.DecorationGapsTest do
       assert BufferProcess.content(pid) == "new content"
       decs = BufferProcess.decorations(pid)
       highlights = IntervalTree.to_list(decs.highlights)
-      assert length(highlights) == 1
+      assert Enum.count(highlights) == 1
     end
 
     test "supports cursor option" do
@@ -190,13 +189,13 @@ defmodule Minga.Buffer.DecorationGapsTest do
 
       # First call builds cache
       vts_line0 = Decorations.virtual_texts_for_line(decs, 0)
-      assert length(vts_line0) == 1
+      assert Enum.count(vts_line0) == 1
 
       vts_line1 = Decorations.virtual_texts_for_line(decs, 1)
       assert vts_line1 == []
 
       vts_line2 = Decorations.virtual_texts_for_line(decs, 2)
-      assert length(vts_line2) == 1
+      assert Enum.count(vts_line2) == 1
     end
 
     test "cache is invalidated on add" do
@@ -208,7 +207,7 @@ defmodule Minga.Buffer.DecorationGapsTest do
           placement: :eol
         )
 
-      assert length(Decorations.virtual_texts_for_line(decs, 0)) == 1
+      assert Enum.count(Decorations.virtual_texts_for_line(decs, 0)) == 1
 
       {_id, decs} =
         Decorations.add_virtual_text(decs, {0, 5},
@@ -216,7 +215,7 @@ defmodule Minga.Buffer.DecorationGapsTest do
           placement: :eol
         )
 
-      assert length(Decorations.virtual_texts_for_line(decs, 0)) == 2
+      assert Enum.count(Decorations.virtual_texts_for_line(decs, 0)) == 2
     end
   end
 end

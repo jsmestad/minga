@@ -451,11 +451,15 @@ defmodule MingaEditor.LspActions do
   """
   @spec selection_expand(state()) :: state()
   def selection_expand(%{lsp: %{selection_ranges: ranges, selection_range_index: idx}} = state)
-      when is_list(ranges) and idx + 1 < length(ranges) do
-    new_idx = idx + 1
-    range = Enum.at(ranges, new_idx)
-    state = EditorState.update_lsp(state, &LSPState.expand_selection/1)
-    apply_selection_range(state, range)
+      when is_list(ranges) do
+    if idx + 1 < Enum.count(ranges) do
+      new_idx = idx + 1
+      range = Enum.at(ranges, new_idx)
+      state = EditorState.update_lsp(state, &LSPState.expand_selection/1)
+      apply_selection_range(state, range)
+    else
+      selection_range(state)
+    end
   end
 
   def selection_expand(state) do
@@ -842,7 +846,7 @@ defmodule MingaEditor.LspActions do
       _ ->
         PickerUI.open(state, LocationSource, %{
           locations: items,
-          title: "References (#{length(items)})"
+          title: "References (#{Enum.count(items)})"
         })
     end
   end
@@ -1033,7 +1037,7 @@ defmodule MingaEditor.LspActions do
       _ ->
         PickerUI.open(state, LocationSource, %{
           locations: items,
-          title: "Document Symbols (#{length(items)})"
+          title: "Document Symbols (#{Enum.count(items)})"
         })
     end
   end
@@ -1065,7 +1069,7 @@ defmodule MingaEditor.LspActions do
       _ ->
         PickerUI.open(state, LocationSource, %{
           locations: items,
-          title: "Workspace Symbols (#{length(items)})"
+          title: "Workspace Symbols (#{Enum.count(items)})"
         })
     end
   end
@@ -1126,7 +1130,6 @@ defmodule MingaEditor.LspActions do
   end
 
   def handle_prepare_call_hierarchy_response(state, {:ok, [item | _]}) do
-    # Store the call hierarchy item and request incoming calls
     request_incoming_calls(state, item)
   end
 
@@ -1327,7 +1330,7 @@ defmodule MingaEditor.LspActions do
 
       pid ->
         Buffer.apply_edits(pid, edits)
-        {st, fc + 1, ec + length(edits)}
+        {st, fc + 1, ec + Enum.count(edits)}
     end
   end
 
@@ -1503,7 +1506,7 @@ defmodule MingaEditor.LspActions do
   defp peek_definition_markdown(path, content, line, col) do
     lines = String.split(content, "\n", trim: false)
     start_line = max(line - 7, 0)
-    end_line = min(line + 7, max(length(lines) - 1, 0))
+    end_line = min(line + 7, max(Enum.count(lines) - 1, 0))
 
     preview =
       lines

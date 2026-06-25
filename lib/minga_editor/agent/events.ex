@@ -722,7 +722,7 @@ defmodule MingaEditor.Agent.Events do
   defp update_active_shell_for_session(state, callback, args) do
     shell = EditorState.active_shell_module(state)
 
-    if function_exported?(shell, callback, length(args) + 1) do
+    if function_exported?(shell, callback, Enum.count(args) + 1) do
       %{state | shell_state: apply(shell, callback, [state.shell_state | args])}
     else
       state
@@ -745,7 +745,7 @@ defmodule MingaEditor.Agent.Events do
 
   @spec update_stashed_shell_for_session(StateStash.t(), atom(), [term()]) :: StateStash.t()
   defp update_stashed_shell_for_session(%StateStash{} = stashed, callback, args) do
-    if function_exported?(stashed.module, callback, length(args) + 1) do
+    if function_exported?(stashed.module, callback, Enum.count(args) + 1) do
       %StateStash{stashed | state: apply(stashed.module, callback, [stashed.state | args])}
     else
       stashed

@@ -180,7 +180,6 @@ defmodule Minga.Integration.SnapshotTest do
 
       assert_screen_snapshot(ctx, "workflow_after_insert")
 
-      # Delete the line
       send_keys_sync(ctx, "dd")
 
       assert_screen_snapshot(ctx, "workflow_after_dd")

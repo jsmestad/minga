@@ -1264,7 +1264,7 @@ defmodule MingaEditor.Commands.Editing do
     else
       line_text = Buffer.lines(buf, line, 1) |> List.first() |> then(&(&1 || ""))
       before = binary_part(line_text, 0, col)
-      before |> String.graphemes() |> List.last() |> then(&(&1 || ""))
+      before |> String.graphemes() |> Enum.at(-1) |> then(&(&1 || ""))
     end
   end
 

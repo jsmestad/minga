@@ -25,7 +25,7 @@ defmodule Minga.Extension.OverlayTest do
         )
 
       overlays = Overlay.all()
-      assert length(overlays) == 1
+      assert Enum.count(overlays) == 1
 
       [overlay] = overlays
       assert overlay.extension == :test_extension
@@ -42,7 +42,7 @@ defmodule Minga.Extension.OverlayTest do
       :ok = Overlay.set(:test_extension, "cursor_1", buf, position: {20, 3}, content: "v2")
 
       overlays = Overlay.all()
-      assert length(overlays) == 1
+      assert Enum.count(overlays) == 1
       assert hd(overlays).position == {20, 3}
       assert hd(overlays).content == "v2"
     end
@@ -52,7 +52,7 @@ defmodule Minga.Extension.OverlayTest do
       :ok = Overlay.set(:test_extension, "a", buf, position: {1, 0})
       :ok = Overlay.set(:other_extension, "b", buf, position: {2, 0})
 
-      assert length(Overlay.all()) == 2
+      assert Enum.count(Overlay.all()) == 2
     end
   end
 
@@ -65,7 +65,7 @@ defmodule Minga.Extension.OverlayTest do
       :ok = Overlay.remove(:test_extension, "a")
 
       overlays = Overlay.all()
-      assert length(overlays) == 1
+      assert Enum.count(overlays) == 1
       assert hd(overlays).overlay_id == "b"
     end
   end
@@ -80,7 +80,7 @@ defmodule Minga.Extension.OverlayTest do
       :ok = Overlay.remove_all(:test_extension)
 
       overlays = Overlay.all()
-      assert length(overlays) == 1
+      assert Enum.count(overlays) == 1
       assert hd(overlays).extension == :other_extension
     end
   end
@@ -93,7 +93,7 @@ defmodule Minga.Extension.OverlayTest do
       :ok = Overlay.set(:test_extension, "a", buf1, position: {1, 0})
       :ok = Overlay.set(:test_extension, "b", buf2, position: {2, 0})
 
-      assert length(Overlay.for_buffer(buf1)) == 1
+      assert Enum.count(Overlay.for_buffer(buf1)) == 1
       assert hd(Overlay.for_buffer(buf1)).overlay_id == "a"
 
       Process.exit(buf1, :kill)
@@ -118,7 +118,7 @@ defmodule Minga.Extension.OverlayTest do
 
       :ok = Overlay.unregister_source(:builtin)
 
-      assert length(Overlay.all()) == 1
+      assert Enum.count(Overlay.all()) == 1
     end
   end
 

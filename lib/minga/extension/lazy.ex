@@ -19,6 +19,7 @@ defmodule Minga.Extension.Lazy do
   alias Minga.Extension.Manifest
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Extension.Supervisor, as: ExtSupervisor
+  alias Minga.Log
 
   @typedoc "Result from registering stubs for a lazy extension."
   @type stub_result :: :ok | {:error, term()}
@@ -139,7 +140,7 @@ defmodule Minga.Extension.Lazy do
 
       with :ok <- register_stub_commands(supervisor, registry, name, module, cmd_registry, opts),
            :ok <- register_stub_keybinds(name, module, keymap) do
-        Minga.Log.info(
+        Log.info(
           :config,
           "Extension #{name} registered as stub (#{inspect(manifest.load_policy)})"
         )
@@ -159,7 +160,7 @@ defmodule Minga.Extension.Lazy do
 
   @spec log_stub_failure(atom(), term(), GenServer.server()) :: :ok
   defp log_stub_failure(name, reason, registry) do
-    Minga.Log.warning(
+    Log.warning(
       :config,
       "Extension #{name} stub registration failed: #{inspect(reason)}"
     )
@@ -192,18 +193,18 @@ defmodule Minga.Extension.Lazy do
     cmd_registry = Keyword.get(opts, :command_registry, Command.Registry)
     keymap = Keyword.get(opts, :keymap, Minga.Keymap.Active)
 
-    Minga.Log.info(:config, "Extension #{name} autoloading on first use")
+    Log.info(:config, "Extension #{name} autoloading on first use")
 
     ExtSupervisor.cleanup_extension_contributions(name, cmd_registry, keymap, opts)
     ExtRegistry.update(registry, name, status: :stopped)
 
     case ExtSupervisor.start_extension(supervisor, registry, name, entry, opts) do
       {:ok, pid} ->
-        Minga.Log.info(:config, "Extension #{name} autoloaded successfully")
+        Log.info(:config, "Extension #{name} autoloaded successfully")
         {:ok, pid}
 
       {:error, reason} ->
-        Minga.Log.warning(:config, "Extension #{name} autoload failed: #{inspect(reason)}")
+        Log.warning(:config, "Extension #{name} autoload failed: #{inspect(reason)}")
         {:error, reason}
     end
   end
@@ -372,7 +373,7 @@ defmodule Minga.Extension.Lazy do
       {:ok, invalid} ->
         reason = {:invalid_execute, cmd_name, invalid}
 
-        Minga.Log.warning(
+        Log.warning(
           :config,
           "Extension #{ext_name} command #{cmd_name} has invalid :execute: #{inspect(invalid)}"
         )
@@ -382,7 +383,7 @@ defmodule Minga.Extension.Lazy do
       :error ->
         reason = {:missing_execute, cmd_name}
 
-        Minga.Log.warning(
+        Log.warning(
           :config,
           "Extension #{ext_name} command #{cmd_name} is missing required :execute option"
         )
@@ -425,7 +426,7 @@ defmodule Minga.Extension.Lazy do
         {:cont, :ok}
 
       {:error, reason} ->
-        Minga.Log.warning(
+        Log.warning(
           :config,
           "Extension #{name} stub command #{cmd_name} rejected: #{inspect(reason)}"
         )
@@ -472,7 +473,7 @@ defmodule Minga.Extension.Lazy do
           {:cont, :ok}
 
         {:error, reason} ->
-          Minga.Log.warning(
+          Log.warning(
             :config,
             "Extension #{name} stub keybind #{inspect(key_str)} failed: #{reason}"
           )
@@ -614,19 +615,19 @@ defmodule Minga.Extension.Lazy do
         do_start_deferred(supervisor, registry, name, entry, opts)
 
       {:ok, %{status: status}} ->
-        Minga.Log.debug(
+        Log.debug(
           :config,
           "Extension #{name} deferred load skipped (status: #{status})"
         )
 
       :error ->
-        Minga.Log.debug(:config, "Extension #{name} deferred load skipped (unregistered)")
+        Log.debug(:config, "Extension #{name} deferred load skipped (unregistered)")
     end
 
     :ok
   rescue
     e ->
-      Minga.Log.warning(
+      Log.warning(
         :config,
         "Extension #{name} deferred load crashed: #{Exception.message(e)}"
       )
@@ -644,10 +645,10 @@ defmodule Minga.Extension.Lazy do
   defp do_start_deferred(supervisor, registry, name, entry, opts) do
     case ExtSupervisor.start_extension(supervisor, registry, name, entry, opts) do
       {:ok, _pid} ->
-        Minga.Log.info(:config, "Extension #{name} deferred load complete")
+        Log.info(:config, "Extension #{name} deferred load complete")
 
       {:error, reason} ->
-        Minga.Log.warning(
+        Log.warning(
           :config,
           "Extension #{name} deferred load failed: #{inspect(reason)}"
         )

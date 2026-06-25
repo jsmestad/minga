@@ -104,7 +104,7 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
       buf = start_buffer(content: "", buffer_name: "[new 1]")
 
       candidates = BufferSource.candidates(fake_state([buf]))
-      assert length(candidates) == 1
+      assert Enum.count(candidates) == 1
     end
 
     test "still excludes unlisted buffers" do
@@ -156,7 +156,7 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
         end
       end)
 
-      assert length(selected.workspace.buffers.list) == 1
+      assert Enum.count(selected.workspace.buffers.list) == 1
       assert fallback_pid != nil
       assert EditorState.active_window_struct(selected).buffer == fallback_pid
       assert Buffer.buffer_name(fallback_pid) == "[new 1]"
@@ -214,7 +214,7 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
       labels = Enum.map(candidates, fn %Item{label: label} -> label end)
 
       assert Enum.any?(labels, &String.contains?(&1, "*Messages*"))
-      assert length(candidates) >= 2
+      assert Enum.count(candidates) >= 2
     end
   end
 
@@ -227,7 +227,7 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
       candidates = BufferAllSource.candidates(fake_state([file_buf]))
       labels = Enum.map(candidates, fn %Item{label: label} -> label end)
 
-      assert length(candidates) == 2
+      assert Enum.count(candidates) == 2
       assert Enum.any?(labels, &String.contains?(&1, "*Messages*"))
     end
 
@@ -243,7 +243,7 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
       singleton = Minga.Log.MessagesBuffer.pid()
 
       candidates = BufferAllSource.candidates(fake_state([singleton]))
-      assert length(candidates) == 1
+      assert Enum.count(candidates) == 1
     end
 
     test "SPC b b does not include extra special buffers" do
@@ -252,7 +252,7 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
       candidates = BufferSource.candidates(fake_state([file_buf]))
       labels = Enum.map(candidates, fn %Item{label: label} -> label end)
 
-      assert length(candidates) == 1
+      assert Enum.count(candidates) == 1
       refute Enum.any?(labels, &String.contains?(&1, "*Messages*"))
     end
   end
@@ -274,7 +274,7 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
       candidates = BufferAllSource.candidates(fake_state([]))
       labels = Enum.map(candidates, fn %Item{label: label} -> label end)
 
-      assert length(candidates) == 1
+      assert Enum.count(candidates) == 1
       assert Enum.any?(labels, &String.contains?(&1, "*Messages*"))
     end
 
@@ -309,14 +309,14 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
 
     test "SPC b B shows singleton from extra special buffers" do
       candidates = BufferAllSource.candidates(fake_state([]))
-      assert length(candidates) == 1
+      assert Enum.count(candidates) == 1
     end
 
     test "SPC b B shows special buffers already in the list" do
       singleton = Minga.Log.MessagesBuffer.pid()
 
       candidates = BufferAllSource.candidates(fake_state([singleton]))
-      assert length(candidates) == 1
+      assert Enum.count(candidates) == 1
     end
   end
 end

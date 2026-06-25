@@ -23,7 +23,7 @@ defmodule MingaEditor.Input.RegistryTest do
              MingaEditor.Input.DiffReview
            ]
 
-    assert List.last(handlers) == MingaEditor.Input.ModeFSM
+    assert Enum.at(handlers, -1) == MingaEditor.Input.ModeFSM
   end
 
   test "extension handler priority controls relative order without callbacks on the hot path" do

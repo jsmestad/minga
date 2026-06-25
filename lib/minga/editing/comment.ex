@@ -192,6 +192,6 @@ defmodule Minga.Editing.Comment do
     line
     |> String.graphemes()
     |> Enum.take_while(&(&1 == " " or &1 == "\t"))
-    |> length()
+    |> Enum.count()
   end
 end

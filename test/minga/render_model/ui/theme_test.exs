@@ -21,7 +21,7 @@ defmodule Minga.RenderModel.UI.ThemeTest do
       slots = [{0x01, 0xFF0000}, {0x02, 0x00FF00}, {0x03, 0x0000FF}]
       theme = %Theme{name: :multi, color_slots: slots}
 
-      assert length(theme.color_slots) == 3
+      assert Enum.count(theme.color_slots) == 3
     end
 
     test "color_slots can be empty" do

@@ -42,7 +42,6 @@ defmodule MingaAgent.Tools.LspDiagnosticsTest do
 
       # The tool reads from the default Diagnostics server by URI.
       # Since we're using a custom server, we need to test the formatting directly.
-      # Let's test the format of the output instead.
       result = format_test_diagnostics("/home/dev/lib/editor.ex", diagnostics)
 
       assert result =~ "3 diagnostics"
@@ -75,7 +74,7 @@ defmodule MingaAgent.Tools.LspDiagnosticsTest do
       |> Enum.filter(fn sev -> Map.get(counts, sev, 0) > 0 end)
       |> Enum.map_join(", ", fn sev -> "#{Map.get(counts, sev)} #{sev}" end)
 
-    header = "#{path}: #{length(diagnostics)} diagnostics (#{summary})"
+    header = "#{path}: #{Enum.count(diagnostics)} diagnostics (#{summary})"
 
     details =
       Enum.map(diagnostics, fn diag ->

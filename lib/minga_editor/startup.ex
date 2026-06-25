@@ -31,6 +31,7 @@ defmodule MingaEditor.Startup do
   alias MingaEditor.VimState
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
+  alias Minga.Config.Options
 
   @doc """
   Builds the complete initial EditorState from startup opts.
@@ -55,9 +56,9 @@ defmodule MingaEditor.Startup do
       Keyword.get(opts, :sidebar_registry, MingaEditor.Extension.Sidebar.default_table())
 
     options_server =
-      case Keyword.get(opts, :options_server, Minga.Config.Options.default_server()) do
-        nil -> Minga.Config.Options.default_server()
-        server -> Minga.Config.Options.validate_server!(server)
+      case Keyword.get(opts, :options_server, Options.default_server()) do
+        nil -> Options.default_server()
+        server -> Options.validate_server!(server)
       end
 
     width = Keyword.get(opts, :width, 80)
@@ -216,7 +217,7 @@ defmodule MingaEditor.Startup do
           pid() | nil,
           pos_integer(),
           pos_integer(),
-          Minga.Config.Options.server()
+          Options.server()
         ) :: {Window.t() | nil, :semantic_agent_window | :noop}
   def build_initial_window(scope, win_id, active_buf, rows, cols) do
     build_initial_window(
@@ -225,7 +226,7 @@ defmodule MingaEditor.Startup do
       active_buf,
       rows,
       cols,
-      Minga.Config.Options.default_server()
+      Options.default_server()
     )
   end
 
@@ -358,7 +359,7 @@ defmodule MingaEditor.Startup do
   @spec startup_view_state(
           EditorState.backend(),
           Minga.CLI.view_mode() | nil,
-          Minga.Config.Options.server() | nil
+          Options.server() | nil
         ) :: {atom(), UIState.t()}
   defp startup_view_state(backend, nil, options_server) do
     cli_flags = Minga.CLI.startup_flags()
@@ -372,7 +373,7 @@ defmodule MingaEditor.Startup do
     do: startup_view_state_from_config(Config.get(:startup_view))
 
   defp startup_view_state(_backend, :auto, options_server),
-    do: startup_view_state_from_config(Minga.Config.Options.get(options_server, :startup_view))
+    do: startup_view_state_from_config(Options.get(options_server, :startup_view))
 
   @spec startup_view_state_from_config(atom()) :: {atom(), UIState.t()}
   defp startup_view_state_from_config(:agent), do: agent_view_state()
@@ -421,7 +422,7 @@ defmodule MingaEditor.Startup do
   """
   @spec apply_config_options(MingaEditor.State.t()) :: MingaEditor.State.t()
   def apply_config_options(state) do
-    theme_name = Minga.Config.Options.get(EditorState.options_server(state), :theme)
+    theme_name = Options.get(EditorState.options_server(state), :theme)
     theme = MingaEditor.UI.Theme.get!(theme_name)
     state = EditorState.apply_theme(state, theme)
 
@@ -445,7 +446,7 @@ defmodule MingaEditor.Startup do
   - `:line_spacing` — `1.0` → `1.2` (GUI text benefits from breathing room;
     TUI stays at 1.0 because terminal cells have fixed height)
   """
-  @spec apply_gui_defaults(MingaEditor.Frontend.Capabilities.t(), Minga.Config.Options.server()) ::
+  @spec apply_gui_defaults(MingaEditor.Frontend.Capabilities.t(), Options.server()) ::
           :ok
   def apply_gui_defaults(caps, options_server) do
     alias MingaEditor.Frontend.Capabilities
@@ -454,14 +455,14 @@ defmodule MingaEditor.Startup do
       # Only override if the user hasn't explicitly set a preference.
       # :hybrid is the TUI default; if it is still the implicit default, we can
       # safely switch to :absolute for native GUI frontends.
-      if Minga.Config.Options.get(options_server, :line_numbers) == :hybrid and
-           not Minga.Config.Options.explicitly_set?(options_server, :line_numbers) do
-        Minga.Config.Options.set(options_server, :line_numbers, :absolute)
+      if Options.get(options_server, :line_numbers) == :hybrid and
+           not Options.explicitly_set?(options_server, :line_numbers) do
+        Options.set(options_server, :line_numbers, :absolute)
       end
 
-      if Minga.Config.Options.get(options_server, :line_spacing) == 1.0 and
-           not Minga.Config.Options.explicitly_set?(options_server, :line_spacing) do
-        Minga.Config.Options.set(options_server, :line_spacing, 1.2)
+      if Options.get(options_server, :line_spacing) == 1.0 and
+           not Options.explicitly_set?(options_server, :line_spacing) do
+        Options.set(options_server, :line_spacing, 1.2)
       end
     end
 
@@ -481,12 +482,12 @@ defmodule MingaEditor.Startup do
 
   def send_font_config(%{port_manager: port} = state) do
     options_server = EditorState.options_server(state)
-    family = Minga.Config.Options.get(options_server, :font_family)
-    config_size = Minga.Config.Options.get(options_server, :font_size)
+    family = Options.get(options_server, :font_family)
+    config_size = Options.get(options_server, :font_size)
     size = state.font_size_override || config_size
-    ligatures = Minga.Config.Options.get(options_server, :font_ligatures)
-    weight = Minga.Config.Options.get(options_server, :font_weight)
-    fallback = Minga.Config.Options.get(options_server, :font_fallback)
+    ligatures = Options.get(options_server, :font_ligatures)
+    weight = Options.get(options_server, :font_weight)
+    fallback = Options.get(options_server, :font_fallback)
 
     MingaEditor.Frontend.configure_font(port, family, size, ligatures, weight, fallback || [])
   catch

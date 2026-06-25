@@ -11,6 +11,7 @@ defmodule MingaEditor.Commands.Helpers do
   alias Minga.Buffer.Document
   alias Minga.Clipboard
   alias Minga.Core.Unicode
+  alias Minga.Editing, as: CoreEditing
   alias MingaEditor.Editing
   alias MingaEditor.HighlightSync
   alias MingaEditor.State, as: EditorState
@@ -414,30 +415,30 @@ defmodule MingaEditor.Commands.Helpers do
   @doc "Resolves a motion atom to a new position in the buffer."
   @spec resolve_motion(
           Buffer.document(),
-          Minga.Editing.Motion.position(),
+          CoreEditing.Motion.position(),
           atom(),
           non_neg_integer()
-        ) :: Minga.Editing.Motion.position()
+        ) :: CoreEditing.Motion.position()
   def resolve_motion(buf, cursor, :word_forward, _buffer_id),
-    do: Minga.Editing.word_forward(buf, cursor)
+    do: CoreEditing.word_forward(buf, cursor)
 
   def resolve_motion(buf, cursor, :word_backward, _buffer_id),
-    do: Minga.Editing.word_backward(buf, cursor)
+    do: CoreEditing.word_backward(buf, cursor)
 
-  def resolve_motion(buf, cursor, :word_end, _buffer_id), do: Minga.Editing.word_end(buf, cursor)
+  def resolve_motion(buf, cursor, :word_end, _buffer_id), do: CoreEditing.word_end(buf, cursor)
 
   def resolve_motion(buf, cursor, :line_start, _buffer_id),
-    do: Minga.Editing.line_start(buf, cursor)
+    do: CoreEditing.line_start(buf, cursor)
 
-  def resolve_motion(buf, cursor, :line_end, _buffer_id), do: Minga.Editing.line_end(buf, cursor)
+  def resolve_motion(buf, cursor, :line_end, _buffer_id), do: CoreEditing.line_end(buf, cursor)
 
   def resolve_motion(buf, _cursor, :document_start, _buffer_id),
-    do: Minga.Editing.document_start(buf)
+    do: CoreEditing.document_start(buf)
 
-  def resolve_motion(buf, _cursor, :document_end, _buffer_id), do: Minga.Editing.document_end(buf)
+  def resolve_motion(buf, _cursor, :document_end, _buffer_id), do: CoreEditing.document_end(buf)
 
   def resolve_motion(buf, cursor, :first_non_blank, _buffer_id),
-    do: Minga.Editing.first_non_blank(buf, cursor)
+    do: CoreEditing.first_non_blank(buf, cursor)
 
   def resolve_motion(_buf, cursor, :half_page_down, _buffer_id), do: cursor
   def resolve_motion(_buf, cursor, :half_page_up, _buffer_id), do: cursor
@@ -445,19 +446,19 @@ defmodule MingaEditor.Commands.Helpers do
   def resolve_motion(_buf, cursor, :page_up, _buffer_id), do: cursor
 
   def resolve_motion(buf, cursor, :word_forward_big, _buffer_id),
-    do: Minga.Editing.word_forward_big(buf, cursor)
+    do: CoreEditing.word_forward_big(buf, cursor)
 
   def resolve_motion(buf, cursor, :word_backward_big, _buffer_id),
-    do: Minga.Editing.word_backward_big(buf, cursor)
+    do: CoreEditing.word_backward_big(buf, cursor)
 
   def resolve_motion(buf, cursor, :word_end_big, _buffer_id),
-    do: Minga.Editing.word_end_big(buf, cursor)
+    do: CoreEditing.word_end_big(buf, cursor)
 
   def resolve_motion(buf, cursor, :paragraph_forward, _buffer_id),
-    do: Minga.Editing.paragraph_forward(buf, cursor)
+    do: CoreEditing.paragraph_forward(buf, cursor)
 
   def resolve_motion(buf, cursor, :paragraph_backward, _buffer_id),
-    do: Minga.Editing.paragraph_backward(buf, cursor)
+    do: CoreEditing.paragraph_backward(buf, cursor)
 
   def resolve_motion(_buf, cursor, :match_bracket, buffer_id) do
     case request_match_item(buffer_id, cursor) do
@@ -471,10 +472,10 @@ defmodule MingaEditor.Commands.Helpers do
   @doc "Resolves a motion target, preserving no-match results for tree-sitter motions."
   @spec resolve_motion_target(
           Buffer.document(),
-          Minga.Editing.Motion.position(),
+          CoreEditing.Motion.position(),
           atom(),
           non_neg_integer()
-        ) :: Minga.Editing.Motion.position() | nil
+        ) :: CoreEditing.Motion.position() | nil
   def resolve_motion_target(_buf, cursor, :match_bracket, buffer_id),
     do: request_match_item(buffer_id, cursor)
 
@@ -486,10 +487,10 @@ defmodule MingaEditor.Commands.Helpers do
   def apply_find_char(buf, dir, char) do
     motion_fn =
       case dir do
-        :f -> &Minga.Editing.find_char_forward/3
-        :F -> &Minga.Editing.find_char_backward/3
-        :t -> &Minga.Editing.till_char_forward/3
-        :T -> &Minga.Editing.till_char_backward/3
+        :f -> &CoreEditing.find_char_forward/3
+        :F -> &CoreEditing.find_char_backward/3
+        :t -> &CoreEditing.till_char_forward/3
+        :T -> &CoreEditing.till_char_backward/3
       end
 
     Buffer.apply_motion(buf, fn doc, cursor -> motion_fn.(doc, cursor, char) end)
@@ -534,8 +535,8 @@ defmodule MingaEditor.Commands.Helpers do
     end
   end
 
-  @spec operator_target(Buffer.document(), atom(), Minga.Editing.Motion.position()) ::
-          Minga.Editing.Motion.position()
+  @spec operator_target(Buffer.document(), atom(), CoreEditing.Motion.position()) ::
+          CoreEditing.Motion.position()
   defp operator_target(buf, :match_bracket, {line, col}) do
     line_text = Document.line_at(buf, line) || ""
     {line, match_item_operator_col(line_text, col)}
@@ -646,52 +647,52 @@ defmodule MingaEditor.Commands.Helpers do
   @doc "Computes the range for a text object modifier + spec pair."
   @spec compute_text_object_range(
           Buffer.document(),
-          Minga.Editing.TextObject.position(),
+          CoreEditing.TextObject.position(),
           atom(),
           term(),
           non_neg_integer()
         ) ::
-          Minga.Editing.TextObject.range()
+          CoreEditing.TextObject.range()
   def compute_text_object_range(buf, pos, :inner, :word, _bid),
-    do: Minga.Editing.select_inner_word(buf, pos)
+    do: CoreEditing.select_inner_word(buf, pos)
 
   def compute_text_object_range(buf, pos, :around, :word, _bid),
-    do: Minga.Editing.select_around_word(buf, pos)
+    do: CoreEditing.select_around_word(buf, pos)
 
   def compute_text_object_range(buf, pos, :inner, {:quote, q}, _bid),
-    do: Minga.Editing.select_inner_quotes(buf, pos, q)
+    do: CoreEditing.select_inner_quotes(buf, pos, q)
 
   def compute_text_object_range(buf, pos, :around, {:quote, q}, _bid),
-    do: Minga.Editing.select_around_quotes(buf, pos, q)
+    do: CoreEditing.select_around_quotes(buf, pos, q)
 
   def compute_text_object_range(buf, pos, :inner, {:paren, open, close}, _bid),
-    do: Minga.Editing.select_inner_parens(buf, pos, open, close)
+    do: CoreEditing.select_inner_parens(buf, pos, open, close)
 
   def compute_text_object_range(buf, pos, :around, {:paren, open, close}, _bid),
-    do: Minga.Editing.select_around_parens(buf, pos, open, close)
+    do: CoreEditing.select_around_parens(buf, pos, open, close)
 
   def compute_text_object_range(buf, pos, :inner, :paragraph, _bid),
-    do: Minga.Editing.select_inner_paragraph(buf, pos)
+    do: CoreEditing.select_inner_paragraph(buf, pos)
 
   def compute_text_object_range(buf, pos, :around, :paragraph, _bid),
-    do: Minga.Editing.select_around_paragraph(buf, pos)
+    do: CoreEditing.select_around_paragraph(buf, pos)
 
   def compute_text_object_range(buf, pos, :inner, :sentence, _bid),
-    do: Minga.Editing.select_inner_sentence(buf, pos)
+    do: CoreEditing.select_inner_sentence(buf, pos)
 
   def compute_text_object_range(buf, pos, :around, :sentence, _bid),
-    do: Minga.Editing.select_around_sentence(buf, pos)
+    do: CoreEditing.select_around_sentence(buf, pos)
 
   def compute_text_object_range(_buf, {line, col}, :inner, {:structural, type}, bid) do
     capture = Atom.to_string(type) <> ".inside"
     tree_data = request_textobject(bid, line, col, capture)
-    Minga.Editing.select_structural_inner(tree_data)
+    CoreEditing.select_structural_inner(tree_data)
   end
 
   def compute_text_object_range(_buf, {line, col}, :around, {:structural, type}, bid) do
     capture = Atom.to_string(type) <> ".around"
     tree_data = request_textobject(bid, line, col, capture)
-    Minga.Editing.select_structural_around(tree_data)
+    CoreEditing.select_structural_around(tree_data)
   end
 
   def compute_text_object_range(_buf, _pos, _modifier, _spec, _bid), do: nil
@@ -741,15 +742,15 @@ defmodule MingaEditor.Commands.Helpers do
   # Queries the tree-sitter parser for a textobject range, returning the raw
   # 4-tuple or nil. Gracefully returns nil when the parser is not running.
   @spec request_textobject(non_neg_integer(), non_neg_integer(), non_neg_integer(), String.t()) ::
-          Minga.Editing.TextObject.tree_range()
+          CoreEditing.TextObject.tree_range()
   defp request_textobject(buffer_id, row, col, capture_name) do
     ParserManager.request_textobject(buffer_id, row, col, capture_name)
   catch
     :exit, _ -> nil
   end
 
-  @spec request_match_item(non_neg_integer(), Minga.Editing.Motion.position()) ::
-          Minga.Editing.Motion.position() | nil
+  @spec request_match_item(non_neg_integer(), CoreEditing.Motion.position()) ::
+          CoreEditing.Motion.position() | nil
   defp request_match_item(buffer_id, {line, col}) do
     ParserManager.request_match_item(buffer_id, line, col)
   end

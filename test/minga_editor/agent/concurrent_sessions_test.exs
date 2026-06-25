@@ -49,7 +49,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
 
     tb =
       Enum.reduce(rest, tb, fn tab, acc ->
-        %{acc | tabs: acc.tabs ++ [tab], next_id: max(acc.next_id, tab.id + 1)}
+        %{acc | tabs: Enum.concat(acc.tabs, [tab]), next_id: max(acc.next_id, tab.id + 1)}
       end)
 
     tb

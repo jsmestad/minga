@@ -17,7 +17,7 @@ defmodule MingaEditor.FoldMap.VisibleLinesTest do
 
       # Lines 0,1,2 are normal, line 3 is fold start (hides 4 lines),
       # then lines 8,9,10,11,12,13 fill the remaining rows
-      assert length(entries) == 10
+      assert Enum.count(entries) == 10
 
       assert Enum.at(entries, 0) == {0, :normal}
       assert Enum.at(entries, 1) == {1, :normal}
@@ -60,7 +60,7 @@ defmodule MingaEditor.FoldMap.VisibleLinesTest do
       entries = VisibleLines.compute(fm, 0, 20, 6)
 
       # Only 4 visible lines exist (0, 1, fold@2, 5)
-      assert length(entries) == 4
+      assert Enum.count(entries) == 4
     end
   end
 

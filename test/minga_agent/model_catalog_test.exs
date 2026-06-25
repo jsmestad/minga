@@ -97,7 +97,7 @@ defmodule MingaAgent.ModelCatalogTest do
       models = ModelCatalog.available_models()
 
       if models != [] do
-        current_id = List.last(models)["id"]
+        current_id = Enum.at(models, -1)["id"]
         [current | _rest] = ModelCatalog.available_models(current_id)
 
         assert current["id"] == current_id
@@ -135,7 +135,7 @@ defmodule MingaAgent.ModelCatalogTest do
       # If anthropic key is set, there should be exactly one current model
       # If not set, no models from anthropic will appear
       if Enum.any?(models, &(&1["provider"] == "anthropic")) do
-        assert length(current) == 1
+        assert Enum.count(current) == 1
         assert hd(current)["id"] == "anthropic:claude-sonnet-4-20250514"
       end
 

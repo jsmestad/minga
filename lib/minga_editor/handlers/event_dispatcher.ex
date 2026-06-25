@@ -411,7 +411,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
       end)
 
     state = reconnect_remote_tabs(state, server_name, remote_node)
-    count = length(sessions)
+    count = Enum.count(sessions)
     status = remote_connected_status(server_name, count)
     EditorState.set_status(state, status)
   end

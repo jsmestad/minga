@@ -12,8 +12,9 @@ defmodule Minga.Session.EventRecorder.Store do
   """
 
   alias Minga.Session.EventRecorder.EventRecord
+  alias Exqlite.Sqlite3
 
-  @type db :: Exqlite.Sqlite3.db()
+  @type db :: Sqlite3.db()
 
   @schema_version 1
 
@@ -29,7 +30,7 @@ defmodule Minga.Session.EventRecorder.Store do
   def open(db_path) do
     File.mkdir_p!(Path.dirname(db_path))
 
-    case Exqlite.Sqlite3.open(db_path) do
+    case Sqlite3.open(db_path) do
       {:ok, db} ->
         case setup(db) do
           :ok -> {:ok, db}
@@ -50,7 +51,7 @@ defmodule Minga.Session.EventRecorder.Store do
   """
   @spec open_readonly(String.t()) :: {:ok, db()} | {:error, term()}
   def open_readonly(db_path) do
-    Exqlite.Sqlite3.open(db_path, mode: :readonly)
+    Sqlite3.open(db_path, mode: :readonly)
   end
 
   @doc """
@@ -58,7 +59,7 @@ defmodule Minga.Session.EventRecorder.Store do
   """
   @spec open_memory() :: {:ok, db()} | {:error, term()}
   def open_memory do
-    case Exqlite.Sqlite3.open(":memory:") do
+    case Sqlite3.open(":memory:") do
       {:ok, db} ->
         case setup(db) do
           :ok -> {:ok, db}
@@ -75,7 +76,7 @@ defmodule Minga.Session.EventRecorder.Store do
   """
   @spec close(db()) :: :ok | {:error, term()}
   def close(db) do
-    Exqlite.Sqlite3.close(db)
+    Sqlite3.close(db)
   end
 
   # ── Write operations ──────────────────────────────────────────────────
@@ -97,9 +98,9 @@ defmodule Minga.Session.EventRecorder.Store do
     scope_str = EventRecord.encode_scope(record.scope)
     payload_json = encode_json(record.payload)
 
-    with {:ok, stmt} <- Exqlite.Sqlite3.prepare(db, sql),
+    with {:ok, stmt} <- Sqlite3.prepare(db, sql),
          :ok <-
-           Exqlite.Sqlite3.bind(stmt, [
+           Sqlite3.bind(stmt, [
              record.timestamp,
              wall_clock_iso,
              record.source,
@@ -107,11 +108,8 @@ defmodule Minga.Session.EventRecorder.Store do
              event_type_str,
              payload_json
            ]),
-         :done <- Exqlite.Sqlite3.step(db, stmt),
-         :ok <- Exqlite.Sqlite3.release(db, stmt) do
-      :ok
-    else
-      {:error, reason} -> {:error, reason}
+         :done <- Sqlite3.step(db, stmt) do
+      Sqlite3.release(db, stmt)
     end
   end
 
@@ -155,7 +153,7 @@ defmodule Minga.Session.EventRecorder.Store do
     LIMIT ?
     """
 
-    params = params ++ [limit]
+    params = Enum.concat(params, [limit])
     query_events(db, sql, params)
   end
 
@@ -226,12 +224,10 @@ defmodule Minga.Session.EventRecorder.Store do
   def count(db) do
     sql = "SELECT COUNT(*) FROM events"
 
-    with {:ok, stmt} <- Exqlite.Sqlite3.prepare(db, sql),
-         {:row, [count]} <- Exqlite.Sqlite3.step(db, stmt),
-         :ok <- Exqlite.Sqlite3.release(db, stmt) do
+    with {:ok, stmt} <- Sqlite3.prepare(db, sql),
+         {:row, [count]} <- Sqlite3.step(db, stmt),
+         :ok <- Sqlite3.release(db, stmt) do
       {:ok, count}
-    else
-      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -247,13 +243,11 @@ defmodule Minga.Session.EventRecorder.Store do
     sql = "DELETE FROM events WHERE wall_clock < ?1"
     cutoff_iso = DateTime.to_iso8601(cutoff)
 
-    with {:ok, stmt} <- Exqlite.Sqlite3.prepare(db, sql),
-         :ok <- Exqlite.Sqlite3.bind(stmt, [cutoff_iso]),
-         :done <- Exqlite.Sqlite3.step(db, stmt),
-         :ok <- Exqlite.Sqlite3.release(db, stmt) do
+    with {:ok, stmt} <- Sqlite3.prepare(db, sql),
+         :ok <- Sqlite3.bind(stmt, [cutoff_iso]),
+         :done <- Sqlite3.step(db, stmt),
+         :ok <- Sqlite3.release(db, stmt) do
       {:ok, changes(db)}
-    else
-      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -270,13 +264,11 @@ defmodule Minga.Session.EventRecorder.Store do
     )
     """
 
-    with {:ok, stmt} <- Exqlite.Sqlite3.prepare(db, sql),
-         :ok <- Exqlite.Sqlite3.bind(stmt, [keep]),
-         :done <- Exqlite.Sqlite3.step(db, stmt),
-         :ok <- Exqlite.Sqlite3.release(db, stmt) do
+    with {:ok, stmt} <- Sqlite3.prepare(db, sql),
+         :ok <- Sqlite3.bind(stmt, [keep]),
+         :done <- Sqlite3.step(db, stmt),
+         :ok <- Sqlite3.release(db, stmt) do
       {:ok, changes(db)}
-    else
-      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -332,9 +324,9 @@ defmodule Minga.Session.EventRecorder.Store do
         :full -> "PRAGMA integrity_check"
       end
 
-    with {:ok, stmt} <- Exqlite.Sqlite3.prepare(db, sql) do
+    with {:ok, stmt} <- Sqlite3.prepare(db, sql) do
       results = collect_rows(db, stmt)
-      Exqlite.Sqlite3.release(db, stmt)
+      Sqlite3.release(db, stmt)
 
       case results do
         [["ok"]] -> {:ok, :healthy}
@@ -379,7 +371,7 @@ defmodule Minga.Session.EventRecorder.Store do
     )
     """
 
-    statements = pragmas ++ [create_sql] ++ indexes ++ [version_sql]
+    statements = Enum.concat(pragmas, [create_sql]) ++ Enum.concat(indexes, [version_sql])
 
     result =
       Enum.reduce_while(statements, :ok, fn sql, :ok ->
@@ -399,9 +391,9 @@ defmodule Minga.Session.EventRecorder.Store do
   defp ensure_schema_version(db) do
     sql = "SELECT version FROM schema_version LIMIT 1"
 
-    with {:ok, stmt} <- Exqlite.Sqlite3.prepare(db, sql) do
-      result = Exqlite.Sqlite3.step(db, stmt)
-      Exqlite.Sqlite3.release(db, stmt)
+    with {:ok, stmt} <- Sqlite3.prepare(db, sql) do
+      result = Sqlite3.step(db, stmt)
+      Sqlite3.release(db, stmt)
 
       case result do
         :done ->
@@ -420,18 +412,15 @@ defmodule Minga.Session.EventRecorder.Store do
 
   @spec execute(db(), String.t()) :: :ok | {:error, term()}
   defp execute(db, sql) do
-    with {:ok, stmt} <- Exqlite.Sqlite3.prepare(db, sql),
-         :done <- step_until_done(db, stmt),
-         :ok <- Exqlite.Sqlite3.release(db, stmt) do
-      :ok
-    else
-      {:error, reason} -> {:error, reason}
+    with {:ok, stmt} <- Sqlite3.prepare(db, sql),
+         :done <- step_until_done(db, stmt) do
+      Sqlite3.release(db, stmt)
     end
   end
 
-  @spec step_until_done(db(), Exqlite.Sqlite3.statement()) :: :done | {:error, term()}
+  @spec step_until_done(db(), Sqlite3.statement()) :: :done | {:error, term()}
   defp step_until_done(db, stmt) do
-    case Exqlite.Sqlite3.step(db, stmt) do
+    case Sqlite3.step(db, stmt) do
       :done -> :done
       {:row, _} -> step_until_done(db, stmt)
       {:error, reason} -> {:error, reason}
@@ -441,19 +430,17 @@ defmodule Minga.Session.EventRecorder.Store do
   @spec query_events(db(), String.t(), [term()]) ::
           {:ok, [EventRecord.t()]} | {:error, term()}
   defp query_events(db, sql, params) do
-    with {:ok, stmt} <- Exqlite.Sqlite3.prepare(db, sql),
-         :ok <- Exqlite.Sqlite3.bind(stmt, params) do
+    with {:ok, stmt} <- Sqlite3.prepare(db, sql),
+         :ok <- Sqlite3.bind(stmt, params) do
       rows = collect_rows(db, stmt)
-      Exqlite.Sqlite3.release(db, stmt)
+      Sqlite3.release(db, stmt)
       {:ok, Enum.map(rows, &row_to_record/1)}
-    else
-      {:error, reason} -> {:error, reason}
     end
   end
 
-  @spec collect_rows(db(), Exqlite.Sqlite3.statement()) :: [list()]
+  @spec collect_rows(db(), Sqlite3.statement()) :: [list()]
   defp collect_rows(db, stmt) do
-    case Exqlite.Sqlite3.step(db, stmt) do
+    case Sqlite3.step(db, stmt) do
       {:row, row} -> [row | collect_rows(db, stmt)]
       :done -> []
     end
@@ -506,9 +493,9 @@ defmodule Minga.Session.EventRecorder.Store do
   defp changes(db) do
     sql = "SELECT changes()"
 
-    with {:ok, stmt} <- Exqlite.Sqlite3.prepare(db, sql),
-         {:row, [count]} <- Exqlite.Sqlite3.step(db, stmt),
-         :ok <- Exqlite.Sqlite3.release(db, stmt) do
+    with {:ok, stmt} <- Sqlite3.prepare(db, sql),
+         {:row, [count]} <- Sqlite3.step(db, stmt),
+         :ok <- Sqlite3.release(db, stmt) do
       count
     else
       error ->

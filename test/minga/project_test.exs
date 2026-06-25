@@ -500,7 +500,7 @@ defmodule Minga.ProjectTest do
       end)
 
       state = flush(name)
-      assert length(state.command_frecency.save) == 20
+      assert Enum.count(state.command_frecency.save) == 20
     end
   end
 

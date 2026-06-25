@@ -28,7 +28,7 @@ defmodule MingaEditor.UI.Picker.ScorerTest do
       cands = candidates(["config.exs", "xconfig.exs", "lib/config/runtime.exs", "readme.md"])
       segments = ["config"]
 
-      assert Scorer.top_k(cands, segments, length(cands)) == brute_force(cands, segments)
+      assert Scorer.top_k(cands, segments, Enum.count(cands)) == brute_force(cands, segments)
     end
 
     test "bounded result is the prefix of the brute-force order" do
@@ -73,7 +73,7 @@ defmodule MingaEditor.UI.Picker.ScorerTest do
       cands = [%Item{id: 1, label: "app.ex", search_text: "lib/deep/path/app.ex"}]
       cands = Candidate.from_items(cands)
 
-      assert Scorer.top_k(cands, ["deep"], 5) |> length() == 1
+      assert Scorer.top_k(cands, ["deep"], 5) |> Enum.count() == 1
     end
   end
 
@@ -85,7 +85,7 @@ defmodule MingaEditor.UI.Picker.ScorerTest do
 
       result = Scorer.top_k(cands, segments, 200)
 
-      assert length(result) == 200
+      assert Enum.count(result) == 200
       assert result == Enum.take(brute_force(cands, segments), 200)
     end
   end

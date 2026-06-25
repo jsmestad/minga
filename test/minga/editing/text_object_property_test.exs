@@ -14,12 +14,11 @@ defmodule Minga.Editing.TextObjectPropertyTest do
 
   import Minga.Test.Generators
 
-  defp assert_range_in_bounds({start_pos, end_pos}, content) do
+  defp assert_range_in_bounds({{sl, sc}, {el, ec}}, content)
+       when is_integer(sl) and is_integer(sc) and is_integer(el) and is_integer(ec) and
+              is_binary(content) do
     lines = String.split(content, "\n")
-    line_count = length(lines)
-
-    {sl, sc} = start_pos
-    {el, ec} = end_pos
+    line_count = Enum.count(lines)
 
     assert sl >= 0, "start line #{sl} is negative"
     assert sl < line_count, "start line #{sl} >= line_count #{line_count}"

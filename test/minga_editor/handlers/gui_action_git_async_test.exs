@@ -167,7 +167,7 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
     state = GuiActionHandler.dispatch(state, {:git_commit, "keep pending"}, opts)
 
     assert EditorState.status_msg(state) == "Committing…"
-    assert length(state.async_actions[:git_worktree].queue) == 1
+    assert Enum.count(state.async_actions[:git_worktree].queue) == 1
 
     stage_token = current_git_token(state)
 
@@ -270,7 +270,7 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
     lane = state.async_actions[:git_worktree]
     assert is_reference(first_token)
     assert lane.running == first_token
-    assert length(lane.queue) == 1
+    assert Enum.count(lane.queue) == 1
   end
 
   @spec run_queued_git_status_regression(
@@ -293,7 +293,7 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
     state = GuiActionHandler.dispatch(state, queued_action, opts)
 
     assert EditorState.status_msg(state) == pending_status
-    assert length(state.async_actions[:git_worktree].queue) == 1
+    assert Enum.count(state.async_actions[:git_worktree].queue) == 1
 
     stage_token = current_git_token(state)
 

@@ -502,7 +502,6 @@ defmodule Minga.Config.Options do
       when is_atom(ext_name) and is_list(schema) and is_list(user_config) do
     table = table_name(server)
 
-    # Store the full schema for introspection
     :ets.insert(table, {{:extension_schema, ext_name}, schema})
 
     # Register each option with its type, default, and doc
@@ -542,17 +541,15 @@ defmodule Minga.Config.Options do
   @spec validate_user_config_entry(:ets.table(), atom(), atom(), term(), MapSet.t(), [String.t()]) ::
           [String.t()]
   defp validate_user_config_entry(table, ext_name, key, value, schema_names, errors) do
-    case MapSet.member?(schema_names, key) do
-      true ->
-        apply_validated_config_entry(table, ext_name, key, value, errors)
+    if MapSet.member?(schema_names, key) do
+      apply_validated_config_entry(table, ext_name, key, value, errors)
+    else
+      Minga.Log.warning(
+        :config,
+        "Extension #{ext_name}: unknown option #{inspect(key)} (ignored)"
+      )
 
-      false ->
-        Minga.Log.warning(
-          :config,
-          "Extension #{ext_name}: unknown option #{inspect(key)} (ignored)"
-        )
-
-        errors
+      errors
     end
   end
 
@@ -1114,7 +1111,7 @@ defmodule Minga.Config.Options do
   # ── Private helpers ─────────────────────────────────────────────────────────
 
   @spec maybe_append([String.t()], boolean(), String.t()) :: [String.t()]
-  defp maybe_append(chain, true, label), do: chain ++ [label]
+  defp maybe_append(chain, true, label), do: Enum.concat(chain, [label])
   defp maybe_append(chain, false, _label), do: chain
 
   @spec global_override?(server(), atom()) :: boolean()

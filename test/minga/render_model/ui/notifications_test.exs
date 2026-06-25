@@ -32,7 +32,7 @@ defmodule Minga.RenderModel.UI.NotificationsTest do
 
       n = %Notifications{items: [item]}
 
-      assert length(n.items) == 1
+      assert Enum.count(n.items) == 1
       assert hd(n.items).id == "test-1"
     end
   end

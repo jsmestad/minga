@@ -30,7 +30,6 @@ defmodule MingaAgent.Hooks.CommandRunner do
     run(hook, payload_map, [])
   end
 
-  @doc false
   @spec run(Hook.t(), map(), run_opts()) :: Result.t()
   def run(%Hook{} = hook, payload_map, opts) when is_map(payload_map) and is_list(opts) do
     with {:ok, payload_json} <- encode_map(payload_map),
@@ -47,7 +46,6 @@ defmodule MingaAgent.Hooks.CommandRunner do
     run(hook, PreToolUsePayload.to_map(payload))
   end
 
-  @doc false
   @spec run_pre_tool_use(Hook.t(), PreToolUsePayload.t(), run_opts()) :: Result.t()
   def run_pre_tool_use(%Hook{} = hook, %PreToolUsePayload{} = payload, opts) when is_list(opts) do
     run(hook, PreToolUsePayload.to_map(payload), opts)

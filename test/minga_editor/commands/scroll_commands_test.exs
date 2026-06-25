@@ -68,7 +68,7 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
     |> hd()
     |> Enum.with_index()
     |> Enum.filter(fn {row, _idx} -> row.byte_offset <= @wrapped_cursor_col end)
-    |> List.last()
+    |> Enum.at(-1)
     |> elem(1)
   end
 
@@ -221,12 +221,12 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
           tab_width: 2
         )
 
-      head_rows = length(head_entry)
-      eof_visual_rows = length(eof_entry)
+      head_rows = Enum.count(head_entry)
+      eof_visual_rows = Enum.count(eof_entry)
       visible = Viewport.content_rows(EditorState.active_window_struct(state).viewport)
       expected_top_offset = head_rows + max(eof_visual_rows - visible, 0)
 
-      BufferProcess.move_to(buffer, {1, List.last(eof_entry).byte_offset})
+      BufferProcess.move_to(buffer, {1, Enum.at(eof_entry, -1).byte_offset})
 
       state = Movement.execute(state, :scroll_center)
       win = EditorState.active_window_struct(state)
@@ -296,11 +296,11 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
           tab_width: 2
         )
 
-      head_rows = length(head_entry)
-      eof_visual_rows = length(eof_entry)
+      head_rows = Enum.count(head_entry)
+      eof_visual_rows = Enum.count(eof_entry)
       visible = Viewport.content_rows(EditorState.active_window_struct(state).viewport)
 
-      BufferProcess.move_to(buffer, {1, List.last(eof_entry).byte_offset})
+      BufferProcess.move_to(buffer, {1, Enum.at(eof_entry, -1).byte_offset})
 
       state = Movement.execute(state, :scroll_cursor_bottom)
       win = EditorState.active_window_struct(state)

@@ -54,7 +54,7 @@ defmodule MingaEditor.State.WorkspaceTest do
 
     test "colors cycle through 6-color palette" do
       colors = for id <- 1..7, do: Workspace.new_agent(id, "A#{id}").color
-      assert length(Enum.uniq(Enum.take(colors, 6))) == 6
+      assert Enum.count(Enum.uniq(Enum.take(colors, 6))) == 6
       assert Enum.at(colors, 6) == Enum.at(colors, 0)
     end
   end

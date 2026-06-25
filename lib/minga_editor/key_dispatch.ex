@@ -11,6 +11,7 @@ defmodule MingaEditor.KeyDispatch do
 
   alias Minga.Buffer
   alias Minga.Config
+  alias Minga.Editing, as: CoreEditing
 
   alias Minga.Editing.Model.Vim, as: VimModel
   alias MingaEditor.BufferLifecycle
@@ -39,7 +40,7 @@ defmodule MingaEditor.KeyDispatch do
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
   def handle_key(state, codepoint, modifiers) do
     key = {codepoint, modifiers}
-    old_mode = Minga.Editing.mode(state)
+    old_mode = CoreEditing.mode(state)
 
     # Route through EditingModel.Vim, which delegates to Mode.process/3.
     # This proves the EditingModel abstraction under real load. When CUA
@@ -96,7 +97,7 @@ defmodule MingaEditor.KeyDispatch do
     # Skip if a command changed the mode (e.g. substitute confirm, search).
     result =
       if new_mode == :normal and old_mode != :normal and
-           Minga.Editing.mode(after_commands) == :normal do
+           CoreEditing.mode(after_commands) == :normal do
         case Editing.mode_state(after_commands) do
           %Mode.State{} -> after_commands
           _ -> Editing.update_mode_state(after_commands, fn _ -> Mode.initial_state() end)
@@ -107,7 +108,7 @@ defmodule MingaEditor.KeyDispatch do
 
     # When leaving :tool_confirm, check if more tools were queued during
     # the session and re-enter :tool_confirm to prompt for them.
-    if old_mode == :tool_confirm and Minga.Editing.mode(result) == :normal and
+    if old_mode == :tool_confirm and CoreEditing.mode(result) == :normal and
          result.shell_state.tool_prompt_queue != [] do
       ms = %Minga.Mode.ToolConfirmState{
         pending: result.shell_state.tool_prompt_queue,

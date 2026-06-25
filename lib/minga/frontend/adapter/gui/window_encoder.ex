@@ -192,7 +192,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
         if Map.get(sw, :cursor_visible, true), do: 0x02, else: 0
 
     cursor_shape = encode_cursor_shape(sw.cursor_shape)
-    row_count = length(sw.rows)
+    row_count = Enum.count(sw.rows)
 
     header_payload =
       <<sw.window_id::16, flags::8, sw.cursor_row::16, sw.cursor_col::16, cursor_shape::8,
@@ -207,7 +207,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
       [header_section, rows_section | overlay.sections] ++
         overlay.geometry ++ overlay.cursorline ++ overlay.scroll_presentation
 
-    binary = IO.iodata_to_binary([<<@op_gui_window_content, length(sections)::8>> | sections])
+    binary = IO.iodata_to_binary([<<@op_gui_window_content, Enum.count(sections)::8>> | sections])
 
     metrics = %{
       row_bytes: byte_size(rows_section),
@@ -229,9 +229,9 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   defp encode_rows_snapshot_delta(opcode, %RenderWindow{} = sw, previous_hashes) do
     {row_entries, has_refs?} = encode_delta_row_entries(sw.rows, previous_hashes)
 
-    rows_payload = IO.iodata_to_binary([<<length(sw.rows)::16>> | row_entries])
+    rows_payload = IO.iodata_to_binary([<<Enum.count(sw.rows)::16>> | row_entries])
     sections = delta_sections(sw, rows_payload)
-    binary = IO.iodata_to_binary([<<opcode, length(sections)::8>> | sections])
+    binary = IO.iodata_to_binary([<<opcode, Enum.count(sections)::8>> | sections])
 
     {binary, has_refs?}
   end
@@ -352,7 +352,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
         geometry.viewport.cols::16, geometry.viewport.total_lines::32,
         geometry.viewport.visual_row_offset::16, geometry.viewport.total_visual_rows::32,
         geometry.gutter_metrics.line_number_width::16, geometry.gutter_metrics.sign_col_width::16,
-        length(geometry.hit_regions)::8>>,
+        Enum.count(geometry.hit_regions)::8>>,
       hit_regions
     ])
   end
@@ -408,7 +408,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
     row_type = encode_row_type(row.row_type)
     text_bytes = row.text
     text_len = byte_size(text_bytes)
-    span_count = length(row.spans)
+    span_count = Enum.count(row.spans)
 
     spans_binary = Enum.map(row.spans, &encode_span/1)
 
@@ -461,7 +461,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
 
   @spec encode_search_matches([SearchMatch.t()]) :: binary()
   defp encode_search_matches(matches) do
-    count = length(matches)
+    count = Enum.count(matches)
     entries = Enum.map(matches, &encode_search_match/1)
     IO.iodata_to_binary([<<count::16>> | entries])
   end
@@ -476,7 +476,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
 
   @spec encode_diagnostic_ranges([DiagnosticRange.t()]) :: binary()
   defp encode_diagnostic_ranges(ranges) do
-    count = length(ranges)
+    count = Enum.count(ranges)
     entries = Enum.map(ranges, &encode_diagnostic_range/1)
     IO.iodata_to_binary([<<count::16>> | entries])
   end
@@ -498,7 +498,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
 
   @spec encode_document_highlights([DocumentHighlight.t()]) :: binary()
   defp encode_document_highlights(highlights) do
-    count = length(highlights)
+    count = Enum.count(highlights)
     entries = Enum.map(highlights, &encode_document_highlight/1)
     IO.iodata_to_binary([<<count::16>> | entries])
   end
@@ -519,7 +519,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
 
   @spec encode_annotations([Annotation.t()]) :: binary()
   defp encode_annotations(annotations) do
-    count = length(annotations)
+    count = Enum.count(annotations)
     entries = Enum.map(annotations, &encode_annotation/1)
     IO.iodata_to_binary([<<count::16>> | entries])
   end
@@ -556,7 +556,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   defp encode_gutter_binary(%Gutter{} = gutter) do
     entries_payload =
       IO.iodata_to_binary([
-        <<length(gutter.entries)::16>> | Enum.map(gutter.entries, &encode_gutter_entry/1)
+        <<Enum.count(gutter.entries)::16>> | Enum.map(gutter.entries, &encode_gutter_entry/1)
       ])
 
     active_byte = if gutter.is_active, do: 1, else: 0
@@ -575,7 +575,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
       encode_section(@section_gutter_entries, entries_payload)
     ]
 
-    IO.iodata_to_binary([<<@op_gui_gutter, length(sections)::8>> | sections])
+    IO.iodata_to_binary([<<@op_gui_gutter, Enum.count(sections)::8>> | sections])
   end
 
   @spec encode_gutter_entry(GutterEntry.t()) :: binary()
@@ -655,9 +655,9 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   end
 
   defp encode_indent_guides(%IndentGuides{} = guides) do
-    guide_count = length(guides.guide_cols)
+    guide_count = Enum.count(guides.guide_cols)
     guide_bytes = for col <- guides.guide_cols, into: <<>>, do: <<col::16>>
-    line_count = length(guides.line_indent_levels)
+    line_count = Enum.count(guides.line_indent_levels)
     level_bytes = for level <- guides.line_indent_levels, into: <<>>, do: <<min(level, 255)::8>>
     payload_len = 6 + 2 * guide_count + 2 + line_count
 

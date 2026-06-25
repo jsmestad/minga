@@ -184,14 +184,14 @@ defmodule Minga.Buffer.CursorTest do
          line_offsets: ls
        }) do
     lines_before = :binary.split(before, "\n", [:global])
-    expected_line = length(lines_before) - 1
-    expected_column = lines_before |> List.last() |> byte_size()
+    expected_line = Enum.count(lines_before) - 1
+    expected_column = lines_before |> Enum.at(-1) |> byte_size()
     text = before <> after_
 
     expected_line_count =
       case text do
         "" -> 1
-        _ -> length(:binary.matches(text, "\n")) + 1
+        _ -> Enum.count(:binary.matches(text, "\n")) + 1
       end
 
     assert cursor_line == expected_line

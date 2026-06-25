@@ -143,7 +143,7 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
       assert WrapMap.visual_row_count([penultimate_entry, last_entry]) <=
                Viewport.content_rows(Viewport.new(10, 24, 0))
 
-      BufferProcess.move_to(buffer, {0, List.last(penultimate_entry).byte_offset})
+      BufferProcess.move_to(buffer, {0, Enum.at(penultimate_entry, -1).byte_offset})
 
       {scrolls, _state, _layout} = run_through_scroll(state)
       [{_win_id, scroll}] = Map.to_list(scrolls)
@@ -173,16 +173,16 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
         )
 
       visible_rows = Viewport.content_rows(Viewport.new(10, 24, 0))
-      assert length(head_entry) < visible_rows
-      assert length(head_entry) > 1
+      assert Enum.count(head_entry) < visible_rows
+      assert Enum.count(head_entry) > 1
 
       win_id = state.workspace.windows.active
       window = Map.fetch!(state.workspace.windows.map, win_id)
-      viewport = Viewport.put_top_visual(window.viewport, 0, 1, length(head_entry))
+      viewport = Viewport.put_top_visual(window.viewport, 0, 1, Enum.count(head_entry))
       window = Window.set_viewport(window, viewport)
       state = put_in(state.workspace.windows.map[win_id], window)
 
-      BufferProcess.move_to(buffer, {0, List.last(head_entry).byte_offset})
+      BufferProcess.move_to(buffer, {0, Enum.at(head_entry, -1).byte_offset})
 
       {scrolls, _state, _layout} = run_through_scroll(state)
       [{_win_id, scroll}] = Map.to_list(scrolls)
@@ -217,7 +217,7 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
       assert WrapMap.visual_row_count([penultimate_entry, last_entry]) >
                Viewport.content_rows(Viewport.new(3, 24, 0))
 
-      BufferProcess.move_to(buffer, {0, List.last(penultimate_entry).byte_offset})
+      BufferProcess.move_to(buffer, {0, Enum.at(penultimate_entry, -1).byte_offset})
 
       {scrolls, _state, _layout} = run_through_scroll(state)
       [{_win_id, scroll}] = Map.to_list(scrolls)

@@ -204,7 +204,6 @@ defmodule MingaAgent.Tools.ReadFileTest do
 
       assert is_integer(version)
 
-      # Verify the content was actually changed
       assert Buffer.Process.content(pid) =~ "goodbye world"
     end
   end

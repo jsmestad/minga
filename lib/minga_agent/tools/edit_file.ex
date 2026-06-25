@@ -71,7 +71,7 @@ defmodule MingaAgent.Tools.EditFile do
   @spec apply_edit(String.t(), String.t(), String.t(), String.t()) ::
           {:ok, String.t()} | {:error, String.t()}
   defp apply_edit(path, content, old_text, new_text) do
-    case length(:binary.matches(content, old_text)) do
+    case Enum.count(:binary.matches(content, old_text)) do
       0 ->
         {:error, "old_text not found in #{path}. Read the file first to get exact text."}
 

@@ -300,10 +300,7 @@ defmodule Minga.Editing.TextObject do
   @spec a_parens(Readable.t(), position(), String.t(), String.t()) :: range()
   def a_parens(buffer, position, open_char, close_char)
       when is_binary(open_char) and is_binary(close_char) do
-    case find_delimited_pair(buffer, position, open_char, close_char) do
-      nil -> nil
-      pair -> pair
-    end
+    find_delimited_pair(buffer, position, open_char, close_char)
   end
 
   # ── Tree-sitter structural text objects ────────────────────────────────────────
@@ -621,7 +618,7 @@ defmodule Minga.Editing.TextObject do
     tokens = graphemes_with_byte_cols(text, line)
 
     if line < last_line do
-      tokens ++ [{"\n", {line, byte_size(text)}}]
+      Enum.concat(tokens, [{"\n", {line, byte_size(text)}}])
     else
       tokens
     end
@@ -679,7 +676,7 @@ defmodule Minga.Editing.TextObject do
     tokens
     |> Enum.with_index()
     |> Enum.filter(fn {{_g, token_pos}, _idx} -> compare_position(token_pos, position) == :lt end)
-    |> List.last()
+    |> Enum.at(-1)
     |> index_from_position_result()
   end
 
@@ -883,7 +880,7 @@ defmodule Minga.Editing.TextObject do
         cursor_idx >= start_idx and cursor_idx <= end_idx
       end) ||
         Enum.find(spans, fn {start_idx, _end_idx, _trailing_end_idx} -> cursor_idx < start_idx end) ||
-        List.last(spans)
+        Enum.at(spans, -1)
 
     sentence_span_to_range(span, tokens, :around)
   end

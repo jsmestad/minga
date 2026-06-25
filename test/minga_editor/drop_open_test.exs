@@ -18,7 +18,7 @@ defmodule MingaEditor.DropOpenTest do
       send(ctx.editor, {:minga_input, {:gui_action, {:open_file, path}}})
       state = editor_state(ctx)
 
-      assert length(state.workspace.buffers.list) == 2
+      assert Enum.count(state.workspace.buffers.list) == 2
       assert Minga.Buffer.Process.file_path(state.workspace.buffers.active) == path
     end
 
@@ -39,8 +39,8 @@ defmodule MingaEditor.DropOpenTest do
 
       state = editor_state(ctx)
 
-      assert length(state.workspace.buffers.list) == 4
-      assert Minga.Buffer.Process.file_path(state.workspace.buffers.active) == List.last(paths)
+      assert Enum.count(state.workspace.buffers.list) == 4
+      assert Minga.Buffer.Process.file_path(state.workspace.buffers.active) == Enum.at(paths, -1)
     end
 
     @tag :tmp_dir
@@ -54,7 +54,7 @@ defmodule MingaEditor.DropOpenTest do
       send(ctx.editor, {:minga_input, {:gui_action, {:open_file, path}}})
       state = editor_state(ctx)
 
-      assert length(state.workspace.buffers.list) == initial_count
+      assert Enum.count(state.workspace.buffers.list) == initial_count
       assert Minga.Buffer.Process.file_path(state.workspace.buffers.active) == path
     end
   end

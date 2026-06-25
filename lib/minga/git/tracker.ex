@@ -19,6 +19,7 @@ defmodule Minga.Git.Tracker do
   alias Minga.Buffer
   alias Minga.Git
   alias Minga.Git.Buffer, as: GitBuffer
+  alias Minga.Events
 
   @registry_table __MODULE__.Registry
 
@@ -84,14 +85,14 @@ defmodule Minga.Git.Tracker do
   @typep tracker_state :: %{
            monitors: %{reference() => {pid(), String.t()}},
            repo_buffer_counts: %{String.t() => pos_integer()},
-           events_registry: Minga.Events.registry(),
+           events_registry: Events.registry(),
            registry_table: atom()
          }
 
   @impl true
   @spec init(keyword()) :: {:ok, tracker_state()}
   def init(opts) do
-    events_registry = Keyword.get(opts, :events_registry, Minga.Events.default_registry())
+    events_registry = Keyword.get(opts, :events_registry, Events.default_registry())
     registry_table = Keyword.get(opts, :registry_table, @registry_table)
 
     :ets.new(registry_table, [
@@ -101,9 +102,9 @@ defmodule Minga.Git.Tracker do
       read_concurrency: true
     ])
 
-    Minga.Events.subscribe(:buffer_opened, events_registry)
-    Minga.Events.subscribe(:buffer_saved, events_registry)
-    Minga.Events.subscribe(:buffer_changed, events_registry)
+    Events.subscribe(:buffer_opened, events_registry)
+    Events.subscribe(:buffer_saved, events_registry)
+    Events.subscribe(:buffer_changed, events_registry)
 
     {:ok,
      %{
@@ -117,7 +118,7 @@ defmodule Minga.Git.Tracker do
   @impl true
   @spec handle_info(term(), tracker_state()) :: {:noreply, tracker_state()}
   def handle_info(
-        {:minga_event, :buffer_changed, %Minga.Events.BufferChangedEvent{buffer: buf}},
+        {:minga_event, :buffer_changed, %Events.BufferChangedEvent{buffer: buf}},
         state
       )
       when is_pid(buf) do
@@ -126,7 +127,7 @@ defmodule Minga.Git.Tracker do
   end
 
   def handle_info(
-        {:minga_event, :buffer_opened, %Minga.Events.BufferEvent{buffer: buf, path: path}},
+        {:minga_event, :buffer_opened, %Events.BufferEvent{buffer: buf, path: path}},
         state
       )
       when is_pid(buf) do
@@ -139,7 +140,7 @@ defmodule Minga.Git.Tracker do
   end
 
   def handle_info(
-        {:minga_event, :buffer_saved, %Minga.Events.BufferEvent{buffer: buf}},
+        {:minga_event, :buffer_saved, %Events.BufferEvent{buffer: buf}},
         state
       )
       when is_pid(buf) do
@@ -194,9 +195,9 @@ defmodule Minga.Git.Tracker do
       ref = Process.monitor(buffer_pid)
       rel_path = Path.relative_to(path, git_root)
 
-      Minga.Events.broadcast(
+      Events.broadcast(
         :log_message,
-        %Minga.Events.LogMessageEvent{
+        %Events.LogMessageEvent{
           text: "Git: tracking #{rel_path}",
           level: :info
         },
@@ -219,7 +220,7 @@ defmodule Minga.Git.Tracker do
     :exit, _ -> state
   end
 
-  @spec ensure_repo_for_path(String.t(), Minga.Events.registry()) :: :ok
+  @spec ensure_repo_for_path(String.t(), Events.registry()) :: :ok
   defp ensure_repo_for_path(path, events_registry) do
     case Git.root_for(path) do
       {:ok, git_root} -> ensure_repo(git_root, events_registry)
@@ -227,7 +228,7 @@ defmodule Minga.Git.Tracker do
     end
   end
 
-  @spec ensure_repo(String.t(), Minga.Events.registry()) :: :ok
+  @spec ensure_repo(String.t(), Events.registry()) :: :ok
   defp ensure_repo(git_root, events_registry) do
     project_root =
       try do

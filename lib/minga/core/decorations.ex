@@ -303,7 +303,7 @@ defmodule Minga.Core.Decorations do
   def remove_virtual_text(%__MODULE__{} = decs, id) do
     new_vts = Enum.reject(decs.virtual_texts, fn vt -> vt.id == id end)
 
-    if length(new_vts) == length(decs.virtual_texts) do
+    if Enum.count(new_vts) == Enum.count(decs.virtual_texts) do
       decs
     else
       %{decs | virtual_texts: new_vts, version: decs.version + 1, vt_line_cache: nil}
@@ -455,7 +455,7 @@ defmodule Minga.Core.Decorations do
   def remove_fold_region(%__MODULE__{} = decs, id) do
     new_folds = Enum.reject(decs.fold_regions, fn f -> f.id == id end)
 
-    if length(new_folds) == length(decs.fold_regions) do
+    if Enum.count(new_folds) == Enum.count(decs.fold_regions) do
       decs
     else
       %{decs | fold_regions: new_folds, version: decs.version + 1}
@@ -529,7 +529,7 @@ defmodule Minga.Core.Decorations do
   def remove_block_decoration(%__MODULE__{} = decs, id) do
     new_blocks = Enum.reject(decs.block_decorations, fn b -> b.id == id end)
 
-    if length(new_blocks) == length(decs.block_decorations) do
+    if Enum.count(new_blocks) == Enum.count(decs.block_decorations) do
       decs
     else
       %{decs | block_decorations: new_blocks, version: decs.version + 1}
@@ -613,7 +613,7 @@ defmodule Minga.Core.Decorations do
   def remove_conceal(%__MODULE__{} = decs, id) do
     new_conceals = Enum.reject(decs.conceal_ranges, fn c -> c.id == id end)
 
-    if length(new_conceals) == length(decs.conceal_ranges) do
+    if Enum.count(new_conceals) == Enum.count(decs.conceal_ranges) do
       decs
     else
       %{decs | conceal_ranges: new_conceals, version: decs.version + 1}
@@ -625,7 +625,7 @@ defmodule Minga.Core.Decorations do
   def remove_conceal_group(%__MODULE__{} = decs, group) when is_atom(group) do
     new_conceals = Enum.reject(decs.conceal_ranges, fn c -> c.group == group end)
 
-    if length(new_conceals) == length(decs.conceal_ranges) do
+    if Enum.count(new_conceals) == Enum.count(decs.conceal_ranges) do
       decs
     else
       %{decs | conceal_ranges: new_conceals, version: decs.version + 1}
@@ -1630,7 +1630,6 @@ defmodule Minga.Core.Decorations do
   def merge_highlights(segments, [], _line), do: segments
 
   def merge_highlights(segments, ranges, line) do
-    # Build a list of column-indexed style overlays for this line
     overlays = ranges_to_line_overlays(ranges, line)
 
     if overlays == [] do

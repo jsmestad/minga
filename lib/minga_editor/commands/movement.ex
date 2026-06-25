@@ -855,7 +855,7 @@ defmodule MingaEditor.Commands.Movement do
     snapshot = Buffer.render_snapshot(buf, line, 1)
     text = List.first(snapshot.lines) || ""
     [entry] = WrapMap.compute([text], content_w, wrap_opts(buf, oracle))
-    max(length(entry), 1)
+    max(Enum.count(entry), 1)
   catch
     :exit, _ -> 1
   end
@@ -873,7 +873,7 @@ defmodule MingaEditor.Commands.Movement do
     lines = snapshot.lines
     line_idx = cursor_line - vp.top
 
-    if line_idx < 0 or line_idx >= length(lines) do
+    if line_idx < 0 or line_idx >= Enum.count(lines) do
       0
     else
       wrap_map = WrapMap.compute(lines, content_w, wrap_opts(buf, oracle))
@@ -924,7 +924,7 @@ defmodule MingaEditor.Commands.Movement do
       vp,
       cursor_line,
       min(target_offset, max_offset),
-      max(length(entry), 1)
+      max(Enum.count(entry), 1)
     )
   catch
     :exit, _ -> vp
@@ -962,7 +962,7 @@ defmodule MingaEditor.Commands.Movement do
     wrap_entry
     |> Enum.with_index()
     |> Enum.filter(fn {row, _idx} -> row.byte_offset <= cursor_col end)
-    |> List.last({%{byte_offset: 0}, 0})
+    |> Enum.at(-1, {%{byte_offset: 0}, 0})
     |> elem(1)
   end
 

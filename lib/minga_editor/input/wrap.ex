@@ -59,7 +59,7 @@ defmodule MingaEditor.Input.Wrap do
   def wrap_line(text, width) do
     graphemes = String.graphemes(text)
 
-    if length(graphemes) <= width do
+    if Enum.count(graphemes) <= width do
       [%VisualLine{text: text, col_offset: 0}]
     else
       do_wrap(graphemes, width, 0, [])
@@ -91,7 +91,7 @@ defmodule MingaEditor.Input.Wrap do
   @spec visual_line_count([String.t()], pos_integer()) :: pos_integer()
   def visual_line_count(lines, width) do
     Enum.reduce(lines, 0, fn line, acc ->
-      acc + length(wrap_line(line, width))
+      acc + Enum.count(wrap_line(line, width))
     end)
   end
 
@@ -126,7 +126,7 @@ defmodule MingaEditor.Input.Wrap do
     visual_offset =
       lines
       |> Enum.take(cursor_line)
-      |> Enum.reduce(0, fn line, acc -> acc + length(wrap_line(line, width)) end)
+      |> Enum.reduce(0, fn line, acc -> acc + Enum.count(wrap_line(line, width)) end)
 
     # Find which visual row within the cursor's logical line contains the cursor
     current_line = Enum.at(lines, cursor_line) || ""
@@ -166,7 +166,7 @@ defmodule MingaEditor.Input.Wrap do
 
       _ ->
         {row_graphemes, overflow} = break_at_word_boundary(taken, rest)
-        row_len = length(row_graphemes)
+        row_len = Enum.count(row_graphemes)
         entry = %VisualLine{text: Enum.join(row_graphemes), col_offset: offset}
         do_wrap(overflow, width, offset + row_len, [entry | acc])
     end
@@ -181,7 +181,7 @@ defmodule MingaEditor.Input.Wrap do
       taken
       |> Enum.with_index()
       |> Enum.filter(fn {g, _} -> g == " " end)
-      |> List.last()
+      |> Enum.at(-1)
 
     case last_space do
       {_, idx} when idx > 0 ->

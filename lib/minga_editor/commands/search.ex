@@ -254,7 +254,7 @@ defmodule MingaEditor.Commands.Search do
       ) do
     accepted_set = MapSet.new(ms.accepted)
     accepted_count = MapSet.size(accepted_set)
-    total = length(ms.matches)
+    total = Enum.count(ms.matches)
 
     if accepted_count == 0 do
       EditorState.set_status(state, "No substitutions made")
@@ -424,7 +424,8 @@ defmodule MingaEditor.Commands.Search do
     Enum.join(new_lines, "\n")
   end
 
-  defdelegate project_root, to: Minga.Project, as: :resolve_root
+  @spec project_root() :: term()
+  def project_root, do: Minga.Project.resolve_root()
 
   # Auto-unfold any fold containing the given line in the active window.
   # Handles both per-window folds and decoration folds.

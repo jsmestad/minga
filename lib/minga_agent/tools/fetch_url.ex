@@ -33,11 +33,9 @@ defmodule MingaAgent.Tools.FetchUrl do
   @spec execute(map()) :: {:ok, String.t()} | {:error, String.t()}
   def execute(args), do: execute(args, &fetch/2)
 
-  @doc false
   @spec execute(map(), fetcher()) :: {:ok, String.t()} | {:error, String.t()}
   def execute(args, fetcher), do: execute(args, fetcher, &resolve_host_addresses/1)
 
-  @doc false
   @spec execute(map(), fetcher(), resolver()) :: {:ok, String.t()} | {:error, String.t()}
   def execute(%{"url" => url} = args, fetcher, resolver)
       when is_binary(url) and is_function(fetcher, 2) and is_function(resolver, 1) do

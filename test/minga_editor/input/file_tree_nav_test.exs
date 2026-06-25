@@ -91,7 +91,7 @@ defmodule MingaEditor.Input.FileTreeNavTest do
     test "tree cursor stays in bounds", %{tmp_dir: tmp_dir, sidebar_registry: table} do
       state = make_state(tmp_dir, table, 3)
       entries = FileTree.visible_entries(ft(state).tree)
-      max_idx = length(entries) - 1
+      max_idx = Enum.count(entries) - 1
 
       # Move down past the end
       state =

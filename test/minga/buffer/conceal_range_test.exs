@@ -49,7 +49,7 @@ defmodule Minga.Buffer.ConcealRangeTest do
         )
 
       assert decs.version == 2
-      assert length(decs.conceal_ranges) == 2
+      assert Enum.count(decs.conceal_ranges) == 2
 
       assert Enum.any?(
                decs.conceal_ranges,
@@ -67,7 +67,7 @@ defmodule Minga.Buffer.ConcealRangeTest do
 
       decs = Decorations.remove_conceal(decs, first_id)
       assert decs.version == 4
-      assert length(decs.conceal_ranges) == 2
+      assert Enum.count(decs.conceal_ranges) == 2
 
       unchanged = Decorations.remove_conceal(decs, make_ref())
       assert unchanged == decs
@@ -301,7 +301,7 @@ defmodule Minga.Buffer.ConcealRangeTest do
             top_tier = Enum.filter(overlapping_inputs, fn {_, _, _, p} -> p == max_priority end)
             replacements = top_tier |> Enum.map(fn {_, _, r, _} -> r end) |> Enum.uniq()
 
-            if length(replacements) == 1 do
+            if Enum.count(replacements) == 1 do
               assert m.replacement == hd(replacements),
                      "Expected replacement #{inspect(hd(replacements))}, got #{inspect(m.replacement)}"
             else

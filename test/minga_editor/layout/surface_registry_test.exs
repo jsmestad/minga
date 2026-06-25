@@ -157,10 +157,10 @@ defmodule MingaEditor.Layout.SurfaceRegistryTest do
         |> Enum.count(&(&1.content_type == :window))
 
       assert window_count > 1
-      assert length(content_placements) == window_count
+      assert Enum.count(content_placements) == window_count
 
       rects = Enum.map(content_placements, & &1.rect)
-      assert length(Enum.uniq(rects)) == length(rects)
+      assert Enum.count(Enum.uniq(rects)) == Enum.count(rects)
     end
 
     test "split layout: sidebar rect resolves via hit-test and agrees with the tree" do
@@ -274,7 +274,7 @@ defmodule MingaEditor.Layout.SurfaceRegistryTest do
       u16s = Enum.map(ids, &SurfaceRegistry.surface_id_u16/1)
 
       assert Enum.all?(u16s, &(&1 in 0..65_535))
-      assert length(Enum.uniq(u16s)) == length(u16s), "surface_id_u16 must be injective"
+      assert Enum.count(Enum.uniq(u16s)) == Enum.count(u16s), "surface_id_u16 must be injective"
     end
   end
 end

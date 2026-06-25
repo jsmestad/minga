@@ -166,13 +166,13 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
       manual_tabs = visible_file_tabs(ctx, 0)
       agent_tabs = visible_file_tabs(ctx, agent_ws)
 
-      assert length(manual_tabs) == 2
-      assert length(agent_tabs) == 1
-      assert Enum.map(manual_tabs ++ agent_tabs, & &1.id) |> Enum.uniq() |> length() == 3
+      assert Enum.count(manual_tabs) == 2
+      assert Enum.count(agent_tabs) == 1
+      assert Enum.map(manual_tabs ++ agent_tabs, & &1.id) |> Enum.uniq() |> Enum.count() == 3
 
       :ok = MingaEditor.open_file(ctx.editor, file_path)
 
-      assert length(visible_file_tabs(ctx, 0)) == 2
+      assert Enum.count(visible_file_tabs(ctx, 0)) == 2
       assert active_workspace_id(ctx) == 0
     end
   end

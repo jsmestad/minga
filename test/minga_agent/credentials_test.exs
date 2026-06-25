@@ -97,7 +97,7 @@ defmodule MingaAgent.CredentialsTest do
   describe "status/1" do
     test "reports unconfigured when nothing is set", %{opts: opts} do
       statuses = Credentials.status(opts)
-      assert length(statuses) == 9
+      assert Enum.count(statuses) == 9
     end
 
     test "reports configured with correct source", %{opts: opts} do

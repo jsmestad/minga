@@ -357,10 +357,7 @@ defmodule MingaAgent.Credentials do
 
   @spec ensure_directory(String.t()) :: :ok | {:error, term()}
   defp ensure_directory(dir) do
-    case File.mkdir_p(dir) do
-      :ok -> :ok
-      {:error, reason} -> {:error, reason}
-    end
+    File.mkdir_p(dir)
   end
 
   @spec credentials_path(keyword()) :: String.t()
