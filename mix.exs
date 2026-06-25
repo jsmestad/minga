@@ -12,6 +12,16 @@ Code.require_file("mix/tasks/native_build_support.ex", __DIR__)
 Code.require_file("mix/tasks/native_build_tui.ex", __DIR__)
 Code.require_file("mix/tasks/native_build_go_tui.ex", __DIR__)
 
+# Burrito hard-codes musl libc for Linux binaries. Tell cc_precompiler to
+# fetch the precompiled musl NIF for exqlite instead of source-compiling
+# against the host glibc (whose versioned symbols musl cannot resolve).
+if Mix.env() == :prod and :os.type() == {:unix, :linux} do
+  arch = :erlang.system_info(:system_architecture) |> to_string() |> String.split("-") |> hd()
+  System.put_env("TARGET_ARCH", arch)
+  System.put_env("TARGET_OS", "linux")
+  System.put_env("TARGET_ABI", "musl")
+end
+
 defmodule Minga.MixProject do
   use Mix.Project
 
@@ -267,12 +277,7 @@ defmodule Minga.MixProject do
     [
       # TUI release: Burrito-wrapped standalone binary (macOS + Linux)
       minga: [
-        steps: [
-          &ensure_linux_musl_nifs/1,
-          :assemble,
-          &ensure_tui_release_artifacts/1,
-          &Burrito.wrap/1
-        ],
+        steps: [:assemble, &ensure_tui_release_artifacts/1, &Burrito.wrap/1],
         burrito: [
           targets: burrito_targets(),
           debug: Mix.env() != :prod,
@@ -308,24 +313,6 @@ defmodule Minga.MixProject do
       ["minga-parser", "minga-hook-runner"],
       "Run `MIX_ENV=prod mix native.build.support` before `mix release minga_macos`."
     )
-  end
-
-  @spec ensure_linux_musl_nifs(Mix.Release.t()) :: Mix.Release.t()
-  defp ensure_linux_musl_nifs(release) do
-    if :os.type() == {:unix, :linux} do
-      arch =
-        :erlang.system_info(:system_architecture)
-        |> to_string()
-        |> String.split("-")
-        |> List.first()
-
-      System.put_env("TARGET_ARCH", arch)
-      System.put_env("TARGET_OS", "linux")
-      System.put_env("TARGET_ABI", "musl")
-      Mix.Task.rerun("deps.compile", ["exqlite", "--force"])
-    end
-
-    release
   end
 
   @spec ensure_release_artifacts!(Mix.Release.t(), [String.t()], String.t()) :: Mix.Release.t()
