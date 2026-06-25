@@ -119,15 +119,10 @@ defmodule MingaEditor.Frontend.Manager do
     # Frequent full sweeps reclaim binary refs promptly.
     Process.flag(:fullsweep_after, 20)
 
-    backend = Keyword.get(opts, :backend, :tui)
     port_mode = Keyword.get(opts, :port_mode, Application.get_env(:minga, :port_mode, :spawn))
-
-    # get_lazy avoids MINGA_FRONTEND validation when renderer_path is explicit.
-    renderer_path =
-      Keyword.get_lazy(opts, :renderer_path, fn -> default_renderer_path(backend) end)
-
+    renderer_path = Keyword.fetch!(opts, :renderer_path)
     port_opener = Keyword.get(opts, :port_opener, &Port.open/2)
-    tty_path = Keyword.get(opts, :tty_path, :detect)
+    tty_path = Keyword.get(opts, :tty_path)
     state = %PortState{renderer_path: renderer_path, port_mode: port_mode, tty_path: tty_path}
     result = {:ok, start_port(state, port_opener)}
     StartupTimer.mark(:frontend_port_ready)
@@ -290,36 +285,9 @@ defmodule MingaEditor.Frontend.Manager do
     end
   end
 
-  # Detect the tty device path and pass it to the renderer.
-  #
-  # When spawned as a BEAM Port, the child process loses access to /dev/tty
-  # because Erlang's erl_child_setup calls setsid().  We detect the real tty
-  # device path and pass it via the MINGA_TTY env var.
-  #
-  # Detection order:
-  #   1. MINGA_TTY env var (set by bin/minga shell wrapper or user)
-  #   2. `ps -o tty=` on the BEAM process (reads from kernel, not stdin)
-  #   3. Empty (the renderer falls back to /dev/tty — may fail)
-  @spec tty_env(String.t() | nil | :detect) :: [{charlist(), charlist()}]
-  defp tty_env(:detect) do
-    tty_path = System.get_env("MINGA_TTY") || detect_tty()
-
-    case tty_path do
-      nil -> []
-      path -> [{~c"MINGA_TTY", String.to_charlist(path)}]
-    end
-  end
-
+  @spec tty_env(String.t() | nil) :: [{charlist(), charlist()}]
   defp tty_env(nil), do: []
   defp tty_env(path) when is_binary(path), do: [{~c"MINGA_TTY", String.to_charlist(path)}]
-
-  @spec detect_tty() :: String.t() | nil
-  defp detect_tty do
-    case System.cmd("ps", ["-o", "tty=", "-p", to_string(:os.getpid())]) do
-      {output, 0} -> tty_path_for(String.trim(output))
-      _ -> nil
-    end
-  end
 
   @doc """
   Builds a `/dev/` path from the tty name returned by `ps -o tty=`.
@@ -413,84 +381,6 @@ defmodule MingaEditor.Frontend.Manager do
     Enum.each(subscribers, &send(&1, message))
   end
 
-  @spec default_renderer_path(backend()) :: String.t()
-  defp default_renderer_path(backend) do
-    binary_name = renderer_binary_name(backend)
-
-    # Priority 1: app bundle context (BEAM release embedded inside Minga.app).
-    # Priority 2: priv/ directory (Burrito binary or standard release).
-    # Priority 3: dev/test fallback in the source tree.
-    case find_app_bundle_binary(binary_name, backend) do
-      {:ok, path} ->
-        path
-
-      :not_in_bundle ->
-        priv_path = Application.app_dir(:minga, "priv/#{binary_name}")
-        if File.exists?(priv_path), do: priv_path, else: dev_fallback_path(backend)
-    end
-  end
-
-  @spec dev_fallback_path(backend()) :: String.t()
-  defp dev_fallback_path(:gui), do: find_xcode_build_product("Minga")
-
-  defp dev_fallback_path(:tui),
-    do: Path.join([File.cwd!(), "go", "tui", "bin", "minga-renderer-go"])
-
-  # When running from a BEAM release embedded inside a .app bundle,
-  # resolve the frontend binary relative to the bundle root.
-  #
-  # The release root is at: Minga.app/Contents/Resources/release/
-  # The GUI binary is at:   Minga.app/Contents/MacOS/Minga
-  # The TUI binary is at:   Minga.app/Contents/Resources/release/lib/minga-*/priv/minga-renderer-go
-  #                         (which Application.app_dir already resolves, so TUI returns :not_in_bundle)
-  @spec find_app_bundle_binary(String.t(), backend()) :: {:ok, String.t()} | :not_in_bundle
-  defp find_app_bundle_binary(binary_name, :gui) do
-    case app_bundle_root() do
-      {:ok, bundle_root} ->
-        gui_path = Path.join([bundle_root, "Contents", "MacOS", binary_name])
-
-        if File.exists?(gui_path) do
-          {:ok, gui_path}
-        else
-          :not_in_bundle
-        end
-
-      :not_in_bundle ->
-        :not_in_bundle
-    end
-  end
-
-  defp find_app_bundle_binary(_binary_name, _tui), do: :not_in_bundle
-
-  # Detect whether the BEAM is running inside a .app bundle by checking
-  # the release root path. Returns the bundle root (e.g., "/path/to/Minga.app")
-  # or :not_in_bundle.
-  #
-  # The release root is the directory containing bin/, lib/, releases/, erts-*.
-  # In a bundle, this is at: Minga.app/Contents/Resources/release/
-  # So the bundle root is 3 levels up from the release root.
-  @spec app_bundle_root() :: {:ok, String.t()} | :not_in_bundle
-  defp app_bundle_root do
-    # :code.root_dir() returns the release root in an OTP release,
-    # e.g., "/path/to/Minga.app/Contents/Resources/release"
-    release_root = :code.root_dir() |> to_string()
-
-    if String.contains?(release_root, ".app/Contents/Resources/release") do
-      # Walk up: release/ -> Resources/ -> Contents/ -> Minga.app/
-      bundle_root =
-        release_root
-        |> Path.join("..")
-        |> Path.join("..")
-        |> Path.join("..")
-        |> Path.expand()
-
-      {:ok, bundle_root}
-    else
-      :not_in_bundle
-    end
-  end
-
-  # Only stop the BEAM when running as a real editor (not in tests).
   @spec maybe_stop_system(non_neg_integer()) :: :ok
   defp maybe_stop_system(code) do
     if Application.get_env(:minga, :start_editor) do
@@ -498,91 +388,5 @@ defmodule MingaEditor.Frontend.Manager do
     end
 
     :ok
-  end
-
-  @spec renderer_binary_name(backend()) :: String.t()
-  defp renderer_binary_name(:tui) do
-    validate_tui_frontend!()
-    "minga-renderer-go"
-  end
-
-  defp renderer_binary_name(:gui), do: "Minga"
-
-  @spec validate_tui_frontend!() :: :ok
-  defp validate_tui_frontend! do
-    case System.get_env("MINGA_FRONTEND") do
-      nil -> :ok
-      "go" -> :ok
-      value -> raise ArgumentError, "MINGA_FRONTEND=#{value} is not valid. Only \"go\" is valid."
-    end
-  end
-
-  # Find the Xcode build product in DerivedData.
-  # Uses `xcodebuild -showBuildSettings` to get the exact path.
-  #
-  # For `type: application` targets, the executable lives inside the .app
-  # bundle at `Minga.app/Contents/MacOS/Minga`. We parse both
-  # BUILT_PRODUCTS_DIR and FULL_PRODUCT_NAME to construct the correct path.
-  @spec find_xcode_build_product(String.t()) :: String.t()
-  defp find_xcode_build_product(product_name) do
-    project_path = Path.join([File.cwd!(), "macos", "Minga.xcodeproj"])
-
-    case System.cmd(
-           "xcodebuild",
-           [
-             "-project",
-             project_path,
-             "-scheme",
-             "Minga",
-             "-configuration",
-             "Debug",
-             "-showBuildSettings"
-           ],
-           stderr_to_stdout: true
-         ) do
-      {output, 0} ->
-        resolve_build_product_path(output, product_name)
-
-      _ ->
-        Path.join([File.cwd!(), "macos", "build", "Debug", product_name])
-    end
-  end
-
-  @spec resolve_build_product_path(String.t(), String.t()) :: String.t()
-  defp resolve_build_product_path(build_settings, product_name) do
-    built_dir = parse_build_setting(build_settings, "BUILT_PRODUCTS_DIR")
-    full_product = parse_build_setting(build_settings, "FULL_PRODUCT_NAME")
-
-    case {built_dir, full_product} do
-      {dir, app_name} when is_binary(dir) and is_binary(app_name) ->
-        resolve_executable_in_product(dir, app_name, product_name)
-
-      {dir, _} when is_binary(dir) ->
-        Path.join(dir, product_name)
-
-      _ ->
-        Path.join([File.cwd!(), "macos", "build", "Debug", product_name])
-    end
-  end
-
-  @spec resolve_executable_in_product(String.t(), String.t(), String.t()) :: String.t()
-  defp resolve_executable_in_product(dir, app_name, product_name) do
-    if String.ends_with?(app_name, ".app") do
-      # Application target: binary is inside the .app bundle
-      Path.join([dir, app_name, "Contents", "MacOS", product_name])
-    else
-      # Tool target (legacy): binary is directly in the build dir
-      Path.join(dir, product_name)
-    end
-  end
-
-  @spec parse_build_setting(String.t(), String.t()) :: String.t() | nil
-  defp parse_build_setting(output, key) do
-    # Anchor to whitespace so e.g. "BUILT_PRODUCTS_DIR" doesn't match
-    # "PRECOMPS_INCLUDE_HEADERS_FROM_BUILT_PRODUCTS_DIR".
-    case Regex.run(~r/\s+#{Regex.escape(key)} = (.+)/, output) do
-      [_, value] -> String.trim(value)
-      _ -> nil
-    end
   end
 end

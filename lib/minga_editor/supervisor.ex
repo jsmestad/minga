@@ -38,10 +38,15 @@ defmodule MingaEditor.Supervisor do
     Minga.Telemetry.StartupTimer.mark(:editor_supervisor_init)
     backend = Keyword.get(opts, :backend, :tui)
 
+    alias MingaEditor.Frontend.Resolve
+    renderer_path = Resolve.renderer_path(backend)
+    tty_path = Resolve.tty_path()
+
     children =
       [
         Minga.Parser.Manager,
-        {MingaEditor.Frontend.Manager, [backend: backend]}
+        {MingaEditor.Frontend.Manager,
+         [backend: backend, renderer_path: renderer_path, tty_path: tty_path]}
       ]
       |> Enum.concat(renderer_children())
       |> Enum.concat([

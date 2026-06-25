@@ -46,8 +46,6 @@ defmodule Minga.Credo.NoBlockingEditorCallCheck do
     {"lib/minga_editor/agent/slash_command.ex", 1293},
     {"lib/minga_editor/ui/picker/todo_search_source.ex", 99},
     {"lib/minga_editor/ui/picker/todo_search_source.ex", 119},
-    {"lib/minga_editor/frontend/manager.ex", 313},
-    {"lib/minga_editor/frontend/manager.ex", 525}
   ]
 
   @impl Credo.Check
@@ -154,8 +152,20 @@ defmodule Minga.Credo.NoBlockingEditorCallCheck do
     end
   end
 
+  @supervisor_modules [
+    "lib/minga_editor/frontend/resolve.ex"
+  ]
+
   defp skip_file?(%SourceFile{} = source_file) do
     filename = Path.expand(source_file.filename)
-    not String.contains?(filename, "/minga_editor/") or String.contains?(filename, "/test/")
+
+    not String.contains?(filename, "/minga_editor/") or
+      String.contains?(filename, "/test/") or
+      supervisor_context?(source_file)
+  end
+
+  defp supervisor_context?(%SourceFile{} = source_file) do
+    rel_path = source_file.filename |> Path.expand() |> project_relative_path()
+    rel_path in @supervisor_modules
   end
 end

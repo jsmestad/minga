@@ -23,7 +23,7 @@ defmodule MingaEditor.Frontend.Manager.State do
             ready: false,
             terminal_size: nil,
             capabilities: %Capabilities{},
-            tty_path: :detect
+            tty_path: nil
 
   @type t :: %__MODULE__{
           port: port() | nil,
@@ -33,6 +33,6 @@ defmodule MingaEditor.Frontend.Manager.State do
           ready: boolean(),
           terminal_size: {width :: pos_integer(), height :: pos_integer()} | nil,
           capabilities: Capabilities.t(),
-          tty_path: String.t() | nil | :detect
+          tty_path: String.t() | nil
         }
 end
