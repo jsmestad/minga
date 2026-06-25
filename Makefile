@@ -160,7 +160,7 @@ ifeq ($(OS),Darwin)
 			"-configuration", "Release", "-showBuildSettings"], stderr_to_stdout: true); \
 		[dir] = Regex.run(~r/BUILT_PRODUCTS_DIR = (.+)/, output, capture: :all_but_first); \
 		[product] = Regex.run(~r/FULL_PRODUCT_NAME = (.+)/, output, capture: :all_but_first); \
-		IO.write(Path.join(String.trim(dir), String.trim(product)))'); \
+		IO.write(Path.join(String.trim(dir), String.trim(product)))' 2>/dev/null); \
 	if [ -z "$$APP_PATH" ] || [ ! -d "$$APP_PATH" ]; then \
 		echo "\033[31mError: Could not locate Minga.app after build.\033[0m"; exit 1; \
 	fi; \

@@ -397,9 +397,12 @@ defmodule Minga.Parser.Manager do
   @impl true
   @spec init(keyword()) :: {:ok, State.t()}
   def init(opts) do
+    Minga.Telemetry.StartupTimer.mark(:parser_port_spawn)
     parser_path = Keyword.get(opts, :parser_path, default_parser_path())
     state = %State{parser_path: parser_path}
-    {:ok, start_port(state)}
+    result = {:ok, start_port(state)}
+    Minga.Telemetry.StartupTimer.mark(:parser_port_ready)
+    result
   end
 
   @impl true

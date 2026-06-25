@@ -61,34 +61,36 @@ defmodule Minga.Services.Supervisor do
   @impl true
   @spec init(keyword()) :: {:ok, {Supervisor.sup_flags(), [Supervisor.child_spec()]}}
   def init(_opts) do
+    Minga.Telemetry.StartupTimer.mark(:services_init)
+
+    alias Minga.Telemetry.StartupTimer
+
     children = [
-      # Independent services under one_for_one: a single service crash
-      # restarts only that service, not its siblings or the chains below.
-      Minga.Services.Independent,
-
-      # Extension chain: Registry → editor contribution registries → CodeLease → provider registry → Supervisor → Loader
-      Minga.Extension.Registry,
-      MingaEditor.Extension.Sidebar,
-      Minga.Extension.CodeLease,
-      MingaAgent.ProviderRegistry,
-      MingaAgent.ProviderPacks.Native,
-      MingaAgent.Hooks.Registry,
-      MingaAgent.MCP.ServerRegistry,
-      MingaAgent.Skills.Registry,
-      MingaEditor.Agent.SlashCommand.Registry,
-      MingaEditor.Agent.SemanticUI.Registry,
-      Minga.Extension.Supervisor,
-      Minga.Config.Loader,
-      Minga.Config.Writer,
-
-      # LSP chain: Supervisor → SyncServer
-      Minga.LSP.Supervisor,
-      Minga.LSP.SyncServer,
-
-      # Project, session registry, and session-backed reactive surfaces (end of chain, minimal cascade)
-      Minga.Project,
-      MingaAgent.SessionManager,
-      MingaAgent.ReactiveDiagnostics
+      StartupTimer.timed_child_spec(:svc_independent, Minga.Services.Independent),
+      StartupTimer.timed_child_spec(:svc_ext_registry, Minga.Extension.Registry),
+      StartupTimer.timed_child_spec(:svc_sidebar, MingaEditor.Extension.Sidebar),
+      StartupTimer.timed_child_spec(:svc_code_lease, Minga.Extension.CodeLease),
+      StartupTimer.timed_child_spec(:svc_provider_registry, MingaAgent.ProviderRegistry),
+      StartupTimer.timed_child_spec(:svc_provider_packs, MingaAgent.ProviderPacks.Native),
+      StartupTimer.timed_child_spec(:svc_hooks_registry, MingaAgent.Hooks.Registry),
+      StartupTimer.timed_child_spec(:svc_mcp_registry, MingaAgent.MCP.ServerRegistry),
+      StartupTimer.timed_child_spec(:svc_skills_registry, MingaAgent.Skills.Registry),
+      StartupTimer.timed_child_spec(
+        :svc_slash_cmd_registry,
+        MingaEditor.Agent.SlashCommand.Registry
+      ),
+      StartupTimer.timed_child_spec(
+        :svc_semantic_ui_registry,
+        MingaEditor.Agent.SemanticUI.Registry
+      ),
+      StartupTimer.timed_child_spec(:svc_ext_supervisor, Minga.Extension.Supervisor),
+      StartupTimer.timed_child_spec(:svc_config_loader, Minga.Config.Loader),
+      StartupTimer.timed_child_spec(:svc_config_writer, Minga.Config.Writer),
+      StartupTimer.timed_child_spec(:svc_lsp_supervisor, Minga.LSP.Supervisor),
+      StartupTimer.timed_child_spec(:svc_lsp_sync, Minga.LSP.SyncServer),
+      StartupTimer.timed_child_spec(:svc_project, Minga.Project),
+      StartupTimer.timed_child_spec(:svc_session_manager, MingaAgent.SessionManager),
+      StartupTimer.timed_child_spec(:svc_reactive_diag, MingaAgent.ReactiveDiagnostics)
     ]
 
     Supervisor.init(children, strategy: :rest_for_one)

@@ -44,25 +44,28 @@ defmodule Minga.Foundation.Supervisor do
   @impl true
   @spec init(keyword()) :: {:ok, {Supervisor.sup_flags(), [Supervisor.child_spec()]}}
   def init(_opts) do
+    Minga.Telemetry.StartupTimer.mark(:foundation_init)
+    alias Minga.Telemetry.StartupTimer
+
     children = [
-      Minga.Language.Registry,
-      Minga.Extensions.LanguagePacks,
-      Minga.Extensions.ThemePacks,
-      Minga.Tool.Recipe.Registry,
-      Minga.Extensions.RecipePacks,
-      Minga.Events,
-      Minga.Config.Options,
-      Minga.Keymap.Active,
-      Minga.Config.Hooks,
-      Minga.Config.Advice,
-      Minga.Config.ModelineSegments,
-      Minga.Extension.Overlay,
-      Minga.Extension.Panel,
-      Minga.Extension.Badge,
-      MingaAgent.Tool.Registry,
-      MingaAgent.ToolPacks.ReadOnly,
-      MingaAgent.ToolPacks.LSP,
-      Minga.Language.Filetype.Registry
+      StartupTimer.timed_child_spec(:fnd_lang_registry, Minga.Language.Registry),
+      StartupTimer.timed_child_spec(:fnd_lang_packs, Minga.Extensions.LanguagePacks),
+      StartupTimer.timed_child_spec(:fnd_theme_packs, Minga.Extensions.ThemePacks),
+      StartupTimer.timed_child_spec(:fnd_recipe_registry, Minga.Tool.Recipe.Registry),
+      StartupTimer.timed_child_spec(:fnd_recipe_packs, Minga.Extensions.RecipePacks),
+      StartupTimer.timed_child_spec(:fnd_events, Minga.Events),
+      StartupTimer.timed_child_spec(:fnd_config_options, Minga.Config.Options),
+      StartupTimer.timed_child_spec(:fnd_keymap, Minga.Keymap.Active),
+      StartupTimer.timed_child_spec(:fnd_hooks, Minga.Config.Hooks),
+      StartupTimer.timed_child_spec(:fnd_advice, Minga.Config.Advice),
+      StartupTimer.timed_child_spec(:fnd_modeline, Minga.Config.ModelineSegments),
+      StartupTimer.timed_child_spec(:fnd_overlay, Minga.Extension.Overlay),
+      StartupTimer.timed_child_spec(:fnd_panel, Minga.Extension.Panel),
+      StartupTimer.timed_child_spec(:fnd_badge, Minga.Extension.Badge),
+      StartupTimer.timed_child_spec(:fnd_tool_registry, MingaAgent.Tool.Registry),
+      StartupTimer.timed_child_spec(:fnd_tool_packs_ro, MingaAgent.ToolPacks.ReadOnly),
+      StartupTimer.timed_child_spec(:fnd_tool_packs_lsp, MingaAgent.ToolPacks.LSP),
+      StartupTimer.timed_child_spec(:fnd_filetype, Minga.Language.Filetype.Registry)
     ]
 
     Supervisor.init(children, strategy: :rest_for_one)

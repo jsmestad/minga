@@ -7,7 +7,8 @@ defmodule Minga.Command.RegistryTest do
   # Each test gets its own named registry to avoid cross-test pollution.
   setup do
     name = :"registry_#{System.unique_integer([:positive])}"
-    {:ok, _pid} = Registry.start_link(name: name)
+    {:ok, pid} = Registry.start_link(name: name)
+    :sys.get_state(pid)
     {:ok, registry: name}
   end
 

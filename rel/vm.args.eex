@@ -48,3 +48,10 @@
 ## GC sooner on processes that churn binaries (Editor, Buffer.Process
 ## during render and streaming). Default is 262144 words.
 +hmbs 32768
+
+## ── Module loading ─────────────────────────────────────────────────
+##
+## RELEASE_MODE is set to "interactive" in rel/env.sh.eex.
+## Do NOT add "-mode interactive" here: the release startup script
+## passes "--erl -mode $RELEASE_MODE" before reading vm.args, so
+## the BEAM would see two -mode flags and use only the first one.

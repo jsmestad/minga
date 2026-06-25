@@ -60,6 +60,7 @@ defmodule MingaEditor do
   alias Minga.LSP.SyncServer, as: LspSyncServer
   alias Minga.Mode
   alias Minga.Log
+  alias Minga.Telemetry.StartupTimer
   # PopupLifecycle alias removed: warnings popup replaced by bottom panel (#825)
 
   @typedoc "Options for starting the editor."
@@ -176,6 +177,8 @@ defmodule MingaEditor do
   @impl true
   @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
+    StartupTimer.mark(:editor_init)
+
     # Tune GC for the Editor process: frequent full sweeps reclaim binary
     # refs from the render loop, and a larger initial heap avoids repeated
     # grow-and-GC cycles during startup.
@@ -257,6 +260,8 @@ defmodule MingaEditor do
     # Legacy no-op retained for callers from the former transcript-buffer path.
     state = AgentLifecycle.setup_agent_highlight(state)
 
+    StartupTimer.mark(:editor_init_done)
+    StartupTimer.schedule_fallback_report()
     {:ok, state}
   end
 
@@ -384,6 +389,8 @@ defmodule MingaEditor do
   @impl true
   @spec handle_info(term(), state()) :: {:noreply, state()}
   def handle_info({:minga_input, {:ready, width, height}}, state) do
+    StartupTimer.mark(:frontend_ready_received)
+
     # Query capabilities from the frontend (may have been sent in extended ready).
     caps = Startup.fetch_capabilities(state.port_manager)
     Startup.apply_gui_defaults(caps, EditorState.options_server(state))
@@ -405,6 +412,9 @@ defmodule MingaEditor do
     Startup.send_font_config(new_state)
     new_state = refresh_gui_config_state(new_state)
     new_state = Renderer.render_or_async(new_state)
+    StartupTimer.mark(:first_render_dispatched)
+    StartupTimer.report()
+
     # Setup highlighting after first paint with correct viewport
     new_state = setup_highlight_or_defer(new_state)
 
