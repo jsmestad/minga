@@ -89,15 +89,16 @@ struct BEAMProcessManagerLaunchArgumentsTests {
         #expect(workingDirectory.path == "/Users/alice/code/minga")
     }
 
-    @Test("keeps /Applications for terminal launches")
-    @MainActor func keepsApplicationsForTerminalLaunches() {
+    @Test("uses HOME for /Applications even with TERM set")
+    @MainActor func usesHomeForApplicationsEvenWithTerm() {
         let workingDirectory = BEAMProcessManager.defaultWorkingDirectoryURL(
             currentDirectoryPath: "/Applications",
             environment: ["HOME": "/Users/alice", "TERM": "xterm-256color"],
-            bundleURL: URL(fileURLWithPath: "/Applications/Minga.app")
+            bundleURL: URL(fileURLWithPath: "/Applications/Minga.app"),
+            fileExists: { path in path == "/Users/alice" }
         )
 
-        #expect(workingDirectory.path == "/Applications")
+        #expect(workingDirectory.path == "/Users/alice")
     }
 
     @Test("keeps cwd when HOME is missing")

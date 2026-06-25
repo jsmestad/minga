@@ -164,6 +164,7 @@ ifeq ($(OS),Darwin)
 	if [ -z "$$APP_PATH" ] || [ ! -d "$$APP_PATH" ]; then \
 		echo "\033[31mError: Could not locate Minga.app after build.\033[0m"; exit 1; \
 	fi; \
+	rm -rf "$(APP_DIR)/Minga.app" && \
 	cp -R "$$APP_PATH" "$(APP_DIR)/Minga.app" || { \
 		echo "\033[33mPermission denied. Try: sudo make install-mac\033[0m"; exit 1; \
 	}; \
