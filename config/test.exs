@@ -48,9 +48,6 @@ config :minga,
 # Disable user extension loading so tests are deterministic regardless
 # of which extensions the developer has installed locally.
 config :minga, load_extensions: false
-config :minga, load_git_porcelain_extension: false
-config :minga, load_knowledge_graph_extension: false
-config :minga, load_adversarial_extension: false
 # Use stub installers in tests to avoid spawning npm/pip/cargo/go/curl
 # subprocesses during concurrent test runs (same EPIPE concern as git).
 config :minga,
