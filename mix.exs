@@ -242,7 +242,7 @@ defmodule Minga.MixProject do
   defp deps do
     [
       # TODO: revert to {:burrito, "~> 1.6"} once burrito-elixir/burrito#225 merges
-      {:burrito, github: "gilbertwong96/burrito", branch: "zig-0.16.0"},
+      {:burrito, github: "gilbertwong96/burrito", ref: "37db26f367613669f0a61ef35446480ad0ee23a1"},
       {:file_system, "~> 1.0"},
       {:stream_data, "~> 1.0", only: [:test, :dev]},
       {:propcheck, "~> 1.5", only: :test},
