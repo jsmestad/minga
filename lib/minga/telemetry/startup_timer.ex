@@ -49,8 +49,10 @@ defmodule Minga.Telemetry.StartupTimer do
   @spec schedule_fallback_report(non_neg_integer()) :: :ok
   def schedule_fallback_report(delay_ms \\ 3000) do
     spawn(fn ->
-      Process.sleep(delay_ms)
-      report()
+      receive do
+      after
+        delay_ms -> report()
+      end
     end)
 
     :ok
@@ -67,6 +69,7 @@ defmodule Minga.Telemetry.StartupTimer do
   end
 
   @doc false
+  @spec timed_start(atom(), {module(), atom(), [term()]}) :: term()
   def timed_start(label, {mod, fun, args}) do
     mark(label)
     result = apply(mod, fun, args)
@@ -83,10 +86,10 @@ defmodule Minga.Telemetry.StartupTimer do
   end
 
   defp print_report([{_first_label, origin} | _] = marks) do
-    lines =
+    {lines, last_time} =
       marks
       |> Enum.chunk_every(2, 1, :discard)
-      |> Enum.map(fn [{_from_label, from_time}, {to_label, to_time}] ->
+      |> Enum.map_reduce(origin, fn [{_from_label, from_time}, {to_label, to_time}], _acc ->
         delta_ms = (to_time - from_time) / 1000.0
         cumulative_ms = (to_time - origin) / 1000.0
 
@@ -94,10 +97,9 @@ defmodule Minga.Telemetry.StartupTimer do
         pad_delta = String.pad_leading(:erlang.float_to_binary(delta_ms, decimals: 1), 8)
         pad_cumul = String.pad_leading(:erlang.float_to_binary(cumulative_ms, decimals: 1), 8)
 
-        "  #{pad_label} #{pad_delta}ms  (#{pad_cumul}ms total)"
+        {"  #{pad_label} #{pad_delta}ms  (#{pad_cumul}ms total)", to_time}
       end)
 
-    {_last_label, last_time} = List.last(marks)
     total_ms = (last_time - origin) / 1000.0
 
     output =

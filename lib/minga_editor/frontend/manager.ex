@@ -28,6 +28,7 @@ defmodule MingaEditor.Frontend.Manager do
   @behaviour MingaEditor.Frontend.Adapter
 
   alias Minga.Telemetry
+  alias Minga.Telemetry.StartupTimer
   alias MingaEditor.Frontend.Protocol
 
   @typedoc "Renderer backend."
@@ -112,7 +113,7 @@ defmodule MingaEditor.Frontend.Manager do
   @impl true
   @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
-    Minga.Telemetry.StartupTimer.mark(:frontend_port_spawn)
+    StartupTimer.mark(:frontend_port_spawn)
 
     # Port.Manager sends large binary render commands every frame.
     # Frequent full sweeps reclaim binary refs promptly.
@@ -129,7 +130,7 @@ defmodule MingaEditor.Frontend.Manager do
     tty_path = Keyword.get(opts, :tty_path, :detect)
     state = %PortState{renderer_path: renderer_path, port_mode: port_mode, tty_path: tty_path}
     result = {:ok, start_port(state, port_opener)}
-    Minga.Telemetry.StartupTimer.mark(:frontend_port_ready)
+    StartupTimer.mark(:frontend_port_ready)
     result
   end
 
