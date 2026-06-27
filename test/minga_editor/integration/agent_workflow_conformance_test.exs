@@ -404,18 +404,34 @@ defmodule MingaEditor.Integration.AgentWorkflowConformanceTest do
   defp start_agent_editor(project_root, options_server, script_or_opts \\ [])
 
   defp start_agent_editor(project_root, options_server, opts) when is_list(opts) do
+    sessions_before =
+      MapSet.new(
+        MingaAgent.SessionManager.list_sessions()
+        |> Enum.map(fn {_id, pid, _meta} -> pid end)
+      )
+
     provider_opts =
       case Keyword.fetch(opts, :scripts) do
         {:ok, scripts} -> ScriptedProvider.scripts(scripts)
         :error -> ScriptedProvider.script(opts)
       end
 
-    start_editor("fixture",
-      project_root: project_root,
-      options_server: options_server,
-      agent_provider_module: ScriptedProvider,
-      agent_provider_opts: provider_opts
-    )
+    ctx =
+      start_editor("fixture",
+        project_root: project_root,
+        options_server: options_server,
+        agent_provider_module: ScriptedProvider,
+        agent_provider_opts: provider_opts
+      )
+
+    on_exit(fn ->
+      for {_id, pid, _meta} <- MingaAgent.SessionManager.list_sessions(),
+          not MapSet.member?(sessions_before, pid) do
+        MingaAgent.SessionManager.stop_session_by_pid(pid)
+      end
+    end)
+
+    ctx
   end
 
   defp turn_rendered?(%AgentChat{} = model) do
