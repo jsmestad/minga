@@ -1946,6 +1946,8 @@ func TestSemanticMouseRoutesModelineAndFileTreeZones(t *testing.T) {
 		generated.OPGuiTabBar:    {Tabs: protocol.TabBar{Tabs: []protocol.Tab{{ID: 41, Icon: "󰈙", Label: "one.ex"}, {ID: 42, Icon: "󰈙", Label: "two.ex", Active: true}}}},
 		generated.OPGuiFileTree:  {Tree: protocol.FileTree{Visible: true, Width: 24, Rows: []protocol.FileTreeRow{{ID: "row-0", Name: "row-0"}, {ID: "row-1", Name: "row-1"}}}},
 	}
+	model.layout = model.computeLayout()
+	model.viewport.SetHeight(model.layout.body.Height)
 	model.viewport.SetContent(model.content())
 	_ = model.View()
 
@@ -1979,6 +1981,8 @@ func TestSemanticMouseRoutesBreadcrumbSegmentZones(t *testing.T) {
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiBreadcrumb: {Breadcrumb: protocol.Breadcrumb{Segments: []string{"lib", "minga", "main.ex"}}},
 	}
+	model.layout = model.computeLayout()
+	model.viewport.SetHeight(model.layout.body.Height)
 	model.viewport.SetContent(model.content())
 	_ = model.View()
 
@@ -2329,6 +2333,8 @@ func TestSemanticMouseRoutesSidebarItemZones(t *testing.T) {
 		}}},
 	}
 	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "pane"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 8, Height: 1}}})
+	model.layout = model.computeLayout()
+	model.viewport.SetHeight(model.layout.body.Height)
 	model.viewport.SetContent(model.content())
 	_ = model.View()
 

@@ -135,7 +135,7 @@ type frameStaging struct {
 }
 
 func New(width, height uint16, out chan<- []byte) Model {
-	vp := viewport.New(viewport.WithWidth(int(width)), viewport.WithHeight(max(int(height)-3, 1)))
+	vp := viewport.New(viewport.WithWidth(int(width)), viewport.WithHeight(1))
 	m := Model{
 		width:             int(width),
 		height:            int(height),
@@ -158,6 +158,7 @@ func New(width, height uint16, out chan<- []byte) Model {
 	// Seed the layout so the first mouse event lands in the correct
 	// region before the first BEAM frame arrives.
 	m.layout = m.computeLayout()
+	m.viewport.SetHeight(m.layout.body.Height)
 	return m
 }
 

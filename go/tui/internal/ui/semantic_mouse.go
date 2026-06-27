@@ -213,25 +213,29 @@ func (m Model) semanticMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	if !ok || click.Button != tea.MouseLeft {
 		return nil, false
 	}
-	if packet, ok := m.modelineMousePacket(msg); ok {
+	if packet, ok := m.overlayMousePacket(msg); ok {
 		return packet, true
 	}
-	if packet, ok := m.tabMousePacket(msg); ok {
-		return packet, true
+	mouse := msg.Mouse()
+	switch {
+	case m.layout.header.Contains(mouse.X, mouse.Y):
+		return m.headerMousePacket(msg)
+	case m.layout.leftPane.Contains(mouse.X, mouse.Y):
+		return m.leftPaneMousePacket(msg)
+	case m.layout.footer.Contains(mouse.X, mouse.Y):
+		return m.footerMousePacket(msg)
 	}
-	if packet, ok := m.fileTreeMousePacket(msg); ok {
-		return packet, true
-	}
-	if packet, ok := m.breadcrumbMousePacket(msg); ok {
-		return packet, true
-	}
+	return nil, false
+}
+
+func (m Model) overlayMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	if packet, ok := m.completionMousePacket(msg); ok {
 		return packet, true
 	}
-	if packet, ok := m.sidebarMousePacket(msg); ok {
+	if packet, ok := m.hoverActionMousePacket(msg); ok {
 		return packet, true
 	}
-	if packet, ok := m.hoverActionMousePacket(msg); ok {
+	if packet, ok := m.floatPopupMousePacket(msg); ok {
 		return packet, true
 	}
 	if packet, ok := m.notificationMousePacket(msg); ok {
@@ -243,10 +247,31 @@ func (m Model) semanticMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	if packet, ok := m.editTimelineMousePacket(msg); ok {
 		return packet, true
 	}
-	if packet, ok := m.floatPopupMousePacket(msg); ok {
+	return nil, false
+}
+
+func (m Model) headerMousePacket(msg tea.MouseMsg) ([]byte, bool) {
+	if packet, ok := m.tabMousePacket(msg); ok {
+		return packet, true
+	}
+	if packet, ok := m.breadcrumbMousePacket(msg); ok {
 		return packet, true
 	}
 	return nil, false
+}
+
+func (m Model) leftPaneMousePacket(msg tea.MouseMsg) ([]byte, bool) {
+	if packet, ok := m.fileTreeMousePacket(msg); ok {
+		return packet, true
+	}
+	if packet, ok := m.sidebarMousePacket(msg); ok {
+		return packet, true
+	}
+	return nil, false
+}
+
+func (m Model) footerMousePacket(msg tea.MouseMsg) ([]byte, bool) {
+	return m.modelineMousePacket(msg)
 }
 
 // floatPopupMousePacket maps a click in the float popup's overlay band but
