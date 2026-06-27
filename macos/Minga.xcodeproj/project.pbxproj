@@ -203,6 +203,7 @@
 		78644398F50FDB9206F731CB /* ProtocolConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = C441427A427E23B912F70092 /* ProtocolConstants.swift */; };
 		78DCE2F6E9A23B694737D77E /* FileTreeRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 628AAE1DCC1D559B04B81E35 /* FileTreeRowView.swift */; };
 		78F06B9BFB553B50D9BDD50F /* FontFace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BC98120D82BD7548347875E /* FontFace.swift */; };
+		798E677ABC34C730785559B4 /* PickerStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00EC9D6E3E77B85DF13841B4 /* PickerStateTests.swift */; };
 		79E8353F67F7638721A02A54 /* BEAMProcessManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0EFEC421284D11AD2177113 /* BEAMProcessManager.swift */; };
 		7BB3EC1088506EF371B65A17 /* NativeSidebarRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7689397379CF6F761E34E67 /* NativeSidebarRegistry.swift */; };
 		7C38B63F699E7794CCCE39C6 /* GitStatusHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120944B58F457FF6EEA773CA /* GitStatusHeaderView.swift */; };
@@ -437,6 +438,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		00EC9D6E3E77B85DF13841B4 /* PickerStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PickerStateTests.swift; sourceTree = "<group>"; };
 		048C53BF025A1476EE8BC1A7 /* IMEComposition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IMEComposition.swift; sourceTree = "<group>"; };
 		053D515EC453DEBFF51FB6CB /* DecoderFuzzTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DecoderFuzzTests.swift; sourceTree = "<group>"; };
 		07B59F66E6260DE4B09FB563 /* FloatPopupState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatPopupState.swift; sourceTree = "<group>"; };
@@ -977,6 +979,7 @@
 				AA65B90C0347C6496C7FA986 /* MouseInputTests.swift */,
 				CA2269E199608D475AB34F10 /* NativeSidebarRegistryTests.swift */,
 				4B3DDF1EB804D4E31EDFA519 /* NonBlockingEncoderTests.swift */,
+				00EC9D6E3E77B85DF13841B4 /* PickerStateTests.swift */,
 				321E4E28F5F49F089CCE2E1D /* PipelineCacheTests.swift */,
 				9E27E6D9ACEB7DCD7F98FB0F /* PowerThermalPolicyTests.swift */,
 				100F1DE1D6A8C5A2065AC582 /* PreviewSnapshotPolicyTests.swift */,
@@ -1587,6 +1590,7 @@
 				FF008C417DFCA685A601A5B4 /* ObservatoryView.swift in Sources */,
 				2DCD343A1C7F479639583FB4 /* PickerOverlay.swift in Sources */,
 				E034885B4B5A1DDEE87195AE /* PickerState.swift in Sources */,
+				798E677ABC34C730785559B4 /* PickerStateTests.swift in Sources */,
 				BF4E98B0BE647893CB5DA85C /* PipelineCache.swift in Sources */,
 				4E1EEFA65935DCE58528E02B /* PipelineCacheTests.swift in Sources */,
 				8F5C757B71ED735F2BB8E05D /* PointingHandModifier.swift in Sources */,

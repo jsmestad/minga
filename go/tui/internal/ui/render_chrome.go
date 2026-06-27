@@ -447,7 +447,7 @@ func (m Model) renderPickerList(title string, picker protocol.Picker, height int
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupChrome()).Width(width).ColorWhitespace(true)
 	lines := []string{renderPadded(titleStyle, " "+title, width)}
 	rowBudget := max(height-1, 0)
-	selected := min(max(int(picker.Selected), 0), max(len(picker.Items)-1, 0))
+	selected := m.effectivePickerIndex(picker)
 	start := 0
 	if selected >= rowBudget && rowBudget > 0 {
 		start = selected - rowBudget + 1
