@@ -14,16 +14,26 @@ defmodule MingaEditor.WarningsBufferTest do
       assert %{visible: true, active_tab: :messages, filter: :warnings} = bottom_panel(ctx)
     end
 
-    test "warning popup opens unless the panel was dismissed" do
+    test "warning-level events do not auto-open the panel" do
       ctx = start_editor("hello")
       set_gui_capabilities(ctx)
 
       broadcast_warning(ctx, "first warning")
+      state = editor_state(ctx)
+      refute state.shell_state.warning_popup_timer
+      refute bottom_panel(ctx).visible
+    end
+
+    test "error-level events auto-open the panel unless dismissed" do
+      ctx = start_editor("hello")
+      set_gui_capabilities(ctx)
+
+      broadcast_error(ctx, "something failed")
       flush_warning_popup(ctx)
-      assert %{visible: true, filter: :warnings} = bottom_panel(ctx)
+      assert %{visible: true} = bottom_panel(ctx)
 
       dismiss_bottom_panel(ctx)
-      broadcast_warning(ctx, "second warning")
+      broadcast_error(ctx, "another failure")
       flush_warning_popup(ctx)
       refute bottom_panel(ctx).visible
     end
@@ -52,6 +62,14 @@ defmodule MingaEditor.WarningsBufferTest do
     Minga.Events.broadcast(
       :log_message,
       %Minga.Events.LogMessageEvent{text: text, level: :warning},
+      ctx.events_registry
+    )
+  end
+
+  defp broadcast_error(ctx, text) do
+    Minga.Events.broadcast(
+      :log_message,
+      %Minga.Events.LogMessageEvent{text: text, level: :error},
       ctx.events_registry
     )
   end

@@ -629,7 +629,8 @@ defmodule MingaEditor.Agent.Events do
     end
   catch
     :exit, reason ->
-      {state, [{:log_warning, "Failed to reload remote file #{path}: #{inspect(reason)}"}]}
+      {state,
+       [{:log, :agent, :error, "Failed to reload remote file #{path}: #{inspect(reason)}"}]}
   end
 
   @spec reload_remote_buffer_content(EditorState.t(), pid(), String.t(), String.t()) ::
