@@ -138,13 +138,19 @@ defmodule MingaEditor.Commands.Movement do
     EditorState.set_desired_col(state, desired)
   end
 
-  def execute(%{workspace: %{buffers: %{active: buf}, editing: editing}} = state, :move_logical_down) do
+  def execute(
+        %{workspace: %{buffers: %{active: buf}, editing: editing}} = state,
+        :move_logical_down
+      ) do
     desired = editing.desired_col || compute_desired_col(state, buf)
     state = non_wrapped_vertical_move(buf, state, :down, desired)
     EditorState.set_desired_col(state, desired)
   end
 
-  def execute(%{workspace: %{buffers: %{active: buf}, editing: editing}} = state, :move_logical_up) do
+  def execute(
+        %{workspace: %{buffers: %{active: buf}, editing: editing}} = state,
+        :move_logical_up
+      ) do
     desired = editing.desired_col || compute_desired_col(state, buf)
     state = non_wrapped_vertical_move(buf, state, :up, desired)
     EditorState.set_desired_col(state, desired)
@@ -306,9 +312,15 @@ defmodule MingaEditor.Commands.Movement do
   # ── Structural AST navigation ─────────────────────────────────────────────
 
   def execute(state, :nav_parent), do: structural_nav(state, :parent) |> reset_desired_col()
-  def execute(state, :nav_first_child), do: structural_nav(state, :first_child) |> reset_desired_col()
-  def execute(state, :nav_next_sibling), do: structural_nav(state, :next_sibling) |> reset_desired_col()
-  def execute(state, :nav_prev_sibling), do: structural_nav(state, :prev_sibling) |> reset_desired_col()
+
+  def execute(state, :nav_first_child),
+    do: structural_nav(state, :first_child) |> reset_desired_col()
+
+  def execute(state, :nav_next_sibling),
+    do: structural_nav(state, :next_sibling) |> reset_desired_col()
+
+  def execute(state, :nav_prev_sibling),
+    do: structural_nav(state, :prev_sibling) |> reset_desired_col()
 
   # ── Paragraph motions ─────────────────────────────────────────────────────
 
@@ -729,7 +741,7 @@ defmodule MingaEditor.Commands.Movement do
   @spec visual_line_move(GenServer.server(), state(), :up | :down, non_neg_integer()) :: state()
   defp visual_line_move(buf, state, direction, desired_col) do
     content_w = content_width(state)
-    opts = wrap_opts(buf, width_oracle(state)) ++ [desired_col: desired_col]
+    opts = [{:desired_col, desired_col} | wrap_opts(buf, width_oracle(state))]
 
     Buffer.apply_motion(buf, fn doc, pos ->
       case direction do
