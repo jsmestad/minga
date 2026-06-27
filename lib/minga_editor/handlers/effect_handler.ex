@@ -157,7 +157,7 @@ defmodule MingaEditor.Handlers.EffectHandler do
 
   defp apply_effect(state, {:log_warning, msg}) when is_binary(msg) do
     Minga.Log.warning(:editor, msg)
-    MingaEditor.maybe_schedule_warning_popup(state)
+    state
   end
 
   defp apply_effect(state, :sync_agent_transcript), do: AgentLifecycle.sync_transcript(state)
