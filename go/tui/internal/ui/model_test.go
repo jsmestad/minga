@@ -1234,15 +1234,16 @@ func TestAgentChatShortcutTogglesLatestToolBlock(t *testing.T) {
 
 func TestAgentAnimationCueChangesAcrossFrames(t *testing.T) {
 	model := New(80, 24, nil)
-	model.agentAnimationFrame = 0
+	model.agent.animationFrame = 0
 	first := ansi.Strip(model.renderAgentStatusBadge(1))
-	model.agentAnimationFrame = 1
+	model.agent.animationFrame = 1
 	second := ansi.Strip(model.renderAgentStatusBadge(1))
 	if first == second {
 		t.Fatalf("thinking status badge should animate across frames: %q", first)
 	}
-	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiAgentChat: {AgentChat: protocol.AgentChat{Visible: true, Status: 1}}}
-	if !model.agentAnimating() {
+	chat := protocol.AgentChat{Visible: true, Status: 1}
+	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiAgentChat: {AgentChat: chat}}
+	if !model.agent.animating(chat) {
 		t.Fatalf("visible thinking agent should animate")
 	}
 }
