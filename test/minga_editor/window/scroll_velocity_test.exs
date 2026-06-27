@@ -12,9 +12,9 @@ defmodule MingaEditor.Window.ScrollVelocityTest do
     test "few events within a window returns :idle" do
       sv =
         ScrollVelocity.new()
-        |> ScrollVelocity.record(1000)
-        |> ScrollVelocity.record(1010)
-        |> ScrollVelocity.record(1020)
+        |> ScrollVelocity.record(1000, :down)
+        |> ScrollVelocity.record(1010, :down)
+        |> ScrollVelocity.record(1020, :down)
 
       assert ScrollVelocity.tier(sv, 1025) == :idle
     end
@@ -22,7 +22,7 @@ defmodule MingaEditor.Window.ScrollVelocityTest do
     test "exactly 5 events returns :medium" do
       sv =
         Enum.reduce(1..5, ScrollVelocity.new(), fn i, acc ->
-          ScrollVelocity.record(acc, 1000 + i * 10)
+          ScrollVelocity.record(acc, 1000 + i * 10, :down)
         end)
 
       assert ScrollVelocity.tier(sv, 1055) == :medium
@@ -31,7 +31,7 @@ defmodule MingaEditor.Window.ScrollVelocityTest do
     test "4 events returns :idle (below medium threshold)" do
       sv =
         Enum.reduce(1..4, ScrollVelocity.new(), fn i, acc ->
-          ScrollVelocity.record(acc, 1000 + i * 10)
+          ScrollVelocity.record(acc, 1000 + i * 10, :down)
         end)
 
       assert ScrollVelocity.tier(sv, 1045) == :idle
@@ -40,7 +40,7 @@ defmodule MingaEditor.Window.ScrollVelocityTest do
     test "exactly 15 events returns :fast" do
       sv =
         Enum.reduce(1..15, ScrollVelocity.new(), fn i, acc ->
-          ScrollVelocity.record(acc, 1000 + i * 5)
+          ScrollVelocity.record(acc, 1000 + i * 5, :down)
         end)
 
       assert ScrollVelocity.tier(sv, 1080) == :fast
@@ -49,7 +49,7 @@ defmodule MingaEditor.Window.ScrollVelocityTest do
     test "14 events returns :medium (below fast threshold)" do
       sv =
         Enum.reduce(1..14, ScrollVelocity.new(), fn i, acc ->
-          ScrollVelocity.record(acc, 1000 + i * 5)
+          ScrollVelocity.record(acc, 1000 + i * 5, :down)
         end)
 
       assert ScrollVelocity.tier(sv, 1075) == :medium
@@ -58,7 +58,7 @@ defmodule MingaEditor.Window.ScrollVelocityTest do
     test "decays to :idle after 200ms with no events" do
       sv =
         Enum.reduce(1..16, ScrollVelocity.new(), fn i, acc ->
-          ScrollVelocity.record(acc, 1000 + i * 5)
+          ScrollVelocity.record(acc, 1000 + i * 5, :down)
         end)
 
       assert ScrollVelocity.tier(sv, 1082) == :fast
@@ -69,12 +69,12 @@ defmodule MingaEditor.Window.ScrollVelocityTest do
     test "sustained scrolling across window reset maintains tier via prev_count" do
       sv =
         Enum.reduce(1..16, ScrollVelocity.new(), fn i, acc ->
-          ScrollVelocity.record(acc, 1000 + i * 5)
+          ScrollVelocity.record(acc, 1000 + i * 5, :down)
         end)
 
       assert ScrollVelocity.tier(sv, 1082) == :fast
 
-      sv = ScrollVelocity.record(sv, 1150)
+      sv = ScrollVelocity.record(sv, 1150, :down)
       assert sv.count == 1
       assert sv.prev_count == 16
       assert ScrollVelocity.tier(sv, 1155) == :fast
@@ -83,40 +83,115 @@ defmodule MingaEditor.Window.ScrollVelocityTest do
     test "window resets after 100ms gap" do
       sv =
         Enum.reduce(1..10, ScrollVelocity.new(), fn i, acc ->
-          ScrollVelocity.record(acc, 1000 + i * 5)
+          ScrollVelocity.record(acc, 1000 + i * 5, :down)
         end)
 
       assert ScrollVelocity.tier(sv, 1055) == :medium
 
-      sv = ScrollVelocity.record(sv, 1200)
+      sv = ScrollVelocity.record(sv, 1200, :down)
       assert ScrollVelocity.tier(sv, 1205) == :medium
     end
 
     test "prev_count decays after two window resets with few events" do
       sv =
         Enum.reduce(1..16, ScrollVelocity.new(), fn i, acc ->
-          ScrollVelocity.record(acc, 1000 + i * 5)
+          ScrollVelocity.record(acc, 1000 + i * 5, :down)
         end)
 
       assert ScrollVelocity.tier(sv, 1082) == :fast
 
-      sv = ScrollVelocity.record(sv, 1200)
+      sv = ScrollVelocity.record(sv, 1200, :down)
       assert ScrollVelocity.tier(sv, 1205) == :fast
 
-      sv = ScrollVelocity.record(sv, 1400)
+      sv = ScrollVelocity.record(sv, 1400, :down)
       assert ScrollVelocity.tier(sv, 1405) == :idle
     end
 
     test "works with negative monotonic timestamps" do
       sv =
         ScrollVelocity.new()
-        |> ScrollVelocity.record(-5000)
-        |> ScrollVelocity.record(-4990)
-        |> ScrollVelocity.record(-4980)
-        |> ScrollVelocity.record(-4970)
-        |> ScrollVelocity.record(-4960)
+        |> ScrollVelocity.record(-5000, :down)
+        |> ScrollVelocity.record(-4990, :down)
+        |> ScrollVelocity.record(-4980, :down)
+        |> ScrollVelocity.record(-4970, :down)
+        |> ScrollVelocity.record(-4960, :down)
 
       assert ScrollVelocity.tier(sv, -4955) == :medium
+    end
+  end
+
+  describe "direction/2" do
+    test "new estimator returns :ambiguous" do
+      sv = ScrollVelocity.new()
+      assert ScrollVelocity.direction(sv, 1000) == :ambiguous
+    end
+
+    test "uniform down events return :down" do
+      sv =
+        Enum.reduce(1..5, ScrollVelocity.new(), fn i, acc ->
+          ScrollVelocity.record(acc, 1000 + i * 10, :down)
+        end)
+
+      assert ScrollVelocity.direction(sv, 1055) == :down
+    end
+
+    test "uniform up events return :up" do
+      sv =
+        Enum.reduce(1..5, ScrollVelocity.new(), fn i, acc ->
+          ScrollVelocity.record(acc, 1000 + i * 10, :up)
+        end)
+
+      assert ScrollVelocity.direction(sv, 1055) == :up
+    end
+
+    test "mixed events return :ambiguous" do
+      sv =
+        ScrollVelocity.new()
+        |> ScrollVelocity.record(1000, :down)
+        |> ScrollVelocity.record(1010, :down)
+        |> ScrollVelocity.record(1020, :up)
+        |> ScrollVelocity.record(1030, :up)
+        |> ScrollVelocity.record(1040, :down)
+
+      assert ScrollVelocity.direction(sv, 1045) == :ambiguous
+    end
+
+    test "4 of 5 same direction returns dominant direction" do
+      sv =
+        ScrollVelocity.new()
+        |> ScrollVelocity.record(1000, :down)
+        |> ScrollVelocity.record(1010, :down)
+        |> ScrollVelocity.record(1020, :down)
+        |> ScrollVelocity.record(1030, :down)
+        |> ScrollVelocity.record(1040, :up)
+
+      assert ScrollVelocity.direction(sv, 1045) == :down
+    end
+
+    test "direction decays to :ambiguous after 200ms" do
+      sv =
+        Enum.reduce(1..5, ScrollVelocity.new(), fn i, acc ->
+          ScrollVelocity.record(acc, 1000 + i * 10, :down)
+        end)
+
+      assert ScrollVelocity.direction(sv, 1055) == :down
+      assert ScrollVelocity.direction(sv, 1255) == :ambiguous
+    end
+
+    test "direction window is capped at 5 most recent events" do
+      sv =
+        Enum.reduce(1..5, ScrollVelocity.new(), fn i, acc ->
+          ScrollVelocity.record(acc, 1000 + i * 5, :down)
+        end)
+
+      assert ScrollVelocity.direction(sv, 1030) == :down
+
+      sv =
+        Enum.reduce(1..5, sv, fn i, acc ->
+          ScrollVelocity.record(acc, 1030 + i * 5, :up)
+        end)
+
+      assert ScrollVelocity.direction(sv, 1060) == :up
     end
   end
 end

@@ -232,15 +232,24 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     {fetch_first, fetch_count, visible_row_start_index} =
       case visible_line_map do
         nil ->
-          overscan =
-            overscan_rows(
-              Window.scroll_velocity_tier(window, System.monotonic_time(:millisecond))
-            )
+          now = System.monotonic_time(:millisecond)
+          velocity_tier = Window.scroll_velocity_tier(window, now)
+          total_overscan = overscan_rows(velocity_tier)
 
-          {overscan_before, fetch_first} = scroll_overscan_before(first_line, wrap_on, overscan)
+          {overscan_behind, overscan_ahead} =
+            directional_split(total_overscan, velocity_tier, Window.scroll_direction(window, now))
+
+          {overscan_before, fetch_first} =
+            scroll_overscan_before(first_line, wrap_on, overscan_behind)
 
           overscan_after =
-            scroll_overscan_after(first_line, visible_rows, line_count_approx, wrap_on, overscan)
+            scroll_overscan_after(
+              first_line,
+              visible_rows,
+              line_count_approx,
+              wrap_on,
+              overscan_ahead
+            )
 
           fetch_rows =
             scroll_fetch_rows(visible_rows, overscan_before, overscan_after, wrap_on)
@@ -337,6 +346,26 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   defp overscan_rows(:idle), do: 50
   defp overscan_rows(:medium), do: 100
   defp overscan_rows(:fast), do: 200
+
+  @spec directional_split(pos_integer(), ScrollVelocity.tier(), ScrollVelocity.direction()) ::
+          {pos_integer(), pos_integer()}
+  defp directional_split(total, :idle, _dir), do: half_split(total)
+  defp directional_split(total, _tier, :ambiguous), do: half_split(total)
+
+  defp directional_split(total, _tier, :down) do
+    behind = max(1, div(total * 15, 100))
+    {behind, total - behind}
+  end
+
+  defp directional_split(total, _tier, :up) do
+    behind = total - max(1, div(total * 15, 100))
+    {behind, total - behind}
+  end
+
+  defp half_split(total) do
+    half = div(total, 2)
+    {half, total - half}
+  end
 
   @spec scroll_overscan_before(non_neg_integer(), boolean(), pos_integer()) ::
           {non_neg_integer(), non_neg_integer()}
