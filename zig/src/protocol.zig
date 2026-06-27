@@ -34,6 +34,8 @@ pub const OP_CAPABILITIES_UPDATED = opcodes.OP_CAPABILITIES_UPDATED;
 pub const OP_PASTE_EVENT = opcodes.OP_PASTE_EVENT;
 pub const OP_GUI_ACTION = opcodes.OP_GUI_ACTION;
 pub const OP_REQUEST_KEYFRAME = opcodes.OP_REQUEST_KEYFRAME;
+pub const OP_SCROLL_BATCH = opcodes.OP_SCROLL_BATCH;
+pub const OP_SCROLL_PREFETCH_HINT = opcodes.OP_SCROLL_PREFETCH_HINT;
 pub const OP_LOG_MESSAGE = opcodes.OP_LOG_MESSAGE;
 
 // Render

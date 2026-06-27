@@ -352,6 +352,8 @@ final class EditorNSView: MTKView {
     /// Nil means the gesture has not latched onto a scroll target yet.
     private var scrollTargetCellPosition: (row: Int16, col: Int16)?
 
+    private var scrollPrefetchEpoch: [UInt16: UInt32] = [:]
+
     /// Schedule a render on the next vsync. Multiple calls between vsyncs
     /// are coalesced by MTKView into a single draw() call.
     func renderFrame() {
@@ -1407,13 +1409,26 @@ final class EditorNSView: MTKView {
         establishSmoothScrollTargetIfNeeded(row: row, col: col)
         let targetCell = Self.smoothScrollEventCellPosition(targetCell: scrollTargetCellPosition, row: row, col: col)
 
-        // Vertical: smooth sub-line pixel offset
         let vEvents = scrollAccumulator.accumulateVertical(
             deltaY: event.scrollingDeltaY, cellHeight: effectiveCellHeight)
-        for e in vEvents {
-            sendScrollEvent(e, row: targetCell.row, col: targetCell.col, mods: mods)
+        if let windowId = scrollTargetWindowId {
+            var deltaLines: Int16 = 0
+            for e in vEvents {
+                switch e {
+                case .scrollDown: deltaLines += 1
+                case .scrollUp: deltaLines -= 1
+                default: break
+                }
+            }
+            if deltaLines != 0 {
+                let direction: UInt8 = deltaLines > 0 ? 0 : 1
+                encoder.sendScrollBatch(windowId: windowId, deltaLines: deltaLines, direction: direction)
+            }
+        } else {
+            for e in vEvents {
+                sendScrollEvent(e, row: targetCell.row, col: targetCell.col, mods: mods)
+            }
         }
-        // Horizontal: discrete column events
         let hEvents = scrollAccumulator.accumulateHorizontal(
             deltaX: event.scrollingDeltaX, cellWidth: cellWidth)
         for e in hEvents {
@@ -1429,6 +1444,29 @@ final class EditorNSView: MTKView {
             for: targetWindowContent,
             scrollPresentation: targetScrollPresentation
         )
+        if let windowId = scrollTargetWindowId, let sp = targetScrollPresentation {
+            if let lastEpoch = scrollPrefetchEpoch[windowId], sp.contentEpoch > lastEpoch {
+                scrollPrefetchEpoch.removeValue(forKey: windowId)
+            }
+
+            let totalOverscan = payloadOverscan.before + payloadOverscan.after
+            if totalOverscan > 0 {
+                let scrollingDown = event.scrollingDeltaY < 0
+                let runway = scrollingDown ? payloadOverscan.after : payloadOverscan.before
+                let threshold = Double(totalOverscan) * 0.4
+                if Double(runway) < threshold, scrollPrefetchEpoch[windowId] == nil {
+                    let direction: UInt8 = scrollingDown ? 0 : 1
+                    encoder.sendScrollPrefetchHint(
+                        windowId: windowId,
+                        currentVisualLine: sp.visibleStartLine,
+                        direction: direction,
+                        contentEpoch: sp.contentEpoch
+                    )
+                    scrollPrefetchEpoch[windowId] = sp.contentEpoch
+                }
+            }
+        }
+
         let translation = Self.presentationScrollTranslation(
             scrollPresentation: targetScrollPresentation,
             scrollOffset: CGPoint(x: scrollAccumulator.pixelOffsetX, y: scrollAccumulator.pixelOffsetY),
@@ -1463,6 +1501,9 @@ final class EditorNSView: MTKView {
         scrollAccumulator.reset()
         scrollPixelOffset = CGPoint(x: 0, y: 0)
         scrollElasticOffsetY = 0
+        if let windowId = scrollTargetWindowId {
+            scrollPrefetchEpoch.removeValue(forKey: windowId)
+        }
         scrollTargetWindowId = nil
         scrollTargetCellPosition = nil
     }

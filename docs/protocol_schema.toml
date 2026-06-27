@@ -16,7 +16,7 @@ version = "2.0.0"
 # familiarity tinting. This changes the hand-decoded file-tree row payload.
 # protocol_version 5 adds producer-assigned stream_instance to the Messages stream.
 # protocol_version 6 frames gui_agent_context and appends gui_edit_timeline file summaries.
-protocol_version = 6
+protocol_version = 7
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -81,6 +81,20 @@ name = "request_keyframe"
 value = 0x08
 direction = "frontend_to_beam"
 framing = "fixed:5"
+
+[[opcodes]]
+category = "input"
+name = "scroll_batch"
+value = 0x09
+direction = "frontend_to_beam"
+framing = "fixed:6"
+
+[[opcodes]]
+category = "input"
+name = "scroll_prefetch_hint"
+value = 0x0A
+direction = "frontend_to_beam"
+framing = "fixed:10"
 
 [[opcodes]]
 category = "input"
