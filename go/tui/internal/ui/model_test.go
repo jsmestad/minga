@@ -1976,6 +1976,17 @@ func TestSemanticMouseRoutesModelineAndFileTreeZones(t *testing.T) {
 	}
 }
 
+func TestSemanticMouseBodyClickFallsThrough(t *testing.T) {
+	model := New(60, 12, nil)
+	model.layout = model.computeLayout()
+
+	bodyX := model.layout.body.X + 1
+	bodyY := model.layout.body.Y + 1
+	if _, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: bodyX, Y: bodyY})); ok {
+		t.Fatal("body-region click should not be handled by semantic routing")
+	}
+}
+
 func TestSemanticMouseRoutesBreadcrumbSegmentZones(t *testing.T) {
 	model := New(120, 12, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
