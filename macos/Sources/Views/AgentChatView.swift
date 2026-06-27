@@ -175,8 +175,8 @@ struct AgentChatView: View {
             .accessibilityAddTraits(.isButton)
             .onHover { hovering in
                 isHelpHovered = hovering
-                if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
             }
+            .pointingHandCursor()
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -212,7 +212,7 @@ struct AgentChatView: View {
         .accessibilityHint(state.isThinking ? "Disabled while the agent is streaming" : "Opens the model picker")
         .accessibilityAddTraits(.isButton)
         .onHover { isModelHovered = $0 }
-        .modifier(HeaderControlPointingHandModifier(isEnabled: !state.isThinking))
+        .pointingHandCursor(isEnabled: !state.isThinking)
     }
 
     @ViewBuilder
@@ -251,7 +251,7 @@ struct AgentChatView: View {
             .accessibilityHint("Opens a menu of thinking levels")
             .accessibilityAddTraits(.isButton)
             .onHover { isThinkingHovered = $0 }
-            .modifier(HeaderControlPointingHandModifier(isEnabled: true))
+            .pointingHandCursor()
         }
     }
 
@@ -277,44 +277,6 @@ struct AgentChatView: View {
         case "medium": return "Medium"
         case "high": return "High"
         default: return level.capitalized
-        }
-    }
-
-    private struct HeaderControlPointingHandModifier: ViewModifier {
-        let isEnabled: Bool
-        @State private var isHovered = false
-        @State private var didPushCursor = false
-
-        func body(content: Content) -> some View {
-            content
-                .onHover { hovering in
-                    isHovered = hovering
-                    syncCursor()
-                }
-                .onChange(of: isEnabled) { _, _ in
-                    syncCursor()
-                }
-                .onDisappear {
-                    popCursorIfNeeded()
-                }
-        }
-
-        private func syncCursor() {
-            let shouldPush = isHovered && isEnabled
-
-            if shouldPush && !didPushCursor {
-                NSCursor.pointingHand.push()
-                didPushCursor = true
-            } else if !shouldPush && didPushCursor {
-                popCursorIfNeeded()
-            }
-        }
-
-        private func popCursorIfNeeded() {
-            if didPushCursor {
-                NSCursor.pop()
-                didPushCursor = false
-            }
         }
     }
 

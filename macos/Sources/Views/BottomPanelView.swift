@@ -100,9 +100,7 @@ struct BottomPanelView: View {
             .buttonStyle(.plain)
             .help("Close panel")
             .padding(.horizontal, 8)
-            .onHover { isHovered in
-                if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-            }
+            .pointingHandCursor()
         }
         .frame(height: 28)
         .background(theme.tabBg)

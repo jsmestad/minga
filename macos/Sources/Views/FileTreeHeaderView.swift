@@ -1,4 +1,4 @@
-/// File tree header content for the unified toolbar.
+/// File tree header view for the unified toolbar.
 ///
 /// Shows the project name, git branch, and action buttons (new file,
 /// new folder, refresh, collapse all). Rendered inside the shared toolbar row
@@ -6,7 +6,7 @@
 
 import SwiftUI
 
-struct FileTreeHeaderContent: View {
+struct FileTreeHeaderView: View {
     let fileTreeState: FileTreeState
     let theme: ThemeColors
     let encoder: InputEncoder?

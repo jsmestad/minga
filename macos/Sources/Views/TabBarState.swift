@@ -149,6 +149,82 @@ final class TabBarState {
         )
     }
 
+    // MARK: - Display tabs
+
+    var displayTabs: [TabEntry] {
+        if hasCanonicalWorkspaceTabs {
+            return workspaceTabs.enumerated().map { index, tab in
+                TabEntry(
+                    id: tab.id,
+                    groupId: tab.workspaceId,
+                    isActive: index == Int(activeIndex),
+                    isDirty: tab.isDirty,
+                    isAgent: tab.isAgent,
+                    hasAttention: tab.hasAttention,
+                    agentStatus: 0,
+                    isPinned: tab.isPinned,
+                    tintColor: tab.tintColor,
+                    icon: tab.icon,
+                    label: tab.label
+                )
+            }
+        }
+
+        return tabs
+    }
+
+    // MARK: - Tab ordering
+
+    func canMoveTabLeft(_ tab: TabEntry) -> Bool {
+        guard let index = movableFileTabIndex(for: tab) else { return false }
+        return index > 0
+    }
+
+    func canMoveTabRight(_ tab: TabEntry) -> Bool {
+        guard let index = movableFileTabIndex(for: tab) else { return false }
+        return index < movableFileTabs(for: tab).count - 1
+    }
+
+    func tabDropReorder(droppedTabs: [TabDragPayload], target tab: TabEntry, visibleIndex _: Int) -> (id: UInt32, newIndex: UInt16)? {
+        guard let draggedId = droppedTabs.first?.id,
+              draggedId != tab.id else {
+            return nil
+        }
+        guard let draggedTab = displayTabs.first(where: { $0.id == draggedId }),
+              draggedTab.groupId == tab.groupId,
+              draggedTab.isPinned == tab.isPinned else {
+            return nil
+        }
+        guard let newIndex = visibleFileTabIndex(for: tab) else {
+            return nil
+        }
+        return (draggedId, UInt16(newIndex))
+    }
+
+    func movableFileTabIndex(for tab: TabEntry) -> Int? {
+        movableFileTabs(for: tab).firstIndex { $0.id == tab.id }
+    }
+
+    func visibleFileTabIndex(for tab: TabEntry) -> Int? {
+        visibleFileTabs(for: tab).firstIndex { $0.id == tab.id }
+    }
+
+    private func movableTabs(for tab: TabEntry) -> [TabEntry] {
+        displayTabs.filter { candidate in
+            candidate.groupId == tab.groupId && candidate.isPinned == tab.isPinned
+        }
+    }
+
+    private func movableFileTabs(for tab: TabEntry) -> [TabEntry] {
+        movableTabs(for: tab).filter { !$0.isAgent }
+    }
+
+    private func visibleFileTabs(for tab: TabEntry) -> [TabEntry] {
+        displayTabs.filter { candidate in
+            candidate.groupId == tab.groupId && !candidate.isAgent
+        }
+    }
+
     /// Clear all tab state.
     func hide() {
         tabs = []

@@ -105,9 +105,7 @@ struct TabBarView: View {
             .menuIndicator(.hidden)
             .frame(width: 28)
             .help("New file or agent session")
-            .onHover { isHovered in
-                if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-            }
+            .pointingHandCursor()
 
             // Window split buttons
             tabBarButton(
@@ -156,25 +154,7 @@ struct TabBarView: View {
     }
 
     private var displayTabs: [TabEntry] {
-        if tabBarState.hasCanonicalWorkspaceTabs {
-            return tabBarState.workspaceTabs.enumerated().map { index, tab in
-                TabEntry(
-                    id: tab.id,
-                    groupId: tab.workspaceId,
-                    isActive: index == Int(tabBarState.activeIndex),
-                    isDirty: tab.isDirty,
-                    isAgent: tab.isAgent,
-                    hasAttention: tab.hasAttention,
-                    agentStatus: 0,
-                    isPinned: tab.isPinned,
-                    tintColor: tab.tintColor,
-                    icon: tab.icon,
-                    label: tab.label
-                )
-            }
-        }
-
-        return tabBarState.tabs
+        tabBarState.displayTabs
     }
 
     func performTabContextMenuAction(_ action: TabContextMenuAction, for tab: TabEntry) {
@@ -190,69 +170,19 @@ struct TabBarView: View {
         }
     }
 
-    func canMoveTabLeft(_ tab: TabEntry) -> Bool {
-        guard let index = movableFileTabIndex(for: tab) else { return false }
-        return index > 0
-    }
-
-    func canMoveTabRight(_ tab: TabEntry) -> Bool {
-        guard let index = movableFileTabIndex(for: tab) else { return false }
-        return index < movableFileTabs(for: tab).count - 1
-    }
-
     func tabContextMenuMoveItems(for tab: TabEntry) -> [TabContextMenuMoveItem] {
         [
-            TabContextMenuMoveItem(id: .moveLeft, title: "Move Tab Left", isDisabled: !canMoveTabLeft(tab)),
-            TabContextMenuMoveItem(id: .moveRight, title: "Move Tab Right", isDisabled: !canMoveTabRight(tab))
+            TabContextMenuMoveItem(id: .moveLeft, title: "Move Tab Left", isDisabled: !tabBarState.canMoveTabLeft(tab)),
+            TabContextMenuMoveItem(id: .moveRight, title: "Move Tab Right", isDisabled: !tabBarState.canMoveTabRight(tab))
         ]
     }
 
     func handleTabDrop(droppedTabs: [TabDragPayload], target tab: TabEntry, visibleIndex: Int) -> Bool {
-        guard let reorder = tabDropReorder(droppedTabs: droppedTabs, target: tab, visibleIndex: visibleIndex) else {
+        guard let reorder = tabBarState.tabDropReorder(droppedTabs: droppedTabs, target: tab, visibleIndex: visibleIndex) else {
             return false
         }
         encoder?.sendTabReorder(id: reorder.id, newIndex: reorder.newIndex)
         return true
-    }
-
-    func tabDropReorder(droppedTabs: [TabDragPayload], target tab: TabEntry, visibleIndex _: Int) -> (id: UInt32, newIndex: UInt16)? {
-        guard let draggedId = droppedTabs.first?.id,
-              draggedId != tab.id else {
-            return nil
-        }
-        guard let draggedTab = displayTabs.first(where: { $0.id == draggedId }),
-              draggedTab.groupId == tab.groupId,
-              draggedTab.isPinned == tab.isPinned else {
-            return nil
-        }
-        guard let newIndex = visibleFileTabIndex(for: tab) else {
-            return nil
-        }
-        return (draggedId, UInt16(newIndex))
-    }
-
-    func movableFileTabIndex(for tab: TabEntry) -> Int? {
-        movableFileTabs(for: tab).firstIndex { $0.id == tab.id }
-    }
-
-    func visibleFileTabIndex(for tab: TabEntry) -> Int? {
-        visibleFileTabs(for: tab).firstIndex { $0.id == tab.id }
-    }
-
-    private func movableTabs(for tab: TabEntry) -> [TabEntry] {
-        displayTabs.filter { candidate in
-            candidate.groupId == tab.groupId && candidate.isPinned == tab.isPinned
-        }
-    }
-
-    private func movableFileTabs(for tab: TabEntry) -> [TabEntry] {
-        movableTabs(for: tab).filter { !$0.isAgent }
-    }
-
-    private func visibleFileTabs(for tab: TabEntry) -> [TabEntry] {
-        displayTabs.filter { candidate in
-            candidate.groupId == tab.groupId && !candidate.isAgent
-        }
     }
 
     // MARK: - Tab strip layouts
@@ -342,12 +272,7 @@ struct TabBarView: View {
         .buttonStyle(.plain)
         .accessibilityLabel("Switch to workspace \(workspace.label)")
         .help("Switch to workspace")
-        .onHover { isHovered in
-            if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-        }
-        .onDisappear {
-            NSCursor.pop()
-        }
+        .pointingHandCursor()
         .contextMenu {
             Button("Switch to Workspace") {
                 encoder?.sendExecuteCommand(name: workspaceGotoCommand(for: workspace))
@@ -734,9 +659,7 @@ struct TabBarView: View {
         }
         .buttonStyle(.plain)
         .help("Close tab")
-        .onHover { isHovered in
-            if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-        }
+        .pointingHandCursor()
     }
 
     @ViewBuilder
@@ -753,9 +676,7 @@ struct TabBarView: View {
         }
         .buttonStyle(.plain)
         .help(tooltip)
-        .onHover { isHovered in
-            if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-        }
+        .pointingHandCursor()
     }
 
     private var verticalSeparator: some View {
