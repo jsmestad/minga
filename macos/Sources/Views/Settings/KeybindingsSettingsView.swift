@@ -48,5 +48,20 @@ struct KeybindingsSettingsView: View {
         }
         .padding(20)
     }
+}
 
+#Preview("Keybindings Settings") {
+    let state = SettingsState()
+    state.isLoading = false
+    state.keybindings = [
+        Wire.KeybindingEntry(mode: "normal", key: "j", command: "move_down", description: "Move cursor down"),
+        Wire.KeybindingEntry(mode: "normal", key: "k", command: "move_up", description: "Move cursor up"),
+        Wire.KeybindingEntry(mode: "normal", key: "h", command: "move_left", description: "Move cursor left"),
+        Wire.KeybindingEntry(mode: "normal", key: "l", command: "move_right", description: "Move cursor right"),
+        Wire.KeybindingEntry(mode: "normal", key: "SPC f f", command: "find_file", description: "Open file finder"),
+        Wire.KeybindingEntry(mode: "normal", key: "SPC b b", command: "switch_buffer", description: "Switch buffer"),
+        Wire.KeybindingEntry(mode: "insert", key: "Escape", command: "normal_mode", description: "Return to normal mode"),
+    ]
+    return KeybindingsSettingsView(state: state, encoder: nil)
+        .frame(width: 520, height: 360)
 }

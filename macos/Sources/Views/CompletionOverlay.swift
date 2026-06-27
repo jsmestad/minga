@@ -158,3 +158,22 @@ struct CompletionOverlay: View {
         }
     }
 }
+
+#Preview("Completion") {
+    let theme = PreviewFixtures.theme()
+    let state = CompletionState()
+    state.update(
+        visible: true, anchorRow: 5, anchorCol: 10, selectedIndex: 1,
+        rawItems: [
+            Wire.CompletionItem(kind: 7, label: "defmodule", detail: "keyword"),
+            Wire.CompletionItem(kind: 7, label: "defstruct", detail: "keyword"),
+            Wire.CompletionItem(kind: 7, label: "defdelegate", detail: "keyword"),
+            Wire.CompletionItem(kind: 2, label: "def", detail: "keyword"),
+            Wire.CompletionItem(kind: 1, label: "Document", detail: "Minga.Buffer.Document"),
+        ],
+        documentation: "Defines a struct for the module.\n\nFields are given as a keyword list."
+    )
+    return CompletionOverlay(state: state, theme: theme, encoder: nil)
+        .frame(width: 400, height: 300)
+        .background(theme.editorBg)
+}
