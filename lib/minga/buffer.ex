@@ -141,6 +141,10 @@ defmodule Minga.Buffer do
   @spec cursor(t()) :: position()
   defdelegate cursor(server), to: BufferProcess
 
+  @doc "Cursor position and text of the cursor's line: `{line, col, line_text}`."
+  @spec cursor_context(t()) :: {non_neg_integer(), non_neg_integer(), String.t()}
+  defdelegate cursor_context(server), to: BufferProcess
+
   @doc "Move the cursor to an exact position."
   @spec move_to(t(), position()) :: :ok
   defdelegate move_to(server, pos), to: BufferProcess

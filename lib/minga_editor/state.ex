@@ -581,6 +581,12 @@ defmodule MingaEditor.State do
     update_editing(state, &VimState.set_last_find_char(&1, find_char))
   end
 
+  @doc "Sets the desired screen column for vertical movement (Vim's curswant)."
+  @spec set_desired_col(t(), non_neg_integer() | nil) :: t()
+  def set_desired_col(%__MODULE__{} = state, col) do
+    update_editing(state, &VimState.set_desired_col(&1, col))
+  end
+
   @doc "Replaces the vim macro recorder."
   @spec set_macro_recorder(t(), MingaEditor.MacroRecorder.t()) :: t()
   def set_macro_recorder(%__MODULE__{} = state, recorder) do

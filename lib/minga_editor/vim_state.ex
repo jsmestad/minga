@@ -38,6 +38,7 @@ defmodule MingaEditor.VimState do
           marks: marks(),
           last_jump_pos: Buffer.position() | nil,
           last_find_char: last_find_char(),
+          desired_col: non_neg_integer() | nil,
           change_recorder: ChangeRecorder.t(),
           macro_recorder: MacroRecorder.t()
         }
@@ -49,6 +50,7 @@ defmodule MingaEditor.VimState do
             marks: %{},
             last_jump_pos: nil,
             last_find_char: nil,
+            desired_col: nil,
             change_recorder: ChangeRecorder.new(),
             macro_recorder: MacroRecorder.new()
 
@@ -173,6 +175,12 @@ defmodule MingaEditor.VimState do
   @spec set_last_find_char(t(), last_find_char()) :: t()
   def set_last_find_char(%__MODULE__{} = vim, find_char) do
     %{vim | last_find_char: find_char}
+  end
+
+  @doc "Sets the desired screen column for vertical movement (Vim's curswant)."
+  @spec set_desired_col(t(), non_neg_integer() | nil) :: t()
+  def set_desired_col(%__MODULE__{} = vim, col) do
+    %{vim | desired_col: col}
   end
 
   @doc "Updates the macro recorder state."

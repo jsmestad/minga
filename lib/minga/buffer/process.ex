@@ -328,6 +328,12 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, :cursor)
   end
 
+  @doc "Returns the cursor position and the text of the cursor's line."
+  @spec cursor_context(GenServer.server()) :: {non_neg_integer(), non_neg_integer(), String.t()}
+  def cursor_context(server) do
+    GenServer.call(server, :cursor_context)
+  end
+
   @doc """
   Moves the cursor left or right if the move is valid, performing the boundary
   check inside the buffer process. Returns `{:ok, new_position}` if the cursor
@@ -1282,6 +1288,12 @@ defmodule Minga.Buffer.Process do
 
   def handle_call(:cursor, _from, state) do
     {:reply, Document.cursor(state.document), state}
+  end
+
+  def handle_call(:cursor_context, _from, state) do
+    {line, col} = Document.cursor(state.document)
+    line_text = Document.line_at(state.document, line)
+    {:reply, {line, col, line_text}, state}
   end
 
   def handle_call(

@@ -33,16 +33,15 @@ defmodule Minga.Editing.Motion.VisualLine do
     line_text = Document.line_at(doc, line)
     wrap_entry = wrap_entry(line_text, content_width, opts)
     display_col = Unicode.display_col(line_text, col)
-    {vrow_idx, vrow_col} = display_col_to_visual(wrap_entry, display_col)
+    {vrow_idx, computed_vrow_col} = display_col_to_visual(wrap_entry, display_col)
+    vrow_col = Keyword.get(opts, :desired_col, computed_vrow_col)
 
     if vrow_idx < Enum.count(wrap_entry) - 1 do
-      # Move to the next visual row within the same logical line
       next_vrow = Enum.at(wrap_entry, vrow_idx + 1)
       target_col = min(vrow_col, max(visual_display_width(next_vrow) - 1, 0))
       byte_col = byte_col_in_vrow(next_vrow, target_col)
       {line, next_vrow.byte_offset + byte_col}
     else
-      # Move to the first visual row of the next logical line
       next_line = line + 1
       max_line = Document.line_count(doc) - 1
 
@@ -74,16 +73,15 @@ defmodule Minga.Editing.Motion.VisualLine do
     line_text = Document.line_at(doc, line)
     wrap_entry = wrap_entry(line_text, content_width, opts)
     display_col = Unicode.display_col(line_text, col)
-    {vrow_idx, vrow_col} = display_col_to_visual(wrap_entry, display_col)
+    {vrow_idx, computed_vrow_col} = display_col_to_visual(wrap_entry, display_col)
+    vrow_col = Keyword.get(opts, :desired_col, computed_vrow_col)
 
     if vrow_idx > 0 do
-      # Move to the previous visual row within the same logical line
       prev_vrow = Enum.at(wrap_entry, vrow_idx - 1)
       target_col = min(vrow_col, max(visual_display_width(prev_vrow) - 1, 0))
       byte_col = byte_col_in_vrow(prev_vrow, target_col)
       {line, prev_vrow.byte_offset + byte_col}
     else
-      # Move to the last visual row of the previous logical line
       if line == 0 do
         {0, col}
       else
@@ -152,11 +150,10 @@ defmodule Minga.Editing.Motion.VisualLine do
     {idx, remaining, Enum.at(wrap_entry, idx)}
   end
 
-  # Given a display column within the full logical line, returns
-  # {visual_row_index, column_within_that_visual_row}.
+  @doc "Maps a full-line display column to `{visual_row_index, column_within_that_visual_row}`."
   @spec display_col_to_visual(WrapMap.wrap_entry(), non_neg_integer()) ::
           {non_neg_integer(), non_neg_integer()}
-  defp display_col_to_visual(wrap_entry, display_col) do
+  def display_col_to_visual(wrap_entry, display_col) do
     wrap_entry
     |> Enum.with_index()
     |> Enum.reduce_while({0, display_col}, fn {vrow, idx}, {_found_idx, remaining_col} ->
