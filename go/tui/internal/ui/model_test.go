@@ -1566,7 +1566,7 @@ func TestPresentationScrollUsesPayloadLocalRowsForWrappedContent(t *testing.T) {
 	model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.layout.header.Height}))
 	model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.layout.header.Height}))
 
-	scroll := model.presentationScroll[7]
+	scroll := model.localPresentation.scrolls[7]
 	if scroll.rowOffset != 3 {
 		t.Fatalf("wrapped presentation scroll should allow payload-local appended rows before clamping, got %d", scroll.rowOffset)
 	}
@@ -1590,13 +1590,13 @@ func TestPresentationScrollShiftWheelMovesHorizontally(t *testing.T) {
 	})
 
 	model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, Mod: tea.ModShift, X: 1, Y: model.layout.header.Height}))
-	scroll := model.presentationScroll[7]
+	scroll := model.localPresentation.scrolls[7]
 	if scroll.rowOffset != 0 || scroll.colOffset != 1 {
 		t.Fatalf("shift wheel-down should move presentation horizontally, got row=%d col=%d", scroll.rowOffset, scroll.colOffset)
 	}
 
 	model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelUp, Mod: tea.ModShift, X: 1, Y: model.layout.header.Height}))
-	if _, ok := model.presentationScroll[7]; ok {
+	if _, ok := model.localPresentation.scrolls[7]; ok {
 		t.Fatalf("shift wheel-up should cancel the horizontal offset and clear presentation scroll")
 	}
 }
@@ -1618,7 +1618,7 @@ func TestPresentationScrollHorizontalOffsetInvalidatesCachedRows(t *testing.T) {
 		t.Fatalf("initial render should show the unshifted cached row, got %q", initial)
 	}
 
-	model.presentationScroll[7] = presentationScroll{anchorTop: 10, anchorLeft: 2, contentEpoch: 9, layoutGeneration: 5, colOffset: 2}
+	model.localPresentation.scrolls[7] = presentationScroll{anchorTop: 10, anchorLeft: 2, contentEpoch: 9, layoutGeneration: 5, colOffset: 2}
 	scrolled := strings.Join(stripRenderedLines(model.renderWindowRows(model.windows[7])), "|")
 	if !strings.Contains(scrolled, "cdef") || strings.Contains(scrolled, "abcdef") {
 		t.Fatalf("horizontal presentation scroll should invalidate cached rows and shift content, got %q", scrolled)
@@ -1641,7 +1641,7 @@ func TestPresentationScrollHorizontalWheelRightClampsAtContentEdge(t *testing.T)
 		model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelRight, X: 1, Y: model.layout.header.Height}))
 	}
 
-	scroll := model.presentationScroll[7]
+	scroll := model.localPresentation.scrolls[7]
 	if scroll.colOffset != 2 {
 		t.Fatalf("horizontal presentation scroll should clamp at right edge, got col offset %d", scroll.colOffset)
 	}
@@ -1667,7 +1667,7 @@ func TestPresentationScrollHorizontalWheelRightUsesTextRectWidth(t *testing.T) {
 		model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelRight, X: 3, Y: model.layout.header.Height}))
 	}
 
-	if got := model.presentationScroll[7].colOffset; got != 2 {
+	if got := model.localPresentation.scrolls[7].colOffset; got != 2 {
 		t.Fatalf("horizontal presentation scroll should clamp against text rect width, got col offset %d", got)
 	}
 }
@@ -1711,9 +1711,8 @@ func TestFileTreeLocalNavigationPreviewMovesSelectionWhenEligible(t *testing.T) 
 		updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: fileTreeLocalNavigationDownKey, Text: string(fileTreeLocalNavigationDownKey)}))
 		model = updated.(Model)
 
-		tree := model.chrome[generated.OPGuiFileTree].Tree
-		if tree.Selected != "b" || !tree.Rows[1].Selected || tree.Rows[0].Selected {
-			t.Fatalf("eligible j press should preview the next file-tree row: %+v", tree)
+		if model.localPresentation.previewFileTreeIndex == nil || *model.localPresentation.previewFileTreeIndex != 1 {
+			t.Fatalf("eligible j press should set preview file-tree index to 1, got %v", model.localPresentation.previewFileTreeIndex)
 		}
 		packets := drainOutboundPackets(out)
 		if len(packets) != 1 || packets[0][0] != generated.OPKeyPress || codepoint(packets[0]) != fileTreeLocalNavigationDownKey || packets[0][5] != 0 {
@@ -1729,9 +1728,8 @@ func TestFileTreeLocalNavigationPreviewMovesSelectionWhenEligible(t *testing.T) 
 		updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyUp}))
 		model = updated.(Model)
 
-		tree := model.chrome[generated.OPGuiFileTree].Tree
-		if tree.Selected != "a" || !tree.Rows[0].Selected || tree.Rows[1].Selected {
-			t.Fatalf("eligible up-arrow press should preview the previous file-tree row: %+v", tree)
+		if model.localPresentation.previewFileTreeIndex == nil || *model.localPresentation.previewFileTreeIndex != 0 {
+			t.Fatalf("eligible up-arrow press should set preview file-tree index to 0, got %v", model.localPresentation.previewFileTreeIndex)
 		}
 		packets := drainOutboundPackets(out)
 		if len(packets) != 1 || packets[0][0] != generated.OPKeyPress || codepoint(packets[0]) != arrowUp || packets[0][5] != 0 {
@@ -1748,9 +1746,8 @@ func TestFileTreeLocalNavigationPreviewRequiresEligibilityFlag(t *testing.T) {
 	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: fileTreeLocalNavigationDownKey, Text: string(fileTreeLocalNavigationDownKey)}))
 	model = updated.(Model)
 
-	tree := model.chrome[generated.OPGuiFileTree].Tree
-	if tree.Selected != "a" || !tree.Rows[0].Selected || tree.Rows[1].Selected {
-		t.Fatalf("file tree should not preview locally when the local-navigation flag is clear: %+v", tree)
+	if model.localPresentation.previewFileTreeIndex != nil {
+		t.Fatalf("file tree should not set preview index when the local-navigation flag is clear, got %v", *model.localPresentation.previewFileTreeIndex)
 	}
 	packets := drainOutboundPackets(out)
 	if len(packets) != 1 || packets[0][0] != generated.OPKeyPress || codepoint(packets[0]) != fileTreeLocalNavigationDownKey || packets[0][5] != 0 {

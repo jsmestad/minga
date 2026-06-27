@@ -50,6 +50,9 @@ func (m *Model) previewFileTreeNavigation(msg tea.KeyPressMsg) bool {
 	}
 
 	selectedIndex := fileTreeSelectedIndex(payload)
+	if m.localPresentation.previewFileTreeIndex != nil {
+		selectedIndex = *m.localPresentation.previewFileTreeIndex
+	}
 	if selectedIndex < 0 {
 		return false
 	}
@@ -64,15 +67,7 @@ func (m *Model) previewFileTreeNavigation(msg tea.KeyPressMsg) bool {
 		return false
 	}
 
-	payload.Selected = payload.Rows[nextIndex].ID
-	payload.Focused = true
-	for i := range payload.Rows {
-		payload.Rows[i].Selected = i == nextIndex
-		payload.Rows[i].Focused = i == nextIndex
-	}
-	chrome := m.chrome[generated.OPGuiFileTree]
-	chrome.Tree = payload
-	m.chrome[generated.OPGuiFileTree] = chrome
+	m.localPresentation.previewFileTreeIndex = &nextIndex
 	return true
 }
 

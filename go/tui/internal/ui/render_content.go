@@ -259,7 +259,7 @@ func (m Model) presentationSourceStart(window protocol.WindowContent, height int
 	before, _ := presentationPayloadOverscanBounds(window, height)
 	maxStart := max(len(window.Rows)-height, 0)
 	start := min(before, maxStart)
-	if scroll, ok := m.presentationScroll[window.ID]; ok && scroll.contentEpoch == window.Scroll.ContentEpoch && scroll.layoutGeneration == window.Scroll.LayoutGeneration && scroll.anchorTop == window.Scroll.AnchorTop && scroll.anchorLeft == window.Scroll.AnchorLeft {
+	if scroll, ok := m.localPresentation.scrolls[window.ID]; ok && scroll.keysMatch(window.Scroll) {
 		start += scroll.rowOffset
 	}
 	return min(max(start, 0), maxStart)
@@ -311,8 +311,8 @@ func presentationVisibleRows(window protocol.WindowContent) int {
 
 func (m Model) presentationScrollEffectiveLeft(window protocol.WindowContent) int {
 	scrollLeft := int(window.ScrollLeft)
-	scroll, ok := m.presentationScroll[window.ID]
-	if !ok || scroll.contentEpoch != window.Scroll.ContentEpoch || scroll.layoutGeneration != window.Scroll.LayoutGeneration || scroll.anchorTop != window.Scroll.AnchorTop || scroll.anchorLeft != window.Scroll.AnchorLeft {
+	scroll, ok := m.localPresentation.scrolls[window.ID]
+	if !ok || !scroll.keysMatch(window.Scroll) {
 		return scrollLeft
 	}
 	return max(scrollLeft+scroll.colOffset, 0)
@@ -742,7 +742,12 @@ func (m Model) renderFileTree(tree protocol.FileTree, width int, height int) []s
 			lines = append(lines, style.Foreground(theme.TreeMutedText()).Render(fit(" "+status, width)))
 		}
 	}
+	previewIdx := m.localPresentation.previewFileTreeIndex
 	for rowIndex, row := range tree.Rows {
+		if previewIdx != nil {
+			row.Selected = rowIndex == *previewIdx
+			row.Focused = rowIndex == *previewIdx
+		}
 		rendered := m.renderFileTreeRow(row, width)
 		lines = append(lines, m.zones.Mark(zoneIDFileTreeRow(rowIndex), rendered))
 		if len(lines) >= height {
