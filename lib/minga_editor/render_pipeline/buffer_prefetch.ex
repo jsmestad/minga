@@ -30,6 +30,8 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   alias MingaEditor.Viewport
   alias MingaEditor.Window
 
+  @overscan_rows 50
+
   @typedoc "Render pipeline input."
   @type state :: Input.t()
 
@@ -329,20 +331,24 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
           {non_neg_integer(), non_neg_integer()}
   defp scroll_overscan_before(first_line, true), do: {0, first_line}
   defp scroll_overscan_before(0, false), do: {0, 0}
-  defp scroll_overscan_before(first_line, false), do: {1, first_line - 1}
+
+  defp scroll_overscan_before(first_line, false) do
+    count = min(@overscan_rows, first_line)
+    {count, first_line - count}
+  end
 
   @spec scroll_overscan_after(non_neg_integer(), pos_integer(), non_neg_integer(), boolean()) ::
           non_neg_integer()
   defp scroll_overscan_after(_first_line, _visible_rows, _line_count, true), do: 0
 
   defp scroll_overscan_after(first_line, visible_rows, line_count, false) do
-    if first_line + visible_rows < line_count, do: 1, else: 0
+    min(@overscan_rows, max(0, line_count - first_line - visible_rows))
   end
 
   @spec scroll_fetch_rows(pos_integer(), non_neg_integer(), non_neg_integer(), boolean()) ::
           pos_integer()
   defp scroll_fetch_rows(visible_rows, _before, _after, true),
-    do: visible_rows + div(visible_rows, 2)
+    do: visible_rows * 3
 
   defp scroll_fetch_rows(visible_rows, before_count, after_count, false),
     do: visible_rows + before_count + after_count
