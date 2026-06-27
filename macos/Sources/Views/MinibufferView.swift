@@ -291,3 +291,26 @@ struct MinibufferView: View {
         }
     }
 }
+
+#Preview("Minibuffer") {
+    let theme = PreviewFixtures.theme()
+    let state = MinibufferState()
+    state.update(
+        visible: true,
+        mode: MinibufferMode.command.rawValue,
+        cursorPos: 7,
+        prompt: "M-x ",
+        input: "org-mod",
+        context: "",
+        selectedIndex: 0,
+        totalCandidates: 23,
+        rawCandidates: [
+            Wire.MinibufferCandidate(matchScore: 95, label: "org-mode", description: "Toggle Org major mode", annotation: "SPC m o", matchPositions: [0, 1, 2, 3, 4, 5, 6]),
+            Wire.MinibufferCandidate(matchScore: 80, label: "org-mode-restart", description: "Restart Org mode parser", annotation: "", matchPositions: [0, 1, 2, 3, 4, 5, 6]),
+            Wire.MinibufferCandidate(matchScore: 72, label: "org-modernize", description: "Modernize Org buffer syntax", annotation: "", matchPositions: [0, 1, 2, 3, 4, 5, 6, 8]),
+        ]
+    )
+    return MinibufferView(state: state, theme: theme, encoder: nil)
+        .frame(width: 600, height: 140)
+        .background(theme.editorBg)
+}

@@ -1,0 +1,263 @@
+/// Reusable preview fixture data builders for PreviewRegistry and #Preview macros.
+
+import SwiftUI
+
+@MainActor
+enum PreviewFixtures {
+
+    /// Vim mode used for preview fixture state.
+    enum PreviewMode {
+        case normal
+        case insert
+    }
+
+    // MARK: - Theme & Encoder
+
+    /// Preview-only theme fixture. Runtime theme selection comes from the BEAM via guiTheme; previews apply explicit slots because ThemeColors itself starts with neutral bootstrap colors.
+    static func theme() -> ThemeColors {
+        let theme = ThemeColors()
+        theme.applySlots([
+            (GUI_COLOR_EDITOR_BG, 0x28, 0x2C, 0x34),
+            (GUI_COLOR_EDITOR_FG, 0xBB, 0xC2, 0xCF),
+            (GUI_COLOR_TREE_BG, 0x21, 0x24, 0x2B),
+            (GUI_COLOR_TREE_FG, 0xBB, 0xC2, 0xCF),
+            (GUI_COLOR_TREE_SELECTION_BG, 0x22, 0x57, 0xA0),
+            (GUI_COLOR_TAB_BG, 0x21, 0x24, 0x2B),
+            (GUI_COLOR_TAB_ACTIVE_BG, 0x28, 0x2C, 0x34),
+            (GUI_COLOR_TAB_ACTIVE_FG, 0xBB, 0xC2, 0xCF),
+            (GUI_COLOR_TAB_INACTIVE_FG, 0x5B, 0x62, 0x68),
+            (GUI_COLOR_POPUP_BG, 0x21, 0x24, 0x2B),
+            (GUI_COLOR_POPUP_FG, 0xBB, 0xC2, 0xCF),
+            (GUI_COLOR_MODELINE_BAR_BG, 0x21, 0x24, 0x2B),
+            (GUI_COLOR_MODELINE_BAR_FG, 0xBB, 0xC2, 0xCF),
+            (GUI_COLOR_ACCENT, 0x51, 0xAF, 0xEF),
+            (GUI_COLOR_SELECTION_BG, 0x26, 0x4F, 0x78),
+        ])
+        return theme
+    }
+
+    static func encoder() -> ProtocolEncoder {
+        let output = FileHandle(forWritingAtPath: "/dev/null") ?? .standardOutput
+        return ProtocolEncoder(output: output)
+    }
+
+    // MARK: - State Population Helpers
+
+    static func populateFileTree(_ state: FileTreeState) {
+        state.update(
+            version: 1,
+            selectedId: "lib/minga/editor.ex",
+            focused: true,
+            treeWidth: 30,
+            rootPath: "/Users/dev/code/minga",
+            rawEntries: fileTreeRawEntries(),
+            treeState: FileTreeVisibilityState.ready.rawValue
+        )
+    }
+
+    static func populateGitStatus(_ state: GitStatusState) {
+        state.update(
+            repoState: .normal,
+            branchName: "feat/preview-host",
+            ahead: 2,
+            behind: 0,
+            syncing: false,
+            entries: gitStatusEntries(),
+            toast: nil,
+            entryBasePath: "/Users/dev/code/minga",
+            lastCommitMessage: "feat(editor): add preview host target",
+            stashCount: 1
+        )
+        state.commitMessage = "feat(macos): polish preview snapshots"
+    }
+
+    static func populateTabBar(_ state: TabBarState) {
+        state.update(activeIndex: 0, entries: tabs())
+    }
+
+    static func populateCompletion(_ state: CompletionState) {
+        state.update(visible: true, anchorRow: 5, anchorCol: 10, selectedIndex: 1, rawItems: completionItems(), documentation: "")
+    }
+
+    static func populateAgentChat(_ state: AgentChatState) {
+        state.update(
+            visible: true,
+            status: 2,
+            model: "anthropic:claude-sonnet-4",
+            thinkingLevel: "medium",
+            prompt: "Make the notification card use the configured theme",
+            promptLineCount: 1,
+            promptCursorLine: 0,
+            promptCursorCol: 52,
+            promptVimMode: 1,
+            promptVisibleRows: 1,
+            promptCompletion: nil,
+            helpVisible: false,
+            helpGroups: [],
+            rawMessages: agentChatMessages()
+        )
+    }
+
+    // MARK: - StatusBar Helpers
+
+    static func statusBarUpdate(agentVisible: Bool, mode: PreviewMode = .normal) -> StatusBarUpdate {
+        let modeValue: UInt8 = mode == .insert ? 1 : 0
+        return StatusBarUpdate(
+            contentKind: 0, mode: modeValue, cursorLine: 42, cursorCol: 9,
+            lineCount: 1250, flags: 0x02, lspStatus: 1, gitBranch: "main",
+            message: "", filetype: "elixir", errorCount: 0, warningCount: 2,
+            modelName: agentVisible ? "claude-sonnet-4" : "", messageCount: agentVisible ? 6 : 0, sessionStatus: agentVisible ? 2 : 0,
+            infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 1, agentStatus: agentVisible ? 2 : 0,
+            activeToolName: agentVisible ? "read" : "",
+            gitAdded: 0, gitModified: 0, gitDeleted: 0,
+            icon: "", iconColorR: 0x88, iconColorG: 0x57, iconColorB: 0xA6, filename: "editor.ex", diagnosticHint: "",
+            backgroundSubagentCount: 0, backgroundSubagentLabel: "",
+            modelineLeftSegments: statusLeftSegments(mode: mode),
+            modelineRightSegments: statusRightSegments()
+        )
+    }
+
+    static func statusLeftSegments(mode: PreviewMode = .normal) -> [Wire.StatusBarSegment] {
+        let modeSegment: Wire.StatusBarSegment
+        switch mode {
+        case .normal:
+            modeSegment = Wire.StatusBarSegment(id: 0, kind: "mode", text: " NORMAL ", fgColor: 0x000000, bgColor: 0x7AA2F7, attrs: 1, command: "")
+        case .insert:
+            modeSegment = Wire.StatusBarSegment(id: 0, kind: "mode", text: " INSERT ", fgColor: 0x000000, bgColor: 0x9ECE6A, attrs: 1, command: "")
+        }
+        return [
+            modeSegment,
+            Wire.StatusBarSegment(id: 1, kind: "git", text: " main ", fgColor: 0xBB9AF7, bgColor: 0x000000, attrs: 0, command: "git_branch_picker"),
+            Wire.StatusBarSegment(id: 2, kind: "filename", text: " editor.ex [+] ", fgColor: 0xC0CAF5, bgColor: 0x000000, attrs: 0, command: "buffer_list"),
+        ]
+    }
+
+    static func statusRightSegments() -> [Wire.StatusBarSegment] {
+        [
+            Wire.StatusBarSegment(id: 0, kind: "diagnostics", text: " 0 ", fgColor: 0xF7768E, bgColor: 0x000000, attrs: 0, command: "diagnostic_list"),
+            Wire.StatusBarSegment(id: 1, kind: "diagnostics", text: " 2 ", fgColor: 0xE0AF68, bgColor: 0x000000, attrs: 0, command: "diagnostic_list"),
+            Wire.StatusBarSegment(id: 2, kind: "filetype", text: " Elixir ", fgColor: 0xC0CAF5, bgColor: 0x000000, attrs: 0, command: "set_language"),
+            Wire.StatusBarSegment(id: 3, kind: "position", text: " Ln 42, Col 9 ", fgColor: 0xC0CAF5, bgColor: 0x000000, attrs: 0, command: "goto_line"),
+        ]
+    }
+
+    // MARK: - Data Builders
+
+    static func tabs() -> [Wire.TabEntry] {
+        [
+            Wire.TabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "editor.ex"),
+            Wire.TabEntry(id: 2, groupId: 0, isActive: false, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "document.ex"),
+            Wire.TabEntry(id: 3, groupId: 0, isActive: false, isDirty: true, isAgent: false, hasAttention: true, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "mode.ex"),
+        ]
+    }
+
+    static func completionItems() -> [Wire.CompletionItem] {
+        [
+            Wire.CompletionItem(kind: 7, label: "defmodule", detail: "keyword"),
+            Wire.CompletionItem(kind: 7, label: "defstruct", detail: "keyword"),
+            Wire.CompletionItem(kind: 7, label: "defdelegate", detail: "keyword"),
+            Wire.CompletionItem(kind: 2, label: "def", detail: "keyword"),
+            Wire.CompletionItem(kind: 1, label: "Document", detail: "Minga.Buffer.Document"),
+        ]
+    }
+
+    static func gitStatusEntries() -> [GitStatusEntry] {
+        [
+            GitStatusEntry(pathHash: 1, section: .staged, status: .modified, path: "lib/minga/editor.ex"),
+            GitStatusEntry(pathHash: 2, section: .staged, status: .added, path: "lib/minga/preview.ex"),
+            GitStatusEntry(pathHash: 3, section: .staged, status: .deleted, path: "lib/minga/old_module.ex"),
+            GitStatusEntry(pathHash: 4, section: .changed, status: .modified, path: "lib/minga/buffer/document.ex"),
+            GitStatusEntry(pathHash: 5, section: .changed, status: .modified, path: "lib/minga/buffer/process.ex"),
+            GitStatusEntry(pathHash: 6, section: .changed, status: .modified, path: "lib/minga/editor/render_pipeline.ex"),
+            GitStatusEntry(pathHash: 7, section: .changed, status: .modified, path: "test/minga/editor/render_pipeline_test.exs"),
+            GitStatusEntry(pathHash: 8, section: .changed, status: .renamed, path: "macos/Sources/Views/PreviewRegistry.swift"),
+            GitStatusEntry(pathHash: 9, section: .untracked, status: .untracked, path: "lib/minga/new_feature.ex"),
+            GitStatusEntry(pathHash: 10, section: .untracked, status: .untracked, path: "docs/SNAPSHOT_AUDIT.md"),
+            GitStatusEntry(pathHash: 11, section: .untracked, status: .untracked, path: "zig/tests/fixtures/full_editor.bin"),
+        ]
+    }
+
+    static func fileTreeRawEntries() -> [Wire.FileTreeEntry] {
+        [
+            wireFileEntry(id: "lib", name: "lib", path: "/Users/dev/code/minga/lib", relPath: "lib", isDir: true, isExpanded: true, depth: 0, icon: ""),
+            wireFileEntry(id: "lib/minga", name: "minga", path: "/Users/dev/code/minga/lib/minga", relPath: "lib/minga", isDir: true, isExpanded: true, depth: 1, icon: ""),
+            wireFileEntry(id: "lib/minga/editor.ex", name: "editor.ex", path: "/Users/dev/code/minga/lib/minga/editor.ex", relPath: "lib/minga/editor.ex", isDir: false, depth: 2, icon: "", isActive: true, gitStatus: 1),
+            wireFileEntry(id: "lib/minga/buffer.ex", name: "buffer.ex", path: "/Users/dev/code/minga/lib/minga/buffer.ex", relPath: "lib/minga/buffer.ex", isDir: false, depth: 2, icon: "", isDirty: true),
+            wireFileEntry(id: "lib/minga/buffer", name: "buffer", path: "/Users/dev/code/minga/lib/minga/buffer", relPath: "lib/minga/buffer", isDir: true, isExpanded: true, depth: 2, icon: ""),
+            wireFileEntry(id: "lib/minga/buffer/document.ex", name: "document.ex", path: "/Users/dev/code/minga/lib/minga/buffer/document.ex", relPath: "lib/minga/buffer/document.ex", isDir: false, depth: 3, icon: ""),
+            wireFileEntry(id: "lib/minga/buffer/process.ex", name: "process.ex", path: "/Users/dev/code/minga/lib/minga/buffer/process.ex", relPath: "lib/minga/buffer/process.ex", isDir: false, depth: 3, icon: "", gitStatus: 1),
+            wireFileEntry(id: "lib/minga/mode", name: "mode", path: "/Users/dev/code/minga/lib/minga/mode", relPath: "lib/minga/mode", isDir: true, isExpanded: false, depth: 2, icon: ""),
+            wireFileEntry(id: "lib/minga/editor", name: "editor", path: "/Users/dev/code/minga/lib/minga/editor", relPath: "lib/minga/editor", isDir: true, isExpanded: true, depth: 2, icon: ""),
+            wireFileEntry(id: "lib/minga/editor/render_pipeline.ex", name: "render_pipeline.ex", path: "/Users/dev/code/minga/lib/minga/editor/render_pipeline.ex", relPath: "lib/minga/editor/render_pipeline.ex", isDir: false, depth: 3, icon: "", gitStatus: 1),
+            wireFileEntry(id: "macos", name: "macos", path: "/Users/dev/code/minga/macos", relPath: "macos", isDir: true, isExpanded: true, depth: 0, icon: ""),
+            wireFileEntry(id: "macos/Sources", name: "Sources", path: "/Users/dev/code/minga/macos/Sources", relPath: "macos/Sources", isDir: true, isExpanded: true, depth: 1, icon: ""),
+            wireFileEntry(id: "macos/Sources/PreviewRegistry.swift", name: "PreviewRegistry.swift", path: "/Users/dev/code/minga/macos/Sources/PreviewRegistry.swift", relPath: "macos/Sources/PreviewRegistry.swift", isDir: false, depth: 2, icon: "", gitStatus: 1),
+            wireFileEntry(id: "test", name: "test", path: "/Users/dev/code/minga/test", relPath: "test", isDir: true, isExpanded: false, depth: 0, icon: ""),
+            wireFileEntry(id: "zig", name: "zig", path: "/Users/dev/code/minga/zig", relPath: "zig", isDir: true, isExpanded: false, depth: 0, icon: "", isLastChild: true),
+        ]
+    }
+
+    static func agentChatMessages() -> [Wire.ChatMessage] {
+        [
+            Wire.ChatMessage(beamId: 1, content: .user(text: "The notification card should use our configured theme.")),
+            Wire.ChatMessage(beamId: 2, content: .thinking(text: "Inspecting the SwiftUI chrome path and checking whether the notification background bypasses ThemeColors.", collapsed: false)),
+            Wire.ChatMessage(beamId: 3, content: .toolCall(name: "read", summary: "macos/Sources/Views/NotificationCenterView.swift", status: 1, isError: false, collapsed: false, autoApprovedScope: 0, durationMs: 148, result: "Found .ultraThinMaterial on the card background.", previewKind: 0, previewLines: [])),
+            Wire.ChatMessage(beamId: 4, content: .assistant(text: "I'll switch the card to theme.popupBg and keep severity as a themed border, so light and dark themes stay under BEAM control.")),
+            Wire.ChatMessage(beamId: 5, content: .styledToolCall(name: "edit", summary: "Apply notification theme polish", status: 1, isError: false, collapsed: false, autoApprovedScope: 0, durationMs: 93, resultLines: [[styledRun(".background(theme.popupBg", 0x98, 0xBE, 0x65, bold: true), styledRun(", in: RoundedRectangle(cornerRadius: 10))", 0xBB, 0xC2, 0xCF)]], previewKind: 0, previewLines: [])),
+            Wire.ChatMessage(beamId: 6, content: .usage(input: 128_000, output: 3_840, cacheRead: 64_000, cacheWrite: 1_280, costMicros: 431_000)),
+        ]
+    }
+
+    static func styledRun(_ text: String, _ r: UInt8, _ g: UInt8, _ b: UInt8, bold: Bool = false) -> Wire.StyledTextRun {
+        Wire.StyledTextRun(text: text, fgR: r, fgG: g, fgB: b, bgR: 0, bgG: 0, bgB: 0, bold: bold, italic: false, underline: false)
+    }
+
+    // MARK: - Wire Helpers
+
+    static func wireFileEntry(
+        id: String,
+        name: String,
+        path: String,
+        relPath: String,
+        isDir: Bool,
+        isExpanded: Bool = false,
+        depth: UInt8,
+        icon: String,
+        isActive: Bool = false,
+        isDirty: Bool = false,
+        isLastChild: Bool = false,
+        gitStatus: UInt8 = 0,
+        isEditing: Bool = false,
+        editingType: UInt8 = 255,
+        editingText: String = ""
+    ) -> Wire.FileTreeEntry {
+        Wire.FileTreeEntry(
+            pathHash: UInt32(id.hashValue & 0x7FFFFFFF),
+            id: id,
+            path: path,
+            isDir: isDir,
+            isExpanded: isExpanded,
+            isSelected: isActive,
+            isFocused: false,
+            isActive: isActive,
+            isDirty: isDirty,
+            isEditing: isEditing,
+            isLastChild: isLastChild,
+            depth: depth,
+            gitStatus: gitStatus,
+            diagnosticErrorCount: 0,
+            diagnosticWarningCount: 0,
+            diagnosticInfoCount: 0,
+            diagnosticHintCount: 0,
+            guides: Array(repeating: false, count: Int(depth)),
+            icon: icon,
+            iconColorR: 0x6D,
+            iconColorG: 0x80,
+            iconColorB: 0x86,
+            name: name,
+            relPath: relPath,
+            editingType: editingType,
+            editingText: editingText
+        )
+    }
+}

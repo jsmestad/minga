@@ -383,3 +383,33 @@ struct PickerOverlay: View {
         )
     }
 }
+
+#Preview("Picker") {
+    let theme = PreviewFixtures.theme()
+    let state = PickerState()
+    state.update(
+        visible: true,
+        selectedIndex: 1,
+        filteredCount: 5,
+        totalCount: 42,
+        markedCount: 0,
+        title: "Find File",
+        query: "edit",
+        hasPreview: false,
+        rawItems: [
+            Wire.PickerItem(iconColor: 0x98BE65, flags: 0, label: "\u{f0e7}editor.ex", description: "lib/minga/editor.ex", annotation: "", matchPositions: [1, 2, 3, 4]),
+            Wire.PickerItem(iconColor: 0x98BE65, flags: 0x01, label: "\u{f0e7}editor_test.exs", description: "test/minga/editor_test.exs", annotation: "test", matchPositions: [1, 2, 3, 4]),
+            Wire.PickerItem(iconColor: 0x51AFEF, flags: 0, label: "\u{f0e7}EditorNSView.swift", description: "macos/Sources/EditorNSView.swift", annotation: "swift", matchPositions: [1, 2, 3, 4]),
+            Wire.PickerItem(iconColor: 0xECBE7B, flags: 0, label: "\u{f085}edit_mode.ex", description: "lib/minga/mode/edit_mode.ex", annotation: "", matchPositions: [1, 2, 3, 4]),
+            Wire.PickerItem(iconColor: 0xC678DD, flags: 0, label: "\u{f0e7}editor_config.ex", description: "lib/minga/editor/config.ex", annotation: "", matchPositions: [1, 2, 3, 4]),
+        ],
+        actionMenu: nil,
+        modePrefix: ""
+    )
+    return ZStack {
+        theme.editorBg
+        PickerOverlay(state: state, theme: theme, encoder: nil)
+    }
+    .frame(width: 600, height: 400)
+    .clipped()
+}

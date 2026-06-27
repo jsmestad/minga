@@ -149,3 +149,77 @@ private struct NotificationCard: View {
         }
     }
 }
+
+#Preview("Notification") {
+    let theme = PreviewFixtures.theme()
+    let state = NotificationCenterState()
+    let now = UInt64(Date().timeIntervalSince1970)
+    state.update(rawNotifications: [
+        Wire.EditorNotification(
+            id: "notif-1",
+            level: .info,
+            flags: 0x01,
+            createdAt: now,
+            updatedAt: now,
+            autoDismissMs: nil,
+            title: "Extension loaded",
+            body: "org-mode v0.3.0 activated for .org files",
+            source: "Extensions",
+            actions: [
+                Wire.NotificationAction(id: "configure", label: "Configure"),
+            ]
+        ),
+    ])
+    return NotificationCenterView(state: state, theme: theme, encoder: nil, bottomInset: 40)
+        .frame(width: 800, height: 600)
+        .background(theme.editorBg)
+}
+
+#Preview("Notification Stack") {
+    let theme = PreviewFixtures.theme()
+    let state = NotificationCenterState()
+    let now = UInt64(Date().timeIntervalSince1970)
+    state.update(rawNotifications: [
+        Wire.EditorNotification(
+            id: "notif-error",
+            level: .error,
+            flags: 0x01,
+            createdAt: now - 120,
+            updatedAt: now - 120,
+            autoDismissMs: nil,
+            title: "Build failed",
+            body: "Compilation error in lib/minga/editor.ex:42",
+            source: "Compiler",
+            actions: [
+                Wire.NotificationAction(id: "show", label: "Show Error"),
+            ]
+        ),
+        Wire.EditorNotification(
+            id: "notif-warning",
+            level: .warning,
+            flags: 0x01,
+            createdAt: now - 60,
+            updatedAt: now - 60,
+            autoDismissMs: nil,
+            title: "Deprecation warning",
+            body: "Minga.Buffer.read/1 is deprecated.",
+            source: "Compiler",
+            actions: []
+        ),
+        Wire.EditorNotification(
+            id: "notif-success",
+            level: .success,
+            flags: 0x01,
+            createdAt: now,
+            updatedAt: now,
+            autoDismissMs: 5000,
+            title: "Tests passed",
+            body: "42 tests, 0 failures",
+            source: "ExUnit",
+            actions: []
+        ),
+    ])
+    return NotificationCenterView(state: state, theme: theme, encoder: nil, bottomInset: 40)
+        .frame(width: 800, height: 600)
+        .background(theme.editorBg)
+}

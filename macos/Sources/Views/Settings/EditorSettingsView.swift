@@ -57,3 +57,15 @@ struct EditorSettingsView: View {
         .padding(20)
     }
 }
+
+#Preview("Editor Settings") {
+    let state = SettingsState()
+    state.isLoading = false
+    state.tabWidth = 2
+    state.lineNumbers = .absolute
+    state.wordWrap = false
+    state.cursorBlink = true
+    state.cursorline = true
+    return EditorSettingsView(state: state)
+        .frame(width: 520, height: 360)
+}

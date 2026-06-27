@@ -112,3 +112,57 @@ struct WhichKeyOverlay: View {
         .frame(height: rowHeight)
     }
 }
+
+#Preview("Which Key") {
+    let theme = PreviewFixtures.theme()
+    let state = WhichKeyState()
+    state.update(
+        visible: true,
+        prefix: "SPC",
+        page: 0,
+        pageCount: 1,
+        rawBindings: [
+            Wire.WhichKeyBinding(kind: 1, key: "f", description: "+file", icon: ""),
+            Wire.WhichKeyBinding(kind: 1, key: "b", description: "+buffer", icon: ""),
+            Wire.WhichKeyBinding(kind: 1, key: "w", description: "+window", icon: ""),
+            Wire.WhichKeyBinding(kind: 1, key: "g", description: "+git", icon: ""),
+            Wire.WhichKeyBinding(kind: 1, key: "s", description: "+search", icon: ""),
+            Wire.WhichKeyBinding(kind: 0, key: ":", description: "M-x command", icon: ""),
+            Wire.WhichKeyBinding(kind: 0, key: ".", description: "repeat", icon: ""),
+            Wire.WhichKeyBinding(kind: 0, key: "/", description: "search project", icon: ""),
+            Wire.WhichKeyBinding(kind: 1, key: "p", description: "+project", icon: ""),
+            Wire.WhichKeyBinding(kind: 1, key: "t", description: "+toggle", icon: ""),
+            Wire.WhichKeyBinding(kind: 1, key: "c", description: "+code", icon: ""),
+            Wire.WhichKeyBinding(kind: 0, key: "e", description: "file tree", icon: ""),
+        ]
+    )
+    return WhichKeyOverlay(state: state, theme: theme)
+        .frame(width: 520, height: 300)
+        .background(theme.editorBg)
+}
+
+#Preview("Which Key Paged") {
+    let theme = PreviewFixtures.theme()
+    let state = WhichKeyState()
+    state.update(
+        visible: true,
+        prefix: "SPC g",
+        page: 1,
+        pageCount: 3,
+        rawBindings: [
+            Wire.WhichKeyBinding(kind: 0, key: "s", description: "stage file", icon: ""),
+            Wire.WhichKeyBinding(kind: 0, key: "u", description: "unstage file", icon: ""),
+            Wire.WhichKeyBinding(kind: 0, key: "c", description: "commit", icon: ""),
+            Wire.WhichKeyBinding(kind: 0, key: "p", description: "push", icon: ""),
+            Wire.WhichKeyBinding(kind: 0, key: "f", description: "fetch", icon: ""),
+            Wire.WhichKeyBinding(kind: 0, key: "d", description: "diff", icon: ""),
+            Wire.WhichKeyBinding(kind: 1, key: "b", description: "+branch", icon: ""),
+            Wire.WhichKeyBinding(kind: 1, key: "r", description: "+rebase", icon: ""),
+            Wire.WhichKeyBinding(kind: 0, key: "l", description: "log", icon: ""),
+            Wire.WhichKeyBinding(kind: 0, key: "z", description: "stash", icon: ""),
+        ]
+    )
+    return WhichKeyOverlay(state: state, theme: theme)
+        .frame(width: 520, height: 300)
+        .background(theme.editorBg)
+}
