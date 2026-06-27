@@ -26,8 +26,9 @@ func (s presentationScroll) keysMatch(scroll protocol.ScrollPresentation) bool {
 }
 
 type localPresentation struct {
-	scrolls              map[uint16]presentationScroll
-	previewFileTreeIndex *int
+	scrolls                map[uint16]presentationScroll
+	previewFileTreeIndex   *int
+	previewCompletionIndex *int
 }
 
 func newLocalPresentation() localPresentation {
@@ -54,12 +55,17 @@ func (lp *localPresentation) reconcileFileTree() {
 	lp.previewFileTreeIndex = nil
 }
 
+func (lp *localPresentation) reconcileCompletion() {
+	lp.previewCompletionIndex = nil
+}
+
 func (lp *localPresentation) discard(kind transformKind, windowID uint16) {
 	switch kind {
 	case transformOffset:
 		delete(lp.scrolls, windowID)
 	case transformIdentity:
 		lp.previewFileTreeIndex = nil
+		lp.previewCompletionIndex = nil
 	}
 }
 

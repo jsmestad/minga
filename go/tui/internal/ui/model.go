@@ -209,6 +209,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if packet, ok := keyPacket(msg, seq); ok {
 			m.send(packet)
 		}
+		m.previewCompletionNavigation(msg)
 		m.previewFileTreeNavigation(msg)
 	case tea.PasteMsg:
 		m.send(pastePacket(msg))
@@ -554,6 +555,8 @@ func (m *Model) applyMutation(command protocol.Command) {
 		case generated.OPGuiFileTreeSelection:
 			m.applyFileTreeSelection(command.Chrome.FileTreeSelection)
 			m.localPresentation.reconcileFileTree()
+		case generated.OPGuiCompletion:
+			m.localPresentation.reconcileCompletion()
 		case generated.OPGuiBottomPanel:
 			m.clampBottomPanelScrollback(command.Chrome.Bottom)
 		case generated.OPGuiSurfaceLayout:

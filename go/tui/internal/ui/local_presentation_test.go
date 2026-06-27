@@ -94,11 +94,36 @@ func TestDiscardIdentity(t *testing.T) {
 	lp := newLocalPresentation()
 	idx := 2
 	lp.previewFileTreeIndex = &idx
+	cIdx := 3
+	lp.previewCompletionIndex = &cIdx
 
 	lp.discard(transformIdentity, 0)
 
 	if lp.previewFileTreeIndex != nil {
 		t.Fatal("discard(identity) should clear file-tree preview")
+	}
+	if lp.previewCompletionIndex != nil {
+		t.Fatal("discard(identity) should clear completion preview")
+	}
+}
+
+func TestReconcileCompletionClearsPreview(t *testing.T) {
+	lp := newLocalPresentation()
+	idx := 5
+	lp.previewCompletionIndex = &idx
+
+	lp.reconcileCompletion()
+
+	if lp.previewCompletionIndex != nil {
+		t.Fatal("completion preview should be cleared on BEAM update")
+	}
+}
+
+func TestReconcileCompletionNoopWhenNoPreview(t *testing.T) {
+	lp := newLocalPresentation()
+	lp.reconcileCompletion()
+	if lp.previewCompletionIndex != nil {
+		t.Fatal("reconcileCompletion should be safe to call with no preview set")
 	}
 }
 

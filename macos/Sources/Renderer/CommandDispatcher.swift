@@ -35,6 +35,14 @@ private enum FileTreeNavigationCodepoints {
     static let upArrow: UInt32 = 57352
 }
 
+private enum CompletionNavigationCodepoints {
+    static let ctrlN: UInt32 = 110
+    static let ctrlP: UInt32 = 112
+    static let downArrow: UInt32 = 57353
+    static let upArrow: UInt32 = 57352
+    static let ctrlModifier: UInt8 = 0x02
+}
+
 /// Dispatches render commands to FrameState (metadata) and GUIState (chrome).
 @MainActor
 final class CommandDispatcher {
@@ -432,6 +440,33 @@ final class CommandDispatcher {
         default:
             return false
         }
+    }
+
+    @discardableResult
+    func previewCompletionNavigation(codepoint: UInt32, modifiers: UInt8) -> Bool {
+        let delta: Int
+        if modifiers == CompletionNavigationCodepoints.ctrlModifier {
+            switch codepoint {
+            case CompletionNavigationCodepoints.ctrlN:
+                delta = 1
+            case CompletionNavigationCodepoints.ctrlP:
+                delta = -1
+            default:
+                return false
+            }
+        } else if modifiers == 0 {
+            switch codepoint {
+            case CompletionNavigationCodepoints.downArrow:
+                delta = 1
+            case CompletionNavigationCodepoints.upArrow:
+                delta = -1
+            default:
+                return false
+            }
+        } else {
+            return false
+        }
+        return guiState.completionState.previewNavigation(delta: delta)
     }
 
     /// Apply a single render command to the presented FrameState/GUIState. This

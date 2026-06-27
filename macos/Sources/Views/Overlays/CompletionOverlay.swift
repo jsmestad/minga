@@ -30,7 +30,7 @@ struct CompletionOverlay: View {
                             }
                         }
                     }
-                    .onChange(of: state.selectedIndex) { _, newIndex in
+                    .onChange(of: state.effectiveSelectedIndex) { _, newIndex in
                         withAnimation(nil) {
                             proxy.scrollTo(newIndex, anchor: .center)
                         }
@@ -78,7 +78,7 @@ struct CompletionOverlay: View {
 
     @ViewBuilder
     private func completionRow(_ item: CompletionItem) -> some View {
-        let isSelected = item.id == state.selectedIndex
+        let isSelected = item.id == state.effectiveSelectedIndex
 
         HStack(spacing: 6) {
             // Kind indicator
