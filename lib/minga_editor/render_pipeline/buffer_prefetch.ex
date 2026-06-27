@@ -229,13 +229,13 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
         {first_line, nil}
       end
 
-    # Fetch one stable row above/below simple mappings so clients can presentation-scroll without inventing rows.
-    velocity_tier = Window.scroll_velocity_tier(window, System.monotonic_time(:millisecond))
-
     {fetch_first, fetch_count, visible_row_start_index} =
       case visible_line_map do
         nil ->
-          overscan = overscan_rows(velocity_tier)
+          overscan =
+            overscan_rows(
+              Window.scroll_velocity_tier(window, System.monotonic_time(:millisecond))
+            )
 
           {overscan_before, fetch_first} = scroll_overscan_before(first_line, wrap_on, overscan)
 
