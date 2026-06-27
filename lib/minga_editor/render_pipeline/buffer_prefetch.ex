@@ -30,7 +30,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   alias MingaEditor.Viewport
   alias MingaEditor.Window
 
-  @overscan_rows 50
+  alias MingaEditor.Window.ScrollVelocity
 
   @typedoc "Render pipeline input."
   @type state :: Input.t()
@@ -230,15 +230,21 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
       end
 
     # Fetch one stable row above/below simple mappings so clients can presentation-scroll without inventing rows.
+    velocity_tier = Window.scroll_velocity_tier(window, System.monotonic_time(:millisecond))
+
     {fetch_first, fetch_count, visible_row_start_index} =
       case visible_line_map do
         nil ->
-          {overscan_before, fetch_first} = scroll_overscan_before(first_line, wrap_on)
+          overscan = overscan_rows(velocity_tier)
+
+          {overscan_before, fetch_first} = scroll_overscan_before(first_line, wrap_on, overscan)
 
           overscan_after =
-            scroll_overscan_after(first_line, visible_rows, line_count_approx, wrap_on)
+            scroll_overscan_after(first_line, visible_rows, line_count_approx, wrap_on, overscan)
 
-          fetch_rows = scroll_fetch_rows(visible_rows, overscan_before, overscan_after, wrap_on)
+          fetch_rows =
+            scroll_fetch_rows(visible_rows, overscan_before, overscan_after, wrap_on)
+
           {fetch_first, fetch_rows, overscan_before}
 
         entries ->
@@ -327,22 +333,32 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     }
   end
 
-  @spec scroll_overscan_before(non_neg_integer(), boolean()) ::
-          {non_neg_integer(), non_neg_integer()}
-  defp scroll_overscan_before(first_line, true), do: {0, first_line}
+  @spec overscan_rows(ScrollVelocity.tier()) :: pos_integer()
+  defp overscan_rows(:idle), do: 50
+  defp overscan_rows(:medium), do: 100
+  defp overscan_rows(:fast), do: 200
 
-  defp scroll_overscan_before(first_line, false) do
-    count = min(@overscan_rows, first_line)
+  @spec scroll_overscan_before(non_neg_integer(), boolean(), pos_integer()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp scroll_overscan_before(first_line, true, _overscan), do: {0, first_line}
+
+  defp scroll_overscan_before(first_line, false, overscan) do
+    count = min(overscan, first_line)
     {count, first_line - count}
   end
 
-  @spec scroll_overscan_after(non_neg_integer(), pos_integer(), non_neg_integer(), boolean()) ::
-          non_neg_integer()
-  defp scroll_overscan_after(_first_line, _visible_rows, _line_count, true), do: 0
+  @spec scroll_overscan_after(
+          non_neg_integer(),
+          pos_integer(),
+          non_neg_integer(),
+          boolean(),
+          pos_integer()
+        ) :: non_neg_integer()
+  defp scroll_overscan_after(_first_line, _visible_rows, _line_count, true, _overscan), do: 0
 
-  defp scroll_overscan_after(first_line, visible_rows, line_count, false) do
+  defp scroll_overscan_after(first_line, visible_rows, line_count, false, overscan) do
     rows_after = line_count - first_line - visible_rows
-    min(@overscan_rows, max(0, rows_after))
+    min(overscan, max(0, rows_after))
   end
 
   @spec scroll_fetch_rows(pos_integer(), non_neg_integer(), non_neg_integer(), boolean()) ::

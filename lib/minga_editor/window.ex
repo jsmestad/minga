@@ -31,6 +31,7 @@ defmodule MingaEditor.Window do
   alias MingaEditor.Viewport
   alias MingaEditor.Window.Content
   alias MingaEditor.Window.RenderCache
+  alias MingaEditor.Window.ScrollVelocity
   alias MingaEditor.UI.Popup.Active, as: PopupActive
 
   @compile {:inline, dirty?: 2}
@@ -50,7 +51,8 @@ defmodule MingaEditor.Window do
           textobject_positions: %{atom() => [{non_neg_integer(), non_neg_integer()}]},
           document_symbols: [Symbol.t()],
           popup_meta: PopupActive.t() | nil,
-          render_cache: RenderCache.t()
+          render_cache: RenderCache.t(),
+          scroll_velocity: ScrollVelocity.t()
         }
 
   @enforce_keys [:id, :content, :buffer, :viewport]
@@ -66,7 +68,8 @@ defmodule MingaEditor.Window do
     textobject_positions: %{},
     document_symbols: [],
     popup_meta: nil,
-    render_cache: %RenderCache{}
+    render_cache: %RenderCache{},
+    scroll_velocity: %ScrollVelocity{}
   ]
 
   @doc """
@@ -176,6 +179,16 @@ defmodule MingaEditor.Window do
   @spec set_pinned(t(), boolean()) :: t()
   def set_pinned(%__MODULE__{} = window, pinned?) when is_boolean(pinned?) do
     %{window | pinned: pinned?}
+  end
+
+  @spec record_scroll_event(t(), integer()) :: t()
+  def record_scroll_event(%__MODULE__{} = window, now_ms) do
+    %{window | scroll_velocity: ScrollVelocity.record(window.scroll_velocity, now_ms)}
+  end
+
+  @spec scroll_velocity_tier(t(), integer()) :: ScrollVelocity.tier()
+  def scroll_velocity_tier(%__MODULE__{} = window, now_ms) do
+    ScrollVelocity.tier(window.scroll_velocity, now_ms)
   end
 
   # ── Popup queries ──────────────────────────────────────────────────────────
