@@ -787,18 +787,17 @@ struct TabBarViewViewTests {
             wireTab(id: 4),
             wireTab(id: 5, groupId: 1),
         ])
-        let sut = TabBarView(tabBarState: state, theme: ThemeColors(), encoder: nil)
 
-        #expect(!sut.canMoveTabLeft(tab(id: 1, isActive: true, isPinned: true)))
-        #expect(sut.canMoveTabRight(tab(id: 1, isActive: true, isPinned: true)))
-        #expect(sut.canMoveTabLeft(tab(id: 2, isPinned: true)))
-        #expect(!sut.canMoveTabRight(tab(id: 2, isPinned: true)))
-        #expect(!sut.canMoveTabLeft(tab(id: 3)))
-        #expect(sut.canMoveTabRight(tab(id: 3)))
-        #expect(sut.canMoveTabLeft(tab(id: 4)))
-        #expect(!sut.canMoveTabRight(tab(id: 4)))
-        #expect(!sut.canMoveTabLeft(tab(id: 5, groupId: 1)))
-        #expect(!sut.canMoveTabRight(tab(id: 5, groupId: 1)))
+        #expect(!state.canMoveTabLeft(tab(id: 1, isActive: true, isPinned: true)))
+        #expect(state.canMoveTabRight(tab(id: 1, isActive: true, isPinned: true)))
+        #expect(state.canMoveTabLeft(tab(id: 2, isPinned: true)))
+        #expect(!state.canMoveTabRight(tab(id: 2, isPinned: true)))
+        #expect(!state.canMoveTabLeft(tab(id: 3)))
+        #expect(state.canMoveTabRight(tab(id: 3)))
+        #expect(state.canMoveTabLeft(tab(id: 4)))
+        #expect(!state.canMoveTabRight(tab(id: 4)))
+        #expect(!state.canMoveTabLeft(tab(id: 5, groupId: 1)))
+        #expect(!state.canMoveTabRight(tab(id: 5, groupId: 1)))
     }
 
     @Test("Tab context menu move actions use bucket edge rules")
@@ -840,19 +839,19 @@ struct TabBarViewViewTests {
         #expect(TabDragPayload.contentType.identifier == "com.minga.tab-id")
         #expect(TabDragPayload.contentType != UTType.plainText)
 
-        if let reorder = sut.tabDropReorder(droppedTabs: [], target: target, visibleIndex: 1) {
+        if let reorder = state.tabDropReorder(droppedTabs: [], target: target, visibleIndex: 1) {
             Issue.record("Expected empty payload to be rejected, got \(reorder)")
         }
-        if let reorder = sut.tabDropReorder(droppedTabs: [TabDragPayload(id: 5)], target: target, visibleIndex: 1) {
+        if let reorder = state.tabDropReorder(droppedTabs: [TabDragPayload(id: 5)], target: target, visibleIndex: 1) {
             Issue.record("Expected cross-workspace payload to be rejected, got \(reorder)")
         }
-        if let reorder = sut.tabDropReorder(droppedTabs: [TabDragPayload(id: 1)], target: target, visibleIndex: 1) {
+        if let reorder = state.tabDropReorder(droppedTabs: [TabDragPayload(id: 1)], target: target, visibleIndex: 1) {
             Issue.record("Expected pinned-bucket mismatch to be rejected, got \(reorder)")
         }
 
         let dropTarget = tab(id: 4, label: "plain-2.ex")
-        #expect(sut.visibleFileTabIndex(for: dropTarget) == 3)
-        #expect(sut.tabDropReorder(droppedTabs: [TabDragPayload(id: 3)], target: dropTarget, visibleIndex: 3)?.newIndex == 3)
+        #expect(state.visibleFileTabIndex(for: dropTarget) == 3)
+        #expect(state.tabDropReorder(droppedTabs: [TabDragPayload(id: 3)], target: dropTarget, visibleIndex: 3)?.newIndex == 3)
 
         let accepted = sut.handleTabDrop(droppedTabs: [TabDragPayload(id: 3)], target: dropTarget, visibleIndex: 3)
 
@@ -869,12 +868,10 @@ struct TabBarViewViewTests {
             wireTab(id: 3, label: "file-b.ex")
         ])
 
-        let sut = TabBarView(tabBarState: state, theme: ThemeColors(), encoder: nil)
-
-        #expect(sut.movableFileTabIndex(for: tab(id: 2, label: "file-a.ex")) == 0)
-        #expect(sut.movableFileTabIndex(for: tab(id: 3, label: "file-b.ex")) == 1)
-        #expect(sut.movableFileTabIndex(for: TabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: true, hasAttention: false, agentStatus: 0, isPinned: false, tintColor: nil, icon: "cpu", label: "Agent")) == nil)
-        #expect(sut.tabDropReorder(droppedTabs: [TabDragPayload(id: 2)], target: tab(id: 3, label: "file-b.ex"), visibleIndex: 2)?.newIndex == 1)
+        #expect(state.movableFileTabIndex(for: tab(id: 2, label: "file-a.ex")) == 0)
+        #expect(state.movableFileTabIndex(for: tab(id: 3, label: "file-b.ex")) == 1)
+        #expect(state.movableFileTabIndex(for: TabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: true, hasAttention: false, agentStatus: 0, isPinned: false, tintColor: nil, icon: "cpu", label: "Agent")) == nil)
+        #expect(state.tabDropReorder(droppedTabs: [TabDragPayload(id: 2)], target: tab(id: 3, label: "file-b.ex"), visibleIndex: 2)?.newIndex == 1)
     }
 
     @Test("Tab bar uses canonical active-workspace visible tabs")
