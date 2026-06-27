@@ -5,9 +5,69 @@ import (
 	"image/color"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
+
+type agentPanel struct {
+	animationFrame   uint64
+	animationRunning bool
+}
+
+func (a *agentPanel) animating(chat protocol.AgentChat) bool {
+	if !chat.Visible {
+		return false
+	}
+	if chat.Status == 1 || chat.Status == 2 || chat.Pending != "" {
+		return true
+	}
+	for _, msg := range chat.Messages {
+		if msg.Kind == agentKindThinking || ((msg.Kind == agentKindTool || msg.Kind == agentKindStyledTool) && msg.Status == 0) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *agentPanel) tick() {
+	a.animationFrame++
+}
+
+func (a *agentPanel) spinner() string {
+	frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	return frames[int(a.animationFrame)%len(frames)]
+}
+
+func (a *agentPanel) handleKey(chat protocol.AgentChat, msg tea.KeyPressMsg) ([]byte, bool) {
+	if !chat.Visible {
+		return nil, false
+	}
+	key := msg.Key()
+	if !key.Mod.Contains(tea.ModCtrl) || !key.Mod.Contains(tea.ModAlt) {
+		return nil, false
+	}
+	switch key.Code {
+	case 'x', 'X':
+		index, ok := latestToolMessageIndex(chat.Messages)
+		if !ok {
+			return nil, false
+		}
+		return protocol.EncodeGUIAgentToolToggle(index), true
+	case 'z', 'Z':
+		index, ok := latestThinkingMessageIndex(chat.Messages)
+		if !ok {
+			return nil, false
+		}
+		return protocol.EncodeGUIAgentToolToggle(index), true
+	default:
+		return nil, false
+	}
+}
+
+func (a *agentPanel) panelHeight(height int) int {
+	return min(max(height/2, 8), 18)
+}
 
 const (
 	agentKindUser              byte = 0x01
@@ -30,7 +90,7 @@ const (
 )
 
 func (m Model) renderAgentChatPanel(chat protocol.AgentChat) []string {
-	return m.renderAgentChatPanelWithLimit(chat, max(m.width, 1), m.agentPanelHeight())
+	return m.renderAgentChatPanelWithLimit(chat, max(m.width, 1), m.agent.panelHeight(m.height))
 }
 
 func (m Model) renderAgentChatBody(chat protocol.AgentChat) []string {
@@ -76,7 +136,7 @@ func (m Model) renderAgentChatPanelWithLimit(chat protocol.AgentChat, width int,
 }
 
 func (m Model) agentPanelHeight() int {
-	return min(max(m.height/2, 8), 18)
+	return m.agent.panelHeight(m.height)
 }
 
 func agentDetailsVisible(width int) bool {
@@ -398,8 +458,7 @@ func (m Model) renderAgentStatusBadge(status byte) string {
 }
 
 func (m Model) agentSpinner() string {
-	frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-	return frames[int(m.agentAnimationFrame)%len(frames)]
+	return m.agent.spinner()
 }
 
 func agentChatStatusLabel(status byte) string {

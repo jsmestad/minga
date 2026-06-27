@@ -240,22 +240,6 @@ func (m Model) agentChatVisible() bool {
 	return ok && chat.Visible
 }
 
-func (m Model) agentAnimating() bool {
-	chat, ok := m.agentChat()
-	if !ok || !chat.Visible {
-		return false
-	}
-	if chat.Status == 1 || chat.Status == 2 || chat.Pending != "" {
-		return true
-	}
-	for _, msg := range chat.Messages {
-		if msg.Kind == agentKindThinking || ((msg.Kind == agentKindTool || msg.Kind == agentKindStyledTool) && msg.Status == 0) {
-			return true
-		}
-	}
-	return false
-}
-
 func (m Model) editTimeline() (protocol.EditTimeline, bool) {
 	for _, payload := range m.chrome {
 		if payload.Timeline.Visible {
