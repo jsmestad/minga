@@ -16,14 +16,15 @@ defmodule MingaEditor.Window.ScrollVelocity do
   @direction_window 5
 
   @type tier :: :idle | :medium | :fast
-  @type direction :: :down | :up | :ambiguous
+  @type event_direction :: :down | :up
+  @type direction :: event_direction() | :ambiguous
 
   @type t :: %__MODULE__{
           count: non_neg_integer(),
           prev_count: non_neg_integer(),
           window_start: integer(),
           last_event: integer(),
-          recent_dirs: [direction()]
+          recent_dirs: [event_direction()]
         }
 
   defstruct count: 0, prev_count: 0, window_start: 0, last_event: 0, recent_dirs: []
@@ -31,7 +32,7 @@ defmodule MingaEditor.Window.ScrollVelocity do
   @spec new() :: t()
   def new, do: %__MODULE__{}
 
-  @spec record(t(), integer(), direction()) :: t()
+  @spec record(t(), integer(), event_direction()) :: t()
   def record(%__MODULE__{last_event: 0}, now_ms, dir) do
     %__MODULE__{count: 1, window_start: now_ms, last_event: now_ms, recent_dirs: [dir]}
   end
@@ -76,11 +77,10 @@ defmodule MingaEditor.Window.ScrollVelocity do
     downs = Enum.count(dirs, &(&1 == :down))
     ups = Enum.count(dirs, &(&1 == :up))
     total = length(dirs)
-    threshold = total * 4 / 5
 
     cond do
-      downs >= threshold -> :down
-      ups >= threshold -> :up
+      downs * 5 >= total * 4 -> :down
+      ups * 5 >= total * 4 -> :up
       true -> :ambiguous
     end
   end

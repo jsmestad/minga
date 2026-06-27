@@ -353,13 +353,13 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   defp directional_split(total, _tier, :ambiguous), do: half_split(total)
 
   defp directional_split(total, _tier, :down) do
-    behind = max(1, div(total * 15, 100))
-    {behind, total - behind}
+    minority = max(1, div(total * 15, 100))
+    {minority, total - minority}
   end
 
   defp directional_split(total, _tier, :up) do
-    behind = total - max(1, div(total * 15, 100))
-    {behind, total - behind}
+    minority = max(1, div(total * 15, 100))
+    {total - minority, minority}
   end
 
   defp half_split(total) do

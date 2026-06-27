@@ -181,7 +181,7 @@ defmodule MingaEditor.Window do
     %{window | pinned: pinned?}
   end
 
-  @spec record_scroll_event(t(), integer(), ScrollVelocity.direction()) :: t()
+  @spec record_scroll_event(t(), integer(), ScrollVelocity.event_direction()) :: t()
   def record_scroll_event(%__MODULE__{} = window, now_ms, dir) do
     %{window | scroll_velocity: ScrollVelocity.record(window.scroll_velocity, now_ms, dir)}
   end

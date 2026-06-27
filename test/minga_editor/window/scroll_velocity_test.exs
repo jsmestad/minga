@@ -156,7 +156,7 @@ defmodule MingaEditor.Window.ScrollVelocityTest do
       assert ScrollVelocity.direction(sv, 1045) == :ambiguous
     end
 
-    test "4 of 5 same direction returns dominant direction" do
+    test "4 of 5 down events returns :down" do
       sv =
         ScrollVelocity.new()
         |> ScrollVelocity.record(1000, :down)
@@ -166,6 +166,18 @@ defmodule MingaEditor.Window.ScrollVelocityTest do
         |> ScrollVelocity.record(1040, :up)
 
       assert ScrollVelocity.direction(sv, 1045) == :down
+    end
+
+    test "4 of 5 up events returns :up" do
+      sv =
+        ScrollVelocity.new()
+        |> ScrollVelocity.record(1000, :up)
+        |> ScrollVelocity.record(1010, :up)
+        |> ScrollVelocity.record(1020, :up)
+        |> ScrollVelocity.record(1030, :up)
+        |> ScrollVelocity.record(1040, :down)
+
+      assert ScrollVelocity.direction(sv, 1045) == :up
     end
 
     test "direction decays to :ambiguous after 200ms" do
