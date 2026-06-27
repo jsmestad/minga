@@ -438,8 +438,14 @@ defmodule MingaEditor.Mouse do
   defp scroll_window_vertical(state, win_id, delta) do
     case Map.fetch(state.workspace.windows.map, win_id) do
       {:ok, %Window{buffer: buf} = window} when is_pid(buf) ->
+        now = System.monotonic_time(:millisecond)
         total_lines = Buffer.line_count(buf)
-        updated = Window.scroll_viewport(window, delta, total_lines)
+
+        updated =
+          window
+          |> Window.scroll_viewport(delta, total_lines)
+          |> Window.record_scroll_event(now)
+
         EditorState.update_window(state, win_id, fn _window -> updated end)
 
       _ ->
