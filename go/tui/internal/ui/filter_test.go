@@ -57,6 +57,22 @@ func TestInputFilterPassesKeyPresses(t *testing.T) {
 	}
 }
 
+func TestInputFilterExactBoundaryPasses(t *testing.T) {
+	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	f := &InputFilter{now: func() time.Time { return now }}
+
+	msg := tea.MouseMotionMsg(tea.Mouse{X: 5, Y: 5, Button: tea.MouseNone})
+
+	if got := f.Filter(nil, msg); got == nil {
+		t.Fatal("first motion should pass through")
+	}
+
+	now = now.Add(inputFilterInterval)
+	if got := f.Filter(nil, msg); got == nil {
+		t.Fatal("motion at exactly 16ms should pass (condition is strictly less-than)")
+	}
+}
+
 func TestInputFilterMotionAndWheelThrottleIndependently(t *testing.T) {
 	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	f := &InputFilter{now: func() time.Time { return now }}

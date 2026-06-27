@@ -33,11 +33,7 @@ func (f *InputFilter) Filter(_ tea.Model, msg tea.Msg) tea.Msg {
 }
 
 func (f *InputFilter) allow(last *time.Time) bool {
-	now := f.now
-	if now == nil {
-		now = time.Now
-	}
-	at := now()
+	at := f.now()
 	if !last.IsZero() && at.Sub(*last) < inputFilterInterval {
 		return false
 	}
