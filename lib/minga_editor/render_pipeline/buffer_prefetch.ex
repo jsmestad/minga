@@ -330,7 +330,6 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   @spec scroll_overscan_before(non_neg_integer(), boolean()) ::
           {non_neg_integer(), non_neg_integer()}
   defp scroll_overscan_before(first_line, true), do: {0, first_line}
-  defp scroll_overscan_before(0, false), do: {0, 0}
 
   defp scroll_overscan_before(first_line, false) do
     count = min(@overscan_rows, first_line)
@@ -342,7 +341,8 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   defp scroll_overscan_after(_first_line, _visible_rows, _line_count, true), do: 0
 
   defp scroll_overscan_after(first_line, visible_rows, line_count, false) do
-    min(@overscan_rows, max(0, line_count - first_line - visible_rows))
+    rows_after = line_count - first_line - visible_rows
+    min(@overscan_rows, max(0, rows_after))
   end
 
   @spec scroll_fetch_rows(pos_integer(), non_neg_integer(), non_neg_integer(), boolean()) ::

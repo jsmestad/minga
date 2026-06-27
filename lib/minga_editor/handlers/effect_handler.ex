@@ -36,7 +36,7 @@ defmodule MingaEditor.Handlers.EffectHandler do
   * `{:push_overlay, module}` — push an overlay handler onto the focus stack
   * `{:pop_overlay, module}` — pop an overlay handler from the focus stack
   * `{:log_message, msg}` — log to *Messages* buffer
-  * `{:log_warning, msg}` — log to both *Messages* and *Warnings* (warning level)
+  * `{:log_warning, msg}` — log at warning level to *Messages* buffer
   * `{:log, subsystem, level, msg}` — log via Minga.Log
   * `:sync_agent_transcript` — sync semantic agent transcript with session output
   * `{:update_tab_label, label}` — update active tab label
