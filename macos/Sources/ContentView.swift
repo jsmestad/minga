@@ -290,6 +290,7 @@ struct ContentView: View {
             ZStack {
                 theme.tabBg
                 TitleBarDragRegion()
+                    .accessibilityHidden(true)
             }
         }
     }
@@ -414,6 +415,18 @@ struct ContentView: View {
                         NSCursor.resizeLeftRight.push()
                     } else {
                         NSCursor.pop()
+                    }
+                }
+                .accessibilityLabel("Change summary resize handle")
+                .accessibilityAdjustableAction { direction in
+                    let step: CGFloat = 20
+                    switch direction {
+                    case .increment:
+                        changeSummaryWidth = min(changeSummaryWidth + step, changeSummaryMaxWidth)
+                    case .decrement:
+                        changeSummaryWidth = max(changeSummaryWidth - step, changeSummaryMinWidth)
+                    @unknown default:
+                        break
                     }
                 }
         }

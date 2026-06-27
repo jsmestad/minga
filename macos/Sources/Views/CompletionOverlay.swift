@@ -115,6 +115,7 @@ struct CompletionOverlay: View {
         .onHover { isHovered in
             hoveredItemId = isHovered ? item.id : nil
         }
+        .accessibilityAddTraits(.isButton)
         .onTapGesture {
             encoder?.sendCompletionSelect(index: UInt16(item.id))
         }

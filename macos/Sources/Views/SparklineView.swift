@@ -7,6 +7,15 @@ struct SparklineView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private var accessibilityDescription: String {
+        guard !data.isEmpty, !data.allSatisfy({ $0 == 0.0 }) else {
+            return "Sparkline chart, no activity"
+        }
+        let peak = data.max() ?? 0
+        let avg = data.reduce(0, +) / Float(data.count)
+        return "Sparkline chart, \(data.count) points, peak \(Int(peak * 100))%, average \(Int(avg * 100))%"
+    }
+
     var body: some View {
         GeometryReader { geometry in
             if data.isEmpty || data.allSatisfy({ $0 == 0.0 }) {
@@ -61,5 +70,7 @@ struct SparklineView: View {
                 .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: data)
             }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityDescription)
     }
 }

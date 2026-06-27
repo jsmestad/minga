@@ -175,6 +175,8 @@ struct ChangeSummaryView: View {
         .onHover { hovering in
             hoveredEntryId = hovering ? entry.id : nil
         }
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel("\(entry.action.indicator) file: \(fileName(from: entry.path))")
         .onTapGesture {
             encoder?.sendChangeSummaryClick(index: UInt32(entry.id))
         }

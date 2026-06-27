@@ -40,19 +40,21 @@ struct BreadcrumbBar: View {
                             .padding(.horizontal, 4)
                     }
 
-                    Text(segment)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(
-                            index == state.segments.count - 1
-                                ? theme.breadcrumbFg
-                                : theme.breadcrumbFg.opacity(0.6)
-                        )
-                        .onTapGesture {
-                            encoder?.sendBreadcrumbClick(index: UInt8(index))
-                        }
-                        .onHover { isHovered in
-                            if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-                        }
+                    Button {
+                        encoder?.sendBreadcrumbClick(index: UInt8(index))
+                    } label: {
+                        Text(segment)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(
+                                index == state.segments.count - 1
+                                    ? theme.breadcrumbFg
+                                    : theme.breadcrumbFg.opacity(0.6)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .onHover { isHovered in
+                        if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                    }
                 }
 
                 Spacer()

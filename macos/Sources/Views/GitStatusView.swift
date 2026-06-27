@@ -223,6 +223,8 @@ struct GitStatusView: View {
         .padding(.horizontal, 10)
         .frame(height: sectionHeaderHeight)
         .contentShape(Rectangle())
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint(state.collapsedSections.contains(section) ? "Double tap to expand" : "Double tap to collapse")
         .onTapGesture {
             withAnimation(.easeInOut(duration: animDuration)) {
                 if state.collapsedSections.contains(section) {
@@ -324,6 +326,7 @@ struct GitStatusView: View {
             encoder?.sendGitOpenFile(path: entry.path)
         }
         .contextMenu { fileContextMenu(entry) }
+        .accessibilityAddTraits(.isButton)
         .accessibilityLabel("\(statusAccessibilityLabel(entry.status)) file: \(entry.filename)")
     }
 
