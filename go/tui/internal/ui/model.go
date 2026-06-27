@@ -59,8 +59,7 @@ type Model struct {
 	// Once an extension ships a terminal runtime decoder, it reads from here.
 	extensionRuntimes     map[string]protocol.ExtensionRuntimePayload
 	bottomPanelScrollback int
-	agentAnimationFrame   uint64
-	agentAnimationRunning bool
+	agent                 agentPanel
 	// latency records end-to-end keystroke-to-write samples (ticket #2215).
 	// It is a pointer so the recorder persists across value-copied Model
 	// updates. hudVisible toggles the on-screen p50/p99 overlay at runtime.
@@ -156,8 +155,8 @@ func New(width, height uint16, out chan<- []byte) Model {
 		lineCache:          newLineCache(),
 		presentationScroll: map[uint16]presentationScroll{},
 	}
-	// Seed the layout so the first mouse event before any frame/resize
-	// translates against the rendered fallback header.
+	// Seed the layout so the first mouse event lands in the correct
+	// region before the first BEAM frame arrives.
 	m.layout = m.computeLayout()
 	return m
 }
@@ -206,8 +205,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.toggleHUD(msg) {
 			break
 		}
-		if m.handleAgentChatShortcut(msg) {
-			break
+		if chat, ok := m.agentChat(); ok {
+			if packet, handled := m.agent.handleKey(chat, msg); handled {
+				m.send(packet)
+				break
+			}
 		}
 		// Stamp the latency correlation sequence (ticket #2215) before
 		// encoding so the resulting frame's commit_frame resolves the sample.
@@ -241,11 +243,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case agentAnimationTickMsg:
-		m.agentAnimationFrame++
-		if m.agentAnimating() {
+		m.agent.tick()
+		if chat, ok := m.agentChat(); ok && m.agent.animating(chat) {
 			cmd = agentAnimationTick()
 		} else {
-			m.agentAnimationRunning = false
+			m.agent.animationRunning = false
 		}
 	case port.PacketMsg:
 		cmd = m.applyCommands(msg.Commands)
@@ -257,8 +259,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.send(protocol.EncodeLogMessage(protocol.LogLevelErr, msg.Err.Error()))
 	}
 
-	if m.agentAnimating() && !m.agentAnimationRunning {
-		m.agentAnimationRunning = true
+	if chat, ok := m.agentChat(); ok && m.agent.animating(chat) && !m.agent.animationRunning {
+		m.agent.animationRunning = true
 		cmd = tea.Batch(cmd, agentAnimationTick())
 	}
 
@@ -778,35 +780,6 @@ func (m *Model) toggleHUD(msg tea.KeyPressMsg) bool {
 		return true
 	}
 	return false
-}
-
-func (m Model) handleAgentChatShortcut(msg tea.KeyPressMsg) bool {
-	chat, ok := m.agentChat()
-	if !ok || !chat.Visible {
-		return false
-	}
-	key := msg.Key()
-	if !key.Mod.Contains(tea.ModCtrl) || !key.Mod.Contains(tea.ModAlt) {
-		return false
-	}
-	switch key.Code {
-	case 'x', 'X':
-		index, ok := latestToolMessageIndex(chat.Messages)
-		if !ok {
-			return false
-		}
-		m.send(protocol.EncodeGUIAgentToolToggle(index))
-		return true
-	case 'z', 'Z':
-		index, ok := latestThinkingMessageIndex(chat.Messages)
-		if !ok {
-			return false
-		}
-		m.send(protocol.EncodeGUIAgentToolToggle(index))
-		return true
-	default:
-		return false
-	}
 }
 
 func latestToolMessageIndex(messages []protocol.AgentChatMessage) (uint16, bool) {

@@ -20,9 +20,9 @@ func (r uiRect) Translate(x, y int) (int, int) {
 // uiLayout describes the spatial arrangement of every top-level region for
 // one frame. It is computed once per Update() from the current chrome state
 // and terminal dimensions, then read by the renderer, the mouse router, and
-// the viewport sizing code. This is the single source of truth for "where is
-// each region on screen?", replacing the scattered bodyHeight() /
-// renderedHeaderHeight / leftChromeWidth() / semanticContentOffsets() calls.
+// the viewport sizing code. This centralizes the scattered bodyHeight() /
+// renderedHeaderHeight / leftChromeWidth() / semanticContentOffsets() calls
+// into a single source of truth for region positions.
 type uiLayout struct {
 	header   uiRect
 	body     uiRect
