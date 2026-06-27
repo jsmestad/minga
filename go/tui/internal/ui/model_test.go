@@ -1758,6 +1758,37 @@ func TestFileTreeLocalNavigationPreviewRequiresEligibilityFlag(t *testing.T) {
 	}
 }
 
+func TestModalOverlaySuppressesFileTreeNavigation(t *testing.T) {
+	eligibleTree := protocol.FileTree{Visible: true, Focused: true, Flags: fileTreeVisibleFlag | fileTreeFocusedFlag | fileTreeLocalNavigationFlag, Status: fileTreeReadyStatus, Selected: "a", Rows: []protocol.FileTreeRow{{ID: "a", Name: "a", Selected: true, Focused: true}, {ID: "b", Name: "b"}}}
+	jKey := tea.KeyPressMsg(tea.Key{Code: fileTreeLocalNavigationDownKey, Text: string(fileTreeLocalNavigationDownKey)})
+
+	for _, tc := range []struct {
+		name    string
+		overlay map[byte]protocol.ChromePayload
+	}{
+		{"picker", map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: eligibleTree}, generated.OPGuiPicker: {Picker: protocol.Picker{Visible: true, Title: "Files", Items: []protocol.PickerItem{{Label: "main.ex"}}}}}},
+		{"which-key", map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: eligibleTree}, generated.OPGuiWhichKey: {Which: protocol.WhichKey{Visible: true, Prefix: "SPC", Bindings: []protocol.WhichKeyBinding{{Key: "f", Description: "file"}}}}}},
+	} {
+		t.Run(tc.name+" suppresses local navigation", func(t *testing.T) {
+			out := make(chan []byte, 1)
+			model := New(30, 6, out)
+			model.chrome = tc.overlay
+
+			updated, _ := model.Update(jKey)
+			model = updated.(Model)
+
+			tree := model.chrome[generated.OPGuiFileTree].Tree
+			if tree.Selected != "a" || !tree.Rows[0].Selected {
+				t.Fatalf("file tree should not preview locally when %s overlay is active: %+v", tc.name, tree)
+			}
+			packets := drainOutboundPackets(out)
+			if len(packets) != 1 || packets[0][0] != generated.OPKeyPress {
+				t.Fatalf("key should still be forwarded to BEAM when %s overlay is active: %#v", tc.name, packets)
+			}
+		})
+	}
+}
+
 func TestApplyCommandsStoresSemanticGuttersByWindow(t *testing.T) {
 	model := New(30, 6, nil)
 	_ = model.applyCommands(frame(

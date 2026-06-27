@@ -187,7 +187,7 @@ func (m Model) footerLines() []string {
 	// composited at its BEAM placement rect by overlayLayer (#2281). The footer
 	// still carries the minibuffer when no full overlay is active so the prompt
 	// line stays in the vertical layout.
-	if !m.pickerVisible() && !m.whichKeyVisible() && !m.agentChatVisible() {
+	if !m.modalOverlayActive() {
 		if _, active := m.overlayWinner(); !active {
 			if mini, ok := m.minibuffer(); ok && mini.Visible {
 				lines = append(lines, m.renderMinibuffer(mini))
