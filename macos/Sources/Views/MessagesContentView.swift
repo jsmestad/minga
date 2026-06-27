@@ -13,7 +13,7 @@ import SwiftUI
 
 struct MessagesContentView: View {
     @Bindable var state: MessagesContentState
-    let theme: ThemeColors
+    @Environment(\.themeColors) private var theme
     let encoder: InputEncoder?
     /// Snapshot-only: render the list as a plain, non-lazy stack so every row
     /// lays out for capture. The live lazy ScrollView path renders blank in the
@@ -22,7 +22,7 @@ struct MessagesContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            MessagesFilterBar(state: state, theme: theme)
+            MessagesFilterBar(state: state)
             entryList
         }
     }
@@ -32,7 +32,7 @@ struct MessagesContentView: View {
         if usesPreviewEagerLayout {
             VStack(spacing: 0) {
                 ForEach(state.filteredEntries) { entry in
-                    MessageEntryRow(entry: entry, theme: theme, encoder: encoder)
+                    MessageEntryRow(entry: entry, encoder: encoder)
                 }
             }
             .padding(.horizontal, Spacing.sm)
@@ -49,7 +49,7 @@ struct MessagesContentView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(state.filteredEntries) { entry in
-                            MessageEntryRow(entry: entry, theme: theme, encoder: encoder)
+                            MessageEntryRow(entry: entry, encoder: encoder)
                                 .id(entry.id)
                         }
 
@@ -117,7 +117,7 @@ struct MessagesContentView: View {
 
 private struct MessagesFilterBar: View {
     @Bindable var state: MessagesContentState
-    let theme: ThemeColors
+    @Environment(\.themeColors) private var theme
 
     var body: some View {
         HStack(spacing: Spacing.sm) {
@@ -303,7 +303,7 @@ private struct MessagesFilterBar: View {
 
 private struct MessageEntryRow: View {
     let entry: MessageEntry
-    let theme: ThemeColors
+    @Environment(\.themeColors) private var theme
     let encoder: InputEncoder?
 
     var body: some View {

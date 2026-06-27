@@ -26,7 +26,7 @@ private struct SigHelpWidthKey: PreferenceKey {
 
 struct SignatureHelpOverlay: View {
     let state: SignatureHelpState
-    let theme: ThemeColors
+    @Environment(\.themeColors) private var theme
     let cellWidth: CGFloat
     let cellHeight: CGFloat
     let viewportHeight: CGFloat

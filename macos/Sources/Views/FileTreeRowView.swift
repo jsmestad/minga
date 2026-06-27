@@ -7,7 +7,7 @@ import SwiftUI
 
 struct FileTreeRowView: View {
     let entry: FileTreeEntry
-    let theme: ThemeColors
+    @Environment(\.themeColors) private var theme
     let rowHeight: CGFloat
     let indentWidth: CGFloat
     let chevronWidth: CGFloat

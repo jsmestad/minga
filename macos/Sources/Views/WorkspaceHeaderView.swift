@@ -3,7 +3,7 @@ import SwiftUI
 /// Workspace header row rendered above active-workspace file tabs.
 struct WorkspaceHeaderView: View {
     let workspaceState: WorkspaceState
-    let theme: ThemeColors
+    @Environment(\.themeColors) private var theme
     let encoder: InputEncoder?
 
     @State private var isRenaming = false
@@ -68,7 +68,7 @@ struct WorkspaceHeaderView: View {
         }
         .onTapGesture(count: 2) { beginRename(workspace) }
         .popover(isPresented: $showIconPicker, arrowEdge: .bottom) {
-            WorkspaceIconPicker(currentIcon: workspace.icon, accentColor: workspace.color, theme: theme) { selectedIcon in
+            WorkspaceIconPicker(currentIcon: workspace.icon, accentColor: workspace.color) { selectedIcon in
                 encoder?.sendWorkspaceSetIcon(id: workspace.id, icon: selectedIcon)
                 showIconPicker = false
             }

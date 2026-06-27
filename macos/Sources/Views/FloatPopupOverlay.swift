@@ -8,7 +8,7 @@ import SwiftUI
 
 struct FloatPopupOverlay: View {
     let state: FloatPopupState
-    let theme: ThemeColors
+    @Environment(\.themeColors) private var theme
     let cellWidth: CGFloat
     let cellHeight: CGFloat
 

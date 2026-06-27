@@ -8,7 +8,7 @@ import SwiftUI
 
 struct CompletionOverlay: View {
     let state: CompletionState
-    let theme: ThemeColors
+    @Environment(\.themeColors) private var theme
     let encoder: InputEncoder?
 
     private let maxVisibleItems = 10
@@ -174,7 +174,8 @@ struct CompletionOverlay: View {
         ],
         documentation: "Defines a struct for the module.\n\nFields are given as a keyword list."
     )
-    return CompletionOverlay(state: state, theme: theme, encoder: nil)
+    return CompletionOverlay(state: state, encoder: nil)
         .frame(width: 400, height: 300)
         .background(theme.editorBg)
+        .environment(theme)
 }

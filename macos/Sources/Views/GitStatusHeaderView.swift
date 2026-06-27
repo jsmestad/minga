@@ -7,7 +7,7 @@ import SwiftUI
 
 struct GitStatusHeaderView: View {
     let state: GitStatusState
-    let theme: ThemeColors
+    @Environment(\.themeColors) private var theme
     let projectName: String
     let leadingPadding: CGFloat
 

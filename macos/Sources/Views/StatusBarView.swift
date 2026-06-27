@@ -33,7 +33,7 @@ private struct StatusBarSegmentGroup: Identifiable {
 
 struct StatusBarView: View {
     let state: StatusBarState
-    let theme: ThemeColors
+    @Environment(\.themeColors) private var theme
     let encoder: InputEncoder?
     var isFileTreeVisible: Bool = false
     var isGitStatusVisible: Bool = false

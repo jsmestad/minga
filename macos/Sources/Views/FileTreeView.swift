@@ -11,18 +11,16 @@ import SwiftUI
 /// The file tree sidebar rendered on the left side of the window.
 struct FileTreeView: View {
     let fileTreeState: FileTreeState
-    let theme: ThemeColors
+    @Environment(\.themeColors) private var theme
     let encoder: InputEncoder?
     let usesPreviewEagerLayout: Bool
 
     init(
         fileTreeState: FileTreeState,
-        theme: ThemeColors,
         encoder: InputEncoder?,
         usesPreviewEagerLayout: Bool = false
     ) {
         self.fileTreeState = fileTreeState
-        self.theme = theme
         self.encoder = encoder
         self.usesPreviewEagerLayout = usesPreviewEagerLayout
     }
@@ -322,7 +320,6 @@ struct FileTreeView: View {
     private func fileTreeRow(_ entry: FileTreeEntry, onActivate: @escaping () -> Void) -> FileTreeRowView {
         FileTreeRowView(
             entry: entry,
-            theme: theme,
             rowHeight: rowHeight,
             indentWidth: indentWidth,
             chevronWidth: chevronWidth,

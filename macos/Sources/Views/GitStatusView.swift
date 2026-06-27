@@ -8,18 +8,16 @@ import SwiftUI
 
 struct GitStatusView: View {
     let state: GitStatusState
-    let theme: ThemeColors
+    @Environment(\.themeColors) private var theme
     let encoder: InputEncoder?
     let usesPreviewEagerLayout: Bool
 
     init(
         state: GitStatusState,
-        theme: ThemeColors,
         encoder: InputEncoder?,
         usesPreviewEagerLayout: Bool = false
     ) {
         self.state = state
-        self.theme = theme
         self.encoder = encoder
         self.usesPreviewEagerLayout = usesPreviewEagerLayout
     }
