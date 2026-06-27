@@ -370,62 +370,13 @@ struct ContentView: View {
 
     // MARK: - Change Summary Sidebar
 
-    @State private var changeSummaryMinWidth: CGFloat = 200
-    @State private var changeSummaryMaxWidth: CGFloat = 400
-    @State private var isDraggingChangeSummaryResize: Bool = false
-
     @ViewBuilder
     private var changeSummarySidebar: some View {
-        HStack(spacing: 0) {
-            VStack(spacing: 0) {
-                ChangeSummaryView(
-                    state: appState.gui.changeSummaryState,
-                    encoder: appState.encoder
-                )
-            }
-            .frame(width: changeSummaryWidth)
-            .background(theme.treeBg)
-
-            // Resize handle (8px hit target with 1px visible separator)
-            Color.clear
-                .frame(width: 8)
-                .overlay(alignment: .leading) {
-                    Rectangle()
-                        .fill(isDraggingChangeSummaryResize ? theme.treeActiveFg.opacity(0.3) : theme.treeSeparatorFg.opacity(0.4))
-                        .frame(width: 1)
-                }
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 1)
-                        .onChanged { value in
-                            isDraggingChangeSummaryResize = true
-                            let newWidth = changeSummaryWidth + value.translation.width
-                            changeSummaryWidth = min(max(newWidth, changeSummaryMinWidth), changeSummaryMaxWidth)
-                        }
-                        .onEnded { _ in
-                            isDraggingChangeSummaryResize = false
-                        }
-                )
-                .onHover { hovering in
-                    if hovering {
-                        NSCursor.resizeLeftRight.push()
-                    } else {
-                        NSCursor.pop()
-                    }
-                }
-                .accessibilityLabel("Change summary resize handle")
-                .accessibilityAdjustableAction { direction in
-                    let step: CGFloat = 20
-                    switch direction {
-                    case .increment:
-                        changeSummaryWidth = min(changeSummaryWidth + step, changeSummaryMaxWidth)
-                    case .decrement:
-                        changeSummaryWidth = max(changeSummaryWidth - step, changeSummaryMinWidth)
-                    @unknown default:
-                        break
-                    }
-                }
-        }
+        ChangeSummarySidebarView(
+            changeSummaryState: appState.gui.changeSummaryState,
+            encoder: appState.encoder,
+            width: $changeSummaryWidth
+        )
     }
 
     // MARK: - Editor Body

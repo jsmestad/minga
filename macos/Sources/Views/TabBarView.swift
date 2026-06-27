@@ -65,7 +65,7 @@ struct TabBarView: View {
 
             // Legacy workspace indicator, hidden when the canonical workspace header is active.
             if !tabBarState.hasCanonicalWorkspaceTabs, let activeWorkspace = tabBarState.activeWorkspace {
-                workspaceIndicator(activeWorkspace)
+                WorkspaceIndicatorView(workspace: activeWorkspace, encoder: encoder, barHeight: barHeight)
                 groupSeparator(color: activeWorkspace.color)
             }
 
@@ -259,7 +259,7 @@ struct TabBarView: View {
                     .lineLimit(1)
                     .foregroundStyle(theme.tabInactiveFg)
 
-                agentStatusDot(workspace.agentStatus, color: color)
+                AgentStatusDot(status: workspace.agentStatus, color: color)
 
                 Text("(\(workspace.tabCount))")
                     .font(.system(size: 10))
@@ -287,129 +287,6 @@ struct TabBarView: View {
     @MainActor
     private func workspaceGotoCommand(for workspace: WorkspaceEntry) -> String {
         "workspace_goto_id:\(workspace.id)"
-    }
-
-    // MARK: - Workspace indicator
-
-    @State private var isRenaming: Bool = false
-    @State private var renameText: String = ""
-    @State private var showIconPicker: Bool = false
-    @FocusState private var renameFieldFocused: Bool
-
-    @ViewBuilder
-    private func workspaceIndicator(_ workspace: WorkspaceEntry) -> some View {
-        HStack(spacing: 4) {
-            // Icon (click to change)
-            Image(systemName: workspace.icon.isEmpty ? "folder" : workspace.icon)
-                .font(.system(size: 10))
-                .foregroundStyle(workspace.color)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    showIconPicker = true
-                }
-                .popover(isPresented: $showIconPicker, arrowEdge: .bottom) {
-                    WorkspaceIconPicker(
-                        currentIcon: workspace.icon,
-                        accentColor: workspace.color
-                    ) { selectedIcon in
-                        showIconPicker = false
-                        encoder?.sendWorkspaceSetIcon(id: workspace.id, icon: selectedIcon)
-                    }
-                }
-
-            // Label (double-click to rename, single-click for picker)
-            if isRenaming {
-                TextField("", text: $renameText)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 11))
-                    .focused($renameFieldFocused)
-                    .frame(minWidth: 40, maxWidth: 160)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 2)
-                    .background(
-                        RoundedRectangle(cornerRadius: 4)
-                            .fill(theme.tabActiveBg)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 4)
-                                    .strokeBorder(Color.accentColor.opacity(0.5), lineWidth: 1)
-                            )
-                    )
-                    .onSubmit {
-                        commitRename(workspace)
-                    }
-                    .onExitCommand {
-                        isRenaming = false
-                    }
-                    .onChange(of: renameFieldFocused) { _, focused in
-                        if !focused {
-                            commitRename(workspace)
-                        }
-                    }
-            } else {
-                Text(workspace.label)
-                    .font(.system(size: 11))
-                    .lineLimit(1)
-                    .foregroundStyle(theme.tabActiveFg)
-                    .onTapGesture(count: 2) {
-                        renameText = workspace.label
-                        isRenaming = true
-                        Task { @MainActor in renameFieldFocused = true }
-                    }
-                    .onTapGesture(count: 1) {
-                        encoder?.sendExecuteCommand(name: "workspace_list")
-                    }
-            }
-
-            agentStatusDot(workspace.agentStatus, color: workspace.color)
-
-            Image(systemName: "chevron.down")
-                .font(.system(size: 7, weight: .bold))
-                .foregroundStyle(theme.tabInactiveFg)
-                .onTapGesture {
-                    encoder?.sendExecuteCommand(name: "workspace_list")
-                }
-        }
-        .padding(.horizontal, 8)
-        .frame(height: barHeight)
-        .contextMenu {
-            Button("Rename Workspace...") {
-                renameText = workspace.label
-                isRenaming = true
-                Task { @MainActor in renameFieldFocused = true }
-            }
-            Button("Change Icon...") {
-                showIconPicker = true
-            }
-            Divider()
-            Button("Close Workspace") {
-                encoder?.sendWorkspaceClose(id: workspace.id)
-            }
-        }
-    }
-
-    private func commitRename(_ workspace: WorkspaceEntry) {
-        guard isRenaming else { return }
-        isRenaming = false
-        let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed != workspace.label else { return }
-        encoder?.sendWorkspaceRename(id: workspace.id, name: trimmed)
-    }
-
-    private func agentStatusDot(_ status: UInt8, color: Color) -> some View {
-        Circle()
-            .fill(agentStatusColor(status, accent: color))
-            .frame(width: 6, height: 6)
-            .accessibilityHidden(true)
-    }
-
-    private func agentStatusColor(_ status: UInt8, accent: Color) -> Color {
-        switch status {
-        case 1: return accent   // thinking
-        case 2: return accent   // tool_executing
-        case 3: return Color.red  // error
-        case 4: return theme.agentStatusNeedsYou  // plan
-        default: return theme.tabInactiveFg  // idle
-        }
     }
 
     private func workspaceColor(for groupId: UInt16) -> Color {
