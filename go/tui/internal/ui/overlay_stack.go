@@ -1,6 +1,10 @@
 package ui
 
-import "charm.land/lipgloss/v2"
+import (
+	"strings"
+
+	"charm.land/lipgloss/v2"
+)
 
 // modalOverlayActive reports whether a modal overlay (picker, which-key, or
 // agent chat) is visible. When true, local side-effects like file-tree
@@ -19,10 +23,29 @@ func (m Model) floatingOverlayLayers() []*lipgloss.Layer {
 		layers = append(layers, overlay)
 	}
 	if which := m.floatingWhichKeyLayer(); which != nil {
-		layers = append(layers, which)
+		layers = append(layers, popupShadow(which)...)
 	}
 	if picker := m.floatingPickerLayer(); picker != nil {
-		layers = append(layers, picker)
+		layers = append(layers, popupShadow(picker)...)
 	}
 	return layers
+}
+
+// popupShadow returns the popup layer preceded by a dark shadow layer offset
+// 1 cell right and 1 cell down. The shadow sits at Z-1 so the popup renders
+// on top, giving floating overlays visual depth.
+func popupShadow(popup *lipgloss.Layer) []*lipgloss.Layer {
+	w := popup.Width()
+	h := popup.Height()
+	if w <= 0 || h <= 0 {
+		return []*lipgloss.Layer{popup}
+	}
+	shadowStyle := lipgloss.NewStyle().Background(lipgloss.Color("#000000")).Width(w)
+	shadowLines := make([]string, h)
+	for i := range shadowLines {
+		shadowLines[i] = shadowStyle.Render(strings.Repeat(" ", w))
+	}
+	shadow := lipgloss.NewLayer(strings.Join(shadowLines, "\n")).
+		X(popup.GetX() + 1).Y(popup.GetY() + 1).Z(popup.GetZ() - 1)
+	return []*lipgloss.Layer{shadow, popup}
 }
