@@ -9,7 +9,7 @@ import SwiftUI
 struct WorkspaceIconPicker: View {
     let currentIcon: String
     let accentColor: Color
-    @Environment(ThemeColors.self) private var theme
+    @Environment(\.themeColors) private var theme
     let onSelect: (String) -> Void
 
     @State private var searchText: String = ""

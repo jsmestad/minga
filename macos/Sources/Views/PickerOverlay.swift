@@ -9,7 +9,7 @@ import SwiftUI
 
 struct PickerOverlay: View {
     let state: PickerState
-    @Environment(ThemeColors.self) private var theme
+    @Environment(\.themeColors) private var theme
     let encoder: InputEncoder?
 
     private let panelWidth: CGFloat = 600

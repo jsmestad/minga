@@ -30,7 +30,7 @@ struct ActivityBarViewTests {
         let guiState = GUIState()
         guiState.sidebarHostState.update(activeId: "file_tree", sidebars: sidebarMetadata())
         let sut = ActivityBar(guiState: guiState, sidebarHostState: guiState.sidebarHostState, encoder: nil)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let buttons = body.findAll(ViewType.Button.self)
 
@@ -43,7 +43,7 @@ struct ActivityBarViewTests {
         guiState.sidebarHostState.update(activeId: "file_tree", sidebars: sidebarMetadata())
         let spy = SpyEncoder()
         let sut = ActivityBar(guiState: guiState, sidebarHostState: guiState.sidebarHostState, encoder: spy)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let buttons = body.findAll(ViewType.Button.self)
 
@@ -66,7 +66,7 @@ struct ActivityBarViewTests {
         }
         guiState.sidebarHostState.update(activeId: "git_status", sidebars: sidebarMetadata())
         let sut = ActivityBar(guiState: guiState, sidebarHostState: guiState.sidebarHostState, encoder: nil)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
@@ -78,7 +78,7 @@ struct ActivityBarViewTests {
         let guiState = GUIState()
         guiState.sidebarHostState.update(activeId: "git_status", sidebars: sidebarMetadata(gitBadgeCount: 7))
         let sut = ActivityBar(guiState: guiState, sidebarHostState: guiState.sidebarHostState, encoder: nil)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let buttons = body.findAll(ViewType.Button.self)
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
@@ -127,7 +127,7 @@ struct SidebarContainerViewTests {
         guiState.sidebarHostState.update(activeId: "custom", sidebars: [item])
         let active = try #require(guiState.sidebarHostState.activeSidebar)
         let sut = SidebarContainer(guiState: guiState, activeSidebar: active, encoder: nil, projectName: "minga", gitBranch: "main", leadingPadding: 10, sidebarWidth: .constant(240))
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let strings = try sut.inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
         #expect(strings.contains("Unsupported sidebar"))
@@ -192,7 +192,7 @@ struct GitStatusViewEmptyStateTests {
         state.repoState = .notARepo
 
         let sut = GitStatusView(state: state, encoder: nil)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
@@ -205,7 +205,7 @@ struct GitStatusViewEmptyStateTests {
         state.repoState = .loading
 
         let sut = GitStatusView(state: state, encoder: nil)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
@@ -220,7 +220,7 @@ struct GitStatusViewEmptyStateTests {
         // No entries = clean
 
         let sut = GitStatusView(state: state, encoder: nil)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
@@ -241,7 +241,7 @@ struct GitStatusViewBranchHeaderTests {
         state.branchName = "feat/sidebar-polish"
 
         let sut = GitStatusHeaderView(state: state, projectName: "minga", leadingPadding: 10)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
@@ -256,7 +256,7 @@ struct GitStatusViewBranchHeaderTests {
         state.branchName = ""
 
         let sut = GitStatusHeaderView(state: state, projectName: "minga", leadingPadding: 10)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
@@ -271,7 +271,7 @@ struct GitStatusViewBranchHeaderTests {
         state.stashCount = 2
 
         let sut = GitStatusHeaderView(state: state, projectName: "minga", leadingPadding: 10)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
@@ -291,7 +291,7 @@ struct FileTreeViewTests {
         state.projectRoot = "/Users/test/code/minga"
 
         let sut = FileTreeHeaderView(fileTreeState: state, encoder: nil, branchName: "main", leadingPadding: 10)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
@@ -306,7 +306,7 @@ struct FileTreeViewTests {
         state.projectRoot = ""
 
         let sut = FileTreeHeaderView(fileTreeState: state, encoder: nil, branchName: "", leadingPadding: 10)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
@@ -319,7 +319,7 @@ struct FileTreeViewTests {
         state.visible = true
 
         let sut = FileTreeHeaderView(fileTreeState: state, encoder: nil, branchName: "", leadingPadding: 10)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let buttons = body.findAll(ViewType.Button.self)
         #expect(buttons.count == 4)
@@ -333,7 +333,7 @@ struct FileTreeViewTests {
         let spy = SpyEncoder()
 
         let sut = FileTreeHeaderView(fileTreeState: state, encoder: spy, branchName: "main", leadingPadding: 10)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let buttons = try sut.inspect().findAll(ViewType.Button.self)
 
         try buttons[0].tap()
@@ -372,7 +372,7 @@ struct FileTreeViewTests {
         ]
 
         let sut = FileTreeView(fileTreeState: state, encoder: nil)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
@@ -390,7 +390,7 @@ struct FileTreeViewTests {
         ]
 
         let sut = FileTreeView(fileTreeState: state, encoder: nil)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
@@ -441,7 +441,7 @@ struct FileTreeViewTests {
         ]
 
         let sut = FileTreeView(fileTreeState: state, encoder: nil)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let fields = body.findAll(InlineEditField.self)
 
@@ -456,19 +456,19 @@ struct FileTreeViewTests {
         state.entries = []
 
         var strings = try FileTreeView(fileTreeState: state, encoder: nil)
-            .environment(ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+            .environment(\.themeColors, ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
         #expect(strings.contains("No files yet"))
         #expect(strings.contains("Create a file or refresh after adding project files."))
 
         state.treeState = .loading
         strings = try FileTreeView(fileTreeState: state, encoder: nil)
-            .environment(ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+            .environment(\.themeColors, ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
         #expect(strings.contains("Loading files…"))
 
         state.treeState = .error
         state.errorReason = "permission denied"
         strings = try FileTreeView(fileTreeState: state, encoder: nil)
-            .environment(ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+            .environment(\.themeColors, ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
         #expect(strings.contains("Couldn’t load file tree"))
         #expect(strings.contains("permission denied"))
     }
@@ -503,22 +503,22 @@ struct FileTreeRowViewTests {
         let collapsedDir = fileTreeRowView(entry: sidebarFileTreeEntry(id: 2, index: 1, isDir: true, icon: "\u{F024B}", name: "lib", relPath: "lib"))
         let expandedDir = fileTreeRowView(entry: sidebarFileTreeEntry(id: 3, index: 2, isDir: true, isExpanded: true, icon: "\u{F0256}", name: "test", relPath: "test"))
 
-        #expect(try file.environment(ThemeColors()).inspect().findAll(ViewType.Image.self).isEmpty)
-        #expect(try collapsedDir.environment(ThemeColors()).inspect().findAll(ViewType.Image.self).count == 1)
-        #expect(try expandedDir.environment(ThemeColors()).inspect().findAll(ViewType.Image.self).count == 1)
-        #expect(try collapsedDir.environment(ThemeColors()).inspect().find(ViewType.Image.self).rotation().angle.degrees == 0)
-        #expect(try expandedDir.environment(ThemeColors()).inspect().find(ViewType.Image.self).rotation().angle.degrees == 90)
+        #expect(try file.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewType.Image.self).isEmpty)
+        #expect(try collapsedDir.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewType.Image.self).count == 1)
+        #expect(try expandedDir.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewType.Image.self).count == 1)
+        #expect(try collapsedDir.environment(\.themeColors, ThemeColors()).inspect().find(ViewType.Image.self).rotation().angle.degrees == 0)
+        #expect(try expandedDir.environment(\.themeColors, ThemeColors()).inspect().find(ViewType.Image.self).rotation().angle.degrees == 90)
     }
 
     @Test("Status markers remain separate from name text")
     @MainActor func statusMarkersRemainSeparateFromNameText() throws {
         let row = fileTreeRowView(entry: sidebarFileTreeEntry(id: 1, index: 0, isSelected: true, isFocused: true, isActive: true, isDirty: true, gitStatus: 1, diagnosticErrorCount: 2, icon: "\u{E62D}", name: "editor.ex", relPath: "lib/editor.ex"))
-        let strings = try row.environment(ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+        let strings = try row.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
         #expect(strings.contains("editor.ex"))
         #expect(strings.contains("✖2"))
         #expect(strings.contains("●"))
-        #expect(try row.environment(ThemeColors()).inspect().findAll(ViewType.Shape.self).count >= 1)
+        #expect(try row.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewType.Shape.self).count >= 1)
     }
 
     @Test("Accessibility labels include independent status summaries")
@@ -571,9 +571,9 @@ struct FileTreeRowViewTests {
         let hint = fileTreeRowView(entry: sidebarFileTreeEntry(id: 2, index: 1, diagnosticHintCount: 3, icon: "\u{E62D}", name: "hint.ex", relPath: "hint.ex"))
         let noisy = fileTreeRowView(entry: sidebarFileTreeEntry(id: 3, index: 2, diagnosticErrorCount: 120, icon: "\u{E62D}", name: "noisy.ex", relPath: "noisy.ex"))
 
-        let infoStrings = try info.environment(ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
-        let hintStrings = try hint.environment(ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
-        let noisyStrings = try noisy.environment(ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+        let infoStrings = try info.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+        let hintStrings = try hint.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+        let noisyStrings = try noisy.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
         #expect(infoStrings.contains("ℹ"))
         #expect(hintStrings.contains("·3"))
@@ -600,12 +600,12 @@ struct FileTreeRowViewTests {
     @Test("Nested rows keep names and status badges as independent views")
     @MainActor func nestedRowsKeepNamesAndStatusBadgesAsIndependentViews() throws {
         let row = fileTreeRowView(entry: sidebarFileTreeEntry(id: 1, index: 0, isDirty: true, gitStatus: 1, diagnosticWarningCount: 1, depth: 8, guides: [true, true, false, true, false, true, true, false], icon: "\u{E62D}", name: "非常に長い_component_view.ex", relPath: "lib/minga_editor/shell/traditional/非常に長い_component_view.ex"))
-        let strings = try row.environment(ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+        let strings = try row.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
         #expect(strings.contains("非常に長い_component_view.ex"))
         #expect(strings.contains("⚠"))
         #expect(strings.contains("●"))
-        #expect(try row.environment(ThemeColors()).inspect().findAll(ViewType.Shape.self).count >= 1)
+        #expect(try row.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewType.Shape.self).count >= 1)
     }
 
     @Test("Selected active and hovered rows keep status markers readable")
@@ -615,7 +615,7 @@ struct FileTreeRowViewTests {
         let hovered = fileTreeRowView(entry: sidebarFileTreeEntry(id: 3, index: 2, isDirty: true, gitStatus: 2, diagnosticInfoCount: 1, icon: "\u{E62D}", name: "hovered.ex", relPath: "hovered.ex"), isHovered: true)
 
         for row in [selected, active, hovered] {
-            let strings = try row.environment(ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+            let strings = try row.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
             #expect(strings.contains("●"))
             #expect(row.accessibilityLabelText.contains("unsaved changes"))
             #expect(row.accessibilityLabelText.contains("git"))
@@ -647,7 +647,7 @@ struct GitStatusViewSectionTests {
         ]
 
         let sut = GitStatusView(state: state, encoder: nil)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
@@ -683,7 +683,7 @@ struct GitStatusViewSectionTests {
         ]
 
         let sut = GitStatusView(state: state, encoder: nil)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 

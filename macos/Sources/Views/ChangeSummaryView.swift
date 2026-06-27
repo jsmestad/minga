@@ -10,7 +10,7 @@ import SwiftUI
 /// gui_action to the BEAM, which opens the file and activates diff view.
 struct ChangeSummaryView: View {
     let state: ChangeSummaryState
-    @Environment(ThemeColors.self) private var theme
+    @Environment(\.themeColors) private var theme
     let encoder: InputEncoder?
 
     var body: some View {

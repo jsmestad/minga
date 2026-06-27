@@ -8,7 +8,7 @@ import SwiftUI
 
 struct BottomPanelView: View {
     @Bindable var state: BottomPanelState
-    @Environment(ThemeColors.self) private var theme
+    @Environment(\.themeColors) private var theme
     let encoder: InputEncoder?
     /// Total height of the right pane (tab bar + editor + panel + status bar).
     /// Used to cap the panel at 60% of available space. Measured by the parent

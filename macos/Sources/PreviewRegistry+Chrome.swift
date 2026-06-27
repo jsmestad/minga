@@ -450,7 +450,7 @@ extension PreviewRegistry {
 
         return SettingsView(appState: appState)
             .frame(width: 600, height: 480)
-            .environment(appState.gui.themeColors)
+            .environment(\.themeColors, appState.gui.themeColors)
     }
 
     // MARK: - ToolManagerView

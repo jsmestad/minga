@@ -8,7 +8,7 @@ import SwiftUI
 
 struct WhichKeyOverlay: View {
     let state: WhichKeyState
-    @Environment(ThemeColors.self) private var theme
+    @Environment(\.themeColors) private var theme
 
     private let columnWidth: CGFloat = 220
     private let rowHeight: CGFloat = 22

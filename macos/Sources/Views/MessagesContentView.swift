@@ -13,7 +13,7 @@ import SwiftUI
 
 struct MessagesContentView: View {
     @Bindable var state: MessagesContentState
-    @Environment(ThemeColors.self) private var theme
+    @Environment(\.themeColors) private var theme
     let encoder: InputEncoder?
     /// Snapshot-only: render the list as a plain, non-lazy stack so every row
     /// lays out for capture. The live lazy ScrollView path renders blank in the
@@ -117,7 +117,7 @@ struct MessagesContentView: View {
 
 private struct MessagesFilterBar: View {
     @Bindable var state: MessagesContentState
-    @Environment(ThemeColors.self) private var theme
+    @Environment(\.themeColors) private var theme
 
     var body: some View {
         HStack(spacing: Spacing.sm) {
@@ -303,7 +303,7 @@ private struct MessagesFilterBar: View {
 
 private struct MessageEntryRow: View {
     let entry: MessageEntry
-    @Environment(ThemeColors.self) private var theme
+    @Environment(\.themeColors) private var theme
     let encoder: InputEncoder?
 
     var body: some View {

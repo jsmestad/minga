@@ -14,7 +14,7 @@ import SwiftUI
 /// Find/replace toolbar view.
 struct SearchToolbar: View {
     let searchState: SearchState
-    @Environment(ThemeColors.self) private var theme
+    @Environment(\.themeColors) private var theme
     let encoder: (any InputEncoder)?
 
     @State private var searchText: String = ""

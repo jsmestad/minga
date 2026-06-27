@@ -198,7 +198,7 @@ struct ContentView: View {
             frontendExtensionRuntimeLayer
             windowOverlays
         }
-        .environment(appState.gui.themeColors)
+        .environment(\.themeColors, appState.gui.themeColors)
         .navigationTitle(appState.windowTitle)
         .ignoresSafeArea(.container, edges: .top)
         .preferredColorScheme(appState.windowBgIsDark ? .dark : .light)

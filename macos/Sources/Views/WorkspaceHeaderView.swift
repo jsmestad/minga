@@ -3,7 +3,7 @@ import SwiftUI
 /// Workspace header row rendered above active-workspace file tabs.
 struct WorkspaceHeaderView: View {
     let workspaceState: WorkspaceState
-    @Environment(ThemeColors.self) private var theme
+    @Environment(\.themeColors) private var theme
     let encoder: InputEncoder?
 
     @State private var isRenaming = false

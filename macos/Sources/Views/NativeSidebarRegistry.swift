@@ -127,7 +127,7 @@ enum NativeSidebarRegistry {
 private struct ObservatorySidebarHeader: View {
     let item: SidebarItem
     let state: ObservatoryState
-    @Environment(ThemeColors.self) private var theme
+    @Environment(\.themeColors) private var theme
     let leadingPadding: CGFloat
 
     var body: some View {
@@ -154,7 +154,7 @@ private struct ObservatorySidebarHeader: View {
 
 private struct GenericSidebarFallbackHeader: View {
     let item: SidebarItem
-    @Environment(ThemeColors.self) private var theme
+    @Environment(\.themeColors) private var theme
     let leadingPadding: CGFloat
 
     var body: some View {
@@ -177,7 +177,7 @@ private struct GenericSidebarFallbackHeader: View {
 
 private struct GenericSidebarFallbackView: View {
     let item: SidebarItem
-    @Environment(ThemeColors.self) private var theme
+    @Environment(\.themeColors) private var theme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {

@@ -8,7 +8,7 @@ import SwiftUI
 
 struct FileTreeHeaderView: View {
     let fileTreeState: FileTreeState
-    @Environment(ThemeColors.self) private var theme
+    @Environment(\.themeColors) private var theme
     let encoder: InputEncoder?
     let branchName: String
     let leadingPadding: CGFloat

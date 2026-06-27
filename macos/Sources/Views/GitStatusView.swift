@@ -8,7 +8,7 @@ import SwiftUI
 
 struct GitStatusView: View {
     let state: GitStatusState
-    @Environment(ThemeColors.self) private var theme
+    @Environment(\.themeColors) private var theme
     let encoder: InputEncoder?
     let usesPreviewEagerLayout: Bool
 

@@ -23,7 +23,7 @@ final class BreadcrumbState {
 
 struct BreadcrumbBar: View {
     let state: BreadcrumbState
-    @Environment(ThemeColors.self) private var theme
+    @Environment(\.themeColors) private var theme
     let encoder: InputEncoder?
 
     private let barHeight: CGFloat = 26

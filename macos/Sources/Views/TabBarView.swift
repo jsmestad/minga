@@ -29,7 +29,7 @@ struct TabContextMenuMoveItem: Identifiable, Equatable {
 /// The tab bar strip rendered above the editor area.
 struct TabBarView: View {
     let tabBarState: TabBarState
-    @Environment(ThemeColors.self) private var theme
+    @Environment(\.themeColors) private var theme
     let encoder: InputEncoder?
 
     @State private var hoverTabId: UInt32?

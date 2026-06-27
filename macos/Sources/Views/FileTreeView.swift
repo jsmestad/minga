@@ -11,7 +11,7 @@ import SwiftUI
 /// The file tree sidebar rendered on the left side of the window.
 struct FileTreeView: View {
     let fileTreeState: FileTreeState
-    @Environment(ThemeColors.self) private var theme
+    @Environment(\.themeColors) private var theme
     let encoder: InputEncoder?
     let usesPreviewEagerLayout: Bool
 

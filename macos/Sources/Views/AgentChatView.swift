@@ -18,7 +18,7 @@ private struct ScrollViewHeightKey: PreferenceKey {
 
 struct AgentChatView: View {
     let state: AgentChatState
-    @Environment(ThemeColors.self) private var theme
+    @Environment(\.themeColors) private var theme
     let isInsertMode: Bool
     let encoder: InputEncoder?
     /// Cell dimensions from the Metal renderer, used to size the prompt gap.

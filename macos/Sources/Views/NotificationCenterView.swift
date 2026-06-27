@@ -5,7 +5,7 @@ import SwiftUI
 /// Renders editor notifications owned by the BEAM.
 struct NotificationCenterView: View {
     let state: NotificationCenterState
-    @Environment(ThemeColors.self) private var theme
+    @Environment(\.themeColors) private var theme
     let encoder: InputEncoder?
     let bottomInset: CGFloat
 
@@ -26,7 +26,7 @@ struct NotificationCenterView: View {
 
 private struct NotificationCard: View {
     let notification: EditorNotification
-    @Environment(ThemeColors.self) private var theme
+    @Environment(\.themeColors) private var theme
     let encoder: InputEncoder?
 
     var body: some View {

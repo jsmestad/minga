@@ -12,7 +12,7 @@ import SwiftUI
 
 struct MinibufferView: View {
     let state: MinibufferState
-    @Environment(ThemeColors.self) private var theme
+    @Environment(\.themeColors) private var theme
     let encoder: InputEncoder?
 
     @State private var hoveredIndex: Int? = nil

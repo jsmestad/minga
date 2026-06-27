@@ -35,7 +35,7 @@ enum SidebarSizing {
 struct SidebarContainer: View {
     let guiState: GUIState
     let activeSidebar: SidebarItem
-    @Environment(ThemeColors.self) private var theme
+    @Environment(\.themeColors) private var theme
     let encoder: InputEncoder?
     let projectName: String
     let gitBranch: String

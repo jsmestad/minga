@@ -28,7 +28,7 @@ struct CompletionOverlayViewTests {
             state: state,
             encoder: nil
         )
-        .environment(ThemeColors())
+        .environment(\.themeColors, ThemeColors())
 
         // When not visible, the body should produce no content
         let body = try sut.inspect()
@@ -54,7 +54,7 @@ struct CompletionOverlayViewTests {
             state: state,
             encoder: nil
         )
-        .environment(ThemeColors())
+        .environment(\.themeColors, ThemeColors())
 
         let body = try sut.inspect()
         // Should find both item labels in the tree
@@ -74,7 +74,7 @@ struct CompletionOverlayViewTests {
         )
 
         let sut = CompletionOverlay(state: state, encoder: nil)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let texts = try sut.inspect().findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
         #expect(strings.contains("Applies fun to each element."))
@@ -90,7 +90,7 @@ struct CompletionOverlayViewTests {
         )
 
         let sut = CompletionOverlay(state: state, encoder: nil)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         // The doc pane is the only place the Divider + scrollable Text appears; with
         // empty docs the documentationPane @ViewBuilder produces nothing (AC 3).
         #expect(throws: (any Error).self) {
@@ -110,7 +110,7 @@ struct WhichKeyOverlayViewTests {
         state.visible = false
 
         let sut = WhichKeyOverlay(state: state)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         #expect(throws: Never.self) {
             _ = try? body.find(text: "anything")
@@ -129,7 +129,7 @@ struct WhichKeyOverlayViewTests {
         )
 
         let sut = WhichKeyOverlay(state: state)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
@@ -152,7 +152,7 @@ struct WhichKeyOverlayViewTests {
         )
 
         let sut = WhichKeyOverlay(state: state)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
@@ -172,7 +172,7 @@ struct BreadcrumbBarViewTests {
         state.segments = []
 
         let sut = BreadcrumbBar(state: state, encoder: nil)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         // Empty segments should render nothing (the if guard)
         let texts = body.findAll(ViewInspectorQuery.text)
@@ -185,7 +185,7 @@ struct BreadcrumbBarViewTests {
         state.segments = ["lib", "minga", "editor.ex"]
 
         let sut = BreadcrumbBar(state: state, encoder: nil)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
@@ -248,7 +248,7 @@ struct StatusBarViewViewTests {
         ))
 
         let sut = StatusBarView(state: state, encoder: nil)
-        let body = try sut.environment(ThemeColors()).inspect()
+        let body = try sut.environment(\.themeColors, ThemeColors()).inspect()
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
 
@@ -261,7 +261,7 @@ struct StatusBarViewViewTests {
     @MainActor func fallbackNativeStatusBarRendersDefaultBuiltins() throws {
         let state = statusBarState()
         let sut = StatusBarView(state: state, encoder: nil)
-        let body = try sut.environment(ThemeColors()).inspect()
+        let body = try sut.environment(\.themeColors, ThemeColors()).inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
         #expect(strings.contains("NORMAL"))
@@ -280,7 +280,7 @@ struct StatusBarViewViewTests {
             safeMode: true
         )
         let sut = StatusBarView(state: state, encoder: nil)
-        let body = try sut.environment(ThemeColors()).inspect()
+        let body = try sut.environment(\.themeColors, ThemeColors()).inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
         #expect(strings.contains("[SAFE]"))
@@ -294,7 +294,7 @@ struct StatusBarViewViewTests {
         let state = statusBarState(leftSegments: [segment(1, " main.ex [1/2] recording @q ", kind: "filename")])
         state.filename = "main.ex"
         let sut = StatusBarView(state: state, encoder: nil)
-        let body = try sut.environment(ThemeColors()).inspect()
+        let body = try sut.environment(\.themeColors, ThemeColors()).inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
         #expect(strings.contains("main.ex [1/2] recording @q"))
@@ -305,7 +305,7 @@ struct StatusBarViewViewTests {
         let spy = SpyEncoder()
         let state = statusBarState()
         let sut = StatusBarView(state: state, encoder: spy)
-        let buttons = try sut.environment(ThemeColors()).inspect().findAll(ViewType.Button.self)
+        let buttons = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewType.Button.self)
 
         for button in buttons {
             try button.tap()
@@ -320,7 +320,7 @@ struct StatusBarViewViewTests {
         let spy = SpyEncoder()
         let state = statusBarState(rightSegments: [segment(1, " Elixir ", kind: "filetype", command: "filetype_menu")])
         let sut = StatusBarView(state: state, encoder: spy)
-        let buttons = try sut.environment(ThemeColors()).inspect().findAll(ViewType.Button.self)
+        let buttons = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewType.Button.self)
 
         for button in buttons {
             try button.tap()
@@ -335,7 +335,7 @@ struct StatusBarViewViewTests {
         let spy = SpyEncoder()
         let state = statusBarState(leftSegments: [segment(1, " main.ex ", kind: "filename")])
         let sut = StatusBarView(state: state, encoder: spy)
-        let buttons = try sut.environment(ThemeColors()).inspect().findAll(ViewType.Button.self)
+        let buttons = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewType.Button.self)
 
         for button in buttons {
             try button.tap()
@@ -349,7 +349,7 @@ struct StatusBarViewViewTests {
         let spy = SpyEncoder()
         let state = statusBarState(leftSegments: [segment(1, " main.ex ", kind: "filename", command: "custom_buffer_picker")])
         let sut = StatusBarView(state: state, encoder: spy)
-        let buttons = try sut.environment(ThemeColors()).inspect().findAll(ViewType.Button.self)
+        let buttons = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewType.Button.self)
 
         for button in buttons {
             try button.tap()
@@ -364,7 +364,7 @@ struct StatusBarViewViewTests {
         let spy = SpyEncoder()
         let state = statusBarState(leftSegments: [segment(1, " 42W ", kind: "word_count", command: "word_count")])
         let sut = StatusBarView(state: state, encoder: spy)
-        let body = try sut.environment(ThemeColors()).inspect()
+        let body = try sut.environment(\.themeColors, ThemeColors()).inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
         let buttons = body.findAll(ViewType.Button.self)
 
@@ -400,7 +400,7 @@ struct StatusBarViewViewTests {
         #expect(layout.rightRect.minX >= layout.centerRect.maxX)
         #expect(layout.leftRect.width + layout.centerRect.width + layout.rightRect.width <= 360.5)
 
-        let body = try sut.environment(ThemeColors()).inspect()
+        let body = try sut.environment(\.themeColors, ThemeColors()).inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
         #expect(strings.contains("CLICKABLE-RIGHT-SEGMENT-WITH-LONG-TEXT"))
     }
@@ -493,7 +493,7 @@ struct StatusBarViewViewTests {
         let spy = SpyEncoder()
         let state = statusBarState(leftSegments: [segment(1, " Buffers ", command: "buffer_list")])
         let sut = StatusBarView(state: state, encoder: spy)
-        let buttons = try sut.environment(ThemeColors()).inspect().findAll(ViewType.Button.self)
+        let buttons = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewType.Button.self)
 
         for button in buttons {
             try button.tap()
@@ -508,7 +508,7 @@ struct StatusBarViewViewTests {
         let spy = SpyEncoder()
         let state = statusBarState(leftSegments: [segment(1, " Passive ")])
         let sut = StatusBarView(state: state, encoder: spy)
-        let buttons = try sut.environment(ThemeColors()).inspect().findAll(ViewType.Button.self)
+        let buttons = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewType.Button.self)
 
         for button in buttons {
             try button.tap()
@@ -562,7 +562,7 @@ struct StatusBarViewViewTests {
         ))
 
         let sut = StatusBarView(state: state, encoder: nil)
-        let body = try sut.environment(ThemeColors()).inspect()
+        let body = try sut.environment(\.themeColors, ThemeColors()).inspect()
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
 
@@ -576,7 +576,7 @@ struct StatusBarViewViewTests {
     @MainActor func agentStatusLabels() throws {
         let running = statusBarState(agentStatus: 2, activeToolName: "read_file")
         let runningTexts = try StatusBarView(state: running, encoder: nil)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
             .inspect()
             .findAll(ViewInspectorQuery.text)
             .compactMap { try? $0.string() }
@@ -585,7 +585,7 @@ struct StatusBarViewViewTests {
 
         let fallback = statusBarState(agentStatus: 2)
         let fallbackTexts = try StatusBarView(state: fallback, encoder: nil)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
             .inspect()
             .findAll(ViewInspectorQuery.text)
             .compactMap { try? $0.string() }
@@ -594,7 +594,7 @@ struct StatusBarViewViewTests {
         #expect(!fallbackTexts.contains("Running read_file"))
 
         let plan = statusBarState(agentStatus: 4)
-        let planBody = try StatusBarView(state: plan, encoder: nil).environment(ThemeColors()).inspect()
+        let planBody = try StatusBarView(state: plan, encoder: nil).environment(\.themeColors, ThemeColors()).inspect()
         let planTexts = planBody.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
         let planAccessibilityLabels = try planBody.findAll(ViewType.HStack.self).compactMap {
             try? $0.accessibilityLabel().string()
@@ -621,7 +621,7 @@ struct StatusBarViewViewTests {
         ))
 
         let sut = StatusBarView(state: state, encoder: spy)
-        let buttons = try sut.environment(ThemeColors()).inspect().findAll(ViewType.Button.self)
+        let buttons = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewType.Button.self)
 
         for button in buttons {
             try button.tap()
@@ -646,7 +646,7 @@ struct StatusBarViewViewTests {
         ))
 
         let sut = StatusBarView(state: state, encoder: nil)
-        let body = try sut.environment(ThemeColors()).inspect()
+        let body = try sut.environment(\.themeColors, ThemeColors()).inspect()
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
 
@@ -669,7 +669,7 @@ struct StatusBarViewViewTests {
         ))
 
         let sut = StatusBarView(state: state, encoder: nil)
-        let body = try sut.environment(ThemeColors()).inspect()
+        let body = try sut.environment(\.themeColors, ThemeColors()).inspect()
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
 
@@ -693,7 +693,7 @@ struct StatusBarViewViewTests {
         ))
 
         let sut = StatusBarView(state: state, encoder: nil)
-        let body = try sut.environment(ThemeColors()).inspect()
+        let body = try sut.environment(\.themeColors, ThemeColors()).inspect()
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
 
@@ -716,7 +716,7 @@ struct StatusBarViewViewTests {
         ))
 
         let sut = StatusBarView(state: state, encoder: nil)
-        let body = try sut.environment(ThemeColors()).inspect()
+        let body = try sut.environment(\.themeColors, ThemeColors()).inspect()
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
 
@@ -749,7 +749,7 @@ struct TabBarViewViewTests {
         ])
 
         let sut = TabBarView(tabBarState: state, encoder: nil)
-        let body = try sut.environment(ThemeColors()).inspect()
+        let body = try sut.environment(\.themeColors, ThemeColors()).inspect()
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
 
@@ -904,7 +904,7 @@ struct TabBarViewViewTests {
         ])
 
         let sut = TabBarView(tabBarState: state, encoder: nil)
-        let strings = try sut.environment(ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+        let strings = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
         #expect(strings.contains("active.ex"))
         #expect(!strings.contains("legacy-agent-chat"))
@@ -931,13 +931,13 @@ struct TabBarViewViewTests {
         ])
 
         let fileImages = try TabBarView(tabBarState: fileState, encoder: nil)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
             .inspect()
             .find(ViewType.ScrollView.self)
             .findAll(ViewType.Image.self)
             .count
         let agentImages = try TabBarView(tabBarState: agentState, encoder: nil)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
             .inspect()
             .find(ViewType.ScrollView.self)
             .findAll(ViewType.Image.self)
@@ -970,7 +970,7 @@ struct WorkspaceHeaderViewTests {
     @Test("Header shows active workspace metadata and badges")
     @MainActor func showsActiveWorkspaceMetadataAndBadges() throws {
         let sut = WorkspaceHeaderView(workspaceState: populatedState(), encoder: nil)
-        let strings = try sut.environment(ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+        let strings = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
         #expect(strings.contains("Review"))
         #expect(strings.contains("Using tools"))
@@ -991,7 +991,7 @@ struct WorkspaceHeaderViewTests {
         ], visibleTabs: [])
 
         let sut = WorkspaceHeaderView(workspaceState: state, encoder: nil)
-        let strings = try sut.environment(ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+        let strings = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
         #expect(strings.contains("minga"))
         #expect(strings.contains("bg ⚡1"))
@@ -1015,7 +1015,7 @@ struct WorkspaceHeaderViewTests {
     @MainActor func switcherClickAdvancesWorkspace() throws {
         let spy = SpyEncoder()
         let sut = WorkspaceHeaderView(workspaceState: populatedState(), encoder: spy)
-        let buttons = try sut.environment(ThemeColors()).inspect().findAll(ViewType.Button.self)
+        let buttons = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewType.Button.self)
         let button = try #require(buttons.first(where: {
             (try? $0.accessibilityLabel().string()) == "Switch to next workspace"
         }))
@@ -1048,7 +1048,7 @@ struct AgentChatViewTests {
         state.status = 0
 
         let sut = AgentChatView(state: state, isInsertMode: false, encoder: nil)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
@@ -1071,7 +1071,7 @@ struct AgentChatViewTests {
         state.status = 0
 
         let sut = AgentChatView(state: state, isInsertMode: false, encoder: nil)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
@@ -1091,7 +1091,7 @@ struct AgentChatViewTests {
         state.status = 0
 
         let sut = AgentChatView(state: state, isInsertMode: false, encoder: spy)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
 
         let headerButtons = try body.findAll(ViewType.Button.self)
@@ -1118,7 +1118,7 @@ struct AgentChatViewTests {
         ])
 
         let sut = AgentChatView(state: state, isInsertMode: false, encoder: spy)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let buttons = try body.findAll(ViewType.Button.self)
 
@@ -1146,7 +1146,7 @@ struct AgentChatViewTests {
         ])
 
         let sut = AgentChatView(state: state, isInsertMode: false, encoder: nil)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
@@ -1165,7 +1165,7 @@ struct AgentChatViewTests {
         ])
 
         let sut = AgentChatView(state: state, isInsertMode: false, encoder: nil)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
@@ -1198,7 +1198,7 @@ struct AgentChatViewTests {
 
         let state = chatState(messages: [.assistantMarkdown(id: 1, blocks: [block])])
         let sut = AgentChatView(state: state, isInsertMode: false, encoder: nil)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
@@ -1217,7 +1217,7 @@ struct AgentChatViewTests {
         state.messages = [.user(id: 0, text: "Hello world")]
 
         let sut = AgentChatView(state: state, isInsertMode: false, encoder: nil)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
@@ -1233,7 +1233,7 @@ struct AgentChatViewTests {
         state.messages = [.system(id: 0, text: "Session started", isError: false)]
 
         let sut = AgentChatView(state: state, isInsertMode: false, encoder: nil)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
@@ -1249,7 +1249,7 @@ struct AgentChatViewTests {
         state.promptVimMode = 1 // insert mode
 
         let sut = AgentChatView(state: state, isInsertMode: true, encoder: nil)
-            .environment(ThemeColors())
+            .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
@@ -1280,7 +1280,7 @@ struct BottomPanelViewTests {
             state: state,
             encoder: nil, availableHeight: 600
         )
-        .environment(ThemeColors())
+        .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
@@ -1302,7 +1302,7 @@ struct BottomPanelViewTests {
             state: state,
             encoder: nil, availableHeight: 600
         )
-        .environment(ThemeColors())
+        .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }

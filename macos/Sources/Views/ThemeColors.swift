@@ -282,6 +282,17 @@ final class ThemeColors {
 
 }
 
+private struct ThemeColorsEnvironmentKey: @preconcurrency EnvironmentKey {
+    @MainActor static let defaultValue = ThemeColors()
+}
+
+extension EnvironmentValues {
+    var themeColors: ThemeColors {
+        get { self[ThemeColorsEnvironmentKey.self] }
+        set { self[ThemeColorsEnvironmentKey.self] = newValue }
+    }
+}
+
 /// Shared spacing scale for SwiftUI chrome.
 ///
 /// A 4pt modular grid. Reach for the nearest step instead of ad-hoc magic
