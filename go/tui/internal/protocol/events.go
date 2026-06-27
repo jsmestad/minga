@@ -265,6 +265,25 @@ func appendString16(out []byte, value string) []byte {
 	return append(out, payload...)
 }
 
+func EncodeScrollBatch(windowID uint16, deltaLines int16, direction byte) []byte {
+	return []byte{
+		generated.OPScrollBatch,
+		byte(windowID >> 8), byte(windowID),
+		byte(uint16(deltaLines) >> 8), byte(deltaLines),
+		direction,
+	}
+}
+
+func EncodeScrollPrefetchHint(windowID uint16, currentVisualLine uint32, direction byte, contentEpoch uint32) []byte {
+	return []byte{
+		generated.OPScrollPrefetchHint,
+		byte(windowID >> 8), byte(windowID),
+		byte(currentVisualLine >> 24), byte(currentVisualLine >> 16), byte(currentVisualLine >> 8), byte(currentVisualLine),
+		direction,
+		byte(contentEpoch >> 24), byte(contentEpoch >> 16), byte(contentEpoch >> 8), byte(contentEpoch),
+	}
+}
+
 func EncodePaste(text string) []byte {
 	payload := []byte(text)
 	if len(payload) > 65535 {

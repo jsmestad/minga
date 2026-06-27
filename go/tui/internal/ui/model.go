@@ -108,6 +108,8 @@ type Model struct {
 	// keep a reduced hand-ordered chain (transitional split, see overlayLines).
 	surfacePlacements  []generated.SurfacePlacement
 	presentationScroll map[uint16]presentationScroll
+	inputFilter        *InputFilter
+	scrollPrefetchSent map[uint16]uint32
 }
 
 type presentationScroll struct {
@@ -134,7 +136,7 @@ type frameStaging struct {
 	commands []protocol.Command
 }
 
-func New(width, height uint16, out chan<- []byte) Model {
+func New(width, height uint16, out chan<- []byte, filter *InputFilter) Model {
 	vp := viewport.New(viewport.WithWidth(int(width)), viewport.WithHeight(max(int(height)-3, 1)))
 	m := Model{
 		width:             int(width),
@@ -149,11 +151,11 @@ func New(width, height uint16, out chan<- []byte) Model {
 		indentGuides:      map[uint16]protocol.IndentGuides{},
 		extensionRuntimes: map[string]protocol.ExtensionRuntimePayload{},
 		latency:           latency.New(),
-		// MINGA_LATENCY_HUD=1 shows the latency overlay at boot; it is also
-		// toggled at runtime with ctrl+alt+l (ticket #2215).
-		hudVisible:         latencyHUDEnvEnabled(),
-		lineCache:          newLineCache(),
+		hudVisible:        latencyHUDEnvEnabled(),
+		lineCache:         newLineCache(),
 		presentationScroll: map[uint16]presentationScroll{},
+		inputFilter:        filter,
+		scrollPrefetchSent: map[uint16]uint32{},
 	}
 	// Seed the layout so the first mouse event lands in the correct
 	// region before the first BEAM frame arrives.
@@ -223,17 +225,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		if updated, ok := m.localMouse(msg); ok {
 			m = updated
-		} else {
+		} else if isWheelButton(msg.Mouse().Button) {
 			m = m.applyPresentationScroll(msg)
+			if !m.sendScrollBatch(msg) {
+				if packet, ok := m.mousePacket(msg); ok {
+					m.send(packet)
+				}
+			}
+		} else {
 			updated, dragPacket, handled := m.handleChromeDrag(msg)
 			m = updated
 			switch {
 			case dragPacket != nil:
 				m.send(dragPacket)
 			case handled:
-				// A chrome drag consumed the event (origin press recorded or an
-				// in-progress drag motion). Do not also forward it as a raw
-				// buffer event or a single-click select.
 			default:
 				if packet, ok := m.semanticMousePacket(msg); ok {
 					m.send(packet)
@@ -694,6 +699,7 @@ func (m *Model) applyWindowDelta(delta protocol.WindowContent) {
 func (m *Model) reconcilePresentationScroll(window protocol.WindowContent) {
 	if !window.ScrollSet || window.Scroll.ResetRequired {
 		delete(m.presentationScroll, window.ID)
+		delete(m.scrollPrefetchSent, window.ID)
 		return
 	}
 	scroll, ok := m.presentationScroll[window.ID]
@@ -743,6 +749,7 @@ func resolveWindowRows(previous []protocol.WindowRow, delta []protocol.WindowRow
 func (m *Model) removeWindow(id uint16) {
 	delete(m.windows, id)
 	delete(m.presentationScroll, id)
+	delete(m.scrollPrefetchSent, id)
 	m.lineCache.dropWindow(id)
 	for index, windowID := range m.windowOrder {
 		if windowID == id {
@@ -758,6 +765,81 @@ func (m Model) bodyHeight() int {
 
 func (m Model) maxOverlayHeight() int {
 	return min(max(m.height/3, 4), 12)
+}
+
+func (m *Model) sendScrollBatch(msg tea.MouseMsg) bool {
+	mouse := msg.Mouse()
+	windowID, ok := m.presentationScrollWindowAt(mouse.X, mouse.Y)
+	if !ok {
+		return false
+	}
+	window, ok := m.windows[windowID]
+	if !ok {
+		return false
+	}
+
+	var deltaLines int16
+	var direction byte
+	if m.inputFilter != nil {
+		delta, _ := m.inputFilter.DrainCoalesced()
+		if delta == 0 {
+			return true
+		}
+		if delta > 0 {
+			deltaLines = int16(min(delta, 0x7FFF))
+			direction = 0
+		} else {
+			deltaLines = int16(max(delta, -0x7FFF))
+			direction = 1
+		}
+	} else {
+		switch mouse.Button {
+		case tea.MouseWheelDown:
+			deltaLines, direction = 1, 0
+		case tea.MouseWheelUp:
+			deltaLines, direction = -1, 1
+		default:
+			return false
+		}
+	}
+
+	m.send(protocol.EncodeScrollBatch(windowID, deltaLines, direction))
+
+	if !window.ScrollSet || window.Scroll.ResetRequired {
+		return true
+	}
+	if sent, ok := m.scrollPrefetchSent[windowID]; ok {
+		if window.Scroll.ContentEpoch > sent {
+			delete(m.scrollPrefetchSent, windowID)
+		}
+	}
+	before, after := presentationPayloadOverscanBounds(window, presentationVisibleRows(window))
+	totalOverscan := before + after
+	if totalOverscan <= 0 {
+		return true
+	}
+	scrollingDown := deltaLines > 0
+	var runway int
+	if scrollingDown {
+		runway = after
+	} else {
+		runway = before
+	}
+	threshold := float64(totalOverscan) * 0.4
+	if _, already := m.scrollPrefetchSent[windowID]; already {
+		return true
+	}
+	if float64(runway) < threshold {
+		var dir byte
+		if scrollingDown {
+			dir = 0
+		} else {
+			dir = 1
+		}
+		m.send(protocol.EncodeScrollPrefetchHint(windowID, window.Scroll.VisibleStartLine, dir, window.Scroll.ContentEpoch))
+		m.scrollPrefetchSent[windowID] = window.Scroll.ContentEpoch
+	}
+	return true
 }
 
 func (m Model) send(payload []byte) {

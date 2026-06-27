@@ -14,7 +14,7 @@ import (
 // cacheable.
 func largeFrameModel(b *testing.B, width, height, rowCount int) Model {
 	b.Helper()
-	m := New(uint16(width), uint16(height), nil)
+	m := New(uint16(width), uint16(height), nil, nil)
 	rows := make([]protocol.WindowRow, rowCount)
 	for i := range rows {
 		rows[i] = protocol.WindowRow{
