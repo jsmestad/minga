@@ -154,7 +154,7 @@ defmodule Minga.Application do
       StartupTimer.report()
     end
 
-    if Burrito.Util.running_standalone?() do
+    if Burrito.Util.running_standalone?() and match?({:ok, _}, result) do
       if minimal? do
         Task.start_link(fn -> Minga.CLI.start_from_cli() end)
       else

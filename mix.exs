@@ -12,6 +12,16 @@ Code.require_file("mix/tasks/native_build_support.ex", __DIR__)
 Code.require_file("mix/tasks/native_build_tui.ex", __DIR__)
 Code.require_file("mix/tasks/native_build_go_tui.ex", __DIR__)
 
+# Burrito hard-codes musl libc for Linux binaries. Tell cc_precompiler to
+# fetch the precompiled musl NIF for exqlite instead of source-compiling
+# against the host glibc (whose versioned symbols musl cannot resolve).
+if Mix.env() == :prod and :os.type() == {:unix, :linux} do
+  arch = :erlang.system_info(:system_architecture) |> to_string() |> String.split("-") |> hd()
+  System.put_env("TARGET_ARCH", arch)
+  System.put_env("TARGET_OS", "linux")
+  System.put_env("TARGET_ABI", "musl")
+end
+
 defmodule Minga.MixProject do
   use Mix.Project
 
