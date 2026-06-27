@@ -304,6 +304,46 @@ defmodule Minga.Conformance.MotionsTest do
         failures: [:cursor],
         actual: %{line: 0, col: 3}
       }
+    },
+    %{
+      name: "j preserves desired column across short line (round-trip)",
+      type: :motion,
+      content: "abcd\nx\nabcd",
+      cursor: %{line: 0, col: 3},
+      keys: "jj",
+      compare: :cursor
+    },
+    %{
+      name: "k preserves desired column across short line (round-trip)",
+      type: :motion,
+      content: "abcd\nx\nabcd",
+      cursor: %{line: 2, col: 3},
+      keys: "kk",
+      compare: :cursor
+    },
+    %{
+      name: "j from col 0 stays at col 0 through varying-length lines",
+      type: :motion,
+      content: "short\na much longer line here\nx\nend",
+      cursor: %{line: 0, col: 0},
+      keys: "jjj",
+      compare: :cursor
+    },
+    %{
+      name: "l then j preserves the new column",
+      type: :motion,
+      content: "abcd\nabcd\nabcd",
+      cursor: %{line: 0, col: 0},
+      keys: "lljj",
+      compare: :cursor
+    },
+    %{
+      name: "j then h resets desired column",
+      type: :motion,
+      content: "abcdef\nxy\nabcdef",
+      cursor: %{line: 0, col: 4},
+      keys: "jhj",
+      compare: :cursor
     }
   ]
 

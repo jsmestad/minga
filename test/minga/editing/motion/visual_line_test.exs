@@ -122,4 +122,30 @@ defmodule Minga.Editing.Motion.VisualLineTest do
       assert {0, _col} = up
     end
   end
+
+  describe "desired_col opt" do
+    test "visual_down with desired_col: 0 stays at column 0 across logical lines" do
+      doc = Document.new("first line\nsecond line\nthird line")
+      pos = VisualLine.visual_down(doc, {0, 0}, 40, desired_col: 0)
+      assert pos == {1, 0}
+      pos2 = VisualLine.visual_down(doc, pos, 40, desired_col: 0)
+      assert pos2 == {2, 0}
+    end
+
+    test "visual_down with desired_col preserves column across lines of different lengths" do
+      doc = Document.new("abcdef\nxy\nabcdef")
+      pos = VisualLine.visual_down(doc, {0, 5}, 40, desired_col: 5)
+      assert {1, _} = pos
+      pos2 = VisualLine.visual_down(doc, pos, 40, desired_col: 5)
+      assert pos2 == {2, 5}
+    end
+
+    test "visual_up with desired_col preserves column across short line" do
+      doc = Document.new("abcdef\nxy\nabcdef")
+      pos = VisualLine.visual_up(doc, {2, 5}, 40, desired_col: 5)
+      assert {1, _} = pos
+      pos2 = VisualLine.visual_up(doc, pos, 40, desired_col: 5)
+      assert pos2 == {0, 5}
+    end
+  end
 end

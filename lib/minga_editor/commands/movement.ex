@@ -10,6 +10,7 @@ defmodule MingaEditor.Commands.Movement do
   alias Minga.Buffer.Document
   alias Minga.Core.Unicode
   alias Minga.Core.WrapMap
+  alias Minga.Editing.Motion.VisualLine
   alias Minga.Parser.Manager, as: ParserManager
   alias Minga.Parser.StructuralNavResult
 
@@ -95,7 +96,7 @@ defmodule MingaEditor.Commands.Movement do
       Buffer.move_if_possible(buf, :left)
     end
 
-    state
+    reset_desired_col(state)
   end
 
   def execute(
@@ -108,37 +109,45 @@ defmodule MingaEditor.Commands.Movement do
       Buffer.move_if_possible(buf, :right)
     end
 
-    state
+    reset_desired_col(state)
   end
 
-  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :move_up) do
-    if effective_wrap_enabled?(state, buf) do
-      visual_line_move(buf, state, :up)
-    else
-      Buffer.move(buf, :up)
-      skip_folded_line(state, buf, :up)
-    end
+  def execute(%{workspace: %{buffers: %{active: buf}, editing: editing}} = state, :move_up) do
+    desired = editing.desired_col || compute_desired_col(state, buf)
+
+    state =
+      if effective_wrap_enabled?(state, buf) do
+        visual_line_move(buf, state, :up, desired)
+      else
+        non_wrapped_vertical_move(buf, state, :up, desired)
+      end
+
+    EditorState.set_desired_col(state, desired)
   end
 
-  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :move_down) do
-    if effective_wrap_enabled?(state, buf) do
-      visual_line_move(buf, state, :down)
-    else
-      Buffer.move(buf, :down)
-      skip_folded_line(state, buf, :down)
-    end
+  def execute(%{workspace: %{buffers: %{active: buf}, editing: editing}} = state, :move_down) do
+    desired = editing.desired_col || compute_desired_col(state, buf)
+
+    state =
+      if effective_wrap_enabled?(state, buf) do
+        visual_line_move(buf, state, :down, desired)
+      else
+        non_wrapped_vertical_move(buf, state, :down, desired)
+      end
+
+    EditorState.set_desired_col(state, desired)
   end
 
-  # Logical line movement (gj/gk). Always moves by logical lines regardless
-  # of wrap setting.
-  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :move_logical_down) do
-    Buffer.move(buf, :down)
-    state
+  def execute(%{workspace: %{buffers: %{active: buf}, editing: editing}} = state, :move_logical_down) do
+    desired = editing.desired_col || compute_desired_col(state, buf)
+    state = non_wrapped_vertical_move(buf, state, :down, desired)
+    EditorState.set_desired_col(state, desired)
   end
 
-  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :move_logical_up) do
-    Buffer.move(buf, :up)
-    state
+  def execute(%{workspace: %{buffers: %{active: buf}, editing: editing}} = state, :move_logical_up) do
+    desired = editing.desired_col || compute_desired_col(state, buf)
+    state = non_wrapped_vertical_move(buf, state, :up, desired)
+    EditorState.set_desired_col(state, desired)
   end
 
   # ── Line start / end ──────────────────────────────────────────────────────
@@ -150,6 +159,7 @@ defmodule MingaEditor.Commands.Movement do
       logical_line_start(buf)
       state
     end
+    |> reset_desired_col()
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :move_to_line_end) do
@@ -159,74 +169,75 @@ defmodule MingaEditor.Commands.Movement do
       logical_line_end(buf)
       state
     end
+    |> reset_desired_col()
   end
 
   # g0/g$ — logical line start/end (always logical, even with wrap on)
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :move_to_logical_line_start) do
     logical_line_start(buf)
-    state
+    reset_desired_col(state)
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :move_to_logical_line_end) do
     logical_line_end(buf)
-    state
+    reset_desired_col(state)
   end
 
   # ── Word motions (small) ───────────────────────────────────────────────────
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :word_forward) do
     Helpers.apply_motion(buf, &Minga.Editing.word_forward/2)
-    state
+    reset_desired_col(state)
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :word_backward) do
     Helpers.apply_motion(buf, &Minga.Editing.word_backward/2)
-    state
+    reset_desired_col(state)
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :word_end) do
     Helpers.apply_motion(buf, &Minga.Editing.word_end/2)
-    state
+    reset_desired_col(state)
   end
 
   # ── Word motions (WORD / big) ─────────────────────────────────────────────
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :word_forward_big) do
     Helpers.apply_motion(buf, &Minga.Editing.word_forward_big/2)
-    state
+    reset_desired_col(state)
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :word_backward_big) do
     Helpers.apply_motion(buf, &Minga.Editing.word_backward_big/2)
-    state
+    reset_desired_col(state)
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :word_end_big) do
     Helpers.apply_motion(buf, &Minga.Editing.word_end_big/2)
-    state
+    reset_desired_col(state)
   end
 
   # ── Line / document navigation ─────────────────────────────────────────────
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :move_to_first_non_blank) do
     Helpers.apply_motion(buf, &Minga.Editing.first_non_blank/2)
-    state
+    reset_desired_col(state)
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :move_to_document_start) do
     Buffer.apply_motion(buf, fn doc, _cursor -> Minga.Editing.document_start(doc) end)
-    state
+    reset_desired_col(state)
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :move_to_document_end) do
     Buffer.apply_motion(buf, fn doc, _cursor -> Minga.Editing.document_end(doc) end)
-    maybe_repin_agent_chat(state)
+    maybe_repin_agent_chat(state) |> reset_desired_col()
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:goto_line, line_num}) do
     target_line = max(0, line_num - 1)
     Buffer.move_to(buf, {target_line, 0})
-    state
+    reset_desired_col(state)
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :next_line_first_non_blank) do
@@ -236,7 +247,7 @@ defmodule MingaEditor.Commands.Movement do
       Minga.Editing.first_non_blank(doc, {next_line, 0})
     end)
 
-    state
+    reset_desired_col(state)
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :prev_line_first_non_blank) do
@@ -245,7 +256,7 @@ defmodule MingaEditor.Commands.Movement do
       Minga.Editing.first_non_blank(doc, {prev_line, 0})
     end)
 
-    state
+    reset_desired_col(state)
   end
 
   # ── Find-char motions ─────────────────────────────────────────────────────
@@ -253,7 +264,7 @@ defmodule MingaEditor.Commands.Movement do
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:find_char, dir, char}) do
     Helpers.apply_find_char(buf, dir, char)
 
-    EditorState.set_last_find_char(state, {dir, char})
+    EditorState.set_last_find_char(state, {dir, char}) |> reset_desired_col()
   end
 
   def execute(
@@ -261,7 +272,7 @@ defmodule MingaEditor.Commands.Movement do
         :repeat_find_char
       ) do
     Helpers.apply_find_char(buf, dir, char)
-    state
+    reset_desired_col(state)
   end
 
   def execute(state, :repeat_find_char), do: state
@@ -272,7 +283,7 @@ defmodule MingaEditor.Commands.Movement do
       ) do
     reverse_dir = Helpers.reverse_find_direction(dir)
     Helpers.apply_find_char(buf, reverse_dir, char)
-    state
+    reset_desired_col(state)
   end
 
   def execute(state, :repeat_find_char_reverse), do: state
@@ -289,26 +300,26 @@ defmodule MingaEditor.Commands.Movement do
       target -> Buffer.move_to(buf, target)
     end
 
-    state
+    reset_desired_col(state)
   end
 
   # ── Structural AST navigation ─────────────────────────────────────────────
 
-  def execute(state, :nav_parent), do: structural_nav(state, :parent)
-  def execute(state, :nav_first_child), do: structural_nav(state, :first_child)
-  def execute(state, :nav_next_sibling), do: structural_nav(state, :next_sibling)
-  def execute(state, :nav_prev_sibling), do: structural_nav(state, :prev_sibling)
+  def execute(state, :nav_parent), do: structural_nav(state, :parent) |> reset_desired_col()
+  def execute(state, :nav_first_child), do: structural_nav(state, :first_child) |> reset_desired_col()
+  def execute(state, :nav_next_sibling), do: structural_nav(state, :next_sibling) |> reset_desired_col()
+  def execute(state, :nav_prev_sibling), do: structural_nav(state, :prev_sibling) |> reset_desired_col()
 
   # ── Paragraph motions ─────────────────────────────────────────────────────
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :paragraph_forward) do
     Helpers.apply_motion(buf, &Minga.Editing.paragraph_forward/2)
-    state
+    reset_desired_col(state)
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :paragraph_backward) do
     Helpers.apply_motion(buf, &Minga.Editing.paragraph_backward/2)
-    state
+    reset_desired_col(state)
   end
 
   # ── Screen-relative motions ───────────────────────────────────────────────
@@ -329,7 +340,7 @@ defmodule MingaEditor.Commands.Movement do
       end
 
     Buffer.move_to(buf, {target_line, 0})
-    state
+    reset_desired_col(state)
   end
 
   # ── Page scrolling ────────────────────────────────────────────────────────
@@ -715,10 +726,10 @@ defmodule MingaEditor.Commands.Movement do
     EditorState.update_file_tree(state, fun)
   end
 
-  @spec visual_line_move(GenServer.server(), state(), :up | :down) :: state()
-  defp visual_line_move(buf, state, direction) do
+  @spec visual_line_move(GenServer.server(), state(), :up | :down, non_neg_integer()) :: state()
+  defp visual_line_move(buf, state, direction, desired_col) do
     content_w = content_width(state)
-    opts = wrap_opts(buf, width_oracle(state))
+    opts = wrap_opts(buf, width_oracle(state)) ++ [desired_col: desired_col]
 
     Buffer.apply_motion(buf, fn doc, pos ->
       case direction do
@@ -728,6 +739,43 @@ defmodule MingaEditor.Commands.Movement do
     end)
 
     state
+  end
+
+  @spec reset_desired_col(state()) :: state()
+  defp reset_desired_col(state), do: EditorState.set_desired_col(state, nil)
+
+  @spec compute_desired_col(state(), GenServer.server()) :: non_neg_integer()
+  defp compute_desired_col(state, buf) do
+    {_line, col, line_text} = Buffer.cursor_context(buf)
+
+    if effective_wrap_enabled?(state, buf) do
+      content_w = content_width(state)
+      opts = wrap_opts(buf, width_oracle(state))
+      wrap_entry = WrapMap.compute([line_text], content_w, opts) |> hd()
+      display_col = Unicode.display_col(line_text, col)
+      {_vrow_idx, vrow_col} = VisualLine.display_col_to_visual(wrap_entry, display_col)
+      vrow_col
+    else
+      Unicode.display_col(line_text, col)
+    end
+  end
+
+  @spec non_wrapped_vertical_move(GenServer.server(), state(), :up | :down, non_neg_integer()) ::
+          state()
+  defp non_wrapped_vertical_move(buf, state, direction, desired_col) do
+    Buffer.apply_motion(buf, fn doc, {line, _col} ->
+      target_line =
+        case direction do
+          :down -> min(line + 1, Document.line_count(doc) - 1)
+          :up -> max(line - 1, 0)
+        end
+
+      target_text = Document.line_at(doc, target_line)
+      byte_col = Unicode.display_col_to_byte(target_text, desired_col)
+      {target_line, byte_col}
+    end)
+
+    skip_folded_line(state, buf, direction)
   end
 
   @spec visual_line_edge(GenServer.server(), state(), :start | :end) :: state()
