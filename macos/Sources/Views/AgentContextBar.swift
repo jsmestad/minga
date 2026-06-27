@@ -97,7 +97,7 @@ struct AgentContextBar: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
         .background(statusColor.opacity(0.15))
-        .cornerRadius(4)
+        .clipShape(.rect(cornerRadius: 4))
     }
 
     private var statusColor: Color {
@@ -156,7 +156,7 @@ struct AgentContextBar: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(color.opacity(0.15))
-            .cornerRadius(4)
+            .clipShape(.rect(cornerRadius: 4))
         }
         .buttonStyle(.plain)
         .help(label)

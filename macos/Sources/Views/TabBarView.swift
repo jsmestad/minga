@@ -429,16 +429,14 @@ struct TabBarView: View {
                     .onTapGesture(count: 2) {
                         renameText = workspace.label
                         isRenaming = true
-                        DispatchQueue.main.async { renameFieldFocused = true }
+                        Task { @MainActor in renameFieldFocused = true }
                     }
                     .onTapGesture(count: 1) {
                         encoder?.sendExecuteCommand(name: "workspace_list")
                     }
             }
 
-            if true {
-                agentStatusDot(workspace.agentStatus, color: workspace.color)
-            }
+            agentStatusDot(workspace.agentStatus, color: workspace.color)
 
             Image(systemName: "chevron.down")
                 .font(.system(size: 7, weight: .bold))
@@ -453,16 +451,14 @@ struct TabBarView: View {
             Button("Rename Workspace...") {
                 renameText = workspace.label
                 isRenaming = true
-                DispatchQueue.main.async { renameFieldFocused = true }
+                Task { @MainActor in renameFieldFocused = true }
             }
             Button("Change Icon...") {
                 showIconPicker = true
             }
             Divider()
-            if !false {
-                Button("Close Workspace") {
-                    encoder?.sendWorkspaceClose(id: workspace.id)
-                }
+            Button("Close Workspace") {
+                encoder?.sendWorkspaceClose(id: workspace.id)
             }
         }
     }

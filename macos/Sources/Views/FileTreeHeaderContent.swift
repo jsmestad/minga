@@ -15,9 +15,7 @@ struct FileTreeHeaderContent: View {
 
     @State private var isHovered = false
 
-    private var reduceMotion: Bool {
-        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-    }
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var headerAnimationDuration: Double {
         reduceMotion ? 0 : 0.15

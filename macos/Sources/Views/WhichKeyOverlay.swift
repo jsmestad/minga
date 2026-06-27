@@ -14,9 +14,10 @@ struct WhichKeyOverlay: View {
     private let rowHeight: CGFloat = 22
     private let maxColumns = 4
 
-    /// Transition animation duration. Respects reduced motion.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     private var animDuration: Double {
-        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.15
+        reduceMotion ? 0 : 0.15
     }
 
     var body: some View {

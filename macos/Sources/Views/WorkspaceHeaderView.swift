@@ -228,7 +228,7 @@ struct WorkspaceHeaderView: View {
     private func beginRename(_ workspace: WorkspaceSummaryEntry) {
         renameText = workspace.label
         isRenaming = true
-        DispatchQueue.main.async { renameFieldFocused = true }
+        Task { @MainActor in renameFieldFocused = true }
     }
 
     private func commitRename(_ workspace: WorkspaceSummaryEntry) {

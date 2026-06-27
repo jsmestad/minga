@@ -30,7 +30,7 @@ struct EditTimelineView: View {
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(themeColors.editorFg.opacity(0.08))
-                    .cornerRadius(4)
+                    .clipShape(.rect(cornerRadius: 4))
                     .help(file.path)
                 }
 

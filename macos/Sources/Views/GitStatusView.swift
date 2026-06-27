@@ -30,8 +30,10 @@ struct GitStatusView: View {
     private let directoryMaxWidth: CGFloat = 110
     @Namespace private var fileMoveNamespace
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     private var animDuration: Double {
-        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.15
+        reduceMotion ? 0 : 0.15
     }
 
     @State private var hoveredEntryId: UInt32? = nil

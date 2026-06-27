@@ -31,6 +31,7 @@ struct AgentChatView: View {
     @State private var isModelHovered: Bool = false
     @State private var isThinkingHovered: Bool = false
     @State private var isHelpHovered: Bool = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Whether auto-scroll should follow streaming output.
     private var shouldAutoScroll: Bool { !userHasScrolledUp }
 
@@ -102,8 +103,7 @@ struct AgentChatView: View {
                         }
                         .transition(.opacity)
                         .animation(
-                            NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-                                ? nil : .easeOut(duration: 0.2),
+                            reduceMotion ? nil : .easeOut(duration: 0.2),
                             value: userHasScrolledUp
                         )
                     }
@@ -1232,8 +1232,7 @@ struct AgentChatView: View {
     /// Scrolls to the last message with smooth animation.
     private func scrollToBottom(proxy: ScrollViewProxy) {
         guard let lastId = state.messages.last?.id else { return }
-        let animation: Animation? = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-            ? nil : .easeOut(duration: 0.15)
+        let animation: Animation? = reduceMotion ? nil : .easeOut(duration: 0.15)
         withAnimation(animation) {
             proxy.scrollTo(lastId, anchor: .bottom)
         }

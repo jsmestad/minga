@@ -1178,6 +1178,7 @@ private struct StatusBarIconButton: View {
     let action: () -> Void
 
     @State private var isHovered = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var iconColor: Color {
         if isActive {
@@ -1187,7 +1188,6 @@ private struct StatusBarIconButton: View {
     }
 
     var body: some View {
-        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
 
         Button(action: action) {
             Image(systemName: icon)

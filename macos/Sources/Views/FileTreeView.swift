@@ -31,9 +31,10 @@ struct FileTreeView: View {
     private let indentWidth: CGFloat = 14
     private let chevronWidth: CGFloat = 12
 
-    /// Chevron/hover animation duration. Respects reduced motion.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     private var animDuration: Double {
-        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.15
+        reduceMotion ? 0 : 0.15
     }
 
     @State private var scrollOffset: CGFloat = 0
