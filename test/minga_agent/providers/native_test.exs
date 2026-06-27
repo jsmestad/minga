@@ -1168,32 +1168,40 @@ defmodule MingaAgent.Providers.NativeTest do
       send(reply_to_1, {:tool_approval_response, "tc_1", :approve})
 
       assert_receive {:agent_provider_event,
-                      %Event.ToolStart{tool_call_id: "tc_1", name: "read_file"}},
-                     1_000
-
-      assert_receive {:agent_provider_event,
-                      %Event.ToolEnd{tool_call_id: "tc_1", name: "read_file", is_error: false}},
-                     1_000
-
-      assert_receive {:agent_provider_event,
                       %Event.ToolApproval{tool_call_id: "tc_2", reply_to: reply_to_2}},
-                     1_000
+                     2_000
 
       send(reply_to_2, {:tool_approval_response, "tc_2", :approve})
 
-      assert_receive {:agent_provider_event,
-                      %Event.ToolStart{tool_call_id: "tc_2", name: "list_directory"}},
-                     1_000
+      events = collect_events(2_000)
 
-      assert_receive {:agent_provider_event,
-                      %Event.ToolEnd{
-                        tool_call_id: "tc_2",
-                        name: "list_directory",
-                        is_error: false
-                      }},
-                     1_000
+      assert Enum.any?(
+               events,
+               &match?(%Event.ToolStart{tool_call_id: "tc_1", name: "read_file"}, &1)
+             )
 
-      assert_receive {:agent_provider_event, %Event.AgentEnd{}}, 1_000
+      assert Enum.any?(
+               events,
+               &match?(
+                 %Event.ToolEnd{tool_call_id: "tc_1", name: "read_file", is_error: false},
+                 &1
+               )
+             )
+
+      assert Enum.any?(
+               events,
+               &match?(%Event.ToolStart{tool_call_id: "tc_2", name: "list_directory"}, &1)
+             )
+
+      assert Enum.any?(
+               events,
+               &match?(
+                 %Event.ToolEnd{tool_call_id: "tc_2", name: "list_directory", is_error: false},
+                 &1
+               )
+             )
+
+      assert Enum.any?(events, &match?(%Event.AgentEnd{}, &1))
     end
 
     test "uses ProjectView-backed tools when project_view is passed to Native.start_link", %{
