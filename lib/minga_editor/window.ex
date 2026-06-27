@@ -181,14 +181,19 @@ defmodule MingaEditor.Window do
     %{window | pinned: pinned?}
   end
 
-  @spec record_scroll_event(t(), integer()) :: t()
-  def record_scroll_event(%__MODULE__{} = window, now_ms) do
-    %{window | scroll_velocity: ScrollVelocity.record(window.scroll_velocity, now_ms)}
+  @spec record_scroll_event(t(), integer(), ScrollVelocity.event_direction()) :: t()
+  def record_scroll_event(%__MODULE__{} = window, now_ms, dir) do
+    %{window | scroll_velocity: ScrollVelocity.record(window.scroll_velocity, now_ms, dir)}
   end
 
   @spec scroll_velocity_tier(t(), integer()) :: ScrollVelocity.tier()
   def scroll_velocity_tier(%__MODULE__{} = window, now_ms) do
     ScrollVelocity.tier(window.scroll_velocity, now_ms)
+  end
+
+  @spec scroll_direction(t(), integer()) :: ScrollVelocity.direction()
+  def scroll_direction(%__MODULE__{} = window, now_ms) do
+    ScrollVelocity.direction(window.scroll_velocity, now_ms)
   end
 
   # ── Popup queries ──────────────────────────────────────────────────────────

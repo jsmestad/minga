@@ -439,12 +439,13 @@ defmodule MingaEditor.Mouse do
     case Map.fetch(state.workspace.windows.map, win_id) do
       {:ok, %Window{buffer: buf} = window} when is_pid(buf) ->
         now = System.monotonic_time(:millisecond)
+        dir = if delta > 0, do: :down, else: :up
         total_lines = Buffer.line_count(buf)
 
         updated =
           window
           |> Window.scroll_viewport(delta, total_lines)
-          |> Window.record_scroll_event(now)
+          |> Window.record_scroll_event(now, dir)
 
         EditorState.update_window(state, win_id, fn _window -> updated end)
 

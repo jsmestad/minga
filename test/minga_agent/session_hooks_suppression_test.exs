@@ -31,18 +31,33 @@ defmodule MingaAgent.SessionHooksSuppressionTest do
 
   test "hooks_enabled false suppresses lifecycle and prompt hook dispatch for inline sessions" do
     normal = start_supervised_session(hooks_enabled?: true, persist?: true)
+    normal_id = Session.session_id(normal)
     :sys.get_state(normal)
-    assert_receive {:agent_hook_payload, %{"event" => "SessionStart"}}, 1_000
+
+    assert_receive {:agent_hook_payload,
+                    %{"event" => "SessionStart", "session_id" => ^normal_id}},
+                   1_000
+
     assert :ok = Session.send_prompt(normal, "hello")
-    assert_receive {:agent_hook_payload, %{"event" => "UserPromptSubmit"}}, 1_000
+
+    assert_receive {:agent_hook_payload,
+                    %{"event" => "UserPromptSubmit", "session_id" => ^normal_id}},
+                   1_000
+
     flush_hook_messages()
 
     inline = start_supervised_session(hooks_enabled?: false, persist?: false)
+    inline_id = Session.session_id(inline)
     :sys.get_state(inline)
     assert :ok = Session.send_prompt(inline, "hello")
 
-    refute_receive {:agent_hook_payload, %{"event" => "SessionStart"}}, 100
-    refute_receive {:agent_hook_payload, %{"event" => "UserPromptSubmit"}}, 100
+    refute_receive {:agent_hook_payload,
+                    %{"event" => "SessionStart", "session_id" => ^inline_id}},
+                   100
+
+    refute_receive {:agent_hook_payload,
+                    %{"event" => "UserPromptSubmit", "session_id" => ^inline_id}},
+                   100
   end
 
   defp start_supervised_session(opts) do
