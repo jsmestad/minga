@@ -104,5 +104,17 @@ struct SidebarContainer: View {
                     NSCursor.pop()
                 }
             }
+            .accessibilityLabel("Sidebar resize handle")
+            .accessibilityAdjustableAction { direction in
+                let step: CGFloat = 20
+                switch direction {
+                case .increment:
+                    sidebarWidth = SidebarSizing.clamp(sidebarWidth + step, for: activeSidebar)
+                case .decrement:
+                    sidebarWidth = SidebarSizing.clamp(sidebarWidth - step, for: activeSidebar)
+                @unknown default:
+                    break
+                }
+            }
     }
 }

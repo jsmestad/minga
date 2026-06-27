@@ -288,6 +288,7 @@ struct FileTreeView: View {
             fileTreeRow(entry, onActivate: { activateEntry(id: entry.id) })
                 .id(entry.id)
                 .contentShape(Rectangle())
+                .accessibilityAddTraits(.isButton)
                 .onTapGesture {
                     activateEntry(id: entry.id)
                 }

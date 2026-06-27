@@ -475,6 +475,7 @@ struct TabBarView: View {
         Circle()
             .fill(agentStatusColor(status, accent: color))
             .frame(width: 6, height: 6)
+            .accessibilityHidden(true)
     }
 
     private func agentStatusColor(_ status: UInt8, accent: Color) -> Color {

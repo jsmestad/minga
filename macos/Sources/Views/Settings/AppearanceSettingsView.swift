@@ -16,10 +16,12 @@ struct AppearanceSettingsView: View {
                 } else {
                     LazyVGrid(columns: columns, spacing: 12) {
                         ForEach(state.themePreviews) { preview in
-                            ThemeSwatch(preview: preview, selected: preview.atom == state.currentThemeName)
-                                .onTapGesture {
-                                    state.update(key: "theme", value: .atom(preview.atom))
-                                }
+                            Button {
+                                state.update(key: "theme", value: .atom(preview.atom))
+                            } label: {
+                                ThemeSwatch(preview: preview, selected: preview.atom == state.currentThemeName)
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                     .padding(.vertical, 4)
