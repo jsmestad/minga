@@ -223,7 +223,7 @@ struct GitStatusViewEmptyStateTests {
 
 // MARK: - GitStatusView Branch Header
 
-@Suite("GitStatusHeaderContent Branch Header")
+@Suite("GitStatusHeaderView Branch Header")
 struct GitStatusViewBranchHeaderTests {
 
     @Test("Branch header shows project and branch name")
@@ -232,7 +232,7 @@ struct GitStatusViewBranchHeaderTests {
         state.repoState = .normal
         state.branchName = "feat/sidebar-polish"
 
-        let sut = GitStatusHeaderContent(state: state, theme: ThemeColors(), projectName: "minga", leadingPadding: 10)
+        let sut = GitStatusHeaderView(state: state, theme: ThemeColors(), projectName: "minga", leadingPadding: 10)
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
@@ -246,7 +246,7 @@ struct GitStatusViewBranchHeaderTests {
         state.repoState = .normal
         state.branchName = ""
 
-        let sut = GitStatusHeaderContent(state: state, theme: ThemeColors(), projectName: "minga", leadingPadding: 10)
+        let sut = GitStatusHeaderView(state: state, theme: ThemeColors(), projectName: "minga", leadingPadding: 10)
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
@@ -260,7 +260,7 @@ struct GitStatusViewBranchHeaderTests {
         state.branchName = "main"
         state.stashCount = 2
 
-        let sut = GitStatusHeaderContent(state: state, theme: ThemeColors(), projectName: "minga", leadingPadding: 10)
+        let sut = GitStatusHeaderView(state: state, theme: ThemeColors(), projectName: "minga", leadingPadding: 10)
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
@@ -279,7 +279,7 @@ struct FileTreeViewTests {
         state.visible = true
         state.projectRoot = "/Users/test/code/minga"
 
-        let sut = FileTreeHeaderContent(fileTreeState: state, theme: ThemeColors(), encoder: nil, branchName: "main", leadingPadding: 10)
+        let sut = FileTreeHeaderView(fileTreeState: state, theme: ThemeColors(), encoder: nil, branchName: "main", leadingPadding: 10)
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
@@ -293,7 +293,7 @@ struct FileTreeViewTests {
         state.visible = true
         state.projectRoot = ""
 
-        let sut = FileTreeHeaderContent(fileTreeState: state, theme: ThemeColors(), encoder: nil, branchName: "", leadingPadding: 10)
+        let sut = FileTreeHeaderView(fileTreeState: state, theme: ThemeColors(), encoder: nil, branchName: "", leadingPadding: 10)
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
@@ -305,7 +305,7 @@ struct FileTreeViewTests {
         let state = FileTreeState()
         state.visible = true
 
-        let sut = FileTreeHeaderContent(fileTreeState: state, theme: ThemeColors(), encoder: nil, branchName: "", leadingPadding: 10)
+        let sut = FileTreeHeaderView(fileTreeState: state, theme: ThemeColors(), encoder: nil, branchName: "", leadingPadding: 10)
         let body = try sut.inspect()
         let buttons = body.findAll(ViewType.Button.self)
         #expect(buttons.count == 4)
@@ -318,7 +318,7 @@ struct FileTreeViewTests {
         state.selectedIndex = 7
         let spy = SpyEncoder()
 
-        let sut = FileTreeHeaderContent(fileTreeState: state, theme: ThemeColors(), encoder: spy, branchName: "main", leadingPadding: 10)
+        let sut = FileTreeHeaderView(fileTreeState: state, theme: ThemeColors(), encoder: spy, branchName: "main", leadingPadding: 10)
         let buttons = try sut.inspect().findAll(ViewType.Button.self)
 
         try buttons[0].tap()
@@ -340,7 +340,7 @@ struct FileTreeViewTests {
         state.visible = true
         state.projectRoot = "/Users/test/code/minga"
 
-        let sut = FileTreeHeaderContent(fileTreeState: state, theme: ThemeColors(), encoder: nil, branchName: "main", leadingPadding: 10)
+        let sut = FileTreeHeaderView(fileTreeState: state, theme: ThemeColors(), encoder: nil, branchName: "main", leadingPadding: 10)
 
         #expect(sut.accessibilityLabelText == "File tree for minga, branch main")
     }

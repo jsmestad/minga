@@ -160,9 +160,7 @@ struct AgentContextBar: View {
         }
         .buttonStyle(.plain)
         .help(label)
-        .onHover { isHovered in
-            if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-        }
+        .pointingHandCursor()
     }
 
     // MARK: - Helpers

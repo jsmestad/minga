@@ -43,7 +43,7 @@ struct SidebarHeaderButton: View {
                     isHovered = hovering
                 }
             }
-            if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
         }
+        .pointingHandCursor()
     }
 }

@@ -1,11 +1,11 @@
-/// Git status header content for the unified toolbar.
+/// Git status header view for the unified toolbar.
 ///
 /// Shows project name, branch name, and ahead/behind indicators. Rendered
 /// inside the shared toolbar row so it shares the same background as the tab bar.
 
 import SwiftUI
 
-struct GitStatusHeaderContent: View {
+struct GitStatusHeaderView: View {
     let state: GitStatusState
     let theme: ThemeColors
     let projectName: String

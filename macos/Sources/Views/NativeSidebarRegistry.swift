@@ -45,7 +45,7 @@ enum NativeSidebarRegistry {
         kind: "file_tree",
         fallbackIcon: "folder",
         makeHeader: { context, _ in
-            AnyView(FileTreeHeaderContent(
+            AnyView(FileTreeHeaderView(
                 fileTreeState: context.guiState.fileTreeState,
                 theme: context.theme,
                 encoder: context.encoder,
@@ -70,7 +70,7 @@ enum NativeSidebarRegistry {
         kind: "git_status",
         fallbackIcon: "point.3.filled.connected.trianglepath.dotted",
         makeHeader: { context, _ in
-            AnyView(GitStatusHeaderContent(
+            AnyView(GitStatusHeaderView(
                 state: context.guiState.gitStatusState,
                 theme: context.theme,
                 projectName: context.projectName,

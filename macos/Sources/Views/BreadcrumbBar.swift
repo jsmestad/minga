@@ -52,9 +52,7 @@ struct BreadcrumbBar: View {
                             )
                     }
                     .buttonStyle(.plain)
-                    .onHover { isHovered in
-                        if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-                    }
+                    .pointingHandCursor()
                 }
 
                 Spacer()
@@ -103,8 +101,6 @@ struct BreadcrumbBar: View {
         .buttonStyle(.plain)
         .help(tooltip)
         .padding(.trailing, 4)
-        .onHover { isHovered in
-            if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-        }
+        .pointingHandCursor()
     }
 }
