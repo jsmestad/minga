@@ -14,9 +14,7 @@ struct SidebarHeaderButton: View {
 
     @State private var isHovered = false
 
-    private var reduceMotion: Bool {
-        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-    }
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Button(action: action) {

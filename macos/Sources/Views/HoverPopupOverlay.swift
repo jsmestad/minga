@@ -41,8 +41,10 @@ struct HoverPopupOverlay: View {
     private let maxHeight: CGFloat = 300
     private let gap: CGFloat = 4
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     private var animDuration: Double {
-        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.15
+        reduceMotion ? 0 : 0.15
     }
 
     /// Whether to show the popup above the anchor (preferred) or below.

@@ -16,9 +16,10 @@ struct PickerOverlay: View {
     private let itemHeight: CGFloat = 24
     private let twoLineItemHeight: CGFloat = 40
 
-    /// Transition animation duration. Respects reduced motion.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     private var animDuration: Double {
-        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.1
+        reduceMotion ? 0 : 0.1
     }
 
     var body: some View {

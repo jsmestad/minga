@@ -18,9 +18,10 @@ struct ToolManagerView: View {
     private let itemHeight: CGFloat = 64
     private let failedItemHeight: CGFloat = 96
 
-    /// Transition animation duration. Respects reduced motion.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     private var animDuration: Double {
-        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.15
+        reduceMotion ? 0 : 0.15
     }
 
     var body: some View {

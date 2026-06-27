@@ -12,8 +12,10 @@ struct FloatPopupOverlay: View {
     let cellWidth: CGFloat
     let cellHeight: CGFloat
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     private var animDuration: Double {
-        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.15
+        reduceMotion ? 0 : 0.15
     }
 
     /// Panel width in points, derived from cell dimensions.

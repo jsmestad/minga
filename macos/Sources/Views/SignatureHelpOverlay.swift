@@ -38,8 +38,10 @@ struct SignatureHelpOverlay: View {
     private let maxWidth: CGFloat = 600
     private let gap: CGFloat = 4
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     private var animDuration: Double {
-        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.1
+        reduceMotion ? 0 : 0.1
     }
 
     /// Whether to show above (preferred) or below the anchor.
