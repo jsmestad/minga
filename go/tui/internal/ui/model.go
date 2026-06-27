@@ -78,16 +78,12 @@ type Model struct {
 	// a tab_reorder or file_tree_drop gui_action (ticket #2229, AC3). It is nil
 	// when no draggable press is active.
 	mouseDrag *chromeDrag
-	// renderedHeaderHeight caches the number of header rows the last rendered
-	// frame placed above the editor body. Since #2244 collapsed layout to
-	// Layout.GUI (editor at BEAM row 0), outbound editor-body mouse rows must
-	// subtract this offset to mirror the inbound translation
-	// (render_content.go semanticContentOffsets). It is the single source of
-	// truth shared with the renderer (headerLines), recomputed whenever the
-	// inputs to headerLines change: applied commands (chrome) and resize
-	// (width/height). Caching avoids recomputing headerLines inconsistently per
-	// mouse event (ticket #2256).
-	renderedHeaderHeight int
+	// layout caches the spatial arrangement of every top-level region (header,
+	// body, footer, left pane) for the current frame. It is the single source
+	// of truth for region positions, replacing the old renderedHeaderHeight
+	// cache. Recomputed whenever inputs change: applied commands (chrome) and
+	// resize (width/height).
+	layout uiLayout
 	// staging holds the open frame transaction (#2219). It is non-nil only
 	// between a begin_frame and its commit_frame: semantic/chrome commands
 	// accumulate here instead of mutating the live model, so View() never paints
@@ -160,9 +156,9 @@ func New(width, height uint16, out chan<- []byte) Model {
 		lineCache:          newLineCache(),
 		presentationScroll: map[uint16]presentationScroll{},
 	}
-	// Seed the header-offset cache so the first mouse event before any
-	// frame/resize still translates against the rendered fallback header.
-	m.refreshRenderedHeaderHeight()
+	// Seed the layout so the first mouse event lands in the correct
+	// region before the first BEAM frame arrives.
+	m.layout = m.computeLayout()
 	return m
 }
 
@@ -202,9 +198,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// its own, but resetting here keeps the cache from holding stale lines
 		// for the old geometry.
 		m.lineCache.reset()
-		m.refreshRenderedHeaderHeight()
+		m.layout = m.computeLayout()
 		m.viewport.SetWidth(msg.Width)
-		m.viewport.SetHeight(m.bodyHeight())
+		m.viewport.SetHeight(m.layout.body.Height)
 		m.send(protocol.EncodeResize(uint16(max(msg.Width, 1)), uint16(max(msg.Height, 1))))
 	case tea.KeyPressMsg:
 		if m.toggleHUD(msg) {
@@ -253,7 +249,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case port.PacketMsg:
 		cmd = m.applyCommands(msg.Commands)
-		m.refreshRenderedHeaderHeight()
+		m.layout = m.computeLayout()
 	case port.LogMsg:
 		m.send(protocol.EncodeLogMessage(msg.Level, msg.Text))
 	case port.ErrorMsg:
@@ -267,7 +263,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	m.viewport.SetWidth(max(m.width, 1))
-	m.viewport.SetHeight(m.bodyHeight())
+	m.viewport.SetHeight(m.layout.body.Height)
 	m.viewport.SetContent(m.composeBody())
 	return m, cmd
 }
@@ -755,16 +751,7 @@ func (m *Model) removeWindow(id uint16) {
 }
 
 func (m Model) bodyHeight() int {
-	return max(m.height-len(m.headerLines())-len(m.footerLines()), 1)
-}
-
-// refreshRenderedHeaderHeight recomputes the cached header offset from the same
-// headerLines the renderer uses, so outbound mouse translation (mousePacket)
-// stays consistent with the frame on screen (ticket #2256). Call it whenever an
-// input to headerLines changes: applied commands (chrome content) and resize
-// (width drives the breadcrumb threshold).
-func (m *Model) refreshRenderedHeaderHeight() {
-	m.renderedHeaderHeight = len(m.headerLines())
+	return m.layout.body.Height
 }
 
 func (m Model) maxOverlayHeight() int {

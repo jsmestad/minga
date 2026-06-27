@@ -244,8 +244,8 @@ func tabBarModel(headerRows int) Model {
 		}
 	}
 	model.chrome = chrome
-	model.refreshRenderedHeaderHeight()
-	if model.renderedHeaderHeight != headerRows {
+	model.layout = model.computeLayout()
+	if model.layout.header.Height != headerRows {
 		panic("tabBarModel: cached header height does not match requested rows")
 	}
 	return model
@@ -272,7 +272,7 @@ func TestMousePacketSubtractsHeaderOffset(t *testing.T) {
 			// the rule is independent of whether headerLines can ever collapse to
 			// zero rows (it cannot today: there is always a title fallback).
 			model := New(120, 24, nil)
-			model.renderedHeaderHeight = tc.offset
+			model.layout.header.Height = tc.offset
 			msg := tea.MouseClickMsg(tea.Mouse{X: 7, Y: tc.terminalY, Button: tea.MouseLeft})
 			packet, ok := model.mousePacket(msg)
 			if !ok {
@@ -296,7 +296,7 @@ func TestMousePacketSubtractsHeaderOffset(t *testing.T) {
 // (ticket #2256).
 func TestMousePacketOffsetMirrorsRenderedHeader(t *testing.T) {
 	model := tabBarModel(2)
-	if got, want := model.renderedHeaderHeight, len(model.headerLines()); got != want {
+	if got, want := model.layout.header.Height, len(model.headerLines()); got != want {
 		t.Fatalf("cached offset = %d, rendered header height = %d; must match", got, want)
 	}
 	msg := tea.MouseClickMsg(tea.Mouse{X: 0, Y: 6, Button: tea.MouseLeft})
@@ -393,7 +393,7 @@ func TestMousePacketNormalizesPresentationScrollOffset(t *testing.T) {
 	})
 	model.presentationScroll[7] = presentationScroll{anchorTop: 10, anchorLeft: 2, contentEpoch: 9, layoutGeneration: 5, rowOffset: 1, colOffset: 2}
 
-	packet, ok := model.mousePacket(tea.MouseClickMsg(tea.Mouse{X: 3, Y: model.renderedHeaderHeight, Button: tea.MouseLeft}))
+	packet, ok := model.mousePacket(tea.MouseClickMsg(tea.Mouse{X: 3, Y: model.layout.header.Height, Button: tea.MouseLeft}))
 	if !ok {
 		t.Fatal("click should encode a mouse packet")
 	}
@@ -419,7 +419,7 @@ func TestMousePacketClampsPresentationScrollOffsetInsideWindow(t *testing.T) {
 	})
 	model.presentationScroll[7] = presentationScroll{anchorTop: 10, anchorLeft: 2, contentEpoch: 9, layoutGeneration: 5, rowOffset: 1, colOffset: 2}
 
-	packet, ok := model.mousePacket(tea.MouseClickMsg(tea.Mouse{X: 9, Y: model.renderedHeaderHeight + 2, Button: tea.MouseLeft}))
+	packet, ok := model.mousePacket(tea.MouseClickMsg(tea.Mouse{X: 9, Y: model.layout.header.Height + 2, Button: tea.MouseLeft}))
 	if !ok {
 		t.Fatal("click should encode a mouse packet")
 	}

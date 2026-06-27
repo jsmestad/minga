@@ -1336,6 +1336,7 @@ func TestSplitSeparatorsNormalizeAgainstHeaderAndFileTree(t *testing.T) {
 		}},
 	}
 	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "body-0"}, {Text: "body-1"}, {Text: "body-2"}}})
+	model.layout = model.computeLayout()
 	model.viewport.SetContent(model.content())
 
 	lines := strings.Split(ansi.Strip(model.View().Content), "\n")
@@ -1412,6 +1413,7 @@ func TestSemanticWindowsNormalizeAbsoluteTUILayoutGeometry(t *testing.T) {
 	model := New(90, 8, nil)
 	model.title = "Header"
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Width: 36, Rows: []protocol.FileTreeRow{{ID: "row-0", Name: "row-0"}}}}}
+	model.layout = model.computeLayout()
 	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "pane"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 1, Col: 37, Width: 8, Height: 1}}})
 	model.viewport.SetContent(model.content())
 
@@ -1475,7 +1477,7 @@ func TestPresentationScrollUsesOverscanRowsImmediately(t *testing.T) {
 		t.Fatalf("initial render should use committed visible rows, got %q", initial)
 	}
 
-	model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.renderedHeaderHeight}))
+	model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.layout.header.Height}))
 	scrolled := strings.Join(stripRenderedLines(model.renderWindowRows(model.windows[7])), "|")
 	if !strings.Contains(scrolled, "bottom") || !strings.Contains(scrolled, "below") || strings.Contains(scrolled, "top") {
 		t.Fatalf("local presentation scroll should shift into overscan rows immediately, got %q", scrolled)
@@ -1522,7 +1524,7 @@ func TestPresentationScrollUsesMatchingOverscanGutterRows(t *testing.T) {
 		t.Fatalf("visible content should use the matching presentation gutter row, got %q", initial)
 	}
 
-	model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.renderedHeaderHeight}))
+	model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.layout.header.Height}))
 	scrolled := strings.Join(stripRenderedLines(model.renderWindowRows(model.windows[7])), "|")
 	if !strings.Contains(scrolled, "C  bottom") || !strings.Contains(scrolled, "D  below") {
 		t.Fatalf("locally shifted content should keep matching gutter rows, got %q", scrolled)
@@ -1559,9 +1561,9 @@ func TestPresentationScrollUsesPayloadLocalRowsForWrappedContent(t *testing.T) {
 		t.Fatalf("wrapped payload should not skip its first row just because document visual offset is non-zero, got %q", initial)
 	}
 
-	model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.renderedHeaderHeight}))
-	model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.renderedHeaderHeight}))
-	model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.renderedHeaderHeight}))
+	model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.layout.header.Height}))
+	model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.layout.header.Height}))
+	model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.layout.header.Height}))
 
 	scroll := model.presentationScroll[7]
 	if scroll.rowOffset != 3 {
@@ -1586,13 +1588,13 @@ func TestPresentationScrollShiftWheelMovesHorizontally(t *testing.T) {
 		Scroll:       protocol.ScrollPresentation{WindowID: 7, ContentEpoch: 9, AnchorTop: 10, AnchorLeft: 0, LayoutGeneration: 5},
 	})
 
-	model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, Mod: tea.ModShift, X: 1, Y: model.renderedHeaderHeight}))
+	model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, Mod: tea.ModShift, X: 1, Y: model.layout.header.Height}))
 	scroll := model.presentationScroll[7]
 	if scroll.rowOffset != 0 || scroll.colOffset != 1 {
 		t.Fatalf("shift wheel-down should move presentation horizontally, got row=%d col=%d", scroll.rowOffset, scroll.colOffset)
 	}
 
-	model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelUp, Mod: tea.ModShift, X: 1, Y: model.renderedHeaderHeight}))
+	model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelUp, Mod: tea.ModShift, X: 1, Y: model.layout.header.Height}))
 	if _, ok := model.presentationScroll[7]; ok {
 		t.Fatalf("shift wheel-up should cancel the horizontal offset and clear presentation scroll")
 	}
@@ -1635,7 +1637,7 @@ func TestPresentationScrollHorizontalWheelRightClampsAtContentEdge(t *testing.T)
 	})
 
 	for range 10 {
-		model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelRight, X: 1, Y: model.renderedHeaderHeight}))
+		model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelRight, X: 1, Y: model.layout.header.Height}))
 	}
 
 	scroll := model.presentationScroll[7]
@@ -1661,7 +1663,7 @@ func TestPresentationScrollHorizontalWheelRightUsesTextRectWidth(t *testing.T) {
 	})
 
 	for range 10 {
-		model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelRight, X: 3, Y: model.renderedHeaderHeight}))
+		model = model.applyPresentationScroll(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelRight, X: 3, Y: model.layout.header.Height}))
 	}
 
 	if got := model.presentationScroll[7].colOffset; got != 2 {

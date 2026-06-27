@@ -180,7 +180,7 @@ func keyModifiers(key tea.Key) byte {
 // motion) honor the suppression.
 func (m Model) mousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	mouse := msg.Mouse()
-	offset := m.renderedHeaderHeight
+	offset := m.layout.header.Height
 	row := mouse.Y - offset
 	if !isWheelButton(mouse.Button) && mouse.Y < offset {
 		// Header-region policy: a PRESS on an unrouted header pixel must not
