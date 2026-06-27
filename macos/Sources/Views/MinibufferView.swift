@@ -12,7 +12,7 @@ import SwiftUI
 
 struct MinibufferView: View {
     let state: MinibufferState
-    let theme: ThemeColors
+    @Environment(ThemeColors.self) private var theme
     let encoder: InputEncoder?
 
     @State private var hoveredIndex: Int? = nil
@@ -310,7 +310,8 @@ struct MinibufferView: View {
             Wire.MinibufferCandidate(matchScore: 72, label: "org-modernize", description: "Modernize Org buffer syntax", annotation: "", matchPositions: [0, 1, 2, 3, 4, 5, 6, 8]),
         ]
     )
-    return MinibufferView(state: state, theme: theme, encoder: nil)
+    return MinibufferView(state: state, encoder: nil)
         .frame(width: 600, height: 140)
         .background(theme.editorBg)
+        .environment(theme)
 }

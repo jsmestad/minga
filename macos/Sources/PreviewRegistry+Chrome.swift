@@ -39,9 +39,10 @@ extension PreviewRegistry {
             modelineRightSegments: rightSegments
         ))
 
-        return StatusBarView(state: state, theme: theme, encoder: nil)
+        return StatusBarView(state: state, encoder: nil)
             .frame(width: width, height: 28)
             .background(theme.editorBg)
+            .environment(theme)
     }
 
     // MARK: - TabBarView
@@ -60,9 +61,10 @@ extension PreviewRegistry {
             Wire.TabEntry(id: 4, groupId: 0, isActive: false, isDirty: true, isAgent: false, hasAttention: true, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "mode.ex"),
         ])
 
-        return TabBarView(tabBarState: state, theme: theme, encoder: nil)
+        return TabBarView(tabBarState: state, encoder: nil)
             .frame(width: width, height: 36)
             .background(theme.editorBg)
+            .environment(theme)
     }
 
     // MARK: - TabBarOverflow
@@ -87,9 +89,10 @@ extension PreviewRegistry {
             Wire.TabEntry(id: 10, groupId: 0, isActive: false, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "application_supervisor_configuration.ex"),
         ])
 
-        return TabBarView(tabBarState: state, theme: theme, encoder: nil)
+        return TabBarView(tabBarState: state, encoder: nil)
             .frame(width: width, height: 36)
             .background(theme.editorBg)
+            .environment(theme)
     }
 
     // MARK: - NotificationCenterView
@@ -115,9 +118,10 @@ extension PreviewRegistry {
             ),
         ])
 
-        return NotificationCenterView(state: state, theme: theme, encoder: nil, bottomInset: 40)
+        return NotificationCenterView(state: state, encoder: nil, bottomInset: 40)
             .frame(width: 800, height: 600)
             .background(theme.editorBg)
+            .environment(theme)
     }
 
     // MARK: - NotificationStack
@@ -185,9 +189,10 @@ extension PreviewRegistry {
             ),
         ])
 
-        return NotificationCenterView(state: state, theme: theme, encoder: nil, bottomInset: 40)
+        return NotificationCenterView(state: state, encoder: nil, bottomInset: 40)
             .frame(width: 800, height: 600)
             .background(theme.editorBg)
+            .environment(theme)
     }
 
     // MARK: - NotificationOverflow
@@ -294,9 +299,10 @@ extension PreviewRegistry {
             ),
         ])
 
-        return NotificationCenterView(state: state, theme: theme, encoder: nil, bottomInset: 40)
+        return NotificationCenterView(state: state, encoder: nil, bottomInset: 40)
             .frame(width: 800, height: 600)
             .background(theme.editorBg)
+            .environment(theme)
     }
 
     // MARK: - BottomPanelView
@@ -317,9 +323,10 @@ extension PreviewRegistry {
         )
         populateMessages(state.messagesState)
 
-        return BottomPanelView(state: state, theme: theme, encoder: nil, availableHeight: 600)
+        return BottomPanelView(state: state, encoder: nil, availableHeight: 600)
             .frame(width: 800, height: 250)
             .background(theme.editorBg)
+            .environment(theme)
     }
 
     static func bottomPanelEmptyPreview() -> some View {
@@ -336,9 +343,10 @@ extension PreviewRegistry {
             ]
         )
 
-        return BottomPanelView(state: state, theme: theme, encoder: nil, availableHeight: 600)
+        return BottomPanelView(state: state, encoder: nil, availableHeight: 600)
             .frame(width: 800, height: 250)
             .background(theme.editorBg)
+            .environment(theme)
     }
 
     // MARK: - BottomPanelDiagnostics
@@ -372,9 +380,10 @@ extension PreviewRegistry {
 
         state.messagesState.activeLevels = [2, 3]
 
-        return BottomPanelView(state: state, theme: theme, encoder: nil, availableHeight: 600)
+        return BottomPanelView(state: state, encoder: nil, availableHeight: 600)
             .frame(width: 800, height: 250)
             .background(theme.editorBg)
+            .environment(theme)
     }
 
     // MARK: - MessagesContentView
@@ -386,12 +395,12 @@ extension PreviewRegistry {
 
         return MessagesContentView(
             state: state,
-            theme: theme,
             encoder: nil,
             usesPreviewEagerLayout: PreviewSnapshotPolicy.shouldUseEagerLayout(for: "MessagesContentView")
         )
         .frame(width: 800, height: 360)
         .background(theme.editorBg)
+            .environment(theme)
         .preferredColorScheme(.dark)
     }
 
@@ -441,6 +450,7 @@ extension PreviewRegistry {
 
         return SettingsView(appState: appState)
             .frame(width: 600, height: 480)
+            .environment(appState.gui.themeColors)
     }
 
     // MARK: - ToolManagerView
@@ -462,9 +472,10 @@ extension PreviewRegistry {
             ]
         )
 
-        return ToolManagerView(state: state, theme: theme, encoder: nil)
+        return ToolManagerView(state: state, encoder: nil)
             .frame(width: 800, height: 600)
             .background(theme.editorBg)
+            .environment(theme)
     }
 
     // MARK: - ObservatoryView
@@ -483,9 +494,10 @@ extension PreviewRegistry {
             Wire.ObservatoryNode(pid: "<0.140.0>", parentPid: "<0.100.0>", name: "Elixir.Minga.LSP.Client", processClass: 3, depth: 1, memory: 155_648, messageQueueLen: 2, reductions: 88_440, sparkline: [0.16, 0.18, 0.26, 0.22, 0.28, 0.24]),
         ])
 
-        return ObservatoryView(state: state, theme: theme, encoder: nil)
+        return ObservatoryView(state: state, encoder: nil)
             .frame(width: 320, height: 640)
             .background(theme.treeBg)
+            .environment(theme)
     }
 
     // MARK: - ChangeSummaryView
@@ -505,8 +517,9 @@ extension PreviewRegistry {
             selectedIndex: 0
         )
 
-        return ChangeSummaryView(state: state, theme: theme, encoder: nil)
+        return ChangeSummaryView(state: state, encoder: nil)
             .frame(width: 280, height: 400)
             .background(theme.treeBg)
+            .environment(theme)
     }
 }

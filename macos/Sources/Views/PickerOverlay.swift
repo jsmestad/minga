@@ -9,7 +9,7 @@ import SwiftUI
 
 struct PickerOverlay: View {
     let state: PickerState
-    let theme: ThemeColors
+    @Environment(ThemeColors.self) private var theme
     let encoder: InputEncoder?
 
     private let panelWidth: CGFloat = 600
@@ -408,8 +408,9 @@ struct PickerOverlay: View {
     )
     return ZStack {
         theme.editorBg
-        PickerOverlay(state: state, theme: theme, encoder: nil)
+        PickerOverlay(state: state, encoder: nil)
     }
     .frame(width: 600, height: 400)
     .clipped()
+    .environment(theme)
 }

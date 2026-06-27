@@ -8,7 +8,7 @@ import SwiftUI
 
 struct WhichKeyOverlay: View {
     let state: WhichKeyState
-    let theme: ThemeColors
+    @Environment(ThemeColors.self) private var theme
 
     private let columnWidth: CGFloat = 220
     private let rowHeight: CGFloat = 22
@@ -136,9 +136,10 @@ struct WhichKeyOverlay: View {
             Wire.WhichKeyBinding(kind: 0, key: "e", description: "file tree", icon: ""),
         ]
     )
-    return WhichKeyOverlay(state: state, theme: theme)
+    return WhichKeyOverlay(state: state)
         .frame(width: 520, height: 300)
         .background(theme.editorBg)
+        .environment(theme)
 }
 
 #Preview("Which Key Paged") {
@@ -162,7 +163,8 @@ struct WhichKeyOverlay: View {
             Wire.WhichKeyBinding(kind: 0, key: "z", description: "stash", icon: ""),
         ]
     )
-    return WhichKeyOverlay(state: state, theme: theme)
+    return WhichKeyOverlay(state: state)
         .frame(width: 520, height: 300)
         .background(theme.editorBg)
+        .environment(theme)
 }

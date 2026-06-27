@@ -8,15 +8,15 @@ extension PreviewRegistry {
     static func fileTreePreview() -> some View {
         let theme = PreviewFixtures.theme()
 
-        return fileTreeBodyPreview(theme: theme)
+        return fileTreeBodyPreview()
             .frame(width: 280, height: 600)
             .background(theme.treeBg)
+            .environment(theme)
     }
 
-    static func fileTreeBodyPreview(theme: ThemeColors) -> some View {
+    static func fileTreeBodyPreview() -> some View {
         FileTreeView(
             fileTreeState: fileTreeState(),
-            theme: theme,
             encoder: nil,
             usesPreviewEagerLayout: PreviewSnapshotPolicy.shouldUseEagerLayout(for: "FileTreeView")
         )
@@ -54,12 +54,12 @@ extension PreviewRegistry {
 
         return FileTreeView(
             fileTreeState: state,
-            theme: theme,
             encoder: nil,
             usesPreviewEagerLayout: PreviewSnapshotPolicy.shouldUseEagerLayout(for: "FileTreeEmpty")
         )
         .frame(width: 280, height: 600)
         .background(theme.treeBg)
+        .environment(theme)
     }
 
     // MARK: - FileTreeError
@@ -80,12 +80,12 @@ extension PreviewRegistry {
 
         return FileTreeView(
             fileTreeState: state,
-            theme: theme,
             encoder: nil,
             usesPreviewEagerLayout: PreviewSnapshotPolicy.shouldUseEagerLayout(for: "FileTreeError")
         )
         .frame(width: 280, height: 600)
         .background(theme.treeBg)
+        .environment(theme)
     }
 
     // MARK: - FileTreeDeep
@@ -105,12 +105,12 @@ extension PreviewRegistry {
 
         return FileTreeView(
             fileTreeState: state,
-            theme: theme,
             encoder: nil,
             usesPreviewEagerLayout: PreviewSnapshotPolicy.shouldUseEagerLayout(for: "FileTreeDeep")
         )
         .frame(width: 280, height: 600)
         .background(theme.treeBg)
+        .environment(theme)
     }
 
     static func fileTreeDeepRawEntries() -> [Wire.FileTreeEntry] {
@@ -142,12 +142,12 @@ extension PreviewRegistry {
 
         return FileTreeView(
             fileTreeState: state,
-            theme: theme,
             encoder: nil,
             usesPreviewEagerLayout: PreviewSnapshotPolicy.shouldUseEagerLayout(for: "FileTreeRename")
         )
         .frame(width: 280, height: 600)
         .background(theme.treeBg)
+        .environment(theme)
     }
 
     static func fileTreeRenameState() -> FileTreeState {

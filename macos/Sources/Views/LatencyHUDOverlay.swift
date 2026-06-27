@@ -10,7 +10,7 @@ import SwiftUI
 
 struct LatencyHUDOverlay: View {
     @Bindable var state: LatencyHUDState
-    let theme: ThemeColors
+    @Environment(ThemeColors.self) private var theme
 
     var body: some View {
         if state.visible {

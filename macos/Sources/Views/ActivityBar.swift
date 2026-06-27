@@ -8,7 +8,7 @@ import SwiftUI
 struct ActivityBar: View {
     let guiState: GUIState
     let sidebarHostState: SidebarHostState
-    let theme: ThemeColors
+    @Environment(ThemeColors.self) private var theme
     let encoder: InputEncoder?
 
     private let width: CGFloat = 32

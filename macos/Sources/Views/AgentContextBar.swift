@@ -7,7 +7,7 @@ import SwiftUI
 
 struct AgentContextBar: View {
     let state: AgentContextBarState
-    let theme: ThemeColors
+    @Environment(ThemeColors.self) private var theme
     let encoder: InputEncoder?
 
     private let barHeight: CGFloat = 28

@@ -198,6 +198,7 @@ struct ContentView: View {
             frontendExtensionRuntimeLayer
             windowOverlays
         }
+        .environment(appState.gui.themeColors)
         .navigationTitle(appState.windowTitle)
         .ignoresSafeArea(.container, edges: .top)
         .preferredColorScheme(appState.windowBgIsDark ? .dark : .light)
@@ -260,7 +261,6 @@ struct ContentView: View {
                     if showsWorkspaceHeader {
                         WorkspaceHeaderView(
                             workspaceState: appState.gui.workspaceState,
-                            theme: theme,
                             encoder: appState.encoder
                         )
                     }
@@ -268,7 +268,6 @@ struct ContentView: View {
                     if !appState.gui.tabBarState.tabs.isEmpty || !appState.gui.workspaceState.visibleTabs.isEmpty {
                         TabBarView(
                             tabBarState: appState.gui.tabBarState,
-                            theme: theme,
                             encoder: appState.encoder
                         )
                         .accessibilityIdentifier("workspace-tabbar")
@@ -352,7 +351,6 @@ struct ContentView: View {
             ActivityBar(
                 guiState: appState.gui,
                 sidebarHostState: appState.gui.sidebarHostState,
-                theme: theme,
                 encoder: appState.encoder
             )
 
@@ -360,7 +358,6 @@ struct ContentView: View {
                 SidebarContainer(
                     guiState: appState.gui,
                     activeSidebar: activeSidebar,
-                    theme: theme,
                     encoder: appState.encoder,
                     projectName: projectName,
                     gitBranch: gitBranch,
@@ -383,7 +380,6 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 ChangeSummaryView(
                     state: appState.gui.changeSummaryState,
-                    theme: theme,
                     encoder: appState.encoder
                 )
             }
@@ -443,13 +439,11 @@ struct ContentView: View {
             if appState.gui.agentContextBarState.visible {
                 AgentContextBar(
                     state: appState.gui.agentContextBarState,
-                    theme: appState.gui.themeColors,
                     encoder: appState.encoder
                 )
             } else {
                 BreadcrumbBar(
                     state: appState.gui.breadcrumbState,
-                    theme: appState.gui.themeColors,
                     encoder: appState.encoder
                 )
             }
@@ -458,7 +452,6 @@ struct ContentView: View {
             if appState.gui.searchState.visible {
                 SearchToolbar(
                     searchState: appState.gui.searchState,
-                    theme: appState.gui.themeColors,
                     encoder: appState.encoder
                 )
                 .transition(
@@ -487,7 +480,6 @@ struct ContentView: View {
             // Edit timeline scrubber (between editor and bottom panel)
             EditTimelineView(
                 state: appState.gui.editTimelineState,
-                themeColors: appState.gui.themeColors,
                 encoder: appState.encoder
             )
 
@@ -495,7 +487,6 @@ struct ContentView: View {
             if appState.gui.bottomPanelState.visible {
                 BottomPanelView(
                     state: appState.gui.bottomPanelState,
-                    theme: appState.gui.themeColors,
                     encoder: appState.encoder,
                     availableHeight: rightPaneHeight
                 )
@@ -508,7 +499,6 @@ struct ContentView: View {
             if appState.gui.minibufferState.visible {
                 MinibufferView(
                     state: appState.gui.minibufferState,
-                    theme: appState.gui.themeColors,
                     encoder: appState.encoder
                 )
                 .transition(
@@ -576,7 +566,6 @@ struct ContentView: View {
             if appState.gui.agentChatState.visible {
                 AgentChatView(
                     state: appState.gui.agentChatState,
-                    theme: appState.gui.themeColors,
                     isInsertMode: appState.gui.statusBarState.isInsertMode,
                     encoder: appState.encoder,
                     cellHeight: CGFloat(appState.editorNSView?.cellHeight ?? 16)
@@ -593,7 +582,6 @@ struct ContentView: View {
 
                 CompletionOverlay(
                     state: appState.gui.completionState,
-                    theme: appState.gui.themeColors,
                     encoder: appState.encoder
                 )
                 .offset(x: x, y: y)
@@ -608,7 +596,6 @@ struct ContentView: View {
             if appState.gui.signatureHelpState.visible {
                 SignatureHelpOverlay(
                     state: appState.gui.signatureHelpState,
-                    theme: appState.gui.themeColors,
                     cellWidth: overlayCW,
                     cellHeight: overlayCH,
                     viewportHeight: rightPaneHeight,
@@ -620,7 +607,6 @@ struct ContentView: View {
             if appState.gui.hoverPopupState.visible {
                 HoverPopupOverlay(
                     state: appState.gui.hoverPopupState,
-                    theme: appState.gui.themeColors,
                     cellWidth: overlayCW,
                     cellHeight: overlayCH,
                     viewportHeight: rightPaneHeight,
@@ -823,7 +809,6 @@ struct ContentView: View {
     private var statusBar: some View {
         StatusBarView(
             state: appState.gui.statusBarState,
-            theme: appState.gui.themeColors,
             encoder: appState.encoder,
             isFileTreeVisible: appState.gui.fileTreeState.visible,
             isGitStatusVisible: appState.gui.gitStatusState.visible,
@@ -855,8 +840,7 @@ struct ContentView: View {
             HStack {
                 Spacer()
                 WhichKeyOverlay(
-                    state: appState.gui.whichKeyState,
-                    theme: appState.gui.themeColors
+                    state: appState.gui.whichKeyState
                 )
                 Spacer()
             }
@@ -865,14 +849,12 @@ struct ContentView: View {
         // Picker overlay (floats over entire window)
         PickerOverlay(
             state: appState.gui.pickerState,
-            theme: appState.gui.themeColors,
             encoder: appState.encoder
         )
 
         // Tool manager overlay (floats over entire window)
         ToolManagerView(
             state: appState.gui.toolManagerState,
-            theme: appState.gui.themeColors,
             encoder: appState.encoder
         )
 
@@ -883,7 +865,6 @@ struct ContentView: View {
 
             FloatPopupOverlay(
                 state: appState.gui.floatPopupState,
-                theme: appState.gui.themeColors,
                 cellWidth: cw,
                 cellHeight: ch
             )
@@ -895,7 +876,6 @@ struct ContentView: View {
         // Notification stack (bottom-right, above regular workspace content).
         NotificationCenterView(
             state: appState.gui.notificationCenterState,
-            theme: appState.gui.themeColors,
             encoder: appState.encoder,
             bottomInset: notificationCenterBottomInset
         )
@@ -903,16 +883,14 @@ struct ContentView: View {
         // Keystroke-to-present latency HUD (ticket #2215). Top-right, client-local
         // debug overlay; visibility is owned by LatencyHUDState.
         LatencyHUDOverlay(
-            state: appState.gui.latencyHUDState,
-            theme: appState.gui.themeColors
+            state: appState.gui.latencyHUDState
         )
 
         // Frame-transaction resync hint (#2219 child D). Bottom-trailing badge
         // shown while a keyframe is in flight after an invalidation; the editor
         // keeps showing the last good frame underneath.
         ResyncOverlay(
-            state: appState.gui.resyncState,
-            theme: appState.gui.themeColors
+            state: appState.gui.resyncState
         )
 
         // Startup overlay: covers the empty Metal framebuffer with a
@@ -927,8 +905,7 @@ struct ContentView: View {
         // it takes precedence over the startup overlay and all content.
         if appState.gui.protocolErrorState.isPresented {
             ProtocolErrorOverlay(
-                state: appState.gui.protocolErrorState,
-                theme: appState.gui.themeColors
+                state: appState.gui.protocolErrorState
             )
         }
     }

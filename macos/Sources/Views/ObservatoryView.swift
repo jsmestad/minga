@@ -3,7 +3,7 @@ import SwiftUI
 /// Native sidebar for observing the live BEAM supervision tree.
 struct ObservatoryView: View {
     let state: ObservatoryState
-    let theme: ThemeColors
+    @Environment(ThemeColors.self) private var theme
     let encoder: InputEncoder?
 
     @State private var expandedNodeIds: Set<String> = []
@@ -225,5 +225,6 @@ struct ObservatoryView: View {
         Wire.ObservatoryNode(pid: "<0.1.0>", parentPid: "", name: "Minga.Supervisor", processClass: 0, depth: 0, memory: 125_000, messageQueueLen: 0, reductions: 42, sparkline: [0, 0.2, 0.1]),
         Wire.ObservatoryNode(pid: "<0.2.0>", parentPid: "<0.1.0>", name: "Minga.Buffer.Process", processClass: 1, depth: 1, memory: 42_000, messageQueueLen: 2, reductions: 1024, sparkline: [0, 0.4, 0.2])
     ])
-    return ObservatoryView(state: state, theme: ThemeColors(), encoder: nil)
+    return ObservatoryView(state: state, encoder: nil)
+        .environment(ThemeColors())
 }

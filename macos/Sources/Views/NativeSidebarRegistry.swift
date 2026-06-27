@@ -47,7 +47,6 @@ enum NativeSidebarRegistry {
         makeHeader: { context, _ in
             AnyView(FileTreeHeaderView(
                 fileTreeState: context.guiState.fileTreeState,
-                theme: context.theme,
                 encoder: context.encoder,
                 branchName: context.gitBranch,
                 leadingPadding: context.leadingPadding
@@ -56,7 +55,6 @@ enum NativeSidebarRegistry {
         makeBody: { context, _ in
             AnyView(FileTreeView(
                 fileTreeState: context.guiState.fileTreeState,
-                theme: context.theme,
                 encoder: context.encoder
             ))
         },
@@ -72,7 +70,6 @@ enum NativeSidebarRegistry {
         makeHeader: { context, _ in
             AnyView(GitStatusHeaderView(
                 state: context.guiState.gitStatusState,
-                theme: context.theme,
                 projectName: context.projectName,
                 leadingPadding: context.leadingPadding
             ))
@@ -80,7 +77,6 @@ enum NativeSidebarRegistry {
         makeBody: { context, _ in
             AnyView(GitStatusView(
                 state: context.guiState.gitStatusState,
-                theme: context.theme,
                 encoder: context.encoder
             ))
         },
@@ -98,12 +94,11 @@ enum NativeSidebarRegistry {
         kind: "observatory",
         fallbackIcon: "network",
         makeHeader: { context, item in
-            AnyView(ObservatorySidebarHeader(item: item, state: context.guiState.observatoryState, theme: context.theme, leadingPadding: context.leadingPadding))
+            AnyView(ObservatorySidebarHeader(item: item, state: context.guiState.observatoryState, leadingPadding: context.leadingPadding))
         },
         makeBody: { context, _ in
             AnyView(ObservatoryView(
                 state: context.guiState.observatoryState,
-                theme: context.theme,
                 encoder: context.encoder
             ))
         },
@@ -117,10 +112,10 @@ enum NativeSidebarRegistry {
         kind: "generic_fallback",
         fallbackIcon: "questionmark.square.dashed",
         makeHeader: { context, item in
-            AnyView(GenericSidebarFallbackHeader(item: item, theme: context.theme, leadingPadding: context.leadingPadding))
+            AnyView(GenericSidebarFallbackHeader(item: item, leadingPadding: context.leadingPadding))
         },
         makeBody: { context, item in
-            AnyView(GenericSidebarFallbackView(item: item, theme: context.theme))
+            AnyView(GenericSidebarFallbackView(item: item))
         },
         sendPrimaryAction: { encoder, item, isActive in
             encoder?.sendSidebarAction(sidebarId: item.id, kind: item.semanticKind, action: isActive ? "toggle" : "activate")
@@ -132,7 +127,7 @@ enum NativeSidebarRegistry {
 private struct ObservatorySidebarHeader: View {
     let item: SidebarItem
     let state: ObservatoryState
-    let theme: ThemeColors
+    @Environment(ThemeColors.self) private var theme
     let leadingPadding: CGFloat
 
     var body: some View {
@@ -159,7 +154,7 @@ private struct ObservatorySidebarHeader: View {
 
 private struct GenericSidebarFallbackHeader: View {
     let item: SidebarItem
-    let theme: ThemeColors
+    @Environment(ThemeColors.self) private var theme
     let leadingPadding: CGFloat
 
     var body: some View {
@@ -182,7 +177,7 @@ private struct GenericSidebarFallbackHeader: View {
 
 private struct GenericSidebarFallbackView: View {
     let item: SidebarItem
-    let theme: ThemeColors
+    @Environment(ThemeColors.self) private var theme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {

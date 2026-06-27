@@ -12,12 +12,12 @@ extension PreviewRegistry {
 
         return GitStatusView(
             state: state,
-            theme: theme,
             encoder: nil,
             usesPreviewEagerLayout: PreviewSnapshotPolicy.shouldUseEagerLayout(for: "GitStatusView")
         )
         .frame(width: 280, height: 600)
         .background(theme.treeBg)
+        .environment(theme)
     }
 
     static func gitStatusState() -> GitStatusState {
@@ -57,12 +57,12 @@ extension PreviewRegistry {
 
         return GitStatusView(
             state: state,
-            theme: theme,
             encoder: nil,
             usesPreviewEagerLayout: PreviewSnapshotPolicy.shouldUseEagerLayout(for: "GitStatusClean")
         )
         .frame(width: 280, height: 600)
         .background(theme.treeBg)
+        .environment(theme)
     }
 
     // MARK: - GitStatusConflict
@@ -86,12 +86,12 @@ extension PreviewRegistry {
 
         return GitStatusView(
             state: state,
-            theme: theme,
             encoder: nil,
             usesPreviewEagerLayout: PreviewSnapshotPolicy.shouldUseEagerLayout(for: "GitStatusConflict")
         )
         .frame(width: 280, height: 600)
         .background(theme.treeBg)
+        .environment(theme)
     }
 
     static func gitStatusConflictEntries() -> [GitStatusEntry] {
@@ -127,12 +127,12 @@ extension PreviewRegistry {
 
         return GitStatusView(
             state: state,
-            theme: theme,
             encoder: nil,
             usesPreviewEagerLayout: PreviewSnapshotPolicy.shouldUseEagerLayout(for: "GitStatusDense")
         )
         .frame(width: 280, height: 600)
         .background(theme.treeBg)
+        .environment(theme)
     }
 
     static func gitStatusDenseEntries() -> [GitStatusEntry] {

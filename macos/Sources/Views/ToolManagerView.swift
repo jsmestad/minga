@@ -10,7 +10,7 @@ import SwiftUI
 
 struct ToolManagerView: View {
     let state: ToolManagerState
-    let theme: ThemeColors
+    @Environment(ThemeColors.self) private var theme
     let encoder: InputEncoder?
 
     private let panelWidth: CGFloat = 680

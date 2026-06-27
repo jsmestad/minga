@@ -29,9 +29,10 @@ extension PreviewRegistry {
             rawMessages: PreviewFixtures.agentChatMessages()
         )
 
-        return AgentChatView(state: state, theme: theme, isInsertMode: true, encoder: nil, cellHeight: 18)
+        return AgentChatView(state: state, isInsertMode: true, encoder: nil, cellHeight: 18)
             .frame(width: width, height: height)
             .background(theme.agentPanelBg)
+            .environment(theme)
     }
 
     // MARK: - AgentChatStreaming
@@ -60,9 +61,10 @@ extension PreviewRegistry {
             ]
         )
 
-        return AgentChatView(state: state, theme: theme, isInsertMode: false, encoder: nil, cellHeight: 18)
+        return AgentChatView(state: state, isInsertMode: false, encoder: nil, cellHeight: 18)
             .frame(width: 760, height: 600)
             .background(theme.agentPanelBg)
+            .environment(theme)
     }
 
     // MARK: - AgentChatApproval
@@ -92,9 +94,10 @@ extension PreviewRegistry {
             ]
         )
 
-        return AgentChatView(state: state, theme: theme, isInsertMode: false, encoder: nil, cellHeight: 18)
+        return AgentChatView(state: state, isInsertMode: false, encoder: nil, cellHeight: 18)
             .frame(width: 760, height: 600)
             .background(theme.agentPanelBg)
+            .environment(theme)
     }
 
     // MARK: - AgentChatError
@@ -126,9 +129,10 @@ extension PreviewRegistry {
             ]
         )
 
-        return AgentChatView(state: state, theme: theme, isInsertMode: false, encoder: nil, cellHeight: 18)
+        return AgentChatView(state: state, isInsertMode: false, encoder: nil, cellHeight: 18)
             .frame(width: 760, height: 600)
             .background(theme.agentPanelBg)
+            .environment(theme)
     }
 
     // MARK: - AgentChatCompletion
@@ -168,9 +172,10 @@ extension PreviewRegistry {
             ]
         )
 
-        return AgentChatView(state: state, theme: theme, isInsertMode: true, encoder: nil, cellHeight: 18)
+        return AgentChatView(state: state, isInsertMode: true, encoder: nil, cellHeight: 18)
             .frame(width: 760, height: 600)
             .background(theme.agentPanelBg)
+            .environment(theme)
     }
 
     // MARK: - AgentChatSummary
@@ -204,8 +209,9 @@ extension PreviewRegistry {
             ]
         )
 
-        return AgentChatView(state: state, theme: theme, isInsertMode: false, encoder: nil, cellHeight: 18)
+        return AgentChatView(state: state, isInsertMode: false, encoder: nil, cellHeight: 18)
             .frame(width: 760, height: 600)
             .background(theme.agentPanelBg)
+            .environment(theme)
     }
 }

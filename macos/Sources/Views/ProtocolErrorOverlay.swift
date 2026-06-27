@@ -9,7 +9,7 @@ import SwiftUI
 
 struct ProtocolErrorOverlay: View {
     var state: ProtocolErrorState
-    var theme: ThemeColors
+    @Environment(ThemeColors.self) private var theme
 
     var body: some View {
         if let message = state.message {

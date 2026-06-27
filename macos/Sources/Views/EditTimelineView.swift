@@ -2,7 +2,7 @@ import SwiftUI
 
 struct EditTimelineView: View {
     let state: EditTimelineState
-    let themeColors: ThemeColors
+    @Environment(ThemeColors.self) private var themeColors
     let encoder: InputEncoder?
 
     var body: some View {

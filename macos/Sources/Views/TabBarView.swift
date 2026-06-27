@@ -29,7 +29,7 @@ struct TabContextMenuMoveItem: Identifiable, Equatable {
 /// The tab bar strip rendered above the editor area.
 struct TabBarView: View {
     let tabBarState: TabBarState
-    let theme: ThemeColors
+    @Environment(ThemeColors.self) private var theme
     let encoder: InputEncoder?
 
     @State private var hoverTabId: UInt32?
@@ -310,8 +310,7 @@ struct TabBarView: View {
                 .popover(isPresented: $showIconPicker, arrowEdge: .bottom) {
                     WorkspaceIconPicker(
                         currentIcon: workspace.icon,
-                        accentColor: workspace.color,
-                        theme: theme
+                        accentColor: workspace.color
                     ) { selectedIcon in
                         showIconPicker = false
                         encoder?.sendWorkspaceSetIcon(id: workspace.id, icon: selectedIcon)

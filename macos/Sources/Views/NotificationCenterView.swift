@@ -5,14 +5,14 @@ import SwiftUI
 /// Renders editor notifications owned by the BEAM.
 struct NotificationCenterView: View {
     let state: NotificationCenterState
-    let theme: ThemeColors
+    @Environment(ThemeColors.self) private var theme
     let encoder: InputEncoder?
     let bottomInset: CGFloat
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 10) {
             ForEach(state.notifications) { notification in
-                NotificationCard(notification: notification, theme: theme, encoder: encoder)
+                NotificationCard(notification: notification, encoder: encoder)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
@@ -26,7 +26,7 @@ struct NotificationCenterView: View {
 
 private struct NotificationCard: View {
     let notification: EditorNotification
-    let theme: ThemeColors
+    @Environment(ThemeColors.self) private var theme
     let encoder: InputEncoder?
 
     var body: some View {
@@ -170,9 +170,10 @@ private struct NotificationCard: View {
             ]
         ),
     ])
-    return NotificationCenterView(state: state, theme: theme, encoder: nil, bottomInset: 40)
+    return NotificationCenterView(state: state, encoder: nil, bottomInset: 40)
         .frame(width: 800, height: 600)
         .background(theme.editorBg)
+        .environment(theme)
 }
 
 #Preview("Notification Stack") {
@@ -219,7 +220,8 @@ private struct NotificationCard: View {
             actions: []
         ),
     ])
-    return NotificationCenterView(state: state, theme: theme, encoder: nil, bottomInset: 40)
+    return NotificationCenterView(state: state, encoder: nil, bottomInset: 40)
         .frame(width: 800, height: 600)
         .background(theme.editorBg)
+        .environment(theme)
 }

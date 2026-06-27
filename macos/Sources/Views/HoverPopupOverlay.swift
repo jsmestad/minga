@@ -27,7 +27,7 @@ private struct HoverWidthKey: PreferenceKey {
 
 struct HoverPopupOverlay: View {
     let state: HoverPopupState
-    let theme: ThemeColors
+    @Environment(ThemeColors.self) private var theme
     let cellWidth: CGFloat
     let cellHeight: CGFloat
     let viewportHeight: CGFloat

@@ -11,7 +11,7 @@ import SwiftUI
 
 struct ResyncOverlay: View {
     var state: ResyncState
-    var theme: ThemeColors
+    @Environment(ThemeColors.self) private var theme
 
     var body: some View {
         if state.pending {

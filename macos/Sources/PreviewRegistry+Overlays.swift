@@ -8,12 +8,13 @@ extension PreviewRegistry {
     static func completionPreview() -> some View {
         let theme = PreviewFixtures.theme()
 
-        return completionPopupPreview(theme: theme)
+        return completionPopupPreview()
             .frame(width: 400, height: 300)
             .background(theme.editorBg)
+            .environment(theme)
     }
 
-    static func completionPopupPreview(theme: ThemeColors) -> some View {
+    static func completionPopupPreview() -> some View {
         let state = CompletionState()
         state.update(
             visible: true, anchorRow: 5, anchorCol: 10, selectedIndex: 1,
@@ -27,7 +28,7 @@ extension PreviewRegistry {
             documentation: "Defines a struct for the module.\n\nFields are given as a keyword list."
         )
 
-        return CompletionOverlay(state: state, theme: theme, encoder: nil)
+        return CompletionOverlay(state: state, encoder: nil)
     }
 
     // MARK: - PickerOverlay
@@ -57,10 +58,11 @@ extension PreviewRegistry {
 
         return ZStack {
             theme.editorBg
-            PickerOverlay(state: state, theme: theme, encoder: nil)
+            PickerOverlay(state: state, encoder: nil)
         }
         .frame(width: 600, height: 400)
         .clipped()
+        .environment(theme)
     }
 
     // MARK: - MinibufferView
@@ -84,9 +86,10 @@ extension PreviewRegistry {
             ]
         )
 
-        return MinibufferView(state: state, theme: theme, encoder: nil)
+        return MinibufferView(state: state, encoder: nil)
             .frame(width: 600, height: 140)
             .background(theme.editorBg)
+            .environment(theme)
     }
 
     // MARK: - WhichKeyOverlay
@@ -115,9 +118,10 @@ extension PreviewRegistry {
             ]
         )
 
-        return WhichKeyOverlay(state: state, theme: theme)
+        return WhichKeyOverlay(state: state)
             .frame(width: 520, height: 300)
             .background(theme.editorBg)
+            .environment(theme)
     }
 
     // MARK: - WhichKeyPaged
@@ -144,9 +148,10 @@ extension PreviewRegistry {
             ]
         )
 
-        return WhichKeyOverlay(state: state, theme: theme)
+        return WhichKeyOverlay(state: state)
             .frame(width: 520, height: 300)
             .background(theme.editorBg)
+            .environment(theme)
     }
 
     // MARK: - SearchToolbar
@@ -156,9 +161,10 @@ extension PreviewRegistry {
         let state = SearchState()
         state.update(active: true, matchCount: 12, currentIndex: 3, flags: 0)
 
-        return SearchToolbar(searchState: state, theme: theme, encoder: nil)
+        return SearchToolbar(searchState: state, encoder: nil)
             .frame(width: 800, height: 40)
             .background(theme.editorBg)
+            .environment(theme)
     }
 
     // MARK: - HoverPopupOverlay
@@ -202,9 +208,10 @@ extension PreviewRegistry {
             ]
         )
 
-        return HoverPopupOverlay(state: state, theme: theme, cellWidth: 8, cellHeight: 18, viewportHeight: 300, viewportWidth: 500, encoder: nil)
+        return HoverPopupOverlay(state: state, cellWidth: 8, cellHeight: 18, viewportHeight: 300, viewportWidth: 500, encoder: nil)
             .frame(width: 500, height: 300)
             .background(theme.editorBg)
+            .environment(theme)
     }
 
     // MARK: - SignatureHelpOverlay
@@ -228,9 +235,10 @@ extension PreviewRegistry {
             ]
         )
 
-        return SignatureHelpOverlay(state: state, theme: theme, cellWidth: 8, cellHeight: 18, viewportHeight: 200, viewportWidth: 500)
+        return SignatureHelpOverlay(state: state, cellWidth: 8, cellHeight: 18, viewportHeight: 200, viewportWidth: 500)
             .frame(width: 500, height: 200)
             .background(theme.editorBg)
+            .environment(theme)
     }
 
     // MARK: - LatencyHUDOverlay
@@ -240,17 +248,19 @@ extension PreviewRegistry {
         let state = LatencyHUDState(environment: ["MINGA_LATENCY_HUD": "1"])
         state.stats = LatencyRecorder.Stats(count: 128, p50Micros: 812, p99Micros: 2450, maxMicros: 5100)
 
-        return LatencyHUDOverlay(state: state, theme: theme)
+        return LatencyHUDOverlay(state: state)
             .frame(width: 520, height: 120)
             .background(theme.editorBg)
+            .environment(theme)
     }
 
     static func latencyHUDEmptyPreview() -> some View {
         let theme = PreviewFixtures.theme()
         let state = LatencyHUDState(environment: ["MINGA_LATENCY_HUD": "1"])
 
-        return LatencyHUDOverlay(state: state, theme: theme)
+        return LatencyHUDOverlay(state: state)
             .frame(width: 520, height: 120)
             .background(theme.editorBg)
+            .environment(theme)
     }
 }
