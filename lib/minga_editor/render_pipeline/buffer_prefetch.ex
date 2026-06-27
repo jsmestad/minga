@@ -363,7 +363,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   end
 
   defp half_split(total) do
-    half = div(total, 2)
+    half = max(1, div(total, 2))
     {half, total - half}
   end
 

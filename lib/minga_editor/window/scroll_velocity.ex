@@ -73,6 +73,8 @@ defmodule MingaEditor.Window.ScrollVelocity do
   def direction(%__MODULE__{} = sv, now_ms) when now_ms - sv.last_event > @decay_ms,
     do: :ambiguous
 
+  def direction(%__MODULE__{recent_dirs: []}, _now_ms), do: :ambiguous
+
   def direction(%__MODULE__{recent_dirs: dirs}, _now_ms) do
     downs = Enum.count(dirs, &(&1 == :down))
     ups = Enum.count(dirs, &(&1 == :up))
