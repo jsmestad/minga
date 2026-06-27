@@ -161,7 +161,8 @@ func maxPresentationLeft(window protocol.WindowContent) int {
 }
 
 func (m Model) presentationScrollWindowAt(x int, y int) (uint16, bool) {
-	return m.presentationScrollWindowAtBody(x-m.leftChromeWidth(), y-m.renderedHeaderHeight)
+	bodyX, bodyY := m.layout.body.Translate(x, y)
+	return m.presentationScrollWindowAtBody(bodyX, bodyY)
 }
 
 func (m Model) presentationScrollWindowAtBody(x int, y int) (uint16, bool) {

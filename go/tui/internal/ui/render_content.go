@@ -141,7 +141,7 @@ func (m Model) normalizeChromeGeometry(row int, col int) (int, int) {
 }
 
 func (m Model) semanticContentOffsets() (int, int) {
-	return len(m.headerLines()), m.leftChromeWidth()
+	return m.layout.header.Height, m.layout.leftPane.Width
 }
 
 func (m Model) leftChromeWidth() int {
