@@ -342,22 +342,19 @@ func (m Model) renderCompletion(completion protocol.Completion) []string {
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupChrome()).Width(width).ColorWhitespace(true)
 	lines := []string{renderPadded(titleStyle, " Completion", width)}
 
-	// When the selected item carries LSP documentation, reserve a slice of the
-	// overlay budget for a preview pane below the item list. Items without docs
-	// reserve nothing, so the list renders exactly as before (no layout shift).
+	// The doc pane renders for the BEAM-committed selection (two-index split:
+	// highlight follows local preview, docs follow committed).
 	doc := strings.TrimSpace(completion.Documentation)
 	docLines := []string(nil)
 	if doc != "" {
 		docLines = m.renderCompletionDocPane(doc, width, height-1)
-		// The pane must never starve the item list: at extreme overlay
-		// heights, showing the item being selected beats showing its docs.
 		if height-1-len(docLines) < 1 {
 			docLines = nil
 		}
 	}
 
 	rowBudget := max(height-1-len(docLines), 0)
-	selected := min(max(int(completion.Selected), 0), max(len(completion.Items)-1, 0))
+	selected := m.effectiveCompletionIndex(completion)
 	start := 0
 	if selected >= rowBudget && rowBudget > 0 {
 		start = selected - rowBudget + 1

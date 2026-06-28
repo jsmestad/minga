@@ -273,7 +273,7 @@ func (m Model) presentationSourceStart(window protocol.WindowContent, height int
 	before, _ := presentationPayloadOverscanBounds(window, height)
 	maxStart := max(len(window.Rows)-height, 0)
 	start := min(before, maxStart)
-	if scroll, ok := m.presentationScroll[window.ID]; ok && scroll.contentEpoch == window.Scroll.ContentEpoch && scroll.layoutGeneration == window.Scroll.LayoutGeneration && scroll.anchorTop == window.Scroll.AnchorTop && scroll.anchorLeft == window.Scroll.AnchorLeft {
+	if scroll, ok := m.localPresentation.scrolls[window.ID]; ok && scroll.keysMatch(window.Scroll) {
 		start += scroll.rowOffset
 	}
 	return min(max(start, 0), maxStart)
@@ -366,8 +366,8 @@ func (m Model) renderScrollbarCell(rowIndex int, sb scrollbarState) string {
 
 func (m Model) presentationScrollEffectiveLeft(window protocol.WindowContent) int {
 	scrollLeft := int(window.ScrollLeft)
-	scroll, ok := m.presentationScroll[window.ID]
-	if !ok || scroll.contentEpoch != window.Scroll.ContentEpoch || scroll.layoutGeneration != window.Scroll.LayoutGeneration || scroll.anchorTop != window.Scroll.AnchorTop || scroll.anchorLeft != window.Scroll.AnchorLeft {
+	scroll, ok := m.localPresentation.scrolls[window.ID]
+	if !ok || !scroll.keysMatch(window.Scroll) {
 		return scrollLeft
 	}
 	return max(scrollLeft+scroll.colOffset, 0)
@@ -837,6 +837,7 @@ func (m Model) renderFileTree(tree protocol.FileTree, width int, height int) []s
 			lines = append(lines, contentStyle.Foreground(theme.TreeMutedText()).Render(fit(" "+status, contentWidth)))
 		}
 	}
+	previewIdx := m.localPresentation.previewFileTreeIndex
 
 	scrollOffset := 0
 	if needsScrollbar {
@@ -854,6 +855,10 @@ func (m Model) renderFileTree(tree protocol.FileTree, width int, height int) []s
 	for i := 0; i < visibleRows && scrollOffset+i < totalRows; i++ {
 		rowIndex := scrollOffset + i
 		row := tree.Rows[rowIndex]
+		if previewIdx != nil {
+			row.Selected = rowIndex == *previewIdx
+			row.Focused = rowIndex == *previewIdx
+		}
 		rendered := m.renderFileTreeRow(row, contentWidth)
 		line := m.zones.Mark(zoneIDFileTreeRow(rowIndex), rendered)
 		if needsScrollbar {

@@ -813,11 +813,11 @@ struct CommandDispatcherRoutingTests {
         #expect(resetCount == 2)
     }
 
-    @Test("layoutGeneration-only change fires scroll presentation reset")
-    @MainActor func layoutGenerationOnlyChangeFiresReset() {
-        let (dispatcher, gui) = makeDispatcher()
-        var resetCount = 0
-        dispatcher.onScrollPresentationReset = { resetCount += 1 }
+    @Test("layoutGeneration-only change fires scroll presentation discard")
+    @MainActor func layoutGenerationChangeFiresDiscard() {
+        let (dispatcher, _) = makeDispatcher()
+        var discardCount = 0
+        dispatcher.onScrollPresentationReset = { discardCount += 1 }
 
         let base = GUIScrollPresentation(
             windowId: 7, resetRequired: false,
@@ -835,7 +835,7 @@ struct CommandDispatcherRoutingTests {
             documentHighlights: [],
             scrollPresentation: base
         )))
-        #expect(resetCount == 0)
+        #expect(discardCount == 0)
 
         let bumped = GUIScrollPresentation(
             windowId: 7, resetRequired: false,
@@ -853,14 +853,14 @@ struct CommandDispatcherRoutingTests {
             documentHighlights: [],
             scrollPresentation: bumped
         )))
-        #expect(resetCount == 1)
+        #expect(discardCount == 1)
     }
 
-    @Test("identical anchor key does not fire scroll presentation reset")
-    @MainActor func identicalAnchorKeyDoesNotFireReset() {
+    @Test("identical anchor key does not fire scroll presentation discard")
+    @MainActor func identicalAnchorKeyDoesNotDiscard() {
         let (dispatcher, _) = makeDispatcher()
-        var resetCount = 0
-        dispatcher.onScrollPresentationReset = { resetCount += 1 }
+        var discardCount = 0
+        dispatcher.onScrollPresentationReset = { discardCount += 1 }
 
         let presentation = GUIScrollPresentation(
             windowId: 7, resetRequired: false,
@@ -878,7 +878,7 @@ struct CommandDispatcherRoutingTests {
             documentHighlights: [],
             scrollPresentation: presentation
         )))
-        #expect(resetCount == 0)
+        #expect(discardCount == 0)
 
         dispatcher.applyForTesting(.guiWindowContent(data: GUIWindowContent(
             windowId: 7, fullRefresh: true, contentEpoch: 42,
@@ -888,14 +888,14 @@ struct CommandDispatcherRoutingTests {
             documentHighlights: [],
             scrollPresentation: presentation
         )))
-        #expect(resetCount == 0)
+        #expect(discardCount == 0)
     }
 
-    @Test("anchorTop-only change fires scroll presentation reset")
-    @MainActor func anchorTopOnlyChangeFiresReset() {
-        let (dispatcher, gui) = makeDispatcher()
-        var resetCount = 0
-        dispatcher.onScrollPresentationReset = { resetCount += 1 }
+    @Test("anchorTop-only change fires scroll presentation discard")
+    @MainActor func anchorTopChangeFiresDiscard() {
+        let (dispatcher, _) = makeDispatcher()
+        var discardCount = 0
+        dispatcher.onScrollPresentationReset = { discardCount += 1 }
 
         let base = GUIScrollPresentation(
             windowId: 7, resetRequired: false,
@@ -913,7 +913,7 @@ struct CommandDispatcherRoutingTests {
             documentHighlights: [],
             scrollPresentation: base
         )))
-        #expect(resetCount == 0)
+        #expect(discardCount == 0)
 
         let shifted = GUIScrollPresentation(
             windowId: 7, resetRequired: false,
@@ -931,7 +931,7 @@ struct CommandDispatcherRoutingTests {
             documentHighlights: [],
             scrollPresentation: shifted
         )))
-        #expect(resetCount == 1)
+        #expect(discardCount == 1)
     }
 
     @Test("guiWindowOverlayDelta updates matching retained content")
