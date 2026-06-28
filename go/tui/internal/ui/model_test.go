@@ -2299,14 +2299,13 @@ func TestSemanticMouseRoutesNotificationDismissAndActionZones(t *testing.T) {
 		}},
 	}
 	// Notifications is registry-placed (#2281): it renders at its BEAM placement
-	// rect and its zones are scanned from there. Height 4 is the BEAM-derived
-	// value for this state, NOT an arbitrary fit: FooterOverlays computes
-	// 1 (title bar) + 2*items + items_with_actions = 1 + 2 + 1 = 4 (#2333).
-	// If the renderer ever emits more rows than that formula counts, takeLines
-	// clips the extra rows and their zones never register -- which is exactly
-	// the production bug this height models, so keep the two in lockstep.
+	// rect and its zones are scanned from there. Height 6 accounts for the
+	// content rows (1 title + 2*items + items_with_actions = 1 + 2 + 1 = 4)
+	// plus 2 for the rounded border frame (#2538). If the renderer ever emits
+	// more rows than that formula counts, takeLines clips the extra rows and
+	// their zones never register, so keep the two in lockstep.
 	model.surfacePlacements = []generated.SurfacePlacement{
-		{SurfaceID: surfaceIDNotifications, Rect: generated.Rect{Row: 20, Col: 0, Width: 60, Height: 4}, Z: 160, HitKind: 8},
+		{SurfaceID: surfaceIDNotifications, Rect: generated.Rect{Row: 20, Col: 0, Width: 60, Height: 6}, Z: 160, HitKind: 8},
 	}
 	model.viewport.SetContent(model.content())
 	_ = model.View()
@@ -2315,8 +2314,8 @@ func TestSemanticMouseRoutesNotificationDismissAndActionZones(t *testing.T) {
 	// absolute coords come from the bottom-aligned placement, proving the overlay
 	// zones merge at the placement offset (ScanInto).
 	dismiss := waitForZone(t, model, zoneIDNotificationDismiss("build:test"))
-	if dismiss.StartY < 20 || dismiss.StartY >= 24 {
-		t.Fatalf("dismiss zone Y %d outside the notifications band rows 20..23", dismiss.StartY)
+	if dismiss.StartY < 20 || dismiss.StartY >= 26 {
+		t.Fatalf("dismiss zone Y %d outside the notifications band rows 20..25", dismiss.StartY)
 	}
 	cmd, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: dismiss.StartX, Y: dismiss.StartY}))
 	if !ok || !bytes.Equal(cmd, protocol.EncodeGUINotificationDismiss("build:test")) {
@@ -2352,7 +2351,7 @@ func TestNotificationDismissZoneAbsentWhenNotDismissable(t *testing.T) {
 		}},
 	}
 	model.surfacePlacements = []generated.SurfacePlacement{
-		{SurfaceID: surfaceIDNotifications, Rect: generated.Rect{Row: 21, Col: 0, Width: 60, Height: 3}, Z: 160, HitKind: 8},
+		{SurfaceID: surfaceIDNotifications, Rect: generated.Rect{Row: 21, Col: 0, Width: 60, Height: 5}, Z: 160, HitKind: 8},
 	}
 	model.viewport.SetContent(model.content())
 	_ = model.View()
@@ -2577,7 +2576,9 @@ func TestCompletionWithoutDocumentationRendersNoPreviewPane(t *testing.T) {
 	if len(withoutDoc) >= len(withDoc) {
 		t.Fatalf("doc preview should add lines: withDoc=%d withoutDoc=%d", len(withDoc), len(withoutDoc))
 	}
-	itemRow := ansi.Strip(withoutDoc[1])
+	// The border adds a top row (index 0) and a bottom row, so the first item
+	// row is at index 2 (border top + title + first item).
+	itemRow := ansi.Strip(withoutDoc[2])
 	if !strings.Contains(itemRow, "map") {
 		t.Fatalf("expected first item row to render the label, got: %q", itemRow)
 	}

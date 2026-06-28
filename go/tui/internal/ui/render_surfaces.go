@@ -621,21 +621,48 @@ func tableCellsText(cells []tableCell) string {
 // matching the BEAM content-height model (FooterOverlays.content_height_
 // notifications = 1 + 2*items); an item with inline actions adds one actions
 // row, the documented per-item slack the band ceiling clamps.
+//
+// The content is wrapped in a rounded border with drop shadow matching the
+// picker/which-key popup styling (#2538). The border adds 2 to height and 4 to
+// width (2 border chars + 2 padding chars); the BEAM placement rect must
+// account for this overhead so overlayLayer does not clip the border frame.
 func (m Model) renderNotifications(notes protocol.Notifications) []string {
 	height := m.maxOverlayHeight()
 	width := max(m.width, 1)
 	theme := m.palette()
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupChrome()).Width(width).ColorWhitespace(true)
-	lines := []string{renderPadded(titleStyle, "  Notifications", width)}
+
+	// Content dimensions account for the rounded border frame. The border adds
+	// 1 column on each side (2 total) and Padding(0,1) adds 1 column on each
+	// side (2 more), for 4 columns of width overhead. Height adds 1 row for the
+	// top border and 1 for the bottom border (2 total).
+	contentWidth := max(width-4, 1)
+	contentHeight := max(height-2, 1)
+
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupChrome()).Width(contentWidth).ColorWhitespace(true)
+	lines := []string{renderPadded(titleStyle, " Notifications", contentWidth)}
 
 	for _, note := range notes.Items {
-		lines = append(lines, m.renderNotificationHeaderRow(note, width))
-		lines = append(lines, m.renderNotificationBodyRow(note, width))
+		lines = append(lines, m.renderNotificationHeaderRow(note, contentWidth))
+		lines = append(lines, m.renderNotificationBodyRow(note, contentWidth))
 		if len(note.Actions) > 0 {
-			lines = append(lines, m.renderNotificationActionsRow(note, width))
+			lines = append(lines, m.renderNotificationActionsRow(note, contentWidth))
 		}
 	}
-	return takeLines(lines, height)
+	lines = takeLines(lines, contentHeight)
+
+	// Wrap in rounded border matching picker/which-key popup styling.
+	content := strings.Join(lines, "\n")
+	bordered := lipgloss.NewStyle().
+		Width(contentWidth).
+		Padding(0, 1).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme.PopupBorder()).
+		BorderBackground(theme.PopupSurface()).
+		Background(theme.PopupSurface()).
+		ColorWhitespace(true).
+		Render(content)
+
+	return strings.Split(bordered, "\n")
 }
 
 // renderNotificationHeaderRow draws a notification's title and, when the

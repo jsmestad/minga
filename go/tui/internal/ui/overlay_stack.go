@@ -20,7 +20,9 @@ func (m Model) modalOverlayActive() bool {
 func (m Model) floatingOverlayLayers() []*lipgloss.Layer {
 	var layers []*lipgloss.Layer
 	if overlay := m.overlayLayer(); overlay != nil {
-		layers = append(layers, overlay)
+		// Drop shadow behind bordered overlays (completion #2534, notifications
+		// #2538): same popupShadow treatment that which-key and picker get.
+		layers = append(layers, popupShadow(overlay)...)
 	}
 	if which := m.floatingWhichKeyLayer(); which != nil {
 		layers = append(layers, popupShadow(which)...)
