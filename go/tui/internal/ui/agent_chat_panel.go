@@ -1096,7 +1096,7 @@ func (m Model) renderAgentComposer(chat protocol.AgentChat, width int) []string 
 		borderColor = markerColor
 	}
 	border := lipgloss.NewStyle().Foreground(borderColor).Background(m.editorBackground())
-	title := lipgloss.NewStyle().Bold(true).Foreground(p.Muted()).Background(m.editorBackground()).Render(" Prompt ")
+	title := lipgloss.NewStyle().Bold(true).Foreground(p.Muted()).Background(m.editorBackground()).Render(" " + agentComposerTitle(chat) + " ")
 	top := border.Render("╭") + title + border.Render(strings.Repeat("─", max(width-2-lipgloss.Width(title), 0))+"╮")
 	innerWidth := max(width-2, 1)
 	marker := lipgloss.NewStyle().Bold(true).Foreground(markerColor).Background(m.editorBackground()).Render("❯")
@@ -1136,6 +1136,20 @@ func agentPromptModeName(mode byte) string {
 		return "REPLACE"
 	default:
 		return "NORMAL"
+	}
+}
+
+func agentComposerTitle(chat protocol.AgentChat) string {
+	if chat.Pending != "" {
+		return "Approval needed"
+	}
+	switch chat.Status {
+	case 1, 2:
+		return "Running..."
+	case 3:
+		return "Error"
+	default:
+		return "Prompt"
 	}
 }
 
