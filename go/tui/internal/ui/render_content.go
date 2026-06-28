@@ -1025,13 +1025,17 @@ func (m Model) renderFileTreeRow(row protocol.FileTreeRow, width int, guides fil
 		iconStyle = iconStyle.Foreground(lipgloss.Color(icon.color))
 	}
 	nameStyle := rowStyle
+	if row.Dirty && !row.Selected {
+		nameStyle = nameStyle.Foreground(theme.TreeGitModified())
+	}
 	if row.Selected || row.Directory {
 		nameStyle = nameStyle.Bold(true)
 	}
 	nameRendered := renderFileTreeName(row.Name, row.MatchPositions, nameStyle, theme.Accent())
 	content := markerStyle.Render(selectionMarker) + guideStyle.Render(guidePrefix) + markerStyle.Render(expander) + rowStyle.Render(" ") + iconStyle.Render(icon.glyph) + rowStyle.Render(" ") + nameRendered
 	if row.Dirty {
-		dirty := lipgloss.NewStyle().Foreground(theme.Warning()).Background(rowBackground).Render("●")
+		dirtyColor := theme.TreeGitModified()
+		dirty := lipgloss.NewStyle().Foreground(dirtyColor).Background(rowBackground).Render("●")
 		space := strings.Repeat(" ", max(width-lipgloss.Width(content)-lipgloss.Width(dirty), 1))
 		content += rowStyle.Render(space) + dirty
 	} else if remaining := width - lipgloss.Width(content); remaining > 0 {

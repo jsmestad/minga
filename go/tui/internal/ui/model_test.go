@@ -1498,6 +1498,30 @@ func TestFileTreeSelectedRowPaintsBackgroundAcrossSegments(t *testing.T) {
 	}
 }
 
+func TestFileTreeDirtyRowUsesGitModifiedColor(t *testing.T) {
+	model := New(40, 8, nil)
+	rendered := model.renderFileTreeRow(protocol.FileTreeRow{Name: "main.go", Dirty: true}, 30, fileTreeRowGuides{})
+	// TreeGitModified bootstrap color is 0xE5C07B = rgb(229,192,123).
+	// The dirty indicator and filename should use this instead of the
+	// Warning color (0xFFAA00 = rgb(255,170,0)).
+	if !strings.Contains(rendered, "38;2;229;192;123") {
+		t.Fatalf("dirty file-tree row should use TreeGitModified color (229,192,123), got %q", rendered)
+	}
+	if strings.Contains(rendered, "38;2;255;170;0") {
+		t.Fatalf("dirty file-tree row should not use Warning color (255,170,0), got %q", rendered)
+	}
+}
+
+func TestFileTreeDirtySelectedRowKeepsSelectionColors(t *testing.T) {
+	model := New(40, 8, nil)
+	rendered := model.renderFileTreeRow(protocol.FileTreeRow{Name: "main.go", Dirty: true, Selected: true}, 30, fileTreeRowGuides{})
+	// TreeSelectionText bootstrap color is 0xFFFFFF = rgb(255,255,255).
+	// Dirty+selected rows should use selection text, not git-modified for the name.
+	if !strings.Contains(rendered, "38;2;255;255;255") {
+		t.Fatalf("dirty+selected file-tree row should use selection text color, got %q", rendered)
+	}
+}
+
 func TestFileTreeMatchHighlightAccentsMatchedCharacters(t *testing.T) {
 	model := New(40, 8, nil, nil)
 	_ = model.applyCommands(frame(testThemeCommand()))
