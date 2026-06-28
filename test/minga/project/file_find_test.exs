@@ -59,15 +59,15 @@ defmodule Minga.Project.FileFindTest do
       File.mkdir_p!(Path.join(tmp_dir, "lib/sub"))
       File.write!(Path.join(tmp_dir, "lib/sub/deep.ex"), "deep")
 
-      server = Minga.Config.Options.default_server()
-      original_excludes = Minga.Config.Options.get(server, :file_find_excludes)
+      {:ok, options_server} = start_supervised({Minga.Config.Options, name: nil})
+      Process.put(:minga_config_options, options_server)
 
       on_exit(fn ->
-        Minga.Config.Options.set(server, :file_find_excludes, original_excludes)
+        Process.delete(:minga_config_options)
         File.rm_rf!(tmp_dir)
       end)
 
-      %{tmp_dir: tmp_dir}
+      %{tmp_dir: tmp_dir, options_server: options_server}
     end
 
     test "returns a list of relative file paths", %{tmp_dir: tmp_dir} do
@@ -107,14 +107,14 @@ defmodule Minga.Project.FileFindTest do
       end
     end
 
-    test "excludes directories listed in file_find_excludes", %{tmp_dir: tmp_dir} do
+    test "excludes directories listed in file_find_excludes", %{tmp_dir: tmp_dir, options_server: options_server} do
       File.mkdir_p!(Path.join(tmp_dir, "node_modules/pkg"))
       File.write!(Path.join(tmp_dir, "node_modules/pkg/index.js"), "module.exports = {}")
       File.mkdir_p!(Path.join(tmp_dir, "vendor/lib"))
       File.write!(Path.join(tmp_dir, "vendor/lib/dep.ex"), "defmodule Dep do\nend")
 
       Minga.Config.Options.set(
-        Minga.Config.Options.default_server(),
+        options_server,
         :file_find_excludes,
         ["node_modules", "vendor"]
       )
@@ -127,12 +127,12 @@ defmodule Minga.Project.FileFindTest do
       assert "lib/app.ex" in files
     end
 
-    test "excludes file names listed in file_find_excludes", %{tmp_dir: tmp_dir} do
+    test "excludes file names listed in file_find_excludes", %{tmp_dir: tmp_dir, options_server: options_server} do
       File.write!(Path.join(tmp_dir, ".DS_Store"), "")
       File.write!(Path.join(tmp_dir, "lib/.DS_Store"), "")
 
       Minga.Config.Options.set(
-        Minga.Config.Options.default_server(),
+        options_server,
         :file_find_excludes,
         [".DS_Store"]
       )
