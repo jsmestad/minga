@@ -60,6 +60,7 @@ type Model struct {
 	extensionRuntimes     map[string]protocol.ExtensionRuntimePayload
 	bottomPanelScrollback int
 	agent                 agentPanel
+	feedback              feedbackState
 	// latency records end-to-end keystroke-to-write samples (ticket #2215).
 	// It is a pointer so the recorder persists across value-copied Model
 	// updates. hudVisible toggles the on-screen p50/p99 overlay at runtime.
@@ -106,17 +107,8 @@ type Model struct {
 	// overlayLines() precedence chain; the rects equal what BEAM mouse
 	// hit-testing uses. Surfaces not yet promoted into the BEAM surface registry
 	// keep a reduced hand-ordered chain (transitional split, see overlayLines).
-	surfacePlacements  []generated.SurfacePlacement
-	presentationScroll map[uint16]presentationScroll
-}
-
-type presentationScroll struct {
-	anchorTop        uint32
-	anchorLeft       uint16
-	contentEpoch     uint32
-	layoutGeneration uint32
-	rowOffset        int
-	colOffset        int
+	surfacePlacements []generated.SurfacePlacement
+	localPresentation localPresentation
 }
 
 // frameStaging is the open frame transaction buffer (#2219). It lives only
@@ -151,9 +143,9 @@ func New(width, height uint16, out chan<- []byte) Model {
 		latency:           latency.New(),
 		// MINGA_LATENCY_HUD=1 shows the latency overlay at boot; it is also
 		// toggled at runtime with ctrl+alt+l (ticket #2215).
-		hudVisible:         latencyHUDEnvEnabled(),
-		lineCache:          newLineCache(),
-		presentationScroll: map[uint16]presentationScroll{},
+		hudVisible:        latencyHUDEnvEnabled(),
+		lineCache:         newLineCache(),
+		localPresentation: newLocalPresentation(),
 	}
 	// Seed the layout so the first mouse event lands in the correct
 	// region before the first BEAM frame arrives.
@@ -218,7 +210,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if packet, ok := keyPacket(msg, seq); ok {
 			m.send(packet)
 		}
-		m.previewFileTreeNavigation(msg)
+		m.previewCompletionNavigation(msg)
+		m.previewPickerNavigation(msg)
+		if !m.modalOverlayActive() {
+			m.previewFileTreeNavigation(msg)
+		}
 	case tea.PasteMsg:
 		m.send(pastePacket(msg))
 	case tea.MouseMsg:
@@ -250,6 +246,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.agent.animationRunning = false
 		}
+	case feedbackTickMsg:
+		m.feedback.tick()
+		if status, ok := m.statusBar(); ok {
+			m.feedback.updateStatus(status.Message)
+		}
+		pickerLoading := false
+		if picker, ok := m.chrome[generated.OPGuiPicker]; ok && picker.Picker.LoadStatus == 1 {
+			pickerLoading = true
+		}
+		if m.feedback.active() || pickerLoading {
+			cmd = feedbackTick()
+		} else {
+			m.feedback.ticking = false
+		}
 	case port.PacketMsg:
 		cmd = m.applyCommands(msg.Commands)
 		m.layout = m.computeLayout()
@@ -263,6 +273,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if chat, ok := m.agentChat(); ok && m.agent.animating(chat) && !m.agent.animationRunning {
 		m.agent.animationRunning = true
 		cmd = tea.Batch(cmd, agentAnimationTick())
+	}
+
+	if status, ok := m.statusBar(); ok {
+		m.feedback.updateStatus(status.Message)
+	}
+	needsTick := m.feedback.active()
+	if !needsTick {
+		if picker, ok := m.chrome[generated.OPGuiPicker]; ok && picker.Picker.LoadStatus == 1 {
+			needsTick = true
+		}
+	}
+	if needsTick && !m.feedback.ticking {
+		m.feedback.ticking = true
+		cmd = tea.Batch(cmd, feedbackTick())
 	}
 
 	m.viewport.SetWidth(max(m.width, 1))
@@ -558,8 +582,15 @@ func (m *Model) applyMutation(command protocol.Command) {
 			m.gutters[command.Chrome.WindowGutter.WindowID] = command.Chrome.WindowGutter
 		case generated.OPGuiIndentGuides:
 			m.indentGuides[command.Chrome.IndentGuides.WindowID] = command.Chrome.IndentGuides
+		case generated.OPGuiFileTree:
+			m.localPresentation.reconcileFileTree()
 		case generated.OPGuiFileTreeSelection:
 			m.applyFileTreeSelection(command.Chrome.FileTreeSelection)
+			m.localPresentation.reconcileFileTree()
+		case generated.OPGuiCompletion:
+			m.localPresentation.reconcileCompletion()
+		case generated.OPGuiPicker:
+			m.localPresentation.reconcilePicker()
 		case generated.OPGuiBottomPanel:
 			m.clampBottomPanelScrollback(command.Chrome.Bottom)
 		case generated.OPGuiSurfaceLayout:
@@ -693,17 +724,7 @@ func (m *Model) applyWindowDelta(delta protocol.WindowContent) {
 }
 
 func (m *Model) reconcilePresentationScroll(window protocol.WindowContent) {
-	if !window.ScrollSet || window.Scroll.ResetRequired {
-		delete(m.presentationScroll, window.ID)
-		return
-	}
-	scroll, ok := m.presentationScroll[window.ID]
-	if !ok {
-		return
-	}
-	if scroll.contentEpoch != window.Scroll.ContentEpoch || scroll.layoutGeneration != window.Scroll.LayoutGeneration || scroll.anchorTop != window.Scroll.AnchorTop || scroll.anchorLeft != window.Scroll.AnchorLeft {
-		delete(m.presentationScroll, window.ID)
-	}
+	m.localPresentation.reconcileScroll(window)
 }
 
 func (m *Model) refreshCursorFromWindows() {
@@ -743,7 +764,7 @@ func resolveWindowRows(previous []protocol.WindowRow, delta []protocol.WindowRow
 
 func (m *Model) removeWindow(id uint16) {
 	delete(m.windows, id)
-	delete(m.presentationScroll, id)
+	m.localPresentation.removeWindow(id)
 	m.lineCache.dropWindow(id)
 	for index, windowID := range m.windowOrder {
 		if windowID == id {

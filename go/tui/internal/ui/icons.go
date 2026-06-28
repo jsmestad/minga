@@ -97,6 +97,29 @@ func whichKeyIcon(binding protocol.WhichKeyBinding) uiIcon {
 	}
 }
 
+// modeIcon returns a nerd font icon for the given vi mode name. The mode name
+// should be the trimmed text from a modeline segment (NORMAL, INSERT, etc.).
+func modeIcon(mode string) string {
+	switch mode {
+	case "NORMAL":
+		return ""
+	case "INSERT":
+		return ""
+	case "VISUAL":
+		return "󰈈"
+	case "COMMAND":
+		return ""
+	case "OP":
+		return ""
+	case "SEARCH":
+		return ""
+	case "REPLACE":
+		return "󰛔"
+	default:
+		return ""
+	}
+}
+
 func devIconForPath(path string, directory bool) uiIcon {
 	if directory && strings.TrimSpace(path) == "" {
 		return uiIcon{glyph: "", color: "#61AFEF"}
