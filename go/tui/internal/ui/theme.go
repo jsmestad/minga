@@ -11,86 +11,86 @@ import (
 
 const (
 	// Slot IDs mirror MingaEditor.UI.Theme.Slots. The bootstrap values below are only used before the first BEAM gui_theme command arrives.
-	themeEditorBG         byte = 0x01
-	themeEditorFG         byte = 0x02
-	themeTreeBG           byte = 0x03
-	themeTreeFG           byte = 0x04
-	themeTreeSelectBG     byte = 0x05
-	themeTreeDirFG        byte = 0x06
-	themeTreeActiveFG     byte = 0x07
-	themeTreeHeaderBG     byte = 0x08
-	themeTreeHeaderFG     byte = 0x09
-	themeTreeSeparatorFG  byte = 0x0A
-	themeTreeGitModified  byte = 0x0B
-	themeTreeGitStaged    byte = 0x0C
-	themeTreeGitUntracked byte = 0x0D
-	themeTreeSelectionFG  byte = 0x0E
-	themeTreeGuideFG      byte = 0x0F
-	themeTabBG            byte = 0x10
-	themeTabActiveBG      byte = 0x11
-	themeTabActiveFG      byte = 0x12
-	themeTabInactiveFG    byte = 0x13
-	themeTabModifiedFG    byte = 0x14
-	themeTabSeparatorFG   byte = 0x15
-	themeTabCloseHoverFG  byte = 0x16
-	themeTabAttentionFG   byte = 0x17
-	themePopupBG          byte = 0x20
-	themePopupFG          byte = 0x21
-	themePopupBorder      byte = 0x22
-	themePopupSelBG       byte = 0x23
-	themePopupKeyFG       byte = 0x24
-	themePopupGroupFG     byte = 0x25
-	themePopupDescFG      byte = 0x26
-	themeBreadcrumbBG     byte = 0x27
-	themeBreadcrumbFG     byte = 0x28
-	themeBreadcrumbSepFG  byte = 0x29
-	themePopupSelFG       byte = 0x2A
-	themeModelineBG       byte = 0x30
-	themeModelineFG       byte = 0x31
-	themeModelineInfoBG   byte = 0x32
-	themeModelineInfoFG   byte = 0x33
-	themeModeNormalBG     byte = 0x34
-	themeModeNormalFG     byte = 0x35
-	themeModeInsertBG     byte = 0x36
-	themeModeInsertFG     byte = 0x37
-	themeModeVisualBG     byte = 0x38
-	themeModeVisualFG     byte = 0x39
-	themeStatusbarAccent  byte = 0x3A
-	themeAccent           byte = 0x40
-	themeGutterFG         byte = 0x50
-	themeGutterCurrentFG  byte = 0x51
-	themeDiagnosticError  byte = 0x52
-	themeWarningFG        byte = 0x53
-	themeDiagnosticInfo   byte = 0x54
-	themeDiagnosticHint   byte = 0x55
-	themeGitAddedFG       byte = 0x56
-	themeGitModifiedFG    byte = 0x57
-	themeGitDeletedFG     byte = 0x58
-	themeHighlightReadBG  byte = 0x59
-	themeHighlightWriteBG byte = 0x5A
-	themeSelectionBG          byte = 0x5B
-	themeAgentStatusIdle      byte = 0x5C
-	themeAgentStatusWorking   byte = 0x5D
-	themeAgentStatusIterating byte = 0x5E
-	themeAgentStatusNeedsYou  byte = 0x5F
-	themeAgentStatusDone      byte = 0x60
-	themeAgentStatusErrored   byte = 0x61
-	themeGutterFoldFG         byte = 0x62
-	themeAgentPanelBG         byte = 0xA0
-	themeAgentHeaderBG        byte = 0xA1
-	themeAgentHeaderFG        byte = 0xA2
-	themeAgentUserBorder      byte = 0xA3
-	themeAgentUserLabel       byte = 0xA4
-	themeAgentAssistantBorder byte = 0xA5
-	themeAgentAssistantLabel  byte = 0xA6
-	themeAgentInputBorder     byte = 0xA7
-	themeAgentInputBG         byte = 0xA8
+	themeEditorBG              byte = 0x01
+	themeEditorFG              byte = 0x02
+	themeTreeBG                byte = 0x03
+	themeTreeFG                byte = 0x04
+	themeTreeSelectBG          byte = 0x05
+	themeTreeDirFG             byte = 0x06
+	themeTreeActiveFG          byte = 0x07
+	themeTreeHeaderBG          byte = 0x08
+	themeTreeHeaderFG          byte = 0x09
+	themeTreeSeparatorFG       byte = 0x0A
+	themeTreeGitModified       byte = 0x0B
+	themeTreeGitStaged         byte = 0x0C
+	themeTreeGitUntracked      byte = 0x0D
+	themeTreeSelectionFG       byte = 0x0E
+	themeTreeGuideFG           byte = 0x0F
+	themeTabBG                 byte = 0x10
+	themeTabActiveBG           byte = 0x11
+	themeTabActiveFG           byte = 0x12
+	themeTabInactiveFG         byte = 0x13
+	themeTabModifiedFG         byte = 0x14
+	themeTabSeparatorFG        byte = 0x15
+	themeTabCloseHoverFG       byte = 0x16
+	themeTabAttentionFG        byte = 0x17
+	themePopupBG               byte = 0x20
+	themePopupFG               byte = 0x21
+	themePopupBorder           byte = 0x22
+	themePopupSelBG            byte = 0x23
+	themePopupKeyFG            byte = 0x24
+	themePopupGroupFG          byte = 0x25
+	themePopupDescFG           byte = 0x26
+	themeBreadcrumbBG          byte = 0x27
+	themeBreadcrumbFG          byte = 0x28
+	themeBreadcrumbSepFG       byte = 0x29
+	themePopupSelFG            byte = 0x2A
+	themeModelineBG            byte = 0x30
+	themeModelineFG            byte = 0x31
+	themeModelineInfoBG        byte = 0x32
+	themeModelineInfoFG        byte = 0x33
+	themeModeNormalBG          byte = 0x34
+	themeModeNormalFG          byte = 0x35
+	themeModeInsertBG          byte = 0x36
+	themeModeInsertFG          byte = 0x37
+	themeModeVisualBG          byte = 0x38
+	themeModeVisualFG          byte = 0x39
+	themeStatusbarAccent       byte = 0x3A
+	themeAccent                byte = 0x40
+	themeGutterFG              byte = 0x50
+	themeGutterCurrentFG       byte = 0x51
+	themeDiagnosticError       byte = 0x52
+	themeWarningFG             byte = 0x53
+	themeDiagnosticInfo        byte = 0x54
+	themeDiagnosticHint        byte = 0x55
+	themeGitAddedFG            byte = 0x56
+	themeGitModifiedFG         byte = 0x57
+	themeGitDeletedFG          byte = 0x58
+	themeHighlightReadBG       byte = 0x59
+	themeHighlightWriteBG      byte = 0x5A
+	themeSelectionBG           byte = 0x5B
+	themeAgentStatusIdle       byte = 0x5C
+	themeAgentStatusWorking    byte = 0x5D
+	themeAgentStatusIterating  byte = 0x5E
+	themeAgentStatusNeedsYou   byte = 0x5F
+	themeAgentStatusDone       byte = 0x60
+	themeAgentStatusErrored    byte = 0x61
+	themeGutterFoldFG          byte = 0x62
+	themeAgentPanelBG          byte = 0xA0
+	themeAgentHeaderBG         byte = 0xA1
+	themeAgentHeaderFG         byte = 0xA2
+	themeAgentUserBorder       byte = 0xA3
+	themeAgentUserLabel        byte = 0xA4
+	themeAgentAssistantBorder  byte = 0xA5
+	themeAgentAssistantLabel   byte = 0xA6
+	themeAgentInputBorder      byte = 0xA7
+	themeAgentInputBG          byte = 0xA8
 	themeAgentInputPlaceholder byte = 0xA9
-	themeAgentTextFG          byte = 0xAA
-	themeAgentToolBorder      byte = 0xAB
-	themeAgentToolHeader      byte = 0xAC
-	themeAgentCodeBG          byte = 0xAD
-	themeAgentCodeBorder      byte = 0xAE
+	themeAgentTextFG           byte = 0xAA
+	themeAgentToolBorder       byte = 0xAB
+	themeAgentToolHeader       byte = 0xAC
+	themeAgentCodeBG           byte = 0xAD
+	themeAgentCodeBorder       byte = 0xAE
 )
 
 var requiredThemeSlots = []byte{
@@ -112,86 +112,86 @@ type palette struct {
 
 func bootstrapPalette() palette {
 	return palette{colors: map[byte]uint32{
-		themeEditorBG:         0x000000,
-		themeEditorFG:         0xFFFFFF,
-		themeTreeBG:           0x000000,
-		themeTreeFG:           0xFFFFFF,
-		themeTreeSelectBG:     0x333333,
-		themeTreeDirFG:        0xFFFFFF,
-		themeTreeActiveFG:     0xFFFFFF,
-		themeTreeHeaderBG:     0x000000,
-		themeTreeHeaderFG:     0xFFFFFF,
-		themeTreeSeparatorFG:  0x666666,
-		themeTreeGitModified:  0xE5C07B,
-		themeTreeGitStaged:    0x98C379,
-		themeTreeGitUntracked: 0x808080,
-		themeTreeSelectionFG:  0xFFFFFF,
-		themeTreeGuideFG:      0x444444,
-		themeTabBG:            0x000000,
-		themeTabActiveBG:      0x333333,
-		themeTabActiveFG:      0xFFFFFF,
-		themeTabInactiveFG:    0x999999,
-		themeTabModifiedFG:    0xFFAA00,
-		themeTabSeparatorFG:   0x444444,
-		themeTabCloseHoverFG:  0xFF5555,
-		themeTabAttentionFG:   0xFFAA00,
-		themePopupBG:          0x000000,
-		themePopupFG:          0xFFFFFF,
-		themePopupBorder:      0x666666,
-		themePopupSelBG:       0x333333,
-		themePopupKeyFG:       0xFFFFFF,
-		themePopupGroupFG:     0xFFFFFF,
-		themePopupDescFG:      0xFFFFFF,
-		themeBreadcrumbBG:     0x000000,
-		themeBreadcrumbFG:     0xCCCCCC,
-		themeBreadcrumbSepFG:  0x666666,
-		themePopupSelFG:       0xFFFFFF,
-		themeModelineBG:       0x000000,
-		themeModelineFG:       0xFFFFFF,
-		themeModelineInfoBG:   0x222222,
-		themeModelineInfoFG:   0xCCCCCC,
-		themeModeNormalBG:     0x61AFEF,
-		themeModeNormalFG:     0x1E1E1E,
-		themeModeInsertBG:     0x98C379,
-		themeModeInsertFG:     0x1E1E1E,
-		themeModeVisualBG:     0xC678DD,
-		themeModeVisualFG:     0x1E1E1E,
-		themeStatusbarAccent:  0x61AFEF,
-		themeAccent:           0xFFFFFF,
-		themeGutterFG:         0x999999,
-		themeGutterCurrentFG:  0xFFFFFF,
-		themeDiagnosticError:  0xFF0000,
-		themeWarningFG:        0xFFAA00,
-		themeDiagnosticInfo:   0x00AAFF,
-		themeDiagnosticHint:   0x999999,
-		themeGitAddedFG:       0x98C379,
-		themeGitModifiedFG:    0xE5C07B,
-		themeGitDeletedFG:     0xE06C75,
-		themeHighlightReadBG:  0x333333,
-		themeHighlightWriteBG: 0x333333,
-		themeSelectionBG:          0x333333,
-		themeAgentStatusIdle:      0x808080,
-		themeAgentStatusWorking:   0x61AFEF,
-		themeAgentStatusIterating: 0xE5C07B,
-		themeAgentStatusNeedsYou:  0xE06C75,
-		themeAgentStatusDone:      0x98C379,
-		themeAgentStatusErrored:   0xE06C75,
-		themeGutterFoldFG:         0x666666,
-		themeAgentPanelBG:         0x1E1E1E,
-		themeAgentHeaderBG:        0x2D2D2D,
-		themeAgentHeaderFG:        0xCCCCCC,
-		themeAgentUserBorder:      0x61AFEF,
-		themeAgentUserLabel:       0x61AFEF,
-		themeAgentAssistantBorder: 0x555555,
-		themeAgentAssistantLabel:  0x808080,
-		themeAgentInputBorder:     0x61AFEF,
-		themeAgentInputBG:         0x1E1E1E,
+		themeEditorBG:              0x000000,
+		themeEditorFG:              0xFFFFFF,
+		themeTreeBG:                0x000000,
+		themeTreeFG:                0xFFFFFF,
+		themeTreeSelectBG:          0x333333,
+		themeTreeDirFG:             0xFFFFFF,
+		themeTreeActiveFG:          0xFFFFFF,
+		themeTreeHeaderBG:          0x000000,
+		themeTreeHeaderFG:          0xFFFFFF,
+		themeTreeSeparatorFG:       0x666666,
+		themeTreeGitModified:       0xE5C07B,
+		themeTreeGitStaged:         0x98C379,
+		themeTreeGitUntracked:      0x808080,
+		themeTreeSelectionFG:       0xFFFFFF,
+		themeTreeGuideFG:           0x444444,
+		themeTabBG:                 0x000000,
+		themeTabActiveBG:           0x333333,
+		themeTabActiveFG:           0xFFFFFF,
+		themeTabInactiveFG:         0x999999,
+		themeTabModifiedFG:         0xFFAA00,
+		themeTabSeparatorFG:        0x444444,
+		themeTabCloseHoverFG:       0xFF5555,
+		themeTabAttentionFG:        0xFFAA00,
+		themePopupBG:               0x000000,
+		themePopupFG:               0xFFFFFF,
+		themePopupBorder:           0x666666,
+		themePopupSelBG:            0x333333,
+		themePopupKeyFG:            0xFFFFFF,
+		themePopupGroupFG:          0xFFFFFF,
+		themePopupDescFG:           0xFFFFFF,
+		themeBreadcrumbBG:          0x000000,
+		themeBreadcrumbFG:          0xCCCCCC,
+		themeBreadcrumbSepFG:       0x666666,
+		themePopupSelFG:            0xFFFFFF,
+		themeModelineBG:            0x000000,
+		themeModelineFG:            0xFFFFFF,
+		themeModelineInfoBG:        0x222222,
+		themeModelineInfoFG:        0xCCCCCC,
+		themeModeNormalBG:          0x61AFEF,
+		themeModeNormalFG:          0x1E1E1E,
+		themeModeInsertBG:          0x98C379,
+		themeModeInsertFG:          0x1E1E1E,
+		themeModeVisualBG:          0xC678DD,
+		themeModeVisualFG:          0x1E1E1E,
+		themeStatusbarAccent:       0x61AFEF,
+		themeAccent:                0xFFFFFF,
+		themeGutterFG:              0x999999,
+		themeGutterCurrentFG:       0xFFFFFF,
+		themeDiagnosticError:       0xFF0000,
+		themeWarningFG:             0xFFAA00,
+		themeDiagnosticInfo:        0x00AAFF,
+		themeDiagnosticHint:        0x999999,
+		themeGitAddedFG:            0x98C379,
+		themeGitModifiedFG:         0xE5C07B,
+		themeGitDeletedFG:          0xE06C75,
+		themeHighlightReadBG:       0x333333,
+		themeHighlightWriteBG:      0x333333,
+		themeSelectionBG:           0x333333,
+		themeAgentStatusIdle:       0x808080,
+		themeAgentStatusWorking:    0x61AFEF,
+		themeAgentStatusIterating:  0xE5C07B,
+		themeAgentStatusNeedsYou:   0xE06C75,
+		themeAgentStatusDone:       0x98C379,
+		themeAgentStatusErrored:    0xE06C75,
+		themeGutterFoldFG:          0x666666,
+		themeAgentPanelBG:          0x1E1E1E,
+		themeAgentHeaderBG:         0x2D2D2D,
+		themeAgentHeaderFG:         0xCCCCCC,
+		themeAgentUserBorder:       0x61AFEF,
+		themeAgentUserLabel:        0x61AFEF,
+		themeAgentAssistantBorder:  0x555555,
+		themeAgentAssistantLabel:   0x808080,
+		themeAgentInputBorder:      0x61AFEF,
+		themeAgentInputBG:          0x1E1E1E,
 		themeAgentInputPlaceholder: 0x666666,
-		themeAgentTextFG:          0xCCCCCC,
-		themeAgentToolBorder:      0x555555,
-		themeAgentToolHeader:      0x999999,
-		themeAgentCodeBG:          0x2D2D2D,
-		themeAgentCodeBorder:      0x444444,
+		themeAgentTextFG:           0xCCCCCC,
+		themeAgentToolBorder:       0x555555,
+		themeAgentToolHeader:       0x999999,
+		themeAgentCodeBG:           0x2D2D2D,
+		themeAgentCodeBorder:       0x444444,
 	}}
 }
 
