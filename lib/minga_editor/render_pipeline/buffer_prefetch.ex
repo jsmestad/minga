@@ -26,6 +26,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   alias MingaEditor.RenderPipeline.ContentHelpers
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
+  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
   alias MingaEditor.Window
@@ -62,7 +63,8 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   @spec prefetch_agent_chat_windows(state(), Layout.t()) :: %{}
   def prefetch_agent_chat_windows(_input, _layout), do: %{}
 
-  @spec apply_prefetch_hint(state(), non_neg_integer(), :down | :up, non_neg_integer()) :: state()
+  @spec apply_prefetch_hint(EditorState.t(), non_neg_integer(), :down | :up, non_neg_integer()) ::
+          EditorState.t()
   def apply_prefetch_hint(state, window_id, direction, content_epoch) do
     case Map.fetch(state.workspace.windows.map, window_id) do
       {:ok, %Window{} = window} ->
