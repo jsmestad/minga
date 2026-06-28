@@ -557,16 +557,17 @@ func (m Model) renderAgentSystemMessage(msg protocol.AgentChatMessage, width int
 
 func (m Model) renderAgentUserMessage(msg protocol.AgentChatMessage, width int) []string {
 	p := m.palette()
+	bg := p.SurfaceAlt()
 	lines := compactTextLines(msg.Text, max(width-12, 8), 2)
 	if len(lines) == 0 {
 		lines = []string{""}
 	}
-	header := lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(m.editorBackground()).Render("  ❯ You")
-	out := []string{lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(header, width))}
-	bodyStyle := lipgloss.NewStyle().Foreground(p.Text()).Background(m.editorBackground())
+	header := lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(bg).Render("  ❯ You")
+	out := []string{lipgloss.NewStyle().Background(bg).Width(width).Render(fitStyled(header, width))}
+	bodyStyle := lipgloss.NewStyle().Foreground(p.Text()).Background(bg)
 	for _, bodyLine := range lines {
 		line := bodyStyle.Render("    " + firstCompactLine(bodyLine, max(width-6, 8)))
-		out = append(out, lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(line, width)))
+		out = append(out, lipgloss.NewStyle().Background(bg).Width(width).Render(fitStyled(line, width)))
 	}
 	return out
 }
