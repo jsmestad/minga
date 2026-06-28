@@ -254,8 +254,8 @@ func (m Model) normalizePresentationMouse(row int, col int) (int, int) {
 	if !ok {
 		return row, col
 	}
-	scroll, ok := m.presentationScroll[windowID]
-	if !ok || scroll.contentEpoch != window.Scroll.ContentEpoch || scroll.layoutGeneration != window.Scroll.LayoutGeneration || scroll.anchorTop != window.Scroll.AnchorTop || scroll.anchorLeft != window.Scroll.AnchorLeft {
+	scroll, ok := m.localPresentation.scrolls[windowID]
+	if !ok || !scroll.keysMatch(window.Scroll) {
 		return row, col
 	}
 	normalizedRow := clampInt(row+scroll.rowOffset, placement.row, placement.row+placement.height-1)

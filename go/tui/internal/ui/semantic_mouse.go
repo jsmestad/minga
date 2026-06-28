@@ -108,8 +108,8 @@ func (m Model) applyPresentationScroll(msg tea.MouseMsg) Model {
 	if !window.ScrollSet || window.Scroll.ResetRequired {
 		return m
 	}
-	scroll := m.presentationScroll[windowID]
-	if scroll.contentEpoch != window.Scroll.ContentEpoch || scroll.layoutGeneration != window.Scroll.LayoutGeneration || scroll.anchorTop != window.Scroll.AnchorTop || scroll.anchorLeft != window.Scroll.AnchorLeft {
+	scroll := m.localPresentation.scrolls[windowID]
+	if !scroll.keysMatch(window.Scroll) {
 		scroll = presentationScroll{anchorTop: window.Scroll.AnchorTop, anchorLeft: window.Scroll.AnchorLeft, contentEpoch: window.Scroll.ContentEpoch, layoutGeneration: window.Scroll.LayoutGeneration}
 	}
 	before, after := presentationPayloadOverscanBounds(window, presentationVisibleRows(window))
@@ -132,9 +132,9 @@ func (m Model) applyPresentationScroll(msg tea.MouseMsg) Model {
 		scroll.colOffset = max(scroll.colOffset-1, minPresentationColOffset(window))
 	}
 	if scroll.rowOffset == 0 && scroll.colOffset == 0 {
-		delete(m.presentationScroll, windowID)
+		delete(m.localPresentation.scrolls, windowID)
 	} else {
-		m.presentationScroll[windowID] = scroll
+		m.localPresentation.scrolls[windowID] = scroll
 	}
 	return m
 }
