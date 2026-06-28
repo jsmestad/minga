@@ -211,6 +211,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.send(packet)
 		}
 		m.previewCompletionNavigation(msg)
+		m.previewPickerNavigation(msg)
 		if !m.modalOverlayActive() {
 			m.previewFileTreeNavigation(msg)
 		}
@@ -588,6 +589,8 @@ func (m *Model) applyMutation(command protocol.Command) {
 			m.localPresentation.reconcileFileTree()
 		case generated.OPGuiCompletion:
 			m.localPresentation.reconcileCompletion()
+		case generated.OPGuiPicker:
+			m.localPresentation.reconcilePicker()
 		case generated.OPGuiBottomPanel:
 			m.clampBottomPanelScrollback(command.Chrome.Bottom)
 		case generated.OPGuiSurfaceLayout:
