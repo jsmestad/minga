@@ -186,25 +186,43 @@ defmodule MingaEditor.Commands.Formatting do
 
   # ── Private helpers ───────────────────────────────────────────────────────
 
+  @format_external_lane :format_external
+
   @spec format_and_replace(state(), pid(), Minga.Editing.Formatter.formatter_spec()) :: state()
   defp format_and_replace(state, buf, spec) do
     content = Buffer.content(buf)
-    buf_name = Buffer.file_path(buf) |> Path.basename()
+    version = Buffer.version(buf)
 
-    case Minga.Editing.format(content, spec) do
-      {:ok, formatted} ->
-        {cursor_line, cursor_col} = Buffer.cursor(buf)
-        Buffer.replace_content(buf, formatted)
-        line_count = Buffer.line_count(buf)
-        safe_line = min(cursor_line, max(line_count - 1, 0))
-        Buffer.move_to(buf, {safe_line, cursor_col})
-        Minga.Log.info(:editor, "Formatted: #{buf_name}")
-        EditorState.set_status(state, "Formatted")
+    state
+    |> EditorState.set_status("Formatting…")
+    |> MingaEditor.AsyncAction.run(@format_external_lane, fn ->
+      case Minga.Editing.format(content, spec) do
+        {:ok, formatted} -> {:ok, formatted, buf, version}
+        {:error, msg} -> {:error, msg}
+      end
+    end)
+  end
 
-      {:error, msg} ->
-        Minga.Log.warning(:editor, "Formatter failed: #{buf_name} (#{msg})")
-        EditorState.set_status(state, "Format error: #{msg}")
+  @doc false
+  @spec apply_format_external_result(state(), term()) :: state()
+  def apply_format_external_result(state, {:ok, formatted, buf, version}) do
+    if Process.alive?(buf) and Buffer.version(buf) == version do
+      {cursor_line, cursor_col} = Buffer.cursor(buf)
+      Buffer.replace_content(buf, formatted)
+      line_count = Buffer.line_count(buf)
+      safe_line = min(cursor_line, max(line_count - 1, 0))
+      Buffer.move_to(buf, {safe_line, cursor_col})
+      buf_name = (Buffer.file_path(buf) || "scratch") |> Path.basename()
+      Minga.Log.info(:editor, "Formatted: #{buf_name}")
+      EditorState.set_status(state, "Formatted")
+    else
+      EditorState.set_status(state, "Buffer changed, format skipped")
     end
+  end
+
+  def apply_format_external_result(state, {:error, msg}) do
+    Minga.Log.warning(:editor, "Formatter failed: #{msg}")
+    EditorState.set_status(state, "Format error: #{msg}")
   end
 
   # When the formatter binary is missing and a tool recipe exists for it,
