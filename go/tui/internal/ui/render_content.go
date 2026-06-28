@@ -599,7 +599,7 @@ func horizontalSeparatorText(width int, filename string) string {
 	if label == "" || width < 4 {
 		return line
 	}
-	label = " " + label + " "
+	label = "╴" + label + "╶"
 	if displayWidth(label) > width {
 		label = fit(label, width)
 	}
