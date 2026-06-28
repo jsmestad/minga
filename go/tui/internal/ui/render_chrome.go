@@ -237,7 +237,8 @@ func (m Model) renderStatusMessage(message string) string {
 	if message == "" {
 		return ""
 	}
-	return lipgloss.NewStyle().Bold(true).Foreground(m.palette().Warning()).Background(m.palette().ChromeSurface()).Render(message)
+	displayed := m.feedback.formatMessage(message)
+	return lipgloss.NewStyle().Bold(true).Foreground(m.palette().Warning()).Background(m.palette().ChromeSurface()).Render(displayed)
 }
 
 func (m Model) renderSegmentList(segments []protocol.StatusSegment) string {
@@ -422,7 +423,7 @@ func (m Model) renderPicker(picker protocol.Picker, preview protocol.PickerPrevi
 		title += fmt.Sprintf("  marked %d", picker.Marked)
 	}
 	if picker.LoadStatus == 1 {
-		title += "  loading"
+		title += "  " + m.feedback.spinner() + " loading"
 	} else if picker.LoadStatus == 2 && picker.LoadError != "" {
 		title += "  " + picker.LoadError
 	}
