@@ -41,9 +41,9 @@ func (m Model) computeLayout() uiLayout {
 	leftPaneWidth := m.leftChromeWidth()
 
 	return uiLayout{
-		header:   uiRect{X: 0, Y: 0, Width: width, Height: headerHeight},
+		header:   uiRect{X: leftPaneWidth, Y: 0, Width: max(width-leftPaneWidth, 1), Height: headerHeight},
 		body:     uiRect{X: leftPaneWidth, Y: headerHeight, Width: max(width-leftPaneWidth, 1), Height: bodyHeight},
 		footer:   uiRect{X: 0, Y: headerHeight + bodyHeight, Width: width, Height: footerHeight},
-		leftPane: uiRect{X: 0, Y: headerHeight, Width: leftPaneWidth, Height: bodyHeight},
+		leftPane: uiRect{X: 0, Y: 0, Width: leftPaneWidth, Height: headerHeight + bodyHeight},
 	}
 }

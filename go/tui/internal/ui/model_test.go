@@ -105,7 +105,7 @@ func TestWorkspaceRowRendersAsQuietNavigation(t *testing.T) {
 	row := ansi.Strip(model.renderWorkspaces(protocol.WorkspaceBar{Spaces: []protocol.Workspace{
 		{Label: "Files", Icon: "", TabCount: 1},
 		{Label: "Agent", Icon: "󰚩", TabCount: 1, Active: true},
-	}}))
+	}}, model.width))
 
 	for _, want := range []string{"Spaces", " Files (1 tab)", "▎󰚩 Agent (1 tab)"} {
 		if !strings.Contains(row, want) {
@@ -884,7 +884,7 @@ func TestBootstrapPaletteIsThemeAgnostic(t *testing.T) {
 		themeTreeBG:          0x000000,
 		themeTreeSelectBG:    0x333333,
 		themeTreeSelectionFG: 0xFFFFFF,
-		themeTabBG:           0x000000,
+		themeTabBG:           0x111317,
 		themePopupBG:         0x000000,
 		themePopupSelFG:      0xFFFFFF,
 		themeModelineBG:      0x000000,
@@ -1596,11 +1596,11 @@ func TestFileTreeReservesVisibleEmptyState(t *testing.T) {
 	model.viewport.SetContent(model.content())
 
 	lines := strings.Split(ansi.Strip(model.View().Content), "\n")
-	if len(lines) < 3 {
+	if len(lines) < 2 {
 		t.Fatalf("visible empty file tree should render reserved sidebar: %+v", lines)
 	}
-	if !strings.Contains(lines[2], "No files") {
-		t.Fatalf("empty file tree should render status row: %q", lines[2])
+	if !strings.Contains(lines[1], "No files") {
+		t.Fatalf("empty file tree should render status row: %q", lines[1])
 	}
 	if got := visibleIndex(lines[1], "pane"); got != 18 {
 		t.Fatalf("empty file tree should reserve protocol width, got pane at %d in %q", got, lines[1])
@@ -2060,15 +2060,15 @@ func TestSemanticWindowsRespectHeaderRowOffset(t *testing.T) {
 func TestSemanticWindowsDoNotClipFirstRowWithWorkspaceAndTabHeaders(t *testing.T) {
 	model := New(80, 8, nil, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
-		generated.OPGuiWorkspaces: {Spaces: protocol.WorkspaceBar{Spaces: []protocol.Workspace{{ID: 1, Label: "Files", Icon: "folder", Active: true, TabCount: 1}}}},
+		generated.OPGuiWorkspaces: {Spaces: protocol.WorkspaceBar{Spaces: []protocol.Workspace{{ID: 1, Label: "Files", Icon: "folder", Active: true, TabCount: 1}, {ID: 2, Label: "Tests", Icon: "beaker"}}}},
 		generated.OPGuiTabBar:     {Tabs: protocol.TabBar{ActiveIndex: 0, Tabs: []protocol.Tab{{ID: 1, Label: "[new 1]", Active: true, Dirty: true}}}},
 	}
 	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "Hey this is a thing"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 24, Height: 1}}})
 	model.viewport.SetContent(model.content())
 
 	lines := strings.Split(ansi.Strip(model.View().Content), "\n")
-	if len(lines) < 4 || !strings.Contains(lines[3], "Hey this is a thing") {
-		t.Fatalf("semantic editor row 0 should render below workspace, tab, and separator headers: %+v", lines)
+	if len(lines) < 3 || !strings.Contains(lines[2], "Hey this is a thing") {
+		t.Fatalf("semantic editor row 0 should render below workspace and tab headers: %+v", lines)
 	}
 }
 

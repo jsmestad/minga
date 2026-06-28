@@ -32,6 +32,9 @@ func (f *InputFilter) Filter(_ tea.Model, msg tea.Msg) tea.Msg {
 		if delta == 0 {
 			return msg
 		}
+		if f.wheelDelta != 0 && (f.wheelDelta > 0) != (delta > 0) {
+			f.wheelDelta = 0
+		}
 		f.wheelDelta += delta
 		f.wheelMod = mouse.Mod
 		if !f.allow(&f.lastWheel) {
