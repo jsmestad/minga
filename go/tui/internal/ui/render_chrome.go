@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"image/color"
 	"sort"
 	"strings"
 
@@ -19,6 +20,7 @@ func (m Model) headerLines() []string {
 	}
 	if tabBar, ok := m.tabBar(); ok && len(tabBar.Tabs) > 0 {
 		lines = append(lines, m.renderTabs(tabBar))
+		lines = append(lines, lipgloss.NewStyle().Foreground(m.palette().TreeSeparator()).Background(m.palette().EditorSurface()).Width(m.width).Render(strings.Repeat("─", m.width)))
 	}
 	if crumb, ok := m.breadcrumb(); ok && len(crumb.Segments) > 0 && m.width >= 100 {
 		lines = append(lines, m.renderBreadcrumb(crumb))
@@ -136,7 +138,7 @@ func (m Model) renderBreadcrumb(crumb protocol.Breadcrumb) string {
 		}
 		segments = append(segments, m.zones.Mark(zoneIDBreadcrumbSegment(index), style.Render(segment)))
 	}
-	separator := lipgloss.NewStyle().Foreground(m.palette().BreadcrumbSeparator()).Background(m.palette().EditorSurface()).Render(" › ")
+	separator := lipgloss.NewStyle().Foreground(m.palette().BreadcrumbSeparator()).Background(m.palette().EditorSurface()).Render(" ❯ ")
 	text := "  " + strings.Join(segments, separator)
 	if git, ok := m.gitStatus(); ok && git.Branch != "" {
 		gitText := lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(m.palette().EditorSurface()).Render("  ·  " + m.gitSummary(git))
@@ -153,7 +155,12 @@ func (m Model) footerLines() []string {
 		if len(chromeStatus.Left) > 0 || len(chromeStatus.Right) > 0 {
 			status = m.renderStatusSegments(chromeStatus)
 		} else if chromeStatus.Filename != "" {
-			status = fmt.Sprintf("%s  %d:%d", chromeStatus.Filename, chromeStatus.Line, chromeStatus.Column)
+			icon := devIconForPath(chromeStatus.Filename, false)
+			prefix := chromeStatus.Filename
+			if icon.glyph != "" {
+				prefix = icon.glyph + " " + chromeStatus.Filename
+			}
+			status = fmt.Sprintf("%s  %d:%d", prefix, chromeStatus.Line, chromeStatus.Column)
 			if chromeStatus.Message != "" {
 				status += "  " + chromeStatus.Message
 			}
@@ -187,7 +194,7 @@ func (m Model) footerLines() []string {
 	// composited at its BEAM placement rect by overlayLayer (#2281). The footer
 	// still carries the minibuffer when no full overlay is active so the prompt
 	// line stays in the vertical layout.
-	if !m.pickerVisible() && !m.whichKeyVisible() && !m.agentChatVisible() {
+	if !m.modalOverlayActive() {
 		if _, active := m.overlayWinner(); !active {
 			if mini, ok := m.minibuffer(); ok && mini.Visible {
 				lines = append(lines, m.renderMinibuffer(mini))
@@ -201,6 +208,17 @@ func (m Model) renderStatusSegments(status protocol.StatusBar) string {
 	left := m.renderSegmentList(status.Left)
 	right := m.renderSegmentList(status.Right)
 	message := m.renderStatusMessage(status.Message)
+	// Prepend a devicon for the current file type before the right segments.
+	if status.Filename != "" {
+		icon := devIconForPath(status.Filename, false)
+		if icon.glyph != "" {
+			fileStyle := lipgloss.NewStyle().Foreground(m.palette().ChromeText()).Background(m.palette().ChromeSurface())
+			if icon.color != "" {
+				fileStyle = fileStyle.Foreground(lipgloss.Color(icon.color))
+			}
+			right = fileStyle.Render(icon.glyph+" ") + right
+		}
+	}
 	leftWidth := lipgloss.Width(left)
 	rightWidth := lipgloss.Width(right)
 	messageWidth := lipgloss.Width(message)
@@ -237,17 +255,38 @@ func (m Model) renderStatusMessage(message string) string {
 	if message == "" {
 		return ""
 	}
-	return lipgloss.NewStyle().Bold(true).Foreground(m.palette().Warning()).Background(m.palette().ChromeSurface()).Render(message)
+	displayed := m.feedback.formatMessage(message)
+	return lipgloss.NewStyle().Bold(true).Foreground(m.palette().Warning()).Background(m.palette().ChromeSurface()).Render(displayed)
 }
 
 func (m Model) renderSegmentList(segments []protocol.StatusSegment) string {
+	sep := lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(m.palette().ChromeSurface()).Render("│")
 	parts := make([]string, 0, len(segments))
+	theme := m.palette()
 	for _, segment := range segments {
 		text := segment.Text
 		if text == "" {
 			continue
 		}
-		style := lipgloss.NewStyle().Foreground(m.palette().ChromeText()).Background(m.palette().ChromeSurface())
+		style := lipgloss.NewStyle().Foreground(theme.ChromeText()).Background(theme.ChromeSurface())
+
+		// Apply semantic styling based on segment name. Mode segments become
+		// colored pill badges; info segments use the modeline-info palette;
+		// other segments can inherit the statusbar accent for bold emphasis.
+		// Inline FG/BG from the BEAM still win when present so the editor can
+		// override theme defaults per-segment.
+		switch segment.Name {
+		case "mode":
+			bg, fg := m.modeColors(text)
+			style = style.Background(bg).Foreground(fg).Bold(true)
+		case "info":
+			style = style.Background(theme.ModelineInfo()).Foreground(theme.ModelineInfoText())
+		default:
+			if segment.Attrs&0x01 != 0 && segment.FG == 0 {
+				style = style.Foreground(theme.StatusbarAccent())
+			}
+		}
+
 		if segment.FG != 0 {
 			style = style.Foreground(lipgloss.Color(fmt.Sprintf("#%06X", segment.FG)))
 		}
@@ -263,13 +302,34 @@ func (m Model) renderSegmentList(segments []protocol.StatusSegment) string {
 		if segment.Attrs&0x04 != 0 {
 			style = style.Italic(true)
 		}
+		// Prepend a nerd font icon when the segment carries a vi mode name.
+		if icon := modeIcon(strings.TrimSpace(text)); icon != "" {
+			text = strings.Replace(text, strings.TrimSpace(text), icon+" "+strings.TrimSpace(text), 1)
+		}
 		rendered := style.Render(text)
 		if segment.Command != "" {
 			rendered = m.zones.Mark(zoneIDModelineCommand(segment.Command), rendered)
 		}
 		parts = append(parts, rendered)
 	}
-	return strings.Join(parts, "")
+	return strings.Join(parts, sep)
+}
+
+// modeColors returns the background and foreground colors for a vi mode pill
+// badge based on the segment text content. The palette accessors (ModeNormal,
+// ModeInsert, ModeVisual) fall back gracefully when theme slots are absent.
+func (m Model) modeColors(text string) (bg, fg color.Color) {
+	theme := m.palette()
+	trimmed := strings.TrimSpace(strings.ToUpper(text))
+	switch {
+	case strings.Contains(trimmed, "INSERT"):
+		return theme.ModeInsert(), theme.ModeInsertText()
+	case strings.Contains(trimmed, "VISUAL"):
+		return theme.ModeVisual(), theme.ModeVisualText()
+	default:
+		// NORMAL and any other/unknown mode get the normal treatment.
+		return theme.ModeNormal(), theme.ModeNormalText()
+	}
 }
 
 func (m Model) gitSummary(git protocol.GitStatus) string {
@@ -319,22 +379,19 @@ func (m Model) renderCompletion(completion protocol.Completion) []string {
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupChrome()).Width(width).ColorWhitespace(true)
 	lines := []string{renderPadded(titleStyle, " Completion", width)}
 
-	// When the selected item carries LSP documentation, reserve a slice of the
-	// overlay budget for a preview pane below the item list. Items without docs
-	// reserve nothing, so the list renders exactly as before (no layout shift).
+	// The doc pane renders for the BEAM-committed selection (two-index split:
+	// highlight follows local preview, docs follow committed).
 	doc := strings.TrimSpace(completion.Documentation)
 	docLines := []string(nil)
 	if doc != "" {
 		docLines = m.renderCompletionDocPane(doc, width, height-1)
-		// The pane must never starve the item list: at extreme overlay
-		// heights, showing the item being selected beats showing its docs.
 		if height-1-len(docLines) < 1 {
 			docLines = nil
 		}
 	}
 
 	rowBudget := max(height-1-len(docLines), 0)
-	selected := min(max(int(completion.Selected), 0), max(len(completion.Items)-1, 0))
+	selected := m.effectiveCompletionIndex(completion)
 	start := 0
 	if selected >= rowBudget && rowBudget > 0 {
 		start = selected - rowBudget + 1
@@ -422,7 +479,7 @@ func (m Model) renderPicker(picker protocol.Picker, preview protocol.PickerPrevi
 		title += fmt.Sprintf("  marked %d", picker.Marked)
 	}
 	if picker.LoadStatus == 1 {
-		title += "  loading"
+		title += "  " + m.feedback.spinner() + " loading"
 	} else if picker.LoadStatus == 2 && picker.LoadError != "" {
 		title += "  " + picker.LoadError
 	}
@@ -449,8 +506,14 @@ func (m Model) renderPickerList(title string, picker protocol.Picker, height int
 	panelStyle := m.popupLineStyle(width)
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupChrome()).Width(width).ColorWhitespace(true)
 	lines := []string{renderPadded(titleStyle, " "+title, width)}
-	rowBudget := max(height-1, 0)
-	selected := min(max(int(picker.Selected), 0), max(len(picker.Items)-1, 0))
+	headerRows := 1
+	if height > 2 {
+		sepStyle := lipgloss.NewStyle().Foreground(theme.PopupBorder()).Background(theme.PopupSurface()).Width(width).ColorWhitespace(true)
+		lines = append(lines, renderPadded(sepStyle, strings.Repeat("─", max(width, 1)), width))
+		headerRows = 2
+	}
+	rowBudget := max(height-headerRows, 0)
+	selected := m.effectivePickerIndex(picker)
 	start := 0
 	if selected >= rowBudget && rowBudget > 0 {
 		start = selected - rowBudget + 1

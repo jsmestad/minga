@@ -35,6 +35,21 @@ private enum FileTreeNavigationCodepoints {
     static let upArrow: UInt32 = 57352
 }
 
+private enum PickerNavigationCodepoints {
+    static let downKey: UInt32 = 106
+    static let upKey: UInt32 = 107
+    static let downArrow: UInt32 = 57353
+    static let upArrow: UInt32 = 57352
+}
+
+private enum CompletionNavigationCodepoints {
+    static let ctrlN: UInt32 = 110
+    static let ctrlP: UInt32 = 112
+    static let downArrow: UInt32 = 57353
+    static let upArrow: UInt32 = 57352
+    static let ctrlModifier: UInt8 = 0x02
+}
+
 /// Dispatches render commands to FrameState (metadata) and GUIState (chrome).
 @MainActor
 final class CommandDispatcher {
@@ -434,6 +449,47 @@ final class CommandDispatcher {
         }
     }
 
+    @discardableResult
+    func previewCompletionNavigation(codepoint: UInt32, modifiers: UInt8) -> Bool {
+        let delta: Int
+        if modifiers == CompletionNavigationCodepoints.ctrlModifier {
+            switch codepoint {
+            case CompletionNavigationCodepoints.ctrlN:
+                delta = 1
+            case CompletionNavigationCodepoints.ctrlP:
+                delta = -1
+            default:
+                return false
+            }
+        } else if modifiers == 0 {
+            switch codepoint {
+            case CompletionNavigationCodepoints.downArrow:
+                delta = 1
+            case CompletionNavigationCodepoints.upArrow:
+                delta = -1
+            default:
+                return false
+            }
+        } else {
+            return false
+        }
+        return guiState.completionState.previewNavigation(delta: delta)
+    }
+
+    @discardableResult
+    func previewPickerNavigation(codepoint: UInt32, modifiers: UInt8) -> Bool {
+        guard modifiers == 0 else { return false }
+
+        switch codepoint {
+        case PickerNavigationCodepoints.downKey, PickerNavigationCodepoints.downArrow:
+            return guiState.pickerState.previewNavigation(delta: 1)
+        case PickerNavigationCodepoints.upKey, PickerNavigationCodepoints.upArrow:
+            return guiState.pickerState.previewNavigation(delta: -1)
+        default:
+            return false
+        }
+    }
+
     /// Apply a single render command to the presented FrameState/GUIState. This
     /// is the single mutation path: called directly for out-of-band commands and
     /// replayed for every staged command at commit. It must NOT handle the frame
@@ -578,6 +634,7 @@ final class CommandDispatcher {
 
         case .guiStatusBar(let update):
             guiState.statusBarState.update(from: update)
+            guiState.feedbackState.update(message: update.message)
             frameState.totalLineCount = update.lineCount
             if update.mode != lastMode {
                 lastMode = update.mode
@@ -639,13 +696,12 @@ final class CommandDispatcher {
             frameState.dirty = true
 
         case .guiWindowContent(let data):
+            let previousScroll = guiState.windowContents[data.windowId]?.scrollPresentation
             guiState.windowContents[data.windowId] = data
             currentFrameWindowIds.insert(data.windowId)
-            if data.scrollPresentation?.resetRequired == true {
-                onScrollPresentationReset?()
+            if shouldResetScrollPresentation(previous: previousScroll, next: data.scrollPresentation) {
+                discardLocalPresentation(.offset, windowId: data.windowId)
             }
-            // BEAM controls cursor visibility per window. When the minibuffer
-            // or other overlay has focus, cursor_visible is false.
             frameState.cursorVisible = data.cursorVisible
 
         case .guiWindowOverlayDelta(let delta):
@@ -663,10 +719,11 @@ final class CommandDispatcher {
                 guiState.windowContents.removeValue(forKey: delta.windowId)
                 break
             }
+            let previousScroll = current.scrollPresentation
             guiState.windowContents[delta.windowId] = updated
             currentFrameWindowIds.insert(delta.windowId)
-            if updated.scrollPresentation?.resetRequired == true {
-                onScrollPresentationReset?()
+            if shouldResetScrollPresentation(previous: previousScroll, next: updated.scrollPresentation) {
+                discardLocalPresentation(.offset, windowId: delta.windowId)
             }
             frameState.cursorVisible = delta.cursorVisible
             frameState.dirty = true
@@ -850,10 +907,47 @@ final class CommandDispatcher {
         }
     }
 
+    // MARK: - Local presentation
+
+    enum TransformKind {
+        case offset
+        case identity
+    }
+
+    struct ScrollAnchorKey: Equatable {
+        let contentEpoch: UInt32
+        let layoutGeneration: UInt32
+        let anchorTop: UInt32
+        let anchorLeft: UInt16
+        let anchorVisualRowOffset: UInt16
+
+        init(_ sp: GUIScrollPresentation) {
+            self.contentEpoch = sp.contentEpoch
+            self.layoutGeneration = sp.layoutGeneration
+            self.anchorTop = sp.anchorTop
+            self.anchorLeft = sp.anchorLeft
+            self.anchorVisualRowOffset = sp.anchorVisualRowOffset
+        }
+    }
+
+    private func shouldResetScrollPresentation(previous: GUIScrollPresentation?, next: GUIScrollPresentation?) -> Bool {
+        if let next, next.resetRequired { return true }
+        guard let prev = previous else { return false }
+        guard let next else { return true }
+        return !next.isSameAnchorKey(as: prev)
+    }
+
+    func discardLocalPresentation(_ kind: TransformKind, windowId: UInt16 = 0) {
+        switch kind {
+        case .offset:
+            onScrollPresentationReset?()
+        case .identity:
+            break
+        }
+    }
+
     // MARK: - Clipboard
 
-    /// Handles a clipboard_write command from the BEAM.
-    /// Target 0 = general pasteboard (Cmd+C), 1 = find pasteboard (Cmd+E).
     private func handleClipboardWrite(target: UInt8, text: String) {
         let pasteboard: NSPasteboard
         if target == 1 {
