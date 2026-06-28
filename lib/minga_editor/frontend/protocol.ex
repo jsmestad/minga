@@ -45,6 +45,8 @@ defmodule MingaEditor.Frontend.Protocol do
   @op_begin_frame Opcodes.begin_frame()
   @op_commit_frame Opcodes.commit_frame()
   @op_request_keyframe Opcodes.request_keyframe()
+  @op_scroll_batch Opcodes.scroll_batch()
+  @op_scroll_prefetch_hint Opcodes.scroll_prefetch_hint()
   @op_set_title Opcodes.set_title()
   @op_set_window_bg Opcodes.set_window_bg()
   @op_set_font Opcodes.set_font()
@@ -166,6 +168,11 @@ defmodule MingaEditor.Frontend.Protocol do
           | {:log_message, level :: String.t(), text :: String.t()}
           | {:gui_action, ProtocolGUI.gui_action()}
           | {:request_keyframe, last_good_frame_seq :: non_neg_integer()}
+          | {:scroll_batch, window_id :: non_neg_integer(), delta_lines :: integer(),
+             direction :: :down | :up}
+          | {:scroll_prefetch_hint, window_id :: non_neg_integer(),
+             current_visual_line :: non_neg_integer(), direction :: :down | :up,
+             content_epoch :: non_neg_integer()}
 
   @typedoc "Cursor shape."
   @type cursor_shape :: :block | :beam | :underline
@@ -498,6 +505,19 @@ defmodule MingaEditor.Frontend.Protocol do
     {:ok, {:request_keyframe, last_good_frame_seq}}
   end
 
+  def decode_event(<<@op_scroll_batch, window_id::16, delta_lines::16-signed, direction::8>>) do
+    dir = if direction == 0, do: :down, else: :up
+    {:ok, {:scroll_batch, window_id, delta_lines, dir}}
+  end
+
+  def decode_event(
+        <<@op_scroll_prefetch_hint, window_id::16, current_visual_line::32, direction::8,
+          content_epoch::32>>
+      ) do
+    dir = if direction == 0, do: :down, else: :up
+    {:ok, {:scroll_prefetch_hint, window_id, current_visual_line, dir, content_epoch}}
+  end
+
   # GUI action: opcode(1) + action_type(1) + payload
   def decode_event(<<@op_gui_action, action_type::8, rest::binary>>) do
     case ProtocolGUI.decode_gui_action(action_type, rest) do
@@ -523,7 +543,9 @@ defmodule MingaEditor.Frontend.Protocol do
              @op_resize,
              @op_ready,
              @op_mouse_event,
-             @op_capabilities_updated
+             @op_capabilities_updated,
+             @op_scroll_batch,
+             @op_scroll_prefetch_hint
            ] do
     {:error, :malformed}
   end

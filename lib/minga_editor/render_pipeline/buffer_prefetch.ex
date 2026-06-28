@@ -26,6 +26,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   alias MingaEditor.RenderPipeline.ContentHelpers
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
+  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
   alias MingaEditor.Window
@@ -62,6 +63,28 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   @spec prefetch_agent_chat_windows(state(), Layout.t()) :: %{}
   def prefetch_agent_chat_windows(_input, _layout), do: %{}
 
+  @spec apply_prefetch_hint(EditorState.t(), non_neg_integer(), :down | :up, non_neg_integer()) ::
+          EditorState.t()
+  def apply_prefetch_hint(state, window_id, direction, content_epoch) do
+    case Map.fetch(state.workspace.windows.map, window_id) do
+      {:ok, %Window{} = window} ->
+        current_epoch = window.render_cache.content_epoch
+
+        if content_epoch < current_epoch do
+          state
+        else
+          updated = %{window | prefetch_overscan_boost: {content_epoch, direction}}
+
+          new_map = Map.put(state.workspace.windows.map, window_id, updated)
+          windows = Windows.set_map(state.workspace.windows, new_map)
+          %{state | workspace: Map.put(state.workspace, :windows, windows)}
+        end
+
+      _ ->
+        state
+    end
+  end
+
   # ── Private ──────────────────────────────────────────────────────────────
 
   # Scrolls a single window and detects invalidation. Guards against buffer
@@ -86,6 +109,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
       {:ok, scroll} ->
         updated_window =
           scroll.window
+          |> Map.put(:prefetch_overscan_boost, nil)
           |> Window.set_viewport(scroll.viewport)
           |> Window.detect_invalidation(
             scroll.viewport.top,
@@ -234,7 +258,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
         nil ->
           now = System.monotonic_time(:millisecond)
           velocity_tier = Window.scroll_velocity_tier(window, now)
-          total_overscan = overscan_rows(velocity_tier)
+          total_overscan = boosted_overscan_rows(window, velocity_tier)
 
           {overscan_behind, overscan_ahead} =
             directional_split(total_overscan, velocity_tier, Window.scroll_direction(window, now))
@@ -346,6 +370,13 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   defp overscan_rows(:idle), do: 50
   defp overscan_rows(:medium), do: 100
   defp overscan_rows(:fast), do: 200
+
+  @spec boosted_overscan_rows(Window.t(), ScrollVelocity.tier()) :: pos_integer()
+  defp boosted_overscan_rows(%Window{prefetch_overscan_boost: nil}, tier),
+    do: overscan_rows(tier)
+
+  defp boosted_overscan_rows(%Window{prefetch_overscan_boost: {_epoch, _dir}}, tier),
+    do: overscan_rows(tier) * 2
 
   @spec directional_split(pos_integer(), ScrollVelocity.tier(), ScrollVelocity.direction()) ::
           {pos_integer(), pos_integer()}

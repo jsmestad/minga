@@ -686,7 +686,16 @@ func (m Model) withFileTree(mainLines []string) []string {
 
 	sidebarWidth := fileTreeWidth(m.width, tree)
 	sidebar := m.renderFileTree(tree, sidebarWidth, max(len(mainLines), m.bodyHeight()))
-	sep := lipgloss.NewStyle().Foreground(m.palette().TreeSeparator()).Background(m.palette().TreeSurface()).Render("│")
+	sepColor := m.palette().TreeSeparator()
+	if tree.Focused {
+		sepColor = m.palette().Accent()
+	}
+	sepStyle := lipgloss.NewStyle().Foreground(sepColor).Background(m.palette().TreeSurface())
+	sep := sepStyle.Render("│")
+	sepCol := max(sidebarWidth-1, 0)
+	for i := range sidebar {
+		sidebar[i] = replaceVisibleCell(sidebar[i], sepCol, sep)
+	}
 	lines := make([]string, max(len(mainLines), len(sidebar)))
 	for i := range lines {
 		left := ""
@@ -697,7 +706,7 @@ func (m Model) withFileTree(mainLines []string) []string {
 		if i < len(mainLines) {
 			right = mainLines[i]
 		}
-		lines[i] = lipgloss.JoinHorizontal(lipgloss.Top, left, sep, right)
+		lines[i] = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 	}
 	return lines
 }
@@ -897,7 +906,7 @@ func (m Model) renderFileTree(tree protocol.FileTree, width int, height int) []s
 	}
 
 	headerStyle := lipgloss.NewStyle().Foreground(theme.TreeHeaderText()).Background(theme.TreeHeader()).Width(width)
-	header := headerStyle.Bold(true).Render(fit(" Files  "+tree.Root, width))
+	header := headerStyle.Bold(true).Render(fit(" 󰙅 Files  "+tree.Root, width))
 	lines := []string{header}
 
 	contentStyle := lipgloss.NewStyle().Foreground(theme.TreeText()).Background(theme.TreeSurface()).Width(contentWidth)
@@ -1025,13 +1034,17 @@ func (m Model) renderFileTreeRow(row protocol.FileTreeRow, width int, guides fil
 		iconStyle = iconStyle.Foreground(lipgloss.Color(icon.color))
 	}
 	nameStyle := rowStyle
+	if row.Dirty && !row.Selected {
+		nameStyle = nameStyle.Foreground(theme.TreeGitModified())
+	}
 	if row.Selected || row.Directory {
 		nameStyle = nameStyle.Bold(true)
 	}
 	nameRendered := renderFileTreeName(row.Name, row.MatchPositions, nameStyle, theme.Accent())
 	content := markerStyle.Render(selectionMarker) + guideStyle.Render(guidePrefix) + markerStyle.Render(expander) + rowStyle.Render(" ") + iconStyle.Render(icon.glyph) + rowStyle.Render(" ") + nameRendered
 	if row.Dirty {
-		dirty := lipgloss.NewStyle().Foreground(theme.Warning()).Background(rowBackground).Render("●")
+		dirtyColor := theme.TreeGitModified()
+		dirty := lipgloss.NewStyle().Foreground(dirtyColor).Background(rowBackground).Render("●")
 		space := strings.Repeat(" ", max(width-lipgloss.Width(content)-lipgloss.Width(dirty), 1))
 		content += rowStyle.Render(space) + dirty
 	} else if remaining := width - lipgloss.Width(content); remaining > 0 {

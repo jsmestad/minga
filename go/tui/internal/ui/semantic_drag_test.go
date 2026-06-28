@@ -23,7 +23,7 @@ func releaseAt(zone *zoneInfo) tea.MouseReleaseMsg {
 
 func tabDragModel(t *testing.T) Model {
 	t.Helper()
-	model := New(80, 12, nil)
+	model := New(80, 12, nil, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiTabBar: {Tabs: protocol.TabBar{Tabs: []protocol.Tab{
 			{ID: 41, Icon: "󰈙", Label: "one.ex"},
@@ -97,7 +97,7 @@ func TestChromeDragOntoSameTabDoesNotReorder(t *testing.T) {
 
 func fileTreeDragModel(t *testing.T) Model {
 	t.Helper()
-	model := New(80, 16, nil)
+	model := New(80, 16, nil, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Width: 30, Rows: []protocol.FileTreeRow{
 			{ID: "/p/src", Path: "src", PathHash: 0x11111111, Name: "src", Directory: true},

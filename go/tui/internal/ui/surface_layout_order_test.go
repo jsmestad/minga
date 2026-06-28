@@ -13,7 +13,7 @@ import (
 // surface occupies the single active overlay slot.
 
 func completionAndBottomPanelModel() Model {
-	model := New(80, 16, nil)
+	model := New(80, 16, nil, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiCompletion: {
 			Opcode:   generated.OPGuiCompletion,
@@ -64,7 +64,7 @@ func TestOverlayPlacedSurfaceBeatsUnplacedSurface(t *testing.T) {
 	// unplaced transitional surface (agent context, order 260), preserving the old
 	// chain where completion sat on top. Orders share one band scale now, so the
 	// placement z must be in the overlay band to win, as the live registry emits.
-	model := New(80, 16, nil)
+	model := New(80, 16, nil, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiCompletion:   {Opcode: generated.OPGuiCompletion, Complete: protocol.Completion{Visible: true, Items: []protocol.CompletionItem{{Label: "Enum.map"}}}},
 		generated.OPGuiAgentContext: {Opcode: generated.OPGuiAgentContext, AgentContext: protocol.AgentContext{Visible: true, Task: "Review diff", Status: 1}},
@@ -85,7 +85,7 @@ func TestOverlayBottomPanelOpenHoverWins(t *testing.T) {
 	// put hover ABOVE the bottom panel, and the band-aligned scale preserves that
 	// (orderHover 290 > bottom panel floating band 200). Hover must win the single
 	// active overlay slot, even with the bottom panel placed at its registry z.
-	model := New(80, 16, nil)
+	model := New(80, 16, nil, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiBottomPanel: {
 			Opcode: generated.OPGuiBottomPanel,
@@ -116,7 +116,7 @@ func TestOverlayHoverOrdersByEmittedPlacementZ(t *testing.T) {
 	// (higher z than hover's emitted z), and the bottom panel must win the slot,
 	// inverting the historical hover>panel order. This is the AC-2 proof that the
 	// promoted hover popup orders by placement data.
-	model := New(80, 16, nil)
+	model := New(80, 16, nil, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiBottomPanel: {
 			Opcode: generated.OPGuiBottomPanel,
@@ -146,7 +146,7 @@ func TestOverlaySignatureHelpOrdersByEmittedPlacementZ(t *testing.T) {
 	// bottom panel's, the panel wins the single active overlay slot, proving the
 	// promoted signature-help surface orders by placement data rather than the
 	// orderSignatureHelp fallback constant.
-	model := New(80, 16, nil)
+	model := New(80, 16, nil, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiBottomPanel: {
 			Opcode: generated.OPGuiBottomPanel,
@@ -175,7 +175,7 @@ func TestOverlayBottomPanelOpenSignatureHelpWins(t *testing.T) {
 	// Same inversion guard for signature help: it historically sat above the
 	// bottom panel (orderSignatureHelp 280 > floating band 200), so with the panel
 	// open, triggering signature help must still show the signature popup.
-	model := New(80, 16, nil)
+	model := New(80, 16, nil, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiBottomPanel: {
 			Opcode: generated.OPGuiBottomPanel,
@@ -273,7 +273,7 @@ func TestPromotedFooterOverlaysRenderAtPlacementRect(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			model := New(80, 24, nil)
+			model := New(80, 24, nil, nil)
 			model.chrome = tc.chrome
 
 			// Without a placement the surface does not render (no fallback table).
@@ -316,7 +316,7 @@ func TestPromotedFooterOverlaysRenderAtPlacementRect(t *testing.T) {
 // content and Go bottom-aligns, so the overlay's bottom edge is the rect's bottom
 // edge (directly above the minibuffer) and the layer is exactly its content tall.
 func TestShortNotificationsHugBandBottom(t *testing.T) {
-	model := New(80, 24, nil)
+	model := New(80, 24, nil, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiNotifications: {Notifications: protocol.Notifications{
 			Visible: true,
@@ -353,7 +353,7 @@ func TestShortNotificationsHugBandBottom(t *testing.T) {
 // short content so the overlay still hugs the screen bottom and the residual
 // phantom zone sits ABOVE the content (between the buffer and the overlay).
 func TestWrapDependentOverlayBottomAlignsInMaxBand(t *testing.T) {
-	model := New(80, 24, nil)
+	model := New(80, 24, nil, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiFloatPopup: {Float: protocol.FloatPopup{Visible: true, Title: "Inspect", Lines: []string{"pid <0.1.0>"}}},
 	}

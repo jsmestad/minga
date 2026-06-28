@@ -51,7 +51,7 @@ func recomposeCounters(m Model) (hits, misses uint64) {
 // whose rows are refs reuses the cached lines (hits) and only recomposes the
 // rows that arrived with full content (misses).
 func TestLineCacheCountsHitsForRefRowsAndMissesForFullRows(t *testing.T) {
-	m := New(80, 24, nil)
+	m := New(80, 24, nil, nil)
 
 	window := protocol.WindowContent{
 		ID:            1,
@@ -106,7 +106,7 @@ func TestLineCacheCountsHitsForRefRowsAndMissesForFullRows(t *testing.T) {
 func TestLineCacheMapStaysBoundedAcrossScroll(t *testing.T) {
 	const viewport = 20 // rows visible at once
 	const buffer = 200  // total rows in the file
-	m := New(80, uint16(viewport+4), nil)
+	m := New(80, uint16(viewport+4), nil, nil)
 
 	// A buffer line's stable wire identity: scrolling never changes a line's
 	// id/hash, only its viewport index, so the same row keeps the same key parts
@@ -172,7 +172,7 @@ func TestLineCacheMapStaysBoundedAcrossScroll(t *testing.T) {
 // produce exactly the same body string.
 func TestLineCachePatchedOutputEqualsFullRecompose(t *testing.T) {
 	build := func() Model {
-		m := New(120, 40, nil)
+		m := New(120, 40, nil, nil)
 		window := protocol.WindowContent{
 			ID:            1,
 			CursorVisible: true,
@@ -223,7 +223,7 @@ func TestLineCachePatchedOutputEqualsFullRecompose(t *testing.T) {
 // the patched body must always equal a from-scratch recompose of the same
 // committed state.
 func TestLineCacheEquivalenceAcrossEditSequence(t *testing.T) {
-	m := New(100, 30, nil)
+	m := New(100, 30, nil, nil)
 	rows := []protocol.WindowRow{
 		{ID: 1, ContentHash: 100, Text: "func main() {"},
 		{ID: 2, ContentHash: 200, Text: "  fmt.Println(\"hi\")"},
@@ -265,7 +265,7 @@ func TestLineCacheEquivalenceAcrossEditSequence(t *testing.T) {
 // AC 2: a resize invalidates the cache and takes the full composition path. The
 // first compose after resize is all misses (cold cache) at the new width.
 func TestLineCacheResizeInvalidatesCache(t *testing.T) {
-	m := New(80, 24, nil)
+	m := New(80, 24, nil, nil)
 	window := protocol.WindowContent{
 		ID:            1,
 		CursorVisible: true,
@@ -295,7 +295,7 @@ func TestLineCacheResizeInvalidatesCache(t *testing.T) {
 // content for the same row IDs, must recompose every row (cold cache) and the
 // rendered body must reflect the keyframe content with no stale lines.
 func TestLineCacheKeyframeResetsCache(t *testing.T) {
-	m := New(80, 24, nil)
+	m := New(80, 24, nil, nil)
 	window := protocol.WindowContent{
 		ID:            1,
 		CursorVisible: true,
@@ -344,7 +344,7 @@ func TestLineCacheKeyframeResetsCache(t *testing.T) {
 // chrome-state-changed path). The context fingerprint folds the palette in, so
 // the post-theme compose recomposes rather than serving stale-colored lines.
 func TestLineCacheThemeChangeInvalidatesViaFingerprint(t *testing.T) {
-	m := New(80, 24, nil)
+	m := New(80, 24, nil, nil)
 	window := protocol.WindowContent{
 		ID:            1,
 		CursorVisible: true,
@@ -377,7 +377,7 @@ func TestLineCacheThemeChangeInvalidatesViaFingerprint(t *testing.T) {
 // AC 3: the compose-time metric and cache stats are recorded through the
 // latency recorder and visible in the HUD string.
 func TestComposeMetricRecordedAndVisibleInHUD(t *testing.T) {
-	m := New(80, 24, nil)
+	m := New(80, 24, nil, nil)
 	window := protocol.WindowContent{
 		ID:            1,
 		CursorVisible: true,

@@ -106,6 +106,33 @@ defmodule MingaEditor.Mouse do
     handle(state, row, col, button, mods, event_type, click_count)
   end
 
+  @spec handle_scroll_batch(state(), non_neg_integer(), integer(), :down | :up) :: state()
+  def handle_scroll_batch(state, _window_id, 0, _direction), do: state
+
+  def handle_scroll_batch(state, window_id, delta_lines, direction) do
+    case Map.fetch(state.workspace.windows.map, window_id) do
+      {:ok, %Window{buffer: buf} = window} when is_pid(buf) ->
+        now = System.monotonic_time(:millisecond)
+        total_lines = Buffer.line_count(buf)
+
+        updated =
+          window
+          |> Window.scroll_viewport(delta_lines, total_lines)
+          |> Window.record_scroll_event(now, direction)
+
+        state = EditorState.update_window(state, window_id, fn _window -> updated end)
+
+        if window_id == state.workspace.windows.active do
+          clamp_cursor_to_viewport(state, direction)
+        else
+          state
+        end
+
+      _ ->
+        state
+    end
+  end
+
   @doc "Dispatches a mouse event, returning updated state."
   @spec handle(
           state(),

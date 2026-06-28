@@ -143,6 +143,36 @@ func TestEncodeGUIFloatPopupDismiss(t *testing.T) {
 	}
 }
 
+func TestEncodeScrollBatchDown(t *testing.T) {
+	got := EncodeScrollBatch(42, 3, 0)
+	want := []byte{generated.OPScrollBatch, 0, 42, 0, 3, 0}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("scroll batch down = %v, want %v", got, want)
+	}
+}
+
+func TestEncodeScrollBatchUp(t *testing.T) {
+	got := EncodeScrollBatch(1, -5, 1)
+	want := []byte{generated.OPScrollBatch, 0, 1, 0xFF, 0xFB, 1}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("scroll batch up = %v, want %v", got, want)
+	}
+}
+
+func TestEncodeScrollPrefetchHint(t *testing.T) {
+	got := EncodeScrollPrefetchHint(7, 1000, 0, 42)
+	want := []byte{
+		generated.OPScrollPrefetchHint,
+		0, 7,
+		0, 0, 0x03, 0xE8,
+		0,
+		0, 0, 0, 42,
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("scroll prefetch hint = %v, want %v", got, want)
+	}
+}
+
 func TestEncodeGUISidebarAction(t *testing.T) {
 	got := EncodeGUISidebarAction("git", "git_status", "activate")
 	want := []byte{

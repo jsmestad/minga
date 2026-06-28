@@ -35,8 +35,8 @@ func run() error {
 	out := make(chan []byte, 128)
 	go writePackets(os.Stdout, out)
 
-	model := ui.New(width, height, out)
 	filter := ui.NewInputFilter()
+	model := ui.New(width, height, out, filter)
 	program := tea.NewProgram(model, tea.WithInput(tty), tea.WithOutput(tty), tea.WithFilter(filter.Filter))
 	port.StartReader(program, os.Stdin)
 

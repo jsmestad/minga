@@ -80,6 +80,20 @@ func trimTrailingBlankLines(lines []string) []string {
 	return lines[:end]
 }
 
+// panelSeparatorLine renders a full-width ─ separator line for the top of a
+// bottom panel, visually separating it from the editor body above. The caller
+// must account for this line in its height budget (subtract 1 from content
+// rows) so the BEAM content_height model stays exact.
+func panelSeparatorLine(theme palette, width int, bg color.Color) string {
+	w := max(width, 1)
+	return lipgloss.NewStyle().
+		Foreground(theme.TreeSeparator()).
+		Background(bg).
+		Width(w).
+		ColorWhitespace(true).
+		Render(strings.Repeat("─", w))
+}
+
 // Registry surface ids (mirror MingaEditor.Layout.SurfaceRegistry.surface_id_u16/1).
 // Every overlay surface is now BEAM registry-placed: #2281 promoted the eight
 // footer-band secondary overlays (float popup through extension overlay) so the
@@ -472,12 +486,13 @@ func (m Model) renderObservatory(obs protocol.Observatory) []string {
 	qWidth := 6
 	nameWidth := max(m.width-pidWidth-qWidth, 20)
 
+	sep := panelSeparatorLine(theme, m.width, theme.PopupSurface())
 	header := tableHeaderRow(theme, m.width, []tableCell{
 		{text: fmt.Sprintf("󰐣 Observatory %d", max(int(obs.Count), len(obs.Nodes))), width: pidWidth},
 		{text: "Process", width: nameWidth},
 		{text: "Q", width: qWidth},
 	})
-	lines := []string{header}
+	lines := []string{sep, header}
 	for _, node := range obs.Nodes {
 		row := tableDataRow(theme, m.width, false, []tableCell{
 			{text: node.PID, width: pidWidth},
@@ -501,8 +516,10 @@ func (m Model) renderObservatory(obs protocol.Observatory) []string {
 func (m Model) renderEditTimeline(timeline protocol.EditTimeline) []string {
 	height := m.maxOverlayHeight()
 	theme := m.palette()
+	sep := panelSeparatorLine(theme, m.width, theme.PopupSurface())
 	if len(timeline.Files) > 0 {
-		return takeLines(m.renderEditTimelineFiles(timeline, theme), height)
+		fileLines := m.renderEditTimelineFiles(timeline, theme)
+		return takeLines(append([]string{sep}, fileLines...), height)
 	}
 	idxWidth := 4
 	ageWidth := 8
@@ -513,7 +530,7 @@ func (m Model) renderEditTimeline(timeline protocol.EditTimeline) []string {
 		{text: "Tool", width: toolWidth},
 		{text: "Age", width: ageWidth},
 	})
-	lines := []string{header}
+	lines := []string{sep, header}
 	for _, entry := range timeline.Entries {
 		selected := uint16(entry.Index) == timeline.ViewingIndex
 		row := tableDataRow(theme, m.width, selected, []tableCell{
@@ -604,21 +621,48 @@ func tableCellsText(cells []tableCell) string {
 // matching the BEAM content-height model (FooterOverlays.content_height_
 // notifications = 1 + 2*items); an item with inline actions adds one actions
 // row, the documented per-item slack the band ceiling clamps.
+//
+// The content is wrapped in a rounded border with drop shadow matching the
+// picker/which-key popup styling (#2538). The border adds 2 to height and 4 to
+// width (2 border chars + 2 padding chars); the BEAM placement rect must
+// account for this overhead so overlayLayer does not clip the border frame.
 func (m Model) renderNotifications(notes protocol.Notifications) []string {
 	height := m.maxOverlayHeight()
 	width := max(m.width, 1)
 	theme := m.palette()
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupChrome()).Width(width).ColorWhitespace(true)
-	lines := []string{renderPadded(titleStyle, "  Notifications", width)}
+
+	// Content dimensions account for the rounded border frame. The border adds
+	// 1 column on each side (2 total) and Padding(0,1) adds 1 column on each
+	// side (2 more), for 4 columns of width overhead. Height adds 1 row for the
+	// top border and 1 for the bottom border (2 total).
+	contentWidth := max(width-4, 1)
+	contentHeight := max(height-2, 1)
+
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupChrome()).Width(contentWidth).ColorWhitespace(true)
+	lines := []string{renderPadded(titleStyle, " Notifications", contentWidth)}
 
 	for _, note := range notes.Items {
-		lines = append(lines, m.renderNotificationHeaderRow(note, width))
-		lines = append(lines, m.renderNotificationBodyRow(note, width))
+		lines = append(lines, m.renderNotificationHeaderRow(note, contentWidth))
+		lines = append(lines, m.renderNotificationBodyRow(note, contentWidth))
 		if len(note.Actions) > 0 {
-			lines = append(lines, m.renderNotificationActionsRow(note, width))
+			lines = append(lines, m.renderNotificationActionsRow(note, contentWidth))
 		}
 	}
-	return takeLines(lines, height)
+	lines = takeLines(lines, contentHeight)
+
+	// Wrap in rounded border matching picker/which-key popup styling.
+	content := strings.Join(lines, "\n")
+	bordered := lipgloss.NewStyle().
+		Width(contentWidth).
+		Padding(0, 1).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme.PopupBorder()).
+		BorderBackground(theme.PopupSurface()).
+		Background(theme.PopupSurface()).
+		ColorWhitespace(true).
+		Render(content)
+
+	return strings.Split(bordered, "\n")
 }
 
 // renderNotificationHeaderRow draws a notification's title and, when the
@@ -680,8 +724,10 @@ func (m Model) renderNotificationActionsRow(note protocol.Notification, width in
 
 func (m Model) renderExtensionOverlay(overlay protocol.ExtensionOverlay) []string {
 	style := m.panelStyle()
-	lines := []string{style.Bold(true).Foreground(m.palette().Accent()).Render(fit(" Extension overlays", m.width))}
-	for _, entry := range overlay.Entries[:min(len(overlay.Entries), max(m.maxOverlayHeight()-1, 0))] {
+	theme := m.palette()
+	sep := panelSeparatorLine(theme, m.width, theme.Base())
+	lines := []string{sep, style.Bold(true).Foreground(theme.Accent()).Render(fit(" Extension overlays", m.width))}
+	for _, entry := range overlay.Entries[:min(len(overlay.Entries), max(m.maxOverlayHeight()-2, 0))] {
 		lines = append(lines, style.Render(fit(fmt.Sprintf("%s %d:%d %s", entry.Extension, entry.Row+1, entry.Col+1, entry.Content), m.width)))
 	}
 	return lines

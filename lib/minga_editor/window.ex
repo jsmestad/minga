@@ -52,7 +52,8 @@ defmodule MingaEditor.Window do
           document_symbols: [Symbol.t()],
           popup_meta: PopupActive.t() | nil,
           render_cache: RenderCache.t(),
-          scroll_velocity: ScrollVelocity.t()
+          scroll_velocity: ScrollVelocity.t(),
+          prefetch_overscan_boost: {non_neg_integer(), :down | :up} | nil
         }
 
   @enforce_keys [:id, :content, :buffer, :viewport]
@@ -69,7 +70,8 @@ defmodule MingaEditor.Window do
     document_symbols: [],
     popup_meta: nil,
     render_cache: %RenderCache{},
-    scroll_velocity: %ScrollVelocity{}
+    scroll_velocity: %ScrollVelocity{},
+    prefetch_overscan_boost: nil
   ]
 
   @doc """

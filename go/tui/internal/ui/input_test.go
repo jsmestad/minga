@@ -103,7 +103,7 @@ func TestMousePacketEncodesHorizontalWheel(t *testing.T) {
 		{name: "shift wheel up", msg: tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelUp, Mod: tea.ModShift}), want: 0x43},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			packet, ok := New(80, 24, nil).mousePacket(tc.msg)
+			packet, ok := New(80, 24, nil, nil).mousePacket(tc.msg)
 			if !ok {
 				t.Fatal("wheel should encode a mouse packet")
 			}
@@ -138,7 +138,7 @@ func TestMousePacketDistinguishesDragFromMotion(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			packet, ok := New(80, 24, nil).mousePacket(tc.msg)
+			packet, ok := New(80, 24, nil, nil).mousePacket(tc.msg)
 			if !ok {
 				t.Fatal("motion should encode a mouse packet")
 			}
@@ -236,7 +236,7 @@ func tabBarModel(headerRows int) Model {
 	if headerRows < 2 {
 		panic("tabBarModel: tab bar with separator is always at least two rows")
 	}
-	model := New(120, 24, nil)
+	model := New(120, 24, nil, nil)
 	chrome := map[byte]protocol.ChromePayload{
 		generated.OPGuiTabBar: {
 			Tabs: protocol.TabBar{Tabs: []protocol.Tab{{ID: 1, Icon: "󰈙", Label: "main.ex", Active: true}}},
@@ -275,7 +275,7 @@ func TestMousePacketSubtractsHeaderOffset(t *testing.T) {
 			// Pin the translation arithmetic directly against the cached offset so
 			// the rule is independent of whether headerLines can ever collapse to
 			// zero rows (it cannot today: there is always a title fallback).
-			model := New(120, 24, nil)
+			model := New(120, 24, nil, nil)
 			model.layout.header.Height = tc.offset
 			msg := tea.MouseClickMsg(tea.Mouse{X: 7, Y: tc.terminalY, Button: tea.MouseLeft})
 			packet, ok := model.mousePacket(msg)
@@ -504,7 +504,7 @@ func TestTabSeparatorFullLineWhenNoActiveTab(t *testing.T) {
 // suppressed, since the BEAM treats a wheel as a viewport scroll with no buffer
 // hit-test (ticket #2256).
 func TestMousePacketNormalizesPresentationScrollOffset(t *testing.T) {
-	model := New(20, 6, nil)
+	model := New(20, 6, nil, nil)
 	model.putWindow(protocol.WindowContent{
 		ID:           7,
 		ContentEpoch: 9,
@@ -530,7 +530,7 @@ func TestMousePacketNormalizesPresentationScrollOffset(t *testing.T) {
 }
 
 func TestMousePacketClampsPresentationScrollOffsetInsideWindow(t *testing.T) {
-	model := New(20, 6, nil)
+	model := New(20, 6, nil, nil)
 	model.putWindow(protocol.WindowContent{
 		ID:           7,
 		ContentEpoch: 9,
