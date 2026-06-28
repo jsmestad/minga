@@ -189,6 +189,9 @@ extension InputEncoder {
     /// Default no-op so existing test spies do not need to implement font size actions.
     func sendFontSizeAdjust(direction: UInt8) {}
 
+    func sendScrollBatch(windowId: UInt16, deltaLines: Int16, direction: UInt8) {}
+    func sendScrollPrefetchHint(windowId: UInt16, currentVisualLine: UInt32, direction: UInt8, contentEpoch: UInt32) {}
+
     /// Default no-op so existing test spies do not need to implement timeline actions.
     func sendTimelineNavigate(index: UInt16) {}
 
@@ -360,6 +363,25 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         buf[6] = modifiers
         buf[7] = eventType
         buf[8] = clickCount
+        writeFrame(buf)
+    }
+
+    func sendScrollBatch(windowId: UInt16, deltaLines: Int16, direction: UInt8) {
+        var buf = Data(count: 6)
+        buf[0] = OP_SCROLL_BATCH
+        writeU16(&buf, 1, windowId)
+        writeI16(&buf, 3, deltaLines)
+        buf[5] = direction
+        writeFrame(buf)
+    }
+
+    func sendScrollPrefetchHint(windowId: UInt16, currentVisualLine: UInt32, direction: UInt8, contentEpoch: UInt32) {
+        var buf = Data(count: 10)
+        buf[0] = OP_SCROLL_PREFETCH_HINT
+        writeU16(&buf, 1, windowId)
+        writeU32(&buf, 3, currentVisualLine)
+        buf[7] = direction
+        writeU32(&buf, 8, contentEpoch)
         writeFrame(buf)
     }
 

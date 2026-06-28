@@ -532,10 +532,29 @@ defmodule MingaEditor do
     {:noreply, new_state}
   end
 
-  # ── Frame transaction: keyframe request (#2219) ──────────────────────────
-  # A frontend asks for a full keyframe after a decode invalidation. Mark the next
-  # frame keyframe-forced and re-render so the full snapshot goes out promptly. The
-  # last_good_frame_seq is informational under single-client scope.
+  def handle_info({:minga_input, {:scroll_batch, window_id, delta_lines, direction}}, state) do
+    snapshot = Input.Router.capture_snapshot(state)
+    new_state = MingaEditor.Mouse.handle_scroll_batch(state, window_id, delta_lines, direction)
+    new_state = Input.Router.post_action_housekeeping(new_state, snapshot)
+    {:noreply, new_state}
+  end
+
+  def handle_info(
+        {:minga_input,
+         {:scroll_prefetch_hint, window_id, _current_visual_line, direction, content_epoch}},
+        state
+      ) do
+    new_state =
+      MingaEditor.RenderPipeline.BufferPrefetch.apply_prefetch_hint(
+        state,
+        window_id,
+        direction,
+        content_epoch
+      )
+
+    {:noreply, Renderer.render_or_async(new_state)}
+  end
+
   def handle_info({:minga_input, {:request_keyframe, _last_good_frame_seq}}, state) do
     new_state = %{state | keyframe_pending?: true}
     {:noreply, Renderer.render_or_async(new_state)}

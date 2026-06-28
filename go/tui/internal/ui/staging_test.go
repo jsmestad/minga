@@ -88,7 +88,7 @@ func applyTo(t *testing.T, model Model, commands ...protocol.Command) Model {
 // silently until a valid commit clears the pending flag (#2266 review).
 func TestInvalidationDebouncesKeyframeRequests(t *testing.T) {
 	out := make(chan []byte, 8)
-	m := New(80, 24, out)
+	m := New(80, 24, out, nil)
 
 	// First invalidation: commit with no open transaction.
 	m = applyTo(t, m, commitFrame(7))
@@ -114,7 +114,7 @@ func TestInvalidationDebouncesKeyframeRequests(t *testing.T) {
 
 func TestInvalidationLogsToMessagesAndDebouncesDiagnostics(t *testing.T) {
 	out := make(chan []byte, 8)
-	m := New(80, 24, out)
+	m := New(80, 24, out, nil)
 
 	m = applyTo(t, m, commitFrame(7))
 	packets := drainOutboundPackets(out)
@@ -153,7 +153,7 @@ func TestInvalidationLogsToMessagesAndDebouncesDiagnostics(t *testing.T) {
 
 func TestStagingDoesNotPaintBeforeCommit(t *testing.T) {
 	out := make(chan []byte, 16)
-	model := New(40, 8, out)
+	model := New(40, 8, out, nil)
 
 	// Commit a first keyframe so there is a known baseline frame on screen.
 	model = applyTo(t, model, beginFrame(1, 0), testThemeCommand(), windowRowsCommand(1, "committed line"), commitFrame(1))
@@ -180,7 +180,7 @@ func TestStagingDoesNotPaintBeforeCommit(t *testing.T) {
 // AC-3: commit applies the staged frame atomically.
 func TestStagingAppliesAtomicallyOnCommit(t *testing.T) {
 	out := make(chan []byte, 16)
-	model := New(40, 8, out)
+	model := New(40, 8, out, nil)
 	model = applyTo(t, model, beginFrame(1, 0), testThemeCommand(), windowRowsCommand(1, "first frame"), commitFrame(1))
 
 	// Stage the next frame across two separate packets, committing only at the end.
@@ -206,7 +206,7 @@ func TestStagingAppliesAtomicallyOnCommit(t *testing.T) {
 // does NOT partially paint; the prior committed frame stays on screen.
 func TestTruncatedTransactionRequestsKeyframeAndKeepsPriorFrame(t *testing.T) {
 	out := make(chan []byte, 16)
-	model := New(40, 8, out)
+	model := New(40, 8, out, nil)
 	model = applyTo(t, model, beginFrame(7, 0), testThemeCommand(), windowRowsCommand(1, "good frame"), commitFrame(7))
 	drainKeyframeRequests(t, out) // clear
 
@@ -233,7 +233,7 @@ func TestTruncatedTransactionRequestsKeyframeAndKeepsPriorFrame(t *testing.T) {
 // keeps the prior frame.
 func TestStreamErrorInsideTransactionRequestsKeyframe(t *testing.T) {
 	out := make(chan []byte, 16)
-	model := New(40, 8, out)
+	model := New(40, 8, out, nil)
 	model = applyTo(t, model, beginFrame(3, 0), testThemeCommand(), windowRowsCommand(1, "stable"), commitFrame(3))
 	drainKeyframeRequests(t, out)
 
@@ -262,7 +262,7 @@ func TestStreamErrorInsideTransactionRequestsKeyframe(t *testing.T) {
 // must not request a keyframe.
 func TestStreamErrorOutsideTransactionIsHarmless(t *testing.T) {
 	out := make(chan []byte, 16)
-	model := New(40, 8, out)
+	model := New(40, 8, out, nil)
 	model = applyTo(t, model, protocol.Command{Kind: protocol.CommandStreamError})
 	if reqs := drainKeyframeRequests(t, out); len(reqs) != 0 {
 		t.Fatalf("out-of-band stream error must not request a keyframe: %v", reqs)
@@ -272,7 +272,7 @@ func TestStreamErrorOutsideTransactionIsHarmless(t *testing.T) {
 // AC-2: a commit whose seq does not match the open begin requests a keyframe.
 func TestCommitSeqMismatchRequestsKeyframe(t *testing.T) {
 	out := make(chan []byte, 16)
-	model := New(40, 8, out)
+	model := New(40, 8, out, nil)
 	model = applyTo(t, model, beginFrame(10, 0), testThemeCommand(), windowRowsCommand(1, "base"), commitFrame(10))
 	drainKeyframeRequests(t, out)
 
@@ -294,7 +294,7 @@ func TestCommitSeqMismatchRequestsKeyframe(t *testing.T) {
 // requests a keyframe.
 func TestBaseMismatchRequestsKeyframe(t *testing.T) {
 	out := make(chan []byte, 16)
-	model := New(40, 8, out)
+	model := New(40, 8, out, nil)
 	model = applyTo(t, model, beginFrame(20, 0), testThemeCommand(), windowRowsCommand(1, "committed"), commitFrame(20))
 	drainKeyframeRequests(t, out)
 
@@ -314,7 +314,7 @@ func TestBaseMismatchRequestsKeyframe(t *testing.T) {
 // commits.
 func TestResyncIndicatorShowsThenClearsOnKeyframe(t *testing.T) {
 	out := make(chan []byte, 16)
-	model := New(40, 8, out)
+	model := New(40, 8, out, nil)
 	model = applyTo(t, model, beginFrame(30, 0), testThemeCommand(), windowRowsCommand(1, "ok"), commitFrame(30))
 
 	// Force an invalidation (double begin).
@@ -344,7 +344,7 @@ func TestResyncIndicatorShowsThenClearsOnKeyframe(t *testing.T) {
 // Out-of-band no-op compatibility commands, such as font setup decoded by the TUI only for sizing, must not invalidate the frame stream.
 func TestOutOfBandNoopDoesNotRequestKeyframe(t *testing.T) {
 	out := make(chan []byte, 16)
-	model := New(40, 8, out)
+	model := New(40, 8, out, nil)
 
 	model = applyTo(t, model, protocol.Command{Kind: protocol.CommandNoop})
 
@@ -359,7 +359,7 @@ func TestOutOfBandNoopDoesNotRequestKeyframe(t *testing.T) {
 // Out-of-band allowance: set_title, set_window_bg, and clipboard_write arriving with no open transaction apply directly as sanctioned side channels and do NOT request a keyframe.
 func TestOutOfBandSideChannelsApplyWithoutTransaction(t *testing.T) {
 	out := make(chan []byte, 16)
-	model := New(40, 8, out)
+	model := New(40, 8, out, nil)
 
 	model = applyTo(t, model,
 		protocol.Command{Kind: protocol.CommandSetTitle, Title: "minga - file.ex"},
@@ -385,7 +385,7 @@ func TestOutOfBandSideChannelsApplyWithoutTransaction(t *testing.T) {
 // staged model: it must NOT apply and must request a keyframe.
 func TestSemanticCommandOutsideTransactionRequestsKeyframe(t *testing.T) {
 	out := make(chan []byte, 16)
-	model := New(40, 8, out)
+	model := New(40, 8, out, nil)
 	model = applyTo(t, model, beginFrame(50, 0), testThemeCommand(), windowRowsCommand(1, "committed"), commitFrame(50))
 	drainKeyframeRequests(t, out)
 
@@ -404,7 +404,7 @@ func TestSemanticCommandOutsideTransactionRequestsKeyframe(t *testing.T) {
 // commit_frame produces a sample.
 func TestLatencyResolvesOnCommit(t *testing.T) {
 	out := make(chan []byte, 16)
-	model := New(40, 8, out)
+	model := New(40, 8, out, nil)
 	seq := model.latency.Stamp()
 
 	model = applyTo(t, model, beginFrame(60, 0), testThemeCommand(), windowRowsCommand(1, "frame"))

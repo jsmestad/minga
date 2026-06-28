@@ -89,3 +89,72 @@ func TestInputFilterMotionAndWheelThrottleIndependently(t *testing.T) {
 		t.Fatal("first wheel should pass even when motion was just allowed")
 	}
 }
+
+func TestInputFilterCoalescesDroppedWheelEvents(t *testing.T) {
+	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	f := &InputFilter{now: func() time.Time { return now }}
+
+	down := tea.MouseWheelMsg(tea.Mouse{X: 5, Y: 5, Button: tea.MouseWheelDown})
+
+	if got := f.Filter(nil, down); got == nil {
+		t.Fatal("first wheel should pass through")
+	}
+	delta, _ := f.DrainCoalesced()
+	if delta != 1 {
+		t.Fatalf("first event delta should be 1, got %d", delta)
+	}
+
+	now = now.Add(3 * time.Millisecond)
+	f.Filter(nil, down)
+	now = now.Add(3 * time.Millisecond)
+	f.Filter(nil, down)
+	now = now.Add(3 * time.Millisecond)
+	f.Filter(nil, down)
+
+	now = now.Add(20 * time.Millisecond)
+	if got := f.Filter(nil, down); got == nil {
+		t.Fatal("wheel after 16ms should pass through")
+	}
+	delta, _ = f.DrainCoalesced()
+	if delta != 4 {
+		t.Fatalf("coalesced delta should be 4 (3 dropped + 1 passed), got %d", delta)
+	}
+}
+
+func TestInputFilterCoalescesOpposingDirections(t *testing.T) {
+	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	f := &InputFilter{now: func() time.Time { return now }}
+
+	down := tea.MouseWheelMsg(tea.Mouse{X: 5, Y: 5, Button: tea.MouseWheelDown})
+	up := tea.MouseWheelMsg(tea.Mouse{X: 5, Y: 5, Button: tea.MouseWheelUp})
+
+	f.Filter(nil, down)
+	f.DrainCoalesced()
+
+	now = now.Add(3 * time.Millisecond)
+	f.Filter(nil, down)
+	now = now.Add(3 * time.Millisecond)
+	f.Filter(nil, up)
+
+	now = now.Add(20 * time.Millisecond)
+	f.Filter(nil, down)
+	delta, _ := f.DrainCoalesced()
+	if delta != 1 {
+		t.Fatalf("opposing directions should cancel: 2 down - 1 up = 1, got %d", delta)
+	}
+}
+
+func TestInputFilterDrainResetsAccumulator(t *testing.T) {
+	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	f := &InputFilter{now: func() time.Time { return now }}
+
+	down := tea.MouseWheelMsg(tea.Mouse{X: 5, Y: 5, Button: tea.MouseWheelDown})
+
+	f.Filter(nil, down)
+	f.DrainCoalesced()
+
+	delta, _ := f.DrainCoalesced()
+	if delta != 0 {
+		t.Fatalf("second drain should return 0, got %d", delta)
+	}
+}

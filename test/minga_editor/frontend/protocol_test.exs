@@ -406,6 +406,42 @@ defmodule MingaEditor.Frontend.ProtocolTest do
     end
   end
 
+  describe "decode_event/1 — scroll_batch" do
+    test "decodes scroll_batch down" do
+      payload = <<0x09, 1::16, 5::16-signed, 0>>
+
+      assert {:ok, {:scroll_batch, 1, 5, :down}} = Protocol.decode_event(payload)
+    end
+
+    test "decodes scroll_batch up with negative delta" do
+      payload = <<0x09, 2::16, -3::16-signed, 1>>
+
+      assert {:ok, {:scroll_batch, 2, -3, :up}} = Protocol.decode_event(payload)
+    end
+
+    test "truncated scroll_batch returns malformed" do
+      assert {:error, :malformed} = Protocol.decode_event(<<0x09, 1::16, 5::16-signed>>)
+    end
+  end
+
+  describe "decode_event/1 — scroll_prefetch_hint" do
+    test "decodes scroll_prefetch_hint down" do
+      payload = <<0x0A, 1::16, 100::32, 0, 42::32>>
+
+      assert {:ok, {:scroll_prefetch_hint, 1, 100, :down, 42}} = Protocol.decode_event(payload)
+    end
+
+    test "decodes scroll_prefetch_hint up" do
+      payload = <<0x0A, 3::16, 200::32, 1, 99::32>>
+
+      assert {:ok, {:scroll_prefetch_hint, 3, 200, :up, 99}} = Protocol.decode_event(payload)
+    end
+
+    test "truncated scroll_prefetch_hint returns malformed" do
+      assert {:error, :malformed} = Protocol.decode_event(<<0x0A, 1::16, 100::32>>)
+    end
+  end
+
   describe "set_title protocol" do
     test "encodes title" do
       encoded = Protocol.encode_set_title("editor.ex [+] (lib) - Minga")
