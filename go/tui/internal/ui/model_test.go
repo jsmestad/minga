@@ -2916,3 +2916,120 @@ func TestCompletionTwoIndexRenderingSplit(t *testing.T) {
 		t.Fatalf("doc pane should show committed item's docs, not the preview item's: %q", joined)
 	}
 }
+
+func pickerChrome(items int, selected uint16) protocol.ChromePayload {
+	pItems := make([]protocol.PickerItem, items)
+	for i := range pItems {
+		pItems[i] = protocol.PickerItem{Label: fmt.Sprintf("item%d", i)}
+	}
+	return protocol.ChromePayload{Opcode: generated.OPGuiPicker, Picker: protocol.Picker{Visible: true, Selected: selected, Items: pItems}}
+}
+
+func TestPickerLocalNavigationJAdvancesPreview(t *testing.T) {
+	out := make(chan []byte, 1)
+	model := New(30, 10, out)
+	model.chrome[generated.OPGuiPicker] = pickerChrome(5, 0)
+
+	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
+	model = updated.(Model)
+
+	if model.localPresentation.previewPickerIndex == nil || *model.localPresentation.previewPickerIndex != 1 {
+		t.Fatalf("j should set preview picker index to 1, got %v", model.localPresentation.previewPickerIndex)
+	}
+	packets := drainOutboundPackets(out)
+	if len(packets) != 1 {
+		t.Fatalf("j should still forward the key packet, got %d packets", len(packets))
+	}
+}
+
+func TestPickerLocalNavigationKRetreatsPreview(t *testing.T) {
+	out := make(chan []byte, 1)
+	model := New(30, 10, out)
+	model.chrome[generated.OPGuiPicker] = pickerChrome(5, 3)
+
+	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'k', Text: "k"}))
+	model = updated.(Model)
+
+	if model.localPresentation.previewPickerIndex == nil || *model.localPresentation.previewPickerIndex != 2 {
+		t.Fatalf("k should set preview picker index to 2, got %v", model.localPresentation.previewPickerIndex)
+	}
+}
+
+func TestPickerLocalNavigationClampsAtBoundaries(t *testing.T) {
+	t.Run("clamps at bottom", func(t *testing.T) {
+		model := New(30, 10, nil)
+		model.chrome[generated.OPGuiPicker] = pickerChrome(3, 2)
+
+		updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
+		model = updated.(Model)
+
+		if model.localPresentation.previewPickerIndex != nil {
+			t.Fatalf("j at last item should not set preview, got %v", *model.localPresentation.previewPickerIndex)
+		}
+	})
+
+	t.Run("clamps at top", func(t *testing.T) {
+		model := New(30, 10, nil)
+		model.chrome[generated.OPGuiPicker] = pickerChrome(3, 0)
+
+		updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'k', Text: "k"}))
+		model = updated.(Model)
+
+		if model.localPresentation.previewPickerIndex != nil {
+			t.Fatalf("k at first item should not set preview, got %v", *model.localPresentation.previewPickerIndex)
+		}
+	})
+}
+
+func TestPickerLocalNavigationDoesNotMutateCommittedSelected(t *testing.T) {
+	model := New(30, 10, nil)
+	model.chrome[generated.OPGuiPicker] = pickerChrome(5, 1)
+
+	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
+	model = updated.(Model)
+
+	if model.chrome[generated.OPGuiPicker].Picker.Selected != 1 {
+		t.Fatalf("j should not mutate the BEAM-committed Selected, got %d", model.chrome[generated.OPGuiPicker].Picker.Selected)
+	}
+}
+
+func TestPickerLocalNavigationIgnoredWhenHidden(t *testing.T) {
+	model := New(30, 10, nil)
+	model.chrome[generated.OPGuiPicker] = protocol.ChromePayload{Opcode: generated.OPGuiPicker, Picker: protocol.Picker{Visible: false, Items: []protocol.PickerItem{{Label: "x"}}}}
+
+	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
+	model = updated.(Model)
+
+	if model.localPresentation.previewPickerIndex != nil {
+		t.Fatalf("j should be ignored when picker is hidden")
+	}
+}
+
+func TestPickerEffectiveIndexUsesPreviewWhenSet(t *testing.T) {
+	model := New(30, 10, nil)
+	picker := protocol.Picker{Visible: true, Selected: 1, Items: []protocol.PickerItem{{Label: "a"}, {Label: "b"}, {Label: "c"}}}
+
+	if got := model.effectivePickerIndex(picker); got != 1 {
+		t.Fatalf("effective index with no preview should be committed, got %d", got)
+	}
+
+	idx := 2
+	model.localPresentation.previewPickerIndex = &idx
+	if got := model.effectivePickerIndex(picker); got != 2 {
+		t.Fatalf("effective index with preview should be preview index, got %d", got)
+	}
+}
+
+func TestPickerReconcileClearsPreviewOnBEAMUpdate(t *testing.T) {
+	model := New(30, 10, nil)
+	idx := 2
+	model.localPresentation.previewPickerIndex = &idx
+
+	_ = model.applyCommands(frame(
+		protocol.Command{Kind: protocol.CommandChrome, Chrome: pickerChrome(3, 1)},
+	))
+
+	if model.localPresentation.previewPickerIndex != nil {
+		t.Fatalf("BEAM picker update should clear the preview index")
+	}
+}
