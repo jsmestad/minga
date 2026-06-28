@@ -3593,7 +3593,7 @@ private func decodeChatMessageCandidates(data: Data, start: Int, end: Int) throw
 
 private func validatedScrollPresentation(_ presentation: GUIScrollPresentation?, windowId: UInt16, contentEpoch: UInt32) throws -> GUIScrollPresentation? {
     guard let presentation else { return nil }
-    guard presentation.matches(windowId: windowId, contentEpoch: contentEpoch) else {
+    guard presentation.belongsTo(windowId: windowId, contentEpoch: contentEpoch) else {
         throw ProtocolDecodeError.malformed
     }
     return presentation

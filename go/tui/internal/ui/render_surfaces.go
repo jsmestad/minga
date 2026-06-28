@@ -473,7 +473,7 @@ func (m Model) renderObservatory(obs protocol.Observatory) []string {
 	nameWidth := max(m.width-pidWidth-qWidth, 20)
 
 	header := tableHeaderRow(theme, m.width, []tableCell{
-		{text: fmt.Sprintf("Observatory %d", max(int(obs.Count), len(obs.Nodes))), width: pidWidth},
+		{text: fmt.Sprintf("󰐣 Observatory %d", max(int(obs.Count), len(obs.Nodes))), width: pidWidth},
 		{text: "Process", width: nameWidth},
 		{text: "Q", width: qWidth},
 	})
@@ -509,7 +509,7 @@ func (m Model) renderEditTimeline(timeline protocol.EditTimeline) []string {
 	toolWidth := max(m.width-idxWidth-ageWidth, 18)
 
 	header := tableHeaderRow(theme, m.width, []tableCell{
-		{text: "#", width: idxWidth},
+		{text: "󰋚 #", width: idxWidth},
 		{text: "Tool", width: toolWidth},
 		{text: "Age", width: ageWidth},
 	})
@@ -531,7 +531,7 @@ func (m Model) renderEditTimelineFiles(timeline protocol.EditTimeline, theme pal
 	countWidth := 6
 	diffWidth := 12
 	header := tableHeaderRow(theme, m.width, []tableCell{
-		{text: "File", width: pathWidth},
+		{text: "󰋚 File", width: pathWidth},
 		{text: "Edits", width: countWidth},
 		{text: "Diff", width: diffWidth},
 	})
@@ -609,7 +609,7 @@ func (m Model) renderNotifications(notes protocol.Notifications) []string {
 	width := max(m.width, 1)
 	theme := m.palette()
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupChrome()).Width(width).ColorWhitespace(true)
-	lines := []string{renderPadded(titleStyle, " Notifications", width)}
+	lines := []string{renderPadded(titleStyle, "  Notifications", width)}
 
 	for _, note := range notes.Items {
 		lines = append(lines, m.renderNotificationHeaderRow(note, width))
@@ -680,7 +680,7 @@ func (m Model) renderNotificationActionsRow(note protocol.Notification, width in
 
 func (m Model) renderExtensionOverlay(overlay protocol.ExtensionOverlay) []string {
 	style := m.panelStyle()
-	lines := []string{style.Bold(true).Foreground(m.palette().Accent()).Render(fit("Extension overlays", m.width))}
+	lines := []string{style.Bold(true).Foreground(m.palette().Accent()).Render(fit(" Extension overlays", m.width))}
 	for _, entry := range overlay.Entries[:min(len(overlay.Entries), max(m.maxOverlayHeight()-1, 0))] {
 		lines = append(lines, style.Render(fit(fmt.Sprintf("%s %d:%d %s", entry.Extension, entry.Row+1, entry.Col+1, entry.Content), m.width)))
 	}

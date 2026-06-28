@@ -156,20 +156,21 @@ type FileTree struct {
 }
 
 type FileTreeRow struct {
-	ID        string
-	Path      string
-	PathHash  uint32
-	Name      string
-	Icon      string
-	IconColor uint32
-	Depth     byte
-	Flags     uint16
-	Directory bool
-	Expanded  bool
-	Selected  bool
-	Focused   bool
-	Active    bool
-	Dirty     bool
+	ID             string
+	Path           string
+	PathHash       uint32
+	Name           string
+	Icon           string
+	IconColor      uint32
+	Depth          byte
+	Flags          uint16
+	Directory      bool
+	Expanded       bool
+	Selected       bool
+	Focused        bool
+	Active         bool
+	Dirty          bool
+	MatchPositions []uint16
 }
 
 type StatusBar struct {
