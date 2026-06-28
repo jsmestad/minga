@@ -73,6 +73,14 @@ struct PreviewSegment: Identifiable {
 final class PickerState {
     var visible: Bool = false
     var selectedIndex: Int = 0
+    var previewSelectedIndex: Int?
+
+    var effectiveSelectedIndex: Int {
+        if let preview = previewSelectedIndex, preview >= 0, preview < items.count {
+            return preview
+        }
+        return selectedIndex
+    }
     var filteredCount: Int = 0
     var totalCount: Int = 0
     var markedCount: Int = 0
@@ -88,6 +96,7 @@ final class PickerState {
     func update(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, rawItems: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String = "", loadStatus: Wire.PickerLoadStatus = .ready) {
         self.visible = visible
         self.selectedIndex = Int(selectedIndex)
+        self.previewSelectedIndex = nil
         self.filteredCount = Int(filteredCount)
         self.totalCount = Int(totalCount)
         self.markedCount = Int(markedCount)
@@ -138,11 +147,21 @@ final class PickerState {
         self.previewLines = []
     }
 
+    func previewNavigation(delta: Int) -> Bool {
+        guard visible, !items.isEmpty else { return false }
+        let current = previewSelectedIndex ?? selectedIndex
+        let next = min(max(current + delta, 0), items.count - 1)
+        guard next != current else { return false }
+        previewSelectedIndex = next
+        return true
+    }
+
     func hide() {
         visible = false
         markedCount = 0
         items = []
         previewLines = []
+        previewSelectedIndex = nil
         modePrefix = ""
         hasPreview = false
         loadStatus = .ready

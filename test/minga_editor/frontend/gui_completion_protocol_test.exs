@@ -21,6 +21,19 @@ defmodule MingaEditor.Frontend.GUICompletionProtocolTest do
     assert decode_labels(entries, count) == Enum.map(2..11, &label/1)
   end
 
+  test "selection move does not re-encode the popup (fingerprint excludes selected_offset)" do
+    comp = many_items_completion(5)
+    model = completion_model(comp, 4, 12)
+
+    alias Minga.Frontend.Adapter.GUI.Caches
+    {first_encode, caches} = CompletionEncoder.encode(model, %Caches{})
+    assert first_encode != nil
+
+    moved_model = %{model | selected_offset: model.selected_offset + 1}
+    {second_encode, _caches} = CompletionEncoder.encode(moved_model, caches)
+    assert second_encode == nil
+  end
+
   # Mirror the production CompletionBuilder transformation: window the legacy
   # completion via visible_items, then map to the semantic Completion model the
   # generated encoder consumes.
