@@ -227,13 +227,14 @@ func mouseCol(packet []byte) int16 {
 
 // tabBarModel builds a model whose header renders headerRows rows above the
 // editor body and refreshes the cached offset exactly as Update does after
-// applyCommands (ticket #2256). With tabs the header is at least 2 rows (tab
-// bar + separator); a wide breadcrumb adds a third row. The chrome path is the
-// realistic source-of-truth check that the cached offset matches the rendered
+// applyCommands (ticket #2256). The header is always at least two rows (a tab
+// bar plus its separator connector), so headerRows must be >= 2; a wide
+// breadcrumb adds a third row. The chrome path is the realistic
+// source-of-truth check that the cached offset matches the rendered
 // headerLines.
 func tabBarModel(headerRows int) Model {
 	if headerRows < 2 {
-		panic("tabBarModel: tabs always produce at least 2 rows (tab bar + separator)")
+		panic("tabBarModel: tab bar with separator is always at least two rows")
 	}
 	model := New(120, 24, nil)
 	chrome := map[byte]protocol.ChromePayload{
@@ -294,21 +295,21 @@ func TestMousePacketSubtractsHeaderOffset(t *testing.T) {
 // TestMousePacketOffsetMirrorsRenderedHeader pins AC2: the offset subtracted
 // from outbound rows is the same headerLines height the renderer uses for the
 // frame on screen, sourced through the cache that Update refreshes after
-// applyCommands. With a tab bar, separator, and breadcrumb the header is three
-// rows, so a click on visual line 4 (terminal row 7) reaches the BEAM as editor
-// row 4 (ticket #2256).
+// applyCommands. With a tab bar, separator, and a wide breadcrumb the header is
+// three rows, so a click on visual line 3 (terminal row 6) reaches the BEAM as
+// editor row 3 (ticket #2256).
 func TestMousePacketOffsetMirrorsRenderedHeader(t *testing.T) {
 	model := tabBarModel(3)
 	if got, want := model.layout.header.Height, len(model.headerLines()); got != want {
 		t.Fatalf("cached offset = %d, rendered header height = %d; must match", got, want)
 	}
-	msg := tea.MouseClickMsg(tea.Mouse{X: 0, Y: 7, Button: tea.MouseLeft})
+	msg := tea.MouseClickMsg(tea.Mouse{X: 0, Y: 6, Button: tea.MouseLeft})
 	packet, ok := model.mousePacket(msg)
 	if !ok {
 		t.Fatal("body click should encode a mouse packet")
 	}
-	if got := mouseRow(packet); got != 4 {
-		t.Fatalf("encoded row = %d, want 4 (terminal row 7 minus three header rows)", got)
+	if got := mouseRow(packet); got != 3 {
+		t.Fatalf("encoded row = %d, want 3 (terminal row 6 minus three header rows)", got)
 	}
 }
 
@@ -337,7 +338,7 @@ func TestMousePacketClampsHeaderRegionDragAndRelease(t *testing.T) {
 		msg     tea.MouseMsg
 		wantRow int16
 	}{
-		{msg: tea.MouseClickMsg(tea.Mouse{X: 2, Y: 4, Button: tea.MouseLeft}), wantRow: 2},
+		{msg: tea.MouseClickMsg(tea.Mouse{X: 2, Y: 3, Button: tea.MouseLeft}), wantRow: 1},
 		{msg: tea.MouseMotionMsg(tea.Mouse{X: 2, Y: 0, Button: tea.MouseLeft}), wantRow: 0},
 		{msg: tea.MouseReleaseMsg(tea.Mouse{X: 2, Y: 0, Button: tea.MouseLeft}), wantRow: 0},
 	}
@@ -362,9 +363,9 @@ func TestMousePacketTranslatesDragSequence(t *testing.T) {
 		msg     tea.MouseMsg
 		wantRow int16
 	}{
-		{msg: tea.MouseClickMsg(tea.Mouse{X: 2, Y: 5, Button: tea.MouseLeft}), wantRow: 3},
-		{msg: tea.MouseMotionMsg(tea.Mouse{X: 6, Y: 8, Button: tea.MouseLeft}), wantRow: 6},
-		{msg: tea.MouseReleaseMsg(tea.Mouse{X: 6, Y: 8, Button: tea.MouseLeft}), wantRow: 6},
+		{msg: tea.MouseClickMsg(tea.Mouse{X: 2, Y: 4, Button: tea.MouseLeft}), wantRow: 2},
+		{msg: tea.MouseMotionMsg(tea.Mouse{X: 6, Y: 7, Button: tea.MouseLeft}), wantRow: 5},
+		{msg: tea.MouseReleaseMsg(tea.Mouse{X: 6, Y: 7, Button: tea.MouseLeft}), wantRow: 5},
 	}
 	for _, step := range steps {
 		packet, ok := model.mousePacket(step.msg)
@@ -557,13 +558,13 @@ func TestMousePacketClampsPresentationScrollOffsetInsideWindow(t *testing.T) {
 func TestMousePacketTranslatesWheelOverBody(t *testing.T) {
 	model := tabBarModel(2)
 
-	bodyWheel := tea.MouseWheelMsg(tea.Mouse{X: 4, Y: 6, Button: tea.MouseWheelDown})
+	bodyWheel := tea.MouseWheelMsg(tea.Mouse{X: 4, Y: 5, Button: tea.MouseWheelDown})
 	packet, ok := model.mousePacket(bodyWheel)
 	if !ok {
 		t.Fatal("body wheel should encode a packet")
 	}
-	if got := mouseRow(packet); got != 4 {
-		t.Fatalf("body wheel row = %d, want 4 (6 - two header rows)", got)
+	if got := mouseRow(packet); got != 3 {
+		t.Fatalf("body wheel row = %d, want 3 (5 - two header rows)", got)
 	}
 	if packet[5] != 0x41 {
 		t.Fatalf("wheel button = %#x, want wheel-down 0x41", packet[5])

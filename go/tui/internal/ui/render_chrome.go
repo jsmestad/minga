@@ -163,7 +163,7 @@ func (m Model) renderTabs(tabBar protocol.TabBar) (string, int, int) {
 // tab and the editor content (VS Code-style tab connector).
 func (m Model) renderTabSeparator(activeStart, activeWidth int) string {
 	theme := m.palette()
-	sepFG := theme.Muted()
+	sepFG := theme.TabSeparator()
 	sepBG := theme.EditorSurface()
 	sepStyle := lipgloss.NewStyle().Foreground(sepFG).Background(sepBG)
 	gapStyle := lipgloss.NewStyle().Background(sepBG)
@@ -189,13 +189,13 @@ func (m Model) renderTabSeparator(activeStart, activeWidth int) string {
 func (m Model) renderBreadcrumb(crumb protocol.Breadcrumb) string {
 	segments := make([]string, 0, len(crumb.Segments))
 	for index, segment := range crumb.Segments {
-		style := lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(m.palette().EditorSurface())
+		style := lipgloss.NewStyle().Foreground(m.palette().BreadcrumbText()).Background(m.palette().EditorSurface())
 		if index == len(crumb.Segments)-1 {
 			style = style.Foreground(m.palette().Text())
 		}
 		segments = append(segments, m.zones.Mark(zoneIDBreadcrumbSegment(index), style.Render(segment)))
 	}
-	separator := lipgloss.NewStyle().Foreground(m.palette().GutterText()).Background(m.palette().EditorSurface()).Render(" ❯ ")
+	separator := lipgloss.NewStyle().Foreground(m.palette().BreadcrumbSeparator()).Background(m.palette().EditorSurface()).Render(" ❯ ")
 	text := "  " + strings.Join(segments, separator)
 	if git, ok := m.gitStatus(); ok && git.Branch != "" {
 		gitText := lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(m.palette().EditorSurface()).Render("  ·  " + m.gitSummary(git))
