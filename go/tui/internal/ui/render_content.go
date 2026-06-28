@@ -892,7 +892,6 @@ func fileTreeHasMoreAtLevel(rows []protocol.FileTreeRow, fromIndex int, level in
 	return false
 }
 
-
 func (m Model) renderFileTree(tree protocol.FileTree, width int, height int) []string {
 	theme := m.palette()
 	totalRows := len(tree.Rows)
