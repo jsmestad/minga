@@ -299,7 +299,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let nsView = EditorNSView(encoder: enc, fontFace: face, dispatcher: disp,
                                    coreTextRenderer: ctRenderer, fontManager: fm)
         disp.onScrollPresentationReset = { [weak nsView] in
-            nsView?.resetSmoothScrollState()
+            guard let nsView else { return }
+            // During an active trackpad gesture the anchor changes because
+            // we just scrolled. Resetting the accumulator mid-gesture causes
+            // jitter; let finishSmoothScrollGesture handle cleanup.
+            if nsView.hasActiveScrollGesture { return }
+            nsView.resetSmoothScrollState()
         }
         nsView.guiState = appState.gui
         nsView.statusBarState = appState.gui.statusBarState

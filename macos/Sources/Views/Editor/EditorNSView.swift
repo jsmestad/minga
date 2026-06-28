@@ -348,6 +348,9 @@ final class EditorNSView: MTKView {
     /// Nil means the event location did not resolve to a scrollable editor window, so fractional offset is disabled instead of shifting every pane.
     private var scrollTargetWindowId: UInt16?
 
+    /// True while a trackpad scroll gesture is in progress.
+    var hasActiveScrollGesture: Bool { scrollTargetWindowId != nil }
+
     /// Cell position that owns the current precise scroll gesture.
     /// Nil means the gesture has not latched onto a scroll target yet.
     private var scrollTargetCellPosition: (row: Int16, col: Int16)?
