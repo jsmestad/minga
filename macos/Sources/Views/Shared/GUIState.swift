@@ -44,6 +44,9 @@ final class GUIState {
     /// Status bar state.
     let statusBarState = StatusBarState()
 
+    /// Action feedback state (delay-then-show spinner, hold floor).
+    let feedbackState = FeedbackState()
+
     /// Picker (command palette) state.
     let pickerState = PickerState()
 

@@ -473,7 +473,7 @@ func (m Model) renderObservatory(obs protocol.Observatory) []string {
 	nameWidth := max(m.width-pidWidth-qWidth, 20)
 
 	header := tableHeaderRow(theme, m.width, []tableCell{
-		{text: fmt.Sprintf("Observatory %d", max(int(obs.Count), len(obs.Nodes))), width: pidWidth},
+		{text: fmt.Sprintf("󰐣 Observatory %d", max(int(obs.Count), len(obs.Nodes))), width: pidWidth},
 		{text: "Process", width: nameWidth},
 		{text: "Q", width: qWidth},
 	})
@@ -509,7 +509,7 @@ func (m Model) renderEditTimeline(timeline protocol.EditTimeline) []string {
 	toolWidth := max(m.width-idxWidth-ageWidth, 18)
 
 	header := tableHeaderRow(theme, m.width, []tableCell{
-		{text: "#", width: idxWidth},
+		{text: "󰋚 #", width: idxWidth},
 		{text: "Tool", width: toolWidth},
 		{text: "Age", width: ageWidth},
 	})
@@ -531,7 +531,7 @@ func (m Model) renderEditTimelineFiles(timeline protocol.EditTimeline, theme pal
 	countWidth := 6
 	diffWidth := 12
 	header := tableHeaderRow(theme, m.width, []tableCell{
-		{text: "File", width: pathWidth},
+		{text: "󰋚 File", width: pathWidth},
 		{text: "Edits", width: countWidth},
 		{text: "Diff", width: diffWidth},
 	})
@@ -609,7 +609,7 @@ func (m Model) renderNotifications(notes protocol.Notifications) []string {
 	width := max(m.width, 1)
 	theme := m.palette()
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupChrome()).Width(width).ColorWhitespace(true)
-	lines := []string{renderPadded(titleStyle, " Notifications", width)}
+	lines := []string{renderPadded(titleStyle, "  Notifications", width)}
 
 	for _, note := range notes.Items {
 		lines = append(lines, m.renderNotificationHeaderRow(note, width))
@@ -678,46 +678,9 @@ func (m Model) renderNotificationActionsRow(note protocol.Notification, width in
 	return renderPadded(rowStyle, rendered, width)
 }
 
-// completionShadowLayer returns a drop-shadow layer for the completion popup,
-// or nil when the active overlay is not the completion menu. The shadow is the
-// same size as the overlay, offset by (1, 1) at a Z below the overlay so only
-// the bottom and right edges peek out. This avoids re-rendering the completion
-// content: it reads the overlay layer's position and dimensions directly.
-func (m Model) completionShadowLayer(overlay *lipgloss.Layer) *lipgloss.Layer {
-	winner, ok := m.overlayWinner()
-	if !ok || winner.surfaceID != surfaceIDCompletionMenu {
-		return nil
-	}
-	w := overlay.Width()
-	h := overlay.Height()
-	shadow := popupShadow(w, h)
-	if shadow == "" {
-		return nil
-	}
-	return lipgloss.NewLayer(shadow).X(overlay.GetX() + 1).Y(overlay.GetY() + 1).Z(overlay.GetZ() - 1)
-}
-
-// popupShadow creates a dark rectangle suitable for compositing as a drop
-// shadow behind a floating popup. The shadow is the same size as the popup
-// and is intended to be offset by (1, 1) at a Z below the popup layer so
-// only the bottom and right edges show through. The color is a fixed dark
-// value that works on both light and dark themes as a subtle depth cue.
-func popupShadow(width, height int) string {
-	if width <= 0 || height <= 0 {
-		return ""
-	}
-	shadowStyle := lipgloss.NewStyle().Background(lipgloss.Color("#111111"))
-	line := shadowStyle.Render(strings.Repeat(" ", width))
-	lines := make([]string, height)
-	for i := range lines {
-		lines[i] = line
-	}
-	return strings.Join(lines, "\n")
-}
-
 func (m Model) renderExtensionOverlay(overlay protocol.ExtensionOverlay) []string {
 	style := m.panelStyle()
-	lines := []string{style.Bold(true).Foreground(m.palette().Accent()).Render(fit("Extension overlays", m.width))}
+	lines := []string{style.Bold(true).Foreground(m.palette().Accent()).Render(fit(" Extension overlays", m.width))}
 	for _, entry := range overlay.Entries[:min(len(overlay.Entries), max(m.maxOverlayHeight()-1, 0))] {
 		lines = append(lines, style.Render(fit(fmt.Sprintf("%s %d:%d %s", entry.Extension, entry.Row+1, entry.Col+1, entry.Content), m.width)))
 	}
