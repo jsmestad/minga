@@ -897,7 +897,7 @@ func (m Model) renderFileTree(tree protocol.FileTree, width int, height int) []s
 	}
 
 	headerStyle := lipgloss.NewStyle().Foreground(theme.TreeHeaderText()).Background(theme.TreeHeader()).Width(width)
-	header := headerStyle.Bold(true).Render(fit(" Files  "+tree.Root, width))
+	header := headerStyle.Bold(true).Render(fit(" 󰙅 Files  "+tree.Root, width))
 	lines := []string{header}
 
 	contentStyle := lipgloss.NewStyle().Foreground(theme.TreeText()).Background(theme.TreeSurface()).Width(contentWidth)
