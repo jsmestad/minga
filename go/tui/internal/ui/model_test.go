@@ -1499,7 +1499,7 @@ func TestFileTreeSelectedRowPaintsBackgroundAcrossSegments(t *testing.T) {
 }
 
 func TestFileTreeDirtyRowUsesGitModifiedColor(t *testing.T) {
-	model := New(40, 8, nil)
+	model := New(40, 8, nil, nil)
 	rendered := model.renderFileTreeRow(protocol.FileTreeRow{Name: "main.go", Dirty: true}, 30, fileTreeRowGuides{})
 	// TreeGitModified bootstrap color is 0xE5C07B = rgb(229,192,123).
 	// The dirty indicator and filename should use this instead of the
@@ -1513,7 +1513,7 @@ func TestFileTreeDirtyRowUsesGitModifiedColor(t *testing.T) {
 }
 
 func TestFileTreeDirtySelectedRowKeepsSelectionColors(t *testing.T) {
-	model := New(40, 8, nil)
+	model := New(40, 8, nil, nil)
 	rendered := model.renderFileTreeRow(protocol.FileTreeRow{Name: "main.go", Dirty: true, Selected: true}, 30, fileTreeRowGuides{})
 	// TreeSelectionText bootstrap color is 0xFFFFFF = rgb(255,255,255).
 	// Dirty+selected rows should use selection text, not git-modified for the name.
