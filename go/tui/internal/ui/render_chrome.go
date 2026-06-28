@@ -18,8 +18,9 @@ func (m Model) headerLines() []string {
 		lines = append(lines, m.renderWorkspaces(spaces))
 	}
 	if tabBar, ok := m.tabBar(); ok && len(tabBar.Tabs) > 0 {
-		lines = append(lines, m.renderTabs(tabBar))
-		lines = append(lines, lipgloss.NewStyle().Foreground(m.palette().TabSeparator()).Background(m.palette().EditorSurface()).Width(m.width).Render(strings.Repeat("─", m.width)))
+		tabLine, activeStart, activeWidth := m.renderTabs(tabBar)
+		lines = append(lines, tabLine)
+		lines = append(lines, m.renderTabSeparator(activeStart, activeWidth))
 	}
 	if crumb, ok := m.breadcrumb(); ok && len(crumb.Segments) > 0 && m.width >= 100 {
 		lines = append(lines, m.renderBreadcrumb(crumb))
@@ -89,7 +90,10 @@ func pluralCount(count uint16, label string) string {
 	return fmt.Sprintf("%d %ss", count, label)
 }
 
-func (m Model) renderTabs(tabBar protocol.TabBar) string {
+// renderTabs renders the tab bar and returns the rendered line along with the
+// active tab's visual start column and width (used by renderTabSeparator to
+// build the connector gap). Positions are ANSI-aware via lipgloss.Width.
+func (m Model) renderTabs(tabBar protocol.TabBar) (string, int, int) {
 	theme := m.palette()
 	rowStyle := lipgloss.NewStyle().Background(theme.Surface()).Width(m.width)
 	activeStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.TabActiveText()).Background(theme.TabActive()).Padding(0, 1)
@@ -125,7 +129,60 @@ func (m Model) renderTabs(tabBar protocol.TabBar) string {
 		}
 		rendered = append(rendered, m.zones.Mark(zoneIDTab(tab.ID), style.Render(label)))
 	}
-	return rowStyle.Render(fitStyled(strings.Join(rendered, " "), m.width))
+
+	// Track the active tab's visual position within the joined tab string.
+	activeStart, activeWidth := 0, 0
+	pos := 0
+	for i, tab := range tabBar.Tabs {
+		if i > 0 {
+			pos++ // 1-char " " separator between tabs
+		}
+		w := lipgloss.Width(rendered[i])
+		if tab.Active {
+			activeStart = pos
+			activeWidth = w
+		}
+		pos += w
+	}
+
+	// Clamp to visible width: fitStyled truncates at m.width, so the gap must
+	// not extend beyond the visible portion of the active tab.
+	if activeStart >= m.width {
+		activeWidth = 0
+	} else if activeStart+activeWidth > m.width {
+		activeWidth = m.width - activeStart
+	}
+
+	line := rowStyle.Render(fitStyled(strings.Join(rendered, " "), m.width))
+	return line, activeStart, activeWidth
+}
+
+// renderTabSeparator builds the horizontal rule below the tab bar with a gap
+// (spaces) under the active tab, creating a visual connector between the active
+// tab and the editor content (VS Code-style tab connector).
+func (m Model) renderTabSeparator(activeStart, activeWidth int) string {
+	theme := m.palette()
+	sepFG := theme.TabSeparator()
+	sepBG := theme.EditorSurface()
+	sepStyle := lipgloss.NewStyle().Foreground(sepFG).Background(sepBG)
+	gapStyle := lipgloss.NewStyle().Background(sepBG)
+	rowStyle := lipgloss.NewStyle().Background(sepBG).Width(m.width)
+
+	width := max(m.width, 0)
+	if activeWidth <= 0 || activeStart >= width {
+		return rowStyle.Render(sepStyle.Render(strings.Repeat("─", width)))
+	}
+
+	end := min(activeStart+activeWidth, width)
+	var b strings.Builder
+	if activeStart > 0 {
+		b.WriteString(sepStyle.Render(strings.Repeat("─", activeStart)))
+	}
+	b.WriteString(gapStyle.Render(strings.Repeat(" ", end-activeStart)))
+	if remaining := width - end; remaining > 0 {
+		b.WriteString(sepStyle.Render(strings.Repeat("─", remaining)))
+	}
+	return rowStyle.Render(b.String())
 }
 
 func (m Model) renderBreadcrumb(crumb protocol.Breadcrumb) string {
