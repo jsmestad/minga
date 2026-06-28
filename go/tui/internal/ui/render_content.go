@@ -740,7 +740,8 @@ func (m Model) renderGutterEntry(gutter protocol.Gutter, rowIndex int) string {
 	if width <= 1 {
 		return ""
 	}
-	style := lipgloss.NewStyle().Foreground(m.palette().GutterText()).Background(m.editorBackground()).Width(width)
+	bg := m.editorBackground()
+	style := lipgloss.NewStyle().Foreground(m.palette().GutterText()).Background(bg).Width(width)
 	if rowIndex < 0 || rowIndex >= len(gutter.Entries) {
 		return style.Render(strings.Repeat(" ", width))
 	}
@@ -750,6 +751,15 @@ func (m Model) renderGutterEntry(gutter protocol.Gutter, rowIndex int) string {
 	}
 	sign := m.gutterSign(entry)
 	number := m.gutterLineNumber(gutter, entry)
+
+	// Apply theme-derived git sign colors (added/modified/deleted).
+	if signColor, ok := m.gutterSignColor(entry); ok {
+		signStyle := lipgloss.NewStyle().Foreground(signColor).Background(bg)
+		numStyle := style.Width(0)
+		content := signStyle.Render(sign) + numStyle.Render(number+" ")
+		return style.Render(fitStyled(content, width))
+	}
+
 	return style.Render(fit(sign+number+" ", width))
 }
 
@@ -786,6 +796,22 @@ func (m Model) gutterSign(entry protocol.GutterEntry) string {
 		return "▾ "
 	}
 	return "  "
+}
+
+// gutterSignColor returns a theme-derived color for git sign types.
+// Returns (color, true) for git signs, (nil, false) otherwise.
+func (m Model) gutterSignColor(entry protocol.GutterEntry) (color.Color, bool) {
+	theme := m.palette()
+	switch entry.SignType {
+	case 1: // git added
+		return theme.GitAdded(), true
+	case 2: // git modified
+		return theme.GitModified(), true
+	case 3, 9: // git deleted / git removed
+		return theme.GitDeleted(), true
+	default:
+		return nil, false
+	}
 }
 
 func (m Model) renderFileTree(tree protocol.FileTree, width int, height int) []string {
