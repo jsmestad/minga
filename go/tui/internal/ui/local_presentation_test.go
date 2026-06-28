@@ -127,6 +127,30 @@ func TestReconcileCompletionNoopWhenNoPreview(t *testing.T) {
 	}
 }
 
+func TestReconcilePickerClearsPreview(t *testing.T) {
+	lp := newLocalPresentation()
+	idx := 3
+	lp.previewPickerIndex = &idx
+
+	lp.reconcilePicker()
+
+	if lp.previewPickerIndex != nil {
+		t.Fatal("picker preview should be cleared on BEAM update")
+	}
+}
+
+func TestDiscardIdentityClearsPickerPreview(t *testing.T) {
+	lp := newLocalPresentation()
+	idx := 2
+	lp.previewPickerIndex = &idx
+
+	lp.discard(transformIdentity, 0)
+
+	if lp.previewPickerIndex != nil {
+		t.Fatal("discard(identity) should clear picker preview")
+	}
+}
+
 func TestRemoveWindowCleansUpScroll(t *testing.T) {
 	lp := newLocalPresentation()
 	lp.scrolls[7] = presentationScroll{rowOffset: 3}
