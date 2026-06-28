@@ -54,7 +54,7 @@ func (m Model) renderFloatingWhichKey(which protocol.WhichKey) string {
 	lines = append(lines, m.renderWhichKeyFooter(which, inner))
 
 	content := strings.Join(lines, "\n")
-	return lipgloss.NewStyle().Width(contentWidth).Padding(0, 1).Border(lipgloss.NormalBorder()).BorderForeground(m.palette().PopupBorder()).Background(m.palette().PopupSurface()).Render(content)
+	return lipgloss.NewStyle().Width(contentWidth).Padding(0, 1).Border(lipgloss.RoundedBorder()).BorderForeground(m.palette().PopupBorder()).BorderBackground(m.palette().PopupSurface()).Background(m.palette().PopupSurface()).ColorWhitespace(true).Render(content)
 }
 
 func (m Model) renderWhichKeyHeader(which protocol.WhichKey, width int) string {
