@@ -1354,7 +1354,7 @@ func TestSplitSeparatorsNormalizeAgainstHeaderAndFileTree(t *testing.T) {
 
 func TestFileTreeSelectedRowPaintsBackgroundAcrossSegments(t *testing.T) {
 	model := New(40, 8, nil)
-	rendered := model.renderFileTreeRow(protocol.FileTreeRow{Name: "installer", Icon: "󰉋", Directory: true, Selected: true}, 24)
+	rendered := model.renderFileTreeRow(protocol.FileTreeRow{Name: "installer", Icon: "󰉋", Directory: true, Selected: true}, 24, fileTreeRowGuides{})
 	if count := strings.Count(rendered, "48;2;51;51;51"); count < 4 {
 		t.Fatalf("selected file-tree row should carry selection background across marker, icon, label, and fill, count=%d row=%q", count, rendered)
 	}

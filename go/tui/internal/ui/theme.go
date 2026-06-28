@@ -330,6 +330,10 @@ func (p palette) TreeMutedText() color.Color {
 	return p.slot(themeTabInactiveFG)
 }
 
+func (p palette) TreeGuide() color.Color {
+	return p.slot(themeTreeSeparatorFG)
+}
+
 func (p palette) TreeDirectoryText() color.Color {
 	return p.slot(themeTreeDirFG)
 }

@@ -732,6 +732,68 @@ func (m Model) gutterSign(entry protocol.GutterEntry) string {
 	return "  "
 }
 
+// fileTreeRowGuides holds precomputed guide characters for a single file tree row.
+type fileTreeRowGuides struct {
+	chars []rune // one entry per depth level; values: ' ', '│', '├', '└'
+}
+
+// fileTreeGuidePrefix builds the indentation prefix from precomputed guide characters. Each guide character is followed by a space, producing two columns per depth level (matching the previous pure-whitespace indentation width).
+func fileTreeGuidePrefix(guides fileTreeRowGuides) string {
+	if len(guides.chars) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, ch := range guides.chars {
+		b.WriteRune(ch)
+		b.WriteRune(' ')
+	}
+	return b.String()
+}
+
+// computeFileTreeGuides precomputes guide characters for every row in the file tree. For each row at depth D, it produces D guide characters: ancestor levels get '│' or ' ', and the connector level (d == D-1) gets '├' or '└'.
+func computeFileTreeGuides(rows []protocol.FileTreeRow) []fileTreeRowGuides {
+	guides := make([]fileTreeRowGuides, len(rows))
+	for i, row := range rows {
+		depth := int(row.Depth)
+		if depth == 0 {
+			continue
+		}
+		chars := make([]rune, depth)
+		for d := 0; d < depth; d++ {
+			more := fileTreeHasMoreAtLevel(rows, i, d+1)
+			if d == depth-1 {
+				if more {
+					chars[d] = '├'
+				} else {
+					chars[d] = '└'
+				}
+			} else {
+				if more {
+					chars[d] = '│'
+				} else {
+					chars[d] = ' '
+				}
+			}
+		}
+		guides[i] = fileTreeRowGuides{chars: chars}
+	}
+	return guides
+}
+
+// fileTreeHasMoreAtLevel returns true if any row after fromIndex has depth exactly equal to level before a row with depth less than level appears. This determines whether the vertical guide line at a given ancestor column is still active.
+func fileTreeHasMoreAtLevel(rows []protocol.FileTreeRow, fromIndex int, level int) bool {
+	for j := fromIndex + 1; j < len(rows); j++ {
+		d := int(rows[j].Depth)
+		if d < level {
+			return false
+		}
+		if d == level {
+			return true
+		}
+	}
+	return false
+}
+
 func (m Model) renderFileTree(tree protocol.FileTree, width int, height int) []string {
 	theme := m.palette()
 	style := lipgloss.NewStyle().Foreground(theme.TreeText()).Background(theme.TreeSurface()).Width(width)
@@ -742,8 +804,9 @@ func (m Model) renderFileTree(tree protocol.FileTree, width int, height int) []s
 			lines = append(lines, style.Foreground(theme.TreeMutedText()).Render(fit(" "+status, width)))
 		}
 	}
+	guides := computeFileTreeGuides(tree.Rows)
 	for rowIndex, row := range tree.Rows {
-		rendered := m.renderFileTreeRow(row, width)
+		rendered := m.renderFileTreeRow(row, width, guides[rowIndex])
 		lines = append(lines, m.zones.Mark(zoneIDFileTreeRow(rowIndex), rendered))
 		if len(lines) >= height {
 			return lines
@@ -755,7 +818,7 @@ func (m Model) renderFileTree(tree protocol.FileTree, width int, height int) []s
 	return lines
 }
 
-func (m Model) renderFileTreeRow(row protocol.FileTreeRow, width int) string {
+func (m Model) renderFileTreeRow(row protocol.FileTreeRow, width int, guides fileTreeRowGuides) string {
 	theme := m.palette()
 	rowBackground := theme.TreeSurface()
 	textColor := theme.TreeText()
@@ -774,7 +837,7 @@ func (m Model) renderFileTreeRow(row protocol.FileTreeRow, width int) string {
 	if row.Selected {
 		selectionMarker = "▌"
 	}
-	prefix := strings.Repeat("  ", int(row.Depth))
+	guidePrefix := fileTreeGuidePrefix(guides)
 	expander := " "
 	if row.Directory && row.Expanded {
 		expander = "▾"
@@ -783,6 +846,7 @@ func (m Model) renderFileTreeRow(row protocol.FileTreeRow, width int) string {
 	}
 	rowStyle := lipgloss.NewStyle().Foreground(textColor).Background(rowBackground)
 	markerStyle := lipgloss.NewStyle().Foreground(markerColor).Background(rowBackground)
+	guideStyle := lipgloss.NewStyle().Foreground(theme.TreeGuide()).Background(rowBackground)
 	if row.Selected {
 		markerStyle = markerStyle.Foreground(theme.Accent()).Bold(true)
 	}
@@ -795,7 +859,7 @@ func (m Model) renderFileTreeRow(row protocol.FileTreeRow, width int) string {
 	if row.Selected || row.Directory {
 		nameStyle = nameStyle.Bold(true)
 	}
-	content := markerStyle.Render(selectionMarker+prefix+expander) + rowStyle.Render(" ") + iconStyle.Render(icon.glyph) + rowStyle.Render(" ") + nameStyle.Render(row.Name)
+	content := markerStyle.Render(selectionMarker) + guideStyle.Render(guidePrefix) + markerStyle.Render(expander) + rowStyle.Render(" ") + iconStyle.Render(icon.glyph) + rowStyle.Render(" ") + nameStyle.Render(row.Name)
 	if row.Dirty {
 		dirty := lipgloss.NewStyle().Foreground(theme.Warning()).Background(rowBackground).Render("●")
 		space := strings.Repeat(" ", max(width-lipgloss.Width(content)-lipgloss.Width(dirty), 1))
