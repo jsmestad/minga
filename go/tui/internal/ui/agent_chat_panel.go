@@ -1001,17 +1001,48 @@ func agentToolLineColor(line string, p palette) color.Color {
 
 func (m Model) renderAgentApprovalMessage(msg protocol.AgentChatMessage, width int) []string {
 	p := m.palette()
-	surface := m.editorBackground()
-	header := lipgloss.NewStyle().Bold(true).Foreground(p.Warning()).Background(surface).Render("  ◆ Approval")
-	name := lipgloss.NewStyle().Bold(true).Foreground(p.Text()).Background(surface).Render(" " + nonEmpty(msg.Name, "tool"))
-	kind := lipgloss.NewStyle().Foreground(p.Accent()).Background(surface).Render(" · " + approvalPreviewKindName(msg.PreviewKind))
-	summary := lipgloss.NewStyle().Foreground(p.Text()).Background(surface).Render("  " + firstCompactLine(msg.Summary, max(width-lipgloss.Width(header)-lipgloss.Width(name)-lipgloss.Width(kind)-3, 8)))
-	lines := []string{lipgloss.NewStyle().Background(surface).Width(width).Render(fitStyled(header+name+kind+summary, width))}
-	for _, previewLine := range msg.PreviewLines[:min(len(msg.PreviewLines), 2)] {
-		preview := lipgloss.NewStyle().Foreground(p.Muted()).Background(surface).Render("  │  " + firstCompactLine(previewLine, max(width-5, 8)))
-		lines = append(lines, lipgloss.NewStyle().Background(surface).Width(width).Render(fitStyled(preview, width)))
+	outerBG := m.editorBackground()
+	innerBG := p.SurfaceAlt()
+	border := lipgloss.NewStyle().Foreground(p.Warning()).Background(outerBG)
+	innerWidth := max(width-2, 1)
+	outerStyle := lipgloss.NewStyle().Background(outerBG).Width(width)
+
+	// Top border
+	top := border.Render("╭" + strings.Repeat("─", max(width-2, 0)) + "╮")
+
+	// Header: ◆ Approval <name> · <kind>  <summary>
+	headerLabel := lipgloss.NewStyle().Bold(true).Foreground(p.Warning()).Background(innerBG).Render("◆ Approval")
+	name := lipgloss.NewStyle().Bold(true).Foreground(p.Text()).Background(innerBG).Render(" " + nonEmpty(msg.Name, "tool"))
+	kind := lipgloss.NewStyle().Foreground(p.Accent()).Background(innerBG).Render(" · " + approvalPreviewKindName(msg.PreviewKind))
+	summaryBudget := max(innerWidth-lipgloss.Width(headerLabel)-lipgloss.Width(name)-lipgloss.Width(kind)-3, 8)
+	summary := lipgloss.NewStyle().Foreground(p.Text()).Background(innerBG).Render("  " + firstCompactLine(msg.Summary, summaryBudget))
+	headerContent := headerLabel + name + kind + summary
+
+	lines := []string{
+		outerStyle.Render(fitStyled(top, width)),
+		m.renderApprovalCardLine(headerContent, innerWidth, border, innerBG),
 	}
+
+	// Preview lines
+	for _, previewLine := range msg.PreviewLines[:min(len(msg.PreviewLines), 2)] {
+		preview := lipgloss.NewStyle().Foreground(p.Muted()).Background(innerBG).Render("  " + firstCompactLine(previewLine, max(innerWidth-4, 8)))
+		lines = append(lines, m.renderApprovalCardLine(preview, innerWidth, border, innerBG))
+	}
+
+	// Action hints
+	hints := lipgloss.NewStyle().Foreground(p.Muted()).Background(innerBG).Render("y approve · n reject")
+	lines = append(lines, m.renderApprovalCardLine(hints, innerWidth, border, innerBG))
+
+	// Bottom border
+	bottom := border.Render("╰" + strings.Repeat("─", max(width-2, 0)) + "╯")
+	lines = append(lines, outerStyle.Render(fitStyled(bottom, width)))
+
 	return lines
+}
+
+func (m Model) renderApprovalCardLine(content string, innerWidth int, border lipgloss.Style, innerBG color.Color) string {
+	body := lipgloss.NewStyle().Background(innerBG).Width(innerWidth).Render(fitStyled(" "+content, innerWidth))
+	return border.Render("│") + body + border.Render("│")
 }
 
 func approvalPreviewKindName(kind byte) string {
