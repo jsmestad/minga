@@ -146,7 +146,7 @@ func (m Model) semanticContentOffsets() (int, int) {
 
 func (m Model) leftChromeWidth() int {
 	if tree, ok := m.fileTree(); ok && tree.Visible && tree.Width > 0 && m.width >= 50 {
-		return fileTreeWidth(m.width, tree)
+		return fileTreeWidth(m.width, tree) + 1 // +1 for the │ border separator
 	}
 	if sidebars, ok := m.sidebars(); ok && len(sidebars.Items) > 0 && m.width >= 60 {
 		return semanticSidebarWidth(m.width, sidebars)
@@ -631,6 +631,7 @@ func (m Model) withFileTree(mainLines []string) []string {
 
 	sidebarWidth := fileTreeWidth(m.width, tree)
 	sidebar := m.renderFileTree(tree, sidebarWidth, max(len(mainLines), m.bodyHeight()))
+	sep := lipgloss.NewStyle().Foreground(m.palette().TreeSeparator()).Background(m.palette().TreeSurface()).Render("│")
 	lines := make([]string, max(len(mainLines), len(sidebar)))
 	for i := range lines {
 		left := ""
@@ -641,7 +642,7 @@ func (m Model) withFileTree(mainLines []string) []string {
 		if i < len(mainLines) {
 			right = mainLines[i]
 		}
-		lines[i] = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+		lines[i] = lipgloss.JoinHorizontal(lipgloss.Top, left, sep, right)
 	}
 	return lines
 }

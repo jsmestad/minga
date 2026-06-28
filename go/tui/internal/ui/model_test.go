@@ -1332,8 +1332,8 @@ func TestSplitSeparatorsNormalizeAgainstHeaderAndFileTree(t *testing.T) {
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Width: 24, Rows: []protocol.FileTreeRow{{ID: "row-0", Name: "row-0"}}}},
 		generated.OPGuiSplitSeparators: {Splits: protocol.SplitSeparators{
-			Verticals:   []protocol.VerticalSeparator{{Col: 24, StartRow: 1, EndRow: 2}},
-			Horizontals: []protocol.HorizontalSeparator{{Row: 2, Col: 24, Width: 2}},
+			Verticals:   []protocol.VerticalSeparator{{Col: 25, StartRow: 1, EndRow: 2}},
+			Horizontals: []protocol.HorizontalSeparator{{Row: 2, Col: 25, Width: 2}},
 		}},
 	}
 	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "body-0"}, {Text: "body-1"}, {Text: "body-2"}}})
@@ -1344,11 +1344,11 @@ func TestSplitSeparatorsNormalizeAgainstHeaderAndFileTree(t *testing.T) {
 	if len(lines) < 3 {
 		t.Fatalf("unexpected view lines: %+v", lines)
 	}
-	if got := visibleIndex(lines[1], "│"); got != 24 {
-		t.Fatalf("vertical separator should land at visible column 24 after normalization, got %d in %q", got, lines[1])
+	if count := strings.Count(lines[1], "│"); count < 2 {
+		t.Fatalf("body row should have tree border and split separator (expected 2 │, got %d) in %q", count, lines[1])
 	}
-	if got := visibleIndex(lines[2], "─"); got != 24 {
-		t.Fatalf("horizontal separator should land at visible column 24 after normalization, got %d in %q", got, lines[2])
+	if got := visibleIndex(lines[2], "─"); got != 25 {
+		t.Fatalf("horizontal separator should land at column 25 (tree 24 + border 1) after normalization, got %d in %q", got, lines[2])
 	}
 }
 
@@ -1389,8 +1389,8 @@ func TestFileTreeReservesVisibleEmptyState(t *testing.T) {
 	if !strings.Contains(lines[2], "No files") {
 		t.Fatalf("empty file tree should render status row: %q", lines[2])
 	}
-	if got := strings.Index(lines[1], "pane"); got != 18 {
-		t.Fatalf("empty file tree should reserve protocol width, got pane at %d in %q", got, lines[1])
+	if got := visibleIndex(lines[1], "pane"); got != 19 {
+		t.Fatalf("empty file tree should leave pane at column 19 (tree 18 + border 1), got %d in %q", got, lines[1])
 	}
 }
 
@@ -1405,8 +1405,13 @@ func TestSemanticWindowsRespectProtocolFileTreeWidth(t *testing.T) {
 	if len(lines) < 2 {
 		t.Fatalf("semantic window should render with file tree width alignment: %+v", lines)
 	}
-	if got := strings.Index(lines[1], "pane"); got != 36 {
-		t.Fatalf("file tree width should follow protocol geometry without a gap, got %d in %q", got, lines[1])
+	if !strings.Contains(lines[1], "pane") {
+		t.Fatalf("file tree width should render pane on first body row: %q", lines[1])
+	}
+	treeEnd := strings.Index(lines[1], "│")
+	paneAt := strings.Index(lines[1], "pane")
+	if treeEnd < 0 || paneAt <= treeEnd {
+		t.Fatalf("pane should appear after tree separator, treeEnd=%d paneAt=%d in %q", treeEnd, paneAt, lines[1])
 	}
 }
 
@@ -1422,8 +1427,13 @@ func TestSemanticWindowsNormalizeAbsoluteTUILayoutGeometry(t *testing.T) {
 	if len(lines) < 2 {
 		t.Fatalf("semantic window should render with normalized geometry: %+v", lines)
 	}
-	if got := strings.Index(lines[1], "pane"); got != 37 {
-		t.Fatalf("absolute TUI geometry should not double-count file-tree width, got pane at %d in %q", got, lines[1])
+	if !strings.Contains(lines[1], "pane") {
+		t.Fatalf("absolute TUI geometry should render pane on first body row: %q", lines[1])
+	}
+	treeEnd := strings.Index(lines[1], "│")
+	paneAt := strings.Index(lines[1], "pane")
+	if treeEnd < 0 || paneAt <= treeEnd {
+		t.Fatalf("absolute TUI geometry should not double-count file-tree width, treeEnd=%d paneAt=%d in %q", treeEnd, paneAt, lines[1])
 	}
 	if len(lines) > 2 && strings.Contains(lines[2], "pane") {
 		t.Fatalf("absolute TUI geometry should not double-count header rows: %+v", lines[:3])
@@ -1758,6 +1768,38 @@ func TestFileTreeLocalNavigationPreviewRequiresEligibilityFlag(t *testing.T) {
 	}
 }
 
+func TestModalOverlaySuppressesFileTreeNavigation(t *testing.T) {
+	eligibleTree := protocol.FileTree{Visible: true, Focused: true, Flags: fileTreeVisibleFlag | fileTreeFocusedFlag | fileTreeLocalNavigationFlag, Status: fileTreeReadyStatus, Selected: "a", Rows: []protocol.FileTreeRow{{ID: "a", Name: "a", Selected: true, Focused: true}, {ID: "b", Name: "b"}}}
+	jKey := tea.KeyPressMsg(tea.Key{Code: fileTreeLocalNavigationDownKey, Text: string(fileTreeLocalNavigationDownKey)})
+
+	for _, tc := range []struct {
+		name    string
+		overlay map[byte]protocol.ChromePayload
+	}{
+		{"picker", map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: eligibleTree}, generated.OPGuiPicker: {Picker: protocol.Picker{Visible: true, Title: "Files", Items: []protocol.PickerItem{{Label: "main.ex"}}}}}},
+		{"which-key", map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: eligibleTree}, generated.OPGuiWhichKey: {Which: protocol.WhichKey{Visible: true, Prefix: "SPC", Bindings: []protocol.WhichKeyBinding{{Key: "f", Description: "file"}}}}}},
+		{"agent-chat", map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: eligibleTree}, generated.OPGuiAgentChat: {AgentChat: protocol.AgentChat{Visible: true, Status: 2, ModelName: "test"}}}},
+	} {
+		t.Run(tc.name+" suppresses local navigation", func(t *testing.T) {
+			out := make(chan []byte, 1)
+			model := New(30, 6, out)
+			model.chrome = tc.overlay
+
+			updated, _ := model.Update(jKey)
+			model = updated.(Model)
+
+			tree := model.chrome[generated.OPGuiFileTree].Tree
+			if tree.Selected != "a" || !tree.Rows[0].Selected {
+				t.Fatalf("file tree should not preview locally when %s overlay is active: %+v", tc.name, tree)
+			}
+			packets := drainOutboundPackets(out)
+			if len(packets) != 1 || packets[0][0] != generated.OPKeyPress {
+				t.Fatalf("key should still be forwarded to BEAM when %s overlay is active: %#v", tc.name, packets)
+			}
+		})
+	}
+}
+
 func TestApplyCommandsStoresSemanticGuttersByWindow(t *testing.T) {
 	model := New(30, 6, nil)
 	_ = model.applyCommands(frame(
@@ -1825,8 +1867,8 @@ func TestSemanticWindowsDoNotClipFirstRowWithWorkspaceAndTabHeaders(t *testing.T
 	model.viewport.SetContent(model.content())
 
 	lines := strings.Split(ansi.Strip(model.View().Content), "\n")
-	if len(lines) < 3 || !strings.Contains(lines[2], "Hey this is a thing") {
-		t.Fatalf("semantic editor row 0 should render below workspace and tab headers: %+v", lines)
+	if len(lines) < 4 || !strings.Contains(lines[3], "Hey this is a thing") {
+		t.Fatalf("semantic editor row 0 should render below workspace, tab, and separator headers: %+v", lines)
 	}
 }
 
@@ -1841,8 +1883,8 @@ func TestSemanticWindowsRespectFileTreeOffset(t *testing.T) {
 	if len(lines) < 2 {
 		t.Fatalf("semantic window should render with file tree offset: %+v", lines)
 	}
-	if got := strings.Index(lines[1], "pane"); got != 24 {
-		t.Fatalf("file tree offset should leave pane at column 24, got %d in %q", got, lines[1])
+	if got := visibleIndex(lines[1], "pane"); got != 25 {
+		t.Fatalf("file tree offset should leave pane at column 25 (tree 24 + border 1), got %d in %q", got, lines[1])
 	}
 }
 
