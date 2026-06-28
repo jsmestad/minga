@@ -94,7 +94,7 @@ struct ActivityBar: View {
             }
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableButtonStyle())
         .help(item.displayName)
         .accessibilityLabel(item.displayName)
     }
@@ -115,5 +115,13 @@ struct ActivityBar: View {
         guard item.semanticKind == "git_status", let count = item.badgeCount, count > 0 else { return nil }
         let countText = count > 99 ? "99+" : String(count)
         return count == 1 ? "1 changed file" : "\(countText) changed files"
+    }
+}
+
+struct PressableButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.92 : 1.0)
+            .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
     }
 }
