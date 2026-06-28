@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"image/color"
 	"sort"
 	"strings"
 
@@ -199,6 +200,12 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 	} else if len(m.windowOrder) <= 1 {
 		height = max(height, m.bodyHeight())
 	}
+	// Scrollbar: reserve the rightmost column when total content exceeds the
+	// viewport height so the thumb indicator can be drawn there.
+	sb := computeScrollbar(window, height)
+	if sb.active {
+		width--
+	}
 	// Composed-line cache (#2288): a row that arrived as a ref (unchanged
 	// content_hash) under an unchanged window render context reuses its
 	// previously composed line instead of re-running the lipgloss tree. The
@@ -223,7 +230,11 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 		if cacheable {
 			if cached, ok := builder.lookup(key); ok {
 				m.lineCache.hits++
-				lines = append(lines, cached)
+				line := cached
+				if sb.active {
+					line += m.renderScrollbarCell(rowIndex, sb)
+				}
+				lines = append(lines, line)
 				continue
 			}
 		}
@@ -240,6 +251,9 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 		if cacheable {
 			m.lineCache.misses++
 			builder.store(key, line)
+		}
+		if sb.active {
+			line += m.renderScrollbarCell(rowIndex, sb)
 		}
 		lines = append(lines, line)
 	}
@@ -307,6 +321,47 @@ func presentationVisibleRows(window protocol.WindowContent) int {
 		}
 	}
 	return 0
+}
+
+// scrollbarState describes the position and size of the proportional scrollbar
+// indicator in the viewport margin. When active is false no scrollbar is drawn.
+type scrollbarState struct {
+	active   bool
+	thumbTop int
+	thumbBot int // exclusive
+}
+
+// computeScrollbar derives scrollbar geometry from the window's pane geometry
+// and scroll presentation. The scrollbar is active only when total content
+// exceeds the rendered viewport height.
+func computeScrollbar(window protocol.WindowContent, viewportHeight int) scrollbarState {
+	if !window.GeometrySet || viewportHeight <= 0 {
+		return scrollbarState{}
+	}
+	totalRows := int(window.Geometry.TotalLines)
+	if totalRows <= viewportHeight {
+		return scrollbarState{}
+	}
+	scrollTop := int(window.Geometry.ViewportTop)
+	if window.ScrollSet {
+		scrollTop = int(window.Scroll.VisibleStartLine)
+	}
+	thumbSize := max(viewportHeight*viewportHeight/totalRows, 1)
+	thumbPos := scrollTop * viewportHeight / totalRows
+	thumbPos = min(thumbPos, viewportHeight-thumbSize)
+	return scrollbarState{
+		active:   true,
+		thumbTop: thumbPos,
+		thumbBot: thumbPos + thumbSize,
+	}
+}
+
+func (m Model) renderScrollbarCell(rowIndex int, sb scrollbarState) string {
+	bg := m.editorBackground()
+	if rowIndex >= sb.thumbTop && rowIndex < sb.thumbBot {
+		return lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(bg).Render("▐")
+	}
+	return lipgloss.NewStyle().Foreground(m.palette().GutterText()).Background(bg).Render(" ")
 }
 
 func (m Model) presentationScrollEffectiveLeft(window protocol.WindowContent) int {
@@ -599,7 +654,7 @@ func horizontalSeparatorText(width int, filename string) string {
 	if label == "" || width < 4 {
 		return line
 	}
-	label = " " + label + " "
+	label = "╴" + label + "╶"
 	if displayWidth(label) > width {
 		label = fit(label, width)
 	}
@@ -735,30 +790,93 @@ func (m Model) gutterSign(entry protocol.GutterEntry) string {
 
 func (m Model) renderFileTree(tree protocol.FileTree, width int, height int) []string {
 	theme := m.palette()
-	style := lipgloss.NewStyle().Foreground(theme.TreeText()).Background(theme.TreeSurface()).Width(width)
-	header := style.Bold(true).Foreground(theme.TreeHeaderText()).Background(theme.TreeHeader()).Render(fit(" Files  "+tree.Root, width))
+	totalRows := len(tree.Rows)
+	visibleRows := height - 1 // header takes 1 line
+	needsScrollbar := totalRows > visibleRows && visibleRows > 0
+
+	contentWidth := width
+	if needsScrollbar {
+		contentWidth = max(width-1, 1)
+	}
+
+	headerStyle := lipgloss.NewStyle().Foreground(theme.TreeHeaderText()).Background(theme.TreeHeader()).Width(width)
+	header := headerStyle.Bold(true).Render(fit(" Files  "+tree.Root, width))
 	lines := []string{header}
-	if len(tree.Rows) == 0 {
+
+	contentStyle := lipgloss.NewStyle().Foreground(theme.TreeText()).Background(theme.TreeSurface()).Width(contentWidth)
+	if totalRows == 0 {
 		if status := fileTreeStatusText(tree); status != "" && len(lines) < height {
-			lines = append(lines, style.Foreground(theme.TreeMutedText()).Render(fit(" "+status, width)))
+			lines = append(lines, contentStyle.Foreground(theme.TreeMutedText()).Render(fit(" "+status, contentWidth)))
 		}
 	}
 	previewIdx := m.localPresentation.previewFileTreeIndex
-	for rowIndex, row := range tree.Rows {
+
+	scrollOffset := 0
+	if needsScrollbar {
+		scrollOffset = fileTreeScrollOffset(tree, visibleRows)
+	}
+
+	var thumbStart, thumbEnd int
+	if needsScrollbar {
+		thumbStart, thumbEnd = fileTreeScrollbarThumb(totalRows, visibleRows, scrollOffset)
+	}
+
+	trackStyle := lipgloss.NewStyle().Foreground(theme.ScrollbarTrack()).Background(theme.TreeSurface())
+	thumbStyle := lipgloss.NewStyle().Foreground(theme.ScrollbarThumb()).Background(theme.TreeSurface())
+
+	for i := 0; i < visibleRows && scrollOffset+i < totalRows; i++ {
+		rowIndex := scrollOffset + i
+		row := tree.Rows[rowIndex]
 		if previewIdx != nil {
 			row.Selected = rowIndex == *previewIdx
 			row.Focused = rowIndex == *previewIdx
 		}
-		rendered := m.renderFileTreeRow(row, width)
-		lines = append(lines, m.zones.Mark(zoneIDFileTreeRow(rowIndex), rendered))
+		rendered := m.renderFileTreeRow(row, contentWidth)
+		line := m.zones.Mark(zoneIDFileTreeRow(rowIndex), rendered)
+		if needsScrollbar {
+			if i >= thumbStart && i < thumbEnd {
+				line += thumbStyle.Render("█")
+			} else {
+				line += trackStyle.Render("│")
+			}
+		}
+		lines = append(lines, line)
 		if len(lines) >= height {
 			return lines
 		}
 	}
+
+	fillStyle := lipgloss.NewStyle().Foreground(theme.TreeText()).Background(theme.TreeSurface()).Width(width)
 	for len(lines) < height {
-		lines = append(lines, style.Render(strings.Repeat(" ", width)))
+		lines = append(lines, fillStyle.Render(strings.Repeat(" ", width)))
 	}
 	return lines
+}
+
+func fileTreeScrollOffset(tree protocol.FileTree, visibleRows int) int {
+	selectedIndex := -1
+	for i, row := range tree.Rows {
+		if row.Selected {
+			selectedIndex = i
+			break
+		}
+	}
+	if selectedIndex < 0 || selectedIndex < visibleRows {
+		return 0
+	}
+	offset := selectedIndex - visibleRows/3
+	maxOffset := len(tree.Rows) - visibleRows
+	return min(max(offset, 0), maxOffset)
+}
+
+func fileTreeScrollbarThumb(totalRows int, visibleRows int, scrollOffset int) (thumbStart int, thumbEnd int) {
+	if totalRows <= 0 || visibleRows <= 0 {
+		return 0, 0
+	}
+	thumbSize := max(visibleRows*visibleRows/totalRows, 1)
+	thumbStart = scrollOffset * visibleRows / totalRows
+	thumbEnd = min(thumbStart+thumbSize, visibleRows)
+	return thumbStart, thumbEnd
 }
 
 func (m Model) renderFileTreeRow(row protocol.FileTreeRow, width int) string {
@@ -775,10 +893,14 @@ func (m Model) renderFileTreeRow(row protocol.FileTreeRow, width int) string {
 	if row.Selected {
 		rowBackground = theme.TreeSelection()
 		textColor = theme.TreeSelectionText()
+	} else if row.Focused {
+		rowBackground = theme.TreeFocus()
 	}
 	selectionMarker := " "
 	if row.Selected {
 		selectionMarker = "▌"
+	} else if row.Focused {
+		selectionMarker = "▏"
 	}
 	prefix := strings.Repeat("  ", int(row.Depth))
 	expander := " "
@@ -791,6 +913,8 @@ func (m Model) renderFileTreeRow(row protocol.FileTreeRow, width int) string {
 	markerStyle := lipgloss.NewStyle().Foreground(markerColor).Background(rowBackground)
 	if row.Selected {
 		markerStyle = markerStyle.Foreground(theme.Accent()).Bold(true)
+	} else if row.Focused {
+		markerStyle = markerStyle.Foreground(theme.Accent())
 	}
 	icon := fileTreeIcon(row, row.Selected)
 	iconStyle := rowStyle
@@ -801,7 +925,8 @@ func (m Model) renderFileTreeRow(row protocol.FileTreeRow, width int) string {
 	if row.Selected || row.Directory {
 		nameStyle = nameStyle.Bold(true)
 	}
-	content := markerStyle.Render(selectionMarker+prefix+expander) + rowStyle.Render(" ") + iconStyle.Render(icon.glyph) + rowStyle.Render(" ") + nameStyle.Render(row.Name)
+	nameRendered := renderFileTreeName(row.Name, row.MatchPositions, nameStyle, theme.Accent())
+	content := markerStyle.Render(selectionMarker+prefix+expander) + rowStyle.Render(" ") + iconStyle.Render(icon.glyph) + rowStyle.Render(" ") + nameRendered
 	if row.Dirty {
 		dirty := lipgloss.NewStyle().Foreground(theme.Warning()).Background(rowBackground).Render("●")
 		space := strings.Repeat(" ", max(width-lipgloss.Width(content)-lipgloss.Width(dirty), 1))
@@ -810,6 +935,33 @@ func (m Model) renderFileTreeRow(row protocol.FileTreeRow, width int) string {
 		content += rowStyle.Render(strings.Repeat(" ", remaining))
 	}
 	return rowStyle.Width(width).Render(fitStyled(content, width))
+}
+
+// renderFileTreeName renders a filename with optional accent highlighting on
+// matched character positions. When matchPositions is empty the name is rendered
+// with the base style only (no highlighting). Match positions are uint16 rune
+// indices into the name string, matching the fuzzy-match pattern used by the
+// picker overlay.
+func renderFileTreeName(name string, matchPositions []uint16, baseStyle lipgloss.Style, accent color.Color) string {
+	if len(matchPositions) == 0 {
+		return baseStyle.Render(name)
+	}
+	matchSet := make(map[uint16]bool, len(matchPositions))
+	for _, pos := range matchPositions {
+		matchSet[pos] = true
+	}
+	accentStyle := baseStyle.Foreground(accent)
+	var result strings.Builder
+	runeIdx := 0
+	for _, r := range name {
+		if matchSet[uint16(runeIdx)] {
+			result.WriteString(accentStyle.Render(string(r)))
+		} else {
+			result.WriteString(baseStyle.Render(string(r)))
+		}
+		runeIdx++
+	}
+	return result.String()
 }
 
 func fileTreeRowMuted(row protocol.FileTreeRow) bool {

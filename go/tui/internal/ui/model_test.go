@@ -307,6 +307,67 @@ func TestFooterRendersStatusMessageWithModelineSegments(t *testing.T) {
 	}
 }
 
+func TestFooterRendersModeIconBeforeModeText(t *testing.T) {
+	model := New(80, 24, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiStatusBar: {
+			Status: protocol.StatusBar{
+				Left:  []protocol.StatusSegment{{Text: " NORMAL "}},
+				Right: []protocol.StatusSegment{{Text: "1:1"}},
+			},
+		},
+	}
+	footer := ansi.Strip(strings.Join(model.footerLines(), "\n"))
+	if !strings.Contains(footer, " NORMAL") {
+		t.Fatalf("footer should prepend mode icon before mode text: %q", footer)
+	}
+}
+
+func TestFooterRendersFileIconBeforeFilename(t *testing.T) {
+	model := New(80, 24, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiStatusBar: {
+			Status: protocol.StatusBar{
+				Filename: "main.go",
+				Left:     []protocol.StatusSegment{{Text: " NORMAL "}},
+				Right:    []protocol.StatusSegment{{Text: "1:1"}},
+			},
+		},
+	}
+	footer := ansi.Strip(strings.Join(model.footerLines(), "\n"))
+	icon := devIconForPath("main.go", false)
+	if icon.glyph == "" {
+		t.Fatal("expected devicon for main.go")
+	}
+	if !strings.Contains(footer, icon.glyph) {
+		t.Fatalf("footer should render file type icon for filename: %q (want glyph %q)", footer, icon.glyph)
+	}
+}
+
+func TestFooterFallbackRendersFileIcon(t *testing.T) {
+	model := New(80, 24, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiStatusBar: {
+			Status: protocol.StatusBar{
+				Filename: "app.rs",
+				Line:     10,
+				Column:   5,
+			},
+		},
+	}
+	footer := ansi.Strip(strings.Join(model.footerLines(), "\n"))
+	icon := devIconForPath("app.rs", false)
+	if icon.glyph == "" {
+		t.Fatal("expected devicon for app.rs")
+	}
+	if !strings.Contains(footer, icon.glyph) {
+		t.Fatalf("fallback footer should render file type icon before filename: %q (want glyph %q)", footer, icon.glyph)
+	}
+	if !strings.Contains(footer, "app.rs") {
+		t.Fatalf("fallback footer should still contain filename: %q", footer)
+	}
+}
+
 func TestHeaderRendersBreadcrumbWithTabs(t *testing.T) {
 	model := New(120, 24, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
@@ -319,7 +380,7 @@ func TestHeaderRendersBreadcrumbWithTabs(t *testing.T) {
 	}
 
 	header := ansi.Strip(strings.Join(model.headerLines(), "\n"))
-	if !strings.Contains(header, "▌ 󰈙 main.ex") || !strings.Contains(header, "lib › minga › main.ex") {
+	if !strings.Contains(header, "▌ 󰈙 main.ex") || !strings.Contains(header, "lib ❯ minga ❯ main.ex") {
 		t.Fatalf("wide header should render active tab accent and breadcrumbs together: %q", header)
 	}
 }
@@ -350,7 +411,7 @@ func TestHeaderHidesBreadcrumbsAtNarrowWidth(t *testing.T) {
 	}
 
 	header := ansi.Strip(strings.Join(model.headerLines(), "\n"))
-	if strings.Contains(header, "lib › minga") {
+	if strings.Contains(header, "lib ❯ minga") {
 		t.Fatalf("narrow header should not spend a row on breadcrumbs: %q", header)
 	}
 }
@@ -1360,6 +1421,60 @@ func TestFileTreeSelectedRowPaintsBackgroundAcrossSegments(t *testing.T) {
 	}
 	if got := displayWidth(ansi.Strip(rendered)); got != 24 {
 		t.Fatalf("selected file-tree row should fill requested width, got %d row=%q", got, rendered)
+	}
+}
+
+func TestFileTreeMatchHighlightAccentsMatchedCharacters(t *testing.T) {
+	model := New(40, 8, nil)
+	_ = model.applyCommands(frame(testThemeCommand()))
+	rendered := model.renderFileTreeRow(protocol.FileTreeRow{
+		Name:           "main.go",
+		Icon:           "",
+		MatchPositions: []uint16{0, 1},
+	}, 30)
+	stripped := ansi.Strip(rendered)
+	if !strings.Contains(stripped, "main.go") {
+		t.Fatalf("rendered row should contain filename, got %q", stripped)
+	}
+	// The test theme accent 0x7DB7FF = (125, 183, 255) produces "125;183;255" in ANSI.
+	// Characters at positions 0 ("m") and 1 ("a") should carry this accent foreground.
+	if !strings.Contains(rendered, "125;183;255") {
+		t.Fatalf("matched characters should carry accent foreground color, got %q", rendered)
+	}
+}
+
+func TestFileTreeMatchHighlightSkippedWhenNoPositions(t *testing.T) {
+	model := New(40, 8, nil)
+	_ = model.applyCommands(frame(testThemeCommand()))
+	withMatch := model.renderFileTreeRow(protocol.FileTreeRow{
+		Name:           "main.go",
+		Icon:           "",
+		MatchPositions: []uint16{0},
+	}, 30)
+	withoutMatch := model.renderFileTreeRow(protocol.FileTreeRow{
+		Name: "main.go",
+		Icon: "",
+	}, 30)
+	// Without match positions, no accent highlighting should appear in the name portion.
+	// The accent color should only appear in the version with match positions.
+	if strings.Contains(withoutMatch, "125;183;255") {
+		t.Fatalf("row without match positions should not contain accent color, got %q", withoutMatch)
+	}
+	if !strings.Contains(withMatch, "125;183;255") {
+		t.Fatalf("row with match positions should contain accent color, got %q", withMatch)
+	}
+}
+
+func TestFileTreeMatchHighlightPreservesRowWidth(t *testing.T) {
+	model := New(40, 8, nil)
+	_ = model.applyCommands(frame(testThemeCommand()))
+	rendered := model.renderFileTreeRow(protocol.FileTreeRow{
+		Name:           "config.toml",
+		Icon:           "",
+		MatchPositions: []uint16{0, 3, 7},
+	}, 28)
+	if got := displayWidth(ansi.Strip(rendered)); got != 28 {
+		t.Fatalf("highlighted file-tree row should fill requested width, got %d row=%q", got, rendered)
 	}
 }
 

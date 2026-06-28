@@ -190,12 +190,10 @@ struct GUIScrollPresentation: Sendable, Equatable {
     let layoutGeneration: UInt32
 
     func isSameAnchorKey(as other: GUIScrollPresentation) -> Bool {
-        windowId == other.windowId
-            && contentEpoch == other.contentEpoch
+        contentEpoch == other.contentEpoch
             && layoutGeneration == other.layoutGeneration
             && anchorTop == other.anchorTop
             && anchorLeft == other.anchorLeft
-            && anchorVisualRowOffset == other.anchorVisualRowOffset
     }
 
     func belongsTo(windowId: UInt16, contentEpoch: UInt32) -> Bool {
