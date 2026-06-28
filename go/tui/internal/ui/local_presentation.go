@@ -5,7 +5,7 @@ import "github.com/jsmestad/minga/go/tui/internal/protocol"
 type transformKind int
 
 const (
-	transformOffset   transformKind = iota
+	transformOffset transformKind = iota
 	transformIdentity
 )
 

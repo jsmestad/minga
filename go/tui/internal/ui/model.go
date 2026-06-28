@@ -106,8 +106,8 @@ type Model struct {
 	// overlayLines() precedence chain; the rects equal what BEAM mouse
 	// hit-testing uses. Surfaces not yet promoted into the BEAM surface registry
 	// keep a reduced hand-ordered chain (transitional split, see overlayLines).
-	surfacePlacements    []generated.SurfacePlacement
-	localPresentation    localPresentation
+	surfacePlacements []generated.SurfacePlacement
+	localPresentation localPresentation
 }
 
 // frameStaging is the open frame transaction buffer (#2219). It lives only
@@ -142,8 +142,8 @@ func New(width, height uint16, out chan<- []byte) Model {
 		latency:           latency.New(),
 		// MINGA_LATENCY_HUD=1 shows the latency overlay at boot; it is also
 		// toggled at runtime with ctrl+alt+l (ticket #2215).
-		hudVisible:         latencyHUDEnvEnabled(),
-		lineCache:          newLineCache(),
+		hudVisible:        latencyHUDEnvEnabled(),
+		lineCache:         newLineCache(),
 		localPresentation: newLocalPresentation(),
 	}
 	// Seed the layout so the first mouse event lands in the correct
