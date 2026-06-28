@@ -58,6 +58,10 @@ defmodule MingaEditor.Agent.IngestTest do
     start_supervised!({Ingest, editor: self(), window_ms: window_ms})
   end
 
+  defp start_ingest(window_ms, opts) do
+    start_supervised!({Ingest, [editor: self(), window_ms: window_ms] ++ opts})
+  end
+
   defp sync(pid), do: :sys.get_state(pid)
 
   # Takes the next message Ingest forwarded to us (the Editor), in mailbox order,
@@ -215,6 +219,109 @@ defmodule MingaEditor.Agent.IngestTest do
 
       send(ingest, {:ingest_tick, session_b})
       assert_receive {:agent_stream_batch, ^session_b, [{:text_delta, "b1"}]}
+    end
+  end
+
+  describe "batch size bounding (D5)" do
+    test "an oversized accumulation by item count splits into multiple bounded batches" do
+      ingest = start_ingest(10_000, max_batch_items: 3, max_batch_bytes: 100_000)
+      session = fake_session()
+
+      # Leading edge: forwarded immediately.
+      send(ingest, {:agent_event, session, {:text_delta, "lead"}})
+      assert_receive {:agent_stream_batch, ^session, [{:text_delta, "lead"}]}
+
+      # Accumulate 7 deltas (exceeds cap of 3 per batch).
+      for i <- 1..7 do
+        send(ingest, {:agent_event, session, {:text_delta, "d#{i}"}})
+      end
+
+      sync(ingest)
+      send(ingest, {:ingest_tick, session})
+
+      # Should split into batches of 3, 3, 1 (preserving order).
+      batch1 = next_forwarded()
+      batch2 = next_forwarded()
+      batch3 = next_forwarded()
+
+      assert {:agent_stream_batch, ^session,
+              [{:text_delta, "d1"}, {:text_delta, "d2"}, {:text_delta, "d3"}]} = batch1
+
+      assert {:agent_stream_batch, ^session,
+              [{:text_delta, "d4"}, {:text_delta, "d5"}, {:text_delta, "d6"}]} = batch2
+
+      assert {:agent_stream_batch, ^session, [{:text_delta, "d7"}]} = batch3
+
+      refute_received {:agent_stream_batch, _, _}
+    end
+
+    test "an oversized accumulation by byte size splits into multiple bounded batches" do
+      ingest = start_ingest(10_000, max_batch_items: 100, max_batch_bytes: 10)
+      session = fake_session()
+
+      send(ingest, {:agent_event, session, {:text_delta, "lead"}})
+      assert_receive {:agent_stream_batch, ^session, [{:text_delta, "lead"}]}
+
+      # Each delta is 6 bytes ("chunk1", "chunk2", "chunk3"). Cap is 10 bytes,
+      # so first batch fits "chunk1" (6 bytes), adding "chunk2" would be 12 > 10,
+      # so it splits: [chunk1], [chunk2], [chunk3].
+      send(ingest, {:agent_event, session, {:text_delta, "chunk1"}})
+      send(ingest, {:agent_event, session, {:text_delta, "chunk2"}})
+      send(ingest, {:agent_event, session, {:text_delta, "chunk3"}})
+      sync(ingest)
+      send(ingest, {:ingest_tick, session})
+
+      batch1 = next_forwarded()
+      batch2 = next_forwarded()
+      batch3 = next_forwarded()
+
+      assert {:agent_stream_batch, ^session, [{:text_delta, "chunk1"}]} = batch1
+      assert {:agent_stream_batch, ^session, [{:text_delta, "chunk2"}]} = batch2
+      assert {:agent_stream_batch, ^session, [{:text_delta, "chunk3"}]} = batch3
+
+      refute_received {:agent_stream_batch, _, _}
+    end
+
+    test "a batch within the cap is forwarded as a single batch (no spurious splitting)" do
+      ingest = start_ingest(10_000, max_batch_items: 10, max_batch_bytes: 100_000)
+      session = fake_session()
+
+      send(ingest, {:agent_event, session, {:text_delta, "lead"}})
+      assert_receive {:agent_stream_batch, ^session, [{:text_delta, "lead"}]}
+
+      send(ingest, {:agent_event, session, {:text_delta, "a"}})
+      send(ingest, {:agent_event, session, {:text_delta, "b"}})
+      send(ingest, {:agent_event, session, {:text_delta, "c"}})
+      sync(ingest)
+      send(ingest, {:ingest_tick, session})
+
+      assert next_forwarded() ==
+               {:agent_stream_batch, session,
+                [{:text_delta, "a"}, {:text_delta, "b"}, {:text_delta, "c"}]}
+
+      refute_received {:agent_stream_batch, _, _}
+    end
+
+    test "control-event flush of an oversized batch still flushes ahead of the control event" do
+      ingest = start_ingest(10_000, max_batch_items: 2, max_batch_bytes: 100_000)
+      session = fake_session()
+
+      send(ingest, {:agent_event, session, {:text_delta, "lead"}})
+      assert_receive {:agent_stream_batch, ^session, [{:text_delta, "lead"}]}
+
+      # Accumulate 3 deltas, then a control event triggers the flush.
+      send(ingest, {:agent_event, session, {:text_delta, "x1"}})
+      send(ingest, {:agent_event, session, {:text_delta, "x2"}})
+      send(ingest, {:agent_event, session, {:text_delta, "x3"}})
+      send(ingest, {:agent_event, session, {:status_changed, :idle}})
+      sync(ingest)
+
+      # Split batches arrive before the control event, in order.
+      assert {:agent_stream_batch, ^session, [{:text_delta, "x1"}, {:text_delta, "x2"}]} =
+               next_forwarded()
+
+      assert {:agent_stream_batch, ^session, [{:text_delta, "x3"}]} = next_forwarded()
+      assert {:agent_event, ^session, {:status_changed, :idle}} = next_forwarded()
     end
   end
 
