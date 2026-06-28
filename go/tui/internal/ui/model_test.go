@@ -1825,8 +1825,8 @@ func TestSemanticWindowsDoNotClipFirstRowWithWorkspaceAndTabHeaders(t *testing.T
 	model.viewport.SetContent(model.content())
 
 	lines := strings.Split(ansi.Strip(model.View().Content), "\n")
-	if len(lines) < 3 || !strings.Contains(lines[2], "Hey this is a thing") {
-		t.Fatalf("semantic editor row 0 should render below workspace and tab headers: %+v", lines)
+	if len(lines) < 4 || !strings.Contains(lines[3], "Hey this is a thing") {
+		t.Fatalf("semantic editor row 0 should render below workspace, tab, and separator headers: %+v", lines)
 	}
 }
 

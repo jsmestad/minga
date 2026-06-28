@@ -1,9 +1,12 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
@@ -224,13 +227,14 @@ func mouseCol(packet []byte) int16 {
 
 // tabBarModel builds a model whose header renders headerRows rows above the
 // editor body and refreshes the cached offset exactly as Update does after
-// applyCommands (ticket #2256). The header is always at least one row (a tab bar
-// or the title fallback), so headerRows must be >= 1; a wide breadcrumb adds the
-// second row. The chrome path is the realistic source-of-truth check that the
-// cached offset matches the rendered headerLines.
+// applyCommands (ticket #2256). The header is always at least two rows (a tab
+// bar plus its separator connector), so headerRows must be >= 2; a wide
+// breadcrumb adds a third row. The chrome path is the realistic
+// source-of-truth check that the cached offset matches the rendered
+// headerLines.
 func tabBarModel(headerRows int) Model {
-	if headerRows < 1 {
-		panic("tabBarModel: header is always at least one row")
+	if headerRows < 2 {
+		panic("tabBarModel: tab bar with separator is always at least two rows")
 	}
 	model := New(120, 24, nil)
 	chrome := map[byte]protocol.ChromePayload{
@@ -238,7 +242,7 @@ func tabBarModel(headerRows int) Model {
 			Tabs: protocol.TabBar{Tabs: []protocol.Tab{{ID: 1, Icon: "󰈙", Label: "main.ex", Active: true}}},
 		},
 	}
-	if headerRows >= 2 {
+	if headerRows >= 3 {
 		chrome[generated.OPGuiBreadcrumb] = protocol.ChromePayload{
 			Breadcrumb: protocol.Breadcrumb{Segments: []string{"lib", "minga", "main.ex"}},
 		}
@@ -291,11 +295,11 @@ func TestMousePacketSubtractsHeaderOffset(t *testing.T) {
 // TestMousePacketOffsetMirrorsRenderedHeader pins AC2: the offset subtracted
 // from outbound rows is the same headerLines height the renderer uses for the
 // frame on screen, sourced through the cache that Update refreshes after
-// applyCommands. With a tab bar plus a wide breadcrumb the header is two rows,
-// so a click on visual line 4 (terminal row 6) reaches the BEAM as editor row 4
-// (ticket #2256).
+// applyCommands. With a tab bar, separator, and a wide breadcrumb the header is
+// three rows, so a click on visual line 3 (terminal row 6) reaches the BEAM as
+// editor row 3 (ticket #2256).
 func TestMousePacketOffsetMirrorsRenderedHeader(t *testing.T) {
-	model := tabBarModel(2)
+	model := tabBarModel(3)
 	if got, want := model.layout.header.Height, len(model.headerLines()); got != want {
 		t.Fatalf("cached offset = %d, rendered header height = %d; must match", got, want)
 	}
@@ -304,8 +308,8 @@ func TestMousePacketOffsetMirrorsRenderedHeader(t *testing.T) {
 	if !ok {
 		t.Fatal("body click should encode a mouse packet")
 	}
-	if got := mouseRow(packet); got != 4 {
-		t.Fatalf("encoded row = %d, want 4 (terminal row 6 minus two header rows)", got)
+	if got := mouseRow(packet); got != 3 {
+		t.Fatalf("encoded row = %d, want 3 (terminal row 6 minus three header rows)", got)
 	}
 }
 
@@ -314,8 +318,8 @@ func TestMousePacketOffsetMirrorsRenderedHeader(t *testing.T) {
 // zone-routed) is suppressed instead of becoming a phantom editor row-0 click
 // (ticket #2256).
 func TestMousePacketSuppressesHeaderRegionClick(t *testing.T) {
-	model := tabBarModel(2)
-	for _, y := range []int{0, 1} {
+	model := tabBarModel(3)
+	for _, y := range []int{0, 1, 2} {
 		msg := tea.MouseClickMsg(tea.Mouse{X: 3, Y: y, Button: tea.MouseLeft})
 		if packet, ok := model.mousePacket(msg); ok {
 			t.Fatalf("click at header row %d should be suppressed, got row %d", y, mouseRow(packet))
@@ -329,12 +333,12 @@ func TestMousePacketSuppressesHeaderRegionClick(t *testing.T) {
 // extending at the top visible line, and the release still terminates the
 // BEAM's drag state) rather than suppressed (ticket #2256 review note).
 func TestMousePacketClampsHeaderRegionDragAndRelease(t *testing.T) {
-	model := tabBarModel(1)
+	model := tabBarModel(2)
 	steps := []struct {
 		msg     tea.MouseMsg
 		wantRow int16
 	}{
-		{msg: tea.MouseClickMsg(tea.Mouse{X: 2, Y: 3, Button: tea.MouseLeft}), wantRow: 2},
+		{msg: tea.MouseClickMsg(tea.Mouse{X: 2, Y: 3, Button: tea.MouseLeft}), wantRow: 1},
 		{msg: tea.MouseMotionMsg(tea.Mouse{X: 2, Y: 0, Button: tea.MouseLeft}), wantRow: 0},
 		{msg: tea.MouseReleaseMsg(tea.Mouse{X: 2, Y: 0, Button: tea.MouseLeft}), wantRow: 0},
 	}
@@ -354,14 +358,14 @@ func TestMousePacketClampsHeaderRegionDragAndRelease(t *testing.T) {
 // header offset so a selection anchored on the visually-Nth line stays aligned
 // (ticket #2256).
 func TestMousePacketTranslatesDragSequence(t *testing.T) {
-	model := tabBarModel(1)
+	model := tabBarModel(2)
 	steps := []struct {
 		msg     tea.MouseMsg
 		wantRow int16
 	}{
-		{msg: tea.MouseClickMsg(tea.Mouse{X: 2, Y: 4, Button: tea.MouseLeft}), wantRow: 3},
-		{msg: tea.MouseMotionMsg(tea.Mouse{X: 6, Y: 7, Button: tea.MouseLeft}), wantRow: 6},
-		{msg: tea.MouseReleaseMsg(tea.Mouse{X: 6, Y: 7, Button: tea.MouseLeft}), wantRow: 6},
+		{msg: tea.MouseClickMsg(tea.Mouse{X: 2, Y: 4, Button: tea.MouseLeft}), wantRow: 2},
+		{msg: tea.MouseMotionMsg(tea.Mouse{X: 6, Y: 7, Button: tea.MouseLeft}), wantRow: 5},
+		{msg: tea.MouseReleaseMsg(tea.Mouse{X: 6, Y: 7, Button: tea.MouseLeft}), wantRow: 5},
 	}
 	for _, step := range steps {
 		packet, ok := model.mousePacket(step.msg)
@@ -370,6 +374,126 @@ func TestMousePacketTranslatesDragSequence(t *testing.T) {
 		}
 		if got := mouseRow(packet); got != step.wantRow {
 			t.Fatalf("drag step row = %d, want %d", got, step.wantRow)
+		}
+	}
+}
+
+// TestTabSeparatorHasActiveTabGap pins the visual tab connector: the separator
+// line below the tab bar contains a gap (spaces) under the active tab and full
+// ─ characters everywhere else (#2532).
+func TestTabSeparatorHasActiveTabGap(t *testing.T) {
+	model := New(80, 24, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiTabBar: {
+			Tabs: protocol.TabBar{Tabs: []protocol.Tab{
+				{ID: 1, Icon: "󰈙", Label: "one.ex"},
+				{ID: 2, Icon: "󰈙", Label: "two.ex", Active: true},
+				{ID: 3, Icon: "󰈙", Label: "three.ex"},
+			}},
+		},
+	}
+	model.layout = model.computeLayout()
+
+	lines := model.headerLines()
+	if len(lines) < 2 {
+		t.Fatalf("expected at least 2 header lines (tab + separator), got %d", len(lines))
+	}
+
+	// The separator is the second line (index 1).
+	sepPlain := ansi.Strip(lines[1])
+	if !strings.Contains(sepPlain, " ") {
+		t.Fatal("separator should contain spaces for the active tab gap")
+	}
+	if !strings.Contains(sepPlain, "─") {
+		t.Fatal("separator should contain ─ characters for non-active regions")
+	}
+
+	// Compute expected active tab position: render tabs and measure.
+	tabBar, _ := model.tabBar()
+	_, activeStart, activeWidth := model.renderTabs(tabBar)
+	if activeWidth <= 0 {
+		t.Fatal("active tab should have positive width")
+	}
+
+	// Verify the gap is at the correct position and width.
+	runes := []rune(sepPlain)
+	for i := 0; i < len(runes) && i < 80; i++ {
+		inGap := i >= activeStart && i < activeStart+activeWidth
+		if inGap && runes[i] != ' ' {
+			t.Fatalf("expected space at column %d (inside active tab gap), got %q", i, string(runes[i]))
+		}
+		if !inGap && runes[i] != '─' {
+			t.Fatalf("expected ─ at column %d (outside active tab gap), got %q", i, string(runes[i]))
+		}
+	}
+}
+
+// TestTabSeparatorGapWidthMatchesRenderedTab verifies the gap width equals the
+// active tab's rendered width as measured by lipgloss.Width (#2532).
+func TestTabSeparatorGapWidthMatchesRenderedTab(t *testing.T) {
+	model := New(80, 24, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiTabBar: {
+			Tabs: protocol.TabBar{Tabs: []protocol.Tab{
+				{ID: 1, Icon: "󰈙", Label: "first.ex", Active: true},
+				{ID: 2, Icon: "󰈙", Label: "second.ex"},
+			}},
+		},
+	}
+	model.layout = model.computeLayout()
+
+	lines := model.headerLines()
+	if len(lines) < 2 {
+		t.Fatalf("expected at least 2 header lines, got %d", len(lines))
+	}
+
+	tabBar, _ := model.tabBar()
+	_, _, activeWidth := model.renderTabs(tabBar)
+
+	sepPlain := ansi.Strip(lines[1])
+	gapCount := 0
+	for _, r := range sepPlain {
+		if r == ' ' {
+			gapCount++
+		}
+	}
+	if gapCount != activeWidth {
+		t.Fatalf("gap width = %d, active tab width = %d; must match", gapCount, activeWidth)
+	}
+}
+
+// TestTabSeparatorFullLineWhenNoActiveTab verifies the separator is a full line
+// of ─ when no tab is marked active (#2532).
+func TestTabSeparatorFullLineWhenNoActiveTab(t *testing.T) {
+	model := New(40, 24, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiTabBar: {
+			Tabs: protocol.TabBar{Tabs: []protocol.Tab{
+				{ID: 1, Icon: "󰈙", Label: "a.ex"},
+				{ID: 2, Icon: "󰈙", Label: "b.ex"},
+			}},
+		},
+	}
+	model.layout = model.computeLayout()
+
+	lines := model.headerLines()
+	if len(lines) < 2 {
+		t.Fatalf("expected at least 2 header lines, got %d", len(lines))
+	}
+
+	sepPlain := ansi.Strip(lines[1])
+	if strings.Contains(sepPlain, " ") {
+		// With no active tab, the separator should not contain spaces (but the
+		// visual width is padded by the row style, which uses lipgloss Width).
+		// fitStyled pads with spaces if shorter, but the raw ─ string should be
+		// full width so no padding appears.
+		if lipgloss.Width(lines[1]) != 40 {
+			t.Fatalf("separator width = %d, want 40", lipgloss.Width(lines[1]))
+		}
+	}
+	for _, r := range sepPlain {
+		if r != '─' {
+			t.Fatalf("expected all ─ in separator when no tab is active, got %q", string(r))
 		}
 	}
 }
@@ -432,15 +556,15 @@ func TestMousePacketClampsPresentationScrollOffsetInsideWindow(t *testing.T) {
 }
 
 func TestMousePacketTranslatesWheelOverBody(t *testing.T) {
-	model := tabBarModel(1)
+	model := tabBarModel(2)
 
 	bodyWheel := tea.MouseWheelMsg(tea.Mouse{X: 4, Y: 5, Button: tea.MouseWheelDown})
 	packet, ok := model.mousePacket(bodyWheel)
 	if !ok {
 		t.Fatal("body wheel should encode a packet")
 	}
-	if got := mouseRow(packet); got != 4 {
-		t.Fatalf("body wheel row = %d, want 4 (5 - one header row)", got)
+	if got := mouseRow(packet); got != 3 {
+		t.Fatalf("body wheel row = %d, want 3 (5 - two header rows)", got)
 	}
 	if packet[5] != 0x41 {
 		t.Fatalf("wheel button = %#x, want wheel-down 0x41", packet[5])
