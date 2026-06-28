@@ -154,7 +154,12 @@ func (m Model) footerLines() []string {
 		if len(chromeStatus.Left) > 0 || len(chromeStatus.Right) > 0 {
 			status = m.renderStatusSegments(chromeStatus)
 		} else if chromeStatus.Filename != "" {
-			status = fmt.Sprintf("%s  %d:%d", chromeStatus.Filename, chromeStatus.Line, chromeStatus.Column)
+			icon := devIconForPath(chromeStatus.Filename, false)
+			prefix := chromeStatus.Filename
+			if icon.glyph != "" {
+				prefix = icon.glyph + " " + chromeStatus.Filename
+			}
+			status = fmt.Sprintf("%s  %d:%d", prefix, chromeStatus.Line, chromeStatus.Column)
 			if chromeStatus.Message != "" {
 				status += "  " + chromeStatus.Message
 			}
@@ -202,6 +207,17 @@ func (m Model) renderStatusSegments(status protocol.StatusBar) string {
 	left := m.renderSegmentList(status.Left)
 	right := m.renderSegmentList(status.Right)
 	message := m.renderStatusMessage(status.Message)
+	// Prepend a devicon for the current file type before the right segments.
+	if status.Filename != "" {
+		icon := devIconForPath(status.Filename, false)
+		if icon.glyph != "" {
+			fileStyle := lipgloss.NewStyle().Foreground(m.palette().ChromeText()).Background(m.palette().ChromeSurface())
+			if icon.color != "" {
+				fileStyle = fileStyle.Foreground(lipgloss.Color(icon.color))
+			}
+			right = fileStyle.Render(icon.glyph+" ") + right
+		}
+	}
 	leftWidth := lipgloss.Width(left)
 	rightWidth := lipgloss.Width(right)
 	messageWidth := lipgloss.Width(message)
@@ -264,6 +280,10 @@ func (m Model) renderSegmentList(segments []protocol.StatusSegment) string {
 		}
 		if segment.Attrs&0x04 != 0 {
 			style = style.Italic(true)
+		}
+		// Prepend a nerd font icon when the segment carries a vi mode name.
+		if icon := modeIcon(strings.TrimSpace(text)); icon != "" {
+			text = strings.Replace(text, strings.TrimSpace(text), icon+" "+strings.TrimSpace(text), 1)
 		}
 		rendered := style.Render(text)
 		if segment.Command != "" {
