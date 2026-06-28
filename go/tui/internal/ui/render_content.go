@@ -823,12 +823,14 @@ func renderFileTreeName(name string, matchPositions []uint16, baseStyle lipgloss
 	}
 	accentStyle := baseStyle.Foreground(accent)
 	var result strings.Builder
-	for i, r := range name {
-		if matchSet[uint16(i)] {
+	runeIdx := 0
+	for _, r := range name {
+		if matchSet[uint16(runeIdx)] {
 			result.WriteString(accentStyle.Render(string(r)))
 		} else {
 			result.WriteString(baseStyle.Render(string(r)))
 		}
+		runeIdx++
 	}
 	return result.String()
 }
