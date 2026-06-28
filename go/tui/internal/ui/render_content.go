@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"image/color"
 	"sort"
 	"strings"
 
@@ -694,7 +695,34 @@ func (m Model) renderGutterEntry(gutter protocol.Gutter, rowIndex int) string {
 	}
 	sign := m.gutterSign(entry)
 	number := m.gutterLineNumber(gutter, entry)
+	if signFG, ok := m.gutterSignColor(entry); ok {
+		signStyle := lipgloss.NewStyle().Foreground(signFG).Background(m.editorBackground())
+		return style.Render(fitStyled(signStyle.Render(sign)+number+" ", width))
+	}
 	return style.Render(fit(sign+number+" ", width))
+}
+
+// gutterSignColor returns the foreground color for a gutter sign based on its
+// type. Git diff signs use the theme palette (green/yellow/red); annotation
+// signs (type 8) use their wire-supplied foreground color.
+func (m Model) gutterSignColor(entry protocol.GutterEntry) (color.Color, bool) {
+	switch entry.SignType {
+	case 1: // git_added
+		return m.palette().GitAdded(), true
+	case 2: // git_modified
+		return m.palette().GitModified(), true
+	case 3: // git_deleted
+		return m.palette().GitDeleted(), true
+	case 8: // annotation with custom fg
+		if entry.SignFG != 0 {
+			return lipgloss.Color(fmt.Sprintf("#%06X", entry.SignFG)), true
+		}
+		return nil, false
+	case 9: // git_removed
+		return m.palette().GitDeleted(), true
+	default:
+		return nil, false
+	}
 }
 
 func (m Model) gutterLineNumber(gutter protocol.Gutter, entry protocol.GutterEntry) string {

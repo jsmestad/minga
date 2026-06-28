@@ -46,6 +46,9 @@ const (
 	themeWarningFG        byte = 0x53
 	themeDiagnosticInfo   byte = 0x54
 	themeDiagnosticHint   byte = 0x55
+	themeGitAddedFG       byte = 0x56
+	themeGitModifiedFG    byte = 0x57
+	themeGitDeletedFG     byte = 0x58
 	themeHighlightReadBG  byte = 0x59
 	themeHighlightWriteBG byte = 0x5A
 	themeSelectionBG      byte = 0x5B
@@ -105,6 +108,9 @@ func bootstrapPalette() palette {
 		themeWarningFG:        0xFFAA00,
 		themeDiagnosticInfo:   0x00AAFF,
 		themeDiagnosticHint:   0x999999,
+		themeGitAddedFG:       0x98C379,
+		themeGitModifiedFG:    0xFFAA00,
+		themeGitDeletedFG:     0xFF0000,
 		themeHighlightReadBG:  0x333333,
 		themeHighlightWriteBG: 0x333333,
 		themeSelectionBG:      0x333333,
@@ -232,6 +238,18 @@ func (p palette) GutterText() color.Color {
 
 func (p palette) GutterCurrentText() color.Color {
 	return p.slot(themeGutterCurrentFG)
+}
+
+func (p palette) GitAdded() color.Color {
+	return p.slot(themeGitAddedFG)
+}
+
+func (p palette) GitModified() color.Color {
+	return p.slot(themeGitModifiedFG)
+}
+
+func (p palette) GitDeleted() color.Color {
+	return p.slot(themeGitDeletedFG)
 }
 
 func (p palette) TreeSurface() color.Color {
