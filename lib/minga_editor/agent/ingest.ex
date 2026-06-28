@@ -70,12 +70,23 @@ defmodule MingaEditor.Agent.Ingest do
   @type state :: %{
           editor: pid(),
           window_ms: non_neg_integer(),
+          max_batch_items: pos_integer(),
+          max_batch_bytes: pos_integer(),
           sessions: %{optional(pid()) => session_state()}
         }
 
   # One 60Hz frame. Adds at most one window to steady-state stream visibility,
   # below perception and partly absorbed by the Editor's render coalescing.
   @default_window_ms 16
+
+  # Batch size caps. A single coalesced flush is split into multiple bounded
+  # batches so the Editor's inline apply (`route_agent_stream_batch`) never
+  # receives a pathologically large batch from a big tool-output dump or
+  # paste-like burst. Item count is the primary guard; byte ceiling catches
+  # fewer-but-larger deltas. Both are conservative: normal streaming rarely
+  # exceeds a handful of small token deltas per 16ms window.
+  @max_batch_items 64
+  @max_batch_bytes 32_768
 
   @telemetry_flush [:minga, :agent, :ingest_flush]
 
@@ -87,6 +98,9 @@ defmodule MingaEditor.Agent.Ingest do
   `:editor` is the pid that batches and control events are forwarded to and
   defaults to the calling process. `:window_ms` overrides the coalescing tick
   (tests pass `0` so the tick fires on the next message turn deterministically).
+  `:max_batch_items` and `:max_batch_bytes` override the batch size caps (tests
+  use small values to exercise the splitting logic without generating hundreds
+  of deltas).
   """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
@@ -113,7 +127,17 @@ defmodule MingaEditor.Agent.Ingest do
   def init(opts) do
     editor = Keyword.get(opts, :editor, self())
     window_ms = Keyword.get(opts, :window_ms, @default_window_ms)
-    {:ok, %{editor: editor, window_ms: window_ms, sessions: %{}}}
+    max_items = Keyword.get(opts, :max_batch_items, @max_batch_items)
+    max_bytes = Keyword.get(opts, :max_batch_bytes, @max_batch_bytes)
+
+    {:ok,
+     %{
+       editor: editor,
+       window_ms: window_ms,
+       max_batch_items: max_items,
+       max_batch_bytes: max_bytes,
+       sessions: %{}
+     }}
   end
 
   @impl true
@@ -204,7 +228,7 @@ defmodule MingaEditor.Agent.Ingest do
 
     case pending do
       [] -> :ok
-      _ -> forward_batch(state, session_pid, Enum.reverse(pending), reason)
+      _ -> forward_bounded(state, session_pid, Enum.reverse(pending), reason)
     end
 
     # After a flush the session is idle again: the next delta re-arms the leading
@@ -215,6 +239,54 @@ defmodule MingaEditor.Agent.Ingest do
   end
 
   # ── Forwarding ───────────────────────────────────────────────────────────────
+
+  @spec forward_bounded(state(), pid(), batch(), :leading | :tick | :control) :: :ok
+  defp forward_bounded(state, session_pid, batch, reason) do
+    batch
+    |> chunk_batch(state.max_batch_items, state.max_batch_bytes)
+    |> Enum.each(&forward_batch(state, session_pid, &1, reason))
+  end
+
+  @spec chunk_batch(batch(), pos_integer(), pos_integer()) :: [batch()]
+  defp chunk_batch(batch, max_items, max_bytes) do
+    chunk_batch(batch, max_items, max_bytes, [], 0, 0, [])
+  end
+
+  defp chunk_batch([], _max_items, _max_bytes, current, _count, _bytes, chunks) do
+    case current do
+      [] -> Enum.reverse(chunks)
+      _ -> Enum.reverse([Enum.reverse(current) | chunks])
+    end
+  end
+
+  defp chunk_batch([delta | rest], max_items, max_bytes, current, count, bytes, chunks) do
+    delta_bytes = delta_byte_size(delta)
+    new_count = count + 1
+    new_bytes = bytes + delta_bytes
+
+    if count > 0 and (new_count > max_items or new_bytes > max_bytes) do
+      chunk_batch(
+        [delta | rest],
+        max_items,
+        max_bytes,
+        [],
+        0,
+        0,
+        [Enum.reverse(current) | chunks]
+      )
+    else
+      chunk_batch(rest, max_items, max_bytes, [delta | current], new_count, new_bytes, chunks)
+    end
+  end
+
+  @spec delta_byte_size(delta()) :: non_neg_integer()
+  defp delta_byte_size({:text_delta, text}) when is_binary(text), do: byte_size(text)
+  defp delta_byte_size({:thinking_delta, text}) when is_binary(text), do: byte_size(text)
+
+  defp delta_byte_size({:tool_update, _, _, value}) when is_binary(value),
+    do: byte_size(value)
+
+  defp delta_byte_size(_), do: 0
 
   @spec forward_batch(state(), pid(), batch(), :leading | :tick | :control) :: :ok
   defp forward_batch(%{editor: editor}, session_pid, batch, edge) do
