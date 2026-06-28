@@ -203,6 +203,145 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
     end
   end
 
+  describe "formatting response" do
+    test "applies edits when buffer version matches" do
+      state = base_state()
+      buf = state.workspace.buffers.active
+      version = Minga.Buffer.version(buf)
+      ref = make_ref()
+      state = put_lsp_pending(state, ref, {:format, buf, version})
+
+      edits = [
+        %{
+          "range" => %{
+            "start" => %{"line" => 0, "character" => 0},
+            "end" => %{"line" => 0, "character" => 8}
+          },
+          "newText" => "LINE ONE"
+        }
+      ]
+
+      {new_state, effects} =
+        LspEventHandler.handle(state, {:lsp_response, ref, {:ok, edits}})
+
+      assert effects == [:render_now]
+      assert new_state.workspace.lsp_pending == %{}
+      assert Minga.Buffer.content(buf) =~ "LINE ONE"
+    end
+
+    test "skips edits when buffer version changed (staleness guard)" do
+      state = base_state()
+      buf = state.workspace.buffers.active
+      old_version = Minga.Buffer.version(buf)
+      ref = make_ref()
+      state = put_lsp_pending(state, ref, {:format, buf, old_version})
+
+      Minga.Buffer.replace_content(buf, "modified content\n")
+
+      edits = [
+        %{
+          "range" => %{
+            "start" => %{"line" => 0, "character" => 0},
+            "end" => %{"line" => 0, "character" => 8}
+          },
+          "newText" => "STALE"
+        }
+      ]
+
+      {new_state, effects} =
+        LspEventHandler.handle(state, {:lsp_response, ref, {:ok, edits}})
+
+      assert effects == [:render_now]
+      assert Minga.Buffer.content(buf) == "modified content\n"
+      assert new_state.shell_state.status_msg =~ "Buffer changed"
+    end
+
+    test "handles nil response (no formatting changes)" do
+      state = base_state()
+      buf = state.workspace.buffers.active
+      ref = make_ref()
+      state = put_lsp_pending(state, ref, {:format, buf, Minga.Buffer.version(buf)})
+
+      {new_state, effects} =
+        LspEventHandler.handle(state, {:lsp_response, ref, {:ok, nil}})
+
+      assert effects == [:render_now]
+      assert new_state.shell_state.status_msg =~ "No formatting changes"
+    end
+
+    test "handles error response" do
+      state = base_state()
+      buf = state.workspace.buffers.active
+      ref = make_ref()
+      state = put_lsp_pending(state, ref, {:format, buf, Minga.Buffer.version(buf)})
+
+      {new_state, effects} =
+        LspEventHandler.handle(state, {:lsp_response, ref, {:error, :timeout}})
+
+      assert effects == [:render_now]
+      assert new_state.shell_state.status_msg =~ "Format error"
+    end
+  end
+
+  describe "format timer events" do
+    test "spinner shows status when format is still pending" do
+      state = base_state()
+      ref = make_ref()
+      buf = state.workspace.buffers.active
+      state = put_lsp_pending(state, ref, {:format, buf, 0})
+
+      {new_state, effects} = LspEventHandler.handle(state, {:lsp_format_spinner, ref})
+
+      assert effects == [:render_now]
+      assert new_state.shell_state.status_msg =~ "Formatting"
+    end
+
+    test "spinner is no-op when format already completed" do
+      state = base_state()
+      ref = make_ref()
+
+      {new_state, effects} = LspEventHandler.handle(state, {:lsp_format_spinner, ref})
+
+      assert effects == []
+      assert new_state == state
+    end
+
+    test "cancellable shows Esc hint when format is still pending" do
+      state = base_state()
+      ref = make_ref()
+      buf = state.workspace.buffers.active
+      state = put_lsp_pending(state, ref, {:format, buf, 0})
+
+      {new_state, effects} = LspEventHandler.handle(state, {:lsp_format_cancellable, ref})
+
+      assert effects == [:render_now]
+      assert new_state.shell_state.status_msg =~ "Esc to cancel"
+    end
+
+    test "timeout drops pending and sets timeout status" do
+      state = base_state()
+      ref = make_ref()
+      buf = state.workspace.buffers.active
+      state = put_lsp_pending(state, ref, {:format, buf, 0})
+
+      {new_state, effects} = LspEventHandler.handle(state, {:lsp_format_timeout, ref})
+
+      assert effects == [:render_now]
+      assert new_state.workspace.lsp_pending == %{}
+      assert new_state.shell_state.status_msg =~ "timed out"
+    end
+
+    test "timeout is no-op when format already completed" do
+      state = base_state()
+      ref = make_ref()
+
+      {new_state, effects} = LspEventHandler.handle(state, {:lsp_format_timeout, ref})
+
+      assert effects == []
+      assert new_state == state
+    end
+  end
+
   defp put_lsp_pending(state, ref, kind) do
     EditorState.put_lsp_pending(state, ref, kind)
   end

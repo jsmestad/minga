@@ -40,6 +40,20 @@ defmodule MingaEditor.Input.GlobalBindings do
     {:handled, new_state}
   end
 
+  @escape 27
+
+  def handle_key(state, @escape, 0) do
+    case MingaEditor.Commands.Formatting.find_pending_format(state) do
+      nil ->
+        {:passthrough, state}
+
+      {ref, _kind} ->
+        state = MingaEditor.State.delete_lsp_pending(state, ref)
+        state = MingaEditor.State.set_status(state, "Format cancelled")
+        {:passthrough, state}
+    end
+  end
+
   def handle_key(state, _cp, _mods) do
     {:passthrough, state}
   end
