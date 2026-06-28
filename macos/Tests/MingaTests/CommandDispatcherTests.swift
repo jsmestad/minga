@@ -813,6 +813,127 @@ struct CommandDispatcherRoutingTests {
         #expect(resetCount == 2)
     }
 
+    @Test("layoutGeneration-only change fires scroll presentation reset")
+    @MainActor func layoutGenerationOnlyChangeFiresReset() {
+        let (dispatcher, gui) = makeDispatcher()
+        var resetCount = 0
+        dispatcher.onScrollPresentationReset = { resetCount += 1 }
+
+        let base = GUIScrollPresentation(
+            windowId: 7, resetRequired: false,
+            anchorTop: 10, anchorLeft: 0, anchorVisualRowOffset: 0,
+            visibleStartLine: 10, visibleEndLine: 20,
+            overscanStartLine: 5, overscanEndLine: 25,
+            contentEpoch: 42, layoutGeneration: 1
+        )
+
+        dispatcher.applyForTesting(.guiWindowContent(data: GUIWindowContent(
+            windowId: 7, fullRefresh: true, contentEpoch: 42,
+            cursorRow: 5, cursorCol: 10, cursorShape: .beam,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [],
+            scrollPresentation: base
+        )))
+        #expect(resetCount == 0)
+
+        let bumped = GUIScrollPresentation(
+            windowId: 7, resetRequired: false,
+            anchorTop: 10, anchorLeft: 0, anchorVisualRowOffset: 0,
+            visibleStartLine: 10, visibleEndLine: 20,
+            overscanStartLine: 5, overscanEndLine: 25,
+            contentEpoch: 42, layoutGeneration: 2
+        )
+
+        dispatcher.applyForTesting(.guiWindowContent(data: GUIWindowContent(
+            windowId: 7, fullRefresh: true, contentEpoch: 42,
+            cursorRow: 5, cursorCol: 10, cursorShape: .beam,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [],
+            scrollPresentation: bumped
+        )))
+        #expect(resetCount == 1)
+    }
+
+    @Test("identical anchor key does not fire scroll presentation reset")
+    @MainActor func identicalAnchorKeyDoesNotFireReset() {
+        let (dispatcher, _) = makeDispatcher()
+        var resetCount = 0
+        dispatcher.onScrollPresentationReset = { resetCount += 1 }
+
+        let presentation = GUIScrollPresentation(
+            windowId: 7, resetRequired: false,
+            anchorTop: 10, anchorLeft: 0, anchorVisualRowOffset: 0,
+            visibleStartLine: 10, visibleEndLine: 20,
+            overscanStartLine: 5, overscanEndLine: 25,
+            contentEpoch: 42, layoutGeneration: 1
+        )
+
+        dispatcher.applyForTesting(.guiWindowContent(data: GUIWindowContent(
+            windowId: 7, fullRefresh: true, contentEpoch: 42,
+            cursorRow: 5, cursorCol: 10, cursorShape: .beam,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [],
+            scrollPresentation: presentation
+        )))
+        #expect(resetCount == 0)
+
+        dispatcher.applyForTesting(.guiWindowContent(data: GUIWindowContent(
+            windowId: 7, fullRefresh: true, contentEpoch: 42,
+            cursorRow: 6, cursorCol: 10, cursorShape: .beam,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [],
+            scrollPresentation: presentation
+        )))
+        #expect(resetCount == 0)
+    }
+
+    @Test("anchorTop-only change fires scroll presentation reset")
+    @MainActor func anchorTopOnlyChangeFiresReset() {
+        let (dispatcher, gui) = makeDispatcher()
+        var resetCount = 0
+        dispatcher.onScrollPresentationReset = { resetCount += 1 }
+
+        let base = GUIScrollPresentation(
+            windowId: 7, resetRequired: false,
+            anchorTop: 10, anchorLeft: 0, anchorVisualRowOffset: 0,
+            visibleStartLine: 10, visibleEndLine: 20,
+            overscanStartLine: 5, overscanEndLine: 25,
+            contentEpoch: 42, layoutGeneration: 1
+        )
+
+        dispatcher.applyForTesting(.guiWindowContent(data: GUIWindowContent(
+            windowId: 7, fullRefresh: true, contentEpoch: 42,
+            cursorRow: 5, cursorCol: 10, cursorShape: .beam,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [],
+            scrollPresentation: base
+        )))
+        #expect(resetCount == 0)
+
+        let shifted = GUIScrollPresentation(
+            windowId: 7, resetRequired: false,
+            anchorTop: 15, anchorLeft: 0, anchorVisualRowOffset: 0,
+            visibleStartLine: 15, visibleEndLine: 25,
+            overscanStartLine: 10, overscanEndLine: 30,
+            contentEpoch: 42, layoutGeneration: 1
+        )
+
+        dispatcher.applyForTesting(.guiWindowContent(data: GUIWindowContent(
+            windowId: 7, fullRefresh: true, contentEpoch: 42,
+            cursorRow: 5, cursorCol: 10, cursorShape: .beam,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [],
+            scrollPresentation: shifted
+        )))
+        #expect(resetCount == 1)
+    }
+
     @Test("guiWindowOverlayDelta updates matching retained content")
     @MainActor func guiWindowOverlayDeltaRouting() {
         let (dispatcher, gui) = makeDispatcher()

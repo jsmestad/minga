@@ -33,6 +33,7 @@ private struct StatusBarSegmentGroup: Identifiable {
 
 struct StatusBarView: View {
     let state: StatusBarState
+    var feedbackState: FeedbackState?
     @Environment(\.themeColors) private var theme
     let encoder: InputEncoder?
     var isFileTreeVisible: Bool = false
@@ -179,11 +180,20 @@ struct StatusBarView: View {
                     .foregroundStyle(theme.modelineBarFg.opacity(0.8))
             }
         } else if !state.message.isEmpty {
-            Text(state.message)
-                .font(.system(size: 11))
-                .foregroundStyle(theme.modelineBarFg.opacity(0.7))
-                .lineLimit(1)
-                .truncationMode(.tail)
+            HStack(spacing: 4) {
+                if feedbackState?.showingSpinner == true, FeedbackState.isInflight(state.message) {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .scaleEffect(0.7)
+                        .frame(width: 14, height: 14)
+                        .transition(.opacity)
+                }
+                Text(state.message)
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.modelineBarFg.opacity(0.7))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
         } else if !state.diagnosticHint.isEmpty {
             Text(state.diagnosticHint)
                 .font(.system(size: 11))
