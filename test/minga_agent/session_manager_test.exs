@@ -319,13 +319,13 @@ defmodule MingaAgent.SessionManagerTest do
     {:ok, session_id, pid} =
       SessionManager.start_session(manager,
         idle_gc_timeout_ms: 60_000,
-        idle_gc_token_fn: fn -> idle_gc_token end
+        idle_gc_token_fn: fn -> idle_gc_token end,
+        credentials_configured_fn: fn -> false end,
+        persist?: false
       )
 
-    assert :ok = MingaAgent.Session.subscribe(pid)
-
     ref = Process.monitor(pid)
-    assert :ok = MingaAgent.Session.unsubscribe(pid)
+    :sys.get_state(pid)
     send(pid, {:idle_gc_timeout, idle_gc_token})
     assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 1000
 
