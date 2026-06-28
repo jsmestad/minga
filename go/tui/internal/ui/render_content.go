@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"image/color"
 	"sort"
 	"strings"
 
@@ -149,7 +150,7 @@ func (m Model) leftChromeWidth() int {
 		return fileTreeWidth(m.width, tree) + 1 // +1 for the │ border separator
 	}
 	if sidebars, ok := m.sidebars(); ok && len(sidebars.Items) > 0 && m.width >= 60 {
-		return semanticSidebarWidth(m.width, sidebars)
+		return semanticSidebarWidth(m.width, sidebars) + 1 // +1 for │ separator column
 	}
 	return 0
 }
@@ -714,8 +715,10 @@ func (m Model) withSemanticSidebars(mainLines []string) []string {
 	theme := m.palette()
 	style := lipgloss.NewStyle().Foreground(theme.Muted()).Background(theme.Surface()).Width(width)
 	activeStyle := style.Bold(true).Foreground(theme.Text()).Background(theme.Selection())
+	sepStyle := lipgloss.NewStyle().Foreground(theme.TreeSeparator()).Background(m.editorBackground())
+	sep := sepStyle.Render("│")
 	lines := make([]string, max(len(mainLines), len(visible)+1))
-	lines[0] = lipgloss.JoinHorizontal(lipgloss.Top, style.Bold(true).Render(fit("Sidebars", width)), lineAt(mainLines, 0))
+	lines[0] = lipgloss.JoinHorizontal(lipgloss.Top, style.Bold(true).Render(fit("Sidebars", width)), sep, lineAt(mainLines, 0))
 	for i, item := range visible {
 		label := strings.TrimSpace(item.Icon + " " + item.DisplayName)
 		if item.BadgeCount != 0xFFFF && item.BadgeCount > 0 {
@@ -726,10 +729,10 @@ func (m Model) withSemanticSidebars(mainLines []string) []string {
 			leftStyle = activeStyle
 		}
 		marked := m.zones.Mark(zoneIDSidebarItem(item.ID), leftStyle.Render(fit(label, width)))
-		lines[i+1] = lipgloss.JoinHorizontal(lipgloss.Top, marked, lineAt(mainLines, i+1))
+		lines[i+1] = lipgloss.JoinHorizontal(lipgloss.Top, marked, sep, lineAt(mainLines, i+1))
 	}
 	for i := len(visible) + 1; i < len(lines); i++ {
-		lines[i] = lipgloss.JoinHorizontal(lipgloss.Top, style.Render(strings.Repeat(" ", width)), lineAt(mainLines, i))
+		lines[i] = lipgloss.JoinHorizontal(lipgloss.Top, style.Render(strings.Repeat(" ", width)), sep, lineAt(mainLines, i))
 	}
 	return lines
 }
@@ -739,7 +742,8 @@ func (m Model) renderGutterEntry(gutter protocol.Gutter, rowIndex int) string {
 	if width <= 1 {
 		return ""
 	}
-	style := lipgloss.NewStyle().Foreground(m.palette().GutterText()).Background(m.editorBackground()).Width(width)
+	bg := m.editorBackground()
+	style := lipgloss.NewStyle().Foreground(m.palette().GutterText()).Background(bg).Width(width)
 	if rowIndex < 0 || rowIndex >= len(gutter.Entries) {
 		return style.Render(strings.Repeat(" ", width))
 	}
@@ -749,6 +753,15 @@ func (m Model) renderGutterEntry(gutter protocol.Gutter, rowIndex int) string {
 	}
 	sign := m.gutterSign(entry)
 	number := m.gutterLineNumber(gutter, entry)
+
+	// Apply theme-derived git sign colors (added/modified/deleted).
+	if signColor, ok := m.gutterSignColor(entry); ok {
+		signStyle := lipgloss.NewStyle().Foreground(signColor).Background(bg)
+		numStyle := style.Width(0)
+		content := signStyle.Render(sign) + numStyle.Render(number+" ")
+		return style.Render(fitStyled(content, width))
+	}
+
 	return style.Render(fit(sign+number+" ", width))
 }
 
@@ -785,6 +798,22 @@ func (m Model) gutterSign(entry protocol.GutterEntry) string {
 		return "▾ "
 	}
 	return "  "
+}
+
+// gutterSignColor returns a theme-derived color for git sign types.
+// Returns (color, true) for git signs, (nil, false) otherwise.
+func (m Model) gutterSignColor(entry protocol.GutterEntry) (color.Color, bool) {
+	theme := m.palette()
+	switch entry.SignType {
+	case 1: // git added
+		return theme.GitAdded(), true
+	case 2: // git modified
+		return theme.GitModified(), true
+	case 3, 9: // git deleted / git removed
+		return theme.GitDeleted(), true
+	default:
+		return nil, false
+	}
 }
 
 func (m Model) renderFileTree(tree protocol.FileTree, width int, height int) []string {
@@ -924,7 +953,8 @@ func (m Model) renderFileTreeRow(row protocol.FileTreeRow, width int) string {
 	if row.Selected || row.Directory {
 		nameStyle = nameStyle.Bold(true)
 	}
-	content := markerStyle.Render(selectionMarker+prefix+expander) + rowStyle.Render(" ") + iconStyle.Render(icon.glyph) + rowStyle.Render(" ") + nameStyle.Render(row.Name)
+	nameRendered := renderFileTreeName(row.Name, row.MatchPositions, nameStyle, theme.Accent())
+	content := markerStyle.Render(selectionMarker+prefix+expander) + rowStyle.Render(" ") + iconStyle.Render(icon.glyph) + rowStyle.Render(" ") + nameRendered
 	if row.Dirty {
 		dirty := lipgloss.NewStyle().Foreground(theme.Warning()).Background(rowBackground).Render("●")
 		space := strings.Repeat(" ", max(width-lipgloss.Width(content)-lipgloss.Width(dirty), 1))
@@ -933,6 +963,33 @@ func (m Model) renderFileTreeRow(row protocol.FileTreeRow, width int) string {
 		content += rowStyle.Render(strings.Repeat(" ", remaining))
 	}
 	return rowStyle.Width(width).Render(fitStyled(content, width))
+}
+
+// renderFileTreeName renders a filename with optional accent highlighting on
+// matched character positions. When matchPositions is empty the name is rendered
+// with the base style only (no highlighting). Match positions are uint16 rune
+// indices into the name string, matching the fuzzy-match pattern used by the
+// picker overlay.
+func renderFileTreeName(name string, matchPositions []uint16, baseStyle lipgloss.Style, accent color.Color) string {
+	if len(matchPositions) == 0 {
+		return baseStyle.Render(name)
+	}
+	matchSet := make(map[uint16]bool, len(matchPositions))
+	for _, pos := range matchPositions {
+		matchSet[pos] = true
+	}
+	accentStyle := baseStyle.Foreground(accent)
+	var result strings.Builder
+	runeIdx := 0
+	for _, r := range name {
+		if matchSet[uint16(runeIdx)] {
+			result.WriteString(accentStyle.Render(string(r)))
+		} else {
+			result.WriteString(baseStyle.Render(string(r)))
+		}
+		runeIdx++
+	}
+	return result.String()
 }
 
 func fileTreeRowMuted(row protocol.FileTreeRow) bool {

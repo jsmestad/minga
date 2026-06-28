@@ -1424,6 +1424,60 @@ func TestFileTreeSelectedRowPaintsBackgroundAcrossSegments(t *testing.T) {
 	}
 }
 
+func TestFileTreeMatchHighlightAccentsMatchedCharacters(t *testing.T) {
+	model := New(40, 8, nil)
+	_ = model.applyCommands(frame(testThemeCommand()))
+	rendered := model.renderFileTreeRow(protocol.FileTreeRow{
+		Name:           "main.go",
+		Icon:           "",
+		MatchPositions: []uint16{0, 1},
+	}, 30)
+	stripped := ansi.Strip(rendered)
+	if !strings.Contains(stripped, "main.go") {
+		t.Fatalf("rendered row should contain filename, got %q", stripped)
+	}
+	// The test theme accent 0x7DB7FF = (125, 183, 255) produces "125;183;255" in ANSI.
+	// Characters at positions 0 ("m") and 1 ("a") should carry this accent foreground.
+	if !strings.Contains(rendered, "125;183;255") {
+		t.Fatalf("matched characters should carry accent foreground color, got %q", rendered)
+	}
+}
+
+func TestFileTreeMatchHighlightSkippedWhenNoPositions(t *testing.T) {
+	model := New(40, 8, nil)
+	_ = model.applyCommands(frame(testThemeCommand()))
+	withMatch := model.renderFileTreeRow(protocol.FileTreeRow{
+		Name:           "main.go",
+		Icon:           "",
+		MatchPositions: []uint16{0},
+	}, 30)
+	withoutMatch := model.renderFileTreeRow(protocol.FileTreeRow{
+		Name: "main.go",
+		Icon: "",
+	}, 30)
+	// Without match positions, no accent highlighting should appear in the name portion.
+	// The accent color should only appear in the version with match positions.
+	if strings.Contains(withoutMatch, "125;183;255") {
+		t.Fatalf("row without match positions should not contain accent color, got %q", withoutMatch)
+	}
+	if !strings.Contains(withMatch, "125;183;255") {
+		t.Fatalf("row with match positions should contain accent color, got %q", withMatch)
+	}
+}
+
+func TestFileTreeMatchHighlightPreservesRowWidth(t *testing.T) {
+	model := New(40, 8, nil)
+	_ = model.applyCommands(frame(testThemeCommand()))
+	rendered := model.renderFileTreeRow(protocol.FileTreeRow{
+		Name:           "config.toml",
+		Icon:           "",
+		MatchPositions: []uint16{0, 3, 7},
+	}, 28)
+	if got := displayWidth(ansi.Strip(rendered)); got != 28 {
+		t.Fatalf("highlighted file-tree row should fill requested width, got %d row=%q", got, rendered)
+	}
+}
+
 func TestFileTreeWidthRespectsProtocolGeometryAndSafetyClamp(t *testing.T) {
 	if got := fileTreeWidth(80, protocol.FileTree{Width: 18}); got != 18 {
 		t.Fatalf("file tree width = %d, want narrow protocol width 18", got)
@@ -1957,8 +2011,12 @@ func TestSemanticWindowsRespectSidebarOffset(t *testing.T) {
 	if len(lines) < 2 {
 		t.Fatalf("semantic window should render with sidebar offset: %+v", lines)
 	}
-	if got := strings.Index(lines[1], "pane"); got != 18 {
-		t.Fatalf("sidebar offset should leave pane at column 18, got %d in %q", got, lines[1])
+	if !strings.Contains(lines[1], "│") {
+		t.Fatalf("sidebar should have │ separator column: %q", lines[1])
+	}
+	// strings.Index returns byte offset: 18 ASCII sidebar chars + 3-byte │ = byte 21
+	if got := strings.Index(lines[1], "pane"); got != 21 {
+		t.Fatalf("sidebar + separator offset should place pane at byte 21 (18 sidebar + 3-byte separator), got %d in %q", got, lines[1])
 	}
 }
 
@@ -2649,4 +2707,138 @@ func waitForZone(t *testing.T, model Model, id string) *zoneInfo {
 		t.Fatalf("zone %q was not registered", id)
 	}
 	return info
+}
+
+func completionChrome(items int, selected uint16) protocol.ChromePayload {
+	cItems := make([]protocol.CompletionItem, items)
+	for i := range cItems {
+		cItems[i] = protocol.CompletionItem{Kind: 1, Label: fmt.Sprintf("item%d", i)}
+	}
+	return protocol.ChromePayload{Opcode: generated.OPGuiCompletion, Complete: protocol.Completion{Visible: true, Selected: selected, Items: cItems}}
+}
+
+func TestCompletionLocalNavigationCtrlNAdvancesPreview(t *testing.T) {
+	out := make(chan []byte, 1)
+	model := New(30, 10, out)
+	model.chrome[generated.OPGuiCompletion] = completionChrome(5, 0)
+
+	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'n', Mod: tea.ModCtrl}))
+	model = updated.(Model)
+
+	if model.localPresentation.previewCompletionIndex == nil || *model.localPresentation.previewCompletionIndex != 1 {
+		t.Fatalf("C-n should set preview completion index to 1, got %v", model.localPresentation.previewCompletionIndex)
+	}
+	packets := drainOutboundPackets(out)
+	if len(packets) != 1 {
+		t.Fatalf("C-n should still forward the key packet, got %d packets", len(packets))
+	}
+}
+
+func TestCompletionLocalNavigationCtrlPRetreatsPreview(t *testing.T) {
+	out := make(chan []byte, 1)
+	model := New(30, 10, out)
+	model.chrome[generated.OPGuiCompletion] = completionChrome(5, 3)
+
+	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'p', Mod: tea.ModCtrl}))
+	model = updated.(Model)
+
+	if model.localPresentation.previewCompletionIndex == nil || *model.localPresentation.previewCompletionIndex != 2 {
+		t.Fatalf("C-p should set preview completion index to 2, got %v", model.localPresentation.previewCompletionIndex)
+	}
+}
+
+func TestCompletionLocalNavigationClampsAtBoundaries(t *testing.T) {
+	t.Run("clamps at bottom", func(t *testing.T) {
+		model := New(30, 10, nil)
+		model.chrome[generated.OPGuiCompletion] = completionChrome(3, 2)
+
+		updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'n', Mod: tea.ModCtrl}))
+		model = updated.(Model)
+
+		if model.localPresentation.previewCompletionIndex != nil {
+			t.Fatalf("C-n at last item should not set preview (no movement), got %v", *model.localPresentation.previewCompletionIndex)
+		}
+	})
+
+	t.Run("clamps at top", func(t *testing.T) {
+		model := New(30, 10, nil)
+		model.chrome[generated.OPGuiCompletion] = completionChrome(3, 0)
+
+		updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'p', Mod: tea.ModCtrl}))
+		model = updated.(Model)
+
+		if model.localPresentation.previewCompletionIndex != nil {
+			t.Fatalf("C-p at first item should not set preview (no movement), got %v", *model.localPresentation.previewCompletionIndex)
+		}
+	})
+}
+
+func TestCompletionLocalNavigationDoesNotMutateCommittedSelected(t *testing.T) {
+	model := New(30, 10, nil)
+	model.chrome[generated.OPGuiCompletion] = completionChrome(5, 1)
+
+	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'n', Mod: tea.ModCtrl}))
+	model = updated.(Model)
+
+	if model.chrome[generated.OPGuiCompletion].Complete.Selected != 1 {
+		t.Fatalf("C-n should not mutate the BEAM-committed Selected, got %d", model.chrome[generated.OPGuiCompletion].Complete.Selected)
+	}
+}
+
+func TestCompletionLocalNavigationIgnoredWhenPopupHidden(t *testing.T) {
+	model := New(30, 10, nil)
+	model.chrome[generated.OPGuiCompletion] = protocol.ChromePayload{Opcode: generated.OPGuiCompletion, Complete: protocol.Completion{Visible: false, Items: []protocol.CompletionItem{{Kind: 1, Label: "x"}}}}
+
+	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'n', Mod: tea.ModCtrl}))
+	model = updated.(Model)
+
+	if model.localPresentation.previewCompletionIndex != nil {
+		t.Fatalf("C-n should be ignored when popup is hidden")
+	}
+}
+
+func TestCompletionEffectiveIndexUsesPreviewWhenSet(t *testing.T) {
+	model := New(30, 10, nil)
+	completion := protocol.Completion{Visible: true, Selected: 1, Items: []protocol.CompletionItem{{Kind: 1, Label: "a"}, {Kind: 1, Label: "b"}, {Kind: 1, Label: "c"}}}
+
+	if got := model.effectiveCompletionIndex(completion); got != 1 {
+		t.Fatalf("effective index with no preview should be committed, got %d", got)
+	}
+
+	idx := 2
+	model.localPresentation.previewCompletionIndex = &idx
+	if got := model.effectiveCompletionIndex(completion); got != 2 {
+		t.Fatalf("effective index with preview should be preview index, got %d", got)
+	}
+}
+
+func TestCompletionReconcileClearsPreviewOnBEAMUpdate(t *testing.T) {
+	model := New(30, 10, nil)
+	idx := 2
+	model.localPresentation.previewCompletionIndex = &idx
+
+	_ = model.applyCommands(frame(
+		protocol.Command{Kind: protocol.CommandChrome, Chrome: completionChrome(3, 1)},
+	))
+
+	if model.localPresentation.previewCompletionIndex != nil {
+		t.Fatalf("BEAM completion update should clear the preview index")
+	}
+}
+
+func TestCompletionTwoIndexRenderingSplit(t *testing.T) {
+	model := New(80, 20, nil)
+	model.activePalette = paletteFromTheme(testThemeCommand().Chrome.Theme)
+	model.themeApplied = true
+	items := []protocol.CompletionItem{{Kind: 1, Label: "foo"}, {Kind: 1, Label: "bar"}, {Kind: 1, Label: "baz"}}
+	model.chrome[generated.OPGuiCompletion] = protocol.ChromePayload{Opcode: generated.OPGuiCompletion, Complete: protocol.Completion{Visible: true, Selected: 0, Items: items, Documentation: "foo docs"}}
+	idx := 2
+	model.localPresentation.previewCompletionIndex = &idx
+
+	lines := model.renderCompletion(model.chrome[generated.OPGuiCompletion].Complete)
+
+	joined := ansi.Strip(strings.Join(lines, "\n"))
+	if !strings.Contains(joined, "foo docs") {
+		t.Fatalf("doc pane should show committed item's docs, not the preview item's: %q", joined)
+	}
 }

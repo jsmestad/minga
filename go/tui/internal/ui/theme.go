@@ -318,6 +318,10 @@ func (p palette) GutterCurrentText() color.Color {
 	return p.slot(themeGutterCurrentFG)
 }
 
+func (p palette) TreeSeparator() color.Color {
+	return p.slot(themeTreeSeparatorFG)
+}
+
 func (p palette) TreeSurface() color.Color {
 	return p.slot(themeTreeBG)
 }

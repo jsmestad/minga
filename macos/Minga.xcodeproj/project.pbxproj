@@ -121,6 +121,7 @@
 		48DF21848F4528EEEBC16586 /* StatusBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 764F85CBFE17A90A0A61F2B6 /* StatusBarView.swift */; };
 		491F52C463D8146E4C8B6FE2 /* AgentChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31DA375DF5D4047E01761926 /* AgentChatView.swift */; };
 		49698AC69FB7940F05E7D3F9 /* SparklineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D721181E284AD8BA34F0354 /* SparklineView.swift */; };
+		4A2ED658D250B02BE89A6A56 /* CompletionStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA19E7E243EB130E1969551 /* CompletionStateTests.swift */; };
 		4AA3DEAF4010C778649B06B9 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65B982679577E3DBD4E7A69D /* SettingsView.swift */; };
 		4ADE54090FEEF5AA2A6C86A0 /* WindowContentRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC335D7973205BF8B7EDD8EA /* WindowContentRenderer.swift */; };
 		4B2CF3C29FD0F4B63C7E7027 /* MingaWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A733EF649EF21A761608D75 /* MingaWindow.swift */; };
@@ -616,6 +617,7 @@
 		FD66FBCBFC20D50D22A969C8 /* SymbolsNerdFontMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "SymbolsNerdFontMono-Regular.ttf"; sourceTree = "<group>"; };
 		FD7FC26DB745A436D50E3AA6 /* WindowContentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowContentTests.swift; sourceTree = "<group>"; };
 		FD9F43E781BA11616C52373E /* BreadcrumbBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BreadcrumbBar.swift; sourceTree = "<group>"; };
+		FEA19E7E243EB130E1969551 /* CompletionStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletionStateTests.swift; sourceTree = "<group>"; };
 		FEEC828C1445B3314C8989E1 /* WhichKeyState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhichKeyState.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -964,6 +966,7 @@
 			children = (
 				1F2A06C5BA9E3F53A59E202F /* BEAMProcessManagerTests.swift */,
 				470991E7B3850B1AADFD46FD /* CommandDispatcherTests.swift */,
+				FEA19E7E243EB130E1969551 /* CompletionStateTests.swift */,
 				A5BA668E827BD6B77C72E9D6 /* CoreTextMetalRendererCursorTests.swift */,
 				053D515EC453DEBFF51FB6CB /* DecoderFuzzTests.swift */,
 				57B35E8311966948B1BA7AEF /* DecoderRobustnessTests.swift */,
@@ -1526,6 +1529,7 @@
 				28F3D7BFADCE4A2509D66C2B /* CommandDispatcherTests.swift in Sources */,
 				FC3004C22BF5D8CFC50CC5C4 /* CompletionOverlay.swift in Sources */,
 				2C35ED6C8CAC3AE11DD4B3A4 /* CompletionState.swift in Sources */,
+				4A2ED658D250B02BE89A6A56 /* CompletionStateTests.swift in Sources */,
 				9BA59A1D924999EEC65EEBCC /* ContentView.swift in Sources */,
 				527C7DB557EFD09B3161BC20 /* CoreTextMetalRenderer.swift in Sources */,
 				BF89605C029E1F2F4EE328EA /* CoreTextMetalRendererCursorTests.swift in Sources */,
