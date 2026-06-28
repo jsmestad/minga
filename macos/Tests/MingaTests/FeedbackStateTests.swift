@@ -83,4 +83,46 @@ struct FeedbackStateTests {
     func successDwell() {
         #expect(FeedbackState.successDwell == .milliseconds(1_500))
     }
+
+    // MARK: - Async spinner behavior
+
+    @Test("spinner appears after delay threshold")
+    @MainActor func spinnerAppearsAfterDelay() async throws {
+        let state = FeedbackState()
+        state.update(message: "Formatting…")
+        #expect(!state.showingSpinner)
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(state.showingSpinner)
+    }
+
+    @Test("spinner holds after fast completion then clears")
+    @MainActor func spinnerHoldsAfterCompletion() async throws {
+        let state = FeedbackState()
+        state.update(message: "Formatting…")
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(state.showingSpinner)
+        state.update(message: "Formatted")
+        #expect(state.showingSpinner)
+        try await Task.sleep(for: .milliseconds(600))
+        #expect(!state.showingSpinner)
+    }
+
+    @Test("fast completion prevents spinner from appearing")
+    @MainActor func fastCompletionPreventsSpinner() async throws {
+        let state = FeedbackState()
+        state.update(message: "Formatting…")
+        try await Task.sleep(for: .milliseconds(50))
+        state.update(message: "Formatted")
+        #expect(!state.showingSpinner)
+    }
+
+    @Test("cancel during spinner hold clears immediately")
+    @MainActor func cancelDuringSpinnerHold() async throws {
+        let state = FeedbackState()
+        state.update(message: "Formatting…")
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(state.showingSpinner)
+        state.cancel()
+        #expect(!state.showingSpinner)
+    }
 }
