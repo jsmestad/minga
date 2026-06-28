@@ -94,11 +94,12 @@ func (m Model) renderAgentChatPanel(chat protocol.AgentChat) []string {
 }
 
 func (m Model) renderAgentChatBody(chat protocol.AgentChat) []string {
+	p := m.palette()
 	width := max(m.width, 1)
 	limit := m.bodyHeight()
 	contentWidth := max(width-2, 1)
 	lines := m.renderAgentChatPanelWithLimit(chat, contentWidth, limit)
-	blank := lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(strings.Repeat(" ", width))
+	blank := lipgloss.NewStyle().Background(p.AgentPanel()).Width(width).Render(strings.Repeat(" ", width))
 	for index, line := range lines {
 		lines[index] = m.insetAgentLine(line, width)
 	}
@@ -109,11 +110,12 @@ func (m Model) renderAgentChatBody(chat protocol.AgentChat) []string {
 }
 
 func (m Model) insetAgentLine(line string, width int) string {
+	p := m.palette()
 	if width <= 1 {
 		return line
 	}
-	inset := lipgloss.NewStyle().Background(m.editorBackground()).Render(" ")
-	return lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(inset+line, width))
+	inset := lipgloss.NewStyle().Background(p.AgentPanel()).Render(" ")
+	return lipgloss.NewStyle().Background(p.AgentPanel()).Width(width).Render(fitStyled(inset+line, width))
 }
 
 func (m Model) renderAgentChatPanelWithLimit(chat protocol.AgentChat, width int, limit int) []string {
@@ -190,14 +192,15 @@ func (m Model) renderAgentMainColumn(chat protocol.AgentChat, width int, budget 
 }
 
 func (m Model) renderAgentBlankLine(width int) string {
-	return lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(strings.Repeat(" ", max(width, 1)))
+	p := m.palette()
+	return lipgloss.NewStyle().Background(p.AgentPanel()).Width(width).Render(strings.Repeat(" ", max(width, 1)))
 }
 
 func (m Model) renderAgentTranscriptHeader(width int) string {
 	p := m.palette()
-	label := lipgloss.NewStyle().Bold(true).Foreground(p.Muted()).Background(m.editorBackground()).Render(" Transcript ")
-	rule := lipgloss.NewStyle().Foreground(p.Muted()).Background(m.editorBackground()).Render(strings.Repeat("─", max(width-lipgloss.Width(label), 0)))
-	return lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(label+rule, width))
+	label := lipgloss.NewStyle().Bold(true).Foreground(p.Muted()).Background(p.AgentPanel()).Render(" Transcript ")
+	rule := lipgloss.NewStyle().Foreground(p.Muted()).Background(p.AgentPanel()).Render(strings.Repeat("─", max(width-lipgloss.Width(label), 0)))
+	return lipgloss.NewStyle().Background(p.AgentPanel()).Width(width).Render(fitStyled(label+rule, width))
 }
 
 func (m Model) renderAgentTranscriptStatus(chat protocol.AgentChat, width int) string {
@@ -211,19 +214,19 @@ func (m Model) renderAgentTranscriptStatus(chat protocol.AgentChat, width int) s
 	if chat.ThinkingLevel != "" {
 		status += " · thinking " + chat.ThinkingLevel
 	}
-	return lipgloss.NewStyle().Foreground(p.Muted()).Background(m.editorBackground()).Width(width).Render(fit(status, width))
+	return lipgloss.NewStyle().Foreground(p.Muted()).Background(p.AgentPanel()).Width(width).Render(fit(status, width))
 }
 
 func (m Model) renderAgentLandingState(width int) []string {
 	p := m.palette()
-	title := lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(m.editorBackground()).Render("Minga is ready")
-	subtitle := lipgloss.NewStyle().Foreground(p.Muted()).Background(m.editorBackground()).Render("Ask in plain language, or start with a slash command.")
-	section := lipgloss.NewStyle().Bold(true).Foreground(p.Muted()).Background(m.editorBackground()).Render("Suggested next moves")
+	title := lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(p.AgentPanel()).Render("Minga is ready")
+	subtitle := lipgloss.NewStyle().Foreground(p.Muted()).Background(p.AgentPanel()).Render("Ask in plain language, or start with a slash command.")
+	section := lipgloss.NewStyle().Bold(true).Foreground(p.Muted()).Background(p.AgentPanel()).Render("Suggested next moves")
 	return []string{
 		m.renderAgentBlankLine(width),
-		lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled("  "+title+"  "+subtitle, width)),
+		lipgloss.NewStyle().Background(p.AgentPanel()).Width(width).Render(fitStyled("  "+title+"  "+subtitle, width)),
 		m.renderAgentBlankLine(width),
-		lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled("  "+section, width)),
+		lipgloss.NewStyle().Background(p.AgentPanel()).Width(width).Render(fitStyled("  "+section, width)),
 		m.renderAgentSuggestionRow(width, "/explain", "Explain this file", "/tests", "Find failing tests"),
 		m.renderAgentSuggestionRow(width, "/review", "Review changes", "/edit", "Edit current buffer"),
 		m.renderAgentSuggestionRow(width, "/run", "Run a command", "/plan", "Draft a plan"),
@@ -231,29 +234,32 @@ func (m Model) renderAgentLandingState(width int) []string {
 }
 
 func (m Model) renderAgentSuggestionRow(width int, leftCommand string, leftLabel string, rightCommand string, rightLabel string) string {
+	p := m.palette()
 	columnWidth := max((width-6)/2, 12)
 	left := m.renderAgentSuggestionAction(leftCommand, leftLabel, columnWidth)
 	right := m.renderAgentSuggestionAction(rightCommand, rightLabel, columnWidth)
-	return lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled("  "+left+"  "+right, width))
+	return lipgloss.NewStyle().Background(p.AgentPanel()).Width(width).Render(fitStyled("  "+left+"  "+right, width))
 }
 
 func (m Model) renderAgentSuggestionAction(command string, label string, width int) string {
 	p := m.palette()
-	cmd := lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(m.editorBackground()).Render(command)
-	text := lipgloss.NewStyle().Foreground(p.Text()).Background(m.editorBackground()).Render(" " + firstCompactLine(label, max(width-lipgloss.Width(command)-1, 4)))
-	return lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(cmd+text, width))
+	cmd := lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(p.AgentPanel()).Render(command)
+	text := lipgloss.NewStyle().Foreground(p.AgentText()).Background(p.AgentPanel()).Render(" " + firstCompactLine(label, max(width-lipgloss.Width(command)-1, 4)))
+	return lipgloss.NewStyle().Background(p.AgentPanel()).Width(width).Render(fitStyled(cmd+text, width))
 }
 
 func (m Model) renderAgentHeader(chat protocol.AgentChat, width int) string {
 	p := m.palette()
-	base := lipgloss.NewStyle().Foreground(p.Text()).Background(m.editorBackground()).Width(width)
+	headerBG := p.AgentHeader()
+	headerFG := p.AgentHeaderText()
+	base := lipgloss.NewStyle().Foreground(headerFG).Background(headerBG).Width(width)
 	provider, modelName := splitAgentModelName(chat.ModelName)
 	modelName = nonEmpty(modelName, "no model")
 
-	icon := lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(m.editorBackground()).Render(agentHeaderIcon())
-	label := lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(m.editorBackground()).Render(" Agent")
-	model := lipgloss.NewStyle().Foreground(p.Text()).Background(m.editorBackground()).Render(modelName)
-	muted := lipgloss.NewStyle().Foreground(p.Muted()).Background(m.editorBackground())
+	icon := lipgloss.NewStyle().Bold(true).Foreground(headerFG).Background(headerBG).Render(agentHeaderIcon())
+	label := lipgloss.NewStyle().Bold(true).Foreground(headerFG).Background(headerBG).Render(" Agent")
+	model := lipgloss.NewStyle().Foreground(headerFG).Background(headerBG).Render(modelName)
+	muted := lipgloss.NewStyle().Foreground(p.Muted()).Background(headerBG)
 
 	title := icon + label
 	identity := model
@@ -282,9 +288,9 @@ func agentHeaderIcon() string {
 
 func (m Model) joinAgentColumns(left []string, right []string, leftWidth int, rightWidth int, height int) []string {
 	p := m.palette()
-	separator := lipgloss.NewStyle().Foreground(p.PopupBorder()).Background(m.editorBackground()).Render(" │ ")
+	separator := lipgloss.NewStyle().Foreground(p.PopupBorder()).Background(p.AgentPanel()).Render(" │ ")
 	blankLeft := lipgloss.NewStyle().Background(p.EditorSurface()).Width(leftWidth).Render(strings.Repeat(" ", leftWidth))
-	blankRight := lipgloss.NewStyle().Background(m.editorBackground()).Width(rightWidth).Render(strings.Repeat(" ", rightWidth))
+	blankRight := lipgloss.NewStyle().Background(p.AgentPanel()).Width(rightWidth).Render(strings.Repeat(" ", rightWidth))
 	out := make([]string, 0, height)
 	for row := 0; row < height; row++ {
 		leftLine := lineAt(left, row)
@@ -342,21 +348,21 @@ func (m Model) renderAgentDetailsRail(chat protocol.AgentChat, width int, budget
 
 func (m Model) renderAgentDetailFrame(kind string, title string, width int) string {
 	p := m.palette()
-	border := lipgloss.NewStyle().Foreground(p.PopupBorder()).Background(m.editorBackground())
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(m.editorBackground())
+	border := lipgloss.NewStyle().Foreground(p.PopupBorder()).Background(p.AgentPanel())
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(p.AgentPanel())
 	inner := max(width-2, 0)
 	if kind == "bottom" {
 		return border.Render("╰" + strings.Repeat("─", inner) + "╯")
 	}
 	titleText := " " + title + " "
 	line := "╭" + titleStyle.Render(titleText) + border.Render(strings.Repeat("─", max(inner-lipgloss.Width(titleText), 0))+"╮")
-	return lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(line, width))
+	return lipgloss.NewStyle().Background(p.AgentPanel()).Width(width).Render(fitStyled(line, width))
 }
 
 func (m Model) renderAgentDetailsSection(label string, width int) string {
 	p := m.palette()
-	line := lipgloss.NewStyle().Foreground(p.PopupBorder()).Background(m.editorBackground()).Render("─")
-	text := lipgloss.NewStyle().Bold(true).Foreground(p.Muted()).Background(m.editorBackground()).Render(" " + label + " ")
+	line := lipgloss.NewStyle().Foreground(p.PopupBorder()).Background(p.AgentPanel()).Render("─")
+	text := lipgloss.NewStyle().Bold(true).Foreground(p.Muted()).Background(p.AgentPanel()).Render(" " + label + " ")
 	remaining := max(width-lipgloss.Width(label)-4, 0)
 	return m.renderAgentDetailContentLine(text+strings.Repeat(line, remaining), width)
 }
@@ -364,8 +370,8 @@ func (m Model) renderAgentDetailsSection(label string, width int) string {
 func (m Model) renderAgentDetailRow(label string, value string, width int) string {
 	p := m.palette()
 	labelWidth := min(max(width/3, 8), 10)
-	labelStyle := lipgloss.NewStyle().Foreground(p.Muted()).Background(m.editorBackground()).Width(labelWidth)
-	valueStyle := lipgloss.NewStyle().Foreground(p.Text()).Background(m.editorBackground())
+	labelStyle := lipgloss.NewStyle().Foreground(p.Muted()).Background(p.AgentPanel()).Width(labelWidth)
+	valueStyle := lipgloss.NewStyle().Foreground(p.AgentText()).Background(p.AgentPanel())
 	prefix := labelStyle.Render(label)
 	body := valueStyle.Render(firstCompactLine(value, max(width-labelWidth-4, 8)))
 	return m.renderAgentDetailContentLine(prefix+" "+body, width)
@@ -373,17 +379,17 @@ func (m Model) renderAgentDetailRow(label string, value string, width int) strin
 
 func (m Model) renderAgentDetailHint(key string, action string, width int) string {
 	p := m.palette()
-	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(m.editorBackground())
-	actionStyle := lipgloss.NewStyle().Foreground(p.Muted()).Background(m.editorBackground())
+	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(p.AgentPanel())
+	actionStyle := lipgloss.NewStyle().Foreground(p.Muted()).Background(p.AgentPanel())
 	line := keyStyle.Render(key) + actionStyle.Render("  "+action)
 	return m.renderAgentDetailContentLine(line, width)
 }
 
 func (m Model) renderAgentDetailContentLine(content string, width int) string {
 	p := m.palette()
-	border := lipgloss.NewStyle().Foreground(p.PopupBorder()).Background(m.editorBackground())
+	border := lipgloss.NewStyle().Foreground(p.PopupBorder()).Background(p.AgentPanel())
 	bodyWidth := max(width-2, 1)
-	body := lipgloss.NewStyle().Background(m.editorBackground()).Width(bodyWidth).Render(fitStyled(" "+content, bodyWidth))
+	body := lipgloss.NewStyle().Background(p.AgentPanel()).Width(bodyWidth).Render(fitStyled(" "+content, bodyWidth))
 	return border.Render("│") + body + border.Render("│")
 }
 
@@ -546,13 +552,13 @@ func (m Model) renderAgentSystemMessage(msg protocol.AgentChatMessage, width int
 		label = "Needs attention"
 		marker = "!"
 		markerColor = p.Diagnostic(0)
-		textColor = p.Text()
+		textColor = p.AgentText()
 	}
-	markerText := lipgloss.NewStyle().Bold(true).Foreground(markerColor).Background(m.editorBackground()).Render(marker)
-	labelText := lipgloss.NewStyle().Bold(true).Foreground(markerColor).Background(m.editorBackground()).Render(" " + label)
-	body := lipgloss.NewStyle().Foreground(textColor).Background(m.editorBackground()).Render("  " + firstCompactLine(msg.Text, max(width-lipgloss.Width(label)-8, 8)))
+	markerText := lipgloss.NewStyle().Bold(true).Foreground(markerColor).Background(p.AgentPanel()).Render(marker)
+	labelText := lipgloss.NewStyle().Bold(true).Foreground(markerColor).Background(p.AgentPanel()).Render(" " + label)
+	body := lipgloss.NewStyle().Foreground(textColor).Background(p.AgentPanel()).Render("  " + firstCompactLine(msg.Text, max(width-lipgloss.Width(label)-8, 8)))
 	line := "  " + markerText + labelText + body
-	return []string{lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(line, width))}
+	return []string{lipgloss.NewStyle().Background(p.AgentPanel()).Width(width).Render(fitStyled(line, width))}
 }
 
 func (m Model) renderAgentUserMessage(msg protocol.AgentChatMessage, width int) []string {
@@ -561,20 +567,24 @@ func (m Model) renderAgentUserMessage(msg protocol.AgentChatMessage, width int) 
 	if len(lines) == 0 {
 		lines = []string{""}
 	}
-	header := lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(m.editorBackground()).Render("  ❯ You")
-	out := []string{lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(header, width))}
-	bodyStyle := lipgloss.NewStyle().Foreground(p.Text()).Background(m.editorBackground())
+	marker := lipgloss.NewStyle().Bold(true).Foreground(p.AgentUserBorder()).Background(p.AgentPanel()).Render("  ❯")
+	label := lipgloss.NewStyle().Bold(true).Foreground(p.AgentUserLabel()).Background(p.AgentPanel()).Render(" You")
+	header := marker + label
+	out := []string{lipgloss.NewStyle().Background(p.AgentPanel()).Width(width).Render(fitStyled(header, width))}
+	bodyStyle := lipgloss.NewStyle().Foreground(p.AgentText()).Background(p.AgentPanel())
 	for _, bodyLine := range lines {
 		line := bodyStyle.Render("    " + firstCompactLine(bodyLine, max(width-6, 8)))
-		out = append(out, lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(line, width)))
+		out = append(out, lipgloss.NewStyle().Background(p.AgentPanel()).Width(width).Render(fitStyled(line, width)))
 	}
 	return out
 }
 
 func (m Model) renderAgentAssistantMessage(msg protocol.AgentChatMessage, width int) []string {
 	p := m.palette()
-	header := lipgloss.NewStyle().Bold(true).Foreground(p.Text()).Background(m.editorBackground()).Render("  ◇ Minga")
-	out := []string{lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(header, width))}
+	headerMarker := lipgloss.NewStyle().Bold(true).Foreground(p.AgentAssistantBorder()).Background(p.AgentPanel()).Render("  ◇")
+	headerLabel := lipgloss.NewStyle().Bold(true).Foreground(p.AgentAssistantLabel()).Background(p.AgentPanel()).Render(" Minga")
+	header := headerMarker + headerLabel
+	out := []string{lipgloss.NewStyle().Background(p.AgentPanel()).Width(width).Render(fitStyled(header, width))}
 
 	if len(msg.MarkdownBlocks) > 0 {
 		out = append(out, m.renderAgentAssistantMarkdownBlocks(msg.MarkdownBlocks, width)...)
@@ -590,11 +600,11 @@ func (m Model) renderAgentAssistantMessage(msg protocol.AgentChatMessage, width 
 	if len(lines) == 0 {
 		lines = []string{""}
 	}
-	rail := lipgloss.NewStyle().Foreground(p.Muted()).Background(m.editorBackground()).Render("  │ ")
-	bodyStyle := lipgloss.NewStyle().Foreground(p.Text()).Background(m.editorBackground())
+	rail := lipgloss.NewStyle().Foreground(p.AgentAssistantBorder()).Background(p.AgentPanel()).Render("  │ ")
+	bodyStyle := lipgloss.NewStyle().Foreground(p.AgentText()).Background(p.AgentPanel())
 	for _, bodyLine := range lines {
 		line := rail + bodyStyle.Render(firstCompactLine(bodyLine, max(width-5, 8)))
-		out = append(out, lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(line, width)))
+		out = append(out, lipgloss.NewStyle().Background(p.AgentPanel()).Width(width).Render(fitStyled(line, width)))
 	}
 	return out
 }
@@ -611,16 +621,16 @@ func (m Model) renderAgentAssistantMarkdownBlocks(blocks []protocol.AgentMarkdow
 }
 
 func (m Model) renderAgentMarkdownBlock(block protocol.AgentMarkdownBlock, width int) []string {
+	p := m.palette()
 	switch block.Kind {
 	case 0x01, 0x02, 0x03, 0x04:
 		return m.renderAgentAssistantStyledLines(block.Lines, width)
 	case 0x05:
-		p := m.palette()
-		surface := m.editorBackground()
+		surface := p.AgentPanel()
 		rule := lipgloss.NewStyle().Foreground(p.Muted()).Background(surface).Render("  ─" + strings.Repeat("─", max(width-4, 1)))
 		return []string{lipgloss.NewStyle().Background(surface).Width(width).Render(fitStyled(rule, width))}
 	case 0x06:
-		return []string{lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render("")}
+		return []string{lipgloss.NewStyle().Background(p.AgentPanel()).Width(width).Render("")}
 	case 0x07:
 		return m.renderAgentCodeCard(block, width)
 	default:
@@ -630,8 +640,9 @@ func (m Model) renderAgentMarkdownBlock(block protocol.AgentMarkdownBlock, width
 
 func (m Model) renderAgentCodeCard(block protocol.AgentMarkdownBlock, width int) []string {
 	p := m.palette()
-	surface := m.editorBackground()
-	rail := lipgloss.NewStyle().Foreground(p.Muted()).Background(surface).Render("  │ ")
+	surface := p.AgentCodeSurface()
+	codeBorder := p.AgentCodeBorder()
+	rail := lipgloss.NewStyle().Foreground(codeBorder).Background(surface).Render("  │ ")
 	bodyWidth := max(width-lipgloss.Width(rail)-2, 8)
 	label := nonEmpty(block.Label, "Code")
 	if block.TargetPath != "" {
@@ -640,13 +651,13 @@ func (m Model) renderAgentCodeCard(block protocol.AgentMarkdownBlock, width int)
 	if !block.Complete() {
 		label += " · streaming"
 	}
-	header := rail + lipgloss.NewStyle().Foreground(p.Muted()).Background(surface).Bold(true).Render("╭─ "+label)
+	header := rail + lipgloss.NewStyle().Foreground(codeBorder).Background(surface).Bold(true).Render("╭─ "+label)
 	out := []string{lipgloss.NewStyle().Background(surface).Width(width).Render(fitStyled(header, width))}
 	for _, line := range block.Lines {
 		body := m.renderAgentCodeCardLine(line, bodyWidth)
 		out = append(out, lipgloss.NewStyle().Background(surface).Width(width).Render(fitStyled(rail+"│ "+body, width)))
 	}
-	footer := rail + lipgloss.NewStyle().Foreground(p.Muted()).Background(surface).Render("╰"+strings.Repeat("─", max(min(bodyWidth, width-6), 1)))
+	footer := rail + lipgloss.NewStyle().Foreground(codeBorder).Background(surface).Render("╰"+strings.Repeat("─", max(min(bodyWidth, width-6), 1)))
 	out = append(out, lipgloss.NewStyle().Background(surface).Width(width).Render(fitStyled(footer, width)))
 	return out
 }
@@ -664,8 +675,8 @@ func (m Model) renderAgentAssistantStyledLines(lines []protocol.AgentStyledLine,
 		return nil
 	}
 	p := m.palette()
-	surface := m.editorBackground()
-	rail := lipgloss.NewStyle().Foreground(p.Muted()).Background(surface).Render("  │ ")
+	surface := p.AgentPanel()
+	rail := lipgloss.NewStyle().Foreground(p.AgentAssistantBorder()).Background(surface).Render("  │ ")
 	bodyWidth := max(width-lipgloss.Width(rail), 8)
 	visible := min(len(lines), agentAssistantStyledLines)
 	out := make([]string, 0, visible+1)
@@ -681,6 +692,7 @@ func (m Model) renderAgentAssistantStyledLines(lines []protocol.AgentStyledLine,
 }
 
 func (m Model) renderAgentStyledLine(line protocol.AgentStyledLine, width int) string {
+	p := m.palette()
 	if len(line) == 0 {
 		return strings.Repeat(" ", width)
 	}
@@ -698,7 +710,7 @@ func (m Model) renderAgentStyledLine(line protocol.AgentStyledLine, width int) s
 			truncated = true
 			text = fit(text, remaining)
 		}
-		part := agentStyledRunStyle(run, m.editorBackground()).Render(text)
+		part := agentStyledRunStyle(run, p.AgentPanel()).Render(text)
 		rendered.WriteString(part)
 		remaining -= lipgloss.Width(part)
 		if remaining <= 0 && index < len(line)-1 {
@@ -707,7 +719,7 @@ func (m Model) renderAgentStyledLine(line protocol.AgentStyledLine, width int) s
 		}
 	}
 	if isCode && truncated {
-		marker := lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(m.editorBackground()).Render("›")
+		marker := lipgloss.NewStyle().Foreground(p.Muted()).Background(p.AgentPanel()).Render("›")
 		if width <= 1 {
 			return marker
 		}
@@ -764,15 +776,15 @@ func (m Model) renderAgentThinkingMessage(msg protocol.AgentChatMessage, width i
 	if !msg.Collapsed {
 		marker = m.agentSpinner()
 	}
-	markerStyle := lipgloss.NewStyle().Foreground(p.Muted()).Background(m.editorBackground()).Bold(true)
-	labelStyle := lipgloss.NewStyle().Foreground(p.Muted()).Background(m.editorBackground()).Italic(true)
-	bodyStyle := lipgloss.NewStyle().Foreground(p.Muted()).Background(m.editorBackground())
+	markerStyle := lipgloss.NewStyle().Foreground(p.Muted()).Background(p.AgentPanel()).Bold(true)
+	labelStyle := lipgloss.NewStyle().Foreground(p.Muted()).Background(p.AgentPanel()).Italic(true)
+	bodyStyle := lipgloss.NewStyle().Foreground(p.Muted()).Background(p.AgentPanel())
 	header := "  " + markerStyle.Render(marker) + labelStyle.Render(" Thinking "+state)
-	lines := []string{lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(header, width))}
+	lines := []string{lipgloss.NewStyle().Background(p.AgentPanel()).Width(width).Render(fitStyled(header, width))}
 	bodyLines := agentThinkingBodyLines(msg.Collapsed)
 	for _, bodyLine := range compactTextLines(text, max(width-8, 8), bodyLines) {
 		line := bodyStyle.Render("    " + firstCompactLine(bodyLine, max(width-6, 8)))
-		lines = append(lines, lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(line, width)))
+		lines = append(lines, lipgloss.NewStyle().Background(p.AgentPanel()).Width(width).Render(fitStyled(line, width)))
 	}
 	return lines
 }
@@ -790,19 +802,22 @@ func (m Model) renderAgentToolMessage(msg protocol.AgentChatMessage, width int) 
 	name := nonEmpty(msg.Name, "tool")
 	presentation := agentToolPresentationFor(name)
 	summary := nonEmpty(msg.Summary, msg.Text)
-	surface := m.editorBackground()
+	surface := p.AgentPanel()
+	toolBorder := p.AgentToolBorder()
+	toolHeader := p.AgentToolHeader()
 	status := lipgloss.NewStyle().Bold(true).Foreground(statusColor).Background(surface).Render(statusIcon)
-	title := lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(surface).Render(presentation.Icon + " " + presentation.Title)
+	title := lipgloss.NewStyle().Bold(true).Foreground(toolHeader).Background(surface).Render(presentation.Icon + " " + presentation.Title)
 	rawName := lipgloss.NewStyle().Foreground(p.Muted()).Background(surface).Render(name)
 	meta := agentToolMeta(msg)
 	metaText := lipgloss.NewStyle().Foreground(p.Muted()).Background(surface).Render(meta)
-	header := "  ├─ " + status + " " + title + lipgloss.NewStyle().Foreground(p.Muted()).Background(surface).Render(" · ") + rawName
+	railStyle := lipgloss.NewStyle().Foreground(toolBorder).Background(surface)
+	header := railStyle.Render("  ├─ ") + status + " " + title + lipgloss.NewStyle().Foreground(p.Muted()).Background(surface).Render(" · ") + rawName
 	if meta != "" {
 		header += lipgloss.NewStyle().Foreground(p.Muted()).Background(surface).Render(" · ") + metaText
 	}
-	label := lipgloss.NewStyle().Foreground(p.Accent()).Background(surface).Render(presentation.SummaryLabel + ":")
+	label := lipgloss.NewStyle().Foreground(toolHeader).Background(surface).Render(presentation.SummaryLabel + ":")
 	summaryText := lipgloss.NewStyle().Foreground(p.Muted()).Background(surface).Render(" " + firstCompactLine(summary, max(width-lipgloss.Width(presentation.SummaryLabel)-9, 8)))
-	body := "  │  " + label + summaryText
+	body := railStyle.Render("  │  ") + label + summaryText
 	lines := []string{
 		lipgloss.NewStyle().Background(surface).Width(width).Render(fitStyled(header, width)),
 		lipgloss.NewStyle().Background(surface).Width(width).Render(fitStyled(body, width)),
@@ -885,9 +900,9 @@ func hasAgentToolResult(msg protocol.AgentChatMessage) bool {
 
 func (m Model) renderAgentToolCollapsedHint(width int) string {
 	p := m.palette()
-	bodyStyle := lipgloss.NewStyle().Foreground(p.Muted()).Background(m.editorBackground()).Italic(true)
-	line := "  │  " + bodyStyle.Render("result collapsed, Ctrl+Alt+X expands latest tool")
-	return lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(line, width))
+	bodyStyle := lipgloss.NewStyle().Foreground(p.Muted()).Background(p.AgentPanel()).Italic(true)
+	line := lipgloss.NewStyle().Foreground(p.AgentToolBorder()).Background(p.AgentPanel()).Render("  │  ") + bodyStyle.Render("result collapsed, Ctrl+Alt+X expands latest tool")
+	return lipgloss.NewStyle().Background(p.AgentPanel()).Width(width).Render(fitStyled(line, width))
 }
 
 func (m Model) renderAgentToolPreviewLines(kind byte, lines []string, width int) []string {
@@ -952,10 +967,11 @@ func (m Model) renderAgentToolStyledLine(label string, runs protocol.AgentStyled
 	if showLabel {
 		labelText = label
 	}
-	labelStyle := lipgloss.NewStyle().Bold(true).Foreground(p.Warning()).Background(m.editorBackground())
-	body := renderAgentStyledRuns(runs, p.Muted(), m.editorBackground())
-	line := "  │  " + labelStyle.Render(labelText+":") + " " + body
-	return lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(line, width))
+	labelStyle := lipgloss.NewStyle().Bold(true).Foreground(p.Warning()).Background(p.AgentPanel())
+	body := renderAgentStyledRuns(runs, p.Muted(), p.AgentPanel())
+	rail := lipgloss.NewStyle().Foreground(p.AgentToolBorder()).Background(p.AgentPanel()).Render("  │  ")
+	line := rail + labelStyle.Render(labelText+":") + " " + body
+	return lipgloss.NewStyle().Background(p.AgentPanel()).Width(width).Render(fitStyled(line, width))
 }
 
 func renderAgentStyledRuns(runs protocol.AgentStyledLine, fallback color.Color, background color.Color) string {
@@ -982,11 +998,12 @@ func (m Model) renderAgentToolLine(label string, text string, showLabel bool, wi
 	if showLabel {
 		labelText = label
 	}
-	labelStyle := lipgloss.NewStyle().Bold(true).Foreground(p.Warning()).Background(m.editorBackground())
-	bodyStyle := lipgloss.NewStyle().Foreground(textColor).Background(m.editorBackground())
+	labelStyle := lipgloss.NewStyle().Bold(true).Foreground(p.Warning()).Background(p.AgentPanel())
+	bodyStyle := lipgloss.NewStyle().Foreground(textColor).Background(p.AgentPanel())
 	body := fit(strings.TrimRight(text, "\r"), max(width-lipgloss.Width(label)-9, 8))
-	line := "  │  " + labelStyle.Render(labelText+":") + bodyStyle.Render(" "+body)
-	return lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(line, width))
+	rail := lipgloss.NewStyle().Foreground(p.AgentToolBorder()).Background(p.AgentPanel()).Render("  │  ")
+	line := rail + labelStyle.Render(labelText+":") + bodyStyle.Render(" "+body)
+	return lipgloss.NewStyle().Background(p.AgentPanel()).Width(width).Render(fitStyled(line, width))
 }
 
 func agentToolLineColor(line string, p palette) color.Color {
@@ -1001,11 +1018,11 @@ func agentToolLineColor(line string, p palette) color.Color {
 
 func (m Model) renderAgentApprovalMessage(msg protocol.AgentChatMessage, width int) []string {
 	p := m.palette()
-	surface := m.editorBackground()
+	surface := p.AgentPanel()
 	header := lipgloss.NewStyle().Bold(true).Foreground(p.Warning()).Background(surface).Render("  ◆ Approval")
-	name := lipgloss.NewStyle().Bold(true).Foreground(p.Text()).Background(surface).Render(" " + nonEmpty(msg.Name, "tool"))
+	name := lipgloss.NewStyle().Bold(true).Foreground(p.AgentText()).Background(surface).Render(" " + nonEmpty(msg.Name, "tool"))
 	kind := lipgloss.NewStyle().Foreground(p.Accent()).Background(surface).Render(" · " + approvalPreviewKindName(msg.PreviewKind))
-	summary := lipgloss.NewStyle().Foreground(p.Text()).Background(surface).Render("  " + firstCompactLine(msg.Summary, max(width-lipgloss.Width(header)-lipgloss.Width(name)-lipgloss.Width(kind)-3, 8)))
+	summary := lipgloss.NewStyle().Foreground(p.AgentText()).Background(surface).Render("  " + firstCompactLine(msg.Summary, max(width-lipgloss.Width(header)-lipgloss.Width(name)-lipgloss.Width(kind)-3, 8)))
 	lines := []string{lipgloss.NewStyle().Background(surface).Width(width).Render(fitStyled(header+name+kind+summary, width))}
 	for _, previewLine := range msg.PreviewLines[:min(len(msg.PreviewLines), 2)] {
 		preview := lipgloss.NewStyle().Foreground(p.Muted()).Background(surface).Render("  │  " + firstCompactLine(previewLine, max(width-5, 8)))
@@ -1034,7 +1051,7 @@ func (m Model) renderAgentUsageMessage(msg protocol.AgentChatMessage, width int)
 	if usage.CostMicros > 0 {
 		text += fmt.Sprintf(" · $%.2f", float64(usage.CostMicros)/1_000_000)
 	}
-	return lipgloss.NewStyle().Foreground(p.Muted()).Background(m.editorBackground()).Width(width).Render(fitStyled(text, width))
+	return lipgloss.NewStyle().Foreground(p.Muted()).Background(p.AgentPanel()).Width(width).Render(fitStyled(text, width))
 }
 
 func (m Model) renderAgentComposer(chat protocol.AgentChat, width int) []string {
@@ -1042,6 +1059,7 @@ func (m Model) renderAgentComposer(chat protocol.AgentChat, width int) []string 
 	if width < 4 {
 		return nil
 	}
+	inputBG := p.AgentInputSurface()
 	prompt := strings.TrimRight(chat.Prompt, "\n")
 	placeholder := prompt == ""
 	if placeholder {
@@ -1053,27 +1071,27 @@ func (m Model) renderAgentComposer(chat protocol.AgentChat, width int) []string 
 	if chat.Status == 1 || chat.Status == 2 {
 		markerColor = p.Warning()
 	}
-	borderColor := p.PopupBorder()
+	borderColor := p.AgentInputBorder()
 	if chat.Status == 1 || chat.Status == 2 {
 		borderColor = markerColor
 	}
-	border := lipgloss.NewStyle().Foreground(borderColor).Background(m.editorBackground())
-	title := lipgloss.NewStyle().Bold(true).Foreground(p.Muted()).Background(m.editorBackground()).Render(" Prompt ")
+	border := lipgloss.NewStyle().Foreground(borderColor).Background(inputBG)
+	title := lipgloss.NewStyle().Bold(true).Foreground(p.Muted()).Background(inputBG).Render(" Prompt ")
 	top := border.Render("╭") + title + border.Render(strings.Repeat("─", max(width-2-lipgloss.Width(title), 0))+"╮")
 	innerWidth := max(width-2, 1)
-	marker := lipgloss.NewStyle().Bold(true).Foreground(markerColor).Background(m.editorBackground()).Render("❯")
-	modeText := lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(m.editorBackground()).Render(mode)
-	promptStyle := lipgloss.NewStyle().Foreground(p.Text()).Background(m.editorBackground())
+	marker := lipgloss.NewStyle().Bold(true).Foreground(markerColor).Background(inputBG).Render("❯")
+	modeText := lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(inputBG).Render(mode)
+	promptStyle := lipgloss.NewStyle().Foreground(p.AgentText()).Background(inputBG)
 	if placeholder {
-		promptStyle = promptStyle.Foreground(p.Muted()).Italic(true)
+		promptStyle = promptStyle.Foreground(p.AgentInputPlaceholder()).Italic(true)
 	}
 	prefix := " " + marker + " " + modeText + "  "
 	promptText := promptStyle.Render(firstCompactLine(prompt, max(innerWidth-lipgloss.Width(prefix)-1, 8)))
-	input := border.Render("│") + lipgloss.NewStyle().Background(m.editorBackground()).Width(innerWidth).Render(fitStyled(prefix+promptText, innerWidth)) + border.Render("│")
-	hints := lipgloss.NewStyle().Foreground(p.Muted()).Background(m.editorBackground()).Render(" Enter send · Esc normal · / commands · " + cursor)
-	help := border.Render("│") + lipgloss.NewStyle().Background(m.editorBackground()).Width(innerWidth).Render(fitStyled(" "+hints, innerWidth)) + border.Render("│")
+	input := border.Render("│") + lipgloss.NewStyle().Background(inputBG).Width(innerWidth).Render(fitStyled(prefix+promptText, innerWidth)) + border.Render("│")
+	hints := lipgloss.NewStyle().Foreground(p.Muted()).Background(inputBG).Render(" Enter send · Esc normal · / commands · " + cursor)
+	help := border.Render("│") + lipgloss.NewStyle().Background(inputBG).Width(innerWidth).Render(fitStyled(" "+hints, innerWidth)) + border.Render("│")
 	bottom := border.Render("╰" + strings.Repeat("─", max(width-2, 0)) + "╯")
-	style := lipgloss.NewStyle().Background(m.editorBackground()).Width(width)
+	style := lipgloss.NewStyle().Background(inputBG).Width(width)
 	return []string{
 		style.Render(fitStyled(top, width)),
 		style.Render(fitStyled(input, width)),
@@ -1103,7 +1121,7 @@ func agentPromptModeName(mode byte) string {
 
 func (m Model) renderAgentEmptyState(width int) []string {
 	p := m.palette()
-	style := lipgloss.NewStyle().Foreground(p.Muted()).Background(p.EditorSurface()).Width(width)
+	style := lipgloss.NewStyle().Foreground(p.Muted()).Background(p.AgentPanel()).Width(width)
 	return []string{
 		style.Render(fit("  Start an agent turn from this prompt, or use /help for slash commands.", width)),
 		style.Render(fit("  Tool calls, approvals, thinking, and usage will appear here as structured cards.", width)),
