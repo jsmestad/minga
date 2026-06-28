@@ -19,7 +19,7 @@ func (m Model) headerLines() []string {
 	}
 	if tabBar, ok := m.tabBar(); ok && len(tabBar.Tabs) > 0 {
 		lines = append(lines, m.renderTabs(tabBar))
-		lines = append(lines, lipgloss.NewStyle().Foreground(m.palette().TreeSeparator()).Background(m.palette().EditorSurface()).Width(m.width).Render(strings.Repeat("─", m.width)))
+		lines = append(lines, lipgloss.NewStyle().Foreground(m.palette().TabSeparator()).Background(m.palette().EditorSurface()).Width(m.width).Render(strings.Repeat("─", m.width)))
 	}
 	if crumb, ok := m.breadcrumb(); ok && len(crumb.Segments) > 0 && m.width >= 100 {
 		lines = append(lines, m.renderBreadcrumb(crumb))
