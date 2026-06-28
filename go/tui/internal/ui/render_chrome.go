@@ -449,7 +449,13 @@ func (m Model) renderPickerList(title string, picker protocol.Picker, height int
 	panelStyle := m.popupLineStyle(width)
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupChrome()).Width(width).ColorWhitespace(true)
 	lines := []string{renderPadded(titleStyle, " "+title, width)}
-	rowBudget := max(height-1, 0)
+	headerRows := 1
+	if height > 2 {
+		sepStyle := lipgloss.NewStyle().Foreground(theme.PopupBorder()).Background(theme.PopupSurface()).Width(width).ColorWhitespace(true)
+		lines = append(lines, renderPadded(sepStyle, strings.Repeat("─", max(width, 1)), width))
+		headerRows = 2
+	}
+	rowBudget := max(height-headerRows, 0)
 	selected := min(max(int(picker.Selected), 0), max(len(picker.Items)-1, 0))
 	start := 0
 	if selected >= rowBudget && rowBudget > 0 {
