@@ -302,6 +302,24 @@ defmodule MingaEditor.Agent.IngestTest do
       refute_received {:agent_stream_batch, _, _}
     end
 
+    test "a single delta exceeding the byte cap is forwarded as a one-element batch (no infinite loop)" do
+      ingest = start_ingest(10_000, max_batch_items: 100, max_batch_bytes: 3)
+      session = fake_session()
+
+      send(ingest, {:agent_event, session, {:text_delta, "lead"}})
+      assert_receive {:agent_stream_batch, ^session, [{:text_delta, "lead"}]}
+
+      # "hello" is 5 bytes, exceeding the 3-byte cap. The count > 0 guard in
+      # chunk_batch ensures the first element always enters the current chunk,
+      # preventing infinite recursion on an oversized single delta.
+      send(ingest, {:agent_event, session, {:text_delta, "hello"}})
+      sync(ingest)
+      send(ingest, {:ingest_tick, session})
+
+      assert next_forwarded() == {:agent_stream_batch, session, [{:text_delta, "hello"}]}
+      refute_received {:agent_stream_batch, _, _}
+    end
+
     test "control-event flush of an oversized batch still flushes ahead of the control event" do
       ingest = start_ingest(10_000, max_batch_items: 2, max_batch_bytes: 100_000)
       session = fake_session()
