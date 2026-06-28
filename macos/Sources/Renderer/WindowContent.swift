@@ -189,7 +189,14 @@ struct GUIScrollPresentation: Sendable, Equatable {
     let contentEpoch: UInt32
     let layoutGeneration: UInt32
 
-    func matches(windowId: UInt16, contentEpoch: UInt32) -> Bool {
+    func isSameAnchorKey(as other: GUIScrollPresentation) -> Bool {
+        contentEpoch == other.contentEpoch
+            && layoutGeneration == other.layoutGeneration
+            && anchorTop == other.anchorTop
+            && anchorLeft == other.anchorLeft
+    }
+
+    func belongsTo(windowId: UInt16, contentEpoch: UInt32) -> Bool {
         self.windowId == windowId && self.contentEpoch == contentEpoch
     }
 }
@@ -424,7 +431,7 @@ final class GUIWindowContent: Sendable {
             }
         }
 
-        let nextScrollPresentation = delta.scrollPresentation?.matches(windowId: windowId, contentEpoch: contentEpoch) == true ? delta.scrollPresentation : nil
+        let nextScrollPresentation = delta.scrollPresentation?.belongsTo(windowId: windowId, contentEpoch: contentEpoch) == true ? delta.scrollPresentation : nil
 
         return GUIWindowContent(
             windowId: windowId,
