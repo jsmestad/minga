@@ -60,6 +60,7 @@ type Model struct {
 	extensionRuntimes     map[string]protocol.ExtensionRuntimePayload
 	bottomPanelScrollback int
 	agent                 agentPanel
+	feedback              feedbackState
 	// latency records end-to-end keystroke-to-write samples (ticket #2215).
 	// It is a pointer so the recorder persists across value-copied Model
 	// updates. hudVisible toggles the on-screen p50/p99 overlay at runtime.
@@ -106,19 +107,9 @@ type Model struct {
 	// overlayLines() precedence chain; the rects equal what BEAM mouse
 	// hit-testing uses. Surfaces not yet promoted into the BEAM surface registry
 	// keep a reduced hand-ordered chain (transitional split, see overlayLines).
-	surfacePlacements  []generated.SurfacePlacement
-	presentationScroll map[uint16]presentationScroll
-	inputFilter        *InputFilter
-	scrollPrefetchSent map[uint16]uint32
-}
-
-type presentationScroll struct {
-	anchorTop        uint32
-	anchorLeft       uint16
-	contentEpoch     uint32
-	layoutGeneration uint32
-	rowOffset        int
-	colOffset        int
+	surfacePlacements []generated.SurfacePlacement
+	localPresentation localPresentation
+	inputFilter       *InputFilter
 }
 
 // frameStaging is the open frame transaction buffer (#2219). It lives only
@@ -137,7 +128,7 @@ type frameStaging struct {
 }
 
 func New(width, height uint16, out chan<- []byte, filter *InputFilter) Model {
-	vp := viewport.New(viewport.WithWidth(int(width)), viewport.WithHeight(max(int(height)-3, 1)))
+	vp := viewport.New(viewport.WithWidth(int(width)), viewport.WithHeight(1))
 	m := Model{
 		width:             int(width),
 		height:            int(height),
@@ -153,13 +144,13 @@ func New(width, height uint16, out chan<- []byte, filter *InputFilter) Model {
 		latency:           latency.New(),
 		hudVisible:        latencyHUDEnvEnabled(),
 		lineCache:         newLineCache(),
-		presentationScroll: map[uint16]presentationScroll{},
-		inputFilter:        filter,
-		scrollPrefetchSent: map[uint16]uint32{},
+		localPresentation: newLocalPresentation(),
+		inputFilter:       filter,
 	}
 	// Seed the layout so the first mouse event lands in the correct
 	// region before the first BEAM frame arrives.
 	m.layout = m.computeLayout()
+	m.viewport.SetHeight(m.layout.body.Height)
 	return m
 }
 
@@ -219,7 +210,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if packet, ok := keyPacket(msg, seq); ok {
 			m.send(packet)
 		}
-		m.previewFileTreeNavigation(msg)
+		m.previewCompletionNavigation(msg)
+		m.previewPickerNavigation(msg)
+		if !m.modalOverlayActive() {
+			m.previewFileTreeNavigation(msg)
+		}
 	case tea.PasteMsg:
 		m.send(pastePacket(msg))
 	case tea.MouseMsg:
@@ -254,6 +249,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.agent.animationRunning = false
 		}
+	case feedbackTickMsg:
+		m.feedback.tick()
+		if status, ok := m.statusBar(); ok {
+			m.feedback.updateStatus(status.Message)
+		}
+		pickerLoading := false
+		if picker, ok := m.chrome[generated.OPGuiPicker]; ok && picker.Picker.LoadStatus == 1 {
+			pickerLoading = true
+		}
+		if m.feedback.active() || pickerLoading {
+			cmd = feedbackTick()
+		} else {
+			m.feedback.ticking = false
+		}
 	case port.PacketMsg:
 		cmd = m.applyCommands(msg.Commands)
 		m.layout = m.computeLayout()
@@ -267,6 +276,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if chat, ok := m.agentChat(); ok && m.agent.animating(chat) && !m.agent.animationRunning {
 		m.agent.animationRunning = true
 		cmd = tea.Batch(cmd, agentAnimationTick())
+	}
+
+	if status, ok := m.statusBar(); ok {
+		m.feedback.updateStatus(status.Message)
+	}
+	needsTick := m.feedback.active()
+	if !needsTick {
+		if picker, ok := m.chrome[generated.OPGuiPicker]; ok && picker.Picker.LoadStatus == 1 {
+			needsTick = true
+		}
+	}
+	if needsTick && !m.feedback.ticking {
+		m.feedback.ticking = true
+		cmd = tea.Batch(cmd, feedbackTick())
 	}
 
 	m.viewport.SetWidth(max(m.width, 1))
@@ -562,8 +585,15 @@ func (m *Model) applyMutation(command protocol.Command) {
 			m.gutters[command.Chrome.WindowGutter.WindowID] = command.Chrome.WindowGutter
 		case generated.OPGuiIndentGuides:
 			m.indentGuides[command.Chrome.IndentGuides.WindowID] = command.Chrome.IndentGuides
+		case generated.OPGuiFileTree:
+			m.localPresentation.reconcileFileTree()
 		case generated.OPGuiFileTreeSelection:
 			m.applyFileTreeSelection(command.Chrome.FileTreeSelection)
+			m.localPresentation.reconcileFileTree()
+		case generated.OPGuiCompletion:
+			m.localPresentation.reconcileCompletion()
+		case generated.OPGuiPicker:
+			m.localPresentation.reconcilePicker()
 		case generated.OPGuiBottomPanel:
 			m.clampBottomPanelScrollback(command.Chrome.Bottom)
 		case generated.OPGuiSurfaceLayout:
@@ -697,18 +727,7 @@ func (m *Model) applyWindowDelta(delta protocol.WindowContent) {
 }
 
 func (m *Model) reconcilePresentationScroll(window protocol.WindowContent) {
-	if !window.ScrollSet || window.Scroll.ResetRequired {
-		delete(m.presentationScroll, window.ID)
-		delete(m.scrollPrefetchSent, window.ID)
-		return
-	}
-	scroll, ok := m.presentationScroll[window.ID]
-	if !ok {
-		return
-	}
-	if scroll.contentEpoch != window.Scroll.ContentEpoch || scroll.layoutGeneration != window.Scroll.LayoutGeneration || scroll.anchorTop != window.Scroll.AnchorTop || scroll.anchorLeft != window.Scroll.AnchorLeft {
-		delete(m.presentationScroll, window.ID)
-	}
+	m.localPresentation.reconcileScroll(window)
 }
 
 func (m *Model) refreshCursorFromWindows() {
@@ -748,8 +767,7 @@ func resolveWindowRows(previous []protocol.WindowRow, delta []protocol.WindowRow
 
 func (m *Model) removeWindow(id uint16) {
 	delete(m.windows, id)
-	delete(m.presentationScroll, id)
-	delete(m.scrollPrefetchSent, id)
+	m.localPresentation.removeWindow(id)
 	m.lineCache.dropWindow(id)
 	for index, windowID := range m.windowOrder {
 		if windowID == id {
@@ -808,9 +826,9 @@ func (m *Model) sendScrollBatch(msg tea.MouseMsg) bool {
 	if !window.ScrollSet || window.Scroll.ResetRequired {
 		return true
 	}
-	if sent, ok := m.scrollPrefetchSent[windowID]; ok {
+	if sent, ok := m.localPresentation.scrollPrefetchSent[windowID]; ok {
 		if window.Scroll.ContentEpoch > sent {
-			delete(m.scrollPrefetchSent, windowID)
+			delete(m.localPresentation.scrollPrefetchSent, windowID)
 		}
 	}
 	before, after := presentationPayloadOverscanBounds(window, presentationVisibleRows(window))
@@ -826,7 +844,7 @@ func (m *Model) sendScrollBatch(msg tea.MouseMsg) bool {
 		runway = before
 	}
 	threshold := float64(totalOverscan) * 0.4
-	if _, already := m.scrollPrefetchSent[windowID]; already {
+	if _, already := m.localPresentation.scrollPrefetchSent[windowID]; already {
 		return true
 	}
 	if float64(runway) < threshold {
@@ -837,7 +855,7 @@ func (m *Model) sendScrollBatch(msg tea.MouseMsg) bool {
 			dir = 1
 		}
 		m.send(protocol.EncodeScrollPrefetchHint(windowID, window.Scroll.VisibleStartLine, dir, window.Scroll.ContentEpoch))
-		m.scrollPrefetchSent[windowID] = window.Scroll.ContentEpoch
+		m.localPresentation.scrollPrefetchSent[windowID] = window.Scroll.ContentEpoch
 	}
 	return true
 }

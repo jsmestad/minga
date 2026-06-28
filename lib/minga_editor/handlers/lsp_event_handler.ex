@@ -57,6 +57,31 @@ defmodule MingaEditor.Handlers.LspEventHandler do
     {LspActions.inlay_hints(state), []}
   end
 
+  def handle(state, {:lsp_format_spinner, ref}) do
+    if Map.has_key?(state.workspace.lsp_pending, ref) do
+      {EditorState.set_status(state, "Formatting…"), [:render_now]}
+    else
+      {state, []}
+    end
+  end
+
+  def handle(state, {:lsp_format_cancellable, ref}) do
+    if Map.has_key?(state.workspace.lsp_pending, ref) do
+      {EditorState.set_status(state, "Formatting… [Esc to cancel]"), [:render_now]}
+    else
+      {state, []}
+    end
+  end
+
+  def handle(state, {:lsp_format_timeout, ref}) do
+    if Map.has_key?(state.workspace.lsp_pending, ref) do
+      state = delete_lsp_pending(state, ref)
+      {EditorState.set_status(state, "Format timed out [r to retry]"), [:render_now]}
+    else
+      {state, []}
+    end
+  end
+
   def handle(state, _msg), do: {state, []}
 
   @spec dispatch_tracked_response(EditorState.t(), reference(), term(), {:ok, term()} | :error) ::
@@ -104,6 +129,9 @@ defmodule MingaEditor.Handlers.LspEventHandler do
 
   defp dispatch_lsp_response(:hover, state, result),
     do: LspActions.handle_hover_response(state, result)
+
+  defp dispatch_lsp_response({:format, buf, version}, state, result),
+    do: LspActions.handle_formatting_response(state, result, buf, version)
 
   defp dispatch_lsp_response({:hover_mouse, row, col}, state, result),
     do: LspActions.handle_hover_mouse_response(state, result, row, col)

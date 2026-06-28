@@ -666,6 +666,13 @@ defmodule MingaEditor do
     {:noreply, EffectHandler.apply_effects(state, effects)}
   end
 
+  @lsp_format_timer_tags [:lsp_format_spinner, :lsp_format_cancellable, :lsp_format_timeout]
+
+  def handle_info({tag, _ref} = msg, state) when tag in @lsp_format_timer_tags do
+    {state, effects} = LspEventHandler.handle(state, msg)
+    {:noreply, EffectHandler.apply_effects(state, effects)}
+  end
+
   @lsp_debounce_atoms [:inlay_hint_scroll_debounce, :document_highlight_debounce]
 
   def handle_info(msg, state) when msg in @lsp_debounce_atoms do
@@ -923,6 +930,10 @@ defmodule MingaEditor do
   @spec apply_async_result(state(), atom(), term()) :: state()
   defp apply_async_result(state, :git_worktree, result) do
     GuiActionHandler.apply_git_result(state, result)
+  end
+
+  defp apply_async_result(state, :format_external, result) do
+    MingaEditor.Commands.Formatting.apply_format_external_result(state, result)
   end
 
   # Defensive fallthrough: a lane with no apply handler degrades to a logged

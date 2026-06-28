@@ -108,8 +108,8 @@ func (m Model) applyPresentationScroll(msg tea.MouseMsg) Model {
 	if !window.ScrollSet || window.Scroll.ResetRequired {
 		return m
 	}
-	scroll := m.presentationScroll[windowID]
-	if scroll.contentEpoch != window.Scroll.ContentEpoch || scroll.layoutGeneration != window.Scroll.LayoutGeneration || scroll.anchorTop != window.Scroll.AnchorTop || scroll.anchorLeft != window.Scroll.AnchorLeft {
+	scroll := m.localPresentation.scrolls[windowID]
+	if !scroll.keysMatch(window.Scroll) {
 		scroll = presentationScroll{anchorTop: window.Scroll.AnchorTop, anchorLeft: window.Scroll.AnchorLeft, contentEpoch: window.Scroll.ContentEpoch, layoutGeneration: window.Scroll.LayoutGeneration}
 	}
 	before, after := presentationPayloadOverscanBounds(window, presentationVisibleRows(window))
@@ -132,9 +132,9 @@ func (m Model) applyPresentationScroll(msg tea.MouseMsg) Model {
 		scroll.colOffset = max(scroll.colOffset-1, minPresentationColOffset(window))
 	}
 	if scroll.rowOffset == 0 && scroll.colOffset == 0 {
-		delete(m.presentationScroll, windowID)
+		delete(m.localPresentation.scrolls, windowID)
 	} else {
-		m.presentationScroll[windowID] = scroll
+		m.localPresentation.scrolls[windowID] = scroll
 	}
 	return m
 }
@@ -213,25 +213,31 @@ func (m Model) semanticMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	if !ok || click.Button != tea.MouseLeft {
 		return nil, false
 	}
-	if packet, ok := m.modelineMousePacket(msg); ok {
+	if packet, ok := m.overlayMousePacket(msg); ok {
 		return packet, true
 	}
-	if packet, ok := m.tabMousePacket(msg); ok {
-		return packet, true
+	mouse := msg.Mouse()
+	switch {
+	case m.layout.header.Contains(mouse.X, mouse.Y):
+		return m.headerMousePacket(msg)
+	case m.layout.leftPane.Contains(mouse.X, mouse.Y):
+		return m.leftPaneMousePacket(msg)
+	case m.layout.footer.Contains(mouse.X, mouse.Y):
+		return m.footerMousePacket(msg)
 	}
-	if packet, ok := m.fileTreeMousePacket(msg); ok {
-		return packet, true
-	}
-	if packet, ok := m.breadcrumbMousePacket(msg); ok {
-		return packet, true
-	}
+	return nil, false
+}
+
+// overlayMousePacket is checked before spatial dispatch because overlays render
+// above all layout zones and must intercept clicks regardless of position.
+func (m Model) overlayMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	if packet, ok := m.completionMousePacket(msg); ok {
 		return packet, true
 	}
-	if packet, ok := m.sidebarMousePacket(msg); ok {
+	if packet, ok := m.hoverActionMousePacket(msg); ok {
 		return packet, true
 	}
-	if packet, ok := m.hoverActionMousePacket(msg); ok {
+	if packet, ok := m.floatPopupMousePacket(msg); ok {
 		return packet, true
 	}
 	if packet, ok := m.notificationMousePacket(msg); ok {
@@ -243,10 +249,31 @@ func (m Model) semanticMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	if packet, ok := m.editTimelineMousePacket(msg); ok {
 		return packet, true
 	}
-	if packet, ok := m.floatPopupMousePacket(msg); ok {
+	return nil, false
+}
+
+func (m Model) headerMousePacket(msg tea.MouseMsg) ([]byte, bool) {
+	if packet, ok := m.tabMousePacket(msg); ok {
+		return packet, true
+	}
+	if packet, ok := m.breadcrumbMousePacket(msg); ok {
 		return packet, true
 	}
 	return nil, false
+}
+
+func (m Model) leftPaneMousePacket(msg tea.MouseMsg) ([]byte, bool) {
+	if packet, ok := m.fileTreeMousePacket(msg); ok {
+		return packet, true
+	}
+	if packet, ok := m.sidebarMousePacket(msg); ok {
+		return packet, true
+	}
+	return nil, false
+}
+
+func (m Model) footerMousePacket(msg tea.MouseMsg) ([]byte, bool) {
+	return m.modelineMousePacket(msg)
 }
 
 // floatPopupMousePacket maps a click in the float popup's overlay band but
