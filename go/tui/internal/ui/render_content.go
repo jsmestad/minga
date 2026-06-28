@@ -773,6 +773,8 @@ func (m Model) renderFileTreeRow(row protocol.FileTreeRow, width int) string {
 	selectionMarker := " "
 	if row.Selected {
 		selectionMarker = "▌"
+	} else if row.Active {
+		selectionMarker = "▎"
 	}
 	prefix := strings.Repeat("  ", int(row.Depth))
 	expander := " "
@@ -785,6 +787,8 @@ func (m Model) renderFileTreeRow(row protocol.FileTreeRow, width int) string {
 	markerStyle := lipgloss.NewStyle().Foreground(markerColor).Background(rowBackground)
 	if row.Selected {
 		markerStyle = markerStyle.Foreground(theme.Accent()).Bold(true)
+	} else if row.Active {
+		markerStyle = markerStyle.Foreground(theme.Accent())
 	}
 	icon := fileTreeIcon(row, row.Selected)
 	iconStyle := rowStyle
