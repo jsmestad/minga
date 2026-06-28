@@ -735,7 +735,7 @@ func (m Model) gutterSign(entry protocol.GutterEntry) string {
 func (m Model) renderFileTree(tree protocol.FileTree, width int, height int) []string {
 	theme := m.palette()
 	style := lipgloss.NewStyle().Foreground(theme.TreeText()).Background(theme.TreeSurface()).Width(width)
-	header := style.Bold(true).Foreground(theme.TreeHeaderText()).Background(theme.TreeHeader()).Render(fit(" Files  "+tree.Root, width))
+	header := style.Bold(true).Foreground(theme.TreeHeaderText()).Background(theme.TreeHeader()).Render(fit(" 󰙅 Files  "+tree.Root, width))
 	lines := []string{header}
 	if len(tree.Rows) == 0 {
 		if status := fileTreeStatusText(tree); status != "" && len(lines) < height {
