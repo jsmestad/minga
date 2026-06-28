@@ -107,7 +107,10 @@ defmodule Minga.Project.FileFindTest do
       end
     end
 
-    test "excludes directories listed in file_find_excludes", %{tmp_dir: tmp_dir, options_server: options_server} do
+    test "excludes directories listed in file_find_excludes", %{
+      tmp_dir: tmp_dir,
+      options_server: options_server
+    } do
       File.mkdir_p!(Path.join(tmp_dir, "node_modules/pkg"))
       File.write!(Path.join(tmp_dir, "node_modules/pkg/index.js"), "module.exports = {}")
       File.mkdir_p!(Path.join(tmp_dir, "vendor/lib"))
@@ -127,7 +130,10 @@ defmodule Minga.Project.FileFindTest do
       assert "lib/app.ex" in files
     end
 
-    test "excludes file names listed in file_find_excludes", %{tmp_dir: tmp_dir, options_server: options_server} do
+    test "excludes file names listed in file_find_excludes", %{
+      tmp_dir: tmp_dir,
+      options_server: options_server
+    } do
       File.write!(Path.join(tmp_dir, ".DS_Store"), "")
       File.write!(Path.join(tmp_dir, "lib/.DS_Store"), "")
 
