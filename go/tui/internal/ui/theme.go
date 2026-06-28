@@ -266,6 +266,14 @@ func (p palette) TreeHeaderText() color.Color {
 	return p.slot(themeTreeHeaderFG)
 }
 
+func (p palette) ScrollbarTrack() color.Color {
+	return p.slot(themeTreeSeparatorFG)
+}
+
+func (p palette) ScrollbarThumb() color.Color {
+	return p.slot(themeTreeActiveFG)
+}
+
 func (p palette) TabActive() color.Color {
 	return p.slot(themeTabActiveBG)
 }

@@ -734,25 +734,88 @@ func (m Model) gutterSign(entry protocol.GutterEntry) string {
 
 func (m Model) renderFileTree(tree protocol.FileTree, width int, height int) []string {
 	theme := m.palette()
-	style := lipgloss.NewStyle().Foreground(theme.TreeText()).Background(theme.TreeSurface()).Width(width)
-	header := style.Bold(true).Foreground(theme.TreeHeaderText()).Background(theme.TreeHeader()).Render(fit(" Files  "+tree.Root, width))
+	totalRows := len(tree.Rows)
+	visibleRows := height - 1 // header takes 1 line
+	needsScrollbar := totalRows > visibleRows && visibleRows > 0
+
+	contentWidth := width
+	if needsScrollbar {
+		contentWidth = max(width-1, 1)
+	}
+
+	headerStyle := lipgloss.NewStyle().Foreground(theme.TreeHeaderText()).Background(theme.TreeHeader()).Width(width)
+	header := headerStyle.Bold(true).Render(fit(" Files  "+tree.Root, width))
 	lines := []string{header}
-	if len(tree.Rows) == 0 {
+
+	contentStyle := lipgloss.NewStyle().Foreground(theme.TreeText()).Background(theme.TreeSurface()).Width(contentWidth)
+	if totalRows == 0 {
 		if status := fileTreeStatusText(tree); status != "" && len(lines) < height {
-			lines = append(lines, style.Foreground(theme.TreeMutedText()).Render(fit(" "+status, width)))
+			lines = append(lines, contentStyle.Foreground(theme.TreeMutedText()).Render(fit(" "+status, contentWidth)))
 		}
 	}
-	for rowIndex, row := range tree.Rows {
-		rendered := m.renderFileTreeRow(row, width)
-		lines = append(lines, m.zones.Mark(zoneIDFileTreeRow(rowIndex), rendered))
+
+	scrollOffset := 0
+	if needsScrollbar {
+		scrollOffset = fileTreeScrollOffset(tree, visibleRows)
+	}
+
+	var thumbStart, thumbEnd int
+	if needsScrollbar {
+		thumbStart, thumbEnd = fileTreeScrollbarThumb(totalRows, visibleRows, scrollOffset)
+	}
+
+	trackStyle := lipgloss.NewStyle().Foreground(theme.ScrollbarTrack()).Background(theme.TreeSurface())
+	thumbStyle := lipgloss.NewStyle().Foreground(theme.ScrollbarThumb()).Background(theme.TreeSurface())
+
+	for i := 0; i < visibleRows && scrollOffset+i < totalRows; i++ {
+		rowIndex := scrollOffset + i
+		row := tree.Rows[rowIndex]
+		rendered := m.renderFileTreeRow(row, contentWidth)
+		line := m.zones.Mark(zoneIDFileTreeRow(rowIndex), rendered)
+		if needsScrollbar {
+			if i >= thumbStart && i < thumbEnd {
+				line += thumbStyle.Render("█")
+			} else {
+				line += trackStyle.Render("│")
+			}
+		}
+		lines = append(lines, line)
 		if len(lines) >= height {
 			return lines
 		}
 	}
+
+	fillStyle := lipgloss.NewStyle().Foreground(theme.TreeText()).Background(theme.TreeSurface()).Width(width)
 	for len(lines) < height {
-		lines = append(lines, style.Render(strings.Repeat(" ", width)))
+		lines = append(lines, fillStyle.Render(strings.Repeat(" ", width)))
 	}
 	return lines
+}
+
+func fileTreeScrollOffset(tree protocol.FileTree, visibleRows int) int {
+	selectedIndex := -1
+	for i, row := range tree.Rows {
+		if row.Selected {
+			selectedIndex = i
+			break
+		}
+	}
+	if selectedIndex < 0 || selectedIndex < visibleRows {
+		return 0
+	}
+	offset := selectedIndex - visibleRows/3
+	maxOffset := len(tree.Rows) - visibleRows
+	return min(max(offset, 0), maxOffset)
+}
+
+func fileTreeScrollbarThumb(totalRows int, visibleRows int, scrollOffset int) (thumbStart int, thumbEnd int) {
+	if totalRows <= 0 || visibleRows <= 0 {
+		return 0, 0
+	}
+	thumbSize := max(visibleRows*visibleRows/totalRows, 1)
+	thumbStart = scrollOffset * visibleRows / totalRows
+	thumbEnd = min(thumbStart+thumbSize, visibleRows)
+	return thumbStart, thumbEnd
 }
 
 func (m Model) renderFileTreeRow(row protocol.FileTreeRow, width int) string {
