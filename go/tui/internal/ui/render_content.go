@@ -694,6 +694,13 @@ func (m Model) renderGutterEntry(gutter protocol.Gutter, rowIndex int) string {
 	}
 	sign := m.gutterSign(entry)
 	number := m.gutterLineNumber(gutter, entry)
+	if entry.DisplayType == 1 || entry.DisplayType == 4 {
+		foldStyle := lipgloss.NewStyle().Foreground(m.palette().GutterFold()).Background(m.editorBackground())
+		if entry.BufferLine == gutter.CursorLine && gutter.LineNumberStyle != 2 {
+			foldStyle = foldStyle.Bold(true)
+		}
+		return style.Render(fitStyled(foldStyle.Render(sign)+number+" ", width))
+	}
 	return style.Render(fit(sign+number+" ", width))
 }
 
