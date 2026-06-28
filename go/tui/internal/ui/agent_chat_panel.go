@@ -460,13 +460,22 @@ func nonEmpty(value string, fallback string) string {
 func (m Model) renderAgentStatusBadge(status byte) string {
 	p := m.palette()
 	label := agentChatStatusLabel(status)
-	style := lipgloss.NewStyle().Bold(true).Foreground(p.Muted()).Background(p.SurfaceAlt()).Padding(0, 1)
+	style := lipgloss.NewStyle().Bold(true).Padding(0, 1)
 	switch status {
-	case 1, 2:
+	case 1: // working
 		label = m.agentSpinner() + " " + label
-		style = style.Foreground(p.SelectionText()).Background(p.Accent())
-	case 3:
-		style = style.Foreground(p.SelectionText()).Background(p.Diagnostic(0))
+		style = style.Foreground(p.SelectionText()).Background(p.AgentStatusWorking())
+	case 2: // iterating
+		label = m.agentSpinner() + " " + label
+		style = style.Foreground(p.SelectionText()).Background(p.AgentStatusIterating())
+	case 3: // needs you
+		style = style.Foreground(p.SelectionText()).Background(p.AgentStatusNeedsYou())
+	case 4: // done
+		style = style.Foreground(p.SelectionText()).Background(p.AgentStatusDone())
+	case 5: // errored
+		style = style.Foreground(p.SelectionText()).Background(p.AgentStatusErrored())
+	default: // idle
+		style = style.Foreground(p.AgentStatusIdle()).Background(p.SurfaceAlt())
 	}
 	return style.Render(label)
 }
@@ -478,11 +487,15 @@ func (m Model) agentSpinner() string {
 func agentChatStatusLabel(status byte) string {
 	switch status {
 	case 1:
-		return "thinking"
+		return "working"
 	case 2:
-		return "tool"
+		return "iterating"
 	case 3:
-		return "error"
+		return "needs you"
+	case 4:
+		return "done"
+	case 5:
+		return "errored"
 	default:
 		return "idle"
 	}
