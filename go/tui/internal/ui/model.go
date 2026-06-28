@@ -211,7 +211,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.previewCompletionNavigation(msg)
 		m.previewPickerNavigation(msg)
-		m.previewFileTreeNavigation(msg)
+		if !m.modalOverlayActive() {
+			m.previewFileTreeNavigation(msg)
+		}
 	case tea.PasteMsg:
 		m.send(pastePacket(msg))
 	case tea.MouseMsg:

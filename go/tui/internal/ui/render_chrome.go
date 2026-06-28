@@ -19,6 +19,7 @@ func (m Model) headerLines() []string {
 	}
 	if tabBar, ok := m.tabBar(); ok && len(tabBar.Tabs) > 0 {
 		lines = append(lines, m.renderTabs(tabBar))
+		lines = append(lines, lipgloss.NewStyle().Foreground(m.palette().TreeSeparator()).Background(m.palette().EditorSurface()).Width(m.width).Render(strings.Repeat("─", m.width)))
 	}
 	if crumb, ok := m.breadcrumb(); ok && len(crumb.Segments) > 0 && m.width >= 100 {
 		lines = append(lines, m.renderBreadcrumb(crumb))
@@ -187,7 +188,7 @@ func (m Model) footerLines() []string {
 	// composited at its BEAM placement rect by overlayLayer (#2281). The footer
 	// still carries the minibuffer when no full overlay is active so the prompt
 	// line stays in the vertical layout.
-	if !m.pickerVisible() && !m.whichKeyVisible() && !m.agentChatVisible() {
+	if !m.modalOverlayActive() {
 		if _, active := m.overlayWinner(); !active {
 			if mini, ok := m.minibuffer(); ok && mini.Visible {
 				lines = append(lines, m.renderMinibuffer(mini))
