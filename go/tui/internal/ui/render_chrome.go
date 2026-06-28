@@ -187,7 +187,6 @@ func (m Model) renderTabs(tabBar protocol.TabBar, width int) string {
 	return rowStyle.Render(fitStyled(strings.Join(rendered, " "), width))
 }
 
-
 func (m Model) renderBreadcrumb(crumb protocol.Breadcrumb, width int) string {
 	bg := m.editorBackground()
 	segments := make([]string, 0, len(crumb.Segments))

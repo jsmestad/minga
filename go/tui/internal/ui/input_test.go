@@ -375,7 +375,6 @@ func TestMousePacketTranslatesDragSequence(t *testing.T) {
 	}
 }
 
-
 // TestMousePacketTranslatesWheelOverBody pins wheel handling: a scroll wheel over
 // the body is forwarded with its row translated by the header offset, and a
 // wheel over the header is still forwarded (clamped at row 0) rather than
