@@ -40,10 +40,10 @@ func popupShadow(popup *lipgloss.Layer) []*lipgloss.Layer {
 	if w <= 0 || h <= 0 {
 		return []*lipgloss.Layer{popup}
 	}
-	shadowStyle := lipgloss.NewStyle().Background(lipgloss.Color("#000000")).Width(w)
+	line := lipgloss.NewStyle().Background(lipgloss.Color("#000000")).Render(strings.Repeat(" ", w))
 	shadowLines := make([]string, h)
 	for i := range shadowLines {
-		shadowLines[i] = shadowStyle.Render(strings.Repeat(" ", w))
+		shadowLines[i] = line
 	}
 	shadow := lipgloss.NewLayer(strings.Join(shadowLines, "\n")).
 		X(popup.GetX() + 1).Y(popup.GetY() + 1).Z(popup.GetZ() - 1)

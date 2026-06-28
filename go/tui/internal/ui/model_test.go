@@ -1332,8 +1332,8 @@ func TestSplitSeparatorsNormalizeAgainstHeaderAndFileTree(t *testing.T) {
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiFileTree: {Tree: protocol.FileTree{Visible: true, Width: 24, Rows: []protocol.FileTreeRow{{ID: "row-0", Name: "row-0"}}}},
 		generated.OPGuiSplitSeparators: {Splits: protocol.SplitSeparators{
-			Verticals:   []protocol.VerticalSeparator{{Col: 24, StartRow: 1, EndRow: 2}},
-			Horizontals: []protocol.HorizontalSeparator{{Row: 2, Col: 24, Width: 2}},
+			Verticals:   []protocol.VerticalSeparator{{Col: 25, StartRow: 1, EndRow: 2}},
+			Horizontals: []protocol.HorizontalSeparator{{Row: 2, Col: 25, Width: 2}},
 		}},
 	}
 	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "body-0"}, {Text: "body-1"}, {Text: "body-2"}}})
@@ -1389,8 +1389,8 @@ func TestFileTreeReservesVisibleEmptyState(t *testing.T) {
 	if !strings.Contains(lines[2], "No files") {
 		t.Fatalf("empty file tree should render status row: %q", lines[2])
 	}
-	if !strings.Contains(lines[1], "pane") {
-		t.Fatalf("empty file tree should render pane on body row: %q", lines[1])
+	if got := visibleIndex(lines[1], "pane"); got != 19 {
+		t.Fatalf("empty file tree should leave pane at column 19 (tree 18 + border 1), got %d in %q", got, lines[1])
 	}
 }
 
@@ -1778,6 +1778,7 @@ func TestModalOverlaySuppressesFileTreeNavigation(t *testing.T) {
 	}{
 		{"picker", map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: eligibleTree}, generated.OPGuiPicker: {Picker: protocol.Picker{Visible: true, Title: "Files", Items: []protocol.PickerItem{{Label: "main.ex"}}}}}},
 		{"which-key", map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: eligibleTree}, generated.OPGuiWhichKey: {Which: protocol.WhichKey{Visible: true, Prefix: "SPC", Bindings: []protocol.WhichKeyBinding{{Key: "f", Description: "file"}}}}}},
+		{"agent-chat", map[byte]protocol.ChromePayload{generated.OPGuiFileTree: {Tree: eligibleTree}, generated.OPGuiAgentChat: {AgentChat: protocol.AgentChat{Visible: true, Status: 2, ModelName: "test"}}}},
 	} {
 		t.Run(tc.name+" suppresses local navigation", func(t *testing.T) {
 			out := make(chan []byte, 1)
@@ -1882,8 +1883,8 @@ func TestSemanticWindowsRespectFileTreeOffset(t *testing.T) {
 	if len(lines) < 2 {
 		t.Fatalf("semantic window should render with file tree offset: %+v", lines)
 	}
-	if !strings.Contains(lines[1], "pane") {
-		t.Fatalf("file tree offset should render pane on first body row: %q", lines[1])
+	if got := visibleIndex(lines[1], "pane"); got != 25 {
+		t.Fatalf("file tree offset should leave pane at column 25 (tree 24 + border 1), got %d in %q", got, lines[1])
 	}
 }
 

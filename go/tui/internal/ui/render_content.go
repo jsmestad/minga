@@ -146,7 +146,7 @@ func (m Model) semanticContentOffsets() (int, int) {
 
 func (m Model) leftChromeWidth() int {
 	if tree, ok := m.fileTree(); ok && tree.Visible && tree.Width > 0 && m.width >= 50 {
-		return fileTreeWidth(m.width, tree)
+		return fileTreeWidth(m.width, tree) + 1 // +1 for the │ border separator
 	}
 	if sidebars, ok := m.sidebars(); ok && len(sidebars.Items) > 0 && m.width >= 60 {
 		return semanticSidebarWidth(m.width, sidebars)
