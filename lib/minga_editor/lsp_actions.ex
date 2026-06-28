@@ -137,7 +137,9 @@ defmodule MingaEditor.LspActions do
 
             ref = Client.request(client, "textDocument/references", params)
 
-            put_lsp_pending(state, ref, :references)
+            state
+            |> EditorState.set_status("Finding references…")
+            |> put_lsp_pending(ref, :references)
         end
     end
   end
@@ -312,7 +314,9 @@ defmodule MingaEditor.LspActions do
 
             ref = Client.request(client, "textDocument/rename", params)
 
-            put_lsp_pending(state, ref, :rename)
+            state
+            |> EditorState.set_status("Renaming…")
+            |> put_lsp_pending(ref, :rename)
         end
     end
   end
