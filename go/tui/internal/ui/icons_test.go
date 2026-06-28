@@ -23,6 +23,27 @@ func TestFileTreeIconUsesTransmittedColorOnlyWhenUnselected(t *testing.T) {
 	}
 }
 
+func TestModeIconReturnsGlyphForKnownModes(t *testing.T) {
+	cases := []struct {
+		mode string
+		want string
+	}{
+		{"NORMAL", ""},
+		{"INSERT", ""},
+		{"VISUAL", "󰈈"},
+		{"COMMAND", ""},
+		{"SEARCH", ""},
+		{"REPLACE", "󰛔"},
+		{"unknown", ""},
+		{"", ""},
+	}
+	for _, tc := range cases {
+		if got := modeIcon(tc.mode); got != tc.want {
+			t.Errorf("modeIcon(%q) = %q, want %q", tc.mode, got, tc.want)
+		}
+	}
+}
+
 func TestFileTreeIconKeepsDeviconFallbackWhenSelected(t *testing.T) {
 	// When the BEAM sends no glyph, the renderer derives one locally; the
 	// transmitted color is not consulted on that path, even if the row is selected.

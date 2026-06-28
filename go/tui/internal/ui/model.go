@@ -60,6 +60,7 @@ type Model struct {
 	extensionRuntimes     map[string]protocol.ExtensionRuntimePayload
 	bottomPanelScrollback int
 	agent                 agentPanel
+	feedback              feedbackState
 	// latency records end-to-end keystroke-to-write samples (ticket #2215).
 	// It is a pointer so the recorder persists across value-copied Model
 	// updates. hudVisible toggles the on-screen p50/p99 overlay at runtime.
@@ -244,6 +245,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.agent.animationRunning = false
 		}
+	case feedbackTickMsg:
+		m.feedback.tick()
+		if status, ok := m.statusBar(); ok {
+			m.feedback.updateStatus(status.Message)
+		}
+		pickerLoading := false
+		if picker, ok := m.chrome[generated.OPGuiPicker]; ok && picker.Picker.LoadStatus == 1 {
+			pickerLoading = true
+		}
+		if m.feedback.active() || pickerLoading {
+			cmd = feedbackTick()
+		} else {
+			m.feedback.ticking = false
+		}
 	case port.PacketMsg:
 		cmd = m.applyCommands(msg.Commands)
 		m.layout = m.computeLayout()
@@ -257,6 +272,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if chat, ok := m.agentChat(); ok && m.agent.animating(chat) && !m.agent.animationRunning {
 		m.agent.animationRunning = true
 		cmd = tea.Batch(cmd, agentAnimationTick())
+	}
+
+	if status, ok := m.statusBar(); ok {
+		m.feedback.updateStatus(status.Message)
+	}
+	needsTick := m.feedback.active()
+	if !needsTick {
+		if picker, ok := m.chrome[generated.OPGuiPicker]; ok && picker.Picker.LoadStatus == 1 {
+			needsTick = true
+		}
+	}
+	if needsTick && !m.feedback.ticking {
+		m.feedback.ticking = true
+		cmd = tea.Batch(cmd, feedbackTick())
 	}
 
 	m.viewport.SetWidth(max(m.width, 1))

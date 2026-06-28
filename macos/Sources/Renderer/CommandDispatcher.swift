@@ -613,6 +613,7 @@ final class CommandDispatcher {
 
         case .guiStatusBar(let update):
             guiState.statusBarState.update(from: update)
+            guiState.feedbackState.update(message: update.message)
             frameState.totalLineCount = update.lineCount
             if update.mode != lastMode {
                 lastMode = update.mode
