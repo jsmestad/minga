@@ -19,6 +19,7 @@ func (m Model) headerLines() []string {
 	}
 	if tabBar, ok := m.tabBar(); ok && len(tabBar.Tabs) > 0 {
 		lines = append(lines, m.renderTabs(tabBar))
+		lines = append(lines, lipgloss.NewStyle().Foreground(m.palette().TreeSeparator()).Background(m.palette().EditorSurface()).Width(m.width).Render(strings.Repeat("─", m.width)))
 	}
 	if crumb, ok := m.breadcrumb(); ok && len(crumb.Segments) > 0 && m.width >= 100 {
 		lines = append(lines, m.renderBreadcrumb(crumb))
@@ -136,7 +137,7 @@ func (m Model) renderBreadcrumb(crumb protocol.Breadcrumb) string {
 		}
 		segments = append(segments, m.zones.Mark(zoneIDBreadcrumbSegment(index), style.Render(segment)))
 	}
-	separator := lipgloss.NewStyle().Foreground(m.palette().GutterText()).Background(m.palette().EditorSurface()).Render(" › ")
+	separator := lipgloss.NewStyle().Foreground(m.palette().GutterText()).Background(m.palette().EditorSurface()).Render(" ❯ ")
 	text := "  " + strings.Join(segments, separator)
 	if git, ok := m.gitStatus(); ok && git.Branch != "" {
 		gitText := lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(m.palette().EditorSurface()).Render("  ·  " + m.gitSummary(git))
@@ -153,7 +154,12 @@ func (m Model) footerLines() []string {
 		if len(chromeStatus.Left) > 0 || len(chromeStatus.Right) > 0 {
 			status = m.renderStatusSegments(chromeStatus)
 		} else if chromeStatus.Filename != "" {
-			status = fmt.Sprintf("%s  %d:%d", chromeStatus.Filename, chromeStatus.Line, chromeStatus.Column)
+			icon := devIconForPath(chromeStatus.Filename, false)
+			prefix := chromeStatus.Filename
+			if icon.glyph != "" {
+				prefix = icon.glyph + " " + chromeStatus.Filename
+			}
+			status = fmt.Sprintf("%s  %d:%d", prefix, chromeStatus.Line, chromeStatus.Column)
 			if chromeStatus.Message != "" {
 				status += "  " + chromeStatus.Message
 			}
@@ -187,7 +193,7 @@ func (m Model) footerLines() []string {
 	// composited at its BEAM placement rect by overlayLayer (#2281). The footer
 	// still carries the minibuffer when no full overlay is active so the prompt
 	// line stays in the vertical layout.
-	if !m.pickerVisible() && !m.whichKeyVisible() && !m.agentChatVisible() {
+	if !m.modalOverlayActive() {
 		if _, active := m.overlayWinner(); !active {
 			if mini, ok := m.minibuffer(); ok && mini.Visible {
 				lines = append(lines, m.renderMinibuffer(mini))
@@ -201,6 +207,17 @@ func (m Model) renderStatusSegments(status protocol.StatusBar) string {
 	left := m.renderSegmentList(status.Left)
 	right := m.renderSegmentList(status.Right)
 	message := m.renderStatusMessage(status.Message)
+	// Prepend a devicon for the current file type before the right segments.
+	if status.Filename != "" {
+		icon := devIconForPath(status.Filename, false)
+		if icon.glyph != "" {
+			fileStyle := lipgloss.NewStyle().Foreground(m.palette().ChromeText()).Background(m.palette().ChromeSurface())
+			if icon.color != "" {
+				fileStyle = fileStyle.Foreground(lipgloss.Color(icon.color))
+			}
+			right = fileStyle.Render(icon.glyph+" ") + right
+		}
+	}
 	leftWidth := lipgloss.Width(left)
 	rightWidth := lipgloss.Width(right)
 	messageWidth := lipgloss.Width(message)
@@ -237,10 +254,12 @@ func (m Model) renderStatusMessage(message string) string {
 	if message == "" {
 		return ""
 	}
-	return lipgloss.NewStyle().Bold(true).Foreground(m.palette().Warning()).Background(m.palette().ChromeSurface()).Render(message)
+	displayed := m.feedback.formatMessage(message)
+	return lipgloss.NewStyle().Bold(true).Foreground(m.palette().Warning()).Background(m.palette().ChromeSurface()).Render(displayed)
 }
 
 func (m Model) renderSegmentList(segments []protocol.StatusSegment) string {
+	sep := lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(m.palette().ChromeSurface()).Render("│")
 	parts := make([]string, 0, len(segments))
 	for _, segment := range segments {
 		text := segment.Text
@@ -263,13 +282,17 @@ func (m Model) renderSegmentList(segments []protocol.StatusSegment) string {
 		if segment.Attrs&0x04 != 0 {
 			style = style.Italic(true)
 		}
+		// Prepend a nerd font icon when the segment carries a vi mode name.
+		if icon := modeIcon(strings.TrimSpace(text)); icon != "" {
+			text = strings.Replace(text, strings.TrimSpace(text), icon+" "+strings.TrimSpace(text), 1)
+		}
 		rendered := style.Render(text)
 		if segment.Command != "" {
 			rendered = m.zones.Mark(zoneIDModelineCommand(segment.Command), rendered)
 		}
 		parts = append(parts, rendered)
 	}
-	return strings.Join(parts, "")
+	return strings.Join(parts, sep)
 }
 
 func (m Model) gitSummary(git protocol.GitStatus) string {
@@ -422,7 +445,7 @@ func (m Model) renderPicker(picker protocol.Picker, preview protocol.PickerPrevi
 		title += fmt.Sprintf("  marked %d", picker.Marked)
 	}
 	if picker.LoadStatus == 1 {
-		title += "  loading"
+		title += "  " + m.feedback.spinner() + " loading"
 	} else if picker.LoadStatus == 2 && picker.LoadError != "" {
 		title += "  " + picker.LoadError
 	}

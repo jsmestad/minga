@@ -56,9 +56,13 @@ defmodule MingaEditor.Commands.Formatting do
   end
 
   @lsp_format_timeout 5_000
+  @lsp_format_spinner_delay 100
+  @lsp_format_cancel_delay 1_000
 
   @spec request_lsp_format(state(), pid(), pid()) :: state()
   defp request_lsp_format(state, buf, client) do
+    state = cancel_pending_format(state)
+
     file_path = Buffer.file_path(buf)
     uri = SyncServer.path_to_uri(file_path)
     tab_width = Buffer.get_option(buf, :tab_width) || 2
@@ -69,22 +73,34 @@ defmodule MingaEditor.Commands.Formatting do
       "options" => %{"tabSize" => tab_width, "insertSpaces" => insert_spaces}
     }
 
-    case Client.request_sync(client, "textDocument/formatting", params, @lsp_format_timeout) do
-      {:ok, edits} when is_list(edits) ->
-        apply_lsp_edits(buf, edits)
-        EditorState.set_status(state, "Formatted (LSP)")
+    version = Buffer.version(buf)
+    ref = Client.request(client, "textDocument/formatting", params)
+    Process.send_after(self(), {:lsp_format_spinner, ref}, @lsp_format_spinner_delay)
+    Process.send_after(self(), {:lsp_format_cancellable, ref}, @lsp_format_cancel_delay)
+    Process.send_after(self(), {:lsp_format_timeout, ref}, @lsp_format_timeout)
+    EditorState.put_lsp_pending(state, ref, {:format, buf, version})
+  end
 
-      {:ok, nil} ->
-        EditorState.set_status(state, "No formatting changes")
-
-      {:error, reason} ->
-        Minga.Log.warning(:editor, "LSP formatting error: #{inspect(reason)}")
-        EditorState.set_status(state, "Format error: LSP request failed")
+  @spec cancel_pending_format(state()) :: state()
+  defp cancel_pending_format(state) do
+    case find_pending_format(state) do
+      nil -> state
+      {ref, _kind} -> EditorState.delete_lsp_pending(state, ref)
     end
   end
 
+  @doc false
+  @spec find_pending_format(state()) :: {reference(), tuple()} | nil
+  def find_pending_format(state) do
+    Enum.find(state.workspace.lsp_pending, fn
+      {_ref, {:format, _buf, _version}} -> true
+      _ -> false
+    end)
+  end
+
+  @doc false
   @spec apply_lsp_edits(pid(), [map()]) :: :ok
-  defp apply_lsp_edits(buf, edits) when is_pid(buf) and is_list(edits) do
+  def apply_lsp_edits(buf, edits) when is_pid(buf) and is_list(edits) do
     if edits != [] do
       {cursor_line, cursor_col} = Buffer.cursor(buf)
       content = Buffer.content(buf)
@@ -170,25 +186,43 @@ defmodule MingaEditor.Commands.Formatting do
 
   # ── Private helpers ───────────────────────────────────────────────────────
 
+  @format_external_lane :format_external
+
   @spec format_and_replace(state(), pid(), Minga.Editing.Formatter.formatter_spec()) :: state()
   defp format_and_replace(state, buf, spec) do
     content = Buffer.content(buf)
-    buf_name = Buffer.file_path(buf) |> Path.basename()
+    version = Buffer.version(buf)
 
-    case Minga.Editing.format(content, spec) do
-      {:ok, formatted} ->
-        {cursor_line, cursor_col} = Buffer.cursor(buf)
-        Buffer.replace_content(buf, formatted)
-        line_count = Buffer.line_count(buf)
-        safe_line = min(cursor_line, max(line_count - 1, 0))
-        Buffer.move_to(buf, {safe_line, cursor_col})
-        Minga.Log.info(:editor, "Formatted: #{buf_name}")
-        EditorState.set_status(state, "Formatted")
+    state
+    |> EditorState.set_status("Formatting…")
+    |> MingaEditor.AsyncAction.run(@format_external_lane, fn ->
+      case Minga.Editing.format(content, spec) do
+        {:ok, formatted} -> {:ok, formatted, buf, version}
+        {:error, msg} -> {:error, msg}
+      end
+    end)
+  end
 
-      {:error, msg} ->
-        Minga.Log.warning(:editor, "Formatter failed: #{buf_name} (#{msg})")
-        EditorState.set_status(state, "Format error: #{msg}")
+  @doc false
+  @spec apply_format_external_result(state(), term()) :: state()
+  def apply_format_external_result(state, {:ok, formatted, buf, version}) do
+    if Process.alive?(buf) and Buffer.version(buf) == version do
+      {cursor_line, cursor_col} = Buffer.cursor(buf)
+      Buffer.replace_content(buf, formatted)
+      line_count = Buffer.line_count(buf)
+      safe_line = min(cursor_line, max(line_count - 1, 0))
+      Buffer.move_to(buf, {safe_line, cursor_col})
+      buf_name = (Buffer.file_path(buf) || "scratch") |> Path.basename()
+      Minga.Log.info(:editor, "Formatted: #{buf_name}")
+      EditorState.set_status(state, "Formatted")
+    else
+      EditorState.set_status(state, "Buffer changed, format skipped")
     end
+  end
+
+  def apply_format_external_result(state, {:error, msg}) do
+    Minga.Log.warning(:editor, "Formatter failed: #{msg}")
+    EditorState.set_status(state, "Format error: #{msg}")
   end
 
   # When the formatter binary is missing and a tool recipe exists for it,

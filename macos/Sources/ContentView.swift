@@ -760,6 +760,7 @@ struct ContentView: View {
     private var statusBar: some View {
         StatusBarView(
             state: appState.gui.statusBarState,
+            feedbackState: appState.gui.feedbackState,
             encoder: appState.encoder,
             isFileTreeVisible: appState.gui.fileTreeState.visible,
             isGitStatusVisible: appState.gui.gitStatusState.visible,
