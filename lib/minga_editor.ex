@@ -647,6 +647,13 @@ defmodule MingaEditor do
     {:noreply, EffectHandler.apply_effects(state, effects)}
   end
 
+  @lsp_format_timer_tags [:lsp_format_spinner, :lsp_format_cancellable, :lsp_format_timeout]
+
+  def handle_info({tag, _ref} = msg, state) when tag in @lsp_format_timer_tags do
+    {state, effects} = LspEventHandler.handle(state, msg)
+    {:noreply, EffectHandler.apply_effects(state, effects)}
+  end
+
   @lsp_debounce_atoms [:inlay_hint_scroll_debounce, :document_highlight_debounce]
 
   def handle_info(msg, state) when msg in @lsp_debounce_atoms do

@@ -56,9 +56,13 @@ defmodule MingaEditor.Commands.Formatting do
   end
 
   @lsp_format_timeout 5_000
+  @lsp_format_spinner_delay 100
+  @lsp_format_cancel_delay 1_000
 
   @spec request_lsp_format(state(), pid(), pid()) :: state()
   defp request_lsp_format(state, buf, client) do
+    state = cancel_pending_format(state)
+
     file_path = Buffer.file_path(buf)
     uri = SyncServer.path_to_uri(file_path)
     tab_width = Buffer.get_option(buf, :tab_width) || 2
@@ -69,22 +73,34 @@ defmodule MingaEditor.Commands.Formatting do
       "options" => %{"tabSize" => tab_width, "insertSpaces" => insert_spaces}
     }
 
-    case Client.request_sync(client, "textDocument/formatting", params, @lsp_format_timeout) do
-      {:ok, edits} when is_list(edits) ->
-        apply_lsp_edits(buf, edits)
-        EditorState.set_status(state, "Formatted (LSP)")
+    version = Buffer.version(buf)
+    ref = Client.request(client, "textDocument/formatting", params)
+    Process.send_after(self(), {:lsp_format_spinner, ref}, @lsp_format_spinner_delay)
+    Process.send_after(self(), {:lsp_format_cancellable, ref}, @lsp_format_cancel_delay)
+    Process.send_after(self(), {:lsp_format_timeout, ref}, @lsp_format_timeout)
+    EditorState.put_lsp_pending(state, ref, {:format, buf, version})
+  end
 
-      {:ok, nil} ->
-        EditorState.set_status(state, "No formatting changes")
-
-      {:error, reason} ->
-        Minga.Log.warning(:editor, "LSP formatting error: #{inspect(reason)}")
-        EditorState.set_status(state, "Format error: LSP request failed")
+  @spec cancel_pending_format(state()) :: state()
+  defp cancel_pending_format(state) do
+    case find_pending_format(state) do
+      nil -> state
+      {ref, _kind} -> EditorState.delete_lsp_pending(state, ref)
     end
   end
 
+  @doc false
+  @spec find_pending_format(state()) :: {reference(), tuple()} | nil
+  def find_pending_format(state) do
+    Enum.find(state.workspace.lsp_pending, fn
+      {_ref, {:format, _buf, _version}} -> true
+      _ -> false
+    end)
+  end
+
+  @doc false
   @spec apply_lsp_edits(pid(), [map()]) :: :ok
-  defp apply_lsp_edits(buf, edits) when is_pid(buf) and is_list(edits) do
+  def apply_lsp_edits(buf, edits) when is_pid(buf) and is_list(edits) do
     if edits != [] do
       {cursor_line, cursor_col} = Buffer.cursor(buf)
       content = Buffer.content(buf)
