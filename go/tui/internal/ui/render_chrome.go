@@ -259,6 +259,7 @@ func (m Model) renderStatusMessage(message string) string {
 }
 
 func (m Model) renderSegmentList(segments []protocol.StatusSegment) string {
+	sep := lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(m.palette().ChromeSurface()).Render("│")
 	parts := make([]string, 0, len(segments))
 	for _, segment := range segments {
 		text := segment.Text
@@ -291,7 +292,7 @@ func (m Model) renderSegmentList(segments []protocol.StatusSegment) string {
 		}
 		parts = append(parts, rendered)
 	}
-	return strings.Join(parts, "")
+	return strings.Join(parts, sep)
 }
 
 func (m Model) gitSummary(git protocol.GitStatus) string {
