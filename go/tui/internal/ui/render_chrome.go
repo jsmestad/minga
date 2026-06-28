@@ -137,7 +137,7 @@ func (m Model) renderBreadcrumb(crumb protocol.Breadcrumb) string {
 		}
 		segments = append(segments, m.zones.Mark(zoneIDBreadcrumbSegment(index), style.Render(segment)))
 	}
-	separator := lipgloss.NewStyle().Foreground(m.palette().GutterText()).Background(m.palette().EditorSurface()).Render(" › ")
+	separator := lipgloss.NewStyle().Foreground(m.palette().GutterText()).Background(m.palette().EditorSurface()).Render(" ❯ ")
 	text := "  " + strings.Join(segments, separator)
 	if git, ok := m.gitStatus(); ok && git.Branch != "" {
 		gitText := lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(m.palette().EditorSurface()).Render("  ·  " + m.gitSummary(git))
