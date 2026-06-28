@@ -515,7 +515,7 @@ func TestMousePacketNormalizesPresentationScrollOffset(t *testing.T) {
 			WindowID: 7, ContentEpoch: 9, AnchorTop: 10, AnchorLeft: 2, LayoutGeneration: 5,
 		},
 	})
-	model.presentationScroll[7] = presentationScroll{anchorTop: 10, anchorLeft: 2, contentEpoch: 9, layoutGeneration: 5, rowOffset: 1, colOffset: 2}
+	model.localPresentation.scrolls[7] = presentationScroll{anchorTop: 10, anchorLeft: 2, contentEpoch: 9, layoutGeneration: 5, rowOffset: 1, colOffset: 2}
 
 	packet, ok := model.mousePacket(tea.MouseClickMsg(tea.Mouse{X: 3, Y: model.layout.header.Height, Button: tea.MouseLeft}))
 	if !ok {
@@ -541,7 +541,7 @@ func TestMousePacketClampsPresentationScrollOffsetInsideWindow(t *testing.T) {
 			WindowID: 7, ContentEpoch: 9, AnchorTop: 10, AnchorLeft: 2, LayoutGeneration: 5,
 		},
 	})
-	model.presentationScroll[7] = presentationScroll{anchorTop: 10, anchorLeft: 2, contentEpoch: 9, layoutGeneration: 5, rowOffset: 1, colOffset: 2}
+	model.localPresentation.scrolls[7] = presentationScroll{anchorTop: 10, anchorLeft: 2, contentEpoch: 9, layoutGeneration: 5, rowOffset: 1, colOffset: 2}
 
 	packet, ok := model.mousePacket(tea.MouseClickMsg(tea.Mouse{X: 9, Y: model.layout.header.Height + 2, Button: tea.MouseLeft}))
 	if !ok {

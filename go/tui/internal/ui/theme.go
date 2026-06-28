@@ -318,6 +318,10 @@ func (p palette) GutterCurrentText() color.Color {
 	return p.slot(themeGutterCurrentFG)
 }
 
+func (p palette) TreeSeparator() color.Color {
+	return p.slot(themeTreeSeparatorFG)
+}
+
 func (p palette) TreeSurface() color.Color {
 	return p.slot(themeTreeBG)
 }
@@ -334,12 +338,13 @@ func (p palette) TreeDirectoryText() color.Color {
 	return p.slot(themeTreeDirFG)
 }
 
-func (p palette) TreeSeparator() color.Color {
-	return p.slot(themeTreeSeparatorFG)
-}
-
 func (p palette) TreeSelection() color.Color {
 	return p.slot(themeTreeSelectBG)
+}
+
+// TreeFocus returns a faint background tint for focused-but-not-selected file tree rows. It blends 40% of the way from TreeSurface toward TreeSelection so the focus cursor is visible without competing with selection styling.
+func (p palette) TreeFocus() color.Color {
+	return p.blendSlots(themeTreeBG, themeTreeSelectBG, 0.4)
 }
 
 func (p palette) TreeSelectionText() color.Color {
@@ -352,6 +357,14 @@ func (p palette) TreeHeader() color.Color {
 
 func (p palette) TreeHeaderText() color.Color {
 	return p.slot(themeTreeHeaderFG)
+}
+
+func (p palette) ScrollbarTrack() color.Color {
+	return p.slot(themeTreeSeparatorFG)
+}
+
+func (p palette) ScrollbarThumb() color.Color {
+	return p.slot(themeTreeActiveFG)
 }
 
 func (p palette) TabActive() color.Color {
@@ -420,6 +433,21 @@ func (p palette) Info() color.Color {
 
 func (p palette) Hint() color.Color {
 	return p.slot(themeDiagnosticHint)
+}
+
+// blendSlots linearly interpolates between two theme slot colors by factor t (0.0 = slotA, 1.0 = slotB).
+func (p palette) blendSlots(slotA byte, slotB byte, t float64) color.Color {
+	a, okA := p.colors[slotA]
+	b, okB := p.colors[slotB]
+	if !okA || !okB {
+		return lipgloss.NoColor{}
+	}
+	rA, gA, bA := int(a>>16&0xFF), int(a>>8&0xFF), int(a&0xFF)
+	rB, gB, bB := int(b>>16&0xFF), int(b>>8&0xFF), int(b&0xFF)
+	r := uint32(float64(rA) + float64(rB-rA)*t)
+	g := uint32(float64(gA) + float64(gB-gA)*t)
+	bl := uint32(float64(bA) + float64(bB-bA)*t)
+	return lipgloss.Color(fmt.Sprintf("#%06X", (r<<16)|(g<<8)|bl))
 }
 
 func (p palette) slot(slot byte) color.Color {
