@@ -906,6 +906,10 @@ defmodule MingaEditor do
     GuiActionHandler.apply_git_result(state, result)
   end
 
+  defp apply_async_result(state, :format_external, result) do
+    MingaEditor.Commands.Formatting.apply_format_external_result(state, result)
+  end
+
   # Defensive fallthrough: a lane with no apply handler degrades to a logged
   # no-op rather than crashing the editor GenServer.
   defp apply_async_result(state, lane, _result) do
