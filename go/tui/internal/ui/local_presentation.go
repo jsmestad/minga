@@ -29,6 +29,7 @@ type localPresentation struct {
 	scrolls                map[uint16]presentationScroll
 	previewFileTreeIndex   *int
 	previewCompletionIndex *int
+	previewPickerIndex     *int
 }
 
 func newLocalPresentation() localPresentation {
@@ -59,6 +60,10 @@ func (lp *localPresentation) reconcileCompletion() {
 	lp.previewCompletionIndex = nil
 }
 
+func (lp *localPresentation) reconcilePicker() {
+	lp.previewPickerIndex = nil
+}
+
 func (lp *localPresentation) discard(kind transformKind, windowID uint16) {
 	switch kind {
 	case transformOffset:
@@ -66,6 +71,7 @@ func (lp *localPresentation) discard(kind transformKind, windowID uint16) {
 	case transformIdentity:
 		lp.previewFileTreeIndex = nil
 		lp.previewCompletionIndex = nil
+		lp.previewPickerIndex = nil
 	}
 }
 

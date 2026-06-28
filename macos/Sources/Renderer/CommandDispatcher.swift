@@ -35,6 +35,13 @@ private enum FileTreeNavigationCodepoints {
     static let upArrow: UInt32 = 57352
 }
 
+private enum PickerNavigationCodepoints {
+    static let downKey: UInt32 = 106
+    static let upKey: UInt32 = 107
+    static let downArrow: UInt32 = 57353
+    static let upArrow: UInt32 = 57352
+}
+
 private enum CompletionNavigationCodepoints {
     static let ctrlN: UInt32 = 110
     static let ctrlP: UInt32 = 112
@@ -467,6 +474,20 @@ final class CommandDispatcher {
             return false
         }
         return guiState.completionState.previewNavigation(delta: delta)
+    }
+
+    @discardableResult
+    func previewPickerNavigation(codepoint: UInt32, modifiers: UInt8) -> Bool {
+        guard modifiers == 0 else { return false }
+
+        switch codepoint {
+        case PickerNavigationCodepoints.downKey, PickerNavigationCodepoints.downArrow:
+            return guiState.pickerState.previewNavigation(delta: 1)
+        case PickerNavigationCodepoints.upKey, PickerNavigationCodepoints.upArrow:
+            return guiState.pickerState.previewNavigation(delta: -1)
+        default:
+            return false
+        }
     }
 
     /// Apply a single render command to the presented FrameState/GUIState. This
