@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"image/color"
 	"sort"
 	"strings"
 
@@ -795,7 +796,8 @@ func (m Model) renderFileTreeRow(row protocol.FileTreeRow, width int) string {
 	if row.Selected || row.Directory {
 		nameStyle = nameStyle.Bold(true)
 	}
-	content := markerStyle.Render(selectionMarker+prefix+expander) + rowStyle.Render(" ") + iconStyle.Render(icon.glyph) + rowStyle.Render(" ") + nameStyle.Render(row.Name)
+	nameRendered := renderFileTreeName(row.Name, row.MatchPositions, nameStyle, theme.Accent())
+	content := markerStyle.Render(selectionMarker+prefix+expander) + rowStyle.Render(" ") + iconStyle.Render(icon.glyph) + rowStyle.Render(" ") + nameRendered
 	if row.Dirty {
 		dirty := lipgloss.NewStyle().Foreground(theme.Warning()).Background(rowBackground).Render("●")
 		space := strings.Repeat(" ", max(width-lipgloss.Width(content)-lipgloss.Width(dirty), 1))
@@ -804,6 +806,31 @@ func (m Model) renderFileTreeRow(row protocol.FileTreeRow, width int) string {
 		content += rowStyle.Render(strings.Repeat(" ", remaining))
 	}
 	return rowStyle.Width(width).Render(fitStyled(content, width))
+}
+
+// renderFileTreeName renders a filename with optional accent highlighting on
+// matched character positions. When matchPositions is empty the name is rendered
+// with the base style only (no highlighting). Match positions are uint16 rune
+// indices into the name string, matching the fuzzy-match pattern used by the
+// picker overlay.
+func renderFileTreeName(name string, matchPositions []uint16, baseStyle lipgloss.Style, accent color.Color) string {
+	if len(matchPositions) == 0 {
+		return baseStyle.Render(name)
+	}
+	matchSet := make(map[uint16]bool, len(matchPositions))
+	for _, pos := range matchPositions {
+		matchSet[pos] = true
+	}
+	accentStyle := baseStyle.Foreground(accent)
+	var result strings.Builder
+	for i, r := range name {
+		if matchSet[uint16(i)] {
+			result.WriteString(accentStyle.Render(string(r)))
+		} else {
+			result.WriteString(baseStyle.Render(string(r)))
+		}
+	}
+	return result.String()
 }
 
 func fileTreeRowMuted(row protocol.FileTreeRow) bool {
