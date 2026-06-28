@@ -256,7 +256,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if status, ok := m.statusBar(); ok {
 			m.feedback.updateStatus(status.Message)
 		}
-		if m.feedback.active() {
+		pickerLoading := false
+		if picker, ok := m.chrome[generated.OPGuiPicker]; ok && picker.Picker.LoadStatus == 1 {
+			pickerLoading = true
+		}
+		if m.feedback.active() || pickerLoading {
 			cmd = feedbackTick()
 		} else {
 			m.feedback.ticking = false
@@ -279,7 +283,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if status, ok := m.statusBar(); ok {
 		m.feedback.updateStatus(status.Message)
 	}
-	if m.feedback.active() && !m.feedback.ticking {
+	needsTick := m.feedback.active()
+	if !needsTick {
+		if picker, ok := m.chrome[generated.OPGuiPicker]; ok && picker.Picker.LoadStatus == 1 {
+			needsTick = true
+		}
+	}
+	if needsTick && !m.feedback.ticking {
 		m.feedback.ticking = true
 		cmd = tea.Batch(cmd, feedbackTick())
 	}

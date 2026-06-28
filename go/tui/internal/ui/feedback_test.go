@@ -132,6 +132,42 @@ func TestFeedbackSpinnerRotates(t *testing.T) {
 	}
 }
 
+func TestFeedbackTickAdvancesFrame(t *testing.T) {
+	var f feedbackState
+	if f.frame != 0 {
+		t.Fatalf("initial frame should be 0, got %d", f.frame)
+	}
+	f.tick()
+	if f.frame != 1 {
+		t.Errorf("frame after one tick should be 1, got %d", f.frame)
+	}
+	f.tick()
+	f.tick()
+	if f.frame != 3 {
+		t.Errorf("frame after three ticks should be 3, got %d", f.frame)
+	}
+	// Verify the spinner output changes across consecutive ticks, covering the
+	// picker-loading case where tick() is the only driver of spinner animation.
+	frames := make([]string, len(spinnerFrames)+1)
+	f.frame = 0
+	for i := range frames {
+		frames[i] = f.spinner()
+		f.tick()
+	}
+	// The first len(spinnerFrames) entries should all be distinct (one full cycle).
+	seen := map[string]bool{}
+	for _, s := range frames[:len(spinnerFrames)] {
+		if seen[s] {
+			t.Errorf("duplicate spinner frame %q within one cycle", s)
+		}
+		seen[s] = true
+	}
+	// After a full cycle the spinner wraps: frame[0] == frame[len(spinnerFrames)].
+	if frames[0] != frames[len(spinnerFrames)] {
+		t.Errorf("spinner should wrap after full cycle: frame[0]=%q, frame[%d]=%q", frames[0], len(spinnerFrames), frames[len(spinnerFrames)])
+	}
+}
+
 func TestFeedbackDuplicateMessage(t *testing.T) {
 	var f feedbackState
 	f.updateStatus("Formatting…")
