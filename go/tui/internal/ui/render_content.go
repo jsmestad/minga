@@ -977,7 +977,6 @@ func fileTreeScrollbarThumb(totalRows int, visibleRows int, scrollOffset int) (t
 	return thumbStart, thumbEnd
 }
 
-
 func (m Model) renderFileTreeRow(row protocol.FileTreeRow, width int, guides fileTreeRowGuides) string {
 	theme := m.palette()
 	rowBackground := theme.TreeSurface()
