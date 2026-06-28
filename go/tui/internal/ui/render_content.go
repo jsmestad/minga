@@ -199,6 +199,12 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 	} else if len(m.windowOrder) <= 1 {
 		height = max(height, m.bodyHeight())
 	}
+	// Scrollbar: reserve the rightmost column when total content exceeds the
+	// viewport height so the thumb indicator can be drawn there.
+	sb := computeScrollbar(window, height)
+	if sb.active {
+		width--
+	}
 	// Composed-line cache (#2288): a row that arrived as a ref (unchanged
 	// content_hash) under an unchanged window render context reuses its
 	// previously composed line instead of re-running the lipgloss tree. The
@@ -223,7 +229,11 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 		if cacheable {
 			if cached, ok := builder.lookup(key); ok {
 				m.lineCache.hits++
-				lines = append(lines, cached)
+				line := cached
+				if sb.active {
+					line += m.renderScrollbarCell(rowIndex, sb)
+				}
+				lines = append(lines, line)
 				continue
 			}
 		}
@@ -240,6 +250,9 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 		if cacheable {
 			m.lineCache.misses++
 			builder.store(key, line)
+		}
+		if sb.active {
+			line += m.renderScrollbarCell(rowIndex, sb)
 		}
 		lines = append(lines, line)
 	}
@@ -307,6 +320,47 @@ func presentationVisibleRows(window protocol.WindowContent) int {
 		}
 	}
 	return 0
+}
+
+// scrollbarState describes the position and size of the proportional scrollbar
+// indicator in the viewport margin. When active is false no scrollbar is drawn.
+type scrollbarState struct {
+	active   bool
+	thumbTop int
+	thumbBot int // exclusive
+}
+
+// computeScrollbar derives scrollbar geometry from the window's pane geometry
+// and scroll presentation. The scrollbar is active only when total content
+// exceeds the rendered viewport height.
+func computeScrollbar(window protocol.WindowContent, viewportHeight int) scrollbarState {
+	if !window.GeometrySet || viewportHeight <= 0 {
+		return scrollbarState{}
+	}
+	totalRows := int(window.Geometry.TotalLines)
+	if totalRows <= viewportHeight {
+		return scrollbarState{}
+	}
+	scrollTop := int(window.Geometry.ViewportTop)
+	if window.ScrollSet {
+		scrollTop = int(window.Scroll.VisibleStartLine)
+	}
+	thumbSize := max(viewportHeight*viewportHeight/totalRows, 1)
+	thumbPos := scrollTop * viewportHeight / totalRows
+	thumbPos = min(thumbPos, viewportHeight-thumbSize)
+	return scrollbarState{
+		active:   true,
+		thumbTop: thumbPos,
+		thumbBot: thumbPos + thumbSize,
+	}
+}
+
+func (m Model) renderScrollbarCell(rowIndex int, sb scrollbarState) string {
+	bg := m.editorBackground()
+	if rowIndex >= sb.thumbTop && rowIndex < sb.thumbBot {
+		return lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(bg).Render("▐")
+	}
+	return lipgloss.NewStyle().Foreground(m.palette().GutterText()).Background(bg).Render(" ")
 }
 
 func (m Model) presentationScrollEffectiveLeft(window protocol.WindowContent) int {
