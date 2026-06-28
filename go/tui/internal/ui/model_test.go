@@ -2132,13 +2132,14 @@ func TestSemanticMouseRoutesObservatoryNodeZones(t *testing.T) {
 		}},
 	}
 	// Observatory is registry-placed (#2281): it renders at its BEAM placement rect
-	// and its zones are scanned from there. Height 3 is the BEAM-derived value for
+	// and its zones are scanned from there. Height 4 is the BEAM-derived value for
 	// this state, NOT an arbitrary fit: FooterOverlays.content_height_observatory =
-	// 1 (header) + node_count = 1 + 2 = 3. If the renderer ever emits more rows than
-	// that formula counts, takeLines clips the extra rows and their zones never
-	// register, so keep the two in lockstep (the #2333 height lesson).
+	// 1 (separator) + 1 (header) + node_count = 1 + 1 + 2 = 4. If the renderer
+	// ever emits more rows than that formula counts, takeLines clips the extra rows
+	// and their zones never register, so keep the two in lockstep (the #2333 height
+	// lesson).
 	model.surfacePlacements = []generated.SurfacePlacement{
-		{SurfaceID: surfaceIDObservatory, Rect: generated.Rect{Row: 21, Col: 0, Width: 80, Height: 3}, Z: 180, HitKind: 8},
+		{SurfaceID: surfaceIDObservatory, Rect: generated.Rect{Row: 20, Col: 0, Width: 80, Height: 4}, Z: 180, HitKind: 8},
 	}
 	model.viewport.SetContent(model.content())
 	_ = model.View()
@@ -2147,8 +2148,8 @@ func TestSemanticMouseRoutesObservatoryNodeZones(t *testing.T) {
 	// observatory_inspect(pid). The absolute coords come from the bottom-aligned
 	// placement, proving the overlay zones merge at the placement offset (ScanInto).
 	node := waitForZone(t, model, zoneIDObservatoryNode("<0.456.0>"))
-	if node.StartY < 21 || node.StartY >= 24 {
-		t.Fatalf("observatory node zone Y %d outside the band rows 21..23", node.StartY)
+	if node.StartY < 20 || node.StartY >= 24 {
+		t.Fatalf("observatory node zone Y %d outside the band rows 20..23", node.StartY)
 	}
 	cmd, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: node.StartX + 1, Y: node.StartY}))
 	if !ok || !bytes.Equal(cmd, protocol.EncodeGUIObservatoryInspect("<0.456.0>")) {
@@ -2175,11 +2176,12 @@ func TestSemanticMouseRoutesEditTimelineEntryZones(t *testing.T) {
 			},
 		}},
 	}
-	// Edit timeline is registry-placed (#2281). Height 3 is the BEAM-derived value:
-	// FooterOverlays.content_height_edit_timeline = 1 (header) + entry_count =
-	// 1 + 2 = 3. Same takeLines/clip lockstep as observatory and notifications.
+	// Edit timeline is registry-placed (#2281). Height 4 is the BEAM-derived value:
+	// FooterOverlays.content_height_edit_timeline = 1 (separator) + 1 (header) +
+	// entry_count = 1 + 1 + 2 = 4. Same takeLines/clip lockstep as observatory
+	// and notifications.
 	model.surfacePlacements = []generated.SurfacePlacement{
-		{SurfaceID: surfaceIDEditTimeline, Rect: generated.Rect{Row: 21, Col: 0, Width: 80, Height: 3}, Z: 170, HitKind: 8},
+		{SurfaceID: surfaceIDEditTimeline, Rect: generated.Rect{Row: 20, Col: 0, Width: 80, Height: 4}, Z: 170, HitKind: 8},
 	}
 	model.viewport.SetContent(model.content())
 	_ = model.View()
@@ -2187,8 +2189,8 @@ func TestSemanticMouseRoutesEditTimelineEntryZones(t *testing.T) {
 	// Each entry row carries a zone keyed by its index; a click routes
 	// timeline_navigate(index).
 	entry := waitForZone(t, model, zoneIDTimelineEntry(1))
-	if entry.StartY < 21 || entry.StartY >= 24 {
-		t.Fatalf("timeline entry zone Y %d outside the band rows 21..23", entry.StartY)
+	if entry.StartY < 20 || entry.StartY >= 24 {
+		t.Fatalf("timeline entry zone Y %d outside the band rows 20..23", entry.StartY)
 	}
 	cmd, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: entry.StartX + 1, Y: entry.StartY}))
 	if !ok || !bytes.Equal(cmd, protocol.EncodeGUITimelineNavigate(1)) {

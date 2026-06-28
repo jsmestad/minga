@@ -80,6 +80,20 @@ func trimTrailingBlankLines(lines []string) []string {
 	return lines[:end]
 }
 
+// panelSeparatorLine renders a full-width ─ separator line for the top of a
+// bottom panel, visually separating it from the editor body above. The caller
+// must account for this line in its height budget (subtract 1 from content
+// rows) so the BEAM content_height model stays exact.
+func panelSeparatorLine(theme palette, width int, bg color.Color) string {
+	w := max(width, 1)
+	return lipgloss.NewStyle().
+		Foreground(theme.TreeSeparator()).
+		Background(bg).
+		Width(w).
+		ColorWhitespace(true).
+		Render(strings.Repeat("─", w))
+}
+
 // Registry surface ids (mirror MingaEditor.Layout.SurfaceRegistry.surface_id_u16/1).
 // Every overlay surface is now BEAM registry-placed: #2281 promoted the eight
 // footer-band secondary overlays (float popup through extension overlay) so the
@@ -472,12 +486,13 @@ func (m Model) renderObservatory(obs protocol.Observatory) []string {
 	qWidth := 6
 	nameWidth := max(m.width-pidWidth-qWidth, 20)
 
+	sep := panelSeparatorLine(theme, m.width, theme.PopupSurface())
 	header := tableHeaderRow(theme, m.width, []tableCell{
 		{text: fmt.Sprintf("Observatory %d", max(int(obs.Count), len(obs.Nodes))), width: pidWidth},
 		{text: "Process", width: nameWidth},
 		{text: "Q", width: qWidth},
 	})
-	lines := []string{header}
+	lines := []string{sep, header}
 	for _, node := range obs.Nodes {
 		row := tableDataRow(theme, m.width, false, []tableCell{
 			{text: node.PID, width: pidWidth},
@@ -501,8 +516,10 @@ func (m Model) renderObservatory(obs protocol.Observatory) []string {
 func (m Model) renderEditTimeline(timeline protocol.EditTimeline) []string {
 	height := m.maxOverlayHeight()
 	theme := m.palette()
+	sep := panelSeparatorLine(theme, m.width, theme.PopupSurface())
 	if len(timeline.Files) > 0 {
-		return takeLines(m.renderEditTimelineFiles(timeline, theme), height)
+		fileLines := m.renderEditTimelineFiles(timeline, theme)
+		return takeLines(append([]string{sep}, fileLines...), height)
 	}
 	idxWidth := 4
 	ageWidth := 8
@@ -513,7 +530,7 @@ func (m Model) renderEditTimeline(timeline protocol.EditTimeline) []string {
 		{text: "Tool", width: toolWidth},
 		{text: "Age", width: ageWidth},
 	})
-	lines := []string{header}
+	lines := []string{sep, header}
 	for _, entry := range timeline.Entries {
 		selected := uint16(entry.Index) == timeline.ViewingIndex
 		row := tableDataRow(theme, m.width, selected, []tableCell{
@@ -680,8 +697,10 @@ func (m Model) renderNotificationActionsRow(note protocol.Notification, width in
 
 func (m Model) renderExtensionOverlay(overlay protocol.ExtensionOverlay) []string {
 	style := m.panelStyle()
-	lines := []string{style.Bold(true).Foreground(m.palette().Accent()).Render(fit("Extension overlays", m.width))}
-	for _, entry := range overlay.Entries[:min(len(overlay.Entries), max(m.maxOverlayHeight()-1, 0))] {
+	theme := m.palette()
+	sep := panelSeparatorLine(theme, m.width, theme.Base())
+	lines := []string{sep, style.Bold(true).Foreground(theme.Accent()).Render(fit("Extension overlays", m.width))}
+	for _, entry := range overlay.Entries[:min(len(overlay.Entries), max(m.maxOverlayHeight()-2, 0))] {
 		lines = append(lines, style.Render(fit(fmt.Sprintf("%s %d:%d %s", entry.Extension, entry.Row+1, entry.Col+1, entry.Content), m.width)))
 	}
 	return lines
