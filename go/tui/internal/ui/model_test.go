@@ -319,7 +319,7 @@ func TestHeaderRendersBreadcrumbWithTabs(t *testing.T) {
 	}
 
 	header := ansi.Strip(strings.Join(model.headerLines(), "\n"))
-	if !strings.Contains(header, "▌ 󰈙 main.ex") || !strings.Contains(header, "lib › minga › main.ex") {
+	if !strings.Contains(header, "▌ 󰈙 main.ex") || !strings.Contains(header, "lib ❯ minga ❯ main.ex") {
 		t.Fatalf("wide header should render active tab accent and breadcrumbs together: %q", header)
 	}
 }
@@ -350,7 +350,7 @@ func TestHeaderHidesBreadcrumbsAtNarrowWidth(t *testing.T) {
 	}
 
 	header := ansi.Strip(strings.Join(model.headerLines(), "\n"))
-	if strings.Contains(header, "lib › minga") {
+	if strings.Contains(header, "lib ❯ minga") {
 		t.Fatalf("narrow header should not spend a row on breadcrumbs: %q", header)
 	}
 }
