@@ -50,6 +50,9 @@ func (m *Model) previewFileTreeNavigation(msg tea.KeyPressMsg) bool {
 	}
 
 	selectedIndex := fileTreeSelectedIndex(payload)
+	if m.localPresentation.previewFileTreeIndex != nil {
+		selectedIndex = *m.localPresentation.previewFileTreeIndex
+	}
 	if selectedIndex < 0 {
 		return false
 	}
@@ -64,15 +67,7 @@ func (m *Model) previewFileTreeNavigation(msg tea.KeyPressMsg) bool {
 		return false
 	}
 
-	payload.Selected = payload.Rows[nextIndex].ID
-	payload.Focused = true
-	for i := range payload.Rows {
-		payload.Rows[i].Selected = i == nextIndex
-		payload.Rows[i].Focused = i == nextIndex
-	}
-	chrome := m.chrome[generated.OPGuiFileTree]
-	chrome.Tree = payload
-	m.chrome[generated.OPGuiFileTree] = chrome
+	m.localPresentation.previewFileTreeIndex = &nextIndex
 	return true
 }
 
@@ -101,6 +96,66 @@ func fileTreeSelectedIndex(tree protocol.FileTree) int {
 		}
 	}
 	return -1
+}
+
+func (m *Model) previewCompletionNavigation(msg tea.KeyPressMsg) bool {
+	key := msg.Key()
+
+	var delta int
+	if key.Mod.Contains(tea.ModCtrl) && !key.Mod.Contains(tea.ModShift) && !key.Mod.Contains(tea.ModAlt) && !key.Mod.Contains(tea.ModSuper) {
+		switch key.Code {
+		case 'n':
+			delta = 1
+		case 'p':
+			delta = -1
+		default:
+			return false
+		}
+	} else if !key.Mod.Contains(tea.ModCtrl) && !key.Mod.Contains(tea.ModShift) && !key.Mod.Contains(tea.ModAlt) && !key.Mod.Contains(tea.ModSuper) {
+		switch key.Code {
+		case tea.KeyDown:
+			delta = 1
+		case tea.KeyUp:
+			delta = -1
+		default:
+			return false
+		}
+	} else {
+		return false
+	}
+
+	payload, ok := m.chrome[generated.OPGuiCompletion]
+	if !ok || !payload.Complete.Visible || len(payload.Complete.Items) == 0 {
+		return false
+	}
+
+	current := int(payload.Complete.Selected)
+	if m.localPresentation.previewCompletionIndex != nil {
+		current = *m.localPresentation.previewCompletionIndex
+	}
+
+	next := current + delta
+	if next < 0 {
+		next = 0
+	} else if next >= len(payload.Complete.Items) {
+		next = len(payload.Complete.Items) - 1
+	}
+	if next == current {
+		return false
+	}
+
+	m.localPresentation.previewCompletionIndex = &next
+	return true
+}
+
+func (m Model) effectiveCompletionIndex(completion protocol.Completion) int {
+	if m.localPresentation.previewCompletionIndex != nil {
+		idx := *m.localPresentation.previewCompletionIndex
+		if idx >= 0 && idx < len(completion.Items) {
+			return idx
+		}
+	}
+	return min(max(int(completion.Selected), 0), max(len(completion.Items)-1, 0))
 }
 
 func (m Model) applyIndentGuide(window protocol.WindowContent, style lipgloss.Style, rowIndex int, col int, text string) (lipgloss.Style, string) {
