@@ -578,6 +578,7 @@ final class CommandDispatcher {
 
         case .guiStatusBar(let update):
             guiState.statusBarState.update(from: update)
+            guiState.feedbackState.update(message: update.message)
             frameState.totalLineCount = update.lineCount
             if update.mode != lastMode {
                 lastMode = update.mode
@@ -639,13 +640,12 @@ final class CommandDispatcher {
             frameState.dirty = true
 
         case .guiWindowContent(let data):
+            let previousScroll = guiState.windowContents[data.windowId]?.scrollPresentation
             guiState.windowContents[data.windowId] = data
             currentFrameWindowIds.insert(data.windowId)
-            if data.scrollPresentation?.resetRequired == true {
+            if shouldResetScrollPresentation(previous: previousScroll, next: data.scrollPresentation) {
                 onScrollPresentationReset?()
             }
-            // BEAM controls cursor visibility per window. When the minibuffer
-            // or other overlay has focus, cursor_visible is false.
             frameState.cursorVisible = data.cursorVisible
 
         case .guiWindowOverlayDelta(let delta):
@@ -663,9 +663,10 @@ final class CommandDispatcher {
                 guiState.windowContents.removeValue(forKey: delta.windowId)
                 break
             }
+            let previousScroll = current.scrollPresentation
             guiState.windowContents[delta.windowId] = updated
             currentFrameWindowIds.insert(delta.windowId)
-            if updated.scrollPresentation?.resetRequired == true {
+            if shouldResetScrollPresentation(previous: previousScroll, next: updated.scrollPresentation) {
                 onScrollPresentationReset?()
             }
             frameState.cursorVisible = delta.cursorVisible
@@ -852,8 +853,13 @@ final class CommandDispatcher {
 
     // MARK: - Clipboard
 
-    /// Handles a clipboard_write command from the BEAM.
-    /// Target 0 = general pasteboard (Cmd+C), 1 = find pasteboard (Cmd+E).
+    private func shouldResetScrollPresentation(previous: GUIScrollPresentation?, next: GUIScrollPresentation?) -> Bool {
+        if let next, next.resetRequired { return true }
+        guard let prev = previous else { return false }
+        guard let next else { return true }
+        return !next.isSameAnchorKey(as: prev)
+    }
+
     private func handleClipboardWrite(target: UInt8, text: String) {
         let pasteboard: NSPasteboard
         if target == 1 {

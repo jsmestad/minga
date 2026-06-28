@@ -137,7 +137,9 @@ defmodule MingaEditor.LspActions do
 
             ref = Client.request(client, "textDocument/references", params)
 
-            put_lsp_pending(state, ref, :references)
+            state
+            |> EditorState.set_status("Finding references…")
+            |> put_lsp_pending(ref, :references)
         end
     end
   end
@@ -312,7 +314,9 @@ defmodule MingaEditor.LspActions do
 
             ref = Client.request(client, "textDocument/rename", params)
 
-            put_lsp_pending(state, ref, :rename)
+            state
+            |> EditorState.set_status("Renaming…")
+            |> put_lsp_pending(ref, :rename)
         end
     end
   end
@@ -948,6 +952,33 @@ defmodule MingaEditor.LspActions do
 
   def handle_rename_response(state, {:ok, workspace_edit}) do
     apply_workspace_edit(state, workspace_edit, "Rename")
+  end
+
+  # ── Formatting response ──────────────────────────────────────────────────
+
+  @doc "Handles a textDocument/formatting response with staleness guard."
+  @spec handle_formatting_response(
+          state(),
+          {:ok, term()} | {:error, term()},
+          pid(),
+          non_neg_integer()
+        ) :: state()
+  def handle_formatting_response(state, {:error, reason}, _buf, _version) do
+    Log.warning(:lsp, "LSP formatting error: #{inspect(reason)}")
+    EditorState.set_status(state, "Format error: LSP request failed")
+  end
+
+  def handle_formatting_response(state, {:ok, nil}, _buf, _version) do
+    EditorState.set_status(state, "No formatting changes")
+  end
+
+  def handle_formatting_response(state, {:ok, edits}, buf, version) when is_list(edits) do
+    if Process.alive?(buf) and Buffer.version(buf) == version do
+      MingaEditor.Commands.Formatting.apply_lsp_edits(buf, edits)
+      EditorState.set_status(state, "Formatted (LSP)")
+    else
+      EditorState.set_status(state, "Buffer changed, format skipped")
+    end
   end
 
   # ── Type definition / Implementation responses ────────────────────────────
