@@ -14,36 +14,92 @@ import (
 const maxTabLabelWidth = 24
 
 func (m Model) headerLines() []string {
+	tree, hasTree := m.fileTree()
+	sidebarWidth := 0
+	if hasTree && tree.Visible && tree.Width > 0 && m.width >= 50 {
+		sidebarWidth = fileTreeWidth(m.width, tree)
+	}
+	mainWidth := m.width
+	if sidebarWidth > 0 {
+		mainWidth = max(m.width-sidebarWidth, 1)
+	}
+
 	lines := []string{}
-	if spaces, ok := m.workspaceBar(); ok && len(spaces.Spaces) > 0 {
-		lines = append(lines, m.renderWorkspaces(spaces))
+	if spaces, ok := m.workspaceBar(); ok && len(spaces.Spaces) > 1 {
+		lines = append(lines, m.renderWorkspaces(spaces, mainWidth))
 	}
 	if tabBar, ok := m.tabBar(); ok && len(tabBar.Tabs) > 0 {
-		tabLine, activeStart, activeWidth := m.renderTabs(tabBar)
-		lines = append(lines, tabLine)
-		lines = append(lines, m.renderTabSeparator(activeStart, activeWidth))
+		lines = append(lines, m.renderTabs(tabBar, mainWidth))
 	}
 	if crumb, ok := m.breadcrumb(); ok && len(crumb.Segments) > 0 && m.width >= 100 {
-		lines = append(lines, m.renderBreadcrumb(crumb))
+		lines = append(lines, m.renderBreadcrumb(crumb, mainWidth))
 	}
 	if len(lines) == 0 {
 		title := m.title
 		if title == "" {
 			title = "Minga"
 		}
-		lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(m.palette().Accent()).Background(m.palette().Surface()).Width(m.width).Render(title))
+		lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(m.palette().Accent()).Background(m.palette().Surface()).Width(mainWidth).Render(title))
+	}
+
+	if sidebarWidth > 0 {
+		lines = m.compositeHeaderWithSidebar(lines, tree, sidebarWidth)
 	}
 	return lines
 }
 
-func (m Model) renderWorkspaces(spaces protocol.WorkspaceBar) string {
+// compositeHeaderWithSidebar prepends a sidebar column to each header line so
+// the file tree header aligns with the tab bar and the tree separator runs
+// continuously from header through body.
+func (m Model) compositeHeaderWithSidebar(mainLines []string, tree protocol.FileTree, sidebarWidth int) []string {
 	theme := m.palette()
-	rowStyle := lipgloss.NewStyle().Background(theme.EditorSurface()).Width(m.width)
-	labelStyle := lipgloss.NewStyle().Foreground(theme.Muted()).Background(theme.EditorSurface())
-	activeStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.EditorSurface())
-	inactiveStyle := lipgloss.NewStyle().Foreground(theme.TabInactiveText()).Background(theme.EditorSurface())
-	metaStyle := lipgloss.NewStyle().Foreground(theme.Muted()).Background(theme.EditorSurface())
-	alertStyle := lipgloss.NewStyle().Foreground(theme.Warning()).Background(theme.EditorSurface())
+	sepColor := theme.TreeSeparator()
+	if tree.Focused {
+		sepColor = theme.Accent()
+	}
+	treeBG := theme.TreeSurface()
+	sepStyle := lipgloss.NewStyle().Foreground(sepColor).Background(treeBG)
+	sep := sepStyle.Render("│")
+
+	headerStyle := lipgloss.NewStyle().Foreground(theme.TreeHeaderText()).Background(treeBG).Width(sidebarWidth)
+	fillStyle := lipgloss.NewStyle().Background(treeBG).Width(sidebarWidth)
+
+	projectName := lastPathComponent(tree.Root)
+	lines := make([]string, len(mainLines))
+	for i, main := range mainLines {
+		var left string
+		if i == 0 {
+			left = headerStyle.Bold(true).Render(fit(" 󰙅 "+projectName, sidebarWidth))
+		} else {
+			left = fillStyle.Render(strings.Repeat(" ", max(sidebarWidth-1, 1)))
+		}
+		left = replaceVisibleCell(left, max(sidebarWidth-1, 0), sep)
+		lines[i] = lipgloss.JoinHorizontal(lipgloss.Top, left, main)
+	}
+	return lines
+}
+
+func lastPathComponent(path string) string {
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] == '/' {
+			if i == len(path)-1 {
+				continue
+			}
+			return path[i+1:]
+		}
+	}
+	return path
+}
+
+func (m Model) renderWorkspaces(spaces protocol.WorkspaceBar, width int) string {
+	theme := m.palette()
+	bg := theme.Surface()
+	rowStyle := lipgloss.NewStyle().Background(bg).Width(width)
+	labelStyle := lipgloss.NewStyle().Foreground(theme.Muted()).Background(bg)
+	activeStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(bg)
+	inactiveStyle := lipgloss.NewStyle().Foreground(theme.TabInactiveText()).Background(bg)
+	metaStyle := lipgloss.NewStyle().Foreground(theme.Muted()).Background(bg)
+	alertStyle := lipgloss.NewStyle().Foreground(theme.Warning()).Background(bg)
 	rendered := []string{labelStyle.Render("Spaces")}
 	separator := metaStyle.Render(" · ")
 	for _, space := range spaces.Spaces {
@@ -64,7 +120,7 @@ func (m Model) renderWorkspaces(spaces protocol.WorkspaceBar) string {
 		}
 		rendered = append(rendered, item)
 	}
-	return rowStyle.Render(fitStyled(strings.Join(rendered, separator), m.width))
+	return rowStyle.Render(fitStyled(strings.Join(rendered, separator), width))
 }
 
 func workspaceSpaceMetadata(space protocol.Workspace) string {
@@ -91,36 +147,34 @@ func pluralCount(count uint16, label string) string {
 	return fmt.Sprintf("%d %ss", count, label)
 }
 
-// renderTabs renders the tab bar and returns the rendered line along with the
-// active tab's visual start column and width (used by renderTabSeparator to
-// build the connector gap). Positions are ANSI-aware via lipgloss.Width.
-func (m Model) renderTabs(tabBar protocol.TabBar) (string, int, int) {
+func (m Model) renderTabs(tabBar protocol.TabBar, width int) string {
 	theme := m.palette()
-	rowStyle := lipgloss.NewStyle().Background(theme.Surface()).Width(m.width)
-	activeStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.TabActiveText()).Background(theme.TabActive()).Padding(0, 1)
-	inactiveStyle := lipgloss.NewStyle().Foreground(theme.TabInactiveText()).Background(theme.Surface()).Padding(0, 1)
-	dirtyStyle := lipgloss.NewStyle().Foreground(theme.TabDirty()).Background(theme.TabActive())
+	chromeBG := theme.Surface()
+	editorBG := m.editorBackground()
+	rowStyle := lipgloss.NewStyle().Background(chromeBG).Width(width)
+	activeStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.TabActiveText()).Background(editorBG).Padding(0, 1)
+	inactiveStyle := lipgloss.NewStyle().Foreground(theme.TabInactiveText()).Background(chromeBG).Padding(0, 1)
 	rendered := make([]string, 0, len(tabBar.Tabs))
 	for _, tab := range tabBar.Tabs {
+		tabBG := chromeBG
+		if tab.Active {
+			tabBG = editorBG
+		}
 		icon := tabIcon(tab)
 		iconText := icon.glyph
-		iconBackground := theme.Surface()
-		if tab.Active {
-			iconBackground = theme.TabActive()
-		}
 		if icon.color != "" {
-			iconText = lipgloss.NewStyle().Foreground(lipgloss.Color(icon.color)).Background(iconBackground).Render(icon.glyph)
+			iconText = lipgloss.NewStyle().Foreground(lipgloss.Color(icon.color)).Background(tabBG).Render(icon.glyph)
 		}
 		tabLabel := ansi.TruncateWc(tab.Label, maxTabLabelWidth, "…")
 		label := strings.TrimSpace(iconText + " " + tabLabel)
 		if tab.Active {
-			label = lipgloss.NewStyle().Foreground(theme.Accent()).Background(theme.TabActive()).Render("▌") + " " + label
+			label = lipgloss.NewStyle().Foreground(theme.Accent()).Background(editorBG).Render("▌") + " " + label
 		}
 		if tab.Dirty {
-			label += dirtyStyle.Render(" *")
+			label += lipgloss.NewStyle().Foreground(theme.TabDirty()).Background(tabBG).Render(" *")
 		}
 		if tab.Attention {
-			label += lipgloss.NewStyle().Foreground(theme.TabAttention()).Background(theme.Surface()).Render(" !")
+			label += lipgloss.NewStyle().Foreground(theme.TabAttention()).Background(tabBG).Render(" !")
 		}
 		style := inactiveStyle
 		if tab.Active {
@@ -130,80 +184,28 @@ func (m Model) renderTabs(tabBar protocol.TabBar) (string, int, int) {
 		}
 		rendered = append(rendered, m.zones.Mark(zoneIDTab(tab.ID), style.Render(label)))
 	}
-
-	// Track the active tab's visual position within the joined tab string.
-	activeStart, activeWidth := 0, 0
-	pos := 0
-	for i, tab := range tabBar.Tabs {
-		if i > 0 {
-			pos++ // 1-char " " separator between tabs
-		}
-		w := lipgloss.Width(rendered[i])
-		if tab.Active {
-			activeStart = pos
-			activeWidth = w
-		}
-		pos += w
-	}
-
-	// Clamp to visible width: fitStyled truncates at m.width, so the gap must
-	// not extend beyond the visible portion of the active tab.
-	if activeStart >= m.width {
-		activeWidth = 0
-	} else if activeStart+activeWidth > m.width {
-		activeWidth = m.width - activeStart
-	}
-
-	line := rowStyle.Render(fitStyled(strings.Join(rendered, " "), m.width))
-	return line, activeStart, activeWidth
+	return rowStyle.Render(fitStyled(strings.Join(rendered, " "), width))
 }
 
-// renderTabSeparator builds the horizontal rule below the tab bar with a gap
-// (spaces) under the active tab, creating a visual connector between the active
-// tab and the editor content (VS Code-style tab connector).
-func (m Model) renderTabSeparator(activeStart, activeWidth int) string {
-	theme := m.palette()
-	sepFG := theme.TabSeparator()
-	sepBG := theme.EditorSurface()
-	sepStyle := lipgloss.NewStyle().Foreground(sepFG).Background(sepBG)
-	gapStyle := lipgloss.NewStyle().Background(sepBG)
-	rowStyle := lipgloss.NewStyle().Background(sepBG).Width(m.width)
-
-	width := max(m.width, 0)
-	if activeWidth <= 0 || activeStart >= width {
-		return rowStyle.Render(sepStyle.Render(strings.Repeat("─", width)))
-	}
-
-	end := min(activeStart+activeWidth, width)
-	var b strings.Builder
-	if activeStart > 0 {
-		b.WriteString(sepStyle.Render(strings.Repeat("─", activeStart)))
-	}
-	b.WriteString(gapStyle.Render(strings.Repeat(" ", end-activeStart)))
-	if remaining := width - end; remaining > 0 {
-		b.WriteString(sepStyle.Render(strings.Repeat("─", remaining)))
-	}
-	return rowStyle.Render(b.String())
-}
-
-func (m Model) renderBreadcrumb(crumb protocol.Breadcrumb) string {
+func (m Model) renderBreadcrumb(crumb protocol.Breadcrumb, width int) string {
+	bg := m.editorBackground()
 	segments := make([]string, 0, len(crumb.Segments))
 	for index, segment := range crumb.Segments {
-		style := lipgloss.NewStyle().Foreground(m.palette().BreadcrumbText()).Background(m.palette().EditorSurface())
+		style := lipgloss.NewStyle().Foreground(m.palette().BreadcrumbText()).Background(bg)
 		if index == len(crumb.Segments)-1 {
 			style = style.Foreground(m.palette().Text())
 		}
 		segments = append(segments, m.zones.Mark(zoneIDBreadcrumbSegment(index), style.Render(segment)))
 	}
-	separator := lipgloss.NewStyle().Foreground(m.palette().BreadcrumbSeparator()).Background(m.palette().EditorSurface()).Render(" ❯ ")
+	separator := lipgloss.NewStyle().Foreground(m.palette().BreadcrumbSeparator()).Background(bg).Render(" ❯ ")
 	text := "  " + strings.Join(segments, separator)
 	if git, ok := m.gitStatus(); ok && git.Branch != "" {
-		gitText := lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(m.palette().EditorSurface()).Render("  ·  " + m.gitSummary(git))
-		if lipgloss.Width(text)+lipgloss.Width(gitText) <= m.width {
+		gitText := lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(bg).Render("  ·  " + m.gitSummary(git))
+		if lipgloss.Width(text)+lipgloss.Width(gitText) <= width {
 			text += gitText
 		}
 	}
-	return lipgloss.NewStyle().Background(m.palette().EditorSurface()).Width(m.width).Render(fitStyled(text, m.width))
+	return lipgloss.NewStyle().Background(bg).Width(width).Render(fitStyled(text, width))
 }
 
 func (m Model) footerLines() []string {

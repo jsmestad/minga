@@ -239,10 +239,11 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 			}
 		}
 
+		cursorline := window.Cursorline.Visible && contentRowIndex == int(window.Cursorline.Row)
 		contentWidth := width
 		gutterText := ""
 		if hasGutter {
-			gutterText = m.renderGutterEntry(gutter, sourceRowIndex)
+			gutterText = m.renderGutterEntry(gutter, sourceRowIndex, cursorline, window.Cursorline.BG)
 			contentWidth = max(width-lipgloss.Width(gutterText), 1)
 		}
 
@@ -685,7 +686,7 @@ func (m Model) withFileTree(mainLines []string) []string {
 	}
 
 	sidebarWidth := fileTreeWidth(m.width, tree)
-	sidebar := m.renderFileTree(tree, sidebarWidth, max(len(mainLines), m.bodyHeight()))
+	sidebar := m.renderFileTree(tree, sidebarWidth, max(len(mainLines), m.bodyHeight()), true)
 	sepColor := m.palette().TreeSeparator()
 	if tree.Focused {
 		sepColor = m.palette().Accent()
@@ -746,13 +747,18 @@ func (m Model) withSemanticSidebars(mainLines []string) []string {
 	return lines
 }
 
-func (m Model) renderGutterEntry(gutter protocol.Gutter, rowIndex int) string {
+func (m Model) renderGutterEntry(gutter protocol.Gutter, rowIndex int, cursorline bool, cursorlineBG uint32) string {
 	width := int(gutter.SignColWidth) + max(int(gutter.LineNumberWidth)-1, 0) + 1
 	if width <= 1 {
 		return ""
 	}
 	bg := m.editorBackground()
 	style := lipgloss.NewStyle().Foreground(m.palette().GutterText()).Background(bg).Width(width)
+	if cursorline && cursorlineBG != 0 {
+		clBG := lipgloss.Color(fmt.Sprintf("#%06X", cursorlineBG))
+		style = style.Background(clBG)
+		bg = clBG
+	}
 	if rowIndex < 0 || rowIndex >= len(gutter.Entries) {
 		return style.Render(strings.Repeat(" ", width))
 	}
@@ -763,7 +769,7 @@ func (m Model) renderGutterEntry(gutter protocol.Gutter, rowIndex int) string {
 	sign := m.gutterSign(entry)
 	number := m.gutterLineNumber(gutter, entry)
 	if entry.DisplayType == 1 || entry.DisplayType == 4 {
-		foldStyle := lipgloss.NewStyle().Foreground(m.palette().GutterFold()).Background(m.editorBackground())
+		foldStyle := lipgloss.NewStyle().Foreground(m.palette().GutterFold()).Background(bg)
 		if entry.BufferLine == gutter.CursorLine && gutter.LineNumberStyle != 2 {
 			foldStyle = foldStyle.Bold(true)
 		}
@@ -901,10 +907,13 @@ func fileTreeHasMoreAtLevel(rows []protocol.FileTreeRow, fromIndex int, level in
 	return false
 }
 
-func (m Model) renderFileTree(tree protocol.FileTree, width int, height int) []string {
+func (m Model) renderFileTree(tree protocol.FileTree, width int, height int, skipHeader bool) []string {
 	theme := m.palette()
 	totalRows := len(tree.Rows)
-	visibleRows := height - 1 // header takes 1 line
+	visibleRows := height
+	if !skipHeader {
+		visibleRows = height - 1
+	}
 	needsScrollbar := totalRows > visibleRows && visibleRows > 0
 
 	contentWidth := width
@@ -912,9 +921,12 @@ func (m Model) renderFileTree(tree protocol.FileTree, width int, height int) []s
 		contentWidth = max(width-1, 1)
 	}
 
-	headerStyle := lipgloss.NewStyle().Foreground(theme.TreeHeaderText()).Background(theme.TreeHeader()).Width(width)
-	header := headerStyle.Bold(true).Render(fit(" 󰙅 Files  "+tree.Root, width))
-	lines := []string{header}
+	lines := []string{}
+	if !skipHeader {
+		headerStyle := lipgloss.NewStyle().Foreground(theme.TreeHeaderText()).Background(theme.TreeHeader()).Width(width)
+		header := headerStyle.Bold(true).Render(fit(" 󰙅 Files  "+tree.Root, width))
+		lines = append(lines, header)
+	}
 
 	contentStyle := lipgloss.NewStyle().Foreground(theme.TreeText()).Background(theme.TreeSurface()).Width(contentWidth)
 	if totalRows == 0 {
