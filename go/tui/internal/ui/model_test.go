@@ -1415,7 +1415,7 @@ func TestSplitSeparatorsNormalizeAgainstHeaderAndFileTree(t *testing.T) {
 
 func TestFileTreeSelectedRowPaintsBackgroundAcrossSegments(t *testing.T) {
 	model := New(40, 8, nil)
-	rendered := model.renderFileTreeRow(protocol.FileTreeRow{Name: "installer", Icon: "󰉋", Directory: true, Selected: true}, 24)
+	rendered := model.renderFileTreeRow(protocol.FileTreeRow{Name: "installer", Icon: "󰉋", Directory: true, Selected: true}, 24, fileTreeRowGuides{})
 	if count := strings.Count(rendered, "48;2;51;51;51"); count < 4 {
 		t.Fatalf("selected file-tree row should carry selection background across marker, icon, label, and fill, count=%d row=%q", count, rendered)
 	}
@@ -1431,7 +1431,7 @@ func TestFileTreeMatchHighlightAccentsMatchedCharacters(t *testing.T) {
 		Name:           "main.go",
 		Icon:           "",
 		MatchPositions: []uint16{0, 1},
-	}, 30)
+	}, 30, fileTreeRowGuides{})
 	stripped := ansi.Strip(rendered)
 	if !strings.Contains(stripped, "main.go") {
 		t.Fatalf("rendered row should contain filename, got %q", stripped)
@@ -1450,11 +1450,11 @@ func TestFileTreeMatchHighlightSkippedWhenNoPositions(t *testing.T) {
 		Name:           "main.go",
 		Icon:           "",
 		MatchPositions: []uint16{0},
-	}, 30)
+	}, 30, fileTreeRowGuides{})
 	withoutMatch := model.renderFileTreeRow(protocol.FileTreeRow{
 		Name: "main.go",
 		Icon: "",
-	}, 30)
+	}, 30, fileTreeRowGuides{})
 	// Without match positions, no accent highlighting should appear in the name portion.
 	// The accent color should only appear in the version with match positions.
 	if strings.Contains(withoutMatch, "125;183;255") {
@@ -1472,7 +1472,7 @@ func TestFileTreeMatchHighlightPreservesRowWidth(t *testing.T) {
 		Name:           "config.toml",
 		Icon:           "",
 		MatchPositions: []uint16{0, 3, 7},
-	}, 28)
+	}, 28, fileTreeRowGuides{})
 	if got := displayWidth(ansi.Strip(rendered)); got != 28 {
 		t.Fatalf("highlighted file-tree row should fill requested width, got %d row=%q", got, rendered)
 	}
