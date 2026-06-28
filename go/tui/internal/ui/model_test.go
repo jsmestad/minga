@@ -2014,8 +2014,12 @@ func TestSemanticWindowsRespectSidebarOffset(t *testing.T) {
 	if len(lines) < 2 {
 		t.Fatalf("semantic window should render with sidebar offset: %+v", lines)
 	}
-	if got := strings.Index(lines[1], "pane"); got != 18 {
-		t.Fatalf("sidebar offset should leave pane at column 18, got %d in %q", got, lines[1])
+	if !strings.Contains(lines[1], "│") {
+		t.Fatalf("sidebar should have │ separator column: %q", lines[1])
+	}
+	// strings.Index returns byte offset: 18 ASCII sidebar chars + 3-byte │ = byte 21
+	if got := strings.Index(lines[1], "pane"); got != 21 {
+		t.Fatalf("sidebar + separator offset should place pane at byte 21 (18 sidebar + 3-byte separator), got %d in %q", got, lines[1])
 	}
 }
 
