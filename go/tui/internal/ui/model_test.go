@@ -2329,7 +2329,9 @@ func TestCompletionWithoutDocumentationRendersNoPreviewPane(t *testing.T) {
 	if len(withoutDoc) >= len(withDoc) {
 		t.Fatalf("doc preview should add lines: withDoc=%d withoutDoc=%d", len(withDoc), len(withoutDoc))
 	}
-	itemRow := ansi.Strip(withoutDoc[1])
+	// The border adds a top row (index 0) and a bottom row, so the first item
+	// row is at index 2 (border top + title + first item).
+	itemRow := ansi.Strip(withoutDoc[2])
 	if !strings.Contains(itemRow, "map") {
 		t.Fatalf("expected first item row to render the label, got: %q", itemRow)
 	}

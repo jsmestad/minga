@@ -15,6 +15,12 @@ func (m Model) composeFrame(content string) string {
 	// rect (#2281), below the picker/which-key floating layers but above the base
 	// content, instead of being footer-appended into the vertical layout.
 	if overlay := m.overlayLayer(); overlay != nil {
+		// Drop shadow for the completion popup (#2534): a dark rectangle at
+		// (x+1, y+1) below the overlay Z creates a subtle depth cue matching
+		// the rounded-border treatment the picker and which-key popups use.
+		if shadow := m.completionShadowLayer(overlay); shadow != nil {
+			layers = append(layers, shadow)
+		}
 		layers = append(layers, overlay)
 	}
 	if which := m.floatingWhichKeyLayer(); which != nil {
