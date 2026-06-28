@@ -150,7 +150,7 @@ func (m Model) leftChromeWidth() int {
 		return fileTreeWidth(m.width, tree) + 1 // +1 for the │ border separator
 	}
 	if sidebars, ok := m.sidebars(); ok && len(sidebars.Items) > 0 && m.width >= 60 {
-		return semanticSidebarWidth(m.width, sidebars)
+		return semanticSidebarWidth(m.width, sidebars) + 1 // +1 for │ separator column
 	}
 	return 0
 }
@@ -273,7 +273,7 @@ func (m Model) presentationSourceStart(window protocol.WindowContent, height int
 	before, _ := presentationPayloadOverscanBounds(window, height)
 	maxStart := max(len(window.Rows)-height, 0)
 	start := min(before, maxStart)
-	if scroll, ok := m.presentationScroll[window.ID]; ok && scroll.contentEpoch == window.Scroll.ContentEpoch && scroll.layoutGeneration == window.Scroll.LayoutGeneration && scroll.anchorTop == window.Scroll.AnchorTop && scroll.anchorLeft == window.Scroll.AnchorLeft {
+	if scroll, ok := m.localPresentation.scrolls[window.ID]; ok && scroll.keysMatch(window.Scroll) {
 		start += scroll.rowOffset
 	}
 	return min(max(start, 0), maxStart)
@@ -366,8 +366,8 @@ func (m Model) renderScrollbarCell(rowIndex int, sb scrollbarState) string {
 
 func (m Model) presentationScrollEffectiveLeft(window protocol.WindowContent) int {
 	scrollLeft := int(window.ScrollLeft)
-	scroll, ok := m.presentationScroll[window.ID]
-	if !ok || scroll.contentEpoch != window.Scroll.ContentEpoch || scroll.layoutGeneration != window.Scroll.LayoutGeneration || scroll.anchorTop != window.Scroll.AnchorTop || scroll.anchorLeft != window.Scroll.AnchorLeft {
+	scroll, ok := m.localPresentation.scrolls[window.ID]
+	if !ok || !scroll.keysMatch(window.Scroll) {
 		return scrollLeft
 	}
 	return max(scrollLeft+scroll.colOffset, 0)
@@ -715,8 +715,10 @@ func (m Model) withSemanticSidebars(mainLines []string) []string {
 	theme := m.palette()
 	style := lipgloss.NewStyle().Foreground(theme.Muted()).Background(theme.Surface()).Width(width)
 	activeStyle := style.Bold(true).Foreground(theme.Text()).Background(theme.Selection())
+	sepStyle := lipgloss.NewStyle().Foreground(theme.TreeSeparator()).Background(m.editorBackground())
+	sep := sepStyle.Render("│")
 	lines := make([]string, max(len(mainLines), len(visible)+1))
-	lines[0] = lipgloss.JoinHorizontal(lipgloss.Top, style.Bold(true).Render(fit("Sidebars", width)), lineAt(mainLines, 0))
+	lines[0] = lipgloss.JoinHorizontal(lipgloss.Top, style.Bold(true).Render(fit("Sidebars", width)), sep, lineAt(mainLines, 0))
 	for i, item := range visible {
 		label := strings.TrimSpace(item.Icon + " " + item.DisplayName)
 		if item.BadgeCount != 0xFFFF && item.BadgeCount > 0 {
@@ -727,10 +729,10 @@ func (m Model) withSemanticSidebars(mainLines []string) []string {
 			leftStyle = activeStyle
 		}
 		marked := m.zones.Mark(zoneIDSidebarItem(item.ID), leftStyle.Render(fit(label, width)))
-		lines[i+1] = lipgloss.JoinHorizontal(lipgloss.Top, marked, lineAt(mainLines, i+1))
+		lines[i+1] = lipgloss.JoinHorizontal(lipgloss.Top, marked, sep, lineAt(mainLines, i+1))
 	}
 	for i := len(visible) + 1; i < len(lines); i++ {
-		lines[i] = lipgloss.JoinHorizontal(lipgloss.Top, style.Render(strings.Repeat(" ", width)), lineAt(mainLines, i))
+		lines[i] = lipgloss.JoinHorizontal(lipgloss.Top, style.Render(strings.Repeat(" ", width)), sep, lineAt(mainLines, i))
 	}
 	return lines
 }
@@ -898,6 +900,7 @@ func (m Model) renderFileTree(tree protocol.FileTree, width int, height int) []s
 		}
 	}
 	guides := computeFileTreeGuides(tree.Rows)
+	previewIdx := m.localPresentation.previewFileTreeIndex
 
 	scrollOffset := 0
 	if needsScrollbar {
@@ -915,6 +918,10 @@ func (m Model) renderFileTree(tree protocol.FileTree, width int, height int) []s
 	for i := 0; i < visibleRows && scrollOffset+i < totalRows; i++ {
 		rowIndex := scrollOffset + i
 		row := tree.Rows[rowIndex]
+		if previewIdx != nil {
+			row.Selected = rowIndex == *previewIdx
+			row.Focused = rowIndex == *previewIdx
+		}
 		rendered := m.renderFileTreeRow(row, contentWidth, guides[rowIndex])
 		line := m.zones.Mark(zoneIDFileTreeRow(rowIndex), rendered)
 		if needsScrollbar {

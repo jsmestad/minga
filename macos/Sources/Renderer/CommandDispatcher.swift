@@ -35,6 +35,14 @@ private enum FileTreeNavigationCodepoints {
     static let upArrow: UInt32 = 57352
 }
 
+private enum CompletionNavigationCodepoints {
+    static let ctrlN: UInt32 = 110
+    static let ctrlP: UInt32 = 112
+    static let downArrow: UInt32 = 57353
+    static let upArrow: UInt32 = 57352
+    static let ctrlModifier: UInt8 = 0x02
+}
+
 /// Dispatches render commands to FrameState (metadata) and GUIState (chrome).
 @MainActor
 final class CommandDispatcher {
@@ -434,6 +442,33 @@ final class CommandDispatcher {
         }
     }
 
+    @discardableResult
+    func previewCompletionNavigation(codepoint: UInt32, modifiers: UInt8) -> Bool {
+        let delta: Int
+        if modifiers == CompletionNavigationCodepoints.ctrlModifier {
+            switch codepoint {
+            case CompletionNavigationCodepoints.ctrlN:
+                delta = 1
+            case CompletionNavigationCodepoints.ctrlP:
+                delta = -1
+            default:
+                return false
+            }
+        } else if modifiers == 0 {
+            switch codepoint {
+            case CompletionNavigationCodepoints.downArrow:
+                delta = 1
+            case CompletionNavigationCodepoints.upArrow:
+                delta = -1
+            default:
+                return false
+            }
+        } else {
+            return false
+        }
+        return guiState.completionState.previewNavigation(delta: delta)
+    }
+
     /// Apply a single render command to the presented FrameState/GUIState. This
     /// is the single mutation path: called directly for out-of-band commands and
     /// replayed for every staged command at commit. It must NOT handle the frame
@@ -644,7 +679,7 @@ final class CommandDispatcher {
             guiState.windowContents[data.windowId] = data
             currentFrameWindowIds.insert(data.windowId)
             if shouldResetScrollPresentation(previous: previousScroll, next: data.scrollPresentation) {
-                onScrollPresentationReset?()
+                discardLocalPresentation(.offset, windowId: data.windowId)
             }
             frameState.cursorVisible = data.cursorVisible
 
@@ -667,7 +702,7 @@ final class CommandDispatcher {
             guiState.windowContents[delta.windowId] = updated
             currentFrameWindowIds.insert(delta.windowId)
             if shouldResetScrollPresentation(previous: previousScroll, next: updated.scrollPresentation) {
-                onScrollPresentationReset?()
+                discardLocalPresentation(.offset, windowId: delta.windowId)
             }
             frameState.cursorVisible = delta.cursorVisible
             frameState.dirty = true
@@ -851,7 +886,28 @@ final class CommandDispatcher {
         }
     }
 
-    // MARK: - Clipboard
+    // MARK: - Local presentation
+
+    enum TransformKind {
+        case offset
+        case identity
+    }
+
+    struct ScrollAnchorKey: Equatable {
+        let contentEpoch: UInt32
+        let layoutGeneration: UInt32
+        let anchorTop: UInt32
+        let anchorLeft: UInt16
+        let anchorVisualRowOffset: UInt16
+
+        init(_ sp: GUIScrollPresentation) {
+            self.contentEpoch = sp.contentEpoch
+            self.layoutGeneration = sp.layoutGeneration
+            self.anchorTop = sp.anchorTop
+            self.anchorLeft = sp.anchorLeft
+            self.anchorVisualRowOffset = sp.anchorVisualRowOffset
+        }
+    }
 
     private func shouldResetScrollPresentation(previous: GUIScrollPresentation?, next: GUIScrollPresentation?) -> Bool {
         if let next, next.resetRequired { return true }
@@ -859,6 +915,17 @@ final class CommandDispatcher {
         guard let next else { return true }
         return !next.isSameAnchorKey(as: prev)
     }
+
+    func discardLocalPresentation(_ kind: TransformKind, windowId: UInt16 = 0) {
+        switch kind {
+        case .offset:
+            onScrollPresentationReset?()
+        case .identity:
+            break
+        }
+    }
+
+    // MARK: - Clipboard
 
     private func handleClipboardWrite(target: UInt8, text: String) {
         let pasteboard: NSPasteboard

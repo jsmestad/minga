@@ -393,6 +393,15 @@ A frame is atomic on the wire. The Emit stage brackets every frame's semantic an
 
 **Frontend-local interaction state.** Semantic frontends are not dumb terminals. The BEAM owns the authoritative semantic model, durable editor state, placement, stacking, containment, and validation of committed actions. Frontends own zero-latency local interaction state when it can be resolved from the last committed semantic model and has no durable effect until activation. This is not about event frequency. It is about whether the interaction should feel instant without waiting for a BEAM render transaction.
 
+Each frontend holds a single local-presentation container with one discard entry point, parameterized by transform kind. Two transform kinds exist:
+
+- **Offset transforms** (smooth scroll): the frontend applies a local pixel or row/column offset on top of the BEAM's committed anchor. Discard on `reset_required` or anchor-key mismatch (the key is `{contentEpoch, layoutGeneration, anchorTop, anchorLeft}`; see `ScrollPresentation` in the protocol). The offset has no row identity; it shifts the viewport within the committed overscan bounds.
+- **Identity transforms** (file-tree selection, completion selection): the frontend previews a new selected index over the BEAM's committed row model. Discard on BEAM update (the next authoritative payload reconciles the prediction) or `retained_row_miss` (the previewed row's stable ID is absent from the committed model).
+
+The shared code is the container and dispatch; the row-identity check is a capability of identity transforms, not a universal step. Applying `retained_row_miss` to scroll would be wrong because scroll has no row identity.
+
+Cursor motion and selection extension are **out of bounds** for local presentation. They are operands the BEAM hit-tests and encodes, never client-decided. The BEAM resolves cursor position against the buffer, wrap state, fold state, and virtual text; the frontend cannot predict the result without duplicating that logic.
+
 File tree is the canonical example. The BEAM sends stable row IDs, paths, labels, icons, expansion state, git state, diagnostics, focus context, and inline editing state. The frontend may own transient row selection while the user navigates the already committed row model. On activation, toggle, rename, delete, drag/drop, or another committed intent, the frontend sends a semantic action with stable row identity. The BEAM validates the action against its current model and may resync if the row is stale.
 
 ---
