@@ -2,9 +2,17 @@ defmodule Minga.Credo.NoBlockingEditorCallCheck do
   @moduledoc """
   Flags synchronous blocking calls inside MingaEditor modules.
 
-  MingaEditor is a single GenServer. Synchronous calls to LSP (`Client.request_sync`), shell commands (`System.cmd`), and sleeps (`Process.sleep`) inside command and handler code head-of-line-block input echo and rendering. These should use `AsyncAction.run/3` or a `Task` instead.
+  MingaEditor is a single GenServer. Synchronous calls to LSP (`Client.request_sync`), shell commands (`System.cmd`), task awaits (`Task.await`), and sleeps (`Process.sleep`) inside command and handler code head-of-line-block input echo and rendering. These should use `AsyncAction.run/3` or a `Task` instead.
 
   Calls nested inside `AsyncAction.run(...)` blocks or `Task.start`/`Task.async` bodies are exempt because the work is already off the critical path.
+
+  ## Inline suppression
+
+  Add `# minga:allow-blocking — <justification>` on the same line as a sanctioned blocking call to suppress the warning. The justification after the dash is required; a bare `# minga:allow-blocking` without explanation will not suppress.
+
+  ## Limitations
+
+  This check matches syntactic call tokens in-module only. A blocking call reached through a helper or another module (e.g. `format_and_replace/3` calling `Minga.Editing.format/2` which calls `System.cmd`) is invisible to it. It catches the copy-paste regression, not transitive blocking. Per-site review (D2) is the real isolation guarantee; this check is a regression tripwire.
 
   See responsiveness epic #2445 (D2/D3) for the full rationale.
   """
@@ -15,9 +23,11 @@ defmodule Minga.Credo.NoBlockingEditorCallCheck do
     category: :warning,
     explanations: [
       check: """
-      `Client.request_sync`, `System.cmd`, and `Process.sleep` block the calling process. Inside MingaEditor modules these block the single editor GenServer, causing head-of-line blocking for input echo and rendering.
+      `Client.request_sync`, `System.cmd`, `Task.await`, and `Process.sleep` block the calling process. Inside MingaEditor modules these block the single editor GenServer, causing head-of-line blocking for input echo and rendering.
 
       Use `AsyncAction.run/3` or a `Task` to move slow work off the critical path.
+
+      To suppress a sanctioned exception, add `# minga:allow-blocking — <justification>` on the same line.
       """
     ]
 
@@ -25,6 +35,7 @@ defmodule Minga.Credo.NoBlockingEditorCallCheck do
     {[:Client], :request_sync},
     {[:Minga, :LSP, :Client], :request_sync},
     {[:System], :cmd},
+    {[:Task], :await},
     {[:Process], :sleep}
   ]
 
@@ -36,6 +47,8 @@ defmodule Minga.Credo.NoBlockingEditorCallCheck do
     {[:Task], :async}
   ]
 
+  @suppression_pattern ~r/# minga:allow-blocking\s+—\s+\S/
+
   # Known blocking-call sites awaiting D2 migration (#2450).
   # Remove entries as each site is migrated to AsyncAction/Task.
   @known_sites [
@@ -44,8 +57,9 @@ defmodule Minga.Credo.NoBlockingEditorCallCheck do
     {"lib/minga_editor/ui/picker/workspace_symbol_source.ex", 46},
     {"lib/minga_editor/ui/picker/code_action_source.ex", 118},
     {"lib/minga_editor/agent/slash_command.ex", 1293},
+    {"lib/minga_editor/agent/slash_command.ex", 1371},
     {"lib/minga_editor/ui/picker/todo_search_source.ex", 99},
-    {"lib/minga_editor/ui/picker/todo_search_source.ex", 119},
+    {"lib/minga_editor/ui/picker/todo_search_source.ex", 119}
   ]
 
   @impl Credo.Check
@@ -55,10 +69,12 @@ defmodule Minga.Credo.NoBlockingEditorCallCheck do
     else
       issue_meta = IssueMeta.for(source_file, params)
       ast = SourceFile.ast(source_file)
+      source_lines = source_file |> SourceFile.source() |> String.split("\n")
 
       ast
       |> find_blocking_calls(issue_meta, false)
       |> Enum.reject(&known_site?(source_file, &1))
+      |> Enum.reject(&suppressed_by_comment?(source_lines, &1))
     end
   end
 
@@ -110,7 +126,8 @@ defmodule Minga.Credo.NoBlockingEditorCallCheck do
 
       [
         format_issue(issue_meta,
-          message: "#{trigger} blocks the editor GenServer. Use AsyncAction.run/3 or a Task to move this off the critical path.",
+          message:
+            "#{trigger} blocks the editor GenServer. Use AsyncAction.run/3 or a Task to move this off the critical path.",
           trigger: trigger,
           line_no: meta[:line]
         )
@@ -136,6 +153,15 @@ defmodule Minga.Credo.NoBlockingEditorCallCheck do
     Enum.any?(@exempt_wrappers, fn {expected_parts, expected_func} ->
       func == expected_func && mod_parts == expected_parts
     end)
+  end
+
+  defp suppressed_by_comment?(source_lines, issue) do
+    line_index = (issue.line_no || 0) - 1
+
+    case Enum.at(source_lines, line_index) do
+      nil -> false
+      line -> Regex.match?(@suppression_pattern, line)
+    end
   end
 
   defp known_site?(%SourceFile{} = source_file, issue) do
