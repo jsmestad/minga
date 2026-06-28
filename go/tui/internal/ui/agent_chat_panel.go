@@ -193,6 +193,14 @@ func (m Model) renderAgentBlankLine(width int) string {
 	return lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(strings.Repeat(" ", max(width, 1)))
 }
 
+func (m Model) renderAgentTranscriptSeparator(width int) string {
+	p := m.palette()
+	indent := "    "
+	ruleWidth := max(width-len(indent), 0)
+	rule := lipgloss.NewStyle().Foreground(p.Muted()).Background(m.editorBackground()).Render(strings.Repeat("─", ruleWidth))
+	return lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(indent+rule, width))
+}
+
 func (m Model) renderAgentTranscriptHeader(width int) string {
 	p := m.palette()
 	label := lipgloss.NewStyle().Bold(true).Foreground(p.Muted()).Background(m.editorBackground()).Render(" Transcript ")
@@ -506,7 +514,7 @@ func (m Model) renderAgentTranscriptTail(chat protocol.AgentChat, budget int, wi
 	for i := len(blocks) - 1; i >= 0; i-- {
 		lines = append(lines, blocks[i]...)
 		if i > 0 && len(lines) < budget {
-			lines = append(lines, m.renderAgentBlankLine(width))
+			lines = append(lines, m.renderAgentTranscriptSeparator(width))
 		}
 	}
 	if len(lines) > budget {
