@@ -382,7 +382,7 @@ func TestMousePacketTranslatesDragSequence(t *testing.T) {
 // line below the tab bar contains a gap (spaces) under the active tab and full
 // ─ characters everywhere else (#2532).
 func TestTabSeparatorHasActiveTabGap(t *testing.T) {
-	model := New(80, 24, nil)
+	model := New(80, 24, nil, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiTabBar: {
 			Tabs: protocol.TabBar{Tabs: []protocol.Tab{
@@ -431,7 +431,7 @@ func TestTabSeparatorHasActiveTabGap(t *testing.T) {
 // TestTabSeparatorGapWidthMatchesRenderedTab verifies the gap width equals the
 // active tab's rendered width as measured by lipgloss.Width (#2532).
 func TestTabSeparatorGapWidthMatchesRenderedTab(t *testing.T) {
-	model := New(80, 24, nil)
+	model := New(80, 24, nil, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiTabBar: {
 			Tabs: protocol.TabBar{Tabs: []protocol.Tab{
@@ -465,7 +465,7 @@ func TestTabSeparatorGapWidthMatchesRenderedTab(t *testing.T) {
 // TestTabSeparatorFullLineWhenNoActiveTab verifies the separator is a full line
 // of ─ when no tab is marked active (#2532).
 func TestTabSeparatorFullLineWhenNoActiveTab(t *testing.T) {
-	model := New(40, 24, nil)
+	model := New(40, 24, nil, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiTabBar: {
 			Tabs: protocol.TabBar{Tabs: []protocol.Tab{
