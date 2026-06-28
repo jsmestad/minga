@@ -764,14 +764,21 @@ func (m Model) renderAgentThinkingMessage(msg protocol.AgentChatMessage, width i
 	if !msg.Collapsed {
 		marker = m.agentSpinner()
 	}
+	// Pulse the rail between two dim shades when actively thinking;
+	// use the dimmer shade when collapsed.
+	railColor := p.PopupBorder()
+	if !msg.Collapsed && m.agent.animationFrame/3%2 == 0 {
+		railColor = p.Muted()
+	}
+	rail := lipgloss.NewStyle().Foreground(railColor).Background(m.editorBackground()).Render("  │ ")
 	markerStyle := lipgloss.NewStyle().Foreground(p.Muted()).Background(m.editorBackground()).Bold(true)
 	labelStyle := lipgloss.NewStyle().Foreground(p.Muted()).Background(m.editorBackground()).Italic(true)
 	bodyStyle := lipgloss.NewStyle().Foreground(p.Muted()).Background(m.editorBackground())
-	header := "  " + markerStyle.Render(marker) + labelStyle.Render(" Thinking "+state)
+	header := rail + markerStyle.Render(marker) + labelStyle.Render(" Thinking "+state)
 	lines := []string{lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(header, width))}
 	bodyLines := agentThinkingBodyLines(msg.Collapsed)
 	for _, bodyLine := range compactTextLines(text, max(width-8, 8), bodyLines) {
-		line := bodyStyle.Render("    " + firstCompactLine(bodyLine, max(width-6, 8)))
+		line := rail + bodyStyle.Render(firstCompactLine(bodyLine, max(width-6, 8)))
 		lines = append(lines, lipgloss.NewStyle().Background(m.editorBackground()).Width(width).Render(fitStyled(line, width)))
 	}
 	return lines
