@@ -250,6 +250,10 @@ func (p palette) TreeDirectoryText() color.Color {
 	return p.slot(themeTreeDirFG)
 }
 
+func (p palette) TreeSeparator() color.Color {
+	return p.slot(themeTreeSeparatorFG)
+}
+
 func (p palette) TreeSelection() color.Color {
 	return p.slot(themeTreeSelectBG)
 }

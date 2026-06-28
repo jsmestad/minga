@@ -218,7 +218,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if packet, ok := keyPacket(msg, seq); ok {
 			m.send(packet)
 		}
-		m.previewFileTreeNavigation(msg)
+		if !m.modalOverlayActive() {
+			m.previewFileTreeNavigation(msg)
+		}
 	case tea.PasteMsg:
 		m.send(pastePacket(msg))
 	case tea.MouseMsg:
