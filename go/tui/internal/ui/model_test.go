@@ -307,6 +307,67 @@ func TestFooterRendersStatusMessageWithModelineSegments(t *testing.T) {
 	}
 }
 
+func TestFooterRendersModeIconBeforeModeText(t *testing.T) {
+	model := New(80, 24, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiStatusBar: {
+			Status: protocol.StatusBar{
+				Left:  []protocol.StatusSegment{{Text: " NORMAL "}},
+				Right: []protocol.StatusSegment{{Text: "1:1"}},
+			},
+		},
+	}
+	footer := ansi.Strip(strings.Join(model.footerLines(), "\n"))
+	if !strings.Contains(footer, " NORMAL") {
+		t.Fatalf("footer should prepend mode icon before mode text: %q", footer)
+	}
+}
+
+func TestFooterRendersFileIconBeforeFilename(t *testing.T) {
+	model := New(80, 24, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiStatusBar: {
+			Status: protocol.StatusBar{
+				Filename: "main.go",
+				Left:     []protocol.StatusSegment{{Text: " NORMAL "}},
+				Right:    []protocol.StatusSegment{{Text: "1:1"}},
+			},
+		},
+	}
+	footer := ansi.Strip(strings.Join(model.footerLines(), "\n"))
+	icon := devIconForPath("main.go", false)
+	if icon.glyph == "" {
+		t.Fatal("expected devicon for main.go")
+	}
+	if !strings.Contains(footer, icon.glyph) {
+		t.Fatalf("footer should render file type icon for filename: %q (want glyph %q)", footer, icon.glyph)
+	}
+}
+
+func TestFooterFallbackRendersFileIcon(t *testing.T) {
+	model := New(80, 24, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiStatusBar: {
+			Status: protocol.StatusBar{
+				Filename: "app.rs",
+				Line:     10,
+				Column:   5,
+			},
+		},
+	}
+	footer := ansi.Strip(strings.Join(model.footerLines(), "\n"))
+	icon := devIconForPath("app.rs", false)
+	if icon.glyph == "" {
+		t.Fatal("expected devicon for app.rs")
+	}
+	if !strings.Contains(footer, icon.glyph) {
+		t.Fatalf("fallback footer should render file type icon before filename: %q (want glyph %q)", footer, icon.glyph)
+	}
+	if !strings.Contains(footer, "app.rs") {
+		t.Fatalf("fallback footer should still contain filename: %q", footer)
+	}
+}
+
 func TestHeaderRendersBreadcrumbWithTabs(t *testing.T) {
 	model := New(120, 24, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
