@@ -686,7 +686,16 @@ func (m Model) withFileTree(mainLines []string) []string {
 
 	sidebarWidth := fileTreeWidth(m.width, tree)
 	sidebar := m.renderFileTree(tree, sidebarWidth, max(len(mainLines), m.bodyHeight()))
-	sep := lipgloss.NewStyle().Foreground(m.palette().TreeSeparator()).Background(m.palette().TreeSurface()).Render("│")
+	sepColor := m.palette().TreeSeparator()
+	if tree.Focused {
+		sepColor = m.palette().Accent()
+	}
+	sepStyle := lipgloss.NewStyle().Foreground(sepColor).Background(m.palette().TreeSurface())
+	sep := sepStyle.Render("│")
+	sepCol := max(sidebarWidth-1, 0)
+	for i := range sidebar {
+		sidebar[i] = replaceVisibleCell(sidebar[i], sepCol, sep)
+	}
 	lines := make([]string, max(len(mainLines), len(sidebar)))
 	for i := range lines {
 		left := ""
@@ -697,7 +706,7 @@ func (m Model) withFileTree(mainLines []string) []string {
 		if i < len(mainLines) {
 			right = mainLines[i]
 		}
-		lines[i] = lipgloss.JoinHorizontal(lipgloss.Top, left, sep, right)
+		lines[i] = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 	}
 	return lines
 }

@@ -1479,11 +1479,11 @@ func TestSplitSeparatorsNormalizeAgainstHeaderAndFileTree(t *testing.T) {
 	if len(lines) < 3 {
 		t.Fatalf("unexpected view lines: %+v", lines)
 	}
-	if count := strings.Count(lines[1], "│"); count < 2 {
-		t.Fatalf("body row should have tree border and split separator (expected 2 │, got %d) in %q", count, lines[1])
+	if got := visibleIndex(lines[1], "│"); got != 23 {
+		t.Fatalf("tree border separator should land at visible column 23 (last tree column), got %d in %q", got, lines[1])
 	}
-	if got := visibleIndex(lines[2], "─"); got != 25 {
-		t.Fatalf("horizontal separator should land at column 25 (tree 24 + border 1) after normalization, got %d in %q", got, lines[2])
+	if got := visibleIndex(lines[2], "─"); got != 24 {
+		t.Fatalf("horizontal separator should land at column 24 (tree width, separator embedded) after normalization, got %d in %q", got, lines[2])
 	}
 }
 
@@ -1602,8 +1602,8 @@ func TestFileTreeReservesVisibleEmptyState(t *testing.T) {
 	if !strings.Contains(lines[2], "No files") {
 		t.Fatalf("empty file tree should render status row: %q", lines[2])
 	}
-	if got := visibleIndex(lines[1], "pane"); got != 19 {
-		t.Fatalf("empty file tree should leave pane at column 19 (tree 18 + border 1), got %d in %q", got, lines[1])
+	if got := visibleIndex(lines[1], "pane"); got != 18 {
+		t.Fatalf("empty file tree should reserve protocol width, got pane at %d in %q", got, lines[1])
 	}
 }
 
@@ -1618,13 +1618,8 @@ func TestSemanticWindowsRespectProtocolFileTreeWidth(t *testing.T) {
 	if len(lines) < 2 {
 		t.Fatalf("semantic window should render with file tree width alignment: %+v", lines)
 	}
-	if !strings.Contains(lines[1], "pane") {
-		t.Fatalf("file tree width should render pane on first body row: %q", lines[1])
-	}
-	treeEnd := strings.Index(lines[1], "│")
-	paneAt := strings.Index(lines[1], "pane")
-	if treeEnd < 0 || paneAt <= treeEnd {
-		t.Fatalf("pane should appear after tree separator, treeEnd=%d paneAt=%d in %q", treeEnd, paneAt, lines[1])
+	if got := visibleIndex(lines[1], "pane"); got != 36 {
+		t.Fatalf("file tree width should follow protocol geometry without a gap, got %d in %q", got, lines[1])
 	}
 }
 
@@ -1640,13 +1635,8 @@ func TestSemanticWindowsNormalizeAbsoluteTUILayoutGeometry(t *testing.T) {
 	if len(lines) < 2 {
 		t.Fatalf("semantic window should render with normalized geometry: %+v", lines)
 	}
-	if !strings.Contains(lines[1], "pane") {
-		t.Fatalf("absolute TUI geometry should render pane on first body row: %q", lines[1])
-	}
-	treeEnd := strings.Index(lines[1], "│")
-	paneAt := strings.Index(lines[1], "pane")
-	if treeEnd < 0 || paneAt <= treeEnd {
-		t.Fatalf("absolute TUI geometry should not double-count file-tree width, treeEnd=%d paneAt=%d in %q", treeEnd, paneAt, lines[1])
+	if got := visibleIndex(lines[1], "pane"); got != 36 {
+		t.Fatalf("absolute TUI geometry should not double-count file-tree width, got pane at %d in %q", got, lines[1])
 	}
 	if len(lines) > 2 && strings.Contains(lines[2], "pane") {
 		t.Fatalf("absolute TUI geometry should not double-count header rows: %+v", lines[:3])
@@ -2093,8 +2083,8 @@ func TestSemanticWindowsRespectFileTreeOffset(t *testing.T) {
 	if len(lines) < 2 {
 		t.Fatalf("semantic window should render with file tree offset: %+v", lines)
 	}
-	if got := visibleIndex(lines[1], "pane"); got != 25 {
-		t.Fatalf("file tree offset should leave pane at column 25 (tree 24 + border 1), got %d in %q", got, lines[1])
+	if got := visibleIndex(lines[1], "pane"); got != 24 {
+		t.Fatalf("file tree offset should leave pane at column 24, got %d in %q", got, lines[1])
 	}
 }
 
