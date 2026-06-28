@@ -149,7 +149,7 @@ func (m Model) leftChromeWidth() int {
 		return fileTreeWidth(m.width, tree)
 	}
 	if sidebars, ok := m.sidebars(); ok && len(sidebars.Items) > 0 && m.width >= 60 {
-		return semanticSidebarWidth(m.width, sidebars)
+		return semanticSidebarWidth(m.width, sidebars) + 1 // +1 for │ separator column
 	}
 	return 0
 }
@@ -659,8 +659,10 @@ func (m Model) withSemanticSidebars(mainLines []string) []string {
 	theme := m.palette()
 	style := lipgloss.NewStyle().Foreground(theme.Muted()).Background(theme.Surface()).Width(width)
 	activeStyle := style.Bold(true).Foreground(theme.Text()).Background(theme.Selection())
+	sepStyle := lipgloss.NewStyle().Foreground(theme.TreeSeparator()).Background(m.editorBackground())
+	sep := sepStyle.Render("│")
 	lines := make([]string, max(len(mainLines), len(visible)+1))
-	lines[0] = lipgloss.JoinHorizontal(lipgloss.Top, style.Bold(true).Render(fit("Sidebars", width)), lineAt(mainLines, 0))
+	lines[0] = lipgloss.JoinHorizontal(lipgloss.Top, style.Bold(true).Render(fit("Sidebars", width)), sep, lineAt(mainLines, 0))
 	for i, item := range visible {
 		label := strings.TrimSpace(item.Icon + " " + item.DisplayName)
 		if item.BadgeCount != 0xFFFF && item.BadgeCount > 0 {
@@ -671,10 +673,10 @@ func (m Model) withSemanticSidebars(mainLines []string) []string {
 			leftStyle = activeStyle
 		}
 		marked := m.zones.Mark(zoneIDSidebarItem(item.ID), leftStyle.Render(fit(label, width)))
-		lines[i+1] = lipgloss.JoinHorizontal(lipgloss.Top, marked, lineAt(mainLines, i+1))
+		lines[i+1] = lipgloss.JoinHorizontal(lipgloss.Top, marked, sep, lineAt(mainLines, i+1))
 	}
 	for i := len(visible) + 1; i < len(lines); i++ {
-		lines[i] = lipgloss.JoinHorizontal(lipgloss.Top, style.Render(strings.Repeat(" ", width)), lineAt(mainLines, i))
+		lines[i] = lipgloss.JoinHorizontal(lipgloss.Top, style.Render(strings.Repeat(" ", width)), sep, lineAt(mainLines, i))
 	}
 	return lines
 }
