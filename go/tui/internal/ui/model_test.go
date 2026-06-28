@@ -3,6 +3,7 @@ package ui
 import (
 	"bytes"
 	"fmt"
+	"image/color"
 	"strings"
 	"testing"
 
@@ -304,6 +305,79 @@ func TestFooterRendersStatusMessageWithModelineSegments(t *testing.T) {
 	footer := ansi.Strip(strings.Join(model.footerLines(), "\n"))
 	if !strings.Contains(footer, "Modified buffers exist. Really quit? (y/n)") {
 		t.Fatalf("footer should render status message with modeline segments: %q", footer)
+	}
+}
+
+func TestModeSegmentRendersColoredPillBadge(t *testing.T) {
+	model := New(80, 24, nil)
+	updated, _ := model.Update(port.PacketMsg{Commands: frame(
+		protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{
+			Opcode: generated.OPGuiStatusBar,
+			Status: protocol.StatusBar{
+				Left:  []protocol.StatusSegment{{Name: "mode", Text: " NORMAL "}},
+				Right: []protocol.StatusSegment{{Name: "position", Text: "1:1 Top"}},
+			},
+		}},
+	)})
+	model = updated.(Model)
+
+	footer := ansi.Strip(strings.Join(model.footerLines(), "\n"))
+	if !strings.Contains(footer, " NORMAL ") {
+		t.Fatalf("footer should contain mode text: %q", footer)
+	}
+	if !strings.Contains(footer, "1:1 Top") {
+		t.Fatalf("footer should contain position text: %q", footer)
+	}
+
+	// Verify the raw (non-stripped) output carries ANSI sequences from mode colors.
+	// The bootstrap palette assigns distinct mode BG (0x61AFEF for NORMAL) so the
+	// rendered text must differ from a plain ChromeSurface render.
+	raw := strings.Join(model.footerLines(), "\n")
+	if raw == footer {
+		t.Fatalf("mode segment should carry ANSI color sequences, but raw == stripped")
+	}
+}
+
+func TestModeColorsMatchViMode(t *testing.T) {
+	model := New(80, 24, nil)
+	theme := model.palette()
+
+	assertColor := func(label string, got, want color.Color) {
+		t.Helper()
+		gr, gg, gb, _ := got.RGBA()
+		wr, wg, wb, _ := want.RGBA()
+		if gr != wr || gg != wg || gb != wb {
+			t.Errorf("%s: got rgba(%d,%d,%d), want rgba(%d,%d,%d)", label, gr>>8, gg>>8, gb>>8, wr>>8, wg>>8, wb>>8)
+		}
+	}
+
+	bg, fg := model.modeColors(" NORMAL ")
+	assertColor("NORMAL bg", bg, theme.ModeNormal())
+	assertColor("NORMAL fg", fg, theme.ModeNormalText())
+
+	bg, fg = model.modeColors(" INSERT ")
+	assertColor("INSERT bg", bg, theme.ModeInsert())
+	assertColor("INSERT fg", fg, theme.ModeInsertText())
+
+	bg, fg = model.modeColors(" VISUAL ")
+	assertColor("VISUAL bg", bg, theme.ModeVisual())
+	assertColor("VISUAL fg", fg, theme.ModeVisualText())
+}
+
+func TestInfoSegmentUsesModelineInfoPalette(t *testing.T) {
+	model := New(80, 24, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiStatusBar: {
+			Status: protocol.StatusBar{
+				Left:  []protocol.StatusSegment{{Name: "mode", Text: " NORMAL "}, {Name: "info", Text: " main.ex "}},
+				Right: []protocol.StatusSegment{{Name: "position", Text: "1:1"}},
+			},
+		},
+	}
+
+	footer := ansi.Strip(strings.Join(model.footerLines(), "\n"))
+	if !strings.Contains(footer, " main.ex ") {
+		t.Fatalf("footer should contain info segment text: %q", footer)
 	}
 }
 

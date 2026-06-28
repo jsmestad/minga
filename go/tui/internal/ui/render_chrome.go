@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"image/color"
 	"sort"
 	"strings"
 
@@ -242,12 +243,31 @@ func (m Model) renderStatusMessage(message string) string {
 
 func (m Model) renderSegmentList(segments []protocol.StatusSegment) string {
 	parts := make([]string, 0, len(segments))
+	theme := m.palette()
 	for _, segment := range segments {
 		text := segment.Text
 		if text == "" {
 			continue
 		}
-		style := lipgloss.NewStyle().Foreground(m.palette().ChromeText()).Background(m.palette().ChromeSurface())
+		style := lipgloss.NewStyle().Foreground(theme.ChromeText()).Background(theme.ChromeSurface())
+
+		// Apply semantic styling based on segment name. Mode segments become
+		// colored pill badges; info segments use the modeline-info palette;
+		// other segments can inherit the statusbar accent for bold emphasis.
+		// Inline FG/BG from the BEAM still win when present so the editor can
+		// override theme defaults per-segment.
+		switch segment.Name {
+		case "mode":
+			bg, fg := m.modeColors(text)
+			style = style.Background(bg).Foreground(fg).Bold(true)
+		case "info":
+			style = style.Background(theme.ModelineInfo()).Foreground(theme.ModelineInfoText())
+		default:
+			if segment.Attrs&0x01 != 0 && segment.FG == 0 {
+				style = style.Foreground(theme.StatusbarAccent())
+			}
+		}
+
 		if segment.FG != 0 {
 			style = style.Foreground(lipgloss.Color(fmt.Sprintf("#%06X", segment.FG)))
 		}
@@ -270,6 +290,23 @@ func (m Model) renderSegmentList(segments []protocol.StatusSegment) string {
 		parts = append(parts, rendered)
 	}
 	return strings.Join(parts, "")
+}
+
+// modeColors returns the background and foreground colors for a vi mode pill
+// badge based on the segment text content. The palette accessors (ModeNormal,
+// ModeInsert, ModeVisual) fall back gracefully when theme slots are absent.
+func (m Model) modeColors(text string) (bg, fg color.Color) {
+	theme := m.palette()
+	trimmed := strings.TrimSpace(strings.ToUpper(text))
+	switch {
+	case strings.Contains(trimmed, "INSERT"):
+		return theme.ModeInsert(), theme.ModeInsertText()
+	case strings.Contains(trimmed, "VISUAL"):
+		return theme.ModeVisual(), theme.ModeVisualText()
+	default:
+		// NORMAL and any other/unknown mode get the normal treatment.
+		return theme.ModeNormal(), theme.ModeNormalText()
+	}
 }
 
 func (m Model) gitSummary(git protocol.GitStatus) string {
