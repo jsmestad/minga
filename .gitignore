@@ -63,3 +63,4 @@ macos/Tests/Snapshots/
 .standup/
 CLAUDE.md
 autoresearch.*
+go/tui/minga-renderer-go
