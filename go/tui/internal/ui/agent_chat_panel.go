@@ -363,10 +363,16 @@ func (m Model) renderAgentDetailFrame(kind string, title string, width int) stri
 
 func (m Model) renderAgentDetailsSection(label string, width int) string {
 	p := m.palette()
-	line := lipgloss.NewStyle().Foreground(p.PopupBorder()).Background(m.editorBackground()).Render("─")
-	text := lipgloss.NewStyle().Bold(true).Foreground(p.Muted()).Background(m.editorBackground()).Render(" " + label + " ")
-	remaining := max(width-lipgloss.Width(label)-4, 0)
-	return m.renderAgentDetailContentLine(text+strings.Repeat(line, remaining), width)
+	ruleStyle := lipgloss.NewStyle().Foreground(p.PopupBorder()).Background(m.editorBackground())
+	text := lipgloss.NewStyle().Bold(true).Foreground(p.Text()).Background(m.editorBackground()).Render(" " + label + " ")
+	// renderAgentDetailContentLine uses bodyWidth = width-2 and prepends a space,
+	// so available content width is width-3.
+	labelVisual := lipgloss.Width(text)
+	totalRule := max(width-3-labelVisual, 0)
+	leftRule := min(3, totalRule)
+	rightRule := max(totalRule-leftRule, 0)
+	content := ruleStyle.Render(strings.Repeat("─", leftRule)) + text + ruleStyle.Render(strings.Repeat("─", rightRule))
+	return m.renderAgentDetailContentLine(content, width)
 }
 
 func (m Model) renderAgentDetailRow(label string, value string, width int) string {
