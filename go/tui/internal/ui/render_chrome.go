@@ -312,12 +312,21 @@ func (m Model) renderMinibuffer(mini protocol.Minibuffer) string {
 // than a charm list so each row can carry a lipgloss zone marker. Mouse routing
 // (semantic_mouse.go) maps a row click to completion_select, matching the GUI
 // (CompletionOverlay.swift:93); the visual stays a titled, selectable list.
+// The content is wrapped in a rounded border matching the picker/which-key
+// treatment (#2534): PopupBorder foreground, PopupSurface background,
+// BorderBackground, and ColorWhitespace so the border band stays solid.
 func (m Model) renderCompletion(completion protocol.Completion) []string {
 	height := m.maxOverlayHeight()
 	width := max(m.width, 1)
 	theme := m.palette()
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupChrome()).Width(width).ColorWhitespace(true)
-	lines := []string{renderPadded(titleStyle, " Completion", width)}
+
+	// Reserve space for the rounded border: 2 columns (left+right) and 2 rows
+	// (top+bottom). Inner content renders inside the border box.
+	innerWidth := max(width-2, 1)
+	innerHeight := max(height-2, 0)
+
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupChrome()).Width(innerWidth).ColorWhitespace(true)
+	lines := []string{renderPadded(titleStyle, " Completion", innerWidth)}
 
 	// When the selected item carries LSP documentation, reserve a slice of the
 	// overlay budget for a preview pane below the item list. Items without docs
@@ -325,15 +334,15 @@ func (m Model) renderCompletion(completion protocol.Completion) []string {
 	doc := strings.TrimSpace(completion.Documentation)
 	docLines := []string(nil)
 	if doc != "" {
-		docLines = m.renderCompletionDocPane(doc, width, height-1)
+		docLines = m.renderCompletionDocPane(doc, innerWidth, innerHeight-1)
 		// The pane must never starve the item list: at extreme overlay
 		// heights, showing the item being selected beats showing its docs.
-		if height-1-len(docLines) < 1 {
+		if innerHeight-1-len(docLines) < 1 {
 			docLines = nil
 		}
 	}
 
-	rowBudget := max(height-1-len(docLines), 0)
+	rowBudget := max(innerHeight-1-len(docLines), 0)
 	selected := min(max(int(completion.Selected), 0), max(len(completion.Items)-1, 0))
 	start := 0
 	if selected >= rowBudget && rowBudget > 0 {
@@ -341,11 +350,23 @@ func (m Model) renderCompletion(completion protocol.Completion) []string {
 	}
 	end := min(start+rowBudget, len(completion.Items))
 	for index := start; index < end; index++ {
-		row := m.renderCompletionItemRow(completion.Items[index], index == selected, width)
+		row := m.renderCompletionItemRow(completion.Items[index], index == selected, innerWidth)
 		lines = append(lines, m.zones.Mark(zoneIDCompletionItem(index), row))
 	}
 	lines = append(lines, docLines...)
-	return takeLines(lines, height)
+	lines = takeLines(lines, innerHeight)
+
+	// Wrap inner content in a rounded border matching the picker/which-key style.
+	content := strings.Join(lines, "\n")
+	bordered := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme.PopupBorder()).
+		BorderBackground(theme.PopupSurface()).
+		Background(theme.PopupSurface()).
+		ColorWhitespace(true).
+		Render(content)
+
+	return strings.Split(bordered, "\n")
 }
 
 // renderCompletionDocPane renders the selected item's documentation as a titled,

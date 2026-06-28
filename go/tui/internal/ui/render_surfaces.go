@@ -705,22 +705,41 @@ func (m Model) renderNotificationActionsRow(note protocol.Notification, width in
 	return renderPadded(rowStyle, rendered, width)
 }
 
-// popupShadow creates a drop-shadow layer for a popup placed at (x, y) with
-// dimensions (w, h). The shadow is a solid dark rectangle offset 1 cell right
-// and 1 cell down from the popup, layered at shadowZ (which should be below the
-// popup's z). Designed for BEAM-placed overlay surfaces composited via lipgloss
-// layers in composeFrame.
-func popupShadow(x, y, shadowZ, w, h int) *lipgloss.Layer {
-	if w <= 0 || h <= 0 {
+// completionShadowLayer returns a drop-shadow layer for the completion popup,
+// or nil when the active overlay is not the completion menu. The shadow is the
+// same size as the overlay, offset by (1, 1) at a Z below the overlay so only
+// the bottom and right edges peek out. This avoids re-rendering the completion
+// content: it reads the overlay layer's position and dimensions directly.
+func (m Model) completionShadowLayer(overlay *lipgloss.Layer) *lipgloss.Layer {
+	winner, ok := m.overlayWinner()
+	if !ok || winner.surfaceID != surfaceIDCompletionMenu {
 		return nil
 	}
-	style := lipgloss.NewStyle().Background(lipgloss.Color("#000000"))
-	line := style.Render(strings.Repeat(" ", w))
-	shadowLines := make([]string, h)
-	for i := range shadowLines {
-		shadowLines[i] = line
+	w := overlay.Width()
+	h := overlay.Height()
+	shadow := popupShadow(w, h)
+	if shadow == "" {
+		return nil
 	}
-	return lipgloss.NewLayer(strings.Join(shadowLines, "\n")).X(x + 1).Y(y + 1).Z(shadowZ)
+	return lipgloss.NewLayer(shadow).X(overlay.GetX() + 1).Y(overlay.GetY() + 1).Z(overlay.GetZ() - 1)
+}
+
+// popupShadow creates a dark rectangle suitable for compositing as a drop
+// shadow behind a floating popup. The shadow is the same size as the popup
+// and is intended to be offset by (1, 1) at a Z below the popup layer so
+// only the bottom and right edges show through. The color is a fixed dark
+// value that works on both light and dark themes as a subtle depth cue.
+func popupShadow(width, height int) string {
+	if width <= 0 || height <= 0 {
+		return ""
+	}
+	shadowStyle := lipgloss.NewStyle().Background(lipgloss.Color("#111111"))
+	line := shadowStyle.Render(strings.Repeat(" ", width))
+	lines := make([]string, height)
+	for i := range lines {
+		lines[i] = line
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m Model) renderExtensionOverlay(overlay protocol.ExtensionOverlay) []string {

@@ -15,6 +15,12 @@ func (m Model) composeFrame(content string) string {
 	// rect (#2281), below the picker/which-key floating layers but above the base
 	// content, instead of being footer-appended into the vertical layout.
 	if overlay := m.overlayLayer(); overlay != nil {
+		// Drop shadow for the completion popup (#2534): a dark rectangle at
+		// (x+1, y+1) below the overlay Z creates a subtle depth cue matching
+		// the rounded-border treatment the picker and which-key popups use.
+		if shadow := m.completionShadowLayer(overlay); shadow != nil {
+			layers = append(layers, shadow)
+		}
 		// Drop shadow behind notification overlays (#2538).
 		if shadow := m.notificationShadowLayer(); shadow != nil {
 			layers = append(layers, shadow)
@@ -44,7 +50,11 @@ func (m Model) notificationShadowLayer() *lipgloss.Layer {
 	if !ok {
 		return nil
 	}
-	return popupShadow(int(rect.Col), int(rect.Row), int(winner.order)+1, int(rect.Width), int(rect.Height))
+	shadow := popupShadow(int(rect.Width), int(rect.Height))
+	if shadow == "" {
+		return nil
+	}
+	return lipgloss.NewLayer(shadow).X(int(rect.Col) + 1).Y(int(rect.Row) + 1).Z(int(winner.order) + 1)
 }
 
 func (m Model) windowBackground() string {
