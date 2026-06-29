@@ -94,7 +94,7 @@ category = "input"
 name = "scroll_prefetch_hint"
 value = 0x0A
 direction = "frontend_to_beam"
-framing = "fixed:10"
+framing = "fixed:12"
 
 [[opcodes]]
 category = "input"

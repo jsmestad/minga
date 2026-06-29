@@ -57,6 +57,7 @@ defmodule MingaEditor.Mouse do
   # GUI scrolls 1 line per event because the frontend accumulates pixel
   # deltas and emits one event per cellHeight crossed.
   @gui_scroll_lines 1
+  @gui_scroll_cols 1
   @scroll_cols 6
 
   # Modifier flags
@@ -120,13 +121,7 @@ defmodule MingaEditor.Mouse do
           |> Window.scroll_viewport(delta_lines, total_lines)
           |> Window.record_scroll_event(now, direction)
 
-        state = EditorState.update_window(state, window_id, fn _window -> updated end)
-
-        if window_id == state.workspace.windows.active do
-          clamp_cursor_to_viewport(state, direction)
-        else
-          state
-        end
+        EditorState.update_window(state, window_id, fn _window -> updated end)
 
       _ ->
         state
@@ -215,7 +210,7 @@ defmodule MingaEditor.Mouse do
     lines = scroll_lines(state)
     vp = current_viewport(state)
     new_vp = scroll_viewport(vp, lines, total_lines)
-    update_current_viewport(state, new_vp) |> clamp_cursor_to_viewport(:down)
+    update_current_viewport(state, new_vp)
   end
 
   def handle(%{workspace: %{buffers: %{active: buf}}} = state, _r, _c, :wheel_up, _m, :press, _cc) do
@@ -223,14 +218,14 @@ defmodule MingaEditor.Mouse do
     lines = scroll_lines(state)
     vp = current_viewport(state)
     new_vp = scroll_viewport(vp, -lines, total_lines)
-    update_current_viewport(state, new_vp) |> clamp_cursor_to_viewport(:up)
+    update_current_viewport(state, new_vp)
   end
 
   # ── Scroll wheel (horizontal) ──
 
   def handle(state, _r, _c, :wheel_right, _m, :press, _cc) do
     vp = current_viewport(state)
-    new_left = vp.left + @scroll_cols
+    new_left = vp.left + scroll_cols(state)
 
     state
     |> update_current_viewport(%{vp | left: new_left})
@@ -239,7 +234,7 @@ defmodule MingaEditor.Mouse do
 
   def handle(state, _r, _c, :wheel_left, _m, :press, _cc) do
     vp = current_viewport(state)
-    new_left = max(vp.left - @scroll_cols, 0)
+    new_left = max(vp.left - scroll_cols(state), 0)
 
     state
     |> update_current_viewport(%{vp | left: new_left})
@@ -454,11 +449,11 @@ defmodule MingaEditor.Mouse do
          _mods,
          _click_count
        ) do
-    scroll_window_horizontal(state, win_id, @scroll_cols)
+    scroll_window_horizontal(state, win_id, scroll_cols(state))
   end
 
   defp handle_buffer_scroll_at_window(state, win_id, _row, _col, :wheel_left, _mods, _click_count) do
-    scroll_window_horizontal(state, win_id, -@scroll_cols)
+    scroll_window_horizontal(state, win_id, -scroll_cols(state))
   end
 
   @spec scroll_window_vertical(state(), term(), integer()) :: state()
@@ -1505,66 +1500,6 @@ defmodule MingaEditor.Mouse do
     end
   end
 
-  # Clamps the cursor to remain visible within the viewport, respecting
-  # scroll_margin so the render pipeline's scroll_to_cursor doesn't override
-  # the viewport position the mouse handler just set.
-  #
-  # Direction-aware (matches vim scrolloff behavior):
-  # - Scrolling UP: enforce bottom margin (push cursor toward top)
-  # - Scrolling DOWN: enforce top margin (push cursor toward bottom)
-  @spec clamp_cursor_to_viewport(state(), :up | :down) :: state()
-  defp clamp_cursor_to_viewport(%{workspace: %{buffers: %{active: buf}}} = state, direction) do
-    vp = current_viewport(state)
-    {cursor_line, cursor_col} = Buffer.cursor(buf)
-    {first_line, last_line} = Viewport.visible_range(vp)
-
-    margin = scroll_margin()
-    visible_rows = Viewport.content_rows(vp)
-    effective_margin = min(margin, div(visible_rows - 1, 2))
-
-    target_line =
-      clamp_with_margin(cursor_line, first_line, last_line, effective_margin, direction)
-
-    if target_line != cursor_line do
-      Buffer.move_to(buf, {target_line, HitTest.clamp_col_to_line(buf, target_line, cursor_col)})
-    end
-
-    state
-  end
-
-  # First clamp to basic visible range, then apply margin for scroll direction.
-  @spec clamp_with_margin(
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          :up | :down
-        ) :: non_neg_integer()
-  defp clamp_with_margin(cursor, first, last, margin, direction) do
-    # Basic visibility clamp
-    clamped = cursor |> max(first) |> min(last)
-
-    # Direction-aware margin clamp
-    case direction do
-      :up ->
-        # Scrolling up: enforce bottom margin (push cursor toward top)
-        max_cursor = last - margin
-        min(clamped, max(max_cursor, first))
-
-      :down ->
-        # Scrolling down: enforce top margin (push cursor toward bottom)
-        min_cursor = first + margin
-        max(clamped, min(min_cursor, last))
-    end
-  end
-
-  @spec scroll_margin() :: non_neg_integer()
-  defp scroll_margin do
-    Config.get(:scroll_margin)
-  catch
-    :exit, _ -> 5
-  end
-
   @spec maybe_auto_scroll(state(), integer(), integer()) :: state()
   defp maybe_auto_scroll(state, row, col) do
     case drag_window_context(state) do
@@ -1775,6 +1710,12 @@ defmodule MingaEditor.Mouse do
   catch
     :exit, _ -> 1
   end
+
+  @spec scroll_cols(state()) :: pos_integer()
+  defp scroll_cols(%{capabilities: %Capabilities{frontend_type: :native_gui}}),
+    do: @gui_scroll_cols
+
+  defp scroll_cols(_state), do: @scroll_cols
 
   # Delegates to EditorState shared helpers.
   defp current_viewport(state), do: EditorState.current_viewport(state)

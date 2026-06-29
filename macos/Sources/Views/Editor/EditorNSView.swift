@@ -202,6 +202,7 @@ final class EditorNSView: MTKView {
         // Standard Metal layer config.
         colorPixelFormat = .bgra8Unorm_srgb
         layer?.isOpaque = true
+        (layer as? CAMetalLayer)?.maximumDrawableCount = 3
 
         coreTextRenderer.setCursorAnimationReduceMotionDisabled(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
     }
@@ -356,6 +357,15 @@ final class EditorNSView: MTKView {
     private var scrollTargetCellPosition: (row: Int16, col: Int16)?
 
     private var scrollPrefetchEpoch: [UInt16: UInt32] = [:]
+
+    private enum ScrollAxisLock { case undecided, vertical, horizontal }
+    private var scrollAxisLock: ScrollAxisLock = .undecided
+    private var scrollAxisAccumulatedX: CGFloat = 0
+    private var scrollAxisAccumulatedY: CGFloat = 0
+    private static let axisLockThreshold: CGFloat = 4
+
+    private var scrollUnconfirmedLines: Int = 0
+    private var scrollLastConfirmedAnchorTop: UInt32? = nil
 
     /// Schedule a render on the next vsync. Multiple calls between vsyncs
     /// are coalesced by MTKView into a single draw() call.
@@ -1407,13 +1417,23 @@ final class EditorNSView: MTKView {
             scrollElasticOffsetY = 0
             scrollTargetWindowId = nil
             scrollTargetCellPosition = nil
+            scrollAxisLock = .undecided
+            scrollAxisAccumulatedX = 0
+            scrollAxisAccumulatedY = 0
+            scrollUnconfirmedLines = 0
+            scrollLastConfirmedAnchorTop = nil
         }
+
+        let (lockedDeltaX, lockedDeltaY) = axisLockedDeltas(
+            deltaX: event.scrollingDeltaX,
+            deltaY: event.scrollingDeltaY
+        )
 
         establishSmoothScrollTargetIfNeeded(row: row, col: col)
         let targetCell = Self.smoothScrollEventCellPosition(targetCell: scrollTargetCellPosition, row: row, col: col)
 
         let vEvents = scrollAccumulator.accumulateVertical(
-            deltaY: event.scrollingDeltaY, cellHeight: effectiveCellHeight)
+            deltaY: lockedDeltaY, cellHeight: effectiveCellHeight)
         if let windowId = scrollTargetWindowId {
             var deltaLines: Int16 = 0
             for e in vEvents {
@@ -1426,6 +1446,7 @@ final class EditorNSView: MTKView {
             if deltaLines != 0 {
                 let direction: UInt8 = deltaLines > 0 ? 0 : 1
                 encoder.sendScrollBatch(windowId: windowId, deltaLines: deltaLines, direction: direction)
+                scrollUnconfirmedLines += Int(deltaLines)
             }
         } else {
             for e in vEvents {
@@ -1433,7 +1454,7 @@ final class EditorNSView: MTKView {
             }
         }
         let hEvents = scrollAccumulator.accumulateHorizontal(
-            deltaX: event.scrollingDeltaX, cellWidth: cellWidth)
+            deltaX: lockedDeltaX, cellWidth: cellWidth)
         for e in hEvents {
             sendScrollEvent(e, row: targetCell.row, col: targetCell.col, mods: mods)
         }
@@ -1456,7 +1477,7 @@ final class EditorNSView: MTKView {
             if totalOverscan > 0 {
                 let scrollingDown = event.scrollingDeltaY < 0
                 let runway = scrollingDown ? payloadOverscan.after : payloadOverscan.before
-                let threshold = Double(totalOverscan) * 0.4
+                let threshold = Double(totalOverscan) * 0.6
                 if Double(runway) < threshold, scrollPrefetchEpoch[windowId] == nil {
                     let direction: UInt8 = scrollingDown ? 0 : 1
                     encoder.sendScrollPrefetchHint(
@@ -1470,10 +1491,26 @@ final class EditorNSView: MTKView {
             }
         }
 
+        if let sp = targetScrollPresentation {
+            if let lastAnchor = scrollLastConfirmedAnchorTop {
+                let anchorDelta = Int(sp.anchorTop) - Int(lastAnchor)
+                if anchorDelta != 0 {
+                    let prev = scrollUnconfirmedLines
+                    scrollUnconfirmedLines -= anchorDelta
+                    if prev >= 0 && scrollUnconfirmedLines < 0 { scrollUnconfirmedLines = 0 }
+                    if prev <= 0 && scrollUnconfirmedLines > 0 { scrollUnconfirmedLines = 0 }
+                    scrollLastConfirmedAnchorTop = sp.anchorTop
+                }
+            } else {
+                scrollLastConfirmedAnchorTop = sp.anchorTop
+            }
+        }
+
+        let compensatedOffsetY = scrollAccumulator.pixelOffsetY + CGFloat(scrollUnconfirmedLines) * effectiveCellHeight
         let translation = Self.presentationScrollTranslation(
             scrollPresentation: targetScrollPresentation,
-            scrollOffset: CGPoint(x: scrollAccumulator.pixelOffsetX, y: scrollAccumulator.pixelOffsetY),
-            scrollDeltaY: event.scrollingDeltaY,
+            scrollOffset: CGPoint(x: scrollAccumulator.pixelOffsetX, y: compensatedOffsetY),
+            scrollDeltaY: lockedDeltaY,
             currentElasticOffsetY: scrollElasticOffsetY,
             cellHeight: effectiveCellHeight,
             payloadOverscanBefore: payloadOverscan.before,
@@ -1483,6 +1520,7 @@ final class EditorNSView: MTKView {
         )
         if translation.scrollOffset.y == 0, translation.elasticOffsetY != 0 {
             scrollAccumulator.snapVertical()
+            scrollUnconfirmedLines = 0
         }
         scrollPixelOffset = scrollTargetWindowId == nil ? CGPoint(x: 0, y: 0) : translation.scrollOffset
         scrollElasticOffsetY = scrollTargetWindowId == nil ? 0 : translation.elasticOffsetY
@@ -1509,6 +1547,29 @@ final class EditorNSView: MTKView {
         }
         scrollTargetWindowId = nil
         scrollTargetCellPosition = nil
+        scrollAxisLock = .undecided
+        scrollAxisAccumulatedX = 0
+        scrollAxisAccumulatedY = 0
+        scrollUnconfirmedLines = 0
+        scrollLastConfirmedAnchorTop = nil
+    }
+
+    private func axisLockedDeltas(deltaX: CGFloat, deltaY: CGFloat) -> (CGFloat, CGFloat) {
+        if scrollAxisLock == .undecided {
+            scrollAxisAccumulatedX += abs(deltaX)
+            scrollAxisAccumulatedY += abs(deltaY)
+            let threshold = Self.axisLockThreshold
+            if scrollAxisAccumulatedY >= threshold || scrollAxisAccumulatedX >= threshold {
+                scrollAxisLock = scrollAxisAccumulatedY >= scrollAxisAccumulatedX ? .vertical : .horizontal
+            } else {
+                return (0, 0)
+            }
+        }
+        switch scrollAxisLock {
+        case .vertical: return (0, deltaY)
+        case .horizontal: return (deltaX, 0)
+        case .undecided: return (0, 0)
+        }
     }
 
     private func establishSmoothScrollTargetIfNeeded(row: Int16, col: Int16) {
@@ -1527,6 +1588,8 @@ final class EditorNSView: MTKView {
         scrollElasticOffsetY = 0
         scrollTargetWindowId = nil
         scrollTargetCellPosition = nil
+        scrollUnconfirmedLines = 0
+        scrollLastConfirmedAnchorTop = nil
         needsDisplay = true
     }
 

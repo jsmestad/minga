@@ -300,9 +300,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                    coreTextRenderer: ctRenderer, fontManager: fm)
         disp.onScrollPresentationReset = { [weak nsView] in
             guard let nsView else { return }
-            // During an active trackpad gesture the anchor changes because
-            // we just scrolled. Resetting the accumulator mid-gesture causes
-            // jitter; let finishSmoothScrollGesture handle cleanup.
             if nsView.hasActiveScrollGesture { return }
             nsView.resetSmoothScrollState()
         }

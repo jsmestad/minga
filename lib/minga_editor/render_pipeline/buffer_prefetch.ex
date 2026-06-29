@@ -199,14 +199,23 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     # Vertical-only scroll for the active window. Inactive windows preserve their
     # own viewport so hover-wheel scrolling a split does not snap back to the
     # inactive window's stored cursor during the render that follows the mouse event.
+    # During active mouse/trackpad scrolling, the viewport moves freely and the
+    # cursor stays where it was (modern editor convention, not vim-style clamping).
+    now = System.monotonic_time(:millisecond)
+    scrolling_active = is_active and Window.scroll_velocity_tier(window, now) != :idle
+
     viewport =
-      maybe_scroll_active_window_to_cursor(
-        viewport,
-        visible_cursor_line,
-        scroll_margin,
-        is_active,
-        wrap_on
-      )
+      if scrolling_active do
+        viewport
+      else
+        maybe_scroll_active_window_to_cursor(
+          viewport,
+          visible_cursor_line,
+          scroll_margin,
+          is_active,
+          wrap_on
+        )
+      end
 
     visible_rows = Viewport.content_rows(viewport)
 
@@ -369,7 +378,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   @spec overscan_rows(ScrollVelocity.tier()) :: pos_integer()
   defp overscan_rows(:idle), do: 50
   defp overscan_rows(:medium), do: 100
-  defp overscan_rows(:fast), do: 200
+  defp overscan_rows(:fast), do: 300
 
   @spec boosted_overscan_rows(Window.t(), ScrollVelocity.tier()) :: pos_integer()
   defp boosted_overscan_rows(%Window{prefetch_overscan_boost: nil}, tier),
