@@ -318,7 +318,7 @@ struct TabBarView: View {
             } else {
                 Text(tab.icon)
                     .font(.custom("Symbols Nerd Font Mono", size: 12))
-                    .foregroundStyle(tab.isActive ? theme.tabActiveFg : theme.tabSecondaryFg)
+                    .foregroundStyle(tabIconColor(tab))
             }
 
             // Label: pinned and agent tabs stay compact; the tooltip carries the full name.
@@ -493,6 +493,7 @@ struct TabBarView: View {
             } else {
                 Text(tab.icon)
                     .font(.custom("Symbols Nerd Font Mono", size: 12))
+                    .foregroundStyle(tabIconColor(tab))
             }
 
             if !tab.isPinned && !tab.isAgent {
@@ -566,6 +567,13 @@ struct TabBarView: View {
             .fill(theme.tabSeparatorFg.opacity(0.75))
             .frame(width: 1, height: 22)
             .padding(.horizontal, 3)
+    }
+
+    private func tabIconColor(_ tab: TabEntry) -> Color {
+        if tab.isActive {
+            return TabIconColors.color(forFilename: tab.label) ?? theme.tabActiveFg
+        }
+        return TabIconColors.color(forFilename: tab.label) ?? theme.tabSecondaryFg
     }
 
     private func tabBackgroundColor(_ tab: TabEntry, isHovering: Bool) -> Color {

@@ -232,8 +232,7 @@ defmodule MingaEditor.UI.Picker.BufferSource do
       id: key,
       label: "#{icon} #{name}#{dirty}#{ro}",
       description: desc,
-      icon_color: color,
-      two_line: true
+      icon_color: color
     }
   end
 

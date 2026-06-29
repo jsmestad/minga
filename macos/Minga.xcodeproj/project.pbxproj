@@ -35,6 +35,7 @@
 		120BF7EC42A94068D7F2C16F /* SidebarHostState.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBA4340DA5B9E9B544083A8B /* SidebarHostState.swift */; };
 		1226B35DF6948D6746E134F4 /* InlineEditField.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4DCF10EBEB51624A4A1F428 /* InlineEditField.swift */; };
 		123999564C3B1FE9804B13B0 /* FontFace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BC98120D82BD7548347875E /* FontFace.swift */; };
+		133A560C4AB7460A6862ADDC /* TabIconColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1F77D3367DCC1BAD0BCC1BE /* TabIconColors.swift */; };
 		1450E5E1A3EAD83E35A0937D /* MinibufferState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7DCE12924B5A58CA615BA58 /* MinibufferState.swift */; };
 		14551DA3AFEE1AB238689798 /* BottomPanelState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A583EB0DCE480D1A5FC7E440 /* BottomPanelState.swift */; };
 		16116567DD7218A82575360A /* CoreTextShaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 48E21C30D142028698027567 /* CoreTextShaders.metal */; };
@@ -47,6 +48,7 @@
 		1A00B407D11CC5604CC5EC85 /* AgentApprovalCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 492285F3371798B69478BF13 /* AgentApprovalCard.swift */; };
 		1A7BC027E152504B67F6F418 /* CoreTextShaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 48E21C30D142028698027567 /* CoreTextShaders.metal */; };
 		1ACACDC02D45948922FE9F47 /* NotificationCenterState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DCCEC5865DAE0AAF754F2E2 /* NotificationCenterState.swift */; };
+		1BF004B335716C13CE08E209 /* TabIconColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1F77D3367DCC1BAD0BCC1BE /* TabIconColors.swift */; };
 		1CAFD16C7C1BEA3677CAF725 /* WorkspaceState.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1EC68F918782FE2FCDB2413 /* WorkspaceState.swift */; };
 		1D4C31CE73DC951049FABBE0 /* SignatureHelpOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F8CC95C21F56C815C87A3C9 /* SignatureHelpOverlay.swift */; };
 		1D7D1C02754FC399174D11DD /* ProtocolErrorState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A915C3108F2370C753A1931B /* ProtocolErrorState.swift */; };
@@ -265,6 +267,7 @@
 		9D1D5E11F9839F86F7A7BA70 /* EditorScrollTrack.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44800E8F274B5EC453CAE7EB /* EditorScrollTrack.swift */; };
 		9E80408113CAE3600C837329 /* SearchState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6104336F33C41EBE21B10F6 /* SearchState.swift */; };
 		A07B320CE2B623ADBA433732 /* PreviewRegistry+Chrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF40BCB1722FAD446E1E6E52 /* PreviewRegistry+Chrome.swift */; };
+		A0F90F5C98AD4588E4C090DB /* TabIconColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1F77D3367DCC1BAD0BCC1BE /* TabIconColors.swift */; };
 		A17019B3C14044971571A5F1 /* ProtocolCommandSize.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = 762CD389E04B0DE6A86CDBF2 /* ProtocolCommandSize.generated.swift */; };
 		A2297B883A245C844B39E8A4 /* GUIState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 644384B6B8FE5F11CD0DB713 /* GUIState.swift */; };
 		A29BB96B8F84AA489CBA0C5F /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9FC2118EA77254CBCAE7B0B /* AppState.swift */; };
@@ -606,6 +609,7 @@
 		EF185FF7AFC2D9E5430B6B65 /* FeedbackState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedbackState.swift; sourceTree = "<group>"; };
 		F086ACF8E4F305C9DDAE24FF /* ThemeColorsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeColorsTests.swift; sourceTree = "<group>"; };
 		F0EFEC421284D11AD2177113 /* BEAMProcessManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BEAMProcessManager.swift; sourceTree = "<group>"; };
+		F1F77D3367DCC1BAD0BCC1BE /* TabIconColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabIconColors.swift; sourceTree = "<group>"; };
 		F220A60775A252A728477659 /* ProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolTests.swift; sourceTree = "<group>"; };
 		F4B4CB36A83E4FEBF0B58397 /* LatencyHUDState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LatencyHUDState.swift; sourceTree = "<group>"; };
 		F5647A59C841B3C408994CC7 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -934,6 +938,7 @@
 				764F85CBFE17A90A0A61F2B6 /* StatusBarView.swift */,
 				0A2CBCDF99282365E723D45A /* TabBarState.swift */,
 				4CDC572B6F7D2CD90E07CA61 /* TabBarView.swift */,
+				F1F77D3367DCC1BAD0BCC1BE /* TabIconColors.swift */,
 				D0D4C9BE8CA9DC30BCE6ED49 /* WorkspaceHeaderView.swift */,
 				671A222860B90E08D7975099 /* WorkspaceIconPicker.swift */,
 				B59BD32DD25D2C6C5A90D898 /* WorkspaceIndicatorView.swift */,
@@ -1202,7 +1207,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "codesign --force --deep --sign - \"${BUILT_PRODUCTS_DIR}/${FULL_PRODUCT_NAME}\"\n";
+			shellScript = "codesign --force --deep --sign - --options runtime --entitlements \"${SRCROOT}/Entitlements.plist\" \"${BUILT_PRODUCTS_DIR}/${FULL_PRODUCT_NAME}\"\n";
 		};
 		DE42BE7E030FEAA69E9EC033 /* Copy CLI launcher */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -1349,6 +1354,7 @@
 				697C4E73D1EA395CE5BC0DD3 /* StatusBarView.swift in Sources */,
 				AED37FD128DF5C792BE8EF2E /* TabBarState.swift in Sources */,
 				294738FAB95202182B7464AA /* TabBarView.swift in Sources */,
+				1BF004B335716C13CE08E209 /* TabIconColors.swift in Sources */,
 				89F02F2C51E1197FDF2AD60A /* TextHighlighting.swift in Sources */,
 				2CF2BF9AEA331EE26254F578 /* ThemeColors.swift in Sources */,
 				AD8A9E4148FCF2FDEFCF352C /* ToolManagerState.swift in Sources */,
@@ -1486,6 +1492,7 @@
 				83978083960CB33C42308F15 /* StatusBarView.swift in Sources */,
 				197B60CF2A04C5E96C724E8C /* TabBarState.swift in Sources */,
 				B055838D672239B0B089C9EC /* TabBarView.swift in Sources */,
+				133A560C4AB7460A6862ADDC /* TabIconColors.swift in Sources */,
 				ADF3EDA688F1254B9CAB6DA0 /* TextHighlighting.swift in Sources */,
 				CA5ADD6063E1BEBD77F04E3D /* ThemeColors.swift in Sources */,
 				395FE3E7663AEC78F497198D /* ToolManagerState.swift in Sources */,
@@ -1659,6 +1666,7 @@
 				FEFCEFCDC21C5AA5456036D0 /* SystemColorTests.swift in Sources */,
 				FA3837C4000CF11179387A41 /* TabBarState.swift in Sources */,
 				E341F39E9410FA63AF4823A3 /* TabBarView.swift in Sources */,
+				A0F90F5C98AD4588E4C090DB /* TabIconColors.swift in Sources */,
 				CB6E2608AA446DC33E01602A /* TextHighlighting.swift in Sources */,
 				CE3FD7FC096A3974F409E50B /* ThemeColors.swift in Sources */,
 				61CF67858355FFF4962D9D99 /* ThemeColorsTests.swift in Sources */,
@@ -1742,8 +1750,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Entitlements.plist;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1894,8 +1904,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Entitlements.plist;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

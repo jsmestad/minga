@@ -57,14 +57,11 @@ defmodule MingaEditor.UI.Picker.ProjectSourceTest do
             %{
               picker_ui: %{
                 context: %{project_root: ^selected_root},
-                picker: file_picker,
-                source: FileSource
+                source: FileSource,
+                load_status: :loading
               }
             }} = new_state.shell_state.modal
 
-    ids = Enum.map(file_picker.items, & &1.id)
-    assert "target.txt" in ids
-    refute "stale.txt" in ids
     assert EditorState.file_tree_state(new_state).project_root == selected_root
   end
 

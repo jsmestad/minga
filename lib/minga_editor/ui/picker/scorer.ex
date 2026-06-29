@@ -18,6 +18,8 @@ defmodule MingaEditor.UI.Picker.Scorer do
 
   @label_match_bonus 200
   @prefix_score 300
+  @basename_prefix_score 280
+  @path_boundary_score 250
   @substring_score 200
   @fuzzy_score 100
   @max_length_bonus 50
@@ -120,9 +122,38 @@ defmodule MingaEditor.UI.Picker.Scorer do
   @spec score_non_prefix_segment(String.t(), String.t()) :: non_neg_integer()
   defp score_non_prefix_segment(text, segment) do
     if String.contains?(text, segment) do
-      @substring_score
+      score_substring_with_boundary(text, segment)
     else
       score_fuzzy_segment(text, segment)
+    end
+  end
+
+  @spec score_substring_with_boundary(String.t(), String.t()) :: non_neg_integer()
+  defp score_substring_with_boundary(text, segment) do
+    basename_start = case :binary.match(text, "/") do
+      :nomatch -> 0
+      _ ->
+        parts = String.split(text, "/")
+        byte_size(text) - byte_size(List.last(parts))
+    end
+
+    cond do
+      basename_start > 0 and String.starts_with?(binary_part(text, basename_start, byte_size(text) - basename_start), segment) ->
+        @basename_prefix_score
+
+      matches_after_separator?(text, segment) ->
+        @path_boundary_score
+
+      true ->
+        @substring_score
+    end
+  end
+
+  @spec matches_after_separator?(String.t(), String.t()) :: boolean()
+  defp matches_after_separator?(text, segment) do
+    case :binary.match(text, "/" <> segment) do
+      {_, _} -> true
+      :nomatch -> false
     end
   end
 
