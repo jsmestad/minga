@@ -300,6 +300,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                    coreTextRenderer: ctRenderer, fontManager: fm)
         disp.onScrollPresentationReset = { [weak nsView] in
             guard let nsView else { return }
+            // Resetting mid-gesture would zero scrollUnconfirmedLines and corrupt pixel-offset compensation.
             if nsView.hasActiveScrollGesture { return }
             nsView.resetSmoothScrollState()
         }

@@ -54,8 +54,8 @@ defmodule MingaEditor.Mouse do
   alias Minga.Mode.VisualState
 
   # TUI scrolls 3 lines per wheel tick (standard terminal behavior).
-  # GUI scrolls 1 line per event because the frontend accumulates pixel
-  # deltas and emits one event per cellHeight crossed.
+  # GUI scrolls 1 line/col per event because the frontend accumulates pixel
+  # deltas and emits one event per cell boundary crossed.
   @gui_scroll_lines 1
   @gui_scroll_cols 1
   @scroll_cols 6
@@ -115,11 +115,12 @@ defmodule MingaEditor.Mouse do
       {:ok, %Window{buffer: buf} = window} when is_pid(buf) ->
         now = System.monotonic_time(:millisecond)
         total_lines = Buffer.line_count(buf)
+        cursor_pos = Buffer.cursor(buf)
 
         updated =
           window
           |> Window.scroll_viewport(delta_lines, total_lines)
-          |> Window.record_scroll_event(now, direction)
+          |> Window.record_scroll_event(now, direction, cursor_pos)
 
         EditorState.update_window(state, window_id, fn _window -> updated end)
 
@@ -463,11 +464,12 @@ defmodule MingaEditor.Mouse do
         now = System.monotonic_time(:millisecond)
         dir = if delta > 0, do: :down, else: :up
         total_lines = Buffer.line_count(buf)
+        cursor_pos = Buffer.cursor(buf)
 
         updated =
           window
           |> Window.scroll_viewport(delta, total_lines)
-          |> Window.record_scroll_event(now, dir)
+          |> Window.record_scroll_event(now, dir, cursor_pos)
 
         EditorState.update_window(state, win_id, fn _window -> updated end)
 
@@ -1541,7 +1543,7 @@ defmodule MingaEditor.Mouse do
          col
        )
        when col < content_col do
-    scroll_window_horizontal(state, win_id, -@scroll_cols)
+    scroll_window_horizontal(state, win_id, -scroll_cols(state))
   end
 
   defp maybe_auto_scroll_horizontal(
@@ -1550,7 +1552,7 @@ defmodule MingaEditor.Mouse do
          col
        )
        when col >= content_col + content_w do
-    scroll_window_horizontal(state, win_id, @scroll_cols)
+    scroll_window_horizontal(state, win_id, scroll_cols(state))
   end
 
   defp maybe_auto_scroll_horizontal(state, _context, _col), do: state

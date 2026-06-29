@@ -196,18 +196,16 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
         FoldMap.buffer_to_visible(fold_map, cursor_line)
       end
 
-    # Vertical-only scroll for the active window. Inactive windows preserve their
-    # own viewport so hover-wheel scrolling a split does not snap back to the
-    # inactive window's stored cursor during the render that follows the mouse event.
-    # During active mouse/trackpad scrolling, the viewport moves freely and the
-    # cursor stays where it was (modern editor convention, not vim-style clamping).
+    # Viewport stays where the user scrolled it until the cursor moves.
     now = System.monotonic_time(:millisecond)
-    scrolling_active = is_active and Window.scroll_velocity_tier(window, now) != :idle
+
+    {window, follow_cursor} =
+      if is_active,
+        do: Window.scroll_follow_cursor?(window, {cursor_line, cursor_byte_col}, now),
+        else: {window, true}
 
     viewport =
-      if scrolling_active do
-        viewport
-      else
+      if follow_cursor do
         maybe_scroll_active_window_to_cursor(
           viewport,
           visible_cursor_line,
@@ -215,6 +213,8 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
           is_active,
           wrap_on
         )
+      else
+        viewport
       end
 
     visible_rows = Viewport.content_rows(viewport)

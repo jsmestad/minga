@@ -21,6 +21,8 @@ const (
 	arrowRight rune = 57351
 	arrowUp    rune = 57352
 	arrowDown  rune = 57353
+
+	prefetchThresholdFraction = 0.6
 )
 
 type Model struct {
@@ -221,9 +223,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if updated, ok := m.localMouse(msg); ok {
 			m = updated
 		} else if isWheelButton(msg.Mouse().Button) {
-			delta, mod := m.drainScrollDelta(msg)
+			delta := m.drainScrollDelta(msg)
 			m = m.applyPresentationScrollDelta(msg, delta)
-			if !m.sendScrollBatchDelta(msg, delta, mod) {
+			if !m.sendScrollBatchDelta(msg, delta) {
 				if packet, ok := m.mousePacket(msg); ok {
 					m.send(packet)
 				}
@@ -786,15 +788,15 @@ func (m Model) maxOverlayHeight() int {
 	return min(max(m.height/3, 4), 12)
 }
 
-func (m *Model) drainScrollDelta(msg tea.MouseMsg) (int, tea.KeyMod) {
+func (m *Model) drainScrollDelta(msg tea.MouseMsg) int {
 	if m.inputFilter != nil {
-		return m.inputFilter.DrainCoalesced()
+		delta, _ := m.inputFilter.DrainCoalesced()
+		return delta
 	}
-	mouse := msg.Mouse()
-	return wheelDeltaSign(mouse.Button), mouse.Mod
+	return wheelDeltaSign(msg.Mouse().Button)
 }
 
-func (m *Model) sendScrollBatchDelta(msg tea.MouseMsg, delta int, mod tea.KeyMod) bool {
+func (m *Model) sendScrollBatchDelta(msg tea.MouseMsg, delta int) bool {
 	mouse := msg.Mouse()
 	windowID, ok := m.presentationScrollWindowAt(mouse.X, mouse.Y)
 	if !ok {
@@ -840,7 +842,8 @@ func (m *Model) sendScrollBatchDelta(msg tea.MouseMsg, delta int, mod tea.KeyMod
 	} else {
 		runway = before
 	}
-	threshold := float64(totalOverscan) * 0.6
+	// Keep in sync with EditorNSView.swift prefetchThresholdFraction.
+	threshold := float64(totalOverscan) * prefetchThresholdFraction
 	if _, already := m.localPresentation.scrollPrefetchSent[windowID]; already {
 		return true
 	}

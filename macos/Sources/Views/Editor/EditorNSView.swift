@@ -363,6 +363,8 @@ final class EditorNSView: MTKView {
     private var scrollAxisAccumulatedX: CGFloat = 0
     private var scrollAxisAccumulatedY: CGFloat = 0
     private static let axisLockThreshold: CGFloat = 4
+    // Keep in sync with model.go prefetchThresholdFraction.
+    private static let prefetchThresholdFraction: Double = 0.6
 
     private var scrollUnconfirmedLines: Int = 0
     private var scrollLastConfirmedAnchorTop: UInt32? = nil
@@ -1417,11 +1419,7 @@ final class EditorNSView: MTKView {
             scrollElasticOffsetY = 0
             scrollTargetWindowId = nil
             scrollTargetCellPosition = nil
-            scrollAxisLock = .undecided
-            scrollAxisAccumulatedX = 0
-            scrollAxisAccumulatedY = 0
-            scrollUnconfirmedLines = 0
-            scrollLastConfirmedAnchorTop = nil
+            resetScrollTrackingState()
         }
 
         let (lockedDeltaX, lockedDeltaY) = axisLockedDeltas(
@@ -1475,9 +1473,9 @@ final class EditorNSView: MTKView {
 
             let totalOverscan = payloadOverscan.before + payloadOverscan.after
             if totalOverscan > 0 {
-                let scrollingDown = event.scrollingDeltaY < 0
+                let scrollingDown = lockedDeltaY < 0
                 let runway = scrollingDown ? payloadOverscan.after : payloadOverscan.before
-                let threshold = Double(totalOverscan) * 0.6
+                let threshold = Double(totalOverscan) * Self.prefetchThresholdFraction
                 if Double(runway) < threshold, scrollPrefetchEpoch[windowId] == nil {
                     let direction: UInt8 = scrollingDown ? 0 : 1
                     encoder.sendScrollPrefetchHint(
@@ -1547,6 +1545,10 @@ final class EditorNSView: MTKView {
         }
         scrollTargetWindowId = nil
         scrollTargetCellPosition = nil
+        resetScrollTrackingState()
+    }
+
+    private func resetScrollTrackingState() {
         scrollAxisLock = .undecided
         scrollAxisAccumulatedX = 0
         scrollAxisAccumulatedY = 0
@@ -1588,8 +1590,7 @@ final class EditorNSView: MTKView {
         scrollElasticOffsetY = 0
         scrollTargetWindowId = nil
         scrollTargetCellPosition = nil
-        scrollUnconfirmedLines = 0
-        scrollLastConfirmedAnchorTop = nil
+        resetScrollTrackingState()
         needsDisplay = true
     }
 

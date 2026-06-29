@@ -53,6 +53,7 @@ defmodule MingaEditor.Window do
           popup_meta: PopupActive.t() | nil,
           render_cache: RenderCache.t(),
           scroll_velocity: ScrollVelocity.t(),
+          scroll_detach_cursor: Buffer.position() | nil,
           prefetch_overscan_boost: {non_neg_integer(), :down | :up} | nil
         }
 
@@ -71,6 +72,7 @@ defmodule MingaEditor.Window do
     popup_meta: nil,
     render_cache: %RenderCache{},
     scroll_velocity: %ScrollVelocity{},
+    scroll_detach_cursor: nil,
     prefetch_overscan_boost: nil
   ]
 
@@ -183,9 +185,31 @@ defmodule MingaEditor.Window do
     %{window | pinned: pinned?}
   end
 
-  @spec record_scroll_event(t(), integer(), ScrollVelocity.event_direction()) :: t()
-  def record_scroll_event(%__MODULE__{} = window, now_ms, dir) do
-    %{window | scroll_velocity: ScrollVelocity.record(window.scroll_velocity, now_ms, dir)}
+  @spec record_scroll_event(t(), integer(), ScrollVelocity.event_direction(), Buffer.position()) ::
+          t()
+  def record_scroll_event(%__MODULE__{} = window, now_ms, dir, cursor_pos) do
+    %{
+      window
+      | scroll_velocity: ScrollVelocity.record(window.scroll_velocity, now_ms, dir),
+        scroll_detach_cursor: cursor_pos
+    }
+  end
+
+  @spec scroll_follow_cursor?(t(), Buffer.position(), integer()) :: {t(), boolean()}
+  def scroll_follow_cursor?(%__MODULE__{} = window, cursor_pos, now_ms) do
+    cond do
+      scroll_velocity_tier(window, now_ms) != :idle ->
+        {window, false}
+
+      window.scroll_detach_cursor != nil and cursor_pos == window.scroll_detach_cursor ->
+        {window, false}
+
+      window.scroll_detach_cursor != nil ->
+        {%{window | scroll_detach_cursor: nil}, true}
+
+      true ->
+        {window, true}
+    end
   end
 
   @spec scroll_velocity_tier(t(), integer()) :: ScrollVelocity.tier()

@@ -116,6 +116,7 @@ func (m Model) applyPresentationScrollDelta(msg tea.MouseMsg, delta int) Model {
 	switch mouse.Button {
 	case tea.MouseWheelDown, tea.MouseWheelUp:
 		if mouse.Mod.Contains(tea.ModShift) {
+			// Horizontal scroll is 1-column-at-a-time regardless of coalesced magnitude.
 			colDelta := 1
 			if delta < 0 {
 				colDelta = -1
