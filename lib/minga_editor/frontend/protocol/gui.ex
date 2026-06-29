@@ -1748,12 +1748,17 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp encode_editing_type(:rename), do: 2
 
   @spec file_tree_row_icon(Row.t()) :: String.t()
-  defp file_tree_row_icon(%Row{directory?: true, name: name}), do: elem(Devicon.folder_icon_and_color(name), 0)
+  defp file_tree_row_icon(%Row{directory?: true, name: name}),
+    do: elem(Devicon.folder_icon_and_color(name), 0)
+
   defp file_tree_row_icon(%Row{name: name}), do: Devicon.icon(Language.detect_filetype(name))
 
   @spec file_tree_row_icon_color(Row.t()) :: non_neg_integer()
-  defp file_tree_row_icon_color(%Row{directory?: true, name: name}), do: elem(Devicon.folder_icon_and_color(name), 1)
-  defp file_tree_row_icon_color(%Row{name: name}), do: Theme.default_icon_color(Language.detect_filetype(name))
+  defp file_tree_row_icon_color(%Row{directory?: true, name: name}),
+    do: elem(Devicon.folder_icon_and_color(name), 1)
+
+  defp file_tree_row_icon_color(%Row{name: name}),
+    do: Theme.default_icon_color(Language.detect_filetype(name))
 
   @spec encode_git_status(atom() | nil) :: non_neg_integer()
   defp encode_git_status(nil), do: 0

@@ -123,12 +123,17 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
   defp editing_model(%{type: type, text: text}), do: %FileTreeEditingModel{type: type, text: text}
 
   @spec row_icon(Row.t()) :: String.t()
-  defp row_icon(%Row{directory?: true, name: name}), do: elem(Devicon.folder_icon_and_color(name), 0)
+  defp row_icon(%Row{directory?: true, name: name}),
+    do: elem(Devicon.folder_icon_and_color(name), 0)
+
   defp row_icon(%Row{name: name}), do: Devicon.icon(Language.detect_filetype(name))
 
   @spec row_icon_color(Row.t(), Theme.t()) :: non_neg_integer()
-  defp row_icon_color(%Row{directory?: true, name: name}, _theme), do: elem(Devicon.folder_icon_and_color(name), 1)
-  defp row_icon_color(%Row{name: name}, theme), do: Theme.icon_color(theme, Language.detect_filetype(name))
+  defp row_icon_color(%Row{directory?: true, name: name}, _theme),
+    do: elem(Devicon.folder_icon_and_color(name), 1)
+
+  defp row_icon_color(%Row{name: name}, theme),
+    do: Theme.icon_color(theme, Language.detect_filetype(name))
 
   @spec active_buffer_path(Context.t()) :: String.t() | nil
   defp active_buffer_path(%{buffers: %{active: buf}}) when is_pid(buf) do

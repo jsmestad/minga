@@ -238,16 +238,6 @@ struct PickerOverlay: View {
         )
     }
 
-    // MARK: - Helpers
-
-    private func iconColor(_ rgb: UInt32) -> Color {
-        if rgb == 0 { return theme.popupFg.opacity(0.5) }
-        return Color(
-            red: Double((rgb >> 16) & 0xFF) / 255.0,
-            green: Double((rgb >> 8) & 0xFF) / 255.0,
-            blue: Double(rgb & 0xFF) / 255.0
-        )
-    }
 }
 
 // MARK: - Picker item row (separate View for observation isolation)

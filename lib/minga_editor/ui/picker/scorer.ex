@@ -130,15 +130,22 @@ defmodule MingaEditor.UI.Picker.Scorer do
 
   @spec score_substring_with_boundary(String.t(), String.t()) :: non_neg_integer()
   defp score_substring_with_boundary(text, segment) do
-    basename_start = case :binary.match(text, "/") do
-      :nomatch -> 0
-      _ ->
-        parts = String.split(text, "/")
-        byte_size(text) - byte_size(List.last(parts))
-    end
+    basename_start =
+      case :binary.match(text, "/") do
+        :nomatch ->
+          0
+
+        _ ->
+          parts = String.split(text, "/")
+          byte_size(text) - byte_size(List.last(parts))
+      end
 
     cond do
-      basename_start > 0 and String.starts_with?(binary_part(text, basename_start, byte_size(text) - basename_start), segment) ->
+      basename_start > 0 and
+          String.starts_with?(
+            binary_part(text, basename_start, byte_size(text) - basename_start),
+            segment
+          ) ->
         @basename_prefix_score
 
       matches_after_separator?(text, segment) ->
