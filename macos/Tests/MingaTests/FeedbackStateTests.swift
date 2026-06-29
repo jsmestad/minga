@@ -86,12 +86,28 @@ struct FeedbackStateTests {
 
     // MARK: - Async spinner behavior
 
+    @MainActor
+    private func waitForSpinner(_ state: FeedbackState, timeout: Duration = .seconds(2)) async throws {
+        let deadline = ContinuousClock.now + timeout
+        while !state.showingSpinner && ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    @MainActor
+    private func waitForSpinnerDismiss(_ state: FeedbackState, timeout: Duration = .seconds(2)) async throws {
+        let deadline = ContinuousClock.now + timeout
+        while state.showingSpinner && ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
     @Test("spinner appears after delay threshold")
     @MainActor func spinnerAppearsAfterDelay() async throws {
         let state = FeedbackState()
         state.update(message: "Formatting…")
         #expect(!state.showingSpinner)
-        try await Task.sleep(for: .milliseconds(150))
+        try await waitForSpinner(state)
         #expect(state.showingSpinner)
     }
 
@@ -99,11 +115,11 @@ struct FeedbackStateTests {
     @MainActor func spinnerHoldsAfterCompletion() async throws {
         let state = FeedbackState()
         state.update(message: "Formatting…")
-        try await Task.sleep(for: .milliseconds(150))
+        try await waitForSpinner(state)
         #expect(state.showingSpinner)
         state.update(message: "Formatted")
         #expect(state.showingSpinner)
-        try await Task.sleep(for: .milliseconds(600))
+        try await waitForSpinnerDismiss(state)
         #expect(!state.showingSpinner)
     }
 
@@ -120,7 +136,7 @@ struct FeedbackStateTests {
     @MainActor func cancelDuringSpinnerHold() async throws {
         let state = FeedbackState()
         state.update(message: "Formatting…")
-        try await Task.sleep(for: .milliseconds(150))
+        try await waitForSpinner(state)
         #expect(state.showingSpinner)
         state.cancel()
         #expect(!state.showingSpinner)
