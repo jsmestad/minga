@@ -528,6 +528,51 @@ defmodule MingaAgent.Changeset.ServerTest do
     end
   end
 
+  describe "preflight_merge" do
+    test "returns a clean preview without touching the real project", %{project: project} do
+      server = start_server(project)
+      ref = Process.monitor(server)
+
+      assert :ok = GenServer.call(server, {:write_file, "hello.txt", "agent version"})
+
+      result = GenServer.call(server, :preflight_merge)
+
+      # Clean preview mirrors the per-file decisions a merge would make.
+      assert {:ok, results} = result
+      assert {:ok, "hello.txt", :applied} in results
+
+      # The real project file is untouched and the server keeps running.
+      assert File.read!(Path.join(project, "hello.txt")) == "original content"
+      assert Process.alive?(server)
+      refute_received {:DOWN, ^ref, :process, ^server, _reason}
+
+      # A subsequent merge still applies cleanly, proving nothing was consumed.
+      assert :ok = GenServer.call(server, :merge)
+      assert File.read!(Path.join(project, "hello.txt")) == "agent version"
+    end
+
+    test "previews a conflict without mutating the real file", %{project: project} do
+      server = start_server(project)
+
+      # Agent modifies the file through the changeset.
+      assert :ok = GenServer.call(server, {:write_file, "hello.txt", "agent version"})
+
+      # Simulate a concurrent external edit to the same real project file.
+      File.write!(Path.join(project, "hello.txt"), "human version")
+
+      result = GenServer.call(server, :preflight_merge)
+
+      assert {:conflict, %{conflicts: [{:conflict, "hello.txt", :concurrent_edit}]} = details} =
+               result
+
+      assert {:conflict, "hello.txt", :concurrent_edit} in details.results
+
+      # The concurrent edit is preserved: preflight wrote nothing.
+      assert File.read!(Path.join(project, "hello.txt")) == "human version"
+      assert Process.alive?(server)
+    end
+  end
+
   describe "discard" do
     test "cleans up overlay and stops the server", %{project: project} do
       server = start_server(project)
