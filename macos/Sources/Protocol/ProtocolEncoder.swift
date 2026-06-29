@@ -136,6 +136,10 @@ protocol InputEncoder: AnyObject, Sendable {
     // Font size adjustment
     func sendFontSizeAdjust(direction: UInt8)
 
+    // Scroll batching
+    func sendScrollBatch(windowId: UInt16, deltaLines: Int16, direction: UInt8)
+    func sendScrollPrefetchHint(windowId: UInt16, currentVisualLine: UInt32, direction: UInt8, contentEpoch: UInt32)
+
     // Edit timeline actions
     func sendTimelineNavigate(index: UInt16)
 
