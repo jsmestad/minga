@@ -136,6 +136,10 @@ protocol InputEncoder: AnyObject, Sendable {
     // Font size adjustment
     func sendFontSizeAdjust(direction: UInt8)
 
+    // Scroll batching
+    func sendScrollBatch(windowId: UInt16, deltaLines: Int16, direction: UInt8)
+    func sendScrollPrefetchHint(windowId: UInt16, currentVisualLine: UInt32, direction: UInt8, contentEpoch: UInt32)
+
     // Edit timeline actions
     func sendTimelineNavigate(index: UInt16)
 
@@ -376,7 +380,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     func sendScrollPrefetchHint(windowId: UInt16, currentVisualLine: UInt32, direction: UInt8, contentEpoch: UInt32) {
-        var buf = Data(count: 10)
+        var buf = Data(count: 12)
         buf[0] = OP_SCROLL_PREFETCH_HINT
         writeU16(&buf, 1, windowId)
         writeU32(&buf, 3, currentVisualLine)

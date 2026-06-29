@@ -37,22 +37,22 @@ defmodule MingaEditor.Window.ScrollVelocityTest do
       assert ScrollVelocity.tier(sv, 1045) == :idle
     end
 
-    test "exactly 15 events returns :fast" do
+    test "exactly 10 events returns :fast" do
       sv =
-        Enum.reduce(1..15, ScrollVelocity.new(), fn i, acc ->
+        Enum.reduce(1..10, ScrollVelocity.new(), fn i, acc ->
           ScrollVelocity.record(acc, 1000 + i * 5, :down)
         end)
 
-      assert ScrollVelocity.tier(sv, 1080) == :fast
+      assert ScrollVelocity.tier(sv, 1055) == :fast
     end
 
-    test "14 events returns :medium (below fast threshold)" do
+    test "9 events returns :medium (below fast threshold)" do
       sv =
-        Enum.reduce(1..14, ScrollVelocity.new(), fn i, acc ->
+        Enum.reduce(1..9, ScrollVelocity.new(), fn i, acc ->
           ScrollVelocity.record(acc, 1000 + i * 5, :down)
         end)
 
-      assert ScrollVelocity.tier(sv, 1075) == :medium
+      assert ScrollVelocity.tier(sv, 1050) == :medium
     end
 
     test "decays to :idle after 200ms with no events" do
@@ -82,11 +82,11 @@ defmodule MingaEditor.Window.ScrollVelocityTest do
 
     test "window resets after 100ms gap" do
       sv =
-        Enum.reduce(1..10, ScrollVelocity.new(), fn i, acc ->
+        Enum.reduce(1..9, ScrollVelocity.new(), fn i, acc ->
           ScrollVelocity.record(acc, 1000 + i * 5, :down)
         end)
 
-      assert ScrollVelocity.tier(sv, 1055) == :medium
+      assert ScrollVelocity.tier(sv, 1050) == :medium
 
       sv = ScrollVelocity.record(sv, 1200, :down)
       assert ScrollVelocity.tier(sv, 1205) == :medium

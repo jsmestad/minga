@@ -29,17 +29,15 @@ defmodule MingaEditor.MouseTest do
   @ctrl 0x02
 
   describe "scrolling" do
-    test "vertical scroll keeps the cursor inside the visible buffer" do
+    test "vertical scroll moves viewport without moving the cursor" do
       {state, buffer} = start_mouse_state(lines(0..29))
 
       state = mouse(state, 0, 0, :wheel_down, :press)
-      assert BufferProcess.cursor(buffer) == {6, 0}
+      assert BufferProcess.cursor(buffer) == {0, 0}
       assert active_viewport(state).top == 3
 
-      BufferProcess.move_to(buffer, {5, 0})
       state = mouse(state, 0, 0, :wheel_up, :press)
-      {line, _col} = BufferProcess.cursor(buffer)
-      assert line in 0..29
+      assert BufferProcess.cursor(buffer) == {0, 0}
       assert active_viewport(state).top == 0
     end
 

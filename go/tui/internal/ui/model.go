@@ -21,6 +21,8 @@ const (
 	arrowRight rune = 57351
 	arrowUp    rune = 57352
 	arrowDown  rune = 57353
+
+	prefetchThresholdFraction = 0.6
 )
 
 type Model struct {
@@ -221,8 +223,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if updated, ok := m.localMouse(msg); ok {
 			m = updated
 		} else if isWheelButton(msg.Mouse().Button) {
-			m = m.applyPresentationScroll(msg)
-			if !m.sendScrollBatch(msg) {
+			delta := m.drainScrollDelta(msg)
+			m = m.applyPresentationScrollDelta(msg, delta)
+			if !m.sendScrollBatchDelta(msg, delta) {
 				if packet, ok := m.mousePacket(msg); ok {
 					m.send(packet)
 				}
@@ -785,7 +788,15 @@ func (m Model) maxOverlayHeight() int {
 	return min(max(m.height/3, 4), 12)
 }
 
-func (m *Model) sendScrollBatch(msg tea.MouseMsg) bool {
+func (m *Model) drainScrollDelta(msg tea.MouseMsg) int {
+	if m.inputFilter != nil {
+		delta, _ := m.inputFilter.DrainCoalesced()
+		return delta
+	}
+	return wheelDeltaSign(msg.Mouse().Button)
+}
+
+func (m *Model) sendScrollBatchDelta(msg tea.MouseMsg, delta int) bool {
 	mouse := msg.Mouse()
 	windowID, ok := m.presentationScrollWindowAt(mouse.X, mouse.Y)
 	if !ok {
@@ -796,29 +807,17 @@ func (m *Model) sendScrollBatch(msg tea.MouseMsg) bool {
 		return false
 	}
 
+	if delta == 0 {
+		return true
+	}
 	var deltaLines int16
 	var direction byte
-	if m.inputFilter != nil {
-		delta, _ := m.inputFilter.DrainCoalesced()
-		if delta == 0 {
-			return true
-		}
-		if delta > 0 {
-			deltaLines = int16(min(delta, 0x7FFF))
-			direction = 0
-		} else {
-			deltaLines = int16(max(delta, -0x7FFF))
-			direction = 1
-		}
+	if delta > 0 {
+		deltaLines = int16(min(delta, 0x7FFF))
+		direction = 0
 	} else {
-		switch mouse.Button {
-		case tea.MouseWheelDown:
-			deltaLines, direction = 1, 0
-		case tea.MouseWheelUp:
-			deltaLines, direction = -1, 1
-		default:
-			return false
-		}
+		deltaLines = int16(max(delta, -0x7FFF))
+		direction = 1
 	}
 
 	m.send(protocol.EncodeScrollBatch(windowID, deltaLines, direction))
@@ -843,7 +842,8 @@ func (m *Model) sendScrollBatch(msg tea.MouseMsg) bool {
 	} else {
 		runway = before
 	}
-	threshold := float64(totalOverscan) * 0.4
+	// Keep in sync with EditorNSView.swift prefetchThresholdFraction.
+	threshold := float64(totalOverscan) * prefetchThresholdFraction
 	if _, already := m.localPresentation.scrollPrefetchSent[windowID]; already {
 		return true
 	}

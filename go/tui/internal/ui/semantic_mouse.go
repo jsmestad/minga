@@ -95,7 +95,7 @@ func (m Model) localMouse(msg tea.MouseMsg) (Model, bool) {
 	return m, true
 }
 
-func (m Model) applyPresentationScroll(msg tea.MouseMsg) Model {
+func (m Model) applyPresentationScrollDelta(msg tea.MouseMsg, delta int) Model {
 	mouse := msg.Mouse()
 	if !isWheelButton(mouse.Button) {
 		return m
@@ -114,17 +114,16 @@ func (m Model) applyPresentationScroll(msg tea.MouseMsg) Model {
 	}
 	before, after := presentationPayloadOverscanBounds(window, presentationVisibleRows(window))
 	switch mouse.Button {
-	case tea.MouseWheelDown:
+	case tea.MouseWheelDown, tea.MouseWheelUp:
 		if mouse.Mod.Contains(tea.ModShift) {
-			scroll.colOffset = min(scroll.colOffset+1, maxPresentationColOffset(window))
+			// Horizontal scroll is 1-column-at-a-time regardless of coalesced magnitude.
+			colDelta := 1
+			if delta < 0 {
+				colDelta = -1
+			}
+			scroll.colOffset = max(min(scroll.colOffset+colDelta, maxPresentationColOffset(window)), minPresentationColOffset(window))
 		} else {
-			scroll.rowOffset = min(scroll.rowOffset+1, after)
-		}
-	case tea.MouseWheelUp:
-		if mouse.Mod.Contains(tea.ModShift) {
-			scroll.colOffset = max(scroll.colOffset-1, minPresentationColOffset(window))
-		} else {
-			scroll.rowOffset = max(scroll.rowOffset-1, -before)
+			scroll.rowOffset = max(min(scroll.rowOffset+delta, after), -before)
 		}
 	case tea.MouseWheelRight:
 		scroll.colOffset = min(scroll.colOffset+1, maxPresentationColOffset(window))

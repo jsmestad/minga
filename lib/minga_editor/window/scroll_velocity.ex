@@ -12,7 +12,7 @@ defmodule MingaEditor.Window.ScrollVelocity do
   @window_ms 100
   @decay_ms 200
   @medium_threshold 5
-  @fast_threshold 15
+  @fast_threshold 10
   @direction_window 5
 
   @type tier :: :idle | :medium | :fast
