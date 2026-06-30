@@ -15,31 +15,70 @@ defmodule Mix.Tasks.Swift.Harness do
 
   @shortdoc "Build the Swift GUI protocol test harness"
 
+  # Sources that live in the `MingaProtocol` framework target in the Xcode
+  # build. The harness compiles everything as ONE flat module, so we include
+  # these directly and strip their cross-module `import MingaProtocol` lines
+  # below (see @cross_module_import). Keep in sync with the MingaProtocol
+  # target's `sources` in macos/project.yml.
+  @protocol_module_sources [
+    "macos/Sources/Protocol/ProtocolTypes.swift",
+    "macos/Sources/Protocol/StatusBarUpdate.swift",
+    "macos/Sources/Protocol/GUIColorSlots.swift",
+    "macos/Sources/Renderer/WindowContent.swift",
+    "macos/Sources/Protocol/AgentSurfaceTypes.swift",
+    "macos/Sources/Protocol/LatencyRecorder.swift",
+    "macos/Sources/Protocol/FrontendExtensionRuntimeMessage.swift"
+  ]
+
+  # Generated + app-target Protocol sources the harness needs on top of the
+  # MingaProtocol module sources above.
+  @harness_app_sources [
+    "macos/.generated/protocol/ProtocolOpcodes.generated.swift",
+    "macos/.generated/protocol/ProtocolCommandSize.generated.swift",
+    "macos/.generated/protocol/ProtocolSemanticDecode.generated.swift",
+    "macos/Sources/Protocol/ProtocolConstants.swift",
+    "macos/Sources/Protocol/ProtocolDecoder.swift",
+    "macos/TestHarness/main.swift"
+  ]
+
+  # `import MingaProtocol` / `import MingaUI` only resolve across the real
+  # framework module boundary. The single-module harness compiles those types
+  # in-line, so these imports must be removed before swiftc sees the file.
+  @cross_module_import ~r/^import (?:MingaProtocol|MingaUI)\R/m
+
   @impl Mix.Task
   @spec run(list()) :: :ok
   def run(_args) do
     Mix.Task.run("protocol.gen", [])
 
-    sources = [
-      "macos/.generated/protocol/ProtocolOpcodes.generated.swift",
-      "macos/.generated/protocol/ProtocolCommandSize.generated.swift",
-      "macos/.generated/protocol/ProtocolSemanticDecode.generated.swift",
-      "macos/Sources/Protocol/ProtocolConstants.swift",
-      "macos/Sources/Protocol/ProtocolTypes.swift",
-      "macos/Sources/Protocol/ProtocolDecoder.swift",
-      "macos/Sources/Protocol/AgentSurfaceTypes.swift",
-      "macos/Sources/Renderer/WindowContent.swift",
-      "macos/TestHarness/main.swift"
-    ]
-
     priv_dir = Path.join(Mix.Project.app_path(), "priv")
     File.mkdir_p!(priv_dir)
     output = Path.join(priv_dir, "minga-test-harness")
 
-    args = sources ++ ["-o", output]
+    # Preprocess every source into a temp dir with cross-module imports
+    # stripped, then flat-compile the copies into a single binary. The temp
+    # dir lives under the (gitignored) build path, not priv/, which is a
+    # symlink back into the repo working tree.
+    src_dir = Path.join(Mix.Project.build_path(), "minga-harness-src")
+    File.rm_rf!(src_dir)
+    File.mkdir_p!(src_dir)
+
+    compile_sources =
+      (@protocol_module_sources ++ @harness_app_sources)
+      |> Enum.map(&preprocess_source(&1, src_dir))
+
+    args = compile_sources ++ ["-o", output]
 
     System.find_executable("swiftc")
     |> run_with_swiftc(args, output)
+  end
+
+  @spec preprocess_source(String.t(), String.t()) :: String.t()
+  defp preprocess_source(source, src_dir) do
+    stripped = source |> File.read!() |> String.replace(@cross_module_import, "")
+    dest = Path.join(src_dir, Path.basename(source))
+    File.write!(dest, stripped)
+    dest
   end
 
   @spec run_with_swiftc(nil | String.t(), [String.t()], String.t()) :: :ok
