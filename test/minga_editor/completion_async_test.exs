@@ -1,0 +1,179 @@
+defmodule MingaEditor.CompletionAsyncTest do
+  @moduledoc """
+  Coverage for processing LSP completion responses off the Editor hot path
+  (ticket #2633).
+
+  The Editor only does cheap ref bookkeeping when a completion response
+  arrives; the parse/sort/filter runs in a Task that sends the processed menu
+  back as `{:completion_processed, gen, mode, payload, trigger_pos}`. These
+  tests prove:
+
+    * (a) the parse/sort/filter does not run on the Editor path — the
+      synchronous handler leaves the menu pending and the built menu only
+      arrives later, as a message, already sorted and filtered;
+    * (b) a stale processed result (older generation) is discarded latest-wins
+      so a superseded Task can never overwrite a fresher menu;
+    * (c) the merge path still unions a secondary server's items into the live
+      menu and re-applies the prefix filter correctly.
+  """
+
+  use Minga.Test.EditorCase, async: true
+
+  alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Editing.Completion
+  alias MingaEditor.CompletionHandling
+  alias MingaEditor.CompletionTrigger
+  alias MingaEditor.State.ModalOverlay
+  alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
+
+  @sync_timeout 15_000
+
+  defp items(raws), do: Completion.parse_response(%{"items" => raws})
+
+  defp completion_from(raws, trigger_pos, prefix) do
+    raws
+    |> items()
+    |> Completion.new(trigger_pos)
+    |> Completion.filter(prefix)
+  end
+
+  defp open_completion_modal(state, completion, gen) do
+    owner = state.shell_state.tab_bar.active_id
+    trigger = %{CompletionTrigger.new() | gen: gen}
+    payload = CompletionPayload.new(owner, completion: completion, trigger: trigger)
+    ModalOverlay.open(state, :completion, payload)
+  end
+
+  defp labels(%Completion{filtered: filtered}), do: Enum.map(filtered, & &1.label)
+
+  describe "(a) parse/sort/filter runs off the Editor process" do
+    test "the synchronous handler leaves the menu pending and the built menu arrives async" do
+      ctx = start_editor("hello")
+      state = editor_state(ctx)
+
+      # Open a pending completion modal with a primary request in flight. `self()`
+      # is the test process, so the Task will send the processed menu back to us.
+      ref = make_ref()
+
+      trigger = %{
+        CompletionTrigger.new()
+        | pending_ref: ref,
+          pending_refs: MapSet.new([ref]),
+          trigger_position: {0, 0},
+          gen: 1
+      }
+
+      state = ModalOverlay.put_completion_trigger(state, trigger)
+
+      # sortText is deliberately out of label order to prove sorting happened in
+      # the Task, not on the Editor.
+      result =
+        {:ok,
+         %{
+           "items" => [
+             %{"label" => "banana", "filterText" => "banana", "sortText" => "2"},
+             %{"label" => "apple", "filterText" => "apple", "sortText" => "1"}
+           ]
+         }}
+
+      returned = CompletionHandling.handle_response(state, ref, result)
+
+      # The Editor path itself never parsed/built the menu: it is still pending.
+      assert ModalOverlay.completion(returned) == nil
+
+      # The built menu arrives later, off-process, already sorted and filtered.
+      assert_receive {:completion_processed, 1, :primary, %Completion{} = built, {0, 0}},
+                     @sync_timeout
+
+      assert labels(built) == ["apple", "banana"]
+    end
+  end
+
+  describe "(b) stale processed result is discarded latest-wins" do
+    test "a result tagged with an older generation never overwrites the live menu" do
+      ctx = start_editor("hello")
+      state = editor_state(ctx)
+
+      existing = completion_from([%{"label" => "keep", "filterText" => "keep"}], {0, 0}, "")
+      state = open_completion_modal(state, existing, 5)
+
+      stale =
+        completion_from(
+          [%{"label" => "stale-sentinel", "filterText" => "stale-sentinel"}],
+          {0, 0},
+          ""
+        )
+
+      # Generation 4 is stale relative to the live generation 5: discard it.
+      discarded = CompletionHandling.apply_processed(state, 4, :primary, stale, {0, 0})
+      assert labels(ModalOverlay.completion(discarded)) == ["keep"]
+
+      # The same result on the live generation 5 is applied (sanity check that the
+      # guard is about the generation, not the payload).
+      applied = CompletionHandling.apply_processed(state, 5, :primary, stale, {0, 0})
+      assert "stale-sentinel" in labels(ModalOverlay.completion(applied))
+    end
+
+    test "a result is discarded when the completion menu has been dismissed" do
+      ctx = start_editor("hello")
+      state = editor_state(ctx)
+
+      # No completion modal is open (modal is :none), so any processed result is stale.
+      built = completion_from([%{"label" => "ghost", "filterText" => "ghost"}], {0, 0}, "")
+      result = CompletionHandling.apply_processed(state, 1, :primary, built, {0, 0})
+
+      assert ModalOverlay.completion(result) == nil
+    end
+  end
+
+  describe "(c) merge path still produces correct merged+filtered completions" do
+    test "secondary server items are unioned in, sorted, and prefix-filtered" do
+      ctx = start_editor("hello")
+      # Cursor at end of "hello" so the prefix typed since trigger {0, 0} is "hello".
+      BufferProcess.move_to(ctx.buffer, {0, 5})
+      state = editor_state(ctx)
+
+      existing =
+        completion_from(
+          [%{"label" => "helloThere", "filterText" => "helloThere", "sortText" => "1"}],
+          {0, 0},
+          "hello"
+        )
+
+      state = open_completion_modal(state, existing, 5)
+
+      merge_items =
+        items([
+          %{"label" => "helloWorld", "filterText" => "helloWorld", "sortText" => "2"},
+          %{"label" => "goodbye", "filterText" => "goodbye", "sortText" => "0"}
+        ])
+
+      merged = CompletionHandling.apply_processed(state, 5, :merge, merge_items, {0, 0})
+      completion = ModalOverlay.completion(merged)
+
+      # Union of both servers, sorted by sortText, with "goodbye" filtered out by
+      # the "hello" prefix.
+      assert labels(completion) == ["helloThere", "helloWorld"]
+      refute "goodbye" in labels(completion)
+    end
+
+    test "a primary result that lands after a secondary merge unions instead of replacing" do
+      ctx = start_editor("hello")
+      state = editor_state(ctx)
+
+      # A secondary :merge already populated the menu first.
+      secondary = completion_from([%{"label" => "from_secondary"}], {0, 0}, "")
+      state = open_completion_modal(state, secondary, 5)
+
+      # The slower primary result lands afterwards; its items must be unioned in.
+      primary =
+        completion_from([%{"label" => "from_primary"}], {0, 0}, "")
+
+      merged = CompletionHandling.apply_processed(state, 5, :primary, primary, {0, 0})
+      result_labels = labels(ModalOverlay.completion(merged))
+
+      assert "from_secondary" in result_labels
+      assert "from_primary" in result_labels
+    end
+  end
+end

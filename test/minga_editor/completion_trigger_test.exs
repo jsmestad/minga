@@ -68,36 +68,66 @@ defmodule MingaEditor.CompletionTriggerTest do
     end
   end
 
-  # ── handle_response/4 ────────────────────────────────────────────────────
+  # ── classify_response/4 ──────────────────────────────────────────────────
+  #
+  # classify_response does the cheap, on-the-Editor half of completion handling:
+  # it matches the response ref against the pending request and reports what to
+  # do, without parsing the (potentially huge) item list. The parse/sort/filter
+  # is performed by CompletionHandling in a Task.
 
-  describe "handle_response/4" do
+  describe "classify_response/4" do
     test "stale response (ref doesn't match) is ignored" do
       ref = make_ref()
       bridge = %{CompletionTrigger.new() | pending_ref: make_ref()}
       {:ok, buf} = BufferProcess.start_link(content: "hello")
 
-      {result_bridge, result} = CompletionTrigger.handle_response(bridge, ref, {:ok, nil}, buf)
-      assert result == nil
+      {result_bridge, classification} =
+        CompletionTrigger.classify_response(bridge, ref, {:ok, nil}, buf)
+
+      assert classification == :ignore
       assert is_map(result_bridge)
 
       GenServer.stop(buf)
     end
 
-    test "error response clears pending ref" do
+    test "error response clears pending ref and is ignored" do
       ref = make_ref()
       bridge = %{CompletionTrigger.new() | pending_ref: ref}
       {:ok, buf} = BufferProcess.start_link(content: "hello")
 
-      {result_bridge, result} =
-        CompletionTrigger.handle_response(bridge, ref, {:error, "timeout"}, buf)
+      {result_bridge, classification} =
+        CompletionTrigger.classify_response(bridge, ref, {:error, "timeout"}, buf)
 
-      assert result == nil
+      assert classification == :ignore
       assert result_bridge.pending_ref == nil
 
       GenServer.stop(buf)
     end
 
-    test "secondary server response returns :merge tuple" do
+    test "primary response (ref matches pending_ref) classifies as :primary and carries gen" do
+      ref = make_ref()
+
+      bridge = %{
+        CompletionTrigger.new()
+        | pending_ref: ref,
+          pending_refs: MapSet.new([ref]),
+          trigger_position: {0, 0},
+          gen: 7
+      }
+
+      {:ok, buf} = BufferProcess.start_link(content: "hello")
+
+      {result_bridge, classification} =
+        CompletionTrigger.classify_response(bridge, ref, {:ok, %{"items" => []}}, buf)
+
+      assert {:primary, {0, 0}, _prefix, 7} = classification
+      assert result_bridge.pending_ref == nil
+      refute MapSet.member?(result_bridge.pending_refs, ref)
+
+      GenServer.stop(buf)
+    end
+
+    test "secondary server response classifies as :merge and carries gen" do
       primary_ref = make_ref()
       secondary_ref = make_ref()
       refs = MapSet.new([primary_ref, secondary_ref])
@@ -106,24 +136,37 @@ defmodule MingaEditor.CompletionTriggerTest do
         CompletionTrigger.new()
         | pending_ref: primary_ref,
           pending_refs: refs,
-          trigger_position: {0, 0}
+          trigger_position: {0, 0},
+          gen: 3
       }
 
       {:ok, buf} = BufferProcess.start_link(content: "hello")
 
-      # Simulate response from secondary (ref doesn't match primary but is in pending_refs)
-      lsp_result = %{
-        "items" => [
-          %{"label" => "world", "kind" => 6}
-        ]
-      }
+      lsp_result = %{"items" => [%{"label" => "world", "kind" => 6}]}
 
-      {result_bridge, result} =
-        CompletionTrigger.handle_response(bridge, secondary_ref, {:ok, lsp_result}, buf)
+      {result_bridge, classification} =
+        CompletionTrigger.classify_response(bridge, secondary_ref, {:ok, lsp_result}, buf)
 
-      assert {:merge, items, _pos} = result
-      assert items != []
-      assert not MapSet.member?(result_bridge.pending_refs, secondary_ref)
+      assert {:merge, {0, 0}, _prefix, 3} = classification
+      refute MapSet.member?(result_bridge.pending_refs, secondary_ref)
+
+      GenServer.stop(buf)
+    end
+  end
+
+  # ── send + gen bump ───────────────────────────────────────────────────────
+
+  describe "generation bumping" do
+    test "each request batch mints a strictly newer generation" do
+      {:ok, buf} = BufferProcess.start_link(file_path: "/tmp/test_gen.ex", content: "hello")
+      BufferProcess.move_to(buf, {0, 5})
+
+      bridge0 = CompletionTrigger.new()
+      bridge1 = CompletionTrigger.flush_debounce(bridge0, [self()], buf)
+      bridge2 = CompletionTrigger.flush_debounce(bridge1, [self()], buf)
+
+      assert bridge1.gen == bridge0.gen + 1
+      assert bridge2.gen == bridge1.gen + 1
 
       GenServer.stop(buf)
     end

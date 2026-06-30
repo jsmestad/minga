@@ -517,10 +517,18 @@ defmodule MingaEditor.CompletionHandling do
   end
 
   @doc """
-  Handles an LSP completion response.
+  Handles an LSP completion response off the Editor hot path.
 
-  Matches the response ref against the pending trigger, creates a
-  `Completion` struct if items were returned, and renders.
+  Only the cheap bookkeeping runs on the Editor: `CompletionTrigger.classify_response/4`
+  matches the response `ref` against the pending request and decides whether it
+  is the primary response, a secondary one to merge, or stale. The expensive
+  work (parsing every item, sorting, and prefix-filtering) is then handed to a
+  Task under `Minga.Eval.TaskSupervisor`, which sends the processed result back
+  as `{:completion_processed, gen, mode, payload, trigger_pos}`. The Editor
+  applies that via `apply_processed/5` with a cheap state assignment.
+
+  This keeps the Editor mailbox responsive even when a server returns 1000+
+  completion items.
   """
   @spec handle_response(EditorState.t(), reference(), term()) :: EditorState.t()
   def handle_response(%{workspace: %{buffers: %{active: nil}}} = state, _ref, _result), do: state
@@ -528,8 +536,8 @@ defmodule MingaEditor.CompletionHandling do
   def handle_response(state, ref, result) do
     buffer_pid = state.workspace.buffers.active
 
-    {new_bridge, completion} =
-      CompletionTrigger.handle_response(
+    {new_bridge, classification} =
+      CompletionTrigger.classify_response(
         ModalOverlay.completion_trigger(state),
         ref,
         result,
@@ -537,20 +545,118 @@ defmodule MingaEditor.CompletionHandling do
       )
 
     new_state = ModalOverlay.put_completion_trigger(state, new_bridge)
+    dispatch_processing(new_state, classification, result)
+  end
 
-    case completion do
+  @spec dispatch_processing(EditorState.t(), CompletionTrigger.classification(), term()) ::
+          EditorState.t()
+  defp dispatch_processing(state, :ignore, _result), do: state
+
+  defp dispatch_processing(state, {mode, trigger_pos, prefix, gen}, result) do
+    start_completion_task(self(), mode, result, trigger_pos, prefix, gen)
+    state
+  end
+
+  # Spawns the parse/sort/filter work in a supervised Task so it never blocks
+  # the Editor GenServer. The Task sends the processed result back to `editor`.
+  @spec start_completion_task(
+          pid(),
+          :primary | :merge,
+          term(),
+          {non_neg_integer(), non_neg_integer()},
+          String.t(),
+          non_neg_integer()
+        ) :: :ok
+  defp start_completion_task(editor, mode, result, trigger_pos, prefix, gen) do
+    Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
+      payload = build_processed(mode, result, trigger_pos, prefix)
+      send(editor, {:completion_processed, gen, mode, payload, trigger_pos})
+    end)
+
+    :ok
+  end
+
+  # Primary: build the full sorted+filtered menu in the Task so the Editor only
+  # has to assign it. Merge: parse to items only; the (rare) merge math runs on
+  # the Editor at apply time against the live menu so ordering stays correct.
+  @spec build_processed(
+          :primary,
+          term(),
+          {non_neg_integer(), non_neg_integer()},
+          String.t()
+        ) :: Completion.t()
+  defp build_processed(:primary, {:ok, result}, trigger_pos, prefix) do
+    result
+    |> Completion.parse_response()
+    |> Completion.new(trigger_pos)
+    |> Completion.filter(prefix)
+  end
+
+  @spec build_processed(:merge, term(), {non_neg_integer(), non_neg_integer()}, String.t()) ::
+          [Completion.item()]
+  defp build_processed(:merge, {:ok, result}, _trigger_pos, _prefix) do
+    Completion.parse_response(result)
+  end
+
+  @doc """
+  Applies a completion result that was processed off the Editor in a Task.
+
+  Discards the result unless a completion modal is still open *and* it carries
+  the current request generation (`gen`). This latest-wins guard drops a stale
+  Task result from a request batch that was superseded by newer typing, so an
+  out-of-order or slow Task can never overwrite a fresher menu.
+
+  For a `:primary` result the Task already produced a fully sorted+filtered
+  `Completion`, so the common single-server path is a cheap assignment. If a
+  secondary server's `:merge` result happened to land first, the primary result
+  is unioned into it (rather than replacing it) so no server's items are lost.
+  """
+  @spec apply_processed(
+          EditorState.t(),
+          non_neg_integer(),
+          :primary | :merge,
+          Completion.t() | [Completion.item()],
+          {non_neg_integer(), non_neg_integer()}
+        ) :: EditorState.t()
+  def apply_processed(state, gen, mode, payload, trigger_pos) do
+    trigger = ModalOverlay.completion_trigger(state)
+
+    if ModalOverlay.match(state.shell_state.modal, :completion) and trigger.gen == gen do
+      apply_processed_current(state, mode, payload, trigger_pos)
+    else
+      # Stale generation or the menu was dismissed/replaced; discard.
+      state
+    end
+  end
+
+  @spec apply_processed_current(
+          EditorState.t(),
+          :primary | :merge,
+          Completion.t() | [Completion.item()],
+          {non_neg_integer(), non_neg_integer()}
+        ) :: EditorState.t()
+  defp apply_processed_current(state, :primary, %Completion{items: []}, _trigger_pos) do
+    # No items: matches the old behaviour of leaving the pending menu empty
+    # rather than showing an empty popup.
+    state
+  end
+
+  defp apply_processed_current(state, :primary, %Completion{} = built, _trigger_pos) do
+    case ModalOverlay.completion(state) do
       nil ->
-        new_state
+        # Fast path (single server / primary lands first): just assign the
+        # already-sorted, already-filtered menu the Task produced.
+        ModalOverlay.update_completion(state, fn _ -> built end)
 
       %Completion{} ->
-        # The trigger update above guarantees a `:completion` modal is
-        # open (any LSP response implies the trigger had pending refs).
-        ModalOverlay.update_completion(new_state, fn _ -> completion end)
-
-      {:merge, items, trigger_pos} ->
-        # Merge items from a secondary server into the existing completion
-        merge_completion_items(new_state, items, trigger_pos)
+        # A secondary :merge result landed first; union the primary items in so
+        # neither server's items are dropped.
+        merge_completion_items(state, built.items, built.trigger_position)
     end
+  end
+
+  defp apply_processed_current(state, :merge, items, trigger_pos) when is_list(items) do
+    merge_completion_items(state, items, trigger_pos)
   end
 
   @spec merge_completion_items(

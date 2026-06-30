@@ -901,6 +901,17 @@ defmodule MingaEditor do
     end
   end
 
+  # ── Async completion processing result ──────────────────────────────────
+  # LSP completion responses are parsed/sorted/filtered in a Task off the
+  # Editor hot path (CompletionHandling.handle_response/3). The Task sends this
+  # message back with the processed menu. apply_processed/5 applies it cheaply
+  # and uses the generation token to discard a stale, superseded result
+  # (latest-wins), so large completion sets never block input.
+  def handle_info({:completion_processed, gen, mode, payload, trigger_pos}, state) do
+    new_state = CompletionHandling.apply_processed(state, gen, mode, payload, trigger_pos)
+    {:noreply, Renderer.render_or_async(new_state)}
+  end
+
   # Async editor-action result: slow work offloaded via MingaEditor.AsyncAction
   # sends this when it finishes. Apply the in-flight result, then advance the lane
   # so the next queued op (if any) starts — lanes run one op at a time, in order.

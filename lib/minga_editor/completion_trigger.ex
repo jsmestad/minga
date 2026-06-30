@@ -32,14 +32,35 @@ defmodule MingaEditor.CompletionTrigger do
           pending_ref: reference() | nil,
           pending_refs: MapSet.t(reference()),
           debounce_timer: reference() | nil,
-          trigger_position: {non_neg_integer(), non_neg_integer()} | nil
+          trigger_position: {non_neg_integer(), non_neg_integer()} | nil,
+          gen: non_neg_integer()
         }
+
+  @typedoc """
+  Result of classifying an incoming LSP completion response without parsing.
+
+  The heavy parse/sort/filter is deferred to a Task (see
+  `MingaEditor.CompletionHandling`); classification only decides whether the
+  response is the primary one (replaces the menu), a secondary one to merge,
+  or stale/ignorable. `gen` lets a late processed result be discarded if a
+  newer request batch has superseded it (latest-wins).
+  """
+  @type classification ::
+          {:primary | :merge, {non_neg_integer(), non_neg_integer()}, String.t(),
+           non_neg_integer()}
+          | :ignore
 
   @doc "Returns initial completion bridge state."
   @dialyzer {:no_opaque, new: 0}
   @spec new() :: t()
   def new do
-    %{pending_ref: nil, pending_refs: MapSet.new(), debounce_timer: nil, trigger_position: nil}
+    %{
+      pending_ref: nil,
+      pending_refs: MapSet.new(),
+      debounce_timer: nil,
+      trigger_position: nil,
+      gen: 0
+    }
   end
 
   @doc """
@@ -90,58 +111,57 @@ defmodule MingaEditor.CompletionTrigger do
   end
 
   @doc """
-  Handles an LSP response for a completion request. Returns the new
-  completion state if the response matches the pending ref, or nil
-  if it's stale.
+  Classifies an incoming LSP completion response and updates the bridge's
+  pending-ref bookkeeping, *without* parsing the (potentially huge) item list.
+
+  This is the cheap, on-the-Editor half of completion handling: it matches the
+  response `ref` against the bridge's pending refs and decides what the caller
+  should do, then returns the trigger position, the prefix typed since the
+  trigger, and the current request generation. The expensive parse/sort/filter
+  is performed by the caller in a Task (see `MingaEditor.CompletionHandling`).
+
+  Returns `{updated_bridge, classification}` where classification is one of:
+
+    * `{:primary, trigger_pos, prefix, gen}` — the authoritative response for
+      the request batch; the processed result replaces the menu.
+    * `{:merge, trigger_pos, prefix, gen}` — a secondary server's response to
+      merge into the existing menu.
+    * `:ignore` — stale ref, error, or no live request.
   """
-  @spec handle_response(t(), reference(), {:ok, term()} | {:error, term()}, pid()) ::
-          {t(),
-           Completion.t()
-           | {:merge, [Completion.item()], {non_neg_integer(), non_neg_integer()}}
-           | nil}
-  def handle_response(bridge, ref, result, buffer_pid)
+  @spec classify_response(t(), reference(), {:ok, term()} | {:error, term()}, pid()) ::
+          {t(), classification()}
+  def classify_response(bridge, ref, result, buffer_pid)
 
-  def handle_response(%{pending_ref: ref} = bridge, ref, {:ok, result}, buffer_pid) do
-    items = Completion.parse_response(result)
+  def classify_response(%{pending_ref: ref} = bridge, ref, {:ok, _result}, buffer_pid) do
     trigger_pos = bridge.trigger_position || get_cursor_position(buffer_pid)
+    prefix = get_typed_since_trigger(buffer_pid, trigger_pos)
     remaining = MapSet.delete(bridge.pending_refs, ref)
-
     bridge = %{bridge | pending_ref: nil, pending_refs: remaining}
-
-    case items do
-      [] ->
-        {bridge, nil}
-
-      _ ->
-        completion = Completion.new(items, trigger_pos)
-        prefix = get_typed_since_trigger(buffer_pid, trigger_pos)
-        completion = Completion.filter(completion, prefix)
-        {bridge, completion}
-    end
+    {bridge, {:primary, trigger_pos, prefix, bridge.gen}}
   end
 
-  # Response from a secondary server: merge into existing completion
-  def handle_response(%{pending_refs: refs} = bridge, ref, {:ok, result}, buffer_pid) do
+  # Response from a secondary server: merge into existing completion.
+  def classify_response(%{pending_refs: refs} = bridge, ref, {:ok, _result}, buffer_pid) do
     if MapSet.member?(refs, ref) do
-      items = Completion.parse_response(result)
+      trigger_pos = bridge.trigger_position || get_cursor_position(buffer_pid)
+      prefix = get_typed_since_trigger(buffer_pid, trigger_pos)
       remaining = MapSet.delete(refs, ref)
       bridge = %{bridge | pending_refs: remaining}
-      # Return items for the caller to merge into existing completion
-      {bridge, {:merge, items, bridge.trigger_position || get_cursor_position(buffer_pid)}}
+      {bridge, {:merge, trigger_pos, prefix, bridge.gen}}
     else
-      # Stale ref, ignore
-      {bridge, nil}
+      # Stale ref, ignore.
+      {bridge, :ignore}
     end
   end
 
-  def handle_response(bridge, _ref, {:error, error}, _buffer_pid) do
+  def classify_response(bridge, _ref, {:error, error}, _buffer_pid) do
     Minga.Log.debug(:lsp, "Completion request failed: #{inspect(error)}")
-    {%{bridge | pending_ref: nil}, nil}
+    {%{bridge | pending_ref: nil}, :ignore}
   end
 
-  # Stale response (ref doesn't match)
-  def handle_response(bridge, _ref, _result, _buffer_pid) do
-    {bridge, nil}
+  # Stale response (ref doesn't match any pending request).
+  def classify_response(bridge, _ref, _result, _buffer_pid) do
+    {bridge, :ignore}
   end
 
   @doc """
@@ -202,11 +222,15 @@ defmodule MingaEditor.CompletionTrigger do
         primary_ref = List.first(refs)
         all_refs = MapSet.new(refs)
 
+        # Mint a new generation for this request batch. A processed result that
+        # carries an older generation is discarded at apply time (latest-wins),
+        # so a slow Task from a superseded request can never clobber the menu.
         {%{
            bridge
            | pending_ref: primary_ref,
              pending_refs: all_refs,
-             trigger_position: {line, col}
+             trigger_position: {line, col},
+             gen: bridge.gen + 1
          }, nil}
     end
   end
