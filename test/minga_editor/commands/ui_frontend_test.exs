@@ -130,8 +130,8 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
       token = make_ref()
       state = observatory_state(@gui, token)
 
-      # The tick handler returns the *unchanged* state: build_observatory_data/0
-      # does not run inline (no data set) and no next tick is scheduled here.
+      # The tick handler returns the *unchanged* state: collection does not run
+      # inline (no data set) and no next tick is scheduled here.
       assert {:noreply, ^state} = MingaEditor.handle_info({:observatory_tick, token}, state)
       assert state.shell_state.observatory_data == nil
 

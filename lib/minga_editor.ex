@@ -596,7 +596,7 @@ defmodule MingaEditor do
   end
 
   # A tick only *spawns* the collection Task and returns immediately, so the
-  # blocking SystemObserver calls in build_observatory_data/0 never run on the
+  # blocking SystemObserver calls in Observatory.Collector.collect/1 never run on the
   # Editor mailbox. The next tick is scheduled when the result lands (see the
   # :observatory_data_result clause), not here, so a collection that takes
   # longer than the 1s interval is effectively skipped, never queued.
@@ -1040,31 +1040,18 @@ defmodule MingaEditor do
 
   # Run the blocking SystemObserver collection in a supervised Task so the
   # Editor GenServer mailbox stays free. The token is echoed back with the
-  # result so the receiving clause can drop stale collections.
+  # result so the receiving clause can drop stale collections. Observatory
+  # .Collector.collect/1 is total, so the Task always sends a result and the
+  # refresh tick always re-arms even when collection fails.
   @spec spawn_observatory_collection(reference()) :: :ok
   defp spawn_observatory_collection(token) do
     editor = self()
 
     Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
-      send(editor, {:observatory_data_result, token, build_observatory_data()})
+      send(editor, {:observatory_data_result, token, Observatory.Collector.collect()})
     end)
 
     :ok
-  end
-
-  @spec build_observatory_data() :: Observatory.Data.t()
-  defp build_observatory_data do
-    case Minga.SystemObserver.snapshot() do
-      %{processes: processes} ->
-        processes
-        |> Minga.SystemObserver.TreeNode.build_tree()
-        |> Observatory.Data.visible(Minga.SystemObserver.samples())
-
-      nil ->
-        Observatory.Data.visible(nil, [])
-    end
-  catch
-    :exit, _ -> Observatory.Data.visible(nil, [])
   end
 
   # ── :DOWN classifier ────────────────────────────────────────────────────────
