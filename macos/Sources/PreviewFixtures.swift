@@ -3,6 +3,52 @@
 import SwiftUI
 import MingaProtocol
 
+// MARK: - .mingaChrome PreviewModifier (AC #7)
+
+/// A `PreviewModifier` that injects the standard Doom One preview theme into any
+/// `#Preview` block. Usage: `#Preview("Foo", traits: .mingaChrome) { FooView(...) }`.
+///
+/// `Context = Void` keeps `makeSharedContext()` nonisolated async-safe — no
+/// `@MainActor` call occurs there. Theme setup defers to `onAppear` inside
+/// `_MingaChromeHost`, which runs on the main actor where `ThemeColors` lives.
+public struct MingaChromeModifier: PreviewModifier {
+    public typealias Context = Void
+
+    public static func makeSharedContext() async throws {}
+
+    public func body(content: Content, context: Void) -> some View {
+        _MingaChromeHost(content: content)
+    }
+}
+
+/// Internal helper view that holds the preview theme in `@State` so the theme
+/// is populated on first appear rather than at struct-init time (avoiding the
+/// nonisolated-context restriction on `@MainActor` code).
+private struct _MingaChromeHost<Content: View>: View {
+    @State private var theme: ThemeColors?
+    let content: Content
+
+    var body: some View {
+        let t = theme ?? ThemeColors()
+        content
+            .environment(\.themeColors, t)
+            .background(t.editorBg)
+            .onAppear {
+                if theme == nil {
+                    theme = PreviewFixtures.theme()
+                }
+            }
+    }
+}
+
+public extension PreviewTrait where T == Preview.ViewTraits {
+    /// Applies the standard Doom One preview theme and editor background so individual
+    /// `#Preview` blocks do not need to repeat `.environment(\.themeColors, theme)` boilerplate.
+    static var mingaChrome: PreviewTrait<T> {
+        .modifier(MingaChromeModifier())
+    }
+}
+
 @MainActor
 public enum PreviewFixtures {
 

@@ -630,3 +630,20 @@ private struct ScrollOffsetKey: PreferenceKey {
         value = nextValue()
     }
 }
+
+// MARK: - Previews
+
+@MainActor
+private func fileTreePreviewState() -> FileTreeState {
+    let state = FileTreeState()
+    PreviewFixtures.populateFileTree(state)
+    return state
+}
+
+#Preview("File Tree") {
+    let theme = PreviewFixtures.theme()
+    FileTreeView(fileTreeState: fileTreePreviewState(), encoder: nil, usesPreviewEagerLayout: true)
+        .frame(width: 280, height: 600)
+        .background(theme.treeBg)
+        .environment(\.themeColors, theme)
+}

@@ -9,6 +9,7 @@
 /// back to a compact capsule showing the tab count.
 
 import SwiftUI
+import MingaProtocol
 import UniformTypeIdentifiers
 
 /// Context-menu actions that target a specific tab without selecting it first.
@@ -651,4 +652,41 @@ public struct TabDragPayload: Codable, Hashable, Sendable, Transferable {
 private struct TabGroup {
     let groupId: UInt16
     let tabs: [TabEntry]
+}
+
+// MARK: - Previews
+
+@MainActor
+private func tabBarPreviewState() -> TabBarState {
+    let state = TabBarState()
+    PreviewFixtures.populateTabBar(state)
+    return state
+}
+
+@MainActor
+private func tabBarPinnedPreviewState() -> TabBarState {
+    let state = TabBarState()
+    state.update(activeIndex: 1, entries: [
+        Wire.TabEntry(id: 1, groupId: 0, isActive: false, isDirty: true, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: true, tintColorRGB: 0, icon: "\u{E62D}", label: "editor.ex"),
+        Wire.TabEntry(id: 2, groupId: 0, isActive: true, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "\u{E62D}", label: "buffer.ex"),
+        Wire.TabEntry(id: 3, groupId: 0, isActive: false, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "\u{E755}", label: "ContentView.swift"),
+        Wire.TabEntry(id: 4, groupId: 0, isActive: false, isDirty: true, isAgent: false, hasAttention: true, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "\u{F0219}", label: "README.md"),
+    ])
+    return state
+}
+
+#Preview("Tab Bar") {
+    let theme = PreviewFixtures.theme()
+    TabBarView(tabBarState: tabBarPreviewState(), encoder: nil)
+        .frame(width: 800, height: 34)
+        .background(theme.tabBg)
+        .environment(\.themeColors, theme)
+}
+
+#Preview("Tab Bar – Pinned & Modified") {
+    let theme = PreviewFixtures.theme()
+    TabBarView(tabBarState: tabBarPinnedPreviewState(), encoder: nil)
+        .frame(width: 800, height: 34)
+        .background(theme.tabBg)
+        .environment(\.themeColors, theme)
 }

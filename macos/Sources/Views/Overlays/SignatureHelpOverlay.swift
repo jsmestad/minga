@@ -5,6 +5,7 @@
 /// Positioned above the cursor, non-interactive (keyboard-driven).
 
 import SwiftUI
+import MingaProtocol
 
 /// PreferenceKey to measure the signature help popup height.
 /// Single reporter: only one GeometryReader writes to this key.
@@ -168,4 +169,35 @@ public struct SignatureHelpOverlay: View {
                 .foregroundStyle(theme.popupFg.opacity(0.8))
         }
     }
+}
+
+// MARK: - Previews
+
+@MainActor
+private func signatureHelpPreviewState() -> SignatureHelpState {
+    let state = SignatureHelpState()
+    state.update(
+        visible: true, anchorRow: 8, anchorCol: 6,
+        activeSignature: 0, activeParameter: 1,
+        rawSignatures: [
+            Wire.Signature(
+                label: "GenServer.start_link(module, init_arg, options)",
+                documentation: "Starts a GenServer process linked to the current process.",
+                parameters: [
+                    Wire.SignatureParameter(label: "module", documentation: "The module implementing the GenServer callbacks."),
+                    Wire.SignatureParameter(label: "init_arg", documentation: "The argument passed to init/1."),
+                    Wire.SignatureParameter(label: "options", documentation: "Options such as :name, :timeout, and :hibernate_after."),
+                ]
+            ),
+        ]
+    )
+    return state
+}
+
+#Preview("Signature Help") {
+    let theme = PreviewFixtures.theme()
+    SignatureHelpOverlay(state: signatureHelpPreviewState(), cellWidth: 8, cellHeight: 18, viewportHeight: 200, viewportWidth: 500)
+        .frame(width: 500, height: 200)
+        .background(theme.editorBg)
+        .environment(\.themeColors, theme)
 }

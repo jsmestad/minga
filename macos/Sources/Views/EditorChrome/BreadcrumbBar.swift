@@ -111,3 +111,17 @@ public struct BreadcrumbBar: View {
         .pointingHandCursor()
     }
 }
+
+// MARK: - Previews
+
+@MainActor
+private func breadcrumbPreviewState() -> BreadcrumbState {
+    let state = BreadcrumbState()
+    state.update(segments: ["macos", "Sources", "Views", "EditorChrome", "BreadcrumbBar.swift"])
+    return state
+}
+
+#Preview("Breadcrumb Bar", traits: .mingaChrome) {
+    BreadcrumbBar(state: breadcrumbPreviewState(), encoder: nil)
+        .frame(width: 700)
+}

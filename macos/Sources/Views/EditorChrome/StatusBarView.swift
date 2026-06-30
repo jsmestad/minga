@@ -1070,4 +1070,34 @@ private struct StatusBarIconButton: View {
     }
 }
 
+// MARK: - Previews
+
+@MainActor
+private func statusBarPreviewState(mode: PreviewFixtures.PreviewMode = .normal) -> StatusBarState {
+    let state = StatusBarState()
+    state.update(from: PreviewFixtures.statusBarUpdate(agentVisible: false, mode: mode))
+    return state
+}
+
+@MainActor
+private func statusBarAgentPreviewState() -> StatusBarState {
+    let state = StatusBarState()
+    state.update(from: PreviewFixtures.statusBarUpdate(agentVisible: true, mode: .normal))
+    return state
+}
+
+#Preview("Status Bar – Normal", traits: .mingaChrome) {
+    StatusBarView(state: statusBarPreviewState(mode: .normal), encoder: nil)
+        .frame(width: 800, height: 28)
+}
+
+#Preview("Status Bar – Insert", traits: .mingaChrome) {
+    StatusBarView(state: statusBarPreviewState(mode: .insert), encoder: nil)
+        .frame(width: 800, height: 28)
+}
+
+#Preview("Status Bar – Agent Running", traits: .mingaChrome) {
+    StatusBarView(state: statusBarAgentPreviewState(), isAgentChatVisible: true)
+        .frame(width: 800, height: 28)
+}
 

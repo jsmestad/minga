@@ -555,3 +555,17 @@ public struct AgentChatView: View {
         }
     }
 }
+
+// MARK: - Previews
+
+@MainActor
+private func agentChatPreviewState() -> AgentChatState {
+    let state = AgentChatState()
+    PreviewFixtures.populateAgentChat(state)
+    return state
+}
+
+#Preview("Agent Chat", traits: .mingaChrome) {
+    AgentChatView(state: agentChatPreviewState(), isInsertMode: false, encoder: nil, cellHeight: 18)
+        .frame(width: 760, height: 600)
+}
