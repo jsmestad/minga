@@ -6,6 +6,7 @@
 
 import Testing
 import Foundation
+import AppKit
 
 @MainActor
 fileprivate func completeThemeSlots() -> [(UInt8, UInt8, UInt8, UInt8)] {
@@ -1649,6 +1650,76 @@ struct CommandDispatcherStagingTests {
         dispatcher.dispatch(.protocolError(message: "version mismatch"))
 
         #expect(gui.protocolErrorState.isPresented == true)
+        #expect(requested.isEmpty)
+    }
+
+    @Test("set_font applies immediately with no open transaction")
+    @MainActor func setFontAppliesOutOfBand() {
+        let (dispatcher, _) = makeDispatcher()
+        var requested: [UInt32] = []
+        var fontArgs: (family: String, size: UInt16, ligatures: Bool, weight: UInt8)?
+        dispatcher.onRequestKeyframe = { requested.append($0) }
+        dispatcher.onFontChanged = { family, size, ligatures, weight in
+            fontArgs = (family, size, ligatures, weight)
+        }
+
+        dispatcher.dispatch(.setFont(family: "JetBrainsMono Nerd Font", size: 14, ligatures: true, weight: 2))
+
+        #expect(fontArgs?.family == "JetBrainsMono Nerd Font")
+        #expect(fontArgs?.size == 14)
+        #expect(fontArgs?.ligatures == true)
+        #expect(fontArgs?.weight == 2)
+        #expect(requested.isEmpty)
+    }
+
+    @Test("set_font_fallback applies immediately with no open transaction")
+    @MainActor func setFontFallbackAppliesOutOfBand() {
+        let (dispatcher, _) = makeDispatcher()
+        var requested: [UInt32] = []
+        dispatcher.onRequestKeyframe = { requested.append($0) }
+        let fontManager = FontManager(name: "Menlo", size: 13.0, scale: 2.0)
+        dispatcher.fontManager = fontManager
+
+        dispatcher.dispatch(.setFontFallback(families: ["Symbols Nerd Font Mono", "Apple Color Emoji"]))
+
+        #expect(requested.isEmpty)
+    }
+
+    @Test("register_font applies immediately with no open transaction")
+    @MainActor func registerFontAppliesOutOfBand() {
+        let (dispatcher, _) = makeDispatcher()
+        var requested: [UInt32] = []
+        dispatcher.onRequestKeyframe = { requested.append($0) }
+        let fontManager = FontManager(name: "Menlo", size: 13.0, scale: 2.0)
+        dispatcher.fontManager = fontManager
+
+        dispatcher.dispatch(.registerFont(id: 1, family: "JetBrainsMono Nerd Font"))
+
+        #expect(requested.isEmpty)
+    }
+
+    @Test("gui_config_state applies immediately with no open transaction")
+    @MainActor func guiConfigStateAppliesOutOfBand() {
+        let (dispatcher, gui) = makeDispatcher()
+        var requested: [UInt32] = []
+        dispatcher.onRequestKeyframe = { requested.append($0) }
+
+        let configState = Wire.ConfigState(options: [:], themePreviews: [], keybindings: [])
+        dispatcher.dispatch(.guiConfigState(configState))
+
+        #expect(requested.isEmpty)
+    }
+
+    @Test("clipboard_write applies immediately with no open transaction")
+    @MainActor func clipboardWriteAppliesOutOfBand() {
+        let (dispatcher, _) = makeDispatcher()
+        var requested: [UInt32] = []
+        dispatcher.onRequestKeyframe = { requested.append($0) }
+
+        dispatcher.dispatch(.clipboardWrite(target: 0, text: "yanked text"))
+
+        let pasted = NSPasteboard.general.string(forType: .string)
+        #expect(pasted == "yanked text")
         #expect(requested.isEmpty)
     }
 

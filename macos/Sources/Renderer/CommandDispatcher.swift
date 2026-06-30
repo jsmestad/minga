@@ -160,7 +160,7 @@ final class CommandDispatcher {
         switch command {
         case .setTitle, .setWindowBg, .protocolError,
              .setFont, .setFontFallback, .registerFont,
-             .guiConfigState:
+             .guiConfigState, .clipboardWrite:
             return true
         default:
             return false
