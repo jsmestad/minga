@@ -17,6 +17,11 @@ defmodule MingaEditor.FileTree.Freshness do
 
   @type state :: EditorState.t()
 
+  @typedoc "Effects emitted by the async refresh orchestration (interpreted by EffectHandler)."
+  @type effect ::
+          {:render, pos_integer()}
+          | {:start_file_tree_refresh, FileTree.t(), reference()}
+
   @doc "Returns true when the file tree is open."
   @spec open?(state()) :: boolean()
   def open?(state), do: match?(%FileTreeState{tree: %FileTree{}}, file_tree_state(state))
@@ -70,29 +75,124 @@ defmodule MingaEditor.FileTree.Freshness do
     |> FileTreeState.refresh_scheduled?()
   end
 
-  @doc "Refreshes cached filesystem entries after the debounce timer fires."
-  @spec flush_refresh(state()) :: state()
-  def flush_refresh(state) do
+  @doc """
+  Starts an async filesystem rescan after the debounce timer fires (#2632).
+
+  The heavy recursive `File.ls`/`File.lstat` walk must not run on the Editor
+  GenServer. This clears the debounce timer and, unless a rescan is already in
+  flight, mints a token and emits a `{:start_file_tree_refresh, tree, token}`
+  effect so `EffectHandler` can spawn the work off-process. The Task replies with
+  `{:file_tree_refresh_result, refreshed_tree, token}`, handled by
+  `apply_refresh_result/3`.
+
+  If a rescan is already in flight, the request is coalesced into a single
+  follow-up (`refresh_pending?`) instead of piling up Tasks (AC3): the in-flight
+  walk finishes, then exactly one fresh rescan starts.
+  """
+  @spec begin_refresh(state()) :: {state(), [effect()]}
+  def begin_refresh(state) do
+    state |> file_tree_state() |> begin_refresh(state)
+  end
+
+  # No open tree: just drop the debounce timer.
+  @spec begin_refresh(FileTreeState.t(), state()) :: {state(), [effect()]}
+  defp begin_refresh(%FileTreeState{tree: nil} = file_tree, state) do
+    {set_file_tree(state, FileTreeState.clear_refresh(file_tree)), []}
+  end
+
+  # A rescan is already running: coalesce instead of spawning another Task.
+  defp begin_refresh(%FileTreeState{tree: %FileTree{}, refresh_inflight: ref} = file_tree, state)
+       when is_reference(ref) do
+    file_tree =
+      file_tree
+      |> FileTreeState.clear_refresh()
+      |> FileTreeState.mark_refresh_pending()
+
+    {set_file_tree(state, file_tree), []}
+  end
+
+  # Idle: mint a token, mark in-flight, and emit the spawn effect.
+  defp begin_refresh(%FileTreeState{tree: %FileTree{} = tree} = file_tree, state) do
+    token = make_ref()
+    file_tree = FileTreeState.begin_inflight_refresh(file_tree, token)
+    {set_file_tree(state, file_tree), [{:start_file_tree_refresh, tree, token}]}
+  end
+
+  @doc """
+  Applies a finished async rescan, swapping the whole tree atomically (#2632 AC4).
+
+  The result is discarded when stale: the token no longer matches the in-flight
+  refresh, or the user re-rooted/closed the tree while the walk ran, so the
+  refreshed tree's root no longer matches the live tree (AC3/AC4 staleness
+  guard). After applying or dropping, a coalesced `refresh_pending?` request, if
+  any, starts exactly one fresh rescan.
+  """
+  @spec apply_refresh_result(state(), FileTree.t(), reference()) :: {state(), [effect()]}
+  def apply_refresh_result(state, %FileTree{} = refreshed_tree, token) when is_reference(token) do
+    state |> file_tree_state() |> apply_refresh_result(state, refreshed_tree, token)
+  end
+
+  # Fresh: the in-flight token matches and the tree is still rooted where the
+  # walk ran. Swap the whole tree in one cheap assignment (no FS walk here).
+  @spec apply_refresh_result(FileTreeState.t(), state(), FileTree.t(), reference()) ::
+          {state(), [effect()]}
+  defp apply_refresh_result(
+         %FileTreeState{refresh_inflight: token, tree: %FileTree{root: root}} = file_tree,
+         state,
+         %FileTree{root: root} = refreshed_tree,
+         token
+       ) do
+    watch_expanded_dirs(refreshed_tree)
+
+    file_tree = FileTreeState.replace_tree(file_tree, refreshed_tree)
+
+    state =
+      state
+      |> set_file_tree(file_tree)
+      |> sync_buffer(refreshed_tree)
+
+    finish_refresh(state, refreshed_tree, [{:render, 16}])
+  end
+
+  # Stale: re-rooted, closed, or superseded while the walk ran. Drop the result.
+  defp apply_refresh_result(%FileTreeState{}, state, _refreshed_tree, _token) do
+    finish_refresh(state, current_tree(state), [])
+  end
+
+  # Clears in-flight tracking and, when a refresh was coalesced while the Task
+  # ran, starts exactly one fresh rescan of the current tree (#2632 AC3).
+  @spec finish_refresh(state(), FileTree.t() | nil, [effect()]) :: {state(), [effect()]}
+  defp finish_refresh(state, tree, effects) do
+    state |> file_tree_state() |> finish_refresh(state, tree, effects)
+  end
+
+  @spec finish_refresh(FileTreeState.t(), state(), FileTree.t() | nil, [effect()]) ::
+          {state(), [effect()]}
+  defp finish_refresh(%FileTreeState{refresh_pending?: true}, state, %FileTree{} = tree, effects) do
+    token = make_ref()
+
+    file_tree =
+      state
+      |> file_tree_state()
+      |> FileTreeState.begin_inflight_refresh(token)
+
+    {set_file_tree(state, file_tree), [{:start_file_tree_refresh, tree, token} | effects]}
+  end
+
+  defp finish_refresh(%FileTreeState{}, state, _tree, effects) do
+    file_tree =
+      state
+      |> file_tree_state()
+      |> FileTreeState.clear_inflight_refresh()
+
+    {set_file_tree(state, file_tree), effects}
+  end
+
+  @spec current_tree(state()) :: FileTree.t() | nil
+  defp current_tree(state) do
     case file_tree_state(state) do
-      %FileTreeState{tree: nil} = file_tree ->
-        set_file_tree(state, FileTreeState.clear_refresh(file_tree))
-
-      %FileTreeState{tree: %FileTree{} = tree} = file_tree ->
-        refreshed_tree =
-          tree
-          |> FileTree.refresh()
-          |> refresh_tree_git_status_from_cache(EditorState.events_registry(state))
-
-        watch_expanded_dirs(refreshed_tree)
-
-        file_tree =
-          file_tree
-          |> FileTreeState.clear_refresh()
-          |> FileTreeState.replace_tree(refreshed_tree)
-
-        state
-        |> set_file_tree(file_tree)
-        |> sync_buffer(refreshed_tree)
+      %FileTreeState{tree: %FileTree{} = tree} -> tree
+      %FileTreeState{} -> nil
     end
   end
 

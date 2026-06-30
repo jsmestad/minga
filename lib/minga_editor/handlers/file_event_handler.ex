@@ -8,6 +8,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
   functions.
   """
 
+  alias Minga.Project.FileTree
   alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
   alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
   alias MingaEditor.State, as: EditorState
@@ -18,6 +19,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
           | {:render, pos_integer()}
           | {:log_message, String.t()}
           | {:schedule_file_tree_refresh, non_neg_integer()}
+          | {:start_file_tree_refresh, FileTree.t(), reference()}
           | {:request_code_lens}
           | {:request_inlay_hints}
           | {:save_session_deferred}
@@ -74,8 +76,12 @@ defmodule MingaEditor.Handlers.FileEventHandler do
   end
 
   def handle(state, :file_tree_refresh_timer) do
-    state = FileTreeFreshness.flush_refresh(state)
-    {state, [{:render, 16}]}
+    FileTreeFreshness.begin_refresh(state)
+  end
+
+  def handle(state, {:file_tree_refresh_result, %FileTree{} = refreshed_tree, token})
+      when is_reference(token) do
+    FileTreeFreshness.apply_refresh_result(state, refreshed_tree, token)
   end
 
   def handle(state, {:git_remote_result, ref, result}) when is_reference(ref) do
