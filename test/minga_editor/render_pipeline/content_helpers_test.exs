@@ -279,4 +279,58 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
       assert highlight.style.bg == 0x123456
     end
   end
+
+  describe "merge_cmd_hover_link_decoration/4 (#2630)" do
+    setup do
+      %{theme: Theme.get!(Theme.default())}
+    end
+
+    test "underlines the word range in the theme link color", %{theme: theme} do
+      assert theme.editor.link_fg != nil, "builder themes must define an editor link color"
+
+      {result, _cache} =
+        ContentHelpers.merge_cmd_hover_link_decoration(
+          Decorations.new(),
+          {{0, 6}, {0, 11}},
+          theme,
+          nil
+        )
+
+      [highlight] = Decorations.highlights_for_line(result, 0)
+      assert highlight.group == :cmd_hover_link
+      assert highlight.start == {0, 6}
+      assert highlight.end_ == {0, 11}
+      assert highlight.style.underline == true
+      assert highlight.style.fg == theme.editor.link_fg
+    end
+
+    test "a nil link clears any standing link decoration", %{theme: theme} do
+      {with_link, cache} =
+        ContentHelpers.merge_cmd_hover_link_decoration(
+          Decorations.new(),
+          {{0, 6}, {0, 11}},
+          theme,
+          nil
+        )
+
+      assert Decorations.highlights_for_line(with_link, 0) != []
+
+      {cleared, _cache} =
+        ContentHelpers.merge_cmd_hover_link_decoration(with_link, nil, theme, cache)
+
+      assert Decorations.highlights_for_line(cleared, 0) == []
+    end
+
+    test "an unchanged link reuses the cached decorations", %{theme: theme} do
+      decs = Decorations.new()
+      link = {{0, 6}, {0, 11}}
+
+      {result1, cache1} = ContentHelpers.merge_cmd_hover_link_decoration(decs, link, theme, nil)
+
+      {result2, _cache2} =
+        ContentHelpers.merge_cmd_hover_link_decoration(decs, link, theme, cache1)
+
+      assert result2 == result1
+    end
+  end
 end

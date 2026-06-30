@@ -81,6 +81,10 @@ final class CommandDispatcher {
     /// Called when the BEAM sends a window background color (RGB).
     var onWindowBgChanged: ((NSColor) -> Void)?
 
+    /// Called when the BEAM toggles the go-to-definition link cursor (#2630).
+    /// `true` shows the pointing-hand cursor for a navigable Cmd+hover symbol.
+    var onLinkCursorChanged: ((Bool) -> Void)?
+
     /// Called when the BEAM sends a font configuration change.
     /// Parameters: family, size, ligatures, weight byte.
     var onFontChanged: ((String, UInt16, Bool, UInt8) -> Void)?
@@ -195,12 +199,13 @@ final class CommandDispatcher {
         // transaction it stages for atomic replay; outside one it applies
         // immediately. Mirrors Go's explicit match arms at model.go:444-450.
         //
-        // setTitle / setWindowBg / clipboardWrite: post-commit side-channels.
+        // setTitle / setWindowBg / setLinkCursor / clipboardWrite: post-commit
+        //   side-channels.
         // protocolError: handshake rejection, always pre-transaction.
         // setFont / setFontFallback / registerFont / guiConfigState: startup
         //   config emitted before the first frame (equivalent to Go's CommandNoop
         //   for font commands, but Swift actually applies them).
-        case .setTitle, .setWindowBg, .protocolError,
+        case .setTitle, .setWindowBg, .setLinkCursor, .protocolError,
              .setFont, .setFontFallback, .registerFont,
              .guiConfigState, .clipboardWrite:
             if openFrameSeq != nil {
@@ -533,6 +538,9 @@ final class CommandDispatcher {
             )
             PortLogger.info("Window bg received: r=\(r) g=\(g) b=\(b)")
             onWindowBgChanged?(color)
+
+        case .setLinkCursor(let active):
+            onLinkCursorChanged?(active)
 
         case .protocolError(let message):
             // The BEAM rejected this frontend's handshake protocol_version, so

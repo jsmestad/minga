@@ -97,12 +97,25 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
         {decorations, state.caches.doc_highlight_cache}
       end
 
+    {decorations, cmd_hover_link_cache} =
+      if is_active do
+        merge_cmd_hover_link_decoration(
+          decorations,
+          state.workspace.cmd_hover_link,
+          state.theme,
+          state.caches.cmd_hover_link_cache
+        )
+      else
+        {decorations, state.caches.cmd_hover_link_cache}
+      end
+
     state = %{
       state
       | caches: %{
           state.caches
           | search_decoration_cache: search_cache,
-            doc_highlight_cache: doc_highlight_cache
+            doc_highlight_cache: doc_highlight_cache,
+            cmd_hover_link_cache: cmd_hover_link_cache
         }
     }
 
@@ -323,6 +336,71 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       theme.editor.highlight_read_bg || 0x3A3F4B,
       theme.editor.highlight_write_bg || 0x4A3F2B
     }
+  end
+
+  # ── Cmd/Ctrl-hover link decoration (#2630) ──────────────────────────────────
+
+  @doc """
+  Merges the transient Cmd/Ctrl-hover go-to-definition link into decorations.
+
+  Styles the full word range with an underline in the theme link/accent color so
+  it reads as a clickable link rather than its original syntax color (#2630).
+  Returns `{merged_decorations, updated_cache}`. Cached on the link range + base
+  decoration version + color so an unchanged preview never rebuilds decorations
+  (and so never forces an idle re-render).
+  """
+  @spec merge_cmd_hover_link_decoration(
+          Decorations.t(),
+          {Buffer.position(), Buffer.position()} | nil,
+          MingaEditor.UI.Theme.t(),
+          term()
+        ) :: {Decorations.t(), term()}
+  def merge_cmd_hover_link_decoration(decs, nil, _theme, nil), do: {decs, nil}
+
+  def merge_cmd_hover_link_decoration(decs, nil, _theme, _cache) do
+    {Decorations.remove_group(decs, :cmd_hover_link), nil}
+  end
+
+  def merge_cmd_hover_link_decoration(decs, {start_pos, end_pos} = link, theme, cached) do
+    fingerprint = {link, decs.version, cmd_hover_link_color(theme)}
+
+    case cached do
+      {^fingerprint, cached_decs} ->
+        {cached_decs, cached}
+
+      _ ->
+        result = rebuild_cmd_hover_link_decoration(decs, start_pos, end_pos, theme)
+        {result, {fingerprint, result}}
+    end
+  end
+
+  @spec rebuild_cmd_hover_link_decoration(
+          Decorations.t(),
+          Buffer.position(),
+          Buffer.position(),
+          MingaEditor.UI.Theme.t()
+        ) :: Decorations.t()
+  defp rebuild_cmd_hover_link_decoration(decs, start_pos, end_pos, theme) do
+    Decorations.batch(decs, fn d ->
+      d = Decorations.remove_group(d, :cmd_hover_link)
+      style = Face.new(fg: cmd_hover_link_color(theme), underline: true)
+
+      {_id, d} =
+        Decorations.add_highlight(d, start_pos, end_pos,
+          style: style,
+          priority: -8,
+          group: :cmd_hover_link
+        )
+
+      d
+    end)
+  end
+
+  # The theme's link/accent color, falling back to a blue accent when a theme
+  # does not define one.
+  @spec cmd_hover_link_color(MingaEditor.UI.Theme.t()) :: non_neg_integer()
+  defp cmd_hover_link_color(theme) do
+    theme.editor.link_fg || 0x61AFEF
   end
 
   @doc "Returns the decorations for a window's buffer."

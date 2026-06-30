@@ -461,6 +461,16 @@ defmodule MingaEditor.Frontend.ProtocolTest do
     end
   end
 
+  describe "set_link_cursor protocol (#2630)" do
+    test "encodes an active link cursor as opcode 0x19 with a 1 byte" do
+      assert <<0x19, 1>> = Protocol.encode_set_link_cursor(true)
+    end
+
+    test "encodes an inactive link cursor as opcode 0x19 with a 0 byte" do
+      assert <<0x19, 0>> = Protocol.encode_set_link_cursor(false)
+    end
+  end
+
   describe "set_font protocol" do
     test "encodes ligatures enabled with default weight" do
       encoded = Protocol.encode_set_font("JetBrains Mono", 14, true)

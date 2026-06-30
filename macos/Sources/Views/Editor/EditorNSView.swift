@@ -80,6 +80,14 @@ final class EditorNSView: MTKView {
     /// Current resize cursor pushed for split divider hover or drag.
     private var dividerCursorState: DividerCursorState = .none
 
+    /// Whether the BEAM currently reports a navigable go-to-definition symbol
+    /// under the pointer (Cmd+hover, #2630). Drives the pointing-hand cursor.
+    private var linkCursorActive = false
+
+    /// Last observed Command-key state, so `flagsChanged` only re-sends a motion
+    /// event when Cmd is pressed or released (not for other modifier changes).
+    private var lastCommandHeld = false
+
     /// Divider direction captured at mouse-down so drag keeps the resize cursor.
     private var dividerDragState: DividerCursorState = .none
 
@@ -1099,7 +1107,40 @@ final class EditorNSView: MTKView {
     }
 
     override func flagsChanged(with event: NSEvent) {
-        // No action needed for bare modifier presses.
+        // Cmd press/release while the pointer is stationary still needs to update
+        // the go-to-definition link preview (#2630): pressing Cmd over a symbol
+        // should underline it and show the hand cursor, and releasing Cmd should
+        // clear both. AppKit delivers a flagsChanged (not a mouseMoved) for this,
+        // so re-send a motion at the current pointer to let the BEAM recompute.
+        let commandHeld = event.modifierFlags.contains(.command)
+        guard commandHeld != lastCommandHeld else { return }
+        lastCommandHeld = commandHeld
+        resendMotionForModifierChange(event)
+    }
+
+    /// Re-sends a free MOUSE_MOTION at the current pointer cell with the latest
+    /// modifier bits. Used when the Command key toggles without pointer movement
+    /// so the BEAM can (re)resolve the Cmd+hover link preview (#2630).
+    private func resendMotionForModifierChange(_ event: NSEvent) {
+        let rawPoint = convert(event.locationInWindow, from: nil)
+        guard bounds.contains(rawPoint) else { return }
+        let (row, col) = cellPosition(from: event)
+        encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_NONE,
+                               modifiers: modifierBits(from: event.modifierFlags),
+                               eventType: MOUSE_MOTION)
+    }
+
+    /// Shows or hides the pointing-hand cursor for a navigable Cmd+hover symbol
+    /// (#2630). Driven by the BEAM's `set_link_cursor` command via the dispatcher.
+    /// Uses the same guarded push/pop discipline as the split-divider cursor.
+    func setLinkCursorActive(_ active: Bool) {
+        guard linkCursorActive != active else { return }
+        linkCursorActive = active
+        if active {
+            NSCursor.pointingHand.push()
+        } else {
+            NSCursor.pop()
+        }
     }
 
     // MARK: - Space leader helpers

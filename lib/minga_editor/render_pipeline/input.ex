@@ -128,6 +128,7 @@ defmodule MingaEditor.RenderPipeline.Input do
           agent_ui: UIState.t(),
           editing: VimState.t(),
           document_highlights: [EditorState.document_highlight()] | nil,
+          cmd_hover_link: EditorState.cmd_hover_link(),
           mouse: Mouse.t(),
           search: Search.t(),
           keymap_scope: Minga.Keymap.Scope.scope_name()
@@ -210,6 +211,7 @@ defmodule MingaEditor.RenderPipeline.Input do
         agent_ui: ws.agent_ui,
         editing: ws.editing,
         document_highlights: ws.document_highlights,
+        cmd_hover_link: ws.cmd_hover_link,
         mouse: ws.mouse,
         search: ws.search,
         keymap_scope: ws.keymap_scope

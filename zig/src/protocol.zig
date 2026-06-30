@@ -44,6 +44,7 @@ pub const OP_COMMIT_FRAME = opcodes.OP_COMMIT_FRAME;
 pub const OP_SET_CURSOR_SHAPE = opcodes.OP_SET_CURSOR_SHAPE;
 pub const OP_SET_TITLE = opcodes.OP_SET_TITLE;
 pub const OP_SET_WINDOW_BG = opcodes.OP_SET_WINDOW_BG;
+pub const OP_SET_LINK_CURSOR = opcodes.OP_SET_LINK_CURSOR;
 pub const OP_PROTOCOL_ERROR = opcodes.OP_PROTOCOL_ERROR;
 
 // Config

@@ -304,6 +304,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if nsView.hasActiveScrollGesture { return }
             nsView.resetSmoothScrollState()
         }
+        // Go-to-definition link cursor (#2630): the BEAM toggles the pointing-hand
+        // cursor when Cmd+hover lands on a navigable symbol.
+        disp.onLinkCursorChanged = { [weak nsView] active in
+            nsView?.setLinkCursorActive(active)
+        }
         nsView.guiState = appState.gui
         nsView.statusBarState = appState.gui.statusBarState
         appState.gui.settingsState.encoder = enc

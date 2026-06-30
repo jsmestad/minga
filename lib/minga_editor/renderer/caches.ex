@@ -26,6 +26,7 @@ defmodule MingaEditor.Renderer.Caches do
     # ── Content stage: inter-frame caches ─────────────────────────────────────
     search_decoration_cache: nil,
     doc_highlight_cache: nil,
+    cmd_hover_link_cache: nil,
 
     # ── Content stage: within-frame cache (reset after each window render) ────
     block_render_cache: %{},
@@ -50,6 +51,7 @@ defmodule MingaEditor.Renderer.Caches do
     emit_prev_editing_mode: nil,
     last_title: nil,
     last_window_bg: nil,
+    last_link_cursor: nil,
 
     # ── Frame transaction (#2219) ────────────────────────────────────────────
     # The frame_seq of the last successfully-emitted frame. A delta frame names
@@ -72,6 +74,7 @@ defmodule MingaEditor.Renderer.Caches do
           chrome_prev_result: term(),
           search_decoration_cache: term(),
           doc_highlight_cache: term(),
+          cmd_hover_link_cache: term(),
           block_render_cache: %{term() => term()},
           frame_rows_rasterized: non_neg_integer(),
           frame_render_path: :patch | :full,
@@ -83,6 +86,7 @@ defmodule MingaEditor.Renderer.Caches do
           emit_prev_editing_mode: atom() | nil,
           last_title: String.t() | nil,
           last_window_bg: non_neg_integer() | nil,
+          last_link_cursor: boolean() | nil,
           last_emitted_frame_seq: non_neg_integer(),
           last_frame_keyframe?: boolean(),
           adapter_gui_caches: Minga.Frontend.Adapter.GUI.Caches.t()
@@ -100,6 +104,7 @@ defmodule MingaEditor.Renderer.Caches do
       | adapter_gui_caches: Minga.Frontend.Adapter.GUI.Caches.new(),
         last_title: nil,
         last_window_bg: nil,
+        last_link_cursor: nil,
         # A reconnecting frontend has no committed base, so force the next frame to
         # a keyframe (base_frame_seq 0) by clearing the last-emitted frame_seq.
         last_emitted_frame_seq: 0

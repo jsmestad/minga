@@ -77,6 +77,9 @@ defmodule MingaEditor.State do
   @typedoc "A document highlight range from the LSP server."
   @type document_highlight :: Minga.LSP.DocumentHighlight.t()
 
+  @typedoc "Transient Cmd/Ctrl-hover go-to-definition link range, or nil."
+  @type cmd_hover_link :: SessionState.cmd_hover_link()
+
   @typedoc "Re-export of `Minga.Keymap.server/0` for editor-state callers."
   @type keymap_server :: Minga.Keymap.server()
 
@@ -603,6 +606,24 @@ defmodule MingaEditor.State do
   @spec set_document_highlights(t(), [document_highlight()] | nil) :: t()
   def set_document_highlights(%__MODULE__{} = state, highlights) do
     update_workspace(state, &SessionState.set_document_highlights(&1, highlights))
+  end
+
+  @doc "Replaces the transient Cmd/Ctrl-hover go-to-definition link range."
+  @spec set_cmd_hover_link(t(), cmd_hover_link()) :: t()
+  def set_cmd_hover_link(%__MODULE__{} = state, link) do
+    update_workspace(state, &SessionState.set_cmd_hover_link(&1, link))
+  end
+
+  @doc "Records the pointer cell the Cmd/Ctrl-hover link was last resolved at."
+  @spec set_cmd_hover_cell(t(), SessionState.cmd_hover_cell()) :: t()
+  def set_cmd_hover_cell(%__MODULE__{} = state, cell) do
+    update_workspace(state, &SessionState.set_cmd_hover_cell(&1, cell))
+  end
+
+  @doc "Clears the Cmd/Ctrl-hover link preview and its dedup cell."
+  @spec clear_cmd_hover_link(t()) :: t()
+  def clear_cmd_hover_link(%__MODULE__{} = state) do
+    update_workspace(state, &SessionState.clear_cmd_hover_link/1)
   end
 
   @doc "Replaces the active workspace LSP pending request map."
@@ -2221,7 +2242,12 @@ defmodule MingaEditor.State do
               wspace
               | windows: %{ws | map: windows, active: target_id},
                 buffers: %{buffers | active: target_win.buffer},
-                keymap_scope: scope
+                keymap_scope: scope,
+                # Focusing another window can swap the active buffer; drop any
+                # standing Cmd/Ctrl-hover link so it never draws against the new
+                # buffer's coordinates before the next motion (#2630).
+                cmd_hover_link: nil,
+                cmd_hover_cell: nil
             }
         }
 

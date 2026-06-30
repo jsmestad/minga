@@ -29,6 +29,27 @@ defmodule MingaEditor.Session.State do
   @typedoc "A document highlight range from the LSP server."
   @type document_highlight :: Minga.LSP.DocumentHighlight.t()
 
+  @typedoc "A buffer position as `{line, byte_col}`."
+  @type position :: {non_neg_integer(), non_neg_integer()}
+
+  @typedoc """
+  Transient Cmd/Ctrl-hover go-to-definition link range.
+
+  `{start_pos, end_pos}` in buffer coordinates (end exclusive), or `nil` when no
+  navigable symbol is under the pointer. Set on the mouse-motion path while the
+  super/ctrl modifier is held and cleared otherwise; never persisted across tabs.
+  """
+  @type cmd_hover_link :: {position(), position()} | nil
+
+  @typedoc """
+  The pointer cell `{row, col}` the Cmd/Ctrl-hover link was last resolved at.
+
+  A motion-path dedup key: while the modifier is held, resolution (word
+  boundaries + tree-sitter scope) is skipped when the pointer cell has not moved
+  since the previous motion. Cleared together with `cmd_hover_link`.
+  """
+  @type cmd_hover_cell :: position() | nil
+
   @type t :: %__MODULE__{
           keymap_scope: Scope.scope_name(),
           buffers: Buffers.t(),
@@ -44,6 +65,8 @@ defmodule MingaEditor.Session.State do
           editing: VimState.t(),
           feature_state: FeatureState.t(),
           document_highlights: [document_highlight()] | nil,
+          cmd_hover_link: cmd_hover_link(),
+          cmd_hover_cell: cmd_hover_cell(),
           agent_ui: UIState.t()
         }
 
@@ -62,6 +85,8 @@ defmodule MingaEditor.Session.State do
             editing: VimState.new(),
             feature_state: FeatureState.new(),
             document_highlights: nil,
+            cmd_hover_link: nil,
+            cmd_hover_cell: nil,
             agent_ui: UIState.new()
 
   @doc "Returns the list of field names (for snapshot/restore compatibility)."
@@ -85,6 +110,10 @@ defmodule MingaEditor.Session.State do
       context
       |> TabContext.to_workspace_map()
       |> Enum.reduce(ws, fn {field, value}, acc -> Map.put(acc, field, value) end)
+      # The Cmd/Ctrl-hover link is transient pointer state, not snapshotted per
+      # tab. Force it off on every restore so a switch never carries a stale
+      # underline (or GUI hand cursor) from the previous tab's buffer (#2630).
+      |> clear_cmd_hover_link()
 
     update_in(ws.buffers, &Buffers.scrub_dead_active/1)
   end
@@ -288,6 +317,30 @@ defmodule MingaEditor.Session.State do
   @spec set_document_highlights(t(), [document_highlight()] | nil) :: t()
   def set_document_highlights(%__MODULE__{} = wspace, highlights) do
     %{wspace | document_highlights: highlights}
+  end
+
+  @doc "Updates the transient Cmd/Ctrl-hover go-to-definition link range."
+  @spec set_cmd_hover_link(t(), cmd_hover_link()) :: t()
+  def set_cmd_hover_link(%__MODULE__{} = wspace, link) do
+    %{wspace | cmd_hover_link: link}
+  end
+
+  @doc "Records the pointer cell the Cmd/Ctrl-hover link was last resolved at."
+  @spec set_cmd_hover_cell(t(), cmd_hover_cell()) :: t()
+  def set_cmd_hover_cell(%__MODULE__{} = wspace, cell) do
+    %{wspace | cmd_hover_cell: cell}
+  end
+
+  @doc """
+  Clears the Cmd/Ctrl-hover link preview and its dedup cell.
+
+  Called on transitions that change the active buffer without a mouse motion (tab
+  switch, window focus, go-to-definition navigation) so a stale underline never
+  lingers against the new buffer's coordinates.
+  """
+  @spec clear_cmd_hover_link(t()) :: t()
+  def clear_cmd_hover_link(%__MODULE__{} = wspace) do
+    %{wspace | cmd_hover_link: nil, cmd_hover_cell: nil}
   end
 
   @doc "Updates the search sub-struct."

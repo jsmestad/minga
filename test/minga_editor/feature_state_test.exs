@@ -63,7 +63,13 @@ defmodule MingaEditor.FeatureStateTest do
       |> Map.delete(:__struct__)
       |> Map.keys()
 
-    assert Enum.sort(TabContext.field_names()) == Enum.sort(workspace_fields)
+    # Every workspace field is either snapshotted per tab (TabContext.field_names/0)
+    # or an explicit, documented transient exclusion (TabContext.transient_fields/0,
+    # e.g. the #2630 Cmd/Ctrl-hover link). A new NON-transient field that is added
+    # to neither will fail this guard, which is the point.
+    accounted_fields = TabContext.field_names() ++ TabContext.transient_fields()
+
+    assert Enum.sort(accounted_fields) == Enum.sort(workspace_fields)
   end
 
   test "session helpers keep feature state scoped to tab snapshots" do

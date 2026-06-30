@@ -57,7 +57,8 @@ defmodule MingaEditor.UI.Theme.DoomOne do
         selection_bg: 0x264F78,
         whitespace_fg: @base5,
         indent_guide_fg: 0x3B3F4C,
-        indent_guide_active_fg: 0x5C6370
+        indent_guide_active_fg: 0x5C6370,
+        link_fg: 0x61AFEF
       },
       gutter: %MingaEditor.UI.Theme.Gutter{
         fg: @base5,
