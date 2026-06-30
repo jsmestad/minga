@@ -24,4 +24,17 @@ defmodule MingaEditor.FileTree.RefreshTest do
     assert "alpha.ex" in names
     assert "beta.ex" in names
   end
+
+  test "start/4 always replies with a failure sentinel when the rescan raises" do
+    # A nil root makes the filesystem walk raise (`File.ls(nil)`); the Task must
+    # still reply so the Editor's in-flight flag is cleared and never wedges
+    # (#2632). The sentinel carries the same token for staleness matching.
+    bad_tree = %FileTree{root: nil}
+    token = make_ref()
+
+    assert :ok = Refresh.start(bad_tree, token, Minga.Events.default_registry(), self())
+
+    assert_receive {:file_tree_refresh_failed, ^token}, 2_000
+    refute_receive {:file_tree_refresh_result, _tree, ^token}, 100
+  end
 end

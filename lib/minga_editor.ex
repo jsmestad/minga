@@ -717,6 +717,13 @@ defmodule MingaEditor do
     {:noreply, EffectHandler.apply_effects(state, effects)}
   end
 
+  # Async file-tree rescan crashed — clear in-flight tracking and honour a
+  # coalesced refresh so the refresh loop never wedges (#2632).
+  def handle_info({:file_tree_refresh_failed, _token} = msg, state) do
+    {state, effects} = FileEventHandler.handle(state, msg)
+    {:noreply, EffectHandler.apply_effects(state, effects)}
+  end
+
   # Renderer.Server writeback after each async frame completes.
   # EditorState narrows the merge to renderer-owned fields only.
   def handle_info({:render_done, %{caches: _caches, layout: _layout} = wb}, state) do

@@ -221,14 +221,21 @@ defmodule MingaEditor.Handlers.EffectHandler do
   end
 
   defp apply_effect(state, {:start_file_tree_refresh, tree, token}) when is_reference(token) do
-    MingaEditor.FileTree.Refresh.start(
-      tree,
-      token,
-      EditorState.events_registry(state),
-      self()
-    )
+    case MingaEditor.FileTree.Refresh.start(
+           tree,
+           token,
+           EditorState.events_registry(state),
+           self()
+         ) do
+      :ok ->
+        state
 
-    state
+      {:error, reason} ->
+        # The supervisor refused the Task (e.g. max children). Clear in-flight so
+        # a later timer can retry instead of wedging the refresh loop (#2632).
+        Minga.Log.warning(:editor, "File tree refresh spawn failed: #{inspect(reason)}")
+        MingaEditor.FileTree.Freshness.cancel_inflight_refresh(state, token)
+    end
   end
 
   defp apply_effect(state, {:conceal_spans, pid, spans}) when is_pid(pid) do

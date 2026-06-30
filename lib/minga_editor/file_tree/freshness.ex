@@ -154,10 +154,60 @@ defmodule MingaEditor.FileTree.Freshness do
     finish_refresh(state, refreshed_tree, [{:render, 16}])
   end
 
-  # Stale: re-rooted, closed, or superseded while the walk ran. Drop the result.
-  defp apply_refresh_result(%FileTreeState{}, state, _refreshed_tree, _token) do
+  # Current in-flight refresh completed, but the tree was re-rooted/closed while
+  # the walk ran so its root no longer matches. Drop the tree, but still finish
+  # the in-flight bookkeeping (clear in-flight, honour a coalesced refresh).
+  defp apply_refresh_result(
+         %FileTreeState{refresh_inflight: token},
+         state,
+         _refreshed_tree,
+         token
+       ) do
     finish_refresh(state, current_tree(state), [])
   end
+
+  # Superseded result: the token is no longer the current in-flight refresh
+  # (a newer refresh replaced it). Ignore it without touching in-flight tracking.
+  defp apply_refresh_result(%FileTreeState{}, state, _refreshed_tree, _token) do
+    {state, []}
+  end
+
+  @doc """
+  Handles a failed async rescan (#2632): the Task raised/threw or could not
+  finish, so no tree is applied. Clears in-flight tracking and honours a
+  coalesced refresh so the refresh loop never wedges. Ignored when the token is
+  no longer the current in-flight refresh.
+  """
+  @spec apply_refresh_failure(state(), reference()) :: {state(), [effect()]}
+  def apply_refresh_failure(state, token) when is_reference(token) do
+    state |> file_tree_state() |> apply_refresh_failure(state, token)
+  end
+
+  @spec apply_refresh_failure(FileTreeState.t(), state(), reference()) :: {state(), [effect()]}
+  defp apply_refresh_failure(%FileTreeState{refresh_inflight: token}, state, token) do
+    finish_refresh(state, current_tree(state), [])
+  end
+
+  defp apply_refresh_failure(%FileTreeState{}, state, _token) do
+    {state, []}
+  end
+
+  @doc """
+  Clears in-flight tracking when a refresh Task could not be spawned (#2632), so
+  a later timer can retry instead of wedging. No-op when the token is not the
+  current in-flight refresh.
+  """
+  @spec cancel_inflight_refresh(state(), reference()) :: state()
+  def cancel_inflight_refresh(state, token) when is_reference(token) do
+    state |> file_tree_state() |> cancel_inflight_refresh(state, token)
+  end
+
+  @spec cancel_inflight_refresh(FileTreeState.t(), state(), reference()) :: state()
+  defp cancel_inflight_refresh(%FileTreeState{refresh_inflight: token} = file_tree, state, token) do
+    set_file_tree(state, FileTreeState.clear_inflight_refresh(file_tree))
+  end
+
+  defp cancel_inflight_refresh(%FileTreeState{}, state, _token), do: state
 
   # Clears in-flight tracking and, when a refresh was coalesced while the Task
   # ran, starts exactly one fresh rescan of the current tree (#2632 AC3).

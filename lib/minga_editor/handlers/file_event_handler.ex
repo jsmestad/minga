@@ -84,6 +84,10 @@ defmodule MingaEditor.Handlers.FileEventHandler do
     FileTreeFreshness.apply_refresh_result(state, refreshed_tree, token)
   end
 
+  def handle(state, {:file_tree_refresh_failed, token}) when is_reference(token) do
+    FileTreeFreshness.apply_refresh_failure(state, token)
+  end
+
   def handle(state, {:git_remote_result, ref, result}) when is_reference(ref) do
     {state, [{:handle_git_remote_result, ref, result}]}
   end

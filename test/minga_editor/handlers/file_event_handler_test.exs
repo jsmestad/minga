@@ -340,6 +340,84 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       refute FileTreeState.refresh_inflight?(ft(state))
     end
 
+    test "a failed rescan clears in-flight so a later timer is not wedged",
+         %{tmp_dir: tmp_dir} do
+      File.write!(Path.join(tmp_dir, "alpha.ex"), "")
+      state = state_with_tree(tmp_dir)
+
+      {state, [{:start_file_tree_refresh, _tree, token}]} =
+        FileEventHandler.handle(state, :file_tree_refresh_timer)
+
+      # The Task crashed and sent the failure sentinel instead of a tree.
+      {state, fail_effects} =
+        FileEventHandler.handle(state, {:file_tree_refresh_failed, token})
+
+      assert fail_effects == []
+      refute FileTreeState.refresh_inflight?(ft(state))
+
+      # A later timer must spawn a brand new rescan — the loop is not wedged.
+      {_state, retry_effects} = FileEventHandler.handle(state, :file_tree_refresh_timer)
+
+      assert [{:start_file_tree_refresh, _retry_tree, retry_token}] = retry_effects
+      assert retry_token != token
+    end
+
+    test "a failed rescan still honours a coalesced refresh", %{tmp_dir: tmp_dir} do
+      File.write!(Path.join(tmp_dir, "alpha.ex"), "")
+      state = state_with_tree(tmp_dir)
+
+      {state, [{:start_file_tree_refresh, _tree, token}]} =
+        FileEventHandler.handle(state, :file_tree_refresh_timer)
+
+      # A burst arrived while the rescan ran; it coalesced into refresh_pending?.
+      {state, []} = FileEventHandler.handle(state, :file_tree_refresh_timer)
+      assert FileTreeState.refresh_pending?(ft(state))
+
+      # Even though the rescan failed, the coalesced request starts exactly one
+      # fresh rescan (#2632 AC3) — no tree was applied, but the loop continues.
+      {state, fail_effects} =
+        FileEventHandler.handle(state, {:file_tree_refresh_failed, token})
+
+      assert [{:start_file_tree_refresh, _retry_tree, follow_up_token}] = fail_effects
+      assert follow_up_token != token
+      assert FileTreeState.refresh_inflight?(ft(state))
+      refute FileTreeState.refresh_pending?(ft(state))
+    end
+
+    test "a stale failure sentinel for a superseded token is ignored",
+         %{tmp_dir: tmp_dir} do
+      File.write!(Path.join(tmp_dir, "alpha.ex"), "")
+      state = state_with_tree(tmp_dir)
+
+      {state, [{:start_file_tree_refresh, _tree, token}]} =
+        FileEventHandler.handle(state, :file_tree_refresh_timer)
+
+      # A failure for some other (already superseded) refresh must not clear the
+      # genuine in-flight refresh.
+      {new_state, effects} =
+        FileEventHandler.handle(state, {:file_tree_refresh_failed, make_ref()})
+
+      assert effects == []
+      assert FileTreeState.refresh_inflight_token(ft(new_state)) == token
+    end
+
+    test "cancel_inflight_refresh clears only the matching in-flight token",
+         %{tmp_dir: tmp_dir} do
+      state = state_with_tree(tmp_dir)
+
+      {state, [{:start_file_tree_refresh, _tree, token}]} =
+        FileEventHandler.handle(state, :file_tree_refresh_timer)
+
+      # A non-matching token (a newer refresh) must be left untouched.
+      untouched = FileTreeFreshness.cancel_inflight_refresh(state, make_ref())
+      assert FileTreeState.refresh_inflight_token(ft(untouched)) == token
+
+      # The matching token (e.g. a failed Task.Supervisor.start_child) is cleared
+      # so a later timer can retry instead of wedging (#2632).
+      cleared = FileTreeFreshness.cancel_inflight_refresh(state, token)
+      refute FileTreeState.refresh_inflight?(ft(cleared))
+    end
+
     test "diagnostics under the tree root schedule render", %{tmp_dir: tmp_dir} do
       file_path = Path.join(tmp_dir, "alpha.ex")
       state = state_with_tree(tmp_dir)
