@@ -98,7 +98,24 @@ defmodule MingaEditor.UI.Picker do
   @doc "Replaces the item list and refilters against the current query."
   @spec replace_items(t(), [item()]) :: t()
   def replace_items(%__MODULE__{} = picker, items) when is_list(items) do
-    refilter(%{picker | items: items, candidates: Candidate.from_items(items)})
+    put_candidates(picker, items, Candidate.from_items(items))
+  end
+
+  @doc """
+  Installs an already-built candidate cache (and its source items) and refilters
+  against the current query.
+
+  This is the cheap half of `replace_items/2`: it skips the O(n)
+  `Candidate.from_items/1` normalization (downcase, grapheme split, search-text
+  join) because the caller has already done it. The async picker fetch builds the
+  candidates in its background Task and hands them here, so the editor's input
+  loop never pays that cost on large directories (#2628). Behavior is identical to
+  `replace_items/2` given `candidates == Candidate.from_items(items)`.
+  """
+  @spec put_candidates(t(), [item()], [Candidate.t()]) :: t()
+  def put_candidates(%__MODULE__{} = picker, items, candidates)
+      when is_list(items) and is_list(candidates) do
+    refilter(%{picker | items: items, candidates: candidates})
   end
 
   # ── Query manipulation ──────────────────────────────────────────────────────

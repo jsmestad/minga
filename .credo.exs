@@ -35,6 +35,7 @@
 
           # ── Editor responsiveness (epic #2445) ─────────────────────────────
           {Minga.Credo.NoBlockingEditorCallCheck, []},
+          {Minga.Credo.NoBlockingHandleInfoCheck, []},
           {Minga.Credo.NoDelegateInEditorCheck, [exit_status: 0]},
 
           # ── Test isolation ────────────────────────────────────────────────
