@@ -1612,7 +1612,12 @@ struct CommandDispatcherStagingTests {
         #expect(gui.tabBarState.tabs.first?.label == "recovered.ex")
     }
 
-    // MARK: - Out-of-band allowlist
+    // MARK: - Negative-guard dispatch (#2634)
+    //
+    // Sanctioned out-of-band commands have explicit match arms in dispatch() and
+    // apply (or stage) directly. Everything else outside a transaction hits the
+    // default branch: active recovery via invalidation and a keyframe request.
+    // This is the negative-guard pattern from Go's model.go applyCommands.
 
     @Test("set_title applies immediately with no open transaction")
     @MainActor func titleAppliesOutOfBand() {
@@ -1723,13 +1728,16 @@ struct CommandDispatcherStagingTests {
         #expect(requested.isEmpty)
     }
 
-    @Test("a chrome command outside a transaction is an invalidation, not applied")
+    @Test("non-sanctioned command outside a transaction triggers keyframe request, not silent drop")
     @MainActor func chromeOutOfBandInvalidates() {
         let (dispatcher, gui) = makeDispatcher()
         var requested: [UInt32] = []
         dispatcher.onRequestKeyframe = { requested.append($0) }
 
-        // guiTabBar is NOT on the out-of-band allowlist.
+        // guiTabBar has no explicit sanctioned match arm in dispatch() — negative guard.
+        // Sending it outside a transaction must trigger active recovery (AC#5 / #2634):
+        // the keyframe callback fires and the command is not applied, rather than being
+        // silently dropped or partially applied.
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("rogue.ex")]))
 
         #expect(gui.tabBarState.tabs.isEmpty)
