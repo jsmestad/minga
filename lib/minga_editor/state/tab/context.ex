@@ -40,6 +40,16 @@ defmodule MingaEditor.State.Tab.Context do
 
   @workspace_fields @snapshot_fields ++ @shared_fields
 
+  # Transient pointer state that is deliberately NOT carried per tab. The
+  # Cmd/Ctrl-hover go-to-definition link preview (#2630) tracks the symbol under
+  # the mouse for the current frame only; snapshotting it would restore a stale
+  # underline (and GUI hand cursor) against the wrong buffer on tab switch, which
+  # is exactly what the clear-on-transition design avoids. Listed here so the
+  # "tab context carries every session workspace field" guard stays meaningful:
+  # a new NON-transient workspace field still fails that test until it is added
+  # to @snapshot_fields/@shared_fields above.
+  @transient_fields [:cmd_hover_link, :cmd_hover_cell]
+
   @typedoc "Workspace fields carried by a tab context."
   @type field_name ::
           :keymap_scope
@@ -105,6 +115,16 @@ defmodule MingaEditor.State.Tab.Context do
   @doc "Returns the workspace field names represented by this context."
   @spec field_names() :: [field_name()]
   def field_names, do: @workspace_fields
+
+  @doc """
+  Returns workspace fields intentionally excluded from per-tab snapshotting.
+
+  These are transient pointer/frame state (#2630), never persisted or restored.
+  Together with `field_names/0` they must account for every `Session.State`
+  field; the `feature_state_test` guard enforces that.
+  """
+  @spec transient_fields() :: [atom()]
+  def transient_fields, do: @transient_fields
 
   @doc "Returns an empty context for a brand-new tab with no saved workspace yet."
   @spec empty() :: t()
