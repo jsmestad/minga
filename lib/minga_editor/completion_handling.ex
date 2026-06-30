@@ -559,6 +559,12 @@ defmodule MingaEditor.CompletionHandling do
 
   # Spawns the parse/sort/filter work in a supervised Task so it never blocks
   # the Editor GenServer. The Task sends the processed result back to `editor`.
+  #
+  # The Task ALWAYS sends a terminal {:completion_processed, ...} message: on
+  # success with the built menu, on any crash (e.g. a malformed LSP item that
+  # FunctionClauseErrors in parse_item/1) with the `:failed` sentinel. If the
+  # Task cannot even be started, we send `:failed` directly. Either way the
+  # pending modal is never left stuck waiting on a message that never arrives.
   @spec start_completion_task(
           pid(),
           :primary | :merge,
@@ -568,11 +574,53 @@ defmodule MingaEditor.CompletionHandling do
           non_neg_integer()
         ) :: :ok
   defp start_completion_task(editor, mode, result, trigger_pos, prefix, gen) do
-    Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
-      payload = build_processed(mode, result, trigger_pos, prefix)
-      send(editor, {:completion_processed, gen, mode, payload, trigger_pos})
-    end)
+    case Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
+           run_completion_task(editor, mode, result, trigger_pos, prefix, gen)
+         end) do
+      {:ok, _pid} ->
+        :ok
 
+      {:error, reason} ->
+        # No Task means no {:completion_processed, ...} will arrive on its own;
+        # signal failure so the Editor clears the stuck pending modal.
+        Minga.Log.warning(:lsp, fn ->
+          "Completion Task failed to start (gen=#{gen}, mode=#{mode}): #{inspect(reason)}"
+        end)
+
+        send(editor, {:completion_processed, gen, mode, :failed, trigger_pos})
+        :ok
+    end
+  end
+
+  @spec run_completion_task(
+          pid(),
+          :primary | :merge,
+          term(),
+          {non_neg_integer(), non_neg_integer()},
+          String.t(),
+          non_neg_integer()
+        ) :: :ok
+  defp run_completion_task(editor, mode, result, trigger_pos, prefix, gen) do
+    payload =
+      try do
+        build_processed(mode, result, trigger_pos, prefix)
+      rescue
+        e ->
+          Minga.Log.warning(:lsp, fn ->
+            "Completion processing crashed (gen=#{gen}, mode=#{mode}): #{Exception.message(e)}"
+          end)
+
+          :failed
+      catch
+        kind, reason ->
+          Minga.Log.warning(:lsp, fn ->
+            "Completion processing failed (gen=#{gen}, mode=#{mode}): #{inspect({kind, reason})}"
+          end)
+
+          :failed
+      end
+
+    send(editor, {:completion_processed, gen, mode, payload, trigger_pos})
     :ok
   end
 
@@ -610,12 +658,15 @@ defmodule MingaEditor.CompletionHandling do
   `Completion`, so the common single-server path is a cheap assignment. If a
   secondary server's `:merge` result happened to land first, the primary result
   is unioned into it (rather than replacing it) so no server's items are lost.
+
+  A `:failed` payload (the Task crashed or could not start) clears a still-pending
+  menu so it is not left stuck, while leaving an already-populated menu intact.
   """
   @spec apply_processed(
           EditorState.t(),
           non_neg_integer(),
           :primary | :merge,
-          Completion.t() | [Completion.item()],
+          Completion.t() | [Completion.item()] | :failed,
           {non_neg_integer(), non_neg_integer()}
         ) :: EditorState.t()
   def apply_processed(state, gen, mode, payload, trigger_pos) do
@@ -632,9 +683,21 @@ defmodule MingaEditor.CompletionHandling do
   @spec apply_processed_current(
           EditorState.t(),
           :primary | :merge,
-          Completion.t() | [Completion.item()],
+          Completion.t() | [Completion.item()] | :failed,
           {non_neg_integer(), non_neg_integer()}
         ) :: EditorState.t()
+  defp apply_processed_current(state, _mode, :failed, _trigger_pos) do
+    # Processing failed (crash or Task could not start). Don't leave the modal
+    # stuck waiting on a menu that will never arrive: dismiss it if it is still
+    # pending, but keep an already-populated menu (e.g. primary succeeded and a
+    # secondary merge failed) intact. A dropped completion self-heals on the
+    # next keystroke.
+    case ModalOverlay.completion(state) do
+      nil -> dismiss(state)
+      %Completion{} -> state
+    end
+  end
+
   defp apply_processed_current(state, :primary, %Completion{items: []}, _trigger_pos) do
     # No items: matches the old behaviour of leaving the pending menu empty
     # rather than showing an empty popup.

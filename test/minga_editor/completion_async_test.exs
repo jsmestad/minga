@@ -14,7 +14,11 @@ defmodule MingaEditor.CompletionAsyncTest do
     * (b) a stale processed result (older generation) is discarded latest-wins
       so a superseded Task can never overwrite a fresher menu;
     * (c) the merge path still unions a secondary server's items into the live
-      menu and re-applies the prefix filter correctly.
+      menu and re-applies the prefix filter correctly;
+    * (d) end-to-end through the live Editor: a completion response drives the
+      real `handle_info({:completion_processed, ...})` clause and the menu
+      becomes visible — and a malformed item that crashes the Task clears the
+      pending menu instead of leaving it stuck.
   """
 
   use Minga.Test.EditorCase, async: true
@@ -174,6 +178,87 @@ defmodule MingaEditor.CompletionAsyncTest do
 
       assert "from_secondary" in result_labels
       assert "from_primary" in result_labels
+    end
+  end
+
+  describe "(d) end-to-end through the live Editor handle_info" do
+    # Inject a pending completion modal whose bridge expects `ref`, so a real
+    # {:lsp_response, ref, ...} sent to the live Editor drives the whole async
+    # pipeline: handle_info -> CompletionHandling.handle_response -> Task ->
+    # {:completion_processed, ...} -> the Editor's handle_info apply clause.
+    defp inject_pending_completion(ctx, ref) do
+      :sys.replace_state(ctx.editor, fn state ->
+        owner = state.shell_state.tab_bar.active_id
+
+        trigger = %{
+          CompletionTrigger.new()
+          | pending_ref: ref,
+            pending_refs: MapSet.new([ref]),
+            trigger_position: {0, 0},
+            gen: 1
+        }
+
+        payload = CompletionPayload.new(owner, trigger: trigger)
+        ModalOverlay.open(state, :completion, payload)
+      end)
+    end
+
+    test "a real LSP completion response routes through handle_info and becomes visible" do
+      ctx = start_editor("hello")
+      ref = make_ref()
+      inject_pending_completion(ctx, ref)
+
+      result =
+        {:ok,
+         %{
+           "items" => [
+             %{"label" => "zeta", "filterText" => "zeta", "sortText" => "2"},
+             %{"label" => "alpha", "filterText" => "alpha", "sortText" => "1"}
+           ]
+         }}
+
+      # Drive the real Editor mailbox: this exercises the actual
+      # handle_info({:completion_processed, ...}) dispatch clause, which the
+      # unit tests bypass by calling apply_processed/5 directly.
+      send(ctx.editor, {:lsp_response, ref, result})
+
+      final =
+        wait_until(ctx, fn state -> match?(%Completion{}, ModalOverlay.completion(state)) end,
+          max_attempts: 200,
+          interval_ms: 10,
+          message: "completion never became visible via the live Editor handle_info"
+        )
+
+      completion = ModalOverlay.completion(final)
+      assert %Completion{} = completion
+      # Sorted in the Task (sortText order), not response order.
+      assert Enum.map(completion.filtered, & &1.label) == ["alpha", "zeta"]
+    end
+
+    test "a malformed item crashes the Task but clears the stuck pending menu" do
+      ctx = start_editor("hello")
+      ref = make_ref()
+      inject_pending_completion(ctx, ref)
+
+      # A bare `null` in the items list FunctionClauseErrors in parse_item/1.
+      # The Task must still report (with :failed) so the pending modal is
+      # dismissed rather than left stuck on a never-arriving menu.
+      result = {:ok, %{"items" => [nil]}}
+
+      send(ctx.editor, {:lsp_response, ref, result})
+
+      _ =
+        wait_until(
+          ctx,
+          fn state -> not ModalOverlay.match(state.shell_state.modal, :completion) end,
+          max_attempts: 200,
+          interval_ms: 10,
+          message: "pending completion modal was left stuck after a Task crash"
+        )
+
+      final = editor_state(ctx)
+      refute ModalOverlay.match(final.shell_state.modal, :completion)
+      assert ModalOverlay.completion(final) == nil
     end
   end
 end
