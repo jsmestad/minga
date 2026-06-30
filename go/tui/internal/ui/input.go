@@ -180,6 +180,14 @@ func keyModifiers(key tea.Key) byte {
 // motion) honor the suppression.
 func (m Model) mousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	mouse := msg.Mouse()
+	// Sticky hover (#2629): free pointer motion inside the hover popup's rect is
+	// not forwarded, so the BEAM never sees motion over the popup and cannot
+	// dismiss it. Wheel, press, and drag still forward (wheel scrolls the popup
+	// content via the BEAM; a press focuses it), so only free motion is dropped.
+	if _, isMotion := msg.(tea.MouseMotionMsg); isMotion && mouse.Button == tea.MouseNone &&
+		m.mouseInHoverPopup(mouse.X, mouse.Y) {
+		return nil, false
+	}
 	offset := m.layout.header.Height
 	row := mouse.Y - offset
 	if !isWheelButton(mouse.Button) && mouse.Y < offset {

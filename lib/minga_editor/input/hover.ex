@@ -141,9 +141,11 @@ defmodule MingaEditor.Input.Hover do
     {:passthrough, state}
   end
 
-  # Scroll wheel when focused: scroll the hover content
+  # Scroll wheel over the popup scrolls its content. The popup node only receives
+  # wheel events when the pointer is inside its rect (scroll routing), so scrolling
+  # works whether or not the popup is keyboard-focused (#2629, AC-3).
   def handle_mouse(
-        %{shell_state: %{hover_popup: %HoverPopup{focused: true}}} = state,
+        %{shell_state: %{hover_popup: %HoverPopup{}}} = state,
         _r,
         _c,
         :wheel_down,
@@ -156,7 +158,7 @@ defmodule MingaEditor.Input.Hover do
   end
 
   def handle_mouse(
-        %{shell_state: %{hover_popup: %HoverPopup{focused: true}}} = state,
+        %{shell_state: %{hover_popup: %HoverPopup{}}} = state,
         _r,
         _c,
         :wheel_up,
@@ -168,7 +170,9 @@ defmodule MingaEditor.Input.Hover do
      EditorState.set_hover_popup(state, HoverPopup.scroll_up(state.shell_state.hover_popup))}
   end
 
-  # Any click dismisses hover
+  # A click inside the popup focuses it for scrolling rather than dismissing it
+  # (#2629, AC-4). This clause only runs when the pointer hit the popup rect, so a
+  # click outside still falls through to the buffer (which dismisses on motion).
   def handle_mouse(
         %{shell_state: %{hover_popup: %HoverPopup{}}} = state,
         _r,
@@ -178,7 +182,22 @@ defmodule MingaEditor.Input.Hover do
         :press,
         _cc
       ) do
-    {:passthrough, EditorState.dismiss_hover_popup(state)}
+    {:handled,
+     EditorState.set_hover_popup(state, HoverPopup.focus(state.shell_state.hover_popup))}
+  end
+
+  # Pointer motion inside the popup keeps it alive (#2629, AC-1). Swallowing the
+  # event here stops it bubbling to the buffer handler that would dismiss it.
+  def handle_mouse(
+        %{shell_state: %{hover_popup: %HoverPopup{}}} = state,
+        _r,
+        _c,
+        _btn,
+        _m,
+        :motion,
+        _cc
+      ) do
+    {:handled, state}
   end
 
   def handle_mouse(state, _row, _col, _btn, _mods, _type, _cc) do

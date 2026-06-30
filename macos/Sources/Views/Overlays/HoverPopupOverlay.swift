@@ -103,7 +103,13 @@ struct HoverPopupOverlay: View {
                         )
                 )
                 .offset(x: offsetX, y: offsetY)
-                .allowsHitTesting(state.focused)
+                // Always intercept mouse events inside the popup (#2629). SwiftUI
+                // then handles motion (keeping the popup alive instead of the
+                // motion reaching EditorNSView and dismissing it via the BEAM),
+                // scrolling, clicks, and the Open button without requiring the
+                // user to keyboard-focus the popup first. Moving the pointer back
+                // out resumes editor motion events, which dismiss on leaving.
+                .allowsHitTesting(true)
                 .transition(.opacity.animation(.easeIn(duration: animDuration)))
         }
     }

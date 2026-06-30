@@ -21,6 +21,10 @@ defmodule MingaEditor.State.Mouse do
   @double_click_ms 400
   # Maximum cell distance between clicks to count as multi-click
   @click_distance 2
+  # Hover debounce before requesting an LSP hover. Matches the VSCode default
+  # (`editor.hover.delay`) so a hovered symbol resolves quickly but transient
+  # pointer motion does not thrash the LSP.
+  @hover_delay_ms 300
 
   defstruct dragging: false,
             anchor: nil,
@@ -152,6 +156,10 @@ defmodule MingaEditor.State.Mouse do
   @spec double_click_ms() :: pos_integer()
   def double_click_ms, do: @double_click_ms
 
+  @doc "Returns the hover debounce delay in milliseconds (for testing)."
+  @spec hover_delay_ms() :: pos_integer()
+  def hover_delay_ms, do: @hover_delay_ms
+
   # ── Hover tracking ─────────────────────────────────────────────────────────
 
   @doc "Sets the hover position and starts a debounce timer."
@@ -161,7 +169,7 @@ defmodule MingaEditor.State.Mouse do
 
     timer =
       if Keyword.get(opts, :backend) != :headless do
-        Process.send_after(self(), :mouse_hover_timeout, 500)
+        Process.send_after(self(), :mouse_hover_timeout, @hover_delay_ms)
       end
 
     %{mouse | hover_pos: {row, col}, hover_timer: timer}
