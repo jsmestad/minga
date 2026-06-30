@@ -738,6 +738,65 @@ defmodule MingaEditor.MouseTest do
 
       assert state.workspace.cmd_hover_link == nil
     end
+
+    test "Cmd+click go-to-definition clears the link preview before navigating" do
+      {state, _buffer} = start_mouse_state("hello world\nfoo bar baz", width: 80)
+      {row, col} = buffer_screen_pos(state, 0, 8)
+
+      state = mouse(state, row, col, :none, :motion, @super)
+      assert state.workspace.cmd_hover_link != nil
+
+      # Cmd+click navigates (possibly to another buffer); the stale underline and
+      # GUI hand cursor (derived from cmd_hover_link != nil) must clear.
+      state = mouse(state, row, col, :left, :press, @super)
+      assert state.workspace.cmd_hover_link == nil
+      assert state.workspace.cmd_hover_cell == nil
+    end
+
+    test "switching tabs clears a standing link preview" do
+      {state, _buf1, _buf2} = start_two_tab_state()
+      [first_tab_id | _] = Enum.map(state.shell_state.tab_bar.tabs, & &1.id)
+      {row, col} = buffer_screen_pos(state, 0, 2)
+
+      state = mouse(state, row, col, :none, :motion, @super)
+      assert state.workspace.cmd_hover_link != nil
+
+      # A keyboard tab switch swaps the active buffer with no intervening motion;
+      # the link preview must not carry over to the new buffer's coordinates.
+      state = EditorState.switch_tab(state, first_tab_id)
+      assert state.workspace.cmd_hover_link == nil
+      assert state.workspace.cmd_hover_cell == nil
+    end
+
+    test "focusing another window clears a standing link preview" do
+      {state, _buffer} = start_mouse_state("hello world\nfoo bar baz", width: 80)
+      state = Movement.execute(state, :split_vertical)
+      {row, col} = buffer_screen_pos(state, 0, 8)
+
+      state = mouse(state, row, col, :none, :motion, @super)
+      assert state.workspace.cmd_hover_link != nil
+
+      other_id =
+        Enum.find(Map.keys(state.workspace.windows.map), &(&1 != state.workspace.windows.active))
+
+      state = EditorState.focus_window(state, other_id)
+      assert state.workspace.cmd_hover_link == nil
+      assert state.workspace.cmd_hover_cell == nil
+    end
+
+    test "a repeated motion at the same cell preserves the link without re-resolving" do
+      {state, _buffer} = start_mouse_state("hello world\nfoo bar baz", width: 80)
+      {row, col} = buffer_screen_pos(state, 0, 8)
+
+      state = mouse(state, row, col, :none, :motion, @super)
+      assert state.workspace.cmd_hover_link == {{0, 6}, {0, 11}}
+      assert state.workspace.cmd_hover_cell == {row, col}
+
+      # Same cell again: the dedup short-circuit returns unchanged state.
+      again = mouse(state, row, col, :none, :motion, @super)
+      assert again.workspace.cmd_hover_link == state.workspace.cmd_hover_link
+      assert again.workspace.cmd_hover_cell == {row, col}
+    end
   end
 
   # Builds a state with an open hover popup and returns its placed screen rect.

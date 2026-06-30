@@ -614,6 +614,18 @@ defmodule MingaEditor.State do
     update_workspace(state, &SessionState.set_cmd_hover_link(&1, link))
   end
 
+  @doc "Records the pointer cell the Cmd/Ctrl-hover link was last resolved at."
+  @spec set_cmd_hover_cell(t(), SessionState.cmd_hover_cell()) :: t()
+  def set_cmd_hover_cell(%__MODULE__{} = state, cell) do
+    update_workspace(state, &SessionState.set_cmd_hover_cell(&1, cell))
+  end
+
+  @doc "Clears the Cmd/Ctrl-hover link preview and its dedup cell."
+  @spec clear_cmd_hover_link(t()) :: t()
+  def clear_cmd_hover_link(%__MODULE__{} = state) do
+    update_workspace(state, &SessionState.clear_cmd_hover_link/1)
+  end
+
   @doc "Replaces the active workspace LSP pending request map."
   @spec set_lsp_pending(t(), %{reference() => atom() | tuple()}) :: t()
   def set_lsp_pending(%__MODULE__{} = state, pending) when is_map(pending) do
@@ -2230,7 +2242,12 @@ defmodule MingaEditor.State do
               wspace
               | windows: %{ws | map: windows, active: target_id},
                 buffers: %{buffers | active: target_win.buffer},
-                keymap_scope: scope
+                keymap_scope: scope,
+                # Focusing another window can swap the active buffer; drop any
+                # standing Cmd/Ctrl-hover link so it never draws against the new
+                # buffer's coordinates before the next motion (#2630).
+                cmd_hover_link: nil,
+                cmd_hover_cell: nil
             }
         }
 

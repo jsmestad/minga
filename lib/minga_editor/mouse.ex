@@ -367,9 +367,20 @@ defmodule MingaEditor.Mouse do
   # decoration on its full word range, or clears it when there is nothing
   # navigable there. Intentionally leaves the hover popup and hover debounce
   # untouched: the link preview is an independent layer from the LSP hover popup.
+  #
+  # Hot-path guard (responsiveness epic): when the pointer cell is unchanged from
+  # the previous resolved motion, the whole word-boundary + tree-sitter + buffer
+  # snapshot resolution is skipped. Transitions that change the active buffer
+  # reset `cmd_hover_cell` to nil, so a same-cell motion re-resolves afterwards.
   @spec update_cmd_hover_link(state(), integer(), integer()) :: state()
+  defp update_cmd_hover_link(%{workspace: %{cmd_hover_cell: {row, col}}} = state, row, col) do
+    state
+  end
+
   defp update_cmd_hover_link(state, row, col) do
-    set_cmd_hover_link_if_changed(state, navigable_link_at(state, row, col))
+    state
+    |> set_cmd_hover_link_if_changed(navigable_link_at(state, row, col))
+    |> EditorState.set_cmd_hover_cell({row, col})
   end
 
   @spec set_cmd_hover_link_if_changed(state(), EditorState.cmd_hover_link()) :: state()
@@ -384,13 +395,17 @@ defmodule MingaEditor.Mouse do
   # navigable symbol) before running normal hover tracking. Skips the clear write
   # when there is nothing to clear so plain motion stays allocation-free.
   @spec clear_cmd_hover_link_then_hover(state(), integer(), integer()) :: state()
-  defp clear_cmd_hover_link_then_hover(%{workspace: %{cmd_hover_link: nil}} = state, row, col) do
+  defp clear_cmd_hover_link_then_hover(
+         %{workspace: %{cmd_hover_link: nil, cmd_hover_cell: nil}} = state,
+         row,
+         col
+       ) do
     handle_hover_motion(state, row, col)
   end
 
   defp clear_cmd_hover_link_then_hover(state, row, col) do
     state
-    |> EditorState.set_cmd_hover_link(nil)
+    |> EditorState.clear_cmd_hover_link()
     |> handle_hover_motion(row, col)
   end
 
@@ -822,6 +837,10 @@ defmodule MingaEditor.Mouse do
       {target_line, target_col} ->
         buf = state.workspace.buffers.active
         Buffer.move_to(buf, {target_line, target_col})
+        # Navigation may open or switch to a different buffer, so drop the link
+        # preview now; otherwise its underline would draw against the new buffer
+        # until the next mouse motion (#2630).
+        state = EditorState.clear_cmd_hover_link(state)
         state = cancel_mode_for_mouse(state)
         state = EditorState.transition_mode(state, :normal)
         MingaEditor.dispatch_command(state, :goto_definition)
