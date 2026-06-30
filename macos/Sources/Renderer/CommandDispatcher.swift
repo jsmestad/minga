@@ -150,23 +150,6 @@ final class CommandDispatcher {
     /// can still be told apart from "never committed" when validating a base.
     private var hasCommitted = false
 
-    /// Out-of-band commands the BEAM legitimately emits OUTSIDE a transaction
-    /// (#2219 child B / AC-1 consult): set_title and set_window_bg are emitted
-    /// post-commit, and protocol_error / the frame markers themselves are never
-    /// inside a transaction. These apply immediately even with no open begin.
-    /// Any OTHER semantic or chrome command outside a transaction is an
-    /// invalidation, because byte boundaries are no longer trustworthy.
-    private static func isOutOfBandAllowed(_ command: RenderCommand) -> Bool {
-        switch command {
-        case .setTitle, .setWindowBg, .protocolError,
-             .setFont, .setFontFallback, .registerFont,
-             .guiConfigState, .clipboardWrite:
-            return true
-        default:
-            return false
-        }
-    }
-
     /// gui_theme must carry the full slot set the frontends rely on. Missing slots are a protocol bug, not a theme fallback case.
     static let requiredThemeSlots: [UInt8] = [
         0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A,
@@ -188,9 +171,17 @@ final class CommandDispatcher {
 
     /// Entry point from the protocol reader. Routes a decoded command through the
     /// frame-transaction state machine: frame markers open/close transactions,
-    /// transaction-scoped commands buffer into `stagedCommands`, and the
-    /// out-of-band allowlist applies immediately. Anything else seen outside a
-    /// transaction invalidates and requests a keyframe.
+    /// transaction-scoped commands buffer into `stagedCommands`, and explicitly
+    /// sanctioned out-of-band commands apply immediately (or stage if inside a
+    /// transaction). Everything else outside a transaction triggers active
+    /// recovery: invalidation and a keyframe request.
+    ///
+    /// This is the negative-guard pattern from Go's model.go (applyCommands,
+    /// lines 444-459): give known out-of-band commands explicit match arms so
+    /// any new BEAM out-of-band command without a match arm defaults to
+    /// active recovery rather than silent drop. Contrast the old positive-allowlist
+    /// design where a missing entry caused an unnecessary keyframe request with no
+    /// application of the command.
     func dispatch(_ command: RenderCommand) {
         switch command {
         case .beginFrame(let frameSeq, let baseFrameSeq):
@@ -199,16 +190,35 @@ final class CommandDispatcher {
         case .commitFrame(let frameSeq, let seq):
             commitTransaction(frameSeq: frameSeq, inputSeq: seq)
 
+        // Sanctioned out-of-band commands: the BEAM legitimately emits these
+        // outside a begin/commit bracket. If one arrives inside an open
+        // transaction it stages for atomic replay; outside one it applies
+        // immediately. Mirrors Go's explicit match arms at model.go:444-450.
+        //
+        // setTitle / setWindowBg / clipboardWrite: post-commit side-channels.
+        // protocolError: handshake rejection, always pre-transaction.
+        // setFont / setFontFallback / registerFont / guiConfigState: startup
+        //   config emitted before the first frame (equivalent to Go's CommandNoop
+        //   for font commands, but Swift actually applies them).
+        case .setTitle, .setWindowBg, .protocolError,
+             .setFont, .setFontFallback, .registerFont,
+             .guiConfigState, .clipboardWrite:
+            if openFrameSeq != nil {
+                stagedCommands.append(command)
+            } else {
+                apply(command)
+            }
+
         default:
             if openFrameSeq != nil {
                 // Inside a transaction: buffer for atomic replay at commit.
                 stagedCommands.append(command)
-            } else if CommandDispatcher.isOutOfBandAllowed(command) {
-                // Legitimately out-of-band (post-commit title/bg, protocol_error).
-                apply(command)
             } else {
-                // A semantic/chrome command arrived with no open transaction.
-                // The stream boundaries are no longer trustworthy; resync.
+                // A command arrived with no open transaction and no sanctioned
+                // out-of-band match above. Either a new BEAM out-of-band command
+                // was added to the protocol without a corresponding explicit arm
+                // here, or the byte stream is desynced. Active recovery: discard
+                // staged state and request a keyframe. Mirrors Go model.go:454-456.
                 invalidate(reason: "out-of-transaction command")
             }
         }
