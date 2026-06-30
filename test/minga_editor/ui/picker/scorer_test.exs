@@ -100,9 +100,14 @@ defmodule MingaEditor.UI.Picker.ScorerTest do
       # match and the new codepoint binary walk must return the same boolean.
       grapheme_fuzzy = fn haystack, needle ->
         walk = fn
-          _h, [], _self -> true
-          [], _n, _self -> false
-          [x | hr], [y | _nr] = ndl, self -> if x == y, do: self.(hr, tl(ndl), self), else: self.(hr, ndl, self)
+          _h, [], _self ->
+            true
+
+          [], _n, _self ->
+            false
+
+          [x | hr], [y | _nr] = ndl, self ->
+            if x == y, do: self.(hr, tl(ndl), self), else: self.(hr, ndl, self)
         end
 
         walk.(String.graphemes(haystack), String.graphemes(needle), walk)
