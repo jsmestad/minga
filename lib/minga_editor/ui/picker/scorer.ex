@@ -174,20 +174,24 @@ defmodule MingaEditor.UI.Picker.Scorer do
   end
 
   # Check if all characters in `needle` appear in order in `haystack`.
+  #
+  # Walks both binaries one Unicode codepoint at a time via `<<c::utf8, ...>>`
+  # instead of materializing a grapheme list per candidate. This is the picker's
+  # per-keystroke hot path: with 100K candidates, `String.graphemes/1` on each
+  # full path allocated millions of single-codepoint binaries and pressured the
+  # Editor process's GC. The binary walk extracts one codepoint without building
+  # a list (a single-byte comparison for ASCII, still correct for multi-byte
+  # UTF-8). For single-codepoint graphemes (the norm for file paths) this is
+  # identical to the previous grapheme-by-grapheme comparison.
   @spec fuzzy_match?(String.t(), String.t()) :: boolean()
-  defp fuzzy_match?(haystack, needle) do
-    do_fuzzy_match?(String.graphemes(haystack), String.graphemes(needle))
+  defp fuzzy_match?(_haystack, <<>>), do: true
+  defp fuzzy_match?(<<>>, _needle), do: false
+
+  defp fuzzy_match?(<<c::utf8, h_rest::binary>>, <<c::utf8, n_rest::binary>>) do
+    fuzzy_match?(h_rest, n_rest)
   end
 
-  @spec do_fuzzy_match?([String.t()], [String.t()]) :: boolean()
-  defp do_fuzzy_match?(_haystack, []), do: true
-  defp do_fuzzy_match?([], _needle), do: false
-
-  defp do_fuzzy_match?([h | h_rest], [n | n_rest] = needle) do
-    if h == n do
-      do_fuzzy_match?(h_rest, n_rest)
-    else
-      do_fuzzy_match?(h_rest, needle)
-    end
+  defp fuzzy_match?(<<_c::utf8, h_rest::binary>>, needle) do
+    fuzzy_match?(h_rest, needle)
   end
 end
