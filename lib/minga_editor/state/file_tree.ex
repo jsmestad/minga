@@ -46,6 +46,8 @@ defmodule MingaEditor.State.FileTree do
           tree_status: tree_status(),
           tree_width: pos_integer(),
           refresh_timer: reference() | nil,
+          refresh_inflight: reference() | nil,
+          refresh_pending?: boolean(),
           clipboard_mark: clipboard_mark() | nil,
           filtering: boolean(),
           help_visible: boolean()
@@ -60,6 +62,8 @@ defmodule MingaEditor.State.FileTree do
             tree_status: :hidden,
             tree_width: 30,
             refresh_timer: nil,
+            refresh_inflight: nil,
+            refresh_pending?: false,
             clipboard_mark: nil,
             filtering: false,
             help_visible: false
@@ -179,6 +183,39 @@ defmodule MingaEditor.State.FileTree do
   @spec clear_refresh(t()) :: t()
   def clear_refresh(%__MODULE__{} = ft), do: %{ft | refresh_timer: nil}
 
+  @doc "Returns true when an async refresh Task is currently in flight."
+  @spec refresh_inflight?(t()) :: boolean()
+  def refresh_inflight?(%__MODULE__{refresh_inflight: ref}) when is_reference(ref), do: true
+  def refresh_inflight?(%__MODULE__{}), do: false
+
+  @doc "Returns the token of the in-flight refresh Task, or nil when none is running."
+  @spec refresh_inflight_token(t()) :: reference() | nil
+  def refresh_inflight_token(%__MODULE__{refresh_inflight: ref}), do: ref
+
+  @doc "Returns true when another refresh was requested while one was in flight."
+  @spec refresh_pending?(t()) :: boolean()
+  def refresh_pending?(%__MODULE__{refresh_pending?: pending?}), do: pending?
+
+  @doc """
+  Marks an async refresh as in flight under `token` and clears the debounce timer.
+
+  Also clears any `refresh_pending?` flag: the freshly spawned Task supersedes a
+  request that was coalesced while a previous Task was running.
+  """
+  @spec begin_inflight_refresh(t(), reference()) :: t()
+  def begin_inflight_refresh(%__MODULE__{} = ft, token) when is_reference(token) do
+    %{ft | refresh_inflight: token, refresh_pending?: false, refresh_timer: nil}
+  end
+
+  @doc "Records that a refresh was requested while one was already in flight."
+  @spec mark_refresh_pending(t()) :: t()
+  def mark_refresh_pending(%__MODULE__{} = ft), do: %{ft | refresh_pending?: true}
+
+  @doc "Clears in-flight and pending refresh tracking once a Task result is handled."
+  @spec clear_inflight_refresh(t()) :: t()
+  def clear_inflight_refresh(%__MODULE__{} = ft),
+    do: %{ft | refresh_inflight: nil, refresh_pending?: false}
+
   @doc "Marks the sidebar as failed with a displayable reason."
   @spec error(t(), term()) :: t()
   def error(%__MODULE__{} = ft, reason) do
@@ -197,7 +234,9 @@ defmodule MingaEditor.State.FileTree do
         tree_status: :hidden,
         clipboard_mark: nil,
         filtering: false,
-        help_visible: false
+        help_visible: false,
+        refresh_inflight: nil,
+        refresh_pending?: false
     }
   end
 

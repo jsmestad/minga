@@ -717,9 +717,24 @@ defmodule MingaEditor do
     {:noreply, RenderHandler.handle_debounced_render(state)}
   end
 
-  # Debounced file-tree refresh timer fired — rescan the cached tree once for a burst of filesystem events.
+  # Debounced file-tree refresh timer fired — spawn an off-process rescan (#2632)
+  # so the recursive filesystem walk never blocks the Editor mailbox.
   def handle_info(:file_tree_refresh_timer, state) do
     {state, effects} = FileEventHandler.handle(state, :file_tree_refresh_timer)
+    {:noreply, EffectHandler.apply_effects(state, effects)}
+  end
+
+  # Async file-tree rescan finished — apply the refreshed tree with a cheap,
+  # atomic whole-tree swap, discarding it if the tree was re-rooted or closed.
+  def handle_info({:file_tree_refresh_result, _refreshed_tree, _token} = msg, state) do
+    {state, effects} = FileEventHandler.handle(state, msg)
+    {:noreply, EffectHandler.apply_effects(state, effects)}
+  end
+
+  # Async file-tree rescan crashed — clear in-flight tracking and honour a
+  # coalesced refresh so the refresh loop never wedges (#2632).
+  def handle_info({:file_tree_refresh_failed, _token} = msg, state) do
+    {state, effects} = FileEventHandler.handle(state, msg)
     {:noreply, EffectHandler.apply_effects(state, effects)}
   end
 
