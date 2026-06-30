@@ -1,4 +1,5 @@
 import Testing
+@testable import MingaUI
 import MingaProtocol
 @testable import Minga
 

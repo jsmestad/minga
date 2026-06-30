@@ -6,6 +6,7 @@
 /// missing icons, incorrect counts).
 
 import Testing
+@testable import MingaUI
 import Foundation
 import SwiftUI
 import MingaProtocol

@@ -1,4 +1,5 @@
 import Testing
+@testable import MingaUI
 
 @Suite("MinibufferState Lifecycle")
 struct MinibufferStateLifecycleTests {

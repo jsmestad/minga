@@ -6,6 +6,7 @@
 /// the views render populated content rather than silently showing nothing.
 
 import Testing
+@testable import MingaUI
 import SwiftUI
 import ViewInspector
 import MingaProtocol
