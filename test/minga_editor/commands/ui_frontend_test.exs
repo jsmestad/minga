@@ -4,7 +4,9 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
   alias MingaEditor.BottomPanel
   alias MingaEditor.Commands
   alias MingaEditor.Frontend.Capabilities
+  alias MingaEditor.Observatory
   alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Viewport
 
@@ -121,5 +123,70 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
 
       Process.cancel_timer(timer)
     end
+  end
+
+  describe "observatory refresh runs off the Editor GenServer" do
+    test "a tick spawns async collection without blocking or scheduling the next tick" do
+      token = make_ref()
+      state = observatory_state(@gui, token)
+
+      # The tick handler returns the *unchanged* state: build_observatory_data/0
+      # does not run inline (no data set) and no next tick is scheduled here.
+      assert {:noreply, ^state} = MingaEditor.handle_info({:observatory_tick, token}, state)
+      assert state.shell_state.observatory_data == nil
+
+      # The collection ran in a supervised Task and reported back as a message,
+      # exactly like a picker/async-action result.
+      assert_receive {:observatory_data_result, ^token, %Observatory.Data{}}, 2_000
+    end
+
+    test "a stale tick does not spawn collection" do
+      token = make_ref()
+      state = observatory_state(@gui, token)
+
+      assert {:noreply, ^state} = MingaEditor.handle_info({:observatory_tick, make_ref()}, state)
+
+      refute_receive {:observatory_data_result, _token, _data}, 200
+    end
+
+    test "the result handler applies data and schedules the next tick only now" do
+      token = make_ref()
+      state = observatory_state(@gui, token)
+      data = Observatory.Data.visible(nil, [])
+
+      assert {:noreply, new_state} =
+               MingaEditor.handle_info({:observatory_data_result, token, data}, state)
+
+      assert new_state.shell_state.observatory_data == data
+
+      assert {next_timer, next_token} = new_state.shell_state.observatory_timer
+      assert is_reference(next_timer)
+      # A fresh token gates the next cycle; the prior token is now stale.
+      assert next_token != token
+
+      # The scheduled timer is live: its tick is actually delivered (~1s later),
+      # proving the next cycle is armed only after a result lands.
+      assert_receive {:observatory_tick, ^next_token}, 3_000
+    end
+
+    test "a stale data result is ignored and schedules nothing" do
+      token = make_ref()
+      state = observatory_state(@gui, token)
+
+      data = Observatory.Data.visible(nil, [])
+
+      assert {:noreply, ^state} =
+               MingaEditor.handle_info({:observatory_data_result, make_ref(), data}, state)
+
+      assert state.shell_state.observatory_data == nil
+    end
+  end
+
+  # Builds editor state with the observatory open and a known refresh token, so
+  # current_observatory_token?/2 matches without scheduling a real timer.
+  defp observatory_state(caps, token) do
+    base = base_state(caps)
+    shell = ShellState.open_observatory(base.shell_state, {make_ref(), token})
+    %{base | shell_state: shell}
   end
 end

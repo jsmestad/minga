@@ -595,9 +595,27 @@ defmodule MingaEditor do
     {:noreply, new_state}
   end
 
+  # A tick only *spawns* the collection Task and returns immediately, so the
+  # blocking SystemObserver calls in build_observatory_data/0 never run on the
+  # Editor mailbox. The next tick is scheduled when the result lands (see the
+  # :observatory_data_result clause), not here, so a collection that takes
+  # longer than the 1s interval is effectively skipped, never queued.
   def handle_info({:observatory_tick, token}, state) do
+    if current_observatory_token?(state, token), do: spawn_observatory_collection(token)
+    {:noreply, state}
+  end
+
+  def handle_info(:observatory_tick, state) do
+    {:noreply, state}
+  end
+
+  # Async observatory data computed by the Task spawned on the matching tick.
+  # Apply it cheaply (no blocking work here) and only now schedule the next
+  # tick, which guarantees ticks are skipped-not-queued under slow collection.
+  # A result carrying a stale token (panel closed, or a newer tick already
+  # superseded this one) is dropped without scheduling anything.
+  def handle_info({:observatory_data_result, token, data}, state) do
     if current_observatory_token?(state, token) do
-      data = build_observatory_data()
       next_token = make_ref()
       timer = Process.send_after(self(), {:observatory_tick, next_token}, 1_000)
 
@@ -610,10 +628,6 @@ defmodule MingaEditor do
     else
       {:noreply, state}
     end
-  end
-
-  def handle_info(:observatory_tick, state) do
-    {:noreply, state}
   end
 
   # ── Handler-delegated bare atom events ─────────────────────────────────────
@@ -1023,6 +1037,20 @@ defmodule MingaEditor do
        do: true
 
   defp current_observatory_token?(_state, _token), do: false
+
+  # Run the blocking SystemObserver collection in a supervised Task so the
+  # Editor GenServer mailbox stays free. The token is echoed back with the
+  # result so the receiving clause can drop stale collections.
+  @spec spawn_observatory_collection(reference()) :: :ok
+  defp spawn_observatory_collection(token) do
+    editor = self()
+
+    Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
+      send(editor, {:observatory_data_result, token, build_observatory_data()})
+    end)
+
+    :ok
+  end
 
   @spec build_observatory_data() :: Observatory.Data.t()
   defp build_observatory_data do
