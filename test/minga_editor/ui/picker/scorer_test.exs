@@ -75,6 +75,54 @@ defmodule MingaEditor.UI.Picker.ScorerTest do
 
       assert Scorer.top_k(cands, ["deep"], 5) |> Enum.count() == 1
     end
+
+    test "fuzzy matches non-ASCII (multi-byte UTF-8) paths in order" do
+      cands = candidates(["café/münchen/straße.txt", "plain/ascii/file.txt"])
+
+      # Query is lowercase and out of contiguous order, forcing the fuzzy path
+      # (no prefix/substring hit). The accented codepoints must match by value.
+      result = Scorer.top_k(cands, ["cféü"], 5) |> Enum.map(& &1.item.label)
+
+      assert result == ["café/münchen/straße.txt"]
+    end
+
+    test "fuzzy path rejects a non-ASCII candidate whose accented codepoints differ" do
+      # The binary walk must compare accented codepoints by value, not treat any
+      # multi-byte sequence as a wildcard. "ö" must not satisfy a query "ü".
+      cands = candidates(["lib/schön/config.exs"])
+
+      # "ü" never appears, so fuzzy must fail and the candidate is dropped.
+      assert Scorer.top_k(cands, ["xü"], 5) == []
+    end
+
+    test "binary fuzzy walk agrees with the grapheme-list walk on Unicode inputs" do
+      # Equivalence check: for the same input bytes, the old grapheme-by-grapheme
+      # match and the new codepoint binary walk must return the same boolean.
+      grapheme_fuzzy = fn haystack, needle ->
+        walk = fn
+          _h, [], _self -> true
+          [], _n, _self -> false
+          [x | hr], [y | _nr] = ndl, self -> if x == y, do: self.(hr, tl(ndl), self), else: self.(hr, ndl, self)
+        end
+
+        walk.(String.graphemes(haystack), String.graphemes(needle), walk)
+      end
+
+      haystacks = ["café.exs", "münchen.ex", "straße_config.exs", "naïve_doc.md"]
+      needles = ["cf", "afx", "müc", "sße", "naïe", "öü", "xyz"]
+
+      for haystack <- haystacks, needle <- needles do
+        # Restrict to inputs where neither prefix nor substring fires, so the
+        # candidate's match outcome is decided purely by the fuzzy walk.
+        refute String.starts_with?(haystack, needle)
+        refute String.contains?(haystack, needle)
+
+        matched? = Scorer.top_k(candidates([haystack]), [needle], 1) != []
+
+        assert matched? == grapheme_fuzzy.(haystack, needle),
+               "binary walk disagreed with grapheme walk for #{inspect(haystack)} / #{inspect(needle)}"
+      end
+    end
   end
 
   describe "bounded large sets" do
