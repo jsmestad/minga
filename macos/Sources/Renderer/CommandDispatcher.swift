@@ -158,7 +158,9 @@ final class CommandDispatcher {
     /// invalidation, because byte boundaries are no longer trustworthy.
     private static func isOutOfBandAllowed(_ command: RenderCommand) -> Bool {
         switch command {
-        case .setTitle, .setWindowBg, .protocolError:
+        case .setTitle, .setWindowBg, .protocolError,
+             .setFont, .setFontFallback, .registerFont,
+             .guiConfigState:
             return true
         default:
             return false
