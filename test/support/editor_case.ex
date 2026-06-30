@@ -620,13 +620,13 @@ defmodule Minga.Test.EditorCase do
     get_editor_state(editor).workspace.search.last_pattern != nil
   end
 
-  @doc "Returns true if the file tree is open."
+  @doc "Returns true if the file tree sidebar is currently visible."
   @spec file_tree_open?(editor_ctx()) :: boolean()
   def file_tree_open?(%{editor: editor}) do
     editor
     |> get_editor_state()
     |> MingaEditor.State.file_tree_state()
-    |> MingaEditor.State.FileTree.open?()
+    |> MingaEditor.State.FileTree.visible?()
   end
 
   @doc "Returns true if the completion menu is visible."

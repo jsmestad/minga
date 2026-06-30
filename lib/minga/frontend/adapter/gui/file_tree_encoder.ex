@@ -14,10 +14,10 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoder do
   @type fingerprint ::
           ready_fingerprint()
           | {:file_tree_state, String.t(), non_neg_integer(), term()}
-          | {:no_tree, String.t()}
 
   @spec encode(FileTree.t(), Caches.t()) :: {binary() | nil, Caches.t()}
-  def encode(%FileTree{status: :ready} = model, %Caches{} = caches) do
+  def encode(%FileTree{status: status} = model, %Caches{} = caches)
+      when status in [:ready, :hidden] do
     structural_fp = ready_structural_fingerprint(model)
     selection_fp = selection_fingerprint(model)
     fp = {:ready, structural_fp, selection_fp}
@@ -74,11 +74,9 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoder do
     <<@op_gui_file_tree_selection, byte_size(payload)::16, payload::binary>>
   end
 
+  # Reached only for non-row statuses (:loading, :empty, :error). Ready and
+  # hidden trees both carry rows and use the structural fingerprint path above.
   @spec fingerprint(FileTree.t()) :: fingerprint()
-  defp fingerprint(%FileTree{status: :hidden, root_path: root_path}) do
-    {:no_tree, root_path || ""}
-  end
-
   defp fingerprint(%FileTree{} = model) do
     {:file_tree_state, model.root_path || "", model.tree_width, model.status}
   end

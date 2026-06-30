@@ -76,6 +76,38 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilderTest do
       assert row.icon_color == 0x42A5F5
     end
 
+    test "builds the full tree with rows even when the sidebar is hidden" do
+      path = "/project/lib"
+
+      tree = %ProjectFileTree{
+        root: "/project",
+        width: 32,
+        cursor: 0,
+        expanded: MapSet.new(["/project", path]),
+        git_status: %{path => :modified},
+        entries: [
+          %{path: path, name: "lib", dir?: true, depth: 1, last_child?: true, guides: [true]}
+        ]
+      }
+
+      # `hidden: true` keeps the loaded tree alive; the sidebar is just toggled off.
+      file_tree = %FileTreeState{tree: tree, focused: false, hidden: true, tree_status: :ready}
+
+      model = FileTreeBuilder.build(build_minimal_context(file_tree: file_tree))
+
+      # Visibility flag still reports hidden so the frontend skips rendering...
+      assert model.status == :hidden
+      refute model.focused?
+      refute model.local_navigation?
+      # ...but the data is always present in the frame (AC1/AC2).
+      assert [row] = model.rows
+      assert row.id == path
+      assert row.name == "lib"
+      assert row.git_status == :modified
+      assert model.root_path == "/project"
+      assert model.tree_width == 32
+    end
+
     test "disables local navigation while filtering" do
       tree = %ProjectFileTree{
         root: "/project",

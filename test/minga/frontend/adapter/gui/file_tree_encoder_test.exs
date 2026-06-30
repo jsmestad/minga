@@ -40,6 +40,37 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoderTest do
 
       assert <<@op_gui_file_tree, _len::32, _payload::binary>> = cmd2
     end
+
+    test "encodes a hidden tree that still carries its rows with the visible flag off" do
+      # A hidden-but-loaded tree (#2626): full data in the frame, but the frontend
+      # must not render it, so the visible bit (0x01) stays clear.
+      model = %{ready_tree("/project/a.ex") | status: :hidden, focused?: false}
+
+      {cmd, _caches} = FileTreeEncoder.encode(model, Caches.new())
+
+      assert <<@op_gui_file_tree, len::32, payload::binary-size(len)>> = cmd
+      assert <<2::8, tree_flags::8, _tree_state::8, _rest::binary>> = payload
+      assert Bitwise.band(tree_flags, 0x01) == 0
+      # Row count is preserved (2 rows), proving the data is encoded while hidden.
+      assert <<2::8, _flags::8, _state::8, sel::binary>> = payload
+
+      assert <<sel_len::16, _selected_id::binary-size(sel_len), root_len::16,
+               _root::binary-size(root_len), _tree_width::16, 2::16, _rest::binary>> = sel
+    end
+
+    test "re-emits the hidden tree only when its rows change (fingerprint cache)" do
+      model = %{ready_tree("/project/a.ex") | status: :hidden, focused?: false}
+
+      {cmd1, caches} = FileTreeEncoder.encode(model, Caches.new())
+      {cmd2, caches} = FileTreeEncoder.encode(model, caches)
+
+      changed = %{model | rows: [row("/project/a.ex"), row("/project/c.ex")]}
+      {cmd3, _caches} = FileTreeEncoder.encode(changed, caches)
+
+      assert <<@op_gui_file_tree, _::32, _::binary>> = cmd1
+      assert cmd2 == nil
+      assert <<@op_gui_file_tree, _::32, _::binary>> = cmd3
+    end
   end
 
   describe "encode/2 - ready tree selection path" do

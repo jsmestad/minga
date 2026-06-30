@@ -43,14 +43,11 @@ defmodule MingaEditor.Commands.FileTree do
       %FileTreeState{tree: nil} ->
         open(state)
 
-      %FileTreeState{tree: tree, buffer: buf} when is_pid(buf) ->
-        FileTreeFreshness.unwatch_expanded_dirs(tree)
-        GenServer.stop(buf, :normal)
-        close_tree(state)
+      %FileTreeState{hidden: true} ->
+        show_tree(state)
 
-      %FileTreeState{tree: %FileTree{} = tree} ->
-        FileTreeFreshness.unwatch_expanded_dirs(tree)
-        close_tree(state)
+      %FileTreeState{tree: %FileTree{}} ->
+        hide_tree(state)
     end
   end
 
@@ -64,12 +61,27 @@ defmodule MingaEditor.Commands.FileTree do
     |> EditorState.invalidate_all_windows()
   end
 
-  @spec close_tree(state()) :: state()
-  defp close_tree(state) do
+  # Reveals a hidden-but-loaded tree. The data, buffer, and watchers are still
+  # alive, so this is a pure layout change with no filesystem rebuild (#2626).
+  @spec show_tree(state()) :: state()
+  defp show_tree(state) do
+    state
+    |> EditorState.update_file_tree(&FileTreeState.show/1)
+    |> EditorState.set_keymap_scope(:file_tree)
+    |> EditorState.set_sidebar_active_id("file_tree")
+    |> Layout.invalidate()
+    |> EditorState.invalidate_all_windows()
+  end
+
+  # Hides the sidebar without tearing down the tree. The backing buffer keeps
+  # running and watched directories stay registered so the model stays fresh and
+  # ready to re-show instantly (#2626).
+  @spec hide_tree(state()) :: state()
+  defp hide_tree(state) do
     scope = restore_scope(state)
 
     state
-    |> EditorState.update_file_tree(&FileTreeState.close/1)
+    |> EditorState.update_file_tree(&FileTreeState.hide/1)
     |> EditorState.set_keymap_scope(scope)
     |> EditorState.set_sidebar_active_id(nil)
     |> Layout.invalidate()
@@ -572,7 +584,7 @@ defmodule MingaEditor.Commands.FileTree do
         state = ensure_tree_open(state)
         tree = FileTree.reveal(file_tree_state(state).tree, path)
         state = sync_and_update(state, tree)
-        state = update_file_tree(state, &FileTreeState.focus/1)
+        state = update_file_tree(state, &FileTreeState.show/1)
 
         state
         |> EditorState.set_keymap_scope(:file_tree)
