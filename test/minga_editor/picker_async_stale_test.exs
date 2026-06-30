@@ -14,6 +14,7 @@ defmodule MingaEditor.PickerAsyncStaleTest do
 
   use Minga.Test.EditorCase, async: true
 
+  alias MingaEditor.UI.Picker.Candidate
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.TodoSearchSource
 
@@ -61,11 +62,12 @@ defmodule MingaEditor.PickerAsyncStaleTest do
     # and must be ignored. This is latest-wins: a superseded fetch loses even if
     # it arrives after the picker opened.
     stale_revision = make_ref()
+    stale_items = [item("stale-sentinel")]
 
     send(
       ctx.editor,
       {:picker_candidates_result, TodoSearchSource, stale_revision,
-       {:ok, [item("stale-sentinel")], %{}}}
+       {:ok, stale_items, Candidate.from_items(stale_items), %{}}}
     )
 
     _ = :sys.get_state(ctx.editor, @sync_timeout)
@@ -77,5 +79,37 @@ defmodule MingaEditor.PickerAsyncStaleTest do
       end
 
     refute "stale-sentinel" in labels
+  end
+
+  test "applies a live-revision result carrying candidates pre-built off the editor",
+       %{project_root: root} do
+    ctx = start_editor("scratch", project_root: root)
+    :ok = GenServer.call(ctx.editor, {:api_execute_command, :search_todos}, @sync_timeout)
+
+    # Grab the picker's live fetch revision so the result passes the stale guard.
+    live_revision = picker_payload(ctx).picker_ui.fetch_revision
+    assert is_reference(live_revision)
+
+    # The result message carries already-built %Candidate{} structs, exactly like
+    # the fetch Task now produces (#2628). The editor handler must install them
+    # without re-running Candidate.from_items, so the input loop never normalizes
+    # the full set inline. Sending built candidates here exercises that path.
+    items = [item("prebuilt-sentinel")]
+    candidates = Candidate.from_items(items)
+    assert [%Candidate{}] = candidates
+
+    send(
+      ctx.editor,
+      {:picker_candidates_result, TodoSearchSource, live_revision, {:ok, items, candidates, %{}}}
+    )
+
+    _ = :sys.get_state(ctx.editor, @sync_timeout)
+    payload = picker_payload(ctx)
+
+    labels = Enum.map(payload.picker_ui.picker.items, & &1.label)
+    assert "prebuilt-sentinel" in labels
+    # The same candidates flow straight through; the picker keeps the pre-built set.
+    assert payload.picker_ui.picker.candidates == candidates
+    assert payload.picker_ui.load_status == :ready
   end
 end
