@@ -148,11 +148,17 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     assert focused.workspace.keymap_scope == :file_tree
     assert EditorState.sidebar_active_id(focused) == "file_tree"
 
-    closed =
+    hidden =
       GuiActionHandler.dispatch(focused, {:sidebar_action, "file_tree", "file_tree", "toggle"})
 
-    assert EditorState.file_tree_state(closed).tree == nil
-    assert EditorState.sidebar_active_id(closed) == nil
+    # Toggling off now hides the sidebar without tearing down the tree (#2626):
+    # the data stays loaded so re-showing is a pure layout change, but the
+    # sidebar is no longer visible/focused and its contribution is deregistered.
+    hidden_state = EditorState.file_tree_state(hidden)
+    assert hidden_state.tree != nil
+    refute FileTreeState.visible?(hidden_state)
+    refute hidden_state.focused
+    assert EditorState.sidebar_active_id(hidden) == nil
   end
 
   test "git porcelain GUI actions report disabled extension instead of no-op", %{
