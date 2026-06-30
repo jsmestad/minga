@@ -89,8 +89,11 @@ defmodule MingaEditor.Input.HoverTest do
   end
 
   describe "handle_mouse/7 sticky behavior (#2629)" do
-    test "pointer motion inside the popup keeps it open" do
+    test "motion event reaching the hover handler keeps the popup open" do
       state = state_with_hover()
+      # The hover node only receives motion when the pointer is inside the popup
+      # rect, so this handler keeps the popup for any motion that reaches it; the
+      # coordinate-gated routing is tested in MingaEditor.MouseTest.
       assert {:handled, new_state} = Hover.handle_mouse(state, 0, 0, :none, @none, :motion, 1)
       assert %HoverPopup{} = new_state.shell_state.hover_popup
     end

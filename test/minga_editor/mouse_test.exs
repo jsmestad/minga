@@ -656,15 +656,21 @@ defmodule MingaEditor.MouseTest do
       assert state.shell_state.hover_popup != nil
     end
 
-    test "motion outside the popup rect dismisses the popup" do
+    test "motion outside the popup rect dismisses and restarts the hover debounce" do
       {state, rect} = state_with_hover_popup()
       {row, col, _w, height} = rect
 
       # The row directly below the popup's bottom edge is outside it (and below
       # the popup, which is anchored above the symbol), so motion there dismisses.
-      state = Mouse.handle(state, row + height, col, :none, 0, :motion, 1)
+      out_row = row + height
+      state = Mouse.handle(state, out_row, col, :none, 0, :motion, 1)
 
       assert state.shell_state.hover_popup == nil
+
+      # Dismissing must also restart hover tracking at the new position, otherwise
+      # hovering a symbol after closing a popup would never re-open one. Guards
+      # against simplifying the dismiss branch down to just dismiss_hover_popup/1.
+      assert state.workspace.mouse.hover_pos == {out_row, col}
     end
   end
 
