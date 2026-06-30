@@ -299,6 +299,13 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
 
       assert ft(new_state).tree.root == Path.expand(new_root)
       assert effects == []
+
+      # The re-root discard path still completes the in-flight bookkeeping:
+      # clearing in-flight is what lets a later timer spawn a new rescan. If it
+      # stayed set, every later timer would coalesce-only and the tree would
+      # never refresh again after a re-root (#2632 AC3 — no permanent wedge).
+      refute FileTreeState.refresh_inflight?(ft(new_state))
+      refute FileTreeState.refresh_pending?(ft(new_state))
     end
 
     test "overlapping events coalesce into one follow-up rescan, not piled Tasks",

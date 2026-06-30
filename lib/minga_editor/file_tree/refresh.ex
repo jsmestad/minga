@@ -59,27 +59,53 @@ defmodule MingaEditor.FileTree.Refresh do
 
   # Runs the rescan and ALWAYS sends a reply, converting any raise/throw/exit
   # into a failure sentinel so the Editor's in-flight flag is always cleared.
+  #
+  # The reply is computed with NO risky work (just building a tuple) and sent
+  # BEFORE any logging. Logging a failure can itself raise (a custom exception's
+  # `message/1` callback, or the logger), so it is deferred to an isolated,
+  # self-guarding helper after the send — the terminal message is guaranteed to
+  # go out no matter what the logging does, preserving the no-wedge invariant.
   @spec run(FileTree.t(), token(), Minga.Events.registry(), pid()) :: :ok
   defp run(tree, token, events_registry, reply_to) do
-    message =
+    {message, failure} =
       try do
         refreshed_tree =
           tree
           |> FileTree.refresh()
           |> Freshness.refresh_tree_git_status_from_cache(events_registry)
 
-        {:file_tree_refresh_result, refreshed_tree, token}
+        {{:file_tree_refresh_result, refreshed_tree, token}, nil}
       rescue
-        e ->
-          Minga.Log.warning(:editor, "File tree refresh failed: #{Exception.message(e)}")
-          {:file_tree_refresh_failed, token}
+        e -> {{:file_tree_refresh_failed, token}, {:rescue, e}}
       catch
-        kind, reason ->
-          Minga.Log.warning(:editor, "File tree refresh #{kind}: #{inspect(reason)}")
-          {:file_tree_refresh_failed, token}
+        kind, reason -> {{:file_tree_refresh_failed, token}, {:catch, kind, reason}}
       end
 
     send(reply_to, message)
+    log_failure(failure)
     :ok
+  end
+
+  # Logs a failure after the reply is already sent. Self-guarded so a raising
+  # `Exception.message/1` or logger can never propagate out of `run/4`.
+  @spec log_failure(nil | {:rescue, Exception.t()} | {:catch, atom(), term()}) :: :ok
+  defp log_failure(nil), do: :ok
+
+  defp log_failure({:rescue, exception}) do
+    Minga.Log.warning(:editor, "File tree refresh failed: #{Exception.message(exception)}")
+    :ok
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
+  end
+
+  defp log_failure({:catch, kind, reason}) do
+    Minga.Log.warning(:editor, "File tree refresh #{kind}: #{inspect(reason)}")
+    :ok
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
   end
 end
