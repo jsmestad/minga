@@ -595,9 +595,27 @@ defmodule MingaEditor do
     {:noreply, new_state}
   end
 
+  # A tick only *spawns* the collection Task and returns immediately, so the
+  # blocking SystemObserver calls in Observatory.Collector.collect/1 never run on the
+  # Editor mailbox. The next tick is scheduled when the result lands (see the
+  # :observatory_data_result clause), not here, so a collection that takes
+  # longer than the 1s interval is effectively skipped, never queued.
   def handle_info({:observatory_tick, token}, state) do
+    if current_observatory_token?(state, token), do: spawn_observatory_collection(token)
+    {:noreply, state}
+  end
+
+  def handle_info(:observatory_tick, state) do
+    {:noreply, state}
+  end
+
+  # Async observatory data computed by the Task spawned on the matching tick.
+  # Apply it cheaply (no blocking work here) and only now schedule the next
+  # tick, which guarantees ticks are skipped-not-queued under slow collection.
+  # A result carrying a stale token (panel closed, or a newer tick already
+  # superseded this one) is dropped without scheduling anything.
+  def handle_info({:observatory_data_result, token, data}, state) do
     if current_observatory_token?(state, token) do
-      data = build_observatory_data()
       next_token = make_ref()
       timer = Process.send_after(self(), {:observatory_tick, next_token}, 1_000)
 
@@ -610,10 +628,6 @@ defmodule MingaEditor do
     else
       {:noreply, state}
     end
-  end
-
-  def handle_info(:observatory_tick, state) do
-    {:noreply, state}
   end
 
   # ── Handler-delegated bare atom events ─────────────────────────────────────
@@ -866,7 +880,18 @@ defmodule MingaEditor do
     Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
       result =
         try do
-          MingaEditor.UI.Picker.Source.fetch(source_module, ctx)
+          case MingaEditor.UI.Picker.Source.fetch(source_module, ctx) do
+            {:ok, items, meta} ->
+              # Build the candidate cache here, off the editor process. The O(n)
+              # normalization (downcase, grapheme split, search-text join) is the
+              # work that froze the editor when a source returned 100K+ paths
+              # (#2628); doing it in the Task means the editor handler only swaps
+              # in the finished list instead of normalizing every path inline.
+              {:ok, items, MingaEditor.UI.Picker.Candidate.from_items(items), meta}
+
+            {:error, _reason} = error ->
+              error
+          end
         rescue
           e -> {:error, Exception.message(e)}
         catch
@@ -985,11 +1010,15 @@ defmodule MingaEditor do
   @spec handle_picker_candidates(
           state(),
           PickerPayload.t(),
-          {:ok, [term()], MingaEditor.UI.Picker.Source.fetch_meta()} | {:error, String.t()}
+          {:ok, [term()], [MingaEditor.UI.Picker.Candidate.t()],
+           MingaEditor.UI.Picker.Source.fetch_meta()}
+          | {:error, String.t()}
         ) :: state()
-  defp handle_picker_candidates(state, payload, {:ok, items, meta}) do
+  defp handle_picker_candidates(state, payload, {:ok, items, candidates, meta}) do
     picker_state = payload.picker_ui
-    picker = MingaEditor.UI.Picker.replace_items(picker_state.picker, items)
+    # Candidates are pre-built by the fetch Task (#2628); the editor only swaps
+    # them in here, so the input loop stays responsive on large directories.
+    picker = MingaEditor.UI.Picker.put_candidates(picker_state.picker, items, candidates)
     new_picker_state = %{picker_state | picker: picker, load_status: :ready}
 
     state
@@ -1024,19 +1053,20 @@ defmodule MingaEditor do
 
   defp current_observatory_token?(_state, _token), do: false
 
-  @spec build_observatory_data() :: Observatory.Data.t()
-  defp build_observatory_data do
-    case Minga.SystemObserver.snapshot() do
-      %{processes: processes} ->
-        processes
-        |> Minga.SystemObserver.TreeNode.build_tree()
-        |> Observatory.Data.visible(Minga.SystemObserver.samples())
+  # Run the blocking SystemObserver collection in a supervised Task so the
+  # Editor GenServer mailbox stays free. The token is echoed back with the
+  # result so the receiving clause can drop stale collections. Observatory
+  # .Collector.collect/1 is total, so the Task always sends a result and the
+  # refresh tick always re-arms even when collection fails.
+  @spec spawn_observatory_collection(reference()) :: :ok
+  defp spawn_observatory_collection(token) do
+    editor = self()
 
-      nil ->
-        Observatory.Data.visible(nil, [])
-    end
-  catch
-    :exit, _ -> Observatory.Data.visible(nil, [])
+    Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
+      send(editor, {:observatory_data_result, token, Observatory.Collector.collect()})
+    end)
+
+    :ok
   end
 
   # ── :DOWN classifier ────────────────────────────────────────────────────────
