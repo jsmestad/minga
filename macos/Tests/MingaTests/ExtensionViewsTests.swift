@@ -8,6 +8,7 @@
 import Testing
 import SwiftUI
 import ViewInspector
+import MingaProtocol
 
 // MARK: - Fixtures
 

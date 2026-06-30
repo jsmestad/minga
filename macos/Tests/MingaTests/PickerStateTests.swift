@@ -1,4 +1,5 @@
 import Testing
+import MingaProtocol
 @testable import Minga
 
 @MainActor

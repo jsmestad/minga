@@ -18,6 +18,7 @@ import QuartzCore
 import AppKit
 import os.log
 import os.signpost
+import MingaProtocol
 
 private let rendererLog = OSLog(subsystem: "com.minga.editor", category: "Renderer")
 

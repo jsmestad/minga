@@ -5,6 +5,7 @@
 /// and detail text.
 
 import SwiftUI
+import MingaProtocol
 
 struct CompletionOverlay: View {
     let state: CompletionState

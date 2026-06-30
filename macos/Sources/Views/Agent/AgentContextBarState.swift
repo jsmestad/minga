@@ -1,5 +1,6 @@
 import Observation
 import Foundation
+import MingaProtocol
 
 /// State for the agent context bar shown when zoomed into an agent card.
 ///

@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import MingaProtocol
 
 @Suite("Messages wire-assigned identity")
 struct MessagesContentStateIdentityTests {

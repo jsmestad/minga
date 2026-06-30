@@ -8,6 +8,7 @@
 import Testing
 import Foundation
 import SwiftUI
+import MingaProtocol
 
 // MARK: - PickerItem
 

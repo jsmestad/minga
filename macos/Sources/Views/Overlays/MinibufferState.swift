@@ -5,6 +5,7 @@
 /// Updated by CommandDispatcher when a guiMinibuffer command arrives.
 
 import SwiftUI
+import MingaProtocol
 
 /// A single completion candidate for the minibuffer.
 struct MinibufferCandidate: Identifiable {

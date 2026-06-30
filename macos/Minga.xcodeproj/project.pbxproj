@@ -46,6 +46,7 @@
 		197B60CF2A04C5E96C724E8C /* TabBarState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A2CBCDF99282365E723D45A /* TabBarState.swift */; };
 		19E561E5F7841B2CF1ABB085 /* BEAMProcessManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0EFEC421284D11AD2177113 /* BEAMProcessManager.swift */; };
 		1A00B407D11CC5604CC5EC85 /* AgentApprovalCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 492285F3371798B69478BF13 /* AgentApprovalCard.swift */; };
+		1A2DA0CD8DD4B1C1F30C9098 /* MingaProtocol.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 848E04E4F242C861887769F3 /* MingaProtocol.framework */; };
 		1A7BC027E152504B67F6F418 /* CoreTextShaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 48E21C30D142028698027567 /* CoreTextShaders.metal */; };
 		1ACACDC02D45948922FE9F47 /* NotificationCenterState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DCCEC5865DAE0AAF754F2E2 /* NotificationCenterState.swift */; };
 		1BF004B335716C13CE08E209 /* TabIconColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1F77D3367DCC1BAD0BCC1BE /* TabIconColors.swift */; };
@@ -54,6 +55,7 @@
 		1D7D1C02754FC399174D11DD /* ProtocolErrorState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A915C3108F2370C753A1931B /* ProtocolErrorState.swift */; };
 		1DFF28C3C78090083E1206E1 /* GUIState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 644384B6B8FE5F11CD0DB713 /* GUIState.swift */; };
 		1E055E65501FDFFA1A301D74 /* MinibufferView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A84E92F596D0DDF8FF11049 /* MinibufferView.swift */; };
+		1EE1BE95F948B359F08BC48A /* StatusBarUpdate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D450D75A36486FD84AD6BB8 /* StatusBarUpdate.swift */; };
 		1F3D130725BB056ADCFAC2EB /* AgentSurfaceTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 483AA21EF140F07296D1E16A /* AgentSurfaceTypes.swift */; };
 		1FF47B9CE2C5C8512116F4BF /* BottomPanelState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A583EB0DCE480D1A5FC7E440 /* BottomPanelState.swift */; };
 		22EFBD4416697A01FDC9C2AD /* ProtocolCommandSize.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = 762CD389E04B0DE6A86CDBF2 /* ProtocolCommandSize.generated.swift */; };
@@ -115,9 +117,9 @@
 		44D48DF33203C53ACC3BA1AA /* WindowContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 790F7E20F30FEEFC552B3685 /* WindowContent.swift */; };
 		44DB0905958BC68A0D5DD518 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65B982679577E3DBD4E7A69D /* SettingsView.swift */; };
 		44E636254D266017A03643CC /* ProtocolErrorOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0411DCA866DF30C994521EC /* ProtocolErrorOverlay.swift */; };
-		4515011E135C9FAE8D843610 /* ProtocolTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08DE9CEF5C3D599B42635554 /* ProtocolTypes.swift */; };
 		451CEC19CBDAFDF6A2AF40E6 /* AgentContextBarState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6ADDC2FFB43010EDEF1C576 /* AgentContextBarState.swift */; };
 		45A352459C76907D8E4CB596 /* CommandDispatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = C21AB9021A9BCB034C13109A /* CommandDispatcher.swift */; };
+		45B91273836C8DFA73205995 /* MingaProtocol.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 848E04E4F242C861887769F3 /* MingaProtocol.framework */; };
 		472B60F1DD0F60B43DE785E7 /* SignatureHelpOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F8CC95C21F56C815C87A3C9 /* SignatureHelpOverlay.swift */; };
 		4794CE0244A0648148F677CE /* FloatPopupOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37AA0E8F5D7D411B92E9E3FA /* FloatPopupOverlay.swift */; };
 		48DF21848F4528EEEBC16586 /* StatusBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 764F85CBFE17A90A0A61F2B6 /* StatusBarView.swift */; };
@@ -142,6 +144,7 @@
 		5319EAB17BE576DBFFA596A8 /* FileTreeRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 628AAE1DCC1D559B04B81E35 /* FileTreeRowView.swift */; };
 		55B5F253AC4EC46FF36ED0CC /* ResyncState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 953A62EE436C9B1F73B97D07 /* ResyncState.swift */; };
 		5769A0CDC98F728E5FAA3888 /* FileTreeState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 202B9FAA0B926E0B23C0BA88 /* FileTreeState.swift */; };
+		581390BB65F36B77E59F6D9F /* GUIColorSlots.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6154F8ABA71694035D38ED2 /* GUIColorSlots.swift */; };
 		586169AD92E9711C2F15B3B6 /* FileTreeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 568352180EC6FAF208830660 /* FileTreeView.swift */; };
 		58D1135E113BF3A33EF7815F /* WindowContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 790F7E20F30FEEFC552B3685 /* WindowContent.swift */; };
 		5B29464B0472E28AECC54215 /* BottomPanelState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A583EB0DCE480D1A5FC7E440 /* BottomPanelState.swift */; };
@@ -188,7 +191,6 @@
 		7114ED089504D83D86CB9A69 /* WorkspaceIconPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 671A222860B90E08D7975099 /* WorkspaceIconPicker.swift */; };
 		71384FFD82964586B710BD94 /* PreviewRegistry+FileTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = 305F0E7D9158C236803224AA /* PreviewRegistry+FileTree.swift */; };
 		7192B24D3C4089B4612319F5 /* SearchToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7740BB367B27DD4B53FFB853 /* SearchToolbar.swift */; };
-		719318748BDDAEBE10DFBB2E /* ProtocolTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08DE9CEF5C3D599B42635554 /* ProtocolTypes.swift */; };
 		721EECA03BE360203C77C248 /* BreadcrumbBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD9F43E781BA11616C52373E /* BreadcrumbBar.swift */; };
 		728FE0F35EC3D43FB68EEDBF /* MinibufferState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7DCE12924B5A58CA615BA58 /* MinibufferState.swift */; };
 		72CC62FDCBD531FEFE4D07DF /* ProtocolDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56750F0AAE58AF9A98BF5841 /* ProtocolDecoder.swift */; };
@@ -248,6 +250,7 @@
 		940FB9D1772F8FA02C10754B /* WindowContentRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC335D7973205BF8B7EDD8EA /* WindowContentRenderer.swift */; };
 		9521DBD697CD35E162EFC359 /* EditTimelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE173FAAAC37ACFF47EE03B8 /* EditTimelineView.swift */; };
 		95373B170561C4BDAF8B073A /* ObservatoryState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67B23834E6FEB75E891AAFE2 /* ObservatoryState.swift */; };
+		95395E861CD4D2198F0AD738 /* MingaProtocol.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 848E04E4F242C861887769F3 /* MingaProtocol.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		95F6DCD24E2D261CF64EC8EB /* FontFace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BC98120D82BD7548347875E /* FontFace.swift */; };
 		97246E545A806856919B7A5A /* PickerState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60980E90FDD864409144BA5B /* PickerState.swift */; };
 		9758BF46BB0EC7FEEB14FBA3 /* SwiftUIViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86478D5660213F165B7E1E35 /* SwiftUIViewTests.swift */; };
@@ -257,6 +260,7 @@
 		986CED792328DA9C1B22BF84 /* PreviewRegistry+GitStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BB5DAD0EAB1AE583E45AF5C /* PreviewRegistry+GitStatus.swift */; };
 		98EFFA06B0B239B2C093226D /* FrontendExtensionRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 752F8FD906F48C58D51FBBA1 /* FrontendExtensionRuntime.swift */; };
 		9A5444BA1A265BD39652C13A /* LatencyRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 749F7E4A3595F1289002943E /* LatencyRecorder.swift */; };
+		9AA31CF152E2CD33E4BD2098 /* MingaProtocol.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 848E04E4F242C861887769F3 /* MingaProtocol.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		9ADD91865E64B910DD187377 /* PreviewFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BAB83B99298DE01101D3C60 /* PreviewFixtures.swift */; };
 		9B51DC08382479DF3AD6C464 /* GitStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3ECFA1BAF013281143087097 /* GitStatusView.swift */; };
 		9BA59A1D924999EEC65EEBCC /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A84218125A9F97DBE87F349 /* ContentView.swift */; };
@@ -310,10 +314,12 @@
 		B63FE5EAD33D990E4493CB83 /* FileTreeHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51E88C12915EC4EBE96165AF /* FileTreeHeaderView.swift */; };
 		B7203DF9CF85663B0A266580 /* PowerThermalPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4D576456737CFE8706B66F5 /* PowerThermalPolicy.swift */; };
 		B7EA51EE1C9145223251B68C /* ProtocolSemanticDecode.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = B639BCE7660087F70778E839 /* ProtocolSemanticDecode.generated.swift */; };
+		B909887B329ECB88EB605B85 /* MingaProtocol.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 848E04E4F242C861887769F3 /* MingaProtocol.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		B9C618BCFB122BE9BE803581 /* ResyncState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 953A62EE436C9B1F73B97D07 /* ResyncState.swift */; };
 		BA280B7DF92050C0604BE5F8 /* MinibufferState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7DCE12924B5A58CA615BA58 /* MinibufferState.swift */; };
 		BA53FE91CC75C143F26B3FAB /* GitStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3ECFA1BAF013281143087097 /* GitStatusView.swift */; };
 		BA72343308BCD0E078452868 /* PowerThermalPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E27E6D9ACEB7DCD7F98FB0F /* PowerThermalPolicyTests.swift */; };
+		BA9576ED247B43963BC588F2 /* MingaProtocol.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 848E04E4F242C861887769F3 /* MingaProtocol.framework */; };
 		BB0BC94AAD3AE83DD523A3EB /* ExtensionPanelState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20D36FDE455CBEE50349F675 /* ExtensionPanelState.swift */; };
 		BB271B6E4AB6E1E746A293CB /* SidebarContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E34C34EC8FF8D20C141F2290 /* SidebarContainer.swift */; };
 		BB743A0A803E3A1609DD6D59 /* KeybindingsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C50661EF3472E892F77AF9C2 /* KeybindingsSettingsView.swift */; };
@@ -332,6 +338,7 @@
 		C01188E89A1E8BE86C360586 /* ObservatoryState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67B23834E6FEB75E891AAFE2 /* ObservatoryState.swift */; };
 		C028B986AC51F3180074F8C7 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65B982679577E3DBD4E7A69D /* SettingsView.swift */; };
 		C1EFCE9E5449DB7B04C386E3 /* PreviewRegistry+FileTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = 305F0E7D9158C236803224AA /* PreviewRegistry+FileTree.swift */; };
+		C2FC62BE435E26A8E579F8AD /* ProtocolTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08DE9CEF5C3D599B42635554 /* ProtocolTypes.swift */; };
 		C3286288C9C090AC688AB804 /* BreadcrumbBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD9F43E781BA11616C52373E /* BreadcrumbBar.swift */; };
 		C3FAE27B586C49B9172CD41A /* FrameMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA1B4D69D3277F2372A8F6F1 /* FrameMetrics.swift */; };
 		C44D9CF03C49E7BCA39A76A9 /* CommandDispatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = C21AB9021A9BCB034C13109A /* CommandDispatcher.swift */; };
@@ -418,7 +425,6 @@
 		F12D6284209D6D32037E6644 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9FC2118EA77254CBCAE7B0B /* AppState.swift */; };
 		F2EB9FDBF3B2B9CA1A612433 /* AgentChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31DA375DF5D4047E01761926 /* AgentChatView.swift */; };
 		F3BB64E36F257BD7FACEA5D6 /* CoreTextShaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 48E21C30D142028698027567 /* CoreTextShaders.metal */; };
-		F5DA741E5CBCF22184C6C712 /* ProtocolTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08DE9CEF5C3D599B42635554 /* ProtocolTypes.swift */; };
 		F606B917E0A7A6398C5DBAFA /* AgentApprovalCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 492285F3371798B69478BF13 /* AgentApprovalCard.swift */; };
 		F6F56719C285CB9C3EA62A57 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F5647A59C841B3C408994CC7 /* Assets.xcassets */; };
 		F8F0F55BECF366B6560BEECE /* SidebarContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E34C34EC8FF8D20C141F2290 /* SidebarContainer.swift */; };
@@ -443,6 +449,66 @@
 		FFA8B5D73FABC2792F4A3589 /* ProtocolDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56750F0AAE58AF9A98BF5841 /* ProtocolDecoder.swift */; };
 		FFE9F4F1490B1937AD3AC129 /* PreviewRegistry+Overlays.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A0D41B1D748FBFE7916342C /* PreviewRegistry+Overlays.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		3AA4E51F5469EEE2AA5A84CE /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 408C02F1934F748B5B5586FC /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 853A7F20F3909F3BE071C5E6;
+			remoteInfo = MingaProtocol;
+		};
+		90C4F94B902B7ADD11FFE5E9 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 408C02F1934F748B5B5586FC /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 853A7F20F3909F3BE071C5E6;
+			remoteInfo = MingaProtocol;
+		};
+		C86ACFF25F2E6CFBA727C87C /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 408C02F1934F748B5B5586FC /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 853A7F20F3909F3BE071C5E6;
+			remoteInfo = MingaProtocol;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		32ADF9D462D7720ADD994243 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				B909887B329ECB88EB605B85 /* MingaProtocol.framework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E88EE1EC327ECD3BA976495E /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				9AA31CF152E2CD33E4BD2098 /* MingaProtocol.framework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F12F9E99F0454734D2BF6945 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				95395E861CD4D2198F0AD738 /* MingaProtocol.framework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		00EC9D6E3E77B85DF13841B4 /* PickerStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PickerStateTests.swift; sourceTree = "<group>"; };
@@ -543,11 +609,13 @@
 		7CDC524DEAE5431F6B18A31B /* ProtocolEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolEncoder.swift; sourceTree = "<group>"; };
 		7E4E980D53CCCE228BA59BD5 /* KeyboardInputTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardInputTests.swift; sourceTree = "<group>"; };
 		82B744449C852E13511FFE8D /* MinibufferStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MinibufferStateTests.swift; sourceTree = "<group>"; };
+		848E04E4F242C861887769F3 /* MingaProtocol.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = MingaProtocol.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		86478D5660213F165B7E1E35 /* SwiftUIViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwiftUIViewTests.swift; sourceTree = "<group>"; };
 		86A4DA796E10E4A7D98A18E1 /* AgentChatHeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentChatHeaderView.swift; sourceTree = "<group>"; };
 		8A733EF649EF21A761608D75 /* MingaWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MingaWindow.swift; sourceTree = "<group>"; };
 		8A84218125A9F97DBE87F349 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		8AD9302C5E00767815DD10A7 /* ExtensionOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionOverlayView.swift; sourceTree = "<group>"; };
+		8D450D75A36486FD84AD6BB8 /* StatusBarUpdate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarUpdate.swift; sourceTree = "<group>"; };
 		912C5F808709BABFF3126DEE /* AppearanceSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceSettingsView.swift; sourceTree = "<group>"; };
 		953A62EE436C9B1F73B97D07 /* ResyncState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResyncState.swift; sourceTree = "<group>"; };
 		98DB822E0C8D06C7B45D329F /* EditorNSView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorNSView.swift; sourceTree = "<group>"; };
@@ -581,6 +649,7 @@
 		C21AB9021A9BCB034C13109A /* CommandDispatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandDispatcher.swift; sourceTree = "<group>"; };
 		C441427A427E23B912F70092 /* ProtocolConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolConstants.swift; sourceTree = "<group>"; };
 		C50661EF3472E892F77AF9C2 /* KeybindingsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeybindingsSettingsView.swift; sourceTree = "<group>"; };
+		C6154F8ABA71694035D38ED2 /* GUIColorSlots.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GUIColorSlots.swift; sourceTree = "<group>"; };
 		CA105569D96F7654005293B2 /* ActivityBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityBar.swift; sourceTree = "<group>"; };
 		CA2269E199608D475AB34F10 /* NativeSidebarRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSidebarRegistryTests.swift; sourceTree = "<group>"; };
 		CC335D7973205BF8B7EDD8EA /* WindowContentRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowContentRenderer.swift; sourceTree = "<group>"; };
@@ -632,7 +701,24 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1A2DA0CD8DD4B1C1F30C9098 /* MingaProtocol.framework in Frameworks */,
 				DB83E9F1763A0D2E7BD7F7D3 /* ViewInspector in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8CA60614A4A439B50A1D9DC9 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BA9576ED247B43963BC588F2 /* MingaProtocol.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A321E55FF7679234F563A18B /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				45B91273836C8DFA73205995 /* MingaProtocol.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -849,6 +935,7 @@
 			isa = PBXGroup;
 			children = (
 				483AA21EF140F07296D1E16A /* AgentSurfaceTypes.swift */,
+				C6154F8ABA71694035D38ED2 /* GUIColorSlots.swift */,
 				749F7E4A3595F1289002943E /* LatencyRecorder.swift */,
 				3E23DC6E0ACB156F21293E87 /* PortLogger.swift */,
 				C441427A427E23B912F70092 /* ProtocolConstants.swift */,
@@ -856,6 +943,7 @@
 				7CDC524DEAE5431F6B18A31B /* ProtocolEncoder.swift */,
 				4AF6BEBA233BA1169CF8C642 /* ProtocolReader.swift */,
 				08DE9CEF5C3D599B42635554 /* ProtocolTypes.swift */,
+				8D450D75A36486FD84AD6BB8 /* StatusBarUpdate.swift */,
 			);
 			path = Protocol;
 			sourceTree = "<group>";
@@ -962,6 +1050,7 @@
 			isa = PBXGroup;
 			children = (
 				B9B4DF5FEB6C8DFCA427A692 /* Minga.app */,
+				848E04E4F242C861887769F3 /* MingaProtocol.framework */,
 				64CEFB02A774E5E8EF19029F /* MingaTests.xctest */,
 				26134C841A15020D9C61E4F9 /* PreviewHost.app */,
 			);
@@ -1027,10 +1116,12 @@
 				77AE57735A00C26BF1B3675A /* Generate protocol opcodes */,
 				C8F3C47EE52117DADE97B9F9 /* Sources */,
 				055B5DD060ABF986C99376D6 /* Frameworks */,
+				F12F9E99F0454734D2BF6945 /* Embed Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				14655DB45254F3E7CB774C7C /* PBXTargetDependency */,
 			);
 			name = MingaTests;
 			packageProductDependencies = (
@@ -1040,16 +1131,36 @@
 			productReference = 64CEFB02A774E5E8EF19029F /* MingaTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		853A7F20F3909F3BE071C5E6 /* MingaProtocol */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 46927136ACC810A748897649 /* Build configuration list for PBXNativeTarget "MingaProtocol" */;
+			buildPhases = (
+				590317A54F129CF78283854C /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MingaProtocol;
+			packageProductDependencies = (
+			);
+			productName = MingaProtocol;
+			productReference = 848E04E4F242C861887769F3 /* MingaProtocol.framework */;
+			productType = "com.apple.product-type.framework";
+		};
 		AD057EA18D39D4B97E8AE743 /* PreviewHost */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = F541977CFF8D668ECB697168 /* Build configuration list for PBXNativeTarget "PreviewHost" */;
 			buildPhases = (
 				32E4BD311DB3937B26DEE906 /* Generate protocol opcodes */,
 				3B2D9C9C9EC032BA12E6F535 /* Sources */,
+				A321E55FF7679234F563A18B /* Frameworks */,
+				E88EE1EC327ECD3BA976495E /* Embed Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				AAFC157948BFE862AF115F0E /* PBXTargetDependency */,
 			);
 			name = PreviewHost;
 			packageProductDependencies = (
@@ -1066,11 +1177,14 @@
 				0DC99D5910B06BE8D7B8DE3E /* Sources */,
 				DE42BE7E030FEAA69E9EC033 /* Copy CLI launcher */,
 				F708F0C1577DD5141846EFB7 /* Resources */,
+				8CA60614A4A439B50A1D9DC9 /* Frameworks */,
+				32ADF9D462D7720ADD994243 /* Embed Frameworks */,
 				DB4598C0910E3166689E6F1A /* Codesign */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				1403D72EC5F51911BCAE764C /* PBXTargetDependency */,
 			);
 			name = Minga;
 			packageProductDependencies = (
@@ -1108,6 +1222,7 @@
 			projectRoot = "";
 			targets = (
 				D96277718552247F338DD197 /* Minga */,
+				853A7F20F3909F3BE071C5E6 /* MingaProtocol */,
 				2734C1C657DD572768745C3F /* MingaTests */,
 				AD057EA18D39D4B97E8AE743 /* PreviewHost */,
 			);
@@ -1334,7 +1449,6 @@
 				2C176B25F957ABFA236A1F31 /* ProtocolOpcodes.generated.swift in Sources */,
 				364C48575BB95C9CA535A9C8 /* ProtocolReader.swift in Sources */,
 				CED32F817C08FC30D21E09AC /* ProtocolSemanticDecode.generated.swift in Sources */,
-				F5DA741E5CBCF22184C6C712 /* ProtocolTypes.swift in Sources */,
 				8A0B62C670C71DB327CE1A29 /* RecoveryManager.swift in Sources */,
 				B297861B05D1C29D4481C243 /* ResyncOverlay.swift in Sources */,
 				55B5F253AC4EC46FF36ED0CC /* ResyncState.swift in Sources */,
@@ -1472,7 +1586,6 @@
 				6AFA24DC3EE21023636C136A /* ProtocolOpcodes.generated.swift in Sources */,
 				4451B7F61D8FB50D964406A0 /* ProtocolReader.swift in Sources */,
 				A911CF7DE0346417471AF27A /* ProtocolSemanticDecode.generated.swift in Sources */,
-				719318748BDDAEBE10DFBB2E /* ProtocolTypes.swift in Sources */,
 				FD4F1E64AF19C8199D4AAEAA /* RecoveryManager.swift in Sources */,
 				A7A09DE37F9A7CCFE93DEA91 /* ResyncOverlay.swift in Sources */,
 				3E438D42569416F480730B9C /* ResyncState.swift in Sources */,
@@ -1505,6 +1618,16 @@
 				FA877BCB4400B12DDB6FA67F /* WorkspaceIconPicker.swift in Sources */,
 				BFE9ADC5E0ACE8A755A8E97B /* WorkspaceIndicatorView.swift in Sources */,
 				8FF634B81E24378F56C6C672 /* WorkspaceState.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		590317A54F129CF78283854C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				581390BB65F36B77E59F6D9F /* GUIColorSlots.swift in Sources */,
+				C2FC62BE435E26A8E579F8AD /* ProtocolTypes.swift in Sources */,
+				1EE1BE95F948B359F08BC48A /* StatusBarUpdate.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1638,7 +1761,6 @@
 				F0A2BCCA095F1CA4FBE9BE3F /* ProtocolSchemaTests.swift in Sources */,
 				B7EA51EE1C9145223251B68C /* ProtocolSemanticDecode.generated.swift in Sources */,
 				686DD6EB8AFDCAFC79EA100A /* ProtocolTests.swift in Sources */,
-				4515011E135C9FAE8D843610 /* ProtocolTypes.swift in Sources */,
 				9C0676A96179F6068B85CCA1 /* RecoveryManager.swift in Sources */,
 				A9EE5F81AE818C176D03A6E3 /* RecoveryManagerTests.swift in Sources */,
 				2D2067A5BDB75F47E892FF3B /* ResyncOverlay.swift in Sources */,
@@ -1687,6 +1809,24 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		1403D72EC5F51911BCAE764C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 853A7F20F3909F3BE071C5E6 /* MingaProtocol */;
+			targetProxy = C86ACFF25F2E6CFBA727C87C /* PBXContainerItemProxy */;
+		};
+		14655DB45254F3E7CB774C7C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 853A7F20F3909F3BE071C5E6 /* MingaProtocol */;
+			targetProxy = 90C4F94B902B7ADD11FFE5E9 /* PBXContainerItemProxy */;
+		};
+		AAFC157948BFE862AF115F0E /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 853A7F20F3909F3BE071C5E6 /* MingaProtocol */;
+			targetProxy = 3AA4E51F5469EEE2AA5A84CE /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		03D1C4FA288798B824DB15EC /* Release */ = {
@@ -1849,6 +1989,30 @@
 			};
 			name = Release;
 		};
+		44A5AB7A9E59512C2043085C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "";
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				GENERATE_INFOPLIST_FILE = YES;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.minga.MingaProtocol;
+				PRODUCT_NAME = MingaProtocol;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Debug;
+		};
 		9DD36755A82F358FF8E42F34 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -1884,6 +2048,30 @@
 				TOOLCHAINS = com.apple.dt.toolchain.Metal.32023.864;
 			};
 			name = Debug;
+		};
+		E11009BC086BA9516100B45A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "";
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				GENERATE_INFOPLIST_FILE = YES;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.minga.MingaProtocol;
+				PRODUCT_NAME = MingaProtocol;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Release;
 		};
 		EAD90A4CDF900B7020964411 /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -1934,6 +2122,15 @@
 			buildConfigurations = (
 				333BBE9DFB9A1207127F43FA /* Debug */,
 				03D1C4FA288798B824DB15EC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		46927136ACC810A748897649 /* Build configuration list for PBXNativeTarget "MingaProtocol" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				44A5AB7A9E59512C2043085C /* Debug */,
+				E11009BC086BA9516100B45A /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

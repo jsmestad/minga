@@ -12,6 +12,7 @@
 import Testing
 import Foundation
 import AppKit
+import MingaProtocol
 
 private enum FileTreeNavigationTestConstants {
     static let visibleFlag: UInt8 = 0x01

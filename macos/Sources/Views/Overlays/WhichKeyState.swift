@@ -1,6 +1,7 @@
 /// Observable which-key state driven by BEAM gui_which_key messages.
 
 import SwiftUI
+import MingaProtocol
 
 struct WhichKeyBinding: Identifiable {
     let id: Int

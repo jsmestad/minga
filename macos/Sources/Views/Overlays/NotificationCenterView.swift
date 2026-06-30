@@ -1,6 +1,7 @@
 /// Bottom-right notification stack rendered with native SwiftUI chrome.
 
 import SwiftUI
+import MingaProtocol
 
 /// Renders editor notifications owned by the BEAM.
 struct NotificationCenterView: View {

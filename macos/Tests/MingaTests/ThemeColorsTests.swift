@@ -6,6 +6,7 @@
 
 import Testing
 import SwiftUI
+import MingaProtocol
 
 @Suite("ThemeColors Slot Mapping")
 struct ThemeColorsSlotMappingTests {

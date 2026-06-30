@@ -5,6 +5,7 @@
 /// active buffer on navigation so the preview appears behind the picker.
 
 import SwiftUI
+import MingaProtocol
 
 struct PickerOverlay: View {
     let state: PickerState

@@ -1,6 +1,7 @@
 /// Reusable preview fixture data builders for PreviewRegistry and #Preview macros.
 
 import SwiftUI
+import MingaProtocol
 
 @MainActor
 enum PreviewFixtures {

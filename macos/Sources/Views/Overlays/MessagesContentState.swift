@@ -4,6 +4,7 @@
 /// position for auto-scroll behavior.
 
 import SwiftUI
+import MingaProtocol
 
 /// A rendered message entry for display in the Messages tab.
 ///

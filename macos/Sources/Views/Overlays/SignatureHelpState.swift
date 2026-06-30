@@ -1,6 +1,7 @@
 /// Observable signature help state driven by BEAM gui_signature_help messages.
 
 import SwiftUI
+import MingaProtocol
 
 /// A parameter in a function signature.
 struct SignatureParameter: Identifiable {

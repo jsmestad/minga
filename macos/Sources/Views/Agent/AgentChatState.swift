@@ -1,6 +1,7 @@
 /// Observable agent chat state driven by BEAM gui_agent_chat messages.
 
 import SwiftUI
+import MingaProtocol
 
 /// A displayable chat message for SwiftUI rendering.
 enum ChatMessageEntry: Identifiable {

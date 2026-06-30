@@ -6,6 +6,7 @@
 /// expandable sections, and a prompt input area at the bottom.
 
 import SwiftUI
+import MingaProtocol
 
 /// Measures the ScrollView's visible viewport height so the content
 /// can be bottom-anchored when there are fewer messages than screen space.

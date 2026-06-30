@@ -1,6 +1,7 @@
 /// Observable completion state driven by BEAM gui_completion messages.
 
 import SwiftUI
+import MingaProtocol
 
 struct CompletionItem: Identifiable {
     let id: Int

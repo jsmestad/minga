@@ -1,6 +1,7 @@
 import AppKit
 import Observation
 import SwiftUI
+import MingaProtocol
 
 /// Line number styles exposed by the native settings panel.
 enum SettingsLineNumberStyle: String, CaseIterable, Identifiable, Sendable {

@@ -11,6 +11,7 @@
 import Testing
 import Foundation
 import AppKit
+import MingaProtocol
 
 @Suite("EditorNSView Mouse Input")
 struct MouseInputTests {

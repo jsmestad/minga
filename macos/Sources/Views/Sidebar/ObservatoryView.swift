@@ -1,4 +1,5 @@
 import SwiftUI
+import MingaProtocol
 
 /// Native sidebar for observing the live BEAM supervision tree.
 struct ObservatoryView: View {

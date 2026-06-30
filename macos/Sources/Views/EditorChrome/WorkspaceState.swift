@@ -1,4 +1,5 @@
 import SwiftUI
+import MingaProtocol
 
 /// A workspace summary for native workspace chrome.
 struct WorkspaceSummaryEntry: Identifiable {

@@ -8,6 +8,7 @@
 import Darwin
 import Foundation
 import os
+import MingaProtocol
 
 /// Protocol for sending input events to the BEAM. The real implementation
 /// writes to stdout; tests can use a spy conformance to verify calls.

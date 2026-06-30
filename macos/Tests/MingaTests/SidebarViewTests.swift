@@ -9,6 +9,7 @@ import Testing
 import SwiftUI
 import AppKit
 import ViewInspector
+import MingaProtocol
 
 private func currentModifierBitsForTest() -> UInt8 {
     var mods: UInt8 = 0

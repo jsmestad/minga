@@ -2,6 +2,7 @@
 
 import Testing
 import SwiftUI
+import MingaProtocol
 
 @Suite("Native sidebar registry")
 @MainActor

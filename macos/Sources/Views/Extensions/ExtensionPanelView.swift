@@ -1,4 +1,5 @@
 import SwiftUI
+import MingaProtocol
 
 /// Renders an extension panel's structured content blocks with native SwiftUI widgets.
 struct ExtensionPanelView: View {

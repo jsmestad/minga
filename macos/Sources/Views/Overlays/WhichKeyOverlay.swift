@@ -5,6 +5,7 @@
 /// Anchored to the bottom of the editor view.
 
 import SwiftUI
+import MingaProtocol
 
 struct WhichKeyOverlay: View {
     let state: WhichKeyState

@@ -2,6 +2,7 @@
 
 import Foundation
 import SwiftUI
+import MingaProtocol
 
 /// Native view model for one notification action.
 struct EditorNotificationAction: Identifiable, Equatable {

@@ -1,4 +1,5 @@
 import SwiftUI
+import MingaProtocol
 
 struct AgentToolCallCard: View {
     let messageIndex: Int

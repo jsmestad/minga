@@ -7,6 +7,7 @@
 import Testing
 import Foundation
 import AppKit
+import MingaProtocol
 
 @MainActor
 fileprivate func completeThemeSlots() -> [(UInt8, UInt8, UInt8, UInt8)] {

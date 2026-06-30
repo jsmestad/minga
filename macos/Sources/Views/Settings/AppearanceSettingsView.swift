@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import MingaProtocol
 
 /// Appearance settings: theme and font controls.
 struct AppearanceSettingsView: View {

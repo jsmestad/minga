@@ -1,4 +1,5 @@
 import Observation
+import MingaProtocol
 
 /// State for extension-registered panels.
 ///

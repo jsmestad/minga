@@ -4,6 +4,7 @@
 /// Replaces the breadcrumb bar when zoomed into a non-You agent card.
 
 import SwiftUI
+import MingaProtocol
 
 struct AgentContextBar: View {
     let state: AgentContextBarState

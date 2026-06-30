@@ -1,4 +1,5 @@
 import SwiftUI
+import MingaProtocol
 
 struct AgentPromptView: View {
     let state: AgentChatState

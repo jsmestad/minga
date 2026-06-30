@@ -1,6 +1,7 @@
 /// Observable hover popup state driven by BEAM gui_hover_popup messages.
 
 import SwiftUI
+import MingaProtocol
 
 /// A styled text segment for rendering in the hover popup.
 struct HoverSegment: Identifiable {

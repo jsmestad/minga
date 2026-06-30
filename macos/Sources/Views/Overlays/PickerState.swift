@@ -5,6 +5,7 @@
 /// and multi-select marks.
 
 import SwiftUI
+import MingaProtocol
 
 struct PickerItem: Identifiable {
     let id: Int

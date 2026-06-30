@@ -6,6 +6,7 @@
 import Testing
 import Foundation
 import Metal
+import MingaProtocol
 
 @Suite("Window Content Renderer - Display Column Mapping")
 struct DisplayColumnMappingTests {

@@ -1,6 +1,7 @@
 /// Observable native sidebar host state driven by semantic BEAM metadata.
 
 import SwiftUI
+import MingaProtocol
 
 /// Sidebar metadata adapted for SwiftUI rendering.
 struct SidebarItem: Identifiable, Equatable {

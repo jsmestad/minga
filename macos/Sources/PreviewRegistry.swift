@@ -2,6 +2,7 @@
 
 import AppKit
 import SwiftUI
+import MingaProtocol
 
 @MainActor
 enum PreviewRegistry {

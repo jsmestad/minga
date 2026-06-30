@@ -13,6 +13,7 @@ import Testing
 import SwiftUI
 import UniformTypeIdentifiers
 import ViewInspector
+import MingaProtocol
 
 // MARK: - CompletionOverlay
 

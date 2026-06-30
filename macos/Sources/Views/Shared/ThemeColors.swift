@@ -3,6 +3,7 @@
 /// All SwiftUI chrome views reference this shared instance for their colors. Initial values are neutral bootstrap colors used only before the first BEAM gui_theme command arrives. Theme selection belongs to the BEAM.
 
 import SwiftUI
+import MingaProtocol
 
 /// Thread-safe observable theme colors for SwiftUI chrome.
 @MainActor

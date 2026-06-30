@@ -1,4 +1,5 @@
 import SwiftUI
+import MingaProtocol
 
 /// Read-only keybinding browser with a shortcut to open the hand-written config file.
 struct KeybindingsSettingsView: View {

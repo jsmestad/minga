@@ -4,6 +4,7 @@
 /// SwiftUI views observe this to render the tab strip.
 
 import SwiftUI
+import MingaProtocol
 
 /// A single tab entry for SwiftUI rendering.
 struct TabEntry: Identifiable {

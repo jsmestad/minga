@@ -21,6 +21,24 @@ packages:
     from: "0.10.3"
 
 targets:
+  MingaProtocol:
+    type: framework
+    platform: macOS
+    sources:
+      - path: Sources/Protocol/ProtocolTypes.swift
+        type: file
+      - path: Sources/Protocol/StatusBarUpdate.swift
+        type: file
+      - path: Sources/Protocol/GUIColorSlots.swift
+        type: file
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: "YES"
+        PRODUCT_NAME: MingaProtocol
+        # No TOOLCHAINS pin: this framework is Metal-toolchain-free so it (and
+        # MingaUI) can build SwiftUI canvas previews without the Metal toolchain.
+    dependencies: []
+
   Minga:
     type: application
     platform: macOS
@@ -30,6 +48,9 @@ targets:
         excludes:
           - "PreviewHostApp.swift"
           - "PreviewRegistry.swift"
+          - "Protocol/ProtocolTypes.swift"
+          - "Protocol/StatusBarUpdate.swift"
+          - "Protocol/GUIColorSlots.swift"
       - path: .generated/protocol/ProtocolOpcodes.generated.swift
         name: ProtocolOpcodes.generated.swift
         type: file
@@ -57,7 +78,8 @@ targets:
         # Workaround: macOS 26 beta cryptex bug prevents Metal toolchain auto-mount.
         # Remove once `metal --version` works without this (check Xcode Settings > Components).
         TOOLCHAINS: com.apple.dt.toolchain.Metal.32023.864
-    dependencies: []
+    dependencies:
+      - target: MingaProtocol
     preBuildScripts:
       - name: Generate protocol opcodes
         script: |
@@ -105,6 +127,9 @@ targets:
           - "MingaApp.swift"
           - "PreviewHostApp.swift"
           - "PreviewRegistry.swift"
+          - "Protocol/ProtocolTypes.swift"
+          - "Protocol/StatusBarUpdate.swift"
+          - "Protocol/GUIColorSlots.swift"
       - path: .generated/protocol/ProtocolOpcodes.generated.swift
         name: ProtocolOpcodes.generated.swift
         type: file
@@ -121,6 +146,7 @@ targets:
         # Compiles Renderer/ Metal sources; needs the Metal toolchain pin.
         TOOLCHAINS: com.apple.dt.toolchain.Metal.32023.864
     dependencies:
+      - target: MingaProtocol
       - package: ViewInspector
     preBuildScripts:
       - name: Generate protocol opcodes
@@ -141,6 +167,9 @@ targets:
         type: group
         excludes:
           - "MingaApp.swift"
+          - "Protocol/ProtocolTypes.swift"
+          - "Protocol/StatusBarUpdate.swift"
+          - "Protocol/GUIColorSlots.swift"
       - path: .generated/protocol/ProtocolOpcodes.generated.swift
         name: ProtocolOpcodes.generated.swift
         type: file
@@ -158,7 +187,8 @@ targets:
         SWIFT_OPTIMIZATION_LEVEL: "-Onone"
         # Builds the full shell incl. Renderer/ Metal sources; needs the toolchain pin.
         TOOLCHAINS: com.apple.dt.toolchain.Metal.32023.864
-    dependencies: []
+    dependencies:
+      - target: MingaProtocol
     preBuildScripts:
       - name: Generate protocol opcodes
         script: |

@@ -4,6 +4,7 @@
 /// position + mode indicator. All colors driven by BEAM theme.
 
 import SwiftUI
+import MingaProtocol
 
 private extension StatusBarUpdate.IndentInfo {
     var label: String {

@@ -1,6 +1,7 @@
 /// Observable file tree state driven by the BEAM via gui_file_tree protocol messages.
 
 import SwiftUI
+import MingaProtocol
 
 private enum FileTreeProtocolConstants {
     static let localNavigationFlag: UInt8 = 0x20

@@ -9,6 +9,7 @@
 /// Phase 3: replaces LineBuffer for buffer window content.
 
 import Foundation
+import MingaProtocol
 
 // MARK: - Row type
 

@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import MingaProtocol
 
 /// Observable state for the BEAM Observatory sidebar.
 @MainActor

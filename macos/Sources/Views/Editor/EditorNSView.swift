@@ -10,6 +10,7 @@
 import AppKit
 import os
 import MetalKit
+import MingaProtocol
 
 private enum DividerCursorState: Equatable {
     case none

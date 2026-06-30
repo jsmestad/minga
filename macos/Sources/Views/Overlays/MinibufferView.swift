@@ -9,6 +9,7 @@
 /// purely a renderer; it never captures keyboard focus.
 
 import SwiftUI
+import MingaProtocol
 
 struct MinibufferView: View {
     let state: MinibufferState
