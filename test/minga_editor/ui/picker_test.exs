@@ -293,6 +293,39 @@ defmodule MingaEditor.UI.PickerTest do
     end
   end
 
+  describe "replace_items/2 and put_candidates/3" do
+    alias MingaEditor.UI.Picker.Candidate
+
+    @new_items [
+      %Item{id: :x, label: "router.ex", description: "/project/lib/router.ex"},
+      %Item{id: :y, label: "schema.ex", description: "/project/lib/schema.ex"}
+    ]
+
+    test "replace_items swaps in a fresh set and refilters" do
+      picker = Picker.new(@items) |> Picker.filter("router")
+      replaced = Picker.replace_items(picker, @new_items)
+
+      assert Picker.total(replaced) == 2
+      assert replaced.query == "router"
+      # "router" now matches router.ex from the new set, not the old README/config.
+      assert Enum.map(replaced.filtered, & &1.id) == [:x]
+    end
+
+    test "put_candidates produces the same picker as replace_items for built candidates" do
+      base = Picker.new(@items) |> Picker.filter("ex")
+
+      via_replace = Picker.replace_items(base, @new_items)
+      via_put = Picker.put_candidates(base, @new_items, Candidate.from_items(@new_items))
+
+      # The seam split (build off-process, install cheaply) must not change scoring,
+      # ordering, items, or candidates versus the all-in-one path.
+      assert via_put.filtered == via_replace.filtered
+      assert via_put.candidates == via_replace.candidates
+      assert via_put.items == via_replace.items
+      assert via_put.selected == via_replace.selected
+    end
+  end
+
   describe "move_down/1 and move_up/1" do
     test "move_down advances selection" do
       picker = Picker.new(@items)
