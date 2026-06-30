@@ -145,9 +145,11 @@ enum PreviewFixtures {
 
     static func tabs() -> [Wire.TabEntry] {
         [
-            Wire.TabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "editor.ex"),
-            Wire.TabEntry(id: 2, groupId: 0, isActive: false, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "document.ex"),
-            Wire.TabEntry(id: 3, groupId: 0, isActive: false, isDirty: true, isAgent: false, hasAttention: true, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "mode.ex"),
+            Wire.TabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "\u{E62D}", label: "buffer.ex"),
+            Wire.TabEntry(id: 2, groupId: 0, isActive: false, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "\u{E62D}", label: "document.ex"),
+            Wire.TabEntry(id: 3, groupId: 0, isActive: false, isDirty: true, isAgent: false, hasAttention: true, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "\u{E755}", label: "ContentView.swift"),
+            Wire.TabEntry(id: 4, groupId: 0, isActive: false, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "\u{F0219}", label: "README.md"),
+            Wire.TabEntry(id: 5, groupId: 0, isActive: false, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "\u{E7A8}", label: "main.rs"),
         ]
     }
 
@@ -179,21 +181,21 @@ enum PreviewFixtures {
 
     static func fileTreeRawEntries() -> [Wire.FileTreeEntry] {
         [
-            wireFileEntry(id: "lib", name: "lib", path: "/Users/dev/code/minga/lib", relPath: "lib", isDir: true, isExpanded: true, depth: 0, icon: ""),
-            wireFileEntry(id: "lib/minga", name: "minga", path: "/Users/dev/code/minga/lib/minga", relPath: "lib/minga", isDir: true, isExpanded: true, depth: 1, icon: ""),
-            wireFileEntry(id: "lib/minga/editor.ex", name: "editor.ex", path: "/Users/dev/code/minga/lib/minga/editor.ex", relPath: "lib/minga/editor.ex", isDir: false, depth: 2, icon: "", isActive: true, gitStatus: 1),
-            wireFileEntry(id: "lib/minga/buffer.ex", name: "buffer.ex", path: "/Users/dev/code/minga/lib/minga/buffer.ex", relPath: "lib/minga/buffer.ex", isDir: false, depth: 2, icon: "", isDirty: true),
-            wireFileEntry(id: "lib/minga/buffer", name: "buffer", path: "/Users/dev/code/minga/lib/minga/buffer", relPath: "lib/minga/buffer", isDir: true, isExpanded: true, depth: 2, icon: ""),
-            wireFileEntry(id: "lib/minga/buffer/document.ex", name: "document.ex", path: "/Users/dev/code/minga/lib/minga/buffer/document.ex", relPath: "lib/minga/buffer/document.ex", isDir: false, depth: 3, icon: ""),
-            wireFileEntry(id: "lib/minga/buffer/process.ex", name: "process.ex", path: "/Users/dev/code/minga/lib/minga/buffer/process.ex", relPath: "lib/minga/buffer/process.ex", isDir: false, depth: 3, icon: "", gitStatus: 1),
-            wireFileEntry(id: "lib/minga/mode", name: "mode", path: "/Users/dev/code/minga/lib/minga/mode", relPath: "lib/minga/mode", isDir: true, isExpanded: false, depth: 2, icon: ""),
-            wireFileEntry(id: "lib/minga/editor", name: "editor", path: "/Users/dev/code/minga/lib/minga/editor", relPath: "lib/minga/editor", isDir: true, isExpanded: true, depth: 2, icon: ""),
-            wireFileEntry(id: "lib/minga/editor/render_pipeline.ex", name: "render_pipeline.ex", path: "/Users/dev/code/minga/lib/minga/editor/render_pipeline.ex", relPath: "lib/minga/editor/render_pipeline.ex", isDir: false, depth: 3, icon: "", gitStatus: 1),
-            wireFileEntry(id: "macos", name: "macos", path: "/Users/dev/code/minga/macos", relPath: "macos", isDir: true, isExpanded: true, depth: 0, icon: ""),
-            wireFileEntry(id: "macos/Sources", name: "Sources", path: "/Users/dev/code/minga/macos/Sources", relPath: "macos/Sources", isDir: true, isExpanded: true, depth: 1, icon: ""),
-            wireFileEntry(id: "macos/Sources/PreviewRegistry.swift", name: "PreviewRegistry.swift", path: "/Users/dev/code/minga/macos/Sources/PreviewRegistry.swift", relPath: "macos/Sources/PreviewRegistry.swift", isDir: false, depth: 2, icon: "", gitStatus: 1),
-            wireFileEntry(id: "test", name: "test", path: "/Users/dev/code/minga/test", relPath: "test", isDir: true, isExpanded: false, depth: 0, icon: ""),
-            wireFileEntry(id: "zig", name: "zig", path: "/Users/dev/code/minga/zig", relPath: "zig", isDir: true, isExpanded: false, depth: 0, icon: "", isLastChild: true),
+            wireFileEntry(id: "lib", name: "lib", path: "/Users/dev/code/minga/lib", relPath: "lib", isDir: true, isExpanded: true, depth: 0, icon: "\u{F1247}", iconColor: 0x42A5F5),
+            wireFileEntry(id: "lib/minga", name: "minga", path: "/Users/dev/code/minga/lib/minga", relPath: "lib/minga", isDir: true, isExpanded: true, depth: 1, icon: "\u{F0256}", iconColor: 0x78909C),
+            wireFileEntry(id: "lib/minga/editor.ex", name: "editor.ex", path: "/Users/dev/code/minga/lib/minga/editor.ex", relPath: "lib/minga/editor.ex", isDir: false, depth: 2, icon: "\u{E62D}", iconColor: 0x9B59B6, isActive: true, gitStatus: 1),
+            wireFileEntry(id: "lib/minga/buffer.ex", name: "buffer.ex", path: "/Users/dev/code/minga/lib/minga/buffer.ex", relPath: "lib/minga/buffer.ex", isDir: false, depth: 2, icon: "\u{E62D}", iconColor: 0x9B59B6, isDirty: true),
+            wireFileEntry(id: "lib/minga/buffer", name: "buffer", path: "/Users/dev/code/minga/lib/minga/buffer", relPath: "lib/minga/buffer", isDir: true, isExpanded: true, depth: 2, icon: "\u{F0256}", iconColor: 0x78909C),
+            wireFileEntry(id: "lib/minga/buffer/document.ex", name: "document.ex", path: "/Users/dev/code/minga/lib/minga/buffer/document.ex", relPath: "lib/minga/buffer/document.ex", isDir: false, depth: 3, icon: "\u{E62D}", iconColor: 0x9B59B6),
+            wireFileEntry(id: "lib/minga/buffer/process.ex", name: "process.ex", path: "/Users/dev/code/minga/lib/minga/buffer/process.ex", relPath: "lib/minga/buffer/process.ex", isDir: false, depth: 3, icon: "\u{E62D}", iconColor: 0x9B59B6, gitStatus: 1),
+            wireFileEntry(id: "lib/minga/mode", name: "mode", path: "/Users/dev/code/minga/lib/minga/mode", relPath: "lib/minga/mode", isDir: true, isExpanded: false, depth: 2, icon: "\u{F0256}", iconColor: 0x78909C),
+            wireFileEntry(id: "lib/minga/editor", name: "editor", path: "/Users/dev/code/minga/lib/minga/editor", relPath: "lib/minga/editor", isDir: true, isExpanded: true, depth: 2, icon: "\u{F0256}", iconColor: 0x78909C),
+            wireFileEntry(id: "lib/minga/editor/render_pipeline.ex", name: "render_pipeline.ex", path: "/Users/dev/code/minga/lib/minga/editor/render_pipeline.ex", relPath: "lib/minga/editor/render_pipeline.ex", isDir: false, depth: 3, icon: "\u{E62D}", iconColor: 0x9B59B6, gitStatus: 1),
+            wireFileEntry(id: "macos", name: "macos", path: "/Users/dev/code/minga/macos", relPath: "macos", isDir: true, isExpanded: true, depth: 0, icon: "\u{F0256}", iconColor: 0xBDBDBD),
+            wireFileEntry(id: "macos/Sources", name: "Sources", path: "/Users/dev/code/minga/macos/Sources", relPath: "macos/Sources", isDir: true, isExpanded: true, depth: 1, icon: "\u{F0256}", iconColor: 0x78909C),
+            wireFileEntry(id: "macos/Sources/PreviewRegistry.swift", name: "PreviewRegistry.swift", path: "/Users/dev/code/minga/macos/Sources/PreviewRegistry.swift", relPath: "macos/Sources/PreviewRegistry.swift", isDir: false, depth: 2, icon: "\u{E755}", iconColor: 0xF05138, gitStatus: 1),
+            wireFileEntry(id: "test", name: "test", path: "/Users/dev/code/minga/test", relPath: "test", isDir: true, isExpanded: false, depth: 0, icon: "\u{F1354}", iconColor: 0x66BB6A),
+            wireFileEntry(id: "zig", name: "zig", path: "/Users/dev/code/minga/zig", relPath: "zig", isDir: true, isExpanded: false, depth: 0, icon: "\u{F0256}", iconColor: 0xF69A1B, isLastChild: true),
         ]
     }
 
@@ -223,6 +225,7 @@ enum PreviewFixtures {
         isExpanded: Bool = false,
         depth: UInt8,
         icon: String,
+        iconColor: UInt32 = 0x6D8086,
         isActive: Bool = false,
         isDirty: Bool = false,
         isLastChild: Bool = false,
@@ -251,9 +254,9 @@ enum PreviewFixtures {
             diagnosticHintCount: 0,
             guides: Array(repeating: false, count: Int(depth)),
             icon: icon,
-            iconColorR: 0x6D,
-            iconColorG: 0x80,
-            iconColorB: 0x86,
+            iconColorR: UInt8((iconColor >> 16) & 0xFF),
+            iconColorG: UInt8((iconColor >> 8) & 0xFF),
+            iconColorB: UInt8(iconColor & 0xFF),
             name: name,
             relPath: relPath,
             editingType: editingType,

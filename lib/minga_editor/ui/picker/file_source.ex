@@ -23,6 +23,10 @@ defmodule MingaEditor.UI.Picker.FileSource do
   def title, do: "Find file"
 
   @impl true
+  @spec async?() :: boolean()
+  def async?, do: true
+
+  @impl true
   @spec preview?() :: boolean()
   def preview?, do: true
 
@@ -103,8 +107,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
       | label: "#{icon} #{filename}",
         description: dir_display,
         icon_color: color,
-        annotation: annotation,
-        two_line: true
+        annotation: annotation
     }
   end
 

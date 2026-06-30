@@ -317,7 +317,7 @@ struct ContentView: View {
 
     private var compactProjectBranchHeader: some View {
         HStack(spacing: 6) {
-            Text("\u{F024B}")
+            Text("\u{F0256}")
                 .font(.custom("Symbols Nerd Font Mono", size: 12))
                 .foregroundStyle(theme.treeDirFg.opacity(0.7))
 

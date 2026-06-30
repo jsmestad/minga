@@ -235,7 +235,7 @@ struct CoreTextMetalRendererCursorTests {
         #expect(rects.rightFills[0].x == 732)
         #expect(rects.rightFills[0].height == 204)
         #expect(rects.separators.count == 1)
-        #expect(rects.separators[0].x == 747)
+        #expect(rects.separators[0].x == 740)
         #expect(rects.separators[0].y == 96)
         #expect(rects.separators[0].height == 204)
     }

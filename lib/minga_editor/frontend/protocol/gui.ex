@@ -1747,17 +1747,15 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp encode_editing_type(:new_folder), do: 1
   defp encode_editing_type(:rename), do: 2
 
-  # Nerd Font folder icon (nf-md-folder)
-  @folder_icon "\u{F024B}"
-
   @spec file_tree_row_icon(Row.t()) :: String.t()
-  defp file_tree_row_icon(%Row{directory?: true}), do: @folder_icon
+  defp file_tree_row_icon(%Row{directory?: true, name: name}),
+    do: elem(Devicon.folder_icon_and_color(name), 0)
+
   defp file_tree_row_icon(%Row{name: name}), do: Devicon.icon(Language.detect_filetype(name))
 
-  # This legacy encoder has no theme in scope, so it emits the theme-independent
-  # default icon color. The live adapter (FileTreeEncoder) carries themed colors.
   @spec file_tree_row_icon_color(Row.t()) :: non_neg_integer()
-  defp file_tree_row_icon_color(%Row{directory?: true}), do: Theme.default_icon_color(:directory)
+  defp file_tree_row_icon_color(%Row{directory?: true, name: name}),
+    do: elem(Devicon.folder_icon_and_color(name), 1)
 
   defp file_tree_row_icon_color(%Row{name: name}),
     do: Theme.default_icon_color(Language.detect_filetype(name))

@@ -80,7 +80,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceSource do
   # ── Helpers ──────────────────────────────────────────────────────────────
 
   @spec group_icon(Workspace.t()) :: String.t()
-  defp group_icon(%Workspace{}), do: "\u{F024B}"
+  defp group_icon(%Workspace{}), do: "\u{F0256}"
 
   @spec agent_status_text(Workspace.t()) :: String.t()
   defp agent_status_text(%Workspace{agent_status: :thinking}),

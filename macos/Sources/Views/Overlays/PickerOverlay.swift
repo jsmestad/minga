@@ -1,9 +1,8 @@
-/// Native command palette / file finder with Helm-level density.
+/// Native command palette / file finder anchored at the top of the window.
 ///
-/// Centered floating panel with dense single-line items. Preview happens
-/// in the editor area behind the picker (the BEAM switches the active
-/// buffer on navigation), not in an inline pane. This matches Helm/Ivy's
-/// approach: the picker is a fast selection tool, the editor is the preview.
+/// The panel drops down from the top-center (like VSCode/Zed), leaving the
+/// editor area visible below for live file preview. The BEAM switches the
+/// active buffer on navigation so the preview appears behind the picker.
 
 import SwiftUI
 
@@ -14,7 +13,6 @@ struct PickerOverlay: View {
 
     private let panelWidth: CGFloat = 600
     private let itemHeight: CGFloat = 24
-    private let twoLineItemHeight: CGFloat = 40
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -25,35 +23,26 @@ struct PickerOverlay: View {
     var body: some View {
         if state.visible {
             GeometryReader { geo in
-                ZStack {
-                    // Dimmed background: click to dismiss (like Spotlight, Alfred, Xcode Open Quickly)
-                    Color.black.opacity(0.3)
-                        .ignoresSafeArea()
-                        .accessibilityHidden(true)
-                        .onTapGesture {
-                            // Send Escape to the BEAM to dismiss the picker via the normal mode transition
-                            encoder?.sendKeyPress(codepoint: 27, modifiers: 0)
-                        }
-
+                VStack(spacing: 0) {
                     VStack(spacing: 0) {
                         searchField
 
                         Divider()
                             .overlay(theme.popupBorder.opacity(0.3))
 
-                        let totalItemsHeight = state.items.reduce(CGFloat(0)) { $0 + ($1.isTwoLine ? twoLineItemHeight : itemHeight) }
-                        let listHeight = min(totalItemsHeight, max(geo.size.height * 0.5, 200))
+                        let totalItemsHeight = CGFloat(state.items.count) * itemHeight
+                        let maxHeight = geo.size.height * 0.4
+                        let listHeight = min(totalItemsHeight, max(maxHeight, 120))
                         resultsList(maxListHeight: listHeight)
-
                     }
-                    .frame(width: panelWidth)
+                    .frame(width: min(panelWidth, geo.size.width - 40))
                     .background(
-                        RoundedRectangle(cornerRadius: 8)
+                        RoundedRectangle(cornerRadius: 6)
                             .fill(theme.popupBg)
-                            .shadow(color: .black.opacity(0.5), radius: 20, y: 8)
+                            .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 8)
+                        RoundedRectangle(cornerRadius: 6)
                             .strokeBorder(theme.popupBorder.opacity(0.4), lineWidth: 1)
                     )
                     .overlay(alignment: .center) {
@@ -61,8 +50,11 @@ struct PickerOverlay: View {
                             actionMenuOverlay(menu)
                         }
                     }
-                    .offset(y: -60)
+                    .padding(.top, 1)
+
+                    Spacer()
                 }
+                .frame(maxWidth: .infinity)
             }
             .transition(.opacity.animation(.easeInOut(duration: animDuration)))
         }
@@ -145,30 +137,38 @@ struct PickerOverlay: View {
             HStack(spacing: 6) {
                 ProgressView()
                     .controlSize(.small)
-                Text("Searching...")
+                Text(state.title.isEmpty ? "Loading..." : "\(state.title)...")
                     .font(.system(size: 13))
                     .foregroundStyle(theme.popupFg.opacity(0.35))
             }
             .frame(maxWidth: .infinity, alignment: .center)
-            .frame(height: 48)
+            .frame(maxHeight: maxListHeight)
+            .frame(minHeight: 48)
         } else if case .error(let message) = state.loadStatus {
             Text(message)
                 .font(.system(size: 13))
                 .foregroundStyle(theme.popupFg.opacity(0.35))
                 .frame(maxWidth: .infinity, alignment: .center)
-                .frame(height: 48)
+                .frame(maxHeight: maxListHeight)
+                .frame(minHeight: 48)
         } else if state.items.isEmpty && !state.query.isEmpty {
             Text("No matches")
                 .font(.system(size: 13))
                 .foregroundStyle(theme.popupFg.opacity(0.35))
                 .frame(maxWidth: .infinity, alignment: .center)
-                .frame(height: 48)
+                .frame(maxHeight: maxListHeight)
+                .frame(minHeight: 48)
         } else {
             ScrollViewReader { proxy in
                 ScrollView(.vertical, showsIndicators: true) {
                     LazyVStack(spacing: 0) {
                         ForEach(state.items) { item in
-                            itemRow(item)
+                            PickerItemRow(
+                                item: item,
+                                isSelected: item.id == state.effectiveSelectedIndex,
+                                query: state.query,
+                                itemHeight: itemHeight
+                            )
                         }
                     }
                 }
@@ -178,127 +178,12 @@ struct PickerOverlay: View {
                         proxy.scrollTo(newIndex, anchor: .center)
                     }
                 }
-            }
-        }
-    }
-
-    // MARK: - Item row
-
-    @ViewBuilder
-    private func itemRow(_ item: PickerItem) -> some View {
-        let isSelected = item.id == state.effectiveSelectedIndex
-
-        Group {
-            if item.isTwoLine {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        itemCheckmark(item)
-                        itemIcon(item)
-                        highlightedLabel(item)
-                        Spacer(minLength: 4)
-                        itemAnnotation(item)
-                    }
-
-                    if !item.description.isEmpty {
-                        Text(item.description)
-                            .font(.system(size: 11))
-                            .foregroundStyle(theme.popupFg.opacity(0.35))
-                            .lineLimit(1)
-                            .truncationMode(.head)
-                            .padding(.leading, 44) // checkmark(14) + spacing(6) + icon(18) + spacing(6)
+                .onChange(of: state.items.count) { _, _ in
+                    withAnimation(nil) {
+                        proxy.scrollTo(state.effectiveSelectedIndex, anchor: .center)
                     }
                 }
-            } else {
-                HStack(spacing: 6) {
-                    itemCheckmark(item)
-                    itemIcon(item)
-                    highlightedLabel(item)
-
-                    if !item.description.isEmpty {
-                        Text(item.description)
-                            .font(.system(size: 12))
-                            .foregroundStyle(theme.popupFg.opacity(0.35))
-                            .lineLimit(1)
-                            .truncationMode(.head)
-                    }
-
-                    Spacer(minLength: 4)
-                    itemAnnotation(item)
-                }
             }
-        }
-        .padding(.horizontal, 10)
-        .frame(height: item.isTwoLine ? twoLineItemHeight : itemHeight)
-        .background(selectionBackground(isSelected))
-        .overlay(alignment: .leading) {
-            if isSelected && item.isTwoLine {
-                RoundedRectangle(cornerRadius: 1.5)
-                    .fill(theme.accent)
-                    .frame(width: 3)
-                    .padding(.vertical, 2)
-            }
-        }
-        .id(item.id)
-    }
-
-    // MARK: - Item row subviews
-
-    @ViewBuilder
-    private func itemCheckmark(_ item: PickerItem) -> some View {
-        Image(systemName: "checkmark.circle.fill")
-            .font(.system(size: 11))
-            .foregroundStyle(theme.accent)
-            .frame(width: 14)
-            .opacity(item.isMarked ? 1 : 0)
-            .accessibilityHidden(true)
-    }
-
-    @ViewBuilder
-    private func itemIcon(_ item: PickerItem) -> some View {
-        if item.hasLeadingIcon {
-            Text(item.icon)
-                .font(.custom("Symbols Nerd Font Mono", size: 13))
-                .foregroundStyle(iconColor(item.iconColor))
-                .frame(width: 18, alignment: .center)
-        }
-    }
-
-    @ViewBuilder
-    private func itemAnnotation(_ item: PickerItem) -> some View {
-        if !item.annotation.isEmpty {
-            Text(item.annotation)
-                .font(.system(size: 10.5, design: .monospaced))
-                .foregroundStyle(theme.popupFg.opacity(0.3))
-                .padding(.horizontal, 5)
-                .padding(.vertical, 1)
-                .background(
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(theme.popupFg.opacity(0.06))
-                )
-        }
-    }
-
-    // MARK: - Match highlighting
-
-    @ViewBuilder
-    private func highlightedLabel(_ item: PickerItem) -> some View {
-        let label = item.displayLabel
-        let matchSet = item.displayMatchPositions
-
-        if matchSet.isEmpty {
-            Text(label)
-                .font(.system(size: 13))
-                .foregroundStyle(theme.popupFg)
-                .lineLimit(1)
-        } else {
-            let attributed = TextHighlighting.attributedString(
-                label,
-                matchPositions: matchSet,
-                baseColor: Color(theme.popupFg),
-                matchColor: Color(theme.accent)
-            )
-            Text(attributed)
-                .lineLimit(1)
         }
     }
 
@@ -329,7 +214,7 @@ struct PickerOverlay: View {
                 HStack {
                     Text(action)
                         .font(.system(size: 13))
-                        .foregroundStyle(isSelected ? Color.white : theme.popupFg)
+                        .foregroundStyle(isSelected ? theme.popupSelFg : theme.popupFg)
                     Spacer()
                 }
                 .padding(.horizontal, 12)
@@ -353,10 +238,131 @@ struct PickerOverlay: View {
         )
     }
 
+}
+
+// MARK: - Picker item row (separate View for observation isolation)
+
+private struct PickerItemRow: View {
+    let item: PickerItem
+    let isSelected: Bool
+    let query: String
+    let itemHeight: CGFloat
+
+    @Environment(\.themeColors) private var theme
+
+    var body: some View {
+        HStack(spacing: 6) {
+            itemCheckmark
+            itemIcon
+            highlightedLabel
+
+            if !item.description.isEmpty {
+                highlightedDescription
+            }
+
+            Spacer(minLength: 4)
+            itemAnnotation
+        }
+        .padding(.horizontal, 10)
+        .frame(height: itemHeight)
+        .background(selectionBackground)
+        .id(item.id)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text(item.displayLabel + (item.description.isEmpty ? "" : ", " + item.description)))
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+    }
+
+    // MARK: - Subviews
+
+    @ViewBuilder
+    private var itemCheckmark: some View {
+        Image(systemName: "checkmark.circle.fill")
+            .font(.system(size: 11))
+            .foregroundStyle(theme.accent)
+            .frame(width: 14)
+            .opacity(item.isMarked ? 1 : 0)
+            .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private var itemIcon: some View {
+        if item.hasLeadingIcon {
+            Text(item.icon)
+                .font(.custom("Symbols Nerd Font Mono", size: 13))
+                .foregroundStyle(iconColor(item.iconColor))
+                .frame(width: 18, alignment: .center)
+        }
+    }
+
+    @ViewBuilder
+    private var itemAnnotation: some View {
+        if !item.annotation.isEmpty {
+            Text(item.annotation)
+                .font(.system(size: 10.5, design: .monospaced))
+                .foregroundStyle(theme.popupFg.opacity(0.3))
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1)
+                .background(
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(theme.popupFg.opacity(0.06))
+                )
+        }
+    }
+
+    // MARK: - Match highlighting
+
+    @ViewBuilder
+    private var highlightedLabel: some View {
+        let label = item.displayLabel
+        let matchSet = item.displayMatchPositions
+        let fg = isSelected ? theme.popupSelFg : theme.popupFg
+
+        if matchSet.isEmpty {
+            Text(label)
+                .font(.system(size: 13))
+                .foregroundStyle(fg)
+                .lineLimit(1)
+        } else {
+            Text(TextHighlighting.attributedString(
+                label,
+                matchPositions: matchSet,
+                baseColor: Color(fg),
+                matchColor: Color(theme.accent)
+            ))
+            .lineLimit(1)
+        }
+    }
+
+    @ViewBuilder
+    private var highlightedDescription: some View {
+        let desc = item.description
+        let descPositions = TextHighlighting.fuzzyMatchPositions(desc, query: query)
+        let fg = isSelected ? theme.popupSelFg.opacity(0.6) : theme.popupFg.opacity(0.35)
+
+        if descPositions.isEmpty {
+            Text(desc)
+                .font(.system(size: 12))
+                .foregroundStyle(fg)
+                .lineLimit(1)
+                .truncationMode(.head)
+        } else {
+            Text(TextHighlighting.attributedString(
+                desc,
+                matchPositions: descPositions,
+                baseFont: .system(size: 12),
+                matchFont: .system(size: 12, weight: .semibold),
+                baseColor: Color(fg),
+                matchColor: Color(theme.accent)
+            ))
+            .lineLimit(1)
+            .truncationMode(.head)
+        }
+    }
+
     // MARK: - Helpers
 
     @ViewBuilder
-    private func selectionBackground(_ isSelected: Bool) -> some View {
+    private var selectionBackground: some View {
         if isSelected {
             RoundedRectangle(cornerRadius: 3)
                 .fill(theme.popupSelBg.opacity(0.7))
@@ -369,14 +375,6 @@ struct PickerOverlay: View {
     private func iconColor(_ rgb: UInt32) -> Color {
         if rgb == 0 { return theme.popupFg.opacity(0.5) }
         return Color(
-            red: Double((rgb >> 16) & 0xFF) / 255.0,
-            green: Double((rgb >> 8) & 0xFF) / 255.0,
-            blue: Double(rgb & 0xFF) / 255.0
-        )
-    }
-
-    private func segmentColor(_ rgb: UInt32) -> Color {
-        Color(
             red: Double((rgb >> 16) & 0xFF) / 255.0,
             green: Double((rgb >> 8) & 0xFF) / 255.0,
             blue: Double(rgb & 0xFF) / 255.0
@@ -406,11 +404,11 @@ struct PickerOverlay: View {
         actionMenu: nil,
         modePrefix: ""
     )
-    return ZStack {
+    return ZStack(alignment: .top) {
         theme.editorBg
         PickerOverlay(state: state, encoder: nil)
     }
-    .frame(width: 600, height: 400)
+    .frame(width: 700, height: 500)
     .clipped()
     .environment(theme)
 }

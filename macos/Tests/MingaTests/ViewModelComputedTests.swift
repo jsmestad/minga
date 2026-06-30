@@ -33,12 +33,11 @@ struct PickerItemComputedTests {
 
     @Test("icon handles Nerd Font character (multi-byte)")
     func iconNerdFont() {
-        // Nerd Font icon: "\u{F024B}" (folder icon) + "lib"
-        let item = PickerItem(id: 0, iconColor: 0, label: "\u{F024B}lib",
+        let item = PickerItem(id: 0, iconColor: 0, label: "\u{F0256}lib",
                              description: "", annotation: "",
                              matchPositions: [], isTwoLine: false, isMarked: false)
         #expect(item.hasLeadingIcon == true)
-        #expect(item.icon == "\u{F024B}")
+        #expect(item.icon == "\u{F0256}")
     }
 
     @Test("displayLabel keeps plain labels intact")

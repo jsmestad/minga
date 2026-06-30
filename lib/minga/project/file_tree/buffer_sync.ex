@@ -18,8 +18,8 @@ defmodule Minga.Project.FileTree.BufferSync do
   @guide_blank "  "
 
   # Nerd Font folder icons matching the semantic file-tree builder
-  @folder_closed "\u{F024B}"
-  @folder_open "\u{F0256}"
+  @folder_closed "\u{F0256}"
+  @folder_open "\u{F0DCF}"
 
   @doc """
   Starts a `*File Tree*` buffer and syncs tree entries into it.

@@ -366,7 +366,7 @@ struct FileTreeViewTests {
         state.visible = true
         state.entries = [
             sidebarFileTreeEntry(id: 1, index: 0, isDir: true, isExpanded: true,
-                                 icon: "\u{F024B}", name: "lib", relPath: "lib"),
+                                 icon: "\u{F0256}", name: "lib", relPath: "lib"),
             sidebarFileTreeEntry(id: 2, index: 1, isSelected: true, depth: 1,
                                  icon: "\u{E62D}", name: "editor.ex", relPath: "lib/editor.ex"),
         ]
@@ -485,7 +485,7 @@ struct FileTreeRowViewTests {
         #expect(file.accessibilityLabelText == "File: editor.ex")
         #expect(file.accessibilityHintText == "Press Return to open.")
 
-        let collapsedDir = fileTreeRowView(entry: sidebarFileTreeEntry(id: 2, index: 1, isDir: true, icon: "\u{F024B}", name: "lib", relPath: "lib"))
+        let collapsedDir = fileTreeRowView(entry: sidebarFileTreeEntry(id: 2, index: 1, isDir: true, icon: "\u{F0256}", name: "lib", relPath: "lib"))
         #expect(collapsedDir.accessibilityLabelText == "Folder: lib")
         #expect(collapsedDir.accessibilityHintText == "Collapsed folder. Press Return to expand.")
 
@@ -500,7 +500,7 @@ struct FileTreeRowViewTests {
     @Test("Files directories and expanded folders have distinct row affordances")
     @MainActor func filesDirectoriesAndExpandedFoldersHaveDistinctAffordances() throws {
         let file = fileTreeRowView(entry: sidebarFileTreeEntry(id: 1, index: 0, icon: "\u{E62D}", name: "editor.ex", relPath: "lib/editor.ex"))
-        let collapsedDir = fileTreeRowView(entry: sidebarFileTreeEntry(id: 2, index: 1, isDir: true, icon: "\u{F024B}", name: "lib", relPath: "lib"))
+        let collapsedDir = fileTreeRowView(entry: sidebarFileTreeEntry(id: 2, index: 1, isDir: true, icon: "\u{F0256}", name: "lib", relPath: "lib"))
         let expandedDir = fileTreeRowView(entry: sidebarFileTreeEntry(id: 3, index: 2, isDir: true, isExpanded: true, icon: "\u{F0256}", name: "test", relPath: "test"))
 
         #expect(try file.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewType.Image.self).isEmpty)

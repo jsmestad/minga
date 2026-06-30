@@ -72,8 +72,8 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilderTest do
       assert row.guides == [true]
       assert row.editing.type == :rename
       assert row.editing.text == "renamed"
-      # Folder rows resolve to the theme's :directory icon color (doom_one uses the default).
-      assert row.icon_color == 0x519ABA
+      # Named folders resolve to per-folder Devicon colors ("lib" = source blue).
+      assert row.icon_color == 0x42A5F5
     end
 
     test "disables local navigation while filtering" do

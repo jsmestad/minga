@@ -76,7 +76,7 @@ final class CoreTextMetalRenderer {
     /// Left margin before the gutter (breathing room from the window edge).
     static let gutterLeftMarginPt: CGFloat = 6.0
     /// Right gap between gutter and content (separator breathing room).
-    static let gutterRightGapPt: CGFloat = 8.0
+    static let gutterRightGapPt: CGFloat = 14.0
     /// Total gutter pixel padding in points (left margin + right separator gap).
     /// Subtracted from the view width when computing cols for the BEAM so
     /// `content_w` accurately reflects the visible content area.
@@ -1868,7 +1868,7 @@ final class CoreTextMetalRenderer {
                     rightFills.append((x: gutterRightX, y: vertical.y, width: gutterPaddingPx, height: vertical.height))
                 }
                 if frameState.gutterSeparatorColor != 0 {
-                    separators.append((x: gutterRightX + gutterPaddingPx - 1.0, y: vertical.y, width: 1.0, height: vertical.height))
+                    separators.append((x: gutterRightX + gutterPaddingPx * 0.5, y: vertical.y, width: 1.0, height: vertical.height))
                 }
             }
             return (leftFills, rightFills, separators)
@@ -1882,9 +1882,8 @@ final class CoreTextMetalRenderer {
             rightFills.append((x: Float(frameState.gutterCol) * cellW * scale + gutterLeftMarginPx, y: 0, width: gutterPaddingPx, height: viewportHeight))
         }
         if frameState.gutterSeparatorColor != 0 {
-            let gutterLeftMarginPt = gutterLeftMarginPx / scale
-            let gutterPaddingPt = gutterPaddingPx / scale
-            separators.append((x: (Float(frameState.gutterCol) * cellW + gutterLeftMarginPt + gutterPaddingPt) * scale - 1.0, y: 0, width: 1.0, height: viewportHeight))
+            let gutterRightX = Float(frameState.gutterCol) * cellW * scale + gutterLeftMarginPx
+            separators.append((x: gutterRightX + gutterPaddingPx * 0.5, y: 0, width: 1.0, height: viewportHeight))
         }
         return (leftFills, rightFills, separators)
     }

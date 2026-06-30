@@ -53,7 +53,7 @@ func pickerItemIcon(title string, item protocol.PickerItem) uiIcon {
 		if strings.TrimSpace(item.Description) != "" {
 			return devIconForPath(item.Description, true)
 		}
-		return uiIcon{glyph: "", color: "#61AFEF"}
+		return uiIcon{glyph: "󰉖", color: "#78909C"}
 	}
 	name := item.Label
 	if strings.TrimSpace(item.Description) != "" {
@@ -77,7 +77,7 @@ func whichKeyIcon(binding protocol.WhichKeyBinding) uiIcon {
 	case strings.Contains(label, "file"):
 		return uiIcon{glyph: "󰈞", color: "#61AFEF"}
 	case strings.Contains(label, "project"):
-		return uiIcon{glyph: "", color: "#61AFEF"}
+		return uiIcon{glyph: "󰉖", color: "#78909C"}
 	case strings.Contains(label, "buffer"), strings.Contains(label, "tab"):
 		return uiIcon{glyph: "󰓩", color: "#C678DD"}
 	case strings.Contains(label, "git"):
@@ -121,15 +121,8 @@ func modeIcon(mode string) string {
 }
 
 func devIconForPath(path string, directory bool) uiIcon {
-	if directory && strings.TrimSpace(path) == "" {
-		return uiIcon{glyph: "", color: "#61AFEF"}
-	}
 	if directory {
-		style := devicons.IconForPath(path)
-		if style.Icon != "" {
-			return uiIcon{glyph: style.Icon, color: style.Color}
-		}
-		return uiIcon{glyph: "", color: "#61AFEF"}
+		return uiIcon{glyph: "󰉖", color: "#78909C"}
 	}
 	style := devicons.IconForPath(path)
 	return uiIcon{glyph: style.Icon, color: style.Color}

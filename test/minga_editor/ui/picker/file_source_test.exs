@@ -334,7 +334,7 @@ defmodule MingaEditor.UI.Picker.FileSourceTest do
       assert String.first(enriched.label) != "b"
       assert enriched.description == "lib/foo"
       assert enriched.annotation == "M"
-      assert enriched.two_line == true
+      assert enriched.two_line == false
       assert is_integer(enriched.icon_color)
     end
 

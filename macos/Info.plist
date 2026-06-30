@@ -31,6 +31,17 @@
 	<key>NSSupportsSuddenTermination</key>
 	<false/>
 
+	<!-- TCC usage descriptions: macOS shows these when the app first
+	     accesses a protected directory (Desktop, Documents, etc.).
+	     Without them, sandboxed apps receive silent denial or
+	     show a generic system-supplied prompt with no app-specific explanation. -->
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Minga needs access to your Desktop to open and edit files stored there.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Minga needs access to your Documents to open and edit files stored there.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Minga needs access to your Downloads to open and edit files stored there.</string>
+
 	<!-- Document types: "Open With > Minga" in Finder -->
 	<key>CFBundleDocumentTypes</key>
 	<array>

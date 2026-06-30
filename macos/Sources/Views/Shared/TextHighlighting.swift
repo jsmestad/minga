@@ -9,16 +9,9 @@ import SwiftUI
 enum TextHighlighting {
     /// Builds an AttributedString with matched character positions highlighted.
     ///
-    /// Matched characters are rendered in `matchColor` with semibold weight.
-    /// Unmatched characters use `baseColor` with the base font.
-    ///
-    /// - Parameters:
-    ///   - text: The full text to render.
-    ///   - matchPositions: Set of grapheme cluster indices to highlight.
-    ///   - baseFont: Font for unmatched characters.
-    ///   - matchFont: Font for matched characters (typically semibold variant).
-    ///   - baseColor: Color for unmatched characters.
-    ///   - matchColor: Color for matched characters (typically accent).
+    /// Uses range overrides on a pre-built base string instead of per-character
+    /// appends: O(k) allocations where k = matched positions, not O(n) where
+    /// n = text length.
     static func attributedString(
         _ text: String,
         matchPositions: Set<Int>,
@@ -27,23 +20,50 @@ enum TextHighlighting {
         baseColor: Color,
         matchColor: Color
     ) -> AttributedString {
-        var result = AttributedString()
-        let chars = Array(text)
+        var result = AttributedString(text)
+        result.font = baseFont
+        result.foregroundColor = baseColor
 
-        for (idx, char) in chars.enumerated() {
-            var segment = AttributedString(String(char))
+        guard !matchPositions.isEmpty else { return result }
 
-            if matchPositions.contains(idx) {
-                segment.foregroundColor = matchColor
-                segment.font = matchFont
-            } else {
-                segment.foregroundColor = baseColor
-                segment.font = baseFont
-            }
-
-            result.append(segment)
+        for pos in matchPositions {
+            let strIndex = text.index(text.startIndex, offsetBy: pos, limitedBy: text.endIndex)
+            guard let strIndex, strIndex < text.endIndex else { continue }
+            let nextIndex = text.index(after: strIndex)
+            guard let attrStart = AttributedString.Index(strIndex, within: result),
+                  let attrEnd = AttributedString.Index(nextIndex, within: result) else { continue }
+            result[attrStart..<attrEnd].foregroundColor = matchColor
+            result[attrStart..<attrEnd].font = matchFont
         }
 
         return result
+    }
+
+    /// Computes fuzzy match positions for a query against text.
+    ///
+    /// Splits the query into space-separated segments and finds each segment's
+    /// characters in order within the text. Returns grapheme cluster indices
+    /// of all matched characters.
+    static func fuzzyMatchPositions(_ text: String, query: String) -> Set<Int> {
+        guard !query.isEmpty, !text.isEmpty else { return [] }
+
+        let lowerText = text.lowercased()
+        let textChars = Array(lowerText)
+        var positions = Set<Int>()
+
+        let segments = query.lowercased().split(separator: " ", omittingEmptySubsequences: true)
+        for segment in segments {
+            let segChars = Array(segment)
+            var segIdx = 0
+            for (textIdx, ch) in textChars.enumerated() {
+                guard segIdx < segChars.count else { break }
+                if ch == segChars[segIdx] {
+                    positions.insert(textIdx)
+                    segIdx += 1
+                }
+            }
+        }
+
+        return positions
     }
 }

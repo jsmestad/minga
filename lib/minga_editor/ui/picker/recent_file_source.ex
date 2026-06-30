@@ -45,8 +45,7 @@ defmodule MingaEditor.UI.Picker.RecentFileSource do
         id: rel_path,
         label: "#{icon} #{filename}",
         description: dir_display,
-        icon_color: color,
-        two_line: true
+        icon_color: color
       }
     end)
   catch
