@@ -12,6 +12,7 @@
 /// 5. Gutter separator line
 /// 6. Beam/underline cursor overlay (drawn after text)
 
+import MingaUI
 import Dispatch
 import Metal
 import QuartzCore

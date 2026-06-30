@@ -1,4 +1,5 @@
 import SwiftUI
+import MingaProtocol
 
 /// Change summary sidebar showing files touched by an agent with diff stats.
 ///
@@ -8,12 +9,16 @@ import SwiftUI
 ///
 /// The selected file is highlighted. Clicking a file sends a `change_summary_click`
 /// gui_action to the BEAM, which opens the file and activates diff view.
-struct ChangeSummaryView: View {
-    let state: ChangeSummaryState
+public struct ChangeSummaryView: View {
+    public init(state: ChangeSummaryState, encoder: InputEncoder? = nil) {
+        self.state = state
+        self.encoder = encoder
+    }
+    public let state: ChangeSummaryState
     @Environment(\.themeColors) private var theme
-    let encoder: InputEncoder?
+    public let encoder: InputEncoder?
 
-    var body: some View {
+    public var body: some View {
         VStack(spacing: 0) {
             // Header
             HStack(spacing: 8) {

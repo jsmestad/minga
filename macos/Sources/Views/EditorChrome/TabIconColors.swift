@@ -1,7 +1,7 @@
 import SwiftUI
 
-enum TabIconColors {
-    static func color(forFilename filename: String) -> Color? {
+public enum TabIconColors {
+    public static func color(forFilename filename: String) -> Color? {
         guard let ext = filename.split(separator: ".").last?.lowercased() else { return nil }
         guard let rgb = extensionColors[String(ext)] else { return nil }
         return Color(

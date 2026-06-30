@@ -4,10 +4,10 @@ import SwiftUI
 import MingaProtocol
 
 @MainActor
-enum PreviewFixtures {
+public enum PreviewFixtures {
 
     /// Vim mode used for preview fixture state.
-    enum PreviewMode {
+    public enum PreviewMode {
         case normal
         case insert
     }
@@ -15,7 +15,7 @@ enum PreviewFixtures {
     // MARK: - Theme & Encoder
 
     /// Preview-only theme fixture. Runtime theme selection comes from the BEAM via guiTheme; previews apply explicit slots because ThemeColors itself starts with neutral bootstrap colors.
-    static func theme() -> ThemeColors {
+    public static func theme() -> ThemeColors {
         let theme = ThemeColors()
         theme.applySlots([
             (GUI_COLOR_EDITOR_BG, 0x28, 0x2C, 0x34),
@@ -37,14 +37,13 @@ enum PreviewFixtures {
         return theme
     }
 
-    static func encoder() -> ProtocolEncoder {
-        let output = FileHandle(forWritingAtPath: "/dev/null") ?? .standardOutput
-        return ProtocolEncoder(output: output)
+    public static func encoder() -> InputEncoder {
+        NullInputEncoder()
     }
 
     // MARK: - State Population Helpers
 
-    static func populateFileTree(_ state: FileTreeState) {
+    public static func populateFileTree(_ state: FileTreeState) {
         state.update(
             version: 1,
             selectedId: "lib/minga/editor.ex",
@@ -56,7 +55,7 @@ enum PreviewFixtures {
         )
     }
 
-    static func populateGitStatus(_ state: GitStatusState) {
+    public static func populateGitStatus(_ state: GitStatusState) {
         state.update(
             repoState: .normal,
             branchName: "feat/preview-host",
@@ -72,15 +71,15 @@ enum PreviewFixtures {
         state.commitMessage = "feat(macos): polish preview snapshots"
     }
 
-    static func populateTabBar(_ state: TabBarState) {
+    public static func populateTabBar(_ state: TabBarState) {
         state.update(activeIndex: 0, entries: tabs())
     }
 
-    static func populateCompletion(_ state: CompletionState) {
+    public static func populateCompletion(_ state: CompletionState) {
         state.update(visible: true, anchorRow: 5, anchorCol: 10, selectedIndex: 1, rawItems: completionItems(), documentation: "")
     }
 
-    static func populateAgentChat(_ state: AgentChatState) {
+    public static func populateAgentChat(_ state: AgentChatState) {
         state.update(
             visible: true,
             status: 2,
@@ -101,7 +100,7 @@ enum PreviewFixtures {
 
     // MARK: - StatusBar Helpers
 
-    static func statusBarUpdate(agentVisible: Bool, mode: PreviewMode = .normal) -> StatusBarUpdate {
+    public static func statusBarUpdate(agentVisible: Bool, mode: PreviewMode = .normal) -> StatusBarUpdate {
         let modeValue: UInt8 = mode == .insert ? 1 : 0
         return StatusBarUpdate(
             contentKind: 0, mode: modeValue, cursorLine: 42, cursorCol: 9,
@@ -118,7 +117,7 @@ enum PreviewFixtures {
         )
     }
 
-    static func statusLeftSegments(mode: PreviewMode = .normal) -> [Wire.StatusBarSegment] {
+    public static func statusLeftSegments(mode: PreviewMode = .normal) -> [Wire.StatusBarSegment] {
         let modeSegment: Wire.StatusBarSegment
         switch mode {
         case .normal:
@@ -133,7 +132,7 @@ enum PreviewFixtures {
         ]
     }
 
-    static func statusRightSegments() -> [Wire.StatusBarSegment] {
+    public static func statusRightSegments() -> [Wire.StatusBarSegment] {
         [
             Wire.StatusBarSegment(id: 0, kind: "diagnostics", text: " 0 ", fgColor: 0xF7768E, bgColor: 0x000000, attrs: 0, command: "diagnostic_list"),
             Wire.StatusBarSegment(id: 1, kind: "diagnostics", text: " 2 ", fgColor: 0xE0AF68, bgColor: 0x000000, attrs: 0, command: "diagnostic_list"),
@@ -144,7 +143,7 @@ enum PreviewFixtures {
 
     // MARK: - Data Builders
 
-    static func tabs() -> [Wire.TabEntry] {
+    public static func tabs() -> [Wire.TabEntry] {
         [
             Wire.TabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "\u{E62D}", label: "buffer.ex"),
             Wire.TabEntry(id: 2, groupId: 0, isActive: false, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "\u{E62D}", label: "document.ex"),
@@ -154,7 +153,7 @@ enum PreviewFixtures {
         ]
     }
 
-    static func completionItems() -> [Wire.CompletionItem] {
+    public static func completionItems() -> [Wire.CompletionItem] {
         [
             Wire.CompletionItem(kind: 7, label: "defmodule", detail: "keyword"),
             Wire.CompletionItem(kind: 7, label: "defstruct", detail: "keyword"),
@@ -164,7 +163,7 @@ enum PreviewFixtures {
         ]
     }
 
-    static func gitStatusEntries() -> [GitStatusEntry] {
+    public static func gitStatusEntries() -> [GitStatusEntry] {
         [
             GitStatusEntry(pathHash: 1, section: .staged, status: .modified, path: "lib/minga/editor.ex"),
             GitStatusEntry(pathHash: 2, section: .staged, status: .added, path: "lib/minga/preview.ex"),
@@ -180,7 +179,7 @@ enum PreviewFixtures {
         ]
     }
 
-    static func fileTreeRawEntries() -> [Wire.FileTreeEntry] {
+    public static func fileTreeRawEntries() -> [Wire.FileTreeEntry] {
         [
             wireFileEntry(id: "lib", name: "lib", path: "/Users/dev/code/minga/lib", relPath: "lib", isDir: true, isExpanded: true, depth: 0, icon: "\u{F1247}", iconColor: 0x42A5F5),
             wireFileEntry(id: "lib/minga", name: "minga", path: "/Users/dev/code/minga/lib/minga", relPath: "lib/minga", isDir: true, isExpanded: true, depth: 1, icon: "\u{F0256}", iconColor: 0x78909C),
@@ -200,7 +199,7 @@ enum PreviewFixtures {
         ]
     }
 
-    static func agentChatMessages() -> [Wire.ChatMessage] {
+    public static func agentChatMessages() -> [Wire.ChatMessage] {
         [
             Wire.ChatMessage(beamId: 1, content: .user(text: "The notification card should use our configured theme.")),
             Wire.ChatMessage(beamId: 2, content: .thinking(text: "Inspecting the SwiftUI chrome path and checking whether the notification background bypasses ThemeColors.", collapsed: false)),
@@ -211,13 +210,13 @@ enum PreviewFixtures {
         ]
     }
 
-    static func styledRun(_ text: String, _ r: UInt8, _ g: UInt8, _ b: UInt8, bold: Bool = false) -> Wire.StyledTextRun {
+    public static func styledRun(_ text: String, _ r: UInt8, _ g: UInt8, _ b: UInt8, bold: Bool = false) -> Wire.StyledTextRun {
         Wire.StyledTextRun(text: text, fgR: r, fgG: g, fgB: b, bgR: 0, bgG: 0, bgB: 0, bold: bold, italic: false, underline: false)
     }
 
     // MARK: - Wire Helpers
 
-    static func wireFileEntry(
+    public static func wireFileEntry(
         id: String,
         name: String,
         path: String,

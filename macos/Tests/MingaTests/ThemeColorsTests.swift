@@ -4,6 +4,7 @@
 /// property. Catches slot ID mismatches, duplicates, and missing entries
 /// in the manual switch statement.
 
+import MingaUI
 import Testing
 import SwiftUI
 import MingaProtocol

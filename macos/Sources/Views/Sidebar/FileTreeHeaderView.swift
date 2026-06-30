@@ -6,12 +6,18 @@
 
 import SwiftUI
 
-struct FileTreeHeaderView: View {
-    let fileTreeState: FileTreeState
+public struct FileTreeHeaderView: View {
+    public init(fileTreeState: FileTreeState, encoder: InputEncoder? = nil, branchName: String, leadingPadding: CGFloat) {
+        self.fileTreeState = fileTreeState
+        self.encoder = encoder
+        self.branchName = branchName
+        self.leadingPadding = leadingPadding
+    }
+    public let fileTreeState: FileTreeState
     @Environment(\.themeColors) private var theme
-    let encoder: InputEncoder?
-    let branchName: String
-    let leadingPadding: CGFloat
+    public let encoder: InputEncoder?
+    public let branchName: String
+    public let leadingPadding: CGFloat
 
     @State private var isHovered = false
 
@@ -21,7 +27,7 @@ struct FileTreeHeaderView: View {
         reduceMotion ? 0 : 0.15
     }
 
-    var body: some View {
+    public var body: some View {
         HStack(spacing: 8) {
             projectContext
                 .layoutPriority(2)
@@ -133,7 +139,7 @@ struct FileTreeHeaderView: View {
         )
     }
 
-    var accessibilityLabelText: String {
+    public var accessibilityLabelText: String {
         if branchName.isEmpty {
             return "File tree for \(projectName)"
         }

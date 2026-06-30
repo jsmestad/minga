@@ -5,13 +5,18 @@
 
 import SwiftUI
 
-struct GitStatusHeaderView: View {
-    let state: GitStatusState
+public struct GitStatusHeaderView: View {
+    public init(state: GitStatusState, projectName: String, leadingPadding: CGFloat) {
+        self.state = state
+        self.projectName = projectName
+        self.leadingPadding = leadingPadding
+    }
+    public let state: GitStatusState
     @Environment(\.themeColors) private var theme
-    let projectName: String
-    let leadingPadding: CGFloat
+    public let projectName: String
+    public let leadingPadding: CGFloat
 
-    var body: some View {
+    public var body: some View {
         HStack(spacing: 6) {
             Text("\u{F0256}")
                 .font(.custom("Symbols Nerd Font Mono", size: 12))

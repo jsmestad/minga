@@ -3,7 +3,7 @@
 /// These are core protocol/view model types used by shared agent context chrome and change summaries.
 
 /// Agent status badge, decoded from protocol status bytes.
-enum CardStatus: UInt8, Equatable, Sendable {
+public enum CardStatus: UInt8, Equatable, Sendable {
     case idle = 0
     case working = 1
     case iterating = 2
@@ -12,7 +12,7 @@ enum CardStatus: UInt8, Equatable, Sendable {
     case errored = 5
 
     /// Human-readable label for the status badge.
-    var label: String {
+    public var label: String {
         switch self {
         case .idle: "Idle"
         case .working: "Working"
@@ -24,7 +24,7 @@ enum CardStatus: UInt8, Equatable, Sendable {
     }
 
     /// Badge color as RGB tuple.
-    var color: (r: Double, g: Double, b: Double) {
+    public var color: (r: Double, g: Double, b: Double) {
         switch self {
         case .idle: (0.5, 0.5, 0.5)
         case .working: (0.2, 0.8, 0.4)
@@ -37,22 +37,30 @@ enum CardStatus: UInt8, Equatable, Sendable {
 }
 
 /// A single file entry in the change summary with its diff stats.
-struct ChangeSummaryEntry: Identifiable, Equatable, Sendable {
-    let id: Int
-    let path: String
-    let action: FileAction
-    let linesAdded: UInt32
-    let linesRemoved: UInt32
+public struct ChangeSummaryEntry: Identifiable, Equatable, Sendable {
+    public let id: Int
+    public let path: String
+    public let action: FileAction
+    public let linesAdded: UInt32
+    public let linesRemoved: UInt32
+
+    public init(id: Int, path: String, action: FileAction, linesAdded: UInt32, linesRemoved: UInt32) {
+        self.id = id
+        self.path = path
+        self.action = action
+        self.linesAdded = linesAdded
+        self.linesRemoved = linesRemoved
+    }
 
     /// File action type: modified, added, deleted, or renamed.
-    enum FileAction: UInt8, Equatable, Sendable {
+    public enum FileAction: UInt8, Equatable, Sendable {
         case modified = 0
         case added = 1
         case deleted = 2
         case renamed = 3
 
         /// Single-letter status indicator.
-        var indicator: String {
+        public var indicator: String {
             switch self {
             case .modified: "M"
             case .added: "A"
@@ -62,7 +70,7 @@ struct ChangeSummaryEntry: Identifiable, Equatable, Sendable {
         }
 
         /// Color for the status indicator.
-        var color: (r: Double, g: Double, b: Double) {
+        public var color: (r: Double, g: Double, b: Double) {
             switch self {
             case .modified: (0.38, 0.69, 0.93)
             case .added: (0.2, 0.8, 0.4)

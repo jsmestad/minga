@@ -2,10 +2,13 @@ import SwiftUI
 import MingaProtocol
 
 /// Renders an extension panel's structured content blocks with native SwiftUI widgets.
-struct ExtensionPanelView: View {
-    let panel: Wire.ExtensionPanelEntry
+public struct ExtensionPanelView: View {
+    public init(panel: Wire.ExtensionPanelEntry) {
+        self.panel = panel
+    }
+    public let panel: Wire.ExtensionPanelEntry
 
-    var body: some View {
+    public var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if !panel.title.isEmpty {
                 Text(panel.title)

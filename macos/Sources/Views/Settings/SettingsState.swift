@@ -4,15 +4,15 @@ import SwiftUI
 import MingaProtocol
 
 /// Line number styles exposed by the native settings panel.
-enum SettingsLineNumberStyle: String, CaseIterable, Identifiable, Sendable {
+public enum SettingsLineNumberStyle: String, CaseIterable, Identifiable, Sendable {
     case none
     case absolute
     case relative
     case hybrid
 
-    var id: String { rawValue }
+    public var id: String { rawValue }
 
-    var label: String {
+    public var label: String {
         switch self {
         case .none: return "Off"
         case .absolute: return "Absolute"
@@ -25,28 +25,30 @@ enum SettingsLineNumberStyle: String, CaseIterable, Identifiable, Sendable {
 /// Observable state for the native Settings scene.
 @MainActor
 @Observable
-final class SettingsState {
-    var isLoading: Bool = true
-    var currentThemeName: String = "doom_one"
-    var fontFamily: String = "Menlo"
-    var fontSize: CGFloat = 13
-    var fontWeight: String = "regular"
-    var fontLigatures: Bool = true
-    var tabWidth: Int = 2
-    var lineNumbers: SettingsLineNumberStyle = .absolute
-    var wordWrap: Bool = false
-    var cursorBlink: Bool = true
-    var cursorline: Bool = true
-    var themePreviews: [Wire.ThemePreview] = []
-    var keybindings: [Wire.KeybindingEntry] = []
+public final class SettingsState {
+    public init() {}
 
-    var encoder: InputEncoder?
-    var onCursorBlinkChanged: ((Bool) -> Void)?
+    public var isLoading: Bool = true
+    public var currentThemeName: String = "doom_one"
+    public var fontFamily: String = "Menlo"
+    public var fontSize: CGFloat = 13
+    public var fontWeight: String = "regular"
+    public var fontLigatures: Bool = true
+    public var tabWidth: Int = 2
+    public var lineNumbers: SettingsLineNumberStyle = .absolute
+    public var wordWrap: Bool = false
+    public var cursorBlink: Bool = true
+    public var cursorline: Bool = true
+    public var themePreviews: [Wire.ThemePreview] = []
+    public var keybindings: [Wire.KeybindingEntry] = []
+
+    public var encoder: InputEncoder?
+    public var onCursorBlinkChanged: ((Bool) -> Void)?
 
     private var fontPanelCoordinator: FontPanelCoordinator?
 
     /// Applies a full or incremental settings state push from the BEAM.
-    func apply(configState: Wire.ConfigState) {
+    public func apply(configState: Wire.ConfigState) {
         isLoading = false
 
         for (key, value) in configState.options {
@@ -63,19 +65,19 @@ final class SettingsState {
     }
 
     /// Sends a settings query to the BEAM.
-    func query(using encoder: InputEncoder?) {
+    public func query(using encoder: InputEncoder?) {
         self.encoder = encoder
         isLoading = true
         encoder?.sendConfigQuery()
     }
 
     /// Sends a typed setting update to the BEAM.
-    func update(key: String, value: SettingValue) {
+    public func update(key: String, value: SettingValue) {
         encoder?.sendConfigUpdate(key: key, value: value)
     }
 
     /// Opens the macOS system font panel and routes selections back through config updates.
-    func openFontPanel(using encoder: InputEncoder?) {
+    public func openFontPanel(using encoder: InputEncoder?) {
         self.encoder = encoder
         let coordinator = fontPanelCoordinator ?? FontPanelCoordinator(settingsState: self)
         fontPanelCoordinator = coordinator
@@ -117,14 +119,14 @@ final class SettingsState {
 
 /// AppKit bridge for NSFontPanel changes.
 @MainActor
-final class FontPanelCoordinator: NSObject {
+public final class FontPanelCoordinator: NSObject {
     private weak var settingsState: SettingsState?
 
-    init(settingsState: SettingsState) {
+    public init(settingsState: SettingsState) {
         self.settingsState = settingsState
     }
 
-    @objc func changeFont(_ sender: NSFontManager) {
+    @objc public func changeFont(_ sender: NSFontManager) {
         guard let settingsState else { return }
         let current = NSFont(name: settingsState.fontFamily, size: settingsState.fontSize) ?? .monospacedSystemFont(ofSize: settingsState.fontSize, weight: .regular)
         let converted = sender.convert(current)
@@ -133,7 +135,7 @@ final class FontPanelCoordinator: NSObject {
         settingsState.update(key: "font_size", value: .int(Int(round(converted.pointSize))))
     }
 
-    @objc var validModesForFontPanel: NSFontPanel.ModeMask {
+    @objc public var validModesForFontPanel: NSFontPanel.ModeMask {
         [.face, .size]
     }
 }

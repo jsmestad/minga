@@ -8,14 +8,21 @@ import SwiftUI
 
 @MainActor
 @Observable
-final class FloatPopupState {
-    var visible: Bool = false
-    var title: String = ""
-    var width: Int = 0
-    var height: Int = 0
-    var lines: [String] = []
+public final class FloatPopupState {
+    public init(visible: Bool = false, title: String = "", width: Int = 0, height: Int = 0, lines: [String] = []) {
+        self.visible = visible
+        self.title = title
+        self.width = width
+        self.height = height
+        self.lines = lines
+    }
+    public var visible: Bool = false
+    public var title: String = ""
+    public var width: Int = 0
+    public var height: Int = 0
+    public var lines: [String] = []
 
-    func update(visible: Bool, width: UInt16, height: UInt16, title: String, lines: [String]) {
+    public func update(visible: Bool, width: UInt16, height: UInt16, title: String, lines: [String]) {
         self.visible = visible
         self.width = Int(width)
         self.height = Int(height)
@@ -23,7 +30,7 @@ final class FloatPopupState {
         self.lines = lines
     }
 
-    func hide() {
+    public func hide() {
         visible = false
         lines = []
     }

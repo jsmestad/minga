@@ -1,15 +1,23 @@
 import SwiftUI
 
-struct AgentApprovalCard: View {
-    let name: String
-    let summary: String
-    let toolCallId: String
-    let previewKind: UInt8
-    let previewLines: [String]
+public struct AgentApprovalCard: View {
+    public init(name: String, summary: String, toolCallId: String, previewKind: UInt8, previewLines: [String], encoder: InputEncoder? = nil) {
+        self.name = name
+        self.summary = summary
+        self.toolCallId = toolCallId
+        self.previewKind = previewKind
+        self.previewLines = previewLines
+        self.encoder = encoder
+    }
+    public let name: String
+    public let summary: String
+    public let toolCallId: String
+    public let previewKind: UInt8
+    public let previewLines: [String]
     @Environment(\.themeColors) private var theme
-    let encoder: InputEncoder?
+    public let encoder: InputEncoder?
 
-    var body: some View {
+    public var body: some View {
         let visiblePreviewLines = Array(previewLines.prefix(8))
 
         VStack(alignment: .leading, spacing: 10) {

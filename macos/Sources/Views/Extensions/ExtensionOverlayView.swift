@@ -5,20 +5,30 @@ import SwiftUI
 /// Each overlay entry specifies a cell position (row, col), color, opacity,
 /// shape, and optional content text. The view positions overlay elements
 /// using the cell dimensions from the editor's font metrics.
-struct ExtensionOverlayView: View {
-    let overlayState: ExtensionOverlayState
-    let windowID: UInt16
-    let cellWidth: CGFloat
-    let cellHeight: CGFloat
-    let contentOrigin: CGPoint
+public struct ExtensionOverlayView: View {
+    public init(overlayState: ExtensionOverlayState, windowID: UInt16, cellWidth: CGFloat, cellHeight: CGFloat, contentOrigin: CGPoint, firstColumn: UInt16 = 0, columnCount: UInt16 = 0, rowCount: UInt16 = 0) {
+        self.overlayState = overlayState
+        self.windowID = windowID
+        self.cellWidth = cellWidth
+        self.cellHeight = cellHeight
+        self.contentOrigin = contentOrigin
+        self.firstColumn = firstColumn
+        self.columnCount = columnCount
+        self.rowCount = rowCount
+    }
+    public let overlayState: ExtensionOverlayState
+    public let windowID: UInt16
+    public let cellWidth: CGFloat
+    public let cellHeight: CGFloat
+    public let contentOrigin: CGPoint
     /// Visible text viewport for the window, in cells. Entries outside it are suppressed so
     /// scrolled-out overlays do not draw over the gutter or an adjacent pane. Defaults
     /// (0) mean "viewport unknown, do not suppress".
-    var firstColumn: UInt16 = 0
-    var columnCount: UInt16 = 0
-    var rowCount: UInt16 = 0
+    public var firstColumn: UInt16 = 0
+    public var columnCount: UInt16 = 0
+    public var rowCount: UInt16 = 0
 
-    var body: some View {
+    public var body: some View {
         let entries = overlayState.entries(forWindow: windowID).filter {
             ExtensionOverlayState.isVisible(
                 $0,

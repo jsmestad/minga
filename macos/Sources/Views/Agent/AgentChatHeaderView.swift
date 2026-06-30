@@ -1,14 +1,18 @@
 import SwiftUI
 
-struct AgentChatHeaderView: View {
-    let state: AgentChatState
-    let encoder: InputEncoder?
+public struct AgentChatHeaderView: View {
+    public init(state: AgentChatState, encoder: InputEncoder? = nil) {
+        self.state = state
+        self.encoder = encoder
+    }
+    public let state: AgentChatState
+    public let encoder: InputEncoder?
     @Environment(\.themeColors) private var theme
     @State private var isModelHovered: Bool = false
     @State private var isThinkingHovered: Bool = false
     @State private var isHelpHovered: Bool = false
 
-    var body: some View {
+    public var body: some View {
         HStack(spacing: 8) {
             // Status indicator
             Circle()

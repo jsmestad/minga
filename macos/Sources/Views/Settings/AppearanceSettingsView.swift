@@ -3,13 +3,17 @@ import SwiftUI
 import MingaProtocol
 
 /// Appearance settings: theme and font controls.
-struct AppearanceSettingsView: View {
+public struct AppearanceSettingsView: View {
+    public init(state: SettingsState, encoder: InputEncoder? = nil) {
+        self.state = state
+        self.encoder = encoder
+    }
     @Bindable var state: SettingsState
     let encoder: InputEncoder?
 
     private let columns = [GridItem(.adaptive(minimum: 140), spacing: 12)]
 
-    var body: some View {
+    public var body: some View {
         Form {
             Section("Theme") {
                 if state.isLoading && state.themePreviews.isEmpty {

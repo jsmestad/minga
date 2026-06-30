@@ -15,12 +15,6 @@ import MingaProtocol
 
 // MARK: - Render command types
 
-struct FrontendExtensionRuntimeMessage: Sendable, Equatable {
-    let extensionID: String
-    let channel: String
-    let payload: Data
-}
-
 /// A decoded render command from the BEAM.
 enum RenderCommand: Sendable {
     /// Opens a frame transaction (#2219): frame_seq is the strictly monotonic

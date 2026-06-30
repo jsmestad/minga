@@ -2,22 +2,28 @@ import AppKit
 import SwiftUI
 
 /// Native macOS Settings window for common editor preferences.
-struct SettingsView: View {
-    let appState: AppState
+public struct SettingsView: View {
+    public let state: SettingsState
+    public let encoder: InputEncoder?
 
-    var body: some View {
+    public init(state: SettingsState, encoder: InputEncoder? = nil) {
+        self.state = state
+        self.encoder = encoder
+    }
+
+    public var body: some View {
         TabView {
-            AppearanceSettingsView(state: appState.gui.settingsState, encoder: appState.encoder)
+            AppearanceSettingsView(state: state, encoder: encoder)
                 .tabItem {
                     Label("Appearance", systemImage: "paintpalette")
                 }
 
-            EditorSettingsView(state: appState.gui.settingsState)
+            EditorSettingsView(state: state)
                 .tabItem {
                     Label("Editor", systemImage: "chevron.left.forwardslash.chevron.right")
                 }
 
-            KeybindingsSettingsView(state: appState.gui.settingsState, encoder: appState.encoder)
+            KeybindingsSettingsView(state: state, encoder: encoder)
                 .tabItem {
                     Label("Keybindings", systemImage: "keyboard")
                 }
@@ -26,7 +32,7 @@ struct SettingsView: View {
         .frame(minWidth: 520, minHeight: 360)
         .background(WindowIdentifierSetter(identifier: "MingaSettingsWindow"))
         .onAppear {
-            appState.gui.settingsState.query(using: appState.encoder)
+            state.query(using: encoder)
         }
     }
 }

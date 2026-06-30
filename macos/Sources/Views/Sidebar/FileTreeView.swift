@@ -9,13 +9,13 @@ import AppKit
 import SwiftUI
 
 /// The file tree sidebar rendered on the left side of the window.
-struct FileTreeView: View {
-    let fileTreeState: FileTreeState
+public struct FileTreeView: View {
+    public let fileTreeState: FileTreeState
     @Environment(\.themeColors) private var theme
-    let encoder: InputEncoder?
-    let usesPreviewEagerLayout: Bool
+    public let encoder: InputEncoder?
+    public let usesPreviewEagerLayout: Bool
 
-    init(
+    public init(
         fileTreeState: FileTreeState,
         encoder: InputEncoder?,
         usesPreviewEagerLayout: Bool = false
@@ -61,7 +61,7 @@ struct FileTreeView: View {
             || usesLegacyScrollerStyle
     }
 
-    var body: some View {
+    public var body: some View {
         VStack(spacing: 0) {
             entryList
         }
@@ -471,7 +471,7 @@ struct FileTreeView: View {
 
     /// Handles a drop of URLs onto a tree entry by sending intent to the BEAM.
     /// The BEAM validates stale targets, resolves file targets to their parent directory, and performs filesystem work.
-    func handleDrop(urls: [URL], onto entry: FileTreeEntry) -> Bool {
+    public func handleDrop(urls: [URL], onto entry: FileTreeEntry) -> Bool {
         let sourcePaths = urls.map(\.path).filter { !$0.isEmpty }
         guard !sourcePaths.isEmpty else { return false }
         guard let encoder else { return false }

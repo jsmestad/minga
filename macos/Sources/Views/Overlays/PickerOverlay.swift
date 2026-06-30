@@ -7,10 +7,14 @@
 import SwiftUI
 import MingaProtocol
 
-struct PickerOverlay: View {
-    let state: PickerState
+public struct PickerOverlay: View {
+    public init(state: PickerState, encoder: InputEncoder? = nil) {
+        self.state = state
+        self.encoder = encoder
+    }
+    public let state: PickerState
     @Environment(\.themeColors) private var theme
-    let encoder: InputEncoder?
+    public let encoder: InputEncoder?
 
     private let panelWidth: CGFloat = 600
     private let itemHeight: CGFloat = 24
@@ -21,7 +25,7 @@ struct PickerOverlay: View {
         reduceMotion ? 0 : 0.1
     }
 
-    var body: some View {
+    public var body: some View {
         if state.visible {
             GeometryReader { geo in
                 VStack(spacing: 0) {
@@ -383,8 +387,8 @@ private struct PickerItemRow: View {
     }
 }
 
-#Preview("Picker") {
-    let theme = PreviewFixtures.theme()
+@MainActor
+private func pickerPreviewState() -> PickerState {
     let state = PickerState()
     state.update(
         visible: true,
@@ -405,11 +409,16 @@ private struct PickerItemRow: View {
         actionMenu: nil,
         modePrefix: ""
     )
-    return ZStack(alignment: .top) {
+    return state
+}
+
+#Preview("Picker") {
+    let theme = PreviewFixtures.theme()
+    ZStack(alignment: .top) {
         theme.editorBg
-        PickerOverlay(state: state, encoder: nil)
+        PickerOverlay(state: pickerPreviewState(), encoder: nil)
     }
     .frame(width: 700, height: 500)
     .clipped()
-    .environment(theme)
+    .environment(\.themeColors, theme)
 }

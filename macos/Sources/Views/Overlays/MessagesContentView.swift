@@ -11,16 +11,21 @@
 
 import SwiftUI
 
-struct MessagesContentView: View {
-    @Bindable var state: MessagesContentState
+public struct MessagesContentView: View {
+    public init(state: MessagesContentState, encoder: InputEncoder? = nil, usesPreviewEagerLayout: Bool = false) {
+        self.state = state
+        self.encoder = encoder
+        self.usesPreviewEagerLayout = usesPreviewEagerLayout
+    }
+    @Bindable public var state: MessagesContentState
     @Environment(\.themeColors) private var theme
-    let encoder: InputEncoder?
+    public let encoder: InputEncoder?
     /// Snapshot-only: render the list as a plain, non-lazy stack so every row
     /// lays out for capture. The live lazy ScrollView path renders blank in the
     /// preview harness (same pattern as FileTreeView / GitStatusView).
-    var usesPreviewEagerLayout: Bool = false
+    public var usesPreviewEagerLayout: Bool = false
 
-    var body: some View {
+    public var body: some View {
         VStack(spacing: 0) {
             MessagesFilterBar(state: state)
             entryList

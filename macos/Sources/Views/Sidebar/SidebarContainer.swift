@@ -4,48 +4,57 @@
 
 import SwiftUI
 
-enum SidebarSizing {
-    static let columnWidth: CGFloat = 8
-    static let defaultWidth: CGFloat = 240
-    static let minWidth: CGFloat = 180
-    static let baseMaxWidth: CGFloat = 360
-    static let maxExtraWidth: CGFloat = 144
-    static let hardMaxWidth: CGFloat = 560
+public enum SidebarSizing {
+    public static let columnWidth: CGFloat = 8
+    public static let defaultWidth: CGFloat = 240
+    public static let minWidth: CGFloat = 180
+    public static let baseMaxWidth: CGFloat = 360
+    public static let maxExtraWidth: CGFloat = 144
+    public static let hardMaxWidth: CGFloat = 560
 
-    static func preferredWidth(for item: SidebarItem?) -> CGFloat {
+    public static func preferredWidth(for item: SidebarItem?) -> CGFloat {
         guard let item else { return defaultWidth }
         return max(defaultWidth, CGFloat(item.preferredWidth) * columnWidth)
     }
 
-    static func maxWidth(for item: SidebarItem?) -> CGFloat {
+    public static func maxWidth(for item: SidebarItem?) -> CGFloat {
         let preferred = preferredWidth(for: item)
         guard preferred > defaultWidth else { return baseMaxWidth }
         return min(max(baseMaxWidth, preferred + maxExtraWidth), hardMaxWidth)
     }
 
-    static func clamp(_ width: CGFloat, for item: SidebarItem?) -> CGFloat {
+    public static func clamp(_ width: CGFloat, for item: SidebarItem?) -> CGFloat {
         min(max(width, minWidth), maxWidth(for: item))
     }
 
-    static func widthByApplyingPreferred(for item: SidebarItem?, currentWidth: CGFloat) -> CGFloat {
+    public static func widthByApplyingPreferred(for item: SidebarItem?, currentWidth: CGFloat) -> CGFloat {
         clamp(max(currentWidth, preferredWidth(for: item)), for: item)
     }
 }
 
-struct SidebarContainer: View {
-    let guiState: GUIState
-    let activeSidebar: SidebarItem
+public struct SidebarContainer: View {
+    public init(guiState: GUIState, activeSidebar: SidebarItem, encoder: InputEncoder? = nil, projectName: String, gitBranch: String, leadingPadding: CGFloat, sidebarWidth: Binding<CGFloat>) {
+        self.guiState = guiState
+        self.activeSidebar = activeSidebar
+        self.encoder = encoder
+        self.projectName = projectName
+        self.gitBranch = gitBranch
+        self.leadingPadding = leadingPadding
+        self._sidebarWidth = sidebarWidth
+    }
+    public let guiState: GUIState
+    public let activeSidebar: SidebarItem
     @Environment(\.themeColors) private var theme
-    let encoder: InputEncoder?
-    let projectName: String
-    let gitBranch: String
-    let leadingPadding: CGFloat
-    @Binding var sidebarWidth: CGFloat
+    public let encoder: InputEncoder?
+    public let projectName: String
+    public let gitBranch: String
+    public let leadingPadding: CGFloat
+    @Binding public var sidebarWidth: CGFloat
 
     @State private var isDraggingResize: Bool = false
     @State private var dragStartWidth: CGFloat = 0
 
-    var body: some View {
+    public var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
                 NativeSidebarRegistry

@@ -6,36 +6,45 @@
 
 import SwiftUI
 
-enum SearchFlags {
-    static let replaceMode: UInt8 = 0x01
-    static let caseSensitive: UInt8 = 0x02
-    static let wholeWord: UInt8 = 0x04
-    static let regex: UInt8 = 0x08
+public enum SearchFlags {
+    public static let replaceMode: UInt8 = 0x01
+    public static let caseSensitive: UInt8 = 0x02
+    public static let wholeWord: UInt8 = 0x04
+    public static let regex: UInt8 = 0x08
 }
 
 @MainActor
 @Observable
-final class SearchState {
+public final class SearchState {
+    public init(visible: Bool = false, matchCount: UInt16 = 0, currentIndex: UInt16 = 0, replaceMode: Bool = false, caseSensitive: Bool = false, wholeWord: Bool = false, regex: Bool = false) {
+        self.visible = visible
+        self.matchCount = matchCount
+        self.currentIndex = currentIndex
+        self.replaceMode = replaceMode
+        self.caseSensitive = caseSensitive
+        self.wholeWord = wholeWord
+        self.regex = regex
+    }
     /// Whether the search toolbar is visible.
-    var visible: Bool = false
+    public var visible: Bool = false
 
     /// Total number of matches for the current query.
-    var matchCount: UInt16 = 0
+    public var matchCount: UInt16 = 0
 
     /// 1-based index of the currently highlighted match (0 when no matches).
-    var currentIndex: UInt16 = 0
+    public var currentIndex: UInt16 = 0
 
     /// Whether replace mode is active (shows the replace row).
-    var replaceMode: Bool = false
+    public var replaceMode: Bool = false
 
     /// Whether the search is case-sensitive.
-    var caseSensitive: Bool = false
+    public var caseSensitive: Bool = false
 
     /// Whether the search matches whole words only.
-    var wholeWord: Bool = false
+    public var wholeWord: Bool = false
 
     /// Whether the search query is a regular expression.
-    var regex: Bool = false
+    public var regex: Bool = false
 
     /// Updates the search state from a BEAM gui_search_state command.
     ///
@@ -44,7 +53,7 @@ final class SearchState {
     /// - Bit 1 (0x02): case_sensitive
     /// - Bit 2 (0x04): whole_word
     /// - Bit 3 (0x08): regex
-    func update(active: Bool, matchCount: UInt16, currentIndex: UInt16, flags: UInt8) {
+    public func update(active: Bool, matchCount: UInt16, currentIndex: UInt16, flags: UInt8) {
         self.visible = active
         self.matchCount = matchCount
         self.currentIndex = currentIndex
@@ -55,7 +64,7 @@ final class SearchState {
     }
 
     /// Hides the search toolbar and resets match counters to avoid stale display on re-open.
-    func hide() {
+    public func hide() {
         visible = false
         matchCount = 0
         currentIndex = 0

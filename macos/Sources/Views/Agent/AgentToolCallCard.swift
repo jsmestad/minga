@@ -1,25 +1,40 @@
 import SwiftUI
 import MingaProtocol
 
-struct AgentToolCallCard: View {
-    let messageIndex: Int
-    let name: String
-    let summary: String
-    let status: UInt8
-    let isError: Bool
-    let collapsed: Bool
-    let autoApprovedScope: UInt8
-    let durationMs: UInt32
-    let result: String?
-    let resultLines: [[Wire.StyledTextRun]]?
-    let previewLines: [String]
+public struct AgentToolCallCard: View {
+    public init(messageIndex: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, result: String? = nil, resultLines: [[Wire.StyledTextRun]]? = nil, previewLines: [String], encoder: InputEncoder? = nil, styledLineView: @escaping ([Wire.StyledTextRun], CGFloat, Bool) -> AnyView) {
+        self.messageIndex = messageIndex
+        self.name = name
+        self.summary = summary
+        self.status = status
+        self.isError = isError
+        self.collapsed = collapsed
+        self.autoApprovedScope = autoApprovedScope
+        self.durationMs = durationMs
+        self.result = result
+        self.resultLines = resultLines
+        self.previewLines = previewLines
+        self.encoder = encoder
+        self.styledLineView = styledLineView
+    }
+    public let messageIndex: Int
+    public let name: String
+    public let summary: String
+    public let status: UInt8
+    public let isError: Bool
+    public let collapsed: Bool
+    public let autoApprovedScope: UInt8
+    public let durationMs: UInt32
+    public let result: String?
+    public let resultLines: [[Wire.StyledTextRun]]?
+    public let previewLines: [String]
     @Environment(\.themeColors) private var theme
-    let encoder: InputEncoder?
+    public let encoder: InputEncoder?
     /// Closure to render a styled line, provided by the parent since it's shared
     /// with assistant message rendering.
-    let styledLineView: ([Wire.StyledTextRun], CGFloat, Bool) -> AnyView
+    public let styledLineView: ([Wire.StyledTextRun], CGFloat, Bool) -> AnyView
 
-    var body: some View {
+    public var body: some View {
         let hasResult = result?.isEmpty == false || resultLines?.isEmpty == false
         let visiblePreviewLines = Array(previewLines.prefix(8))
 

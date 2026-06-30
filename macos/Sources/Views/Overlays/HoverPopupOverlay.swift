@@ -25,14 +25,22 @@ private struct HoverWidthKey: PreferenceKey {
     }
 }
 
-struct HoverPopupOverlay: View {
-    let state: HoverPopupState
+public struct HoverPopupOverlay: View {
+    public init(state: HoverPopupState, cellWidth: CGFloat, cellHeight: CGFloat, viewportHeight: CGFloat, viewportWidth: CGFloat, encoder: InputEncoder? = nil) {
+        self.state = state
+        self.cellWidth = cellWidth
+        self.cellHeight = cellHeight
+        self.viewportHeight = viewportHeight
+        self.viewportWidth = viewportWidth
+        self.encoder = encoder
+    }
+    public let state: HoverPopupState
     @Environment(\.themeColors) private var theme
-    let cellWidth: CGFloat
-    let cellHeight: CGFloat
-    let viewportHeight: CGFloat
-    let viewportWidth: CGFloat
-    let encoder: InputEncoder?
+    public let cellWidth: CGFloat
+    public let cellHeight: CGFloat
+    public let viewportHeight: CGFloat
+    public let viewportWidth: CGFloat
+    public let encoder: InputEncoder?
 
     @State private var popupHeight: CGFloat = 0
     @State private var popupWidth: CGFloat = 0
@@ -73,7 +81,7 @@ struct HoverPopupOverlay: View {
         return min(rawX, maxX)
     }
 
-    var body: some View {
+    public var body: some View {
         if state.visible && !state.lines.isEmpty {
             popupContent
                 .frame(maxWidth: maxWidth)

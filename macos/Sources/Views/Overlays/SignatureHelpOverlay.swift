@@ -24,13 +24,20 @@ private struct SigHelpWidthKey: PreferenceKey {
     }
 }
 
-struct SignatureHelpOverlay: View {
-    let state: SignatureHelpState
+public struct SignatureHelpOverlay: View {
+    public init(state: SignatureHelpState, cellWidth: CGFloat, cellHeight: CGFloat, viewportHeight: CGFloat, viewportWidth: CGFloat) {
+        self.state = state
+        self.cellWidth = cellWidth
+        self.cellHeight = cellHeight
+        self.viewportHeight = viewportHeight
+        self.viewportWidth = viewportWidth
+    }
+    public let state: SignatureHelpState
     @Environment(\.themeColors) private var theme
-    let cellWidth: CGFloat
-    let cellHeight: CGFloat
-    let viewportHeight: CGFloat
-    let viewportWidth: CGFloat
+    public let cellWidth: CGFloat
+    public let cellHeight: CGFloat
+    public let viewportHeight: CGFloat
+    public let viewportWidth: CGFloat
 
     @State private var popupHeight: CGFloat = 0
     @State private var popupWidth: CGFloat = 0
@@ -68,7 +75,7 @@ struct SignatureHelpOverlay: View {
         return min(rawX, maxX)
     }
 
-    var body: some View {
+    public var body: some View {
         if state.visible && !state.signatures.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
                 signatureLabel

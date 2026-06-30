@@ -9,6 +9,8 @@
 ///   CommandDispatcher (main thread) → updates FrameState + GUIState → triggers CoreTextMetalRenderer
 ///   EditorNSView (main thread) → keyboard/mouse → ProtocolEncoder → stdout
 
+import MingaProtocol
+import MingaUI
 import SwiftUI
 import AppKit
 import Darwin
@@ -41,7 +43,7 @@ struct MingaApp: App {
         }
 
         Settings {
-            SettingsView(appState: appDelegate.appState)
+            SettingsView(state: appDelegate.appState.gui.settingsState, encoder: appDelegate.appState.encoder)
         }
     }
 }

@@ -1,5 +1,6 @@
 /// Protocol encode/decode round-trip tests.
 
+import MingaUI
 import Testing
 import AppKit
 import Foundation

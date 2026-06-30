@@ -1,5 +1,6 @@
 /// Tests for CoreTextMetalRenderer cursor coordinate selection.
 
+import MingaUI
 import Testing
 import Foundation
 import QuartzCore

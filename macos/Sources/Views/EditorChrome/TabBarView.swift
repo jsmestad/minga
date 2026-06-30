@@ -12,7 +12,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// Context-menu actions that target a specific tab without selecting it first.
-enum TabContextMenuAction: Equatable, Hashable {
+public enum TabContextMenuAction: Equatable, Hashable {
     case pin
     case unpin
     case moveLeft
@@ -20,17 +20,26 @@ enum TabContextMenuAction: Equatable, Hashable {
 }
 
 /// Presentation state for a tab context-menu move item.
-struct TabContextMenuMoveItem: Identifiable, Equatable {
-    let id: TabContextMenuAction
-    let title: String
-    let isDisabled: Bool
+public struct TabContextMenuMoveItem: Identifiable, Equatable {
+    public init(id: TabContextMenuAction, title: String, isDisabled: Bool) {
+        self.id = id
+        self.title = title
+        self.isDisabled = isDisabled
+    }
+    public let id: TabContextMenuAction
+    public let title: String
+    public let isDisabled: Bool
 }
 
 /// The tab bar strip rendered above the editor area.
-struct TabBarView: View {
-    let tabBarState: TabBarState
+public struct TabBarView: View {
+    public init(tabBarState: TabBarState, encoder: InputEncoder? = nil) {
+        self.tabBarState = tabBarState
+        self.encoder = encoder
+    }
+    public let tabBarState: TabBarState
     @Environment(\.themeColors) private var theme
-    let encoder: InputEncoder?
+    public let encoder: InputEncoder?
 
     @State private var hoverTabId: UInt32?
     @State private var dropTargetTabId: UInt32?
@@ -44,7 +53,7 @@ struct TabBarView: View {
     /// Minimum horizontal swipe distance to trigger a workspace switch.
     private let swipeThreshold: CGFloat = 80
 
-    var body: some View {
+    public var body: some View {
         HStack(spacing: 0) {
             // Navigation arrows (back/forward)
             tabBarButton(
@@ -157,7 +166,7 @@ struct TabBarView: View {
         tabBarState.displayTabs
     }
 
-    func performTabContextMenuAction(_ action: TabContextMenuAction, for tab: TabEntry) {
+    public func performTabContextMenuAction(_ action: TabContextMenuAction, for tab: TabEntry) {
         switch action {
         case .pin:
             encoder?.sendTabPin(id: tab.id)
@@ -170,14 +179,14 @@ struct TabBarView: View {
         }
     }
 
-    func tabContextMenuMoveItems(for tab: TabEntry) -> [TabContextMenuMoveItem] {
+    public func tabContextMenuMoveItems(for tab: TabEntry) -> [TabContextMenuMoveItem] {
         [
             TabContextMenuMoveItem(id: .moveLeft, title: "Move Tab Left", isDisabled: !tabBarState.canMoveTabLeft(tab)),
             TabContextMenuMoveItem(id: .moveRight, title: "Move Tab Right", isDisabled: !tabBarState.canMoveTabRight(tab))
         ]
     }
 
-    func handleTabDrop(droppedTabs: [TabDragPayload], target tab: TabEntry, visibleIndex: Int) -> Bool {
+    public func handleTabDrop(droppedTabs: [TabDragPayload], target tab: TabEntry, visibleIndex: Int) -> Bool {
         guard let reorder = tabBarState.tabDropReorder(droppedTabs: droppedTabs, target: tab, visibleIndex: visibleIndex) else {
             return false
         }
@@ -623,12 +632,15 @@ struct TabBarView: View {
 // MARK: - Drag payload
 
 /// App-private tab drag payload used for in-window tab reordering.
-struct TabDragPayload: Codable, Hashable, Sendable, Transferable {
-    static let contentType = UTType(exportedAs: "com.minga.tab-id")
+public struct TabDragPayload: Codable, Hashable, Sendable, Transferable {
+    public init(id: UInt32) {
+        self.id = id
+    }
+    public static let contentType = UTType(exportedAs: "com.minga.tab-id")
 
-    let id: UInt32
+    public let id: UInt32
 
-    static var transferRepresentation: some TransferRepresentation {
+    public static var transferRepresentation: some TransferRepresentation {
         CodableRepresentation(contentType: contentType)
     }
 }

@@ -9,6 +9,7 @@
 /// tests verify structure (what views exist, how many items render,
 /// which text appears) without needing Metal, a window, or pixel output.
 
+import MingaUI
 import Testing
 import SwiftUI
 import UniformTypeIdentifiers

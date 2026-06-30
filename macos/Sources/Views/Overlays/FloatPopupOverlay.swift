@@ -6,11 +6,16 @@
 
 import SwiftUI
 
-struct FloatPopupOverlay: View {
-    let state: FloatPopupState
+public struct FloatPopupOverlay: View {
+    public init(state: FloatPopupState, cellWidth: CGFloat, cellHeight: CGFloat) {
+        self.state = state
+        self.cellWidth = cellWidth
+        self.cellHeight = cellHeight
+    }
+    public let state: FloatPopupState
     @Environment(\.themeColors) private var theme
-    let cellWidth: CGFloat
-    let cellHeight: CGFloat
+    public let cellWidth: CGFloat
+    public let cellHeight: CGFloat
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -28,7 +33,7 @@ struct FloatPopupOverlay: View {
         CGFloat(state.height) * cellHeight
     }
 
-    var body: some View {
+    public var body: some View {
         if state.visible && !state.lines.isEmpty {
             VStack(spacing: 0) {
                 // Title bar

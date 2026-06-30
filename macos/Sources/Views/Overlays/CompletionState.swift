@@ -3,34 +3,49 @@
 import SwiftUI
 import MingaProtocol
 
-struct CompletionItem: Identifiable {
-    let id: Int
-    let kind: UInt8
-    let label: String
-    let detail: String
+public struct CompletionItem: Identifiable {
+    public init(id: Int, kind: UInt8, label: String, detail: String) {
+        self.id = id
+        self.kind = kind
+        self.label = label
+        self.detail = detail
+    }
+    public let id: Int
+    public let kind: UInt8
+    public let label: String
+    public let detail: String
 }
 
 @MainActor
 @Observable
-final class CompletionState {
-    var visible: Bool = false
-    var anchorRow: Int = 0
-    var anchorCol: Int = 0
-    var selectedIndex: Int = 0
-    var previewSelectedIndex: Int?
-    var items: [CompletionItem] = []
+public final class CompletionState {
+    public init(visible: Bool = false, anchorRow: Int = 0, anchorCol: Int = 0, selectedIndex: Int = 0, previewSelectedIndex: Int? = nil, items: [CompletionItem] = [], documentation: String = "") {
+        self.visible = visible
+        self.anchorRow = anchorRow
+        self.anchorCol = anchorCol
+        self.selectedIndex = selectedIndex
+        self.previewSelectedIndex = previewSelectedIndex
+        self.items = items
+        self.documentation = documentation
+    }
+    public var visible: Bool = false
+    public var anchorRow: Int = 0
+    public var anchorCol: Int = 0
+    public var selectedIndex: Int = 0
+    public var previewSelectedIndex: Int?
+    public var items: [CompletionItem] = []
     /// Documentation preview for the selected item (markdown or plaintext from the
     /// LSP completion item). Empty when the selected item has no docs.
-    var documentation: String = ""
+    public var documentation: String = ""
 
-    var effectiveSelectedIndex: Int {
+    public var effectiveSelectedIndex: Int {
         if let preview = previewSelectedIndex, preview >= 0, preview < items.count {
             return preview
         }
         return selectedIndex
     }
 
-    func update(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, rawItems: [Wire.CompletionItem], documentation: String) {
+    public func update(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, rawItems: [Wire.CompletionItem], documentation: String) {
         self.visible = visible
         self.anchorRow = Int(anchorRow)
         self.anchorCol = Int(anchorCol)
@@ -42,7 +57,7 @@ final class CompletionState {
         }
     }
 
-    func previewNavigation(delta: Int) -> Bool {
+    public func previewNavigation(delta: Int) -> Bool {
         guard visible, !items.isEmpty else { return false }
         let current = previewSelectedIndex ?? selectedIndex
         let next = min(max(current + delta, 0), items.count - 1)
@@ -51,7 +66,7 @@ final class CompletionState {
         return true
     }
 
-    func hide() {
+    public func hide() {
         visible = false
         items = []
         previewSelectedIndex = nil

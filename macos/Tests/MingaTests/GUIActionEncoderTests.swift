@@ -9,6 +9,7 @@
 /// never received the calls. The InputEncoder cast fix (commit e9212e03)
 /// made these testable.
 
+import MingaUI
 import Testing
 import Foundation
 import os

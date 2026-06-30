@@ -4,7 +4,7 @@ import SwiftUI
 import MingaProtocol
 
 /// A displayable chat message for SwiftUI rendering.
-enum ChatMessageEntry: Identifiable {
+public enum ChatMessageEntry: Identifiable {
     case user(id: Int, text: String)
     case assistant(id: Int, text: String)
     /// Assistant message with pre-styled text runs from the BEAM (tree-sitter or markdown parser).
@@ -18,7 +18,7 @@ enum ChatMessageEntry: Identifiable {
     case system(id: Int, text: String, isError: Bool)
     case usage(id: Int, input: UInt32, output: UInt32, cacheRead: UInt32, cacheWrite: UInt32, costMicros: UInt32)
 
-    var id: Int {
+    public var id: Int {
         switch self {
         case .user(let id, _), .assistant(let id, _), .styledAssistant(let id, _),
              .assistantMarkdown(let id, _),
@@ -34,51 +34,72 @@ enum ChatMessageEntry: Identifiable {
 }
 
 /// A group of keybindings for the help overlay cheatsheet.
-struct HelpGroup: Identifiable {
-    let title: String
-    let bindings: [(key: String, description: String)]
+public struct HelpGroup: Identifiable {
+    public init(title: String, bindings: [(key: String, description: String)]) {
+        self.title = title
+        self.bindings = bindings
+    }
+    public let title: String
+    public let bindings: [(key: String, description: String)]
 
-    var id: String { title }
+    public var id: String { title }
 }
 
 @MainActor
 @Observable
-final class AgentChatState {
-    var visible: Bool = false
-    var status: UInt8 = 0
-    var model: String = ""
-    var thinkingLevel: String = "medium"
-    var prompt: String = ""
-    var messages: [ChatMessageEntry] = []
-    var helpVisible: Bool = false
-    var helpGroups: [HelpGroup] = []
+public final class AgentChatState {
+    public init(visible: Bool = false, status: UInt8 = 0, model: String = "", thinkingLevel: String = "medium", prompt: String = "", messages: [ChatMessageEntry] = [], helpVisible: Bool = false, helpGroups: [HelpGroup] = [], promptVersion: Int = 0, promptLineCount: UInt8 = 1, promptCursorLine: UInt16 = 0, promptCursorCol: UInt16 = 0, promptVimMode: UInt8 = 0, promptVisibleRows: UInt8 = 1, promptCompletion: Wire.PromptCompletion? = nil) {
+        self.visible = visible
+        self.status = status
+        self.model = model
+        self.thinkingLevel = thinkingLevel
+        self.prompt = prompt
+        self.messages = messages
+        self.helpVisible = helpVisible
+        self.helpGroups = helpGroups
+        self.promptVersion = promptVersion
+        self.promptLineCount = promptLineCount
+        self.promptCursorLine = promptCursorLine
+        self.promptCursorCol = promptCursorCol
+        self.promptVimMode = promptVimMode
+        self.promptVisibleRows = promptVisibleRows
+        self.promptCompletion = promptCompletion
+    }
+    public var visible: Bool = false
+    public var status: UInt8 = 0
+    public var model: String = ""
+    public var thinkingLevel: String = "medium"
+    public var prompt: String = ""
+    public var messages: [ChatMessageEntry] = []
+    public var helpVisible: Bool = false
+    public var helpGroups: [HelpGroup] = []
 
     /// Monotonically increasing counter for change detection.
     /// Increments on every update() so SwiftUI observers detect frame changes.
-    var promptVersion: Int = 0
+    public var promptVersion: Int = 0
 
     // ── Prompt cell-grid metadata (for Metal rendering) ──
 
     /// Number of logical lines in the prompt buffer.
-    var promptLineCount: UInt8 = 1
+    public var promptLineCount: UInt8 = 1
     /// Cursor row within the prompt buffer.
-    var promptCursorLine: UInt16 = 0
+    public var promptCursorLine: UInt16 = 0
     /// Cursor column within the prompt buffer.
-    var promptCursorCol: UInt16 = 0
+    public var promptCursorCol: UInt16 = 0
     /// Vim mode: 0=normal, 1=insert, 2=visual, 3=visual_line, 4=operator_pending.
-    var promptVimMode: UInt8 = 0
+    public var promptVimMode: UInt8 = 0
     /// Number of visible rows in the prompt (after wrapping, clamped to max).
-    var promptVisibleRows: UInt8 = 1
+    public var promptVisibleRows: UInt8 = 1
 
     /// Whether the prompt is in insert mode (for SwiftUI styling).
-    var isPromptInsertMode: Bool { promptVimMode == 1 }
+    public var isPromptInsertMode: Bool { promptVimMode == 1 }
 
     // ── Prompt completion popup ──
 
     /// Active completion popup for @-mention or /slash commands. Nil when no popup is showing.
-    var promptCompletion: Wire.PromptCompletion?
+    public var promptCompletion: Wire.PromptCompletion?
 
-    var statusLabel: String {
+    public var statusLabel: String {
         switch status {
         case 0: return "idle"
         case 1: return "thinking"
@@ -88,14 +109,14 @@ final class AgentChatState {
         }
     }
 
-    var isThinking: Bool { status == 1 || status == 2 }
+    public var isThinking: Bool { status == 1 || status == 2 }
 
-    var displayModel: String {
+    public var displayModel: String {
         guard let separator = model.firstIndex(of: ":") else { return model }
         return String(model[model.index(after: separator)...])
     }
 
-    var thinkingLabel: String {
+    public var thinkingLabel: String {
         switch thinkingLevel {
         case "off": return "Off"
         case "low": return "Low"
@@ -105,7 +126,7 @@ final class AgentChatState {
         }
     }
 
-    var thinkingIconName: String {
+    public var thinkingIconName: String {
         switch thinkingLevel {
         case "medium": return "brain.head.profile"
         case "high": return "brain.head.profile.fill"
@@ -113,7 +134,7 @@ final class AgentChatState {
         }
     }
 
-    func update(visible: Bool, status: UInt8, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptVimMode: UInt8, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, helpVisible: Bool, helpGroups: [HelpGroup], rawMessages: [Wire.ChatMessage]) {
+    public func update(visible: Bool, status: UInt8, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptVimMode: UInt8, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, helpVisible: Bool, helpGroups: [HelpGroup], rawMessages: [Wire.ChatMessage]) {
         self.visible = visible
         self.status = status
         self.model = model
@@ -155,7 +176,7 @@ final class AgentChatState {
         }
     }
 
-    func hide() {
+    public func hide() {
         visible = false
         messages = []
         helpVisible = false

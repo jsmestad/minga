@@ -14,7 +14,7 @@ import Foundation
 /// the bench harness already capture the BEAM-side numbers, and this recorder
 /// makes the GUI keystroke-to-present sample available for a future overlay or
 /// log dump.
-final class LatencyRecorder: @unchecked Sendable {
+public final class LatencyRecorder: @unchecked Sendable {
     /// Bounds the in-flight stamps and recorded samples.
     private let ringSize = 4096
 
@@ -29,17 +29,17 @@ final class LatencyRecorder: @unchecked Sendable {
     private var head = 0
     private var count = 0
 
-    private(set) var resolvedCount: UInt64 = 0
-    private(set) var droppedCount: UInt64 = 0
+    public private(set) var resolvedCount: UInt64 = 0
+    public private(set) var droppedCount: UInt64 = 0
 
-    init(now: @escaping () -> DispatchTime = { DispatchTime.now() }) {
+    public init(now: @escaping () -> DispatchTime = { DispatchTime.now() }) {
         self.now = now
         self.samples = [Double](repeating: 0, count: ringSize)
     }
 
     /// Allocates the next correlation sequence and records the current time.
     /// Sequences start at 1 so 0 stays the "no correlation" sentinel.
-    func stamp() -> UInt32 {
+    public func stamp() -> UInt32 {
         lock.lock()
         defer { lock.unlock() }
 
@@ -62,7 +62,7 @@ final class LatencyRecorder: @unchecked Sendable {
     /// Sequence 0 (no correlation) and unknown sequences are ignored; the BEAM
     /// coalesces rapid keystrokes into one frame, so only the latest sequence in
     /// a frame resolves and earlier ones fall out of `pending` naturally.
-    func resolve(seq: UInt32) {
+    public func resolve(seq: UInt32) {
         guard seq != 0 else { return }
 
         lock.lock()
@@ -81,17 +81,24 @@ final class LatencyRecorder: @unchecked Sendable {
     }
 
     /// Percentile statistics over the buffered samples, in microseconds.
-    struct Stats: Equatable {
-        var count: Int = 0
-        var p50Micros: Double = 0
-        var p99Micros: Double = 0
-        var maxMicros: Double = 0
+    public struct Stats: Equatable, Sendable {
+        public var count: Int = 0
+        public var p50Micros: Double = 0
+        public var p99Micros: Double = 0
+        public var maxMicros: Double = 0
+
+        public init(count: Int = 0, p50Micros: Double = 0, p99Micros: Double = 0, maxMicros: Double = 0) {
+            self.count = count
+            self.p50Micros = p50Micros
+            self.p99Micros = p99Micros
+            self.maxMicros = maxMicros
+        }
     }
 
     /// Returns percentile statistics over the buffered samples. Copies the live
     /// window before sorting so the hot path never blocks on a sort of the
     /// shared buffer.
-    func snapshot() -> Stats {
+    public func snapshot() -> Stats {
         lock.lock()
         var window = [Double]()
         window.reserveCapacity(count)

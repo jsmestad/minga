@@ -11,10 +11,15 @@
 import SwiftUI
 import MingaProtocol
 
-struct MinibufferView: View {
-    let state: MinibufferState
+public struct MinibufferView: View {
+    public init(state: MinibufferState, encoder: InputEncoder? = nil) {
+        self.state = state
+        self.encoder = encoder
+    }
+    public let state: MinibufferState
     @Environment(\.themeColors) private var theme
-    let encoder: InputEncoder?
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    public let encoder: InputEncoder?
 
     @State private var hoveredIndex: Int? = nil
 
@@ -22,7 +27,7 @@ struct MinibufferView: View {
     private let candidateHeight: CGFloat = 26
     private let maxCandidateCount: Int = 15
 
-    var body: some View {
+    public var body: some View {
         VStack(spacing: 0) {
             // Candidate list (expands upward above the input bar)
             if state.hasCandidates {
@@ -44,7 +49,7 @@ struct MinibufferView: View {
             // Top border (fully opaque when Increase Contrast is on)
             Rectangle()
                 .fill(theme.popupBorder.opacity(
-                    NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? 1.0 : 0.3
+                    colorSchemeContrast == .increased ? 1.0 : 0.3
                 ))
                 .frame(height: 1)
 

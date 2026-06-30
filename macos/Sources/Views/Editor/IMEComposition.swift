@@ -8,13 +8,13 @@ import Foundation
 /// Tracks the state of an active IME composition (marked text).
 struct IMEComposition {
     /// The current composition text, or nil if no composition is active.
-    private(set) var markedText: String?
+    public private(set) var markedText: String?
 
     /// Selection range within the marked text.
-    private(set) var selectedRange: NSRange = NSRange(location: NSNotFound, length: 0)
+    public private(set) var selectedRange: NSRange = NSRange(location: NSNotFound, length: 0)
 
     /// Range in the "document" being replaced by this composition.
-    private(set) var replacementRange: NSRange = NSRange(location: NSNotFound, length: 0)
+    public private(set) var replacementRange: NSRange = NSRange(location: NSNotFound, length: 0)
 
     /// Whether a composition is currently active.
     var hasMarkedText: Bool { markedText != nil }

@@ -3,6 +3,7 @@
 /// These tests verify the critical coordinate mapping logic that converts
 /// BEAM display columns (CJK = 2 cols) to Swift String.Index positions.
 
+import MingaUI
 import Testing
 import Foundation
 import Metal

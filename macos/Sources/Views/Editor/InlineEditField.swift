@@ -9,17 +9,23 @@
 
 import SwiftUI
 
-struct InlineEditFieldStyle {
-    let textColor: Color
-    let selectionBackgroundColor: Color
-    let selectionForegroundColor: Color
-    let insertionPointColor: Color
+public struct InlineEditFieldStyle {
+    public init(textColor: Color, selectionBackgroundColor: Color, selectionForegroundColor: Color, insertionPointColor: Color) {
+        self.textColor = textColor
+        self.selectionBackgroundColor = selectionBackgroundColor
+        self.selectionForegroundColor = selectionForegroundColor
+        self.insertionPointColor = insertionPointColor
+    }
+    public let textColor: Color
+    public let selectionBackgroundColor: Color
+    public let selectionForegroundColor: Color
+    public let insertionPointColor: Color
 
-    @MainActor var nsTextColor: NSColor {
+    @MainActor public var nsTextColor: NSColor {
         Self.nsColor(textColor)
     }
 
-    @MainActor func apply(to textView: NSTextView) {
+    @MainActor public func apply(to textView: NSTextView) {
         textView.textColor = nsTextColor
         textView.insertionPointColor = Self.nsColor(insertionPointColor)
         textView.selectedTextAttributes = [
@@ -33,15 +39,22 @@ struct InlineEditFieldStyle {
     }
 }
 
-struct InlineEditField: NSViewRepresentable {
-    let initialText: String
+public struct InlineEditField: NSViewRepresentable {
+    public init(initialText: String, selectStem: Bool, style: InlineEditFieldStyle, onCommit: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
+        self.initialText = initialText
+        self.selectStem = selectStem
+        self.style = style
+        self.onCommit = onCommit
+        self.onCancel = onCancel
+    }
+    public let initialText: String
     /// When true, selects only the stem (before the last dot) on first focus.
-    let selectStem: Bool
-    let style: InlineEditFieldStyle
-    let onCommit: (String) -> Void
-    let onCancel: () -> Void
+    public let selectStem: Bool
+    public let style: InlineEditFieldStyle
+    public let onCommit: (String) -> Void
+    public let onCancel: () -> Void
 
-    func makeNSView(context: Context) -> NSTextField {
+    public func makeNSView(context: Context) -> NSTextField {
         let field = NSTextField()
         field.isBezeled = false
         field.drawsBackground = false
@@ -72,14 +85,14 @@ struct InlineEditField: NSViewRepresentable {
         return field
     }
 
-    func updateNSView(_ nsView: NSTextField, context: Context) {
+    public func updateNSView(_ nsView: NSTextField, context: Context) {
         context.coordinator.style = style
         Self.applyStyle(style, to: nsView)
         // Don't update stringValue on subsequent SwiftUI updates;
         // the user is actively typing and we'd reset their input.
     }
 
-    func makeCoordinator() -> Coordinator {
+    public func makeCoordinator() -> Coordinator {
         Coordinator(style: style, onCommit: onCommit, onCancel: onCancel)
     }
 
@@ -90,19 +103,19 @@ struct InlineEditField: NSViewRepresentable {
         style.apply(to: editor)
     }
 
-    final class Coordinator: NSObject, NSTextFieldDelegate {
-        var style: InlineEditFieldStyle
-        let onCommit: (String) -> Void
-        let onCancel: () -> Void
+    public final class Coordinator: NSObject, NSTextFieldDelegate {
+        public var style: InlineEditFieldStyle
+        public let onCommit: (String) -> Void
+        public let onCancel: () -> Void
         private var committed = false
 
-        init(style: InlineEditFieldStyle, onCommit: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
+        public init(style: InlineEditFieldStyle, onCommit: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
             self.style = style
             self.onCommit = onCommit
             self.onCancel = onCancel
         }
 
-        func controlTextDidBeginEditing(_ obj: Notification) {
+        public func controlTextDidBeginEditing(_ obj: Notification) {
             guard let field = obj.object as? NSTextField,
                   let editor = field.currentEditor() as? NSTextView
             else { return }
@@ -111,7 +124,7 @@ struct InlineEditField: NSViewRepresentable {
             style.apply(to: editor)
         }
 
-        func controlTextDidEndEditing(_ obj: Notification) {
+        public func controlTextDidEndEditing(_ obj: Notification) {
             guard !committed else { return }
             committed = true
 
@@ -128,7 +141,7 @@ struct InlineEditField: NSViewRepresentable {
             }
         }
 
-        func control(
+        public func control(
             _ control: NSControl, textView: NSTextView,
             doCommandBy commandSelector: Selector
         ) -> Bool {

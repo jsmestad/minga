@@ -32,16 +32,26 @@ private struct StatusBarSegmentGroup: Identifiable {
     var segments: [Wire.StatusBarSegment]
 }
 
-struct StatusBarView: View {
-    let state: StatusBarState
-    var feedbackState: FeedbackState?
+public struct StatusBarView: View {
+    public init(state: StatusBarState, feedbackState: FeedbackState? = nil, encoder: InputEncoder? = nil, isFileTreeVisible: Bool = false, isGitStatusVisible: Bool = false, isBottomPanelVisible: Bool = false, isAgentChatVisible: Bool = false, gitSyncing: Bool = false) {
+        self.state = state
+        self.feedbackState = feedbackState
+        self.encoder = encoder
+        self.isFileTreeVisible = isFileTreeVisible
+        self.isGitStatusVisible = isGitStatusVisible
+        self.isBottomPanelVisible = isBottomPanelVisible
+        self.isAgentChatVisible = isAgentChatVisible
+        self.gitSyncing = gitSyncing
+    }
+    public let state: StatusBarState
+    public var feedbackState: FeedbackState?
     @Environment(\.themeColors) private var theme
-    let encoder: InputEncoder?
-    var isFileTreeVisible: Bool = false
-    var isGitStatusVisible: Bool = false
-    var isBottomPanelVisible: Bool = false
-    var isAgentChatVisible: Bool = false
-    var gitSyncing: Bool = false
+    public let encoder: InputEncoder?
+    public var isFileTreeVisible: Bool = false
+    public var isGitStatusVisible: Bool = false
+    public var isBottomPanelVisible: Bool = false
+    public var isAgentChatVisible: Bool = false
+    public var gitSyncing: Bool = false
 
     private let barHeight: CGFloat = 24
     private let sideSpacing: CGFloat = 10
@@ -49,7 +59,7 @@ struct StatusBarView: View {
     private let rightFixedControlsWidth: CGFloat = 34
     private let maxCenterStatusWidth: CGFloat = 320
 
-    var body: some View {
+    public var body: some View {
         GeometryReader { proxy in
             let layout = modelineLayout(totalWidth: proxy.size.width)
 
@@ -140,7 +150,7 @@ struct StatusBarView: View {
         }
     }
 
-    func modelineLayout(totalWidth: CGFloat) -> StatusBarModelineLayout {
+    public func modelineLayout(totalWidth: CGFloat) -> StatusBarModelineLayout {
         StatusBarModelineLayout.compute(
             totalWidth: totalWidth,
             barHeight: barHeight,
@@ -154,7 +164,7 @@ struct StatusBarView: View {
         )
     }
 
-    func modelineLayoutBudgets(totalWidth: CGFloat) -> (leftModeline: CGFloat, rightModeline: CGFloat, center: CGFloat) {
+    public func modelineLayoutBudgets(totalWidth: CGFloat) -> (leftModeline: CGFloat, rightModeline: CGFloat, center: CGFloat) {
         let layout = modelineLayout(totalWidth: totalWidth)
         return (layout.leftModelineWidth, layout.rightModelineWidth, layout.centerRect.width)
     }
@@ -795,19 +805,27 @@ struct StatusBarView: View {
 
 }
 
-struct StatusBarModelineLayout: Equatable {
-    let totalWidth: CGFloat
-    let leftRect: CGRect
-    let centerRect: CGRect
-    let rightRect: CGRect
-    let leftModelineWidth: CGFloat
-    let rightModelineWidth: CGFloat
+public struct StatusBarModelineLayout: Equatable {
+    public init(totalWidth: CGFloat, leftRect: CGRect, centerRect: CGRect, rightRect: CGRect, leftModelineWidth: CGFloat, rightModelineWidth: CGFloat) {
+        self.totalWidth = totalWidth
+        self.leftRect = leftRect
+        self.centerRect = centerRect
+        self.rightRect = rightRect
+        self.leftModelineWidth = leftModelineWidth
+        self.rightModelineWidth = rightModelineWidth
+    }
+    public let totalWidth: CGFloat
+    public let leftRect: CGRect
+    public let centerRect: CGRect
+    public let rightRect: CGRect
+    public let leftModelineWidth: CGFloat
+    public let rightModelineWidth: CGFloat
 
-    var centerIsProtected: Bool {
+    public var centerIsProtected: Bool {
         leftRect.maxX <= centerRect.minX && rightRect.minX >= centerRect.maxX
     }
 
-    static func compute(
+    public static func compute(
         totalWidth: CGFloat,
         barHeight: CGFloat,
         hasCenter: Bool,
@@ -882,8 +900,8 @@ struct StatusBarModelineLayout: Equatable {
 
 // MARK: - Configured modeline segment
 
-enum StatusBarModelineFont {
-    static func containsPrivateUseGlyph(_ text: String) -> Bool {
+public enum StatusBarModelineFont {
+    public static func containsPrivateUseGlyph(_ text: String) -> Bool {
         text.unicodeScalars.contains { scalar in
             isPrivateUseScalar(scalar.value)
         }

@@ -4,40 +4,56 @@ import SwiftUI
 
 /// Context passed to native sidebar adapter builders.
 @MainActor
-struct NativeSidebarContext {
-    let guiState: GUIState
-    let theme: ThemeColors
-    let encoder: InputEncoder?
-    let projectName: String
-    let gitBranch: String
-    let leadingPadding: CGFloat
+public struct NativeSidebarContext {
+    public init(guiState: GUIState, theme: ThemeColors, encoder: InputEncoder? = nil, projectName: String, gitBranch: String, leadingPadding: CGFloat) {
+        self.guiState = guiState
+        self.theme = theme
+        self.encoder = encoder
+        self.projectName = projectName
+        self.gitBranch = gitBranch
+        self.leadingPadding = leadingPadding
+    }
+    public let guiState: GUIState
+    public let theme: ThemeColors
+    public let encoder: InputEncoder?
+    public let projectName: String
+    public let gitBranch: String
+    public let leadingPadding: CGFloat
 }
 
 /// Compiled-in adapter for one semantic sidebar kind.
 @MainActor
-struct NativeSidebarAdapter {
-    let kind: String
-    let fallbackIcon: String
-    let makeHeader: (NativeSidebarContext, SidebarItem) -> AnyView
-    let makeBody: (NativeSidebarContext, SidebarItem) -> AnyView
-    let sendPrimaryAction: (InputEncoder?, SidebarItem, Bool) -> Void
-    let badgeText: (NativeSidebarContext, SidebarItem) -> String?
+public struct NativeSidebarAdapter {
+    public init(kind: String, fallbackIcon: String, makeHeader: @escaping (NativeSidebarContext, SidebarItem) -> AnyView, makeBody: @escaping (NativeSidebarContext, SidebarItem) -> AnyView, sendPrimaryAction: @escaping (InputEncoder?, SidebarItem, Bool) -> Void, badgeText: @escaping (NativeSidebarContext, SidebarItem) -> String?) {
+        self.kind = kind
+        self.fallbackIcon = fallbackIcon
+        self.makeHeader = makeHeader
+        self.makeBody = makeBody
+        self.sendPrimaryAction = sendPrimaryAction
+        self.badgeText = badgeText
+    }
+    public let kind: String
+    public let fallbackIcon: String
+    public let makeHeader: (NativeSidebarContext, SidebarItem) -> AnyView
+    public let makeBody: (NativeSidebarContext, SidebarItem) -> AnyView
+    public let sendPrimaryAction: (InputEncoder?, SidebarItem, Bool) -> Void
+    public let badgeText: (NativeSidebarContext, SidebarItem) -> String?
 }
 
 /// Native sidebar registry. This is intentionally static so extensions cannot load arbitrary Swift code at runtime.
 @MainActor
-enum NativeSidebarRegistry {
+public enum NativeSidebarRegistry {
     private static let adapters: [String: NativeSidebarAdapter] = [
         fileTree.kind: fileTree,
         gitStatus.kind: gitStatus,
         observatory.kind: observatory
     ]
 
-    static func adapter(for kind: String) -> NativeSidebarAdapter? {
+    public static func adapter(for kind: String) -> NativeSidebarAdapter? {
         adapters[kind]
     }
 
-    static func adapterOrFallback(for kind: String) -> NativeSidebarAdapter {
+    public static func adapterOrFallback(for kind: String) -> NativeSidebarAdapter {
         adapters[kind] ?? genericFallback
     }
 

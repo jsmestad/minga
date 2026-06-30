@@ -2,9 +2,14 @@ import SwiftUI
 
 @MainActor
 @Observable
-final class FeedbackState {
-    private(set) var isPending = false
-    private(set) var showingSpinner = false
+public final class FeedbackState {
+    public init(showTask: Task<Void, Never>? = nil, holdTask: Task<Void, Never>? = nil, spinnerOnTime: ContinuousClock.Instant? = nil) {
+        self.showTask = showTask
+        self.holdTask = holdTask
+        self.spinnerOnTime = spinnerOnTime
+    }
+    public private(set) var isPending = false
+    public private(set) var showingSpinner = false
 
     private var showTask: Task<Void, Never>?
     private var holdTask: Task<Void, Never>?
@@ -15,7 +20,7 @@ final class FeedbackState {
     nonisolated static let spinnerHold: Duration = .milliseconds(500)
     nonisolated static let successDwell: Duration = .milliseconds(1_500)
 
-    func update(message: String) {
+    public func update(message: String) {
         guard message != lastMessage else { return }
         lastMessage = message
         let pending = Self.isInflight(message)
@@ -57,7 +62,7 @@ final class FeedbackState {
         }
     }
 
-    func cancel() {
+    public func cancel() {
         isPending = false
         showingSpinner = false
         showTask?.cancel()

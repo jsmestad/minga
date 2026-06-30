@@ -8,11 +8,14 @@
 
 import SwiftUI
 
-struct LatencyHUDOverlay: View {
-    @Bindable var state: LatencyHUDState
+public struct LatencyHUDOverlay: View {
+    public init(state: LatencyHUDState) {
+        self.state = state
+    }
+    @Bindable public var state: LatencyHUDState
     @Environment(\.themeColors) private var theme
 
-    var body: some View {
+    public var body: some View {
         if state.visible {
             let model = state.model
             VStack {

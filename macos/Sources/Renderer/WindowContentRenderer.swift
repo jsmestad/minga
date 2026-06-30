@@ -9,6 +9,7 @@
 /// string. They are returned as overlay quad data for Metal to draw as separate
 /// geometry (zero re-rasterization when selection changes).
 
+import MingaProtocol
 import Foundation
 import CoreText
 import CoreGraphics

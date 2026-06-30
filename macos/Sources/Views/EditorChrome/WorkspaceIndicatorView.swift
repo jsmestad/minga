@@ -1,17 +1,22 @@
 import SwiftUI
 
-struct WorkspaceIndicatorView: View {
-    let workspace: WorkspaceEntry
+public struct WorkspaceIndicatorView: View {
+    public init(workspace: WorkspaceEntry, encoder: InputEncoder? = nil, barHeight: CGFloat) {
+        self.workspace = workspace
+        self.encoder = encoder
+        self.barHeight = barHeight
+    }
+    public let workspace: WorkspaceEntry
     @Environment(\.themeColors) private var theme
-    let encoder: InputEncoder?
-    let barHeight: CGFloat
+    public let encoder: InputEncoder?
+    public let barHeight: CGFloat
 
     @State private var isRenaming: Bool = false
     @State private var renameText: String = ""
     @State private var showIconPicker: Bool = false
     @FocusState private var renameFieldFocused: Bool
 
-    var body: some View {
+    public var body: some View {
         HStack(spacing: 4) {
             Image(systemName: workspace.icon.isEmpty ? "folder" : workspace.icon)
                 .font(.system(size: 10))
@@ -113,12 +118,16 @@ struct WorkspaceIndicatorView: View {
 
 }
 
-struct AgentStatusDot: View {
-    let status: UInt8
-    let color: Color
+public struct AgentStatusDot: View {
+    public init(status: UInt8, color: Color) {
+        self.status = status
+        self.color = color
+    }
+    public let status: UInt8
+    public let color: Color
     @Environment(\.themeColors) private var theme
 
-    var body: some View {
+    public var body: some View {
         Circle()
             .fill(dotColor)
             .frame(width: 6, height: 6)

@@ -9,25 +9,33 @@ import MingaProtocol
 /// A rendered message entry for display in the Messages tab.
 ///
 /// SwiftUI identity is `id`, a `(streamInstance, seq)` composite carried by the wire contract, NOT the raw backend sequence number (`seq`).
-struct MessageEntry: Identifiable, Equatable {
+public struct MessageEntry: Identifiable, Equatable {
+    public init(id: UInt64, level: UInt8, subsystem: UInt8, timestampSecs: UInt32, filePath: String, text: String) {
+        self.id = id
+        self.level = level
+        self.subsystem = subsystem
+        self.timestampSecs = timestampSecs
+        self.filePath = filePath
+        self.text = text
+    }
     /// Restart-safe composite identity: `(UInt64(streamInstance) << 32) | seq`.
-    let id: UInt64
-    let level: UInt8
-    let subsystem: UInt8
-    let timestampSecs: UInt32
-    let filePath: String
-    let text: String
+    public let id: UInt64
+    public let level: UInt8
+    public let subsystem: UInt8
+    public let timestampSecs: UInt32
+    public let filePath: String
+    public let text: String
 
     /// Raw backend sequence number for this entry (the low 32 bits of `id`).
-    var seq: UInt32 { UInt32(id & 0xFFFF_FFFF) }
+    public var seq: UInt32 { UInt32(id & 0xFFFF_FFFF) }
 
     /// Builds the restart-safe composite identity from a producer stream instance and a backend sequence number.
-    static func makeID(streamInstance: UInt32, seq: UInt32) -> UInt64 {
+    public static func makeID(streamInstance: UInt32, seq: UInt32) -> UInt64 {
         (UInt64(streamInstance) << 32) | UInt64(seq)
     }
 
     /// Compact timestamp as HH:MM:SS.
-    var timestamp: String {
+    public var timestamp: String {
         let h = timestampSecs / 3600
         let m = (timestampSecs % 3600) / 60
         let s = timestampSecs % 60
@@ -35,7 +43,7 @@ struct MessageEntry: Identifiable, Equatable {
     }
 
     /// Human-readable level name.
-    var levelName: String {
+    public var levelName: String {
         switch level {
         case 0: return "DEBUG"
         case 1: return "INFO"
@@ -46,7 +54,7 @@ struct MessageEntry: Identifiable, Equatable {
     }
 
     /// Human-readable subsystem name.
-    var subsystemName: String {
+    public var subsystemName: String {
         switch subsystem {
         case 0: return "EDITOR"
         case 1: return "LSP"
@@ -61,7 +69,7 @@ struct MessageEntry: Identifiable, Equatable {
     }
 
     /// Color for the level indicator dot.
-    var levelColor: Color {
+    public var levelColor: Color {
         switch level {
         case 0: return .gray
         case 1: return .green
@@ -72,12 +80,12 @@ struct MessageEntry: Identifiable, Equatable {
     }
 
     /// Color for the subsystem badge.
-    var subsystemColor: Color {
+    public var subsystemColor: Color {
         Self.subsystemColor(for: subsystem)
     }
 
     /// Static lookup for level color by ID (used by filter bar + severity summary).
-    static func levelColor(for level: UInt8) -> Color {
+    public static func levelColor(for level: UInt8) -> Color {
         switch level {
         case 0: return .gray
         case 1: return .green
@@ -90,7 +98,7 @@ struct MessageEntry: Identifiable, Equatable {
     /// Title-case level name for tooltips. Distinct from the instance `levelName`,
     /// which returns the uppercase badge form ("WARN"); the two formats serve
     /// different surfaces, so they are intentionally separate.
-    static func levelTooltip(for level: UInt8) -> String {
+    public static func levelTooltip(for level: UInt8) -> String {
         switch level {
         case 0: return "Debug"
         case 1: return "Info"
@@ -101,7 +109,7 @@ struct MessageEntry: Identifiable, Equatable {
     }
 
     /// Static lookup for subsystem name by ID (used by filter bar).
-    static func subsystemName(for sub: UInt8) -> String {
+    public static func subsystemName(for sub: UInt8) -> String {
         switch sub {
         case 0: return "EDITOR"
         case 1: return "LSP"
@@ -116,7 +124,7 @@ struct MessageEntry: Identifiable, Equatable {
     }
 
     /// Static lookup for subsystem color by ID (used by filter bar).
-    static func subsystemColor(for sub: UInt8) -> Color {
+    public static func subsystemColor(for sub: UInt8) -> Color {
         switch sub {
         case 0: return .blue        // EDITOR
         case 1: return .purple      // LSP
@@ -133,36 +141,44 @@ struct MessageEntry: Identifiable, Equatable {
 
 @MainActor
 @Observable
-final class MessagesContentState {
-    var entries: [MessageEntry] = []
+public final class MessagesContentState {
+    public init(entries: [MessageEntry] = [], isAutoScrolling: Bool = true, hasNewEntries: Bool = false, activeLevels: Set<UInt8> = [1, 2, 3], activeSubsystems: Set<UInt8> = [0, 1, 2, 3, 4, 5, 6, 7], searchText: String = "") {
+        self.entries = entries
+        self.isAutoScrolling = isAutoScrolling
+        self.hasNewEntries = hasNewEntries
+        self.activeLevels = activeLevels
+        self.activeSubsystems = activeSubsystems
+        self.searchText = searchText
+    }
+    public var entries: [MessageEntry] = []
     /// Whether the view should auto-scroll to the latest entry.
-    var isAutoScrolling: Bool = true
+    public var isAutoScrolling: Bool = true
     /// Set to true when new entries arrive while scrolled up (shows "jump to latest").
-    var hasNewEntries: Bool = false
+    public var hasNewEntries: Bool = false
 
     // MARK: - Filters
 
     /// Active log levels. Default: info + warning + error (debug hidden).
-    var activeLevels: Set<UInt8> = [1, 2, 3]
+    public var activeLevels: Set<UInt8> = [1, 2, 3]
     /// Active subsystems. Default: all.
-    var activeSubsystems: Set<UInt8> = [0, 1, 2, 3, 4, 5, 6, 7]
+    public var activeSubsystems: Set<UInt8> = [0, 1, 2, 3, 4, 5, 6, 7]
     /// Text search query (case-insensitive substring match).
-    var searchText: String = ""
+    public var searchText: String = ""
 
     /// All known subsystem IDs.
-    static let allSubsystems: Set<UInt8> = [0, 1, 2, 3, 4, 5, 6, 7]
+    public static let allSubsystems: Set<UInt8> = [0, 1, 2, 3, 4, 5, 6, 7]
     /// Default active levels (info + warning + error).
-    static let defaultLevels: Set<UInt8> = [1, 2, 3]
+    public static let defaultLevels: Set<UInt8> = [1, 2, 3]
 
     /// Whether any filter is active (not at defaults).
-    var isFiltering: Bool {
+    public var isFiltering: Bool {
         activeLevels != Self.defaultLevels
             || activeSubsystems != Self.allSubsystems
             || !searchText.isEmpty
     }
 
     /// Entries after applying all filters.
-    var filteredEntries: [MessageEntry] {
+    public var filteredEntries: [MessageEntry] {
         let search = searchText.lowercased()
         return entries.filter { entry in
             activeLevels.contains(entry.level)
@@ -172,7 +188,7 @@ final class MessagesContentState {
     }
 
     /// Toggle a level filter on/off.
-    func toggleLevel(_ level: UInt8) {
+    public func toggleLevel(_ level: UInt8) {
         if activeLevels.contains(level) {
             activeLevels.remove(level)
         } else {
@@ -181,7 +197,7 @@ final class MessagesContentState {
     }
 
     /// Toggle a subsystem filter on/off.
-    func toggleSubsystem(_ sub: UInt8) {
+    public func toggleSubsystem(_ sub: UInt8) {
         if activeSubsystems.contains(sub) {
             activeSubsystems.remove(sub)
         } else {
@@ -190,14 +206,14 @@ final class MessagesContentState {
     }
 
     /// Reset all filters to defaults.
-    func resetFilters() {
+    public func resetFilters() {
         activeLevels = Self.defaultLevels
         activeSubsystems = Self.allSubsystems
         searchText = ""
     }
 
     /// Set of subsystem IDs that have at least one entry.
-    var presentSubsystems: Set<UInt8> {
+    public var presentSubsystems: Set<UInt8> {
         Set(entries.map(\.subsystem))
     }
 
@@ -205,7 +221,7 @@ final class MessagesContentState {
     private let maxEntries = 1000
 
     /// Append new entries from the protocol decoder.
-    func appendEntries(_ rawEntries: [Wire.MessageEntry]) {
+    public func appendEntries(_ rawEntries: [Wire.MessageEntry]) {
         for raw in rawEntries {
             let entry = MessageEntry(
                 id: MessageEntry.makeID(streamInstance: raw.streamInstance, seq: raw.id),
@@ -227,18 +243,18 @@ final class MessagesContentState {
     }
 
     /// Called when user scrolls to bottom.
-    func scrolledToBottom() {
+    public func scrolledToBottom() {
         isAutoScrolling = true
         hasNewEntries = false
     }
 
     /// Called when user scrolls up.
-    func scrolledUp() {
+    public func scrolledUp() {
         isAutoScrolling = false
     }
 
     /// Jump to latest and re-enable auto-scroll.
-    func jumpToLatest() {
+    public func jumpToLatest() {
         isAutoScrolling = true
         hasNewEntries = false
     }

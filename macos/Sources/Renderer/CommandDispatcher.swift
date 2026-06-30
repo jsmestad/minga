@@ -24,6 +24,8 @@
 /// resync-pending hint (`GUIState.resyncState`) is raised until the next clean
 /// commit lands.
 
+import MingaProtocol
+import MingaUI
 import Foundation
 import AppKit
 import os

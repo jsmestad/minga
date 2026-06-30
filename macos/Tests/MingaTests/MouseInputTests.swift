@@ -8,6 +8,7 @@
 /// NSEvent.mouseEvent creates synthetic events at known pixel positions;
 /// the view's cellPosition divides by cell dimensions to get grid coordinates.
 
+import MingaUI
 import Testing
 import Foundation
 import AppKit

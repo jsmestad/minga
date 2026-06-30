@@ -1,21 +1,30 @@
 import SwiftUI
+import MingaProtocol
 
-struct FrontendExtensionViewContext {
-    let theme: ThemeColors
-    let encoder: InputEncoder?
-    let namespace: Namespace.ID
+public struct FrontendExtensionViewContext {
+    public let theme: ThemeColors
+    public let encoder: InputEncoder?
+    public let namespace: Namespace.ID
+
+    public init(theme: ThemeColors, encoder: InputEncoder? = nil, namespace: Namespace.ID) {
+        self.theme = theme
+        self.encoder = encoder
+        self.namespace = namespace
+    }
 }
 
 @MainActor
-final class FrontendExtensionRuntimeRegistry {
-    typealias Decoder = (FrontendExtensionRuntimeMessage) -> Void
-    typealias ViewBuilder = (FrontendExtensionViewContext) -> AnyView
+public final class FrontendExtensionRuntimeRegistry {
+    public typealias Decoder = (FrontendExtensionRuntimeMessage) -> Void
+    public typealias ViewBuilder = (FrontendExtensionViewContext) -> AnyView
 
     private var decoders: [String: Decoder] = [:]
     private var viewBuilders: [String: ViewBuilder] = [:]
-    private(set) var activeExtensionIDs: [String] = []
+    public private(set) var activeExtensionIDs: [String] = []
 
-    func register(extensionID: String, decoder: @escaping Decoder, view: @escaping ViewBuilder) {
+    public init() {}
+
+    public func register(extensionID: String, decoder: @escaping Decoder, view: @escaping ViewBuilder) {
         decoders[extensionID] = decoder
         viewBuilders[extensionID] = view
         if !activeExtensionIDs.contains(extensionID) {
@@ -23,11 +32,11 @@ final class FrontendExtensionRuntimeRegistry {
         }
     }
 
-    func dispatch(_ message: FrontendExtensionRuntimeMessage) {
+    public func dispatch(_ message: FrontendExtensionRuntimeMessage) {
         decoders[message.extensionID]?(message)
     }
 
-    func view(for extensionID: String, context: FrontendExtensionViewContext) -> AnyView? {
+    public func view(for extensionID: String, context: FrontendExtensionViewContext) -> AnyView? {
         viewBuilders[extensionID]?(context)
     }
 }

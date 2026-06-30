@@ -4,13 +4,18 @@ import SwiftUI
 import MingaProtocol
 
 /// Renders editor notifications owned by the BEAM.
-struct NotificationCenterView: View {
-    let state: NotificationCenterState
+public struct NotificationCenterView: View {
+    public init(state: NotificationCenterState, encoder: InputEncoder? = nil, bottomInset: CGFloat) {
+        self.state = state
+        self.encoder = encoder
+        self.bottomInset = bottomInset
+    }
+    public let state: NotificationCenterState
     @Environment(\.themeColors) private var theme
-    let encoder: InputEncoder?
-    let bottomInset: CGFloat
+    public let encoder: InputEncoder?
+    public let bottomInset: CGFloat
 
-    var body: some View {
+    public var body: some View {
         VStack(alignment: .trailing, spacing: 10) {
             ForEach(state.notifications) { notification in
                 NotificationCard(notification: notification, encoder: encoder)

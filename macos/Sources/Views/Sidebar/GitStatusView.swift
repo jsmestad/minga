@@ -6,13 +6,13 @@
 
 import SwiftUI
 
-struct GitStatusView: View {
-    let state: GitStatusState
+public struct GitStatusView: View {
+    public let state: GitStatusState
     @Environment(\.themeColors) private var theme
-    let encoder: InputEncoder?
-    let usesPreviewEagerLayout: Bool
+    public let encoder: InputEncoder?
+    public let usesPreviewEagerLayout: Bool
 
-    init(
+    public init(
         state: GitStatusState,
         encoder: InputEncoder?,
         usesPreviewEagerLayout: Bool = false
@@ -38,7 +38,7 @@ struct GitStatusView: View {
     @State private var hoveredSection: GitStatusSection? = nil
     @State private var fileToDiscard: GitStatusEntry? = nil
 
-    var body: some View {
+    public var body: some View {
         VStack(spacing: 0) {
             // Toast banner
             if let toast = state.toastMessage {

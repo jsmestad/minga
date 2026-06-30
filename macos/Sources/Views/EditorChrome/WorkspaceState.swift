@@ -2,63 +2,94 @@ import SwiftUI
 import MingaProtocol
 
 /// A workspace summary for native workspace chrome.
-struct WorkspaceSummaryEntry: Identifiable {
-    let id: UInt16
-    let kind: UInt8
-    let agentStatus: UInt8
-    let flags: UInt16
-    let color: Color
-    let tabCount: UInt16
-    let draftCount: UInt16
-    let conflictCount: UInt16
-    let runningBackgroundCount: UInt16
-    let label: String
-    let icon: String
+public struct WorkspaceSummaryEntry: Identifiable {
+    public init(id: UInt16, kind: UInt8, agentStatus: UInt8, flags: UInt16, color: Color, tabCount: UInt16, draftCount: UInt16, conflictCount: UInt16, runningBackgroundCount: UInt16, label: String, icon: String) {
+        self.id = id
+        self.kind = kind
+        self.agentStatus = agentStatus
+        self.flags = flags
+        self.color = color
+        self.tabCount = tabCount
+        self.draftCount = draftCount
+        self.conflictCount = conflictCount
+        self.runningBackgroundCount = runningBackgroundCount
+        self.label = label
+        self.icon = icon
+    }
+    public let id: UInt16
+    public let kind: UInt8
+    public let agentStatus: UInt8
+    public let flags: UInt16
+    public let color: Color
+    public let tabCount: UInt16
+    public let draftCount: UInt16
+    public let conflictCount: UInt16
+    public let runningBackgroundCount: UInt16
+    public let label: String
+    public let icon: String
 
-    var isManual: Bool { kind == 0 }
-    var isAgent: Bool { kind == 1 }
-    var hasAttention: Bool { flags & 0x0001 != 0 }
-    var isCloseable: Bool { flags & 0x0002 != 0 }
+    public var isManual: Bool { kind == 0 }
+    public var isAgent: Bool { kind == 1 }
+    public var hasAttention: Bool { flags & 0x0001 != 0 }
+    public var isCloseable: Bool { flags & 0x0002 != 0 }
 }
 
 /// A visible file tab for the active workspace.
-struct WorkspaceFileTabEntry: Identifiable {
-    let id: UInt32
-    let workspaceId: UInt16
-    let kind: UInt8
-    let flags: UInt16
-    let pathHash: UInt32
-    let icon: String
-    let label: String
-    let path: String
+public struct WorkspaceFileTabEntry: Identifiable {
+    public init(id: UInt32, workspaceId: UInt16, kind: UInt8, flags: UInt16, pathHash: UInt32, icon: String, label: String, path: String) {
+        self.id = id
+        self.workspaceId = workspaceId
+        self.kind = kind
+        self.flags = flags
+        self.pathHash = pathHash
+        self.icon = icon
+        self.label = label
+        self.path = path
+    }
+    public let id: UInt32
+    public let workspaceId: UInt16
+    public let kind: UInt8
+    public let flags: UInt16
+    public let pathHash: UInt32
+    public let icon: String
+    public let label: String
+    public let path: String
 
-    var isDirty: Bool { flags & 0x0001 != 0 }
-    var hasAttention: Bool { flags & 0x0002 != 0 }
-    var isDraft: Bool { flags & 0x0004 != 0 }
-    var isDraftElsewhere: Bool { flags & 0x0008 != 0 }
-    var hasConflict: Bool { flags & 0x0010 != 0 }
+    public var isDirty: Bool { flags & 0x0001 != 0 }
+    public var hasAttention: Bool { flags & 0x0002 != 0 }
+    public var isDraft: Bool { flags & 0x0004 != 0 }
+    public var isDraftElsewhere: Bool { flags & 0x0008 != 0 }
+    public var hasConflict: Bool { flags & 0x0010 != 0 }
 }
 
 /// Observable state for the workspace header and active-workspace file tabs.
 @MainActor
 @Observable
-final class WorkspaceState {
-    var workspaces: [WorkspaceSummaryEntry] = []
-    var visibleTabs: [WorkspaceFileTabEntry] = []
-    var activeWorkspaceId: UInt16 = 0
-    var viewMode: UInt8 = 0
-    var flags: UInt8 = 0
-    var hasCanonicalPayload: Bool = false
+public final class WorkspaceState {
+    public init(workspaces: [WorkspaceSummaryEntry] = [], visibleTabs: [WorkspaceFileTabEntry] = [], activeWorkspaceId: UInt16 = 0, viewMode: UInt8 = 0, flags: UInt8 = 0, hasCanonicalPayload: Bool = false) {
+        self.workspaces = workspaces
+        self.visibleTabs = visibleTabs
+        self.activeWorkspaceId = activeWorkspaceId
+        self.viewMode = viewMode
+        self.flags = flags
+        self.hasCanonicalPayload = hasCanonicalPayload
+    }
+    public var workspaces: [WorkspaceSummaryEntry] = []
+    public var visibleTabs: [WorkspaceFileTabEntry] = []
+    public var activeWorkspaceId: UInt16 = 0
+    public var viewMode: UInt8 = 0
+    public var flags: UInt8 = 0
+    public var hasCanonicalPayload: Bool = false
 
-    var activeWorkspace: WorkspaceSummaryEntry? {
+    public var activeWorkspace: WorkspaceSummaryEntry? {
         workspaces.first { $0.id == activeWorkspaceId }
     }
 
-    var hasAttention: Bool {
+    public var hasAttention: Bool {
         flags & 0x01 != 0 || workspaces.contains(where: { $0.hasAttention })
     }
 
-    var shouldShowHeader: Bool {
+    public var shouldShowHeader: Bool {
         guard hasCanonicalPayload else { return false }
         guard let activeWorkspace else { return false }
 
@@ -76,31 +107,31 @@ final class WorkspaceState {
             backgroundErrorCount > 0
     }
 
-    var backgroundWorkspaces: [WorkspaceSummaryEntry] {
+    public var backgroundWorkspaces: [WorkspaceSummaryEntry] {
         workspaces.filter { $0.id != activeWorkspaceId }
     }
 
-    var backgroundRunningCount: Int {
+    public var backgroundRunningCount: Int {
         backgroundWorkspaces.reduce(0) { $0 + Int($1.runningBackgroundCount) }
     }
 
-    var backgroundDraftCount: Int {
+    public var backgroundDraftCount: Int {
         backgroundWorkspaces.reduce(0) { $0 + Int($1.draftCount) }
     }
 
-    var backgroundConflictCount: Int {
+    public var backgroundConflictCount: Int {
         backgroundWorkspaces.reduce(0) { $0 + Int($1.conflictCount) }
     }
 
-    var backgroundAttentionCount: Int {
+    public var backgroundAttentionCount: Int {
         backgroundWorkspaces.filter { $0.hasAttention }.count
     }
 
-    var backgroundErrorCount: Int {
+    public var backgroundErrorCount: Int {
         backgroundWorkspaces.filter { $0.agentStatus == 3 }.count
     }
 
-    func update(version: UInt8, activeWorkspaceId: UInt16, mode: UInt8, flags: UInt8, workspaces: [Wire.WorkspaceEntry], visibleTabs: [Wire.WorkspaceTabEntry]) {
+    public func update(version: UInt8, activeWorkspaceId: UInt16, mode: UInt8, flags: UInt8, workspaces: [Wire.WorkspaceEntry], visibleTabs: [Wire.WorkspaceTabEntry]) {
         self.activeWorkspaceId = activeWorkspaceId
         self.viewMode = mode
         self.flags = flags
@@ -139,11 +170,11 @@ final class WorkspaceState {
         }
     }
 
-    func switchCommand(for workspace: WorkspaceSummaryEntry) -> String {
+    public func switchCommand(for workspace: WorkspaceSummaryEntry) -> String {
         "workspace_goto_id:\(workspace.id)"
     }
 
-    func hide() {
+    public func hide() {
         workspaces = []
         visibleTabs = []
         activeWorkspaceId = 0

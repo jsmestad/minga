@@ -7,10 +7,14 @@
 import SwiftUI
 import MingaProtocol
 
-struct CompletionOverlay: View {
-    let state: CompletionState
+public struct CompletionOverlay: View {
+    public init(state: CompletionState, encoder: InputEncoder? = nil) {
+        self.state = state
+        self.encoder = encoder
+    }
+    public let state: CompletionState
     @Environment(\.themeColors) private var theme
-    let encoder: InputEncoder?
+    public let encoder: InputEncoder?
 
     private let maxVisibleItems = 10
     private let itemHeight: CGFloat = 24
@@ -20,7 +24,7 @@ struct CompletionOverlay: View {
 
     private let docPaneMaxHeight: CGFloat = 160
 
-    var body: some View {
+    public var body: some View {
         if state.visible && !state.items.isEmpty {
             VStack(spacing: 0) {
                 ScrollViewReader { proxy in
@@ -161,8 +165,8 @@ struct CompletionOverlay: View {
     }
 }
 
-#Preview("Completion") {
-    let theme = PreviewFixtures.theme()
+@MainActor
+private func completionPreviewState() -> CompletionState {
     let state = CompletionState()
     state.update(
         visible: true, anchorRow: 5, anchorCol: 10, selectedIndex: 1,
@@ -175,8 +179,13 @@ struct CompletionOverlay: View {
         ],
         documentation: "Defines a struct for the module.\n\nFields are given as a keyword list."
     )
-    return CompletionOverlay(state: state, encoder: nil)
+    return state
+}
+
+#Preview("Completion") {
+    let theme = PreviewFixtures.theme()
+    CompletionOverlay(state: completionPreviewState(), encoder: nil)
         .frame(width: 400, height: 300)
         .background(theme.editorBg)
-        .environment(theme)
+        .environment(\.themeColors, theme)
 }

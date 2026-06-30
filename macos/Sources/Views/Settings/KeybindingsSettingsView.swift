@@ -2,7 +2,11 @@ import SwiftUI
 import MingaProtocol
 
 /// Read-only keybinding browser with a shortcut to open the hand-written config file.
-struct KeybindingsSettingsView: View {
+public struct KeybindingsSettingsView: View {
+    public init(state: SettingsState, encoder: InputEncoder? = nil) {
+        self.state = state
+        self.encoder = encoder
+    }
     @Bindable var state: SettingsState
     let encoder: InputEncoder?
     @State private var searchText: String = ""
@@ -18,7 +22,7 @@ struct KeybindingsSettingsView: View {
         }
     }
 
-    var body: some View {
+    public var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {

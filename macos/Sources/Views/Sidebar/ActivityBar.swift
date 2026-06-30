@@ -5,16 +5,21 @@
 import SwiftUI
 
 /// Thin VS Code-style icon strip for sidebar panel discovery and switching.
-struct ActivityBar: View {
-    let guiState: GUIState
-    let sidebarHostState: SidebarHostState
+public struct ActivityBar: View {
+    public init(guiState: GUIState, sidebarHostState: SidebarHostState, encoder: InputEncoder? = nil) {
+        self.guiState = guiState
+        self.sidebarHostState = sidebarHostState
+        self.encoder = encoder
+    }
+    public let guiState: GUIState
+    public let sidebarHostState: SidebarHostState
     @Environment(\.themeColors) private var theme
-    let encoder: InputEncoder?
+    public let encoder: InputEncoder?
 
     private let width: CGFloat = 32
     private let buttonSize: CGFloat = 28
 
-    var body: some View {
+    public var body: some View {
         VStack(spacing: 4) {
             ForEach(sidebarHostState.visibleSidebars) { item in
                 activityButton(for: item)
@@ -118,10 +123,11 @@ struct ActivityBar: View {
     }
 }
 
-struct PressableButtonStyle: ButtonStyle {
+public struct PressableButtonStyle: ButtonStyle {
+    public init() {}
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    func makeBody(configuration: Configuration) -> some View {
+    public func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.92 : 1.0)
             .animation(reduceMotion ? nil : .easeInOut(duration: 0.1), value: configuration.isPressed)

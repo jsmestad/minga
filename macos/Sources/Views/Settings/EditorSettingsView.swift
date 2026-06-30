@@ -1,10 +1,13 @@
 import SwiftUI
 
 /// Editor behavior settings.
-struct EditorSettingsView: View {
+public struct EditorSettingsView: View {
+    public init(state: SettingsState) {
+        self.state = state
+    }
     @Bindable var state: SettingsState
 
-    var body: some View {
+    public var body: some View {
         Form {
             Section("Indentation") {
                 Picker("Tab Width", selection: Binding(

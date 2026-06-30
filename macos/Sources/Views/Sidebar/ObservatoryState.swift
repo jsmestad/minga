@@ -5,40 +5,44 @@ import MingaProtocol
 /// Observable state for the BEAM Observatory sidebar.
 @MainActor
 @Observable
-final class ObservatoryState {
-    var visible: Bool = false
-    var nodes: [ObservatoryNode] = []
+public final class ObservatoryState {
+    public init(visible: Bool = false, nodes: [ObservatoryNode] = []) {
+        self.visible = visible
+        self.nodes = nodes
+    }
+    public var visible: Bool = false
+    public var nodes: [ObservatoryNode] = []
 
-    var processCount: Int { nodes.count }
-    var totalMemory: UInt64 { nodes.reduce(UInt64(0)) { $0 + UInt64($1.memory) } }
+    public var processCount: Int { nodes.count }
+    public var totalMemory: UInt64 { nodes.reduce(UInt64(0)) { $0 + UInt64($1.memory) } }
 
     /// Updates state from a decoded gui_observatory protocol message.
-    func update(visible: Bool, rawNodes: [Wire.ObservatoryNode]) {
+    public func update(visible: Bool, rawNodes: [Wire.ObservatoryNode]) {
         self.visible = visible
         self.nodes = rawNodes.map(ObservatoryNode.init(raw:))
     }
 
     /// Hides the Observatory and clears transient selection.
-    func hide() {
+    public func hide() {
         visible = false
         nodes = []
     }
 }
 
 /// SwiftUI view model for a single BEAM process node.
-struct ObservatoryNode: Identifiable, Equatable {
-    let id: String
-    let pid: String
-    let parentPid: String
-    let name: String
-    let processClass: ObservatoryProcessClass
-    let depth: Int
-    let memory: UInt32
-    let messageQueueLen: UInt16
-    let reductions: UInt32
-    let sparkline: [Float]
+public struct ObservatoryNode: Identifiable, Equatable {
+    public let id: String
+    public let pid: String
+    public let parentPid: String
+    public let name: String
+    public let processClass: ObservatoryProcessClass
+    public let depth: Int
+    public let memory: UInt32
+    public let messageQueueLen: UInt16
+    public let reductions: UInt32
+    public let sparkline: [Float]
 
-    init(raw: Wire.ObservatoryNode) {
+    public init(raw: Wire.ObservatoryNode) {
         id = raw.pid
         pid = raw.pid
         parentPid = raw.parentPid
@@ -51,11 +55,11 @@ struct ObservatoryNode: Identifiable, Equatable {
         sparkline = raw.sparkline
     }
 
-    var isSupervisor: Bool { processClass == .supervisor }
+    public var isSupervisor: Bool { processClass == .supervisor }
 }
 
 /// Semantic process class from the BEAM.
-enum ObservatoryProcessClass: UInt8 {
+public enum ObservatoryProcessClass: UInt8 {
     case supervisor = 0
     case buffer = 1
     case agentSession = 2
@@ -63,7 +67,7 @@ enum ObservatoryProcessClass: UInt8 {
     case service = 4
     case worker = 5
 
-    var icon: String {
+    public var icon: String {
         switch self {
         case .supervisor: return "square.stack.3d.up"
         case .buffer: return "doc.text"
@@ -74,7 +78,7 @@ enum ObservatoryProcessClass: UInt8 {
         }
     }
 
-    var label: String {
+    public var label: String {
         switch self {
         case .supervisor: return "supervisor"
         case .buffer: return "buffer"

@@ -9,6 +9,7 @@
 /// context. These tests focus on the special key mapping and modifier
 /// encoding that bypass IME.
 
+import MingaUI
 import Testing
 import Foundation
 import AppKit

@@ -31,6 +31,14 @@ targets:
         type: file
       - path: Sources/Protocol/GUIColorSlots.swift
         type: file
+      - path: Sources/Renderer/WindowContent.swift
+        type: file
+      - path: Sources/Protocol/AgentSurfaceTypes.swift
+        type: file
+      - path: Sources/Protocol/LatencyRecorder.swift
+        type: file
+      - path: Sources/Protocol/FrontendExtensionRuntimeMessage.swift
+        type: file
     settings:
       base:
         GENERATE_INFOPLIST_FILE: "YES"
@@ -38,6 +46,50 @@ targets:
         # No TOOLCHAINS pin: this framework is Metal-toolchain-free so it (and
         # MingaUI) can build SwiftUI canvas previews without the Metal toolchain.
     dependencies: []
+
+  MingaUI:
+    type: framework
+    platform: macOS
+    sources:
+      - path: Sources/Views/Agent
+      - path: Sources/Views/EditorChrome
+      - path: Sources/Views/Extensions
+      - path: Sources/Views/Modifiers
+      - path: Sources/Views/Overlays
+      - path: Sources/Views/Settings
+      - path: Sources/Views/Sidebar
+      - path: Sources/Views/Shared/EditTimelineState.swift
+        type: file
+      - path: Sources/Views/Shared/EditTimelineView.swift
+        type: file
+      - path: Sources/Views/Shared/GUIState.swift
+        type: file
+      - path: Sources/Views/Shared/SparklineView.swift
+        type: file
+      - path: Sources/Views/Shared/TextHighlighting.swift
+        type: file
+      - path: Sources/Views/Shared/ThemeColors.swift
+        type: file
+      - path: Sources/PreviewFixtures.swift
+        type: file
+      - path: Sources/Protocol/InputEncoder.swift
+        type: file
+      - path: Sources/Protocol/PortLogger.swift
+        type: file
+      - path: Sources/Extensions/FrontendExtensionRuntime.swift
+        type: file
+      - path: Sources/Views/Editor/InlineEditField.swift
+        type: file
+      - path: Sources/Views/Editor/BlinkingCursor.swift
+        type: file
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: "YES"
+        PRODUCT_NAME: MingaUI
+        # No TOOLCHAINS pin: this SwiftUI framework is Metal-toolchain-free so it
+        # builds and renders SwiftUI canvas previews without the Metal toolchain.
+    dependencies:
+      - target: MingaProtocol
 
   Minga:
     type: application
@@ -51,6 +103,31 @@ targets:
           - "Protocol/ProtocolTypes.swift"
           - "Protocol/StatusBarUpdate.swift"
           - "Protocol/GUIColorSlots.swift"
+          # MingaProtocol-owned (Slice 3)
+          - "Renderer/WindowContent.swift"
+          - "Protocol/AgentSurfaceTypes.swift"
+          - "Protocol/LatencyRecorder.swift"
+          - "Protocol/FrontendExtensionRuntimeMessage.swift"
+          # MingaUI-owned (Slice 3)
+          - "Protocol/InputEncoder.swift"
+          - "Protocol/PortLogger.swift"
+          - "Extensions/FrontendExtensionRuntime.swift"
+          - "Views/Editor/InlineEditField.swift"
+          - "Views/Editor/BlinkingCursor.swift"
+          - "PreviewFixtures.swift"
+          - "Views/Agent/**"
+          - "Views/EditorChrome/**"
+          - "Views/Extensions/**"
+          - "Views/Modifiers/**"
+          - "Views/Overlays/**"
+          - "Views/Settings/**"
+          - "Views/Sidebar/**"
+          - "Views/Shared/EditTimelineState.swift"
+          - "Views/Shared/EditTimelineView.swift"
+          - "Views/Shared/GUIState.swift"
+          - "Views/Shared/SparklineView.swift"
+          - "Views/Shared/TextHighlighting.swift"
+          - "Views/Shared/ThemeColors.swift"
       - path: .generated/protocol/ProtocolOpcodes.generated.swift
         name: ProtocolOpcodes.generated.swift
         type: file
@@ -80,6 +157,7 @@ targets:
         TOOLCHAINS: com.apple.dt.toolchain.Metal.32023.864
     dependencies:
       - target: MingaProtocol
+      - target: MingaUI
     preBuildScripts:
       - name: Generate protocol opcodes
         script: |
@@ -130,6 +208,31 @@ targets:
           - "Protocol/ProtocolTypes.swift"
           - "Protocol/StatusBarUpdate.swift"
           - "Protocol/GUIColorSlots.swift"
+          # MingaProtocol-owned (Slice 3)
+          - "Renderer/WindowContent.swift"
+          - "Protocol/AgentSurfaceTypes.swift"
+          - "Protocol/LatencyRecorder.swift"
+          - "Protocol/FrontendExtensionRuntimeMessage.swift"
+          # MingaUI-owned (Slice 3)
+          - "Protocol/InputEncoder.swift"
+          - "Protocol/PortLogger.swift"
+          - "Extensions/FrontendExtensionRuntime.swift"
+          - "Views/Editor/InlineEditField.swift"
+          - "Views/Editor/BlinkingCursor.swift"
+          - "PreviewFixtures.swift"
+          - "Views/Agent/**"
+          - "Views/EditorChrome/**"
+          - "Views/Extensions/**"
+          - "Views/Modifiers/**"
+          - "Views/Overlays/**"
+          - "Views/Settings/**"
+          - "Views/Sidebar/**"
+          - "Views/Shared/EditTimelineState.swift"
+          - "Views/Shared/EditTimelineView.swift"
+          - "Views/Shared/GUIState.swift"
+          - "Views/Shared/SparklineView.swift"
+          - "Views/Shared/TextHighlighting.swift"
+          - "Views/Shared/ThemeColors.swift"
       - path: .generated/protocol/ProtocolOpcodes.generated.swift
         name: ProtocolOpcodes.generated.swift
         type: file
@@ -147,6 +250,7 @@ targets:
         TOOLCHAINS: com.apple.dt.toolchain.Metal.32023.864
     dependencies:
       - target: MingaProtocol
+      - target: MingaUI
       - package: ViewInspector
     preBuildScripts:
       - name: Generate protocol opcodes
@@ -170,6 +274,31 @@ targets:
           - "Protocol/ProtocolTypes.swift"
           - "Protocol/StatusBarUpdate.swift"
           - "Protocol/GUIColorSlots.swift"
+          # MingaProtocol-owned (Slice 3)
+          - "Renderer/WindowContent.swift"
+          - "Protocol/AgentSurfaceTypes.swift"
+          - "Protocol/LatencyRecorder.swift"
+          - "Protocol/FrontendExtensionRuntimeMessage.swift"
+          # MingaUI-owned (Slice 3)
+          - "Protocol/InputEncoder.swift"
+          - "Protocol/PortLogger.swift"
+          - "Extensions/FrontendExtensionRuntime.swift"
+          - "Views/Editor/InlineEditField.swift"
+          - "Views/Editor/BlinkingCursor.swift"
+          - "PreviewFixtures.swift"
+          - "Views/Agent/**"
+          - "Views/EditorChrome/**"
+          - "Views/Extensions/**"
+          - "Views/Modifiers/**"
+          - "Views/Overlays/**"
+          - "Views/Settings/**"
+          - "Views/Sidebar/**"
+          - "Views/Shared/EditTimelineState.swift"
+          - "Views/Shared/EditTimelineView.swift"
+          - "Views/Shared/GUIState.swift"
+          - "Views/Shared/SparklineView.swift"
+          - "Views/Shared/TextHighlighting.swift"
+          - "Views/Shared/ThemeColors.swift"
       - path: .generated/protocol/ProtocolOpcodes.generated.swift
         name: ProtocolOpcodes.generated.swift
         type: file
@@ -189,6 +318,7 @@ targets:
         TOOLCHAINS: com.apple.dt.toolchain.Metal.32023.864
     dependencies:
       - target: MingaProtocol
+      - target: MingaUI
     preBuildScripts:
       - name: Generate protocol opcodes
         script: |
