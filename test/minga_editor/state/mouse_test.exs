@@ -3,6 +3,12 @@ defmodule MingaEditor.State.MouseTest do
 
   alias MingaEditor.State.Mouse
 
+  describe "hover_delay_ms/0" do
+    test "is the 300ms VSCode default" do
+      assert Mouse.hover_delay_ms() == 300
+    end
+  end
+
   describe "start_drag/2" do
     test "sets dragging to true and stores the anchor" do
       mouse = %Mouse{} |> Mouse.start_drag({5, 10})

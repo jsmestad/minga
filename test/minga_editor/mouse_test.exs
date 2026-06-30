@@ -645,6 +645,44 @@ defmodule MingaEditor.MouseTest do
     end
   end
 
+  describe "sticky hover popup motion (#2629)" do
+    test "motion inside the popup rect keeps the popup open" do
+      {state, rect} = state_with_hover_popup()
+      {row, col, _w, _h} = rect
+
+      # A free-motion event landing inside the popup's rect must not dismiss it.
+      state = Mouse.handle(state, row, col, :none, 0, :motion, 1)
+
+      assert state.shell_state.hover_popup != nil
+    end
+
+    test "motion outside the popup rect dismisses the popup" do
+      {state, rect} = state_with_hover_popup()
+      {row, col, _w, height} = rect
+
+      # The row directly below the popup's bottom edge is outside it (and below
+      # the popup, which is anchored above the symbol), so motion there dismisses.
+      state = Mouse.handle(state, row + height, col, :none, 0, :motion, 1)
+
+      assert state.shell_state.hover_popup == nil
+    end
+  end
+
+  # Builds a state with an open hover popup and returns its placed screen rect.
+  defp state_with_hover_popup do
+    {state, _buffer} = start_mouse_state("hello\nworld\nfoo bar", width: 80, height: 24)
+    # Headless backend so set_hover does not start a real debounce timer.
+    state = %{state | backend: :headless}
+
+    popup = MingaEditor.HoverPopup.new("Documentation for symbol", 12, 10)
+    state = EditorState.set_hover_popup(state, popup)
+
+    rect = MingaEditor.Layout.SurfaceRegistry.rect_for(state, :hover_popup)
+    assert rect != nil, "expected the hover popup to be placed in the focus tree"
+
+    {state, rect}
+  end
+
   defp start_mouse_state(content, opts \\ []) do
     id = :erlang.unique_integer([:positive])
     events_registry = :"#{__MODULE__}.Events.#{id}"

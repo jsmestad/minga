@@ -322,20 +322,35 @@ defmodule MingaEditor.Mouse do
   # ── Mouse motion (hover tracking) ──
 
   def handle(state, row, col, :none, _mods, :motion, _cc) do
-    # Clear any existing hover popup when the mouse moves
-    state =
-      if state.shell_state.hover_popup != nil do
-        EditorState.dismiss_hover_popup(state)
-      else
-        state
-      end
-
-    update_mouse(state, &MouseState.set_hover(&1, row, col, backend: state.backend))
+    handle_hover_motion(state, row, col)
   end
 
   # ── Ignore all other mouse events ──
 
   def handle(state, _row, _col, _button, _mods, _type, _cc), do: state
+
+  # Free pointer motion drives hover tracking. When a hover popup is open and the
+  # pointer is inside its on-screen rect, the popup is kept alive untouched so the
+  # user can read, scroll, or click it (#2629); restarting the debounce here would
+  # thrash and dismissing it would defeat the point. Anywhere else, motion
+  # (re)starts the hover debounce, dismissing a stale popup first.
+  @spec handle_hover_motion(state(), integer(), integer()) :: state()
+  defp handle_hover_motion(%{shell_state: %{hover_popup: nil}} = state, row, col) do
+    update_mouse(state, &MouseState.set_hover(&1, row, col, backend: state.backend))
+  end
+
+  defp handle_hover_motion(state, row, col) do
+    keep_or_dismiss_hover(state, row, col, SurfaceRegistry.within?(state, :hover_popup, row, col))
+  end
+
+  @spec keep_or_dismiss_hover(state(), integer(), integer(), boolean()) :: state()
+  defp keep_or_dismiss_hover(state, _row, _col, true), do: state
+
+  defp keep_or_dismiss_hover(state, row, col, false) do
+    state
+    |> EditorState.dismiss_hover_popup()
+    |> update_mouse(&MouseState.set_hover(&1, row, col, backend: state.backend))
+  end
 
   @spec update_mouse(state(), (MouseState.t() -> MouseState.t())) :: state()
   defp update_mouse(state, fun) when is_function(fun, 1) do

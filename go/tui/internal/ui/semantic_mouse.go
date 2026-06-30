@@ -177,6 +177,20 @@ func (m Model) presentationScrollWindowAtBody(x int, y int) (uint16, bool) {
 	return 0, false
 }
 
+// mouseInHoverPopup reports whether screen coordinates (x, y) fall inside the
+// hover popup's BEAM placement rect. The placement rect is composited at its
+// row/col as screen coordinates (overlayLayer), so a raw mouse coordinate is
+// compared directly, matching mouseInBottomPanel. Used to suppress free-motion
+// forwarding so motion over the popup does not dismiss it (#2629).
+func (m Model) mouseInHoverPopup(x int, y int) bool {
+	rect, ok := m.surfacePlacementFor(surfaceIDHoverPopup)
+	if !ok {
+		return false
+	}
+	return y >= int(rect.Row) && y < int(rect.Row)+int(rect.Height) &&
+		x >= int(rect.Col) && x < int(rect.Col)+int(rect.Width)
+}
+
 func (m Model) mouseInBottomPanel(y int) bool {
 	// The bottom panel is composited at its BEAM placement rect now (#2281), not
 	// footer-appended, so its on-screen band comes from the placement, not from a
