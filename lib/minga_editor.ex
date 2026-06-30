@@ -866,7 +866,18 @@ defmodule MingaEditor do
     Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
       result =
         try do
-          MingaEditor.UI.Picker.Source.fetch(source_module, ctx)
+          case MingaEditor.UI.Picker.Source.fetch(source_module, ctx) do
+            {:ok, items, meta} ->
+              # Build the candidate cache here, off the editor process. The O(n)
+              # normalization (downcase, grapheme split, search-text join) is the
+              # work that froze the editor when a source returned 100K+ paths
+              # (#2628); doing it in the Task means the editor handler only swaps
+              # in the finished list instead of normalizing every path inline.
+              {:ok, items, MingaEditor.UI.Picker.Candidate.from_items(items), meta}
+
+            {:error, _reason} = error ->
+              error
+          end
         rescue
           e -> {:error, Exception.message(e)}
         catch
@@ -985,11 +996,15 @@ defmodule MingaEditor do
   @spec handle_picker_candidates(
           state(),
           PickerPayload.t(),
-          {:ok, [term()], MingaEditor.UI.Picker.Source.fetch_meta()} | {:error, String.t()}
+          {:ok, [term()], [MingaEditor.UI.Picker.Candidate.t()],
+           MingaEditor.UI.Picker.Source.fetch_meta()}
+          | {:error, String.t()}
         ) :: state()
-  defp handle_picker_candidates(state, payload, {:ok, items, meta}) do
+  defp handle_picker_candidates(state, payload, {:ok, items, candidates, meta}) do
     picker_state = payload.picker_ui
-    picker = MingaEditor.UI.Picker.replace_items(picker_state.picker, items)
+    # Candidates are pre-built by the fetch Task (#2628); the editor only swaps
+    # them in here, so the input loop stays responsive on large directories.
+    picker = MingaEditor.UI.Picker.put_candidates(picker_state.picker, items, candidates)
     new_picker_state = %{picker_state | picker: picker, load_status: :ready}
 
     state
