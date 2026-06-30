@@ -39,6 +39,7 @@ defmodule MingaEditor.State.FileTree do
   @type t :: %__MODULE__{
           tree: FileTree.t() | nil,
           focused: boolean(),
+          hidden: boolean(),
           buffer: pid() | nil,
           editing: editing() | nil,
           project_root: String.t() | nil,
@@ -55,6 +56,7 @@ defmodule MingaEditor.State.FileTree do
 
   defstruct tree: nil,
             focused: false,
+            hidden: false,
             buffer: nil,
             editing: nil,
             project_root: nil,
@@ -68,10 +70,21 @@ defmodule MingaEditor.State.FileTree do
             filtering: false,
             help_visible: false
 
-  @doc "Returns true when the file tree is open."
-  @spec open?(t()) :: boolean()
-  def open?(%__MODULE__{tree: nil}), do: false
-  def open?(%__MODULE__{}), do: true
+  @doc """
+  Returns true when the file tree has loaded data.
+
+  A hidden-but-loaded tree is still loaded: the data, buffer, and watchers stay
+  alive so refresh handlers keep it fresh. This is intentionally NOT "is the
+  sidebar visible" — use `visible?/1` for that. Mixing the two leaks the backing
+  buffer (see #2626).
+  """
+  @spec loaded?(t()) :: boolean()
+  def loaded?(%__MODULE__{tree: nil}), do: false
+  def loaded?(%__MODULE__{}), do: true
+
+  @doc "Returns true when the sidebar is currently visible (loaded and not hidden)."
+  @spec visible?(t()) :: boolean()
+  def visible?(%__MODULE__{} = ft), do: visible_status?(status(ft))
 
   @doc "Returns true when the file tree is open and focused."
   @spec focused?(t()) :: boolean()
@@ -88,6 +101,10 @@ defmodule MingaEditor.State.FileTree do
   def status(%__MODULE__{tree: nil, tree_status: status}) when status in [:loading], do: status
   def status(%__MODULE__{tree: nil, tree_status: {:error, _reason} = status}), do: status
   def status(%__MODULE__{tree: nil}), do: :hidden
+
+  # A loaded tree whose sidebar has been toggled off. The data and watchers stay
+  # alive so showing it again is a pure layout change (#2626).
+  def status(%__MODULE__{tree: %FileTree{}, hidden: true}), do: :hidden
 
   def status(%__MODULE__{tree: %FileTree{}, tree_status: :hidden} = ft),
     do: classify_tree(ft.tree)
@@ -110,6 +127,21 @@ defmodule MingaEditor.State.FileTree do
   @spec unfocus(t()) :: t()
   def unfocus(%__MODULE__{} = ft), do: %{ft | focused: false}
 
+  @doc """
+  Hides the sidebar while keeping the loaded tree, backing buffer, and watchers.
+
+  Toggling visibility off is a pure layout change: the render model still carries
+  the full tree data so showing it again does not rebuild anything (#2626).
+  """
+  @spec hide(t()) :: t()
+  def hide(%__MODULE__{} = ft) do
+    %{ft | hidden: true, focused: false, editing: nil, filtering: false, help_visible: false}
+  end
+
+  @doc "Reveals a previously hidden tree and refocuses it."
+  @spec show(t()) :: t()
+  def show(%__MODULE__{} = ft), do: %{ft | hidden: false, focused: true}
+
   @doc "Returns the tree width, preserving the last sidebar width while state-only payloads are visible."
   @spec width(t()) :: pos_integer()
   def width(%__MODULE__{tree: nil, tree_width: width}), do: width
@@ -124,6 +156,7 @@ defmodule MingaEditor.State.FileTree do
       ft
       | tree: tree,
         focused: true,
+        hidden: false,
         buffer: buffer,
         project_root: tree.root,
         original_root: ft.original_root || tree.root,
@@ -229,6 +262,7 @@ defmodule MingaEditor.State.FileTree do
       ft
       | tree: nil,
         focused: false,
+        hidden: false,
         buffer: nil,
         editing: nil,
         tree_status: :hidden,

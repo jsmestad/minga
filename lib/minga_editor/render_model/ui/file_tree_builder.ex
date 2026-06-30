@@ -23,12 +23,7 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
   @spec build(Context.t()) :: FileTreeModel.t()
   def build(%Context{file_tree: %{tree: %FileTree{} = tree} = file_tree} = ctx) do
     tree = FileTree.ensure_entries(tree)
-    tree_status = FileTreeState.status(file_tree)
-
-    case tree_status do
-      :ready -> build_ready(tree, file_tree, ctx)
-      status -> build_state(file_tree, status)
-    end
+    build_for_status(FileTreeState.status(file_tree), tree, file_tree, ctx)
   end
 
   def build(%Context{file_tree: %FileTreeState{} = file_tree}) do
@@ -46,8 +41,27 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
     build_hidden(nil)
   end
 
-  @spec build_ready(FileTree.t(), FileTreeState.t(), Context.t()) :: FileTreeModel.t()
-  defp build_ready(tree, file_tree, ctx) do
+  # A ready or hidden tree always carries its full row set. Hidden differs only
+  # in the status flag: the data lives in the frame and the frontend decides
+  # whether to render it, so toggling the sidebar is a pure layout change (#2626).
+  @spec build_for_status(
+          FileTreeState.tree_status(),
+          FileTree.t(),
+          FileTreeState.t(),
+          Context.t()
+        ) ::
+          FileTreeModel.t()
+  defp build_for_status(:ready, tree, file_tree, ctx),
+    do: build_full(tree, file_tree, ctx, :ready)
+
+  defp build_for_status(:hidden, tree, file_tree, ctx),
+    do: build_full(tree, file_tree, ctx, :hidden)
+
+  defp build_for_status(status, _tree, file_tree, _ctx), do: build_state(file_tree, status)
+
+  @spec build_full(FileTree.t(), FileTreeState.t(), Context.t(), FileTreeModel.status()) ::
+          FileTreeModel.t()
+  defp build_full(tree, file_tree, ctx, status) do
     active_path = active_buffer_path(ctx)
     dirty_path_set = dirty_paths(ctx.buffers)
     diagnostics = file_tree_diagnostics(tree.root)
@@ -69,7 +83,7 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
     %FileTreeModel{
       root_path: tree.root,
       tree_width: tree.width,
-      status: :ready,
+      status: status,
       focused?: file_tree_focused?(file_tree),
       local_navigation?: local_navigation?(file_tree),
       selected_id: selected_row_id(tree),

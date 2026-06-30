@@ -40,6 +40,61 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoderTest do
 
       assert <<@op_gui_file_tree, _len::32, _payload::binary>> = cmd2
     end
+
+    test "encodes a hidden tree that still carries its rows with the visible flag off" do
+      # A hidden-but-loaded tree (#2626): full data in the frame, but the frontend
+      # must not render it, so the visible bit (0x01) stays clear.
+      model = %{ready_tree("/project/a.ex") | status: :hidden, focused?: false}
+
+      {cmd, _caches} = FileTreeEncoder.encode(model, Caches.new())
+
+      assert <<@op_gui_file_tree, len::32, payload::binary-size(len)>> = cmd
+      assert <<2::8, tree_flags::8, _tree_state::8, _rest::binary>> = payload
+      assert Bitwise.band(tree_flags, 0x01) == 0
+      # Row count is preserved (2 rows), proving the data is encoded while hidden.
+      assert <<2::8, _flags::8, _state::8, sel::binary>> = payload
+
+      assert <<sel_len::16, _selected_id::binary-size(sel_len), root_len::16,
+               _root::binary-size(root_len), _tree_width::16, 2::16, _rest::binary>> = sel
+    end
+
+    test "re-emits the hidden tree only when its rows change (fingerprint cache)" do
+      model = %{ready_tree("/project/a.ex") | status: :hidden, focused?: false}
+
+      {cmd1, caches} = FileTreeEncoder.encode(model, Caches.new())
+      {cmd2, caches} = FileTreeEncoder.encode(model, caches)
+
+      changed = %{model | rows: [row("/project/a.ex"), row("/project/c.ex")]}
+      {cmd3, _caches} = FileTreeEncoder.encode(changed, caches)
+
+      assert <<@op_gui_file_tree, _::32, _::binary>> = cmd1
+      assert cmd2 == nil
+      assert <<@op_gui_file_tree, _::32, _::binary>> = cmd3
+    end
+
+    test "re-emits across a toggle cycle so the visible flag flips even when rows are unchanged" do
+      # Hold focus and rows constant so ONLY `status` changes between frames.
+      # This locks in that the status bit participates in re-emission: if a future
+      # refactor moved `status` out of the structural fingerprint, these
+      # transitions would silently cache-hit (returning nil) and the sidebar would
+      # stop appearing/disappearing on toggle, with no other test catching it.
+      ready = %{ready_tree("/project/a.ex") | focused?: false}
+      hidden = %{ready | status: :hidden}
+
+      {_first, caches} = FileTreeEncoder.encode(ready, Caches.new())
+
+      # ready -> hidden: full re-emit, visible bit cleared, status byte hidden (0).
+      {hidden_cmd, caches} = FileTreeEncoder.encode(hidden, caches)
+      {hidden_flags, hidden_status} = file_tree_header(hidden_cmd)
+      assert Bitwise.band(hidden_flags, 0x01) == 0
+      assert hidden_status == 0
+
+      # hidden -> ready: full re-emit, visible bit set, status byte ready (3).
+      {ready_cmd, _caches} = FileTreeEncoder.encode(ready, caches)
+      {ready_flags, ready_status} = file_tree_header(ready_cmd)
+      assert Bitwise.band(ready_flags, 0x01) != 0
+      assert ready_status == 3
+    end
   end
 
   describe "encode/2 - ready tree selection path" do
@@ -155,6 +210,15 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoderTest do
 
       assert <<@op_gui_file_tree, _len::32, _payload::binary>> = cmd2
     end
+  end
+
+  # Decodes the {flags, status} header bytes of a full gui_file_tree command.
+  # Pattern-matches the opcode, so a nil (cache hit) or selection-only command
+  # raises here, which is exactly the toggle-regression we want to fail on.
+  @spec file_tree_header(binary()) :: {non_neg_integer(), non_neg_integer()}
+  defp file_tree_header(<<@op_gui_file_tree, len::32, payload::binary-size(len)>>) do
+    <<2::8, flags::8, status_byte::8, _rest::binary>> = payload
+    {flags, status_byte}
   end
 
   @spec ready_tree(String.t()) :: FileTree.t()
