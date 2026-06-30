@@ -10,9 +10,10 @@ options:
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    # Workaround: macOS 26 beta cryptex bug prevents Metal toolchain auto-mount.
-    # Remove once `metal --version` works without this (check Xcode Settings > Components).
-    TOOLCHAINS: com.apple.dt.toolchain.Metal.32023.864
+    # NOTE: The Metal toolchain pin (TOOLCHAINS) is intentionally NOT global.
+    # It lives only on the targets that compile Metal (Minga, MingaTests,
+    # PreviewHost) so the Metal-free framework targets (MingaProtocol, MingaUI)
+    # build — and render SwiftUI canvas previews — without the Metal toolchain.
 
 packages:
   ViewInspector:
@@ -53,6 +54,9 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         COMBINE_HIDPI_IMAGES: "YES"
         MTL_LANGUAGE_REVISION: UseDeploymentTarget
+        # Workaround: macOS 26 beta cryptex bug prevents Metal toolchain auto-mount.
+        # Remove once `metal --version` works without this (check Xcode Settings > Components).
+        TOOLCHAINS: com.apple.dt.toolchain.Metal.32023.864
     dependencies: []
     preBuildScripts:
       - name: Generate protocol opcodes
@@ -114,6 +118,8 @@ targets:
       base:
         PRODUCT_NAME: MingaTests
         GENERATE_INFOPLIST_FILE: "YES"
+        # Compiles Renderer/ Metal sources; needs the Metal toolchain pin.
+        TOOLCHAINS: com.apple.dt.toolchain.Metal.32023.864
     dependencies:
       - package: ViewInspector
     preBuildScripts:
@@ -150,6 +156,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.minga.preview-host
         GENERATE_INFOPLIST_FILE: "YES"
         SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+        # Builds the full shell incl. Renderer/ Metal sources; needs the toolchain pin.
+        TOOLCHAINS: com.apple.dt.toolchain.Metal.32023.864
     dependencies: []
     preBuildScripts:
       - name: Generate protocol opcodes
