@@ -128,6 +128,43 @@ defmodule MingaEditor.UI.Picker.ScorerTest do
                "binary walk disagreed with grapheme walk for #{inspect(haystack)} / #{inspect(needle)}"
       end
     end
+
+    test "documents intentional NFD divergence: base letter matches a decomposed grapheme" do
+      # macOS APFS delivers accented filenames in NFD (decomposed): the accent is
+      # a separate combining codepoint after the base letter, e.g. "café.txt" is
+      # the bytes "cafe" + U+0301 (0xCC 0x81) + ".txt", not a precomposed "é".
+      nfd_label = <<"cafe", 0xCC, 0x81, ".txt">>
+
+      # Sanity-check the fixture really is decomposed: 10 bytes / 9 codepoints
+      # collapse to 8 graphemes because "e" + U+0301 forms a single "é" grapheme.
+      assert byte_size(nfd_label) == 10
+      assert length(String.graphemes(nfd_label)) == 8
+
+      cands = candidates([nfd_label])
+
+      # "fet" is neither a prefix nor a contiguous substring (the combining mark
+      # sits between "fe" and "t"), so this exercises the fuzzy walk specifically.
+      refute String.starts_with?(nfd_label, "fet")
+      refute String.contains?(nfd_label, "fet")
+
+      # The new byte-level walk extracts the base "e" before the combining mark,
+      # so the ASCII needle matches. This is the DOCUMENTED, INTENTIONAL
+      # divergence from the old grapheme-level matcher: on decomposed Unicode the
+      # binary walk is strictly more lenient (it can match a base letter that the
+      # grapheme walk hid inside a combined grapheme). The divergence is additive
+      # (more matches, never fewer) and is conventional fuzzy-picker behavior.
+      # Normalizing per keystroke would reintroduce the per-candidate allocation
+      # this change exists to remove, so the lenient behavior is deliberate.
+      assert Scorer.top_k(cands, ["fet"], 5) |> Enum.map(& &1.item.label) == [nfd_label]
+
+      # Prove this is a genuine divergence: the old grapheme-by-grapheme matcher
+      # could NOT have matched "fet", because the base "e" is fused into the "é"
+      # grapheme and never appears as a standalone "e" grapheme to compare against.
+      # A future change that re-aligns the two walks must be a conscious decision,
+      # not a silent regression caught only here.
+      refute "e" in String.graphemes(nfd_label),
+             "expected the decomposed grapheme to hide the base 'e' from grapheme matching"
+    end
   end
 
   describe "bounded large sets" do
