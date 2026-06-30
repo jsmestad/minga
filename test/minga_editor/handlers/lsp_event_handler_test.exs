@@ -8,6 +8,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Editing.Completion
+  alias MingaEditor.CompletionHandling
   alias MingaEditor.CompletionTrigger
   alias MingaEditor.Handlers.LspEventHandler
   alias MingaEditor.State, as: EditorState
@@ -169,7 +170,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       assert [%{layer: 2}] = Tuple.to_list(highlight.spans)
     end
 
-    test "untracked completion response updates the visible completion and returns render_now" do
+    test "untracked completion response is processed off-thread, then becomes visible" do
       state = buffer_state("hello\n")
       ref = make_ref()
       trigger = %{CompletionTrigger.new() | pending_ref: ref, pending_refs: MapSet.new([ref])}
@@ -192,14 +193,25 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
       assert effects == [:render_now]
 
-      completion = ModalOverlay.completion(new_state)
-      assert %Completion{} = completion
-      assert [%{label: "hello_world"}] = completion.filtered
-      assert completion.selected == 0
+      # The handler only does cheap ref bookkeeping: pending refs are cleared
+      # synchronously, but the parse/sort/filter is deferred to a Task (#2633),
+      # so the menu is not yet visible right after handle/2 returns.
+      assert ModalOverlay.completion(new_state) == nil
 
       new_trigger = ModalOverlay.completion_trigger(new_state)
       assert new_trigger.pending_ref == nil
       assert MapSet.new() == new_trigger.pending_refs
+
+      # Drive the async result the Task sends back, exactly as the Editor's
+      # {:completion_processed, ...} handle_info clause does, and confirm the
+      # completion ultimately becomes visible.
+      assert_receive {:completion_processed, gen, mode, processed, trigger_pos}, 5_000
+      applied = CompletionHandling.apply_processed(new_state, gen, mode, processed, trigger_pos)
+
+      completion = ModalOverlay.completion(applied)
+      assert %Completion{} = completion
+      assert [%{label: "hello_world"}] = completion.filtered
+      assert completion.selected == 0
     end
   end
 
