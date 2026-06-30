@@ -59,7 +59,8 @@ defmodule MingaEditor.Frontend.Emit.Context do
           gui?: boolean(),
           line_spacing: number() | nil,
           cursor_animate: boolean() | nil,
-          config_state: Minga.RenderModel.UI.ConfigState.t() | nil
+          config_state: Minga.RenderModel.UI.ConfigState.t() | nil,
+          link_cursor: boolean()
         }
 
   @enforce_keys [:port_manager, :capabilities, :theme, :font_registry, :windows, :layout, :shell]
@@ -96,7 +97,8 @@ defmodule MingaEditor.Frontend.Emit.Context do
             gui?: false,
             line_spacing: nil,
             cursor_animate: nil,
-            config_state: nil
+            config_state: nil,
+            link_cursor: false
 
   @doc "Builds an emit context from render pipeline input."
   @spec from_editor_state(map()) :: t()
@@ -149,7 +151,10 @@ defmodule MingaEditor.Frontend.Emit.Context do
       gui?: gui?,
       line_spacing: gui_only(gui?, Map.get(state, :line_spacing)),
       cursor_animate: gui_only(gui?, Map.get(state, :cursor_animate)),
-      config_state: gui_only(gui?, Map.get(state, :gui_config_state))
+      config_state: gui_only(gui?, Map.get(state, :gui_config_state)),
+      # The pointing-hand cursor is GUI-only; a non-nil Cmd/Ctrl-hover link range
+      # means a navigable symbol is under the pointer (#2630).
+      link_cursor: gui? and state.workspace.cmd_hover_link != nil
     }
   end
 

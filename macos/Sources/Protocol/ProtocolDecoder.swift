@@ -185,6 +185,9 @@ enum RenderCommand: Sendable {
     case setCursorShape(CursorShape)
     case setTitle(String)
     case setWindowBg(r: UInt8, g: UInt8, b: UInt8)
+    /// set_link_cursor (0x19, #2630): toggles the go-to-definition pointing-hand
+    /// cursor while a Cmd+hover link preview is shown. `active` is the 1-byte body.
+    case setLinkCursor(active: Bool)
     /// protocol_error (0x18): the BEAM rejected this frontend's handshake
     /// protocol_version, so it carries a UTF-8 reason the frontend shows as a
     /// blocking error instead of decoding a stream it cannot parse (ticket
@@ -399,6 +402,10 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
     case OP_SET_WINDOW_BG:
         guard data.count >= rest + 3 else { throw ProtocolDecodeError.malformed }
         return (.setWindowBg(r: data[rest], g: data[rest + 1], b: data[rest + 2]), 4)
+
+    case OP_SET_LINK_CURSOR:
+        guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
+        return (.setLinkCursor(active: data[rest] != 0), 2)
 
     // Config commands.
     case OP_SET_FONT:

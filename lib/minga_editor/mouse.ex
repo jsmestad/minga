@@ -46,6 +46,7 @@ defmodule MingaEditor.Mouse do
   alias MingaEditor.State.Mouse, as: MouseState
   alias MingaEditor.State.Windows
   alias MingaEditor.State.WhichKey, as: WhichKeyState
+  alias MingaEditor.UI.Highlight
   alias MingaEditor.Viewport
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
@@ -319,15 +320,146 @@ defmodule MingaEditor.Mouse do
     EditorState.update_mouse(state, &MouseState.stop_resize/1)
   end
 
-  # ── Mouse motion (hover tracking) ──
+  # ── Mouse motion (hover tracking + Cmd/Ctrl link preview) ──
 
-  def handle(state, row, col, :none, _mods, :motion, _cc) do
-    handle_hover_motion(state, row, col)
+  def handle(state, row, col, :none, mods, :motion, _cc) do
+    handle_motion(state, row, col, mods)
   end
 
   # ── Ignore all other mouse events ──
 
   def handle(state, _row, _col, _button, _mods, _type, _cc), do: state
+
+  # Free pointer motion. With the go-to-definition modifier held (Cmd/Super on
+  # every frontend, or Ctrl on the TUI) the pointer previews a navigable symbol as
+  # an underlined link (#2630); otherwise it drives normal hover tracking (#2629).
+  # The link preview is computed locally (word boundaries + tree-sitter scope), so
+  # it never sends a per-motion LSP request and cannot regress input latency.
+  @spec handle_motion(state(), integer(), integer(), non_neg_integer()) :: state()
+  defp handle_motion(state, row, col, mods) when band(mods, @mod_super) != 0 do
+    update_cmd_hover_link(state, row, col)
+  end
+
+  # Ctrl on native GUI frontends follows platform context-menu semantics, so it
+  # is not a link-preview modifier there; fall through to plain hover.
+  defp handle_motion(
+         %{capabilities: %Capabilities{frontend_type: :native_gui}} = state,
+         row,
+         col,
+         mods
+       )
+       when band(mods, @mod_ctrl) != 0 do
+    clear_cmd_hover_link_then_hover(state, row, col)
+  end
+
+  # Ctrl on the TUI mirrors Ctrl+click go-to-definition, so it previews the link.
+  defp handle_motion(state, row, col, mods) when band(mods, @mod_ctrl) != 0 do
+    update_cmd_hover_link(state, row, col)
+  end
+
+  defp handle_motion(state, row, col, _mods) do
+    clear_cmd_hover_link_then_hover(state, row, col)
+  end
+
+  # ── Cmd/Ctrl-hover link preview (#2630) ──────────────────────────────────────
+
+  # Resolves the navigable symbol under the pointer and sets a transient link
+  # decoration on its full word range, or clears it when there is nothing
+  # navigable there. Intentionally leaves the hover popup and hover debounce
+  # untouched: the link preview is an independent layer from the LSP hover popup.
+  @spec update_cmd_hover_link(state(), integer(), integer()) :: state()
+  defp update_cmd_hover_link(state, row, col) do
+    set_cmd_hover_link_if_changed(state, navigable_link_at(state, row, col))
+  end
+
+  @spec set_cmd_hover_link_if_changed(state(), EditorState.cmd_hover_link()) :: state()
+  defp set_cmd_hover_link_if_changed(%{workspace: %{cmd_hover_link: link}} = state, link),
+    do: state
+
+  defp set_cmd_hover_link_if_changed(state, link) do
+    EditorState.set_cmd_hover_link(state, link)
+  end
+
+  # Clears any standing link decoration (modifier released, or pointer moved off a
+  # navigable symbol) before running normal hover tracking. Skips the clear write
+  # when there is nothing to clear so plain motion stays allocation-free.
+  @spec clear_cmd_hover_link_then_hover(state(), integer(), integer()) :: state()
+  defp clear_cmd_hover_link_then_hover(%{workspace: %{cmd_hover_link: nil}} = state, row, col) do
+    handle_hover_motion(state, row, col)
+  end
+
+  defp clear_cmd_hover_link_then_hover(state, row, col) do
+    state
+    |> EditorState.set_cmd_hover_link(nil)
+    |> handle_hover_motion(row, col)
+  end
+
+  # Returns the full word range `{start, end_exclusive}` for a navigable symbol at
+  # the pointer, or nil. Navigable means: an identifier character sits under the
+  # pointer, the position is not inside a comment or string (tree-sitter scope),
+  # and an inner-word text object resolves. No LSP request is made.
+  @spec navigable_link_at(state(), integer(), integer()) :: EditorState.cmd_hover_link()
+  defp navigable_link_at(state, row, col) do
+    case mouse_to_buffer_pos(state, row, col) do
+      nil -> nil
+      {line, buf_col} -> navigable_link_at_pos(state, line, buf_col)
+    end
+  end
+
+  @spec navigable_link_at_pos(state(), non_neg_integer(), non_neg_integer()) ::
+          EditorState.cmd_hover_link()
+  defp navigable_link_at_pos(state, line, col) do
+    buf = state.workspace.buffers.active
+
+    with text when is_binary(text) <- cursor_line_text(buf, line),
+         true <- identifier_char_at?(text, col),
+         {{sl, sc}, {el, ec}} <- word_boundaries_at(buf, line, col),
+         true <- navigable_scope?(state, buf, line, col) do
+      {{sl, sc}, {el, Unicode.next_grapheme_byte_offset(text, ec)}}
+    else
+      _ -> nil
+    end
+  catch
+    :exit, _ -> nil
+  end
+
+  # True when the byte under `col` begins an identifier-class grapheme (ASCII word
+  # char or any non-ASCII byte, which we treat as a Unicode letter). Punctuation,
+  # whitespace, and line-end positions are not navigable.
+  @spec identifier_char_at?(String.t(), non_neg_integer()) :: boolean()
+  defp identifier_char_at?(text, col) when col >= byte_size(text), do: false
+
+  defp identifier_char_at?(text, col) do
+    case binary_part(text, col, 1) do
+      <<c>> -> identifier_byte?(c)
+      _ -> false
+    end
+  end
+
+  @spec identifier_byte?(byte()) :: boolean()
+  defp identifier_byte?(c) when c in ?a..?z, do: true
+  defp identifier_byte?(c) when c in ?A..?Z, do: true
+  defp identifier_byte?(c) when c in ?0..?9, do: true
+  defp identifier_byte?(?_), do: true
+  defp identifier_byte?(c) when c >= 128, do: true
+  defp identifier_byte?(_), do: false
+
+  # True when the tree-sitter scope at the position is code (not a comment or
+  # string). When no highlight data exists yet (parser still loading, or a plain
+  # buffer) the scope degrades to `:code`, matching `Highlight.scope_at/2`.
+  @spec navigable_scope?(state(), pid(), non_neg_integer(), non_neg_integer()) :: boolean()
+  defp navigable_scope?(state, buf, line, col) do
+    case Map.fetch(state.workspace.highlight.highlights, buf) do
+      {:ok, %Highlight{} = hl} ->
+        offset = Buffer.byte_offset_for_line(buf, line) + col
+        Highlight.scope_at(hl, offset) == :code
+
+      :error ->
+        true
+    end
+  catch
+    :exit, _ -> true
+  end
 
   # Free pointer motion drives hover tracking. When a hover popup is open and the
   # pointer is inside its on-screen rect, the popup is kept alive untouched so the

@@ -112,6 +112,17 @@ defmodule MingaEditor.Frontend do
     send_commands(port, [Protocol.encode_set_window_bg(color)])
   end
 
+  @doc """
+  Toggles the GUI go-to-definition link cursor (#2630).
+
+  Emitted out-of-band (post-commit) like `set_title`, so it joins the frontend
+  out-of-band allowlist. The GUI shows `NSCursor.pointingHand` while `active`.
+  """
+  @spec set_link_cursor(GenServer.server(), boolean()) :: :ok
+  def set_link_cursor(port \\ MingaEditor.Frontend.Manager, active) do
+    send_commands(port, [Protocol.encode_set_link_cursor(active)])
+  end
+
   @doc "Configures the editor font."
   @spec configure_font(GenServer.server(), String.t(), pos_integer(), boolean(), atom(), [
           String.t()

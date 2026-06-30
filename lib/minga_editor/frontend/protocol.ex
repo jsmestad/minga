@@ -49,6 +49,7 @@ defmodule MingaEditor.Frontend.Protocol do
   @op_scroll_prefetch_hint Opcodes.scroll_prefetch_hint()
   @op_set_title Opcodes.set_title()
   @op_set_window_bg Opcodes.set_window_bg()
+  @op_set_link_cursor Opcodes.set_link_cursor()
   @op_set_font Opcodes.set_font()
   @op_set_font_fallback Opcodes.set_font_fallback()
   @op_register_font Opcodes.register_font()
@@ -274,6 +275,17 @@ defmodule MingaEditor.Frontend.Protocol do
     g = Bitwise.band(Bitwise.bsr(rgb, 8), 0xFF)
     b = Bitwise.band(rgb, 0xFF)
     <<@op_set_window_bg, r::8, g::8, b::8>>
+  end
+
+  @doc """
+  Encodes a set_link_cursor command (#2630).
+
+  `active` toggles the GUI pointing-hand cursor while a Cmd/Ctrl+hover
+  go-to-definition link preview is shown. The TUI sizes and skips it.
+  """
+  @spec encode_set_link_cursor(boolean()) :: binary()
+  def encode_set_link_cursor(active) when is_boolean(active) do
+    <<@op_set_link_cursor, if(active, do: 1, else: 0)::8>>
   end
 
   @doc """

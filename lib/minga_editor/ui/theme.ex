@@ -110,7 +110,8 @@ defmodule MingaEditor.UI.Theme do
       :selection_bg,
       :whitespace_fg,
       :indent_guide_fg,
-      :indent_guide_active_fg
+      :indent_guide_active_fg,
+      :link_fg
     ]
 
     @type t :: %__MODULE__{
@@ -126,7 +127,8 @@ defmodule MingaEditor.UI.Theme do
             selection_bg: MingaEditor.UI.Theme.color() | nil,
             whitespace_fg: MingaEditor.UI.Theme.color() | nil,
             indent_guide_fg: MingaEditor.UI.Theme.color() | nil,
-            indent_guide_active_fg: MingaEditor.UI.Theme.color() | nil
+            indent_guide_active_fg: MingaEditor.UI.Theme.color() | nil,
+            link_fg: MingaEditor.UI.Theme.color() | nil
           }
   end
 

@@ -70,7 +70,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       set_cursor_shape: 0x15,
       set_title: 0x16,
       set_window_bg: 0x17,
-      protocol_error: 0x18
+      protocol_error: 0x18,
+      set_link_cursor: 0x19
     )
   end
 

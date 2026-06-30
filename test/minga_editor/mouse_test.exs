@@ -27,6 +27,7 @@ defmodule MingaEditor.MouseTest do
 
   @content_row 1
   @ctrl 0x02
+  @super 0x08
 
   describe "scrolling" do
     test "vertical scroll moves viewport without moving the cursor" do
@@ -671,6 +672,71 @@ defmodule MingaEditor.MouseTest do
       # hovering a symbol after closing a popup would never re-open one. Guards
       # against simplifying the dismiss branch down to just dismiss_hover_popup/1.
       assert state.workspace.mouse.hover_pos == {out_row, col}
+    end
+  end
+
+  describe "Cmd/Ctrl+hover link preview (#2630)" do
+    test "Cmd+motion over a symbol sets the link decoration on the full word range" do
+      {state, _buffer} = start_mouse_state("hello world\nfoo bar baz", width: 80)
+      {row, col} = buffer_screen_pos(state, 0, 8)
+
+      state = mouse(state, row, col, :none, :motion, @super)
+
+      # "world" spans bytes 6..10 inclusive; the decoration range is end-exclusive.
+      assert state.workspace.cmd_hover_link == {{0, 6}, {0, 11}}
+    end
+
+    test "releasing the modifier clears the link decoration" do
+      {state, _buffer} = start_mouse_state("hello world\nfoo bar baz", width: 80)
+      {row, col} = buffer_screen_pos(state, 0, 8)
+
+      state = mouse(state, row, col, :none, :motion, @super)
+      assert state.workspace.cmd_hover_link != nil
+
+      # Same position, modifier released: the preview clears immediately.
+      state = mouse(state, row, col, :none, :motion, 0)
+      assert state.workspace.cmd_hover_link == nil
+    end
+
+    test "moving onto whitespace while Cmd is held clears the link decoration" do
+      {state, _buffer} = start_mouse_state("hello world\nfoo bar baz", width: 80)
+      {word_row, word_col} = buffer_screen_pos(state, 0, 8)
+      {space_row, space_col} = buffer_screen_pos(state, 0, 5)
+
+      state = mouse(state, word_row, word_col, :none, :motion, @super)
+      assert state.workspace.cmd_hover_link != nil
+
+      state = mouse(state, space_row, space_col, :none, :motion, @super)
+      assert state.workspace.cmd_hover_link == nil
+    end
+
+    test "Cmd+motion over whitespace sets no link decoration" do
+      {state, _buffer} = start_mouse_state("hello world\nfoo bar baz", width: 80)
+      {row, col} = buffer_screen_pos(state, 0, 5)
+
+      state = mouse(state, row, col, :none, :motion, @super)
+
+      assert state.workspace.cmd_hover_link == nil
+    end
+
+    test "Ctrl+motion previews the link on the TUI" do
+      {state, _buffer} = start_mouse_state("hello world\nfoo bar baz", width: 80)
+      state = set_capabilities(state, :tui)
+      {row, col} = buffer_screen_pos(state, 0, 8)
+
+      state = mouse(state, row, col, :none, :motion, @ctrl)
+
+      assert state.workspace.cmd_hover_link == {{0, 6}, {0, 11}}
+    end
+
+    test "Ctrl+motion does not preview on native GUI (context-menu modifier)" do
+      {state, _buffer} = start_mouse_state("hello world\nfoo bar baz", width: 80)
+      state = set_capabilities(state, :native_gui)
+      {row, col} = buffer_screen_pos(state, 0, 8)
+
+      state = mouse(state, row, col, :none, :motion, @ctrl)
+
+      assert state.workspace.cmd_hover_link == nil
     end
   end
 

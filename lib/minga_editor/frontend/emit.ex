@@ -61,7 +61,8 @@ defmodule MingaEditor.Frontend.Emit do
           caches
           | adapter_gui_caches: Minga.Frontend.Adapter.GUI.Caches.new(),
             last_title: nil,
-            last_window_bg: nil
+            last_window_bg: nil,
+            last_link_cursor: nil
         }
       else
         caches
@@ -109,6 +110,7 @@ defmodule MingaEditor.Frontend.Emit do
         MingaEditor.Frontend.send_render_commands(ctx.port_manager, commands)
         caches = send_title(render_model, caches)
         caches = send_window_bg(render_model, caches)
+        caches = send_link_cursor(ctx, caches)
         {caches, ctx}
       end
     )
@@ -253,4 +255,20 @@ defmodule MingaEditor.Frontend.Emit do
       caches
     end
   end
+
+  # Edge-triggered out-of-band cursor hint for the Cmd/Ctrl+hover link preview
+  # (#2630). Mirrors send_title/send_window_bg: only emits when the navigable
+  # state flips, so an unchanged preview never re-sends. GUI-only by construction
+  # (ctx.link_cursor is gated on gui? when the context is built).
+  @spec send_link_cursor(ctx(), Caches.t()) :: Caches.t()
+  defp send_link_cursor(%{gui?: true, link_cursor: active}, caches) do
+    if active != caches.last_link_cursor do
+      MingaEditor.Frontend.set_link_cursor(active)
+      %{caches | last_link_cursor: active}
+    else
+      caches
+    end
+  end
+
+  defp send_link_cursor(_ctx, caches), do: caches
 end

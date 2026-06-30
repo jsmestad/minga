@@ -226,7 +226,8 @@ defmodule MingaEditor.UI.Theme.Builder do
       selection_bg: p.semantic.selection_bg,
       whitespace_fg: p.base.muted,
       indent_guide_fg: p.base.subtle,
-      indent_guide_active_fg: p.base.muted
+      indent_guide_active_fg: p.base.muted,
+      link_fg: p.semantic.link
     }
   end
 

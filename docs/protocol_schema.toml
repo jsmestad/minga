@@ -16,7 +16,11 @@ version = "2.0.0"
 # familiarity tinting. This changes the hand-decoded file-tree row payload.
 # protocol_version 5 adds producer-assigned stream_instance to the Messages stream.
 # protocol_version 6 frames gui_agent_context and appends gui_edit_timeline file summaries.
-protocol_version = 7
+# protocol_version 7 baseline.
+# protocol_version 8 adds set_link_cursor (#2630): a 1-byte beam_to_frontend hint
+# that toggles the pointing-hand cursor while Cmd/Ctrl+hover previews a navigable
+# go-to-definition symbol. Emitted out-of-band (post-commit), like set_title.
+protocol_version = 8
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -174,6 +178,19 @@ name = "set_window_bg"
 value = 0x17
 direction = "beam_to_frontend"
 framing = "fixed:4"
+
+# set_link_cursor (#2630) reuses the freed cell-paradigm value 0x19 (destroy_region,
+# retired in protocol_version 2). fixed:2 = opcode(1) + active(u8: 1 = navigable
+# symbol under the pointer, 0 = none). The GUI frontend toggles NSCursor.pointingHand
+# on this hint while Cmd+hover previews a go-to-definition link; the TUI sizes and
+# skips it (no terminal pointer-shape control). Emitted out-of-band post-commit, so
+# it joins the frontend out-of-band allowlist alongside set_title/set_window_bg.
+[[opcodes]]
+category = "render"
+name = "set_link_cursor"
+value = 0x19
+direction = "beam_to_frontend"
+framing = "fixed:2"
 
 # protocol_error reuses the freed cell-paradigm value 0x18. The BEAM emits it when
 # a frontend's handshake protocol_version does not match the BEAM's, carrying a

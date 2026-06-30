@@ -77,6 +77,9 @@ defmodule MingaEditor.State do
   @typedoc "A document highlight range from the LSP server."
   @type document_highlight :: Minga.LSP.DocumentHighlight.t()
 
+  @typedoc "Transient Cmd/Ctrl-hover go-to-definition link range, or nil."
+  @type cmd_hover_link :: SessionState.cmd_hover_link()
+
   @typedoc "Re-export of `Minga.Keymap.server/0` for editor-state callers."
   @type keymap_server :: Minga.Keymap.server()
 
@@ -603,6 +606,12 @@ defmodule MingaEditor.State do
   @spec set_document_highlights(t(), [document_highlight()] | nil) :: t()
   def set_document_highlights(%__MODULE__{} = state, highlights) do
     update_workspace(state, &SessionState.set_document_highlights(&1, highlights))
+  end
+
+  @doc "Replaces the transient Cmd/Ctrl-hover go-to-definition link range."
+  @spec set_cmd_hover_link(t(), cmd_hover_link()) :: t()
+  def set_cmd_hover_link(%__MODULE__{} = state, link) do
+    update_workspace(state, &SessionState.set_cmd_hover_link(&1, link))
   end
 
   @doc "Replaces the active workspace LSP pending request map."

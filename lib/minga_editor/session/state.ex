@@ -29,6 +29,18 @@ defmodule MingaEditor.Session.State do
   @typedoc "A document highlight range from the LSP server."
   @type document_highlight :: Minga.LSP.DocumentHighlight.t()
 
+  @typedoc "A buffer position as `{line, byte_col}`."
+  @type position :: {non_neg_integer(), non_neg_integer()}
+
+  @typedoc """
+  Transient Cmd/Ctrl-hover go-to-definition link range.
+
+  `{start_pos, end_pos}` in buffer coordinates (end exclusive), or `nil` when no
+  navigable symbol is under the pointer. Set on the mouse-motion path while the
+  super/ctrl modifier is held and cleared otherwise; never persisted across tabs.
+  """
+  @type cmd_hover_link :: {position(), position()} | nil
+
   @type t :: %__MODULE__{
           keymap_scope: Scope.scope_name(),
           buffers: Buffers.t(),
@@ -44,6 +56,7 @@ defmodule MingaEditor.Session.State do
           editing: VimState.t(),
           feature_state: FeatureState.t(),
           document_highlights: [document_highlight()] | nil,
+          cmd_hover_link: cmd_hover_link(),
           agent_ui: UIState.t()
         }
 
@@ -62,6 +75,7 @@ defmodule MingaEditor.Session.State do
             editing: VimState.new(),
             feature_state: FeatureState.new(),
             document_highlights: nil,
+            cmd_hover_link: nil,
             agent_ui: UIState.new()
 
   @doc "Returns the list of field names (for snapshot/restore compatibility)."
@@ -288,6 +302,12 @@ defmodule MingaEditor.Session.State do
   @spec set_document_highlights(t(), [document_highlight()] | nil) :: t()
   def set_document_highlights(%__MODULE__{} = wspace, highlights) do
     %{wspace | document_highlights: highlights}
+  end
+
+  @doc "Updates the transient Cmd/Ctrl-hover go-to-definition link range."
+  @spec set_cmd_hover_link(t(), cmd_hover_link()) :: t()
+  def set_cmd_hover_link(%__MODULE__{} = wspace, link) do
+    %{wspace | cmd_hover_link: link}
   end
 
   @doc "Updates the search sub-struct."

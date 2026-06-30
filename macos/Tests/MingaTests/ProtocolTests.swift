@@ -105,6 +105,30 @@ struct ProtocolDecoderTests {
         #expect(seq == 0x0000_102A)
     }
 
+    @Test("Decode set_link_cursor active command (#2630)")
+    func decodeSetLinkCursorActive() throws {
+        let data = Data([OP_SET_LINK_CURSOR, 0x01])
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == 2)
+        guard case .setLinkCursor(let active) = cmd else {
+            Issue.record("Expected .setLinkCursor, got \(String(describing: cmd))")
+            return
+        }
+        #expect(active == true)
+    }
+
+    @Test("Decode set_link_cursor inactive command (#2630)")
+    func decodeSetLinkCursorInactive() throws {
+        let data = Data([OP_SET_LINK_CURSOR, 0x00])
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == 2)
+        guard case .setLinkCursor(let active) = cmd else {
+            Issue.record("Expected .setLinkCursor, got \(String(describing: cmd))")
+            return
+        }
+        #expect(active == false)
+    }
+
     @Test("Decode begin_frame command")
     func decodeBeginFrame() throws {
         // begin_frame (#2219): frame_seq:u32 + base_frame_seq:u32.
