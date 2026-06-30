@@ -69,13 +69,14 @@ defmodule MingaEditor.State.FileTree do
   @doc """
   Returns true when the file tree has loaded data.
 
-  A hidden-but-loaded tree is still "open" in this sense: the data, buffer, and
-  watchers stay alive so refresh handlers keep it fresh. Use `visible?/1` to ask
-  whether the sidebar is currently shown.
+  A hidden-but-loaded tree is still loaded: the data, buffer, and watchers stay
+  alive so refresh handlers keep it fresh. This is intentionally NOT "is the
+  sidebar visible" — use `visible?/1` for that. Mixing the two leaks the backing
+  buffer (see #2626).
   """
-  @spec open?(t()) :: boolean()
-  def open?(%__MODULE__{tree: nil}), do: false
-  def open?(%__MODULE__{}), do: true
+  @spec loaded?(t()) :: boolean()
+  def loaded?(%__MODULE__{tree: nil}), do: false
+  def loaded?(%__MODULE__{}), do: true
 
   @doc "Returns true when the sidebar is currently visible (loaded and not hidden)."
   @spec visible?(t()) :: boolean()

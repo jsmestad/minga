@@ -106,10 +106,19 @@ defmodule MingaEditor.Commands.FileTree do
 
   @spec project_browse(state()) :: state()
   def project_browse(state) do
-    if file_tree_state(state) |> FileTreeState.status() |> FileTreeState.visible_status?() do
-      focus_visible_tree(state)
-    else
-      open(state)
+    case file_tree_state(state) do
+      # No tree yet: build it (and its backing buffer) for the first time.
+      %FileTreeState{tree: nil} ->
+        open(state)
+
+      # Loaded but hidden: reveal it, reusing the existing buffer and watchers.
+      # Calling open/1 here would orphan the running tree buffer (#2626 leak fix).
+      %FileTreeState{hidden: true} ->
+        show_tree(state)
+
+      # Already visible: just refocus it.
+      %FileTreeState{tree: %FileTree{}} ->
+        focus_visible_tree(state)
     end
   end
 
