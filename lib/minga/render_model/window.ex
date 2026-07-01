@@ -3,6 +3,8 @@ defmodule Minga.RenderModel.Window do
   Canonical visible model for one buffer-like window.
 
   The Content stage builds this model from current-frame data. Frontend adapters encode it for GUI or composite it into cells for TUI proof-of-concept paths. The struct is pure data and lives in core so products can produce window content without importing `MingaEditor`.
+
+  `contiguous_rows` is a BEAM-internal hint (never encoded on the wire): it is true only for the non-wrapped, non-folded sequential path, where `rows` are consecutive `:normal` buffer lines. It lets `ScrollPresentation` derive the resident line range by arithmetic instead of folding over every row.
   """
 
   alias __MODULE__.{
@@ -44,7 +46,8 @@ defmodule Minga.RenderModel.Window do
             indent_guides: nil,
             geometry: nil,
             content_epoch: 0,
-            full_refresh: true
+            full_refresh: true,
+            contiguous_rows: false
 
   @type t :: %__MODULE__{
           window_id: pos_integer(),
@@ -66,6 +69,7 @@ defmodule Minga.RenderModel.Window do
           indent_guides: IndentGuides.t() | nil,
           geometry: PaneGeometry.t() | nil,
           content_epoch: non_neg_integer(),
-          full_refresh: boolean()
+          full_refresh: boolean(),
+          contiguous_rows: boolean()
         }
 end

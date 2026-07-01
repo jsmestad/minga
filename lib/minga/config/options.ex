@@ -133,6 +133,8 @@ defmodule Minga.Config.Options do
           | :default_shell
           | :file_find_excludes
           | :picker_backdrop
+          | :resident_store_max_lines
+          | :resident_store_max_bytes
 
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
@@ -419,7 +421,11 @@ defmodule Minga.Config.Options do
        ".DS_Store"
      ], "Directory names excluded from the file finder (SPC f f). Stacks with .gitignore."},
     {:picker_backdrop, :boolean, true,
-     "Whether centered floating pickers render a dimmed backdrop overlay."}
+     "Whether centered floating pickers render a dimmed backdrop overlay."},
+    {:resident_store_max_lines, :non_neg_integer, 0,
+     "Maximum buffer line count that still receives full-document row residence (glitch-free fast scrolling). 0 disables full residence entirely (the default); larger buffers fall back to viewport-windowed emit."},
+    {:resident_store_max_bytes, :pos_integer, 10_485_760,
+     "Maximum buffer byte size that still receives full-document row residence. Residence is gated by both this and :resident_store_max_lines, so it stays off while :resident_store_max_lines is 0."}
   ]
   @valid_names Enum.map(@option_specs, &elem(&1, 0))
 

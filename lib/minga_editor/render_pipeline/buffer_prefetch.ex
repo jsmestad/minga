@@ -11,6 +11,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   """
 
   alias Minga.Buffer
+  alias Minga.Config
   alias Minga.Core.Decorations
   alias Minga.Core.Unicode
   alias Minga.Core.WidthOracle
@@ -266,37 +267,23 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
         {first_line, nil}
       end
 
+    # Full-document residence (#2653): for under-threshold, non-wrapped, non-fold
+    # buffers, fetch and emit the entire laid-out document so a fast scroll can
+    # never outrun the resident row store. Over-threshold, wrapped, or folded
+    # buffers keep today's velocity-aware viewport-plus-overscan windowing.
+    full_residence? =
+      is_nil(visible_line_map) and full_residence?(window.buffer, wrap_on, line_count_approx)
+
     {fetch_first, fetch_count, visible_row_start_index} =
-      case visible_line_map do
-        nil ->
-          now = System.monotonic_time(:millisecond)
-          velocity_tier = Window.scroll_velocity_tier(window, now)
-          total_overscan = boosted_overscan_rows(window, velocity_tier)
-
-          {overscan_behind, overscan_ahead} =
-            directional_split(total_overscan, velocity_tier, Window.scroll_direction(window, now))
-
-          {overscan_before, fetch_first} =
-            scroll_overscan_before(first_line, wrap_on, overscan_behind)
-
-          overscan_after =
-            scroll_overscan_after(
-              first_line,
-              visible_rows,
-              line_count_approx,
-              wrap_on,
-              overscan_ahead
-            )
-
-          fetch_rows =
-            scroll_fetch_rows(visible_rows, overscan_before, overscan_after, wrap_on)
-
-          {fetch_first, fetch_rows, overscan_before}
-
-        entries ->
-          {buf_first, buf_last} = buffer_range_from_entries(entries)
-          {buf_first, buf_last - buf_first + 1, 0}
-      end
+      resolve_fetch_range(%{
+        window: window,
+        visible_line_map: visible_line_map,
+        full_residence?: full_residence?,
+        first_line: first_line,
+        visible_rows: visible_rows,
+        line_count: line_count_approx,
+        wrap_on: wrap_on
+      })
 
     snapshot = Buffer.render_snapshot(window.buffer, fetch_first, fetch_count)
     lines = snapshot.lines
@@ -375,8 +362,95 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
       git_signs: ContentHelpers.signs_for_window(state, window),
       visible_line_map: visible_line_map,
       total_visual_rows: total_visual_rows,
-      visible_row_start_index: visible_row_start_index
+      visible_row_start_index: visible_row_start_index,
+      full_residence: full_residence?
     }
+  end
+
+  # Resolves the buffer line range to fetch and the visible viewport's offset
+  # within it. Three cases: full-document residence (whole doc from line 0),
+  # folded/decorated windows (the visible_line_map's exact buffer span), and the
+  # default velocity-aware viewport-plus-overscan window.
+  @spec resolve_fetch_range(map()) ::
+          {non_neg_integer(), non_neg_integer(), non_neg_integer()}
+  defp resolve_fetch_range(%{visible_line_map: nil, full_residence?: true} = params) do
+    # first_line is the viewport-top buffer line; the fetch starts at 0, so
+    # first_line doubles as the visible viewport's offset within the store.
+    {0, params.line_count, params.first_line}
+  end
+
+  defp resolve_fetch_range(%{visible_line_map: nil} = params) do
+    %{window: window, first_line: first_line, visible_rows: visible_rows} = params
+    wrap_on = params.wrap_on
+    now = System.monotonic_time(:millisecond)
+    velocity_tier = Window.scroll_velocity_tier(window, now)
+    total_overscan = boosted_overscan_rows(window, velocity_tier)
+
+    {overscan_behind, overscan_ahead} =
+      directional_split(total_overscan, velocity_tier, Window.scroll_direction(window, now))
+
+    {overscan_before, fetch_first} =
+      scroll_overscan_before(first_line, wrap_on, overscan_behind)
+
+    overscan_after =
+      scroll_overscan_after(first_line, visible_rows, params.line_count, wrap_on, overscan_ahead)
+
+    fetch_rows = scroll_fetch_rows(visible_rows, overscan_before, overscan_after, wrap_on)
+    {fetch_first, fetch_rows, overscan_before}
+  end
+
+  defp resolve_fetch_range(%{visible_line_map: entries}) do
+    {buf_first, buf_last} = buffer_range_from_entries(entries)
+    {buf_first, buf_last - buf_first + 1, 0}
+  end
+
+  # Wire-format ceiling: gui_window_content and its row/viewport deltas encode the
+  # row count as a u16, so a resident store may not exceed 65_535 rows regardless
+  # of the configured line threshold. Above this, fall back to windowed emit.
+  @wire_max_rows 0xFFFF
+
+  # A buffer qualifies for full-document residence when it is not wrapped, not
+  # folded/decorated (caller passes the nil-visible_line_map case only), and both
+  # its line count and byte size sit under the configured thresholds and the wire
+  # row ceiling. The byte check runs last so an over-line file skips the extra call.
+  # A line threshold of 0 (or nil) means residence is disabled, which is the
+  # default: the feature ships dormant until explicitly opted in via config.
+  @spec full_residence?(pid(), boolean(), non_neg_integer()) :: boolean()
+  defp full_residence?(_buf, true = _wrap_on, _line_count), do: false
+
+  defp full_residence?(buf, false = _wrap_on, line_count) do
+    residence_within_limits?(buf, line_count, resident_store_max_lines())
+  end
+
+  @spec residence_within_limits?(pid(), non_neg_integer(), non_neg_integer() | nil) :: boolean()
+  defp residence_within_limits?(_buf, _line_count, nil), do: false
+  defp residence_within_limits?(_buf, _line_count, max_lines) when max_lines <= 0, do: false
+
+  defp residence_within_limits?(buf, line_count, max_lines) do
+    line_count <= @wire_max_rows and
+      line_count <= max_lines and
+      buffer_bytes_within_limit?(buf)
+  end
+
+  @spec buffer_bytes_within_limit?(pid()) :: boolean()
+  defp buffer_bytes_within_limit?(buf) do
+    Buffer.content_byte_size(buf) <= resident_store_max_bytes()
+  catch
+    :exit, _ -> false
+  end
+
+  @spec resident_store_max_lines() :: non_neg_integer()
+  defp resident_store_max_lines do
+    Config.get(:resident_store_max_lines)
+  catch
+    :exit, _ -> 0
+  end
+
+  @spec resident_store_max_bytes() :: pos_integer()
+  defp resident_store_max_bytes do
+    Config.get(:resident_store_max_bytes)
+  catch
+    :exit, _ -> 10_485_760
   end
 
   @spec overscan_rows(ScrollVelocity.tier()) :: pos_integer()
@@ -513,6 +587,10 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
       scroll.viewport.rows,
       scroll.viewport.cols,
       scroll.window.fold_map,
+      # A residence toggle mid-session swaps the row set between viewport-sized
+      # and full-document; force a full re-emit so no :patch frame diffs across
+      # differently-sized stores.
+      scroll.full_residence,
       Map.get(options, :breakindent, true),
       Map.get(options, :linebreak, true),
       Map.get(options, :tab_width, 2),

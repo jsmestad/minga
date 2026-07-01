@@ -134,6 +134,8 @@ defmodule MingaEditor.RenderPipeline.LinePatchFastPathTest do
       # A tall enough buffer that scrolling exposes exactly one new row. The
       # rows still on screen keep their row_id and input fingerprint, so the
       # retained-row cache reuses them; only the row scrolled into view composes.
+      # (Full-document residence is dormant by default, so this windowed path is
+      # what runs.)
       state = gui_state(content: long_content(100), rows: 8)
       buffer = state.workspace.buffers.active
       state = warm(state)

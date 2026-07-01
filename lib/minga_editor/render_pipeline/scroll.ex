@@ -71,7 +71,8 @@ defmodule MingaEditor.RenderPipeline.Scroll do
       total_visual_rows: nil,
       visible_row_start_index: 0,
       content_epoch: 0,
-      full_refresh: true
+      full_refresh: true,
+      full_residence: false
     ]
 
     @type t :: %__MODULE__{
@@ -100,7 +101,8 @@ defmodule MingaEditor.RenderPipeline.Scroll do
             total_visual_rows: non_neg_integer() | nil,
             visible_row_start_index: non_neg_integer(),
             content_epoch: non_neg_integer(),
-            full_refresh: boolean()
+            full_refresh: boolean(),
+            full_residence: boolean()
           }
   end
 

@@ -355,6 +355,10 @@ defmodule Minga.Buffer.Process do
   @spec line_count(GenServer.server()) :: pos_integer()
   def line_count(server), do: GenServer.call(server, :line_count)
 
+  @doc "Returns the buffer content size in bytes (gap-buffer halves summed, O(1))."
+  @spec content_byte_size(GenServer.server()) :: non_neg_integer()
+  def content_byte_size(server), do: GenServer.call(server, :content_byte_size)
+
   @doc "Returns whether the buffer has unsaved changes."
   @spec dirty?(GenServer.server()) :: boolean()
   def dirty?(server), do: GenServer.call(server, :dirty?)
@@ -1318,6 +1322,10 @@ defmodule Minga.Buffer.Process do
 
   def handle_call(:line_count, _from, state) do
     {:reply, Document.line_count(state.document), state}
+  end
+
+  def handle_call(:content_byte_size, _from, state) do
+    {:reply, Document.content_byte_size(state.document), state}
   end
 
   def handle_call(:dirty?, _from, state) do

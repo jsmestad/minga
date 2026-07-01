@@ -56,7 +56,7 @@ defmodule Minga.RenderModel.Window.ScrollPresentation do
 
   def from_window(%Window{geometry: %PaneGeometry{} = geometry} = window) do
     {overscan_start_line, overscan_end_line} =
-      line_range(window.rows, geometry.viewport.top)
+      line_range(window.rows, geometry.viewport.top, window.contiguous_rows)
 
     visible_start_line = max(geometry.viewport.top, overscan_start_line)
     visible_end_line = min(visible_start_line + geometry.viewport.rows, overscan_end_line)
@@ -76,10 +76,21 @@ defmodule Minga.RenderModel.Window.ScrollPresentation do
     }
   end
 
-  @spec line_range([Row.t()], non_neg_integer()) :: {non_neg_integer(), non_neg_integer()}
-  defp line_range([], fallback_line), do: {fallback_line, fallback_line}
+  @spec line_range([Row.t()], non_neg_integer(), boolean()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp line_range([], fallback_line, _contiguous?), do: {fallback_line, fallback_line}
 
-  defp line_range(rows, _fallback_line) do
+  # Contiguous non-wrapped sequential rows are consecutive buffer lines, so the
+  # half-open range is arithmetic from the first row's buf_line and the row count.
+  # This avoids folding over the whole (possibly full-document) row list every
+  # frame; `length/1` is a cheap BIF walk rather than a per-row min/max reduce.
+  defp line_range([%Row{buf_line: first} | _] = rows, _fallback_line, true) do
+    {first, first + length(rows)}
+  end
+
+  # Wrapped or folded rows are not 1:1 with buffer lines (wrap continuations share
+  # a buf_line, folds skip hidden lines), so fold for the true min/max.
+  defp line_range(rows, _fallback_line, false) do
     {first, last} =
       Enum.reduce(rows, {nil, nil}, fn %Row{buf_line: line}, {min_line, max_line} ->
         {min_line(min_line, line), max_line(max_line, line)}

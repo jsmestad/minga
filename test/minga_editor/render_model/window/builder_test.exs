@@ -553,6 +553,23 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       assert is_integer(presentation.layout_generation)
     end
 
+    test "contiguous line_range arithmetic matches the fold result for sequential rows" do
+      # ScrollPresentation derives the resident line range by arithmetic when the
+      # window's rows are contiguous non-wrapped buffer lines. It must produce the
+      # same range as folding over every row (the wrap/fold path).
+      state = gui_state(rows: 8, cols: 40, content: long_content(40))
+      {[wf], _cursor, _state} = build_content(state)
+      model = wf.window_model
+
+      assert model.contiguous_rows
+
+      arithmetic = ScrollPresentation.from_window(model)
+      folded = ScrollPresentation.from_window(%{model | contiguous_rows: false})
+
+      assert arithmetic.overscan_start_line == folded.overscan_start_line
+      assert arithmetic.overscan_end_line == folded.overscan_end_line
+    end
+
     test "includes gutter and indent guide models built from current-frame data" do
       state = gui_state(content: "def a do\n  :ok\nend")
       {[wf], _cursor, _state} = build_content(state)
