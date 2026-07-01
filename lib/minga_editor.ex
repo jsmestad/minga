@@ -52,7 +52,6 @@ defmodule MingaEditor do
   alias MingaEditor.Handlers.LspEventHandler
   alias MingaEditor.Handlers.RenderHandler
   alias MingaEditor.Handlers.SessionHandler
-  alias MingaEditor.Handlers.SessionRestore
   alias MingaEditor.Handlers.ToolHandler
   # WarningLog removed in #825; warnings route through MessageLog with level override
   alias MingaEditor.Window
@@ -84,8 +83,6 @@ defmodule MingaEditor do
           | {:suppress_tool_prompts, boolean()}
 
   alias MingaEditor.State, as: EditorState
-
-  alias MingaEditor.State.Session, as: EditorSessionState
 
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.ModalOverlay
@@ -415,22 +412,8 @@ defmodule MingaEditor do
     StartupTimer.mark(:first_render_dispatched)
     StartupTimer.report()
 
-    # Setup highlighting after first paint with correct viewport
     new_state = setup_highlight_or_defer(new_state)
-
-    SessionRestore.maybe_check_swap_recovery(new_state)
-
-    # If the agentic view was activated at init, start the session now
-    # that the port is connected and the viewport is known.
-    new_state = AgentLifecycle.maybe_start_session(new_state)
-    # Start the periodic session save timer (30 seconds); skip in headless
-    # to avoid non-deterministic timer messages during tests.
-    new_state =
-      if new_state.backend != :headless do
-        %{new_state | session: EditorSessionState.start_timer(new_state.session)}
-      else
-        new_state
-      end
+    new_state = Startup.ensure_session_started(new_state)
 
     {:noreply, new_state}
   end

@@ -17,6 +17,7 @@ defmodule MingaEditor.StartupTest do
   alias MingaEditor.Shell.Registry, as: ShellRegistry
   alias MingaEditor.Startup
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Session
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.Workspace.Persistence
@@ -769,6 +770,46 @@ defmodule MingaEditor.StartupTest do
       workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
       options_server: server || Options.default_server(),
       capabilities: %Capabilities{frontend_type: frontend_type}
+    }
+  end
+
+  describe "ensure_session_started/1" do
+    test "runs the once-only startup work on the first call" do
+      result = Startup.ensure_session_started(unstarted_state())
+
+      assert result.session_started? == true
+      # The save timer was actually started (not skipped), so we have something
+      # real whose non-recreation the reconnect test can assert on.
+      assert is_reference(result.session.timer)
+    end
+
+    test "is a no-op on an already-started state (renderer reconnect / hot-reload)" do
+      # A reconnecting renderer re-sends `ready`. The guard must prevent re-running
+      # the non-idempotent work: no second save timer, no re-triggered swap recovery.
+      first = Startup.ensure_session_started(unstarted_state())
+      timer = first.session.timer
+      assert is_reference(timer)
+
+      second = Startup.ensure_session_started(first)
+
+      # Identical state back, and crucially the SAME timer ref: if the guard were
+      # removed, start_timer/1 would run again and mint a new ref here.
+      assert second == first
+      assert second.session.timer == timer
+    end
+  end
+
+  # A non-headless backend with a session_dir makes the once-only work observable:
+  # start_timer/1 actually creates a save-timer ref (it no-ops on :headless or a
+  # nil session_dir), so a re-run would produce a *different* ref. This is what
+  # makes the "no-op on reconnect" test fail if the guard clause is removed.
+  defp unstarted_state do
+    %EditorState{
+      port_manager: self(),
+      workspace: nil,
+      backend: :tui,
+      session_started?: false,
+      session: %Session{session_dir: System.tmp_dir!()}
     }
   end
 

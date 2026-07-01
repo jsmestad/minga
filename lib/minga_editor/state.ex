@@ -157,7 +157,11 @@ defmodule MingaEditor.State do
             # semantic model (#2119). Rebuilt only when a settings option changes
             # (see MingaEditor.refresh_gui_config_state/1), so the render pipeline
             # reads it for free each frame. nil until the first GUI frontend attaches.
-            gui_config_state: nil
+            gui_config_state: nil,
+            # Latched once the first `ready` runs the one-time startup work, so a
+            # renderer reconnect (dev hot-reload) re-runs the idempotent ready path
+            # without re-triggering it. See `Startup.ensure_session_started/1`.
+            session_started?: false
 
   @type backend :: :tui | :gui | :native_gui | :headless
 
@@ -220,7 +224,8 @@ defmodule MingaEditor.State do
           font_size_override: pos_integer() | nil,
           last_input_seq: non_neg_integer(),
           keyframe_pending?: boolean(),
-          gui_config_state: Minga.RenderModel.UI.ConfigState.t() | nil
+          gui_config_state: Minga.RenderModel.UI.ConfigState.t() | nil,
+          session_started?: boolean()
         }
 
   @doc "Returns the cached native settings snapshot emitted in-frame (#2119)."

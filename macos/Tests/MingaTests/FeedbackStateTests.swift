@@ -128,8 +128,10 @@ struct FeedbackStateTests {
     @MainActor func fastCompletionPreventsSpinner() async throws {
         let state = FeedbackState()
         state.update(message: "Formatting…")
-        try await Task.sleep(for: .milliseconds(50))
+        // Complete in the same synchronous turn so the delayed show-task is
+        // cancelled before it can run; a real sleep here flakes on a loaded CI.
         state.update(message: "Formatted")
+        try await Task.sleep(for: FeedbackState.spinnerDelay + .milliseconds(100))
         #expect(!state.showingSpinner)
     }
 

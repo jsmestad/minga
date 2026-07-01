@@ -11,6 +11,8 @@ defmodule MingaEditor.Startup do
   @dialyzer {:no_opaque, build_initial_state: 1}
 
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.AgentLifecycle
+  alias MingaEditor.Handlers.SessionRestore
   alias Minga.Buffer
   alias Minga.Log
   alias Minga.Config
@@ -32,6 +34,28 @@ defmodule MingaEditor.Startup do
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
   alias Minga.Config.Options
+
+  @doc "Runs the one-time startup work (swap recovery, agent session, save timer) exactly once per session."
+  @spec ensure_session_started(EditorState.t()) :: EditorState.t()
+  def ensure_session_started(%EditorState{session_started?: true} = state), do: state
+
+  def ensure_session_started(%EditorState{} = state) do
+    SessionRestore.maybe_check_swap_recovery(state)
+
+    state =
+      state
+      |> AgentLifecycle.maybe_start_session()
+      |> maybe_start_save_timer()
+
+    %{state | session_started?: true}
+  end
+
+  @spec maybe_start_save_timer(EditorState.t()) :: EditorState.t()
+  defp maybe_start_save_timer(%EditorState{backend: :headless} = state), do: state
+
+  defp maybe_start_save_timer(%EditorState{} = state) do
+    %{state | session: EditorSessionState.start_timer(state.session)}
+  end
 
   @doc """
   Builds the complete initial EditorState from startup opts.
