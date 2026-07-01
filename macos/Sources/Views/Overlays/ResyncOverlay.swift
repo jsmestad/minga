@@ -9,11 +9,14 @@
 
 import SwiftUI
 
-struct ResyncOverlay: View {
-    var state: ResyncState
+public struct ResyncOverlay: View {
+    public init(state: ResyncState) {
+        self.state = state
+    }
+    public var state: ResyncState
     @Environment(\.themeColors) private var theme
 
-    var body: some View {
+    public var body: some View {
         if state.pending {
             VStack {
                 Spacer()

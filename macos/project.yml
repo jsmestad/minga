@@ -10,9 +10,10 @@ options:
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    # Workaround: macOS 26 beta cryptex bug prevents Metal toolchain auto-mount.
-    # Remove once `metal --version` works without this (check Xcode Settings > Components).
-    TOOLCHAINS: com.apple.dt.toolchain.Metal.32023.864
+    # NOTE: The Metal toolchain pin (TOOLCHAINS) is intentionally NOT global.
+    # It lives only on the targets that compile Metal (Minga, MingaTests,
+    # PreviewHost) so the Metal-free framework targets (MingaProtocol, MingaUI)
+    # build — and render SwiftUI canvas previews — without the Metal toolchain.
 
 packages:
   ViewInspector:
@@ -20,6 +21,76 @@ packages:
     from: "0.10.3"
 
 targets:
+  MingaProtocol:
+    type: framework
+    platform: macOS
+    sources:
+      - path: Sources/Protocol/ProtocolTypes.swift
+        type: file
+      - path: Sources/Protocol/StatusBarUpdate.swift
+        type: file
+      - path: Sources/Protocol/GUIColorSlots.swift
+        type: file
+      - path: Sources/Renderer/WindowContent.swift
+        type: file
+      - path: Sources/Protocol/AgentSurfaceTypes.swift
+        type: file
+      - path: Sources/Protocol/LatencyRecorder.swift
+        type: file
+      - path: Sources/Protocol/FrontendExtensionRuntimeMessage.swift
+        type: file
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: "YES"
+        PRODUCT_NAME: MingaProtocol
+        # No TOOLCHAINS pin: this framework is Metal-toolchain-free so it (and
+        # MingaUI) can build SwiftUI canvas previews without the Metal toolchain.
+    dependencies: []
+
+  MingaUI:
+    type: framework
+    platform: macOS
+    sources:
+      - path: Sources/Views/Agent
+      - path: Sources/Views/EditorChrome
+      - path: Sources/Views/Extensions
+      - path: Sources/Views/Modifiers
+      - path: Sources/Views/Overlays
+      - path: Sources/Views/Settings
+      - path: Sources/Views/Sidebar
+      - path: Sources/Views/Shared/EditTimelineState.swift
+        type: file
+      - path: Sources/Views/Shared/EditTimelineView.swift
+        type: file
+      - path: Sources/Views/Shared/GUIState.swift
+        type: file
+      - path: Sources/Views/Shared/SparklineView.swift
+        type: file
+      - path: Sources/Views/Shared/TextHighlighting.swift
+        type: file
+      - path: Sources/Views/Shared/ThemeColors.swift
+        type: file
+      - path: Sources/PreviewFixtures.swift
+        type: file
+      - path: Sources/Protocol/InputEncoder.swift
+        type: file
+      - path: Sources/Protocol/PortLogger.swift
+        type: file
+      - path: Sources/Extensions/FrontendExtensionRuntime.swift
+        type: file
+      - path: Sources/Views/Editor/InlineEditField.swift
+        type: file
+      - path: Sources/Views/Editor/BlinkingCursor.swift
+        type: file
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: "YES"
+        PRODUCT_NAME: MingaUI
+        # No TOOLCHAINS pin: this SwiftUI framework is Metal-toolchain-free so it
+        # builds and renders SwiftUI canvas previews without the Metal toolchain.
+    dependencies:
+      - target: MingaProtocol
+
   Minga:
     type: application
     platform: macOS
@@ -29,6 +100,34 @@ targets:
         excludes:
           - "PreviewHostApp.swift"
           - "PreviewRegistry.swift"
+          - "Protocol/ProtocolTypes.swift"
+          - "Protocol/StatusBarUpdate.swift"
+          - "Protocol/GUIColorSlots.swift"
+          # MingaProtocol-owned (Slice 3)
+          - "Renderer/WindowContent.swift"
+          - "Protocol/AgentSurfaceTypes.swift"
+          - "Protocol/LatencyRecorder.swift"
+          - "Protocol/FrontendExtensionRuntimeMessage.swift"
+          # MingaUI-owned (Slice 3)
+          - "Protocol/InputEncoder.swift"
+          - "Protocol/PortLogger.swift"
+          - "Extensions/FrontendExtensionRuntime.swift"
+          - "Views/Editor/InlineEditField.swift"
+          - "Views/Editor/BlinkingCursor.swift"
+          - "PreviewFixtures.swift"
+          - "Views/Agent/**"
+          - "Views/EditorChrome/**"
+          - "Views/Extensions/**"
+          - "Views/Modifiers/**"
+          - "Views/Overlays/**"
+          - "Views/Settings/**"
+          - "Views/Sidebar/**"
+          - "Views/Shared/EditTimelineState.swift"
+          - "Views/Shared/EditTimelineView.swift"
+          - "Views/Shared/GUIState.swift"
+          - "Views/Shared/SparklineView.swift"
+          - "Views/Shared/TextHighlighting.swift"
+          - "Views/Shared/ThemeColors.swift"
       - path: .generated/protocol/ProtocolOpcodes.generated.swift
         name: ProtocolOpcodes.generated.swift
         type: file
@@ -53,7 +152,12 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         COMBINE_HIDPI_IMAGES: "YES"
         MTL_LANGUAGE_REVISION: UseDeploymentTarget
-    dependencies: []
+        # Workaround: macOS 26 beta cryptex bug prevents Metal toolchain auto-mount.
+        # Remove once `metal --version` works without this (check Xcode Settings > Components).
+        TOOLCHAINS: com.apple.dt.toolchain.Metal.32023.864
+    dependencies:
+      - target: MingaProtocol
+      - target: MingaUI
     preBuildScripts:
       - name: Generate protocol opcodes
         script: |
@@ -101,6 +205,34 @@ targets:
           - "MingaApp.swift"
           - "PreviewHostApp.swift"
           - "PreviewRegistry.swift"
+          - "Protocol/ProtocolTypes.swift"
+          - "Protocol/StatusBarUpdate.swift"
+          - "Protocol/GUIColorSlots.swift"
+          # MingaProtocol-owned (Slice 3)
+          - "Renderer/WindowContent.swift"
+          - "Protocol/AgentSurfaceTypes.swift"
+          - "Protocol/LatencyRecorder.swift"
+          - "Protocol/FrontendExtensionRuntimeMessage.swift"
+          # MingaUI-owned (Slice 3)
+          - "Protocol/InputEncoder.swift"
+          - "Protocol/PortLogger.swift"
+          - "Extensions/FrontendExtensionRuntime.swift"
+          - "Views/Editor/InlineEditField.swift"
+          - "Views/Editor/BlinkingCursor.swift"
+          - "PreviewFixtures.swift"
+          - "Views/Agent/**"
+          - "Views/EditorChrome/**"
+          - "Views/Extensions/**"
+          - "Views/Modifiers/**"
+          - "Views/Overlays/**"
+          - "Views/Settings/**"
+          - "Views/Sidebar/**"
+          - "Views/Shared/EditTimelineState.swift"
+          - "Views/Shared/EditTimelineView.swift"
+          - "Views/Shared/GUIState.swift"
+          - "Views/Shared/SparklineView.swift"
+          - "Views/Shared/TextHighlighting.swift"
+          - "Views/Shared/ThemeColors.swift"
       - path: .generated/protocol/ProtocolOpcodes.generated.swift
         name: ProtocolOpcodes.generated.swift
         type: file
@@ -114,7 +246,11 @@ targets:
       base:
         PRODUCT_NAME: MingaTests
         GENERATE_INFOPLIST_FILE: "YES"
+        # Compiles Renderer/ Metal sources; needs the Metal toolchain pin.
+        TOOLCHAINS: com.apple.dt.toolchain.Metal.32023.864
     dependencies:
+      - target: MingaProtocol
+      - target: MingaUI
       - package: ViewInspector
     preBuildScripts:
       - name: Generate protocol opcodes
@@ -135,6 +271,34 @@ targets:
         type: group
         excludes:
           - "MingaApp.swift"
+          - "Protocol/ProtocolTypes.swift"
+          - "Protocol/StatusBarUpdate.swift"
+          - "Protocol/GUIColorSlots.swift"
+          # MingaProtocol-owned (Slice 3)
+          - "Renderer/WindowContent.swift"
+          - "Protocol/AgentSurfaceTypes.swift"
+          - "Protocol/LatencyRecorder.swift"
+          - "Protocol/FrontendExtensionRuntimeMessage.swift"
+          # MingaUI-owned (Slice 3)
+          - "Protocol/InputEncoder.swift"
+          - "Protocol/PortLogger.swift"
+          - "Extensions/FrontendExtensionRuntime.swift"
+          - "Views/Editor/InlineEditField.swift"
+          - "Views/Editor/BlinkingCursor.swift"
+          - "PreviewFixtures.swift"
+          - "Views/Agent/**"
+          - "Views/EditorChrome/**"
+          - "Views/Extensions/**"
+          - "Views/Modifiers/**"
+          - "Views/Overlays/**"
+          - "Views/Settings/**"
+          - "Views/Sidebar/**"
+          - "Views/Shared/EditTimelineState.swift"
+          - "Views/Shared/EditTimelineView.swift"
+          - "Views/Shared/GUIState.swift"
+          - "Views/Shared/SparklineView.swift"
+          - "Views/Shared/TextHighlighting.swift"
+          - "Views/Shared/ThemeColors.swift"
       - path: .generated/protocol/ProtocolOpcodes.generated.swift
         name: ProtocolOpcodes.generated.swift
         type: file
@@ -150,7 +314,11 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.minga.preview-host
         GENERATE_INFOPLIST_FILE: "YES"
         SWIFT_OPTIMIZATION_LEVEL: "-Onone"
-    dependencies: []
+        # Builds the full shell incl. Renderer/ Metal sources; needs the toolchain pin.
+        TOOLCHAINS: com.apple.dt.toolchain.Metal.32023.864
+    dependencies:
+      - target: MingaProtocol
+      - target: MingaUI
     preBuildScripts:
       - name: Generate protocol opcodes
         script: |

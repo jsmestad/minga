@@ -1,11 +1,14 @@
 import SwiftUI
 
-struct PointingHandModifier: ViewModifier {
-    var isEnabled: Bool = true
+public struct PointingHandModifier: ViewModifier {
+    public init(isEnabled: Bool = true) {
+        self.isEnabled = isEnabled
+    }
+    public var isEnabled: Bool = true
     @State private var isHovered = false
     @State private var didPushCursor = false
 
-    func body(content: Content) -> some View {
+    public func body(content: Content) -> some View {
         content
             .onHover { hovering in
                 isHovered = hovering
@@ -36,7 +39,7 @@ struct PointingHandModifier: ViewModifier {
 }
 
 extension View {
-    func pointingHandCursor(isEnabled: Bool = true) -> some View {
+    public func pointingHandCursor(isEnabled: Bool = true) -> some View {
         modifier(PointingHandModifier(isEnabled: isEnabled))
     }
 }

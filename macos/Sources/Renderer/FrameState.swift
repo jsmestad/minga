@@ -9,6 +9,8 @@
 /// overwritten individually by protocol opcodes. Only `dirty` resets
 /// at frame start via `beginFrame()`.
 
+import MingaProtocol
+
 /// Gutter theme colors grouped for cleaner dispatch and rendering.
 struct GutterThemeColors {
     var fg: UInt32 = 0x555555

@@ -15,15 +15,16 @@
 /// owns.
 
 import SwiftUI
+import MingaProtocol
 
 @MainActor
 @Observable
-final class LatencyHUDState {
+public final class LatencyHUDState {
     /// Whether the overlay is currently shown.
-    var visible: Bool
+    public var visible: Bool
 
     /// The latest percentile snapshot rendered by the HUD.
-    var stats: LatencyRecorder.Stats = LatencyRecorder.Stats()
+    public var stats: LatencyRecorder.Stats = LatencyRecorder.Stats()
 
     /// Snapshot source, injected once the dispatcher exists. The closure copies
     /// the live sample window and computes percentiles outside the stamp/resolve
@@ -43,7 +44,7 @@ final class LatencyHUDState {
     /// - Parameters:
     ///   - environment: process environment, read once for the boot default.
     ///   - refreshInterval: how often to pull a fresh snapshot while visible.
-    init(
+    public init(
         environment: [String: String] = ProcessInfo.processInfo.environment,
         refreshInterval: Duration = .milliseconds(500)
     ) {
@@ -65,7 +66,7 @@ final class LatencyHUDState {
 
     /// Wires the recorder snapshot source and starts refreshing if the HUD booted
     /// visible. Called once from `AppDelegate` after the dispatcher is created.
-    func connect(snapshotProvider: @escaping @MainActor () -> LatencyRecorder.Stats) {
+    public func connect(snapshotProvider: @escaping @MainActor () -> LatencyRecorder.Stats) {
         self.snapshotProvider = snapshotProvider
         if visible {
             refresh()
@@ -76,7 +77,7 @@ final class LatencyHUDState {
     /// Flips the overlay and starts or stops the refresh loop to match. Returns
     /// the new visibility so callers can update menu state.
     @discardableResult
-    func toggle() -> Bool {
+    public func toggle() -> Bool {
         visible.toggle()
         if visible {
             refresh()
@@ -88,13 +89,13 @@ final class LatencyHUDState {
     }
 
     /// Pulls one fresh snapshot from the recorder, if connected.
-    func refresh() {
+    public func refresh() {
         guard let snapshotProvider else { return }
         stats = snapshotProvider()
     }
 
     /// One-line model used by the HUD view and exercised by unit tests.
-    var model: LatencyHUDModel { LatencyHUDModel(stats: stats) }
+    public var model: LatencyHUDModel { LatencyHUDModel(stats: stats) }
 
     private func startRefreshing() {
         guard refreshTask == nil else { return }
@@ -120,31 +121,34 @@ final class LatencyHUDState {
 /// Pure formatting model for the latency HUD. Kept `Sendable` and free of
 /// `@MainActor` so it can be unit-tested directly, mirroring the Go TUI's
 /// `Stats.HUD()`/`fmtDur` helpers.
-struct LatencyHUDModel: Sendable, Equatable {
-    let stats: LatencyRecorder.Stats
+public struct LatencyHUDModel: Sendable, Equatable {
+    public init(stats: LatencyRecorder.Stats) {
+        self.stats = stats
+    }
+    public let stats: LatencyRecorder.Stats
 
     /// True when there are no resolved samples yet.
-    var isEmpty: Bool { stats.count == 0 }
+    public var isEmpty: Bool { stats.count == 0 }
 
     /// p50 formatted as a duration string (e.g. `812µs`, `1.20ms`).
-    var p50: String { LatencyHUDModel.formatMicros(stats.p50Micros) }
+    public var p50: String { LatencyHUDModel.formatMicros(stats.p50Micros) }
     /// p99 formatted as a duration string.
-    var p99: String { LatencyHUDModel.formatMicros(stats.p99Micros) }
+    public var p99: String { LatencyHUDModel.formatMicros(stats.p99Micros) }
     /// max formatted as a duration string.
-    var max: String { LatencyHUDModel.formatMicros(stats.maxMicros) }
+    public var max: String { LatencyHUDModel.formatMicros(stats.maxMicros) }
     /// Resolved sample count backing the percentiles.
-    var sampleCount: Int { stats.count }
+    public var sampleCount: Int { stats.count }
 
     /// One-line badge text, matching the Go HUD layout. Shows a placeholder until
     /// the first sample resolves.
-    var line: String {
+    public var line: String {
         guard !isEmpty else { return "lat: (no samples)" }
         return "lat p50 \(p50)  p99 \(p99)  max \(max)  n=\(sampleCount)"
     }
 
     /// Formats a microsecond value as `µs` below 1ms and `ms` at or above, with
     /// two decimals, matching the Go TUI's `fmtDur`.
-    static func formatMicros(_ micros: Double) -> String {
+    public static func formatMicros(_ micros: Double) -> String {
         if micros >= 1000.0 {
             return String(format: "%.2fms", micros / 1000.0)
         }

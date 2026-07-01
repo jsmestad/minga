@@ -6,6 +6,7 @@
 
 import Testing
 import Foundation
+import MingaProtocol
 
 // MARK: - Binary builder helpers
 

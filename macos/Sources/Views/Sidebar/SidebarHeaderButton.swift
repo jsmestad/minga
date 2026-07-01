@@ -6,17 +6,23 @@
 
 import SwiftUI
 
-struct SidebarHeaderButton: View {
-    let systemName: String
-    let barFg: Color
-    var tooltip: String = ""
-    let action: () -> Void
+public struct SidebarHeaderButton: View {
+    public init(systemName: String, barFg: Color, tooltip: String = "", action: @escaping () -> Void) {
+        self.systemName = systemName
+        self.barFg = barFg
+        self.tooltip = tooltip
+        self.action = action
+    }
+    public let systemName: String
+    public let barFg: Color
+    public var tooltip: String = ""
+    public let action: () -> Void
 
     @State private var isHovered = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    var body: some View {
+    public var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 10.5, weight: .medium))

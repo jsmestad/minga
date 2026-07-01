@@ -1,9 +1,13 @@
 import SwiftUI
 
 /// A filled area sparkline chart showing recent activity.
-struct SparklineView: View {
-    let data: [Float]
-    let color: Color
+public struct SparklineView: View {
+    public init(data: [Float], color: Color) {
+        self.data = data
+        self.color = color
+    }
+    public let data: [Float]
+    public let color: Color
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -16,7 +20,7 @@ struct SparklineView: View {
         return "Sparkline chart, \(data.count) points, peak \(Int(peak * 100))%, average \(Int(avg * 100))%"
     }
 
-    var body: some View {
+    public var body: some View {
         GeometryReader { geometry in
             if data.isEmpty || data.allSatisfy({ $0 == 0.0 }) {
                 Path { path in

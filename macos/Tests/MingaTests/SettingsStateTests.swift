@@ -1,4 +1,6 @@
+import MingaUI
 import Testing
+import MingaProtocol
 
 @MainActor
 @Suite("Settings State")

@@ -1,7 +1,9 @@
 /// Maps view names to constructed SwiftUI chrome views with mock state.
 
+import MingaUI
 import AppKit
 import SwiftUI
+import MingaProtocol
 
 @MainActor
 enum PreviewRegistry {

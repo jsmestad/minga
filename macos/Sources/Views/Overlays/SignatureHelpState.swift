@@ -1,33 +1,53 @@
 /// Observable signature help state driven by BEAM gui_signature_help messages.
 
 import SwiftUI
+import MingaProtocol
 
 /// A parameter in a function signature.
-struct SignatureParameter: Identifiable {
-    let id: Int
-    let label: String
-    let documentation: String
+public struct SignatureParameter: Identifiable {
+    public init(id: Int, label: String, documentation: String) {
+        self.id = id
+        self.label = label
+        self.documentation = documentation
+    }
+    public let id: Int
+    public let label: String
+    public let documentation: String
 }
 
 /// A function signature with its parameters.
-struct SignatureInfo: Identifiable {
-    let id: Int
-    let label: String
-    let documentation: String
-    let parameters: [SignatureParameter]
+public struct SignatureInfo: Identifiable {
+    public init(id: Int, label: String, documentation: String, parameters: [SignatureParameter]) {
+        self.id = id
+        self.label = label
+        self.documentation = documentation
+        self.parameters = parameters
+    }
+    public let id: Int
+    public let label: String
+    public let documentation: String
+    public let parameters: [SignatureParameter]
 }
 
 @MainActor
 @Observable
-final class SignatureHelpState {
-    var visible: Bool = false
-    var anchorRow: Int = 0
-    var anchorCol: Int = 0
-    var activeSignature: Int = 0
-    var activeParameter: Int = 0
-    var signatures: [SignatureInfo] = []
+public final class SignatureHelpState {
+    public init(visible: Bool = false, anchorRow: Int = 0, anchorCol: Int = 0, activeSignature: Int = 0, activeParameter: Int = 0, signatures: [SignatureInfo] = []) {
+        self.visible = visible
+        self.anchorRow = anchorRow
+        self.anchorCol = anchorCol
+        self.activeSignature = activeSignature
+        self.activeParameter = activeParameter
+        self.signatures = signatures
+    }
+    public var visible: Bool = false
+    public var anchorRow: Int = 0
+    public var anchorCol: Int = 0
+    public var activeSignature: Int = 0
+    public var activeParameter: Int = 0
+    public var signatures: [SignatureInfo] = []
 
-    func update(visible: Bool, anchorRow: UInt16, anchorCol: UInt16,
+    public func update(visible: Bool, anchorRow: UInt16, anchorCol: UInt16,
                 activeSignature: UInt8, activeParameter: UInt8,
                 rawSignatures: [Wire.Signature]) {
         self.visible = visible
@@ -46,7 +66,7 @@ final class SignatureHelpState {
         }
     }
 
-    func hide() {
+    public func hide() {
         visible = false
         signatures = []
     }

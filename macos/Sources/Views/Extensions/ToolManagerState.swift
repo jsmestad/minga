@@ -8,13 +8,13 @@ import SwiftUI
 
 // MARK: - Data models
 
-enum ToolCategory: UInt8, CaseIterable {
+public enum ToolCategory: UInt8, CaseIterable {
     case lspServer = 0
     case formatter = 1
     case linter = 2
     case debugger = 3
 
-    var label: String {
+    public var label: String {
         switch self {
         case .lspServer: return "Language Servers"
         case .formatter: return "Formatters"
@@ -23,7 +23,7 @@ enum ToolCategory: UInt8, CaseIterable {
         }
     }
 
-    var icon: String {
+    public var icon: String {
         switch self {
         case .lspServer: return "server.rack"
         case .formatter: return "text.alignleft"
@@ -33,14 +33,14 @@ enum ToolCategory: UInt8, CaseIterable {
     }
 }
 
-enum ToolStatus: UInt8 {
+public enum ToolStatus: UInt8 {
     case notInstalled = 0
     case installed = 1
     case installing = 2
     case updateAvailable = 3
     case failed = 4
 
-    var label: String {
+    public var label: String {
         switch self {
         case .notInstalled: return "Not installed"
         case .installed: return "Installed"
@@ -51,14 +51,14 @@ enum ToolStatus: UInt8 {
     }
 }
 
-enum ToolMethod: UInt8 {
+public enum ToolMethod: UInt8 {
     case npm = 0
     case pip = 1
     case cargo = 2
     case goInstall = 3
     case githubRelease = 4
 
-    var label: String {
+    public var label: String {
         switch self {
         case .npm: return "npm"
         case .pip: return "pip"
@@ -68,7 +68,7 @@ enum ToolMethod: UInt8 {
         }
     }
 
-    var icon: String {
+    public var icon: String {
         switch self {
         case .npm: return "shippingbox"
         case .pip: return "cube"
@@ -79,14 +79,14 @@ enum ToolMethod: UInt8 {
     }
 }
 
-enum ToolFilter: UInt8, CaseIterable {
+public enum ToolFilter: UInt8, CaseIterable {
     case all = 0
     case installed = 1
     case notInstalled = 2
     case lspServers = 3
     case formatters = 4
 
-    var label: String {
+    public var label: String {
         switch self {
         case .all: return "All"
         case .installed: return "Installed"
@@ -97,32 +97,52 @@ enum ToolFilter: UInt8, CaseIterable {
     }
 }
 
-struct ToolEntry: Identifiable {
-    let id: String  // name atom as string
-    let name: String
-    let label: String
-    let description: String
-    let category: ToolCategory
-    let status: ToolStatus
-    let method: ToolMethod
-    let languages: [String]
-    let version: String
-    let homepage: String
-    let provides: [String]
-    let errorReason: String
+public struct ToolEntry: Identifiable {
+    public init(id: String, name: String, label: String, description: String, category: ToolCategory, status: ToolStatus, method: ToolMethod, languages: [String], version: String, homepage: String, provides: [String], errorReason: String) {
+        self.id = id
+        self.name = name
+        self.label = label
+        self.description = description
+        self.category = category
+        self.status = status
+        self.method = method
+        self.languages = languages
+        self.version = version
+        self.homepage = homepage
+        self.provides = provides
+        self.errorReason = errorReason
+    }
+    public let id: String  // name atom as string
+    public let name: String
+    public let label: String
+    public let description: String
+    public let category: ToolCategory
+    public let status: ToolStatus
+    public let method: ToolMethod
+    public let languages: [String]
+    public let version: String
+    public let homepage: String
+    public let provides: [String]
+    public let errorReason: String
 }
 
 // MARK: - Observable state
 
 @MainActor
 @Observable
-final class ToolManagerState {
-    var visible: Bool = false
-    var filter: ToolFilter = .all
-    var selectedIndex: Int = 0
-    var tools: [ToolEntry] = []
+public final class ToolManagerState {
+    public init(visible: Bool = false, filter: ToolFilter = .all, selectedIndex: Int = 0, tools: [ToolEntry] = []) {
+        self.visible = visible
+        self.filter = filter
+        self.selectedIndex = selectedIndex
+        self.tools = tools
+    }
+    public var visible: Bool = false
+    public var filter: ToolFilter = .all
+    public var selectedIndex: Int = 0
+    public var tools: [ToolEntry] = []
 
-    func update(
+    public func update(
         visible: Bool,
         filter: ToolFilter,
         selectedIndex: UInt16,
@@ -134,20 +154,20 @@ final class ToolManagerState {
         self.tools = tools
     }
 
-    func hide() {
+    public func hide() {
         visible = false
         tools = []
     }
 
-    var installedCount: Int {
+    public var installedCount: Int {
         tools.filter { $0.status == .installed || $0.status == .updateAvailable }.count
     }
 
-    var availableCount: Int {
+    public var availableCount: Int {
         tools.filter { $0.status == .notInstalled }.count
     }
 
-    var installingCount: Int {
+    public var installingCount: Int {
         tools.filter { $0.status == .installing }.count
     }
 }

@@ -1,4 +1,5 @@
 import Foundation
+@testable import MingaUI
 import Testing
 
 @Suite("PreviewSnapshotPolicy")

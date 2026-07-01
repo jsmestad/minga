@@ -12,12 +12,14 @@
 /// 5. Gutter separator line
 /// 6. Beam/underline cursor overlay (drawn after text)
 
+import MingaUI
 import Dispatch
 import Metal
 import QuartzCore
 import AppKit
 import os.log
 import os.signpost
+import MingaProtocol
 
 private let rendererLog = OSLog(subsystem: "com.minga.editor", category: "Renderer")
 

@@ -14,16 +14,21 @@ import SwiftUI
 /// All cursor-blinking surfaces (SwiftUI BlinkingCursor, Metal editor
 /// cursor) share this single source of truth for blink timing. The
 /// system settings are NSTextInsertionPointBlinkPeriodOn/Off (milliseconds).
-struct SystemBlinkTiming {
+public struct SystemBlinkTiming {
     /// Nanoseconds the cursor stays visible per blink cycle.
-    let onDuration: UInt64
+    public let onDuration: UInt64
 
     /// Nanoseconds the cursor stays hidden per blink cycle.
-    let offDuration: UInt64
+    public let offDuration: UInt64
+
+    public init(onDuration: UInt64, offDuration: UInt64) {
+        self.onDuration = onDuration
+        self.offDuration = offDuration
+    }
 
     /// Reads the current system blink timing. Falls back to 530ms (macOS default)
     /// if the UserDefaults keys are missing or zero.
-    static var system: SystemBlinkTiming {
+    public static var system: SystemBlinkTiming {
         let onMs = UserDefaults.standard.double(forKey: "NSTextInsertionPointBlinkPeriodOn")
         let offMs = UserDefaults.standard.double(forKey: "NSTextInsertionPointBlinkPeriodOff")
         return SystemBlinkTiming(
@@ -35,7 +40,7 @@ struct SystemBlinkTiming {
     /// Whether the system has disabled cursor blinking via Accessibility settings.
     /// When true, cursors should remain solid (always visible, no blink).
     @MainActor
-    static var blinkingDisabled: Bool {
+    public static var blinkingDisabled: Bool {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     }
 }
@@ -48,16 +53,22 @@ struct SystemBlinkTiming {
 ///
 /// Uses a Task-based timer loop for precise on/off timing that matches
 /// native macOS text cursor behavior (no fade, just toggle).
-struct BlinkingCursor: View {
-    let color: Color
-    var width: CGFloat = 2
-    var height: CGFloat = 16
-    var resetToken: Int = 0
+public struct BlinkingCursor: View {
+    public init(color: Color, width: CGFloat = 2, height: CGFloat = 16, resetToken: Int = 0) {
+        self.color = color
+        self.width = width
+        self.height = height
+        self.resetToken = resetToken
+    }
+    public let color: Color
+    public var width: CGFloat = 2
+    public var height: CGFloat = 16
+    public var resetToken: Int = 0
 
     @State private var isVisible = true
     @State private var blinkTask: Task<Void, Never>?
 
-    var body: some View {
+    public var body: some View {
         Rectangle()
             .fill(color)
             .frame(width: width, height: height)

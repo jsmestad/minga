@@ -4,9 +4,11 @@
 /// sub-state when dispatched. Catches wiring bugs where a command is
 /// routed to the wrong state or not routed at all.
 
+import MingaUI
 import Testing
 import Foundation
 import AppKit
+import MingaProtocol
 
 @MainActor
 fileprivate func completeThemeSlots() -> [(UInt8, UInt8, UInt8, UInt8)] {

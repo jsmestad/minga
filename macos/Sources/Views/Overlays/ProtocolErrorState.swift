@@ -11,17 +11,18 @@ import SwiftUI
 
 @MainActor
 @Observable
-final class ProtocolErrorState {
+public final class ProtocolErrorState {
+    public init() {}
     /// The BEAM-supplied reason, or nil when no protocol_error has arrived.
     /// While non-nil, ContentView renders a blocking overlay over everything.
-    private(set) var message: String?
+    public private(set) var message: String?
 
     /// Whether the blocking error overlay should be shown.
-    var isPresented: Bool { message != nil }
+    public var isPresented: Bool { message != nil }
 
     /// Latches a protocol_error reason. A version mismatch is fatal for the
     /// session, so this is intentionally one-way: there is no reset.
-    func present(message: String) {
+    public func present(message: String) {
         self.message = message
     }
 }

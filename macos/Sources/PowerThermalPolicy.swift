@@ -2,6 +2,7 @@
 ///
 /// The GUI remains event-driven and lets the BEAM own frame pacing. Under stronger resource pressure,
 /// this policy slows or disables cursor blinking so the native surface does less avoidable work while the system is constrained.
+import MingaUI
 import Foundation
 
 struct PowerThermalPolicy: Equatable {

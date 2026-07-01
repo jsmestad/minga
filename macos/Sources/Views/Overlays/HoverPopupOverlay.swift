@@ -6,6 +6,7 @@
 /// Non-interactive by default; interactive when focused for scrolling.
 
 import SwiftUI
+import MingaProtocol
 
 /// PreferenceKey to measure the popup's rendered height.
 /// Single reporter: only one GeometryReader writes to this key.
@@ -25,14 +26,22 @@ private struct HoverWidthKey: PreferenceKey {
     }
 }
 
-struct HoverPopupOverlay: View {
-    let state: HoverPopupState
+public struct HoverPopupOverlay: View {
+    public init(state: HoverPopupState, cellWidth: CGFloat, cellHeight: CGFloat, viewportHeight: CGFloat, viewportWidth: CGFloat, encoder: InputEncoder? = nil) {
+        self.state = state
+        self.cellWidth = cellWidth
+        self.cellHeight = cellHeight
+        self.viewportHeight = viewportHeight
+        self.viewportWidth = viewportWidth
+        self.encoder = encoder
+    }
+    public let state: HoverPopupState
     @Environment(\.themeColors) private var theme
-    let cellWidth: CGFloat
-    let cellHeight: CGFloat
-    let viewportHeight: CGFloat
-    let viewportWidth: CGFloat
-    let encoder: InputEncoder?
+    public let cellWidth: CGFloat
+    public let cellHeight: CGFloat
+    public let viewportHeight: CGFloat
+    public let viewportWidth: CGFloat
+    public let encoder: InputEncoder?
 
     @State private var popupHeight: CGFloat = 0
     @State private var popupWidth: CGFloat = 0
@@ -73,7 +82,7 @@ struct HoverPopupOverlay: View {
         return min(rawX, maxX)
     }
 
-    var body: some View {
+    public var body: some View {
         if state.visible && !state.lines.isEmpty {
             popupContent
                 .frame(maxWidth: maxWidth)
@@ -262,4 +271,55 @@ struct HoverPopupOverlay: View {
             blue: Double(rgb & 0xFF) / 255.0
         )
     }
+}
+
+// MARK: - Previews
+
+@MainActor
+private func hoverPopupPreviewState() -> HoverPopupState {
+    let state = HoverPopupState()
+    state.update(
+        visible: true, anchorRow: 8, anchorCol: 4,
+        focused: false, scrollOffset: 0,
+        rawLines: [
+            Wire.HoverLine(lineType: .header, segments: [
+                Wire.HoverSegment(style: .header2, fgColor: nil, flags: 0, text: "Buffer.open/1"),
+            ]),
+            Wire.HoverLine(lineType: .empty, segments: []),
+            Wire.HoverLine(lineType: .text, segments: [
+                Wire.HoverSegment(style: .plain, fgColor: nil, flags: 0, text: "Opens a file from disk and returns a managed buffer process."),
+            ]),
+            Wire.HoverLine(lineType: .text, segments: [
+                Wire.HoverSegment(style: .plain, fgColor: nil, flags: 0, text: "The buffer is registered under the given path and will be reused"),
+            ]),
+            Wire.HoverLine(lineType: .text, segments: [
+                Wire.HoverSegment(style: .plain, fgColor: nil, flags: 0, text: "on subsequent calls with the same path."),
+            ]),
+            Wire.HoverLine(lineType: .empty, segments: []),
+            Wire.HoverLine(lineType: .codeHeader, segments: [
+                Wire.HoverSegment(style: .codeBlock, fgColor: nil, flags: 0, text: "elixir"),
+            ]),
+            Wire.HoverLine(lineType: .code, segments: [
+                Wire.HoverSegment(style: .syntaxHighlighted, fgColor: 0xC678DD, flags: 1, text: "@spec "),
+                Wire.HoverSegment(style: .syntaxHighlighted, fgColor: 0x61AFEF, flags: 0, text: "open"),
+                Wire.HoverSegment(style: .syntaxHighlighted, fgColor: 0xBBC2CF, flags: 0, text: "("),
+                Wire.HoverSegment(style: .syntaxHighlighted, fgColor: 0xE5C07B, flags: 0, text: "String.t()"),
+                Wire.HoverSegment(style: .syntaxHighlighted, fgColor: 0xBBC2CF, flags: 0, text: ") :: "),
+                Wire.HoverSegment(style: .syntaxHighlighted, fgColor: 0xE5C07B, flags: 0, text: "{:ok, pid()}"),
+            ]),
+            Wire.HoverLine(lineType: .empty, segments: []),
+            Wire.HoverLine(lineType: .blockquote, segments: [
+                Wire.HoverSegment(style: .blockquote, fgColor: nil, flags: 0, text: "Since: v0.4.0"),
+            ]),
+        ]
+    )
+    return state
+}
+
+#Preview("Hover Popup") {
+    let theme = PreviewFixtures.theme()
+    HoverPopupOverlay(state: hoverPopupPreviewState(), cellWidth: 8, cellHeight: 18, viewportHeight: 300, viewportWidth: 500, encoder: nil)
+        .frame(width: 500, height: 300)
+        .background(theme.editorBg)
+        .environment(\.themeColors, theme)
 }

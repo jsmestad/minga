@@ -7,9 +7,11 @@
 ///
 /// Wrapped by EditorView (NSViewRepresentable) for use in SwiftUI.
 
+import MingaUI
 import AppKit
 import os
 import MetalKit
+import MingaProtocol
 
 private enum DividerCursorState: Equatable {
     case none
@@ -29,7 +31,7 @@ private enum EditorStatusMode {
 /// vsync-driven rendering with automatic frame coalescing.
 final class EditorNSView: MTKView {
     var encoder: InputEncoder
-    private(set) var fontFace: FontFace
+    public private(set) var fontFace: FontFace
 
     /// Command dispatcher owning frame metadata.
     let dispatcher: CommandDispatcher
@@ -128,7 +130,7 @@ final class EditorNSView: MTKView {
     /// by the NSView layer. A local key event monitor forwards keyboard
     /// events to keyDown since opacity(0) disconnects normal event
     /// delivery from the SwiftUI hosting layer.
-    private(set) var agentChatVisible: Bool = false
+    public private(set) var agentChatVisible: Bool = false
 
     /// Local event monitor that forwards keyboard events to keyDown
     /// when the agent chat overlay is visible. Installed/removed by
@@ -178,7 +180,7 @@ final class EditorNSView: MTKView {
     /// Whether the cursor is currently visible in the blink cycle.
     /// The Metal renderer ANDs this with `frameState.cursorVisible` to
     /// determine whether to draw the cursor.
-    private(set) var cursorBlinkVisible: Bool = true
+    public private(set) var cursorBlinkVisible: Bool = true
 
     /// Whether Minga config allows blinking the editor cursor.
     private var cursorBlinkEnabled: Bool = true

@@ -12,10 +12,14 @@
 import SwiftUI
 
 /// Find/replace toolbar view.
-struct SearchToolbar: View {
-    let searchState: SearchState
+public struct SearchToolbar: View {
+    public init(searchState: SearchState, encoder: (any InputEncoder)? = nil) {
+        self.searchState = searchState
+        self.encoder = encoder
+    }
+    public let searchState: SearchState
     @Environment(\.themeColors) private var theme
-    let encoder: (any InputEncoder)?
+    public let encoder: (any InputEncoder)?
 
     @State private var searchText: String = ""
     @State private var replaceText: String = ""
@@ -39,7 +43,7 @@ struct SearchToolbar: View {
         return "\(searchState.currentIndex) of \(searchState.matchCount)"
     }
 
-    var body: some View {
+    public var body: some View {
         VStack(spacing: 0) {
             // Top border
             Rectangle()

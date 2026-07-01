@@ -4,6 +4,7 @@
 /// variants for CoreText line rendering. Weight variants are lazily
 /// resolved via NSFontManager and cached.
 
+import MingaUI
 import CoreText
 import CoreGraphics
 import Foundation

@@ -6,11 +6,16 @@
 
 import SwiftUI
 
-struct WorkspaceIconPicker: View {
-    let currentIcon: String
-    let accentColor: Color
+public struct WorkspaceIconPicker: View {
+    public init(currentIcon: String, accentColor: Color, onSelect: @escaping (String) -> Void) {
+        self.currentIcon = currentIcon
+        self.accentColor = accentColor
+        self.onSelect = onSelect
+    }
+    public let currentIcon: String
+    public let accentColor: Color
     @Environment(\.themeColors) private var theme
-    let onSelect: (String) -> Void
+    public let onSelect: (String) -> Void
 
     @State private var searchText: String = ""
     @FocusState private var searchFocused: Bool
@@ -54,7 +59,7 @@ struct WorkspaceIconPicker: View {
         }
     }
 
-    var body: some View {
+    public var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")

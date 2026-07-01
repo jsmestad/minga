@@ -1,16 +1,21 @@
 import SwiftUI
+import MingaProtocol
 
 /// Native sidebar for observing the live BEAM supervision tree.
-struct ObservatoryView: View {
-    let state: ObservatoryState
+public struct ObservatoryView: View {
+    public init(state: ObservatoryState, encoder: InputEncoder? = nil) {
+        self.state = state
+        self.encoder = encoder
+    }
+    public let state: ObservatoryState
     @Environment(\.themeColors) private var theme
-    let encoder: InputEncoder?
+    public let encoder: InputEncoder?
 
     @State private var expandedNodeIds: Set<String> = []
     @State private var selectedNodeId: String?
     @State private var hasInitializedExpansion = false
 
-    var body: some View {
+    public var body: some View {
         VStack(spacing: 0) {
             header
             Divider().overlay(theme.treeSeparatorFg.opacity(0.4))

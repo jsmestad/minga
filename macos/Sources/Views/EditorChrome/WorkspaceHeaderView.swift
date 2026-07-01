@@ -1,10 +1,14 @@
 import SwiftUI
 
 /// Workspace header row rendered above active-workspace file tabs.
-struct WorkspaceHeaderView: View {
-    let workspaceState: WorkspaceState
+public struct WorkspaceHeaderView: View {
+    public init(workspaceState: WorkspaceState, encoder: InputEncoder? = nil) {
+        self.workspaceState = workspaceState
+        self.encoder = encoder
+    }
+    public let workspaceState: WorkspaceState
     @Environment(\.themeColors) private var theme
-    let encoder: InputEncoder?
+    public let encoder: InputEncoder?
 
     @State private var isRenaming = false
     @State private var renameText = ""
@@ -13,7 +17,7 @@ struct WorkspaceHeaderView: View {
 
     private let rowHeight: CGFloat = 26
 
-    var body: some View {
+    public var body: some View {
         HStack(spacing: 8) {
             if let activeWorkspace = workspaceState.activeWorkspace {
                 activeWorkspacePill(activeWorkspace)

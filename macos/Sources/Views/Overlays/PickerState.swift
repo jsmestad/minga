@@ -5,37 +5,48 @@
 /// and multi-select marks.
 
 import SwiftUI
+import MingaProtocol
 
-struct PickerItem: Identifiable {
-    let id: Int
-    let iconColor: UInt32
-    let label: String
-    let description: String
-    let annotation: String
-    let matchPositions: [UInt16]
-    let isTwoLine: Bool
-    let isMarked: Bool
+public struct PickerItem: Identifiable {
+    public init(id: Int, iconColor: UInt32, label: String, description: String, annotation: String, matchPositions: [UInt16], isTwoLine: Bool, isMarked: Bool) {
+        self.id = id
+        self.iconColor = iconColor
+        self.label = label
+        self.description = description
+        self.annotation = annotation
+        self.matchPositions = matchPositions
+        self.isTwoLine = isTwoLine
+        self.isMarked = isMarked
+    }
+    public let id: Int
+    public let iconColor: UInt32
+    public let label: String
+    public let description: String
+    public let annotation: String
+    public let matchPositions: [UInt16]
+    public let isTwoLine: Bool
+    public let isMarked: Bool
 
     /// Whether the label starts with a separate icon glyph.
-    var hasLeadingIcon: Bool {
+    public var hasLeadingIcon: Bool {
         guard let first = label.first else { return false }
         return first.isPrivateUseScalar
     }
 
     /// Extract the leading icon glyph when the label intentionally includes one.
-    var icon: String {
+    public var icon: String {
         guard hasLeadingIcon, let first = label.first else { return "" }
         return String(first)
     }
 
     /// The label text without the leading icon glyph and its spacer.
-    var displayLabel: String {
+    public var displayLabel: String {
         String(label.dropFirst(displayPrefixLength))
     }
 
     /// Match positions adjusted for the visible label after removing an icon prefix.
     /// Only includes positions that fall within the display label range.
-    var displayMatchPositions: Set<Int> {
+    public var displayMatchPositions: Set<Int> {
         Set(matchPositions.compactMap { pos in
             let adjusted = Int(pos) - displayPrefixLength
             return adjusted >= 0 && adjusted < displayLabel.count ? adjusted : nil
@@ -50,50 +61,80 @@ struct PickerItem: Identifiable {
 }
 
 /// Action menu state for the picker (C-o menu).
-struct PickerActionMenu {
-    let selectedIndex: Int
-    let actions: [String]
+public struct PickerActionMenu {
+    public init(selectedIndex: Int, actions: [String]) {
+        self.selectedIndex = selectedIndex
+        self.actions = actions
+    }
+    public let selectedIndex: Int
+    public let actions: [String]
 }
 
 /// A line of preview content with styled segments.
-struct PreviewLine: Identifiable {
-    let id: Int
-    let segments: [PreviewSegment]
+public struct PreviewLine: Identifiable {
+    public init(id: Int, segments: [PreviewSegment]) {
+        self.id = id
+        self.segments = segments
+    }
+    public let id: Int
+    public let segments: [PreviewSegment]
 }
 
-struct PreviewSegment: Identifiable {
-    let id: Int
-    let text: String
-    let fgColor: UInt32
-    let bold: Bool
+public struct PreviewSegment: Identifiable {
+    public init(id: Int, text: String, fgColor: UInt32, bold: Bool) {
+        self.id = id
+        self.text = text
+        self.fgColor = fgColor
+        self.bold = bold
+    }
+    public let id: Int
+    public let text: String
+    public let fgColor: UInt32
+    public let bold: Bool
 }
 
 @MainActor
 @Observable
-final class PickerState {
-    var visible: Bool = false
-    var selectedIndex: Int = 0
-    var previewSelectedIndex: Int?
+public final class PickerState {
+    public init(visible: Bool = false, selectedIndex: Int = 0, previewSelectedIndex: Int? = nil, filteredCount: Int = 0, totalCount: Int = 0, markedCount: Int = 0, title: String = "", query: String = "", modePrefix: String = "", hasPreview: Bool = false, loadStatus: Wire.PickerLoadStatus = .ready, items: [PickerItem] = [], previewLines: [PreviewLine] = [], actionMenu: PickerActionMenu? = nil) {
+        self.visible = visible
+        self.selectedIndex = selectedIndex
+        self.previewSelectedIndex = previewSelectedIndex
+        self.filteredCount = filteredCount
+        self.totalCount = totalCount
+        self.markedCount = markedCount
+        self.title = title
+        self.query = query
+        self.modePrefix = modePrefix
+        self.hasPreview = hasPreview
+        self.loadStatus = loadStatus
+        self.items = items
+        self.previewLines = previewLines
+        self.actionMenu = actionMenu
+    }
+    public var visible: Bool = false
+    public var selectedIndex: Int = 0
+    public var previewSelectedIndex: Int?
 
-    var effectiveSelectedIndex: Int {
+    public var effectiveSelectedIndex: Int {
         if let preview = previewSelectedIndex, preview >= 0, preview < items.count {
             return preview
         }
         return selectedIndex
     }
-    var filteredCount: Int = 0
-    var totalCount: Int = 0
-    var markedCount: Int = 0
-    var title: String = ""
-    var query: String = ""
-    var modePrefix: String = ""
-    var hasPreview: Bool = false
-    var loadStatus: Wire.PickerLoadStatus = .ready
-    var items: [PickerItem] = []
-    var previewLines: [PreviewLine] = []
-    var actionMenu: PickerActionMenu? = nil
+    public var filteredCount: Int = 0
+    public var totalCount: Int = 0
+    public var markedCount: Int = 0
+    public var title: String = ""
+    public var query: String = ""
+    public var modePrefix: String = ""
+    public var hasPreview: Bool = false
+    public var loadStatus: Wire.PickerLoadStatus = .ready
+    public var items: [PickerItem] = []
+    public var previewLines: [PreviewLine] = []
+    public var actionMenu: PickerActionMenu? = nil
 
-    func update(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, rawItems: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String = "", loadStatus: Wire.PickerLoadStatus = .ready) {
+    public func update(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, rawItems: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String = "", loadStatus: Wire.PickerLoadStatus = .ready) {
         self.visible = visible
         self.selectedIndex = Int(selectedIndex)
         self.previewSelectedIndex = nil
@@ -127,7 +168,7 @@ final class PickerState {
         }
     }
 
-    func updatePreview(lines: [Wire.PickerPreviewLine]) {
+    public func updatePreview(lines: [Wire.PickerPreviewLine]) {
         self.previewLines = lines.enumerated().map { lineIdx, segments in
             PreviewLine(
                 id: lineIdx,
@@ -143,11 +184,11 @@ final class PickerState {
         }
     }
 
-    func clearPreview() {
+    public func clearPreview() {
         self.previewLines = []
     }
 
-    func previewNavigation(delta: Int) -> Bool {
+    public func previewNavigation(delta: Int) -> Bool {
         guard visible, !items.isEmpty else { return false }
         let current = previewSelectedIndex ?? selectedIndex
         let next = min(max(current + delta, 0), items.count - 1)
@@ -156,7 +197,7 @@ final class PickerState {
         return true
     }
 
-    func hide() {
+    public func hide() {
         visible = false
         markedCount = 0
         items = []

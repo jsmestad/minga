@@ -4,82 +4,130 @@
 /// SwiftUI views observe this to render the tab strip.
 
 import SwiftUI
+import MingaProtocol
 
 /// A single tab entry for SwiftUI rendering.
-struct TabEntry: Identifiable {
-    let id: UInt32
-    let groupId: UInt16
-    let isActive: Bool
-    let isDirty: Bool
-    let isAgent: Bool
-    let hasAttention: Bool
-    let agentStatus: UInt8
-    let isPinned: Bool
-    let tintColor: Color?
-    let icon: String
-    let label: String
+public struct TabEntry: Identifiable {
+    public init(id: UInt32, groupId: UInt16, isActive: Bool, isDirty: Bool, isAgent: Bool, hasAttention: Bool, agentStatus: UInt8, isPinned: Bool, tintColor: Color? = nil, icon: String, label: String) {
+        self.id = id
+        self.groupId = groupId
+        self.isActive = isActive
+        self.isDirty = isDirty
+        self.isAgent = isAgent
+        self.hasAttention = hasAttention
+        self.agentStatus = agentStatus
+        self.isPinned = isPinned
+        self.tintColor = tintColor
+        self.icon = icon
+        self.label = label
+    }
+    public let id: UInt32
+    public let groupId: UInt16
+    public let isActive: Bool
+    public let isDirty: Bool
+    public let isAgent: Bool
+    public let hasAttention: Bool
+    public let agentStatus: UInt8
+    public let isPinned: Bool
+    public let tintColor: Color?
+    public let icon: String
+    public let label: String
 }
 
 /// A workspace entry for the tab bar capsules and indicator.
-struct WorkspaceEntry: Identifiable {
-    let id: UInt16
-    let kind: UInt8
-    let agentStatus: UInt8
-    let flags: UInt16
-    let color: Color
-    let tabCount: UInt16
-    let draftCount: UInt16
-    let conflictCount: UInt16
-    let runningBackgroundCount: UInt16
-    let label: String
-    let icon: String
+public struct WorkspaceEntry: Identifiable {
+    public init(id: UInt16, kind: UInt8, agentStatus: UInt8, flags: UInt16, color: Color, tabCount: UInt16, draftCount: UInt16, conflictCount: UInt16, runningBackgroundCount: UInt16, label: String, icon: String) {
+        self.id = id
+        self.kind = kind
+        self.agentStatus = agentStatus
+        self.flags = flags
+        self.color = color
+        self.tabCount = tabCount
+        self.draftCount = draftCount
+        self.conflictCount = conflictCount
+        self.runningBackgroundCount = runningBackgroundCount
+        self.label = label
+        self.icon = icon
+    }
+    public let id: UInt16
+    public let kind: UInt8
+    public let agentStatus: UInt8
+    public let flags: UInt16
+    public let color: Color
+    public let tabCount: UInt16
+    public let draftCount: UInt16
+    public let conflictCount: UInt16
+    public let runningBackgroundCount: UInt16
+    public let label: String
+    public let icon: String
 }
 
 /// A visible file tab entry from the canonical workspace protocol.
-struct WorkspaceTabEntry: Identifiable {
-    let id: UInt32
-    let workspaceId: UInt16
-    let kind: UInt8
-    let flags: UInt16
-    let pathHash: UInt32
-    let tintColor: Color?
-    let icon: String
-    let label: String
-    let path: String
+public struct WorkspaceTabEntry: Identifiable {
+    public init(id: UInt32, workspaceId: UInt16, kind: UInt8, flags: UInt16, pathHash: UInt32, tintColor: Color? = nil, icon: String, label: String, path: String) {
+        self.id = id
+        self.workspaceId = workspaceId
+        self.kind = kind
+        self.flags = flags
+        self.pathHash = pathHash
+        self.tintColor = tintColor
+        self.icon = icon
+        self.label = label
+        self.path = path
+    }
+    public let id: UInt32
+    public let workspaceId: UInt16
+    public let kind: UInt8
+    public let flags: UInt16
+    public let pathHash: UInt32
+    public let tintColor: Color?
+    public let icon: String
+    public let label: String
+    public let path: String
 
-    var isAgent: Bool { kind == 1 }
-    var isDirty: Bool { flags & 0x0001 != 0 }
-    var hasAttention: Bool { flags & 0x0002 != 0 }
-    var isPinned: Bool { flags & 0x0020 != 0 }
+    public var isAgent: Bool { kind == 1 }
+    public var isDirty: Bool { flags & 0x0001 != 0 }
+    public var hasAttention: Bool { flags & 0x0002 != 0 }
+    public var isPinned: Bool { flags & 0x0020 != 0 }
 }
 
 /// Observable state for the tab bar, driven by BEAM protocol messages.
 @MainActor
 @Observable
-final class TabBarState {
-    var tabs: [TabEntry] = []
+public final class TabBarState {
+    public init(tabs: [TabEntry] = [], activeIndex: UInt8 = 0, workspaces: [WorkspaceEntry] = [], workspaceTabs: [WorkspaceTabEntry] = [], activeWorkspaceId: UInt16 = 0, workspaceMode: UInt8 = 0, workspaceFlags: UInt8 = 0, hasCanonicalWorkspaceTabs: Bool = false) {
+        self.tabs = tabs
+        self.activeIndex = activeIndex
+        self.workspaces = workspaces
+        self.workspaceTabs = workspaceTabs
+        self.activeWorkspaceId = activeWorkspaceId
+        self.workspaceMode = workspaceMode
+        self.workspaceFlags = workspaceFlags
+        self.hasCanonicalWorkspaceTabs = hasCanonicalWorkspaceTabs
+    }
+    public var tabs: [TabEntry] = []
     /// Visible-tab active index from gui_tab_bar, or 255 when the active tab is hidden.
-    var activeIndex: UInt8 = 0
-    var workspaces: [WorkspaceEntry] = []
-    var workspaceTabs: [WorkspaceTabEntry] = []
-    var activeWorkspaceId: UInt16 = 0
-    var workspaceMode: UInt8 = 0
-    var workspaceFlags: UInt8 = 0
-    var hasCanonicalWorkspaceTabs: Bool = false
+    public var activeIndex: UInt8 = 0
+    public var workspaces: [WorkspaceEntry] = []
+    public var workspaceTabs: [WorkspaceTabEntry] = []
+    public var activeWorkspaceId: UInt16 = 0
+    public var workspaceMode: UInt8 = 0
+    public var workspaceFlags: UInt8 = 0
+    public var hasCanonicalWorkspaceTabs: Bool = false
 
     /// Whether any agent workspaces exist (controls visibility of group UI).
-    var hasWorkspaces: Bool {
+    public var hasWorkspaces: Bool {
         !workspaces.isEmpty
     }
 
     /// The active agent workspace, if the active tab belongs to one. Nil when
     /// the user is viewing the manual workspace.
-    var activeWorkspace: WorkspaceEntry? {
+    public var activeWorkspace: WorkspaceEntry? {
         workspaces.first { $0.id == activeWorkspaceId }
     }
 
     /// Update from a decoded gui_tab_bar protocol message.
-    func update(activeIndex: UInt8, entries: [Wire.TabEntry]) {
+    public func update(activeIndex: UInt8, entries: [Wire.TabEntry]) {
         self.activeIndex = activeIndex
         self.tabs = entries.map { entry in
             TabEntry(
@@ -99,7 +147,7 @@ final class TabBarState {
     }
 
     /// Update from a decoded gui_workspaces protocol message.
-    func updateWorkspaces(activeWorkspaceId: UInt16, mode: UInt8, flags: UInt8, entries: [Wire.WorkspaceEntry], visibleTabs: [Wire.WorkspaceTabEntry]) {
+    public func updateWorkspaces(activeWorkspaceId: UInt16, mode: UInt8, flags: UInt8, entries: [Wire.WorkspaceEntry], visibleTabs: [Wire.WorkspaceTabEntry]) {
         self.activeWorkspaceId = activeWorkspaceId
         self.workspaceMode = mode
         self.workspaceFlags = flags
@@ -151,7 +199,7 @@ final class TabBarState {
 
     // MARK: - Display tabs
 
-    var displayTabs: [TabEntry] {
+    public var displayTabs: [TabEntry] {
         if hasCanonicalWorkspaceTabs {
             return workspaceTabs.enumerated().map { index, tab in
                 TabEntry(
@@ -175,17 +223,17 @@ final class TabBarState {
 
     // MARK: - Tab ordering
 
-    func canMoveTabLeft(_ tab: TabEntry) -> Bool {
+    public func canMoveTabLeft(_ tab: TabEntry) -> Bool {
         guard let index = movableFileTabIndex(for: tab) else { return false }
         return index > 0
     }
 
-    func canMoveTabRight(_ tab: TabEntry) -> Bool {
+    public func canMoveTabRight(_ tab: TabEntry) -> Bool {
         guard let index = movableFileTabIndex(for: tab) else { return false }
         return index < movableFileTabs(for: tab).count - 1
     }
 
-    func tabDropReorder(droppedTabs: [TabDragPayload], target tab: TabEntry, visibleIndex _: Int) -> (id: UInt32, newIndex: UInt16)? {
+    public func tabDropReorder(droppedTabs: [TabDragPayload], target tab: TabEntry, visibleIndex _: Int) -> (id: UInt32, newIndex: UInt16)? {
         guard let draggedId = droppedTabs.first?.id,
               draggedId != tab.id else {
             return nil
@@ -201,11 +249,11 @@ final class TabBarState {
         return (draggedId, UInt16(newIndex))
     }
 
-    func movableFileTabIndex(for tab: TabEntry) -> Int? {
+    public func movableFileTabIndex(for tab: TabEntry) -> Int? {
         movableFileTabs(for: tab).firstIndex { $0.id == tab.id }
     }
 
-    func visibleFileTabIndex(for tab: TabEntry) -> Int? {
+    public func visibleFileTabIndex(for tab: TabEntry) -> Int? {
         visibleFileTabs(for: tab).firstIndex { $0.id == tab.id }
     }
 
@@ -226,7 +274,7 @@ final class TabBarState {
     }
 
     /// Clear all tab state.
-    func hide() {
+    public func hide() {
         tabs = []
         activeIndex = 0
         workspaces = []

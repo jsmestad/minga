@@ -6,7 +6,9 @@
 /// to view model types.
 
 import Testing
+@testable import MingaUI
 import Foundation
+import MingaProtocol
 
 // MARK: - CompletionState
 

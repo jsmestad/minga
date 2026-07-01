@@ -1,5 +1,7 @@
+import MingaUI
 import AppKit
 import SwiftUI
+import MingaProtocol
 
 /// Preference key for measuring the right pane's total height.
 /// Used by BottomPanelView to cap its height at a fraction of

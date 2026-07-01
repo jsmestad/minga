@@ -1,3 +1,5 @@
+import MingaProtocol
+@testable import MingaUI
 import Foundation
 import Testing
 

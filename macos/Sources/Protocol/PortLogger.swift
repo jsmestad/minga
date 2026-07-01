@@ -11,6 +11,14 @@
 import Foundation
 import os
 
+// Log levels (must match Zig protocol.zig and Elixir protocol.ex). Kept
+// file-local so MingaUI's PortLogger has no dependency on the app-target
+// ProtocolConstants. These are stable wire constants.
+private let LOG_LEVEL_ERR: UInt8 = 0
+private let LOG_LEVEL_WARN: UInt8 = 1
+private let LOG_LEVEL_INFO: UInt8 = 2
+private let LOG_LEVEL_DEBUG: UInt8 = 3
+
 /// Thread-safe log router. Uses OSAllocatedUnfairLock to protect the
 /// encoder reference so PortLogger can be called from any thread.
 ///
@@ -18,7 +26,7 @@ import os
 /// and to macOS unified logging (`os_log`) for Console.app visibility.
 /// os_log is always active, even before `setup(encoder:)` is called,
 /// so early-init messages are captured in Console.app.
-final class PortLogger: Sendable {
+public final class PortLogger: Sendable {
     /// Singleton accessed via static methods below.
     private static let shared = PortLogger()
 
@@ -38,7 +46,7 @@ final class PortLogger: Sendable {
 
     /// Set the encoder used for all subsequent log calls.
     /// Call once during app startup after the ProtocolEncoder is created.
-    static func setup(encoder: any InputEncoder) {
+    public static func setup(encoder: any InputEncoder) {
         shared.state.withLock { $0 = encoder }
     }
 
@@ -47,22 +55,22 @@ final class PortLogger: Sendable {
         encoder?.sendLog(level: level, message: message)
     }
 
-    static func error(_ message: String) {
+    public static func error(_ message: String) {
         send(level: LOG_LEVEL_ERR, message: message)
         if osLogEnabled { osLog.error("\(message, privacy: .public)") }
     }
 
-    static func warn(_ message: String) {
+    public static func warn(_ message: String) {
         send(level: LOG_LEVEL_WARN, message: message)
         if osLogEnabled { osLog.warning("\(message, privacy: .public)") }
     }
 
-    static func info(_ message: String) {
+    public static func info(_ message: String) {
         send(level: LOG_LEVEL_INFO, message: message)
         if osLogEnabled { osLog.info("\(message, privacy: .public)") }
     }
 
-    static func debug(_ message: String) {
+    public static func debug(_ message: String) {
         send(level: LOG_LEVEL_DEBUG, message: message)
         if osLogEnabled { osLog.debug("\(message, privacy: .public)") }
     }

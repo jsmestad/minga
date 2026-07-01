@@ -8,10 +8,14 @@
 
 import SwiftUI
 
-struct ToolManagerView: View {
-    let state: ToolManagerState
+public struct ToolManagerView: View {
+    public init(state: ToolManagerState, encoder: InputEncoder? = nil) {
+        self.state = state
+        self.encoder = encoder
+    }
+    public let state: ToolManagerState
     @Environment(\.themeColors) private var theme
-    let encoder: InputEncoder?
+    public let encoder: InputEncoder?
 
     private let panelWidth: CGFloat = 680
     private let panelMaxHeight: CGFloat = 520
@@ -24,7 +28,7 @@ struct ToolManagerView: View {
         reduceMotion ? 0 : 0.15
     }
 
-    var body: some View {
+    public var body: some View {
         if state.visible {
             ZStack {
                 // Dimmed background scrim

@@ -5,9 +5,13 @@
 /// Anchored to the bottom of the editor view.
 
 import SwiftUI
+import MingaProtocol
 
-struct WhichKeyOverlay: View {
-    let state: WhichKeyState
+public struct WhichKeyOverlay: View {
+    public init(state: WhichKeyState) {
+        self.state = state
+    }
+    public let state: WhichKeyState
     @Environment(\.themeColors) private var theme
 
     private let columnWidth: CGFloat = 220
@@ -20,7 +24,7 @@ struct WhichKeyOverlay: View {
         reduceMotion ? 0 : 0.15
     }
 
-    var body: some View {
+    public var body: some View {
         if state.visible && !state.bindings.isEmpty {
             VStack(spacing: 0) {
                 // Prefix header

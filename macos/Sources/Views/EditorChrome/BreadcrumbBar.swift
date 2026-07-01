@@ -7,28 +7,35 @@ import SwiftUI
 
 @MainActor
 @Observable
-final class BreadcrumbState {
-    var segments: [String] = []
+public final class BreadcrumbState {
+    public init(segments: [String] = []) {
+        self.segments = segments
+    }
+    public var segments: [String] = []
 
-    func update(segments: [String]) {
+    public func update(segments: [String]) {
         self.segments = segments
     }
 
     /// Clear breadcrumb state. Called when no buffer is active or during
     /// error recovery to prevent stale path segments from persisting.
-    func hide() {
+    public func hide() {
         segments = []
     }
 }
 
-struct BreadcrumbBar: View {
-    let state: BreadcrumbState
+public struct BreadcrumbBar: View {
+    public init(state: BreadcrumbState, encoder: InputEncoder? = nil) {
+        self.state = state
+        self.encoder = encoder
+    }
+    public let state: BreadcrumbState
     @Environment(\.themeColors) private var theme
-    let encoder: InputEncoder?
+    public let encoder: InputEncoder?
 
     private let barHeight: CGFloat = 26
 
-    var body: some View {
+    public var body: some View {
         if !state.segments.isEmpty {
             HStack(spacing: 0) {
                 // Path segments with chevron separators
@@ -103,4 +110,18 @@ struct BreadcrumbBar: View {
         .padding(.trailing, 4)
         .pointingHandCursor()
     }
+}
+
+// MARK: - Previews
+
+@MainActor
+private func breadcrumbPreviewState() -> BreadcrumbState {
+    let state = BreadcrumbState()
+    state.update(segments: ["macos", "Sources", "Views", "EditorChrome", "BreadcrumbBar.swift"])
+    return state
+}
+
+#Preview("Breadcrumb Bar", traits: .mingaChrome) {
+    BreadcrumbBar(state: breadcrumbPreviewState(), encoder: nil)
+        .frame(width: 700)
 }

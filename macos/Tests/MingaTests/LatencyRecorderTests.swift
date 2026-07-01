@@ -1,3 +1,4 @@
+import MingaProtocol
 import Foundation
 import Testing
 

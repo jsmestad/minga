@@ -5,10 +5,12 @@
 /// shared resize handle) didn't break text rendering or button counts.
 /// Cosmetic details (opacity, padding, colors) are left to visual QA.
 
+import MingaUI
 import Testing
 import SwiftUI
 import AppKit
 import ViewInspector
+import MingaProtocol
 
 private func currentModifierBitsForTest() -> UInt8 {
     var mods: UInt8 = 0

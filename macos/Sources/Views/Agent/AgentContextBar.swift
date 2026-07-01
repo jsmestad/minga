@@ -4,11 +4,16 @@
 /// Replaces the breadcrumb bar when zoomed into a non-You agent card.
 
 import SwiftUI
+import MingaProtocol
 
-struct AgentContextBar: View {
-    let state: AgentContextBarState
+public struct AgentContextBar: View {
+    public init(state: AgentContextBarState, encoder: InputEncoder? = nil) {
+        self.state = state
+        self.encoder = encoder
+    }
+    public let state: AgentContextBarState
     @Environment(\.themeColors) private var theme
-    let encoder: InputEncoder?
+    public let encoder: InputEncoder?
 
     private let barHeight: CGFloat = 28
 
@@ -16,7 +21,7 @@ struct AgentContextBar: View {
     @State private var timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     @State private var elapsedDisplay: String = "0s"
 
-    var body: some View {
+    public var body: some View {
         if state.visible {
             HStack(spacing: 12) {
                 // Task description (left-aligned)

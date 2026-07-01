@@ -1,11 +1,15 @@
 import SwiftUI
 
-struct EditTimelineView: View {
-    let state: EditTimelineState
+public struct EditTimelineView: View {
+    public init(state: EditTimelineState, encoder: InputEncoder? = nil) {
+        self.state = state
+        self.encoder = encoder
+    }
+    public let state: EditTimelineState
     @Environment(\.themeColors) private var themeColors
-    let encoder: InputEncoder?
+    public let encoder: InputEncoder?
 
-    var body: some View {
+    public var body: some View {
         if state.visible && !state.files.isEmpty {
             HStack(spacing: 8) {
                 ForEach(state.files) { file in

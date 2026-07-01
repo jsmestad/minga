@@ -6,13 +6,13 @@
 
 import SwiftUI
 
-enum TextHighlighting {
+public enum TextHighlighting {
     /// Builds an AttributedString with matched character positions highlighted.
     ///
     /// Uses range overrides on a pre-built base string instead of per-character
     /// appends: O(k) allocations where k = matched positions, not O(n) where
     /// n = text length.
-    static func attributedString(
+    public static func attributedString(
         _ text: String,
         matchPositions: Set<Int>,
         baseFont: Font = .system(size: 13),
@@ -44,7 +44,7 @@ enum TextHighlighting {
     /// Splits the query into space-separated segments and finds each segment's
     /// characters in order within the text. Returns grapheme cluster indices
     /// of all matched characters.
-    static func fuzzyMatchPositions(_ text: String, query: String) -> Set<Int> {
+    public static func fuzzyMatchPositions(_ text: String, query: String) -> Set<Int> {
         guard !query.isEmpty, !text.isEmpty else { return [] }
 
         let lowerText = text.lowercased()

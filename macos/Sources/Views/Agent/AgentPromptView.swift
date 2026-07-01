@@ -1,10 +1,16 @@
 import SwiftUI
+import MingaProtocol
 
-struct AgentPromptView: View {
-    let state: AgentChatState
+public struct AgentPromptView: View {
+    public init(state: AgentChatState, isInsertMode: Bool, encoder: InputEncoder? = nil) {
+        self.state = state
+        self.isInsertMode = isInsertMode
+        self.encoder = encoder
+    }
+    public let state: AgentChatState
     @Environment(\.themeColors) private var theme
-    let isInsertMode: Bool
-    let encoder: InputEncoder?
+    public let isInsertMode: Bool
+    public let encoder: InputEncoder?
 
     /// Whether the agent is actively streaming a response.
     private var isStreaming: Bool { state.status == 1 || state.status == 2 }
@@ -48,7 +54,7 @@ struct AgentPromptView: View {
         }
     }
 
-    var body: some View {
+    public var body: some View {
         VStack(spacing: 0) {
             // Prompt completion popup (floats above the prompt area)
             if let completion = state.promptCompletion {

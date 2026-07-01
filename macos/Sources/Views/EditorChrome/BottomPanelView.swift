@@ -6,14 +6,19 @@
 
 import SwiftUI
 
-struct BottomPanelView: View {
-    @Bindable var state: BottomPanelState
+public struct BottomPanelView: View {
+    public init(state: BottomPanelState, encoder: InputEncoder? = nil, availableHeight: CGFloat) {
+        self.state = state
+        self.encoder = encoder
+        self.availableHeight = availableHeight
+    }
+    @Bindable public var state: BottomPanelState
     @Environment(\.themeColors) private var theme
-    let encoder: InputEncoder?
+    public let encoder: InputEncoder?
     /// Total height of the right pane (tab bar + editor + panel + status bar).
     /// Used to cap the panel at 60% of available space. Measured by the parent
     /// via a preference key so the panel itself doesn't need a GeometryReader.
-    let availableHeight: CGFloat
+    public let availableHeight: CGFloat
 
     /// Minimum panel height in points.
     private let minHeight: CGFloat = 100
@@ -24,7 +29,7 @@ struct BottomPanelView: View {
     @State private var dragStartHeight: CGFloat = 0
     @State private var hoveredTabId: Int? = nil
 
-    var body: some View {
+    public var body: some View {
         let maxH = availableHeight * maxHeightFraction
         let panelH = min(max(state.userHeight, minHeight), maxH)
 

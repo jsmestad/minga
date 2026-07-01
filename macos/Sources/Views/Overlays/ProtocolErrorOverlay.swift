@@ -7,11 +7,14 @@
 
 import SwiftUI
 
-struct ProtocolErrorOverlay: View {
-    var state: ProtocolErrorState
+public struct ProtocolErrorOverlay: View {
+    public init(state: ProtocolErrorState) {
+        self.state = state
+    }
+    public var state: ProtocolErrorState
     @Environment(\.themeColors) private var theme
 
-    var body: some View {
+    public var body: some View {
         if let message = state.message {
             ZStack {
                 theme.editorBg

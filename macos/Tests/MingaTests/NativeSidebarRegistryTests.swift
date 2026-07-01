@@ -1,7 +1,9 @@
 /// Tests for static native sidebar registry selection and fallback behavior.
 
 import Testing
+@testable import MingaUI
 import SwiftUI
+import MingaProtocol
 
 @Suite("Native sidebar registry")
 @MainActor

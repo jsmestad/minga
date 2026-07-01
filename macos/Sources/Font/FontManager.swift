@@ -7,6 +7,7 @@
 /// Secondary fonts with incompatible metrics log a warning but are still
 /// loaded; CoreText handles layout positioning.
 
+import MingaUI
 import Foundation
 import AppKit
 

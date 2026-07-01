@@ -5,18 +5,30 @@
 
 import SwiftUI
 
-struct FileTreeRowView: View {
-    let entry: FileTreeEntry
+public struct FileTreeRowView: View {
+    public init(entry: FileTreeEntry, rowHeight: CGFloat, indentWidth: CGFloat, chevronWidth: CGFloat, isHovered: Bool, isDropTarget: Bool, animDuration: Double, onActivate: @escaping () -> Void, onEditCommit: @escaping (String) -> Void, onEditCancel: @escaping () -> Void) {
+        self.entry = entry
+        self.rowHeight = rowHeight
+        self.indentWidth = indentWidth
+        self.chevronWidth = chevronWidth
+        self.isHovered = isHovered
+        self.isDropTarget = isDropTarget
+        self.animDuration = animDuration
+        self.onActivate = onActivate
+        self.onEditCommit = onEditCommit
+        self.onEditCancel = onEditCancel
+    }
+    public let entry: FileTreeEntry
     @Environment(\.themeColors) private var theme
-    let rowHeight: CGFloat
-    let indentWidth: CGFloat
-    let chevronWidth: CGFloat
-    let isHovered: Bool
-    let isDropTarget: Bool
-    let animDuration: Double
-    let onActivate: () -> Void
-    let onEditCommit: (String) -> Void
-    let onEditCancel: () -> Void
+    public let rowHeight: CGFloat
+    public let indentWidth: CGFloat
+    public let chevronWidth: CGFloat
+    public let isHovered: Bool
+    public let isDropTarget: Bool
+    public let animDuration: Double
+    public let onActivate: () -> Void
+    public let onEditCommit: (String) -> Void
+    public let onEditCancel: () -> Void
 
     @Environment(\.displayScale) private var displayScale
     @State private var isLocallyHovered = false
@@ -27,7 +39,7 @@ struct FileTreeRowView: View {
         isHovered || isLocallyHovered
     }
 
-    var body: some View {
+    public var body: some View {
         let row = rowContent
             .padding(.leading, leadingPadding)
             .padding(.trailing, 8)
@@ -245,11 +257,11 @@ struct FileTreeRowView: View {
             .padding(.horizontal, 4)
     }
 
-    var leadingPadding: CGFloat {
+    public var leadingPadding: CGFloat {
         8 + depthOffset(for: entry.depth)
     }
 
-    var indentGuideOpacity: Double {
+    public var indentGuideOpacity: Double {
         if entry.isSelected || isDropTarget { return 0.22 }
         return 0.42
     }
@@ -305,7 +317,7 @@ struct FileTreeRowView: View {
         )
     }
 
-    var accessibilityLabelText: String {
+    public var accessibilityLabelText: String {
         let base: String
         if entry.isEditing {
             base = "Editing: \(entry.name)"
@@ -366,7 +378,7 @@ struct FileTreeRowView: View {
         }
     }
 
-    var accessibilityValueText: String {
+    public var accessibilityValueText: String {
         accessibilityValueParts.joined(separator: ", ")
     }
 
@@ -382,14 +394,14 @@ struct FileTreeRowView: View {
         return parts
     }
 
-    var accessibilityTraits: AccessibilityTraits {
+    public var accessibilityTraits: AccessibilityTraits {
         var traits: AccessibilityTraits = []
         if !entry.isEditing { _ = traits.insert(.isButton) }
         if entry.isSelected { _ = traits.insert(.isSelected) }
         return traits
     }
 
-    var accessibilityHintText: String {
+    public var accessibilityHintText: String {
         if entry.isEditing {
             return "Type a new name, then press Return to confirm or Escape to cancel."
         }

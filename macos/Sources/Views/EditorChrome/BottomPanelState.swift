@@ -7,33 +7,45 @@
 import SwiftUI
 
 /// A tab definition decoded from the BEAM protocol.
-struct BottomPanelTab: Identifiable, Equatable {
-    let id: Int
-    let tabType: UInt8
-    let name: String
+public struct BottomPanelTab: Identifiable, Equatable {
+    public init(id: Int, tabType: UInt8, name: String) {
+        self.id = id
+        self.tabType = tabType
+        self.name = name
+    }
+    public let id: Int
+    public let tabType: UInt8
+    public let name: String
 }
 
 @MainActor
 @Observable
-final class BottomPanelState {
-    var visible: Bool = false
-    var activeTabIndex: Int = 0
-    var heightPercent: Int = 30
-    var filterPreset: UInt8 = 0
-    var tabs: [BottomPanelTab] = []
+public final class BottomPanelState {
+    public init(visible: Bool = false, activeTabIndex: Int = 0, heightPercent: Int = 30, filterPreset: UInt8 = 0, tabs: [BottomPanelTab] = []) {
+        self.visible = visible
+        self.activeTabIndex = activeTabIndex
+        self.heightPercent = heightPercent
+        self.filterPreset = filterPreset
+        self.tabs = tabs
+    }
+    public var visible: Bool = false
+    public var activeTabIndex: Int = 0
+    public var heightPercent: Int = 30
+    public var filterPreset: UInt8 = 0
+    public var tabs: [BottomPanelTab] = []
 
     /// Messages tab content state.
-    let messagesState = MessagesContentState()
+    public let messagesState = MessagesContentState()
 
     /// Panel height stored in UserDefaults for persistence across show/hide.
     /// This is the user's drag-resized height; the BEAM's heightPercent is
     /// the initial/default value.
-    var userHeight: CGFloat {
+    public var userHeight: CGFloat {
         get { UserDefaults.standard.double(forKey: "bottomPanelHeight").clamped(to: 100...800, fallback: 200) }
         set { UserDefaults.standard.set(newValue, forKey: "bottomPanelHeight") }
     }
 
-    func update(visible: Bool, activeTabIndex: Int, heightPercent: Int,
+    public func update(visible: Bool, activeTabIndex: Int, heightPercent: Int,
                 filterPreset: UInt8, tabs: [BottomPanelTab]) {
         let wasHidden = !self.visible
         self.activeTabIndex = activeTabIndex
@@ -49,7 +61,7 @@ final class BottomPanelState {
         }
     }
 
-    func hide() {
+    public func hide() {
         self.visible = false
     }
 }

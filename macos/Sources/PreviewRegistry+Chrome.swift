@@ -1,4 +1,6 @@
+import MingaUI
 import SwiftUI
+import MingaProtocol
 
 @MainActor
 extension PreviewRegistry {
@@ -449,7 +451,7 @@ extension PreviewRegistry {
             Wire.ThemePreview(name: "Nord", atom: "nord", editorBg: 0x2E3440, editorFg: 0xD8DEE9, accent: 0x88C0D0),
         ]
 
-        return SettingsView(appState: appState)
+        return SettingsView(state: appState.gui.settingsState, encoder: appState.encoder)
             .frame(width: 600, height: 480)
             .environment(\.themeColors, appState.gui.themeColors)
     }

@@ -1,10 +1,12 @@
 /// Protocol encode/decode round-trip tests.
 
+import MingaUI
 import Testing
 import AppKit
 import Foundation
 import QuartzCore
 import os
+import MingaProtocol
 
 private func appendConfigStateU16(_ data: inout Data, _ value: UInt16) {
     data.append(UInt8((value >> 8) & 0xFF))

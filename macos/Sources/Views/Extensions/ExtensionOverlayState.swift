@@ -1,41 +1,56 @@
 import Observation
+import MingaProtocol
 
 /// State for extension-registered overlays on the editor surface.
 ///
 /// Updated by `CommandDispatcher` from `gui_extension_overlay` (0x9C) opcode.
 /// Read by `ExtensionOverlayView` to render positioned overlays.
 @MainActor @Observable
-final class ExtensionOverlayState {
+public final class ExtensionOverlayState {
+    public init() {}
     /// Active overlay entries from all extensions.
-    private(set) var entries: [OverlayEntry] = []
+    public private(set) var entries: [OverlayEntry] = []
 
     /// A single overlay for rendering.
-    struct OverlayEntry: Identifiable, Equatable {
-        let extensionName: String
-        let overlayID: String
-        let windowID: UInt16
-        let row: UInt16
-        let col: UInt16
-        let shape: UInt8
-        let colorR: UInt8
-        let colorG: UInt8
-        let colorB: UInt8
-        let opacity: UInt8
-        let content: String
+    public struct OverlayEntry: Identifiable, Equatable {
+        public init(extensionName: String, overlayID: String, windowID: UInt16, row: UInt16, col: UInt16, shape: UInt8, colorR: UInt8, colorG: UInt8, colorB: UInt8, opacity: UInt8, content: String) {
+            self.extensionName = extensionName
+            self.overlayID = overlayID
+            self.windowID = windowID
+            self.row = row
+            self.col = col
+            self.shape = shape
+            self.colorR = colorR
+            self.colorG = colorG
+            self.colorB = colorB
+            self.opacity = opacity
+            self.content = content
+        }
+        public let extensionName: String
+        public let overlayID: String
+        public let windowID: UInt16
+        public let row: UInt16
+        public let col: UInt16
+        public let shape: UInt8
+        public let colorR: UInt8
+        public let colorG: UInt8
+        public let colorB: UInt8
+        public let opacity: UInt8
+        public let content: String
 
-        var id: String { "\(extensionName):\(overlayID)" }
+        public var id: String { "\(extensionName):\(overlayID)" }
 
-        var color: (Double, Double, Double) {
+        public var color: (Double, Double, Double) {
             (Double(colorR) / 255.0, Double(colorG) / 255.0, Double(colorB) / 255.0)
         }
 
-        var opacityValue: Double {
+        public var opacityValue: Double {
             Double(opacity) / 255.0
         }
     }
 
     /// Updates overlay entries from protocol data.
-    func update(_ wireEntries: [Wire.ExtensionOverlayEntry]) {
+    public func update(_ wireEntries: [Wire.ExtensionOverlayEntry]) {
         entries = wireEntries.map { wire in
             OverlayEntry(
                 extensionName: wire.extensionName,
@@ -54,12 +69,12 @@ final class ExtensionOverlayState {
     }
 
     /// Returns entries for a specific window.
-    func entries(forWindow windowID: UInt16) -> [OverlayEntry] {
+    public func entries(forWindow windowID: UInt16) -> [OverlayEntry] {
         entries.filter { $0.windowID == windowID }
     }
 
     /// Distinct window IDs that currently have overlay entries, in first-seen order.
-    var windowIDs: [UInt16] {
+    public var windowIDs: [UInt16] {
         var seen = Set<UInt16>()
         return entries.compactMap { seen.insert($0.windowID).inserted ? $0.windowID : nil }
     }

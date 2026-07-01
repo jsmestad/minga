@@ -1,16 +1,21 @@
 import SwiftUI
 
-struct ChangeSummarySidebarView: View {
-    let changeSummaryState: ChangeSummaryState
-    let encoder: InputEncoder?
-    @Binding var width: CGFloat
+public struct ChangeSummarySidebarView: View {
+    public init(changeSummaryState: ChangeSummaryState, encoder: InputEncoder? = nil, width: Binding<CGFloat>) {
+        self.changeSummaryState = changeSummaryState
+        self.encoder = encoder
+        self._width = width
+    }
+    public let changeSummaryState: ChangeSummaryState
+    public let encoder: InputEncoder?
+    @Binding public var width: CGFloat
     @Environment(\.themeColors) private var theme
 
     @State private var minWidth: CGFloat = 200
     @State private var maxWidth: CGFloat = 400
     @State private var isDraggingResize: Bool = false
 
-    var body: some View {
+    public var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
                 ChangeSummaryView(

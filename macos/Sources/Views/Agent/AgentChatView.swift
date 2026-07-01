@@ -6,6 +6,7 @@
 /// expandable sections, and a prompt input area at the bottom.
 
 import SwiftUI
+import MingaProtocol
 
 /// Measures the ScrollView's visible viewport height so the content
 /// can be bottom-anchored when there are fewer messages than screen space.
@@ -16,13 +17,19 @@ private struct ScrollViewHeightKey: PreferenceKey {
     }
 }
 
-struct AgentChatView: View {
-    let state: AgentChatState
+public struct AgentChatView: View {
+    public init(state: AgentChatState, isInsertMode: Bool, encoder: InputEncoder? = nil, cellHeight: CGFloat = 16) {
+        self.state = state
+        self.isInsertMode = isInsertMode
+        self.encoder = encoder
+        self.cellHeight = cellHeight
+    }
+    public let state: AgentChatState
     @Environment(\.themeColors) private var theme
-    let isInsertMode: Bool
-    let encoder: InputEncoder?
+    public let isInsertMode: Bool
+    public let encoder: InputEncoder?
     /// Cell dimensions from the Metal renderer, used to size the prompt gap.
-    var cellHeight: CGFloat = 16
+    public var cellHeight: CGFloat = 16
 
     @State private var scrollViewHeight: CGFloat = 0
     /// Tracks whether the user has scrolled away from the bottom.
@@ -32,7 +39,7 @@ struct AgentChatView: View {
     /// Whether auto-scroll should follow streaming output.
     private var shouldAutoScroll: Bool { !userHasScrolledUp }
 
-    var body: some View {
+    public var body: some View {
         VStack(spacing: 0) {
             // Header bar
             AgentChatHeaderView(state: state, encoder: encoder)
@@ -547,4 +554,18 @@ struct AgentChatView: View {
         default: return false
         }
     }
+}
+
+// MARK: - Previews
+
+@MainActor
+private func agentChatPreviewState() -> AgentChatState {
+    let state = AgentChatState()
+    PreviewFixtures.populateAgentChat(state)
+    return state
+}
+
+#Preview("Agent Chat", traits: .mingaChrome) {
+    AgentChatView(state: agentChatPreviewState(), isInsertMode: false, encoder: nil, cellHeight: 18)
+        .frame(width: 760, height: 600)
 }

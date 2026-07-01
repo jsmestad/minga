@@ -16,19 +16,20 @@ import SwiftUI
 
 @MainActor
 @Observable
-final class ResyncState {
+public final class ResyncState {
+    public init() {}
     /// True between an invalidation and the next clean commit. Drives a small
     /// status-corner hint; the editor surface keeps showing the last good frame.
-    private(set) var pending: Bool = false
+    public private(set) var pending: Bool = false
 
     /// Raise the resync-pending hint. Called by `CommandDispatcher.invalidate`.
-    func markPending() {
+    public func markPending() {
         pending = true
     }
 
     /// Clear the hint. Called by `CommandDispatcher` when a clean `commit_frame`
     /// promotes a new frame.
-    func clear() {
+    public func clear() {
         pending = false
     }
 }

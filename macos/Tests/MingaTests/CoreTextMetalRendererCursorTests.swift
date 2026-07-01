@@ -1,8 +1,10 @@
 /// Tests for CoreTextMetalRenderer cursor coordinate selection.
 
+import MingaUI
 import Testing
 import Foundation
 import QuartzCore
+import MingaProtocol
 
 @Suite("CoreTextMetalRenderer cursor geometry")
 struct CoreTextMetalRendererCursorTests {

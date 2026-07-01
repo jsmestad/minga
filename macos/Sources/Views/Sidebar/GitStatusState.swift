@@ -4,7 +4,7 @@ import SwiftUI
 
 /// Git file status codes sent by the BEAM. Matches the values in
 /// `lib/minga_editor/frontend/protocol/gui.ex` for the git status panel.
-enum GitFileStatus: UInt8, Sendable {
+public enum GitFileStatus: UInt8, Sendable {
     case unknown = 0
     case modified = 1
     case added = 2
@@ -16,13 +16,13 @@ enum GitFileStatus: UInt8, Sendable {
 }
 
 /// Which section a file entry belongs to.
-enum GitStatusSection: UInt8, Sendable, CaseIterable {
+public enum GitStatusSection: UInt8, Sendable, CaseIterable {
     case staged = 0
     case changed = 1
     case untracked = 2
     case conflicted = 3
 
-    var label: String {
+    public var label: String {
         switch self {
         case .staged: "Staged Changes"
         case .changed: "Changes"
@@ -33,41 +33,47 @@ enum GitStatusSection: UInt8, Sendable, CaseIterable {
 }
 
 /// A single file entry in the git status panel.
-struct GitStatusEntry: Identifiable, Sendable, Equatable {
+public struct GitStatusEntry: Identifiable, Sendable, Equatable {
+    public init(pathHash: UInt32, section: GitStatusSection, status: GitFileStatus, path: String) {
+        self.pathHash = pathHash
+        self.section = section
+        self.status = status
+        self.path = path
+    }
     /// Stable path hash from the BEAM. This stays stable when the entry moves between sections, which lets SwiftUI animate staged/unstaged moves.
-    let pathHash: UInt32
+    public let pathHash: UInt32
     /// Row identity must stay unique when the same file appears in staged and unstaged sections at the same time.
-    var id: UInt32 { (UInt32(section.rawValue) << 24) | (pathHash & 0x00FFFFFF) }
-    let section: GitStatusSection
-    let status: GitFileStatus
+    public var id: UInt32 { (UInt32(section.rawValue) << 24) | (pathHash & 0x00FFFFFF) }
+    public let section: GitStatusSection
+    public let status: GitFileStatus
     /// Relative path from project root (e.g., "lib/minga/editor.ex").
-    let path: String
+    public let path: String
     /// Just the filename for display (e.g., "editor.ex").
-    var filename: String {
+    public var filename: String {
         (path as NSString).lastPathComponent
     }
     /// Parent directory for context (e.g., "lib/minga/").
-    var directory: String {
+    public var directory: String {
         let dir = (path as NSString).deletingLastPathComponent
         return dir.isEmpty ? "" : dir + "/"
     }
 }
 
 /// The overall state of the repository for display purposes.
-enum GitRepoState: UInt8, Sendable {
+public enum GitRepoState: UInt8, Sendable {
     case normal = 0
     case notARepo = 1
     case loading = 2
 }
 
 /// Severity level for a git toast notification.
-enum ToastLevel: UInt8, Sendable {
+public enum ToastLevel: UInt8, Sendable {
     case success = 0
     case error = 1
 }
 
 /// Suggested recovery action for a git toast notification.
-enum ToastAction: UInt8, Sendable {
+public enum ToastAction: UInt8, Sendable {
     case none = 0
     case pullAndRetry = 1
 }
@@ -75,61 +81,84 @@ enum ToastAction: UInt8, Sendable {
 /// Observable state for the git status sidebar panel, driven by BEAM protocol messages.
 @MainActor
 @Observable
-final class GitStatusState {
-    var visible: Bool = false
-    var repoState: GitRepoState = .notARepo
-    var syncing: Bool = false
+public final class GitStatusState {
+    public init(visible: Bool = false, repoState: GitRepoState = .notARepo, syncing: Bool = false, branchName: String = "", ahead: UInt16 = 0, behind: UInt16 = 0, entryBasePath: String = "", stashCount: UInt16 = 0, toastMessage: String? = nil, toastLevel: ToastLevel = .success, toastAction: ToastAction = .none, stagedEntries: [GitStatusEntry] = [], changedEntries: [GitStatusEntry] = [], untrackedEntries: [GitStatusEntry] = [], conflictedEntries: [GitStatusEntry] = [], duplicatePathHashes: Set<UInt32> = [], collapsedSections: Set<GitStatusSection> = [], commitMessage: String = "", previousCommitMessage: String = "", amendMode: Bool = false, entriesRevision: UInt64 = 0) {
+        self.visible = visible
+        self.repoState = repoState
+        self.syncing = syncing
+        self.branchName = branchName
+        self.ahead = ahead
+        self.behind = behind
+        self.entryBasePath = entryBasePath
+        self.stashCount = stashCount
+        self.toastMessage = toastMessage
+        self.toastLevel = toastLevel
+        self.toastAction = toastAction
+        self.stagedEntries = stagedEntries
+        self.changedEntries = changedEntries
+        self.untrackedEntries = untrackedEntries
+        self.conflictedEntries = conflictedEntries
+        self.duplicatePathHashes = duplicatePathHashes
+        self.collapsedSections = collapsedSections
+        self.commitMessage = commitMessage
+        self.previousCommitMessage = previousCommitMessage
+        self.amendMode = amendMode
+        self.entriesRevision = entriesRevision
+    }
+    public var visible: Bool = false
+    public var repoState: GitRepoState = .notARepo
+    public var syncing: Bool = false
 
     // Branch info
-    var branchName: String = ""
-    var ahead: UInt16 = 0
-    var behind: UInt16 = 0
-    var entryBasePath: String = ""
-    var stashCount: UInt16 = 0
+    public var branchName: String = ""
+    public var ahead: UInt16 = 0
+    public var behind: UInt16 = 0
+    public var entryBasePath: String = ""
+    public var stashCount: UInt16 = 0
 
     // Toast notification (shown after remote operations)
-    var toastMessage: String? = nil
-    var toastLevel: ToastLevel = .success
-    var toastAction: ToastAction = .none
+    public var toastMessage: String? = nil
+    public var toastLevel: ToastLevel = .success
+    public var toastAction: ToastAction = .none
 
     // File entries grouped by section
-    var stagedEntries: [GitStatusEntry] = []
-    var changedEntries: [GitStatusEntry] = []
-    var untrackedEntries: [GitStatusEntry] = []
-    var conflictedEntries: [GitStatusEntry] = []
-    var duplicatePathHashes: Set<UInt32> = []
+    public var stagedEntries: [GitStatusEntry] = []
+    public var changedEntries: [GitStatusEntry] = []
+    public var untrackedEntries: [GitStatusEntry] = []
+    public var conflictedEntries: [GitStatusEntry] = []
+    public var duplicatePathHashes: Set<UInt32> = []
 
     // Section collapsed state (local UI state, not sent by BEAM)
-    var collapsedSections: Set<GitStatusSection> = []
+    public var collapsedSections: Set<GitStatusSection> = []
 
     // Commit message (local UI state, typed by the user)
-    var commitMessage: String = ""
-    var previousCommitMessage: String = ""
+    public var commitMessage: String = ""
+    public var previousCommitMessage: String = ""
 
     // Amend mode (local UI state, toggled by the user)
-    var amendMode: Bool = false
+    public var amendMode: Bool = false
 
     // Changes whenever BEAM-provided entries update. Views use this to animate moves between sections.
-    var entriesRevision: UInt64 = 0
+    public var entriesRevision: UInt64 = 0
 
     /// Total number of entries across all sections.
-    var totalCount: Int {
+    public var totalCount: Int {
         stagedEntries.count + changedEntries.count
             + untrackedEntries.count + conflictedEntries.count
     }
 
     /// Whether the working tree is clean (nothing to commit).
-    var isClean: Bool {
+    public var isClean: Bool {
         totalCount == 0 && repoState == .normal
     }
 
     /// Whether the commit button should be enabled.
-    var canCommit: Bool {
+    public var canCommit: Bool {
         !stagedEntries.isEmpty && !commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// Entries for a given section.
-    func entries(for section: GitStatusSection) -> [GitStatusEntry] {
+    public func entries(for section: GitStatusSection) -> [GitStatusEntry] {
         switch section {
         case .staged: stagedEntries
         case .changed: changedEntries
@@ -139,7 +168,7 @@ final class GitStatusState {
     }
 
     /// Update from a decoded gui_git_status protocol message.
-    func update(repoState: GitRepoState, branchName: String, ahead: UInt16, behind: UInt16, syncing: Bool, entries: [GitStatusEntry], toast: (String, ToastLevel, ToastAction)?, entryBasePath: String, lastCommitMessage: String, stashCount: UInt16) {
+    public func update(repoState: GitRepoState, branchName: String, ahead: UInt16, behind: UInt16, syncing: Bool, entries: [GitStatusEntry], toast: (String, ToastLevel, ToastAction)?, entryBasePath: String, lastCommitMessage: String, stashCount: UInt16) {
         self.visible = true
         self.repoState = repoState
         self.branchName = branchName
@@ -175,12 +204,12 @@ final class GitStatusState {
     }
 
     /// Matched-geometry identity for section moves. Falls back to row identity when the same path appears in multiple sections at once.
-    func animationID(for entry: GitStatusEntry) -> UInt32 {
+    public func animationID(for entry: GitStatusEntry) -> UInt32 {
         duplicatePathHashes.contains(entry.pathHash) ? entry.id : entry.pathHash
     }
 
     /// Hide the git status panel (BEAM toggled sidebar off or switched tab).
-    func hide(syncing: Bool = false, toast: (String, ToastLevel, ToastAction)? = nil) {
+    public func hide(syncing: Bool = false, toast: (String, ToastLevel, ToastAction)? = nil) {
         visible = false
         self.syncing = syncing
         entryBasePath = ""
@@ -189,7 +218,7 @@ final class GitStatusState {
     }
 
     /// Toggle amend mode and prefill the input with the last commit message when the user has not typed a message yet.
-    func setAmendMode(_ enabled: Bool) {
+    public func setAmendMode(_ enabled: Bool) {
         guard amendMode != enabled else { return }
         amendMode = enabled
         if enabled && commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

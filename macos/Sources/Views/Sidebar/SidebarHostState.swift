@@ -1,20 +1,21 @@
 /// Observable native sidebar host state driven by semantic BEAM metadata.
 
 import SwiftUI
+import MingaProtocol
 
 /// Sidebar metadata adapted for SwiftUI rendering.
-struct SidebarItem: Identifiable, Equatable {
-    let id: String
-    let displayName: String
-    let semanticKind: String
-    let icon: String
-    let order: UInt16
-    let visible: Bool
-    let focused: Bool
-    let preferredWidth: UInt16
-    let badgeCount: UInt16?
+public struct SidebarItem: Identifiable, Equatable {
+    public let id: String
+    public let displayName: String
+    public let semanticKind: String
+    public let icon: String
+    public let order: UInt16
+    public let visible: Bool
+    public let focused: Bool
+    public let preferredWidth: UInt16
+    public let badgeCount: UInt16?
 
-    init(_ wire: Wire.SidebarMetadata) {
+    public init(_ wire: Wire.SidebarMetadata) {
         id = wire.id
         displayName = wire.displayName
         semanticKind = wire.semanticKind
@@ -30,16 +31,19 @@ struct SidebarItem: Identifiable, Equatable {
 /// Stores the BEAM-selected sidebar identities and validates semantic kinds against the native registry.
 @MainActor
 @Observable
-final class SidebarHostState {
-    private(set) var sidebars: [SidebarItem] = SidebarHostState.defaultSidebars
-    private(set) var activeId: String = "file_tree"
+public final class SidebarHostState {
+    public init(warnedUnknownKinds: Set<String> = []) {
+        self.warnedUnknownKinds = warnedUnknownKinds
+    }
+    public private(set) var sidebars: [SidebarItem] = SidebarHostState.defaultSidebars
+    public private(set) var activeId: String = "file_tree"
     private var warnedUnknownKinds: Set<String> = []
 
-    var visibleSidebars: [SidebarItem] {
+    public var visibleSidebars: [SidebarItem] {
         sidebars.sorted { lhs, rhs in lhs.order < rhs.order }
     }
 
-    var activeSidebar: SidebarItem? {
+    public var activeSidebar: SidebarItem? {
         if let active = sidebars.first(where: { $0.id == activeId && $0.visible }) {
             return active
         }
@@ -54,12 +58,12 @@ final class SidebarHostState {
             .first
     }
 
-    var hasVisibleSidebar: Bool {
+    public var hasVisibleSidebar: Bool {
         activeSidebar != nil
     }
 
     /// Applies semantic sidebar metadata from the BEAM.
-    func update(activeId: String, sidebars wireSidebars: [Wire.SidebarMetadata]) {
+    public func update(activeId: String, sidebars wireSidebars: [Wire.SidebarMetadata]) {
         let items = wireSidebars.map(SidebarItem.init).sorted { lhs, rhs in lhs.order < rhs.order }
         self.sidebars = items.isEmpty ? SidebarHostState.defaultSidebars : items
         self.activeId = activeId
