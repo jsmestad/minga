@@ -13,6 +13,28 @@ enum PreviewRegistry {
         PreviewSnapshotPolicy.size(named: name)
     }
 
+    /// Builds the full-shell `ContentView` from a production preview `AppState`,
+    /// wiring the app-only editor geometry, window chrome, and Metal editor
+    /// surface exactly the way `MingaApp` does.
+    static func productionContentView(_ appState: AppState) -> some View {
+        ContentView(
+            gui: appState.gui,
+            encoder: appState.encoder,
+            editorGeometry: { EditorGeometry(editorNSView: appState.editorNSView) },
+            chrome: WindowChrome(appState: appState),
+            onAgentChatVisibleChange: { visible in
+                appState.editorNSView?.setAgentChatVisible(visible)
+            },
+            makeEditorSurface: {
+                if let nsView = appState.editorNSView {
+                    EditorView(editorNSView: nsView)
+                } else {
+                    Color(red: 0.12, green: 0.12, blue: 0.14)
+                }
+            }
+        )
+    }
+
     /// Returns a preview for the named view, or an error label for unknown names.
     @ViewBuilder
     static func view(named name: String) -> some View {
@@ -131,7 +153,7 @@ enum PreviewRegistry {
     private static func insertModeEditorPreview() -> some View {
         let size = PreviewSnapshotPolicy.size(named: "InsertModeEditorView")
         if let appState = productionPreviewAppState(agentVisible: false, mode: .insert) {
-            ContentView(appState: appState)
+            productionContentView(appState)
                 .frame(width: size.width, height: size.height)
         } else {
             previewFailureView(message: "InsertModeEditorView could not initialize the production editor renderer.")
@@ -145,7 +167,7 @@ enum PreviewRegistry {
     private static func hoverEditorPreview() -> some View {
         let size = PreviewSnapshotPolicy.size(named: "HoverEditorView")
         if let appState = hoverEditorAppState() {
-            ContentView(appState: appState)
+            productionContentView(appState)
                 .frame(width: size.width, height: size.height)
         } else {
             previewFailureView(message: "HoverEditorView could not initialize the production editor renderer.")
@@ -170,7 +192,7 @@ enum PreviewRegistry {
     private static func signatureHelpEditorPreview() -> some View {
         let size = PreviewSnapshotPolicy.size(named: "SignatureHelpEditorView")
         if let appState = signatureHelpEditorAppState() {
-            ContentView(appState: appState)
+            productionContentView(appState)
                 .frame(width: size.width, height: size.height)
         } else {
             previewFailureView(message: "SignatureHelpEditorView could not initialize the production editor renderer.")
@@ -195,7 +217,7 @@ enum PreviewRegistry {
         let size = PreviewSnapshotPolicy.size(named: viewName)
 
         if let appState = productionPreviewAppState(agentVisible: agentVisible) {
-            ContentView(appState: appState)
+            productionContentView(appState)
                 .frame(width: size.width, height: size.height)
         } else {
             previewFailureView(message: failureMessage)
@@ -383,7 +405,7 @@ enum PreviewRegistry {
         let size = PreviewSnapshotPolicy.size(named: "DiagnosticsEditorView")
 
         if let appState = diagnosticsPreviewAppState() {
-            ContentView(appState: appState)
+            productionContentView(appState)
                 .frame(width: size.width, height: size.height)
         } else {
             previewFailureView(message: failureMessage)

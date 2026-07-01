@@ -134,52 +134,84 @@ struct StartupOverlay: View {
 /// The unified toolbar is a single row spanning the full window width,
 /// containing the sidebar header (project name/branch) and the tab bar.
 /// One shared background eliminates visual seams between sidebar and editor.
-struct ContentView: View {
-    var appState: AppState
+public struct ContentView<EditorSurface: View>: View {
+    let gui: GUIState
+    let encoder: InputEncoder?
+    /// Editor geometry read just-in-time inside the body. This is a closure (not
+    /// a stored value) so each read reflects the live editor metrics: a value
+    /// computed in MingaApp's body would go stale because MingaApp under-renders
+    /// relative to ContentView.
+    let editorGeometry: () -> EditorGeometry
+    /// Window chrome. A plain value is safe: its inputs are `@Observable` on
+    /// AppState, so it stays fresh across ContentView body re-evaluations.
+    let chrome: WindowChrome
+    /// Called when the agent chat visibility changes so the app can hide/show the
+    /// Metal editor NSView layer underneath the SwiftUI chat overlay.
+    let onAgentChatVisibleChange: (Bool) -> Void
+    @ViewBuilder let makeEditorSurface: () -> EditorSurface
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     @State private var rightPaneHeight: CGFloat = 600
     @State private var workspaceWidth: CGFloat = 800
     @State private var sidebarWidth: CGFloat = SidebarSizing.defaultWidth
     @State private var changeSummaryWidth: CGFloat = 280
     @Namespace private var frontendExtensionNamespace
 
+    public init(
+        gui: GUIState,
+        encoder: InputEncoder?,
+        editorGeometry: @escaping () -> EditorGeometry,
+        chrome: WindowChrome,
+        onAgentChatVisibleChange: @escaping (Bool) -> Void,
+        @ViewBuilder makeEditorSurface: @escaping () -> EditorSurface
+    ) {
+        self.gui = gui
+        self.encoder = encoder
+        self.editorGeometry = editorGeometry
+        self.chrome = chrome
+        self.onAgentChatVisibleChange = onAgentChatVisibleChange
+        self.makeEditorSurface = makeEditorSurface
+    }
+
     private let activityBarWidth: CGFloat = 32
 
     private var showSidebarContent: Bool {
-        appState.gui.sidebarHostState.hasVisibleSidebar
+        gui.sidebarHostState.hasVisibleSidebar
     }
 
     private var showChangeSummary: Bool {
-        appState.gui.changeSummaryState.visible
+        gui.changeSummaryState.visible
     }
 
-    private var theme: ThemeColors { appState.gui.themeColors }
+    private var theme: ThemeColors { gui.themeColors }
 
     private var titleBarLeadingPadding: CGFloat {
-        appState.isFullScreen ? 10 : 84
+        chrome.isFullScreen ? 10 : 84
     }
 
     private var sidebarHeaderLeadingPadding: CGFloat {
-        appState.isFullScreen ? 12 : 36
+        chrome.isFullScreen ? 12 : 36
     }
 
     private var projectName: String {
-        if !appState.gui.fileTreeState.projectRoot.isEmpty {
-            return (appState.gui.fileTreeState.projectRoot as NSString).lastPathComponent
+        if !gui.fileTreeState.projectRoot.isEmpty {
+            return (gui.fileTreeState.projectRoot as NSString).lastPathComponent
         }
         return "Minga"
     }
 
     private var gitBranch: String {
-        appState.gui.statusBarState.gitBranch
+        gui.statusBarState.gitBranch
     }
 
     private var notificationCenterBottomInset: CGFloat {
         let statusBarHeight: CGFloat = 24
         let panelHeight: CGFloat
 
-        if appState.gui.bottomPanelState.visible {
+        if gui.bottomPanelState.visible {
             let maxPanelHeight = rightPaneHeight * 0.6
-            panelHeight = min(max(appState.gui.bottomPanelState.userHeight, 100), maxPanelHeight)
+            panelHeight = min(max(gui.bottomPanelState.userHeight, 100), maxPanelHeight)
         } else {
             panelHeight = 0
         }
@@ -187,7 +219,7 @@ struct ContentView: View {
         return statusBarHeight + panelHeight + 18
     }
 
-    var body: some View {
+    public var body: some View {
         ZStack {
             VStack(spacing: 0) {
                 unifiedToolbar
@@ -200,21 +232,21 @@ struct ContentView: View {
             frontendExtensionRuntimeLayer
             windowOverlays
         }
-        .environment(\.themeColors, appState.gui.themeColors)
-        .navigationTitle(appState.windowTitle)
+        .environment(\.themeColors, gui.themeColors)
+        .navigationTitle(chrome.title)
         .ignoresSafeArea(.container, edges: .top)
-        .preferredColorScheme(appState.windowBgIsDark ? .dark : .light)
+        .preferredColorScheme(chrome.backgroundIsDark ? .dark : .light)
         .onAppear {
             applyActiveSidebarPreferredWidth()
         }
-        .onChange(of: appState.gui.sidebarHostState.activeSidebar) { _, _ in
+        .onChange(of: gui.sidebarHostState.activeSidebar) { _, _ in
             applyActiveSidebarPreferredWidth()
         }
     }
 
     private func applyActiveSidebarPreferredWidth() {
         sidebarWidth = SidebarSizing.widthByApplyingPreferred(
-            for: appState.gui.sidebarHostState.activeSidebar,
+            for: gui.sidebarHostState.activeSidebar,
             currentWidth: sidebarWidth
         )
     }
@@ -227,7 +259,7 @@ struct ContentView: View {
     private let workspaceHeaderHeight: CGFloat = 30
 
     private var showsWorkspaceHeader: Bool {
-        appState.gui.workspaceState.shouldShowHeader
+        gui.workspaceState.shouldShowHeader
     }
 
     private var toolbarContentHeight: CGFloat {
@@ -235,7 +267,7 @@ struct ContentView: View {
     }
 
     private var toolbarTopPadding: CGFloat {
-        max(appState.trafficLightMidY - contentHeight / 2, 0)
+        max(chrome.trafficLightMidY - contentHeight / 2, 0)
     }
 
     @ViewBuilder
@@ -262,15 +294,15 @@ struct ContentView: View {
                 VStack(spacing: 0) {
                     if showsWorkspaceHeader {
                         WorkspaceHeaderView(
-                            workspaceState: appState.gui.workspaceState,
-                            encoder: appState.encoder
+                            workspaceState: gui.workspaceState,
+                            encoder: encoder
                         )
                     }
 
-                    if !appState.gui.tabBarState.tabs.isEmpty || !appState.gui.workspaceState.visibleTabs.isEmpty {
+                    if !gui.tabBarState.tabs.isEmpty || !gui.workspaceState.visibleTabs.isEmpty {
                         TabBarView(
-                            tabBarState: appState.gui.tabBarState,
-                            encoder: appState.encoder
+                            tabBarState: gui.tabBarState,
+                            encoder: encoder
                         )
                         .accessibilityIdentifier("workspace-tabbar")
                     } else {
@@ -299,7 +331,7 @@ struct ContentView: View {
     /// Renders the header for the BEAM-selected semantic sidebar.
     @ViewBuilder
     private var sidebarHeaderContent: some View {
-        if let activeSidebar = appState.gui.sidebarHostState.activeSidebar {
+        if let activeSidebar = gui.sidebarHostState.activeSidebar {
             NativeSidebarRegistry
                 .adapterOrFallback(for: activeSidebar.semanticKind)
                 .makeHeader(sidebarContext, activeSidebar)
@@ -308,9 +340,9 @@ struct ContentView: View {
 
     private var sidebarContext: NativeSidebarContext {
         NativeSidebarContext(
-            guiState: appState.gui,
+            guiState: gui,
             theme: theme,
-            encoder: appState.encoder,
+            encoder: encoder,
             projectName: projectName,
             gitBranch: gitBranch,
             leadingPadding: sidebarHeaderLeadingPadding
@@ -351,16 +383,16 @@ struct ContentView: View {
     private var sidebarBody: some View {
         HStack(spacing: 0) {
             ActivityBar(
-                guiState: appState.gui,
-                sidebarHostState: appState.gui.sidebarHostState,
-                encoder: appState.encoder
+                guiState: gui,
+                sidebarHostState: gui.sidebarHostState,
+                encoder: encoder
             )
 
-            if let activeSidebar = appState.gui.sidebarHostState.activeSidebar {
+            if let activeSidebar = gui.sidebarHostState.activeSidebar {
                 SidebarContainer(
-                    guiState: appState.gui,
+                    guiState: gui,
                     activeSidebar: activeSidebar,
-                    encoder: appState.encoder,
+                    encoder: encoder,
                     projectName: projectName,
                     gitBranch: gitBranch,
                     leadingPadding: titleBarLeadingPadding,
@@ -375,8 +407,8 @@ struct ContentView: View {
     @ViewBuilder
     private var changeSummarySidebar: some View {
         ChangeSummarySidebarView(
-            changeSummaryState: appState.gui.changeSummaryState,
-            encoder: appState.encoder,
+            changeSummaryState: gui.changeSummaryState,
+            encoder: encoder,
             width: $changeSummaryWidth
         )
     }
@@ -389,26 +421,26 @@ struct ContentView: View {
 
             // Conditionally show agent context bar (when zoomed into an agent card)
             // or breadcrumb bar (when in traditional editor or zoomed into You card)
-            if appState.gui.agentContextBarState.visible {
+            if gui.agentContextBarState.visible {
                 AgentContextBar(
-                    state: appState.gui.agentContextBarState,
-                    encoder: appState.encoder
+                    state: gui.agentContextBarState,
+                    encoder: encoder
                 )
             } else {
                 BreadcrumbBar(
-                    state: appState.gui.breadcrumbState,
-                    encoder: appState.encoder
+                    state: gui.breadcrumbState,
+                    encoder: encoder
                 )
             }
 
             // Search toolbar (appears below breadcrumb bar when active)
-            if appState.gui.searchState.visible {
+            if gui.searchState.visible {
                 SearchToolbar(
-                    searchState: appState.gui.searchState,
-                    encoder: appState.encoder
+                    searchState: gui.searchState,
+                    encoder: encoder
                 )
                 .transition(
-                    NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                    reduceMotion
                         ? .opacity.animation(.easeInOut(duration: 0.1))
                         : .move(edge: .top)
                             .combined(with: .opacity)
@@ -426,21 +458,21 @@ struct ContentView: View {
 
                 extensionRightPanels
             }
-            .onChange(of: appState.gui.agentChatState.visible) { _, visible in
-                appState.editorNSView?.setAgentChatVisible(visible)
+            .onChange(of: gui.agentChatState.visible) { _, visible in
+                onAgentChatVisibleChange(visible)
             }
 
             // Edit timeline scrubber (between editor and bottom panel)
             EditTimelineView(
-                state: appState.gui.editTimelineState,
-                encoder: appState.encoder
+                state: gui.editTimelineState,
+                encoder: encoder
             )
 
             // Bottom panel (between editor and status bar)
-            if appState.gui.bottomPanelState.visible {
+            if gui.bottomPanelState.visible {
                 BottomPanelView(
-                    state: appState.gui.bottomPanelState,
-                    encoder: appState.encoder,
+                    state: gui.bottomPanelState,
+                    encoder: encoder,
                     availableHeight: rightPaneHeight
                 )
             }
@@ -449,13 +481,13 @@ struct ContentView: View {
             extensionBottomPanels
 
             // Native minibuffer (appears above status bar when active)
-            if appState.gui.minibufferState.visible {
+            if gui.minibufferState.visible {
                 MinibufferView(
-                    state: appState.gui.minibufferState,
-                    encoder: appState.encoder
+                    state: gui.minibufferState,
+                    encoder: encoder
                 )
                 .transition(
-                    NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                    reduceMotion
                         ? .opacity.animation(.easeInOut(duration: 0.1))
                         : .move(edge: .bottom)
                             .combined(with: .opacity)
@@ -480,75 +512,61 @@ struct ContentView: View {
 
     // MARK: - Editor Surface (Metal + editor-local overlays)
 
-    private func completionOverlayCursor() -> (row: Int, col: Int, gutterPad: CGFloat) {
-        guard let nsView = appState.editorNSView else {
-            return (appState.gui.completionState.anchorRow, appState.gui.completionState.anchorCol, 0)
-        }
-
-        let frameState = nsView.dispatcher.frameState
+    private func completionOverlayCursor(_ geo: EditorGeometry) -> (row: Int, col: Int, gutterPad: CGFloat) {
+        let row = gui.completionState.anchorRow
+        let col = gui.completionState.anchorCol
         let gutterPad: CGFloat
-
-        if frameState.gutterCol > 0 {
-            if frameState.cursorCol >= frameState.gutterCol {
-                gutterPad = CoreTextMetalRenderer.gutterLeftMarginPt + CoreTextMetalRenderer.gutterRightGapPt
-            } else {
-                gutterPad = CoreTextMetalRenderer.gutterLeftMarginPt
-            }
+        if geo.gutterCol > 0 {
+            gutterPad = col >= geo.gutterCol ? geo.gutterLeftMargin + geo.gutterRightGap : geo.gutterLeftMargin
         } else {
             gutterPad = 0
         }
-
-        return (Int(frameState.cursorRow), Int(frameState.cursorCol), gutterPad)
+        return (row, col, gutterPad)
     }
 
     private var editorSurface: some View {
-        ZStack(alignment: .topLeading) {
+        let geo = editorGeometry()
+        return ZStack(alignment: .topLeading) {
             // Metal editor surface (always present for input handling).
             // Hidden when agent chat is visible so the SwiftUI chat overlay
             // is not occluded by the NSView layer (AppKit NSViews render
             // above SwiftUI views in a ZStack regardless of child order).
-            Group {
-                if let nsView = appState.editorNSView {
-                    EditorView(editorNSView: nsView)
-                } else {
-                    Color(red: 0.12, green: 0.12, blue: 0.14)
-                }
-            }
-            .opacity(appState.gui.agentChatState.visible ? 0 : 1)
+            makeEditorSurface()
+                .opacity(gui.agentChatState.visible ? 0 : 1)
 
-            if appState.gui.agentChatState.visible {
+            if gui.agentChatState.visible {
                 AgentChatView(
-                    state: appState.gui.agentChatState,
-                    isInsertMode: appState.gui.statusBarState.isInsertMode,
-                    encoder: appState.encoder,
-                    cellHeight: CGFloat(appState.editorNSView?.cellHeight ?? 16)
+                    state: gui.agentChatState,
+                    isInsertMode: gui.statusBarState.isInsertMode,
+                    encoder: encoder,
+                    cellHeight: geo.cellHeight
                 )
             }
 
             // Completion overlay (positioned at cursor)
-            if appState.gui.completionState.visible {
-                let cw = CGFloat(appState.editorNSView?.cellWidth ?? 8)
-                let ch = CGFloat(appState.editorNSView?.cellHeight ?? 16)
-                let cursor = completionOverlayCursor()
+            if gui.completionState.visible {
+                let cw = geo.cellWidth
+                let ch = geo.cellHeight
+                let cursor = completionOverlayCursor(geo)
                 let x = CGFloat(cursor.col) * cw + cursor.gutterPad
                 let y = (CGFloat(cursor.row) + 1) * ch
 
                 CompletionOverlay(
-                    state: appState.gui.completionState,
-                    encoder: appState.encoder
+                    state: gui.completionState,
+                    encoder: encoder
                 )
                 .offset(x: x, y: y)
             }
 
             // Overlay shared dimensions (computed once for all overlays)
-            let overlayCW = CGFloat(appState.editorNSView?.cellWidth ?? 8)
-            let overlayCH = CGFloat(appState.editorNSView?.cellHeight ?? 16)
-            let overlayVPW = CGFloat(appState.editorNSView?.bounds.width ?? 800)
+            let overlayCW = geo.cellWidth
+            let overlayCH = geo.cellHeight
+            let overlayVPW = geo.viewportWidth
 
             // Signature help overlay (lowest overlay z-order)
-            if appState.gui.signatureHelpState.visible {
+            if gui.signatureHelpState.visible {
                 SignatureHelpOverlay(
-                    state: appState.gui.signatureHelpState,
+                    state: gui.signatureHelpState,
                     cellWidth: overlayCW,
                     cellHeight: overlayCH,
                     viewportHeight: rightPaneHeight,
@@ -557,14 +575,14 @@ struct ContentView: View {
             }
 
             // Hover popup overlay (above signature help, below completion)
-            if appState.gui.hoverPopupState.visible {
+            if gui.hoverPopupState.visible {
                 HoverPopupOverlay(
-                    state: appState.gui.hoverPopupState,
+                    state: gui.hoverPopupState,
                     cellWidth: overlayCW,
                     cellHeight: overlayCH,
                     viewportHeight: rightPaneHeight,
                     viewportWidth: overlayVPW,
-                    encoder: appState.encoder
+                    encoder: encoder
                 )
             }
 
@@ -599,16 +617,17 @@ struct ContentView: View {
     /// active window's gutter column when pane geometry has not been retained yet.
     @ViewBuilder
     private var extensionOverlayLayer: some View {
-        if !appState.gui.extensionOverlayState.entries.isEmpty {
-            let cw = CGFloat(appState.editorNSView?.cellWidth ?? 8)
-            let ch = CGFloat(appState.editorNSView?.cellHeight ?? 16)
-            let frameGutterCols = appState.editorNSView?.dispatcher.frameState.gutterCol ?? 0
+        if !gui.extensionOverlayState.entries.isEmpty {
+            let geo = editorGeometry()
+            let cw = geo.cellWidth
+            let ch = geo.cellHeight
+            let frameGutterCols = UInt16(geo.gutterCol)
             let gutterPad: CGFloat = frameGutterCols > 0
-                ? CoreTextMetalRenderer.gutterLeftMarginPt + CoreTextMetalRenderer.gutterRightGapPt
+                ? geo.gutterLeftMargin + geo.gutterRightGap
                 : 0
 
-            ForEach(appState.gui.extensionOverlayState.windowIDs, id: \.self) { wid in
-                let content = appState.gui.windowContents[wid]
+            ForEach(gui.extensionOverlayState.windowIDs, id: \.self) { wid in
+                let content = gui.windowContents[wid]
                 let geometry = content?.paneGeometry
                 let scrollLeft = content?.scrollLeft ?? 0
                 let origin = Self.overlayContentOrigin(
@@ -621,7 +640,7 @@ struct ContentView: View {
                 )
 
                 ExtensionOverlayView(
-                    overlayState: appState.gui.extensionOverlayState,
+                    overlayState: gui.extensionOverlayState,
                     windowID: wid,
                     cellWidth: cw,
                     cellHeight: ch,
@@ -680,9 +699,9 @@ struct ContentView: View {
     /// the widest panel's requested size.
     @ViewBuilder
     private var extensionRightPanels: some View {
-        let panels = appState.gui.extensionPanelState.panels(forPosition: 1)
+        let panels = gui.extensionPanelState.panels(forPosition: 1)
         if !panels.isEmpty {
-            let cw = CGFloat(appState.editorNSView?.cellWidth ?? 8)
+            let cw = editorGeometry().cellWidth
             // Percent panels size against the stable editor-column width, not the editor
             // NSView (which is the surface left over after the panel takes space, causing
             // a 30% request to converge to ~23% and oscillate as layout settles).
@@ -713,9 +732,9 @@ struct ContentView: View {
     /// the tallest panel's requested size.
     @ViewBuilder
     private var extensionBottomPanels: some View {
-        let panels = appState.gui.extensionPanelState.panels(forPosition: 0)
+        let panels = gui.extensionPanelState.panels(forPosition: 0)
         if !panels.isEmpty {
-            let ch = CGFloat(appState.editorNSView?.cellHeight ?? 16)
+            let ch = editorGeometry().cellHeight
             let height = panels
                 .map { panelCrossSize($0, cellExtent: ch, basis: rightPaneHeight, minimum: 80) }
                 .max() ?? (rightPaneHeight * 0.4)
@@ -740,7 +759,7 @@ struct ContentView: View {
     /// Floating extension panels (position 2), centered over the workspace.
     @ViewBuilder
     private var extensionFloatPanels: some View {
-        let panels = appState.gui.extensionPanelState.panels(forPosition: 2)
+        let panels = gui.extensionPanelState.panels(forPosition: 2)
         if !panels.isEmpty {
             VStack(spacing: 12) {
                 ForEach(panels) { panel in
@@ -761,14 +780,14 @@ struct ContentView: View {
 
     private var statusBar: some View {
         StatusBarView(
-            state: appState.gui.statusBarState,
-            feedbackState: appState.gui.feedbackState,
-            encoder: appState.encoder,
-            isFileTreeVisible: appState.gui.fileTreeState.visible,
-            isGitStatusVisible: appState.gui.gitStatusState.visible,
-            isBottomPanelVisible: appState.gui.bottomPanelState.visible,
-            isAgentChatVisible: appState.gui.agentChatState.visible,
-            gitSyncing: appState.gui.gitStatusState.syncing
+            state: gui.statusBarState,
+            feedbackState: gui.feedbackState,
+            encoder: encoder,
+            isFileTreeVisible: gui.fileTreeState.visible,
+            isGitStatusVisible: gui.gitStatusState.visible,
+            isBottomPanelVisible: gui.bottomPanelState.visible,
+            isAgentChatVisible: gui.agentChatState.visible,
+            gitSyncing: gui.gitStatusState.syncing
         )
     }
 
@@ -776,9 +795,9 @@ struct ContentView: View {
 
     @ViewBuilder
     private var frontendExtensionRuntimeLayer: some View {
-        let context = FrontendExtensionViewContext(theme: appState.gui.themeColors, encoder: appState.encoder, namespace: frontendExtensionNamespace)
-        ForEach(appState.gui.frontendExtensions.activeExtensionIDs, id: \.self) { extensionID in
-            if let view = appState.gui.frontendExtensions.view(for: extensionID, context: context) {
+        let context = FrontendExtensionViewContext(theme: gui.themeColors, encoder: encoder, namespace: frontendExtensionNamespace)
+        ForEach(gui.frontendExtensions.activeExtensionIDs, id: \.self) { extensionID in
+            if let view = gui.frontendExtensions.view(for: extensionID, context: context) {
                 view
             }
         }
@@ -794,7 +813,7 @@ struct ContentView: View {
             HStack {
                 Spacer()
                 WhichKeyOverlay(
-                    state: appState.gui.whichKeyState
+                    state: gui.whichKeyState
                 )
                 Spacer()
             }
@@ -802,23 +821,24 @@ struct ContentView: View {
 
         // Picker overlay (floats over entire window)
         PickerOverlay(
-            state: appState.gui.pickerState,
-            encoder: appState.encoder
+            state: gui.pickerState,
+            encoder: encoder
         )
 
         // Tool manager overlay (floats over entire window)
         ToolManagerView(
-            state: appState.gui.toolManagerState,
-            encoder: appState.encoder
+            state: gui.toolManagerState,
+            encoder: encoder
         )
 
         // Float popup overlay (centered, like picker)
-        if appState.gui.floatPopupState.visible {
-            let cw = CGFloat(appState.editorNSView?.cellWidth ?? 8)
-            let ch = CGFloat(appState.editorNSView?.cellHeight ?? 16)
+        if gui.floatPopupState.visible {
+            let geo = editorGeometry()
+            let cw = geo.cellWidth
+            let ch = geo.cellHeight
 
             FloatPopupOverlay(
-                state: appState.gui.floatPopupState,
+                state: gui.floatPopupState,
                 cellWidth: cw,
                 cellHeight: ch
             )
@@ -829,27 +849,27 @@ struct ContentView: View {
 
         // Notification stack (bottom-right, above regular workspace content).
         NotificationCenterView(
-            state: appState.gui.notificationCenterState,
-            encoder: appState.encoder,
+            state: gui.notificationCenterState,
+            encoder: encoder,
             bottomInset: notificationCenterBottomInset
         )
 
         // Keystroke-to-present latency HUD (ticket #2215). Top-right, client-local
         // debug overlay; visibility is owned by LatencyHUDState.
         LatencyHUDOverlay(
-            state: appState.gui.latencyHUDState
+            state: gui.latencyHUDState
         )
 
         // Frame-transaction resync hint (#2219 child D). Bottom-trailing badge
         // shown while a keyframe is in flight after an invalidation; the editor
         // keeps showing the last good frame underneath.
         ResyncOverlay(
-            state: appState.gui.resyncState
+            state: gui.resyncState
         )
 
         // Startup overlay: covers the empty Metal framebuffer with a
         // spinner while the BEAM boots. Fades out on first commit_frame.
-        if !appState.hasReceivedFirstFrame {
+        if !chrome.hasReceivedFirstFrame {
             StartupOverlay()
                 .transition(.opacity)
         }
@@ -857,10 +877,59 @@ struct ContentView: View {
         // Protocol error overlay: blocks the whole window when the BEAM rejects
         // this frontend's handshake protocol_version (0x18). Highest z-order so
         // it takes precedence over the startup overlay and all content.
-        if appState.gui.protocolErrorState.isPresented {
+        if gui.protocolErrorState.isPresented {
             ProtocolErrorOverlay(
-                state: appState.gui.protocolErrorState
+                state: gui.protocolErrorState
             )
         }
     }
+}
+
+// MARK: - Canvas preview
+
+/// Builds a fully-populated `GUIState` for the canvas shell preview. No `AppState`,
+/// no `EditorNSView`, and no Metal are involved: `ContentView` renders entirely
+/// from injected `MingaUI` values, so the whole shell lays out in Xcode's canvas
+/// with a placeholder rect where the Metal editor surface would be.
+@MainActor
+private func fullShellPreviewGUI() -> GUIState {
+    let gui = GUIState()
+    PreviewFixtures.applyPreviewTheme(to: gui.themeColors)
+    PreviewFixtures.populateFileTree(gui.fileTreeState)
+    PreviewFixtures.populateTabBar(gui.tabBarState)
+    PreviewFixtures.populateGitStatus(gui.gitStatusState)
+    gui.statusBarState.update(from: PreviewFixtures.statusBarUpdate(agentVisible: false))
+    // Mark the file-tree sidebar visible + active so the shell shows the sidebar.
+    gui.fileTreeState.visible = true
+    gui.sidebarHostState.update(
+        activeId: "file_tree",
+        sidebars: [
+            Wire.SidebarMetadata(
+                id: "file_tree",
+                displayName: "File Tree",
+                semanticKind: "file_tree",
+                icon: "folder",
+                order: 10,
+                visible: true,
+                focused: true,
+                preferredWidth: 30,
+                badgeCount: nil
+            )
+        ]
+    )
+    return gui
+}
+
+#Preview("Full Shell", traits: .mingaChrome) {
+    ContentView(
+        gui: fullShellPreviewGUI(),
+        encoder: NullInputEncoder(),
+        editorGeometry: { .preview },
+        chrome: .preview,
+        onAgentChatVisibleChange: { _ in }
+    ) {
+        Color(red: 0.12, green: 0.12, blue: 0.14)
+            .overlay(Text("editor surface").foregroundStyle(.secondary))
+    }
+    .frame(width: 1200, height: 800)
 }

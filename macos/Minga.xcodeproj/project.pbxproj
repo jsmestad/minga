@@ -37,7 +37,7 @@
 		2189892352237ED1153E70F2 /* MingaUI.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 7D941F158B53B4D4CF4AAA4F /* MingaUI.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		2198A76504E5C0A41209CF57 /* EditTimelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE173FAAAC37ACFF47EE03B8 /* EditTimelineView.swift */; };
 		22EFBD4416697A01FDC9C2AD /* ProtocolCommandSize.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = 762CD389E04B0DE6A86CDBF2 /* ProtocolCommandSize.generated.swift */; };
-		236A0542773564BED642D5AD /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A84218125A9F97DBE87F349 /* ContentView.swift */; };
+		2388D1CC8878556958DA4A0D /* EditorGeometry+App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F6F03841A5D97A688A35CC9 /* EditorGeometry+App.swift */; };
 		23DA463A92D1EC2F7BFA5B5A /* CoreTextMetalRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DDE4A535E0895090BF02EE8 /* CoreTextMetalRenderer.swift */; };
 		25B21FDC79D3F65CAA270C99 /* Instrumentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53CEDDFB3856C44BA51C8A7B /* Instrumentation.swift */; };
 		25D865A5AD887E5F31FA162D /* LatencyHUDStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA53378E05335BC93B342123 /* LatencyHUDStateTests.swift */; };
@@ -52,7 +52,6 @@
 		2DFDA6E32CE61E6D89341423 /* AppearanceSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 912C5F808709BABFF3126DEE /* AppearanceSettingsView.swift */; };
 		2F0A0D75FA309989C48B32EF /* WindowContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 790F7E20F30FEEFC552B3685 /* WindowContent.swift */; };
 		2FE07FE013FC3DE8FD01DF39 /* BottomPanelState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A583EB0DCE480D1A5FC7E440 /* BottomPanelState.swift */; };
-		2FF702C4573CDB88FD43AF15 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A84218125A9F97DBE87F349 /* ContentView.swift */; };
 		30AF3AD9C1C7F46956940CEC /* FontManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79F5D551302873BE8F7240ED /* FontManager.swift */; };
 		30E31170A79F30413D15D858 /* GUIChromeDecoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 754C68BAFE0C4DB553BFD06A /* GUIChromeDecoderTests.swift */; };
 		310AFFC13B7C85D248C21371 /* InlineEditField.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4DCF10EBEB51624A4A1F428 /* InlineEditField.swift */; };
@@ -114,6 +113,7 @@
 		6C48A19EB071FA951E15B3D9 /* PreviewRegistry+Chrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF40BCB1722FAD446E1E6E52 /* PreviewRegistry+Chrome.swift */; };
 		6CF0F1BB4E1BDC0182EDCCB1 /* Instrumentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53CEDDFB3856C44BA51C8A7B /* Instrumentation.swift */; };
 		6DC4EDE61F449DC8AFF50B20 /* StatusBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 764F85CBFE17A90A0A61F2B6 /* StatusBarView.swift */; };
+		6DC89F81DBC022B3FCBA39BB /* EditorGeometry+App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F6F03841A5D97A688A35CC9 /* EditorGeometry+App.swift */; };
 		6EE7C16703E92B31CC9CE9C0 /* NonBlockingEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B3DDF1EB804D4E31EDFA519 /* NonBlockingEncoderTests.swift */; };
 		6EE844B0AA477984A99FF81A /* MingaUI.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 7D941F158B53B4D4CF4AAA4F /* MingaUI.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		6F4588B8EB30D91E05176E9E /* ScrollAccumulator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25503C21E0D55E1515A38C7D /* ScrollAccumulator.swift */; };
@@ -164,7 +164,6 @@
 		986CED792328DA9C1B22BF84 /* PreviewRegistry+GitStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BB5DAD0EAB1AE583E45AF5C /* PreviewRegistry+GitStatus.swift */; };
 		9AA31CF152E2CD33E4BD2098 /* MingaProtocol.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 848E04E4F242C861887769F3 /* MingaProtocol.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		9B328F29A48C7C7EC810CB1B /* AgentApprovalCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 492285F3371798B69478BF13 /* AgentApprovalCard.swift */; };
-		9BA59A1D924999EEC65EEBCC /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A84218125A9F97DBE87F349 /* ContentView.swift */; };
 		9C0676A96179F6068B85CCA1 /* RecoveryManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A6769D066EC44A58791CFC /* RecoveryManager.swift */; };
 		9C5FE3A02B819B292912EA4C /* ObservatoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C6CC43E02AE08773B90E8AC /* ObservatoryView.swift */; };
 		9CC563AE009A1EA1A0BE0D9F /* SettingsStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26C02007D4036FC9C7D0FB71 /* SettingsStateTests.swift */; };
@@ -237,6 +236,7 @@
 		D486A1CE007AF228798286B7 /* SidebarContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E34C34EC8FF8D20C141F2290 /* SidebarContainer.swift */; };
 		D5F45455932847E76CA9A4E4 /* MessagesContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BA08D322A0BCE2491D4489D /* MessagesContentView.swift */; };
 		D916997E44A9619D08995FDA /* IMEComposition.swift in Sources */ = {isa = PBXBuildFile; fileRef = 048C53BF025A1476EE8BC1A7 /* IMEComposition.swift */; };
+		DA224DFB69915CFBFC50DDAE /* EditorGeometry+App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F6F03841A5D97A688A35CC9 /* EditorGeometry+App.swift */; };
 		DA2EDB0295FDA3FBF421E0E8 /* ToolManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28C576F6F2E779DEEABFE79C /* ToolManagerView.swift */; };
 		DB4EE4C9D35A3CCEA80442D6 /* WorkspaceState.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1EC68F918782FE2FCDB2413 /* WorkspaceState.swift */; };
 		DB83E9F1763A0D2E7BD7F7D3 /* ViewInspector in Frameworks */ = {isa = PBXBuildFile; productRef = BD2531C0969FD21CC18D2FDB /* ViewInspector */; };
@@ -248,6 +248,7 @@
 		E1601C8BE90E7A7CB8F7F5DA /* ResyncState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 953A62EE436C9B1F73B97D07 /* ResyncState.swift */; };
 		E20D436BEA6628E24B9FFA2C /* BEAMProcessManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0EFEC421284D11AD2177113 /* BEAMProcessManager.swift */; };
 		E27074789DFFC30C49DD40D0 /* EditorNSView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98DB822E0C8D06C7B45D329F /* EditorNSView.swift */; };
+		E28B13C9D7A0CFE84CC086EB /* EditorGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13C8650724242FD0A50EC3CA /* EditorGeometry.swift */; };
 		E2BC69E1121328310B830E45 /* CachedLineTexture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C9F6C86861307AE9524E8F5 /* CachedLineTexture.swift */; };
 		E3B2DB94D802E1831C17474E /* PipelineCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EE75BA15B74A84B77B5B911 /* PipelineCache.swift */; };
 		E4A2887CDB5EDB64080E5096 /* FrameState.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2D59D9EEB390C8DF351D595 /* FrameState.swift */; };
@@ -264,6 +265,7 @@
 		F0A2BCCA095F1CA4FBE9BE3F /* ProtocolSchemaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DC281B7F9F7E4C0BA793B1E /* ProtocolSchemaTests.swift */; };
 		F12D6284209D6D32037E6644 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9FC2118EA77254CBCAE7B0B /* AppState.swift */; };
 		F3BB64E36F257BD7FACEA5D6 /* CoreTextShaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 48E21C30D142028698027567 /* CoreTextShaders.metal */; };
+		F3C4A9DABEF6FD369F8B1F45 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A84218125A9F97DBE87F349 /* ContentView.swift */; };
 		F6F56719C285CB9C3EA62A57 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F5647A59C841B3C408994CC7 /* Assets.xcassets */; };
 		F984C67E0F2861DE6A25DBD4 /* PreviewRegistry+GitStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BB5DAD0EAB1AE583E45AF5C /* PreviewRegistry+GitStatus.swift */; };
 		F986D696164E7D7483EF2DB4 /* PreviewRegistry+Overlays.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A0D41B1D748FBFE7916342C /* PreviewRegistry+Overlays.swift */; };
@@ -384,6 +386,7 @@
 		10FA7BF770B3453A402B9F78 /* WhichKeyOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhichKeyOverlay.swift; sourceTree = "<group>"; };
 		120944B58F457FF6EEA773CA /* GitStatusHeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitStatusHeaderView.swift; sourceTree = "<group>"; };
 		124E376C3B8F6EC62765F5C1 /* CompletionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletionState.swift; sourceTree = "<group>"; };
+		13C8650724242FD0A50EC3CA /* EditorGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorGeometry.swift; sourceTree = "<group>"; };
 		13E89640A29C207B9040DC67 /* EditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorView.swift; sourceTree = "<group>"; };
 		19D226D16EF96375868F716D /* ProtocolEncoderDisconnectTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolEncoderDisconnectTests.swift; sourceTree = "<group>"; };
 		1BA08D322A0BCE2491D4489D /* MessagesContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessagesContentView.swift; sourceTree = "<group>"; };
@@ -444,6 +447,7 @@
 		5A84E92F596D0DDF8FF11049 /* MinibufferView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MinibufferView.swift; sourceTree = "<group>"; };
 		5C6CC43E02AE08773B90E8AC /* ObservatoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObservatoryView.swift; sourceTree = "<group>"; };
 		5DDE4A535E0895090BF02EE8 /* CoreTextMetalRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreTextMetalRenderer.swift; sourceTree = "<group>"; };
+		5F6F03841A5D97A688A35CC9 /* EditorGeometry+App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EditorGeometry+App.swift"; sourceTree = "<group>"; };
 		60980E90FDD864409144BA5B /* PickerState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PickerState.swift; sourceTree = "<group>"; };
 		620F7F967502D4F1F7AE8F03 /* WindowContentRendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowContentRendererTests.swift; sourceTree = "<group>"; };
 		628AAE1DCC1D559B04B81E35 /* FileTreeRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTreeRowView.swift; sourceTree = "<group>"; };
@@ -794,6 +798,7 @@
 		B603D25CD10F75A12EA94237 /* Shared */ = {
 			isa = PBXGroup;
 			children = (
+				13C8650724242FD0A50EC3CA /* EditorGeometry.swift */,
 				1BB45C5B630FDEDFD0BD6BE0 /* EditTimelineState.swift */,
 				EE173FAAAC37ACFF47EE03B8 /* EditTimelineView.swift */,
 				644384B6B8FE5F11CD0DB713 /* GUIState.swift */,
@@ -830,6 +835,7 @@
 				B9FC2118EA77254CBCAE7B0B /* AppState.swift */,
 				F0EFEC421284D11AD2177113 /* BEAMProcessManager.swift */,
 				8A84218125A9F97DBE87F349 /* ContentView.swift */,
+				5F6F03841A5D97A688A35CC9 /* EditorGeometry+App.swift */,
 				53CEDDFB3856C44BA51C8A7B /* Instrumentation.swift */,
 				4A647814918768E62822D4A1 /* MingaApp.swift */,
 				B4D576456737CFE8706B66F5 /* PowerThermalPolicy.swift */,
@@ -1162,7 +1168,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "cd \"${SRCROOT}/..\"\nif ! command -v mix >/dev/null 2>&1; then\n  echo \"error: mix is required to generate protocol artifacts. Install Elixir, then run: mix protocol.gen\"\n  exit 1\nfi\nmix protocol.gen\n";
+			shellScript = "cd \"${SRCROOT}/..\"\nif ! command -v mix >/dev/null 2>&1; then\n  if [ -f macos/.generated/protocol/ProtocolOpcodes.generated.swift ]; then\n    echo \"warning: mix not found; reusing existing generated protocol artifacts (e.g. Xcode Preview build sandbox)\"\n    exit 0\n  fi\n  echo \"error: mix is required to generate protocol artifacts. Install Elixir, then run: mix protocol.gen\"\n  exit 1\nfi\nmix protocol.gen\n";
 		};
 		658E1AB9C3D7AAE877712688 /* Generate protocol opcodes */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -1184,7 +1190,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "cd \"${SRCROOT}/..\"\nif ! command -v mix >/dev/null 2>&1; then\n  echo \"error: mix is required to generate protocol artifacts. Install Elixir, then run: mix protocol.gen\"\n  exit 1\nfi\nmix protocol.gen\n";
+			shellScript = "cd \"${SRCROOT}/..\"\nif ! command -v mix >/dev/null 2>&1; then\n  if [ -f macos/.generated/protocol/ProtocolOpcodes.generated.swift ]; then\n    echo \"warning: mix not found; reusing existing generated protocol artifacts (e.g. Xcode Preview build sandbox)\"\n    exit 0\n  fi\n  echo \"error: mix is required to generate protocol artifacts. Install Elixir, then run: mix protocol.gen\"\n  exit 1\nfi\nmix protocol.gen\n";
 		};
 		77AE57735A00C26BF1B3675A /* Generate protocol opcodes */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -1203,7 +1209,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "cd \"${SRCROOT}/..\"\nif ! command -v mix >/dev/null 2>&1; then\n  echo \"error: mix is required to generate protocol artifacts. Install Elixir, then run: mix protocol.gen\"\n  exit 1\nfi\nmix protocol.gen\n";
+			shellScript = "cd \"${SRCROOT}/..\"\nif ! command -v mix >/dev/null 2>&1; then\n  if [ -f macos/.generated/protocol/ProtocolOpcodes.generated.swift ]; then\n    echo \"warning: mix not found; reusing existing generated protocol artifacts (e.g. Xcode Preview build sandbox)\"\n    exit 0\n  fi\n  echo \"error: mix is required to generate protocol artifacts. Install Elixir, then run: mix protocol.gen\"\n  exit 1\nfi\nmix protocol.gen\n";
 		};
 		DB4598C0910E3166689E6F1A /* Codesign */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -1257,9 +1263,9 @@
 				18F0DDA03D08C0B4302DCCF4 /* BitmapRasterizer.swift in Sources */,
 				AFE31388980EE451C8F734A3 /* CachedLineTexture.swift in Sources */,
 				C44D9CF03C49E7BCA39A76A9 /* CommandDispatcher.swift in Sources */,
-				236A0542773564BED642D5AD /* ContentView.swift in Sources */,
 				23DA463A92D1EC2F7BFA5B5A /* CoreTextMetalRenderer.swift in Sources */,
 				16116567DD7218A82575360A /* CoreTextShaders.metal in Sources */,
+				DA224DFB69915CFBFC50DDAE /* EditorGeometry+App.swift in Sources */,
 				ED8592B57E8A2A3EAAE24295 /* EditorNSView.swift in Sources */,
 				281A9531103F9E962B3F31A7 /* EditorScrollTrack.swift in Sources */,
 				78621BB35169CCFF26C753DD /* EditorView.swift in Sources */,
@@ -1303,9 +1309,9 @@
 				932C189ED218AC16620D8C19 /* BitmapRasterizer.swift in Sources */,
 				5CF105289D5A9C9AD4B8548A /* CachedLineTexture.swift in Sources */,
 				45A352459C76907D8E4CB596 /* CommandDispatcher.swift in Sources */,
-				2FF702C4573CDB88FD43AF15 /* ContentView.swift in Sources */,
 				8FB0DF76DEB5112AD590BB11 /* CoreTextMetalRenderer.swift in Sources */,
 				1A7BC027E152504B67F6F418 /* CoreTextShaders.metal in Sources */,
+				6DC89F81DBC022B3FCBA39BB /* EditorGeometry+App.swift in Sources */,
 				E27074789DFFC30C49DD40D0 /* EditorNSView.swift in Sources */,
 				CE65FF332E03ED47ADFBA48E /* EditorScrollTrack.swift in Sources */,
 				BBFA84AD4053D2DDA336FBAF /* EditorView.swift in Sources */,
@@ -1378,8 +1384,10 @@
 				C3460BA2BBD420A4B37C4DFB /* ChangeSummaryView.swift in Sources */,
 				3CD15ED81AE384C93557B0C0 /* CompletionOverlay.swift in Sources */,
 				E8DAC5BD5013095E550BF4E8 /* CompletionState.swift in Sources */,
+				F3C4A9DABEF6FD369F8B1F45 /* ContentView.swift in Sources */,
 				2CFB39859AC1E448147D8C31 /* EditTimelineState.swift in Sources */,
 				2198A76504E5C0A41209CF57 /* EditTimelineView.swift in Sources */,
+				E28B13C9D7A0CFE84CC086EB /* EditorGeometry.swift in Sources */,
 				A9551F6F0EB19FB618A8DB3E /* EditorSettingsView.swift in Sources */,
 				537AA754C723E8F02ED14D32 /* ExtensionOverlayState.swift in Sources */,
 				E139B8F9FCA100EBDDC042AB /* ExtensionOverlayView.swift in Sources */,
@@ -1462,12 +1470,12 @@
 				07C32C28178AE5675ACF4539 /* CommandDispatcher.swift in Sources */,
 				28F3D7BFADCE4A2509D66C2B /* CommandDispatcherTests.swift in Sources */,
 				4A2ED658D250B02BE89A6A56 /* CompletionStateTests.swift in Sources */,
-				9BA59A1D924999EEC65EEBCC /* ContentView.swift in Sources */,
 				527C7DB557EFD09B3161BC20 /* CoreTextMetalRenderer.swift in Sources */,
 				BF89605C029E1F2F4EE328EA /* CoreTextMetalRendererCursorTests.swift in Sources */,
 				F3BB64E36F257BD7FACEA5D6 /* CoreTextShaders.metal in Sources */,
 				888A35D1348A7A3CAE935561 /* DecoderFuzzTests.swift in Sources */,
 				A6327C6FAB3DCFD57327FBF4 /* DecoderRobustnessTests.swift in Sources */,
+				2388D1CC8878556958DA4A0D /* EditorGeometry+App.swift in Sources */,
 				BCCC8F959EDD3B7C8525BA61 /* EditorNSView.swift in Sources */,
 				9D1D5E11F9839F86F7A7BA70 /* EditorScrollTrack.swift in Sources */,
 				B308ADA08963E550E47FCDED /* EditorScrollTrackTests.swift in Sources */,

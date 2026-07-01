@@ -30,7 +30,24 @@ struct MingaApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView(appState: appDelegate.appState)
+            ContentView(
+                gui: appDelegate.appState.gui,
+                encoder: appDelegate.appState.encoder,
+                editorGeometry: { [appState = appDelegate.appState] in
+                    EditorGeometry(editorNSView: appState.editorNSView)
+                },
+                chrome: WindowChrome(appState: appDelegate.appState),
+                onAgentChatVisibleChange: { [appState = appDelegate.appState] visible in
+                    appState.editorNSView?.setAgentChatVisible(visible)
+                },
+                makeEditorSurface: { [appState = appDelegate.appState] in
+                    if let nsView = appState.editorNSView {
+                        EditorView(editorNSView: nsView)
+                    } else {
+                        Color(red: 0.12, green: 0.12, blue: 0.14)
+                    }
+                }
+            )
                 .frame(minWidth: 160, minHeight: 80)
                 // Disable SwiftUI's focus system so it doesn't steal
                 // first responder from the EditorNSView.

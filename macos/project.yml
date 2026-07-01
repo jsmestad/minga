@@ -62,6 +62,8 @@ targets:
         type: file
       - path: Sources/Views/Shared/EditTimelineView.swift
         type: file
+      - path: Sources/Views/Shared/EditorGeometry.swift
+        type: file
       - path: Sources/Views/Shared/GUIState.swift
         type: file
       - path: Sources/Views/Shared/SparklineView.swift
@@ -69,6 +71,8 @@ targets:
       - path: Sources/Views/Shared/TextHighlighting.swift
         type: file
       - path: Sources/Views/Shared/ThemeColors.swift
+        type: file
+      - path: Sources/ContentView.swift
         type: file
       - path: Sources/PreviewFixtures.swift
         type: file
@@ -115,6 +119,8 @@ targets:
           - "Views/Editor/InlineEditField.swift"
           - "Views/Editor/BlinkingCursor.swift"
           - "PreviewFixtures.swift"
+          - "ContentView.swift"
+          - "Views/Shared/EditorGeometry.swift"
           - "Views/Agent/**"
           - "Views/EditorChrome/**"
           - "Views/Extensions/**"
@@ -163,6 +169,10 @@ targets:
         script: |
           cd "${SRCROOT}/.."
           if ! command -v mix >/dev/null 2>&1; then
+            if [ -f macos/.generated/protocol/ProtocolOpcodes.generated.swift ]; then
+              echo "warning: mix not found; reusing existing generated protocol artifacts (e.g. Xcode Preview build sandbox)"
+              exit 0
+            fi
             echo "error: mix is required to generate protocol artifacts. Install Elixir, then run: mix protocol.gen"
             exit 1
           fi
@@ -220,6 +230,8 @@ targets:
           - "Views/Editor/InlineEditField.swift"
           - "Views/Editor/BlinkingCursor.swift"
           - "PreviewFixtures.swift"
+          - "ContentView.swift"
+          - "Views/Shared/EditorGeometry.swift"
           - "Views/Agent/**"
           - "Views/EditorChrome/**"
           - "Views/Extensions/**"
@@ -257,6 +269,10 @@ targets:
         script: |
           cd "${SRCROOT}/.."
           if ! command -v mix >/dev/null 2>&1; then
+            if [ -f macos/.generated/protocol/ProtocolOpcodes.generated.swift ]; then
+              echo "warning: mix not found; reusing existing generated protocol artifacts (e.g. Xcode Preview build sandbox)"
+              exit 0
+            fi
             echo "error: mix is required to generate protocol artifacts. Install Elixir, then run: mix protocol.gen"
             exit 1
           fi
@@ -286,6 +302,8 @@ targets:
           - "Views/Editor/InlineEditField.swift"
           - "Views/Editor/BlinkingCursor.swift"
           - "PreviewFixtures.swift"
+          - "ContentView.swift"
+          - "Views/Shared/EditorGeometry.swift"
           - "Views/Agent/**"
           - "Views/EditorChrome/**"
           - "Views/Extensions/**"
@@ -324,6 +342,10 @@ targets:
         script: |
           cd "${SRCROOT}/.."
           if ! command -v mix >/dev/null 2>&1; then
+            if [ -f macos/.generated/protocol/ProtocolOpcodes.generated.swift ]; then
+              echo "warning: mix not found; reusing existing generated protocol artifacts (e.g. Xcode Preview build sandbox)"
+              exit 0
+            fi
             echo "error: mix is required to generate protocol artifacts. Install Elixir, then run: mix protocol.gen"
             exit 1
           fi
