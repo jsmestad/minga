@@ -412,13 +412,7 @@ defmodule MingaEditor do
     StartupTimer.mark(:first_render_dispatched)
     StartupTimer.report()
 
-    # Setup highlighting after first paint with correct viewport. Idempotent:
-    # re-requests highlight for the current buffer, safe on renderer reconnect.
     new_state = setup_highlight_or_defer(new_state)
-
-    # Everything above is idempotent rehydration and re-runs on every `ready`
-    # (including a renderer reconnect / dev hot-reload). The one-time,
-    # non-idempotent startup work runs exactly once, guarded internally.
     new_state = Startup.ensure_session_started(new_state)
 
     {:noreply, new_state}

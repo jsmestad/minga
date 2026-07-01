@@ -35,24 +35,7 @@ defmodule MingaEditor.Startup do
   alias MingaEditor.WindowTree
   alias Minga.Config.Options
 
-  @doc """
-  Runs the one-time, non-idempotent startup work triggered by the first
-  `ready` handshake, exactly once per session.
-
-  The `ready` handler resets frontend render state and dispatches a full
-  keyframe on *every* ready, so it is safe to re-run when a renderer
-  reconnects (dev hot-reload, late-subscriber replay). This function isolates
-  the parts that are NOT safe to re-run:
-
-    * swap recovery — re-sends `:check_swap_recovery`, would re-prompt/re-recover
-    * the 30s session-save timer — `start_timer/1` leaks a new timer ref per call
-    * agent session start — already self-guarded via `AgentAccess.session/1`, so
-      re-running is a no-op on its own; kept here for locality with the other two
-
-  The first two have no internal guard, so the `state.session_started?` gate is
-  load-bearing for them. Subsequent readys skip the whole block and take the pure
-  rehydration path. Returns the state unchanged once already started.
-  """
+  @doc "Runs the one-time startup work (swap recovery, agent session, save timer) exactly once per session."
   @spec ensure_session_started(EditorState.t()) :: EditorState.t()
   def ensure_session_started(%EditorState{session_started?: true} = state), do: state
 
@@ -67,8 +50,6 @@ defmodule MingaEditor.Startup do
     %{state | session_started?: true}
   end
 
-  # Starts the periodic session save timer (30s). Skipped in headless so tests
-  # don't receive non-deterministic timer messages.
   @spec maybe_start_save_timer(EditorState.t()) :: EditorState.t()
   defp maybe_start_save_timer(%EditorState{backend: :headless} = state), do: state
 

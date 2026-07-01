@@ -158,11 +158,9 @@ defmodule MingaEditor.State do
             # (see MingaEditor.refresh_gui_config_state/1), so the render pipeline
             # reads it for free each frame. nil until the first GUI frontend attaches.
             gui_config_state: nil,
-            # Set true once the one-time, non-idempotent startup work has run on
-            # the first `ready` handshake (swap recovery, agent session, save
-            # timer). Guards `Startup.ensure_session_started/1` so a renderer
-            # reconnect (e.g. dev hot-reload) re-sends `ready` and gets a full
-            # rehydration keyframe WITHOUT re-triggering that once-only work.
+            # Latched once the first `ready` runs the one-time startup work, so a
+            # renderer reconnect (dev hot-reload) re-runs the idempotent ready path
+            # without re-triggering it. See `Startup.ensure_session_started/1`.
             session_started?: false
 
   @type backend :: :tui | :gui | :native_gui | :headless

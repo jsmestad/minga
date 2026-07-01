@@ -28,15 +28,13 @@ func TestFindProjectRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// t.TempDir may live under a symlinked path (e.g. /var -> /private/var on
-	// macOS); compare resolved paths so the symlink doesn't fail the assertion.
 	if resolve(t, got) != resolve(t, root) {
 		t.Fatalf("findProjectRoot = %q, want %q", got, root)
 	}
 }
 
 func TestFindProjectRoot_NoMarker(t *testing.T) {
-	dir := t.TempDir() // a temp dir with no mix.exs above it (up to the fs root)
+	dir := t.TempDir()
 	if _, err := findProjectRoot(dir); err == nil {
 		t.Fatal("expected an error when no mix.exs exists in any parent, got nil")
 	}
@@ -76,7 +74,7 @@ func TestMtimeChanged(t *testing.T) {
 	}
 	s := &supervisor{logger: discardLogger(), rendererPath: bin}
 
-	var last int64 // zero baseline
+	var last int64
 	if !s.mtimeChanged(&last) {
 		t.Fatal("first check against a zero baseline should report changed")
 	}
@@ -84,7 +82,6 @@ func TestMtimeChanged(t *testing.T) {
 		t.Fatal("no rebuild between checks should report unchanged")
 	}
 
-	// Simulate a rebuild by bumping the binary's mtime forward.
 	future := time.Now().Add(time.Second)
 	if err := os.Chtimes(bin, future, future); err != nil {
 		t.Fatal(err)
@@ -94,11 +91,9 @@ func TestMtimeChanged(t *testing.T) {
 	}
 }
 
-// TestForwardBeamToRenderer_DeliversWhenAttached feeds framed packets through the
-// forwarder while a renderer is attached and asserts every frame arrives intact.
 func TestForwardBeamToRenderer_DeliversWhenAttached(t *testing.T) {
 	s := &supervisor{logger: discardLogger()}
-	var out bytes.Buffer // sole writer is the forward goroutine; read after it exits
+	var out bytes.Buffer
 	s.setRenderer(&out)
 
 	pr, pw := io.Pipe()
@@ -114,7 +109,7 @@ func TestForwardBeamToRenderer_DeliversWhenAttached(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	_ = pw.Close() // EOF -> forwarder drains everything read so far, then returns
+	_ = pw.Close()
 	<-done
 
 	got := readAllPackets(t, out.Bytes())
@@ -128,11 +123,9 @@ func TestForwardBeamToRenderer_DeliversWhenAttached(t *testing.T) {
 	}
 }
 
-// TestForwardBeamToRenderer_DropsWhenDetached asserts that frames arriving while
-// no renderer is attached (mid-swap) are dropped without panicking or blocking.
 func TestForwardBeamToRenderer_DropsWhenDetached(t *testing.T) {
 	s := &supervisor{logger: discardLogger()}
-	s.setRenderer(nil) // detached
+	s.setRenderer(nil)
 
 	pr, pw := io.Pipe()
 	done := make(chan struct{})
@@ -153,7 +146,6 @@ func TestForwardBeamToRenderer_DropsWhenDetached(t *testing.T) {
 	}
 }
 
-// readAllPackets splits a byte stream of {:packet,4} frames back into payloads.
 func readAllPackets(t *testing.T, data []byte) [][]byte {
 	t.Helper()
 	var out [][]byte
