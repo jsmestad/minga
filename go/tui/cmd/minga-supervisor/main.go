@@ -178,8 +178,10 @@ type supervisor struct {
 	// rendIn is the current renderer's stdin, or nil while swapping. It is
 	// io.Writer (not io.WriteCloser) so callers can only forward through it; the
 	// renderer's lifecycle (including Close) is owned solely by spawnRenderer /
-	// stopRenderer via the local WriteCloser they hold.
-	mu     sync.RWMutex
+	// stopRenderer via the local WriteCloser they hold. A plain Mutex suffices:
+	// the sole reader is forwardBeamToRenderer, so there's no read-parallelism to
+	// gain from an RWMutex.
+	mu     sync.Mutex
 	rendIn io.Writer
 }
 
@@ -190,8 +192,8 @@ func (s *supervisor) setRenderer(w io.Writer) {
 }
 
 func (s *supervisor) currentRenderer() io.Writer {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.rendIn
 }
 
@@ -228,28 +230,13 @@ func (s *supervisor) forwardBeamToRenderer(beamOut io.Reader) {
 	}
 }
 
-// startupGrace bounds how quickly a renderer must exit for a clean (status 0)
-// exit to be read as a startup failure on a fresh build rather than a user quit.
-// A user opening then quitting within this window is rare and only costs a "still
-// alive, waiting for rebuild" wait; misreading a crash as a quit would wrongly
-// tear the whole session down, so we bias toward "crash" when it exits instantly.
-const startupGrace = 2 * time.Second
-
-// rendererExit carries the outcome of a renderer process for crash-vs-quit
-// classification. err is nil on a status-0 exit; state may be nil if Wait failed.
-type rendererExit struct {
-	err   error
-	state *os.ProcessState
-}
-
 // rendererHandle bundles a running renderer's process, its stdin (the local
-// WriteCloser that owns Close), a buffered channel delivering its exit exactly
-// once, and when it started (for the startupGrace heuristic).
+// WriteCloser that owns Close), and a buffered channel delivering its exit error
+// exactly once (nil on a clean status-0 exit).
 type rendererHandle struct {
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
-	done    <-chan rendererExit
-	started time.Time
+	cmd   *exec.Cmd
+	stdin io.WriteCloser
+	done  <-chan error
 }
 
 // outcome is why a running renderer stopped, which decides what the manager does
@@ -315,20 +302,23 @@ func (s *supervisor) superviseRenderer(h *rendererHandle, shutdown <-chan struct
 			s.stopRenderer(h)
 			return outcomeShutdown
 
-		case exit := <-h.done:
+		case err := <-h.done:
 			s.setRenderer(nil)
-			if isCleanQuit(exit, time.Since(h.started)) {
+			// A renderer only exits status 0 when its stdin hits EOF, which only
+			// stopRenderer causes (and that path drains done itself, never reaching
+			// here). So a *spontaneous* exit through this case is a crash: the
+			// renderer os.Exit(1)s on any run error, and a genuine user quit unwinds
+			// through BEAM shutdown -> outcomeShutdown, not this branch. Classify on
+			// exit status alone; nil still means "clean, treat as quit" defensively.
+			if err == nil {
 				s.logger.Printf("renderer exited cleanly (user quit)")
 				return outcomeUserQuit
 			}
-			s.logger.Printf("renderer exited unexpectedly (%s) after %s; keeping BEAM alive, waiting for a rebuild",
-				exitDescription(exit), time.Since(h.started).Round(time.Millisecond))
+			s.logger.Printf("renderer exited unexpectedly (%v); keeping BEAM alive, waiting for a rebuild", err)
 			return outcomeCrash
 
 		case <-ticker.C:
-			m := s.rendererMtime()
-			if m != *lastMtime && m != 0 {
-				*lastMtime = m
+			if s.mtimeChanged(lastMtime) {
 				s.logger.Printf("renderer binary changed; reloading")
 				s.stopRenderer(h)
 				return outcomeReload
@@ -345,9 +335,7 @@ func (s *supervisor) awaitRebuild(shutdown <-chan struct{}, ticker *time.Ticker,
 		case <-shutdown:
 			return false
 		case <-ticker.C:
-			m := s.rendererMtime()
-			if m != *lastMtime && m != 0 {
-				*lastMtime = m
+			if s.mtimeChanged(lastMtime) {
 				s.logger.Printf("renderer rebuilt; respawning")
 				return true
 			}
@@ -355,19 +343,16 @@ func (s *supervisor) awaitRebuild(shutdown <-chan struct{}, ticker *time.Ticker,
 	}
 }
 
-// isCleanQuit reports whether a renderer exit looks like a deliberate user quit
-// (status 0 after running past startupGrace) rather than a crash on a fresh
-// build. A non-zero/signal exit, or a near-instant clean exit, is treated as a
-// crash so it doesn't tear down the session.
-func isCleanQuit(exit rendererExit, uptime time.Duration) bool {
-	return exit.err == nil && uptime >= startupGrace
-}
-
-func exitDescription(exit rendererExit) string {
-	if exit.err != nil {
-		return exit.err.Error()
+// mtimeChanged reports whether the renderer binary's mtime differs from *last,
+// updating *last when it does. A zero mtime (mid-rebuild, binary briefly absent)
+// is ignored so a transient stat failure doesn't count as a change.
+func (s *supervisor) mtimeChanged(last *int64) bool {
+	m := s.rendererMtime()
+	if m != *last && m != 0 {
+		*last = m
+		return true
 	}
-	return "exit status 0"
+	return false
 }
 
 // spawnRenderer starts a renderer process wired to BEAM through the supervisor:
@@ -388,7 +373,6 @@ func (s *supervisor) spawnRenderer() (*rendererHandle, error) {
 	if err != nil {
 		return nil, err
 	}
-	started := time.Now()
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
@@ -413,13 +397,12 @@ func (s *supervisor) spawnRenderer() (*rendererHandle, error) {
 
 	// Buffered so the Wait goroutine can deliver the exit even if no one is
 	// reading yet (e.g. stopRenderer's timeout path), without leaking.
-	done := make(chan rendererExit, 1)
+	done := make(chan error, 1)
 	go func() {
-		err := cmd.Wait()
-		done <- rendererExit{err: err, state: cmd.ProcessState}
+		done <- cmd.Wait()
 	}()
 
-	return &rendererHandle{cmd: cmd, stdin: stdin, done: done, started: started}, nil
+	return &rendererHandle{cmd: cmd, stdin: stdin, done: done}, nil
 }
 
 // stopRenderer gracefully stops the current renderer. Closing its stdin makes

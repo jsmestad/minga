@@ -14,28 +14,6 @@ import (
 
 func discardLogger() *log.Logger { return log.New(io.Discard, "", 0) }
 
-func TestIsCleanQuit(t *testing.T) {
-	tests := []struct {
-		name   string
-		exit   rendererExit
-		uptime time.Duration
-		want   bool
-	}{
-		{"status 0 after running: user quit", rendererExit{err: nil}, startupGrace + time.Second, true},
-		{"status 0 but near-instant: startup crash", rendererExit{err: nil}, 10 * time.Millisecond, false},
-		{"non-zero exit: crash", rendererExit{err: io.ErrUnexpectedEOF}, startupGrace + time.Second, false},
-		{"non-zero and instant: crash", rendererExit{err: io.ErrUnexpectedEOF}, time.Millisecond, false},
-		{"exactly at grace: user quit", rendererExit{err: nil}, startupGrace, true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := isCleanQuit(tt.exit, tt.uptime); got != tt.want {
-				t.Fatalf("isCleanQuit(%v, %v) = %v, want %v", tt.exit, tt.uptime, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestFindProjectRoot(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "mix.exs"), []byte("# marker"), 0o644); err != nil {
