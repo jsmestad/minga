@@ -11,6 +11,8 @@ defmodule MingaEditor.Startup do
   @dialyzer {:no_opaque, build_initial_state: 1}
 
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.AgentLifecycle
+  alias MingaEditor.Handlers.SessionRestore
   alias Minga.Buffer
   alias Minga.Log
   alias Minga.Config
@@ -32,6 +34,42 @@ defmodule MingaEditor.Startup do
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
   alias Minga.Config.Options
+
+  @doc """
+  Runs the one-time, non-idempotent startup work triggered by the first
+  `ready` handshake, exactly once per session.
+
+  The `ready` handler resets frontend render state and dispatches a full
+  keyframe on *every* ready, so it is safe to re-run when a renderer
+  reconnects (dev hot-reload, late-subscriber replay). This function isolates
+  the parts that are NOT safe to re-run:
+
+    * swap recovery — re-sends `:check_swap_recovery`, would re-prompt/re-recover
+    * agent session start — should not restart an already-running session
+    * the 30s session-save timer — `start_timer/1` leaks a new timer ref per call
+
+  Guarded by `state.session_started?` so subsequent readys skip it and take the
+  pure rehydration path. Returns the state unchanged once already started.
+  """
+  @spec ensure_session_started(EditorState.t()) :: EditorState.t()
+  def ensure_session_started(%EditorState{session_started?: true} = state), do: state
+
+  def ensure_session_started(%EditorState{} = state) do
+    SessionRestore.maybe_check_swap_recovery(state)
+
+    state = AgentLifecycle.maybe_start_session(state)
+
+    # Start the periodic session save timer (30 seconds); skip in headless to
+    # avoid non-deterministic timer messages during tests.
+    state =
+      if state.backend != :headless do
+        %{state | session: EditorSessionState.start_timer(state.session)}
+      else
+        state
+      end
+
+    %{state | session_started?: true}
+  end
 
   @doc """
   Builds the complete initial EditorState from startup opts.

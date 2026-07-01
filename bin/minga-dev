@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# Launch the Minga TUI with Go-renderer hot-reload.
+#
+# Runs the editor through the dev supervisor (go/tui/cmd/minga-supervisor): BEAM
+# boots in connected mode and stays alive while you edit the Go renderer. A
+# background watcher rebuilds the renderer binary on any go/tui source change,
+# the supervisor notices the new binary and respawns the renderer, and BEAM
+# repaints the current editor state via a keyframe. You get a brief alt-screen
+# blip on each reload (the coordinated-swap tradeoff) but never lose your session.
+#
+# Usage:
+#   bin/minga-dev [filename]
+#
+# Logs (BEAM stderr, renderer stderr, supervisor diagnostics) go to
+#   $XDG_DATA_HOME/minga/minga-dev.log   (default ~/.local/share/minga/)
+# so they never corrupt the renderer's terminal. Tail that file in another pane
+# to watch reloads and build errors.
+
+set -euo pipefail
+
+PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$PROJECT_DIR"
+
+LOG_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/minga"
+mkdir -p "$LOG_DIR"
+LOG_FILE="$LOG_DIR/minga-dev.log"
+
+RENDERER_SRC="./cmd/minga-renderer-go"
+RENDERER_BIN="bin/minga-renderer-go"
+SUPERVISOR_SRC="./cmd/minga-supervisor"
+SUPERVISOR_BIN="bin/minga-supervisor"
+
+log() { printf '[minga-dev] %s\n' "$*" >&2; }
+
+build_renderer() {
+  # Build to a temp path then atomically rename so the supervisor never stats a
+  # half-written binary. A single mtime bump is what triggers the reload.
+  local tmp="${RENDERER_BIN}.tmp.$$"
+  if (cd go/tui && go build -o "$tmp" "$RENDERER_SRC") 2>>"$LOG_FILE"; then
+    mv "go/tui/$tmp" "go/tui/$RENDERER_BIN"
+    return 0
+  fi
+  rm -f "go/tui/$tmp" 2>/dev/null || true
+  log "renderer build FAILED (see $LOG_FILE); keeping previous binary"
+  return 1
+}
+
+# Compute a fingerprint of all renderer Go sources (path + mtime). Used by the
+# polling watcher to detect edits without depending on fswatch/wgo/entr.
+# Test files are excluded so editing them doesn't trigger a pointless reload.
+# Note: `stat -f` is BSD/macOS syntax (this is a macOS dev helper).
+renderer_fingerprint() {
+  find go/tui/cmd/minga-renderer-go go/tui/internal -name '*.go' -type f \
+    ! -name '*_test.go' -exec stat -f '%N:%m' {} + 2>/dev/null | sort
+}
+
+watch_and_rebuild() {
+  local last current
+  last="$(renderer_fingerprint)"
+  while true; do
+    sleep 0.5
+    current="$(renderer_fingerprint)"
+    if [ "$current" != "$last" ]; then
+      last="$current"
+      log "source change detected; rebuilding renderer"
+      build_renderer || true
+    fi
+  done
+}
+
+log "building renderer + supervisor..."
+build_renderer
+(cd go/tui && go build -o "$SUPERVISOR_BIN" "$SUPERVISOR_SRC") 2>>"$LOG_FILE"
+
+# Pre-compile the BEAM so `mix minga` (launched by the supervisor in connected
+# mode) does not emit compile output onto its protocol stdout. The Go renderer
+# build is owned by the watcher, so skip it here.
+log "compiling BEAM (this may take a moment on a cold build)..."
+MINGA_SKIP_GO_TUI_BUILD=1 mix compile >>"$LOG_FILE" 2>&1
+
+# Start the background rebuild watcher and make sure it dies with us.
+watch_and_rebuild &
+WATCH_PID=$!
+cleanup() {
+  kill "$WATCH_PID" 2>/dev/null || true
+  wait "$WATCH_PID" 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
+
+log "starting supervisor (edit go/tui sources to hot-reload; Ctrl-C or :q to quit)"
+exec "go/tui/$SUPERVISOR_BIN" \
+  -renderer "$PROJECT_DIR/go/tui/$RENDERER_BIN" \
+  -log "$LOG_FILE" \
+  "$@"

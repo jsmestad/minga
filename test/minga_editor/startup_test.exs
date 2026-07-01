@@ -17,6 +17,7 @@ defmodule MingaEditor.StartupTest do
   alias MingaEditor.Shell.Registry, as: ShellRegistry
   alias MingaEditor.Startup
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Session
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.Workspace.Persistence
@@ -770,6 +771,38 @@ defmodule MingaEditor.StartupTest do
       options_server: server || Options.default_server(),
       capabilities: %Capabilities{frontend_type: frontend_type}
     }
+  end
+
+  describe "ensure_session_started/1" do
+    test "runs once: flips session_started? on the first call" do
+      state = %EditorState{
+        port_manager: self(),
+        workspace: nil,
+        backend: :headless,
+        session_started?: false
+      }
+
+      result = Startup.ensure_session_started(state)
+
+      assert result.session_started? == true
+    end
+
+    test "is a no-op on an already-started state (renderer reconnect / hot-reload)" do
+      # A reconnecting renderer re-sends `ready`, which must NOT re-run the
+      # once-only startup work. The guard returns the state untouched, so no
+      # duplicate save timer is created and swap recovery is not re-triggered.
+      timer_ref = make_ref()
+
+      state = %EditorState{
+        port_manager: self(),
+        workspace: nil,
+        session_started?: true,
+        session: %Session{timer: timer_ref}
+      }
+
+      assert Startup.ensure_session_started(state) == state
+      assert Startup.ensure_session_started(state).session.timer == timer_ref
+    end
   end
 
   defp window_state(scope, window) do
