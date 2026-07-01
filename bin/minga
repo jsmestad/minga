@@ -27,11 +27,10 @@ if [ "${MINGA_SKIP_NATIVE_LAUNCH_BUILD:-}" != "1" ]; then
   fi
 fi
 
-# Editor-tuned VM flags (see rel/vm.args.eex for rationale).
+# Editor-tuned VM flags, shared with bin/minga-dev (see rel/vm.args.eex).
 # ERL_FLAGS set by the caller are appended, so they can override.
-MINGA_ERL_FLAGS="+A 4 +sbwt none +sbwtdcpu none +sbwtdio none +swt very_low +swtdcpu very_low +swtdio very_low +MBas aobf +Mea min +MBacul 0 +hmbs 32768"
-
-export ERL_FLAGS="${MINGA_ERL_FLAGS} ${ERL_FLAGS:-}"
+# shellcheck source=bin/lib/erl-flags.sh
+source "$PROJECT_DIR/bin/lib/erl-flags.sh"
 
 should_redirect_stdio() {
   if [ "${MINGA_DISABLE_LAUNCH_STDIO_REDIRECT:-}" = "1" ]; then

@@ -21,6 +21,12 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_DIR"
 
+# Boot BEAM with the same editor-tuned VM flags as bin/minga. The supervisor
+# launches `mix minga` inheriting our environment, so exporting ERL_FLAGS here is
+# enough; the connected-mode BEAM picks up the tuned scheduler/allocator flags.
+# shellcheck source=bin/lib/erl-flags.sh
+source "$PROJECT_DIR/bin/lib/erl-flags.sh"
+
 LOG_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/minga"
 mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/minga-dev.log"
