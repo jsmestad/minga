@@ -63,6 +63,14 @@ public enum PreviewFixtures {
     /// Preview-only theme fixture. Runtime theme selection comes from the BEAM via guiTheme; previews apply explicit slots because ThemeColors itself starts with neutral bootstrap colors.
     public static func theme() -> ThemeColors {
         let theme = ThemeColors()
+        applyPreviewTheme(to: theme)
+        return theme
+    }
+
+    /// Applies the Doom One preview palette to an existing `ThemeColors`.
+    /// Use this to theme a `GUIState`'s owned `themeColors` (which views read
+    /// via `\.themeColors`) rather than a standalone instance.
+    public static func applyPreviewTheme(to theme: ThemeColors) {
         theme.applySlots([
             (GUI_COLOR_EDITOR_BG, 0x28, 0x2C, 0x34),
             (GUI_COLOR_EDITOR_FG, 0xBB, 0xC2, 0xCF),
@@ -80,7 +88,6 @@ public enum PreviewFixtures {
             (GUI_COLOR_ACCENT, 0x51, 0xAF, 0xEF),
             (GUI_COLOR_SELECTION_BG, 0x26, 0x4F, 0x78),
         ])
-        return theme
     }
 
     public static func encoder() -> InputEncoder {

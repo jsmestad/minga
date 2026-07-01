@@ -217,7 +217,7 @@ struct ExtensionOverlayViewTests {
 struct OverlayContentOriginTests {
     @Test("origin offsets past the gutter text column")
     func gutterOffset() {
-        let origin = ContentView.overlayContentOrigin(
+        let origin = ContentView<Color>.overlayContentOrigin(
             textCol: 5, textRow: 0, scrollLeft: 0,
             cellWidth: 8, cellHeight: 16, gutterPad: 14
         )
@@ -228,7 +228,7 @@ struct OverlayContentOriginTests {
 
     @Test("split pane uses the pane's text rect row/col")
     func splitPaneOffset() {
-        let origin = ContentView.overlayContentOrigin(
+        let origin = ContentView<Color>.overlayContentOrigin(
             textCol: 40, textRow: 20, scrollLeft: 0,
             cellWidth: 8, cellHeight: 16, gutterPad: 0
         )
@@ -238,7 +238,7 @@ struct OverlayContentOriginTests {
 
     @Test("horizontal scroll shifts the origin left")
     func horizontalScroll() {
-        let origin = ContentView.overlayContentOrigin(
+        let origin = ContentView<Color>.overlayContentOrigin(
             textCol: 5, textRow: 0, scrollLeft: 3,
             cellWidth: 8, cellHeight: 16, gutterPad: 14
         )
@@ -253,7 +253,7 @@ struct OverlayContentOriginTests {
 struct PanelCrossSizeTests {
     @Test("percent resolves against the basis")
     func percentOfBasis() {
-        let size = ContentView.panelCrossSize(
+        let size = ContentView<Color>.panelCrossSize(
             sizeType: 0, sizeValue: 30, cellExtent: 8, basis: 1000, minimum: 160
         )
         #expect(size == 300)
@@ -261,7 +261,7 @@ struct PanelCrossSizeTests {
 
     @Test("lines resolves against the cell extent")
     func linesByCellExtent() {
-        let size = ContentView.panelCrossSize(
+        let size = ContentView<Color>.panelCrossSize(
             sizeType: 1, sizeValue: 20, cellExtent: 8, basis: 1000, minimum: 160
         )
         #expect(size == 160)
@@ -269,7 +269,7 @@ struct PanelCrossSizeTests {
 
     @Test("tiny requests clamp up to the minimum")
     func clampsToMinimum() {
-        let size = ContentView.panelCrossSize(
+        let size = ContentView<Color>.panelCrossSize(
             sizeType: 0, sizeValue: 1, cellExtent: 8, basis: 1000, minimum: 160
         )
         #expect(size == 160)
@@ -277,7 +277,7 @@ struct PanelCrossSizeTests {
 
     @Test("oversized requests clamp to 80% of the basis")
     func clampsToBasisFraction() {
-        let size = ContentView.panelCrossSize(
+        let size = ContentView<Color>.panelCrossSize(
             sizeType: 0, sizeValue: 95, cellExtent: 8, basis: 1000, minimum: 160
         )
         #expect(size == 800)
