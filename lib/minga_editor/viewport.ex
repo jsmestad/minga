@@ -175,6 +175,25 @@ defmodule MingaEditor.Viewport do
     %{vp | visual_row_offset: min(vp.visual_row_offset, visual_row_count - 1)}
   end
 
+  @doc """
+  Clamps the logical `top` so the viewport never scrolls past end-of-file.
+
+  `scroll_to_cursor` applies `scroll_margin` without knowing the buffer length,
+  so at EOF it would push `top` down far enough to leave blank rows below the
+  last line (and start scrolling before the last line reaches the bottom). This
+  pins the last line to the bottom row instead. `total_lines` is the number of
+  scrollable (visible) lines. This is the non-wrap counterpart to the wrap
+  path's `clamp_visual_row_offset/3` EOF clamp.
+  """
+  @spec clamp_top_to_eof(t(), integer()) :: t()
+  def clamp_top_to_eof(%__MODULE__{} = vp, total_lines)
+      when is_integer(total_lines) and total_lines > 0 do
+    max_top = max(total_lines - content_rows(vp), 0)
+    %{vp | top: min(vp.top, max_top)}
+  end
+
+  def clamp_top_to_eof(%__MODULE__{} = vp, _total_lines), do: vp
+
   @doc "Scrolls down by one visual row when wrapping is active."
   @spec scroll_visual_row_down(t(), pos_integer(), non_neg_integer(), non_neg_integer()) :: t()
   def scroll_visual_row_down(%__MODULE__{} = vp, top_line_visual_rows, total_lines, _margin)

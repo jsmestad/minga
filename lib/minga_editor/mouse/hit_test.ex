@@ -185,9 +185,23 @@ defmodule MingaEditor.Mouse.HitTest do
     do: viewport.top
 
   def scroll_top(nil, content_height, content_width, cursor_line, buffer) do
-    viewport = Viewport.new(content_height, content_width, 0)
-    viewport = Viewport.scroll_to_cursor(viewport, {cursor_line, 0}, buffer)
-    viewport.top
+    viewport =
+      Viewport.new(content_height, content_width, 0)
+      |> Viewport.scroll_to_cursor({cursor_line, 0}, buffer)
+
+    # Clamp to EOF so a click near the last line doesn't resolve through an
+    # overscrolled top. Tolerate a dead buffer like the scroll_margin read above.
+    case safe_line_count(buffer) do
+      nil -> viewport.top
+      total_lines -> Viewport.clamp_top_to_eof(viewport, total_lines).top
+    end
+  end
+
+  @spec safe_line_count(pid()) :: pos_integer() | nil
+  defp safe_line_count(buffer) do
+    Buffer.line_count(buffer)
+  catch
+    :exit, _ -> nil
   end
 
   @spec buffer_gutter_width(pid() | nil, non_neg_integer()) :: non_neg_integer()
