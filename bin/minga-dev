@@ -41,7 +41,7 @@ build_renderer() {
     return 0
   fi
   rm -f "go/tui/$tmp" 2>/dev/null || true
-  log "renderer build FAILED (see $LOG_FILE); keeping previous binary"
+  log "renderer build FAILED (see $LOG_FILE)"
   return 1
 }
 
@@ -56,30 +56,48 @@ renderer_fingerprint() {
 
 watch_and_rebuild() {
   local last current
-  last="$(renderer_fingerprint)"
+  # `|| true` so a transient non-zero from the find/sort pipeline can't trip the
+  # inherited `set -e` and silently kill the watcher (hot-reload would just stop).
+  last="$(renderer_fingerprint || true)"
   while true; do
     sleep 0.5
-    current="$(renderer_fingerprint)"
+    current="$(renderer_fingerprint || true)"
     if [ "$current" != "$last" ]; then
       last="$current"
       log "source change detected; rebuilding renderer"
-      build_renderer || true
+      # On failure the running renderer keeps going untouched; the build error is
+      # in the log and the next successful rebuild triggers the reload.
+      build_renderer || log "keeping previous renderer running (see $LOG_FILE)"
     fi
   done
 }
 
+# Each startup step states what broke ON THE TERMINAL before aborting, rather
+# than exiting silently via `set -e` and leaving the reason only in a log file
+# the user isn't tailing yet.
 log "building renderer + supervisor..."
-build_renderer
-(cd go/tui && go build -o "$SUPERVISOR_BIN" "$SUPERVISOR_SRC") 2>>"$LOG_FILE"
+if ! build_renderer; then
+  log "initial renderer build failed; aborting"
+  exit 1
+fi
+if ! (cd go/tui && go build -o "$SUPERVISOR_BIN" "$SUPERVISOR_SRC") 2>>"$LOG_FILE"; then
+  log "supervisor build FAILED (see $LOG_FILE); aborting"
+  exit 1
+fi
 
 # Pre-compile the BEAM so `mix minga` (launched by the supervisor in connected
 # mode) does not emit compile output onto its protocol stdout. The Go renderer
 # build is owned by the watcher, so skip it here.
 log "compiling BEAM (this may take a moment on a cold build)..."
-MINGA_SKIP_GO_TUI_BUILD=1 mix compile >>"$LOG_FILE" 2>&1
+if ! MINGA_SKIP_GO_TUI_BUILD=1 mix compile >>"$LOG_FILE" 2>&1; then
+  log "BEAM compile FAILED (see $LOG_FILE); aborting"
+  exit 1
+fi
 
-# Start the background rebuild watcher and make sure it dies with us.
-watch_and_rebuild &
+# Start the background rebuild watcher. Redirect it to the log file: once the
+# supervisor starts, the renderer owns the terminal (alt-screen + raw mode), so
+# any watcher output on the tty would corrupt the display. Ensure it dies with us.
+watch_and_rebuild >>"$LOG_FILE" 2>&1 &
 WATCH_PID=$!
 cleanup() {
   kill "$WATCH_PID" 2>/dev/null || true
@@ -87,8 +105,11 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# Run (do NOT `exec`) so this shell survives to fire the EXIT trap when the
+# supervisor returns. `exec` would replace the shell and discard the trap,
+# orphaning the watcher to keep rebuilding forever after you quit with :q.
 log "starting supervisor (edit go/tui sources to hot-reload; Ctrl-C or :q to quit)"
-exec "go/tui/$SUPERVISOR_BIN" \
+"go/tui/$SUPERVISOR_BIN" \
   -renderer "$PROJECT_DIR/go/tui/$RENDERER_BIN" \
   -log "$LOG_FILE" \
   "$@"

@@ -774,35 +774,43 @@ defmodule MingaEditor.StartupTest do
   end
 
   describe "ensure_session_started/1" do
-    test "runs once: flips session_started? on the first call" do
-      state = %EditorState{
-        port_manager: self(),
-        workspace: nil,
-        backend: :headless,
-        session_started?: false
-      }
-
-      result = Startup.ensure_session_started(state)
+    test "runs the once-only startup work on the first call" do
+      result = Startup.ensure_session_started(unstarted_state())
 
       assert result.session_started? == true
+      # The save timer was actually started (not skipped), so we have something
+      # real whose non-recreation the reconnect test can assert on.
+      assert is_reference(result.session.timer)
     end
 
     test "is a no-op on an already-started state (renderer reconnect / hot-reload)" do
-      # A reconnecting renderer re-sends `ready`, which must NOT re-run the
-      # once-only startup work. The guard returns the state untouched, so no
-      # duplicate save timer is created and swap recovery is not re-triggered.
-      timer_ref = make_ref()
+      # A reconnecting renderer re-sends `ready`. The guard must prevent re-running
+      # the non-idempotent work: no second save timer, no re-triggered swap recovery.
+      first = Startup.ensure_session_started(unstarted_state())
+      timer = first.session.timer
+      assert is_reference(timer)
 
-      state = %EditorState{
-        port_manager: self(),
-        workspace: nil,
-        session_started?: true,
-        session: %Session{timer: timer_ref}
-      }
+      second = Startup.ensure_session_started(first)
 
-      assert Startup.ensure_session_started(state) == state
-      assert Startup.ensure_session_started(state).session.timer == timer_ref
+      # Identical state back, and crucially the SAME timer ref: if the guard were
+      # removed, start_timer/1 would run again and mint a new ref here.
+      assert second == first
+      assert second.session.timer == timer
     end
+  end
+
+  # A non-headless backend with a session_dir makes the once-only work observable:
+  # start_timer/1 actually creates a save-timer ref (it no-ops on :headless or a
+  # nil session_dir), so a re-run would produce a *different* ref. This is what
+  # makes the "no-op on reconnect" test fail if the guard clause is removed.
+  defp unstarted_state do
+    %EditorState{
+      port_manager: self(),
+      workspace: nil,
+      backend: :tui,
+      session_started?: false,
+      session: %Session{session_dir: System.tmp_dir!()}
+    }
   end
 
   defp window_state(scope, window) do

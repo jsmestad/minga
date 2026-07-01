@@ -45,11 +45,13 @@ defmodule MingaEditor.Startup do
   the parts that are NOT safe to re-run:
 
     * swap recovery — re-sends `:check_swap_recovery`, would re-prompt/re-recover
-    * agent session start — should not restart an already-running session
     * the 30s session-save timer — `start_timer/1` leaks a new timer ref per call
+    * agent session start — already self-guarded via `AgentAccess.session/1`, so
+      re-running is a no-op on its own; kept here for locality with the other two
 
-  Guarded by `state.session_started?` so subsequent readys skip it and take the
-  pure rehydration path. Returns the state unchanged once already started.
+  The first two have no internal guard, so the `state.session_started?` gate is
+  load-bearing for them. Subsequent readys skip the whole block and take the pure
+  rehydration path. Returns the state unchanged once already started.
   """
   @spec ensure_session_started(EditorState.t()) :: EditorState.t()
   def ensure_session_started(%EditorState{session_started?: true} = state), do: state
