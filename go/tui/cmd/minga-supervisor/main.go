@@ -49,6 +49,10 @@ const (
 	// closing its stdin before we SIGKILL it, so a wedged renderer can't stall a
 	// reload forever.
 	rendererStopTimeout = 3 * time.Second
+
+	// beamStopTimeout bounds how long we wait for BEAM to exit after closing its
+	// stdin before we kill it.
+	beamStopTimeout = 3 * time.Second
 )
 
 func main() {
@@ -137,6 +141,7 @@ func run() error {
 	// mostly a backstop) trigger a clean shutdown.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
 	go func() {
 		<-sigCh
 		logger.Printf("signal received; shutting down")
@@ -152,7 +157,7 @@ func run() error {
 	_ = beamIn.Close()
 	select {
 	case <-beamDone:
-	case <-time.After(rendererStopTimeout):
+	case <-time.After(beamStopTimeout):
 		logger.Printf("BEAM did not exit in time; killing")
 		_ = beamCmd.Process.Kill()
 	}
@@ -379,26 +384,26 @@ func (s *supervisor) spawnRenderer() (*rendererHandle, error) {
 
 	s.setRenderer(stdin)
 
-	// Forward renderer -> BEAM (input events and the ready handshake). writeBeam
-	// holds beamInMu so a quiescing previous renderer's goroutine can't interleave
-	// a half-written frame with this one's.
+	// One goroutine owns the renderer's stdout for its whole life: forward every
+	// frame (input events + the ready handshake) to BEAM, then Wait once the read
+	// loop drains. Draining before Wait honors the os/exec contract (Wait closes
+	// the pipe, so reads must finish first) and guarantees this goroutine is done
+	// before stopRenderer returns, so it can't overlap the next renderer's
+	// forwarder. writeBeam still holds beamInMu to keep a frame's header+payload
+	// atomic. done is buffered so the exit is delivered even if no one is reading
+	// yet (e.g. stopRenderer's timeout path).
+	done := make(chan error, 1)
 	go func() {
 		for {
 			pkt, err := protocol.ReadPacket(stdout)
 			if err != nil {
-				return
+				break
 			}
 			if err := s.writeBeam(pkt); err != nil {
 				s.logger.Printf("renderer->BEAM write error: %v", err)
-				return
+				break
 			}
 		}
-	}()
-
-	// Buffered so the Wait goroutine can deliver the exit even if no one is
-	// reading yet (e.g. stopRenderer's timeout path), without leaking.
-	done := make(chan error, 1)
-	go func() {
 		done <- cmd.Wait()
 	}()
 
@@ -446,6 +451,15 @@ func launchBeam(root string, args []string, stderr io.Writer, logger *log.Logger
 		"MINGA_SKIP_GO_TUI_BUILD=1",
 	)
 	cmd.Stderr = stderr
+
+	// Put BEAM in its own process group. During a renderer swap raw mode is
+	// briefly torn down, so a Ctrl-C on the terminal is delivered to the whole
+	// foreground group as SIGINT; isolating BEAM keeps that signal from reaching
+	// its break handler mid-session. The supervisor catches the signal itself and
+	// shuts BEAM down cleanly by closing its stdin (:eof). The renderer is
+	// deliberately NOT isolated — it needs the controlling terminal, and a
+	// background process group reading the tty would take SIGTTIN.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

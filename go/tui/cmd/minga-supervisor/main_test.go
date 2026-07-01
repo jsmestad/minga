@@ -69,6 +69,31 @@ func TestRendererMtime(t *testing.T) {
 	}
 }
 
+func TestMtimeChanged(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "renderer")
+	if err := os.WriteFile(bin, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := &supervisor{logger: discardLogger(), rendererPath: bin}
+
+	var last int64 // zero baseline
+	if !s.mtimeChanged(&last) {
+		t.Fatal("first check against a zero baseline should report changed")
+	}
+	if s.mtimeChanged(&last) {
+		t.Fatal("no rebuild between checks should report unchanged")
+	}
+
+	// Simulate a rebuild by bumping the binary's mtime forward.
+	future := time.Now().Add(time.Second)
+	if err := os.Chtimes(bin, future, future); err != nil {
+		t.Fatal(err)
+	}
+	if !s.mtimeChanged(&last) {
+		t.Fatal("after an mtime bump should report changed")
+	}
+}
+
 // TestForwardBeamToRenderer_DeliversWhenAttached feeds framed packets through the
 // forwarder while a renderer is attached and asserts every frame arrives intact.
 func TestForwardBeamToRenderer_DeliversWhenAttached(t *testing.T) {

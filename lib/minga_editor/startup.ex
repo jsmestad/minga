@@ -59,18 +59,21 @@ defmodule MingaEditor.Startup do
   def ensure_session_started(%EditorState{} = state) do
     SessionRestore.maybe_check_swap_recovery(state)
 
-    state = AgentLifecycle.maybe_start_session(state)
-
-    # Start the periodic session save timer (30 seconds); skip in headless to
-    # avoid non-deterministic timer messages during tests.
     state =
-      if state.backend != :headless do
-        %{state | session: EditorSessionState.start_timer(state.session)}
-      else
-        state
-      end
+      state
+      |> AgentLifecycle.maybe_start_session()
+      |> maybe_start_save_timer()
 
     %{state | session_started?: true}
+  end
+
+  # Starts the periodic session save timer (30s). Skipped in headless so tests
+  # don't receive non-deterministic timer messages.
+  @spec maybe_start_save_timer(EditorState.t()) :: EditorState.t()
+  defp maybe_start_save_timer(%EditorState{backend: :headless} = state), do: state
+
+  defp maybe_start_save_timer(%EditorState{} = state) do
+    %{state | session: EditorSessionState.start_timer(state.session)}
   end
 
   @doc """
