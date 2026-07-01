@@ -190,7 +190,8 @@ defmodule MingaEditor.Mouse.HitTest do
       |> Viewport.scroll_to_cursor({cursor_line, 0}, buffer)
 
     # Clamp to EOF so a click near the last line doesn't resolve through an
-    # overscrolled top. Tolerate a dead buffer like the scroll_margin read above.
+    # overscrolled top. Tolerate a dead buffer (same as Viewport.scroll_to_cursor/3's
+    # internal scroll_margin lookup).
     case safe_line_count(buffer) do
       nil -> viewport.top
       total_lines -> Viewport.clamp_top_to_eof(viewport, total_lines).top

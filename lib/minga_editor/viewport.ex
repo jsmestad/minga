@@ -183,16 +183,16 @@ defmodule MingaEditor.Viewport do
   last line (and start scrolling before the last line reaches the bottom). This
   pins the last line to the bottom row instead. `total_lines` is the number of
   scrollable (visible) lines. This is the non-wrap counterpart to the wrap
-  path's `clamp_visual_row_offset/3` EOF clamp.
+  path's `max_visual_row_offset/2` EOF clamp.
   """
-  @spec clamp_top_to_eof(t(), integer()) :: t()
+  @spec clamp_top_to_eof(t(), non_neg_integer()) :: t()
   def clamp_top_to_eof(%__MODULE__{} = vp, total_lines)
       when is_integer(total_lines) and total_lines > 0 do
     max_top = max(total_lines - content_rows(vp), 0)
     %{vp | top: min(vp.top, max_top)}
   end
 
-  def clamp_top_to_eof(%__MODULE__{} = vp, _total_lines), do: vp
+  def clamp_top_to_eof(%__MODULE__{} = vp, 0), do: vp
 
   @doc "Scrolls down by one visual row when wrapping is active."
   @spec scroll_visual_row_down(t(), pos_integer(), non_neg_integer(), non_neg_integer()) :: t()
