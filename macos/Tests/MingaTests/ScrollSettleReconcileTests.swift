@@ -192,33 +192,22 @@ struct ThumbDragPresentationTests {
         #expect(EditorNSView.thumbDragPresentationOffsetY(targetLine: 300, committedAnchorTop: 300, cellHeight: 18) == 0)
     }
 
-    @Test("a new target flushes at most one intent per frame")
-    func throttleFlushesOncePerTarget() {
-        // Pending differs from last-sent → flush this frame.
-        #expect(EditorNSView.shouldFlushThumbDragIntent(pending: 42, lastSent: nil))
-        #expect(EditorNSView.shouldFlushThumbDragIntent(pending: 42, lastSent: 10))
-        // Already sent this target → no redundant intent.
-        #expect(!EditorNSView.shouldFlushThumbDragIntent(pending: 42, lastSent: 42))
-        // Nothing pending → nothing to send.
-        #expect(!EditorNSView.shouldFlushThumbDragIntent(pending: nil, lastSent: 42))
-    }
-
     @Test("reconcile lands when the committed anchor reaches the target after release")
     func reconcileLandsOnExactMatch() {
         // Released while dragging down (positive residual): lands at offset 0.
-        #expect(EditorNSView.thumbDragReconciled(offsetLines: 0, releaseSign: 1))
+        #expect(ThumbDragSession.reconciled(offsetLines: 0, releaseSign: 1))
         // Still catching up: not yet reconciled.
-        #expect(!EditorNSView.thumbDragReconciled(offsetLines: 5, releaseSign: 1))
+        #expect(!ThumbDragSession.reconciled(offsetLines: 5, releaseSign: 1))
     }
 
     @Test("reconcile lands when the committed anchor overshoots the target (clamp-mismatch guard)")
     func reconcileLandsOnOvershoot() {
         // Released dragging down but the anchor committed past the target: sign flipped → land.
-        #expect(EditorNSView.thumbDragReconciled(offsetLines: -2, releaseSign: 1))
+        #expect(ThumbDragSession.reconciled(offsetLines: -2, releaseSign: 1))
         // Released dragging up but the anchor committed above the target: sign flipped → land.
-        #expect(EditorNSView.thumbDragReconciled(offsetLines: 3, releaseSign: -1))
+        #expect(ThumbDragSession.reconciled(offsetLines: 3, releaseSign: -1))
         // Released already on grid.
-        #expect(EditorNSView.thumbDragReconciled(offsetLines: 0, releaseSign: 0))
+        #expect(ThumbDragSession.reconciled(offsetLines: 0, releaseSign: 0))
     }
 
     // Baseline captured at release: seq 5, epoch 2, layout 1, dragging down toward line 100.
@@ -226,7 +215,7 @@ struct ThumbDragPresentationTests {
         nextScrollSeq: UInt32 = 5, nextContentEpoch: UInt32 = 2, nextLayoutGeneration: UInt32 = 1,
         previousAnchorTop: UInt32 = 40, nextAnchorTop: UInt32
     ) -> Bool {
-        EditorNSView.thumbDragAuthoritativeInterrupt(
+        ThumbDragSession.authoritativeInterrupt(
             baselineScrollSeq: 5, nextScrollSeq: nextScrollSeq,
             baselineContentEpoch: 2, nextContentEpoch: nextContentEpoch,
             baselineLayoutGeneration: 1, nextLayoutGeneration: nextLayoutGeneration,
@@ -266,6 +255,148 @@ struct ThumbDragPresentationTests {
         #expect(!interrupt(previousAnchorTop: 90, nextAnchorTop: 100))
         // Overshooting the target is a crossing, handled by the reconcile, not an interrupt.
         #expect(!interrupt(previousAnchorTop: 90, nextAnchorTop: 105))
+    }
+
+    @Test("progress tracks only steps toward the target (feeds the watchdog)")
+    func madeProgressDirectionality() {
+        #expect(ThumbDragSession.madeProgress(previousAnchorTop: 40, nextAnchorTop: 55, targetLine: 100))
+        #expect(!ThumbDragSession.madeProgress(previousAnchorTop: 40, nextAnchorTop: 30, targetLine: 100))
+        #expect(!ThumbDragSession.madeProgress(previousAnchorTop: 55, nextAnchorTop: 55, targetLine: 100))
+        #expect(!ThumbDragSession.madeProgress(previousAnchorTop: 100, nextAnchorTop: 100, targetLine: 100))
+    }
+
+    @Test("watchdog expiry is a simple deadline since last progress")
+    func watchdogDeadline() {
+        #expect(!ThumbDragSession.watchdogExpired(now: 1.0, lastProgress: 0.8, deadline: 0.5))
+        #expect(ThumbDragSession.watchdogExpired(now: 1.4, lastProgress: 0.8, deadline: 0.5))
+    }
+}
+
+@Suite("Thumb-drag session state machine (issue #2665)")
+struct ThumbDragSessionTests {
+
+    private func committed(
+        anchorTop: UInt32, scrollSeq: UInt32 = 5, contentEpoch: UInt32 = 2, layoutGeneration: UInt32 = 1
+    ) -> ThumbDragSession.Committed {
+        ThumbDragSession.Committed(anchorTop: anchorTop, scrollSeq: scrollSeq, contentEpoch: contentEpoch, layoutGeneration: layoutGeneration)
+    }
+
+    @Test("release-flush / throttle interaction: coalesce to one intent per frame, flush the final")
+    func throttleAndReleaseFlush() {
+        var s = ThumbDragSession(windowId: 1, targetLine: 10)
+        // First intent (the click) flushes immediately, un-throttled.
+        #expect(s.takeIntent() == 10)
+        #expect(s.takeIntent() == nil)
+        // Several drag updates within one frame coalesce to the last target.
+        s.updateTarget(11)
+        s.updateTarget(12)
+        s.updateTarget(13)
+        #expect(s.takeIntent() == 13)
+        #expect(s.takeIntent() == nil)
+        // A newer un-sent target at release is flushed so the final position is never dropped.
+        s.updateTarget(20)
+        #expect(s.release(committed: committed(anchorTop: 5), now: 0) == 20)
+        #expect(s.phase == .reconciling)
+        // No further intents once reconciling.
+        s.updateTarget(30)
+        #expect(s.takeIntent() == nil)
+    }
+
+    @Test("gate persists across normal frames while dragging (residency decided at start, not re-checked)")
+    func gatePersistsWhileDragging() {
+        var s = ThumbDragSession(windowId: 7, targetLine: 100)
+        _ = s.takeIntent()
+        // Many ordinary frames arrive; the session keeps its gate and tracks the offset.
+        for anchor: UInt32 in [40, 50, 60] {
+            let out = s.advance(committed: committed(anchorTop: anchor), now: 0, buttonHeld: true)
+            #expect(!out.finished)
+            #expect(out.offsetLines == Int64(100) - Int64(anchor))
+        }
+        #expect(s.phase == .dragging)
+    }
+
+    @Test("residency lost mid-drag (presentation nil) finishes instead of leaking the gate")
+    func residencyLostMidDragFinishes() {
+        var s = ThumbDragSession(windowId: 1, targetLine: 100)
+        _ = s.takeIntent()
+        let out = s.advance(committed: nil, now: 0, buttonHeld: true)
+        #expect(out.finished)
+        #expect(out.offsetLines == 0)
+    }
+
+    @Test("a BEAM jump landing while dragging is suppressed (live drag keeps presenting)")
+    func liveDragSuppressesAuthoritativeJump() {
+        var s = ThumbDragSession(windowId: 1, targetLine: 100)
+        _ = s.takeIntent()
+        // A seq bump / backward anchor jump mid-hold would interrupt a reconcile, but during the
+        // live drag the offset keeps tracking (interrupt only runs post-release).
+        let out = s.advance(committed: committed(anchorTop: 20, scrollSeq: 99), now: 0, buttonHeld: true)
+        #expect(!out.finished)
+        #expect(out.offsetLines == 80)
+        #expect(s.phase == .dragging)
+    }
+
+    @Test("wheel ownership: the drag owns scroll input only while the button is held")
+    func ownsScrollInputWhileDragging() {
+        var s = ThumbDragSession(windowId: 1, targetLine: 100)
+        #expect(s.ownsScrollInput)
+        _ = s.release(committed: committed(anchorTop: 40), now: 0)
+        #expect(!s.ownsScrollInput)
+    }
+
+    @Test("happy-path release reconcile drains to grid without a premature finish")
+    func happyPathReleaseReconcile() {
+        var s = ThumbDragSession(windowId: 1, targetLine: 100)
+        #expect(s.takeIntent() == 100)
+        // Release with the committed anchor still lagging at 40.
+        #expect(s.release(committed: committed(anchorTop: 40), now: 0) == nil)
+        // Echo commits step the anchor toward the target; the offset drains and never finishes early.
+        let f1 = s.advance(committed: committed(anchorTop: 70), now: 0.01, buttonHeld: false)
+        #expect(!f1.finished)
+        #expect(f1.offsetLines == 30)
+        // The final echo lands exactly on the target: offset 0, finished, no settle-jump.
+        let f2 = s.advance(committed: committed(anchorTop: 100), now: 0.02, buttonHeld: false)
+        #expect(f2.finished)
+        #expect(f2.offsetLines == 0)
+    }
+
+    @Test("lost mouseUp: a button-up frame in the dragging phase releases and reconciles")
+    func lostMouseUpReleasesAndReconciles() {
+        var s = ThumbDragSession(windowId: 1, targetLine: 100)
+        _ = s.takeIntent()
+        // No mouseUp arrived, but the button is physically up: advance treats it as a release.
+        let out = s.advance(committed: committed(anchorTop: 40), now: 0, buttonHeld: false)
+        #expect(s.phase == .reconciling)
+        #expect(!out.finished)
+        #expect(out.offsetLines == 60)
+        // The anchor then reaches the target and the reconcile lands.
+        let done = s.advance(committed: committed(anchorTop: 100), now: 0.01, buttonHeld: false)
+        #expect(done.finished)
+    }
+
+    @Test("reconcile watchdog clears a stranded drag when no progress arrives (dropped final flush)")
+    func watchdogClearsStrandedReconcile() {
+        var s = ThumbDragSession(windowId: 1, targetLine: 100)
+        _ = s.takeIntent()
+        _ = s.release(committed: committed(anchorTop: 40), now: 0)
+        // The final flush was dropped (disconnected port / backpressure): the anchor never moves.
+        let within = s.advance(committed: committed(anchorTop: 40), now: 0.1, buttonHeld: false)
+        #expect(!within.finished)
+        // After the watchdog deadline with no progress, the drag clears so the gate cannot stay open.
+        let expired = s.advance(committed: committed(anchorTop: 40), now: ThumbDragSession.watchdogDeadline + 0.1, buttonHeld: false)
+        #expect(expired.finished)
+        #expect(expired.offsetLines == 0)
+    }
+
+    @Test("an authoritative interrupt post-release finishes immediately (discard wins)")
+    func authoritativeInterruptFinishes() {
+        var s = ThumbDragSession(windowId: 1, targetLine: 100)
+        _ = s.takeIntent()
+        _ = s.release(committed: committed(anchorTop: 40, scrollSeq: 5), now: 0)
+        // A seq bump lands mid-reconcile: finish now so the BEAM's discard wins.
+        let out = s.advance(committed: committed(anchorTop: 55, scrollSeq: 6), now: 0.01, buttonHeld: false)
+        #expect(out.finished)
+        #expect(out.offsetLines == 0)
     }
 }
 
