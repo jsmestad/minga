@@ -68,14 +68,14 @@ func TestRenderEmptyStateShowsLaunchpadContent(t *testing.T) {
 
 	for _, want := range []string{
 		"m i n g a", // letter-spaced wordmark
-		"v0.9",      // muted version
-		"Session",   // session card title in the top border
+		"v0.9",      // faint version
+		"Session",   // session card title in the top border (cards keep case)
 		"resume last session",
 		"4 files",          // right-aligned detail
-		"Recent",           // section rule label
+		"RECENT",           // section rule label (uppercased at render time)
 		"startup.ex",       // recent basename
 		"lib/minga_editor", // recent directory (width >= 64 keeps it)
-		"Start",
+		"START",
 		"open file",
 		"SPC",   // chord chip token
 		"write", // footer verb

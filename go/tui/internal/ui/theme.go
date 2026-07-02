@@ -347,6 +347,26 @@ func (p palette) TreeFocus() color.Color {
 	return p.blendSlots(themeTreeBG, themeTreeSelectBG, 0.4)
 }
 
+// ChipSurface returns a neutral keycap background for chips sitting directly on the editor surface. KeycapSurface is tuned for elevated popup backgrounds (which-key) and reads far too bright here; this blends a whisper above the editor background instead.
+func (p palette) ChipSurface() color.Color {
+	return p.blendSlots(themeEditorBG, themeSelectionBG, 0.55)
+}
+
+// AccentWash returns a faint accent-tinted background for the launchpad focus band and jump-key chips: visible hue without swallowing bold text or colored glyphs rendered over it.
+func (p palette) AccentWash() color.Color {
+	return p.blendSlots(themeEditorBG, themeAccent, 0.16)
+}
+
+// AccentSoft returns a dimmed accent for at-rest emphasis (the launchpad hero border), clearly hued but below the full Accent used for the focused state.
+func (p palette) AccentSoft() color.Color {
+	return p.blendSlots(themeEditorBG, themeAccent, 0.45)
+}
+
+// TextFaint returns a below-Muted foreground tier for tertiary chrome (versions, directories, rule dashes, middots) so secondary text keeps a visible step above it.
+func (p palette) TextFaint() color.Color {
+	return p.blendSlots(themeEditorBG, themeTabInactiveFG, 0.65)
+}
+
 func (p palette) TreeSelectionText() color.Color {
 	return p.slot(themeTreeSelectionFG)
 }
