@@ -93,6 +93,8 @@ public struct StatusBarUpdate: Sendable {
     public let modelineRightSegments: [Wire.StatusBarSegment]
     public let selection: SelectionInfo
     public let workspace: WorkspaceInfo?
+    /// vim showcmd: pending key sequence typed but not yet resolved. Empty when nothing is pending.
+    public let pendingKeys: String
 
     public init(
         contentKind: UInt8,
@@ -133,7 +135,8 @@ public struct StatusBarUpdate: Sendable {
         modelineLeftSegments: [Wire.StatusBarSegment] = [],
         modelineRightSegments: [Wire.StatusBarSegment] = [],
         selection: SelectionInfo = .init(mode: 0, size: 0),
-        workspace: WorkspaceInfo? = nil
+        workspace: WorkspaceInfo? = nil,
+        pendingKeys: String = ""
     ) {
         self.contentKind = contentKind
         self.mode = mode
@@ -174,5 +177,6 @@ public struct StatusBarUpdate: Sendable {
         self.modelineRightSegments = modelineRightSegments
         self.selection = selection
         self.workspace = workspace
+        self.pendingKeys = pendingKeys
     }
 }

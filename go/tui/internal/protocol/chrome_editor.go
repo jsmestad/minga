@@ -330,6 +330,10 @@ func decodeStatus(payload []byte) (StatusBar, string, int) {
 			}
 		case 0x0B:
 			status.Left, status.Right = decodeStatusSegments(section)
+		case 0x0E:
+			if keys, _, ok := readString16(section, 0); ok {
+				status.PendingKeys = keys
+			}
 		}
 	}
 

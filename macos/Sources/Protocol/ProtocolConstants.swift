@@ -19,6 +19,7 @@ let SECTION_INDENT: UInt8 = 0x0A
 let SECTION_MODELINE_SEGMENTS: UInt8 = 0x0B
 let SECTION_SELECTION: UInt8 = 0x0C
 let SECTION_WORKSPACE: UInt8 = 0x0D
+let SECTION_PENDING_KEYS: UInt8 = 0x0E
 
 // GUI theme color slot IDs (GUI_COLOR_*) moved to GUIColorSlots.swift in the
 // MingaProtocol framework so the preview framework can share them.

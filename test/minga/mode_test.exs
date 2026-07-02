@@ -34,6 +34,85 @@ defmodule Minga.ModeTest do
     end
   end
 
+  describe "pending_keys/2 (showcmd)" do
+    alias Minga.Mode.OperatorPendingState
+    alias Minga.Mode.State
+
+    test "returns empty string when nothing is pending" do
+      assert Mode.pending_keys(:normal, %State{}) == ""
+    end
+
+    test "echoes an accumulated count" do
+      assert Mode.pending_keys(:normal, %State{count: 12}) == "12"
+    end
+
+    test "echoes a pending register prefix" do
+      assert Mode.pending_keys(:normal, %State{pending: :register}) == "\""
+    end
+
+    test "echoes pending single-key operations" do
+      assert Mode.pending_keys(:normal, %State{pending: :replace}) == "r"
+      assert Mode.pending_keys(:normal, %State{pending: {:find, :f}}) == "f"
+      assert Mode.pending_keys(:normal, %State{pending: {:find, :T}}) == "T"
+      assert Mode.pending_keys(:normal, %State{pending: {:mark, :set}}) == "m"
+      assert Mode.pending_keys(:normal, %State{pending: {:mark, :jump_line}}) == "'"
+      assert Mode.pending_keys(:normal, %State{pending: {:mark, :jump_exact}}) == "`"
+      assert Mode.pending_keys(:normal, %State{pending: :macro_register}) == "q"
+      assert Mode.pending_keys(:normal, %State{pending: :macro_replay}) == "@"
+    end
+
+    test "echoes a normal-mode prefix (g/z/[/]) in typed order" do
+      assert Mode.pending_keys(:normal, %State{prefix_keys: ["g"]}) == "g"
+      assert Mode.pending_keys(:normal, %State{prefix_keys: ["r", "g"]}) == "gr"
+    end
+
+    test "echoes a leader sequence in typed order" do
+      assert Mode.pending_keys(:normal, %State{leader_keys: ["f", "SPC"]}) == "SPC f"
+    end
+
+    test "combines a count with a pending operation" do
+      assert Mode.pending_keys(:normal, %State{count: 2, pending: {:find, :f}}) == "2f"
+    end
+
+    test "combines a count with a normal-mode prefix" do
+      assert Mode.pending_keys(:normal, %State{count: 2, prefix_keys: ["g"]}) == "2g"
+    end
+
+    test "echoes a pending operator in operator-pending mode" do
+      state = %OperatorPendingState{operator: :delete}
+      assert Mode.pending_keys(:operator_pending, state) == "d"
+    end
+
+    test "echoes operator count prefix and motion count" do
+      state = %OperatorPendingState{operator: :change, op_count: 2, count: 3}
+      assert Mode.pending_keys(:operator_pending, state) == "2c3"
+    end
+
+    test "echoes count before a pending g in typed order (d2g of d2gg)" do
+      state = %OperatorPendingState{operator: :delete, count: 2, pending_g: true}
+      assert Mode.pending_keys(:operator_pending, state) == "d2g"
+    end
+
+    test "maps each operator to its key" do
+      for {op, key} <- [
+            delete: "d",
+            change: "c",
+            yank: "y",
+            indent: ">",
+            dedent: "<",
+            reindent: "=",
+            comment: "gc"
+          ] do
+        state = %OperatorPendingState{operator: op}
+        assert Mode.pending_keys(:operator_pending, state) == key
+      end
+    end
+
+    test "returns empty string for modes without base FSM state" do
+      assert Mode.pending_keys(:insert, nil) == ""
+    end
+  end
+
   describe "process/3 — Normal mode transitions" do
     setup do
       {:ok, state: Mode.initial_state()}

@@ -750,6 +750,32 @@ func TestDecodeStatusModelineSegments(t *testing.T) {
 	}
 }
 
+func TestDecodeStatusPendingKeys(t *testing.T) {
+	packet := []byte{generated.OPGuiStatusBar, 1}
+	packet = append(packet, section(0x0E, string16("\"a2d"))...)
+
+	command, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	if command.Chrome.Status.PendingKeys != "\"a2d" {
+		t.Fatalf("pending keys decoded incorrectly: %q", command.Chrome.Status.PendingKeys)
+	}
+}
+
+func TestDecodeStatusPendingKeysAbsentSection(t *testing.T) {
+	packet := []byte{generated.OPGuiStatusBar, 1}
+	packet = append(packet, section(0x07, string16("ready"))...)
+
+	command, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	if command.Chrome.Status.PendingKeys != "" {
+		t.Fatalf("absent pending-keys section should decode to empty, got %q", command.Chrome.Status.PendingKeys)
+	}
+}
+
 func TestDecodeGutterChrome(t *testing.T) {
 	window := section(0x01, []byte{0, 7, 0, 1, 0, 2, 0, 3, 1, 0, 80})
 	config := section(0x02, []byte{0, 0, 0, 4, 0, 4, 2})

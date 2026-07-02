@@ -76,7 +76,8 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilder do
         background_label: Map.get(data, :active_background_subagent_label),
         active_tool_name: Map.get(data, :active_tool_name)
       },
-      modeline_segments: Map.get(data, :modeline_segments)
+      modeline_segments: Map.get(data, :modeline_segments),
+      pending_keys: Map.get(data, :pending_keys, "")
     }
   end
 

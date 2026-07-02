@@ -4,7 +4,7 @@ import MingaProtocol
 @MainActor
 @Observable
 public final class StatusBarState {
-    public init(contentKind: UInt8 = 0, mode: UInt8 = 0, cursorLine: UInt32 = 1, cursorCol: UInt32 = 1, lineCount: UInt32 = 1, flags: UInt8 = 0, safeMode: Bool = false, lspStatus: UInt8 = 0, gitBranch: String = "", message: String = "", filetype: String = "", errorCount: UInt16 = 0, warningCount: UInt16 = 0, modelName: String = "", messageCount: UInt32 = 0, sessionStatus: UInt8 = 0, infoCount: UInt16 = 0, hintCount: UInt16 = 0, macroRecording: UInt8 = 0, parserStatus: UInt8 = 0, agentStatus: UInt8 = 0, activeToolName: String = "", gitAdded: UInt16 = 0, gitModified: UInt16 = 0, gitDeleted: UInt16 = 0, icon: String = "", iconColorR: UInt8 = 0, iconColorG: UInt8 = 0, iconColorB: UInt8 = 0, filename: String = "", diagnosticHint: String = "", backgroundSubagentCount: UInt16 = 0, backgroundSubagentLabel: String = "", indent: StatusBarUpdate.IndentInfo = .init(kind: 0, size: 2), modelineSegmentsPresent: Bool = false, modelineLeftSegments: [Wire.StatusBarSegment] = [], modelineRightSegments: [Wire.StatusBarSegment] = [], selection: StatusBarUpdate.SelectionInfo = .init(mode: 0, size: 0)) {
+    public init(contentKind: UInt8 = 0, mode: UInt8 = 0, cursorLine: UInt32 = 1, cursorCol: UInt32 = 1, lineCount: UInt32 = 1, flags: UInt8 = 0, safeMode: Bool = false, lspStatus: UInt8 = 0, gitBranch: String = "", message: String = "", filetype: String = "", errorCount: UInt16 = 0, warningCount: UInt16 = 0, modelName: String = "", messageCount: UInt32 = 0, sessionStatus: UInt8 = 0, infoCount: UInt16 = 0, hintCount: UInt16 = 0, macroRecording: UInt8 = 0, parserStatus: UInt8 = 0, agentStatus: UInt8 = 0, activeToolName: String = "", gitAdded: UInt16 = 0, gitModified: UInt16 = 0, gitDeleted: UInt16 = 0, icon: String = "", iconColorR: UInt8 = 0, iconColorG: UInt8 = 0, iconColorB: UInt8 = 0, filename: String = "", diagnosticHint: String = "", backgroundSubagentCount: UInt16 = 0, backgroundSubagentLabel: String = "", indent: StatusBarUpdate.IndentInfo = .init(kind: 0, size: 2), modelineSegmentsPresent: Bool = false, modelineLeftSegments: [Wire.StatusBarSegment] = [], modelineRightSegments: [Wire.StatusBarSegment] = [], selection: StatusBarUpdate.SelectionInfo = .init(mode: 0, size: 0), pendingKeys: String = "") {
         self.contentKind = contentKind
         self.mode = mode
         self.cursorLine = cursorLine
@@ -43,6 +43,7 @@ public final class StatusBarState {
         self.modelineLeftSegments = modelineLeftSegments
         self.modelineRightSegments = modelineRightSegments
         self.selection = selection
+        self.pendingKeys = pendingKeys
     }
     /// 0 = buffer window, 1 = agent chat window.
     public var contentKind: UInt8 = 0
@@ -85,6 +86,8 @@ public final class StatusBarState {
     public var modelineLeftSegments: [Wire.StatusBarSegment] = []
     public var modelineRightSegments: [Wire.StatusBarSegment] = []
     public var selection: StatusBarUpdate.SelectionInfo = .init(mode: 0, size: 0)
+    /// vim showcmd: pending key sequence echoed instantly. Empty when nothing is pending.
+    public var pendingKeys: String = ""
 
     /// Updates status bar properties, guarding each assignment with an
     /// equality check to prevent redundant `@Observable` notifications.
@@ -131,6 +134,7 @@ public final class StatusBarState {
         if self.modelineLeftSegments != data.modelineLeftSegments { self.modelineLeftSegments = data.modelineLeftSegments }
         if self.modelineRightSegments != data.modelineRightSegments { self.modelineRightSegments = data.modelineRightSegments }
         if self.selection != data.selection { self.selection = data.selection }
+        if self.pendingKeys != data.pendingKeys { self.pendingKeys = data.pendingKeys }
     }
 
     public var modeName: String {

@@ -1667,6 +1667,12 @@ fields = [
   { name = "icon", type = "string8" },
 ]
 
+[[sections]]
+opcode = "gui_status_bar"
+id = 0x0E
+name = "pending_keys"
+fields = [{ name = "keys", type = "string16" }]
+
 # gui_gutter (0x7B) sections
 
 [[sections]]

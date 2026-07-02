@@ -29,6 +29,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
   @section_modeline_segments 0x0B
   @section_selection 0x0C
   @section_workspace 0x0D
+  @section_pending_keys 0x0E
   @max_modeline_segments 128
 
   @spec encode(StatusBar.t(), Caches.t()) :: {binary(), Caches.t()}
@@ -100,6 +101,8 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
 
     sections = Enum.concat(sections, modeline_segment_sections(data.modeline_segments))
 
+    sections = Enum.concat(sections, pending_keys_sections(data.pending_keys))
+
     sections =
       Enum.concat(sections, [
         Wire.encode_section(@section_selection, <<selection_mode::8, selection_size::32>>)
@@ -157,6 +160,14 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
       <<agent_byte::8, agent.background_count::16, byte_size(background_label)::16,
         background_label::binary, byte_size(active_tool_name)::8, active_tool_name::binary>>
     )
+  end
+
+  @spec pending_keys_sections(String.t() | nil) :: [binary()]
+  defp pending_keys_sections(pending) when pending in [nil, ""], do: []
+
+  defp pending_keys_sections(pending) do
+    bytes = Wire.utf8_prefix_bytes(pending, Wire.max_u16())
+    [Wire.encode_section(@section_pending_keys, <<byte_size(bytes)::16, bytes::binary>>)]
   end
 
   @spec modeline_segment_sections(Data.modeline_segments()) :: [binary()]

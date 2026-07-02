@@ -1416,6 +1416,17 @@ func DecodeGuiStatusBarWorkspace(data []byte, offset int, windowEnd int) (GuiSta
 	}, pos, nil
 }
 
+func DecodeGuiStatusBarPendingKeys(data []byte, offset int, windowEnd int) (GuiStatusBarPendingKeys, int, error) {
+	pos := offset
+	keys, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return GuiStatusBarPendingKeys{}, offset, err
+	}
+	return GuiStatusBarPendingKeys{
+		Keys: keys,
+	}, pos, nil
+}
+
 // Section decoders for gui_surface_layout
 
 func DecodeGuiSurfaceLayoutPlacements(data []byte, offset int, windowEnd int) ([]SurfacePlacement, int, error) {
