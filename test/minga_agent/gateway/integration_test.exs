@@ -69,6 +69,46 @@ defmodule MingaAgent.Gateway.IntegrationTest do
 
       ws_close(ws)
     end
+
+    # Regression for issue #2663: the gateway subscribes to Minga.Events on connect
+    # and pushes event notifications on the same socket. A notification that
+    # interleaves with a request/response pair must not be mistaken for the
+    # response. Emitting a `:log_message` before the request enqueues the
+    # notification frame ahead of the response frame, so a client that blindly read
+    # "the next frame" would fail here.
+    test "response is returned even when an event notification interleaves", %{
+      port: port,
+      token: token
+    } do
+      {:ok, ws} = ws_connect(port, token)
+
+      # Warm-up round-trip: the WebSocket handler subscribes to Minga.Events in its
+      # init/1, which runs asynchronously after the HTTP upgrade. Completing one
+      # request/response proves init/1 (and thus the subscription) has run, so the
+      # broadcast below is guaranteed to reach this connection.
+      :ok = ws_send(ws, JSON.encode!(%{jsonrpc: "2.0", method: "tool.list", params: %{}, id: 4}))
+      {:ok, warmup} = ws_receive(ws)
+      assert warmup["id"] == 4
+
+      # Now enqueue an event notification ahead of the next response. broadcast/2
+      # delivers synchronously, so {:minga_event, ...} is in the connection's
+      # mailbox (pushed as a notification frame) before the request below is sent.
+      Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{
+        text: "interleaved notification",
+        level: :info
+      })
+
+      request =
+        JSON.encode!(%{jsonrpc: "2.0", method: "runtime.capabilities", params: %{}, id: 5})
+
+      :ok = ws_send(ws, request)
+
+      {:ok, response} = ws_receive(ws)
+      assert response["id"] == 5
+      assert is_integer(response["result"]["tool_count"])
+
+      ws_close(ws)
+    end
   end
 
   # ── WebSocket helpers using raw :gen_tcp + HTTP upgrade ─────────────────────
@@ -122,7 +162,30 @@ defmodule MingaAgent.Gateway.IntegrationTest do
     :gen_tcp.send(socket, frame)
   end
 
+  # Reads WebSocket frames until a JSON-RPC *response* (a frame carrying an "id")
+  # arrives, skipping any server-pushed notifications that interleave.
+  #
+  # Root cause of issue #2663: the gateway WebSocket subscribes to Minga.Events on
+  # connect (`EventStream.subscribe_all/0`) and pushes event notifications
+  # (`{"jsonrpc":"2.0","method":"event.<topic>",...}` frames with no "id") on the
+  # same socket. Under full-suite load a `:log_message`/`:buffer_changed`/etc. event
+  # can fire between our request and its response, so blindly reading "the next
+  # frame" would read a notification and see the wrong (or missing) id. A real
+  # JSON-RPC-over-WebSocket client correlates responses by id and ignores
+  # notifications, so the test must too.
   defp ws_receive(socket) do
+    frame = ws_read_frame(socket)
+
+    cond do
+      # JSON-RPC responses always carry the request id.
+      Map.has_key?(frame, "id") -> {:ok, frame}
+      # JSON-RPC notifications carry a method and no id: skip and keep reading.
+      Map.has_key?(frame, "method") -> ws_receive(socket)
+      true -> {:ok, frame}
+    end
+  end
+
+  defp ws_read_frame(socket) do
     # Read a text frame. Simplified parser: assumes single unfragmented frame.
     {:ok, <<_fin_opcode, len_byte>>} = :gen_tcp.recv(socket, 2, 5_000)
     # Server frames are unmasked
@@ -143,7 +206,7 @@ defmodule MingaAgent.Gateway.IntegrationTest do
       end
 
     {:ok, payload} = :gen_tcp.recv(socket, actual_len, 5_000)
-    {:ok, JSON.decode!(payload)}
+    JSON.decode!(payload)
   end
 
   defp ws_close(socket) do

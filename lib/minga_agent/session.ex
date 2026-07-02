@@ -465,10 +465,16 @@ defmodule MingaAgent.Session do
     GenServer.call(session, :cycle_model, 10_000)
   end
 
-  @doc "Sets the model without resetting conversation context."
-  @spec set_model(GenServer.server(), String.t()) :: :ok | {:error, term()}
-  def set_model(session, model) when is_binary(model) do
-    GenServer.call(session, {:set_model, model})
+  @doc """
+  Sets the model without resetting conversation context.
+
+  Setting a model can start the provider synchronously (see `start_provider/1`),
+  so callers may pass a larger `timeout` when a slow provider startup should not
+  surface as a call timeout.
+  """
+  @spec set_model(GenServer.server(), String.t(), timeout()) :: :ok | {:error, term()}
+  def set_model(session, model, timeout \\ 5_000) when is_binary(model) do
+    GenServer.call(session, {:set_model, model}, timeout)
   end
 
   @doc "Toggles the collapsed state of a tool call message."

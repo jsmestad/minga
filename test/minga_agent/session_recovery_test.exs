@@ -6,6 +6,22 @@ defmodule MingaAgent.SessionRecoveryTest do
   alias MingaAgent.Providers.Native
   alias MingaAgent.Session
 
+  # Provider startup runs synchronously inside the Session process
+  # (`start_provider/1` -> `provider_module.start_link/1` -> `Native.init/1`).
+  # That startup is only ~10ms idle, but under full-suite scheduler contention the
+  # Session can stall well past the default 5s `GenServer.call` timeout, so any
+  # call that triggers or waits behind startup times out (issue #2663). We wait for
+  # startup to finish with `:sys.get_state/2` (a synchronization barrier that
+  # drains the Session mailbox) and give startup-triggering calls a generous
+  # ceiling, instead of racing the 5s default.
+  @startup_timeout 30_000
+
+  # Blocks until the Session has processed every message enqueued before this call,
+  # including any `:start_provider` scheduled during `start_link/1` or a preceding
+  # `refresh_credentials/1` cast. After it returns the Session is idle, so the
+  # following assertions run against a settled provider without racing the timeout.
+  defp await_provider_startup(session), do: :sys.get_state(session, @startup_timeout)
+
   defp start_credential_checker(initial_state) do
     checker =
       {Agent, fn -> initial_state end}
@@ -28,6 +44,10 @@ defmodule MingaAgent.SessionRecoveryTest do
         |> Keyword.put(:provider_opts, provider_opts)
         |> Keyword.put(:credentials_configured_fn, credentials_configured_fn)
       )
+
+    # `start_link/1` schedules `:start_provider` when credentials are already
+    # configured; wait it out here so callers observe a settled session.
+    await_provider_startup(session)
 
     {session, checker}
   end
@@ -160,6 +180,9 @@ defmodule MingaAgent.SessionRecoveryTest do
 
     Agent.update(checker, fn _ -> true end)
     assert :ok = Session.refresh_credentials(session)
+    # refresh_credentials/1 is a cast that starts the provider synchronously in
+    # handle_cast; wait for that before reading provider-dependent state.
+    await_provider_startup(session)
     assert Session.editor_snapshot(session).credentials_configured == true
     assert is_pid(Session.get_provider(session))
   end
@@ -172,7 +195,9 @@ defmodule MingaAgent.SessionRecoveryTest do
       )
 
     assert Session.get_provider(session) == nil
-    assert :ok = Session.set_model(session, "claude-opus-4-20250514@anthropic")
+    # set_model/2 starts the provider synchronously in handle_call, so pass a
+    # generous timeout rather than racing the default 5s under suite load.
+    assert :ok = Session.set_model(session, "claude-opus-4-20250514@anthropic", @startup_timeout)
     assert is_pid(Session.get_provider(session))
 
     metadata = Session.metadata(session)
