@@ -170,7 +170,7 @@ defmodule MingaEditor.StatusBar.Data do
     buf = state.workspace.buffers.active
     {line, col} = if buf, do: Buffer.cursor(buf), else: {0, 0}
     line_count = if buf, do: Buffer.line_count(buf), else: 1
-    file_name = if buf, do: buf_display_name(buf), else: "[no file]"
+    file_name = if buf, do: buf_display_name(buf), else: no_buffer_file_name(state)
     dirty = buf != nil and Buffer.dirty?(buf)
     filetype = if buf, do: buffer_filetype(buf), else: :text
     file_path = if buf, do: buffer_file_path(buf), else: nil
@@ -257,6 +257,14 @@ defmodule MingaEditor.StatusBar.Data do
   @spec register_prefix(String.t()) :: String.t()
   defp register_prefix(""), do: ""
   defp register_prefix(name), do: "\"" <> name
+
+  # In the zero-buffers launchpad (#2689) the file segment stays empty
+  # instead of advertising a "[no file]" placeholder; any other nil-buffer
+  # context (transient races) keeps the placeholder.
+  @spec no_buffer_file_name(EditorState.t() | map()) :: String.t()
+  defp no_buffer_file_name(state) do
+    if Map.get(state.workspace, :launchpad), do: "", else: "[no file]"
+  end
 
   @spec buf_display_name(pid()) :: String.t()
   defp buf_display_name(buf) do

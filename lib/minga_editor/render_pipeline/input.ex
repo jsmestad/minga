@@ -131,7 +131,8 @@ defmodule MingaEditor.RenderPipeline.Input do
           cmd_hover_link: EditorState.cmd_hover_link(),
           mouse: Mouse.t(),
           search: Search.t(),
-          keymap_scope: Minga.Keymap.Scope.scope_name()
+          keymap_scope: Minga.Keymap.Scope.scope_name(),
+          launchpad: MingaEditor.State.Launchpad.t() | nil
         }
 
   @type t :: %__MODULE__{
@@ -214,7 +215,12 @@ defmodule MingaEditor.RenderPipeline.Input do
         cmd_hover_link: ws.cmd_hover_link,
         mouse: ws.mouse,
         search: ws.search,
-        keymap_scope: ws.keymap_scope
+        keymap_scope: ws.keymap_scope,
+        # The zero-buffers launchpad (#2689) must survive the async render
+        # snapshot: Emit.Context reads it to build the gui_empty_state frame,
+        # and omitting it here silently rendered the launchpad hidden on
+        # every production frame while sync-path tests stayed green.
+        launchpad: ws.launchpad
       }
     }
     |> sync_active_window_cursor()
