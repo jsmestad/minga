@@ -31,8 +31,13 @@ defmodule MingaEditor.RenderPipeline.Input do
 
   **From `state.workspace` (per-tab editing context, stored as `workspace` map):**
   `windows`, `buffers`, `viewport`, `file_tree` (FileTree feature state), `highlight`,
-  `agent_ui`, `editing`, `document_highlights`,
-  `search`, `keymap_scope`
+  `agent_ui`, `editing`, `document_highlights`, `cmd_hover_link`, `mouse`,
+  `search`, `keymap_scope`, `launchpad`
+
+  Every `Session.State` field must be either snapshotted here or listed in
+  the explicit exclusions pinned by
+  `test/minga_editor/render_pipeline/input_launchpad_test.exs` — a field in
+  neither silently disappears on the async render path (#2689).
 
   Note: completion lives on `state.shell_state.modal` after #1426; the
   fingerprint includes the modal sum type, so completion changes are
@@ -216,10 +221,9 @@ defmodule MingaEditor.RenderPipeline.Input do
         mouse: ws.mouse,
         search: ws.search,
         keymap_scope: ws.keymap_scope,
-        # The zero-buffers launchpad (#2689) must survive the async render
-        # snapshot: Emit.Context reads it to build the gui_empty_state frame,
-        # and omitting it here silently rendered the launchpad hidden on
-        # every production frame while sync-path tests stayed green.
+        # Emit.Context builds the gui_empty_state frame from this; only the
+        # async path crosses this snapshot, so dropping it is invisible to
+        # sync-path tests (#2689).
         launchpad: ws.launchpad
       }
     }

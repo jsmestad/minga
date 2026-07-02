@@ -263,7 +263,7 @@ defmodule MingaEditor.StatusBar.Data do
   # context (transient races) keeps the placeholder.
   @spec no_buffer_file_name(EditorState.t() | map()) :: String.t()
   defp no_buffer_file_name(state) do
-    if Map.get(state.workspace, :launchpad), do: "", else: "[no file]"
+    if state.workspace.launchpad, do: "", else: "[no file]"
   end
 
   @spec buf_display_name(pid()) :: String.t()
