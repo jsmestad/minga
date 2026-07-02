@@ -93,6 +93,44 @@ defmodule MingaEditor.Commands do
     :tool_update_named
   ]
 
+  # Authoritative viewport-jump commands (#2652): a frontend holding a local
+  # free-scroll offset must always discard it after one of these runs, even when
+  # the committed top lands on exactly the previous/echoed top (a `zz` while
+  # already centered). Marking the active window here (the dispatch choke point
+  # for atom commands) bumps `scroll_seq` at settle regardless of whether the top
+  # also moved; the settle-time top comparison covers the top-moved case, and the
+  # OR keeps it to one bump.
+  #
+  # Only commands that unconditionally re-anchor belong here — a command that can
+  # no-op (a failed search, `%` with no bracket, a jump to an unset mark, the
+  # async LSP goto family) must instead mark in its handler's success branch, so
+  # a no-op never discards the user's local scroll: see
+  # `MingaEditor.Commands.Search`, `MingaEditor.Commands.Movement`
+  # (`:match_bracket`), `MingaEditor.Commands.Marks`, and
+  # `MingaEditor.LspActions.jump_to_location/4`. The parameterized
+  # `{:goto_line, _}` jump (clamped, never fails) is marked in its own dispatch
+  # clause below. Pure cursor motion (h/j/k/l, word, H/M/L) is deliberately
+  # absent everywhere: it re-anchors via cursor-must-stay-visible, which bumps
+  # through the top comparison only when it actually moves the top.
+  #
+  # This MapSet plus the success-branch marks above are the single source of
+  # truth for which commands force a discard; docs reference this location
+  # rather than re-listing commands.
+  @authoritative_scroll_commands MapSet.new([
+                                   :scroll_center,
+                                   :scroll_cursor_top,
+                                   :scroll_cursor_bottom,
+                                   :scroll_down_line,
+                                   :scroll_up_line,
+                                   :half_page_down,
+                                   :half_page_up,
+                                   :page_down,
+                                   :page_up,
+                                   :move_to_document_start,
+                                   :move_to_document_end,
+                                   :cancel_search
+                                 ])
+
   @doc """
   Executes a single command against the editor state.
 
@@ -323,7 +361,13 @@ defmodule MingaEditor.Commands do
   # ── Parameterized movement ────────────────────────────────────────────────
 
   def execute(state, {:goto_line, _} = cmd) do
-    guard_buffer(state, fn -> Movement.execute(state, cmd) end)
+    # goto-line is an authoritative jump (#2652): mark before delegating so a jump
+    # to a line already on screen still discards a frontend-held local offset.
+    guard_buffer(state, fn ->
+      state
+      |> EditorState.mark_authoritative_scroll()
+      |> Movement.execute(cmd)
+    end)
   end
 
   def execute(state, {:find_char, _, _} = cmd) do
@@ -680,9 +724,25 @@ defmodule MingaEditor.Commands do
   end
 
   defp execute_checked(state, cmd, %Command{execute: fun}) do
+    state = maybe_mark_authoritative_scroll(state, cmd)
+
     Minga.Telemetry.span([:minga, :command, :execute], %{command: cmd}, fn ->
       fun.(state)
     end)
+  end
+
+  # Bumps the active window's authoritative-scroll marker before an
+  # authoritative viewport-jump command runs (#2652). Marking the input state is
+  # safe: the command's own window mutations (viewport commit or async cursor
+  # move) preserve the marker field, and the mark is consumed once at the next
+  # settle.
+  @spec maybe_mark_authoritative_scroll(state(), atom()) :: state()
+  defp maybe_mark_authoritative_scroll(state, cmd) do
+    if MapSet.member?(@authoritative_scroll_commands, cmd) do
+      EditorState.mark_authoritative_scroll(state)
+    else
+      state
+    end
   end
 
   # ── Public buffer helpers (called directly from Editor) ───────────────────

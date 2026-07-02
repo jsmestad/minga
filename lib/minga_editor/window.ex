@@ -55,7 +55,8 @@ defmodule MingaEditor.Window do
           scroll_velocity: ScrollVelocity.t(),
           scroll_detach_cursor: Buffer.position() | nil,
           prefetch_overscan_boost: {non_neg_integer(), :down | :up} | nil,
-          scroll_echo_top: integer() | nil
+          scroll_echo_top: integer() | nil,
+          authoritative_scroll_seq: non_neg_integer()
         }
 
   @enforce_keys [:id, :content, :buffer, :viewport]
@@ -75,7 +76,8 @@ defmodule MingaEditor.Window do
     scroll_velocity: %ScrollVelocity{},
     scroll_detach_cursor: nil,
     prefetch_overscan_boost: nil,
-    scroll_echo_top: nil
+    scroll_echo_top: nil,
+    authoritative_scroll_seq: 0
   ]
 
   @doc """
@@ -233,6 +235,38 @@ defmodule MingaEditor.Window do
     %{window | scroll_echo_top: echo_top}
   end
 
+  @doc """
+  Records that an authoritative BEAM-initiated viewport jump must discard any
+  frontend-held local scroll offset, even if the committed top is unchanged (#2652).
+
+  Command handlers call this on the live window (editor process): at dispatch
+  for the always-authoritative viewport commands, and from the success branches
+  of failable jumps (search hits, mark jumps, bracket match, LSP goto). The
+  `MingaEditor.Commands` `@authoritative_scroll_commands` comment documents the
+  policy and is the source of truth for the command set.
+  It is an editor-owned, top-level `Window` field (never in the render cache), a
+  monotonic request counter incremented once per authoritative jump. Like
+  `scroll_echo_top`, only the editor writes it, on the live window, so the async
+  render writeback (which copies back only the render cache) cannot clobber it.
+
+  `settle_scroll_seq/1` consumes it: the render cache remembers the last request
+  count it settled against and advances `scroll_seq` whenever this counter moved
+  past that baseline. Because the baseline (in the render cache) is overwritten to
+  the observed counter every settle rather than the counter being cleared here, a
+  single increment produces exactly one bump per rendered lineage and cannot latch
+  (see `MingaEditor.Window.RenderCache.settle_scroll_seq/4`). This closes the
+  same-top gap that the settle-time top comparison alone cannot see (a `zz` while
+  already centered, a search hit already on screen).
+  """
+  @spec mark_authoritative_scroll(t()) :: t()
+  def mark_authoritative_scroll(%__MODULE__{authoritative_scroll_seq: seq} = window) do
+    %{window | authoritative_scroll_seq: seq + 1}
+  end
+
+  @doc "Returns the editor-owned authoritative-scroll request counter (#2652)."
+  @spec authoritative_scroll_seq(t()) :: non_neg_integer()
+  def authoritative_scroll_seq(%__MODULE__{authoritative_scroll_seq: seq}), do: seq
+
   @doc "Returns the renderer-owned monotonic scroll-authority sequence."
   @spec scroll_seq(t()) :: non_neg_integer()
   def scroll_seq(%__MODULE__{render_cache: cache}), do: RenderCache.scroll_seq(cache)
@@ -240,19 +274,28 @@ defmodule MingaEditor.Window do
   @doc """
   Settles the per-frame `scroll_seq` decision against the render cache baseline.
 
-  Delegates to `MingaEditor.Window.RenderCache.settle_scroll_seq/3` with this
-  frame's committed viewport top and the sticky `scroll_echo_top` recorded by the
-  input path. `scroll_seq` advances only when the top moved to a value that is
-  neither the previous committed top nor a frontend-reported free-scroll top, i.e.
-  a genuine BEAM-initiated anchor move (a jump command or a cursor-must-stay-visible
-  re-attach). Scrolloff-breach cursor drags share the reported top, so they are
-  echoes too and do not advance the sequence. Both the counter and its baseline
-  live in the render cache, so the counter is monotonic across the serially
-  threaded, written-back render cache.
+  Delegates to `MingaEditor.Window.RenderCache.settle_scroll_seq/4` with this
+  frame's committed viewport top, the sticky `scroll_echo_top` recorded by the
+  input path, and the `authoritative_scroll_seq` request counter set by command
+  handlers. `scroll_seq` advances when EITHER an authoritative jump was marked
+  since the last settle OR the top moved to a value that is neither the previous
+  committed top nor a frontend-reported free-scroll top (a genuine BEAM-initiated
+  anchor move). Scrolloff-breach cursor drags share the reported top, so they are
+  echoes and do not advance the sequence. A jump that also moves the top bumps
+  once, not twice (a single OR decision per settle). The counter, its baseline,
+  and the authoritative-request baseline all live in the render cache, so the
+  sequence is monotonic across the serially threaded, written-back render cache.
   """
   @spec settle_scroll_seq(t()) :: t()
-  def settle_scroll_seq(%__MODULE__{render_cache: cache, viewport: %Viewport{top: top}} = window) do
-    %{window | render_cache: RenderCache.settle_scroll_seq(cache, top, window.scroll_echo_top)}
+  def settle_scroll_seq(
+        %__MODULE__{
+          render_cache: cache,
+          viewport: %Viewport{top: top},
+          scroll_echo_top: echo_top,
+          authoritative_scroll_seq: auth_seq
+        } = window
+      ) do
+    %{window | render_cache: RenderCache.settle_scroll_seq(cache, top, echo_top, auth_seq)}
   end
 
   @spec scroll_follow_cursor?(t(), Buffer.position(), integer()) :: {t(), boolean()}

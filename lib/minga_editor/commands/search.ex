@@ -2,6 +2,14 @@ defmodule MingaEditor.Commands.Search do
   @moduledoc """
   Search commands: incremental search, confirm/cancel, next/prev match, and
   word-under-cursor search.
+
+  Successful search jumps mark the window's authoritative-scroll marker (#2652)
+  in their success branch, so a hit landing on the same committed top still
+  discards a frontend-held local scroll offset. Failed searches (no pattern, no
+  match, no word under cursor) deliberately do not mark: a no-op must never
+  discard the user's local scroll. See
+  `MingaEditor.Commands.@authoritative_scroll_commands` for the dispatch-marked
+  set.
   """
 
   use MingaEditor.Commands.Provider
@@ -53,7 +61,7 @@ defmodule MingaEditor.Commands.Search do
 
         {line, col} ->
           Buffer.move_to(buf, {line, col})
-          state
+          EditorState.mark_authoritative_scroll(state)
       end
     end
   end
@@ -76,6 +84,7 @@ defmodule MingaEditor.Commands.Search do
         Buffer.move_to(buf, {line, col})
 
         state
+        |> EditorState.mark_authoritative_scroll()
         |> auto_unfold_at(line)
         |> put_in_search(:last_pattern, ms.input)
         |> put_in_search(:last_direction, ms.direction)
@@ -110,7 +119,10 @@ defmodule MingaEditor.Commands.Search do
 
       {line, col} ->
         Buffer.move_to(buf, {line, col})
-        auto_unfold_at(state, line)
+
+        state
+        |> EditorState.mark_authoritative_scroll()
+        |> auto_unfold_at(line)
     end
   end
 
@@ -138,7 +150,10 @@ defmodule MingaEditor.Commands.Search do
 
       {line, col} ->
         Buffer.move_to(buf, {line, col})
-        auto_unfold_at(state, line)
+
+        state
+        |> EditorState.mark_authoritative_scroll()
+        |> auto_unfold_at(line)
     end
   end
 
@@ -166,6 +181,7 @@ defmodule MingaEditor.Commands.Search do
             Buffer.move_to(buf, {line, col})
 
             state
+            |> EditorState.mark_authoritative_scroll()
             |> auto_unfold_at(line)
             |> put_in_search(:last_pattern, word)
             |> put_in_search(:last_direction, :forward)
@@ -196,6 +212,7 @@ defmodule MingaEditor.Commands.Search do
             Buffer.move_to(buf, {line, col})
 
             state
+            |> EditorState.mark_authoritative_scroll()
             |> auto_unfold_at(line)
             |> put_in_search(:last_pattern, word)
             |> put_in_search(:last_direction, :backward)

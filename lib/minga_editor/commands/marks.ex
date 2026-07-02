@@ -2,6 +2,11 @@ defmodule MingaEditor.Commands.Marks do
   @moduledoc """
   Mark commands: set a mark, jump to a mark (line or exact), and jump to the
   last cursor position.
+
+  Successful jumps mark the window's authoritative-scroll marker (#2652) in
+  their success branch, so a jump landing on the same committed top still
+  discards a frontend-held local scroll offset. A jump to an unset mark (or
+  with no last position) is a no-op and deliberately does not mark.
   """
 
   use MingaEditor.Commands.Provider
@@ -50,7 +55,10 @@ defmodule MingaEditor.Commands.Marks do
         tmp_buf = Document.new(content)
         target = Minga.Editing.first_non_blank(tmp_buf, {mark_line, 0})
         Buffer.move_to(buf, target)
-        Helpers.save_jump_pos(state, current_pos, target)
+
+        state
+        |> EditorState.mark_authoritative_scroll()
+        |> Helpers.save_jump_pos(current_pos, target)
     end
   end
 
@@ -68,7 +76,10 @@ defmodule MingaEditor.Commands.Marks do
       mark_pos ->
         current_pos = Buffer.cursor(buf)
         Buffer.move_to(buf, mark_pos)
-        Helpers.save_jump_pos(state, current_pos, mark_pos)
+
+        state
+        |> EditorState.mark_authoritative_scroll()
+        |> Helpers.save_jump_pos(current_pos, mark_pos)
     end
   end
 
@@ -84,7 +95,9 @@ defmodule MingaEditor.Commands.Marks do
     target = Minga.Editing.first_non_blank(tmp_buf, {last_line, 0})
     Buffer.move_to(buf, target)
 
-    EditorState.set_last_jump_pos(state, current_pos)
+    state
+    |> EditorState.mark_authoritative_scroll()
+    |> EditorState.set_last_jump_pos(current_pos)
   end
 
   def execute(state, :jump_to_last_pos_line), do: state
@@ -97,7 +110,9 @@ defmodule MingaEditor.Commands.Marks do
     current_pos = Buffer.cursor(buf)
     Buffer.move_to(buf, last_pos)
 
-    EditorState.set_last_jump_pos(state, current_pos)
+    state
+    |> EditorState.mark_authoritative_scroll()
+    |> EditorState.set_last_jump_pos(current_pos)
   end
 
   def execute(state, :jump_to_last_pos_exact), do: state

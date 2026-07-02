@@ -25,27 +25,39 @@ defmodule MingaEditor.Commands.MatchBracketCommandTest do
   end
 
   describe ":match_bracket command path" do
-    test "jumps from an opening delimiter to the matching end" do
+    test "jumps from an opening delimiter to the matching end and marks the window" do
       {state, buffer} = prepared_state("def foo do\n  :ok\nend\n", :elixir)
       BufferProcess.move_to(buffer, {0, 0})
 
-      _ = Movement.execute(state, :match_bracket)
+      updated = Movement.execute(state, :match_bracket)
 
       assert BufferProcess.cursor(buffer) == {2, 0}
+      # A successful bracket jump is authoritative (#2652): it must discard a
+      # frontend-held local offset even when it lands on the same committed top.
+      assert authoritative_seq(updated) == 1
     end
 
     test "is a no-op when the parser has no matching item" do
       {state, buffer} = prepared_state("word\n", :elixir)
       BufferProcess.move_to(buffer, {0, 0})
 
-      _ = Movement.execute(state, :match_bracket)
+      updated = Movement.execute(state, :match_bracket)
 
       assert BufferProcess.cursor(buffer) == {0, 0}
+      # No bracket, no jump: the marker must stay untouched so the no-op never
+      # discards the user's local scroll (#2652).
+      assert authoritative_seq(updated) == 0
     end
   end
 
   defp prepared_state(content, filetype) do
     state = TestHelpers.base_state(content: content, filetype: filetype)
     {HighlightSync.setup_for_buffer(state), state.workspace.buffers.active}
+  end
+
+  defp authoritative_seq(state) do
+    win_id = state.workspace.windows.active
+
+    MingaEditor.Window.authoritative_scroll_seq(state.workspace.windows.map[win_id])
   end
 end

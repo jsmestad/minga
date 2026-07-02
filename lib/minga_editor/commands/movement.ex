@@ -301,10 +301,18 @@ defmodule MingaEditor.Commands.Movement do
     buffer_id = Helpers.buffer_id_for_motion(state, buf, :match_bracket)
     {row, col} = Buffer.cursor(buf)
 
-    case ParserManager.request_match_item(buffer_id, row, col) do
-      nil -> :ok
-      target -> Buffer.move_to(buf, target)
-    end
+    # A successful bracket jump marks the authoritative-scroll marker (#2652) so
+    # a match on the same committed top still discards a frontend-held local
+    # offset; no matching bracket is a no-op and must not mark.
+    state =
+      case ParserManager.request_match_item(buffer_id, row, col) do
+        nil ->
+          state
+
+        target ->
+          Buffer.move_to(buf, target)
+          EditorState.mark_authoritative_scroll(state)
+      end
 
     reset_desired_col(state)
   end

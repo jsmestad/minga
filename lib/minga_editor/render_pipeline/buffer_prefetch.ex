@@ -133,8 +133,10 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
         # back via `State.merge_renderer_window/2`), so `scroll_seq` stays
         # monotonic on the wire across the async render round trip and the input
         # layer sees residence on the live window. `settle_scroll_seq/1` reads its
-        # own baseline and the sticky `scroll_echo_top` from the window, bumping
-        # `scroll_seq` only for a genuine BEAM-initiated anchor move.
+        # own baselines, the sticky `scroll_echo_top`, and the editor-set
+        # `authoritative_scroll_seq` marker from the window, bumping `scroll_seq`
+        # for a genuine BEAM-initiated anchor move (top change) OR an explicitly
+        # marked authoritative jump that landed on the same top (#2652).
         updated_window =
           updated_window
           |> Window.settle_scroll_seq()

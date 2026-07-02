@@ -73,7 +73,7 @@ defmodule Mix.Tasks.Conformance.Gen do
       drag_selection_active_offset(),
       hml_after_scroll_report(),
       scroll_seq_strictly_newer_discard(),
-      same_top_jump_documented_limitation(),
+      same_top_jump_discards(),
       wheel_momentum_during_ctrl_d()
     ]
   end
@@ -444,24 +444,24 @@ defmodule Mix.Tasks.Conformance.Gen do
     )
   end
 
-  @spec same_top_jump_documented_limitation() :: transcript()
-  defp same_top_jump_documented_limitation do
+  @spec same_top_jump_discards() :: transcript()
+  defp same_top_jump_discards do
     rows = rows_for(0, 10)
     win1 = window(window_id: 1, rows: rows, top: 0, epoch: 1, full_refresh: true, scroll_seq: 5)
 
-    # A jump that lands on exactly the previous/echoed top with NO scroll_seq bump:
-    # the documented current limitation. The frontend cannot tell it apart from an
-    # echo, so it does NOT discard. When the future explicit bump_scroll_seq lands
-    # at the authoritative jump call sites, this frame carries scroll_seq 6 and the
-    # expectation flips to offset_discarded = true.
-    win2 = window(window_id: 1, rows: rows, top: 0, epoch: 1, full_refresh: false, scroll_seq: 5)
+    # A jump that lands on exactly the previous/echoed top. The settle-time top
+    # comparison cannot see it, but the authoritative-scroll marker set by the jump
+    # command bumps scroll_seq anyway (#2652), so the frame carries scroll_seq 6 and
+    # the frontend discards its local offset. The anchor key is byte-identical to
+    # win1's; only the sequence increase disambiguates the jump from an echo.
+    win2 = window(window_id: 1, rows: rows, top: 0, epoch: 1, full_refresh: false, scroll_seq: 6)
     {viewport_delta, true} = WindowEncoder.encode_viewport_delta(win2, hashes(rows))
 
     transcript(
-      "same_top_jump_documented_limitation",
+      "same_top_jump_discards",
       "input",
       %{swift: true, go: true},
-      "DOCUMENTED CURRENT LIMITATION: a jump landing on exactly the previous top without a scroll_seq bump is indistinguishable from an echo, so no discard happens. The future explicit bump_scroll_seq at the jump call sites will flip this expectation to offset_discarded = true.",
+      "An authoritative viewport jump (zz already centered, a search hit already on screen) lands on exactly the previous top. The explicit authoritative-scroll marker bumps scroll_seq even with an unchanged anchor, so the frontend discards its local offset (#2652).",
       [
         frame(
           @op_window_content,
@@ -472,11 +472,16 @@ defmodule Mix.Tasks.Conformance.Gen do
           }
         ),
         inject_offset(1, 3, 0),
-        frame(@op_viewport_delta, "same anchor, same scroll_seq (no bump)", viewport_delta, %{
-          "store_present" => true,
-          "anchor" => anchor(win2),
-          "offset_discarded" => discarded?(scroll(win1), scroll(win2))
-        })
+        frame(
+          @op_viewport_delta,
+          "same anchor, scroll_seq 6 (authoritative marker bump)",
+          viewport_delta,
+          %{
+            "store_present" => true,
+            "anchor" => anchor(win2),
+            "offset_discarded" => discarded?(scroll(win1), scroll(win2))
+          }
+        )
       ]
     )
   end
