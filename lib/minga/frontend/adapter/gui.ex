@@ -374,9 +374,10 @@ defmodule Minga.Frontend.Adapter.GUI do
 
   # Row-content key for the content fingerprint. On the residence path the
   # builder supplies an incrementally maintained digest keyed by
-  # row_id/content_hash; using it keeps the frame-emit gate O(changed rows)
-  # instead of O(document). Off residence there is no digest and the raw rows
-  # list is hashed, preserving the exact windowed fingerprint.
+  # row_id/content_hash; the O(changed rows) cost is paid upstream in
+  # ResidentBuild's splice, making this gate O(1). Off residence there is no
+  # digest and the raw rows list is hashed, preserving the exact windowed
+  # fingerprint.
   @spec row_content_key(RenderModel.Window.t()) :: term()
   defp row_content_key(%RenderModel.Window{content_digest: nil} = window), do: window.rows
 

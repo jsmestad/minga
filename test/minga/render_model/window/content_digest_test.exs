@@ -4,8 +4,9 @@ defmodule Minga.RenderModel.Window.ContentDigestTest do
 
   The digest gates the resident-window frame-emit, so the load-bearing
   properties are: (b) the incremental digest always equals a full recompute, and
-  the AC3 corollary that a digest changes exactly when a row's `{row_id,
-  content_hash}` pair changes, with no spurious change on an edit-back-to-original.
+  the AC3 corollary that a digest changes with overwhelming probability when a
+  row's `{row_id, content_hash}` pair changes, with no spurious change on an
+  edit-back-to-original.
   """
 
   use ExUnit.Case, async: true
@@ -94,6 +95,13 @@ defmodule Minga.RenderModel.Window.ContentDigestTest do
 
         changed = ContentDigest.update(base, id, old_hash, new_hash)
         restored = ContentDigest.update(changed, id, new_hash, old_hash)
+
+        # A genuinely different content hash should change the digest (modulo
+        # the ~2^-27 phash2 collision rate, which is vanishingly unlikely with
+        # our small generator range).
+        if old_hash != new_hash do
+          assert changed != base
+        end
 
         # No spurious change when the content did not actually change.
         if old_hash == new_hash do

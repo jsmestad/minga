@@ -14,9 +14,9 @@ defmodule Minga.RenderModel.Window.ContentDigest do
   The digest is a fold over per-row *cells*, where a cell is
   `phash2({row_id, content_hash})`. `row_id` already encodes the row's buffer
   line (`Row.stable_id/4`), so a cell captures both a row's identity/position and
-  its rendered content. Two row lists produce the same digest exactly when they
-  carry the same multiset of `{row_id, content_hash}` pairs, which is exactly
-  when they render identically.
+  its rendered content. Two row lists produce the same digest with overwhelming
+  probability when they carry the same multiset of `{row_id, content_hash}` pairs
+  (see Collision behaviour below for the probabilistic bound).
 
   ## Algebra
 
@@ -29,11 +29,14 @@ defmodule Minga.RenderModel.Window.ContentDigest do
 
   ## Collision behaviour
 
-  The digest is `phash2`-derived, so a content change is missed only when the old
-  and new cells collide (~1 in 2^27 per changed row). This matches the collision
-  profile of the whole-list `phash2` it replaces; it does not add risk. Row ids
-  are assumed unique within a window (guaranteed by `Row.stable_id/4` per
-  position); the digest is a set digest under that assumption.
+  The digest is `phash2`-derived, so a single-row content change is missed only
+  when the old and new cells collide (~1 in 2^27 per changed row). For multi-row
+  splices the deltas of several rows can also XOR-cancel even when no single row
+  collides; the overall miss probability stays in the same ~2^-27 order. This
+  matches the collision profile of the whole-list `phash2` it replaces; it does
+  not add risk. Row ids are assumed unique within a window (guaranteed by
+  `Row.stable_id/4` per position); the digest is a set digest under that
+  assumption.
   """
 
   import Bitwise
@@ -41,7 +44,7 @@ defmodule Minga.RenderModel.Window.ContentDigest do
   alias Minga.RenderModel.Window.Row
 
   @typedoc "An opaque non-negative integer digest."
-  @type t :: non_neg_integer()
+  @opaque t :: non_neg_integer()
 
   @doc "Returns the digest of an empty row set."
   @spec empty() :: t()
@@ -65,7 +68,7 @@ defmodule Minga.RenderModel.Window.ContentDigest do
   """
   @spec remove(t(), Row.row_id(), non_neg_integer()) :: t()
   def remove(digest, row_id, content_hash) when is_integer(digest) do
-    bxor(digest, cell(row_id, content_hash))
+    add(digest, row_id, content_hash)
   end
 
   @doc "Replaces a row's content hash under the same id."

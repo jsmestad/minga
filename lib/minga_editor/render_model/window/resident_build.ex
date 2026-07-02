@@ -23,9 +23,12 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
   frame's, so every source that alters a resident row's rendered content routes
   to either a precise splice (buffer text edits) or a conservative full rebuild
   (everything the context fingerprint or the highlight fingerprint captures:
-  selection- and search-driven span overlays, diagnostics, git signs, decorations,
-  re-highlight spans). Nothing that changes a row is allowed to skip the digest,
-  which is the completeness guarantee AC 2 depends on.
+  search-driven and diagnostic-underline decoration spans, generic decorations,
+  re-highlight spans). Overlay- and gutter-only sources (selection, git signs,
+  diagnostic signs) are viewport-windowed fields of the window model, not baked
+  into `Row.content_hash`, so off-screen changes to them correctly produce no
+  resident re-emit. Nothing that changes a row's rendered content is allowed to
+  skip the digest, which is the completeness guarantee AC 2 depends on.
   """
 
   alias Minga.RenderModel.Window.ContentDigest
@@ -40,7 +43,6 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
 
   @type t :: %__MODULE__{
           store: ResidentStore.t(),
-          retained_rows: retained_rows(),
           compose_fp: integer() | nil,
           highlight_fp: integer() | nil,
           line_count: integer(),
@@ -48,7 +50,6 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
         }
 
   defstruct store: %ResidentStore{},
-            retained_rows: %{},
             compose_fp: nil,
             highlight_fp: nil,
             line_count: -1,
@@ -71,6 +72,7 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
           required(:compose_fp) => integer(),
           required(:highlight_fp) => integer() | nil,
           required(:reset?) => boolean(),
+          required(:retained_rows) => retained_rows(),
           required(:build_all) => (-> [payload()]),
           required(:build_dirty) => (MapSet.t(non_neg_integer()) ->
                                        %{non_neg_integer() => payload()})
@@ -123,7 +125,6 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
 
     state = %__MODULE__{
       store: store,
-      retained_rows: retained,
       compose_fp: inputs.compose_fp,
       highlight_fp: inputs.highlight_fp,
       line_count: length(payloads),
@@ -159,7 +160,7 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
      %{
        payloads: ResidentStore.payloads(prev.store),
        digest: ResidentStore.digest(prev.store),
-       retained_rows: prev.retained_rows,
+       retained_rows: inputs.retained_rows,
        rasterized: 0,
        spliced: 0
      }}
@@ -175,11 +176,11 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
       end)
 
     retained =
-      Enum.reduce(dirty_payloads, prev.retained_rows, fn {_index, payload}, acc ->
+      Enum.reduce(dirty_payloads, inputs.retained_rows, fn {_index, payload}, acc ->
         Map.put(acc, payload.row.row_id, {retain_hash(payload), payload.row})
       end)
 
-    state = %{prev | store: store, retained_rows: retained, line_texts: inputs.line_texts}
+    state = %{prev | store: store, line_texts: inputs.line_texts}
 
     {state,
      %{

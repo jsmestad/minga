@@ -170,9 +170,11 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     #
     # Full-document residence (#2658) takes an incremental path: a persistent
     # ResidentBuild state splices only the rows whose text changed and maintains
-    # the content digest in O(changed rows), so an edit frame no longer rebuilds
-    # the whole document. Off residence this is the unchanged windowed build and
-    # `resident_result` is nil, so behaviour is byte identical.
+    # the content digest in O(changed rows). A tree-sitter re-highlight still
+    # triggers a full rebuild (the highlight fingerprint changes), but the common
+    # case (in-place text edit) avoids the O(document) compose. Off residence this
+    # is the unchanged windowed build and `resident_result` is nil, so behaviour
+    # is byte identical.
     {all_visual_entries, resident_result} =
       if scroll.full_residence do
         build_resident_entries(scroll, lines, first_line, ctx, snapshot, retain_ctx, opts)
@@ -389,6 +391,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       compose_fp: retain_ctx.compose_fp,
       highlight_fp: highlight_content_fingerprint(ctx.highlight),
       reset?: scroll.full_refresh,
+      retained_rows: retain_ctx.prev,
       build_all: fn ->
         build_visual_entries(lines, first_line, nil, false, ctx, snapshot, retain_ctx)
       end,
@@ -398,15 +401,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     }
 
     {state, result} = ResidentBuild.run(Keyword.get(opts, :resident_build), inputs)
-
-    {result.payloads,
-     %{
-       retained_rows: result.retained_rows,
-       rasterized: result.rasterized,
-       digest: result.digest,
-       state: state,
-       spliced: result.spliced
-     }}
+    {result.payloads, Map.put(result, :state, state)}
   end
 
   # Composes entries for exactly the dirty sequential line indices, reusing the
@@ -441,20 +436,15 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     end)
   end
 
-  # One byte-offset scan, materializing only the dirty lines' `{text, offset}`.
-  # Cheaper than building the full offset list every edit frame (#2658).
   @spec dirty_line_offsets([String.t()], non_neg_integer(), MapSet.t(non_neg_integer())) ::
           %{non_neg_integer() => {String.t(), non_neg_integer()}}
   defp dirty_line_offsets(lines, first_byte_off, dirty) do
-    {map, _off} =
-      lines
-      |> Enum.with_index()
-      |> Enum.reduce({%{}, first_byte_off}, fn {line, index}, {acc, off} ->
-        acc = if MapSet.member?(dirty, index), do: Map.put(acc, index, {line, off}), else: acc
-        {acc, off + byte_size(line) + 1}
-      end)
-
-    map
+    lines
+    |> build_lines_with_offsets(first_byte_off)
+    |> Enum.with_index()
+    |> Enum.reduce(%{}, fn {{line, off}, index}, acc ->
+      if MapSet.member?(dirty, index), do: Map.put(acc, index, {line, off}), else: acc
+    end)
   end
 
   # Masked highlight segments for exactly the dirty lines, keyed by index. With no
