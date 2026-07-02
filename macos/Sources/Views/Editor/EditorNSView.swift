@@ -215,6 +215,7 @@ final class EditorNSView: MTKView {
         (layer as? CAMetalLayer)?.maximumDrawableCount = 3
 
         coreTextRenderer.setCursorAnimationReduceMotionDisabled(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+        scrollAnimationsReduceMotionDisabled = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     }
 
     @available(*, unavailable)
@@ -335,7 +336,13 @@ final class EditorNSView: MTKView {
         accessibilityTask = Task { @MainActor [weak self] in
             for await _ in NotificationCenter.default.notifications(named: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification) {
                 guard let self else { return }
-                self.coreTextRenderer.setCursorAnimationReduceMotionDisabled(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+                let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                self.coreTextRenderer.setCursorAnimationReduceMotionDisabled(reduceMotion)
+                self.scrollAnimationsReduceMotionDisabled = reduceMotion
+                if reduceMotion {
+                    // Snap any in-flight presentation scroll animation straight to the grid.
+                    self.resetSmoothScrollState()
+                }
                 if SystemBlinkTiming.blinkingDisabled {
                     self.stopCursorBlink()
                 } else {
@@ -354,6 +361,61 @@ final class EditorNSView: MTKView {
     /// Client-only boundary elasticity applied when the target pane is already
     /// at the top or bottom of the committed overscan range.
     private var scrollElasticOffsetY: CGFloat = 0
+
+    /// Raw accumulated overscroll pull (px) feeding the asymptotic rubber-band curve (AC2).
+    private var scrollElasticRawDistance: CGFloat = 0
+
+    /// Presentation-only decay of the residual sub-line offset toward the grid.
+    /// Drives the AC1 gesture-end settle and the AC3 eased discrete-wheel tick.
+    private var scrollSettleAnimator = PresentationScrollAnimator()
+
+    /// Presentation-only spring-back of the rubber-band elastic offset on release (AC2).
+    private var scrollElasticAnimator = PresentationScrollAnimator()
+
+    /// Window whose committed anchor the settle/discrete animation reconciles against.
+    /// Distinct from `scrollTargetWindowId`: it outlives the live gesture so the momentum-end
+    /// settle can keep unconfirmed-line compensation stable while the BEAM's anchor eases
+    /// forward, eliminating the back-then-forward stutter (AC1).
+    private var scrollSettleWindowId: UInt16?
+
+    /// Window whose rubber-band spring-back (AC2) is in flight. Like `scrollSettleWindowId`, it
+    /// outlives the live gesture so the renderer keeps applying the elastic offset to that pane
+    /// after `scrollTargetWindowId` has been released.
+    private var scrollElasticWindowId: UInt16?
+
+    /// The pane that should receive the presentation scroll/elastic offset this frame.
+    /// Decouples "which window shows the offset" from "a gesture is active": during a settle or
+    /// spring-back the gesture target is nil (so `onScrollPresentationReset` discards can win),
+    /// but the offset must still land on the settling/elastic pane.
+    private var presentationScrollWindowId: UInt16? {
+        Self.presentationScrollWindowId(
+            targetWindowId: scrollTargetWindowId,
+            settleWindowId: scrollSettleWindowId,
+            elasticWindowId: scrollElasticWindowId
+        )
+    }
+
+    /// Resolves the pane that owns the presentation offset, preferring the live gesture target,
+    /// then the settling window, then the elastic spring-back window. Pure for testability.
+    nonisolated static func presentationScrollWindowId(targetWindowId: UInt16?, settleWindowId: UInt16?, elasticWindowId: UInt16?) -> UInt16? {
+        targetWindowId ?? settleWindowId ?? elasticWindowId
+    }
+
+    /// System Reduce Motion state, which disables all presentation scroll animations (AC4).
+    private var scrollAnimationsReduceMotionDisabled = false
+
+    /// Whether presentation scroll animations may run. Mirrors the cursor-animation
+    /// accessibility check: Reduce Motion turns every animation into an instant snap.
+    private var scrollAnimateEnabled: Bool { !scrollAnimationsReduceMotionDisabled }
+
+    /// Gesture-end settle duration (AC1): roughly 80-120ms per the acceptance criteria.
+    private static let scrollSettleDuration: CFTimeInterval = 0.10
+    /// Rubber-band spring-back duration on release (AC2).
+    private static let scrollElasticSpringBackDuration: CFTimeInterval = 0.35
+    /// Eased discrete-wheel tick duration (AC3).
+    private static let scrollDiscreteTickDuration: CFTimeInterval = 0.12
+    /// Rubber-band asymptote, in cells (AC2: about 3-4 cells of pull).
+    private static let scrollElasticLimitCells: CGFloat = 3.5
 
     /// Window receiving the current fractional smooth-scroll offset.
     /// Nil means the event location did not resolve to a scrollable editor window, so fractional offset is disabled instead of shifting every pane.
@@ -416,6 +478,7 @@ final class EditorNSView: MTKView {
         }
 
         clearSmoothScrollStateIfTargetWindowMissing()
+        advancePresentationScrollAnimation()
 
         let validGutterHoverWindowId = gutterHoverWindowId.flatMap { windowId in
             dispatcher.currentFrameWindowIds.contains(windowId) ? windowId : nil
@@ -433,7 +496,7 @@ final class EditorNSView: MTKView {
                                 drawable: drawable, viewportSize: drawableSize,
                                 contentScale: scale,
                                 scrollOffset: SIMD2<Float>(Float(scrollPixelOffset.x), Float(scrollPixelOffset.y + scrollElasticOffsetY)),
-                                scrollTargetWindowId: scrollTargetWindowId)
+                                presentationWindowId: presentationScrollWindowId)
         if coreTextRenderer.cursorAnimationGeneration != cursorAnimationGeneration {
             resetCursorBlink()
         }
@@ -1438,7 +1501,9 @@ final class EditorNSView: MTKView {
 
     override func scrollWheel(with event: NSEvent) {
         if event.hasPreciseScrollingDeltas && event.phase == .began {
-            finishSmoothScrollGesture()
+            // A fresh trackpad gesture supersedes any in-flight settle; the `.began`
+            // branch in handleTrackpadScroll performs the full reset.
+            cancelScrollAnimations()
         }
 
         let (row, col) = cellPosition(from: event)
@@ -1479,11 +1544,19 @@ final class EditorNSView: MTKView {
 
     private func handleTrackpadScroll(event: NSEvent, row: Int16, col: Int16, mods: UInt8) {
         if event.phase == .began {
+            cancelScrollAnimations()
             scrollAccumulator.reset()
+            scrollPixelOffset = .zero
             scrollElasticOffsetY = 0
             scrollTargetWindowId = nil
             scrollTargetCellPosition = nil
             resetScrollTrackingState()
+        } else if event.momentumPhase == .began || event.momentumPhase == .changed {
+            // Momentum resuming after finger-lift: cancel the tentative settle started at
+            // `.ended` so the animator and live momentum don't both drive the offset. The
+            // unconfirmed-line bookkeeping is preserved for continuity; momentum re-latches
+            // the target below via establishSmoothScrollTargetIfNeeded.
+            cancelScrollAnimations()
         }
 
         let (lockedDeltaX, lockedDeltaY) = axisLockedDeltas(
@@ -1554,41 +1627,24 @@ final class EditorNSView: MTKView {
         }
 
         if let sp = targetScrollPresentation {
-            if let lastAnchor = scrollLastConfirmedAnchorTop {
-                let anchorDelta = Int(sp.anchorTop) - Int(lastAnchor)
-                if anchorDelta != 0 {
-                    let prev = scrollUnconfirmedLines
-                    scrollUnconfirmedLines -= anchorDelta
-                    if prev >= 0 && scrollUnconfirmedLines < 0 { scrollUnconfirmedLines = 0 }
-                    if prev <= 0 && scrollUnconfirmedLines > 0 { scrollUnconfirmedLines = 0 }
-                    scrollLastConfirmedAnchorTop = sp.anchorTop
-                }
-            } else {
-                scrollLastConfirmedAnchorTop = sp.anchorTop
-            }
+            reconcileUnconfirmedLines(against: sp)
         }
 
         let compensatedOffsetY = scrollAccumulator.pixelOffsetY + CGFloat(scrollUnconfirmedLines) * effectiveCellHeight
         let translation = Self.presentationScrollTranslation(
             scrollPresentation: targetScrollPresentation,
-            scrollOffset: CGPoint(x: scrollAccumulator.pixelOffsetX, y: compensatedOffsetY),
+            scrollOffsetY: compensatedOffsetY,
             scrollDeltaY: lockedDeltaY,
-            currentElasticOffsetY: scrollElasticOffsetY,
-            cellHeight: effectiveCellHeight,
             payloadOverscanBefore: payloadOverscan.before,
             payloadOverscanAfter: payloadOverscan.after,
             boundaryBefore: boundaryAvailability.before,
             boundaryAfter: boundaryAvailability.after
         )
-        if translation.scrollOffset.y == 0, translation.elasticOffsetY != 0 {
-            scrollAccumulator.snapVertical()
-            scrollUnconfirmedLines = 0
-        }
         let suppressLocalOffset = scrollTargetWindowId == nil || isSelectionDragActive
-        scrollPixelOffset = suppressLocalOffset ? CGPoint(x: 0, y: 0) : translation.scrollOffset
-        scrollElasticOffsetY = suppressLocalOffset ? 0 : translation.elasticOffsetY
+        let offsetX = suppressLocalOffset ? 0 : scrollAccumulator.pixelOffsetX
+        applyPresentationTranslation(translation, offsetX: offsetX, suppressLocalOffset: suppressLocalOffset)
 
-        // Snap to zero when gesture/momentum ends
+        // Settle onto the grid when the gesture, then any following momentum, truly ends.
         if (event.phase == .ended || event.phase == .cancelled) && event.momentumPhase == [] {
             finishSmoothScrollGesture()
         }
@@ -1601,16 +1657,71 @@ final class EditorNSView: MTKView {
         needsDisplay = true
     }
 
+    /// Ends a smooth-scroll gesture. With animations enabled this eases the residual sub-line
+    /// offset to the grid (AC1) and springs the rubber band back (AC2) instead of snapping;
+    /// under Reduce Motion it hard-resets to the grid immediately.
     private func finishSmoothScrollGesture() {
+        guard scrollAnimateEnabled else {
+            hardResetSmoothScroll()
+            return
+        }
+
+        var startedAnimation = false
+
+        // AC2: release at an overscrolled edge springs the elastic offset back to 0.
+        if scrollElasticOffsetY != 0 {
+            scrollElasticAnimator.start(offset: scrollElasticOffsetY, duration: Self.scrollElasticSpringBackDuration)
+            scrollElasticRawDistance = 0
+            // Keep applying the elastic to its pane after the gesture target is released.
+            scrollElasticWindowId = scrollTargetWindowId ?? scrollElasticWindowId
+            startedAnimation = true
+        }
+
+        // AC1: ease the residual sub-line offset to the grid while unconfirmed-line
+        // reconciliation keeps the anchor easing forward (no back-then-forward stutter).
+        if let windowId = scrollTargetWindowId, scrollUnconfirmedLines != 0 || scrollAccumulator.pixelOffsetY != 0 {
+            let residual = scrollAccumulator.pixelOffsetY
+            scrollAccumulator.reset()
+            beginScrollSettle(windowId: windowId, residual: residual, duration: Self.scrollSettleDuration)
+            startedAnimation = true
+        }
+
+        // Release live-gesture-only state; the settle keeps reconciling via scrollSettleWindowId.
+        if let windowId = scrollTargetWindowId {
+            scrollPrefetchEpoch.removeValue(forKey: windowId)
+        }
+        scrollTargetWindowId = nil
+        scrollTargetCellPosition = nil
+        scrollAxisLock = .undecided
+        scrollAxisAccumulatedX = 0
+        scrollAxisAccumulatedY = 0
+
+        if !startedAnimation {
+            scrollAccumulator.reset()
+            scrollPixelOffset = .zero
+            scrollElasticOffsetY = 0
+            scrollElasticRawDistance = 0
+            scrollUnconfirmedLines = 0
+            scrollLastConfirmedAnchorTop = nil
+            scrollSettleWindowId = nil
+            scrollElasticWindowId = nil
+        }
+        needsDisplay = true
+    }
+
+    /// Instantly resets all smooth-scroll and animation state to the grid (Reduce Motion / cleanup).
+    private func hardResetSmoothScroll() {
         scrollAccumulator.reset()
-        scrollPixelOffset = CGPoint(x: 0, y: 0)
+        scrollPixelOffset = .zero
         scrollElasticOffsetY = 0
         if let windowId = scrollTargetWindowId {
             scrollPrefetchEpoch.removeValue(forKey: windowId)
         }
         scrollTargetWindowId = nil
         scrollTargetCellPosition = nil
+        cancelScrollAnimations()
         resetScrollTrackingState()
+        needsDisplay = true
     }
 
     private func resetScrollTrackingState() {
@@ -1619,6 +1730,131 @@ final class EditorNSView: MTKView {
         scrollAxisAccumulatedY = 0
         scrollUnconfirmedLines = 0
         scrollLastConfirmedAnchorTop = nil
+    }
+
+    /// Cancels in-flight presentation scroll animations without moving the offset.
+    /// Callers snap or reset the offset separately. Preserves unconfirmed-line bookkeeping
+    /// so a resuming momentum gesture stays continuous.
+    private func cancelScrollAnimations() {
+        scrollSettleAnimator.cancel()
+        scrollElasticAnimator.cancel()
+        scrollSettleWindowId = nil
+        scrollElasticWindowId = nil
+        scrollElasticRawDistance = 0
+    }
+
+    /// Begins the AC1/AC3 settle: decays `residual` px to the grid while the draw loop
+    /// reconciles unconfirmed lines against `windowId`'s committed anchor.
+    private func beginScrollSettle(windowId: UInt16, residual: CGFloat, duration: CFTimeInterval) {
+        if let current = scrollSettleWindowId, current != windowId {
+            // Settling switched panes: rebase the anchor reconciliation baseline.
+            scrollLastConfirmedAnchorTop = nil
+        }
+        scrollSettleWindowId = windowId
+        if scrollLastConfirmedAnchorTop == nil {
+            scrollLastConfirmedAnchorTop = guiState?.windowContents[windowId]?.scrollPresentation?.anchorTop
+        }
+        scrollSettleAnimator.start(offset: residual, duration: duration)
+        // Reflect the seeded offset immediately so this frame is continuous with the last.
+        scrollPixelOffset = CGPoint(x: scrollPixelOffset.x, y: residual + CGFloat(scrollUnconfirmedLines) * effectiveCellHeight)
+        needsDisplay = true
+    }
+
+    /// Reconciles the predicted unconfirmed-line count against a freshly committed anchor.
+    /// Keeps the rendered position stable as the BEAM's anchor catches up to local prediction.
+    private func reconcileUnconfirmedLines(against sp: GUIScrollPresentation) {
+        guard let lastAnchor = scrollLastConfirmedAnchorTop else {
+            scrollLastConfirmedAnchorTop = sp.anchorTop
+            return
+        }
+        let anchorDelta = Int(sp.anchorTop) - Int(lastAnchor)
+        guard anchorDelta != 0 else { return }
+        scrollUnconfirmedLines = Self.reconciledUnconfirmedLines(current: scrollUnconfirmedLines, anchorDelta: anchorDelta)
+        scrollLastConfirmedAnchorTop = sp.anchorTop
+    }
+
+    /// Advances the settle and rubber-band spring-back animations one frame.
+    ///
+    /// The MTKView is paused, so this self-retriggers `needsDisplay` while an animation runs,
+    /// mirroring the cursor animation's draw-loop self-retrigger. Discards always win: the state
+    /// is cleared out from under this by `resetSmoothScrollState()` before it runs.
+    private func advancePresentationScrollAnimation() {
+        guard scrollAnimateEnabled else { return }
+        let now = CACurrentMediaTime()
+        var keepAnimating = false
+
+        if let windowId = scrollSettleWindowId {
+            if let sp = guiState?.windowContents[windowId]?.scrollPresentation {
+                reconcileUnconfirmedLines(against: sp)
+            }
+            let residual = scrollSettleAnimator.offset(now: now)
+            let offsetY = residual + CGFloat(scrollUnconfirmedLines) * effectiveCellHeight
+            scrollPixelOffset = CGPoint(x: scrollPixelOffset.x, y: offsetY)
+            if scrollSettleAnimator.isActive {
+                keepAnimating = true
+            } else if scrollUnconfirmedLines == 0 {
+                // Fully settled: residual is exactly 0 and no unconfirmed lines remain.
+                scrollSettleWindowId = nil
+                scrollLastConfirmedAnchorTop = nil
+                scrollPixelOffset = CGPoint(x: scrollPixelOffset.x, y: 0)
+            }
+            // Otherwise the residual is done but whole (on-grid) lines are still committing;
+            // keep reconciling on future BEAM frames, which drive their own redraws.
+        }
+
+        if scrollElasticAnimator.isActive {
+            scrollElasticOffsetY = scrollElasticAnimator.offset(now: now)
+            if scrollElasticAnimator.isActive {
+                keepAnimating = true
+            } else {
+                scrollElasticOffsetY = 0
+                scrollElasticRawDistance = 0
+                scrollElasticWindowId = nil
+            }
+        }
+
+        if keepAnimating {
+            needsDisplay = true
+        }
+    }
+
+    /// Applies the pure translation decision to the live presentation offset and rubber band.
+    private func applyPresentationTranslation(_ translation: ScrollTranslation, offsetX: CGFloat, suppressLocalOffset: Bool) {
+        switch translation {
+        case .content(let offsetY):
+            // Scrolling within real content: no rubber band.
+            scrollElasticOffsetY = 0
+            scrollElasticRawDistance = 0
+            scrollPixelOffset = CGPoint(x: offsetX, y: suppressLocalOffset ? 0 : offsetY)
+
+        case .elastic(let pullDelta):
+            let limit = effectiveCellHeight * Self.scrollElasticLimitCells
+            // AC2: on the frame the elastic engages, fold the residual sub-line offset into the
+            // rubber band instead of popping it to 0. The whole-line overscroll can't be
+            // predicted past the boundary, so it snaps (usually 0 near the edge).
+            let enteringElastic = scrollElasticRawDistance == 0 && scrollElasticOffsetY == 0
+            if enteringElastic {
+                let residual = scrollAccumulator.pixelOffsetY
+                scrollAccumulator.snapVertical()
+                scrollUnconfirmedLines = 0
+                if scrollAnimateEnabled, residual != 0 {
+                    let sign: CGFloat = pullDelta >= 0 ? 1 : -1
+                    scrollElasticRawDistance = sign * PresentationScrollAnimator.inverseRubberBandDistance(offset: abs(residual), limit: limit)
+                }
+            } else {
+                scrollAccumulator.snapVertical()
+                scrollUnconfirmedLines = 0
+            }
+
+            if scrollAnimateEnabled && !suppressLocalOffset {
+                scrollElasticRawDistance += pullDelta
+                scrollElasticOffsetY = PresentationScrollAnimator.rubberBandOffset(rawDistance: scrollElasticRawDistance, limit: limit)
+            } else {
+                scrollElasticOffsetY = 0
+                scrollElasticRawDistance = 0
+            }
+            scrollPixelOffset = CGPoint(x: offsetX, y: 0)
+        }
     }
 
     private func axisLockedDeltas(deltaX: CGFloat, deltaY: CGFloat) -> (CGFloat, CGFloat) {
@@ -1655,16 +1891,28 @@ final class EditorNSView: MTKView {
         scrollElasticOffsetY = 0
         scrollTargetWindowId = nil
         scrollTargetCellPosition = nil
+        cancelScrollAnimations()
         resetScrollTrackingState()
         needsDisplay = true
     }
 
     private func clearSmoothScrollStateIfTargetWindowMissing() {
-        guard let targetWindowId = scrollTargetWindowId else { return }
-        guard dispatcher.currentFrameWindowIds.contains(targetWindowId), guiState?.windowContents[targetWindowId] != nil else {
+        // Covers the live gesture target and the settle / elastic windows that outlive it: if any
+        // pane owning presentation state has closed, drop the offset and cancel its animation so a
+        // stale whole-cell offset can't linger after the animator finishes on a vanished pane.
+        let available = Set(dispatcher.currentFrameWindowIds.filter { guiState?.windowContents[$0] != nil })
+        if Self.missingPresentationWindow(
+            candidateWindowIds: [scrollTargetWindowId, scrollSettleWindowId, scrollElasticWindowId],
+            availableWindowIds: available
+        ) {
             resetSmoothScrollState()
-            return
         }
+    }
+
+    /// Returns true when any non-nil presentation window is no longer available (frame missing or
+    /// content dropped), so the caller can clear stale offset/animation state. Pure for testability.
+    nonisolated static func missingPresentationWindow(candidateWindowIds: [UInt16?], availableWindowIds: Set<UInt16>) -> Bool {
+        candidateWindowIds.compactMap { $0 }.contains { !availableWindowIds.contains($0) }
     }
 
     nonisolated static func smoothScrollEventCellPosition(targetCell: (row: Int16, col: Int16)?, row: Int16, col: Int16) -> (row: Int16, col: Int16) {
@@ -1701,6 +1949,7 @@ final class EditorNSView: MTKView {
         scrollAccumulator.reset()
         scrollPixelOffset = CGPoint(x: 0, y: 0)
         scrollElasticOffsetY = 0
+        cancelScrollAnimations()
     }
 
     nonisolated static func shouldResetSmoothScrollTarget(currentTargetWindowId: UInt16?, pointerWindowId: UInt16?, hasPixelOffset: Bool) -> Bool {
@@ -1738,20 +1987,31 @@ final class EditorNSView: MTKView {
         return NSPoint(x: point.x, y: normalizedY)
     }
 
+    /// Result of classifying a vertical scroll delta against the pane's content and boundaries.
+    enum ScrollTranslation: Equatable {
+        /// Scrolling within real content: present the given fractional offset, no rubber band.
+        case content(offsetY: CGFloat)
+        /// Overscrolling past a document edge: the caller accumulates `pullDelta` (px) into the
+        /// rubber-band curve. The presented content offset is pinned to the boundary (0).
+        case elastic(pullDelta: CGFloat)
+    }
+
+    /// Classifies a vertical scroll delta as in-content or overscroll (rubber band).
+    ///
+    /// The rubber-band magnitude is no longer computed here: the caller maps accumulated pull
+    /// through `PresentationScrollAnimator.rubberBandOffset` so the curve is asymptotic and the
+    /// spring-back animation can own the offset on release (AC2).
     nonisolated static func presentationScrollTranslation(
         scrollPresentation: GUIScrollPresentation?,
-        scrollOffset: CGPoint,
+        scrollOffsetY: CGFloat,
         scrollDeltaY: CGFloat,
-        currentElasticOffsetY: CGFloat,
-        cellHeight: CGFloat,
         payloadOverscanBefore: Int,
         payloadOverscanAfter: Int,
         boundaryBefore: Int,
         boundaryAfter: Int
-    ) -> (scrollOffset: CGPoint, elasticOffsetY: CGFloat) {
-        guard scrollPresentation != nil else { return (scrollOffset, 0) }
-        guard cellHeight > 0 else { return (scrollOffset, 0) }
-        guard scrollDeltaY != 0 else { return (scrollOffset, currentElasticOffsetY) }
+    ) -> ScrollTranslation {
+        guard scrollPresentation != nil else { return .content(offsetY: scrollOffsetY) }
+        guard scrollDeltaY != 0 else { return .content(offsetY: scrollOffsetY) }
 
         let pullingTowardBefore = scrollDeltaY > 0
         let pullingTowardAfter = scrollDeltaY < 0
@@ -1759,19 +2019,28 @@ final class EditorNSView: MTKView {
             (pullingTowardBefore && payloadOverscanBefore > 0) ||
             (pullingTowardAfter && payloadOverscanAfter > 0)
         if hasRenderablePayload {
-            return (scrollOffset, 0)
+            return .content(offsetY: scrollOffsetY)
         }
 
         let pullingPastTop = pullingTowardBefore && boundaryBefore == 0
         let pullingPastBottom = pullingTowardAfter && boundaryAfter == 0
         guard pullingPastTop || pullingPastBottom else {
-            return (CGPoint(x: scrollOffset.x, y: 0), 0)
+            return .content(offsetY: 0)
         }
 
-        let maxElastic = max(cellHeight * 0.75, 1)
-        let dampedPull = -scrollDeltaY * 0.35
-        let elasticOffsetY = min(max(currentElasticOffsetY + dampedPull, -maxElastic), maxElastic)
-        return (CGPoint(x: scrollOffset.x, y: 0), elasticOffsetY)
+        return .elastic(pullDelta: -scrollDeltaY)
+    }
+
+    /// Reconciles a predicted unconfirmed-line count against a committed anchor delta.
+    ///
+    /// Subtracts the delta and clamps to 0 when the confirmation overshoots (sign flip), which
+    /// keeps the presentation from fighting an authoritative anchor jump. Pure for testability.
+    nonisolated static func reconciledUnconfirmedLines(current: Int, anchorDelta: Int) -> Int {
+        guard anchorDelta != 0 else { return current }
+        let next = current - anchorDelta
+        if current >= 0 && next < 0 { return 0 }
+        if current <= 0 && next > 0 { return 0 }
+        return next
     }
 
     nonisolated static func presentationScrollBoundaryAvailability(
@@ -1850,9 +2119,11 @@ final class EditorNSView: MTKView {
         if event.scrollingDeltaY > 0 {
             encoder.sendMouseEvent(row: row, col: col, button: MOUSE_SCROLL_UP,
                                    modifiers: mods, eventType: MOUSE_PRESS)
+            seedDiscreteScrollAnimation(row: row, col: col, lineDelta: -1)
         } else if event.scrollingDeltaY < 0 {
             encoder.sendMouseEvent(row: row, col: col, button: MOUSE_SCROLL_DOWN,
                                    modifiers: mods, eventType: MOUSE_PRESS)
+            seedDiscreteScrollAnimation(row: row, col: col, lineDelta: 1)
         }
         if event.scrollingDeltaX > 0 {
             encoder.sendMouseEvent(row: row, col: col, button: MOUSE_SCROLL_LEFT,
@@ -1861,6 +2132,25 @@ final class EditorNSView: MTKView {
             encoder.sendMouseEvent(row: row, col: col, button: MOUSE_SCROLL_RIGHT,
                                    modifiers: mods, eventType: MOUSE_PRESS)
         }
+    }
+
+    /// AC3: eases a discrete-wheel line motion locally on the same frame it arrives instead of
+    /// teleporting at round-trip latency. The GUI scrolls exactly one line per wheel event
+    /// (`@gui_scroll_lines`), so a `lineDelta` of ±1 is seeded as a predicted unconfirmed line;
+    /// the draw loop reconciles it against the committed anchor and decays the residual to the
+    /// grid. The scroll intent already sent above is unchanged: the BEAM sees an identical report.
+    private func seedDiscreteScrollAnimation(row: Int16, col: Int16, lineDelta: Int) {
+        guard scrollAnimateEnabled, !isSelectionDragActive else { return }
+        // Never fight a live trackpad gesture; discrete and precise input are mutually exclusive.
+        guard scrollTargetWindowId == nil else { return }
+        guard effectiveCellHeight > 0 else { return }
+        guard let windowId = smoothScrollTargetWindowId(row: row, col: col) else { return }
+
+        // Extend any in-flight settle from its current position so rapid ticks accumulate smoothly.
+        let residualNow = scrollSettleAnimator.offset()
+        scrollUnconfirmedLines += lineDelta
+        let residual = residualNow - CGFloat(lineDelta) * effectiveCellHeight
+        beginScrollSettle(windowId: windowId, residual: residual, duration: Self.scrollDiscreteTickDuration)
     }
 
     /// Maps a ScrollAccumulator.Event to a protocol mouse event.
