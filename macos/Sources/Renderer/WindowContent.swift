@@ -254,8 +254,14 @@ public struct GUIScrollPresentation: Sendable, Equatable {
     public let overscanEndLine: UInt32
     public let contentEpoch: UInt32
     public let layoutGeneration: UInt32
+    /// Monotonic scroll-authority sequence (#2661). Advances only when the BEAM
+    /// commits a new anchor for a reason other than an echoed frontend scroll
+    /// report, so a frontend can tell a genuine jump apart from its own report
+    /// being reflected back even when the jump coincidentally lands on the same
+    /// `anchorTop`.
+    public let scrollSeq: UInt32
 
-    public init(windowId: UInt16, resetRequired: Bool, anchorTop: UInt32, anchorLeft: UInt16, anchorVisualRowOffset: UInt16, visibleStartLine: UInt32, visibleEndLine: UInt32, overscanStartLine: UInt32, overscanEndLine: UInt32, contentEpoch: UInt32, layoutGeneration: UInt32) {
+    public init(windowId: UInt16, resetRequired: Bool, anchorTop: UInt32, anchorLeft: UInt16, anchorVisualRowOffset: UInt16, visibleStartLine: UInt32, visibleEndLine: UInt32, overscanStartLine: UInt32, overscanEndLine: UInt32, contentEpoch: UInt32, layoutGeneration: UInt32, scrollSeq: UInt32 = 0) {
         self.windowId = windowId
         self.resetRequired = resetRequired
         self.anchorTop = anchorTop
@@ -267,6 +273,7 @@ public struct GUIScrollPresentation: Sendable, Equatable {
         self.overscanEndLine = overscanEndLine
         self.contentEpoch = contentEpoch
         self.layoutGeneration = layoutGeneration
+        self.scrollSeq = scrollSeq
     }
 
     public func isSameAnchorKey(as other: GUIScrollPresentation) -> Bool {

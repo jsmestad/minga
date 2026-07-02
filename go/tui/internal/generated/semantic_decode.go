@@ -1820,6 +1820,11 @@ func DecodeGuiWindowContentScrollPresentation(data []byte, offset int, windowEnd
 	}
 	layoutGeneration := decodeU32(data, pos)
 	pos += 4
+	if err := decodeRequireWindow(windowEnd, pos+4, "scroll_seq"); err != nil {
+		return GuiWindowContentScrollPresentation{}, offset, err
+	}
+	scrollSeq := decodeU32(data, pos)
+	pos += 4
 	return GuiWindowContentScrollPresentation{
 		WindowID:              windowID,
 		Flags:                 flags,
@@ -1832,6 +1837,7 @@ func DecodeGuiWindowContentScrollPresentation(data []byte, offset int, windowEnd
 		OverscanEndLine:       overscanEndLine,
 		ContentEpoch:          contentEpoch,
 		LayoutGeneration:      layoutGeneration,
+		ScrollSeq:             scrollSeq,
 	}, pos, nil
 }
 

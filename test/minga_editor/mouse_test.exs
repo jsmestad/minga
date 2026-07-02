@@ -72,6 +72,89 @@ defmodule MingaEditor.MouseTest do
     end
   end
 
+  describe "resident window scroll intent (#2661)" do
+    test "an in-bounds report moves only the viewport, cursor untouched" do
+      {state, buffer} = start_mouse_state(lines(0..99), width: 40, height: 20)
+      state = native_gui_state(state)
+      win_id = state.workspace.windows.active
+      state = mark_resident(state, win_id)
+      state = set_window_top(state, win_id, 40)
+      BufferProcess.move_to(buffer, {50, 0})
+
+      state = Mouse.handle_scroll_batch(state, win_id, 2, :down)
+
+      assert BufferProcess.cursor(buffer) == {50, 0}
+      assert window_viewport(state, win_id).top == 42
+    end
+
+    test "a report that would breach scrolloff drags the cursor along with the viewport" do
+      {state, buffer} = start_mouse_state(lines(0..99), width: 40, height: 20)
+      state = native_gui_state(state)
+      win_id = state.workspace.windows.active
+      state = mark_resident(state, win_id)
+      state = set_window_top(state, win_id, 40)
+      BufferProcess.move_to(buffer, {50, 0})
+
+      state = Mouse.handle_scroll_batch(state, win_id, 30, :down)
+
+      {cursor_line, _col} = BufferProcess.cursor(buffer)
+      new_top = window_viewport(state, win_id).top
+      assert new_top == 70
+      assert cursor_line >= new_top
+    end
+
+    test "a non-resident window keeps today's viewport-only behavior regardless of magnitude" do
+      {state, buffer} = start_mouse_state(lines(0..99), width: 40, height: 20)
+      state = native_gui_state(state)
+      win_id = state.workspace.windows.active
+      state = set_window_top(state, win_id, 40)
+      BufferProcess.move_to(buffer, {50, 0})
+
+      state = Mouse.handle_scroll_batch(state, win_id, 30, :down)
+
+      assert BufferProcess.cursor(buffer) == {50, 0}
+      assert window_viewport(state, win_id).top == 70
+    end
+
+    test "a resident window on a non-GUI frontend never drags the cursor" do
+      {state, buffer} = start_mouse_state(lines(0..99), width: 40, height: 20)
+      win_id = state.workspace.windows.active
+      state = mark_resident(state, win_id)
+      state = set_window_top(state, win_id, 40)
+      BufferProcess.move_to(buffer, {50, 0})
+
+      state = Mouse.handle_scroll_batch(state, win_id, 30, :down)
+
+      assert BufferProcess.cursor(buffer) == {50, 0}
+      assert window_viewport(state, win_id).top == 70
+    end
+
+    test "handle_scroll_batch records the committed top as the free-scroll echo top" do
+      {state, _buffer} = start_mouse_state(lines(0..99), width: 40, height: 20)
+      state = native_gui_state(state)
+      win_id = state.workspace.windows.active
+      state = mark_resident(state, win_id)
+
+      state = Mouse.handle_scroll_batch(state, win_id, 3, :down)
+
+      window = Map.fetch!(state.workspace.windows.map, win_id)
+      assert window.scroll_echo_top == window.viewport.top
+    end
+
+    test "H resolves against the reported top after a scroll report (ordered channel, AC2)" do
+      {state, buffer} = start_mouse_state(lines(0..99), width: 40, height: 20)
+      state = native_gui_state(state)
+      win_id = state.workspace.windows.active
+
+      state = Mouse.handle_scroll_batch(state, win_id, 10, :down)
+      state = Movement.execute(state, {:move_to_screen, :top})
+
+      {cursor_line, _col} = BufferProcess.cursor(buffer)
+      assert cursor_line == window_viewport(state, win_id).top
+      assert cursor_line == 10
+    end
+  end
+
   describe "click-to-position" do
     test "left click moves the cursor to the clicked buffer position" do
       {state, buffer} = start_mouse_state("hello\nworld\nfoo bar baz")
@@ -893,6 +976,18 @@ defmodule MingaEditor.MouseTest do
 
   defp window_viewport(state, window_id),
     do: Map.fetch!(state.workspace.windows.map, window_id).viewport
+
+  defp native_gui_state(state),
+    do: %{state | capabilities: %Capabilities{frontend_type: :native_gui}}
+
+  defp mark_resident(state, window_id),
+    do: EditorState.update_window(state, window_id, &Window.set_resident(&1, true))
+
+  defp set_window_top(state, window_id, top) do
+    EditorState.update_window(state, window_id, fn window ->
+      %{window | viewport: %{window.viewport | top: top}}
+    end)
+  end
 
   defp active_viewport(state), do: EditorState.active_window_struct(state).viewport
 

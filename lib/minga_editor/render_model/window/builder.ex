@@ -352,6 +352,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       geometry: geometry,
       content_epoch: scroll.content_epoch,
       full_refresh: scroll.full_refresh,
+      scroll_seq: scroll.scroll_seq,
       # Non-wrapped, non-folded windows emit consecutive :normal buffer lines, so
       # ScrollPresentation can derive the resident line range arithmetically.
       contiguous_rows: is_nil(visible_line_map) and not wrap_on,

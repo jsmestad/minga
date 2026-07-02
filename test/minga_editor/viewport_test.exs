@@ -283,6 +283,87 @@ defmodule MingaEditor.ViewportTest do
     end
   end
 
+  describe "scroll_by_with_scrolloff/5 (#2661)" do
+    test "delta of 0 is a no-op" do
+      vp = Viewport.new(10, 80, 0)
+      assert Viewport.scroll_by_with_scrolloff(vp, 5, 100, 0, 3) == {vp, 5}
+    end
+
+    test "in-bounds multi-line scroll down leaves the cursor untouched" do
+      # 20 visible rows, margin 5, top 0, cursor 10 (comfortably inside scrolloff at new top).
+      vp = Viewport.new(20, 80, 0)
+
+      {new_vp, cursor} = Viewport.scroll_by_with_scrolloff(vp, 10, 100, 3, 5)
+
+      assert new_vp.top == 3
+      assert cursor == 10
+    end
+
+    test "scrolling down far enough drags the cursor exactly like scroll_line_down" do
+      vp = Viewport.new(10, 80, 0)
+      vp = %{vp | top: 5}
+
+      {new_vp, clamped} = Viewport.scroll_by_with_scrolloff(vp, 5, 100, 1, 3)
+      {expected_vp, expected_cursor} = Viewport.scroll_line_down(vp, 5, 100, 3)
+
+      assert new_vp.top == expected_vp.top
+      assert clamped == expected_cursor
+    end
+
+    test "a large downward delta drags the cursor to respect the top margin" do
+      # 10 visible rows, margin 3, top 0, cursor 0. Scrolling down 5 lines at once
+      # must land the cursor at the same place a 5x single-line scroll_line_down
+      # sequence would, not merely clamp it to the old top.
+      vp = Viewport.new(10, 80, 0)
+
+      {new_vp, clamped} = Viewport.scroll_by_with_scrolloff(vp, 0, 100, 5, 3)
+
+      {expected_vp, expected_cursor} =
+        Enum.reduce(1..5, {vp, 0}, fn _, {v, c} -> Viewport.scroll_line_down(v, c, 100, 3) end)
+
+      assert new_vp.top == expected_vp.top
+      assert clamped == expected_cursor
+    end
+
+    test "in-bounds multi-line scroll up leaves the cursor untouched" do
+      vp = Viewport.new(20, 80, 0)
+      vp = %{vp | top: 10}
+
+      {new_vp, cursor} = Viewport.scroll_by_with_scrolloff(vp, 15, 100, -3, 5)
+
+      assert new_vp.top == 7
+      assert cursor == 15
+    end
+
+    test "scrolling up far enough drags the cursor exactly like scroll_line_up" do
+      vp = Viewport.new(10, 80, 0)
+      vp = %{vp | top: 5}
+
+      {new_vp, clamped} = Viewport.scroll_by_with_scrolloff(vp, 8, 100, -1, 3)
+      {expected_vp, expected_cursor} = Viewport.scroll_line_up(vp, 8, 100, 3)
+
+      assert new_vp.top == expected_vp.top
+      assert clamped == expected_cursor
+    end
+
+    test "top clamps at document start regardless of delta magnitude" do
+      vp = Viewport.new(10, 80, 0)
+      vp = %{vp | top: 2}
+
+      {new_vp, _clamped} = Viewport.scroll_by_with_scrolloff(vp, 5, 100, -50, 3)
+
+      assert new_vp.top == 0
+    end
+
+    test "top clamps at end of document regardless of delta magnitude" do
+      vp = Viewport.new(10, 80, 0)
+
+      {new_vp, _clamped} = Viewport.scroll_by_with_scrolloff(vp, 5, 30, 50, 3)
+
+      assert new_vp.top == 20
+    end
+  end
+
   describe "visual row offset" do
     test "new viewport starts at first visual row" do
       vp = Viewport.new(24, 80)

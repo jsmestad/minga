@@ -3457,7 +3457,7 @@ private func validatedScrollPresentation(_ presentation: GUIScrollPresentation?,
 }
 
 private func decodeScrollPresentation(data: Data, start: Int, end: Int) throws -> GUIScrollPresentation {
-    guard start + 35 <= end else { throw ProtocolDecodeError.malformed }
+    guard start + 39 <= end else { throw ProtocolDecodeError.malformed }
 
     return GUIScrollPresentation(
         windowId: readU16(data, start),
@@ -3470,7 +3470,8 @@ private func decodeScrollPresentation(data: Data, start: Int, end: Int) throws -
         overscanStartLine: readU32(data, start + 19),
         overscanEndLine: readU32(data, start + 23),
         contentEpoch: readU32(data, start + 27),
-        layoutGeneration: readU32(data, start + 31)
+        layoutGeneration: readU32(data, start + 31),
+        scrollSeq: readU32(data, start + 35)
     )
 }
 

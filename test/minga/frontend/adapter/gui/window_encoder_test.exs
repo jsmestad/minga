@@ -44,7 +44,8 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
       indent_guides: Keyword.get(opts, :indent_guides, nil),
       geometry: Keyword.get(opts, :geometry, nil),
       content_epoch: Keyword.get(opts, :content_epoch, 0),
-      full_refresh: Keyword.get(opts, :full_refresh, true)
+      full_refresh: Keyword.get(opts, :full_refresh, true),
+      scroll_seq: Keyword.get(opts, :scroll_seq, 0)
     }
   end
 
@@ -255,7 +256,8 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
              overscan_start_line: 7,
              overscan_end_line: 8,
              content_epoch: 42,
-             layout_generation: decoded.scroll_presentation.layout_generation
+             layout_generation: decoded.scroll_presentation.layout_generation,
+             scroll_seq: 0
            }
 
     assert is_integer(decoded.scroll_presentation.layout_generation)
@@ -267,6 +269,24 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
              :divider,
              :status_bar
            ]
+  end
+
+  test "encodes the scroll-authority sequence onto scroll presentation (#2661)" do
+    row = %Row{
+      row_id: Row.stable_id(:normal, 7),
+      row_type: :normal,
+      buf_line: 7,
+      text: "hello",
+      spans: [],
+      content_hash: 123
+    }
+
+    decoded =
+      window(content_epoch: 42, geometry: geometry_model(), rows: [row], scroll_seq: 9)
+      |> WindowEncoder.encode_window_content()
+      |> GUIWindowDecoder.decode()
+
+    assert decoded.scroll_presentation.scroll_seq == 9
   end
 
   test "encodes distinct visible and overscan bounds for simple windows" do

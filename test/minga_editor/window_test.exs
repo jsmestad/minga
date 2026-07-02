@@ -189,6 +189,77 @@ defmodule MingaEditor.WindowTest do
     end
   end
 
+  describe "scroll authority sequence (#2661)" do
+    test "new windows default to non-resident with scroll_seq 0 and no echo top" do
+      window = make_window()
+      refute Window.resident?(window)
+      assert Window.scroll_seq(window) == 0
+      assert window.scroll_echo_top == nil
+    end
+
+    test "set_resident/2 records the render pipeline's residence decision in the render cache" do
+      window = make_window()
+      assert Window.resident?(Window.set_resident(window, true))
+      refute Window.resident?(Window.set_resident(window, false))
+    end
+
+    test "mark_scroll_echo/2 records the committed top on the window (not the render cache)" do
+      window = Window.mark_scroll_echo(make_window(), 7)
+      assert window.scroll_echo_top == 7
+    end
+
+    test "settle_scroll_seq/1 establishes the baseline without bumping on the first settle" do
+      window = make_window() |> at_top(0) |> Window.settle_scroll_seq()
+      assert Window.scroll_seq(window) == 0
+    end
+
+    test "settle_scroll_seq/1 bumps when the top moves to a non-echo value" do
+      window =
+        make_window()
+        |> at_top(0)
+        |> Window.settle_scroll_seq()
+        |> at_top(5)
+        |> Window.settle_scroll_seq()
+
+      assert Window.scroll_seq(window) == 1
+    end
+
+    test "settle_scroll_seq/1 does not bump when the top matches the reported free-scroll top" do
+      window =
+        make_window()
+        |> at_top(0)
+        |> Window.settle_scroll_seq()
+        |> at_top(5)
+        |> Window.mark_scroll_echo(5)
+        |> Window.settle_scroll_seq()
+
+      assert Window.scroll_seq(window) == 0
+    end
+
+    test "settle_scroll_seq/1 is a no-op when the top did not change" do
+      window =
+        make_window()
+        |> at_top(3)
+        |> Window.settle_scroll_seq()
+        |> Window.settle_scroll_seq()
+
+      assert Window.scroll_seq(window) == 0
+    end
+
+    test "settle_scroll_seq/1 stays monotonic across repeated jumps" do
+      window =
+        make_window()
+        |> at_top(0)
+        |> Window.settle_scroll_seq()
+        |> at_top(5)
+        |> Window.settle_scroll_seq()
+        |> at_top(10)
+        |> Window.settle_scroll_seq()
+
+      assert Window.scroll_seq(window) == 2
+    end
+  end
+
   defp cached_window(window) do
     # Put the window in a "clean, previously rendered" state so a later
     # resize/invalidate is observable as a transition back to a full redraw.
@@ -197,6 +268,10 @@ defmodule MingaEditor.WindowTest do
 
   defp with_tracking(window, updates) do
     %{window | render_cache: Map.merge(window.render_cache, Map.new(updates))}
+  end
+
+  defp at_top(window, top) do
+    %{window | viewport: %{window.viewport | top: top}}
   end
 
   defp assert_fully_invalidated(window) do

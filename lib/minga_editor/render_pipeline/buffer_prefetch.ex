@@ -128,6 +128,18 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
             scroll.line_number_style
           )
 
+        # #2661: settle this frame's scroll-authority sequence and record the
+        # residence flag. Both live in the render cache (renderer-owned, written
+        # back via `State.merge_renderer_window/2`), so `scroll_seq` stays
+        # monotonic on the wire across the async render round trip and the input
+        # layer sees residence on the live window. `settle_scroll_seq/1` reads its
+        # own baseline and the sticky `scroll_echo_top` from the window, bumping
+        # `scroll_seq` only for a genuine BEAM-initiated anchor move.
+        updated_window =
+          updated_window
+          |> Window.settle_scroll_seq()
+          |> Window.set_resident(scroll.full_residence)
+
         {updated_window, content_epoch, full_refresh?} =
           Window.prepare_render_epoch(updated_window, render_reset_fingerprint(scroll))
 
@@ -135,7 +147,8 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
           scroll
           | window: updated_window,
             content_epoch: content_epoch,
-            full_refresh: full_refresh?
+            full_refresh: full_refresh?,
+            scroll_seq: Window.scroll_seq(updated_window)
         }
 
         new_map = Map.put(st.workspace.windows.map, win_id, updated_window)

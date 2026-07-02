@@ -337,9 +337,15 @@ defmodule MingaEditor.Commands.Movement do
   # ── Screen-relative motions ───────────────────────────────────────────────
 
   def execute(
-        %{workspace: %{buffers: %{active: buf}, viewport: vp}} = state,
+        %{workspace: %{buffers: %{active: buf}}} = state,
         {:move_to_screen, position}
       ) do
+    # Reads the active window's own viewport (#2661), not the stale
+    # session-level fallback: that field only tracks terminal-size changes
+    # (set on :ready/:resize) and never the window's scrolled position, so H/M/L
+    # previously resolved against whatever line was on screen right after the
+    # last resize instead of the screen the user is actually looking at.
+    vp = active_viewport(state)
     {first_line, _last_line} = Viewport.visible_range(vp)
     visible_rows = Viewport.content_rows(vp)
     total_lines = Buffer.line_count(buf)

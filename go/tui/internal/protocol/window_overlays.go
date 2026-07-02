@@ -60,6 +60,11 @@ type ScrollPresentation struct {
 	OverscanEndLine       uint32
 	ContentEpoch          uint32
 	LayoutGeneration      uint32
+	// ScrollSeq is the monotonic scroll-authority sequence (#2661). The TUI
+	// does not use local-presentation scroll offsets, so it only carries this
+	// field through for parity with the wire format; it does not change any
+	// TUI-visible rendering or input behavior.
+	ScrollSeq uint32
 }
 
 type PaneGeometry struct {
@@ -169,6 +174,7 @@ func decodeScrollPresentation(section []byte, window *WindowContent) {
 		OverscanEndLine:       gen.OverscanEndLine,
 		ContentEpoch:          gen.ContentEpoch,
 		LayoutGeneration:      gen.LayoutGeneration,
+		ScrollSeq:             gen.ScrollSeq,
 	}
 	window.ScrollSet = true
 }

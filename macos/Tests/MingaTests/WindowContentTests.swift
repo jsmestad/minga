@@ -166,6 +166,7 @@ struct WindowContentBuilder {
         appendU32(&data, 18)
         appendU32(&data, 42)
         appendU32(&data, 99)
+        appendU32(&data, 3) // scroll_seq (#2661)
         return data
     }
 
@@ -517,6 +518,7 @@ struct WindowContentDecoderTests {
         #expect(presentation.overscanEndLine == 18)
         #expect(presentation.contentEpoch == 42)
         #expect(presentation.layoutGeneration == 99)
+        #expect(presentation.scrollSeq == 3)
     }
 
     @Test("Reject scroll presentation identity mismatch")
@@ -827,6 +829,7 @@ struct WindowContentDecoderTests {
         #expect(presentation.windowId == 7)
         #expect(presentation.contentEpoch == 42)
         #expect(presentation.layoutGeneration == 99)
+        #expect(presentation.scrollSeq == 3)
     }
 
     @Test("Rows delta rejects mismatched scroll presentation identity")

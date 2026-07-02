@@ -54,7 +54,8 @@ defmodule MingaEditor.Window do
           render_cache: RenderCache.t(),
           scroll_velocity: ScrollVelocity.t(),
           scroll_detach_cursor: Buffer.position() | nil,
-          prefetch_overscan_boost: {non_neg_integer(), :down | :up} | nil
+          prefetch_overscan_boost: {non_neg_integer(), :down | :up} | nil,
+          scroll_echo_top: integer() | nil
         }
 
   @enforce_keys [:id, :content, :buffer, :viewport]
@@ -73,7 +74,8 @@ defmodule MingaEditor.Window do
     render_cache: %RenderCache{},
     scroll_velocity: %ScrollVelocity{},
     scroll_detach_cursor: nil,
-    prefetch_overscan_boost: nil
+    prefetch_overscan_boost: nil,
+    scroll_echo_top: nil
   ]
 
   @doc """
@@ -193,6 +195,64 @@ defmodule MingaEditor.Window do
       | scroll_velocity: ScrollVelocity.record(window.scroll_velocity, now_ms, dir),
         scroll_detach_cursor: cursor_pos
     }
+  end
+
+  @doc """
+  Records whether this window is a full-document resident window (#2653/#2658).
+
+  Stored in the render cache because residence is a renderer-computed value and
+  the render cache is the only per-window struct copied back from the async
+  render pipeline (see `MingaEditor.State.merge_renderer_window/2`). The input
+  layer (mouse wheel/trackpad handling) reads it via `resident?/1` so it can
+  branch on residence without recomputing it. Stale by at most one frame, which
+  is harmless: residence is a document-size property that doesn't flip mid-gesture.
+  """
+  @spec set_resident(t(), boolean()) :: t()
+  def set_resident(%__MODULE__{render_cache: cache} = window, resident?)
+      when is_boolean(resident?) do
+    %{window | render_cache: RenderCache.set_resident(cache, resident?)}
+  end
+
+  @doc "Returns whether this window was a full-document resident window as of the last rendered frame."
+  @spec resident?(t()) :: boolean()
+  def resident?(%__MODULE__{render_cache: cache}), do: RenderCache.resident?(cache)
+
+  @doc """
+  Records the committed viewport top of a frontend-reported free-scroll (#2661).
+
+  Set by the mouse-wheel/trackpad input path to the top it just committed. It is
+  an editor-owned, top-level `Window` field (never in the render cache) so the
+  async render writeback cannot clobber a newer value: only the input path ever
+  writes it, on the live window. It is deliberately sticky — never cleared. A
+  later wheel overwrites it; `settle_scroll_seq/1` treats a viewport top equal to
+  this value as an echo of the frontend's own report, so it does not advance
+  `scroll_seq` (the "echo-loop guard": no re-anchor storm while margin-riding).
+  """
+  @spec mark_scroll_echo(t(), integer()) :: t()
+  def mark_scroll_echo(%__MODULE__{} = window, echo_top) when is_integer(echo_top) do
+    %{window | scroll_echo_top: echo_top}
+  end
+
+  @doc "Returns the renderer-owned monotonic scroll-authority sequence."
+  @spec scroll_seq(t()) :: non_neg_integer()
+  def scroll_seq(%__MODULE__{render_cache: cache}), do: RenderCache.scroll_seq(cache)
+
+  @doc """
+  Settles the per-frame `scroll_seq` decision against the render cache baseline.
+
+  Delegates to `MingaEditor.Window.RenderCache.settle_scroll_seq/3` with this
+  frame's committed viewport top and the sticky `scroll_echo_top` recorded by the
+  input path. `scroll_seq` advances only when the top moved to a value that is
+  neither the previous committed top nor a frontend-reported free-scroll top, i.e.
+  a genuine BEAM-initiated anchor move (a jump command or a cursor-must-stay-visible
+  re-attach). Scrolloff-breach cursor drags share the reported top, so they are
+  echoes too and do not advance the sequence. Both the counter and its baseline
+  live in the render cache, so the counter is monotonic across the serially
+  threaded, written-back render cache.
+  """
+  @spec settle_scroll_seq(t()) :: t()
+  def settle_scroll_seq(%__MODULE__{render_cache: cache, viewport: %Viewport{top: top}} = window) do
+    %{window | render_cache: RenderCache.settle_scroll_seq(cache, top, window.scroll_echo_top)}
   end
 
   @spec scroll_follow_cursor?(t(), Buffer.position(), integer()) :: {t(), boolean()}

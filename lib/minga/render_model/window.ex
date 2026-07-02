@@ -7,6 +7,8 @@ defmodule Minga.RenderModel.Window do
   `contiguous_rows` is a BEAM-internal hint (never encoded on the wire): it is true only for the non-wrapped, non-folded sequential path, where `rows` are consecutive `:normal` buffer lines. It lets `ScrollPresentation` derive the resident line range by arithmetic instead of folding over every row.
 
   `content_digest` is a BEAM-internal, never-encoded incremental fingerprint of the row set (`Minga.RenderModel.Window.ContentDigest`), set only on the full-document residence path. When present, the GUI adapter's content frame-emit gate uses it instead of hashing the whole `rows` list, so an edit-frame gate is O(changed rows) rather than O(document). It is `nil` off the residence path, where the adapter keeps hashing `rows` directly.
+
+  `scroll_seq` is the monotonic scroll-authority sequence (#2661) encoded onto `ScrollPresentation`. It advances only when the committed viewport top changes for a reason other than an echoed frontend scroll report (see `MingaEditor.Window.settle_scroll_seq/2`), so frontends can distinguish a BEAM-initiated jump racing a local scroll from the frontend's own reported delta being reflected back.
   """
 
   alias __MODULE__.{
@@ -50,7 +52,8 @@ defmodule Minga.RenderModel.Window do
             content_epoch: 0,
             full_refresh: true,
             contiguous_rows: false,
-            content_digest: nil
+            content_digest: nil,
+            scroll_seq: 0
 
   @type t :: %__MODULE__{
           window_id: pos_integer(),

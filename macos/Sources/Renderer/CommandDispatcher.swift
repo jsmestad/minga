@@ -956,6 +956,11 @@ final class CommandDispatcher {
         if let next, next.resetRequired { return true }
         guard let prev = previous else { return false }
         guard let next else { return true }
+        // #2661: a strictly newer scroll-authority sequence means the BEAM
+        // committed a fresh authoritative anchor (a jump racing a local
+        // scroll report), even in the rare case where the jump coincidentally
+        // lands on the same anchor key as the frontend's own in-flight offset.
+        if next.scrollSeq > prev.scrollSeq { return true }
         return !next.isSameAnchorKey(as: prev)
     }
 

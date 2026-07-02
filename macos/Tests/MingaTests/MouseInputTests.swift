@@ -508,6 +508,21 @@ struct MouseInputTests {
         #expect(EditorNSView.hasActivePresentationOffset(scrollPixelOffset: .zero, scrollElasticOffsetY: 0) == false)
     }
 
+    @Test("selection drag active only while the mouse button is down for a plain text drag (#2661)")
+    func selectionDragActiveOnlyForPlainTextDrag() {
+        // No mouse button down: never a drag.
+        #expect(EditorNSView.isSelectionDragActive(hasMouseDownPoint: false, isDividerDragActive: false, isDraggingScrollIndicator: false) == false)
+
+        // Plain left-mouse-down drag with no divider/scrollbar interaction: a selection drag.
+        #expect(EditorNSView.isSelectionDragActive(hasMouseDownPoint: true, isDividerDragActive: false, isDraggingScrollIndicator: false) == true)
+
+        // Pane-divider drag also holds the mouse button down but is not a selection drag.
+        #expect(EditorNSView.isSelectionDragActive(hasMouseDownPoint: true, isDividerDragActive: true, isDraggingScrollIndicator: false) == false)
+
+        // Scrollbar-thumb drag also holds the mouse button down but is not a selection drag.
+        #expect(EditorNSView.isSelectionDragActive(hasMouseDownPoint: true, isDividerDragActive: false, isDraggingScrollIndicator: true) == false)
+    }
+
     @Test("presentation-normalized points stay inside the target pane")
     func presentationNormalizedPointClampsToTargetPane() {
         let rect = GUICellRect(row: 2, col: 4, width: 10, height: 3)
