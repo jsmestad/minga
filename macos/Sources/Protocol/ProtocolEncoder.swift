@@ -182,16 +182,6 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    func sendScrollPrefetchHint(windowId: UInt16, currentVisualLine: UInt32, direction: UInt8, contentEpoch: UInt32) {
-        var buf = Data(count: 12)
-        buf[0] = OP_SCROLL_PREFETCH_HINT
-        writeU16(&buf, 1, windowId)
-        writeU32(&buf, 3, currentVisualLine)
-        buf[7] = direction
-        writeU32(&buf, 8, contentEpoch)
-        writeFrame(buf)
-    }
-
     /// Send a paste event to the BEAM containing the full pasted text.
     /// Layout: opcode(1) + text_len(2, big-endian) + text(text_len).
     /// Text is UTF-8 encoded. Maximum length is 65535 bytes (UInt16.max).

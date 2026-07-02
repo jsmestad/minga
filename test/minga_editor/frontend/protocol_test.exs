@@ -424,21 +424,14 @@ defmodule MingaEditor.Frontend.ProtocolTest do
     end
   end
 
-  describe "decode_event/1 — scroll_prefetch_hint" do
-    test "decodes scroll_prefetch_hint down" do
+  # The scroll_prefetch_hint opcode (0x0A) and its decode were deleted with the
+  # velocity-aware overscan prefetch (#2680, epic #2652); 0x0A is now an unknown
+  # opcode.
+  describe "decode_event/1 — retired scroll_prefetch_hint opcode" do
+    test "former scroll_prefetch_hint opcode (0x0A) is unknown" do
       payload = <<0x0A, 1::16, 100::32, 0, 42::32>>
 
-      assert {:ok, {:scroll_prefetch_hint, 1, 100, :down, 42}} = Protocol.decode_event(payload)
-    end
-
-    test "decodes scroll_prefetch_hint up" do
-      payload = <<0x0A, 3::16, 200::32, 1, 99::32>>
-
-      assert {:ok, {:scroll_prefetch_hint, 3, 200, :up, 99}} = Protocol.decode_event(payload)
-    end
-
-    test "truncated scroll_prefetch_hint returns malformed" do
-      assert {:error, :malformed} = Protocol.decode_event(<<0x0A, 1::16, 100::32>>)
+      assert {:error, :unknown_opcode} = Protocol.decode_event(payload)
     end
   end
 

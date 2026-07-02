@@ -21,8 +21,6 @@ const (
 	arrowRight rune = 57351
 	arrowUp    rune = 57352
 	arrowDown  rune = 57353
-
-	prefetchThresholdFraction = 0.6
 )
 
 type Model struct {
@@ -802,8 +800,7 @@ func (m *Model) sendScrollBatchDelta(msg tea.MouseMsg, delta int) bool {
 	if !ok {
 		return false
 	}
-	window, ok := m.windows[windowID]
-	if !ok {
+	if _, ok := m.windows[windowID]; !ok {
 		return false
 	}
 
@@ -821,42 +818,6 @@ func (m *Model) sendScrollBatchDelta(msg tea.MouseMsg, delta int) bool {
 	}
 
 	m.send(protocol.EncodeScrollBatch(windowID, deltaLines, direction))
-
-	if !window.ScrollSet || window.Scroll.ResetRequired {
-		return true
-	}
-	if sent, ok := m.localPresentation.scrollPrefetchSent[windowID]; ok {
-		if window.Scroll.ContentEpoch > sent {
-			delete(m.localPresentation.scrollPrefetchSent, windowID)
-		}
-	}
-	before, after := presentationPayloadOverscanBounds(window, presentationVisibleRows(window))
-	totalOverscan := before + after
-	if totalOverscan <= 0 {
-		return true
-	}
-	scrollingDown := deltaLines > 0
-	var runway int
-	if scrollingDown {
-		runway = after
-	} else {
-		runway = before
-	}
-	// Keep in sync with EditorNSView.swift prefetchThresholdFraction.
-	threshold := float64(totalOverscan) * prefetchThresholdFraction
-	if _, already := m.localPresentation.scrollPrefetchSent[windowID]; already {
-		return true
-	}
-	if float64(runway) < threshold {
-		var dir byte
-		if scrollingDown {
-			dir = 0
-		} else {
-			dir = 1
-		}
-		m.send(protocol.EncodeScrollPrefetchHint(windowID, window.Scroll.VisibleStartLine, dir, window.Scroll.ContentEpoch))
-		m.localPresentation.scrollPrefetchSent[windowID] = window.Scroll.ContentEpoch
-	}
 	return true
 }
 

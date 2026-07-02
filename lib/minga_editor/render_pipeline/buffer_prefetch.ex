@@ -27,15 +27,19 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   alias MingaEditor.RenderPipeline.ContentHelpers
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
   alias MingaEditor.Window
 
-  alias MingaEditor.Window.ScrollVelocity
-
   @typedoc "Render pipeline input."
   @type state :: Input.t()
+
+  # Fixed overscan for the surviving non-wrapped windowed fetch (the brief
+  # pre-promotion arming frame, and residence-disabled configs). Matches the
+  # former idle-tier value so the first-paint arming frame is byte-for-byte
+  # unchanged; wrapped/folded windows ignore it entirely (see resolve_fetch_range).
+  # Replaces the deleted velocity-scaled tiers (50/100/300) and prefetch boost (#2680).
+  @windowed_overscan_rows 50
 
   @doc """
   Prefetches per-window buffer snapshots before the pure render stages run.
@@ -64,28 +68,6 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   @spec prefetch_agent_chat_windows(state(), Layout.t()) :: %{}
   def prefetch_agent_chat_windows(_input, _layout), do: %{}
 
-  @spec apply_prefetch_hint(EditorState.t(), non_neg_integer(), :down | :up, non_neg_integer()) ::
-          EditorState.t()
-  def apply_prefetch_hint(state, window_id, direction, content_epoch) do
-    case Map.fetch(state.workspace.windows.map, window_id) do
-      {:ok, %Window{} = window} ->
-        current_epoch = window.render_cache.content_epoch
-
-        if content_epoch < current_epoch do
-          state
-        else
-          updated = %{window | prefetch_overscan_boost: {content_epoch, direction}}
-
-          new_map = Map.put(state.workspace.windows.map, window_id, updated)
-          windows = Windows.set_map(state.workspace.windows, new_map)
-          %{state | workspace: Map.put(state.workspace, :windows, windows)}
-        end
-
-      _ ->
-        state
-    end
-  end
-
   # ── Private ──────────────────────────────────────────────────────────────
 
   # Scrolls a single window and detects invalidation. Guards against buffer
@@ -110,7 +92,6 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
       {:ok, scroll} ->
         updated_window =
           scroll.window
-          |> Map.put(:prefetch_overscan_boost, nil)
           |> Window.set_viewport(scroll.viewport)
           |> Window.detect_invalidation(
             scroll.viewport.top,
@@ -283,8 +264,12 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
 
     # Full-document residence (#2653): for under-threshold, non-wrapped, non-fold
     # buffers, fetch and emit the entire laid-out document so a fast scroll can
-    # never outrun the resident row store. Over-threshold, wrapped, or folded
-    # buffers keep today's velocity-aware viewport-plus-overscan windowing.
+    # never outrun the resident row store. Wrapped or folded buffers (and the brief
+    # pre-promotion arming frame below) keep the viewport-plus-fixed-overscan
+    # windowing. The velocity-aware overscan and prefetch hints were deleted with
+    # residence on by default and huge files refused (#2680, epic #2652): the
+    # windowed remnant either ignores overscan (wrapped/folded) or renders a single
+    # idle first-paint frame (arming), so adaptive sizing bought nothing.
     #
     # First-paint-then-promote (#2679): the O(document) first build is ~0.5s at the
     # 65k-row ceiling (measured), so an eligible window renders viewport-windowed on
@@ -400,7 +385,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   # Resolves the buffer line range to fetch and the visible viewport's offset
   # within it. Three cases: full-document residence (whole doc from line 0),
   # folded/decorated windows (the visible_line_map's exact buffer span), and the
-  # default velocity-aware viewport-plus-overscan window.
+  # default viewport-plus-fixed-overscan window (wrapped/folded/arming remnant).
   @spec resolve_fetch_range(map()) ::
           {non_neg_integer(), non_neg_integer(), non_neg_integer()}
   defp resolve_fetch_range(%{visible_line_map: nil, full_residence?: true} = params) do
@@ -411,18 +396,17 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
 
   defp resolve_fetch_range(%{
          visible_line_map: nil,
-         window: window,
          first_line: first_line,
          visible_rows: visible_rows,
          line_count: line_count,
          wrap_on: wrap_on
        }) do
-    now = System.monotonic_time(:millisecond)
-    velocity_tier = Window.scroll_velocity_tier(window, now)
-    total_overscan = boosted_overscan_rows(window, velocity_tier)
-
-    {overscan_behind, overscan_ahead} =
-      directional_split(total_overscan, velocity_tier, Window.scroll_direction(window, now))
+    # Fixed, evenly-split overscan. Wrapped/folded windows ignore these counts
+    # (the wrap_on clauses of scroll_overscan_before/after fetch a fixed span);
+    # the non-wrapped arming frame renders once at idle before promoting, so
+    # velocity scaling bought nothing (#2680).
+    overscan_behind = div(@windowed_overscan_rows, 2)
+    overscan_ahead = @windowed_overscan_rows - overscan_behind
 
     {overscan_before, fetch_first} =
       scroll_overscan_before(first_line, wrap_on, overscan_behind)
@@ -486,38 +470,6 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     Config.get(:resident_store_max_bytes)
   catch
     :exit, _ -> @default_resident_store_max_bytes
-  end
-
-  @spec overscan_rows(ScrollVelocity.tier()) :: pos_integer()
-  defp overscan_rows(:idle), do: 50
-  defp overscan_rows(:medium), do: 100
-  defp overscan_rows(:fast), do: 300
-
-  @spec boosted_overscan_rows(Window.t(), ScrollVelocity.tier()) :: pos_integer()
-  defp boosted_overscan_rows(%Window{prefetch_overscan_boost: nil}, tier),
-    do: overscan_rows(tier)
-
-  defp boosted_overscan_rows(%Window{prefetch_overscan_boost: {_epoch, _dir}}, tier),
-    do: overscan_rows(tier) * 2
-
-  @spec directional_split(pos_integer(), ScrollVelocity.tier(), ScrollVelocity.direction()) ::
-          {pos_integer(), pos_integer()}
-  defp directional_split(total, :idle, _dir), do: half_split(total)
-  defp directional_split(total, _tier, :ambiguous), do: half_split(total)
-
-  defp directional_split(total, _tier, :down) do
-    minority = max(1, div(total * 15, 100))
-    {minority, total - minority}
-  end
-
-  defp directional_split(total, _tier, :up) do
-    minority = max(1, div(total * 15, 100))
-    {total - minority, minority}
-  end
-
-  defp half_split(total) do
-    half = max(1, div(total, 2))
-    {half, total - half}
   end
 
   @spec scroll_overscan_before(non_neg_integer(), boolean(), pos_integer()) ::

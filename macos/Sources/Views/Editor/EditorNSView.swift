@@ -431,15 +431,11 @@ final class EditorNSView: MTKView {
     /// Nil means the gesture has not latched onto a scroll target yet.
     private var scrollTargetCellPosition: (row: Int16, col: Int16)?
 
-    private var scrollPrefetchEpoch: [UInt16: UInt32] = [:]
-
     private enum ScrollAxisLock { case undecided, vertical, horizontal }
     private var scrollAxisLock: ScrollAxisLock = .undecided
     private var scrollAxisAccumulatedX: CGFloat = 0
     private var scrollAxisAccumulatedY: CGFloat = 0
     private static let axisLockThreshold: CGFloat = 4
-    // Keep in sync with model.go prefetchThresholdFraction.
-    private static let prefetchThresholdFraction: Double = 0.6
 
     private var scrollUnconfirmedLines: Int = 0
     private var scrollLastConfirmedAnchorTop: UInt32? = nil
@@ -1611,28 +1607,6 @@ final class EditorNSView: MTKView {
             for: targetWindowContent,
             scrollPresentation: targetScrollPresentation
         )
-        if let windowId = scrollTargetWindowId, let sp = targetScrollPresentation {
-            if let lastEpoch = scrollPrefetchEpoch[windowId], sp.contentEpoch > lastEpoch {
-                scrollPrefetchEpoch.removeValue(forKey: windowId)
-            }
-
-            let totalOverscan = payloadOverscan.before + payloadOverscan.after
-            if totalOverscan > 0 {
-                let scrollingDown = lockedDeltaY < 0
-                let runway = scrollingDown ? payloadOverscan.after : payloadOverscan.before
-                let threshold = Double(totalOverscan) * Self.prefetchThresholdFraction
-                if Double(runway) < threshold, scrollPrefetchEpoch[windowId] == nil {
-                    let direction: UInt8 = scrollingDown ? 0 : 1
-                    encoder.sendScrollPrefetchHint(
-                        windowId: windowId,
-                        currentVisualLine: sp.visibleStartLine,
-                        direction: direction,
-                        contentEpoch: sp.contentEpoch
-                    )
-                    scrollPrefetchEpoch[windowId] = sp.contentEpoch
-                }
-            }
-        }
 
         if let sp = targetScrollPresentation {
             reconcileUnconfirmedLines(against: sp)
@@ -1695,9 +1669,6 @@ final class EditorNSView: MTKView {
         }
 
         // Release live-gesture-only state; the settle keeps reconciling via scrollSettleWindowId.
-        if let windowId = scrollTargetWindowId {
-            scrollPrefetchEpoch.removeValue(forKey: windowId)
-        }
         scrollTargetWindowId = nil
         scrollTargetCellPosition = nil
         scrollAxisLock = .undecided
@@ -1722,9 +1693,6 @@ final class EditorNSView: MTKView {
         scrollAccumulator.reset()
         scrollPixelOffset = .zero
         scrollElasticOffsetY = 0
-        if let windowId = scrollTargetWindowId {
-            scrollPrefetchEpoch.removeValue(forKey: windowId)
-        }
         scrollTargetWindowId = nil
         scrollTargetCellPosition = nil
         cancelScrollAnimations()

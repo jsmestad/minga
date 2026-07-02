@@ -17,7 +17,6 @@ const (
 	OPGuiAction           byte = 0x07
 	OPRequestKeyframe     byte = 0x08
 	OPScrollBatch         byte = 0x09
-	OPScrollPrefetchHint  byte = 0x0A
 	OPLogMessage          byte = 0x60
 
 	// Render

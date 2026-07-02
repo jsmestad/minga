@@ -34,7 +34,6 @@ func (s presentationScroll) keysMatch(scroll protocol.ScrollPresentation) bool {
 
 type localPresentation struct {
 	scrolls                map[uint16]presentationScroll
-	scrollPrefetchSent     map[uint16]uint32
 	previewFileTreeIndex   *int
 	previewCompletionIndex *int
 	previewPickerIndex     *int
@@ -42,8 +41,7 @@ type localPresentation struct {
 
 func newLocalPresentation() localPresentation {
 	return localPresentation{
-		scrolls:            make(map[uint16]presentationScroll),
-		scrollPrefetchSent: make(map[uint16]uint32),
+		scrolls: make(map[uint16]presentationScroll),
 	}
 }
 
@@ -64,7 +62,6 @@ func newLocalPresentation() localPresentation {
 func (lp *localPresentation) reconcileScroll(window protocol.WindowContent) {
 	if !window.ScrollSet || window.Scroll.ResetRequired {
 		delete(lp.scrolls, window.ID)
-		delete(lp.scrollPrefetchSent, window.ID)
 		return
 	}
 	scroll, ok := lp.scrolls[window.ID]
@@ -105,5 +102,4 @@ func (lp *localPresentation) discard(kind transformKind, windowID uint16) {
 
 func (lp *localPresentation) removeWindow(windowID uint16) {
 	delete(lp.scrolls, windowID)
-	delete(lp.scrollPrefetchSent, windowID)
 }

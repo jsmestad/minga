@@ -133,7 +133,7 @@ defmodule MingaEditor.Mouse do
   # editor-owned (never written back), so the async render round trip cannot
   # latch or clobber it.
   @spec apply_scroll_intent(state(), non_neg_integer(), integer(), :down | :up) :: state()
-  defp apply_scroll_intent(state, window_id, delta_lines, direction) do
+  defp apply_scroll_intent(state, window_id, delta_lines, _direction) do
     case Map.fetch(state.workspace.windows.map, window_id) do
       {:ok, %Window{buffer: buf} = window} when is_pid(buf) ->
         now = System.monotonic_time(:millisecond)
@@ -145,7 +145,7 @@ defmodule MingaEditor.Mouse do
         updated =
           scrolled
           |> Window.mark_scroll_echo(scrolled.viewport.top)
-          |> Window.record_scroll_event(now, direction, cursor_pos)
+          |> Window.record_scroll_event(now, cursor_pos)
 
         EditorState.update_window(state, window_id, fn _window -> updated end)
 
