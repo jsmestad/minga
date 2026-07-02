@@ -77,6 +77,7 @@ defmodule Minga.RenderModel.Window do
           content_epoch: non_neg_integer(),
           full_refresh: boolean(),
           contiguous_rows: boolean(),
-          content_digest: Minga.RenderModel.Window.ContentDigest.t() | nil
+          content_digest: Minga.RenderModel.Window.ContentDigest.t() | nil,
+          scroll_seq: non_neg_integer()
         }
 end

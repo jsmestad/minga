@@ -21,6 +21,7 @@ defmodule MingaEditor.MouseTest do
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace, as: WorkspaceDomain
   alias MingaEditor.State.Windows
+  alias MingaEditor.Viewport
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
   alias MingaEditor.Session.ChromeState
@@ -152,6 +153,24 @@ defmodule MingaEditor.MouseTest do
       {cursor_line, _col} = BufferProcess.cursor(buffer)
       assert cursor_line == window_viewport(state, win_id).top
       assert cursor_line == 10
+    end
+
+    test "M and L resolve against the reported top after a scroll report (ordered channel, AC2)" do
+      {state, buffer} = start_mouse_state(lines(0..99), width: 40, height: 20)
+      state = native_gui_state(state)
+      win_id = state.workspace.windows.active
+
+      state = Mouse.handle_scroll_batch(state, win_id, 10, :down)
+      vp = window_viewport(state, win_id)
+      visible_rows = Viewport.content_rows(vp)
+
+      state = Movement.execute(state, {:move_to_screen, :middle})
+      {middle_line, _col} = BufferProcess.cursor(buffer)
+      assert middle_line == 10 + div(visible_rows, 2)
+
+      Movement.execute(state, {:move_to_screen, :bottom})
+      {bottom_line, _col} = BufferProcess.cursor(buffer)
+      assert bottom_line == 10 + visible_rows - 1
     end
   end
 
