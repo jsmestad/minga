@@ -124,7 +124,9 @@ defmodule MingaEditor.Frontend.Emit.Context do
       file_tree: State.file_tree_state(state),
       highlight: state.workspace.highlight,
       agent_ui: state.workspace.agent_ui,
-      launchpad: Map.get(state.workspace, :launchpad),
+      # Strict like every sibling field: a snapshot path that drops the
+      # launchpad key must fail loudly, not render the launchpad hidden.
+      launchpad: state.workspace.launchpad,
       completion: State.ModalOverlay.completion(state),
       keymap_scope: state.workspace.keymap_scope,
       editing: state.workspace.editing,
