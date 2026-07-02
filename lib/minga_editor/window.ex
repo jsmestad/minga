@@ -465,6 +465,16 @@ defmodule MingaEditor.Window do
     %{window | render_cache: RenderCache.put_retained_wrap_lines(cache, lines)}
   end
 
+  @doc "Returns the persistent full-document residence build state (#2658)."
+  @spec resident_build(t()) :: MingaEditor.RenderModel.Window.ResidentBuild.t() | nil
+  def resident_build(%__MODULE__{render_cache: cache}), do: RenderCache.resident_build(cache)
+
+  @doc "Stores the current frame's residence build state for incremental reuse next frame (#2658)."
+  @spec put_resident_build(t(), MingaEditor.RenderModel.Window.ResidentBuild.t() | nil) :: t()
+  def put_resident_build(%__MODULE__{render_cache: cache} = window, state) do
+    %{window | render_cache: RenderCache.put_resident_build(cache, state)}
+  end
+
   @doc """
   Checks current frame parameters against last-frame tracking fields
   and returns the window with `dirty_lines: :all` if anything that

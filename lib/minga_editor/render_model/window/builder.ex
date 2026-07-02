@@ -33,6 +33,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   alias MingaEditor.Renderer.Composition
   alias MingaEditor.Renderer.Context
   alias Minga.RenderModel.Window, as: RenderWindow
+  alias Minga.RenderModel.Window.ContentDigest
+  alias MingaEditor.RenderModel.Window.ResidentBuild
   alias Minga.RenderModel.Window.Annotation
   alias Minga.RenderModel.Window.Cursorline
   alias Minga.RenderModel.Window.DiagnosticRange
@@ -90,7 +92,9 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   @type build_stats :: %{
           rasterized: non_neg_integer(),
           retained_rows: %{optional(non_neg_integer()) => {non_neg_integer(), Row.t()}},
-          retained_wrap_lines: %{optional(non_neg_integer()) => {non_neg_integer(), [map()]}}
+          retained_wrap_lines: %{optional(non_neg_integer()) => {non_neg_integer(), [map()]}},
+          resident_build: ResidentBuild.t() | nil,
+          resident_rows_spliced: non_neg_integer()
         }
 
   # Threaded through the visual-entry builders to drive upstream row reuse
@@ -163,16 +167,28 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     # Build visual rows from the same data the draw path uses. Unchanged rows
     # are reused from the retained-row cache (no recompose) when their cheap
     # input fingerprint matches; only composed rows count as rasterized (#2287).
-    all_visual_entries =
-      build_visual_entries(
-        lines,
-        first_line,
-        visible_line_map,
-        wrap_on,
-        ctx,
-        snapshot,
-        retain_ctx
-      )
+    #
+    # Full-document residence (#2658) takes an incremental path: a persistent
+    # ResidentBuild state splices only the rows whose text changed and maintains
+    # the content digest in O(changed rows). A tree-sitter re-highlight still
+    # triggers a full rebuild (the highlight fingerprint changes), but the common
+    # case (in-place text edit) avoids the O(document) compose. Off residence this
+    # is the unchanged windowed build and `resident_result` is nil, so behaviour
+    # is byte identical.
+    {all_visual_entries, resident_result} =
+      if scroll.full_residence do
+        build_resident_entries(scroll, lines, first_line, ctx, snapshot, retain_ctx, opts)
+      else
+        {build_visual_entries(
+           lines,
+           first_line,
+           visible_line_map,
+           wrap_on,
+           ctx,
+           snapshot,
+           retain_ctx
+         ), nil}
+      end
 
     visible_row_start_index = scroll.visible_row_start_index + viewport.visual_row_offset
     raw_overscan_before = max(scroll.visible_row_start_index - viewport.visual_row_offset, 0)
@@ -200,6 +216,10 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     # (build_gutter below) stays viewport-windowed off `presentation_entries`;
     # indent guides are independently viewport-windowed off `scroll.lines`. Only
     # the row set and its retained-row cache become resident.
+    #
+    # The resident entries feed only `presentation_rows` (the `.row` of each),
+    # which never carries the entry-level `display_row`, so the residence path
+    # skips the whole-document re-index `trim_visual_entries/3` would do (#2658).
     resident_entries =
       if scroll.full_residence do
         all_visual_entries
@@ -207,7 +227,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         presentation_entries
       end
 
-    {new_retained, rasterized} = retained_stats(resident_entries, retain_ctx)
+    {new_retained, rasterized, content_digest, resident_build_state, resident_rows_spliced} =
+      resolve_retained_and_digest(resident_result, resident_entries, retain_ctx)
 
     new_retained_wrap =
       retained_wrap_lines(resident_entries, wrap_on and visible_line_map == nil)
@@ -333,15 +354,134 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       full_refresh: scroll.full_refresh,
       # Non-wrapped, non-folded windows emit consecutive :normal buffer lines, so
       # ScrollPresentation can derive the resident line range arithmetically.
-      contiguous_rows: is_nil(visible_line_map) and not wrap_on
+      contiguous_rows: is_nil(visible_line_map) and not wrap_on,
+      # Set only on the residence path; the GUI adapter gates the content
+      # frame-emit on it instead of hashing the full rows list (#2658).
+      content_digest: content_digest
     }
 
     {render_window,
      %{
        rasterized: rasterized,
        retained_rows: new_retained,
-       retained_wrap_lines: new_retained_wrap
+       retained_wrap_lines: new_retained_wrap,
+       resident_build: resident_build_state,
+       resident_rows_spliced: resident_rows_spliced
      }}
+  end
+
+  # ── Full-document residence incremental build (#2658) ──────────────────────
+
+  # Runs the persistent ResidentBuild for the residence path, returning the full
+  # resident entry list and the frame's retained/digest result. The full build
+  # and the dirty-line splice both compose through `compose_sequential_entry/6`,
+  # so a spliced entry is byte identical to a freshly built one.
+  @spec build_resident_entries(
+          WindowScroll.t(),
+          [String.t()],
+          non_neg_integer(),
+          Context.t(),
+          map(),
+          retain_ctx(),
+          keyword()
+        ) :: {[visual_row_entry()], map()}
+  defp build_resident_entries(scroll, lines, first_line, ctx, snapshot, retain_ctx, opts) do
+    inputs = %{
+      line_texts: lines,
+      compose_fp: retain_ctx.compose_fp,
+      highlight_fp: highlight_content_fingerprint(ctx.highlight),
+      reset?: scroll.full_refresh,
+      retained_rows: retain_ctx.prev,
+      build_all: fn ->
+        build_visual_entries(lines, first_line, nil, false, ctx, snapshot, retain_ctx)
+      end,
+      build_dirty: fn dirty ->
+        build_dirty_sequential_entries(dirty, lines, first_line, ctx, snapshot, retain_ctx)
+      end
+    }
+
+    {state, result} = ResidentBuild.run(Keyword.get(opts, :resident_build), inputs)
+    {result.payloads, Map.put(result, :state, state)}
+  end
+
+  # Composes entries for exactly the dirty sequential line indices, reusing the
+  # masked highlight batch so only dirty rows produce styled segments (#2658).
+  @spec build_dirty_sequential_entries(
+          MapSet.t(non_neg_integer()),
+          [String.t()],
+          non_neg_integer(),
+          Context.t(),
+          map(),
+          retain_ctx()
+        ) :: %{non_neg_integer() => visual_row_entry()}
+  defp build_dirty_sequential_entries(dirty, lines, first_line, ctx, snapshot, retain_ctx) do
+    first_byte_off = snapshot.first_line_byte_offset
+    offsets = dirty_line_offsets(lines, first_byte_off, dirty)
+    masked = masked_highlight_by_index(ctx.highlight, lines, first_byte_off, dirty)
+
+    Enum.reduce(dirty, %{}, fn index, acc ->
+      {line_text, line_byte_offset} = Map.fetch!(offsets, index)
+
+      entry =
+        compose_sequential_entry(
+          first_line + index,
+          line_text,
+          Map.get(masked, index),
+          line_byte_offset,
+          ctx,
+          retain_ctx
+        )
+
+      Map.put(acc, index, entry)
+    end)
+  end
+
+  @spec dirty_line_offsets([String.t()], non_neg_integer(), MapSet.t(non_neg_integer())) ::
+          %{non_neg_integer() => {String.t(), non_neg_integer()}}
+  defp dirty_line_offsets(lines, first_byte_off, dirty) do
+    lines
+    |> build_lines_with_offsets(first_byte_off)
+    |> Enum.with_index()
+    |> Enum.reduce(%{}, fn {{line, off}, index}, acc ->
+      if MapSet.member?(dirty, index), do: Map.put(acc, index, {line, off}), else: acc
+    end)
+  end
+
+  # Masked highlight segments for exactly the dirty lines, keyed by index. With no
+  # tree-sitter highlight there is nothing to compute. With highlight, the batch
+  # walk keeps byte-offset watermarks correct but only produces segments for the
+  # dirty rows (#2658).
+  @spec masked_highlight_by_index(
+          Highlight.t() | nil,
+          [String.t()],
+          non_neg_integer(),
+          MapSet.t(non_neg_integer())
+        ) :: %{non_neg_integer() => [Highlight.styled_segment()]}
+  defp masked_highlight_by_index(nil, _lines, _first_byte_off, _dirty), do: %{}
+
+  defp masked_highlight_by_index(%Highlight{} = hl, lines, first_byte_off, dirty) do
+    hl
+    |> Highlight.styles_for_text_lines_masked(lines, first_byte_off, dirty)
+    |> Enum.with_index()
+    |> Enum.reduce(%{}, fn {segments, index}, acc ->
+      if is_nil(segments), do: acc, else: Map.put(acc, index, segments)
+    end)
+  end
+
+  @spec highlight_content_fingerprint(Highlight.t() | nil) :: integer() | nil
+  defp highlight_content_fingerprint(nil), do: nil
+  defp highlight_content_fingerprint(%Highlight{} = hl), do: :erlang.phash2(hl)
+
+  @spec resolve_retained_and_digest(map() | nil, [visual_row_entry()], retain_ctx()) ::
+          {%{optional(non_neg_integer()) => {non_neg_integer(), Row.t()}}, non_neg_integer(),
+           ContentDigest.t() | nil, ResidentBuild.t() | nil, non_neg_integer()}
+  defp resolve_retained_and_digest(nil, resident_entries, retain_ctx) do
+    {new_retained, rasterized} = retained_stats(resident_entries, retain_ctx)
+    {new_retained, rasterized, nil, nil, 0}
+  end
+
+  defp resolve_retained_and_digest(%{} = result, _resident_entries, _retain_ctx) do
+    {result.retained_rows, result.rasterized, result.digest, result.state, result.spliced}
   end
 
   # ── Upstream row retention (#2287) ─────────────────────────────────────────
@@ -597,28 +737,56 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     |> Enum.zip(highlight_segments_list)
     |> Enum.with_index()
     |> Enum.map(fn {{{line_text, line_byte_offset}, hl_segments}, idx} ->
-      buf_line = first_line + idx
-      row_id = Row.stable_id(:normal, buf_line)
-
-      {row, input_hash, reused?} =
-        compose_or_reuse(retain_ctx, row_id, {:seq, line_text, hl_segments}, fn ->
-          {composed_text, spans} =
-            compose_line(line_text, hl_segments, ctx, buf_line, line_byte_offset)
-
-          %Row{
-            row_id: row_id,
-            row_type: :normal,
-            buf_line: buf_line,
-            text: composed_text,
-            spans: spans,
-            content_hash: Row.compute_hash(composed_text, spans)
-          }
-        end)
-
-      row
-      |> visual_entry(0, Unicode.display_width(row.text), 0)
-      |> with_retain_meta(input_hash, reused?)
+      compose_sequential_entry(
+        first_line + idx,
+        line_text,
+        hl_segments,
+        line_byte_offset,
+        ctx,
+        retain_ctx
+      )
     end)
+  end
+
+  # Composes (or reuses) the single visual-row entry for one sequential line.
+  # Shared by the full sequential build and the residence dirty-line splice
+  # (#2658) so both produce byte-identical entries for the same inputs.
+  @spec compose_sequential_entry(
+          non_neg_integer(),
+          String.t(),
+          [Highlight.styled_segment()] | nil,
+          non_neg_integer(),
+          Context.t(),
+          retain_ctx()
+        ) :: visual_row_entry()
+  defp compose_sequential_entry(
+         buf_line,
+         line_text,
+         hl_segments,
+         line_byte_offset,
+         ctx,
+         retain_ctx
+       ) do
+    row_id = Row.stable_id(:normal, buf_line)
+
+    {row, input_hash, reused?} =
+      compose_or_reuse(retain_ctx, row_id, {:seq, line_text, hl_segments}, fn ->
+        {composed_text, spans} =
+          compose_line(line_text, hl_segments, ctx, buf_line, line_byte_offset)
+
+        %Row{
+          row_id: row_id,
+          row_type: :normal,
+          buf_line: buf_line,
+          text: composed_text,
+          spans: spans,
+          content_hash: Row.compute_hash(composed_text, spans)
+        }
+      end)
+
+    row
+    |> visual_entry(0, Unicode.display_width(row.text), 0)
+    |> with_retain_meta(input_hash, reused?)
   end
 
   @spec build_visual_entries_wrapped(

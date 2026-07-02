@@ -199,7 +199,8 @@ defmodule MingaEditor.RenderPipeline.Content do
         WindowModelBuilder.build_with_stats(state, %{scroll | window: window}, render_ctx,
           content_kind: :buffer,
           retained_rows: Window.retained_rows(window),
-          retained_wrap_lines: Window.retained_wrap_lines(window)
+          retained_wrap_lines: Window.retained_wrap_lines(window),
+          resident_build: Window.resident_build(window)
         )
       end)
 
@@ -207,6 +208,7 @@ defmodule MingaEditor.RenderPipeline.Content do
       window
       |> Window.put_retained_rows(build_stats.retained_rows)
       |> Window.put_retained_wrap_lines(build_stats.retained_wrap_lines)
+      |> Window.put_resident_build(build_stats.resident_build)
 
     state = add_rows_rasterized(state, build_stats.rasterized)
 
