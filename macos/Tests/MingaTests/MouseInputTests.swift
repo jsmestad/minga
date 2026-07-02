@@ -551,20 +551,16 @@ struct MouseInputTests {
 
         let translation = EditorNSView.presentationScrollTranslation(
             scrollPresentation: presentation,
-            scrollOffset: CGPoint(x: 4, y: 8),
+            scrollOffsetY: 8,
             scrollDeltaY: 120,
-            currentElasticOffsetY: 0,
-            cellHeight: 20,
             payloadOverscanBefore: 0,
             payloadOverscanAfter: 1,
             boundaryBefore: 0,
             boundaryAfter: 1
         )
 
-        #expect(translation.scrollOffset.x == 4)
-        #expect(translation.scrollOffset.y == 0)
-        #expect(translation.elasticOffsetY < 0)
-        #expect(abs(translation.elasticOffsetY) <= 15)
+        // Pulling past the top: the caller feeds the negative pull into the rubber-band curve.
+        #expect(translation == .elastic(pullDelta: -120))
     }
 
     @Test("bottom boundary smooth scroll becomes bounded elastic while content stays clamped")
@@ -585,20 +581,16 @@ struct MouseInputTests {
 
         let translation = EditorNSView.presentationScrollTranslation(
             scrollPresentation: presentation,
-            scrollOffset: CGPoint(x: 4, y: 8),
+            scrollOffsetY: 8,
             scrollDeltaY: -120,
-            currentElasticOffsetY: 0,
-            cellHeight: 20,
             payloadOverscanBefore: 1,
             payloadOverscanAfter: 0,
             boundaryBefore: 1,
             boundaryAfter: 0
         )
 
-        #expect(translation.scrollOffset.x == 4)
-        #expect(translation.scrollOffset.y == 0)
-        #expect(translation.elasticOffsetY > 0)
-        #expect(abs(translation.elasticOffsetY) <= 15)
+        // Pulling past the bottom: the caller feeds the positive pull into the rubber-band curve.
+        #expect(translation == .elastic(pullDelta: 120))
     }
 
     @Test("middle smooth scroll keeps normal content offset")
@@ -619,19 +611,16 @@ struct MouseInputTests {
 
         let translation = EditorNSView.presentationScrollTranslation(
             scrollPresentation: presentation,
-            scrollOffset: CGPoint(x: 4, y: 8),
+            scrollOffsetY: 8,
             scrollDeltaY: 12,
-            currentElasticOffsetY: 3,
-            cellHeight: 20,
             payloadOverscanBefore: 1,
             payloadOverscanAfter: 1,
             boundaryBefore: 1,
             boundaryAfter: 1
         )
 
-        #expect(translation.scrollOffset.x == 4)
-        #expect(translation.scrollOffset.y == 8)
-        #expect(translation.elasticOffsetY == 0)
+        // Renderable payload exists in the pull direction: present the content offset, no elastic.
+        #expect(translation == .content(offsetY: 8))
     }
 
     @Test("smooth scroll clamps when document has rows but payload cannot render them")
@@ -652,19 +641,16 @@ struct MouseInputTests {
 
         let translation = EditorNSView.presentationScrollTranslation(
             scrollPresentation: presentation,
-            scrollOffset: CGPoint(x: 4, y: 8),
+            scrollOffsetY: 8,
             scrollDeltaY: 12,
-            currentElasticOffsetY: 3,
-            cellHeight: 20,
             payloadOverscanBefore: 0,
             payloadOverscanAfter: 0,
             boundaryBefore: 5,
             boundaryAfter: 7
         )
 
-        #expect(translation.scrollOffset.x == 4)
-        #expect(translation.scrollOffset.y == 0)
-        #expect(translation.elasticOffsetY == 0)
+        // No renderable payload but content still exists at the boundary: clamp to grid, no elastic.
+        #expect(translation == .content(offsetY: 0))
     }
 
     @Test("mid-document wrapped scroll with no payload rows before does not bounce at top")
@@ -709,10 +695,8 @@ struct MouseInputTests {
         let boundary = EditorNSView.presentationScrollBoundaryAvailability(for: content, scrollPresentation: presentation)
         let translation = EditorNSView.presentationScrollTranslation(
             scrollPresentation: presentation,
-            scrollOffset: CGPoint(x: 4, y: 8),
+            scrollOffsetY: 8,
             scrollDeltaY: 120,
-            currentElasticOffsetY: 0,
-            cellHeight: 20,
             payloadOverscanBefore: payload.before,
             payloadOverscanAfter: payload.after,
             boundaryBefore: boundary.before,
@@ -721,9 +705,8 @@ struct MouseInputTests {
 
         #expect(payload.before == 0)
         #expect(boundary.before == 1)
-        #expect(translation.scrollOffset.x == 4)
-        #expect(translation.scrollOffset.y == 0)
-        #expect(translation.elasticOffsetY == 0)
+        // Content still exists above (boundary.before == 1), so no top rubber band.
+        #expect(translation == .content(offsetY: 0))
     }
 
     @Test("mouseMoved sends motion event")

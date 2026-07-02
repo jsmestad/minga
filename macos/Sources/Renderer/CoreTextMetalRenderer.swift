@@ -375,7 +375,12 @@ final class CoreTextMetalRenderer {
                 gutterHoverRow: UInt16? = nil,
                 drawable: CAMetalDrawable, viewportSize: CGSize,
                 contentScale: Float, scrollOffset: SIMD2<Float> = .zero,
-                scrollTargetWindowId: UInt16? = nil) {
+                presentationWindowId: UInt16? = nil) {
+        // The window that owns the current presentation scroll offset. During a live gesture this
+        // is the gesture target; during a settle / spring-back / discrete ease the gesture target
+        // is already nil, so the view resolves this from the settle/elastic window instead. The
+        // gate below is unchanged: the offset applies only to this one pane.
+        let scrollTargetWindowId = presentationWindowId
 
         frameMetrics.reset()
         let renderSignpostID = OSSignpostID(log: renderLog)
