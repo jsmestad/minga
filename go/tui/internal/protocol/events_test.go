@@ -159,20 +159,6 @@ func TestEncodeScrollBatchUp(t *testing.T) {
 	}
 }
 
-func TestEncodeScrollPrefetchHint(t *testing.T) {
-	got := EncodeScrollPrefetchHint(7, 1000, 0, 42)
-	want := []byte{
-		generated.OPScrollPrefetchHint,
-		0, 7,
-		0, 0, 0x03, 0xE8,
-		0,
-		0, 0, 0, 42,
-	}
-	if !bytes.Equal(got, want) {
-		t.Fatalf("scroll prefetch hint = %v, want %v", got, want)
-	}
-}
-
 func TestEncodeGUISidebarAction(t *testing.T) {
 	got := EncodeGUISidebarAction("git", "git_status", "activate")
 	want := []byte{

@@ -520,22 +520,6 @@ defmodule MingaEditor do
     {:noreply, new_state}
   end
 
-  def handle_info(
-        {:minga_input,
-         {:scroll_prefetch_hint, window_id, _current_visual_line, direction, content_epoch}},
-        state
-      ) do
-    new_state =
-      MingaEditor.RenderPipeline.BufferPrefetch.apply_prefetch_hint(
-        state,
-        window_id,
-        direction,
-        content_epoch
-      )
-
-    {:noreply, Renderer.render_or_async(new_state)}
-  end
-
   def handle_info({:minga_input, {:request_keyframe, _last_good_frame_seq}}, state) do
     new_state = %{state | keyframe_pending?: true}
     {:noreply, Renderer.render_or_async(new_state)}

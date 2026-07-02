@@ -54,7 +54,6 @@ defmodule MingaEditor.Window do
           render_cache: RenderCache.t(),
           scroll_velocity: ScrollVelocity.t(),
           scroll_detach_cursor: Buffer.position() | nil,
-          prefetch_overscan_boost: {non_neg_integer(), :down | :up} | nil,
           scroll_echo_top: integer() | nil,
           authoritative_scroll_seq: non_neg_integer()
         }
@@ -75,7 +74,6 @@ defmodule MingaEditor.Window do
     render_cache: %RenderCache{},
     scroll_velocity: %ScrollVelocity{},
     scroll_detach_cursor: nil,
-    prefetch_overscan_boost: nil,
     scroll_echo_top: nil,
     authoritative_scroll_seq: 0
   ]
@@ -189,12 +187,20 @@ defmodule MingaEditor.Window do
     %{window | pinned: pinned?}
   end
 
-  @spec record_scroll_event(t(), integer(), ScrollVelocity.event_direction(), Buffer.position()) ::
-          t()
-  def record_scroll_event(%__MODULE__{} = window, now_ms, dir, cursor_pos) do
+  @doc """
+  Records a wheel/trackpad scroll event so the render pipeline can tell a scroll
+  gesture is in progress.
+
+  Advances the scroll-rate estimator (`scroll_follow_cursor?/3` reads its tier to
+  suppress cursor re-anchoring mid-gesture) and marks `scroll_detach_cursor` at
+  the cursor position at gesture start, so the viewport stays put until the cursor
+  actually moves.
+  """
+  @spec record_scroll_event(t(), integer(), Buffer.position()) :: t()
+  def record_scroll_event(%__MODULE__{} = window, now_ms, cursor_pos) do
     %{
       window
-      | scroll_velocity: ScrollVelocity.record(window.scroll_velocity, now_ms, dir),
+      | scroll_velocity: ScrollVelocity.record(window.scroll_velocity, now_ms),
         scroll_detach_cursor: cursor_pos
     }
   end
@@ -329,11 +335,6 @@ defmodule MingaEditor.Window do
   @spec scroll_velocity_tier(t(), integer()) :: ScrollVelocity.tier()
   def scroll_velocity_tier(%__MODULE__{} = window, now_ms) do
     ScrollVelocity.tier(window.scroll_velocity, now_ms)
-  end
-
-  @spec scroll_direction(t(), integer()) :: ScrollVelocity.direction()
-  def scroll_direction(%__MODULE__{} = window, now_ms) do
-    ScrollVelocity.direction(window.scroll_velocity, now_ms)
   end
 
   # ── Popup queries ──────────────────────────────────────────────────────────

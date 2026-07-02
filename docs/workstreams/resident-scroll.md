@@ -1,6 +1,8 @@
 # Resident-Store Rendering Direction
 
-**Status:** Shipping. Full-document residence is **on by default** as of [#2679](https://github.com/jsmestad/minga/issues/2679) (`resident_store_max_lines` defaults to `65535`, the u16 wire ceiling). Tracked by epic [#2652](https://github.com/jsmestad/minga/issues/2652). This doc captures the decision and its rationale so future work (human or agent) builds toward it instead of extending the machinery it deletes. The normative protocol spec lives in `GUI_PROTOCOL.md` and `ARCHITECTURE.md`.
+**Status:** Complete. Epic [#2652](https://github.com/jsmestad/minga/issues/2652) shipped end to end: full-document residence is **on by default** as of [#2679](https://github.com/jsmestad/minga/issues/2679) (`resident_store_max_lines` defaults to `65535`, the u16 wire ceiling), and the velocity-aware overscan prefetch machinery was deleted from the BEAM and both frontends in [#2680](https://github.com/jsmestad/minga/issues/2680). This doc captures the decision and its rationale so future work (human or agent) builds on the resident-store model instead of reinventing the machinery it replaced. The normative protocol spec lives in `GUI_PROTOCOL.md` and `ARCHITECTURE.md`.
+
+**Deferred remnants (candidate follow-ups, not regressions):** wrapped/folded residence (still uses the windowed emit path; needs visual-row offset math); residual O(document) cheap passes at the 65k ceiling (~30 fps resident scroll at the extreme; delta-only row-list construction, only if >5k-line residence matters post-launch); the discrete-wheel-tick-into-boundary one-cell park (candidate micro-fix or fold into #2665); the `fullRefresh`-without-`resetRequired` promotion discard-gate verification (BEAM forces full_refresh on promotion, so no live-settle cancel gap is expected, but it was flagged for a smoke check); and the Go rows-without-scroll `ScrollSet`-clearing divergence from Swift (`model.go`, harmless today, would surface only under a rows-without-scroll transcript).
 
 ## Status ledger (as of #2679)
 
@@ -28,7 +30,7 @@ Make the document fully resident in the frontend for normal-size files, so scrol
 - **Presentation vs position.** The frontend owns scroll *presentation*: an ephemeral, discardable local offset applied same-frame. The BEAM owns scroll *position*: the committed anchor, the cursor, and scrolloff enforcement. The frontend reports scroll intent promptly on the same ordered channel as key events; BEAM-authoritative jumps always win via a scroll-authority sequence number. One value, one writer, each.
 - **Two update paths, both already built.** `layout_generation` change (resize, font, wrap, fold) → full store replace. `content_epoch` change (edits) → existing 0xA2 row-deltas keyed by `row_id + content_hash`. Cursor motion rides 0xA0 and never touches the store. Full-document re-send per keystroke was considered and rejected: it regresses edit latency to O(document).
 - **Huge files are refused, not degraded.** Above a byte-size gate checked before buffer load (default 10MB, config-overridable, final number gated on encode-time measurement), Minga shows a text-only "File too large for Minga V1" surface suggesting another editor. No button, no degraded scroll mode, no silent fallback to the old compositor.
-- **The compositor gets deleted.** The scroll reconciliation state machine and the velocity-aware overscan prefetch are removed from the BEAM and both frontends once conformance passes on both. The 0xA2 content-delta ref-miss guard stays; it is content-addressed, not positional, and "no reconciliation" applies to the scroll path only.
+- **The compositor gets deleted.** The velocity-aware overscan prefetch (the `scroll_prefetch_hint` opcode, the frontend runway senders, the BEAM velocity tiers and directional split) was removed from the BEAM and both frontends in #2680 after conformance passed on both. The windowed emit path survives only for wrapped/folded buffers and the brief pre-promotion arming frame, now sized with a fixed overscan. The 0xA2 content-delta ref-miss guard stays; it is content-addressed, not positional, and "no reconciliation" applies to the scroll path only.
 
 ## The principle, generalized
 
@@ -52,7 +54,7 @@ These boundaries were litigated and stand:
 
 ## What this means for new work
 
-- Do not extend the scroll compositor, overscan sizing, or velocity prefetch (`lib/minga_editor/render_pipeline/buffer_prefetch.ex`); that machinery is scheduled for deletion under #2652.
+- Do not reintroduce velocity-aware overscan sizing or scroll prefetch hints; that machinery was deleted in #2680. The windowed fetch in `lib/minga_editor/render_pipeline/buffer_prefetch.ex` uses a fixed overscan and serves only wrapped/folded buffers and the arming frame.
 - New scrollable surfaces adopt the #2652 store lifecycle rather than inventing per-surface reconciliation.
 - The texture retention key is `row_id + content_hash` across `content_epoch` changes, invalidated only on `layout_generation`. Treat this as a hard invariant.
 - Conformance for anything touching this contract means both transcript kinds: store transcripts (frames → expected store state) and input transcripts (frames + local offset + input → expected anchor/cursor/action).

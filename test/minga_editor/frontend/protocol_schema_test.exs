@@ -55,7 +55,6 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       gui_action: 0x07,
       request_keyframe: 0x08,
       scroll_batch: 0x09,
-      scroll_prefetch_hint: 0x0A,
       log_message: 0x60
     )
   end
