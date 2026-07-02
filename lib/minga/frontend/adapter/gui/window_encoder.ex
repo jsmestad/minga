@@ -367,7 +367,8 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
       presentation.anchor_left::16, presentation.anchor_visual_row_offset::16,
       presentation.visible_start_line::32, presentation.visible_end_line::32,
       presentation.overscan_start_line::32, presentation.overscan_end_line::32,
-      presentation.content_epoch::32, presentation.layout_generation::32>>
+      presentation.content_epoch::32, presentation.layout_generation::32,
+      presentation.scroll_seq::32>>
   end
 
   @spec encode_rect(PaneGeometry.rect()) :: binary()

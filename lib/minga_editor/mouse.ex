@@ -112,15 +112,41 @@ defmodule MingaEditor.Mouse do
   def handle_scroll_batch(state, _window_id, 0, _direction), do: state
 
   def handle_scroll_batch(state, window_id, delta_lines, direction) do
+    apply_scroll_intent(state, window_id, delta_lines, direction)
+  end
+
+  # Shared entry point for wheel/trackpad scroll intent (#2661), used by both
+  # the smooth-trackpad accumulator (`handle_scroll_batch/4`) and the discrete
+  # per-tick wheel path for inactive windows (`scroll_window_vertical/3`).
+  #
+  # For a resident GUI window (full-document residence, #2653/#2658), a report
+  # that would push the cursor outside `scroll_margin` drags the cursor via
+  # `Viewport.scroll_by_with_scrolloff/5` (the same scrolloff math as
+  # ctrl-e/ctrl-y); a report that stays within scrolloff moves only the
+  # viewport, exactly like today. Every other window (windowed, or any
+  # non-GUI frontend) keeps today's `Window.scroll_viewport/3` behavior
+  # unconditionally, so residence-off configs and TUI stay byte-identical.
+  #
+  # `Window.mark_scroll_echo/2` records the committed top of this move as a
+  # frontend-reported free-scroll top so the render pipeline's
+  # `Window.settle_scroll_seq/1` does not bump `scroll_seq` for it — only
+  # BEAM-initiated jumps and the cursor-must-stay-visible re-attach do, which is
+  # the "no re-anchor storm" contract from #2661. The echo top is sticky and
+  # editor-owned (never written back), so the async render round trip cannot
+  # latch or clobber it.
+  @spec apply_scroll_intent(state(), non_neg_integer(), integer(), :down | :up) :: state()
+  defp apply_scroll_intent(state, window_id, delta_lines, direction) do
     case Map.fetch(state.workspace.windows.map, window_id) do
       {:ok, %Window{buffer: buf} = window} when is_pid(buf) ->
         now = System.monotonic_time(:millisecond)
         total_lines = Buffer.line_count(buf)
         cursor_pos = Buffer.cursor(buf)
 
+        scrolled = apply_scroll_delta(state, buf, window, total_lines, cursor_pos, delta_lines)
+
         updated =
-          window
-          |> Window.scroll_viewport(delta_lines, total_lines)
+          scrolled
+          |> Window.mark_scroll_echo(scrolled.viewport.top)
           |> Window.record_scroll_event(now, direction, cursor_pos)
 
         EditorState.update_window(state, window_id, fn _window -> updated end)
@@ -128,6 +154,64 @@ defmodule MingaEditor.Mouse do
       _ ->
         state
     end
+  end
+
+  @spec apply_scroll_delta(
+          state(),
+          pid(),
+          Window.t(),
+          non_neg_integer(),
+          Buffer.position(),
+          integer()
+        ) :: Window.t()
+  defp apply_scroll_delta(state, buf, window, total_lines, cursor_pos, delta_lines) do
+    if Window.resident?(window) and native_gui?(state) do
+      resident_scroll(buf, window, total_lines, cursor_pos, delta_lines)
+    else
+      Window.scroll_viewport(window, delta_lines, total_lines)
+    end
+  end
+
+  # Free-scroll for a full-document resident GUI window (#2661): apply the report
+  # directly, dragging the cursor only when the move breaches scroll_margin (the
+  # same scrolloff math as ctrl-e/ctrl-y). The frontend never moves the cursor.
+  #
+  # Uses the buffer-local scroll_margin (matching the render pipeline's
+  # `scroll_margin/1`), not the global default, so a filetype override does not
+  # produce a visible settle-jump when cursor-follow re-scrolls at gesture end.
+  #
+  # Intentionally does not set the `pinned` flag that `Window.scroll_viewport/3`
+  # would set at the document bottom: free-scroll is presentation, and cursor
+  # position (not a pin) drives residence re-anchoring. (The pinned flag is
+  # currently unread in lib/; noted here for future readers.)
+  @spec resident_scroll(pid(), Window.t(), non_neg_integer(), Buffer.position(), integer()) ::
+          Window.t()
+  defp resident_scroll(buf, window, total_lines, {cursor_line, cursor_col}, delta_lines) do
+    margin = scroll_margin(buf)
+
+    {new_vp, new_cursor_line} =
+      Viewport.scroll_by_with_scrolloff(
+        window.viewport,
+        cursor_line,
+        total_lines,
+        delta_lines,
+        margin
+      )
+
+    if new_cursor_line != cursor_line, do: Buffer.move_to(buf, {new_cursor_line, cursor_col})
+
+    %{window | viewport: new_vp}
+  end
+
+  @spec native_gui?(state()) :: boolean()
+  defp native_gui?(%{capabilities: %Capabilities{frontend_type: :native_gui}}), do: true
+  defp native_gui?(_state), do: false
+
+  @spec scroll_margin(pid()) :: non_neg_integer()
+  defp scroll_margin(buf) do
+    Buffer.get_option(buf, :scroll_margin)
+  catch
+    :exit, _ -> 5
   end
 
   @doc "Dispatches a mouse event, returning updated state."
@@ -621,23 +705,8 @@ defmodule MingaEditor.Mouse do
 
   @spec scroll_window_vertical(state(), term(), integer()) :: state()
   defp scroll_window_vertical(state, win_id, delta) do
-    case Map.fetch(state.workspace.windows.map, win_id) do
-      {:ok, %Window{buffer: buf} = window} when is_pid(buf) ->
-        now = System.monotonic_time(:millisecond)
-        dir = if delta > 0, do: :down, else: :up
-        total_lines = Buffer.line_count(buf)
-        cursor_pos = Buffer.cursor(buf)
-
-        updated =
-          window
-          |> Window.scroll_viewport(delta, total_lines)
-          |> Window.record_scroll_event(now, dir, cursor_pos)
-
-        EditorState.update_window(state, win_id, fn _window -> updated end)
-
-      _ ->
-        state
-    end
+    dir = if delta > 0, do: :down, else: :up
+    apply_scroll_intent(state, win_id, delta, dir)
   end
 
   @spec scroll_window_horizontal(state(), term(), integer()) :: state()

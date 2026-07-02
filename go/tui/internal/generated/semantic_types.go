@@ -287,6 +287,7 @@ type GuiWindowContentScrollPresentation struct {
 	OverscanEndLine       uint32
 	ContentEpoch          uint32
 	LayoutGeneration      uint32
+	ScrollSeq             uint32
 }
 
 type GuiStatusBarIdentity struct {

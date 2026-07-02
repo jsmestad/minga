@@ -78,7 +78,10 @@ defmodule MingaEditor.Window.RenderCache do
           total_visual_rows_cache: {term(), non_neg_integer()} | nil,
           retained_rows: %{optional(non_neg_integer()) => retained_row()},
           retained_wrap_lines: %{optional(non_neg_integer()) => retained_wrap_line()},
-          resident_build: MingaEditor.RenderModel.Window.ResidentBuild.t() | nil
+          resident_build: MingaEditor.RenderModel.Window.ResidentBuild.t() | nil,
+          resident: boolean(),
+          scroll_seq: non_neg_integer(),
+          scroll_seq_last_top: integer() | nil
         }
 
   defstruct dirty_lines: %{},
@@ -95,7 +98,10 @@ defmodule MingaEditor.Window.RenderCache do
             total_visual_rows_cache: nil,
             retained_rows: %{},
             retained_wrap_lines: %{},
-            resident_build: nil
+            resident_build: nil,
+            resident: false,
+            scroll_seq: 0,
+            scroll_seq_last_top: nil
 
   @doc """
   Returns a fresh cache with all lines dirty.
@@ -423,5 +429,59 @@ defmodule MingaEditor.Window.RenderCache do
   @spec put_resident_build(t(), MingaEditor.RenderModel.Window.ResidentBuild.t() | nil) :: t()
   def put_resident_build(%__MODULE__{} = cache, state) do
     %{cache | resident_build: state}
+  end
+
+  # ── Scroll authority and residence flag (#2661) ─────────────────────────────
+
+  @doc """
+  Records the render pipeline's full-document residence decision for the frame.
+
+  Lives in the render cache (not a top-level `Window` field) because the render
+  cache is the only per-window struct the async render writeback copies back to
+  the live window (`MingaEditor.State.merge_renderer_window/2`). The input layer
+  reads it via `resident?/1`.
+  """
+  @spec set_resident(t(), boolean()) :: t()
+  def set_resident(%__MODULE__{} = cache, resident?) when is_boolean(resident?) do
+    %{cache | resident: resident?}
+  end
+
+  @doc "Returns the residence flag captured by the last rendered frame."
+  @spec resident?(t()) :: boolean()
+  def resident?(%__MODULE__{resident: resident}), do: resident
+
+  @doc "Returns the monotonic scroll-authority sequence (#2661)."
+  @spec scroll_seq(t()) :: non_neg_integer()
+  def scroll_seq(%__MODULE__{scroll_seq: seq}), do: seq
+
+  @doc """
+  Advances the scroll-authority sequence when the committed top made a genuine
+  BEAM-initiated move, and records the new baseline.
+
+  `scroll_seq` bumps only when `top` differs from both the previous committed top
+  (`scroll_seq_last_top`) and the frontend-reported free-scroll top (`echo_top`).
+  A move to the echoed top is the frontend's own report reflected back (a pure
+  free scroll or a scrolloff-breach cursor drag, both of which share the reported
+  top), so it does not advance the sequence. A move to any other top is an
+  authoritative anchor change (a jump command or a cursor-must-stay-visible
+  re-attach) and does advance it. The first settle after a fresh cache (nil
+  baseline) only records the baseline. Because both the counter and the baseline
+  live here and the render cache is written back to the live window, the
+  counter is monotonic per rendered lineage; overlapped in-flight frames can
+  emit duplicate or regressing values, which the frontend tolerates (strict
+  greater-than check, with anchor-key and reset_required covering discards).
+
+  Note: this cannot detect a jump that lands exactly on the previous or echoed
+  top. That same-top case is intended to be covered by an explicit bump at the
+  authoritative jump call sites in the future; it is not implemented yet.
+  """
+  @spec settle_scroll_seq(t(), integer(), integer() | nil) :: t()
+  def settle_scroll_seq(%__MODULE__{} = cache, top, echo_top) when is_integer(top) do
+    bump? =
+      not is_nil(cache.scroll_seq_last_top) and top != cache.scroll_seq_last_top and
+        top != echo_top
+
+    seq = if bump?, do: cache.scroll_seq + 1, else: cache.scroll_seq
+    %{cache | scroll_seq: seq, scroll_seq_last_top: top}
   end
 end

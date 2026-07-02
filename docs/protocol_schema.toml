@@ -1536,6 +1536,7 @@ fields = [
   { name = "overscan_end_line", type = "u32" },
   { name = "content_epoch", type = "u32" },
   { name = "layout_generation", type = "u32" },
+  { name = "scroll_seq", type = "u32" },
 ]
 
 # gui_status_bar (0x76) sections

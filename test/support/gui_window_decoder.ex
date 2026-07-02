@@ -117,7 +117,8 @@ defmodule Minga.Test.GUIWindowDecoder do
   defp decode_scroll_presentation(
          <<window_id::16, flags::8, anchor_top::32, anchor_left::16, anchor_visual_row_offset::16,
            visible_start_line::32, visible_end_line::32, overscan_start_line::32,
-           overscan_end_line::32, content_epoch::32, layout_generation::32, rest::binary>>
+           overscan_end_line::32, content_epoch::32, layout_generation::32, scroll_seq::32,
+           rest::binary>>
        ) do
     scroll_presentation = %{
       window_id: window_id,
@@ -130,7 +131,8 @@ defmodule Minga.Test.GUIWindowDecoder do
       overscan_start_line: overscan_start_line,
       overscan_end_line: overscan_end_line,
       content_epoch: content_epoch,
-      layout_generation: layout_generation
+      layout_generation: layout_generation,
+      scroll_seq: scroll_seq
     }
 
     {scroll_presentation, rest}

@@ -116,20 +116,38 @@ defmodule MingaAgent.Providers.NativeTest do
   end
 
   # Wait for events with a helper that collects all events within a timeout.
-  defp collect_events(timeout) do
-    collect_events_acc([], timeout)
+  # Waits for a full agent run, collecting every event up to and including the
+  # terminal AgentEnd (which the Native provider emits on every path: normal
+  # finish, turn/cost limit, stream interruption, LLM error, task crash, abort).
+  # Uses an overall deadline rather than an inter-event silence gap, so a
+  # slow-but-healthy pause between events (e.g. a real tool execution on a
+  # loaded CI runner) can never silently truncate the run mid-collection. If
+  # AgentEnd never arrives, this fails loudly with the events collected so far
+  # instead of returning a partial list that surfaces as a confusing downstream
+  # assertion failure.
+  @full_run_deadline_ms 10_000
+
+  defp collect_run_events(deadline_ms \\ @full_run_deadline_ms) do
+    deadline = System.monotonic_time(:millisecond) + deadline_ms
+    collect_run_events_acc([], deadline, deadline_ms)
   end
 
-  defp collect_events_acc(acc, timeout) do
+  defp collect_run_events_acc(acc, deadline, deadline_ms) do
+    timeout = max(deadline - System.monotonic_time(:millisecond), 0)
+
     receive do
       {:agent_provider_event, %Event.AgentEnd{} = event} ->
-        # AgentEnd is always the last event; return immediately
+        # AgentEnd is always the last event of a run; return immediately
         Enum.reverse([event | acc])
 
       {:agent_provider_event, event} ->
-        collect_events_acc([event | acc], timeout)
+        collect_run_events_acc([event | acc], deadline, deadline_ms)
     after
-      timeout -> Enum.reverse(acc)
+      timeout ->
+        flunk("""
+        collect_run_events/1 timed out after #{deadline_ms}ms without an AgentEnd.
+        Collected #{length(acc)} event(s): #{inspect(Enum.reverse(acc))}
+        """)
     end
   end
 
@@ -424,7 +442,7 @@ defmodule MingaAgent.Providers.NativeTest do
           assert provider_options[:codex_originator] == "minga"
         end
 
-        collect_events(500)
+        collect_run_events()
       end)
     end
   end
@@ -451,7 +469,7 @@ defmodule MingaAgent.Providers.NativeTest do
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, thinking_level: "medium")
 
       :ok = Native.send_prompt(pid, "Hello")
-      collect_events(500)
+      collect_run_events()
 
       assert :ok = Native.set_model(pid, "openai:o4-mini")
       assert {:ok, state} = Native.get_state(pid)
@@ -459,7 +477,7 @@ defmodule MingaAgent.Providers.NativeTest do
       assert state.thinking_level == "medium"
 
       :ok = Native.send_prompt(pid, "Follow up")
-      collect_events(500)
+      collect_run_events()
 
       assert_received {^messages_ref, 1, "openai:o4-mini", messages}
       assert Enum.count(messages) >= 4
@@ -495,7 +513,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
       assert :ok = Native.send_prompt(pid, "Hi")
 
-      events = collect_events(500)
+      events = collect_run_events()
       assert %Event.AgentStart{} = Enum.at(events, 0)
 
       assert [%Event.ThinkingDelta{delta: "Let me think..."}] =
@@ -548,7 +566,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
       assert :ok = Native.send_prompt(pid, "Read test.txt")
 
-      events = collect_events(1_000)
+      events = collect_run_events()
 
       # Should have tool start and tool end events
       tool_starts = Enum.filter(events, &match?(%Event.ToolStart{}, &1))
@@ -630,7 +648,7 @@ defmodule MingaAgent.Providers.NativeTest do
       assert_receive {:tool_started, "failing_tool", _failing_pid}, 1_000
 
       send(slow_pid, {release_ref, :release})
-      events = collect_events(1_000)
+      events = collect_run_events()
 
       assert Enum.any?(events, &match?(%Event.ToolEnd{name: "slow_tool", is_error: false}, &1))
       assert Enum.any?(events, &match?(%Event.ToolEnd{name: "failing_tool", is_error: true}, &1))
@@ -707,7 +725,7 @@ defmodule MingaAgent.Providers.NativeTest do
       assert_receive {:tool_started, "sibling_tool", sibling_pid}, 1_000
 
       send(sibling_pid, {release_ref, :release})
-      events = collect_events(1_000)
+      events = collect_run_events()
 
       crash_end = Enum.find(events, &match?(%Event.ToolEnd{name: "crashing_tool"}, &1))
       assert crash_end != nil
@@ -818,7 +836,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
       assert_receive {:tool_started, "stream_sibling_tool", sibling_pid}, 1_000
       send(sibling_pid, {release_ref, :release})
-      events = collect_events(1_000)
+      events = collect_run_events()
 
       assert Enum.any?(
                events,
@@ -997,7 +1015,7 @@ defmodule MingaAgent.Providers.NativeTest do
       assert_receive {:tool_started, "allowed_tool", allowed_pid}, 1_000
       send(reply_to, {:tool_approval_response, "tc_ask", :approve})
       send(allowed_pid, {release_ref, :release})
-      events = collect_events(1_000)
+      events = collect_run_events()
 
       assert Enum.any?(events, &match?(%Event.ToolEnd{name: "ask_tool", is_error: false}, &1))
       assert Enum.any?(events, &match?(%Event.ToolEnd{name: "allowed_tool", is_error: false}, &1))
@@ -1087,7 +1105,7 @@ defmodule MingaAgent.Providers.NativeTest do
       assert_receive {:tool_started, "reject_allowed_tool", allowed_pid}, 1_000
       send(reply_to, {:tool_approval_response, "tc_reject", :reject})
       send(allowed_pid, {release_ref, :release})
-      events = collect_events(1_000)
+      events = collect_run_events()
 
       rejected_end = Enum.find(events, &match?(%Event.ToolEnd{name: "reject_ask_tool"}, &1))
       assert rejected_end != nil
@@ -1173,7 +1191,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
       send(reply_to_2, {:tool_approval_response, "tc_2", :approve})
 
-      events = collect_events(2_000)
+      events = collect_run_events()
 
       assert Enum.any?(
                events,
@@ -1252,7 +1270,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
       assert :ok = Native.send_prompt(pid, "Read the file through ProjectView")
 
-      events = collect_events(2_000)
+      events = collect_run_events()
       assert_received {:project_view_call, {:read_file, "lib/file.txt"}}
       tool_end = Enum.find(events, &match?(%Event.ToolEnd{name: "read_file"}, &1))
       assert tool_end != nil
@@ -1299,7 +1317,7 @@ defmodule MingaAgent.Providers.NativeTest do
         )
 
       assert :ok = Native.send_prompt(pid, "Delete the file")
-      events = collect_events(1_000)
+      events = collect_run_events()
 
       assert Enum.any?(events, &match?(%Event.ToolStart{name: "delete_file"}, &1))
       assert Enum.any?(events, &match?(%Event.ToolEnd{name: "delete_file", is_error: false}, &1))
@@ -1354,7 +1372,7 @@ defmodule MingaAgent.Providers.NativeTest do
         )
 
       assert :ok = Native.send_prompt(pid, "Patch the file")
-      events = collect_events(1_000)
+      events = collect_run_events()
 
       assert Enum.any?(events, &match?(%Event.ToolStart{name: "apply_diff"}, &1))
       assert Enum.any?(events, &match?(%Event.ToolEnd{name: "apply_diff", is_error: false}, &1))
@@ -1400,7 +1418,7 @@ defmodule MingaAgent.Providers.NativeTest do
       tools = Tools.all(project_root: dir)
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, tools: tools)
       :ok = Native.send_prompt(pid, "Read nonexistent.txt")
-      _events = collect_events(1_000)
+      _events = collect_run_events()
 
       assert_received {^messages_ref, 1, messages}
       tool_msg = Enum.find(messages, fn m -> m.role == :tool end)
@@ -1416,7 +1434,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
       assert :ok = Native.send_prompt(pid, "Hello")
 
-      events = collect_events(500)
+      events = collect_run_events()
 
       error = Enum.find(events, &match?(%Event.Error{}, &1))
       assert error != nil
@@ -1432,8 +1450,8 @@ defmodule MingaAgent.Providers.NativeTest do
     test "surfaces a single failure exactly once", %{tmp_dir: dir} do
       # Regression: the agent loop emitted the error, and the Task-completion
       # handler emitted it again, so a single failure showed up twice in the
-      # transcript. collect_events/1 stops at the first AgentEnd, so we drain
-      # afterward to prove no second Error (or AgentEnd) follows.
+      # transcript. collect_run_events/1 stops at the first AgentEnd, so we
+      # drain afterward to prove no second Error (or AgentEnd) follows.
       client = fake_error_client("boom once")
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_retries: 0)
 
@@ -1640,7 +1658,7 @@ defmodule MingaAgent.Providers.NativeTest do
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_retries: 0)
       :ok = Native.send_prompt(pid, "Tell me something important")
 
-      events = collect_events(1_000)
+      events = collect_run_events()
 
       # Should have streamed the partial text before the error
       text_deltas = Enum.filter(events, &match?(%Event.TextDelta{}, &1))
@@ -1690,11 +1708,11 @@ defmodule MingaAgent.Providers.NativeTest do
 
       # First prompt gets interrupted
       :ok = Native.send_prompt(pid, "Tell me something")
-      _events1 = collect_events(1_000)
+      _events1 = collect_run_events()
 
       # Continue should work
       :ok = Native.continue(pid)
-      events2 = collect_events(1_000)
+      events2 = collect_run_events()
 
       text_deltas = Enum.filter(events2, &match?(%Event.TextDelta{}, &1))
       continued_text = Enum.map_join(text_deltas, & &1.delta)
@@ -1711,7 +1729,7 @@ defmodule MingaAgent.Providers.NativeTest do
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client)
 
       :ok = Native.send_prompt(pid, "Hello")
-      _events = collect_events(500)
+      _events = collect_run_events()
 
       assert {:error, "No interrupted response to continue from"} = Native.continue(pid)
     end
@@ -1748,7 +1766,7 @@ defmodule MingaAgent.Providers.NativeTest do
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_retries: 0)
       :ok = Native.send_prompt(pid, "Hello")
 
-      events = collect_events(1_000)
+      events = collect_run_events()
 
       # Should get a normal error, not the recovery path
       error_events = Enum.filter(events, &match?(%Event.Error{}, &1))
@@ -1798,7 +1816,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
       :ok = Native.send_prompt(pid, "Read the file over and over")
 
-      events = collect_events(3_000)
+      events = collect_run_events()
 
       # Should have a turn limit warning
       text_deltas = Enum.filter(events, &match?(%Event.TextDelta{}, &1))
@@ -1849,7 +1867,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
       :ok = Native.send_prompt(pid, "Read the file twice")
 
-      events = collect_events(3_000)
+      events = collect_run_events()
 
       # Should NOT have a turn limit warning
       text_deltas = Enum.filter(events, &match?(%Event.TextDelta{}, &1))
@@ -1895,14 +1913,14 @@ defmodule MingaAgent.Providers.NativeTest do
 
       # First prompt hits the limit after 2 turns
       :ok = Native.send_prompt(pid, "Keep reading")
-      events1 = collect_events(3_000)
+      events1 = collect_run_events()
 
       text1 = events1 |> Enum.filter(&match?(%Event.TextDelta{}, &1)) |> Enum.map_join(& &1.delta)
       assert text1 =~ "Turn limit reached"
 
       # Continue should reset the counter and keep going
       :ok = Native.continue(pid)
-      events2 = collect_events(3_000)
+      events2 = collect_run_events()
 
       text2 = events2 |> Enum.filter(&match?(%Event.TextDelta{}, &1)) |> Enum.map_join(& &1.delta)
       # It will hit the limit again (2 more turns), or finish if the counter went past 5
@@ -1939,7 +1957,7 @@ defmodule MingaAgent.Providers.NativeTest do
                "Do not use shell to recursively list or search files when find or grep can answer the question."
 
       :ok = Native.send_prompt(pid, "test")
-      events = collect_events(1_000)
+      events = collect_run_events()
 
       assert %Event.AgentEnd{
                usage: %TurnUsage{
@@ -1970,7 +1988,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_cost: 5.0)
       :ok = Native.send_prompt(pid, "test")
-      events = collect_events(1_000)
+      events = collect_run_events()
 
       assert %Event.AgentEnd{
                usage: %TurnUsage{
@@ -1994,7 +2012,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_cost: 5.0)
       :ok = Native.send_prompt(pid, "test")
-      events = collect_events(1_000)
+      events = collect_run_events()
 
       assert %Event.AgentEnd{
                usage: %TurnUsage{
@@ -2018,7 +2036,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_cost: 5.0)
       :ok = Native.send_prompt(pid, "test")
-      events = collect_events(1_000)
+      events = collect_run_events()
 
       assert %Event.AgentEnd{usage: %TurnUsage{input: 0, output: 0, cost: cost}} =
                Enum.find(events, &match?(%Event.AgentEnd{}, &1))
@@ -2049,7 +2067,7 @@ defmodule MingaAgent.Providers.NativeTest do
       assert {:ok, %{max_cost: nil}} = GenServer.call(pid, :get_budget)
 
       :ok = Native.send_prompt(pid, "test")
-      collect_events(500)
+      collect_run_events()
 
       :ok = Native.new_session(pid)
       assert {:ok, budget} = GenServer.call(pid, :get_budget)
@@ -2084,7 +2102,7 @@ defmodule MingaAgent.Providers.NativeTest do
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_cost: 1.0)
 
       assert :ok = Native.send_prompt(pid, "initial prompt")
-      initial_events = collect_events(1_000)
+      initial_events = collect_run_events()
       assert Enum.any?(initial_events, &match?(%Event.TextDelta{delta: "Initial"}, &1))
       assert Enum.any?(initial_events, &match?(%Event.AgentEnd{}, &1))
       assert {:ok, %{session_cost: 2.0}} = GenServer.call(pid, :get_budget)
@@ -2099,7 +2117,7 @@ defmodule MingaAgent.Providers.NativeTest do
       assert :ok = GenServer.call(pid, {:set_max_cost, 3.0})
       assert :ok = Native.send_prompt(pid, "after budget increase")
 
-      events = collect_events(1_000)
+      events = collect_run_events()
       assert Enum.any?(events, &match?(%Event.TextDelta{delta: "Recovered"}, &1))
       assert Enum.any?(events, &match?(%Event.AgentEnd{}, &1))
       assert {:ok, %{is_streaming: false}} = Native.get_state(pid)
@@ -2138,7 +2156,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
       :ok = Native.send_prompt(pid, "Keep reading forever")
 
-      events = collect_events(5_000)
+      events = collect_run_events()
 
       text_deltas = Enum.filter(events, &match?(%Event.TextDelta{}, &1))
       all_text = Enum.map_join(text_deltas, & &1.delta)
@@ -2175,7 +2193,7 @@ defmodule MingaAgent.Providers.NativeTest do
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_cost: nil)
 
       :ok = Native.send_prompt(pid, "test")
-      events = collect_events(1_000)
+      events = collect_run_events()
 
       text_deltas = Enum.filter(events, &match?(%Event.TextDelta{}, &1))
       all_text = Enum.map_join(text_deltas, & &1.delta)
@@ -2228,7 +2246,7 @@ defmodule MingaAgent.Providers.NativeTest do
           refute Keyword.has_key?(opts, :base_url)
         end
 
-        collect_events(500)
+        collect_run_events()
       end
     end
   end
@@ -2255,7 +2273,7 @@ defmodule MingaAgent.Providers.NativeTest do
       log =
         capture_log(fn ->
           Native.send_prompt(pid, "hello")
-          events = collect_events(2_000)
+          events = collect_run_events()
 
           error = Enum.find(events, &match?(%Event.Error{}, &1))
 
@@ -2287,7 +2305,7 @@ defmodule MingaAgent.Providers.NativeTest do
         )
 
       Native.send_prompt(pid, "hello")
-      events = collect_events(2_000)
+      events = collect_run_events()
 
       error = Enum.find(events, &match?(%Event.Error{}, &1))
 
@@ -2319,7 +2337,7 @@ defmodule MingaAgent.Providers.NativeTest do
         )
 
       Native.send_prompt(pid, "hello")
-      events = collect_events(2_000)
+      events = collect_run_events()
 
       error = Enum.find(events, &match?(%Event.Error{}, &1))
 
@@ -2357,7 +2375,7 @@ defmodule MingaAgent.Providers.NativeTest do
           )
 
         Native.send_prompt(pid, "hello")
-        events = collect_events(2_000)
+        events = collect_run_events()
 
         error = Enum.find(events, &match?(%Event.Error{}, &1))
         assert %Event.Error{kind: ^kind} = error
@@ -2379,7 +2397,7 @@ defmodule MingaAgent.Providers.NativeTest do
         )
 
       Native.send_prompt(pid, "hello")
-      events = collect_events(2_000)
+      events = collect_run_events()
 
       error_events = Enum.filter(events, &match?(%Event.Error{}, &1))
       assert error_events != []

@@ -818,6 +818,11 @@ defmodule MingaEditor.State do
     %{live_windows | map: map}
   end
 
+  # Only `render_cache` is renderer-owned and round-trips through the async
+  # writeback. Any other `Window` field written during a render is dropped here:
+  # editor-owned state (e.g. `scroll_echo_top`) must be written only by the
+  # input/editor path, and renderer-computed state must live in the render cache
+  # (e.g. `scroll_seq`, `resident`).
   @spec merge_renderer_window(Window.t(), Window.t() | nil) :: Window.t()
   defp merge_renderer_window(%Window{} = live_window, %Window{} = rendered_window) do
     %{live_window | render_cache: rendered_window.render_cache}

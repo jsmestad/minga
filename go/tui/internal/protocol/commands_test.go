@@ -164,6 +164,7 @@ func TestDecodeWindowContentScrollPresentation(t *testing.T) {
 	scrollPayload = append(scrollPayload, u32Bytes(18)...)
 	scrollPayload = append(scrollPayload, u32Bytes(42)...)
 	scrollPayload = append(scrollPayload, u32Bytes(99)...)
+	scrollPayload = append(scrollPayload, u32Bytes(3)...) // scroll_seq (#2661)
 
 	packet := []byte{generated.OPGuiWindowContent, 3}
 	packet = append(packet, section(0x01, headerPayload)...)
@@ -190,6 +191,9 @@ func TestDecodeWindowContentScrollPresentation(t *testing.T) {
 	if scroll.ContentEpoch != 42 || scroll.LayoutGeneration != 99 {
 		t.Fatalf("scroll identity decoded incorrectly: %+v", scroll)
 	}
+	if scroll.ScrollSeq != 3 {
+		t.Fatalf("scroll_seq decoded incorrectly: %+v", scroll)
+	}
 }
 
 func TestDecodeWindowContentDropsMismatchedScrollPresentation(t *testing.T) {
@@ -205,6 +209,7 @@ func TestDecodeWindowContentDropsMismatchedScrollPresentation(t *testing.T) {
 	scrollPayload = append(scrollPayload, u32Bytes(18)...)
 	scrollPayload = append(scrollPayload, u32Bytes(42)...)
 	scrollPayload = append(scrollPayload, u32Bytes(99)...)
+	scrollPayload = append(scrollPayload, u32Bytes(3)...) // scroll_seq (#2661)
 
 	packet := []byte{generated.OPGuiWindowContent, 3}
 	packet = append(packet, section(0x01, headerPayload)...)

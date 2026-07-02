@@ -1456,6 +1456,27 @@ final class EditorNSView: MTKView {
 
     /// Smooth trackpad scrolling: accumulate pixel deltas, emit discrete
     /// events at cell boundaries, and render the fractional offset via Metal.
+    /// True while the user is actively dragging a text selection (left mouse
+    /// button held down, excluding pane-divider and scrollbar-thumb drags,
+    /// which are unrelated gestures that also hold the button down).
+    ///
+    /// #2661: during an active selection drag, local presentation scrolling
+    /// defers to BEAM-authoritative anchors — drag-autoscroll is BEAM-owned,
+    /// so the frontend must not layer its own ephemeral scroll offset on top
+    /// of it. Scroll-intent reports still go out normally; only the local
+    /// pixel-offset *presentation* is suppressed.
+    private var isSelectionDragActive: Bool {
+        Self.isSelectionDragActive(
+            hasMouseDownPoint: leftMouseDownPoint != nil,
+            isDividerDragActive: dividerDragState != .none,
+            isDraggingScrollIndicator: isDraggingScrollIndicator
+        )
+    }
+
+    nonisolated static func isSelectionDragActive(hasMouseDownPoint: Bool, isDividerDragActive: Bool, isDraggingScrollIndicator: Bool) -> Bool {
+        hasMouseDownPoint && !isDividerDragActive && !isDraggingScrollIndicator
+    }
+
     private func handleTrackpadScroll(event: NSEvent, row: Int16, col: Int16, mods: UInt8) {
         if event.phase == .began {
             scrollAccumulator.reset()
@@ -1563,8 +1584,9 @@ final class EditorNSView: MTKView {
             scrollAccumulator.snapVertical()
             scrollUnconfirmedLines = 0
         }
-        scrollPixelOffset = scrollTargetWindowId == nil ? CGPoint(x: 0, y: 0) : translation.scrollOffset
-        scrollElasticOffsetY = scrollTargetWindowId == nil ? 0 : translation.elasticOffsetY
+        let suppressLocalOffset = scrollTargetWindowId == nil || isSelectionDragActive
+        scrollPixelOffset = suppressLocalOffset ? CGPoint(x: 0, y: 0) : translation.scrollOffset
+        scrollElasticOffsetY = suppressLocalOffset ? 0 : translation.elasticOffsetY
 
         // Snap to zero when gesture/momentum ends
         if (event.phase == .ended || event.phase == .cancelled) && event.momentumPhase == [] {

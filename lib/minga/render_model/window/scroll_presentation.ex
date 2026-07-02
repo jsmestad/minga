@@ -5,6 +5,8 @@ defmodule Minga.RenderModel.Window.ScrollPresentation do
   This is not editor state. The BEAM remains authoritative for the committed viewport and layout; frontends may use this metadata to move already committed rows inside the provided clip rect while they wait for the next committed frame.
 
   `visible_end_line` and `overscan_end_line` are exclusive bounds. The visible and overscan ranges are half-open line ranges: `start_line <= line < end_line`.
+
+  `scroll_seq` (#2661) is the monotonic scroll-authority sequence stamped from the render cache via `MingaEditor.Window.settle_scroll_seq/1`. It advances only when the committed viewport top moves to a value that is neither the previous committed top nor the frontend-reported free-scroll top, i.e. a genuine BEAM-initiated anchor move (a jump or a cursor-must-stay-visible re-attach). A frontend racing a wheel report against a jump that lands on a *different* top can therefore tell the jump apart from its own report and discard its local offset. The settle-time top comparison cannot catch a jump that lands exactly on the previous or echoed top; that same-top case is intended to be covered by an explicit `bump_scroll_seq` at the authoritative jump call sites in the future (not implemented yet).
   """
 
   alias Minga.RenderModel.Window
@@ -34,7 +36,8 @@ defmodule Minga.RenderModel.Window.ScrollPresentation do
             overscan_start_line: 0,
             overscan_end_line: 0,
             content_epoch: 0,
-            layout_generation: 0
+            layout_generation: 0,
+            scroll_seq: 0
 
   @type t :: %__MODULE__{
           window_id: non_neg_integer(),
@@ -47,7 +50,8 @@ defmodule Minga.RenderModel.Window.ScrollPresentation do
           overscan_start_line: non_neg_integer(),
           overscan_end_line: non_neg_integer(),
           content_epoch: non_neg_integer(),
-          layout_generation: non_neg_integer()
+          layout_generation: non_neg_integer(),
+          scroll_seq: non_neg_integer()
         }
 
   @doc "Builds scroll presentation metadata from a render window when geometry is available."
@@ -72,7 +76,8 @@ defmodule Minga.RenderModel.Window.ScrollPresentation do
       overscan_start_line: overscan_start_line,
       overscan_end_line: overscan_end_line,
       content_epoch: window.content_epoch,
-      layout_generation: layout_generation(geometry)
+      layout_generation: layout_generation(geometry),
+      scroll_seq: window.scroll_seq
     }
   end
 

@@ -71,7 +71,7 @@ defmodule MingaAgent.Providers.NativeHooksTest do
 
     assert_receive {:hook_payload, "tc_hook", "shell", %{"command" => "date"}}, 2_000
 
-    events = collect_events(2_000)
+    events = collect_run_events()
     refute_received :tool_callback_ran
 
     assert %Event.Error{message: error_message} = Enum.find(events, &match?(%Event.Error{}, &1))
@@ -97,19 +97,32 @@ defmodule MingaAgent.Providers.NativeHooksTest do
     {:ok, stream_response}
   end
 
-  defp collect_events(timeout) do
-    collect_events_acc([], timeout)
+  # Waits for a full agent run up to the terminal AgentEnd, using an overall
+  # deadline instead of an inter-event silence gap so a slow event gap under CI
+  # load can never silently truncate the run. See the identical helper in
+  # native_test.exs for the full rationale.
+  @full_run_deadline_ms 10_000
+
+  defp collect_run_events(deadline_ms \\ @full_run_deadline_ms) do
+    deadline = System.monotonic_time(:millisecond) + deadline_ms
+    collect_run_events_acc([], deadline, deadline_ms)
   end
 
-  defp collect_events_acc(acc, timeout) do
+  defp collect_run_events_acc(acc, deadline, deadline_ms) do
+    timeout = max(deadline - System.monotonic_time(:millisecond), 0)
+
     receive do
       {:agent_provider_event, %Event.AgentEnd{} = event} ->
         Enum.reverse([event | acc])
 
       {:agent_provider_event, event} ->
-        collect_events_acc([event | acc], timeout)
+        collect_run_events_acc([event | acc], deadline, deadline_ms)
     after
-      timeout -> Enum.reverse(acc)
+      timeout ->
+        flunk("""
+        collect_run_events/1 timed out after #{deadline_ms}ms without an AgentEnd.
+        Collected #{length(acc)} event(s): #{inspect(Enum.reverse(acc))}
+        """)
     end
   end
 end

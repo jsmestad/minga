@@ -260,22 +260,46 @@ struct DecoderTruncatedGUIChromeTests {
     }
 }
 
-private func windowContentData(rowsPayload: Data) -> Data {
+private func windowContentData(rowsPayload: Data, scrollSeq: UInt32? = nil) -> Data {
     var headerPayload = Data()
-    appendU16(&headerPayload, 1)
-    headerPayload.append(0x03)
-    appendU16(&headerPayload, 0)
-    appendU16(&headerPayload, 0)
-    headerPayload.append(0x00)
-    appendU16(&headerPayload, 0)
+    appendU16(&headerPayload, 1) // window_id
+    headerPayload.append(0x03) // flags
+    appendU16(&headerPayload, 0) // cursor_row
+    appendU16(&headerPayload, 0) // cursor_col
+    headerPayload.append(0x00) // cursor_shape
+    appendU16(&headerPayload, 0) // scroll_left
+    if scrollSeq != nil {
+        appendU32(&headerPayload, 42) // content_epoch, matched by the scroll_presentation section below
+    }
 
-    var data = Data([OP_GUI_WINDOW_CONTENT, 2])
+    var data = Data([OP_GUI_WINDOW_CONTENT, scrollSeq != nil ? 3 : 2])
     data.append(0x01)
     appendU16(&data, UInt16(headerPayload.count))
     data.append(headerPayload)
     data.append(0x02)
     appendU16(&data, UInt16(rowsPayload.count))
     data.append(rowsPayload)
+
+    if let scrollSeq {
+        var scrollPresentationPayload = Data()
+        appendU16(&scrollPresentationPayload, 1) // window_id
+        scrollPresentationPayload.append(0x00) // flags
+        appendU32(&scrollPresentationPayload, 5) // anchor_top
+        appendU16(&scrollPresentationPayload, 0) // anchor_left
+        appendU16(&scrollPresentationPayload, 0) // anchor_visual_row_offset
+        appendU32(&scrollPresentationPayload, 5) // visible_start_line
+        appendU32(&scrollPresentationPayload, 10) // visible_end_line
+        appendU32(&scrollPresentationPayload, 0) // overscan_start_line
+        appendU32(&scrollPresentationPayload, 20) // overscan_end_line
+        appendU32(&scrollPresentationPayload, 42) // content_epoch (matches header above)
+        appendU32(&scrollPresentationPayload, 7) // layout_generation
+        appendU32(&scrollPresentationPayload, scrollSeq) // scroll_seq
+
+        data.append(0x0A)
+        appendU16(&data, UInt16(scrollPresentationPayload.count))
+        data.append(scrollPresentationPayload)
+    }
+
     return data
 }
 
@@ -316,6 +340,43 @@ private func expectMalformedWindowContent(_ data: Data) {
     } catch ProtocolDecodeError.malformed {
     } catch {
         Issue.record("Expected ProtocolDecodeError.malformed, got \(error)")
+    }
+}
+
+// MARK: - Scroll presentation scroll_seq field (#2661)
+
+@Suite("Decoder: Scroll Presentation scroll_seq (#2661)")
+struct DecoderScrollPresentationScrollSeqTests {
+
+    private static func emptyRowsPayload() -> Data {
+        var payload = Data()
+        appendU16(&payload, 0) // row_count = 0
+        return payload
+    }
+
+    @Test("decodes the scroll_seq field appended to the scroll_presentation section")
+    func decodesScrollSeq() throws {
+        let data = windowContentData(rowsPayload: Self.emptyRowsPayload(), scrollSeq: 99)
+
+        let (command, _) = try decodeCommand(data: data, offset: 0)
+        guard case .guiWindowContent(let content) = command else {
+            Issue.record("Expected guiWindowContent")
+            return
+        }
+        #expect(content.scrollPresentation?.scrollSeq == 99)
+    }
+
+    @Test("truncated scroll_presentation section (missing scroll_seq bytes) throws malformed")
+    func truncatedScrollSeq() {
+        var data = windowContentData(rowsPayload: Self.emptyRowsPayload(), scrollSeq: 99)
+        // Chop off the last 2 of the 4 scroll_seq bytes; the section's declared
+        // length still claims the full 39 bytes so the decoder must reject it
+        // rather than reading past the truncated buffer.
+        data.removeLast(2)
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
     }
 }
 

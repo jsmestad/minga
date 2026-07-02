@@ -894,6 +894,91 @@ struct CommandDispatcherRoutingTests {
         #expect(discardCount == 0)
     }
 
+    @Test("identical anchor key with a newer scroll_seq still fires discard (#2661 race case)")
+    @MainActor func newerScrollSeqDiscardsEvenWithSameAnchorKey() {
+        let (dispatcher, _) = makeDispatcher()
+        var discardCount = 0
+        dispatcher.onScrollPresentationReset = { discardCount += 1 }
+
+        let base = GUIScrollPresentation(
+            windowId: 7, resetRequired: false,
+            anchorTop: 10, anchorLeft: 0, anchorVisualRowOffset: 0,
+            visibleStartLine: 10, visibleEndLine: 20,
+            overscanStartLine: 5, overscanEndLine: 25,
+            contentEpoch: 42, layoutGeneration: 1, scrollSeq: 3
+        )
+
+        dispatcher.applyForTesting(.guiWindowContent(data: GUIWindowContent(
+            windowId: 7, fullRefresh: true, contentEpoch: 42,
+            cursorRow: 5, cursorCol: 10, cursorShape: .beam,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [],
+            scrollPresentation: base
+        )))
+        #expect(discardCount == 0)
+
+        // A BEAM-initiated jump (search, ctrl-d, zz) races a local scroll report
+        // and coincidentally lands back on the exact same anchor key. Without
+        // the scroll_seq check this would be indistinguishable from an echo of
+        // the frontend's own report and would wrongly keep the stale local offset.
+        let coincidentallySameAnchor = GUIScrollPresentation(
+            windowId: 7, resetRequired: false,
+            anchorTop: 10, anchorLeft: 0, anchorVisualRowOffset: 0,
+            visibleStartLine: 10, visibleEndLine: 20,
+            overscanStartLine: 5, overscanEndLine: 25,
+            contentEpoch: 42, layoutGeneration: 1, scrollSeq: 4
+        )
+
+        dispatcher.applyForTesting(.guiWindowContent(data: GUIWindowContent(
+            windowId: 7, fullRefresh: true, contentEpoch: 42,
+            cursorRow: 5, cursorCol: 10, cursorShape: .beam,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [],
+            scrollPresentation: coincidentallySameAnchor
+        )))
+        #expect(discardCount == 1)
+    }
+
+    @Test("an unchanged or lower scroll_seq with the same anchor key does not discard")
+    @MainActor func unchangedScrollSeqDoesNotDiscard() {
+        let (dispatcher, _) = makeDispatcher()
+        var discardCount = 0
+        dispatcher.onScrollPresentationReset = { discardCount += 1 }
+
+        let base = GUIScrollPresentation(
+            windowId: 7, resetRequired: false,
+            anchorTop: 10, anchorLeft: 0, anchorVisualRowOffset: 0,
+            visibleStartLine: 10, visibleEndLine: 20,
+            overscanStartLine: 5, overscanEndLine: 25,
+            contentEpoch: 42, layoutGeneration: 1, scrollSeq: 5
+        )
+
+        dispatcher.applyForTesting(.guiWindowContent(data: GUIWindowContent(
+            windowId: 7, fullRefresh: true, contentEpoch: 42,
+            cursorRow: 5, cursorCol: 10, cursorShape: .beam,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [],
+            scrollPresentation: base
+        )))
+        #expect(discardCount == 0)
+
+        // Same scroll_seq: this is the routine echo-loop case (#2661) — the
+        // wheel report kept the cursor inside scrolloff, so the BEAM committed
+        // the same anchor and did not advance the authority sequence.
+        dispatcher.applyForTesting(.guiWindowContent(data: GUIWindowContent(
+            windowId: 7, fullRefresh: true, contentEpoch: 42,
+            cursorRow: 5, cursorCol: 10, cursorShape: .beam,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [],
+            scrollPresentation: base
+        )))
+        #expect(discardCount == 0)
+    }
+
     @Test("anchorTop-only change fires scroll presentation discard")
     @MainActor func anchorTopChangeFiresDiscard() {
         let (dispatcher, _) = makeDispatcher()
