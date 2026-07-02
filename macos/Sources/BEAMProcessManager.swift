@@ -55,6 +55,22 @@ final class BEAMProcessManager {
     /// Flushed to the BEAM once the protocol signals ready.
     private(set) var pendingFileURLs: [URL] = []
 
+    /// App Nap / termination assertion held for the lifetime of the BEAM child.
+    ///
+    /// Without this, macOS can App Nap (suspend) or automatically terminate the
+    /// GUI process once it is fully occluded or hidden. A suspended GUI stops
+    /// draining the BEAM's stdout pipe (render backpressure) and, if the process
+    /// is reaped, drops the BEAM's stdin pipe. A dropped stdin pipe reaches the
+    /// BEAM as EOF, which Frontend.Manager treats as "GUI exited" and answers
+    /// with `System.stop(0)` — tearing down the whole editor node, buffers and
+    /// undo included (#2698). Holding a `userInitiated` activity keeps the GUI
+    /// scheduled and un-reaped while the editor core is alive; system sleep is
+    /// still allowed (handled separately via the sleep/wake notifications).
+    private var backgroundActivity: (any NSObjectProtocol)?
+
+    /// Whether a BEAM child is currently running.
+    var hasLiveProcess: Bool { process?.isRunning ?? false }
+
     /// Resolves the BEAM release executable inside the app bundle.
     /// Returns nil if not running as a bundled app.
     static func beamExecutableURL() -> URL? {
@@ -146,6 +162,9 @@ final class BEAMProcessManager {
             return
         }
 
+        // Prevent App Nap / automatic + sudden termination while the BEAM lives.
+        beginBackgroundActivityIfNeeded()
+
         let proc = Process()
         proc.executableURL = execURL
 
@@ -231,12 +250,26 @@ final class BEAMProcessManager {
         kill(proc.processIdentifier, SIGUSR1)
     }
 
+    /// Re-spawns the BEAM after the automatic restart budget was exhausted.
+    ///
+    /// Called from the recovery surface (user chose "Restart Editor"). Clears
+    /// the crash-backoff history so the fresh process gets a clean budget.
+    func restartAfterRecovery() {
+        restartTimestamps.removeAll()
+        isShuttingDown = false
+        start()
+    }
+
     /// Sends SIGTERM to the BEAM and waits briefly for clean shutdown.
     /// Used during Cmd+Q / applicationShouldTerminate.
     func shutdownGracefully(timeout: TimeInterval = 3.0) {
         guard let proc = process, proc.isRunning else { return }
 
         isShuttingDown = true
+
+        // Real quit: release the App Nap / termination assertion so the GUI
+        // process can exit normally once the BEAM has shut down.
+        endBackgroundActivity()
 
         // SIGTERM triggers orderly OTP shutdown in the BEAM.
         proc.terminate()
@@ -258,46 +291,101 @@ final class BEAMProcessManager {
         }
     }
 
+    // MARK: - Termination decision (pure, testable)
+
+    /// What to do when the BEAM child process exits.
+    enum TerminationOutcome: Equatable {
+        /// Expected exit (graceful shutdown or user quit): let the app close.
+        case normalExit
+        /// Unexpected crash within the restart budget: respawn after `delay`.
+        case restart(delay: TimeInterval)
+        /// Unexpected crash past the restart budget: surface recovery to the user.
+        case giveUp
+    }
+
+    /// Decides the termination outcome from inputs only. Pure and synchronous:
+    /// it performs no I/O and never blocks, so the main actor stays free when
+    /// the termination handler calls it (#2698 defect B).
+    nonisolated static func terminationOutcome(
+        status: Int32,
+        isShuttingDown: Bool,
+        recentRestartCount: Int,
+        maxRestarts: Int
+    ) -> TerminationOutcome {
+        if isShuttingDown { return .normalExit }
+        if status == 0 { return .normalExit }
+        if recentRestartCount >= maxRestarts { return .giveUp }
+
+        let attempt = recentRestartCount + 1
+        // Exponential backoff: 100ms, 200ms, 400ms
+        let delay = 0.1 * pow(2.0, Double(attempt - 1))
+        return .restart(delay: delay)
+    }
+
     // MARK: - Private
 
-    private func handleTermination(status: Int32, reason: Process.TerminationReason) {
+    /// Handles BEAM exit. Kept non-`private` so the termination path can be
+    /// exercised directly in tests that assert the main actor is not blocked.
+    func handleTermination(status: Int32, reason: Process.TerminationReason) {
         NSLog("BEAMProcessManager: BEAM exited (status \(status), reason \(reason.rawValue))")
 
         self.process = nil
         self.readHandle = nil
         self.writeHandle = nil
 
-        // Graceful shutdown in progress (Cmd+Q): don't restart.
-        guard !isShuttingDown else {
-            onNormalExit?()
-            return
-        }
-
-        // Normal exit (user quit): don't restart.
-        guard status != 0 else {
-            onNormalExit?()
-            return
-        }
-
         // Prune old timestamps outside the restart window.
         let now = Date()
         let cutoff = now.addingTimeInterval(-windowSeconds)
         restartTimestamps.removeAll { $0 < cutoff }
 
-        if restartTimestamps.count >= maxRestarts {
+        let outcome = Self.terminationOutcome(
+            status: status,
+            isShuttingDown: isShuttingDown,
+            recentRestartCount: restartTimestamps.count,
+            maxRestarts: maxRestarts
+        )
+
+        switch outcome {
+        case .normalExit:
+            onNormalExit?()
+
+        case .giveUp:
             NSLog("BEAMProcessManager: too many crashes (\(maxRestarts) in \(windowSeconds)s), giving up")
+            // Recovery is presented by onCrash; it must not block the main actor.
             onCrash?()
-            return
+
+        case let .restart(delay):
+            restartTimestamps.append(now)
+            NSLog("BEAMProcessManager: restarting in \(delay)s")
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.start()
+            }
         }
+    }
 
-        restartTimestamps.append(now)
+    // MARK: - App Nap / termination assertion
 
-        // Exponential backoff: 100ms, 200ms, 400ms
-        let delay = 0.1 * pow(2.0, Double(restartTimestamps.count - 1))
-        NSLog("BEAMProcessManager: restarting in \(delay)s")
+    private func beginBackgroundActivityIfNeeded() {
+        guard backgroundActivity == nil else { return }
+        backgroundActivity = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiatedAllowingIdleSystemSleep, .automaticTerminationDisabled, .suddenTerminationDisabled],
+            reason: "Minga editor core (BEAM) is running"
+        )
+    }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            self?.start()
+    private func endBackgroundActivity() {
+        if let token = backgroundActivity {
+            ProcessInfo.processInfo.endActivity(token)
+            backgroundActivity = nil
         }
+    }
+
+    // MARK: - Test hooks
+
+    /// Seeds the crash-backoff history so tests can drive the give-up path
+    /// without spawning real processes.
+    func primeRestartHistoryForTesting(count: Int) {
+        let now = Date()
+        restartTimestamps = Array(repeating: now, count: count)
     }
 }

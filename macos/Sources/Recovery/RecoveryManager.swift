@@ -50,6 +50,36 @@ final class RecoveryManager {
         return true
     }
 
+    /// Presents the recovery surface after the BEAM child process has exited and
+    /// automatic restart gave up.
+    ///
+    /// Non-blocking by contract: the alert is scheduled on the next main-actor
+    /// turn, so the caller (the process manager's termination handler) returns
+    /// immediately and the main actor is never blocked by the termination path
+    /// (#2698). The alert itself remains fully interactive and quittable.
+    func presentEditorCoreStopped(onRestart: @escaping @MainActor () -> Void) {
+        guard !isShowingAlert else { return }
+        isShowingAlert = true
+
+        Task { @MainActor in
+            defer { self.isShowingAlert = false }
+
+            let alert = NSAlert()
+            alert.alertStyle = .critical
+            alert.messageText = "Editor Core Stopped"
+            alert.informativeText = "The Minga editor core exited and could not be restarted automatically. Restart it to continue editing, or quit Minga."
+            alert.addButton(withTitle: "Restart Editor")
+            alert.addButton(withTitle: "Quit Minga")
+
+            switch alert.runModal() {
+            case .alertFirstButtonReturn:
+                onRestart()
+            default:
+                NSApp.terminate(nil)
+            }
+        }
+    }
+
     /// Test helper for deterministic timeout checks.
     func setLastFramePresentedTimeForTesting(_ time: CFAbsoluteTime) {
         lastFramePresentedTime = time

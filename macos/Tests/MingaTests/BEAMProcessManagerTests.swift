@@ -135,3 +135,109 @@ struct BEAMProcessManagerLaunchArgumentsTests {
         #expect(workingDirectory.path == "/Applications")
     }
 }
+
+@Suite("BEAMProcessManager Termination Handling")
+struct BEAMProcessManagerTerminationTests {
+    // MARK: - Pure decision function
+
+    @Test("graceful shutdown resolves to a normal exit")
+    func gracefulShutdownIsNormalExit() {
+        let outcome = BEAMProcessManager.terminationOutcome(
+            status: 0, isShuttingDown: true, recentRestartCount: 0, maxRestarts: 3
+        )
+        #expect(outcome == .normalExit)
+    }
+
+    @Test("clean exit code resolves to a normal exit")
+    func cleanExitIsNormalExit() {
+        let outcome = BEAMProcessManager.terminationOutcome(
+            status: 0, isShuttingDown: false, recentRestartCount: 2, maxRestarts: 3
+        )
+        #expect(outcome == .normalExit)
+    }
+
+    @Test("crash within budget schedules a backoff restart")
+    func crashWithinBudgetRestarts() {
+        #expect(
+            BEAMProcessManager.terminationOutcome(
+                status: 1, isShuttingDown: false, recentRestartCount: 0, maxRestarts: 3
+            ) == .restart(delay: 0.1)
+        )
+        #expect(
+            BEAMProcessManager.terminationOutcome(
+                status: 1, isShuttingDown: false, recentRestartCount: 1, maxRestarts: 3
+            ) == .restart(delay: 0.2)
+        )
+        #expect(
+            BEAMProcessManager.terminationOutcome(
+                status: 1, isShuttingDown: false, recentRestartCount: 2, maxRestarts: 3
+            ) == .restart(delay: 0.4)
+        )
+    }
+
+    @Test("crash past the budget resolves to give up (recovery surface)")
+    func crashPastBudgetGivesUp() {
+        let outcome = BEAMProcessManager.terminationOutcome(
+            status: 1, isShuttingDown: false, recentRestartCount: 3, maxRestarts: 3
+        )
+        #expect(outcome == .giveUp)
+    }
+
+    // MARK: - Main-actor is never blocked by the termination path (#2698 defect B)
+
+    @Test("give-up path invokes recovery without blocking the main actor")
+    @MainActor func giveUpDoesNotBlockMainActor() {
+        let manager = BEAMProcessManager()
+        var recoveryPresented = false
+        var normalExited = false
+        manager.onCrash = { recoveryPresented = true }
+        manager.onNormalExit = { normalExited = true }
+
+        // Seed the crash history to the restart limit so the next crash gives up.
+        manager.primeRestartHistoryForTesting(count: 3)
+
+        let start = Date()
+        manager.handleTermination(status: 1, reason: .exit)
+        let elapsed = Date().timeIntervalSince(start)
+
+        #expect(recoveryPresented == true)
+        #expect(normalExited == false)
+        // The handler must return effectively instantly; a synchronous restart
+        // wait or a terminate wedge would take far longer than this budget.
+        #expect(elapsed < 0.1)
+        #expect(manager.hasLiveProcess == false)
+    }
+
+    @Test("restart path returns immediately and defers the respawn")
+    @MainActor func restartPathDoesNotBlockMainActor() {
+        let manager = BEAMProcessManager()
+        var recoveryPresented = false
+        var normalExited = false
+        manager.onCrash = { recoveryPresented = true }
+        manager.onNormalExit = { normalExited = true }
+
+        let start = Date()
+        manager.handleTermination(status: 1, reason: .exit)
+        let elapsed = Date().timeIntervalSince(start)
+
+        // First crash: neither give up nor normal exit; the respawn is deferred
+        // to a later main-actor turn, so nothing runs synchronously here.
+        #expect(recoveryPresented == false)
+        #expect(normalExited == false)
+        #expect(elapsed < 0.1)
+    }
+
+    @Test("clean exit routes to normal exit, not recovery")
+    @MainActor func cleanExitRoutesToNormalExit() {
+        let manager = BEAMProcessManager()
+        var recoveryPresented = false
+        var normalExited = false
+        manager.onCrash = { recoveryPresented = true }
+        manager.onNormalExit = { normalExited = true }
+
+        manager.handleTermination(status: 0, reason: .exit)
+
+        #expect(normalExited == true)
+        #expect(recoveryPresented == false)
+    }
+}
