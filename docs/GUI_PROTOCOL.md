@@ -51,7 +51,7 @@ opcode(1) + payload_length(2, big-endian) + payload(payload_length)
 
 This allows old frontends to skip unknown opcodes without crashing. When a frontend encounters an unrecognized opcode >= 0x90, it reads the 2-byte length, advances past the payload, and continues decoding the rest of the batch.
 
-Opcodes below 0x90 generally do NOT include a length prefix and retain their existing positional wire format. The explicit exception is `0x88 gui_agent_context`, which occupies a legacy opcode slot but now carries a 16-bit length-prefixed payload for compatibility with its expanded activity fields. If a frontend encounters an unknown opcode below 0x90, it cannot determine the message size and must abort decoding. Known 0x90+ opcodes may document a wider envelope when the payload can exceed 64KB, as `gui_file_tree` does.
+Opcodes below 0x90 generally do NOT include a length prefix and retain their existing positional wire format. The explicit exceptions are `0x86 gui_agent_transcript`, which carries a 32-bit length-prefixed payload (`len32`) because the resident transcript can exceed 64KB, and `0x88 gui_agent_context`, which carries a 16-bit length-prefixed payload for compatibility with its expanded activity fields. Both occupy legacy opcode slots but self-describe their length so a frontend that recognizes the opcode can size and skip them; the schema's generated `command_size` sizes both from their declared framing. If a frontend encounters an *unknown* opcode below 0x90, it cannot determine the message size and must abort decoding. Known 0x90+ opcodes may document a wider envelope when the payload can exceed 64KB, as `gui_file_tree` does.
 
 The BEAM-side encoder must use a documented length-prefixed envelope for all new opcodes (0x90+). Currently defined 0x90+ opcodes:
 
@@ -1006,6 +1006,40 @@ Toast when toast_present == 1:
 `stash_count`: number of stashes in the repository, clamped to 65,535. Frontends should show it only when greater than zero.
 
 When the git status panel is closed, the BEAM sends `repo_state = not_a_repo`, no entries, and an empty `entry_base_path` as the hide signal. A non-git project opened in the Source Control tab also uses `repo_state = not_a_repo`, but includes the project root so the frontend can show the native "Not a git repository" empty state instead of hiding the panel. The frontend should still copy `syncing` and `toast` so remote operation feedback remains accurate while the panel is hidden.
+
+### 0x86 — gui_agent_transcript
+
+Resident agent-chat transcript stream (#2654). Carries the conversation as resident data so a frontend scrolls it from local state without a BEAM round-trip, decoupled from the `gui_agent_chat` (0x78) chrome model whose u16 sectioned frame capped the transcript at ~65KB. Framing is `len32` (opcode + u32 payload length), so the payload can exceed 64KB and any frontend that recognizes the opcode sizes and skips it via the schema's generated `command_size`. Message bodies are byte-identical to the 0x78 messages section (shared codec).
+
+The resident set is the conversation scoped by `display_start_index` and bounded by the `agent_transcript_resident_max_bytes` config as a contiguous most-recent suffix; the `truncated` flag signals when older messages sit outside the window.
+
+```
+opcode(1) + payload_len(4) + payload
+
+payload:
+  version(1) = 1
+  mode(1)              # 0 = full_replace, 1 = append
+  epoch(4)
+  truncated(1)         # 1 when older messages sit outside the resident window
+  # full_replace (mode 0):
+  count(4)
+  # append (mode 1):
+  trim_front(4)        # leading messages evicted from the store front this delta
+  base_count(4)        # unchanged leading messages of the remainder to keep
+  count(4)
+  # both modes:
+  count * message
+
+message:
+  id(4) + body_len(4) + body(body_len)   # body is the shared agent-chat message codec
+```
+
+`epoch` is an opaque change token; a frontend that receives an `epoch` different from the one its store was built under must treat the frame as authoritative for that epoch. `mode`:
+
+- **full_replace** — clear the store, then set it to the `count` messages in order. Emitted on first frame of an epoch, on epoch change, or on a non-prefix divergence (e.g. compaction).
+- **append** — an incremental delta within the current epoch. Apply in this order: drop `trim_front` messages from the **front** of the store (cap eviction of older messages); of the remainder, keep the first `base_count` messages unchanged; then upsert each of the `count` messages by `id` (a new `id` appends; a matching `id` patches the streaming last message in place).
+
+`base_count` is the count of unchanged leading messages **of the remainder** (after the `trim_front` drop), i.e. keep `[0, base_count)` and upsert from there. It is **not** the store's resident count, and is normally less than it on every streaming patch (the patched last message is part of the upserted suffix). A frontend desyncs (drops the delta and requests / awaits the next `full_replace`) only when its resident count is **less than** `trim_front + base_count`, meaning the delta cannot be applied against what the store holds. Because eviction rides `trim_front`, an over-cap session in steady streaming keeps emitting bounded appends rather than degrading to a full replace per frame.
 
 ### 0x88 — gui_agent_context
 

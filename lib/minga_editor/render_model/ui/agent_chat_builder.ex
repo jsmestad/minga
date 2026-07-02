@@ -65,10 +65,11 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
       |> build_gui_messages(styled_cache, pending_approval)
       |> maybe_append_transcript_enrichments(panel, SemanticUIRegistry.default_table())
 
-    # Resident transcript (#2654): the full, un-windowed conversation for the
-    # gui_agent_transcript (0x86) stream. Never sliced by scroll; enrichments
-    # always sit at the true end. `messages` above stays windowed for the legacy
-    # gui_agent_chat (0x78) section during the dual-emit transition.
+    # Resident transcript (#2654): the display_start_index-scoped conversation for
+    # the gui_agent_transcript (0x86) stream. Never sliced by scroll (the 0x86
+    # encoder applies the byte-cap suffix bound); enrichments always sit at the
+    # true end. `messages` above stays windowed for the legacy gui_agent_chat
+    # (0x78) section during the dual-emit transition.
     resident_messages =
       full_pairs
       |> build_gui_messages(full_styled_cache, pending_approval)

@@ -39,9 +39,12 @@ defmodule Minga.RenderModel.UI.AgentChat do
   ## Resident transcript
 
   `messages` is the windowed, byte-capped tail the legacy `gui_agent_chat` (0x78)
-  section carries. `resident_messages` is the full, un-windowed transcript (same
+  section carries. `resident_messages` is the resident transcript (same
   `message()` shape) that rides the dedicated `gui_agent_transcript` (0x86)
-  stream so the frontend can scroll the whole session from local data (#2654).
+  stream so the frontend can scroll from local data (#2654): the conversation
+  scoped by `display_start_index`, which the encoder further bounds by
+  `:agent_transcript_resident_max_bytes` as a contiguous most-recent suffix
+  (marking the stream truncated when older messages fall outside the window).
   `transcript_epoch` is an opaque change token that flips on structural change
   (session switch, display-start/compaction), driving the resident stream's
   full-replace-vs-append decision. Both default empty/zero so surfaces that do

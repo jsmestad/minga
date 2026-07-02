@@ -1,6 +1,8 @@
 defmodule Minga.Frontend.Adapter.GUI.Caches do
   @moduledoc false
 
+  alias Minga.Frontend.Adapter.GUI.AgentTranscriptSentState
+
   @type fingerprint :: term()
 
   @type t :: %__MODULE__{
@@ -22,9 +24,7 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
           last_signature_help_fp: fingerprint() | nil,
           last_agent_chat_fp: integer() | nil,
           last_empty_state_fp: integer() | nil,
-          last_agent_transcript_fp: integer() | nil,
-          last_agent_transcript_epoch: non_neg_integer() | nil,
-          last_agent_transcript_keys: [{non_neg_integer(), non_neg_integer()}],
+          last_agent_transcript: AgentTranscriptSentState.t(),
           last_bottom_panel_fp: integer() | nil,
           last_change_summary_fp: integer() | nil,
           last_edit_timeline_fp: integer() | nil,
@@ -63,9 +63,7 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
             last_signature_help_fp: nil,
             last_agent_chat_fp: nil,
             last_empty_state_fp: nil,
-            last_agent_transcript_fp: nil,
-            last_agent_transcript_epoch: nil,
-            last_agent_transcript_keys: [],
+            last_agent_transcript: %AgentTranscriptSentState{},
             last_bottom_panel_fp: nil,
             last_change_summary_fp: nil,
             last_edit_timeline_fp: nil,
