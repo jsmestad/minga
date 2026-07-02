@@ -24,8 +24,12 @@ defmodule MingaEditor.RenderPipeline.FullDocumentResidenceThresholdTest do
   import MingaEditor.RenderPipeline.TestHelpers
 
   setup do
-    original = Config.get(:resident_store_max_lines)
-    on_exit(fn -> Config.set(:resident_store_max_lines, original) end)
+    original_lines = Config.get(:resident_store_max_lines)
+
+    on_exit(fn ->
+      Config.set(:resident_store_max_lines, original_lines)
+    end)
+
     :ok
   end
 
@@ -35,6 +39,23 @@ defmodule MingaEditor.RenderPipeline.FullDocumentResidenceThresholdTest do
     layout = Layout.get(state)
     {scrolls, _state} = Scroll.scroll_windows(state, layout)
     scrolls
+  end
+
+  defp run_through_scroll_with_state(state) do
+    state = EditorState.sync_active_window_cursor(state)
+    state = RenderPipeline.compute_layout(state)
+    layout = Layout.get(state)
+    {scrolls, state} = Scroll.scroll_windows(state, layout)
+    {scrolls, state}
+  end
+
+  defp warm(state) do
+    state = EditorState.sync_active_window_cursor(state)
+    state = RenderPipeline.compute_layout(state)
+    layout = Layout.get(state)
+    {scrolls, state} = Scroll.scroll_windows(state, layout)
+    {_contents, _cursor, state} = Content.build_content(state, scrolls)
+    state
   end
 
   defp build_model(state) do
@@ -101,5 +122,37 @@ defmodule MingaEditor.RenderPipeline.FullDocumentResidenceThresholdTest do
 
     assert scroll.full_residence == false
     assert Enum.count(scroll.lines) < 500
+  end
+
+  test "toggling residence mid-session forces a full refresh via the render reset fingerprint" do
+    state = scrolled_state(250)
+
+    # Warm up with residence disabled (default 0) to establish a baseline
+    # fingerprint in the window's render cache.
+    state = warm(state)
+
+    # Second frame should be stable (no full refresh).
+    {scrolls, state} = run_through_scroll_with_state(state)
+    [{_win_id, scroll}] = Map.to_list(scrolls)
+    assert scroll.full_refresh == false
+    assert scroll.full_residence == false
+
+    # Enable residence and run a third frame. The fingerprint change should
+    # force full_refresh: true so no :patch frame diffs across differently-sized stores.
+    Config.set(:resident_store_max_lines, 100_000)
+    {scrolls, _state} = run_through_scroll_with_state(state)
+    [{_win_id, scroll}] = Map.to_list(scrolls)
+    assert scroll.full_refresh == true
+    assert scroll.full_residence == true
+  end
+
+  test "gutter stays viewport-bounded under residence even when scrolled deep" do
+    Config.set(:resident_store_max_lines, 100_000)
+
+    model = build_model(scrolled_state(400))
+    visible = model.geometry.viewport.rows
+
+    assert Enum.count(model.rows) == 500
+    assert Enum.count(model.gutter.entries) <= visible * 3
   end
 end

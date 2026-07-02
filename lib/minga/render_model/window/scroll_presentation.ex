@@ -82,9 +82,10 @@ defmodule Minga.RenderModel.Window.ScrollPresentation do
 
   # Contiguous non-wrapped sequential rows are consecutive buffer lines, so the
   # half-open range is arithmetic from the first row's buf_line and the row count.
-  # This avoids folding over the whole (possibly full-document) row list every
-  # frame; `length/1` is a cheap BIF walk rather than a per-row min/max reduce.
-  defp line_range([%Row{buf_line: first} | _] = rows, _fallback_line, true) do
+  # Both paths are O(n) over the row list, but the arithmetic path avoids the
+  # per-row closure call and tuple allocation of a fold; `length/1` is a C-level
+  # BIF walk.
+  defp line_range([%Row{row_type: :normal, buf_line: first} | _] = rows, _fallback_line, true) do
     {first, first + length(rows)}
   end
 

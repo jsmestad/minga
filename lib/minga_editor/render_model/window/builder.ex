@@ -175,7 +175,14 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       )
 
     visible_row_start_index = scroll.visible_row_start_index + viewport.visual_row_offset
-    payload_overscan_before = max(scroll.visible_row_start_index - viewport.visual_row_offset, 0)
+    raw_overscan_before = max(scroll.visible_row_start_index - viewport.visual_row_offset, 0)
+    # Under full residence, visible_row_start_index is the viewport's absolute
+    # document offset, not a small overscan count. Cap the presentation overscan
+    # so the gutter stays viewport-windowed.
+    payload_overscan_before =
+      if scroll.full_residence,
+        do: min(raw_overscan_before, visible_row_count),
+        else: raw_overscan_before
 
     visual_entries =
       trim_visual_entries(all_visual_entries, visible_row_start_index, visible_row_count)
@@ -190,12 +197,12 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
     # Full-document residence (#2653): the window carries every laid-out row so the
     # frontend store is complete and a fast scroll can never outrun it. The gutter
-    # (build_gutter below) and indent guides stay viewport-windowed off
-    # `presentation_entries`, keeping per-frame chrome bytes bounded; only the row
-    # set and its retained-row cache become resident.
+    # (build_gutter below) stays viewport-windowed off `presentation_entries`;
+    # indent guides are independently viewport-windowed off `scroll.lines`. Only
+    # the row set and its retained-row cache become resident.
     resident_entries =
       if scroll.full_residence do
-        trim_visual_entries(all_visual_entries, 0, length(all_visual_entries))
+        all_visual_entries
       else
         presentation_entries
       end

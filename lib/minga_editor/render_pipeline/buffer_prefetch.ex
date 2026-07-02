@@ -205,8 +205,8 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
         do: Window.scroll_follow_cursor?(window, {cursor_line, cursor_byte_col}, now),
         else: {window, true}
 
-    total_visible_lines =
-      FoldMap.visible_line_count(fold_map, Buffer.line_count(window.buffer))
+    line_count = Buffer.line_count(window.buffer)
+    total_visible_lines = FoldMap.visible_line_count(fold_map, line_count)
 
     viewport =
       if follow_cursor do
@@ -236,11 +236,10 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
 
     # Compute final gutter dimensions before building the DisplayMap.
     # Dynamic block decorations must see the same text width in scroll, content, and GUI gutter paths.
-    line_count_approx = Buffer.line_count(window.buffer)
     line_number_style = Buffer.get_option(window.buffer, :line_numbers)
 
     {has_sign_column, gutter_w} =
-      gutter_dimensions(state, window.buffer, line_number_style, line_count_approx)
+      gutter_dimensions(state, window.buffer, line_number_style, line_count)
 
     content_w = max(viewport.cols - gutter_w, 1)
 
@@ -259,7 +258,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
           decorations,
           first_line,
           visible_rows,
-          line_count_approx,
+          line_count,
           content_w,
           cursor_line
         )
@@ -272,7 +271,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     # never outrun the resident row store. Over-threshold, wrapped, or folded
     # buffers keep today's velocity-aware viewport-plus-overscan windowing.
     full_residence? =
-      is_nil(visible_line_map) and full_residence?(window.buffer, wrap_on, line_count_approx)
+      is_nil(visible_line_map) and full_residence?(window.buffer, wrap_on, line_count)
 
     {fetch_first, fetch_count, visible_row_start_index} =
       resolve_fetch_range(%{
@@ -281,7 +280,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
         full_residence?: full_residence?,
         first_line: first_line,
         visible_rows: visible_rows,
-        line_count: line_count_approx,
+        line_count: line_count,
         wrap_on: wrap_on
       })
 
@@ -379,9 +378,14 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     {0, params.line_count, params.first_line}
   end
 
-  defp resolve_fetch_range(%{visible_line_map: nil} = params) do
-    %{window: window, first_line: first_line, visible_rows: visible_rows} = params
-    wrap_on = params.wrap_on
+  defp resolve_fetch_range(%{
+         visible_line_map: nil,
+         window: window,
+         first_line: first_line,
+         visible_rows: visible_rows,
+         line_count: line_count,
+         wrap_on: wrap_on
+       }) do
     now = System.monotonic_time(:millisecond)
     velocity_tier = Window.scroll_velocity_tier(window, now)
     total_overscan = boosted_overscan_rows(window, velocity_tier)
@@ -393,13 +397,14 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
       scroll_overscan_before(first_line, wrap_on, overscan_behind)
 
     overscan_after =
-      scroll_overscan_after(first_line, visible_rows, params.line_count, wrap_on, overscan_ahead)
+      scroll_overscan_after(first_line, visible_rows, line_count, wrap_on, overscan_ahead)
 
     fetch_rows = scroll_fetch_rows(visible_rows, overscan_before, overscan_after, wrap_on)
     {fetch_first, fetch_rows, overscan_before}
   end
 
-  defp resolve_fetch_range(%{visible_line_map: entries}) do
+  defp resolve_fetch_range(%{visible_line_map: entries, full_residence?: false})
+       when entries != nil do
     {buf_first, buf_last} = buffer_range_from_entries(entries)
     {buf_first, buf_last - buf_first + 1, 0}
   end
@@ -408,6 +413,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   # row count as a u16, so a resident store may not exceed 65_535 rows regardless
   # of the configured line threshold. Above this, fall back to windowed emit.
   @wire_max_rows 0xFFFF
+  @default_resident_store_max_bytes 10_485_760
 
   # A buffer qualifies for full-document residence when it is not wrapped, not
   # folded/decorated (caller passes the nil-visible_line_map case only), and both
@@ -419,17 +425,15 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   defp full_residence?(_buf, true = _wrap_on, _line_count), do: false
 
   defp full_residence?(buf, false = _wrap_on, line_count) do
-    residence_within_limits?(buf, line_count, resident_store_max_lines())
-  end
+    case resident_store_max_lines() do
+      max_lines when is_integer(max_lines) and max_lines > 0 ->
+        line_count <= @wire_max_rows and
+          line_count <= max_lines and
+          buffer_bytes_within_limit?(buf)
 
-  @spec residence_within_limits?(pid(), non_neg_integer(), non_neg_integer() | nil) :: boolean()
-  defp residence_within_limits?(_buf, _line_count, nil), do: false
-  defp residence_within_limits?(_buf, _line_count, max_lines) when max_lines <= 0, do: false
-
-  defp residence_within_limits?(buf, line_count, max_lines) do
-    line_count <= @wire_max_rows and
-      line_count <= max_lines and
-      buffer_bytes_within_limit?(buf)
+      _disabled ->
+        false
+    end
   end
 
   @spec buffer_bytes_within_limit?(pid()) :: boolean()
@@ -450,7 +454,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   defp resident_store_max_bytes do
     Config.get(:resident_store_max_bytes)
   catch
-    :exit, _ -> 10_485_760
+    :exit, _ -> @default_resident_store_max_bytes
   end
 
   @spec overscan_rows(ScrollVelocity.tier()) :: pos_integer()
