@@ -173,18 +173,9 @@ defmodule MingaEditor.UI.Picker.BufferSource do
   end
 
   @spec apply_kill_result(Buffers.t(), [pid()], Buffers.t(), term()) :: term()
-  defp apply_kill_result(%Buffers{list: []}, pids, bs, state) do
-    case start_fallback_buffer(state) do
-      {:ok, new_buf} ->
-        Enum.each(pids, &stop_buffer/1)
-
-        state
-        |> EditorState.set_buffers(Buffers.replace_list(bs, [new_buf], 0))
-        |> EditorState.sync_active_window_buffer()
-
-      {:error, _} ->
-        state
-    end
+  defp apply_kill_result(%Buffers{list: []}, pids, _bs, state) do
+    Enum.each(pids, &stop_buffer/1)
+    EditorState.enter_empty_state(state)
   end
 
   defp apply_kill_result(%Buffers{} = new_bs, pids, _bs, state) do
@@ -193,15 +184,6 @@ defmodule MingaEditor.UI.Picker.BufferSource do
     state
     |> EditorState.set_buffers(new_bs)
     |> EditorState.sync_active_window_buffer()
-  end
-
-  @spec start_fallback_buffer(term()) :: {:ok, pid()} | {:error, term()}
-  defp start_fallback_buffer(state) do
-    DynamicSupervisor.start_child(
-      Minga.Buffer.Supervisor,
-      {Buffer,
-       content: "", buffer_name: "Untitled-1", options_server: EditorState.options_server(state)}
-    )
   end
 
   @spec item_pid(Item.t(), [pid()]) :: pid() | nil

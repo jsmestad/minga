@@ -116,6 +116,7 @@ const (
 	OPGuiWindowRowsDelta     byte = 0xA2
 	OPGuiExtensionRuntime    byte = 0xA3
 	OPGuiSurfaceLayout       byte = 0xA4
+	OPGuiEmptyState          byte = 0xA5
 
 	GUIActionSelectTab            byte = 0x01
 	GUIActionCloseTab             byte = 0x02
@@ -203,4 +204,5 @@ const (
 	GUIActionExtensionAction      byte = 0x58
 	GUIActionFloatPopupDismiss    byte = 0x59
 	GUIActionSystemWillUnmount    byte = 0x5A
+	GUIActionEmptyStateActivate   byte = 0x5B
 )

@@ -26,6 +26,9 @@ public final class GUIState {
     /// Tab bar state.
     public let tabBarState = TabBarState()
 
+    /// Launchpad empty state (0xA5), shown when zero buffers are open.
+    public let emptyStateState = EmptyStateState()
+
     /// Workspace header and active-workspace file tab state.
     public let workspaceState = WorkspaceState()
 

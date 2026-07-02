@@ -880,6 +880,34 @@ Sections 0x03-0x09:
 
 The frontend applies the delta only when it already has retained content for the same `window_id` and `content_epoch`. Ref entries must resolve by `row_id + content_hash`; if any ref is missing, the frontend drops that retained window state and waits for the next full 0x80 recovery frame. The BEAM marks row and viewport deltas as pending and follows them with a full content frame, so a missed delta cannot silently advance the backend cache forever.
 
+### 0xA5 — gui_empty_state
+
+The zero-buffers launchpad (#2689): data-driven sections (session resume, recent files, actions, footer) with chords resolved from the user's live keymap. Frontends lay the surface out natively (SwiftUI column with the logo watermark; TUI centered block) and render it instead of window content while visible. Activation is echoed back with the `empty_state_activate` gui_action (0x07 sub-opcode 0x5B, payload string8 item id) so semantics stay BEAM-side.
+
+```
+opcode(1) + payload_len(2) + payload
+
+Payload:
+  visible(1): 0 = hidden (payload ends here), 1 = visible
+  flags(1): bit 0 = crashed (previous session did not shut down cleanly)
+  version: string8
+  focused_id: string8 (empty = no focus)
+  section_count(1), per section:
+    section_id(1): 0 = session, 1 = recent, 2 = start, 3 = footer
+    title: string8
+    item_count(1), per item:
+      kind(1): 0 = resume, 1 = recent_file, 2 = action, 3 = hint
+      id: string8
+      label: string16
+      detail: string16
+      jump_key: string8 (empty = none; single keycap chip when present)
+      chord: string8 (space-separated keystroke tokens, e.g. "SPC f f"; one chip per token)
+      icon: string8 (Nerd Font glyph, may be empty)
+      icon_color: u32 (0xRRGGBB, 0 = theme default)
+```
+
+Input-visual classes: a non-empty `jump_key` renders as a single keycap chip, a non-empty `chord` renders chip-per-token, and a `detail` starting with `:` renders as accent text (ex command). `focused_id` is authoritative; frontends may locally echo focus movement between frames but reconcile to it.
+
 ### 0x81 — gui_hover_popup
 
 Native hover tooltip popup for LSP hover content. Sends parsed markdown content as styled segments so the GUI frontend can render with native text layout. Positioned at the anchor token; the frontend handles above/below flip logic.

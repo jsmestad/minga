@@ -13,7 +13,6 @@ defmodule MingaEditor.Startup do
   alias MingaEditor.Agent.UIState
   alias MingaEditor.AgentLifecycle
   alias MingaEditor.Handlers.SessionRestore
-  alias Minga.Buffer
   alias Minga.Log
   alias Minga.Config
   alias MingaEditor.Commands
@@ -95,22 +94,14 @@ defmodule MingaEditor.Startup do
 
     log_safe_mode_startup()
 
-    # Always ensure an active buffer exists. The editor's render pipeline,
-    # command dispatch, and input routing all assume buffers.active is a
-    # pid. An empty launch (no file argument) opens a normal blank buffer.
+    # An empty launch (no file argument) boots into the zero-buffers
+    # launchpad (#2689): buffers.active stays nil, the initial window shows
+    # the empty-state surface, and command dispatch skips requires_buffer
+    # commands until a buffer opens.
     {active_buf, buffers} =
       case buffer do
-        pid when is_pid(pid) ->
-          {pid, [pid]}
-
-        _ ->
-          {:ok, buf} =
-            DynamicSupervisor.start_child(
-              Minga.Buffer.Supervisor,
-              {Buffer, content: "", buffer_name: "Untitled-1", options_server: options_server}
-            )
-
-          {buf, [buf]}
+        pid when is_pid(pid) -> {pid, [pid]}
+        _ -> {nil, []}
       end
 
     # Decide mode FIRST, then create the right window type.
@@ -129,8 +120,7 @@ defmodule MingaEditor.Startup do
         options_server
       )
 
-    windows =
-      if initial_window, do: %{initial_window_id => initial_window}, else: %{}
+    windows = %{initial_window_id => initial_window}
 
     project_root = project_root_from_opts(opts)
 
@@ -154,7 +144,8 @@ defmodule MingaEditor.Startup do
           next_id: initial_window_id + 1
         },
         keymap_scope: keymap_scope,
-        agent_ui: agentic_state
+        agent_ui: agentic_state,
+        launchpad: startup_launchpad(active_buf, keymap_scope, opts)
       }
       |> MingaEditor.Session.State.set_file_tree(file_tree)
 
@@ -234,7 +225,7 @@ defmodule MingaEditor.Startup do
   either `:semantic_agent_window` or `:noop`.
   """
   @spec build_initial_window(atom(), Window.id(), pid() | nil, pos_integer(), pos_integer()) ::
-          {Window.t() | nil, :semantic_agent_window | :noop}
+          {Window.t(), :semantic_agent_window | :noop}
   @spec build_initial_window(
           atom(),
           Window.id(),
@@ -242,7 +233,7 @@ defmodule MingaEditor.Startup do
           pos_integer(),
           pos_integer(),
           Options.server()
-        ) :: {Window.t() | nil, :semantic_agent_window | :noop}
+        ) :: {Window.t(), :semantic_agent_window | :noop}
   def build_initial_window(scope, win_id, active_buf, rows, cols) do
     build_initial_window(
       scope,
@@ -260,10 +251,24 @@ defmodule MingaEditor.Startup do
 
   def build_initial_window(_scope, win_id, active_buf, rows, cols, _options_server) do
     window =
-      if active_buf, do: Window.new(win_id, active_buf, rows, cols), else: nil
+      if active_buf do
+        Window.new(win_id, active_buf, rows, cols)
+      else
+        Window.new_empty_state(win_id, rows, cols)
+      end
 
     {window, :noop}
   end
+
+  # An empty non-agent launch boots into the launchpad; agent view mode has
+  # its own semantic surface, and a file argument shows the buffer.
+  @spec startup_launchpad(pid() | nil, atom(), keyword()) ::
+          MingaEditor.State.Launchpad.t() | nil
+  defp startup_launchpad(nil, scope, opts) when scope != :agent do
+    MingaEditor.State.Launchpad.new(Keyword.take(opts, [:session_dir]))
+  end
+
+  defp startup_launchpad(_active_buf, _scope, _opts), do: nil
 
   @spec subscribe_port(GenServer.server() | nil) :: :ok
   defp subscribe_port(nil), do: :ok
@@ -283,16 +288,17 @@ defmodule MingaEditor.Startup do
     |> restore_persisted_workspaces(project_root)
   end
 
+  def initial_tab_bar(nil, _scope, project_root) do
+    TabBar.new_empty(project_root)
+    |> restore_persisted_workspaces(project_root)
+  end
+
   def initial_tab_bar(active_buf, _scope, project_root) do
     file_label =
-      if active_buf do
-        try do
-          Commands.Helpers.buffer_display_name(active_buf)
-        catch
-          :exit, _ -> "[no file]"
-        end
-      else
-        "[no file]"
+      try do
+        Commands.Helpers.buffer_display_name(active_buf)
+      catch
+        :exit, _ -> "[no file]"
       end
 
     TabBar.new(Tab.new_file(1, file_label), project_root)

@@ -17,6 +17,7 @@ enum PreviewSnapshotPolicy {
         case "CompletionOverlay": CGSize(width: 400, height: 300)
         case "StatusBarView": CGSize(width: 800, height: 28)
         case "TabBarView": CGSize(width: 800, height: 36)
+        case "EmptyStateView", "EmptyStateFirstRun": CGSize(width: 900, height: 640)
         case "NotificationCenterView", "NotificationStack": CGSize(width: 800, height: 600)
         case "BottomPanelView", "BottomPanelEmpty": CGSize(width: 800, height: 250)
         case "MessagesContentView": CGSize(width: 800, height: 360)

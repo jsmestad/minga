@@ -55,6 +55,17 @@ public struct TabBarView: View {
     private let swipeThreshold: CGFloat = 80
 
     public var body: some View {
+        // Collapse the whole strip when there are no tabs (e.g. the launchpad
+        // empty state). Otherwise the nav/new-tab/split controls render a
+        // phantom bar over an editor with nothing open.
+        if displayTabs.isEmpty {
+            EmptyView()
+        } else {
+            tabStrip
+        }
+    }
+
+    private var tabStrip: some View {
         HStack(spacing: 0) {
             // Navigation arrows (back/forward)
             tabBarButton(

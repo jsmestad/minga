@@ -435,6 +435,61 @@ defmodule Minga.Keymap.Bindings do
     merge_bindings(trie, Minga.Keymap.SharedGroups.get(group_name), opts)
   end
 
+  # ── Reverse lookup ───────────────────────────────────────────────────────────
+
+  @doc """
+  Returns all key sequences bound to `command`, shortest first.
+
+  Walks the trie collecting every path whose node carries `command`. Used to
+  render hints (launchpad, help surfaces) from the user's live keymap
+  instead of hardcoded defaults.
+
+  ## Examples
+
+      iex> trie = Minga.Keymap.Bindings.new()
+      iex> trie = Minga.Keymap.Bindings.bind(trie, [{?f, 0}, {?f, 0}], :find_file, "Find file")
+      iex> Minga.Keymap.Bindings.sequences_for_command(trie, :find_file)
+      [[{?f, 0}, {?f, 0}]]
+      iex> Minga.Keymap.Bindings.sequences_for_command(trie, :missing)
+      []
+  """
+  @spec sequences_for_command(node_t(), atom() | tuple()) :: [[key()]]
+  def sequences_for_command(%Node{} = root, command) do
+    root
+    |> collect_sequences([], command)
+    |> Enum.sort_by(&length/1)
+  end
+
+  @spec collect_sequences(Node.t(), [key()], atom() | tuple()) :: [[key()]]
+  defp collect_sequences(%Node{} = node, path_rev, command) do
+    own =
+      if node.command == command and path_rev != [] do
+        [Enum.reverse(path_rev)]
+      else
+        []
+      end
+
+    child_matches =
+      Enum.flat_map(node.children, fn {key, child} ->
+        collect_sequences(child, [key | path_rev], command)
+      end)
+
+    own ++ child_matches
+  end
+
+  @doc """
+  Formats a key sequence as a space-separated human-readable string.
+
+  ## Examples
+
+      iex> Minga.Keymap.Bindings.format_sequence([{32, 0}, {?f, 0}, {?f, 0}])
+      "SPC f f"
+  """
+  @spec format_sequence([key()]) :: String.t()
+  def format_sequence(keys) when is_list(keys) do
+    Enum.map_join(keys, " ", &format_key/1)
+  end
+
   # ── Key formatting ───────────────────────────────────────────────────────────
 
   import Bitwise, only: [band: 2]

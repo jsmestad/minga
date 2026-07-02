@@ -274,11 +274,26 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
     # Only close the buffer when the shell has a tab bar.
     # EditorState.active_tab/1 returns nil when there are no tabs.
-    if EditorState.active_tab(state) do
-      Commands.BufferManagement.execute(state, :force_quit)
-    else
-      state
+    case EditorState.active_tab(state) do
+      # Closing the last file tab lands on the launchpad, never quits the
+      # app (#2689): kill the buffer so the empty state has zero buffers.
+      %MingaEditor.State.Tab{kind: :file} ->
+        if last_file_tab?(state) do
+          Commands.BufferManagement.execute(state, :kill_buffer)
+        else
+          Commands.BufferManagement.execute(state, :force_quit)
+        end
+
+      nil ->
+        state
+
+      _tab ->
+        Commands.BufferManagement.execute(state, :force_quit)
     end
+  end
+
+  defp dispatch_action(state, {:empty_state_activate, item_id}) do
+    Commands.Launchpad.activate(state, item_id)
   end
 
   defp dispatch_action(state, {:file_tree_click, index}) do
@@ -866,6 +881,13 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     Minga.Log.warning(:editor, "[gui_action] unrecognized action: #{inspect(action)}")
     state
   end
+
+  @spec last_file_tab?(EditorState.t()) :: boolean()
+  defp last_file_tab?(%{shell_state: %{tab_bar: %MingaEditor.State.TabBar{} = tb}}) do
+    match?([_single], MingaEditor.State.TabBar.visible_file_tabs(tb))
+  end
+
+  defp last_file_tab?(_state), do: false
 
   @spec dispatch_to_active_shell(EditorState.t(), term()) :: EditorState.t()
   defp dispatch_to_active_shell(state, action) do

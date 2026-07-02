@@ -591,3 +591,143 @@ func decodeSplitSeparators(payload []byte) (SplitSeparators, string, int) {
 func splitSummary(splits SplitSeparators) string {
 	return fmt.Sprintf("%d vertical %d horizontal", len(splits.Verticals), len(splits.Horizontals))
 }
+
+// decodeEmptyState decodes the gui_empty_state (0xA5) launchpad frame. Framing
+// is len16: opcode(1) + payload_len(2) + payload. The payload's first byte is
+// the visibility flag; when 0 the frame is a single-byte hide and the rest of
+// the struct is absent. Otherwise: flags(1, bit0=crashed), version(string8),
+// focused_id(string8), section_count(1), then per section: id(1),
+// title(string8), item_count(1), then per item: kind(1), id(string8),
+// label(string16), detail(string16), jump_key(string8), chord(string8),
+// icon(string8), icon_color(u32). Mirrors the BEAM encoder
+// (Minga.Frontend.Adapter.GUI.EmptyStateEncoder).
+func decodeEmptyState(payload []byte) (EmptyState, string, int) {
+	size := payloadLen16Size(payload)
+	if size == 0 {
+		return EmptyState{}, "", len(payload)
+	}
+	body := payload[3:size]
+	if len(body) < 1 || body[0] == 0 {
+		return EmptyState{Visible: false}, "hidden", size
+	}
+
+	state := EmptyState{Visible: true}
+	if len(body) < 2 {
+		return state, "empty", size
+	}
+	state.Crashed = body[1]&0x01 != 0
+	offset := 2
+
+	version, next, ok := readString8(body, offset)
+	if !ok {
+		return state, "empty", size
+	}
+	state.Version = version
+	offset = next
+
+	focused, next, ok := readString8(body, offset)
+	if !ok {
+		return state, "empty", size
+	}
+	state.FocusedID = focused
+	offset = next
+
+	if len(body) < offset+1 {
+		return state, "empty", size
+	}
+	sectionCount := int(body[offset])
+	offset++
+
+	state.Sections = make([]EmptyStateSection, 0, sectionCount)
+	for s := 0; s < sectionCount; s++ {
+		if len(body) < offset+1 {
+			break
+		}
+		section := EmptyStateSection{ID: body[offset]}
+		offset++
+
+		title, next, ok := readString8(body, offset)
+		if !ok {
+			break
+		}
+		section.Title = title
+		offset = next
+
+		if len(body) < offset+1 {
+			break
+		}
+		itemCount := int(body[offset])
+		offset++
+
+		section.Items = make([]EmptyStateItem, 0, itemCount)
+		for i := 0; i < itemCount; i++ {
+			item, nextOffset, ok := decodeEmptyStateItem(body, offset)
+			if !ok {
+				break
+			}
+			section.Items = append(section.Items, item)
+			offset = nextOffset
+		}
+		state.Sections = append(state.Sections, section)
+	}
+
+	return state, fmt.Sprintf("launchpad %d sections", len(state.Sections)), size
+}
+
+func decodeEmptyStateItem(body []byte, offset int) (EmptyStateItem, int, bool) {
+	if len(body) < offset+1 {
+		return EmptyStateItem{}, offset, false
+	}
+	item := EmptyStateItem{Kind: body[offset]}
+	offset++
+
+	id, next, ok := readString8(body, offset)
+	if !ok {
+		return EmptyStateItem{}, offset, false
+	}
+	item.ID = id
+	offset = next
+
+	label, next, ok := readString16(body, offset)
+	if !ok {
+		return EmptyStateItem{}, offset, false
+	}
+	item.Label = label
+	offset = next
+
+	detail, next, ok := readString16(body, offset)
+	if !ok {
+		return EmptyStateItem{}, offset, false
+	}
+	item.Detail = detail
+	offset = next
+
+	jumpKey, next, ok := readString8(body, offset)
+	if !ok {
+		return EmptyStateItem{}, offset, false
+	}
+	item.JumpKey = jumpKey
+	offset = next
+
+	chord, next, ok := readString8(body, offset)
+	if !ok {
+		return EmptyStateItem{}, offset, false
+	}
+	item.Chord = chord
+	offset = next
+
+	icon, next, ok := readString8(body, offset)
+	if !ok {
+		return EmptyStateItem{}, offset, false
+	}
+	item.Icon = icon
+	offset = next
+
+	if len(body) < offset+4 {
+		return EmptyStateItem{}, offset, false
+	}
+	item.IconColor = u32(body, offset)
+	offset += 4
+
+	return item, offset, true
+}

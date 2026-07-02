@@ -214,6 +214,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.previewPickerNavigation(msg)
 		if !m.modalOverlayActive() {
 			m.previewFileTreeNavigation(msg)
+			m.previewEmptyStateNavigation(msg)
 		}
 	case tea.PasteMsg:
 		m.send(pastePacket(msg))
@@ -597,6 +598,10 @@ func (m *Model) applyMutation(command protocol.Command) {
 			m.localPresentation.reconcilePicker()
 		case generated.OPGuiBottomPanel:
 			m.clampBottomPanelScrollback(command.Chrome.Bottom)
+		case generated.OPGuiEmptyState:
+			// The launchpad frame's focused_id is authoritative (#2689): a fresh
+			// frame reconciles any locally-echoed focus movement.
+			m.localPresentation.reconcileEmptyState()
 		case generated.OPGuiSurfaceLayout:
 			// The authoritative per-frame surface layout (#2268). Replace wholesale
 			// each frame: it is a full snapshot, not a delta, and an absent opcode

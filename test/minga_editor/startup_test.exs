@@ -164,11 +164,13 @@ defmodule MingaEditor.StartupTest do
   end
 
   describe "build_initial_state/1" do
-    test "empty launch (no file buffer) opens a normal blank active buffer, never a nil active" do
-      # Regression pin for the dashboard removal (#2323). The dashboard was the
-      # only path that left buffers.active == nil; with it gone, an empty launch
-      # must always land on a real blank buffer so input/render never route to a
-      # missing surface.
+    test "empty launch (no file buffer) boots into the launchpad with zero buffers" do
+      # Successor to the #2323 dashboard-removal pin. The old dashboard left
+      # buffers.active == nil with nothing modeling that state, so input and
+      # render routed to a missing surface. The launchpad (#2689) makes the
+      # zero-buffers state first-class instead: the window carries the
+      # `{:empty, :semantic}` content, the launchpad snapshot exists, and
+      # requires_buffer command dispatch guards the rest.
       state =
         Startup.build_initial_state(
           backend: :headless,
@@ -181,9 +183,10 @@ defmodule MingaEditor.StartupTest do
           sidebar_registry: private_sidebar_registry()
         )
 
-      active = state.workspace.buffers.active
-      assert is_pid(active)
-      assert active in state.workspace.buffers.list
+      assert state.workspace.buffers.active == nil
+      assert state.workspace.buffers.list == []
+      assert state.workspace.launchpad != nil
+      assert MingaEditor.State.active_window_struct(state).content == {:empty, :semantic}
       # No modal overlay is pushed on an empty launch.
       assert state.shell_state.modal == :none
       assert state.message_store.stream_instance > 0
@@ -422,12 +425,15 @@ defmodule MingaEditor.StartupTest do
       assert {:ok, false} =
                Options.set_for_filetype(options_server, :text, :autopair_block, false)
 
+      {:ok, buffer} = BufferProcess.start_link(content: "", options_server: options_server)
+
       custom_state =
         Startup.build_initial_state(
           backend: :headless,
           port_manager: nil,
           parser_manager: nil,
           options_server: options_server,
+          buffer: buffer,
           width: 80,
           height: 24
         )
@@ -644,8 +650,9 @@ defmodule MingaEditor.StartupTest do
       assert editor_window.buffer == buf
     end
 
-    test "editor startup with nil buffer returns no window" do
-      assert {nil, :noop} = Startup.build_initial_window(:editor, 1, nil, 24, 80)
+    test "editor startup with nil buffer returns a launchpad window" do
+      assert {%Window{content: {:empty, :semantic}, buffer: nil}, :noop} =
+               Startup.build_initial_window(:editor, 1, nil, 24, 80)
     end
   end
 

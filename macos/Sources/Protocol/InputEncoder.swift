@@ -30,6 +30,7 @@ public protocol InputEncoder: AnyObject, Sendable {
     // GUI actions (semantic commands from SwiftUI chrome)
     func sendSelectTab(id: UInt32)
     func sendCloseTab(id: UInt32)
+    func sendEmptyStateActivate(id: String)
     func sendTabCopyPath(id: UInt32)
     func sendTabReorder(id: UInt32, newIndex: UInt16)
     func sendTabPin(id: UInt32)
@@ -204,6 +205,9 @@ public extension InputEncoder {
     public func sendSearchReplace(replacement: String) {}
     public func sendSearchReplaceAll(replacement: String) {}
     public func sendSearchDismiss() {}
+
+    /// Default no-op so existing test spies do not need to implement launchpad activation.
+    public func sendEmptyStateActivate(id: String) {}
 }
 
 /// A no-op `InputEncoder` for SwiftUI previews and canvas rendering.
@@ -225,6 +229,7 @@ public final class NullInputEncoder: InputEncoder, @unchecked Sendable {
 
     public func sendSelectTab(id: UInt32) {}
     public func sendCloseTab(id: UInt32) {}
+    public func sendEmptyStateActivate(id: String) {}
     public func sendTabCopyPath(id: UInt32) {}
     public func sendTabReorder(id: UInt32, newIndex: UInt16) {}
     public func sendTabPin(id: UInt32) {}

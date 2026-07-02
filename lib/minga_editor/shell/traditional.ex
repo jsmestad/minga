@@ -269,7 +269,7 @@ defmodule MingaEditor.Shell.Traditional do
         switch_to_buffer_tab(shell_state, prev_workspace, workspace, tab_id)
 
       nil ->
-        case {context, TabBar.active(tb).kind} do
+        case {context, bar_active_tab_kind(tb)} do
           {:preview, _} ->
             # Preview: sync window content only, leave tab bar unchanged.
             # The tab label stays as-is so confirm can detect "no tab for
@@ -282,8 +282,34 @@ defmodule MingaEditor.Shell.Traditional do
 
           {_, :file} ->
             open_buffer_in_file_tab(shell_state, prev_workspace, workspace, label)
+
+          # Empty tab bar: the first buffer opened from the launchpad
+          # (#2689) creates and activates the first file tab.
+          {_, nil} ->
+            open_buffer_in_new_tab(shell_state, workspace, label)
         end
     end
+  end
+
+  @spec bar_active_tab_kind(TabBar.t()) :: Tab.kind() | nil
+  defp bar_active_tab_kind(tb) do
+    case TabBar.active(tb) do
+      %Tab{kind: kind} -> kind
+      nil -> nil
+    end
+  end
+
+  @spec open_buffer_in_new_tab(ShellState.t(), SessionState.t(), String.t()) ::
+          {ShellState.t(), SessionState.t(), [MingaEditor.effect()]}
+  defp open_buffer_in_new_tab(
+         %ShellState{tab_bar: %TabBar{} = tb} = shell_state,
+         workspace,
+         label
+       ) do
+    {tb, tab} = TabBar.add(tb, :file, label)
+    tb = TabBar.switch_to(tb, tab.id)
+    workspace = SessionState.sync_active_window_buffer(workspace)
+    {%{shell_state | tab_bar: tb}, workspace, []}
   end
 
   @impl true
@@ -513,8 +539,12 @@ defmodule MingaEditor.Shell.Traditional do
   def active_tab_kind(%ShellState{tab_bar: nil}), do: :file
 
   def active_tab_kind(%ShellState{tab_bar: tb}) do
-    %Tab{kind: kind} = TabBar.active(tb)
-    kind
+    # An empty tab bar (launchpad, #2689) behaves like the tab-bar-less
+    # shells: file semantics.
+    case TabBar.active(tb) do
+      %Tab{kind: kind} -> kind
+      nil -> :file
+    end
   end
 
   @impl true

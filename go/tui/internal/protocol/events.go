@@ -253,6 +253,21 @@ func EncodeGUIFloatPopupDismiss() []byte {
 	return []byte{generated.OPGuiAction, generated.GUIActionFloatPopupDismiss}
 }
 
+// EncodeGUIEmptyStateActivate encodes an empty_state_activate action. Wire
+// format: <gui_action, 0x5B, id_len:u8, id> (#2689). The BEAM decodes the item
+// id as a string8 (gui.ex decode_gui_action @gui_action_empty_state_activate:
+// <<len::8, id::binary-size(len)>>), so the id is u8-prefixed, unlike the
+// string16 gui_actions. Activation is authoritative on the BEAM: the frontend
+// only echoes the clicked/selected row's item id.
+func EncodeGUIEmptyStateActivate(itemID string) []byte {
+	payload := []byte(itemID)
+	if len(payload) > 255 {
+		payload = payload[:255]
+	}
+	out := []byte{generated.OPGuiAction, generated.GUIActionEmptyStateActivate, byte(len(payload))}
+	return append(out, payload...)
+}
+
 // appendString16 appends a length-prefixed string (len:u16 big-endian, then
 // utf8 bytes) to out, truncating to the u16 ceiling, matching the macOS
 // appendString16 helper used by every string-bearing gui_action.

@@ -37,6 +37,11 @@ type localPresentation struct {
 	previewFileTreeIndex   *int
 	previewCompletionIndex *int
 	previewPickerIndex     *int
+	// previewEmptyStateIndex is the locally-echoed launchpad focus row (#2689):
+	// an index into the ordered focusable items. It lets j/k/arrows move the
+	// highlight with zero latency; the next gui_empty_state frame's focused_id
+	// is authoritative and clears it via reconcileEmptyState.
+	previewEmptyStateIndex *int
 }
 
 func newLocalPresentation() localPresentation {
@@ -89,6 +94,13 @@ func (lp *localPresentation) reconcilePicker() {
 	lp.previewPickerIndex = nil
 }
 
+// reconcileEmptyState drops the locally-echoed launchpad focus when a fresh
+// gui_empty_state frame arrives: the frame's focused_id is authoritative
+// (#2689), so the local echo must not outlive the reconciliation.
+func (lp *localPresentation) reconcileEmptyState() {
+	lp.previewEmptyStateIndex = nil
+}
+
 func (lp *localPresentation) discard(kind transformKind, windowID uint16) {
 	switch kind {
 	case transformOffset:
@@ -97,6 +109,7 @@ func (lp *localPresentation) discard(kind transformKind, windowID uint16) {
 		lp.previewFileTreeIndex = nil
 		lp.previewCompletionIndex = nil
 		lp.previewPickerIndex = nil
+		lp.previewEmptyStateIndex = nil
 	}
 }
 

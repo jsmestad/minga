@@ -2199,6 +2199,30 @@ defmodule MingaEditor.State do
   end
 
   @doc """
+  Enters the zero-buffers launchpad (#2689).
+
+  Removes all file tabs from the tab bar (agent tabs stay), clears the
+  buffer list, and switches the active window to the empty-state surface.
+  The reverse transition happens automatically in
+  `sync_active_window_buffer/1` when any buffer becomes active.
+  """
+  @spec enter_empty_state(t()) :: t()
+  def enter_empty_state(%__MODULE__{} = state) do
+    launchpad_opts = EditorSessionState.session_opts(state.session)
+
+    state
+    |> clear_file_tabs()
+    |> update_workspace(&SessionState.enter_empty_state(&1, launchpad_opts))
+  end
+
+  @spec clear_file_tabs(t()) :: t()
+  defp clear_file_tabs(%__MODULE__{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+    set_tab_bar(state, TabBar.remove_file_tabs(tb))
+  end
+
+  defp clear_file_tabs(%__MODULE__{} = state), do: state
+
+  @doc """
   Re-syncs shell presentation (tab label, file ref, tab context) with the
   active buffer.
 

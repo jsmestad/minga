@@ -128,6 +128,48 @@ public enum PreviewFixtures {
         state.update(activeIndex: 0, entries: tabs())
     }
 
+    /// Launchpad fixture matching what the BEAM builder emits for a returning user (#2689).
+    public static func emptyStateReturningUser() -> [Wire.EmptyStateSection] {
+        [
+            Wire.EmptyStateSection(sectionId: 0, title: "Session", items: [
+                Wire.EmptyStateItem(kind: 0, id: "resume", label: "resume last session", detail: "4 files", jumpKey: "r", chord: "", icon: "", iconColorRGB: 0),
+            ]),
+            Wire.EmptyStateSection(sectionId: 1, title: "Recent", items: [
+                Wire.EmptyStateItem(kind: 1, id: "recent-1", label: "startup.ex", detail: "lib/minga_editor", jumpKey: "1", chord: "", icon: "\u{E62D}", iconColorRGB: 0xA074C4),
+                Wire.EmptyStateItem(kind: 1, id: "recent-2", label: "render_content.go", detail: "go/tui/internal/ui", jumpKey: "2", chord: "", icon: "\u{E627}", iconColorRGB: 0x519ABA),
+                Wire.EmptyStateItem(kind: 1, id: "recent-3", label: "ContentView.swift", detail: "macos/Sources", jumpKey: "3", chord: "", icon: "\u{E755}", iconColorRGB: 0xF05138),
+            ]),
+            Wire.EmptyStateSection(sectionId: 2, title: "Start", items: [
+                Wire.EmptyStateItem(kind: 2, id: "action-find-file", label: "open file", detail: "", jumpKey: "", chord: "SPC f f", icon: "\u{F0224}", iconColorRGB: 0x61AFEF),
+                Wire.EmptyStateItem(kind: 2, id: "action-file-tree", label: "file tree", detail: "", jumpKey: "", chord: "SPC o p", icon: "\u{F0256}", iconColorRGB: 0x78909C),
+                Wire.EmptyStateItem(kind: 2, id: "action-palette", label: "command palette", detail: "", jumpKey: "", chord: "SPC :", icon: "\u{F0633}", iconColorRGB: 0x51AFEF),
+                Wire.EmptyStateItem(kind: 2, id: "action-tutor", label: "tutorial", detail: ":Tutor", jumpKey: "", chord: "", icon: "", iconColorRGB: 0),
+            ]),
+            Wire.EmptyStateSection(sectionId: 3, title: "", items: [
+                Wire.EmptyStateItem(kind: 3, id: "hint-write", label: "write", detail: "", jumpKey: "i", chord: "", icon: "", iconColorRGB: 0),
+                Wire.EmptyStateItem(kind: 3, id: "hint-quit", label: "quit", detail: ":q", jumpKey: "", chord: "", icon: "", iconColorRGB: 0),
+            ]),
+        ]
+    }
+
+    /// Launchpad fixture for a first run: tutorial hero, no session or recents (#2689).
+    public static func emptyStateFirstRun() -> [Wire.EmptyStateSection] {
+        [
+            Wire.EmptyStateSection(sectionId: 0, title: "Get started", items: [
+                Wire.EmptyStateItem(kind: 2, id: "action-tutor", label: "open the tutorial", detail: ":Tutor", jumpKey: "RET", chord: "", icon: "", iconColorRGB: 0),
+            ]),
+            Wire.EmptyStateSection(sectionId: 2, title: "Start", items: [
+                Wire.EmptyStateItem(kind: 2, id: "action-find-file", label: "open file", detail: "", jumpKey: "", chord: "SPC f f", icon: "\u{F0224}", iconColorRGB: 0x61AFEF),
+                Wire.EmptyStateItem(kind: 2, id: "action-file-tree", label: "file tree", detail: "", jumpKey: "", chord: "SPC o p", icon: "\u{F0256}", iconColorRGB: 0x78909C),
+                Wire.EmptyStateItem(kind: 2, id: "action-palette", label: "command palette", detail: "", jumpKey: "", chord: "SPC :", icon: "\u{F0633}", iconColorRGB: 0x51AFEF),
+            ]),
+            Wire.EmptyStateSection(sectionId: 3, title: "", items: [
+                Wire.EmptyStateItem(kind: 3, id: "hint-write", label: "to start writing", detail: "", jumpKey: "i", chord: "", icon: "", iconColorRGB: 0),
+                Wire.EmptyStateItem(kind: 3, id: "hint-quit", label: "to quit", detail: ":q", jumpKey: "", chord: "", icon: "", iconColorRGB: 0),
+            ]),
+        ]
+    }
+
     public static func populateCompletion(_ state: CompletionState) {
         state.update(visible: true, anchorRow: 5, anchorCol: 10, selectedIndex: 1, rawItems: completionItems(), documentation: "")
     }

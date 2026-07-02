@@ -30,7 +30,7 @@ defmodule MingaEditor.EditorTest do
       assert active_buffer_pid(state) == buffer
     end
 
-    test "creates a default buffer when none is provided" do
+    test "boots into the launchpad when no buffer is provided" do
       state =
         Startup.build_initial_state(
           port_manager: nil,
@@ -41,7 +41,11 @@ defmodule MingaEditor.EditorTest do
         )
 
       assert Minga.Editing.mode(state) == :normal
-      assert is_pid(active_buffer_pid(state))
+      assert active_buffer_pid(state) == nil
+      assert state.workspace.buffers.list == []
+      assert state.workspace.launchpad != nil
+      assert MingaEditor.State.active_window_struct(state).content == {:empty, :semantic}
+      assert MingaEditor.State.tab_bar(state).tabs == []
     end
   end
 

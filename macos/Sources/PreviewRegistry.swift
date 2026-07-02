@@ -65,6 +65,10 @@ enum PreviewRegistry {
             statusBarPreview()
         case "TabBarView":
             tabBarPreview()
+        case "EmptyStateView":
+            emptyStatePreview()
+        case "EmptyStateFirstRun":
+            emptyStateFirstRunPreview()
         case "NotificationCenterView":
             notificationPreview()
         case "NotificationStack":
@@ -280,7 +284,7 @@ enum PreviewRegistry {
         return appState
     }
 
-    private static func previewEditorNSView(appState: AppState, encoder: ProtocolEncoder) -> EditorNSView? {
+    private static func previewEditorNSView(appState: AppState, encoder: InputEncoder) -> EditorNSView? {
         let scale = NSScreen.main?.backingScaleFactor ?? 2.0
         let fontFace = FontFace(name: "Menlo", size: 13, scale: scale)
         let fontManager = FontManager(name: "Menlo", size: 13, scale: scale)
@@ -436,7 +440,7 @@ enum PreviewRegistry {
         return appState
     }
 
-    private static func previewDiagnosticsEditorNSView(appState: AppState, encoder: ProtocolEncoder) -> EditorNSView? {
+    private static func previewDiagnosticsEditorNSView(appState: AppState, encoder: InputEncoder) -> EditorNSView? {
         let scale = NSScreen.main?.backingScaleFactor ?? 2.0
         let fontFace = FontFace(name: "Menlo", size: 13, scale: scale)
         let fontManager = FontManager(name: "Menlo", size: 13, scale: scale)

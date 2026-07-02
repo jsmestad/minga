@@ -16,6 +16,12 @@ func (m Model) content() string {
 	if chat, ok := m.agentChat(); ok && chat.Visible {
 		return strings.Join(m.renderAgentChatBody(chat), "\n")
 	}
+	// The launchpad (#2689) takes over the editor region when the workspace has
+	// zero buffers, exactly as the zero-windows path below takes over: its
+	// content replaces window content, not overlays it.
+	if state, ok := m.emptyState(); ok && state.Visible {
+		return strings.Join(m.renderEmptyState(state), "\n")
+	}
 	if len(m.windows) > 0 {
 		return strings.Join(m.fillBody(m.withFileTree(m.withSplitSeparators(m.semanticLines()))), "\n")
 	}

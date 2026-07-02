@@ -115,6 +115,42 @@ defmodule MingaEditor.Window do
     }
   end
 
+  @doc "Creates a new window showing the zero-buffers launchpad surface (#2689)."
+  @spec new_empty_state(id(), pos_integer(), pos_integer()) :: t()
+  def new_empty_state(id, rows, cols)
+      when is_integer(id) and id > 0 and is_integer(rows) and rows > 0 and is_integer(cols) and
+             cols > 0 do
+    %__MODULE__{
+      id: id,
+      content: Content.empty(),
+      buffer: nil,
+      viewport: Viewport.new(rows, cols),
+      render_cache: RenderCache.reset()
+    }
+  end
+
+  @doc """
+  Switches the window to the zero-buffers launchpad surface (#2689).
+
+  The window stays open (the window tree never drops its last leaf); only
+  its content changes, mirroring how agent chat panes host non-buffer
+  content. Any cached buffer rendering is invalidated.
+  """
+  @spec show_empty_state(t()) :: t()
+  def show_empty_state(%__MODULE__{} = window) do
+    %{window | content: Content.empty(), buffer: nil}
+    |> set_document_symbols([])
+    |> invalidate()
+  end
+
+  @doc "Switches the window from the launchpad back to a buffer."
+  @spec show_buffer(t(), pid()) :: t()
+  def show_buffer(%__MODULE__{} = window, buffer) when is_pid(buffer) do
+    %{window | content: Content.buffer(buffer), buffer: buffer}
+    |> set_document_symbols([])
+    |> invalidate()
+  end
+
   @doc "Creates a new window with the given id, buffer, viewport dimensions, and cursor position."
   @spec new(id(), pid(), pos_integer(), pos_integer(), Buffer.position()) :: t()
   def new(id, buffer, rows, cols, cursor)

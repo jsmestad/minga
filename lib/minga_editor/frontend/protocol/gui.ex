@@ -168,6 +168,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   @gui_action_select_tab Opcodes.gui_action_select_tab()
   @gui_action_close_tab Opcodes.gui_action_close_tab()
+  @gui_action_empty_state_activate Opcodes.gui_action_empty_state_activate()
   @gui_action_file_tree_click Opcodes.gui_action_file_tree_click()
   @gui_action_file_tree_toggle Opcodes.gui_action_file_tree_toggle()
   @gui_action_completion_select Opcodes.gui_action_completion_select()
@@ -318,6 +319,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @type gui_action ::
           {:select_tab, id :: pos_integer()}
           | {:close_tab, id :: pos_integer()}
+          | {:empty_state_activate, item_id :: String.t()}
           | {:file_tree_click, index :: non_neg_integer()}
           | {:file_tree_toggle, index :: non_neg_integer()}
           | {:completion_select, index :: non_neg_integer()}
@@ -2261,6 +2263,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @spec decode_gui_action(non_neg_integer(), binary()) :: {:ok, gui_action()} | :error
   def decode_gui_action(@gui_action_select_tab, <<id::32>>), do: {:ok, {:select_tab, id}}
   def decode_gui_action(@gui_action_close_tab, <<id::32>>), do: {:ok, {:close_tab, id}}
+
+  def decode_gui_action(@gui_action_empty_state_activate, <<len::8, id::binary-size(len)>>),
+    do: {:ok, {:empty_state_activate, id}}
 
   def decode_gui_action(@gui_action_file_tree_click, <<index::16>>),
     do: {:ok, {:file_tree_click, index}}

@@ -258,6 +258,15 @@ func (m Model) toolManager() (protocol.ToolManager, bool) {
 	return protocol.ToolManager{}, false
 }
 
+func (m Model) emptyState() (protocol.EmptyState, bool) {
+	for _, payload := range m.chrome {
+		if payload.EmptyState.Visible {
+			return payload.EmptyState, true
+		}
+	}
+	return protocol.EmptyState{}, false
+}
+
 func (m Model) splitSeparators() (protocol.SplitSeparators, bool) {
 	for _, payload := range m.chrome {
 		if len(payload.Splits.Verticals) > 0 || len(payload.Splits.Horizontals) > 0 {

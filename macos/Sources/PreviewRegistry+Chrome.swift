@@ -47,6 +47,27 @@ extension PreviewRegistry {
             .environment(theme)
     }
 
+    // MARK: - EmptyStateView (launchpad, #2689)
+
+    static func emptyStatePreview() -> some View {
+        emptyStateView(sections: PreviewFixtures.emptyStateReturningUser(), focusedId: "resume")
+    }
+
+    static func emptyStateFirstRunPreview() -> some View {
+        emptyStateView(sections: PreviewFixtures.emptyStateFirstRun(), focusedId: "action-tutor")
+    }
+
+    static func emptyStateView(sections: [Wire.EmptyStateSection], focusedId: String) -> some View {
+        let state = EmptyStateState()
+        let theme = PreviewFixtures.theme()
+        state.update(crashed: false, version: "v0.9", focusedId: focusedId, sections: sections)
+
+        return EmptyStateView(state: state, encoder: nil)
+            .frame(width: 900, height: 640)
+            .background(theme.editorBg)
+            .environment(theme)
+    }
+
     // MARK: - TabBarView
 
     static func tabBarPreview() -> some View {

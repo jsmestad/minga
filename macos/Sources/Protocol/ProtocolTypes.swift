@@ -215,6 +215,53 @@ public enum Wire {
         }
     }
 
+    // MARK: - Launchpad empty state
+
+    /// A single launchpad row decoded from the gui_empty_state protocol message (0xA5).
+    ///
+    /// `kind`: 0=resume, 1=recent_file, 2=action, 3=hint. The BEAM sends semantic
+    /// data only; the frontend owns all layout. `jumpKey` (single instant key),
+    /// `chord` (space-separated keystroke tokens), and a `detail` beginning with
+    /// ":" select one of three input-visual treatments.
+    public struct EmptyStateItem: Sendable, Identifiable {
+        public let kind: UInt8
+        public let id: String
+        public let label: String
+        public let detail: String
+        public let jumpKey: String
+        public let chord: String
+        public let icon: String
+        public let iconColorRGB: UInt32
+
+        public init(kind: UInt8, id: String, label: String, detail: String, jumpKey: String, chord: String, icon: String, iconColorRGB: UInt32) {
+            self.kind = kind
+            self.id = id
+            self.label = label
+            self.detail = detail
+            self.jumpKey = jumpKey
+            self.chord = chord
+            self.icon = icon
+            self.iconColorRGB = iconColorRGB
+        }
+    }
+
+    /// A launchpad section decoded from gui_empty_state (0xA5).
+    ///
+    /// `sectionId`: 0=session, 1=recent, 2=start, 3=footer.
+    public struct EmptyStateSection: Sendable, Identifiable {
+        public let sectionId: UInt8
+        public let title: String
+        public let items: [EmptyStateItem]
+
+        public var id: UInt8 { sectionId }
+
+        public init(sectionId: UInt8, title: String, items: [EmptyStateItem]) {
+            self.sectionId = sectionId
+            self.title = title
+            self.items = items
+        }
+    }
+
     /// A workspace entry decoded from the canonical gui_workspaces protocol message.
     public struct WorkspaceEntry: Sendable {
         public let id: UInt16

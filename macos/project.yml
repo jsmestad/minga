@@ -317,6 +317,9 @@ targets:
           - "Views/Shared/SparklineView.swift"
           - "Views/Shared/TextHighlighting.swift"
           - "Views/Shared/ThemeColors.swift"
+      # The launchpad watermark (MingaLogo) and other catalog assets must be
+      # bundled for previews; the app target gets them via `path: Resources`.
+      - path: Resources/Assets.xcassets
       - path: .generated/protocol/ProtocolOpcodes.generated.swift
         name: ProtocolOpcodes.generated.swift
         type: file

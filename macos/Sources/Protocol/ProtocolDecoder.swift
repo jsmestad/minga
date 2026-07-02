@@ -91,6 +91,11 @@ enum RenderCommand: Sendable {
     case guiExtensionRuntime(FrontendExtensionRuntimeMessage)
     case guiSearchState(active: Bool, matchCount: UInt16, currentIndex: UInt16, flags: UInt8)
     case guiSidebars(version: UInt8, activeId: String, sidebars: [Wire.SidebarMetadata])
+    /// gui_empty_state (0xA5): the launchpad shown when zero buffers are open.
+    /// `visible` false means the launchpad is hidden (payload is a single byte);
+    /// `crashed` marks an unclean previous shutdown. Static, data-driven sections
+    /// (session/recent/start/footer) carry semantic rows the frontend lays out.
+    case guiEmptyState(visible: Bool, crashed: Bool, version: String, focusedId: String, sections: [Wire.EmptyStateSection])
 }
 
 // MARK: - Decoder
@@ -313,6 +318,63 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         guard data.count >= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
         let notifications = try decodeNotifications(data: data, start: payloadStart, end: payloadStart + payloadLen)
         return (.guiNotifications(notifications), 1 + 2 + payloadLen)
+
+    case OP_GUI_EMPTY_STATE:
+        // len16 framed. Payload: visible(1). When visible: flags(1, bit0=crashed),
+        // version:string8, focused_id:string8, section_count(1), then per section:
+        // section_id(1), title:string8, item_count(1), then per item:
+        // kind(1), id:string8, label:string16, detail:string16, jump_key:string8,
+        // chord:string8, icon:string8, icon_color(u32 0xRRGGBB).
+        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
+        let payloadLen = Int(readU16(data, rest))
+        let payloadStart = rest + 2
+        let payloadEnd = payloadStart + payloadLen
+        guard data.count >= payloadEnd, payloadLen >= 1 else { throw ProtocolDecodeError.malformed }
+        var pos = payloadStart
+        let visible = data[pos] != 0
+        pos += 1
+        guard visible else {
+            return (.guiEmptyState(visible: false, crashed: false, version: "", focusedId: "", sections: []), 1 + 2 + payloadLen)
+        }
+        guard pos + 1 <= payloadEnd else { throw ProtocolDecodeError.malformed }
+        let esFlags = data[pos]
+        pos += 1
+        let esCrashed = esFlags & 0x01 != 0
+        let esVersion = try readString8(data: data, pos: &pos, end: payloadEnd)
+        let esFocusedId = try readString8(data: data, pos: &pos, end: payloadEnd)
+        guard pos + 1 <= payloadEnd else { throw ProtocolDecodeError.malformed }
+        let esSectionCount = Int(data[pos])
+        pos += 1
+        var esSections: [Wire.EmptyStateSection] = []
+        esSections.reserveCapacity(esSectionCount)
+        for _ in 0..<esSectionCount {
+            guard pos + 1 <= payloadEnd else { throw ProtocolDecodeError.malformed }
+            let sectionId = data[pos]
+            pos += 1
+            let title = try readString8(data: data, pos: &pos, end: payloadEnd)
+            guard pos + 1 <= payloadEnd else { throw ProtocolDecodeError.malformed }
+            let itemCount = Int(data[pos])
+            pos += 1
+            var items: [Wire.EmptyStateItem] = []
+            items.reserveCapacity(itemCount)
+            for _ in 0..<itemCount {
+                guard pos + 1 <= payloadEnd else { throw ProtocolDecodeError.malformed }
+                let kind = data[pos]
+                pos += 1
+                let itemId = try readString8(data: data, pos: &pos, end: payloadEnd)
+                let label = try readString16(data: data, pos: &pos, end: payloadEnd)
+                let detail = try readString16(data: data, pos: &pos, end: payloadEnd)
+                let jumpKey = try readString8(data: data, pos: &pos, end: payloadEnd)
+                let chord = try readString8(data: data, pos: &pos, end: payloadEnd)
+                let icon = try readString8(data: data, pos: &pos, end: payloadEnd)
+                guard pos + 4 <= payloadEnd else { throw ProtocolDecodeError.malformed }
+                let iconColor = readU32(data, pos)
+                pos += 4
+                items.append(Wire.EmptyStateItem(kind: kind, id: itemId, label: label, detail: detail, jumpKey: jumpKey, chord: chord, icon: icon, iconColorRGB: iconColor))
+            }
+            esSections.append(Wire.EmptyStateSection(sectionId: sectionId, title: title, items: items))
+        }
+        return (.guiEmptyState(visible: true, crashed: esCrashed, version: esVersion, focusedId: esFocusedId, sections: esSections), 1 + 2 + payloadLen)
 
     // GUI chrome commands.
     case OP_GUI_FILE_TREE:
