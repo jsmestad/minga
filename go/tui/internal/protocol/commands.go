@@ -113,6 +113,7 @@ type ChromePayload struct {
 	ConfigState       ConfigState
 	ToolManager       ToolManager
 	Splits            SplitSeparators
+	EmptyState        EmptyState
 	// Placements carries the authoritative per-frame surface layout from
 	// gui_surface_layout (0xA4, #2268): the BEAM's one rect+z list that drives
 	// compositing order (sort by Z) and is the same list BEAM mouse hit-testing

@@ -153,6 +153,8 @@ func opcodeName(opcode byte) string {
 		return "config state"
 	case generated.OPGuiSplitSeparators:
 		return "split separators"
+	case generated.OPGuiEmptyState:
+		return "empty state"
 	default:
 		return fmt.Sprintf("0x%02X", opcode)
 	}

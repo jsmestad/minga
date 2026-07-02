@@ -737,6 +737,18 @@ value = 0xA4
 direction = "beam_to_frontend"
 framing = "sectioned"
 
+# gui_empty_state (#2689) carries the zero-buffers launchpad: data-driven
+# sections (session resume / recents / actions / footer) with live-resolved
+# keybinding chords. Frontends lay the surface out natively (SwiftUI column,
+# TUI centered block); activation semantics stay BEAM-side via the
+# empty_state_activate gui_action. Hidden state is a single visible=0 byte.
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_empty_state"
+value = 0xA5
+direction = "beam_to_frontend"
+framing = "len16"
+
 # Sub-opcodes inside gui_action (0x07).
 [[gui_actions]]
 name = "select_tab"
@@ -1085,6 +1097,13 @@ value = 0x59
 [[gui_actions]]
 name = "system_will_unmount"
 value = 0x5A
+
+# Activate a launchpad (empty-state) item by id. Payload: string8 item id.
+# Sent on GUI click or Enter/jump-key echo; activation semantics live on the
+# BEAM so frontends cannot drift (#2689).
+[[gui_actions]]
+name = "empty_state_activate"
+value = 0x5B
 
 # ── Enum vocabularies ─────────────────────────────────────────────────────
 #

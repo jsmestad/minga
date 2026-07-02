@@ -67,7 +67,8 @@ defmodule MingaEditor.Session.State do
           document_highlights: [document_highlight()] | nil,
           cmd_hover_link: cmd_hover_link(),
           cmd_hover_cell: cmd_hover_cell(),
-          agent_ui: UIState.t()
+          agent_ui: UIState.t(),
+          launchpad: MingaEditor.State.Launchpad.t() | nil
         }
 
   @enforce_keys [:viewport]
@@ -87,7 +88,8 @@ defmodule MingaEditor.Session.State do
             document_highlights: nil,
             cmd_hover_link: nil,
             cmd_hover_cell: nil,
-            agent_ui: UIState.new()
+            agent_ui: UIState.new(),
+            launchpad: nil
 
   @doc "Returns the list of field names (for snapshot/restore compatibility)."
   @spec field_names() :: [TabContext.field_name()]
@@ -213,10 +215,40 @@ defmodule MingaEditor.Session.State do
 
         %{wspace | windows: windows}
 
+      # A buffer became active while the window showed the launchpad:
+      # leave the empty state in the same frame (#2689).
+      {:ok, %Window{content: {:empty, :semantic}}} ->
+        windows = Windows.update(ws, id, &Window.show_buffer(&1, buffers.active))
+        %{wspace | windows: windows, launchpad: nil}
+
       _ ->
         wspace
     end
   end
+
+  @doc """
+  Enters the zero-buffers launchpad (#2689).
+
+  Clears the active buffer, switches the active window's content to the
+  empty-state surface, and snapshots launchpad data (session, recents).
+  The window tree is untouched: the last window stays open.
+  """
+  @spec enter_empty_state(t()) :: t()
+  @spec enter_empty_state(t(), keyword()) :: t()
+  def enter_empty_state(%__MODULE__{} = wspace, launchpad_opts \\ []) do
+    windows = Windows.update(wspace.windows, wspace.windows.active, &Window.show_empty_state/1)
+
+    %{
+      wspace
+      | windows: windows,
+        buffers: %Buffers{},
+        launchpad: MingaEditor.State.Launchpad.new(launchpad_opts)
+    }
+  end
+
+  @doc "True when the workspace is showing the zero-buffers launchpad."
+  @spec empty_state?(t()) :: boolean()
+  def empty_state?(%__MODULE__{launchpad: launchpad}), do: launchpad != nil
 
   @doc "Transitions the editing model to a new mode."
   @spec transition_mode(t(), atom(), term()) :: t()
@@ -454,6 +486,12 @@ defmodule MingaEditor.Session.State do
   @spec set_agent_ui(t(), UIState.t()) :: t()
   def set_agent_ui(%__MODULE__{} = wspace, agent_ui) do
     %{wspace | agent_ui: agent_ui}
+  end
+
+  @doc "Sets or clears the launchpad (zero-buffers empty state)."
+  @spec set_launchpad(t(), MingaEditor.State.Launchpad.t() | nil) :: t()
+  def set_launchpad(%__MODULE__{} = wspace, launchpad) do
+    %{wspace | launchpad: launchpad}
   end
 
   @doc "Updates the injection ranges map."

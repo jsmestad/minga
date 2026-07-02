@@ -204,6 +204,66 @@ func pickerNavigationDelta(key tea.Key) (int, bool) {
 	}
 }
 
+// previewEmptyStateNavigation locally echoes launchpad focus movement (#2689):
+// j/k/arrows move the highlighted row immediately so there is no perceptible
+// latency, while the key still travels to the BEAM (which stays authoritative
+// for activation and re-broadcasts focused_id in the next frame). It is scoped
+// to focus movement only; it never activates a row. Returns true when it moved
+// the local focus.
+func (m *Model) previewEmptyStateNavigation(msg tea.KeyPressMsg) bool {
+	key := msg.Key()
+	if key.Mod.Contains(tea.ModShift) || key.Mod.Contains(tea.ModAlt) || key.Mod.Contains(tea.ModCtrl) || key.Mod.Contains(tea.ModSuper) {
+		return false
+	}
+
+	delta, ok := emptyStateNavigationDelta(key)
+	if !ok {
+		return false
+	}
+
+	state, ok := m.emptyState()
+	if !ok || !state.Visible {
+		return false
+	}
+
+	items := focusableEmptyStateItems(state)
+	if len(items) == 0 {
+		return false
+	}
+
+	current := emptyStateFocusedIndex(items, state.FocusedID)
+	if m.localPresentation.previewEmptyStateIndex != nil {
+		current = *m.localPresentation.previewEmptyStateIndex
+	}
+	if current < 0 {
+		current = 0
+	}
+
+	next := current + delta
+	if next < 0 {
+		next = 0
+	} else if next >= len(items) {
+		next = len(items) - 1
+	}
+	if next == current {
+		return false
+	}
+
+	m.localPresentation.previewEmptyStateIndex = &next
+	return true
+}
+
+func emptyStateNavigationDelta(key tea.Key) (int, bool) {
+	switch key.Code {
+	case 'j', tea.KeyDown:
+		return 1, true
+	case 'k', tea.KeyUp:
+		return -1, true
+	default:
+		return 0, false
+	}
+}
+
 func (m Model) effectivePickerIndex(picker protocol.Picker) int {
 	if m.localPresentation.previewPickerIndex != nil {
 		idx := *m.localPresentation.previewPickerIndex

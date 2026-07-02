@@ -170,7 +170,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       gui_window_viewport_delta: 0xA1,
       gui_window_rows_delta: 0xA2,
       gui_extension_runtime: 0xA3,
-      gui_surface_layout: 0xA4
+      gui_surface_layout: 0xA4,
+      gui_empty_state: 0xA5
     )
   end
 
@@ -261,7 +262,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       sidebar_action: 0x57,
       extension_action: 0x58,
       float_popup_dismiss: 0x59,
-      system_will_unmount: 0x5A
+      system_will_unmount: 0x5A,
+      empty_state_activate: 0x5B
     )
   end
 

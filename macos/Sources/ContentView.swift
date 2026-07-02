@@ -532,7 +532,7 @@ public struct ContentView<EditorSurface: View>: View {
             // is not occluded by the NSView layer (AppKit NSViews render
             // above SwiftUI views in a ZStack regardless of child order).
             makeEditorSurface()
-                .opacity(gui.agentChatState.visible ? 0 : 1)
+                .opacity(gui.agentChatState.visible || gui.emptyStateState.visible ? 0 : 1)
 
             if gui.agentChatState.visible {
                 AgentChatView(
@@ -540,6 +540,15 @@ public struct ContentView<EditorSurface: View>: View {
                     isInsertMode: gui.statusBarState.isInsertMode,
                     encoder: encoder,
                     cellHeight: geo.cellHeight
+                )
+            }
+
+            // Launchpad empty state (zero buffers). Swapped in over the Metal
+            // surface exactly like AgentChatView; keys still flow to the BEAM.
+            if gui.emptyStateState.visible {
+                EmptyStateView(
+                    state: gui.emptyStateState,
+                    encoder: encoder
                 )
             }
 

@@ -160,7 +160,7 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
       assert Buffer.content(selected.workspace.buffers.active) == "beta"
     end
 
-    test "bulk select creates a fallback buffer when all open buffers are killed" do
+    test "bulk select enters the launchpad when all open buffers are killed" do
       state = state_with_buffers(["alpha", "beta", "gamma"])
 
       items = [
@@ -171,21 +171,10 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
 
       selected = BufferSource.on_bulk_select(items, state)
 
-      fallback_pid = selected.workspace.buffers.active
-
-      on_exit(fn ->
-        try do
-          GenServer.stop(fallback_pid)
-        catch
-          :exit, _ -> :ok
-        end
-      end)
-
-      assert Enum.count(selected.workspace.buffers.list) == 1
-      assert fallback_pid != nil
-      assert EditorState.active_window_struct(selected).buffer == fallback_pid
-      assert Buffer.buffer_name(fallback_pid) == "Untitled-1"
-      assert Buffer.content(fallback_pid) == ""
+      assert selected.workspace.buffers.list == []
+      assert selected.workspace.buffers.active == nil
+      assert selected.workspace.launchpad != nil
+      assert EditorState.active_window_struct(selected).content == {:empty, :semantic}
     end
 
     test "bulk actions expose kill all marked" do

@@ -48,7 +48,10 @@ defmodule MingaEditor.State.Tab.Context do
   # "tab context carries every session workspace field" guard stays meaningful:
   # a new NON-transient workspace field still fails that test until it is added
   # to @snapshot_fields/@shared_fields above.
-  @transient_fields [:cmd_hover_link, :cmd_hover_cell]
+  # :launchpad (#2689) is also transient: it exists only while the workspace
+  # has zero buffers, and entering the empty state removes all file tabs, so
+  # no tab snapshot could meaningfully carry it.
+  @transient_fields [:cmd_hover_link, :cmd_hover_cell, :launchpad]
 
   @typedoc "Workspace fields carried by a tab context."
   @type field_name ::

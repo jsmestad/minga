@@ -49,6 +49,23 @@ defmodule MingaEditor.State.TabBar do
     }
   end
 
+  @doc """
+  Creates a tab bar with no tabs, for a zero-buffers launchpad startup (#2689).
+
+  `active_id` keeps its dangling default (1) — `active/1` returns nil for an
+  empty bar — so `next_id` starts at 2 to guarantee no restored or added tab
+  ever collides with the dangling active id.
+  """
+  @spec new_empty(String.t() | nil) :: t()
+  def new_empty(project_root \\ nil) do
+    %__MODULE__{
+      tabs: [],
+      active_id: 1,
+      next_id: 2,
+      workspaces: [Workspace.new_manual(project_root)]
+    }
+  end
+
   @doc "Returns the active tab."
   @spec active(t()) :: Tab.t() | nil
   def active(%__MODULE__{tabs: tabs, active_id: id}) do
@@ -103,6 +120,29 @@ defmodule MingaEditor.State.TabBar do
     new_tabs = before ++ [tab] ++ rest
 
     {%{tb | tabs: new_tabs, next_id: tb.next_id + 1}, tab}
+  end
+
+  @doc """
+  Removes every file tab, leaving agent tabs (if any) in place.
+
+  Used when the workspace enters the zero-buffers launchpad (#2689): the
+  file tab strip collapses instead of keeping phantom tabs. `remove/2`
+  keeps its can't-remove-last contract for every other caller. When the
+  active tab was removed, the first remaining tab becomes active;
+  `active/1` tolerates an empty bar (returns nil).
+  """
+  @spec remove_file_tabs(t()) :: t()
+  def remove_file_tabs(%__MODULE__{tabs: tabs, active_id: active_id} = tb) do
+    remaining = Enum.reject(tabs, &(&1.kind == :file))
+
+    new_active =
+      case {Enum.find(remaining, &(&1.id == active_id)), remaining} do
+        {%Tab{}, _} -> active_id
+        {nil, [%Tab{id: first_id} | _]} -> first_id
+        {nil, []} -> active_id
+      end
+
+    %{tb | tabs: remaining, active_id: new_active}
   end
 
   @doc """

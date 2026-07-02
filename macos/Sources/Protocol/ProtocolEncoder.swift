@@ -232,6 +232,24 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
+    /// Send a gui_action: empty_state_activate. Layout: opcode(1) + action_type(1) + id_len(1) + id(id_len).
+    ///
+    /// Activates a launchpad row (resume card, recent file, or action) by its
+    /// semantic id. Activation is authoritative on the BEAM; the frontend only
+    /// forwards the click.
+    func sendEmptyStateActivate(id: String) {
+        let utf8 = Array(id.utf8)
+        let idLen = min(utf8.count, Int(UInt8.max))
+        var buf = Data(count: 3 + idLen)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_EMPTY_STATE_ACTIVATE
+        buf[2] = UInt8(idLen)
+        if idLen > 0 {
+            buf.replaceSubrange(3..<(3 + idLen), with: utf8[0..<idLen])
+        }
+        writeFrame(buf)
+    }
+
     /// Send a gui_action: tab_copy_path. Layout: opcode(1) + action_type(1) + tab_id(4).
     func sendTabCopyPath(id: UInt32) {
         var buf = Data(count: 6)

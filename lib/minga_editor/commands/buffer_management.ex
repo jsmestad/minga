@@ -1870,14 +1870,32 @@ defmodule MingaEditor.Commands.BufferManagement do
     if TabBar.count(tb) > 1 do
       close_file_tab(state)
     else
-      shutdown_editor(state)
+      quit_last_file_tab(state)
     end
+  end
+
+  # `:q` on the last open tab: vim behavior quits the editor; the
+  # `quit_last_tab: :empty_state` option closes into the launchpad instead
+  # (kills the buffer, so the empty state truly has zero buffers, #2689).
+  @spec quit_last_file_tab(state()) :: state()
+  defp quit_last_file_tab(state) do
+    case quit_last_tab_option(state) do
+      :empty_state -> remove_current_buffer(state)
+      _ -> shutdown_editor(state)
+    end
+  end
+
+  @spec quit_last_tab_option(state()) :: :quit | :empty_state
+  defp quit_last_tab_option(state) do
+    Minga.Config.Options.get(EditorState.options_server(state), :quit_last_tab)
+  catch
+    :exit, _ -> :quit
   end
 
   @spec quit_would_exit_editor?(state()) :: boolean()
   defp quit_would_exit_editor?(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
     case EditorState.active_tab(state) do
-      %Tab{kind: :file} -> TabBar.count(tb) == 1
+      %Tab{kind: :file} -> TabBar.count(tb) == 1 and quit_last_tab_option(state) == :quit
       %Tab{kind: :agent} -> TabBar.count(tb) == 1
       _ -> true
     end
@@ -2005,12 +2023,12 @@ defmodule MingaEditor.Commands.BufferManagement do
     if state.workspace.buffers.active do
       EditorState.sync_active_window_buffer(state)
     else
-      create_fallback_buffer(state, state.workspace.buffers)
+      EditorState.enter_empty_state(state)
     end
   end
 
-  defp restore_neighbor_tab_or_create_fallback(state, old_buffers, false) do
-    create_fallback_buffer(state, old_buffers)
+  defp restore_neighbor_tab_or_create_fallback(state, _old_buffers, false) do
+    EditorState.enter_empty_state(state)
   end
 
   @spec remove_current_tab(state(), Tab.id() | nil) :: state()
@@ -2460,32 +2478,11 @@ defmodule MingaEditor.Commands.BufferManagement do
     end
   end
 
-  # Creates an empty buffer when the last buffer is killed, so the editor
-  # always has an active buffer to render.
-  @spec create_fallback_buffer(state(), EditorState.Buffers.t()) :: state()
-  defp create_fallback_buffer(state, bs) do
-    case DynamicSupervisor.start_child(
-           Minga.Buffer.Supervisor,
-           {Minga.Buffer,
-            content: "",
-            buffer_name: "Untitled-1",
-            options_server: EditorState.options_server(state)}
-         ) do
-      {:ok, new_buf} ->
-        state
-        |> EditorState.set_buffers(Buffers.replace_list(bs, [new_buf], 0))
-        |> EditorState.sync_active_window_buffer()
-
-      {:error, _} ->
-        EditorState.set_buffers(state, Buffers.replace_list(bs, [], 0))
-    end
-  end
-
   command(:save, "Save the current file", requires_buffer: true)
   command(:force_save, "Force save the current file", requires_buffer: true)
   command(:reload, "Reload file from disk", requires_buffer: true)
-  command(:quit, "Close tab or quit", requires_buffer: true)
-  command(:force_quit, "Force close tab or quit", requires_buffer: true)
+  command(:quit, "Close tab or quit", requires_buffer: false)
+  command(:force_quit, "Force close tab or quit", requires_buffer: false)
   command(:close_other_tabs, "Close all tabs except the active tab", requires_buffer: true)
   command(:kill_other_buffers, "Close all tabs except the active tab", requires_buffer: true)
 
@@ -2494,11 +2491,11 @@ defmodule MingaEditor.Commands.BufferManagement do
   )
 
   command(:kill_all_buffers, "Close all file tabs", requires_buffer: true)
-  command(:quit_all, "Quit the editor (all tabs)", requires_buffer: true)
-  command(:force_quit_all, "Force quit the editor (all tabs)", requires_buffer: true)
+  command(:quit_all, "Quit the editor (all tabs)", requires_buffer: false)
+  command(:force_quit_all, "Force quit the editor (all tabs)", requires_buffer: false)
   command(:abort_quit, "Abort and quit with error exit code", requires_buffer: false)
-  command(:confirm_quit_yes, "Confirm quit (yes)", requires_buffer: true)
-  command(:confirm_quit_no, "Confirm quit (no)", requires_buffer: true)
+  command(:confirm_quit_yes, "Confirm quit (yes)", requires_buffer: false)
+  command(:confirm_quit_no, "Confirm quit (no)", requires_buffer: false)
   command(:buffer_list, "Switch buffer", requires_buffer: true)
   command(:buffer_list_all, "Switch buffer (all)", requires_buffer: true)
   command(:buffer_next, "Next buffer", requires_buffer: true)

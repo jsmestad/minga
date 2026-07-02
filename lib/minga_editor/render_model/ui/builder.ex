@@ -12,6 +12,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   alias MingaEditor.RenderModel.UI.CursorAnimationBuilder
   alias MingaEditor.RenderModel.UI.LineSpacingBuilder
   alias MingaEditor.RenderModel.UI.EditTimelineBuilder
+  alias MingaEditor.RenderModel.UI.EmptyStateBuilder
   alias MingaEditor.RenderModel.UI.ExtensionOverlayBuilder
   alias MingaEditor.RenderModel.UI.ExtensionPanelBuilder
   alias MingaEditor.RenderModel.UI.FileTreeBuilder
@@ -73,6 +74,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
       completion: CompletionBuilder.build(ctx),
       signature_help: SignatureHelpBuilder.build(ctx),
       agent_chat: AgentChatBuilder.build(ctx),
+      empty_state: EmptyStateBuilder.build(ctx),
       bottom_panel: bottom_panel,
       change_summary: ChangeSummaryBuilder.build(gui_payload),
       edit_timeline: EditTimelineBuilder.build(ctx),

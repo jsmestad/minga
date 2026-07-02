@@ -591,6 +591,42 @@ type HorizontalSeparator struct {
 	Filename string
 }
 
+// EmptyState is the zero-buffers launchpad surface (gui_empty_state, 0xA5,
+// #2689). The BEAM owns content and activation semantics; the renderer owns
+// layout. Sections are data-driven and arrive in display order (session,
+// recent, start, footer); absent sections are simply not sent.
+type EmptyState struct {
+	Visible   bool
+	Crashed   bool
+	Version   string
+	FocusedID string
+	Sections  []EmptyStateSection
+}
+
+// EmptyStateSection groups launchpad items under a titled region. ID is the
+// wire section id: 0=session, 1=recent, 2=start, 3=footer.
+type EmptyStateSection struct {
+	ID    byte
+	Title string
+	Items []EmptyStateItem
+}
+
+// EmptyStateItem is one launchpad row. Kind is the wire item kind: 0=resume,
+// 1=recent_file, 2=action, 3=hint. JumpKey is a single-key/RET jump binding
+// (empty when the row teaches a durable chord instead); Chord is a
+// space-separated leader sequence (e.g. "SPC f f"). IconColor is a 24-bit RGB
+// value in the low bytes of a u32.
+type EmptyStateItem struct {
+	Kind      byte
+	ID        string
+	Label     string
+	Detail    string
+	JumpKey   string
+	Chord     string
+	Icon      string
+	IconColor uint32
+}
+
 type RichLine struct {
 	Segments []RichSegment
 }

@@ -32,7 +32,7 @@ func CommandSize(payload []byte) (int, CommandSizeStatus) {
 		return fixedCommandSize(payload, 6)
 	case OPBeginFrame, OPCommitFrame:
 		return fixedCommandSize(payload, 9)
-	case OPSetTitle, OPProtocolError, OPClipboardWrite, OPGuiIndentGuides, OPGuiLineSpacing, OPGuiFileTreeSelection, OPGuiCursorAnimation, OPGuiHoverAction, OPGuiConfigState, OPGuiWorkspaces, OPGuiNotifications, OPGuiEditTimeline, OPGuiExtensionOverlay, OPGuiExtensionPanel, OPGuiSearchState:
+	case OPSetTitle, OPProtocolError, OPClipboardWrite, OPGuiIndentGuides, OPGuiLineSpacing, OPGuiFileTreeSelection, OPGuiCursorAnimation, OPGuiHoverAction, OPGuiConfigState, OPGuiWorkspaces, OPGuiNotifications, OPGuiEditTimeline, OPGuiExtensionOverlay, OPGuiExtensionPanel, OPGuiSearchState, OPGuiEmptyState:
 		return len16CommandSize(payload)
 	case OPGuiFileTree, OPGuiObservatory, OPGuiSidebars, OPGuiExtensionRuntime:
 		return len32CommandSize(payload)

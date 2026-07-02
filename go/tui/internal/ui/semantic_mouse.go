@@ -19,9 +19,17 @@ const (
 	zonePrefixNotificationAct   = "notification:action:"
 	zonePrefixObservatoryNode   = "observatory:node:"
 	zonePrefixTimelineEntry     = "timeline:entry:"
+	zonePrefixEmptyStateItem    = "empty-state:item:"
 	zoneIDHoverAction           = "hover:action"
 	bottomPanelWheelLines       = 3
 )
+
+// zoneIDEmptyStateItem tags one activatable launchpad row by its stable item
+// id (#2689). A click routes empty_state_activate(id), the same authoritative
+// activation the keyboard jump keys reach on the BEAM.
+func zoneIDEmptyStateItem(id string) string {
+	return zonePrefixEmptyStateItem + url.QueryEscape(id)
+}
 
 func zoneIDFileTreeRow(index int) string {
 	return fmt.Sprintf("%s%d", zonePrefixFileTreeRow, index)
@@ -229,6 +237,11 @@ func (m Model) semanticMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	if packet, ok := m.overlayMousePacket(msg); ok {
 		return packet, true
 	}
+	// The launchpad takes over the whole editor body, so its clickable rows are
+	// checked before the spatial header/left-pane/footer dispatch (#2689).
+	if packet, ok := m.emptyStateMousePacket(msg); ok {
+		return packet, true
+	}
 	mouse := msg.Mouse()
 	switch {
 	case m.layout.header.Contains(mouse.X, mouse.Y):
@@ -403,6 +416,30 @@ func (m Model) notificationMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 			zoneInfo := m.zones.Get(zoneIDNotificationAction(note.ID, action.ID))
 			if zoneInfo != nil && zoneInfo.InBounds(msg) {
 				return protocol.EncodeGUINotificationAction(note.ID, action.ID), true
+			}
+		}
+	}
+	return nil, false
+}
+
+// emptyStateMousePacket maps a click on an activatable launchpad row to
+// empty_state_activate(id) (#2689), the same authoritative activation the
+// keyboard jump keys reach on the BEAM. Hint rows (footer) carry no zone and
+// are never activatable. A click that hits no row returns ok=false so it falls
+// through to the raw mouse path.
+func (m Model) emptyStateMousePacket(msg tea.MouseMsg) ([]byte, bool) {
+	state, ok := m.emptyState()
+	if !ok || !state.Visible {
+		return nil, false
+	}
+	for _, section := range state.Sections {
+		for _, item := range section.Items {
+			if item.Kind == emptyStateKindHint {
+				continue
+			}
+			zoneInfo := m.zones.Get(zoneIDEmptyStateItem(item.ID))
+			if zoneInfo != nil && zoneInfo.InBounds(msg) {
+				return protocol.EncodeGUIEmptyStateActivate(item.ID), true
 			}
 		}
 	}

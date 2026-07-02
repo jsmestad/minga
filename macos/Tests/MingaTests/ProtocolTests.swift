@@ -213,6 +213,99 @@ struct ProtocolDecoderTests {
         #expect(todos.isEmpty)
     }
 
+    @Test("Decode visible gui_empty_state launchpad frame")
+    func decodeGuiEmptyStateVisible() throws {
+        var body = Data()
+        body.append(1)          // visible
+        body.append(0x01)       // flags: crashed
+        appendWireString8(&body, "v0.9")
+        appendWireString8(&body, "resume")   // focused_id
+
+        body.append(2)          // section_count
+
+        // Section 0: session (one resume card row)
+        body.append(0)                          // section_id = session
+        appendWireString8(&body, "Crashed session")
+        body.append(1)                          // item_count
+        body.append(0)                          // kind = resume
+        appendWireString8(&body, "resume")      // id
+        appendWireString16(&body, "restore session")
+        appendWireString16(&body, "4 files")
+        appendWireString8(&body, "r")           // jump_key
+        appendWireString8(&body, "")            // chord
+        appendWireString8(&body, "\u{f0453}")   // icon
+        appendWireU32(&body, 0xFF8800)          // icon_color
+
+        // Section 2: start (one action row with a chord)
+        body.append(2)                          // section_id = start
+        appendWireString8(&body, "Start")
+        body.append(1)                          // item_count
+        body.append(2)                          // kind = action
+        appendWireString8(&body, "find_file")   // id
+        appendWireString16(&body, "open file")
+        appendWireString16(&body, "")
+        appendWireString8(&body, "")            // jump_key
+        appendWireString8(&body, "SPC f f")     // chord
+        appendWireString8(&body, "\u{f0224}")   // icon
+        appendWireU32(&body, 0)                 // icon_color = default
+
+        var data = Data([OP_GUI_EMPTY_STATE])
+        appendWireU16(&data, UInt16(body.count))
+        data.append(body)
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+        guard case .guiEmptyState(let visible, let crashed, let version, let focusedId, let sections) = cmd else {
+            Issue.record("Expected .guiEmptyState, got \(String(describing: cmd))")
+            return
+        }
+
+        #expect(visible)
+        #expect(crashed)
+        #expect(version == "v0.9")
+        #expect(focusedId == "resume")
+        #expect(sections.count == 2)
+
+        let session = sections[0]
+        #expect(session.sectionId == 0)
+        #expect(session.title == "Crashed session")
+        #expect(session.items.count == 1)
+        let resume = session.items[0]
+        #expect(resume.kind == 0)
+        #expect(resume.id == "resume")
+        #expect(resume.label == "restore session")
+        #expect(resume.detail == "4 files")
+        #expect(resume.jumpKey == "r")
+        #expect(resume.chord.isEmpty)
+        #expect(resume.iconColorRGB == 0xFF8800)
+
+        let start = sections[1]
+        #expect(start.sectionId == 2)
+        let action = start.items[0]
+        #expect(action.kind == 2)
+        #expect(action.id == "find_file")
+        #expect(action.label == "open file")
+        #expect(action.jumpKey.isEmpty)
+        #expect(action.chord == "SPC f f")
+        #expect(action.iconColorRGB == 0)
+    }
+
+    @Test("Decode hidden gui_empty_state single-byte payload")
+    func decodeGuiEmptyStateHidden() throws {
+        var data = Data([OP_GUI_EMPTY_STATE])
+        appendWireU16(&data, 1)
+        data.append(0)  // visible = 0
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+        guard case .guiEmptyState(let visible, _, _, _, let sections) = cmd else {
+            Issue.record("Expected .guiEmptyState, got \(String(describing: cmd))")
+            return
+        }
+        #expect(!visible)
+        #expect(sections.isEmpty)
+    }
+
     @Test("Decode gui_edit_timeline file summaries")
     func decodeGuiEditTimelineFiles() throws {
         var payload = Data([1])

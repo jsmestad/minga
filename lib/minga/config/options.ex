@@ -104,6 +104,7 @@ defmodule Minga.Config.Options do
           | :agent_react_to_lsp_errors_on_save
           | :agent_flush_before_shell
           | :confirm_quit
+          | :quit_last_tab
           | :line_spacing
           | :font_family
           | :font_size
@@ -352,6 +353,8 @@ defmodule Minga.Config.Options do
      "Whether pending agent output flushes before shell tools run."},
     {:confirm_quit, :boolean, true,
      "Whether quitting with unsaved changes asks for confirmation."},
+    {:quit_last_tab, {:enum, [:quit, :empty_state]}, :quit,
+     "What :q does on the last open tab: quit the editor (vim behavior) or close into the launchpad."},
     {:cursorline, :boolean, true, "Whether the current cursor line is highlighted."},
     {:cursor_animate, :boolean, true,
      "Whether cursor movement is smoothly animated in GUI frontends."},
