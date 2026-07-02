@@ -545,6 +545,116 @@ struct CoreTextMetalRendererCursorTests {
         #expect(abs((cursor?.y ?? 0) - expectedY) < 0.001)
     }
 
+    @Test("cursor row Y uses spaced cell height at line spacing 1.2")
+    func cursorRowYUsesSpacedCellHeightAtSpacing1_2() {
+        let cellW: Float = 7.5
+        let baseCellH: Float = 16.0
+        let lineSpacing: Float = 1.2
+        let displayCellH = baseCellH * lineSpacing
+        let scale: Float = 2.0
+
+        var frameState = FrameState(cols: 80, rows: 24)
+        frameState.lineSpacing = lineSpacing
+        frameState.cursorRow = 10
+        frameState.cursorCol = 4
+        frameState.cursorShape = .block
+        frameState.gutterCol = 0
+
+        let cursor = CoreTextMetalRenderer.resolveCursor(
+            frameState: frameState,
+            windowContents: [:],
+            cellW: cellW,
+            displayCellH: displayCellH,
+            scale: scale,
+            gutterLeftMarginPx: 0,
+            gutterPaddingPx: 0
+        )
+
+        // Row Y must land on the spaced row position, not the unspaced one.
+        let spacedY = Float(10) * displayCellH * scale
+        let unspacedY = Float(10) * baseCellH * scale
+        #expect(abs((cursor?.y ?? 0) - spacedY) < 0.001)
+        #expect(abs((cursor?.y ?? 0) - unspacedY) > 0.001)
+    }
+
+    @Test("cursor row Y at line spacing 1.0 matches the unspaced baseline")
+    func cursorRowYAtSpacing1_0MatchesUnspacedBaseline() {
+        let cellW: Float = 7.5
+        let baseCellH: Float = 16.0
+        let lineSpacing: Float = 1.0
+        let displayCellH = baseCellH * lineSpacing
+        let scale: Float = 2.0
+
+        var frameState = FrameState(cols: 80, rows: 24)
+        frameState.lineSpacing = lineSpacing
+        frameState.cursorRow = 10
+        frameState.cursorCol = 4
+        frameState.cursorShape = .block
+        frameState.gutterCol = 0
+
+        let cursor = CoreTextMetalRenderer.resolveCursor(
+            frameState: frameState,
+            windowContents: [:],
+            cellW: cellW,
+            displayCellH: displayCellH,
+            scale: scale,
+            gutterLeftMarginPx: 0,
+            gutterPaddingPx: 0
+        )
+
+        // At 1.0 the spaced and unspaced positions are identical (byte-for-byte
+        // parity with pre-1.2-default behavior).
+        let expectedY = Float(10) * baseCellH * scale
+        #expect(abs((cursor?.y ?? 0) - expectedY) < 0.001)
+    }
+
+    @Test("semantic window rows land on spaced positions at line spacing 1.2")
+    func semanticWindowRowsLandOnSpacedPositionsAtSpacing1_2() {
+        // The semantic content path positions each row at rowIndex * displayCellH.
+        // resolveCursor shares that formula through the window's contentRow +
+        // cursorRow, so a spaced computation must place the cursor's row on the
+        // spaced grid rather than compacting rows into the unspaced top band.
+        let cellW: Float = 8.0
+        let baseCellH: Float = 16.0
+        let lineSpacing: Float = 1.2
+        let displayCellH = baseCellH * lineSpacing
+        let scale: Float = 2.0
+
+        var frameState = FrameState(cols: 80, rows: 24)
+        frameState.lineSpacing = lineSpacing
+        frameState.cursorRow = 0
+        frameState.cursorCol = 0
+        frameState.cursorShape = .block
+        frameState.windowGutters[1] = Wire.WindowGutter(
+            windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 20,
+            isActive: true, contentWidth: 80, cursorLine: 5, lineNumberStyle: .none,
+            lineNumberWidth: 0, signColWidth: 0, entries: []
+        )
+
+        // Cursor is on the 6th visible row of the window content.
+        let content = GUIWindowContent(
+            windowId: 1, fullRefresh: true,
+            cursorRow: 5, cursorCol: 0, cursorShape: .block,
+            rows: [], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: []
+        )
+
+        let cursor = CoreTextMetalRenderer.resolveCursor(
+            frameState: frameState,
+            windowContents: [1: content],
+            cellW: cellW,
+            displayCellH: displayCellH,
+            scale: scale,
+            gutterLeftMarginPx: 0,
+            gutterPaddingPx: 0
+        )
+
+        let expectedY = Float(0 + 5) * displayCellH * scale
+        #expect(cursor?.windowId == 1)
+        #expect(abs((cursor?.y ?? 0) - expectedY) < 0.001)
+    }
+
     @Test("cursor animation progress clamps to timeline bounds")
     func cursorAnimationProgressClamps() {
         #expect(CoreTextMetalRenderer.cursorAnimationProgress(now: 0.0, startTime: 1.0, duration: 0.035) == 0.0)

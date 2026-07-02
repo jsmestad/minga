@@ -2512,8 +2512,9 @@ extension EditorNSView: @preconcurrency NSTextInputClient {
         } else {
             gutterPad = 0
         }
-        let localRect = NSRect(x: col * cellWidth + gutterPad, y: row * cellHeight,
-                                width: cellWidth, height: cellHeight)
+        let displayCellHeight = effectiveCellHeight
+        let localRect = NSRect(x: col * cellWidth + gutterPad, y: row * displayCellHeight,
+                                width: cellWidth, height: displayCellHeight)
 
         // Convert to screen coordinates.
         guard let window else { return localRect }
@@ -2540,7 +2541,7 @@ extension EditorNSView: @preconcurrency NSTextInputClient {
         } else {
             col = max(0, Int(localPoint.x / cellWidth))
         }
-        let row = Int(localPoint.y / cellHeight)
+        let row = Int(localPoint.y / effectiveCellHeight)
         return row * Int(dispatcher.frameState.cols) + col
     }
 
