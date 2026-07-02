@@ -280,7 +280,7 @@ defmodule MingaEditor.Window do
   handlers. `scroll_seq` advances when EITHER an authoritative jump was marked
   since the last settle OR the top moved to a value that is neither the previous
   committed top nor a frontend-reported free-scroll top (a genuine BEAM-initiated
-  anchor move). Scrolloff-breach cursor drags share the reported top, so they are
+  anchor move). Wheel/trackpad free-scroll frames share the reported top, so they are
   echoes and do not advance the sequence. A jump that also moves the top bumps
   once, not twice (a single OR decision per settle). The counter, its baseline,
   and the authoritative-request baseline all live in the render cache, so the

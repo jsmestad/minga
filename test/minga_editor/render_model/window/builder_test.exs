@@ -61,6 +61,28 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
     end)
   end
 
+  # Detaches the active window's viewport from the cursor at `top` (as a wheel
+  # free-scroll does): sets the scrolled top and marks `scroll_detach_cursor` to
+  # the current cursor so the pipeline leaves the viewport where the user put it.
+  defp detach_scroll(state, top) do
+    win_id = state.workspace.windows.active
+    window = Map.fetch!(state.workspace.windows.map, win_id)
+    cursor = BufferProcess.cursor(state.workspace.buffers.active)
+
+    window =
+      window
+      |> EditorWindow.set_viewport(Viewport.put_top(window.viewport, top))
+      |> Map.put(:scroll_detach_cursor, cursor)
+
+    windows =
+      Windows.set_map(
+        state.workspace.windows,
+        Map.put(state.workspace.windows.map, win_id, window)
+      )
+
+    %{state | workspace: %{state.workspace | windows: windows}}
+  end
+
   defp build_window_model(state, ctx_overrides) do
     state = EditorState.sync_active_window_cursor(state)
     state = MingaEditor.RenderPipeline.compute_layout(state)
@@ -163,6 +185,75 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
 
       assert left.window_model.cursor_visible == true
       assert right.window_model.cursor_visible == false
+    end
+
+    # VSCode-style wheel free-scroll (#2684) can leave the cursor off-viewport
+    # without moving it. When that happens the caret and cursorline must
+    # disappear rather than ghost at the edge row; they return on scroll-back.
+    # A window whose `scroll_detach_cursor` matches the (unmoved) cursor keeps
+    # its scrolled top through the pipeline, reproducing the detached state.
+    test "omits the caret and cursorline when the cursor is scrolled above the viewport" do
+      content = Enum.map_join(0..49, "\n", &"line #{&1}")
+      state = gui_state(rows: 5, cols: 20, content: content)
+      :ok = BufferProcess.move_to(state.workspace.buffers.active, {0, 0})
+
+      model = build_window_model(detach_scroll(state, 30), cursorline_bg: 0x223344)
+
+      assert model.cursor_visible == false
+      assert model.cursorline == nil
+    end
+
+    test "omits the caret and cursorline when the cursor is scrolled below the viewport" do
+      content = Enum.map_join(0..49, "\n", &"line #{&1}")
+      state = gui_state(rows: 5, cols: 20, content: content)
+      # Cursor on the last line; scroll the viewport back to the top so the
+      # cursor sits past the bottom bound. Guards the upper bound strictly:
+      # a `<` -> `<=` regression in cursor_on_screen? would fail here.
+      :ok = BufferProcess.move_to(state.workspace.buffers.active, {49, 0})
+
+      model = build_window_model(detach_scroll(state, 0), cursorline_bg: 0x223344)
+
+      assert model.cursor_visible == false
+      assert model.cursorline == nil
+    end
+
+    test "bottom bound is strict: last visible row shows the caret, one past hides it" do
+      content = Enum.map_join(0..49, "\n", &"line #{&1}")
+      # Probe the visible-row boundary instead of hardcoding chrome height:
+      # walk the cursor down from the top until visibility flips, then assert
+      # the flip is exactly one row wide. A `<` -> `<=` regression in
+      # cursor_on_screen? moves the flip and fails the paired assertions.
+      state = gui_state(rows: 8, cols: 20, content: content)
+      buffer = state.workspace.buffers.active
+
+      visible_at? = fn line ->
+        :ok = BufferProcess.move_to(buffer, {line, 0})
+        build_window_model(detach_scroll(state, 0), cursorline_bg: 0x223344).cursor_visible
+      end
+
+      first_hidden = Enum.find(1..49, fn line -> not visible_at?.(line) end)
+
+      assert is_integer(first_hidden),
+             "expected the cursor to leave the viewport within the buffer"
+
+      last_visible = first_hidden - 1
+      :ok = BufferProcess.move_to(buffer, {last_visible, 0})
+      model = build_window_model(detach_scroll(state, 0), cursorline_bg: 0x223344)
+      assert model.cursor_visible == true
+      assert %Window.Cursorline{row: ^last_visible} = model.cursorline
+    end
+
+    test "restores the caret and cursorline when scrolled back onto the cursor" do
+      content = Enum.map_join(0..49, "\n", &"line #{&1}")
+      state = gui_state(rows: 5, cols: 20, content: content)
+      :ok = BufferProcess.move_to(state.workspace.buffers.active, {0, 0})
+
+      off = build_window_model(detach_scroll(state, 30), cursorline_bg: 0x223344)
+      assert off.cursorline == nil
+
+      back = build_window_model(detach_scroll(state, 0), cursorline_bg: 0x223344)
+      assert back.cursor_visible == true
+      assert %Window.Cursorline{row: 0, bg_rgb: 0x223344} = back.cursorline
     end
 
     test "ordinary buffer edits change row hashes without bumping content epoch or forcing refresh" do

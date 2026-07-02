@@ -88,7 +88,7 @@ defmodule MingaEditor.MouseTest do
       assert window_viewport(state, win_id).top == 42
     end
 
-    test "a report that would breach scrolloff drags the cursor along with the viewport" do
+    test "a report that scrolls the cursor off-screen never moves the cursor (#2684)" do
       {state, buffer} = start_mouse_state(lines(0..99), width: 40, height: 20)
       state = native_gui_state(state)
       win_id = state.workspace.windows.active
@@ -98,10 +98,13 @@ defmodule MingaEditor.MouseTest do
 
       state = Mouse.handle_scroll_batch(state, win_id, 30, :down)
 
-      {cursor_line, _col} = BufferProcess.cursor(buffer)
-      new_top = window_viewport(state, win_id).top
+      window = Map.fetch!(state.workspace.windows.map, win_id)
+      new_top = window.viewport.top
+      # Viewport scrolls past the cursor line (50 < 70), but the cursor stays put
+      # and the committed top is marked as a free-scroll echo.
       assert new_top == 70
-      assert cursor_line >= new_top
+      assert BufferProcess.cursor(buffer) == {50, 0}
+      assert window.scroll_echo_top == new_top
     end
 
     test "a non-resident window keeps today's viewport-only behavior regardless of magnitude" do
@@ -192,7 +195,7 @@ defmodule MingaEditor.MouseTest do
       assert BufferProcess.cursor(buffer) == {50, 0}
     end
 
-    test "a resident GUI window drags the cursor once the wheel breaches scrolloff" do
+    test "a resident GUI window never moves the cursor no matter how far the wheel scrolls (#2684)" do
       {state, buffer} = start_mouse_state(lines(0..99), width: 40, height: 20)
       state = native_gui_state(state)
       win_id = state.workspace.windows.active
@@ -202,12 +205,13 @@ defmodule MingaEditor.MouseTest do
 
       state = Enum.reduce(1..20, state, fn _, acc -> mouse(acc, 0, 0, :wheel_down, :press) end)
 
-      {cursor_line, _col} = BufferProcess.cursor(buffer)
       window = Map.fetch!(state.workspace.windows.map, win_id)
       new_top = window.viewport.top
+      # The viewport scrolled well past the cursor line, yet the cursor is unchanged
+      # and every committed top stayed a free-scroll echo.
+      assert new_top > 50
+      assert BufferProcess.cursor(buffer) == {50, 0}
       assert window.scroll_echo_top == new_top
-      assert cursor_line > 50
-      assert cursor_line >= new_top
     end
 
     test "a resident GUI window scrolls up through apply_scroll_intent as well" do

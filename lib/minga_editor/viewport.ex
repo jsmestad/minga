@@ -472,56 +472,6 @@ defmodule MingaEditor.Viewport do
     {put_top(vp, new_top), clamped_cursor}
   end
 
-  @doc """
-  Scrolls the viewport by an arbitrary signed line `delta`, dragging the cursor
-  only when the resulting top would push it past the scroll margin.
-
-  Generalizes `scroll_line_down/4` and `scroll_line_up/4` to a multi-line step so
-  a single wheel/trackpad report can be applied in one shot instead of looping
-  one line at a time. `delta > 0` scrolls down (content moves up), `delta < 0`
-  scrolls up. Returns `{updated_viewport, clamped_cursor_line}`; the caller can
-  compare the returned cursor line against the input to detect whether this
-  step actually dragged the cursor (a scrolloff breach) or left it untouched
-  (an in-bounds free-scroll echo).
-  """
-  @spec scroll_by_with_scrolloff(
-          t(),
-          non_neg_integer(),
-          non_neg_integer(),
-          integer(),
-          non_neg_integer()
-        ) ::
-          {t(), non_neg_integer()}
-  def scroll_by_with_scrolloff(%__MODULE__{} = vp, cursor_line, _total_lines, 0, _margin) do
-    {vp, cursor_line}
-  end
-
-  def scroll_by_with_scrolloff(%__MODULE__{} = vp, cursor_line, total_lines, delta, margin)
-      when delta > 0 do
-    visible = content_rows(vp)
-    max_top = max(total_lines - visible, 0)
-    new_top = (vp.top + delta) |> max(0) |> min(max_top)
-    effective_margin = min(margin, div(visible - 1, 2))
-
-    # Scrolling down: enforce top margin (push cursor away from top edge)
-    min_cursor = new_top + effective_margin
-    clamped_cursor = cursor_line |> max(new_top) |> max(min(min_cursor, new_top + visible - 1))
-    {put_top(vp, new_top), clamped_cursor}
-  end
-
-  def scroll_by_with_scrolloff(%__MODULE__{} = vp, cursor_line, total_lines, delta, margin)
-      when delta < 0 do
-    visible = content_rows(vp)
-    max_top = max(total_lines - visible, 0)
-    new_top = (vp.top + delta) |> max(0) |> min(max_top)
-    effective_margin = min(margin, div(visible - 1, 2))
-
-    # Scrolling up: enforce bottom margin (push cursor away from bottom edge)
-    max_cursor = new_top + visible - 1 - effective_margin
-    clamped_cursor = cursor_line |> min(new_top + visible - 1) |> min(max(max_cursor, new_top))
-    {put_top(vp, new_top), clamped_cursor}
-  end
-
   # Default scroll margin. Reads from config, falls back to 5.
   @spec default_scroll_margin() :: non_neg_integer()
   defp default_scroll_margin do

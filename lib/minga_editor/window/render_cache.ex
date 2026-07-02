@@ -475,7 +475,7 @@ defmodule MingaEditor.Window.RenderCache do
   * **Top comparison:** `top` differs from both the previous committed top
     (`scroll_seq_last_top`) and the frontend-reported free-scroll top
     (`echo_top`). A move to the echoed top is the frontend's own report reflected
-    back (a pure free scroll or a scrolloff-breach cursor drag), so it does not
+    back (a wheel/trackpad free scroll, always viewport-only), so it does not
     advance the sequence. The first settle after a fresh cache (nil baseline) does
     not bump via this path (it only records the baseline).
 
