@@ -43,12 +43,22 @@ defmodule MingaEditor.Layout.GUITest do
       assert col == 0
     end
 
-    test "minibuffer is the last row" do
+    test "minibuffer sits just below the content grid (native chrome, not reserved)" do
       state = gui_state()
       layout = LayoutGUI.compute(state)
 
       {row, 0, _, 1} = layout.minibuffer
-      assert row == state.workspace.viewport.rows - 1
+      # Native GUI renders the minibuffer outside the Metal surface, so no grid
+      # row is reserved: the rect is anchored on the row directly below content.
+      assert row == state.workspace.viewport.rows
+    end
+
+    test "editor fills the full viewport for native GUI (no phantom minibuffer row)" do
+      state = gui_state()
+      layout = LayoutGUI.compute(state)
+
+      {_r, _c, _w, editor_h} = layout.editor_area
+      assert editor_h == state.workspace.viewport.rows
     end
 
     test "single window has no modeline row" do

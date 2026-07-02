@@ -125,16 +125,16 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       model = wf.window_model
 
       assert model.geometry.window_id == state.workspace.windows.active
-      assert model.geometry.total_rect == {0, 0, 80, 23}
-      assert model.geometry.content_rect == {0, 0, 80, 23}
-      assert model.geometry.gutter_rect == {0, 0, 6, 23}
-      assert model.geometry.text_rect == {0, 6, 74, 23}
-      assert model.geometry.viewport.rows == 23
+      assert model.geometry.total_rect == {0, 0, 80, 24}
+      assert model.geometry.content_rect == {0, 0, 80, 24}
+      assert model.geometry.gutter_rect == {0, 0, 6, 24}
+      assert model.geometry.text_rect == {0, 6, 74, 24}
+      assert model.geometry.viewport.rows == 24
       assert model.geometry.gutter_metrics.line_number_width == 3
       assert model.geometry.gutter_metrics.sign_col_width == 3
 
       assert Enum.find(model.geometry.hit_regions, &(&1.kind == :fold_control)).rect ==
-               {0, 2, 1, 23}
+               {0, 2, 1, 24}
 
       assert Enum.map(model.geometry.hit_regions, & &1.kind) == [:text, :gutter, :fold_control]
       assert is_integer(model.content_epoch)
@@ -163,7 +163,7 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
         |> Enum.flat_map(& &1.geometry.hit_regions)
         |> Enum.filter(&(&1.kind == :divider))
 
-      assert Enum.any?(divider_regions, &(&1.rect == {0, 39, 1, 23}))
+      assert Enum.any?(divider_regions, &(&1.rect == {0, 39, 1, 24}))
     end
 
     test "inactive GUI windows hide their cursor" do
@@ -629,7 +629,10 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
 
     test "wrapped selection starts at the pane edge when visual row offset hides its start" do
       content = "\tabcdef界ghijABCDEFGHIJ"
-      state = gui_state(rows: 3, cols: 18, content: content)
+      # rows: 2 yields a 2-row content area. Before #2693 this needed rows: 3
+      # because the GUI layout stole one row for a phantom minibuffer reservation;
+      # now the editor fills the full viewport, so 2 reported rows == 2 content rows.
+      state = gui_state(rows: 2, cols: 18, content: content)
       buffer = state.workspace.buffers.active
       assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
       assert {:ok, false} = BufferProcess.set_option(buffer, :linebreak, false)
@@ -710,10 +713,13 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
                ":tail"
              ]
 
-      assert model.indent_guides.line_indent_levels == [1, 2, 1, 0]
+      assert model.indent_guides.line_indent_levels == [0, 1, 2, 1, 0]
       assert presentation != nil
       assert presentation.window_id == model.window_id
-      assert presentation.visible_start_line == 1
+      # With the minibuffer no longer stealing a row, the 5-row viewport now fits
+      # one more line, so the EOF clamp pulls the top back to line 0 and the whole
+      # 6-line file is visible (#2693 interaction: EOF clamp sees the taller area).
+      assert presentation.visible_start_line == 0
       assert presentation.visible_end_line == 5
       assert presentation.overscan_start_line == 0
       assert presentation.overscan_end_line == 6

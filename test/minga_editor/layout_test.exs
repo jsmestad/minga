@@ -16,9 +16,11 @@ defmodule MingaEditor.LayoutTest do
 
   # Every live frontend is semantic (`Layout.GUI`); the legacy cell-grid
   # `Layout.TUI` and its reserved tab-bar/file-tree/agent-panel geometry were
-  # deleted in #2235. These tests drive the surviving GUI layout: the Metal
-  # viewport is pure editor area plus a minibuffer row, and the shared
-  # window-subdivision/split math in `MingaEditor.Layout`.
+  # deleted in #2235. These tests drive the surviving GUI layout under native-GUI
+  # capabilities: the Metal viewport is pure editor area that fills the whole
+  # reported grid (the minibuffer is native chrome rendered outside the surface,
+  # so no grid row is reserved, #2693), plus the shared window-subdivision/split
+  # math in `MingaEditor.Layout`.
 
   setup do
     table = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
@@ -140,19 +142,21 @@ defmodule MingaEditor.LayoutTest do
   # ── Single window ────────────────────────────────────────────────────────────
 
   describe "compute/1 single window" do
-    test "editor area is the full viewport minus the minibuffer row" do
+    test "native GUI editor area fills the full viewport (minibuffer is native chrome)" do
       state = new_state(24, 80) |> with_window()
       layout = Layout.compute(state)
 
       assert layout.terminal == {0, 0, 80, 24}
-      # SwiftUI/Go render tab bar, status bar, and file tree natively; the BEAM
-      # reserves no rows or columns for them.
+      # SwiftUI/Go render tab bar, status bar, file tree, and minibuffer natively;
+      # the reported rows already exclude them, so the BEAM reserves no rows or
+      # columns. The editor claims the whole viewport (#2693) and the minibuffer
+      # rect is anchored just below the content grid for cursor/focus routing.
       assert layout.tab_bar == nil
       assert layout.status_bar == nil
       assert layout.file_tree == nil
       assert layout.agent_panel == nil
-      assert layout.minibuffer == {23, 0, 80, 1}
-      assert layout.editor_area == {0, 0, 80, 23}
+      assert layout.minibuffer == {24, 0, 80, 1}
+      assert layout.editor_area == {0, 0, 80, 24}
     end
 
     test "single window fills the editor area with a zero-height modeline" do
@@ -160,8 +164,8 @@ defmodule MingaEditor.LayoutTest do
       layout = Layout.compute(state)
 
       assert %{1 => wl} = layout.window_layouts
-      assert wl.total == {0, 0, 80, 23}
-      assert wl.content == {0, 0, 80, 23}
+      assert wl.total == {0, 0, 80, 24}
+      assert wl.content == {0, 0, 80, 24}
       # Per-window modelines are gone; the global status bar (0x76) handles display.
       {_, _, _, ml_h} = wl.modeline
       assert ml_h == 0
@@ -182,7 +186,7 @@ defmodule MingaEditor.LayoutTest do
       layout = Layout.compute(state)
 
       assert layout.agent_panel == nil
-      assert layout.editor_area == {0, 0, 80, 23}
+      assert layout.editor_area == {0, 0, 80, 24}
     end
   end
 
@@ -264,7 +268,7 @@ defmodule MingaEditor.LayoutTest do
       layout2 = Layout.compute(state2)
 
       assert layout2.terminal == {0, 0, 120, 40}
-      assert layout2.minibuffer == {39, 0, 120, 1}
+      assert layout2.minibuffer == {40, 0, 120, 1}
 
       {_, _, w1, h1} = layout1.editor_area
       {_, _, w2, h2} = layout2.editor_area
@@ -328,7 +332,13 @@ defmodule MingaEditor.LayoutTest do
       |> Enum.map(fn wl -> wl.content end)
       |> Enum.reject(fn {_r, _c, _w, h} -> h == 0 end)
 
-    base ++ window_rects
+    # Native chrome (the GUI minibuffer) renders outside the Metal grid, so its
+    # rect is anchored on the row directly below the content and is not a grid
+    # region. Drop off-grid rects from the grid-tiling invariants.
+    {_tr, _tc, _tw, term_h} = layout.terminal
+
+    (base ++ window_rects)
+    |> Enum.reject(fn {r, _c, _w, _h} -> r >= term_h end)
   end
 
   defp assert_no_overlap(layout) do
@@ -448,19 +458,19 @@ defmodule MingaEditor.LayoutTest do
       assert width == 120
     end
 
-    test "minibuffer is the last row" do
+    test "minibuffer is anchored just below the content grid (native chrome)" do
       state = new_state(40, 120) |> with_window()
       layout = Layout.compute(state)
 
-      assert layout.minibuffer == {39, 0, 120, 1}
+      assert layout.minibuffer == {40, 0, 120, 1}
     end
 
-    test "editor area height is the viewport minus the minibuffer" do
+    test "editor area height fills the full viewport (no phantom minibuffer row)" do
       state = new_state(40, 120) |> with_window()
       layout = Layout.compute(state)
 
       {_row, _col, _w, height} = layout.editor_area
-      assert height == 39
+      assert height == 40
     end
 
     test "tab bar, status bar, file tree, and agent panel rects are nil" do

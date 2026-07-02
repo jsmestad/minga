@@ -8,23 +8,44 @@ defmodule MingaEditor.Layout.GUI do
   columns for chrome that SwiftUI renders natively.
   """
 
+  alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Layout
   alias MingaEditor.State, as: EditorState
 
   @doc """
-  Computes GUI layout: Metal viewport is editor area plus one minibuffer row.
-  No tab bar, no file tree columns, no agent panel.
+  Computes GUI layout: no tab bar, no file tree columns, no agent panel.
+
+  Row accounting for the minibuffer depends on what the frontend's reported
+  rows already exclude:
+
+  * Native GUI (`Capabilities.gui?/1`): the Metal viewport measures the content
+    area only. The status bar and minibuffer are native SwiftUI chrome rendered
+    outside the Metal surface, so the reported rows already exclude them.
+    Reserving a grid row here would double-book the minibuffer and drop a content
+    row (#2693), so the editor fills the full viewport and the minibuffer rect is
+    anchored just below the content grid for server-side cursor/focus routing.
+  * Terminal frontends (`:tui`, the default): the reported rows are the full
+    terminal grid, so the minibuffer genuinely consumes the last row and must be
+    reserved.
   """
   @spec compute(EditorState.t()) :: Layout.t()
   def compute(state) do
     vp = state.terminal_viewport
     terminal = {0, 0, vp.cols, vp.rows}
 
-    # Minibuffer takes the last row (stays in Metal for command-line input).
-    minibuffer = {vp.rows - 1, 0, vp.cols, 1}
-    editor_height = max(vp.rows - 1, 1)
+    native_gui? = Capabilities.gui?(capabilities(state))
 
-    # Editor area is the full viewport minus the minibuffer row.
+    {editor_height, minibuffer} =
+      if native_gui? do
+        # Native minibuffer chrome lives outside the content grid; the reported
+        # rows already exclude it, so the editor claims the whole viewport and
+        # the minibuffer rect sits on the row directly below the content.
+        {vp.rows, {vp.rows, 0, vp.cols, 1}}
+      else
+        # Terminal grid: the minibuffer occupies the last real row.
+        {max(vp.rows - 1, 1), {vp.rows - 1, 0, vp.cols, 1}}
+      end
+
     editor_area = {0, 0, vp.cols, editor_height}
 
     # All windows are no-modeline; the global SwiftUI status bar handles status display.
@@ -51,4 +72,11 @@ defmodule MingaEditor.Layout.GUI do
       minibuffer: minibuffer
     }
   end
+
+  # Reads frontend capabilities, defaulting to the terminal profile (reserve the
+  # minibuffer row) when they are absent so pre-ready frames and non-struct
+  # callers keep the conservative TUI-compatible geometry.
+  @spec capabilities(EditorState.t() | map()) :: Capabilities.t()
+  defp capabilities(%{capabilities: %Capabilities{} = caps}), do: caps
+  defp capabilities(_state), do: Capabilities.default()
 end
