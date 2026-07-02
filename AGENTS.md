@@ -786,6 +786,8 @@ This is the load-bearing boundary of the whole architecture. When in doubt about
 
 Two rules apply immediately: do not extend the scroll compositor or overscan/velocity prefetch machinery (scheduled for deletion under #2652), and new scrollable surfaces adopt the #2652 store lifecycle instead of inventing per-surface reconciliation.
 
+**Row fit is a presentation fact (ADR-0001).** The frontend computes how many rows fit (one floor: `content_pixels / (cell_height × line_spacing)`) and reports it; the BEAM lays out in the rows it is given and never derives row counts from pixel math or line spacing. Line spacing is a draw-time hint with zero BEAM-side layout influence. If a bug smells like "line height broke the layout," the real defect is a unit conversion on the wrong side of the process boundary or chrome double-booking — read `docs/adr/0001-frontend-owns-row-fit.md` before touching viewport/row/geometry accounting, and do not reintroduce `effective_rows`-style derivation on the BEAM.
+
 ## Keymap Architecture
 
 Minga follows the Neovim/which-key model: flat, explicit, debuggable. This is a deliberate choice over Emacs's deep keymap hierarchy. The guiding principle is transparency: when you press a key, you should be able to look at one scope module and know exactly what will happen. No invisible stacks of keymaps silently shadowing each other.
