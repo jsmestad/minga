@@ -26,6 +26,17 @@ A standing guardrail test, `internal/protocol/semantic_guardrail_test.go:9`, enu
 - DIVERGENCE: Go behaves differently on purpose, with a one-line rationale. Non-blocking.
 - N/A: surface is not meaningful in a terminal, with rationale.
 
+## Store lifecycle and scroll reconciliation parity (shared conformance corpus)
+
+The behavioral contract for the resident-store lifecycle and scroll-offset reconciliation is no longer maintained as prose here. It is enforced as an executable, cross-frontend test: the shared transcript corpus at `test/conformance/corpus/`, generated from the real BEAM encoder by `mix conformance.gen` (#2667). The macOS runner (`macos/Tests/MingaTests/ConformanceTranscriptTests.swift`) and the Go runner (`go/tui/internal/ui/conformance_transcript_test.go`) execute the same corpus, so any divergence in these seams fails a build.
+
+The corpus owns the behavior claims for:
+
+- **Store lifecycle:** 0x80 keyframe decode to a resident row set keyed by `row_id + content_hash`, 0xA2 row-delta ref resolution, ref-miss → drop → 0x80 full-recovery, 0xA0 cursor-only overlay delta, `layout_generation` full replace, and `reset_required` discard.
+- **Input resolution:** drag-selection pointer normalization under an active local offset, H/M/L echo-commit (no re-anchor storm), the `scroll_seq` strictly-newer discard, and the same-top-jump documented limitation.
+
+The `scroll_seq` transcripts (`scroll_seq_strictly_newer_discard`, `wheel_momentum_during_ctrl_d`) are enumerated but explicitly Go-skipped: the Go reconciler (`internal/ui/local_presentation.go`) implements the windowed contract and does not key on `scroll_seq`. The Go TUI resident-port child extends the reconciler and flips those transcripts on. See `test/conformance/corpus/README.md` for the fixture format and `index.json` for the authoritative transcript list.
+
 ## Chrome and semantic surfaces
 
 | Surface | Opcode | Decode (a) | Render (b) | Input (c) | Tests (d) | Status |
@@ -46,10 +57,10 @@ A standing guardrail test, `internal/protocol/semantic_guardrail_test.go:9`, enu
 | File tree | gui_file_tree 0x93 | `chrome_editor.go:187` `decodeFileTree` + rows | `render_content.go:702` `renderFileTree`, composited left via `withFileTree` (width >= 50) | row click → file_tree_click `semantic_mouse.go:121`, `events.go:71` | commands_test TestDecodeFileTreeChromeRows; model_test TestFileTreeSelectedRow..., TestFileTreeWidthRespectsProtocolGeometry... | PASS |
 | File tree selection | gui_file_tree_selection 0x94 | `chrome_misc.go:85` `decodeFileTreeSelection` | applied to tree state `model.go:220` | n/a | model_test TestFileTreeSelectionUpdatesExistingTree | PASS |
 | Sidebars | gui_sidebars 0x9F | `chrome_panels.go:319` `decodeSidebars` | `render_content.go:617` `withSemanticSidebars` (width >= 60) | item click → sidebar_action (activate/toggle) `semantic_mouse.go` `sidebarMousePacket`, `events.go` `EncodeGUISidebarAction` | commands_test TestDecodePanelAndSidebarChrome; model_test TestSemanticWindowsRespectSidebarOffset, TestSemanticMouseRoutesSidebarItemZones | PASS |
-| Window content | gui_window_content 0x80 | `commands.go:260` `decodeWindowContent` (9 sections) | `render_content.go:196` `renderWindowRows`/`renderRow` | editor keys via key_press; raw mouse fallback `input.go:150` | commands_test TestDecodeWindowContentRows, TestDecodeWindowCursorlineSection; many model_test window cases | PASS |
-| Window viewport delta | gui_window_viewport_delta 0xA1 | `commands.go:201` → `decodeWindowContent` | epoch-guarded merge `model.go:244` `applyWindowDelta` | n/a | commands_test TestDecodeWindowRowsAndViewportDeltas...; model_test TestApplyWindowDelta... | PASS |
-| Window rows delta | gui_window_rows_delta 0xA2 | `commands.go:201` → `decodeWindowContent` | row-ref resolution `model.go:306` `resolveWindowRows` | n/a | commands_test TestDecodeWindowRowsAndViewportDeltas...; model_test TestApplyWindowDeltaResolvesRefs..., InvalidatesMissingRetainedRowRef | PASS |
-| Window overlay delta | gui_window_overlay_delta 0xA0 | `commands.go:316` `decodeOverlayDelta` | cursor/cursorline merge `model.go:244` | n/a | commands_test TestDecodeWindowOverlaySections; model_test TestOverlayDeltaPreservesExistingScrollLeft | PASS |
+| Window content | gui_window_content 0x80 | `commands.go:260` `decodeWindowContent` (9 sections) | `render_content.go:196` `renderWindowRows`/`renderRow` | editor keys via key_press; raw mouse fallback `input.go:150` | commands_test TestDecodeWindowContentRows; store lifecycle owned by the conformance corpus (`conformance_transcript_test.go`) | PASS |
+| Window viewport delta | gui_window_viewport_delta 0xA1 | `commands.go:201` → `decodeWindowContent` | epoch-guarded merge `model.go:244` `applyWindowDelta` | n/a | commands_test TestDecodeWindowRowsAndViewportDeltas...; merge behavior owned by the conformance corpus | PASS |
+| Window rows delta | gui_window_rows_delta 0xA2 | `commands.go:201` → `decodeWindowContent` | row-ref resolution `model.go:306` `resolveWindowRows` | n/a | commands_test TestDecodeWindowRowsAndViewportDeltas...; ref resolution + ref-miss recovery owned by the conformance corpus | PASS |
+| Window overlay delta | gui_window_overlay_delta 0xA0 | `commands.go:316` `decodeOverlayDelta` | cursor/cursorline merge `model.go:244` | n/a | commands_test TestDecodeWindowOverlaySections; cursor-only merge owned by the conformance corpus | PASS |
 | Gutter (line numbers, signs, folds) | gui_gutter 0x7B | `chrome_gutter.go:5` `decodeGutter` (3 sections) | `render_content.go:649` `renderGutterEntry` | fold_toggle_at_line not routed by mouse | commands_test TestDecodeGutterChrome; model_test TestApplyCommandsStoresSemanticGuttersByWindow, ...RendersGutterCursorline... | PASS (see gap G6 for gutter fold click) |
 | Gutter separator | gui_gutter_sep 0x79 | `chrome_editor.go:536` `decodeGutterSeparator` | folded into gutter geometry | n/a | semantic_guardrail_test | DIVERGENCE: Go derives separators from gutter width rather than a discrete glyph column. |
 | Cursorline | gui_cursorline 0x7A | `chrome_misc.go:47` `decodeCursorlineChrome` | `render_content.go:431` `withLegacyCursorline` and per-row bg | n/a | model_test TestLegacyCursorlineAppliesToCellFallback | PASS |
