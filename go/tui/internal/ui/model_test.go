@@ -1698,6 +1698,103 @@ func TestPresentationScrollUsesOverscanRowsImmediately(t *testing.T) {
 	}
 }
 
+// TestPresentationScrollResidentReachesDocumentBottom covers #2671 AC1: over a
+// resident window (the payload spans the whole document, so overscan is anchored
+// at line 0 and reaches TotalLines), a fast fling scrolls continuously to the
+// last full page instead of starving at an overscan edge. The row offset clamps
+// at documentRows - visibleRows so the document bottom is reachable.
+func TestPresentationScrollResidentReachesDocumentBottom(t *testing.T) {
+	const docRows = 100
+	const visibleRows = 10
+
+	rows := make([]protocol.WindowRow, docRows)
+	for i := range rows {
+		rows[i] = protocol.WindowRow{ID: uint64(i + 1), ContentHash: uint32(i + 1), BufferLine: uint32(i), Text: fmt.Sprintf("line %d", i)}
+	}
+
+	model := New(20, 14, nil, nil)
+	model.putWindow(protocol.WindowContent{
+		ID:           7,
+		ContentEpoch: 9,
+		Rows:         rows,
+		GeometrySet:  true,
+		Geometry: protocol.PaneGeometry{
+			ContentRect:  protocol.Rect{Row: 0, Col: 0, Width: 10, Height: visibleRows},
+			ViewportRows: visibleRows,
+			TotalLines:   docRows,
+		},
+		ScrollSet: true,
+		Scroll: protocol.ScrollPresentation{
+			WindowID: 7, ContentEpoch: 9, AnchorTop: 0,
+			VisibleStartLine: 0, VisibleEndLine: visibleRows,
+			OverscanStartLine: 0, OverscanEndLine: docRows,
+		},
+	})
+
+	if !windowCoversDocument(model.windows[7]) {
+		t.Fatal("a full-document resident payload should be detected as covering the document")
+	}
+
+	// A fling far larger than the payload window: it must accumulate to the
+	// document bottom, not clamp at a small overscan runway.
+	for i := 0; i < 500; i++ {
+		model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.layout.header.Height}), 1)
+	}
+
+	scroll := model.localPresentation.scrolls[7]
+	if want := docRows - visibleRows; scroll.rowOffset != want {
+		t.Fatalf("resident fling should reach the document bottom offset %d, got %d", want, scroll.rowOffset)
+	}
+}
+
+// TestPresentationScrollWindowedClampsAtOverscanEdge covers #2671 AC4: a windowed
+// window (residence-off / over-threshold: the payload is a small overscan slice,
+// not the whole document) keeps today's overscan-payload clamp, so the offset
+// caps at the payload edge byte-identically to before this change.
+func TestPresentationScrollWindowedClampsAtOverscanEdge(t *testing.T) {
+	const visibleRows = 2
+
+	model := New(20, 6, nil, nil)
+	model.putWindow(protocol.WindowContent{
+		ID:           7,
+		ContentEpoch: 9,
+		Rows: []protocol.WindowRow{
+			{ID: 1, ContentHash: 1, Text: "a"},
+			{ID: 2, ContentHash: 2, Text: "b"},
+			{ID: 3, ContentHash: 3, Text: "c"},
+			{ID: 4, ContentHash: 4, Text: "d"},
+		},
+		GeometrySet: true,
+		Geometry: protocol.PaneGeometry{
+			ContentRect:  protocol.Rect{Row: 0, Col: 0, Width: 10, Height: visibleRows},
+			ViewportRows: visibleRows,
+			// The document is far larger than the resident payload, and overscan
+			// does not span it, so this is a windowed window.
+			TotalLines: 1000,
+		},
+		ScrollSet: true,
+		Scroll: protocol.ScrollPresentation{
+			WindowID: 7, ContentEpoch: 9, AnchorTop: 10,
+			VisibleStartLine: 10, VisibleEndLine: 12,
+			OverscanStartLine: 9, OverscanEndLine: 13,
+		},
+	})
+
+	if windowCoversDocument(model.windows[7]) {
+		t.Fatal("a windowed overscan payload must not be detected as covering the document")
+	}
+
+	for i := 0; i < 500; i++ {
+		model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.layout.header.Height}), 1)
+	}
+
+	// Overscan payload bound: len(rows)=4, visible=2, before=(10-9)=1 -> after=1.
+	scroll := model.localPresentation.scrolls[7]
+	if scroll.rowOffset != 1 {
+		t.Fatalf("windowed scroll should clamp at the overscan edge (offset 1), got %d", scroll.rowOffset)
+	}
+}
+
 func TestPresentationScrollUsesMatchingOverscanGutterRows(t *testing.T) {
 	model := New(20, 6, nil, nil)
 	model.gutters = map[uint16]protocol.Gutter{

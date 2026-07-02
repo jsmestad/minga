@@ -155,6 +155,90 @@ defmodule MingaEditor.MouseTest do
     end
   end
 
+  describe "active-window discrete wheel scroll (#2671)" do
+    test "a resident GUI window free-scrolls via apply_scroll_intent, marking the echo top" do
+      {state, buffer} = start_mouse_state(lines(0..99), width: 40, height: 20)
+      state = native_gui_state(state)
+      win_id = state.workspace.windows.active
+      state = mark_resident(state, win_id)
+      state = set_window_top(state, win_id, 40)
+      BufferProcess.move_to(buffer, {50, 0})
+
+      state = mouse(state, 0, 0, :wheel_down, :press)
+
+      window = Map.fetch!(state.workspace.windows.map, win_id)
+      # apply_scroll_intent marks the committed top as a free-scroll echo; the
+      # viewport-only path never touches scroll_echo_top.
+      assert window.scroll_echo_top == window.viewport.top
+      assert BufferProcess.cursor(buffer) == {50, 0}
+    end
+
+    test "a resident GUI window drags the cursor once the wheel breaches scrolloff" do
+      {state, buffer} = start_mouse_state(lines(0..99), width: 40, height: 20)
+      state = native_gui_state(state)
+      win_id = state.workspace.windows.active
+      state = mark_resident(state, win_id)
+      state = set_window_top(state, win_id, 40)
+      BufferProcess.move_to(buffer, {50, 0})
+
+      state = Enum.reduce(1..20, state, fn _, acc -> mouse(acc, 0, 0, :wheel_down, :press) end)
+
+      {cursor_line, _col} = BufferProcess.cursor(buffer)
+      new_top = window_viewport(state, win_id).top
+      assert cursor_line > 50
+      assert cursor_line >= new_top
+    end
+
+    test "a resident GUI window scrolls up through apply_scroll_intent as well" do
+      {state, buffer} = start_mouse_state(lines(0..99), width: 40, height: 20)
+      state = native_gui_state(state)
+      win_id = state.workspace.windows.active
+      state = mark_resident(state, win_id)
+      state = set_window_top(state, win_id, 40)
+      BufferProcess.move_to(buffer, {50, 0})
+
+      state = mouse(state, 0, 0, :wheel_up, :press)
+
+      window = Map.fetch!(state.workspace.windows.map, win_id)
+      assert window.scroll_echo_top == window.viewport.top
+      assert window.viewport.top == 39
+      assert BufferProcess.cursor(buffer) == {50, 0}
+    end
+
+    test "the TUI keeps viewport-only wheel behavior byte-identically (no cursor move, no echo)" do
+      {state, buffer} = start_mouse_state(lines(0..99), width: 40, height: 20)
+      win_id = state.workspace.windows.active
+      # Resident, but a non-GUI frontend: the shared clause must NOT free-scroll.
+      state = mark_resident(state, win_id)
+      state = set_window_top(state, win_id, 40)
+      BufferProcess.move_to(buffer, {50, 0})
+
+      before_top = window_viewport(state, win_id).top
+      state = mouse(state, 0, 0, :wheel_down, :press)
+
+      window = Map.fetch!(state.workspace.windows.map, win_id)
+      assert window.scroll_echo_top == nil
+      assert BufferProcess.cursor(buffer) == {50, 0}
+      assert window.viewport.top > before_top
+    end
+
+    test "a non-resident GUI window keeps viewport-only wheel behavior byte-identically" do
+      {state, buffer} = start_mouse_state(lines(0..99), width: 40, height: 20)
+      state = native_gui_state(state)
+      win_id = state.workspace.windows.active
+      state = set_window_top(state, win_id, 40)
+      BufferProcess.move_to(buffer, {50, 0})
+
+      before_top = window_viewport(state, win_id).top
+      state = mouse(state, 0, 0, :wheel_down, :press)
+
+      window = Map.fetch!(state.workspace.windows.map, win_id)
+      assert window.scroll_echo_top == nil
+      assert BufferProcess.cursor(buffer) == {50, 0}
+      assert window.viewport.top > before_top
+    end
+  end
+
   describe "click-to-position" do
     test "left click moves the cursor to the clicked buffer position" do
       {state, buffer} = start_mouse_state("hello\nworld\nfoo bar baz")

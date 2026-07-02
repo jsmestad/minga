@@ -110,9 +110,9 @@ func (m Model) applyPresentationScrollDelta(msg tea.MouseMsg, delta int) Model {
 	}
 	scroll := m.localPresentation.scrolls[windowID]
 	if !scroll.keysMatch(window.Scroll) {
-		scroll = presentationScroll{anchorTop: window.Scroll.AnchorTop, anchorLeft: window.Scroll.AnchorLeft, contentEpoch: window.Scroll.ContentEpoch, layoutGeneration: window.Scroll.LayoutGeneration}
+		scroll = presentationScroll{anchorTop: window.Scroll.AnchorTop, anchorLeft: window.Scroll.AnchorLeft, contentEpoch: window.Scroll.ContentEpoch, layoutGeneration: window.Scroll.LayoutGeneration, scrollSeq: window.Scroll.ScrollSeq}
 	}
-	before, after := presentationPayloadOverscanBounds(window, presentationVisibleRows(window))
+	before, after := presentationScrollRowBounds(window, presentationVisibleRows(window))
 	switch mouse.Button {
 	case tea.MouseWheelDown, tea.MouseWheelUp:
 		if mouse.Mod.Contains(tea.ModShift) {

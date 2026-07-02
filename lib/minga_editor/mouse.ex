@@ -292,19 +292,11 @@ defmodule MingaEditor.Mouse do
         :press,
         _cc
       ) do
-    total_lines = Buffer.line_count(buf)
-    lines = scroll_lines(state)
-    vp = current_viewport(state)
-    new_vp = scroll_viewport(vp, lines, total_lines)
-    update_current_viewport(state, new_vp)
+    scroll_active_window_vertical(state, buf, scroll_lines(state), :down)
   end
 
   def handle(%{workspace: %{buffers: %{active: buf}}} = state, _r, _c, :wheel_up, _m, :press, _cc) do
-    total_lines = Buffer.line_count(buf)
-    lines = scroll_lines(state)
-    vp = current_viewport(state)
-    new_vp = scroll_viewport(vp, -lines, total_lines)
-    update_current_viewport(state, new_vp)
+    scroll_active_window_vertical(state, buf, -scroll_lines(state), :up)
   end
 
   # ── Scroll wheel (horizontal) ──
@@ -719,6 +711,40 @@ defmodule MingaEditor.Mouse do
         state
     end
   end
+
+  # Discrete physical-wheel scroll on the active window. This closes the #2661
+  # deferral (the "TUI-shared clause"): a resident GUI window free-scrolls through
+  # `apply_scroll_intent`, so a wheel click that would drag the cursor past
+  # scroll_margin drags it via the same scrolloff math as the trackpad path and
+  # marks the committed top as a scroll echo. Every non-GUI frontend and every
+  # non-resident window keeps the viewport-only `scroll_viewport` path
+  # byte-identically, so residence-off configs and the TUI are unchanged.
+  @spec scroll_active_window_vertical(state(), pid(), integer(), :down | :up) :: state()
+  defp scroll_active_window_vertical(state, buf, delta_lines, direction) do
+    case active_resident_gui_window(state) do
+      {:ok, win_id} ->
+        apply_scroll_intent(state, win_id, delta_lines, direction)
+
+      :error ->
+        total_lines = Buffer.line_count(buf)
+        vp = current_viewport(state)
+        new_vp = scroll_viewport(vp, delta_lines, total_lines)
+        update_current_viewport(state, new_vp)
+    end
+  end
+
+  @spec active_resident_gui_window(state()) :: {:ok, Window.id()} | :error
+  defp active_resident_gui_window(%{workspace: %{windows: %{active: win_id, map: map}}} = state) do
+    with true <- native_gui?(state),
+         {:ok, %Window{} = window} <- Map.fetch(map, win_id),
+         true <- Window.resident?(window) do
+      {:ok, win_id}
+    else
+      _ -> :error
+    end
+  end
+
+  defp active_resident_gui_window(_state), do: :error
 
   # ── Left press dispatcher ──────────────────────────────────────────────────
 

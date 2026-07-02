@@ -123,11 +123,15 @@ defmodule Mix.Tasks.Conformance.Gen do
           "store_present" => true,
           "rows" => rows_expect(rows1)
         }),
+        # Inject a live offset first so offset_discarded => false is a real
+        # assertion that the row-delta PRESERVED the offset, not a trivial pass on
+        # a window that never had one (#2667 coverage note).
+        inject_offset(1, 2, 0),
         frame(@op_rows_delta, "rows-delta (4 refs + 1 full)", rows_delta, %{
           "store_present" => true,
           "rows" => rows_expect(rows2),
           "anchor" => anchor(win2),
-          "offset_discarded" => false
+          "offset_discarded" => discarded?(scroll(win1), scroll(win2))
         })
       ]
     )
@@ -179,7 +183,11 @@ defmodule Mix.Tasks.Conformance.Gen do
   @spec cursor_only_overlay_delta() :: transcript()
   defp cursor_only_overlay_delta do
     rows = rows_for(0, 5)
-    win1 = window(window_id: 1, rows: rows, top: 0, epoch: 1, full_refresh: true, cursor_row: 0)
+    # Non-reset keyframe: a local offset only ever exists on a committed
+    # non-reset frame, so the injected-offset coverage of offset_discarded => false
+    # (a cursor-only 0xA0 preserving the offset) must ride a reset_required = false
+    # frame, not a full_refresh keyframe (#2667 coverage note).
+    win1 = window(window_id: 1, rows: rows, top: 0, epoch: 1, full_refresh: false, cursor_row: 0)
     win2 = window(window_id: 1, rows: rows, top: 0, epoch: 1, full_refresh: false, cursor_row: 3)
 
     transcript(
@@ -193,6 +201,10 @@ defmodule Mix.Tasks.Conformance.Gen do
           "rows" => rows_expect(rows),
           "cursor_row" => 0
         }),
+        # Inject a live offset first so offset_discarded => false is a real
+        # assertion that a cursor-only 0xA0 delta PRESERVED the offset, not a
+        # trivial pass on a window that never had one (#2667 coverage note).
+        inject_offset(1, 2, 0),
         frame(
           @op_overlay_delta,
           "cursor-only overlay delta",
@@ -202,7 +214,7 @@ defmodule Mix.Tasks.Conformance.Gen do
             "rows" => rows_expect(rows),
             "anchor" => anchor(win1),
             "cursor_row" => 3,
-            "offset_discarded" => false
+            "offset_discarded" => discarded?(scroll(win1), scroll(win2))
           }
         )
       ]
@@ -411,12 +423,7 @@ defmodule Mix.Tasks.Conformance.Gen do
     transcript(
       "scroll_seq_strictly_newer_discard",
       "input",
-      %{
-        swift: true,
-        go: false,
-        go_skip_reason:
-          "Go implements the windowed contract: its offset reconciliation key does not include scroll_seq, so a strictly-newer sequence with an identical anchor key does not force a discard. The Go TUI resident-port child extends the reconciler to honor scroll_seq and flips this expectation on."
-      },
+      %{swift: true, go: true},
       "A strictly-newer scroll_seq with an identical anchor key forces a local-offset discard, disambiguating a BEAM jump that landed on the same top from a routine echo.",
       [
         frame(
@@ -491,12 +498,7 @@ defmodule Mix.Tasks.Conformance.Gen do
     transcript(
       "wheel_momentum_during_ctrl_d",
       "input",
-      %{
-        swift: true,
-        go: false,
-        go_skip_reason:
-          "Depends on the scroll_seq discard (resident free-scroll contract): the authoritative anchor coincides with the momentum-scrolled top, so only a strictly-newer scroll_seq forces the discard. Go's windowed reconciler ignores scroll_seq; the resident-port child enables it."
-      },
+      %{swift: true, go: true},
       "Wheel momentum keeps feeding local-offset updates while ctrl-d's authoritative anchor lands on the same top; each authoritative commit bumps scroll_seq, which must discard the leftover momentum offset even though momentum is still active.",
       [
         frame(

@@ -33,9 +33,9 @@ The behavioral contract for the resident-store lifecycle and scroll-offset recon
 The corpus owns the behavior claims for:
 
 - **Store lifecycle:** 0x80 keyframe decode to a resident row set keyed by `row_id + content_hash`, 0xA2 row-delta ref resolution, ref-miss → drop → 0x80 full-recovery, 0xA0 cursor-only overlay delta, `layout_generation` full replace, and `reset_required` discard.
-- **Input resolution:** drag-selection pointer normalization under an active local offset, H/M/L echo-commit (no re-anchor storm), the `scroll_seq` strictly-newer discard, and the same-top-jump documented limitation.
+- **Input resolution:** drag-selection pointer normalization under an active local offset, H/M/L echo-commit (no re-anchor storm), the `scroll_seq` strictly-newer discard, the wheel-momentum-during-`ctrl-d` discard, and the same-top-jump documented limitation.
 
-The `scroll_seq` transcripts (`scroll_seq_strictly_newer_discard`, `wheel_momentum_during_ctrl_d`) are enumerated but explicitly Go-skipped: the Go reconciler (`internal/ui/local_presentation.go`) implements the windowed contract and does not key on `scroll_seq`. The Go TUI resident-port child extends the reconciler and flips those transcripts on. See `test/conformance/corpus/README.md` for the fixture format and `index.json` for the authoritative transcript list.
+As of the Go TUI resident-store port (#2671) the corpus runs with **zero Go skips**: the Go reconciler (`internal/ui/local_presentation.go` `reconcileScroll`) now keys on `scroll_seq` ahead of the anchor-key check, mirroring Swift `shouldResetScrollPresentation`, so both `scroll_seq` transcripts pass on both frontends. Local wheel scrolling over a resident window clamps to document bounds (`internal/ui/render_content.go` `presentationScrollRowBounds`) rather than the overscan payload, so a fast fling never starves at an overscan edge; residence-off and over-threshold (windowed) buffers keep the overscan clamp byte-identically. See `test/conformance/corpus/README.md` for the fixture format and `index.json` for the authoritative transcript list.
 
 ## Chrome and semantic surfaces
 
