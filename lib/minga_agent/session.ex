@@ -676,6 +676,8 @@ defmodule MingaAgent.Session do
 
   @spec do_init(keyword()) :: {:ok, state()}
   defp do_init(opts) do
+    Process.flag(:trap_exit, true)
+
     provider_opts =
       Keyword.merge(
         [subscriber: self()],
@@ -1426,26 +1428,18 @@ defmodule MingaAgent.Session do
   end
 
   def handle_info({:DOWN, _ref, :process, pid, reason}, %{provider: pid} = state) do
-    Minga.Log.warning(:agent, "[Agent.Session] provider process died: #{inspect(reason)}")
-    release_provider_lease(state.provider_lease)
+    {:noreply, handle_provider_death(state, reason)}
+  end
 
-    state =
-      state
-      |> Map.merge(%{
-        provider: nil,
-        provider_lease: nil,
-        error_message: "Agent provider crashed",
-        turn_active?: false
-      })
-      |> set_error_status()
-      |> maybe_schedule_provider_restart(reason)
+  def handle_info({:EXIT, pid, reason}, %{provider: pid} = state) do
+    {:noreply, handle_provider_death(state, reason)}
+  end
 
-    broadcast(state, {:error, state.error_message})
+  def handle_info({:EXIT, _pid, _reason}, state) do
     {:noreply, state}
   end
 
   def handle_info({:DOWN, _ref, :process, pid, reason}, state) do
-    # A subscriber died, remove it and vacate the driver role if needed.
     {:noreply, remove_subscriber(state, pid, reason)}
   end
 
@@ -3128,6 +3122,26 @@ defmodule MingaAgent.Session do
   @spec reset_provider_restart(state()) :: state()
   defp reset_provider_restart(state) do
     %{state | provider_restart: initial_provider_restart_state()}
+  end
+
+  @spec handle_provider_death(state(), term()) :: state()
+  defp handle_provider_death(state, reason) do
+    Minga.Log.warning(:agent, "[Agent.Session] provider process died: #{inspect(reason)}")
+    release_provider_lease(state.provider_lease)
+
+    state =
+      state
+      |> Map.merge(%{
+        provider: nil,
+        provider_lease: nil,
+        error_message: "Agent provider crashed",
+        turn_active?: false
+      })
+      |> set_error_status()
+      |> maybe_schedule_provider_restart(reason)
+
+    broadcast(state, {:error, state.error_message})
+    state
   end
 
   @spec maybe_schedule_provider_restart(state(), term()) :: state()
