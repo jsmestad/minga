@@ -235,9 +235,9 @@ defmodule MingaEditor.StatusBar.Data do
   @spec pending_keys(EditorState.t() | map(), Minga.Mode.mode(), Minga.Mode.state() | nil) ::
           String.t()
   # Which-key takes over the acknowledgment once its popup is showing, so the
-  # instant echo clears the moment which-key opens (AC #2). When a sequence
-  # resolves or is aborted, the FSM count/pending/leader fields reset, so the
-  # derived string is empty again with no extra bookkeeping (AC #3).
+  # instant echo clears the moment which-key opens (#2666 AC #2). When a
+  # sequence resolves or is aborted, the FSM count/pending/leader fields reset,
+  # so the derived string is empty again with no extra bookkeeping (#2666 AC #3).
   defp pending_keys(state, mode, mode_state) do
     if whichkey_showing?(state) do
       ""
@@ -251,10 +251,7 @@ defmodule MingaEditor.StatusBar.Data do
   defp whichkey_showing?(_state), do: false
 
   @spec active_register_name(EditorState.t() | map()) :: String.t()
-  defp active_register_name(%{workspace: %{editing: %{reg: %{active: active}}}})
-       when is_binary(active),
-       do: active
-
+  defp active_register_name(%EditorState{} = state), do: Editing.active_register(state)
   defp active_register_name(_state), do: ""
 
   @spec register_prefix(String.t()) :: String.t()

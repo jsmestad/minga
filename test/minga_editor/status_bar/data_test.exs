@@ -93,6 +93,18 @@ defmodule MingaEditor.StatusBar.DataTest do
       assert data.pending_keys == "d"
     end
 
+    test "composes the register prefix with operator-pending FSM state" do
+      op_state = %Minga.Mode.OperatorPendingState{operator: :delete, op_count: 2}
+
+      state =
+        state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
+        |> MingaEditor.Editing.set_active_register("a")
+        |> EditorState.transition_mode(:operator_pending, op_state)
+
+      {:buffer, data} = Data.from_state(state)
+      assert data.pending_keys == "\"a2d"
+    end
+
     test "clears when the which-key popup is showing" do
       state =
         state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))

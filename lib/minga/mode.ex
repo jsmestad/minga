@@ -212,17 +212,20 @@ defmodule Minga.Mode do
 
   This is the sequence of keys the user has typed that have not yet resolved
   into a command: an accumulated count, a pending single-key operation (`"`, `r`,
-  `f`, `m`, `q`, `@`), a normal-mode prefix (`g`, `z`, `[`, `]`), a leader
-  sequence, or a pending operator (`d`, `c`, `y`, ...). Returns `""` when nothing
-  is pending. Pure over `mode` and `mode_state`; callers layer on register and
-  which-key state.
+  `f`/`F`/`t`/`T`, `m`, `'`, `` ` ``, `q`, `@`), a normal-mode prefix (`g`, `z`,
+  `[`, `]`), a leader sequence, or a pending operator (`d`, `c`, `y`, ...).
+  Returns `""` when nothing is pending. Pure over `mode` and `mode_state`;
+  callers layer on register and which-key state.
   """
   @spec pending_keys(mode(), state()) :: String.t()
   def pending_keys(:operator_pending, %Minga.Mode.OperatorPendingState{} = s) do
     op_count = if s.op_count > 1, do: Integer.to_string(s.op_count), else: ""
     count = if s.count, do: Integer.to_string(s.count), else: ""
     g = if s.pending_g, do: "g", else: ""
-    op_count <> operator_key(s.operator) <> g <> count
+    # count precedes the g prefix in typed order: `d2g` (of `d2gg`) accumulates
+    # count 2 before g sets pending_g, and no count can follow g (the next key
+    # after g always resolves).
+    op_count <> operator_key(s.operator) <> count <> g
   end
 
   def pending_keys(_mode, %Minga.Mode.State{} = s) do
@@ -232,6 +235,10 @@ defmodule Minga.Mode do
     count <> prefix <> leader <> pending_key(s.pending)
   end
 
+  # Visual, command, search, and the other mode-state structs intentionally
+  # fall through with no echo: only base State and OperatorPendingState carry
+  # showcmd-relevant keys today. A mode struct that later gains counts or
+  # prefixes (VisualState already reserves a count field) needs its own clause.
   def pending_keys(_mode, _state), do: ""
 
   # ── Private ──────────────────────────────────────────────────────────────────
@@ -255,7 +262,9 @@ defmodule Minga.Mode do
   defp pending_key({:mark, :jump_exact}), do: "`"
   defp pending_key(:macro_register), do: "q"
   defp pending_key(:macro_replay), do: "@"
-  defp pending_key(nil), do: ""
+  # Catch-all (covers nil) so a future pending variant degrades to no echo
+  # instead of raising in status-bar construction, matching operator_key/1.
+  defp pending_key(_pending), do: ""
 
   @spec mode_module(mode()) :: module()
   defp mode_module(:normal), do: Minga.Mode.Normal
