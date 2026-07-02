@@ -22,6 +22,7 @@ defmodule MingaEditor.Session.ChromeState.TabSummary do
           draft_state: draft_state(),
           attention?: boolean(),
           pinned?: boolean(),
+          ephemeral?: boolean(),
           tint_color: non_neg_integer()
         }
 
@@ -38,7 +39,7 @@ defmodule MingaEditor.Session.ChromeState.TabSummary do
     :pinned?,
     :tint_color
   ]
-  defstruct @enforce_keys
+  defstruct @enforce_keys ++ [ephemeral?: false]
 
   @doc "Builds a tab summary."
   @spec new(keyword()) :: t()
@@ -56,6 +57,7 @@ defmodule MingaEditor.Session.ChromeState.TabSummary do
       draft_state: Keyword.get(attrs, :draft_state, :none),
       attention?: Keyword.get(attrs, :attention?, false),
       pinned?: Keyword.get(attrs, :pinned?, false),
+      ephemeral?: Keyword.get(attrs, :ephemeral?, false),
       tint_color: Keyword.get(attrs, :tint_color, 0)
     }
   end

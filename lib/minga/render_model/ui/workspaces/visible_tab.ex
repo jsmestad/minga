@@ -15,6 +15,7 @@ defmodule Minga.RenderModel.UI.Workspaces.VisibleTab do
           draft_state: draft_state(),
           attention?: boolean(),
           pinned?: boolean(),
+          ephemeral?: boolean(),
           tint_color: non_neg_integer()
         }
 
@@ -29,5 +30,6 @@ defmodule Minga.RenderModel.UI.Workspaces.VisibleTab do
             draft_state: :none,
             attention?: false,
             pinned?: false,
+            ephemeral?: false,
             tint_color: 0
 end

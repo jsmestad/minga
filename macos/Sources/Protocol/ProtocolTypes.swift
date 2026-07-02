@@ -182,6 +182,9 @@ public enum Wire {
     // MARK: - Tab bar
 
     /// A single tab entry decoded from the gui_tab_bar protocol message.
+    ///
+    /// Flag bits 4-6 are kind-scoped: agent tabs carry the agent status
+    /// there; file tabs use bit 4 as the ephemeral (not-on-disk) marker.
     public struct TabEntry: Sendable {
         public let id: UInt32
         public let groupId: UInt16
@@ -191,11 +194,12 @@ public enum Wire {
         public let hasAttention: Bool
         public let agentStatus: UInt8
         public let isPinned: Bool
+        public let isEphemeral: Bool
         public let tintColorRGB: UInt32
         public let icon: String
         public let label: String
 
-        public init(id: UInt32, groupId: UInt16, isActive: Bool, isDirty: Bool, isAgent: Bool, hasAttention: Bool, agentStatus: UInt8, isPinned: Bool, tintColorRGB: UInt32, icon: String, label: String) {
+        public init(id: UInt32, groupId: UInt16, isActive: Bool, isDirty: Bool, isAgent: Bool, hasAttention: Bool, agentStatus: UInt8, isPinned: Bool, isEphemeral: Bool = false, tintColorRGB: UInt32, icon: String, label: String) {
             self.id = id
             self.groupId = groupId
             self.isActive = isActive
@@ -204,6 +208,7 @@ public enum Wire {
             self.hasAttention = hasAttention
             self.agentStatus = agentStatus
             self.isPinned = isPinned
+            self.isEphemeral = isEphemeral
             self.tintColorRGB = tintColorRGB
             self.icon = icon
             self.label = label

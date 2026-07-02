@@ -200,7 +200,7 @@ defmodule MingaEditor.UI.Picker.BufferSource do
     DynamicSupervisor.start_child(
       Minga.Buffer.Supervisor,
       {Buffer,
-       content: "", buffer_name: "[new 1]", options_server: EditorState.options_server(state)}
+       content: "", buffer_name: "Untitled-1", options_server: EditorState.options_server(state)}
     )
   end
 
@@ -224,7 +224,7 @@ defmodule MingaEditor.UI.Picker.BufferSource do
     name = display_name(buf)
     ft = Buffer.filetype(buf)
     {icon, color} = Devicon.icon_and_color(ft)
-    desc = Buffer.file_path(buf) || ""
+    desc = Buffer.file_path(buf) || content_preview(buf)
     dirty = if Buffer.dirty?(buf), do: " [+]", else: ""
     ro = if Buffer.read_only?(buf), do: " [RO]", else: ""
 
@@ -234,6 +234,25 @@ defmodule MingaEditor.UI.Picker.BufferSource do
       description: desc,
       icon_color: color
     }
+  end
+
+  # First non-blank line of a pathless buffer, truncated for the picker's
+  # description column. Zed-style preview so several untitled buffers are
+  # tellable apart without opening them.
+  @preview_scan_lines 20
+  @preview_max_chars 40
+
+  @spec content_preview(pid()) :: String.t()
+  defp content_preview(buf) do
+    buf
+    |> Buffer.lines(0, @preview_scan_lines)
+    # Cap before trimming so a pathologically long first line doesn't get
+    # fully traversed on every picker rebuild.
+    |> Enum.map(&(&1 |> String.slice(0, 200) |> String.trim()))
+    |> Enum.find("", &(&1 != ""))
+    |> String.slice(0, @preview_max_chars)
+  catch
+    :exit, _ -> ""
   end
 
   @spec display_name(pid()) :: String.t()

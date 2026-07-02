@@ -114,6 +114,19 @@ defmodule Minga.Buffer.State do
     %{state | file_path: file_path}
   end
 
+  @doc """
+  Adopts a file path as the buffer's identity after save-as.
+
+  Clears the display `name` so tab, picker, and statusline derive from the
+  path basename instead of a stale scratch name (e.g., `Untitled-1`), and
+  adopts the given filetype detected from the new path.
+  """
+  @spec adopt_saved_path(t(), String.t(), atom()) :: t()
+  def adopt_saved_path(%__MODULE__{} = state, file_path, filetype)
+      when is_binary(file_path) and is_atom(filetype) do
+    %{state | file_path: file_path, name: nil, filetype: filetype}
+  end
+
   @doc "Returns save state for content loaded from storage."
   @spec loaded_save_state(String.t() | nil, SaveState.metadata(), String.t()) :: SaveState.t()
   def loaded_save_state(path, metadata, content) do

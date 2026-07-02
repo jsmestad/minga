@@ -79,7 +79,7 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
     end
 
     test "returns false for named buffers without star pattern" do
-      buf = start_buffer(content: "", buffer_name: "[new 1]")
+      buf = start_buffer(content: "", buffer_name: "Untitled-1")
       refute BufferSource.special?(buf)
     end
 
@@ -101,10 +101,35 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
     end
 
     test "includes regular named buffers" do
-      buf = start_buffer(content: "", buffer_name: "[new 1]")
+      buf = start_buffer(content: "", buffer_name: "Untitled-1")
 
       candidates = BufferSource.candidates(fake_state([buf]))
       assert Enum.count(candidates) == 1
+    end
+
+    test "untitled buffers show a first-line content preview as description" do
+      buf = start_buffer(content: "\n\n  def parse(line) do\nend", buffer_name: "Untitled-1")
+
+      [%Item{description: description}] = BufferSource.candidates(fake_state([buf]))
+
+      assert description == "def parse(line) do"
+    end
+
+    test "empty untitled buffers show an empty description" do
+      buf = start_buffer(content: "", buffer_name: "Untitled-1")
+
+      [%Item{description: description}] = BufferSource.candidates(fake_state([buf]))
+
+      assert description == ""
+    end
+
+    test "long first lines are truncated in the preview" do
+      long = String.duplicate("x", 100)
+      buf = start_buffer(content: long, buffer_name: "Untitled-1")
+
+      [%Item{description: description}] = BufferSource.candidates(fake_state([buf]))
+
+      assert String.length(description) == 40
     end
 
     test "still excludes unlisted buffers" do
@@ -159,7 +184,7 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
       assert Enum.count(selected.workspace.buffers.list) == 1
       assert fallback_pid != nil
       assert EditorState.active_window_struct(selected).buffer == fallback_pid
-      assert Buffer.buffer_name(fallback_pid) == "[new 1]"
+      assert Buffer.buffer_name(fallback_pid) == "Untitled-1"
       assert Buffer.content(fallback_pid) == ""
     end
 

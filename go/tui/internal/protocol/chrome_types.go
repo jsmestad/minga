@@ -6,17 +6,19 @@ type TabBar struct {
 }
 
 type Tab struct {
-	Flags       byte
-	ID          uint32
-	GroupID     uint16
-	Icon        string
-	Label       string
-	Tint        uint32
-	Active      bool
-	Dirty       bool
-	Agent       bool
-	Attention   bool
-	Pinned      bool
+	Flags     byte
+	ID        uint32
+	GroupID   uint16
+	Icon      string
+	Label     string
+	Tint      uint32
+	Active    bool
+	Dirty     bool
+	Agent     bool
+	Attention bool
+	Pinned    bool
+	// Ephemeral marks a file tab backed by no file on disk (e.g. Untitled-1).
+	Ephemeral   bool
 	AgentStatus byte
 }
 

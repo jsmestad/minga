@@ -166,6 +166,33 @@ defmodule Minga.Frontend.Adapter.GUI.WorkspacesEncoderTest do
       assert <<2::8, 2::16, 1::8, 0::8, 0::8, 1::16, 9::32, 2::16, 1::8, _rest::binary>> = payload
     end
 
+    test "encodes ephemeral visible tabs in flag bit 6" do
+      model = %Workspaces{
+        visible?: true,
+        active_workspace_id: 0,
+        mode: :editor,
+        visible_tabs: [
+          %VisibleTab{
+            id: 7,
+            workspace_id: 0,
+            label: "Untitled-1",
+            icon: "󰈔",
+            path: nil,
+            ephemeral?: true
+          }
+        ]
+      }
+
+      {cmd, _caches} = WorkspacesEncoder.encode(model, Caches.new())
+
+      assert <<@op_gui_workspaces, len::16, payload::binary-size(len)>> = cmd
+
+      assert <<2::8, 0::16, 0::8, 0::8, 0::8, 1::16, 7::32, 0::16, 0::8, flags::16,
+               _rest::binary>> = payload
+
+      assert Bitwise.band(flags, 0x40) == 0x40
+    end
+
     test "returns nil on second call with same semantic data" do
       model = %Workspaces{
         visible?: true,

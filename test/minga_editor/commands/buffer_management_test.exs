@@ -99,6 +99,67 @@ defmodule MingaEditor.Commands.BufferManagementTest do
 
       assert {2, _col} = BufferProcess.cursor(buffer)
     end
+
+    @tag :tmp_dir
+    test ":w <path> adopts the file as the untitled buffer's identity", %{tmp_dir: tmp_dir} do
+      path = Path.join(tmp_dir, "notes.ex")
+      {editor, buffer} = start_editor(content: "defmodule Notes do\nend\n")
+
+      state = send_keys(editor, ":w #{path}\r")
+
+      assert File.read!(path) == "defmodule Notes do\nend\n"
+      assert BufferProcess.buffer_name(buffer) == nil
+      assert BufferProcess.file_path(buffer) == path
+      assert BufferProcess.filetype(buffer) == :elixir
+      assert "notes.ex" in tab_labels(state)
+    end
+
+    @tag :tmp_dir
+    test ":w <path> refuses to overwrite an existing file", %{tmp_dir: tmp_dir} do
+      path = Path.join(tmp_dir, "exists.txt")
+      File.write!(path, "original")
+      {editor, buffer} = start_editor(content: "scratch content")
+
+      send_keys(editor, ":w #{path}\r")
+
+      assert File.read!(path) == "original"
+      assert BufferProcess.file_path(buffer) == nil
+    end
+
+    @tag :tmp_dir
+    test ":w! <path> overwrites an existing file", %{tmp_dir: tmp_dir} do
+      path = Path.join(tmp_dir, "exists.txt")
+      File.write!(path, "original")
+      {editor, buffer} = start_editor(content: "scratch content")
+
+      send_keys(editor, ":w! #{path}\r")
+
+      assert File.read!(path) == "scratch content"
+      assert BufferProcess.file_path(buffer) == path
+    end
+  end
+
+  describe "untitled buffer numbering" do
+    test "new buffers reuse the lowest unused untitled number" do
+      {state, _buffer} = start_command_state("first file")
+
+      state = BufferManagement.execute(state, :new_buffer)
+      state = BufferManagement.execute(state, :new_buffer)
+
+      assert "Untitled-1" in buffer_names(state)
+      assert "Untitled-2" in buffer_names(state)
+
+      # Kill Untitled-1, then create a new buffer: the freed number is
+      # reused instead of drifting to Untitled-3.
+      state = switch_to_buffer_named(state, "Untitled-1")
+      state = BufferManagement.execute(state, :kill_buffer)
+      refute "Untitled-1" in buffer_names(state)
+
+      state = BufferManagement.execute(state, :new_buffer)
+
+      assert "Untitled-1" in buffer_names(state)
+      refute "Untitled-3" in buffer_names(state)
+    end
   end
 
   describe "global keybinding editor routing" do
@@ -214,7 +275,7 @@ defmodule MingaEditor.Commands.BufferManagementTest do
       assert BufferProcess.content(result.workspace.buffers.active) == "first file"
       assert EditorState.tab_bar(result).active_id == initial_active_id
       assert tab_labels(result) == initial_tab_labels
-      refute Enum.any?(tab_labels(result), &String.starts_with?(&1, "[new"))
+      refute Enum.any?(tab_labels(result), &String.starts_with?(&1, "Untitled"))
     end
 
     test ":q with a single clean file tab cancels without changing state" do
@@ -226,7 +287,7 @@ defmodule MingaEditor.Commands.BufferManagementTest do
 
       assert prompted.pending_quit == :quit
       assert prompted.shell_state.status_msg == "Quit Minga? (y/n)"
-      refute Enum.any?(tab_labels(prompted), &String.starts_with?(&1, "[new"))
+      refute Enum.any?(tab_labels(prompted), &String.starts_with?(&1, "Untitled"))
 
       result = BufferManagement.execute(prompted, :confirm_quit_no)
 
@@ -236,7 +297,7 @@ defmodule MingaEditor.Commands.BufferManagementTest do
       assert BufferProcess.content(result.workspace.buffers.active) == "first file"
       assert EditorState.tab_bar(result).active_id == initial_active_id
       assert tab_labels(result) == initial_tab_labels
-      refute Enum.any?(tab_labels(result), &String.starts_with?(&1, "[new"))
+      refute Enum.any?(tab_labels(result), &String.starts_with?(&1, "Untitled"))
     end
 
     test ":q with the last file tab and an agent tab closes the file tab" do
@@ -250,7 +311,7 @@ defmodule MingaEditor.Commands.BufferManagementTest do
       assert tab_count(result) == 1
       assert EditorState.tab_bar(result).active_id == agent_tab_id
       refute active_tab_id in Enum.map(EditorState.tab_bar(result).tabs, & &1.id)
-      refute Enum.any?(tab_labels(result), &String.starts_with?(&1, "[new"))
+      refute Enum.any?(tab_labels(result), &String.starts_with?(&1, "Untitled"))
     end
 
     test ":q closes only the active workspace file tab when another workspace has a file tab" do
@@ -282,7 +343,7 @@ defmodule MingaEditor.Commands.BufferManagementTest do
       assert EditorState.active_tab_kind(result) == :file
       refute EditorState.tab_bar(result).active_id == agent_tab_id
       refute EditorState.tab_bar(result).active_id == closed_tab_id
-      refute Enum.any?(tab_labels(result), &String.starts_with?(&1, "[new"))
+      refute Enum.any?(tab_labels(result), &String.starts_with?(&1, "Untitled"))
       refute_process_down(closed_tab_buffer)
     end
   end
@@ -440,13 +501,13 @@ defmodule MingaEditor.Commands.BufferManagementTest do
       state = BufferManagement.execute(state, {:execute_ex_command, {:quit, []}})
       assert state.pending_quit == :quit
       assert state.shell_state.status_msg =~ "Modified buffers"
-      refute Enum.any?(tab_labels(state), &String.starts_with?(&1, "[new"))
+      refute Enum.any?(tab_labels(state), &String.starts_with?(&1, "Untitled"))
 
       result = BufferManagement.execute(state, :confirm_quit_no)
       assert result.pending_quit == nil
       assert result.shell_state.status_msg == nil
       assert tab_labels(result) == tab_labels(state)
-      refute Enum.any?(tab_labels(result), &String.starts_with?(&1, "[new"))
+      refute Enum.any?(tab_labels(result), &String.starts_with?(&1, "Untitled"))
     end
 
     test "Escape cancels dirty quit confirmation through the input router" do
@@ -455,11 +516,11 @@ defmodule MingaEditor.Commands.BufferManagementTest do
 
       state = send_keys(editor, ":q\r")
       assert state.pending_quit == :quit
-      refute Enum.any?(tab_labels(state), &String.starts_with?(&1, "[new"))
+      refute Enum.any?(tab_labels(state), &String.starts_with?(&1, "Untitled"))
 
       state = send_key(editor, 27)
       assert state.pending_quit == nil
-      refute Enum.any?(tab_labels(state), &String.starts_with?(&1, "[new"))
+      refute Enum.any?(tab_labels(state), &String.starts_with?(&1, "Untitled"))
     end
   end
 
@@ -576,6 +637,15 @@ defmodule MingaEditor.Commands.BufferManagementTest do
     |> EditorState.tab_bar()
     |> Map.fetch!(:tabs)
     |> Enum.map(& &1.label)
+  end
+
+  defp buffer_names(state) do
+    Enum.map(state.workspace.buffers.list, &BufferProcess.buffer_name/1)
+  end
+
+  defp switch_to_buffer_named(state, name) do
+    idx = Enum.find_index(state.workspace.buffers.list, &(BufferProcess.buffer_name(&1) == name))
+    EditorState.switch_buffer(state, idx)
   end
 
   defp visible_tab_ids(state) do

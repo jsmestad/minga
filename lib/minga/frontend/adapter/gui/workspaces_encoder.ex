@@ -132,6 +132,7 @@ defmodule Minga.Frontend.Adapter.GUI.WorkspacesEncoder do
     |> maybe_workspace_flag(tab.draft_state == :draft_elsewhere, 0x08)
     |> maybe_workspace_flag(tab.draft_state == :conflict, 0x10)
     |> maybe_workspace_flag(tab.pinned?, 0x20)
+    |> maybe_workspace_flag(tab.ephemeral?, 0x40)
   end
 
   @spec maybe_workspace_flag(non_neg_integer(), boolean(), non_neg_integer()) :: non_neg_integer()

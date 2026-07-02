@@ -132,7 +132,7 @@ defmodule MingaEditor.StateTest do
         %{state.workspace | buffers: buffers, windows: %{windows | map: %{1 => files_window}}}
         |> SessionState.to_tab_context()
 
-      tab = Tab.new_file(1, "[new 1]") |> Tab.set_context(context)
+      tab = Tab.new_file(1, "Untitled-1") |> Tab.set_context(context)
       state = EditorState.set_tab_bar(state, TabBar.new(tab))
 
       restored = EditorState.restore_tab_context(state, context)

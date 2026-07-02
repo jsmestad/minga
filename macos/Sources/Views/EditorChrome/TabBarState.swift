@@ -8,7 +8,7 @@ import MingaProtocol
 
 /// A single tab entry for SwiftUI rendering.
 public struct TabEntry: Identifiable {
-    public init(id: UInt32, groupId: UInt16, isActive: Bool, isDirty: Bool, isAgent: Bool, hasAttention: Bool, agentStatus: UInt8, isPinned: Bool, tintColor: Color? = nil, icon: String, label: String) {
+    public init(id: UInt32, groupId: UInt16, isActive: Bool, isDirty: Bool, isAgent: Bool, hasAttention: Bool, agentStatus: UInt8, isPinned: Bool, isEphemeral: Bool = false, tintColor: Color? = nil, icon: String, label: String) {
         self.id = id
         self.groupId = groupId
         self.isActive = isActive
@@ -17,6 +17,7 @@ public struct TabEntry: Identifiable {
         self.hasAttention = hasAttention
         self.agentStatus = agentStatus
         self.isPinned = isPinned
+        self.isEphemeral = isEphemeral
         self.tintColor = tintColor
         self.icon = icon
         self.label = label
@@ -29,6 +30,8 @@ public struct TabEntry: Identifiable {
     public let hasAttention: Bool
     public let agentStatus: UInt8
     public let isPinned: Bool
+    /// File tab backed by no file on disk (e.g. Untitled-1).
+    public let isEphemeral: Bool
     public let tintColor: Color?
     public let icon: String
     public let label: String
@@ -89,6 +92,8 @@ public struct WorkspaceTabEntry: Identifiable {
     public var isDirty: Bool { flags & 0x0001 != 0 }
     public var hasAttention: Bool { flags & 0x0002 != 0 }
     public var isPinned: Bool { flags & 0x0020 != 0 }
+    /// File tab backed by no file on disk (e.g. Untitled-1).
+    public var isEphemeral: Bool { !isAgent && flags & 0x0040 != 0 }
 }
 
 /// Observable state for the tab bar, driven by BEAM protocol messages.
@@ -139,6 +144,7 @@ public final class TabBarState {
                 hasAttention: entry.hasAttention,
                 agentStatus: entry.agentStatus,
                 isPinned: entry.isPinned,
+                isEphemeral: entry.isEphemeral,
                 tintColor: Self.color(from: entry.tintColorRGB),
                 icon: entry.icon,
                 label: entry.label
@@ -211,6 +217,7 @@ public final class TabBarState {
                     hasAttention: tab.hasAttention,
                     agentStatus: 0,
                     isPinned: tab.isPinned,
+                    isEphemeral: tab.isEphemeral,
                     tintColor: tab.tintColor,
                     icon: tab.icon,
                     label: tab.label

@@ -159,7 +159,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   def execute(state, :new_buffer) do
     n = next_new_buffer_number(state.workspace.buffers.list)
-    name = "[new #{n}]"
+    name = "Untitled-#{n}"
 
     case DynamicSupervisor.start_child(
            Minga.Buffer.Supervisor,
@@ -250,6 +250,14 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   def execute(state, {:execute_ex_command, {:abort_quit, []}}),
     do: execute(state, :abort_quit)
+
+  def execute(state, {:execute_ex_command, {:save_as, [path]}}) do
+    save_buffer_as(state, path, overwrite: false)
+  end
+
+  def execute(state, {:execute_ex_command, {:force_save_as, [path]}}) do
+    save_buffer_as(state, path, overwrite: true)
+  end
 
   def execute(state, {:execute_ex_command, {:save_quit, []}}) do
     state |> execute(:save) |> close_tab_or_quit()
@@ -2077,9 +2085,11 @@ defmodule MingaEditor.Commands.BufferManagement do
     end
   end
 
+  # Returns the lowest unused untitled number so long sessions reuse freed
+  # names instead of drifting to Untitled-14.
   @spec next_new_buffer_number([pid()]) :: pos_integer()
   defp next_new_buffer_number(buffers) do
-    existing =
+    used =
       buffers
       |> Enum.flat_map(fn buf ->
         try do
@@ -2089,8 +2099,8 @@ defmodule MingaEditor.Commands.BufferManagement do
         end
       end)
       |> Enum.flat_map(fn
-        "[new " <> rest ->
-          case Integer.parse(String.trim_trailing(rest, "]")) do
+        "Untitled-" <> rest ->
+          case Integer.parse(rest) do
             {n, ""} -> [n]
             _ -> []
           end
@@ -2098,11 +2108,64 @@ defmodule MingaEditor.Commands.BufferManagement do
         _ ->
           []
       end)
+      |> MapSet.new()
 
-    case existing do
-      [] -> 1
-      nums -> Enum.max(nums) + 1
+    Enum.find(Stream.iterate(1, &(&1 + 1)), &(not MapSet.member?(used, &1)))
+  end
+
+  # ── Save-as ──────────────────────────────────────────────────────────────
+
+  # Writes the active buffer to `path` and adopts it as the buffer's
+  # identity: the buffer drops any scratch display name (e.g. Untitled-1),
+  # re-detects filetype, and the tab label / picker / statusline all derive
+  # from the new basename.
+  @spec save_buffer_as(state(), String.t(), overwrite: boolean()) :: state()
+  defp save_buffer_as(%{workspace: %{buffers: %{active: buf}}} = state, path,
+         overwrite: overwrite
+       )
+       when is_pid(buf) do
+    target = Path.expand(path)
+
+    if not overwrite and File.exists?(target) and Buffer.file_path(buf) != target do
+      EditorState.set_status(state, "File exists: #{Path.basename(target)} (use :w! to override)")
+    else
+      write_buffer_as(state, buf, target)
     end
+  end
+
+  defp save_buffer_as(state, _path, _opts) do
+    EditorState.set_status(state, "No active buffer")
+  end
+
+  @spec write_buffer_as(state(), pid(), String.t()) :: state()
+  defp write_buffer_as(state, buf, target) do
+    adopt_target_filetype(buf, target)
+    state = apply_pre_save_transforms(state, buf)
+
+    case Buffer.save_as(buf, target) do
+      :ok ->
+        state
+        |> EditorState.refresh_active_buffer_presentation()
+        |> setup_highlight_or_defer()
+        |> EditorState.set_status("Wrote #{Path.basename(target)}")
+
+      {:error, reason} ->
+        EditorState.set_status(state, "Save failed: #{inspect(reason)}")
+    end
+  end
+
+  # Pre-save transforms (format-on-save) must run against the filetype the
+  # buffer is about to become, not the scratch default, so the first
+  # `:w foo.ex` of an untitled buffer formats as Elixir. The `save_as`
+  # handler re-detects afterwards, which is idempotent with this.
+  @spec adopt_target_filetype(pid(), String.t()) :: :ok
+  defp adopt_target_filetype(buf, target) do
+    if Buffer.file_path(buf) == nil do
+      first_line = buf |> Buffer.lines(0, 1) |> List.first("")
+      Buffer.set_filetype(buf, Minga.Language.detect_filetype_from_content(target, first_line))
+    end
+
+    :ok
   end
 
   # ── Pre-save transforms ─────────────────────────────────────────────────
@@ -2404,7 +2467,9 @@ defmodule MingaEditor.Commands.BufferManagement do
     case DynamicSupervisor.start_child(
            Minga.Buffer.Supervisor,
            {Minga.Buffer,
-            content: "", buffer_name: "[new 1]", options_server: EditorState.options_server(state)}
+            content: "",
+            buffer_name: "Untitled-1",
+            options_server: EditorState.options_server(state)}
          ) do
       {:ok, new_buf} ->
         state
