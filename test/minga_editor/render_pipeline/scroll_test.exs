@@ -101,6 +101,24 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
       assert scroll.content_w >= 1
     end
 
+    test "full-document residence is dormant by default and keeps windowed overscan (#2653)" do
+      # residence ships off (resident_store_max_lines default 0); even a large
+      # nowrap buffer stays windowed unless residence is explicitly enabled.
+      # Config-enabled residence behavior is covered in the async:false threshold
+      # suite (full_document_residence_threshold_test.exs).
+      state = base_state(rows: 10, cols: 40, content: long_content(500))
+      win_id = state.workspace.windows.active
+      window = Map.fetch!(state.workspace.windows.map, win_id)
+      window = Window.set_viewport(window, Viewport.put_top(window.viewport, 250))
+      state = put_in(state.workspace.windows.map[win_id], window)
+
+      {scrolls, _state, _layout} = run_through_scroll(state)
+      [{_win_id, scroll}] = Map.to_list(scrolls)
+
+      assert scroll.full_residence == false
+      assert Enum.count(scroll.lines) < 500
+    end
+
     test "wrap_on is false when folds produce a visible_line_map" do
       state = base_state(content: String.duplicate("a", 120) <> "\n" <> "hidden\nfold\ntail")
       buffer = state.workspace.buffers.active

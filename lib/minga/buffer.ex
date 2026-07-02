@@ -131,6 +131,10 @@ defmodule Minga.Buffer do
   @spec line_count(t()) :: pos_integer()
   defdelegate line_count(server), to: BufferProcess
 
+  @doc "Content size in bytes (used to gate full-document row residence)."
+  @spec content_byte_size(t()) :: non_neg_integer()
+  defdelegate content_byte_size(server), to: BufferProcess
+
   @doc "Byte offset of the start of a line (for tree-sitter integration)."
   @spec byte_offset_for_line(t(), non_neg_integer()) :: non_neg_integer()
   defdelegate byte_offset_for_line(server, line), to: BufferProcess

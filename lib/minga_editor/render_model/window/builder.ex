@@ -175,7 +175,14 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       )
 
     visible_row_start_index = scroll.visible_row_start_index + viewport.visual_row_offset
-    payload_overscan_before = max(scroll.visible_row_start_index - viewport.visual_row_offset, 0)
+    raw_overscan_before = max(scroll.visible_row_start_index - viewport.visual_row_offset, 0)
+    # Under full residence, visible_row_start_index is the viewport's absolute
+    # document offset, not a small overscan count. Cap the presentation overscan
+    # so the gutter stays viewport-windowed.
+    payload_overscan_before =
+      if scroll.full_residence,
+        do: min(raw_overscan_before, visible_row_count),
+        else: raw_overscan_before
 
     visual_entries =
       trim_visual_entries(all_visual_entries, visible_row_start_index, visible_row_count)
@@ -188,12 +195,24 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         payload_overscan_before
       )
 
-    {new_retained, rasterized} = retained_stats(presentation_entries, retain_ctx)
+    # Full-document residence (#2653): the window carries every laid-out row so the
+    # frontend store is complete and a fast scroll can never outrun it. The gutter
+    # (build_gutter below) stays viewport-windowed off `presentation_entries`;
+    # indent guides are independently viewport-windowed off `scroll.lines`. Only
+    # the row set and its retained-row cache become resident.
+    resident_entries =
+      if scroll.full_residence do
+        all_visual_entries
+      else
+        presentation_entries
+      end
+
+    {new_retained, rasterized} = retained_stats(resident_entries, retain_ctx)
 
     new_retained_wrap =
-      retained_wrap_lines(presentation_entries, wrap_on and visible_line_map == nil)
+      retained_wrap_lines(resident_entries, wrap_on and visible_line_map == nil)
 
-    presentation_rows = Enum.map(presentation_entries, & &1.row)
+    presentation_rows = Enum.map(resident_entries, & &1.row)
     committed_rows = Enum.map(visual_entries, & &1.row)
     wrapped_coordinates? = wrap_on and visible_line_map == nil
 
@@ -311,7 +330,10 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       indent_guides: build_indent_guides(scroll, ctx, content_kind),
       geometry: geometry,
       content_epoch: scroll.content_epoch,
-      full_refresh: scroll.full_refresh
+      full_refresh: scroll.full_refresh,
+      # Non-wrapped, non-folded windows emit consecutive :normal buffer lines, so
+      # ScrollPresentation can derive the resident line range arithmetically.
+      contiguous_rows: is_nil(visible_line_map) and not wrap_on
     }
 
     {render_window,
