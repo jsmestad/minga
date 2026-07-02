@@ -226,6 +226,23 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
       assert scroll.viewport.visual_row_offset == 1
     end
 
+    test "non-wrap cursor-follow clamps to EOF instead of overscrolling" do
+      content = Enum.map_join(1..20, "\n", &"line #{&1}")
+      state = base_state(content: content, rows: 10, cols: 80)
+      buffer = state.workspace.buffers.active
+
+      _ = BufferProcess.set_option(buffer, :wrap, false)
+      _ = BufferProcess.set_option(buffer, :line_numbers, :none)
+
+      BufferProcess.move_to(buffer, {19, 0})
+
+      {scrolls, _state, _layout} = run_through_scroll(state)
+      [{_win_id, scroll}] = Map.to_list(scrolls)
+
+      visible = Viewport.content_rows(scroll.viewport)
+      assert scroll.viewport.top <= 20 - visible
+    end
+
     test "scroll result includes buf_version" do
       state = base_state()
       {scrolls, _state, _layout} = run_through_scroll(state)

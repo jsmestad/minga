@@ -172,6 +172,18 @@ defmodule MingaEditor.Mouse.HitTestTest do
     end
   end
 
+  describe "scroll_top/5 (no active window)" do
+    test "clamps to EOF so a click near the last line doesn't resolve through an overscrolled top" do
+      content = Enum.map_join(1..20, "\n", &"line #{&1}")
+      {_state, buffer} = start_mouse_state(content)
+
+      # 10 visible rows, cursor on the last line (index 19). Cursor-following
+      # scroll_margin would push top to 10+margin (blank rows past EOF); the EOF
+      # clamp pins it to total_lines - visible = 20 - 10 = 10.
+      assert HitTest.scroll_top(nil, 10, 80, 19, buffer) == 10
+    end
+  end
+
   defp start_mouse_state(content, opts \\ []) do
     id = :erlang.unique_integer([:positive])
     events_registry = :"#{__MODULE__}.Events.#{id}"

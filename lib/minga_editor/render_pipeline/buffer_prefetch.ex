@@ -204,6 +204,9 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
         do: Window.scroll_follow_cursor?(window, {cursor_line, cursor_byte_col}, now),
         else: {window, true}
 
+    total_visible_lines =
+      FoldMap.visible_line_count(fold_map, Buffer.line_count(window.buffer))
+
     viewport =
       if follow_cursor do
         maybe_scroll_active_window_to_cursor(
@@ -211,7 +214,8 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
           visible_cursor_line,
           scroll_margin,
           is_active,
-          wrap_on
+          wrap_on,
+          total_visible_lines
         )
       else
         viewport
@@ -778,14 +782,16 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
           non_neg_integer(),
           non_neg_integer(),
           boolean(),
-          boolean()
+          boolean(),
+          non_neg_integer()
         ) :: Viewport.t()
   defp maybe_scroll_active_window_to_cursor(
          viewport,
          _visible_cursor_line,
          _scroll_margin,
          false,
-         _wrap_on
+         _wrap_on,
+         _total_visible_lines
        ),
        do: viewport
 
@@ -794,7 +800,8 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
          _visible_cursor_line,
          _scroll_margin,
          true,
-         true
+         true,
+         _total_visible_lines
        ) do
     viewport
   end
@@ -804,12 +811,17 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
          visible_cursor_line,
          scroll_margin,
          true,
-         false
+         false,
+         total_visible_lines
        ) do
     saved_left = viewport.left
 
+    # Clamp top to EOF after scrolling so the last line pins to the bottom
+    # instead of scrolling past it (scroll_to_cursor applies scroll_margin
+    # without knowing the buffer length). The wrap path clamps separately.
     viewport
     |> Viewport.scroll_to_cursor({visible_cursor_line, 0}, scroll_margin)
+    |> Viewport.clamp_top_to_eof(total_visible_lines)
     |> Map.put(:left, saved_left)
   end
 

@@ -407,4 +407,41 @@ defmodule MingaEditor.ViewportTest do
       assert Viewport.effective_rows(24) == 24
     end
   end
+
+  describe "clamp_top_to_eof/2" do
+    test "pins the last line to the bottom instead of scrolling past EOF" do
+      # Reproduces the underfill bug: scroll_to_cursor applies scroll_margin at
+      # EOF, pushing top past the last line and leaving blank rows below.
+      # 16 content rows (reserved: 0), 20-line buffer, cursor on the last line.
+      vp = %Viewport{top: 0, left: 0, rows: 16, cols: 80, reserved: 0}
+      scrolled = Viewport.scroll_to_cursor(vp, {19, 0}, 5)
+      # Without a clamp, margin=5 scrolls to top=9 → lines 20..24 are blank.
+      assert scrolled.top == 9
+
+      clamped = Viewport.clamp_top_to_eof(scrolled, 20)
+      # top = min(9, 20 - 16) = 4 → lines 4..19, last line pinned to the bottom.
+      assert clamped.top == 4
+    end
+
+    test "does not scroll up when content already fits" do
+      vp = %Viewport{top: 0, left: 0, rows: 16, cols: 80, reserved: 0}
+      assert Viewport.clamp_top_to_eof(vp, 8).top == 0
+    end
+
+    test "never produces a negative top" do
+      vp = %Viewport{top: 3, left: 0, rows: 16, cols: 80, reserved: 0}
+      assert Viewport.clamp_top_to_eof(vp, 5).top == 0
+    end
+
+    test "honors reserved rows via content_rows" do
+      # reserved: 2 → 14 content rows; 20 lines → max_top = 6.
+      vp = %Viewport{top: 10, left: 0, rows: 16, cols: 80, reserved: 2}
+      assert Viewport.clamp_top_to_eof(vp, 20).top == 6
+    end
+
+    test "leaves the viewport untouched for a non-positive line count" do
+      vp = %Viewport{top: 7, left: 0, rows: 16, cols: 80, reserved: 0}
+      assert Viewport.clamp_top_to_eof(vp, 0).top == 7
+    end
+  end
 end
