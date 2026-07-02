@@ -304,6 +304,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
       maybe_adjust_wrapped_viewport(%{
         wrap_on: wrap_on,
         is_active: is_active,
+        follow_cursor: follow_cursor,
         viewport: viewport,
         first_line: fetch_first,
         lines: lines,
@@ -662,6 +663,24 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
          %{
            wrap_on: true,
            is_active: true,
+           follow_cursor: false
+         } = params
+       ) do
+    # Free-scroll (#2661/#2668): the wheel/trackpad moved `viewport.top` directly
+    # and `scroll_follow_cursor?/3` suppressed cursor-follow, so honor the
+    # free-scrolled top/offset instead of re-anchoring to the cursor. This mirrors
+    # the non-wrapped path, where the same `follow_cursor` gate on
+    # `maybe_scroll_active_window_to_cursor/6` already keeps the viewport put.
+    # Preserving the reported top keeps the #2668 echo contract: the emitted top
+    # equals the top `Window.mark_scroll_echo/2` recorded, so `settle_scroll_seq/1`
+    # does not bump `scroll_seq` on the user's own scroll.
+    present_free_scroll_wrapped_viewport(params)
+  end
+
+  defp maybe_adjust_wrapped_viewport(
+         %{
+           wrap_on: true,
+           is_active: true,
            first_line: first_line,
            lines: lines,
            cursor_line: cursor_line
@@ -672,6 +691,60 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     else
       adjust_wrapped_viewport_from_map(params)
     end
+  end
+
+  # Presents a wrapped active window at its already-committed free-scroll top
+  # without moving toward the cursor. Reuses the lines already fetched at
+  # `first_line` (== the free-scrolled `viewport.top` for wrapped windows, whose
+  # overscan-before is zero), computes the top line's wrap count for the visual
+  # offset, and applies the same near-EOF offset clamp as
+  # `adjust_wrapped_viewport_from_map/1`.
+  @spec present_free_scroll_wrapped_viewport(map()) ::
+          {Viewport.t(), non_neg_integer(), map(), [String.t()], String.t(), non_neg_integer()}
+  defp present_free_scroll_wrapped_viewport(%{
+         viewport: viewport,
+         first_line: first_line,
+         lines: lines,
+         snapshot: snapshot,
+         buf: buf,
+         cursor_line: cursor_line,
+         cursor_byte_col: cursor_byte_col,
+         content_w: content_w,
+         visible_rows: visible_rows,
+         oracle: oracle
+       }) do
+    wrap_map = compute_wrap_map(buf, lines, content_w, oracle)
+
+    top_count =
+      wrap_map
+      |> List.first([%{byte_offset: 0, text: "", source_text: "", indent_width: 0}])
+      |> Enum.count()
+      |> max(1)
+
+    total_lines = Buffer.line_count(buf)
+    near_eof = first_line + visible_rows >= total_lines - 1
+
+    total_visual_rows_to_eof =
+      if near_eof do
+        visual_rows_to_eof(buf, first_line, content_w, oracle)
+      else
+        top_count
+      end
+
+    new_offset =
+      if near_eof do
+        min(
+          viewport.visual_row_offset,
+          Viewport.max_visual_row_offset(total_visual_rows_to_eof, visible_rows)
+        )
+      else
+        viewport.visual_row_offset
+      end
+
+    top_count = max(top_count, total_visual_rows_to_eof)
+    new_viewport = Viewport.put_top_visual(viewport, first_line, new_offset, top_count)
+    text = cursor_line_text(lines, cursor_line, first_line)
+    {new_viewport, first_line, snapshot, lines, text, Unicode.display_col(text, cursor_byte_col)}
   end
 
   @spec adjust_wrapped_viewport_from_map(map()) ::
