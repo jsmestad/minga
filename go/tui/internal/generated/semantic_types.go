@@ -366,6 +366,10 @@ type GuiStatusBarWorkspace struct {
 	Icon                   string
 }
 
+type GuiStatusBarPendingKeys struct {
+	Keys string
+}
+
 type GuiGutterWindow struct {
 	WindowID      uint16
 	ContentRow    uint16

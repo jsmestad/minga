@@ -106,6 +106,13 @@ public struct StatusBarView: View {
             groups.insert(StatusBarSegmentGroup(id: "right-safe-mode", kind: "safe", segments: []), at: 0)
         }
 
+        // showcmd: echo pending keys as a dim, right-aligned segment (issue #2666).
+        // Placed leftmost within the right cluster; the BEAM clears it (empty
+        // string) when the sequence resolves, aborts, or which-key opens.
+        if !state.pendingKeys.isEmpty {
+            groups.insert(StatusBarSegmentGroup(id: "right-showcmd", kind: "showcmd", segments: []), at: 0)
+        }
+
         return groups
     }
 
@@ -221,6 +228,8 @@ public struct StatusBarView: View {
         switch group.kind {
         case "mode":
             modeBadge
+        case "showcmd":
+            showcmdBadge
         case "safe":
             safeModeBadge
         case "filename":
@@ -624,6 +633,18 @@ public struct StatusBarView: View {
         let numerator = max(0, Int(state.cursorLine) - 1) * 100
         let denominator = max(1, Int(state.lineCount) - 1)
         return "\(numerator / denominator)%"
+    }
+
+    @ViewBuilder
+    private var showcmdBadge: some View {
+        Text(state.pendingKeys)
+            .font(.system(size: 11, design: .monospaced))
+            .monospacedDigit()
+            .foregroundStyle(theme.modelineBarFg.opacity(0.45))
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .help("Pending keys: \(state.pendingKeys)")
+            .accessibilityLabel("Pending keys \(state.pendingKeys)")
     }
 
     @ViewBuilder

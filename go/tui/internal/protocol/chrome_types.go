@@ -184,6 +184,7 @@ type StatusBar struct {
 	Filename    string
 	Filetype    string
 	Message     string
+	PendingKeys string
 	Left        []StatusSegment
 	Right       []StatusSegment
 }

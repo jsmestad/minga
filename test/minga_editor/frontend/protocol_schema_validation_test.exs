@@ -785,6 +785,7 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
         right: [{:file, "test.ex", 0xCCCCCC, 0x000000, [], nil}]
       },
       selection: %Selection{mode: :chars, size: 10},
+      pending_keys: "\"a2d",
       agent: %Agent{
         agent_status: :idle,
         session_status: :idle,

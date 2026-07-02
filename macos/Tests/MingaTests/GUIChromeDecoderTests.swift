@@ -802,6 +802,53 @@ struct GUIStatusBarDecoderTests {
         #expect(update.modelineRightSegments[0].command == "set_language")
     }
 
+    @Test("Decode pending_keys (showcmd) section")
+    func decodePendingKeysSection() throws {
+        var identity = Data()
+        identity.append(0); identity.append(0); identity.append(0)
+
+        var pendingKeys = Data()
+        appendString16(&pendingKeys, "\"a2d")
+
+        let sections = [
+            buildSection(SECTION_IDENTITY, identity),
+            buildSection(SECTION_PENDING_KEYS, pendingKeys),
+        ]
+
+        var data = Data()
+        data.append(OP_GUI_STATUS_BAR)
+        data.append(UInt8(sections.count))
+        for s in sections { data.append(s) }
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiStatusBar(let update) = cmd else {
+            Issue.record("Expected .guiStatusBar"); return
+        }
+
+        #expect(update.pendingKeys == "\"a2d")
+    }
+
+    @Test("Pending keys default to empty when section absent")
+    func pendingKeysDefaultEmpty() throws {
+        var identity = Data()
+        identity.append(0); identity.append(0); identity.append(0)
+
+        let sections = [buildSection(SECTION_IDENTITY, identity)]
+
+        var data = Data()
+        data.append(OP_GUI_STATUS_BAR)
+        data.append(UInt8(sections.count))
+        for s in sections { data.append(s) }
+
+        let (cmd, _) = try decodeCommand(data: data, offset: 0)
+        guard case .guiStatusBar(let update) = cmd else {
+            Issue.record("Expected .guiStatusBar"); return
+        }
+        #expect(update.pendingKeys == "")
+    }
+
     @Test("Decode legacy v1 modeline segments as custom kind")
     func decodeLegacyV1ModelineSegmentsSection() throws {
         var identity = Data()

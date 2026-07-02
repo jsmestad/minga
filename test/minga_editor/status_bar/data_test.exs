@@ -57,6 +57,53 @@ defmodule MingaEditor.StatusBar.DataTest do
     refute Map.has_key?(buffer_data, :modeline_segments)
   end
 
+  describe "pending_keys (showcmd)" do
+    test "is empty in a fresh normal-mode state" do
+      state = state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
+      {:buffer, data} = Data.from_state(state)
+      assert data.pending_keys == ""
+    end
+
+    test "echoes an accumulated count from FSM state" do
+      state =
+        state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
+        |> EditorState.update_mode_state(&%{&1 | count: 2})
+
+      {:buffer, data} = Data.from_state(state)
+      assert data.pending_keys == "2"
+    end
+
+    test "prefixes the active register selection" do
+      state =
+        state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
+        |> MingaEditor.Editing.set_active_register("a")
+
+      {:buffer, data} = Data.from_state(state)
+      assert data.pending_keys == "\"a"
+    end
+
+    test "echoes a pending operator in operator-pending mode" do
+      op_state = %Minga.Mode.OperatorPendingState{operator: :delete}
+
+      state =
+        state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
+        |> EditorState.transition_mode(:operator_pending, op_state)
+
+      {:buffer, data} = Data.from_state(state)
+      assert data.pending_keys == "d"
+    end
+
+    test "clears when the which-key popup is showing" do
+      state =
+        state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
+        |> EditorState.update_mode_state(&%{&1 | count: 2})
+        |> EditorState.set_whichkey(%MingaEditor.State.WhichKey{show: true})
+
+      {:buffer, data} = Data.from_state(state)
+      assert data.pending_keys == ""
+    end
+  end
+
   test "with_modeline_segments preserves agent status command output" do
     state = state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
     state = AgentAccess.update_agent(state, &AgentState.set_status(&1, :thinking))

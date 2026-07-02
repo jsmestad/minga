@@ -88,6 +88,26 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoderTest do
       assert Map.has_key?(sections, 0x0D)
     end
 
+    test "omits pending_keys section (0x0E) when empty" do
+      model = %StatusBar{content_kind: :buffer, data: status_data(), workspace: workspace()}
+
+      {cmd, _caches} = StatusBarEncoder.encode(model, Caches.new())
+      sections = decode_sections(cmd)
+
+      refute Map.has_key?(sections, 0x0E)
+    end
+
+    test "encodes pending_keys section (0x0E) when set" do
+      data = %{status_data() | pending_keys: "\"a2d"}
+      model = %StatusBar{content_kind: :buffer, data: data, workspace: workspace()}
+
+      {cmd, _caches} = StatusBarEncoder.encode(model, Caches.new())
+      sections = decode_sections(cmd)
+
+      assert <<len::16, keys::binary-size(len)>> = sections[0x0E]
+      assert keys == "\"a2d"
+    end
+
     test "encodes semantic agent status section" do
       data = %{
         status_data()

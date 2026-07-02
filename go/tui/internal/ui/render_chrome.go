@@ -211,7 +211,7 @@ func (m Model) renderBreadcrumb(crumb protocol.Breadcrumb, width int) string {
 func (m Model) footerLines() []string {
 	status := fmt.Sprintf("row %d col %d", m.cursorRow+1, m.cursorCol+1)
 	if chromeStatus, ok := m.statusBar(); ok {
-		if len(chromeStatus.Left) > 0 || len(chromeStatus.Right) > 0 {
+		if len(chromeStatus.Left) > 0 || len(chromeStatus.Right) > 0 || chromeStatus.PendingKeys != "" {
 			status = m.renderStatusSegments(chromeStatus)
 		} else if chromeStatus.Filename != "" {
 			icon := devIconForPath(chromeStatus.Filename, false)
@@ -277,6 +277,14 @@ func (m Model) renderStatusSegments(status protocol.StatusBar) string {
 			}
 			right = fileStyle.Render(icon.glyph+" ") + right
 		}
+	}
+	// showcmd: echo the pending key sequence as a dim, right-aligned segment so
+	// every keypress is acknowledged instantly (issue #2666). Rendered leftmost
+	// within the right cluster; the BEAM clears it (empty string) when the
+	// sequence resolves, aborts, or which-key opens, so no timer lives here.
+	if status.PendingKeys != "" {
+		pending := lipgloss.NewStyle().Faint(true).Foreground(m.palette().Muted()).Background(m.palette().ChromeSurface()).Render(status.PendingKeys + "  ")
+		right = pending + right
 	}
 	leftWidth := lipgloss.Width(left)
 	rightWidth := lipgloss.Width(right)

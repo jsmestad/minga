@@ -79,6 +79,7 @@ defmodule MingaEditor.StatusBar.Data do
           background_subagent_count: non_neg_integer(),
           active_background_subagent_label: String.t() | nil,
           status_msg: String.t() | nil,
+          pending_keys: String.t(),
           workspace_label: String.t(),
           workspace_draft_count: non_neg_integer(),
           workspace_conflict_count: non_neg_integer(),
@@ -122,6 +123,7 @@ defmodule MingaEditor.StatusBar.Data do
           background_subagent_count: non_neg_integer(),
           active_background_subagent_label: String.t() | nil,
           status_msg: String.t() | nil,
+          pending_keys: String.t(),
           workspace_label: String.t(),
           workspace_draft_count: non_neg_integer(),
           workspace_conflict_count: non_neg_integer(),
@@ -220,12 +222,44 @@ defmodule MingaEditor.StatusBar.Data do
       background_subagent_count: background.count,
       active_background_subagent_label: background.label,
       status_msg: Map.get(state.shell_state, :status_msg),
+      pending_keys: pending_keys(state, mode, mode_state),
       workspace_label: workspace.label,
       workspace_draft_count: workspace.draft_count,
       workspace_conflict_count: workspace.conflict_count,
       merge_conflict_count: merge_conflict_count(buf)
     }
   end
+
+  # ── Pending-key echo (vim showcmd) ─────────────────────────────────────────
+
+  @spec pending_keys(EditorState.t() | map(), Minga.Mode.mode(), Minga.Mode.state() | nil) ::
+          String.t()
+  # Which-key takes over the acknowledgment once its popup is showing, so the
+  # instant echo clears the moment which-key opens (AC #2). When a sequence
+  # resolves or is aborted, the FSM count/pending/leader fields reset, so the
+  # derived string is empty again with no extra bookkeeping (AC #3).
+  defp pending_keys(state, mode, mode_state) do
+    if whichkey_showing?(state) do
+      ""
+    else
+      register_prefix(active_register_name(state)) <> Minga.Mode.pending_keys(mode, mode_state)
+    end
+  end
+
+  @spec whichkey_showing?(EditorState.t() | map()) :: boolean()
+  defp whichkey_showing?(%{shell_state: %{whichkey: %{show: true}}}), do: true
+  defp whichkey_showing?(_state), do: false
+
+  @spec active_register_name(EditorState.t() | map()) :: String.t()
+  defp active_register_name(%{workspace: %{editing: %{reg: %{active: active}}}})
+       when is_binary(active),
+       do: active
+
+  defp active_register_name(_state), do: ""
+
+  @spec register_prefix(String.t()) :: String.t()
+  defp register_prefix(""), do: ""
+  defp register_prefix(name), do: "\"" <> name
 
   @spec buf_display_name(pid()) :: String.t()
   defp buf_display_name(buf) do
@@ -375,6 +409,7 @@ defmodule MingaEditor.StatusBar.Data do
       background_subagent_count: background.count,
       active_background_subagent_label: background.label,
       status_msg: Map.get(state.shell_state, :status_msg),
+      pending_keys: pending_keys(state, mode, mode_state),
       workspace_label: workspace.label,
       workspace_draft_count: workspace.draft_count,
       workspace_conflict_count: workspace.conflict_count,

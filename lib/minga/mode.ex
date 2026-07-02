@@ -207,7 +207,55 @@ defmodule Minga.Mode do
 
   def display(mode, _state), do: display(mode)
 
+  @doc """
+  Returns the pending-key echo string (vim `showcmd`) for the current FSM state.
+
+  This is the sequence of keys the user has typed that have not yet resolved
+  into a command: an accumulated count, a pending single-key operation (`"`, `r`,
+  `f`, `m`, `q`, `@`), a normal-mode prefix (`g`, `z`, `[`, `]`), a leader
+  sequence, or a pending operator (`d`, `c`, `y`, ...). Returns `""` when nothing
+  is pending. Pure over `mode` and `mode_state`; callers layer on register and
+  which-key state.
+  """
+  @spec pending_keys(mode(), state()) :: String.t()
+  def pending_keys(:operator_pending, %Minga.Mode.OperatorPendingState{} = s) do
+    op_count = if s.op_count > 1, do: Integer.to_string(s.op_count), else: ""
+    count = if s.count, do: Integer.to_string(s.count), else: ""
+    g = if s.pending_g, do: "g", else: ""
+    op_count <> operator_key(s.operator) <> g <> count
+  end
+
+  def pending_keys(_mode, %Minga.Mode.State{} = s) do
+    count = if s.count, do: Integer.to_string(s.count), else: ""
+    prefix = s.prefix_keys |> Enum.reverse() |> Enum.join()
+    leader = s.leader_keys |> Enum.reverse() |> Enum.join(" ")
+    count <> prefix <> leader <> pending_key(s.pending)
+  end
+
+  def pending_keys(_mode, _state), do: ""
+
   # ── Private ──────────────────────────────────────────────────────────────────
+
+  @spec operator_key(Minga.Mode.OperatorPendingState.operator()) :: String.t()
+  defp operator_key(:delete), do: "d"
+  defp operator_key(:change), do: "c"
+  defp operator_key(:yank), do: "y"
+  defp operator_key(:indent), do: ">"
+  defp operator_key(:dedent), do: "<"
+  defp operator_key(:reindent), do: "="
+  defp operator_key(:comment), do: "gc"
+  defp operator_key(_operator), do: ""
+
+  @spec pending_key(Minga.Mode.State.pending()) :: String.t()
+  defp pending_key(:register), do: "\""
+  defp pending_key(:replace), do: "r"
+  defp pending_key({:find, dir}), do: Atom.to_string(dir)
+  defp pending_key({:mark, :set}), do: "m"
+  defp pending_key({:mark, :jump_line}), do: "'"
+  defp pending_key({:mark, :jump_exact}), do: "`"
+  defp pending_key(:macro_register), do: "q"
+  defp pending_key(:macro_replay), do: "@"
+  defp pending_key(nil), do: ""
 
   @spec mode_module(mode()) :: module()
   defp mode_module(:normal), do: Minga.Mode.Normal

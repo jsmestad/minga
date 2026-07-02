@@ -46,7 +46,8 @@ defmodule Minga.RenderModel.UI.StatusBar.Data do
           indent: Indent.t(),
           selection: Selection.t(),
           agent: Agent.t(),
-          modeline_segments: modeline_segments()
+          modeline_segments: modeline_segments(),
+          pending_keys: String.t()
         }
 
   defstruct mode: :normal,
@@ -62,5 +63,6 @@ defmodule Minga.RenderModel.UI.StatusBar.Data do
             indent: %Indent{},
             selection: %Selection{},
             agent: %Agent{},
-            modeline_segments: nil
+            modeline_segments: nil,
+            pending_keys: ""
 end

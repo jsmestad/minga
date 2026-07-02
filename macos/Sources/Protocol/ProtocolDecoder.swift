@@ -723,6 +723,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         var modelineRightSegments: [Wire.StatusBarSegment] = []
         var selection = StatusBarUpdate.SelectionInfo(mode: 0, size: 0)
         var workspace: StatusBarUpdate.WorkspaceInfo? = nil
+        var pendingKeys = ""
 
         for _ in 0..<sectionCount {
             guard data.count >= pos + 3 else { throw ProtocolDecodeError.malformed }
@@ -851,6 +852,13 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                     icon: icon
                 )
 
+            case 0x0E: // PendingKeys (showcmd): keys_len(2) + keys
+                guard sectionLen >= 2 else { break }
+                let pkLen = Int(readU16(data, sStart))
+                if sectionLen >= 2 + pkLen, pkLen > 0 {
+                    pendingKeys = String(data: data[(sStart + 2)..<(sStart + 2 + pkLen)], encoding: .utf8) ?? ""
+                }
+
             default:
                 break // Skip unknown sections (forward compatibility)
             }
@@ -933,7 +941,8 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             modelineLeftSegments: modelineLeftSegments,
             modelineRightSegments: modelineRightSegments,
             selection: selection,
-            workspace: workspace
+            workspace: workspace,
+            pendingKeys: pendingKeys
         )
         return (.guiStatusBar(update), pos - offset)
 

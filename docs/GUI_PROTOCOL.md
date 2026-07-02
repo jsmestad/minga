@@ -321,6 +321,7 @@ opcode(1) + section_count(1) + [section_id(1) + section_len(2) + payload(section
 | 0x0B | ModelineSegments | version(1, currently 2) + left_count(2) + right_count(2) + left segments + right segments. Each v2 segment is name_len(1) + name + fg(3) + bg(3) + attrs(1) + text_len(2) + text + target_len(2) + target. |
 | 0x0C | Selection | selection_mode(1: 0=none, 1=chars, 2=lines) + selection_size(4) |
 | 0x0D | Workspace | id(2) + kind(1) + status(1) + flags(2) + draft_count(2) + conflict_count(2) + background_count(2) + attention_count(2) + label_len(1) + label + icon_len(1) + icon |
+| 0x0E | PendingKeys | keys_len(2) + keys |
 
 `content_kind`: 0 = buffer window, 1 = agent chat window. When `content_kind == 1`, the standard sections (cursor, git, diagnostics, etc.) contain background buffer data and section 0x09 includes agent-specific fields. `background_count` is the number of currently running background sub-agents. `background_label` is the active background child label when focused, otherwise the first running child label. `active_tool_name` is the currently running tool label when the agent status is `tool_executing`; it is empty otherwise.
 
@@ -349,6 +350,8 @@ Macro recording: 0=not recording, 1-26=recording register a-z
 `ModelineSegments` is the named GUI projection of the configurable modeline. The BEAM resolves built-in and custom segment names, side placement, explicit ordering, and click targets, then sends named styled segments to the frontend. Native frontends should use `name` to render known built-ins with platform-native controls (`mode` as a badge, `position` as compact text, `filetype` with the devicon, and so on) instead of drawing terminal-style full-height color blocks. Unknown or custom names can use `text`, `fg`, `bg`, and `attrs` as a native chip fallback. `attrs` uses the same low bits as `draw_text`: bit 0 bold, bit 1 underline, bit 2 italic. `target` is empty for non-clickable segments; otherwise it is a command name to send through the existing `execute_command` GUI action.
 
 Section `0x0B` is omitted when the BEAM has no GUI modeline data for this frame. A present section with zero left and right segments is explicit and tells the frontend not to synthesize fallback built-ins.
+
+`PendingKeys` (`0x0E`) is vim's `showcmd`: the pending key sequence typed in normal/operator-pending mode that has not yet resolved into a command (an accumulated count, a register prefix like `"a`, an operator like `d`, or a pending single-key op like `f`/`r`/`m`). The frontend renders it as a dim, right-aligned status-bar segment so every keypress is acknowledged instantly, underneath the delayed which-key popup. The section is omitted when the string is empty, so it clears automatically when the sequence resolves, is aborted (Esc), or which-key opens (the BEAM sends an empty string, and empty sections are not emitted). It renders purely from BEAM FSM state per frame with no frontend timers.
 
 ### 0x77 — gui_picker (sectioned format)
 
