@@ -249,10 +249,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let manager = BEAMProcessManager()
             self.beamManager = manager
 
-            manager.onCrash = {
-                // TODO: show error UI instead of terminating
-                NSLog("BEAM crashed too many times, terminating")
-                NSApp.terminate(nil)
+            manager.onCrash = { [weak self] in
+                // The editor core died and automatic restart gave up. Present the
+                // recovery surface instead of terminating, and keep the app
+                // responsive (clickable/quittable) while the user decides (#2698).
+                self?.presentEditorCoreStoppedRecovery()
             }
             manager.onNormalExit = {
                 NSApp.terminate(nil)
@@ -475,6 +476,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return .terminateNow
         }
 
+        // If the BEAM is already gone (it exited on its own, e.g. a background
+        // death or the user quit the editor core), there is nothing to shut down.
+        // Returning .terminateLater here without a live process to wait on would
+        // wedge the main runloop forever, because shutdownGracefully bails early
+        // and never calls reply(toApplicationShouldTerminate:) (#2698 defect B).
+        guard manager.hasLiveProcess else {
+            return .terminateNow
+        }
+
         // In bundle mode, wait for the BEAM to exit cleanly before
         // allowing the app to terminate. This prevents orphaned BEAM
         // processes running in the background after the Dock icon disappears.
@@ -486,6 +496,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         manager.shutdownGracefully(timeout: 3.0)
         return .terminateLater
+    }
+
+    /// Presents the recovery surface after the editor core exited and automatic
+    /// restart gave up. Scheduled on the next main-actor turn so the termination
+    /// handler that triggers it returns immediately and never blocks the main
+    /// actor; the alert itself is an interactive, quittable surface (#2698).
+    private func presentEditorCoreStoppedRecovery() {
+        recoveryManager?.presentEditorCoreStopped { [weak self] in
+            self?.beamManager?.restartAfterRecovery()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
