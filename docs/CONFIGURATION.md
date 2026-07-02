@@ -28,6 +28,8 @@ That's it. Save the file and restart Minga. Your options take effect immediately
 | `:autopair_block` | boolean | `true` | Auto-insert language-aware block-closing keywords on Enter |
 | `:scroll_margin` | non-negative integer | `5` | Lines to keep visible above/below cursor when scrolling |
 | `:max_file_size` | positive integer | `10485760` | Maximum file size in bytes Minga will open. Larger files show a text-only "file too large" surface instead of loading a buffer; checked with a pre-read stat so the gap buffer and tree-sitter parser never touch the content. Default 10 MB. Raise it for the brave. |
+| `:resident_store_max_lines` | non-negative integer | `65535` | Maximum buffer line count that still gets full-document residence (glitch-free fast scrolling). Defaults to `65535`, the u16 wire ceiling: frames encode the row count as a u16, so the render path caps residence there regardless of this value. Real exposure is bounded well below the line ceiling by `:resident_store_max_bytes` (10 MB) and `:max_file_size` (10 MB, refused pre-load). Set to `0` to disable residence and force the viewport-windowed path. Wrapped and folded buffers always use the windowed path. See [Fast scrolling (residence)](#fast-scrolling-residence) below. |
+| `:resident_store_max_bytes` | positive integer | `10485760` | Maximum buffer byte size that still gets full-document residence. Residence needs both this and `:resident_store_max_lines`; set `:resident_store_max_lines` to `0` to disable residence regardless of byte size. Default 10 MB. |
 | `:theme` | theme name atom | `:astrodark` | Color theme (see [Themes](#themes) below) |
 | `:indent_with` | `:spaces` or `:tabs` | `:spaces` | Whether to indent with spaces or tab characters |
 | `:trim_trailing_whitespace` | boolean | `false` | Strip trailing whitespace on save |
@@ -507,6 +509,21 @@ Available placeholders:
 | `{bufname}` | Buffer display name (filename, or `*scratch*` for unnamed buffers) |
 
 The title is restored to its previous value when Minga exits.
+
+## Fast scrolling (residence)
+
+Minga keeps the whole document resident in the frontend for normal-size files, so scrolling never outruns the data and never shows blank or stale rows during a fast flick. This is on by default.
+
+Two knobs gate it, and both must pass:
+
+- `:resident_store_max_lines` (default `65535`): the maximum line count that still gets residence. The default is the u16 wire ceiling; frames encode the row count as a u16, so this is the hard cap regardless of what you set. Set it to `0` to turn residence off and go back to the viewport-windowed path.
+- `:resident_store_max_bytes` (default `10485760`, 10 MB): the maximum buffer byte size that still gets residence.
+
+In practice the byte gate and the `:max_file_size` pre-load refusal (also 10 MB) bound the real exposure well below the line ceiling: files above `:max_file_size` never open at all, so they never reach the residence gate.
+
+Wrapped and folded buffers always use the viewport-windowed path, not residence.
+
+To open a huge file instantly, residence engages on the frame after first paint: the first frame of a newly opened (or resized) file renders viewport-windowed so content appears immediately, then the full-document store is built on the next frame. You do not need to configure this; it is automatic.
 
 ## Per-filetype settings
 

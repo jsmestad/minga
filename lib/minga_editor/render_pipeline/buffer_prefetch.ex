@@ -285,8 +285,18 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     # buffers, fetch and emit the entire laid-out document so a fast scroll can
     # never outrun the resident row store. Over-threshold, wrapped, or folded
     # buffers keep today's velocity-aware viewport-plus-overscan windowing.
-    full_residence? =
+    #
+    # First-paint-then-promote (#2679): the O(document) first build is ~0.5s at the
+    # 65k-row ceiling (measured), so an eligible window renders viewport-windowed on
+    # its first frame (fast file-open paint) and promotes to full residence on the
+    # next frame, when `residence_armed?` is true. The expensive build then lands
+    # one frame later on the renderer process, after content is already on screen,
+    # instead of blocking first paint. `residence_armed` resets on layout_generation
+    # rebuilds (RenderCache.reset/1) so resize/font/wrap changes re-defer.
+    residence_eligible? =
       is_nil(visible_line_map) and full_residence?(window.buffer, wrap_on, line_count)
+
+    full_residence? = residence_eligible? and Window.residence_armed?(window)
 
     {fetch_first, fetch_count, visible_row_start_index} =
       resolve_fetch_range(%{
@@ -353,6 +363,11 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
         width_oracle,
         snapshot
       )
+
+    # Arm promotion for the next frame whenever this window is residence-eligible,
+    # so an eligible window that rendered windowed this frame goes resident next
+    # frame (#2679). Disarms when eligibility is lost (wrap/fold/over-threshold).
+    window = Window.set_residence_armed(window, residence_eligible?)
 
     %WindowScroll{
       win_id: win_id,
@@ -435,8 +450,8 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   # folded/decorated (caller passes the nil-visible_line_map case only), and both
   # its line count and byte size sit under the configured thresholds and the wire
   # row ceiling. The byte check runs last so an over-line file skips the extra call.
-  # A line threshold of 0 (or nil) means residence is disabled, which is the
-  # default: the feature ships dormant until explicitly opted in via config.
+  # Residence is on by default (:resident_store_max_lines defaults to the u16 wire
+  # ceiling); a line threshold of 0 (or nil) disables it and forces the windowed path.
   @spec full_residence?(pid(), boolean(), non_neg_integer()) :: boolean()
   defp full_residence?(_buf, true = _wrap_on, _line_count), do: false
 

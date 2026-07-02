@@ -219,6 +219,17 @@ defmodule MingaEditor.Window do
   @spec resident?(t()) :: boolean()
   def resident?(%__MODULE__{render_cache: cache}), do: RenderCache.resident?(cache)
 
+  @doc "Arms or disarms residence promotion for the next frame (#2679 first-paint-then-promote)."
+  @spec set_residence_armed(t(), boolean()) :: t()
+  def set_residence_armed(%__MODULE__{render_cache: cache} = window, armed?)
+      when is_boolean(armed?) do
+    %{window | render_cache: RenderCache.set_residence_armed(cache, armed?)}
+  end
+
+  @doc "Returns whether residence was armed by the previous eligible frame (#2679)."
+  @spec residence_armed?(t()) :: boolean()
+  def residence_armed?(%__MODULE__{render_cache: cache}), do: RenderCache.residence_armed?(cache)
+
   @doc """
   Records the committed viewport top of a frontend-reported free-scroll (#2661).
 

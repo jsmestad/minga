@@ -101,22 +101,26 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
       assert scroll.content_w >= 1
     end
 
-    test "full-document residence is dormant by default and keeps windowed overscan (#2653)" do
-      # residence ships off (resident_store_max_lines default 0); even a large
-      # nowrap buffer stays windowed unless residence is explicitly enabled.
-      # Config-enabled residence behavior is covered in the async:false threshold
-      # suite (full_document_residence_threshold_test.exs).
+    test "full-document residence is on by default for a nowrap buffer under the ceiling (#2679)" do
+      # Residence now ships on (resident_store_max_lines default 65_535), so a
+      # nowrap buffer under the ceiling becomes fully resident regardless of scroll
+      # position. This test relies on the default rather than mutating global config
+      # so it stays async-safe; threshold-boundary and disabled-path behavior are
+      # covered in the async:false suite (full_document_residence_threshold_test.exs).
       state = base_state(rows: 10, cols: 40, content: long_content(500))
       win_id = state.workspace.windows.active
       window = Map.fetch!(state.workspace.windows.map, win_id)
       window = Window.set_viewport(window, Viewport.put_top(window.viewport, 250))
       state = put_in(state.workspace.windows.map[win_id], window)
 
+      # First-paint-then-promote (#2679): the first frame renders windowed (arming
+      # promotion), the second promotes to full residence.
+      {_scrolls, state, _layout} = run_through_scroll(state)
       {scrolls, _state, _layout} = run_through_scroll(state)
       [{_win_id, scroll}] = Map.to_list(scrolls)
 
-      assert scroll.full_residence == false
-      assert Enum.count(scroll.lines) < 500
+      assert scroll.full_residence == true
+      assert Enum.count(scroll.lines) == 500
     end
 
     test "wrap_on is false when folds produce a visible_line_map" do
