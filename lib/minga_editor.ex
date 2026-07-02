@@ -16,7 +16,6 @@ defmodule MingaEditor do
   alias MingaEditor.Agent.Events
   alias MingaEditor.Agent.UIState
   alias Minga.Buffer
-  alias Minga.Config
   alias Minga.Editing.Completion
   alias Minga.Events, as: EventBus
   alias Minga.Git
@@ -392,10 +391,10 @@ defmodule MingaEditor do
     caps = Startup.fetch_capabilities(state.port_manager)
     Startup.apply_gui_defaults(caps, EditorState.options_server(state))
 
-    line_spacing = Config.get(:line_spacing) || 1.0
-    effective_height = Viewport.effective_rows(height, line_spacing)
-
-    vp = Viewport.new(effective_height, width)
+    # The frontend already floored content pixels into rows-that-fit at the
+    # current presentation metrics (ADR-0001); the BEAM lays out in the rows it
+    # is given and derives nothing from line spacing.
+    vp = Viewport.new(height, width)
 
     new_state = %{
       (state
@@ -428,10 +427,9 @@ defmodule MingaEditor do
   end
 
   def handle_info({:minga_input, {:resize, width, height}}, state) do
-    line_spacing = Config.get(:line_spacing) || 1.0
-    effective_height = Viewport.effective_rows(height, line_spacing)
-
-    vp = Viewport.new(effective_height, width)
+    # `height` is content rows-that-fit as measured by the frontend at the
+    # current presentation metrics (ADR-0001). No spacing arithmetic here.
+    vp = Viewport.new(height, width)
 
     new_state =
       state

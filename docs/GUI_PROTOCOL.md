@@ -25,6 +25,8 @@ ready: opcode(1) + width(2) + height(2) + caps_version(1) + caps_len(1) + caps_d
 caps_data: frontend_type(1) + color_depth(1) + unicode_width(1) + image_support(1) + float_support(1) + text_rendering(1)
 ```
 
+`width`/`height` are **content cells at the current presentation metrics**, not pixels. A native GUI computes rows-that-fit with a single floor where the pixels live (`rows = floor(content_pixels / (cell_height × line_spacing))`) and reports that in `ready` and every `resize` (0x02). The BEAM lays out in exactly those rows and performs no line-spacing arithmetic of its own. See the `0x02 resize` section in `PROTOCOL.md` and `docs/adr/0001-frontend-owns-row-fit.md`.
+
 The `frontend_type` byte describes the rendering surface, not the product implementation:
 
 | Value | Type | Description |
@@ -1350,7 +1352,7 @@ opcode(1=0x92) + payload_length(2=0x0002) + spacing_x100(2)
 Fields:
 - `spacing_x100`: the spacing multiplier times 100 as a 16-bit unsigned integer. For example, 1.0 is 100, 1.2 is 120, 1.5 is 150.
 
-The frontend uses this to compute `displayCellH = cellH * (spacing_x100 / 100.0)` for all row positioning. The BEAM adjusts its viewport row count using the same multiplier, so scrolling math stays correct on both sides.
+The frontend uses this to compute `displayCellH = cellH * (spacing_x100 / 100.0)` for all row positioning. Line spacing is a **draw-time rendering hint only**: it has zero influence on BEAM-side layout, viewport, or scroll math. When the spacing changes at runtime the frontend recomputes its own rows-that-fit (`floor(content_pixels / (cell_height × line_spacing))`, one floor, where the pixels live) and sends an ordinary `resize` (0x02) carrying the new content row count. The BEAM lays out in exactly those rows and never divides by the multiplier itself. This resize does not re-trigger `0x92` (the emit is fingerprint-gated on the spacing value), so there is no feedback loop. See `docs/adr/0001-frontend-owns-row-fit.md`.
 
 ## Behavioral Contract
 
