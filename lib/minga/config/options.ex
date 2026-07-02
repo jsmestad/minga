@@ -135,6 +135,7 @@ defmodule Minga.Config.Options do
           | :picker_backdrop
           | :resident_store_max_lines
           | :resident_store_max_bytes
+          | :max_file_size
 
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
@@ -425,7 +426,9 @@ defmodule Minga.Config.Options do
     {:resident_store_max_lines, :non_neg_integer, 0,
      "Maximum buffer line count that still receives full-document row residence (glitch-free fast scrolling). 0 disables full residence entirely (the default); larger buffers fall back to viewport-windowed emit."},
     {:resident_store_max_bytes, :pos_integer, 10_485_760,
-     "Maximum buffer byte size that still receives full-document row residence. Residence is gated by both this and :resident_store_max_lines, so it stays off while :resident_store_max_lines is 0."}
+     "Maximum buffer byte size that still receives full-document row residence. Residence is gated by both this and :resident_store_max_lines, so it stays off while :resident_store_max_lines is 0."},
+    {:max_file_size, :pos_integer, 10_485_760,
+     "Maximum file size in bytes Minga will open. Files larger than this show a text-only \"file too large\" surface instead of loading a buffer; the size is checked with a pre-read stat, so the gap buffer and tree-sitter parser never touch the content. Default 10 MB."}
   ]
   @valid_names Enum.map(@option_specs, &elem(&1, 0))
 

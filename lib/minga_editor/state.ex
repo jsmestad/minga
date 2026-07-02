@@ -1572,10 +1572,12 @@ defmodule MingaEditor.State do
   def start_buffer(file_path, options_server \\ Minga.Config.Options.default_server()) do
     options_server = normalize_options_server(options_server)
 
-    DynamicSupervisor.start_child(
-      Minga.Buffer.Supervisor,
-      {Minga.Buffer, file_path: file_path, options_server: options_server}
-    )
+    MingaEditor.HugeFile.guard(file_path, options_server, fn ->
+      DynamicSupervisor.start_child(
+        Minga.Buffer.Supervisor,
+        {Minga.Buffer, file_path: file_path, options_server: options_server}
+      )
+    end)
   end
 
   # ── Buffer monitoring ──────────────────────────────────────────────────────

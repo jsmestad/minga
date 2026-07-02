@@ -27,6 +27,7 @@ That's it. Save the file and restart Minga. Your options take effect immediately
 | `:autopair` | boolean | `true` | Auto-insert matching brackets and quotes |
 | `:autopair_block` | boolean | `true` | Auto-insert language-aware block-closing keywords on Enter |
 | `:scroll_margin` | non-negative integer | `5` | Lines to keep visible above/below cursor when scrolling |
+| `:max_file_size` | positive integer | `10485760` | Maximum file size in bytes Minga will open. Larger files show a text-only "file too large" surface instead of loading a buffer; checked with a pre-read stat so the gap buffer and tree-sitter parser never touch the content. Default 10 MB. Raise it for the brave. |
 | `:theme` | theme name atom | `:astrodark` | Color theme (see [Themes](#themes) below) |
 | `:indent_with` | `:spaces` or `:tabs` | `:spaces` | Whether to indent with spaces or tab characters |
 | `:trim_trailing_whitespace` | boolean | `false` | Strip trailing whitespace on save |
