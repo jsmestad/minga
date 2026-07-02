@@ -694,9 +694,11 @@ defmodule MingaEditor.Commands do
   def start_buffer(file_path, options_server \\ nil) do
     options_server = normalize_options_server(options_server)
 
-    Buffer.ensure_for_path(file_path, Minga.Events.default_registry(),
-      options_server: options_server
-    )
+    MingaEditor.HugeFile.guard(file_path, options_server, fn ->
+      Buffer.ensure_for_path(file_path, Minga.Events.default_registry(),
+        options_server: options_server
+      )
+    end)
   end
 
   @doc "Adds a new buffer to the list and makes it active."
