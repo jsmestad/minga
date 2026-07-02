@@ -35,6 +35,17 @@ defmodule Minga.RenderModel.UI.AgentChat do
 
   Bare body tuples (without an `id` wrapper) are also accepted and encode with
   ID `0`, matching the historical wire behaviour.
+
+  ## Resident transcript
+
+  `messages` is the windowed, byte-capped tail the legacy `gui_agent_chat` (0x78)
+  section carries. `resident_messages` is the full, un-windowed transcript (same
+  `message()` shape) that rides the dedicated `gui_agent_transcript` (0x86)
+  stream so the frontend can scroll the whole session from local data (#2654).
+  `transcript_epoch` is an opaque change token that flips on structural change
+  (session switch, display-start/compaction), driving the resident stream's
+  full-replace-vs-append decision. Both default empty/zero so surfaces that do
+  not populate them keep the historical single-transport behaviour.
   """
 
   alias __MODULE__.ApprovalView
@@ -71,18 +82,24 @@ defmodule Minga.RenderModel.UI.AgentChat do
   @type t :: %__MODULE__{
           visible?: boolean(),
           status: atom(),
-          model_name: String.t(),
-          thinking_level: String.t(),
-          prompt: String.t(),
-          prompt_line_count: non_neg_integer(),
-          prompt_cursor_line: non_neg_integer(),
-          prompt_cursor_col: non_neg_integer(),
+          # Chrome fields are typed `| nil` defensively: defstruct defaults are non-nil
+          # and the builder always populates them, but the encoder retains `|| default`
+          # fallbacks for directly-constructed structs (tests do this), so the types
+          # reflect what the encoder actually tolerates rather than builder guarantees.
+          model_name: String.t() | nil,
+          thinking_level: String.t() | nil,
+          prompt: String.t() | nil,
+          prompt_line_count: non_neg_integer() | nil,
+          prompt_cursor_line: non_neg_integer() | nil,
+          prompt_cursor_col: non_neg_integer() | nil,
           prompt_vim_mode: atom() | nil,
-          prompt_visible_rows: non_neg_integer(),
+          prompt_visible_rows: non_neg_integer() | nil,
           prompt_completion: PromptCompletion.t() | nil,
           help_visible?: boolean(),
           help_groups: [{String.t(), [{String.t(), String.t()}]}],
-          messages: [message()]
+          messages: [message()],
+          resident_messages: [message()],
+          transcript_epoch: non_neg_integer()
         }
 
   defstruct visible?: false,
@@ -98,7 +115,9 @@ defmodule Minga.RenderModel.UI.AgentChat do
             prompt_completion: nil,
             help_visible?: false,
             help_groups: [],
-            messages: []
+            messages: [],
+            resident_messages: [],
+            transcript_epoch: 0
 
   defmodule PromptCompletion do
     @moduledoc """
@@ -113,8 +132,9 @@ defmodule Minga.RenderModel.UI.AgentChat do
             type: :mention | :slash,
             candidates: [candidate()],
             selected: non_neg_integer(),
-            anchor_line: non_neg_integer(),
-            anchor_col: non_neg_integer()
+            # nil-tolerated by the GUI encoder's `anchor_line || 0` fallback.
+            anchor_line: non_neg_integer() | nil,
+            anchor_col: non_neg_integer() | nil
           }
 
     defstruct type: :mention,

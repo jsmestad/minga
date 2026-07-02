@@ -18,6 +18,9 @@ struct ProtocolCommandSizeTests {
         #expect(commandSize([OP_SET_TITLE, 0x00, 0x03, 0x61, 0x62, 0x63]) == .sized(6))
         // len32.
         #expect(commandSize([OP_GUI_FILE_TREE, 0, 0, 0, 2, 0xAA, 0xBB]) == .sized(7))
+        // #2654 slice 1: the resident agent transcript is len32-framed, so a
+        // frontend that does not yet consume it still sizes and skips it cleanly.
+        #expect(commandSize([OP_GUI_AGENT_TRANSCRIPT, 0, 0, 0, 2, 0xAA, 0xBB]) == .sized(7))
     }
 
     @Test func sizesFrameTransactionMarkers() {

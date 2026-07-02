@@ -9,26 +9,29 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
   product module. The editor builder pre-resolves every agent struct into the
   core views (`AgentChat.ToolCallView`, `AgentChat.ApprovalView`,
   `AgentChat.Usage`) before they reach this encoder.
+
+  This is the legacy transcript transport: the `@section_chat_messages` section
+  carries a windowed, byte-capped tail of the conversation. The full resident
+  transcript now rides the dedicated `gui_agent_transcript` (0x86) stream via
+  `Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder` (#2654). Both share the
+  per-message body codec in `Minga.Frontend.Adapter.GUI.AgentChatMessageCodec`
+  so the two transports encode each message with byte-identical bytes. The
+  `messages` field this encoder consumes stays windowed until the frontends
+  switch to consuming 0x86 (#2654 slices 2-3); the resident transcript never
+  passes through this section.
   """
 
-  import Bitwise
-
+  alias Minga.Frontend.Adapter.GUI.AgentChatMessageCodec
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.AgentChat
-  alias Minga.RenderModel.UI.AgentChat.ApprovalView
-  alias Minga.RenderModel.UI.AgentChat.MarkdownBlock
   alias Minga.RenderModel.UI.AgentChat.PromptCompletion
-  alias Minga.RenderModel.UI.AgentChat.ToolCallView
-  alias Minga.RenderModel.UI.AgentChat.Usage
 
   @op_gui_agent_chat Opcodes.gui_agent_chat()
 
   @max_u16 65_535
 
   @chat_message_limit 100
-  @max_chat_text_bytes 60_000
-  @truncation_suffix "\n… [truncated]"
   @chat_payload_omission_notice "Some agent chat content was omitted because the GUI chat payload exceeded 65KB."
 
   # gui_agent_chat sections
@@ -43,13 +46,22 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
 
   @spec encode(AgentChat.t(), Caches.t()) :: {binary() | nil, Caches.t()}
   def encode(%AgentChat{} = model, %Caches{} = caches) do
-    fp = :erlang.phash2(model)
+    fp = :erlang.phash2(chrome_fingerprint_model(model))
 
     if fp != caches.last_agent_chat_fp do
       {encode_binary(model), %{caches | last_agent_chat_fp: fp}}
     else
       {nil, caches}
     end
+  end
+
+  # The 0x78 chrome frame is independent of the resident transcript stream (0x86),
+  # so exclude the resident-only fields from its change-detection fingerprint. A
+  # streaming append that lands beyond the windowed `messages` tail must not force
+  # a redundant chrome re-send.
+  @spec chrome_fingerprint_model(AgentChat.t()) :: AgentChat.t()
+  defp chrome_fingerprint_model(%AgentChat{} = model) do
+    %{model | resident_messages: [], transcript_epoch: 0}
   end
 
   @spec encode_binary(AgentChat.t()) :: binary()
@@ -59,8 +71,8 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
 
   defp encode_binary(%AgentChat{visible?: true} = model) do
     status_byte = encode_agent_chat_status(model.status)
-    model_bytes = utf8_prefix_bytes(model.model_name || "", @max_u16 - 2)
-    prompt_bytes = utf8_prefix_bytes(model.prompt || "", @max_u16 - 9)
+    model_bytes = AgentChatMessageCodec.utf8_prefix_bytes(model.model_name || "", @max_u16 - 2)
+    prompt_bytes = AgentChatMessageCodec.utf8_prefix_bytes(model.prompt || "", @max_u16 - 9)
 
     prompt_line_count = model.prompt_line_count || 1
     prompt_cursor_line = model.prompt_cursor_line || 0
@@ -71,7 +83,9 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
     completion_bytes = encode_prompt_completion(model.prompt_completion)
     pending_bytes = <<0::8>>
     help_bytes = encode_help_overlay(model.help_visible?, model.help_groups)
-    thinking_bytes = utf8_prefix_bytes(model.thinking_level || "", @max_u16 - 2)
+
+    thinking_bytes =
+      AgentChatMessageCodec.utf8_prefix_bytes(model.thinking_level || "", @max_u16 - 2)
 
     messages_payload = encode_chat_messages(model.messages)
 
@@ -170,55 +184,21 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
 
   defp encode_help_overlay(_, _), do: <<0::8>>
 
-  @spec preview_kind_byte(atom()) :: non_neg_integer()
-  defp preview_kind_byte(:diff), do: 1
-  defp preview_kind_byte(:command), do: 2
-  defp preview_kind_byte(:target), do: 3
-  defp preview_kind_byte(_), do: 0
-
-  @spec preview_text_bytes(term(), pos_integer()) :: binary()
-  defp preview_text_bytes(value, max_length) when is_binary(value) do
-    value |> String.slice(0, max_length) |> :erlang.iolist_to_binary()
-  end
-
-  defp preview_text_bytes(value, max_length) do
-    value
-    |> inspect(printable_limit: max_length)
-    |> String.slice(0, max_length)
-    |> :erlang.iolist_to_binary()
-  end
-
-  @spec encode_preview_payload(ToolCallView.preview_kind(), [String.t()]) :: binary()
-  defp encode_preview_payload(kind, lines) when is_list(lines) do
-    line_binaries =
-      lines
-      |> Enum.take(20)
-      |> Enum.map(fn line ->
-        bytes = preview_text_bytes(line, 1_000)
-        <<byte_size(bytes)::16, bytes::binary>>
-      end)
-
-    IO.iodata_to_binary([
-      <<preview_kind_byte(kind)::8, Enum.count(line_binaries)::16>> | line_binaries
-    ])
-  end
-
-  defp encode_preview_payload(kind, _lines), do: <<preview_kind_byte(kind)::8, 0::16>>
-
-  # ── Chat messages ──
-
-  @typedoc "A chat message that may carry pre-computed styled runs."
-  @type gui_chat_message :: AgentChat.message_body()
+  # ── Chat messages (windowed, byte-capped legacy section) ──
 
   @spec encode_chat_messages([AgentChat.message()]) :: binary()
   defp encode_chat_messages(messages) do
-    messages = messages |> recent_chat_messages() |> Enum.map(&bound_chat_message_text/1)
+    messages =
+      messages
+      |> recent_chat_messages()
+      |> Enum.map(&AgentChatMessageCodec.bound_message_text/1)
+
     payload = encode_chat_messages_payload(messages)
 
     if byte_size(payload) <= @max_u16 do
       payload
     else
-      stripped_messages = Enum.map(messages, &strip_chat_message_links/1)
+      stripped_messages = Enum.map(messages, &AgentChatMessageCodec.strip_message_links/1)
       stripped_payload = encode_chat_messages_payload(stripped_messages)
 
       if byte_size(stripped_payload) <= @max_u16 do
@@ -238,27 +218,6 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
     |> Enum.take(@chat_message_limit)
     |> Enum.reverse()
   end
-
-  @spec bound_chat_message_text(AgentChat.message()) :: AgentChat.message()
-  defp bound_chat_message_text({id, msg}) when is_integer(id),
-    do: {id, bound_chat_message_text(msg)}
-
-  defp bound_chat_message_text({:user, text}),
-    do: {:user, utf8_prefix_bytes(text, @max_chat_text_bytes)}
-
-  defp bound_chat_message_text({:user, text, attachments}),
-    do: {:user, utf8_prefix_bytes(text, @max_chat_text_bytes), attachments}
-
-  defp bound_chat_message_text({:assistant, text}),
-    do: {:assistant, utf8_prefix_bytes(text, @max_chat_text_bytes)}
-
-  defp bound_chat_message_text({:thinking, text, collapsed}),
-    do: {:thinking, utf8_prefix_bytes(text, @max_chat_text_bytes), collapsed}
-
-  defp bound_chat_message_text({:system, text, level}),
-    do: {:system, utf8_prefix_bytes(text, @max_chat_text_bytes), level}
-
-  defp bound_chat_message_text(msg), do: msg
 
   @spec fit_chat_messages_to_payload_limit([AgentChat.message()]) :: [AgentChat.message()]
   defp fit_chat_messages_to_payload_limit(messages) do
@@ -296,7 +255,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
 
   @spec encode_chat_messages_payload([AgentChat.message()]) :: binary()
   defp encode_chat_messages_payload(messages) do
-    msg_binaries = Enum.map(messages, &encode_chat_message/1)
+    msg_binaries = Enum.map(messages, &AgentChatMessageCodec.encode_message/1)
 
     framed_messages =
       Enum.map(msg_binaries, fn msg ->
@@ -304,343 +263,6 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
       end)
 
     IO.iodata_to_binary([<<0xFF::8, 1::8, Enum.count(msg_binaries)::16>> | framed_messages])
-  end
-
-  @spec strip_chat_message_links(AgentChat.message()) :: AgentChat.message()
-  defp strip_chat_message_links({id, msg}) when is_integer(id),
-    do: {id, strip_chat_message_links(msg)}
-
-  defp strip_chat_message_links({:styled_assistant, styled_lines}) do
-    {:styled_assistant, strip_styled_lines_links(styled_lines)}
-  end
-
-  defp strip_chat_message_links({:styled_tool_call, tc, styled_lines}) do
-    {:styled_tool_call, tc, strip_styled_lines_links(styled_lines)}
-  end
-
-  defp strip_chat_message_links({:assistant_markdown, blocks}) do
-    {:assistant_markdown, strip_markdown_block_links(blocks)}
-  end
-
-  defp strip_chat_message_links(msg), do: msg
-
-  @spec strip_styled_lines_links([AgentChat.styled_line()]) :: [AgentChat.styled_line()]
-  defp strip_styled_lines_links(styled_lines) do
-    Enum.map(styled_lines, &strip_styled_line_links/1)
-  end
-
-  @spec strip_styled_line_links(AgentChat.styled_line()) :: AgentChat.styled_line()
-  defp strip_styled_line_links(runs), do: Enum.map(runs, &strip_styled_run_link/1)
-
-  @spec strip_styled_run_link(AgentChat.styled_run()) :: AgentChat.styled_run()
-  defp strip_styled_run_link({text, fg, bg, flags, _url}), do: {text, fg, bg, flags &&& 0xF3}
-  defp strip_styled_run_link(run), do: run
-
-  @spec strip_markdown_block_links([MarkdownBlock.t()]) :: [MarkdownBlock.t()]
-  defp strip_markdown_block_links(blocks) do
-    Enum.map(blocks, fn %MarkdownBlock{} = block ->
-      MarkdownBlock.map_lines(block, &strip_styled_line_links/1)
-    end)
-  end
-
-  # Unwrap {id, message} tuple: prefix with the stable uint32 ID, then encode the message.
-  @spec encode_chat_message(AgentChat.message()) :: binary()
-  defp encode_chat_message({id, msg}) when is_integer(id) do
-    <<id::32, encode_chat_message_body(msg)::binary>>
-  end
-
-  # Bare messages (no ID wrapper) for backward compat. ID defaults to 0.
-  defp encode_chat_message(msg) when is_tuple(msg) do
-    <<0::32, encode_chat_message_body(msg)::binary>>
-  end
-
-  @spec encode_chat_message_body(gui_chat_message()) :: binary()
-  defp encode_chat_message_body({:user, text}) do
-    text_bytes = :erlang.iolist_to_binary([text])
-    <<0x01::8, byte_size(text_bytes)::32, text_bytes::binary>>
-  end
-
-  defp encode_chat_message_body({:user, text, _attachments}) do
-    text_bytes = :erlang.iolist_to_binary([text])
-    <<0x01::8, byte_size(text_bytes)::32, text_bytes::binary>>
-  end
-
-  defp encode_chat_message_body({:assistant, text}) do
-    text_bytes = :erlang.iolist_to_binary([text])
-    <<0x02::8, byte_size(text_bytes)::32, text_bytes::binary>>
-  end
-
-  # Styled assistant message: opcode 0x07, line_count::16, then per line:
-  # run_count::16, then per run: text_len::16, text, fg::24, bg::24, flags::8,
-  # and when flags bit 0x08 is set: url_len::16, url.
-  defp encode_chat_message_body({:styled_assistant, styled_lines}) do
-    line_binaries =
-      Enum.map(styled_lines, fn runs ->
-        run_binaries = Enum.map(runs, &encode_styled_run/1)
-        [<<Enum.count(runs)::16>> | run_binaries]
-      end)
-
-    IO.iodata_to_binary([<<0x07::8, Enum.count(styled_lines)::16>> | line_binaries])
-  end
-
-  # Assistant markdown message: opcode 0x0A, block_count::16, then semantic blocks.
-  defp encode_chat_message_body({:assistant_markdown, blocks}) do
-    bounded_blocks = bound_markdown_blocks(blocks)
-
-    IO.iodata_to_binary([
-      <<0x0A::8, Enum.count(bounded_blocks)::16>>,
-      Enum.map(bounded_blocks, &encode_markdown_block/1)
-    ])
-  end
-
-  defp encode_chat_message_body({:thinking, text, collapsed}) do
-    collapsed_byte = if collapsed, do: 1, else: 0
-    text_bytes = :erlang.iolist_to_binary([text])
-    <<0x03::8, collapsed_byte::8, byte_size(text_bytes)::32, text_bytes::binary>>
-  end
-
-  defp encode_chat_message_body({:tool_call, %ToolCallView{} = tc}) do
-    name_bytes = :erlang.iolist_to_binary([tc.name])
-    summary_bytes = utf8_prefix_bytes(tc.summary || "", @max_chat_text_bytes)
-    result_bytes = :erlang.iolist_to_binary([tc.result])
-    status_byte = tool_call_status_byte(tc.status)
-
-    duration = tc.duration_ms || 0
-    error_byte = if tc.is_error, do: 1, else: 0
-    collapsed_byte = if tc.collapsed, do: 1, else: 0
-    auto_approved_byte = auto_approved_scope_byte(tc.auto_approved_scope)
-
-    preview_bytes = encode_preview_payload(tc.preview_kind, tc.preview_lines)
-
-    <<0x04::8, status_byte::8, error_byte::8, collapsed_byte::8, duration::32,
-      byte_size(name_bytes)::16, name_bytes::binary, byte_size(summary_bytes)::16,
-      summary_bytes::binary, byte_size(result_bytes)::32, result_bytes::binary,
-      auto_approved_byte::8, preview_bytes::binary>>
-  end
-
-  # Approval tool call: inline approval card attached to the tool message.
-  # Sub-opcode 0x09. Layout:
-  #   0x09, status::8, name_len::16, name, summary_len::16, summary,
-  #   tool_call_id_len::16, tool_call_id, preview_kind::8,
-  #   preview_line_count::16, [line_len::16, line]*
-  defp encode_chat_message_body({:approval_tool_call, %ApprovalView{} = approval}) do
-    name_bytes = preview_text_bytes(approval.name, 120)
-    summary_bytes = approval_summary_bytes(approval.preview_kind, approval.summary)
-    id_bytes = preview_text_bytes(approval.tool_call_id, 120)
-
-    line_binaries =
-      approval.preview_lines
-      |> Enum.take(20)
-      |> Enum.map(fn line ->
-        bytes = preview_text_bytes(line, 1_000)
-        <<byte_size(bytes)::16, bytes::binary>>
-      end)
-
-    preview_bytes = IO.iodata_to_binary(line_binaries)
-
-    <<0x09::8, 0::8, byte_size(name_bytes)::16, name_bytes::binary, byte_size(summary_bytes)::16,
-      summary_bytes::binary, byte_size(id_bytes)::16, id_bytes::binary,
-      preview_kind_byte(approval.preview_kind)::8, Enum.count(line_binaries)::16,
-      preview_bytes::binary>>
-  end
-
-  # Styled tool call: same header fields as tool_call (0x04), but result is styled runs.
-  # Sub-opcode 0x08. Layout:
-  #   0x08, status::8, error::8, collapsed::8, duration::32, name_len::16, name,
-  #   summary_len::16, summary, line_count::16, then per line: run_count::16,
-  #   then per run: text_len::16, text, fg::24, bg::24, flags::8,
-  #   and when flags bit 0x08 is set: url_len::16, url.
-  #   auto_approved::8 and preview payload are appended after the styled line payload.
-  defp encode_chat_message_body({:styled_tool_call, %ToolCallView{} = tc, styled_lines}) do
-    name_bytes = :erlang.iolist_to_binary([tc.name])
-    summary_bytes = utf8_prefix_bytes(tc.summary || "", @max_chat_text_bytes)
-    status_byte = tool_call_status_byte(tc.status)
-
-    duration = tc.duration_ms || 0
-    error_byte = if tc.is_error, do: 1, else: 0
-    collapsed_byte = if tc.collapsed, do: 1, else: 0
-    auto_approved_byte = auto_approved_scope_byte(tc.auto_approved_scope)
-
-    line_binaries =
-      Enum.map(styled_lines, fn runs ->
-        run_binaries = Enum.map(runs, &encode_styled_run/1)
-        [<<Enum.count(runs)::16>> | run_binaries]
-      end)
-
-    preview_bytes = encode_preview_payload(tc.preview_kind, tc.preview_lines)
-
-    IO.iodata_to_binary([
-      <<0x08::8, status_byte::8, error_byte::8, collapsed_byte::8, duration::32,
-        byte_size(name_bytes)::16, name_bytes::binary, byte_size(summary_bytes)::16,
-        summary_bytes::binary, Enum.count(styled_lines)::16>>,
-      line_binaries,
-      <<auto_approved_byte::8>>,
-      preview_bytes
-    ])
-  end
-
-  defp encode_chat_message_body({:system, text, level}) do
-    level_byte = if level == :error, do: 1, else: 0
-    text_bytes = :erlang.iolist_to_binary([text])
-    <<0x05::8, level_byte::8, byte_size(text_bytes)::32, text_bytes::binary>>
-  end
-
-  defp encode_chat_message_body({:usage, %Usage{} = u}) do
-    cost_int = round((u.cost || 0.0) * 1_000_000)
-    <<0x06::8, u.input::32, u.output::32, u.cache_read::32, u.cache_write::32, cost_int::32>>
-  end
-
-  @spec tool_call_status_byte(ToolCallView.status()) :: 0 | 1 | 2
-  defp tool_call_status_byte(:running), do: 0
-  defp tool_call_status_byte(:complete), do: 1
-  defp tool_call_status_byte(:error), do: 2
-
-  @spec approval_summary_bytes(ApprovalView.preview_kind(), String.t()) :: binary()
-  defp approval_summary_bytes(:command, summary) do
-    utf8_prefix_bytes(summary || "", @max_chat_text_bytes)
-  end
-
-  defp approval_summary_bytes(_kind, summary) do
-    utf8_prefix_bytes(summary || "", 300)
-  end
-
-  @spec auto_approved_scope_byte(ToolCallView.auto_approved_scope()) :: 0 | 1 | 2
-  defp auto_approved_scope_byte(:session), do: 1
-  defp auto_approved_scope_byte(:turn), do: 2
-  defp auto_approved_scope_byte(nil), do: 0
-
-  @spec bound_markdown_blocks([MarkdownBlock.t()]) :: [MarkdownBlock.t()]
-  defp bound_markdown_blocks(blocks) do
-    Enum.map(blocks, fn %MarkdownBlock{} = block ->
-      MarkdownBlock.map_lines(block, &bound_styled_line/1, 500)
-    end)
-  end
-
-  @spec bound_styled_line(AgentChat.styled_line()) :: AgentChat.styled_line()
-  defp bound_styled_line(runs), do: Enum.map(runs, &bound_styled_run/1)
-
-  @spec bound_styled_run(AgentChat.styled_run()) :: AgentChat.styled_run()
-  defp bound_styled_run({text, fg, bg, flags, url}),
-    do: {utf8_prefix_bytes(text, 2_000), fg, bg, flags, url}
-
-  defp bound_styled_run({text, fg, bg, flags}),
-    do: {utf8_prefix_bytes(text, 2_000), fg, bg, flags}
-
-  @spec encode_markdown_block(MarkdownBlock.t()) :: binary()
-  defp encode_markdown_block(%MarkdownBlock{kind: :paragraph} = block),
-    do: encode_block_header(block, 0x01) <> encode_styled_lines(block.lines)
-
-  defp encode_markdown_block(%MarkdownBlock{kind: :heading} = block),
-    do:
-      encode_block_header(block, 0x02) <>
-        <<min(block.level, 255)::8>> <> encode_styled_lines(block.lines)
-
-  defp encode_markdown_block(%MarkdownBlock{kind: :list_item} = block) do
-    ordered = if block.ordered, do: 1, else: 0
-
-    encode_block_header(block, 0x03) <>
-      <<min(block.indent, 255)::8, ordered::8, block.ordinal::32>> <>
-      encode_styled_lines(block.lines)
-  end
-
-  defp encode_markdown_block(%MarkdownBlock{kind: :blockquote} = block),
-    do: encode_block_header(block, 0x04) <> encode_styled_lines(block.lines)
-
-  defp encode_markdown_block(%MarkdownBlock{kind: :rule} = block),
-    do: encode_block_header(block, 0x05)
-
-  defp encode_markdown_block(%MarkdownBlock{kind: :spacer} = block),
-    do: encode_block_header(block, 0x06) <> <<min(block.height, 255)::8>>
-
-  defp encode_markdown_block(%MarkdownBlock{kind: :code_block} = block) do
-    language = utf8_prefix_bytes(block.language || "", @max_u16)
-    label = utf8_prefix_bytes(block.label || "", @max_u16)
-    target_path = utf8_prefix_bytes(block.target_path || "", @max_u16)
-
-    IO.iodata_to_binary([
-      encode_block_header(block, 0x07),
-      <<byte_size(language)::16, language::binary, byte_size(label)::16, label::binary,
-        byte_size(target_path)::16, target_path::binary, block.capability_flags::8>>,
-      encode_styled_lines(block.lines)
-    ])
-  end
-
-  @spec encode_block_header(MarkdownBlock.t(), non_neg_integer()) :: binary()
-  defp encode_block_header(%MarkdownBlock{} = block, kind),
-    do: <<block.id::32, kind::8, block.flags::8>>
-
-  @spec encode_styled_lines([AgentChat.styled_line()]) :: binary()
-  defp encode_styled_lines(styled_lines) do
-    line_binaries =
-      Enum.map(styled_lines, fn runs ->
-        run_binaries = Enum.map(runs, &encode_styled_run/1)
-        [<<Enum.count(runs)::16>> | run_binaries]
-      end)
-
-    IO.iodata_to_binary([<<Enum.count(styled_lines)::16>> | line_binaries])
-  end
-
-  @spec encode_styled_run(AgentChat.styled_run()) :: binary()
-  defp encode_styled_run({text, fg, bg, flags, url}) do
-    text_bytes = utf8_prefix_bytes(text, @max_u16)
-    url_bytes = :erlang.iolist_to_binary([url])
-
-    if byte_size(url_bytes) <= @max_u16 do
-      link_flags = flags ||| 0x08
-
-      <<byte_size(text_bytes)::16, text_bytes::binary, fg::24, bg::24, link_flags::8,
-        byte_size(url_bytes)::16, url_bytes::binary>>
-    else
-      non_link_flags = flags &&& 0xF3
-      encode_styled_run({text, fg, bg, non_link_flags})
-    end
-  end
-
-  defp encode_styled_run({text, fg, bg, flags}) do
-    text_bytes = utf8_prefix_bytes(text, @max_u16)
-    safe_flags = flags &&& 0xF7
-    <<byte_size(text_bytes)::16, text_bytes::binary, fg::24, bg::24, safe_flags::8>>
-  end
-
-  # ── UTF-8 truncation ──
-
-  @spec utf8_prefix_bytes(String.t(), non_neg_integer()) :: binary()
-  defp utf8_prefix_bytes(text, max_bytes) when byte_size(text) <= max_bytes do
-    if String.valid?(text) do
-      :erlang.iolist_to_binary([text])
-    else
-      valid_utf8_prefix(text, max_bytes)
-    end
-  end
-
-  defp utf8_prefix_bytes(text, max_bytes) do
-    suffix_bytes = :erlang.iolist_to_binary([@truncation_suffix])
-
-    if max_bytes <= byte_size(suffix_bytes) do
-      valid_utf8_prefix(text, max_bytes)
-    else
-      valid_utf8_prefix(text, max_bytes - byte_size(suffix_bytes)) <> suffix_bytes
-    end
-  end
-
-  @spec valid_utf8_prefix(String.t(), non_neg_integer()) :: binary()
-  defp valid_utf8_prefix(_text, 0), do: ""
-
-  defp valid_utf8_prefix(text, max_bytes) do
-    text
-    |> binary_part(0, min(max_bytes, byte_size(text)))
-    |> trim_invalid_utf8_suffix()
-  end
-
-  @spec trim_invalid_utf8_suffix(binary()) :: binary()
-  defp trim_invalid_utf8_suffix(<<>>), do: ""
-
-  defp trim_invalid_utf8_suffix(prefix) do
-    if String.valid?(prefix) do
-      prefix
-    else
-      prefix |> binary_part(0, byte_size(prefix) - 1) |> trim_invalid_utf8_suffix()
-    end
   end
 
   # ── Enum byte helpers ──

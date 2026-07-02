@@ -154,6 +154,7 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       gui_float_popup: 0x83,
       gui_split_separators: 0x84,
       gui_git_status: 0x85,
+      gui_agent_transcript: 0x86,
       gui_agent_context: 0x88,
       gui_change_summary: 0x89,
       gui_hover_action: 0x96,

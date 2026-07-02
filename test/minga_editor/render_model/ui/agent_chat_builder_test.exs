@@ -121,6 +121,43 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
            ]
   end
 
+  test "build/1 keeps the full transcript resident even when messages are windowed (#2654)" do
+    session = fake_session_pid()
+
+    panel =
+      synced_panel(
+        [
+          {:assistant, "first"},
+          {:assistant, "second"},
+          {:assistant, "third"}
+        ],
+        scroll: Scroll.new(2) |> Scroll.update_metrics(5, 1),
+        styled_messages: [nil, nil, nil]
+      )
+
+    model =
+      context(session, panel)
+      |> AgentChatBuilder.build()
+
+    # The legacy 0x78 `messages` field stays windowed (drops "third")...
+    assert Enum.map(model.messages, &message_summary/1) == [
+             {1, :assistant, "first"},
+             {2, :assistant, "second"}
+           ]
+
+    # ...while the resident 0x86 transcript carries the whole conversation,
+    # including the message the scroll viewport windowed out.
+    assert [
+             {1, :assistant, "first"},
+             {2, :assistant, "second"},
+             {3, :assistant, "third"},
+             {_, :system, "Agent UI registry online"}
+           ] = Enum.map(model.resident_messages, &message_summary/1)
+
+    # transcript_epoch is a stable, non-nil change token for the session.
+    assert is_integer(model.transcript_epoch)
+  end
+
   test "build/1 sends connect-provider empty state for first-run no-credential sessions" do
     session = fake_session_pid()
 
