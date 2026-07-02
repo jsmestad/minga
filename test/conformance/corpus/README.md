@@ -109,5 +109,5 @@ Input resolution seams (AC2):
 - **drag_selection_active_offset** — a drag pointer under a nonzero local offset normalizes to the visually-correct buffer line.
 - **hml_after_scroll_report** — an H/M/L echo commit (same anchor, same `scroll_seq`) moves only the cursor and keeps the offset (no re-anchor storm).
 - **scroll_seq_strictly_newer_discard** — a strictly-newer `scroll_seq` with an identical anchor key forces a discard (Go-skipped: windowed contract).
-- **same_top_jump_documented_limitation** — a same-top jump with no `scroll_seq` bump does NOT discard (the documented current limitation; the future bump flips this expectation).
+- **same_top_jump_discards** — an authoritative jump (zz already centered, a search hit already on screen) lands on the previous top but still bumps `scroll_seq` via the explicit authoritative-scroll marker, so the frontend discards its local offset (#2652).
 - **wheel_momentum_during_ctrl_d** — momentum keeps feeding local offset while ctrl-d's authoritative anchors land on the same top; each `scroll_seq` bump discards the leftover offset (Go-skipped: windowed contract).

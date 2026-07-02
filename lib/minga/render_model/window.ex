@@ -8,7 +8,7 @@ defmodule Minga.RenderModel.Window do
 
   `content_digest` is a BEAM-internal, never-encoded incremental fingerprint of the row set (`Minga.RenderModel.Window.ContentDigest`), set only on the full-document residence path. When present, the GUI adapter's content frame-emit gate uses it instead of hashing the whole `rows` list, so an edit-frame gate is O(changed rows) rather than O(document). It is `nil` off the residence path, where the adapter keeps hashing `rows` directly.
 
-  `scroll_seq` is the monotonic scroll-authority sequence (#2661) encoded onto `ScrollPresentation`. It advances only when the committed viewport top changes for a reason other than an echoed frontend scroll report (see `MingaEditor.Window.settle_scroll_seq/2`), so frontends can distinguish a BEAM-initiated jump racing a local scroll from the frontend's own reported delta being reflected back.
+  `scroll_seq` is the monotonic scroll-authority sequence (#2661) encoded onto `ScrollPresentation`. It advances when the committed viewport top changes for a reason other than an echoed frontend scroll report, or when an authoritative viewport-jump command explicitly marked the window even though the top was unchanged (#2652); see `MingaEditor.Window.settle_scroll_seq/1`. Frontends discard their local offset on any increase, so a BEAM-initiated jump racing a local scroll is distinguished from the frontend's own reported delta being reflected back.
   """
 
   alias __MODULE__.{

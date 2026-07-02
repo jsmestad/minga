@@ -1857,6 +1857,22 @@ defmodule MingaEditor.State do
   end
 
   @doc """
+  Marks the active window's next rendered frame as an authoritative BEAM scroll
+  that must discard any frontend-held local offset (#2652).
+
+  Called by command handlers for view-centering, page-scroll, document-jump,
+  goto-line, and search-jump commands. No-op when no window is active. See
+  `MingaEditor.Window.mark_authoritative_scroll/1` for the marker lifecycle.
+  """
+  @spec mark_authoritative_scroll(t()) :: t()
+  def mark_authoritative_scroll(%__MODULE__{} = state) do
+    case active_window_struct(state) do
+      nil -> state
+      %Window{id: win_id} -> update_window(state, win_id, &Window.mark_authoritative_scroll/1)
+    end
+  end
+
+  @doc """
   Finds the agent chat window in the windows map.
 
   Returns `{win_id, window}` or `nil` if no agent chat window exists.

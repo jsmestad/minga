@@ -258,6 +258,56 @@ defmodule MingaEditor.WindowTest do
 
       assert Window.scroll_seq(window) == 2
     end
+
+    test "new windows default to authoritative_scroll_seq 0" do
+      assert Window.authoritative_scroll_seq(make_window()) == 0
+    end
+
+    test "mark_authoritative_scroll/1 increments the request counter" do
+      window = make_window() |> Window.mark_authoritative_scroll()
+      assert Window.authoritative_scroll_seq(window) == 1
+      assert Window.authoritative_scroll_seq(Window.mark_authoritative_scroll(window)) == 2
+    end
+
+    test "settle_scroll_seq/1 bumps for a marked authoritative jump even when the top is unchanged" do
+      # The same-top gap (#2652): zz while already centered, a search hit already
+      # on screen. The top never moves, so only the marker forces the bump.
+      window =
+        make_window()
+        |> at_top(3)
+        |> Window.settle_scroll_seq()
+        |> Window.mark_authoritative_scroll()
+        |> Window.settle_scroll_seq()
+
+      assert Window.scroll_seq(window) == 1
+    end
+
+    test "settle_scroll_seq/1 does not latch: a marked jump bumps once, then stops" do
+      window =
+        make_window()
+        |> at_top(3)
+        |> Window.settle_scroll_seq()
+        |> Window.mark_authoritative_scroll()
+        |> Window.settle_scroll_seq()
+
+      assert Window.scroll_seq(window) == 1
+
+      # No new mark and no top move on the following frames: the sequence holds.
+      window = window |> Window.settle_scroll_seq() |> Window.settle_scroll_seq()
+      assert Window.scroll_seq(window) == 1
+    end
+
+    test "settle_scroll_seq/1 bumps a marked jump that also moves the top exactly once" do
+      window =
+        make_window()
+        |> at_top(0)
+        |> Window.settle_scroll_seq()
+        |> at_top(20)
+        |> Window.mark_authoritative_scroll()
+        |> Window.settle_scroll_seq()
+
+      assert Window.scroll_seq(window) == 1
+    end
   end
 
   defp cached_window(window) do

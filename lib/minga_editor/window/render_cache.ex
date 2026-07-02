@@ -81,7 +81,8 @@ defmodule MingaEditor.Window.RenderCache do
           resident_build: MingaEditor.RenderModel.Window.ResidentBuild.t() | nil,
           resident: boolean(),
           scroll_seq: non_neg_integer(),
-          scroll_seq_last_top: integer() | nil
+          scroll_seq_last_top: integer() | nil,
+          scroll_seq_last_authoritative: non_neg_integer()
         }
 
   defstruct dirty_lines: %{},
@@ -101,7 +102,8 @@ defmodule MingaEditor.Window.RenderCache do
             resident_build: nil,
             resident: false,
             scroll_seq: 0,
-            scroll_seq_last_top: nil
+            scroll_seq_last_top: nil,
+            scroll_seq_last_authoritative: 0
 
   @doc """
   Returns a fresh cache with all lines dirty.
@@ -455,33 +457,55 @@ defmodule MingaEditor.Window.RenderCache do
   def scroll_seq(%__MODULE__{scroll_seq: seq}), do: seq
 
   @doc """
-  Advances the scroll-authority sequence when the committed top made a genuine
-  BEAM-initiated move, and records the new baseline.
+  Advances the scroll-authority sequence when this frame made a genuine
+  BEAM-initiated scroll, and records the new baselines.
 
-  `scroll_seq` bumps only when `top` differs from both the previous committed top
-  (`scroll_seq_last_top`) and the frontend-reported free-scroll top (`echo_top`).
-  A move to the echoed top is the frontend's own report reflected back (a pure
-  free scroll or a scrolloff-breach cursor drag, both of which share the reported
-  top), so it does not advance the sequence. A move to any other top is an
-  authoritative anchor change (a jump command or a cursor-must-stay-visible
-  re-attach) and does advance it. The first settle after a fresh cache (nil
-  baseline) only records the baseline. Because both the counter and the baseline
-  live here and the render cache is written back to the live window, the
-  counter is monotonic per rendered lineage; overlapped in-flight frames can
-  emit duplicate or regressing values, which the frontend tolerates (strict
-  greater-than check, with anchor-key and reset_required covering discards).
+  `scroll_seq` bumps when EITHER of two independent signals fires:
 
-  Note: this cannot detect a jump that lands exactly on the previous or echoed
-  top. That same-top case is intended to be covered by an explicit bump at the
-  authoritative jump call sites in the future; it is not implemented yet.
+  * **Authoritative marker (#2652):** `authoritative_seq` (the editor-owned
+    `Window.authoritative_scroll_seq` request counter) moved past the last count
+    this cache settled against. Command handlers increment it for the commands
+    that must always discard a frontend offset (view centering `zz`/`zt`/`zb`,
+    page scroll `ctrl-d`/`ctrl-u`/`ctrl-f`/`ctrl-b`, `gg`/`G`, goto-line, and
+    search jumps). This is the only signal that catches a jump landing exactly on
+    the previous or echoed top (`zz` while already centered, a search hit already
+    on screen), which the top comparison below cannot see.
+
+  * **Top comparison:** `top` differs from both the previous committed top
+    (`scroll_seq_last_top`) and the frontend-reported free-scroll top
+    (`echo_top`). A move to the echoed top is the frontend's own report reflected
+    back (a pure free scroll or a scrolloff-breach cursor drag), so it does not
+    advance the sequence. The first settle after a fresh cache (nil baseline) does
+    not bump via this path (it only records the baseline).
+
+  The two signals are OR-combined into one bump, so a jump that both marks the
+  counter and moves the top advances `scroll_seq` exactly once, never twice.
+
+  The marker cannot latch: the render cache overwrites `scroll_seq_last_authoritative`
+  to the observed counter on every settle rather than the counter being cleared on
+  the live window, so a single increment causes at most one bump per rendered
+  lineage. Because the counter (`scroll_seq`) and both baselines live here and the
+  render cache is written back to the live window, the sequence is monotonic per
+  rendered lineage; overlapped in-flight frames can emit duplicate or regressing
+  values, which the frontend tolerates (strict greater-than check, with anchor-key
+  and reset_required covering discards).
   """
-  @spec settle_scroll_seq(t(), integer(), integer() | nil) :: t()
-  def settle_scroll_seq(%__MODULE__{} = cache, top, echo_top) when is_integer(top) do
-    bump? =
+  @spec settle_scroll_seq(t(), integer(), integer() | nil, non_neg_integer()) :: t()
+  def settle_scroll_seq(%__MODULE__{} = cache, top, echo_top, authoritative_seq)
+      when is_integer(top) and is_integer(authoritative_seq) do
+    authoritative_move? = authoritative_seq != cache.scroll_seq_last_authoritative
+
+    top_move? =
       not is_nil(cache.scroll_seq_last_top) and top != cache.scroll_seq_last_top and
         top != echo_top
 
-    seq = if bump?, do: cache.scroll_seq + 1, else: cache.scroll_seq
-    %{cache | scroll_seq: seq, scroll_seq_last_top: top}
+    seq = if authoritative_move? or top_move?, do: cache.scroll_seq + 1, else: cache.scroll_seq
+
+    %{
+      cache
+      | scroll_seq: seq,
+        scroll_seq_last_top: top,
+        scroll_seq_last_authoritative: authoritative_seq
+    }
   end
 end

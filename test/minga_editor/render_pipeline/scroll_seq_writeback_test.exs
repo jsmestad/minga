@@ -13,6 +13,9 @@ defmodule MingaEditor.RenderPipeline.ScrollSeqWritebackTest do
   * `resident` and `scroll_seq` live in the render cache and survive the writeback;
   * `scroll_seq` stays monotonic across frames (its baseline is written back too);
   * a wheel echo does not advance `scroll_seq`, but a later jump does;
+  * an authoritative-scroll marker (#2652) set on the live window rides into the
+    snapshot, bumps `scroll_seq` exactly once even with an unchanged top, and does
+    not latch on the following frame;
   * `scroll_echo_top` is editor-owned and is NOT clobbered by a stale writeback.
 
   The "pipeline step" here is the exact pair of render-cache mutations that
@@ -102,6 +105,41 @@ defmodule MingaEditor.RenderPipeline.ScrollSeqWritebackTest do
     assert live_window(state, win_id).scroll_echo_top == 9
   end
 
+  test "an authoritative-scroll marker rides into the snapshot, bumps scroll_seq exactly once, and cannot latch" do
+    state = resident_gui_state()
+    win_id = state.workspace.windows.active
+
+    # Frame 1: baseline. No marker, no move.
+    state = render_writeback(state)
+    assert Window.scroll_seq(live_window(state, win_id)) == 0
+
+    # A command handler marks the LIVE window (editor process) for an authoritative
+    # jump that lands on exactly the current top: the viewport never moves (this is
+    # the same-top gap #2652 closes). Only the marker can force the discard.
+    state = mark_authoritative(state, win_id)
+    assert Window.authoritative_scroll_seq(live_window(state, win_id)) == 1
+
+    # Frame 2: the marker is editor-owned top-level Window state, so it survives
+    # into the render snapshot. settle bumps scroll_seq once and the render cache
+    # baseline (scroll_seq_last_authoritative) rides back through
+    # merge_renderer_window. The top never moved.
+    state = render_writeback(state)
+    assert Window.scroll_seq(live_window(state, win_id)) == 1
+    assert live_window(state, win_id).viewport.top == 0
+
+    # Frame 3: no new mark, no top move. The marker provably cannot latch: the
+    # written-back baseline equals the live request counter, so a subsequent
+    # unrelated frame does NOT bump again.
+    state = render_writeback(state)
+    assert Window.scroll_seq(live_window(state, win_id)) == 1
+
+    # A second authoritative jump advances the request counter again and bumps
+    # exactly once more, proving the baseline round-trips correctly.
+    state = mark_authoritative(state, win_id)
+    state = render_writeback(state)
+    assert Window.scroll_seq(live_window(state, win_id)) == 2
+  end
+
   # ── Helpers ────────────────────────────────────────────────────────────────
 
   defp resident_gui_state do
@@ -160,5 +198,9 @@ defmodule MingaEditor.RenderPipeline.ScrollSeqWritebackTest do
 
   defp put_scroll_echo_top(state, win_id, top) do
     EditorState.update_window(state, win_id, &Window.mark_scroll_echo(&1, top))
+  end
+
+  defp mark_authoritative(state, win_id) do
+    EditorState.update_window(state, win_id, &Window.mark_authoritative_scroll/1)
   end
 end
