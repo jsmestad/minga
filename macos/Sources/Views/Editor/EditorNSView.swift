@@ -1552,10 +1552,19 @@ final class EditorNSView: MTKView {
             scrollTargetCellPosition = nil
             resetScrollTrackingState()
         } else if event.momentumPhase == .began || event.momentumPhase == .changed {
-            // Momentum resuming after finger-lift: cancel the tentative settle started at
-            // `.ended` so the animator and live momentum don't both drive the offset. The
-            // unconfirmed-line bookkeeping is preserved for continuity; momentum re-latches
-            // the target below via establishSmoothScrollTargetIfNeeded.
+            // Momentum resuming after finger-lift: hand the tentative settle's residual back to
+            // the accumulator so the sub-cell fractional position continues seamlessly instead of
+            // restarting from 0 (a one-frame backward hitch of up to a cell). Then cancel the
+            // tentative settle so the animator and live momentum don't both drive the offset. The
+            // unconfirmed-line bookkeeping is preserved by cancelScrollAnimations; momentum
+            // re-latches the target below via establishSmoothScrollTargetIfNeeded.
+            if let residual = Self.momentumResumeAccumulatorResidual(
+                settleActive: scrollSettleAnimator.isActive,
+                settleOffset: scrollSettleAnimator.offset(),
+                cellHeight: effectiveCellHeight
+            ) {
+                scrollAccumulator.pixelOffsetY = residual
+            }
             cancelScrollAnimations()
         }
 
@@ -2041,6 +2050,23 @@ final class EditorNSView: MTKView {
         if current >= 0 && next < 0 { return 0 }
         if current <= 0 && next > 0 { return 0 }
         return next
+    }
+
+    /// Residual to hand back to the accumulator when momentum resumes after a tentative settle.
+    ///
+    /// The gesture-end tentative settle resets the accumulator and moves the sub-cell residual into
+    /// the settle animator. If momentum follows (a flick), that residual must be restored so the
+    /// fractional position continues from where the finger left off; otherwise the accumulator
+    /// restarts at 0 and the content hitches backward by up to a cell on the first momentum frame.
+    ///
+    /// Only a valid sub-cell trackpad residual `[0, cellHeight)` is returned. A discrete-tick settle
+    /// seeds an out-of-range offset (about `±cellHeight`); returning that would push the accumulator
+    /// past a cell boundary and emit a spurious scroll event, so it is left to reset (nil). Pure for
+    /// testability.
+    nonisolated static func momentumResumeAccumulatorResidual(settleActive: Bool, settleOffset: CGFloat, cellHeight: CGFloat) -> CGFloat? {
+        guard settleActive, cellHeight > 0 else { return nil }
+        guard settleOffset >= 0, settleOffset < cellHeight else { return nil }
+        return settleOffset
     }
 
     nonisolated static func presentationScrollBoundaryAvailability(

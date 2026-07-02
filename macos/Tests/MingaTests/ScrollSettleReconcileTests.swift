@@ -100,6 +100,73 @@ struct DiscreteTickEasingTests {
     }
 }
 
+@Suite("Momentum resume restores the tentative-settle residual (no handoff hitch)")
+struct MomentumResumeResidualTests {
+
+    /// Composed fractional offset the renderer would show: accumulator residual plus the
+    /// unconfirmed-line compensation. (Elastic is 0 during an ordinary in-content settle.)
+    private func composedOffset(pixelOffsetY: CGFloat, unconfirmed: Int, cellHeight: CGFloat) -> CGFloat {
+        pixelOffsetY + CGFloat(unconfirmed) * cellHeight
+    }
+
+    @Test("a live sub-cell residual is handed back so momentum continues from it")
+    func restoresSubCellResidual() {
+        let cell: CGFloat = 16
+        // Finger-lift: tentative settle active carrying an 11pt residual (barely decayed).
+        let residual = EditorNSView.momentumResumeAccumulatorResidual(settleActive: true, settleOffset: 11, cellHeight: cell)
+        #expect(residual == 11)
+
+        // Without the restore the accumulator would start at 0 and the first momentum frame would
+        // render the fractional short by the whole residual: a backward hitch.
+        let unconfirmed = 2
+        let lastLive = composedOffset(pixelOffsetY: 11, unconfirmed: unconfirmed, cellHeight: cell)
+
+        // With the restore, seed the accumulator, then apply the first momentum delta (4pt down).
+        var acc = ScrollAccumulator()
+        acc.pixelOffsetY = residual!
+        let events = acc.accumulateVertical(deltaY: -4, cellHeight: cell) // down = content up
+        #expect(events.isEmpty) // 11 + 4 = 15 stays within the current cell
+        let firstMomentum = composedOffset(pixelOffsetY: acc.pixelOffsetY, unconfirmed: unconfirmed, cellHeight: cell)
+
+        // The offset advances forward by exactly the momentum delta: no backward jump.
+        #expect(firstMomentum == lastLive + 4)
+        #expect(firstMomentum > lastLive)
+    }
+
+    @Test("crossing a cell boundary during resume emits the line event at the true position")
+    func restoreKeepsBoundaryAligned() {
+        let cell: CGFloat = 16
+        let residual = EditorNSView.momentumResumeAccumulatorResidual(settleActive: true, settleOffset: 12, cellHeight: cell)!
+        var acc = ScrollAccumulator()
+        acc.pixelOffsetY = residual
+        // A 6pt down delta pushes 12 + 6 = 18 across the 16pt boundary: exactly one line event,
+        // remainder 2pt. Restarting from 0 would have needed 16pt to cross, mis-timing the report.
+        let events = acc.accumulateVertical(deltaY: -6, cellHeight: cell)
+        #expect(events == [.scrollDown])
+        #expect(abs(acc.pixelOffsetY - 2) < 1e-9)
+    }
+
+    @Test("no active settle hands back nothing")
+    func inactiveSettleReturnsNil() {
+        #expect(EditorNSView.momentumResumeAccumulatorResidual(settleActive: false, settleOffset: 8, cellHeight: 16) == nil)
+    }
+
+    @Test("a discrete-tick settle offset is out of range and is not handed back")
+    func discreteResidualRejected() {
+        let cell: CGFloat = 16
+        // A discrete down-tick seeds residual near -cell; an up-tick near +cell. Both must be
+        // rejected so momentum resume never pushes the accumulator across a boundary spuriously.
+        #expect(EditorNSView.momentumResumeAccumulatorResidual(settleActive: true, settleOffset: -cell, cellHeight: cell) == nil)
+        #expect(EditorNSView.momentumResumeAccumulatorResidual(settleActive: true, settleOffset: cell, cellHeight: cell) == nil)
+        #expect(EditorNSView.momentumResumeAccumulatorResidual(settleActive: true, settleOffset: cell + 3, cellHeight: cell) == nil)
+    }
+
+    @Test("a zero cell height is rejected")
+    func zeroCellRejected() {
+        #expect(EditorNSView.momentumResumeAccumulatorResidual(settleActive: true, settleOffset: 0, cellHeight: 0) == nil)
+    }
+}
+
 @Suite("Presentation offset reaches the settling pane (render-path gate)")
 struct PresentationScrollWindowResolutionTests {
 
