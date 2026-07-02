@@ -71,6 +71,20 @@ public final class AgentChatState {
     public var thinkingLevel: String = "medium"
     public var prompt: String = ""
     public var messages: [ChatMessageEntry] = []
+
+    /// Transcript epoch of the resident stream currently held in `messages` (0x86).
+    /// A `full_replace` carrying a new epoch swaps the array wholesale and adopts
+    /// the epoch; an `append` must match this epoch or it is dropped as stale.
+    public private(set) var transcriptEpoch: UInt32 = 0
+
+    /// Whether a `full_replace` has seeded the resident transcript. Appends before
+    /// the first full_replace are dropped until a full_replace arrives.
+    private var hasTranscript: Bool = false
+
+    /// True when older messages sit outside the resident byte-cap window (0x86
+    /// `truncated` flag). A UI hint that the visible history is not the full session.
+    public private(set) var transcriptTruncated: Bool = false
+
     public var helpVisible: Bool = false
     public var helpGroups: [HelpGroup] = []
 
@@ -134,7 +148,13 @@ public final class AgentChatState {
         }
     }
 
-    public func update(visible: Bool, status: UInt8, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptVimMode: UInt8, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, helpVisible: Bool, helpGroups: [HelpGroup], rawMessages: [Wire.ChatMessage]) {
+    /// Updates the chat chrome (visibility, status, model, prompt, help).
+    ///
+    /// Message content is no longer sourced here (#2654 slice 2): the resident
+    /// transcript arrives on the 0x86 stream via `applyTranscript`. `rawMessages`
+    /// is retained only as an optional seeding convenience for previews and tests;
+    /// when nil (the live 0x78 path), `messages` is left untouched.
+    public func update(visible: Bool, status: UInt8, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptVimMode: UInt8, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, helpVisible: Bool, helpGroups: [HelpGroup], rawMessages: [Wire.ChatMessage]? = nil) {
         self.visible = visible
         self.status = status
         self.model = model
@@ -149,30 +169,78 @@ public final class AgentChatState {
         self.promptVersion += 1
         self.helpVisible = helpVisible
         self.helpGroups = helpGroups
-        self.messages = rawMessages.map { msg in
-            let id = Int(msg.beamId)
-            switch msg.content {
-            case .user(let text):
-                return .user(id: id, text: text)
-            case .assistant(let text):
-                return .assistant(id: id, text: text)
-            case .styledAssistant(let lines):
-                return .styledAssistant(id: id, lines: lines)
-            case .assistantMarkdown(let blocks):
-                return .assistantMarkdown(id: id, blocks: blocks)
-            case .thinking(let text, let collapsed):
-                return .thinking(id: id, text: text, collapsed: collapsed)
-            case .toolCall(let name, let summary, let st, let isError, let collapsed, let autoApprovedScope, let duration, let result, let previewKind, let previewLines):
-                return .toolCall(id: id, name: name, summary: summary, status: st, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result, previewKind: previewKind, previewLines: previewLines)
-            case .styledToolCall(let name, let summary, let st, let isError, let collapsed, let autoApprovedScope, let duration, let resultLines, let previewKind, let previewLines):
-                return .styledToolCall(id: id, name: name, summary: summary, status: st, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, resultLines: resultLines, previewKind: previewKind, previewLines: previewLines)
-            case .approvalToolCall(let name, let summary, let toolCallId, let previewKind, let previewLines):
-                return .approvalToolCall(id: id, name: name, summary: summary, toolCallId: toolCallId, previewKind: previewKind, previewLines: previewLines)
-            case .system(let text, let isError):
-                return .system(id: id, text: text, isError: isError)
-            case .usage(let inp, let outp, let cacheR, let cacheW, let costM):
-                return .usage(id: id, input: inp, output: outp, cacheRead: cacheR, cacheWrite: cacheW, costMicros: costM)
-            }
+        if let rawMessages {
+            self.messages = rawMessages.map(Self.mapMessage)
+        }
+    }
+
+    /// Applies a resident transcript frame (0x86, #2654 slice 2).
+    ///
+    /// `mode` 0 = full_replace: swap the message array atomically and adopt the
+    /// carried epoch (a session switch or structural change; the bottom-anchored
+    /// view pins to the newest content, which is the right per-epoch reset).
+    ///
+    /// `mode` 1 = append: a front-eviction plus id-keyed suffix upsert. First
+    /// `trimFront` messages are dropped from the FRONT of the resident store
+    /// (resident byte-cap eviction). Then, over the remainder, the first
+    /// `baseCount` messages stay put and everything past them is replaced by
+    /// `rawMessages`. `baseCount` is the encoder's unchanged-leading (content-hash)
+    /// prefix length over the remainder, NOT the client's resident count, so
+    /// `baseCount < remainder.count` is the normal streaming in-place patch, not a
+    /// dropped frame. Kept entries keep their stable `ChatMessageEntry.id`, so the
+    /// `ForEach` diff preserves the reader's scroll position. A frame is dropped
+    /// (await the next full_replace) only when it cannot be applied safely: before
+    /// any full_replace, an epoch mismatch, or the remainder being shorter than
+    /// `baseCount` (a genuinely dropped frame).
+    public func applyTranscript(mode: UInt8, epoch: UInt32, truncated: Bool = false, trimFront: Int = 0, baseCount: Int, messages rawMessages: [Wire.ChatMessage]) {
+        let mapped = rawMessages.map(Self.mapMessage)
+
+        if mode == 0 {
+            self.messages = mapped
+            self.transcriptEpoch = epoch
+            self.hasTranscript = true
+            self.transcriptTruncated = truncated
+            self.promptVersion += 1
+            return
+        }
+
+        // Desync (drop the delta, await the next full_replace) exactly when the store
+        // is shorter than trim_front + base_count, per GUI_PROTOCOL.md 0x86.
+        guard hasTranscript, epoch == transcriptEpoch, trimFront >= 0, baseCount >= 0,
+              messages.count >= trimFront + baseCount else { return }
+
+        // Evict trim_front from the front, keep [0, base_count) of the remainder, upsert.
+        let kept = messages[trimFront ..< (trimFront + baseCount)]
+        self.messages = Array(kept) + mapped
+        self.transcriptTruncated = truncated
+        self.promptVersion += 1
+    }
+
+    /// Maps a decoded wire message onto its displayable `ChatMessageEntry`.
+    /// Shared by the transcript stream (0x86) and the preview/test seeding path.
+    static func mapMessage(_ msg: Wire.ChatMessage) -> ChatMessageEntry {
+        let id = Int(msg.beamId)
+        switch msg.content {
+        case .user(let text):
+            return .user(id: id, text: text)
+        case .assistant(let text):
+            return .assistant(id: id, text: text)
+        case .styledAssistant(let lines):
+            return .styledAssistant(id: id, lines: lines)
+        case .assistantMarkdown(let blocks):
+            return .assistantMarkdown(id: id, blocks: blocks)
+        case .thinking(let text, let collapsed):
+            return .thinking(id: id, text: text, collapsed: collapsed)
+        case .toolCall(let name, let summary, let st, let isError, let collapsed, let autoApprovedScope, let duration, let result, let previewKind, let previewLines):
+            return .toolCall(id: id, name: name, summary: summary, status: st, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result, previewKind: previewKind, previewLines: previewLines)
+        case .styledToolCall(let name, let summary, let st, let isError, let collapsed, let autoApprovedScope, let duration, let resultLines, let previewKind, let previewLines):
+            return .styledToolCall(id: id, name: name, summary: summary, status: st, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, resultLines: resultLines, previewKind: previewKind, previewLines: previewLines)
+        case .approvalToolCall(let name, let summary, let toolCallId, let previewKind, let previewLines):
+            return .approvalToolCall(id: id, name: name, summary: summary, toolCallId: toolCallId, previewKind: previewKind, previewLines: previewLines)
+        case .system(let text, let isError):
+            return .system(id: id, text: text, isError: isError)
+        case .usage(let inp, let outp, let cacheR, let cacheW, let costM):
+            return .usage(id: id, input: inp, output: outp, cacheRead: cacheR, cacheWrite: cacheW, costMicros: costM)
         }
     }
 
@@ -181,5 +249,8 @@ public final class AgentChatState {
         messages = []
         helpVisible = false
         helpGroups = []
+        transcriptEpoch = 0
+        hasTranscript = false
+        transcriptTruncated = false
     }
 }

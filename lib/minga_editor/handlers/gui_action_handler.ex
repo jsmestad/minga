@@ -20,6 +20,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias Minga.LSP.SyncServer, as: LspSyncServer
 
   alias MingaEditor.Agent.SemanticUI.Registry, as: SemanticUIRegistry
+  alias MingaEditor.Agent.UIState
   alias MingaEditor.AsyncAction
   alias MingaEditor.BottomPanel
   alias MingaEditor.Commands
@@ -235,6 +236,20 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     do: dispatch_to_active_shell(state, :agent_request_changes)
 
   defp dispatch_action(state, :agent_dismiss), do: dispatch_to_active_shell(state, :agent_dismiss)
+
+  # Agent-chat pin intents (#2654 slice 2). A frontend that owns its transcript
+  # scroll locally reports crossing the bottom threshold; the BEAM tracks the
+  # pin flag as the authority without moving the offset, so a round-trip
+  # frontend's concrete scroll position is untouched. No render is forced: the
+  # reporting frontend already reflects the change locally, and the flag only
+  # affects the auto-follow decision on the next streaming frame.
+  defp dispatch_action(state, :chat_scrolled_away_from_bottom) do
+    AgentAccess.update_agent_ui(state, &UIState.set_pinned(&1, false))
+  end
+
+  defp dispatch_action(state, :chat_returned_to_bottom) do
+    AgentAccess.update_agent_ui(state, &UIState.set_pinned(&1, true))
+  end
 
   defp dispatch_action(state, {:select_tab, id}) do
     EditorState.switch_tab(state, id)

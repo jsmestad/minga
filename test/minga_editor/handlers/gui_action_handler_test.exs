@@ -415,6 +415,65 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
                     }}
   end
 
+  describe "agent chat pin intents (#2654)" do
+    alias MingaEditor.Agent.UIState
+    alias MingaEditor.State.AgentAccess
+
+    test "chat_scrolled_away_from_bottom unpins without moving the offset", %{
+      sidebar_registry: table
+    } do
+      # Seed a pinned scroll that sits at a concrete offset so the test can prove
+      # the offset a round-trip frontend relies on is left untouched.
+      seeded =
+        base_state(table)
+        |> AgentAccess.update_agent_ui(fn ui ->
+          %{
+            ui
+            | panel: %{
+                ui.panel
+                | scroll: Minga.Editing.set_pinned(Minga.Editing.Scroll.new(5), true)
+              }
+          }
+        end)
+
+      assert AgentAccess.agent_ui(seeded).panel.scroll.pinned == true
+
+      scrolled = GuiActionHandler.dispatch(seeded, :chat_scrolled_away_from_bottom)
+      scroll = AgentAccess.agent_ui(scrolled).panel.scroll
+
+      assert scroll.pinned == false
+      assert scroll.offset == 5
+    end
+
+    test "chat_returned_to_bottom re-pins without moving the offset", %{sidebar_registry: table} do
+      seeded =
+        base_state(table)
+        |> AgentAccess.update_agent_ui(fn ui ->
+          %{ui | panel: %{ui.panel | scroll: Minga.Editing.Scroll.new(9)}}
+        end)
+
+      assert AgentAccess.agent_ui(seeded).panel.scroll.pinned == false
+
+      returned = GuiActionHandler.dispatch(seeded, :chat_returned_to_bottom)
+      scroll = AgentAccess.agent_ui(returned).panel.scroll
+
+      assert scroll.pinned == true
+      assert scroll.offset == 9
+    end
+
+    test "UIState.set_pinned toggles the pin flag without touching the offset" do
+      state = UIState.new()
+      unpinned = %{state | panel: %{state.panel | scroll: Minga.Editing.Scroll.new(3)}}
+
+      assert UIState.set_pinned(unpinned, true).panel.scroll == %{
+               unpinned.panel.scroll
+               | pinned: true
+             }
+
+      assert UIState.set_pinned(unpinned, true).panel.scroll.offset == 3
+    end
+  end
+
   defp base_state(sidebar_registry, opts \\ []) do
     opts = Keyword.put(opts, :sidebar_registry, sidebar_registry)
     state = TestHelpers.base_state(opts)

@@ -283,4 +283,14 @@ struct GUIActionEncoderTests {
         #expect(spy.guiActions.count == 2)
         #expect(spy.pasteCalls.count == 1)
     }
+
+    @Test("chat pin intents record scrolled-away and returned-to-bottom")
+    func chatPinIntents() {
+        let spy = SpyEncoder()
+        let encoder: InputEncoder = spy
+        encoder.sendChatScrolledAwayFromBottom()
+        encoder.sendChatReturnedToBottom()
+
+        #expect(spy.guiActions == [.chatScrolledAwayFromBottom, .chatReturnedToBottom])
+    }
 }

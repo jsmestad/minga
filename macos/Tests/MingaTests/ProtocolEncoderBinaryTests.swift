@@ -257,6 +257,19 @@ struct EncoderGUIActionTests {
         #expect(readU32(payload, 2) == 99)
     }
 
+    @Test("chat pin intents encode opcode and sub-opcode with no payload")
+    func chatPinIntentLayout() {
+        let awayPayload = captureFrame { $0.sendChatScrolledAwayFromBottom() }
+        #expect(awayPayload.count == 2)
+        #expect(awayPayload[0] == OP_GUI_ACTION)
+        #expect(awayPayload[1] == GUI_ACTION_CHAT_SCROLLED_AWAY_FROM_BOTTOM)
+
+        let returnedPayload = captureFrame { $0.sendChatReturnedToBottom() }
+        #expect(returnedPayload.count == 2)
+        #expect(returnedPayload[0] == OP_GUI_ACTION)
+        #expect(returnedPayload[1] == GUI_ACTION_CHAT_RETURNED_TO_BOTTOM)
+    }
+
     @Test("tab_reorder encodes action type, tab ID, and visible index")
     func tabReorderLayout() {
         let payload = captureFrame { $0.sendTabReorder(id: 42, newIndex: 3) }

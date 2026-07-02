@@ -121,6 +121,11 @@ public protocol InputEncoder: AnyObject, Sendable {
     func sendAgentDismiss()
     func sendChangeSummaryClick(index: UInt32)
     func sendScrollToLine(line: UInt32)
+
+    // Agent chat pin intents (#2654 slice 2): reported when a frontend that owns
+    // its transcript scroll locally crosses the bottom threshold.
+    func sendChatScrolledAwayFromBottom()
+    func sendChatReturnedToBottom()
     func sendFoldToggleAtLine(windowId: UInt16, bufferLine: UInt32)
 
     // Native settings actions
@@ -295,6 +300,8 @@ public final class NullInputEncoder: InputEncoder, @unchecked Sendable {
     public func sendAgentDismiss() {}
     public func sendChangeSummaryClick(index: UInt32) {}
     public func sendScrollToLine(line: UInt32) {}
+    public func sendChatScrolledAwayFromBottom() {}
+    public func sendChatReturnedToBottom() {}
     public func sendFoldToggleAtLine(windowId: UInt16, bufferLine: UInt32) {}
     public func sendObservatoryInspect(pid: String) {}
 }

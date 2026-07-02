@@ -3071,3 +3071,210 @@ struct GUIGitStatusDecoderTests {
         }
     }
 }
+
+// MARK: - gui_agent_transcript (0x86) decode
+
+/// Decoder tests for the resident agent-chat transcript stream (#2654 slice 2).
+/// The per-message body reuses the exact 0x78 message codec, so these fixtures
+/// build bodies without the leading id (which 0x86 carries in its entry header).
+@Suite("gui_agent_transcript decode (0x86)")
+struct AgentTranscriptDecoderTests {
+    /// Builds a full_replace 0x86 frame: opcode + payload_len(4) + header
+    /// (version(1)=1 + mode(1)=0 + epoch(4) + truncated(1)) + count(4) + entries.
+    private func buildFullReplace(epoch: UInt32, truncated: Bool = false,
+                                  entries: [(id: UInt32, body: Data)]) -> Data {
+        var payload = Data()
+        payload.append(1) // version
+        payload.append(0) // mode = full_replace
+        appendU32(&payload, epoch)
+        payload.append(truncated ? 1 : 0)
+        appendU32(&payload, UInt32(entries.count))
+        appendEntries(&payload, entries)
+        return frame(payload)
+    }
+
+    /// Builds an append 0x86 frame: header + trim_front(4) + base_count(4) + count(4) + entries.
+    private func buildAppend(epoch: UInt32, truncated: Bool = false, trimFront: UInt32,
+                             baseCount: UInt32, entries: [(id: UInt32, body: Data)]) -> Data {
+        var payload = Data()
+        payload.append(1) // version
+        payload.append(1) // mode = append
+        appendU32(&payload, epoch)
+        payload.append(truncated ? 1 : 0)
+        appendU32(&payload, trimFront)
+        appendU32(&payload, baseCount)
+        appendU32(&payload, UInt32(entries.count))
+        appendEntries(&payload, entries)
+        return frame(payload)
+    }
+
+    private func appendEntries(_ payload: inout Data, _ entries: [(id: UInt32, body: Data)]) {
+        for entry in entries {
+            appendU32(&payload, entry.id)
+            appendU32(&payload, UInt32(entry.body.count))
+            payload.append(entry.body)
+        }
+    }
+
+    private func frame(_ payload: Data) -> Data {
+        var data = Data()
+        data.append(OP_GUI_AGENT_TRANSCRIPT)
+        appendU32(&data, UInt32(payload.count))
+        data.append(payload)
+        return data
+    }
+
+    /// user message body (sub-opcode 0x01), matching the shared codec minus the id.
+    private func userBody(_ text: String) -> Data {
+        var d = Data()
+        d.append(0x01)
+        appendU32(&d, UInt32(text.utf8.count))
+        d.append(contentsOf: text.utf8)
+        return d
+    }
+
+    /// assistant message body (sub-opcode 0x02).
+    private func assistantBody(_ text: String) -> Data {
+        var d = Data()
+        d.append(0x02)
+        appendU32(&d, UInt32(text.utf8.count))
+        d.append(contentsOf: text.utf8)
+        return d
+    }
+
+    @Test("full_replace decodes header and messages")
+    func fullReplace() throws {
+        let data = buildFullReplace(epoch: 7, truncated: true, entries: [
+            (id: 1, body: userBody("hello")),
+            (id: 2, body: assistantBody("hi there"))
+        ])
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiAgentTranscript(let mode, let epoch, let truncated, let trimFront, let baseCount, let messages) = cmd else {
+            Issue.record("Expected .guiAgentTranscript"); return
+        }
+        #expect(mode == 0)
+        #expect(epoch == 7)
+        #expect(truncated == true)
+        #expect(trimFront == 0)
+        #expect(baseCount == 0)
+        guard messages.count == 2 else { Issue.record("Expected 2 messages"); return }
+        #expect(messages[0].beamId == 1)
+        guard case .user(let t0) = messages[0].content else { Issue.record("Expected .user"); return }
+        #expect(t0 == "hello")
+        #expect(messages[1].beamId == 2)
+        guard case .assistant(let t1) = messages[1].content else { Issue.record("Expected .assistant"); return }
+        #expect(t1 == "hi there")
+    }
+
+    @Test("append decodes trim_front, base_count, and the suffix entries")
+    func appendSuffix() throws {
+        let data = buildAppend(epoch: 7, trimFront: 1, baseCount: 2, entries: [
+            (id: 3, body: assistantBody("streaming..."))
+        ])
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiAgentTranscript(let mode, let epoch, let truncated, let trimFront, let baseCount, let messages) = cmd else {
+            Issue.record("Expected .guiAgentTranscript"); return
+        }
+        #expect(mode == 1)
+        #expect(epoch == 7)
+        #expect(truncated == false)
+        #expect(trimFront == 1)
+        #expect(baseCount == 2)
+        #expect(messages.count == 1)
+        #expect(messages[0].beamId == 3)
+    }
+
+    @Test("append with eviction only (zero entries) decodes trim_front")
+    func appendEvictionOnly() throws {
+        let data = buildAppend(epoch: 4, trimFront: 3, baseCount: 5, entries: [])
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiAgentTranscript(let mode, _, _, let trimFront, let baseCount, let messages) = cmd else {
+            Issue.record("Expected .guiAgentTranscript"); return
+        }
+        #expect(mode == 1)
+        #expect(trimFront == 3)
+        #expect(baseCount == 5)
+        #expect(messages.isEmpty)
+    }
+
+    @Test("empty full_replace decodes to zero messages")
+    func emptyTranscript() throws {
+        let data = buildFullReplace(epoch: 1, entries: [])
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+        guard case .guiAgentTranscript(_, _, _, _, _, let messages) = cmd else {
+            Issue.record("Expected .guiAgentTranscript"); return
+        }
+        #expect(messages.isEmpty)
+    }
+
+    @Test("unknown version throws malformed")
+    func unknownVersionThrows() {
+        var data = buildFullReplace(epoch: 1, entries: [(id: 1, body: userBody("x"))])
+        // version byte is at offset 5 (opcode + 4-byte len).
+        data[5] = 2
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    @Test("append payload too short for its header throws malformed")
+    func appendHeaderTooShortThrows() {
+        // A valid full_replace-length payload (11 bytes) but mode=append needs 19.
+        var payload = Data()
+        payload.append(1) // version
+        payload.append(1) // mode = append
+        appendU32(&payload, 1) // epoch
+        payload.append(0) // truncated
+        appendU32(&payload, 0) // only 4 more bytes; append needs trim_front+base+count
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: frame(payload), offset: 0)
+        }
+    }
+
+    @Test("count larger than entries throws malformed")
+    func countOverrunThrows() {
+        // Hand-build a full_replace frame claiming 2 entries but supplying one.
+        var payload = Data()
+        payload.append(1) // version
+        payload.append(0) // mode full_replace
+        appendU32(&payload, 1) // epoch
+        payload.append(0) // truncated
+        appendU32(&payload, 2) // count = 2 (lie)
+        appendU32(&payload, 1) // id
+        let body = userBody("x")
+        appendU32(&payload, UInt32(body.count))
+        payload.append(body)
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: frame(payload), offset: 0)
+        }
+    }
+
+    @Test("truncated body length throws malformed")
+    func truncatedBodyThrows() {
+        var payload = Data()
+        payload.append(1) // version
+        payload.append(0) // mode
+        appendU32(&payload, 1) // epoch
+        payload.append(0) // truncated
+        appendU32(&payload, 1) // count
+        appendU32(&payload, 1) // id
+        appendU32(&payload, 99) // body_len larger than actual body
+        payload.append(0x01) // partial body
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: frame(payload), offset: 0)
+        }
+    }
+}

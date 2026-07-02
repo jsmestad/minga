@@ -684,19 +684,25 @@ final class CommandDispatcher {
                 guiState.pickerState.clearPreview()
             }
 
-        case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptVimMode, let promptVisibleRows, let promptCompletion, _, _, let helpVisible, let helpGroups, let messages):
+        case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptVimMode, let promptVisibleRows, let promptCompletion, _, _, let helpVisible, let helpGroups, _):
+            // The 0x78 messages section is intentionally ignored (#2654 slice 2):
+            // the resident transcript is sourced from the 0x86 gui_agent_transcript
+            // stream via .guiAgentTranscript. Only chrome fields are applied here.
             let wasVisible = guiState.agentChatState.visible
             if visible {
                 let groups = helpGroups.map { g in
                     HelpGroup(title: g.title, bindings: g.bindings.map { ($0.key, $0.description) })
                 }
-                guiState.agentChatState.update(visible: true, status: status, model: model, thinkingLevel: thinkingLevel, prompt: prompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptVimMode: promptVimMode, promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, helpVisible: helpVisible, helpGroups: groups, rawMessages: messages)
+                guiState.agentChatState.update(visible: true, status: status, model: model, thinkingLevel: thinkingLevel, prompt: prompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptVimMode: promptVimMode, promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, helpVisible: helpVisible, helpGroups: groups)
             } else {
                 guiState.agentChatState.hide()
             }
             if guiState.agentChatState.visible != wasVisible {
                 onAgentChatVisibilityChanged?(guiState.agentChatState.visible)
             }
+
+        case .guiAgentTranscript(let mode, let epoch, let truncated, let trimFront, let baseCount, let messages):
+            guiState.agentChatState.applyTranscript(mode: mode, epoch: epoch, truncated: truncated, trimFront: Int(trimFront), baseCount: Int(baseCount), messages: messages)
 
         case .guiGutterSeparator(let col, let r, let g, let b):
             let rgb: UInt32 = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
