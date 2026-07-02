@@ -294,6 +294,54 @@ func scrollOverscanAfter(scroll protocol.ScrollPresentation) int {
 	return int(scroll.OverscanEndLine - scroll.VisibleEndLine)
 }
 
+// presentationScrollRowBounds returns the inclusive min/max local row offset for
+// a wheel scroll. A resident window (its row payload spans the whole document,
+// #2653) clamps to document bounds, so a fast fling scrolls continuously to
+// either end and never starves at an overscan edge (#2671, AC1). A windowed
+// window (residence-off or over-threshold) keeps the overscan-payload clamp
+// unchanged, so those configs stay byte-identical (AC4). When the payload
+// already covers the document the two are equal; the split clamps resident
+// scrolling against the authoritative document extent rather than a windowing
+// concept that no longer applies.
+func presentationScrollRowBounds(window protocol.WindowContent, visibleRows int) (before int, after int) {
+	if windowCoversDocument(window) {
+		return presentationDocumentRowBounds(window, visibleRows)
+	}
+	return presentationPayloadOverscanBounds(window, visibleRows)
+}
+
+// windowCoversDocument reports whether the resident row payload spans the whole
+// document, i.e. the store holds every laid-out row (full-document residence).
+// The BEAM emitter reports this by anchoring the overscan range at line 0 and
+// extending it to (or past) the document's total line count. The row-count check
+// verifies the payload actually delivers those lines: a truncated or stale frame
+// that still advertises full coverage degrades to the windowed overscan clamp
+// instead of promising document rows it does not hold.
+func windowCoversDocument(window protocol.WindowContent) bool {
+	if !window.ScrollSet || !window.GeometrySet || window.Geometry.TotalLines == 0 {
+		return false
+	}
+	return window.Scroll.OverscanStartLine == 0 &&
+		window.Scroll.OverscanEndLine >= window.Geometry.TotalLines &&
+		len(window.Rows) >= int(window.Geometry.TotalLines)
+}
+
+// presentationDocumentRowBounds clamps the local offset to the resident document:
+// up to the document top (before rows) and down to the last full page
+// (document lines minus the visible page minus the leading rows). It mirrors the
+// overscan-bounds arithmetic but sources the extent from the authoritative
+// Geometry.TotalLines rather than the payload length; windowCoversDocument
+// guarantees the payload holds at least that many rows, so in a well-formed
+// resident frame the two are equal.
+func presentationDocumentRowBounds(window protocol.WindowContent, visibleRows int) (before int, after int) {
+	before = presentationPayloadOverscanBefore(window)
+	documentRows := int(window.Geometry.TotalLines)
+	if visibleRows > 0 {
+		return before, max(documentRows-visibleRows-before, 0)
+	}
+	return before, max(documentRows-before, 0)
+}
+
 func presentationPayloadOverscanBounds(window protocol.WindowContent, visibleRows int) (before int, after int) {
 	before = presentationPayloadOverscanBefore(window)
 	if visibleRows > 0 {

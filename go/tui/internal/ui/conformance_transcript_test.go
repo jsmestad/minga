@@ -207,8 +207,12 @@ func injectConformanceOffset(model *Model, step conformanceStep) {
 		anchorLeft:       window.Scroll.AnchorLeft,
 		contentEpoch:     window.Scroll.ContentEpoch,
 		layoutGeneration: window.Scroll.LayoutGeneration,
-		rowOffset:        step.RowOffset,
-		colOffset:        step.ColOffset,
+		// Capture the scroll_seq the currently-stored frame carries so a
+		// later strictly-newer scroll_seq forces a discard, exactly as a real
+		// wheel offset captures the committed seq at creation time (#2671).
+		scrollSeq: window.Scroll.ScrollSeq,
+		rowOffset: step.RowOffset,
+		colOffset: step.ColOffset,
 	}
 }
 
