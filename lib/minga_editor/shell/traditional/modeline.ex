@@ -494,10 +494,15 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
         _other -> ""
       end
 
-    [
-      {" #{data.file_name}#{data.dirty_marker}#{buf_indicator}#{macro_indicator} ", ctx.info_fg,
-       ctx.info_bg, [], :buffer_list}
-    ]
+    text = " #{data.file_name}#{data.dirty_marker}#{buf_indicator}#{macro_indicator} "
+
+    # An empty file name (the zero-buffers launchpad, #2689) drops the whole
+    # segment instead of rendering a blank padded pill.
+    if String.trim(text) == "" do
+      []
+    else
+      [{text, ctx.info_fg, ctx.info_bg, [], :buffer_list}]
+    end
   end
 
   @spec render_filetype(context()) :: [render_segment()]

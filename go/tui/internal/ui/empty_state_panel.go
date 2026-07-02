@@ -106,13 +106,13 @@ func (m Model) renderEmptyState(state protocol.EmptyState) []string {
 			col = append(col, m.emptyBlankCol(colWidth))
 		case emptyStateSectionRecent:
 			if showChrome {
-				col = append(col, m.emptyRule(section.Title, colWidth, m.palette().PopupBorder()))
+				col = append(col, m.emptyRule(section.Title, colWidth, m.palette().TextFaint()))
 			}
 			col = append(col, m.emptyRecentRows(section, colWidth, focusID, recentCap, dropDir)...)
 			col = append(col, m.emptyBlankCol(colWidth))
 		case emptyStateSectionStart:
 			if showChrome {
-				col = append(col, m.emptyRule(section.Title, colWidth, m.palette().PopupBorder()))
+				col = append(col, m.emptyRule(section.Title, colWidth, m.palette().TextFaint()))
 			}
 			col = append(col, m.emptyStartRows(section, colWidth, focusID)...)
 			col = append(col, m.emptyBlankCol(colWidth))
@@ -144,7 +144,7 @@ func (m Model) emptyStateMinimal(state protocol.EmptyState, width int, height in
 		lipgloss.NewStyle().Background(bg).Render(" ") +
 		lipgloss.NewStyle().Bold(true).Foreground(p.Text()).Background(bg).Render("minga")
 	if v := strings.TrimSpace(state.Version); v != "" {
-		mark += lipgloss.NewStyle().Background(bg).Render(" ") + lipgloss.NewStyle().Foreground(p.Muted()).Background(bg).Render(v)
+		mark += lipgloss.NewStyle().Background(bg).Render(" ") + lipgloss.NewStyle().Foreground(p.TextFaint()).Background(bg).Render(v)
 	}
 
 	col := []string{m.emptyCenterInCol(mark, colWidth)}
@@ -240,43 +240,51 @@ func (m Model) emptyWordmark(version string, colWidth int) string {
 	space := lipgloss.NewStyle().Background(bg)
 	mark := diamond + space.Render("  ") + name
 	if v := strings.TrimSpace(version); v != "" {
-		mark += space.Render("   ") + lipgloss.NewStyle().Foreground(p.Muted()).Background(bg).Render(v)
+		mark += space.Render("   ") + lipgloss.NewStyle().Foreground(p.TextFaint()).Background(bg).Render(v)
 	}
 	return m.emptyCenterInCol(mark, colWidth)
 }
 
-// emptyRule renders a labeled section rule: `─── Label ───────` with the dashes
-// in the border color and the label muted-bold.
+// emptyRule renders a labeled section rule: `─── LABEL ───────`. Rules are
+// tertiary chrome: faint dashes and an uppercase muted label, receding below
+// row labels so the hero card carries the only at-rest emphasis.
 func (m Model) emptyRule(title string, colWidth int, borderColor color.Color) string {
 	p := m.palette()
 	bg := m.editorBackground()
 	dash := lipgloss.NewStyle().Foreground(borderColor).Background(bg)
-	label := lipgloss.NewStyle().Bold(true).Foreground(p.Muted()).Background(bg).Render(title)
+	label := lipgloss.NewStyle().Foreground(p.Muted()).Background(bg).Render(strings.ToUpper(title))
 	content := dash.Render("  ─── ") + label + dash.Render(" ")
 	fill := max(colWidth-lipgloss.Width(content), 0)
 	content += dash.Render(strings.Repeat("─", fill))
 	return m.emptyPadExact(content, colWidth)
 }
 
-// emptyKeycap renders a bold keycap chip on the keycap surface, 3 cells wide and
-// centered, matching the which-key overlay chips. RET renders as ↵.
-func (m Model) emptyKeycap(text string) string {
+// emptyKeycap renders a content-hugging keycap chip (one padding cell per
+// side, so "SPC" and "f" get the same visual margin). Two classes: jump chips
+// are "press me right now" affordances in accent on the accent wash; chord
+// chips are quiet educational neutrals on the chip surface. KeycapSurface is
+// deliberately NOT used here — it is tuned for elevated popup backgrounds
+// (which-key) and outshines everything on the editor surface. RET renders as ↵.
+func (m Model) emptyKeycap(text string, jump bool) string {
 	p := m.palette()
 	if text == "RET" {
 		text = "↵"
 	}
-	return lipgloss.NewStyle().
-		Bold(true).
-		Foreground(p.KeycapText()).
-		Background(p.KeycapSurface()).
-		Width(3).
-		Align(lipgloss.Center).
-		Render(fit(text, 3))
+
+	style := lipgloss.NewStyle().Padding(0, 1)
+	if jump {
+		style = style.Bold(true).Foreground(p.Accent()).Background(p.AccentWash())
+	} else {
+		style = style.Foreground(p.Muted()).Background(p.ChipSurface())
+	}
+
+	return style.Render(text)
 }
 
 // emptyBorderColor returns the card border/title/glyph color for the session
-// hero: warning on crash, accent while a row inside is focused, otherwise the
-// dim popup border. Only one accent border exists on screen at a time.
+// hero: warning on crash, accent while a row inside is focused, otherwise a
+// dimmed accent so the hero is the only accent-hued element at rest. Only one
+// full-accent border exists on screen at a time.
 func (m Model) emptyBorderColor(crashed bool, focused bool) color.Color {
 	p := m.palette()
 	switch {
@@ -285,7 +293,7 @@ func (m Model) emptyBorderColor(crashed bool, focused bool) color.Color {
 	case focused:
 		return p.Accent()
 	default:
-		return p.PopupBorder()
+		return p.AccentSoft()
 	}
 }
 
@@ -328,22 +336,22 @@ func (m Model) emptySessionSection(section protocol.EmptyStateSection, colWidth 
 func (m Model) emptyCardInner(item protocol.EmptyStateItem, inner int, focused bool) string {
 	p := m.palette()
 	var rowBg color.Color = m.editorBackground()
-	textColor := p.Text()
-	detailColor := p.Muted()
+	detailColor := p.TextFaint()
 	if focused {
-		rowBg = p.Selection()
-		textColor = p.SelectionText()
-		detailColor = p.SelectionText()
+		// A faint accent wash instead of the heavy text-selection gray: the
+		// bold label, accent marker, and chip keep their contrast on it.
+		rowBg = p.AccentWash()
+		detailColor = p.Muted()
 	}
-	base := lipgloss.NewStyle().Foreground(textColor).Background(rowBg)
+	base := lipgloss.NewStyle().Foreground(p.Text()).Background(rowBg)
 
 	marker := base.Render("  ")
 	if focused {
 		marker = lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(rowBg).Render("▸") + base.Render(" ")
 	}
-	chip := m.emptyKeycap(item.JumpKey)
-	label := base.Render(item.Label)
-	left := base.Render(" ") + marker + chip + base.Render("   ") + label
+	chip := m.emptyKeycap(item.JumpKey, true)
+	label := base.Bold(focused).Render(item.Label)
+	left := base.Render(" ") + marker + chip + base.Render("  ") + label
 
 	right := ""
 	if item.Detail != "" {
@@ -379,22 +387,20 @@ func (m Model) emptyRecentRows(section protocol.EmptyStateSection, colWidth int,
 func (m Model) emptyRecentRow(item protocol.EmptyStateItem, colWidth int, focused bool, dropDir bool) string {
 	p := m.palette()
 	var rowBg color.Color = m.editorBackground()
-	textColor := p.Text()
-	detailColor := p.Muted()
+	detailColor := p.TextFaint()
 	if focused {
-		rowBg = p.Selection()
-		textColor = p.SelectionText()
-		detailColor = p.SelectionText()
+		rowBg = p.AccentWash()
+		detailColor = p.Muted()
 	}
-	base := lipgloss.NewStyle().Foreground(textColor).Background(rowBg)
+	base := lipgloss.NewStyle().Foreground(p.Text()).Background(rowBg)
 
 	marker := base.Render("  ")
 	if focused {
 		marker = lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(rowBg).Render("▸") + base.Render(" ")
 	}
-	chip := m.emptyKeycap(item.JumpKey)
-	icon := m.emptyIcon(item, rowBg, textColor, focused)
-	label := base.Render(item.Label)
+	chip := m.emptyKeycap(item.JumpKey, true)
+	icon := m.emptyIcon(item, rowBg, p.Text(), focused)
+	label := base.Bold(focused).Render(item.Label)
 	left := base.Render(" ") + marker + chip + base.Render("  ") + icon + base.Render(" ") + label
 
 	right := ""
@@ -422,19 +428,17 @@ func (m Model) emptyStartRows(section protocol.EmptyStateSection, colWidth int, 
 func (m Model) emptyStartRow(item protocol.EmptyStateItem, colWidth int, focused bool) string {
 	p := m.palette()
 	var rowBg color.Color = m.editorBackground()
-	textColor := p.Text()
 	if focused {
-		rowBg = p.Selection()
-		textColor = p.SelectionText()
+		rowBg = p.AccentWash()
 	}
-	base := lipgloss.NewStyle().Foreground(textColor).Background(rowBg)
+	base := lipgloss.NewStyle().Foreground(p.Text()).Background(rowBg)
 
 	marker := base.Render("  ")
 	if focused {
 		marker = lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(rowBg).Render("▸") + base.Render(" ")
 	}
-	icon := m.emptyIcon(item, rowBg, textColor, focused)
-	label := base.Render(item.Label)
+	icon := m.emptyIcon(item, rowBg, p.Text(), focused)
+	label := base.Bold(focused).Render(item.Label)
 	left := base.Render(" ") + marker + base.Render("  ") + icon + base.Render("  ") + label
 
 	right := m.emptyStartAffordance(item, rowBg, base)
@@ -451,7 +455,7 @@ func (m Model) emptyStartAffordance(item protocol.EmptyStateItem, rowBg color.Co
 		tokens := strings.Fields(item.Chord)
 		parts := make([]string, 0, len(tokens))
 		for _, token := range tokens {
-			parts = append(parts, m.emptyKeycap(token))
+			parts = append(parts, m.emptyKeycap(token, false))
 		}
 		return strings.Join(parts, base.Render(" ")) + base.Render(" ")
 	}
@@ -459,23 +463,23 @@ func (m Model) emptyStartAffordance(item protocol.EmptyStateItem, rowBg color.Co
 		return lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(rowBg).Render(strings.TrimSpace(item.Detail)) + base.Render(" ")
 	}
 	if item.Detail != "" {
-		return lipgloss.NewStyle().Foreground(p.Muted()).Background(rowBg).Render(item.Detail) + base.Render(" ")
+		return lipgloss.NewStyle().Foreground(p.TextFaint()).Background(rowBg).Render(item.Detail) + base.Render(" ")
 	}
 	return ""
 }
 
-// emptyIcon renders an item's devicon glyph colored by its wire icon_color. On
-// a focused (selection) row the glyph takes the selection foreground for
-// contrast; a missing glyph collapses to a single space so columns stay aligned.
-func (m Model) emptyIcon(item protocol.EmptyStateItem, rowBg color.Color, textColor color.Color, focused bool) string {
+// emptyIcon renders an item's devicon glyph colored by its wire icon_color —
+// on focused rows too, since the accent wash is faint enough for full-color
+// glyphs to read against it. A missing glyph keeps the slot so columns align.
+func (m Model) emptyIcon(item protocol.EmptyStateItem, rowBg color.Color, textColor color.Color, _ bool) string {
+	// Fixed two-cell slot: glyph widths vary (missing, single-cell PUA,
+	// double-cell symbols), and the label column must not shift with them.
+	style := lipgloss.NewStyle().Background(rowBg).Width(2).MaxWidth(2)
 	glyph := strings.TrimSpace(item.Icon)
 	if glyph == "" {
-		return lipgloss.NewStyle().Background(rowBg).Render(" ")
+		return style.Render(" ")
 	}
-	style := lipgloss.NewStyle().Background(rowBg)
-	if focused {
-		style = style.Foreground(textColor)
-	} else if item.IconColor != 0 {
+	if item.IconColor != 0 {
 		style = style.Foreground(lipgloss.Color(iconColorHex(item.IconColor)))
 	} else {
 		style = style.Foreground(textColor)
@@ -520,5 +524,7 @@ func (m Model) footerFragment(items []protocol.EmptyStateItem) string {
 		}
 		parts = append(parts, fragment)
 	}
-	return strings.Join(parts, verbStyle.Render("  ·  "))
+
+	dotStyle := lipgloss.NewStyle().Foreground(p.TextFaint()).Background(bg)
+	return strings.Join(parts, dotStyle.Render("  ·  "))
 }
