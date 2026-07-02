@@ -1860,9 +1860,12 @@ defmodule MingaEditor.State do
   Marks the active window's next rendered frame as an authoritative BEAM scroll
   that must discard any frontend-held local offset (#2652).
 
-  Called by command handlers for view-centering, page-scroll, document-jump,
-  goto-line, and search-jump commands. No-op when no window is active. See
-  `MingaEditor.Window.mark_authoritative_scroll/1` for the marker lifecycle.
+  Called at dispatch for the always-authoritative viewport commands (the
+  `MingaEditor.Commands` `@authoritative_scroll_commands` set and `goto_line`)
+  and from the success branches of failable jumps (search hits, mark jumps,
+  bracket match, LSP goto) — see that MapSet's comment for the policy. No-op
+  when no window is active. See `MingaEditor.Window.mark_authoritative_scroll/1`
+  for the marker lifecycle.
   """
   @spec mark_authoritative_scroll(t()) :: t()
   def mark_authoritative_scroll(%__MODULE__{} = state) do

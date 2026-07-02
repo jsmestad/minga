@@ -239,8 +239,11 @@ defmodule MingaEditor.Window do
   Records that an authoritative BEAM-initiated viewport jump must discard any
   frontend-held local scroll offset, even if the committed top is unchanged (#2652).
 
-  Command handlers call this on the live window (editor process) for the
-  view-centering, page-scroll, document-jump, goto-line, and search-jump commands.
+  Command handlers call this on the live window (editor process): at dispatch
+  for the always-authoritative viewport commands, and from the success branches
+  of failable jumps (search hits, mark jumps, bracket match, LSP goto). The
+  `MingaEditor.Commands` `@authoritative_scroll_commands` comment documents the
+  policy and is the source of truth for the command set.
   It is an editor-owned, top-level `Window` field (never in the render cache), a
   monotonic request counter incremented once per authoritative jump. Like
   `scroll_echo_top`, only the editor writes it, on the live window, so the async

@@ -96,14 +96,26 @@ defmodule MingaEditor.Commands do
   # Authoritative viewport-jump commands (#2652): a frontend holding a local
   # free-scroll offset must always discard it after one of these runs, even when
   # the committed top lands on exactly the previous/echoed top (a `zz` while
-  # already centered, a search hit already on screen). Marking the active window
-  # here (a single dispatch choke point for atom commands) bumps `scroll_seq` at
-  # settle regardless of whether the top also moved; the settle-time top
-  # comparison already covers the top-moved case, and the OR keeps it to one bump.
-  # Pure cursor motion (h/j/k/l, word, H/M/L) is deliberately absent: it re-anchors
-  # via cursor-must-stay-visible, which bumps through the top comparison only when
-  # it actually moves the top. The parameterized `{:goto_line, _}` jump is marked
-  # in its own dispatch clause below.
+  # already centered). Marking the active window here (the dispatch choke point
+  # for atom commands) bumps `scroll_seq` at settle regardless of whether the top
+  # also moved; the settle-time top comparison covers the top-moved case, and the
+  # OR keeps it to one bump.
+  #
+  # Only commands that unconditionally re-anchor belong here — a command that can
+  # no-op (a failed search, `%` with no bracket, a jump to an unset mark, the
+  # async LSP goto family) must instead mark in its handler's success branch, so
+  # a no-op never discards the user's local scroll: see
+  # `MingaEditor.Commands.Search`, `MingaEditor.Commands.Movement`
+  # (`:match_bracket`), `MingaEditor.Commands.Marks`, and
+  # `MingaEditor.LspActions.jump_to_location/4`. The parameterized
+  # `{:goto_line, _}` jump (clamped, never fails) is marked in its own dispatch
+  # clause below. Pure cursor motion (h/j/k/l, word, H/M/L) is deliberately
+  # absent everywhere: it re-anchors via cursor-must-stay-visible, which bumps
+  # through the top comparison only when it actually moves the top.
+  #
+  # This MapSet plus the success-branch marks above are the single source of
+  # truth for which commands force a discard; docs reference this location
+  # rather than re-listing commands.
   @authoritative_scroll_commands MapSet.new([
                                    :scroll_center,
                                    :scroll_cursor_top,
@@ -116,17 +128,7 @@ defmodule MingaEditor.Commands do
                                    :page_up,
                                    :move_to_document_start,
                                    :move_to_document_end,
-                                   :match_bracket,
-                                   :goto_definition,
-                                   :goto_type_definition,
-                                   :find_references,
-                                   :search_next,
-                                   :search_prev,
-                                   :incremental_search,
-                                   :confirm_search,
-                                   :cancel_search,
-                                   :search_word_under_cursor_forward,
-                                   :search_word_under_cursor_backward
+                                   :cancel_search
                                  ])
 
   @doc """
@@ -494,12 +496,10 @@ defmodule MingaEditor.Commands do
   end
 
   def execute(state, {:jump_to_mark_line, _} = cmd) do
-    state = EditorState.mark_authoritative_scroll(state)
     guard_buffer(state, fn -> Marks.execute(state, cmd) end)
   end
 
   def execute(state, {:jump_to_mark_exact, _} = cmd) do
-    state = EditorState.mark_authoritative_scroll(state)
     guard_buffer(state, fn -> Marks.execute(state, cmd) end)
   end
 

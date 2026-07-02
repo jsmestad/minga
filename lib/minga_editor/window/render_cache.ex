@@ -465,11 +465,12 @@ defmodule MingaEditor.Window.RenderCache do
   * **Authoritative marker (#2652):** `authoritative_seq` (the editor-owned
     `Window.authoritative_scroll_seq` request counter) moved past the last count
     this cache settled against. Command handlers increment it for the commands
-    that must always discard a frontend offset (view centering `zz`/`zt`/`zb`,
-    page scroll `ctrl-d`/`ctrl-u`/`ctrl-f`/`ctrl-b`, `gg`/`G`, goto-line, and
-    search jumps). This is the only signal that catches a jump landing exactly on
-    the previous or echoed top (`zz` while already centered, a search hit already
-    on screen), which the top comparison below cannot see.
+    that must discard a frontend offset — at dispatch for always-authoritative
+    viewport commands, and in the success branch of failable jumps (the
+    `MingaEditor.Commands` `@authoritative_scroll_commands` comment is the
+    source of truth for the set). This is the only signal that catches a jump
+    landing exactly on the previous or echoed top (`zz` while already centered,
+    a search hit already on screen), which the top comparison below cannot see.
 
   * **Top comparison:** `top` differs from both the previous committed top
     (`scroll_seq_last_top`) and the frontend-reported free-scroll top

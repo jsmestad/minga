@@ -1497,15 +1497,19 @@ defmodule MingaEditor.LspActions do
     # Set jump mark before navigating
     state = set_jump_mark(state)
 
+    # This is the seam where an async LSP goto actually lands (#2652): marking
+    # here (not at command dispatch) means a request that errors or returns no
+    # result never discards a frontend-held local scroll offset, while a jump
+    # landing on the same committed top still does.
     if target_path == current_path do
       # Same file: just move the cursor
       Buffer.move_to(state.workspace.buffers.active, {line, col})
-      state
+      EditorState.mark_authoritative_scroll(state)
     else
       # Different file: open it, then move cursor
       state = open_or_switch_to_file(state, target_path)
       Buffer.move_to(state.workspace.buffers.active, {line, col})
-      state
+      EditorState.mark_authoritative_scroll(state)
     end
   end
 

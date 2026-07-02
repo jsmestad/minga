@@ -308,6 +308,23 @@ defmodule MingaEditor.WindowTest do
 
       assert Window.scroll_seq(window) == 1
     end
+
+    test "settle_scroll_seq/1 coalesces two marks between settles into one bump" do
+      # Two authoritative jumps landing inside one frame must discard once, not
+      # twice: the baseline comparison is a boolean, not a delta count.
+      window =
+        make_window()
+        |> at_top(3)
+        |> Window.settle_scroll_seq()
+        |> Window.mark_authoritative_scroll()
+        |> Window.mark_authoritative_scroll()
+        |> Window.settle_scroll_seq()
+
+      assert Window.scroll_seq(window) == 1
+
+      window = Window.settle_scroll_seq(window)
+      assert Window.scroll_seq(window) == 1
+    end
   end
 
   defp cached_window(window) do
