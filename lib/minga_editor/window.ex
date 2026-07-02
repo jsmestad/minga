@@ -228,7 +228,7 @@ defmodule MingaEditor.Window do
   writes it, on the live window. It is deliberately sticky — never cleared. A
   later wheel overwrites it; `settle_scroll_seq/1` treats a viewport top equal to
   this value as an echo of the frontend's own report, so it does not advance
-  `scroll_seq` (the "echo-loop guard": no re-anchor storm while margin-riding).
+  `scroll_seq` (the "echo-loop guard": no re-anchor storm during a wheel/trackpad scroll gesture).
   """
   @spec mark_scroll_echo(t(), integer()) :: t()
   def mark_scroll_echo(%__MODULE__{} = window, echo_top) when is_integer(echo_top) do

@@ -256,6 +256,84 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       assert %Window.Cursorline{row: 0, bg_rgb: 0x223344} = back.cursorline
     end
 
+    test "wrapped buffer hides cursor when scrolled off-viewport" do
+      content = Enum.map_join(0..49, "\n", &"line #{&1} with enough text to wrap")
+      state = gui_state(rows: 5, cols: 20, content: content)
+      buffer = state.workspace.buffers.active
+      assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+      assert {:ok, false} = BufferProcess.set_option(buffer, :linebreak, false)
+      :ok = BufferProcess.move_to(buffer, {0, 0})
+
+      model = build_window_model(detach_scroll(state, 30), cursorline_bg: 0x223344)
+
+      assert model.cursor_visible == false
+      assert model.cursorline == nil
+    end
+
+    test "wrapped buffer restores cursor when scrolled back into view" do
+      content = Enum.map_join(0..49, "\n", &"line #{&1} with enough text to wrap")
+      state = gui_state(rows: 5, cols: 20, content: content)
+      buffer = state.workspace.buffers.active
+      assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+      assert {:ok, false} = BufferProcess.set_option(buffer, :linebreak, false)
+      :ok = BufferProcess.move_to(buffer, {0, 0})
+
+      off = build_window_model(detach_scroll(state, 30), cursorline_bg: 0x223344)
+      assert off.cursor_visible == false
+
+      back = build_window_model(detach_scroll(state, 0), cursorline_bg: 0x223344)
+      assert back.cursor_visible == true
+      assert %Window.Cursorline{bg_rgb: 0x223344} = back.cursorline
+    end
+
+    test "folded buffer hides cursor when scrolled off-viewport" do
+      content = Enum.map_join(0..49, "\n", &"line #{&1}")
+      state = gui_state(rows: 5, cols: 20, content: content)
+      buffer = state.workspace.buffers.active
+      :ok = BufferProcess.move_to(buffer, {0, 0})
+
+      win_id = state.workspace.windows.active
+      window = Map.fetch!(state.workspace.windows.map, win_id)
+      window = EditorWindow.set_fold_ranges(window, [FoldRange.new!(5, 20)])
+      window = EditorWindow.fold_at(window, 5)
+
+      state =
+        put_in(
+          state.workspace.windows.map,
+          Map.put(state.workspace.windows.map, win_id, window)
+        )
+
+      model = build_window_model(detach_scroll(state, 25), cursorline_bg: 0x223344)
+
+      assert model.cursor_visible == false
+      assert model.cursorline == nil
+    end
+
+    test "folded buffer restores cursor when scrolled back into view" do
+      content = Enum.map_join(0..49, "\n", &"line #{&1}")
+      state = gui_state(rows: 5, cols: 20, content: content)
+      buffer = state.workspace.buffers.active
+      :ok = BufferProcess.move_to(buffer, {0, 0})
+
+      win_id = state.workspace.windows.active
+      window = Map.fetch!(state.workspace.windows.map, win_id)
+      window = EditorWindow.set_fold_ranges(window, [FoldRange.new!(5, 20)])
+      window = EditorWindow.fold_at(window, 5)
+
+      state =
+        put_in(
+          state.workspace.windows.map,
+          Map.put(state.workspace.windows.map, win_id, window)
+        )
+
+      off = build_window_model(detach_scroll(state, 25), cursorline_bg: 0x223344)
+      assert off.cursor_visible == false
+
+      back = build_window_model(detach_scroll(state, 0), cursorline_bg: 0x223344)
+      assert back.cursor_visible == true
+      assert %Window.Cursorline{row: 0, bg_rgb: 0x223344} = back.cursorline
+    end
+
     test "ordinary buffer edits change row hashes without bumping content epoch or forcing refresh" do
       state = gui_state(content: "hello")
       {[wf], _cursor, state} = build_content(state)
