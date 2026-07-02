@@ -83,7 +83,14 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder do
            | {:append, non_neg_integer(), non_neg_integer(), [entry()]}
 
   @spec encode(AgentChat.t(), Caches.t()) :: {binary() | nil, Caches.t()}
-  def encode(%AgentChat{visible?: false}, %Caches{} = caches), do: {nil, caches}
+  # When the panel hides, reset the delta base. A frontend clears its local
+  # transcript on the 0x78 hide signal, so on reopen the store is empty; without
+  # this reset an unchanged transcript keeps the same fingerprint and no frame is
+  # sent, leaving the reopened panel blank. Clearing the cache forces the next
+  # visible frame to re-emit a full_replace (mirrors the 0x78 encoder, whose
+  # fingerprint includes visibility).
+  def encode(%AgentChat{visible?: false}, %Caches{} = caches),
+    do: {nil, %{caches | last_agent_transcript: %SentState{}}}
 
   def encode(%AgentChat{visible?: true} = model, %Caches{} = caches) do
     epoch = model.transcript_epoch

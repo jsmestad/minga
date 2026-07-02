@@ -7,6 +7,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoderTest do
   alias Minga.Frontend.Adapter.GUI
   alias Minga.Frontend.Adapter.GUI.AgentChatMessageCodec, as: Codec
   alias Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder, as: Encoder
+  alias Minga.Frontend.Adapter.GUI.AgentTranscriptSentState
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI
@@ -271,9 +272,27 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoderTest do
   end
 
   describe "visibility" do
-    test "a hidden model emits nil and leaves caches untouched" do
-      caches = Caches.new()
-      assert {nil, ^caches} = Encoder.encode(%AgentChat{visible?: false}, caches)
+    test "a hidden model emits nil and resets the transcript delta base" do
+      messages = [user(1, "a"), user(2, "b")]
+      {_frame, caches} = Encoder.encode(model(1, messages), Caches.new())
+      refute caches.last_agent_transcript == %AgentTranscriptSentState{}
+
+      assert {nil, reset} = Encoder.encode(%AgentChat{visible?: false}, caches)
+      assert reset.last_agent_transcript == %AgentTranscriptSentState{}
+    end
+
+    test "reopening the panel re-emits a full_replace for an unchanged transcript" do
+      # The frontend clears its local transcript on hide, so a reopen with the
+      # same transcript must resend everything rather than be suppressed by an
+      # unchanged fingerprint.
+      messages = [user(1, "a"), user(2, "b")]
+      {_f1, c1} = Encoder.encode(model(1, messages), Caches.new())
+      {nil, c2} = Encoder.encode(%AgentChat{visible?: false}, c1)
+      {frame, _c3} = Encoder.encode(model(1, messages), c2)
+
+      decoded = decode(frame)
+      assert decoded.mode == @mode_full_replace
+      assert ids(decoded) == [1, 2]
     end
   end
 
