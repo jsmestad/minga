@@ -265,13 +265,15 @@ func (m Model) emptyKeycap(text string) string {
 	if text == "RET" {
 		text = "↵"
 	}
+	// Content-hugging chips with one padding cell per side: "SPC" and "f"
+	// get the same visual margin, so chord rows read as evenly spaced keys
+	// instead of a ragged band of fixed-width boxes.
 	return lipgloss.NewStyle().
 		Bold(true).
 		Foreground(p.KeycapText()).
 		Background(p.KeycapSurface()).
-		Width(3).
-		Align(lipgloss.Center).
-		Render(fit(text, 3))
+		Padding(0, 1).
+		Render(text)
 }
 
 // emptyBorderColor returns the card border/title/glyph color for the session
@@ -343,7 +345,7 @@ func (m Model) emptyCardInner(item protocol.EmptyStateItem, inner int, focused b
 	}
 	chip := m.emptyKeycap(item.JumpKey)
 	label := base.Render(item.Label)
-	left := base.Render(" ") + marker + chip + base.Render("   ") + label
+	left := base.Render(" ") + marker + chip + base.Render("  ") + label
 
 	right := ""
 	if item.Detail != "" {
@@ -468,11 +470,13 @@ func (m Model) emptyStartAffordance(item protocol.EmptyStateItem, rowBg color.Co
 // a focused (selection) row the glyph takes the selection foreground for
 // contrast; a missing glyph collapses to a single space so columns stay aligned.
 func (m Model) emptyIcon(item protocol.EmptyStateItem, rowBg color.Color, textColor color.Color, focused bool) string {
+	// Fixed two-cell slot: glyph widths vary (missing, single-cell PUA,
+	// double-cell symbols), and the label column must not shift with them.
+	style := lipgloss.NewStyle().Background(rowBg).Width(2).MaxWidth(2)
 	glyph := strings.TrimSpace(item.Icon)
 	if glyph == "" {
-		return lipgloss.NewStyle().Background(rowBg).Render(" ")
+		return style.Render(" ")
 	}
-	style := lipgloss.NewStyle().Background(rowBg)
 	if focused {
 		style = style.Foreground(textColor)
 	} else if item.IconColor != 0 {
