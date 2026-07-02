@@ -19,7 +19,6 @@ defmodule MingaEditor.RenderPipeline.ViewportRowAccountingTest do
   alias MingaEditor.RenderPipeline.Content
   alias MingaEditor.RenderPipeline.Scroll
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.Viewport
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -91,22 +90,25 @@ defmodule MingaEditor.RenderPipeline.ViewportRowAccountingTest do
     end
 
     test "line spacing feeds the row count exactly once, then fills the viewport" do
-      # Reconcile the reported ledger: a 21-raw-cell window at spacing 1.2 must
-      # yield 17 effective rows and emit all 17 as content (the #2693 report saw
-      # 17 effective but only ~16 rendered because of the phantom reservation).
+      # Reconcile the reported ledger: a 21-cell-tall window at spacing 1.2 floors
+      # once on the frontend to 17 rows-that-fit, and the BEAM emits all 17 as
+      # content (the #2693 report saw 17 but only ~16 rendered because of the
+      # phantom reservation). Per ADR-0001 the single floor lives on the frontend
+      # (floor(cells / spacing)); the BEAM performs no spacing arithmetic and lays
+      # out in exactly the rows it is given.
       raw_rows = 21
 
       for {spacing, expected} <- [{1.0, 21}, {1.2, 17}] do
-        effective = Viewport.effective_rows(raw_rows, spacing)
+        effective = floor(raw_rows / spacing)
 
         assert effective == expected,
-               "effective_rows(#{raw_rows}, #{spacing}) should be #{expected}"
+               "frontend row-fit floor(#{raw_rows} / #{spacing}) should be #{expected}"
 
         state = gui_state(rows: effective, cols: 108, content: long_content(effective * 3))
         {models, _layout} = emitted_models(state)
         [model] = Map.values(models)
 
-        # Emitted rows equal the effective viewport rows: spacing applied once,
+        # Emitted rows equal the reported viewport rows: spacing applied once,
         # no phantom chrome deduction on top.
         assert content_height(model.rect) == effective
         assert_fills_content(model, effective)

@@ -299,30 +299,34 @@ The terminal or window was resized.
 
 ```
 opcode: u8  = 0x02
-width:  u16           new width in columns (or pixels for GUI)
-height: u16           new height in rows (or pixels for GUI)
+width:  u16           content columns available at current presentation metrics
+height: u16           content rows available at current presentation metrics
 ```
 
 Total size: 5 bytes.
 
 **Behavior:** Sent when the frontend detects a size change (SIGWINCH for TUI, window resize event for GUI). The BEAM re-renders to the new dimensions on the next frame.
 
+`width`/`height` are **content cells**, not pixels. Each frontend owns the single row-fit floor and reports how many rows and columns fit its content area at the current font, backing scale, and line spacing: `rows = floor(content_pixels / (cell_height × line_spacing))`, computed once in the layer that owns the pixels. The BEAM lays out in exactly these rows and performs no pixel or line-spacing arithmetic of its own. The TUI reports its terminal grid unchanged (line spacing is 1.0 there by construction). Line spacing reaches the GUI only as a draw-time rendering hint (`gui_line_spacing`, 0x92) and a runtime spacing change arrives back here as an ordinary resize. See `docs/adr/0001-frontend-owns-row-fit.md`.
+
 ### `0x03` ready
 
 The frontend has initialized and is ready to receive render commands.
 
+The `width`/`height` fields carry the same "content cells at current presentation metrics" meaning as `resize` above (see that section for the row-fit rule and ADR-0001 reference).
+
 **Short format (5 bytes):**
 ```
 opcode: u8  = 0x03
-width:  u16           initial width
-height: u16           initial height
+width:  u16           initial content columns available at current presentation metrics
+height: u16           initial content rows available at current presentation metrics
 ```
 
 **Extended format (13 bytes, or 15+ with a version tail):**
 ```
 opcode:           u8  = 0x03
-width:            u16           initial width
-height:           u16           initial height
+width:            u16           initial content columns available at current presentation metrics
+height:           u16           initial content rows available at current presentation metrics
 caps_version:     u8            capability format version (currently 1)
 caps_len:         u8            length of capability data
 caps_data:        [caps_len]u8  capability fields (see "Capability Negotiation" section)

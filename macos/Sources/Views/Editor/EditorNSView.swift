@@ -114,8 +114,11 @@ final class EditorNSView: MTKView {
 
     private struct GridDimensions {
         let cols: UInt16
-        let rawRows: UInt16
-        let effectiveRows: UInt16
+        /// Content rows-that-fit at the current presentation metrics: one floor of
+        /// content pixels by the spaced cell height (ADR-0001). This is the value
+        /// reported on the wire and the value the BEAM lays out in; there is no
+        /// separate unspaced "raw" row count anymore.
+        let rows: UInt16
     }
 
     /// First responder guard that prevents SwiftUI from stealing keyboard focus.
@@ -515,19 +518,21 @@ final class EditorNSView: MTKView {
         let resolvedCellWidth = cellWidth ?? self.cellWidth
         let resolvedCellHeight = cellHeight ?? self.cellHeight
         guard resolvedCellWidth > 0, resolvedCellHeight > 0 else {
-            return GridDimensions(cols: 1, rawRows: 1, effectiveRows: 1)
+            return GridDimensions(cols: 1, rows: 1)
         }
 
         let gutterPad: CGFloat = dispatcher.frameState.gutterCol > 0 ? CoreTextMetalRenderer.gutterPixelPaddingPt : 0
         let cols = UInt16(max((width - gutterPad) / resolvedCellWidth, 1))
-        let rawRows = UInt16(max(height / resolvedCellHeight, 1))
-        let effectiveRows = effectiveRows(from: rawRows, lineSpacing: dispatcher.frameState.lineSpacing)
-        return GridDimensions(cols: cols, rawRows: rawRows, effectiveRows: effectiveRows)
+        let rows = rowsThatFit(height: height, cellHeight: resolvedCellHeight, lineSpacing: dispatcher.frameState.lineSpacing)
+        return GridDimensions(cols: cols, rows: rows)
     }
 
-    private func effectiveRows(from rawRows: UInt16, lineSpacing: Float) -> UInt16 {
-        let spacing = max(Double(lineSpacing), 1.0)
-        return UInt16(max(floor(Double(rawRows) / spacing), 1))
+    /// The one and only row-fit floor (ADR-0001): content pixels divided by the
+    /// spaced cell height, floored once, in the layer that owns the pixels. The
+    /// BEAM consumes this verbatim and never re-derives a row count from spacing.
+    private func rowsThatFit(height: CGFloat, cellHeight: CGFloat, lineSpacing: Float) -> UInt16 {
+        let spacedCellHeight = cellHeight * CGFloat(max(lineSpacing, 1.0))
+        return UInt16(max(floor(height / spacedCellHeight), 1))
     }
 
     // MARK: - Font update
@@ -545,9 +550,9 @@ final class EditorNSView: MTKView {
 
         let grid = gridDimensions(width: frame.width, height: frame.height, cellWidth: newCellW, cellHeight: newCellH)
 
-        if grid.cols != dispatcher.frameState.cols || grid.effectiveRows != dispatcher.frameState.rows {
-            dispatcher.applyViewportResize(newCols: grid.cols, newRows: grid.effectiveRows)
-            encoder.sendResize(cols: grid.cols, rows: grid.rawRows)
+        if grid.cols != dispatcher.frameState.cols || grid.rows != dispatcher.frameState.rows {
+            dispatcher.applyViewportResize(newCols: grid.cols, newRows: grid.rows)
+            encoder.sendResize(cols: grid.cols, rows: grid.rows)
         }
 
         // Force a full re-render.
@@ -630,16 +635,16 @@ final class EditorNSView: MTKView {
         guard frame.width > 0, frame.height > 0 else { return }
 
         let grid = currentGridDimensions()
-        dispatcher.applyViewportResize(newCols: grid.cols, newRows: grid.effectiveRows)
+        dispatcher.applyViewportResize(newCols: grid.cols, newRows: grid.rows)
 
         if readySent {
-            encoder.sendResize(cols: grid.cols, rows: grid.rawRows)
+            encoder.sendResize(cols: grid.cols, rows: grid.rows)
         } else {
             readySent = true
-            encoder.sendReady(cols: grid.cols, rows: grid.rawRows)
+            encoder.sendReady(cols: grid.cols, rows: grid.rows)
         }
 
-        PortLogger.info("\(reason): \(grid.cols)x\(grid.rawRows) raw cells, \(grid.effectiveRows) effective rows")
+        PortLogger.info("\(reason): \(grid.cols)x\(grid.rows) rows")
     }
 
     private func measureTrafficLightPosition(in window: NSWindow) {
@@ -774,14 +779,14 @@ final class EditorNSView: MTKView {
             // First real frame size: send the ready event with actual
             // window dimensions so the BEAM never sees wrong defaults.
             readySent = true
-            dispatcher.applyViewportResize(newCols: grid.cols, newRows: grid.effectiveRows)
-            encoder.sendReady(cols: grid.cols, rows: grid.rawRows)
-            os_signpost(.event, log: startupLog, name: "ReadySent", "%{public}dx%{public}d", grid.cols, grid.rawRows)
-            PortLogger.info("Window ready: \(grid.cols)x\(grid.rawRows) raw cells, \(grid.effectiveRows) effective rows (\(Int(newSize.width))x\(Int(newSize.height))pt)")
-        } else if grid.cols != dispatcher.frameState.cols || grid.effectiveRows != dispatcher.frameState.rows {
-            dispatcher.applyViewportResize(newCols: grid.cols, newRows: grid.effectiveRows)
-            encoder.sendResize(cols: grid.cols, rows: grid.rawRows)
-            PortLogger.info("Window resized: \(grid.cols)x\(grid.rawRows) raw cells, \(grid.effectiveRows) effective rows")
+            dispatcher.applyViewportResize(newCols: grid.cols, newRows: grid.rows)
+            encoder.sendReady(cols: grid.cols, rows: grid.rows)
+            os_signpost(.event, log: startupLog, name: "ReadySent", "%{public}dx%{public}d", grid.cols, grid.rows)
+            PortLogger.info("Window ready: \(grid.cols)x\(grid.rows) rows (\(Int(newSize.width))x\(Int(newSize.height))pt)")
+        } else if grid.cols != dispatcher.frameState.cols || grid.rows != dispatcher.frameState.rows {
+            dispatcher.applyViewportResize(newCols: grid.cols, newRows: grid.rows)
+            encoder.sendResize(cols: grid.cols, rows: grid.rows)
+            PortLogger.info("Window resized: \(grid.cols)x\(grid.rows) rows")
         }
     }
 
@@ -845,16 +850,19 @@ final class EditorNSView: MTKView {
 
     // MARK: - Line spacing
 
-    /// Called when the BEAM sends a new line_spacing value. Recomputes the grid
-    /// row count based on the new effective cell height and sends a resize event
-    /// so the BEAM adjusts its viewport.
+    /// Called when the BEAM sends a new line_spacing value (opcode 0x92). By the
+    /// time this fires the dispatcher has already stored the new spacing, so we
+    /// recompute rows-that-fit once against the spaced cell height (ADR-0001) and,
+    /// if it changed, send an ordinary resize. The BEAM re-lays-out in the given
+    /// rows without any spacing math of its own. A resize never re-triggers 0x92
+    /// (the emit is fingerprint-gated on the spacing value), so there is no loop.
     func lineSpacingChanged(_ spacing: Float) {
         guard frame.width > 0, frame.height > 0 else { return }
         let grid = currentGridDimensions()
 
-        if grid.cols != dispatcher.frameState.cols || grid.effectiveRows != dispatcher.frameState.rows {
-            dispatcher.applyViewportResize(newCols: grid.cols, newRows: grid.effectiveRows)
-            encoder.sendResize(cols: grid.cols, rows: grid.rawRows)
+        if grid.cols != dispatcher.frameState.cols || grid.rows != dispatcher.frameState.rows {
+            dispatcher.applyViewportResize(newCols: grid.cols, newRows: grid.rows)
+            encoder.sendResize(cols: grid.cols, rows: grid.rows)
         }
     }
 
