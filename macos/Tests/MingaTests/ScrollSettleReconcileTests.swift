@@ -100,6 +100,50 @@ struct DiscreteTickEasingTests {
     }
 }
 
+@Suite("Discrete-tick boundary gate suppresses uncommittable predictions")
+struct DiscreteTickBoundaryGateTests {
+
+    // Direction convention mirrors `presentationScrollBoundaryAvailability` and the seed:
+    // scroll up is `lineDelta < 0` and needs content `before` (above); scroll down is
+    // `lineDelta > 0` and needs content `after` (below). GUI ticks are exactly one line
+    // (`@gui_scroll_lines = 1`), so a tick is always ±1 and one available line is enough.
+
+    @Test("a tick into the top boundary seeds nothing")
+    func topBoundarySuppressed() {
+        // At the very top: no content before. A scroll-up tick can't be committed, so no seed.
+        #expect(EditorNSView.discreteTickSeedsPrediction(lineDelta: -1, boundaryBefore: 0, boundaryAfter: 1) == false)
+    }
+
+    @Test("a tick into the bottom boundary seeds nothing")
+    func bottomBoundarySuppressed() {
+        // At the very bottom: no content after. A scroll-down tick can't be committed, so no seed.
+        #expect(EditorNSView.discreteTickSeedsPrediction(lineDelta: 1, boundaryBefore: 1, boundaryAfter: 0) == false)
+    }
+
+    @Test("a mid-document tick seeds normally in both directions")
+    func midDocumentSeeds() {
+        // Content on both sides: either direction commits, so both seed.
+        #expect(EditorNSView.discreteTickSeedsPrediction(lineDelta: -1, boundaryBefore: 1, boundaryAfter: 1) == true)
+        #expect(EditorNSView.discreteTickSeedsPrediction(lineDelta: 1, boundaryBefore: 1, boundaryAfter: 1) == true)
+    }
+
+    @Test("a tick away from a boundary still seeds")
+    func awayFromBoundarySeeds() {
+        // Parked at the top (no content before): scrolling DOWN is still valid and must seed.
+        #expect(EditorNSView.discreteTickSeedsPrediction(lineDelta: 1, boundaryBefore: 0, boundaryAfter: 1) == true)
+        // Parked at the bottom (no content after): scrolling UP is still valid and must seed.
+        #expect(EditorNSView.discreteTickSeedsPrediction(lineDelta: -1, boundaryBefore: 1, boundaryAfter: 0) == true)
+    }
+
+    @Test("exactly one available line satisfies a one-line tick (no partial-availability underflow)")
+    func partialAvailabilityIsExactForOneLineTick() {
+        // A GUI tick is one line, so a boundary "one line away" (availability = 1) commits exactly:
+        // the tick seeds. There is no multi-line discrete tick that could overshoot a 1-line margin.
+        #expect(EditorNSView.discreteTickSeedsPrediction(lineDelta: -1, boundaryBefore: 1, boundaryAfter: 0) == true)
+        #expect(EditorNSView.discreteTickSeedsPrediction(lineDelta: 1, boundaryBefore: 0, boundaryAfter: 1) == true)
+    }
+}
+
 @Suite("Presentation offset reaches the settling pane (render-path gate)")
 struct PresentationScrollWindowResolutionTests {
 
