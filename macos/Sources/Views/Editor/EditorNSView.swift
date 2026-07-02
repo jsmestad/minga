@@ -2288,6 +2288,20 @@ final class EditorNSView: MTKView {
         }
     }
 
+    /// Whether a discrete tick may seed a predicted line, given the boundary availability for the
+    /// target pane. A tick INTO a document edge (scroll up at the top, scroll down at the bottom)
+    /// seeds a line the BEAM can never commit: the eased residual decays to zero while
+    /// `scrollUnconfirmedLines` sticks at ±1, parking content one cell off-grid until the next
+    /// authoritative reset. Suppress the local prediction there; the scroll intent still sends, so
+    /// an at-boundary tick simply does nothing visually, matching reality. `before`/`after` mirror
+    /// `presentationScrollBoundaryAvailability`: `before` is content above (needed to scroll up,
+    /// `lineDelta < 0`), `after` is content below (needed to scroll down, `lineDelta > 0`).
+    nonisolated static func discreteTickSeedsPrediction(lineDelta: Int, boundaryBefore: Int, boundaryAfter: Int) -> Bool {
+        if lineDelta < 0 { return boundaryBefore > 0 }
+        if lineDelta > 0 { return boundaryAfter > 0 }
+        return false
+    }
+
     /// AC3: eases a discrete-wheel line motion locally on the same frame it arrives instead of
     /// teleporting at round-trip latency. The GUI scrolls exactly one line per wheel event
     /// (`@gui_scroll_lines`), so a `lineDelta` of ±1 is seeded as a predicted unconfirmed line;
@@ -2299,6 +2313,19 @@ final class EditorNSView: MTKView {
         guard scrollTargetWindowId == nil else { return }
         guard effectiveCellHeight > 0 else { return }
         guard let windowId = smoothScrollTargetWindowId(row: row, col: col) else { return }
+
+        // A tick into a document boundary can't be committed by the BEAM, so predicting it would
+        // park content one cell off-grid; suppress the seed (the scroll intent already sent above).
+        let windowContent = guiState?.windowContents[windowId]
+        let boundary = Self.presentationScrollBoundaryAvailability(
+            for: windowContent,
+            scrollPresentation: windowContent?.scrollPresentation
+        )
+        guard Self.discreteTickSeedsPrediction(
+            lineDelta: lineDelta,
+            boundaryBefore: boundary.before,
+            boundaryAfter: boundary.after
+        ) else { return }
 
         // Extend any in-flight settle from its current position so rapid ticks accumulate smoothly.
         let residualNow = scrollSettleAnimator.offset()
