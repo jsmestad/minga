@@ -15,6 +15,7 @@ defmodule MingaEditor.RenderPipeline.LinePatchFastPathTest do
   use ExUnit.Case, async: false
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Config
   alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline
   alias MingaEditor.RenderPipeline.BufferPrefetch
@@ -27,6 +28,13 @@ defmodule MingaEditor.RenderPipeline.LinePatchFastPathTest do
   import MingaEditor.RenderPipeline.TestHelpers
 
   setup context do
+    # These tests target the #2287 windowed line-patch fast path, so pin
+    # full-document residence off (it now defaults on, #2679). Safe because the
+    # module is already async: false; the option is restored after each test.
+    original_residence = Config.get(:resident_store_max_lines)
+    Config.set(:resident_store_max_lines, 0)
+    on_exit(fn -> Config.set(:resident_store_max_lines, original_residence) end)
+
     # Capture the pipeline span's stop metadata for assertions. Each test gets a
     # unique handler id so the async suite never crosses streams.
     handler_id = {__MODULE__, context.test, self()}
@@ -134,8 +142,7 @@ defmodule MingaEditor.RenderPipeline.LinePatchFastPathTest do
       # A tall enough buffer that scrolling exposes exactly one new row. The
       # rows still on screen keep their row_id and input fingerprint, so the
       # retained-row cache reuses them; only the row scrolled into view composes.
-      # (Full-document residence is dormant by default, so this windowed path is
-      # what runs.)
+      # (Residence is pinned off in setup so this windowed path is what runs.)
       state = gui_state(content: long_content(100), rows: 8)
       buffer = state.workspace.buffers.active
       state = warm(state)

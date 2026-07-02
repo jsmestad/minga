@@ -1,6 +1,20 @@
 # Resident-Store Rendering Direction
 
-**Status:** Approved direction, June 2026. Tracked by epic [#2652](https://github.com/jsmestad/minga/issues/2652). This doc captures the decision and its rationale so future work (human or agent) builds toward it instead of extending the machinery it deletes. The normative protocol spec lands in `GUI_PROTOCOL.md` and `ARCHITECTURE.md` as the epic's implementation ships; until then, this doc describes the target, not current behavior.
+**Status:** Shipping. Full-document residence is **on by default** as of [#2679](https://github.com/jsmestad/minga/issues/2679) (`resident_store_max_lines` defaults to `65535`, the u16 wire ceiling). Tracked by epic [#2652](https://github.com/jsmestad/minga/issues/2652). This doc captures the decision and its rationale so future work (human or agent) builds toward it instead of extending the machinery it deletes. The normative protocol spec lives in `GUI_PROTOCOL.md` and `ARCHITECTURE.md`.
+
+## Status ledger (as of #2679)
+
+The prerequisites the epic set for the default flip have all landed:
+
+- Incremental resident store, edit frames O(changed rows) — [#2658](https://github.com/jsmestad/minga/issues/2658). Wall-clock evidence: single-line edit on a 5,000-line resident buffer is ~1 ms p50 / ~1.1 ms p95, flat across sizes; the operation-count CI gate is `test/minga_editor/render_pipeline/resident_incremental_test.exs`.
+- GUI free-scroll zone renders locally — [#2661](https://github.com/jsmestad/minga/issues/2661).
+- Same-top jump discard gap closed (explicit `bump_scroll_seq` at authoritative call sites) — [#2678](https://github.com/jsmestad/minga/issues/2678).
+- Huge files refused pre-load above `:max_file_size` — [#2673](https://github.com/jsmestad/minga/issues/2673).
+- Conformance runs zero-skip on both frontends.
+
+**First-paint-then-promote (#2679).** File-open first paint at the 65k-row ceiling was measured at ~0.5 s for a full resident build versus ~0.7 ms for the windowed path, so residence now engages one frame after first paint: a newly opened or resized window renders viewport-windowed first (instant content), then promotes to full residence on the next frame. The expensive O(document) first build lands on the renderer process after content is on screen, not blocking first paint. The promotion is carried by `residence_armed` in the window render cache and resets on layout_generation rebuilds.
+
+**Closed ledger items:** residence default flip (was AC4 of #2658), first-paint protection (was the ledger's evidence-gated design input). **Still open:** the manual GUI smoke session (the epic's one human gate, signed off on #2679 before merge); residual O(document) passes at the 65k extreme (~30 fps resident scroll at the ceiling; delta-only row-list construction, only if >5k-line residence matters post-launch); wrapped/folded residence (future slice, needs visual-row offset math).
 
 ## The problem
 

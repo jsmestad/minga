@@ -345,6 +345,13 @@ defmodule MingaEditor.RenderPipelineTest do
     end
 
     test "unchanged lines emit a viewport delta instead of a full content frame" do
+      # This exercises the windowed semantic-encoder delta cache (0xA1). Pin
+      # residence off (#2679 defaults it on) so frame 2 stays on the windowed
+      # delta path instead of promoting to a resident full-content keyframe.
+      original = Minga.Config.get(:resident_store_max_lines)
+      Minga.Config.set(:resident_store_max_lines, 0)
+      on_exit(fn -> Minga.Config.set(:resident_store_max_lines, original) end)
+
       state = base_state(content: "hello\nworld\nfoo")
 
       # Frame 1: fresh render emits a full window content (0x80) snapshot.

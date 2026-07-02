@@ -80,6 +80,7 @@ defmodule MingaEditor.Window.RenderCache do
           retained_wrap_lines: %{optional(non_neg_integer()) => retained_wrap_line()},
           resident_build: MingaEditor.RenderModel.Window.ResidentBuild.t() | nil,
           resident: boolean(),
+          residence_armed: boolean(),
           scroll_seq: non_neg_integer(),
           scroll_seq_last_top: integer() | nil,
           scroll_seq_last_authoritative: non_neg_integer()
@@ -101,6 +102,7 @@ defmodule MingaEditor.Window.RenderCache do
             retained_wrap_lines: %{},
             resident_build: nil,
             resident: false,
+            residence_armed: false,
             scroll_seq: 0,
             scroll_seq_last_top: nil,
             scroll_seq_last_authoritative: 0
@@ -138,7 +140,8 @@ defmodule MingaEditor.Window.RenderCache do
         total_visual_rows_cache: nil,
         retained_rows: %{},
         retained_wrap_lines: %{},
-        resident_build: nil
+        resident_build: nil,
+        residence_armed: false
     }
   end
 
@@ -451,6 +454,24 @@ defmodule MingaEditor.Window.RenderCache do
   @doc "Returns the residence flag captured by the last rendered frame."
   @spec resident?(t()) :: boolean()
   def resident?(%__MODULE__{resident: resident}), do: resident
+
+  @doc """
+  Arms (or disarms) full-document residence for the next frame (#2679).
+
+  First-paint-then-promote: a resident-eligible window renders viewport-windowed
+  on its first frame after becoming eligible, arming promotion; the next frame
+  sees `residence_armed?/1` true and emits full residence. This keeps the
+  expensive O(document) first build off file-open first paint. The flag is reset
+  by `reset/1` so a layout_generation rebuild (resize, font, wrap) re-defers.
+  """
+  @spec set_residence_armed(t(), boolean()) :: t()
+  def set_residence_armed(%__MODULE__{} = cache, armed?) when is_boolean(armed?) do
+    %{cache | residence_armed: armed?}
+  end
+
+  @doc "Returns whether residence was armed by the previous eligible frame (#2679)."
+  @spec residence_armed?(t()) :: boolean()
+  def residence_armed?(%__MODULE__{residence_armed: armed}), do: armed
 
   @doc "Returns the monotonic scroll-authority sequence (#2661)."
   @spec scroll_seq(t()) :: non_neg_integer()

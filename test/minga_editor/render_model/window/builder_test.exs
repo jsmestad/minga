@@ -336,6 +336,10 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
 
     test "ordinary buffer edits change row hashes without bumping content epoch or forcing refresh" do
       state = gui_state(content: "hello")
+      # First-paint-then-promote (#2679): frame 1 renders windowed (arming), frame 2
+      # promotes to residence with a full refresh. Settle both before measuring
+      # edit-epoch stability so the edit frame is the only variable.
+      {[_wf], _cursor, state} = build_content(state)
       {[wf], _cursor, state} = build_content(state)
       epoch = wf.window_model.content_epoch
       old_hash = hd(wf.window_model.rows).content_hash

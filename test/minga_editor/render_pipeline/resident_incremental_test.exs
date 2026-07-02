@@ -61,7 +61,8 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
 
   describe "digest consistency" do
     test "content_digest always equals a from-scratch digest of the emitted rows" do
-      {model, _state} = build_frame(resident_state(300))
+      # First-paint-then-promote (#2679): warm one frame so residence is promoted.
+      {model, _state} = build_frame(warm(resident_state(300)))
 
       refute is_nil(model.content_digest)
       assert model.content_digest == ContentDigest.of_rows(model.rows)

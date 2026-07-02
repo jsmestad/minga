@@ -43,6 +43,10 @@ defmodule Minga.Bench.ResidentFrame do
   defp bench_size(size) do
     state = resident_state(size)
 
+    # First-paint-then-promote (#2679): the first frame renders windowed (arming
+    # promotion); discard it so `keyframe_us` measures the first full resident
+    # build. The following frame settles the incremental base for the edit samples.
+    {_arm_us, state} = timed_frame(state)
     {keyframe_us, state} = timed_frame(state)
     {_us, state} = timed_frame(state)
 

@@ -423,10 +423,10 @@ defmodule Minga.Config.Options do
      ], "Directory names excluded from the file finder (SPC f f). Stacks with .gitignore."},
     {:picker_backdrop, :boolean, true,
      "Whether centered floating pickers render a dimmed backdrop overlay."},
-    {:resident_store_max_lines, :non_neg_integer, 0,
-     "Maximum buffer line count that still receives full-document row residence (glitch-free fast scrolling). 0 disables full residence entirely (the default); larger buffers fall back to viewport-windowed emit."},
+    {:resident_store_max_lines, :non_neg_integer, 65_535,
+     "Maximum buffer line count that still receives full-document row residence (glitch-free fast scrolling). Defaults to 65_535, the u16 wire ceiling: gui_window_content and its row/viewport deltas encode row_count as a u16, so the render path (@wire_max_rows in buffer_prefetch) caps residence there regardless of this value. Real exposure is bounded well below the line ceiling by two byte gates in front of it: :resident_store_max_bytes (10 MB) skips residence for large buffers, and :max_file_size (10 MB, pre-read stat) refuses the file before a buffer is even created. Set to 0 to disable full residence entirely; over-ceiling or over-byte buffers fall back to viewport-windowed emit. Wrapped and folded buffers always use the windowed path."},
     {:resident_store_max_bytes, :pos_integer, 10_485_760,
-     "Maximum buffer byte size that still receives full-document row residence. Residence is gated by both this and :resident_store_max_lines, so it stays off while :resident_store_max_lines is 0."},
+     "Maximum buffer byte size that still receives full-document row residence. Residence is gated by both this and :resident_store_max_lines; set :resident_store_max_lines to 0 to disable residence regardless of byte size."},
     {:max_file_size, :pos_integer, 10_485_760,
      "Maximum file size in bytes Minga will open. Files larger than this show a text-only \"file too large\" surface instead of loading a buffer; the size is checked with a pre-read stat, so the gap buffer and tree-sitter parser never touch the content. Default 10 MB."}
   ]

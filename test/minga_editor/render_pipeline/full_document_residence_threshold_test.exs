@@ -2,9 +2,10 @@ defmodule MingaEditor.RenderPipeline.FullDocumentResidenceThresholdTest do
   @moduledoc """
   Threshold-guard and residence-emit tests for full-document row residence (#2653).
 
-  Residence ships dormant (`:resident_store_max_lines` default 0), so these tests
-  enable it by setting the global config option. That mutation forces the module
-  to run `async: false`; the option is restored after each test.
+  Residence ships on by default (`:resident_store_max_lines` default 65_535). These
+  tests pin the option explicitly per case (raising, lowering, or disabling it) to
+  exercise the threshold boundaries. That mutation forces the module to run
+  `async: false`; the option is restored after each test.
   """
 
   # Mutates the global Config option server (:resident_store_max_lines).
@@ -93,7 +94,9 @@ defmodule MingaEditor.RenderPipeline.FullDocumentResidenceThresholdTest do
   test "a buffer under the configured line threshold stays fully resident" do
     Config.set(:resident_store_max_lines, 100_000)
 
-    [{_win_id, scroll}] = Map.to_list(run_through_scroll(scrolled_state(250)))
+    # First-paint-then-promote (#2679): residence engages on the second frame.
+    state = warm(scrolled_state(250))
+    [{_win_id, scroll}] = Map.to_list(run_through_scroll(state))
 
     assert scroll.full_residence == true
     assert Enum.count(scroll.lines) == 500
@@ -102,7 +105,8 @@ defmodule MingaEditor.RenderPipeline.FullDocumentResidenceThresholdTest do
   test "residence emits every document row regardless of scroll position" do
     Config.set(:resident_store_max_lines, 100_000)
 
-    model = build_model(scrolled_state(250))
+    # First-paint-then-promote (#2679): warm one frame so residence is promoted.
+    model = build_model(warm(scrolled_state(250)))
     presentation = ScrollPresentation.from_window(model)
 
     # The window carries every document row, in buffer order from line 0 to 499.
@@ -125,10 +129,13 @@ defmodule MingaEditor.RenderPipeline.FullDocumentResidenceThresholdTest do
   end
 
   test "toggling residence mid-session forces a full refresh via the render reset fingerprint" do
+    # Residence is on by default, so pin it off first to establish a windowed
+    # baseline fingerprint before toggling it on below.
+    Config.set(:resident_store_max_lines, 0)
     state = scrolled_state(250)
 
-    # Warm up with residence disabled (default 0) to establish a baseline
-    # fingerprint in the window's render cache.
+    # Warm up with residence disabled to establish a baseline fingerprint in the
+    # window's render cache.
     state = warm(state)
 
     # Second frame should be stable (no full refresh).
@@ -137,9 +144,16 @@ defmodule MingaEditor.RenderPipeline.FullDocumentResidenceThresholdTest do
     assert scroll.full_refresh == false
     assert scroll.full_residence == false
 
-    # Enable residence and run a third frame. The fingerprint change should
-    # force full_refresh: true so no :patch frame diffs across differently-sized stores.
+    # Enable residence. First-paint-then-promote (#2679): the first frame after
+    # enabling stays windowed (arming promotion), so it neither becomes resident
+    # nor forces a refresh yet.
     Config.set(:resident_store_max_lines, 100_000)
+    {scrolls, state} = run_through_scroll_with_state(state)
+    [{_win_id, arming}] = Map.to_list(scrolls)
+    assert arming.full_residence == false
+
+    # The next frame promotes to residence. The fingerprint change forces
+    # full_refresh: true so no :patch frame diffs across differently-sized stores.
     {scrolls, _state} = run_through_scroll_with_state(state)
     [{_win_id, scroll}] = Map.to_list(scrolls)
     assert scroll.full_refresh == true
@@ -149,7 +163,8 @@ defmodule MingaEditor.RenderPipeline.FullDocumentResidenceThresholdTest do
   test "gutter stays viewport-bounded under residence even when scrolled deep" do
     Config.set(:resident_store_max_lines, 100_000)
 
-    model = build_model(scrolled_state(400))
+    # First-paint-then-promote (#2679): warm one frame so residence is promoted.
+    model = build_model(warm(scrolled_state(400)))
     visible = model.geometry.viewport.rows
 
     assert Enum.count(model.rows) == 500
