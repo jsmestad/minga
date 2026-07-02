@@ -4,6 +4,7 @@ import Testing
 import Foundation
 import CoreGraphics
 import simd
+import MingaProtocol
 
 @Suite("Scroll settle unconfirmed-line reconciliation")
 struct ScrollSettleReconcileTests {
@@ -105,13 +106,19 @@ struct PresentationScrollWindowResolutionTests {
 
     @Test("live gesture target owns the offset")
     func livePreferred() {
-        let resolved = EditorNSView.presentationScrollWindowId(targetWindowId: 3, settleWindowId: 9, elasticWindowId: 8)
+        let resolved = EditorNSView.presentationScrollWindowId(targetWindowId: 3, thumbDragWindowId: 4, settleWindowId: 9, elasticWindowId: 8)
         #expect(resolved == 3)
+    }
+
+    @Test("thumb drag wins over settle and elastic when no trackpad gesture is live")
+    func thumbDragPreferred() {
+        let resolved = EditorNSView.presentationScrollWindowId(targetWindowId: nil, thumbDragWindowId: 4, settleWindowId: 9, elasticWindowId: 8)
+        #expect(resolved == 4)
     }
 
     @Test("target nil falls back to the settling window so the settle stays visible")
     func settleFallback() {
-        let resolved = EditorNSView.presentationScrollWindowId(targetWindowId: nil, settleWindowId: 5, elasticWindowId: nil)
+        let resolved = EditorNSView.presentationScrollWindowId(targetWindowId: nil, thumbDragWindowId: nil, settleWindowId: 5, elasticWindowId: nil)
         #expect(resolved == 5)
         // The renderer gate applies the offset to exactly that pane, not to every window.
         let offset = SIMD2<Float>(0, 12)
@@ -121,16 +128,144 @@ struct PresentationScrollWindowResolutionTests {
 
     @Test("target nil and no settle falls back to the elastic spring-back window")
     func elasticFallback() {
-        let resolved = EditorNSView.presentationScrollWindowId(targetWindowId: nil, settleWindowId: nil, elasticWindowId: 7)
+        let resolved = EditorNSView.presentationScrollWindowId(targetWindowId: nil, thumbDragWindowId: nil, settleWindowId: nil, elasticWindowId: 7)
         #expect(resolved == 7)
     }
 
     @Test("all windows nil resolves to nil so the renderer zeroes the offset")
     func allNilZeroes() {
-        let resolved = EditorNSView.presentationScrollWindowId(targetWindowId: nil, settleWindowId: nil, elasticWindowId: nil)
+        let resolved = EditorNSView.presentationScrollWindowId(targetWindowId: nil, thumbDragWindowId: nil, settleWindowId: nil, elasticWindowId: nil)
         #expect(resolved == nil)
         // Mirrors the state after a discard cancels an in-flight settle: no pane shows the offset.
         #expect(CoreTextMetalRenderer.smoothScrollOffset(for: 5, targetWindowId: resolved, scrollOffsetPx: SIMD2<Float>(0, 12)) == .zero)
+    }
+}
+
+@Suite("Scrollbar thumb-drag local presentation (issue #2665)")
+struct ThumbDragPresentationTests {
+
+    private func presentation(overscanStart: UInt32, overscanEnd: UInt32) -> GUIScrollPresentation {
+        GUIScrollPresentation(
+            windowId: 1, resetRequired: false, anchorTop: 0, anchorLeft: 0, anchorVisualRowOffset: 0,
+            visibleStartLine: overscanStart, visibleEndLine: overscanEnd,
+            overscanStartLine: overscanStart, overscanEndLine: overscanEnd,
+            contentEpoch: 1, layoutGeneration: 1
+        )
+    }
+
+    @Test("a resident pane (whole-document overscan) can present locally")
+    func residentPresentsLocally() {
+        // Overscan spans line 0 through totalLines: the whole document is resident.
+        let sp = presentation(overscanStart: 0, overscanEnd: 1_000)
+        #expect(EditorNSView.thumbDragCanPresentLocally(scrollPresentation: sp, totalLines: 1_000))
+    }
+
+    @Test("a windowed pane (partial band) keeps the round-trip path")
+    func windowedStaysRoundTrip() {
+        // A viewport-plus-overscan band that does not start at 0 or reach the end.
+        let sp = presentation(overscanStart: 400, overscanEnd: 520)
+        #expect(!EditorNSView.thumbDragCanPresentLocally(scrollPresentation: sp, totalLines: 1_000))
+    }
+
+    @Test("no presentation or empty document never presents locally")
+    func degenerateNeverPresents() {
+        #expect(!EditorNSView.thumbDragCanPresentLocally(scrollPresentation: nil, totalLines: 1_000))
+        let sp = presentation(overscanStart: 0, overscanEnd: 0)
+        #expect(!EditorNSView.thumbDragCanPresentLocally(scrollPresentation: sp, totalLines: 0))
+    }
+
+    @Test("presentation offset places the target line at the viewport top")
+    func offsetPlacesTargetAtTop() {
+        // Committed anchor at line 100, dragging to line 450, 18px cells: content shifts up 350 lines.
+        let offset = EditorNSView.thumbDragPresentationOffsetY(targetLine: 450, committedAnchorTop: 100, cellHeight: 18)
+        #expect(offset == CGFloat(350 * 18))
+    }
+
+    @Test("dragging above the committed anchor yields a negative (upward) offset")
+    func offsetUpwardIsNegative() {
+        let offset = EditorNSView.thumbDragPresentationOffsetY(targetLine: 40, committedAnchorTop: 100, cellHeight: 20)
+        #expect(offset == CGFloat(-60 * 20))
+    }
+
+    @Test("offset is zero once the committed anchor reaches the target")
+    func offsetZeroWhenCaughtUp() {
+        #expect(EditorNSView.thumbDragPresentationOffsetY(targetLine: 300, committedAnchorTop: 300, cellHeight: 18) == 0)
+    }
+
+    @Test("a new target flushes at most one intent per frame")
+    func throttleFlushesOncePerTarget() {
+        // Pending differs from last-sent → flush this frame.
+        #expect(EditorNSView.shouldFlushThumbDragIntent(pending: 42, lastSent: nil))
+        #expect(EditorNSView.shouldFlushThumbDragIntent(pending: 42, lastSent: 10))
+        // Already sent this target → no redundant intent.
+        #expect(!EditorNSView.shouldFlushThumbDragIntent(pending: 42, lastSent: 42))
+        // Nothing pending → nothing to send.
+        #expect(!EditorNSView.shouldFlushThumbDragIntent(pending: nil, lastSent: 42))
+    }
+
+    @Test("reconcile lands when the committed anchor reaches the target after release")
+    func reconcileLandsOnExactMatch() {
+        // Released while dragging down (positive residual): lands at offset 0.
+        #expect(EditorNSView.thumbDragReconciled(offsetLines: 0, releaseSign: 1))
+        // Still catching up: not yet reconciled.
+        #expect(!EditorNSView.thumbDragReconciled(offsetLines: 5, releaseSign: 1))
+    }
+
+    @Test("reconcile lands when the committed anchor overshoots the target (clamp-mismatch guard)")
+    func reconcileLandsOnOvershoot() {
+        // Released dragging down but the anchor committed past the target: sign flipped → land.
+        #expect(EditorNSView.thumbDragReconciled(offsetLines: -2, releaseSign: 1))
+        // Released dragging up but the anchor committed above the target: sign flipped → land.
+        #expect(EditorNSView.thumbDragReconciled(offsetLines: 3, releaseSign: -1))
+        // Released already on grid.
+        #expect(EditorNSView.thumbDragReconciled(offsetLines: 0, releaseSign: 0))
+    }
+
+    // Baseline captured at release: seq 5, epoch 2, layout 1, dragging down toward line 100.
+    private func interrupt(
+        nextScrollSeq: UInt32 = 5, nextContentEpoch: UInt32 = 2, nextLayoutGeneration: UInt32 = 1,
+        previousAnchorTop: UInt32 = 40, nextAnchorTop: UInt32
+    ) -> Bool {
+        EditorNSView.thumbDragAuthoritativeInterrupt(
+            baselineScrollSeq: 5, nextScrollSeq: nextScrollSeq,
+            baselineContentEpoch: 2, nextContentEpoch: nextContentEpoch,
+            baselineLayoutGeneration: 1, nextLayoutGeneration: nextLayoutGeneration,
+            previousAnchorTop: previousAnchorTop, nextAnchorTop: nextAnchorTop,
+            targetLine: 100
+        )
+    }
+
+    @Test("a scroll_seq bump mid-reconcile bails out even while the anchor looks like progress")
+    func interruptOnSeqBump() {
+        // Anchor stepping toward the target (echo-shaped) but seq advanced → authoritative jump.
+        #expect(interrupt(nextScrollSeq: 6, nextAnchorTop: 55))
+    }
+
+    @Test("a non-crossing anchor jump away from the target mid-reconcile bails out")
+    func interruptOnAnchorMovingAway() {
+        // Seq/epoch flat, but the anchor moved backward (away from line 100): out-of-band scroll.
+        #expect(interrupt(previousAnchorTop: 40, nextAnchorTop: 30))
+        // Already on the target, then the anchor moves at all → authoritative.
+        #expect(interrupt(previousAnchorTop: 100, nextAnchorTop: 98))
+    }
+
+    @Test("a content-epoch or layout-generation change mid-reconcile bails out")
+    func interruptOnEpochOrLayoutChange() {
+        #expect(interrupt(nextContentEpoch: 3, nextAnchorTop: 55))
+        #expect(interrupt(nextLayoutGeneration: 2, nextAnchorTop: 55))
+    }
+
+    @Test("normal echo progress toward the target never bails out (release stays seamless)")
+    func noInterruptOnEchoProgress() {
+        // Seq/epoch/layout flat and the anchor stepping toward the target: the happy path.
+        #expect(!interrupt(previousAnchorTop: 40, nextAnchorTop: 55))
+        #expect(!interrupt(previousAnchorTop: 55, nextAnchorTop: 88))
+        // Anchor unchanged this frame (no BEAM commit yet) is not an interrupt.
+        #expect(!interrupt(previousAnchorTop: 55, nextAnchorTop: 55))
+        // Reaching the target exactly is progress, not an interrupt (reconcile then clears it).
+        #expect(!interrupt(previousAnchorTop: 90, nextAnchorTop: 100))
+        // Overshooting the target is a crossing, handled by the reconcile, not an interrupt.
+        #expect(!interrupt(previousAnchorTop: 90, nextAnchorTop: 105))
     }
 }
 
