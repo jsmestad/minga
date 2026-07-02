@@ -269,8 +269,27 @@ defmodule MingaEditor.Session.ChromeState do
       draft_state: :none,
       attention?: tab.attention,
       pinned?: tab.pinned?,
+      ephemeral?: ephemeral_tab?(tab, buffer, path),
       tint_color: tab_tint_color(tab, workspace)
     )
+  end
+
+  # A file tab whose buffer is a normal editable buffer with no backing file
+  # (e.g. Untitled-1). Non-file buffer types (:nofile, :nowrite, :prompt,
+  # :terminal — *Messages* and friends) are never expected to be on disk,
+  # so they are not styled as ephemeral.
+  @spec ephemeral_tab?(Tab.t(), pid() | nil, String.t() | nil) :: boolean()
+  defp ephemeral_tab?(%Tab{kind: :file}, buffer, nil) when is_pid(buffer) do
+    buffer_type(buffer) == :file
+  end
+
+  defp ephemeral_tab?(_tab, _buffer, _path), do: false
+
+  @spec buffer_type(pid()) :: Minga.Buffer.State.buffer_type()
+  defp buffer_type(pid) do
+    Buffer.buffer_type(pid)
+  catch
+    :exit, _ -> :nofile
   end
 
   @spec tab_buffer(map(), Tab.t()) :: pid() | nil

@@ -107,7 +107,7 @@ defmodule MingaEditor.Startup do
           {:ok, buf} =
             DynamicSupervisor.start_child(
               Minga.Buffer.Supervisor,
-              {Buffer, content: "", buffer_name: "[new 1]", options_server: options_server}
+              {Buffer, content: "", buffer_name: "Untitled-1", options_server: options_server}
             )
 
           {buf, [buf]}

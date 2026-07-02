@@ -46,7 +46,7 @@ defmodule MingaEditor.Commands.BufferManagementShutdownTest do
       type_string(editor, ":q\r")
       assert pending_quit(editor) == :quit
       assert status_msg(editor) == "Quit Minga? (y/n)"
-      refute Enum.any?(tab_labels(editor), &String.starts_with?(&1, "[new"))
+      refute Enum.any?(tab_labels(editor), &String.starts_with?(&1, "Untitled"))
 
       send_key(editor, ?y)
 

@@ -85,6 +85,35 @@ defmodule Minga.Frontend.Adapter.GUI.TabBarEncoderTest do
       assert Bitwise.band(flags, 0x70) == 0x10
     end
 
+    test "encodes ephemeral file tabs in bit 4" do
+      model = %TabBar{
+        visible?: true,
+        active_tab_id: 1,
+        tabs: [
+          %Tab{id: 1, workspace_id: 0, label: "Untitled-1", icon: "󰈔", ephemeral?: true}
+        ]
+      }
+
+      {cmd, _caches} = TabBarEncoder.encode(model, Caches.new())
+
+      assert <<@op_gui_tab_bar, 0::8, 1::8, flags::8, _rest::binary>> = cmd
+      assert Bitwise.band(flags, 0x04) == 0x00
+      assert Bitwise.band(flags, 0x10) == 0x10
+    end
+
+    test "file tabs with a backing file do not set the ephemeral bit" do
+      model = %TabBar{
+        visible?: true,
+        active_tab_id: 1,
+        tabs: [%Tab{id: 1, workspace_id: 0, label: "README.md", icon: "󰈙"}]
+      }
+
+      {cmd, _caches} = TabBarEncoder.encode(model, Caches.new())
+
+      assert <<@op_gui_tab_bar, 0::8, 1::8, flags::8, _rest::binary>> = cmd
+      assert Bitwise.band(flags, 0x70) == 0x00
+    end
+
     test "returns nil on second call with same semantic data" do
       model = %TabBar{
         visible?: true,

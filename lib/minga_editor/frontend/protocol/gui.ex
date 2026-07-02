@@ -546,9 +546,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     is_agent = if tab.kind == :agent, do: 1, else: 0
     has_attention = if tab.attention, do: 1, else: 0
     is_pinned = if tab.pinned?, do: 1, else: 0
-    agent_status = encode_agent_status(tab.agent_status)
+    kind_status = tab_kind_status_bits(tab)
 
-    tab_flags(is_active, is_dirty, is_agent, has_attention, agent_status, is_pinned)
+    tab_flags(is_active, is_dirty, is_agent, has_attention, kind_status, is_pinned)
   end
 
   @spec build_tab_summary_flags(TabSummary.t(), 0 | 1) :: non_neg_integer()
@@ -557,16 +557,25 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     is_agent = if tab.kind == :agent, do: 1, else: 0
     has_attention = if tab.attention?, do: 1, else: 0
     is_pinned = if tab.pinned?, do: 1, else: 0
-    tab_flags(is_active, is_dirty, is_agent, has_attention, 0, is_pinned)
+    kind_status = if tab.kind == :file and tab.ephemeral?, do: 1, else: 0
+    tab_flags(is_active, is_dirty, is_agent, has_attention, kind_status, is_pinned)
   end
 
+  # Bits 4-6 of the tab flags byte are kind-scoped: agent tabs carry the
+  # agent status there; file tabs use bit 4 as the ephemeral (not-on-disk)
+  # marker. Decoders must check the is_agent bit before interpreting them.
+  @spec tab_kind_status_bits(Tab.t()) :: non_neg_integer()
+  defp tab_kind_status_bits(%{kind: :agent} = tab), do: encode_agent_status(tab.agent_status)
+  defp tab_kind_status_bits(%{kind: :file, file_ref: nil}), do: 1
+  defp tab_kind_status_bits(_tab), do: 0
+
   @spec tab_flags(0 | 1, 0 | 1, 0 | 1, 0 | 1, non_neg_integer(), 0 | 1) :: non_neg_integer()
-  defp tab_flags(is_active, is_dirty, is_agent, has_attention, agent_status, is_pinned) do
+  defp tab_flags(is_active, is_dirty, is_agent, has_attention, kind_status, is_pinned) do
     bor(
       bor(is_active, bsl(is_dirty, 1)),
       bor(
         bor(bsl(is_agent, 2), bsl(has_attention, 3)),
-        bor(bsl(band(agent_status, 0x07), 4), bsl(is_pinned, 7))
+        bor(bsl(band(kind_status, 0x07), 4), bsl(is_pinned, 7))
       )
     )
   end
@@ -748,6 +757,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     |> maybe_workspace_flag(tab.draft_state == :draft_elsewhere, 0x08)
     |> maybe_workspace_flag(tab.draft_state == :conflict, 0x10)
     |> maybe_workspace_flag(tab.pinned?, 0x20)
+    |> maybe_workspace_flag(tab.ephemeral?, 0x40)
   end
 
   @spec maybe_workspace_flag(non_neg_integer(), boolean(), non_neg_integer()) :: non_neg_integer()

@@ -590,7 +590,7 @@ func TestPickerSelectedRowUsesSelectionColors(t *testing.T) {
 	rows := model.renderPickerList("Buffers", protocol.Picker{
 		Visible:  true,
 		Selected: 0,
-		Items:    []protocol.PickerItem{{Label: "[new 1]", Description: "dirty"}},
+		Items:    []protocol.PickerItem{{Label: "Untitled-1", Description: "dirty"}},
 	}, 2, 40)
 	joined := strings.Join(rows, "\n")
 	if !strings.Contains(joined, "48;2;51;51;51") {
@@ -653,7 +653,7 @@ func TestWidePickerPreviewRendersBesideList(t *testing.T) {
 func TestHiddenWindowCursorDoesNotOverrideVisibleWindowCursor(t *testing.T) {
 	model := New(80, 24, nil, nil)
 	model.putWindow(protocol.WindowContent{ID: 1, CursorRow: 4, CursorCol: 18, CursorShape: 1, CursorVisible: true, Rows: []protocol.WindowRow{{Text: "typed text"}}})
-	model.putWindow(protocol.WindowContent{ID: 2, CursorRow: 1, CursorCol: 0, CursorShape: 0, CursorVisible: false, Rows: []protocol.WindowRow{{Text: "[new 1] *"}}})
+	model.putWindow(protocol.WindowContent{ID: 2, CursorRow: 1, CursorCol: 0, CursorShape: 0, CursorVisible: false, Rows: []protocol.WindowRow{{Text: "Untitled-1 *"}}})
 
 	if model.cursorRow != 4 || model.cursorCol != 18 || model.cursorShape != 1 {
 		t.Fatalf("hidden secondary window cursor should not override active cursor: row=%d col=%d shape=%d", model.cursorRow, model.cursorCol, model.cursorShape)
@@ -663,9 +663,9 @@ func TestHiddenWindowCursorDoesNotOverrideVisibleWindowCursor(t *testing.T) {
 func TestHiddenWindowDeltaDoesNotOverrideVisibleWindowCursor(t *testing.T) {
 	model := New(80, 24, nil, nil)
 	model.putWindow(protocol.WindowContent{ID: 1, ContentEpoch: 2, CursorRow: 4, CursorCol: 18, CursorShape: 1, CursorVisible: true, Rows: []protocol.WindowRow{{Text: "typed text"}}})
-	model.putWindow(protocol.WindowContent{ID: 2, ContentEpoch: 2, CursorRow: 1, CursorCol: 0, CursorShape: 0, CursorVisible: false, Rows: []protocol.WindowRow{{Text: "[new 1] *"}}})
+	model.putWindow(protocol.WindowContent{ID: 2, ContentEpoch: 2, CursorRow: 1, CursorCol: 0, CursorShape: 0, CursorVisible: false, Rows: []protocol.WindowRow{{Text: "Untitled-1 *"}}})
 
-	model.applyWindowDelta(protocol.WindowContent{ID: 2, ContentEpoch: 2, CursorRow: 1, CursorCol: 0, CursorShape: 0, CursorVisible: false, Rows: []protocol.WindowRow{{Text: "[new 1] *"}}})
+	model.applyWindowDelta(protocol.WindowContent{ID: 2, ContentEpoch: 2, CursorRow: 1, CursorCol: 0, CursorShape: 0, CursorVisible: false, Rows: []protocol.WindowRow{{Text: "Untitled-1 *"}}})
 
 	if model.cursorRow != 4 || model.cursorCol != 18 || model.cursorShape != 1 {
 		t.Fatalf("hidden secondary window delta should not override active cursor: row=%d col=%d shape=%d", model.cursorRow, model.cursorCol, model.cursorShape)
@@ -675,9 +675,9 @@ func TestHiddenWindowDeltaDoesNotOverrideVisibleWindowCursor(t *testing.T) {
 func TestVisibleToHiddenWindowDeltaRestoresRemainingVisibleCursor(t *testing.T) {
 	model := New(80, 24, nil, nil)
 	model.putWindow(protocol.WindowContent{ID: 1, ContentEpoch: 2, CursorRow: 4, CursorCol: 18, CursorShape: 1, CursorVisible: true, Rows: []protocol.WindowRow{{Text: "typed text"}}})
-	model.putWindow(protocol.WindowContent{ID: 2, ContentEpoch: 2, CursorRow: 1, CursorCol: 0, CursorShape: 0, CursorVisible: true, Rows: []protocol.WindowRow{{Text: "[new 1] *"}}})
+	model.putWindow(protocol.WindowContent{ID: 2, ContentEpoch: 2, CursorRow: 1, CursorCol: 0, CursorShape: 0, CursorVisible: true, Rows: []protocol.WindowRow{{Text: "Untitled-1 *"}}})
 
-	model.applyWindowDelta(protocol.WindowContent{ID: 2, ContentEpoch: 2, CursorRow: 1, CursorCol: 0, CursorShape: 0, CursorVisible: false, Rows: []protocol.WindowRow{{Text: "[new 1] *"}}})
+	model.applyWindowDelta(protocol.WindowContent{ID: 2, ContentEpoch: 2, CursorRow: 1, CursorCol: 0, CursorShape: 0, CursorVisible: false, Rows: []protocol.WindowRow{{Text: "Untitled-1 *"}}})
 
 	if model.cursorRow != 4 || model.cursorCol != 18 || model.cursorShape != 1 {
 		t.Fatalf("visible-to-hidden delta should restore remaining visible cursor: row=%d col=%d shape=%d", model.cursorRow, model.cursorCol, model.cursorShape)
@@ -687,9 +687,9 @@ func TestVisibleToHiddenWindowDeltaRestoresRemainingVisibleCursor(t *testing.T) 
 func TestHiddenToVisibleWindowDeltaUpdatesCursor(t *testing.T) {
 	model := New(80, 24, nil, nil)
 	model.putWindow(protocol.WindowContent{ID: 1, ContentEpoch: 2, CursorRow: 4, CursorCol: 18, CursorShape: 1, CursorVisible: true, Rows: []protocol.WindowRow{{Text: "typed text"}}})
-	model.putWindow(protocol.WindowContent{ID: 2, ContentEpoch: 2, CursorRow: 1, CursorCol: 0, CursorShape: 0, CursorVisible: false, Rows: []protocol.WindowRow{{Text: "[new 1] *"}}})
+	model.putWindow(protocol.WindowContent{ID: 2, ContentEpoch: 2, CursorRow: 1, CursorCol: 0, CursorShape: 0, CursorVisible: false, Rows: []protocol.WindowRow{{Text: "Untitled-1 *"}}})
 
-	model.applyWindowDelta(protocol.WindowContent{ID: 2, ContentEpoch: 2, CursorRow: 2, CursorCol: 5, CursorShape: 2, CursorVisible: true, Rows: []protocol.WindowRow{{Text: "[new 1] *"}}})
+	model.applyWindowDelta(protocol.WindowContent{ID: 2, ContentEpoch: 2, CursorRow: 2, CursorCol: 5, CursorShape: 2, CursorVisible: true, Rows: []protocol.WindowRow{{Text: "Untitled-1 *"}}})
 
 	if model.cursorRow != 2 || model.cursorCol != 5 || model.cursorShape != 2 {
 		t.Fatalf("hidden-to-visible delta should update cursor: row=%d col=%d shape=%d", model.cursorRow, model.cursorCol, model.cursorShape)
@@ -2281,7 +2281,7 @@ func TestSemanticWindowsDoNotClipFirstRowWithWorkspaceAndTabHeaders(t *testing.T
 	model := New(80, 8, nil, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiWorkspaces: {Spaces: protocol.WorkspaceBar{Spaces: []protocol.Workspace{{ID: 1, Label: "Files", Icon: "folder", Active: true, TabCount: 1}, {ID: 2, Label: "Tests", Icon: "beaker"}}}},
-		generated.OPGuiTabBar:     {Tabs: protocol.TabBar{ActiveIndex: 0, Tabs: []protocol.Tab{{ID: 1, Label: "[new 1]", Active: true, Dirty: true}}}},
+		generated.OPGuiTabBar:     {Tabs: protocol.TabBar{ActiveIndex: 0, Tabs: []protocol.Tab{{ID: 1, Label: "Untitled-1", Active: true, Dirty: true}}}},
 	}
 	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "Hey this is a thing"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 24, Height: 1}}})
 	model.viewport.SetContent(model.content())

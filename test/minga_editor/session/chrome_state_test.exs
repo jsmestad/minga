@@ -168,6 +168,45 @@ defmodule MingaEditor.Session.ChromeStateTest do
     end
   end
 
+  describe "ephemeral tabs" do
+    test "untitled file tabs are marked ephemeral", %{tmp_dir: tmp_dir} do
+      buffer = start_supervised!({BufferProcess, content: "", buffer_name: "Untitled-1"})
+
+      context =
+        TabContext.from_workspace_map(%{buffers: %Buffers{active: buffer, list: [buffer]}})
+
+      tab = Tab.new_file(1, "Untitled-1") |> Tab.set_context(context)
+      tb = %TabBar{tabs: [tab], active_id: 1, next_id: 2}
+
+      chrome = ChromeState.from_editor_state(state(tab_bar: tb, project_root: tmp_dir))
+
+      assert [%{ephemeral?: true}] = chrome.visible_tabs
+    end
+
+    test "file-backed tabs are not ephemeral", %{tmp_dir: tmp_dir} do
+      chrome = ChromeState.from_editor_state(state(project_root: tmp_dir))
+
+      assert Enum.all?(chrome.visible_tabs, &(&1.ephemeral? == false))
+    end
+
+    test "pathless non-file buffers are not ephemeral", %{tmp_dir: tmp_dir} do
+      buffer =
+        start_supervised!(
+          {BufferProcess, content: "", buffer_name: "*Messages*", buffer_type: :nofile}
+        )
+
+      context =
+        TabContext.from_workspace_map(%{buffers: %Buffers{active: buffer, list: [buffer]}})
+
+      tab = Tab.new_file(1, "*Messages*") |> Tab.set_context(context)
+      tb = %TabBar{tabs: [tab], active_id: 1, next_id: 2}
+
+      chrome = ChromeState.from_editor_state(state(tab_bar: tb, project_root: tmp_dir))
+
+      assert [%{ephemeral?: false}] = chrome.visible_tabs
+    end
+  end
+
   test "draft and conflict counts default to zero", %{tmp_dir: tmp_dir} do
     {tb, _group} = tab_bar_with_agent_workspace(tmp_dir)
     chrome = ChromeState.from_editor_state(state(tab_bar: tb, project_root: tmp_dir))

@@ -182,6 +182,12 @@ func (m Model) renderTabs(tabBar protocol.TabBar, width int) string {
 		} else if tab.Tint != 0 {
 			style = style.Foreground(lipgloss.Color(fmt.Sprintf("#%06X", tab.Tint&0xFFFFFF)))
 		}
+		// Ephemeral (not-on-disk) buffers like Untitled-1 render dim, but
+		// the active tab keeps its active foreground (matching the GUI,
+		// which styles ephemeral with italics only).
+		if tab.Ephemeral && !tab.Active {
+			style = style.Foreground(theme.Muted())
+		}
 		rendered = append(rendered, m.zones.Mark(zoneIDTab(tab.ID), style.Render(label)))
 	}
 	return rowStyle.Render(fitStyled(strings.Join(rendered, " "), width))

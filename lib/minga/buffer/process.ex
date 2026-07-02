@@ -1191,7 +1191,14 @@ defmodule Minga.Buffer.Process do
         unregister_path(state.file_path)
         register_path(file_path)
 
-        new_state = BufState.retarget_path(state, file_path)
+        # The buffer's identity is now the file: drop any scratch display
+        # name and re-detect the filetype from the new extension.
+        first_line = content |> String.split("\n", parts: 2) |> List.first("")
+        filetype = Language.detect_filetype_from_content(file_path, first_line)
+
+        new_state = BufState.adopt_saved_path(state, file_path, filetype)
+        new_state = %{new_state | options: reseed_options(new_state, filetype)}
+
         {:reply, :ok, mark_saved(new_state, {new_mtime, new_size}, content)}
 
       {:error, reason} ->

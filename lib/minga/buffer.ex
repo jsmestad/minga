@@ -379,8 +379,8 @@ defmodule Minga.Buffer do
   @spec persistent?(t()) :: boolean()
   defdelegate persistent?(server), to: BufferProcess
 
-  @doc "Buffer kind: `:file`, `:scratch`, or `:special`."
-  @spec buffer_type(t()) :: :file | :scratch | :special
+  @doc "Buffer kind: `:file`, `:nofile`, `:nowrite`, `:prompt`, or `:terminal`."
+  @spec buffer_type(t()) :: Minga.Buffer.State.buffer_type()
   defdelegate buffer_type(server), to: BufferProcess
 
   @doc "Monotonic version counter (incremented on every content change)."

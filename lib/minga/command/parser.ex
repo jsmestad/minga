@@ -13,6 +13,9 @@ defmodule Minga.Command.Parser do
   |------------------|--------------------------------|
   | `w`              | `{:save, []}`                  |
   | `w!`             | `{:force_save, []}`            |
+  | `w <path>`       | `{:save_as, [path]}`           |
+  | `w! <path>`      | `{:force_save_as, [path]}`     |
+  | `saveas <path>`  | `{:save_as, [path]}`           |
   | `q`              | `{:quit, []}`                  |
   | `q!`             | `{:force_quit, []}`            |
   | `qa`             | `{:quit_all, []}`              |
@@ -47,6 +50,8 @@ defmodule Minga.Command.Parser do
 
   * `{:save, []}` — write the current buffer to disk (`:w`)
   * `{:force_save, []}` — force-write, skipping mtime check (`:w!`)
+  * `{:save_as, [path]}` — write the buffer to a new path (`:w <path>` / `:saveas <path>`)
+  * `{:force_save_as, [path]}` — write to a new path, overwriting an existing file (`:w! <path>`)
   * `{:quit, []}` — close current tab or quit if last tab (`:q`)
   * `{:force_quit, []}` — force close tab or quit without saving (`:q!`)
   * `{:quit_all, []}` — quit the entire editor (`:qa`)
@@ -72,6 +77,8 @@ defmodule Minga.Command.Parser do
   @type parsed ::
           {:save, []}
           | {:force_save, []}
+          | {:save_as, [String.t()]}
+          | {:force_save_as, [String.t()]}
           | {:quit, []}
           | {:force_quit, []}
           | {:quit_all, []}
@@ -249,6 +256,10 @@ defmodule Minga.Command.Parser do
   @spec do_parse(String.t()) :: parsed()
   defp do_parse("w"), do: {:save, []}
   defp do_parse("w!"), do: {:force_save, []}
+  defp do_parse("w " <> rest), do: parse_save_as(rest, :save_as)
+  defp do_parse("w! " <> rest), do: parse_save_as(rest, :force_save_as)
+  defp do_parse("saveas " <> rest), do: parse_save_as(rest, :save_as)
+  defp do_parse("saveas! " <> rest), do: parse_save_as(rest, :force_save_as)
   defp do_parse("q"), do: {:quit, []}
   defp do_parse("q!"), do: {:force_quit, []}
   defp do_parse("qa"), do: {:quit_all, []}
@@ -446,6 +457,15 @@ defmodule Minga.Command.Parser do
     case Integer.parse(input) do
       {n, ""} when n > 0 -> {:goto_line, n}
       _ -> {:unknown, input}
+    end
+  end
+
+  # Parses the path argument of `:w <path>` / `:saveas <path>`.
+  @spec parse_save_as(String.t(), :save_as | :force_save_as) :: parsed()
+  defp parse_save_as(rest, command) do
+    case String.trim(rest) do
+      "" -> {:unknown, "w"}
+      path -> {command, [path]}
     end
   end
 

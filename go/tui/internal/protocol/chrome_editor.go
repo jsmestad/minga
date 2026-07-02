@@ -32,6 +32,13 @@ func decodeTabBar(payload []byte) (TabBar, string, int) {
 		}
 		tint := u32(payload, next)
 		offset = next + 4
+		// Bits 4-6 are kind-scoped: agent status for agent tabs, ephemeral
+		// (not-on-disk) marker in bit 4 for file tabs.
+		isAgent := flags&0x04 != 0
+		agentStatus := byte(0)
+		if isAgent {
+			agentStatus = (flags >> 4) & 0x07
+		}
 		tab := Tab{
 			Flags:       flags,
 			ID:          id,
@@ -41,9 +48,10 @@ func decodeTabBar(payload []byte) (TabBar, string, int) {
 			Tint:        tint,
 			Active:      flags&0x01 != 0,
 			Dirty:       flags&0x02 != 0,
-			Agent:       flags&0x04 != 0,
+			Agent:       isAgent,
 			Attention:   flags&0x08 != 0,
-			AgentStatus: (flags >> 4) & 0x07,
+			AgentStatus: agentStatus,
+			Ephemeral:   !isAgent && flags&0x10 != 0,
 			Pinned:      flags&0x80 != 0,
 		}
 		tabBar.Tabs = append(tabBar.Tabs, tab)

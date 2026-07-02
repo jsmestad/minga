@@ -58,6 +58,7 @@ defmodule MingaEditor.RenderModel.UI.WorkspacesBuilder do
       draft_state: tab.draft_state,
       attention?: tab.attention?,
       pinned?: tab.pinned?,
+      ephemeral?: tab.ephemeral?,
       tint_color: tab.tint_color
     }
   end

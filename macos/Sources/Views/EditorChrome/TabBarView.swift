@@ -332,9 +332,11 @@ public struct TabBarView: View {
             }
 
             // Label: pinned and agent tabs stay compact; the tooltip carries the full name.
+            // Ephemeral (not-on-disk) buffers like Untitled-1 render italic.
             if !tab.isPinned && !tab.isAgent {
                 Text(tab.label)
                     .font(.system(size: 11.5))
+                    .italic(tab.isEphemeral)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .foregroundStyle(tab.isActive ? theme.tabActiveFg : theme.tabSecondaryFg)

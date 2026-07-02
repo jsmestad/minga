@@ -127,6 +127,18 @@ defmodule Minga.Buffer.MtimeTest do
     refute BufferProcess.dirty?(buf)
   end
 
+  @tag :tmp_dir
+  test "save_as adopts the path as the buffer's identity", %{tmp_dir: tmp_dir} do
+    path = Path.join(tmp_dir, "parser.ex")
+    buf = start_buffer(content: "defmodule Parser do\nend\n", buffer_name: "Untitled-1")
+
+    assert :ok = BufferProcess.save_as(buf, path)
+
+    assert BufferProcess.buffer_name(buf) == nil
+    assert BufferProcess.display_name(buf) == "parser.ex"
+    assert BufferProcess.filetype(buf) == :elixir
+  end
+
   defp start_buffer(opts) do
     start_supervised!({BufferProcess, opts}, id: {:buffer, make_ref()})
   end

@@ -49,6 +49,7 @@ defmodule MingaEditor.RenderModel.UI.TabBarBuilder do
       kind: tab.kind,
       attention?: tab.attention?,
       pinned?: tab.pinned?,
+      ephemeral?: tab.ephemeral?,
       tint_color: tab.tint_color
     }
   end

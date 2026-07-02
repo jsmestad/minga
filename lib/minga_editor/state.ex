@@ -2199,6 +2199,27 @@ defmodule MingaEditor.State do
   end
 
   @doc """
+  Re-syncs shell presentation (tab label, file ref, tab context) with the
+  active buffer.
+
+  Use when the active buffer's identity changes in place, e.g. save-as
+  retargeting an untitled buffer to a real file, so the tab bar reflects the
+  new name without a buffer switch.
+  """
+  @spec refresh_active_buffer_presentation(t()) :: t()
+  def refresh_active_buffer_presentation(%__MODULE__{} = state) do
+    state = ensure_shell_available(state)
+
+    {shell_state, workspace, shell_effects} =
+      active_shell_module(state).on_buffer_switched(state.shell_state, state.workspace)
+
+    state
+    |> update_shell_state(fn _ -> shell_state end)
+    |> set_workspace(workspace)
+    |> apply_buffer_effects(shell_effects)
+  end
+
+  @doc """
   Snapshots the active buffer's cursor into the active window struct.
 
   Call this before rendering split views so inactive windows have a fresh

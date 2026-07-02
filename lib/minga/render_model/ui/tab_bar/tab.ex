@@ -14,6 +14,7 @@ defmodule Minga.RenderModel.UI.TabBar.Tab do
           attention?: boolean(),
           agent_status: agent_status(),
           pinned?: boolean(),
+          ephemeral?: boolean(),
           tint_color: non_neg_integer()
         }
 
@@ -27,5 +28,6 @@ defmodule Minga.RenderModel.UI.TabBar.Tab do
             attention?: false,
             agent_status: nil,
             pinned?: false,
+            ephemeral?: false,
             tint_color: 0
 end

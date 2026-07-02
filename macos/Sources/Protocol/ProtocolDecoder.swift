@@ -580,15 +580,19 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             let labelData = data[(pos + 10 + iconLen)..<(pos + 10 + iconLen + labelLen)]
             let label = String(data: labelData, encoding: .utf8) ?? ""
             let tintColorRGB = readU32(data, pos + 10 + iconLen + labelLen)
+            // Bits 4-6 are kind-scoped: agent status for agent tabs,
+            // ephemeral (not-on-disk) marker in bit 4 for file tabs.
+            let isAgent = flags & 0x04 != 0
             tabs.append(Wire.TabEntry(
                 id: tabId,
                 groupId: groupId,
                 isActive: flags & 0x01 != 0,
                 isDirty: flags & 0x02 != 0,
-                isAgent: flags & 0x04 != 0,
+                isAgent: isAgent,
                 hasAttention: flags & 0x08 != 0,
-                agentStatus: (flags >> 4) & 0x07,
+                agentStatus: isAgent ? (flags >> 4) & 0x07 : 0,
                 isPinned: flags & 0x80 != 0,
+                isEphemeral: !isAgent && flags & 0x10 != 0,
                 tintColorRGB: tintColorRGB,
                 icon: icon,
                 label: label
