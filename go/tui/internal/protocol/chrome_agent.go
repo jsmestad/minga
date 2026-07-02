@@ -128,6 +128,10 @@ func decodeAgentChat(payload []byte) (AgentChat, string, int) {
 			if value, _, ok := readString16(section, 0); ok {
 				chat.ThinkingLevel = value
 			}
+		case 0x09:
+			if len(section) >= 1 {
+				chat.InputFocused = section[0] != 0
+			}
 		case 0x06:
 			chat.Messages = decodeAgentMessages(section)
 		}
@@ -213,8 +217,20 @@ func decodeAgentMessage(body []byte) (AgentChatMessage, bool) {
 	if len(body) < 5 {
 		return AgentChatMessage{}, false
 	}
-	msg := AgentChatMessage{ID: u32(body, 0), Kind: body[4]}
-	offset := 5
+	return decodeAgentMessageBody(u32(body, 0), body[4:])
+}
+
+// decodeAgentMessageBody decodes a message from its id and its kind-first body
+// (the shared per-message body codec, <<kind::8, ...>>). It is the seam both
+// transports decode through: the 0x78 messages section concatenates id + body
+// (decodeAgentMessage splits them here), while the 0x86 resident transcript
+// frames the id separately and hands the raw body straight in.
+func decodeAgentMessageBody(id uint32, body []byte) (AgentChatMessage, bool) {
+	if len(body) < 1 {
+		return AgentChatMessage{}, false
+	}
+	msg := AgentChatMessage{ID: id, Kind: body[0]}
+	offset := 1
 	switch msg.Kind {
 	case 0x01, 0x02:
 		text, ok := decodeAgentTextBody(body, offset)

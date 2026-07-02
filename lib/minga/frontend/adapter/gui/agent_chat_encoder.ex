@@ -43,6 +43,11 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
   @section_chat_messages 0x06
   @section_chat_completion 0x07
   @section_chat_thinking 0x08
+  # input_focused: whether the composer captures keys. A frontend that owns the
+  # local transcript scroll (#2654) gates j/k on this so a scroll key is not
+  # mistaken for composer cursor motion. Unknown sections are skipped by every
+  # sectioned decoder, so this is backward/forward compatible.
+  @section_chat_input_focused 0x09
 
   @spec encode(AgentChat.t(), Caches.t()) :: {binary() | nil, Caches.t()}
   def encode(%AgentChat{} = model, %Caches{} = caches) do
@@ -105,6 +110,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
         @section_chat_thinking,
         <<byte_size(thinking_bytes)::16, thinking_bytes::binary>>
       ),
+      encode_section(@section_chat_input_focused, <<bool_byte(model.input_focused)::8>>),
       encode_section(@section_chat_messages, messages_payload)
     ]
 
@@ -273,6 +279,10 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
   defp encode_agent_chat_status(:tool_executing), do: 2
   defp encode_agent_chat_status(:error), do: 3
   defp encode_agent_chat_status(_), do: 0
+
+  @spec bool_byte(boolean() | nil) :: 0 | 1
+  defp bool_byte(true), do: 1
+  defp bool_byte(_), do: 0
 
   @spec encode_vim_mode(atom() | nil) :: non_neg_integer()
   defp encode_vim_mode(:normal), do: 0

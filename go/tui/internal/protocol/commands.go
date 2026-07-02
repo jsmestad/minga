@@ -102,6 +102,7 @@ type ChromePayload struct {
 	Observatory       Observatory
 	AgentContext      AgentContext
 	AgentChat         AgentChat
+	AgentTranscript   AgentTranscript
 	Timeline          EditTimeline
 	Gutter            GutterSeparator
 	CursorlineChrome  CursorlineChrome

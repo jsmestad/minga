@@ -444,9 +444,13 @@ type AgentChat struct {
 	PromptVimMode     byte
 	PromptVisibleRows byte
 	ThinkingLevel     string
-	Messages          []AgentChatMessage
-	Pending           string
-	Completion        []string
+	// InputFocused reports whether the composer captures keys (0x78 section 0x09).
+	// The resident transcript scroll (#2654) gates j/k on this so a scroll key is
+	// not mistaken for composer cursor motion. Absent section leaves it false.
+	InputFocused bool
+	Messages     []AgentChatMessage
+	Pending      string
+	Completion   []string
 }
 
 type AgentChatMessage struct {

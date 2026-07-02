@@ -80,7 +80,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoderTest do
       {cmd, _caches} = AgentChatEncoder.encode(visible, caches)
 
       assert cmd != nil
-      assert <<@op_gui_agent_chat, 8::8, _::binary>> = cmd
+      assert <<@op_gui_agent_chat, 9::8, _::binary>> = cmd
     end
 
     test "transitions from visible back to hidden" do
@@ -96,8 +96,13 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoderTest do
   end
 
   describe "header, model, prompt, thinking sections" do
-    test "visible chat always emits 8 sections" do
-      assert <<@op_gui_agent_chat, 8::8, _::binary>> = encode(%AgentChat{visible?: true})
+    test "visible chat always emits 9 sections" do
+      assert <<@op_gui_agent_chat, 9::8, _::binary>> = encode(%AgentChat{visible?: true})
+    end
+
+    test "input_focused section carries the composer focus flag (#2654)" do
+      assert <<1::8>> = section!(encode(%AgentChat{visible?: true, input_focused: true}), 0x09)
+      assert <<0::8>> = section!(encode(%AgentChat{visible?: true, input_focused: false}), 0x09)
     end
 
     test "header carries the status byte" do

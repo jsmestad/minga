@@ -100,6 +100,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
       prompt_completion: build_prompt_completion(panel),
       help_visible?: help_visible,
       help_groups: help_groups,
+      input_focused: panel.input_focused,
       messages: gui_messages,
       resident_messages: resident_messages,
       transcript_epoch: transcript_epoch(session, panel)
