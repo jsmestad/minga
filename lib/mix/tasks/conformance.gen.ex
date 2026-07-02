@@ -387,7 +387,7 @@ defmodule Mix.Tasks.Conformance.Gen do
       "hml_after_scroll_report",
       "input",
       %{swift: true, go: true},
-      "An H/M/L command that resolves against a just-reported scroll top commits an echo frame (same anchor, same scroll_seq) that moves only the cursor; the frontend keeps its local offset instead of re-anchoring every margin-riding frame.",
+      "An H/M/L command that resolves against a just-reported scroll top commits an echo frame (same anchor, same scroll_seq) that moves only the cursor; the frontend keeps its local offset instead of re-anchoring every wheel/trackpad frame.",
       [
         frame(
           @op_window_content,

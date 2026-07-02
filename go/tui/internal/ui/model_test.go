@@ -696,6 +696,32 @@ func TestHiddenToVisibleWindowDeltaUpdatesCursor(t *testing.T) {
 	}
 }
 
+// A cursor scrolled off-viewport (#2684) is encoded by the BEAM with the
+// cursorline section absent (Cursorline.Visible == false), so the paint path
+// must not draw a cursorline highlight. When it returns to view the section
+// reappears and the highlight comes back. Text is identical either way; only
+// styling changes.
+func TestOffViewportCursorHidesCursorlineHighlight(t *testing.T) {
+	model := New(80, 24, nil, nil)
+	rows := []protocol.WindowRow{{Text: "cursor line"}}
+
+	onScreen := protocol.WindowContent{ID: 1, Rows: rows, Cursorline: protocol.Cursorline{Visible: true, Row: 0, BG: 0x223344}}
+	offScreen := protocol.WindowContent{ID: 1, Rows: rows, Cursorline: protocol.Cursorline{Visible: false}}
+
+	lit := model.renderSemanticContentRow(onScreen, 0, 0, 40)
+	dark := model.renderSemanticContentRow(offScreen, 0, 0, 40)
+
+	if lit == dark {
+		t.Fatalf("cursorline highlight should change the rendered row when the cursor is on-screen")
+	}
+	if ansi.Strip(lit) != ansi.Strip(dark) {
+		t.Fatalf("cursorline should change styling only, not text: %q vs %q", ansi.Strip(lit), ansi.Strip(dark))
+	}
+	if strings.Contains(dark, "223344") {
+		t.Fatalf("off-viewport row must carry no cursorline background: %q", dark)
+	}
+}
+
 func TestApplyWindowDeltaResolvesRefsAndReplacesRowSnapshot(t *testing.T) {
 	model := New(80, 24, nil, nil)
 	model.putWindow(protocol.WindowContent{

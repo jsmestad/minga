@@ -264,12 +264,29 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         committed_rows
       )
 
+    # Whether the cursor's line currently falls inside the visible viewport.
+    # After VSCode-style wheel free-scroll (#2684) the cursor can leave the
+    # viewport without moving; when it does, the caret and cursorline must
+    # disappear rather than ghost at the edge row (the clamp in
+    # `compute_display_cursor/7` and the encoder both pin a negative relative
+    # row to 0). Cursor-follow re-anchors on the next cursor-moving key.
+    cursor_on_screen? =
+      cursor_on_screen?(
+        cursor_line,
+        viewport,
+        window.fold_map,
+        visual_entries,
+        visible_row_count,
+        wrapped_coordinates?
+      )
+
     # Hide the editor cursor when the minibuffer has focus (command, search,
     # eval, search_prompt modes). The native SwiftUI minibuffer shows its
-    # own cursor; having two cursors visible is confusing.
+    # own cursor; having two cursors visible is confusing. Also hide it when the
+    # cursor has scrolled off-viewport (#2684).
     cursor_visible =
       if is_active do
-        not Minga.Editing.minibuffer_mode?(state)
+        cursor_on_screen? and not Minga.Editing.minibuffer_mode?(state)
       else
         false
       end
@@ -347,7 +364,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       document_highlights: doc_highlights,
       annotations: annotations,
       gutter: build_gutter(scroll, ctx, content_kind, presentation_entries),
-      cursorline: build_cursorline(content_row, display_cursor_row, is_active, ctx),
+      cursorline:
+        build_cursorline(content_row, display_cursor_row, is_active, cursor_on_screen?, ctx),
       indent_guides: build_indent_guides(scroll, ctx, content_kind),
       geometry: geometry,
       content_epoch: scroll.content_epoch,
@@ -1514,6 +1532,52 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     {row, col}
   end
 
+  # True when the cursor's line is inside the visible viewport, so the caret and
+  # cursorline should paint. After wheel free-scroll (#2684) the cursor can leave
+  # the viewport without moving; off-screen we hide both rather than clamp them to
+  # an edge row. Non-wrapped: the fold-visible cursor line must sit in
+  # `[top, top + rows)`. Wrapped: a visible visual row must map back to the cursor
+  # line.
+  @spec cursor_on_screen?(
+          non_neg_integer(),
+          Viewport.t(),
+          FoldMap.t(),
+          [visual_row_entry()],
+          non_neg_integer(),
+          boolean()
+        ) :: boolean()
+  defp cursor_on_screen?(
+         cursor_line,
+         _viewport,
+         _fold_map,
+         visual_entries,
+         visible_row_count,
+         true
+       ) do
+    Enum.any?(visual_entries, fn entry ->
+      entry.buf_line == cursor_line and entry.display_row >= 0 and
+        entry.display_row < visible_row_count
+    end)
+  end
+
+  defp cursor_on_screen?(
+         cursor_line,
+         viewport,
+         fold_map,
+         _visual_entries,
+         visible_row_count,
+         false
+       ) do
+    visible_cursor =
+      if FoldMap.empty?(fold_map) do
+        cursor_line
+      else
+        FoldMap.buffer_to_visible(fold_map, cursor_line)
+      end
+
+    visible_cursor >= viewport.top and visible_cursor < viewport.top + visible_row_count
+  end
+
   @spec compute_wrapped_display_cursor(
           non_neg_integer(),
           non_neg_integer(),
@@ -2026,14 +2090,19 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
   # ── Cursorline ─────────────────────────────────────────────────────────
 
-  @spec build_cursorline(non_neg_integer(), non_neg_integer(), boolean(), Context.t()) ::
+  @spec build_cursorline(non_neg_integer(), non_neg_integer(), boolean(), boolean(), Context.t()) ::
           Cursorline.t() | nil
-  defp build_cursorline(_content_row, _cursor_row, false, _ctx), do: nil
+  defp build_cursorline(_content_row, _cursor_row, false, _on_screen?, _ctx), do: nil
 
-  defp build_cursorline(content_row, cursor_row, true, %Context{cursorline_bg: bg})
+  # The cursor has scrolled off-viewport (#2684): no cursorline, so it disappears
+  # with its line instead of ghosting at the edge row, and returns on scroll-back.
+  defp build_cursorline(_content_row, _cursor_row, true, false, _ctx), do: nil
+
+  defp build_cursorline(content_row, cursor_row, true, true, %Context{cursorline_bg: bg})
        when is_integer(bg), do: %Cursorline{row: content_row + cursor_row, bg_rgb: bg}
 
-  defp build_cursorline(_content_row, _cursor_row, true, %Context{}), do: Cursorline.disabled()
+  defp build_cursorline(_content_row, _cursor_row, true, true, %Context{}),
+    do: Cursorline.disabled()
 
   # ── Indent guides ──────────────────────────────────────────────────────
 

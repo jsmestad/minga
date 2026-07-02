@@ -32,7 +32,7 @@ Considered and deliberately skipped for now (revisit only with evidence of real 
 
 These boundaries were litigated and stand:
 
-- **Cursor motion and selection stay BEAM-owned.** The responsiveness epic (#2445) dropped cursor prediction for good reason; the frontend never moves the cursor. Wheel motion that would drag the cursor past scrolloff is a cursor move and therefore BEAM work.
+- **Cursor motion and selection stay BEAM-owned.** The responsiveness epic (#2445) dropped cursor prediction for good reason; the frontend never moves the cursor. Wheel/trackpad scrolling is VSCode-style (#2684): it is viewport-only and never moves the cursor at all, so the cursor can leave the viewport and the next cursor-moving keypress re-anchors via cursor-follow. (Explicit scroll commands keep their vim cursor semantics; earlier iterations dragged the wheel cursor through scrolloff, which #2684 reverted for wheel/trackpad input.)
 - **No windowed runtime fallback in v1.** The store contract (keyed row map, global `content_epoch` delta base, client-local scroll offset) is designed so windowing can return later as an additive mode for remote thin clients in the daemon epic. That deferral is deliberate and recorded here, not a silent loss.
 - **This is not "move logic to the frontend."** The pattern is resident data plus local presentation, never local semantics.
 
