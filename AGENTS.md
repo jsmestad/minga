@@ -749,7 +749,7 @@ See `docs/PROTOCOL.md` for the full message specification and `docs/GUI_PROTOCOL
 
 ## Rendering Architecture
 
-The rendering pipeline supports multiple frontends through a shared display list IR and a binary port protocol. The BEAM owns all rendering decisions; frontends are "dumb" renderers.
+The rendering pipeline supports multiple frontends through a shared display list IR and a binary port protocol. The BEAM is the single authority for editor state and semantics; frontends are semantic renderers with a precisely bounded local-presentation layer (see "Ownership" below).
 
 Key design decisions:
 - **Display list IR:** The BEAM side owns a display list of styled text runs (not a cell grid) that sits between editor state and protocol encoding. All frontends consume this shared IR. See `docs/ARCHITECTURE.md` § "Display List (Rendering IR)" for the type definitions.
@@ -757,6 +757,34 @@ Key design decisions:
 - **GUI chrome protocol:** Native GUI frontends receive structured data opcodes (0x70-0x78) for chrome elements like tab bars, file trees, status bars, and popups. These are rendered with platform-native widgets (SwiftUI, GTK4), not painted as cells. See `docs/GUI_PROTOCOL.md`.
 - **Per-window render state:** Each `Window` carries cached draw commands and a dirty-line set for incremental rendering.
 - **Pipeline stages:** Seven named stages (Invalidation, Layout, Scroll, Content, Chrome, Compose, Emit) with per-stage timing via telemetry.
+
+### Ownership: what the BEAM decides vs what frontends decide
+
+This is the load-bearing boundary of the whole architecture. When in doubt about where logic goes, resolve it against this section, and read `docs/workstreams/resident-scroll.md` for the direction that sharpened it (epic #2652).
+
+**The BEAM owns (authoritative, durable, shared across frontends):**
+
+- All editor state: buffers, cursor, selection, modes, undo, registers, marks
+- Layout authority over buffer content: wrapping, folds, visual rows with stable identity (`row_id`, `content_hash`), highlight spans. Frontends never run their own text-layout opinions against buffer content
+- The semantic UI model for every shared surface: window content, chrome (tabs, file tree, modeline), pickers, completion, agent chat, overlays
+- Scroll *position*: the committed anchor, scrolloff enforcement, and any wheel motion that would move the cursor
+- Surface placement, stacking, and containment; interpretation of committed intents; all product policy
+
+**Frontends own (local, per-frontend, discardable):**
+
+- Presentation: turning committed models into pixels or cells. Rasterization strategy, texture/glyph caches, and composition are frontend-private and non-normative. The texture retention key `row_id + content_hash` survives `content_epoch` changes and invalidates only on `layout_generation`
+- Ephemeral presentation transforms: the local scroll offset, cursor blink, spinners, live-resize scale/crop. All discardable at any time; a BEAM-authoritative update always wins
+- Zero-latency interaction previews resolvable from the last committed model (file-tree selection, completion highlight), confirmed by sending a semantic intent on activation
+- Native input capture, normalized through the current presentation transform before anything is sent. A click during a local scroll must map to the row the user actually saw
+
+**The contract between them (the resident-store principle):**
+
+- The BEAM ships the whole navigable model, not the visible slice: full document rows for normal-size files, full chat transcripts, full committed row models. Frontends navigate resident data locally and never wait on a round-trip to show content the user scrolls to
+- Updates flow by stable identity, not position: full store replace only on `layout_generation` change; row-deltas (0xA2) within an epoch; cursor-only deltas (0xA0) for motion. Never full re-sends per keystroke
+- Frontends send semantic intents (`gui_action` with row identity and offsets), never mutate state locally, and never duplicate semantics (no local cursor motion, selection logic, fuzzy matching, or regex search per frontend). The pattern is resident data plus local presentation, never local semantics
+- Uniformity across Swift, Go, and the future GTK4 frontend comes from making the BEAM say more and the frontends decide less, enforced by conformance transcripts (store transcripts and input transcripts), not by hand-kept parity docs
+
+Two rules apply immediately: do not extend the scroll compositor or overscan/velocity prefetch machinery (scheduled for deletion under #2652), and new scrollable surfaces adopt the #2652 store lifecycle instead of inventing per-surface reconciliation.
 
 ## Keymap Architecture
 
