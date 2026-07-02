@@ -657,7 +657,20 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, {:scroll_to_line, line}) do
-    # Scroll the active window's viewport to the target line.
+    # Scroll the active window's viewport to the target line. This is the
+    # scrollbar thumb-drag / track-click commit path (#2665). It gets the same
+    # free-scroll treatment as the wheel/trackpad path in `Mouse.apply_scroll_intent`:
+    #
+    #   * `mark_scroll_echo/2` records the committed top so `settle_scroll_seq/1`
+    #     treats it as a frontend-reported echo and does NOT bump `scroll_seq`.
+    #     Without this, the drag's own committed anchor would look like a
+    #     BEAM-initiated jump and discard the frontend's same-frame local
+    #     presentation over resident rows (AC2).
+    #   * `record_scroll_event/3` marks `scroll_detach_cursor` so cursor-follow is
+    #     suppressed: the viewport stays where it was dragged and the cursor stays
+    #     put (VSCode wheel semantics, #2684/#2691). A thumb drag never moves the
+    #     cursor, so without this the next frame would re-anchor the viewport to
+    #     the cursor line and yank the content back — a settle-jump.
     active_win_id = state.workspace.windows.active
     win_map = state.workspace.windows.map
 
@@ -668,7 +681,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       window ->
         vp = window.viewport
         new_vp = Viewport.put_top(vp, max(line, 0))
-        new_win = MingaEditor.Window.set_viewport(window, new_vp)
+        new_win = scroll_to_line_commit(window, new_vp)
         new_map = Map.put(win_map, active_win_id, new_win)
 
         new_state =
@@ -1736,6 +1749,30 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   # ── Window helpers ─────────────────────────────────────────────────
+
+  # Commits a scroll-to-line viewport for the thumb-drag/track-click path (#2665),
+  # echo-marking the committed top and recording a free-scroll event so the move is
+  # treated exactly like a wheel/trackpad free-scroll (no `scroll_seq` bump, no cursor
+  # re-anchor). When the window has a live buffer the cursor position feeds
+  # `record_scroll_event/3`; without one there is nothing to detach from, so only the
+  # echo mark is recorded.
+  @spec scroll_to_line_commit(MingaEditor.Window.t(), Viewport.t()) :: MingaEditor.Window.t()
+  defp scroll_to_line_commit(%MingaEditor.Window{buffer: buf} = window, new_vp)
+       when is_pid(buf) do
+    now = System.monotonic_time(:millisecond)
+    cursor_pos = Buffer.cursor(buf)
+
+    window
+    |> MingaEditor.Window.set_viewport(new_vp)
+    |> MingaEditor.Window.mark_scroll_echo(new_vp.top)
+    |> MingaEditor.Window.record_scroll_event(now, cursor_pos)
+  end
+
+  defp scroll_to_line_commit(%MingaEditor.Window{} = window, new_vp) do
+    window
+    |> MingaEditor.Window.set_viewport(new_vp)
+    |> MingaEditor.Window.mark_scroll_echo(new_vp.top)
+  end
 
   @spec open_file_by_path_in_active_window(state(), String.t()) :: state()
   defp open_file_by_path_in_active_window(state, abs_path) do

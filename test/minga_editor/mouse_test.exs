@@ -13,6 +13,7 @@ defmodule MingaEditor.MouseTest do
   alias MingaEditor.FocusTree.Node, as: FocusNode
   alias MingaEditor.FoldMap
   alias MingaEditor.Frontend.Capabilities
+  alias MingaEditor.Handlers.GuiActionHandler
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Layout
   alias MingaEditor.Mouse
@@ -261,6 +262,58 @@ defmodule MingaEditor.MouseTest do
       assert window.scroll_echo_top == nil
       assert BufferProcess.cursor(buffer) == {50, 0}
       assert window.viewport.top > before_top
+    end
+  end
+
+  describe "scrollbar thumb-drag commit (:scroll_to_line, #2665)" do
+    test "echo-marks the committed top so the drag's own commit does not bump scroll_seq" do
+      {state, _buffer} = start_mouse_state(lines(0..99), width: 40, height: 20)
+      state = native_gui_state(state)
+      win_id = state.workspace.windows.active
+      state = mark_resident(state, win_id)
+
+      state = GuiActionHandler.dispatch(state, {:scroll_to_line, 30})
+
+      window = Map.fetch!(state.workspace.windows.map, win_id)
+      # The committed top is recorded as a free-scroll echo, exactly like the wheel
+      # path, so settle_scroll_seq/1 treats it as an echo and never bumps scroll_seq.
+      assert window.viewport.top == 30
+      assert window.scroll_echo_top == 30
+    end
+
+    test "never moves the cursor even when the target scrolls it off-screen (#2691)" do
+      {state, buffer} = start_mouse_state(lines(0..99), width: 40, height: 20)
+      state = native_gui_state(state)
+      win_id = state.workspace.windows.active
+      BufferProcess.move_to(buffer, {50, 0})
+
+      state = GuiActionHandler.dispatch(state, {:scroll_to_line, 0})
+
+      window = Map.fetch!(state.workspace.windows.map, win_id)
+      # Thumb drag is VSCode-style viewport-only: the cursor stays put and
+      # scroll_detach_cursor is armed so cursor-follow will not re-anchor the view.
+      # Without the detach the viewport would snap back toward the cursor (line 50);
+      # it must stay on the dragged top instead.
+      assert window.viewport.top == 0
+      assert BufferProcess.cursor(buffer) == {50, 0}
+      assert window.scroll_detach_cursor == {50, 0}
+      assert window.scroll_echo_top == window.viewport.top
+    end
+
+    test "commits the exact dragged top so the frontend offset reconciles to zero" do
+      {state, _buffer} = start_mouse_state(lines(0..99), width: 40, height: 20)
+      state = native_gui_state(state)
+      win_id = state.workspace.windows.active
+      state = mark_resident(state, win_id)
+      state = set_window_top(state, win_id, 10)
+
+      state = GuiActionHandler.dispatch(state, {:scroll_to_line, 72})
+
+      window = Map.fetch!(state.workspace.windows.map, win_id)
+      # The committed anchor lands exactly on the requested line so the frontend's
+      # local presentation offset (target - anchorTop) drains to zero on grid.
+      assert window.viewport.top == 72
+      assert window.scroll_echo_top == 72
     end
   end
 

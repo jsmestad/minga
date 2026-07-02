@@ -236,6 +236,7 @@ final class EditorNSView: MTKView {
     /// Cleans up window-bound observers and monitors.
     private func cleanupWindowResources() {
         cleanupBlinkResources()
+        cancelThumbDragWithFlush()
         resetSmoothScrollState()
         scrollerStyleTask?.cancel()
         scrollerStyleTask = nil
@@ -343,7 +344,10 @@ final class EditorNSView: MTKView {
                 self.coreTextRenderer.setCursorAnimationReduceMotionDisabled(reduceMotion)
                 self.scrollAnimationsReduceMotionDisabled = reduceMotion
                 if reduceMotion {
-                    // Snap any in-flight presentation scroll animation straight to the grid.
+                    // Snap any in-flight presentation scroll animation straight to the grid. A
+                    // thumb drag held across the toggle is discarded with its final target flushed
+                    // so the dragged position is never silently dropped (Critical 2, policy b).
+                    self.cancelThumbDragWithFlush()
                     self.resetSmoothScrollState()
                 }
                 if SystemBlinkTiming.blinkingDisabled {
@@ -393,15 +397,19 @@ final class EditorNSView: MTKView {
     private var presentationScrollWindowId: UInt16? {
         Self.presentationScrollWindowId(
             targetWindowId: scrollTargetWindowId,
+            thumbDragWindowId: thumbDragSession?.windowId,
             settleWindowId: scrollSettleWindowId,
             elasticWindowId: scrollElasticWindowId
         )
     }
 
-    /// Resolves the pane that owns the presentation offset, preferring the live gesture target,
-    /// then the settling window, then the elastic spring-back window. Pure for testability.
-    nonisolated static func presentationScrollWindowId(targetWindowId: UInt16?, settleWindowId: UInt16?, elasticWindowId: UInt16?) -> UInt16? {
-        targetWindowId ?? settleWindowId ?? elasticWindowId
+    /// Resolves the pane that owns the presentation offset, preferring the live trackpad
+    /// gesture target, then the thumb-drag pane, then the settling window, then the elastic
+    /// spring-back window. Trackpad and thumb-drag are mutually exclusive (a thumb drag holds
+    /// the mouse button, a trackpad gesture does not), so their order relative to each other is
+    /// immaterial; both must win over settle/elastic. Pure for testability.
+    nonisolated static func presentationScrollWindowId(targetWindowId: UInt16?, thumbDragWindowId: UInt16?, settleWindowId: UInt16?, elasticWindowId: UInt16?) -> UInt16? {
+        targetWindowId ?? thumbDragWindowId ?? settleWindowId ?? elasticWindowId
     }
 
     /// System Reduce Motion state, which disables all presentation scroll animations (AC4).
@@ -424,8 +432,21 @@ final class EditorNSView: MTKView {
     /// Nil means the event location did not resolve to a scrollable editor window, so fractional offset is disabled instead of shifting every pane.
     private var scrollTargetWindowId: UInt16?
 
-    /// True while a trackpad scroll gesture is in progress.
-    var hasActiveScrollGesture: Bool { scrollTargetWindowId != nil }
+    /// Active scrollbar thumb-drag over a resident pane (#2665), or nil. The session is the single
+    /// owner of the drag's gate, target, throttle bookkeeping, release baselines, and reconcile
+    /// watchdog; this view only translates its per-frame `Outcome` into encoder sends, the
+    /// presentation offset, and redraw scheduling. Non-nil only for a resident pane: windowed panes
+    /// keep the round-trip `sendScrollToLine` path (`thumbDragSession` stays nil). It outlives the
+    /// button-held phase until the BEAM's echo-marked commit reaches the target (or an authoritative
+    /// interrupt / watchdog fires), so discards stay gated (see `hasActiveScrollGesture`) through the
+    /// reconcile.
+    private var thumbDragSession: ThumbDragSession?
+
+    /// True while a trackpad scroll gesture or a resident thumb-drag presentation is in
+    /// progress. While true, authoritative-anchor discards (`onScrollPresentationReset`)
+    /// are ignored so the reconcile owns the offset instead of a mid-gesture reset
+    /// zeroing it. The thumb-drag half stays true through the post-release reconcile.
+    var hasActiveScrollGesture: Bool { scrollTargetWindowId != nil || thumbDragSession != nil }
 
     /// Cell position that owns the current precise scroll gesture.
     /// Nil means the gesture has not latched onto a scroll target yet.
@@ -478,6 +499,7 @@ final class EditorNSView: MTKView {
 
         clearSmoothScrollStateIfTargetWindowMissing()
         advancePresentationScrollAnimation()
+        advanceThumbDragPresentation()
 
         let validGutterHoverWindowId = gutterHoverWindowId.flatMap { windowId in
             dispatcher.currentFrameWindowIds.contains(windowId) ? windowId : nil
@@ -750,6 +772,10 @@ final class EditorNSView: MTKView {
 
     @objc private func windowDidResignKey(_ notification: Notification) {
         stopCursorBlink()
+        // The window lost key while the thumb may still be held (system modal, Cmd-Tab, Mission
+        // Control): no mouseUp is guaranteed, so discard the drag with its final target flushed
+        // rather than leave the reconcile gate stuck open (Critical 1b / Critical 2, policy b).
+        cancelThumbDragWithFlush()
     }
 
     override func becomeFirstResponder() -> Bool {
@@ -842,6 +868,136 @@ final class EditorNSView: MTKView {
             totalLines: fs.totalLineCount,
             visibleRows: visibleRows
         )
+    }
+
+    // MARK: - Scrollbar thumb-drag local presentation (#2665)
+
+    /// The active editor window's id, derived from the active gutter. The scroll track
+    /// operates on the active pane (its metrics drive `scrollTrackYToLine`), so this is the
+    /// window a thumb drag scrolls.
+    private var activeWindowId: UInt16? {
+        dispatcher.frameState.windowGutters.values
+            .filter(\.isActive)
+            .sorted { $0.windowId < $1.windowId }
+            .first?
+            .windowId
+    }
+
+    /// Establishes resident local presentation for a thumb drag if the active pane is resident,
+    /// and sends the first intent immediately for a responsive click. Windowed / non-resident panes
+    /// leave `thumbDragSession` nil and keep the round-trip path; the residency decision is made
+    /// once here and never re-checked (see `ThumbDragSession` gate policy).
+    private func beginThumbDragPresentation(targetLine: UInt32) {
+        guard let windowId = activeWindowId,
+              let content = guiState?.windowContents[windowId],
+              Self.thumbDragCanPresentLocally(
+                  scrollPresentation: content.scrollPresentation,
+                  totalLines: content.paneGeometry?.viewport.totalLines ?? dispatcher.frameState.totalLineCount
+              )
+        else {
+            thumbDragSession = nil
+            // Windowed pane: send the initial jump on the round-trip path (today's behavior).
+            encoder.sendScrollToLine(line: targetLine)
+            return
+        }
+        var session = ThumbDragSession(windowId: windowId, targetLine: targetLine)
+        if let intent = session.takeIntent() { encoder.sendScrollToLine(line: intent) }
+        thumbDragSession = session
+        applyThumbDragOffset(targetLine: targetLine, windowId: windowId)
+        needsDisplay = true
+    }
+
+    /// Updates the drag target. Resident panes present same-frame and defer the intent to the
+    /// per-frame throttle; windowed panes keep sending on every event (today's behavior).
+    private func updateThumbDragPresentation(targetLine: UInt32) {
+        if let windowId = thumbDragSession?.windowId {
+            thumbDragSession?.updateTarget(targetLine)
+            applyThumbDragOffset(targetLine: targetLine, windowId: windowId)
+            needsDisplay = true
+        } else {
+            encoder.sendScrollToLine(line: targetLine)
+        }
+    }
+
+    /// Handles thumb-drag release. Flushes any final throttled intent through the session, then
+    /// hands off to the draw-loop reconcile: the offset keeps tracking the committed anchor until
+    /// the BEAM's echo-marked commit reaches the target (offset 0), so there is no settle-jump.
+    private func endThumbDragPresentation() {
+        guard var session = thumbDragSession, session.phase == .dragging else { return }
+        if let intent = session.release(committed: committedThumbDrag(for: session.windowId), now: CACurrentMediaTime()) {
+            encoder.sendScrollToLine(line: intent)
+        }
+        thumbDragSession = session
+        needsDisplay = true
+    }
+
+    /// Forced discard of an in-flight thumb drag that never silently drops the dragged position:
+    /// flushes the final target intent, drops the session (the rest of the gesture, if the button is
+    /// still held, degrades to the round-trip path), and zeroes the offset. Used by mid-hold reset
+    /// paths that must discard local presentation (Reduce Motion toggle, window resign-key).
+    private func cancelThumbDragWithFlush() {
+        guard var session = thumbDragSession else { return }
+        if let intent = session.cancelWithFlush() { encoder.sendScrollToLine(line: intent) }
+        thumbDragSession = nil
+        scrollPixelOffset = CGPoint(x: scrollPixelOffset.x, y: 0)
+        needsDisplay = true
+    }
+
+    /// Presents the drag offset for `targetLine` against the pane's committed anchor.
+    private func applyThumbDragOffset(targetLine: UInt32, windowId: UInt16) {
+        guard let anchorTop = committedThumbDrag(for: windowId)?.anchorTop, effectiveCellHeight > 0 else { return }
+        scrollPixelOffset = CGPoint(
+            x: scrollPixelOffset.x,
+            y: Self.thumbDragPresentationOffsetY(targetLine: targetLine, committedAnchorTop: anchorTop, cellHeight: effectiveCellHeight)
+        )
+    }
+
+    /// The committed scroll presentation of the thumb-drag pane, or nil when it is gone.
+    private func committedThumbDrag(for windowId: UInt16) -> ThumbDragSession.Committed? {
+        guard let sp = guiState?.windowContents[windowId]?.scrollPresentation else { return nil }
+        return ThumbDragSession.Committed(anchorTop: sp.anchorTop, scrollSeq: sp.scrollSeq, contentEpoch: sp.contentEpoch, layoutGeneration: sp.layoutGeneration)
+    }
+
+    /// Advances the thumb-drag session one frame and applies its decision: flushes at most one
+    /// throttled intent (AC4), tracks the offset against the committed anchor, and finishes the
+    /// session when the reconcile lands, an authoritative event interrupts it, the presentation
+    /// vanishes, the button is released without a mouseUp, or the reconcile watchdog expires.
+    private func advanceThumbDragPresentation() {
+        guard var session = thumbDragSession else { return }
+        let committed = committedThumbDrag(for: session.windowId)
+        // The button check catches a lost mouseUp (system modal / Mission Control / Cmd-Tab mid-drag)
+        // so a gesture cannot stay stuck in the dragging phase with the gate held open.
+        let buttonHeld = NSEvent.pressedMouseButtons & 0x1 != 0
+        let outcome = session.advance(committed: committed, now: CACurrentMediaTime(), buttonHeld: buttonHeld)
+
+        if let intent = outcome.intent { encoder.sendScrollToLine(line: intent) }
+        if outcome.finished {
+            thumbDragSession = nil
+            scrollPixelOffset = CGPoint(x: scrollPixelOffset.x, y: 0)
+        } else {
+            thumbDragSession = session
+            if effectiveCellHeight > 0 {
+                scrollPixelOffset = CGPoint(x: scrollPixelOffset.x, y: CGFloat(outcome.offsetLines) * effectiveCellHeight)
+            }
+        }
+        if outcome.needsRedraw { needsDisplay = true }
+    }
+
+    /// Pixel offset that shifts resident rows so `targetLine` renders at the viewport top, given
+    /// the BEAM's committed `anchorTop`. Positive shifts content up (scrolled toward the end),
+    /// matching `scrollPixelOffset.y`. Pure for testability.
+    nonisolated static func thumbDragPresentationOffsetY(targetLine: UInt32, committedAnchorTop: UInt32, cellHeight: CGFloat) -> CGFloat {
+        CGFloat(Int64(targetLine) - Int64(committedAnchorTop)) * cellHeight
+    }
+
+    /// Whether a resident pane can present a thumb-drag target same-frame from resident rows.
+    ///
+    /// Resident panes carry the whole document (overscan spans line 0 through `totalLines`), so
+    /// any drag target renders from resident rows. Windowed panes carry only a viewport band and
+    /// must keep the round-trip path. Pure for testability.
+    nonisolated static func thumbDragCanPresentLocally(scrollPresentation: GUIScrollPresentation?, totalLines: UInt32) -> Bool {
+        guard let sp = scrollPresentation, totalLines > 0 else { return false }
+        return sp.overscanStartLine == 0 && sp.overscanEndLine >= totalLines
     }
 
     // MARK: - Line spacing
@@ -1246,7 +1402,9 @@ final class EditorNSView: MTKView {
             isDraggingScrollIndicator = true
             scrollIndicatorDragOffset = scrollTrackDragOffset(forY: point.y)
             let line = scrollTrackYToLine(point.y)
-            encoder.sendScrollToLine(line: line)
+            // beginThumbDragPresentation sends the first intent itself (un-throttled) for a
+            // responsive click, on either the resident or the round-trip path.
+            beginThumbDragPresentation(targetLine: line)
             flashScrollIndicator()
             return
         }
@@ -1273,6 +1431,7 @@ final class EditorNSView: MTKView {
         if isDraggingScrollIndicator {
             isDraggingScrollIndicator = false
             scrollIndicatorDragOffset = nil
+            endThumbDragPresentation()
             flashScrollIndicator()
             return
         }
@@ -1382,7 +1541,7 @@ final class EditorNSView: MTKView {
         if isDraggingScrollIndicator {
             let point = convert(event.locationInWindow, from: nil)
             let line = scrollTrackYToLine(point.y)
-            encoder.sendScrollToLine(line: line)
+            updateThumbDragPresentation(targetLine: line)
             return
         }
 
@@ -1504,6 +1663,14 @@ final class EditorNSView: MTKView {
     }
 
     override func scrollWheel(with event: NSEvent) {
+        // A resident thumb drag owns scroll presentation while the button is held: ignore concurrent
+        // wheel input so the two do not fight over the offset. A post-release reconcile (button up)
+        // is superseded by a fresh wheel gesture, so flush-and-drop it and let the wheel take over.
+        if let session = thumbDragSession {
+            if session.ownsScrollInput { return }
+            cancelThumbDragWithFlush()
+        }
+
         if event.hasPreciseScrollingDeltas && event.phase == .began {
             // A fresh trackpad gesture supersedes any in-flight settle; the `.began`
             // branch in handleTrackpadScroll performs the full reset.
@@ -1695,6 +1862,9 @@ final class EditorNSView: MTKView {
         scrollElasticOffsetY = 0
         scrollTargetWindowId = nil
         scrollTargetCellPosition = nil
+        // Trackpad and thumb-drag are mutually exclusive (the scrollWheel guard ignores wheel input
+        // while a drag is button-held), so no session is expected here; drop it defensively.
+        thumbDragSession = nil
         cancelScrollAnimations()
         resetScrollTrackingState()
         needsDisplay = true
@@ -1861,6 +2031,11 @@ final class EditorNSView: MTKView {
         }
     }
 
+    /// Resets the trackpad smooth-scroll state (offset, target, animations). It deliberately does
+    /// NOT clear an in-flight thumb drag: `mouseExited` routes here, and an NSView keeps tracking a
+    /// drag outside its bounds, so the drag must survive (Critical 2, policy a). The one-frame offset
+    /// zero is re-applied by the next `advanceThumbDragPresentation`. Reset paths that must discard a
+    /// thumb drag mid-hold call `cancelThumbDragWithFlush()` instead so the position is never dropped.
     func resetSmoothScrollState() {
         scrollAccumulator.reset()
         scrollPixelOffset = .zero
@@ -1873,14 +2048,17 @@ final class EditorNSView: MTKView {
     }
 
     private func clearSmoothScrollStateIfTargetWindowMissing() {
-        // Covers the live gesture target and the settle / elastic windows that outlive it: if any
-        // pane owning presentation state has closed, drop the offset and cancel its animation so a
-        // stale whole-cell offset can't linger after the animator finishes on a vanished pane.
+        // Covers the live gesture target, the thumb-drag pane, and the settle / elastic windows that
+        // outlive it: if any pane owning presentation state has closed, drop the offset and cancel
+        // its animation so a stale whole-cell offset can't linger after the animator finishes on a
+        // vanished pane.
         let available = Set(dispatcher.currentFrameWindowIds.filter { guiState?.windowContents[$0] != nil })
         if Self.missingPresentationWindow(
-            candidateWindowIds: [scrollTargetWindowId, scrollSettleWindowId, scrollElasticWindowId],
+            candidateWindowIds: [scrollTargetWindowId, thumbDragSession?.windowId, scrollSettleWindowId, scrollElasticWindowId],
             availableWindowIds: available
         ) {
+            // The thumb-drag pane vanished: drop the session (no flush; the window is gone).
+            thumbDragSession = nil
             resetSmoothScrollState()
         }
     }
