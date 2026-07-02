@@ -184,7 +184,9 @@ defmodule MingaEditor.MouseTest do
       state = Enum.reduce(1..20, state, fn _, acc -> mouse(acc, 0, 0, :wheel_down, :press) end)
 
       {cursor_line, _col} = BufferProcess.cursor(buffer)
-      new_top = window_viewport(state, win_id).top
+      window = Map.fetch!(state.workspace.windows.map, win_id)
+      new_top = window.viewport.top
+      assert window.scroll_echo_top == new_top
       assert cursor_line > 50
       assert cursor_line >= new_top
     end

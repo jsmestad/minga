@@ -18,8 +18,8 @@ type presentationScroll struct {
 	// this local offset was captured (#2671). The reconciler discards the offset
 	// when a later frame reports a strictly-newer scroll_seq: an authoritative
 	// BEAM jump that raced the local scroll, even one that coincidentally landed
-	// on the same anchor key. It mirrors the previous ScrollPresentation.scrollSeq
-	// in Swift shouldResetScrollPresentation.
+	// on the same anchor key. It mirrors prev.scrollSeq of Swift's
+	// GUIScrollPresentation, compared inside shouldResetScrollPresentation.
 	scrollSeq uint32
 	rowOffset int
 	colOffset int

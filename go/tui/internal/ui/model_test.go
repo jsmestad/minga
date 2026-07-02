@@ -1795,6 +1795,103 @@ func TestPresentationScrollWindowedClampsAtOverscanEdge(t *testing.T) {
 	}
 }
 
+// TestPresentationScrollResidentReachesDocumentTop is the upward mirror of the
+// document-bottom test: from a mid-document anchor, an upward fling over a
+// resident window clamps at the document top (offset -before), and a downward
+// fling from the same anchor still reaches the last full page.
+func TestPresentationScrollResidentReachesDocumentTop(t *testing.T) {
+	const docRows = 100
+	const visibleRows = 10
+	const anchorTop = 50
+
+	rows := make([]protocol.WindowRow, docRows)
+	for i := range rows {
+		rows[i] = protocol.WindowRow{ID: uint64(i + 1), ContentHash: uint32(i + 1), BufferLine: uint32(i), Text: fmt.Sprintf("line %d", i)}
+	}
+
+	model := New(20, 14, nil, nil)
+	model.putWindow(protocol.WindowContent{
+		ID:           7,
+		ContentEpoch: 9,
+		Rows:         rows,
+		GeometrySet:  true,
+		Geometry: protocol.PaneGeometry{
+			ContentRect:  protocol.Rect{Row: 0, Col: 0, Width: 10, Height: visibleRows},
+			ViewportRows: visibleRows,
+			TotalLines:   docRows,
+		},
+		ScrollSet: true,
+		Scroll: protocol.ScrollPresentation{
+			WindowID: 7, ContentEpoch: 9, AnchorTop: anchorTop,
+			VisibleStartLine: anchorTop, VisibleEndLine: anchorTop + visibleRows,
+			OverscanStartLine: 0, OverscanEndLine: docRows,
+		},
+	})
+
+	for i := 0; i < 500; i++ {
+		model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelUp, X: 1, Y: model.layout.header.Height}), -1)
+	}
+	scroll := model.localPresentation.scrolls[7]
+	if want := -anchorTop; scroll.rowOffset != want {
+		t.Fatalf("resident upward fling should clamp at the document top offset %d, got %d", want, scroll.rowOffset)
+	}
+
+	for i := 0; i < 500; i++ {
+		model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.layout.header.Height}), 1)
+	}
+	scroll = model.localPresentation.scrolls[7]
+	if want := docRows - visibleRows - anchorTop; scroll.rowOffset != want {
+		t.Fatalf("resident downward fling should reach the document bottom offset %d, got %d", want, scroll.rowOffset)
+	}
+}
+
+// TestWindowCoversDocumentBoundaries pins the coverage predicate at its seams:
+// coverage requires the overscan range to span [0, TotalLines) AND the payload
+// to actually deliver that many rows, so a one-line-short overscan range or a
+// truncated payload that still advertises full coverage degrades to the
+// windowed overscan clamp instead of promising document rows it does not hold.
+func TestWindowCoversDocumentBoundaries(t *testing.T) {
+	const docRows = 20
+
+	makeWindow := func(overscanEnd uint32, payloadRows int) protocol.WindowContent {
+		rows := make([]protocol.WindowRow, payloadRows)
+		for i := range rows {
+			rows[i] = protocol.WindowRow{ID: uint64(i + 1), ContentHash: uint32(i + 1), BufferLine: uint32(i), Text: fmt.Sprintf("line %d", i)}
+		}
+		return protocol.WindowContent{
+			ID:           7,
+			ContentEpoch: 9,
+			Rows:         rows,
+			GeometrySet:  true,
+			Geometry:     protocol.PaneGeometry{ViewportRows: 5, TotalLines: docRows},
+			ScrollSet:    true,
+			Scroll: protocol.ScrollPresentation{
+				WindowID: 7, ContentEpoch: 9,
+				VisibleStartLine: 0, VisibleEndLine: 5,
+				OverscanStartLine: 0, OverscanEndLine: overscanEnd,
+			},
+		}
+	}
+
+	cases := []struct {
+		name        string
+		overscanEnd uint32
+		payloadRows int
+		want        bool
+	}{
+		{"exact coverage", docRows, docRows, true},
+		{"overscan one line short", docRows - 1, docRows, false},
+		{"truncated payload with covering metadata", docRows, docRows - 1, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := windowCoversDocument(makeWindow(tc.overscanEnd, tc.payloadRows)); got != tc.want {
+				t.Fatalf("windowCoversDocument = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestPresentationScrollUsesMatchingOverscanGutterRows(t *testing.T) {
 	model := New(20, 6, nil, nil)
 	model.gutters = map[uint16]protocol.Gutter{

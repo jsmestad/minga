@@ -313,23 +313,29 @@ func presentationScrollRowBounds(window protocol.WindowContent, visibleRows int)
 // windowCoversDocument reports whether the resident row payload spans the whole
 // document, i.e. the store holds every laid-out row (full-document residence).
 // The BEAM emitter reports this by anchoring the overscan range at line 0 and
-// extending it to (or past) the document's total line count.
+// extending it to (or past) the document's total line count. The row-count check
+// verifies the payload actually delivers those lines: a truncated or stale frame
+// that still advertises full coverage degrades to the windowed overscan clamp
+// instead of promising document rows it does not hold.
 func windowCoversDocument(window protocol.WindowContent) bool {
 	if !window.ScrollSet || !window.GeometrySet || window.Geometry.TotalLines == 0 {
 		return false
 	}
 	return window.Scroll.OverscanStartLine == 0 &&
-		window.Scroll.OverscanEndLine >= window.Geometry.TotalLines
+		window.Scroll.OverscanEndLine >= window.Geometry.TotalLines &&
+		len(window.Rows) >= int(window.Geometry.TotalLines)
 }
 
 // presentationDocumentRowBounds clamps the local offset to the resident document:
 // up to the document top (before rows) and down to the last full page
-// (document rows minus the visible page minus the leading rows). It mirrors the
-// overscan-bounds arithmetic but sources the row extent from the resident payload
-// that spans the document, so a fling reaches the true document bottom.
+// (document lines minus the visible page minus the leading rows). It mirrors the
+// overscan-bounds arithmetic but sources the extent from the authoritative
+// Geometry.TotalLines rather than the payload length; windowCoversDocument
+// guarantees the payload holds at least that many rows, so in a well-formed
+// resident frame the two are equal.
 func presentationDocumentRowBounds(window protocol.WindowContent, visibleRows int) (before int, after int) {
 	before = presentationPayloadOverscanBefore(window)
-	documentRows := len(window.Rows)
+	documentRows := int(window.Geometry.TotalLines)
 	if visibleRows > 0 {
 		return before, max(documentRows-visibleRows-before, 0)
 	}
