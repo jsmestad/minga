@@ -520,6 +520,37 @@ final class CoreTextMetalRenderer {
                 )
                 let contentBottomPx = min(contentTopPx + Float(committedVisibleRows) * displayCellH * scale, Float(viewportSize.height))
 
+                // Editor background fill for the pane. The semantic content path
+                // rasterizes rows into text-width, transparent-background textures,
+                // so every pixel that is not covered by text, gutter, or an overlay
+                // shows through to whatever is behind it. Relying on the Metal clear
+                // color alone leaves the remainder below the last row painted by an
+                // implicit global color; here we paint it explicitly in the editor
+                // background so the fill always reaches the status bar edge.
+                //
+                // The bottom-most pane extends to the full drawable height so both
+                // remainder classes are covered: the raw-cell remainder (view height
+                // not a multiple of the cell height) and the effective-rows remainder
+                // (spaced rows * displayCellH < view height). Interior panes stop at
+                // their neighbor's top so horizontal split separators and stacked
+                // panes (including the agent panel edge) have no band above them.
+                if windowBounds.width > 0,
+                   let fill = CoreTextMetalRenderer.windowBackgroundFillBounds(
+                       paneTopRow: Int(paneGeometry?.textRect.row ?? gutter.contentRow),
+                       paneRows: committedVisibleRows,
+                       totalRows: Int(frameState.rows),
+                       displayCellH: displayCellH,
+                       scale: scale,
+                       viewportHeight: Float(viewportSize.height)
+                   ) {
+                    var bgFill = QuadGPU()
+                    bgFill.position = SIMD2<Float>(windowBounds.x, fill.top)
+                    bgFill.size = SIMD2<Float>(windowBounds.width, fill.bottom - fill.top)
+                    bgFill.color = defaultBg
+                    bgFill.alpha = 1.0
+                    bgQuads.append(bgFill)
+                }
+
                 if let cursorline = content.cursorline, cursorline.bg != 0 {
                     let yPos = scrollableWindowRowOffset + Float(cursorline.row) * displayCellH * scale
                     if let clipped = CoreTextMetalRenderer.clipVerticalQuad(y: yPos, height: displayCellH * scale, top: contentTopPx, bottom: contentBottomPx) {
@@ -1963,6 +1994,46 @@ final class CoreTextMetalRenderer {
             return bottom > top ? (top, bottom) : nil
         }
         return nil
+    }
+
+    /// Vertical span (in device pixels) of a window's editor-background fill.
+    ///
+    /// Fills from the pane's top row down to its bottom. A pane whose bottom row
+    /// reaches (or passes) the grid bottom owns the leftover strip down to the
+    /// drawable edge, so the remainder below the last text row is painted the
+    /// editor background instead of exposing the clear color. This covers both
+    /// the raw-cell remainder (view height not a multiple of the cell height) and
+    /// the effective-rows remainder (spaced rows * displayCellH < view height).
+    /// Interior panes stop at their neighbor's top so split separators and the
+    /// agent-panel edge have no band above them.
+    ///
+    /// - Parameters:
+    ///   - paneTopRow: The pane's top text row in grid rows.
+    ///   - paneRows: The pane's committed visible rows (spaced grid rows).
+    ///   - totalRows: The editor grid's total spaced rows (`frameState.rows`).
+    ///   - displayCellH: Spaced cell height in points (`cellH * lineSpacing`).
+    ///   - scale: Backing scale factor.
+    ///   - viewportHeight: Drawable height in device pixels.
+    /// - Returns: The fill's `(top, bottom)` in device pixels, or nil when empty.
+    nonisolated static func windowBackgroundFillBounds(
+        paneTopRow: Int,
+        paneRows: Int,
+        totalRows: Int,
+        displayCellH: Float,
+        scale: Float,
+        viewportHeight: Float
+    ) -> (top: Float, bottom: Float)? {
+        let top = min(Float(max(paneTopRow, 0)) * displayCellH * scale, viewportHeight)
+        let paneBottomRow = max(paneTopRow, 0) + max(paneRows, 0)
+        let bottom: Float
+        if paneBottomRow >= totalRows {
+            // Bottom-most pane: absorb the remainder down to the drawable edge.
+            bottom = viewportHeight
+        } else {
+            bottom = min(Float(paneBottomRow) * displayCellH * scale, viewportHeight)
+        }
+        guard bottom > top else { return nil }
+        return (top, bottom)
     }
 
     nonisolated static func windowWidthCols(gutter: Wire.WindowGutter, frameCols: UInt16) -> Int {

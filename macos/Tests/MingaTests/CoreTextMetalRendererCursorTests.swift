@@ -356,6 +356,108 @@ struct CoreTextMetalRendererCursorTests {
         #expect(bounds?.bottom == 384)
     }
 
+    // MARK: - Editor background remainder fill (#2687)
+
+    @Test("background fill absorbs the effective-rows remainder at 1.2 spacing")
+    func backgroundFillAbsorbsEffectiveRowsRemainder() {
+        // rawRows 21 at 1.2 spacing -> floor(21/1.2) = 17 effective rows.
+        // Cell height 10pt raw -> 12pt spaced. View height = 21 raw cells = 210px.
+        // The 17 spaced rows only reach 17 * 12 = 204px, leaving a 6px band that
+        // the fill must absorb by extending the bottom-most pane to 210px.
+        let fill = CoreTextMetalRenderer.windowBackgroundFillBounds(
+            paneTopRow: 0,
+            paneRows: 17,
+            totalRows: 17,
+            displayCellH: 12,
+            scale: 1,
+            viewportHeight: 210
+        )
+
+        #expect(fill?.top == 0)
+        #expect(fill?.bottom == 210)
+        // The remainder below the last spaced row is painted, not exposed.
+        #expect((fill?.bottom ?? 0) > 17 * 12)
+    }
+
+    @Test("background fill matches the view height at 1.0 spacing baseline")
+    func backgroundFillIdentityAtUnitSpacing() {
+        // At 1.0 spacing 21 rows * 10px = 210px exactly equals the view height.
+        let fill = CoreTextMetalRenderer.windowBackgroundFillBounds(
+            paneTopRow: 0,
+            paneRows: 21,
+            totalRows: 21,
+            displayCellH: 10,
+            scale: 1,
+            viewportHeight: 210
+        )
+
+        #expect(fill?.top == 0)
+        #expect(fill?.bottom == 210)
+    }
+
+    @Test("background fill absorbs the raw-cell remainder")
+    func backgroundFillAbsorbsRawCellRemainder() {
+        // View height 215px is not a multiple of the 10px cell height: floor gives
+        // 21 rows reaching 210px, leaving a 5px raw-cell remainder the fill covers.
+        let fill = CoreTextMetalRenderer.windowBackgroundFillBounds(
+            paneTopRow: 0,
+            paneRows: 21,
+            totalRows: 21,
+            displayCellH: 10,
+            scale: 1,
+            viewportHeight: 215
+        )
+
+        #expect(fill?.bottom == 215)
+        #expect((fill?.bottom ?? 0) > 21 * 10)
+    }
+
+    @Test("interior split pane stops at its neighbor instead of the view bottom")
+    func backgroundFillInteriorPaneStopsAtNeighbor() {
+        // Stacked split: top pane rows 0..<10, bottom pane rows 10..<17 of a
+        // 17-row grid. displayCellH 12, view height 210.
+        let top = CoreTextMetalRenderer.windowBackgroundFillBounds(
+            paneTopRow: 0,
+            paneRows: 10,
+            totalRows: 17,
+            displayCellH: 12,
+            scale: 1,
+            viewportHeight: 210
+        )
+        // The top pane ends at the separator (10 * 12 = 120), never the view bottom.
+        #expect(top?.top == 0)
+        #expect(top?.bottom == 120)
+
+        let bottom = CoreTextMetalRenderer.windowBackgroundFillBounds(
+            paneTopRow: 10,
+            paneRows: 7,
+            totalRows: 17,
+            displayCellH: 12,
+            scale: 1,
+            viewportHeight: 210
+        )
+        // The bottom pane absorbs the remainder down to the view bottom, so the
+        // two fills tile the full height with no gap above the separator.
+        #expect(bottom?.top == 120)
+        #expect(bottom?.bottom == 210)
+    }
+
+    @Test("background fill applies the backing scale to the pane top")
+    func backgroundFillAppliesScale() {
+        // Retina: paneTopRow 10 at 12pt spaced height, scale 2 -> top = 240px.
+        let fill = CoreTextMetalRenderer.windowBackgroundFillBounds(
+            paneTopRow: 10,
+            paneRows: 7,
+            totalRows: 17,
+            displayCellH: 12,
+            scale: 2,
+            viewportHeight: 500
+        )
+
+        #expect(fill?.top == 240)
+        #expect(fill?.bottom == 500)
+    }
+
     @Test("presentation scroll offset keeps negative x clamped when horizontal scroll is at zero")
     func presentationScrollOffsetKeepsNegativeXClampedAtLeftEdge() {
         let suppressed = CoreTextMetalRenderer.presentationScrollOffset(scrollLeft: 0, scrollOffsetPx: SIMD2<Float>(-12, 5))
