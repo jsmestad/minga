@@ -356,7 +356,11 @@ defmodule Minga.Frontend.Adapter.GUI do
       window.content_epoch,
       window.full_refresh,
       window.scroll_left,
-      window.rows,
+      # On the residence path the builder maintains an incremental digest of the
+      # row set, so gate on it instead of re-hashing the (full-document) rows list
+      # every frame. Off residence `content_digest` is nil and we hash `rows`
+      # directly, keeping the fingerprint byte-identical to the windowed path.
+      row_content_key(window),
       window.selection,
       window.search_matches,
       window.diagnostic_ranges,
@@ -367,6 +371,17 @@ defmodule Minga.Frontend.Adapter.GUI do
       window.indent_guides
     })
   end
+
+  # Row-content key for the content fingerprint. On the residence path the
+  # builder supplies an incrementally maintained digest keyed by
+  # row_id/content_hash; using it keeps the frame-emit gate O(changed rows)
+  # instead of O(document). Off residence there is no digest and the raw rows
+  # list is hashed, preserving the exact windowed fingerprint.
+  @spec row_content_key(RenderModel.Window.t()) :: term()
+  defp row_content_key(%RenderModel.Window{content_digest: nil} = window), do: window.rows
+
+  defp row_content_key(%RenderModel.Window{content_digest: digest}),
+    do: {:resident_digest, digest}
 
   @spec window_overlay_fingerprint(RenderModel.Window.t()) :: integer()
   defp window_overlay_fingerprint(%RenderModel.Window{} = window) do

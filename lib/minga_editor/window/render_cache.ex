@@ -77,7 +77,8 @@ defmodule MingaEditor.Window.RenderCache do
           last_reset_fingerprint: term(),
           total_visual_rows_cache: {term(), non_neg_integer()} | nil,
           retained_rows: %{optional(non_neg_integer()) => retained_row()},
-          retained_wrap_lines: %{optional(non_neg_integer()) => retained_wrap_line()}
+          retained_wrap_lines: %{optional(non_neg_integer()) => retained_wrap_line()},
+          resident_build: MingaEditor.RenderModel.Window.ResidentBuild.t() | nil
         }
 
   defstruct dirty_lines: %{},
@@ -93,7 +94,8 @@ defmodule MingaEditor.Window.RenderCache do
             last_reset_fingerprint: nil,
             total_visual_rows_cache: nil,
             retained_rows: %{},
-            retained_wrap_lines: %{}
+            retained_wrap_lines: %{},
+            resident_build: nil
 
   @doc """
   Returns a fresh cache with all lines dirty.
@@ -127,7 +129,8 @@ defmodule MingaEditor.Window.RenderCache do
         reset_pending: true,
         total_visual_rows_cache: nil,
         retained_rows: %{},
-        retained_wrap_lines: %{}
+        retained_wrap_lines: %{},
+        resident_build: nil
     }
   end
 
@@ -404,5 +407,21 @@ defmodule MingaEditor.Window.RenderCache do
           t()
   def put_retained_wrap_lines(%__MODULE__{} = cache, lines) when is_map(lines) do
     %{cache | retained_wrap_lines: lines}
+  end
+
+  # ── Incremental residence build state (#2658) ──────────────────────────────
+
+  @doc """
+  Returns the persistent full-document residence build state, or `nil` when the
+  window has not built on the residence path since the last reset. Carries the
+  resident entry list and its incremental content digest across frames.
+  """
+  @spec resident_build(t()) :: MingaEditor.RenderModel.Window.ResidentBuild.t() | nil
+  def resident_build(%__MODULE__{resident_build: state}), do: state
+
+  @doc "Replaces the persistent residence build state captured by the last frame."
+  @spec put_resident_build(t(), MingaEditor.RenderModel.Window.ResidentBuild.t() | nil) :: t()
+  def put_resident_build(%__MODULE__{} = cache, state) do
+    %{cache | resident_build: state}
   end
 end
