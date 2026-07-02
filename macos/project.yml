@@ -359,6 +359,11 @@ targets:
 schemes:
   Minga:
     build:
+      # parallelizeBuild off makes Xcode build in listed order: the app first,
+      # so MingaTests' `@testable import Minga` resolves on a cold checkout
+      # without a target dependency (which would infer TEST_HOST and embed the
+      # xctest into the app, breaking the app's --deep codesign script).
+      parallelizeBuild: false
       targets:
         Minga: all
         MingaTests: [test]
