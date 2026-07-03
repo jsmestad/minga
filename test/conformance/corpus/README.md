@@ -24,6 +24,7 @@ test/conformance/corpus/
   README.md           # this file
   store/*.json         # store-lifecycle transcripts (AC1)
   input/*.json         # input-resolution transcripts (AC2)
+  chat/*.json          # resident agent-transcript transcripts (0x86, #2654)
 ```
 
 `index.json` is the enumeration authority. A frontend that cannot yet run a transcript must skip it *by name from this list* (a skipped-but-enumerated transcript is the deliverable); silent omission is not allowed.
@@ -80,6 +81,37 @@ Steps run in order against a live frontend store. Three kinds:
      "expect": { "normalized_buffer_line": 45 } }
    ```
 
+### Chat steps (resident agent transcript, 0x86, #2654)
+
+The `chat/*.json` family is a distinct transcript shape for the resident agent-chat transcript stream (`gui_agent_transcript`, 0x86). Its frames are produced by the real `Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder` and folded through each frontend's real store apply (Swift `AgentChatState.applyTranscript`, Go `residentTranscript.apply`), so an encoder change regenerates the corpus and drift is caught. A third leg, the BEAM oracle in `test/conformance/agent_transcript_corpus_test.exs`, re-decodes the same bytes and asserts they carry exactly what the expectations claim.
+
+There are three chat step kinds:
+
+1. **transcript_frame** — a single framed 0x86 message. The runner base64-decodes `payload_base64`, decodes it through the real protocol decoder, applies it through the real resident store, then asserts `expect.transcript` (the shared parity core, asserted identically on both frontends and the BEAM oracle).
+
+   ```json
+   { "kind": "transcript_frame", "opcode": 134, "note": "full_replace 8 messages",
+     "payload_base64": "...",
+     "expect": { "transcript": { "epoch": 1, "count": 8, "truncated": false, "message_ids": [1,2,3,4,5,6,7,8] } } }
+   ```
+
+2. **transcript_scroll** — a local scroll input (`rows`, signed: `+`down / `-`up). Go owns a top-anchored scroll offset in the store, so its runner drives the real `scrollBy` + `resolveScroll` and asserts the `go` selector. Swift's scroll is a SwiftUI `ScrollView` concern with no store effect, so its runner treats this step as a no-op (position preservation is asserted via id stability instead).
+
+   ```json
+   { "kind": "transcript_scroll", "note": "scroll up 4 rows", "rows": -4,
+     "go": { "max_top": 6, "expect_top_offset": 2, "expect_pinned": false, "expect_pin_transition": "scrolled_away" } }
+   ```
+
+3. **transcript_assert** — a per-frontend position-preservation assertion. `swift` asserts the id at a store index (`ForEach(id:)` stability is what preserves the SwiftUI scroll position across an append). `go` drives `resolveScroll` at the post-frame `max_top` and asserts the reading offset is stable and the pin state is correct.
+
+   ```json
+   { "kind": "transcript_assert", "note": "reading position preserved",
+     "swift": { "anchor_index": 2, "anchor_id": 3 },
+     "go": { "max_top": 7, "expect_top_offset": 2, "expect_pinned": false } }
+   ```
+
+Both frontends run every chat transcript; there are no `go_skip` entries in this family. The per-frontend `swift`/`go` selectors capture the honest asymmetry between the two offset models (SwiftUI id stability vs. a store-owned top-anchored offset), while the shared `transcript_frame.expect.transcript` is what makes the resident-store parity executable. `expect_top_offset` and `expect_pin_transition` are optional (an unpinned-only or pin-only assertion omits the irrelevant key). Pin transition names are `scrolled_away`, `returned`, or absent (no edge).
+
 ### `expect` fields
 
 A runner asserts only the keys present on a step; absent keys are not checked.
@@ -111,3 +143,12 @@ Input resolution seams (AC2):
 - **scroll_seq_strictly_newer_discard** — a strictly-newer `scroll_seq` with an identical anchor key forces a discard (Go-skipped: windowed contract).
 - **same_top_jump_discards** — an authoritative jump (zz already centered, a search hit already on screen) lands on the previous top but still bumps `scroll_seq` via the explicit authoritative-scroll marker, so the frontend discards its local offset (#2652).
 - **wheel_momentum_during_ctrl_d** — momentum keeps feeding local offset while ctrl-d's authoritative anchors land on the same top; each `scroll_seq` bump discards the leftover offset (Go-skipped: windowed contract).
+
+Resident agent transcript (0x86, #2654):
+
+- **append_while_scrolled_up** — a bottom append while the reader is scrolled up preserves the reading position: Swift's anchor id stays at its store index, Go's top-anchored offset is unchanged by the growth.
+- **pin_to_bottom_resume** — scroll up (unpin, emit the scrolled-away edge), scroll back to the bottom (re-pin, emit the returned edge), then a following append is followed (Go stays pinned; the Swift store's newest message is at the tail the view follows).
+- **session_switch_full_replace** — a full_replace at a new epoch resets the resident store to the new session and re-pins to the bottom, discarding the prior local offset.
+- **trim_front_eviction_midstream** — streaming past the resident byte cap evicts the oldest messages from the store front (append `trim_front`) and flags the stream `truncated`, instead of degrading to a full_replace per frame.
+- **epoch_flip_midstream** — an in-epoch append followed by an epoch flip; the append stays incremental, the epoch flip forces a full_replace even with unchanged messages.
+- **streaming_tail_patch** — the streaming last message is patched in place by id (same id, new content); the store stays count 2 with ids [1, 2], catching a frontend that appends instead of upserting.

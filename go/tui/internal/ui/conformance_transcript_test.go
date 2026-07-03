@@ -53,25 +53,57 @@ type conformanceTranscript struct {
 }
 
 type conformanceStep struct {
-	Kind          string             `json:"kind"`
-	Opcode        int                `json:"opcode"`
-	Note          string             `json:"note"`
-	PayloadBase64 string             `json:"payload_base64"`
-	WindowID      uint16             `json:"window_id"`
-	RowOffset     int                `json:"row_offset"`
-	ColOffset     int                `json:"col_offset"`
-	PointerRow    int                `json:"pointer_row"`
-	PointerCol    int                `json:"pointer_col"`
-	Expect        *conformanceExpect `json:"expect"`
+	Kind          string                    `json:"kind"`
+	Opcode        int                       `json:"opcode"`
+	Note          string                    `json:"note"`
+	PayloadBase64 string                    `json:"payload_base64"`
+	WindowID      uint16                    `json:"window_id"`
+	RowOffset     int                       `json:"row_offset"`
+	ColOffset     int                       `json:"col_offset"`
+	PointerRow    int                       `json:"pointer_row"`
+	PointerCol    int                       `json:"pointer_col"`
+	Rows          int                       `json:"rows"`
+	Go            *conformanceGoSelector    `json:"go"`
+	Swift         *conformanceSwiftSelector `json:"swift"`
+	Expect        *conformanceExpect        `json:"expect"`
 }
 
 type conformanceExpect struct {
-	StorePresent         *bool              `json:"store_present"`
-	Rows                 *[]conformanceRow  `json:"rows"`
-	Anchor               *conformanceAnchor `json:"anchor"`
-	CursorRow            *int               `json:"cursor_row"`
-	OffsetDiscarded      *bool              `json:"offset_discarded"`
-	NormalizedBufferLine *int               `json:"normalized_buffer_line"`
+	StorePresent         *bool                        `json:"store_present"`
+	Rows                 *[]conformanceRow            `json:"rows"`
+	Anchor               *conformanceAnchor           `json:"anchor"`
+	CursorRow            *int                         `json:"cursor_row"`
+	OffsetDiscarded      *bool                        `json:"offset_discarded"`
+	NormalizedBufferLine *int                         `json:"normalized_buffer_line"`
+	Transcript           *conformanceTranscriptExpect `json:"transcript"`
+}
+
+// conformanceTranscriptExpect is the resident agent-transcript store state after
+// a 0x86 frame: the shared parity core both frontends assert identically.
+type conformanceTranscriptExpect struct {
+	Epoch      uint32   `json:"epoch"`
+	Count      int      `json:"count"`
+	Truncated  bool     `json:"truncated"`
+	MessageIDs []uint32 `json:"message_ids"`
+}
+
+// conformanceGoSelector carries the Go-specific position assertions. Go owns a
+// top-anchored scroll offset in the store, so its runner drives the pure
+// scrollBy/resolveScroll functions with an explicit max_top and asserts the
+// resulting offset and pin state (the Swift SwiftUI-native runner ignores this).
+type conformanceGoSelector struct {
+	MaxTop              int     `json:"max_top"`
+	ExpectTopOffset     *int    `json:"expect_top_offset"`
+	ExpectPinned        *bool   `json:"expect_pinned"`
+	ExpectPinTransition *string `json:"expect_pin_transition"`
+}
+
+// conformanceSwiftSelector carries the Swift-specific position assertion (id at a
+// store index). The Go runner ignores it; the id stability it captures is already
+// implied by the shared message_ids assertion on the frames.
+type conformanceSwiftSelector struct {
+	AnchorIndex int    `json:"anchor_index"`
+	AnchorID    uint32 `json:"anchor_id"`
 }
 
 type conformanceRow struct {
@@ -117,6 +149,12 @@ func runConformanceTranscript(t *testing.T, transcript conformanceTranscript) {
 			injectConformanceOffset(&model, step)
 		case "pointer":
 			assertConformancePointer(t, &model, i, step)
+		case "transcript_frame":
+			applyConformanceTranscriptFrame(t, &model, i, step)
+		case "transcript_scroll":
+			applyConformanceTranscriptScroll(t, &model, i, step)
+		case "transcript_assert":
+			assertConformanceTranscriptPosition(t, &model, i, step)
 		default:
 			t.Fatalf("step %d: unknown kind %q", i, step.Kind)
 		}
@@ -243,6 +281,122 @@ func assertConformancePointer(t *testing.T, model *Model, i int, step conformanc
 				i, step.Note, bufferLine, *step.Expect.NormalizedBufferLine)
 		}
 	}
+}
+
+// applyConformanceTranscriptFrame decodes a 0x86 gui_agent_transcript frame and
+// folds it through the real store (protocol.DecodeCommand + model.applyMutation ->
+// residentTranscript.apply), then asserts the resident store's epoch, truncated
+// flag, count, and ordered message ids. This is the shared parity assertion the
+// Swift runner mirrors byte-for-byte.
+func applyConformanceTranscriptFrame(t *testing.T, model *Model, i int, step conformanceStep) {
+	t.Helper()
+	payload, err := base64.StdEncoding.DecodeString(step.PayloadBase64)
+	if err != nil {
+		t.Fatalf("step %d (%s): base64 decode: %v", i, step.Note, err)
+	}
+	command, err := protocol.DecodeCommand(payload)
+	if err != nil {
+		t.Fatalf("step %d (%s): DecodeCommand: %v", i, step.Note, err)
+	}
+	model.applyMutation(command)
+
+	if step.Expect == nil || step.Expect.Transcript == nil {
+		return
+	}
+	want := step.Expect.Transcript
+	store := model.transcript
+
+	if store.epoch != want.Epoch {
+		t.Fatalf("step %d (%s): epoch = %d, want %d", i, step.Note, store.epoch, want.Epoch)
+	}
+	if store.truncated != want.Truncated {
+		t.Fatalf("step %d (%s): truncated = %v, want %v", i, step.Note, store.truncated, want.Truncated)
+	}
+
+	ids := make([]uint32, len(store.messages))
+	for j := range store.messages {
+		ids[j] = store.messages[j].ID
+	}
+	if len(ids) != want.Count {
+		t.Fatalf("step %d (%s): resident count = %d, want %d", i, step.Note, len(ids), want.Count)
+	}
+	if !equalIDs(ids, want.MessageIDs) {
+		t.Fatalf("step %d (%s): resident ids = %v, want %v", i, step.Note, ids, want.MessageIDs)
+	}
+}
+
+// applyConformanceTranscriptScroll drives the real local-scroll path
+// (scrollBy + resolveScroll) and asserts the resulting top-anchored offset, pin
+// state, and pin transition. This is the Go offset model; the Swift runner treats
+// the scroll input as a view-only concern with no store effect.
+func applyConformanceTranscriptScroll(t *testing.T, model *Model, i int, step conformanceStep) {
+	t.Helper()
+	store := model.transcript
+	store.scrollBy(step.Rows)
+
+	maxTop := 0
+	if step.Go != nil {
+		maxTop = step.Go.MaxTop
+	}
+	transition := store.resolveScroll(maxTop)
+	assertConformanceGoSelector(t, i, step, store, transition)
+}
+
+// assertConformanceTranscriptPosition drives resolveScroll once more (no queued
+// scroll) at the post-frame max_top and asserts the reading offset is stable and
+// the pin state is correct. It is the Go leg of the per-frontend position
+// assertion; the Swift runner asserts an anchor id instead.
+func assertConformanceTranscriptPosition(t *testing.T, model *Model, i int, step conformanceStep) {
+	t.Helper()
+	if step.Go == nil {
+		return
+	}
+	store := model.transcript
+	transition := store.resolveScroll(step.Go.MaxTop)
+	assertConformanceGoSelector(t, i, step, store, transition)
+}
+
+func assertConformanceGoSelector(t *testing.T, i int, step conformanceStep, store *residentTranscript, transition int) {
+	t.Helper()
+	sel := step.Go
+	if sel == nil {
+		return
+	}
+	if sel.ExpectTopOffset != nil && store.topOffset != *sel.ExpectTopOffset {
+		t.Fatalf("step %d (%s): top_offset = %d, want %d", i, step.Note, store.topOffset, *sel.ExpectTopOffset)
+	}
+	if sel.ExpectPinned != nil && store.pinned != *sel.ExpectPinned {
+		t.Fatalf("step %d (%s): pinned = %v, want %v", i, step.Note, store.pinned, *sel.ExpectPinned)
+	}
+	if sel.ExpectPinTransition != nil {
+		want := pinTransitionFromName(*sel.ExpectPinTransition)
+		if transition != want {
+			t.Fatalf("step %d (%s): pin_transition = %d, want %d (%q)", i, step.Note, transition, want, *sel.ExpectPinTransition)
+		}
+	}
+}
+
+func pinTransitionFromName(name string) int {
+	switch name {
+	case "scrolled_away":
+		return pinScrolledAway
+	case "returned":
+		return pinReturned
+	default:
+		return pinNone
+	}
+}
+
+func equalIDs(a []uint32, b []uint32) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func loadConformanceIndex(t *testing.T) conformanceIndex {

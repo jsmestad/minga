@@ -80,6 +80,25 @@ struct ConformanceTranscriptTests {
                                    colOffset: injectedColOffset[windowId] ?? 0,
                                    index: i, name: entry.name)
 
+            case "transcript_frame":
+                let commands = try Self.decodeFrame(step, index: i, name: entry.name)
+                for command in commands { dispatcher.applyForTesting(command) }
+                if let expect = step["expect"] as? [String: Any],
+                   let transcript = expect["transcript"] as? [String: Any] {
+                    Self.assertTranscript(transcript, state: gui.agentChatState, index: i, name: entry.name)
+                }
+
+            case "transcript_scroll":
+                // Local scroll is a SwiftUI view concern (ScrollView offset), not a
+                // store mutation: the macOS store is unaffected. Position preservation
+                // is asserted via id stability on transcript_assert steps instead.
+                break
+
+            case "transcript_assert":
+                if let swift = step["swift"] as? [String: Any] {
+                    Self.assertTranscriptAnchor(swift, state: gui.agentChatState, index: i, name: entry.name)
+                }
+
             default:
                 Issue.record("\(entry.name) step \(i): unknown kind \(kind)")
             }
@@ -133,6 +152,50 @@ struct ConformanceTranscriptTests {
             #expect(row.rowId == wantId && row.contentHash == wantHash && row.bufLine == wantLine,
                     "\(name) step \(index): row \(j) = {id:\(row.rowId) hash:\(row.contentHash) line:\(row.bufLine)}, want {id:\(wantId) hash:\(wantHash) line:\(wantLine)}")
         }
+    }
+
+    // MARK: - Resident agent-transcript assertions (0x86, #2654)
+
+    /// Asserts the resident store's epoch, truncated flag, count, and ordered
+    /// message ids after a 0x86 frame. This is the shared parity assertion the Go
+    /// runner mirrors: both decode the same encoder bytes through their real store
+    /// apply (`AgentChatState.applyTranscript`) and must produce the same id list.
+    @MainActor
+    static func assertTranscript(_ expect: [String: Any], state: AgentChatState, index: Int, name: String) {
+        if let wantEpoch = expect["epoch"] as? Int {
+            #expect(Int(state.transcriptEpoch) == wantEpoch,
+                    "\(name) step \(index): epoch = \(state.transcriptEpoch), want \(wantEpoch)")
+        }
+        if let wantTruncated = expect["truncated"] as? Bool {
+            #expect(state.transcriptTruncated == wantTruncated,
+                    "\(name) step \(index): truncated = \(state.transcriptTruncated), want \(wantTruncated)")
+        }
+        if let wantIds = expect["message_ids"] as? [Int] {
+            let gotIds = state.messages.map { $0.id }
+            #expect(gotIds == wantIds,
+                    "\(name) step \(index): resident ids = \(gotIds), want \(wantIds)")
+        }
+        if let wantCount = expect["count"] as? Int {
+            #expect(state.messages.count == wantCount,
+                    "\(name) step \(index): resident count = \(state.messages.count), want \(wantCount)")
+        }
+    }
+
+    /// Asserts the message at a store index still carries the expected id (the
+    /// SwiftUI-native position-preservation check: `ForEach(id:)` stability is what
+    /// keeps the reader's scroll position across an append, so a stable anchor id
+    /// at a stable index is the store-side proof).
+    @MainActor
+    static func assertTranscriptAnchor(_ swift: [String: Any], state: AgentChatState, index: Int, name: String) {
+        guard let anchorIndex = swift["anchor_index"] as? Int,
+              let anchorId = swift["anchor_id"] as? Int else { return }
+        guard anchorIndex < state.messages.count else {
+            Issue.record("\(name) step \(index): anchor_index \(anchorIndex) out of range (\(state.messages.count) messages)")
+            return
+        }
+        let gotId = state.messages[anchorIndex].id
+        #expect(gotId == anchorId,
+                "\(name) step \(index): id at store index \(anchorIndex) = \(gotId), want \(anchorId)")
     }
 
     // MARK: - Pointer normalization
