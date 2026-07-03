@@ -430,6 +430,163 @@ struct AgentChatStateLifecycleTests {
     }
 }
 
+// MARK: - AgentChatState resident transcript (0x86)
+
+@Suite("AgentChatState transcript application")
+struct AgentChatTranscriptTests {
+    private func user(_ id: UInt32, _ text: String) -> Wire.ChatMessage {
+        Wire.ChatMessage(beamId: id, content: .user(text: text))
+    }
+    private func assistant(_ id: UInt32, _ text: String) -> Wire.ChatMessage {
+        Wire.ChatMessage(beamId: id, content: .assistant(text: text))
+    }
+
+    @Test("full_replace swaps the array and adopts the epoch")
+    @MainActor func fullReplace() {
+        let state = AgentChatState()
+        state.applyTranscript(mode: 0, epoch: 5, baseCount: 0, messages: [user(1, "a"), assistant(2, "b")])
+
+        #expect(state.transcriptEpoch == 5)
+        #expect(state.messages.map(\.id) == [1, 2])
+    }
+
+    @Test("append adds new messages while keeping prior ids stable")
+    @MainActor func appendNew() {
+        let state = AgentChatState()
+        state.applyTranscript(mode: 0, epoch: 5, baseCount: 0, messages: [user(1, "a"), assistant(2, "b")])
+        state.applyTranscript(mode: 1, epoch: 5, baseCount: 2, messages: [assistant(3, "c")])
+
+        #expect(state.messages.map(\.id) == [1, 2, 3])
+        // The first two entries are unchanged, so the ForEach diff preserves position.
+        guard case .user(_, let t0) = state.messages[0] else { Issue.record("expected user"); return }
+        #expect(t0 == "a")
+    }
+
+    @Test("append patches the streaming tail in place with a stable id")
+    @MainActor func appendPatchTail() {
+        let state = AgentChatState()
+        state.applyTranscript(mode: 0, epoch: 5, baseCount: 0, messages: [user(1, "a"), assistant(2, "hi")])
+        // Re-send the last message (same id 2) with grown content; base keeps only the first.
+        state.applyTranscript(mode: 1, epoch: 5, baseCount: 1, messages: [assistant(2, "hi there")])
+
+        #expect(state.messages.count == 2)
+        #expect(state.messages.map(\.id) == [1, 2])
+        guard case .assistant(_, let patched) = state.messages[1] else { Issue.record("expected assistant"); return }
+        #expect(patched == "hi there")
+    }
+
+    @Test("full_replace with a new epoch replaces the whole transcript")
+    @MainActor func epochFlip() {
+        let state = AgentChatState()
+        state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: [user(1, "a"), assistant(2, "b")])
+        state.applyTranscript(mode: 0, epoch: 2, baseCount: 0, messages: [user(9, "fresh")])
+
+        #expect(state.transcriptEpoch == 2)
+        #expect(state.messages.map(\.id) == [9])
+    }
+
+    @Test("append is dropped on epoch mismatch")
+    @MainActor func appendEpochMismatchDropped() {
+        let state = AgentChatState()
+        state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: [user(1, "a"), assistant(2, "b")])
+        state.applyTranscript(mode: 1, epoch: 2, baseCount: 2, messages: [assistant(3, "c")])
+
+        // Stale-epoch append ignored; the resident transcript is untouched.
+        #expect(state.messages.map(\.id) == [1, 2])
+        #expect(state.transcriptEpoch == 1)
+    }
+
+    @Test("append with a base beyond the resident count is dropped")
+    @MainActor func appendBaseOverrunDropped() {
+        let state = AgentChatState()
+        state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: [user(1, "a")])
+        state.applyTranscript(mode: 1, epoch: 1, baseCount: 5, messages: [assistant(2, "c")])
+
+        #expect(state.messages.map(\.id) == [1])
+    }
+
+    @Test("append before any full_replace is dropped")
+    @MainActor func appendBeforeSeedDropped() {
+        let state = AgentChatState()
+        state.applyTranscript(mode: 1, epoch: 1, baseCount: 0, messages: [user(1, "a")])
+
+        #expect(state.messages.isEmpty)
+    }
+
+    @Test("append with trim_front evicts from the front before the upsert")
+    @MainActor func appendTrimFrontEviction() {
+        let state = AgentChatState()
+        state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: [user(1, "a"), assistant(2, "b"), assistant(3, "c")])
+        // Evict the oldest message, keep the rest, no new/patched entries.
+        state.applyTranscript(mode: 1, epoch: 1, trimFront: 1, baseCount: 2, messages: [])
+
+        #expect(state.messages.map(\.id) == [2, 3])
+    }
+
+    @Test("append combines front eviction with an in-place tail patch")
+    @MainActor func appendTrimFrontWithPatch() {
+        let state = AgentChatState()
+        state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: [user(1, "a"), assistant(2, "b"), assistant(3, "streaming")])
+        // Evict the oldest, keep [2], patch the streaming tail 3 in place.
+        state.applyTranscript(mode: 1, epoch: 1, trimFront: 1, baseCount: 1, messages: [assistant(3, "streaming done")])
+
+        #expect(state.messages.map(\.id) == [2, 3])
+        guard case .assistant(_, let patched) = state.messages[1] else { Issue.record("expected assistant"); return }
+        #expect(patched == "streaming done")
+    }
+
+    @Test("append combines front eviction with a new trailing message")
+    @MainActor func appendTrimFrontWithNew() {
+        let state = AgentChatState()
+        state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: [user(1, "a"), assistant(2, "b")])
+        state.applyTranscript(mode: 1, epoch: 1, trimFront: 1, baseCount: 1, messages: [assistant(3, "c")])
+
+        #expect(state.messages.map(\.id) == [2, 3])
+    }
+
+    @Test("append is dropped when the base exceeds the post-eviction remainder")
+    @MainActor func appendTrimFrontBaseOverrunDropped() {
+        let state = AgentChatState()
+        state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: [user(1, "a")])
+        // After evicting 1, the remainder is empty, so baseCount 1 is unsatisfiable.
+        state.applyTranscript(mode: 1, epoch: 1, trimFront: 1, baseCount: 1, messages: [assistant(2, "c")])
+
+        #expect(state.messages.map(\.id) == [1])
+    }
+
+    @Test("desync rule: applies on the resident_count == trim_front + base_count boundary")
+    @MainActor func desyncBoundaryApplies() {
+        let state = AgentChatState()
+        state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: [user(1, "a"), assistant(2, "b"), assistant(3, "c")])
+        // trim_front(1) + base_count(2) == 3 == resident: on the boundary, applies. The
+        // upserted id (4) is new, past the kept prefix, so it appends without a collision.
+        state.applyTranscript(mode: 1, epoch: 1, trimFront: 1, baseCount: 2, messages: [assistant(4, "d")])
+
+        #expect(state.messages.map(\.id) == [2, 3, 4])
+    }
+
+    @Test("desync rule: dropped one past the boundary (resident_count < trim_front + base_count)")
+    @MainActor func desyncOnePastBoundaryDropped() {
+        let state = AgentChatState()
+        state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: [user(1, "a"), assistant(2, "b"), assistant(3, "c")])
+        // trim_front(2) + base_count(2) == 4 > resident(3): dropped, store untouched.
+        state.applyTranscript(mode: 1, epoch: 1, trimFront: 2, baseCount: 2, messages: [assistant(4, "d")])
+
+        #expect(state.messages.map(\.id) == [1, 2, 3])
+    }
+
+    @Test("truncated flag is carried onto the state")
+    @MainActor func truncatedFlag() {
+        let state = AgentChatState()
+        state.applyTranscript(mode: 0, epoch: 1, truncated: true, baseCount: 0, messages: [user(1, "a")])
+        #expect(state.transcriptTruncated == true)
+
+        // A later non-truncated frame clears the hint.
+        state.applyTranscript(mode: 1, epoch: 1, truncated: false, trimFront: 0, baseCount: 1, messages: [assistant(2, "b")])
+        #expect(state.transcriptTruncated == false)
+    }
+}
+
 // MARK: - ToolManagerState
 
 @Suite("ToolManagerState Lifecycle")

@@ -111,6 +111,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x34       | system_will_sleep       |
   | 0x35       | system_did_wake         |
   | 0x5A       | system_will_unmount     |
+  | 0x5C       | chat_scrolled_away_from_bottom |
+  | 0x5D       | chat_returned_to_bottom |
 
   """
 
@@ -246,6 +248,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_extension_panel_action Opcodes.gui_action_extension_panel_action()
   @gui_action_extension_action Opcodes.gui_action_extension_action()
   @gui_action_float_popup_dismiss Opcodes.gui_action_float_popup_dismiss()
+  @gui_action_chat_scrolled_away_from_bottom Opcodes.gui_action_chat_scrolled_away_from_bottom()
+  @gui_action_chat_returned_to_bottom Opcodes.gui_action_chat_returned_to_bottom()
   @gui_action_search_query Opcodes.gui_action_search_query()
   @gui_action_search_next Opcodes.gui_action_search_next()
   @gui_action_search_prev Opcodes.gui_action_search_prev()
@@ -408,6 +412,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:extension_action, extension_id :: String.t(), action :: String.t(),
              payload :: binary()}
           | :float_popup_dismiss
+          | :chat_scrolled_away_from_bottom
+          | :chat_returned_to_bottom
 
   @typedoc "Semantic sidebar metadata sent to native GUI frontends."
   @type sidebar_metadata :: %{
@@ -2603,6 +2609,12 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     do: decode_extension_action(payload)
 
   def decode_gui_action(@gui_action_float_popup_dismiss, <<>>), do: {:ok, :float_popup_dismiss}
+
+  def decode_gui_action(@gui_action_chat_scrolled_away_from_bottom, <<>>),
+    do: {:ok, :chat_scrolled_away_from_bottom}
+
+  def decode_gui_action(@gui_action_chat_returned_to_bottom, <<>>),
+    do: {:ok, :chat_returned_to_bottom}
 
   def decode_gui_action(_, _), do: :error
 

@@ -1126,6 +1126,18 @@ value = 0x5A
 name = "empty_state_activate"
 value = 0x5B
 
+# Agent-chat pin intents (#2654 slice 2). A frontend that owns its transcript
+# scroll locally reports these when the reader crosses the bottom threshold:
+# scrolled_away pauses BEAM-side auto-follow, returned_to_bottom re-pins. No
+# payload; the BEAM maps them onto the agent UIState scroll pin flag.
+[[gui_actions]]
+name = "chat_scrolled_away_from_bottom"
+value = 0x5C
+
+[[gui_actions]]
+name = "chat_returned_to_bottom"
+value = 0x5D
+
 # ── Enum vocabularies ─────────────────────────────────────────────────────
 #
 # An [[enums]] entry names a closed set of wire byte values with a stable

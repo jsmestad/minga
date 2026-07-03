@@ -1015,6 +1015,8 @@ final class SpyEncoder: InputEncoder, Sendable {
         case gitPullAndRetry
         case foldToggleAtLine(windowId: UInt16, bufferLine: UInt32)
         case observatoryInspect(pid: String)
+        case chatScrolledAwayFromBottom
+        case chatReturnedToBottom
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
@@ -1133,6 +1135,8 @@ final class SpyEncoder: InputEncoder, Sendable {
     func sendObservatoryInspect(pid: String) {
         state.withLock { $0.guiActions.append(.observatoryInspect(pid: pid)) }
     }
+    func sendChatScrolledAwayFromBottom() { state.withLock { $0.guiActions.append(.chatScrolledAwayFromBottom) } }
+    func sendChatReturnedToBottom() { state.withLock { $0.guiActions.append(.chatReturnedToBottom) } }
 }
 
 @Suite("EditorNSView Resize")

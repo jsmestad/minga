@@ -100,6 +100,19 @@ defmodule Minga.Editing.Scroll do
     %{scroll | pinned: true}
   end
 
+  @doc """
+  Sets the pin flag without moving the offset.
+
+  Used by frontends that own their transcript scroll locally (#2654): they
+  report crossing the bottom threshold so the BEAM tracks the pin state as the
+  authority, without disturbing the concrete offset a round-trip frontend relies
+  on.
+  """
+  @spec set_pinned(t(), boolean()) :: t()
+  def set_pinned(%__MODULE__{} = scroll, pinned) when is_boolean(pinned) do
+    %{scroll | pinned: pinned}
+  end
+
   @doc "Scrolls to the top. Unpins from bottom."
   @spec scroll_to_top(t()) :: t()
   def scroll_to_top(%__MODULE__{} = scroll) do

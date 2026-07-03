@@ -264,7 +264,9 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       extension_action: 0x58,
       float_popup_dismiss: 0x59,
       system_will_unmount: 0x5A,
-      empty_state_activate: 0x5B
+      empty_state_activate: 0x5B,
+      chat_scrolled_away_from_bottom: 0x5C,
+      chat_returned_to_bottom: 0x5D
     )
   end
 

@@ -391,6 +391,21 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
     end
   end
 
+  describe "decode_gui_action for agent chat pin intents (#2654)" do
+    test "decodes the two no-payload pin intents" do
+      assert {:ok, :chat_scrolled_away_from_bottom} ==
+               ProtocolGUI.decode_gui_action(0x5C, <<>>)
+
+      assert {:ok, :chat_returned_to_bottom} ==
+               ProtocolGUI.decode_gui_action(0x5D, <<>>)
+    end
+
+    test "rejects unexpected payload bytes" do
+      assert :error == ProtocolGUI.decode_gui_action(0x5C, <<1>>)
+      assert :error == ProtocolGUI.decode_gui_action(0x5D, <<1>>)
+    end
+  end
+
   describe "decode_gui_action for power and thermal state" do
     test "decodes low power and thermal tiers" do
       assert {:ok, {:power_thermal_state, false, :nominal}} ==

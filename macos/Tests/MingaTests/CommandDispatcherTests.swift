@@ -654,9 +654,11 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.pickerState.markedCount == 0)
     }
 
-    @Test("guiAgentChat visible updates agentChatState")
+    @Test("guiAgentChat updates chrome but ignores its 0x78 messages section")
     @MainActor func guiAgentChatVisible() {
         let (dispatcher, gui) = makeDispatcher()
+        // The 0x78 messages section is intentionally ignored (#2654 slice 2): the
+        // resident transcript is sourced from the 0x86 stream, not from here.
         let messages: [Wire.ChatMessage] = [Wire.ChatMessage(beamId: 1, content: .user(text: "hello"))]
         dispatcher.applyForTesting(.guiAgentChat(visible: true, status: 1, model: "claude",
                                            thinkingLevel: "medium", prompt: "Fix this", promptLineCount: 1,
@@ -668,7 +670,26 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.agentChatState.visible == true)
         #expect(gui.agentChatState.model == "claude")
         #expect(gui.agentChatState.thinkingLevel == "medium")
-        #expect(gui.agentChatState.messages.count == 1)
+        #expect(gui.agentChatState.messages.isEmpty)
+    }
+
+    @Test("guiAgentTranscript populates agentChatState messages")
+    @MainActor func guiAgentTranscriptPopulatesMessages() {
+        let (dispatcher, gui) = makeDispatcher()
+        // Chrome frame first (visible), then the resident transcript stream.
+        dispatcher.applyForTesting(.guiAgentChat(visible: true, status: 1, model: "claude",
+                                           thinkingLevel: "medium", prompt: "", promptLineCount: 1,
+                                           promptCursorLine: 0, promptCursorCol: 0,
+                                           promptVimMode: 1, promptVisibleRows: 1,
+                                           promptCompletion: nil, pendingToolName: nil,
+                                           pendingToolSummary: "", helpVisible: false, helpGroups: [], messages: []))
+        dispatcher.applyForTesting(.guiAgentTranscript(mode: 0, epoch: 3, truncated: false, trimFront: 0, baseCount: 0, messages: [
+            Wire.ChatMessage(beamId: 1, content: .user(text: "hello")),
+            Wire.ChatMessage(beamId: 2, content: .assistant(text: "hi"))
+        ]))
+
+        #expect(gui.agentChatState.messages.map(\.id) == [1, 2])
+        #expect(gui.agentChatState.transcriptEpoch == 3)
     }
 
     @Test("guiAgentChat hidden clears agentChatState")

@@ -421,6 +421,19 @@ defmodule MingaEditor.Agent.UIState do
     %{state | panel: %{panel | scroll: Minga.Editing.pin_to_bottom(panel.scroll)}}
   end
 
+  @doc """
+  Sets the chat pin flag without moving the scroll offset.
+
+  Drives the BEAM-authoritative pin state from a frontend that owns its
+  transcript scroll locally (#2654 pin intents). `pinned: true` re-follows the
+  bottom, `pinned: false` pauses auto-follow, both without disturbing the
+  concrete offset a round-trip frontend still relies on.
+  """
+  @spec set_pinned(t(), boolean()) :: t()
+  def set_pinned(%__MODULE__{panel: panel} = state, pinned) when is_boolean(pinned) do
+    %{state | panel: %{panel | scroll: Minga.Editing.set_pinned(panel.scroll, pinned)}}
+  end
+
   @doc "Scrolls to top. Delegates to `Minga.Editing.scroll_to_top/1`."
   @spec scroll_to_top(t()) :: t()
   def scroll_to_top(%__MODULE__{panel: panel} = state) do

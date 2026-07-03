@@ -267,6 +267,9 @@ defmodule Minga.Editing do
   @doc "Pin scroll to the bottom of content."
   defdelegate pin_to_bottom(scroll), to: Minga.Editing.Scroll
 
+  @doc "Set the scroll pin flag without moving the offset."
+  defdelegate set_pinned(scroll, pinned), to: Minga.Editing.Scroll
+
   @doc "Scroll to the top of content."
   defdelegate scroll_to_top(scroll), to: Minga.Editing.Scroll
 

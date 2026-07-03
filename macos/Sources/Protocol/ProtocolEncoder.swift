@@ -883,6 +883,26 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
+    /// Send a gui_action: chat_scrolled_away_from_bottom. Layout: opcode(1) + action_type(1).
+    /// Reports that the reader scrolled away from the transcript bottom (#2654),
+    /// pausing BEAM-side auto-follow.
+    func sendChatScrolledAwayFromBottom() {
+        var buf = Data(count: 2)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_CHAT_SCROLLED_AWAY_FROM_BOTTOM
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: chat_returned_to_bottom. Layout: opcode(1) + action_type(1).
+    /// Reports that the reader returned to the transcript bottom (#2654),
+    /// re-pinning BEAM-side auto-follow.
+    func sendChatReturnedToBottom() {
+        var buf = Data(count: 2)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_CHAT_RETURNED_TO_BOTTOM
+        writeFrame(buf)
+    }
+
     /// Send a gui_action: change_summary_click. Layout: opcode(1) + action_type(1) + index(4).
     func sendChangeSummaryClick(index: UInt32) {
         var buf = Data(count: 6)

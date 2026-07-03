@@ -77,7 +77,7 @@ public struct AgentChatView: View {
                         let atBottom = geometry.contentOffset.y + geometry.visibleRect.height >= geometry.contentSize.height - 50
                         return atBottom
                     } action: { _, isAtBottom in
-                        userHasScrolledUp = !isAtBottom
+                        setScrolledUp(!isAtBottom)
                     }
                     .onChange(of: state.messages.count) { _, _ in
                         if shouldAutoScroll {
@@ -95,7 +95,7 @@ public struct AgentChatView: View {
                         VStack {
                             Spacer()
                             Button {
-                                userHasScrolledUp = false
+                                setScrolledUp(false)
                                 scrollToBottom(proxy: proxy)
                             } label: {
                                 followOutputPillLabel
@@ -530,6 +530,20 @@ public struct AgentChatView: View {
             Capsule()
                 .strokeBorder(theme.agentCodeBorder.opacity(0.3), lineWidth: 1)
         )
+    }
+
+    /// Updates the local scrolled-up flag and, only on a transition, reports the
+    /// pin intent to the BEAM so it owns the authoritative pin state (#2654).
+    /// The frontend keeps presenting its local scroll same-frame; the report just
+    /// pauses or resumes BEAM-side auto-follow of streaming output.
+    private func setScrolledUp(_ scrolledUp: Bool) {
+        guard scrolledUp != userHasScrolledUp else { return }
+        userHasScrolledUp = scrolledUp
+        if scrolledUp {
+            encoder?.sendChatScrolledAwayFromBottom()
+        } else {
+            encoder?.sendChatReturnedToBottom()
+        }
     }
 
     /// Scrolls to the last message with smooth animation.

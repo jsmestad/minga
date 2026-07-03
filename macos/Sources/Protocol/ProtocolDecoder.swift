@@ -58,6 +58,14 @@ enum RenderCommand: Sendable {
     case guiPicker(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, items: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String, loadStatus: Wire.PickerLoadStatus)
     case guiPickerPreview(visible: Bool, lines: [Wire.PickerPreviewLine])
     case guiAgentChat(visible: Bool, status: UInt8, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptVimMode: UInt8, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, pendingToolName: String?, pendingToolSummary: String, helpVisible: Bool, helpGroups: [Wire.HelpGroup], messages: [Wire.ChatMessage])
+    /// Resident agent-chat transcript stream (0x86, #2654). `mode` is 0=full_replace, 1=append.
+    /// `truncated` marks older messages sitting outside the resident byte-cap window. On append,
+    /// `trimFront` messages are first evicted from the store front, then over the remainder
+    /// `baseCount` unchanged-leading messages are kept and the `count` entries are upserted;
+    /// `baseCount` is the content-hash prefix of the remainder, NOT the client's resident count.
+    /// full_replace carries `trimFront`/`baseCount` as 0. Each message carries its stable id in
+    /// `beamId`; bodies use the shared 0x78 codec.
+    case guiAgentTranscript(mode: UInt8, epoch: UInt32, truncated: Bool, trimFront: UInt32, baseCount: UInt32, messages: [Wire.ChatMessage])
     case guiGutterSeparator(col: UInt16, r: UInt8, g: UInt8, b: UInt8)
     case guiCursorline(row: UInt16, r: UInt8, g: UInt8, b: UInt8)
     case guiGutter(data: Wire.WindowGutter)
@@ -1304,6 +1312,66 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         }
 
         return (.guiAgentChat(visible: chatVisible, status: chatStatus, model: chatModel, thinkingLevel: chatThinkingLevel, prompt: chatPrompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptVimMode: promptVimMode, promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary, helpVisible: helpVisible, helpGroups: helpGroups, messages: messages), chatPos - offset)
+
+    case OP_GUI_AGENT_TRANSCRIPT:
+        // len32 framing: opcode(1) + payload_len(4) + payload (GUI_PROTOCOL.md 0x86).
+        //   header: version(1)=1 + mode(1) + epoch(4) + truncated(1)
+        //   full_replace (mode 0): count(4)
+        //   append (mode 1): trim_front(4) + base_count(4) + count(4)
+        //   both: count * [ id(4), body_len(4), body ]. Body is the shared 0x78 codec.
+        guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
+        let transcriptPayloadLen = Int(readU32(data, rest))
+        let transcriptPayloadStart = rest + 4
+        let transcriptEnd = transcriptPayloadStart + transcriptPayloadLen
+        guard data.count >= transcriptEnd else { throw ProtocolDecodeError.malformed }
+        // Minimum: 7-byte header + full_replace count(4).
+        guard transcriptPayloadLen >= 11 else { throw ProtocolDecodeError.malformed }
+
+        let transcriptVersion = data[transcriptPayloadStart]
+        guard transcriptVersion == 1 else { throw ProtocolDecodeError.malformed }
+        let transcriptMode = data[transcriptPayloadStart + 1]
+        let transcriptEpoch = readU32(data, transcriptPayloadStart + 2)
+        let transcriptTruncated = data[transcriptPayloadStart + 6] != 0
+
+        let transcriptTrimFront: UInt32
+        let transcriptBaseCount: UInt32
+        let transcriptCount: Int
+        var transcriptPos: Int
+        if transcriptMode == 1 {
+            // append: trim_front(4) + base_count(4) + count(4) after the 7-byte header.
+            guard transcriptPayloadLen >= 19 else { throw ProtocolDecodeError.malformed }
+            transcriptTrimFront = readU32(data, transcriptPayloadStart + 7)
+            transcriptBaseCount = readU32(data, transcriptPayloadStart + 11)
+            transcriptCount = Int(readU32(data, transcriptPayloadStart + 15))
+            transcriptPos = transcriptPayloadStart + 19
+        } else {
+            // full_replace: count(4) after the 7-byte header.
+            transcriptTrimFront = 0
+            transcriptBaseCount = 0
+            transcriptCount = Int(readU32(data, transcriptPayloadStart + 7))
+            transcriptPos = transcriptPayloadStart + 11
+        }
+
+        var transcriptMessages: [Wire.ChatMessage] = []
+        transcriptMessages.reserveCapacity(transcriptCount)
+        for _ in 0..<transcriptCount {
+            guard transcriptPos + 8 <= transcriptEnd else { throw ProtocolDecodeError.malformed }
+            let entryId = readU32(data, transcriptPos)
+            let bodyLen = Int(readU32(data, transcriptPos + 4))
+            let bodyStart = transcriptPos + 8
+            let bodyEnd = bodyStart + bodyLen
+            guard bodyEnd <= transcriptEnd else { throw ProtocolDecodeError.malformed }
+
+            let candidates = try decodeChatMessageBodyCandidates(data: data, beamId: entryId, bodyStart: bodyStart, end: bodyEnd)
+            guard let candidate = candidates.first(where: { $0.nextOffset == bodyEnd }) else {
+                throw ProtocolDecodeError.malformed
+            }
+            transcriptMessages.append(candidate.message)
+            transcriptPos = bodyEnd
+        }
+
+        guard transcriptPos == transcriptEnd else { throw ProtocolDecodeError.malformed }
+        return (.guiAgentTranscript(mode: transcriptMode, epoch: transcriptEpoch, truncated: transcriptTruncated, trimFront: transcriptTrimFront, baseCount: transcriptBaseCount, messages: transcriptMessages), 1 + 4 + transcriptPayloadLen)
 
     case OP_GUI_GUTTER_SEP:
         // col:2, r:1, g:1, b:1 = 5 bytes after opcode
@@ -3288,11 +3356,23 @@ private func readRequiredString16(data: Data, pos: inout Int, end: Int) throws -
 }
 
 private func decodeChatMessageCandidates(data: Data, start: Int, end: Int) throws -> [DecodedChatMessageCandidate] {
-    guard start + 5 <= end else { throw ProtocolDecodeError.malformed }
+    guard start + 4 <= end else { throw ProtocolDecodeError.malformed }
 
     let beamId = readU32(data, start)
-    let msgType = data[start + 4]
-    let pos = start + 4
+    return try decodeChatMessageBodyCandidates(data: data, beamId: beamId, bodyStart: start + 4, end: end)
+}
+
+/// Decodes a single chat-message body (no leading id) with an externally supplied
+/// `beamId`. The 0x78 `gui_agent_chat` messages section frames each message as
+/// `<<id::32, body>>`, so `decodeChatMessageCandidates` reads the id then calls
+/// this. The 0x86 `gui_agent_transcript` stream frames each entry as
+/// `<<id::32, body_len::32, body>>`, carrying the id and length separately, so it
+/// calls this directly with the pre-read id. Both share the exact same body codec.
+private func decodeChatMessageBodyCandidates(data: Data, beamId: UInt32, bodyStart: Int, end: Int) throws -> [DecodedChatMessageCandidate] {
+    guard bodyStart + 1 <= end else { throw ProtocolDecodeError.malformed }
+
+    let msgType = data[bodyStart]
+    let pos = bodyStart
 
     switch msgType {
     case 0x01: // user
