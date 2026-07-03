@@ -26,7 +26,12 @@ defmodule Mix.Tasks.Conformance.Gen do
 
   use Mix.Task
 
+  alias Minga.Config.Options
+  alias Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder
+  alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.WindowEncoder
+  alias Minga.Protocol.Opcodes
+  alias Minga.RenderModel.UI.AgentChat
   alias Minga.RenderModel.Window, as: RW
   alias Minga.RenderModel.Window.GutterMetrics
   alias Minga.RenderModel.Window.PaneGeometry
@@ -40,6 +45,7 @@ defmodule Mix.Tasks.Conformance.Gen do
   @op_overlay_delta 0xA0
   @op_viewport_delta 0xA1
   @op_rows_delta 0xA2
+  @op_gui_agent_transcript Opcodes.gui_agent_transcript()
 
   @typep sp :: ScrollPresentation.t()
   @typep transcript :: %{optional(String.t()) => term()}
@@ -49,16 +55,36 @@ defmodule Mix.Tasks.Conformance.Gen do
   def run(_args) do
     File.mkdir_p!(Path.join(@corpus_dir, "store"))
     File.mkdir_p!(Path.join(@corpus_dir, "input"))
+    File.mkdir_p!(Path.join(@corpus_dir, "chat"))
 
-    transcripts = build_all()
-    Enum.each(transcripts, &write_transcript/1)
-    write_index(transcripts)
+    # The chat family drives AgentTranscriptEncoder, which reads the resident
+    # byte-cap option from Config. Config is ETS-backed, so a server must exist
+    # or the read raises. Start one for the run (and stop it if we started it).
+    started? = ensure_options_server()
 
-    Mix.shell().info(
-      "conformance.gen: wrote #{length(transcripts)} transcripts to #{@corpus_dir}"
-    )
+    try do
+      transcripts = build_all()
+      Enum.each(transcripts, &write_transcript/1)
+      write_index(transcripts)
+
+      Mix.shell().info(
+        "conformance.gen: wrote #{length(transcripts)} transcripts to #{@corpus_dir}"
+      )
+    after
+      if started?, do: GenServer.stop(Options.default_server())
+    end
 
     :ok
+  end
+
+  # Starts the default Config.Options server if one is not already running.
+  # Returns true when this task started it (so the caller stops it).
+  @spec ensure_options_server() :: boolean()
+  defp ensure_options_server do
+    case Options.start_link() do
+      {:ok, _pid} -> true
+      {:error, {:already_started, _pid}} -> false
+    end
   end
 
   @spec build_all() :: [transcript()]
@@ -74,7 +100,13 @@ defmodule Mix.Tasks.Conformance.Gen do
       hml_after_scroll_report(),
       scroll_seq_strictly_newer_discard(),
       same_top_jump_discards(),
-      wheel_momentum_during_ctrl_d()
+      wheel_momentum_during_ctrl_d(),
+      append_while_scrolled_up(),
+      pin_to_bottom_resume(),
+      session_switch_full_replace(),
+      trim_front_eviction_midstream(),
+      epoch_flip_midstream(),
+      streaming_tail_patch()
     ]
   end
 
@@ -531,6 +563,307 @@ defmodule Mix.Tasks.Conformance.Gen do
         )
       ]
     )
+  end
+
+  # ── Resident agent-transcript transcripts (0x86, #2654 slice 5) ───────────
+  #
+  # A NEW transcript family. The frames are produced by the real
+  # AgentTranscriptEncoder (so an encoder change regenerates the corpus and drift
+  # is caught) and folded through the frontends' real resident-store apply
+  # functions (Swift AgentChatState.applyTranscript, Go residentTranscript.apply).
+  #
+  # Two things are asserted per transcript:
+  #
+  #   * `transcript_frame.expect.transcript` — the resident store's {epoch, count,
+  #     truncated, message_ids} after applying the frame. This is the SHARED
+  #     parity core: both frontends decode the same encoder bytes and must produce
+  #     the identical id list. The BEAM oracle re-decodes the same bytes as a
+  #     self-check (test/conformance/agent_transcript_corpus_test.exs).
+  #
+  #   * Position preservation, per-frontend because the offset models differ. Swift
+  #     is SwiftUI-native (ForEach id stability preserves the scroll), so its runner
+  #     asserts an anchor id stays at a store index (`transcript_assert.swift`). Go
+  #     owns a top-anchored scroll offset in the store, so its runner drives the
+  #     pure scrollBy/resolveScroll functions and asserts the offset + pin state
+  #     (`transcript_scroll.go`, `transcript_assert.go`). Both frontends run every
+  #     chat transcript; there are no go_skip entries.
+
+  @spec append_while_scrolled_up() :: transcript()
+  defp append_while_scrolled_up do
+    m1 = for i <- 1..8, do: chat_msg(i, "message #{i}")
+    {f1, caches1} = AgentTranscriptEncoder.encode(chat_model(1, m1), Caches.new())
+
+    m2 = m1 ++ [chat_msg(9, "message 9")]
+    {f2, _caches2} = AgentTranscriptEncoder.encode(chat_model(1, m2), caches1)
+
+    chat_transcript(
+      "append_while_scrolled_up",
+      "A resident append at the bottom while the reader is scrolled up preserves the reading position: the id at the reader's anchor stays at the same store index (Swift SwiftUI id stability), and the Go top-anchored resolveScroll offset is unchanged by the bottom growth.",
+      [
+        transcript_frame(
+          "full_replace, 8 messages",
+          f1,
+          chat_expect(1, false, Enum.to_list(1..8))
+        ),
+        transcript_scroll("reader scrolls up 4 rows, leaving the bottom", -4, %{
+          "max_top" => 6,
+          "expect_top_offset" => 2,
+          "expect_pinned" => false,
+          "expect_pin_transition" => "scrolled_away"
+        }),
+        transcript_frame(
+          "append message 9 at the bottom",
+          f2,
+          chat_expect(1, false, Enum.to_list(1..9))
+        ),
+        transcript_assert(
+          "reading position preserved across the append",
+          %{"anchor_index" => 2, "anchor_id" => 3},
+          %{"max_top" => 7, "expect_top_offset" => 2, "expect_pinned" => false}
+        )
+      ]
+    )
+  end
+
+  @spec pin_to_bottom_resume() :: transcript()
+  defp pin_to_bottom_resume do
+    m1 = for i <- 1..6, do: chat_msg(i, "msg #{i}")
+    {f1, caches1} = AgentTranscriptEncoder.encode(chat_model(1, m1), Caches.new())
+
+    m2 = m1 ++ [chat_msg(7, "msg 7")]
+    {f2, _caches2} = AgentTranscriptEncoder.encode(chat_model(1, m2), caches1)
+
+    chat_transcript(
+      "pin_to_bottom_resume",
+      "A reader scrolls up (unpins), then scrolls back to the bottom (re-pins, emitting the returned-to-bottom edge). A following append is then followed: Go stays pinned; the Swift store's newest message is at the tail the bottom-anchored view follows.",
+      [
+        transcript_frame(
+          "full_replace, 6 messages",
+          f1,
+          chat_expect(1, false, Enum.to_list(1..6))
+        ),
+        transcript_scroll("reader scrolls up 3 rows", -3, %{
+          "max_top" => 4,
+          "expect_top_offset" => 1,
+          "expect_pinned" => false,
+          "expect_pin_transition" => "scrolled_away"
+        }),
+        transcript_scroll("reader scrolls back to the bottom", 3, %{
+          "max_top" => 4,
+          "expect_top_offset" => 4,
+          "expect_pinned" => true,
+          "expect_pin_transition" => "returned"
+        }),
+        transcript_frame(
+          "append message 7 while pinned",
+          f2,
+          chat_expect(1, false, Enum.to_list(1..7))
+        ),
+        transcript_assert(
+          "pinned view follows the new bottom message",
+          %{"anchor_index" => 6, "anchor_id" => 7},
+          %{"max_top" => 5, "expect_pinned" => true}
+        )
+      ]
+    )
+  end
+
+  @spec session_switch_full_replace() :: transcript()
+  defp session_switch_full_replace do
+    m1 = for i <- 1..5, do: chat_msg(i, "old #{i}")
+    {f1, caches1} = AgentTranscriptEncoder.encode(chat_model(1, m1), Caches.new())
+
+    # A new session: a different epoch and a disjoint id space. The epoch flip
+    # forces a full_replace regardless of message content.
+    m2 = for i <- 0..3, do: chat_msg(100 + i, "new #{i}")
+    {f2, _caches2} = AgentTranscriptEncoder.encode(chat_model(2, m2), caches1)
+
+    chat_transcript(
+      "session_switch_full_replace",
+      "A session switch arrives as a full_replace at a new epoch. It resets the resident store to the new session's messages and re-pins to the bottom, discarding any prior local scroll offset.",
+      [
+        transcript_frame(
+          "full_replace, session 1 (epoch 1)",
+          f1,
+          chat_expect(1, false, Enum.to_list(1..5))
+        ),
+        transcript_scroll("reader scrolls up 2 rows in session 1", -2, %{
+          "max_top" => 3,
+          "expect_top_offset" => 1,
+          "expect_pinned" => false,
+          "expect_pin_transition" => "scrolled_away"
+        }),
+        transcript_frame(
+          "session switch: full_replace at epoch 2",
+          f2,
+          chat_expect(2, false, [100, 101, 102, 103])
+        ),
+        transcript_assert(
+          "session switch re-pins to the bottom and resets the offset",
+          %{"anchor_index" => 0, "anchor_id" => 100},
+          %{"max_top" => 2, "expect_top_offset" => 0, "expect_pinned" => true}
+        )
+      ]
+    )
+  end
+
+  @spec trim_front_eviction_midstream() :: transcript()
+  defp trim_front_eviction_midstream do
+    with_low_cap(1_000, fn ->
+      # Each entry is 8 (id+len) + 200 (body) = 208 wire bytes; four fit under the
+      # 1000-byte cap, a fifth does not. Growing to six messages evicts the two
+      # oldest from the resident front (trim_front) and marks the stream truncated.
+      m1 = for i <- 1..4, do: sized_chat_msg(i, 200)
+      {f1, caches1} = AgentTranscriptEncoder.encode(chat_model(1, m1), Caches.new())
+
+      m2 = for i <- 1..6, do: sized_chat_msg(i, 200)
+      {f2, _caches2} = AgentTranscriptEncoder.encode(chat_model(1, m2), caches1)
+
+      chat_transcript(
+        "trim_front_eviction_midstream",
+        "Streaming past the resident byte cap evicts the oldest messages from the store front (append trim_front) and flags the stream truncated, instead of degrading to a full_replace per frame. Both frontends drop the trimmed prefix and keep the most-recent contiguous suffix.",
+        [
+          transcript_frame(
+            "full_replace, 4 messages under the cap",
+            f1,
+            chat_expect(1, false, [1, 2, 3, 4])
+          ),
+          transcript_frame(
+            "append past the cap: front eviction (trim_front) + truncated",
+            f2,
+            chat_expect(1, true, [3, 4, 5, 6])
+          )
+        ]
+      )
+    end)
+  end
+
+  @spec epoch_flip_midstream() :: transcript()
+  defp epoch_flip_midstream do
+    m1 = [chat_msg(1, "a"), chat_msg(2, "b"), chat_msg(3, "c")]
+    {f1, caches1} = AgentTranscriptEncoder.encode(chat_model(5, m1), Caches.new())
+
+    m2 = m1 ++ [chat_msg(4, "d")]
+    {f2, caches2} = AgentTranscriptEncoder.encode(chat_model(5, m2), caches1)
+
+    # Same messages, new epoch: the epoch token flip alone forces a full_replace.
+    {f3, _caches3} = AgentTranscriptEncoder.encode(chat_model(6, m2), caches2)
+
+    chat_transcript(
+      "epoch_flip_midstream",
+      "An in-epoch append followed by an epoch flip. The append stays incremental; the epoch flip forces a full_replace even though the messages are unchanged, and both frontends adopt the new epoch.",
+      [
+        transcript_frame("full_replace at epoch 5", f1, chat_expect(5, false, [1, 2, 3])),
+        transcript_frame(
+          "append message 4 within epoch 5",
+          f2,
+          chat_expect(5, false, [1, 2, 3, 4])
+        ),
+        transcript_frame(
+          "epoch flip to 6 forces a full_replace",
+          f3,
+          chat_expect(6, false, [1, 2, 3, 4])
+        )
+      ]
+    )
+  end
+
+  @spec streaming_tail_patch() :: transcript()
+  defp streaming_tail_patch do
+    m1 = [chat_msg(1, "question"), {2, {:assistant, "par"}}]
+    {f1, caches1} = AgentTranscriptEncoder.encode(chat_model(1, m1), Caches.new())
+
+    # The streaming assistant message (id 2) grows in place: same id, new content.
+    m2 = [chat_msg(1, "question"), {2, {:assistant, "partial answer"}}]
+    {f2, _caches2} = AgentTranscriptEncoder.encode(chat_model(1, m2), caches1)
+
+    chat_transcript(
+      "streaming_tail_patch",
+      "The streaming last message is patched in place by id (same id, new content). The store count stays 2 with ids [1, 2]; a frontend that appended instead of upserting by id would show a duplicate, which the count assertion catches.",
+      [
+        transcript_frame(
+          "full_replace, user + streaming assistant",
+          f1,
+          chat_expect(1, false, [1, 2])
+        ),
+        transcript_frame(
+          "streaming tail patch of message 2 (same id, new content)",
+          f2,
+          chat_expect(1, false, [1, 2])
+        )
+      ]
+    )
+  end
+
+  # ── Chat builders + step shaping ──────────────────────────────────────────
+
+  @spec chat_model(non_neg_integer(), [AgentChat.message()]) :: AgentChat.t()
+  defp chat_model(epoch, messages) do
+    %AgentChat{visible?: true, resident_messages: messages, transcript_epoch: epoch}
+  end
+
+  @spec chat_msg(pos_integer(), String.t()) :: AgentChat.message()
+  defp chat_msg(id, text), do: {id, {:assistant, text}}
+
+  # A user message whose encoded body is exactly `body_bytes` (>= 5): the body is
+  # 0x01 + len:u32 + text, so the text length is body_bytes - 5. Used to hit the
+  # resident byte cap deterministically.
+  @spec sized_chat_msg(pos_integer(), pos_integer()) :: AgentChat.message()
+  defp sized_chat_msg(id, body_bytes) when body_bytes >= 5 do
+    {id, {:user, String.duplicate("x", body_bytes - 5)}}
+  end
+
+  @spec chat_expect(non_neg_integer(), boolean(), [pos_integer()]) :: map()
+  defp chat_expect(epoch, truncated?, ids) do
+    %{
+      "epoch" => epoch,
+      "count" => length(ids),
+      "truncated" => truncated?,
+      "message_ids" => ids
+    }
+  end
+
+  @spec transcript_frame(String.t(), binary(), map()) :: map()
+  defp transcript_frame(note, frame, expect_transcript) do
+    %{
+      "kind" => "transcript_frame",
+      "opcode" => @op_gui_agent_transcript,
+      "note" => note,
+      "payload_base64" => Base.encode64(frame),
+      "expect" => %{"transcript" => expect_transcript}
+    }
+  end
+
+  @spec transcript_scroll(String.t(), integer(), map()) :: map()
+  defp transcript_scroll(note, rows, go) do
+    %{"kind" => "transcript_scroll", "note" => note, "rows" => rows, "go" => go}
+  end
+
+  @spec transcript_assert(String.t(), map(), map()) :: map()
+  defp transcript_assert(note, swift, go) do
+    %{"kind" => "transcript_assert", "note" => note, "swift" => swift, "go" => go}
+  end
+
+  @spec chat_transcript(String.t(), String.t(), [map()]) :: transcript()
+  defp chat_transcript(name, description, steps) do
+    transcript(name, "chat", %{swift: true, go: true}, description, steps)
+  end
+
+  # Runs `fun` with a low resident byte cap so the trim_front eviction transcript
+  # is reachable without a multi-megabyte fixture. Overrides the option on the
+  # default Options server (started by run/0) and restores it afterward, so the
+  # encoder's Config.get sees the temporary cap.
+  @spec with_low_cap(pos_integer(), (-> transcript())) :: transcript()
+  defp with_low_cap(bytes, fun) do
+    server = Options.default_server()
+    previous = Options.get(server, :agent_transcript_resident_max_bytes)
+    Options.set(server, :agent_transcript_resident_max_bytes, bytes)
+
+    try do
+      fun.()
+    after
+      Options.set(server, :agent_transcript_resident_max_bytes, previous)
+    end
   end
 
   # ── Reconciliation rule (mirrors docs/GUI_PROTOCOL.md) ────────────────────
