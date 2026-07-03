@@ -70,7 +70,16 @@ public final class AgentChatState {
     public var model: String = ""
     public var thinkingLevel: String = "medium"
     public var prompt: String = ""
-    public var messages: [ChatMessageEntry] = []
+    // private(set): the resident array must only change together with its epoch
+    // bookkeeping (applyTranscript/update/hide/seed), never by direct assignment.
+    public private(set) var messages: [ChatMessageEntry] = []
+
+    /// Seeds the message list directly for previews and view tests. Production
+    /// mutation goes through `applyTranscript`; this bypasses the epoch
+    /// bookkeeping on purpose and must not be called on a live transcript.
+    public func seed(messages: [ChatMessageEntry]) {
+        self.messages = messages
+    }
 
     /// Transcript epoch of the resident stream currently held in `messages` (0x86).
     /// A `full_replace` carrying a new epoch swaps the array wholesale and adopts
@@ -192,7 +201,25 @@ public final class AgentChatState {
     /// (await the next full_replace) only when it cannot be applied safely: before
     /// any full_replace, an epoch mismatch, or the remainder being shorter than
     /// `baseCount` (a genuinely dropped frame).
-    public func applyTranscript(mode: UInt8, epoch: UInt32, truncated: Bool = false, trimFront: Int = 0, baseCount: Int, messages rawMessages: [Wire.ChatMessage]) {
+    /// Named outcome of one transcript frame, so drops are observable instead of a
+    /// silent void return. The dropped cases are defense-in-depth: they are unreachable
+    /// while the encoder's per-connection cache lifecycle holds (a fresh frontend
+    /// connection starts from an empty `AgentTranscriptSentState`, so every epoch's
+    /// first frame is a full_replace). If one ever fires, the transcript is frozen
+    /// until the next full_replace — which is exactly why it must be loud.
+    public enum TranscriptApplyOutcome: Equatable {
+        case appliedFullReplace
+        case appliedAppend
+        /// An append arrived before any full_replace seeded the store.
+        case droppedBeforeSeed
+        /// An append carried a different epoch than the store holds.
+        case droppedEpochMismatch
+        /// The store is shorter than `trim_front + base_count` (GUI_PROTOCOL.md 0x86).
+        case droppedDesynced
+    }
+
+    @discardableResult
+    public func applyTranscript(mode: UInt8, epoch: UInt32, truncated: Bool = false, trimFront: Int = 0, baseCount: Int, messages rawMessages: [Wire.ChatMessage]) -> TranscriptApplyOutcome {
         let mapped = rawMessages.map(Self.mapMessage)
 
         if mode == 0 {
@@ -201,19 +228,32 @@ public final class AgentChatState {
             self.hasTranscript = true
             self.transcriptTruncated = truncated
             self.promptVersion += 1
-            return
+            return .appliedFullReplace
         }
 
-        // Desync (drop the delta, await the next full_replace) exactly when the store
-        // is shorter than trim_front + base_count, per GUI_PROTOCOL.md 0x86.
-        guard hasTranscript, epoch == transcriptEpoch, trimFront >= 0, baseCount >= 0,
-              messages.count >= trimFront + baseCount else { return }
+        // Drop conditions (await the next full_replace), per GUI_PROTOCOL.md 0x86.
+        // Each is named and logged: a drop means the transcript stops updating until
+        // the next full_replace, and an invisible freeze is the worst failure mode
+        // this stream can have.
+        guard hasTranscript else {
+            PortLogger.warn("transcript append before seed dropped (epoch \(epoch))")
+            return .droppedBeforeSeed
+        }
+        guard epoch == transcriptEpoch else {
+            PortLogger.warn("transcript append epoch mismatch dropped (frame \(epoch), store \(transcriptEpoch))")
+            return .droppedEpochMismatch
+        }
+        guard trimFront >= 0, baseCount >= 0, messages.count >= trimFront + baseCount else {
+            PortLogger.warn("transcript append desynced dropped (resident \(messages.count), trimFront \(trimFront), baseCount \(baseCount), epoch \(epoch))")
+            return .droppedDesynced
+        }
 
         // Evict trim_front from the front, keep [0, base_count) of the remainder, upsert.
         let kept = messages[trimFront ..< (trimFront + baseCount)]
         self.messages = Array(kept) + mapped
         self.transcriptTruncated = truncated
         self.promptVersion += 1
+        return .appliedAppend
     }
 
     /// Maps a decoded wire message onto its displayable `ChatMessageEntry`.

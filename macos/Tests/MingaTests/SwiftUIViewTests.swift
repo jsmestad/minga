@@ -1038,7 +1038,7 @@ struct AgentChatViewTests {
         state.visible = true
         state.model = "claude-sonnet-4"
         state.status = 0
-        state.messages = messages
+        state.seed(messages: messages)
         return state
     }
 
@@ -1216,7 +1216,7 @@ struct AgentChatViewTests {
         let state = AgentChatState()
         state.visible = true
         state.model = "test-model"
-        state.messages = [.user(id: 0, text: "Hello world")]
+        state.seed(messages: [.user(id: 0, text: "Hello world")])
 
         let sut = AgentChatView(state: state, isInsertMode: false, encoder: nil)
             .environment(\.themeColors, ThemeColors())
@@ -1232,7 +1232,7 @@ struct AgentChatViewTests {
         let state = AgentChatState()
         state.visible = true
         state.model = "test-model"
-        state.messages = [.system(id: 0, text: "Session started", isError: false)]
+        state.seed(messages: [.system(id: 0, text: "Session started", isError: false)])
 
         let sut = AgentChatView(state: state, isInsertMode: false, encoder: nil)
             .environment(\.themeColors, ThemeColors())

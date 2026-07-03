@@ -2117,6 +2117,63 @@ struct GUIAgentChatDecoderTests {
         #expect(collapsed == true)
     }
 
+    @Test("0x78 and 0x86 decode the same message body identically")
+    func bodyByteIdentityAcrossOpcodes() throws {
+        // The shared body codec is a structural guarantee; this pins it from the
+        // decode side so a fork of decodeChatMessageBodyCandidates cannot drift
+        // the two transports apart silently. (The BEAM has the encoder-side pin.)
+        // tool_call is the body kind with the most fields and an optional preview,
+        // so it is the strongest identity probe.
+        var body = Data()
+        body.append(0x04) // tool_call
+        body.append(1); body.append(0); body.append(1) // status, isError, collapsed
+        appendU32(&body, 1234) // durationMs
+        appendString16(&body, "read_file")
+        appendString16(&body, "lib/minga.ex")
+        let result = "file contents here"
+        appendU32(&body, UInt32(result.utf8.count))
+        body.append(contentsOf: result.utf8)
+        body.append(2) // autoApprovedScope
+        body.append(1) // previewKind diff
+        appendU16(&body, 2)
+        appendString16(&body, "-old")
+        appendString16(&body, "+new")
+
+        var chatMsgs = Data()
+        appendU32(&chatMsgs, 5) // beam_id
+        chatMsgs.append(body)
+        let chatData = buildChatData(status: 1, model: "m", messages: buildMessagesPayload(count: 1, chatMsgs))
+        let (chatCmd, _) = try decodeCommand(data: chatData, offset: 0)
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let chatMessages) = chatCmd else {
+            Issue.record("Expected .guiAgentChat"); return
+        }
+
+        // Inline 0x86 full_replace frame: header + count(4) + one entry.
+        var trPayload = Data()
+        trPayload.append(1) // version
+        trPayload.append(0) // mode full_replace
+        appendU32(&trPayload, 1) // epoch
+        trPayload.append(0) // truncated
+        appendU32(&trPayload, 1) // count
+        appendU32(&trPayload, 5) // id
+        appendU32(&trPayload, UInt32(body.count))
+        trPayload.append(body)
+        var trData = Data()
+        trData.append(OP_GUI_AGENT_TRANSCRIPT)
+        appendU32(&trData, UInt32(trPayload.count))
+        trData.append(trPayload)
+
+        let (trCmd, _) = try decodeCommand(data: trData, offset: 0)
+        guard case .guiAgentTranscript(_, _, _, _, _, let trMessages) = trCmd else {
+            Issue.record("Expected .guiAgentTranscript"); return
+        }
+
+        guard chatMessages.count == 1, trMessages.count == 1 else {
+            Issue.record("Expected one message on each path"); return
+        }
+        #expect(String(describing: chatMessages[0]) == String(describing: trMessages[0]))
+    }
+
     @Test("Decode gui_agent_chat with tool_call message (sectioned)")
     func decodeToolCall() throws {
         var msgs = Data()
@@ -3277,4 +3334,81 @@ struct AgentTranscriptDecoderTests {
             try decodeCommand(data: frame(payload), offset: 0)
         }
     }
+
+    @Test("unknown mode throws malformed instead of a split-brain parse")
+    func unknownModeThrows() {
+        // Only modes 0/1 exist. An unknown mode must be rejected at decode: the
+        // decoder's layout branch is append-shaped (mode == 1) while the consumer's
+        // apply branch is full_replace-shaped (mode == 0), so a mode that passed
+        // through would be parsed with one layout and applied with the other.
+        var payload = Data()
+        payload.append(1) // version
+        payload.append(2) // mode = unknown
+        appendU32(&payload, 1) // epoch
+        payload.append(0) // truncated
+        appendU32(&payload, 0) // count
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: frame(payload), offset: 0)
+        }
+    }
+
+    @Test("a corrupt huge count throws malformed instead of a giant allocation")
+    func hugeCountThrows() {
+        var payload = Data()
+        payload.append(1) // version
+        payload.append(0) // mode full_replace
+        appendU32(&payload, 1) // epoch
+        payload.append(0) // truncated
+        appendU32(&payload, 0xFFFF_FFFF) // count far beyond the payload
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: frame(payload), offset: 0)
+        }
+    }
+
+    /// tool_call message body (sub-opcode 0x04) with an optional preview section.
+    /// This is the one body kind that yields MULTIPLE decode candidates (with and
+    /// without the preview), so it is what actually exercises the 0x86 path's
+    /// exact-consumption disambiguation.
+    private func toolCallBody(withPreview: Bool) -> Data {
+        var d = Data()
+        d.append(0x04) // tool_call
+        d.append(1) // status
+        d.append(0) // isError
+        d.append(1) // collapsed
+        appendU32(&d, 1234) // durationMs
+        appendString16(&d, "read_file")
+        appendString16(&d, "lib/minga.ex")
+        let result = "file contents here"
+        appendU32(&d, UInt32(result.utf8.count))
+        d.append(contentsOf: result.utf8)
+        d.append(2) // autoApprovedScope
+        if withPreview {
+            d.append(1) // previewKind diff
+            appendU16(&d, 2)
+            appendString16(&d, "-old")
+            appendString16(&d, "+new")
+        }
+        return d
+    }
+
+    @Test("tool_call bodies disambiguate via exact consumption", arguments: [true, false])
+    func toolCallExactConsumption(withPreview: Bool) throws {
+        let data = buildFullReplace(epoch: 3, entries: [
+            (id: 5, body: toolCallBody(withPreview: withPreview))
+        ])
+
+        let (cmd, _) = try decodeCommand(data: data, offset: 0)
+        guard case .guiAgentTranscript(_, _, _, _, _, let messages) = cmd else {
+            Issue.record("Expected .guiAgentTranscript"); return
+        }
+        guard messages.count == 1,
+              case .toolCall(let name, _, _, _, _, _, _, _, _, let previewLines) = messages[0].content else {
+            Issue.record("Expected one toolCall message"); return
+        }
+        #expect(name == "read_file")
+        #expect(previewLines.isEmpty == !withPreview)
+    }
+
 }

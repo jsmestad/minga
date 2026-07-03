@@ -1208,7 +1208,7 @@ opcode(1) + action_type(1) + payload...
 | 0x59 | float_popup_dismiss | (empty) | Dismiss the active float popup |
 | 0x5A | system_will_unmount | path_len(2) + path | A volume is about to unmount; BEAM protects buffers under the mount path |
 | 0x5C | chat_scrolled_away_from_bottom | (empty) | Reader left the transcript bottom; pauses BEAM-side auto-follow (pin flag only, no offset move) |
-| 0x5D | chat_returned_to_bottom | (empty) | Reader returned to the transcript bottom; re-pins auto-follow |
+| 0x5D | chat_returned_to_bottom | (empty) | Reader returned to the transcript bottom; re-pins auto-follow (pin flag only, no offset move) |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |
