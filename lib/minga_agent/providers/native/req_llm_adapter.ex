@@ -241,7 +241,13 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
   @spec maybe_add_prompt_cache(keyword(), String.t(), AgentConfig.t()) :: keyword()
   defp maybe_add_prompt_cache(opts, model, config) do
     if anthropic_model?(model) and config.prompt_cache do
-      Keyword.put(opts, :provider_options, anthropic_prompt_cache: true)
+      # anthropic_cache_messages adds a cache_control breakpoint on the last
+      # conversation message so the growing transcript is a rolling cache-read
+      # prefix rather than re-sent at full input price every turn.
+      Keyword.put(opts, :provider_options,
+        anthropic_prompt_cache: true,
+        anthropic_cache_messages: true
+      )
     else
       opts
     end

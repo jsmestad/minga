@@ -48,6 +48,7 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
     assert opts[:max_tokens] == 4096
     assert opts[:base_url] == "https://anthropic.example/v1"
     assert opts[:provider_options][:anthropic_prompt_cache] == true
+    assert opts[:provider_options][:anthropic_cache_messages] == true
     assert opts[:reasoning_effort] == :high
 
     openai_opts = ReqLLMAdapter.stream_opts("gpt-4o@openai", [], "high", 1000, config)
