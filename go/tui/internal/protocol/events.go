@@ -294,6 +294,18 @@ func appendString16(out []byte, value string) []byte {
 	return append(out, payload...)
 }
 
+// EncodeGUIFoldToggleAtLine encodes a fold_toggle_at_line action. Wire format:
+// <gui_action, 0x41, window_id:u16, buffer_line:u32>, matching the macOS encoder
+// (ProtocolEncoder.swift sendFoldToggleAtLine) and the BEAM decoder
+// (gui.ex decode_gui_action @gui_action_fold_toggle_at_line).
+func EncodeGUIFoldToggleAtLine(windowID uint16, bufferLine uint32) []byte {
+	return []byte{
+		generated.OPGuiAction, generated.GUIActionFoldToggleAtLine,
+		byte(windowID >> 8), byte(windowID),
+		byte(bufferLine >> 24), byte(bufferLine >> 16), byte(bufferLine >> 8), byte(bufferLine),
+	}
+}
+
 func EncodeScrollBatch(windowID uint16, deltaLines int16, direction byte) []byte {
 	return []byte{
 		generated.OPScrollBatch,

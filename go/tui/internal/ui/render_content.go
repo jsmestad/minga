@@ -206,6 +206,14 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 	} else if len(m.windowOrder) <= 1 {
 		height = max(height, m.bodyHeight())
 	}
+	// The BEAM's ContentRect.Height does not account for the Go TUI's header
+	// chrome (tabs, breadcrumbs), so it can exceed the actual visible body
+	// area. Cap height to bodyHeight so scroll bounds and rendering agree
+	// with the real viewport, preventing the last lines from being clipped
+	// behind the footer.
+	if body := m.bodyHeight(); height > body && body > 0 {
+		height = body
+	}
 	// Scrollbar: reserve the rightmost column when total content exceeds the
 	// viewport height so the thumb indicator can be drawn there.
 	sb := computeScrollbar(window, height)
@@ -278,7 +286,13 @@ func (m Model) presentationSourceStart(window protocol.WindowContent, height int
 		return 0
 	}
 	before, _ := presentationPayloadOverscanBounds(window, height)
-	maxStart := max(len(window.Rows)-height, 0)
+	// Scroll-past-end: the last document line can reach the top of the
+	// viewport, so maxStart is rows-1 (not rows-height). Rows past the
+	// document end render as tilde fills.
+	maxStart := max(len(window.Rows)-1, 0)
+	if !windowCoversDocument(window) {
+		maxStart = max(len(window.Rows)-height, 0)
+	}
 	start := min(before, maxStart)
 	if scroll, ok := m.localPresentation.scrolls[window.ID]; ok && scroll.keysMatch(window.Scroll) {
 		start += scroll.rowOffset
@@ -332,20 +346,15 @@ func windowCoversDocument(window protocol.WindowContent) bool {
 		len(window.Rows) >= int(window.Geometry.TotalLines)
 }
 
-// presentationDocumentRowBounds clamps the local offset to the resident document:
-// up to the document top (before rows) and down to the last full page
-// (document lines minus the visible page minus the leading rows). It mirrors the
-// overscan-bounds arithmetic but sources the extent from the authoritative
-// Geometry.TotalLines rather than the payload length; windowCoversDocument
-// guarantees the payload holds at least that many rows, so in a well-formed
-// resident frame the two are equal.
+// presentationDocumentRowBounds clamps the local offset to the resident document.
+// Scroll-past-end: the last line can reach the top of the viewport (VSCode
+// default), so the max forward offset is documentRows - 1 - before rather than
+// documentRows - visibleRows - before. Rows past the document end render as
+// tilde fills.
 func presentationDocumentRowBounds(window protocol.WindowContent, visibleRows int) (before int, after int) {
 	before = presentationPayloadOverscanBefore(window)
 	documentRows := int(window.Geometry.TotalLines)
-	if visibleRows > 0 {
-		return before, max(documentRows-visibleRows-before, 0)
-	}
-	return before, max(documentRows-before, 0)
+	return before, max(documentRows-1-before, 0)
 }
 
 func presentationPayloadOverscanBounds(window protocol.WindowContent, visibleRows int) (before int, after int) {

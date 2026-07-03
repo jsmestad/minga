@@ -120,7 +120,11 @@ func (m Model) applyPresentationScrollDelta(msg tea.MouseMsg, delta int) Model {
 	if !scroll.keysMatch(window.Scroll) {
 		scroll = presentationScroll{anchorTop: window.Scroll.AnchorTop, anchorLeft: window.Scroll.AnchorLeft, contentEpoch: window.Scroll.ContentEpoch, layoutGeneration: window.Scroll.LayoutGeneration, scrollSeq: window.Scroll.ScrollSeq}
 	}
-	before, after := presentationScrollRowBounds(window, presentationVisibleRows(window))
+	visibleRows := presentationVisibleRows(window)
+	if body := m.bodyHeight(); visibleRows > body && body > 0 {
+		visibleRows = body
+	}
+	before, after := presentationScrollRowBounds(window, visibleRows)
 	switch mouse.Button {
 	case tea.MouseWheelDown, tea.MouseWheelUp:
 		if mouse.Mod.Contains(tea.ModShift) {
@@ -250,6 +254,8 @@ func (m Model) semanticMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 		return m.leftPaneMousePacket(msg)
 	case m.layout.footer.Contains(mouse.X, mouse.Y):
 		return m.footerMousePacket(msg)
+	case m.layout.body.Contains(mouse.X, mouse.Y):
+		return m.gutterFoldMousePacket(msg)
 	}
 	return nil, false
 }
@@ -300,6 +306,45 @@ func (m Model) leftPaneMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 
 func (m Model) footerMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	return m.modelineMousePacket(msg)
+}
+
+// gutterFoldMousePacket maps a click on a fold chevron in the gutter to
+// fold_toggle_at_line, the same gui_action the macOS frontend sends
+// (EditorNSView.swift handleFoldChevronClick). A click that does not land on a
+// foldable gutter entry returns ok=false so it falls through to the raw mouse
+// path.
+func (m Model) gutterFoldMousePacket(msg tea.MouseMsg) ([]byte, bool) {
+	mouse := msg.Mouse()
+	bodyX, bodyY := m.layout.body.Translate(mouse.X, mouse.Y)
+	windowID, ok := m.presentationScrollWindowAtBody(bodyX, bodyY)
+	if !ok {
+		return nil, false
+	}
+	window := m.windows[windowID]
+	gutter, ok := m.windowGutter(windowID)
+	if !ok || gutter.SignColWidth < 2 {
+		return nil, false
+	}
+	placement, ok := m.semanticWindowPlacement(window)
+	if !ok {
+		return nil, false
+	}
+	localX := bodyX - placement.col
+	if localX < 0 || localX >= int(gutter.SignColWidth) {
+		return nil, false
+	}
+	localY := bodyY - placement.row
+	height := placement.height
+	sourceStart := m.presentationSourceStart(window, height)
+	sourceRowIndex := localY + sourceStart
+	if sourceRowIndex < 0 || sourceRowIndex >= len(gutter.Entries) {
+		return nil, false
+	}
+	entry := gutter.Entries[sourceRowIndex]
+	if entry.DisplayType != 1 && entry.DisplayType != 4 {
+		return nil, false
+	}
+	return protocol.EncodeGUIFoldToggleAtLine(gutter.WindowID, entry.BufferLine), true
 }
 
 // floatPopupMousePacket maps a click in the float popup's overlay band but

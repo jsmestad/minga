@@ -194,7 +194,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     raw_overscan_before = max(scroll.visible_row_start_index - viewport.visual_row_offset, 0)
     # Under full residence, visible_row_start_index is the viewport's absolute
     # document offset, not a small overscan count. Cap the presentation overscan
-    # so the gutter stays viewport-windowed.
+    # so retained-row resolution stays viewport-windowed.
     payload_overscan_before =
       if scroll.full_residence,
         do: min(raw_overscan_before, visible_row_count),
@@ -213,9 +213,10 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
     # Full-document residence (#2653): the window carries every laid-out row so the
     # frontend store is complete and a fast scroll can never outrun it. The gutter
-    # (build_gutter below) stays viewport-windowed off `presentation_entries`;
-    # indent guides are independently viewport-windowed off `scroll.lines`. Only
-    # the row set and its retained-row cache become resident.
+    # (build_gutter below) uses the same entry set as the rows so the Go side can
+    # index both by absolute row position; indent guides are independently
+    # viewport-windowed off `scroll.lines`. Only the row set and its retained-row
+    # cache become resident.
     #
     # The resident entries feed only `presentation_rows` (the `.row` of each),
     # which never carries the entry-level `display_row`, so the residence path
@@ -363,7 +364,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       diagnostic_ranges: diagnostic_ranges,
       document_highlights: doc_highlights,
       annotations: annotations,
-      gutter: build_gutter(scroll, ctx, content_kind, presentation_entries),
+      gutter: build_gutter(scroll, ctx, content_kind, resident_entries),
       cursorline:
         build_cursorline(content_row, display_cursor_row, is_active, cursor_on_screen?, ctx),
       indent_guides: build_indent_guides(scroll, ctx, content_kind),

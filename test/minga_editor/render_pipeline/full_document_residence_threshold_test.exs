@@ -114,9 +114,9 @@ defmodule MingaEditor.RenderPipeline.FullDocumentResidenceThresholdTest do
     assert presentation.overscan_start_line == 0
     assert presentation.overscan_end_line == 500
 
-    # The gutter stays viewport-windowed so per-frame chrome bytes stay bounded;
-    # only the row set becomes resident.
-    assert Enum.count(model.gutter.entries) < 100
+    # The gutter is resident alongside the rows so the Go side can index both
+    # by absolute row position without a gutter/row count mismatch.
+    assert Enum.count(model.gutter.entries) == 500
   end
 
   test "a wrapped buffer opts out of residence even when it is enabled" do
@@ -160,14 +160,13 @@ defmodule MingaEditor.RenderPipeline.FullDocumentResidenceThresholdTest do
     assert scroll.full_residence == true
   end
 
-  test "gutter stays viewport-bounded under residence even when scrolled deep" do
+  test "gutter covers all rows under residence even when scrolled deep" do
     Config.set(:resident_store_max_lines, 100_000)
 
     # First-paint-then-promote (#2679): warm one frame so residence is promoted.
     model = build_model(warm(scrolled_state(400)))
-    visible = model.geometry.viewport.rows
 
     assert Enum.count(model.rows) == 500
-    assert Enum.count(model.gutter.entries) <= visible * 3
+    assert Enum.count(model.gutter.entries) == 500
   end
 end
