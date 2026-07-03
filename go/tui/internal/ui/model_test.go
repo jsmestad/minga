@@ -1404,7 +1404,7 @@ func TestAgentAnimationCueChangesAcrossFrames(t *testing.T) {
 	}
 	chat := protocol.AgentChat{Visible: true, Status: 1}
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiAgentChat: {AgentChat: chat}}
-	if !model.agent.animating(chat) {
+	if !model.agent.animating(chat, chat.Messages) {
 		t.Fatalf("visible thinking agent should animate")
 	}
 }

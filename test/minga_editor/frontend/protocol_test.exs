@@ -1303,7 +1303,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
 
       encoded = encode_gui_agent_chat(data)
       # Sectioned: opcode + section_count + sections
-      assert <<0x78, 8, sections::binary>> = encoded
+      assert <<0x78, 9, sections::binary>> = encoded
       assert gui_agent_chat_section!(sections, 0x04) == <<0::8>>
       assert :binary.match(encoded, "shell") == :nomatch
       assert :binary.match(encoded, "ls -la") == :nomatch
@@ -1321,7 +1321,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
 
       encoded = encode_gui_agent_chat(data)
       # Sectioned: opcode + section_count + sections
-      assert <<0x78, 8, _sections::binary>> = encoded
+      assert <<0x78, 9, _sections::binary>> = encoded
       # Verify model is present
       assert :binary.match(encoded, "claude") != :nomatch
     end
@@ -1338,7 +1338,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       }
 
       encoded = encode_gui_agent_chat(data)
-      assert <<0x78, 8, sections::binary>> = encoded
+      assert <<0x78, 9, sections::binary>> = encoded
       assert <<4::16, "high">> = gui_agent_chat_section!(sections, 0x08)
     end
 
@@ -1368,7 +1368,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
 
       encoded = encode_gui_agent_chat(data)
 
-      assert <<0x78, 8, sections::binary>> = encoded
+      assert <<0x78, 9, sections::binary>> = encoded
       messages_payload = gui_agent_chat_section!(sections, 0x06)
 
       assert <<1::16, 0::32, 0x09::8, 0::8, name_len::16, rest::binary>> = messages_payload
@@ -1404,7 +1404,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
 
       encoded = encode_gui_agent_chat(data)
       # Sectioned: opcode + section_count
-      assert <<0x78, 8, _sections::binary>> = encoded
+      assert <<0x78, 9, _sections::binary>> = encoded
 
       # Verify styled_assistant message type byte (0x07) appears in the binary
       assert :binary.match(encoded, <<0x07>>) != :nomatch

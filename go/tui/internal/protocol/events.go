@@ -268,6 +268,20 @@ func EncodeGUIEmptyStateActivate(itemID string) []byte {
 	return append(out, payload...)
 }
 
+// EncodeGUIChatScrolledAwayFromBottom reports that the agent-chat transcript
+// left the bottom (the reader scrolled up), so the BEAM disengages follow-bottom
+// (#2654). Zero payload: the frontend owns the local scroll offset and only
+// reports the pin transition so the BEAM's authoritative state matches.
+func EncodeGUIChatScrolledAwayFromBottom() []byte {
+	return []byte{generated.OPGuiAction, generated.GUIActionChatScrolledAwayFromBottom}
+}
+
+// EncodeGUIChatReturnedToBottom reports that the transcript returned to the
+// bottom (follow-bottom re-engaged). Pairs with the scrolled-away report (#2654).
+func EncodeGUIChatReturnedToBottom() []byte {
+	return []byte{generated.OPGuiAction, generated.GUIActionChatReturnedToBottom}
+}
+
 // appendString16 appends a length-prefixed string (len:u16 big-endian, then
 // utf8 bytes) to out, truncating to the u16 ceiling, matching the macOS
 // appendString16 helper used by every string-bearing gui_action.

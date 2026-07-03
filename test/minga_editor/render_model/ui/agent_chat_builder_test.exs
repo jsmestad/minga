@@ -55,6 +55,17 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     refute {:user, "hidden"} in Enum.map(summaries, fn {_id, type, text} -> {type, text} end)
   end
 
+  test "build/1 carries the composer input focus for transcript scroll gating (#2654)" do
+    session = fake_session_pid()
+    panel = synced_panel([{:assistant, "hi"}])
+
+    focused = context(session, %{panel | input_focused: true}) |> AgentChatBuilder.build()
+    unfocused = context(session, %{panel | input_focused: false}) |> AgentChatBuilder.build()
+
+    assert focused.input_focused
+    refute unfocused.input_focused
+  end
+
   test "build/1 emits semantic assistant markdown blocks when cache has them" do
     session = fake_session_pid()
 

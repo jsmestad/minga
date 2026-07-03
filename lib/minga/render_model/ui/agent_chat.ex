@@ -100,6 +100,7 @@ defmodule Minga.RenderModel.UI.AgentChat do
           prompt_completion: PromptCompletion.t() | nil,
           help_visible?: boolean(),
           help_groups: [{String.t(), [{String.t(), String.t()}]}],
+          input_focused: boolean(),
           messages: [message()],
           resident_messages: [message()],
           transcript_epoch: non_neg_integer()
@@ -118,6 +119,7 @@ defmodule Minga.RenderModel.UI.AgentChat do
             prompt_completion: nil,
             help_visible?: false,
             help_groups: [],
+            input_focused: false,
             messages: [],
             resident_messages: [],
             transcript_epoch: 0

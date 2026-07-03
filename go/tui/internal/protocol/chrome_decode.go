@@ -59,6 +59,8 @@ func decodeChrome(payload []byte) ChromePayload {
 		chrome.AgentContext, chrome.Summary, chrome.Bytes = decodeAgentContext(payload)
 	case generated.OPGuiAgentChat:
 		chrome.AgentChat, chrome.Summary, chrome.Bytes = decodeAgentChat(payload)
+	case generated.OPGuiAgentTranscript:
+		chrome.AgentTranscript, chrome.Summary, chrome.Bytes = decodeAgentTranscript(payload)
 	case generated.OPGuiEditTimeline:
 		chrome.Timeline, chrome.Summary, chrome.Bytes = decodeEditTimeline(payload)
 	case generated.OPGuiGutterSep:

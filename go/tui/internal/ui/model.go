@@ -110,6 +110,12 @@ type Model struct {
 	surfacePlacements []generated.SurfacePlacement
 	localPresentation localPresentation
 	inputFilter       *InputFilter
+	// transcript is the resident agent-chat transcript store (#2654). It folds
+	// gui_agent_transcript (0x86) frames and owns the local scroll offset + pin
+	// flag so j/k/wheel repaint the transcript same-frame from local data. It is
+	// a pointer so it persists across the value-copied Update loop (same lifetime
+	// trick as lineCache/latency).
+	transcript *residentTranscript
 }
 
 // frameStaging is the open frame transaction buffer (#2219). It lives only
@@ -146,6 +152,7 @@ func New(width, height uint16, out chan<- []byte, filter *InputFilter) Model {
 		lineCache:         newLineCache(),
 		localPresentation: newLocalPresentation(),
 		inputFilter:       filter,
+		transcript:        newResidentTranscript(),
 	}
 	// Seed the layout so the first mouse event lands in the correct
 	// region before the first BEAM frame arrives.
@@ -199,11 +206,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		if chat, ok := m.agentChat(); ok {
-			if packet, handled := m.agent.handleKey(chat, msg); handled {
+			if packet, handled := m.agent.handleKey(chat, m.agentTranscriptMessages(chat), msg); handled {
 				m.send(packet)
 				break
 			}
 		}
+		// Local transcript scroll (#2654): when the agent chat owns the view and
+		// its composer is not capturing keys, a nav key adjusts the resident scroll
+		// offset and repaints same-frame. The key is still forwarded so the BEAM's
+		// authoritative scroll/pin state stays in sync (it just no longer gates the
+		// paint).
+		m.queueAgentTranscriptScroll(msg)
 		// Stamp the latency correlation sequence (ticket #2215) before
 		// encoding so the resulting frame's commit_frame resolves the sample.
 		seq := m.latency.Stamp()
@@ -223,6 +236,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m = updated
 		} else if isWheelButton(msg.Mouse().Button) {
 			delta := m.drainScrollDelta(msg)
+			m.queueAgentWheelScroll(msg, delta)
 			m = m.applyPresentationScrollDelta(msg, delta)
 			if !m.sendScrollBatchDelta(msg, delta) {
 				if packet, ok := m.mousePacket(msg); ok {
@@ -246,7 +260,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case agentAnimationTickMsg:
 		m.agent.tick()
-		if chat, ok := m.agentChat(); ok && m.agent.animating(chat) {
+		if chat, ok := m.agentChat(); ok && m.agent.animating(chat, m.agentTranscriptMessages(chat)) {
 			cmd = agentAnimationTick()
 		} else {
 			m.agent.animationRunning = false
@@ -275,7 +289,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.send(protocol.EncodeLogMessage(protocol.LogLevelErr, msg.Err.Error()))
 	}
 
-	if chat, ok := m.agentChat(); ok && m.agent.animating(chat) && !m.agent.animationRunning {
+	if chat, ok := m.agentChat(); ok && m.agent.animating(chat, m.agentTranscriptMessages(chat)) && !m.agent.animationRunning {
 		m.agent.animationRunning = true
 		cmd = tea.Batch(cmd, agentAnimationTick())
 	}
@@ -297,7 +311,107 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.viewport.SetWidth(max(m.width, 1))
 	m.viewport.SetHeight(m.layout.body.Height)
 	m.viewport.SetContent(m.composeBody())
+	// The transcript render resolves any queued local scroll and records a pin
+	// edge (#2654). Report it to the BEAM so its authoritative follow-bottom state
+	// tracks the frontend; rendering already happened without waiting for it.
+	m.reportTranscriptPinTransition()
 	return m, cmd
+}
+
+// reportTranscriptPinTransition sends the pin gui_action for a pin edge produced
+// by this frame's transcript render, if any (#2654). The frontend owns the local
+// scroll offset; this only keeps the BEAM's authoritative pin state in sync.
+func (m *Model) reportTranscriptPinTransition() {
+	if m.transcript == nil {
+		return
+	}
+	switch m.transcript.takePinTransition() {
+	case pinScrolledAway:
+		m.send(protocol.EncodeGUIChatScrolledAwayFromBottom())
+	case pinReturned:
+		m.send(protocol.EncodeGUIChatReturnedToBottom())
+	}
+}
+
+// agentTranscriptScrollTarget reports whether local transcript scroll should
+// intercept input this frame: the agent chat owns the view and its composer is
+// not capturing keys (so a nav key is a scroll, not composer cursor motion).
+func (m Model) agentTranscriptScrollTarget() bool {
+	if m.transcript == nil {
+		return false
+	}
+	chat, ok := m.agentChat()
+	return ok && chat.Visible && !chat.InputFocused
+}
+
+// queueAgentTranscriptScroll queues a local transcript scroll for a nav key when
+// the agent transcript is the scroll target (#2654). The key is still forwarded
+// to the BEAM by the caller.
+func (m *Model) queueAgentTranscriptScroll(msg tea.KeyPressMsg) {
+	if !m.agentTranscriptScrollTarget() {
+		return
+	}
+	if rows, ok := agentTranscriptScrollRows(msg, m.layout.body.Height); ok {
+		m.transcript.scrollBy(rows)
+	}
+}
+
+// queueAgentWheelScroll queues a local transcript scroll for a wheel event over
+// the agent chat body (#2654). Unlike keys this does not need the composer-focus
+// gate: a wheel over the transcript always scrolls it.
+func (m *Model) queueAgentWheelScroll(msg tea.MouseMsg, delta int) {
+	if m.transcript == nil || delta == 0 {
+		return
+	}
+	chat, ok := m.agentChat()
+	if !ok || !chat.Visible {
+		return
+	}
+	mouse := msg.Mouse()
+	if !m.layout.body.Contains(mouse.X, mouse.Y) {
+		return
+	}
+	// wheelDeltaSign: +down / -up, matching the resident store's row convention.
+	m.transcript.scrollBy(delta)
+}
+
+// agentTranscriptScrollRows maps a nav key to a signed scroll amount in rendered
+// lines (+down toward newest / -up toward oldest). page is the visible height,
+// used for half/full-page and jump-to-bottom keys.
+func agentTranscriptScrollRows(msg tea.KeyPressMsg, page int) (int, bool) {
+	page = max(page, 1)
+	half := max(page/2, 1)
+	key := msg.Key()
+	ctrl := key.Mod.Contains(tea.ModCtrl)
+	alt := key.Mod.Contains(tea.ModAlt)
+	switch key.Code {
+	case 'j':
+		if !ctrl && !alt {
+			return 1, true
+		}
+	case 'k':
+		if !ctrl && !alt {
+			return -1, true
+		}
+	case 'd':
+		if ctrl && !alt {
+			return half, true
+		}
+	case 'u':
+		if ctrl && !alt {
+			return -half, true
+		}
+	case 'G':
+		if !ctrl && !alt {
+			// Jump to bottom: a large downward amount the render clamps and re-pins.
+			return 1 << 20, true
+		}
+	case tea.KeyPgDown:
+		return page, true
+	case tea.KeyPgUp:
+		return -page, true
+	}
+	return 0, false
 }
 
 // composeBody renders the editor body (the expensive lipgloss path) and records
@@ -578,6 +692,13 @@ func (m *Model) applyMutation(command protocol.Command) {
 		}
 		m.chrome[command.Chrome.Opcode] = command.Chrome
 		switch command.Chrome.Opcode {
+		case generated.OPGuiAgentTranscript:
+			// Fold the resident transcript delta (#2654). The 0x86 stream, not the
+			// chrome snapshot, is the transcript source; the chrome entry is kept
+			// only so opcode bookkeeping stays uniform.
+			if m.transcript != nil {
+				m.transcript.apply(command.Chrome.AgentTranscript)
+			}
 		case generated.OPGuiTheme:
 			m.activePalette = paletteFromTheme(command.Chrome.Theme)
 			m.themeApplied = true

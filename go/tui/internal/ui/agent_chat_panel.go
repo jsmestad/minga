@@ -15,14 +15,14 @@ type agentPanel struct {
 	animationRunning bool
 }
 
-func (a *agentPanel) animating(chat protocol.AgentChat) bool {
+func (a *agentPanel) animating(chat protocol.AgentChat, messages []protocol.AgentChatMessage) bool {
 	if !chat.Visible {
 		return false
 	}
 	if chat.Status == 1 || chat.Status == 2 || chat.Pending != "" {
 		return true
 	}
-	for _, msg := range chat.Messages {
+	for _, msg := range messages {
 		if msg.Kind == agentKindThinking || ((msg.Kind == agentKindTool || msg.Kind == agentKindStyledTool) && msg.Status == 0) {
 			return true
 		}
@@ -39,7 +39,14 @@ func (a *agentPanel) spinner() string {
 	return frames[int(a.animationFrame)%len(frames)]
 }
 
-func (a *agentPanel) handleKey(chat protocol.AgentChat, msg tea.KeyPressMsg) ([]byte, bool) {
+// handleKey handles the Ctrl+Alt+X/Z collapse toggles. The index is resolved
+// against `messages` (the resident transcript, #2654), not the windowed 0x78
+// list: the BEAM's toggle handler applies List.update_at on the full session
+// conversation, which the resident store mirrors (messages_with_ids, with
+// transcript enrichments appended after the tool/thinking messages), so the
+// latest-tool/thinking index aligns. The windowed 0x78 list would drift once the
+// conversation exceeds the window.
+func (a *agentPanel) handleKey(chat protocol.AgentChat, messages []protocol.AgentChatMessage, msg tea.KeyPressMsg) ([]byte, bool) {
 	if !chat.Visible {
 		return nil, false
 	}
@@ -49,13 +56,13 @@ func (a *agentPanel) handleKey(chat protocol.AgentChat, msg tea.KeyPressMsg) ([]
 	}
 	switch key.Code {
 	case 'x', 'X':
-		index, ok := latestToolMessageIndex(chat.Messages)
+		index, ok := latestToolMessageIndex(messages)
 		if !ok {
 			return nil, false
 		}
 		return protocol.EncodeGUIAgentToolToggle(index), true
 	case 'z', 'Z':
-		index, ok := latestThinkingMessageIndex(chat.Messages)
+		index, ok := latestThinkingMessageIndex(messages)
 		if !ok {
 			return nil, false
 		}
@@ -120,7 +127,7 @@ func (m Model) insetAgentLine(line string, width int) string {
 
 func (m Model) renderAgentChatPanelWithLimit(chat protocol.AgentChat, width int, limit int) []string {
 	limit = max(limit, 1)
-	empty := chat.Pending == "" && strings.TrimSpace(chat.Prompt) == "" && len(chat.Messages) == 0
+	empty := chat.Pending == "" && strings.TrimSpace(chat.Prompt) == "" && len(m.agentTranscriptMessages(chat)) == 0
 	lines := []string{m.renderAgentHeader(chat, width)}
 
 	if agentDetailsVisible(width) && limit > 5 {
@@ -163,7 +170,8 @@ func (m Model) renderAgentMainColumn(chat protocol.AgentChat, width int, budget 
 		statusHeight = 1
 	}
 	contentBudget := max(transcriptBudget-statusHeight, 0)
-	sparse := len(chat.Messages) <= 1 && chat.Pending == "" && strings.TrimSpace(chat.Prompt) == ""
+	messageCount := len(m.agentTranscriptMessages(chat))
+	sparse := messageCount <= 1 && chat.Pending == "" && strings.TrimSpace(chat.Prompt) == ""
 	if chat.Pending != "" && len(lines) < contentBudget {
 		lines = append(lines, m.renderAgentNotice("◆ approval", chat.Pending, width))
 	}
@@ -172,7 +180,7 @@ func (m Model) renderAgentMainColumn(chat protocol.AgentChat, width int, budget 
 		lines = append(lines, m.renderAgentTranscriptHeader(width))
 	}
 
-	messageLines := m.renderAgentTranscriptTail(chat, max(contentBudget-len(lines), 0), width)
+	messageLines := m.renderAgentResidentTranscript(chat, max(contentBudget-len(lines), 0), width)
 	lines = append(lines, messageLines...)
 
 	if empty && len(lines) < contentBudget {
@@ -213,7 +221,7 @@ func (m Model) renderAgentTranscriptHeader(width int) string {
 
 func (m Model) renderAgentTranscriptStatus(chat protocol.AgentChat, width int) string {
 	p := m.palette()
-	messageCount := len(chat.Messages)
+	messageCount := len(m.agentTranscriptMessages(chat))
 	label := "messages"
 	if messageCount == 1 {
 		label = "message"
@@ -315,6 +323,7 @@ func (m Model) joinAgentColumns(left []string, right []string, leftWidth int, ri
 }
 
 func (m Model) renderAgentDetailsRail(chat protocol.AgentChat, width int, budget int) []string {
+	messages := m.agentTranscriptMessages(chat)
 	provider, model := splitAgentModelName(chat.ModelName)
 	lines := []string{m.renderAgentDetailFrame("top", "◇ Session", width)}
 	lines = append(lines, m.renderAgentDetailRow("Provider", nonEmpty(provider, "unknown"), width))
@@ -323,9 +332,9 @@ func (m Model) renderAgentDetailsRail(chat protocol.AgentChat, width int, budget
 	if chat.ThinkingLevel != "" {
 		lines = append(lines, m.renderAgentDetailRow("Thinking", chat.ThinkingLevel, width))
 	}
-	lines = append(lines, m.renderAgentDetailRow("Messages", fmt.Sprintf("%d", len(chat.Messages)), width))
+	lines = append(lines, m.renderAgentDetailRow("Messages", fmt.Sprintf("%d", len(messages)), width))
 
-	toolCount, runningTools, erroredTools := agentToolCounts(chat.Messages)
+	toolCount, runningTools, erroredTools := agentToolCounts(messages)
 	if toolCount > 0 {
 		value := fmt.Sprintf("%d", toolCount)
 		if runningTools > 0 || erroredTools > 0 {
@@ -336,11 +345,11 @@ func (m Model) renderAgentDetailsRail(chat protocol.AgentChat, width int, budget
 	if chat.Pending != "" {
 		lines = append(lines, m.renderAgentDetailRow("Approval", "waiting", width))
 	}
-	if lastAgentError(chat.Messages) != "" {
+	if lastAgentError(messages) != "" {
 		lines = append(lines, m.renderAgentDetailsSection("Needs attention", width))
 		lines = append(lines, m.renderAgentDetailRow("Auth", "run /auth or check API key", width))
 	}
-	if usage, ok := lastAgentUsage(chat.Messages); ok {
+	if usage, ok := lastAgentUsage(messages); ok {
 		lines = append(lines, m.renderAgentDetailRow("Context", fmt.Sprintf("%s in · %s out", formatAgentTokens(usage.Input), formatAgentTokens(usage.Output)), width))
 		if usage.CostMicros > 0 {
 			lines = append(lines, m.renderAgentDetailRow("Cost", fmt.Sprintf("$%.2f", float64(usage.CostMicros)/1_000_000), width))
@@ -515,37 +524,98 @@ func (m Model) renderAgentNotice(label string, text string, width int) string {
 	return lipgloss.NewStyle().Background(p.SurfaceAlt()).Width(width).Render(fitStyled(line, width))
 }
 
-func (m Model) renderAgentTranscriptTail(chat protocol.AgentChat, budget int, width int) []string {
-	if budget <= 0 || len(chat.Messages) == 0 {
+// agentTranscriptMessages is the transcript rendering source: the resident 0x86
+// store (#2654). It falls back to the 0x78 chrome messages only when the store
+// is empty (a BEAM that has not sent a transcript frame yet), so a transitional
+// stream still renders.
+func (m Model) agentTranscriptMessages(chat protocol.AgentChat) []protocol.AgentChatMessage {
+	if m.transcript != nil && len(m.transcript.messages) > 0 {
+		return m.transcript.messages
+	}
+	return chat.Messages
+}
+
+// renderAgentResidentTranscript renders the visible transcript window from the
+// resident store, applying any queued local scroll same-frame (#2654). Pinned
+// follows the bottom; unpinned holds a top-anchored offset so a streaming append
+// does not move the reading position. It mutates the shared *transcript pointer
+// (clamp + pin edge), which persists through the value-receiver render chain.
+func (m Model) renderAgentResidentTranscript(chat protocol.AgentChat, budget int, width int) []string {
+	messages := m.agentTranscriptMessages(chat)
+	t := m.transcript
+	if t == nil {
+		return m.agentTranscriptTail(messages, budget, width)
+	}
+	if budget <= 0 || len(messages) == 0 {
+		t.pendingScroll = 0
 		return nil
 	}
-	blocks := make([][]string, 0, len(chat.Messages))
-	used := 0
-	for i := len(chat.Messages) - 1; i >= 0; i-- {
-		block := m.renderAgentMessage(chat.Messages[i], width)
+	// Only pay for the full layout when scrolled up or a scroll is pending; the
+	// common followed case renders just the bottom window.
+	if t.pendingScroll == 0 && t.pinned {
+		return m.agentTranscriptTail(messages, budget, width)
+	}
+	lines := m.agentTranscriptAllLines(messages, width)
+	maxTop := max(len(lines)-budget, 0)
+	t.resolveScroll(maxTop)
+	if t.pinned {
+		return windowBottom(lines, budget)
+	}
+	return windowTopAnchored(lines, budget, t.topOffset)
+}
+
+// agentTranscriptAllLines renders every message top-to-bottom with a separator
+// between messages. It is the full line layout the unpinned (scrolled-up) window
+// slices; the pinned path uses the cheaper bottom-bounded agentTranscriptTail.
+func (m Model) agentTranscriptAllLines(messages []protocol.AgentChatMessage, width int) []string {
+	lines := make([]string, 0, len(messages)*2)
+	first := true
+	for _, msg := range messages {
+		block := m.renderAgentMessage(msg, width)
 		if len(block) == 0 {
 			continue
 		}
-		if used > 0 && used+len(block) > budget {
-			break
-		}
-		blocks = append(blocks, block)
-		used += len(block)
-		if used >= budget {
-			break
-		}
-	}
-	lines := make([]string, 0, budget)
-	for i := len(blocks) - 1; i >= 0; i-- {
-		lines = append(lines, blocks[i]...)
-		if i > 0 && len(lines) < budget {
+		if !first {
 			lines = append(lines, m.renderAgentTranscriptSeparator(width))
 		}
-	}
-	if len(lines) > budget {
-		return lines[:budget]
+		lines = append(lines, block...)
+		first = false
 	}
 	return lines
+}
+
+// agentTranscriptTail renders the bottom `budget` lines, bounded so a followed
+// session only renders enough messages to fill the view regardless of transcript
+// length. Its output equals the bottom `budget` lines of agentTranscriptAllLines
+// (guarded by test) so the pinned and unpinned paths stay visually consistent.
+func (m Model) agentTranscriptTail(messages []protocol.AgentChatMessage, budget int, width int) []string {
+	if budget <= 0 || len(messages) == 0 {
+		return nil
+	}
+	blocks := make([][]string, 0, 8) // newest-first
+	total := 0
+	for i := len(messages) - 1; i >= 0; i-- {
+		block := m.renderAgentMessage(messages[i], width)
+		if len(block) == 0 {
+			continue
+		}
+		if len(blocks) > 0 {
+			total++ // separator above the previously added (newer) block
+		}
+		blocks = append(blocks, block)
+		total += len(block)
+		if total >= budget {
+			break
+		}
+	}
+	lines := make([]string, 0, total)
+	for k := len(blocks) - 1; k >= 0; k-- {
+		if k < len(blocks)-1 {
+			lines = append(lines, m.renderAgentTranscriptSeparator(width))
+		}
+		lines = append(lines, blocks[k]...)
+	}
+	return windowBottom(lines, budget)
 }
 
 func (m Model) renderAgentMessage(msg protocol.AgentChatMessage, width int) []string {
