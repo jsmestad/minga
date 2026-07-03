@@ -1768,8 +1768,10 @@ func TestPresentationScrollResidentReachesDocumentBottom(t *testing.T) {
 	}
 
 	scroll := model.localPresentation.scrolls[7]
-	if want := docRows - visibleRows; scroll.rowOffset != want {
-		t.Fatalf("resident fling should reach the document bottom offset %d, got %d", want, scroll.rowOffset)
+	// Scroll-past-end: the last line can reach the top of the viewport, so
+	// the max offset is docRows - 1 (not docRows - visibleRows).
+	if want := docRows - 1; scroll.rowOffset != want {
+		t.Fatalf("resident fling should reach the scroll-past-end offset %d, got %d", want, scroll.rowOffset)
 	}
 }
 
@@ -1866,8 +1868,9 @@ func TestPresentationScrollResidentReachesDocumentTop(t *testing.T) {
 		model = model.applyPresentationScrollDelta(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: 1, Y: model.layout.header.Height}), 1)
 	}
 	scroll = model.localPresentation.scrolls[7]
-	if want := docRows - visibleRows - anchorTop; scroll.rowOffset != want {
-		t.Fatalf("resident downward fling should reach the document bottom offset %d, got %d", want, scroll.rowOffset)
+	// Scroll-past-end: max forward offset is docRows - 1 - anchorTop.
+	if want := docRows - 1 - anchorTop; scroll.rowOffset != want {
+		t.Fatalf("resident downward fling should reach the scroll-past-end offset %d, got %d", want, scroll.rowOffset)
 	}
 }
 
