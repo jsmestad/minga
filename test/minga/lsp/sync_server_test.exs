@@ -156,9 +156,13 @@ defmodule Minga.LSP.SyncServerTest do
       ref = Process.monitor(doomed)
       Process.exit(doomed, :kill)
       assert_receive {:DOWN, ^ref, :process, ^doomed, :killed}
-      sync_server()
 
-      assert SyncServer.clients_for_buffer(buf) == [survivor]
+      # The SyncServer's own monitor :DOWN is delivered by the runtime on
+      # doomed's death, a different sender than this test process. FIFO-per-sender
+      # therefore does not order that :DOWN ahead of a :sys.get_state barrier we
+      # send, so the reap may not have run when we read. Poll the observable ETS
+      # state until the crashed client drops.
+      assert_clients_eventually(buf, [survivor])
     end
   end
 
@@ -217,6 +221,23 @@ defmodule Minga.LSP.SyncServerTest do
   defp sync_server do
     :sys.get_state(SyncServer)
     :ok
+  end
+
+  # Polls the direct-ETS registry read until it matches `expected`, then asserts.
+  # Used for reaps driven by runtime-delivered monitor :DOWN messages, whose
+  # arrival at the SyncServer cannot be ordered by a :sys.get_state barrier sent
+  # from the test process. On timeout the final assert raises a full diff.
+  defp assert_clients_eventually(buf, expected, attempts \\ 100, interval \\ 10) do
+    if SyncServer.clients_for_buffer(buf) == expected do
+      :ok
+    else
+      if attempts > 0 do
+        Process.sleep(interval)
+        assert_clients_eventually(buf, expected, attempts - 1, interval)
+      else
+        assert SyncServer.clients_for_buffer(buf) == expected
+      end
+    end
   end
 
   defp reset_sync_server do
