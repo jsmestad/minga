@@ -1205,6 +1205,14 @@ final class CoreTextMetalRenderer {
         let visibleRows = UInt32(frameState.rows)
         let viewportTop = frameState.viewportTopLine
 
+        let scrollIndicatorResident: Bool = {
+            guard let wid = frameState.activeWindowId,
+                  let content = windowContents[wid],
+                  let sp = content.scrollPresentation else { return false }
+            let perWindowTotal = content.paneGeometry?.viewport.totalLines ?? totalLines
+            return perWindowTotal > 0 && sp.overscanStartLine == 0 && sp.overscanEndLine >= perWindowTotal
+        }()
+
         if totalLines > visibleRows && viewportTop != 0xFFFF_FFFF && scrollIndicatorAlpha > 0 {
             let viewportH = Float(viewportSize.height)
             let indicatorWidth: Float = 6.0 * scale
@@ -1214,7 +1222,8 @@ final class CoreTextMetalRenderer {
             // Compute thumb size and position.
             let proportion = Float(visibleRows) / Float(totalLines)
             let thumbHeight = max(proportion * trackHeight, 20.0 * scale)
-            let maxTop = Float(max(Int64(totalLines) - Int64(visibleRows), 1))
+            let maxTop = Float(EditorScrollTrack.maxScrollableTop(
+                totalLines: totalLines, visibleRows: visibleRows, resident: scrollIndicatorResident))
             let thumbY = (Float(viewportTop) / maxTop) * (trackHeight - thumbHeight)
 
             let thumbX = Float(viewportSize.width) - indicatorWidth - indicatorMargin

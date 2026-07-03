@@ -722,6 +722,7 @@ final class CommandDispatcher {
             frameState.windowGutters[data.windowId] = data
             currentFrameWindowIds.insert(data.windowId)
             if data.isActive {
+                frameState.activeWindowId = data.windowId
                 frameState.gutterCol = UInt16(data.lineNumberWidth) + UInt16(data.signColWidth)
                 // Derive viewport top from the first gutter entry's buffer line.
                 if let firstEntry = data.entries.first {

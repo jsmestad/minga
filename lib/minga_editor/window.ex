@@ -203,7 +203,12 @@ defmodule MingaEditor.Window do
 
   def scroll_viewport(%__MODULE__{viewport: vp} = window, delta, total_lines) do
     visible = Viewport.content_rows(vp)
-    max_top = max(total_lines - visible, 0)
+
+    max_top =
+      if resident?(window),
+        do: max(total_lines - 1, 0),
+        else: max(total_lines - visible, 0)
+
     new_top = (vp.top + delta) |> max(0) |> min(max_top)
     pinned = delta > 0 and new_top >= max_top
 

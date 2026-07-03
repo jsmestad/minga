@@ -981,7 +981,8 @@ final class EditorNSView: MTKView {
             viewHeight: bounds.height,
             totalLines: fs.totalLineCount,
             visibleRows: UInt32(fs.rows),
-            viewportTopLine: fs.viewportTopLine
+            viewportTopLine: fs.viewportTopLine,
+            resident: activeWindowIsResident
         ) else { return nil }
         return EditorScrollTrack.dragOffset(forY: y, thumb: thumb)
     }
@@ -990,6 +991,7 @@ final class EditorNSView: MTKView {
     private func scrollTrackYToLine(_ y: CGFloat) -> UInt32 {
         let fs = dispatcher.frameState
         let visibleRows = UInt32(fs.rows)
+        let resident = activeWindowIsResident
 
         if let scrollIndicatorDragOffset {
             return EditorScrollTrack.line(
@@ -997,7 +999,8 @@ final class EditorNSView: MTKView {
                 dragOffset: scrollIndicatorDragOffset,
                 viewHeight: bounds.height,
                 totalLines: fs.totalLineCount,
-                visibleRows: visibleRows
+                visibleRows: visibleRows,
+                resident: resident
             )
         }
 
@@ -1005,7 +1008,8 @@ final class EditorNSView: MTKView {
             forY: y,
             viewHeight: bounds.height,
             totalLines: fs.totalLineCount,
-            visibleRows: visibleRows
+            visibleRows: visibleRows,
+            resident: resident
         )
     }
 
@@ -1020,6 +1024,15 @@ final class EditorNSView: MTKView {
             .sorted { $0.windowId < $1.windowId }
             .first?
             .windowId
+    }
+
+    private var activeWindowIsResident: Bool {
+        guard let windowId = activeWindowId,
+              let content = guiState?.windowContents[windowId] else { return false }
+        return Self.thumbDragCanPresentLocally(
+            scrollPresentation: content.scrollPresentation,
+            totalLines: content.paneGeometry?.viewport.totalLines ?? dispatcher.frameState.totalLineCount
+        )
     }
 
     /// Establishes resident local presentation for a thumb drag if the active pane is resident,
@@ -1925,11 +1938,7 @@ final class EditorNSView: MTKView {
         }
         let targetWindowContent = scrollTargetWindowId.flatMap { guiState?.windowContents[$0] }
         let targetScrollPresentation = targetWindowContent?.scrollPresentation
-        let payloadOverscan = Self.presentationScrollPayloadOverscanBounds(
-            for: targetWindowContent,
-            scrollPresentation: targetScrollPresentation
-        )
-        let boundaryAvailability = Self.presentationScrollBoundaryAvailability(
+        let scrollBounds = Self.presentationScrollBounds(
             for: targetWindowContent,
             scrollPresentation: targetScrollPresentation
         )
@@ -1943,10 +1952,10 @@ final class EditorNSView: MTKView {
             scrollPresentation: targetScrollPresentation,
             scrollOffsetY: compensatedOffsetY,
             scrollDeltaY: lockedDeltaY,
-            payloadOverscanBefore: payloadOverscan.before,
-            payloadOverscanAfter: payloadOverscan.after,
-            boundaryBefore: boundaryAvailability.before,
-            boundaryAfter: boundaryAvailability.after
+            payloadOverscanBefore: scrollBounds.payloadBefore,
+            payloadOverscanAfter: scrollBounds.payloadAfter,
+            boundaryBefore: scrollBounds.boundaryBefore,
+            boundaryAfter: scrollBounds.boundaryAfter
         )
         let suppressLocalOffset = scrollTargetWindowId == nil || isSelectionDragActive
         let offsetX = suppressLocalOffset ? 0 : scrollAccumulator.pixelOffsetX
@@ -2302,11 +2311,17 @@ final class EditorNSView: MTKView {
 
     /// Result of classifying a vertical scroll delta against the pane's content and boundaries.
     enum ScrollTranslation: Equatable {
-        /// Scrolling within real content: present the given fractional offset, no rubber band.
         case content(offsetY: CGFloat)
-        /// Overscrolling past a document edge: the caller accumulates `pullDelta` (px) into the
-        /// rubber-band curve. The presented content offset is pinned to the boundary (0).
         case elastic(pullDelta: CGFloat)
+    }
+
+    struct PresentationScrollBounds: Equatable {
+        let payloadBefore: Int
+        let payloadAfter: Int
+        let boundaryBefore: Int
+        let boundaryAfter: Int
+
+        static let zero = PresentationScrollBounds(payloadBefore: 0, payloadAfter: 0, boundaryBefore: 0, boundaryAfter: 0)
     }
 
     /// Classifies a vertical scroll delta as in-content or overscroll (rubber band).
@@ -2356,38 +2371,74 @@ final class EditorNSView: MTKView {
         return next
     }
 
+    nonisolated static func presentationScrollBounds(
+        for windowContent: GUIWindowContent?,
+        scrollPresentation: GUIScrollPresentation?
+    ) -> PresentationScrollBounds {
+        guard let scrollPresentation else { return .zero }
+
+        let before = windowContent.map {
+            CoreTextMetalRenderer.presentationPayloadOverscanBeforeRows(rows: $0.rows, scrollPresentation: scrollPresentation)
+        } ?? CoreTextMetalRenderer.scrollOverscanBefore(scrollPresentation)
+
+        let totalLines = windowContent?.paneGeometry?.viewport.totalLines
+        let isResident = totalLines.map {
+            $0 > 0 && Self.thumbDragCanPresentLocally(scrollPresentation: scrollPresentation, totalLines: $0)
+        } ?? false
+
+        let payloadAfter: Int
+        if let windowContent {
+            let visibleRows = presentationPayloadVisibleRows(for: windowContent)
+            if visibleRows > 0 {
+                let rawAfter = max(windowContent.rows.count - visibleRows - before, 0)
+                if rawAfter > 0 {
+                    payloadAfter = rawAfter
+                } else if isResident {
+                    payloadAfter = max(Int(totalLines!) - 1 - Int(scrollPresentation.anchorTop), 0)
+                } else {
+                    payloadAfter = 0
+                }
+            } else {
+                payloadAfter = max(0, Int(scrollPresentation.overscanEndLine) - Int(scrollPresentation.visibleEndLine))
+            }
+        } else {
+            payloadAfter = max(0, Int(scrollPresentation.overscanEndLine) - Int(scrollPresentation.visibleEndLine))
+        }
+
+        let hasContentBefore = scrollPresentation.anchorTop > 0 || scrollPresentation.anchorVisualRowOffset > 0 || before > 0
+        let hasContentAfter: Bool
+        if let totalLines, totalLines > 0 {
+            if isResident {
+                hasContentAfter = scrollPresentation.anchorTop < totalLines - 1 || payloadAfter > 0
+            } else {
+                hasContentAfter = scrollPresentation.visibleEndLine < totalLines || payloadAfter > 0
+            }
+        } else {
+            hasContentAfter = payloadAfter > 0
+        }
+
+        return PresentationScrollBounds(
+            payloadBefore: before,
+            payloadAfter: payloadAfter,
+            boundaryBefore: hasContentBefore ? 1 : 0,
+            boundaryAfter: hasContentAfter ? 1 : 0
+        )
+    }
+
     nonisolated static func presentationScrollBoundaryAvailability(
         for windowContent: GUIWindowContent?,
         scrollPresentation: GUIScrollPresentation?
     ) -> (before: Int, after: Int) {
-        guard let scrollPresentation else { return (0, 0) }
-
-        let payload = presentationScrollPayloadOverscanBounds(for: windowContent, scrollPresentation: scrollPresentation)
-        let hasContentBefore = scrollPresentation.anchorTop > 0 || scrollPresentation.anchorVisualRowOffset > 0 || payload.before > 0
-        let hasContentAfter: Bool
-        if let totalLines = windowContent?.paneGeometry?.viewport.totalLines, totalLines > 0 {
-            hasContentAfter = scrollPresentation.visibleEndLine < totalLines || payload.after > 0
-        } else {
-            hasContentAfter = payload.after > 0
-        }
-
-        return (hasContentBefore ? 1 : 0, hasContentAfter ? 1 : 0)
+        let bounds = presentationScrollBounds(for: windowContent, scrollPresentation: scrollPresentation)
+        return (bounds.boundaryBefore, bounds.boundaryAfter)
     }
 
     nonisolated static func presentationScrollPayloadOverscanBounds(
         for windowContent: GUIWindowContent?,
         scrollPresentation: GUIScrollPresentation?
     ) -> (before: Int, after: Int) {
-        guard let scrollPresentation else { return (0, 0) }
-        let before = windowContent.map { CoreTextMetalRenderer.presentationPayloadOverscanBeforeRows(rows: $0.rows, scrollPresentation: scrollPresentation) } ?? CoreTextMetalRenderer.scrollOverscanBefore(scrollPresentation)
-        if let windowContent {
-            let visibleRows = presentationPayloadVisibleRows(for: windowContent)
-            if visibleRows > 0 {
-                return (before, max(windowContent.rows.count - visibleRows - before, 0))
-            }
-        }
-        let after = max(0, Int(scrollPresentation.overscanEndLine) - Int(scrollPresentation.visibleEndLine))
-        return (before, after)
+        let bounds = presentationScrollBounds(for: windowContent, scrollPresentation: scrollPresentation)
+        return (bounds.payloadBefore, bounds.payloadAfter)
     }
 
     nonisolated static func presentationPayloadVisibleRows(for windowContent: GUIWindowContent) -> Int {

@@ -54,6 +54,7 @@ enum EditorScrollTrack {
         totalLines: UInt32,
         visibleRows: UInt32,
         viewportTopLine: UInt32,
+        resident: Bool = false,
         minThumbHeight: CGFloat = Self.minThumbHeight
     ) -> Thumb? {
         guard totalLines > visibleRows, viewHeight > 0 else { return nil }
@@ -62,7 +63,7 @@ enum EditorScrollTrack {
         let proportion = CGFloat(visibleRows) / CGFloat(totalLines)
         let thumbHeight = min(viewHeight, max(proportion * viewHeight, minThumbHeight))
         let travelHeight = max(viewHeight - thumbHeight, 0)
-        let maxTop = maxScrollableTop(totalLines: totalLines, visibleRows: visibleRows)
+        let maxTop = maxScrollableTop(totalLines: totalLines, visibleRows: visibleRows, resident: resident)
         let clampedTopLine = min(viewportTopLine, maxTop)
         let y = travelHeight > 0 ? (CGFloat(clampedTopLine) / CGFloat(maxTop)) * travelHeight : 0
         return Thumb(y: y, height: thumbHeight, travelHeight: travelHeight)
@@ -81,6 +82,7 @@ enum EditorScrollTrack {
         viewHeight: CGFloat,
         totalLines: UInt32,
         visibleRows: UInt32,
+        resident: Bool = false,
         minThumbHeight: CGFloat = Self.minThumbHeight
     ) -> UInt32 {
         guard let thumb = thumb(
@@ -88,13 +90,14 @@ enum EditorScrollTrack {
             totalLines: totalLines,
             visibleRows: visibleRows,
             viewportTopLine: 0,
+            resident: resident,
             minThumbHeight: minThumbHeight
         ) else { return 0 }
         guard thumb.travelHeight > 0 else { return 0 }
 
         let thumbY = max(0, min(thumb.travelHeight, y - dragOffset))
         let proportion = thumbY / thumb.travelHeight
-        let maxTop = maxScrollableTop(totalLines: totalLines, visibleRows: visibleRows)
+        let maxTop = maxScrollableTop(totalLines: totalLines, visibleRows: visibleRows, resident: resident)
         return UInt32(max(0, min(Int64(maxTop), Int64(Double(proportion) * Double(maxTop)))))
     }
 
@@ -106,17 +109,19 @@ enum EditorScrollTrack {
         forY y: CGFloat,
         viewHeight: CGFloat,
         totalLines: UInt32,
-        visibleRows: UInt32
+        visibleRows: UInt32,
+        resident: Bool = false
     ) -> UInt32 {
         guard totalLines > visibleRows, viewHeight > 0 else { return 0 }
 
         let clampedY = max(0, min(viewHeight, y))
         let proportion = clampedY / viewHeight
-        let maxTop = maxScrollableTop(totalLines: totalLines, visibleRows: visibleRows)
+        let maxTop = maxScrollableTop(totalLines: totalLines, visibleRows: visibleRows, resident: resident)
         return UInt32(max(0, min(Int64(maxTop), Int64(Double(proportion) * Double(maxTop)))))
     }
 
-    private static func maxScrollableTop(totalLines: UInt32, visibleRows: UInt32) -> UInt32 {
-        UInt32(max(Int64(totalLines) - Int64(visibleRows), 1))
+    static func maxScrollableTop(totalLines: UInt32, visibleRows: UInt32, resident: Bool) -> UInt32 {
+        let subtract: Int64 = resident ? 1 : Int64(visibleRows)
+        return UInt32(max(Int64(totalLines) - subtract, 1))
     }
 }
