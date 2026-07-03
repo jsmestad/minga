@@ -57,6 +57,7 @@ struct FrameState {
     // NOT cleared between frames: stale data serves as fallback to
     // prevent blank-gutter flash if the gutter command hasn't arrived yet.
     var windowGutters: [UInt16: Wire.WindowGutter] = [:]
+    var activeWindowId: UInt16?
 
     // Split separator data from gui_split_separators (0x84).
     var splitBorderColor: UInt32 = 0

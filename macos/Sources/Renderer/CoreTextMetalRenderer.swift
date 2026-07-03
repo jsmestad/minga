@@ -1206,8 +1206,7 @@ final class CoreTextMetalRenderer {
         let viewportTop = frameState.viewportTopLine
 
         let scrollIndicatorResident: Bool = {
-            guard let wid = frameState.windowGutters.values.filter(\.isActive)
-                      .sorted(by: { $0.windowId < $1.windowId }).first?.windowId,
+            guard let wid = frameState.activeWindowId,
                   let content = windowContents[wid],
                   let sp = content.scrollPresentation else { return false }
             let perWindowTotal = content.paneGeometry?.viewport.totalLines ?? totalLines
