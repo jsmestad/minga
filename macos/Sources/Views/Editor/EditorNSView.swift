@@ -981,7 +981,8 @@ final class EditorNSView: MTKView {
             viewHeight: bounds.height,
             totalLines: fs.totalLineCount,
             visibleRows: UInt32(fs.rows),
-            viewportTopLine: fs.viewportTopLine
+            viewportTopLine: fs.viewportTopLine,
+            resident: activeWindowIsResident
         ) else { return nil }
         return EditorScrollTrack.dragOffset(forY: y, thumb: thumb)
     }
@@ -990,6 +991,7 @@ final class EditorNSView: MTKView {
     private func scrollTrackYToLine(_ y: CGFloat) -> UInt32 {
         let fs = dispatcher.frameState
         let visibleRows = UInt32(fs.rows)
+        let resident = activeWindowIsResident
 
         if let scrollIndicatorDragOffset {
             return EditorScrollTrack.line(
@@ -997,7 +999,8 @@ final class EditorNSView: MTKView {
                 dragOffset: scrollIndicatorDragOffset,
                 viewHeight: bounds.height,
                 totalLines: fs.totalLineCount,
-                visibleRows: visibleRows
+                visibleRows: visibleRows,
+                resident: resident
             )
         }
 
@@ -1005,7 +1008,8 @@ final class EditorNSView: MTKView {
             forY: y,
             viewHeight: bounds.height,
             totalLines: fs.totalLineCount,
-            visibleRows: visibleRows
+            visibleRows: visibleRows,
+            resident: resident
         )
     }
 
@@ -1020,6 +1024,15 @@ final class EditorNSView: MTKView {
             .sorted { $0.windowId < $1.windowId }
             .first?
             .windowId
+    }
+
+    private var activeWindowIsResident: Bool {
+        guard let windowId = activeWindowId,
+              let content = guiState?.windowContents[windowId] else { return false }
+        return Self.thumbDragCanPresentLocally(
+            scrollPresentation: content.scrollPresentation,
+            totalLines: content.paneGeometry?.viewport.totalLines ?? dispatcher.frameState.totalLineCount
+        )
     }
 
     /// Establishes resident local presentation for a thumb drag if the active pane is resident,
@@ -2366,7 +2379,12 @@ final class EditorNSView: MTKView {
         let hasContentBefore = scrollPresentation.anchorTop > 0 || scrollPresentation.anchorVisualRowOffset > 0 || payload.before > 0
         let hasContentAfter: Bool
         if let totalLines = windowContent?.paneGeometry?.viewport.totalLines, totalLines > 0 {
-            hasContentAfter = scrollPresentation.visibleEndLine < totalLines || payload.after > 0
+            let isResident = scrollPresentation.overscanStartLine == 0 && scrollPresentation.overscanEndLine >= totalLines
+            if isResident {
+                hasContentAfter = scrollPresentation.anchorTop < totalLines - 1 || payload.after > 0
+            } else {
+                hasContentAfter = scrollPresentation.visibleEndLine < totalLines || payload.after > 0
+            }
         } else {
             hasContentAfter = payload.after > 0
         }
@@ -2383,7 +2401,16 @@ final class EditorNSView: MTKView {
         if let windowContent {
             let visibleRows = presentationPayloadVisibleRows(for: windowContent)
             if visibleRows > 0 {
-                return (before, max(windowContent.rows.count - visibleRows - before, 0))
+                let payloadAfter = max(windowContent.rows.count - visibleRows - before, 0)
+                if payloadAfter > 0 { return (before, payloadAfter) }
+                if let totalLines = windowContent.paneGeometry?.viewport.totalLines, totalLines > 0 {
+                    let isResident = scrollPresentation.overscanStartLine == 0 && scrollPresentation.overscanEndLine >= totalLines
+                    if isResident {
+                        let scrollAfter = max(Int(totalLines) - 1 - Int(scrollPresentation.anchorTop), 0)
+                        return (before, scrollAfter)
+                    }
+                }
+                return (before, 0)
             }
         }
         let after = max(0, Int(scrollPresentation.overscanEndLine) - Int(scrollPresentation.visibleEndLine))
