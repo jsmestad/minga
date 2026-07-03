@@ -120,10 +120,8 @@ enum EditorScrollTrack {
         return UInt32(max(0, min(Int64(maxTop), Int64(Double(proportion) * Double(maxTop)))))
     }
 
-    private static func maxScrollableTop(totalLines: UInt32, visibleRows: UInt32, resident: Bool) -> UInt32 {
-        if resident {
-            return UInt32(max(Int64(totalLines) - 1, 1))
-        }
-        return UInt32(max(Int64(totalLines) - Int64(visibleRows), 1))
+    static func maxScrollableTop(totalLines: UInt32, visibleRows: UInt32, resident: Bool) -> UInt32 {
+        let subtract: Int64 = resident ? 1 : Int64(visibleRows)
+        return UInt32(max(Int64(totalLines) - subtract, 1))
     }
 }
