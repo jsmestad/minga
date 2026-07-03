@@ -32,6 +32,11 @@ enum LiveResizeDebounce {
             self.interval = interval
             self.maxWait = maxWait
         }
+
+        /// The one production tuning for window live-resize (75ms trailing, 250ms cap).
+        /// Tests reference this same value so a retune can never silently desync the
+        /// suite from what ships.
+        static let liveResize = Config(interval: 0.075, maxWait: 0.25)
     }
 
     /// What to do with a resize event observed at a given time.
@@ -86,10 +91,28 @@ struct LiveResizeBookkeeping: Equatable {
         }
     }
 
+    /// The two legal states, as one value: either nothing is pending, or a grid is pending
+    /// with the burst-start time that feeds the max-wait cap. An enum spine (same convention
+    /// as `ThumbDragSession.Phase`) makes "pending grid without a burst start" — the state a
+    /// desynced optional pair could reach — unrepresentable by construction.
+    private enum State: Equatable {
+        case idle
+        case pending(Grid, since: TimeInterval)
+    }
+
+    private var state: State = .idle
+
     /// The latest live grid awaiting a flush, or nil when nothing is pending.
-    private(set) var pending: Grid?
-    /// When the current unflushed burst began (`CACurrentMediaTime`), feeding the max-wait cap.
-    private(set) var firstPendingAt: TimeInterval?
+    var pending: Grid? {
+        guard case .pending(let grid, _) = state else { return nil }
+        return grid
+    }
+
+    /// When the current unflushed burst began (`CACurrentMediaTime`), or nil when idle.
+    var firstPendingAt: TimeInterval? {
+        guard case .pending(_, let since) = state else { return nil }
+        return since
+    }
 
     init() {}
 
@@ -114,20 +137,17 @@ struct LiveResizeBookkeeping: Equatable {
             // Drag returned to the committed size: there is nothing to commit. Drop any pending
             // resize so a later flush can't send a stale (dragged-away) grid for the committed one.
             let hadPending = pending != nil
-            pending = nil
-            firstPendingAt = nil
+            state = .idle
             return hadPending ? .cancelPending : .noop
         }
 
         let decision = LiveResizeDebounce.onResize(now: now, firstPendingAt: firstPendingAt, config: config)
-        pending = live
         switch decision {
         case .flushNow:
-            pending = nil
-            firstPendingAt = nil
+            state = .idle
             return .flushNow(live)
         case .deferUntil(let deadline):
-            if firstPendingAt == nil { firstPendingAt = now }
+            state = .pending(live, since: firstPendingAt ?? now)
             return .schedule(deadline)
         }
     }
@@ -136,9 +156,8 @@ struct LiveResizeBookkeeping: Equatable {
     /// Returns nil when there is nothing to send: no pending grid, or the pending grid already
     /// matches the committed grid (the drag-away-and-back guard, applied again at flush time).
     mutating func takeFlush(committed: Grid) -> Grid? {
-        firstPendingAt = nil
-        guard let grid = pending else { return nil }
-        pending = nil
+        guard case .pending(let grid, _) = state else { return nil }
+        state = .idle
         guard grid != committed else { return nil }
         return grid
     }

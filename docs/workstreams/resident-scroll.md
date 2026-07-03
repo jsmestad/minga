@@ -42,7 +42,7 @@ Applied and approved so far:
 
 - Buffer scrolling: epic [#2652](https://github.com/jsmestad/minga/issues/2652), ready-now slice [#2653](https://github.com/jsmestad/minga/issues/2653).
 - Agent chat transcript residency: [#2654](https://github.com/jsmestad/minga/issues/2654), after #2652's store lifecycle lands.
-- Live resize as local presentation with debounced re-layout: [#2655](https://github.com/jsmestad/minga/issues/2655).
+- Live resize as local presentation with debounced re-layout: [#2655](https://github.com/jsmestad/minga/issues/2655) — **shipped**: during a window-edge drag the GUI presents the last committed frame as a top-left crop and defers re-layout through a trailing debounce (75ms, 250ms max-wait, `LiveResizeBookkeeping` in `LiveResizeDebounce.swift`); the flush is GUI-side only (#2699 sole-emitter), the BEAM and TUI are untouched.
 
 Considered and deliberately skipped for now (revisit only with evidence of real latency pain): local fuzzy-filtering in pickers/completion (duplicates match semantics per frontend), keymap-trie prefetch for instant which-key, and local incremental-search highlighting (duplicates regex semantics; prefer BEAM-computed match spans over the resident store).
 

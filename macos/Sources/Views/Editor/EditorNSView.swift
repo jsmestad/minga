@@ -108,17 +108,18 @@ final class EditorNSView: MTKView {
     /// keep presenting the last committed frame cropped top-left (the renderer anchors content
     /// in pixel space and fills the grown region with the editor background) and defer the
     /// re-layout to the trailing edge, so the BEAM does one committed re-layout instead of one
-    /// per resize event. The state machine is a pure value type for testability.
-    private var resizeBookkeeping = LiveResizeBookkeeping()
+    /// per resize event. The state machine is a pure value type for testability; the field is
+    /// internal (not private) so integration tests can seed a pending grid and pin the
+    /// exactly-once flush behavior of the wiring.
+    var resizeBookkeeping = LiveResizeBookkeeping()
 
     /// Trailing-edge flush scheduled during a live resize. Cancelled/rescheduled on each resize
     /// frame and flushed immediately at `viewDidEndLiveResize`. Structured concurrency (not a
     /// `DispatchWorkItem`) so the closure is provably main-actor isolated (macOS AGENTS.md).
-    private var resizeDebounceTask: Task<Void, Never>?
+    /// Internal for the same test-seam reason as `resizeBookkeeping`.
+    var resizeDebounceTask: Task<Void, Never>?
 
-    /// Trailing quiescence (75ms) with a 250ms max-wait cap so a continuous drag still
-    /// re-lays out at a bounded rate (AC3) instead of cropping a stale frame forever.
-    private static let resizeDebounceConfig = LiveResizeDebounce.Config(interval: 0.075, maxWait: 0.25)
+    private static let resizeDebounceConfig = LiveResizeDebounce.Config.liveResize
 
     /// Whether macOS has put the displays to sleep. BEAM state may keep changing,
     /// but the Metal surface must not schedule GPU work until screens wake.
@@ -264,6 +265,9 @@ final class EditorNSView: MTKView {
         spaceGraceTimer?.cancel()
         spaceGraceTimer = nil
         cancelResizeFlushTask()
+        // Unlike the thumb drag above (always flushed), a pending resize is deliberately
+        // discarded here: the window is being torn down, so there is no surface left for
+        // the BEAM to lay out.
         resizeBookkeeping = LiveResizeBookkeeping()
         dividerDragState = .none
         setDividerCursorState(.none)
@@ -846,6 +850,10 @@ final class EditorNSView: MTKView {
     /// computed against the old geometry and must not fight the resize.
     override func viewWillStartLiveResize() {
         super.viewWillStartLiveResize()
+        // The crop presented during the drag relies on the drawable auto-tracking the
+        // view (see handleLiveResize); catch a future autoResizeDrawable flip loudly
+        // instead of silently sample-stretching every resize.
+        assert(autoResizeDrawable, "live-resize crop requires MTKView.autoResizeDrawable")
         resetSmoothScrollState()
         // resetSmoothScrollState deliberately spares a live thumb drag; a window
         // resize invalidates the drag's geometry, so it is a forced-reset path:
@@ -853,10 +861,21 @@ final class EditorNSView: MTKView {
         cancelThumbDragWithFlush()
         isDraggingScrollIndicator = false
         scrollIndicatorDragOffset = nil
-        // Drop any in-flight text-drag anchor: pointer input is deferred during the
-        // resize (AC5), so a mouseUp that would clear it may never arrive.
+        // Pointer input is dropped during the resize (AC5), so a mouseUp that would
+        // end an in-flight press may never reach the BEAM. Mirror the thumb-drag
+        // rule: complete the gesture (send the release) before clearing its state.
+        if leftMouseDownPoint != nil {
+            let point = leftMouseDownPoint ?? .zero
+            let (row, col) = rawCellPosition(at: point)
+            encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_LEFT,
+                                   modifiers: 0, eventType: MOUSE_RELEASE)
+        }
         leftMouseDownPoint = nil
         leftMouseDragStarted = false
+        if dividerDragState != .none {
+            dividerDragState = .none
+            setDividerCursorState(.none)
+        }
     }
 
     /// The drag ended. Flush any deferred resize immediately so the view snaps once to a
@@ -917,7 +936,8 @@ final class EditorNSView: MTKView {
     /// Flushes any deferred resize to the BEAM (one committed re-layout) and clears the
     /// debounce bookkeeping. Idempotent: a no-op when nothing is pending or the pending grid
     /// already matches the committed frame (the drag-away-and-back guard, re-applied here).
-    private func flushPendingResize() {
+    /// Internal so integration tests can pin the exactly-once/idempotent contract.
+    func flushPendingResize() {
         cancelResizeFlushTask()
         let committed = LiveResizeBookkeeping.Grid(cols: dispatcher.frameState.cols, rows: dispatcher.frameState.rows)
         guard let target = resizeBookkeeping.takeFlush(committed: committed) else { return }
@@ -1513,9 +1533,12 @@ final class EditorNSView: MTKView {
     // MARK: - Mouse
 
     override func mouseDown(with event: NSEvent) {
-        // Defer pointer input while a live resize is in flight (#2655, AC5): the view
+        // Drop pointer input while a live resize is in flight (#2655, AC5): the view
         // geometry is changing and the on-screen content is a crop of the last committed
-        // frame, so a hit-test would map against stale, in-flux geometry.
+        // frame, so a hit-test would map against stale, in-flux geometry. Events are
+        // discarded, not queued: nothing is replayed after the resize ends. The same
+        // guard gates every geometry-hit-testing handler below; press/release pairs
+        // that straddle a resize are completed by viewWillStartLiveResize instead.
         guard !inLiveResize else { return }
         reclaimFirstResponderIfNeeded()
 
@@ -1574,6 +1597,9 @@ final class EditorNSView: MTKView {
     }
 
     override func rightMouseDown(with event: NSEvent) {
+        // Dropped during a live resize (see mouseDown). The matching rightMouseUp stays
+        // ungated so a press that straddles the resize still delivers its release.
+        guard !inLiveResize else { return }
         reclaimFirstResponderIfNeeded()
         resetCursorBlink()
         let (row, col) = cellPosition(from: event)
@@ -1647,6 +1673,9 @@ final class EditorNSView: MTKView {
     }
 
     override func otherMouseDown(with event: NSEvent) {
+        // Dropped during a live resize (see mouseDown). otherMouseUp stays ungated so a
+        // press that straddles the resize still delivers its release.
+        guard !inLiveResize else { return }
         reclaimFirstResponderIfNeeded()
         let (row, col) = cellPosition(from: event)
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_MIDDLE,
@@ -1789,6 +1818,10 @@ final class EditorNSView: MTKView {
     }
 
     override func scrollWheel(with event: NSEvent) {
+        // Dropped during a live resize like the left-mouse family (see mouseDown): a wheel
+        // event mid-resize would hit-test in-flux geometry and re-establish the scroll
+        // offset the resize discard just cleared.
+        guard !inLiveResize else { return }
         // A resident thumb drag owns scroll presentation while the button is held: ignore concurrent
         // wheel input so the two do not fight over the offset. A post-release reconcile (button up)
         // is superseded by a fresh wheel gesture, so flush-and-drop it and let the wheel take over.
@@ -2487,6 +2520,9 @@ final class EditorNSView: MTKView {
     private let fontSizeReset: UInt8 = 0x02
 
     override func magnify(with event: NSEvent) {
+        // Dropped during a live resize (see mouseDown): font-size changes mid-resize
+        // would invalidate the committed grid the crop is presenting.
+        guard !inLiveResize else { return }
         switch event.phase {
         case .began:
             magnifyAccumulator = 0

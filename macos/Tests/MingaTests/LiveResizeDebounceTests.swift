@@ -1,11 +1,14 @@
 import Testing
 import Foundation
+import AppKit
 import MingaUI
+import MingaProtocol
 
 /// Tests for the pure live-resize debounce decision and the crop-fill guarantee (#2655).
 @Suite("Live-resize presentation (#2655)")
 struct LiveResizeDebounceTests {
-    private let config = LiveResizeDebounce.Config(interval: 0.075, maxWait: 0.25)
+    // The production tuning, not a copy: a retune cannot silently desync the suite.
+    private let config = LiveResizeDebounce.Config.liveResize
 
     /// Unwraps a `.deferUntil` deadline, failing the test on `.flushNow`.
     private func deadline(_ decision: LiveResizeDebounce.Decision) -> TimeInterval? {
@@ -147,6 +150,44 @@ struct LiveResizeDebounceTests {
         #expect(bk.takeFlush(committed: grid(80, 50)) == nil)
     }
 
+    @Test("drag-away-and-back-and-away-again restarts the max-wait clock from the second departure")
+    func dragAwayBackAwayRestartsBurstClock() {
+        var bk = LiveResizeBookkeeping()
+        let g0 = grid(100, 50)
+
+        // First departure at t=0 starts a burst.
+        #expect(bk.onFrame(live: grid(80, 50), committed: g0, now: 0.0, config: config) == .schedule(0.075))
+        // Back to committed at t=0.02 cancels it entirely.
+        #expect(bk.onFrame(live: g0, committed: g0, now: 0.02, config: config) == .cancelPending)
+        // Second departure at t=0.03 must start a FRESH burst: trailing edge from the new
+        // now (0.105), not clamped against the stale t=0 burst start. A regression that
+        // fails to reset the burst clock on cancel would fire the max-wait cap early here.
+        #expect(bk.onFrame(live: grid(70, 50), committed: g0, now: 0.03, config: config) == .schedule(0.105))
+        #expect(bk.firstPendingAt == 0.03)
+    }
+
+    @Test("a trailing flush mid-pause commits, then a resumed drag opens a fresh burst")
+    func trailingFlushMidPauseThenResumedDrag() {
+        var bk = LiveResizeBookkeeping()
+        var committed = grid(100, 50)
+        let g1 = grid(80, 50)
+
+        // Drag, then pause: the trailing timer fires and takes the flush while the live
+        // resize is still in progress (user is holding the edge, not moving).
+        #expect(bk.onFrame(live: g1, committed: committed, now: 0.0, config: config) == .schedule(0.075))
+        #expect(bk.takeFlush(committed: committed) == g1)
+        committed = g1 // sendLiveResize applied the viewport resize
+
+        // Drag resumes 200ms later: a genuinely fresh burst against the new committed
+        // grid, with the max-wait cap anchored at the resumed time.
+        let g2 = grid(60, 50)
+        #expect(bk.onFrame(live: g2, committed: committed, now: 0.2, config: config) == .schedule(0.275))
+        #expect(bk.firstPendingAt == 0.2)
+
+        // Release commits the second burst's grid.
+        #expect(bk.takeFlush(committed: committed) == g2)
+    }
+
     // MARK: - Crop-fill guarantee
 
     @Test("growing the window mid-drag fills the newly exposed region below the committed rows")
@@ -173,5 +214,92 @@ struct LiveResizeDebounceTests {
         // The fill reaches the grown drawable edge, not just the committed content bottom.
         #expect(fill?.bottom == grownHeight)
         #expect((fill?.bottom ?? 0) > committedHeight)
+    }
+}
+
+/// Integration tests for the EditorNSView live-resize wiring: the exactly-once flush and
+/// the gesture teardown at resize start. These drive the real view methods headlessly
+/// (viewWillStartLiveResize / flushPendingResize are plain overrides/internal methods),
+/// pinning the guarantees the pure state machine alone cannot: Task bookkeeping, encoder
+/// sends, and the press-release contract with the BEAM.
+@Suite("Live-resize view wiring (#2655)")
+struct LiveResizeWiringTests {
+    @MainActor
+    private func makeView(spy: SpyEncoder) -> EditorNSView? {
+        let face = FontFace(name: "Menlo", size: 13.0, scale: 1.0)
+        let fm = FontManager(name: "Menlo", size: 13.0, scale: 1.0)
+        let guiState = GUIState()
+        let disp = CommandDispatcher(cols: 80, rows: 24, guiState: guiState)
+        guard let ctRenderer = CoreTextMetalRenderer() else { return nil }
+        ctRenderer.setupRenderers(fontManager: fm)
+        let view = EditorNSView(encoder: spy, fontFace: face, dispatcher: disp,
+                                coreTextRenderer: ctRenderer, fontManager: fm)
+        view.guiState = guiState
+        view.frame = NSRect(x: 0, y: 0,
+                            width: CGFloat(face.cellWidth) * 80,
+                            height: CGFloat(face.cellHeight) * 24)
+        return view
+    }
+
+    @MainActor
+    @Test("flushPendingResize sends the pending grid exactly once and is then idempotent")
+    func flushPendingResizeIsExactlyOnce() throws {
+        let spy = SpyEncoder()
+        // Skip gracefully when Metal is unavailable (headless local runs), like
+        // MouseInputTests; CI runs these for real.
+        guard let view = makeView(spy: spy) else { return }
+
+        // Seed a pending grid through the real state machine against the committed 80x24.
+        let committed = LiveResizeBookkeeping.Grid(cols: 80, rows: 24)
+        let dragged = LiveResizeBookkeeping.Grid(cols: 100, rows: 30)
+        _ = view.resizeBookkeeping.onFrame(live: dragged, committed: committed, now: 0.0,
+                                           config: .liveResize)
+
+        view.flushPendingResize()
+        #expect(spy.resizeCalls.count == 1)
+        #expect(spy.resizeCalls.first?.cols == 100)
+        #expect(spy.resizeCalls.first?.rows == 30)
+        #expect(view.resizeDebounceTask == nil)
+
+        // A second flush (e.g. the release path racing a fired trailing task) sends nothing.
+        view.flushPendingResize()
+        #expect(spy.resizeCalls.count == 1)
+    }
+
+    @MainActor
+    @Test("resize start releases an outstanding left press so the BEAM never keeps a stuck press")
+    func resizeStartReleasesOutstandingPress() throws {
+        let spy = SpyEncoder()
+        guard let view = makeView(spy: spy) else { return }
+
+        let down = try #require(NSEvent.mouseEvent(
+            with: .leftMouseDown, location: NSPoint(x: 40, y: 40), modifierFlags: [],
+            timestamp: 0, windowNumber: 0, context: nil, eventNumber: 1,
+            clickCount: 1, pressure: 1))
+        view.mouseDown(with: down)
+        #expect(spy.mouseEventCalls.last?.eventType == MOUSE_PRESS)
+        let pressCount = spy.mouseEventCalls.count
+
+        // The resize begins before any mouseUp is delivered; the up will be dropped by the
+        // inLiveResize guard, so the teardown must complete the gesture itself.
+        view.viewWillStartLiveResize()
+
+        let release = try #require(spy.mouseEventCalls.last)
+        #expect(spy.mouseEventCalls.count == pressCount + 1)
+        #expect(release.button == MOUSE_BUTTON_LEFT)
+        #expect(release.eventType == MOUSE_RELEASE)
+
+        // The teardown is idempotent: a second resize start (no press outstanding) sends nothing.
+        view.viewWillStartLiveResize()
+        #expect(spy.mouseEventCalls.count == pressCount + 1)
+    }
+
+    @MainActor
+    @Test("resize start with no outstanding press sends no synthetic release")
+    func resizeStartWithoutPressSendsNothing() throws {
+        let spy = SpyEncoder()
+        guard let view = makeView(spy: spy) else { return }
+        view.viewWillStartLiveResize()
+        #expect(spy.mouseEventCalls.isEmpty)
     }
 }
