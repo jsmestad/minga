@@ -206,6 +206,14 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 	} else if len(m.windowOrder) <= 1 {
 		height = max(height, m.bodyHeight())
 	}
+	// The BEAM's ContentRect.Height does not account for the Go TUI's header
+	// chrome (tabs, breadcrumbs), so it can exceed the actual visible body
+	// area. Cap height to bodyHeight so scroll bounds and rendering agree
+	// with the real viewport, preventing the last lines from being clipped
+	// behind the footer.
+	if body := m.bodyHeight(); height > body && body > 0 {
+		height = body
+	}
 	// Scrollbar: reserve the rightmost column when total content exceeds the
 	// viewport height so the thumb indicator can be drawn there.
 	sb := computeScrollbar(window, height)
