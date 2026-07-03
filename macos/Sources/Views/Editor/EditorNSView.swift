@@ -2379,8 +2379,7 @@ final class EditorNSView: MTKView {
         let hasContentBefore = scrollPresentation.anchorTop > 0 || scrollPresentation.anchorVisualRowOffset > 0 || payload.before > 0
         let hasContentAfter: Bool
         if let totalLines = windowContent?.paneGeometry?.viewport.totalLines, totalLines > 0 {
-            let isResident = scrollPresentation.overscanStartLine == 0 && scrollPresentation.overscanEndLine >= totalLines
-            if isResident {
+            if Self.thumbDragCanPresentLocally(scrollPresentation: scrollPresentation, totalLines: totalLines) {
                 hasContentAfter = scrollPresentation.anchorTop < totalLines - 1 || payload.after > 0
             } else {
                 hasContentAfter = scrollPresentation.visibleEndLine < totalLines || payload.after > 0
@@ -2403,12 +2402,10 @@ final class EditorNSView: MTKView {
             if visibleRows > 0 {
                 let payloadAfter = max(windowContent.rows.count - visibleRows - before, 0)
                 if payloadAfter > 0 { return (before, payloadAfter) }
-                if let totalLines = windowContent.paneGeometry?.viewport.totalLines, totalLines > 0 {
-                    let isResident = scrollPresentation.overscanStartLine == 0 && scrollPresentation.overscanEndLine >= totalLines
-                    if isResident {
-                        let scrollAfter = max(Int(totalLines) - 1 - Int(scrollPresentation.anchorTop), 0)
-                        return (before, scrollAfter)
-                    }
+                if let totalLines = windowContent.paneGeometry?.viewport.totalLines, totalLines > 0,
+                   Self.thumbDragCanPresentLocally(scrollPresentation: scrollPresentation, totalLines: totalLines) {
+                    let scrollAfter = max(Int(totalLines) - 1 - Int(scrollPresentation.anchorTop), 0)
+                    return (before, scrollAfter)
                 }
                 return (before, 0)
             }

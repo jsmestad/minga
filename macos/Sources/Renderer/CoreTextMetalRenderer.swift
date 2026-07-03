@@ -1206,9 +1206,12 @@ final class CoreTextMetalRenderer {
         let viewportTop = frameState.viewportTopLine
 
         let scrollIndicatorResident: Bool = {
-            guard let wid = frameState.windowGutters.values.first(where: \.isActive)?.windowId,
-                  let sp = windowContents[wid]?.scrollPresentation else { return false }
-            return sp.overscanStartLine == 0 && sp.overscanEndLine >= totalLines
+            guard let wid = frameState.windowGutters.values.filter(\.isActive)
+                      .sorted(by: { $0.windowId < $1.windowId }).first?.windowId,
+                  let content = windowContents[wid],
+                  let sp = content.scrollPresentation else { return false }
+            let perWindowTotal = content.paneGeometry?.viewport.totalLines ?? totalLines
+            return perWindowTotal > 0 && sp.overscanStartLine == 0 && sp.overscanEndLine >= perWindowTotal
         }()
 
         if totalLines > visibleRows && viewportTop != 0xFFFF_FFFF && scrollIndicatorAlpha > 0 {
