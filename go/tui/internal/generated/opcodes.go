@@ -99,6 +99,7 @@ const (
 	OPGuiFloatPopup          byte = 0x83
 	OPGuiSplitSeparators     byte = 0x84
 	OPGuiGitStatus           byte = 0x85
+	OPGuiAgentTranscript     byte = 0x86
 	OPGuiAgentContext        byte = 0x88
 	OPGuiChangeSummary       byte = 0x89
 	OPGuiHoverAction         byte = 0x96

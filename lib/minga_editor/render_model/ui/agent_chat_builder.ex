@@ -53,13 +53,27 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     inner_width = max(ctx.viewport.cols - 10, 20)
     visible_rows = PromptRenderWindow.visible_rows(panel, inner_width)
 
-    {messages_with_ids, styled_cache} = displayed_messages_for_model(panel, session, ctx.theme)
+    {full_pairs, full_styled_cache} = full_messages_for_model(panel, session, ctx.theme)
+
+    {messages_with_ids, styled_cache} =
+      visible_message_slice(panel, full_pairs, full_styled_cache)
+
     pending_approval = ctx.shell_state.agent.pending_approval
 
     gui_messages =
       messages_with_ids
       |> build_gui_messages(styled_cache, pending_approval)
       |> maybe_append_transcript_enrichments(panel, SemanticUIRegistry.default_table())
+
+    # Resident transcript (#2654): the display_start_index-scoped conversation for
+    # the gui_agent_transcript (0x86) stream. Never sliced by scroll (the 0x86
+    # encoder applies the byte-cap suffix bound); enrichments always sit at the
+    # true end. `messages` above stays windowed for the legacy gui_agent_chat
+    # (0x78) section during the dual-emit transition.
+    resident_messages =
+      full_pairs
+      |> build_gui_messages(full_styled_cache, pending_approval)
+      |> append_resident_transcript_enrichments(SemanticUIRegistry.default_table())
 
     help_visible = view.help_visible
 
@@ -86,8 +100,18 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
       prompt_completion: build_prompt_completion(panel),
       help_visible?: help_visible,
       help_groups: help_groups,
-      messages: gui_messages
+      messages: gui_messages,
+      resident_messages: resident_messages,
+      transcript_epoch: transcript_epoch(session, panel)
     }
+  end
+
+  # Opaque change token for the resident transcript stream. Flips on structural
+  # change (session switch → new pid; compaction/clear_display → new
+  # display_start_index), which the 0x86 encoder maps to a full store replace.
+  @spec transcript_epoch(pid(), MingaEditor.Agent.UIState.Panel.t()) :: non_neg_integer()
+  defp transcript_epoch(session, panel) do
+    :erlang.phash2({session, panel.display_start_index})
   end
 
   @spec display_model_name(String.t()) :: String.t()
@@ -143,19 +167,22 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     :exit, _ -> ""
   end
 
-  @spec displayed_messages_for_model(MingaEditor.Agent.UIState.Panel.t(), pid(), Theme.t() | nil) ::
+  @spec full_messages_for_model(MingaEditor.Agent.UIState.Panel.t(), pid(), Theme.t() | nil) ::
           {[{pos_integer(), term()}], [term()] | nil}
-  defp displayed_messages_for_model(panel, session, theme) do
+  defp full_messages_for_model(panel, session, theme) do
     pairs = displayed_message_pairs(panel, session)
+    styled_cache = resolve_styled_cache(panel, theme)
+    {pairs, styled_cache}
+  end
 
-    styled_cache =
-      if panel.cached_styled_fingerprint == styled_cache_fingerprint(theme) do
-        panel.cached_styled_messages
-      else
-        nil
-      end
-
-    visible_message_slice(panel, pairs, styled_cache)
+  @spec resolve_styled_cache(MingaEditor.Agent.UIState.Panel.t(), Theme.t() | nil) ::
+          [term()] | nil
+  defp resolve_styled_cache(panel, theme) do
+    if panel.cached_styled_fingerprint == styled_cache_fingerprint(theme) do
+      panel.cached_styled_messages
+    else
+      nil
+    end
   end
 
   @spec styled_cache_fingerprint(Theme.t() | nil) :: non_neg_integer()
@@ -226,6 +253,16 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
        do: messages
 
   defp maybe_append_transcript_enrichments(messages, _panel, agent_ui_registry) do
+    messages ++ SemanticUIRegistry.transcript_enrichments(agent_ui_registry)
+  end
+
+  # The resident transcript is never windowed, so its enrichments always sit at
+  # the true end (independent of scroll pin state).
+  @spec append_resident_transcript_enrichments(
+          [{pos_integer(), term()}],
+          SemanticUIRegistry.table()
+        ) :: [{pos_integer(), term()}]
+  defp append_resident_transcript_enrichments(messages, agent_ui_registry) do
     messages ++ SemanticUIRegistry.transcript_enrichments(agent_ui_registry)
   end
 

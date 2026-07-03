@@ -21,6 +21,9 @@ func TestCommandSizeFramings(t *testing.T) {
 		{"len16 indent_guides", []byte{OPGuiIndentGuides, 0x00, 0x06, 1, 2, 3, 4, 5, 6}, 9, CommandSizeOK},
 		{"len16 set_title", append([]byte{OPSetTitle, 0x00, 0x03}, []byte("abc")...), 6, CommandSizeOK},
 		{"len32 file_tree", []byte{OPGuiFileTree, 0, 0, 0, 2, 0xAA, 0xBB}, 7, CommandSizeOK},
+		// #2654 slice 1: the resident agent transcript is len32-framed, so a
+		// frontend that does not yet consume it still sizes and skips it cleanly.
+		{"len32 agent_transcript", []byte{OPGuiAgentTranscript, 0, 0, 0, 2, 0xAA, 0xBB}, 7, CommandSizeOK},
 		{"sectioned status_bar", []byte{OPGuiStatusBar, 1, 0x01, 0x00, 0x02, 0xAA, 0xBB}, 7, CommandSizeOK},
 		{"custom git_status", []byte{OPGuiGitStatus, 0, 0, 0, 0}, 0, CommandSizeCustom},
 		{"incomplete len16", []byte{OPGuiIndentGuides, 0x00}, 0, CommandSizeIncomplete},

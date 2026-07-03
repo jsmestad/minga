@@ -3,6 +3,7 @@ defmodule Minga.Frontend.Adapter.GUI do
 
   alias Minga.Frontend.Adapter.GUI.AgentChatEncoder
   alias Minga.Frontend.Adapter.GUI.AgentContextEncoder
+  alias Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder
   alias Minga.Frontend.Adapter.GUI.BottomPanelEncoder
   alias Minga.Frontend.Adapter.GUI.BreadcrumbEncoder
   alias Minga.Frontend.Adapter.GUI.Caches
@@ -59,6 +60,9 @@ defmodule Minga.Frontend.Adapter.GUI do
     {:signature_help, SignatureHelpEncoder},
     {:agent_chat, AgentChatEncoder},
     {:empty_state, EmptyStateEncoder},
+    # Resident transcript stream (0x86) reads the same agent_chat model and emits
+    # alongside the legacy 0x78 chrome during the #2654 transition (dual-emit).
+    {:agent_chat, AgentTranscriptEncoder},
     {:bottom_panel, BottomPanelEncoder},
     {:change_summary, ChangeSummaryEncoder},
     {:edit_timeline, EditTimelineEncoder},

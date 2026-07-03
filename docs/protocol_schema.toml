@@ -604,6 +604,27 @@ value = 0x85
 direction = "beam_to_frontend"
 framing = "custom"
 
+# gui_agent_transcript (#2654 slice 1) carries the full, resident agent-chat
+# transcript decoupled from the small gui_agent_chat (0x78) chrome model, so the
+# transcript is no longer capped by the 0x78 u16 sectioned frame. len32 framing:
+# opcode(1) + payload_len(u32) + payload, sized generically by the generated
+# command_size on every frontend, so a frontend that does not yet consume the
+# opcode still skips it by the right length (the slice-1 cross-language safety
+# property). Payload is hand-decoded (like the other len32 opcodes) and reuses the
+# gui_agent_chat per-message body codec. Layout:
+#   version:u8=1, mode:u8 (0=full_replace,1=append), epoch:u32,
+#   base_count:u32 (append: resident count the suffix extends; full_replace: 0),
+#   count:u32, then count * [ id:u32, body_len:u32, body:bytes ].
+# full_replace on structural change (session switch, display_start_index change,
+# compaction/truncation); append (id-keyed upsert) for streaming/new messages
+# within an epoch. Frontends do not decode it until #2654 slices 2-3.
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_agent_transcript"
+value = 0x86
+direction = "beam_to_frontend"
+framing = "len32"
+
 [[opcodes]]
 category = "gui_semantic"
 name = "gui_agent_context"
