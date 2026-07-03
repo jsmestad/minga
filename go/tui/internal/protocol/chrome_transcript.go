@@ -81,6 +81,14 @@ func decodeAgentTranscript(payload []byte) (AgentTranscript, string, int) {
 		Epoch:     u32(body, 2),
 		Truncated: body[6] != 0,
 	}
+	// Reject unknown versions and modes outright. Mode validation is load-bearing:
+	// the layout branch below is append-shaped (mode==1) while the store's apply
+	// branch is full_replace-shaped (mode==0), so an unknown mode passed through
+	// would be parsed with one layout and applied with the other (split-brain).
+	if transcript.Version != transcriptVersion ||
+		(transcript.Mode != transcriptModeReplace && transcript.Mode != transcriptModeAppend) {
+		return AgentTranscript{}, "", end
+	}
 	offset := transcriptHeaderLength
 
 	var count int
@@ -100,17 +108,31 @@ func decodeAgentTranscript(payload []byte) (AgentTranscript, string, int) {
 		offset += 4
 	}
 
+	// A corrupt count must fail cleanly, not request a giant allocation: each entry
+	// needs at least its 8-byte id+body_len header.
+	if count > (len(body)-offset)/8 {
+		return AgentTranscript{}, "", end
+	}
 	transcript.Messages = make([]AgentChatMessage, 0, count)
-	for i := 0; i < count && len(body) >= offset+8; i++ {
+	for i := 0; i < count; i++ {
+		// A truncated or undecodable entry poisons the whole frame: the Present
+		// contract above promises the store's prior state stays untouched, and
+		// folding a PARTIAL delta would silently corrupt the resident transcript,
+		// which is worse than skipping the frame.
+		if len(body) < offset+8 {
+			return AgentTranscript{}, "", end
+		}
 		id := u32(body, offset)
 		bodyLen := int(u32(body, offset+4))
 		offset += 8
 		if len(body) < offset+bodyLen {
-			break
+			return AgentTranscript{}, "", end
 		}
-		if msg, ok := decodeAgentMessageBody(id, body[offset:offset+bodyLen]); ok {
-			transcript.Messages = append(transcript.Messages, msg)
+		msg, ok := decodeAgentMessageBody(id, body[offset:offset+bodyLen])
+		if !ok {
+			return AgentTranscript{}, "", end
 		}
+		transcript.Messages = append(transcript.Messages, msg)
 		offset += bodyLen
 	}
 

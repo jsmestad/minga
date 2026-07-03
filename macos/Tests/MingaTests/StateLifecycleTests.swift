@@ -489,9 +489,10 @@ struct AgentChatTranscriptTests {
     @MainActor func appendEpochMismatchDropped() {
         let state = AgentChatState()
         state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: [user(1, "a"), assistant(2, "b")])
-        state.applyTranscript(mode: 1, epoch: 2, baseCount: 2, messages: [assistant(3, "c")])
+        let outcome = state.applyTranscript(mode: 1, epoch: 2, baseCount: 2, messages: [assistant(3, "c")])
 
         // Stale-epoch append ignored; the resident transcript is untouched.
+        #expect(outcome == .droppedEpochMismatch)
         #expect(state.messages.map(\.id) == [1, 2])
         #expect(state.transcriptEpoch == 1)
     }
@@ -500,16 +501,18 @@ struct AgentChatTranscriptTests {
     @MainActor func appendBaseOverrunDropped() {
         let state = AgentChatState()
         state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: [user(1, "a")])
-        state.applyTranscript(mode: 1, epoch: 1, baseCount: 5, messages: [assistant(2, "c")])
+        let outcome = state.applyTranscript(mode: 1, epoch: 1, baseCount: 5, messages: [assistant(2, "c")])
 
+        #expect(outcome == .droppedDesynced)
         #expect(state.messages.map(\.id) == [1])
     }
 
     @Test("append before any full_replace is dropped")
     @MainActor func appendBeforeSeedDropped() {
         let state = AgentChatState()
-        state.applyTranscript(mode: 1, epoch: 1, baseCount: 0, messages: [user(1, "a")])
+        let outcome = state.applyTranscript(mode: 1, epoch: 1, baseCount: 0, messages: [user(1, "a")])
 
+        #expect(outcome == .droppedBeforeSeed)
         #expect(state.messages.isEmpty)
     }
 

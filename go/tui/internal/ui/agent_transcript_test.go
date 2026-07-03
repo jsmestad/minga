@@ -139,7 +139,9 @@ func TestResidentTranscriptAppendDesyncDropped(t *testing.T) {
 	tr.apply(replaceFrame(1, msg(1, "a")))
 	// resident_count (1) < trim_front + base_count (1 + 1): the delta cannot apply
 	// against what the store holds, so drop it and await full_replace.
-	tr.apply(appendFrame(1, 1, 1, msg(6, "orphan")))
+	if reason := tr.apply(appendFrame(1, 1, 1, msg(6, "orphan"))); reason != transcriptDroppedDesync {
+		t.Fatalf("expected desync drop reason, got %q", reason)
+	}
 
 	if got, want := ids(tr.messages), []uint32{1}; fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("desync append should be dropped, got %v", got)
@@ -149,10 +151,30 @@ func TestResidentTranscriptAppendDesyncDropped(t *testing.T) {
 func TestResidentTranscriptAppendEpochMismatchDropped(t *testing.T) {
 	tr := newResidentTranscript()
 	tr.apply(replaceFrame(1, msg(1, "a")))
-	tr.apply(appendFrame(2, 0, 1, msg(2, "b")))
+	if reason := tr.apply(appendFrame(2, 0, 1, msg(2, "b"))); reason != transcriptDroppedEpoch {
+		t.Fatalf("expected epoch drop reason, got %q", reason)
+	}
 
 	if got, want := ids(tr.messages), []uint32{1}; fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("epoch-mismatch append should be dropped, got %v", got)
+	}
+}
+
+func TestResidentTranscriptAppendBeforeSeedDropped(t *testing.T) {
+	// An append arriving before any full_replace means the epoch's seed frame was
+	// missed. Folding it against the empty store (even with trim=base=0) would
+	// fabricate a partial transcript; the Swift consumer drops this case too, and
+	// the two frontends must agree.
+	tr := newResidentTranscript()
+	if reason := tr.apply(appendFrame(1, 0, 0, msg(1, "early"))); reason != transcriptDroppedBeforeSeed {
+		t.Fatalf("expected before-seed drop reason, got %q", reason)
+	}
+
+	if len(tr.messages) != 0 {
+		t.Fatalf("pre-seed append should not populate the store, got %d messages", len(tr.messages))
+	}
+	if tr.hasEpoch {
+		t.Fatalf("pre-seed append should not adopt an epoch")
 	}
 }
 

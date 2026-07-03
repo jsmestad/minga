@@ -697,7 +697,14 @@ func (m *Model) applyMutation(command protocol.Command) {
 			// chrome snapshot, is the transcript source; the chrome entry is kept
 			// only so opcode bookkeeping stays uniform.
 			if m.transcript != nil {
-				m.transcript.apply(command.Chrome.AgentTranscript)
+				if reason := m.transcript.apply(command.Chrome.AgentTranscript); reason != transcriptApplied {
+					// A dropped delta freezes the transcript until the next
+					// full_replace; that must never be invisible.
+					frame := command.Chrome.AgentTranscript
+					m.send(protocol.EncodeLogMessage(protocol.LogLevelWarn,
+						fmt.Sprintf("transcript frame dropped: %s (epoch %d, trim %d, base %d, count %d)",
+							reason, frame.Epoch, frame.TrimFront, frame.BaseCount, len(frame.Messages))))
+				}
 			}
 		case generated.OPGuiTheme:
 			m.activePalette = paletteFromTheme(command.Chrome.Theme)

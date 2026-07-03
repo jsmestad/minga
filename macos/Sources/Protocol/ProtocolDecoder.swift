@@ -1330,6 +1330,11 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let transcriptVersion = data[transcriptPayloadStart]
         guard transcriptVersion == 1 else { throw ProtocolDecodeError.malformed }
         let transcriptMode = data[transcriptPayloadStart + 1]
+        // Only full_replace (0) and append (1) exist. Rejecting anything else here is
+        // load-bearing: the layout branch below is mode==1-shaped while the consumer's
+        // apply branch is mode==0-shaped, so an unknown mode passed through would be
+        // parsed with one layout and applied with the other (split-brain).
+        guard transcriptMode <= 1 else { throw ProtocolDecodeError.malformed }
         let transcriptEpoch = readU32(data, transcriptPayloadStart + 2)
         let transcriptTruncated = data[transcriptPayloadStart + 6] != 0
 
@@ -1352,6 +1357,11 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             transcriptPos = transcriptPayloadStart + 11
         }
 
+        // A corrupt count must fail as .malformed, not as a giant allocation: each entry
+        // needs at least its 8-byte id+body_len header, so count is bounded by the payload.
+        guard transcriptCount <= (transcriptEnd - transcriptPos) / 8 else {
+            throw ProtocolDecodeError.malformed
+        }
         var transcriptMessages: [Wire.ChatMessage] = []
         transcriptMessages.reserveCapacity(transcriptCount)
         for _ in 0..<transcriptCount {

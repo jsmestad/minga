@@ -48,15 +48,31 @@ func newResidentTranscript() *residentTranscript {
 	return &residentTranscript{pinned: true}
 }
 
+// transcriptDropReason names why a transcript frame was not folded into the
+// store; empty means it applied. The drop cases are defense-in-depth (a fresh
+// connection's encoder state makes every epoch's first frame a full_replace),
+// but if one ever fires the transcript is frozen until the next full_replace,
+// so the caller must surface it rather than let the freeze be invisible.
+type transcriptDropReason string
+
+const (
+	transcriptApplied            transcriptDropReason = ""
+	transcriptDroppedBeforeSeed  transcriptDropReason = "append before seed"
+	transcriptDroppedEpoch       transcriptDropReason = "epoch mismatch"
+	transcriptDroppedDesync      transcriptDropReason = "desynced (short store)"
+	transcriptDroppedUndecodable transcriptDropReason = "undecodable frame"
+)
+
 // apply folds one decoded gui_agent_transcript frame into the store, following
-// the docs/GUI_PROTOCOL.md 0x86 apply rules.
-func (t *residentTranscript) apply(frame protocol.AgentTranscript) {
+// the docs/GUI_PROTOCOL.md 0x86 apply rules. Returns transcriptApplied, or the
+// reason the frame was dropped so the caller can log it.
+func (t *residentTranscript) apply(frame protocol.AgentTranscript) transcriptDropReason {
 	if !frame.Present {
-		return
+		return transcriptDroppedUndecodable
 	}
-	t.truncated = frame.Truncated
 
 	if frame.FullReplace() {
+		t.truncated = frame.Truncated
 		epochChanged := !t.hasEpoch || frame.Epoch != t.epoch
 		next := make([]protocol.AgentChatMessage, len(frame.Messages))
 		copy(next, frame.Messages)
@@ -71,20 +87,26 @@ func (t *residentTranscript) apply(frame protocol.AgentTranscript) {
 			t.pinned = true
 			t.topOffset = 0
 		}
-		return
+		return transcriptApplied
 	}
 
-	// append: an epoch mismatch means we missed the epoch's full_replace; drop the
-	// delta and await the next full_replace.
-	if t.hasEpoch && frame.Epoch != t.epoch {
-		return
+	// append drop conditions per GUI_PROTOCOL.md 0x86 (await the next
+	// full_replace). An unseeded store drops appends too: every epoch's first
+	// frame is a full_replace, so an early append means a missed seed, and folding
+	// it against an empty store would fabricate a partial transcript. The Swift
+	// consumer drops this case as well; the two frontends must agree.
+	if !t.hasEpoch {
+		return transcriptDroppedBeforeSeed
+	}
+	if frame.Epoch != t.epoch {
+		return transcriptDroppedEpoch
 	}
 	trim := int(frame.TrimFront)
 	base := int(frame.BaseCount)
 	// Desync when the store cannot cover the delta's front assumptions: it holds
 	// fewer than trim_front + base_count messages. Drop and await full_replace.
 	if len(t.messages) < trim+base {
-		return
+		return transcriptDroppedDesync
 	}
 
 	// Apply order (GUI_PROTOCOL.md 0x86): drop trim_front from the front; keep the
@@ -101,10 +123,8 @@ func (t *residentTranscript) apply(frame protocol.AgentTranscript) {
 		}
 	}
 	t.messages = next
-	if frame.Epoch != 0 {
-		t.epoch = frame.Epoch
-		t.hasEpoch = true
-	}
+	t.truncated = frame.Truncated
+	return transcriptApplied
 }
 
 // indexByID returns the position of the message with id, or -1. A message id of 0
