@@ -456,6 +456,7 @@ public struct GitStatusView: View {
                     }
 
                     TextEditor(text: Bindable(state).commitMessage)
+                        .padding(.vertical, 6)
                         .font(.system(size: 12))
                         .foregroundStyle(theme.treeFg)
                         .scrollContentBackground(.hidden)
