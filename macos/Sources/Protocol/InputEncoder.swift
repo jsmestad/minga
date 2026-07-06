@@ -159,60 +159,60 @@ public protocol InputEncoder: AnyObject, Sendable {
 
 public extension InputEncoder {
     /// Convenience: send a mouse event with click count defaulting to 1.
-    public func sendMouseEvent(row: Int16, col: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8) {
+    func sendMouseEvent(row: Int16, col: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8) {
         sendMouseEvent(row: row, col: col, button: button, modifiers: modifiers, eventType: eventType, clickCount: 1)
     }
 
     /// Default: forward to the sequence-less encoder so existing test spies and
     /// alternate conformers do not need to implement latency stamping (ticket
     /// #2215). `ProtocolEncoder` overrides this to append the sequence on the wire.
-    public func sendKeyPress(codepoint: UInt32, modifiers: UInt8, seq: UInt32) {
+    func sendKeyPress(codepoint: UInt32, modifiers: UInt8, seq: UInt32) {
         sendKeyPress(codepoint: codepoint, modifiers: modifiers)
     }
 
     /// Default no-op so existing test spies do not need to implement the
     /// frame-transaction resync request (#2219 child D).
-    public func sendRequestKeyframe(lastGoodFrameSeq: UInt32) {}
+    func sendRequestKeyframe(lastGoodFrameSeq: UInt32) {}
 
     /// Default no-op so existing test spies do not need to implement settings actions.
-    public func sendConfigQuery() {}
+    func sendConfigQuery() {}
 
     /// Default no-op so existing test spies do not need to implement settings actions.
-    public func sendConfigUpdate(key: String, value: SettingValue) {}
+    func sendConfigUpdate(key: String, value: SettingValue) {}
 
     /// Default no-op so existing test spies do not need to implement notification actions.
-    public func sendNotificationDismiss(id: String) {}
+    func sendNotificationDismiss(id: String) {}
 
     /// Default no-op so existing test spies do not need to implement notification actions.
-    public func sendNotificationAction(id: String, actionId: String) {}
+    func sendNotificationAction(id: String, actionId: String) {}
 
     /// Default no-op so existing test spies do not need to implement sidebar host actions.
-    public func sendSidebarAction(sidebarId: String, kind: String, action: String) {}
+    func sendSidebarAction(sidebarId: String, kind: String, action: String) {}
 
     /// Default no-op so existing test spies do not need to implement frontend extension actions.
-    public func sendExtensionAction(extensionID: String, action: String, payload: Data) {}
+    func sendExtensionAction(extensionID: String, action: String, payload: Data) {}
 
     /// Default no-op so existing test spies do not need to implement power and thermal actions.
-    public func sendPowerThermalState(lowPowerMode: Bool, thermalState: UInt8) {}
+    func sendPowerThermalState(lowPowerMode: Bool, thermalState: UInt8) {}
 
     /// Default no-op so existing test spies do not need to implement font size actions.
-    public func sendFontSizeAdjust(direction: UInt8) {}
+    func sendFontSizeAdjust(direction: UInt8) {}
 
-    public func sendScrollBatch(windowId: UInt16, deltaLines: Int16, direction: UInt8) {}
+    func sendScrollBatch(windowId: UInt16, deltaLines: Int16, direction: UInt8) {}
 
     /// Default no-op so existing test spies do not need to implement timeline actions.
-    public func sendTimelineNavigate(index: UInt16) {}
+    func sendTimelineNavigate(index: UInt16) {}
 
     /// Default no-op so existing test spies do not need to implement search actions.
-    public func sendSearchQuery(query: String, flags: UInt8) {}
-    public func sendSearchNext() {}
-    public func sendSearchPrev() {}
-    public func sendSearchReplace(replacement: String) {}
-    public func sendSearchReplaceAll(replacement: String) {}
-    public func sendSearchDismiss() {}
+    func sendSearchQuery(query: String, flags: UInt8) {}
+    func sendSearchNext() {}
+    func sendSearchPrev() {}
+    func sendSearchReplace(replacement: String) {}
+    func sendSearchReplaceAll(replacement: String) {}
+    func sendSearchDismiss() {}
 
     /// Default no-op so existing test spies do not need to implement launchpad activation.
-    public func sendEmptyStateActivate(id: String) {}
+    func sendEmptyStateActivate(id: String) {}
 }
 
 /// A no-op `InputEncoder` for SwiftUI previews and canvas rendering.
