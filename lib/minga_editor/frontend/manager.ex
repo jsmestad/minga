@@ -29,6 +29,7 @@ defmodule MingaEditor.Frontend.Manager do
 
   alias Minga.Telemetry
   alias Minga.Telemetry.StartupTimer
+  alias MingaEditor.Frontend.FrameTransaction
   alias MingaEditor.Frontend.Protocol
 
   @typedoc "Renderer backend."
@@ -177,6 +178,8 @@ defmodule MingaEditor.Frontend.Manager do
   end
 
   def handle_cast({:send_commands, commands}, state) do
+    log_frame_transaction_violation(commands)
+
     Telemetry.span_with_stop_metadata([:minga, :port, :write], %{}, fn ->
       batch = IO.iodata_to_binary(commands)
       Port.command(state.port, batch)
@@ -256,6 +259,20 @@ defmodule MingaEditor.Frontend.Manager do
   end
 
   # ── Private ──
+
+  @spec log_frame_transaction_violation([binary()]) :: :ok
+  defp log_frame_transaction_violation(commands) do
+    case FrameTransaction.validate(commands) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Minga.Log.warning(
+          :port,
+          "Frontend command batch violates frame transaction: #{FrameTransaction.format_error(reason)}"
+        )
+    end
+  end
 
   @spec start_port(state(), fun()) :: state()
   defp start_port(%{port_mode: :connected} = state, port_opener) do

@@ -120,11 +120,22 @@ enum ProtocolDecodeError: Error {
 /// an entire frame into one message). This function iterates through the
 /// payload, decoding each command and calling the handler.
 func decodeCommands(from data: Data, handler: (RenderCommand) -> Void) throws {
+    try decodeCommands(from: data) { command, _ in
+        handler(command)
+    }
+}
+
+/// Decodes all commands and reports each command's wire opcode alongside its decoded value.
+///
+/// The opcode is protocol metadata, not payload content. Consumers can therefore identify a
+/// producer that violates frame boundaries without logging editor text or semantic UI data.
+func decodeCommands(from data: Data, handler: (RenderCommand, UInt8) -> Void) throws {
     var offset = 0
     while offset < data.count {
+        let opcode = data[offset]
         let (command, size) = try decodeCommand(data: data, offset: offset)
         if let command {
-            handler(command)
+            handler(command, opcode)
         }
         offset += size
     }
