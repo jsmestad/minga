@@ -1631,6 +1631,54 @@ struct CommandDispatcherStagingTests {
         #expect(gui.tabBarState.tabs.first?.label == "fresh.ex")
     }
 
+    @Test("a stale delta commit does not clear a pending resync")
+    @MainActor func staleDeltaDoesNotClearPendingResync() {
+        let (dispatcher, gui) = makeDispatcher()
+        var requested: [UInt32] = []
+        dispatcher.onRequestKeyframe = { requested.append($0) }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("rogue.ex")]))
+        #expect(requested == [1])
+
+        // This delta is valid against our retained baseline, but it is not the
+        // requested base-0 recovery frame and must not dismiss the pending hint.
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("stale.ex")]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+        #expect(gui.resyncState.pending == true)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.commitFrame(frameSeq: 3, seq: 0))
+        #expect(gui.resyncState.pending == false)
+    }
+
+    @Test("invalidating a requested keyframe sends one replacement request")
+    @MainActor func failedKeyframeRequestsReplacement() {
+        let (dispatcher, gui) = makeDispatcher()
+        var requested: [UInt32] = []
+        dispatcher.onRequestKeyframe = { requested.append($0) }
+
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        #expect(requested == [0])
+
+        // A base-0 frame has answered the request, but fails validation before it
+        // can commit. It must reopen the request window instead of hanging forever.
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTheme(slots: []))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+        #expect(requested == [0, 0])
+        #expect(gui.resyncState.pending == true)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.commitFrame(frameSeq: 3, seq: 0))
+        #expect(gui.resyncState.pending == false)
+    }
+
     @Test("double begin (truncation) invalidates the open frame and requests keyframe")
     @MainActor func doubleBeginTruncates() {
         let (dispatcher, gui) = makeDispatcher()

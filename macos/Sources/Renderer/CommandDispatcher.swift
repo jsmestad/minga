@@ -156,6 +156,16 @@ final class CommandDispatcher {
     /// can still be told apart from "never committed" when validating a base.
     private var hasCommitted = false
 
+    /// Resync is complete only when a requested base-0 keyframe commits cleanly.
+    /// A keyframe that fails while staged must trigger one fresh request, while stale
+    /// delta frames arriving before that keyframe remain debounced.
+    private enum ResyncRecoveryState: Equatable {
+        case clean
+        case awaitingKeyframe
+        case keyframeInFlight
+    }
+    private var resyncRecoveryState: ResyncRecoveryState = .clean
+
     /// gui_theme must carry the full slot set the frontends rely on. Missing slots are a protocol bug, not a theme fallback case.
     static let requiredThemeSlots: [UInt8] = [
         0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A,
@@ -188,7 +198,7 @@ final class CommandDispatcher {
     /// active recovery rather than silent drop. Contrast the old positive-allowlist
     /// design where a missing entry caused an unnecessary keyframe request with no
     /// application of the command.
-    func dispatch(_ command: RenderCommand) {
+    func dispatch(_ command: RenderCommand, opcode: UInt8? = nil) {
         switch command {
         case .beginFrame(let frameSeq, let baseFrameSeq):
             beginTransaction(frameSeq: frameSeq, baseFrameSeq: baseFrameSeq)
@@ -226,7 +236,7 @@ final class CommandDispatcher {
                 // was added to the protocol without a corresponding explicit arm
                 // here, or the byte stream is desynced. Active recovery: discard
                 // staged state and request a keyframe. Mirrors Go model.go:454-456.
-                invalidate(reason: "out-of-transaction command")
+                invalidate(reason: "out-of-transaction command", sourceOpcode: opcode)
             }
         }
     }
@@ -242,6 +252,9 @@ final class CommandDispatcher {
         openFrameSeq = frameSeq
         openBaseFrameSeq = baseFrameSeq
         stagedCommands.removeAll(keepingCapacity: true)
+        if baseFrameSeq == 0 && resyncRecoveryState == .awaitingKeyframe {
+            resyncRecoveryState = .keyframeInFlight
+        }
     }
 
     /// Closes a frame transaction. Validates frame_seq against the open begin and
@@ -305,7 +318,10 @@ final class CommandDispatcher {
         hasCommitted = true
         openFrameSeq = nil
         stagedCommands.removeAll(keepingCapacity: true)
-        guiState.resyncState.clear()
+        if openBaseFrameSeq == 0 && resyncRecoveryState == .keyframeInFlight {
+            resyncRecoveryState = .clean
+            guiState.resyncState.clear()
+        }
 
         // Resolve the keystroke-to-present latency sample for the echoed input
         // correlation sequence (ticket #2215). The frame is fully promoted here
@@ -395,19 +411,16 @@ final class CommandDispatcher {
     /// state is left exactly as the last clean commit left it, so the screen
     /// holds the last good frame until the keyframe arrives. Raises a subtle
     /// resync-pending hint in the meantime.
-    private func invalidate(reason: String) {
-        PortLogger.warn("Frame transaction invalidated (\(reason)); requesting keyframe from \(lastCommittedFrameSeq)")
+    private func invalidate(reason: String, sourceOpcode: UInt8? = nil) {
+        let opcodeContext = sourceOpcode.map { String(format: ", opcode=0x%02X", $0) } ?? ""
+        let shouldRequestKeyframe = resyncRecoveryState != .awaitingKeyframe
+        resyncRecoveryState = .awaitingKeyframe
+        PortLogger.warn("Frame transaction invalidated (\(reason)\(opcodeContext)); \(shouldRequestKeyframe ? "requesting" : "awaiting") keyframe from \(lastCommittedFrameSeq)")
         openFrameSeq = nil
         openBaseFrameSeq = 0
         stagedCommands.removeAll(keepingCapacity: false)
-        // Debounce the keyframe request: after an invalidation, every stale
-        // in-flight frame also fails its base check (the BEAM advances
-        // base_frame_seq for frames we discarded), and re-requesting per frame
-        // would force a duplicate BEAM render each. One request per resync
-        // window; pending clears when a valid commit promotes.
-        let alreadyPending = guiState.resyncState.pending
         guiState.resyncState.markPending()
-        if !alreadyPending {
+        if shouldRequestKeyframe {
             onRequestKeyframe?(lastCommittedFrameSeq)
         }
     }

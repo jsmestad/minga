@@ -787,8 +787,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func handleProtocolData(_ data: Data) {
         guard let dispatcher else { return }
         do {
-            try decodeCommands(from: data) { command in
-                dispatcher.dispatch(command)
+            try decodeCommands(from: data) { command, opcode in
+                dispatcher.dispatch(command, opcode: opcode)
             }
         } catch {
             // A decode failure (sizing error or unknown opcode) mid-stream means

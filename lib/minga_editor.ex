@@ -520,7 +520,8 @@ defmodule MingaEditor do
     {:noreply, new_state}
   end
 
-  def handle_info({:minga_input, {:request_keyframe, _last_good_frame_seq}}, state) do
+  def handle_info({:minga_input, {:request_keyframe, last_good_frame_seq}}, state) do
+    Minga.Log.warning(:render, "Frontend requested keyframe from frame #{last_good_frame_seq}")
     new_state = %{state | keyframe_pending?: true}
     {:noreply, Renderer.render_or_async(new_state)}
   end

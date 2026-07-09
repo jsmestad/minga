@@ -96,6 +96,13 @@ defmodule MingaEditor.Frontend.Emit do
         encoded_frame.chrome_commands ++
         [surface_layout_command, Protocol.encode_commit_frame(frame_seq, input_seq)]
 
+    if keyframe? do
+      Minga.Log.info(
+        :render,
+        "Emitting keyframe #{frame_seq} in response to frontend recovery or attach"
+      )
+    end
+
     caches = update_tracking(ctx, caches)
     # Record both the seq and whether this frame carried the keyframe so the Editor
     # clears `keyframe_pending?` only when a frame that actually honored the request
