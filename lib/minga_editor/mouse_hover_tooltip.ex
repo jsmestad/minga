@@ -10,6 +10,7 @@ defmodule MingaEditor.MouseHoverTooltip do
   alias Minga.Buffer
   alias Minga.Diagnostics
   alias MingaEditor.HoverPopup
+  alias MingaEditor.Mouse.HitTest
   alias MingaEditor.State, as: EditorState
   alias Minga.LSP.Client
   alias Minga.LSP.SyncServer
@@ -27,24 +28,17 @@ defmodule MingaEditor.MouseHoverTooltip do
   def check_hover(%{workspace: %{buffers: %{active: nil}}} = state), do: state
 
   def check_hover(%{workspace: %{mouse: %{hover_pos: {row, col}}}} = state) do
-    # Convert screen position to buffer position
-    buf = state.workspace.buffers.active
-    vp = state.terminal_viewport
+    with {:buffer, target} <- HitTest.resolve_buffer(state, row, col) do
+      case check_diagnostic(target.buffer, target.line) do
+        nil ->
+          send_hover_request(state, target.buffer, target.line, target.col, row, col)
 
-    buf_line = row + vp.top - 1
-    # Approximate: col minus gutter width
-    gutter_w = Map.get(state, :layout, nil) |> gutter_width()
-    buf_col = max(0, col - gutter_w)
-
-    # Check for diagnostics first
-    case check_diagnostic(buf, buf_line) do
-      nil ->
-        # No diagnostic; send LSP hover request (async)
-        send_hover_request(state, buf, buf_line, buf_col, row, col)
-
-      message ->
-        popup = HoverPopup.new(message, row, col, theme: state.theme)
-        EditorState.set_hover_popup(state, popup)
+        message ->
+          popup = HoverPopup.new(message, row, col, theme: state.theme)
+          EditorState.set_hover_popup(state, popup)
+      end
+    else
+      _ -> state
     end
   end
 
@@ -90,7 +84,12 @@ defmodule MingaEditor.MouseHoverTooltip do
       }
 
       ref = Client.request(client, "textDocument/hover", params)
-      put_lsp_pending(state, ref, {:hover_mouse, row, col})
+
+      put_lsp_pending(
+        state,
+        ref,
+        {:hover_mouse, row, col, buf, buf_line, buf_col, Buffer.version(buf)}
+      )
     else
       _ -> state
     end
@@ -104,8 +103,4 @@ defmodule MingaEditor.MouseHoverTooltip do
   defp put_lsp_pending(state, ref, kind) do
     EditorState.put_lsp_pending(state, ref, kind)
   end
-
-  @spec gutter_width(term()) :: non_neg_integer()
-  defp gutter_width(nil), do: 4
-  defp gutter_width(layout), do: Map.get(layout, :gutter_width, 4)
 end

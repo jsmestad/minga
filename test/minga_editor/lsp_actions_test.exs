@@ -9,6 +9,7 @@ defmodule MingaEditor.LspActionsTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Highlighting
+  alias MingaEditor.State.Mouse
   alias MingaEditor.UI.Picker.CodeActionSource
   alias MingaEditor.UI.Picker.Context, as: PickerContext
   alias MingaEditor.VimState
@@ -136,7 +137,14 @@ defmodule MingaEditor.LspActionsTest do
       }
 
       for hover <- [plaintext, markdown] do
-        result = LspActions.handle_hover_mouse_response(fake_state(), {:ok, hover}, 5, 20)
+        result =
+          LspActions.handle_hover_mouse_response(
+            fake_state_with_hover(5, 20),
+            {:ok, hover},
+            5,
+            20
+          )
+
         assert %HoverPopup{} = result.shell_state.hover_popup
         assert result.shell_state.hover_popup.content_lines != []
       end
@@ -146,9 +154,16 @@ defmodule MingaEditor.LspActionsTest do
             {:ok, nil},
             {:ok, %{"contents" => %{"kind" => "plaintext", "value" => ""}}}
           ] do
-        state = fake_state()
+        state = fake_state_with_hover(5, 20)
         assert LspActions.handle_hover_mouse_response(state, response, 5, 20) == state
       end
+    end
+
+    test "mouse hover ignores stale async responses after pointer moves" do
+      hover = %{"contents" => %{"kind" => "plaintext", "value" => "Old symbol docs"}}
+      state = fake_state_with_hover(6, 21)
+
+      assert LspActions.handle_hover_mouse_response(state, {:ok, hover}, 5, 20) == state
     end
   end
 
@@ -395,6 +410,18 @@ defmodule MingaEditor.LspActionsTest do
   defp fake_state_with_buffer(buf) do
     state = fake_state()
     %{state | workspace: %{state.workspace | buffers: %Buffers{active: buf, list: [buf]}}}
+  end
+
+  defp fake_state_with_hover(row, col) do
+    state = fake_state()
+
+    %{
+      state
+      | workspace: %{
+          state.workspace
+          | mouse: Mouse.set_hover(state.workspace.mouse, row, col, backend: :headless)
+        }
+    }
   end
 
   defp fake_state_with_vim do
