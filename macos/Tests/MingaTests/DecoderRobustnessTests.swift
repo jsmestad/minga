@@ -214,9 +214,10 @@ struct DecoderTruncatedGUIChromeTests {
     @Test("gui_window_content truncated section payload")
     func truncatedWindowContent() {
         var data = Data([OP_GUI_WINDOW_CONTENT])
+        appendU32(&data, 6) // payload_len = section_count + incomplete section header
         data.append(1) // section_count = 1
         data.append(0x01) // section_id
-        data.append(contentsOf: [0x00, 0x40]) // section_len = 64 (but only 0 bytes follow)
+        data.append(contentsOf: [0x00, 0x00, 0x00, 0x40]) // section_len = 64 (but only 0 bytes follow)
 
         #expect(throws: ProtocolDecodeError.self) {
             try decodeCommand(data: data, offset: 0)
@@ -272,13 +273,10 @@ private func windowContentData(rowsPayload: Data, scrollSeq: UInt32? = nil) -> D
         appendU32(&headerPayload, 42) // content_epoch, matched by the scroll_presentation section below
     }
 
-    var data = Data([OP_GUI_WINDOW_CONTENT, scrollSeq != nil ? 3 : 2])
-    data.append(0x01)
-    appendU16(&data, UInt16(headerPayload.count))
-    data.append(headerPayload)
-    data.append(0x02)
-    appendU16(&data, UInt16(rowsPayload.count))
-    data.append(rowsPayload)
+    var payload = Data()
+    payload.append(scrollSeq != nil ? 3 : 2)
+    payload.append(windowContentSection(id: 0x01, payload: headerPayload))
+    payload.append(windowContentSection(id: 0x02, payload: rowsPayload))
 
     if let scrollSeq {
         var scrollPresentationPayload = Data()
@@ -295,12 +293,20 @@ private func windowContentData(rowsPayload: Data, scrollSeq: UInt32? = nil) -> D
         appendU32(&scrollPresentationPayload, 7) // layout_generation
         appendU32(&scrollPresentationPayload, scrollSeq) // scroll_seq
 
-        data.append(0x0A)
-        appendU16(&data, UInt16(scrollPresentationPayload.count))
-        data.append(scrollPresentationPayload)
+        payload.append(windowContentSection(id: 0x0A, payload: scrollPresentationPayload))
     }
 
+    var data = Data([OP_GUI_WINDOW_CONTENT])
+    appendU32(&data, UInt32(payload.count))
+    data.append(payload)
     return data
+}
+
+private func windowContentSection(id: UInt8, payload: Data) -> Data {
+    var section = Data([id])
+    appendU32(&section, UInt32(payload.count))
+    section.append(payload)
+    return section
 }
 
 private func windowContentRowsPayload(rowBytes: Data) -> Data {

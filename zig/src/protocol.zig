@@ -1147,7 +1147,7 @@ fn customCommandSize(payload: []const u8) usize {
         OP_GUI_FILE_TREE_SELECTION => len16CommandSize(payload),
         OP_GUI_GUTTER => sectionedGuiSize(payload),
         OP_GUI_INDENT_GUIDES => len16CommandSize(payload),
-        OP_GUI_WINDOW_CONTENT => sectionedGuiSize(payload),
+        OP_GUI_WINDOW_CONTENT => len32CommandSize(payload),
         OP_GUI_WINDOW_OVERLAY_DELTA => guiWindowOverlayDeltaSize(payload),
         OP_GUI_WINDOW_VIEWPORT_DELTA => sectionedGuiSize(payload),
         OP_GUI_WINDOW_ROWS_DELTA => sectionedGuiSize(payload),
@@ -2032,7 +2032,7 @@ test "all generated GUI render opcodes are accounted for by TUI semantic noops" 
         &[_]u8{ OP_GUI_PICKER_PREVIEW, 0 },
         &[_]u8{ OP_GUI_TOOL_MANAGER, 0 },
         &[_]u8{ OP_GUI_MINIBUFFER, 0 },
-        &[_]u8{ OP_GUI_WINDOW_CONTENT, 0 },
+        &[_]u8{ OP_GUI_WINDOW_CONTENT, 0, 0, 0, 1, 0 },
         &[_]u8{ OP_GUI_HOVER_POPUP, 0 },
         &[_]u8{ OP_GUI_SIGNATURE_HELP, 0 },
         &[_]u8{ OP_GUI_FLOAT_POPUP, 0 },
@@ -2796,10 +2796,13 @@ test "commandSize: hidden gui_bottom_panel is two bytes" {
     try std.testing.expectEqual(@as(usize, 2), commandSize(&data));
 }
 
-test "commandSize: gui_window_content sectioned packet" {
+test "commandSize: gui_window_content len32 packet" {
     const data = [_]u8{
-        OP_GUI_WINDOW_CONTENT, 1,
+        OP_GUI_WINDOW_CONTENT, 0,
+        0,                     0,
+        20,                    1,
         0x01,                  0,
+        0,                     0,
         14,                    0,
         7,                     0x02,
         0,                     1,

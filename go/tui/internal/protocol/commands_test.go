@@ -126,9 +126,7 @@ func TestDecodeWindowContentRows(t *testing.T) {
 	}
 	rowsPayload := append([]byte{0, 1}, row...)
 	headerPayload := []byte{0, 7, 0x02, 0, 3, 0, 4, 1, 0, 0, 0, 0, 0, 11}
-	packet := append([]byte{generated.OPGuiWindowContent, 2, 0x01, 0, byte(len(headerPayload))}, headerPayload...)
-	packet = append(packet, 0x02, byte(len(rowsPayload)>>8), byte(len(rowsPayload)))
-	packet = append(packet, rowsPayload...)
+	packet := windowContentPacket(section32(0x01, headerPayload), section32(0x02, rowsPayload))
 
 	command, err := DecodeCommand(packet)
 	if err != nil {
@@ -166,10 +164,11 @@ func TestDecodeWindowContentScrollPresentation(t *testing.T) {
 	scrollPayload = append(scrollPayload, u32Bytes(99)...)
 	scrollPayload = append(scrollPayload, u32Bytes(3)...) // scroll_seq (#2661)
 
-	packet := []byte{generated.OPGuiWindowContent, 3}
-	packet = append(packet, section(0x01, headerPayload)...)
-	packet = append(packet, section(0x02, rowsPayload)...)
-	packet = append(packet, section(0x0A, scrollPayload)...)
+	packet := windowContentPacket(
+		section32(0x01, headerPayload),
+		section32(0x02, rowsPayload),
+		section32(0x0A, scrollPayload),
+	)
 
 	command, err := DecodeCommand(packet)
 	if err != nil {
@@ -211,10 +210,11 @@ func TestDecodeWindowContentDropsMismatchedScrollPresentation(t *testing.T) {
 	scrollPayload = append(scrollPayload, u32Bytes(99)...)
 	scrollPayload = append(scrollPayload, u32Bytes(3)...) // scroll_seq (#2661)
 
-	packet := []byte{generated.OPGuiWindowContent, 3}
-	packet = append(packet, section(0x01, headerPayload)...)
-	packet = append(packet, section(0x02, rowsPayload)...)
-	packet = append(packet, section(0x0A, scrollPayload)...)
+	packet := windowContentPacket(
+		section32(0x01, headerPayload),
+		section32(0x02, rowsPayload),
+		section32(0x0A, scrollPayload),
+	)
 
 	command, err := DecodeCommand(packet)
 	if err != nil {
@@ -798,29 +798,21 @@ func TestDecodeGutterChrome(t *testing.T) {
 }
 
 func TestDecodeWindowOverlaySections(t *testing.T) {
-	header := section(0x01, []byte{0, 7, 3, 0, 1, 0, 2, 0, 0, 0, 0, 0, 0, 9})
-	rows := section(0x02, []byte{0, 0})
-	selection := section(0x03, []byte{1, 0, 0, 0, 1, 0, 0, 0, 4})
-	search := section(0x04, []byte{0, 1, 0, 0, 0, 2, 0, 5, 1})
-	diagnostics := section(0x05, []byte{0, 1, 0, 0, 0, 2, 0, 0, 0, 5, 0})
-	highlights := section(0x06, []byte{0, 1, 0, 0, 0, 3, 0, 0, 0, 6, 2})
+	header := section32(0x01, []byte{0, 7, 3, 0, 1, 0, 2, 0, 0, 0, 0, 0, 0, 9})
+	rows := section32(0x02, []byte{0, 0})
+	selection := section32(0x03, []byte{1, 0, 0, 0, 1, 0, 0, 0, 4})
+	search := section32(0x04, []byte{0, 1, 0, 0, 0, 2, 0, 5, 1})
+	diagnostics := section32(0x05, []byte{0, 1, 0, 0, 0, 2, 0, 0, 0, 5, 0})
+	highlights := section32(0x06, []byte{0, 1, 0, 0, 0, 3, 0, 0, 0, 6, 2})
 	annotationPayload := []byte{0, 1, 0, 0, 1, 0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33}
 	annotationPayload = append(annotationPayload, string16("note")...)
-	annotations := section(0x07, annotationPayload)
+	annotations := section32(0x07, annotationPayload)
 	geometryPayload := make([]byte, 67)
 	geometryPayload[1] = 7
 	geometryPayload[63] = 3
 	geometryPayload[65] = 2
-	geometry := section(0x08, geometryPayload)
-	packet := []byte{generated.OPGuiWindowContent, 8}
-	packet = append(packet, header...)
-	packet = append(packet, rows...)
-	packet = append(packet, selection...)
-	packet = append(packet, search...)
-	packet = append(packet, diagnostics...)
-	packet = append(packet, highlights...)
-	packet = append(packet, annotations...)
-	packet = append(packet, geometry...)
+	geometry := section32(0x08, geometryPayload)
+	packet := windowContentPacket(header, rows, selection, search, diagnostics, highlights, annotations, geometry)
 
 	command, err := DecodeCommand(packet)
 	if err != nil {
@@ -836,18 +828,15 @@ func TestDecodeWindowOverlaySections(t *testing.T) {
 }
 
 func TestDecodeWindowOverlayGeometryFailureLeavesGeometryUnset(t *testing.T) {
-	header := section(0x01, []byte{0, 7, 3, 0, 1, 0, 2, 0, 0, 0, 0, 0, 0, 9})
-	rows := section(0x02, []byte{0, 0})
+	header := section32(0x01, []byte{0, 7, 3, 0, 1, 0, 2, 0, 0, 0, 0, 0, 0, 9})
+	rows := section32(0x02, []byte{0, 0})
 	geometryPayload := make([]byte, 67)
 	geometryPayload[1] = 7
 	geometryPayload[63] = 3
 	geometryPayload[65] = 2
 	geometryPayload[66] = 1
-	geometry := section(0x08, geometryPayload)
-	packet := []byte{generated.OPGuiWindowContent, 3}
-	packet = append(packet, header...)
-	packet = append(packet, rows...)
-	packet = append(packet, geometry...)
+	geometry := section32(0x08, geometryPayload)
+	packet := windowContentPacket(header, rows, geometry)
 
 	command, err := DecodeCommand(packet)
 	if err != nil {
@@ -859,13 +848,10 @@ func TestDecodeWindowOverlayGeometryFailureLeavesGeometryUnset(t *testing.T) {
 }
 
 func TestDecodeWindowCursorlineSection(t *testing.T) {
-	header := section(0x01, []byte{0, 7, 3, 0, 1, 0, 2, 0, 0, 0, 0, 0, 0, 9})
-	rows := section(0x02, []byte{0, 0})
-	cursorline := section(0x09, []byte{0, 1, 0x11, 0x22, 0x33})
-	packet := []byte{generated.OPGuiWindowContent, 3}
-	packet = append(packet, header...)
-	packet = append(packet, rows...)
-	packet = append(packet, cursorline...)
+	header := section32(0x01, []byte{0, 7, 3, 0, 1, 0, 2, 0, 0, 0, 0, 0, 0, 9})
+	rows := section32(0x02, []byte{0, 0})
+	cursorline := section32(0x09, []byte{0, 1, 0x11, 0x22, 0x33})
+	packet := windowContentPacket(header, rows, cursorline)
 
 	command, err := DecodeCommand(packet)
 	if err != nil {
@@ -1361,6 +1347,22 @@ func u32Bytes(value uint32) []byte {
 func section(id byte, payload []byte) []byte {
 	out := []byte{id, byte(len(payload) >> 8), byte(len(payload))}
 	return append(out, payload...)
+}
+
+func section32(id byte, payload []byte) []byte {
+	out := []byte{id}
+	out = append(out, u32Bytes(uint32(len(payload)))...)
+	return append(out, payload...)
+}
+
+func windowContentPacket(sections ...[]byte) []byte {
+	body := []byte{byte(len(sections))}
+	for _, section := range sections {
+		body = append(body, section...)
+	}
+	packet := []byte{generated.OPGuiWindowContent}
+	packet = append(packet, u32Bytes(uint32(len(body)))...)
+	return append(packet, body...)
 }
 
 func bottomPanelPacket(streamInstance uint32, id uint32, text string) []byte {

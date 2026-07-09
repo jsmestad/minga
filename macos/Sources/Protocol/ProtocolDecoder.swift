@@ -1582,10 +1582,15 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                                  tabs: tabs, entries: entries), pos - offset)
 
     case OP_GUI_WINDOW_CONTENT:
-        // Sectioned format: opcode(1) + section_count(1) + sections...
-        guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
-        let wcSectionCount = Int(data[rest])
-        var wcPos = rest + 1
+        // len32 command framing plus u32 section lengths:
+        // opcode(1) + payload_len(4) + section_count(1) + sections...
+        guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
+        let wcPayloadLen = Int(readU32(data, rest))
+        let wcPayloadStart = rest + 4
+        let wcPayloadEnd = wcPayloadStart + wcPayloadLen
+        guard wcPayloadLen >= 1, data.count >= wcPayloadEnd else { throw ProtocolDecodeError.malformed }
+        let wcSectionCount = Int(data[wcPayloadStart])
+        var wcPos = wcPayloadStart + 1
 
         var wcWindowId: UInt16 = 0
         var wcFlags: UInt8 = 0
@@ -1598,11 +1603,11 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         var wcOverlays = DecodedOverlaySections()
 
         for _ in 0..<wcSectionCount {
-            guard data.count >= wcPos + 3 else { throw ProtocolDecodeError.malformed }
+            guard wcPayloadEnd >= wcPos + 5 else { throw ProtocolDecodeError.malformed }
             let wcSId = data[wcPos]
-            let wcSLen = Int(readU16(data, wcPos + 1))
-            let wcSStart = wcPos + 3
-            guard data.count >= wcSStart + wcSLen else { throw ProtocolDecodeError.malformed }
+            let wcSLen = Int(readU32(data, wcPos + 1))
+            let wcSStart = wcPos + 5
+            guard wcPayloadEnd >= wcSStart + wcSLen else { throw ProtocolDecodeError.malformed }
 
             switch wcSId {
             case 0x01: // Header: window_id(2) + flags(1) + cursor_row(2) + cursor_col(2) + cursor_shape(1) + scroll_left(2) + optional content_epoch(4)
@@ -1628,6 +1633,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
 
             wcPos = wcSStart + wcSLen
         }
+        guard wcPos == wcPayloadEnd else { throw ProtocolDecodeError.malformed }
 
         let scrollPresentation = try validatedScrollPresentation(wcOverlays.scrollPresentation, windowId: wcWindowId, contentEpoch: wcContentEpoch)
 
@@ -1650,7 +1656,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             cursorline: wcOverlays.cursorline,
             scrollPresentation: scrollPresentation
         )
-        return (.guiWindowContent(data: content), wcPos - offset)
+        return (.guiWindowContent(data: content), 1 + 4 + wcPayloadLen)
 
     case OP_GUI_WINDOW_OVERLAY_DELTA:
         guard data.count >= rest + 12 else { throw ProtocolDecodeError.malformed }

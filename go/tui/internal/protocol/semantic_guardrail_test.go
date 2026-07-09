@@ -66,7 +66,7 @@ func TestSemanticFrontendOpcodesAreAccountedFor(t *testing.T) {
 		generated.OPGuiPickerPreview:       {generated.OPGuiPickerPreview, 0},
 		generated.OPGuiToolManager:         {generated.OPGuiToolManager, 0},
 		generated.OPGuiMinibuffer:          {generated.OPGuiMinibuffer, 0},
-		generated.OPGuiWindowContent:       {generated.OPGuiWindowContent, 0},
+		generated.OPGuiWindowContent:       {generated.OPGuiWindowContent, 0, 0, 0, 1, 0},
 		generated.OPGuiHoverPopup:          {generated.OPGuiHoverPopup, 0},
 		generated.OPGuiSignatureHelp:       {generated.OPGuiSignatureHelp, 0},
 		generated.OPGuiFloatPopup:          {generated.OPGuiFloatPopup, 0},

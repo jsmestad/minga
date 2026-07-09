@@ -20,7 +20,11 @@ version = "2.0.0"
 # protocol_version 8 adds set_link_cursor (#2630): a 1-byte beam_to_frontend hint
 # that toggles the pointing-hand cursor while Cmd/Ctrl+hover previews a navigable
 # go-to-definition symbol. Emitted out-of-band (post-commit), like set_title.
-protocol_version = 8
+# protocol_version 9 promotes gui_window_content (0x80) from u16 sectioned framing
+# to len32 command framing with u32 inner section lengths. Large resume keyframes
+# can exceed 64KB in the rows section, so the old carrier could wrap the length
+# and strand the GUI in resync recovery.
+protocol_version = 9
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -567,7 +571,7 @@ category = "gui_semantic"
 name = "gui_window_content"
 value = 0x80
 direction = "beam_to_frontend"
-framing = "sectioned"
+framing = "len32"
 
 [[opcodes]]
 category = "gui_semantic"
