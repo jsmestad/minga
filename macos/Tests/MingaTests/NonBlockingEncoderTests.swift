@@ -34,6 +34,35 @@ private func parseFrames(_ raw: Data) -> [Data]? {
     return frames
 }
 
+private final class ProtocolReaderCapture: @unchecked Sendable {
+    private let lock = NSLock()
+    private var payloadSizes: [Int] = []
+
+    func append(_ data: Data) {
+        lock.lock()
+        payloadSizes.append(data.count)
+        lock.unlock()
+    }
+
+    func snapshot() -> [Int] {
+        lock.lock()
+        let sizes = payloadSizes
+        lock.unlock()
+        return sizes
+    }
+}
+
+private func framedPayload(_ payload: Data) -> Data {
+    var frame = Data(count: 4)
+    let length = payload.count
+    frame[0] = UInt8((length >> 24) & 0xFF)
+    frame[1] = UInt8((length >> 16) & 0xFF)
+    frame[2] = UInt8((length >> 8) & 0xFF)
+    frame[3] = UInt8(length & 0xFF)
+    frame.append(payload)
+    return frame
+}
+
 @Suite("Encoder: Non-blocking Buffer")
 struct NonBlockingEncoderTests {
     @Test("writes are buffered and delivered asynchronously")
@@ -133,5 +162,42 @@ struct NonBlockingEncoderTests {
         // Key press frames are 10 bytes: opcode + codepoint(4) + modifiers(1) +
         // correlation sequence(4) (ticket #2215).
         #expect(frames?.allSatisfy { $0.count == 10 && $0.first == OP_KEY_PRESS } == true)
+    }
+}
+
+@Suite("ProtocolReader")
+struct ProtocolReaderTests {
+    @Test("accepts large render payloads and preserves packet alignment")
+    func acceptsLargeRenderPayloads() throws {
+        let largePayload = Data(repeating: 0xAB, count: 1_100_000)
+        let smallPayload = Data([0x01, 0x02, 0x03])
+        var stream = Data()
+        stream.append(framedPayload(largePayload))
+        stream.append(framedPayload(smallPayload))
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("minga-protocol-reader-\(UUID().uuidString).bin")
+        try stream.write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let capture = ProtocolReaderCapture()
+        let disconnected = DispatchSemaphore(value: 0)
+        let handle = try FileHandle(forReadingFrom: url)
+        let reader = ProtocolReader(
+            input: handle,
+            maxPayloadLength: 2_000_000,
+            handler: { data in
+                capture.append(data)
+            },
+            onDisconnect: {
+                disconnected.signal()
+            }
+        )
+
+        reader.start()
+        #expect(disconnected.wait(timeout: .now() + 2) == .success)
+        try handle.close()
+
+        #expect(capture.snapshot() == [largePayload.count, smallPayload.count])
     }
 }

@@ -419,7 +419,7 @@ final class CommandDispatcher {
         openFrameSeq = nil
         openBaseFrameSeq = 0
         stagedCommands.removeAll(keepingCapacity: false)
-        guiState.resyncState.markPending()
+        guiState.resyncState.markPending(lastGoodFrameSeq: lastCommittedFrameSeq)
         if shouldRequestKeyframe {
             onRequestKeyframe?(lastCommittedFrameSeq)
         }

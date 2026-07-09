@@ -22,8 +22,13 @@ public final class ResyncState {
     /// status-corner hint; the editor surface keeps showing the last good frame.
     public private(set) var pending: Bool = false
 
+    /// Most recent frame_seq that committed cleanly before recovery began.
+    /// Manual retry uses this to ask the BEAM for the same keyframe recovery the automatic path requested.
+    public private(set) var lastGoodFrameSeq: UInt32 = 0
+
     /// Raise the resync-pending hint. Called by `CommandDispatcher.invalidate`.
-    public func markPending() {
+    public func markPending(lastGoodFrameSeq: UInt32) {
+        self.lastGoodFrameSeq = lastGoodFrameSeq
         pending = true
     }
 
@@ -31,5 +36,6 @@ public final class ResyncState {
     /// promotes a new frame.
     public func clear() {
         pending = false
+        lastGoodFrameSeq = 0
     }
 }

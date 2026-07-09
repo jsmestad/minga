@@ -870,10 +870,13 @@ public struct ContentView<EditorSurface: View>: View {
         )
 
         // Frame-transaction resync hint (#2219 child D). Bottom-trailing badge
-        // shown while a keyframe is in flight after an invalidation; the editor
-        // keeps showing the last good frame underneath.
+        // shown while a keyframe is in flight after an invalidation; the editor keeps showing the last good frame underneath.
+        // If recovery stalls, the badge becomes a small manual retry control.
         ResyncOverlay(
-            state: gui.resyncState
+            state: gui.resyncState,
+            onRetry: { lastGoodFrameSeq in
+                encoder?.sendRequestKeyframe(lastGoodFrameSeq: lastGoodFrameSeq)
+            }
         )
 
         // Startup overlay: covers the empty Metal framebuffer with a
