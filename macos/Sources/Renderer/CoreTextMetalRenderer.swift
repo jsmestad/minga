@@ -647,40 +647,34 @@ final class CoreTextMetalRenderer {
                     semanticOverlayQuads.append(quad)
                 }
 
-                // Pre-clip all rows to the visible viewport window.
-                // Drops scrollLeft columns from the start and limits to viewport width,
-                // so each texture is at most viewport-wide. Fixes gutter bleedthrough
-                // (no leftward position shift) and text truncation (texture always
-                // covers the visible portion).
+                // Pre-clip visible rows to the viewport window. Drops scrollLeft
+                // columns from the start and limits to viewport width, so each
+                // texture is at most viewport-wide.
                 let localScrollInsetCols = scrollLeftInt > 0 ? 1 : 0
                 let localClipScrollLeft = max(scrollLeftInt - localScrollInsetCols, 0)
                 let localClipXOffset = Float(localScrollInsetCols) * cellW * scale
-                var clippedRows: [GUIVisualRow] = []
-                clippedRows.reserveCapacity(content.rows.count)
-                for row in content.rows {
-                    clippedRows.append(
-                        wcr.clipRowToViewport(row, scrollLeft: localClipScrollLeft, viewportCols: contentCols + 2)
-                    )
-                }
 
                 // Render pre-clipped line textures into atlas.
                 var rowEntriesByRow: [UInt16: AtlasEntry] = [:]
-                for (rowIdx, clippedRow) in clippedRows.enumerated() {
+                for (rowIdx, row) in content.rows.enumerated() {
                     let displayRow = UInt16(rowIdx)
+                    let presentationRow = rowIdx - overscanBeforeRows
+                    let yPos = scrollableWindowRowOffset + Float(presentationRow) * displayCellH * scale
+                    let textYOffset = (displayCellH - cellH) * scale * 0.5
+                    let rawLineY = yPos + textYOffset
+                    guard CoreTextMetalRenderer.clipVerticalQuad(y: rawLineY, height: Float(wcr.linePixelHeight), top: contentTopPx, bottom: contentBottomPx) != nil else { continue }
+
+                    let clippedRow = wcr.clipRowToViewport(row, scrollLeft: localClipScrollLeft, viewportCols: contentCols + 2)
                     if let atlas, let entry = wcr.renderRowToAtlas(displayRow: displayRow, row: clippedRow, windowId: content.windowId, contentEpoch: content.contentEpoch, atlas: atlas, metrics: &frameMetrics) {
-                        let presentationRow = rowIdx - overscanBeforeRows
                         if presentationRow >= 0 && presentationRow < committedVisibleRows {
                             rowEntriesByRow[UInt16(presentationRow)] = entry
                         }
-                        let yPos = scrollableWindowRowOffset + Float(presentationRow) * displayCellH * scale
-                        let textYOffset = (displayCellH - cellH) * scale * 0.5
 
                         let (uvOrigin, uvSize) = atlas.uvForSlot(entry.slotIndex, pixelWidth: entry.pixelWidth)
                         let rawLineX = contentColOffset - localClipXOffset - scrollableWindowColOffset
                         let clippedLeftPx = max(contentColOffset - rawLineX, 0)
                         let lineX = max(rawLineX, contentColOffset)
                         let visiblePixelWidth = min(Float(entry.pixelWidth) - clippedLeftPx, contentRightPx - lineX)
-                        let rawLineY = yPos + textYOffset
                         let clippedTopPx = max(contentTopPx - rawLineY, 0)
                         let lineY = max(rawLineY, contentTopPx)
                         let visiblePixelHeight = min(Float(entry.pixelHeight) - clippedTopPx, contentBottomPx - lineY)
@@ -1703,25 +1697,43 @@ final class CoreTextMetalRenderer {
     }
 
     nonisolated static func atlasSlotDemand(frameState: FrameState, windowContents: [UInt16: GUIWindowContent]) -> Int {
-        let bufferRows = windowContents.values.reduce(0) { total, content in
-            total + content.rows.count
+        let bufferRows = windowContents.values.reduce(0 as Int) { total, content in
+            total + atlasVisibleRowBudget(content: content, gutter: frameState.windowGutters[content.windowId])
         }
 
-        let lineAnnotations = windowContents.values.reduce(0) { total, content in
-            total + content.lineAnnotations.filter { $0.kind != .gutterIcon }.count
+        let lineAnnotations = windowContents.values.reduce(0 as Int) { total, content in
+            let committedRows = atlasVisibleRowBudget(content: content, gutter: frameState.windowGutters[content.windowId])
+            return total + content.lineAnnotations.filter {
+                $0.kind != .gutterIcon && Int($0.row) < committedRows
+            }.count
         }
 
-        let gutterTextures = frameState.windowGutters.values.reduce(0) { total, gutter in
+        let gutterTextures = frameState.windowGutters.values.reduce(0 as Int) { total, gutter in
             total + gutterTextureDemand(gutter)
         }
 
-        let splitLabels = frameState.horizontalSeparators.reduce(0) { total, separator in
+        let splitLabels = frameState.horizontalSeparators.reduce(0 as Int) { total, separator in
             total + (separator.filename.isEmpty ? 0 : 1)
         }
 
         let demand = bufferRows + lineAnnotations + gutterTextures + splitLabels
         let slack = max(Int(frameState.rows), 32)
         return max(demand + slack, 1)
+    }
+
+    private nonisolated static func atlasVisibleRowBudget(content: GUIWindowContent, gutter: Wire.WindowGutter?) -> Int {
+        let overscanBeforeRows = presentationOverscanBeforeRows(content)
+        let fallback = max(content.rows.count - overscanBeforeRows, 0)
+        let committedRows: Int
+        if let gutter {
+            committedRows = committedVisibleRows(paneGeometry: content.paneGeometry, gutter: gutter, fallback: fallback)
+        } else if let paneGeometry = content.paneGeometry, paneGeometry.textRect.height > 0 {
+            committedRows = Int(paneGeometry.textRect.height)
+        } else {
+            committedRows = fallback
+        }
+
+        return min(content.rows.count, committedRows + 2)
     }
 
     private nonisolated static func gutterTextureDemand(_ gutter: Wire.WindowGutter) -> Int {
