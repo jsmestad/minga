@@ -108,10 +108,33 @@ enum RenderCommand: Sendable {
 
 // MARK: - Decoder
 
-enum ProtocolDecodeError: Error {
+indirect enum ProtocolDecodeError: Error, CustomStringConvertible {
     case malformed
     case unknownOpcode(UInt8)
     case insufficientData
+    case commandFailed(opcode: UInt8, offset: Int, remaining: Int, cause: ProtocolDecodeError)
+
+    var description: String {
+        switch self {
+        case .malformed:
+            return "malformed"
+        case .unknownOpcode(let opcode):
+            return String(format: "unknown opcode 0x%02X", opcode)
+        case .insufficientData:
+            return "insufficient data"
+        case .commandFailed(let opcode, let offset, let remaining, let cause):
+            return String(format: "opcode 0x%02X at offset %d failed with %@ (remaining=%d)", opcode, offset, String(describing: cause), remaining)
+        }
+    }
+
+    func contextualized(opcode: UInt8, offset: Int, remaining: Int) -> ProtocolDecodeError {
+        switch self {
+        case .commandFailed:
+            return self
+        case .malformed, .unknownOpcode, .insufficientData:
+            return .commandFailed(opcode: opcode, offset: offset, remaining: remaining, cause: self)
+        }
+    }
 }
 
 /// Decodes all commands from a single `{:packet, 4}` payload.
@@ -133,7 +156,13 @@ func decodeCommands(from data: Data, handler: (RenderCommand, UInt8) -> Void) th
     var offset = 0
     while offset < data.count {
         let opcode = data[offset]
-        let (command, size) = try decodeCommand(data: data, offset: offset)
+        let commandAndSize: (RenderCommand?, Int)
+        do {
+            commandAndSize = try decodeCommand(data: data, offset: offset)
+        } catch let error as ProtocolDecodeError {
+            throw error.contextualized(opcode: opcode, offset: offset, remaining: data.count - offset)
+        }
+        let (command, size) = commandAndSize
         if let command {
             handler(command, opcode)
         }

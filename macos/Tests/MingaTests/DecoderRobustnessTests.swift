@@ -575,6 +575,32 @@ struct DecoderEdgeCaseTests {
         #expect(commands.count == 2)
     }
 
+    @Test("decodeCommands includes opcode and offset context on malformed command")
+    func malformedMultiCommandReportsContext() throws {
+        var data = Data()
+        data.append(OP_SET_CURSOR_SHAPE)
+        data.append(CURSOR_BLOCK)
+        data.append(OP_SET_TITLE)
+        data.append(contentsOf: [0x00, 0x05, 0x68])
+
+        do {
+            try decodeCommands(from: data) { _ in }
+            Issue.record("Expected decodeCommands to throw")
+        } catch let error as ProtocolDecodeError {
+            guard case .commandFailed(let opcode, let offset, let remaining, let cause) = error else {
+                Issue.record("Expected contextual commandFailed error, got \(String(describing: error))")
+                return
+            }
+
+            #expect(opcode == OP_SET_TITLE)
+            #expect(offset == 2)
+            #expect(remaining == 4)
+            #expect(String(describing: cause) == "insufficient data")
+            #expect(String(describing: error).contains("opcode 0x"))
+            #expect(String(describing: error).contains("offset 2"))
+        }
+    }
+
     @Test("Zero-length strings decode correctly")
     func zeroLengthStrings() throws {
         var data = Data([OP_SET_TITLE])
