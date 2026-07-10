@@ -2819,6 +2819,7 @@ test "commandSize: gui_window_rows_delta sectioned packet" {
     const data = [_]u8{
         OP_GUI_WINDOW_ROWS_DELTA, 1,
         0x01,                     0,
+        0,                        0,
         14,                       0,
         7,                        0,
         0,                        0,

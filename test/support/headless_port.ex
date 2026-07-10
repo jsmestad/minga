@@ -898,7 +898,7 @@ defmodule Minga.Test.HeadlessPort do
   defp decode_delta_sections(rest, 0, result, _row_cache), do: {result, rest}
 
   defp decode_delta_sections(
-         <<section_id::8, section_len::16, payload::binary-size(section_len), rest::binary>>,
+         <<section_id::8, section_len::32, payload::binary-size(section_len), rest::binary>>,
          remaining,
          result,
          row_cache
@@ -928,7 +928,7 @@ defmodule Minga.Test.HeadlessPort do
 
   defp decode_delta_section(
          0x02,
-         <<row_count::16, rest::binary>>,
+         <<row_count::32, rest::binary>>,
          %{window_id: window_id} = result,
          row_cache
        ) do

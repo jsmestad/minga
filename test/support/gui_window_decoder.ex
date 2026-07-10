@@ -67,7 +67,7 @@ defmodule Minga.Test.GUIWindowDecoder do
     }
   end
 
-  defp decode_section(0x02, <<row_count::16, rest::binary>>, result) do
+  defp decode_section(0x02, <<row_count::32, rest::binary>>, result) do
     {rows, <<>>} = decode_rows(rest, row_count, [])
     %{result | rows: rows}
   end

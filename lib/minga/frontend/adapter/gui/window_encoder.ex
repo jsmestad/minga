@@ -16,7 +16,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   cursor_col:           u16      (display col, virtual text adjusted)
   cursor_shape:         u8
   scroll_left:          u16      (horizontal scroll offset in display cols)
-  visible_row_count:    u16
+  visible_row_count:    u32
 
   per visible row:
     row_type:           u8       (0=normal, 1=fold_start, 2=virtual_line,
@@ -198,7 +198,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
       <<sw.window_id::16, flags::8, sw.cursor_row::16, sw.cursor_col::16, cursor_shape::8,
         sw.scroll_left::16, sw.content_epoch::32>>
 
-    rows_payload = IO.iodata_to_binary([<<row_count::16>> | encode_rows(sw.rows)])
+    rows_payload = IO.iodata_to_binary([<<row_count::32>> | encode_rows(sw.rows)])
     header_section = encode_window_content_section(@section_wc_header, header_payload)
     rows_section = encode_window_content_section(@section_wc_rows, rows_payload)
     overlay = overlay_sections(sw, &encode_window_content_section/2)
@@ -235,7 +235,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   defp encode_rows_snapshot_delta(opcode, %RenderWindow{} = sw, previous_hashes) do
     {row_entries, has_refs?} = encode_delta_row_entries(sw.rows, previous_hashes)
 
-    rows_payload = IO.iodata_to_binary([<<Enum.count(sw.rows)::16>> | row_entries])
+    rows_payload = IO.iodata_to_binary([<<Enum.count(sw.rows)::32>> | row_entries])
     sections = delta_sections(sw, rows_payload)
     binary = IO.iodata_to_binary([<<opcode, Enum.count(sections)::8>> | sections])
 
@@ -251,9 +251,9 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
       <<sw.window_id::16, sw.content_epoch::32, flags::8, sw.cursor_row::16, sw.cursor_col::16,
         cursor_shape::8, sw.scroll_left::16>>
 
-    header_section = encode_section(@section_wc_header, header_payload)
-    rows_section = encode_section(@section_wc_rows, rows_payload)
-    overlay = overlay_sections(sw, &encode_section/2)
+    header_section = encode_delta_section(@section_wc_header, header_payload)
+    rows_section = encode_delta_section(@section_wc_rows, rows_payload)
+    overlay = overlay_sections(sw, &encode_delta_section/2)
 
     [header_section, rows_section | overlay.sections] ++
       overlay.geometry ++ overlay.cursorline ++ overlay.scroll_presentation
@@ -330,6 +330,11 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   @spec encode_section(non_neg_integer(), binary()) :: binary()
   defp encode_section(section_id, payload) do
     <<section_id::8, byte_size(payload)::16, payload::binary>>
+  end
+
+  @spec encode_delta_section(non_neg_integer(), binary()) :: binary()
+  defp encode_delta_section(section_id, payload) do
+    <<section_id::8, byte_size(payload)::32, payload::binary>>
   end
 
   @spec encode_window_content_section(non_neg_integer(), binary()) :: binary()

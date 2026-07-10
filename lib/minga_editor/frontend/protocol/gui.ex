@@ -1002,8 +1002,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @doc """
   Encodes a clipboard_write command.
 
-  Uses the forward-compatible 0x90+ format: opcode(1) + payload_length(2) + payload.
-  Payload: target(1) + text_length(2) + text(text_length).
+  Uses the forward-compatible 0x90+ format: opcode(1) + payload_length(4) + payload.
+  Payload: target(1) + text_length(4) + text(text_length).
 
   Target: 0 = general pasteboard (Cmd+C), 1 = find pasteboard (Cmd+E).
   """
@@ -1012,9 +1012,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     target_byte = if target == :find, do: 1, else: 0
     text_bytes = :erlang.iolist_to_binary([text])
     text_len = byte_size(text_bytes)
-    payload_len = 1 + 2 + text_len
+    payload_len = 1 + 4 + text_len
 
-    <<@op_clipboard_write, payload_len::16, target_byte::8, text_len::16, text_bytes::binary>>
+    <<@op_clipboard_write, payload_len::32, target_byte::8, text_len::32, text_bytes::binary>>
   end
 
   # ── Line spacing (forward-compatible, 0x92) ──

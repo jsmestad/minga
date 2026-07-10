@@ -565,17 +565,17 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
     test "encodes general pasteboard write with length prefix" do
       binary = ProtocolGUI.encode_clipboard_write("hello")
 
-      # Format: opcode(1) + payload_length(2) + target(1) + text_len(2) + text
-      assert <<0x90, payload_len::16, 0::8, text_len::16, text::binary>> = binary
+      # Format: opcode(1) + payload_length(4) + target(1) + text_len(4) + text
+      assert <<0x90, payload_len::32, 0::8, text_len::32, text::binary>> = binary
       assert text == "hello"
       assert text_len == 5
-      assert payload_len == 1 + 2 + 5
+      assert payload_len == 1 + 4 + 5
     end
 
     test "encodes find pasteboard write" do
       binary = ProtocolGUI.encode_clipboard_write("search", :find)
 
-      assert <<0x90, _payload_len::16, 1::8, text_len::16, text::binary>> = binary
+      assert <<0x90, _payload_len::32, 1::8, text_len::32, text::binary>> = binary
       assert text == "search"
       assert text_len == 6
     end
@@ -583,14 +583,14 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
     test "encodes empty text" do
       binary = ProtocolGUI.encode_clipboard_write("")
 
-      assert <<0x90, payload_len::16, 0::8, 0::16>> = binary
-      assert payload_len == 3
+      assert <<0x90, payload_len::32, 0::8, 0::32>> = binary
+      assert payload_len == 5
     end
 
     test "encodes unicode text" do
       binary = ProtocolGUI.encode_clipboard_write("日本語")
 
-      assert <<0x90, _payload_len::16, 0::8, text_len::16, text::binary>> = binary
+      assert <<0x90, _payload_len::32, 0::8, text_len::32, text::binary>> = binary
       assert text == "日本語"
       assert text_len == byte_size("日本語")
     end
@@ -599,8 +599,18 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       binary = ProtocolGUI.encode_clipboard_write("test")
 
       # Verify a decoder that doesn't know 0x90 can still skip it:
-      # read opcode (1 byte), read payload_len (2 bytes), skip payload_len bytes
-      <<0x90, payload_len::16, _payload::binary-size(payload_len)>> = binary
+      # read opcode (1 byte), read payload_len (4 bytes), skip payload_len bytes
+      <<0x90, payload_len::32, _payload::binary-size(payload_len)>> = binary
+    end
+
+    test "encodes 65,536 UTF-8 bytes without truncation" do
+      text = String.duplicate("x", 65_536)
+
+      assert <<0x90, payload_len::32, 0::8, text_len::32, ^text::binary>> =
+               ProtocolGUI.encode_clipboard_write(text)
+
+      assert text_len == 65_536
+      assert payload_len == 65_541
     end
   end
 

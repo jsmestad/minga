@@ -866,11 +866,13 @@ Complete visible-window snapshots for retained GUI windows. Both opcodes carry t
 ```
 opcode(1) + section_count(1) + sections...
 
+Each section is `section_id(1) + section_len(4) + payload(section_len)`. Decoders must validate each declared section length against the remaining command bytes before allocating or applying any section.
+
 Header section 0x01:
   window_id(2) + content_epoch(4) + flags(1) + cursor_row(2) + cursor_col(2) + cursor_shape(1) + scroll_left(2)
 
 Rows section 0x02:
-  row_count(2) + row_entries...
+  row_count(4) + row_entries...
 
 Per row entry:
   entry_type(1)
@@ -1353,14 +1355,14 @@ This allows older frontends to skip unknown standard-envelope opcodes gracefully
 2. Skips `length` bytes forward
 3. Continues decoding the next command
 
-For opcodes < 0x90 that are unknown, the decoder must throw an error (it cannot determine the payload size). Known opcodes may document a wider envelope when the payload can exceed 64KB. `gui_file_tree` (0x93) is one of those exceptions and uses a 4-byte length field.
+For opcodes < 0x90 that are unknown, the decoder must throw an error (it cannot determine the payload size). Known opcodes may document a wider envelope when the payload can exceed 64KB. `clipboard_write` (0x90) and `gui_file_tree` (0x93) are such exceptions and use a 4-byte length field.
 
 **Example:** A BEAM running version 0.3.0 introduces a new `OP_GUI_NEW_FEATURE = 0x91`. A macOS frontend running 0.2.0 receives this opcode. Because 0x91 >= 0x90 and uses the standard envelope, it reads the length prefix, skips that many bytes, and continues. The frontend remains functional even though it doesn't render the new feature.
 
 This convention is enforced on the BEAM side: all new opcodes >= 0x90 must use a documented length-prefixed encoding. See `lib/minga_editor/frontend/protocol/gui.ex` for the encoder implementation.
 
 **Current 0x90+ opcodes:**
-- `OP_CLIPBOARD_WRITE (0x90)` — clipboard write command (16-bit length-prefixed)
+- `OP_CLIPBOARD_WRITE (0x90)` — clipboard write command (32-bit length-prefixed)
 - `OP_GUI_INDENT_GUIDES (0x91)` — indent guide positions per window (16-bit length-prefixed)
 - `OP_GUI_LINE_SPACING (0x92)` — renderer line spacing multiplier (16-bit length-prefixed)
 - `OP_GUI_FILE_TREE (0x93)` — semantic file tree rows (32-bit length-prefixed)

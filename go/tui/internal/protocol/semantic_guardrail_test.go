@@ -85,8 +85,8 @@ func TestSemanticFrontendOpcodesAreAccountedFor(t *testing.T) {
 		generated.OPGuiSearchState:         {generated.OPGuiSearchState, 0, 5, 0, 0, 0, 0, 0},
 		generated.OPGuiSidebars:            {generated.OPGuiSidebars, 0, 0, 0, 0, 0},
 		generated.OPGuiWindowOverlayDelta:  {generated.OPGuiWindowOverlayDelta, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0},
-		generated.OPGuiWindowViewportDelta: append(append([]byte{generated.OPGuiWindowViewportDelta, 2}, section(0x01, []byte{0, 8, 0x12, 0x34, 0x56, 0x78, 0x01, 0, 0, 0x02, 0, 2, 0, 0})...), section(0x02, []byte{0, 0})...),
-		generated.OPGuiWindowRowsDelta:     append(append([]byte{generated.OPGuiWindowRowsDelta, 2}, section(0x01, []byte{0, 7, 0x12, 0x34, 0x56, 0x78, 0x00, 0, 0, 0x02, 0, 2, 0, 0})...), section(0x02, []byte{0, 0})...),
+		generated.OPGuiWindowViewportDelta: append(append([]byte{generated.OPGuiWindowViewportDelta, 2}, section32Semantic(0x01, []byte{0, 8, 0x12, 0x34, 0x56, 0x78, 0x01, 0, 0, 0x02, 0, 2, 0, 0})...), section32Semantic(0x02, []byte{0, 0, 0, 0})...),
+		generated.OPGuiWindowRowsDelta:     append(append([]byte{generated.OPGuiWindowRowsDelta, 2}, section32Semantic(0x01, []byte{0, 7, 0x12, 0x34, 0x56, 0x78, 0x00, 0, 0, 0x02, 0, 2, 0, 0})...), section32Semantic(0x02, []byte{0, 0, 0, 0})...),
 		generated.OPGuiIndentGuides:        {generated.OPGuiIndentGuides, 0, 6, 0, 1, 2, 0xFF, 0xFF, 0},
 		generated.OPGuiLineSpacing:         {generated.OPGuiLineSpacing, 0, 2, 0, 100},
 		generated.OPGuiFileTree:            {generated.OPGuiFileTree, 0, 0, 0, 0},
@@ -119,4 +119,9 @@ func TestSemanticFrontendOpcodesAreAccountedFor(t *testing.T) {
 			}
 		})
 	}
+}
+
+func section32Semantic(id byte, payload []byte) []byte {
+	section := []byte{id, 0, 0, 0, byte(len(payload))}
+	return append(section, payload...)
 }

@@ -21,10 +21,10 @@ version = "2.0.0"
 # that toggles the pointing-hand cursor while Cmd/Ctrl+hover previews a navigable
 # go-to-definition symbol. Emitted out-of-band (post-commit), like set_title.
 # protocol_version 9 promotes gui_window_content (0x80) from u16 sectioned framing
-# to len32 command framing with u32 inner section lengths. Large resume keyframes
-# can exceed 64KB in the rows section, so the old carrier could wrap the length
-# and strand the GUI in resync recovery.
-protocol_version = 9
+# to len32 command framing with u32 inner section lengths.
+# protocol_version 10 widens clipboard_write and the A1/A2 window delta section
+# carriers and row counts to u32 so large payloads cannot silently wrap.
+protocol_version = 10
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -528,7 +528,7 @@ category = "gui_chrome"
 name = "clipboard_write"
 value = 0x90
 direction = "beam_to_frontend"
-framing = "len16"
+framing = "len32"
 
 [[opcodes]]
 category = "gui_chrome"
@@ -730,14 +730,14 @@ category = "gui_semantic"
 name = "gui_window_viewport_delta"
 value = 0xA1
 direction = "beam_to_frontend"
-framing = "sectioned"
+framing = "sectioned32"
 
 [[opcodes]]
 category = "gui_semantic"
 name = "gui_window_rows_delta"
 value = 0xA2
 direction = "beam_to_frontend"
-framing = "sectioned"
+framing = "sectioned32"
 
 [[opcodes]]
 category = "gui_semantic"
@@ -1496,7 +1496,7 @@ opcode = "gui_window_content"
 id = 0x02
 name = "rows"
 layout = "counted_array"
-count_type = "u16"
+count_type = "u32"
 element = "row"
 
 [[sections]]
@@ -1782,7 +1782,7 @@ opcode = "gui_window_viewport_delta"
 id = 0x02
 name = "rows"
 layout = "counted_array"
-count_type = "u16"
+count_type = "u32"
 element = "row"
 
 # gui_window_rows_delta (0xA2) sections
@@ -1806,7 +1806,7 @@ opcode = "gui_window_rows_delta"
 id = 0x02
 name = "rows"
 layout = "counted_array"
-count_type = "u16"
+count_type = "u32"
 element = "row"
 
 # gui_surface_layout (0xA4) sections

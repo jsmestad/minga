@@ -32,12 +32,14 @@ func CommandSize(payload []byte) (int, CommandSizeStatus) {
 		return fixedCommandSize(payload, 6)
 	case OPBeginFrame, OPCommitFrame:
 		return fixedCommandSize(payload, 9)
-	case OPSetTitle, OPProtocolError, OPClipboardWrite, OPGuiIndentGuides, OPGuiLineSpacing, OPGuiFileTreeSelection, OPGuiCursorAnimation, OPGuiHoverAction, OPGuiConfigState, OPGuiWorkspaces, OPGuiNotifications, OPGuiEditTimeline, OPGuiExtensionOverlay, OPGuiExtensionPanel, OPGuiSearchState, OPGuiEmptyState:
+	case OPSetTitle, OPProtocolError, OPGuiIndentGuides, OPGuiLineSpacing, OPGuiFileTreeSelection, OPGuiCursorAnimation, OPGuiHoverAction, OPGuiConfigState, OPGuiWorkspaces, OPGuiNotifications, OPGuiEditTimeline, OPGuiExtensionOverlay, OPGuiExtensionPanel, OPGuiSearchState, OPGuiEmptyState:
 		return len16CommandSize(payload)
-	case OPGuiWindowContent, OPGuiAgentTranscript, OPGuiFileTree, OPGuiObservatory, OPGuiSidebars, OPGuiExtensionRuntime:
+	case OPGuiWindowContent, OPGuiAgentTranscript, OPClipboardWrite, OPGuiFileTree, OPGuiObservatory, OPGuiSidebars, OPGuiExtensionRuntime:
 		return len32CommandSize(payload)
-	case OPGuiStatusBar, OPGuiGutter, OPGuiWindowViewportDelta, OPGuiWindowRowsDelta, OPGuiSurfaceLayout:
+	case OPGuiStatusBar, OPGuiGutter, OPGuiSurfaceLayout:
 		return sectionedCommandSize(payload)
+	case OPGuiWindowViewportDelta, OPGuiWindowRowsDelta:
+		return sectioned32CommandSize(payload)
 	case OPSetFont, OPSetFontFallback, OPRegisterFont, OPGuiTabBar, OPGuiWhichKey, OPGuiCompletion, OPGuiTheme, OPGuiBreadcrumb, OPGuiPicker, OPGuiAgentChat, OPGuiBottomPanel, OPGuiPickerPreview, OPGuiToolManager, OPGuiMinibuffer, OPGuiHoverPopup, OPGuiSignatureHelp, OPGuiFloatPopup, OPGuiSplitSeparators, OPGuiGitStatus, OPGuiAgentContext, OPGuiChangeSummary, OPGuiWindowOverlayDelta:
 		return 0, CommandSizeCustom
 	default:
@@ -76,6 +78,24 @@ func len32CommandSize(payload []byte) (int, CommandSizeStatus) {
 		return 0, CommandSizeIncomplete
 	}
 	return size, CommandSizeOK
+}
+
+func sectioned32CommandSize(payload []byte) (int, CommandSizeStatus) {
+	if len(payload) < 2 {
+		return 0, CommandSizeIncomplete
+	}
+	offset := 2
+	count := int(payload[1])
+	for i := 0; i < count; i++ {
+		if len(payload) < offset+5 {
+			return 0, CommandSizeIncomplete
+		}
+		offset += 5 + int(payload[offset+1])<<24 + int(payload[offset+2])<<16 + int(payload[offset+3])<<8 + int(payload[offset+4])
+		if len(payload) < offset {
+			return 0, CommandSizeIncomplete
+		}
+	}
+	return offset, CommandSizeOK
 }
 
 func sectionedCommandSize(payload []byte) (int, CommandSizeStatus) {

@@ -205,6 +205,10 @@ Between frames, the frontend must not mutate committed editor state or present n
 
 ---
 
+## Bounded length carriers
+
+`clipboard_write` uses a u32 outer payload length and u32 text length. `gui_window_content` and its A1/A2 delta commands use u32 section lengths and u32 row counts. These carriers support values from 0 through 4,294,967,295 bytes or rows. A producer must reject a value outside its carrier before writing any part of the command. Fields documented as u8 or u16 remain intentionally bounded and must likewise fail before emission when their value is out of range.
+
 ## Frame Transactions
 
 > Status: protocol_version 4 keeps the transaction vocabulary introduced in protocol_version 3 (#2219 child A) and the BEAM now brackets every emitted frame with `begin_frame`/`commit_frame` (#2219 child B). Both frontends decode the markers and gate frames and latency on `commit_frame` exactly as they did `batch_end`; they ignore `base_frame_seq` for now. Children C/D move the frontends onto real staging/commit (paint nothing until the matching `commit_frame`, resync on truncation). This section is the authoritative spec those children build against.
@@ -760,7 +764,7 @@ Total size: 4 + msg_len bytes.
 
 ## Protocol Version Negotiation
 
-The schema (`docs/protocol_schema.toml`) carries a `protocol_version` integer (currently 6). `mix protocol.gen` emits it as a constant on every side: `Minga.Protocol.Opcodes.protocol_version()` (Elixir), `generated.ProtocolVersion` (Go), `PROTOCOL_VERSION` (Swift), `PROTOCOL_VERSION` (Zig parser). Bump it whenever the wire contract changes incompatibly; protocol_version 2 retired the 9 cell-paradigm render opcodes, protocol_version 3 (#2219) added the frame-transaction vocabulary (`begin_frame`, `commit_frame`, `request_keyframe`) and authoritative layout (`surface_placement`, `gui_surface_layout`), protocol_version 4 added the `gui_file_tree` row `heat_level` byte, protocol_version 5 added producer-assigned `stream_instance` identity to the Messages stream, and protocol_version 6 frames `gui_agent_context` and appends `gui_edit_timeline` file summaries. A frontend built against an older protocol handshakes with its old version and receives the `protocol_error` blocking surface instead of a desynced stream.
+The schema (`docs/protocol_schema.toml`) carries a `protocol_version` integer (currently 10). `mix protocol.gen` emits it as a constant on every side: `Minga.Protocol.Opcodes.protocol_version()` (Elixir), `generated.ProtocolVersion` (Go), `PROTOCOL_VERSION` (Swift), `PROTOCOL_VERSION` (Zig parser). Bump it whenever the wire contract changes incompatibly; protocol_version 2 retired the 9 cell-paradigm render opcodes, protocol_version 3 (#2219) added the frame-transaction vocabulary (`begin_frame`, `commit_frame`, `request_keyframe`) and authoritative layout (`surface_placement`, `gui_surface_layout`), protocol_version 4 added the `gui_file_tree` row `heat_level` byte, protocol_version 5 added producer-assigned `stream_instance` identity to the Messages stream, protocol_version 6 frames `gui_agent_context` and appends `gui_edit_timeline` file summaries, protocol_version 7 established the current baseline, protocol_version 8 added `set_link_cursor`, protocol_version 9 widened `gui_window_content` framing and section lengths, and protocol_version 10 widens clipboard and retained-window delta framing. A frontend built against an older protocol handshakes with its old version and receives the `protocol_error` blocking surface instead of a desynced stream.
 
 **Handshake.** A frontend appends its compiled-in `protocol_version` as a u16 tail on the extended `ready` event (after `caps_data`). A frontend that omits the tail (short ready, or extended ready without the tail) is treated as protocol_version 0.
 
