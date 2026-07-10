@@ -79,6 +79,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   alias Minga.RenderModel.Window.SearchMatch
   alias Minga.RenderModel.Window.Selection
   alias Minga.RenderModel.Window.Span
+  alias Minga.Frontend.Adapter.GUI.Wire
 
   alias Minga.Protocol.Opcodes
 
@@ -128,6 +129,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   @doc "Encodes a cursor and cursorline overlay delta for a retained GUI window."
   @spec encode_overlay_delta(RenderWindow.t()) :: binary()
   def encode_overlay_delta(%RenderWindow{} = window) do
+    validate_window_fields!(window, :gui_window_overlay_delta)
     cursorline = encode_cursorline_section(window.cursorline, window.rect)
 
     flags =
@@ -186,6 +188,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   @doc "Encodes window content with per-section byte metrics."
   @spec encode_window_content_with_metrics(RenderWindow.t()) :: {binary(), metrics()}
   def encode_window_content_with_metrics(%RenderWindow{} = sw) do
+    validate_window_fields!(sw, :gui_window_content)
     # Flags byte: bit 0 = full_refresh, bit 1 = cursor_visible
     flags =
       if(sw.full_refresh, do: 1, else: 0) |||
@@ -193,6 +196,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
 
     cursor_shape = encode_cursor_shape(sw.cursor_shape)
     row_count = Enum.count(sw.rows)
+    validate_uint!(:gui_window_content, :row_count, row_count, Wire.max_u32())
 
     header_payload =
       <<sw.window_id::16, flags::8, sw.cursor_row::16, sw.cursor_col::16, cursor_shape::8,
@@ -233,9 +237,13 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   @spec encode_rows_snapshot_delta(non_neg_integer(), RenderWindow.t(), map()) ::
           {binary(), boolean()}
   defp encode_rows_snapshot_delta(opcode, %RenderWindow{} = sw, previous_hashes) do
+    command = delta_command(opcode)
+    validate_window_fields!(sw, command)
     {row_entries, has_refs?} = encode_delta_row_entries(sw.rows, previous_hashes)
 
-    rows_payload = IO.iodata_to_binary([<<Enum.count(sw.rows)::32>> | row_entries])
+    row_count = Enum.count(sw.rows)
+    validate_uint!(command, :row_count, row_count, Wire.max_u32())
+    rows_payload = IO.iodata_to_binary([<<row_count::32>> | row_entries])
     sections = delta_sections(sw, rows_payload)
     binary = IO.iodata_to_binary([<<opcode, Enum.count(sections)::8>> | sections])
 
@@ -329,16 +337,27 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
 
   @spec encode_section(non_neg_integer(), binary()) :: binary()
   defp encode_section(section_id, payload) do
-    <<section_id::8, byte_size(payload)::16, payload::binary>>
+    Wire.encode_section(section_id, payload)
   end
 
   @spec encode_delta_section(non_neg_integer(), binary()) :: binary()
   defp encode_delta_section(section_id, payload) do
+    validate_uint!(:gui_window_delta_section, :section_id, section_id, Wire.max_u8())
+    validate_uint!(:gui_window_delta_section, :payload_length, byte_size(payload), Wire.max_u32())
     <<section_id::8, byte_size(payload)::32, payload::binary>>
   end
 
   @spec encode_window_content_section(non_neg_integer(), binary()) :: binary()
   defp encode_window_content_section(section_id, payload) do
+    validate_uint!(:gui_window_content_section, :section_id, section_id, Wire.max_u8())
+
+    validate_uint!(
+      :gui_window_content_section,
+      :payload_length,
+      byte_size(payload),
+      Wire.max_u32()
+    )
+
     <<section_id::8, byte_size(payload)::32, payload::binary>>
   end
 
@@ -435,6 +454,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
     text_bytes = row.text
     text_len = byte_size(text_bytes)
     span_count = Enum.count(row.spans)
+    validate_uint!(:gui_window_content, :span_count, span_count, Wire.max_u16())
 
     spans_binary = Enum.map(row.spans, &encode_span/1)
 
@@ -488,6 +508,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   @spec encode_search_matches([SearchMatch.t()]) :: binary()
   defp encode_search_matches(matches) do
     count = Enum.count(matches)
+    validate_uint!(:gui_window_content, :search_match_count, count, Wire.max_u16())
     entries = Enum.map(matches, &encode_search_match/1)
     IO.iodata_to_binary([<<count::16>> | entries])
   end
@@ -503,6 +524,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   @spec encode_diagnostic_ranges([DiagnosticRange.t()]) :: binary()
   defp encode_diagnostic_ranges(ranges) do
     count = Enum.count(ranges)
+    validate_uint!(:gui_window_content, :diagnostic_range_count, count, Wire.max_u16())
     entries = Enum.map(ranges, &encode_diagnostic_range/1)
     IO.iodata_to_binary([<<count::16>> | entries])
   end
@@ -525,6 +547,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   @spec encode_document_highlights([DocumentHighlight.t()]) :: binary()
   defp encode_document_highlights(highlights) do
     count = Enum.count(highlights)
+    validate_uint!(:gui_window_content, :document_highlight_count, count, Wire.max_u16())
     entries = Enum.map(highlights, &encode_document_highlight/1)
     IO.iodata_to_binary([<<count::16>> | entries])
   end
@@ -546,6 +569,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   @spec encode_annotations([Annotation.t()]) :: binary()
   defp encode_annotations(annotations) do
     count = Enum.count(annotations)
+    validate_uint!(:gui_window_content, :annotation_count, count, Wire.max_u16())
     entries = Enum.map(annotations, &encode_annotation/1)
     IO.iodata_to_binary([<<count::16>> | entries])
   end
@@ -561,6 +585,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
     bg_b = ann.bg &&& 0xFF
     text_bytes = ann.text
     text_len = byte_size(text_bytes)
+    validate_uint!(:gui_window_content, :annotation_text_length, text_len, Wire.max_u16())
 
     <<ann.row::16, kind::8, fg_r::8, fg_g::8, fg_b::8, bg_r::8, bg_g::8, bg_b::8, text_len::16,
       text_bytes::binary>>
@@ -580,6 +605,8 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
 
   @spec encode_gutter_binary(Gutter.t()) :: binary()
   defp encode_gutter_binary(%Gutter{} = gutter) do
+    validate_uint!(:gui_gutter, :entry_count, Enum.count(gutter.entries), Wire.max_u16())
+
     entries_payload =
       IO.iodata_to_binary([
         <<Enum.count(gutter.entries)::16>> | Enum.map(gutter.entries, &encode_gutter_entry/1)
@@ -616,6 +643,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
       :annotation ->
         fg = entry.sign_fg || 0
         text = entry.sign_text || ""
+        validate_uint!(:gui_gutter, :annotation_text_length, byte_size(text), Wire.max_u8())
         <<base::binary, red(fg)::8, green(fg)::8, blue(fg)::8, byte_size(text)::8, text::binary>>
 
       _ ->
@@ -711,4 +739,22 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   defp encode_cursor_shape(:block), do: 0
   defp encode_cursor_shape(:beam), do: 1
   defp encode_cursor_shape(:underline), do: 2
+
+  @spec delta_command(non_neg_integer()) :: atom()
+  defp delta_command(@op_gui_window_viewport_delta), do: :gui_window_viewport_delta
+  defp delta_command(@op_gui_window_rows_delta), do: :gui_window_rows_delta
+
+  @spec validate_window_fields!(RenderWindow.t(), atom()) :: :ok
+  defp validate_window_fields!(%RenderWindow{} = window, command) do
+    validate_uint!(command, :window_id, window.window_id, Wire.max_u16())
+    validate_uint!(command, :cursor_row, window.cursor_row, Wire.max_u16())
+    validate_uint!(command, :cursor_col, window.cursor_col, Wire.max_u16())
+    validate_uint!(command, :scroll_left, window.scroll_left, Wire.max_u16())
+    validate_uint!(command, :content_epoch, window.content_epoch, Wire.max_u32())
+    validate_uint!(command, :scroll_seq, window.scroll_seq, Wire.max_u32())
+  end
+
+  @spec validate_uint!(atom(), atom(), term(), non_neg_integer()) :: :ok
+  defp validate_uint!(command, field, value, max),
+    do: Wire.validate_uint!(command, field, value, max)
 end
