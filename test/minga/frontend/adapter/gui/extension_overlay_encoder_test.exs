@@ -2,6 +2,7 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionOverlayEncoderTest do
   use ExUnit.Case, async: true
 
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.EncodingError
   alias Minga.Frontend.Adapter.GUI.ExtensionOverlayEncoder
   alias Minga.RenderModel.UI.ExtensionOverlay
   alias Minga.RenderModel.UI.ExtensionOverlay.Entry
@@ -68,77 +69,59 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionOverlayEncoderTest do
                ProtocolGUI.encode_gui_extension_overlays(legacy_entries)
     end
 
-    test "bounds extension-controlled counts and 8-bit strings" do
+    test "rejects extension-controlled counts before truncating the command" do
       long_text = String.duplicate("å", 300)
 
       entries =
         for index <- 1..300,
             do: entry(extension: long_text, overlay_id: "overlay-#{index}-#{long_text}")
 
-      command = ExtensionOverlayEncoder.encode_command(%ExtensionOverlay{entries: entries})
+      error =
+        assert_raise EncodingError, fn ->
+          ExtensionOverlayEncoder.encode_command(%ExtensionOverlay{entries: entries})
+        end
 
-      <<@op_gui_extension_overlay, payload_len::16, payload::binary-size(payload_len)>> = command
-      <<entry_count::8, first_entry::binary>> = payload
-
-      <<ext_len::8, ext::binary-size(ext_len), overlay_id_len::8,
-        overlay_id::binary-size(overlay_id_len), _rest::binary>> = first_entry
-
-      assert entry_count <= 255
-      assert ext_len <= 255
-      assert overlay_id_len <= 255
-      assert String.valid?(ext)
-      assert String.valid?(overlay_id)
+      assert %{command: :gui_extension_overlay, field: :entry_count, actual: 300} = error
     end
 
-    test "clamps numeric overlay bounds with a normal payload" do
-      command =
-        ExtensionOverlayEncoder.encode_command(%ExtensionOverlay{
-          entries: [
-            entry(
-              extension: "e",
-              overlay_id: "o",
-              window_id: 99_999,
-              row: 99_999,
-              col: 99_999,
-              opacity: 999,
-              content: "abc"
-            )
-          ]
-        })
+    test "rejects out-of-range numeric overlay fields" do
+      error =
+        assert_raise EncodingError, fn ->
+          ExtensionOverlayEncoder.encode_command(%ExtensionOverlay{
+            entries: [
+              entry(
+                extension: "e",
+                overlay_id: "o",
+                window_id: 99_999,
+                row: 99_999,
+                col: 99_999,
+                opacity: 999,
+                content: "abc"
+              )
+            ]
+          })
+        end
 
-      <<@op_gui_extension_overlay, payload_len::16, payload::binary-size(payload_len)>> = command
-      <<1::8, first_entry::binary>> = payload
-
-      <<ext_len::8, _ext::binary-size(ext_len), overlay_id_len::8,
-        _overlay_id::binary-size(overlay_id_len), window_id::16, row::16, col::16, _shape::8,
-        _r::8, _g::8, _b::8, opacity::8, content_len::16, content::binary-size(content_len)>> =
-        first_entry
-
-      assert ext_len == 1
-      assert overlay_id_len == 1
-      assert window_id == 0xFFFF
-      assert row == 0xFFFF
-      assert col == 0xFFFF
-      assert opacity == 255
-      assert content_len == 3
-      assert content == "abc"
+      assert %{field: :window_id, actual: 99_999} = error
     end
 
-    test "drops oversized overlay content when the encoded entry exceeds the budget" do
+    test "rejects oversized overlay content" do
       long_content = String.duplicate("a", 70_000)
 
-      command =
-        ExtensionOverlayEncoder.encode_command(%ExtensionOverlay{
-          entries: [
-            entry(
-              extension: "e",
-              overlay_id: "o",
-              content: long_content
-            )
-          ]
-        })
+      error =
+        assert_raise EncodingError, fn ->
+          ExtensionOverlayEncoder.encode_command(%ExtensionOverlay{
+            entries: [
+              entry(
+                extension: "e",
+                overlay_id: "o",
+                content: long_content
+              )
+            ]
+          })
+        end
 
-      assert command == <<@op_gui_extension_overlay, 1::16, 0>>
+      assert %{field: :content_length, actual: 70_000} = error
     end
   end
 
