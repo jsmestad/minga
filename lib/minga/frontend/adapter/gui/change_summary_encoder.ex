@@ -2,6 +2,7 @@ defmodule Minga.Frontend.Adapter.GUI.ChangeSummaryEncoder do
   @moduledoc false
 
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.Wire
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.ChangeSummary
 
@@ -27,9 +28,28 @@ defmodule Minga.Frontend.Adapter.GUI.ChangeSummaryEncoder do
         path_bytes = :erlang.iolist_to_binary([entry.path])
         action_byte = action_byte(entry.action)
 
+        Wire.validate_uint!(
+          :gui_change_summary,
+          :path_length,
+          byte_size(path_bytes),
+          Wire.max_u16()
+        )
+
+        Wire.validate_uint!(:gui_change_summary, :lines_added, entry.lines_added, Wire.max_u32())
+
+        Wire.validate_uint!(
+          :gui_change_summary,
+          :lines_removed,
+          entry.lines_removed,
+          Wire.max_u32()
+        )
+
         <<byte_size(path_bytes)::16, path_bytes::binary, action_byte::8, entry.lines_added::32,
           entry.lines_removed::32>>
       end)
+
+    Wire.validate_uint!(:gui_change_summary, :selected_index, selected_index, Wire.max_u16())
+    Wire.validate_uint!(:gui_change_summary, :entry_count, Enum.count(entries), Wire.max_u16())
 
     IO.iodata_to_binary([
       <<@op_gui_change_summary, visible::8, selected_index::16, Enum.count(entries)::16>>
