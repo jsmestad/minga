@@ -270,9 +270,6 @@ func decodeWindowContent(payload []byte) (Command, error) {
 		end = len(payload)
 	}
 
-	requiresSections := opcode == generated.OPGuiWindowRowsDelta || opcode == generated.OPGuiWindowViewportDelta
-	needHeader := requiresSections
-	needRows := requiresSections
 	sawHeader := false
 	sawRows := false
 	window := WindowContent{}
@@ -292,15 +289,15 @@ func decodeWindowContent(payload []byte) (Command, error) {
 
 		switch sectionID {
 		case 0x01:
-			sawHeader = true
-			if !decodeWindowHeader(opcode, section, &window) && needHeader {
+			if sawHeader || !decodeWindowHeader(opcode, section, &window) {
 				return Command{}, fmt.Errorf("malformed semantic window header")
 			}
+			sawHeader = true
 		case 0x02:
-			sawRows = true
-			if !decodeRows(section, &window, opcode != generated.OPGuiWindowContent) {
+			if sawRows || !decodeRows(section, &window, opcode != generated.OPGuiWindowContent) {
 				return Command{}, fmt.Errorf("malformed semantic window rows")
 			}
+			sawRows = true
 		case 0x03:
 			decodeSelection(section, &window)
 		case 0x04:
@@ -320,10 +317,10 @@ func decodeWindowContent(payload []byte) (Command, error) {
 		}
 	}
 
-	if needHeader && !sawHeader {
+	if !sawHeader {
 		return Command{}, fmt.Errorf("missing required semantic window header")
 	}
-	if needRows && !sawRows {
+	if !sawRows {
 		return Command{}, fmt.Errorf("missing required semantic window rows")
 	}
 

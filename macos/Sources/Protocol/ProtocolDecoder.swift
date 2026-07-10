@@ -1601,6 +1601,8 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         var wcContentEpoch: UInt32 = 0
         var wcRows: [GUIVisualRow] = []
         var wcOverlays = DecodedOverlaySections()
+        var wcSawHeader = false
+        var wcSawRows = false
 
         for _ in 0..<wcSectionCount {
             guard wcPayloadEnd >= wcPos + 5 else { throw ProtocolDecodeError.malformed }
@@ -1611,7 +1613,8 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
 
             switch wcSId {
             case 0x01: // Header: window_id(2) + flags(1) + cursor_row(2) + cursor_col(2) + cursor_shape(1) + scroll_left(2) + optional content_epoch(4)
-                guard wcSLen >= 10 else { break }
+                guard !wcSawHeader, wcSLen >= 10 else { throw ProtocolDecodeError.malformed }
+                wcSawHeader = true
                 wcWindowId = readU16(data, wcSStart)
                 wcFlags = data[wcSStart + 2]
                 wcCursorRow = readU16(data, wcSStart + 3)
@@ -1623,6 +1626,8 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                 }
 
             case 0x02: // Rows: row_count(4) + rows...
+                guard !wcSawRows else { throw ProtocolDecodeError.malformed }
+                wcSawRows = true
                 wcRows = try decodeWindowContentRows(data: data, start: wcSStart, end: wcSStart + wcSLen)
 
             case 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A:
@@ -1633,7 +1638,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
 
             wcPos = wcSStart + wcSLen
         }
-        guard wcPos == wcPayloadEnd else { throw ProtocolDecodeError.malformed }
+        guard wcPos == wcPayloadEnd, wcSawHeader, wcSawRows else { throw ProtocolDecodeError.malformed }
 
         let scrollPresentation = try validatedScrollPresentation(wcOverlays.scrollPresentation, windowId: wcWindowId, contentEpoch: wcContentEpoch)
 
@@ -3095,7 +3100,7 @@ private func decodeWindowRowsDelta(data: Data, offset: Int) throws -> (GUIWindow
 
         switch sectionId {
         case 0x01:
-            guard sectionLen >= 14 else { throw ProtocolDecodeError.malformed }
+            guard !sawHeader, sectionLen >= 14 else { throw ProtocolDecodeError.malformed }
             sawHeader = true
             windowId = readU16(data, sectionStart)
             contentEpoch = readU32(data, sectionStart + 2)
@@ -3106,6 +3111,7 @@ private func decodeWindowRowsDelta(data: Data, offset: Int) throws -> (GUIWindow
             scrollLeft = readU16(data, sectionStart + 12)
 
         case 0x02:
+            guard !sawRows else { throw ProtocolDecodeError.malformed }
             sawRows = true
             rows = try decodeWindowDeltaRows(data: data, start: sectionStart, end: sectionEnd)
 

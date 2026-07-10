@@ -149,6 +149,30 @@ func TestDecodeWindowContentRows(t *testing.T) {
 	}
 }
 
+func TestDecodeWindowContentRequiresOneHeaderAndRows(t *testing.T) {
+	header := []byte{0, 7, 0x02, 0, 3, 0, 4, 1, 0, 0, 0, 0, 0, 11}
+	rows := []byte{0, 0, 0, 0}
+
+	tests := []struct {
+		name   string
+		packet []byte
+	}{
+		{name: "empty sections", packet: windowContentPacket()},
+		{name: "missing rows", packet: windowContentPacket(section32(0x01, header))},
+		{name: "missing header", packet: windowContentPacket(section32(0x02, rows))},
+		{name: "duplicate header", packet: windowContentPacket(section32(0x01, header), section32(0x01, header), section32(0x02, rows))},
+		{name: "duplicate rows", packet: windowContentPacket(section32(0x01, header), section32(0x02, rows), section32(0x02, rows))},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := DecodeCommand(tt.packet); err == nil {
+				t.Fatal("DecodeCommand accepted an incomplete semantic window")
+			}
+		})
+	}
+}
+
 func TestDecodeWindowContentScrollPresentation(t *testing.T) {
 	headerPayload := []byte{0, 7, 0x02, 0, 3, 0, 4, 1, 0, 2, 0, 0, 0, 42}
 	rowsPayload := []byte{0, 0, 0, 0}
