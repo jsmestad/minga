@@ -58,12 +58,14 @@ defmodule Minga.Frontend.Adapter.GUI.Wire do
   @spec encode_string8(iodata()) :: binary()
   def encode_string8(value) do
     bytes = :erlang.iolist_to_binary([value])
+    validate_uint!(:gui_string, :byte_length, byte_size(bytes), @max_u8)
     <<byte_size(bytes)::8, bytes::binary>>
   end
 
   @spec encode_string16(iodata()) :: binary()
   def encode_string16(value) do
     bytes = :erlang.iolist_to_binary([value])
+    validate_uint!(:gui_string, :byte_length, byte_size(bytes), @max_u16)
     <<byte_size(bytes)::16, bytes::binary>>
   end
 
