@@ -1972,7 +1972,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.minga.editor;
 				PRODUCT_NAME = Minga;
 				SDKROOT = macosx;
-				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				TOOLCHAINS = com.apple.dt.toolchain.Metal.32023.864;
 			};
 			name = Release;

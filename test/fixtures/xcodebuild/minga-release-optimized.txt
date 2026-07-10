@@ -1,0 +1,2 @@
+    SWIFT_OPTIMIZATION_LEVEL = -O
+    TARGET_NAME = Minga

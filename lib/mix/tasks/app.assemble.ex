@@ -114,6 +114,7 @@ defmodule Mix.Tasks.App.Assemble do
   end
 
   defp build_xcode_project(false) do
+    verify_release_optimization!()
     macos_dir = Path.join(File.cwd!(), "macos")
     project_path = Path.join(macos_dir, "#{@app_name}.xcodeproj")
 
@@ -156,6 +157,16 @@ defmodule Mix.Tasks.App.Assemble do
     end
 
     app_path
+  end
+
+  @spec verify_release_optimization!() :: :ok
+  defp verify_release_optimization! do
+    script = Path.join([File.cwd!(), "scripts", "check_macos_release_optimization"])
+
+    case System.cmd(script, [], stderr_to_stdout: true) do
+      {_output, 0} -> :ok
+      {output, _code} -> Mix.raise("Release optimization verification failed:\n#{output}")
+    end
   end
 
   @spec embed_release(String.t(), String.t()) :: :ok

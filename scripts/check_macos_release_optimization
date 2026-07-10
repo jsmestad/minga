@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+project="$repo_root/macos/Minga.xcodeproj"
+
+if [[ $# -eq 1 ]]; then
+  settings="$(cat "$1")"
+else
+  settings="$(xcodebuild -project "$project" -scheme Minga -configuration Release -showBuildSettings)"
+fi
+
+target_count="$(grep -Ec '^[[:space:]]*TARGET_NAME = Minga$' <<<"$settings" || true)"
+optimization_count="$(grep -Ec '^[[:space:]]*SWIFT_OPTIMIZATION_LEVEL = -O$' <<<"$settings" || true)"
+
+if [[ "$target_count" != "1" || "$optimization_count" != "1" ]]; then
+  echo "error: Minga Release must resolve SWIFT_OPTIMIZATION_LEVEL = -O (targets: $target_count, matching settings: $optimization_count)" >&2
+  printf '%s\n' "$settings" | grep -E 'TARGET_NAME|SWIFT_OPTIMIZATION_LEVEL' >&2 || true
+  exit 1
+fi
+
+echo "Minga Release optimization: -O"
