@@ -356,7 +356,7 @@ struct DecoderScrollPresentationScrollSeqTests {
 
     private static func emptyRowsPayload() -> Data {
         var payload = Data()
-        appendU16(&payload, 0) // row_count = 0
+        appendU32(&payload, 0) // row_count = 0
         return payload
     }
 
@@ -473,18 +473,17 @@ struct DecoderForwardCompatTests {
         // OP_CLIPBOARD_WRITE (0x90) uses the length-prefixed format but is a known opcode
         var data = Data()
         data.append(OP_CLIPBOARD_WRITE) // 0x90
-        // payload: target(1) + text_len(2) + text
+        // payload: target(1) + text_len(4) + text
         let text = "hello"
-        let payloadLen = 1 + 2 + text.utf8.count // 8
-        data.append(UInt8(payloadLen >> 8))
-        data.append(UInt8(payloadLen & 0xFF))
+        let payloadLen = 1 + 4 + text.utf8.count // 10
+        data.append(contentsOf: [0x00, 0x00, 0x00, UInt8(payloadLen)])
         data.append(0x00) // target = general pasteboard
-        data.append(contentsOf: [0x00, UInt8(text.utf8.count)])
+        data.append(contentsOf: [0x00, 0x00, 0x00, UInt8(text.utf8.count)])
         data.append(contentsOf: text.utf8)
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(cmd != nil, "Known 0x90 opcode should decode, not skip")
-        #expect(size == 1 + 2 + payloadLen)
+        #expect(size == 1 + 4 + payloadLen)
         guard case .clipboardWrite(let target, let decoded) = cmd else {
             Issue.record("Expected .clipboardWrite, got \(String(describing: cmd))"); return
         }
@@ -640,5 +639,14 @@ struct DecoderEdgeCaseTests {
             Issue.record("Expected .guiBreadcrumb"); return
         }
         #expect(segments.isEmpty)
+    }
+
+    @Test("gui_window_content rejects an impossible u32 row count")
+    func rejectsImpossibleWindowRowCount() {
+        let data = Data([OP_GUI_WINDOW_CONTENT, 0, 0, 0, 9, 1, 0x02, 0, 0, 0, 4, 0xFF, 0xFF, 0xFF, 0xFF])
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
     }
 }

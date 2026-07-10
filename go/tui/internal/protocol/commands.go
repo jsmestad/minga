@@ -250,7 +250,7 @@ func decodeWindowContent(payload []byte) (Command, error) {
 	sectionCount := 0
 	offset := 0
 	end := 0
-	sectionLenBytes := 2
+	sectionLenBytes := 4
 
 	if opcode == generated.OPGuiWindowContent {
 		if len(payload) < 6 {
@@ -282,10 +282,7 @@ func decodeWindowContent(payload []byte) (Command, error) {
 			return Command{}, fmt.Errorf("short semantic section")
 		}
 		sectionID := payload[offset]
-		sectionLen := int(u16(payload, offset+1))
-		if sectionLenBytes == 4 {
-			sectionLen = int(u32(payload, offset+1))
-		}
+		sectionLen := int(u32(payload, offset+1))
 		offset += 1 + sectionLenBytes
 		if end < offset+sectionLen {
 			return Command{}, fmt.Errorf("short semantic section payload")
@@ -301,7 +298,7 @@ func decodeWindowContent(payload []byte) (Command, error) {
 			}
 		case 0x02:
 			sawRows = true
-			if !decodeRows(section, &window, opcode != generated.OPGuiWindowContent) && needRows {
+			if !decodeRows(section, &window, opcode != generated.OPGuiWindowContent) {
 				return Command{}, fmt.Errorf("malformed semantic window rows")
 			}
 		case 0x03:
@@ -429,15 +426,22 @@ func decodeCursorline(section []byte, window *WindowContent) {
 }
 
 func decodeRows(section []byte, window *WindowContent, delta bool) bool {
-	if len(section) < 2 {
+	if len(section) < 4 {
 		return false
 	}
 
-	count := int(u16(section, 0))
-	offset := 2
+	count := int(u32(section, 0))
+	offset := 4
+	minimumRowSize := 23
+	if delta {
+		minimumRowSize = 13
+	}
+	if count > (len(section)-offset)/minimumRowSize {
+		return false
+	}
 	rows := make([]WindowRow, 0, count)
 
-	for i := 0; i < count && offset < len(section); i++ {
+	for i := 0; i < count; i++ {
 		if delta && section[offset] == 0 && len(section) >= offset+13 {
 			rows = append(rows, WindowRow{
 				Ref:         true,
@@ -459,6 +463,9 @@ func decodeRows(section []byte, window *WindowContent, delta bool) bool {
 		offset = next
 	}
 
+	if offset != len(section) {
+		return false
+	}
 	window.Rows = rows
 	return true
 }
@@ -496,19 +503,19 @@ func decodeProtocolError(payload []byte) (Command, error) {
 }
 
 func decodeClipboardWrite(payload []byte) (Command, error) {
-	if len(payload) < 6 {
+	if len(payload) < 10 {
 		return Command{}, fmt.Errorf("short clipboard_write")
 	}
-	payloadLen := int(u16(payload, 1))
-	size := 3 + payloadLen
-	if len(payload) < size || payloadLen < 3 {
+	payloadLen := int(u32(payload, 1))
+	size := 5 + payloadLen
+	if len(payload) < size || payloadLen < 5 {
 		return Command{}, fmt.Errorf("short clipboard_write payload")
 	}
-	textLen := int(u16(payload, 4))
-	if 3+textLen > payloadLen {
-		return Command{}, fmt.Errorf("short clipboard_write text")
+	textLen := int(u32(payload, 6))
+	if 5+textLen != payloadLen {
+		return Command{}, fmt.Errorf("inconsistent clipboard_write text length")
 	}
-	text := string(payload[6 : 6+textLen])
+	text := string(payload[10 : 10+textLen])
 	return Command{Kind: CommandClipboardWrite, Size: size, ClipboardText: text}, nil
 }
 

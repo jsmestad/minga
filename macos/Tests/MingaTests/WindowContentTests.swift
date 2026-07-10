@@ -62,7 +62,7 @@ struct WindowContentBuilder {
         }
 
         var rowsPayload = Data()
-        appendU16(&rowsPayload, UInt16(rows.count))
+        appendU32(&rowsPayload, UInt32(rows.count))
         for row in rows {
             rowsPayload.append(row.rowType)
             appendU64(&rowsPayload, row.rowId)
@@ -274,7 +274,7 @@ struct WindowContentDecoderTests {
 
         if includeRows {
             var rows = Data()
-            deltaAppendU16(&rows, 2)
+            deltaAppendU32(&rows, 2)
             rows.append(0)
             deltaAppendU64(&rows, 1)
             deltaAppendU32(&rows, 11)
@@ -306,7 +306,7 @@ struct WindowContentDecoderTests {
     private func deltaSection(_ id: UInt8, _ payload: Data) -> Data {
         var section = Data()
         section.append(id)
-        deltaAppendU16(&section, UInt16(payload.count))
+        deltaAppendU32(&section, UInt32(payload.count))
         section.append(payload)
         return section
     }

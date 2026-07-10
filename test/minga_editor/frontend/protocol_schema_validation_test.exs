@@ -121,8 +121,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
       {section_count, sections_binary} = window_sections(binary)
       rows_payload = extract_section_payload(sections_binary, section_count, 0x02)
 
-      # The rows section starts with row_count(u16), then the row data.
-      <<1::16, row_binary::binary>> = rows_payload
+      # The rows section starts with row_count(u32), then the row data.
+      <<1::32, row_binary::binary>> = rows_payload
 
       text = "hello"
       text_len = byte_size(text)
@@ -161,8 +161,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
       {section_count, sections_binary} = window_sections(binary)
       rows_payload = extract_section_payload(sections_binary, section_count, 0x02)
 
-      # row_count(2) + row_type(1) + row_id(8) + buf_line(4) + content_hash(4) + text_len(4) + text(0) + span_count(2)
-      prefix_size = 2 + 1 + 8 + 4 + 4 + 4 + 0 + 2
+      # row_count(4) + row_type(1) + row_id(8) + buf_line(4) + content_hash(4) + text_len(4) + text(0) + span_count(2)
+      prefix_size = 4 + 1 + 8 + 4 + 4 + 4 + 0 + 2
 
       <<_prefix::binary-size(^prefix_size), span_binary::binary>> = rows_payload
 

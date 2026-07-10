@@ -124,7 +124,7 @@ func TestDecodeWindowContentRows(t *testing.T) {
 		2,
 		0,
 	}
-	rowsPayload := append([]byte{0, 1}, row...)
+	rowsPayload := append([]byte{0, 0, 0, 1}, row...)
 	headerPayload := []byte{0, 7, 0x02, 0, 3, 0, 4, 1, 0, 0, 0, 0, 0, 11}
 	packet := windowContentPacket(section32(0x01, headerPayload), section32(0x02, rowsPayload))
 
@@ -151,7 +151,7 @@ func TestDecodeWindowContentRows(t *testing.T) {
 
 func TestDecodeWindowContentScrollPresentation(t *testing.T) {
 	headerPayload := []byte{0, 7, 0x02, 0, 3, 0, 4, 1, 0, 2, 0, 0, 0, 42}
-	rowsPayload := []byte{0, 0}
+	rowsPayload := []byte{0, 0, 0, 0}
 	scrollPayload := []byte{0, 7, 0x01}
 	scrollPayload = append(scrollPayload, u32Bytes(5)...)
 	scrollPayload = append(scrollPayload, 0, 2)
@@ -197,7 +197,7 @@ func TestDecodeWindowContentScrollPresentation(t *testing.T) {
 
 func TestDecodeWindowContentDropsMismatchedScrollPresentation(t *testing.T) {
 	headerPayload := []byte{0, 7, 0x02, 0, 3, 0, 4, 1, 0, 2, 0, 0, 0, 42}
-	rowsPayload := []byte{0, 0}
+	rowsPayload := []byte{0, 0, 0, 0}
 	scrollPayload := []byte{0, 8, 0x01}
 	scrollPayload = append(scrollPayload, u32Bytes(5)...)
 	scrollPayload = append(scrollPayload, 0, 2)
@@ -231,7 +231,7 @@ func TestDecodeWindowRowsAndViewportDeltasIncludeRowRefs(t *testing.T) {
 		0, 0, 0, 0, 0, 0, 0, 9,
 		0, 0, 0, 5,
 	}
-	rowsPayload := append([]byte{0, 1}, ref...)
+	rowsPayload := append([]byte{0, 0, 0, 1}, ref...)
 	tests := []struct {
 		name              string
 		opcode            byte
@@ -249,8 +249,8 @@ func TestDecodeWindowRowsAndViewportDeltasIncludeRowRefs(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			packet := append([]byte{tt.opcode, 2, 0x01, 0, byte(len(tt.header))}, tt.header...)
-			packet = append(packet, 0x02, byte(len(rowsPayload)>>8), byte(len(rowsPayload)))
+			packet := append([]byte{tt.opcode, 2, 0x01, 0, 0, 0, byte(len(tt.header))}, tt.header...)
+			packet = append(packet, 0x02, 0, 0, byte(len(rowsPayload)>>8), byte(len(rowsPayload)))
 			packet = append(packet, rowsPayload...)
 			packet = append(packet, generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0)
 
@@ -291,7 +291,7 @@ func TestDecodeWindowRowsAndViewportDeltasIncludeRowRefs(t *testing.T) {
 
 func TestDecodeWindowSectionedDeltaRequiresHeaderAndRows(t *testing.T) {
 	header := []byte{0, 7, 0x12, 0x34, 0x56, 0x78, 0xAA, 0, 9, 0, 11, 2, 0, 13}
-	rowsPayload := []byte{0, 0}
+	rowsPayload := []byte{0, 0, 0, 0}
 
 	tests := []struct {
 		name   string
@@ -799,7 +799,7 @@ func TestDecodeGutterChrome(t *testing.T) {
 
 func TestDecodeWindowOverlaySections(t *testing.T) {
 	header := section32(0x01, []byte{0, 7, 3, 0, 1, 0, 2, 0, 0, 0, 0, 0, 0, 9})
-	rows := section32(0x02, []byte{0, 0})
+	rows := section32(0x02, []byte{0, 0, 0, 0})
 	selection := section32(0x03, []byte{1, 0, 0, 0, 1, 0, 0, 0, 4})
 	search := section32(0x04, []byte{0, 1, 0, 0, 0, 2, 0, 5, 1})
 	diagnostics := section32(0x05, []byte{0, 1, 0, 0, 0, 2, 0, 0, 0, 5, 0})
@@ -829,7 +829,7 @@ func TestDecodeWindowOverlaySections(t *testing.T) {
 
 func TestDecodeWindowOverlayGeometryFailureLeavesGeometryUnset(t *testing.T) {
 	header := section32(0x01, []byte{0, 7, 3, 0, 1, 0, 2, 0, 0, 0, 0, 0, 0, 9})
-	rows := section32(0x02, []byte{0, 0})
+	rows := section32(0x02, []byte{0, 0, 0, 0})
 	geometryPayload := make([]byte, 67)
 	geometryPayload[1] = 7
 	geometryPayload[63] = 3
@@ -849,7 +849,7 @@ func TestDecodeWindowOverlayGeometryFailureLeavesGeometryUnset(t *testing.T) {
 
 func TestDecodeWindowCursorlineSection(t *testing.T) {
 	header := section32(0x01, []byte{0, 7, 3, 0, 1, 0, 2, 0, 0, 0, 0, 0, 0, 9})
-	rows := section32(0x02, []byte{0, 0})
+	rows := section32(0x02, []byte{0, 0, 0, 0})
 	cursorline := section32(0x09, []byte{0, 1, 0x11, 0x22, 0x33})
 	packet := windowContentPacket(header, rows, cursorline)
 

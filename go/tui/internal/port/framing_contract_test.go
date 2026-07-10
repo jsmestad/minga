@@ -73,10 +73,9 @@ const maxMinimalBodyProbe = 48
 // Each override is validated against the live reader exactly like an auto-probed
 // body (framesExactly), so a wrong override cannot silently pass.
 var minimalBodyOverrides = map[byte][]byte{
-	// clipboard_write (len16): decodeClipboardWrite requires payload_len >= 3 and a
-	// consistent inner text_len, so an all-zero len16 body is rejected. Minimal:
-	// opcode + payload_len(2)=3 + (text_len(2)=0, one filler byte) = 6 bytes.
-	generated.OPClipboardWrite: {generated.OPClipboardWrite, 0x00, 0x03, 0x00, 0x00, 0x00},
+	// clipboard_write (len32): decodeClipboardWrite requires payload_len == 5 + text_len. Minimal:
+	// opcode + payload_len(4)=5 + target(1) + text_len(4)=0 = 10 bytes.
+	generated.OPClipboardWrite: {generated.OPClipboardWrite, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00},
 	// gui_window_content (len32): full keyframes wrap the section table in an
 	// outer u32 payload length, and the decoder requires the inner payload to at
 	// least contain section_count. Minimal: opcode + payload_len(4)=1 +
@@ -91,8 +90,8 @@ var minimalBodyOverrides = map[byte][]byte{
 	// Their decoder requires both header and rows sections so malformed sectioned
 	// deltas cannot masquerade as overlay-only deltas in the UI model. Minimal:
 	// opcode + section_count(2) + header section(14-byte payload) + empty rows section.
-	generated.OPGuiWindowViewportDelta: {generated.OPGuiWindowViewportDelta, 0x02, 0x01, 0x00, 0x0E, 0x00, 0x08, 0x12, 0x34, 0x56, 0x78, 0x01, 0x00, 0x00, 0x02, 0x00, 0x02, 0x00, 0x00, 0x02, 0x00, 0x02, 0x00, 0x00},
-	generated.OPGuiWindowRowsDelta:     {generated.OPGuiWindowRowsDelta, 0x02, 0x01, 0x00, 0x0E, 0x00, 0x07, 0x12, 0x34, 0x56, 0x78, 0x00, 0x00, 0x00, 0x02, 0x00, 0x02, 0x00, 0x00, 0x02, 0x00, 0x02, 0x00, 0x00},
+	generated.OPGuiWindowViewportDelta: minimalWindowDelta(generated.OPGuiWindowViewportDelta, 8, 0x01),
+	generated.OPGuiWindowRowsDelta:     minimalWindowDelta(generated.OPGuiWindowRowsDelta, 7, 0x00),
 }
 
 func TestFramingContractEveryFramedOpcode(t *testing.T) {
@@ -251,4 +250,12 @@ func loadGeneratedOpcodes(t *testing.T) []generatedOpcode {
 		t.Fatalf("no OP* constants parsed from %s; the generated format changed", path)
 	}
 	return opcodes
+}
+
+func minimalWindowDelta(opcode byte, windowID byte, flags byte) []byte {
+	header := []byte{0, windowID, 0x12, 0x34, 0x56, 0x78, flags, 0, 0, 0x02, 0, 2, 0, 0}
+	result := []byte{opcode, 2, 0x01, 0, 0, 0, byte(len(header))}
+	result = append(result, header...)
+	result = append(result, 0x02, 0, 0, 0, 4, 0, 0, 0, 0)
+	return result
 }

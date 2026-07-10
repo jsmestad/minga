@@ -1622,7 +1622,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                     wcContentEpoch = readU32(data, wcSStart + 10)
                 }
 
-            case 0x02: // Rows: row_count(2) + rows...
+            case 0x02: // Rows: row_count(4) + rows...
                 wcRows = try decodeWindowContentRows(data: data, start: wcSStart, end: wcSStart + wcSLen)
 
             case 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A:
@@ -2709,17 +2709,17 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         return (.guiSidebars(version: version, activeId: activeId, sidebars: sidebars), 5 + payloadLen)
 
     case OP_CLIPBOARD_WRITE:
-        // Forward-compatible format: opcode(1) + payload_length(2) + target(1) + text_len(2) + text
-        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
-        let payloadLen = Int(readU16(data, rest))
-        guard data.count >= rest + 2 + payloadLen else { throw ProtocolDecodeError.malformed }
-        let payloadStart = rest + 2
+        // Forward-compatible format: opcode(1) + payload_length(4) + target(1) + text_len(4) + text
+        guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
+        let payloadLen = Int(readU32(data, rest))
+        guard payloadLen >= 5, data.count >= rest + 4 + payloadLen else { throw ProtocolDecodeError.malformed }
+        let payloadStart = rest + 4
         let target = data[payloadStart]
-        let textLen = Int(readU16(data, payloadStart + 1))
-        guard payloadLen >= 3 + textLen else { throw ProtocolDecodeError.malformed }
-        let textData = data[(payloadStart + 3)..<(payloadStart + 3 + textLen)]
+        let textLen = Int(readU32(data, payloadStart + 1))
+        guard payloadLen == 5 + textLen else { throw ProtocolDecodeError.malformed }
+        let textData = data[(payloadStart + 5)..<(payloadStart + 5 + textLen)]
         let text = String(data: textData, encoding: .utf8) ?? ""
-        return (.clipboardWrite(target: target, text: text), 1 + 2 + payloadLen)
+        return (.clipboardWrite(target: target, text: text), 1 + 4 + payloadLen)
 
     case OP_PROTOCOL_ERROR:
         // protocol_error: opcode(1) + message_len(2) + UTF-8 message. The BEAM
@@ -3086,10 +3086,10 @@ private func decodeWindowRowsDelta(data: Data, offset: Int) throws -> (GUIWindow
     var sawRows = false
 
     for _ in 0..<sectionCount {
-        guard data.count >= pos + 3 else { throw ProtocolDecodeError.malformed }
+        guard data.count >= pos + 5 else { throw ProtocolDecodeError.malformed }
         let sectionId = data[pos]
-        let sectionLen = Int(readU16(data, pos + 1))
-        let sectionStart = pos + 3
+        let sectionLen = Int(readU32(data, pos + 1))
+        let sectionStart = pos + 5
         let sectionEnd = sectionStart + sectionLen
         guard data.count >= sectionEnd else { throw ProtocolDecodeError.malformed }
 
@@ -3145,9 +3145,10 @@ private func decodeWindowRowsDelta(data: Data, offset: Int) throws -> (GUIWindow
 }
 
 private func decodeWindowDeltaRows(data: Data, start: Int, end: Int) throws -> [GUIWindowRowDeltaEntry] {
-    guard start + 2 <= end else { throw ProtocolDecodeError.malformed }
-    let rowCount = Int(readU16(data, start))
-    var pos = start + 2
+    guard start + 4 <= end else { throw ProtocolDecodeError.malformed }
+    let rowCount = Int(readU32(data, start))
+    var pos = start + 4
+    guard rowCount <= (end - pos) / 13 else { throw ProtocolDecodeError.malformed }
     var rows: [GUIWindowRowDeltaEntry] = []
     rows.reserveCapacity(rowCount)
 
@@ -3174,9 +3175,10 @@ private func decodeWindowDeltaRows(data: Data, start: Int, end: Int) throws -> [
 }
 
 private func decodeWindowContentRows(data: Data, start: Int, end: Int) throws -> [GUIVisualRow] {
-    guard start + 2 <= end else { throw ProtocolDecodeError.malformed }
-    let rowCount = Int(readU16(data, start))
-    var pos = start + 2
+    guard start + 4 <= end else { throw ProtocolDecodeError.malformed }
+    let rowCount = Int(readU32(data, start))
+    var pos = start + 4
+    guard rowCount <= (end - pos) / 23 else { throw ProtocolDecodeError.malformed }
     var rows: [GUIVisualRow] = []
     rows.reserveCapacity(rowCount)
 

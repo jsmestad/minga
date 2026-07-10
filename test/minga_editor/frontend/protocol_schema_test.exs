@@ -33,7 +33,7 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
     # renderer (gui_indent_guides was sized by guesswork), so the schema must
     # classify every command the BEAM can send to a frontend.
     valid? = fn
-      framing when framing in ["len16", "len32", "sectioned", "custom"] -> true
+      framing when framing in ["len16", "len32", "sectioned", "sectioned32", "custom"] -> true
       "fixed:" <> n -> match?({_int, ""}, Integer.parse(n))
       _other -> false
     end

@@ -775,13 +775,14 @@ defmodule Minga.Mix.ProtocolGenerator do
   #   len16      opcode(1) + payload_len(u16) + payload   => 3 + len
   #   len32      opcode(1) + payload_len(u32) + payload   => 5 + len
   #   sectioned  opcode(1) + section_count(u8) + sections => 2 + sum(3 + section_len)
+  #   sectioned32 opcode(1) + section_count(u8) + sections => 2 + sum(5 + section_len)
   #   custom     bespoke layout; the frontend's decoder owns sizing
   #
   # The generated `command_size` functions size every generic framing and report
   # `custom` for the rest. New opcodes at 0x90+ are also handled by the
   # forward-compatible len16 fallback even before a frontend learns to size them.
 
-  @allowed_simple_framings ~w(len16 len32 sectioned custom)
+  @allowed_simple_framings ~w(len16 len32 sectioned sectioned32 custom)
 
   @spec validate_framing!(schema()) :: :ok
   defp validate_framing!(schema) do
@@ -808,7 +809,8 @@ defmodule Minga.Mix.ProtocolGenerator do
   defp valid_framing?("fixed:" <> rest), do: match?({_int, ""}, Integer.parse(rest))
   defp valid_framing?(_framing), do: false
 
-  @spec framing_kind(opcode()) :: {:fixed, pos_integer()} | :len16 | :len32 | :sectioned | :custom
+  @spec framing_kind(opcode()) ::
+          {:fixed, pos_integer()} | :len16 | :len32 | :sectioned | :sectioned32 | :custom
   defp framing_kind(%{"framing" => "fixed:" <> rest}), do: {:fixed, String.to_integer(rest)}
   defp framing_kind(%{"framing" => framing}), do: String.to_atom(framing)
 
@@ -1021,6 +1023,7 @@ defmodule Minga.Mix.ProtocolGenerator do
        "\tcase #{ops |> opcodes_of_kind(:len16) |> Enum.map_join(", ", cn)}:\n\t\treturn len16CommandSize(payload)\n" <>
        "\tcase #{ops |> opcodes_of_kind(:len32) |> Enum.map_join(", ", cn)}:\n\t\treturn len32CommandSize(payload)\n" <>
        "\tcase #{ops |> opcodes_of_kind(:sectioned) |> Enum.map_join(", ", cn)}:\n\t\treturn sectionedCommandSize(payload)\n" <>
+       "\tcase #{ops |> opcodes_of_kind(:sectioned32) |> Enum.map_join(", ", cn)}:\n\t\treturn sectioned32CommandSize(payload)\n" <>
        "\tcase #{ops |> opcodes_of_kind(:custom) |> Enum.map_join(", ", cn)}:\n\t\treturn 0, CommandSizeCustom\n" <>
        "\tdefault:\n" <>
        "\t\t// Forward-compatibility: opcodes >= 0x90 carry a u16 length prefix.\n" <>
@@ -1063,7 +1066,25 @@ defmodule Minga.Mix.ProtocolGenerator do
     \treturn size, CommandSizeOK
     }
 
-    func sectionedCommandSize(payload []byte) (int, CommandSizeStatus) {
+        func sectioned32CommandSize(payload []byte) (int, CommandSizeStatus) {
+        if len(payload) < 2 {
+        return 0, CommandSizeIncomplete
+        }
+        offset := 2
+        count := int(payload[1])
+        for i := 0; i < count; i++ {
+        if len(payload) < offset+5 {
+        return 0, CommandSizeIncomplete
+        }
+        offset += 5 + int(payload[offset+1])<<24 + int(payload[offset+2])<<16 + int(payload[offset+3])<<8 + int(payload[offset+4])
+        if len(payload) < offset {
+        return 0, CommandSizeIncomplete
+        }
+        }
+        return offset, CommandSizeOK
+        }
+
+        func sectionedCommandSize(payload []byte) (int, CommandSizeStatus) {
     \tif len(payload) < 2 {
     \t\treturn 0, CommandSizeIncomplete
     \t}
@@ -1116,6 +1137,7 @@ defmodule Minga.Mix.ProtocolGenerator do
       zig_arm.(:len16, "len16(payload)") <>
       zig_arm.(:len32, "len32(payload)") <>
       zig_arm.(:sectioned, "sectioned(payload)") <>
+      zig_arm.(:sectioned32, "sectioned32(payload)") <>
       zig_arm.(:custom, ".{ .status = .custom }") <>
       "        // Forward-compatibility: opcodes >= 0x90 carry a u16 length prefix.\n" <>
       "        else => if (payload[0] >= 0x90) len16(payload) else .{ .status = .unknown },\n" <>
@@ -1143,6 +1165,19 @@ defmodule Minga.Mix.ProtocolGenerator do
         const size: usize = 5 + (@as(usize, payload[1]) << 24 | @as(usize, payload[2]) << 16 | @as(usize, payload[3]) << 8 | @as(usize, payload[4]));
         if (payload.len < size) return .{ .status = .incomplete };
         return .{ .status = .sized, .size = size };
+    }
+
+    fn sectioned32(payload: []const u8) Result {
+        if (payload.len < 2) return .{ .status = .incomplete };
+        var offset: usize = 2;
+        const count: usize = payload[1];
+        var i: usize = 0;
+        while (i < count) : (i += 1) {
+            if (payload.len < offset + 5) return .{ .status = .incomplete };
+            offset += 5 + (@as(usize, payload[offset + 1]) << 24 | @as(usize, payload[offset + 2]) << 16 | @as(usize, payload[offset + 3]) << 8 | @as(usize, payload[offset + 4]));
+            if (payload.len < offset) return .{ .status = .incomplete };
+        }
+        return .{ .status = .sized, .size = offset };
     }
 
     fn sectioned(payload: []const u8) Result {
@@ -1208,6 +1243,7 @@ defmodule Minga.Mix.ProtocolGenerator do
       swift_case.(:len16, "len16CommandSize(payload)") <>
       swift_case.(:len32, "len32CommandSize(payload)") <>
       swift_case.(:sectioned, "sectionedCommandSize(payload)") <>
+      swift_case.(:sectioned32, "sectioned32CommandSize(payload)") <>
       swift_custom_case.() <>
       "    default:\n" <>
       "        // Forward-compatibility: opcodes >= 0x90 carry a u16 length prefix.\n" <>
@@ -1234,6 +1270,18 @@ defmodule Minga.Mix.ProtocolGenerator do
         if payload.count < 5 { return .incomplete }
         let size = 5 + (Int(payload[1]) << 24 | Int(payload[2]) << 16 | Int(payload[3]) << 8 | Int(payload[4]))
         return payload.count < size ? .incomplete : .sized(size)
+    }
+
+    private func sectioned32CommandSize(_ payload: [UInt8]) -> CommandSizeResult {
+        if payload.count < 2 { return .incomplete }
+        var offset = 2
+        let count = Int(payload[1])
+        for _ in 0..<count {
+            if payload.count < offset + 5 { return .incomplete }
+            offset += 5 + (Int(payload[offset + 1]) << 24 | Int(payload[offset + 2]) << 16 | Int(payload[offset + 3]) << 8 | Int(payload[offset + 4]))
+            if payload.count < offset { return .incomplete }
+        }
+        return .sized(offset)
     }
 
     private func sectionedCommandSize(_ payload: [UInt8]) -> CommandSizeResult {

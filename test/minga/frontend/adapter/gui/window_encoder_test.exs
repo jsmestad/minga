@@ -181,6 +181,24 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
     assert hd(decoded.rows).text == text
   end
 
+  test "encodes 65,536 rows with a u32 row count" do
+    rows =
+      for line <- 0..65_535 do
+        %Row{
+          row_id: Row.stable_id(:normal, line),
+          row_type: :normal,
+          buf_line: line,
+          text: "",
+          spans: [],
+          content_hash: line
+        }
+      end
+
+    assert <<0x80, _payload_len::32, _section_count::8, 0x01, header_len::32,
+             _header::binary-size(header_len), 0x02, _rows_len::32, 65_536::32, _rest::binary>> =
+             WindowEncoder.encode_window_content(window(rows: rows))
+  end
+
   test "encodes full window content overlays and cursor flags" do
     row = %Row{
       row_id: Row.stable_id(:virtual_line, 11, 0, 4),

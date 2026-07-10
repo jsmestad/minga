@@ -1503,11 +1503,11 @@ func DecodeGuiWindowContentHeader(data []byte, offset int, windowEnd int) (GuiWi
 
 func DecodeGuiWindowContentRows(data []byte, offset int, windowEnd int) ([]Row, int, error) {
 	pos := offset
-	if err := decodeRequireWindow(windowEnd, pos+2, "rows count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+4, "rows count"); err != nil {
 		return nil, offset, err
 	}
-	count := int(decodeU16(data, pos))
-	pos += 2
+	count := int(decodeU32(data, pos))
+	pos += 4
 	items := make([]Row, 0, min(count, len(data)-pos))
 	for i := 0; i < count; i++ {
 		item, nextPos, err := DecodeRow(data, pos, windowEnd)
@@ -1904,11 +1904,11 @@ func DecodeGuiWindowRowsDeltaHeader(data []byte, offset int, windowEnd int) (Gui
 
 func DecodeGuiWindowRowsDeltaRows(data []byte, offset int, windowEnd int) ([]Row, int, error) {
 	pos := offset
-	if err := decodeRequireWindow(windowEnd, pos+2, "rows count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+4, "rows count"); err != nil {
 		return nil, offset, err
 	}
-	count := int(decodeU16(data, pos))
-	pos += 2
+	count := int(decodeU32(data, pos))
+	pos += 4
 	items := make([]Row, 0, min(count, len(data)-pos))
 	for i := 0; i < count; i++ {
 		item, nextPos, err := DecodeRow(data, pos, windowEnd)
@@ -1973,11 +1973,11 @@ func DecodeGuiWindowViewportDeltaHeader(data []byte, offset int, windowEnd int) 
 
 func DecodeGuiWindowViewportDeltaRows(data []byte, offset int, windowEnd int) ([]Row, int, error) {
 	pos := offset
-	if err := decodeRequireWindow(windowEnd, pos+2, "rows count"); err != nil {
+	if err := decodeRequireWindow(windowEnd, pos+4, "rows count"); err != nil {
 		return nil, offset, err
 	}
-	count := int(decodeU16(data, pos))
-	pos += 2
+	count := int(decodeU32(data, pos))
+	pos += 4
 	items := make([]Row, 0, min(count, len(data)-pos))
 	for i := 0; i < count; i++ {
 		item, nextPos, err := DecodeRow(data, pos, windowEnd)
