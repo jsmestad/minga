@@ -142,8 +142,8 @@ All feature branches use git worktrees. This keeps the main checkout clean and l
    scripts/create_worktree <branch-name>
    ```
 2. Do all work inside the created worktree under `../minga-worktrees/`. The agent's working directory must be set to the worktree, not the main checkout.
-3. The helper copies `deps/`, `_build/`, and ElixirLS PLTs into the new worktree when `mix.lock` matches, which keeps first-run `mix` commands and Dialyzer fast. If the helper skips the copy, run `mix deps.get` and let the worktree rebuild normally.
-4. Run the helper from any Minga checkout, but only when no `mix` command is active in the source checkout or target worktree. Copying build caches while they are being written can produce confusing compile or Dialyzer failures.
+3. The helper copies `deps/`, `_build/`, and Expert's `.expert/build/` cache into the new worktree when `mix.lock` matches, which keeps first-run Mix commands, Dialyzer, and Expert fast. It intentionally skips Expert's project indexes because they are large and worktree-specific. If the helper skips the copy, run `mix deps.get` and let the worktree rebuild normally.
+4. Run the helper from any Minga checkout, but only when no Mix or Expert command is active in the source checkout or target worktree. Copying build caches while they are being written can produce confusing compile, Dialyzer, or Expert failures.
 
 **After the PR is merged:**
 

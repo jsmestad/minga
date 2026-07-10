@@ -5,9 +5,9 @@ usage() {
   cat <<'USAGE'
 Usage: scripts/create_worktree <branch-name> [base-ref]
 
-Creates a worktree under ../minga-worktrees/ relative to the primary checkout and copies local Mix caches into it so the first mix command does not start cold.
+Creates a worktree under ../minga-worktrees/ relative to the primary checkout and copies local development caches into it so the first Mix and Expert commands do not start cold.
 
-Run this from any Minga checkout when no mix command is active in the source checkout.
+Run this from any Minga checkout when no Mix or Expert command is active in the source checkout.
 USAGE
 }
 
@@ -70,29 +70,21 @@ copy_dir() {
   fi
 }
 
-copy_elixir_ls_plts() {
-  local source_dir="$repo_root/.elixir_ls"
-  local target_dir="$worktree_path/.elixir_ls"
+copy_expert_builds() {
+  local source_dir="$repo_root/.expert/build"
+  local target_dir="$worktree_path/.expert/build"
   if [[ ! -d "$source_dir" ]]; then
     return 0
   fi
 
-  shopt -s nullglob
-  local plts=("$source_dir"/iplt-*)
-  shopt -u nullglob
-
-  if [[ ${#plts[@]} -eq 0 ]]; then
-    return 0
-  fi
-
-  echo "Copying .elixir_ls PLTs"
-  mkdir -p "$target_dir"
-  rsync -a "${plts[@]}" "$target_dir/"
+  echo "Copying .expert/build/"
+  mkdir -p "$(dirname "$target_dir")"
+  rsync -a "$source_dir/" "$target_dir/"
 }
 
 copy_dir deps
 copy_dir _build
-copy_elixir_ls_plts
+copy_expert_builds
 
 echo "Worktree ready: $worktree_path"
 echo "Next: cd $worktree_path && mix deps.get"
