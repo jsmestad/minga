@@ -51,13 +51,13 @@ opcode(1) + payload_length(2, big-endian) + payload(payload_length)
 
 This allows old frontends to skip unknown opcodes without crashing. When a frontend encounters an unrecognized opcode >= 0x90, it reads the 2-byte length, advances past the payload, and continues decoding the rest of the batch.
 
-Opcodes below 0x90 generally do NOT include a length prefix and retain their existing positional wire format. The explicit exceptions are `0x86 gui_agent_transcript`, which carries a 32-bit length-prefixed payload (`len32`) because the resident transcript can exceed 64KB, and `0x88 gui_agent_context`, which carries a 16-bit length-prefixed payload for compatibility with its expanded activity fields. Both occupy legacy opcode slots but self-describe their length so a frontend that recognizes the opcode can size and skip them; the schema's generated `command_size` sizes both from their declared framing. If a frontend encounters an *unknown* opcode below 0x90, it cannot determine the message size and must abort decoding. Known 0x90+ opcodes may document a wider envelope when the payload can exceed 64KB, as `gui_file_tree` does.
+Opcodes below 0x90 generally do NOT include a length prefix and retain their existing positional wire format. The explicit exceptions are `0x86 gui_agent_transcript`, which carries a 32-bit length-prefixed payload (`len32`) because the resident transcript can exceed 64KB, and `0x88 gui_agent_context`, which carries a 16-bit length-prefixed payload for compatibility with its expanded activity fields. Both occupy legacy opcode slots but self-describe their length so a frontend that recognizes the opcode can size and skip them; the schema's generated `command_size` sizes both from their declared framing. If a frontend encounters an *unknown* opcode below 0x90, it cannot determine the message size and must abort decoding. Known 0x90+ opcodes may document a wider envelope when the payload can exceed 64KB, as `clipboard_write` and `gui_file_tree` do.
 
 The BEAM-side encoder must use a documented length-prefixed envelope for all new opcodes (0x90+). Currently defined 0x90+ opcodes:
 
 | Opcode | Name | Description |
 |--------|------|-------------|
-| 0x90 | clipboard_write | Write text to the system clipboard |
+| 0x90 | clipboard_write | Write text to the system clipboard. Uses a 32-bit payload length for content beyond 64KB. |
 | 0x91 | gui_indent_guides | Indent guide positions per window |
 | 0x92 | gui_line_spacing | Line spacing multiplier for the renderer |
 | 0x93 | gui_file_tree | Semantic file tree rows for the native sidebar view. Uses a 32-bit payload length because expanded project trees can exceed 64KB. |

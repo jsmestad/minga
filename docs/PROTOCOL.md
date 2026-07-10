@@ -207,7 +207,7 @@ Between frames, the frontend must not mutate committed editor state or present n
 
 ## Bounded length carriers
 
-`clipboard_write` uses a u32 outer payload length and u32 text length. `gui_window_content` and its A1/A2 delta commands use u32 section lengths and u32 row counts. These carriers support values from 0 through 4,294,967,295 bytes or rows. A producer must reject a value outside its carrier before writing any part of the command. Fields documented as u8 or u16 remain intentionally bounded and must likewise fail before emission when their value is out of range.
+`clipboard_write` uses a u32 outer payload length and u32 text length. `gui_window_content` and its A1/A2 delta commands use u32 section lengths and u32 row counts. These carriers represent values from 0 through 4,294,967,295 bytes or rows, but both shipped frontends reject packets larger than 64 MiB before allocation. A producer must reject a value outside its carrier before writing any part of the command. Fields documented as u8 or u16 remain intentionally bounded and must likewise fail before emission when their value is out of range.
 
 ## Frame Transactions
 

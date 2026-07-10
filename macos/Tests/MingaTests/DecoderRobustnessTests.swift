@@ -311,9 +311,28 @@ private func windowContentSection(id: UInt8, payload: Data) -> Data {
 
 private func windowContentRowsPayload(rowBytes: Data) -> Data {
     var payload = Data()
-    appendU16(&payload, 1)
+    appendU32(&payload, 1)
     payload.append(rowBytes)
     return payload
+}
+
+private func windowContentData(sections: [Data]) -> Data {
+    var payload = Data([UInt8(sections.count)])
+    for section in sections {
+        payload.append(section)
+    }
+
+    var data = Data([OP_GUI_WINDOW_CONTENT])
+    appendU32(&data, UInt32(payload.count))
+    data.append(payload)
+    return data
+}
+
+private func windowDeltaData(opcode: UInt8, header: Data, rows: Data) -> Data {
+    var data = Data([opcode, 2])
+    data.append(windowContentSection(id: 0x01, payload: header))
+    data.append(windowContentSection(id: 0x02, payload: rows))
+    return data
 }
 
 private func appendU16(_ data: inout Data, _ value: UInt16) {
@@ -648,5 +667,88 @@ struct DecoderEdgeCaseTests {
         #expect(throws: ProtocolDecodeError.self) {
             try decodeCommand(data: data, offset: 0)
         }
+    }
+}
+
+@Suite("Decoder Robustness: u32 Window Framing")
+struct DecoderU32WindowFramingTests {
+    private let header = Data([0, 1, 0x03, 0, 0, 0, 0, 0, 0, 0])
+    private let deltaHeader = Data([0, 1, 0, 0, 0, 1, 0x01, 0, 0, 0, 0, 0, 0, 0])
+    private let emptyRows = Data([0, 0, 0, 0])
+
+    @Test("gui_window_content requires one header and rows section")
+    func requiresHeaderAndRows() {
+        let headerSection = windowContentSection(id: 0x01, payload: header)
+        let rowsSection = windowContentSection(id: 0x02, payload: emptyRows)
+        let invalidCommands = [
+            windowContentData(sections: []),
+            windowContentData(sections: [headerSection]),
+            windowContentData(sections: [rowsSection]),
+            windowContentData(sections: [headerSection, headerSection, rowsSection]),
+            windowContentData(sections: [headerSection, rowsSection, rowsSection])
+        ]
+
+        for data in invalidCommands {
+            #expect(throws: ProtocolDecodeError.self) {
+                try decodeCommand(data: data, offset: 0)
+            }
+        }
+    }
+
+    @Test("window deltas reject truncated sections and trailing row bytes")
+    func rejectsMalformedDeltaSections() {
+        for opcode in [OP_GUI_WINDOW_ROWS_DELTA, OP_GUI_WINDOW_VIEWPORT_DELTA] {
+            var truncatedSection = Data([opcode, 1, 0x01])
+            appendU32(&truncatedSection, 15)
+            truncatedSection.append(deltaHeader)
+
+            #expect(throws: ProtocolDecodeError.self) {
+                try decodeCommand(data: truncatedSection, offset: 0)
+            }
+
+            let trailingRows = Data([0, 0, 0, 0, 0xFF])
+            let trailingRowsCommand = windowDeltaData(opcode: opcode, header: deltaHeader, rows: trailingRows)
+            #expect(throws: ProtocolDecodeError.self) {
+                try decodeCommand(data: trailingRowsCommand, offset: 0)
+            }
+        }
+    }
+
+    @Test("clipboard_write decodes more than UInt16 bytes")
+    func decodesLargeClipboardWrite() throws {
+        let text = Data(repeating: 0x78, count: 65_536)
+        var data = Data([OP_CLIPBOARD_WRITE])
+        appendU32(&data, UInt32(5 + text.count))
+        data.append(0)
+        appendU32(&data, UInt32(text.count))
+        data.append(text)
+
+        let (command, _) = try decodeCommand(data: data, offset: 0)
+        guard case .clipboardWrite(_, let decoded) = command else {
+            Issue.record("Expected clipboardWrite")
+            return
+        }
+        #expect(decoded.utf8.count == text.count)
+    }
+
+    @Test("window deltas decode more than UInt16 rows")
+    func decodesLargeWindowDelta() throws {
+        let rowCount = 65_536
+        var rows = Data()
+        appendU32(&rows, UInt32(rowCount))
+
+        for rowId in 0..<rowCount {
+            rows.append(0)
+            appendU64(&rows, UInt64(rowId))
+            appendU32(&rows, 0)
+        }
+
+        let data = windowDeltaData(opcode: OP_GUI_WINDOW_ROWS_DELTA, header: deltaHeader, rows: rows)
+        let (command, _) = try decodeCommand(data: data, offset: 0)
+        guard case .guiWindowRowsDelta(let delta) = command else {
+            Issue.record("Expected guiWindowRowsDelta")
+            return
+        }
+        #expect(delta.rows.count == rowCount)
     }
 }

@@ -6,6 +6,8 @@ import (
 	"io"
 )
 
+const maxPacketPayloadLength = 64 * 1_048_576
+
 func ReadPacket(reader io.Reader) ([]byte, error) {
 	var header [4]byte
 	if _, err := io.ReadFull(reader, header[:]); err != nil {
@@ -15,6 +17,9 @@ func ReadPacket(reader io.Reader) ([]byte, error) {
 	length := binary.BigEndian.Uint32(header[:])
 	if length == 0 {
 		return []byte{}, nil
+	}
+	if length > maxPacketPayloadLength {
+		return nil, fmt.Errorf("packet payload length %d exceeds maximum %d", length, maxPacketPayloadLength)
 	}
 
 	payload := make([]byte, length)

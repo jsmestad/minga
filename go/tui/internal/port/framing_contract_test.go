@@ -76,11 +76,8 @@ var minimalBodyOverrides = map[byte][]byte{
 	// clipboard_write (len32): decodeClipboardWrite requires payload_len == 5 + text_len. Minimal:
 	// opcode + payload_len(4)=5 + target(1) + text_len(4)=0 = 10 bytes.
 	generated.OPClipboardWrite: {generated.OPClipboardWrite, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00},
-	// gui_window_content (len32): full keyframes wrap the section table in an
-	// outer u32 payload length, and the decoder requires the inner payload to at
-	// least contain section_count. Minimal: opcode + payload_len(4)=1 +
-	// section_count(1)=0.
-	generated.OPGuiWindowContent: {generated.OPGuiWindowContent, 0x00, 0x00, 0x00, 0x01, 0x00},
+	// gui_window_content (len32): full keyframes require a header and rows section.
+	generated.OPGuiWindowContent: minimalWindowContent(),
 	// gui_extension_runtime (len32): decodeExtensionRuntime reads two string16
 	// fields (extension_id, channel) inside payload_len, so payload_len must be >= 4
 	// for two zero-length strings. Minimal: opcode + payload_len(4)=4 + four zero
@@ -250,6 +247,15 @@ func loadGeneratedOpcodes(t *testing.T) []generatedOpcode {
 		t.Fatalf("no OP* constants parsed from %s; the generated format changed", path)
 	}
 	return opcodes
+}
+
+func minimalWindowContent() []byte {
+	header := []byte{0, 7, 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+	body := []byte{2, 0x01, 0, 0, 0, byte(len(header))}
+	body = append(body, header...)
+	body = append(body, 0x02, 0, 0, 0, 4, 0, 0, 0, 0)
+	result := []byte{generated.OPGuiWindowContent, 0, 0, 0, byte(len(body))}
+	return append(result, body...)
 }
 
 func minimalWindowDelta(opcode byte, windowID byte, flags byte) []byte {
