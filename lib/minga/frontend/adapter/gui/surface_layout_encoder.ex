@@ -58,35 +58,35 @@ defmodule Minga.Frontend.Adapter.GUI.SurfaceLayoutEncoder do
   Always emits (one section, possibly with an empty placement array). The
   command is part of the frame transaction, so it ships every frame between
   begin_frame and commit_frame; there is no skip-if-unchanged cache because the
-  placement list IS the per-frame layout authority. Cell fields are clamped to
-  u16/u8 so a degenerate rect can never produce a malformed packet (mirrors the
-  window encoder's clamp policy).
+  placement list IS the per-frame layout authority. Invalid bounded fields are
+  rejected before encoding so a frame can never contain truncated placement data.
   """
   @spec encode_command([wire_placement()]) :: binary()
   def encode_command(placements) when is_list(placements) do
-    bounded = Enum.map(placements, &clamp/1)
+    validated = Enum.map(placements, &validate/1)
 
     section =
       Wire.encode_section(
         @section_placements,
-        Encode.encode_gui_surface_layout_placements(bounded)
+        Encode.encode_gui_surface_layout_placements(validated)
       )
 
     IO.iodata_to_binary([<<@op_gui_surface_layout, 1::8>>, section])
   end
 
-  @spec clamp(wire_placement()) :: map()
-  defp clamp(%{surface_id: surface_id, rect: rect, z: z, hit_kind: hit_kind}) do
-    %{
-      surface_id: Wire.clamp_u16(surface_id),
-      rect: %{
-        row: Wire.clamp_u16(rect.row),
-        col: Wire.clamp_u16(rect.col),
-        width: Wire.clamp_u16(rect.width),
-        height: Wire.clamp_u16(rect.height)
-      },
-      z: Wire.clamp_u16(z),
-      hit_kind: Wire.clamp_u8(hit_kind)
-    }
+  @spec validate(wire_placement()) :: map()
+  defp validate(%{surface_id: surface_id, rect: rect, z: z, hit_kind: hit_kind} = placement) do
+    validate_uint!(:surface_id, surface_id, Wire.max_u16())
+    validate_uint!(:row, rect.row, Wire.max_u16())
+    validate_uint!(:col, rect.col, Wire.max_u16())
+    validate_uint!(:width, rect.width, Wire.max_u16())
+    validate_uint!(:height, rect.height, Wire.max_u16())
+    validate_uint!(:z, z, Wire.max_u16())
+    validate_uint!(:hit_kind, hit_kind, Wire.max_u8())
+    placement
   end
+
+  @spec validate_uint!(atom(), term(), non_neg_integer()) :: :ok
+  defp validate_uint!(field, value, max),
+    do: Wire.validate_uint!(:gui_surface_layout, field, value, max)
 end
