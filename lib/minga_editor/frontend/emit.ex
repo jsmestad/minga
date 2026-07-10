@@ -68,24 +68,64 @@ defmodule MingaEditor.Frontend.Emit do
         caches
       end
 
-    encoded_frame =
-      Telemetry.span_with_stop_metadata([:minga, :render, :adapter_encode], %{}, fn ->
-        encoded_frame = Minga.Frontend.Adapter.GUI.encode(render_model, caches.adapter_gui_caches)
-        {encoded_frame, adapter_encode_metadata(encoded_frame.metrics)}
-      end)
+    case encode_adapter_frame(render_model, caches) do
+      {:error, error} ->
+        Minga.Log.warning(:render, "Discarded invalid GUI frame: #{Exception.message(error)}")
 
+        {%{
+           caches
+           | adapter_gui_caches: Minga.Frontend.Adapter.GUI.Caches.new(),
+             last_emitted_frame_seq: 0
+         }, ctx}
+
+      {:ok, encoded_frame} ->
+        emit_encoded_frame(
+          encoded_frame,
+          render_model,
+          ctx,
+          caches,
+          frame_seq,
+          base_frame_seq,
+          keyframe?
+        )
+    end
+  end
+
+  @spec encode_adapter_frame(Minga.RenderModel.t(), Caches.t()) ::
+          {:ok, Minga.Frontend.Adapter.GUI.EncodedFrame.t()} | {:error, Exception.t()}
+  defp encode_adapter_frame(render_model, caches) do
+    Telemetry.span_with_stop_metadata([:minga, :render, :adapter_encode], %{}, fn ->
+      case Minga.Frontend.Adapter.GUI.encode_checked(render_model, caches.adapter_gui_caches) do
+        {:ok, encoded_frame} ->
+          {{:ok, encoded_frame}, adapter_encode_metadata(encoded_frame.metrics)}
+
+        {:error, error} ->
+          {{:error, error}, %{encoding_error: true}}
+      end
+    end)
+  end
+
+  @spec emit_encoded_frame(
+          Minga.Frontend.Adapter.GUI.EncodedFrame.t(),
+          Minga.RenderModel.t(),
+          ctx(),
+          Caches.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          boolean()
+        ) :: {Caches.t(), ctx()}
+  defp emit_encoded_frame(
+         encoded_frame,
+         render_model,
+         ctx,
+         caches,
+         frame_seq,
+         base_frame_seq,
+         keyframe?
+       ) do
     caches = %{caches | adapter_gui_caches: encoded_frame.caches}
-
-    # Echo the latest input correlation sequence on commit_frame (ticket #2215) so
-    # the frontend can resolve a keystroke-to-write latency sample.
     input_seq = Map.get(ctx, :last_input_seq, 0)
 
-    # gui_surface_layout (#2219 child E / #2268): the authoritative per-frame
-    # surface placement list, emitted inside the transaction from the SAME
-    # SurfaceRegistry placements that feed BEAM mouse hit-testing. One source,
-    # one rect+z list; Go composites by z and derives mouse zones from these
-    # rects (no more overlayLines precedence chain for placed surfaces). It rides
-    # with the chrome commands so it sits after content and before commit.
     surface_layout_command =
       Minga.Frontend.Adapter.GUI.SurfaceLayoutEncoder.encode_command(ctx.surface_placements)
 
@@ -104,9 +144,6 @@ defmodule MingaEditor.Frontend.Emit do
     end
 
     caches = update_tracking(ctx, caches)
-    # Record both the seq and whether this frame carried the keyframe so the Editor
-    # clears `keyframe_pending?` only when a frame that actually honored the request
-    # reached emit (#2219). A concurrent delta writeback must not swallow the flag.
     caches = %{caches | last_emitted_frame_seq: frame_seq, last_frame_keyframe?: keyframe?}
     byte_count = IO.iodata_length(commands)
 
@@ -117,8 +154,7 @@ defmodule MingaEditor.Frontend.Emit do
         MingaEditor.Frontend.send_render_commands(ctx.port_manager, commands)
         caches = send_title(render_model, caches)
         caches = send_window_bg(render_model, caches)
-        caches = send_link_cursor(ctx, caches)
-        {caches, ctx}
+        {send_link_cursor(ctx, caches), ctx}
       end
     )
   end
@@ -234,11 +270,7 @@ defmodule MingaEditor.Frontend.Emit do
   # ── Side-channel writes (shared) ─────────────────────────────────────────
 
   @spec send_title(Minga.RenderModel.t() | ctx(), Caches.t()) :: Caches.t()
-  defp send_title(%Minga.RenderModel{title: title}, caches), do: do_send_title(title, caches)
-  defp send_title(ctx, caches), do: do_send_title(ctx.title, caches)
-
-  @spec do_send_title(String.t(), Caches.t()) :: Caches.t()
-  defp do_send_title(title, caches) do
+  defp send_title(%Minga.RenderModel{title: title}, caches) do
     if title != caches.last_title do
       MingaEditor.Frontend.set_title(title)
       %{caches | last_title: title}
@@ -248,13 +280,7 @@ defmodule MingaEditor.Frontend.Emit do
   end
 
   @spec send_window_bg(Minga.RenderModel.t() | ctx(), Caches.t()) :: Caches.t()
-  defp send_window_bg(%Minga.RenderModel{window_bg: bg}, caches),
-    do: do_send_window_bg(bg, caches)
-
-  defp send_window_bg(ctx, caches), do: do_send_window_bg(ctx.theme.editor.bg, caches)
-
-  @spec do_send_window_bg(non_neg_integer(), Caches.t()) :: Caches.t()
-  defp do_send_window_bg(bg, caches) do
+  defp send_window_bg(%Minga.RenderModel{window_bg: bg}, caches) do
     if bg != caches.last_window_bg do
       MingaEditor.Frontend.set_window_bg(bg)
       %{caches | last_window_bg: bg}

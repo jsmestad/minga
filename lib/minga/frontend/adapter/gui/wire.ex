@@ -37,7 +37,22 @@ defmodule Minga.Frontend.Adapter.GUI.Wire do
   @spec encode_section(non_neg_integer(), iodata()) :: binary()
   def encode_section(section_id, payload) do
     payload = IO.iodata_to_binary(payload)
+    validate_uint!(:gui_section, :section_id, section_id, @max_u8)
+    validate_uint!(:gui_section, :payload_length, byte_size(payload), @max_u16)
     <<section_id::8, byte_size(payload)::16, payload::binary>>
+  end
+
+  @spec validate_uint!(atom(), atom(), integer(), non_neg_integer()) :: :ok
+  def validate_uint!(_command, _field, value, max)
+      when is_integer(value) and value >= 0 and value <= max, do: :ok
+
+  def validate_uint!(command, field, value, max) do
+    raise Minga.Frontend.Adapter.GUI.EncodingError,
+      command: command,
+      field: field,
+      actual: value,
+      min: 0,
+      max: max
   end
 
   @spec encode_string8(iodata()) :: binary()
