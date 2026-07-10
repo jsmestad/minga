@@ -270,11 +270,7 @@ defmodule MingaEditor.Frontend.Emit do
   # ── Side-channel writes (shared) ─────────────────────────────────────────
 
   @spec send_title(Minga.RenderModel.t() | ctx(), Caches.t()) :: Caches.t()
-  defp send_title(%Minga.RenderModel{title: title}, caches), do: do_send_title(title, caches)
-  defp send_title(ctx, caches), do: do_send_title(ctx.title, caches)
-
-  @spec do_send_title(String.t(), Caches.t()) :: Caches.t()
-  defp do_send_title(title, caches) do
+  defp send_title(%Minga.RenderModel{title: title}, caches) do
     if title != caches.last_title do
       MingaEditor.Frontend.set_title(title)
       %{caches | last_title: title}
@@ -284,13 +280,7 @@ defmodule MingaEditor.Frontend.Emit do
   end
 
   @spec send_window_bg(Minga.RenderModel.t() | ctx(), Caches.t()) :: Caches.t()
-  defp send_window_bg(%Minga.RenderModel{window_bg: bg}, caches),
-    do: do_send_window_bg(bg, caches)
-
-  defp send_window_bg(ctx, caches), do: do_send_window_bg(ctx.theme.editor.bg, caches)
-
-  @spec do_send_window_bg(non_neg_integer(), Caches.t()) :: Caches.t()
-  defp do_send_window_bg(bg, caches) do
+  defp send_window_bg(%Minga.RenderModel{window_bg: bg}, caches) do
     if bg != caches.last_window_bg do
       MingaEditor.Frontend.set_window_bg(bg)
       %{caches | last_window_bg: bg}
