@@ -3,6 +3,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
 
   alias Minga.Frontend.Adapter.GUI, as: AdapterGUI
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.EncodingError
   alias Minga.Frontend.Adapter.GUI.WindowEncoder
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.Window
@@ -197,6 +198,49 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
     assert <<0x80, _payload_len::32, _section_count::8, 0x01, header_len::32,
              _header::binary-size(header_len), 0x02, _rows_len::32, 65_536::32, _rest::binary>> =
              WindowEncoder.encode_window_content(window(rows: rows))
+  end
+
+  test "rejects an out-of-range window field before encoding any command bytes" do
+    error =
+      assert_raise EncodingError, fn ->
+        WindowEncoder.encode_window_content(window(cursor_row: 65_536))
+      end
+
+    assert %{
+             command: :gui_window_content,
+             field: :cursor_row,
+             actual: 65_536,
+             min: 0,
+             max: 65_535
+           } =
+             error
+  end
+
+  test "rejects an out-of-range row span count" do
+    span = %Span{start_col: 0, end_col: 0, fg: 0, bg: 0, attrs: 0}
+
+    row = %Row{
+      row_id: Row.stable_id(:normal, 0),
+      row_type: :normal,
+      buf_line: 0,
+      text: "",
+      spans: List.duplicate(span, 65_536),
+      content_hash: 0
+    }
+
+    error =
+      assert_raise EncodingError, fn ->
+        WindowEncoder.encode_window_content(window(rows: [row]))
+      end
+
+    assert %{
+             command: :gui_window_content,
+             field: :span_count,
+             actual: 65_536,
+             min: 0,
+             max: 65_535
+           } =
+             error
   end
 
   test "encodes full window content overlays and cursor flags" do
