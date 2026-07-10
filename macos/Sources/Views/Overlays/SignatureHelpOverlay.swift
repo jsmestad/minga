@@ -1,79 +1,25 @@
 /// Native SwiftUI signature help overlay for LSP signature help.
 ///
 /// Shows the active function signature with the current parameter
-/// highlighted. Supports cycling through overloaded signatures.
-/// Positioned above the cursor, non-interactive (keyboard-driven).
+/// highlighted. Supports cycling through overloaded signatures. `EditorOverlayHost`
+/// owns anchor placement, viewport clipping, and z-order.
 
 import SwiftUI
 import MingaProtocol
 
-/// PreferenceKey to measure the signature help popup height.
-/// Single reporter: only one GeometryReader writes to this key.
-private struct SigHelpHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
-    }
-}
-
-/// PreferenceKey to measure the signature help popup width.
-/// Single reporter: only one GeometryReader writes to this key.
-private struct SigHelpWidthKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
-    }
-}
-
 public struct SignatureHelpOverlay: View {
-    public init(state: SignatureHelpState, cellWidth: CGFloat, cellHeight: CGFloat, viewportHeight: CGFloat, viewportWidth: CGFloat) {
+    public init(state: SignatureHelpState) {
         self.state = state
-        self.cellWidth = cellWidth
-        self.cellHeight = cellHeight
-        self.viewportHeight = viewportHeight
-        self.viewportWidth = viewportWidth
     }
     public let state: SignatureHelpState
     @Environment(\.themeColors) private var theme
-    public let cellWidth: CGFloat
-    public let cellHeight: CGFloat
-    public let viewportHeight: CGFloat
-    public let viewportWidth: CGFloat
-
-    @State private var popupHeight: CGFloat = 0
-    @State private var popupWidth: CGFloat = 0
 
     private let maxWidth: CGFloat = 600
-    private let gap: CGFloat = 4
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var animDuration: Double {
         reduceMotion ? 0 : 0.1
-    }
-
-    /// Whether to show above (preferred) or below the anchor.
-    private var showAbove: Bool {
-        let anchorY = CGFloat(state.anchorRow) * cellHeight
-        return anchorY > popupHeight + gap + cellHeight
-    }
-
-    /// Clamped to stay within the viewport height.
-    private var offsetY: CGFloat {
-        let anchorY = CGFloat(state.anchorRow) * cellHeight
-        if showAbove {
-            return max(anchorY - popupHeight - gap, 0)
-        } else {
-            let y = anchorY + cellHeight + gap
-            let maxY = max(viewportHeight - popupHeight - 8, 0)
-            return min(y, maxY)
-        }
-    }
-
-    private var offsetX: CGFloat {
-        let rawX = CGFloat(state.anchorCol) * cellWidth
-        let maxX = max(viewportWidth - popupWidth - 8, 0)
-        return min(rawX, maxX)
     }
 
     public var body: some View {
@@ -102,25 +48,14 @@ public struct SignatureHelpOverlay: View {
             .frame(maxWidth: maxWidth)
             .fixedSize(horizontal: false, vertical: true)
             .background(
-                GeometryReader { geo in
-                    Color.clear
-                        .preference(key: SigHelpHeightKey.self, value: geo.size.height)
-                        .preference(key: SigHelpWidthKey.self, value: geo.size.width)
-                }
-            )
-            .onPreferenceChange(SigHelpHeightKey.self) { popupHeight = $0 }
-            .onPreferenceChange(SigHelpWidthKey.self) { popupWidth = $0 }
-            .background(
                 RoundedRectangle(cornerRadius: 8)
                     .fill(theme.popupBg)
-                    .shadow(color: .black.opacity(0.4), radius: 12,
-                            y: showAbove ? -4 : 4)
+                    .shadow(color: .black.opacity(0.4), radius: 12, y: 4)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
                     .strokeBorder(theme.popupBorder.opacity(0.5), lineWidth: 1)
             )
-            .offset(x: offsetX, y: offsetY)
             .allowsHitTesting(false)
             .transition(.opacity.animation(.easeIn(duration: animDuration)))
         }
@@ -196,7 +131,7 @@ private func signatureHelpPreviewState() -> SignatureHelpState {
 
 #Preview("Signature Help") {
     let theme = PreviewFixtures.theme()
-    SignatureHelpOverlay(state: signatureHelpPreviewState(), cellWidth: 8, cellHeight: 18, viewportHeight: 200, viewportWidth: 500)
+    SignatureHelpOverlay(state: signatureHelpPreviewState())
         .frame(width: 500, height: 200)
         .background(theme.editorBg)
         .environment(\.themeColors, theme)

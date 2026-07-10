@@ -6,10 +6,12 @@ defmodule MingaEditor.Layout.FooterOverlays do
   observatory, edit timeline, notifications, extension overlay) historically had
   no BEAM rect: the Go compositor footer-appended one of them, sizing it
   frontend-side. The owner ruled them mouse-driven (#2330), so the BEAM now owns
-  their footer-band geometry. This module is the single place that decides which
-  of the eight is visible this frame and how tall its band is, reading the SAME
-  underlying state the render-model builders read (so visibility never drifts
-  from what the frontend actually renders).
+  their semantic footer-band z and conservative cell containment. Native GUI
+  frontends still own final rich-content measurement inside those bands. This
+  module is the single place that decides which of the eight is visible this
+  frame and how tall its conservative band is, reading the SAME underlying state
+  the render-model builders read (so visibility never drifts from what the
+  frontend actually renders).
 
   `visible/1` returns the visible footer overlays as `{surface_id, content_height}`
   pairs. `MingaEditor.FocusTree` turns each into an overlay node via
@@ -42,8 +44,9 @@ defmodule MingaEditor.Layout.FooterOverlays do
       the residual phantom zone (clamp ceiling minus rendered lines) sits ABOVE
       the content, between the buffer and the overlay, not below it. Per surface,
       the phantom band is at most `band_height - rendered_lines` rows tall:
-      float_popup renders `1 + min(line_count, ceiling-1)` lines so its phantom
-      zone is the remaining ceiling rows above; agent_context renders the live
+      float_popup renders native wrapped content from a bounded semantic line
+      snapshot, so its phantom zone is the remaining ceiling rows above;
+      agent_context renders the live
       activity spine and may wrap the visible task or todo text; extension_panel
       renders a title plus up to two blocks per visible panel until it fills the
       band, so its phantom zone shrinks as panels are added.

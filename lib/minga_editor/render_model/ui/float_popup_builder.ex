@@ -5,6 +5,8 @@ defmodule MingaEditor.RenderModel.UI.FloatPopupBuilder do
   alias Minga.RenderModel.UI.FloatPopup
   alias MingaEditor.Frontend.Emit.Context
 
+  @max_native_popup_lines 400
+
   @spec build(Context.t()) :: FloatPopup.t()
   def build(%Context{shell_state: %{observatory_inspection: %{visible: true} = data}} = _ctx) do
     float_popup_model(data)
@@ -41,16 +43,15 @@ defmodule MingaEditor.RenderModel.UI.FloatPopupBuilder do
     width = resolve_float_dim(rule, :width, vp.cols)
     height = resolve_float_dim(rule, :height, vp.rows)
 
-    # Interior dimensions (subtract 2 for border)
-    interior_h = max(height - 2, 1)
-    interior_w = max(width - 2, 1)
-
     {title, lines} =
       try do
         name = Buffer.buffer_name(window.buffer)
-        snapshot = Buffer.render_snapshot(window.buffer, 0, interior_h)
-        trimmed = Enum.map(snapshot.lines, &String.slice(&1, 0, interior_w))
-        {name, trimmed}
+        line_count = Buffer.line_count(window.buffer)
+
+        snapshot =
+          Buffer.render_snapshot(window.buffer, 0, min(line_count, @max_native_popup_lines))
+
+        {name, snapshot.lines}
       catch
         :exit, _ -> {"", []}
       end

@@ -368,12 +368,13 @@ defmodule MingaEditor.FocusTree do
 
   # ── Floating overlay builders ─────────────────────────────────────────────
   #
-  # Cursor-anchored LSP popups (hover, signature help). Their rect is the exact
-  # box the BEAM already computes for layout (`HoverPopup.box/3`/`SignatureHelp.box/3`,
-  # both driven by `FloatingWindow`), so the SurfaceRegistry can place them with a
-  # real rect/z/hit_kind instead of leaving them to a Go-side transitional rank
-  # (#2281). They sit ABOVE floating chrome (bottom panel) and BELOW the single
-  # active modal overlay, preserving the historical stacking order.
+  # Cursor-anchored LSP popups (hover, signature help). Their rect is a
+  # conservative BEAM cell-grid containment/fallback rect for focus routing and
+  # terminal-style surfaces. Native GUI frontends render these popups from
+  # semantic opcode content and own final pixel placement because it depends on
+  # font metrics, measured content, chrome insets, and viewport points. They sit
+  # ABOVE floating chrome (bottom panel) and BELOW the single active modal
+  # overlay, preserving the historical stacking order.
 
   @spec add_floating_overlays(t(), map()) :: t()
   defp add_floating_overlays(%TreeNode{} = root, state) do

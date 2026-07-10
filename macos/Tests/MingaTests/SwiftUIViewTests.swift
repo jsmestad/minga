@@ -16,6 +16,68 @@ import UniformTypeIdentifiers
 import ViewInspector
 import MingaProtocol
 
+// MARK: - AnchoredOverlayPlacement
+
+@Suite("AnchoredOverlayPlacement")
+struct AnchoredOverlayPlacementTests {
+    private let cellHeight: CGFloat = 18
+    private let viewportHeight: CGFloat = 300
+    private let desiredMaxHeight: CGFloat = 300
+    private let gap: CGFloat = 4
+    private let bottomInset: CGFloat = 8
+
+    @Test("small popup prefers above when there is room")
+    func smallPopupPrefersAbove() {
+        let measuredHeight: CGFloat = 80
+        let placement = resolve(anchorRow: 10, measuredHeight: measuredHeight)
+        let anchorTop = CGFloat(10) * cellHeight
+
+        #expect(placement.showsAbove)
+        #expect(placement.offsetY + measuredHeight <= anchorTop)
+    }
+
+    @Test("tall popup near upper viewport chooses below without covering anchor row")
+    func tallPopupNearUpperViewportChoosesBelow() {
+        let anchorRow = 7
+        let placement = resolve(anchorRow: anchorRow, measuredHeight: 260)
+        let anchorBottom = CGFloat(anchorRow + 1) * cellHeight
+
+        #expect(!placement.showsAbove)
+        #expect(placement.offsetY >= anchorBottom + gap)
+        #expect(placement.offsetY + placement.maxHeight <= viewportHeight - bottomInset)
+    }
+
+    @Test("tall popup near lower viewport chooses above without covering anchor row")
+    func tallPopupNearLowerViewportChoosesAbove() {
+        let anchorRow = 14
+        let placement = resolve(anchorRow: anchorRow, measuredHeight: 260)
+        let anchorTop = CGFloat(anchorRow) * cellHeight
+
+        #expect(placement.showsAbove)
+        #expect(placement.offsetY + placement.maxHeight <= anchorTop)
+    }
+
+    @Test("completion-style popup prefers below when there is room")
+    func completionStylePopupPrefersBelow() {
+        let placement = AnchoredOverlayPlacement.resolve(anchorRow: 4, cellHeight: cellHeight, measuredHeight: 80, viewportHeight: viewportHeight, desiredMaxHeight: desiredMaxHeight, preferredSide: .below, gap: gap, bottomInset: bottomInset)
+
+        #expect(!placement.showsAbove)
+    }
+
+    @Test("horizontal placement includes gutter padding and clamps to viewport")
+    func horizontalPlacementIncludesGutterPaddingAndClamps() {
+        let unclamped = AnchoredOverlayPlacement.offsetX(anchorCol: 10, cellWidth: 8, measuredWidth: 100, viewportWidth: 300, gutterPad: 24)
+        let clamped = AnchoredOverlayPlacement.offsetX(anchorCol: 30, cellWidth: 8, measuredWidth: 100, viewportWidth: 300, gutterPad: 24)
+
+        #expect(unclamped == 104)
+        #expect(clamped == 192)
+    }
+
+    private func resolve(anchorRow: Int, measuredHeight: CGFloat) -> AnchoredOverlayPlacement {
+        AnchoredOverlayPlacement.resolve(anchorRow: anchorRow, cellHeight: cellHeight, measuredHeight: measuredHeight, viewportHeight: viewportHeight, desiredMaxHeight: desiredMaxHeight, preferredSide: .above, gap: gap, bottomInset: bottomInset)
+    }
+}
+
 // MARK: - CompletionOverlay
 
 @Suite("CompletionOverlay View Structure")

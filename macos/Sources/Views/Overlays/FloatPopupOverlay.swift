@@ -1,8 +1,8 @@
-/// Native SwiftUI float popup overlay for buffer content popups.
+/// Native SwiftUI float popup overlay for semantic popup content.
 ///
 /// Renders as a centered, bordered panel with a title bar and
-/// scrollable monospace content. Used for the *Help* buffer and
-/// similar float-display popups.
+/// scrollable content. The BEAM provides preferred size hints, while this view
+/// owns native text wrapping, measurement, and final size.
 
 import SwiftUI
 
@@ -23,13 +23,13 @@ public struct FloatPopupOverlay: View {
         reduceMotion ? 0 : 0.15
     }
 
-    /// Panel width in points, derived from cell dimensions.
-    private var panelWidth: CGFloat {
+    /// Preferred maximum panel width in points, derived from cell dimensions.
+    private var panelMaxWidth: CGFloat {
         CGFloat(state.width) * cellWidth
     }
 
-    /// Panel height in points, derived from cell dimensions.
-    private var panelHeight: CGFloat {
+    /// Preferred maximum panel height in points, derived from cell dimensions.
+    private var panelMaxHeight: CGFloat {
         CGFloat(state.height) * cellHeight
     }
 
@@ -60,13 +60,14 @@ public struct FloatPopupOverlay: View {
                                 .font(.system(size: 12, design: .monospaced))
                                 .foregroundStyle(theme.popupFg.opacity(0.9))
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                                .textSelection(.enabled)
                         }
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                 }
             }
-            .frame(width: panelWidth, height: panelHeight)
+            .frame(maxWidth: panelMaxWidth, maxHeight: panelMaxHeight)
             .background(
                 RoundedRectangle(cornerRadius: 8)
                     .fill(theme.popupBg)

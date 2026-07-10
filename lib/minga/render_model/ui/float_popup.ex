@@ -7,6 +7,7 @@ defmodule Minga.RenderModel.UI.FloatPopup do
           visible?: boolean(),
           title: String.t(),
           lines: [String.t()],
+          # Preferred native maximum size, retained as width/height for the current wire format.
           width: non_neg_integer(),
           height: non_neg_integer()
         }

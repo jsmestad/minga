@@ -210,7 +210,7 @@ extension PreviewRegistry {
             ]
         )
 
-        return HoverPopupOverlay(state: state, cellWidth: 8, cellHeight: 18, viewportHeight: 300, viewportWidth: 500, encoder: nil)
+        return HoverPopupOverlay(state: state, encoder: nil)
             .frame(width: 500, height: 300)
             .background(theme.editorBg)
             .environment(theme)
@@ -237,7 +237,7 @@ extension PreviewRegistry {
             ]
         )
 
-        return SignatureHelpOverlay(state: state, cellWidth: 8, cellHeight: 18, viewportHeight: 200, viewportWidth: 500)
+        return SignatureHelpOverlay(state: state)
             .frame(width: 500, height: 200)
             .background(theme.editorBg)
             .environment(theme)

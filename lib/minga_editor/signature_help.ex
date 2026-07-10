@@ -94,11 +94,12 @@ defmodule MingaEditor.SignatureHelp do
   # ── Rendering ───────────────────────────────────────────────────────────
 
   @doc """
-  Returns the tooltip's outer rect `{row, col, width, height}` in screen cells.
+  Returns the tooltip's conservative outer rect `{row, col, width, height}` in screen cells.
 
-  Same box `render/3` paints into (border, anchor placement, viewport clamping
-  included), so the `SurfaceRegistry` registers the signature-help surface's rect
-  from the BEAM's own geometry. Returns `nil` when there is no signature to place.
+  Native GUI frontends render signature help from semantic opcode content and own
+  final pixel placement. This rect exists for BEAM-routed cell input, focus-tree
+  containment, and terminal-style fallback geometry. Returns `nil` when there is
+  no signature to place.
   """
   @spec box(t(), {pos_integer(), pos_integer()}, map()) :: MingaEditor.Layout.rect() | nil
   def box(%__MODULE__{} = sh, viewport, theme) do
