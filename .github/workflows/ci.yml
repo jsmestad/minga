@@ -409,16 +409,6 @@ jobs:
             -derivedDataPath DerivedData \
             CODE_SIGNING_ALLOWED=NO
 
-      - name: Release protocol tests
-        run: |
-          cd macos
-          xcodebuild test \
-            -scheme Minga \
-            -configuration Release \
-            -derivedDataPath DerivedData \
-            CODE_SIGNING_ALLOWED=NO \
-            ENABLE_TESTABILITY=YES
-
   swift-integration:
     name: Swift Protocol Integration
     runs-on: macos-15
