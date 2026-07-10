@@ -15,14 +15,13 @@ public struct HoverPopupOverlay: View {
     }
     public let state: HoverPopupState
     @Environment(\.themeColors) private var theme
+    @Environment(\.anchoredOverlayContext) private var overlayContext
     public let encoder: InputEncoder?
 
     private let maxWidth: CGFloat = 500
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private var animDuration: Double {
-        reduceMotion ? 0 : 0.15
+    private var showsScrollIndicators: Bool {
+        state.focused || state.scrollOffset > 0 || state.lines.count > 12
     }
 
     public var body: some View {
@@ -32,7 +31,7 @@ public struct HoverPopupOverlay: View {
                 .background(
                     RoundedRectangle(cornerRadius: 8)
                         .fill(theme.popupBg)
-                        .shadow(color: .black.opacity(0.4), radius: 12, y: 4)
+                        .shadow(color: .black.opacity(0.4), radius: 12, y: overlayContext.shadowYOffset)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
@@ -50,13 +49,12 @@ public struct HoverPopupOverlay: View {
                 // user to keyboard-focus the popup first. Moving the pointer back
                 // out resumes editor motion events, which dismiss on leaving.
                 .allowsHitTesting(true)
-                .transition(.opacity.animation(.easeIn(duration: animDuration)))
         }
     }
 
     @ViewBuilder
     private var popupContent: some View {
-        ScrollView(.vertical, showsIndicators: state.focused) {
+        ScrollView(.vertical, showsIndicators: showsScrollIndicators) {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(state.visibleLines) { line in
                     lineView(line)

@@ -3,11 +3,6 @@ import AppKit
 import SwiftUI
 import MingaProtocol
 
-public enum AnchoredOverlaySide: Equatable {
-    case above
-    case below
-}
-
 public struct AnchoredOverlayPlacement: Equatable {
     public let offsetY: CGFloat
     public let maxHeight: CGFloat
@@ -112,7 +107,7 @@ private struct EditorOverlayHost: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             if gui.signatureHelpState.visible {
-                anchoredOverlay(row: gui.signatureHelpState.anchorRow, col: gui.signatureHelpState.anchorCol, preferredSide: .above, maxHeight: 220) {
+                anchoredOverlay(row: gui.signatureHelpState.anchorRow, col: gui.signatureHelpState.anchorCol, preferredSide: .above, maxHeight: 220) { _ in
                     SignatureHelpOverlay(state: gui.signatureHelpState)
                         .allowsHitTesting(false)
                 }
@@ -120,7 +115,7 @@ private struct EditorOverlayHost: View {
             }
 
             if gui.hoverPopupState.visible {
-                anchoredOverlay(row: gui.hoverPopupState.anchorRow, col: gui.hoverPopupState.anchorCol, preferredSide: .above, maxHeight: 300) {
+                anchoredOverlay(row: gui.hoverPopupState.anchorRow, col: gui.hoverPopupState.anchorCol, preferredSide: .above, maxHeight: 300) { _ in
                     HoverPopupOverlay(state: gui.hoverPopupState, encoder: encoder)
                         .allowsHitTesting(true)
                 }
@@ -128,7 +123,7 @@ private struct EditorOverlayHost: View {
             }
 
             if gui.completionState.visible {
-                anchoredOverlay(row: gui.completionState.anchorRow, col: gui.completionState.anchorCol, preferredSide: .below, maxHeight: 420, gap: 2) {
+                anchoredOverlay(row: gui.completionState.anchorRow, col: gui.completionState.anchorCol, preferredSide: .below, maxHeight: 420, gap: 2) { _ in
                     CompletionOverlay(state: gui.completionState, encoder: encoder)
                 }
                 .zIndex(30)
@@ -142,7 +137,7 @@ private struct EditorOverlayHost: View {
         preferredSide: AnchoredOverlaySide,
         maxHeight: CGFloat,
         gap: CGFloat = 4,
-        @ViewBuilder content: @escaping () -> Content
+        @ViewBuilder content: @escaping (AnchoredOverlayPlacement) -> Content
     ) -> some View {
         AnchoredEditorOverlay(
             anchorRow: row,
@@ -180,10 +175,11 @@ private struct AnchoredEditorOverlay<Content: View>: View {
     let preferredSide: AnchoredOverlaySide
     let gap: CGFloat
     let bottomInset: CGFloat
-    let content: () -> Content
+    let content: (AnchoredOverlayPlacement) -> Content
 
     @State private var measuredHeight: CGFloat = 0
     @State private var measuredWidth: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(
         anchorRow: Int,
@@ -197,7 +193,7 @@ private struct AnchoredEditorOverlay<Content: View>: View {
         preferredSide: AnchoredOverlaySide,
         gap: CGFloat,
         bottomInset: CGFloat = 8,
-        @ViewBuilder content: @escaping () -> Content
+        @ViewBuilder content: @escaping (AnchoredOverlayPlacement) -> Content
     ) {
         self.anchorRow = anchorRow
         self.anchorCol = anchorCol
@@ -222,7 +218,9 @@ private struct AnchoredEditorOverlay<Content: View>: View {
     }
 
     var body: some View {
-        content()
+        let placement = placement
+        content(placement)
+            .environment(\.anchoredOverlayContext, AnchoredOverlayContext(side: placement.side, maxHeight: placement.maxHeight))
             .frame(maxHeight: placement.maxHeight)
             .background(
                 GeometryReader { geo in
@@ -234,6 +232,24 @@ private struct AnchoredEditorOverlay<Content: View>: View {
             .onPreferenceChange(AnchoredOverlayHeightKey.self) { measuredHeight = $0 }
             .onPreferenceChange(AnchoredOverlayWidthKey.self) { measuredWidth = $0 }
             .offset(x: offsetX, y: placement.offsetY)
+            .transition(transition(for: placement.side))
+    }
+
+    private func transition(for side: AnchoredOverlaySide) -> AnyTransition {
+        if reduceMotion {
+            return .opacity.animation(.easeInOut(duration: 0.08))
+        }
+
+        let anchor: UnitPoint = side == .above ? .bottomLeading : .topLeading
+        let motionY: CGFloat = side == .above ? 6 : -6
+
+        return .asymmetric(
+            insertion: .opacity
+                .combined(with: .scale(scale: 0.985, anchor: anchor))
+                .combined(with: .offset(x: 0, y: motionY))
+                .animation(.easeOut(duration: 0.14)),
+            removal: .opacity.animation(.easeIn(duration: 0.08))
+        )
     }
 }
 

@@ -5,6 +5,35 @@
 import SwiftUI
 import MingaProtocol
 
+public enum AnchoredOverlaySide: Equatable, Sendable {
+    case above
+    case below
+}
+
+public struct AnchoredOverlayContext: Equatable, Sendable {
+    public let side: AnchoredOverlaySide
+    public let maxHeight: CGFloat
+
+    public var showsAbove: Bool {
+        side == .above
+    }
+
+    public var shadowYOffset: CGFloat {
+        side == .above ? -5 : 5
+    }
+}
+
+private struct AnchoredOverlayContextKey: EnvironmentKey {
+    static let defaultValue = AnchoredOverlayContext(side: .below, maxHeight: .infinity)
+}
+
+public extension EnvironmentValues {
+    var anchoredOverlayContext: AnchoredOverlayContext {
+        get { self[AnchoredOverlayContextKey.self] }
+        set { self[AnchoredOverlayContextKey.self] = newValue }
+    }
+}
+
 /// Thread-safe observable theme colors for SwiftUI chrome.
 @MainActor
 @Observable

@@ -13,14 +13,9 @@ public struct SignatureHelpOverlay: View {
     }
     public let state: SignatureHelpState
     @Environment(\.themeColors) private var theme
+    @Environment(\.anchoredOverlayContext) private var overlayContext
 
     private let maxWidth: CGFloat = 600
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private var animDuration: Double {
-        reduceMotion ? 0 : 0.1
-    }
 
     public var body: some View {
         if state.visible && !state.signatures.isEmpty {
@@ -50,14 +45,13 @@ public struct SignatureHelpOverlay: View {
             .background(
                 RoundedRectangle(cornerRadius: 8)
                     .fill(theme.popupBg)
-                    .shadow(color: .black.opacity(0.4), radius: 12, y: 4)
+                    .shadow(color: .black.opacity(0.4), radius: 12, y: overlayContext.shadowYOffset)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
                     .strokeBorder(theme.popupBorder.opacity(0.5), lineWidth: 1)
             )
             .allowsHitTesting(false)
-            .transition(.opacity.animation(.easeIn(duration: animDuration)))
         }
     }
 
