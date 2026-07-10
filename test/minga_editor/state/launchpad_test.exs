@@ -122,6 +122,6 @@ defmodule MingaEditor.State.LaunchpadTest do
 
   test "recents cap at five" do
     lp = launchpad(recents: Enum.map(1..9, &"file#{&1}.ex"))
-    assert length(lp.recents) == 5
+    assert [_, _, _, _, _] = lp.recents
   end
 end

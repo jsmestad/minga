@@ -36,6 +36,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaEditor.Renderer
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
+  alias MingaEditor.Window
 
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
@@ -1771,22 +1772,22 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   # re-anchor). When the window has a live buffer the cursor position feeds
   # `record_scroll_event/3`; without one there is nothing to detach from, so only the
   # echo mark is recorded.
-  @spec scroll_to_line_commit(MingaEditor.Window.t(), Viewport.t()) :: MingaEditor.Window.t()
-  defp scroll_to_line_commit(%MingaEditor.Window{buffer: buf} = window, new_vp)
+  @spec scroll_to_line_commit(Window.t(), Viewport.t()) :: Window.t()
+  defp scroll_to_line_commit(%Window{buffer: buf} = window, new_vp)
        when is_pid(buf) do
     now = System.monotonic_time(:millisecond)
     cursor_pos = Buffer.cursor(buf)
 
     window
-    |> MingaEditor.Window.set_viewport(new_vp)
-    |> MingaEditor.Window.mark_scroll_echo(new_vp.top)
-    |> MingaEditor.Window.record_scroll_event(now, cursor_pos)
+    |> Window.set_viewport(new_vp)
+    |> Window.mark_scroll_echo(new_vp.top)
+    |> Window.record_scroll_event(now, cursor_pos)
   end
 
-  defp scroll_to_line_commit(%MingaEditor.Window{} = window, new_vp) do
+  defp scroll_to_line_commit(%Window{} = window, new_vp) do
     window
-    |> MingaEditor.Window.set_viewport(new_vp)
-    |> MingaEditor.Window.mark_scroll_echo(new_vp.top)
+    |> Window.set_viewport(new_vp)
+    |> Window.mark_scroll_echo(new_vp.top)
   end
 
   @spec open_file_by_path_in_active_window(state(), String.t()) :: state()
@@ -1889,7 +1890,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     end
   end
 
-  @spec find_float_popup_window_id(state()) :: MingaEditor.Window.id() | nil
+  @spec find_float_popup_window_id(state()) :: Window.id() | nil
   defp find_float_popup_window_id(%{workspace: %{windows: %{map: map}}}) when is_map(map) do
     Enum.find_value(map, fn
       {id,

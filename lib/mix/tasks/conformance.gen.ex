@@ -593,7 +593,7 @@ defmodule Mix.Tasks.Conformance.Gen do
     m1 = for i <- 1..8, do: chat_msg(i, "message #{i}")
     {f1, caches1} = AgentTranscriptEncoder.encode(chat_model(1, m1), Caches.new())
 
-    m2 = m1 ++ [chat_msg(9, "message 9")]
+    m2 = Enum.concat(m1, [chat_msg(9, "message 9")])
     {f2, _caches2} = AgentTranscriptEncoder.encode(chat_model(1, m2), caches1)
 
     chat_transcript(
@@ -630,7 +630,7 @@ defmodule Mix.Tasks.Conformance.Gen do
     m1 = for i <- 1..6, do: chat_msg(i, "msg #{i}")
     {f1, caches1} = AgentTranscriptEncoder.encode(chat_model(1, m1), Caches.new())
 
-    m2 = m1 ++ [chat_msg(7, "msg 7")]
+    m2 = Enum.concat(m1, [chat_msg(7, "msg 7")])
     {f2, _caches2} = AgentTranscriptEncoder.encode(chat_model(1, m2), caches1)
 
     chat_transcript(
@@ -743,7 +743,7 @@ defmodule Mix.Tasks.Conformance.Gen do
     m1 = [chat_msg(1, "a"), chat_msg(2, "b"), chat_msg(3, "c")]
     {f1, caches1} = AgentTranscriptEncoder.encode(chat_model(5, m1), Caches.new())
 
-    m2 = m1 ++ [chat_msg(4, "d")]
+    m2 = Enum.concat(m1, [chat_msg(4, "d")])
     {f2, caches2} = AgentTranscriptEncoder.encode(chat_model(5, m2), caches1)
 
     # Same messages, new epoch: the epoch token flip alone forces a full_replace.

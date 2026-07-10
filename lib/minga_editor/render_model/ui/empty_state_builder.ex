@@ -132,8 +132,9 @@ defmodule MingaEditor.RenderModel.UI.EmptyStateBuilder do
       if first_run?(lp) do
         action_items
       else
-        action_items ++
-          [%Item{id: "action-tutor", kind: :action, label: "tutorial", detail: ":Tutor"}]
+        Enum.concat(action_items, [
+          %Item{id: "action-tutor", kind: :action, label: "tutorial", detail: ":Tutor"}
+        ])
       end
 
     %Section{id: :start, title: "Start", items: items}

@@ -7,6 +7,7 @@ defmodule MingaEditor.Integration.AgentWorkflowConformanceTest do
   alias Minga.Config.Options
   alias MingaAgent.Event
   alias MingaAgent.Session
+  alias MingaAgent.SessionManager
   alias MingaEditor.State.AgentAccess
 
   @moduletag :tmp_dir
@@ -406,7 +407,7 @@ defmodule MingaEditor.Integration.AgentWorkflowConformanceTest do
   defp start_agent_editor(project_root, options_server, opts) when is_list(opts) do
     sessions_before =
       MapSet.new(
-        MingaAgent.SessionManager.list_sessions()
+        SessionManager.list_sessions()
         |> Enum.map(fn {_id, pid, _meta} -> pid end)
       )
 
@@ -425,9 +426,9 @@ defmodule MingaEditor.Integration.AgentWorkflowConformanceTest do
       )
 
     on_exit(fn ->
-      for {_id, pid, _meta} <- MingaAgent.SessionManager.list_sessions(),
+      for {_id, pid, _meta} <- SessionManager.list_sessions(),
           not MapSet.member?(sessions_before, pid) do
-        MingaAgent.SessionManager.stop_session_by_pid(pid)
+        SessionManager.stop_session_by_pid(pid)
       end
     end)
 

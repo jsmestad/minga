@@ -28,17 +28,19 @@ defmodule MingaEditor.MouseHoverTooltip do
   def check_hover(%{workspace: %{buffers: %{active: nil}}} = state), do: state
 
   def check_hover(%{workspace: %{mouse: %{hover_pos: {row, col}}}} = state) do
-    with {:buffer, target} <- HitTest.resolve_buffer(state, row, col) do
-      case check_diagnostic(target.buffer, target.line) do
-        nil ->
-          send_hover_request(state, target.buffer, target.line, target.col, row, col)
+    case HitTest.resolve_buffer(state, row, col) do
+      {:buffer, target} ->
+        case check_diagnostic(target.buffer, target.line) do
+          nil ->
+            send_hover_request(state, target.buffer, target.line, target.col, row, col)
 
-        message ->
-          popup = HoverPopup.new(message, row, col, theme: state.theme)
-          EditorState.set_hover_popup(state, popup)
-      end
-    else
-      _ -> state
+          message ->
+            popup = HoverPopup.new(message, row, col, theme: state.theme)
+            EditorState.set_hover_popup(state, popup)
+        end
+
+      _ ->
+        state
     end
   end
 
