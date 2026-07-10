@@ -5,8 +5,12 @@ defmodule Minga.Integration.LspWiringTest do
 
   use Minga.Test.EditorCase, async: true
 
+  alias Minga.Buffer
   alias Minga.Events
+  alias MingaEditor.Mouse.HitTest
+  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.LSP
+  alias MingaEditor.State.Mouse
 
   describe "LSP no-op triggers" do
     test "deferred and save triggers are safe without an LSP client" do
@@ -39,7 +43,15 @@ defmodule Minga.Integration.LspWiringTest do
       ref = make_ref()
 
       :sys.replace_state(ctx.editor, fn state ->
-        put_in(state.workspace.lsp_pending[ref], {:hover_mouse, 5, 20})
+        state
+        |> put_in(
+          [Access.key!(:workspace), Access.key!(:lsp_pending), ref],
+          {:hover_mouse, 5, 20}
+        )
+        |> update_in(
+          [Access.key!(:workspace), Access.key!(:mouse)],
+          &Mouse.set_hover(&1, 5, 20, backend: :headless)
+        )
       end)
 
       hover_result =
@@ -56,6 +68,51 @@ defmodule Minga.Integration.LspWiringTest do
 
       assert state.shell_state.hover_popup.anchor_row == 5
       assert state.shell_state.hover_popup.anchor_col == 20
+    end
+
+    test "target-keyed hover response creates a popup when the target still matches" do
+      ctx = start_editor("defmodule Foo do\n  def bar, do: :ok\nend")
+      ref = make_ref()
+
+      :sys.replace_state(ctx.editor, fn state ->
+        put_target_hover_pending(state, ref, 1, 8)
+      end)
+
+      hover_result =
+        {:ok, %{"contents" => %{"kind" => "plaintext", "value" => "module docs"}}}
+
+      send(ctx.editor, {:lsp_response, ref, hover_result})
+
+      state =
+        wait_until(ctx, fn state -> state.shell_state.hover_popup != nil end,
+          max_attempts: 10,
+          interval_ms: 10,
+          message: "hover popup should be created from target-keyed hover response"
+        )
+
+      assert state.shell_state.hover_popup.anchor_row == 1
+      assert state.shell_state.hover_popup.anchor_col == 8
+    end
+
+    test "target-keyed hover response is ignored when the same cell maps to new content" do
+      ctx = start_editor(Enum.map_join(0..30, "\n", &"line #{&1}"))
+      ref = make_ref()
+
+      :sys.replace_state(ctx.editor, fn state ->
+        state =
+          put_target_hover_pending(state, ref, 5, 12)
+
+        EditorState.update_window(state, state.workspace.windows.active, fn window ->
+          %{window | viewport: %{window.viewport | top: window.viewport.top + 1}}
+        end)
+      end)
+
+      hover_result =
+        {:ok, %{"contents" => %{"kind" => "plaintext", "value" => "old line docs"}}}
+
+      send(ctx.editor, {:lsp_response, ref, hover_result})
+      assert sync_editor(ctx) == :normal
+      assert editor_state(ctx).shell_state.hover_popup == nil
     end
   end
 
@@ -91,6 +148,21 @@ defmodule Minga.Integration.LspWiringTest do
       assert state.lsp.selection_ranges == nil
       assert state.lsp.selection_range_index == 0
     end
+  end
+
+  defp put_target_hover_pending(state, ref, row, col) do
+    {:buffer, target} = HitTest.resolve_buffer(state, row, col)
+
+    state
+    |> put_in(
+      [Access.key!(:workspace), Access.key!(:lsp_pending), ref],
+      {:hover_mouse, row, col, target.buffer, target.line, target.col,
+       Buffer.version(target.buffer)}
+    )
+    |> update_in(
+      [Access.key!(:workspace), Access.key!(:mouse)],
+      &Mouse.set_hover(&1, row, col, backend: :headless)
+    )
   end
 
   defp sync_editor(ctx), do: GenServer.call(ctx.editor, :api_mode)

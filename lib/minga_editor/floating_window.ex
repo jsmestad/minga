@@ -1,16 +1,17 @@
 defmodule MingaEditor.FloatingWindow do
   @moduledoc """
-  Geometry for bordered, titled floating panels.
+  Cell-grid geometry for bordered, titled floating panels.
 
   Takes a `Spec` struct describing a floating window's size and position and
   resolves its outer rect via `box/1`. The cursor-anchored popups
   (`HoverPopup`, `SignatureHelp`) build a `Spec` and ask for its `box/1` so the
-  `SurfaceRegistry`/`FocusTree` can register the popup's hit region from the
-  BEAM's own geometry.
+  `SurfaceRegistry`/`FocusTree` can register a conservative cell-grid
+  containment rect from the BEAM's semantic state.
 
   The cell-grid painter (`render/1` and the border/title/footer/content draw
   helpers) was removed in #2311: the semantic frontends render these popups
-  natively from dedicated GUI opcodes, so nothing consumed the cell draws.
+  natively from dedicated GUI opcodes, so native GUI frontends own final pixel
+  placement.
   """
 
   # ── Border styles ────────────────────────────────────────────────────────
@@ -73,10 +74,10 @@ defmodule MingaEditor.FloatingWindow do
   @doc """
   Returns the window's outer rect in `Layout.rect()` shape: `{row, col, width, height}`.
 
-  This is the authoritative placement rect for a floating popup, including
+  This is the BEAM's cell-grid containment rect for a floating popup, including
   border, position resolution, and viewport clamping, so a caller (the
-  `SurfaceRegistry`/`FocusTree`) can register the surface's rect without
-  rendering its content.
+  `SurfaceRegistry`/`FocusTree`) can register the surface without rendering its
+  content. Native GUI frontends must not treat this as an exact pixel rect.
   """
   @spec box(Spec.t()) :: {non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()}
   def box(%Spec{} = spec) do

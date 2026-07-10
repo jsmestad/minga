@@ -135,10 +135,10 @@ defmodule MingaEditor.UI.Picker.ScorerTest do
       # the bytes "cafe" + U+0301 (0xCC 0x81) + ".txt", not a precomposed "é".
       nfd_label = <<"cafe", 0xCC, 0x81, ".txt">>
 
-      # Sanity-check the fixture really is decomposed: 10 bytes / 9 codepoints
-      # collapse to 8 graphemes because "e" + U+0301 forms a single "é" grapheme.
+      # Sanity-check the fixture really is decomposed: 10 bytes collapse to 8
+      # graphemes because "e" + U+0301 forms a single "é" grapheme.
       assert byte_size(nfd_label) == 10
-      assert length(String.graphemes(nfd_label)) == 8
+      assert String.length(nfd_label) == 8
 
       cands = candidates([nfd_label])
 

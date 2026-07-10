@@ -136,8 +136,7 @@ defmodule MingaEditor.UI.Picker.Scorer do
           0
 
         _ ->
-          parts = String.split(text, "/")
-          byte_size(text) - byte_size(List.last(parts))
+          byte_size(text) - byte_size(Path.basename(text))
       end
 
     cond do

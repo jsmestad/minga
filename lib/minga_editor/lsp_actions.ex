@@ -28,6 +28,7 @@ defmodule MingaEditor.LspActions do
   alias MingaEditor.Commands
   alias MingaEditor.HoverPopup
   alias MingaEditor.LspDecorations
+  alias MingaEditor.Mouse.HitTest
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.LSP, as: LSPState
@@ -793,10 +794,63 @@ defmodule MingaEditor.LspActions do
           non_neg_integer(),
           non_neg_integer()
         ) :: state()
-  def handle_hover_mouse_response(state, {:error, _}, _row, _col), do: state
-  def handle_hover_mouse_response(state, {:ok, nil}, _row, _col), do: state
+  def handle_hover_mouse_response(state, response, row, col) do
+    case state.workspace.mouse.hover_pos do
+      {^row, ^col} -> handle_current_hover_mouse_response(state, response, row, col)
+      _ -> state
+    end
+  end
 
-  def handle_hover_mouse_response(state, {:ok, %{"contents" => contents}}, row, col) do
+  @spec handle_hover_mouse_response(
+          state(),
+          {:ok, term()} | {:error, term()},
+          non_neg_integer(),
+          non_neg_integer(),
+          pid(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: state()
+  def handle_hover_mouse_response(state, response, row, col, buffer, line, buffer_col, version) do
+    if current_hover_mouse_target?(state, row, col, buffer, line, buffer_col, version) do
+      handle_current_hover_mouse_response(state, response, row, col)
+    else
+      state
+    end
+  end
+
+  @spec current_hover_mouse_target?(
+          state(),
+          non_neg_integer(),
+          non_neg_integer(),
+          pid(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: boolean()
+  defp current_hover_mouse_target?(state, row, col, buffer, line, buffer_col, version) do
+    with {^row, ^col} <- state.workspace.mouse.hover_pos,
+         {:buffer, %{buffer: ^buffer, line: ^line, col: ^buffer_col}} <-
+           HitTest.resolve_buffer(state, row, col),
+         ^version <- Buffer.version(buffer) do
+      true
+    else
+      _ -> false
+    end
+  catch
+    :exit, _ -> false
+  end
+
+  @spec handle_current_hover_mouse_response(
+          state(),
+          {:ok, term()} | {:error, term()},
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: state()
+  defp handle_current_hover_mouse_response(state, {:error, _}, _row, _col), do: state
+  defp handle_current_hover_mouse_response(state, {:ok, nil}, _row, _col), do: state
+
+  defp handle_current_hover_mouse_response(state, {:ok, %{"contents" => contents}}, row, col) do
     markdown = extract_hover_markdown(contents)
 
     case markdown do
@@ -809,7 +863,7 @@ defmodule MingaEditor.LspActions do
     end
   end
 
-  def handle_hover_mouse_response(state, {:ok, _}, _row, _col), do: state
+  defp handle_current_hover_mouse_response(state, {:ok, _}, _row, _col), do: state
 
   # ── References response ─────────────────────────────────────────────────────
 

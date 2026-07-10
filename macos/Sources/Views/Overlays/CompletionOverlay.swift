@@ -14,6 +14,7 @@ public struct CompletionOverlay: View {
     }
     public let state: CompletionState
     @Environment(\.themeColors) private var theme
+    @Environment(\.anchoredOverlayContext) private var overlayContext
     public let encoder: InputEncoder?
 
     private let maxVisibleItems = 10
@@ -28,7 +29,7 @@ public struct CompletionOverlay: View {
         if state.visible && !state.items.isEmpty {
             VStack(spacing: 0) {
                 ScrollViewReader { proxy in
-                    ScrollView(.vertical, showsIndicators: false) {
+                    ScrollView(.vertical, showsIndicators: state.items.count > maxVisibleItems) {
                         LazyVStack(spacing: 0) {
                             ForEach(state.items.prefix(maxVisibleItems)) { item in
                                 completionRow(item)
@@ -52,7 +53,7 @@ public struct CompletionOverlay: View {
             .background(
                 RoundedRectangle(cornerRadius: 8)
                     .fill(theme.popupBg)
-                    .shadow(color: .black.opacity(0.4), radius: 12, y: 4)
+                    .shadow(color: .black.opacity(0.4), radius: 12, y: overlayContext.shadowYOffset)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 8)

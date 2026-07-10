@@ -1,106 +1,37 @@
 /// Native SwiftUI hover popup overlay for LSP hover tooltips.
 ///
-/// Positioned above the anchor token by default, flipping below when
-/// near the top of the viewport. Renders markdown-styled content with
-/// code blocks, headers, bold/italic text, and blockquotes.
+/// Renders markdown-styled content with code blocks, headers, bold/italic text,
+/// and blockquotes. `EditorOverlayHost` owns anchor placement, viewport
+/// clipping, and z-order.
 /// Non-interactive by default; interactive when focused for scrolling.
 
 import SwiftUI
 import MingaProtocol
 
-/// PreferenceKey to measure the popup's rendered height.
-/// Single reporter: only one GeometryReader writes to this key.
-private struct HoverHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
-    }
-}
-
-/// PreferenceKey to measure the popup's rendered width.
-/// Single reporter: only one GeometryReader writes to this key.
-private struct HoverWidthKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
-    }
-}
-
 public struct HoverPopupOverlay: View {
-    public init(state: HoverPopupState, cellWidth: CGFloat, cellHeight: CGFloat, viewportHeight: CGFloat, viewportWidth: CGFloat, encoder: InputEncoder? = nil) {
+    public init(state: HoverPopupState, encoder: InputEncoder? = nil) {
         self.state = state
-        self.cellWidth = cellWidth
-        self.cellHeight = cellHeight
-        self.viewportHeight = viewportHeight
-        self.viewportWidth = viewportWidth
         self.encoder = encoder
     }
     public let state: HoverPopupState
     @Environment(\.themeColors) private var theme
-    public let cellWidth: CGFloat
-    public let cellHeight: CGFloat
-    public let viewportHeight: CGFloat
-    public let viewportWidth: CGFloat
+    @Environment(\.anchoredOverlayContext) private var overlayContext
     public let encoder: InputEncoder?
 
-    @State private var popupHeight: CGFloat = 0
-    @State private var popupWidth: CGFloat = 0
-
     private let maxWidth: CGFloat = 500
-    private let maxHeight: CGFloat = 300
-    private let gap: CGFloat = 4
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private var animDuration: Double {
-        reduceMotion ? 0 : 0.15
-    }
-
-    /// Whether to show the popup above the anchor (preferred) or below.
-    private var showAbove: Bool {
-        let anchorY = CGFloat(state.anchorRow) * cellHeight
-        return anchorY > popupHeight + gap + cellHeight
-    }
-
-    /// Vertical offset: bottom of popup above anchor row, or top of popup below anchor row.
-    /// Clamped to stay within the viewport height.
-    private var offsetY: CGFloat {
-        let anchorY = CGFloat(state.anchorRow) * cellHeight
-        if showAbove {
-            return max(anchorY - popupHeight - gap, 0)
-        } else {
-            let y = anchorY + cellHeight + gap
-            let maxY = max(viewportHeight - popupHeight - 8, 0)
-            return min(y, maxY)
-        }
-    }
-
-    /// Horizontal offset clamped so the popup doesn't extend past the right edge.
-    private var offsetX: CGFloat {
-        let rawX = CGFloat(state.anchorCol) * cellWidth
-        let maxX = max(viewportWidth - popupWidth - 8, 0)
-        return min(rawX, maxX)
+    private var showsScrollIndicators: Bool {
+        state.focused || state.scrollOffset > 0 || state.lines.count > 12
     }
 
     public var body: some View {
         if state.visible && !state.lines.isEmpty {
             popupContent
                 .frame(maxWidth: maxWidth)
-                .frame(maxHeight: maxHeight)
-                .background(
-                    GeometryReader { geo in
-                        Color.clear
-                            .preference(key: HoverHeightKey.self, value: geo.size.height)
-                            .preference(key: HoverWidthKey.self, value: geo.size.width)
-                    }
-                )
-                .onPreferenceChange(HoverHeightKey.self) { popupHeight = $0 }
-                .onPreferenceChange(HoverWidthKey.self) { popupWidth = $0 }
                 .background(
                     RoundedRectangle(cornerRadius: 8)
                         .fill(theme.popupBg)
-                        .shadow(color: .black.opacity(0.4), radius: 12,
-                                y: showAbove ? -4 : 4)
+                        .shadow(color: .black.opacity(0.4), radius: 12, y: overlayContext.shadowYOffset)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
@@ -111,7 +42,6 @@ public struct HoverPopupOverlay: View {
                             lineWidth: state.focused ? 2 : 1
                         )
                 )
-                .offset(x: offsetX, y: offsetY)
                 // Always intercept mouse events inside the popup (#2629). SwiftUI
                 // then handles motion (keeping the popup alive instead of the
                 // motion reaching EditorNSView and dismissing it via the BEAM),
@@ -119,13 +49,12 @@ public struct HoverPopupOverlay: View {
                 // user to keyboard-focus the popup first. Moving the pointer back
                 // out resumes editor motion events, which dismiss on leaving.
                 .allowsHitTesting(true)
-                .transition(.opacity.animation(.easeIn(duration: animDuration)))
         }
     }
 
     @ViewBuilder
     private var popupContent: some View {
-        ScrollView(.vertical, showsIndicators: state.focused) {
+        ScrollView(.vertical, showsIndicators: showsScrollIndicators) {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(state.visibleLines) { line in
                     lineView(line)
@@ -318,7 +247,7 @@ private func hoverPopupPreviewState() -> HoverPopupState {
 
 #Preview("Hover Popup") {
     let theme = PreviewFixtures.theme()
-    HoverPopupOverlay(state: hoverPopupPreviewState(), cellWidth: 8, cellHeight: 18, viewportHeight: 300, viewportWidth: 500, encoder: nil)
+    HoverPopupOverlay(state: hoverPopupPreviewState(), encoder: nil)
         .frame(width: 500, height: 300)
         .background(theme.editorBg)
         .environment(\.themeColors, theme)

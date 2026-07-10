@@ -118,7 +118,7 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
       window = minimal_render_window(rows: [row])
       binary = WindowEncoder.encode_window_content(window)
 
-      <<0x80, section_count::8, sections_binary::binary>> = binary
+      {section_count, sections_binary} = window_sections(binary)
       rows_payload = extract_section_payload(sections_binary, section_count, 0x02)
 
       # The rows section starts with row_count(u16), then the row data.
@@ -158,7 +158,7 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
       window = minimal_render_window(rows: [row])
       binary = WindowEncoder.encode_window_content(window)
 
-      <<0x80, section_count::8, sections_binary::binary>> = binary
+      {section_count, sections_binary} = window_sections(binary)
       rows_payload = extract_section_payload(sections_binary, section_count, 0x02)
 
       # row_count(2) + row_type(1) + row_id(8) + buf_line(4) + content_hash(4) + text_len(4) + text(0) + span_count(2)
@@ -263,7 +263,7 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
       window = full_render_window()
       binary = WindowEncoder.encode_window_content(window)
 
-      <<0x80, section_count::8, sections_binary::binary>> = binary
+      {section_count, sections_binary} = window_sections(binary)
       actual_ids = extract_section_ids(sections_binary, section_count)
 
       for {id, name} <- schema_section_ids do
@@ -279,7 +279,7 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
       window = full_render_window()
       binary = WindowEncoder.encode_window_content(window)
 
-      <<0x80, section_count::8, sections_binary::binary>> = binary
+      {section_count, sections_binary} = window_sections(binary)
       actual_ids = extract_section_ids(sections_binary, section_count)
 
       for id <- actual_ids do
@@ -296,7 +296,7 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
       window = full_render_window()
       binary = WindowEncoder.encode_window_content(window)
 
-      <<0x80, section_count::8, sections_binary::binary>> = binary
+      {section_count, sections_binary} = window_sections(binary)
       payload = extract_section_payload(sections_binary, section_count, 0x03)
 
       assert payload == <<1::8, 0::16, 0::16, 0::16, 5::16>>
@@ -308,7 +308,7 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
       window = full_render_window()
       binary = WindowEncoder.encode_window_content(window)
 
-      <<0x80, section_count::8, sections_binary::binary>> = binary
+      {section_count, sections_binary} = window_sections(binary)
       payload = extract_section_payload(sections_binary, section_count, 0x08)
 
       assert <<_prefix::binary-size(67), hit_region::binary-size(11)>> = payload
@@ -652,6 +652,25 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
          acc
        ) do
     do_extract_section_ids(rest, remaining - 1, [section_id | acc])
+  end
+
+  @spec window_sections(binary()) :: {non_neg_integer(), binary()}
+  defp window_sections(<<0x80, payload_len::32, payload::binary-size(payload_len)>>) do
+    <<section_count::8, sections::binary>> = payload
+    {section_count, normalize_window_sections(sections, section_count, [])}
+  end
+
+  @spec normalize_window_sections(binary(), non_neg_integer(), [binary()]) :: binary()
+  defp normalize_window_sections(_sections, 0, acc), do: IO.iodata_to_binary(Enum.reverse(acc))
+
+  defp normalize_window_sections(
+         <<section_id::8, payload_len::32, payload::binary-size(payload_len), rest::binary>>,
+         remaining,
+         acc
+       ) do
+    normalize_window_sections(rest, remaining - 1, [
+      <<section_id::8, payload_len::16, payload::binary>> | acc
+    ])
   end
 
   @spec hex(non_neg_integer()) :: String.t()

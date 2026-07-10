@@ -89,7 +89,7 @@ defmodule MingaEditor.Commands.Formatting do
     end
   end
 
-  @doc false
+  @doc "Finds the active pending LSP formatting request, if one exists."
   @spec find_pending_format(state()) :: {reference(), tuple()} | nil
   def find_pending_format(state) do
     Enum.find(state.workspace.lsp_pending, fn
@@ -98,7 +98,7 @@ defmodule MingaEditor.Commands.Formatting do
     end)
   end
 
-  @doc false
+  @doc "Applies LSP text edits to a buffer and restores the cursor to the nearest valid line."
   @spec apply_lsp_edits(pid(), [map()]) :: :ok
   def apply_lsp_edits(buf, edits) when is_pid(buf) and is_list(edits) do
     if edits != [] do
@@ -203,7 +203,7 @@ defmodule MingaEditor.Commands.Formatting do
     end)
   end
 
-  @doc false
+  @doc "Applies the result of an asynchronous external formatter run."
   @spec apply_format_external_result(state(), term()) :: state()
   def apply_format_external_result(state, {:ok, formatted, buf, version}) do
     if Process.alive?(buf) and Buffer.version(buf) == version do

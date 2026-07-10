@@ -30,6 +30,11 @@ enum AtlasLookupResult {
 
 @MainActor
 final class LineTextureAtlas {
+    /// Conservative macOS Metal 2D texture edge limit. The renderer may receive
+    /// retained recovery payloads with thousands of rows, but a single atlas must
+    /// still fit inside this hardware limit.
+    static let maxTextureDimension = 16_384
+
     /// The atlas texture.
     private(set) var texture: MTLTexture?
 
@@ -46,6 +51,11 @@ final class LineTextureAtlas {
 
     /// Total atlas height in pixels.
     private(set) var atlasHeight: Int = 0
+
+    /// Maximum slots that fit in one Metal 2D texture for this device.
+    var maxSlotCapacity: Int {
+        max(Self.maxTextureDimension / max(slotHeight, 1), 1)
+    }
 
     /// Number of allocated slots.
     var slotCount: Int { allocator.capacity }
@@ -65,11 +75,11 @@ final class LineTextureAtlas {
     func ensureCapacity(maxSlots: Int, width: Int) {
         guard maxSlots > 0, width > 0 else { return }
 
-        let needsRealloc = maxSlots > allocator.capacity || width > atlasWidth
+        let newSlotCount = min(max(maxSlots, allocator.capacity), maxSlotCapacity)
+        let newWidth = min(max(width, atlasWidth), Self.maxTextureDimension)
+        let needsRealloc = newSlotCount > allocator.capacity || newWidth > atlasWidth
         guard needsRealloc else { return }
 
-        let newSlotCount = max(maxSlots, allocator.capacity)
-        let newWidth = max(width, atlasWidth)
         let newHeight = newSlotCount * slotHeight
 
         let desc = MTLTextureDescriptor.texture2DDescriptor(
@@ -78,8 +88,8 @@ final class LineTextureAtlas {
             height: newHeight,
             mipmapped: false
         )
-        desc.usage = [.shaderRead]
-        desc.storageMode = .managed
+        desc.usage = MTLTextureUsage.shaderRead
+        desc.storageMode = MTLStorageMode.managed
 
         texture = device.makeTexture(descriptor: desc)
         atlasWidth = newWidth

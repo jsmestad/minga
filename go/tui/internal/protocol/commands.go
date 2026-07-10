@@ -247,23 +247,47 @@ func decodeWindowContent(payload []byte) (Command, error) {
 	}
 
 	opcode := payload[0]
-	sectionCount := int(payload[1])
+	sectionCount := 0
+	offset := 0
+	end := 0
+	sectionLenBytes := 2
+
+	if opcode == generated.OPGuiWindowContent {
+		if len(payload) < 6 {
+			return Command{}, fmt.Errorf("short semantic window")
+		}
+		payloadLen := int(u32(payload, 1))
+		end = 5 + payloadLen
+		if payloadLen < 1 || len(payload) < end {
+			return Command{}, fmt.Errorf("short semantic window payload")
+		}
+		sectionCount = int(payload[5])
+		offset = 6
+		sectionLenBytes = 4
+	} else {
+		sectionCount = int(payload[1])
+		offset = 2
+		end = len(payload)
+	}
+
 	requiresSections := opcode == generated.OPGuiWindowRowsDelta || opcode == generated.OPGuiWindowViewportDelta
 	needHeader := requiresSections
 	needRows := requiresSections
 	sawHeader := false
 	sawRows := false
-	offset := 2
 	window := WindowContent{}
 
 	for i := 0; i < sectionCount; i++ {
-		if len(payload) < offset+3 {
+		if end < offset+1+sectionLenBytes {
 			return Command{}, fmt.Errorf("short semantic section")
 		}
 		sectionID := payload[offset]
 		sectionLen := int(u16(payload, offset+1))
-		offset += 3
-		if len(payload) < offset+sectionLen {
+		if sectionLenBytes == 4 {
+			sectionLen = int(u32(payload, offset+1))
+		}
+		offset += 1 + sectionLenBytes
+		if end < offset+sectionLen {
 			return Command{}, fmt.Errorf("short semantic section payload")
 		}
 		section := payload[offset : offset+sectionLen]
@@ -311,6 +335,9 @@ func decodeWindowContent(payload []byte) (Command, error) {
 	kind := CommandWindowContent
 	if opcode != generated.OPGuiWindowContent {
 		kind = CommandWindowDelta
+	}
+	if opcode == generated.OPGuiWindowContent && offset != end {
+		return Command{}, fmt.Errorf("trailing semantic window bytes")
 	}
 	return Command{Kind: kind, Size: offset, Window: window}, nil
 }

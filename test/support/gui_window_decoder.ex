@@ -12,7 +12,9 @@ defmodule Minga.Test.GUIWindowDecoder do
 
   @doc "Decodes an 0x80 binary back into a map for test assertions."
   @spec decode(binary()) :: map()
-  def decode(<<0x80, section_count::8, rest::binary>>) do
+  def decode(<<0x80, payload_len::32, payload::binary-size(payload_len)>>) do
+    <<section_count::8, rest::binary>> = payload
+
     result = %{
       window_id: 0,
       full_refresh: true,
@@ -40,7 +42,7 @@ defmodule Minga.Test.GUIWindowDecoder do
   defp decode_sections(rest, 0, result), do: {result, rest}
 
   defp decode_sections(
-         <<section_id::8, section_len::16, payload::binary-size(section_len), rest::binary>>,
+         <<section_id::8, section_len::32, payload::binary-size(section_len), rest::binary>>,
          remaining,
          result
        ) do

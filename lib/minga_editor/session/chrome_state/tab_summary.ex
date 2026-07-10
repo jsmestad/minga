@@ -39,7 +39,18 @@ defmodule MingaEditor.Session.ChromeState.TabSummary do
     :pinned?,
     :tint_color
   ]
-  defstruct @enforce_keys ++ [ephemeral?: false]
+  defstruct id: nil,
+            workspace_id: nil,
+            kind: nil,
+            label: nil,
+            path: nil,
+            icon: nil,
+            dirty?: nil,
+            draft_state: nil,
+            attention?: nil,
+            pinned?: nil,
+            tint_color: nil,
+            ephemeral?: false
 
   @doc "Builds a tab summary."
   @spec new(keyword()) :: t()

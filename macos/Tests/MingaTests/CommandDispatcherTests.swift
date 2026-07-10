@@ -1600,6 +1600,7 @@ struct CommandDispatcherStagingTests {
         #expect(requested == [3])
         // Resync hint raised.
         #expect(gui.resyncState.pending == true)
+        #expect(gui.resyncState.lastGoodFrameSeq == 3)
         #expect(dispatcher.lastCommittedFrameSeq == 3)
     }
 
@@ -1664,6 +1665,7 @@ struct CommandDispatcherStagingTests {
 
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
         #expect(requested == [0])
+        #expect(gui.resyncState.lastGoodFrameSeq == 0)
 
         // A base-0 frame has answered the request, but fails validation before it
         // can commit. It must reopen the request window instead of hanging forever.
@@ -1717,6 +1719,7 @@ struct CommandDispatcherStagingTests {
         #expect(gui.tabBarState.tabs.first?.label == "base.ex")
         #expect(requested == [10])
         #expect(gui.resyncState.pending == true)
+        #expect(gui.resyncState.lastGoodFrameSeq == 10)
     }
 
     @Test("commit with no open begin invalidates and requests keyframe")
@@ -1765,6 +1768,7 @@ struct CommandDispatcherStagingTests {
         dispatcher.dispatch(.commitFrame(frameSeq: 7, seq: 0))
 
         #expect(gui.resyncState.pending == false)
+        #expect(gui.resyncState.lastGoodFrameSeq == 0)
         #expect(gui.tabBarState.tabs.first?.label == "recovered.ex")
     }
 
@@ -1861,7 +1865,7 @@ struct CommandDispatcherStagingTests {
 
     @Test("gui_config_state applies immediately with no open transaction")
     @MainActor func guiConfigStateAppliesOutOfBand() {
-        let (dispatcher, gui) = makeDispatcher()
+        let (dispatcher, _) = makeDispatcher()
         var requested: [UInt32] = []
         dispatcher.onRequestKeyframe = { requested.append($0) }
 

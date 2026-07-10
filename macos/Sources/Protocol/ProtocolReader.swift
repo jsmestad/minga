@@ -13,10 +13,13 @@ import Synchronization
 /// Defaults to stdin (BEAM is parent, spawned us). In bundle mode, the
 /// BEAMProcessManager passes the child process's stdout pipe instead.
 final class ProtocolReader: @unchecked Sendable {
+    private static let defaultMaxPayloadLength = 64 * 1_048_576
+
     private var thread: Thread?
     private let input: FileHandle
     private let handler: @Sendable (Data) -> Void
     private let onDisconnect: @Sendable () -> Void
+    private let maxPayloadLength: Int
     private let running = Mutex(false)
 
     /// Create a reader that calls `handler` with each payload on a background thread.
@@ -27,9 +30,11 @@ final class ProtocolReader: @unchecked Sendable {
     ///   - handler: Called with each decoded payload.
     ///   - onDisconnect: Called when the input stream closes.
     init(input: FileHandle = .standardInput,
+         maxPayloadLength: Int = ProtocolReader.defaultMaxPayloadLength,
          handler: @escaping @Sendable (Data) -> Void,
          onDisconnect: @escaping @Sendable () -> Void) {
         self.input = input
+        self.maxPayloadLength = maxPayloadLength
         self.handler = handler
         self.onDisconnect = onDisconnect
     }
@@ -73,9 +78,10 @@ final class ProtocolReader: @unchecked Sendable {
             let length = Int(lenData[0]) << 24 | Int(lenData[1]) << 16 |
                          Int(lenData[2]) << 8 | Int(lenData[3])
 
-            guard length > 0, length < 1_048_576 else {
-                // Sanity check: skip zero-length or absurdly large messages.
-                continue
+            guard length > 0, length <= maxPayloadLength else {
+                os_log(.error, log: protocolLog, "Protocol payload length %{public}d outside valid range 1...%{public}d; disconnecting to avoid stream desync", length, maxPayloadLength)
+                onDisconnect()
+                return
             }
 
             // Read the payload.

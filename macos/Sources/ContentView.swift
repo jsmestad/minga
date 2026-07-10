@@ -3,6 +3,79 @@ import AppKit
 import SwiftUI
 import MingaProtocol
 
+public struct AnchoredOverlayPlacement: Equatable {
+    public let offsetY: CGFloat
+    public let maxHeight: CGFloat
+    public let side: AnchoredOverlaySide
+
+    public var showsAbove: Bool {
+        side == .above
+    }
+
+    public static func resolve(
+        anchorRow: Int,
+        cellHeight: CGFloat,
+        measuredHeight: CGFloat,
+        viewportHeight: CGFloat,
+        desiredMaxHeight: CGFloat,
+        preferredSide: AnchoredOverlaySide,
+        gap: CGFloat,
+        bottomInset: CGFloat
+    ) -> AnchoredOverlayPlacement {
+        let anchorTop = CGFloat(anchorRow) * cellHeight
+        let anchorBottom = anchorTop + cellHeight
+        let availableAbove = max(anchorTop - gap, 0)
+        let availableBelow = max(viewportHeight - bottomInset - anchorBottom - gap, 0)
+        let candidateHeight = measuredHeight > 0 ? min(measuredHeight, desiredMaxHeight) : desiredMaxHeight
+        let side = resolveSide(preferredSide: preferredSide, candidateHeight: candidateHeight, availableAbove: availableAbove, availableBelow: availableBelow)
+        let availableOnSide = side == .above ? availableAbove : availableBelow
+        let maxHeight = min(desiredMaxHeight, max(availableOnSide, 1))
+        let renderedHeight = min(measuredHeight > 0 ? measuredHeight : maxHeight, maxHeight)
+        let offsetY = side == .above ? max(anchorTop - gap - renderedHeight, 0) : anchorBottom + gap
+
+        return AnchoredOverlayPlacement(offsetY: offsetY, maxHeight: maxHeight, side: side)
+    }
+
+    public static func offsetX(
+        anchorCol: Int,
+        cellWidth: CGFloat,
+        measuredWidth: CGFloat,
+        viewportWidth: CGFloat,
+        gutterPad: CGFloat,
+        rightInset: CGFloat = 8
+    ) -> CGFloat {
+        let rawX = CGFloat(anchorCol) * cellWidth + gutterPad
+        let maxX = max(viewportWidth - measuredWidth - rightInset, 0)
+        return min(rawX, maxX)
+    }
+
+    private static func resolveSide(
+        preferredSide: AnchoredOverlaySide,
+        candidateHeight: CGFloat,
+        availableAbove: CGFloat,
+        availableBelow: CGFloat
+    ) -> AnchoredOverlaySide {
+        switch preferredSide {
+        case .above:
+            if availableAbove >= candidateHeight {
+                return .above
+            }
+            if availableBelow >= candidateHeight {
+                return .below
+            }
+        case .below:
+            if availableBelow >= candidateHeight {
+                return .below
+            }
+            if availableAbove >= candidateHeight {
+                return .above
+            }
+        }
+
+        return availableAbove >= availableBelow ? .above : .below
+    }
+}
+
 /// Preference key for measuring the right pane's total height.
 /// Used by BottomPanelView to cap its height at a fraction of
 /// available space without needing a greedy GeometryReader.
@@ -22,6 +95,175 @@ private struct PaneWidthKey: PreferenceKey {
     static let defaultValue: CGFloat = 800
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
+    }
+}
+
+private struct EditorOverlayHost: View {
+    let gui: GUIState
+    let geometry: EditorGeometry
+    let viewportHeight: CGFloat
+    let encoder: InputEncoder?
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            if gui.signatureHelpState.visible {
+                anchoredOverlay(row: gui.signatureHelpState.anchorRow, col: gui.signatureHelpState.anchorCol, preferredSide: .above, maxHeight: 220) { _ in
+                    SignatureHelpOverlay(state: gui.signatureHelpState)
+                        .allowsHitTesting(false)
+                }
+                .zIndex(10)
+            }
+
+            if gui.hoverPopupState.visible {
+                anchoredOverlay(row: gui.hoverPopupState.anchorRow, col: gui.hoverPopupState.anchorCol, preferredSide: .above, maxHeight: 300) { _ in
+                    HoverPopupOverlay(state: gui.hoverPopupState, encoder: encoder)
+                        .allowsHitTesting(true)
+                }
+                .zIndex(20)
+            }
+
+            if gui.completionState.visible {
+                anchoredOverlay(row: gui.completionState.anchorRow, col: gui.completionState.anchorCol, preferredSide: .below, maxHeight: 420, gap: 2) { _ in
+                    CompletionOverlay(state: gui.completionState, encoder: encoder)
+                }
+                .zIndex(30)
+            }
+        }
+    }
+
+    private func anchoredOverlay<Content: View>(
+        row: Int,
+        col: Int,
+        preferredSide: AnchoredOverlaySide,
+        maxHeight: CGFloat,
+        gap: CGFloat = 4,
+        @ViewBuilder content: @escaping (AnchoredOverlayPlacement) -> Content
+    ) -> some View {
+        AnchoredEditorOverlay(
+            anchorRow: row,
+            anchorCol: col,
+            cellWidth: geometry.cellWidth,
+            cellHeight: geometry.cellHeight,
+            viewportHeight: viewportHeight,
+            viewportWidth: geometry.viewportWidth,
+            gutterPad: anchoredOverlayGutterPad(col: col),
+            desiredMaxHeight: maxHeight,
+            preferredSide: preferredSide,
+            gap: gap,
+            content: content
+        )
+    }
+
+    private func anchoredOverlayGutterPad(col: Int) -> CGFloat {
+        if geometry.gutterCol > 0 {
+            return col >= geometry.gutterCol ? geometry.gutterLeftMargin + geometry.gutterRightGap : geometry.gutterLeftMargin
+        }
+
+        return 0
+    }
+}
+
+private struct AnchoredEditorOverlay<Content: View>: View {
+    let anchorRow: Int
+    let anchorCol: Int
+    let cellWidth: CGFloat
+    let cellHeight: CGFloat
+    let viewportHeight: CGFloat
+    let viewportWidth: CGFloat
+    let gutterPad: CGFloat
+    let desiredMaxHeight: CGFloat
+    let preferredSide: AnchoredOverlaySide
+    let gap: CGFloat
+    let bottomInset: CGFloat
+    let content: (AnchoredOverlayPlacement) -> Content
+
+    @State private var measuredHeight: CGFloat = 0
+    @State private var measuredWidth: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    init(
+        anchorRow: Int,
+        anchorCol: Int,
+        cellWidth: CGFloat,
+        cellHeight: CGFloat,
+        viewportHeight: CGFloat,
+        viewportWidth: CGFloat,
+        gutterPad: CGFloat,
+        desiredMaxHeight: CGFloat,
+        preferredSide: AnchoredOverlaySide,
+        gap: CGFloat,
+        bottomInset: CGFloat = 8,
+        @ViewBuilder content: @escaping (AnchoredOverlayPlacement) -> Content
+    ) {
+        self.anchorRow = anchorRow
+        self.anchorCol = anchorCol
+        self.cellWidth = cellWidth
+        self.cellHeight = cellHeight
+        self.viewportHeight = viewportHeight
+        self.viewportWidth = viewportWidth
+        self.gutterPad = gutterPad
+        self.desiredMaxHeight = desiredMaxHeight
+        self.preferredSide = preferredSide
+        self.gap = gap
+        self.bottomInset = bottomInset
+        self.content = content
+    }
+
+    private var placement: AnchoredOverlayPlacement {
+        AnchoredOverlayPlacement.resolve(anchorRow: anchorRow, cellHeight: cellHeight, measuredHeight: measuredHeight, viewportHeight: viewportHeight, desiredMaxHeight: desiredMaxHeight, preferredSide: preferredSide, gap: gap, bottomInset: bottomInset)
+    }
+
+    private var offsetX: CGFloat {
+        AnchoredOverlayPlacement.offsetX(anchorCol: anchorCol, cellWidth: cellWidth, measuredWidth: measuredWidth, viewportWidth: viewportWidth, gutterPad: gutterPad)
+    }
+
+    var body: some View {
+        let placement = placement
+        content(placement)
+            .environment(\.anchoredOverlayContext, AnchoredOverlayContext(side: placement.side, maxHeight: placement.maxHeight))
+            .frame(maxHeight: placement.maxHeight)
+            .background(
+                GeometryReader { geo in
+                    Color.clear
+                        .preference(key: AnchoredOverlayHeightKey.self, value: geo.size.height)
+                        .preference(key: AnchoredOverlayWidthKey.self, value: geo.size.width)
+                }
+            )
+            .onPreferenceChange(AnchoredOverlayHeightKey.self) { measuredHeight = $0 }
+            .onPreferenceChange(AnchoredOverlayWidthKey.self) { measuredWidth = $0 }
+            .offset(x: offsetX, y: placement.offsetY)
+            .transition(transition(for: placement.side))
+    }
+
+    private func transition(for side: AnchoredOverlaySide) -> AnyTransition {
+        if reduceMotion {
+            return .opacity.animation(.easeInOut(duration: 0.08))
+        }
+
+        let anchor: UnitPoint = side == .above ? .bottomLeading : .topLeading
+        let motionY: CGFloat = side == .above ? 6 : -6
+
+        return .asymmetric(
+            insertion: .opacity
+                .combined(with: .scale(scale: 0.985, anchor: anchor))
+                .combined(with: .offset(x: 0, y: motionY))
+                .animation(.easeOut(duration: 0.14)),
+            removal: .opacity.animation(.easeIn(duration: 0.08))
+        )
+    }
+}
+
+private struct AnchoredOverlayHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private struct AnchoredOverlayWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
@@ -512,18 +754,6 @@ public struct ContentView<EditorSurface: View>: View {
 
     // MARK: - Editor Surface (Metal + editor-local overlays)
 
-    private func completionOverlayCursor(_ geo: EditorGeometry) -> (row: Int, col: Int, gutterPad: CGFloat) {
-        let row = gui.completionState.anchorRow
-        let col = gui.completionState.anchorCol
-        let gutterPad: CGFloat
-        if geo.gutterCol > 0 {
-            gutterPad = col >= geo.gutterCol ? geo.gutterLeftMargin + geo.gutterRightGap : geo.gutterLeftMargin
-        } else {
-            gutterPad = 0
-        }
-        return (row, col, gutterPad)
-    }
-
     private var editorSurface: some View {
         let geo = editorGeometry()
         return ZStack(alignment: .topLeading) {
@@ -552,48 +782,12 @@ public struct ContentView<EditorSurface: View>: View {
                 )
             }
 
-            // Completion overlay (positioned at cursor)
-            if gui.completionState.visible {
-                let cw = geo.cellWidth
-                let ch = geo.cellHeight
-                let cursor = completionOverlayCursor(geo)
-                let x = CGFloat(cursor.col) * cw + cursor.gutterPad
-                let y = (CGFloat(cursor.row) + 1) * ch
-
-                CompletionOverlay(
-                    state: gui.completionState,
-                    encoder: encoder
-                )
-                .offset(x: x, y: y)
-            }
-
-            // Overlay shared dimensions (computed once for all overlays)
-            let overlayCW = geo.cellWidth
-            let overlayCH = geo.cellHeight
-            let overlayVPW = geo.viewportWidth
-
-            // Signature help overlay (lowest overlay z-order)
-            if gui.signatureHelpState.visible {
-                SignatureHelpOverlay(
-                    state: gui.signatureHelpState,
-                    cellWidth: overlayCW,
-                    cellHeight: overlayCH,
-                    viewportHeight: rightPaneHeight,
-                    viewportWidth: overlayVPW
-                )
-            }
-
-            // Hover popup overlay (above signature help, below completion)
-            if gui.hoverPopupState.visible {
-                HoverPopupOverlay(
-                    state: gui.hoverPopupState,
-                    cellWidth: overlayCW,
-                    cellHeight: overlayCH,
-                    viewportHeight: rightPaneHeight,
-                    viewportWidth: overlayVPW,
-                    encoder: encoder
-                )
-            }
+            EditorOverlayHost(
+                gui: gui,
+                geometry: geo,
+                viewportHeight: rightPaneHeight,
+                encoder: encoder
+            )
 
             // Extension-registered overlays (positioned per window on the editor surface)
             extensionOverlayLayer
@@ -870,10 +1064,13 @@ public struct ContentView<EditorSurface: View>: View {
         )
 
         // Frame-transaction resync hint (#2219 child D). Bottom-trailing badge
-        // shown while a keyframe is in flight after an invalidation; the editor
-        // keeps showing the last good frame underneath.
+        // shown while a keyframe is in flight after an invalidation; the editor keeps showing the last good frame underneath.
+        // If recovery stalls, the badge becomes a small manual retry control.
         ResyncOverlay(
-            state: gui.resyncState
+            state: gui.resyncState,
+            onRetry: { lastGoodFrameSeq in
+                encoder?.sendRequestKeyframe(lastGoodFrameSeq: lastGoodFrameSeq)
+            }
         )
 
         // Startup overlay: covers the empty Metal framebuffer with a

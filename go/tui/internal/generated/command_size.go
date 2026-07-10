@@ -34,9 +34,9 @@ func CommandSize(payload []byte) (int, CommandSizeStatus) {
 		return fixedCommandSize(payload, 9)
 	case OPSetTitle, OPProtocolError, OPClipboardWrite, OPGuiIndentGuides, OPGuiLineSpacing, OPGuiFileTreeSelection, OPGuiCursorAnimation, OPGuiHoverAction, OPGuiConfigState, OPGuiWorkspaces, OPGuiNotifications, OPGuiEditTimeline, OPGuiExtensionOverlay, OPGuiExtensionPanel, OPGuiSearchState, OPGuiEmptyState:
 		return len16CommandSize(payload)
-	case OPGuiAgentTranscript, OPGuiFileTree, OPGuiObservatory, OPGuiSidebars, OPGuiExtensionRuntime:
+	case OPGuiWindowContent, OPGuiAgentTranscript, OPGuiFileTree, OPGuiObservatory, OPGuiSidebars, OPGuiExtensionRuntime:
 		return len32CommandSize(payload)
-	case OPGuiStatusBar, OPGuiGutter, OPGuiWindowContent, OPGuiWindowViewportDelta, OPGuiWindowRowsDelta, OPGuiSurfaceLayout:
+	case OPGuiStatusBar, OPGuiGutter, OPGuiWindowViewportDelta, OPGuiWindowRowsDelta, OPGuiSurfaceLayout:
 		return sectionedCommandSize(payload)
 	case OPSetFont, OPSetFontFallback, OPRegisterFont, OPGuiTabBar, OPGuiWhichKey, OPGuiCompletion, OPGuiTheme, OPGuiBreadcrumb, OPGuiPicker, OPGuiAgentChat, OPGuiBottomPanel, OPGuiPickerPreview, OPGuiToolManager, OPGuiMinibuffer, OPGuiHoverPopup, OPGuiSignatureHelp, OPGuiFloatPopup, OPGuiSplitSeparators, OPGuiGitStatus, OPGuiAgentContext, OPGuiChangeSummary, OPGuiWindowOverlayDelta:
 		return 0, CommandSizeCustom

@@ -157,12 +157,12 @@ defmodule MingaEditor.HoverPopup do
   end
 
   @doc """
-  Returns the popup's outer rect `{row, col, width, height}` in screen cells.
+  Returns the popup's conservative outer rect `{row, col, width, height}` in screen cells.
 
-  This is the same box `render/3` paints into (border, anchor placement, and
-  viewport clamping included), so the `SurfaceRegistry` can register the hover
-  surface's rect from the BEAM's own geometry instead of inventing one. Returns
-  `nil` when there is no content to place.
+  Native GUI frontends render hover from semantic opcode content and own final
+  pixel placement. This rect exists for BEAM-routed cell input, focus-tree
+  containment, and terminal-style fallback geometry. Returns `nil` when there is
+  no content to place.
   """
   @spec box(t(), {pos_integer(), pos_integer()}, map()) :: MingaEditor.Layout.rect() | nil
   def box(%__MODULE__{content_lines: []}, _viewport, _theme), do: nil
@@ -183,13 +183,17 @@ defmodule MingaEditor.HoverPopup do
     {content_draws, content_width, content_height} =
       build_content_draws(popup.content_lines, popup.scroll_offset, vp_cols, theme)
 
-    # Size the window to fit content, clamped to limits
+    # Size the window to fit content, clamped to limits.
     width = content_width |> max(@min_width) |> min(@max_width) |> min(vp_cols - 2)
-    height = content_height |> min(@max_height) |> min(vp_rows - 4)
+    desired_inner_height = content_height |> min(@max_height) |> min(vp_rows - 4)
+    desired_total_height = desired_inner_height + 2
 
-    # Add 2 for border
+    {side, total_height} =
+      place_without_anchor_overlap(desired_total_height, popup.anchor_row, vp_rows)
+
+    height = max(total_height - 2, 1)
+
     total_width = width + 2
-    total_height = height + 2
 
     # Scrollbar indicator in footer
     total_lines = Enum.count(popup.content_lines)
@@ -209,13 +213,43 @@ defmodule MingaEditor.HoverPopup do
       content: content_draws,
       width: {:cols, total_width},
       height: {:rows, total_height},
-      position: {:anchor, popup.anchor_row, popup.anchor_col, :above},
+      position: {:anchor, popup.anchor_row, popup.anchor_col, side},
       border: border_style,
       footer: footer,
       theme: popup_theme,
       viewport: viewport
     }
   end
+
+  @spec place_without_anchor_overlap(pos_integer(), non_neg_integer(), pos_integer()) ::
+          {:above | :below, pos_integer()}
+  defp place_without_anchor_overlap(desired_height, anchor_row, vp_rows) do
+    rows_above = anchor_row
+    rows_below = max(vp_rows - anchor_row - 1, 0)
+    side = choose_hover_side(desired_height, rows_above, rows_below)
+
+    available_rows =
+      case side do
+        :above -> rows_above
+        :below -> rows_below
+      end
+
+    {side, min(desired_height, max(available_rows, 1))}
+  end
+
+  @spec choose_hover_side(pos_integer(), non_neg_integer(), non_neg_integer()) :: :above | :below
+  defp choose_hover_side(desired_height, rows_above, _rows_below)
+       when rows_above >= desired_height,
+       do: :above
+
+  defp choose_hover_side(desired_height, _rows_above, rows_below)
+       when rows_below >= desired_height,
+       do: :below
+
+  defp choose_hover_side(_desired_height, rows_above, rows_below) when rows_above >= rows_below,
+    do: :above
+
+  defp choose_hover_side(_desired_height, _rows_above, _rows_below), do: :below
 
   @spec build_content_draws(
           [Markdown.parsed_line()],

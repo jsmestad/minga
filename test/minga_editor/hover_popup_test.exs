@@ -217,6 +217,21 @@ defmodule MingaEditor.HoverPopupTest do
 
       assert row >= 0
     end
+
+    test "places tall content below near the upper viewport without covering anchor row" do
+      popup = HoverPopup.new(tall_hover_text(), 7, 10)
+      {row, _col, _w, h} = HoverPopup.box(popup, @viewport, @theme)
+
+      assert row > 7
+      assert row + h <= 24
+    end
+
+    test "places tall content above near the lower viewport without covering anchor row" do
+      popup = HoverPopup.new(tall_hover_text(), 18, 10)
+      {row, _col, _w, h} = HoverPopup.box(popup, @viewport, @theme)
+
+      assert row + h <= 18
+    end
   end
 
   describe "with_open_action/2 and open_action_name/1" do
@@ -280,5 +295,10 @@ defmodule MingaEditor.HoverPopupTest do
     Enum.map_join(lines, "\n", fn {segments, _type} ->
       Enum.map_join(segments, "", fn {text, _style} -> text end)
     end)
+  end
+
+  defp tall_hover_text do
+    1..40
+    |> Enum.map_join("\n", &"line #{&1}")
   end
 end

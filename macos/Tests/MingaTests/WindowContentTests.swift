@@ -145,11 +145,15 @@ struct WindowContentBuilder {
         }
 
         var data = Data()
-        data.append(OP_GUI_WINDOW_CONTENT)
-        data.append(UInt8(sections.count))
+        var payload = Data()
+        payload.append(UInt8(sections.count))
         for section in sections {
-            data.append(contentsOf: section)
+            payload.append(contentsOf: section)
         }
+
+        data.append(OP_GUI_WINDOW_CONTENT)
+        appendU32(&data, UInt32(payload.count))
+        data.append(payload)
         return data
     }
 
@@ -219,7 +223,7 @@ struct WindowContentBuilder {
     private func buildSection(_ id: UInt8, _ payload: Data) -> Data {
         var section = Data()
         section.append(id)
-        appendU16(&section, UInt16(payload.count))
+        appendU32(&section, UInt32(payload.count))
         section.append(payload)
         return section
     }

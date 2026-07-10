@@ -50,7 +50,7 @@ defmodule MingaEditor.RenderModel.UI.FloatPopupBuilderTest do
       refute model.visible?
     end
 
-    test "builds float popup from window buffer using resolved interior dimensions" do
+    test "builds float popup from window buffer using preferred size hints without trimming content" do
       ctx = build_minimal_context(%{})
 
       buffer =
@@ -70,7 +70,7 @@ defmodule MingaEditor.RenderModel.UI.FloatPopupBuilderTest do
       assert model.title == "*Float*"
       assert model.width == 8
       assert model.height == 4
-      assert model.lines == ["abcdef", "second"]
+      assert model.lines == ["abcdefghi", "second line", "third"]
     end
   end
 

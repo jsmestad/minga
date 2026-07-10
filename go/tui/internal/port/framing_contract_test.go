@@ -77,6 +77,11 @@ var minimalBodyOverrides = map[byte][]byte{
 	// consistent inner text_len, so an all-zero len16 body is rejected. Minimal:
 	// opcode + payload_len(2)=3 + (text_len(2)=0, one filler byte) = 6 bytes.
 	generated.OPClipboardWrite: {generated.OPClipboardWrite, 0x00, 0x03, 0x00, 0x00, 0x00},
+	// gui_window_content (len32): full keyframes wrap the section table in an
+	// outer u32 payload length, and the decoder requires the inner payload to at
+	// least contain section_count. Minimal: opcode + payload_len(4)=1 +
+	// section_count(1)=0.
+	generated.OPGuiWindowContent: {generated.OPGuiWindowContent, 0x00, 0x00, 0x00, 0x01, 0x00},
 	// gui_extension_runtime (len32): decodeExtensionRuntime reads two string16
 	// fields (extension_id, channel) inside payload_len, so payload_len must be >= 4
 	// for two zero-length strings. Minimal: opcode + payload_len(4)=4 + four zero

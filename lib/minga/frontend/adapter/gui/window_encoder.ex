@@ -116,7 +116,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
         }
 
   @doc """
-  Encodes a `RenderWindow` into the 0x80 wire format (sectioned).
+  Encodes a `RenderWindow` into the 0x80 wire format (len32 sectioned).
 
   Returns a single binary suitable for sending via `MingaEditor.Frontend.send_commands/2`.
   """
@@ -199,15 +199,21 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
         sw.scroll_left::16, sw.content_epoch::32>>
 
     rows_payload = IO.iodata_to_binary([<<row_count::16>> | encode_rows(sw.rows)])
-    header_section = encode_section(@section_wc_header, header_payload)
-    rows_section = encode_section(@section_wc_rows, rows_payload)
-    overlay = overlay_sections(sw)
+    header_section = encode_window_content_section(@section_wc_header, header_payload)
+    rows_section = encode_window_content_section(@section_wc_rows, rows_payload)
+    overlay = overlay_sections(sw, &encode_window_content_section/2)
 
     sections =
       [header_section, rows_section | overlay.sections] ++
         overlay.geometry ++ overlay.cursorline ++ overlay.scroll_presentation
 
-    binary = IO.iodata_to_binary([<<@op_gui_window_content, Enum.count(sections)::8>> | sections])
+    sections_payload = IO.iodata_to_binary([<<Enum.count(sections)::8>> | sections])
+
+    binary =
+      IO.iodata_to_binary([
+        <<@op_gui_window_content, byte_size(sections_payload)::32>>,
+        sections_payload
+      ])
 
     metrics = %{
       row_bytes: byte_size(rows_section),
@@ -217,7 +223,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
       gutter_bytes: 0,
       annotation_bytes: byte_size(overlay.annotations),
       metadata_bytes:
-        2 + byte_size(header_section) + IO.iodata_length(overlay.geometry) +
+        6 + byte_size(header_section) + IO.iodata_length(overlay.geometry) +
           IO.iodata_length(overlay.cursorline) + IO.iodata_length(overlay.scroll_presentation)
     }
 
@@ -247,7 +253,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
 
     header_section = encode_section(@section_wc_header, header_payload)
     rows_section = encode_section(@section_wc_rows, rows_payload)
-    overlay = overlay_sections(sw)
+    overlay = overlay_sections(sw, &encode_section/2)
 
     [header_section, rows_section | overlay.sections] ++
       overlay.geometry ++ overlay.cursorline ++ overlay.scroll_presentation
@@ -264,39 +270,44 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
     end)
   end
 
-  defp overlay_sections(%RenderWindow{} = sw) do
+  defp overlay_sections(%RenderWindow{} = sw, section_encoder) do
     selection =
-      encode_section(@section_wc_selection, IO.iodata_to_binary(encode_selection(sw.selection)))
+      section_encoder.(@section_wc_selection, IO.iodata_to_binary(encode_selection(sw.selection)))
 
     search =
-      encode_section(
+      section_encoder.(
         @section_wc_search,
         IO.iodata_to_binary(encode_search_matches(sw.search_matches))
       )
 
     diagnostics =
-      encode_section(
+      section_encoder.(
         @section_wc_diagnostics,
         IO.iodata_to_binary(encode_diagnostic_ranges(sw.diagnostic_ranges))
       )
 
     highlights =
-      encode_section(
+      section_encoder.(
         @section_wc_highlights,
         IO.iodata_to_binary(encode_document_highlights(sw.document_highlights))
       )
 
     annotations =
-      encode_section(
+      section_encoder.(
         @section_wc_annotations,
         IO.iodata_to_binary(encode_annotations(sw.annotations))
       )
 
-    geometry = geometry_sections(encode_geometry(sw.geometry))
-    cursorline = cursorline_sections(encode_cursorline_section(sw.cursorline, sw.rect))
+    geometry = geometry_sections(encode_geometry(sw.geometry), section_encoder)
+
+    cursorline =
+      cursorline_sections(encode_cursorline_section(sw.cursorline, sw.rect), section_encoder)
 
     scroll_presentation =
-      scroll_presentation_sections(encode_scroll_presentation(ScrollPresentation.from_window(sw)))
+      scroll_presentation_sections(
+        encode_scroll_presentation(ScrollPresentation.from_window(sw)),
+        section_encoder
+      )
 
     %{
       sections: [selection, search, diagnostics, highlights, annotations],
@@ -321,19 +332,28 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
     <<section_id::8, byte_size(payload)::16, payload::binary>>
   end
 
-  @spec geometry_sections(binary() | nil) :: [binary()]
-  defp geometry_sections(nil), do: []
-  defp geometry_sections(payload), do: [encode_section(@section_wc_geometry, payload)]
+  @spec encode_window_content_section(non_neg_integer(), binary()) :: binary()
+  defp encode_window_content_section(section_id, payload) do
+    <<section_id::8, byte_size(payload)::32, payload::binary>>
+  end
 
-  @spec cursorline_sections(binary() | nil) :: [binary()]
-  defp cursorline_sections(nil), do: []
-  defp cursorline_sections(payload), do: [encode_section(@section_wc_cursorline, payload)]
+  @spec geometry_sections(binary() | nil, function()) :: [binary()]
+  defp geometry_sections(nil, _section_encoder), do: []
 
-  @spec scroll_presentation_sections(binary() | nil) :: [binary()]
-  defp scroll_presentation_sections(nil), do: []
+  defp geometry_sections(payload, section_encoder),
+    do: [section_encoder.(@section_wc_geometry, payload)]
 
-  defp scroll_presentation_sections(payload),
-    do: [encode_section(@section_wc_scroll_presentation, payload)]
+  @spec cursorline_sections(binary() | nil, function()) :: [binary()]
+  defp cursorline_sections(nil, _section_encoder), do: []
+
+  defp cursorline_sections(payload, section_encoder),
+    do: [section_encoder.(@section_wc_cursorline, payload)]
+
+  @spec scroll_presentation_sections(binary() | nil, function()) :: [binary()]
+  defp scroll_presentation_sections(nil, _section_encoder), do: []
+
+  defp scroll_presentation_sections(payload, section_encoder),
+    do: [section_encoder.(@section_wc_scroll_presentation, payload)]
 
   @spec encode_geometry(PaneGeometry.t() | nil) :: binary() | nil
   defp encode_geometry(nil), do: nil

@@ -60,12 +60,18 @@ defmodule Minga.Conformance.AgentTranscriptCorpusTest do
   end
 
   defp apply_frame(%{ids: ids} = store, %{mode: @mode_append} = frame) do
-    kept = ids |> Enum.drop(frame.trim_front) |> Enum.take(frame.base)
+    kept = Enum.slice(ids, frame.trim_front, frame.base)
 
-    merged =
-      Enum.reduce(frame.entries, kept, fn {id, _body}, acc ->
-        if id in acc, do: acc, else: acc ++ [id]
+    {new_ids, _seen} =
+      Enum.reduce(frame.entries, {[], MapSet.new(kept)}, fn {id, _body}, {acc, seen} ->
+        if MapSet.member?(seen, id) do
+          {acc, seen}
+        else
+          {[id | acc], MapSet.put(seen, id)}
+        end
       end)
+
+    merged = kept ++ Enum.reverse(new_ids)
 
     %{store | epoch: (frame.epoch != 0 && frame.epoch) || store.epoch, ids: merged}
   end

@@ -331,6 +331,48 @@ struct WindowContentFrameMetricsTests {
         #expect(demand >= 2 + 1 + 4 + 1 + 32)
     }
 
+    @Test("Atlas slot demand ignores retained rows outside the visible pane")
+    func atlasDemandIgnoresOffscreenRecoveryRows() {
+        let rows = (0..<5_000).map { index in
+            GUIVisualRow(rowType: .normal, rowId: UInt64(index + 1), bufLine: UInt32(index), contentHash: UInt32(index), text: "row", spans: [])
+        }
+
+        let geometry = GUIPaneGeometry(
+            windowId: 1,
+            totalRect: GUICellRect(row: 0, col: 0, width: 80, height: 40),
+            contentRect: GUICellRect(row: 0, col: 0, width: 80, height: 40),
+            textRect: GUICellRect(row: 0, col: 0, width: 80, height: 40),
+            gutterRect: GUICellRect(row: 0, col: 0, width: 0, height: 40),
+            clipRect: GUICellRect(row: 0, col: 0, width: 80, height: 40),
+            viewport: GUIViewportSummary(top: 0, left: 0, rows: 40, cols: 80, totalLines: 5_000, visualRowOffset: 0, totalVisualRows: 5_000),
+            gutterMetrics: GUIGutterMetrics(lineNumberWidth: 0, signColWidth: 0),
+            hitRegions: []
+        )
+
+        let content = GUIWindowContent(
+            windowId: 1, fullRefresh: true, cursorRow: 0, cursorCol: 0, cursorShape: .block,
+            rows: rows, selection: nil, searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [], paneGeometry: geometry
+        )
+        let frameState = FrameState(cols: 80, rows: 40)
+
+        let demand = CoreTextMetalRenderer.atlasSlotDemand(frameState: frameState, windowContents: [1: content])
+
+        #expect(demand < 5_000)
+        #expect(demand >= 40)
+    }
+
+    @Test("LineTextureAtlas caps capacity to Metal texture height")
+    @MainActor func lineTextureAtlasCapsCapacityToTextureHeight() {
+        guard let (_, atlas) = makeRendererAndAtlas() else { return }
+        let oversizedSlots = atlas.maxSlotCapacity + 1_000
+
+        atlas.ensureCapacity(maxSlots: oversizedSlots, width: 1024)
+
+        #expect(atlas.slotCount == atlas.maxSlotCapacity)
+        #expect(atlas.atlasHeight <= LineTextureAtlas.maxTextureDimension)
+    }
+
     @Test("FrameMetrics reset clears all counters")
     func frameMetricsReset() {
         var metrics = FrameMetrics(bufferRowsRasterized: 1, bufferRowsReused: 2, otherTexturesRasterized: 3, otherTexturesReused: 4, textureUploads: 5, textureUploadBytes: 6, atlasNewKeys: 7, atlasHashChanges: 8, atlasEvictions: 9)

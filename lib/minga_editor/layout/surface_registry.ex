@@ -16,31 +16,33 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
   ## The input rule (design of record, epic #2330)
 
   Clients resolve clicks on content they render and send semantic intents
-  (`gui_actions`); the BEAM owns placement, stacking, and containment for
-  registry-placed surfaces. That is the governing line for all surface input.
+  (`gui_actions`); the BEAM owns semantic stacking and conservative cell-grid
+  containment for registry-placed surfaces. Native GUI frontends own final pixel
+  placement for popups/widgets whose size depends on native measurement. That is
+  the governing line for all surface input.
 
   A frontend hit-tests its own rendered content (a completion row, a
   notification action, an observatory node) and emits an intent like
   "item N clicked", exactly as SwiftUI's native hit-test already does. The BEAM
   does not re-derive what a click means on rendered content. What it owns is
-  structure: which rect a surface occupies (placements), which surface wins when
-  rects overlap (z-order arbitration, since stacking depends on editor state only
-  the BEAM has), and containment, so a click that misses every interactive
-  element of a registry-placed surface is swallowed instead of falling through to
-  the buffer underneath (`MingaEditor.Input.OverlaySink`). The picker is the one
-  documented exception: it predates this rule and stays BEAM-resolved as shipped.
+  structure: which semantic surface wins when surfaces overlap (z-order
+  arbitration, since stacking depends on editor state only the BEAM has), and
+  conservative containment for BEAM-routed cell input so a click that misses
+  every interactive element of a registry-placed surface is swallowed instead of
+  falling through to the buffer underneath (`MingaEditor.Input.OverlaySink`).
+  The picker is the one documented exception: it predates this rule and stays
+  BEAM-resolved as shipped.
 
   ## One source, derived from the focus tree
 
   The registry is built by flattening the existing `MingaEditor.FocusTree`. The
-  focus tree is already the BEAM's authority for mouse routing: it carries the
+  focus tree is the BEAM's authority for cell-grid mouse routing: it carries the
   per-frame `Layout` rects plus the single active overlay, with children stored
   in rendered z-order (back to front). By projecting that same tree into
   placement entries, the registry rect for every surface is, by construction,
-  the exact rect the focus tree (and therefore every hit-test that routes
-  through it) uses. That is the behaviour-neutrality guarantee the epic asks
-  for: registry rect == the rect each handler previously computed, because both
-  read the same tree.
+  the same conservative cell rect the focus tree uses. Native GUI frontends may
+  realize a different pixel rect for semantic popups after measuring native
+  content.
 
   ## Scope honesty: single active overlay
 
@@ -53,20 +55,23 @@ defmodule MingaEditor.Layout.SurfaceRegistry do
 
   Enumeration history (#2268 -> #2281). The Go compositor's `overlayLines()` chain
   once stacked surfaces that were not focus-tree nodes via a hand-ordered rank
-  table. That table is now gone: every overlay surface is a focus-tree node with a
-  BEAM-authoritative rect.
+  table. That table is now gone: every overlay surface is a focus-tree node with
+  a BEAM-owned semantic z band and conservative cell rect.
 
-  * **Cursor-anchored popups: hover popup, signature help.** Both are floating
-    popups whose exact on-screen box the BEAM computes for layout
+  * **Cursor-anchored popups: hover popup, signature help.** Both are semantic
+    popups whose BEAM rect is a conservative cell-grid containment/fallback rect
     (`HoverPopup.box/3`/`SignatureHelp.box/3`, driven by `FloatingWindow`).
-    `FocusTree.add_floating_overlays/2` adds them as overlay nodes from
-    `shell_state`; they occupy the `@z_floating_overlay` region (hover 290 >
-    signature help 280).
+    Native GUI frontends receive dedicated semantic opcodes and own final pixel
+    placement. `FocusTree.add_floating_overlays/2` adds them as overlay nodes
+    from `shell_state`; they occupy the `@z_floating_overlay` region (hover 290
+    > signature help 280).
 
   * **Footer-band secondary overlays (#2281): float popup, agent context, tool
     manager, extension panel, observatory, edit timeline, notifications, extension
-    overlay.** The owner ruled these mouse-driven (#2330), so the BEAM owning their
-    footer-band geometry is now the *designed* layout. `FocusTree.add_footer_band_overlays/3`
+    overlay.** The owner ruled these mouse-driven (#2330), so the BEAM owns their
+    semantic footer-band z and conservative cell containment. Native GUI
+    frontends can still measure rich content inside those bands.
+    `FocusTree.add_footer_band_overlays/3`
     adds each visible one (per `MingaEditor.Layout.FooterOverlays`) as an overlay
     node with a bottom-anchored full-width rect from `MingaEditor.Layout.OverlayBand`
     (porting the Go `maxOverlayHeight` clamp). They carry the exact historical

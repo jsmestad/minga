@@ -718,11 +718,11 @@ Mode values:
 
 `cursor_pos` is the 0-indexed character position within `input` for the beam cursor. `0xFFFF` means no cursor (prompt-only modes 5-9). `context` is right-aligned supplementary text. `match_score` is 0-255 fuzzy match quality. `candidate_count == 0` naturally represents "input visible, no completions."
 
-### 0x80 — gui_window_content (sectioned format)
+### 0x80 — gui_window_content (len32 sectioned format)
 
 Semantic rendering data for a buffer window. Replaces draw_text commands for buffer content. The BEAM pre-resolves all layout (word wrap, folding, virtual text splicing, conceal ranges) and all styling (syntax highlighting colors). The frontend renders directly from this data via CoreText, with selection/search/diagnostics as overlay quads (not baked into text colors).
 
-A full 0x80 message is sent for the first frame, epoch changes, full refreshes, and recovery frames. Cursor-only frames may use `gui_window_overlay_delta` (0xA0), while viewport and visible-row snapshots may use 0xA1 or 0xA2. Agent chat windows do not use this opcode. Uses sectioned envelope: `opcode(1) + section_count(1) + sections...`.
+A full 0x80 message is sent for the first frame, epoch changes, full refreshes, and recovery frames. Cursor-only frames may use `gui_window_overlay_delta` (0xA0), while viewport and visible-row snapshots may use 0xA1 or 0xA2. Agent chat windows do not use this opcode. Uses len32 command framing and u32 section lengths: `opcode(1) + payload_len(4) + section_count(1) + sections...`. Each section is `section_id(1) + section_len(4) + payload(section_len)`.
 
 | Section ID | Name | Content |
 |-----------|------|--------|
@@ -738,7 +738,10 @@ A full 0x80 message is sent for the first frame, epoch changes, full refreshes, 
 | 0x0A | ScrollPresentation | metadata for safe client-local presentation scrolling and reconciliation |
 
 ```
-opcode(1) + section_count(1) + sections...
+opcode(1) + payload_len(4) + section_count(1) + sections...
+
+Each section:
+  section_id(1) + section_len(4) + payload(section_len)
 
 Header section:
   window_id(2) + flags(1) + cursor_row(2) + cursor_col(2) + cursor_shape(1) + scroll_left(2) + content_epoch(4)

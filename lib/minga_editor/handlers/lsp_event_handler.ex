@@ -136,6 +136,23 @@ defmodule MingaEditor.Handlers.LspEventHandler do
   defp dispatch_lsp_response({:hover_mouse, row, col}, state, result),
     do: LspActions.handle_hover_mouse_response(state, result, row, col)
 
+  defp dispatch_lsp_response(
+         {:hover_mouse, row, col, buffer, line, buffer_col, version},
+         state,
+         result
+       ),
+       do:
+         LspActions.handle_hover_mouse_response(
+           state,
+           result,
+           row,
+           col,
+           buffer,
+           line,
+           buffer_col,
+           version
+         )
+
   defp dispatch_lsp_response(:references, state, result),
     do: LspActions.handle_references_response(state, result)
 
