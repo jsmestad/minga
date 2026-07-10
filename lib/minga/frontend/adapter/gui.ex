@@ -84,7 +84,17 @@ defmodule Minga.Frontend.Adapter.GUI do
 
   @doc "Encodes a full GUI render model into Metal-critical and SwiftUI chrome command groups."
   @spec encode(RenderModel.t(), Caches.t()) :: EncodedFrame.t()
-  def encode(%RenderModel{} = model, %Caches{} = caches) do
+  def encode(%RenderModel{} = model, %Caches{} = caches), do: do_encode(model, caches)
+
+  @spec encode_checked(RenderModel.t(), Caches.t()) :: {:ok, EncodedFrame.t()} | {:error, term()}
+  def encode_checked(%RenderModel{} = model, %Caches{} = caches) do
+    {:ok, do_encode(model, caches)}
+  rescue
+    error in Minga.Frontend.Adapter.GUI.EncodingError -> {:error, error}
+  end
+
+  @spec do_encode(RenderModel.t(), Caches.t()) :: EncodedFrame.t()
+  defp do_encode(%RenderModel{} = model, %Caches{} = caches) do
     {window_content_cmds, caches, window_metrics} =
       encode_windows_with_metrics(model.windows, caches)
 
