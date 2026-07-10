@@ -388,6 +388,9 @@ jobs:
       - name: Clear stale Swift build cache
         run: rm -rf macos/DerivedData/Build macos/DerivedData/ModuleCache.noindex macos/DerivedData/SDKStatCaches.noindex
 
+      - name: Verify Release optimization
+        run: scripts/check_macos_release_optimization
+
       - name: Build
         run: |
           cd macos
@@ -405,6 +408,16 @@ jobs:
             -configuration Debug \
             -derivedDataPath DerivedData \
             CODE_SIGNING_ALLOWED=NO
+
+      - name: Release protocol tests
+        run: |
+          cd macos
+          xcodebuild test \
+            -scheme Minga \
+            -configuration Release \
+            -derivedDataPath DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES
 
   swift-integration:
     name: Swift Protocol Integration
