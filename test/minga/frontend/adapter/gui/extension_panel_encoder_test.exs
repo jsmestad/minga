@@ -2,6 +2,7 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionPanelEncoderTest do
   use ExUnit.Case, async: true
 
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.EncodingError
   alias Minga.Frontend.Adapter.GUI.ExtensionPanelEncoder
   alias Minga.RenderModel.UI.ExtensionPanel
   alias Minga.RenderModel.UI.ExtensionPanel.Content.KeyValue
@@ -140,26 +141,17 @@ defmodule Minga.Frontend.Adapter.GUI.ExtensionPanelEncoderTest do
                ProtocolGUI.encode_gui_extension_panels(legacy_panels)
     end
 
-    test "bounds extension-controlled counts and 8-bit strings" do
+    test "rejects extension-controlled counts before truncating the command" do
       long_text = String.duplicate("å", 300)
       panels = for index <- 1..300, do: oversized_panel(index, long_text)
 
-      command = ExtensionPanelEncoder.encode_command(%ExtensionPanel{panels: panels})
+      error =
+        assert_raise EncodingError, fn ->
+          ExtensionPanelEncoder.encode_command(%ExtensionPanel{panels: panels})
+        end
 
-      <<@op_gui_extension_panel, payload_len::16, payload::binary-size(payload_len)>> = command
-      <<panel_count::8, first_panel::binary>> = payload
-
-      <<ext_len::8, ext::binary-size(ext_len), panel_id_len::8,
-        panel_id::binary-size(panel_id_len), title_len::8, title::binary-size(title_len),
-        _rest::binary>> = first_panel
-
-      assert panel_count <= 255
-      assert ext_len <= 255
-      assert panel_id_len <= 255
-      assert title_len <= 255
-      assert String.valid?(ext)
-      assert String.valid?(panel_id)
-      assert String.valid?(title)
+      assert %{command: :gui_extension_panel, field: :panel_count, actual: 300, min: 0, max: 255} =
+               error
     end
   end
 
