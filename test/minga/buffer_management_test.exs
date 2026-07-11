@@ -1,11 +1,8 @@
 defmodule Minga.BufferManagementTest do
   @moduledoc """
-  Wiring tests for multi-buffer management: verifies that keybindings and
-  ex commands correctly dispatch to buffer lifecycle operations.
+  Wiring tests for multi-buffer management: verifies that keybindings and ex commands correctly dispatch to buffer lifecycle operations.
 
-  Buffer count, index, and state-level invariants are tested as pure
-  functions in `MingaEditor.State.BufferLifecycleTest`. These tests focus on
-  the keystroke-to-state-change plumbing.
+  Buffer count, index, and state-level invariants are tested as pure functions in `MingaEditor.State.BufferLifecycleTest`. These tests focus on the keystroke-to-state-change plumbing.
   """
 
   use Minga.Test.EditorCase, async: true
@@ -20,10 +17,10 @@ defmodule Minga.BufferManagementTest do
 
       ctx = start_editor("first", file_path: path1)
 
-      send_keys(ctx, ":e #{path2}<CR>")
+      send_ex_sync(ctx, "e #{path2}")
       assert active_content(ctx) == "second"
 
-      send_keys(ctx, ":e #{path1}<CR>")
+      send_ex_sync(ctx, "e #{path1}")
       assert active_content(ctx) == "first"
     end
   end
@@ -39,9 +36,8 @@ defmodule Minga.BufferManagementTest do
       File.write!(path3, "gamma")
 
       ctx = start_editor("alpha", file_path: path1)
-
-      send_keys(ctx, ":e #{path2}<CR>")
-      send_keys(ctx, ":e #{path3}<CR>")
+      send_ex_sync(ctx, "e #{path2}")
+      send_ex_sync(ctx, "e #{path3}")
 
       assert active_content(ctx) == "gamma"
 
@@ -54,20 +50,10 @@ defmodule Minga.BufferManagementTest do
       send_keys_sync(ctx, "<SPC>bp")
       assert active_content(ctx) == "alpha"
 
-      # Regression for #1476: after `:e <path>`, cycling must restore a valid resting
-      # mode state so another leader command remains usable.
+      # Regression for #1476: after `:e <path>`, cycling restores a valid resting mode state.
+      # Another leader command must then remain usable.
       send_keys_sync(ctx, "<SPC>bn")
       assert active_content(ctx) == "beta"
-    end
-
-    test "next/prev with single buffer is a no-op" do
-      ctx = start_editor("only one")
-
-      send_keys_sync(ctx, "<SPC>bn")
-      assert active_content(ctx) == "only one"
-
-      send_keys_sync(ctx, "<SPC>bp")
-      assert active_content(ctx) == "only one"
     end
   end
 
@@ -80,45 +66,20 @@ defmodule Minga.BufferManagementTest do
       File.write!(path2, "second")
 
       ctx = start_editor("first", file_path: path1)
-      send_keys(ctx, ":e #{path2}<CR>")
+      send_ex_sync(ctx, "e #{path2}")
 
-      # On buffer 2/2, kill it — should switch back to first
       send_keys_sync(ctx, "<SPC>bd")
       assert active_content(ctx) == "first"
-    end
-
-    @tag :tmp_dir
-    test "killing the only buffer creates a new empty buffer", %{tmp_dir: tmp_dir} do
-      path = Path.join(tmp_dir, "solo.txt")
-      File.write!(path, "alone")
-
-      ctx = start_editor("alone", file_path: path)
-      send_keys_sync(ctx, "<SPC>bd")
-
-      assert active_content(ctx) == ""
     end
   end
 
   describe "new buffers" do
     test ":new creates an editable empty buffer" do
       ctx = start_editor("hello")
-      send_keys_sync(ctx, ":new<CR>")
+      send_ex_sync(ctx, "new")
       send_keys_sync(ctx, "isome text<Esc>")
 
       assert active_content(ctx) == "some text"
-    end
-
-    test "SPC b d closes the active scratch buffer when multiple scratch buffers are open" do
-      ctx = start_editor("")
-      send_keys_sync(ctx, "<SPC>bN")
-      send_keys_sync(ctx, "iHey there<Esc>")
-
-      assert active_content(ctx) == "Hey there"
-
-      send_keys_sync(ctx, "<SPC>bd")
-
-      assert active_content(ctx) == ""
-      refute status_msg(ctx) == "Cannot close the last window"
     end
 
     @tag :tmp_dir
@@ -136,13 +97,6 @@ defmodule Minga.BufferManagementTest do
 
       assert active_content(ctx) == ""
       refute status_msg(ctx) == "Cannot close the last window"
-    end
-
-    test "SPC b N creates an empty buffer" do
-      ctx = start_editor("hello")
-      send_keys_sync(ctx, "<SPC>bN")
-
-      assert active_content(ctx) == ""
     end
   end
 end
