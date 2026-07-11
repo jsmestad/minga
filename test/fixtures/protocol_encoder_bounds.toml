@@ -1,0 +1,22 @@
+[[structures]]
+name = "fixture_child"
+fields = [
+  { name = "score", type = "u16" },
+  { name = "label", type = "string8" },
+]
+
+[[command_fields]]
+opcode = "fixture_command"
+fields = [
+  { name = "tiny", type = "u8" },
+  { name = "small", type = "u16" },
+  { name = "color", type = "u24" },
+  { name = "large", type = "u32" },
+  { name = "huge", type = "u64" },
+  { name = "title", type = "string16" },
+  { name = "child", type = "struct", element = "fixture_child" },
+  { name = "children", type = "counted_array", count_type = "u8", element = "fixture_child" },
+]
+conditional_tail = { guard = "tiny == 1", fields = [
+  { name = "conditional_note", type = "string8" },
+] }

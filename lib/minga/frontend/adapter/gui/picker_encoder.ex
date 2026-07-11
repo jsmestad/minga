@@ -67,7 +67,6 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
   defp encode_picker(%Picker{} = model) do
     :gui_picker
     |> Writer.new()
-    |> preflight_picker(model)
     |> Writer.append(<<@op_gui_picker>>)
     |> Writer.uint8(:section_count, 6)
     |> Writer.section16(
@@ -101,83 +100,6 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
       Encode.encode_gui_picker_load_status(to_wire_load_status(model.load_status))
     )
     |> Writer.finish()
-  end
-
-  @spec preflight_picker(Writer.t(), Picker.t()) :: Writer.t()
-  defp preflight_picker(%Writer{} = writer, %Picker{} = model) do
-    writer
-    |> Writer.check_uint8(:visible, 1)
-    |> Writer.check_uint16(:selected_index, model.selected_index)
-    |> Writer.check_uint16(:filtered_count, model.filtered_count)
-    |> Writer.check_uint16(:total_count, model.total_count)
-    |> Writer.check_uint8(:has_preview, if(model.has_preview?, do: 1, else: 0))
-    |> Writer.check_string16(:title, model.title)
-    |> Writer.check_uint16(:marked_count, model.marked_count)
-    |> Writer.check_string16(:query, model.query)
-    |> Writer.check_uint16(:item_count, Enum.count(model.items))
-    |> preflight_items(model.items)
-    |> preflight_action_menu(model.action_menu)
-    |> Writer.check_string16(:mode_prefix, model.mode_prefix)
-    |> preflight_load_status(model.load_status)
-  end
-
-  @spec preflight_items(Writer.t(), [Picker.item()]) :: Writer.t()
-  defp preflight_items(%Writer{} = writer, items) do
-    Enum.reduce(items, writer, &preflight_item/2)
-  end
-
-  @spec preflight_item(Picker.item(), Writer.t()) :: Writer.t()
-  defp preflight_item(item, %Writer{} = writer) do
-    writer
-    |> Writer.check_uint24(:item_icon_color, item.icon_color)
-    |> Writer.check_uint8(:item_flags, item.flags)
-    |> Writer.check_string16(:item_label, item.label)
-    |> Writer.check_string16(:item_description, item.description)
-    |> Writer.check_string16(:item_annotation, item.annotation)
-    |> Writer.check_uint8(:item_match_position_count, Enum.count(item.match_positions))
-    |> preflight_match_positions(item.match_positions)
-  end
-
-  @spec preflight_match_positions(Writer.t(), [non_neg_integer()]) :: Writer.t()
-  defp preflight_match_positions(%Writer{} = writer, positions) do
-    Enum.reduce(positions, writer, fn position, acc ->
-      Writer.check_uint16(acc, :item_match_position, position)
-    end)
-  end
-
-  @spec preflight_action_menu(Writer.t(), ActionMenu.t() | nil) :: Writer.t()
-  defp preflight_action_menu(%Writer{} = writer, nil) do
-    Writer.check_uint8(writer, :action_menu_visible, 0)
-  end
-
-  defp preflight_action_menu(%Writer{} = writer, %ActionMenu{} = menu) do
-    writer
-    |> Writer.check_uint8(:action_menu_visible, 1)
-    |> Writer.check_uint8(:action_menu_selected_index, menu.selected_index)
-    |> Writer.check_uint8(:action_count, Enum.count(menu.actions))
-    |> preflight_actions(menu.actions)
-  end
-
-  @spec preflight_actions(Writer.t(), [String.t()]) :: Writer.t()
-  defp preflight_actions(%Writer{} = writer, actions) do
-    Enum.reduce(actions, writer, fn action, acc ->
-      Writer.check_string16(acc, :action_name, action)
-    end)
-  end
-
-  @spec preflight_load_status(Writer.t(), Picker.load_status()) :: Writer.t()
-  defp preflight_load_status(%Writer{} = writer, :ready) do
-    Writer.check_uint8(writer, :load_status, 0)
-  end
-
-  defp preflight_load_status(%Writer{} = writer, :loading) do
-    Writer.check_uint8(writer, :load_status, 1)
-  end
-
-  defp preflight_load_status(%Writer{} = writer, {:error, reason}) do
-    writer
-    |> Writer.check_uint8(:load_status, 2)
-    |> Writer.check_string16(:load_status_message, reason)
   end
 
   @spec to_wire_header(Picker.t()) :: map()

@@ -3534,8 +3534,19 @@ defmodule Minga.Mix.ProtocolGenerator do
   # before calling these. Field values are read by schema name from the model
   # struct or map, matching the names the hand-written encoders consume today.
 
+  @doc false
+  @spec render_encode_module(schema(), module()) :: String.t()
+  def render_encode_module(schema, module_name) when is_atom(module_name) do
+    schema
+    |> attach_enum_reprs()
+    |> encode_elixir_file(module_name)
+  end
+
   @spec encode_elixir_file(schema()) :: String.t()
-  defp encode_elixir_file(schema) do
+  defp encode_elixir_file(schema), do: encode_elixir_file(schema, Minga.Protocol.Encode)
+
+  @spec encode_elixir_file(schema(), module()) :: String.t()
+  defp encode_elixir_file(schema, module_name) do
     smap = structures_map(schema)
     enums = enums_list(schema)
     structures = Map.get(schema, "structures", [])
@@ -3543,24 +3554,40 @@ defmodule Minga.Mix.ProtocolGenerator do
     command_fields = command_fields_list(schema)
 
     [
-      "defmodule Minga.Protocol.Encode do\n",
+      "defmodule #{inspect(module_name)} do\n",
       "  @moduledoc \"\"\"\n",
       "  Generated pure protocol encoders.\n\n",
       "  Generated from `docs/protocol_schema.toml` by `mix protocol.gen`. Do not edit by hand.\n\n",
-      "  Each `encode_*/1` returns the on-wire iodata for one schema record; the\n",
-      "  adapter layer wraps these with framing and the fingerprint cache, and the\n",
-      "  Layer 2 builders normalize the model before encoding.\n",
+      "  Each `encode_*/1` validates schema-owned bounded fields immediately before\n",
+      "  emitting them and returns the on-wire iodata for one schema record.\n",
       "  \"\"\"\n\n",
+      "  alias Minga.Protocol.EncodingError\n\n",
       Enum.map(enums, &elixir_encode_enum/1),
-      Enum.map(structures, fn s ->
-        elixir_record_encoder(encode_fn_name(s["name"]), s, smap)
+      Enum.map(structures, fn entry ->
+        elixir_record_encoder(
+          encode_fn_name(entry["name"]),
+          String.to_atom(entry["name"]),
+          entry,
+          smap
+        )
       end),
-      Enum.map(sections, fn s ->
-        elixir_record_encoder(section_encode_fn_name(s), s, smap)
+      Enum.map(sections, fn entry ->
+        elixir_record_encoder(
+          section_encode_fn_name(entry),
+          String.to_atom(entry["opcode"]),
+          entry,
+          smap
+        )
       end),
-      Enum.map(command_fields, fn cf ->
-        elixir_record_encoder(command_fields_encode_fn_name(cf), cf, smap)
+      Enum.map(command_fields, fn entry ->
+        elixir_record_encoder(
+          command_fields_encode_fn_name(entry),
+          String.to_atom(entry["opcode"]),
+          entry,
+          smap
+        )
       end),
+      elixir_validation_helpers(),
       "end\n"
     ]
     |> IO.iodata_to_binary()
@@ -3577,10 +3604,6 @@ defmodule Minga.Mix.ProtocolGenerator do
   @spec command_fields_encode_fn_name(command_fields()) :: String.t()
   defp command_fields_encode_fn_name(cf), do: "encode_#{cf["opcode"]}"
 
-  # An enum encoder is the inverse of the Go byte -> constant mapping: one clause
-  # per declared atom plus a catch-all that emits the schema `default` byte. The
-  # atom names mirror the value names (the hand-written encoders pattern-match the
-  # same atoms today).
   @spec elixir_encode_enum(enum()) :: iodata()
   defp elixir_encode_enum(%{"name" => name} = enum) do
     values = Map.get(enum, "values", [])
@@ -3589,8 +3612,8 @@ defmodule Minga.Mix.ProtocolGenerator do
 
     [
       "  @spec #{fn_name}(atom()) :: non_neg_integer()\n",
-      Enum.map(values, fn v ->
-        "  def #{fn_name}(:#{v["name"]}), do: #{v["value"]}\n"
+      Enum.map(values, fn value ->
+        "  def #{fn_name}(:#{value["name"]}), do: #{value["value"]}\n"
       end),
       "  def #{fn_name}(_), do: #{default_byte}\n\n"
     ]
@@ -3600,47 +3623,50 @@ defmodule Minga.Mix.ProtocolGenerator do
   defp enum_default_byte(%{"default" => default} = enum) when is_binary(default) do
     enum
     |> Map.get("values", [])
-    |> Enum.find(fn v -> v["name"] == default end)
+    |> Enum.find(fn value -> value["name"] == default end)
     |> Map.fetch!("value")
   end
 
   defp enum_default_byte(_enum), do: 0
 
-  # A counted_array-layout section (e.g. gui_picker.items) has no named fields:
-  # it decodes to a bare slice, so its encoder takes the list directly and emits
-  # the count prefix + mapped elements, the inverse of the Go counted_array
-  # section decoder.
-  @spec elixir_record_encoder(String.t(), map(), %{String.t() => structure()}) :: iodata()
+  @spec elixir_record_encoder(String.t(), atom(), map(), %{String.t() => structure()}) ::
+          iodata()
   defp elixir_record_encoder(
          fn_name,
+         command,
          %{"layout" => "counted_array", "element" => element} = entry,
          smap
        ) do
     count_type = entry["count_type"] || "u16"
     bits = @primitive_sizes[count_type] * 8
-    element_encoder = elixir_array_element_encoder(element, smap)
+    max = integer_max(bits)
+    root_path = inspect([String.to_atom(entry["name"])])
+    element_encoder = elixir_array_element_encoder(element, smap, "command", "[index | path]")
 
     [
       "  @spec #{fn_name}([term()]) :: iodata()\n",
-      "  def #{fn_name}(items) when is_list(items) do\n",
-      "    [<<Enum.count(items)::#{bits}>> | Enum.map(items, #{element_encoder})]\n",
+      "  def #{fn_name}(items) when is_list(items), do: #{fn_name}(items, #{inspect(command)}, #{root_path})\n\n",
+      "  @spec #{fn_name}([term()], atom(), [atom() | non_neg_integer()]) :: iodata()\n",
+      "  defp #{fn_name}(items, command, path) when is_list(items) do\n",
+      "    count = Enum.count(items)\n",
+      "    validate_uint!(command, path, count, #{max})\n",
+      "    [<<count::#{bits}>> | Enum.map(Stream.with_index(items), #{element_encoder})]\n",
       "  end\n\n"
     ]
   end
 
-  # Emit `encode_<unit>(model) :: iodata()` for one record. Base fields are
-  # encoded in order; an optional conditional tail emits its fields only when the
-  # guard (rewritten to read `model.<field>`) holds. A record with no fields and
-  # no tail (none exist today) still compiles to an empty list.
-  defp elixir_record_encoder(fn_name, entry, smap) do
+  defp elixir_record_encoder(fn_name, command, entry, smap) do
     base_fields = Map.get(entry, "fields", [])
+    root_path = elixir_entry_root_path(entry)
 
     [
       "  @spec #{fn_name}(map()) :: iodata()\n",
-      "  def #{fn_name}(model) do\n",
+      "  def #{fn_name}(model), do: #{fn_name}(model, #{inspect(command)}, #{inspect(root_path)})\n\n",
+      "  @spec #{fn_name}(map(), atom(), [atom() | non_neg_integer()]) :: iodata()\n",
+      "  defp #{fn_name}(model, command, path) do\n",
       "    [\n",
       Enum.map(base_fields, fn field ->
-        "      #{elixir_encode_field(field, "model", smap)},\n"
+        "      #{elixir_encode_field(field, "model", smap, "command", "path")},\n"
       end),
       elixir_encode_conditional_tail(entry, smap),
       "    ]\n",
@@ -3648,10 +3674,6 @@ defmodule Minga.Mix.ProtocolGenerator do
     ]
   end
 
-  # The conditional tail compiles to a nested list guarded by an `if`. The guard
-  # is the schema guard with each base-field identifier rewritten to
-  # `Map.fetch!(model, :<field>)` so it reads the same field the fixed section
-  # decoded, mirroring the Go decoder's substitution of decoded locals.
   @spec elixir_encode_conditional_tail(map(), %{String.t() => structure()}) :: iodata()
   defp elixir_encode_conditional_tail(entry, smap) do
     case conditional_tail_fields(entry) do
@@ -3663,7 +3685,7 @@ defmodule Minga.Mix.ProtocolGenerator do
           "      if #{elixir_guard_expression(entry)} do\n",
           "        [\n",
           Enum.map(tail_fields, fn field ->
-            "          #{elixir_encode_field(field, "model", smap)},\n"
+            "          #{elixir_encode_field(field, "model", smap, "command", "path")},\n"
           end),
           "        ]\n",
           "      else\n",
@@ -3685,46 +3707,49 @@ defmodule Minga.Mix.ProtocolGenerator do
     )
   end
 
-  # Encode one field as iodata, reading its value from `<source>.<name>` (a struct
-  # or map field with the schema name). Mirrors the Go decode-field dispatch.
-  @spec elixir_encode_field(map(), String.t(), %{String.t() => structure()}) :: String.t()
+  @spec elixir_encode_field(
+          map(),
+          String.t(),
+          %{String.t() => structure()},
+          String.t(),
+          String.t()
+        ) :: String.t()
   defp elixir_encode_field(
          %{"name" => name, "type" => "enum", "enum" => enum_name, "repr" => repr},
          source,
-         _smap
+         _smap,
+         command,
+         path
        ) do
     bits = @primitive_sizes[repr] * 8
-    "<<encode_#{enum_name}(#{field_read(source, name)})::#{bits}>>"
+    value = "encode_#{enum_name}(#{field_read(source, name)})"
+    elixir_encode_uint(value, bits, command, field_path(path, name))
   end
 
-  defp elixir_encode_field(%{"name" => name, "type" => type}, source, _smap)
+  defp elixir_encode_field(%{"name" => name, "type" => type}, source, _smap, command, path)
        when type in ["u8", "u16", "u24", "u32", "u64"] do
     bits = @primitive_sizes[type] * 8
-    "<<#{field_read(source, name)}::#{bits}>>"
+    elixir_encode_uint(field_read(source, name), bits, command, field_path(path, name))
   end
 
-  defp elixir_encode_field(%{"name" => name, "type" => "rgb"}, source, _smap) do
-    "<<#{field_read(source, name)}::24>>"
+  defp elixir_encode_field(%{"name" => name, "type" => "rgb"}, source, _smap, command, path) do
+    elixir_encode_uint(field_read(source, name), 24, command, field_path(path, name))
   end
 
-  defp elixir_encode_field(%{"name" => name, "type" => "string8"}, source, _smap) do
-    elixir_encode_string(field_read(source, name), 8)
-  end
-
-  defp elixir_encode_field(%{"name" => name, "type" => "string16"}, source, _smap) do
-    elixir_encode_string(field_read(source, name), 16)
-  end
-
-  defp elixir_encode_field(%{"name" => name, "type" => "string32"}, source, _smap) do
-    elixir_encode_string(field_read(source, name), 32)
+  defp elixir_encode_field(%{"name" => name, "type" => type}, source, _smap, command, path)
+       when type in ["string8", "string16", "string32"] do
+    bits = type |> String.replace_prefix("string", "") |> String.to_integer()
+    elixir_encode_string(field_read(source, name), bits, command, field_path(path, name))
   end
 
   defp elixir_encode_field(
          %{"name" => name, "type" => "struct", "element" => element},
          source,
-         _smap
+         _smap,
+         command,
+         path
        ) do
-    "#{encode_fn_name(element)}(#{field_read(source, name)})"
+    "#{encode_fn_name(element)}(#{field_read(source, name)}, #{command}, #{field_path(path, name)})"
   end
 
   defp elixir_encode_field(
@@ -3735,46 +3760,97 @@ defmodule Minga.Mix.ProtocolGenerator do
            "element" => element
          },
          source,
-         smap
+         smap,
+         command,
+         path
        ) do
     bits = @primitive_sizes[count_type] * 8
+    max = integer_max(bits)
     list = field_read(source, name)
-    element_encoder = elixir_array_element_encoder(element, smap)
-    "[<<Enum.count(#{list})::#{bits}>> | Enum.map(#{list}, #{element_encoder})]"
+    array_path = field_path(path, name)
+
+    element_encoder =
+      elixir_array_element_encoder(element, smap, command, "[index | #{array_path}]")
+
+    "(fn items -> count = Enum.count(items); validate_uint!(#{command}, #{array_path}, count, #{max}); " <>
+      "[<<count::#{bits}>> | Enum.map(Stream.with_index(items), #{element_encoder})] end).(#{list})"
   end
 
-  # A counted_array element is either a bare wire type or a named structure. Bare
-  # primitives/strings encode inline; structures delegate to their encoder. The
-  # returned string is an anonymous fn passed to `Enum.map/2`.
-  @spec elixir_array_element_encoder(String.t(), %{String.t() => structure()}) :: String.t()
-  defp elixir_array_element_encoder(element, _smap)
+  @spec elixir_array_element_encoder(
+          String.t(),
+          %{String.t() => structure()},
+          String.t(),
+          String.t()
+        ) :: String.t()
+  defp elixir_array_element_encoder(element, _smap, command, path)
        when element in ["u8", "u16", "u24", "u32", "u64"] do
     bits = @primitive_sizes[element] * 8
-    "fn v -> <<v::#{bits}>> end"
+    "fn {value, index} -> #{elixir_encode_uint("value", bits, command, path)} end"
   end
 
-  defp elixir_array_element_encoder("rgb", _smap), do: "fn v -> <<v::24>> end"
-
-  defp elixir_array_element_encoder("string8", _smap),
-    do: "fn v -> #{elixir_encode_string("v", 8)} end"
-
-  defp elixir_array_element_encoder("string16", _smap),
-    do: "fn v -> #{elixir_encode_string("v", 16)} end"
-
-  defp elixir_array_element_encoder("string32", _smap),
-    do: "fn v -> #{elixir_encode_string("v", 32)} end"
-
-  defp elixir_array_element_encoder(element, _smap),
-    do: "&#{encode_fn_name(element)}/1"
-
-  # A length-prefixed string: `<<byte_size(bin)::N, bin::binary>>` where `bin` is
-  # the value coerced to a binary. The hand-written encoders use
-  # `:erlang.iolist_to_binary/1`; matching that keeps bytes identical for iodata
-  # values while a plain binary passes through unchanged.
-  @spec elixir_encode_string(String.t(), non_neg_integer()) :: String.t()
-  defp elixir_encode_string(expr, bits) do
-    "(fn bin -> <<byte_size(bin)::#{bits}, bin::binary>> end).(:erlang.iolist_to_binary([#{expr}]))"
+  defp elixir_array_element_encoder("rgb", _smap, command, path) do
+    "fn {value, index} -> #{elixir_encode_uint("value", 24, command, path)} end"
   end
+
+  defp elixir_array_element_encoder(element, _smap, command, path)
+       when element in ["string8", "string16", "string32"] do
+    bits = element |> String.replace_prefix("string", "") |> String.to_integer()
+    "fn {value, index} -> #{elixir_encode_string("value", bits, command, path)} end"
+  end
+
+  defp elixir_array_element_encoder(element, _smap, command, path) do
+    "fn {value, index} -> #{encode_fn_name(element)}(value, #{command}, #{path}) end"
+  end
+
+  @spec elixir_encode_uint(String.t(), pos_integer(), String.t(), String.t()) :: String.t()
+  defp elixir_encode_uint(expr, bits, command, path) do
+    max = integer_max(bits)
+
+    "(fn value -> validate_uint!(#{command}, #{path}, value, #{max}); " <>
+      "<<value::#{bits}>> end).(#{expr})"
+  end
+
+  @spec elixir_encode_string(String.t(), pos_integer(), String.t(), String.t()) :: String.t()
+  defp elixir_encode_string(expr, bits, command, path) do
+    max = integer_max(bits)
+
+    "(fn value -> bin = :erlang.iolist_to_binary([value]); " <>
+      "validate_uint!(#{command}, #{path}, byte_size(bin), #{max}); " <>
+      "<<byte_size(bin)::#{bits}, bin::binary>> end).(#{expr})"
+  end
+
+  @spec elixir_validation_helpers() :: iodata()
+  defp elixir_validation_helpers do
+    [
+      "  @spec validate_uint!(atom(), [atom() | non_neg_integer()], term(), non_neg_integer()) :: :ok\n",
+      "  defp validate_uint!(_command, _path, value, max)\n",
+      "       when is_integer(value) and value >= 0 and value <= max,\n",
+      "       do: :ok\n\n",
+      "  defp validate_uint!(command, reverse_path, value, max) do\n",
+      "    field_path = Enum.reverse(reverse_path)\n",
+      "    raise EncodingError,\n",
+      "      command: command,\n",
+      "      field: Enum.find(reverse_path, &is_atom/1),\n",
+      "      field_path: field_path,\n",
+      "      actual: value,\n",
+      "      min: 0,\n",
+      "      max: max\n",
+      "  end\n\n"
+    ]
+  end
+
+  @spec elixir_entry_root_path(map()) :: [atom()]
+  defp elixir_entry_root_path(%{"opcode" => _opcode, "name" => name}) do
+    [String.to_atom(name)]
+  end
+
+  defp elixir_entry_root_path(_entry), do: []
+
+  @spec field_path(String.t(), String.t()) :: String.t()
+  defp field_path(path, name), do: "[:#{name} | #{path}]"
+
+  @spec integer_max(pos_integer()) :: pos_integer()
+  defp integer_max(bits), do: Bitwise.bsl(1, bits) - 1
 
   @spec field_read(String.t(), String.t()) :: String.t()
   defp field_read(source, name), do: "Map.fetch!(#{source}, :#{name})"

@@ -90,7 +90,8 @@ defmodule Minga.Frontend.Adapter.GUI do
   def encode_checked(%RenderModel{} = model, %Caches{} = caches) do
     {:ok, do_encode(model, caches)}
   rescue
-    error in Minga.Frontend.Adapter.GUI.EncodingError -> {:error, error}
+    error in [Minga.Protocol.EncodingError, Minga.Frontend.Adapter.GUI.EncodingError] ->
+      {:error, error}
   end
 
   @spec do_encode(RenderModel.t(), Caches.t()) :: EncodedFrame.t()

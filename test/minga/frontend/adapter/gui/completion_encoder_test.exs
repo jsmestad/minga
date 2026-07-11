@@ -3,7 +3,7 @@ defmodule Minga.Frontend.Adapter.GUI.CompletionEncoderTest do
 
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.CompletionEncoder
-  alias Minga.Frontend.Adapter.GUI.EncodingError
+  alias Minga.Protocol.EncodingError
   alias Minga.RenderModel.UI.Completion
   alias Minga.RenderModel.UI.Completion.Item
 
@@ -130,17 +130,17 @@ defmodule Minga.Frontend.Adapter.GUI.CompletionEncoderTest do
 
       assert_encoding_error(
         %Completion{visible?: true, items: List.duplicate(item, 65_536)},
-        :item_count,
+        [:items],
         65_536
       )
 
       oversized = String.duplicate("x", 65_536)
 
-      for {field, item} <- [
-            item_label: %{item | label: oversized},
-            item_detail: %{item | detail: oversized}
+      for {field_path, item} <- [
+            {[:items, 0, :label], %{item | label: oversized}},
+            {[:items, 0, :detail], %{item | detail: oversized}}
           ] do
-        assert_encoding_error(%Completion{visible?: true, items: [item]}, field, 65_536)
+        assert_encoding_error(%Completion{visible?: true, items: [item]}, field_path, 65_536)
       end
 
       assert_encoding_error(
@@ -151,12 +151,18 @@ defmodule Minga.Frontend.Adapter.GUI.CompletionEncoderTest do
     end
   end
 
-  defp assert_encoding_error(model, field, actual) do
+  defp assert_encoding_error(model, field, actual) when is_atom(field) do
+    assert_encoding_error(model, [field], actual)
+  end
+
+  defp assert_encoding_error(model, field_path, actual) do
+    field = Enum.find(Enum.reverse(field_path), &is_atom/1)
     error = assert_raise EncodingError, fn -> CompletionEncoder.encode_command(model) end
 
     assert %EncodingError{
              command: :gui_completion,
              field: ^field,
+             field_path: ^field_path,
              actual: ^actual,
              min: 0,
              max: 65_535

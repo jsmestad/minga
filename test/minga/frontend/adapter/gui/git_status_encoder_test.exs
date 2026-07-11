@@ -2,7 +2,7 @@ defmodule Minga.Frontend.Adapter.GUI.GitStatusEncoderTest do
   use ExUnit.Case, async: true
 
   alias Minga.Frontend.Adapter.GUI.Caches
-  alias Minga.Frontend.Adapter.GUI.EncodingError
+  alias Minga.Protocol.EncodingError
   alias Minga.Frontend.Adapter.GUI.GitStatusEncoder
   alias Minga.RenderModel.UI.GitStatus
   alias MingaEditor.RenderModel.UI.GitStatusBuilder
@@ -275,17 +275,27 @@ defmodule Minga.Frontend.Adapter.GUI.GitStatusEncoderTest do
     }
   end
 
-  defp assert_encoding_error(model, field, actual, max) do
+  defp assert_encoding_error(model, adapter_field, actual, max) do
+    field_path = git_status_schema_path(adapter_field)
+    field = Enum.find(Enum.reverse(field_path), &is_atom/1)
     error = assert_raise EncodingError, fn -> GitStatusEncoder.encode_command(model) end
 
     assert %EncodingError{
              command: :gui_git_status,
              field: ^field,
+             field_path: ^field_path,
              actual: ^actual,
              min: 0,
              max: ^max
            } = error
   end
+
+  defp git_status_schema_path(:entry_count), do: [:entries]
+  defp git_status_schema_path(:entry_path), do: [:entries, 0, :path]
+  defp git_status_schema_path(:entry_path_hash), do: [:entries, 0, :path_hash]
+  defp git_status_schema_path(:entry_section), do: [:entries, 0, :section]
+  defp git_status_schema_path(:toast_message), do: [:toast, :message]
+  defp git_status_schema_path(field), do: [field]
 
   # Decodes the production gui_git_status wire format (opcode stripped) into a
   # struct of fields, mirroring the layout the native frontend decodes.
