@@ -76,7 +76,7 @@ defmodule Minga.Mix.ProtocolGeneratorTest do
 
     extended_schema =
       update_in(schema, ["command_fields", Access.at(0), "fields"], fn fields ->
-        fields ++ [future_field]
+        List.insert_at(fields, -1, future_field)
       end)
 
     compile_encoder(extended_schema, module)
@@ -88,8 +88,11 @@ defmodule Minga.Mix.ProtocolGeneratorTest do
              field_path: [:future_sequence],
              actual: 65_536,
              max: 65_535
-           } = assert_raise(EncodingError, fn -> module.encode_fixture_command(model) end)
+           } =
+             assert_raise(EncodingError, fn -> encode_fixture_command(module, model) end)
   end
+
+  defp encode_fixture_command(module, model), do: module.encode_fixture_command(model)
 
   defp assert_error(model, field_path, actual, max) do
     assert %EncodingError{
@@ -99,7 +102,8 @@ defmodule Minga.Mix.ProtocolGeneratorTest do
              actual: ^actual,
              min: 0,
              max: ^max
-           } = assert_raise(EncodingError, fn -> @encoder.encode_fixture_command(model) end)
+           } =
+             assert_raise(EncodingError, fn -> encode_fixture_command(@encoder, model) end)
 
     assert field == Enum.find(Enum.reverse(field_path), &is_atom/1)
   end

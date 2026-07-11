@@ -159,7 +159,7 @@ end
 
 The `side:` option is the default side when you do not list the segment explicitly. It must be `:left` or `:right`, and `priority:` must be an integer. Invalid declarations fail during config load so you see the mistake immediately. Custom segment names cannot reuse built-in names like `:mode`, `:filename`, or `:git`, because built-ins always win during rendering.
 
-Segment text and click command names are bounded to the GUI protocol's 16-bit string and section limits. Oversized strings are truncated at valid UTF-8 boundaries, and trailing segments are dropped if a GUI status-bar payload would exceed the wire-format limit.
+Segment text and click command names are bounded to the GUI protocol's 16-bit string and section limits. Oversized strings or a status-bar payload that exceeds its wire-format limit are rejected before the frontend Port write; Minga does not truncate strings or drop trailing segments to make a payload fit.
 
 You can still place the segment yourself:
 
