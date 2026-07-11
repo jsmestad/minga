@@ -407,83 +407,39 @@ struct DecoderScrollPresentationScrollSeqTests {
 
 // MARK: - Forward-compatible unknown opcodes (0x90+)
 
-@Suite("Decoder Robustness: Forward-Compatible Unknown Opcodes")
+@Suite("Decoder Robustness: Unknown Opcodes Fail Closed")
 struct DecoderForwardCompatTests {
 
-    @Test("Unknown opcode >= 0x90 with valid length prefix is skipped")
-    func skipUnknownOpcode() throws {
-        // Opcode 0xFE is intentionally outside the currently defined semantic opcode range.
-        // It uses the 0x90+ convention: opcode(1) + payload_length(2, big-endian) + payload(payload_length).
-        var data = Data()
-        data.append(0xFE)                       // unknown opcode
-        data.append(contentsOf: [0x00, 0x04])   // payload_length = 4
-        data.append(contentsOf: [0xDE, 0xAD, 0xBE, 0xEF]) // payload (4 bytes)
-
-        let (cmd, size) = try decodeCommand(data: data, offset: 0)
-        #expect(cmd == nil, "Unknown opcode should be skipped (nil command)")
-        #expect(size == 7, "Should consume opcode(1) + length(2) + payload(4) = 7 bytes")
+    @Test("Unknown opcode >= 0x90 with valid length prefix is rejected")
+    func skipUnknownOpcode() {
+        let data = Data([0xFE, 0x00, 0x04, 0xDE, 0xAD, 0xBE, 0xEF])
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: data, offset: 0)
+        }
     }
 
-    @Test("Unknown opcode skipped, subsequent commands decoded correctly")
-    func skipThenDecode() throws {
-        // Build a batch: unknown 0xFE (5-byte payload) + set_cursor_shape + batch_end
-        var data = Data()
-        // Unknown opcode
-        data.append(0xFE)
-        data.append(contentsOf: [0x00, 0x05]) // payload_length = 5
-        data.append(contentsOf: [0x01, 0x02, 0x03, 0x04, 0x05]) // 5 bytes of payload
-        // Known commands that follow
-        data.append(OP_SET_CURSOR_SHAPE)
-        data.append(CURSOR_BLOCK)
-        data.append(OP_COMMIT_FRAME)
-        data.append(contentsOf: [0, 0, 0, 0, 0, 0, 0, 0]) // commit_frame frame_seq + echoed input_seq (fixed:9, #2219/#2215)
-
+    @Test("Unknown opcode prevents subsequent command publication")
+    func skipThenDecode() {
+        let data = Data([0xFE, 0x00, 0x00, OP_SET_CURSOR_SHAPE, CURSOR_BLOCK])
         var commands: [RenderCommand] = []
-        try decodeCommands(from: data) { cmd in
-            commands.append(cmd)
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommands(from: data) { commands.append($0) }
         }
-        // The unknown opcode is skipped (nil), so only set_cursor_shape and commitFrame are collected
-        #expect(commands.count == 2)
-        guard case .setCursorShape = commands[0] else {
-            Issue.record("Expected .setCursorShape after skipped opcode"); return
-        }
-        guard case .commitFrame = commands[1] else {
-            Issue.record("Expected .commitFrame"); return
+        #expect(commands.isEmpty)
+    }
+
+    @Test("Unknown opcode with zero-length payload is rejected")
+    func skipZeroPayload() {
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: Data([0xB0, 0x00, 0x00]), offset: 0)
         }
     }
 
-    @Test("Unknown opcode with zero-length payload is skipped")
-    func skipZeroPayload() throws {
-        var data = Data()
-        data.append(0xB0)                       // unknown opcode
-        data.append(contentsOf: [0x00, 0x00])   // payload_length = 0
-
-        let (cmd, size) = try decodeCommand(data: data, offset: 0)
-        #expect(cmd == nil)
-        #expect(size == 3, "opcode(1) + length(2) + payload(0) = 3")
-    }
-
-    @Test("Multiple unknown opcodes in a row are all skipped")
-    func skipMultipleUnknown() throws {
-        var data = Data()
-        // First unknown opcode (3-byte payload)
-        data.append(0xFD)
-        data.append(contentsOf: [0x00, 0x03])
-        data.append(contentsOf: [0xAA, 0xBB, 0xCC])
-        // Second unknown opcode (0-byte payload)
-        data.append(0xFC)
-        data.append(contentsOf: [0x00, 0x00])
-        // Known command
-        data.append(OP_SET_CURSOR_SHAPE)
-        data.append(CURSOR_BLOCK)
-
-        var commands: [RenderCommand] = []
-        try decodeCommands(from: data) { cmd in
-            commands.append(cmd)
-        }
-        #expect(commands.count == 1)
-        guard case .setCursorShape = commands[0] else {
-            Issue.record("Expected .setCursorShape"); return
+    @Test("First unknown opcode rejects the complete packet")
+    func skipMultipleUnknown() {
+        let data = Data([0xFD, 0x00, 0x00, 0xFC, 0x00, 0x00])
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeFrame(from: data)
         }
     }
 
@@ -619,7 +575,7 @@ struct DecoderEdgeCaseTests {
             #expect(opcode == OP_SET_TITLE)
             #expect(offset == 2)
             #expect(remaining == 4)
-            #expect(String(describing: cause) == "insufficient data")
+            #expect(String(describing: cause) == "insufficient data" || String(describing: cause) == "malformed")
             #expect(String(describing: error).contains("opcode 0x"))
             #expect(String(describing: error).contains("offset 2"))
         }

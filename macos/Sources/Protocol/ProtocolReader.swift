@@ -17,25 +17,28 @@ final class ProtocolReader: @unchecked Sendable {
 
     private var thread: Thread?
     private let input: FileHandle
-    private let handler: @Sendable (Data) -> Void
+    private let decoder: @Sendable (Data) throws -> DecodedFrame
+    private let handler: @Sendable (DecodedFrame) -> Void
+    private let onDecodeFailure: @Sendable (ProtocolDecodeError) -> Void
     private let onDisconnect: @Sendable () -> Void
     private let maxPayloadLength: Int
     private let running = Mutex(false)
 
-    /// Create a reader that calls `handler` with each payload on a background thread.
-    /// `onDisconnect` is called when the input closes (peer exited).
-    ///
-    /// - Parameters:
-    ///   - input: File handle to read from. Defaults to `.standardInput`.
-    ///   - handler: Called with each decoded payload.
-    ///   - onDisconnect: Called when the input stream closes.
-    init(input: FileHandle = .standardInput,
-         maxPayloadLength: Int = ProtocolReader.defaultMaxPayloadLength,
-         handler: @escaping @Sendable (Data) -> Void,
-         onDisconnect: @escaping @Sendable () -> Void) {
+    /// Creates a reader that decodes complete packets on its background thread.
+    /// Only one immutable `DecodedFrame` is delivered for each successful packet.
+    init(
+        input: FileHandle = .standardInput,
+        maxPayloadLength: Int = ProtocolReader.defaultMaxPayloadLength,
+        decoder: @escaping @Sendable (Data) throws -> DecodedFrame = { data in try decodeFrame(from: data) },
+        handler: @escaping @Sendable (DecodedFrame) -> Void,
+        onDecodeFailure: @escaping @Sendable (ProtocolDecodeError) -> Void,
+        onDisconnect: @escaping @Sendable () -> Void
+    ) {
         self.input = input
         self.maxPayloadLength = maxPayloadLength
+        self.decoder = decoder
         self.handler = handler
+        self.onDecodeFailure = onDecodeFailure
         self.onDisconnect = onDisconnect
     }
 
@@ -98,7 +101,23 @@ final class ProtocolReader: @unchecked Sendable {
             }
 
             os_signpost(.event, log: protocolLog, name: "ProtocolPayloadReceived", "bytes=%{public}d", payload.count)
-            handler(payload)
+            do {
+                let frame = try decoder(payload)
+                os_signpost(
+                    .event,
+                    log: protocolLog,
+                    name: "ProtocolPayloadDecoded",
+                    "bytes=%{public}d copied=%{public}d allocations=%{public}d",
+                    frame.metrics.packetBytes,
+                    frame.metrics.bytesCopied,
+                    frame.metrics.allocations
+                )
+                handler(frame)
+            } catch let error as ProtocolDecodeError {
+                onDecodeFailure(error)
+            } catch {
+                onDecodeFailure(.malformed)
+            }
         }
     }
 }

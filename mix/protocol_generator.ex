@@ -1243,8 +1243,9 @@ defmodule Minga.Mix.ProtocolGenerator do
       "    case unknown\n" <>
       "}\n\n" <>
       "/// Returns the on-wire byte length of the first command in `payload`,\n" <>
-      "/// derived from each opcode's schema framing.\n" <>
-      "public func commandSize(_ payload: [UInt8]) -> CommandSizeResult {\n" <>
+      "/// derived from each opcode's schema framing. Accepting integer-indexed\n" <>
+      "/// collections lets Data slices be sized without copying packet tails.\n" <>
+      "public func commandSize<C: RandomAccessCollection>(_ payload: C) -> CommandSizeResult where C.Element == UInt8, C.Index == Int {\n" <>
       "    guard let opcode = payload.first else { return .incomplete }\n" <>
       "    switch opcode {\n" <>
       IO.iodata_to_binary(fixed_cases) <>
@@ -1254,8 +1255,6 @@ defmodule Minga.Mix.ProtocolGenerator do
       swift_case.(:sectioned32, "sectioned32CommandSize(payload)") <>
       swift_custom_case.() <>
       "    default:\n" <>
-      "        // Forward-compatibility: opcodes >= 0x90 carry a u16 length prefix.\n" <>
-      "        if opcode >= 0x90 { return len16CommandSize(payload) }\n" <>
       "        return .unknown\n" <>
       "    }\n}\n\n" <>
       swift_command_size_helpers()
@@ -1264,41 +1263,45 @@ defmodule Minga.Mix.ProtocolGenerator do
   @spec swift_command_size_helpers() :: String.t()
   defp swift_command_size_helpers do
     """
-    private func fixedCommandSize(_ payload: [UInt8], _ size: Int) -> CommandSizeResult {
+    private func fixedCommandSize<C: RandomAccessCollection>(_ payload: C, _ size: Int) -> CommandSizeResult where C.Element == UInt8, C.Index == Int {
         payload.count < size ? .incomplete : .sized(size)
     }
 
-    private func len16CommandSize(_ payload: [UInt8]) -> CommandSizeResult {
+    private func byte<C: RandomAccessCollection>(_ payload: C, _ offset: Int) -> UInt8 where C.Element == UInt8, C.Index == Int {
+        payload[payload.startIndex + offset]
+    }
+
+    private func len16CommandSize<C: RandomAccessCollection>(_ payload: C) -> CommandSizeResult where C.Element == UInt8, C.Index == Int {
         if payload.count < 3 { return .incomplete }
-        let size = 3 + (Int(payload[1]) << 8 | Int(payload[2]))
+        let size = 3 + (Int(byte(payload, 1)) << 8 | Int(byte(payload, 2)))
         return payload.count < size ? .incomplete : .sized(size)
     }
 
-    private func len32CommandSize(_ payload: [UInt8]) -> CommandSizeResult {
+    private func len32CommandSize<C: RandomAccessCollection>(_ payload: C) -> CommandSizeResult where C.Element == UInt8, C.Index == Int {
         if payload.count < 5 { return .incomplete }
-        let size = 5 + (Int(payload[1]) << 24 | Int(payload[2]) << 16 | Int(payload[3]) << 8 | Int(payload[4]))
+        let size = 5 + (Int(byte(payload, 1)) << 24 | Int(byte(payload, 2)) << 16 | Int(byte(payload, 3)) << 8 | Int(byte(payload, 4)))
         return payload.count < size ? .incomplete : .sized(size)
     }
 
-    private func sectioned32CommandSize(_ payload: [UInt8]) -> CommandSizeResult {
+    private func sectioned32CommandSize<C: RandomAccessCollection>(_ payload: C) -> CommandSizeResult where C.Element == UInt8, C.Index == Int {
         if payload.count < 2 { return .incomplete }
         var offset = 2
-        let count = Int(payload[1])
+        let count = Int(byte(payload, 1))
         for _ in 0..<count {
             if payload.count < offset + 5 { return .incomplete }
-            offset += 5 + (Int(payload[offset + 1]) << 24 | Int(payload[offset + 2]) << 16 | Int(payload[offset + 3]) << 8 | Int(payload[offset + 4]))
+            offset += 5 + (Int(byte(payload, offset + 1)) << 24 | Int(byte(payload, offset + 2)) << 16 | Int(byte(payload, offset + 3)) << 8 | Int(byte(payload, offset + 4)))
             if payload.count < offset { return .incomplete }
         }
         return .sized(offset)
     }
 
-    private func sectionedCommandSize(_ payload: [UInt8]) -> CommandSizeResult {
+    private func sectionedCommandSize<C: RandomAccessCollection>(_ payload: C) -> CommandSizeResult where C.Element == UInt8, C.Index == Int {
         if payload.count < 2 { return .incomplete }
         var offset = 2
-        let count = Int(payload[1])
+        let count = Int(byte(payload, 1))
         for _ in 0..<count {
             if payload.count < offset + 3 { return .incomplete }
-            offset += 3 + (Int(payload[offset + 1]) << 8 | Int(payload[offset + 2]))
+            offset += 3 + (Int(byte(payload, offset + 1)) << 8 | Int(byte(payload, offset + 2)))
             if payload.count < offset { return .incomplete }
         }
         return .sized(offset)

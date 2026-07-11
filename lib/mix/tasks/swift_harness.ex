@@ -5,6 +5,7 @@ defmodule Mix.Tasks.Swift.Harness do
   ## Usage
 
       mix swift.harness
+      mix swift.harness --release
 
   Compiles `macos/Sources/TestHarness/main.swift` along with the shared
   protocol files into `priv/minga-test-harness`. Required before running
@@ -37,6 +38,9 @@ defmodule Mix.Tasks.Swift.Harness do
     "macos/.generated/protocol/ProtocolCommandSize.generated.swift",
     "macos/.generated/protocol/ProtocolSemanticDecode.generated.swift",
     "macos/Sources/Protocol/ProtocolConstants.swift",
+    "macos/Sources/Protocol/ByteCursor.swift",
+    "macos/Sources/Protocol/DecodedFrame.swift",
+    "macos/Sources/Protocol/ProtocolEventHandoff.swift",
     "macos/Sources/Protocol/ProtocolDecoder.swift",
     "macos/TestHarness/main.swift"
   ]
@@ -48,7 +52,7 @@ defmodule Mix.Tasks.Swift.Harness do
 
   @impl Mix.Task
   @spec run(list()) :: :ok
-  def run(_args) do
+  def run(args) do
     Mix.Task.run("protocol.gen", [])
 
     priv_dir = Path.join(Mix.Project.app_path(), "priv")
@@ -67,10 +71,15 @@ defmodule Mix.Tasks.Swift.Harness do
       (@protocol_module_sources ++ @harness_app_sources)
       |> Enum.map(&preprocess_source(&1, src_dir))
 
-    args = compile_sources ++ ["-o", output]
+    compiler_args = compile_sources ++ optimization_args(args) ++ ["-o", output]
 
     System.find_executable("swiftc")
-    |> run_with_swiftc(args, output)
+    |> run_with_swiftc(compiler_args, output)
+  end
+
+  @spec optimization_args([String.t()]) :: [String.t()]
+  defp optimization_args(args) do
+    if "--release" in args, do: ["-O"], else: []
   end
 
   @spec preprocess_source(String.t(), String.t()) :: String.t()
