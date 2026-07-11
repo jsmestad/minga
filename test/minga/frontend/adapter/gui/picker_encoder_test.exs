@@ -2,7 +2,7 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
   use ExUnit.Case, async: true
 
   alias Minga.Frontend.Adapter.GUI.Caches
-  alias Minga.Frontend.Adapter.GUI.EncodingError
+  alias Minga.Protocol.EncodingError
   alias Minga.Frontend.Adapter.GUI.PickerEncoder
   alias Minga.RenderModel.UI.Picker
   alias Minga.RenderModel.UI.Picker.ActionMenu
@@ -226,17 +226,39 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
     }
   end
 
-  defp assert_encoding_error(model, field, actual, max) do
+  defp assert_encoding_error(model, adapter_field, actual, max) do
+    field_path = picker_schema_path(adapter_field)
+    field = Enum.find(Enum.reverse(field_path), &is_atom/1)
     error = assert_raise EncodingError, fn -> PickerEncoder.encode_command(model) end
 
     assert %EncodingError{
              command: :gui_picker,
              field: ^field,
+             field_path: ^field_path,
              actual: ^actual,
              min: 0,
              max: ^max
            } = error
   end
+
+  defp picker_schema_path(field)
+       when field in [:selected_index, :filtered_count, :total_count, :marked_count, :title],
+       do: [:header, field]
+
+  defp picker_schema_path(:item_count), do: [:items]
+  defp picker_schema_path(:query), do: [:query, :text]
+  defp picker_schema_path(:mode_prefix), do: [:mode_prefix, :text]
+  defp picker_schema_path(:load_status_message), do: [:load_status, :message]
+  defp picker_schema_path(:item_icon_color), do: [:items, 0, :icon_color]
+  defp picker_schema_path(:item_flags), do: [:items, 0, :flags]
+  defp picker_schema_path(:item_label), do: [:items, 0, :label]
+  defp picker_schema_path(:item_description), do: [:items, 0, :description]
+  defp picker_schema_path(:item_annotation), do: [:items, 0, :annotation]
+  defp picker_schema_path(:item_match_position_count), do: [:items, 0, :match_positions]
+  defp picker_schema_path(:item_match_position), do: [:items, 0, :match_positions, 0]
+  defp picker_schema_path(:action_menu_selected_index), do: [:action_menu, :selected_index]
+  defp picker_schema_path(:action_count), do: [:action_menu, :actions]
+  defp picker_schema_path(:action_name), do: [:action_menu, :actions, 0]
 
   # Splits `count` self-describing sections (id:1, len:2, payload:len) off the
   # front of the picker payload, returning a section-id => payload map and the

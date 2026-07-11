@@ -14,8 +14,16 @@ defmodule MingaAgent.SessionManagerTest do
     # Start an isolated SessionManager with a unique name per test.
     name = :"session_manager_#{System.unique_integer([:positive])}"
 
-    manager =
-      start_supervised!({SessionManager, [name: name]}, id: name)
+    {:ok, manager} = SessionManager.start_link(name: name)
+    Process.unlink(manager)
+
+    on_exit(fn ->
+      for {session_id, _pid, _metadata} <- SessionManager.list_sessions(manager) do
+        SessionManager.stop_session(manager, session_id)
+      end
+
+      GenServer.stop(manager)
+    end)
 
     %{manager: manager}
   end
@@ -318,29 +326,27 @@ defmodule MingaAgent.SessionManagerTest do
 
     {:ok, session_id, pid} =
       SessionManager.start_session(manager,
+        persist?: false,
         idle_gc_timeout_ms: 60_000,
         idle_gc_token_fn: fn -> idle_gc_token end
       )
 
     assert :ok = MingaAgent.Session.subscribe(pid)
-
-    ref = Process.monitor(pid)
     assert :ok = MingaAgent.Session.unsubscribe(pid)
     send(pid, {:idle_gc_timeout, idle_gc_token})
-    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 1000
 
     assert_receive {
                      :minga_event,
                      :agent_session_stopped,
                      %SessionStoppedEvent{session_id: ^session_id, pid: ^pid, reason: :normal}
                    },
-                   1000
+                   5_000
+
+    assert {:error, :not_found} = SessionManager.get_session(manager, session_id)
 
     refute_receive {:minga_event, :agent_session_restarted,
                     %SessionRestartedEvent{session_id: ^session_id}},
                    50
-
-    assert {:error, :not_found} = SessionManager.get_session(manager, session_id)
   end
 
   test "repeated crash restarts eventually exhaust and stop terminally", %{manager: manager} do

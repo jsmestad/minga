@@ -353,9 +353,15 @@ defmodule MingaAgent.SessionTest do
     end
   end
 
+  defp start_test_session(opts) do
+    opts = Keyword.put_new(opts, :persist?, false)
+    child_id = {:session, System.unique_integer([:positive, :monotonic])}
+    start_supervised!({Session, opts}, id: child_id)
+  end
+
   defp start_subscribed_session(provider \\ MockProvider, provider_opts \\ []) do
     provider_opts = native_provider_opts(provider, provider_opts)
-    {:ok, session} = Session.start_link(provider: provider, provider_opts: provider_opts)
+    session = start_test_session(provider: provider, provider_opts: provider_opts)
     Session.subscribe(session)
     session
   end
@@ -405,7 +411,8 @@ defmodule MingaAgent.SessionTest do
     session = start_subscribed_session(SlowMockProvider)
     assert is_pid(Session.get_provider(session))
     assert :ok = Session.send_prompt(session, prompt)
-    assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
+    assert_receive {:agent_event, ^session, {:status_changed, :thinking}}, @event_timeout
+    assert_receive {:agent_event, ^session, {:text_delta, ^prompt}}, @event_timeout
     session
   end
 
@@ -442,8 +449,8 @@ defmodule MingaAgent.SessionTest do
   # ── Tests ───────────────────────────────────────────────────────────────────
 
   setup do
-    {:ok, session} =
-      Session.start_link(
+    session =
+      start_test_session(
         provider: MockProvider,
         provider_opts: []
       )
@@ -478,8 +485,8 @@ defmodule MingaAgent.SessionTest do
 
     on_exit(fn -> ProviderRegistry.unregister_source(source) end)
 
-    {:ok, session} =
-      Session.start_link(
+    session =
+      start_test_session(
         provider: SlowMockProvider,
         provider_id: provider_id,
         provider_source: source,
@@ -561,7 +568,7 @@ defmodule MingaAgent.SessionTest do
     end
 
     test "driver role is vacated when the driver process dies" do
-      {:ok, session} = Session.start_link(provider: MockProvider, provider_opts: [])
+      session = start_test_session(provider: MockProvider, provider_opts: [])
       driver = idle_process()
       viewer = idle_process()
 
@@ -593,8 +600,8 @@ defmodule MingaAgent.SessionTest do
     test "idle detached sessions are reclaimed after the configured timeout" do
       idle_gc_token = make_ref()
 
-      {:ok, session} =
-        Session.start_link(
+      session =
+        start_test_session(
           provider: MockProvider,
           provider_opts: [],
           idle_gc_timeout_ms: 60_000,
@@ -620,8 +627,8 @@ defmodule MingaAgent.SessionTest do
       File.write!(bad_store_dir, "not a directory")
       idle_gc_token = make_ref()
 
-      {:ok, session} =
-        Session.start_link(
+      session =
+        start_test_session(
           provider: MockProvider,
           provider_opts: [],
           persist?: false,
@@ -650,8 +657,8 @@ defmodule MingaAgent.SessionTest do
 
       idle_gc_token = make_ref()
 
-      {:ok, session} =
-        Session.start_link(
+      session =
+        start_test_session(
           provider: DeferredMockProvider,
           provider_opts: [test_pid: self()],
           session_store_dir: session_store_dir,
@@ -661,10 +668,7 @@ defmodule MingaAgent.SessionTest do
 
       client = idle_process()
 
-      on_exit(fn ->
-        Process.exit(client, :kill)
-        Process.exit(session, :kill)
-      end)
+      on_exit(fn -> Process.exit(client, :kill) end)
 
       assert :ok = Session.subscribe(session, client)
       assert :ok = Session.unsubscribe(session, client)
@@ -692,16 +696,14 @@ defmodule MingaAgent.SessionTest do
       initial_token = make_ref()
       finished_token = make_ref()
 
-      {:ok, session} =
-        Session.start_link(
+      session =
+        start_test_session(
           provider: Minga.Test.StubProvider,
           provider_opts: [],
           persist?: false,
           idle_gc_timeout_ms: 60_000,
           idle_gc_token_fn: idle_gc_token_fn([initial_token, finished_token])
         )
-
-      on_exit(fn -> Process.exit(session, :kill) end)
 
       ref = Process.monitor(session)
 
@@ -720,14 +722,12 @@ defmodule MingaAgent.SessionTest do
     end
 
     test "active detached sessions are not reclaimed" do
-      {:ok, session} =
-        Session.start_link(
+      session =
+        start_test_session(
           provider: SlowMockProvider,
           provider_opts: [],
           idle_gc_timeout_ms: 60_000
         )
-
-      on_exit(fn -> Process.exit(session, :kill) end)
 
       {_timer_ref, stale_token} = :sys.get_state(session).idle_gc_timer
 
@@ -741,14 +741,12 @@ defmodule MingaAgent.SessionTest do
     end
 
     test "active plan-mode turns are not reclaimed" do
-      {:ok, session} =
-        Session.start_link(
+      session =
+        start_test_session(
           provider: Minga.Test.StubProvider,
           provider_opts: [],
           idle_gc_timeout_ms: 60_000
         )
-
-      on_exit(fn -> Process.exit(session, :kill) end)
 
       assert :ok = Session.enter_plan(session)
       send(session, {:agent_provider_event, %Event.AgentStart{}})
@@ -763,10 +761,8 @@ defmodule MingaAgent.SessionTest do
     end
 
     test "stale idle GC messages are ignored after a client reconnects" do
-      {:ok, session} =
-        Session.start_link(provider: MockProvider, provider_opts: [], idle_gc_timeout_ms: 60_000)
-
-      on_exit(fn -> Process.exit(session, :kill) end)
+      session =
+        start_test_session(provider: MockProvider, provider_opts: [], idle_gc_timeout_ms: 60_000)
 
       assert :ok = Session.subscribe(session)
       assert :ok = Session.unsubscribe(session)
@@ -781,15 +777,14 @@ defmodule MingaAgent.SessionTest do
       bad_store_dir = Path.join(dir, "blocked-store")
       File.write!(bad_store_dir, "not a directory")
 
-      {:ok, session} =
-        Session.start_link(
+      session =
+        start_test_session(
           provider: MockProvider,
           provider_opts: [],
+          persist?: true,
           session_store_dir: bad_store_dir,
           idle_gc_timeout_ms: 60_000
         )
-
-      on_exit(fn -> Process.exit(session, :kill) end)
 
       ref = Process.monitor(session)
 
@@ -805,15 +800,14 @@ defmodule MingaAgent.SessionTest do
       bad_store_dir = Path.join(dir, "blocked-store")
       File.write!(bad_store_dir, "not a directory")
 
-      {:ok, session} =
-        Session.start_link(
+      session =
+        start_test_session(
           provider: MockProvider,
           provider_opts: [],
+          persist?: true,
           session_store_dir: bad_store_dir,
           idle_gc_timeout_ms: 60_000
         )
-
-      on_exit(fn -> Process.exit(session, :kill) end)
 
       {_timer_ref, token} = :sys.get_state(session).idle_gc_timer
       ref = Process.monitor(session)
@@ -854,8 +848,8 @@ defmodule MingaAgent.SessionTest do
     end
 
     test "provider write tool is refused through a real plan-mode session" do
-      {:ok, session} =
-        Session.start_link(
+      session =
+        start_test_session(
           provider: PlanToolProvider,
           provider_opts: [parent: self()]
         )
@@ -1034,8 +1028,8 @@ defmodule MingaAgent.SessionTest do
       # Start a session with a provider that will crash immediately
       # so provider stays nil. Use a simpler approach: check the session
       # can handle the call gracefully when provider is nil.
-      {:ok, session} =
-        Session.start_link(
+      session =
+        start_test_session(
           provider: MockProvider,
           provider_opts: []
         )
@@ -1212,7 +1206,14 @@ defmodule MingaAgent.SessionTest do
       assert id1 != id2
     end
 
-    test "save is scheduled after user prompt", %{session: session} do
+    test "save is scheduled after user prompt" do
+      session =
+        start_test_session(
+          provider: MockProvider,
+          provider_opts: [],
+          persist?: true
+        )
+
       # The save fires asynchronously via debounced timer
       Session.send_prompt(session, "test prompt")
       # Just verify no crash; actual file I/O tested in SessionStore tests
@@ -1249,8 +1250,8 @@ defmodule MingaAgent.SessionTest do
     end
 
     test "load_session restores messages, model, provider metadata, and branches", %{tmp_dir: dir} do
-      {:ok, session} =
-        Session.start_link(
+      session =
+        start_test_session(
           provider: MockProvider,
           provider_opts: [],
           session_store_dir: dir
@@ -1305,8 +1306,8 @@ defmodule MingaAgent.SessionTest do
          %{
            tmp_dir: dir
          } do
-      {:ok, session} =
-        Session.start_link(
+      session =
+        start_test_session(
           provider: MockProvider,
           provider_opts: [],
           session_store_dir: dir
@@ -1335,10 +1336,11 @@ defmodule MingaAgent.SessionTest do
     end
 
     test "load_session saves the current dirty session before replacement", %{tmp_dir: dir} do
-      {:ok, session} =
-        Session.start_link(
+      session =
+        start_test_session(
           provider: MockProvider,
           provider_opts: [],
+          persist?: true,
           session_store_dir: dir
         )
 
@@ -2230,8 +2232,8 @@ defmodule MingaAgent.SessionTest do
         mcp_session_stream(chunks)
       end
 
-      {:ok, session} =
-        Session.start_link(
+      session =
+        start_test_session(
           provider: Native,
           provider_opts: [
             model: "anthropic:claude-sonnet-4-20250514",

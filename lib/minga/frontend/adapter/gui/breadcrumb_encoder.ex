@@ -26,15 +26,8 @@ defmodule Minga.Frontend.Adapter.GUI.BreadcrumbEncoder do
   # passes it to the generated codec.
   @spec encode_command(Breadcrumb.t()) :: binary()
   def encode_command(%Breadcrumb{} = model) do
-    writer =
-      model.segments
-      |> Enum.reduce(
-        Writer.new(:gui_breadcrumb)
-        |> Writer.check_uint8(:segment_count, Enum.count(model.segments)),
-        fn segment, writer -> Writer.check_string16(writer, :segment, segment) end
-      )
-
-    writer
+    :gui_breadcrumb
+    |> Writer.new()
     |> Writer.append([
       @op_gui_breadcrumb | Encode.encode_gui_breadcrumb(%{segments: model.segments})
     ])

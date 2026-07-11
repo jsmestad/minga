@@ -31,7 +31,6 @@ defmodule Minga.Frontend.Adapter.GUI.CompletionEncoder do
 
     :gui_completion
     |> Writer.new()
-    |> preflight(wire)
     |> Writer.append(<<@op_gui_completion>>)
     |> Writer.append(Encode.encode_gui_completion(wire))
     |> Writer.finish()
@@ -49,29 +48,6 @@ defmodule Minga.Frontend.Adapter.GUI.CompletionEncoder do
       items: Enum.map(model.items, fn item -> Map.from_struct(item) end),
       documentation: model.documentation
     }
-  end
-
-  @spec preflight(Writer.t(), map()) :: Writer.t()
-  defp preflight(%Writer{} = writer, %{visible: 0}), do: Writer.check_uint8(writer, :visible, 0)
-
-  defp preflight(%Writer{} = writer, wire) do
-    writer
-    |> Writer.check_uint8(:visible, wire.visible)
-    |> Writer.check_uint16(:cursor_row, wire.cursor_row)
-    |> Writer.check_uint16(:cursor_col, wire.cursor_col)
-    |> Writer.check_uint16(:selected_offset, wire.selected_offset)
-    |> Writer.check_uint16(:item_count, Enum.count(wire.items))
-    |> preflight_items(wire.items)
-    |> Writer.check_string16(:documentation, wire.documentation)
-  end
-
-  @spec preflight_items(Writer.t(), [map()]) :: Writer.t()
-  defp preflight_items(%Writer{} = writer, items) do
-    Enum.reduce(items, writer, fn item, acc ->
-      acc
-      |> Writer.check_string16(:item_label, item.label)
-      |> Writer.check_string16(:item_detail, item.detail)
-    end)
   end
 
   @spec fingerprint(Completion.t()) :: term()

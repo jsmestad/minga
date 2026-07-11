@@ -158,7 +158,7 @@ defmodule MingaEditor.Frontend.Emit do
       end
     )
   rescue
-    error in Minga.Frontend.Adapter.GUI.EncodingError ->
+    error in [Minga.Protocol.EncodingError, Minga.Frontend.Adapter.GUI.EncodingError] ->
       Minga.Log.warning(:render, "Discarded invalid GUI frame: #{Exception.message(error)}")
 
       {%{

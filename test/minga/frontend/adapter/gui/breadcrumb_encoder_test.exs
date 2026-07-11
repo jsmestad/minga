@@ -3,7 +3,7 @@ defmodule Minga.Frontend.Adapter.GUI.BreadcrumbEncoderTest do
 
   alias Minga.Frontend.Adapter.GUI.BreadcrumbEncoder
   alias Minga.Frontend.Adapter.GUI.Caches
-  alias Minga.Frontend.Adapter.GUI.EncodingError
+  alias Minga.Protocol.EncodingError
   alias Minga.RenderModel.UI.Breadcrumb
   alias MingaEditor.RenderModel.UI.BreadcrumbBuilder
 
@@ -42,7 +42,14 @@ defmodule Minga.Frontend.Adapter.GUI.BreadcrumbEncoderTest do
     test "rejects a segment count beyond the uint8 carrier" do
       model = %Breadcrumb{file_path: "ignored", root: "/", segments: List.duplicate("a", 256)}
 
-      assert %{command: :gui_breadcrumb, field: :segment_count, actual: 256, min: 0, max: 255} =
+      assert %{
+               command: :gui_breadcrumb,
+               field: :segments,
+               field_path: [:segments],
+               actual: 256,
+               min: 0,
+               max: 255
+             } =
                assert_raise(EncodingError, fn -> BreadcrumbEncoder.encode(model, Caches.new()) end)
     end
 
@@ -53,7 +60,14 @@ defmodule Minga.Frontend.Adapter.GUI.BreadcrumbEncoderTest do
         segments: [String.duplicate("a", 65_536)]
       }
 
-      assert %{command: :gui_breadcrumb, field: :segment, actual: 65_536, min: 0, max: 65_535} =
+      assert %{
+               command: :gui_breadcrumb,
+               field: :segments,
+               field_path: [:segments, 0],
+               actual: 65_536,
+               min: 0,
+               max: 65_535
+             } =
                assert_raise(EncodingError, fn -> BreadcrumbEncoder.encode(model, Caches.new()) end)
     end
 

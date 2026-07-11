@@ -1,6 +1,7 @@
 defmodule Minga.Frontend.Adapter.GUI.SurfaceLayoutEncoderTest do
   use ExUnit.Case, async: true
-  alias Minga.Frontend.Adapter.GUI.{EncodingError, SurfaceLayoutEncoder}
+  alias Minga.Frontend.Adapter.GUI.SurfaceLayoutEncoder
+  alias Minga.Protocol.EncodingError
   @u16_fields [:surface_id, :row, :col, :width, :height, :z]
   defp placement,
     do: %{surface_id: 1, rect: %{row: 2, col: 3, width: 40, height: 20}, z: 4, hit_kind: 5}
@@ -15,10 +16,25 @@ defmodule Minga.Frontend.Adapter.GUI.SurfaceLayoutEncoderTest do
 
       assert error.command == :gui_surface_layout
       assert error.field == field
+      assert error.field_path == field_path(field)
       assert error.actual == value
       assert error.min == 0
       assert error.max == if(field == :hit_kind, do: 255, else: 65_535)
     end
+  end
+
+  test "rejects an overflowing placement count with its schema field path" do
+    error =
+      assert_raise EncodingError, fn ->
+        SurfaceLayoutEncoder.encode_command(List.duplicate(placement(), 65_536))
+      end
+
+    assert error.command == :gui_surface_layout
+    assert error.field == :placements
+    assert error.field_path == [:placements]
+    assert error.actual == 65_536
+    assert error.min == 0
+    assert error.max == 65_535
   end
 
   test "accepts the wire maximum for every bounded field" do
@@ -43,6 +59,12 @@ defmodule Minga.Frontend.Adapter.GUI.SurfaceLayoutEncoderTest do
 
     assert Exception.message(error) =~ "z=%{}"
   end
+
+  defp field_path(field) when field in [:surface_id, :z, :hit_kind],
+    do: [:placements, 0, field]
+
+  defp field_path(field) when field in [:row, :col, :width, :height],
+    do: [:placements, 0, :rect, field]
 
   defp put_field(placement, field, value) when field in [:surface_id, :z, :hit_kind],
     do: Map.put(placement, field, value)

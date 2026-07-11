@@ -58,36 +58,17 @@ defmodule Minga.Frontend.Adapter.GUI.SurfaceLayoutEncoder do
   Always emits (one section, possibly with an empty placement array). The
   command is part of the frame transaction, so it ships every frame between
   begin_frame and commit_frame; there is no skip-if-unchanged cache because the
-  placement list IS the per-frame layout authority. Invalid bounded fields are
-  rejected before encoding so a frame can never contain truncated placement data.
+  placement list IS the per-frame layout authority. The schema-generated encoder
+  rejects invalid bounded fields before bytes are constructed, so a frame can
+  never contain truncated placement data.
   """
   @spec encode_command([wire_placement()]) :: binary()
   def encode_command(placements) when is_list(placements) do
-    writer =
-      placements
-      |> Enum.reduce(
-        Writer.new(:gui_surface_layout)
-        |> Writer.check_uint16(:placement_count, Enum.count(placements)),
-        &validate(&2, &1)
-      )
-
     payload = Encode.encode_gui_surface_layout_placements(placements)
 
-    writer
+    Writer.new(:gui_surface_layout)
     |> Writer.append(<<@op_gui_surface_layout, 1>>)
     |> Writer.section16(:placements_payload, @section_placements, payload)
     |> Writer.finish()
-  end
-
-  @spec validate(Writer.t(), wire_placement()) :: Writer.t()
-  defp validate(writer, %{surface_id: surface_id, rect: rect, z: z, hit_kind: hit_kind}) do
-    writer
-    |> Writer.check_uint16(:surface_id, surface_id)
-    |> Writer.check_uint16(:row, rect.row)
-    |> Writer.check_uint16(:col, rect.col)
-    |> Writer.check_uint16(:width, rect.width)
-    |> Writer.check_uint16(:height, rect.height)
-    |> Writer.check_uint16(:z, z)
-    |> Writer.check_uint8(:hit_kind, hit_kind)
   end
 end
