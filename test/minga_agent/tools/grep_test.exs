@@ -2,6 +2,9 @@ defmodule MingaAgent.Tools.GrepTest do
   # Spawns OS processes through rg/grep/git-backed ignore checks, which must not run async.
   use ExUnit.Case, async: false
 
+  # The real search binary contract runs separately from the edit-loop suite.
+  @moduletag :heavy
+
   alias MingaAgent.Tools.Grep
 
   defp with_fake_path(executables, fun) do

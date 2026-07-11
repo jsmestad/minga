@@ -12,8 +12,8 @@ defmodule MingaEditor.HighlightIntegrationTest do
   describe "buffer switch highlight lifecycle" do
     @tag :tmp_dir
     test "opening a new file clears stale active highlights", %{tmp_dir: tmp_dir} do
-      path1 = Path.join(tmp_dir, "file1.ex")
-      path2 = Path.join(tmp_dir, "file2.ex")
+      path1 = Path.join(tmp_dir, "file1.txt")
+      path2 = Path.join(tmp_dir, "file2.txt")
       File.write!(path1, "defmodule A do\nend\n")
       File.write!(path2, "defmodule B do\nend\n")
 
@@ -27,8 +27,8 @@ defmodule MingaEditor.HighlightIntegrationTest do
 
     @tag :tmp_dir
     test "switching back to a highlighted file restores its cached spans", %{tmp_dir: tmp_dir} do
-      path1 = Path.join(tmp_dir, "file1.ex")
-      path2 = Path.join(tmp_dir, "file2.ex")
+      path1 = Path.join(tmp_dir, "file1.txt")
+      path2 = Path.join(tmp_dir, "file2.txt")
       File.write!(path1, "defmodule A do\nend\n")
       File.write!(path2, "defmodule B do\nend\n")
 
