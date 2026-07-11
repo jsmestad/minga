@@ -30,7 +30,6 @@ public struct SignatureInfo: Identifiable {
 }
 
 @MainActor
-@Observable
 public final class SignatureHelpState {
     public init(visible: Bool = false, anchorRow: Int = 0, anchorCol: Int = 0, activeSignature: Int = 0, activeParameter: Int = 0, signatures: [SignatureInfo] = []) {
         self.visible = visible

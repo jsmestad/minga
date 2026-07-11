@@ -2,7 +2,6 @@ import Foundation
 import MingaProtocol
 
 @MainActor
-@Observable
 public final class EditTimelineState {
     public init(visible: Bool = false, viewingIndex: Int = -1, entries: [TimelineEntry] = [], files: [TimelineFile] = []) {
         self.visible = visible

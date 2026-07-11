@@ -63,6 +63,9 @@ struct FrameDecodeMetrics: Sendable, Equatable {
 }
 
 /// A fully validated packet. No command is observable until this value exists.
+/// The main-actor dispatcher consumes the whole value and compiles its commands
+/// directly into a `PreparedFrameTransactionBuilder`; it never stores packet views
+/// or publishes commands individually.
 struct DecodedFrame: Sendable {
     let commands: [DecodedCommand]
     let metrics: FrameDecodeMetrics

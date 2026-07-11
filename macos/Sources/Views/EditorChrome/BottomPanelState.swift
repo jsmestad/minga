@@ -19,7 +19,6 @@ public struct BottomPanelTab: Identifiable, Equatable {
 }
 
 @MainActor
-@Observable
 public final class BottomPanelState {
     public init(visible: Bool = false, activeTabIndex: Int = 0, heightPercent: Int = 30, filterPreset: UInt8 = 0, tabs: [BottomPanelTab] = []) {
         self.visible = visible

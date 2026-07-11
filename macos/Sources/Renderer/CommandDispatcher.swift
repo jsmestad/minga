@@ -4,23 +4,18 @@
 /// and the dedicated gui_* opcodes. The cell-paradigm commands (draw_text,
 /// set_cursor, clear, region tracking) were retired in protocol_version 2.
 ///
-/// ## Frame transactions (#2219 child D)
+/// ## Frame transactions (#2747)
 ///
 /// Every BEAM frame is bracketed by `begin_frame` and `commit_frame`. Between
-/// the two, transaction-scoped commands are *buffered* in `stagedCommands`
-/// rather than mutating the presented `FrameState`/`GUIState`, so SwiftUI never
-/// renders a half-applied frame. At `commit_frame` the dispatcher validates the
-/// transaction (frame_seq matches the open begin; base_frame_seq is 0 or the
-/// last committed seq) and *replays* the buffered commands through the same
-/// `apply(_:)` switch that drives non-transactional dispatch. This is the
-/// buffered-commands design from the AC-1 consult: one mutation path, no shadow
-/// state, no per-field staging twins. The replay happens synchronously inside
-/// `commit_frame` before `onFrameReady`, so the SwiftUI render pass observes the
-/// whole frame as one consistent update.
+/// the two, commands compile into typed domain updates in a value-semantic
+/// `PreparedFrameTransactionBuilder`; presented state remains untouched.
+/// Window deltas and resource references resolve while staging. Commit validates
+/// ordering and freezes the builder before entering one focused GUI publication
+/// boundary, so an invalid frame cannot partially publish.
 ///
-/// Invalidation (truncation via double-begin, seq mismatch, base mismatch, or a
-/// decode failure surfaced while a transaction is open) discards the staged
-/// buffer and requests a fresh keyframe via `onRequestKeyframe`. A subtle
+/// Rejection (truncation via double-begin, seq mismatch, base mismatch, or a
+/// decode failure surfaced while a transaction is open) discards the builder
+/// and requests a fresh keyframe via `onRequestKeyframe`. A subtle
 /// resync-pending hint (`GUIState.resyncState`) is raised until the next clean
 /// commit lands.
 
@@ -143,9 +138,21 @@ final class CommandDispatcher {
     /// Validated against `lastCommittedFrameSeq` at commit.
     private var openBaseFrameSeq: UInt32 = 0
 
-    /// Commands buffered since the open `begin_frame`. Replayed through
-    /// `apply(_:)` at `commit_frame` so the presented state changes in one batch.
-    private var stagedCommands: [RenderCommand] = []
+    /// Value-semantic builder for the open frame. Commands are classified and
+    /// window deltas are resolved during staging; commit only freezes and publishes.
+    private var transactionBuilder: PreparedFrameTransactionBuilder?
+
+    /// Font resources known to the publisher. Font id 0 is the primary font.
+    private var registeredFontIds: Set<UInt8> = [0]
+
+    /// Typed result boundary consumed by the frame acknowledgement work in #2739.
+    var onTransactionResult: ((FrameTransactionResult) -> Void)?
+
+    /// Number of focused publication-boundary entries, exposed for instrumentation.
+    private(set) var publicationCount = 0
+
+    /// Cost of the most recently published frame in changed-domain operations.
+    private(set) var lastPublicationOperationCounts: PreparedFrameOperationCounts?
 
     /// frame_seq of the last transaction this dispatcher committed cleanly.
     /// Doubles as the delta base validator and the `last_good_frame_seq` carried
@@ -187,7 +194,7 @@ final class CommandDispatcher {
 
     /// Entry point from the protocol reader. Routes a decoded command through the
     /// frame-transaction state machine: frame markers open/close transactions,
-    /// transaction-scoped commands buffer into `stagedCommands`, and explicitly
+    /// transaction-scoped commands compile into the prepared builder, and explicitly
     /// sanctioned out-of-band commands apply immediately (or stage if inside a
     /// transaction). Everything else outside a transaction triggers active
     /// recovery: invalidation and a keyframe request.
@@ -198,6 +205,14 @@ final class CommandDispatcher {
     /// active recovery rather than silent drop. Contrast the old positive-allowlist
     /// design where a missing entry caused an unnecessary keyframe request with no
     /// application of the command.
+    /// Stages every immutable command from one decoded packet through the same
+    /// prepared-transaction builder. Packet decoding itself remains off-main.
+    func dispatch(_ frame: DecodedFrame) {
+        for decoded in frame.commands {
+            dispatch(decoded.command, opcode: decoded.opcode)
+        }
+    }
+
     func dispatch(_ command: RenderCommand, opcode: UInt8? = nil) {
         switch command {
         case .beginFrame(let frameSeq, let baseFrameSeq):
@@ -208,7 +223,7 @@ final class CommandDispatcher {
 
         // Sanctioned out-of-band commands: the BEAM legitimately emits these
         // outside a begin/commit bracket. If one arrives inside an open
-        // transaction it stages for atomic replay; outside one it applies
+        // transaction it compiles for atomic publication; outside one it applies
         // immediately. Mirrors Go's explicit match arms at model.go:444-450.
         //
         // setTitle / setWindowBg / setLinkCursor / clipboardWrite: post-commit
@@ -217,26 +232,39 @@ final class CommandDispatcher {
         // setFont / setFontFallback / registerFont / guiConfigState: startup
         //   config emitted before the first frame (equivalent to Go's CommandNoop
         //   for font commands, but Swift actually applies them).
-        case .setTitle, .setWindowBg, .setLinkCursor, .protocolError,
-             .setFont, .setFontFallback, .registerFont,
-             .guiConfigState, .clipboardWrite:
-            if openFrameSeq != nil {
-                stagedCommands.append(command)
-            } else {
+        case .guiConfigState:
+            // Settings is an independently interactive scene. Its config stream
+            // is startup/out-of-band state and never participates in a render frame.
+            guiState.performOutOfBandPublication {
                 apply(command)
+            }
+
+        case .setTitle, .setWindowBg, .setLinkCursor, .protocolError,
+             .setFont, .setFontFallback, .registerFont, .clipboardWrite:
+            if openFrameSeq != nil {
+                transactionBuilder?.stage(command)
+            } else {
+                guiState.performOutOfBandPublication {
+                    apply(command)
+                }
             }
 
         default:
             if openFrameSeq != nil {
-                // Inside a transaction: buffer for atomic replay at commit.
-                stagedCommands.append(command)
+                // Inside a transaction: compile into typed domain updates.
+                transactionBuilder?.stage(command)
             } else {
                 // A command arrived with no open transaction and no sanctioned
                 // out-of-band match above. Either a new BEAM out-of-band command
                 // was added to the protocol without a corresponding explicit arm
                 // here, or the byte stream is desynced. Active recovery: discard
                 // staged state and request a keyframe. Mirrors Go model.go:454-456.
-                invalidate(reason: "out-of-transaction command", sourceOpcode: opcode)
+                reject(
+                    .outOfTransactionCommand(opcode: opcode),
+                    frameSeq: nil,
+                    logReason: "out-of-transaction command",
+                    sourceOpcode: opcode
+                )
             }
         }
     }
@@ -245,89 +273,91 @@ final class CommandDispatcher {
     /// `commit_frame` is truncation: the prior frame never closed, so its staged
     /// commands are discarded and we resync before opening the new transaction.
     private func beginTransaction(frameSeq: UInt32, baseFrameSeq: UInt32) {
-        if openFrameSeq != nil {
+        if let openFrameSeq {
             // Double-begin = truncation of the previous frame.
-            invalidate(reason: "begin_frame while a transaction was open")
+            reject(
+                .beginWhileOpen(openFrameSeq: openFrameSeq, incomingFrameSeq: frameSeq),
+                frameSeq: openFrameSeq,
+                logReason: "begin_frame while a transaction was open"
+            )
         }
         openFrameSeq = frameSeq
         openBaseFrameSeq = baseFrameSeq
-        stagedCommands.removeAll(keepingCapacity: true)
+        transactionBuilder = PreparedFrameTransactionBuilder(
+            frameSeq: frameSeq,
+            baseFrameSeq: baseFrameSeq,
+            committedWindows: guiState.windowContents,
+            registeredFontIds: registeredFontIds,
+            committedTranscript: guiState.agentChatState.transcriptSnapshot
+        )
         if baseFrameSeq == 0 && resyncRecoveryState == .awaitingKeyframe {
             resyncRecoveryState = .keyframeInFlight
         }
     }
 
-    /// Closes a frame transaction. Validates frame_seq against the open begin and
-    /// base_frame_seq against the last clean commit, then replays the buffered
-    /// commands through `apply(_:)` in one batch and presents. Any validation
-    /// failure discards staging and requests a keyframe without partial promotion.
+    /// Closes, freezes, and publishes the open transaction. Validation completes
+    /// before `publish(_:)` is entered, so a rejected frame has no observable writes.
     private func commitTransaction(frameSeq: UInt32, inputSeq: UInt32) {
         guard let open = openFrameSeq else {
-            // commit_frame with no open begin: truncation/desync.
-            invalidate(reason: "commit_frame with no open transaction")
+            reject(
+                .commitWithoutBegin(frameSeq: frameSeq),
+                frameSeq: frameSeq,
+                logReason: "commit_frame with no open transaction"
+            )
             return
         }
-
         guard frameSeq == open else {
-            invalidate(reason: "commit_frame seq \(frameSeq) != open begin seq \(open)")
+            reject(
+                .commitSequenceMismatch(openFrameSeq: open, commitFrameSeq: frameSeq),
+                frameSeq: open,
+                logReason: "commit_frame seq \(frameSeq) != open begin seq \(open)"
+            )
+            return
+        }
+        guard !hasCommitted || frameSeq > lastCommittedFrameSeq else {
+            reject(
+                .frameSequenceNotIncreasing(lastFrameSeq: lastCommittedFrameSeq, incomingFrameSeq: frameSeq),
+                frameSeq: frameSeq,
+                logReason: "frame_seq \(frameSeq) is not newer than \(lastCommittedFrameSeq)"
+            )
             return
         }
 
-        // base_frame_seq == 0 is a keyframe (depends on nothing). Otherwise the
-        // base must name the frame_seq this client last committed cleanly.
         let baseValid = openBaseFrameSeq == 0 ||
             (hasCommitted && openBaseFrameSeq == lastCommittedFrameSeq)
         guard baseValid else {
-            invalidate(reason: "base_frame_seq \(openBaseFrameSeq) != last committed \(lastCommittedFrameSeq)")
+            reject(
+                .baseSequenceMismatch(expectedFrameSeq: lastCommittedFrameSeq, actualBaseFrameSeq: openBaseFrameSeq),
+                frameSeq: frameSeq,
+                logReason: "base_frame_seq \(openBaseFrameSeq) != last committed \(lastCommittedFrameSeq)"
+            )
+            return
+        }
+        guard let transactionBuilder else {
+            reject(.decodeFailure(frameSeq: frameSeq), frameSeq: frameSeq, logReason: "missing frame builder")
             return
         }
 
-        let validation = stagedThemeValidation()
-        if validation.found {
-            if !validation.missingSlots.isEmpty {
-                let missingSlots = CommandDispatcher.formatMissingThemeSlots(validation.missingSlots)
-                if openBaseFrameSeq == 0 {
-                    PortLogger.warn("Keyframe committed with incomplete gui_theme, missing slots: \(missingSlots)")
-                    apply(.protocolError(message: "missing gui_theme slots in keyframe: \(missingSlots)"))
-                    return invalidate(reason: "missing gui_theme slots in keyframe: \(missingSlots)")
-                }
-
-                PortLogger.warn("Frame committed with incomplete gui_theme, missing slots: \(missingSlots)")
-                apply(.protocolError(message: "missing gui_theme slots: \(missingSlots)"))
-                return invalidate(reason: "missing gui_theme slots: \(missingSlots)")
+        switch transactionBuilder.freeze(requiredThemeSlots: Self.requiredThemeSlots) {
+        case .failure(let rejection):
+            reject(rejection, frameSeq: frameSeq, logReason: rejection.logDescription)
+            return
+        case .success(let transaction):
+            if openBaseFrameSeq == 0 && resyncRecoveryState == .keyframeInFlight {
+                resyncRecoveryState = .clean
+                guiState.resyncState.clear()
             }
-        } else if openBaseFrameSeq == 0 {
-            PortLogger.warn("Keyframe committed without gui_theme; refusing to present unthemed frame")
-            apply(.protocolError(message: "missing gui_theme in keyframe"))
-            return invalidate(reason: "missing gui_theme in keyframe")
+            publish(transaction)
         }
 
-        // Promote: replay the staged commands through the single mutation path.
-        // This whole loop runs synchronously before onFrameReady, so SwiftUI's
-        // render pass observes one consistent update rather than each step.
-        for staged in stagedCommands {
-            apply(staged)
-        }
-
-        if openBaseFrameSeq == 0 {
-            pruneAuthoritativeFrameState(liveWindowIds: liveWindowIds(from: stagedCommands))
-        }
-
-        // Record the clean commit and clear the transaction.
         lastCommittedFrameSeq = frameSeq
         hasCommitted = true
         openFrameSeq = nil
-        stagedCommands.removeAll(keepingCapacity: true)
-        if openBaseFrameSeq == 0 && resyncRecoveryState == .keyframeInFlight {
-            resyncRecoveryState = .clean
-            guiState.resyncState.clear()
-        }
+        self.transactionBuilder = nil
 
-        // Resolve the keystroke-to-present latency sample for the echoed input
-        // correlation sequence (ticket #2215). The frame is fully promoted here
-        // and about to be presented by the Metal renderer.
         os_signpost(.event, log: renderLog, name: "CommitFrame", "frame=%{public}u input=%{public}u", frameSeq, inputSeq)
         latency.resolve(seq: inputSeq)
+        onTransactionResult?(.published(frameSeq: frameSeq))
         if let firstRender = onFirstRender {
             firstRender()
             onFirstRender = nil
@@ -336,20 +366,42 @@ final class CommandDispatcher {
         onFrameReady?()
     }
 
-    private func stagedThemeValidation() -> (found: Bool, missingSlots: [UInt8]) {
-        var found = false
-
-        for command in stagedCommands {
-            if case .guiTheme(let slots) = command {
-                found = true
-                let missingSlots = CommandDispatcher.missingThemeSlots(in: slots)
-                if !missingSlots.isEmpty {
-                    return (true, missingSlots)
+    /// The sole committed-GUI publication boundary.
+    private func publish(_ transaction: PreparedFrameTransaction) {
+        guiState.performFramePublication(frameSeq: transaction.frameSeq) {
+            if let theme = transaction.theme { apply(.guiTheme(slots: theme.slots)) }
+            if let resources = transaction.resources { resources.commands.forEach(apply) }
+            if let windows = transaction.windows { apply(windows) }
+            if let metadata = transaction.metadata { metadata.commands.forEach(apply) }
+            if let chrome = transaction.chrome {
+                if let transcript = chrome.transcript {
+                    guiState.agentChatState.publishTranscript(transcript)
                 }
+                chrome.commands.forEach(apply)
             }
+            if let overlays = transaction.overlays { overlays.commands.forEach(apply) }
+            if let focus = transaction.focus { focus.commands.forEach(apply) }
         }
+        publicationCount += 1
+        lastPublicationOperationCounts = transaction.operationCounts
+    }
 
-        return (found, [])
+    private func apply(_ updates: PreparedWindowUpdates) {
+        for (windowId, content) in updates.replacements {
+            let previousScroll = guiState.windowContents[windowId]?.scrollPresentation
+            guiState.windowContents[windowId] = content
+            if shouldResetScrollPresentation(previous: previousScroll, next: content.scrollPresentation) {
+                discardLocalPresentation(.offset, windowId: windowId)
+            }
+            frameState.cursorVisible = content.cursorVisible
+            frameState.dirty = true
+        }
+        updates.commands.forEach(apply)
+        if let authoritativeWindowIds = updates.authoritativeWindowIds {
+            pruneAuthoritativeFrameState(liveWindowIds: authoritativeWindowIds)
+        } else {
+            currentFrameWindowIds.formUnion(updates.touchedWindowIds)
+        }
     }
 
     private func pruneAuthoritativeFrameState(liveWindowIds: Set<UInt16>) {
@@ -371,55 +423,25 @@ final class CommandDispatcher {
         frameState.viewportTopLine = activeGutter.entries.first?.bufLine ?? 0xFFFF_FFFF
     }
 
-    private func liveWindowIds(from commands: [RenderCommand]) -> Set<UInt16> {
-        var ids = Set<UInt16>()
-        ids.reserveCapacity(commands.count)
-
-        for command in commands {
-            switch command {
-            case .guiWindowContent(let data):
-                ids.insert(data.windowId)
-            case .guiWindowOverlayDelta(let data):
-                ids.insert(data.windowId)
-            case .guiWindowViewportDelta(let data):
-                ids.insert(data.windowId)
-            case .guiWindowRowsDelta(let data):
-                ids.insert(data.windowId)
-            case .guiGutter(let data):
-                ids.insert(data.windowId)
-            case .guiIndentGuides(let data):
-                ids.insert(data.windowId)
-            default:
-                continue
-            }
-        }
-
-        return ids
-    }
-
-    private static func missingThemeSlots(in slots: [(UInt8, UInt8, UInt8, UInt8)]) -> [UInt8] {
-        let present = Set(slots.map { $0.0 })
-        return requiredThemeSlots.filter { !present.contains($0) }
-    }
-
-    private static func formatMissingThemeSlots(_ slots: [UInt8]) -> String {
-        slots.map { String(format: "0x%02X", $0) }.joined(separator: ", ")
-    }
-
-    /// Discards the open transaction's staged commands without promoting any of
-    /// them and asks the BEAM for a fresh keyframe (#2219 child D). The presented
-    /// state is left exactly as the last clean commit left it, so the screen
-    /// holds the last good frame until the keyframe arrives. Raises a subtle
-    /// resync-pending hint in the meantime.
-    private func invalidate(reason: String, sourceOpcode: UInt8? = nil) {
+    /// Rejects one frame, leaves the last-good publication untouched, and emits
+    /// exactly one typed result for the acknowledgement layer in #2739.
+    private func reject(
+        _ rejection: PreparedFrameRejection,
+        frameSeq: UInt32?,
+        logReason: String,
+        sourceOpcode: UInt8? = nil
+    ) {
         let opcodeContext = sourceOpcode.map { String(format: ", opcode=0x%02X", $0) } ?? ""
         let shouldRequestKeyframe = resyncRecoveryState != .awaitingKeyframe
         resyncRecoveryState = .awaitingKeyframe
-        PortLogger.warn("Frame transaction invalidated (\(reason)\(opcodeContext)); \(shouldRequestKeyframe ? "requesting" : "awaiting") keyframe from \(lastCommittedFrameSeq)")
+        PortLogger.warn("Frame transaction rejected (\(logReason)\(opcodeContext)); \(shouldRequestKeyframe ? "requesting" : "awaiting") keyframe from \(lastCommittedFrameSeq)")
         openFrameSeq = nil
         openBaseFrameSeq = 0
-        stagedCommands.removeAll(keepingCapacity: false)
-        guiState.resyncState.markPending(lastGoodFrameSeq: lastCommittedFrameSeq)
+        transactionBuilder = nil
+        guiState.performOutOfBandPublication {
+            guiState.resyncState.markPending(lastGoodFrameSeq: lastCommittedFrameSeq)
+        }
+        onTransactionResult?(.rejected(frameSeq: frameSeq, reason: rejection))
         if shouldRequestKeyframe {
             onRequestKeyframe?(lastCommittedFrameSeq)
         }
@@ -432,8 +454,12 @@ final class CommandDispatcher {
     /// a transaction there is nothing staged to discard, so the reader keeps its
     /// existing log-and-continue behavior.
     func decodeFailed() {
-        guard openFrameSeq != nil else { return }
-        invalidate(reason: "decode failure inside an open transaction")
+        guard let openFrameSeq else { return }
+        reject(
+            .decodeFailure(frameSeq: openFrameSeq),
+            frameSeq: openFrameSeq,
+            logReason: "decode failure inside an open transaction"
+        )
     }
 
     /// Test seam: apply a single command directly to the presented state,
@@ -441,6 +467,17 @@ final class CommandDispatcher {
     /// this; it routes through `dispatch`. Routing/setup tests use it to assert a
     /// command's mutation without bracketing every call in begin/commit.
     func applyForTesting(_ command: RenderCommand) {
+        if case .guiAgentTranscript(let mode, let epoch, let truncated, let trimFront, let baseCount, let messages) = command {
+            _ = guiState.agentChatState.applyTranscript(
+                mode: mode,
+                epoch: epoch,
+                truncated: truncated,
+                trimFront: Int(trimFront),
+                baseCount: Int(baseCount),
+                messages: messages
+            )
+            return
+        }
         apply(command)
     }
 
@@ -471,14 +508,17 @@ final class CommandDispatcher {
     func previewFileTreeNavigation(codepoint: UInt32, modifiers: UInt8) -> Bool {
         guard modifiers == 0 else { return false }
 
+        let changed: Bool
         switch codepoint {
         case FileTreeNavigationCodepoints.downKey, FileTreeNavigationCodepoints.downArrow:
-            return guiState.fileTreeState.previewNavigation(delta: 1)
+            changed = guiState.fileTreeState.previewNavigation(delta: 1)
         case FileTreeNavigationCodepoints.upKey, FileTreeNavigationCodepoints.upArrow:
-            return guiState.fileTreeState.previewNavigation(delta: -1)
+            changed = guiState.fileTreeState.previewNavigation(delta: -1)
         default:
             return false
         }
+        if changed { guiState.performOutOfBandPublication {} }
+        return changed
     }
 
     @discardableResult
@@ -505,26 +545,31 @@ final class CommandDispatcher {
         } else {
             return false
         }
-        return guiState.completionState.previewNavigation(delta: delta)
+        let changed = guiState.completionState.previewNavigation(delta: delta)
+        if changed { guiState.performOutOfBandPublication {} }
+        return changed
     }
 
     @discardableResult
     func previewPickerNavigation(codepoint: UInt32, modifiers: UInt8) -> Bool {
         guard modifiers == 0 else { return false }
 
+        let changed: Bool
         switch codepoint {
         case PickerNavigationCodepoints.downKey, PickerNavigationCodepoints.downArrow:
-            return guiState.pickerState.previewNavigation(delta: 1)
+            changed = guiState.pickerState.previewNavigation(delta: 1)
         case PickerNavigationCodepoints.upKey, PickerNavigationCodepoints.upArrow:
-            return guiState.pickerState.previewNavigation(delta: -1)
+            changed = guiState.pickerState.previewNavigation(delta: -1)
         default:
             return false
         }
+        if changed { guiState.performOutOfBandPublication {} }
+        return changed
     }
 
-    /// Apply a single render command to the presented FrameState/GUIState. This
-    /// is the single mutation path: called directly for out-of-band commands and
-    /// replayed for every staged command at commit. It must NOT handle the frame
+    /// Apply one domain command to the presented FrameState/GUIState. This is
+    /// called directly for out-of-band commands and from the focused prepared
+    /// publication boundary for committed domain updates. It must NOT handle frame
     /// markers (begin/commit) — those drive the transaction state machine in
     /// `dispatch`/`commitTransaction`, not the presented state.
     private func apply(_ command: RenderCommand) {
@@ -535,7 +580,7 @@ final class CommandDispatcher {
         case .beginFrame, .commitFrame:
             // Frame markers drive the transaction state machine in `dispatch`,
             // not the presented state. They are intercepted before `apply` is
-            // called and are never buffered into `stagedCommands`, so reaching
+            // called and are never staged into a prepared transaction, so reaching
             // here means a routing bug.
             PortLogger.warn("Frame marker reached apply(_:); transaction routing bug")
 
@@ -572,6 +617,7 @@ final class CommandDispatcher {
 
         case .registerFont(let id, let family):
             fontManager?.registerFont(id: id, name: family)
+            registeredFontIds.insert(id)
 
         case .guiConfigState(let configState):
             guiState.settingsState.apply(configState: configState)
@@ -583,7 +629,7 @@ final class CommandDispatcher {
             guiState.editTimelineState.update(visible: visible, viewingIndex: viewingIndex, wireEntries: entries, wireFiles: files)
 
         case .guiTheme(let slots):
-            guiState.themeColors.applySlots(slots)
+            guiState.replaceTheme(slots: slots)
             let tc = guiState.themeColors
             frameState.gutterColors = GutterThemeColors(
                 fg: tc.gutterFgRGB,
@@ -714,8 +760,10 @@ final class CommandDispatcher {
                 onAgentChatVisibilityChanged?(guiState.agentChatState.visible)
             }
 
-        case .guiAgentTranscript(let mode, let epoch, let truncated, let trimFront, let baseCount, let messages):
-            guiState.agentChatState.applyTranscript(mode: mode, epoch: epoch, truncated: truncated, trimFront: Int(trimFront), baseCount: Int(baseCount), messages: messages)
+        case .guiAgentTranscript:
+            // Prepared transactions publish the validated value snapshot directly.
+            // Reaching this path would bypass all-or-nothing transcript validation.
+            assertionFailure("guiAgentTranscript must be prepared before publication")
 
         case .guiGutterSeparator(let col, let r, let g, let b):
             let rgb: UInt32 = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)

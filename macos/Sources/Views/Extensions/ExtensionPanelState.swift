@@ -5,7 +5,7 @@ import MingaProtocol
 ///
 /// Updated by `CommandDispatcher` from `gui_extension_panel` (0x9D) opcode.
 /// Read by `ExtensionPanelView` to render structured content with native widgets.
-@MainActor @Observable
+@MainActor
 public final class ExtensionPanelState {
     public init() {}
     /// Active panel entries from all extensions.

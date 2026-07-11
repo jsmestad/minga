@@ -6,7 +6,6 @@
 import SwiftUI
 
 @MainActor
-@Observable
 public final class BreadcrumbState {
     public init(segments: [String] = []) {
         self.segments = segments

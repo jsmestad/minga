@@ -45,8 +45,24 @@ public struct HelpGroup: Identifiable {
     public var id: String { title }
 }
 
+/// Value-semantic resident transcript used to validate and prepare a complete
+/// frame before any GUI state is published.
+public struct AgentTranscriptSnapshot {
+    let messages: [ChatMessageEntry]
+    let epoch: UInt32
+    let hasTranscript: Bool
+    let truncated: Bool
+    let promptVersion: Int
+}
+
+/// Stable reason that a transcript operation cannot join the resident transcript snapshot.
+public enum AgentTranscriptPreparationFailure: Error, Equatable {
+    case beforeSeed
+    case epochMismatch
+    case desynced
+}
+
 @MainActor
-@Observable
 public final class AgentChatState {
     public init(visible: Bool = false, status: UInt8 = 0, model: String = "", thinkingLevel: String = "medium", prompt: String = "", messages: [ChatMessageEntry] = [], helpVisible: Bool = false, helpGroups: [HelpGroup] = [], promptVersion: Int = 0, promptLineCount: UInt8 = 1, promptCursorLine: UInt16 = 0, promptCursorCol: UInt16 = 0, promptVimMode: UInt8 = 0, promptVisibleRows: UInt8 = 1, promptCompletion: Wire.PromptCompletion? = nil) {
         self.visible = visible
@@ -220,40 +236,85 @@ public final class AgentChatState {
 
     @discardableResult
     public func applyTranscript(mode: UInt8, epoch: UInt32, truncated: Bool = false, trimFront: Int = 0, baseCount: Int, messages rawMessages: [Wire.ChatMessage]) -> TranscriptApplyOutcome {
-        let mapped = rawMessages.map(Self.mapMessage)
-
-        if mode == 0 {
-            self.messages = mapped
-            self.transcriptEpoch = epoch
-            self.hasTranscript = true
-            self.transcriptTruncated = truncated
-            self.promptVersion += 1
-            return .appliedFullReplace
-        }
-
-        // Drop conditions (await the next full_replace), per GUI_PROTOCOL.md 0x86.
-        // Each is named and logged: a drop means the transcript stops updating until
-        // the next full_replace, and an invisible freeze is the worst failure mode
-        // this stream can have.
-        guard hasTranscript else {
+        switch Self.prepareTranscript(
+            from: transcriptSnapshot,
+            mode: mode,
+            epoch: epoch,
+            truncated: truncated,
+            trimFront: trimFront,
+            baseCount: baseCount,
+            messages: rawMessages
+        ) {
+        case .success(let prepared):
+            publishTranscript(prepared)
+            return mode == 0 ? .appliedFullReplace : .appliedAppend
+        case .failure(.beforeSeed):
             PortLogger.warn("transcript append before seed dropped (epoch \(epoch))")
             return .droppedBeforeSeed
-        }
-        guard epoch == transcriptEpoch else {
+        case .failure(.epochMismatch):
             PortLogger.warn("transcript append epoch mismatch dropped (frame \(epoch), store \(transcriptEpoch))")
             return .droppedEpochMismatch
-        }
-        guard trimFront >= 0, baseCount >= 0, messages.count >= trimFront + baseCount else {
+        case .failure(.desynced):
             PortLogger.warn("transcript append desynced dropped (resident \(messages.count), trimFront \(trimFront), baseCount \(baseCount), epoch \(epoch))")
             return .droppedDesynced
         }
+    }
 
-        // Evict trim_front from the front, keep [0, base_count) of the remainder, upsert.
-        let kept = messages[trimFront ..< (trimFront + baseCount)]
-        self.messages = Array(kept) + mapped
-        self.transcriptTruncated = truncated
-        self.promptVersion += 1
-        return .appliedAppend
+    /// Captures the resident transcript as a value for frame-level validation.
+    public var transcriptSnapshot: AgentTranscriptSnapshot {
+        AgentTranscriptSnapshot(
+            messages: messages,
+            epoch: transcriptEpoch,
+            hasTranscript: hasTranscript,
+            truncated: transcriptTruncated,
+            promptVersion: promptVersion
+        )
+    }
+
+    /// Validates and applies one full or append transcript operation without mutating presented state.
+    public static func prepareTranscript(
+        from current: AgentTranscriptSnapshot,
+        mode: UInt8,
+        epoch: UInt32,
+        truncated: Bool,
+        trimFront: Int,
+        baseCount: Int,
+        messages rawMessages: [Wire.ChatMessage]
+    ) -> Result<AgentTranscriptSnapshot, AgentTranscriptPreparationFailure> {
+        let mapped = rawMessages.map(Self.mapMessage)
+        if mode == 0 {
+            return .success(AgentTranscriptSnapshot(
+                messages: mapped,
+                epoch: epoch,
+                hasTranscript: true,
+                truncated: truncated,
+                promptVersion: current.promptVersion + 1
+            ))
+        }
+        guard current.hasTranscript else { return .failure(.beforeSeed) }
+        guard epoch == current.epoch else { return .failure(.epochMismatch) }
+        guard trimFront >= 0,
+              baseCount >= 0,
+              current.messages.count >= trimFront + baseCount else {
+            return .failure(.desynced)
+        }
+        let kept = current.messages[trimFront ..< (trimFront + baseCount)]
+        return .success(AgentTranscriptSnapshot(
+            messages: Array(kept) + mapped,
+            epoch: current.epoch,
+            hasTranscript: true,
+            truncated: truncated,
+            promptVersion: current.promptVersion + 1
+        ))
+    }
+
+    /// Installs a transcript snapshot that was fully validated before frame publication.
+    public func publishTranscript(_ snapshot: AgentTranscriptSnapshot) {
+        messages = snapshot.messages
+        transcriptEpoch = snapshot.epoch
+        hasTranscript = snapshot.hasTranscript
+        transcriptTruncated = snapshot.truncated
+        promptVersion = snapshot.promptVersion
     }
 
     /// Maps a decoded wire message onto its displayable `ChatMessageEntry`.
