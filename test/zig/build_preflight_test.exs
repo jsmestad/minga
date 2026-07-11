@@ -7,6 +7,9 @@ defmodule Minga.ZigBuildPreflightTest do
   # async: false - shells out to the Zig CLI in a temp checkout to verify the actionable failure message.
   use ExUnit.Case, async: false
 
+  # This validates the Zig CLI boundary and is intentionally part of test.heavy, not the edit-loop suite.
+  @moduletag :heavy
+
   @repo_root File.cwd!()
   @zig_bin System.find_executable("zig")
 

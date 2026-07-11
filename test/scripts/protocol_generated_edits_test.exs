@@ -2,6 +2,9 @@
 defmodule Minga.ProtocolGeneratedEditsScriptTest do
   use ExUnit.Case, async: false
 
+  # Temporary Git repositories validate the hook's CLI contract and run in test.heavy.
+  @moduletag :heavy
+
   @script Path.expand("../../scripts/check_protocol_generated_edits", __DIR__)
   @git_env [
     {"GIT_CONFIG_NOSYSTEM", "1"},

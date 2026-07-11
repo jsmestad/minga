@@ -164,9 +164,10 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
       # A fresh token gates the next cycle; the prior token is now stale.
       assert next_token != token
 
-      # The scheduled timer is live: its tick is actually delivered (~1s later),
-      # proving the next cycle is armed only after a result lands.
-      assert_receive {:observatory_tick, ^next_token}, 3_000
+      # A live timer proves the next cycle is armed only after a result lands. Waiting
+      # for its delivery only retests BEAM timer semantics and adds one second to the suite.
+      assert is_integer(Process.read_timer(next_timer))
+      assert Process.cancel_timer(next_timer) != false
     end
 
     test "a stale data result is ignored and schedules nothing" do
