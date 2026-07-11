@@ -48,14 +48,18 @@ defmodule Minga.Mix.ProtocolGenerator do
   @type gui_action :: %{String.t() => term()}
   @type schema :: %{String.t() => term()}
   @type generated_file :: {Path.t(), String.t()}
+  @type run_option :: {:format_generated_go, boolean()}
 
   @spec run([String.t()]) :: :ok
-  def run(args) do
+  def run(args), do: run(args, [])
+
+  @spec run([String.t()], [run_option()]) :: :ok
+  def run(args, options) do
     ensure_generator_deps_loaded!()
 
     {opts, _argv, _invalid} = OptionParser.parse(args, strict: [check: :boolean])
     schema = load_schema!()
-    files = generated_files(schema)
+    files = generated_files(schema, Keyword.get(options, :format_generated_go, true))
 
     if Keyword.get(opts, :check, false) do
       check_files!(files)
@@ -200,8 +204,8 @@ defmodule Minga.Mix.ProtocolGenerator do
     |> List.flatten()
   end
 
-  @spec generated_files(schema()) :: [generated_file()]
-  defp generated_files(schema) do
+  @spec generated_files(schema(), boolean()) :: [generated_file()]
+  defp generated_files(schema, format_generated_go) do
     [
       {@generated_elixir_path, elixir_file(schema)},
       {@generated_golden_fields_path, golden_fields_elixir_file(schema)},
@@ -209,14 +213,14 @@ defmodule Minga.Mix.ProtocolGenerator do
       {@generated_swift_path, swift_file(schema)},
       {@generated_zig_opcodes_path, zig_opcodes_file(schema)},
       {@generated_zig_schema_test_path, zig_schema_test_file(schema)},
-      {@generated_go_opcodes_path, go_opcodes_file(schema)},
-      {@generated_go_command_size_path, go_command_size_file(schema)},
+      {@generated_go_opcodes_path, go_opcodes_file(schema, format_generated_go)},
+      {@generated_go_command_size_path, go_command_size_file(schema, format_generated_go)},
       {@generated_zig_command_size_path, zig_command_size_file(schema)},
       {@generated_swift_command_size_path, swift_command_size_file(schema)},
       {@generated_swift_semantic_decode_path, swift_semantic_decode_file(schema)},
-      {@generated_go_semantic_types_path, go_semantic_types_file(schema)},
-      {@generated_go_semantic_decode_path, go_semantic_decode_file(schema)},
-      {@generated_go_golden_path, go_golden_decode_file(schema)}
+      {@generated_go_semantic_types_path, go_semantic_types_file(schema, format_generated_go)},
+      {@generated_go_semantic_decode_path, go_semantic_decode_file(schema, format_generated_go)},
+      {@generated_go_golden_path, go_golden_decode_file(schema, format_generated_go)}
     ]
   end
 
@@ -235,6 +239,10 @@ defmodule Minga.Mix.ProtocolGenerator do
       _other -> File.write!(path, content)
     end
   end
+
+  @spec maybe_format_generated_go_file(String.t(), boolean()) :: String.t()
+  defp maybe_format_generated_go_file(binary, false), do: binary
+  defp maybe_format_generated_go_file(binary, true), do: format_generated_go_file(binary)
 
   @spec format_generated_go_file(String.t()) :: String.t()
   defp format_generated_go_file(binary) do
@@ -523,8 +531,8 @@ defmodule Minga.Mix.ProtocolGenerator do
     "pub const GUI_ACTION_#{constant_name(name)}: u8 = #{hex(value)};\n"
   end
 
-  @spec go_opcodes_file(schema()) :: String.t()
-  defp go_opcodes_file(schema) do
+  @spec go_opcodes_file(schema(), boolean()) :: String.t()
+  defp go_opcodes_file(schema, format_generated_go) do
     opcodes = Map.fetch!(schema, "opcodes")
     actions = Map.fetch!(schema, "gui_actions")
 
@@ -540,7 +548,7 @@ defmodule Minga.Mix.ProtocolGenerator do
       ")\n"
     ]
     |> IO.iodata_to_binary()
-    |> format_generated_go_file()
+    |> maybe_format_generated_go_file(format_generated_go)
   end
 
   @spec go_opcodes([opcode()]) :: iodata()
@@ -988,8 +996,8 @@ defmodule Minga.Mix.ProtocolGenerator do
 
   # ── Go: command_size.go ───────────────────────────────────────────────────
 
-  @spec go_command_size_file(schema()) :: String.t()
-  defp go_command_size_file(schema) do
+  @spec go_command_size_file(schema(), boolean()) :: String.t()
+  defp go_command_size_file(schema, format_generated_go) do
     ops = framing_opcodes(schema)
     cn = &go_opcode_const_name/1
 
@@ -1031,7 +1039,7 @@ defmodule Minga.Mix.ProtocolGenerator do
        "\t\treturn 0, CommandSizeUnknown\n" <>
        "\t}\n}\n\n" <>
        go_command_size_helpers())
-    |> format_generated_go_file()
+    |> maybe_format_generated_go_file(format_generated_go)
   end
 
   @spec go_command_size_helpers() :: String.t()
@@ -1979,8 +1987,8 @@ defmodule Minga.Mix.ProtocolGenerator do
 
   # ── Go: semantic_types.go ───────────────────────────────────────────────
 
-  @spec go_semantic_types_file(schema()) :: String.t()
-  defp go_semantic_types_file(schema) do
+  @spec go_semantic_types_file(schema(), boolean()) :: String.t()
+  defp go_semantic_types_file(schema, format_generated_go) do
     structures = Map.get(schema, "structures", [])
     sections = sections_list(schema)
     command_fields = command_fields_list(schema)
@@ -1996,7 +2004,7 @@ defmodule Minga.Mix.ProtocolGenerator do
       go_command_fields_struct_definitions(command_fields, smap)
     ]
     |> IO.iodata_to_binary()
-    |> format_generated_go_file()
+    |> maybe_format_generated_go_file(format_generated_go)
   end
 
   # Emit one named uint type per enum plus a typed constant for each value, so a
@@ -2101,8 +2109,8 @@ defmodule Minga.Mix.ProtocolGenerator do
 
   # ── Go: semantic_decode.go ──────────────────────────────────────────────
 
-  @spec go_semantic_decode_file(schema()) :: String.t()
-  defp go_semantic_decode_file(schema) do
+  @spec go_semantic_decode_file(schema(), boolean()) :: String.t()
+  defp go_semantic_decode_file(schema, format_generated_go) do
     structures = Map.get(schema, "structures", [])
     sections = sections_list(schema)
     command_fields = command_fields_list(schema)
@@ -2120,7 +2128,7 @@ defmodule Minga.Mix.ProtocolGenerator do
       go_decode_command_fields_functions(command_fields, smap)
     ]
     |> IO.iodata_to_binary()
-    |> format_generated_go_file()
+    |> maybe_format_generated_go_file(format_generated_go)
   end
 
   @spec go_decode_helpers() :: String.t()
@@ -2701,8 +2709,8 @@ defmodule Minga.Mix.ProtocolGenerator do
     Enum.sort_by(section_units ++ command_field_units, & &1.name)
   end
 
-  @spec go_golden_decode_file(schema()) :: String.t()
-  defp go_golden_decode_file(schema) do
+  @spec go_golden_decode_file(schema(), boolean()) :: String.t()
+  defp go_golden_decode_file(schema, format_generated_go) do
     units = golden_units(schema)
 
     [
@@ -2728,7 +2736,7 @@ defmodule Minga.Mix.ProtocolGenerator do
       "}\n"
     ]
     |> IO.iodata_to_binary()
-    |> format_generated_go_file()
+    |> maybe_format_generated_go_file(format_generated_go)
   end
 
   # ── Swift: ProtocolSemanticDecode.generated.swift ────────────────────────

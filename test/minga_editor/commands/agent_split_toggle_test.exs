@@ -168,7 +168,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
     end
 
     test "does not double-start a session when one is already running" do
-      fake_session = spawn(fn -> :timer.sleep(1000) end)
+      fake_session = fake_session()
       state = base_state(session: fake_session)
       new_state = AgentCommands.toggle_agentic_view(state)
 
