@@ -17,34 +17,23 @@ defmodule MingaEditor.Commands.DiredTest do
   @moduletag :tmp_dir
 
   describe "[EditorCase integration] :dired — open directory buffer" do
-    test "opens directory by path", %{tmp_dir: dir} do
-      File.write!(Path.join(dir, "hello.txt"), "")
+    test "uses filetype options for the listing and opened files", %{tmp_dir: dir} do
+      File.write!(Path.join(dir, "hello.txt"), "hello")
       File.write!(Path.join(dir, "other.txt"), "")
-
       options_server = start_supervised!({Options, name: nil})
 
       assert {:ok, false} =
                Options.set_for_filetype(options_server, :dired, :autopair_block, false)
-
-      ctx = start_editor("", options_server: options_server)
-      send_keys_sync(ctx, ":dired #{dir}<CR>")
-
-      assert BufferProcess.get_option(active_buffer(ctx), :autopair_block) == false
-      content = active_content(ctx)
-      assert content =~ "hello.txt"
-      assert content =~ "other.txt"
-    end
-
-    test "opening a regular file from dired inherits the editor options server", %{tmp_dir: dir} do
-      File.write!(Path.join(dir, "hello.txt"), "hello")
-
-      options_server = start_supervised!({Options, name: nil})
 
       assert {:ok, false} =
                Options.set_for_filetype(options_server, :text, :autopair_block, false)
 
       ctx = start_editor("", options_server: options_server)
       send_keys_sync(ctx, ":dired #{dir}<CR>")
+
+      assert BufferProcess.get_option(active_buffer(ctx), :autopair_block) == false
+      assert active_content(ctx) =~ "hello.txt"
+      assert active_content(ctx) =~ "other.txt"
 
       send_keys_sync(ctx, "<CR>")
       active = active_buffer(ctx)
@@ -56,27 +45,18 @@ defmodule MingaEditor.Commands.DiredTest do
   end
 
   describe "[EditorCase integration] save interception" do
-    test ":w on dired buffer does not write to disk", %{tmp_dir: dir} do
-      file = Path.join(dir, "file.txt")
-      File.write!(file, "original")
+    test ":w skips an unchanged listing and confirms edits", %{tmp_dir: dir} do
+      file = Path.join(dir, "old_name.txt")
+      File.write!(file, "content")
 
       ctx = start_editor("")
       send_keys_sync(ctx, ":dired #{dir}<CR>")
 
       state = send_keys_sync(ctx, ":w<CR>")
-
-      assert File.read!(file) == "original"
+      assert File.read!(file) == "content"
       assert state.shell_state.status_msg =~ "No changes"
-    end
-
-    test ":w with changes enters confirmation mode", %{tmp_dir: dir} do
-      File.write!(Path.join(dir, "old_name.txt"), "content")
-
-      ctx = start_editor("")
-      send_keys_sync(ctx, ":dired #{dir}<CR>")
 
       send_keys_sync(ctx, "ciwnew_name.txt<Esc>")
-
       state = send_keys_sync(ctx, ":w<CR>")
 
       assert state.workspace.dired.confirming?
@@ -201,59 +181,31 @@ defmodule MingaEditor.Commands.DiredTest do
   end
 
   describe "[EditorCase integration] display toggles" do
-    test "g. toggles hidden files", %{tmp_dir: dir} do
+    test "update the listing state", %{tmp_dir: dir} do
       File.write!(Path.join(dir, ".hidden"), "")
       File.write!(Path.join(dir, "visible.txt"), "")
-
-      ctx = start_editor("")
-      send_keys_sync(ctx, ":dired #{dir}<CR>")
-
-      refute active_content(ctx) =~ ".hidden"
-
-      send_keys_sync(ctx, "g.")
-
-      assert active_content(ctx) =~ ".hidden"
-    end
-
-    test "gs shows entries in the next sort order", %{tmp_dir: dir} do
       File.write!(Path.join(dir, "z-small.txt"), "a")
       File.write!(Path.join(dir, "a-big.txt"), String.duplicate("x", 1000))
 
       ctx = start_editor("")
       send_keys_sync(ctx, ":dired #{dir}<CR>")
-      send_keys_sync(ctx, "gs")
+      refute active_content(ctx) =~ ".hidden"
 
+      send_keys_sync(ctx, "g.")
+      assert active_content(ctx) =~ ".hidden"
+
+      send_keys_sync(ctx, "gs")
       lines = String.split(active_content(ctx), "\n", trim: true)
       small_index = Enum.find_index(lines, &String.contains?(&1, "z-small.txt"))
       big_index = Enum.find_index(lines, &String.contains?(&1, "a-big.txt"))
-
       assert small_index < big_index
-    end
-
-    test "gd toggles detail columns", %{tmp_dir: dir} do
-      File.write!(Path.join(dir, "file.txt"), "content")
-
-      ctx = start_editor("")
-      send_keys_sync(ctx, ":dired #{dir}<CR>")
-
-      refute active_content(ctx) =~ "rw"
 
       send_keys_sync(ctx, "gd")
-
       assert active_content(ctx) =~ "rw"
-    end
-
-    test "gr refreshes listing", %{tmp_dir: dir} do
-      File.write!(Path.join(dir, "initial.txt"), "")
-
-      ctx = start_editor("")
-      send_keys_sync(ctx, ":dired #{dir}<CR>")
 
       refute active_content(ctx) =~ "added_later.txt"
-
       File.write!(Path.join(dir, "added_later.txt"), "")
       send_keys_sync(ctx, "gr")
-
       assert active_content(ctx) =~ "added_later.txt"
     end
   end

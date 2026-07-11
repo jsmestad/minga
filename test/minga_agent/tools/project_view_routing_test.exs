@@ -2,6 +2,9 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
   # Uses find, grep, and shell tool callbacks, which spawn OS processes.
   use ExUnit.Case, async: false
 
+  # Real discovery, shell, and Git routing remain integration coverage outside the edit loop.
+  @moduletag :heavy
+
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Git.Stub, as: GitStub
   alias MingaAgent.BufferForkStore

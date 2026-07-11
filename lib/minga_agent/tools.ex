@@ -52,9 +52,7 @@ defmodule MingaAgent.Tools do
   alias MingaAgent.Tools.DiagnosticFeedback
   alias MingaAgent.Tools.EditFile
   alias MingaAgent.Tools.FetchUrl
-  alias MingaAgent.Tools.Find
   alias MingaAgent.Tools.Git, as: GitTools
-  alias MingaAgent.Tools.Grep
   alias MingaAgent.Tools.ListDirectory
   alias MingaAgent.Tools.LspCodeActions
   alias MingaAgent.Tools.LspDefinition
@@ -67,7 +65,7 @@ defmodule MingaAgent.Tools do
   alias MingaAgent.Tools.MemoryWrite
   alias MingaAgent.Tools.MultiEditFile
   alias MingaAgent.Tools.ReadFile
-  alias MingaAgent.Tools.Shell
+  alias MingaAgent.Tools.ProcessBackend.System, as: SystemProcessBackend
   alias MingaAgent.Tools.Subagent
   alias MingaAgent.Tool.BundledSources
   alias MingaAgent.Tools.WriteFile
@@ -81,7 +79,8 @@ defmodule MingaAgent.Tools do
           changeset: pid() | nil,
           fork_store: pid() | nil,
           parent_session: GenServer.server() | nil,
-          shell_output_callback: (String.t() -> :ok) | nil
+          shell_output_callback: (String.t() -> :ok) | nil,
+          process_backend: module()
         ]
 
   @default_destructive_tools ~w(write_file edit_file multi_edit_file apply_diff delete_file shell git_stage git_commit rename)
@@ -143,6 +142,7 @@ defmodule MingaAgent.Tools do
     fs = Keyword.get(opts, :fork_store)
     parent_session = Keyword.get(opts, :parent_session)
     shell_output_callback = Keyword.get(opts, :shell_output_callback)
+    process_backend = Keyword.get(opts, :process_backend, SystemProcessBackend)
     router_ctx = ToolRouter.context(project_view, fs, cs)
 
     [
@@ -153,10 +153,10 @@ defmodule MingaAgent.Tools do
       apply_diff(root, router_ctx),
       delete_file(root, router_ctx),
       list_directory(root, router_ctx),
-      find(root, router_ctx),
-      grep(root, router_ctx),
+      find(root, router_ctx, process_backend),
+      grep(root, router_ctx, process_backend),
       fetch_url(),
-      shell(root, router_ctx, shell_output_callback),
+      shell(root, router_ctx, shell_output_callback, process_backend),
       subagent(root, parent_session),
       git_status(root),
       git_diff(root, router_ctx),
@@ -693,8 +693,8 @@ defmodule MingaAgent.Tools do
     )
   end
 
-  @spec find(String.t(), ToolRouter.context()) :: Tool.t()
-  defp find(root, router_ctx) do
+  @spec find(String.t(), ToolRouter.context(), module()) :: Tool.t()
+  defp find(root, router_ctx, process_backend) do
     Tool.new!(
       name: "find",
       description: """
@@ -736,7 +736,7 @@ defmodule MingaAgent.Tools do
 
             routed_result(
               router_ctx,
-              Find.execute(args["pattern"], search.exec_path, public_args,
+              process_backend.find(args["pattern"], search.exec_path, public_args,
                 filter_root: search.filter_root
               )
             )
@@ -748,8 +748,8 @@ defmodule MingaAgent.Tools do
     )
   end
 
-  @spec grep(String.t(), ToolRouter.context()) :: Tool.t()
-  defp grep(root, router_ctx) do
+  @spec grep(String.t(), ToolRouter.context(), module()) :: Tool.t()
+  defp grep(root, router_ctx, process_backend) do
     Tool.new!(
       name: "grep",
       description: """
@@ -794,7 +794,7 @@ defmodule MingaAgent.Tools do
 
             routed_result(
               router_ctx,
-              Grep.execute(args["pattern"], search.exec_path, public_args,
+              process_backend.grep(args["pattern"], search.exec_path, public_args,
                 filter_root: search.filter_root
               )
             )
@@ -806,8 +806,9 @@ defmodule MingaAgent.Tools do
     )
   end
 
-  @spec shell(String.t(), MingaAgent.ToolRouter.context(), (String.t() -> :ok) | nil) :: Tool.t()
-  defp shell(root, router_ctx, shell_output_callback) do
+  @spec shell(String.t(), MingaAgent.ToolRouter.context(), (String.t() -> :ok) | nil, module()) ::
+          Tool.t()
+  defp shell(root, router_ctx, shell_output_callback, process_backend) do
     Tool.new!(
       name: "shell",
       description: """
@@ -844,7 +845,7 @@ defmodule MingaAgent.Tools do
 
           routed_result(
             router_ctx,
-            Shell.execute(args["command"], shell_root, timeout_secs,
+            process_backend.shell(args["command"], shell_root, timeout_secs,
               env: env,
               on_output: shell_output_callback
             )

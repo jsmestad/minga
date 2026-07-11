@@ -2,6 +2,9 @@ defmodule MingaAgent.Tools.FindTest do
   # Spawns OS processes through fd/find/git-backed ignore checks, which must not run async.
   use ExUnit.Case, async: false
 
+  # The real discovery binary contract runs separately from the edit-loop suite.
+  @moduletag :heavy
+
   alias MingaAgent.Tools.Find
 
   defp with_fake_path(executables, fun) do

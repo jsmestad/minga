@@ -2,6 +2,9 @@ defmodule MingaEditor.Integration.MatchItemTest do
   # Uses the global ParserManager because commands request match items through the production parser.
   use Minga.Test.EditorCase, async: false
 
+  # Parser-backed structural navigation remains a focused integration contract.
+  @moduletag :heavy
+
   setup do
     if Process.whereis(Minga.Parser.Manager) == nil do
       start_supervised!({Minga.Parser.Manager, []})
