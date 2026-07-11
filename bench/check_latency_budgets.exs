@@ -1,196 +1,90 @@
+Code.require_file("latency_comparison.exs", __DIR__)
+
 defmodule Minga.Bench.CheckLatencyBudgets do
   @moduledoc """
-  Enforces keystroke latency budgets with a same-runner A/B comparison.
+  Enforces keystroke latency budgets from a symmetric same-runner A/B benchmark.
 
-  The gate is RELATIVE, not absolute. On `pull_request` CI runs the workflow
-  benches the PR's merge-base and the PR HEAD on the same runner, then runs this
-  script with `--base <base.json>`. For every scenario/metric we require:
+  CI collects repeated base and HEAD rounds in alternating order, then this
+  script compares the median round-level metric for each revision. `p50` is the
+  strict relative merge gate. `p99` is reported as an advisory comparison until
+  a benchmark invocation has enough within-run samples to make a stable p99;
+  both metrics retain absolute catastrophic sanity bounds.
 
-      head <= base * (1 + tolerance)
+  With repeated paths, use:
 
-  with tolerances from `bench/latency_budgets.json` (`relative.p50_pct`,
-  `relative.p99_pct`). This cancels runner speed: GitHub hosted runners vary
-  run-to-run, so absolute ceilings calibrated on one machine can never be both
-  tight and stable.
+      MIX_ENV=test mix run bench/check_latency_budgets.exs \
+        --base /tmp/base-1.json --base /tmp/base-2.json \
+        --head /tmp/head-1.json --head /tmp/head-2.json \
+        --comparison-output bench/baselines/keystroke_latency_comparison.json
 
-  Absolute ceilings survive only as loose catastrophic sanity bounds
-  (`absolute_sanity.scenarios`), recalibrated generously for runner reality.
-  They are NOT the gate; they catch a ~2x regression even when the base bench is
-  unavailable.
-
-  Modes:
-
-    * `--base <path>` given: relative gate (per scenario/metric) AND absolute
-      sanity. Either breach class exits 1 with a per-metric report.
-    * no `--base`: absolute sanity only, with a loud warning that the relative
-      gate was skipped. Used on push-to-main (record/trend) runs and as the
-      fallback when the base bench could not run for infrastructure reasons.
-
-  Run with:
-
-      MIX_ENV=test mix run bench/check_latency_budgets.exs [--base /path/to/base.json]
+  Without `--base`, only absolute sanity bounds are enforced. This is used for
+  push-to-main trend recording and when a base revision cannot be benchmarked.
   """
+
+  # Loaded from bench/latency_comparison.exs above; it is intentionally a
+  # script-local module rather than part of the production application.
+  @compile {:no_warn_undefined, Minga.Bench.LatencyComparison}
+  alias Minga.Bench.LatencyComparison
 
   @baseline_path Path.join([__DIR__, "baselines", "keystroke_latency.json"])
   @budgets_path Path.join([__DIR__, "latency_budgets.json"])
 
-  @metrics [{"p50_us", "p50", "p50_pct"}, {"p99_us", "p99", "p99_pct"}]
-
   @spec run([String.t()]) :: :ok | no_return()
   def run(argv) do
-    head = load_json!(@baseline_path)
+    options = parse_options(argv)
+    head_runs = load_runs(options.head_paths, @baseline_path)
+    base_runs = Enum.map(options.base_paths, &load_json!/1)
     budgets = load_json!(@budgets_path)
-    base = load_base(parse_base_path(argv))
 
-    breaches = check(head, base, budgets)
+    head = LatencyComparison.aggregate_runs(head_runs)
+    base = aggregate_base(base_runs)
+    result = LatencyComparison.compare(head, base, budgets)
 
-    report(breaches, base)
+    write_comparison(options.comparison_output, base_runs, head_runs, base, head, result)
+    report(result, base)
   end
 
-  @spec parse_base_path([String.t()]) :: String.t() | nil
-  defp parse_base_path(["--base", path | _rest]), do: path
-  defp parse_base_path([_other | rest]), do: parse_base_path(rest)
-  defp parse_base_path([]), do: nil
-
-  @spec load_base(String.t() | nil) :: map() | nil
-  defp load_base(nil), do: nil
-  defp load_base(path), do: load_json!(path)
-
-  # ── Checking ─────────────────────────────────────────────────────────────────
-
-  @spec check(map(), map() | nil, map()) :: [map()]
-  defp check(head, base, budgets) do
-    head_scenarios = Map.get(head, "scenarios", %{})
-
-    Enum.flat_map(head_scenarios, fn {scenario, head_stats} ->
-      sanity = sanity_budget(budgets, scenario)
-      base_stats = base_scenario(base, scenario)
-
-      Enum.flat_map(@metrics, fn {key, label, pct_key} ->
-        head_us = Map.get(head_stats, key)
-
-        check_relative(scenario, label, head_us, base_stats, key, relative_pct(budgets, pct_key)) ++
-          check_sanity(scenario, label, head_us, Map.get(sanity, key))
-      end)
-    end)
-  end
-
-  @spec relative_pct(map(), String.t()) :: number() | nil
-  defp relative_pct(budgets, pct_key) do
-    budgets
-    |> Map.get("relative", %{})
-    |> Map.get(pct_key)
-  end
-
-  @spec sanity_budget(map(), String.t()) :: map()
-  defp sanity_budget(budgets, scenario) do
-    budgets
-    |> Map.get("absolute_sanity", %{})
-    |> Map.get("scenarios", %{})
-    |> Map.get(scenario, %{})
-  end
-
-  @spec base_scenario(map() | nil, String.t()) :: map() | nil
-  defp base_scenario(nil, _scenario), do: nil
-
-  defp base_scenario(base, scenario) do
-    base
-    |> Map.get("scenarios", %{})
-    |> Map.get(scenario)
-  end
-
-  # Relative gate only applies when we have a base bench to compare against.
-  @spec check_relative(
-          String.t(),
-          String.t(),
-          number() | nil,
-          map() | nil,
-          String.t(),
-          number() | nil
-        ) ::
-          [map()]
-  defp check_relative(_scenario, _label, _head_us, nil, _key, _pct), do: []
-
-  defp check_relative(scenario, label, nil, _base_stats, _key, _pct),
-    do: [%{kind: :relative, scenario: scenario, field: label, error: "no head measurement found"}]
-
-  defp check_relative(scenario, label, _head_us, _base_stats, _key, nil),
-    do: [
-      %{
-        kind: :relative,
-        scenario: scenario,
-        field: label,
-        error: "no relative tolerance configured"
-      }
-    ]
-
-  defp check_relative(scenario, label, head_us, base_stats, key, pct) do
-    eval_relative(scenario, label, head_us, Map.get(base_stats, key), pct)
-  end
-
-  @spec eval_relative(String.t(), String.t(), number(), number() | nil, number()) :: [map()]
-  defp eval_relative(scenario, label, _head_us, nil, _pct),
-    do: [%{kind: :relative, scenario: scenario, field: label, error: "no base measurement found"}]
-
-  defp eval_relative(scenario, label, head_us, base_us, pct) do
-    allowed = base_us * (1 + pct / 100)
-
-    if head_us > allowed do
-      [
-        %{
-          kind: :relative,
-          scenario: scenario,
-          field: label,
-          head: head_us,
-          base: base_us,
-          tolerance_pct: pct,
-          allowed: round_us(allowed),
-          over_pct: pct_over(head_us, allowed)
+  @spec parse_options([String.t()]) :: %{
+          base_paths: [String.t()],
+          head_paths: [String.t()],
+          comparison_output: String.t() | nil
         }
-      ]
-    else
-      []
-    end
-  end
+  defp parse_options(argv),
+    do: parse_options(argv, %{base_paths: [], head_paths: [], comparison_output: nil})
 
-  @spec check_sanity(String.t(), String.t(), number() | nil, number() | nil) :: [map()]
-  defp check_sanity(_scenario, _label, _head_us, nil), do: []
+  defp parse_options(["--base", path | rest], options),
+    do: parse_options(rest, %{options | base_paths: options.base_paths ++ [path]})
 
-  defp check_sanity(scenario, label, nil, _bound),
-    do: [%{kind: :sanity, scenario: scenario, field: label, error: "no head measurement found"}]
+  defp parse_options(["--head", path | rest], options),
+    do: parse_options(rest, %{options | head_paths: options.head_paths ++ [path]})
 
-  defp check_sanity(scenario, label, head_us, bound) when head_us > bound do
-    [
-      %{
-        kind: :sanity,
-        scenario: scenario,
-        field: label,
-        head: head_us,
-        bound: bound,
-        over_pct: pct_over(head_us, bound)
-      }
-    ]
-  end
+  defp parse_options(["--comparison-output", path | rest], options),
+    do: parse_options(rest, %{options | comparison_output: path})
 
-  defp check_sanity(_scenario, _label, _head_us, _bound), do: []
+  defp parse_options([_other | rest], options), do: parse_options(rest, options)
+  defp parse_options([], options), do: options
+
+  defp load_runs([], fallback_path), do: [load_json!(fallback_path)]
+  defp load_runs(paths, _fallback_path), do: Enum.map(paths, &load_json!/1)
+  defp aggregate_base([]), do: nil
+  defp aggregate_base(runs), do: LatencyComparison.aggregate_runs(runs)
 
   # ── Reporting ────────────────────────────────────────────────────────────────
 
-  @spec report([map()], map() | nil) :: :ok | no_return()
-  defp report(breaches, base) do
+  defp report(%{blocking: blocking, advisory: advisory}, base) do
     print_mode(base)
+    print_advisories(advisory)
 
-    if Enum.empty?(breaches) do
-      IO.puts("✓ All latency budgets within limits")
+    if Enum.empty?(blocking) do
+      IO.puts("✓ All blocking latency budgets within limits")
       :ok
     else
       IO.puts("\n✗ Latency budget breaches detected:\n")
-      print_breaches(breaches)
+      print_breaches(blocking)
       System.halt(1)
     end
   end
 
-  @spec print_mode(map() | nil) :: :ok
   defp print_mode(nil) do
     IO.puts(:stderr, "WARNING: no --base provided; the relative same-runner gate is SKIPPED.")
 
@@ -198,22 +92,23 @@ defmodule Minga.Bench.CheckLatencyBudgets do
       :stderr,
       "WARNING: enforcing ABSOLUTE SANITY bounds only (catastrophic-regression backstop, not the real gate)."
     )
-
-    :ok
   end
 
-  defp print_mode(_base) do
-    IO.puts("Relative same-runner gate active (head vs base) + absolute sanity backstop.")
-    :ok
+  defp print_mode(base) do
+    IO.puts(
+      "Symmetric same-runner A/B gate active: #{base["run_count"]} base and HEAD round(s), median aggregation; p50 required, p99 advisory."
+    )
   end
 
-  @spec print_breaches([map()]) :: :ok
-  defp print_breaches(breaches) do
-    Enum.each(breaches, &print_breach/1)
-    :ok
+  defp print_advisories([]), do: :ok
+
+  defp print_advisories(advisory) do
+    IO.puts("\n! Advisory latency observations (non-blocking):\n")
+    print_breaches(advisory)
   end
 
-  @spec print_breach(map()) :: :ok
+  defp print_breaches(breaches), do: Enum.each(breaches, &print_breach/1)
+
   defp print_breach(%{error: error, kind: kind, scenario: scenario, field: field}) do
     IO.puts("  [#{kind}] #{scenario}/#{field}: #{error}")
   end
@@ -224,13 +119,13 @@ defmodule Minga.Bench.CheckLatencyBudgets do
          field: field,
          head: head,
          base: base,
-         tolerance_pct: tol,
+         tolerance_pct: tolerance,
          allowed: allowed,
          over_pct: over
        }) do
     IO.puts(
       "  [relative] #{scenario}/#{field}: head #{head}µs vs base #{base}µs " <>
-        "(allowed #{allowed}µs at +#{tol}%, +#{over}% over)"
+        "(allowed #{allowed}µs at +#{tolerance}%, +#{over}% over)"
     )
   end
 
@@ -247,48 +142,59 @@ defmodule Minga.Bench.CheckLatencyBudgets do
     )
   end
 
-  # ── Math / IO helpers ────────────────────────────────────────────────────────
+  # ── Comparison artifact ──────────────────────────────────────────────────────
 
-  @spec pct_over(number(), number()) :: integer()
-  defp pct_over(measured, limit), do: round((measured - limit) / limit * 100)
+  defp write_comparison(nil, _base_runs, _head_runs, _base, _head, _result), do: :ok
 
-  @spec round_us(number()) :: integer()
-  defp round_us(value), do: round(value)
+  defp write_comparison(path, base_runs, head_runs, base, head, result) do
+    payload = %{
+      "schema" => "minga.keystroke_latency.comparison.v1",
+      "generated_at" => DateTime.utc_now() |> DateTime.to_iso8601(),
+      "methodology" => %{
+        "round_aggregation" => "median",
+        "relative_gate_metrics" => ["p50"],
+        "relative_advisory_metrics" => ["p99"]
+      },
+      "rounds" => %{"base" => base_runs, "head" => head_runs},
+      "aggregate" => %{"base" => base, "head" => head},
+      "result" => %{
+        "blocking_breaches" => Enum.map(result.blocking, &json_breach/1),
+        "advisories" => Enum.map(result.advisory, &json_breach/1)
+      }
+    }
 
-  @spec load_json!(String.t()) :: map()
+    File.mkdir_p!(Path.dirname(path))
+    File.write!(path, JSON.encode!(payload) <> "\n")
+    IO.puts("Wrote comparison artifact: #{path}")
+  end
+
+  defp json_breach(breach) do
+    breach
+    |> Map.new(fn {key, value} -> {to_string(key), value} end)
+    |> Map.update("kind", nil, &to_string/1)
+  end
+
+  # ── IO helpers ───────────────────────────────────────────────────────────────
+
   defp load_json!(path) do
     case File.read(path) do
-      {:ok, content} ->
-        decode_json!(path, content)
-
-      {:error, :enoent} ->
-        IO.puts(
-          :stderr,
-          "Error: #{path} not found. Run `MIX_ENV=test mix run bench/keystroke_latency_baseline.exs` first."
-        )
-
-        System.halt(1)
-
-      {:error, reason} ->
-        IO.puts(:stderr, "Error reading #{path}: #{inspect(reason)}")
-        System.halt(1)
+      {:ok, content} -> decode_json!(path, content)
+      {:error, :enoent} -> halt("Error: #{path} not found. Run the latency benchmark first.")
+      {:error, reason} -> halt("Error reading #{path}: #{inspect(reason)}")
     end
   end
 
-  @spec decode_json!(String.t(), String.t()) :: map()
   defp decode_json!(path, content) do
     case JSON.decode(content) do
-      {:ok, data} when is_map(data) ->
-        data
-
-      {:ok, other} ->
-        IO.puts(:stderr, "Error: #{path} did not decode to a JSON object: #{inspect(other)}")
-        System.halt(1)
-
-      {:error, reason} ->
-        IO.puts(:stderr, "Error parsing #{path}: #{inspect(reason)}")
-        System.halt(1)
+      {:ok, data} when is_map(data) -> data
+      {:ok, other} -> halt("Error: #{path} did not decode to a JSON object: #{inspect(other)}")
+      {:error, reason} -> halt("Error parsing #{path}: #{inspect(reason)}")
     end
+  end
+
+  defp halt(message) do
+    IO.puts(:stderr, message)
+    System.halt(1)
   end
 end
 

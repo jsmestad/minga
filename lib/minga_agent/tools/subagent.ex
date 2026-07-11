@@ -9,6 +9,7 @@ defmodule MingaAgent.Tools.Subagent do
   alias MingaAgent.Session
   alias MingaAgent.SessionManager
   alias MingaAgent.Subagent.Handle
+  alias MingaAgent.Subagent.Worktree
   alias MingaAgent.SubagentContext
   alias MingaAgent.Supervisor, as: AgentSupervisor
 
@@ -35,6 +36,8 @@ defmodule MingaAgent.Tools.Subagent do
           provider_opts: keyword(),
           background: boolean(),
           isolation: String.t() | atom() | nil,
+          worktree_backend: module(),
+          worktree_backend_opts: keyword(),
           session_manager: GenServer.server(),
           notifier: module() | {module(), term()}
         ]
@@ -73,13 +76,13 @@ defmodule MingaAgent.Tools.Subagent do
       Keyword.get(opts, :project_root) || parent_context(opts).project_root ||
         detect_project_root()
 
-    case create_worktree(project_root) do
+    case Worktree.create(project_root, worktree_opts(opts)) do
       {:ok, worktree} ->
-        worktree_opts = Keyword.put(opts, :project_root, worktree.path)
+        child_opts = Keyword.put(opts, :project_root, worktree.path)
 
-        case do_start_background(task, worktree_opts) do
-          {:ok, result} -> {:ok, result <> worktree_metadata(worktree)}
-          {:error, reason} -> finish_worktree_error(worktree, reason)
+        case do_start_background(task, child_opts) do
+          {:ok, result} -> {:ok, result <> Worktree.metadata(worktree)}
+          {:error, reason} -> Worktree.finish_error(worktree, reason)
         end
 
       {:error, reason} ->
@@ -138,16 +141,16 @@ defmodule MingaAgent.Tools.Subagent do
       Keyword.get(opts, :project_root) || parent_context(opts).project_root ||
         detect_project_root()
 
-    case create_worktree(project_root) do
+    case Worktree.create(project_root, worktree_opts(opts)) do
       {:ok, worktree} ->
-        worktree_opts = Keyword.put(opts, :project_root, worktree.path)
+        child_opts = Keyword.put(opts, :project_root, worktree.path)
 
-        case do_start_foreground(task, worktree_opts) do
+        case do_start_foreground(task, child_opts) do
           {:ok, result} ->
-            finish_worktree_result(worktree, result)
+            Worktree.finish_result(worktree, result)
 
           {:error, reason} ->
-            finish_worktree_error(worktree, reason)
+            Worktree.finish_error(worktree, reason)
         end
 
       {:error, reason} ->
@@ -236,131 +239,12 @@ defmodule MingaAgent.Tools.Subagent do
   @spec worktree_isolation?(opts()) :: boolean()
   defp worktree_isolation?(opts), do: Keyword.get(opts, :isolation) in ["worktree", :worktree]
 
-  @type worktree :: %{
-          root: String.t(),
-          path: String.t(),
-          branch: String.t(),
-          base_sha: String.t()
-        }
-
-  @spec create_worktree(String.t()) :: {:ok, worktree()} | {:error, String.t()}
-  defp create_worktree(project_root) do
-    with {:ok, root} <- git_root(project_root),
-         :ok <- require_clean_git(root),
-         {:ok, base_sha} <- git_output(root, ["rev-parse", "HEAD"]),
-         worktree <- new_worktree(root, String.trim(base_sha)),
-         :ok <- add_worktree(worktree) do
-      {:ok, worktree}
-    end
-  end
-
-  @spec git_root(String.t()) :: {:ok, String.t()} | {:error, String.t()}
-  defp git_root(project_root) do
-    case git_output(project_root, ["rev-parse", "--show-toplevel"]) do
-      {:ok, root} -> {:ok, String.trim(root)}
-      {:error, reason} -> {:error, "Worktree isolation requires a git repository: #{reason}"}
-    end
-  end
-
-  @spec require_clean_git(String.t()) :: :ok | {:error, String.t()}
-  defp require_clean_git(root) do
-    case git_output(root, ["status", "--porcelain"]) do
-      {:ok, ""} -> :ok
-      {:ok, _dirty} -> {:error, "Worktree isolation requires a clean git tree"}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  @spec new_worktree(String.t(), String.t()) :: worktree()
-  defp new_worktree(root, base_sha) do
-    id = System.unique_integer([:positive])
-    branch = "subagent/#{id}"
-    path = Path.join(Path.dirname(root), "#{Path.basename(root)}-subagent-#{id}")
-    %{root: root, path: path, branch: branch, base_sha: base_sha}
-  end
-
-  @spec add_worktree(worktree()) :: :ok | {:error, String.t()}
-  defp add_worktree(worktree) do
-    case git(worktree.root, [
-           "worktree",
-           "add",
-           "-b",
-           worktree.branch,
-           worktree.path,
-           worktree.base_sha
-         ]) do
-      :ok -> :ok
-      {:error, reason} -> {:error, "Failed to create subagent worktree: #{reason}"}
-    end
-  end
-
-  @spec finish_worktree_result(worktree(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
-  defp finish_worktree_result(worktree, result) do
-    if worktree_changed?(worktree) do
-      {:ok, result <> worktree_metadata(worktree)}
-    else
-      cleanup_worktree_if_clean(worktree)
-      {:ok, result}
-    end
-  end
-
-  @spec finish_worktree_error(worktree(), String.t()) :: {:error, String.t()}
-  defp finish_worktree_error(worktree, reason) do
-    if worktree_changed?(worktree) do
-      {:error, reason <> worktree_metadata(worktree)}
-    else
-      cleanup_worktree_if_clean(worktree)
-      {:error, reason}
-    end
-  end
-
-  @spec worktree_metadata(worktree()) :: String.t()
-  defp worktree_metadata(worktree) do
-    "\n\nWorktree: #{worktree.path}\nBranch: #{worktree.branch}"
-  end
-
-  @spec worktree_changed?(worktree()) :: boolean()
-  defp worktree_changed?(worktree) do
-    dirty? =
-      match?({:ok, dirty} when dirty != "", git_output(worktree.path, ["status", "--porcelain"]))
-
-    committed? =
-      match?(
-        {:ok, count} when count != "0\n",
-        git_output(worktree.path, ["rev-list", "--count", "HEAD", "^#{worktree.base_sha}"])
-      )
-
-    dirty? or committed?
-  end
-
-  @spec cleanup_worktree_if_clean(worktree()) :: :ok
-  defp cleanup_worktree_if_clean(worktree) do
-    unless worktree_changed?(worktree) do
-      case git(worktree.root, ["worktree", "remove", "--force", worktree.path]) do
-        :ok -> _ = git(worktree.root, ["branch", "-D", worktree.branch])
-        {:error, _reason} -> :ok
-      end
-    end
-
-    :ok
-  end
-
-  @spec git_output(String.t(), [String.t()]) :: {:ok, String.t()} | {:error, String.t()}
-  defp git_output(cwd, args) do
-    case System.cmd("git", args, cd: cwd, stderr_to_stdout: true) do
-      {output, 0} -> {:ok, output}
-      {output, _} -> {:error, String.trim(output)}
-    end
-  rescue
-    e -> {:error, Exception.message(e)}
-  end
-
-  @spec git(String.t(), [String.t()]) :: :ok | {:error, String.t()}
-  defp git(cwd, args) do
-    case git_output(cwd, args) do
-      {:ok, _} -> :ok
-      {:error, reason} -> {:error, reason}
-    end
+  @spec worktree_opts(opts()) :: Worktree.create_opts()
+  defp worktree_opts(opts) do
+    [
+      backend: Keyword.get(opts, :worktree_backend, MingaAgent.Subagent.Worktree.System),
+      backend_opts: Keyword.get(opts, :worktree_backend_opts, [])
+    ]
   end
 
   # ── Session opts (shared by foreground and background) ─────────────────────
