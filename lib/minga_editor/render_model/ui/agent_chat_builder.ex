@@ -1,6 +1,7 @@
 defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   @moduledoc false
 
+  alias Minga.Frontend.Adapter.GUI.AgentChatMessageCodec, as: AgentChatMessageCodec
   alias MingaAgent.Session, as: AgentSession
   alias MingaAgent.ToolApproval
   alias MingaAgent.ToolCall
@@ -66,14 +67,15 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
       |> maybe_append_transcript_enrichments(panel, SemanticUIRegistry.default_table())
 
     # Resident transcript (#2654): the display_start_index-scoped conversation for
-    # the gui_agent_transcript (0x86) stream. Never sliced by scroll (the 0x86
-    # encoder applies the byte-cap suffix bound); enrichments always sit at the
-    # true end. `messages` above stays windowed for the legacy gui_agent_chat
-    # (0x78) section during the dual-emit transition.
-    resident_messages =
+    # the gui_agent_transcript (0x86) stream. It is never sliced by scroll; this
+    # builder applies the configured byte-cap suffix bound and records whether
+    # older complete messages were omitted. `messages` above stays windowed for
+    # the legacy gui_agent_chat (0x78) section during the dual-emit transition.
+    {resident_messages, resident_truncated?} =
       full_pairs
       |> build_gui_messages(full_styled_cache, pending_approval)
       |> append_resident_transcript_enrichments(SemanticUIRegistry.default_table())
+      |> select_resident_messages()
 
     help_visible = view.help_visible
 
@@ -103,8 +105,19 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
       input_focused: panel.input_focused,
       messages: gui_messages,
       resident_messages: resident_messages,
+      resident_truncated?: resident_truncated?,
       transcript_epoch: transcript_epoch(session, panel)
     }
+  end
+
+  @doc false
+  @spec select_resident_messages([AgentChat.message()], pos_integer()) ::
+          {[AgentChat.message()], boolean()}
+  def select_resident_messages(
+        messages,
+        max_bytes \\ Minga.Config.get(:agent_transcript_resident_max_bytes)
+      ) do
+    AgentChat.resident_suffix(messages, max_bytes, &AgentChatMessageCodec.resident_entry_size/1)
   end
 
   # Opaque change token for the resident transcript stream. Flips on structural

@@ -2,6 +2,7 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
   use ExUnit.Case, async: true
 
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.EncodingError
   alias Minga.Frontend.Adapter.GUI.PickerEncoder
   alias Minga.RenderModel.UI.Picker
   alias Minga.RenderModel.UI.Picker.ActionMenu
@@ -142,6 +143,99 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
       assert cmd1 != nil
       assert cmd2 == nil
     end
+
+    test "rejects oversized picker header coordinates and counts" do
+      base = valid_picker()
+
+      for field <- [:selected_index, :filtered_count, :total_count, :marked_count] do
+        assert_encoding_error(Map.put(base, field, 65_536), field, 65_536, 65_535)
+      end
+
+      assert_encoding_error(
+        %{base | items: List.duplicate(hd(base.items), 65_536)},
+        :item_count,
+        65_536,
+        65_535
+      )
+    end
+
+    test "rejects every oversized picker header and conditional string" do
+      oversized = String.duplicate("x", 65_536)
+      base = valid_picker()
+
+      for {field, model} <- [
+            title: %{base | title: oversized},
+            query: %{base | query: oversized},
+            mode_prefix: %{base | mode_prefix: oversized},
+            load_status_message: %{base | load_status: {:error, oversized}}
+          ] do
+        assert_encoding_error(model, field, 65_536, 65_535)
+      end
+    end
+
+    test "rejects oversized nested picker item fields and preserves all match positions" do
+      base = valid_picker()
+      [item] = base.items
+      oversized = String.duplicate("x", 65_536)
+
+      for {field, changed_item, actual, max} <- [
+            {:item_icon_color, %{item | icon_color: 0x1000000}, 0x1000000, 0xFFFFFF},
+            {:item_flags, %{item | flags: 256}, 256, 255},
+            {:item_label, %{item | label: oversized}, 65_536, 65_535},
+            {:item_description, %{item | description: oversized}, 65_536, 65_535},
+            {:item_annotation, %{item | annotation: oversized}, 65_536, 65_535},
+            {:item_match_position_count, %{item | match_positions: Enum.to_list(0..255)}, 256,
+             255},
+            {:item_match_position, %{item | match_positions: [65_536]}, 65_536, 65_535}
+          ] do
+        assert_encoding_error(%{base | items: [changed_item]}, field, actual, max)
+      end
+    end
+
+    test "rejects oversized picker action menu fields" do
+      base = valid_picker()
+      oversized = String.duplicate("x", 65_536)
+
+      for {field, menu, actual, max} <- [
+            {:action_menu_selected_index, %ActionMenu{actions: [], selected_index: 256}, 256,
+             255},
+            {:action_count, %ActionMenu{actions: List.duplicate("Open", 256), selected_index: 0},
+             256, 255},
+            {:action_name, %ActionMenu{actions: [oversized], selected_index: 0}, 65_536, 65_535}
+          ] do
+        assert_encoding_error(%{base | action_menu: menu}, field, actual, max)
+      end
+    end
+  end
+
+  defp valid_picker do
+    %Picker{
+      visible?: true,
+      title: "Pick",
+      query: "",
+      items: [
+        %{
+          icon_color: 0,
+          flags: 0,
+          label: "One",
+          description: "",
+          annotation: "",
+          match_positions: []
+        }
+      ]
+    }
+  end
+
+  defp assert_encoding_error(model, field, actual, max) do
+    error = assert_raise EncodingError, fn -> PickerEncoder.encode_command(model) end
+
+    assert %EncodingError{
+             command: :gui_picker,
+             field: ^field,
+             actual: ^actual,
+             min: 0,
+             max: ^max
+           } = error
   end
 
   # Splits `count` self-describing sections (id:1, len:2, payload:len) off the

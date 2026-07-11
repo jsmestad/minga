@@ -199,6 +199,41 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoderTest do
       assert decoded.count == 50
       assert ids(decoded) == Enum.to_list(1..50)
     end
+
+    test "serializes the model-owned resident truncation flag without selecting a suffix" do
+      messages = [user(2, "newest"), user(3, "latest")]
+      {frame, _} = Encoder.encode(model(1, messages, resident_truncated?: true), Caches.new())
+
+      assert decode(frame).truncated
+      assert ids(decode(frame)) == [2, 3]
+    end
+
+    test "emits an append when only the model-owned truncation flag changes" do
+      messages = [user(1, "one"), user(2, "two")]
+      {_frame, caches} = Encoder.encode(model(1, messages), Caches.new())
+      {frame, _} = Encoder.encode(model(1, messages, resident_truncated?: true), caches)
+      decoded = decode(frame)
+
+      assert decoded.mode == @mode_append
+      assert decoded.base == 2
+      assert decoded.count == 0
+      assert decoded.truncated
+    end
+
+    test "sets truncated on an append after the semantic resident suffix evicts older messages" do
+      initial = [user(1, "one"), user(2, "two"), user(3, "three"), user(4, "four")]
+      {_frame, caches} = Encoder.encode(model(1, initial), Caches.new())
+
+      suffix = [user(3, "three"), user(4, "four"), user(5, "five"), user(6, "six")]
+      {frame, _} = Encoder.encode(model(1, suffix, resident_truncated?: true), caches)
+      decoded = decode(frame)
+
+      assert decoded.mode == @mode_append
+      assert decoded.trim_front == 2
+      assert decoded.base == 2
+      assert decoded.truncated
+      assert ids(decoded) == [5, 6]
+    end
   end
 
   describe "duplicate ids" do

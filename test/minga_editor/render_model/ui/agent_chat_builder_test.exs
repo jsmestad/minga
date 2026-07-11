@@ -5,7 +5,9 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
   alias MingaEditor.Agent.UIState
   alias MingaAgent.ToolApproval
   alias MingaAgent.ToolCall
+  alias Minga.Config.Options
   alias Minga.Editing.Scroll
+  alias Minga.Frontend.Adapter.GUI.AgentChatMessageCodec
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Frontend.Emit.Context
   alias Minga.RenderModel.UI.AgentChat.MarkdownBlock
@@ -167,6 +169,49 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
 
     # transcript_epoch is a stable, non-nil change token for the session.
     assert is_integer(model.transcript_epoch)
+  end
+
+  test "select_resident_messages/2 applies the configured wire-byte cap before the adapter" do
+    messages = [
+      {1, {:user, "first"}},
+      {2, {:user, "second"}},
+      {3, {:user, "third"}}
+    ]
+
+    {selected, truncated?} = AgentChatBuilder.select_resident_messages(messages, 37)
+
+    assert selected == [{2, {:user, "second"}}, {3, {:user, "third"}}]
+    assert truncated?
+  end
+
+  test "build/1 applies the configured resident byte cap and marks omitted messages" do
+    options_server = start_supervised!({Options, name: nil})
+    previous_options_server = Process.put(:minga_config_options, options_server)
+
+    on_exit(fn ->
+      if is_nil(previous_options_server) do
+        Process.delete(:minga_config_options)
+      else
+        Process.put(:minga_config_options, previous_options_server)
+      end
+    end)
+
+    session = fake_session_pid()
+    panel = synced_panel([{:assistant, "first"}, {:assistant, "second"}])
+    uncapped = context(session, panel) |> AgentChatBuilder.build()
+    retained = Enum.take(uncapped.resident_messages, -2)
+
+    retained_bytes =
+      Enum.reduce(retained, 0, fn message, total ->
+        total + AgentChatMessageCodec.resident_entry_size(message)
+      end)
+
+    assert :ok = Minga.Config.set(:agent_transcript_resident_max_bytes, retained_bytes)
+
+    capped = context(session, panel) |> AgentChatBuilder.build()
+
+    assert capped.resident_messages == retained
+    assert capped.resident_truncated?
   end
 
   test "build/1 sends connect-provider empty state for first-run no-credential sessions" do

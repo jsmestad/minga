@@ -47,6 +47,24 @@ defmodule Minga.RenderModel.UI.AgentChatTest do
       assert Enum.count(model.messages) == 2
     end
 
+    test "selects a contiguous newest resident suffix" do
+      messages = [{1, {:user, "one"}}, {2, {:user, "two"}}, {3, {:user, "three"}}]
+      sizes = %{1 => 10, 2 => 20, 3 => 30}
+
+      assert {[{2, {:user, "two"}}, {3, {:user, "three"}}], true} =
+               AgentChat.resident_suffix(messages, 50, fn {id, _body} -> Map.fetch!(sizes, id) end)
+    end
+
+    test "retains an oversized newest message without shortening it" do
+      messages = [{1, {:user, "older"}}, {2, {:user, "newest"}}]
+
+      assert {[{2, {:user, "newest"}}], true} =
+               AgentChat.resident_suffix(messages, 10, fn _message -> 20 end)
+
+      assert {[{2, {:user, "newest"}}], false} =
+               AgentChat.resident_suffix([{2, {:user, "newest"}}], 10, fn _message -> 20 end)
+    end
+
     test "holds a prompt completion popup" do
       completion = %PromptCompletion{
         type: :slash,

@@ -30,7 +30,6 @@ defmodule Minga.Test.ProtocolGolden do
   alias Minga.Frontend.Adapter.GUI.GitStatusEncoder
   alias Minga.Frontend.Adapter.GUI.PickerEncoder
   alias Minga.Frontend.Adapter.GUI.SearchStateEncoder
-  alias Minga.Frontend.Protocol.Encoding
   alias Minga.Protocol.Encode
   alias Minga.Protocol.GoldenFields
   alias Minga.RenderModel.UI.Breadcrumb
@@ -589,17 +588,16 @@ defmodule Minga.Test.ProtocolGolden do
         %{message: "Pull failed", level: :error, action: :pull_and_retry}
       )
 
-    # Boundary case: oversized stash_count clamps to u16 max, and an over-length
-    # last_commit_message is utf8-truncated (the builder appends the suffix).
-    over_limit_message = String.duplicate("λ", 40_000)
+    # Boundary case: the largest valid u16 count and string remain byte-exact.
+    max_message = String.duplicate("x", 65_535)
 
-    clamp =
+    boundary =
       GitStatusBuilder.build(
         %{
           repo_state: :normal,
           branch: "b",
-          stash_count: 70_000,
-          last_commit_message: over_limit_message
+          stash_count: 65_535,
+          last_commit_message: max_message
         },
         true,
         %{message: "Done", level: :success, action: nil}
@@ -663,9 +661,9 @@ defmodule Minga.Test.ProtocolGolden do
         }
       },
       %{
-        name: "git_status_clamp_truncate_boundary",
+        name: "git_status_max_boundary",
         decoder: "GuiGitStatusFields",
-        payload: git_status_payload(clamp),
+        payload: git_status_payload(boundary),
         expected: %{
           repo_state: 0,
           syncing: 1,
@@ -675,9 +673,7 @@ defmodule Minga.Test.ProtocolGolden do
           entries: [],
           toast: %{present: 1, level: 0, action: 0, message: "Done"},
           entry_base_path: "",
-          # The builder truncates to the u16 byte limit; re-derive the exact
-          # truncated value so the fixture pins byte-for-byte agreement.
-          last_commit_message: Encoding.utf8_prefix_bytes(over_limit_message, 65_535),
+          last_commit_message: max_message,
           stash_count: 65_535
         }
       }

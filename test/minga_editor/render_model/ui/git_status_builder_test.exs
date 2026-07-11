@@ -89,20 +89,25 @@ defmodule MingaEditor.RenderModel.UI.GitStatusBuilderTest do
       refute Map.has_key?(staged, :staged)
     end
 
-    test "clamps stash_count to the u16 maximum" do
+    test "preserves stash_count for adapter boundary validation" do
       model = GitStatusBuilder.build(%{repo_state: :normal, stash_count: 70_000}, false, nil)
 
-      assert model.stash_count == 65_535
+      assert model.stash_count == 70_000
     end
 
-    test "truncates an over-length last_commit_message to the u16 byte limit" do
+    test "preserves over-length strings for adapter boundary validation" do
       message = String.duplicate("λ", 40_000)
+      base_path = String.duplicate("root/", 20_000)
 
       model =
-        GitStatusBuilder.build(%{repo_state: :normal, last_commit_message: message}, false, nil)
+        GitStatusBuilder.build(
+          %{repo_state: :normal, last_commit_message: message, entry_base_path: base_path},
+          false,
+          nil
+        )
 
-      assert byte_size(model.last_commit_message) <= 65_535
-      assert String.valid?(model.last_commit_message)
+      assert model.last_commit_message == message
+      assert model.entry_base_path == base_path
     end
 
     test "normalizes a nil toast action to :none" do

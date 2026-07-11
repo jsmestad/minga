@@ -1016,7 +1016,7 @@ When the git status panel is closed, the BEAM sends `repo_state = not_a_repo`, n
 
 Resident agent-chat transcript stream (#2654). Carries the conversation as resident data so a frontend scrolls it from local state without a BEAM round-trip, decoupled from the `gui_agent_chat` (0x78) chrome model whose u16 sectioned frame capped the transcript at ~65KB. Framing is `len32` (opcode + u32 payload length), so the payload can exceed 64KB and any frontend that recognizes the opcode sizes and skips it via the schema's generated `command_size`. Message bodies are byte-identical to the 0x78 messages section (shared codec).
 
-The resident set is the conversation scoped by `display_start_index` and bounded by the `agent_transcript_resident_max_bytes` config as a contiguous most-recent suffix; the `truncated` flag signals when older messages sit outside the window.
+The semantic-model builder scopes the resident set by `display_start_index` and bounds it with `agent_transcript_resident_max_bytes` as a contiguous most-recent suffix. It retains every selected message whole, and the `truncated` flag signals when older complete messages sit outside the window. The GUI adapter serializes that selected model exactly and never applies its own cap.
 
 ```
 opcode(1) + payload_len(4) + payload

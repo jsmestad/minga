@@ -38,14 +38,13 @@ defmodule Minga.RenderModel.UI.AgentChat do
 
   ## Resident transcript
 
-  `messages` is the windowed, byte-capped tail the legacy `gui_agent_chat` (0x78)
-  section carries. `resident_messages` is the resident transcript (same
-  `message()` shape) that rides the dedicated `gui_agent_transcript` (0x86)
-  stream so the frontend can scroll from local data (#2654): the conversation
-  scoped by `display_start_index`, which the encoder further bounds by
-  `:agent_transcript_resident_max_bytes` as a contiguous most-recent suffix
-  (marking the stream truncated when older messages fall outside the window).
-  `transcript_epoch` is an opaque change token that flips on structural change
+  `messages` is the windowed tail the legacy `gui_agent_chat` (0x78) section
+  carries. `resident_messages` is the resident transcript (same `message()`
+  shape) that rides the dedicated `gui_agent_transcript` (0x86) stream so the
+  frontend can scroll from local data (#2654). The editor builder applies
+  `:agent_transcript_resident_max_bytes` as a contiguous most-recent suffix and
+  sets `resident_truncated?` when it omits older complete messages. The adapter
+  serializes that already-selected model exactly. `transcript_epoch` is an opaque change token that flips on structural change
   (session switch, display-start/compaction), driving the resident stream's
   full-replace-vs-append decision. Both default empty/zero so surfaces that do
   not populate them keep the historical single-transport behaviour.
@@ -103,6 +102,7 @@ defmodule Minga.RenderModel.UI.AgentChat do
           input_focused: boolean(),
           messages: [message()],
           resident_messages: [message()],
+          resident_truncated?: boolean(),
           transcript_epoch: non_neg_integer()
         }
 
@@ -122,7 +122,83 @@ defmodule Minga.RenderModel.UI.AgentChat do
             input_focused: false,
             messages: [],
             resident_messages: [],
+            resident_truncated?: false,
             transcript_epoch: 0
+
+  @doc "Selects a contiguous newest resident suffix without shortening any message."
+  @spec resident_suffix([message()], pos_integer(), (message() -> pos_integer())) ::
+          {[message()], boolean()}
+  def resident_suffix(messages, max_bytes, entry_size)
+      when is_list(messages) and is_function(entry_size, 1) do
+    select_resident_suffix(Enum.reverse(messages), max_bytes, entry_size, [], 0)
+  end
+
+  @spec select_resident_suffix(
+          [message()],
+          pos_integer(),
+          (message() -> pos_integer()),
+          [message()],
+          non_neg_integer()
+        ) :: {[message()], boolean()}
+  defp select_resident_suffix([], _max_bytes, _entry_size, selected, _selected_bytes),
+    do: {selected, false}
+
+  defp select_resident_suffix([newest | older], max_bytes, entry_size, [], _selected_bytes) do
+    select_resident_suffix(older, max_bytes, entry_size, [newest], entry_size.(newest))
+  end
+
+  defp select_resident_suffix([message | older], max_bytes, entry_size, selected, selected_bytes) do
+    message_bytes = entry_size.(message)
+
+    select_resident_suffix_if_fits(
+      message,
+      older,
+      max_bytes,
+      entry_size,
+      selected,
+      selected_bytes,
+      message_bytes
+    )
+  end
+
+  @spec select_resident_suffix_if_fits(
+          message(),
+          [message()],
+          pos_integer(),
+          (message() -> pos_integer()),
+          [message()],
+          non_neg_integer(),
+          pos_integer()
+        ) :: {[message()], boolean()}
+  defp select_resident_suffix_if_fits(
+         message,
+         older,
+         max_bytes,
+         entry_size,
+         selected,
+         selected_bytes,
+         message_bytes
+       )
+       when selected_bytes + message_bytes <= max_bytes do
+    select_resident_suffix(
+      older,
+      max_bytes,
+      entry_size,
+      [message | selected],
+      selected_bytes + message_bytes
+    )
+  end
+
+  defp select_resident_suffix_if_fits(
+         _message,
+         _older,
+         _max_bytes,
+         _entry_size,
+         selected,
+         _selected_bytes,
+         _message_bytes
+       ),
+       do: {selected, true}
 
   defmodule PromptCompletion do
     @moduledoc """
