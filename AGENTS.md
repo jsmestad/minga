@@ -393,7 +393,7 @@ LLM agents hit these repeatedly. Read before writing any Elixir:
 
 ### Custom Credo Checks
 
-Minga has project-specific Credo checks in `credo/checks/`. These enforce architectural rules that are easy to violate accidentally and hard to catch in review. All run as part of `make lint`.
+Minga has project-specific Credo checks in `credo/checks/`. These enforce architectural rules that are easy to violate accidentally and hard to catch in review. `make lint` runs them for changed source files, while `make lint.full` and CI run them across the whole project.
 
 | Check | ID | What it guards |
 |-------|----|----------------|
@@ -410,14 +410,15 @@ The `commit-gate` extension blocks every `git commit` until all checks pass. You
 
 **Before requesting review, do this self-check:**
 
-1. **Run `make lint`** (format + credo + compile + dialyzer). All four steps run even if one fails, so dialyzer is never skipped. Fix any failures.
+1. **Run `make lint.full`** before requesting review (format + full Credo + compile + classic Dialyzer). All checks run even if one fails, so Dialyzer is never skipped. Use `make lint` for the fast local gate between edits.
 2. **Run `mix test.llm`**. Fix any failures.
 3. **Check every touched `.ex` file:** does every public function have `@spec`? Does the module have `@moduledoc`? Do structs have `@enforce_keys`?
 4. **If you touched `.zig` files**, run `mix zig.lint`.
 5. **If you touched `.swift` files**, run `mix swift.build` and Swift tests.
 
 ```bash
-make lint                         # Format + credo + compile + dialyzer (all steps, even on failure)
+make lint                         # Fast format + changed Credo + compile + incremental Dialyzer
+make lint.full                    # Full format + Credo + compile + classic Dialyzer before review
 mix test.llm                      # Tests with LLM-optimized output (excludes :heavy)
 mix test.heavy                    # Only :heavy tests (OS process, timeout, multi-turn)
 mix test.debug test/minga/foo_test.exs  # Single file, verbose (faster iteration)

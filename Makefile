@@ -1,4 +1,4 @@
-.PHONY: help lint lint.format lint.credo lint.compile lint.dialyzer lint.fix test test.llm \
+.PHONY: help lint lint.full lint.format lint.credo lint.credo.changed lint.compile lint.dialyzer lint.dialyzer.incremental lint.fix test test.llm \
        native.support native.tui native.go-tui \
        release release-tui release-mac install install-tui install-mac uninstall
 
@@ -12,8 +12,9 @@ help:
 	@printf "  \033[1mbin/minga\033[0m          Launch the Go/Bubble Tea TUI\n"
 	@printf "  \033[1mbin/minga +gui\033[0m     Launch the native macOS GUI\n\n"
 	@printf "\033[1;36mQuality checks\033[0m\n"
-	@printf "  \033[1mmake lint\033[0m          Format, credo, compile, and dialyzer\n"
-	@printf "  \033[1mmake lint.fix\033[0m      Run format and strict credo\n"
+	@printf "  \033[1mmake lint\033[0m          Fast local format, changed Credo, compile, and incremental Dialyzer\n"
+	@printf "  \033[1mmake lint.full\033[0m     Full format, Credo, compile, and classic Dialyzer\n"
+	@printf "  \033[1mmake lint.fix\033[0m      Run format and strict Credo\n"
 	@printf "  \033[1mmake test\033[0m          Build parser support and run the full ExUnit suite\n"
 	@printf "  \033[1mmake test.llm\033[0m      Build parser support and run LLM-friendly tests\n\n"
 	@printf "\033[1;36mNative builds\033[0m\n"
@@ -62,20 +63,35 @@ endif
 
 # ── Lint ────────────────────────────────────────────────────────────────
 
-# Run all lint checks. Each step runs independently so dialyzer always
-# runs even if an earlier step fails. Failures are collected and reported
-# at the end.
+# Run the fast local lint gate. Each step runs independently so later checks
+# still report failures when an earlier check fails.
 lint:
 	@failed=""; \
 	mix format --check-formatted || failed="$$failed format"; \
-	mix credo --strict || failed="$$failed credo"; \
+	scripts/credo_changed || failed="$$failed credo"; \
 	mix compile --warnings-as-errors || failed="$$failed compile"; \
-	mix dialyzer || failed="$$failed dialyzer"; \
+	mix dialyzer.incremental || failed="$$failed dialyzer"; \
 	if [ -n "$$failed" ]; then \
 		echo "\n\033[31mFailed checks:$$failed\033[0m"; \
 		exit 1; \
 	else \
-		echo "\n\033[32mAll lint checks passed.\033[0m"; \
+		echo "\n\033[32mFast lint checks passed.\033[0m"; \
+	fi
+
+# Run the complete local gate. Credo is independent of compilation and
+# Dialyzer, so it runs concurrently without dropping any checks.
+lint.full:
+	@failed=""; \
+	mix format --check-formatted || failed="$$failed format"; \
+	mix credo --strict & credo_pid=$$!; \
+	mix compile --warnings-as-errors || failed="$$failed compile"; \
+	mix dialyzer || failed="$$failed dialyzer"; \
+	wait "$$credo_pid" || failed="$$failed credo"; \
+	if [ -n "$$failed" ]; then \
+		echo "\n\033[31mFailed checks:$$failed\033[0m"; \
+		exit 1; \
+	else \
+		echo "\n\033[32mFull lint checks passed.\033[0m"; \
 	fi
 
 lint.format:
@@ -84,11 +100,17 @@ lint.format:
 lint.credo:
 	mix credo --strict
 
+lint.credo.changed:
+	scripts/credo_changed
+
 lint.compile:
 	mix compile --warnings-as-errors
 
 lint.dialyzer:
 	mix dialyzer
+
+lint.dialyzer.incremental:
+	mix dialyzer.incremental
 
 lint.fix:
 	mix format

@@ -7,6 +7,8 @@ Code.require_file("mix/compilers/minga_zig.ex", __DIR__)
 Code.require_file("mix/compilers/minga_go_tui.ex", __DIR__)
 Code.require_file("mix/tasks/language_aliases.gen.ex", __DIR__)
 Code.require_file("mix/tasks/protocol.gen.ex", __DIR__)
+Code.require_file("mix/tasks/dialyzer.incremental.ex", __DIR__)
+Code.require_file("mix/tasks/dialyzer.incremental.clean.ex", __DIR__)
 Code.require_file("mix/tasks/native_build/result.ex", __DIR__)
 Code.require_file("mix/tasks/native_build_support.ex", __DIR__)
 Code.require_file("mix/tasks/native_build_tui.ex", __DIR__)
@@ -255,7 +257,7 @@ defmodule Minga.MixProject do
       {:burrito,
        github: "gilbertwong96/burrito", ref: "37db26f367613669f0a61ef35446480ad0ee23a1"},
       {:file_system, "~> 1.0"},
-      {:stream_data, "~> 1.0", only: [:test, :dev]},
+      {:stream_data, "~> 1.0", only: :test},
       {:propcheck, "~> 1.5", only: :test},
       {:ex_doc, "~> 0.35", only: :dev, runtime: false},
       {:req_llm, "~> 1.16"},
