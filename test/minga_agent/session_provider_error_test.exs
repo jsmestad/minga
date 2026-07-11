@@ -2,6 +2,7 @@ defmodule MingaAgent.SessionProviderErrorTest do
   use Minga.Test.SessionCase, async: true
 
   describe "MCP crash handling" do
+    @tag :tmp_dir
     test "adds a system message and can still run a builtin tool", %{tmp_dir: dir} do
       test_pid = self()
       call_count = :counters.new(1, [:atomics])

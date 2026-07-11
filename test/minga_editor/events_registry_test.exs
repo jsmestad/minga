@@ -1,5 +1,5 @@
 defmodule MingaEditor.EventsRegistryTest do
-  use Minga.Test.EditorCase, async: true
+  use Minga.Test.EditorCase, async: true, rendering: :disabled
 
   alias Minga.Events
 

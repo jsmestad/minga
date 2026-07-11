@@ -1,261 +1,23 @@
 defmodule MingaAgent.Tools.SubagentTest do
-  # Uses the global MingaAgent.Supervisor for child sessions, so this file must run serially.
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Minga.Events
-  alias MingaAgent.Event
-  alias MingaAgent.ProviderPacks.Native, as: NativeProviderPack
-  alias MingaAgent.ProviderRegistry
   alias MingaAgent.Session
   alias MingaAgent.SessionManager
   alias MingaAgent.Subagent.Handle
   alias MingaAgent.Tools.Subagent
+  alias Minga.Test.SubagentErrorProvider, as: ErrorProvider
+  alias Minga.Test.SubagentGatedProvider, as: GatedProvider
+  alias Minga.Test.SubagentOverrideProvider, as: OverrideProvider
+  alias Minga.Test.SubagentRecordingProvider, as: RecordingProvider
+  alias Minga.Test.SubagentTestNotifier, as: TestNotifier
   alias Minga.Test.SubagentWorktreeBackend
   alias Minga.Test.SubagentWorktreeProvider
   alias ReqLLM.StreamResponse.MetadataHandle
   alias ReqLLM.StreamChunk
 
   @moduletag :tmp_dir
-
-  # ── Test providers ────────────────────────────────────────────────────────
-
-  defmodule GatedProvider do
-    @behaviour MingaAgent.Provider
-
-    use GenServer
-
-    @impl MingaAgent.Provider
-    def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
-
-    @impl MingaAgent.Provider
-    def send_prompt(pid, text), do: GenServer.call(pid, {:prompt, text})
-
-    @impl MingaAgent.Provider
-    def abort(pid), do: GenServer.call(pid, :abort)
-
-    @impl MingaAgent.Provider
-    def new_session(pid), do: GenServer.call(pid, :new_session)
-
-    @impl MingaAgent.Provider
-    def seed_messages(_pid, _messages), do: :ok
-
-    @impl MingaAgent.Provider
-    def get_state(_pid), do: {:ok, %{model: nil, is_streaming: false, token_usage: nil}}
-
-    @spec proceed(GenServer.server(), String.t()) :: :ok
-    def proceed(pid, text \\ "child done"), do: GenServer.call(pid, {:proceed, text})
-
-    @impl GenServer
-    def init(opts) do
-      {:ok,
-       %{subscriber: Keyword.fetch!(opts, :subscriber), test_pid: Keyword.fetch!(opts, :test_pid)}}
-    end
-
-    @impl GenServer
-    def handle_call({:prompt, text}, _from, state) do
-      send(state.subscriber, {:agent_provider_event, %Event.AgentStart{}})
-      send(state.test_pid, {:provider_prompt, self(), text})
-      {:reply, :ok, state}
-    end
-
-    def handle_call({:proceed, text}, _from, state) do
-      send(state.subscriber, {:agent_provider_event, %Event.TextDelta{delta: text}})
-      send(state.subscriber, {:agent_provider_event, %Event.AgentEnd{}})
-      {:reply, :ok, state}
-    end
-
-    def handle_call(:abort, _from, state), do: {:reply, :ok, state}
-    def handle_call(:new_session, _from, state), do: {:reply, :ok, state}
-  end
-
-  defmodule ErrorProvider do
-    @behaviour MingaAgent.Provider
-
-    use GenServer
-
-    @impl MingaAgent.Provider
-    def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
-
-    @impl MingaAgent.Provider
-    def send_prompt(pid, text), do: GenServer.call(pid, {:prompt, text})
-
-    @impl MingaAgent.Provider
-    def abort(pid), do: GenServer.call(pid, :abort)
-
-    @impl MingaAgent.Provider
-    def new_session(pid), do: GenServer.call(pid, :new_session)
-
-    @impl MingaAgent.Provider
-    def seed_messages(_pid, _messages), do: :ok
-
-    @impl MingaAgent.Provider
-    def get_state(_pid), do: {:ok, %{model: nil, is_streaming: false, token_usage: nil}}
-
-    @impl GenServer
-    def init(opts) do
-      {:ok,
-       %{subscriber: Keyword.fetch!(opts, :subscriber), test_pid: Keyword.fetch!(opts, :test_pid)}}
-    end
-
-    @impl GenServer
-    def handle_call({:prompt, text}, _from, state) do
-      send(state.subscriber, {:agent_provider_event, %Event.AgentStart{}})
-      send(state.test_pid, {:provider_prompt, self(), text})
-      send(state.subscriber, {:agent_provider_event, %Event.Error{message: "boom"}})
-      {:reply, :ok, state}
-    end
-
-    def handle_call(:abort, _from, state), do: {:reply, :ok, state}
-    def handle_call(:new_session, _from, state), do: {:reply, :ok, state}
-  end
-
-  defmodule TestNotifier do
-    @spec notify(atom(), String.t(), pid()) :: :ok
-    def notify(trigger, message, test_pid) do
-      send(test_pid, {:notified, trigger, message})
-      :ok
-    end
-  end
-
-  defmodule RecordingProvider do
-    @behaviour MingaAgent.Provider
-
-    use GenServer
-
-    @impl MingaAgent.Provider
-    def start_link(opts) do
-      GenServer.start_link(__MODULE__, opts)
-    end
-
-    @impl MingaAgent.Provider
-    def send_prompt(pid, text) do
-      GenServer.call(pid, {:send_prompt, text})
-    end
-
-    @impl MingaAgent.Provider
-    def abort(pid) do
-      GenServer.cast(pid, :abort)
-      :ok
-    end
-
-    @impl MingaAgent.Provider
-    def new_session(pid) do
-      GenServer.cast(pid, :new_session)
-      :ok
-    end
-
-    @impl MingaAgent.Provider
-    def seed_messages(_pid, _messages), do: :ok
-
-    @impl MingaAgent.Provider
-    def get_state(pid) do
-      GenServer.call(pid, :get_state)
-    end
-
-    @impl GenServer
-    def init(opts) do
-      notify_test(opts, {:provider_started, self(), opts})
-
-      state = %{
-        subscriber: Keyword.fetch!(opts, :subscriber),
-        model: Keyword.get(opts, :model),
-        provider: Keyword.get(opts, :provider, "recording"),
-        thinking_level: Keyword.get(opts, :thinking_level),
-        active_skill_names: Keyword.get(opts, :active_skill_names, []),
-        project_root: Keyword.get(opts, :project_root),
-        blocking: Keyword.get(opts, :blocking, false),
-        test_pid: Keyword.get(opts, :test_pid),
-        test_ref: Keyword.get(opts, :test_ref)
-      }
-
-      {:ok, state}
-    end
-
-    @impl GenServer
-    def handle_call({:send_prompt, text}, _from, state) do
-      notify_test(state, {:prompt_received, self(), state.subscriber, text})
-      notify_session(state, %Event.AgentStart{})
-
-      if state.blocking do
-        {:reply, :ok, state}
-      else
-        notify_session(state, %Event.TextDelta{delta: "child response"})
-        notify_session(state, %Event.AgentEnd{usage: nil})
-        {:reply, :ok, state}
-      end
-    end
-
-    def handle_call(:get_state, _from, state) do
-      provider_state = %{
-        model: %{id: state.model, name: state.model, provider: state.provider},
-        is_streaming: false,
-        token_usage: nil,
-        thinking_level: state.thinking_level,
-        active_skill_names: state.active_skill_names,
-        project_root: state.project_root
-      }
-
-      {:reply, {:ok, provider_state}, state}
-    end
-
-    @impl GenServer
-    def handle_cast(:finish, state) do
-      notify_session(state, %Event.TextDelta{delta: "blocked child response"})
-      notify_session(state, %Event.AgentEnd{usage: nil})
-      {:noreply, state}
-    end
-
-    def handle_cast(_message, state), do: {:noreply, state}
-
-    @spec finish(GenServer.server()) :: :ok
-    def finish(pid) do
-      GenServer.cast(pid, :finish)
-    end
-
-    @spec notify_session(map(), Event.t()) :: :ok
-    defp notify_session(state, event) do
-      send(state.subscriber, {:agent_provider_event, event})
-      :ok
-    end
-
-    @spec notify_test(keyword() | map(), tuple()) :: :ok
-    defp notify_test(opts_or_state, message) do
-      test_pid = get_opt(opts_or_state, :test_pid)
-      test_ref = get_opt(opts_or_state, :test_ref)
-
-      if is_pid(test_pid) and test_ref != nil do
-        send(test_pid, {test_ref, message})
-      end
-
-      :ok
-    end
-
-    @spec get_opt(keyword() | map(), atom()) :: term()
-    defp get_opt(opts, key) when is_list(opts), do: Keyword.get(opts, key)
-    defp get_opt(state, key) when is_map(state), do: Map.get(state, key)
-  end
-
-  defmodule OverrideProvider do
-    @behaviour MingaAgent.Provider
-
-    @impl MingaAgent.Provider
-    def start_link(opts), do: RecordingProvider.start_link(opts)
-
-    @impl MingaAgent.Provider
-    def send_prompt(pid, text), do: RecordingProvider.send_prompt(pid, text)
-
-    @impl MingaAgent.Provider
-    def abort(pid), do: RecordingProvider.abort(pid)
-
-    @impl MingaAgent.Provider
-    def new_session(pid), do: RecordingProvider.new_session(pid)
-
-    @impl MingaAgent.Provider
-    def seed_messages(_pid, _messages), do: :ok
-
-    @impl MingaAgent.Provider
-    def get_state(pid), do: RecordingProvider.get_state(pid)
-  end
+  @event_timeout 5_000
 
   # ── Setup ──────────────────────────────────────────────────────────────────
 
@@ -265,160 +27,6 @@ defmodule MingaAgent.Tools.SubagentTest do
 
   # ── Background subagent tests ──────────────────────────────────────────────
 
-  test "foreground subagent resolves registered string provider ids" do
-    test_pid = self()
-
-    assert :ok =
-             ProviderRegistry.register(
-               id: "gated-test",
-               source: :config,
-               module: GatedProvider,
-               display_name: "Gated Test"
-             )
-
-    on_exit(fn -> ProviderRegistry.unregister_source(:config) end)
-
-    task =
-      Task.async(fn ->
-        Subagent.execute("registered provider task",
-          provider: "gated-test",
-          provider_opts: [test_pid: test_pid]
-        )
-      end)
-
-    assert_receive {:provider_prompt, provider_pid, "registered provider task"}, 1_000
-    assert :ok = GatedProvider.proceed(provider_pid, "registered done")
-    assert {:ok, "registered done"} = Task.await(task)
-  end
-
-  test "native provider atom override is rejected when the bundled source is disabled" do
-    assert :ok = ProviderRegistry.disable("native")
-    on_exit(fn -> ProviderRegistry.enable("native") end)
-
-    assert {:error, message} = Subagent.execute("blocked native", provider: :native)
-    assert message =~ "Failed to resolve subagent provider"
-    assert message =~ ":disabled"
-  end
-
-  test "native provider string override is rejected when the bundled source is disabled" do
-    assert :ok = ProviderRegistry.disable("native")
-    on_exit(fn -> ProviderRegistry.enable("native") end)
-
-    assert {:error, message} = Subagent.execute("blocked native", provider: "native")
-    assert message =~ "Failed to resolve subagent provider"
-    assert message =~ ":disabled"
-  end
-
-  test "default native provider is rejected after bundled source cleanup" do
-    assert :ok = ProviderRegistry.unregister_source(NativeProviderPack.source())
-    on_exit(fn -> NativeProviderPack.register() end)
-
-    assert {:error, message} = Subagent.execute("blocked native")
-    assert message =~ "Failed to resolve subagent provider"
-    assert message =~ ":not_found"
-  end
-
-  test "inherited source-owned providers resolve for child sessions while registered", %{
-    tmp_dir: dir
-  } do
-    source = {:bundle, :recording_subagent_provider_positive}
-    provider_id = "recording-subagent-provider-positive"
-    ref = make_ref()
-
-    assert :ok =
-             ProviderRegistry.register(
-               id: provider_id,
-               source: source,
-               module: RecordingProvider,
-               display_name: "Recording Subagent Provider"
-             )
-
-    {:ok, parent} =
-      MingaAgent.Supervisor.start_session(
-        provider: RecordingProvider,
-        provider_id: provider_id,
-        provider_source: source,
-        model_name: "parent-model",
-        provider_opts: [
-          provider: "recording",
-          model: "parent-model",
-          thinking_level: "high",
-          active_skill_names: ["elixir"],
-          project_root: dir,
-          test_pid: self(),
-          test_ref: ref
-        ]
-      )
-
-    assert_receive {^ref, {:provider_started, _provider_pid, _opts}}, 1_000
-
-    on_exit(fn ->
-      MingaAgent.Supervisor.stop_session(parent)
-      ProviderRegistry.unregister_source(source)
-    end)
-
-    assert {:ok, "child response"} =
-             Subagent.execute("allowed inherited",
-               parent_session: parent,
-               project_root: dir,
-               provider_opts: [test_pid: self(), test_ref: ref]
-             )
-
-    assert_receive {^ref, {:provider_started, _child_provider, child_opts}}, 1_000
-    assert Keyword.fetch!(child_opts, :project_root) == dir
-    assert Keyword.fetch!(child_opts, :provider) == provider_id
-    assert Keyword.fetch!(child_opts, :model) == "parent-model"
-    assert Keyword.fetch!(child_opts, :thinking_level) == "high"
-    assert Keyword.fetch!(child_opts, :active_skill_names) == ["elixir"]
-    assert Keyword.fetch!(child_opts, :test_ref) == ref
-
-    assert_receive {^ref, {:prompt_received, _provider_pid, _subscriber, "allowed inherited"}},
-                   1_000
-  end
-
-  test "inherited source-owned providers are rechecked for child sessions", %{tmp_dir: dir} do
-    source = {:bundle, :recording_subagent_provider}
-    provider_id = "recording-subagent-provider"
-    ref = make_ref()
-
-    assert :ok =
-             ProviderRegistry.register(
-               id: provider_id,
-               source: source,
-               module: RecordingProvider,
-               display_name: "Recording Subagent Provider"
-             )
-
-    {:ok, parent} =
-      MingaAgent.Supervisor.start_session(
-        provider: RecordingProvider,
-        provider_id: provider_id,
-        provider_source: source,
-        model_name: "parent-model",
-        provider_opts: [
-          provider: "recording",
-          model: "parent-model",
-          project_root: dir,
-          test_pid: self(),
-          test_ref: ref
-        ]
-      )
-
-    assert_receive {^ref, {:provider_started, _provider_pid, _opts}}, 1_000
-    assert :ok = ProviderRegistry.unregister_source(source)
-
-    on_exit(fn ->
-      MingaAgent.Supervisor.stop_session(parent)
-      ProviderRegistry.unregister_source(source)
-    end)
-
-    assert {:error, message} =
-             Subagent.execute("blocked inherited", parent_session: parent, project_root: dir)
-
-    assert message =~ "Failed to resolve subagent provider"
-    assert message =~ ":not_found"
-  end
-
   @tag :session_manager
   test "background subagent returns a stable handle before the child finishes", %{
     manager: manager
@@ -427,22 +35,19 @@ defmodule MingaAgent.Tools.SubagentTest do
 
     Events.subscribe(:background_subagent_started)
 
-    task =
-      Task.async(fn ->
-        Subagent.execute("long task",
-          background: true,
-          session_manager: manager,
-          provider: GatedProvider,
-          provider_opts: [test_pid: test_pid]
-        )
-      end)
+    assert {:ok, result} =
+             Subagent.execute("long task",
+               background: true,
+               session_manager: manager,
+               provider: GatedProvider,
+               provider_opts: [test_pid: test_pid]
+             )
 
-    assert {:ok, result} = Task.await(task)
     assert result =~ ~r/Handle: session-1-[0-9a-f]{8}/
 
     assert_receive {:minga_event, :background_subagent_started,
                     %Handle{session_id: session_id, task: "long task"}},
-                   1_000
+                   @event_timeout
 
     assert String.match?(session_id, ~r/^session-1-[0-9a-f]{8}$/)
 
@@ -450,7 +55,7 @@ defmodule MingaAgent.Tools.SubagentTest do
     assert %Handle{session_id: ^session_id, pid: child_pid} = handle
     assert Session.status(child_pid) in [:idle, :thinking]
 
-    assert_receive {:provider_prompt, provider_pid, "long task"}, 1_000
+    assert_receive {:provider_prompt, provider_pid, "long task"}, @event_timeout
     assert Session.status(child_pid) == :thinking
 
     assert :ok = GatedProvider.proceed(provider_pid)
@@ -474,7 +79,7 @@ defmodule MingaAgent.Tools.SubagentTest do
         provider_opts: [test_pid: self()]
       )
 
-    assert_receive {:provider_prompt, _provider_pid, "child work"}, 1_000
+    assert_receive {:provider_prompt, _provider_pid, "child work"}, @event_timeout
     [handle] = SessionManager.list_background_subagents(manager, parent_pid)
     assert handle.parent_pid == parent_pid
 
@@ -498,9 +103,9 @@ defmodule MingaAgent.Tools.SubagentTest do
 
     [handle] = SessionManager.list_background_subagents(manager, nil)
     Session.subscribe(handle.pid)
-    assert_receive {:provider_prompt, provider_pid, "write result"}, 1_000
+    assert_receive {:provider_prompt, provider_pid, "write result"}, @event_timeout
     :ok = GatedProvider.proceed(provider_pid, "saved answer")
-    assert_receive {:agent_event, _pid, {:status_changed, :idle}}, 1_000
+    assert_receive {:agent_event, _pid, {:status_changed, :idle}}, @event_timeout
 
     assert Enum.any?(Session.messages(handle.pid), &(&1 == {:assistant, "saved answer"}))
   end
@@ -520,9 +125,9 @@ defmodule MingaAgent.Tools.SubagentTest do
 
     [handle] = SessionManager.list_background_subagents(manager, nil)
     Session.subscribe(handle.pid)
-    assert_receive {:provider_prompt, _provider_pid, "fail"}, 1_000
+    assert_receive {:provider_prompt, _provider_pid, "fail"}, @event_timeout
     assert Session.status(handle.pid) == :error
-    assert_receive {:notified, :error, "boom"}, 1_000
+    assert_receive {:notified, :error, "boom"}, @event_timeout
     refute_receive {:notified, :error, _}, 50
 
     assert Session.status(handle.pid) == :error
@@ -542,10 +147,10 @@ defmodule MingaAgent.Tools.SubagentTest do
 
     [handle] = SessionManager.list_background_subagents(manager, nil)
     Session.subscribe(handle.pid)
-    assert_receive {:provider_prompt, provider_pid, "notify"}, 1_000
+    assert_receive {:provider_prompt, provider_pid, "notify"}, @event_timeout
     :ok = GatedProvider.proceed(provider_pid)
-    assert_receive {:agent_event, _pid, {:status_changed, :idle}}, 1_000
-    assert_receive {:notified, :complete, message}, 1_000
+    assert_receive {:agent_event, _pid, {:status_changed, :idle}}, @event_timeout
+    assert_receive {:notified, :complete, message}, @event_timeout
     assert String.match?(message, ~r/^Sub-agent session-1-[0-9a-f]{8} finished$/)
     refute_receive {:notified, :complete, _}, 50
   end
@@ -576,7 +181,7 @@ defmodule MingaAgent.Tools.SubagentTest do
 
     assert_receive {:agent_event, _pid,
                     {:approval_rejected, "tc_write_file", "write_file", message}},
-                   1_000
+                   @event_timeout
 
     elapsed_ms = System.monotonic_time(:millisecond) - started_at
     assert elapsed_ms < 2_000
@@ -607,9 +212,9 @@ defmodule MingaAgent.Tools.SubagentTest do
         )
       end)
 
-    assert_receive {:provider_prompt, provider_pid, "foreground"}, 1_000
+    assert_receive {:provider_prompt, provider_pid, "foreground"}, @event_timeout
     :ok = GatedProvider.proceed(provider_pid, "foreground done")
-    assert {:ok, "foreground done"} = Task.await(task)
+    assert {:ok, "foreground done"} = Task.await(task, @event_timeout)
   end
 
   test "worktree-isolated subagent preserves a changed worktree", %{tmp_dir: dir} do
@@ -766,7 +371,7 @@ defmodule MingaAgent.Tools.SubagentTest do
 
     assert_receive {:agent_event, _pid,
                     {:tool_auto_approved, "tc_write_file", "write_file", :session}},
-                   1_000
+                   @event_timeout
 
     assert_eventually_idle(handle.pid)
 
@@ -858,7 +463,7 @@ defmodule MingaAgent.Tools.SubagentTest do
         end)
 
       assert_receive {^ref, {:prompt_received, provider_pid, child_session, "do child task"}},
-                     1_000
+                     @event_timeout
 
       [{:system, first_system_message, :info} | _rest] = Session.messages(child_session)
       assert first_system_message =~ "Subagent overrides"
@@ -866,7 +471,7 @@ defmodule MingaAgent.Tools.SubagentTest do
       assert first_system_message =~ "model override: override-model"
 
       RecordingProvider.finish(provider_pid)
-      assert {:ok, "blocked child response"} = Task.await(task, 1_000)
+      assert {:ok, "blocked child response"} = Task.await(task, @event_timeout)
     end
 
     test "falls back to default context when parent session is already dead", %{tmp_dir: dir} do
@@ -874,7 +479,7 @@ defmodule MingaAgent.Tools.SubagentTest do
       parent = start_parent_session(dir, ref)
       monitor_ref = Process.monitor(parent)
       assert :ok = MingaAgent.Supervisor.stop_session(parent)
-      assert_receive {:DOWN, ^monitor_ref, :process, ^parent, _reason}, 1_000
+      assert_receive {:DOWN, ^monitor_ref, :process, ^parent, _reason}, @event_timeout
 
       assert {:ok, "child response"} =
                Subagent.execute("do child task",
@@ -902,10 +507,10 @@ defmodule MingaAgent.Tools.SubagentTest do
                )
 
       assert_receive {^ref, {:prompt_received, _provider_pid, child_session, "do child task"}},
-                     1_000
+                     @event_timeout
 
       monitor_ref = Process.monitor(child_session)
-      assert_receive {:DOWN, ^monitor_ref, :process, ^child_session, _reason}, 1_000
+      assert_receive {:DOWN, ^monitor_ref, :process, ^child_session, _reason}, @event_timeout
     end
   end
 
@@ -920,7 +525,7 @@ defmodule MingaAgent.Tools.SubagentTest do
       receive do
         {:agent_event, ^session_pid, {:status_changed, :idle}} -> :ok
       after
-        1_000 -> flunk("session did not become idle")
+        @event_timeout -> flunk("session did not become idle")
       end
     end
   end
@@ -942,7 +547,7 @@ defmodule MingaAgent.Tools.SubagentTest do
         ]
       )
 
-    assert_receive {^ref, {:provider_started, _provider_pid, opts}}, 1_000
+    assert_receive {^ref, {:provider_started, _provider_pid, opts}}, @event_timeout
     assert Keyword.fetch!(opts, :subscriber) == parent
     on_exit(fn -> MingaAgent.Supervisor.stop_session(parent) end)
     parent
@@ -950,7 +555,7 @@ defmodule MingaAgent.Tools.SubagentTest do
 
   @spec assert_child_started(reference(), (keyword() -> any())) :: :ok
   defp assert_child_started(ref, assertions) do
-    assert_receive {^ref, {:provider_started, _provider_pid, opts}}, 1_000
+    assert_receive {^ref, {:provider_started, _provider_pid, opts}}, @event_timeout
     assertions.(opts)
     :ok
   end

@@ -234,8 +234,16 @@ defmodule MingaAgent.SessionTranscriptTest do
   end
 
   describe "message IDs" do
-    test "IDs increment across turns and reset for new or loaded sessions" do
-      session = start_subscribed_session()
+    @tag :tmp_dir
+    test "IDs increment across turns and reset for new or loaded sessions", %{tmp_dir: dir} do
+      session =
+        start_test_session(
+          provider: Minga.Test.SessionMockProvider,
+          provider_opts: [],
+          session_store_dir: dir
+        )
+
+      Session.subscribe(session)
       assert [{1, {:system, _, :info}}] = Session.messages_with_ids(session)
 
       :ok = Session.send_prompt(session, "first")
@@ -257,19 +265,22 @@ defmodule MingaAgent.SessionTranscriptTest do
 
       loaded_id = "id-test-session-#{System.unique_integer([:positive])}"
 
-      SessionStore.save(%{
-        id: loaded_id,
-        timestamp: DateTime.to_iso8601(DateTime.utc_now()),
-        model_name: "test-model",
-        messages: [{:user, "loaded"}, {:assistant, "reply"}],
-        usage: %MingaAgent.TurnUsage{
-          input: 10,
-          output: 5,
-          cache_read: 0,
-          cache_write: 0,
-          cost: 0.001
-        }
-      })
+      SessionStore.save(
+        %{
+          id: loaded_id,
+          timestamp: DateTime.to_iso8601(DateTime.utc_now()),
+          model_name: "test-model",
+          messages: [{:user, "loaded"}, {:assistant, "reply"}],
+          usage: %MingaAgent.TurnUsage{
+            input: 10,
+            output: 5,
+            cache_read: 0,
+            cache_write: 0,
+            cost: 0.001
+          }
+        },
+        dir
+      )
 
       :ok = Session.load_session(session, loaded_id)
       assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout

@@ -1,7 +1,7 @@
 defmodule MingaEditor.EnsureBufferEditorTest do
   @moduledoc false
 
-  use Minga.Test.EditorCase, async: true
+  use Minga.Test.EditorCase, async: true, rendering: :disabled
 
   alias Minga.Config.Options
 

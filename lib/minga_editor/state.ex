@@ -98,6 +98,7 @@ defmodule MingaEditor.State do
 
   @enforce_keys [:port_manager, :workspace]
   defstruct backend: :headless,
+            rendering: :enabled,
             port_manager: nil,
             renderer: nil,
             agent_ingest: nil,
@@ -164,6 +165,7 @@ defmodule MingaEditor.State do
             session_started?: false
 
   @type backend :: :tui | :gui | :native_gui | :headless
+  @type rendering_policy :: :enabled | :disabled
 
   @typedoc """
   Per-lane serial gate for `MingaEditor.AsyncAction`: the in-flight operation's
@@ -178,6 +180,7 @@ defmodule MingaEditor.State do
 
   @type t :: %__MODULE__{
           backend: backend(),
+          rendering: rendering_policy(),
           port_manager: GenServer.server() | nil,
           renderer: pid() | nil,
           agent_ingest: pid() | nil,
@@ -227,6 +230,11 @@ defmodule MingaEditor.State do
           gui_config_state: Minga.RenderModel.UI.ConfigState.t() | nil,
           session_started?: boolean()
         }
+
+  @doc "Returns whether this editor instance emits rendered frames."
+  @spec rendering_enabled?(t()) :: boolean()
+  def rendering_enabled?(%__MODULE__{rendering: :enabled}), do: true
+  def rendering_enabled?(%__MODULE__{rendering: :disabled}), do: false
 
   @doc "Returns the cached native settings snapshot emitted in-frame (#2119)."
   @spec gui_config_state(t()) :: Minga.RenderModel.UI.ConfigState.t() | nil

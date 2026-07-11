@@ -325,6 +325,10 @@ defmodule MingaEditor.Input.Router do
   # shortcut is only taken when nothing else can be writing the port concurrently:
   # either there is no async renderer (sync/headless paths), or the renderer is idle.
   @spec emit_operator_pending_frame(EditorState.t()) :: EditorState.t()
+  defp emit_operator_pending_frame(%EditorState{rendering: :disabled} = state) do
+    MingaEditor.do_render(state)
+  end
+
   defp emit_operator_pending_frame(state) do
     if async_renderer_busy?(state) do
       MingaEditor.do_render(state)
