@@ -7,7 +7,7 @@ defmodule Minga.Frontend.Adapter.GUI.EncodingError do
   @type t :: %__MODULE__{
           command: atom(),
           field: atom(),
-          actual: integer(),
+          actual: term(),
           min: integer(),
           max: integer()
         }
@@ -15,6 +15,6 @@ defmodule Minga.Frontend.Adapter.GUI.EncodingError do
   @impl Exception
   @spec message(t()) :: String.t()
   def message(%__MODULE__{} = error) do
-    "cannot encode #{error.command}.#{error.field}=#{error.actual}; expected #{error.min}..#{error.max}"
+    "cannot encode #{error.command}.#{error.field}=#{inspect(error.actual)}; expected #{error.min}..#{error.max}"
   end
 end

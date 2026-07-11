@@ -157,6 +157,15 @@ defmodule MingaEditor.Frontend.Emit do
         {send_link_cursor(ctx, caches), ctx}
       end
     )
+  rescue
+    error in Minga.Frontend.Adapter.GUI.EncodingError ->
+      Minga.Log.warning(:render, "Discarded invalid GUI frame: #{Exception.message(error)}")
+
+      {%{
+         caches
+         | adapter_gui_caches: Minga.Frontend.Adapter.GUI.Caches.new(),
+           last_emitted_frame_seq: 0
+       }, ctx}
   end
 
   # The async render path threads Renderer.Server's monotonic seq through the
