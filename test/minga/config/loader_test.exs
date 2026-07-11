@@ -245,6 +245,24 @@ defmodule Minga.Config.LoaderTest do
     assert {:ok, after_entry} = ExtRegistry.get(:after_config_ext)
     assert after_entry.status == :running
     assert Process.alive?(after_entry.pid)
+
+    on_exit(fn ->
+      :ok =
+        ExtSupervisor.stop_extension(
+          Minga.Extension.Supervisor,
+          Minga.Extension.Registry,
+          :project_config_ext,
+          project_entry
+        )
+
+      :ok =
+        ExtSupervisor.stop_extension(
+          Minga.Extension.Supervisor,
+          Minga.Extension.Registry,
+          :after_config_ext,
+          after_entry
+        )
+    end)
   end
 
   describe "loading LSP settings" do

@@ -44,13 +44,15 @@ cd zig && zig build test       # Zig renderer tests
 
 ## Before Committing
 
-All three must pass:
+Run the fast local gate while iterating, then run the complete gate before requesting review:
 
 ```bash
-make lint                         # Formatting + Credo + compile warnings
+make lint                         # Formatting + changed Credo + compile warnings + incremental Dialyzer
+make lint.full                    # Full formatting + Credo + compile warnings + classic Dialyzer
 mix test --warnings-as-errors     # Tests
-mix dialyzer                      # Typespec consistency
 ```
+
+CI also runs full Credo and classic Dialyzer before merge.
 
 ## Project Layout
 

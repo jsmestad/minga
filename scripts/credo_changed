@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+base_ref=${CREDO_CHANGED_BASE_REF:-main}
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+if ! git rev-parse --verify --quiet "$base_ref^{commit}" >/dev/null; then
+  echo "Credo base ref does not exist: $base_ref" >&2
+  exit 2
+fi
+
+merge_base=$(git merge-base HEAD "$base_ref")
+temporary_dir=$(mktemp -d "${TMPDIR:-/tmp}/minga-credo-changed.XXXXXX")
+trap 'rm -rf "$temporary_dir"' EXIT
+changed_paths=()
+source_paths=()
+full_check=false
+command_registration_changed=false
+
+append_unique() {
+  local path=$1
+  local existing
+
+  for existing in "${changed_paths[@]}"; do
+    if [[ "$existing" == "$path" ]]; then
+      return
+    fi
+  done
+
+  changed_paths+=("$path")
+}
+
+append_source() {
+  local path=$1
+  local existing
+
+  for existing in "${source_paths[@]}"; do
+    if [[ "$existing" == "$path" ]]; then
+      return
+    fi
+  done
+
+  source_paths+=("$path")
+}
+
+collect_paths() {
+  local path
+  local path_file=$1
+
+  while IFS= read -r -d '' path; do
+    append_unique "$path"
+  done < "$path_file"
+}
+
+collect_command() {
+  local path_file=$1
+  shift
+
+  if ! "$@" > "$path_file"; then
+    echo "Could not collect changed files for Credo." >&2
+    exit 2
+  fi
+
+  collect_paths "$path_file"
+}
+
+collect_command "$temporary_dir/branch" git diff --name-only -z --diff-filter=ACMRD "$merge_base...HEAD"
+collect_command "$temporary_dir/staged" git diff --name-only -z --diff-filter=ACMRD --cached
+collect_command "$temporary_dir/working" git diff --name-only -z --diff-filter=ACMRD
+collect_command "$temporary_dir/untracked" git ls-files --others --exclude-standard -z
+
+for path in "${changed_paths[@]}"; do
+  case "$path" in
+    .credo.exs|mix.exs|credo/checks/*)
+      full_check=true
+      ;;
+    lib/minga/command/parser.ex|lib/minga/command/registry.ex|lib/minga_editor/commands.ex|lib/minga_editor/commands/*)
+      command_registration_changed=true
+      ;;
+  esac
+
+  case "$path" in
+    lib/*.ex|lib/*.exs|mix/*.ex|mix/*.exs|test/*.ex|test/*.exs)
+      if [[ -f "$path" ]]; then
+        append_source "$path"
+      fi
+      ;;
+  esac
+done
+
+if [[ "$full_check" == true ]]; then
+  echo "Running full Credo because its configuration or a custom check changed."
+  exec mix credo --strict
+fi
+
+if [[ "$command_registration_changed" == true && -f lib/minga/command/parser.ex ]]; then
+  append_source lib/minga/command/parser.ex
+fi
+
+if (( ${#source_paths[@]} == 0 )); then
+  echo "No changed Credo source files."
+  exit 0
+fi
+
+printf 'Running Credo for %d changed source file(s).\n' "${#source_paths[@]}"
+exec mix credo suggest --strict "${source_paths[@]}"

@@ -142,8 +142,8 @@ All feature branches use git worktrees. This keeps the main checkout clean and l
    scripts/create_worktree <branch-name>
    ```
 2. Do all work inside the created worktree under `../minga-worktrees/`. The agent's working directory must be set to the worktree, not the main checkout.
-3. The helper copies `deps/`, `_build/`, and Expert's `.expert/build/` cache into the new worktree when `mix.lock` matches, which keeps first-run Mix commands, Dialyzer, and Expert fast. It intentionally skips Expert's project indexes because they are large and worktree-specific. If the helper skips the copy, run `mix deps.get` and let the worktree rebuild normally.
-4. Run the helper from any Minga checkout, but only when no Mix or Expert command is active in the source checkout or target worktree. Copying build caches while they are being written can produce confusing compile, Dialyzer, or Expert failures.
+3. The helper copies `deps/`, `_build/`, and Expert's `.expert/build/` cache into the new worktree when `mix.lock` matches, which keeps first-run Mix commands, Dialyzer, and Expert fast. Before copying, it imports up to three completed same-toolchain incremental Dialyzer PLTs from unlocked worktrees into the primary checkout so later worktrees receive recent seeds. It intentionally skips Expert's project indexes because they are large and worktree-specific. If the helper skips the copy, run `mix deps.get` and let the worktree rebuild normally.
+4. Run the helper from any Minga checkout, but only when no Mix or Expert command is active in the source checkout or target worktree. The helper skips incremental PLT synchronization while the primary cache is locked. Copying build caches while they are being written can produce confusing compile, Dialyzer, or Expert failures.
 
 **After the PR is merged:**
 
@@ -393,7 +393,7 @@ LLM agents hit these repeatedly. Read before writing any Elixir:
 
 ### Custom Credo Checks
 
-Minga has project-specific Credo checks in `credo/checks/`. These enforce architectural rules that are easy to violate accidentally and hard to catch in review. All run as part of `make lint`.
+Minga has project-specific Credo checks in `credo/checks/`. These enforce architectural rules that are easy to violate accidentally and hard to catch in review. `make lint` runs them for changed source files, while `make lint.full` and CI run them across the whole project.
 
 | Check | ID | What it guards |
 |-------|----|----------------|
@@ -410,18 +410,20 @@ The `commit-gate` extension blocks every `git commit` until all checks pass. You
 
 **Before requesting review, do this self-check:**
 
-1. **Run `make lint`** (format + credo + compile + dialyzer). All four steps run even if one fails, so dialyzer is never skipped. Fix any failures.
+1. **Run `make lint.full`** before requesting review (format + full Credo + compile + classic Dialyzer). All checks run even if one fails, so Dialyzer is never skipped. Use `make lint` for the fast local gate between edits.
 2. **Run `mix test.llm`**. Fix any failures.
 3. **Check every touched `.ex` file:** does every public function have `@spec`? Does the module have `@moduledoc`? Do structs have `@enforce_keys`?
 4. **If you touched `.zig` files**, run `mix zig.lint`.
 5. **If you touched `.swift` files**, run `mix swift.build` and Swift tests.
 
 ```bash
-make lint                         # Format + credo + compile + dialyzer (all steps, even on failure)
-mix test.llm                      # Tests with LLM-optimized output (excludes :heavy)
+make lint                         # Fast format + changed Credo + compile + incremental Dialyzer
+make lint.full                    # Full format + Credo + compile + classic Dialyzer before review
+mix test.debug test/minga/foo_test.exs  # Focused edit-loop test, verbose and fast
+mix test.quick                    # Broad edit-loop check for stale tests only
+mix test.llm                      # Full non-heavy suite before review
 mix test.heavy                    # Only :heavy tests (OS process, timeout, multi-turn)
-mix test.debug test/minga/foo_test.exs  # Single file, verbose (faster iteration)
-mix test --failed                 # Re-run only previously failed tests
+mix test --failed                 # Re-run only previously failed tests while debugging
 mix zig.lint                      # zig fmt --check + zig build test (only if .zig changed)
 ```
 
@@ -574,13 +576,15 @@ EditorCase tests must not assert on internal state fields via `:sys.get_state` u
 
 **Running tests (prefer these aliases over raw `mix test`):**
 
+During edits, run the cheapest test that proves the change: a focused test file first, then `mix test.quick` when the change affects a broader area. Use `mix test --failed` only to iterate on an observed failure. Run `mix test.llm` before review; it remains the full local non-heavy gate.
+
 ```bash
-mix test.llm                              # Default for LLM agents. Module-level summary, stops at 5 failures.
-mix test.llm test/minga/buffer/           # Scoped to a directory
-mix test.debug test/minga/foo_test.exs    # Verbose per-test names (--trace), stops at 3 failures. Use when iterating on a specific file.
-mix test.quick                            # Only runs tests affected by changed modules (--stale), stops at 5 failures.
+mix test.debug test/minga/foo_test.exs    # Focused edit-loop test, verbose and fast.
+mix test.quick                            # Broad edit-loop check for stale tests only (--stale), stops at 5 failures.
+mix test --failed                         # Re-run only previously failed tests while debugging.
+mix test.llm                              # Full local non-heavy gate before review. Module-level summary, stops at 5 failures.
+mix test.llm test/minga/buffer/           # Scoped LLM-formatted test run.
 mix test                                  # Full suite, default ExUnit output. Use for CI or final verification.
-mix test --failed                         # Re-run only tests that failed last time.
 ```
 
 `mix test.llm` uses a custom formatter (`Minga.Test.LLMFormatter` in `test/support/llm_formatter.ex`) that outputs one line per module with the file path, and groups all failure locations at the end with copy-pasteable `mix test file:line` commands. No dots, no ANSI colors.

@@ -1212,19 +1212,38 @@ defmodule Minga.Extension.Supervisor do
 
   @spec start_child_restart_monitor(restart_monitor(), pid()) :: :ok
   defp start_child_restart_monitor(monitor, pid) do
-    spawn(fn -> monitor_child_restarts(monitor, pid, 0) end)
+    owner = self()
+    ready_ref = make_ref()
 
-    :ok
+    spawn(fn -> monitor_child_restarts(monitor, pid, 0, {owner, ready_ref}) end)
+
+    receive do
+      {:extension_restart_monitor_ready, ^ready_ref} -> :ok
+    end
   end
 
-  @spec monitor_child_restarts(restart_monitor(), pid(), non_neg_integer()) :: :ok
-  defp monitor_child_restarts(monitor, pid, count) do
+  @spec monitor_child_restarts(
+          restart_monitor(),
+          pid(),
+          non_neg_integer(),
+          {pid(), reference()} | nil
+        ) :: :ok
+  defp monitor_child_restarts(monitor, pid, count, ready) do
     ref = Process.monitor(pid)
+    notify_restart_monitor_ready(ready)
 
     receive do
       {:DOWN, ^ref, :process, ^pid, reason} -> handle_child_down(monitor, pid, reason, count)
     end
   end
+
+  @spec notify_restart_monitor_ready({pid(), reference()} | nil) :: :ok
+  defp notify_restart_monitor_ready({owner, ready_ref}) do
+    send(owner, {:extension_restart_monitor_ready, ready_ref})
+    :ok
+  end
+
+  defp notify_restart_monitor_ready(nil), do: :ok
 
   @spec handle_child_down(restart_monitor(), pid(), term(), non_neg_integer()) :: :ok
   defp handle_child_down(monitor, pid, reason, count) do
@@ -1344,7 +1363,7 @@ defmodule Minga.Extension.Supervisor do
     run_test_hook(monitor.opts, :before_restart_reconcile)
 
     case reconcile_restarted_child(monitor, pid, count) do
-      :monitor -> monitor_child_restarts(monitor, pid, count)
+      :monitor -> monitor_child_restarts(monitor, pid, count, nil)
       :stale -> :ok
     end
   end
