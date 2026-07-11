@@ -10,29 +10,25 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
   core views (`AgentChat.ToolCallView`, `AgentChat.ApprovalView`,
   `AgentChat.Usage`) before they reach this encoder.
 
-  This is the legacy transcript transport: the `@section_chat_messages` section
-  carries a windowed, byte-capped tail of the conversation. The full resident
-  transcript now rides the dedicated `gui_agent_transcript` (0x86) stream via
-  `Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder` (#2654). Both share the
-  per-message body codec in `Minga.Frontend.Adapter.GUI.AgentChatMessageCodec`
-  so the two transports encode each message with byte-identical bytes. The
-  `messages` field this encoder consumes stays windowed until the frontends
-  switch to consuming 0x86 (#2654 slices 2-3); the resident transcript never
-  passes through this section.
+  This is the legacy transcript transport. The render model decides which
+  messages belong in its `messages` field; this adapter encodes that list exactly
+  and rejects a section that exceeds the wire's uint16 payload bound. The full
+  resident transcript rides the dedicated `gui_agent_transcript` (0x86) stream
+  via `Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder` (#2654). Both share the
+  per-message body codec in `Minga.Frontend.Adapter.GUI.AgentChatMessageCodec`,
+  so the two transports encode each valid message with byte-identical bytes.
   """
 
   alias Minga.Frontend.Adapter.GUI.AgentChatMessageCodec
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.Wire.Writer
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.AgentChat
   alias Minga.RenderModel.UI.AgentChat.PromptCompletion
 
   @op_gui_agent_chat Opcodes.gui_agent_chat()
 
-  @max_u16 65_535
-
-  @chat_message_limit 100
-  @chat_payload_omission_notice "Some agent chat content was omitted because the GUI chat payload exceeded 65KB."
+  @command :gui_agent_chat
 
   # gui_agent_chat sections
   @section_chat_header 0x01
@@ -75,51 +71,66 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
   end
 
   defp encode_binary(%AgentChat{visible?: true} = model) do
-    status_byte = encode_agent_chat_status(model.status)
-    model_bytes = AgentChatMessageCodec.utf8_prefix_bytes(model.model_name || "", @max_u16 - 2)
-    prompt_bytes = AgentChatMessageCodec.utf8_prefix_bytes(model.prompt || "", @max_u16 - 9)
-
-    prompt_line_count = model.prompt_line_count || 1
-    prompt_cursor_line = model.prompt_cursor_line || 0
-    prompt_cursor_col = model.prompt_cursor_col || 0
-    prompt_vim_mode = encode_vim_mode(model.prompt_vim_mode)
-    prompt_visible_rows = model.prompt_visible_rows || 1
-
-    completion_bytes = encode_prompt_completion(model.prompt_completion)
-    pending_bytes = <<0::8>>
-    help_bytes = encode_help_overlay(model.help_visible?, model.help_groups)
-
-    thinking_bytes =
-      AgentChatMessageCodec.utf8_prefix_bytes(model.thinking_level || "", @max_u16 - 2)
-
-    messages_payload = encode_chat_messages(model.messages)
-
     sections = [
-      encode_section(@section_chat_header, <<1::8, status_byte::8>>),
-      encode_section(@section_chat_model, <<byte_size(model_bytes)::16, model_bytes::binary>>),
       encode_section(
-        @section_chat_prompt,
-        <<byte_size(prompt_bytes)::16, prompt_bytes::binary, prompt_line_count::8,
-          prompt_cursor_line::16, prompt_cursor_col::16, prompt_vim_mode::8,
-          prompt_visible_rows::8>>
+        @section_chat_header,
+        Writer.new(@command)
+        |> Writer.uint8(:version, 1)
+        |> Writer.uint8(:status, encode_agent_chat_status(model.status))
+        |> Writer.finish()
       ),
-      encode_section(@section_chat_completion, completion_bytes),
-      encode_section(@section_chat_pending, pending_bytes),
-      encode_section(@section_chat_help, help_bytes),
+      encode_section(
+        @section_chat_model,
+        Writer.new(@command)
+        |> Writer.string16(:model_name, model.model_name || "")
+        |> Writer.finish()
+      ),
+      encode_section(@section_chat_prompt, encode_prompt(model)),
+      encode_section(@section_chat_completion, encode_prompt_completion(model.prompt_completion)),
+      encode_section(@section_chat_pending, <<0::8>>),
+      encode_section(
+        @section_chat_help,
+        encode_help_overlay(model.help_visible?, model.help_groups)
+      ),
       encode_section(
         @section_chat_thinking,
-        <<byte_size(thinking_bytes)::16, thinking_bytes::binary>>
+        Writer.new(@command)
+        |> Writer.string16(:thinking_level, model.thinking_level || "")
+        |> Writer.finish()
       ),
-      encode_section(@section_chat_input_focused, <<bool_byte(model.input_focused)::8>>),
-      encode_section(@section_chat_messages, messages_payload)
+      encode_section(
+        @section_chat_input_focused,
+        Writer.new(@command)
+        |> Writer.uint8(:input_focused, bool_byte(model.input_focused))
+        |> Writer.finish()
+      ),
+      encode_section(@section_chat_messages, encode_chat_messages(model.messages))
     ]
 
-    IO.iodata_to_binary([<<@op_gui_agent_chat, Enum.count(sections)::8>> | sections])
+    Writer.new(@command)
+    |> Writer.uint8(:opcode, @op_gui_agent_chat)
+    |> Writer.uint8(:section_count, Enum.count(sections))
+    |> Writer.append(sections)
+    |> Writer.finish()
+  end
+
+  @spec encode_prompt(AgentChat.t()) :: binary()
+  defp encode_prompt(%AgentChat{} = model) do
+    Writer.new(@command)
+    |> Writer.string16(:prompt, model.prompt || "")
+    |> Writer.uint8(:prompt_line_count, model.prompt_line_count || 1)
+    |> Writer.uint16(:prompt_cursor_line, model.prompt_cursor_line || 0)
+    |> Writer.uint16(:prompt_cursor_col, model.prompt_cursor_col || 0)
+    |> Writer.uint8(:prompt_vim_mode, encode_vim_mode(model.prompt_vim_mode))
+    |> Writer.uint8(:prompt_visible_rows, model.prompt_visible_rows || 1)
+    |> Writer.finish()
   end
 
   @spec encode_section(non_neg_integer(), binary()) :: binary()
   defp encode_section(section_id, payload) do
-    <<section_id::8, byte_size(payload)::16, payload::binary>>
+    Writer.new(@command)
+    |> Writer.section16(:section_payload, section_id, payload)
+    |> Writer.finish()
   end
 
   # ── Prompt completion ──
@@ -132,33 +143,35 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
 
   defp encode_prompt_completion(%PromptCompletion{candidates: candidates} = comp)
        when is_list(candidates) and candidates != [] do
-    type_byte = if comp.type == :slash, do: 1, else: 0
-    anchor_line = comp.anchor_line || 0
-    anchor_col = comp.anchor_col || 0
-    candidate_count = min(Enum.count(candidates), 255)
+    candidate_bins = Enum.map(candidates, &encode_completion_candidate/1)
 
-    candidate_bins =
-      candidates
-      |> Enum.take(candidate_count)
-      |> Enum.map(fn
-        {name, desc} ->
-          n = :erlang.iolist_to_binary([name])
-          d = :erlang.iolist_to_binary([desc])
-          <<byte_size(n)::16, n::binary, byte_size(d)::16, d::binary>>
-
-        name when is_binary(name) ->
-          n = :erlang.iolist_to_binary([name])
-          <<byte_size(n)::16, n::binary, 0::16>>
-      end)
-
-    IO.iodata_to_binary([
-      <<1::8, type_byte::8, min(comp.selected, 255)::8, anchor_line::16, anchor_col::16,
-        candidate_count::8>>
-      | candidate_bins
-    ])
+    Writer.new(@command)
+    |> Writer.uint8(:completion_visible, 1)
+    |> Writer.uint8(:completion_type, if(comp.type == :slash, do: 1, else: 0))
+    |> Writer.uint8(:completion_selected, comp.selected)
+    |> Writer.uint16(:completion_anchor_line, comp.anchor_line || 0)
+    |> Writer.uint16(:completion_anchor_col, comp.anchor_col || 0)
+    |> Writer.uint8(:completion_candidate_count, Enum.count(candidates))
+    |> Writer.append(candidate_bins)
+    |> Writer.finish()
   end
 
   defp encode_prompt_completion(_), do: <<0::8>>
+
+  @spec encode_completion_candidate(PromptCompletion.candidate()) :: binary()
+  defp encode_completion_candidate({name, description}) do
+    Writer.new(@command)
+    |> Writer.string16(:completion_candidate_name, name)
+    |> Writer.string16(:completion_candidate_description, description)
+    |> Writer.finish()
+  end
+
+  defp encode_completion_candidate(name) when is_binary(name) do
+    Writer.new(@command)
+    |> Writer.string16(:completion_candidate_name, name)
+    |> Writer.string16(:completion_candidate_description, "")
+    |> Writer.finish()
+  end
 
   # ── Help overlay ──
 
@@ -167,108 +180,49 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
   @spec encode_help_overlay(boolean() | nil, [{String.t(), [{String.t(), String.t()}]}] | nil) ::
           binary()
   defp encode_help_overlay(true, groups) when is_list(groups) and groups != [] do
-    group_binaries =
-      Enum.map(groups, fn {title, bindings} ->
-        title_b = :erlang.iolist_to_binary([title])
-
-        binding_binaries =
-          Enum.map(bindings, fn {key, desc} ->
-            key_b = :erlang.iolist_to_binary([key])
-            desc_b = :erlang.iolist_to_binary([desc])
-
-            <<byte_size(key_b)::8, key_b::binary, byte_size(desc_b)::16, desc_b::binary>>
-          end)
-
-        IO.iodata_to_binary([
-          <<byte_size(title_b)::16, title_b::binary, Enum.count(bindings)::8>>
-          | binding_binaries
-        ])
-      end)
-
-    IO.iodata_to_binary([<<1::8, Enum.count(groups)::8>> | group_binaries])
+    Writer.new(@command)
+    |> Writer.uint8(:help_visible, 1)
+    |> Writer.uint8(:help_group_count, Enum.count(groups))
+    |> Writer.append(Enum.map(groups, &encode_help_group/1))
+    |> Writer.finish()
   end
 
   defp encode_help_overlay(_, _), do: <<0::8>>
 
-  # ── Chat messages (windowed, byte-capped legacy section) ──
+  @spec encode_help_group({String.t(), [{String.t(), String.t()}]}) :: binary()
+  defp encode_help_group({title, bindings}) do
+    Writer.new(@command)
+    |> Writer.string16(:help_group_title, title)
+    |> Writer.uint8(:help_binding_count, Enum.count(bindings))
+    |> Writer.append(Enum.map(bindings, &encode_help_binding/1))
+    |> Writer.finish()
+  end
+
+  @spec encode_help_binding({String.t(), String.t()}) :: binary()
+  defp encode_help_binding({key, description}) do
+    Writer.new(@command)
+    |> Writer.string8(:help_binding_key, key)
+    |> Writer.string16(:help_binding_description, description)
+    |> Writer.finish()
+  end
+
+  # ── Chat messages ──
 
   @spec encode_chat_messages([AgentChat.message()]) :: binary()
   defp encode_chat_messages(messages) do
-    messages =
-      messages
-      |> recent_chat_messages()
-      |> Enum.map(&AgentChatMessageCodec.bound_message_text/1)
-
-    payload = encode_chat_messages_payload(messages)
-
-    if byte_size(payload) <= @max_u16 do
-      payload
-    else
-      stripped_messages = Enum.map(messages, &AgentChatMessageCodec.strip_message_links/1)
-      stripped_payload = encode_chat_messages_payload(stripped_messages)
-
-      if byte_size(stripped_payload) <= @max_u16 do
-        stripped_payload
-      else
-        stripped_messages
-        |> fit_chat_messages_to_payload_limit()
-        |> encode_chat_messages_payload()
-      end
-    end
+    Writer.new(@command)
+    |> Writer.uint8(:messages_marker, 0xFF)
+    |> Writer.uint8(:messages_version, 1)
+    |> Writer.uint16(:message_count, Enum.count(messages))
+    |> Writer.append(Enum.map(messages, &encode_chat_message/1))
+    |> Writer.finish()
   end
 
-  @spec recent_chat_messages([AgentChat.message()]) :: [AgentChat.message()]
-  defp recent_chat_messages(messages) do
-    messages
-    |> Enum.reverse()
-    |> Enum.take(@chat_message_limit)
-    |> Enum.reverse()
-  end
-
-  @spec fit_chat_messages_to_payload_limit([AgentChat.message()]) :: [AgentChat.message()]
-  defp fit_chat_messages_to_payload_limit(messages) do
-    {selected, omitted?} =
-      messages
-      |> Enum.reverse()
-      |> Enum.reduce({[], false}, fn msg, {selected, omitted?} ->
-        candidate = [msg | selected]
-
-        if byte_size(encode_chat_messages_payload(candidate)) <= @max_u16 do
-          {candidate, omitted?}
-        else
-          {selected, true}
-        end
-      end)
-
-    if omitted?, do: add_chat_payload_omission_notice(selected), else: selected
-  end
-
-  @spec add_chat_payload_omission_notice([AgentChat.message()]) :: [AgentChat.message()]
-  defp add_chat_payload_omission_notice([]) do
-    [{:system, @chat_payload_omission_notice, :info}]
-  end
-
-  defp add_chat_payload_omission_notice(messages) do
-    notice = {:system, @chat_payload_omission_notice, :info}
-
-    if byte_size(encode_chat_messages_payload([notice | messages])) <= @max_u16 do
-      [notice | messages]
-    else
-      [_dropped | rest] = messages
-      add_chat_payload_omission_notice(rest)
-    end
-  end
-
-  @spec encode_chat_messages_payload([AgentChat.message()]) :: binary()
-  defp encode_chat_messages_payload(messages) do
-    msg_binaries = Enum.map(messages, &AgentChatMessageCodec.encode_message/1)
-
-    framed_messages =
-      Enum.map(msg_binaries, fn msg ->
-        <<byte_size(msg)::32, msg::binary>>
-      end)
-
-    IO.iodata_to_binary([<<0xFF::8, 1::8, Enum.count(msg_binaries)::16>> | framed_messages])
+  @spec encode_chat_message(AgentChat.message()) :: binary()
+  defp encode_chat_message(message) do
+    Writer.new(@command)
+    |> Writer.payload32(:message, AgentChatMessageCodec.encode_message(message))
+    |> Writer.finish()
   end
 
   # ── Enum byte helpers ──

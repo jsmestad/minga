@@ -2,6 +2,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoderTest do
   use ExUnit.Case, async: true
 
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.EncodingError
   alias Minga.Frontend.Adapter.GUI.StatusBarEncoder
   alias Minga.RenderModel.UI.StatusBar
   alias Minga.RenderModel.UI.StatusBar.Agent
@@ -128,6 +129,51 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoderTest do
                _rest::binary>> = sections[0x09]
 
       assert model_name == "Claude"
+    end
+
+    test "encodes every wire-valid modeline segment instead of taking only 128" do
+      segment = {:mode, "N", 0xFFFFFF, 0x000000, [], nil}
+
+      data = %{
+        status_data()
+        | modeline_segments: %{left: List.duplicate(segment, 129), right: []}
+      }
+
+      model = %StatusBar{content_kind: :buffer, data: data}
+
+      {cmd, _caches} = StatusBarEncoder.encode(model, Caches.new())
+      sections = decode_sections(cmd)
+
+      assert <<2::8, 129::16, 0::16, _segments::binary>> = sections[0x0B]
+    end
+
+    test "rejects an out-of-range indent size instead of clamping it" do
+      data = %{status_data() | indent: %Indent{type: :spaces, size: 256}}
+      model = %StatusBar{content_kind: :buffer, data: data}
+
+      assert %{
+               command: :gui_status_bar,
+               field: :indent_size,
+               actual: 256,
+               min: 0,
+               max: 255
+             } =
+               assert_raise(EncodingError, fn -> StatusBarEncoder.encode(model, Caches.new()) end)
+    end
+
+    test "rejects an out-of-range icon color instead of masking it" do
+      file = Map.put(status_data().file, :icon_color, 0x1000000)
+      data = %{status_data() | file: file}
+      model = %StatusBar{content_kind: :buffer, data: data}
+
+      assert %{
+               command: :gui_status_bar,
+               field: :file_icon_color,
+               actual: 0x1000000,
+               min: 0,
+               max: 0xFFFFFF
+             } =
+               assert_raise(EncodingError, fn -> StatusBarEncoder.encode(model, Caches.new()) end)
     end
 
     test "always returns a command" do

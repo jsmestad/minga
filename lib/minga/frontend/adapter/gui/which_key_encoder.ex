@@ -2,8 +2,9 @@ defmodule Minga.Frontend.Adapter.GUI.WhichKeyEncoder do
   @moduledoc false
 
   alias Minga.Frontend.Adapter.GUI.Caches
-  alias Minga.RenderModel.UI.WhichKey
+  alias Minga.Frontend.Adapter.GUI.Wire.Writer
   alias Minga.Protocol.Opcodes
+  alias Minga.RenderModel.UI.WhichKey
 
   @op_gui_which_key Opcodes.gui_which_key()
 
@@ -25,24 +26,25 @@ defmodule Minga.Frontend.Adapter.GUI.WhichKeyEncoder do
   end
 
   defp encode_which_key_binary(%WhichKey{} = model) do
-    prefix_bytes = :erlang.iolist_to_binary([model.prefix])
+    writer =
+      :gui_which_key
+      |> Writer.new()
+      |> Writer.append(<<@op_gui_which_key, 1::8>>)
+      |> Writer.string16(:prefix, model.prefix)
+      |> Writer.uint8(:page, model.page)
+      |> Writer.uint8(:page_count, model.page_count)
+      |> Writer.uint16(:binding_count, Enum.count(model.bindings))
 
-    entries =
-      Enum.map(model.bindings, fn b ->
-        kind_byte = if b.kind == :group, do: 1, else: 0
-        key = :erlang.iolist_to_binary([b.key])
-        desc = :erlang.iolist_to_binary([b.description])
-        icon = :erlang.iolist_to_binary([b.icon || ""])
+    model.bindings
+    |> Enum.reduce(writer, fn binding, acc ->
+      kind_byte = if binding.kind == :group, do: 1, else: 0
 
-        <<kind_byte::8, byte_size(key)::8, key::binary, byte_size(desc)::16, desc::binary,
-          byte_size(icon)::8, icon::binary>>
-      end)
-
-    IO.iodata_to_binary([
-      @op_gui_which_key,
-      <<1::8, byte_size(prefix_bytes)::16, prefix_bytes::binary, model.page::8,
-        model.page_count::8, Enum.count(model.bindings)::16>>
-      | entries
-    ])
+      acc
+      |> Writer.uint8(:binding_kind, kind_byte)
+      |> Writer.string8(:binding_key, binding.key)
+      |> Writer.string16(:binding_description, binding.description)
+      |> Writer.string8(:binding_icon, binding.icon || "")
+    end)
+    |> Writer.finish()
   end
 end

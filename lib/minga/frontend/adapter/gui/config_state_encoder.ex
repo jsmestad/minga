@@ -2,6 +2,7 @@ defmodule Minga.Frontend.Adapter.GUI.ConfigStateEncoder do
   @moduledoc false
 
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.Wire.Writer
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.ConfigState
 
@@ -33,82 +34,110 @@ defmodule Minga.Frontend.Adapter.GUI.ConfigStateEncoder do
   # so frontends decode it unchanged.
   @spec encode_command(ConfigState.t()) :: binary()
   def encode_command(%ConfigState{} = model) do
-    option_entries = Enum.map(model.options, fn {name, value} -> encode_option(name, value) end)
-    preview_entries = Enum.map(model.theme_previews, &encode_theme_preview/1)
-    binding_entries = Enum.map(model.keybindings, &encode_keybinding/1)
+    writer =
+      :gui_config_state
+      |> Writer.new()
+      |> Writer.uint16(:option_count, Enum.count(model.options))
 
-    payload =
-      IO.iodata_to_binary([
-        <<Enum.count(option_entries)::16>>,
-        option_entries,
-        <<Enum.count(preview_entries)::16>>,
-        preview_entries,
-        <<Enum.count(binding_entries)::16>>,
-        binding_entries
-      ])
+    writer =
+      Enum.reduce(model.options, writer, fn {name, value}, acc ->
+        encode_option(acc, name, value)
+      end)
 
-    <<@op_gui_config_state, byte_size(payload)::16, payload::binary>>
+    writer = Writer.uint16(writer, :theme_preview_count, Enum.count(model.theme_previews))
+
+    writer =
+      Enum.reduce(model.theme_previews, writer, fn preview, acc ->
+        encode_theme_preview(acc, preview)
+      end)
+
+    writer = Writer.uint16(writer, :keybinding_count, Enum.count(model.keybindings))
+
+    writer =
+      Enum.reduce(model.keybindings, writer, fn binding, acc ->
+        encode_keybinding(acc, binding)
+      end)
+
+    payload = Writer.finish(writer)
+
+    :gui_config_state
+    |> Writer.new()
+    |> Writer.append(<<@op_gui_config_state>>)
+    |> Writer.payload16(:payload, payload)
+    |> Writer.finish()
   end
 
-  @spec encode_option(String.t(), ConfigState.value()) :: binary()
-  defp encode_option(name, value) when is_binary(name) do
-    name_bytes = :erlang.iolist_to_binary([name])
-    value_payload = encode_value(value)
-    <<byte_size(name_bytes)::8, name_bytes::binary, value_payload::binary>>
+  @spec encode_option(Writer.t(), String.t(), ConfigState.value()) :: Writer.t()
+  defp encode_option(%Writer{} = writer, name, value) when is_binary(name) do
+    writer
+    |> Writer.string8(:option_name, name)
+    |> encode_value(value)
   end
 
-  @spec encode_value(ConfigState.value()) :: binary()
-  defp encode_value(value) when is_boolean(value) do
+  @spec encode_value(Writer.t(), ConfigState.value()) :: Writer.t()
+  defp encode_value(%Writer{} = writer, value) when is_boolean(value) do
     encoded = if value, do: 1, else: 0
-    <<@value_boolean::8, encoded::8>>
+
+    writer
+    |> Writer.append(<<@value_boolean::8>>)
+    |> Writer.uint8(:boolean_value, encoded)
   end
 
-  defp encode_value(value) when is_integer(value),
-    do: <<@value_integer::8, value::32-signed>>
-
-  defp encode_value(value) when is_binary(value) do
-    bytes = :erlang.iolist_to_binary([value])
-    <<@value_string::8, byte_size(bytes)::16, bytes::binary>>
+  defp encode_value(%Writer{} = writer, value) when is_integer(value) do
+    writer
+    |> Writer.append(<<@value_integer::8>>)
+    |> Writer.int32(:integer_value, value)
   end
 
-  defp encode_value(value) when is_atom(value) do
-    bytes = Atom.to_string(value)
-    <<@value_atom::8, byte_size(bytes)::16, bytes::binary>>
+  defp encode_value(%Writer{} = writer, value) when is_binary(value) do
+    writer
+    |> Writer.append(<<@value_string::8>>)
+    |> Writer.string16(:string_value, value)
   end
 
-  defp encode_value(value) when is_float(value), do: <<@value_float::8, value::float-64>>
-
-  defp encode_value(value) do
-    bytes = inspect(value)
-    <<@value_string::8, byte_size(bytes)::16, bytes::binary>>
+  defp encode_value(%Writer{} = writer, value) when is_atom(value) do
+    writer
+    |> Writer.append(<<@value_atom::8>>)
+    |> Writer.string16(:atom_value, Atom.to_string(value))
   end
 
-  @spec encode_theme_preview(ConfigState.theme_preview()) :: binary()
-  defp encode_theme_preview(%{
+  defp encode_value(%Writer{} = writer, value) when is_float(value) do
+    Writer.append(writer, <<@value_float::8, value::float-64>>)
+  end
+
+  defp encode_value(%Writer{} = writer, value) do
+    writer
+    |> Writer.append(<<@value_string::8>>)
+    |> Writer.string16(:inspected_value, inspect(value))
+  end
+
+  @spec encode_theme_preview(Writer.t(), ConfigState.theme_preview()) :: Writer.t()
+  defp encode_theme_preview(%Writer{} = writer, %{
          name: name,
          atom: atom,
          editor_bg: bg,
          editor_fg: fg,
          accent: accent
        }) do
-    <<string8(name)::binary, string8(atom)::binary, bg::24, fg::24, accent::24>>
+    writer
+    |> Writer.string8(:theme_name, name)
+    |> Writer.string8(:theme_atom, atom)
+    |> Writer.rgb24(:theme_editor_bg, bg)
+    |> Writer.rgb24(:theme_editor_fg, fg)
+    |> Writer.rgb24(:theme_accent, accent)
   end
 
-  @spec encode_keybinding(ConfigState.keybinding()) :: binary()
-  defp encode_keybinding(%{mode: mode, key: key, command: command, description: desc}) do
-    <<string8(mode)::binary, string16(key)::binary, string16(command)::binary,
-      string16(desc)::binary>>
-  end
-
-  @spec string8(String.t()) :: binary()
-  defp string8(value) do
-    bytes = :erlang.iolist_to_binary([value])
-    <<byte_size(bytes)::8, bytes::binary>>
-  end
-
-  @spec string16(String.t()) :: binary()
-  defp string16(value) do
-    bytes = :erlang.iolist_to_binary([value])
-    <<byte_size(bytes)::16, bytes::binary>>
+  @spec encode_keybinding(Writer.t(), ConfigState.keybinding()) :: Writer.t()
+  defp encode_keybinding(%Writer{} = writer, %{
+         mode: mode,
+         key: key,
+         command: command,
+         description: desc
+       }) do
+    writer
+    |> Writer.string8(:keybinding_mode, mode)
+    |> Writer.string16(:keybinding_key, key)
+    |> Writer.string16(:keybinding_command, command)
+    |> Writer.string16(:keybinding_description, desc)
   end
 end

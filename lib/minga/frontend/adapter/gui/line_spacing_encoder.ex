@@ -2,6 +2,7 @@ defmodule Minga.Frontend.Adapter.GUI.LineSpacingEncoder do
   @moduledoc false
 
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.Wire.Writer
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.LineSpacing
 
@@ -25,8 +26,11 @@ defmodule Minga.Frontend.Adapter.GUI.LineSpacingEncoder do
   # need no change.
   @spec encode_command(LineSpacing.t()) :: binary()
   def encode_command(%LineSpacing{} = model) do
-    spacing_x100 = spacing_x100(model.multiplier)
-    <<@op_gui_line_spacing, 2::16, spacing_x100::16>>
+    :gui_line_spacing
+    |> Writer.new()
+    |> Writer.append(<<@op_gui_line_spacing, 2::16>>)
+    |> Writer.uint16(:spacing_x100, spacing_x100(model.multiplier))
+    |> Writer.finish()
   end
 
   @spec spacing_x100(number()) :: non_neg_integer()

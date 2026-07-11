@@ -17,6 +17,7 @@ defmodule MingaEditor.Frontend.EmitTest do
   alias Minga.Core.Face
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.Window, as: RenderWindow
+  alias Minga.RenderModel.Window.IndentGuides
   alias Minga.RenderModel.Window.Row, as: RenderRow
   alias Minga.RenderModel.Window.Span, as: RenderSpan
   alias MingaEditor.Renderer.Caches
@@ -140,6 +141,27 @@ defmodule MingaEditor.Frontend.EmitTest do
 
       assert [<<_, 22::32, base_frame_seq::32>> | _] = commands
       assert base_frame_seq == 11, "non-keyframe bases on the previously emitted frame_seq"
+    end
+
+    test "an invalid late window field writes nothing and the next valid frame recovers with a keyframe" do
+      frame = window_frame_with_content()
+      state = semantic_state()
+
+      {_commands, caches} = emit_and_capture(frame, state, %Caches{}, frame_seq: 11)
+      invalid_frame = frame_with_invalid_indent_level(frame)
+      ctx = %{Context.from_editor_state(state) | frame_seq: 22}
+
+      {recovered_caches, _font_registry, _message_store} =
+        Emit.emit(invalid_frame, ctx, nil, caches)
+
+      refute_receive {:"$gen_cast", {:send_commands, _}}
+      assert recovered_caches.adapter_gui_caches == Minga.Frontend.Adapter.GUI.Caches.new()
+      assert recovered_caches.last_emitted_frame_seq == 0
+
+      {commands, _caches} = emit_and_capture(frame, state, recovered_caches, frame_seq: 33)
+
+      assert [<<_, 33::32, 0::32>> | _] = commands
+      assert Enum.any?(commands, &match?(<<0x80, _::binary>>, &1))
     end
 
     test "request_keyframe forces the next frame back to base 0 with full window content" do
@@ -335,6 +357,20 @@ defmodule MingaEditor.Frontend.EmitTest do
     }
 
     %{frame | windows: [window_model]}
+  end
+
+  defp frame_with_invalid_indent_level(frame) do
+    [window] = frame.windows
+
+    indent_guides = %IndentGuides{
+      window_id: window.window_id,
+      tab_width: 2,
+      active_guide_col: 2,
+      guide_cols: [2],
+      line_indent_levels: [0, 256]
+    }
+
+    %{frame | windows: [%{window | indent_guides: indent_guides}]}
   end
 
   # Drives Emit.emit/4 with an explicit frame_seq and optional keyframe forcing,

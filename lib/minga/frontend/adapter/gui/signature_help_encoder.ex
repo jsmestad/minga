@@ -2,6 +2,7 @@ defmodule Minga.Frontend.Adapter.GUI.SignatureHelpEncoder do
   @moduledoc false
 
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.Wire.Writer
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.SignatureHelp
   alias Minga.RenderModel.UI.SignatureHelp.Parameter
@@ -24,19 +25,19 @@ defmodule Minga.Frontend.Adapter.GUI.SignatureHelpEncoder do
   def encode_command(%SignatureHelp{visible?: false}), do: <<@op_gui_signature_help, 0::8>>
 
   def encode_command(%SignatureHelp{} = model) do
-    signatures = Enum.take(model.signatures, 255)
-    active_signature = clamp_index(model.active_signature, Enum.count(signatures))
+    writer =
+      :gui_signature_help
+      |> Writer.new()
+      |> Writer.append(<<@op_gui_signature_help, 1::8>>)
+      |> Writer.uint16(:anchor_row, model.anchor_row)
+      |> Writer.uint16(:anchor_col, model.anchor_col)
+      |> Writer.uint8(:active_signature, model.active_signature)
+      |> Writer.uint8(:active_parameter, model.active_parameter)
+      |> Writer.uint8(:signature_count, Enum.count(model.signatures))
 
-    active_parameter =
-      clamp_active_parameter(model.active_parameter, Enum.at(signatures, active_signature))
-
-    sig_data = Enum.map(signatures, &encode_signature/1)
-
-    IO.iodata_to_binary([
-      <<@op_gui_signature_help, 1::8, model.anchor_row::16, model.anchor_col::16,
-        active_signature::8, active_parameter::8, Enum.count(signatures)::8>>
-      | sig_data
-    ])
+    model.signatures
+    |> Enum.reduce(writer, &encode_signature/2)
+    |> Writer.finish()
   end
 
   @spec fingerprint(SignatureHelp.t()) :: term()
@@ -47,37 +48,21 @@ defmodule Minga.Frontend.Adapter.GUI.SignatureHelpEncoder do
      model.active_parameter, model.signatures}
   end
 
-  @spec encode_signature(Signature.t()) :: iodata()
-  defp encode_signature(%Signature{} = signature) do
-    label_bytes = :erlang.iolist_to_binary([signature.label])
-    doc_bytes = :erlang.iolist_to_binary([signature.documentation])
-    parameters = Enum.take(signature.parameters, 255)
-    param_data = Enum.map(parameters, &encode_parameter/1)
+  @spec encode_signature(Signature.t(), Writer.t()) :: Writer.t()
+  defp encode_signature(%Signature{} = signature, %Writer{} = writer) do
+    writer =
+      writer
+      |> Writer.string16(:signature_label, signature.label)
+      |> Writer.string16(:signature_documentation, signature.documentation)
+      |> Writer.uint8(:parameter_count, Enum.count(signature.parameters))
 
-    [
-      <<byte_size(label_bytes)::16, label_bytes::binary, byte_size(doc_bytes)::16,
-        doc_bytes::binary, Enum.count(parameters)::8>>
-      | param_data
-    ]
+    Enum.reduce(signature.parameters, writer, &encode_parameter/2)
   end
 
-  @spec encode_parameter(Parameter.t()) :: binary()
-  defp encode_parameter(%Parameter{} = parameter) do
-    label_bytes = :erlang.iolist_to_binary([parameter.label])
-    doc_bytes = :erlang.iolist_to_binary([parameter.documentation])
-
-    <<byte_size(label_bytes)::16, label_bytes::binary, byte_size(doc_bytes)::16,
-      doc_bytes::binary>>
+  @spec encode_parameter(Parameter.t(), Writer.t()) :: Writer.t()
+  defp encode_parameter(%Parameter{} = parameter, %Writer{} = writer) do
+    writer
+    |> Writer.string16(:parameter_label, parameter.label)
+    |> Writer.string16(:parameter_documentation, parameter.documentation)
   end
-
-  @spec clamp_active_parameter(non_neg_integer(), Signature.t() | nil) :: non_neg_integer()
-  defp clamp_active_parameter(_active_parameter, nil), do: 0
-
-  defp clamp_active_parameter(active_parameter, %Signature{} = signature) do
-    clamp_index(active_parameter, min(Enum.count(signature.parameters), 255))
-  end
-
-  @spec clamp_index(non_neg_integer(), non_neg_integer()) :: non_neg_integer()
-  defp clamp_index(_index, 0), do: 0
-  defp clamp_index(index, count), do: min(index, count - 1)
 end

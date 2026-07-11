@@ -31,7 +31,7 @@ defmodule Minga.Frontend.Adapter.GUI.SurfaceLayoutEncoder do
   `placements` (id 0x01), holding a counted array of `surface_placement`.
   """
 
-  alias Minga.Frontend.Adapter.GUI.Wire
+  alias Minga.Frontend.Adapter.GUI.Wire.Writer
   alias Minga.Protocol.Encode
   alias Minga.Protocol.Opcodes
 
@@ -63,30 +63,31 @@ defmodule Minga.Frontend.Adapter.GUI.SurfaceLayoutEncoder do
   """
   @spec encode_command([wire_placement()]) :: binary()
   def encode_command(placements) when is_list(placements) do
-    validated = Enum.map(placements, &validate/1)
-
-    section =
-      Wire.encode_section(
-        @section_placements,
-        Encode.encode_gui_surface_layout_placements(validated)
+    writer =
+      placements
+      |> Enum.reduce(
+        Writer.new(:gui_surface_layout)
+        |> Writer.check_uint16(:placement_count, Enum.count(placements)),
+        &validate(&2, &1)
       )
 
-    IO.iodata_to_binary([<<@op_gui_surface_layout, 1::8>>, section])
+    payload = Encode.encode_gui_surface_layout_placements(placements)
+
+    writer
+    |> Writer.append(<<@op_gui_surface_layout, 1>>)
+    |> Writer.section16(:placements_payload, @section_placements, payload)
+    |> Writer.finish()
   end
 
-  @spec validate(wire_placement()) :: map()
-  defp validate(%{surface_id: surface_id, rect: rect, z: z, hit_kind: hit_kind} = placement) do
-    validate_uint!(:surface_id, surface_id, Wire.max_u16())
-    validate_uint!(:row, rect.row, Wire.max_u16())
-    validate_uint!(:col, rect.col, Wire.max_u16())
-    validate_uint!(:width, rect.width, Wire.max_u16())
-    validate_uint!(:height, rect.height, Wire.max_u16())
-    validate_uint!(:z, z, Wire.max_u16())
-    validate_uint!(:hit_kind, hit_kind, Wire.max_u8())
-    placement
+  @spec validate(Writer.t(), wire_placement()) :: Writer.t()
+  defp validate(writer, %{surface_id: surface_id, rect: rect, z: z, hit_kind: hit_kind}) do
+    writer
+    |> Writer.check_uint16(:surface_id, surface_id)
+    |> Writer.check_uint16(:row, rect.row)
+    |> Writer.check_uint16(:col, rect.col)
+    |> Writer.check_uint16(:width, rect.width)
+    |> Writer.check_uint16(:height, rect.height)
+    |> Writer.check_uint16(:z, z)
+    |> Writer.check_uint8(:hit_kind, hit_kind)
   end
-
-  @spec validate_uint!(atom(), term(), non_neg_integer()) :: :ok
-  defp validate_uint!(field, value, max),
-    do: Wire.validate_uint!(:gui_surface_layout, field, value, max)
 end

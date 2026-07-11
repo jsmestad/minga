@@ -3,6 +3,7 @@ defmodule Minga.Frontend.Adapter.GUI.BottomPanelEncoderTest do
 
   alias Minga.Frontend.Adapter.GUI.BottomPanelEncoder
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.EncodingError
   alias Minga.RenderModel.UI.BottomPanel
   alias Minga.RenderModel.UI.BottomPanel.MessageEntry
 
@@ -90,6 +91,22 @@ defmodule Minga.Frontend.Adapter.GUI.BottomPanelEncoderTest do
       assert ts == 3661
       assert path == "lib/editor.ex"
       assert text == "File opened"
+    end
+
+    test "rejects a tab name that exceeds its u8 byte length" do
+      model = %BottomPanel{
+        visible?: true,
+        tabs: [{0x01, String.duplicate("x", 256)}],
+        stream_instance: 99
+      }
+
+      assert %{
+               command: :gui_bottom_panel,
+               field: :tab_name,
+               actual: 256,
+               min: 0,
+               max: 255
+             } = assert_raise(EncodingError, fn -> encode(model) end)
     end
 
     test "encodes a nil file_path as an empty path" do

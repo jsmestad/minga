@@ -542,6 +542,53 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
                cached_metrics.metadata_bytes
   end
 
+  test "rejects RGB values that do not fit the span color field" do
+    row = %Row{
+      row_id: Row.stable_id(:normal, 0),
+      row_type: :normal,
+      buf_line: 0,
+      text: "x",
+      spans: [%Span{start_col: 0, end_col: 1, fg: 0x1000000, bg: 0, attrs: 0}],
+      content_hash: 0
+    }
+
+    error =
+      assert_raise EncodingError, fn ->
+        WindowEncoder.encode_window_content(window(rows: [row]))
+      end
+
+    assert %{
+             command: :gui_window_content,
+             field: :span_fg,
+             actual: 0x1000000,
+             min: 0,
+             max: 0xFFFFFF
+           } = error
+  end
+
+  test "rejects a late indent level that does not fit instead of clipping it" do
+    guides = %IndentGuides{
+      window_id: 1,
+      tab_width: 2,
+      active_guide_col: 2,
+      guide_cols: [2, 4],
+      line_indent_levels: [0, 1, 256]
+    }
+
+    error =
+      assert_raise EncodingError, fn ->
+        WindowEncoder.encode_frame_metadata(window(indent_guides: guides))
+      end
+
+    assert %{
+             command: :gui_indent_guides,
+             field: :indent_level,
+             actual: 256,
+             min: 0,
+             max: 255
+           } = error
+  end
+
   test "adapter encodes first-class non-buffer window models" do
     model = window(content_kind: :agent_prompt, window_id: 65_534)
 

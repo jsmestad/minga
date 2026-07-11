@@ -2,6 +2,7 @@ defmodule Minga.Frontend.Adapter.GUI.MinibufferEncoder do
   @moduledoc false
 
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.Wire.Writer
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.Minibuffer
   alias Minga.RenderModel.UI.Minibuffer.Candidate
@@ -23,20 +24,22 @@ defmodule Minga.Frontend.Adapter.GUI.MinibufferEncoder do
   def encode_command(%Minibuffer{visible?: false}), do: <<@op_gui_minibuffer, 0::8>>
 
   def encode_command(%Minibuffer{} = model) do
-    prompt_bytes = :erlang.iolist_to_binary([model.prompt])
-    input_bytes = :erlang.iolist_to_binary([model.input])
-    context_bytes = :erlang.iolist_to_binary([model.context])
-    candidate_data = Enum.map(model.candidates, &encode_candidate/1)
-    mode = encode_mode(model.mode)
-    cursor_pos = encode_cursor_pos(model.cursor_pos)
+    writer =
+      :gui_minibuffer
+      |> Writer.new()
+      |> Writer.append(<<@op_gui_minibuffer, 1::8>>)
+      |> Writer.uint8(:mode, encode_mode(model.mode))
+      |> Writer.uint16(:cursor_pos, encode_cursor_pos(model.cursor_pos))
+      |> Writer.string8(:prompt, model.prompt)
+      |> Writer.string16(:input, model.input)
+      |> Writer.string16(:context, model.context)
+      |> Writer.uint16(:selected_index, model.selected_index)
+      |> Writer.uint16(:candidate_count, Enum.count(model.candidates))
+      |> Writer.uint16(:total_candidates, model.total_candidates)
 
-    IO.iodata_to_binary([
-      <<@op_gui_minibuffer, 1::8, mode::8, cursor_pos::16, byte_size(prompt_bytes)::8,
-        prompt_bytes::binary, byte_size(input_bytes)::16, input_bytes::binary,
-        byte_size(context_bytes)::16, context_bytes::binary, model.selected_index::16,
-        Enum.count(model.candidates)::16, model.total_candidates::16>>
-      | candidate_data
-    ])
+    model.candidates
+    |> Enum.reduce(writer, &encode_candidate/2)
+    |> Writer.finish()
   end
 
   @spec fingerprint(Minibuffer.t()) :: term()
@@ -65,19 +68,18 @@ defmodule Minga.Frontend.Adapter.GUI.MinibufferEncoder do
   defp encode_cursor_pos(nil), do: 0xFFFF
   defp encode_cursor_pos(cursor_pos), do: cursor_pos
 
-  @spec encode_candidate(Candidate.t()) :: iodata()
-  defp encode_candidate(%Candidate{} = candidate) do
-    label_bytes = :erlang.iolist_to_binary([candidate.label])
-    desc_bytes = :erlang.iolist_to_binary([candidate.description])
-    annotation_bytes = :erlang.iolist_to_binary([candidate.annotation])
-    match_positions = candidate.match_positions
-    pos_binary = Enum.map(match_positions, fn pos -> <<min(pos, 0xFFFF)::16>> end)
+  @spec encode_candidate(Candidate.t(), Writer.t()) :: Writer.t()
+  defp encode_candidate(%Candidate{} = candidate, %Writer{} = writer) do
+    writer =
+      writer
+      |> Writer.uint8(:candidate_match_score, candidate.match_score)
+      |> Writer.string16(:candidate_label, candidate.label)
+      |> Writer.string16(:candidate_description, candidate.description)
+      |> Writer.string16(:candidate_annotation, candidate.annotation)
+      |> Writer.uint8(:candidate_match_position_count, Enum.count(candidate.match_positions))
 
-    [
-      <<min(candidate.match_score, 255)::8, byte_size(label_bytes)::16, label_bytes::binary,
-        byte_size(desc_bytes)::16, desc_bytes::binary, byte_size(annotation_bytes)::16,
-        annotation_bytes::binary, Enum.count(match_positions)::8>>
-      | pos_binary
-    ]
+    Enum.reduce(candidate.match_positions, writer, fn position, acc ->
+      Writer.uint16(acc, :candidate_match_position, position)
+    end)
   end
 end

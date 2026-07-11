@@ -2,6 +2,7 @@ defmodule Minga.Frontend.Adapter.GUI.MinibufferEncoderTest do
   use ExUnit.Case, async: true
 
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.EncodingError
   alias Minga.Frontend.Adapter.GUI.MinibufferEncoder
   alias Minga.RenderModel.UI.Minibuffer
   alias Minga.RenderModel.UI.Minibuffer.Candidate
@@ -27,7 +28,7 @@ defmodule Minga.Frontend.Adapter.GUI.MinibufferEncoderTest do
         context: "3 matches",
         selected_index: 1,
         candidates: [
-          %Candidate{label: "term", description: "Match", match_score: 999, annotation: "line 4"}
+          %Candidate{label: "term", description: "Match", match_score: 255, annotation: "line 4"}
         ],
         total_candidates: 4
       }
@@ -41,7 +42,7 @@ defmodule Minga.Frontend.Adapter.GUI.MinibufferEncoderTest do
         context: "3 matches",
         selected_index: 1,
         candidates: [
-          %{label: "term", description: "Match", match_score: 999, annotation: "line 4"}
+          %{label: "term", description: "Match", match_score: 255, annotation: "line 4"}
         ],
         total_candidates: 4
       }
@@ -118,6 +119,17 @@ defmodule Minga.Frontend.Adapter.GUI.MinibufferEncoderTest do
       {cmd, _caches} = MinibufferEncoder.encode(model, Caches.new())
 
       assert cmd == ProtocolGUI.encode_gui_minibuffer(legacy)
+    end
+
+    test "raises instead of clamping an out-of-range candidate score" do
+      model = %Minibuffer{
+        visible?: true,
+        candidates: [%Candidate{label: "overflow", match_score: 256}]
+      }
+
+      assert_raise EncodingError,
+                   "cannot encode gui_minibuffer.candidate_match_score=256; expected 0..255",
+                   fn -> MinibufferEncoder.encode(model, Caches.new()) end
     end
 
     test "returns nil on second call with same semantic data" do

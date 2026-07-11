@@ -2,6 +2,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentContextEncoderTest do
   use ExUnit.Case, async: true
 
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.EncodingError
   alias Minga.Frontend.Adapter.GUI.AgentContextEncoder
   alias Minga.RenderModel.UI.AgentContext
   alias Minga.RenderModel.UI.AgentContext.Progress
@@ -96,6 +97,27 @@ defmodule Minga.Frontend.Adapter.GUI.AgentContextEncoderTest do
       assert <<1::8, ^task_len::16, "Done", ^timestamp_unix::64, 3::8, 1::8, 5::16, "shell",
                2::16, 1::16, 33::16, "Review: approve or reject changes", 2::8, 2::8, 13::16,
                "Inspect files", 1::8, 9::16, "Run tests">> = payload
+    end
+
+    test "rejects a todo count that exceeds u8" do
+      model = %AgentContext{
+        visible: true,
+        task: "Task",
+        dispatch_timestamp: ~U[2024-01-15 10:30:00Z],
+        status: :working,
+        todos: List.duplicate(%Todo{description: "item", status: :pending}, 256)
+      }
+
+      assert %{
+               command: :gui_agent_context,
+               field: :todo_count,
+               actual: 256,
+               min: 0,
+               max: 255
+             } =
+               assert_raise(EncodingError, fn ->
+                 AgentContextEncoder.encode(model, Caches.new())
+               end)
     end
 
     test "returns nil on second call with same model (fingerprint skip)" do

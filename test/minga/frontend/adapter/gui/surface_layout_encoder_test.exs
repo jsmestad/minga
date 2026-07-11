@@ -6,7 +6,8 @@ defmodule Minga.Frontend.Adapter.GUI.SurfaceLayoutEncoderTest do
     do: %{surface_id: 1, rect: %{row: 2, col: 3, width: 40, height: 20}, z: 4, hit_kind: 5}
 
   test "rejects negative and overflowing values for every bounded field" do
-    for field <- @u16_fields ++ [:hit_kind], value <- [-1, 65_536] do
+    for field <- [:surface_id, :row, :col, :width, :height, :z, :hit_kind],
+        value <- [-1, 65_536] do
       error =
         assert_raise EncodingError, fn ->
           SurfaceLayoutEncoder.encode_command([put_field(placement(), field, value)])

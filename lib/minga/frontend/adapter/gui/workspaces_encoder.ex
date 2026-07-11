@@ -5,6 +5,7 @@ defmodule Minga.Frontend.Adapter.GUI.WorkspacesEncoder do
 
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.Wire
+  alias Minga.Frontend.Adapter.GUI.Wire.Writer
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.Workspaces
   alias Minga.RenderModel.UI.Workspaces.VisibleTab
@@ -27,8 +28,11 @@ defmodule Minga.Frontend.Adapter.GUI.WorkspacesEncoder do
 
   @spec encode_command(Workspaces.t()) :: binary()
   def encode_command(%Workspaces{} = model) do
-    payload = encode_payload(model)
-    <<@op_gui_workspaces, byte_size(payload)::16, payload::binary>>
+    :gui_workspaces
+    |> Writer.new()
+    |> Writer.append(<<@op_gui_workspaces>>)
+    |> Writer.payload16(:payload, encode_payload(model))
+    |> Writer.finish()
   end
 
   @spec fingerprint(Workspaces.t()) :: integer()
@@ -44,57 +48,51 @@ defmodule Minga.Frontend.Adapter.GUI.WorkspacesEncoder do
 
   @spec encode_payload(Workspaces.t()) :: binary()
   defp encode_payload(%Workspaces{} = model) do
-    workspace_budget = Wire.max_u16() - 6 - 2
+    writer =
+      :gui_workspaces
+      |> Writer.new()
+      |> Writer.append(<<2::8>>)
+      |> Writer.uint16(:active_workspace_id, model.active_workspace_id)
+      |> Writer.uint8(:workspace_mode, encode_workspace_mode(model.mode))
+      |> Writer.uint8(:workspace_flags, encode_workspace_flags(model))
+      |> Writer.uint8(:workspace_count, Enum.count(model.workspaces))
 
-    {workspace_entries, remaining_budget} =
-      Wire.bounded_entries(
-        model.workspaces,
-        &encode_workspace_summary/1,
-        Wire.max_u8(),
-        workspace_budget
-      )
+    writer = Enum.reduce(model.workspaces, writer, &encode_workspace_summary/2)
+    writer = Writer.uint16(writer, :visible_tab_count, Enum.count(model.visible_tabs))
 
-    {visible_tab_entries, _remaining_budget} =
-      Wire.bounded_entries(
-        model.visible_tabs,
-        &encode_visible_tab/1,
-        Wire.max_u16(),
-        remaining_budget
-      )
-
-    IO.iodata_to_binary([
-      <<2::8, model.active_workspace_id::16, encode_workspace_mode(model.mode)::8,
-        encode_workspace_flags(model)::8, Enum.count(workspace_entries)::8>>,
-      workspace_entries,
-      <<Enum.count(visible_tab_entries)::16>>,
-      visible_tab_entries
-    ])
+    model.visible_tabs
+    |> Enum.reduce(writer, &encode_visible_tab/2)
+    |> Writer.finish()
   end
 
-  @spec encode_workspace_summary(Workspace.t()) :: binary()
-  defp encode_workspace_summary(%Workspace{} = workspace) do
-    {r, g, b} = Wire.rgb(workspace.color)
-    label_bytes = Wire.utf8_prefix_bytes(workspace.label, 255)
-    icon_bytes = Wire.utf8_prefix_bytes(workspace.icon, 255)
-
-    <<workspace.id::16, encode_workspace_kind(workspace.kind)::8,
-      encode_agent_status(workspace.status)::8, encode_workspace_entry_flags(workspace)::16, r::8,
-      g::8, b::8, workspace.tab_count::16, workspace.draft_count::16,
-      workspace.conflict_count::16, workspace.running_background_count::16,
-      byte_size(label_bytes)::8, label_bytes::binary, byte_size(icon_bytes)::8,
-      icon_bytes::binary>>
+  @spec encode_workspace_summary(Workspace.t(), Writer.t()) :: Writer.t()
+  defp encode_workspace_summary(%Workspace{} = workspace, %Writer{} = writer) do
+    writer
+    |> Writer.uint16(:workspace_id, workspace.id)
+    |> Writer.uint8(:workspace_kind, encode_workspace_kind(workspace.kind))
+    |> Writer.uint8(:workspace_agent_status, encode_agent_status(workspace.status))
+    |> Writer.uint16(:workspace_entry_flags, encode_workspace_entry_flags(workspace))
+    |> Writer.rgb24(:workspace_color, workspace.color)
+    |> Writer.uint16(:workspace_tab_count, workspace.tab_count)
+    |> Writer.uint16(:workspace_draft_count, workspace.draft_count)
+    |> Writer.uint16(:workspace_conflict_count, workspace.conflict_count)
+    |> Writer.uint16(:workspace_running_background_count, workspace.running_background_count)
+    |> Writer.string8(:workspace_label, workspace.label)
+    |> Writer.string8(:workspace_icon, workspace.icon)
   end
 
-  @spec encode_visible_tab(VisibleTab.t()) :: binary()
-  defp encode_visible_tab(%VisibleTab{} = tab) do
-    icon_bytes = Wire.utf8_prefix_bytes(tab.icon, 255)
-    label_bytes = Wire.utf8_prefix_bytes(tab.label, Wire.max_u16())
-    path_bytes = Wire.utf8_prefix_bytes(tab.path || "", Wire.max_u16())
-
-    <<tab.id::32, tab.workspace_id::16, encode_tab_kind(tab.kind)::8,
-      encode_visible_tab_flags(tab)::16, Wire.path_hash(tab.path)::32, byte_size(icon_bytes)::8,
-      icon_bytes::binary, byte_size(label_bytes)::16, label_bytes::binary,
-      byte_size(path_bytes)::16, path_bytes::binary, tab.tint_color::32>>
+  @spec encode_visible_tab(VisibleTab.t(), Writer.t()) :: Writer.t()
+  defp encode_visible_tab(%VisibleTab{} = tab, %Writer{} = writer) do
+    writer
+    |> Writer.uint32(:tab_id, tab.id)
+    |> Writer.uint16(:tab_workspace_id, tab.workspace_id)
+    |> Writer.uint8(:tab_kind, encode_tab_kind(tab.kind))
+    |> Writer.uint16(:tab_flags, encode_visible_tab_flags(tab))
+    |> Writer.uint32(:tab_path_hash, Wire.path_hash(tab.path))
+    |> Writer.string8(:tab_icon, tab.icon)
+    |> Writer.string16(:tab_label, tab.label)
+    |> Writer.string16(:tab_path, tab.path || "")
+    |> Writer.uint32(:tab_tint_color, tab.tint_color)
   end
 
   @spec encode_workspace_mode(Workspaces.mode()) :: non_neg_integer()

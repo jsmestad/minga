@@ -1,9 +1,8 @@
 defmodule Minga.Frontend.Adapter.GUI.ThemeEncoder do
   @moduledoc false
 
-  import Bitwise
-
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.Wire.Writer
   alias Minga.RenderModel.UI.Theme
 
   # gui_theme opcode
@@ -23,16 +22,17 @@ defmodule Minga.Frontend.Adapter.GUI.ThemeEncoder do
 
   @spec encode_theme_binary([Theme.color_slot()]) :: binary()
   defp encode_theme_binary(color_slots) do
-    count = Enum.count(color_slots)
+    writer =
+      :gui_theme
+      |> Writer.new()
+      |> Writer.append(<<@op_gui_theme>>)
+      |> Writer.uint8(:color_slot_count, Enum.count(color_slots))
 
-    entries =
-      Enum.map(color_slots, fn {slot, rgb} ->
-        r = bsr(band(rgb, 0xFF0000), 16)
-        g = bsr(band(rgb, 0x00FF00), 8)
-        b = band(rgb, 0x0000FF)
-        <<slot::8, r::8, g::8, b::8>>
-      end)
-
-    IO.iodata_to_binary([@op_gui_theme, <<count::8>> | entries])
+    Enum.reduce(color_slots, writer, fn {slot, rgb}, acc ->
+      acc
+      |> Writer.uint8(:color_slot, slot)
+      |> Writer.rgb24(:color_slot_rgb, rgb)
+    end)
+    |> Writer.finish()
   end
 end

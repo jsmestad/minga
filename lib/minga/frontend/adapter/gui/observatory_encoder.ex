@@ -2,14 +2,13 @@ defmodule Minga.Frontend.Adapter.GUI.ObservatoryEncoder do
   @moduledoc false
 
   alias Minga.Frontend.Adapter.GUI.Caches
-  alias Minga.Frontend.Adapter.GUI.Wire
+  alias Minga.Frontend.Adapter.GUI.Wire.Writer
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.Observatory
   alias Minga.RenderModel.UI.Observatory.Node
 
   @op_gui_observatory Opcodes.gui_observatory()
   @max_observatory_section_payload_bytes 65_000
-  @max_observatory_name_bytes 64_000
 
   @spec encode(Observatory.t(), Caches.t()) :: {binary() | nil, Caches.t()}
   def encode(%Observatory{} = model, %Caches{} = caches) do
@@ -24,33 +23,53 @@ defmodule Minga.Frontend.Adapter.GUI.ObservatoryEncoder do
 
   @spec encode_command(Observatory.t()) :: binary()
   def encode_command(%Observatory{visible?: false}) do
-    payload = Wire.encode_section(0x01, <<0::8, 0::16>>)
-    <<@op_gui_observatory, byte_size(payload)::32, payload::binary>>
+    payload = Writer.section16(Writer.new(:gui_observatory), :header, 0x01, <<0::8, 0::16>>)
+    encode_envelope(Writer.finish(payload))
   end
 
   def encode_command(%Observatory{visible?: true} = model) do
-    node_entries = Enum.map(model.nodes, &encode_observatory_node/1)
-    sparkline_entries = Enum.map(model.nodes, &encode_observatory_sparkline/1)
+    header =
+      :gui_observatory
+      |> Writer.new()
+      |> Writer.append(<<1::8>>)
+      |> Writer.uint16(:node_count, Enum.count(model.nodes))
+      |> Writer.finish()
 
-    sections = [
-      Wire.encode_section(0x01, <<1::8, Enum.count(model.nodes)::16>>),
-      encode_chunked_sections(0x02, node_entries),
-      encode_chunked_sections(0x03, sparkline_entries)
-    ]
+    writer = Writer.section16(Writer.new(:gui_observatory), :header, 0x01, header)
 
-    payload = IO.iodata_to_binary(sections)
-    <<@op_gui_observatory, byte_size(payload)::32, payload::binary>>
+    writer =
+      encode_chunked_sections(writer, 0x02, Enum.map(model.nodes, &encode_observatory_node/1))
+
+    writer =
+      encode_chunked_sections(
+        writer,
+        0x03,
+        Enum.map(model.nodes, &encode_observatory_sparkline/1)
+      )
+
+    writer |> Writer.finish() |> encode_envelope()
+  end
+
+  @spec encode_envelope(binary()) :: binary()
+  defp encode_envelope(payload) do
+    :gui_observatory
+    |> Writer.new()
+    |> Writer.append(<<@op_gui_observatory>>)
+    |> Writer.payload32(:payload, payload)
+    |> Writer.finish()
   end
 
   @spec fingerprint(Observatory.t()) :: term()
   defp fingerprint(%Observatory{visible?: false}), do: :hidden
   defp fingerprint(%Observatory{} = model), do: {model.visible?, model.nodes}
 
-  @spec encode_chunked_sections(non_neg_integer(), [binary()]) :: iodata()
-  defp encode_chunked_sections(section_id, entries) do
+  @spec encode_chunked_sections(Writer.t(), non_neg_integer(), [binary()]) :: Writer.t()
+  defp encode_chunked_sections(%Writer{} = writer, section_id, entries) do
     entries
     |> chunk_observatory_entries()
-    |> Enum.map(&Wire.encode_section(section_id, &1))
+    |> Enum.reduce(writer, fn payload, acc ->
+      Writer.section16(acc, :observatory_entries, section_id, payload)
+    end)
   end
 
   @spec chunk_observatory_entries([binary()]) :: [binary()]
@@ -100,32 +119,32 @@ defmodule Minga.Frontend.Adapter.GUI.ObservatoryEncoder do
 
   @spec encode_observatory_node(Node.t()) :: binary()
   defp encode_observatory_node(%Node{} = node) do
-    pid_bytes = node.pid |> :erlang.pid_to_list() |> List.to_string()
-    parent_bytes = pid_to_bytes(node.parent_pid)
-    name_bytes = Wire.utf8_prefix_bytes(node.name, @max_observatory_name_bytes)
-
-    <<byte_size(pid_bytes)::8, pid_bytes::binary, byte_size(parent_bytes)::8,
-      parent_bytes::binary, byte_size(name_bytes)::16, name_bytes::binary,
-      observatory_class_byte(node.process_class)::8, node.depth::8,
-      Wire.clamp_u32(node.memory)::32, Wire.clamp_u16(node.message_queue_len)::16,
-      Wire.clamp_u32(node.reductions)::32>>
+    :gui_observatory
+    |> Writer.new()
+    |> Writer.string8(:node_pid, node.pid |> :erlang.pid_to_list() |> List.to_string())
+    |> Writer.string8(:node_parent_pid, pid_to_bytes(node.parent_pid))
+    |> Writer.string16(:node_name, node.name)
+    |> Writer.uint8(:node_class, observatory_class_byte(node.process_class))
+    |> Writer.uint8(:node_depth, node.depth)
+    |> Writer.uint32(:node_memory, node.memory)
+    |> Writer.uint16(:node_message_queue_len, node.message_queue_len)
+    |> Writer.uint32(:node_reductions, node.reductions)
+    |> Writer.finish()
   end
 
   @spec encode_observatory_sparkline(Node.t()) :: binary()
   defp encode_observatory_sparkline(%Node{} = node) do
-    pid_bytes = node.pid |> :erlang.pid_to_list() |> List.to_string()
-    values = Enum.take(node.sparkline_values, 255)
-    sample_bytes = Enum.map(values, &encode_float16/1)
+    writer =
+      :gui_observatory
+      |> Writer.new()
+      |> Writer.string8(:sparkline_pid, node.pid |> :erlang.pid_to_list() |> List.to_string())
+      |> Writer.uint8(:sparkline_sample_count, Enum.count(node.sparkline_values))
 
-    <<byte_size(pid_bytes)::8, pid_bytes::binary, Enum.count(values)::8,
-      IO.iodata_to_binary(sample_bytes)::binary>>
-  end
-
-  @spec encode_float16(float()) :: binary()
-  defp encode_float16(value) do
-    clamped = max(0.0, min(1.0, value))
-    scaled = round(clamped * 65_535.0)
-    <<scaled::16>>
+    node.sparkline_values
+    |> Enum.reduce(writer, fn value, acc ->
+      Writer.uint16(acc, :sparkline_sample, round(value * 65_535.0))
+    end)
+    |> Writer.finish()
   end
 
   @spec pid_to_bytes(pid() | nil) :: binary()

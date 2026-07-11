@@ -4,6 +4,7 @@ defmodule Minga.Frontend.Adapter.GUI.TabBarEncoder do
   import Bitwise
 
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.Wire.Writer
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.TabBar
   alias Minga.RenderModel.UI.TabBar.Tab
@@ -26,13 +27,16 @@ defmodule Minga.Frontend.Adapter.GUI.TabBarEncoder do
 
   @spec encode_command(TabBar.t()) :: binary()
   def encode_command(%TabBar{} = model) do
-    active_index = active_index(model)
-    entries = Enum.map(model.tabs, &encode_tab_entry(&1, model.active_tab_id))
+    writer =
+      :gui_tab_bar
+      |> Writer.new()
+      |> Writer.append(<<@op_gui_tab_bar>>)
+      |> Writer.uint8(:active_index, active_index(model))
+      |> Writer.uint8(:tab_count, Enum.count(model.tabs))
 
-    IO.iodata_to_binary([
-      @op_gui_tab_bar,
-      <<active_index::8, Enum.count(model.tabs)::8>> | entries
-    ])
+    model.tabs
+    |> Enum.reduce(writer, &encode_tab_entry(&1, model.active_tab_id, &2))
+    |> Writer.finish()
   end
 
   @spec fingerprint(TabBar.t()) :: integer()
@@ -46,15 +50,17 @@ defmodule Minga.Frontend.Adapter.GUI.TabBarEncoder do
     end
   end
 
-  @spec encode_tab_entry(Tab.t(), non_neg_integer() | nil) :: binary()
-  defp encode_tab_entry(%Tab{} = tab, active_id) do
+  @spec encode_tab_entry(Tab.t(), non_neg_integer() | nil, Writer.t()) :: Writer.t()
+  defp encode_tab_entry(%Tab{} = tab, active_id, %Writer{} = writer) do
     is_active = if tab.id == active_id, do: 1, else: 0
-    flags = build_tab_flags(tab, is_active)
-    icon_bytes = :erlang.iolist_to_binary([tab.icon])
-    label_bytes = :erlang.iolist_to_binary([tab.label])
 
-    <<flags::8, tab.id::32, tab.workspace_id::16, byte_size(icon_bytes)::8, icon_bytes::binary,
-      byte_size(label_bytes)::16, label_bytes::binary, tab.tint_color::32>>
+    writer
+    |> Writer.uint8(:tab_flags, build_tab_flags(tab, is_active))
+    |> Writer.uint32(:tab_id, tab.id)
+    |> Writer.uint16(:workspace_id, tab.workspace_id)
+    |> Writer.string8(:tab_icon, tab.icon)
+    |> Writer.string16(:tab_label, tab.label)
+    |> Writer.uint32(:tab_tint_color, tab.tint_color)
   end
 
   @spec build_tab_flags(Tab.t(), 0 | 1) :: non_neg_integer()
@@ -82,7 +88,7 @@ defmodule Minga.Frontend.Adapter.GUI.TabBarEncoder do
       bor(is_active, bsl(is_dirty, 1)),
       bor(
         bor(bsl(is_agent, 2), bsl(has_attention, 3)),
-        bor(bsl(band(kind_status, 0x07), 4), bsl(is_pinned, 7))
+        bor(bsl(kind_status, 4), bsl(is_pinned, 7))
       )
     )
   end
