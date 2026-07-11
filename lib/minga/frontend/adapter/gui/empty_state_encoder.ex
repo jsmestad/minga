@@ -2,7 +2,7 @@ defmodule Minga.Frontend.Adapter.GUI.EmptyStateEncoder do
   @moduledoc false
 
   alias Minga.Frontend.Adapter.GUI.Caches
-  alias Minga.Frontend.Adapter.GUI.Wire
+  alias Minga.Frontend.Adapter.GUI.Wire.Writer
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.EmptyState
   alias Minga.RenderModel.UI.EmptyState.Item
@@ -32,51 +32,52 @@ defmodule Minga.Frontend.Adapter.GUI.EmptyStateEncoder do
   end
 
   def encode_command(%EmptyState{} = model) do
-    payload = encode_payload(model)
-    <<@op_gui_empty_state, byte_size(payload)::16, payload::binary>>
+    :gui_empty_state
+    |> Writer.new()
+    |> Writer.append(<<@op_gui_empty_state>>)
+    |> Writer.payload16(:payload, encode_payload(model))
+    |> Writer.finish()
   end
 
   @spec encode_payload(EmptyState.t()) :: binary()
   defp encode_payload(%EmptyState{} = model) do
     flags = if model.crashed?, do: 0x01, else: 0x00
 
-    IO.iodata_to_binary([
-      <<1::8, flags::8>>,
-      string8(model.version),
-      string8(model.focused_id || ""),
-      <<Enum.count(model.sections)::8>>,
-      Enum.map(model.sections, &encode_section/1)
-    ])
+    writer =
+      :gui_empty_state
+      |> Writer.new()
+      |> Writer.append(<<1::8>>)
+      |> Writer.uint8(:flags, flags)
+      |> Writer.string8(:version, model.version)
+      |> Writer.string8(:focused_id, model.focused_id || "")
+      |> Writer.uint8(:section_count, Enum.count(model.sections))
+
+    model.sections
+    |> Enum.reduce(writer, &encode_section/2)
+    |> Writer.finish()
   end
 
-  @spec encode_section(Section.t()) :: iodata()
-  defp encode_section(%Section{} = section) do
-    [
-      <<Map.fetch!(@section_ids, section.id)::8>>,
-      string8(section.title),
-      <<Enum.count(section.items)::8>>,
-      Enum.map(section.items, &encode_item/1)
-    ]
+  @spec encode_section(Section.t(), Writer.t()) :: Writer.t()
+  defp encode_section(%Section{} = section, %Writer{} = writer) do
+    writer =
+      writer
+      |> Writer.uint8(:section_id, Map.fetch!(@section_ids, section.id))
+      |> Writer.string8(:section_title, section.title)
+      |> Writer.uint8(:section_item_count, Enum.count(section.items))
+
+    Enum.reduce(section.items, writer, &encode_item/2)
   end
 
-  @spec encode_item(Item.t()) :: iodata()
-  defp encode_item(%Item{} = item) do
-    [
-      <<Map.fetch!(@item_kinds, item.kind)::8>>,
-      string8(item.id),
-      string16(item.label),
-      string16(item.detail),
-      string8(item.jump_key || ""),
-      string8(item.chord),
-      string8(item.icon),
-      <<item.icon_color::32>>
-    ]
+  @spec encode_item(Item.t(), Writer.t()) :: Writer.t()
+  defp encode_item(%Item{} = item, %Writer{} = writer) do
+    writer
+    |> Writer.uint8(:item_kind, Map.fetch!(@item_kinds, item.kind))
+    |> Writer.string8(:item_id, item.id)
+    |> Writer.string16(:item_label, item.label)
+    |> Writer.string16(:item_detail, item.detail)
+    |> Writer.string8(:item_jump_key, item.jump_key || "")
+    |> Writer.string8(:item_chord, item.chord)
+    |> Writer.string8(:item_icon, item.icon)
+    |> Writer.uint32(:item_icon_color, item.icon_color)
   end
-
-  @spec string8(String.t()) :: binary()
-  defp string8(value), do: value |> Wire.utf8_prefix_bytes(255) |> Wire.encode_string8()
-
-  @spec string16(String.t()) :: binary()
-  defp string16(value),
-    do: value |> Wire.utf8_prefix_bytes(Wire.max_u16()) |> Wire.encode_string16()
 end

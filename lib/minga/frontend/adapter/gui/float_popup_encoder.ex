@@ -2,6 +2,7 @@ defmodule Minga.Frontend.Adapter.GUI.FloatPopupEncoder do
   @moduledoc false
 
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.Wire.Writer
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.FloatPopup
 
@@ -22,19 +23,18 @@ defmodule Minga.Frontend.Adapter.GUI.FloatPopupEncoder do
   def encode_command(%FloatPopup{visible?: false}), do: <<@op_gui_float_popup, 0::8>>
 
   def encode_command(%FloatPopup{} = model) do
-    title_bytes = IO.iodata_to_binary(model.title)
+    writer =
+      :gui_float_popup
+      |> Writer.new()
+      |> Writer.append(<<@op_gui_float_popup, 1::8>>)
+      |> Writer.uint16(:width, model.width)
+      |> Writer.uint16(:height, model.height)
+      |> Writer.string16(:title, model.title)
+      |> Writer.uint16(:line_count, Enum.count(model.lines))
 
-    line_data =
-      Enum.map(model.lines, fn line ->
-        text = IO.iodata_to_binary(line)
-        <<byte_size(text)::16, text::binary>>
-      end)
-
-    IO.iodata_to_binary([
-      <<@op_gui_float_popup, 1::8, model.width::16, model.height::16, byte_size(title_bytes)::16,
-        title_bytes::binary, Enum.count(model.lines)::16>>
-      | line_data
-    ])
+    model.lines
+    |> Enum.reduce(writer, &Writer.string16(&2, :line, &1))
+    |> Writer.finish()
   end
 
   @spec fingerprint(FloatPopup.t()) :: term()

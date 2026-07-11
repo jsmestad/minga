@@ -2,10 +2,13 @@ defmodule Minga.Frontend.Adapter.GUI.BottomPanelEncoder do
   @moduledoc false
 
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.Wire.Writer
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.BottomPanel
+  alias Minga.RenderModel.UI.BottomPanel.MessageEntry
 
   @op_gui_bottom_panel Opcodes.gui_bottom_panel()
+  @command :gui_bottom_panel
 
   @spec encode(BottomPanel.t(), Caches.t()) :: {binary() | nil, Caches.t()}
   def encode(%BottomPanel{} = model, %Caches{} = caches) do
@@ -28,33 +31,51 @@ defmodule Minga.Frontend.Adapter.GUI.BottomPanelEncoder do
   #   hidden: opcode + visible=0(1)
   @spec encode_binary(BottomPanel.t()) :: binary()
   defp encode_binary(%BottomPanel{visible?: false}) do
-    <<@op_gui_bottom_panel, 0>>
+    Writer.new(@command)
+    |> Writer.uint8(:opcode, @op_gui_bottom_panel)
+    |> Writer.uint8(:visible, 0)
+    |> Writer.finish()
   end
 
   defp encode_binary(%BottomPanel{} = model) do
-    tab_defs =
-      for {type_byte, name} <- model.tabs, into: <<>> do
-        <<type_byte::8, byte_size(name)::8, name::binary>>
-      end
-
-    header =
-      <<@op_gui_bottom_panel, 1, model.active_tab_index::8, model.height_percent::8,
-        model.filter_byte::8, Enum.count(model.tabs)::8, tab_defs::binary>>
-
-    header <> encode_messages(model.stream_instance, model.messages)
+    Writer.new(@command)
+    |> Writer.uint8(:opcode, @op_gui_bottom_panel)
+    |> Writer.uint8(:visible, 1)
+    |> Writer.uint8(:active_tab_index, model.active_tab_index)
+    |> Writer.uint8(:height_percent, model.height_percent)
+    |> Writer.uint8(:filter, model.filter_byte)
+    |> Writer.uint8(:tab_count, Enum.count(model.tabs))
+    |> Writer.append(Enum.map(model.tabs, &encode_tab/1))
+    |> Writer.append(encode_messages(model.stream_instance, model.messages))
+    |> Writer.finish()
   end
 
-  @spec encode_messages(BottomPanel.stream_instance(), [BottomPanel.MessageEntry.t()]) :: binary()
-  defp encode_messages(stream_instance, entries) when stream_instance in 1..0xFFFF_FFFF do
-    entry_data =
-      for entry <- entries, into: <<>> do
-        path_bytes = entry.file_path || ""
+  @spec encode_tab(BottomPanel.tab()) :: binary()
+  defp encode_tab({type_byte, name}) do
+    Writer.new(@command)
+    |> Writer.uint8(:tab_type, type_byte)
+    |> Writer.string8(:tab_name, name)
+    |> Writer.finish()
+  end
 
-        <<entry.id::32, entry.level_byte::8, entry.subsystem_byte::8, entry.ts_secs::32,
-          byte_size(path_bytes)::16, path_bytes::binary, byte_size(entry.text)::16,
-          entry.text::binary>>
-      end
+  @spec encode_messages(BottomPanel.stream_instance(), [MessageEntry.t()]) :: binary()
+  defp encode_messages(stream_instance, entries) do
+    Writer.new(@command)
+    |> Writer.uint32(:stream_instance, stream_instance)
+    |> Writer.uint16(:entry_count, Enum.count(entries))
+    |> Writer.append(Enum.map(entries, &encode_message/1))
+    |> Writer.finish()
+  end
 
-    <<stream_instance::32, Enum.count(entries)::16, entry_data::binary>>
+  @spec encode_message(MessageEntry.t()) :: binary()
+  defp encode_message(%MessageEntry{} = entry) do
+    Writer.new(@command)
+    |> Writer.uint32(:message_id, entry.id)
+    |> Writer.uint8(:message_level, entry.level_byte)
+    |> Writer.uint8(:message_subsystem, entry.subsystem_byte)
+    |> Writer.uint32(:message_timestamp, entry.ts_secs)
+    |> Writer.string16(:message_path, entry.file_path || "")
+    |> Writer.string16(:message_text, entry.text)
+    |> Writer.finish()
   end
 end

@@ -2,6 +2,7 @@ defmodule Minga.Frontend.Adapter.GUI.CursorAnimationEncoder do
   @moduledoc false
 
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.Wire.Writer
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.CursorAnimation
 
@@ -23,6 +24,11 @@ defmodule Minga.Frontend.Adapter.GUI.CursorAnimationEncoder do
   @spec encode_command(CursorAnimation.t()) :: binary()
   def encode_command(%CursorAnimation{enabled?: enabled?}) do
     enabled_byte = if enabled?, do: 1, else: 0
-    <<@op_gui_cursor_animation, 1::16, enabled_byte::8>>
+
+    :gui_cursor_animation
+    |> Writer.new()
+    |> Writer.append(<<@op_gui_cursor_animation, 1::16>>)
+    |> Writer.uint8(:enabled, enabled_byte)
+    |> Writer.finish()
   end
 end

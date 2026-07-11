@@ -2,6 +2,7 @@ defmodule Minga.Frontend.Adapter.GUI.EditTimelineEncoderTest do
   use ExUnit.Case, async: true
 
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.EncodingError
   alias Minga.Frontend.Adapter.GUI.EditTimelineEncoder
   alias Minga.RenderModel.UI.EditTimeline
   alias Minga.RenderModel.UI.EditTimeline.Entry
@@ -64,6 +65,20 @@ defmodule Minga.Frontend.Adapter.GUI.EditTimelineEncoderTest do
 
       assert <<1::8, 0xFFFF::16, 0::8, 1::8, 8::16, "lib/a.ex", 2::8, 10::32, 3::32, 1::8>> =
                payload
+    end
+
+    test "rejects a tool name that exceeds its u8 byte length" do
+      model = %EditTimeline{
+        entries: [%Entry{index: 0, tool_name: String.duplicate("x", 256), timestamp_delta: 0}]
+      }
+
+      assert %{
+               command: :gui_edit_timeline,
+               field: :tool_name,
+               actual: 256,
+               min: 0,
+               max: 255
+             } = assert_raise(EncodingError, fn -> encode(model) end)
     end
 
     test "encodes a nil viewing index as 0xFFFF when visible" do

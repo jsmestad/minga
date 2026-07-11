@@ -115,9 +115,7 @@ defmodule Minga.Frontend.Adapter.GUI.SearchStateEncoderTest do
       end
     end
 
-    test "clamps match_count and current_index to u16 max" do
-      legacy_binary = ProtocolGUI.encode_gui_search_state(true, 70_000, 70_000, %{})
-
+    test "rejects out-of-range match_count before narrowing it to u16" do
       model = %SearchState{
         active: true,
         match_count: 70_000,
@@ -128,10 +126,16 @@ defmodule Minga.Frontend.Adapter.GUI.SearchStateEncoderTest do
         replace_mode: false
       }
 
-      caches = Caches.new()
-      {new_binary, _caches} = SearchStateEncoder.encode(model, caches)
-
-      assert new_binary == legacy_binary
+      assert %{
+               command: :gui_search_state,
+               field: :match_count,
+               actual: 70_000,
+               min: 0,
+               max: 65_535
+             } =
+               assert_raise(Minga.Frontend.Adapter.GUI.EncodingError, fn ->
+                 SearchStateEncoder.encode(model, Caches.new())
+               end)
     end
   end
 end

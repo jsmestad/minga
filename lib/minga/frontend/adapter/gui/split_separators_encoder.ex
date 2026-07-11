@@ -1,9 +1,8 @@
 defmodule Minga.Frontend.Adapter.GUI.SplitSeparatorsEncoder do
   @moduledoc false
 
-  import Bitwise
-
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.Wire.Writer
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.SplitSeparators
 
@@ -22,33 +21,31 @@ defmodule Minga.Frontend.Adapter.GUI.SplitSeparatorsEncoder do
 
   @spec encode_binary(SplitSeparators.t()) :: binary()
   defp encode_binary(%SplitSeparators{} = model) do
-    verticals =
-      Enum.map(model.verticals, fn {col, start_row, end_row} ->
-        <<col::16, start_row::16, end_row::16>>
+    writer =
+      :gui_split_separators
+      |> Writer.new()
+      |> Writer.append(<<@op_gui_split_separators>>)
+      |> Writer.rgb24(:border_color_rgb, model.border_color_rgb)
+      |> Writer.uint8(:vertical_count, Enum.count(model.verticals))
+
+    writer =
+      Enum.reduce(model.verticals, writer, fn {col, start_row, end_row}, acc ->
+        acc
+        |> Writer.uint16(:vertical_col, col)
+        |> Writer.uint16(:vertical_start_row, start_row)
+        |> Writer.uint16(:vertical_end_row, end_row)
       end)
 
-    horizontals =
-      Enum.map(model.horizontals, fn {row, col, width, filename} ->
-        name = IO.iodata_to_binary(filename)
-        <<row::16, col::16, width::16, byte_size(name)::16, name::binary>>
-      end)
+    writer = Writer.uint8(writer, :horizontal_count, Enum.count(model.horizontals))
 
-    IO.iodata_to_binary([
-      <<@op_gui_split_separators, red(model.border_color_rgb)::8,
-        green(model.border_color_rgb)::8, blue(model.border_color_rgb)::8,
-        Enum.count(model.verticals)::8>>,
-      verticals,
-      <<Enum.count(model.horizontals)::8>>,
-      horizontals
-    ])
+    model.horizontals
+    |> Enum.reduce(writer, fn {row, col, width, filename}, acc ->
+      acc
+      |> Writer.uint16(:horizontal_row, row)
+      |> Writer.uint16(:horizontal_col, col)
+      |> Writer.uint16(:horizontal_width, width)
+      |> Writer.string16(:horizontal_filename, filename)
+    end)
+    |> Writer.finish()
   end
-
-  @spec red(non_neg_integer()) :: non_neg_integer()
-  defp red(rgb), do: rgb >>> 16 &&& 0xFF
-
-  @spec green(non_neg_integer()) :: non_neg_integer()
-  defp green(rgb), do: rgb >>> 8 &&& 0xFF
-
-  @spec blue(non_neg_integer()) :: non_neg_integer()
-  defp blue(rgb), do: rgb &&& 0xFF
 end

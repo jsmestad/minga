@@ -3,7 +3,7 @@ defmodule Minga.Frontend.Adapter.GUI.HoverPopupEncoder do
 
   alias Minga.Core.Face
   alias Minga.Frontend.Adapter.GUI.Caches
-  alias Minga.Frontend.Adapter.GUI.Wire
+  alias Minga.Frontend.Adapter.GUI.Wire.Writer
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.HoverPopup
   alias Minga.RenderModel.UI.HoverPopup.Line
@@ -29,14 +29,21 @@ defmodule Minga.Frontend.Adapter.GUI.HoverPopupEncoder do
 
   def encode_command(%HoverPopup{} = model) do
     focused_byte = if model.focused?, do: 1, else: 0
-    line_data = Enum.map(model.content_lines, &encode_line/1)
+
+    writer =
+      :gui_hover_popup
+      |> Writer.new()
+      |> Writer.append(<<@op_gui_hover_popup, 1::8>>)
+      |> Writer.uint16(:anchor_row, model.anchor_row)
+      |> Writer.uint16(:anchor_col, model.anchor_col)
+      |> Writer.uint8(:focused, focused_byte)
+      |> Writer.uint16(:scroll_offset, model.scroll_offset)
+      |> Writer.uint16(:line_count, Enum.count(model.content_lines))
 
     hover =
-      IO.iodata_to_binary([
-        <<@op_gui_hover_popup, 1::8, model.anchor_row::16, model.anchor_col::16, focused_byte::8,
-          model.scroll_offset::16, Enum.count(model.content_lines)::16>>
-        | line_data
-      ])
+      model.content_lines
+      |> Enum.reduce(writer, &encode_line/2)
+      |> Writer.finish()
 
     IO.iodata_to_binary([hover, encode_hover_action(model.open_action_name)])
   end
@@ -49,38 +56,50 @@ defmodule Minga.Frontend.Adapter.GUI.HoverPopupEncoder do
      model.content_lines, model.open_action_name}
   end
 
-  @spec encode_line(Line.t()) :: iodata()
-  defp encode_line(%Line{} = line) do
-    segment_data = Enum.map(line.segments, &encode_markdown_segment/1)
-    line_type_byte = encode_line_type(line.line_type)
-    [<<line_type_byte::8, Enum.count(line.segments)::16>> | segment_data]
+  @spec encode_line(Line.t(), Writer.t()) :: Writer.t()
+  defp encode_line(%Line{} = line, %Writer{} = writer) do
+    writer =
+      writer
+      |> Writer.uint8(:line_type, encode_line_type(line.line_type))
+      |> Writer.uint16(:segment_count, Enum.count(line.segments))
+
+    Enum.reduce(line.segments, writer, &encode_markdown_segment/2)
   end
 
   @spec encode_hover_action(String.t() | nil) :: binary()
   defp encode_hover_action(nil), do: <<@op_gui_hover_action, 1::16, 0::8>>
 
   defp encode_hover_action(action_name) do
-    action_bytes = :erlang.iolist_to_binary([action_name])
-    payload_len = 1 + 2 + byte_size(action_bytes)
+    payload =
+      :gui_hover_action
+      |> Writer.new()
+      |> Writer.append(<<1::8>>)
+      |> Writer.string16(:action_name, action_name)
+      |> Writer.finish()
 
-    <<@op_gui_hover_action, payload_len::16, 1::8, byte_size(action_bytes)::16,
-      action_bytes::binary>>
+    :gui_hover_action
+    |> Writer.new()
+    |> Writer.append(<<@op_gui_hover_action>>)
+    |> Writer.payload16(:payload, payload)
+    |> Writer.finish()
   end
 
-  @spec encode_markdown_segment(Segment.t()) :: binary()
-  defp encode_markdown_segment(%Segment{text: text, style: {:syntax, %Face{} = face}}) do
-    text_bytes = :erlang.iolist_to_binary([text])
-    fg = face.fg || @syntax_fallback_fg
-    {r, g, b} = Wire.rgb(fg)
-    flags = encode_syntax_flags(face)
-
-    <<13::8, r::8, g::8, b::8, flags::8, byte_size(text_bytes)::16, text_bytes::binary>>
+  @spec encode_markdown_segment(Segment.t(), Writer.t()) :: Writer.t()
+  defp encode_markdown_segment(
+         %Segment{text: text, style: {:syntax, %Face{} = face}},
+         %Writer{} = writer
+       ) do
+    writer
+    |> Writer.append(<<13::8>>)
+    |> Writer.rgb24(:syntax_fg, face.fg || @syntax_fallback_fg)
+    |> Writer.uint8(:syntax_flags, encode_syntax_flags(face))
+    |> Writer.string16(:segment_text, text)
   end
 
-  defp encode_markdown_segment(%Segment{} = segment) do
-    style_byte = encode_markdown_style(segment.style)
-    text_bytes = :erlang.iolist_to_binary([segment.text])
-    <<style_byte::8, byte_size(text_bytes)::16, text_bytes::binary>>
+  defp encode_markdown_segment(%Segment{} = segment, %Writer{} = writer) do
+    writer
+    |> Writer.uint8(:markdown_style, encode_markdown_style(segment.style))
+    |> Writer.string16(:segment_text, segment.text)
   end
 
   @spec encode_syntax_flags(Face.t()) :: non_neg_integer()

@@ -4,7 +4,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
   import Bitwise
 
   alias Minga.Frontend.Adapter.GUI.Caches
-  alias Minga.Frontend.Adapter.GUI.Wire
+  alias Minga.Frontend.Adapter.GUI.Wire.Writer
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.StatusBar
   alias Minga.RenderModel.UI.StatusBar.Agent
@@ -16,6 +16,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
   alias Minga.RenderModel.UI.StatusBar.Workspace
 
   @op_gui_status_bar Opcodes.gui_status_bar()
+  @command :gui_status_bar
   @section_identity 0x01
   @section_cursor 0x02
   @section_diagnostics 0x03
@@ -30,17 +31,19 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
   @section_selection 0x0C
   @section_workspace 0x0D
   @section_pending_keys 0x0E
-  @max_modeline_segments 128
 
   @spec encode(StatusBar.t(), Caches.t()) :: {binary(), Caches.t()}
-  def encode(%StatusBar{} = model, %Caches{} = caches) do
-    {encode_command(model), caches}
-  end
+  def encode(%StatusBar{} = model, %Caches{} = caches), do: {encode_command(model), caches}
 
   @spec encode_command(StatusBar.t()) :: binary()
   def encode_command(%StatusBar{} = model) do
     sections = encode_sections(model)
-    IO.iodata_to_binary([<<@op_gui_status_bar, Enum.count(sections)::8>> | sections])
+
+    Writer.new(@command)
+    |> Writer.uint8(:opcode, @op_gui_status_bar)
+    |> Writer.uint8(:section_count, Enum.count(sections))
+    |> Writer.append(sections)
+    |> Writer.finish()
   end
 
   @spec encode_sections(StatusBar.t()) :: [binary()]
@@ -49,70 +52,109 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
          data: %Data{} = data,
          workspace: workspace
        }) do
-    content_kind_byte = content_kind_byte(content_kind)
-    mode_byte = encode_vim_mode(data.mode)
-    flags = build_status_flags(data)
-    lsp_byte = encode_lsp_status(data.language)
-    parser_byte = encode_parser_status(data.language)
-    agent_byte = encode_agent_session_status(data.agent.agent_status)
-    indent_type_byte = encode_indent_type(data.indent)
-    indent_size = Wire.clamp_u8(data.indent.size)
     {selection_mode, selection_size} = encode_selection_info(data.selection)
     {error_count, warning_count, info_count, hint_count} = data.diagnostics.counts
-    macro_byte = encode_macro_recording(data.recording)
     {git_added, git_modified, git_deleted} = git_diff_counts(data.git)
-    {icon_r, icon_g, icon_b} = Wire.rgb(data.file.icon_color)
-
-    git_branch = :erlang.iolist_to_binary([data.git.branch || ""])
-    filetype = :erlang.iolist_to_binary([Atom.to_string(data.file.filetype)])
-    icon_bytes = :erlang.iolist_to_binary([data.file.icon])
-    filename = :erlang.iolist_to_binary([data.file.name])
-    diag_hint = :erlang.iolist_to_binary([data.diagnostics.hint || ""])
-    message = :erlang.iolist_to_binary([data.message || ""])
-    background_label = :erlang.iolist_to_binary([data.agent.background_label || ""])
-    active_tool_name = :erlang.iolist_to_binary([data.agent.active_tool_name || ""])
 
     sections = [
-      Wire.encode_section(@section_identity, <<content_kind_byte::8, mode_byte::8, flags::8>>),
-      Wire.encode_section(
+      section(
+        @section_identity,
+        Writer.new(@command)
+        |> Writer.uint8(:content_kind, content_kind_byte(content_kind))
+        |> Writer.uint8(:mode, encode_vim_mode(data.mode))
+        |> Writer.uint8(:flags, build_status_flags(data))
+        |> Writer.finish()
+      ),
+      section(
         @section_cursor,
-        <<data.cursor.line + 1::32, data.cursor.col + 1::32, data.cursor.line_count::32>>
+        Writer.new(@command)
+        |> Writer.uint32(:cursor_line, data.cursor.line + 1)
+        |> Writer.uint32(:cursor_col, data.cursor.col + 1)
+        |> Writer.uint32(:line_count, data.cursor.line_count)
+        |> Writer.finish()
       ),
-      Wire.encode_section(
+      section(
         @section_diagnostics,
-        <<error_count::16, warning_count::16, info_count::16, hint_count::16,
-          byte_size(diag_hint)::16, diag_hint::binary>>
+        Writer.new(@command)
+        |> Writer.uint16(:diagnostic_error_count, error_count)
+        |> Writer.uint16(:diagnostic_warning_count, warning_count)
+        |> Writer.uint16(:diagnostic_info_count, info_count)
+        |> Writer.uint16(:diagnostic_hint_count, hint_count)
+        |> Writer.string16(:diagnostic_hint, data.diagnostics.hint || "")
+        |> Writer.finish()
       ),
-      Wire.encode_section(@section_language, <<lsp_byte::8, parser_byte::8>>),
-      Wire.encode_section(
+      section(
+        @section_language,
+        Writer.new(@command)
+        |> Writer.uint8(:lsp_status, encode_lsp_status(data.language))
+        |> Writer.uint8(:parser_status, encode_parser_status(data.language))
+        |> Writer.finish()
+      ),
+      section(
         @section_git,
-        <<byte_size(git_branch)::8, git_branch::binary, git_added::16, git_modified::16,
-          git_deleted::16>>
+        Writer.new(@command)
+        |> Writer.string8(:git_branch, data.git.branch || "")
+        |> Writer.uint16(:git_added, git_added)
+        |> Writer.uint16(:git_modified, git_modified)
+        |> Writer.uint16(:git_deleted, git_deleted)
+        |> Writer.finish()
       ),
-      Wire.encode_section(
-        @section_file,
-        <<byte_size(icon_bytes)::8, icon_bytes::binary, icon_r::8, icon_g::8, icon_b::8,
-          byte_size(filename)::16, filename::binary, byte_size(filetype)::8, filetype::binary>>
+      section(@section_file, encode_file(data)),
+      section(
+        @section_message,
+        Writer.new(@command) |> Writer.string16(:message, data.message || "") |> Writer.finish()
       ),
-      Wire.encode_section(@section_message, <<byte_size(message)::16, message::binary>>),
-      Wire.encode_section(@section_recording, <<macro_byte::8>>),
-      Wire.encode_section(@section_indent, <<indent_type_byte::8, indent_size::8>>)
+      section(
+        @section_recording,
+        Writer.new(@command)
+        |> Writer.uint8(:recording, encode_macro_recording(data.recording))
+        |> Writer.finish()
+      ),
+      section(
+        @section_indent,
+        Writer.new(@command)
+        |> Writer.uint8(:indent_type, encode_indent_type(data.indent))
+        |> Writer.uint8(:indent_size, data.indent.size)
+        |> Writer.finish()
+      )
     ]
 
-    sections = Enum.concat(sections, modeline_segment_sections(data.modeline_segments))
-
-    sections = Enum.concat(sections, pending_keys_sections(data.pending_keys))
+    sections = sections ++ modeline_segment_sections(data.modeline_segments)
+    sections = sections ++ pending_keys_sections(data.pending_keys)
 
     sections =
       Enum.concat(sections, [
-        Wire.encode_section(@section_selection, <<selection_mode::8, selection_size::32>>)
+        section(
+          @section_selection,
+          Writer.new(@command)
+          |> Writer.uint8(:selection_mode, selection_mode)
+          |> Writer.uint32(:selection_size, selection_size)
+          |> Writer.finish()
+        )
       ])
 
-    sections = Enum.concat(sections, workspace_sections(workspace))
-
-    Enum.concat(sections, [
-      agent_section(content_kind, data.agent, agent_byte, background_label, active_tool_name)
+    Enum.concat([
+      sections,
+      workspace_sections(workspace),
+      [agent_section(content_kind, data.agent)]
     ])
+  end
+
+  @spec encode_file(Data.t()) :: binary()
+  defp encode_file(%Data{} = data) do
+    Writer.new(@command)
+    |> Writer.string8(:file_icon, data.file.icon)
+    |> Writer.rgb24(:file_icon_color, data.file.icon_color)
+    |> Writer.string16(:file_name, data.file.name)
+    |> Writer.string8(:filetype, Atom.to_string(data.file.filetype))
+    |> Writer.finish()
+  end
+
+  @spec section(non_neg_integer(), iodata()) :: binary()
+  defp section(section_id, payload) do
+    Writer.new(@command)
+    |> Writer.section16(:section_payload, section_id, payload)
+    |> Writer.finish()
   end
 
   @spec content_kind_byte(StatusBar.content_kind()) :: 0 | 1
@@ -120,141 +162,97 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
   defp content_kind_byte(:buffer), do: 0
 
   @spec workspace_sections(Workspace.t() | nil) :: [binary()]
-  defp workspace_sections(%Workspace{} = workspace) do
-    [Wire.encode_section(@section_workspace, encode_status_workspace(workspace))]
-  end
+  defp workspace_sections(%Workspace{} = workspace),
+    do: [section(@section_workspace, encode_status_workspace(workspace))]
 
   defp workspace_sections(nil), do: []
 
   @spec encode_status_workspace(Workspace.t()) :: binary()
   defp encode_status_workspace(%Workspace{} = workspace) do
-    label_bytes = Wire.utf8_prefix_bytes(workspace.label, 255)
-    icon_bytes = Wire.utf8_prefix_bytes(workspace.icon, 255)
-
-    <<workspace.id::16, encode_workspace_kind(workspace.kind)::8,
-      encode_agent_session_status(workspace.status)::8,
-      encode_workspace_entry_flags(workspace)::16, workspace.draft_count::16,
-      workspace.conflict_count::16, workspace.running_background_count::16,
-      workspace.attention_count::16, byte_size(label_bytes)::8, label_bytes::binary,
-      byte_size(icon_bytes)::8, icon_bytes::binary>>
+    Writer.new(@command)
+    |> Writer.uint16(:workspace_id, workspace.id)
+    |> Writer.uint8(:workspace_kind, encode_workspace_kind(workspace.kind))
+    |> Writer.uint8(:workspace_status, encode_agent_session_status(workspace.status))
+    |> Writer.uint16(:workspace_flags, encode_workspace_entry_flags(workspace))
+    |> Writer.uint16(:workspace_draft_count, workspace.draft_count)
+    |> Writer.uint16(:workspace_conflict_count, workspace.conflict_count)
+    |> Writer.uint16(:workspace_running_background_count, workspace.running_background_count)
+    |> Writer.uint16(:workspace_attention_count, workspace.attention_count)
+    |> Writer.string8(:workspace_label, workspace.label)
+    |> Writer.string8(:workspace_icon, workspace.icon)
+    |> Writer.finish()
   end
 
-  @spec agent_section(StatusBar.content_kind(), Agent.t(), non_neg_integer(), binary(), binary()) ::
-          binary()
-  defp agent_section(:agent, %Agent{} = agent, agent_byte, background_label, active_tool_name) do
-    model_name = :erlang.iolist_to_binary([agent.model_name])
-    session_status_byte = encode_agent_session_status(agent.session_status)
+  @spec agent_section(StatusBar.content_kind(), Agent.t()) :: binary()
+  defp agent_section(:agent, %Agent{} = agent) do
+    payload =
+      Writer.new(@command)
+      |> Writer.string8(:agent_model_name, agent.model_name)
+      |> Writer.uint32(:agent_message_count, agent.message_count)
+      |> Writer.uint8(:agent_session_status, encode_agent_session_status(agent.session_status))
+      |> Writer.uint8(:agent_status, encode_agent_session_status(agent.agent_status))
+      |> Writer.uint16(:agent_background_count, agent.background_count)
+      |> Writer.string16(:agent_background_label, agent.background_label || "")
+      |> Writer.string8(:agent_active_tool_name, agent.active_tool_name || "")
+      |> Writer.finish()
 
-    Wire.encode_section(
-      @section_agent,
-      <<byte_size(model_name)::8, model_name::binary, agent.message_count::32,
-        session_status_byte::8, agent_byte::8, agent.background_count::16,
-        byte_size(background_label)::16, background_label::binary, byte_size(active_tool_name)::8,
-        active_tool_name::binary>>
-    )
+    section(@section_agent, payload)
   end
 
-  defp agent_section(:buffer, %Agent{} = agent, agent_byte, background_label, active_tool_name) do
-    Wire.encode_section(
-      @section_agent,
-      <<agent_byte::8, agent.background_count::16, byte_size(background_label)::16,
-        background_label::binary, byte_size(active_tool_name)::8, active_tool_name::binary>>
-    )
+  defp agent_section(:buffer, %Agent{} = agent) do
+    payload =
+      Writer.new(@command)
+      |> Writer.uint8(:agent_status, encode_agent_session_status(agent.agent_status))
+      |> Writer.uint16(:agent_background_count, agent.background_count)
+      |> Writer.string16(:agent_background_label, agent.background_label || "")
+      |> Writer.string8(:agent_active_tool_name, agent.active_tool_name || "")
+      |> Writer.finish()
+
+    section(@section_agent, payload)
   end
 
   @spec pending_keys_sections(String.t() | nil) :: [binary()]
   defp pending_keys_sections(pending) when pending in [nil, ""], do: []
 
-  defp pending_keys_sections(pending) do
-    bytes = Wire.utf8_prefix_bytes(pending, Wire.max_u16())
-    [Wire.encode_section(@section_pending_keys, <<byte_size(bytes)::16, bytes::binary>>)]
-  end
+  defp pending_keys_sections(pending),
+    do: [
+      section(
+        @section_pending_keys,
+        Writer.new(@command) |> Writer.string16(:pending_keys, pending) |> Writer.finish()
+      )
+    ]
 
   @spec modeline_segment_sections(Data.modeline_segments()) :: [binary()]
   defp modeline_segment_sections(nil), do: []
 
-  defp modeline_segment_sections(modeline_segments) do
-    [Wire.encode_section(@section_modeline_segments, encode_modeline_segments(modeline_segments))]
-  end
+  defp modeline_segment_sections(modeline_segments),
+    do: [section(@section_modeline_segments, encode_modeline_segments(modeline_segments))]
 
   @spec encode_modeline_segments(%{left: [tuple()], right: [tuple()]}) :: binary()
   defp encode_modeline_segments(%{left: left, right: right}) do
-    {left, right} = capped_modeline_segments(left, right)
-    {encoded_left, left_count, remaining} = bounded_modeline_side(left, Wire.max_u16() - 5)
-    {encoded_right, right_count, _remaining} = bounded_modeline_side(right, remaining)
-
-    IO.iodata_to_binary([<<2::8, left_count::16, right_count::16>>, encoded_left, encoded_right])
+    Writer.new(@command)
+    |> Writer.uint8(:modeline_version, 2)
+    |> Writer.uint16(:modeline_left_count, Enum.count(left))
+    |> Writer.uint16(:modeline_right_count, Enum.count(right))
+    |> Writer.append(Enum.map(left, &encode_modeline_segment/1))
+    |> Writer.append(Enum.map(right, &encode_modeline_segment/1))
+    |> Writer.finish()
   end
 
-  @spec capped_modeline_segments([tuple()], [tuple()]) :: {[tuple()], [tuple()]}
-  defp capped_modeline_segments(left, right) do
-    left = Enum.take(left, @max_modeline_segments)
-    right = Enum.take(right, max(0, @max_modeline_segments - Enum.count(left)))
-    {left, right}
+  @spec encode_modeline_segment(tuple()) :: binary()
+  defp encode_modeline_segment({name, text, fg, bg, opts, target}) do
+    Writer.new(@command)
+    |> Writer.string8(:modeline_segment_name, to_string(name))
+    |> Writer.rgb24(:modeline_segment_fg, fg)
+    |> Writer.rgb24(:modeline_segment_bg, bg)
+    |> Writer.uint8(:modeline_segment_attrs, encode_modeline_attrs(opts))
+    |> Writer.string16(:modeline_segment_text, text)
+    |> Writer.string16(:modeline_segment_target, encode_modeline_target(target))
+    |> Writer.finish()
   end
 
-  @spec bounded_modeline_side([tuple()], non_neg_integer()) ::
-          {[binary()], non_neg_integer(), non_neg_integer()}
-  defp bounded_modeline_side(segments, budget) do
-    Enum.reduce_while(segments, {[], 0, budget}, fn segment, {encoded, count, remaining} ->
-      case encode_modeline_segment(segment, remaining) do
-        {:ok, bytes} -> {:cont, {[bytes | encoded], count + 1, remaining - byte_size(bytes)}}
-        :drop -> {:halt, {encoded, count, remaining}}
-      end
-    end)
-    |> then(fn {encoded, count, remaining} -> {Enum.reverse(encoded), count, remaining} end)
-  end
-
-  @spec encode_modeline_segment(tuple(), non_neg_integer()) :: {:ok, binary()} | :drop
-  defp encode_modeline_segment(_segment, remaining) when remaining < 12, do: :drop
-
-  defp encode_modeline_segment({name, text, fg, bg, opts, target}, remaining) do
-    name_bytes = modeline_name_bytes(name)
-    overhead = 12 + byte_size(name_bytes)
-
-    if remaining < overhead do
-      :drop
-    else
-      attrs = encode_modeline_attrs(opts)
-      target = encode_modeline_target(target)
-      payload_budget = remaining - overhead
-      {text_bytes, target_bytes} = bounded_modeline_text_and_target(text, target, payload_budget)
-
-      {:ok,
-       <<byte_size(name_bytes)::8, name_bytes::binary, fg::24, bg::24, attrs::8,
-         byte_size(text_bytes)::16, text_bytes::binary, byte_size(target_bytes)::16,
-         target_bytes::binary>>}
-    end
-  end
-
-  defp encode_modeline_segment({text, fg, bg, opts, target}, remaining) do
-    encode_modeline_segment({:custom, text, fg, bg, opts, target}, remaining)
-  end
-
-  @spec modeline_name_bytes(atom() | String.t()) :: binary()
-  defp modeline_name_bytes(name) do
-    name
-    |> to_string()
-    |> :erlang.iolist_to_binary()
-    |> Wire.utf8_prefix_bytes(255)
-  end
-
-  @spec bounded_modeline_text_and_target(String.t(), String.t(), non_neg_integer()) ::
-          {binary(), binary()}
-  defp bounded_modeline_text_and_target(text, target, budget) do
-    target_bytes = modeline_target_bytes(target, budget)
-    text_budget = budget - byte_size(target_bytes)
-    text_bytes = Wire.utf8_prefix_bytes(text, min(byte_size(text), text_budget))
-    {text_bytes, target_bytes}
-  end
-
-  @spec modeline_target_bytes(String.t(), non_neg_integer()) :: binary()
-  defp modeline_target_bytes("", _budget), do: ""
-
-  defp modeline_target_bytes(target, budget) do
-    target_bytes = :erlang.iolist_to_binary([target])
-    if byte_size(target_bytes) <= budget, do: target_bytes, else: ""
-  end
+  defp encode_modeline_segment({text, fg, bg, opts, target}),
+    do: encode_modeline_segment({:custom, text, fg, bg, opts, target})
 
   @spec encode_modeline_target(atom() | nil) :: String.t()
   defp encode_modeline_target(nil), do: ""
@@ -285,12 +283,8 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
   defp encode_indent_type(%Indent{}), do: 0
 
   @spec encode_selection_info(Selection.t()) :: {non_neg_integer(), non_neg_integer()}
-  defp encode_selection_info(%Selection{mode: :chars, size: count}),
-    do: {1, min(count, Wire.max_u32())}
-
-  defp encode_selection_info(%Selection{mode: :lines, size: count}),
-    do: {2, min(count, Wire.max_u32())}
-
+  defp encode_selection_info(%Selection{mode: :chars, size: count}), do: {1, count}
+  defp encode_selection_info(%Selection{mode: :lines, size: count}), do: {2, count}
   defp encode_selection_info(%Selection{}), do: {0, 0}
 
   @spec encode_lsp_status(Language.t()) :: non_neg_integer()

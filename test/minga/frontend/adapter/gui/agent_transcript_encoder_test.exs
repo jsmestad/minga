@@ -1,14 +1,12 @@
 defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoderTest do
-  # async: false — several tests mutate the global :agent_transcript_resident_max_bytes
-  # config option and restore it, so they must not race other config readers.
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
-  alias Minga.Config
   alias Minga.Frontend.Adapter.GUI
   alias Minga.Frontend.Adapter.GUI.AgentChatMessageCodec, as: Codec
   alias Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder, as: Encoder
   alias Minga.Frontend.Adapter.GUI.AgentTranscriptSentState
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.EncodingError
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI
   alias Minga.RenderModel.UI.AgentChat
@@ -31,17 +29,6 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoderTest do
   # 8 + body_bytes.
   defp sized(id, body_bytes) when body_bytes >= 5 do
     user(id, String.duplicate("x", body_bytes - 5))
-  end
-
-  defp with_cap(bytes, fun) do
-    original = Config.get(:agent_transcript_resident_max_bytes)
-    Config.set_option(:agent_transcript_resident_max_bytes, bytes)
-
-    try do
-      fun.()
-    after
-      Config.set_option(:agent_transcript_resident_max_bytes, original)
-    end
   end
 
   # Decodes one gui_agent_transcript frame into a plain map for assertions.
@@ -155,6 +142,36 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoderTest do
       assert decode(f3).mode == @mode_append
     end
 
+    test "rejects an out-of-range transcript epoch with command metadata" do
+      error =
+        assert_raise EncodingError, fn ->
+          Encoder.encode(model(4_294_967_296, [user(1, "a")]), Caches.new())
+        end
+
+      assert %{
+               command: :gui_agent_transcript,
+               field: :epoch,
+               actual: 4_294_967_296,
+               min: 0,
+               max: 4_294_967_295
+             } = error
+    end
+
+    test "rejects an out-of-range resident message id" do
+      error =
+        assert_raise EncodingError, fn ->
+          Encoder.encode(model(1, [user(4_294_967_296, "a")]), Caches.new())
+        end
+
+      assert %{
+               command: :gui_agent_transcript,
+               field: :message_id,
+               actual: 4_294_967_296,
+               min: 0,
+               max: 4_294_967_295
+             } = error
+    end
+
     test "a changed leading message (compaction) forces a full_replace" do
       m1 = [user(1, "a"), user(2, "b"), user(3, "c")]
       {_f, caches} = Encoder.encode(model(1, m1), Caches.new())
@@ -170,104 +187,40 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoderTest do
     end
   end
 
-  describe "resident byte cap" do
-    test "keeps a contiguous most-recent suffix and marks the stream truncated" do
-      with_cap(1_000, fn ->
-        big = String.duplicate("x", 200)
-        messages = for i <- 1..50, do: user(i, big)
+  describe "resident selection" do
+    test "encodes every resident message without selecting a suffix" do
+      messages = for i <- 1..50, do: sized(i, 300)
 
-        {frame, _} = Encoder.encode(model(1, messages), Caches.new())
-        decoded = decode(frame)
+      {frame, _} = Encoder.encode(model(1, messages), Caches.new())
+      decoded = decode(frame)
 
-        assert decoded.mode == @mode_full_replace
-        assert decoded.truncated
-        # Contiguous suffix of the tail ids, at least one, fewer than all.
-        assert ids(decoded) == Enum.to_list((51 - decoded.count)..50)
-        assert decoded.count < 50 and decoded.count > 0
-      end)
-    end
-
-    test "does not leapfrog a small older message past a large one (no holes)" do
-      # cap 1000; entries oldest→newest with a large id2 that must halt eviction.
-      # Contiguous suffix keeps [3,4,5]; a buggy non-halting reduce would grab the
-      # small id1 back in, producing [1,3,4,5] with a hole where id2 was.
-      with_cap(1_000, fn ->
-        messages = [
-          sized(1, 20),
-          sized(2, 300),
-          sized(3, 300),
-          sized(4, 300),
-          sized(5, 300)
-        ]
-
-        {frame, _} = Encoder.encode(model(1, messages), Caches.new())
-        decoded = decode(frame)
-
-        assert ids(decoded) == [3, 4, 5]
-        refute 1 in ids(decoded)
-        assert decoded.truncated
-      end)
-    end
-
-    test "a single message larger than the cap still ships" do
-      with_cap(500, fn ->
-        messages = [sized(1, 2_000)]
-        {frame, _} = Encoder.encode(model(1, messages), Caches.new())
-        decoded = decode(frame)
-
-        assert ids(decoded) == [1]
-        refute decoded.truncated
-      end)
-    end
-
-    test "over-cap streaming steady state emits bounded appends, never full_replace" do
-      with_cap(1_000, fn ->
-        # Each message body 300 bytes (wire 308); ~3 fit under 1000. Grow the
-        # transcript one message at a time and encode each frame in sequence.
-        frames =
-          Enum.reduce(1..8, {Caches.new(), []}, fn n, {caches, acc} ->
-            messages = for i <- 1..n, do: sized(i, 300)
-            {frame, caches2} = Encoder.encode(model(1, messages), caches)
-            {caches2, [frame | acc]}
-          end)
-          |> elem(1)
-          |> Enum.reverse()
-
-        [first | rest] = frames
-
-        # First frame is the initial full_replace; every later frame is an append.
-        assert decode(first).mode == @mode_full_replace
-
-        assert Enum.all?(rest, fn f -> decode(f).mode == @mode_append end),
-               "over-cap streaming must not degrade to full_replace"
-
-        # Once the window is full, appends carry a nonzero trim_front (eviction).
-        assert Enum.any?(rest, fn f -> decode(f).trim_front > 0 end)
-
-        # Each delta frame stays bounded (a handful of entries, well under the cap).
-        assert Enum.all?(rest, fn f -> byte_size(f) < 1_000 end)
-      end)
+      assert decoded.mode == @mode_full_replace
+      refute decoded.truncated
+      assert decoded.count == 50
+      assert ids(decoded) == Enum.to_list(1..50)
     end
   end
 
   describe "duplicate ids" do
-    test "deduplicates by id last-wins, preserving order" do
+    test "rejects duplicate ids instead of silently dropping entries" do
       messages = [
         {1, {:user, "a"}},
         {2, {:user, "b"}},
         {1, {:user, "c"}}
       ]
 
-      {frame, _} = Encoder.encode(model(1, messages), Caches.new())
-      decoded = decode(frame)
+      error =
+        assert_raise EncodingError, fn ->
+          Encoder.encode(model(1, messages), Caches.new())
+        end
 
-      # id 1's earlier occurrence is dropped; the last one ("c") survives at its
-      # position, so order is [2, 1].
-      assert ids(decoded) == [2, 1]
-      assert decoded.count == 2
-
-      assert [_first, {1, body}] = decoded.entries
-      assert body == Codec.encode_message_body({:user, "c"})
+      assert %{
+               command: :gui_agent_transcript,
+               field: :message_id_occurrences,
+               actual: 2,
+               min: 0,
+               max: 1
+             } = error
     end
   end
 

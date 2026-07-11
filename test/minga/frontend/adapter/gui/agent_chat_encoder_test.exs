@@ -5,6 +5,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoderTest do
 
   alias Minga.Frontend.Adapter.GUI.AgentChatEncoder
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.EncodingError
   alias Minga.RenderModel.UI.AgentChat
   alias Minga.RenderModel.UI.AgentChat.ApprovalView
   alias Minga.RenderModel.UI.AgentChat.MarkdownBlock
@@ -198,20 +199,15 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoderTest do
       assert <<99::32, 0x02::8, 2::32, "hi">> = m2
     end
 
-    test "message count cap keeps the newest transcript messages" do
-      messages =
-        for id <- 1..105 do
-          {id, {:assistant, "message #{id}"}}
-        end
+    test "encodes every message when the complete section fits" do
+      messages = for id <- 1..105, do: {id, {:assistant, "message #{id}"}}
 
       binary = encode(%AgentChat{visible?: true, messages: messages})
       encoded_messages = messages!(binary)
 
-      assert Enum.count(encoded_messages) == 100
-      assert [first | _] = encoded_messages
-      assert <<6::32, 0x02::8, _rest::binary>> = first
-      assert last = Enum.at(encoded_messages, -1)
-      assert <<105::32, 0x02::8, _rest::binary>> = last
+      assert Enum.count(encoded_messages) == 105
+      assert [<<1::32, 0x02::8, _rest::binary>> | _] = encoded_messages
+      assert [<<105::32, 0x02::8, _rest::binary>> | _] = Enum.reverse(encoded_messages)
     end
 
     test "bare tuple messages encode with ID 0" do
@@ -478,50 +474,78 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoderTest do
       assert (flags &&& 0x08) == 0
     end
 
-    test "downgrades overlong link urls instead of corrupting framing" do
-      for url <- [String.duplicate("a", 65_535), String.duplicate("a", 65_536)] do
-        styled = [[{"docs", 0x61AFEF, 0, 0x0C, url}]]
-        binary = encode(%AgentChat{visible?: true, messages: [{1, {:styled_assistant, styled}}]})
-        assert [m1] = messages!(binary)
+    test "rejects an out-of-range URL-less run flag before clearing its link bit" do
+      styled = [[{"not a link", 0xBBC2CF, 0, 256}]]
 
-        <<1::32, 0x07::8, 1::16, 1::16, tlen::16, text::binary-size(tlen), _fg::24, _bg::24,
-          flags::8>> = m1
+      error =
+        assert_raise EncodingError, fn ->
+          encode(%AgentChat{visible?: true, messages: [{1, {:styled_assistant, styled}}]})
+        end
 
-        assert text == "docs"
-        assert (flags &&& 0x08) == 0
-        assert (flags &&& 0x04) == 0
-      end
+      assert %{
+               command: :gui_agent_chat_message,
+               field: :run_flags,
+               actual: 256,
+               min: 0,
+               max: 255
+             } = error
+    end
+
+    test "rejects an overlong link URL without stripping link metadata" do
+      url = String.duplicate("a", 65_536)
+      styled = [[{"docs", 0x61AFEF, 0, 0x0C, url}]]
+
+      error =
+        assert_raise EncodingError, fn ->
+          encode(%AgentChat{visible?: true, messages: [{1, {:styled_assistant, styled}}]})
+        end
+
+      assert %{
+               command: :gui_agent_chat_message,
+               field: :run_url,
+               actual: 65_536,
+               min: 0,
+               max: 65_535
+             } = error
     end
   end
 
-  describe "payload limits and truncation" do
-    test "truncates oversized plain chat text" do
+  describe "bounded fields" do
+    test "rejects a messages section that exceeds its uint16 payload" do
       text = String.duplicate("x", 70_000)
-      binary = encode(%AgentChat{visible?: true, messages: [{:assistant, text}]})
 
-      assert byte_size(section!(binary, 0x06)) <= 65_535
-      assert [m1] = messages!(binary)
-      <<0::32, 0x02::8, len::32, encoded::binary-size(len)>> = m1
-      assert byte_size(encoded) == 60_000
-      assert String.ends_with?(encoded, "… [truncated]")
+      error =
+        assert_raise EncodingError, fn ->
+          encode(%AgentChat{visible?: true, messages: [{:assistant, text}]})
+        end
+
+      assert %{
+               command: :gui_agent_chat,
+               field: :section_payload,
+               actual: 70_017,
+               min: 0,
+               max: 65_535
+             } = error
     end
 
-    test "omits older messages instead of overflowing the section" do
+    test "rejects the complete oversized transcript instead of omitting older messages" do
       text = String.duplicate("x", 70_000)
 
-      binary =
-        encode(%AgentChat{
-          visible?: true,
-          messages: [{1, {:assistant, text}}, {2, {:assistant, text}}]
-        })
+      error =
+        assert_raise EncodingError, fn ->
+          encode(%AgentChat{
+            visible?: true,
+            messages: [{1, {:assistant, text}}, {2, {:assistant, text}}]
+          })
+        end
 
-      assert byte_size(section!(binary, 0x06)) <= 65_535
-
-      assert [notice_msg, kept_msg] = messages!(binary)
-      <<0::32, 0x05::8, 0::8, notice_len::32, notice::binary-size(notice_len)>> = notice_msg
-      assert notice =~ "omitted"
-
-      <<2::32, 0x02::8, _len::32, _text::binary>> = kept_msg
+      assert %{
+               command: :gui_agent_chat,
+               field: :section_payload,
+               actual: 140_030,
+               min: 0,
+               max: 65_535
+             } = error
     end
 
     test "keeps long command approval summaries without the short cap" do
@@ -550,20 +574,22 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoderTest do
       assert summary == command
     end
 
-    test "keeps multibyte summaries within UTF-8 byte limits" do
+    test "rejects multibyte summaries whose byte length exceeds uint16" do
       command = String.duplicate("🚀", 20_000)
       tc = %ToolCallView{name: "shell", summary: command, status: :running, result: ""}
 
-      binary = encode(%AgentChat{visible?: true, messages: [{1, {:tool_call, tc}}]})
-      assert [m1] = messages!(binary)
+      error =
+        assert_raise EncodingError, fn ->
+          encode(%AgentChat{visible?: true, messages: [{1, {:tool_call, tc}}]})
+        end
 
-      <<1::32, 0x04::8, _status::8, _error::8, _collapsed::8, _duration::32, name_len::16,
-        _name::binary-size(name_len), summary_len::16, summary::binary-size(summary_len),
-        _rest::binary>> = m1
-
-      assert summary_len <= 60_000
-      assert String.valid?(summary)
-      assert String.ends_with?(summary, "… [truncated]")
+      assert %{
+               command: :gui_agent_chat_message,
+               field: :summary,
+               actual: 80_000,
+               min: 0,
+               max: 65_535
+             } = error
     end
   end
 

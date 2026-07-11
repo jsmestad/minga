@@ -5,22 +5,19 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder do
 
   Carries the resident transcript so a frontend can scroll the session from local
   data without a BEAM round-trip (#2654), decoupled from the small
-  `gui_agent_chat` (0x78) chrome model whose u16 sectioned frame capped the
-  transcript at ~65 KB. The resident set is the conversation **bounded by
-  `:agent_transcript_resident_max_bytes` (a contiguous most-recent suffix) and
-  scoped by `display_start_index`** — not necessarily the whole history. The
-  `truncated` header flag tells the frontend when older messages sit outside the
-  resident window. Reuses the shared per-message body codec
-  (`Minga.Frontend.Adapter.GUI.AgentChatMessageCodec`) so a message encodes
-  byte-identically on both transports.
+  `gui_agent_chat` (0x78) chrome model whose u16 sectioned frame caps its legacy
+  messages section at about 65 KB. The render model owns resident selection. This
+  adapter encodes its `resident_messages` exactly and never selects a suffix,
+  marks content truncated, or drops entries. Reuses the shared per-message body
+  codec (`Minga.Frontend.Adapter.GUI.AgentChatMessageCodec`) so a valid message
+  encodes byte-identically on both transports.
 
   Adopts the #2652 resident-store lifecycle: a full store replace only on genuine
   structural change (`transcript_epoch` flip or a non-prefix divergence such as
   compaction), and id-keyed append/upsert deltas within an epoch for streaming
-  growth, the in-place last-message patch, and cap eviction. Cap eviction never
-  degrades to full_replace-per-frame: the append delta carries `trim_front`, the
-  number of already-evicted leading messages, so over-cap streaming stays bounded
-  and incremental. State for the delta base lives in a
+  growth, the in-place last-message patch, and upstream resident eviction. The
+  append delta carries `trim_front`, the number of leading messages removed by
+  the model. State for the delta base lives in a
   `Minga.Frontend.Adapter.GUI.AgentTranscriptSentState` inside
   `Minga.Frontend.Adapter.GUI.Caches`, never on the BEAM editor state.
 
@@ -29,7 +26,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder do
       version:u8 = 1
       mode:u8            # 0 = full_replace, 1 = append
       epoch:u32
-      truncated:u8       # 1 when older messages sit outside the resident window
+      truncated:u8 = 0   # selection semantics belong to the render model
       # full_replace (mode 0):
       count:u32
       # append (mode 1):
@@ -56,10 +53,11 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder do
     base_count`, i.e. the delta cannot be applied against what the store holds.
   """
 
-  alias Minga.Config
   alias Minga.Frontend.Adapter.GUI.AgentChatMessageCodec, as: Codec
   alias Minga.Frontend.Adapter.GUI.AgentTranscriptSentState, as: SentState
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.EncodingError
+  alias Minga.Frontend.Adapter.GUI.Wire.Writer
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.AgentChat
 
@@ -69,11 +67,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder do
   @mode_full_replace 0
   @mode_append 1
 
-  # Fallback cap when config is unavailable; mirrors the option default.
-  @default_resident_max_bytes 8_388_608
-
-  # Per-entry wire overhead: id:u32 + body_len:u32.
-  @entry_overhead 8
+  @command :gui_agent_transcript
 
   @typep entry :: {non_neg_integer(), binary()}
   @typep key :: SentState.key()
@@ -109,9 +103,8 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder do
   defp encode_changed(epoch, messages, fp, %Caches{} = caches) do
     prev = caches.last_agent_transcript
 
-    full_entries = messages |> Enum.map(&message_entry/1) |> dedupe_last_wins()
-    {entries, dropped} = cap_to_resident_bytes(full_entries)
-    truncated? = dropped > 0
+    validate_unique_message_ids!(messages)
+    entries = Enum.map(messages, &message_entry/1)
     keys = Enum.map(entries, &entry_key/1)
 
     new_caches = %{caches | last_agent_transcript: %SentState{fp: fp, epoch: epoch, keys: keys}}
@@ -121,11 +114,10 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder do
         {nil, new_caches}
 
       {:full_replace, out} ->
-        {build_full_replace(epoch, truncated?, out), new_caches}
+        {build_full_replace(epoch, out), new_caches}
 
       {:append, trim_front, base_count, out} ->
-        log_eviction(trim_front, length(entries), dropped)
-        {build_append(epoch, truncated?, trim_front, base_count, out), new_caches}
+        {build_append(epoch, trim_front, base_count, out), new_caches}
     end
   end
 
@@ -133,7 +125,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder do
 
   # A full store replace only on genuine structural change: epoch flip, no prior
   # base, an emptied transcript, or a non-prefix divergence. Otherwise an
-  # eviction-aware append: `trim_front` accounts for cap eviction of the store
+  # eviction-aware append: `trim_front` accounts for upstream removal from the store
   # front, `base_count` is the unchanged leading count of the remainder, and the
   # suffix from `base_count` is upserted (new messages plus the last-message
   # streaming patch).
@@ -159,7 +151,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder do
   end
 
   # Aligns the previously-sent keys against the new resident keys. The new head
-  # id is located in the previous keys; everything before it was evicted from the
+  # id is located in the previous keys; everything before it was removed from the
   # store front (`trim_front`). The remainder must be an id-prefix of the new keys
   # (pure forward growth); otherwise the transcript diverged (reorder/compaction)
   # and a full_replace is required. Returns the strict `{id, hash}` prefix length
@@ -202,47 +194,82 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder do
 
   # ── Frame building ──
 
-  @spec build_full_replace(non_neg_integer(), boolean(), [entry()]) :: binary()
-  defp build_full_replace(epoch, truncated?, entries) do
-    header = <<@version::8, @mode_full_replace::8, epoch::32, bool(truncated?)::8>>
-    frame([header, <<Enum.count(entries)::32>>, entries_body(entries)])
+  @spec build_full_replace(non_neg_integer(), [entry()]) :: binary()
+  defp build_full_replace(epoch, entries) do
+    payload =
+      Writer.new(@command)
+      |> Writer.uint8(:version, @version)
+      |> Writer.uint8(:mode, @mode_full_replace)
+      |> Writer.uint32(:epoch, epoch)
+      |> Writer.uint8(:truncated, 0)
+      |> Writer.uint32(:message_count, Enum.count(entries))
+      |> Writer.append(entries_body(entries))
+      |> Writer.finish()
+
+    frame(payload)
   end
 
-  @spec build_append(non_neg_integer(), boolean(), non_neg_integer(), non_neg_integer(), [entry()]) ::
+  @spec build_append(non_neg_integer(), non_neg_integer(), non_neg_integer(), [entry()]) ::
           binary()
-  defp build_append(epoch, truncated?, trim_front, base_count, entries) do
-    header = <<@version::8, @mode_append::8, epoch::32, bool(truncated?)::8>>
+  defp build_append(epoch, trim_front, base_count, entries) do
+    payload =
+      Writer.new(@command)
+      |> Writer.uint8(:version, @version)
+      |> Writer.uint8(:mode, @mode_append)
+      |> Writer.uint32(:epoch, epoch)
+      |> Writer.uint8(:truncated, 0)
+      |> Writer.uint32(:trim_front, trim_front)
+      |> Writer.uint32(:base_count, base_count)
+      |> Writer.uint32(:message_count, Enum.count(entries))
+      |> Writer.append(entries_body(entries))
+      |> Writer.finish()
 
-    frame([
-      header,
-      <<trim_front::32, base_count::32, Enum.count(entries)::32>>,
-      entries_body(entries)
-    ])
+    frame(payload)
   end
 
   @spec entries_body([entry()]) :: iodata()
-  defp entries_body(entries) do
-    Enum.map(entries, fn {id, body_bin} ->
-      <<id::32, byte_size(body_bin)::32, body_bin::binary>>
-    end)
+  defp entries_body(entries), do: Enum.map(entries, &encode_entry/1)
+
+  @spec encode_entry(entry()) :: binary()
+  defp encode_entry({id, body}) do
+    Writer.new(@command)
+    |> Writer.uint32(:message_id, id)
+    |> Writer.payload32(:message_body, body)
+    |> Writer.finish()
   end
 
-  @spec frame(iodata()) :: binary()
-  defp frame(payload_iodata) do
-    payload = IO.iodata_to_binary(payload_iodata)
-    <<@op_gui_agent_transcript, byte_size(payload)::32, payload::binary>>
+  @spec frame(binary()) :: binary()
+  defp frame(payload) do
+    Writer.new(@command)
+    |> Writer.uint8(:opcode, @op_gui_agent_transcript)
+    |> Writer.payload32(:payload, payload)
+    |> Writer.finish()
   end
-
-  @spec bool(boolean()) :: 0 | 1
-  defp bool(true), do: 1
-  defp bool(false), do: 0
 
   # ── Message entries ──
 
+  @spec validate_unique_message_ids!([AgentChat.message()]) :: :ok
+  defp validate_unique_message_ids!(messages) do
+    messages
+    |> Enum.map(&Codec.message_id/1)
+    |> Enum.frequencies()
+    |> Enum.each(fn
+      {_id, 1} ->
+        :ok
+
+      {_id, occurrences} ->
+        raise EncodingError,
+          command: @command,
+          field: :message_id_occurrences,
+          actual: occurrences,
+          min: 0,
+          max: 1
+    end)
+  end
+
   @spec message_entry(AgentChat.message()) :: entry()
   defp message_entry(message) do
-    bounded = Codec.bound_message_text(message)
-    {Codec.message_id(bounded), Codec.encode_message_body(message_body(bounded))}
+    {Codec.message_id(message), Codec.encode_message_body(message_body(message))}
   end
 
   @spec message_body(AgentChat.message()) :: AgentChat.message_body()
@@ -251,78 +278,4 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder do
 
   @spec entry_key(entry()) :: key()
   defp entry_key({id, body_bin}), do: {id, :erlang.phash2(body_bin)}
-
-  # Upsert semantics make duplicate ids silent data loss (a later entry clobbers
-  # an earlier one on the frontend), and session ids and enrichment ids have no
-  # cross-generator uniqueness guarantee. Drop earlier duplicates deterministically
-  # (last-wins, preserving order) and log a warning so the collision is visible.
-  @spec dedupe_last_wins([entry()]) :: [entry()]
-  defp dedupe_last_wins(entries) do
-    {kept, _seen, dropped} =
-      entries
-      |> Enum.reverse()
-      |> Enum.reduce({[], MapSet.new(), 0}, fn {id, _} = entry, {acc, seen, dropped} ->
-        if MapSet.member?(seen, id) do
-          {acc, seen, dropped + 1}
-        else
-          {[entry | acc], MapSet.put(seen, id), dropped}
-        end
-      end)
-
-    if dropped > 0 do
-      Minga.Log.warning(
-        :render,
-        "agent transcript: dropped #{dropped} duplicate-id message(s) (last-wins)"
-      )
-    end
-
-    kept
-  end
-
-  # Keep the most recent messages whose cumulative wire size fits the resident
-  # byte cap as a **contiguous suffix**: iterate newest to oldest and halt at the
-  # first entry that does not fit, so a small older message can never leapfrog a
-  # large one back into the resident window and punch a hole. The newest message
-  # is always kept, even if it alone exceeds the cap. Returns the kept suffix (in
-  # order) and the count dropped from the front.
-  @spec cap_to_resident_bytes([entry()]) :: {[entry()], non_neg_integer()}
-  defp cap_to_resident_bytes(entries) do
-    cap = resident_max_bytes()
-
-    {kept, _used} =
-      entries
-      |> Enum.reverse()
-      |> Enum.reduce_while({[], 0}, fn {_id, body_bin} = entry, {acc, used} ->
-        next = used + @entry_overhead + byte_size(body_bin)
-
-        cond do
-          acc == [] -> {:cont, {[entry], next}}
-          next <= cap -> {:cont, {[entry | acc], next}}
-          true -> {:halt, {acc, used}}
-        end
-      end)
-
-    {kept, length(entries) - length(kept)}
-  end
-
-  @spec log_eviction(non_neg_integer(), non_neg_integer(), non_neg_integer()) :: :ok
-  defp log_eviction(0, _resident, _dropped), do: :ok
-
-  defp log_eviction(trim_front, resident, dropped) do
-    Minga.Log.debug(
-      :render,
-      "agent transcript cap evicted #{trim_front} front message(s) this frame " <>
-        "(resident #{resident}, #{dropped} older not shown)"
-    )
-  end
-
-  @spec resident_max_bytes() :: pos_integer()
-  defp resident_max_bytes do
-    case Config.get(:agent_transcript_resident_max_bytes) do
-      n when is_integer(n) and n > 0 -> n
-      _ -> @default_resident_max_bytes
-    end
-  catch
-    :exit, _ -> @default_resident_max_bytes
-  end
 end

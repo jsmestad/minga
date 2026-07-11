@@ -708,7 +708,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       assert levels == <<2, 4, 4, 3, 1>>
     end
 
-    test "indent levels above 255 are clamped to fit uint8 wire format" do
+    test "indent levels above 255 are rejected instead of clamped to fit uint8 wire format" do
       data = %{
         window_id: 1,
         tab_width: 2,
@@ -717,13 +717,18 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
         line_indent_levels: [300, 0, 256, 255]
       }
 
-      binary = encode_indent_guides(data)
+      error =
+        assert_raise Minga.Frontend.Adapter.GUI.EncodingError, fn ->
+          encode_indent_guides(data)
+        end
 
-      <<0x91, _len::16, _win::16, _tw::8, _active::16, _count::8, _col::16, line_count::16,
-        levels::binary>> = binary
-
-      assert line_count == 4
-      assert levels == <<255, 0, 255, 255>>
+      assert %{
+               command: :gui_indent_guides,
+               field: :indent_level,
+               actual: 300,
+               min: 0,
+               max: 255
+             } = error
     end
   end
 

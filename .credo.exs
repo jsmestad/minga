@@ -31,6 +31,7 @@
           {Minga.Credo.NoDirectStateMachineWriteCheck, []},
           {Minga.Credo.NoDirectModalOverlayWriteCheck, []},
           {Minga.Credo.NoRawWorkspaceSnapshotCheck, []},
+          {Minga.Credo.NoLossyGuiEncoderCheck, []},
           {Minga.Credo.CommandRegistrationCheck, []},
 
           # ── Editor responsiveness (epic #2445) ─────────────────────────────

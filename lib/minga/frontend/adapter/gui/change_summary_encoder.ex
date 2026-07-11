@@ -2,7 +2,7 @@ defmodule Minga.Frontend.Adapter.GUI.ChangeSummaryEncoder do
   @moduledoc false
 
   alias Minga.Frontend.Adapter.GUI.Caches
-  alias Minga.Frontend.Adapter.GUI.Wire
+  alias Minga.Frontend.Adapter.GUI.Wire.Writer
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.ChangeSummary
 
@@ -23,38 +23,23 @@ defmodule Minga.Frontend.Adapter.GUI.ChangeSummaryEncoder do
   defp encode_binary(%ChangeSummary{entries: entries, selected_index: selected_index}) do
     visible = if entries == [], do: 0, else: 1
 
-    entry_binaries =
-      Enum.map(entries, fn entry ->
-        path_bytes = :erlang.iolist_to_binary([entry.path])
-        action_byte = action_byte(entry.action)
+    writer =
+      :gui_change_summary
+      |> Writer.new()
+      |> Writer.append(<<@op_gui_change_summary>>)
+      |> Writer.uint8(:visible, visible)
+      |> Writer.uint16(:selected_index, selected_index)
+      |> Writer.uint16(:entry_count, Enum.count(entries))
 
-        Wire.validate_uint!(
-          :gui_change_summary,
-          :path_length,
-          byte_size(path_bytes),
-          Wire.max_u16()
-        )
-
-        Wire.validate_uint!(:gui_change_summary, :lines_added, entry.lines_added, Wire.max_u32())
-
-        Wire.validate_uint!(
-          :gui_change_summary,
-          :lines_removed,
-          entry.lines_removed,
-          Wire.max_u32()
-        )
-
-        <<byte_size(path_bytes)::16, path_bytes::binary, action_byte::8, entry.lines_added::32,
-          entry.lines_removed::32>>
-      end)
-
-    Wire.validate_uint!(:gui_change_summary, :selected_index, selected_index, Wire.max_u16())
-    Wire.validate_uint!(:gui_change_summary, :entry_count, Enum.count(entries), Wire.max_u16())
-
-    IO.iodata_to_binary([
-      <<@op_gui_change_summary, visible::8, selected_index::16, Enum.count(entries)::16>>
-      | entry_binaries
-    ])
+    entries
+    |> Enum.reduce(writer, fn entry, acc ->
+      acc
+      |> Writer.string16(:entry_path, entry.path)
+      |> Writer.uint8(:entry_action, action_byte(entry.action))
+      |> Writer.uint32(:lines_added, entry.lines_added)
+      |> Writer.uint32(:lines_removed, entry.lines_removed)
+    end)
+    |> Writer.finish()
   end
 
   @spec action_byte(ChangeSummary.Entry.action()) :: non_neg_integer()

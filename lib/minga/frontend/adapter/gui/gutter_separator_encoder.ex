@@ -1,9 +1,8 @@
 defmodule Minga.Frontend.Adapter.GUI.GutterSeparatorEncoder do
   @moduledoc false
 
-  import Bitwise
-
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.Wire.Writer
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.GutterSeparator
 
@@ -22,15 +21,11 @@ defmodule Minga.Frontend.Adapter.GUI.GutterSeparatorEncoder do
 
   @spec encode_binary(GutterSeparator.t()) :: binary()
   defp encode_binary(%GutterSeparator{col: col, color_rgb: rgb}) do
-    <<@op_gui_gutter_sep, col::16, red(rgb)::8, green(rgb)::8, blue(rgb)::8>>
+    :gui_gutter_separator
+    |> Writer.new()
+    |> Writer.append(<<@op_gui_gutter_sep>>)
+    |> Writer.uint16(:col, col)
+    |> Writer.rgb24(:color_rgb, rgb)
+    |> Writer.finish()
   end
-
-  @spec red(non_neg_integer()) :: non_neg_integer()
-  defp red(rgb), do: rgb >>> 16 &&& 0xFF
-
-  @spec green(non_neg_integer()) :: non_neg_integer()
-  defp green(rgb), do: rgb >>> 8 &&& 0xFF
-
-  @spec blue(non_neg_integer()) :: non_neg_integer()
-  defp blue(rgb), do: rgb &&& 0xFF
 end

@@ -3,6 +3,7 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoder do
 
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.Wire
+  alias Minga.Frontend.Adapter.GUI.Wire.Writer
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.FileTree
   alias Minga.RenderModel.UI.FileTree.Row
@@ -47,31 +48,48 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoder do
   @spec encode_command(FileTree.t()) :: binary()
   def encode_command(%FileTree{} = model) do
     root = model.root_path || ""
-    error_reason = error_reason(model.status)
+
+    writer =
+      :gui_file_tree
+      |> Writer.new()
+      |> Writer.append(<<2::8>>)
+      |> Writer.uint8(
+        :flags,
+        file_tree_flags(model.status, model.focused?, model.local_navigation?)
+      )
+      |> Writer.uint8(:status, encode_file_tree_status(model.status))
+      |> Writer.string16(:selected_id, model.selected_id)
+      |> Writer.string16(:root_path, root)
+      |> Writer.uint16(:tree_width, model.tree_width)
+      |> Writer.uint16(:row_count, Enum.count(model.rows))
+      |> Writer.string16(:error_reason, error_reason(model.status))
 
     payload =
-      IO.iodata_to_binary([
-        <<2::8, file_tree_flags(model.status, model.focused?, model.local_navigation?)::8,
-          encode_file_tree_status(model.status)::8>>,
-        Wire.encode_string16(model.selected_id),
-        Wire.encode_string16(root),
-        <<model.tree_width::16, Enum.count(model.rows)::16>>,
-        Wire.encode_string16(error_reason),
-        Enum.map(model.rows, &encode_row(&1, root, model))
-      ])
+      model.rows
+      |> Enum.reduce(writer, fn row, acc -> encode_row(row, root, model, acc) end)
+      |> Writer.finish()
 
-    <<@op_gui_file_tree, byte_size(payload)::32, payload::binary>>
+    :gui_file_tree
+    |> Writer.new()
+    |> Writer.append(<<@op_gui_file_tree>>)
+    |> Writer.payload32(:payload, payload)
+    |> Writer.finish()
   end
 
   @spec encode_selection_command(FileTree.t()) :: binary()
   defp encode_selection_command(%FileTree{} = model) do
     payload =
-      IO.iodata_to_binary([
-        <<file_tree_selection_flags(model.focused?)::8>>,
-        Wire.encode_string16(model.selected_id)
-      ])
+      :gui_file_tree_selection
+      |> Writer.new()
+      |> Writer.uint8(:flags, file_tree_selection_flags(model.focused?))
+      |> Writer.string16(:selected_id, model.selected_id)
+      |> Writer.finish()
 
-    <<@op_gui_file_tree_selection, byte_size(payload)::16, payload::binary>>
+    :gui_file_tree_selection
+    |> Writer.new()
+    |> Writer.append(<<@op_gui_file_tree_selection>>)
+    |> Writer.payload16(:payload, payload)
+    |> Writer.finish()
   end
 
   # Reached only for non-row statuses (:loading, :empty, :error). Ready and
@@ -100,41 +118,45 @@ defmodule Minga.Frontend.Adapter.GUI.FileTreeEncoder do
     row
   end
 
-  @spec encode_row(Row.t(), String.t(), FileTree.t()) :: iodata()
-  defp encode_row(%Row{} = row, root, %FileTree{} = model) do
+  @spec encode_row(Row.t(), String.t(), FileTree.t(), Writer.t()) :: Writer.t()
+  defp encode_row(%Row{} = row, root, %FileTree{} = model, %Writer{} = writer) do
     editing_type = if row.editing, do: encode_editing_type(row.editing.type), else: 0xFF
     editing_text = if row.editing, do: row.editing.text, else: ""
-    guides = Enum.map(row.guides, fn guide? -> if guide?, do: <<1>>, else: <<0>> end)
-    {errors, warnings, info, hints} = clamp_diagnostics(row.diagnostics)
-    {icon_r, icon_g, icon_b} = Wire.rgb(row.icon_color)
+    {errors, warnings, info, hints} = row.diagnostics
 
-    [
-      <<:erlang.phash2(row.id, 0xFFFFFFFF)::32, file_tree_row_flags(row, model)::16, row.depth::8,
-        encode_git_status(row.git_status)::8, errors::16, warnings::16, info::16, hints::16,
-        Enum.count(row.guides)::8>>,
-      guides,
-      Wire.encode_string16(row.id),
-      Wire.encode_string16(row.path),
-      Wire.encode_string16(Path.relative_to(row.path, root)),
-      Wire.encode_string16(row.name),
-      Wire.encode_string8(row.icon),
-      <<editing_type::8>>,
-      Wire.encode_string16(editing_text),
-      <<icon_r::8, icon_g::8, icon_b::8>>,
-      <<encode_heat_level(row.heat_level)::8>>
-    ]
+    writer =
+      writer
+      |> Writer.uint32(:row_id_hash, :erlang.phash2(row.id, 0xFFFFFFFF))
+      |> Writer.uint16(:row_flags, file_tree_row_flags(row, model))
+      |> Writer.uint8(:row_depth, row.depth)
+      |> Writer.uint8(:row_git_status, encode_git_status(row.git_status))
+      |> Writer.uint16(:row_diagnostic_errors, errors)
+      |> Writer.uint16(:row_diagnostic_warnings, warnings)
+      |> Writer.uint16(:row_diagnostic_info, info)
+      |> Writer.uint16(:row_diagnostic_hints, hints)
+      |> Writer.uint8(:row_guide_count, Enum.count(row.guides))
+
+    writer =
+      Enum.reduce(row.guides, writer, fn guide?, acc ->
+        Writer.uint8(acc, :row_guide, if(guide?, do: 1, else: 0))
+      end)
+
+    writer
+    |> Writer.string16(:row_id, row.id)
+    |> Writer.string16(:row_path, row.path)
+    |> Writer.string16(:row_relative_path, Path.relative_to(row.path, root))
+    |> Writer.string16(:row_name, row.name)
+    |> Writer.string8(:row_icon, row.icon)
+    |> Writer.uint8(:row_editing_type, editing_type)
+    |> Writer.string16(:row_editing_text, editing_text)
+    |> Writer.rgb24(:row_icon_color, row.icon_color)
+    |> Writer.uint8(:row_heat_level, encode_heat_level(row.heat_level))
   end
 
   # Familiarity/heat bucket 0..4, or 0xFF for "no decoration".
   @spec encode_heat_level(0..4 | nil) :: non_neg_integer()
   defp encode_heat_level(nil), do: 0xFF
   defp encode_heat_level(level) when level in 0..4, do: level
-
-  @spec clamp_diagnostics(Row.diagnostics()) :: Row.diagnostics()
-  defp clamp_diagnostics({errors, warnings, info, hints}) do
-    {Wire.clamp_u16(errors), Wire.clamp_u16(warnings), Wire.clamp_u16(info),
-     Wire.clamp_u16(hints)}
-  end
 
   @spec file_tree_selection_flags(boolean()) :: non_neg_integer()
   defp file_tree_selection_flags(focused?), do: Wire.maybe_flag(0, focused?, 0)

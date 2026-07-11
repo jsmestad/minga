@@ -2,6 +2,7 @@ defmodule Minga.Frontend.Adapter.GUI.SignatureHelpEncoderTest do
   use ExUnit.Case, async: true
 
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.EncodingError
   alias Minga.Frontend.Adapter.GUI.SignatureHelpEncoder
   alias Minga.RenderModel.UI.SignatureHelp
   alias Minga.RenderModel.UI.SignatureHelp.Parameter
@@ -58,36 +59,19 @@ defmodule Minga.Frontend.Adapter.GUI.SignatureHelpEncoderTest do
                ProtocolGUI.encode_gui_signature_help(legacy)
     end
 
-    test "clamps active indexes and counts to protocol byte fields" do
-      parameters =
-        for index <- 1..260 do
-          %Parameter{label: "param-#{index}", documentation: "doc-#{index}"}
-        end
-
-      signatures =
-        for index <- 1..260 do
-          %Signature{label: "sig-#{index}", documentation: "doc-#{index}", parameters: parameters}
-        end
-
+    test "raises instead of clamping active indexes to protocol byte fields" do
       model = %SignatureHelp{
         visible?: true,
         anchor_row: 4,
         anchor_col: 9,
-        active_signature: 300,
-        active_parameter: 300,
-        signatures: signatures
+        active_signature: 256,
+        active_parameter: 0,
+        signatures: []
       }
 
-      <<@op_gui_signature_help, 1, 4::16, 9::16, active_signature::8, active_parameter::8,
-        signature_count::8, first_signature::binary>> = SignatureHelpEncoder.encode_command(model)
-
-      <<label_len::16, _label::binary-size(label_len), doc_len::16, _doc::binary-size(doc_len),
-        parameter_count::8, _rest::binary>> = first_signature
-
-      assert active_signature == 254
-      assert active_parameter == 254
-      assert signature_count == 255
-      assert parameter_count == 255
+      assert_raise EncodingError,
+                   "cannot encode gui_signature_help.active_signature=256; expected 0..255",
+                   fn -> SignatureHelpEncoder.encode_command(model) end
     end
   end
 
