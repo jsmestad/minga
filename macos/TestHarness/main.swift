@@ -15,6 +15,7 @@ import Foundation
 let stdin = FileHandle.standardInput
 let stdout = FileHandle.standardOutput
 let lock = NSLock()
+let emitSelectTab = CommandLine.arguments.contains("--emit-select-tab")
 
 /// Writes a {:packet, 4} framed message to stdout.
 func writeFramed(_ data: Data) {
@@ -94,10 +95,9 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
              "is_agent": tab.isAgent, "has_attention": tab.hasAttention,
              "agent_status": Int(tab.agentStatus)]
         }
-        // If there are 2+ tabs, auto-send a select_tab gui_action for the
-        // second tab. This enables round-trip testing: BEAM sends gui_tab_bar,
-        // harness decodes it and sends gui_action select_tab back.
-        if tabs.count >= 2 {
+        // The bidirectional protocol test explicitly opts in to this synthetic action.
+        // Ordinary decode tests must leave no input event for a later response to consume.
+        if emitSelectTab && tabs.count >= 2 {
             let secondTabId = tabs[1].id
             sendSelectTab(id: secondTabId)
         }

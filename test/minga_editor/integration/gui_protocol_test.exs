@@ -19,6 +19,7 @@ defmodule Minga.Integration.GUIProtocolTest do
   alias Minga.RenderModel.UI.AgentChat.ToolCallView
   alias Minga.RenderModel.UI.Completion
   alias Minga.RenderModel.UI.Picker, as: PickerModel
+  alias Minga.Test.GUIHarness
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.RenderModel.UI.BreadcrumbBuilder
 
@@ -26,30 +27,17 @@ defmodule Minga.Integration.GUIProtocolTest do
 
   @moduletag :swift_harness
 
-  setup do
+  setup_all do
     unless File.exists?(@harness_path) do
       flunk("Test harness not found at #{@harness_path}. Run: mix swift.harness")
     end
 
-    port = Port.open({:spawn_executable, @harness_path}, [:binary, {:packet, 4}])
-
-    # Wait for the ready signal from the harness.
-    assert_receive {^port, {:data, ready_json}}, 5_000
-    assert %{"type" => "ready"} = JSON.decode!(ready_json)
-
-    on_exit(fn ->
-      if Port.info(port) != nil do
-        Port.close(port)
-      end
-    end)
-
-    %{port: port}
+    {:ok, harness} = start_supervised({GUIHarness, path: @harness_path})
+    %{harness: harness}
   end
 
-  defp round_trip(port, command) do
-    Port.command(port, command)
-    assert_receive {^port, {:data, json}}, 5_000
-    JSON.decode!(json)
+  defp round_trip(harness, command, expected_type) do
+    GUIHarness.round_trip!(harness, command, expected_type)
   end
 
   # Encodes an agent chat through the core semantic encoder, accepting the legacy
@@ -82,13 +70,11 @@ defmodule Minga.Integration.GUIProtocolTest do
   end
 
   describe "GUI chrome opcode round-trip" do
-    test "gui_theme encodes and decodes correctly", %{port: port} do
+    test "gui_theme encodes and decodes correctly", %{harness: harness} do
       theme = MingaEditor.UI.Theme.get!(:doom_one)
       cmd = ProtocolGUI.encode_gui_theme(theme)
 
-      Port.command(port, cmd)
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = JSON.decode!(json)
+      decoded = round_trip(harness, cmd, "gui_theme")
 
       assert decoded["type"] == "gui_theme"
       assert is_list(decoded["slots"])
@@ -102,16 +88,13 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert is_integer(editor_bg_slot["b"])
     end
 
-    test "gui_tab_bar encodes and decodes correctly", %{port: port} do
+    test "gui_tab_bar encodes and decodes correctly", %{harness: harness} do
       tab1 = %MingaEditor.State.Tab{id: 1, kind: :file, label: "editor.ex"}
       tab2 = %MingaEditor.State.Tab{id: 2, kind: :agent, label: "Agent", agent_status: :thinking}
       tb = %MingaEditor.State.TabBar{tabs: [tab1, tab2], active_id: 1, next_id: 3}
 
       cmd = ProtocolGUI.encode_gui_tab_bar(tb)
-      Port.command(port, cmd)
-
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = JSON.decode!(json)
+      decoded = round_trip(harness, cmd, "gui_tab_bar")
 
       assert decoded["type"] == "gui_tab_bar"
       assert decoded["active_index"] == 0
@@ -124,21 +107,19 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert t1["is_agent"] == false
     end
 
-    test "gui_breadcrumb encodes and decodes correctly", %{port: port} do
+    test "gui_breadcrumb encodes and decodes correctly", %{harness: harness} do
       model =
         BreadcrumbBuilder.build("/home/user/project/lib/foo.ex", "/home/user/project")
 
       {cmd, _caches} = BreadcrumbEncoder.encode(model, Caches.new())
 
-      Port.command(port, cmd)
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = JSON.decode!(json)
+      decoded = round_trip(harness, cmd, "gui_breadcrumb")
 
       assert decoded["type"] == "gui_breadcrumb"
       assert decoded["segments"] == ["lib", "foo.ex"]
     end
 
-    test "gui_status_bar buffer variant encodes and decodes correctly", %{port: port} do
+    test "gui_status_bar buffer variant encodes and decodes correctly", %{harness: harness} do
       data =
         {:buffer,
          %{
@@ -174,9 +155,7 @@ defmodule Minga.Integration.GUIProtocolTest do
          }}
 
       cmd = ProtocolGUI.encode_gui_status_bar(data)
-      Port.command(port, cmd)
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = JSON.decode!(json)
+      decoded = round_trip(harness, cmd, "gui_status_bar")
 
       assert decoded["type"] == "gui_status_bar"
       # content_kind 0 = buffer
@@ -215,7 +194,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["selection_size"] == 42
     end
 
-    test "gui_status_bar agent variant encodes and decodes correctly", %{port: port} do
+    test "gui_status_bar agent variant encodes and decodes correctly", %{harness: harness} do
       data =
         {:agent,
          %{
@@ -251,9 +230,7 @@ defmodule Minga.Integration.GUIProtocolTest do
          }}
 
       cmd = ProtocolGUI.encode_gui_status_bar(data)
-      Port.command(port, cmd)
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = JSON.decode!(json)
+      decoded = round_trip(harness, cmd, "gui_status_bar")
 
       assert decoded["type"] == "gui_status_bar"
       # content_kind 1 = agent
@@ -283,7 +260,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["selection_size"] == 3
     end
 
-    test "gui_agent_chat visible with messages", %{port: port} do
+    test "gui_agent_chat visible with messages", %{harness: harness} do
       data = %{
         visible: true,
         messages: [{:user, "hello"}, {:assistant, "hi there"}],
@@ -294,9 +271,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       }
 
       cmd = encode_gui_agent_chat(data)
-      Port.command(port, cmd)
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = JSON.decode!(json)
+      decoded = round_trip(harness, cmd, "gui_agent_chat")
 
       assert decoded["type"] == "gui_agent_chat"
       assert decoded["visible"] == true
@@ -311,7 +286,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert msg2["text"] == "hi there"
     end
 
-    test "gui_agent_chat with styled_tool_call round-trips", %{port: port} do
+    test "gui_agent_chat with styled_tool_call round-trips", %{harness: harness} do
       tc = %ToolCallView{
         name: "bash",
         status: :complete,
@@ -337,9 +312,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       }
 
       cmd = encode_gui_agent_chat(data)
-      Port.command(port, cmd)
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = JSON.decode!(json)
+      decoded = round_trip(harness, cmd, "gui_agent_chat")
 
       assert decoded["type"] == "gui_agent_chat"
       assert decoded["visible"] == true
@@ -363,7 +336,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert run2["bold"] == false
     end
 
-    test "gui_agent_chat with regular tool_call round-trips", %{port: port} do
+    test "gui_agent_chat with regular tool_call round-trips", %{harness: harness} do
       tc = %ToolCallView{
         name: "read_file",
         status: :running,
@@ -384,9 +357,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       }
 
       cmd = encode_gui_agent_chat(data)
-      Port.command(port, cmd)
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = JSON.decode!(json)
+      decoded = round_trip(harness, cmd, "gui_agent_chat")
 
       assert decoded["type"] == "gui_agent_chat"
       assert Enum.count(decoded["messages"]) == 1
@@ -399,7 +370,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert msg["result"] == "file content here"
     end
 
-    test "gui_agent_chat with help overlay round-trips", %{port: port} do
+    test "gui_agent_chat with help overlay round-trips", %{harness: harness} do
       data = %{
         visible: true,
         messages: [],
@@ -415,9 +386,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       }
 
       cmd = encode_gui_agent_chat(data)
-      Port.command(port, cmd)
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = JSON.decode!(json)
+      decoded = round_trip(harness, cmd, "gui_agent_chat")
 
       assert decoded["type"] == "gui_agent_chat"
       assert decoded["help_visible"] == true
@@ -438,7 +407,9 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert hd(copy["bindings"])["key"] == "y"
     end
 
-    test "gui_agent_chat without help data round-trips with help_visible=false", %{port: port} do
+    test "gui_agent_chat without help data round-trips with help_visible=false", %{
+      harness: harness
+    } do
       data = %{
         visible: true,
         messages: [],
@@ -449,9 +420,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       }
 
       cmd = encode_gui_agent_chat(data)
-      Port.command(port, cmd)
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = JSON.decode!(json)
+      decoded = round_trip(harness, cmd, "gui_agent_chat")
 
       assert decoded["type"] == "gui_agent_chat"
       assert decoded["help_visible"] == false
@@ -459,48 +428,10 @@ defmodule Minga.Integration.GUIProtocolTest do
     end
   end
 
-  describe "round-trip: BEAM encode → harness decode → harness sends gui_action → BEAM receives" do
-    test "tab bar triggers harness to send select_tab gui_action back", %{port: port} do
-      alias MingaEditor.Frontend.Protocol
-
-      # and automatically send a gui_action select_tab for the second tab.
-      tab1 = %MingaEditor.State.Tab{id: 1, kind: :file, label: "main.ex"}
-      tab2 = %MingaEditor.State.Tab{id: 2, kind: :file, label: "test.ex"}
-      tb = %MingaEditor.State.TabBar{tabs: [tab1, tab2], active_id: 1, next_id: 3}
-
-      cmd = ProtocolGUI.encode_gui_tab_bar(tb)
-      Port.command(port, cmd)
-
-      # (a) The JSON report of the decoded gui_tab_bar
-      # (b) The raw gui_action binary (select_tab for tab id=2)
-      # Order may vary, so collect both.
-      messages =
-        Enum.map(1..2, fn _ ->
-          assert_receive {^port, {:data, data}}, 5_000
-          data
-        end)
-
-      # Find the JSON report.
-      json_msg = Enum.find(messages, fn d -> String.starts_with?(d, "{") end)
-      assert json_msg != nil
-      tab_decoded = JSON.decode!(json_msg)
-      assert tab_decoded["type"] == "gui_tab_bar"
-      assert Enum.count(tab_decoded["tabs"]) == 2
-
-      # Find the gui_action binary and decode it on the BEAM side.
-      action_msg = Enum.find(messages, fn d -> not String.starts_with?(d, "{") end)
-      assert action_msg != nil
-      assert {:ok, {:gui_action, {:select_tab, 2}}} = Protocol.decode_event(action_msg)
-    end
-  end
-
   describe "gui_gutter_separator" do
-    test "round-trips gutter separator col and color", %{port: port} do
+    test "round-trips gutter separator col and color", %{harness: harness} do
       cmd = <<Opcodes.gui_gutter_sep(), 4::16, 0x3F, 0x44, 0x4A>>
-      Port.command(port, cmd)
-
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = JSON.decode!(json)
+      decoded = round_trip(harness, cmd, "gui_gutter_separator")
 
       assert decoded["type"] == "gui_gutter_separator"
       assert decoded["col"] == 4
@@ -511,7 +442,7 @@ defmodule Minga.Integration.GUIProtocolTest do
   end
 
   describe "hidden GUI chrome commands" do
-    test "round-trip visible false for hidden overlays", %{port: port} do
+    test "round-trip visible false for hidden overlays", %{harness: harness} do
       alias Minga.Frontend.Adapter.GUI.BottomPanelEncoder
       alias Minga.Frontend.Adapter.GUI.Caches
       alias Minga.RenderModel.UI.BottomPanel
@@ -529,7 +460,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       ]
 
       for {type, command} <- cases do
-        decoded = round_trip(port, command)
+        decoded = round_trip(harness, command, type)
 
         assert decoded["type"] == type
         assert decoded["visible"] == false
@@ -538,7 +469,7 @@ defmodule Minga.Integration.GUIProtocolTest do
   end
 
   describe "gui_gutter" do
-    test "round-trips gutter with entries", %{port: port} do
+    test "round-trips gutter with entries", %{harness: harness} do
       alias Minga.RenderModel.Window
       alias Minga.RenderModel.Window.Gutter
       alias Minga.RenderModel.Window.GutterEntry
@@ -575,10 +506,7 @@ defmodule Minga.Integration.GUIProtocolTest do
           opcode == Opcodes.gui_gutter()
         end)
 
-      Port.command(port, cmd)
-
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = JSON.decode!(json)
+      decoded = round_trip(harness, cmd, "gui_gutter")
 
       assert decoded["type"] == "gui_gutter"
       assert decoded["window_id"] == 1
@@ -604,7 +532,7 @@ defmodule Minga.Integration.GUIProtocolTest do
   end
 
   describe "gui_completion visible" do
-    test "round-trips visible completion with items", %{port: port} do
+    test "round-trips visible completion with items", %{harness: harness} do
       comp = %Minga.Editing.Completion{
         items: [],
         filtered: [
@@ -659,10 +587,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       }
 
       cmd = CompletionEncoder.encode_command(model)
-      Port.command(port, cmd)
-
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = JSON.decode!(json)
+      decoded = round_trip(harness, cmd, "gui_completion")
 
       assert decoded["type"] == "gui_completion"
       assert decoded["visible"] == true
@@ -676,7 +601,7 @@ defmodule Minga.Integration.GUIProtocolTest do
   end
 
   describe "gui_which_key visible" do
-    test "round-trips visible which-key with bindings", %{port: port} do
+    test "round-trips visible which-key with bindings", %{harness: harness} do
       # Build raw binary: visible=1, prefix="SPC", page=0, pageCount=2, 2 bindings
       prefix = "SPC"
 
@@ -690,10 +615,7 @@ defmodule Minga.Integration.GUIProtocolTest do
         <<0x72, 1::8, byte_size(prefix)::16, prefix::binary, 0::8, 2::8, 2::16, binding1::binary,
           binding2::binary>>
 
-      Port.command(port, cmd)
-
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = JSON.decode!(json)
+      decoded = round_trip(harness, cmd, "gui_which_key")
 
       assert decoded["type"] == "gui_which_key"
       assert decoded["visible"] == true
@@ -713,7 +635,7 @@ defmodule Minga.Integration.GUIProtocolTest do
   end
 
   describe "gui_picker visible" do
-    test "round-trips visible picker with items", %{port: port} do
+    test "round-trips visible picker with items", %{harness: harness} do
       # The production PickerBuilder normalizes a filtered legacy picker into
       # this wire-shaped RenderModel.UI.Picker (flags packed: marked => bit 1 =>
       # 2; query "edi" re-derives match_positions [0, 1, 2] against "editor.ex").
@@ -743,10 +665,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       }
 
       cmd = PickerEncoder.encode_command(model)
-      Port.command(port, cmd)
-
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = JSON.decode!(json)
+      decoded = round_trip(harness, cmd, "gui_picker")
 
       assert decoded["type"] == "gui_picker"
       assert decoded["visible"] == true
@@ -766,7 +685,7 @@ defmodule Minga.Integration.GUIProtocolTest do
   end
 
   describe "gui_picker_preview visible" do
-    test "round-trips visible preview with styled lines", %{port: port} do
+    test "round-trips visible preview with styled lines", %{harness: harness} do
       # Line 1: 2 segments
       seg1 = <<0x51, 0xAF, 0xEF, 0x01, 4::16, "def "::binary>>
       seg2 = <<0xEC, 0xBE, 0x7B, 0x00, 5::16, "hello"::binary>>
@@ -776,10 +695,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       cmd =
         <<0x7D, 1::8, 2::16, 2::8, seg1::binary, seg2::binary, 1::8, seg3::binary>>
 
-      Port.command(port, cmd)
-
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = JSON.decode!(json)
+      decoded = round_trip(harness, cmd, "gui_picker_preview")
 
       assert decoded["type"] == "gui_picker_preview"
       assert decoded["visible"] == true
@@ -796,7 +712,7 @@ defmodule Minga.Integration.GUIProtocolTest do
   end
 
   describe "gui_bottom_panel visible" do
-    test "round-trips visible bottom panel with tabs and entries", %{port: port} do
+    test "round-trips visible bottom panel with tabs and entries", %{harness: harness} do
       # Tab: type=0 (messages), name="Messages"
       tab = <<0::8, 8::8, "Messages"::binary>>
 
@@ -812,10 +728,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       cmd =
         <<0x7C, 1::8, 0::8, 30::8, 0::8, 1::8, tab::binary, 7::32, 1::16, entry::binary>>
 
-      Port.command(port, cmd)
-
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = JSON.decode!(json)
+      decoded = round_trip(harness, cmd, "gui_bottom_panel")
 
       assert decoded["type"] == "gui_bottom_panel"
       assert decoded["visible"] == true
@@ -833,7 +746,7 @@ defmodule Minga.Integration.GUIProtocolTest do
   end
 
   describe "gui_tool_manager visible" do
-    test "round-trips visible tool manager with tools", %{port: port} do
+    test "round-trips visible tool manager with tools", %{harness: harness} do
       # Tool: name_len(1)+name, label_len(1)+label, desc_len(2)+desc,
       #       category(1)+status(1)+method(1)+lang_count(1),
       #       lang_len(1)+lang, version_len(1)+version,
@@ -855,10 +768,7 @@ defmodule Minga.Integration.GUIProtocolTest do
 
       cmd = <<0x7E, 1::8, 0::8, 0::16, 1::16, tool::binary>>
 
-      Port.command(port, cmd)
-
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = JSON.decode!(json)
+      decoded = round_trip(harness, cmd, "gui_tool_manager")
 
       assert decoded["type"] == "gui_tool_manager"
       assert decoded["visible"] == true
@@ -877,7 +787,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert t["provides"] == ["elixir-ls"]
     end
 
-    test "round-trips failed tool with error reason", %{port: port} do
+    test "round-trips failed tool with error reason", %{harness: harness} do
       error = "No matching asset for darwin_arm64"
 
       tool =
@@ -885,18 +795,14 @@ defmodule Minga.Integration.GUIProtocolTest do
           0::8, 0::8, ""::binary, 0::16, ""::binary, 0::8, byte_size(error)::16, error::binary>>
 
       cmd = <<0x7E, 1::8, 0::8, 0::16, 1::16, tool::binary>>
-
-      Port.command(port, cmd)
-
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = JSON.decode!(json)
+      decoded = round_trip(harness, cmd, "gui_tool_manager")
 
       t = hd(decoded["tools"])
       assert t["status"] == 4
       assert t["error_reason"] == "No matching asset for darwin_arm64"
     end
 
-    test "encodes failed tool error_reason through Elixir encoder", %{port: port} do
+    test "encodes failed tool error_reason through Elixir encoder", %{harness: harness} do
       tool = %{
         name: :pyrite,
         label: "Pyrite",
@@ -919,10 +825,7 @@ defmodule Minga.Integration.GUIProtocolTest do
           tools: [tool]
         })
 
-      Port.command(port, cmd)
-
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = JSON.decode!(json)
+      decoded = round_trip(harness, cmd, "gui_tool_manager")
 
       t = hd(decoded["tools"])
       assert t["status"] == 4
@@ -931,7 +834,7 @@ defmodule Minga.Integration.GUIProtocolTest do
   end
 
   describe "gui_file_tree visible" do
-    test "round-trips semantic visible file tree with entries", %{port: port} do
+    test "round-trips semantic visible file tree with entries", %{harness: harness} do
       root = "/project"
 
       rows = [
@@ -971,10 +874,12 @@ defmodule Minga.Integration.GUIProtocolTest do
         )
       ]
 
-      Port.command(port, ProtocolGUI.encode_gui_file_tree(root, 30, :ready, true, rows))
-
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = JSON.decode!(json)
+      decoded =
+        round_trip(
+          harness,
+          ProtocolGUI.encode_gui_file_tree(root, 30, :ready, true, rows),
+          "gui_file_tree"
+        )
 
       assert decoded["type"] == "gui_file_tree"
       assert decoded["version"] == 2
@@ -1011,8 +916,13 @@ defmodule Minga.Integration.GUIProtocolTest do
   end
 
   describe "gui_cursorline" do
-    test "round-trips visible and hidden cursorline states", %{port: port} do
-      decoded = round_trip(port, <<Opcodes.gui_cursorline(), 12::16, 0x2C, 0x32, 0x3C>>)
+    test "round-trips visible and hidden cursorline states", %{harness: harness} do
+      decoded =
+        round_trip(
+          harness,
+          <<Opcodes.gui_cursorline(), 12::16, 0x2C, 0x32, 0x3C>>,
+          "gui_cursorline"
+        )
 
       assert decoded["type"] == "gui_cursorline"
       assert decoded["row"] == 12
@@ -1020,7 +930,8 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["g"] == 0x32
       assert decoded["b"] == 0x3C
 
-      decoded = round_trip(port, <<Opcodes.gui_cursorline(), 0xFFFF::16, 0, 0, 0>>)
+      decoded =
+        round_trip(harness, <<Opcodes.gui_cursorline(), 0xFFFF::16, 0, 0, 0>>, "gui_cursorline")
 
       assert decoded["type"] == "gui_cursorline"
       assert decoded["row"] == 0xFFFF
@@ -1031,7 +942,7 @@ defmodule Minga.Integration.GUIProtocolTest do
   end
 
   describe "gui_window_content" do
-    test "round-trips window content with rows, selection, and diagnostics", %{port: port} do
+    test "round-trips window content with rows, selection, and diagnostics", %{harness: harness} do
       alias Minga.RenderModel.Window
       alias Minga.RenderModel.Window.{DiagnosticRange, Row, Selection, Span}
 
@@ -1077,10 +988,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       }
 
       cmd = WindowEncoder.encode_window_content(sw)
-      Port.command(port, cmd)
-
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = JSON.decode!(json)
+      decoded = round_trip(harness, cmd, "gui_window_content")
 
       assert decoded["type"] == "gui_window_content"
       assert decoded["window_id"] == 7
@@ -1107,23 +1015,23 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["diagnostic_count"] == 1
     end
 
-    test "round-trips a large full row through the viewport delta", %{port: port} do
+    test "round-trips a large full row through the viewport delta", %{harness: harness} do
       assert_large_delta_row_round_trip(
-        port,
+        harness,
         &WindowEncoder.encode_viewport_delta/2,
         "gui_window_viewport_delta"
       )
     end
 
-    test "round-trips a large full row through the rows delta", %{port: port} do
+    test "round-trips a large full row through the rows delta", %{harness: harness} do
       assert_large_delta_row_round_trip(
-        port,
+        harness,
         &WindowEncoder.encode_rows_delta/2,
         "gui_window_rows_delta"
       )
     end
 
-    test "round-trips rows delta with ref and full entries", %{port: port} do
+    test "round-trips rows delta with ref and full entries", %{harness: harness} do
       alias Minga.RenderModel.Window
       alias Minga.RenderModel.Window.Row
 
@@ -1161,10 +1069,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       {cmd, true} =
         WindowEncoder.encode_rows_delta(window, %{retained.row_id => retained.content_hash})
 
-      Port.command(port, cmd)
-
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = JSON.decode!(json)
+      decoded = round_trip(harness, cmd, "gui_window_rows_delta")
 
       assert decoded["type"] == "gui_window_rows_delta"
       assert decoded["window_id"] == 7
@@ -1180,11 +1085,11 @@ defmodule Minga.Integration.GUIProtocolTest do
   end
 
   @spec assert_large_delta_row_round_trip(
-          port(),
+          GenServer.server(),
           (Minga.RenderModel.Window.t(), map() -> {binary(), boolean()}),
           String.t()
         ) :: :ok
-  defp assert_large_delta_row_round_trip(port, encode_delta, expected_type) do
+  defp assert_large_delta_row_round_trip(harness, encode_delta, expected_type) do
     alias Minga.RenderModel.Window
     alias Minga.RenderModel.Window.Row
 
@@ -1222,7 +1127,7 @@ defmodule Minga.Integration.GUIProtocolTest do
     assert byte_size(rows_payload) > 65_535
     assert row_text == text
 
-    decoded = round_trip(port, command)
+    decoded = round_trip(harness, command, expected_type)
     assert decoded["type"] == expected_type
     assert [%{"entry_type" => "full", "text" => ^text}] = decoded["rows"]
     :ok

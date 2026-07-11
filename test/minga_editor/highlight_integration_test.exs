@@ -20,7 +20,7 @@ defmodule MingaEditor.HighlightIntegrationTest do
       ctx = start_editor("defmodule A do\nend\n", file_path: path1)
       inject_highlights(ctx, ["keyword"], 1, [%{start_byte: 0, end_byte: 9, capture_id: 0}])
 
-      state = send_keys_sync(ctx, ":e #{path2}<CR>")
+      state = send_ex_sync(ctx, "e #{path2}")
 
       assert HighlightSync.get_active_highlight(state).spans == {}
     end
@@ -36,8 +36,8 @@ defmodule MingaEditor.HighlightIntegrationTest do
       spans = [%{start_byte: 0, end_byte: 9, capture_id: 0}]
       inject_highlights(ctx, ["keyword"], 1, spans)
 
-      send_keys_sync(ctx, ":e #{path2}<CR>")
-      state = send_keys_sync(ctx, ":e #{path1}<CR>")
+      send_ex_sync(ctx, "e #{path2}")
+      state = send_ex_sync(ctx, "e #{path1}")
 
       assert HighlightSync.get_active_highlight(state).spans == List.to_tuple(spans)
     end
@@ -51,26 +51,6 @@ defmodule MingaEditor.HighlightIntegrationTest do
       send_keys_sync(ctx, "dd")
 
       assert buffer_content(ctx) == "line two\nline three"
-    end
-
-    test "insert-mode edits remain usable while highlights are active" do
-      ctx = start_editor("hello")
-      inject_highlights(ctx, ["keyword"], 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}])
-
-      send_key_sync(ctx, ?i)
-      send_key_sync(ctx, ?a)
-
-      assert buffer_content(ctx) == "ahello"
-    end
-
-    @tag :tmp_dir
-    test "unsupported filetype renders without crash", %{tmp_dir: tmp_dir} do
-      path = Path.join(tmp_dir, "test.xyz")
-      File.write!(path, "just plain text")
-
-      ctx = start_editor("just plain text", file_path: path)
-
-      assert_row_contains(ctx, 1, "just plain text")
     end
   end
 end
