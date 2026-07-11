@@ -10,6 +10,8 @@ defmodule MingaAgent.Tools.SubagentTest do
   alias MingaAgent.SessionManager
   alias MingaAgent.Subagent.Handle
   alias MingaAgent.Tools.Subagent
+  alias Minga.Test.SubagentWorktreeBackend
+  alias Minga.Test.SubagentWorktreeProvider
   alias ReqLLM.StreamResponse.MetadataHandle
   alias ReqLLM.StreamChunk
 
@@ -112,64 +114,6 @@ defmodule MingaAgent.Tools.SubagentTest do
     def notify(trigger, message, test_pid) do
       send(test_pid, {:notified, trigger, message})
       :ok
-    end
-  end
-
-  defmodule WorktreeProvider do
-    @behaviour MingaAgent.Provider
-
-    use GenServer
-
-    @impl MingaAgent.Provider
-    def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
-
-    @impl MingaAgent.Provider
-    def send_prompt(pid, text), do: GenServer.call(pid, {:prompt, text})
-
-    @impl MingaAgent.Provider
-    def abort(_pid), do: :ok
-
-    @impl MingaAgent.Provider
-    def new_session(_pid), do: :ok
-
-    @impl MingaAgent.Provider
-    def seed_messages(_pid, _messages), do: :ok
-
-    @impl MingaAgent.Provider
-    def get_state(_pid), do: {:ok, %{model: nil, is_streaming: false, token_usage: nil}}
-
-    @impl GenServer
-    def init(opts),
-      do:
-        {:ok,
-         %{
-           subscriber: Keyword.fetch!(opts, :subscriber),
-           project_root: Keyword.fetch!(opts, :project_root)
-         }}
-
-    @impl GenServer
-    def handle_call({:prompt, "write"}, _from, state) do
-      File.write!(Path.join(state.project_root, "child.txt"), "from child\n")
-      finish(state, "wrote file")
-    end
-
-    def handle_call({:prompt, "write-error"}, _from, state) do
-      File.write!(Path.join(state.project_root, "child.txt"), "from child\n")
-      send(state.subscriber, {:agent_provider_event, %Event.AgentStart{}})
-      send(state.subscriber, {:agent_provider_event, %Event.Error{message: "failed after write"}})
-      {:reply, :ok, state}
-    end
-
-    def handle_call({:prompt, _text}, _from, state) do
-      finish(state, "no changes")
-    end
-
-    @spec finish(map(), String.t()) :: {:reply, :ok, map()}
-    defp finish(state, text) do
-      send(state.subscriber, {:agent_provider_event, %Event.AgentStart{}})
-      send(state.subscriber, {:agent_provider_event, %Event.TextDelta{delta: text}})
-      send(state.subscriber, {:agent_provider_event, %Event.AgentEnd{usage: nil}})
-      {:reply, :ok, state}
     end
   end
 
@@ -315,21 +259,8 @@ defmodule MingaAgent.Tools.SubagentTest do
 
   # ── Setup ──────────────────────────────────────────────────────────────────
 
-  setup do
-    name = :"subagent_manager_#{System.unique_integer([:positive])}"
-    {:ok, manager} = GenServer.start(SessionManager, [], name: name)
-
-    on_exit(fn ->
-      manager
-      |> GenServer.call(:list_sessions)
-      |> Enum.each(fn {session_id, _pid, _meta} ->
-        GenServer.call(manager, {:stop_session, session_id})
-      end)
-
-      GenServer.stop(manager)
-    end)
-
-    %{manager: manager}
+  setup context do
+    if context[:session_manager], do: start_session_manager(), else: :ok
   end
 
   # ── Background subagent tests ──────────────────────────────────────────────
@@ -488,6 +419,7 @@ defmodule MingaAgent.Tools.SubagentTest do
     assert message =~ ":not_found"
   end
 
+  @tag :session_manager
   test "background subagent returns a stable handle before the child finishes", %{
     manager: manager
   } do
@@ -525,6 +457,7 @@ defmodule MingaAgent.Tools.SubagentTest do
     assert_eventually_idle(child_pid)
   end
 
+  @tag :session_manager
   test "parent session remains usable while background child is running", %{manager: manager} do
     {:ok, _parent_id, parent_pid} =
       SessionManager.start_session(manager,
@@ -553,6 +486,7 @@ defmodule MingaAgent.Tools.SubagentTest do
            )
   end
 
+  @tag :session_manager
   test "background child result remains available in child chat", %{manager: manager} do
     {:ok, _result} =
       Subagent.execute("write result",
@@ -571,6 +505,7 @@ defmodule MingaAgent.Tools.SubagentTest do
     assert Enum.any?(Session.messages(handle.pid), &(&1 == {:assistant, "saved answer"}))
   end
 
+  @tag :session_manager
   test "background child error remains available in child chat and notifies once", %{
     manager: manager
   } do
@@ -594,6 +529,7 @@ defmodule MingaAgent.Tools.SubagentTest do
     assert Enum.any?(Session.messages(handle.pid), &(&1 == {:system, "boom", :error}))
   end
 
+  @tag :session_manager
   test "background child completion notifies once", %{manager: manager} do
     {:ok, _result} =
       Subagent.execute("notify",
@@ -614,6 +550,7 @@ defmodule MingaAgent.Tools.SubagentTest do
     refute_receive {:notified, :complete, _}, 50
   end
 
+  @tag :session_manager
   test "background native subagent rejects destructive tools immediately without an approval driver",
        %{
          manager: manager,
@@ -676,32 +613,33 @@ defmodule MingaAgent.Tools.SubagentTest do
   end
 
   test "worktree-isolated subagent preserves a changed worktree", %{tmp_dir: dir} do
-    root = init_git_repo!(dir)
+    root = fake_git_root!(dir)
 
     assert {:ok, result} =
              Subagent.execute("write",
                isolation: "worktree",
                project_root: root,
-               provider: WorktreeProvider,
-               provider_opts: [project_root: root]
+               provider: SubagentWorktreeProvider,
+               worktree_backend: SubagentWorktreeBackend,
+               worktree_backend_opts: fake_worktree_opts(root)
              )
 
     assert result =~ "wrote file"
     assert [_, worktree_path] = Regex.run(~r/Worktree: (.+)/, result)
-    assert [_, branch] = Regex.run(~r/Branch: (.+)/, result)
-    assert branch =~ "subagent/"
+    assert [_, "subagent/" <> _id] = Regex.run(~r/Branch: (.+)/, result)
     assert File.read!(Path.join(worktree_path, "child.txt")) == "from child\n"
     refute File.exists?(Path.join(root, "child.txt"))
-    assert File.exists?(worktree_path)
   end
 
   test "worktree-isolated native subagent auto-approves destructive tools", %{tmp_dir: dir} do
-    root = init_git_repo!(dir)
+    root = fake_git_root!(dir)
 
     assert {:ok, result} =
              Subagent.execute("write through native tool",
                isolation: "worktree",
                project_root: root,
+               worktree_backend: SubagentWorktreeBackend,
+               worktree_backend_opts: fake_worktree_opts(root),
                provider: MingaAgent.Providers.Native,
                model: "anthropic:claude-sonnet-4-20250514",
                provider_opts: [
@@ -717,56 +655,88 @@ defmodule MingaAgent.Tools.SubagentTest do
   end
 
   test "worktree-isolated subagent removes a clean no-op worktree", %{tmp_dir: dir} do
-    root = init_git_repo!(dir)
-    sibling_before = sibling_worktrees(root)
+    root = fake_git_root!(dir)
 
     assert {:ok, "no changes"} =
              Subagent.execute("noop",
                isolation: "worktree",
                project_root: root,
-               provider: WorktreeProvider
+               provider: SubagentWorktreeProvider,
+               worktree_backend: SubagentWorktreeBackend,
+               worktree_backend_opts: fake_worktree_opts(root)
              )
 
-    assert sibling_worktrees(root) == sibling_before
-    assert git_lines(root, ["branch", "--list", "subagent/*"]) == []
+    assert_receive {:worktree_command, ^root,
+                    ["worktree", "add", "-b", branch, worktree_path, "test-base-sha"]}
+
+    assert_receive {:worktree_command, ^root, ["worktree", "remove", "--force", ^worktree_path]}
+
+    assert_receive {:worktree_command, ^root, ["branch", "-D", ^branch]}
+    refute File.exists?(worktree_path)
+  end
+
+  test "worktree-isolated subagent preserves the child when cleanliness inspection fails", %{
+    tmp_dir: dir
+  } do
+    root = fake_git_root!(dir)
+
+    assert {:ok, result} =
+             Subagent.execute("noop",
+               isolation: "worktree",
+               project_root: root,
+               provider: SubagentWorktreeProvider,
+               worktree_backend: SubagentWorktreeBackend,
+               worktree_backend_opts: fake_worktree_opts(root, inspection_error: true)
+             )
+
+    assert [_, worktree_path] = Regex.run(~r/Worktree: (.+)/, result)
+    assert result =~ "Branch: subagent/"
+    assert File.dir?(worktree_path)
+    refute_received {:worktree_command, ^root, ["worktree", "remove" | _rest]}
   end
 
   test "worktree-isolated subagent returns preserved worktree metadata after dirty error", %{
     tmp_dir: dir
   } do
-    root = init_git_repo!(dir)
+    root = fake_git_root!(dir)
 
     assert {:error, message} =
              Subagent.execute("write-error",
                isolation: "worktree",
                project_root: root,
-               provider: WorktreeProvider
+               provider: SubagentWorktreeProvider,
+               worktree_backend: SubagentWorktreeBackend,
+               worktree_backend_opts: fake_worktree_opts(root)
              )
 
     assert message =~ "failed after write"
     assert [_, worktree_path] = Regex.run(~r/Worktree: (.+)/, message)
+    assert message =~ "Branch: subagent/"
     assert File.read!(Path.join(worktree_path, "child.txt")) == "from child\n"
   end
 
   test "worktree-isolated subagent refuses a dirty repository", %{tmp_dir: dir} do
-    root = init_git_repo!(dir)
-    File.write!(Path.join(root, "dirty.txt"), "dirty\n")
+    root = fake_git_root!(dir)
 
     assert {:error, message} =
              Subagent.execute("noop",
                isolation: "worktree",
                project_root: root,
-               provider: WorktreeProvider
+               provider: SubagentWorktreeProvider,
+               worktree_backend: SubagentWorktreeBackend,
+               worktree_backend_opts: fake_worktree_opts(root, dirty_parent: true)
              )
 
     assert message =~ "requires a clean git tree"
+    refute_received {:worktree_command, ^root, ["worktree", "add" | _rest]}
   end
 
+  @tag :session_manager
   test "worktree-isolated background native subagent auto-approves destructive tools", %{
     manager: manager,
     tmp_dir: dir
   } do
-    root = init_git_repo!(dir)
+    root = fake_git_root!(dir)
 
     assert {:ok, result} =
              Subagent.execute("write through native tool",
@@ -774,6 +744,8 @@ defmodule MingaAgent.Tools.SubagentTest do
                background: true,
                session_manager: manager,
                project_root: root,
+               worktree_backend: SubagentWorktreeBackend,
+               worktree_backend_opts: fake_worktree_opts(root),
                provider: MingaAgent.Providers.Native,
                model: "anthropic:claude-sonnet-4-20250514",
                provider_opts: [
@@ -1028,43 +1000,33 @@ defmodule MingaAgent.Tools.SubagentTest do
     {:ok, stream_response}
   end
 
-  @spec init_git_repo!(String.t()) :: String.t()
-  defp init_git_repo!(dir) do
+  @spec start_session_manager() :: map()
+  defp start_session_manager do
+    name = :"subagent_manager_#{System.unique_integer([:positive])}"
+    {:ok, manager} = GenServer.start(SessionManager, [], name: name)
+
+    on_exit(fn ->
+      manager
+      |> GenServer.call(:list_sessions)
+      |> Enum.each(fn {session_id, _pid, _meta} ->
+        GenServer.call(manager, {:stop_session, session_id})
+      end)
+
+      GenServer.stop(manager)
+    end)
+
+    %{manager: manager}
+  end
+
+  @spec fake_git_root!(String.t()) :: String.t()
+  defp fake_git_root!(dir) do
     root = Path.join(dir, "repo")
     File.mkdir_p!(root)
-    git!(root, ["init", "."])
-    hooks_dir = Path.join(root, ".git/hooks-disabled")
-    File.mkdir_p!(hooks_dir)
-    git!(root, ["config", "core.hooksPath", hooks_dir])
-    git!(root, ["config", "user.email", "test@example.com"])
-    git!(root, ["config", "user.name", "Minga Test"])
-    git!(root, ["config", "commit.gpgsign", "false"])
-    File.write!(Path.join(root, "README.md"), "root\n")
-    git!(root, ["add", "README.md"])
-    git!(root, ["commit", "-m", "init"])
     root
   end
 
-  @spec sibling_worktrees(String.t()) :: [String.t()]
-  defp sibling_worktrees(root) do
-    root
-    |> Path.dirname()
-    |> File.ls!()
-    |> Enum.filter(&String.contains?(&1, "subagent"))
-    |> Enum.sort()
-  end
-
-  @spec git_lines(String.t(), [String.t()]) :: [String.t()]
-  defp git_lines(cwd, args) do
-    case System.cmd("git", args, cd: cwd, stderr_to_stdout: true) do
-      {output, 0} -> String.split(output, "\n", trim: true)
-      {output, _code} -> flunk("git #{Enum.join(args, " ")} failed: #{output}")
-    end
-  end
-
-  @spec git!(String.t(), [String.t()]) :: :ok
-  defp git!(cwd, args) do
-    _ = git_lines(cwd, args)
-    :ok
+  @spec fake_worktree_opts(String.t(), keyword()) :: keyword()
+  defp fake_worktree_opts(root, extra \\ []) do
+    Keyword.merge([root: root, test_pid: self()], extra)
   end
 end

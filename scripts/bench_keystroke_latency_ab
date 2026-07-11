@@ -1,0 +1,176 @@
+#!/usr/bin/env bash
+# Collect a symmetric same-runner keystroke-latency A/B comparison.
+#
+# Usage: scripts/bench_keystroke_latency_ab BASE_SHA HEAD_SHA
+#        scripts/bench_keystroke_latency_ab --head-only HEAD_SHA
+#
+# Each round warms and measures both revisions through
+# bench/keystroke_latency_baseline.exs. Revision order alternates to cancel
+# thermal/cache/order drift. On a breach, a confirmation re-runs BOTH revisions
+# as an alternating pair before deciding the result.
+set -uo pipefail
+
+if [[ $# -eq 2 && $1 == "--head-only" ]]; then
+  base_available=0
+  base_sha=""
+  head_sha=$(git rev-parse "$2")
+elif [[ $# -eq 2 ]]; then
+  base_available=1
+  base_sha=$1
+  head_sha=$(git rev-parse "$2")
+else
+  echo "usage: $0 BASE_SHA HEAD_SHA | --head-only HEAD_SHA" >&2
+  exit 2
+fi
+rounds=${MINGA_LATENCY_AB_ROUNDS:-4}
+confirmation_rounds=${MINGA_LATENCY_AB_CONFIRMATION_ROUNDS:-2}
+
+if (( rounds < 2 || rounds % 2 != 0 || confirmation_rounds < 2 || confirmation_rounds % 2 != 0 )); then
+  echo "MINGA_LATENCY_AB_ROUNDS and MINGA_LATENCY_AB_CONFIRMATION_ROUNDS must both be even and at least 2" >&2
+  exit 2
+fi
+
+artifact_dir="${GITHUB_WORKSPACE:-$PWD}"
+metrics_file="$artifact_dir/keystroke_latency_metrics.txt"
+baseline_output="$artifact_dir/keystroke_latency.json"
+comparison_output="$artifact_dir/keystroke_latency_comparison.json"
+work_dir=$(mktemp -d "${TMPDIR:-/tmp}/minga-keystroke-latency.XXXXXX")
+base_runs=()
+head_runs=()
+
+cleanup() {
+  git checkout -f --quiet "$head_sha" || true
+  rm -rf "$work_dir"
+}
+trap cleanup EXIT
+
+: > "$metrics_file"
+
+echo "Keystroke latency A/B: base=$base_sha head=$head_sha rounds=$rounds"
+
+if (( base_available )) && ! git cat-file -e "$base_sha:bench/keystroke_latency_baseline.exs" 2>/dev/null; then
+  echo "::warning::bench/keystroke_latency_baseline.exs is missing at merge-base $base_sha; relative gate will be skipped (absolute sanity only)."
+  base_available=0
+elif (( base_available )) && ! git diff --quiet "$base_sha" "$head_sha" -- bench/keystroke_latency_baseline.exs; then
+  echo "::warning::bench/keystroke_latency_baseline.exs changed between base and HEAD; relative gate will be skipped because the benchmark ruler differs."
+  base_available=0
+fi
+
+run_revision() {
+  local revision=$1
+  local side=$2
+  local round=$3
+  local output="$work_dir/${side}-${round}.json"
+
+  echo "::group::Keystroke latency ${side}, round ${round} (${revision})"
+  if ! git checkout -f --quiet "$revision"; then
+    echo "::endgroup::"
+    return 1
+  fi
+
+  if ! mix deps.get || ! mix deps.compile || ! mix protocol.gen || ! mix native.build.support; then
+    echo "::endgroup::"
+    return 1
+  fi
+
+  if ! MIX_ENV=test mix run bench/keystroke_latency_baseline.exs | tee -a "$metrics_file"; then
+    echo "::endgroup::"
+    return 1
+  fi
+
+  cp bench/baselines/keystroke_latency.json "$output"
+  echo "::endgroup::"
+
+  if [[ "$side" == "base" ]]; then
+    base_runs+=("$output")
+  else
+    head_runs+=("$output")
+  fi
+}
+
+run_rounds() {
+  local first_round=$1
+  local count=$2
+  local round side_first side_second revision_var
+
+  for ((round = first_round; round < first_round + count; round++)); do
+    if (( round % 2 == 1 )); then
+      side_first=base
+      side_second=head
+    else
+      side_first=head
+      side_second=base
+    fi
+
+    revision_var="${side_first}_sha"
+    if ! run_revision "${!revision_var}" "$side_first" "$round"; then
+      return 1
+    fi
+
+    revision_var="${side_second}_sha"
+    if ! run_revision "${!revision_var}" "$side_second" "$round"; then
+      return 1
+    fi
+  done
+}
+
+run_check() {
+  local args=(--comparison-output "$comparison_output")
+  local path
+
+  for path in "${base_runs[@]}"; do
+    args+=(--base "$path")
+  done
+
+  for path in "${head_runs[@]}"; do
+    args+=(--head "$path")
+  done
+
+  git checkout -f --quiet "$head_sha"
+  MIX_ENV=test mix run bench/check_latency_budgets.exs "${args[@]}"
+}
+
+preserve_head_artifact() {
+  local last_head_index=$((${#head_runs[@]} - 1))
+  cp "${head_runs[$last_head_index]}" "$baseline_output"
+}
+
+if (( base_available )); then
+  if ! run_rounds 1 "$rounds"; then
+    echo "::warning::base/HEAD paired benchmark could not complete; falling back to one HEAD absolute-sanity run."
+    base_available=0
+    base_runs=()
+    head_runs=()
+  fi
+fi
+
+if (( ! base_available )); then
+  if ! run_revision "$head_sha" head 1; then
+    echo "HEAD latency benchmark failed" >&2
+    exit 1
+  fi
+
+  preserve_head_artifact
+  run_check
+  exit $?
+fi
+
+# Preserve measured artifacts outside tracked paths so revision checkouts cannot
+# replace them with committed baselines before upload.
+preserve_head_artifact
+
+if run_check; then
+  exit 0
+fi
+
+# A failed first aggregate is confirmed with an additional alternating pair.
+# Both sides are re-run so confirmation remains symmetric; the final decision
+# uses all equal-count round observations, not a HEAD-only retry.
+echo "Initial aggregate breached; collecting $confirmation_rounds paired confirmation round(s)."
+if ! run_rounds "$((rounds + 1))" "$confirmation_rounds"; then
+  echo "Paired confirmation benchmark failed" >&2
+  exit 1
+fi
+
+preserve_head_artifact
+run_check

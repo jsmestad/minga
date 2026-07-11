@@ -390,27 +390,15 @@ defmodule Minga.Test.EditorCase do
   end
 
   @doc """
-  Sends an ex command with a single editor barrier after the final Enter.
+  Sends an ex command and synchronizes after each key.
 
-  This is intentionally narrower than `send_keys_sync/2`: command-mode text is
-  processed in one mailbox order, so tests that assert editor state do not need
-  a render barrier for every character. Use `send_keys_sync/2` for arbitrary
-  Vim key sequences, where each key may trigger deferred routing.
+  Command-mode input recomputes completion and renders for every character. A
+  single final barrier can therefore time out behind a long path under scheduler
+  contention. Per-key barriers keep each wait bounded and preserve deferred input
+  routing semantics.
   """
   @spec send_ex_sync(editor_ctx(), String.t()) :: map()
-  def send_ex_sync(%{editor: editor, port: port}, command) do
-    ":#{command}<CR>"
-    |> parse_key_sequence()
-    |> Enum.each(fn {codepoint, mods} ->
-      send(editor, {:minga_input, {:key_press, codepoint, mods}})
-    end)
-
-    # A normal GenServer call preserves mailbox order with the submitted input.
-    # The later system-state read can then safely observe the completed command.
-    sync_editor(editor)
-    Process.delete({:last_frame_snapshot, port})
-    get_editor_state(editor)
-  end
+  def send_ex_sync(ctx, command), do: send_keys_sync(ctx, ":#{command}<CR>")
 
   @doc """
   Sends a vim-style key sequence. Supports:

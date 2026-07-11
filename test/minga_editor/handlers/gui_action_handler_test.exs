@@ -128,7 +128,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   test "native GUI file tree sidebar actions use the registered FileTree action handler", %{
     sidebar_registry: table
   } do
-    assert :ok = FileTreeFeature.register_contributions(%FileTreeState{}, table)
+    assert :ok = FileTreeFeature.sync_sidebar(%FileTreeState{}, table)
     state = base_state(table)
 
     opened =

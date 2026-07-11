@@ -38,6 +38,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
   alias MingaEditor.Input
+  alias Minga.Test.SessionSlowMockProvider
   alias Minga.Test.StubServer
 
   defmodule RestartStubSession do
@@ -647,6 +648,32 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   end
 
   describe "scope_ctrl_c/1" do
+    test "aborts a live turn and restores queued messages to the prompt" do
+      session =
+        start_supervised!(
+          {Session,
+           provider: SessionSlowMockProvider, provider_opts: [test_pid: self()], persist?: false}
+        )
+
+      assert :ok = Session.subscribe(session)
+      assert :ok = Session.send_prompt(session, "active turn")
+      assert_receive {:agent_event, ^session, {:status_changed, :thinking}}, 1_000
+
+      assert {:queued, :steering} = Session.send_prompt(session, "steering note")
+      assert {:queued, :follow_up} = Session.queue_follow_up(session, "follow-up note")
+
+      state =
+        base_state(session: session)
+        |> AgentAccess.update_agent(&AgentState.set_status(&1, :thinking))
+
+      new_state = AgentCommands.scope_ctrl_c(state)
+
+      assert_receive :provider_abort_called, 1_000
+      prompt = UIState.input_text(AgentAccess.panel(new_state))
+      assert prompt =~ "steering note"
+      assert prompt =~ "follow-up note"
+    end
+
     test "retries the provider when the agent is in error state" do
       {:ok, session} = RestartStubSession.start_link(self())
 
