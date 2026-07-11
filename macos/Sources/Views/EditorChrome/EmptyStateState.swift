@@ -79,7 +79,6 @@ public struct EmptyStateSectionModel: Identifiable, Equatable {
 
 /// Observable state for the launchpad, driven by BEAM protocol messages.
 @MainActor
-@Observable
 public final class EmptyStateState {
     public init(visible: Bool = false, crashed: Bool = false, version: String = "", focusedId: String = "", sections: [EmptyStateSectionModel] = []) {
         self.visible = visible

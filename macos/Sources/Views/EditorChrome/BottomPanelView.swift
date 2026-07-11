@@ -12,7 +12,7 @@ public struct BottomPanelView: View {
         self.encoder = encoder
         self.availableHeight = availableHeight
     }
-    @Bindable public var state: BottomPanelState
+    public let state: BottomPanelState
     @Environment(\.themeColors) private var theme
     public let encoder: InputEncoder?
     /// Total height of the right pane (tab bar + editor + panel + status bar).

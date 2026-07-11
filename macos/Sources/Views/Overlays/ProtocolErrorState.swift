@@ -10,7 +10,6 @@
 import SwiftUI
 
 @MainActor
-@Observable
 public final class ProtocolErrorState {
     public init() {}
     /// The BEAM-supplied reason, or nil when no protocol_error has arrived.

@@ -818,9 +818,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             frame.metrics.actorHopCount
         )
         guard let dispatcher else { return }
-        for decoded in frame.commands {
-            dispatcher.dispatch(decoded.command, opcode: decoded.opcode)
-        }
+        dispatcher.dispatch(frame)
     }
 
     private func handleProtocolDecodeFailure(_ error: ProtocolDecodeError) {

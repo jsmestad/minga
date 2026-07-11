@@ -5,6 +5,8 @@
 /// routed to the wrong state or not routed at all.
 
 import MingaUI
+import Observation
+import Synchronization
 import Testing
 import Foundation
 import AppKit
@@ -1366,50 +1368,62 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.themeColors.hasAppliedTheme)
     }
 
-    @Test("keyframe with content but no guiTheme presents protocol error")
+    @Test("keyframe with content but no guiTheme returns a typed rejection")
     @MainActor func keyframeWithoutThemeErrors() {
         let (dispatcher, gui) = makeDispatcher()
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
 
         dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [Wire.TabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "unthemed.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
 
-        #expect(gui.protocolErrorState.isPresented)
-        #expect(gui.protocolErrorState.message == "missing gui_theme in keyframe")
+        #expect(gui.protocolErrorState.isPresented == false)
         #expect(gui.tabBarState.tabs.isEmpty)
+        #expect(results == [.rejected(frameSeq: 1, reason: .missingTheme)])
     }
 
     @Test("keyframe with empty guiTheme rejects promotion")
     @MainActor func keyframeWithEmptyThemeErrors() {
         let (dispatcher, gui) = makeDispatcher()
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
 
         dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0))
         dispatcher.dispatch(.guiTheme(slots: []))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [Wire.TabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "empty.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
 
-        #expect(gui.protocolErrorState.isPresented)
-        #expect(gui.protocolErrorState.message?.contains("missing gui_theme slots in keyframe") == true)
-        #expect(gui.protocolErrorState.message?.contains("0x01") == true)
+        #expect(gui.protocolErrorState.isPresented == false)
         #expect(gui.themeColors.hasAppliedTheme == false)
         #expect(gui.tabBarState.tabs.isEmpty)
+        guard case .rejected(frameSeq: 2, reason: .incompleteTheme(let missing)) = results.first else {
+            Issue.record("expected incomplete-theme rejection")
+            return
+        }
+        #expect(missing.contains(0x01))
     }
 
     @Test("keyframe with partial guiTheme rejects promotion")
     @MainActor func keyframeWithPartialThemeErrors() {
         let (dispatcher, gui) = makeDispatcher()
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
 
         dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 0))
         dispatcher.dispatch(.guiTheme(slots: [(GUI_COLOR_EDITOR_BG, 0x00, 0x00, 0x00)]))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [Wire.TabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "partial.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 3, seq: 0))
 
-        #expect(gui.protocolErrorState.isPresented)
-        #expect(gui.protocolErrorState.message?.contains("missing gui_theme slots in keyframe") == true)
-        #expect(gui.protocolErrorState.message?.contains("0x02") == true)
-        #expect(gui.protocolErrorState.message?.contains("0xA0") == true)
+        #expect(gui.protocolErrorState.isPresented == false)
         #expect(gui.themeColors.hasAppliedTheme == false)
         #expect(gui.tabBarState.tabs.isEmpty)
+        guard case .rejected(frameSeq: 3, reason: .incompleteTheme(let missing)) = results.first else {
+            Issue.record("expected incomplete-theme rejection")
+            return
+        }
+        #expect(missing.contains(0x02))
+        #expect(missing.contains(0xA0))
     }
 }
 
@@ -1433,6 +1447,30 @@ struct CommandDispatcherStagingTests {
         Wire.TabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: false,
                       hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0,
                       icon: "", label: label)
+    }
+
+    private func windowContent(windowId: UInt16 = 7, epoch: UInt32 = 42, fontId: UInt8 = 0) -> GUIWindowContent {
+        let span = GUIHighlightSpan(
+            startCol: 0, endCol: 3, fg: 0xFFFFFF, bg: 0,
+            attrs: 0, fontWeight: 0, fontId: fontId
+        )
+        let row = GUIVisualRow(
+            rowType: .normal, rowId: 1, bufLine: 0,
+            contentHash: 11, text: "old", spans: [span]
+        )
+        return GUIWindowContent(
+            windowId: windowId, fullRefresh: true, contentEpoch: epoch,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block,
+            rows: [row], selection: nil, searchMatches: [],
+            diagnosticUnderlines: [], documentHighlights: []
+        )
+    }
+
+    private func overlayDelta(windowId: UInt16 = 7, epoch: UInt32 = 42) -> GUIWindowOverlayDelta {
+        GUIWindowOverlayDelta(
+            windowId: windowId, contentEpoch: epoch, cursorVisible: true,
+            cursorRow: 0, cursorCol: 1, cursorShape: .beam, cursorline: nil
+        )
     }
 
     // MARK: - Nothing paints between begin and commit
@@ -1532,6 +1570,8 @@ struct CommandDispatcherStagingTests {
     @Test("delta frame with empty guiTheme rejects promotion")
     @MainActor func deltaFrameWithEmptyThemeErrors() {
         let (dispatcher, gui) = makeDispatcher()
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
 
         dispatcher.dispatch(.beginFrame(frameSeq: 5, baseFrameSeq: 0))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
@@ -1544,17 +1584,23 @@ struct CommandDispatcherStagingTests {
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("empty-delta.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 6, seq: 0))
 
-        #expect(gui.protocolErrorState.isPresented)
-        #expect(gui.protocolErrorState.message?.contains("missing gui_theme slots: ") == true)
-        #expect(gui.protocolErrorState.message?.contains("0x01") == true)
-        #expect(gui.protocolErrorState.message?.contains("0xA0") == true)
+        #expect(gui.protocolErrorState.isPresented == false)
         #expect(gui.themeColors.editorBg == baselineThemeBg)
         #expect(gui.tabBarState.tabs.first?.label == "base.ex")
+        #expect(results.count == 2)
+        guard case .rejected(frameSeq: 6, reason: .incompleteTheme(let missing)) = results.last else {
+            Issue.record("expected incomplete-theme rejection")
+            return
+        }
+        #expect(missing.contains(0x01))
+        #expect(missing.contains(0xA0))
     }
 
     @Test("delta frame with partial guiTheme rejects promotion")
     @MainActor func deltaFrameWithPartialThemeErrors() {
         let (dispatcher, gui) = makeDispatcher()
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
 
         dispatcher.dispatch(.beginFrame(frameSeq: 5, baseFrameSeq: 0))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
@@ -1567,12 +1613,16 @@ struct CommandDispatcherStagingTests {
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("partial-delta.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 6, seq: 0))
 
-        #expect(gui.protocolErrorState.isPresented)
-        #expect(gui.protocolErrorState.message?.contains("missing gui_theme slots: ") == true)
-        #expect(gui.protocolErrorState.message?.contains("0x02") == true)
-        #expect(gui.protocolErrorState.message?.contains("0xA0") == true)
+        #expect(gui.protocolErrorState.isPresented == false)
         #expect(gui.themeColors.editorBg == baselineThemeBg)
         #expect(gui.tabBarState.tabs.first?.label == "base.ex")
+        #expect(results.count == 2)
+        guard case .rejected(frameSeq: 6, reason: .incompleteTheme(let missing)) = results.last else {
+            Issue.record("expected incomplete-theme rejection")
+            return
+        }
+        #expect(missing.contains(0x02))
+        #expect(missing.contains(0xA0))
     }
 
     // MARK: - Invalidation requests a keyframe with no partial promotion
@@ -1770,6 +1820,254 @@ struct CommandDispatcherStagingTests {
         #expect(gui.resyncState.pending == false)
         #expect(gui.resyncState.lastGoodFrameSeq == 0)
         #expect(gui.tabBarState.tabs.first?.label == "recovered.ex")
+    }
+
+    // MARK: - Prepared transaction publication contract (#2747)
+
+    @Test("prepared publication is equivalent to the direct command fixture")
+    @MainActor func preparedPublicationEquivalence() {
+        let (direct, directGUI) = makeDispatcher()
+        let (prepared, preparedGUI) = makeDispatcher()
+        let content = windowContent()
+        let commands: [RenderCommand] = [
+            .guiTheme(slots: completeThemeSlots()),
+            .guiWindowContent(data: content),
+            .guiTabBar(activeIndex: 0, tabs: [tab("equivalent.ex")]),
+            .setCursorShape(.beam),
+        ]
+
+        for command in commands { direct.applyForTesting(command) }
+        prepared.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        for command in commands { prepared.dispatch(command) }
+        prepared.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        #expect(preparedGUI.themeColors.editorBg == directGUI.themeColors.editorBg)
+        #expect(preparedGUI.windowContents[7]?.rows.map(\.text) == directGUI.windowContents[7]?.rows.map(\.text))
+        #expect(preparedGUI.tabBarState.tabs.map(\.label) == directGUI.tabBarState.tabs.map(\.label))
+        #expect(prepared.frameState.cursorShape == direct.frameState.cursorShape)
+    }
+
+    @Test("one valid frame enters the publication boundary exactly once")
+    @MainActor func onePublicationPerFrame() {
+        let (dispatcher, gui) = makeDispatcher()
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: windowContent()))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("prepared.ex")]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        #expect(gui.framePublicationCount == 1)
+        #expect(dispatcher.publicationCount == 1)
+        #expect(results == [.published(frameSeq: 1)])
+        #expect(gui.windowContents[7]?.rows.first?.text == "old")
+        #expect(gui.tabBarState.tabs.first?.label == "prepared.ex")
+    }
+
+    @Test("one aggregate observation callback sees all sibling domains committed")
+    @MainActor func aggregateObservationIsAtomic() {
+        let (dispatcher, gui) = makeDispatcher()
+        let notificationCount = Mutex(0)
+
+        withObservationTracking {
+            _ = gui.framePublication
+            // Reading the siblings documents the observation's consistency contract.
+            _ = gui.tabBarState.tabs
+            _ = gui.agentChatState.model
+        } onChange: {
+            notificationCount.withLock { $0 += 1 }
+        }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("atomic.ex")]))
+        dispatcher.dispatch(.guiAgentChat(
+            visible: true, status: 0, model: "prepared-model", thinkingLevel: "medium",
+            prompt: "", promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0,
+            promptVimMode: 1, promptVisibleRows: 1, promptCompletion: nil,
+            pendingToolName: nil, pendingToolSummary: "", helpVisible: false,
+            helpGroups: [], messages: []
+        ))
+        #expect(notificationCount.withLock { $0 } == 0)
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        #expect(notificationCount.withLock { $0 } == 1)
+        #expect(gui.tabBarState.tabs.first?.label == "atomic.ex")
+        #expect(gui.agentChatState.model == "prepared-model")
+    }
+
+    @Test("gutter and indent guide keys cannot collide across window ids")
+    @MainActor func typedWindowCoalescingKeysDoNotCollide() {
+        let (dispatcher, _) = makeDispatcher()
+        let gutter = Wire.WindowGutter(
+            windowId: 1001, contentRow: 0, contentCol: 4, contentHeight: 1,
+            isActive: false, contentWidth: 40, cursorLine: 0, lineNumberStyle: .absolute,
+            lineNumberWidth: 3, signColWidth: 1, entries: []
+        )
+        let guides = IndentGuideData(
+            windowId: 1, tabWidth: 4, activeGuideCol: 4,
+            guideCols: [4, 8], lineIndentLevels: [2]
+        )
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: windowContent(windowId: 1001)))
+        dispatcher.dispatch(.guiWindowContent(data: windowContent(windowId: 1)))
+        dispatcher.dispatch(.guiGutter(data: gutter))
+        dispatcher.dispatch(.guiIndentGuides(data: guides))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        #expect(dispatcher.frameState.windowGutters[1001]?.lineNumberWidth == 3)
+        #expect(dispatcher.frameState.windowIndentGuides[1]?.guideCols == [4, 8])
+    }
+
+    @Test("a later invalid domain rejects the whole frame without publication")
+    @MainActor func partialFrameRejectionPublishesNothing() {
+        let (dispatcher, gui) = makeDispatcher()
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("must-not-publish.ex")]))
+        dispatcher.dispatch(.guiWindowOverlayDelta(data: overlayDelta(windowId: 99)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        #expect(gui.framePublicationCount == 0)
+        #expect(gui.tabBarState.tabs.isEmpty)
+        #expect(results == [.rejected(frameSeq: 1, reason: .missingWindowReference(windowId: 99))])
+    }
+
+    @Test("invalid transcript operations reject without publishing sibling state")
+    @MainActor func invalidTranscriptRejectsWholeTransaction() {
+        let invalidCommands: [(RenderCommand, PreparedFrameRejection)] = [
+            (
+                .guiAgentTranscript(mode: 1, epoch: 1, truncated: false, trimFront: 0, baseCount: 0, messages: []),
+                .transcriptBeforeSeed
+            ),
+            (
+                .guiAgentTranscript(mode: 1, epoch: 2, truncated: false, trimFront: 0, baseCount: 1, messages: []),
+                .transcriptEpochMismatch
+            ),
+            (
+                .guiAgentTranscript(mode: 1, epoch: 1, truncated: false, trimFront: 0, baseCount: 9, messages: []),
+                .transcriptDesynced
+            ),
+        ]
+
+        for (index, invalid) in invalidCommands.enumerated() {
+            let (dispatcher, gui) = makeDispatcher()
+            var results: [FrameTransactionResult] = []
+            dispatcher.onTransactionResult = { results.append($0) }
+
+            if index > 0 {
+                dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+                dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+                dispatcher.dispatch(.guiAgentTranscript(
+                    mode: 0, epoch: 1, truncated: false, trimFront: 0, baseCount: 0,
+                    messages: [Wire.ChatMessage(beamId: 1, content: .user(text: "seed"))]
+                ))
+                dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("baseline.ex")]))
+                dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+            }
+
+            let baselinePublications = gui.framePublicationCount
+            let frameSeq = UInt32(index > 0 ? 2 : 1)
+            let baseSeq = UInt32(index > 0 ? 1 : 0)
+            dispatcher.dispatch(.beginFrame(frameSeq: frameSeq, baseFrameSeq: baseSeq))
+            if baseSeq == 0 { dispatcher.dispatch(.guiTheme(slots: completeThemeSlots())) }
+            dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("must-not-publish.ex")]))
+            dispatcher.dispatch(invalid.0)
+            dispatcher.dispatch(.commitFrame(frameSeq: frameSeq, seq: 0))
+
+            #expect(gui.framePublicationCount == baselinePublications)
+            #expect(gui.tabBarState.tabs.first?.label == (index > 0 ? "baseline.ex" : nil))
+            #expect(results.last == .rejected(frameSeq: frameSeq, reason: invalid.1))
+            #expect(gui.agentChatState.messages.map(\.id) == (index > 0 ? [1] : []))
+        }
+    }
+
+    @Test("duplicate and out-of-order frame sequences return typed rejections")
+    @MainActor func duplicateAndOutOfOrderFramesReject() {
+        for incoming: UInt32 in [5, 4] {
+            let (dispatcher, _) = makeDispatcher()
+            var results: [FrameTransactionResult] = []
+            dispatcher.onTransactionResult = { results.append($0) }
+            dispatcher.dispatch(.beginFrame(frameSeq: 5, baseFrameSeq: 0))
+            dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+            dispatcher.dispatch(.commitFrame(frameSeq: 5, seq: 0))
+
+            dispatcher.dispatch(.beginFrame(frameSeq: incoming, baseFrameSeq: 0))
+            dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+            dispatcher.dispatch(.commitFrame(frameSeq: incoming, seq: 0))
+
+            #expect(results.last == .rejected(
+                frameSeq: incoming,
+                reason: .frameSequenceNotIncreasing(lastFrameSeq: 5, incomingFrameSeq: incoming)
+            ))
+            #expect(dispatcher.publicationCount == 1)
+        }
+    }
+
+    @Test("missing window references and stale epochs reject before publication")
+    @MainActor func windowReferenceAndEpochValidation() {
+        let (dispatcher, gui) = makeDispatcher()
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: windowContent()))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1))
+        dispatcher.dispatch(.guiWindowOverlayDelta(data: overlayDelta(epoch: 41)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+
+        #expect(gui.framePublicationCount == 1)
+        #expect(results.last == .rejected(
+            frameSeq: 2,
+            reason: .windowEpochMismatch(windowId: 7, expected: 42, actual: 41)
+        ))
+        #expect(gui.windowContents[7]?.cursorShape == .block)
+    }
+
+    @Test("unregistered font resources reject a prepared frame")
+    @MainActor func missingFontResourceRejects() {
+        let (dispatcher, gui) = makeDispatcher()
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: windowContent(fontId: 3)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        #expect(gui.framePublicationCount == 0)
+        #expect(results == [.rejected(frameSeq: 1, reason: .missingFontResource(fontId: 3))])
+    }
+
+    @Test("publication operation count depends on changed domains, not command count")
+    @MainActor func changedDomainOperationCount() {
+        let (dispatcher, gui) = makeDispatcher()
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1))
+        for index in 0..<100 {
+            dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("\(index).ex")]))
+        }
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+
+        #expect(dispatcher.lastPublicationOperationCounts == PreparedFrameOperationCounts(
+            theme: 0, windows: 0, chrome: 1, overlays: 0,
+            resources: 0, focus: 0, metadata: 0
+        ))
+        #expect(gui.framePublicationCount == 2)
+        #expect(gui.tabBarState.tabs.first?.label == "99.ex")
     }
 
     // MARK: - Negative-guard dispatch (#2634)

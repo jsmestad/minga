@@ -15,7 +15,6 @@
 import SwiftUI
 
 @MainActor
-@Observable
 public final class ResyncState {
     public init() {}
     /// True between an invalidation and the next clean commit. Drives a small

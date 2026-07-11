@@ -1,6 +1,8 @@
 /// Container for all GUI chrome sub-states.
 ///
-/// Holds every `@Observable` state object that SwiftUI chrome views need.
+/// Owns the protocol-driven State + View objects behind one observable aggregate
+/// publication value. The child states are deliberately non-observable: a frame
+/// mutates them while hidden, then swaps `framePublication` exactly once.
 /// Injected once into `CommandDispatcher` and `ContentView`, eliminating
 /// the 9 optional property wiring that previously required individual
 /// assignment in `AppDelegate`.
@@ -8,14 +10,67 @@
 /// All sub-states are initialized at creation time; no optional nil-checks
 /// needed in dispatch handlers.
 import MingaProtocol
+import Observation
+
+/// Immutable observation token published after one complete GUI state transition.
+public struct GUIStatePublication: Equatable, Sendable {
+    public let generation: UInt64
+    public let frameSeq: UInt32?
+}
 
 @MainActor
+@Observable
 public final class GUIState {
     public init(windowContents: [UInt16: GUIWindowContent] = [:]) {
         self.windowContents = windowContents
+        feedbackState.onPresentationChanged = { [weak self] in
+            self?.performOutOfBandPublication {}
+        }
     }
-    /// Theme colors for SwiftUI chrome views.
-    public let themeColors = ThemeColors()
+
+    /// Immutable aggregate token swapped after every complete prepared frame.
+    /// Reading this token is the only observation dependency views need for
+    /// protocol-driven child state.
+    public private(set) var framePublication = GUIStatePublication(generation: 0, frameSeq: nil)
+
+    /// Out-of-band/recovery state has a separate publication stream so rejecting
+    /// a frame never masquerades as a committed frame publication.
+    public private(set) var outOfBandPublication = GUIStatePublication(generation: 0, frameSeq: nil)
+
+    /// Number of complete prepared frames published since this GUI state was created.
+    public var framePublicationCount: UInt64 { framePublication.generation }
+
+    /// Child state cannot notify while this closure runs because protocol-driven
+    /// State objects are non-observable. The immutable aggregate swap is therefore
+    /// the sole frame observation point.
+    public func performFramePublication(frameSeq: UInt32, _ mutation: () -> Void) {
+        mutation()
+        framePublication = GUIStatePublication(
+            generation: framePublication.generation + 1,
+            frameSeq: frameSeq
+        )
+    }
+
+    /// Applies one recovery or local-presentation mutation and publishes it separately from committed frames.
+    public func performOutOfBandPublication(_ mutation: () -> Void) {
+        mutation()
+        outOfBandPublication = GUIStatePublication(
+            generation: outOfBandPublication.generation + 1,
+            frameSeq: nil
+        )
+    }
+
+    /// Theme remains Observable because SwiftUI environment injection requires
+    /// that conformance. Frame publication replaces the whole instance, so the
+    /// published instance is never mutated under active observers.
+    @ObservationIgnored public private(set) var themeColors = ThemeColors()
+
+    /// Builds and installs a complete theme value without mutating the observed prior instance.
+    public func replaceTheme(slots: [(slotId: UInt8, r: UInt8, g: UInt8, b: UInt8)]) {
+        let replacement = ThemeColors()
+        replacement.applySlots(slots)
+        themeColors = replacement
+    }
 
     /// Native settings panel state.
     public let settingsState = SettingsState()
@@ -119,6 +174,6 @@ public final class GUIState {
     /// Keyed by windowId. NOT cleared between frames; the guiWindowContent
     /// dispatch overwrites per-window data each frame. Stale entries serve
     /// as fallback to prevent blank viewport flashes.
-    public var windowContents: [UInt16: GUIWindowContent] = [:]
+    @ObservationIgnored public var windowContents: [UInt16: GUIWindowContent] = [:]
 
 }

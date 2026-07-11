@@ -462,7 +462,12 @@ public struct ContentView<EditorSurface: View>: View {
     }
 
     public var body: some View {
-        ZStack {
+        // Protocol-driven child State objects publish through these aggregate
+        // swaps, never through independent nested observation notifications.
+        _ = gui.framePublication
+        _ = gui.outOfBandPublication
+
+        return ZStack {
             VStack(spacing: 0) {
                 unifiedToolbar
                 HStack(spacing: 0) {

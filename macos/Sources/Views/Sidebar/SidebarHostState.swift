@@ -30,7 +30,6 @@ public struct SidebarItem: Identifiable, Equatable {
 
 /// Stores the BEAM-selected sidebar identities and validates semantic kinds against the native registry.
 @MainActor
-@Observable
 public final class SidebarHostState {
     public init(warnedUnknownKinds: Set<String> = []) {
         self.warnedUnknownKinds = warnedUnknownKinds
