@@ -17,24 +17,49 @@ defmodule Minga.Credo.NoLossyGuiEncoderCheck do
     if gui_encoder_file?(source_file) do
       issue_meta = IssueMeta.for(source_file, params)
 
+      preflight_helpers =
+        source_file
+        |> Credo.Code.prewalk(&collect_preflight_helper/2)
+        |> List.flatten()
+        |> MapSet.new()
+
       source_file
-      |> Credo.Code.prewalk(&find_lossy_encoder_call(&1, &2, issue_meta))
+      |> Credo.Code.prewalk(&find_lossy_encoder_call(&1, &2, issue_meta, preflight_helpers))
       |> List.flatten()
     else
       []
     end
   end
 
-  defp find_lossy_encoder_call({:min, meta, _args} = ast, issues, issue_meta),
+  defp find_lossy_encoder_call(
+         {definition, meta, [_head, [do: body]]} = ast,
+         issues,
+         issue_meta,
+         preflight_helpers
+       )
+       when definition in [:def, :defp] do
+    if generated_encode?(body) and not writer_preflight?(body, preflight_helpers) do
+      issue(ast, issues, issue_meta, meta, "generated_encode")
+    else
+      {ast, issues}
+    end
+  end
+
+  defp find_lossy_encoder_call({:min, meta, _args} = ast, issues, issue_meta, _preflight_helpers),
     do: issue(ast, issues, issue_meta, meta, "min")
 
-  defp find_lossy_encoder_call({:&&&, meta, _args} = ast, issues, issue_meta),
+  defp find_lossy_encoder_call({:&&&, meta, _args} = ast, issues, issue_meta, _preflight_helpers),
     do: issue(ast, issues, issue_meta, meta, "&&&")
 
-  defp find_lossy_encoder_call({:utf8_prefix_bytes, meta, _args} = ast, issues, issue_meta),
-    do: issue(ast, issues, issue_meta, meta, "utf8_prefix_bytes")
+  defp find_lossy_encoder_call(
+         {:utf8_prefix_bytes, meta, _args} = ast,
+         issues,
+         issue_meta,
+         _preflight_helpers
+       ),
+       do: issue(ast, issues, issue_meta, meta, "utf8_prefix_bytes")
 
-  defp find_lossy_encoder_call({:<<>>, _, segments} = ast, issues, issue_meta) do
+  defp find_lossy_encoder_call({:<<>>, _, segments} = ast, issues, issue_meta, _preflight_helpers) do
     issues = Enum.reduce(segments, issues, &dynamic_bounded_segment_issue(&1, &2, issue_meta))
     {ast, issues}
   end
@@ -42,7 +67,8 @@ defmodule Minga.Credo.NoLossyGuiEncoderCheck do
   defp find_lossy_encoder_call(
          {{:., _, [module, function]}, meta, _args} = ast,
          issues,
-         issue_meta
+         issue_meta,
+         _preflight_helpers
        )
        when function in [
               :bounded_entries,
@@ -65,7 +91,76 @@ defmodule Minga.Credo.NoLossyGuiEncoderCheck do
     end
   end
 
-  defp find_lossy_encoder_call(ast, issues, _issue_meta), do: {ast, issues}
+  defp find_lossy_encoder_call(ast, issues, _issue_meta, _preflight_helpers), do: {ast, issues}
+
+  defp generated_encode?(body) do
+    {_body, found?} =
+      Macro.prewalk(body, false, fn
+        {{:., _, [module, function]}, _meta, _args} = ast, found? ->
+          generated? =
+            alias_name(module) == :Encode and
+              String.starts_with?(Atom.to_string(function), "encode_")
+
+          {ast, found? or generated?}
+
+        ast, found? ->
+          {ast, found?}
+      end)
+
+    found?
+  end
+
+  defp collect_preflight_helper(
+         {definition, _meta, [{name, _head_meta, args}, [do: body]]} = ast,
+         helpers
+       )
+       when definition in [:def, :defp] and is_atom(name) do
+    if String.starts_with?(Atom.to_string(name), "preflight") and contains_writer_check?(body) do
+      {ast, [{name, length(args)} | helpers]}
+    else
+      {ast, helpers}
+    end
+  end
+
+  defp collect_preflight_helper(ast, helpers), do: {ast, helpers}
+
+  defp writer_preflight?(body, preflight_helpers) do
+    contains_writer_check?(body) or calls_preflight_helper?(body, preflight_helpers)
+  end
+
+  defp contains_writer_check?(body) do
+    {_body, found?} =
+      Macro.prewalk(body, false, fn
+        {{:., _, [module, function]}, _meta, _args} = ast, found? ->
+          check? =
+            alias_name(module) == :Writer and
+              String.starts_with?(Atom.to_string(function), "check_")
+
+          {ast, found? or check?}
+
+        ast, found? ->
+          {ast, found?}
+      end)
+
+    found?
+  end
+
+  defp calls_preflight_helper?(body, preflight_helpers) do
+    {_body, found?} =
+      Macro.prewalk(body, false, fn
+        {:|>, _meta, [_left, {function, _call_meta, args}]} = ast, found?
+        when is_atom(function) and is_list(args) ->
+          {ast, found? or MapSet.member?(preflight_helpers, {function, length(args) + 1})}
+
+        {function, _meta, args} = ast, found? when is_atom(function) and is_list(args) ->
+          {ast, found? or MapSet.member?(preflight_helpers, {function, length(args)})}
+
+        ast, found? ->
+          {ast, found?}
+      end)
+
+    found?
+  end
 
   defp dynamic_bounded_segment_issue(
          {:"::", meta, [value, {:-, _, [{:signed, _, _}, 32]}]},

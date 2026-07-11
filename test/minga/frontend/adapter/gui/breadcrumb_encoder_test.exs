@@ -3,6 +3,7 @@ defmodule Minga.Frontend.Adapter.GUI.BreadcrumbEncoderTest do
 
   alias Minga.Frontend.Adapter.GUI.BreadcrumbEncoder
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.EncodingError
   alias Minga.RenderModel.UI.Breadcrumb
   alias MingaEditor.RenderModel.UI.BreadcrumbBuilder
 
@@ -36,6 +37,24 @@ defmodule Minga.Frontend.Adapter.GUI.BreadcrumbEncoderTest do
       {cmd, _caches} = BreadcrumbEncoder.encode(model, Caches.new())
 
       assert cmd == <<@op_gui_breadcrumb, 2::8, 1::16, "a", 2::16, "bb">>
+    end
+
+    test "rejects a segment count beyond the uint8 carrier" do
+      model = %Breadcrumb{file_path: "ignored", root: "/", segments: List.duplicate("a", 256)}
+
+      assert %{command: :gui_breadcrumb, field: :segment_count, actual: 256, min: 0, max: 255} =
+               assert_raise(EncodingError, fn -> BreadcrumbEncoder.encode(model, Caches.new()) end)
+    end
+
+    test "rejects a segment beyond the string16 carrier" do
+      model = %Breadcrumb{
+        file_path: "ignored",
+        root: "/",
+        segments: [String.duplicate("a", 65_536)]
+      }
+
+      assert %{command: :gui_breadcrumb, field: :segment, actual: 65_536, min: 0, max: 65_535} =
+               assert_raise(EncodingError, fn -> BreadcrumbEncoder.encode(model, Caches.new()) end)
     end
 
     test "returns nil on second call with same model (fingerprint skip)" do

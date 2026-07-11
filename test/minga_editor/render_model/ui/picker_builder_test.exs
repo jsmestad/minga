@@ -59,7 +59,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
       assert model.action_menu.selected_index == 0
       # The builder emits wire-shaped item maps: flags packs two_line (bit 0)
       # and marked (bit 1), description/annotation default to "", icon_color
-      # defaults to 0, and match_positions are clamped to 255.
+      # defaults to 0, and match_positions are preserved exactly.
       assert [
                %{
                  icon_color: 0x123456,
@@ -74,10 +74,10 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
       assert model.preview_lines == [[{"preview: One", 0xABCDEF, true}]]
     end
 
-    test "normalizes item nil defaults and clamps match_positions to 255" do
-      # Source item with nil icon_color/annotation and an oversized
-      # match_positions list. The builder owns this derivation (ruling 4): the
-      # wire map must default nils and clamp the highlight list to 255 entries.
+    test "normalizes item nil defaults without dropping match_positions" do
+      # Source item with nil icon_color/annotation and a match_positions list
+      # larger than the wire count. The semantic builder preserves it exactly;
+      # the adapter rejects the out-of-range count before encoding.
       item = %Item{
         id: "one",
         label: "One",
@@ -96,11 +96,11 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
       assert wire_item.icon_color == 0
       assert wire_item.description == ""
       assert wire_item.annotation == ""
-      assert Enum.count(wire_item.match_positions) == 255
-      assert wire_item.match_positions == Enum.to_list(0..254)
+      assert Enum.count(wire_item.match_positions) == 301
+      assert wire_item.match_positions == Enum.to_list(0..300)
     end
 
-    test "exactly 255 match_positions are preserved (clamp boundary)" do
+    test "exactly 255 match_positions are preserved" do
       item = %Item{id: "one", label: "One", match_positions: Enum.to_list(0..254)}
       picker = %PickerState{items: [item], filtered: [item], title: "Find", selected: 0}
       modal = picker_modal(picker, nil, nil, "", :ready)

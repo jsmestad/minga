@@ -100,6 +100,61 @@ defmodule Minga.Credo.NoLossyGuiEncoderCheckTest do
     end)
   end
 
+  test "flags generated encoders without a Writer preflight" do
+    """
+    defmodule Minga.Frontend.Adapter.GUI.ExampleEncoder do
+      def encode(value), do: Encode.encode_gui_example(%{value: value})
+    end
+    """
+    |> check()
+    |> assert_issue(fn issue -> assert issue.trigger == "generated_encode" end)
+  end
+
+  test "flags a generated encoder after a no-op preflight helper" do
+    """
+    defmodule Minga.Frontend.Adapter.GUI.ExampleEncoder do
+      def encode(value) do
+        preflight(value)
+        Encode.encode_gui_example(%{value: value})
+      end
+
+      defp preflight(_value), do: :ok
+    end
+    """
+    |> check()
+    |> assert_issue(fn issue -> assert issue.trigger == "generated_encode" end)
+  end
+
+  test "flags a generated encoder after a different-arity preflight helper" do
+    """
+    defmodule Minga.Frontend.Adapter.GUI.ExampleEncoder do
+      def encode(value) do
+        preflight()
+        Encode.encode_gui_example(%{value: value})
+      end
+
+      defp preflight(value), do: Writer.check_uint16(Writer.new(:gui_example), :value, value)
+      defp preflight, do: :ok
+    end
+    """
+    |> check()
+    |> assert_issue(fn issue -> assert issue.trigger == "generated_encode" end)
+  end
+
+  test "allows generated encoders after a Writer preflight" do
+    """
+    defmodule Minga.Frontend.Adapter.GUI.ExampleEncoder do
+      def encode(value) do
+        Writer.new(:gui_example)
+        |> Writer.check_uint16(:value, value)
+        |> Writer.append(Encode.encode_gui_example(%{value: value}))
+      end
+    end
+    """
+    |> check()
+    |> refute_issues()
+  end
+
   test "allows the checked writer" do
     """
     defmodule Minga.Frontend.Adapter.GUI.ExampleEncoder do

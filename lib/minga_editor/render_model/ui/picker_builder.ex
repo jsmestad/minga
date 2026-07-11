@@ -10,7 +10,6 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   alias MingaEditor.UI.Picker
 
   @max_items 100
-  @max_match_positions 255
   @preview_max_lines 50
   @binary_preview_message "Binary file preview unavailable"
 
@@ -89,10 +88,9 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   # Normalize one picker source item into the wire-shaped map the generated
   # `encode_picker_item/1` consumes. All derivation lives here (ruling 4): the
   # `flags` byte, the `icon_color || 0` / `annotation || ""` nil-vs-empty
-  # defaulting, and the 255 match_positions clamp. (The source `description` is
-  # already typed non-nil with a "" default, so it needs no defaulting.) The
-  # encoder shell passes these maps straight to the generated codec without
-  # further derivation.
+  # defaulting. (The source `description` is already typed non-nil with a ""
+  # default, so it needs no defaulting.) Wire limits are enforced by the adapter,
+  # which rejects oversized values without changing this semantic model.
   @spec item_model(Picker.t(), Picker.Item.t()) :: PickerModel.item()
   defp item_model(picker, item) do
     %{
@@ -101,7 +99,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
       label: item.label,
       description: item.description,
       annotation: item.annotation || "",
-      match_positions: Enum.take(item.match_positions, @max_match_positions)
+      match_positions: item.match_positions
     }
   end
 

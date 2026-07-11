@@ -26,7 +26,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder do
       version:u8 = 1
       mode:u8            # 0 = full_replace, 1 = append
       epoch:u32
-      truncated:u8 = 0   # selection semantics belong to the render model
+      truncated:u8       # model-owned resident suffix omitted older messages
       # full_replace (mode 0):
       count:u32
       # append (mode 1):
@@ -89,36 +89,46 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder do
   def encode(%AgentChat{visible?: true} = model, %Caches{} = caches) do
     epoch = model.transcript_epoch
     messages = model.resident_messages
-    fp = :erlang.phash2({epoch, messages})
+    truncated? = model.resident_truncated?
+    fp = :erlang.phash2({epoch, messages, truncated?})
 
     if fp == caches.last_agent_transcript.fp do
       {nil, caches}
     else
-      encode_changed(epoch, messages, fp, caches)
+      encode_changed(epoch, messages, truncated?, fp, caches)
     end
   end
 
-  @spec encode_changed(non_neg_integer(), [AgentChat.message()], integer(), Caches.t()) ::
+  @spec encode_changed(non_neg_integer(), [AgentChat.message()], boolean(), integer(), Caches.t()) ::
           {binary() | nil, Caches.t()}
-  defp encode_changed(epoch, messages, fp, %Caches{} = caches) do
+  defp encode_changed(epoch, messages, truncated?, fp, %Caches{} = caches) do
     prev = caches.last_agent_transcript
 
     validate_unique_message_ids!(messages)
     entries = Enum.map(messages, &message_entry/1)
     keys = Enum.map(entries, &entry_key/1)
 
-    new_caches = %{caches | last_agent_transcript: %SentState{fp: fp, epoch: epoch, keys: keys}}
+    new_caches = %{caches | last_agent_transcript: SentState.emitted(fp, epoch, keys, truncated?)}
 
     case select_delta(prev.epoch, prev.keys, epoch, keys, entries) do
       :nothing ->
-        {nil, new_caches}
+        emit_truncation_transition(prev.truncated?, truncated?, epoch, entries, new_caches)
 
       {:full_replace, out} ->
-        {build_full_replace(epoch, out), new_caches}
+        {build_full_replace(epoch, truncated?, out), new_caches}
 
       {:append, trim_front, base_count, out} ->
-        {build_append(epoch, trim_front, base_count, out), new_caches}
+        {build_append(epoch, truncated?, trim_front, base_count, out), new_caches}
     end
+  end
+
+  @spec emit_truncation_transition(boolean(), boolean(), non_neg_integer(), [entry()], Caches.t()) ::
+          {binary() | nil, Caches.t()}
+  defp emit_truncation_transition(truncated?, truncated?, _epoch, _entries, caches),
+    do: {nil, caches}
+
+  defp emit_truncation_transition(_previous_truncated?, truncated?, epoch, entries, caches) do
+    {build_append(epoch, truncated?, 0, Enum.count(entries), []), caches}
   end
 
   # ── Delta selection ──
@@ -194,14 +204,14 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder do
 
   # ── Frame building ──
 
-  @spec build_full_replace(non_neg_integer(), [entry()]) :: binary()
-  defp build_full_replace(epoch, entries) do
+  @spec build_full_replace(non_neg_integer(), boolean(), [entry()]) :: binary()
+  defp build_full_replace(epoch, truncated?, entries) do
     payload =
       Writer.new(@command)
       |> Writer.uint8(:version, @version)
       |> Writer.uint8(:mode, @mode_full_replace)
       |> Writer.uint32(:epoch, epoch)
-      |> Writer.uint8(:truncated, 0)
+      |> Writer.uint8(:truncated, if(truncated?, do: 1, else: 0))
       |> Writer.uint32(:message_count, Enum.count(entries))
       |> Writer.append(entries_body(entries))
       |> Writer.finish()
@@ -209,15 +219,15 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder do
     frame(payload)
   end
 
-  @spec build_append(non_neg_integer(), non_neg_integer(), non_neg_integer(), [entry()]) ::
+  @spec build_append(non_neg_integer(), boolean(), non_neg_integer(), non_neg_integer(), [entry()]) ::
           binary()
-  defp build_append(epoch, trim_front, base_count, entries) do
+  defp build_append(epoch, truncated?, trim_front, base_count, entries) do
     payload =
       Writer.new(@command)
       |> Writer.uint8(:version, @version)
       |> Writer.uint8(:mode, @mode_append)
       |> Writer.uint32(:epoch, epoch)
-      |> Writer.uint8(:truncated, 0)
+      |> Writer.uint8(:truncated, if(truncated?, do: 1, else: 0))
       |> Writer.uint32(:trim_front, trim_front)
       |> Writer.uint32(:base_count, base_count)
       |> Writer.uint32(:message_count, Enum.count(entries))

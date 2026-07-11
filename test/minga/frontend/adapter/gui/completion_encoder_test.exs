@@ -3,6 +3,7 @@ defmodule Minga.Frontend.Adapter.GUI.CompletionEncoderTest do
 
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.CompletionEncoder
+  alias Minga.Frontend.Adapter.GUI.EncodingError
   alias Minga.RenderModel.UI.Completion
   alias Minga.RenderModel.UI.Completion.Item
 
@@ -114,5 +115,51 @@ defmodule Minga.Frontend.Adapter.GUI.CompletionEncoderTest do
       assert label == "map"
       assert detail == "Enum.map/2"
     end
+
+    test "rejects every oversized completion coordinate with command-scoped metadata" do
+      base = %Completion{visible?: true}
+
+      for field <- [:cursor_row, :cursor_col, :selected_offset] do
+        model = Map.put(base, field, 65_536)
+        assert_encoding_error(model, field, 65_536)
+      end
+    end
+
+    test "rejects oversized completion item counts and strings without truncation" do
+      item = %Item{kind: :function, label: "map", detail: "Enum.map/2"}
+
+      assert_encoding_error(
+        %Completion{visible?: true, items: List.duplicate(item, 65_536)},
+        :item_count,
+        65_536
+      )
+
+      oversized = String.duplicate("x", 65_536)
+
+      for {field, item} <- [
+            item_label: %{item | label: oversized},
+            item_detail: %{item | detail: oversized}
+          ] do
+        assert_encoding_error(%Completion{visible?: true, items: [item]}, field, 65_536)
+      end
+
+      assert_encoding_error(
+        %Completion{visible?: true, documentation: oversized},
+        :documentation,
+        65_536
+      )
+    end
+  end
+
+  defp assert_encoding_error(model, field, actual) do
+    error = assert_raise EncodingError, fn -> CompletionEncoder.encode_command(model) end
+
+    assert %EncodingError{
+             command: :gui_completion,
+             field: ^field,
+             actual: ^actual,
+             min: 0,
+             max: 65_535
+           } = error
   end
 end

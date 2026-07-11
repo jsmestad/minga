@@ -1107,6 +1107,22 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["diagnostic_count"] == 1
     end
 
+    test "round-trips a large full row through the viewport delta", %{port: port} do
+      assert_large_delta_row_round_trip(
+        port,
+        &WindowEncoder.encode_viewport_delta/2,
+        "gui_window_viewport_delta"
+      )
+    end
+
+    test "round-trips a large full row through the rows delta", %{port: port} do
+      assert_large_delta_row_round_trip(
+        port,
+        &WindowEncoder.encode_rows_delta/2,
+        "gui_window_rows_delta"
+      )
+    end
+
     test "round-trips rows delta with ref and full entries", %{port: port} do
       alias Minga.RenderModel.Window
       alias Minga.RenderModel.Window.Row
@@ -1162,4 +1178,71 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert full["text"] == "new"
     end
   end
+
+  @spec assert_large_delta_row_round_trip(
+          port(),
+          (Minga.RenderModel.Window.t(), map() -> {binary(), boolean()}),
+          String.t()
+        ) :: :ok
+  defp assert_large_delta_row_round_trip(port, encode_delta, expected_type) do
+    alias Minga.RenderModel.Window
+    alias Minga.RenderModel.Window.Row
+
+    text = String.duplicate("x", 70_000)
+
+    row = %Row{
+      row_id: Row.stable_id(:normal, 0),
+      row_type: :normal,
+      buf_line: 0,
+      text: text,
+      spans: [],
+      content_hash: 1
+    }
+
+    window = %Window{
+      window_id: 7,
+      content_kind: :buffer,
+      rect: {0, 0, 80, 20},
+      full_refresh: false,
+      cursor_row: 0,
+      cursor_col: 0,
+      cursor_shape: :beam,
+      content_epoch: 42,
+      rows: [row]
+    }
+
+    {command, false} = encode_delta.(window, %{})
+    rows_payload = section_payload(command, 0x02)
+
+    assert <<1::32, 1::8, _row_type::8, _row_id::64, _buf_line::32, _content_hash::32,
+             text_length::32, row_text::binary-size(text_length), 0::16>> = rows_payload
+
+    assert text_length == byte_size(text)
+    assert text_length > 65_535
+    assert byte_size(rows_payload) > 65_535
+    assert row_text == text
+
+    decoded = round_trip(port, command)
+    assert decoded["type"] == expected_type
+    assert [%{"entry_type" => "full", "text" => ^text}] = decoded["rows"]
+    :ok
+  end
+
+  @spec section_payload(binary(), non_neg_integer()) :: binary()
+  defp section_payload(<<_opcode::8, _section_count::8, sections::binary>>, section_id) do
+    find_section_payload(sections, section_id)
+  end
+
+  @spec find_section_payload(binary(), non_neg_integer()) :: binary()
+  defp find_section_payload(
+         <<section_id::8, length::32, payload::binary-size(length), _rest::binary>>,
+         section_id
+       ),
+       do: payload
+
+  defp find_section_payload(
+         <<_id::8, length::32, _payload::binary-size(length), rest::binary>>,
+         section_id
+       ),
+       do: find_section_payload(rest, section_id)
 end

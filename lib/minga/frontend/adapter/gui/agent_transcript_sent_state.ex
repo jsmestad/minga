@@ -15,8 +15,14 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptSentState do
   @type t :: %__MODULE__{
           fp: integer() | nil,
           epoch: non_neg_integer() | nil,
-          keys: [key()]
+          keys: [key()],
+          truncated?: boolean()
         }
 
-  defstruct fp: nil, epoch: nil, keys: []
+  defstruct fp: nil, epoch: nil, keys: [], truncated?: false
+
+  @spec emitted(integer(), non_neg_integer(), [key()], boolean()) :: t()
+  def emitted(fp, epoch, keys, truncated?) do
+    %__MODULE__{fp: fp, epoch: epoch, keys: keys, truncated?: truncated?}
+  end
 end

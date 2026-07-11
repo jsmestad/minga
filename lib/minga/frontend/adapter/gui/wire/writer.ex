@@ -85,6 +85,11 @@ defmodule Minga.Frontend.Adapter.GUI.Wire.Writer do
     check_uint(writer, field, value, Wire.max_u16())
   end
 
+  @spec check_uint24(t(), atom(), term()) :: t()
+  def check_uint24(%__MODULE__{} = writer, field, value) do
+    check_uint(writer, field, value, 16_777_215)
+  end
+
   @spec check_uint32(t(), atom(), term()) :: t()
   def check_uint32(%__MODULE__{} = writer, field, value) do
     check_uint(writer, field, value, Wire.max_u32())
@@ -93,6 +98,21 @@ defmodule Minga.Frontend.Adapter.GUI.Wire.Writer do
   @spec check_uint64(t(), atom(), term()) :: t()
   def check_uint64(%__MODULE__{} = writer, field, value) do
     check_uint(writer, field, value, 18_446_744_073_709_551_615)
+  end
+
+  @spec check_string8(t(), atom(), iodata()) :: t()
+  def check_string8(%__MODULE__{} = writer, field, value) do
+    check_bytes(writer, field, value, Wire.max_u8())
+  end
+
+  @spec check_string16(t(), atom(), iodata()) :: t()
+  def check_string16(%__MODULE__{} = writer, field, value) do
+    check_bytes(writer, field, value, Wire.max_u16())
+  end
+
+  @spec check_string32(t(), atom(), iodata()) :: t()
+  def check_string32(%__MODULE__{} = writer, field, value) do
+    check_bytes(writer, field, value, Wire.max_u32())
   end
 
   @spec section16(t(), atom(), term(), iodata()) :: t()
@@ -161,6 +181,13 @@ defmodule Minga.Frontend.Adapter.GUI.Wire.Writer do
 
   defp check_uint(%__MODULE__{} = writer, field, value, max) do
     Wire.validate_uint!(writer.command, field, value, max)
+    writer
+  end
+
+  @spec check_bytes(t(), atom(), iodata(), non_neg_integer()) :: t()
+  defp check_bytes(%__MODULE__{} = writer, field, value, max) do
+    bytes = :erlang.iolist_to_binary([value])
+    Wire.validate_uint!(writer.command, field, byte_size(bytes), max)
     writer
   end
 end

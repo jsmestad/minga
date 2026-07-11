@@ -27,6 +27,7 @@ defmodule Mix.Tasks.Conformance.Gen do
   use Mix.Task
 
   alias Minga.Config.Options
+  alias Minga.Frontend.Adapter.GUI.AgentChatMessageCodec
   alias Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.WindowEncoder
@@ -57,9 +58,9 @@ defmodule Mix.Tasks.Conformance.Gen do
     File.mkdir_p!(Path.join(@corpus_dir, "input"))
     File.mkdir_p!(Path.join(@corpus_dir, "chat"))
 
-    # The chat family drives AgentTranscriptEncoder, which reads the resident
-    # byte-cap option from Config. Config is ETS-backed, so a server must exist
-    # or the read raises. Start one for the run (and stop it if we started it).
+    # The chat family uses the semantic transcript selector. It reads the
+    # resident byte-cap option from Config, so start its ETS-backed server for
+    # this run and stop it afterward when this task started it.
     started? = ensure_options_server()
 
     try do
@@ -709,33 +710,31 @@ defmodule Mix.Tasks.Conformance.Gen do
 
   @spec trim_front_eviction_midstream() :: transcript()
   defp trim_front_eviction_midstream do
-    with_low_cap(1_000, fn ->
-      # Each entry is 8 (id+len) + 200 (body) = 208 wire bytes; four fit under the
-      # 1000-byte cap, a fifth does not. Growing to six messages evicts the two
-      # oldest from the resident front (trim_front) and marks the stream truncated.
-      m1 = for i <- 1..4, do: sized_chat_msg(i, 200)
-      {f1, caches1} = AgentTranscriptEncoder.encode(chat_model(1, m1), Caches.new())
+    # Each entry is 8 (id+len) + 200 (body) = 208 wire bytes; four fit under the
+    # 1000-byte cap, a fifth does not. Growing to six messages evicts the two
+    # oldest from the semantic resident suffix and marks the stream truncated.
+    m1 = for i <- 1..4, do: sized_chat_msg(i, 200)
+    {f1, caches1} = AgentTranscriptEncoder.encode(chat_model(1, m1, 1_000), Caches.new())
 
-      m2 = for i <- 1..6, do: sized_chat_msg(i, 200)
-      {f2, _caches2} = AgentTranscriptEncoder.encode(chat_model(1, m2), caches1)
+    m2 = for i <- 1..6, do: sized_chat_msg(i, 200)
+    {f2, _caches2} = AgentTranscriptEncoder.encode(chat_model(1, m2, 1_000), caches1)
 
-      chat_transcript(
-        "trim_front_eviction_midstream",
-        "Streaming past the resident byte cap evicts the oldest messages from the store front (append trim_front) and flags the stream truncated, instead of degrading to a full_replace per frame. Both frontends drop the trimmed prefix and keep the most-recent contiguous suffix.",
-        [
-          transcript_frame(
-            "full_replace, 4 messages under the cap",
-            f1,
-            chat_expect(1, false, [1, 2, 3, 4])
-          ),
-          transcript_frame(
-            "append past the cap: front eviction (trim_front) + truncated",
-            f2,
-            chat_expect(1, true, [3, 4, 5, 6])
-          )
-        ]
-      )
-    end)
+    chat_transcript(
+      "trim_front_eviction_midstream",
+      "Streaming past the resident byte cap evicts the oldest messages from the store front (append trim_front) and flags the stream truncated, instead of degrading to a full_replace per frame. Both frontends drop the trimmed prefix and keep the most-recent contiguous suffix.",
+      [
+        transcript_frame(
+          "full_replace, 4 messages under the cap",
+          f1,
+          chat_expect(1, false, [1, 2, 3, 4])
+        ),
+        transcript_frame(
+          "append past the cap: front eviction (trim_front) + truncated",
+          f2,
+          chat_expect(1, true, [3, 4, 5, 6])
+        )
+      ]
+    )
   end
 
   @spec epoch_flip_midstream() :: transcript()
@@ -797,9 +796,23 @@ defmodule Mix.Tasks.Conformance.Gen do
 
   # ── Chat builders + step shaping ──────────────────────────────────────────
 
-  @spec chat_model(non_neg_integer(), [AgentChat.message()]) :: AgentChat.t()
-  defp chat_model(epoch, messages) do
+  @spec chat_model(non_neg_integer(), [AgentChat.message()], pos_integer() | nil) :: AgentChat.t()
+  defp chat_model(epoch, messages, max_bytes \\ nil)
+
+  defp chat_model(epoch, messages, nil) do
     %AgentChat{visible?: true, resident_messages: messages, transcript_epoch: epoch}
+  end
+
+  defp chat_model(epoch, messages, max_bytes) do
+    {resident_messages, resident_truncated?} =
+      AgentChat.resident_suffix(messages, max_bytes, &AgentChatMessageCodec.resident_entry_size/1)
+
+    %AgentChat{
+      visible?: true,
+      resident_messages: resident_messages,
+      resident_truncated?: resident_truncated?,
+      transcript_epoch: epoch
+    }
   end
 
   @spec chat_msg(pos_integer(), String.t()) :: AgentChat.message()
@@ -847,23 +860,6 @@ defmodule Mix.Tasks.Conformance.Gen do
   @spec chat_transcript(String.t(), String.t(), [map()]) :: transcript()
   defp chat_transcript(name, description, steps) do
     transcript(name, "chat", %{swift: true, go: true}, description, steps)
-  end
-
-  # Runs `fun` with a low resident byte cap so the trim_front eviction transcript
-  # is reachable without a multi-megabyte fixture. Overrides the option on the
-  # default Options server (started by run/0) and restores it afterward, so the
-  # encoder's Config.get sees the temporary cap.
-  @spec with_low_cap(pos_integer(), (-> transcript())) :: transcript()
-  defp with_low_cap(bytes, fun) do
-    server = Options.default_server()
-    previous = Options.get(server, :agent_transcript_resident_max_bytes)
-    Options.set(server, :agent_transcript_resident_max_bytes, bytes)
-
-    try do
-      fun.()
-    after
-      Options.set(server, :agent_transcript_resident_max_bytes, previous)
-    end
   end
 
   # ── Reconciliation rule (mirrors docs/GUI_PROTOCOL.md) ────────────────────

@@ -2,7 +2,9 @@ defmodule Minga.Frontend.Adapter.GUI.GitStatusEncoderTest do
   use ExUnit.Case, async: true
 
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.EncodingError
   alias Minga.Frontend.Adapter.GUI.GitStatusEncoder
+  alias Minga.RenderModel.UI.GitStatus
   alias MingaEditor.RenderModel.UI.GitStatusBuilder
 
   @op_gui_git_status Minga.Protocol.Opcodes.gui_git_status()
@@ -217,6 +219,72 @@ defmodule Minga.Frontend.Adapter.GUI.GitStatusEncoderTest do
 
       assert decoded.repo_state == 2
     end
+
+    test "rejects oversized git status header counts" do
+      base = valid_git_status()
+
+      for field <- [:ahead, :behind, :stash_count] do
+        assert_encoding_error(Map.put(base, field, 65_536), field, 65_536, 65_535)
+      end
+
+      assert_encoding_error(
+        %{base | entries: List.duplicate(hd(base.entries), 65_536)},
+        :entry_count,
+        65_536,
+        65_535
+      )
+    end
+
+    test "rejects every oversized git status string" do
+      oversized = String.duplicate("x", 65_536)
+      base = valid_git_status()
+      [entry] = base.entries
+
+      for {field, model} <- [
+            branch: %{base | branch: oversized},
+            entry_path: %{base | entries: [%{entry | path: oversized}]},
+            toast_message: %{
+              base
+              | git_toast: %{present: 1, level: :error, action: :none, message: oversized}
+            },
+            entry_base_path: %{base | entry_base_path: oversized},
+            last_commit_message: %{base | last_commit_message: oversized}
+          ] do
+        assert_encoding_error(model, field, 65_536, 65_535)
+      end
+    end
+
+    test "rejects oversized nested git entry numeric fields" do
+      base = valid_git_status()
+      [entry] = base.entries
+
+      for {field, changed_entry, actual, max} <- [
+            {:entry_path_hash, %{entry | path_hash: 0x100000000}, 0x100000000, 0xFFFFFFFF},
+            {:entry_section, %{entry | section: 256}, 256, 255}
+          ] do
+        assert_encoding_error(%{base | entries: [changed_entry]}, field, actual, max)
+      end
+    end
+  end
+
+  defp valid_git_status do
+    %GitStatus{
+      repo_state: :normal,
+      syncing: false,
+      entries: [%{path_hash: 1, section: 1, status: :modified, path: "lib/file.ex"}]
+    }
+  end
+
+  defp assert_encoding_error(model, field, actual, max) do
+    error = assert_raise EncodingError, fn -> GitStatusEncoder.encode_command(model) end
+
+    assert %EncodingError{
+             command: :gui_git_status,
+             field: ^field,
+             actual: ^actual,
+             min: 0,
+             max: ^max
+           } = error
   end
 
   # Decodes the production gui_git_status wire format (opcode stripped) into a

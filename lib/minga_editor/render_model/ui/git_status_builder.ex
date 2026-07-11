@@ -1,10 +1,7 @@
 defmodule MingaEditor.RenderModel.UI.GitStatusBuilder do
   @moduledoc false
 
-  alias Minga.Frontend.Protocol.Encoding
   alias Minga.RenderModel.UI.GitStatus
-
-  @max_u16 65_535
 
   @spec build(map() | nil, boolean(), map() | nil) :: GitStatus.t()
   def build(nil, syncing, toast) do
@@ -32,10 +29,9 @@ defmodule MingaEditor.RenderModel.UI.GitStatusBuilder do
       ahead: Map.get(data, :ahead) || 0,
       behind: Map.get(data, :behind) || 0,
       entries: wire_entries(Map.get(data, :entries) || []),
-      entry_base_path:
-        truncate(Map.get(data, :entry_base_path) || Map.get(data, :git_root) || ""),
-      last_commit_message: truncate(Map.get(data, :last_commit_message) || ""),
-      stash_count: min(Map.get(data, :stash_count) || 0, @max_u16),
+      entry_base_path: Map.get(data, :entry_base_path) || Map.get(data, :git_root) || "",
+      last_commit_message: Map.get(data, :last_commit_message) || "",
+      stash_count: Map.get(data, :stash_count) || 0,
       git_toast: normalize_toast(toast)
     }
   end
@@ -66,10 +62,6 @@ defmodule MingaEditor.RenderModel.UI.GitStatusBuilder do
   defp section(%{status: :untracked}), do: 2
   defp section(%{status: :conflict}), do: 3
   defp section(_entry), do: 1
-
-  # UTF-8 truncation to the u16 byte limit, formerly inline in the encoder.
-  @spec truncate(String.t()) :: binary()
-  defp truncate(text), do: Encoding.utf8_prefix_bytes(text, @max_u16)
 
   # Normalize a raw toast into the non-nullable wire map (presence byte plus the
   # conditional level/action/message tail). A nil action maps to :none.

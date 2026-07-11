@@ -41,6 +41,13 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatMessageCodec do
     |> Writer.finish()
   end
 
+  @doc "Returns the 0x86 byte cost of one resident transcript entry."
+  @spec resident_entry_size(AgentChat.message()) :: pos_integer()
+  def resident_entry_size({id, body}) when is_integer(id),
+    do: 8 + byte_size(encode_message_body(body))
+
+  def resident_entry_size(body), do: 8 + byte_size(encode_message_body(body))
+
   @spec encode_message_body(AgentChat.message_body()) :: binary()
   def encode_message_body({:user, text}), do: encode_text_message(0x01, text)
   def encode_message_body({:user, text, _attachments}), do: encode_text_message(0x01, text)
