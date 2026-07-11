@@ -5,8 +5,10 @@ defmodule Mix.Tasks.Dialyzer.Incremental do
   Runs native OTP incremental Dialyzer with the same project scope, warning
   configuration, and warning filters as Dialyxir.
 
-  The incompatible incremental PLT is kept separately beneath the active Mix
-  build environment. Remove it with `mix dialyzer.incremental.clean`.
+  Incremental PLTs are kept beneath the active Mix build environment. When
+  the current configuration cache is absent, a cache from the same OTP and
+  Elixir toolchain seeds the new analysis. Remove all caches with
+  `mix dialyzer.incremental.clean`.
   """
 
   use Mix.Task
@@ -17,7 +19,13 @@ defmodule Mix.Tasks.Dialyzer.Incremental do
   @default_warnings [:unknown]
   @dialyxir_core_apps [:erts, :kernel, :stdlib, :crypto, :elixir]
 
-  @type cache_paths :: %{root: Path.t(), plt: Path.t(), lock: Path.t()}
+  @type cache_paths :: %{
+          root: Path.t(),
+          plt: Path.t(),
+          legacy_plt: Path.t(),
+          lock: Path.t(),
+          compatible_prefix: String.t()
+        }
 
   @impl Mix.Task
   @spec run([String.t()]) :: :ok
@@ -33,7 +41,9 @@ defmodule Mix.Tasks.Dialyzer.Incremental do
     File.mkdir_p!(cache.root)
 
     with_lock(cache.lock, fn ->
-      run_with_cache(cache, project_files, analysis_dirs)
+      initial_plt = initial_plt(cache)
+      Mix.shell().info("Incremental Dialyzer seed: #{seed_label(cache, initial_plt)}")
+      run_with_cache(cache, initial_plt, project_files, analysis_dirs)
     end)
   end
 
@@ -43,12 +53,18 @@ defmodule Mix.Tasks.Dialyzer.Incremental do
   @spec cache_paths() :: cache_paths()
   def cache_paths do
     root = Path.join(Mix.Project.build_path(), "dialyzer_incremental")
-    key = cache_key(otp_version(), System.version(), lock_contents(), dialyzer_config())
+    otp = otp_version()
+    elixir = System.version()
+    key = cache_key(otp, elixir, lock_contents(), dialyzer_config())
+    toolchain = toolchain_key(otp, elixir)
+    compatible_prefix = "incremental-#{toolchain}-"
 
     %{
       root: root,
-      plt: Path.join(root, "incremental-#{key}.plt"),
-      lock: Path.join(Mix.Project.build_path(), ".dialyzer_incremental.lock")
+      plt: Path.join(root, "#{compatible_prefix}#{key}.plt"),
+      legacy_plt: Path.join(root, "incremental-#{key}.plt"),
+      lock: Path.join(Mix.Project.build_path(), ".dialyzer_incremental.lock"),
+      compatible_prefix: compatible_prefix
     }
   end
 
@@ -62,6 +78,36 @@ defmodule Mix.Tasks.Dialyzer.Incremental do
     |> Base.url_encode64(padding: false)
     |> binary_part(0, 24)
   end
+
+  @doc "Builds a cache namespace shared only by the same OTP and Elixir versions."
+  @spec toolchain_key(String.t(), String.t()) :: String.t()
+  def toolchain_key(otp_version, elixir_version) do
+    :crypto.hash(:sha256, :erlang.term_to_binary({otp_version, elixir_version}))
+    |> Base.url_encode64(padding: false)
+    |> binary_part(0, 16)
+  end
+
+  @doc "Returns the current cache or the newest compatible cache to seed an analysis."
+  @spec initial_plt(cache_paths()) :: Path.t()
+  def initial_plt(%{plt: plt} = cache) do
+    initial_plt(File.exists?(plt), cache)
+  end
+
+  defp initial_plt(true, %{plt: plt}), do: plt
+
+  defp initial_plt(false, %{legacy_plt: legacy_plt} = cache) do
+    initial_plt(File.exists?(legacy_plt), legacy_plt, cache)
+  end
+
+  defp initial_plt(true, legacy_plt, _cache), do: legacy_plt
+  defp initial_plt(false, _legacy_plt, cache), do: newest_compatible_plt(cache) || cache.plt
+
+  defp seed_label(%{plt: plt}, plt) do
+    if File.exists?(plt), do: "current cache", else: "cold start"
+  end
+
+  defp seed_label(%{legacy_plt: legacy_plt}, legacy_plt), do: "legacy exact cache"
+  defp seed_label(_cache, _initial_plt), do: "same-toolchain cache"
 
   @doc "Runs a function while exclusively holding the incremental cache lock."
   @spec with_lock(Path.t(), (-> term())) :: term()
@@ -90,26 +136,41 @@ defmodule Mix.Tasks.Dialyzer.Incremental do
 
   @doc "Atomically promotes a completed temporary PLT to the active cache."
   @spec promote_cache(Path.t(), Path.t()) :: :ok | :unchanged
-  def promote_cache(temp_path, cache_path) do
-    promote_cache(File.exists?(temp_path), temp_path, cache_path)
+  def promote_cache(temp_path, cache_path), do: promote_cache(temp_path, cache_path, cache_path)
+
+  @doc "Atomically promotes a completed temporary PLT or compatible seed to the active cache."
+  @spec promote_cache(Path.t(), Path.t(), Path.t()) :: :ok | :unchanged
+  def promote_cache(temp_path, cache_path, seed_path) do
+    promote_cache(File.exists?(temp_path), temp_path, cache_path, seed_path)
   end
 
-  defp promote_cache(true, temp_path, cache_path) do
+  defp promote_cache(true, temp_path, cache_path, _seed_path) do
+    replace_cache!(temp_path, cache_path)
+  end
+
+  # An unchanged incremental run may leave its seed untouched instead of writing the requested output PLT.
+  defp promote_cache(false, temp_path, cache_path, seed_path) do
+    promote_unchanged_cache(File.exists?(cache_path), temp_path, cache_path, seed_path)
+  end
+
+  defp promote_unchanged_cache(true, _temp_path, _cache_path, _seed_path), do: :unchanged
+
+  defp promote_unchanged_cache(false, temp_path, cache_path, seed_path) do
+    if File.exists?(seed_path) do
+      File.cp!(seed_path, temp_path)
+      replace_cache!(temp_path, cache_path)
+    else
+      Mix.raise("native incremental Dialyzer succeeded without producing a cache")
+    end
+  end
+
+  defp replace_cache!(temp_path, cache_path) do
     case File.rename(temp_path, cache_path) do
       :ok ->
         :ok
 
       {:error, reason} ->
         Mix.raise("could not replace incremental Dialyzer cache: #{:file.format_error(reason)}")
-    end
-  end
-
-  # An unchanged incremental run may leave the existing PLT untouched instead of writing the requested output PLT.
-  defp promote_cache(false, _temp_path, cache_path) do
-    if File.exists?(cache_path) do
-      :unchanged
-    else
-      Mix.raise("native incremental Dialyzer succeeded without producing a cache")
     end
   end
 
@@ -137,14 +198,14 @@ defmodule Mix.Tasks.Dialyzer.Incremental do
     if parts == [], do: nil, else: "Incrementality: " <> Enum.join(parts, ", ")
   end
 
-  defp run_with_cache(cache, project_files, analysis_dirs) do
+  defp run_with_cache(cache, initial_plt, project_files, analysis_dirs) do
     suffix = "#{System.pid()}-#{System.unique_integer([:positive, :monotonic])}"
     temp_plt = Path.join(cache.root, ".incremental-#{suffix}.plt")
     metrics_path = Path.join(cache.root, ".metrics-#{suffix}.txt")
 
     args = [
       analysis_type: :incremental,
-      init_plt: String.to_charlist(cache.plt),
+      init_plt: String.to_charlist(initial_plt),
       output_plt: String.to_charlist(temp_plt),
       files: project_files,
       files_rec: analysis_dirs,
@@ -159,12 +220,12 @@ defmodule Mix.Tasks.Dialyzer.Incremental do
     ]
 
     try do
-      case Dialyzer.dialyze(args) do
+      case Dialyzer.dialyze(args, Mix.Tasks.Dialyzer.Incremental.Runner) do
         {status, exit_status, [time | output]} when status in [:ok, :warn] ->
-          metrics = read_metrics!(metrics_path)
-          promote_cache(temp_plt, cache.plt)
           Mix.shell().info(time)
           Enum.each(output, &report(status, &1))
+          metrics = read_metrics!(metrics_path)
+          promote_cache(temp_plt, cache.plt, initial_plt)
           Mix.shell().info(metrics)
 
           if exit_status != 0 do
@@ -197,6 +258,37 @@ defmodule Mix.Tasks.Dialyzer.Incremental do
         )
     end
   end
+
+  defp newest_compatible_plt(%{root: root, compatible_prefix: compatible_prefix}) do
+    root
+    |> File.ls!()
+    |> Enum.filter(fn name ->
+      String.starts_with?(name, compatible_prefix) and String.ends_with?(name, ".plt")
+    end)
+    |> Enum.map(fn name -> cache_with_mtime!(Path.join(root, name)) end)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.sort_by(&elem(&1, 1), :desc)
+    |> List.first()
+    |> cache_path()
+  end
+
+  defp cache_with_mtime!(path) do
+    case File.stat(path) do
+      {:ok, %File.Stat{type: :regular, mtime: mtime}} ->
+        {path, mtime}
+
+      {:ok, %File.Stat{}} ->
+        nil
+
+      {:error, reason} ->
+        Mix.raise(
+          "could not inspect incremental Dialyzer cache #{path}: #{:file.format_error(reason)}"
+        )
+    end
+  end
+
+  defp cache_path({path, _mtime}), do: path
+  defp cache_path(nil), do: nil
 
   defp application_dirs(apps) do
     apps

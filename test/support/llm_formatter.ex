@@ -43,21 +43,12 @@ defmodule Minga.Test.LLMFormatter do
 
   def handle_cast({:suite_finished, times_us}, config) do
     IO.write("\n")
-
-    # Print module summary
-    config.module_results
-    |> Enum.sort_by(fn {name, _} -> name end)
-    |> Enum.each(fn {_name, %{passed: passed, failed: failed, time_us: time_us, file: file}} ->
-      status = if failed == 0, do: "PASS", else: "FAIL"
-      ms = format_ms(time_us)
-      IO.puts("  #{status} #{file} (#{passed + failed} tests, #{ms})")
-    end)
-
+    print_module_summary(config.module_results)
     IO.write("\n")
     IO.puts(format_times(times_us))
 
     # Reprint all failure locations grouped together for easy copy-paste
-    if config.failure_counter > 0 do
+    if config.failures != [] do
       IO.puts("\nFailed test locations (copy-paste to re-run):\n")
 
       Enum.each(config.failures, fn {file, line, name} ->
@@ -152,7 +143,8 @@ defmodule Minga.Test.LLMFormatter do
 
     IO.puts("\n#{formatted}")
 
-    failed_count = Enum.count(test_module.tests, &is_nil(&1.state))
+    failed_count = max(Enum.count(test_module.tests, &is_nil(&1.state)), 1)
+    config = update_module_failure(config, test_module, failed_count)
 
     {:noreply, %{config | failure_counter: config.failure_counter + failed_count}}
   end
@@ -208,6 +200,52 @@ defmodule Minga.Test.LLMFormatter do
     end)
   end
 
+  defp update_module_failure(config, %ExUnit.TestModule{name: name, file: file}, failed_count) do
+    update_in(config.module_results, fn results ->
+      Map.update(
+        results,
+        name,
+        %{passed: 0, failed: failed_count, time_us: 0, file: Path.relative_to_cwd(file)},
+        fn result -> Map.update!(result, :failed, &max(&1, failed_count)) end
+      )
+    end)
+  end
+
+  defp print_module_summary(module_results) do
+    modules = Map.values(module_results)
+    passed_modules = Enum.filter(modules, &(&1.failed == 0))
+    failed_modules = Enum.reject(modules, &(&1.failed == 0))
+
+    IO.puts("Modules: #{length(passed_modules)} passed, #{length(failed_modules)} failed")
+    print_slowest_modules(passed_modules)
+    print_failed_modules(failed_modules)
+  end
+
+  defp print_slowest_modules([]), do: :ok
+
+  defp print_slowest_modules(modules) do
+    IO.puts("Slowest passing modules:")
+
+    modules
+    |> Enum.sort_by(& &1.time_us, :desc)
+    |> Enum.take(5)
+    |> Enum.each(&print_module_result("PASS", &1))
+  end
+
+  defp print_failed_modules([]), do: :ok
+
+  defp print_failed_modules(modules) do
+    IO.puts("Failed modules:")
+
+    modules
+    |> Enum.sort_by(& &1.file)
+    |> Enum.each(&print_module_result("FAIL", &1))
+  end
+
+  defp print_module_result(status, %{passed: passed, failed: failed, time_us: time_us, file: file}) do
+    IO.puts("  #{status} #{file} (#{passed + failed} tests, #{format_ms(time_us)})")
+  end
+
   defp format_ms(us) do
     ms = div(us, 1000)
 
@@ -219,9 +257,6 @@ defmodule Minga.Test.LLMFormatter do
   end
 
   defp print_summary(config) do
-    total =
-      Enum.reduce(config.test_counter, 0, fn {_, count}, acc -> acc + count end)
-
     test_counts =
       config.test_counter
       |> Enum.sort()
@@ -231,6 +266,7 @@ defmodule Minga.Test.LLMFormatter do
         "#{count} #{label}"
       end)
       |> Enum.join(", ")
+      |> empty_test_counts()
 
     parts = [
       test_counts,
@@ -252,9 +288,12 @@ defmodule Minga.Test.LLMFormatter do
         do: parts ++ ["#{config.excluded_counter} excluded"],
         else: parts
 
-    status = if config.failure_counter > 0 or total == 0, do: "FAIL", else: "PASS"
+    status = if config.failure_counter > 0, do: "FAIL", else: "PASS"
     IO.puts("#{status}: #{Enum.join(parts, ", ")}")
   end
+
+  defp empty_test_counts(""), do: "0 tests"
+  defp empty_test_counts(test_counts), do: test_counts
 
   # Plain text formatter (no ANSI colors)
   defp plain_formatter(:diff_enabled?, _), do: false

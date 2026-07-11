@@ -7,6 +7,7 @@ Code.require_file("mix/compilers/minga_zig.ex", __DIR__)
 Code.require_file("mix/compilers/minga_go_tui.ex", __DIR__)
 Code.require_file("mix/tasks/language_aliases.gen.ex", __DIR__)
 Code.require_file("mix/tasks/protocol.gen.ex", __DIR__)
+Code.require_file("mix/tasks/dialyzer.incremental.runner.ex", __DIR__)
 Code.require_file("mix/tasks/dialyzer.incremental.ex", __DIR__)
 Code.require_file("mix/tasks/dialyzer.incremental.clean.ex", __DIR__)
 Code.require_file("mix/tasks/native_build/result.ex", __DIR__)
@@ -382,7 +383,7 @@ defmodule Minga.MixProject do
       ],
       "test.debug": ["test --warnings-as-errors --trace --max-failures 3 --exclude conformance"],
       "test.quick": [
-        "test --warnings-as-errors --stale --max-failures 5 --exclude heavy --exclude conformance"
+        "test --warnings-as-errors --formatter Minga.Test.LLMFormatter --stale --max-failures 5 --exclude heavy --exclude conformance"
       ],
       "test.heavy": ["test --warnings-as-errors --only heavy --exclude conformance"],
       conformance: [

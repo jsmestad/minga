@@ -20,6 +20,39 @@ defmodule Mix.Tasks.Dialyzer.IncrementalTest do
     end
   end
 
+  test "toolchain key changes for OTP and Elixir version changes" do
+    key = Incremental.toolchain_key("29.0.3", "1.20.2")
+
+    refute Incremental.toolchain_key("29.0.4", "1.20.2") == key
+    refute Incremental.toolchain_key("29.0.3", "1.20.3") == key
+  end
+
+  test "uses a compatible cache when the exact cache is absent", %{tmp_dir: dir} do
+    cache = cache_paths(dir)
+    compatible = Path.join(dir, "#{cache.compatible_prefix}previous.plt")
+    File.write!(compatible, "compatible cache")
+
+    assert Incremental.initial_plt(cache) == compatible
+
+    File.write!(cache.plt, "exact cache")
+    assert Incremental.initial_plt(cache) == cache.plt
+  end
+
+  test "does not use a cache from another toolchain", %{tmp_dir: dir} do
+    cache = cache_paths(dir)
+    incompatible = Path.join(dir, "incremental-other-toolchain-previous.plt")
+    File.write!(incompatible, "incompatible cache")
+
+    assert Incremental.initial_plt(cache) == cache.plt
+  end
+
+  test "uses the previous exact cache filename as a migration seed", %{tmp_dir: dir} do
+    cache = cache_paths(dir)
+    File.write!(cache.legacy_plt, "legacy cache")
+
+    assert Incremental.initial_plt(cache) == cache.legacy_plt
+  end
+
   test "exclusive lock rejects a concurrent writer without removing its lock", %{tmp_dir: dir} do
     lock_path = Path.join(dir, ".lock")
     File.write!(lock_path, "first writer")
@@ -58,6 +91,16 @@ defmodule Mix.Tasks.Dialyzer.IncrementalTest do
 
     assert :unchanged = Incremental.promote_cache(Path.join(dir, "missing.tmp"), cache_path)
     assert File.read!(cache_path) == "current cache"
+  end
+
+  defp cache_paths(dir) do
+    %{
+      root: dir,
+      plt: Path.join(dir, "incremental-compatible-toolchain-current.plt"),
+      legacy_plt: Path.join(dir, "incremental-current.plt"),
+      lock: Path.join(dir, ".lock"),
+      compatible_prefix: "incremental-compatible-toolchain-"
+    }
   end
 
   test "metrics report only values emitted by OTP" do

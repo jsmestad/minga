@@ -82,7 +82,7 @@ for path in "${changed_paths[@]}"; do
 
   case "$path" in
     lib/*.ex|lib/*.exs|mix/*.ex|mix/*.exs|test/*.ex|test/*.exs)
-      if [[ -f "$path" && "$path" != test/support/* ]]; then
+      if [[ -f "$path" ]]; then
         append_source "$path"
       fi
       ;;
