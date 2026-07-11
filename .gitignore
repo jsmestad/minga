@@ -60,6 +60,7 @@ macos/Tests/Snapshots/
 .minga/workspaces/
 
 # Agent / experiment scratch files
+.expert/
 .pi/npm/
 .standup/
 CLAUDE.md
