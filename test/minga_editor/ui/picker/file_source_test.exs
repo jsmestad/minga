@@ -2,7 +2,7 @@ defmodule MingaEditor.UI.Picker.FileSourceTest do
   @moduledoc "Tests frecency ordering in FileSource candidates."
 
   # Uses the global Minga.Project singleton to drive FileSource.project_root/0.
-  use Minga.Test.EditorCase, async: false
+  use Minga.Test.EditorCase, async: false, rendering: :disabled
 
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.State, as: EditorState

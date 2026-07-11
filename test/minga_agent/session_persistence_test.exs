@@ -17,23 +17,34 @@ defmodule MingaAgent.SessionPersistenceTest do
       assert id1 != id2
     end
 
-    test "load_session replaces messages" do
-      session = start_subscribed_session()
+    @tag :tmp_dir
+    test "load_session replaces messages", %{tmp_dir: dir} do
+      session =
+        start_test_session(
+          provider: Minga.Test.SessionMockProvider,
+          provider_opts: [],
+          session_store_dir: dir
+        )
+
+      Session.subscribe(session)
       _id = Session.session_id(session)
 
-      SessionStore.save(%{
-        id: "loaded-session",
-        timestamp: DateTime.to_iso8601(DateTime.utc_now()),
-        model_name: "test-model",
-        messages: [{:user, "loaded message"}, {:assistant, "loaded reply"}],
-        usage: %MingaAgent.TurnUsage{
-          input: 500,
-          output: 200,
-          cache_read: 0,
-          cache_write: 0,
-          cost: 0.01
-        }
-      })
+      SessionStore.save(
+        %{
+          id: "loaded-session",
+          timestamp: DateTime.to_iso8601(DateTime.utc_now()),
+          model_name: "test-model",
+          messages: [{:user, "loaded message"}, {:assistant, "loaded reply"}],
+          usage: %MingaAgent.TurnUsage{
+            input: 500,
+            output: 200,
+            cache_read: 0,
+            cache_write: 0,
+            cost: 0.01
+          }
+        },
+        dir
+      )
 
       :ok = Session.load_session(session, "loaded-session")
 
@@ -43,11 +54,19 @@ defmodule MingaAgent.SessionPersistenceTest do
       assert [{:user, "loaded message"}] = user_msgs
     end
 
-    test "load_session returns error for missing session" do
-      session = start_subscribed_session()
+    @tag :tmp_dir
+    test "load_session returns error for missing session", %{tmp_dir: dir} do
+      session =
+        start_test_session(
+          provider: Minga.Test.SessionMockProvider,
+          provider_opts: [],
+          session_store_dir: dir
+        )
+
       assert {:error, _} = Session.load_session(session, "nonexistent")
     end
 
+    @tag :tmp_dir
     test "load_session restores messages, model, provider metadata, and branches", %{tmp_dir: dir} do
       session =
         start_test_session(
@@ -101,6 +120,7 @@ defmodule MingaAgent.SessionPersistenceTest do
              ]
     end
 
+    @tag :tmp_dir
     test "load_session leaves existing memory untouched for legacy sessions without a memory snapshot",
          %{
            tmp_dir: dir
@@ -134,6 +154,7 @@ defmodule MingaAgent.SessionPersistenceTest do
       assert MingaAgent.Memory.read(dir) =~ "keep this memory"
     end
 
+    @tag :tmp_dir
     test "load_session saves the current dirty session before replacement", %{tmp_dir: dir} do
       session =
         start_test_session(

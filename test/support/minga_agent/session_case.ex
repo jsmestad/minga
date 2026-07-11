@@ -15,7 +15,6 @@ defmodule Minga.Test.SessionCase do
       alias MingaAgent.Session
       alias MingaAgent.SessionStore
 
-      @moduletag :tmp_dir
       @event_timeout 5_000
     end
   end

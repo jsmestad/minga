@@ -6,7 +6,7 @@ defmodule MingaEditor.HighlightIntegrationTest do
   highlight suites.
   """
 
-  use Minga.Test.EditorCase, async: true
+  use Minga.Test.EditorCase, async: true, rendering: :disabled
 
   alias MingaEditor.HighlightSync
 

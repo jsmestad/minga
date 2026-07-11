@@ -71,6 +71,7 @@ defmodule MingaEditor.Startup do
   @spec build_initial_state(keyword()) :: EditorState.t()
   def build_initial_state(opts) do
     backend = Keyword.get(opts, :backend, :headless)
+    rendering = rendering_policy(opts)
     port_manager = Keyword.get(opts, :port_manager, MingaEditor.Frontend.Manager)
     keymap_server = Keyword.get(opts, :keymap_server, Minga.Keymap.default_server())
     events_registry = Keyword.get(opts, :events_registry, Minga.Events.default_registry())
@@ -166,6 +167,7 @@ defmodule MingaEditor.Startup do
 
     state = %EditorState{
       backend: backend,
+      rendering: rendering,
       workspace: workspace,
       port_manager: port_manager,
       agent_provider_module: Keyword.get(opts, :agent_provider_module),
@@ -203,6 +205,21 @@ defmodule MingaEditor.Startup do
     current_tb = EditorState.tab_bar(state)
     tb = TabBar.update_context(current_tb, current_tb.active_id, context)
     EditorState.set_tab_bar(state, tb)
+  end
+
+  @spec rendering_policy(keyword()) :: EditorState.rendering_policy()
+  defp rendering_policy(opts) do
+    opts
+    |> Keyword.get(:rendering, :enabled)
+    |> validate_rendering_policy()
+  end
+
+  @spec validate_rendering_policy(term()) :: EditorState.rendering_policy()
+  defp validate_rendering_policy(policy) when policy in [:enabled, :disabled], do: policy
+
+  defp validate_rendering_policy(policy) do
+    raise ArgumentError,
+          "expected :rendering to be :enabled or :disabled, got: #{inspect(policy)}"
   end
 
   @spec log_safe_mode_startup() :: :ok

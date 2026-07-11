@@ -88,6 +88,7 @@ defmodule MingaAgent.SessionLifecycleTest do
       assert_receive {:DOWN, ^ref, :process, ^session, :normal}, @event_timeout
     end
 
+    @tag :tmp_dir
     test "idle detached sessions with persist?: false exit normally without writing", %{
       tmp_dir: dir
     } do
@@ -118,6 +119,7 @@ defmodule MingaAgent.SessionLifecycleTest do
       assert File.read!(bad_store_dir) == "not a directory"
     end
 
+    @tag :tmp_dir
     test "sending a prompt while the idle timer is pending keeps the session alive", %{
       tmp_dir: dir
     } do
@@ -245,6 +247,7 @@ defmodule MingaAgent.SessionLifecycleTest do
       assert Session.status(session) == :idle
     end
 
+    @tag :tmp_dir
     test "save_session failures are logged and retried with backoff", %{tmp_dir: dir} do
       bad_store_dir = Path.join(dir, "blocked-store")
       File.write!(bad_store_dir, "not a directory")
@@ -268,6 +271,7 @@ defmodule MingaAgent.SessionLifecycleTest do
       refute_receive {:DOWN, ^ref, :process, ^session, _}, 50
     end
 
+    @tag :tmp_dir
     test "idle detached sessions stay alive when persistence fails", %{tmp_dir: dir} do
       bad_store_dir = Path.join(dir, "blocked-store")
       File.write!(bad_store_dir, "not a directory")

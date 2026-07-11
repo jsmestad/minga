@@ -23,15 +23,31 @@ defmodule Minga.Test.EditorCase do
   alias MingaEditor.StatusBar.Data, as: StatusBarData
   alias MingaEditor.Window.Content
 
-  using do
-    quote do
+  using options do
+    rendering = Minga.Test.EditorCase.rendering_option(options, :enabled)
+
+    quote bind_quoted: [editor_case_rendering: rendering] do
       import Minga.Test.EditorCase
       alias Minga.Buffer.Process, as: BufferProcess
+
+      @moduletag editor_case_rendering: editor_case_rendering
+
+      setup context do
+        rendering =
+          Minga.Test.EditorCase.rendering_option(
+            Map.to_list(context),
+            context.editor_case_rendering
+          )
+
+        Process.put(:minga_editor_case_rendering, rendering)
+        :ok
+      end
     end
   end
 
   @typedoc "Test context with editor processes."
   @type editor_ctx :: %{
+          optional(:rendering) => MingaEditor.State.rendering_policy(),
           editor: pid(),
           buffer: pid(),
           port: pid(),
@@ -41,6 +57,35 @@ defmodule Minga.Test.EditorCase do
         }
 
   @sync_timeout 15_000
+  @rendering_process_key :minga_editor_case_rendering
+
+  @doc false
+  @spec rendering_option(keyword(), MingaEditor.State.rendering_policy()) ::
+          MingaEditor.State.rendering_policy()
+  def rendering_option(options, default) do
+    case Keyword.fetch(options, :rendering) do
+      {:ok, policy} -> validate_rendering_policy!(policy)
+      :error -> input_only_rendering_option(options, default)
+    end
+  end
+
+  @spec input_only_rendering_option(keyword(), MingaEditor.State.rendering_policy()) ::
+          MingaEditor.State.rendering_policy()
+  defp input_only_rendering_option(options, default) do
+    case Keyword.get(options, :input_only, false) do
+      true -> :disabled
+      false -> validate_rendering_policy!(default)
+      value -> raise ArgumentError, "expected :input_only to be a boolean, got: #{inspect(value)}"
+    end
+  end
+
+  @spec validate_rendering_policy!(term()) :: MingaEditor.State.rendering_policy()
+  defp validate_rendering_policy!(policy) when policy in [:enabled, :disabled], do: policy
+
+  defp validate_rendering_policy!(policy) do
+    raise ArgumentError,
+          "expected :rendering to be :enabled or :disabled, got: #{inspect(policy)}"
+  end
 
   # ── Setup helpers ────────────────────────────────────────────────────────────
   @doc """
@@ -58,6 +103,7 @@ defmodule Minga.Test.EditorCase do
     height = Keyword.get(opts, :height, 24)
     file_path = Keyword.get(opts, :file_path)
     clipboard = Keyword.get(opts, :clipboard, :none)
+    rendering = rendering_option(opts, Process.get(@rendering_process_key, :enabled))
     id = :erlang.unique_integer([:positive])
 
     events_registry =
@@ -98,6 +144,7 @@ defmodule Minga.Test.EditorCase do
     editor_opts = [
       name: :"headless_editor_#{id}",
       backend: backend,
+      rendering: rendering,
       port_manager: port,
       buffer: buffer,
       width: width,
@@ -134,18 +181,7 @@ defmodule Minga.Test.EditorCase do
 
     {:ok, editor} = MingaEditor.start_link(editor_opts)
 
-    # Send ready event to trigger initial render
-    ref = HeadlessPort.prepare_await(port)
-    send(editor, {:minga_input, {:ready, width, height}})
-    {:ok, snapshot} = HeadlessPort.collect_frame(ref, @sync_timeout)
-    Process.put({:last_frame_snapshot, port}, snapshot)
-
-    # Drain any deferred messages queued by the :ready handler (e.g.
-    # :setup_highlight, :debounced_render). Without this, a background
-    # render can produce a spurious commit_frame that satisfies the next
-    # send_key's frame waiter before the key press is actually processed.
-    _ = sync_editor(editor)
-    _ = sync_port(port)
+    synchronize_ready(editor, port, width, height, rendering)
 
     Map.merge(ctx, %{
       editor: editor,
@@ -153,6 +189,7 @@ defmodule Minga.Test.EditorCase do
       port: port,
       width: width,
       height: height,
+      rendering: rendering,
       events_registry: events_registry,
       sidebar_registry: sidebar_registry
     })
@@ -164,6 +201,7 @@ defmodule Minga.Test.EditorCase do
     width = Keyword.get(opts, :width, 80)
     height = Keyword.get(opts, :height, 24)
     clipboard = Keyword.get(opts, :clipboard, :none)
+    rendering = rendering_option(opts, Process.get(@rendering_process_key, :enabled))
     id = :erlang.unique_integer([:positive])
 
     events_registry =
@@ -190,6 +228,7 @@ defmodule Minga.Test.EditorCase do
     editor_opts = [
       name: :"headless_editor_#{id}",
       backend: :headless,
+      rendering: rendering,
       port_manager: port,
       buffer: buffer,
       width: width,
@@ -212,14 +251,7 @@ defmodule Minga.Test.EditorCase do
 
     {:ok, editor} = MingaEditor.start_link(editor_opts)
 
-    ref = HeadlessPort.prepare_await(port)
-    send(editor, {:minga_input, {:ready, width, height}})
-    {:ok, snapshot} = HeadlessPort.collect_frame(ref, @sync_timeout)
-    Process.put({:last_frame_snapshot, port}, snapshot)
-
-    # Drain deferred messages from :ready (see start_editor/2 comment).
-    _ = sync_editor(editor)
-    _ = sync_port(port)
+    synchronize_ready(editor, port, width, height, rendering)
 
     %{
       editor: editor,
@@ -227,9 +259,40 @@ defmodule Minga.Test.EditorCase do
       port: port,
       width: width,
       height: height,
+      rendering: rendering,
       events_registry: events_registry,
       sidebar_registry: sidebar_registry
     }
+  end
+
+  @spec synchronize_ready(
+          pid(),
+          pid(),
+          pos_integer(),
+          pos_integer(),
+          MingaEditor.State.rendering_policy()
+        ) :: :ok
+  defp synchronize_ready(editor, port, width, height, :enabled) do
+    ref = HeadlessPort.prepare_await(port)
+    send(editor, {:minga_input, {:ready, width, height}})
+    {:ok, snapshot} = HeadlessPort.collect_frame(ref, @sync_timeout)
+    Process.put({:last_frame_snapshot, port}, snapshot)
+    synchronize_processes(editor, port)
+  end
+
+  defp synchronize_ready(editor, port, width, height, :disabled) do
+    send(editor, {:minga_input, {:ready, width, height}})
+    Process.delete({:last_frame_snapshot, port})
+    synchronize_processes(editor, port)
+  end
+
+  @spec synchronize_processes(pid(), pid()) :: :ok
+  defp synchronize_processes(editor, port) do
+    # Drain deferred editor work, then use the HeadlessPort call as a second
+    # mailbox barrier. Disabled rendering must not rely on a frame to become ready.
+    _ = sync_editor(editor)
+    _ = sync_port(port)
+    :ok
   end
 
   # ── Highlight injection helpers ─────────────────────────────────────────────
@@ -299,6 +362,15 @@ defmodule Minga.Test.EditorCase do
   end
 
   # ── Key sending helpers ──────────────────────────────────────────────────────
+  @doc false
+  @spec assert_rendering_enabled!(editor_ctx(), String.t()) :: :ok
+  def assert_rendering_enabled!(%{rendering: :disabled}, helper) do
+    raise ArgumentError,
+          "#{helper} requires rendering, but this EditorCase editor was started with rendering: :disabled"
+  end
+
+  def assert_rendering_enabled!(_ctx, _helper), do: :ok
+
   @doc """
   Sends a key press and waits for the next rendered frame.
   Stores the captured frame snapshot in the process dictionary so
@@ -306,7 +378,9 @@ defmodule Minga.Test.EditorCase do
   instead of reading the (possibly overwritten) HeadlessPort grid.
   """
   @spec send_key(editor_ctx(), non_neg_integer(), non_neg_integer()) :: :ok
-  def send_key(%{editor: editor, port: port}, codepoint, mods \\ 0) do
+  def send_key(%{editor: editor, port: port} = ctx, codepoint, mods \\ 0) do
+    assert_rendering_enabled!(ctx, "send_key/3")
+
     # Drain any pending async messages (timers, highlight events, etc.)
     # before registering the frame waiter. This prevents a pending render
     # from satisfying our waiter instead of the intended key's render.
@@ -374,7 +448,8 @@ defmodule Minga.Test.EditorCase do
   Not needed after `send_key` (which captures a frame snapshot directly).
   """
   @spec sync_screen(editor_ctx()) :: :ok
-  def sync_screen(%{port: port}) do
+  def sync_screen(%{port: port} = ctx) do
+    assert_rendering_enabled!(ctx, "sync_screen/1")
     sync_port(port)
     :ok
   end
@@ -427,7 +502,9 @@ defmodule Minga.Test.EditorCase do
 
   @doc "Returns the rendered text for a specific row."
   @spec screen_row(editor_ctx(), non_neg_integer()) :: String.t()
-  def screen_row(%{port: port}, row) do
+  def screen_row(%{port: port} = ctx, row) do
+    assert_rendering_enabled!(ctx, "screen_row/2")
+
     case Process.get({:last_frame_snapshot, port}) do
       %{grid: grid} ->
         grid
@@ -442,7 +519,9 @@ defmodule Minga.Test.EditorCase do
 
   @doc "Returns all screen rows as a list of strings."
   @spec screen_text(editor_ctx()) :: [String.t()]
-  def screen_text(%{port: port}) do
+  def screen_text(%{port: port} = ctx) do
+    assert_rendering_enabled!(ctx, "screen_text/1")
+
     case Process.get({:last_frame_snapshot, port}) do
       %{grid: grid} ->
         Enum.map(grid, fn row ->
@@ -491,7 +570,9 @@ defmodule Minga.Test.EditorCase do
 
   @doc "Returns the cursor position on screen."
   @spec screen_cursor(editor_ctx()) :: {non_neg_integer(), non_neg_integer()}
-  def screen_cursor(%{port: port}) do
+  def screen_cursor(%{port: port} = ctx) do
+    assert_rendering_enabled!(ctx, "screen_cursor/1")
+
     case Process.get({:last_frame_snapshot, port}) do
       %{cursor: cursor} -> cursor
       nil -> HeadlessPort.get_cursor(port)
@@ -500,7 +581,9 @@ defmodule Minga.Test.EditorCase do
 
   @doc "Returns the current cursor shape."
   @spec cursor_shape(editor_ctx()) :: MingaEditor.Frontend.Protocol.cursor_shape()
-  def cursor_shape(%{port: port}) do
+  def cursor_shape(%{port: port} = ctx) do
+    assert_rendering_enabled!(ctx, "cursor_shape/1")
+
     case Process.get({:last_frame_snapshot, port}) do
       %{cursor_shape: shape} -> shape
       nil -> HeadlessPort.get_cursor_shape(port)
@@ -713,7 +796,8 @@ defmodule Minga.Test.EditorCase do
 
   @doc "Returns the cell at a given screen row and col."
   @spec screen_cell(editor_ctx(), non_neg_integer(), non_neg_integer()) :: map()
-  def screen_cell(%{port: port}, row, col) do
+  def screen_cell(%{port: port} = ctx, row, col) do
+    assert_rendering_enabled!(ctx, "screen_cell/3")
     HeadlessPort.get_cell(port, row, col)
   end
 
@@ -781,6 +865,7 @@ defmodule Minga.Test.EditorCase do
     quote do
       ctx = unquote(ctx)
       name = unquote(snapshot_name)
+      Minga.Test.EditorCase.assert_rendering_enabled!(ctx, "assert_screen_snapshot/2")
       # If a preceding `send_key` captured a frame snapshot, use it.
       # Otherwise (after `send_key_sync`/`send_keys_sync`, which clear
       # the stale snapshot), fall back to reading the live grid from
@@ -891,7 +976,8 @@ defmodule Minga.Test.EditorCase do
   multiple render cycles on loaded CI runners.
   """
   @spec wait_until_screen(editor_ctx(), (-> boolean()), keyword()) :: :ok
-  def wait_until_screen(%{editor: editor, port: port} = _ctx, condition, opts \\ []) do
+  def wait_until_screen(%{editor: editor, port: port} = ctx, condition, opts \\ []) do
+    assert_rendering_enabled!(ctx, "wait_until_screen/3")
     max = Keyword.get(opts, :max_attempts, 50)
     interval = Keyword.get(opts, :interval_ms, 20)
     message = Keyword.get(opts, :message, "Screen condition not met after polling")
@@ -939,7 +1025,7 @@ defmodule Minga.Test.EditorCase do
           pos_integer()
         ) :: :ok
   def send_mouse(
-        %{editor: editor, port: port},
+        %{editor: editor, port: port} = ctx,
         row,
         col,
         button,
@@ -947,6 +1033,7 @@ defmodule Minga.Test.EditorCase do
         event_type \\ :press,
         click_count \\ 1
       ) do
+    assert_rendering_enabled!(ctx, "send_mouse/7")
     _ = sync_editor(editor)
     ref = HeadlessPort.prepare_await(port)
 
@@ -973,7 +1060,8 @@ defmodule Minga.Test.EditorCase do
   clicks, sidebar actions, tab selection) instead of raw cell coordinates.
   """
   @spec send_gui_action(editor_ctx(), term()) :: :ok
-  def send_gui_action(%{editor: editor, port: port}, action) do
+  def send_gui_action(%{editor: editor, port: port} = ctx, action) do
+    assert_rendering_enabled!(ctx, "send_gui_action/2")
     _ = sync_editor(editor)
     ref = HeadlessPort.prepare_await(port)
     send(editor, {:minga_input, {:gui_action, action}})
@@ -988,6 +1076,7 @@ defmodule Minga.Test.EditorCase do
   """
   @spec send_resize(editor_ctx(), pos_integer(), pos_integer()) :: editor_ctx()
   def send_resize(%{editor: editor, port: port} = ctx, new_width, new_height) do
+    assert_rendering_enabled!(ctx, "send_resize/3")
     _ = sync_editor(editor)
     HeadlessPort.resize(port, new_width, new_height)
     ref = HeadlessPort.prepare_await(port)

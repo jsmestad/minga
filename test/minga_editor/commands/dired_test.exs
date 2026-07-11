@@ -6,7 +6,7 @@ defmodule MingaEditor.Commands.DiredTest do
   cheaper direct boundaries.
   """
 
-  use Minga.Test.EditorCase, async: true
+  use Minga.Test.EditorCase, async: true, rendering: :disabled
 
   alias Minga.Buffer.Process, as: BufferProcess
 

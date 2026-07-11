@@ -40,6 +40,8 @@ defmodule MingaEditor.Renderer do
   returned state for the optimization to work.
   """
   @spec render(state()) :: state()
+  def render(%EditorState{rendering: :disabled} = state), do: state
+
   def render(state) do
     state = EditorState.ensure_shell_available(state)
     EditorState.active_shell_module(state).render(state)
@@ -55,6 +57,7 @@ defmodule MingaEditor.Renderer do
   or when the active shell cannot use the async RenderPipeline path.
   """
   @spec render_or_async(state()) :: state()
+  def render_or_async(%EditorState{rendering: :disabled} = state), do: state
   def render_or_async(%{backend: :headless} = state), do: render(state)
 
   def render_or_async(%{renderer: pid} = state) when is_pid(pid) do

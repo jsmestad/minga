@@ -223,6 +223,7 @@ defmodule MingaAgent.SessionApprovalTest do
       assert Session.list_tool_trust(session) == %{"read_file" => :session}
     end
 
+    @tag :tmp_dir
     test "turn trust clears before automatically queued follow-up turns", %{tmp_dir: dir} do
       File.write!(Path.join(dir, "test.txt"), "file contents")
       call_count = :counters.new(1, [:atomics])

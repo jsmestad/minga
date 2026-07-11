@@ -6,7 +6,7 @@ defmodule Minga.BufferManagementTest do
   lower-layer suites.
   """
 
-  use Minga.Test.EditorCase, async: true
+  use Minga.Test.EditorCase, async: true, rendering: :disabled
 
   @tag :tmp_dir
   test ":e and leader keys route buffer navigation, kill, and new commands", %{tmp_dir: dir} do
