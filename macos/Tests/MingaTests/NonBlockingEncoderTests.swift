@@ -186,8 +186,23 @@ struct ProtocolReaderTests {
         let reader = ProtocolReader(
             input: handle,
             maxPayloadLength: 2_000_000,
-            handler: { data in
-                capture.append(data)
+            decoder: { data in
+                DecodedFrame(
+                    commands: [],
+                    metrics: FrameDecodeMetrics(
+                        packetBytes: data.count,
+                        bytesCopied: 0,
+                        allocations: 0,
+                        decodeDuration: .zero,
+                        actorHopCount: 0
+                    )
+                )
+            },
+            handler: { frame in
+                capture.append(Data(count: frame.metrics.packetBytes))
+            },
+            onDecodeFailure: { _ in
+                disconnected.signal()
             },
             onDisconnect: {
                 disconnected.signal()

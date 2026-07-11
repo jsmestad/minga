@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+mix swift.harness --release
+"_build/${MIX_ENV:-dev}/lib/minga/priv/minga-test-harness" --decode-benchmark

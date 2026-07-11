@@ -34,8 +34,8 @@ struct ProtocolCommandSizeTests {
         #expect(commandSize([OP_GUI_GIT_STATUS, 0, 0, 0, 0]) == .custom)
     }
 
-    @Test func forwardCompatibleUnknownHighOpcode() {
-        #expect(commandSize([0xB7, 0x00, 0x02, 0xAA, 0xBB]) == .sized(5))
+    @Test func unknownHighOpcodeFailsClosed() {
+        #expect(commandSize([0xB7, 0x00, 0x02, 0xAA, 0xBB]) == .unknown)
     }
 
     @Test func reportsTruncatedPayload() {
@@ -43,19 +43,10 @@ struct ProtocolCommandSizeTests {
         #expect(commandSize([]) == .incomplete)
     }
 
-    @Test func decodeCommandsSkipsGeneratedSizedUnrenderedOpcode() throws {
-        // commit_frame is fixed:9 (opcode + frame_seq + echoed input_seq u32, #2219/#2215).
+    @Test func decodeCommandsRejectsGeneratedSizedUnknownOpcode() {
         let payload = Data([0xB7, 0x00, 0x02, 0xAA, 0xBB, OP_COMMIT_FRAME, 0, 0, 0, 0, 0, 0, 0, 0])
-        var commands: [RenderCommand] = []
-
-        try decodeCommands(from: payload) { command in
-            commands.append(command)
-        }
-
-        #expect(commands.count == 1)
-        guard case .commitFrame = commands.first else {
-            Issue.record("Expected .commitFrame but got \(String(describing: commands.first))")
-            return
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommands(from: payload) { _ in }
         }
     }
 }

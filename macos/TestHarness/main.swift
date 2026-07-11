@@ -445,6 +445,79 @@ func sendReady() {
     writeJSON(["type": "ready"])
 }
 
+func makeDecodeBenchmarkPacket(size: Int) -> Data {
+    // set_title is a real rendering command and forces construction of the
+    // immutable String values published in DecodedFrame. Chunking at u16.max
+    // keeps the packet protocol-compatible while exercising owned-copy metrics.
+    var packet = Data(capacity: size)
+    var remaining = size
+    while remaining > 65_538 {
+        let commandSize = remaining - 65_538 == 1 ? 65_537 : 65_538
+        let textSize = commandSize - 3
+        packet.append(OP_SET_TITLE)
+        packet.append(UInt8((textSize >> 8) & 0xFF))
+        packet.append(UInt8(textSize & 0xFF))
+        packet.append(Data(repeating: 0x61, count: textSize))
+        remaining -= commandSize
+    }
+    if remaining == 2 {
+        packet.append(contentsOf: [OP_SET_CURSOR_SHAPE, CURSOR_BLOCK])
+    } else if remaining >= 3 {
+        let textSize = remaining - 3
+        packet.append(OP_SET_TITLE)
+        packet.append(UInt8((textSize >> 8) & 0xFF))
+        packet.append(UInt8(textSize & 0xFF))
+        packet.append(Data(repeating: 0x61, count: textSize))
+    }
+    return packet
+}
+
+func decodeBenchmarkNanoseconds(_ duration: Duration) -> Double {
+    let components = duration.components
+    return Double(components.seconds) * 1_000_000_000 + Double(components.attoseconds) / 1_000_000_000
+}
+
+func runDecodeBenchmark() throws {
+    let sizes = [64 * 1024, 1024 * 1024, 16 * 1024 * 1024, 64 * 1024 * 1024]
+    var measurements: [[String: Any]] = []
+    var baselineNanoseconds = 0.0
+
+    // Keep one-time Swift/Foundation initialization out of the linear baseline.
+    _ = try decodeFrame(from: makeDecodeBenchmarkPacket(size: sizes[0]))
+
+    for size in sizes {
+        let decodedFrame = try decodeFrame(from: makeDecodeBenchmarkPacket(size: size), collectOwnedMetrics: true)
+        let handoff = ProtocolEventHandoff()
+        let frame = handoff.deliver(decodedFrame)
+        let nanoseconds = decodeBenchmarkNanoseconds(frame.metrics.decodeDuration)
+        if baselineNanoseconds == 0 { baselineNanoseconds = max(nanoseconds, 1_000) }
+        let linearBudget = max(1_000_000, baselineNanoseconds * Double(size / sizes[0]) * 4)
+        let expectedOwnedBytes = size - frame.commands.count * 3
+        let expectedOwnedAllocations = frame.commands.count + 1
+        guard frame.metrics.bytesCopied == expectedOwnedBytes,
+              frame.metrics.allocations == expectedOwnedAllocations,
+              frame.metrics.actorHopCount == 1,
+              nanoseconds <= linearBudget else {
+            throw ProtocolDecodeError.malformed
+        }
+        measurements.append(["packet_bytes": size, "bytes_copied": frame.metrics.bytesCopied, "allocations": frame.metrics.allocations, "decode_nanoseconds": nanoseconds, "actor_hop_count": frame.metrics.actorHopCount, "linear_budget_nanoseconds": linearBudget])
+    }
+
+    let output = try JSONSerialization.data(withJSONObject: ["configuration": "release", "measurements": measurements], options: [.sortedKeys])
+    stdout.write(output)
+    stdout.write(Data([0x0A]))
+}
+
+if CommandLine.arguments.contains("--decode-benchmark") {
+    do {
+        try runDecodeBenchmark()
+        exit(EXIT_SUCCESS)
+    } catch {
+        FileHandle.standardError.write(Data("decode benchmark failed: \(error)\n".utf8))
+        exit(EXIT_FAILURE)
+    }
+}
+
 sendReady()
 
 // Read {:packet, 4} framed messages from stdin.

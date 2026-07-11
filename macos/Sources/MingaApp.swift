@@ -200,6 +200,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var fontManager: FontManager?
     private var editorNSView: EditorNSView?
     private var workspaceNotificationTasks: [Task<Void, Never>] = []
+    private var protocolDeliveryTask: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Ignore SIGPIPE so broken pipe writes return EPIPE instead of
@@ -415,13 +416,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // @unchecked Sendable and disconnect() is lock-protected.
         let disconnectEncoder = enc
 
-        // Start reading protocol commands.
+        // Start reading protocol commands. One stream consumer preserves the
+        // reader's wire order across successful packets and decode failures.
+        let protocolHandoff = installProtocolEventHandoff()
         let reader = ProtocolReader(
             input: protocolInput,
-            handler: { [weak self] data in
-                DispatchQueue.main.async {
-                    self?.handleProtocolData(data)
-                }
+            handler: { frame in
+                protocolHandoff.deliver(frame)
+            },
+            onDecodeFailure: { error in
+                protocolHandoff.deliver(error)
             },
             onDisconnect: { [weak self] in
                 // Immediately mark the encoder as disconnected so any
@@ -655,13 +659,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Capture for the background-thread disconnect callback.
         let disconnectEncoder = enc
 
-        // Create new reader for the new pipe.
+        // Create new reader for the new pipe. Reconnection replaces the one
+        // ordered stream consumer instead of spawning a task per event.
+        let protocolHandoff = installProtocolEventHandoff()
         let reader = ProtocolReader(
             input: readHandle,
-            handler: { [weak self] data in
-                DispatchQueue.main.async {
-                    self?.handleProtocolData(data)
-                }
+            handler: { frame in
+                protocolHandoff.deliver(frame)
+            },
+            onDecodeFailure: { error in
+                protocolHandoff.deliver(error)
             },
             onDisconnect: { [weak self] in
                 disconnectEncoder.disconnect()
@@ -784,19 +791,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Protocol handling
 
-    private func handleProtocolData(_ data: Data) {
-        guard let dispatcher else { return }
-        do {
-            try decodeCommands(from: data) { command, opcode in
-                dispatcher.dispatch(command, opcode: opcode)
+    private func installProtocolEventHandoff() -> ProtocolEventHandoff {
+        protocolDeliveryTask?.cancel()
+        let handoff = ProtocolEventHandoff()
+        protocolDeliveryTask = Task { @MainActor [weak self] in
+            for await event in handoff.events {
+                guard let self else { return }
+                switch event {
+                case .frame(let frame):
+                    self.handleDecodedFrame(frame)
+                case .decodeFailure(let error):
+                    self.handleProtocolDecodeFailure(error)
+                }
             }
-        } catch {
-            // A decode failure (sizing error or unknown opcode) mid-stream means
-            // the byte boundaries are no longer trustworthy. If a frame
-            // transaction is open, this tightens the usual log-and-continue policy:
-            // discard the staged frame and request a keyframe (#2219 child D).
-            PortLogger.error("Protocol decode error: \(error)")
-            dispatcher.decodeFailed()
         }
+        return handoff
+    }
+
+    private func handleDecodedFrame(_ frame: DecodedFrame) {
+        os_signpost(
+            .event,
+            log: protocolLog,
+            name: "ProtocolPayloadDelivered",
+            "bytes=%{public}d hops=%{public}d",
+            frame.metrics.packetBytes,
+            frame.metrics.actorHopCount
+        )
+        guard let dispatcher else { return }
+        for decoded in frame.commands {
+            dispatcher.dispatch(decoded.command, opcode: decoded.opcode)
+        }
+    }
+
+    private func handleProtocolDecodeFailure(_ error: ProtocolDecodeError) {
+        // The packet is transactional: no command from it crossed actor isolation,
+        // so discarding the staged frame cannot leave a partially applied update.
+        PortLogger.error("Protocol decode error: \(error)")
+        dispatcher?.decodeFailed()
     }
 }
