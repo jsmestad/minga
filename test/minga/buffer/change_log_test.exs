@@ -73,11 +73,32 @@ defmodule Minga.Buffer.ChangeLogTest do
           ChangeLog.record_change(acc, delta(Integer.to_string(i)))
         end)
 
-      assert {{:ok, changes}, log} = ChangeLog.take_unseen_changes(log, :lsp)
-      assert Enum.count(changes) == 1100
+      assert {:reset_required, log} = ChangeLog.take_unseen_changes(log, :lsp)
       assert ChangeLog.retained_count(log) == 1000
-
       assert {:reset_required, _log} = ChangeLog.take_unseen_changes(log, :late_reader)
+    end
+  end
+
+  describe "changes_since/2" do
+    test "is sequence-qualified and non-mutating" do
+      log =
+        ChangeLog.new()
+        |> ChangeLog.record_change(delta("a"))
+        |> ChangeLog.record_change(delta("b"))
+
+      assert {:ok, 2, changes} = ChangeLog.changes_since(log, 0)
+      assert Enum.map(changes, & &1.inserted_text) == ["a", "b"]
+      assert {:ok, 2, ^changes} = ChangeLog.changes_since(log, 0)
+      assert ChangeLog.sequence(log) == 2
+      assert ChangeLog.horizon(log) == 1
+    end
+
+    test "clear advances the sequence and exposes an explicit gap" do
+      log = ChangeLog.new() |> ChangeLog.record_change(delta("a"))
+      cleared = ChangeLog.clear(log)
+
+      assert {:reset_required, 2} = ChangeLog.changes_since(cleared, 1)
+      assert ChangeLog.horizon(cleared) == 3
     end
   end
 

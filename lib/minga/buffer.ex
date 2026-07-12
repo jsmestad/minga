@@ -11,6 +11,7 @@ defmodule Minga.Buffer do
   should never reference those modules directly.
   """
 
+  alias Minga.Buffer.ChangeLog
   alias Minga.Buffer.Document
   alias Minga.Buffer.Process, as: BufferProcess
 
@@ -420,10 +421,20 @@ defmodule Minga.Buffer do
           Minga.Buffer.RenderSnapshot.t()
   defdelegate render_snapshot(server, first_line, count), to: BufferProcess
 
+  @doc "Atomic render snapshot with non-mutating deltas after a sequence."
+  @spec render_snapshot(t(), non_neg_integer(), non_neg_integer(), ChangeLog.sequence()) ::
+          Minga.Buffer.RenderSnapshot.t()
+  defdelegate render_snapshot(server, first_line, count, since_sequence), to: BufferProcess
+
+  @doc "Returns sequence-qualified changes without advancing a consumer cursor."
+  @spec changes_since(t(), ChangeLog.sequence()) :: ChangeLog.sequence_changes()
+  defdelegate changes_since(server, sequence), to: BufferProcess
+
   # ── Edit deltas (for LSP incremental sync) ─────────────────────────
 
   @doc "Consume edit deltas accumulated since the given consumer's last read, or return `:reset_required` when the consumer must full-sync."
-  @spec consume_edit_deltas(t(), atom()) :: BufferProcess.edit_delta_update()
+  @spec consume_edit_deltas(t(), Minga.Buffer.ChangeLog.consumer()) ::
+          BufferProcess.edit_delta_update()
   defdelegate consume_edit_deltas(server, consumer_id), to: BufferProcess
 
   # ── Decorations ────────────────────────────────────────────────────

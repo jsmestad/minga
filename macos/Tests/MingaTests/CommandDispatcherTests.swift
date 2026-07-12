@@ -2050,6 +2050,37 @@ struct CommandDispatcherStagingTests {
         #expect(gui.windowContents[7]?.cursorShape == .block)
     }
 
+    @Test("missing retained row reports targeted miss without partial publication")
+    @MainActor func missingRetainedRowIsTransactional() {
+        let (dispatcher, gui) = makeDispatcher()
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: windowContent()))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("baseline.ex")]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        let missing = GUIWindowRowsDelta(
+            windowId: 7, contentEpoch: 42, cursorVisible: true,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block, scrollLeft: 0,
+            rows: [.reference(rowId: 999, contentHash: 999)], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [], documentHighlights: [],
+            lineAnnotations: [], paneGeometry: nil, cursorline: nil
+        )
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("must-not-publish.ex")]))
+        dispatcher.dispatch(.guiWindowRowsDelta(data: missing))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+
+        #expect(gui.framePublicationCount == 1)
+        #expect(gui.tabBarState.tabs.first?.label == "baseline.ex")
+        #expect(gui.windowContents[7]?.rows.first?.text == "old")
+        #expect(results.last == .windowRefMiss(generation: 1, frameSeq: 2, lastAppliedFrameSeq: 1, windowId: 7))
+    }
+
     @Test("unregistered font resources reject a prepared frame")
     @MainActor func missingFontResourceRejects() {
         let (dispatcher, gui) = makeDispatcher()

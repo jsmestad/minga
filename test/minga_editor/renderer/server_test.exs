@@ -8,11 +8,13 @@ defmodule MingaEditor.Renderer.ServerTest do
   # Registers a fake shell in the global shell registry for async-render opt-out coverage.
   use ExUnit.Case, async: false
 
+  alias Minga.RenderModel.Window.LineIdentity
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.Renderer.Caches
   alias MingaEditor.Renderer.Server, as: RendererServer
   alias MingaEditor.UI.Panel.MessageStore
   alias MingaEditor.Viewport
+  alias MingaEditor.Window
 
   # Async renderer writeback can lag a bit under CI load, keep this local to the renderer assertions.
   @async_render_timeout 5_000
@@ -99,6 +101,111 @@ defmodule MingaEditor.Renderer.ServerTest do
 
     assert_receive {:render_done, %{frame_seq: 11, caches: %Caches{last_emitted_frame_seq: 11}}},
                    @async_render_timeout
+
+    assert_receive {:render_done, %{frame_seq: 12, caches: %Caches{last_emitted_frame_seq: 12}}},
+                   @async_render_timeout
+  end
+
+  test "in-flight and pending structural edits rebase through renderer-owned lineage" do
+    state = build_editor_state(:tui, nil, "a\nb\nc")
+    snapshot = Input.from_editor_state(state)
+    buffer = state.workspace.buffers.active
+    renderer = start_ack_renderer(self(), pipeline: lineage_probe_pipeline(self()))
+
+    RendererServer.cast_snapshot(renderer, snapshot, 70)
+    assert_receive {:lineage_probe, 70, nil, 0, [0, 1, 2], 0}, @async_render_timeout
+
+    :ok = Minga.Buffer.Process.move_to(buffer, {0, 0})
+    :ok = Minga.Buffer.Process.insert_text(buffer, "new\n")
+    RendererServer.cast_snapshot(renderer, snapshot, 71)
+    RendererServer.frame_status(renderer, {:frame_applied, 1, 70})
+
+    assert_receive {:lineage_probe, 71, [0, 1, 2], 0, [3, 0, 1, 2], 1},
+                   @async_render_timeout
+  end
+
+  test "rejection keeps successful pipeline lineage for replay" do
+    state = build_editor_state(:tui, nil, "a\nb")
+    snapshot = Input.from_editor_state(state)
+    buffer = state.workspace.buffers.active
+    renderer = start_ack_renderer(self(), pipeline: lineage_probe_pipeline(self()))
+
+    RendererServer.cast_snapshot(renderer, snapshot, 80)
+    assert_receive {:lineage_probe, 80, nil, 0, [0, 1], 0}, @async_render_timeout
+
+    :ok = Minga.Buffer.Process.move_to(buffer, {0, 0})
+    :ok = Minga.Buffer.Process.insert_text(buffer, "new\n")
+    RendererServer.cast_snapshot(renderer, snapshot, 81)
+    RendererServer.frame_status(renderer, {:frame_rejected, 1, 80, 0, :base_sequence_mismatch})
+
+    assert_receive {:lineage_probe, 81, [0, 1], 0, [2, 0, 1], 1}, @async_render_timeout
+  end
+
+  test "pipeline failure does not advance lineage and pending replay reapplies changes" do
+    state = build_editor_state(:tui, nil, "a\nb")
+    snapshot = Input.from_editor_state(state)
+    buffer = state.workspace.buffers.active
+    failure_mode = start_supervised!({Agent, fn -> :succeed end})
+
+    renderer =
+      start_renderer(self(), pipeline: failing_lineage_probe_pipeline(self(), failure_mode))
+
+    RendererServer.cast_snapshot(renderer, snapshot, 89)
+    assert_receive {:lineage_probe, 89, nil, 0, [0, 1], 0}, @async_render_timeout
+    assert_receive {:render_done, %{frame_seq: 89}}, @async_render_timeout
+
+    :ok = Minga.Buffer.Process.move_to(buffer, {0, 0})
+    :ok = Minga.Buffer.Process.insert_text(buffer, "new\n")
+    Agent.update(failure_mode, fn _ -> :fail_once end)
+
+    :sys.replace_state(renderer, fn renderer_state ->
+      %{
+        renderer_state
+        | rendering?: true,
+          in_flight: {snapshot, 90, 0},
+          pending: {snapshot, 91, 0}
+      }
+    end)
+
+    send(renderer, :do_render)
+
+    assert_receive {:lineage_probe, 90, [0, 1], 0, [2, 0, 1], 1}, @async_render_timeout
+    assert_receive {:lineage_probe, 91, [0, 1], 0, [2, 0, 1], 1}, @async_render_timeout
+  end
+
+  test "idle renderer uses its latest caches when the editor writeback is still stale" do
+    parent = self()
+    renderer = start_renderer(parent, pipeline: cache_probe_pipeline(parent))
+    stale_editor_snapshot = %{stub_snapshot() | caches: %Caches{last_emitted_frame_seq: 10}}
+
+    :sys.replace_state(renderer, fn state ->
+      %{state | caches: %Caches{last_emitted_frame_seq: 11}}
+    end)
+
+    RendererServer.cast_snapshot(renderer, stale_editor_snapshot, 12)
+
+    assert_receive {:pipeline_input, 12, 11}, @async_render_timeout
+
+    assert_receive {:render_done, %{frame_seq: 12, caches: %Caches{last_emitted_frame_seq: 12}}},
+                   @async_render_timeout
+  end
+
+  test "frontend reset snapshots keep their reset caches" do
+    parent = self()
+    renderer = start_renderer(parent, pipeline: cache_probe_pipeline(parent))
+
+    reset_snapshot = %{
+      stub_snapshot()
+      | caches: %Caches{last_emitted_frame_seq: 0, recovery_generation: 2}
+    }
+
+    :sys.replace_state(renderer, fn state ->
+      %{state | caches: %Caches{last_emitted_frame_seq: 11}}
+    end)
+
+    RendererServer.cast_snapshot(renderer, reset_snapshot, 12)
+
+    assert_receive {:pipeline_input, 12, 0}, @async_render_timeout
 
     assert_receive {:render_done, %{frame_seq: 12, caches: %Caches{last_emitted_frame_seq: 12}}},
                    @async_render_timeout
@@ -340,6 +447,56 @@ defmodule MingaEditor.Renderer.ServerTest do
     end
   end
 
+  defp lineage_probe_pipeline(parent) do
+    fn input -> update_lineage(input, parent) end
+  end
+
+  defp failing_lineage_probe_pipeline(parent, failure_mode) do
+    fn input ->
+      output = update_lineage(input, parent)
+
+      should_fail? =
+        Agent.get_and_update(failure_mode, fn
+          :fail_once -> {true, :succeed}
+          :succeed -> {false, :succeed}
+        end)
+
+      maybe_fail_lineage_pipeline(output, should_fail?)
+    end
+  end
+
+  defp maybe_fail_lineage_pipeline(_output, true),
+    do: raise("deliberate lineage pipeline failure")
+
+  defp maybe_fail_lineage_pipeline(output, false), do: output
+
+  defp update_lineage(input, parent) do
+    {window_id, window} = Enum.at(input.workspace.windows.map, 0)
+    input_identity = Window.line_identity(window)
+    input_ids = if input_identity, do: LineIdentity.source_ids(input_identity), else: nil
+    input_sequence = Window.applied_change_sequence(window)
+
+    snapshot =
+      Minga.Buffer.render_snapshot(window.buffer, 0, 0, input_sequence)
+
+    updated_window = Window.sync_line_identity(window, snapshot)
+    output_identity = Window.line_identity(updated_window)
+
+    send(parent, {
+      :lineage_probe,
+      input.frame_seq,
+      input_ids,
+      input_sequence,
+      LineIdentity.source_ids(output_identity),
+      Window.applied_change_sequence(updated_window)
+    })
+
+    windows = input.workspace.windows
+    workspace = input.workspace
+    updated_windows = %{windows | map: Map.put(windows.map, window_id, updated_window)}
+    %{input | workspace: %{workspace | windows: updated_windows}}
+  end
+
   defp targeted_probe_pipeline(parent) do
     fn input ->
       reset_windows =
@@ -442,8 +599,8 @@ defmodule MingaEditor.Renderer.ServerTest do
     }
   end
 
-  defp build_editor_state(backend, renderer_pid) do
-    buf = start_supervised!({Minga.Buffer, content: "test"})
+  defp build_editor_state(backend, renderer_pid, content \\ "test") do
+    buf = start_supervised!({Minga.Buffer, content: content})
 
     workspace = %MingaEditor.Session.State{
       buffers: %MingaEditor.State.Buffers{

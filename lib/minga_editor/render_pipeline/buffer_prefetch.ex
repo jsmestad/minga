@@ -11,6 +11,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   """
 
   alias Minga.Buffer
+  alias Minga.Buffer.RenderSnapshot
   alias Minga.Config
   alias Minga.Core.Decorations
   alias Minga.Core.Unicode
@@ -131,7 +132,8 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
           | window: updated_window,
             content_epoch: content_epoch,
             full_refresh: full_refresh?,
-            scroll_seq: Window.scroll_seq(updated_window)
+            scroll_seq: Window.scroll_seq(updated_window),
+            line_identity: Window.line_identity(updated_window)
         }
 
         new_map = Map.put(st.workspace.windows.map, win_id, updated_window)
@@ -201,7 +203,11 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
         do: Window.scroll_follow_cursor?(window, {cursor_line, cursor_byte_col}, now),
         else: {window, true}
 
-    line_count = Buffer.line_count(window.buffer)
+    base_snapshot =
+      Buffer.render_snapshot(window.buffer, 0, 0, Window.applied_change_sequence(window))
+
+    window = Window.sync_line_identity(window, base_snapshot)
+    line_count = base_snapshot.line_count
     total_visible_lines = FoldMap.visible_line_count(fold_map, line_count)
 
     viewport =
@@ -294,7 +300,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
         wrap_on: wrap_on
       })
 
-    snapshot = Buffer.render_snapshot(window.buffer, fetch_first, fetch_count)
+    snapshot = RenderSnapshot.slice(base_snapshot, fetch_first, fetch_count)
     lines = snapshot.lines
     # Cursor byte → display col
     {viewport, first_line, snapshot, lines, _cursor_line_text, cursor_col} =

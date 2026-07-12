@@ -245,7 +245,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
 
   test "encodes full window content overlays and cursor flags" do
     row = %Row{
-      row_id: Row.stable_id(:virtual_line, 11, 0, 4),
+      row_id: Row.stable_id(:virtual_line, 11, 4),
       row_type: :virtual_line,
       buf_line: 11,
       text: "héllo",
@@ -294,7 +294,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
     assert decoded.cursor_shape == :underline
     assert decoded.scroll_left == 2
     assert hd(decoded.rows).row_type == :virtual_line
-    assert hd(decoded.rows).row_id == Row.stable_id(:virtual_line, 11, 0, 4)
+    assert hd(decoded.rows).row_id == Row.stable_id(:virtual_line, 11, 4)
     assert hd(decoded.rows).text == "héllo"
 
     assert hd(decoded.rows).spans |> hd() |> Map.take([:attrs, :font_weight, :font_id]) == %{

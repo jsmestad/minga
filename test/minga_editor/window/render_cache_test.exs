@@ -1,6 +1,8 @@
 defmodule MingaEditor.Window.RenderCacheTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer
+  alias Minga.RenderModel.Window.LineIdentity
   alias MingaEditor.Window.RenderCache
 
   describe "detect_invalidation/6" do
@@ -56,6 +58,25 @@ defmodule MingaEditor.Window.RenderCacheTest do
     end
   end
 
+  describe "sync_line_identity/3" do
+    test "switching buffers starts a fresh content epoch even when line counts match" do
+      first_buffer = start_supervised!({Buffer, content: "same\nlines"}, id: :first_buffer)
+      second_buffer = start_supervised!({Buffer, content: "same\nlines"}, id: :second_buffer)
+      first_snapshot = Buffer.render_snapshot(first_buffer, 0, 0, 0)
+      second_snapshot = Buffer.render_snapshot(second_buffer, 0, 0, 0)
+
+      first_cache =
+        RenderCache.reset()
+        |> RenderCache.sync_line_identity(first_buffer, first_snapshot)
+
+      second_cache =
+        RenderCache.sync_line_identity(first_cache, second_buffer, second_snapshot)
+
+      assert RenderCache.content_epoch(second_cache) == RenderCache.content_epoch(first_cache) + 1
+      assert LineIdentity.content_epoch(RenderCache.line_identity(second_cache)) == 2
+    end
+  end
+
   describe "prepare_epoch/2" do
     test "keeps epoch stable and full_refresh false when reset fingerprint is unchanged" do
       {cache, epoch, full_refresh?} =
@@ -72,7 +93,7 @@ defmodule MingaEditor.Window.RenderCacheTest do
       assert next_full_refresh? == false
     end
 
-    test "bumps epoch and full_refresh when reset fingerprint changes" do
+    test "preserves content epoch while refreshing changed layout fingerprint" do
       {cache, epoch, _full_refresh?} =
         RenderCache.reset()
         |> RenderCache.prepare_epoch({:window, 1, :geometry})
@@ -80,11 +101,11 @@ defmodule MingaEditor.Window.RenderCacheTest do
       {_cache, next_epoch, next_full_refresh?} =
         RenderCache.prepare_epoch(cache, {:window, 1, :resized})
 
-      assert next_epoch == epoch + 1
+      assert next_epoch == epoch
       assert next_full_refresh? == true
     end
 
-    test "frontend reset marker bumps epoch and requests a full refresh for unchanged geometry" do
+    test "frontend reset marker preserves content epoch and requests a full refresh" do
       {cache, epoch, _full_refresh?} =
         RenderCache.reset()
         |> RenderCache.prepare_epoch({:window, 1, :geometry})
@@ -94,7 +115,7 @@ defmodule MingaEditor.Window.RenderCacheTest do
       {_cache, next_epoch, full_refresh?} =
         RenderCache.prepare_epoch(cache, {:window, 1, :geometry})
 
-      assert next_epoch == epoch + 1
+      assert next_epoch == epoch
       assert full_refresh? == true
     end
   end

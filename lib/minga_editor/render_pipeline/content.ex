@@ -15,10 +15,12 @@ defmodule MingaEditor.RenderPipeline.Content do
   alias Minga.Core.Unicode
   alias Minga.Core.WrapMap
   alias Minga.RenderModel.Cursor
+  alias Minga.RenderModel.Window.RowSlotExhaustedError
   alias MingaEditor.FoldMap
   alias MingaEditor.Layout
   alias Minga.Telemetry
 
+  alias MingaEditor.Renderer.Context
   alias MingaEditor.RenderPipeline.ContentHelpers
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
   alias MingaEditor.RenderModel.Window.Builder, as: WindowModelBuilder
@@ -85,6 +87,37 @@ defmodule MingaEditor.RenderPipeline.Content do
   def rows_rasterized(state), do: state.caches.frame_rows_rasterized
 
   # ── Private ──────────────────────────────────────────────────────────────
+
+  @spec build_window_model_with_slot_reset(state(), WindowScroll.t(), Window.t(), Context.t()) ::
+          {Minga.RenderModel.Window.t(), WindowModelBuilder.build_stats(), Window.t()}
+  defp build_window_model_with_slot_reset(state, scroll, window, render_ctx) do
+    result =
+      Telemetry.span([:minga, :render, :window_model_build], %{window_id: scroll.win_id}, fn ->
+        WindowModelBuilder.build_with_stats(state, %{scroll | window: window}, render_ctx,
+          content_kind: :buffer,
+          retained_rows: Window.retained_rows(window),
+          retained_wrap_lines: Window.retained_wrap_lines(window),
+          resident_build: Window.resident_build(window),
+          row_slot_allocator: Window.row_slot_allocator(window)
+        )
+      end)
+
+    {window_model, build_stats} = result
+    {window_model, build_stats, window}
+  rescue
+    RowSlotExhaustedError ->
+      reset_window = Window.reset_content_identity(window, scroll.snapshot)
+
+      reset_scroll = %{
+        scroll
+        | window: reset_window,
+          line_identity: Window.line_identity(reset_window),
+          content_epoch: Window.content_epoch(reset_window),
+          full_refresh: true
+      }
+
+      build_window_model_with_slot_reset(state, reset_scroll, reset_window, render_ctx)
+  end
 
   @spec add_rows_rasterized(state(), non_neg_integer()) :: state()
   defp add_rows_rasterized(state, count) do
@@ -194,21 +227,15 @@ defmodule MingaEditor.RenderPipeline.Content do
     # Build the canonical window model; TUI adapts it to cells at the frontend boundary.
     # Carry the previous frame's retained rows so unchanged rows are reused
     # without recomposing, and capture how many rows were freshly rasterized (#2287).
-    {window_model, build_stats} =
-      Telemetry.span([:minga, :render, :window_model_build], %{window_id: scroll.win_id}, fn ->
-        WindowModelBuilder.build_with_stats(state, %{scroll | window: window}, render_ctx,
-          content_kind: :buffer,
-          retained_rows: Window.retained_rows(window),
-          retained_wrap_lines: Window.retained_wrap_lines(window),
-          resident_build: Window.resident_build(window)
-        )
-      end)
+    {window_model, build_stats, window} =
+      build_window_model_with_slot_reset(state, scroll, window, render_ctx)
 
     window =
       window
       |> Window.put_retained_rows(build_stats.retained_rows)
       |> Window.put_retained_wrap_lines(build_stats.retained_wrap_lines)
       |> Window.put_resident_build(build_stats.resident_build)
+      |> Window.put_row_slot_allocator(build_stats.row_slot_allocator)
 
     state = add_rows_rasterized(state, build_stats.rasterized)
 

@@ -3,40 +3,38 @@ defmodule Minga.RenderModel.Window.RowTest do
 
   alias Minga.RenderModel.Window.Row
 
-  describe "stable_id/4" do
-    test "is deterministic for the same durable row inputs" do
-      assert Row.stable_id(:normal, 12, 0, 0) == Row.stable_id(:normal, 12, 0, 0)
-    end
-
-    test "distinguishes row kinds, wrapped continuations, and decoration discriminators" do
+  describe "stable_id/3" do
+    test "uses an injective kind, source, and producer slot layout" do
       ids = [
-        Row.stable_id(:normal, 12, 0, 0),
-        Row.stable_id(:wrap_continuation, 12, 1, 0),
-        Row.stable_id(:fold_start, 12, 0, 0),
-        Row.stable_id(:virtual_line, 12, 0, 1),
-        Row.stable_id(:block, 12, 1, 2)
+        Row.stable_id(:normal, 12, 0),
+        Row.stable_id(:wrap_continuation, 12, 1),
+        Row.stable_id(:fold_start, 12, 0),
+        Row.stable_id(:virtual_line, 12, 1),
+        Row.stable_id(:block, 12, 1),
+        Row.stable_id(:decoration_fold, 12, 0),
+        Row.stable_id(:normal, 13, 0)
       ]
 
       assert Enum.uniq(ids) == ids
+      assert Row.stable_id(:normal, 12, 7) == Row.stable_id(:normal, 12, 7)
+    end
+
+    test "rejects values that cannot fit instead of masking into collisions" do
+      assert_raise FunctionClauseError, fn -> Row.stable_id(:normal, 0x1_0000_0000) end
+      assert_raise FunctionClauseError, fn -> Row.stable_id(:normal, 1, 0x1000_0000) end
     end
   end
 
   describe "stable_decoration_id/3" do
-    test "is deterministic for virtual text and block decoration identities" do
-      vt_id = make_ref()
-      block_id = make_ref()
+    test "accepts only producer-allocated integer slots" do
+      assert Row.stable_decoration_id(:virtual_line, 12, 7) ==
+               Row.stable_decoration_id(:virtual_line, 12, 7)
 
-      assert Row.stable_decoration_id(:virtual_line, 12, vt_id) ==
-               Row.stable_decoration_id(:virtual_line, 12, vt_id)
+      assert Row.stable_decoration_id(:virtual_line, 12, 7) !=
+               Row.stable_decoration_id(:virtual_line, 12, 8)
 
-      assert Row.stable_decoration_id(:virtual_line, 12, vt_id) !=
-               Row.stable_decoration_id(:virtual_line, 12, make_ref())
-
-      assert Row.stable_decoration_id(:block, 12, {block_id, 0}) !=
-               Row.stable_decoration_id(:block, 12, {block_id, 1})
-
-      assert Row.stable_decoration_id(:fold_start, 12, block_id) ==
-               Row.stable_decoration_id(:fold_start, 12, block_id)
+      assert Row.stable_decoration_id(:block, 12, 7) !=
+               Row.stable_decoration_id(:virtual_line, 12, 7)
     end
   end
 end

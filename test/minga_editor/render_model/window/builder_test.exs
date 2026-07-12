@@ -21,6 +21,7 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
   alias MingaEditor.UI.Highlight
   alias Minga.RenderModel.Window
   alias Minga.RenderModel.Window.Row
+  alias Minga.RenderModel.Window.RowSlotAllocator
   alias Minga.RenderModel.Window.ScrollPresentation
 
   import MingaEditor.RenderPipeline.TestHelpers
@@ -117,6 +118,38 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       assert %Window{} = wf.window_model
       assert wf.window_model.content_kind == :buffer
       assert Enum.map(wf.window_model.rows, & &1.text) == ["hello", "world"]
+    end
+
+    test "preserves surviving row identities across top insertion and deletion" do
+      state = gui_state(content: "duplicate\nduplicate\ntail")
+      {[_arming], _cursor, state} = build_content(state)
+      {[first], _cursor, state} = build_content(state)
+
+      original =
+        Map.new(first.window_model.rows, &{&1.text <> Integer.to_string(&1.buf_line), &1.row_id})
+
+      buffer = state.workspace.buffers.active
+
+      :ok = BufferProcess.insert_text(buffer, "new\n")
+      {[inserted], _cursor, state} = build_content(state)
+      [new_row | surviving] = inserted.window_model.rows
+
+      assert new_row.text == "new"
+
+      assert Enum.map(surviving, & &1.row_id) == [
+               original["duplicate0"],
+               original["duplicate1"],
+               original["tail2"]
+             ]
+
+      :ok = BufferProcess.delete_lines(buffer, 0, 0)
+      {[restored], _cursor, _state} = build_content(state)
+
+      assert Enum.map(restored.window_model.rows, & &1.row_id) == [
+               original["duplicate0"],
+               original["duplicate1"],
+               original["tail2"]
+             ]
     end
 
     test "includes pane geometry and content epoch for GUI windows" do
@@ -353,15 +386,17 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       assert hd(wf.window_model.rows).content_hash != old_hash
     end
 
-    test "resize reset fingerprint bumps content epoch and forces full refresh" do
+    test "resize invalidates layout while preserving content epoch and row identity" do
       state = gui_state(content: "hello")
       {[wf], _cursor, state} = build_content(state)
       epoch = wf.window_model.content_epoch
+      row_id = hd(wf.window_model.rows).row_id
 
       resized = %{state | terminal_viewport: Viewport.new(24, 100)}
       {[wf], _cursor, _state} = build_content(resized)
 
-      assert wf.window_model.content_epoch != epoch
+      assert wf.window_model.content_epoch == epoch
+      assert hd(wf.window_model.rows).row_id == row_id
       assert wf.window_model.full_refresh == true
     end
 
@@ -397,6 +432,94 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       assert model.cursor_col == 12
     end
 
+    test "wrapped row IDs follow their durable source when a line is inserted above" do
+      state = gui_state(cols: 20, content: "top\nabcdefghijABCDEFGHIJ")
+      buffer = state.workspace.buffers.active
+      assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+      assert {:ok, false} = BufferProcess.set_option(buffer, :linebreak, false)
+
+      {[before], _cursor, state} = build_content(state)
+
+      wrapped_ids =
+        before.window_model.rows
+        |> Enum.filter(&(&1.buf_line == 1))
+        |> Enum.map(& &1.row_id)
+
+      :ok = BufferProcess.move_to(buffer, {0, 0})
+      :ok = BufferProcess.insert_text(buffer, "new\n")
+      {[after_insert], _cursor, _state} = build_content(state)
+
+      assert after_insert.window_model.rows
+             |> Enum.filter(&(&1.buf_line == 2))
+             |> Enum.map(& &1.row_id) == wrapped_ids
+    end
+
+    test "virtual and block row IDs follow their durable source across structural edits" do
+      state = gui_state(content: "top\nanchor\ntail")
+      buffer = state.workspace.buffers.active
+
+      _virtual_id =
+        BufferProcess.add_virtual_text(buffer, {1, 0},
+          segments: [{"virtual", Face.new()}],
+          placement: :above
+        )
+
+      _block_id =
+        BufferProcess.add_block_decoration(buffer, 1,
+          placement: :below,
+          render: fn _width -> [{"block", Face.new()}] end
+        )
+
+      {[before], _cursor, state} = build_content(state)
+
+      decoration_ids =
+        before.window_model.rows
+        |> Enum.filter(&(&1.row_type in [:virtual_line, :block]))
+        |> Enum.map(& &1.row_id)
+
+      :ok = BufferProcess.move_to(buffer, {0, 0})
+      :ok = BufferProcess.insert_text(buffer, "new\n")
+      {[after_insert], _cursor, _state} = build_content(state)
+
+      assert after_insert.window_model.rows
+             |> Enum.filter(&(&1.row_type in [:virtual_line, :block]))
+             |> Enum.map(& &1.row_id) == decoration_ids
+    end
+
+    test "row-slot exhaustion resets content epoch before rebuilding decoration identities" do
+      state = gui_state(content: "line")
+      buffer = state.workspace.buffers.active
+
+      _id =
+        BufferProcess.add_virtual_text(buffer, {0, 0},
+          segments: [{"virtual", Face.new()}],
+          placement: :above
+        )
+
+      win_id = state.workspace.windows.active
+      window = Map.fetch!(state.workspace.windows.map, win_id)
+
+      exhausted = %RowSlotAllocator{
+        slots: %{},
+        next: %{{1, 0, :virtual_line} => 0x1000_0000}
+      }
+
+      window = EditorWindow.put_row_slot_allocator(window, exhausted)
+
+      windows = %{
+        state.workspace.windows
+        | map: Map.put(state.workspace.windows.map, win_id, window)
+      }
+
+      state = put_in(state.workspace.windows, windows)
+
+      {[wf], _cursor, _state} = build_content(state)
+
+      assert wf.window_model.content_epoch == 2
+      assert wf.window_model.full_refresh == true
+      assert Enum.any?(wf.window_model.rows, &(&1.row_type == :virtual_line))
+    end
+
     test "virtual line row IDs stay stable when earlier siblings are removed" do
       state = gui_state(content: "line\nnext")
       buffer = state.workspace.buffers.active
@@ -408,14 +531,14 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
           priority: 0
         )
 
-      second_id =
+      _second_id =
         BufferProcess.add_virtual_text(buffer, {0, 0},
           segments: [{"second virtual", Face.new()}],
           placement: :above,
           priority: 1
         )
 
-      {[wf], _cursor, _state} = build_content(state)
+      {[wf], _cursor, state} = build_content(state)
 
       virtual_rows = Enum.filter(wf.window_model.rows, &(&1.row_type == :virtual_line))
       assert Enum.map(virtual_rows, & &1.text) == ["first virtual", "second virtual"]
@@ -424,10 +547,8 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       assert Enum.map(virtual_gutters, & &1.display_type) == [:blank, :blank]
       assert Enum.map(virtual_gutters, & &1.sign_type) == [:none, :none]
 
-      assert Enum.map(virtual_rows, & &1.row_id) == [
-               Row.stable_decoration_id(:virtual_line, 0, first_id),
-               Row.stable_decoration_id(:virtual_line, 0, second_id)
-             ]
+      [first_row_id, second_row_id] = Enum.map(virtual_rows, & &1.row_id)
+      refute first_row_id == second_row_id
 
       :ok = BufferProcess.remove_virtual_text(buffer, first_id)
 
@@ -435,7 +556,7 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
 
       [remaining] = Enum.filter(wf.window_model.rows, &(&1.row_type == :virtual_line))
       assert remaining.text == "second virtual"
-      assert remaining.row_id == Row.stable_decoration_id(:virtual_line, 0, second_id)
+      assert remaining.row_id == second_row_id
     end
 
     test "block decoration row IDs stay stable when earlier siblings are removed" do
@@ -449,14 +570,14 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
           priority: 0
         )
 
-      second_id =
+      _second_id =
         BufferProcess.add_block_decoration(buffer, 0,
           placement: :above,
           render: fn _width -> [{"second block", Face.new()}] end,
           priority: 1
         )
 
-      {[wf], _cursor, _state} = build_content(state)
+      {[wf], _cursor, state} = build_content(state)
 
       block_rows = Enum.filter(wf.window_model.rows, &(&1.row_type == :block))
       assert Enum.map(block_rows, & &1.text) == ["first block", "second block"]
@@ -465,10 +586,8 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       assert Enum.map(block_gutters, & &1.display_type) == [:blank, :blank]
       assert Enum.map(block_gutters, & &1.sign_type) == [:none, :none]
 
-      assert Enum.map(block_rows, & &1.row_id) == [
-               Row.stable_decoration_id(:block, 0, {first_id, 0}),
-               Row.stable_decoration_id(:block, 0, {second_id, 0})
-             ]
+      [first_row_id, second_row_id] = Enum.map(block_rows, & &1.row_id)
+      refute first_row_id == second_row_id
 
       :ok = BufferProcess.remove_block_decoration(buffer, first_id)
 
@@ -476,7 +595,7 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
 
       [remaining] = Enum.filter(wf.window_model.rows, &(&1.row_type == :block))
       assert remaining.text == "second block"
-      assert remaining.row_id == Row.stable_decoration_id(:block, 0, {second_id, 0})
+      assert remaining.row_id == second_row_id
     end
 
     test "fold-start rows use stable ids for window folds" do
@@ -497,7 +616,7 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
 
       [fold_row] = Enum.filter(wf.window_model.rows, &(&1.row_type == :fold_start))
       [fold_gutter] = Enum.filter(wf.window_model.gutter.entries, &(&1.buf_line == 0))
-      assert fold_row.row_id == Row.stable_id(:fold_start, 0, 0, 2)
+      assert fold_row.row_id == Row.stable_id(:fold_start, 0)
       assert fold_gutter.display_type == :fold_start
     end
 
@@ -552,13 +671,11 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
           decs
         end)
 
-      [fold] = BufferProcess.decorations(buffer).fold_regions
-
       {[wf], _cursor, _state} = build_content(state)
 
       [fold_row] = Enum.filter(wf.window_model.rows, &(&1.row_type == :fold_start))
       [fold_gutter] = Enum.filter(wf.window_model.gutter.entries, &(&1.buf_line == 0))
-      assert fold_row.row_id == Row.stable_decoration_id(:fold_start, 0, fold.id)
+      assert fold_row.row_id == Row.stable_id(:decoration_fold, 0, 0)
       assert fold_gutter.display_type == :fold_start
     end
 

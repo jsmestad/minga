@@ -631,12 +631,16 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 	}
 
 	// Validate every window reference against a temporary snapshot before any
-	// publication. A miss returns targeted status and leaves surrounding state live.
-	if windowID, missed := m.validateWindowReferences(); missed {
-		generation, seq := m.staging.generation, m.staging.seq
-		m.send(protocol.EncodeWindowRefMiss(generation, seq, m.lastCommittedSeq, windowID))
-		m.staging = nil
-		return cmds
+	// publication. Missing refs use targeted recovery; wrong epochs reject the
+	// entire frame through the generation-aware status contract.
+	if failure := m.validateWindowReferences(); failure != nil {
+		if failure.targeted {
+			generation, seq := m.staging.generation, m.staging.seq
+			m.send(protocol.EncodeWindowRefMiss(generation, seq, m.lastCommittedSeq, failure.windowID))
+			m.staging = nil
+			return cmds
+		}
+		return m.rejectStaging(cmds, failure.reason, "window epoch mismatch")
 	}
 
 	// Valid: replay the buffer atomically through the live mutation path.
@@ -665,18 +669,22 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 // frame, so View() never paints a partial. request_keyframe remains reserved for
 // an explicit manual retry rather than duplicating automatic typed recovery.
 func (m *Model) invalidateStaging(cmds []tea.Cmd, reason string) []tea.Cmd {
+	return m.rejectStaging(cmds, rejectionCode(reason), reason)
+}
+
+func (m *Model) rejectStaging(cmds []tea.Cmd, reason byte, description string) []tea.Cmd {
 	generation, frameSeq := uint32(0), uint32(0)
 	if m.staging != nil {
 		generation, frameSeq = m.staging.generation, m.staging.seq
 	}
-	m.send(protocol.EncodeFrameRejected(generation, frameSeq, m.lastCommittedSeq, rejectionCode(reason)))
+	m.send(protocol.EncodeFrameRejected(generation, frameSeq, m.lastCommittedSeq, reason))
 	m.staging = nil
 	// Typed rejection is the automatic recovery trigger. Keep diagnostics and
 	// the visible resync state debounced while stale frames from the old credit
 	// drain, but never send a second recovery trigger automatically.
 	if !m.resyncPending {
 		m.resyncPending = true
-		m.logToMessages(protocol.LogLevelWarn, "Go TUI frame invalidated (%s), awaiting recovery from %d", reason, m.lastCommittedSeq)
+		m.logToMessages(protocol.LogLevelWarn, "Go TUI frame invalidated (%s), awaiting recovery from %d", description, m.lastCommittedSeq)
 	}
 	return cmds
 }
@@ -702,9 +710,15 @@ func rejectionCode(reason string) byte {
 	}
 }
 
+type windowReferenceFailure struct {
+	windowID uint16
+	reason   byte
+	targeted bool
+}
+
 // validateWindowReferences resolves deltas against a temporary window snapshot.
-// It performs no observable writes, so a miss can be reported before publication.
-func (m *Model) validateWindowReferences() (uint16, bool) {
+// It performs no observable writes, so any failure is reported before publication.
+func (m *Model) validateWindowReferences() *windowReferenceFailure {
 	working := make(map[uint16]protocol.WindowContent, len(m.windows))
 	for id, window := range m.windows {
 		working[id] = window
@@ -715,20 +729,23 @@ func (m *Model) validateWindowReferences() (uint16, bool) {
 			working[command.Window.ID] = command.Window
 		case protocol.CommandWindowDelta:
 			previous, ok := working[command.Window.ID]
-			if !ok || previous.ContentEpoch != command.Window.ContentEpoch {
-				return command.Window.ID, true
+			if !ok {
+				return &windowReferenceFailure{windowID: command.Window.ID, targeted: true}
+			}
+			if previous.ContentEpoch != command.Window.ContentEpoch {
+				return &windowReferenceFailure{windowID: command.Window.ID, reason: protocol.RejectWindowEpoch}
 			}
 			if command.Window.Rows != nil {
 				rows, err := resolveWindowRows(previous.Rows, command.Window.Rows)
 				if err != nil {
-					return command.Window.ID, true
+					return &windowReferenceFailure{windowID: command.Window.ID, targeted: true}
 				}
 				previous.Rows = rows
 			}
 			working[command.Window.ID] = previous
 		}
 	}
-	return 0, false
+	return nil
 }
 
 // applyMutation runs a single command through the live per-command mutation

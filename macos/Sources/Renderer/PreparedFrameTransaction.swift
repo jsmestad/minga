@@ -397,7 +397,7 @@ struct PreparedFrameTransactionBuilder {
             return
         }
         guard let updated = current.applyingRowsDelta(delta) else {
-            rejection = .invalidRetainedRows(windowId: delta.windowId, contentEpoch: delta.contentEpoch)
+            rejection = .missingWindowReference(windowId: delta.windowId)
             return
         }
         workingWindows[delta.windowId] = updated

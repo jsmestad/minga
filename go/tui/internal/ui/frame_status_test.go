@@ -45,6 +45,29 @@ func TestRejectedTransactionEmitsOnlyTypedRejectionAndDoesNotPublish(t *testing.
 	}
 }
 
+func TestWrongWindowEpochRejectsTransactionWithoutPartialApply(t *testing.T) {
+	out := make(chan []byte, 16)
+	m := New(40, 8, out, nil)
+	m = applyTo(t, m, beginFrame(1, 0), testThemeCommand(), windowRowsCommand(1, "baseline"), commitFrame(1))
+	drainOutboundPackets(out)
+
+	wrongEpoch := protocol.Command{Kind: protocol.CommandWindowDelta, Window: protocol.WindowContent{
+		ID: 1, ContentEpoch: 99,
+		Rows: []protocol.WindowRow{{ID: 2, ContentHash: 2, Text: "must not publish"}},
+	}}
+	m = applyTo(t, m, beginFrame(2, 1), wrongEpoch, commitFrame(2))
+	packets := drainOutboundPackets(out)
+	if len(packets) != 2 || packets[0][0] != generated.OPFrameRejected || packets[0][13] != protocol.RejectWindowEpoch {
+		t.Fatalf("expected window-epoch frame rejection plus diagnostic, got %v", packets)
+	}
+	if got := m.windows[1].Rows[0].Text; got != "baseline" {
+		t.Fatalf("wrong-epoch transaction partially published: %q", got)
+	}
+	if m.lastCommittedSeq != 1 {
+		t.Fatalf("wrong-epoch frame advanced commit sequence to %d", m.lastCommittedSeq)
+	}
+}
+
 func TestWindowReferenceMissReportsTargetWithoutPublishingSiblingState(t *testing.T) {
 	out := make(chan []byte, 16)
 	m := New(40, 8, out, nil)
