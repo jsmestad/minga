@@ -7,7 +7,7 @@ Usage: scripts/create_worktree <branch-name> [base-ref]
 
 Creates a worktree under ../minga-worktrees/ relative to the primary checkout and copies local development caches into it so the first Mix and Expert commands do not start cold.
 
-Run this from any Minga checkout when no Mix or Expert command is active in the source checkout.
+Run this from any Minga checkout when no Mix or Expert command is active in the source or primary checkout.
 USAGE
 }
 
@@ -44,8 +44,7 @@ worktree_name=${branch//\//-}
 worktree_parent="$(cd "$main_worktree/.." && pwd -P)/minga-worktrees"
 worktree_path="$worktree_parent/$worktree_name"
 incremental_cache_relative="_build/dev/dialyzer_incremental"
-main_incremental_cache="$main_worktree/$incremental_cache_relative"
-main_incremental_lock="$main_worktree/_build/dev/.dialyzer_incremental.lock"
+primary_incremental_cache="$main_worktree/$incremental_cache_relative"
 
 if [[ -e "$worktree_path" ]]; then
   echo "Worktree path already exists: $worktree_path" >&2
@@ -73,121 +72,18 @@ copy_dir() {
   fi
 }
 
-incremental_cache_name() {
-  [[ $1 =~ ^incremental-([A-Za-z0-9_-]{16})-[A-Za-z0-9_-]+\.plt$ ]]
-}
-
-file_mtime() {
-  if stat -f '%m' "$1" >/dev/null 2>&1; then
-    stat -f '%m' "$1"
-  else
-    stat -c '%Y' "$1"
+copy_build_cache() {
+  if [[ -d "$repo_root/_build" ]]; then
+    echo "Copying _build/"
+    rsync -a --exclude='/dev/dialyzer_incremental/' --exclude='/dev/.dialyzer_incremental.lock' "$repo_root/_build/" "$worktree_path/_build/"
   fi
-}
-
-sync_incremental_dialyzer_caches() {
-  with_primary_incremental_lock sync_incremental_dialyzer_caches_locked
-}
-
-with_primary_incremental_lock() (
-  mkdir -p "$(dirname "$main_incremental_lock")"
-  temporary_lock=$(mktemp "$main_incremental_lock.XXXXXX")
-
-  if ! ln "$temporary_lock" "$main_incremental_lock"; then
-    rm -f "$temporary_lock"
-    echo "Primary incremental Dialyzer cache is locked; skipping cache synchronization." >&2
-    exit 0
-  fi
-
-  rm -f "$temporary_lock"
-  trap 'rm -f "$main_incremental_lock"' EXIT
-  "$@"
-)
-
-sync_incremental_dialyzer_caches_locked() {
-  local source_worktree
-  local source_cache
-  local source_lock
-  local source_plt
-  local cache_name
-  local target_plt
-  local temporary_plt
-
-  mkdir -p "$main_incremental_cache"
-
-  while IFS= read -r source_worktree; do
-    [[ "$source_worktree" == "$main_worktree" ]] && continue
-
-    source_cache="$source_worktree/$incremental_cache_relative"
-    source_lock="$source_worktree/_build/dev/.dialyzer_incremental.lock"
-    [[ -d "$source_cache" && ! -e "$source_lock" ]] || continue
-
-    for source_plt in "$source_cache"/incremental-*.plt; do
-      [[ -f "$source_plt" ]] || continue
-      cache_name=$(basename "$source_plt")
-      incremental_cache_name "$cache_name" || continue
-      target_plt="$main_incremental_cache/$cache_name"
-
-      if [[ -f "$target_plt" && ! "$source_plt" -nt "$target_plt" ]]; then
-        continue
-      fi
-
-      temporary_plt=$(mktemp "$main_incremental_cache/.${cache_name}.XXXXXX")
-      cp -p "$source_plt" "$temporary_plt"
-      mv -f "$temporary_plt" "$target_plt"
-      echo "Synced incremental Dialyzer cache: $cache_name"
-    done
-  done < <(git -C "$main_worktree" worktree list --porcelain | awk '
-    $1 == "worktree" {
-      sub(/^worktree /, "")
-      print
-    }
-  ')
-
-  prune_incremental_dialyzer_caches
-}
-
-prune_incremental_dialyzer_caches() {
-  local records_file
-  local cache_path
-  local cache_name
-  local namespace
-  local current_namespace=""
-  local retained=0
-  local _mtime
-
-  records_file=$(mktemp "${TMPDIR:-/tmp}/minga-dialyzer-caches.XXXXXX")
-
-  for cache_path in "$main_incremental_cache"/incremental-*.plt; do
-    [[ -f "$cache_path" ]] || continue
-    cache_name=$(basename "$cache_path")
-    incremental_cache_name "$cache_name" || continue
-    namespace=${BASH_REMATCH[1]}
-    printf '%s\t%s\t%s\n' "$namespace" "$(file_mtime "$cache_path")" "$cache_path" >> "$records_file"
-  done
-
-  while IFS=$'\t' read -r namespace _mtime cache_path; do
-    if [[ "$namespace" != "$current_namespace" ]]; then
-      current_namespace=$namespace
-      retained=0
-    fi
-
-    retained=$((retained + 1))
-
-    if (( retained > 3 )); then
-      rm -f "$cache_path"
-      echo "Pruned incremental Dialyzer cache: $(basename "$cache_path")"
-    fi
-  done < <(sort -t $'\t' -k1,1 -k2,2nr "$records_file")
-
-  rm -f "$records_file"
 }
 
 copy_incremental_dialyzer_caches() {
-  if [[ -d "$main_incremental_cache" ]]; then
+  if [[ -d "$primary_incremental_cache" ]]; then
     echo "Copying primary incremental Dialyzer caches/"
     mkdir -p "$worktree_path/$incremental_cache_relative"
-    rsync -a "$main_incremental_cache/" "$worktree_path/$incremental_cache_relative/"
+    rsync -a "$primary_incremental_cache/" "$worktree_path/$incremental_cache_relative/"
   fi
 }
 
@@ -203,9 +99,8 @@ copy_expert_builds() {
   rsync -a "$source_dir/" "$target_dir/"
 }
 
-sync_incremental_dialyzer_caches
 copy_dir deps
-copy_dir _build
+copy_build_cache
 copy_incremental_dialyzer_caches
 copy_expert_builds
 
