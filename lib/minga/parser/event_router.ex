@@ -22,8 +22,6 @@ defmodule Minga.Parser.EventRouter do
 
   @type route_result ::
           {:noreply, BufferRegistry.t(), ParseScheduler.t(), RequestState.t(), SnippetState.t()}
-          | {:port_write_failed, BufferRegistry.t(), ParseScheduler.t(), RequestState.t(),
-             SnippetState.t()}
   @type highlight_start_result ::
           {:noreply, SnippetState.t()} | {:reply, :unsupported, SnippetState.t()}
   @type route_context ::
@@ -315,9 +313,6 @@ defmodule Minga.Parser.EventRouter do
 
         noreply(buffers, scheduler, requests, snippets)
 
-      {:port_write_failed, buffers, scheduler, requests} ->
-        {:port_write_failed, buffers, scheduler, requests, snippets}
-
       :stale ->
         noreply(buffers, scheduler, requests, snippets)
     end
@@ -463,13 +458,10 @@ defmodule Minga.Parser.EventRouter do
   defp recover_parser_buffer(port, buffers, scheduler, requests, snippets, buffer_id) do
     case BufferRegistry.resolve(buffers, buffer_id) do
       buffer_pid when is_pid(buffer_pid) ->
-        case ParseSync.force_parse(port, buffers, scheduler, requests, buffer_pid) do
-          {:ok, buffers, scheduler, requests} ->
-            noreply(buffers, scheduler, requests, snippets)
+        {:ok, buffers, scheduler, requests} =
+          ParseSync.force_parse(port, buffers, scheduler, requests, buffer_pid)
 
-          {:port_write_failed, buffers, scheduler, requests} ->
-            {:port_write_failed, buffers, scheduler, requests, snippets}
-        end
+        noreply(buffers, scheduler, requests, snippets)
 
       nil ->
         noreply(buffers, scheduler, requests, snippets)

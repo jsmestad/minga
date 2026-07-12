@@ -19,12 +19,12 @@ defmodule Minga.Parser.ParseSync do
 
   @parse_admission_timeout_ms 10_000
 
+  @type ok_result :: {:ok, BufferRegistry.t(), ParseScheduler.t(), RequestState.t()}
   @type result ::
-          {:ok, BufferRegistry.t(), ParseScheduler.t(), RequestState.t()}
+          ok_result()
           | {:port_write_failed, BufferRegistry.t(), ParseScheduler.t(), RequestState.t()}
   @type completion_result ::
           {:ok, BufferRegistry.t(), ParseScheduler.t(), RequestState.t(), BufferRegistration.t()}
-          | {:port_write_failed, BufferRegistry.t(), ParseScheduler.t(), RequestState.t()}
           | :stale
   @type timeout_result ::
           :ok | {:drop_buffer, RequestState.t()} | :restart_port
@@ -36,7 +36,7 @@ defmodule Minga.Parser.ParseSync do
           ParseScheduler.t(),
           RequestState.t(),
           pid()
-        ) :: result()
+        ) :: ok_result()
   def force_parse(port, buffers, scheduler, requests, buffer_pid) do
     case BufferRegistry.fetch(buffers, buffer_pid) do
       {:ok, registration} ->
@@ -59,7 +59,7 @@ defmodule Minga.Parser.ParseSync do
           RequestState.t(),
           pid(),
           non_neg_integer()
-        ) :: result()
+        ) :: ok_result()
   def mark_dirty(port, buffers, scheduler, requests, buffer_pid, sequence) do
     case BufferRegistry.fetch(buffers, buffer_pid) do
       {:ok, registration} ->
@@ -82,7 +82,7 @@ defmodule Minga.Parser.ParseSync do
           ParseScheduler.t(),
           RequestState.t(),
           pid()
-        ) :: result()
+        ) :: ok_result()
   def pump(nil, buffers, scheduler, requests, _buffer_pid), do: ok(buffers, scheduler, requests)
 
   def pump(port, buffers, scheduler, requests, buffer_pid) do
@@ -97,7 +97,7 @@ defmodule Minga.Parser.ParseSync do
 
   @doc "Activates the next queued parse synchronization operation."
   @spec dispatch_next(port() | nil, BufferRegistry.t(), ParseScheduler.t(), RequestState.t()) ::
-          result()
+          ok_result()
   def dispatch_next(nil, buffers, scheduler, requests), do: ok(buffers, scheduler, requests)
 
   def dispatch_next(port, buffers, scheduler, requests) do
@@ -219,7 +219,7 @@ defmodule Minga.Parser.ParseSync do
           BufferRegistry.t(),
           ParseScheduler.t(),
           RequestState.t()
-        ) :: result()
+        ) :: ok_result()
   def restart_pumps(port, buffers, scheduler, requests) do
     buffer_count = BufferRegistry.count(buffers)
 
@@ -233,11 +233,8 @@ defmodule Minga.Parser.ParseSync do
     buffers
     |> BufferRegistry.entries()
     |> Map.keys()
-    |> Enum.reduce_while(ok(buffers, scheduler, requests), fn buffer_pid, {:ok, b, s, r} ->
-      case pump(port, b, s, r, buffer_pid) do
-        {:ok, _b, _s, _r} = result -> {:cont, result}
-        failed -> {:halt, failed}
-      end
+    |> Enum.reduce(ok(buffers, scheduler, requests), fn buffer_pid, {:ok, b, s, r} ->
+      pump(port, b, s, r, buffer_pid)
     end)
   end
 
@@ -259,7 +256,7 @@ defmodule Minga.Parser.ParseSync do
           RequestState.t(),
           pid(),
           BufferRegistration.t()
-        ) :: result()
+        ) :: ok_result()
   defp enqueue_pumpable(port, buffers, scheduler, requests, buffer_pid, registration) do
     if BufferRegistration.pumpable?(registration) do
       dispatch_next(port, buffers, ParseScheduler.enqueue(scheduler, buffer_pid), requests)
@@ -274,7 +271,7 @@ defmodule Minga.Parser.ParseSync do
           ParseScheduler.t(),
           RequestState.t(),
           pid()
-        ) :: result()
+        ) :: ok_result()
   defp dispatch_activated(port, buffers, scheduler, requests, buffer_pid) do
     case BufferRegistry.fetch(buffers, buffer_pid) do
       {:ok, registration} ->
@@ -295,7 +292,7 @@ defmodule Minga.Parser.ParseSync do
           ParseScheduler.t(),
           RequestState.t(),
           pid()
-        ) :: result()
+        ) :: ok_result()
   defp continue_dispatch(port, buffers, scheduler, requests, buffer_pid) do
     scheduler = release_admission(scheduler, buffer_pid)
     dispatch_next(port, buffers, scheduler, requests)
@@ -307,7 +304,7 @@ defmodule Minga.Parser.ParseSync do
           RequestState.t(),
           pid(),
           BufferRegistration.t()
-        ) :: result()
+        ) :: ok_result()
   defp request_snapshot(buffers, scheduler, requests, buffer_pid, registration) do
     token = make_ref()
     cursor = BufferRegistration.snapshot_cursor(registration)
@@ -445,7 +442,7 @@ defmodule Minga.Parser.ParseSync do
     end
   end
 
-  @spec ok(BufferRegistry.t(), ParseScheduler.t(), RequestState.t()) :: result()
+  @spec ok(BufferRegistry.t(), ParseScheduler.t(), RequestState.t()) :: ok_result()
   defp ok(buffers, scheduler, requests), do: {:ok, buffers, scheduler, requests}
 
   @spec monotonic_ms() :: integer()
