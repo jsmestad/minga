@@ -139,13 +139,13 @@ defmodule MingaAgent.Credentials do
       end)
 
     oauth_status =
-      if oauth_configured?() do
+      if auth_probe(opts, :oauth_probe, &oauth_configured?/0) do
         %ProviderStatus{provider: "openai_codex", configured: true, source: :oauth}
       else
         %ProviderStatus{provider: "openai_codex", configured: false, source: nil}
       end
 
-    ollama_up = ollama_available?()
+    ollama_up = auth_probe(opts, :ollama_probe, &ollama_available?/0)
 
     ollama_status = %ProviderStatus{
       provider: "ollama",
@@ -162,8 +162,8 @@ defmodule MingaAgent.Credentials do
   @spec any_configured?(keyword()) :: boolean()
   def any_configured?(opts \\ []) do
     Enum.any?(@known_providers, fn p -> resolve(p, opts) != :error end) or
-      oauth_configured?() or
-      ollama_available?()
+      auth_probe(opts, :oauth_probe, &oauth_configured?/0) or
+      auth_probe(opts, :ollama_probe, &ollama_available?/0)
   end
 
   @doc """
@@ -226,6 +226,13 @@ defmodule MingaAgent.Credentials do
     ArgumentError -> false
   catch
     :exit, _ -> false
+  end
+
+  @spec auth_probe(keyword(), atom(), (-> boolean())) :: boolean()
+  defp auth_probe(opts, key, default) do
+    opts
+    |> Keyword.get(key, default)
+    |> then(& &1.())
   end
 
   @doc """

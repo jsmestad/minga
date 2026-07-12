@@ -1,19 +1,29 @@
 defmodule MingaEditor.UI.Picker.HelpSourceTest do
   @moduledoc false
-  # Uses the global code server and HelpSource persistent_term cache.
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.HelpSource
 
   describe "candidates/1" do
-    test "includes known modules and public functions" do
+    test "builds sorted module and function candidates from supplied exports" do
+      labels =
+        [{String, [upcase: 1]}, {Enum, [map: 2]}]
+        |> HelpSource.candidates_from_exports()
+        |> Enum.map(& &1.label)
+
+      assert labels == ["Enum", "Enum.map/2", "String", "String.upcase/1"]
+    end
+
+    @tag :heavy
+    test "discovers known modules and public functions from the code server" do
       labels = candidate_labels()
 
       assert "Enum" in labels
       assert "Enum.map/2" in labels
     end
 
+    @tag :heavy
     test "refreshes cached candidates when a new module is loaded" do
       _initial_labels = candidate_labels()
       module = Module.concat(__MODULE__, "Dynamic#{System.unique_integer([:positive])}")
@@ -31,6 +41,7 @@ defmodule MingaEditor.UI.Picker.HelpSourceTest do
       assert "#{inspect(module)}.hello/0" in candidate_labels()
     end
 
+    @tag :heavy
     test "refreshes cached candidates when a module gains a public function" do
       module = Module.concat(__MODULE__, "Reloaded#{System.unique_integer([:positive])}")
 

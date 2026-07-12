@@ -1,6 +1,5 @@
 defmodule MingaEditor.Agent.SlashCommandTest do
-  # async: false because completion_candidates tests mutate Minga.Config.set_option(:agent_models).
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias MingaAgent.Memory
   alias MingaAgent.Session
@@ -186,14 +185,9 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     end
 
     test "returns configured model candidates after model and a space" do
-      Minga.Config.set_option(:agent_models, ["anthropic:claude-sonnet-4", "openai:gpt-4o"])
-
-      try do
-        candidates = SlashCommand.completion_candidates(mock_state(), "model gpt")
-        assert [%{label: "openai:gpt-4o", insert: "model openai:gpt-4o"}] = candidates
-      after
-        Minga.Config.set_option(:agent_models, [])
-      end
+      models = ["anthropic:claude-sonnet-4", "openai:gpt-4o"]
+      candidates = SlashCommand.completion_candidates(mock_state(), "model gpt", models)
+      assert [%{label: "openai:gpt-4o", insert: "model openai:gpt-4o"}] = candidates
     end
 
     test "renders all configured model entries when many are available" do
@@ -206,17 +200,12 @@ defmodule MingaEditor.Agent.SlashCommandTest do
           |> then(&"zz-#{&1}")
         end)
 
-      Minga.Config.set_option(:agent_models, models)
+      labels =
+        SlashCommand.completion_candidates(mock_state(), "model zz", models)
+        |> Enum.map(& &1.label)
 
-      try do
-        labels =
-          SlashCommand.completion_candidates(mock_state(), "model zz") |> Enum.map(& &1.label)
-
-        assert Enum.count(labels) == 25
-        assert MapSet.new(labels) == MapSet.new(models)
-      after
-        Minga.Config.set_option(:agent_models, [])
-      end
+      assert Enum.count(labels) == 25
+      assert MapSet.new(labels) == MapSet.new(models)
     end
   end
 
