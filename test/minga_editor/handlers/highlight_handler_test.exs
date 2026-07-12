@@ -5,30 +5,35 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.Parser.Manager
   alias MingaEditor.Handlers.HighlightHandler
+  alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.UI.Highlight
   alias MingaEditor.Window
 
-  import MingaEditor.RenderPipeline.TestHelpers
+  @spec base_state() :: EditorState.t()
+  defp base_state do
+    manager = Module.concat(__MODULE__, "Parser#{System.unique_integer([:positive])}")
 
-  @spec with_buffer_id(EditorState.t(), pid(), non_neg_integer()) :: EditorState.t()
-  defp with_buffer_id(state, pid, buffer_id) do
-    hl = state.workspace.highlight
+    start_supervised!(
+      {Manager, name: manager, parser_path: "/missing/minga-parser"},
+      id: {:parser_manager, manager}
+    )
 
-    updated_hl = %{
-      hl
-      | buffer_ids: Map.put(hl.buffer_ids, pid, buffer_id),
-        reverse_buffer_ids: Map.put(hl.reverse_buffer_ids, buffer_id, pid),
-        next_buffer_id: max(hl.next_buffer_id, buffer_id + 1)
-    }
+    %{TestHelpers.base_state() | parser_manager: manager}
+  end
 
-    %{state | workspace: %{state.workspace | highlight: updated_hl}}
+  @spec with_buffer_id(EditorState.t(), pid(), pos_integer()) :: EditorState.t()
+  defp with_buffer_id(state, pid, expected_id) do
+    id = Manager.register_buffer(pid, "elixir", fn -> "" end, server: state.parser_manager)
+    assert id == expected_id
+    state
   end
 
   @spec with_highlight(EditorState.t(), pid()) :: EditorState.t()
   defp with_highlight(state, pid) do
-    hl = state.workspace.highlight
+    hl = state.highlighting
     theme = state.theme
 
     buf_hl = %Highlight{
@@ -40,22 +45,7 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
     }
 
     updated_hl = %{hl | highlights: Map.put(hl.highlights, pid, buf_hl)}
-    %{state | workspace: %{state.workspace | highlight: updated_hl}}
-  end
-
-  @spec with_buffer_tracking(EditorState.t(), pid(), non_neg_integer(), non_neg_integer()) ::
-          EditorState.t()
-  defp with_buffer_tracking(state, pid, buffer_id, last_active_ms_ago) do
-    state = with_buffer_id(state, pid, buffer_id)
-    hl = state.workspace.highlight
-    now = System.monotonic_time(:millisecond)
-
-    updated_hl = %{
-      hl
-      | last_active_at: Map.put(hl.last_active_at, pid, now - last_active_ms_ago)
-    }
-
-    %{state | workspace: %{state.workspace | highlight: updated_hl}}
+    %{state | highlighting: updated_hl}
   end
 
   describe "setup and parser lifecycle" do
@@ -78,13 +68,12 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
         HighlightHandler.handle(restarted_state, {:minga_highlight, :parser_restarted})
 
       assert restarted.parser_status == :available
-      assert restarted.workspace.highlight.version == 0
 
       assert Enum.all?(Map.values(restarted.workspace.windows.map), fn %Window{} = window ->
                match?(%MingaEditor.Window.RenderCache{}, window.render_cache)
              end)
 
-      assert Enum.all?(restarted.workspace.highlight.highlights, fn {_pid, hl} ->
+      assert Enum.all?(restarted.highlighting.highlights, fn {_pid, hl} ->
                hl.version == 0
              end)
 
@@ -111,50 +100,6 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
 
       assert {^catch_all_state, []} =
                HighlightHandler.handle(catch_all_state, {:minga_highlight, :unknown_event})
-    end
-
-    test "parser tree eviction protects visible split buffers while evicting hidden buffers" do
-      state = base_state()
-      active = active_buffer(state)
-
-      visible_buf =
-        start_supervised!({Minga.Buffer.Process, content: "visible"},
-          id: {:highlight_handler_test_visible_buf, make_ref()}
-        )
-
-      hidden_buf =
-        start_supervised!({Minga.Buffer.Process, content: "hidden"},
-          id: {:highlight_handler_test_hidden_buf, make_ref()}
-        )
-
-      stale_ms = 10 * 60 * 1_000
-
-      visible_window = Window.new(2, visible_buf, 24, 80)
-
-      state =
-        state
-        |> with_buffer_tracking(active, 1, stale_ms)
-        |> with_buffer_tracking(visible_buf, 2, stale_ms)
-        |> with_buffer_tracking(hidden_buf, 3, stale_ms)
-
-      workspace = %{
-        state.workspace
-        | windows: %{
-            state.workspace.windows
-            | map: Map.put(state.workspace.windows.map, 2, visible_window),
-              next_id: 3
-          }
-      }
-
-      state = %{state | workspace: workspace}
-
-      {new_state, _effects} = HighlightHandler.handle(state, :evict_parser_trees)
-
-      assert Map.get(new_state.workspace.highlight.buffer_ids, active) == 1
-      assert Map.get(new_state.workspace.highlight.buffer_ids, visible_buf) == 2
-      refute Map.has_key?(new_state.workspace.highlight.buffer_ids, hidden_buf)
-      refute Map.has_key?(new_state.workspace.highlight.reverse_buffer_ids, 3)
-      refute Map.has_key?(new_state.workspace.highlight.last_active_at, hidden_buf)
     end
 
     test "grammar and port log messages are translated to log effects" do
@@ -235,7 +180,7 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
       {new_state, []} =
         HighlightHandler.handle(state, {:minga_highlight, {:highlight_names, 2, ["string"]}})
 
-      assert new_state.workspace.highlight.highlights[other_buf] != nil
+      assert new_state.highlighting.highlights[other_buf] != nil
     end
 
     test "injection ranges and language responses update only the public highlight state" do
@@ -247,7 +192,7 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
       {new_state, []} =
         HighlightHandler.handle(state, {:minga_highlight, {:injection_ranges, 1, ranges}})
 
-      assert new_state.workspace.injection_ranges[buf] == ranges
+      assert new_state.injection_ranges[buf] == ranges
 
       assert {^new_state, []} =
                HighlightHandler.handle(
@@ -352,6 +297,7 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
     do: Map.fetch!(state.workspace.windows.map, state.workspace.windows.active)
 
   defp state_with_other_buffer(state, buffer_id) do
+    state = with_buffer_id(state, active_buffer(state), 1)
     {:ok, other_buf} = Minga.Buffer.Process.start_link(content: "other")
     {with_buffer_id(state, other_buf, buffer_id), other_buf}
   end
@@ -365,16 +311,12 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
 
   defp mark_parser_restarting(state) do
     buf = active_buffer(state)
-    hl = state.workspace.highlight
+    hl = state.highlighting
     buf_hl = Map.fetch!(hl.highlights, buf)
 
-    updated_hl = %{
-      hl
-      | version: 5,
-        highlights: Map.put(hl.highlights, buf, %{buf_hl | version: 3})
-    }
+    updated_hl = %{hl | highlights: Map.put(hl.highlights, buf, %{buf_hl | version: 3})}
 
-    %{state | workspace: %{state.workspace | highlight: updated_hl}, parser_status: :restarting}
+    %{state | highlighting: updated_hl, parser_status: :restarting}
   end
 
   defp state_with_visible_inactive_buffer_symbols(state) do

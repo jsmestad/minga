@@ -8,7 +8,7 @@ defmodule MingaEditor.Handlers.HighlightHandler do
   via 1-2 catch-all clauses and applies the returned effects.
 
   Each function reads and writes only highlight-related state slices
-  (`state.workspace.highlight`, `state.workspace.injection_ranges`,
+  (`state.highlighting`, `state.injection_ranges`,
   `state.parser_status`). Cross-cutting concerns (render, log, timer
   scheduling) are expressed as effects.
   """
@@ -382,20 +382,14 @@ defmodule MingaEditor.Handlers.HighlightHandler do
 
   @spec handle_parser_restarted(EditorState.t()) :: {EditorState.t(), [highlight_effect()]}
   defp handle_parser_restarted(state) do
-    hl = state.workspace.highlight
-
     reset_highlights =
-      Map.new(hl.highlights, fn {pid, buf_hl} ->
-        {pid, %{buf_hl | version: 0}}
+      Map.new(state.highlighting.highlights, fn {pid, buffer_highlight} ->
+        {pid, %{buffer_highlight | version: 0}}
       end)
 
     new_state =
       state
-      |> EditorState.update_highlight(fn highlight ->
-        highlight
-        |> Highlighting.set_version(0)
-        |> Highlighting.set_highlights(reset_highlights)
-      end)
+      |> EditorState.update_highlight(&Highlighting.set_highlights(&1, reset_highlights))
       |> Map.put(:parser_status, :available)
       |> EditorState.reset_frontend_render_state()
 

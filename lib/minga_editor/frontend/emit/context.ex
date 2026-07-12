@@ -124,7 +124,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
       buffers: state.workspace.buffers,
       viewport: state.terminal_viewport,
       file_tree: State.file_tree_state(state),
-      highlight: state.workspace.highlight,
+      highlight: state.highlighting,
       agent_ui: state.workspace.agent_ui,
       # Strict like every sibling field: a snapshot path that drops the
       # launchpad key must fail loudly, not render the launchpad hidden.

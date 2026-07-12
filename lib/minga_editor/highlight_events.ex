@@ -53,7 +53,7 @@ defmodule MingaEditor.HighlightEvents do
     new_buffer = state.workspace.buffers.active
 
     if new_buffer != old_buffer and new_buffer != nil do
-      hl = state.workspace.highlight
+      hl = state.highlighting
 
       case Map.get(hl.highlights, new_buffer) do
         nil ->
@@ -85,13 +85,7 @@ defmodule MingaEditor.HighlightEvents do
     # Buffer.Process broadcasts :buffer_changed with delta from record_edit.
 
     if content_changed do
-      active_hl = HighlightSync.get_active_highlight(state)
-
-      if active_hl.capture_names != {} do
-        HighlightSync.request_reparse(state)
-      else
-        state
-      end
+      HighlightSync.request_reparse(state)
     else
       state
     end

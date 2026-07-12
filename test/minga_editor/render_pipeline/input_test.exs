@@ -23,7 +23,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       assert input.workspace.buffers == state.workspace.buffers
       assert input.workspace.viewport == state.workspace.viewport
       assert input.workspace.editing == state.workspace.editing
-      assert input.workspace.highlight == state.workspace.highlight
+      assert input.highlighting == state.highlighting
       assert input.workspace.file_tree == EditorState.file_tree_state(state)
       assert input.workspace.agent_ui == state.workspace.agent_ui
       assert input.workspace.document_highlights == state.workspace.document_highlights

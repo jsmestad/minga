@@ -590,7 +590,7 @@ defmodule MingaEditor.Commands.Editing do
   @spec toggle_comment(pid(), non_neg_integer(), non_neg_integer(), state()) :: :ok
   defp toggle_comment(buf, start_line, end_line, state) do
     filetype = Buffer.filetype(buf)
-    injection_ranges = Map.get(state.workspace.injection_ranges, buf, [])
+    injection_ranges = Map.get(state.injection_ranges, buf, [])
 
     prefix = resolve_comment_prefix(buf, start_line, filetype, injection_ranges)
     raw = Buffer.content_on_lines(buf, start_line, end_line)
@@ -797,7 +797,7 @@ defmodule MingaEditor.Commands.Editing do
   end
 
   @spec highlight_for_buffer(state(), pid()) :: Highlight.t() | nil
-  defp highlight_for_buffer(%{workspace: %{highlight: %{highlights: highlights}}}, buf)
+  defp highlight_for_buffer(%{highlighting: %{highlights: highlights}}, buf)
        when is_map(highlights) do
     Map.get(highlights, buf)
   end

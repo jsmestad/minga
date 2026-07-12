@@ -174,7 +174,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
       if overrides == %{} do
         Map.delete(state.face_override_registries, buf_pid)
       else
-        hl = Map.get(state.workspace.highlight.highlights, buf_pid)
+        hl = Map.get(state.highlighting.highlights, buf_pid)
 
         merged =
           if hl do

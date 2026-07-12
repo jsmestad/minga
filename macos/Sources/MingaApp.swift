@@ -32,7 +32,7 @@ struct MingaApp: App {
         WindowGroup {
             ContentView(
                 gui: appDelegate.appState.gui,
-                encoder: appDelegate.appState.encoder,
+                encoder: { [appState = appDelegate.appState] in appState.encoder },
                 editorGeometry: { [appState = appDelegate.appState] in
                     EditorGeometry(editorNSView: appState.editorNSView)
                 },

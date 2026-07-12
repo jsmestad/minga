@@ -6,9 +6,11 @@ defmodule MingaEditor.State.SnapshotTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
+  alias MingaEditor.State.Highlighting
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context
   alias MingaEditor.State.TabBar
+  alias MingaEditor.UI.Highlight
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias Minga.Mode
@@ -56,6 +58,11 @@ defmodule MingaEditor.State.SnapshotTest do
       state = make_state(buffer: buf, mode: :insert, keymap_scope: :editor)
       state = put_in(state.workspace.lsp_pending, pending)
 
+      highlighting = %Highlighting{highlights: %{buf => Highlight.new()}}
+
+      state = put_in(state.highlighting, highlighting)
+      state = put_in(state.injection_ranges, %{buf => [:range]})
+
       ctx = EditorState.snapshot_tab_context(state)
 
       assert ctx.buffers.active == buf
@@ -65,10 +72,10 @@ defmodule MingaEditor.State.SnapshotTest do
       assert ctx.lsp_pending == pending
       assert ctx.search == state.workspace.search
 
-      # PID/process-keyed highlight and injection cache state stays out of the snapshot.
-      assert ctx.highlight == nil
+      # PID/process-keyed parser state is not representable in a tab snapshot.
+      refute Map.has_key?(ctx, :highlight)
       refute :highlight in ctx.present_fields
-      assert ctx.injection_ranges == nil
+      refute Map.has_key?(ctx, :injection_ranges)
       refute :injection_ranges in ctx.present_fields
     end
 

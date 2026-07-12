@@ -801,7 +801,12 @@ defmodule MingaEditor do
     case classify_down(state, ref, pid, reason) do
       :buffer ->
         Log.info(:editor, "Buffer process #{inspect(pid)} died, removing from state")
-        state = EditorState.remove_dead_buffer(state, pid)
+
+        state =
+          state
+          |> HighlightSync.close_buffer(pid)
+          |> EditorState.remove_dead_buffer(pid)
+
         {:noreply, Renderer.render_or_async(state)}
 
       {:git_remote_task, updated_state} ->

@@ -54,8 +54,10 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
 
     %EditorState{
       port_manager: self(),
+      parser_manager: Keyword.get(opts, :parser_manager, Minga.Parser.Manager),
       terminal_viewport: vp,
       sidebar_registry: sidebar_registry,
+      highlighting: %Highlighting{},
       workspace: %MingaEditor.Session.State{
         viewport: vp,
         editing: VimState.new(),
@@ -65,8 +67,7 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
           map: %{win_id => window},
           active: win_id,
           next_id: win_id + 1
-        },
-        highlight: %Highlighting{}
+        }
       },
       focus_stack: Input.default_stack(),
       shell_identity: ShellIdentity.new(shell_entry),

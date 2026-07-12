@@ -19,7 +19,7 @@ enum PreviewRegistry {
     static func productionContentView(_ appState: AppState) -> some View {
         ContentView(
             gui: appState.gui,
-            encoder: appState.encoder,
+            encoder: { appState.encoder },
             editorGeometry: { EditorGeometry(editorNSView: appState.editorNSView) },
             chrome: WindowChrome(appState: appState),
             onAgentChatVisibleChange: { visible in

@@ -49,12 +49,12 @@ defmodule MingaEditor.Agent.View.PromptRendererTest do
 
     %EditorState{
       port_manager: self(),
+      highlighting: %Highlighting{},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(rows, cols),
         editing: VimState.new(),
         buffers: %Buffers{active: buf, list: [buf], active_index: 0},
-        agent_ui: agentic,
-        highlight: %Highlighting{}
+        agent_ui: agentic
       },
       focus_stack: Input.default_stack(),
       shell_state: %MingaEditor.Shell.Traditional.State{agent: agent},

@@ -2,6 +2,7 @@ defmodule MingaEditor.HighlightSyncTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Parser.Manager
   alias Minga.Language.Symbol
   alias MingaEditor.HighlightSync
   alias MingaEditor.State, as: EditorState
@@ -10,12 +11,20 @@ defmodule MingaEditor.HighlightSyncTest do
   alias MingaEditor.VimState
   alias MingaEditor.Window
 
+  setup do
+    name = Module.concat(__MODULE__, "Parser#{System.unique_integer([:positive])}")
+    manager = start_supervised!({Manager, name: name, parser_path: "/missing/minga-parser"})
+    Process.put(:parser_manager, manager)
+    :ok
+  end
+
   # Minimal state for testing with a fake active buffer PID.
   defp base_state do
     pid = self()
 
     %EditorState{
       port_manager: nil,
+      parser_manager: manager(),
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: VimState.new()
@@ -23,6 +32,8 @@ defmodule MingaEditor.HighlightSyncTest do
     }
     |> then(fn s -> put_in(s.workspace.buffers.active, pid) end)
   end
+
+  defp manager, do: Process.get(:parser_manager)
 
   defp get_hl(state) do
     HighlightSync.get_active_highlight(state)
@@ -109,22 +120,20 @@ defmodule MingaEditor.HighlightSyncTest do
 
       new_state = HighlightSync.setup_for_buffer_pid(state, md_buf)
 
-      # Should have a buffer_id mapping
-      assert Map.has_key?(new_state.workspace.highlight.buffer_ids, md_buf)
-      id = Map.get(new_state.workspace.highlight.buffer_ids, md_buf)
-      assert is_integer(id)
-      assert id > 0
-      # Reverse mapping should exist
-      assert Map.get(new_state.workspace.highlight.reverse_buffer_ids, id) == md_buf
+      id = Manager.buffer_id(md_buf, manager())
+      assert is_integer(id) and id > 0
+      assert Manager.resolve_buffer(id, manager()) == md_buf
+      assert Map.has_key?(new_state.highlighting.highlights, md_buf)
     end
 
-    test "sets last_active_at timestamp" do
+    test "registers activity metadata in Parser.Manager" do
       state = base_state()
       {:ok, md_buf} = BufferProcess.start_link(content: "# Hello", filetype: :markdown)
 
-      new_state = HighlightSync.setup_for_buffer_pid(state, md_buf)
+      _new_state = HighlightSync.setup_for_buffer_pid(state, md_buf)
 
-      assert Map.has_key?(new_state.workspace.highlight.last_active_at, md_buf)
+      assert {:ok, _id, version} = Manager.begin_parse(md_buf, manager())
+      assert version > 0
     end
 
     test "initializes highlight entry for the buffer" do
@@ -142,10 +151,10 @@ defmodule MingaEditor.HighlightSyncTest do
       {:ok, md_buf} = BufferProcess.start_link(content: "# Hello", filetype: :markdown)
 
       state2 = HighlightSync.setup_for_buffer_pid(state, md_buf)
-      id1 = Map.get(state2.workspace.highlight.buffer_ids, md_buf)
+      id1 = Manager.buffer_id(md_buf, manager())
 
-      state3 = HighlightSync.setup_for_buffer_pid(state2, md_buf)
-      id2 = Map.get(state3.workspace.highlight.buffer_ids, md_buf)
+      _state3 = HighlightSync.setup_for_buffer_pid(state2, md_buf)
+      id2 = Manager.buffer_id(md_buf, manager())
 
       assert id1 == id2
     end
@@ -156,10 +165,10 @@ defmodule MingaEditor.HighlightSyncTest do
       {:ok, buf2} = BufferProcess.start_link(content: "# B", filetype: :markdown)
 
       state2 = HighlightSync.setup_for_buffer_pid(state, buf1)
-      state3 = HighlightSync.setup_for_buffer_pid(state2, buf2)
+      _state3 = HighlightSync.setup_for_buffer_pid(state2, buf2)
 
-      id1 = Map.get(state3.workspace.highlight.buffer_ids, buf1)
-      id2 = Map.get(state3.workspace.highlight.buffer_ids, buf2)
+      id1 = Manager.buffer_id(buf1, manager())
+      id2 = Manager.buffer_id(buf2, manager())
       assert id1 != id2
     end
 
@@ -167,9 +176,9 @@ defmodule MingaEditor.HighlightSyncTest do
       state = base_state()
       {:ok, txt_buf} = BufferProcess.start_link(content: "hello", filetype: :text)
 
-      new_state = HighlightSync.setup_for_buffer_pid(state, txt_buf)
+      _new_state = HighlightSync.setup_for_buffer_pid(state, txt_buf)
 
-      refute Map.has_key?(new_state.workspace.highlight.buffer_ids, txt_buf)
+      assert Manager.buffer_id(txt_buf, manager()) == nil
     end
 
     test "clears seeded window document symbols for unsupported buffers" do
@@ -217,10 +226,25 @@ defmodule MingaEditor.HighlightSyncTest do
       assert HighlightSync.request_reparse(state) == state
     end
 
-    test "returns state unchanged when no highlighting active" do
-      state = base_state()
+    test "does not register an unsupported buffer" do
+      {:ok, buffer} = BufferProcess.start_link(content: "plain", filetype: :text)
+      state = put_in(base_state().workspace.buffers.active, buffer)
+
+      reparsed = HighlightSync.request_reparse(state)
+      assert get_hl(reparsed).capture_names == {}
+      assert Manager.buffer_id(buffer, manager()) == nil
+    end
+
+    test "requests another parse before initial highlight results arrive" do
+      {:ok, buffer} =
+        BufferProcess.start_link(content: "defmodule Pending do\nend\n", filetype: :elixir)
+
+      state = put_in(base_state().workspace.buffers.active, buffer)
+      state = HighlightSync.setup_for_buffer(state)
       assert get_hl(state).capture_names == {}
+
       assert HighlightSync.request_reparse(state) == state
+      assert {:ok, _buffer_id, 3} = Manager.begin_parse(buffer, manager())
     end
   end
 
@@ -230,7 +254,7 @@ defmodule MingaEditor.HighlightSyncTest do
       {:ok, md_buf} = BufferProcess.start_link(content: "# Hello", filetype: :markdown)
 
       new_state = HighlightSync.setup_for_buffer_pid(state, md_buf)
-      buffer_id = Map.get(new_state.workspace.highlight.buffer_ids, md_buf)
+      buffer_id = Manager.buffer_id(md_buf, manager())
 
       assert HighlightSync.resolve_buffer_pid(new_state, buffer_id) == md_buf
     end

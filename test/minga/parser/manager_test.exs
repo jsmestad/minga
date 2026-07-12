@@ -12,11 +12,10 @@ defmodule Minga.Parser.ManagerTest do
   describe "document_symbols" do
     test "parser publishes symbols from built-in tags query after parse" do
       server = start_parser_manager()
-      buffer_id = 11
       content = "defmodule Foo do\n  def bar do\n    :ok\n  end\nend\n"
 
       :ok = Manager.subscribe(server)
-      setup_buffer(server, buffer_id, content)
+      buffer_id = setup_buffer(server, content)
       _indent = Manager.request_indent(buffer_id, 1, server)
 
       assert_receive {:minga_highlight, {:document_symbols, ^buffer_id, 0, symbols}}, 2_000
@@ -26,11 +25,10 @@ defmodule Minga.Parser.ManagerTest do
 
     test "parser publishes updated symbols after edit_buffer" do
       server = start_parser_manager()
-      buffer_id = 12
       content = "defmodule Foo do\n  def foo do\n    :ok\n  end\nend\n"
 
       :ok = Manager.subscribe(server)
-      setup_buffer(server, buffer_id, content)
+      buffer_id = setup_buffer(server, content)
 
       assert_receive {:minga_highlight, {:document_symbols, ^buffer_id, 0, initial_symbols}},
                      2_000
@@ -41,7 +39,15 @@ defmodule Minga.Parser.ManagerTest do
              )
 
       edit = replacement_delta(content, "foo", "bar")
-      Manager.send_commands(server, [Protocol.encode_edit_buffer(buffer_id, 1, [edit])])
+
+      Manager.send_buffer_commands(
+        self(),
+        buffer_id,
+        [
+          Protocol.encode_edit_buffer(buffer_id, 1, [edit])
+        ],
+        server
+      )
 
       assert_receive {:minga_highlight, {:document_symbols, ^buffer_id, 1, edited_symbols}}, 2_000
 
@@ -67,9 +73,7 @@ defmodule Minga.Parser.ManagerTest do
     test "returns tree-sitter indent levels from the parser" do
       server = start_parser_manager()
       content = "def foo do\nif bar do\nbaz\nend\nend"
-      buffer_id = 1
-
-      setup_buffer(server, buffer_id, "elixir", content)
+      buffer_id = setup_buffer(server, "elixir", content)
 
       assert Manager.request_indent(buffer_id, 2, server) == 2
       assert Manager.request_indent(buffer_id, 3, server) == 1
@@ -78,9 +82,7 @@ defmodule Minga.Parser.ManagerTest do
     test "returns first-enter indentation after the newline is present in a complete block" do
       server = start_parser_manager()
       content = "def foo do\n\nend"
-      buffer_id = 1
-
-      setup_buffer(server, buffer_id, "elixir", content)
+      buffer_id = setup_buffer(server, "elixir", content)
 
       assert Manager.request_indent(buffer_id, 1, server) == 1
     end
@@ -96,9 +98,7 @@ defmodule Minga.Parser.ManagerTest do
     test "returns target node ranges and type names from the parser" do
       server = start_parser_manager()
       content = "function add(a, b) {\n  return a + b;\n}\n"
-      buffer_id = 2
-
-      setup_buffer(server, buffer_id, "javascript", content)
+      buffer_id = setup_buffer(server, "javascript", content)
 
       parent = Manager.request_structural_nav(buffer_id, 0, 20, 0, server)
       first_child = Manager.request_structural_nav(buffer_id, 0, 0, 1, server)
@@ -114,6 +114,57 @@ defmodule Minga.Parser.ManagerTest do
       assert next_sibling.type_name == "identifier"
       assert prev_sibling.start_col == 13
       assert prev_sibling.type_name == "identifier"
+    end
+  end
+
+  describe "editor buffer recovery" do
+    test "registered command emission rejects an ID after unregistration" do
+      server = start_parser_manager()
+      content = "defmodule Orphan do\nend\n"
+      :ok = Manager.subscribe(server)
+      buffer_id = Manager.register_buffer(self(), "elixir", fn -> content end, server: server)
+      :ok = Manager.unregister_buffer(self(), server)
+
+      Manager.send_buffer_commands(
+        self(),
+        buffer_id,
+        [
+          Protocol.encode_set_language(buffer_id, "elixir"),
+          Protocol.encode_parse_buffer(buffer_id, 1, content)
+        ],
+        server
+      )
+
+      refute_receive {:minga_highlight, {:highlight_names, ^buffer_id, _names}}, 300
+      refute_receive {:minga_highlight, {:highlight_spans, ^buffer_id, 1, _spans}}, 100
+    end
+
+    test "restart removes registrations whose content callback exits without crashing" do
+      server = start_parser_manager()
+      buffer = spawn(fn -> receive do: (:stop -> :ok) end)
+      on_exit(fn -> send(buffer, :stop) end)
+
+      buffer_id =
+        Manager.register_buffer(buffer, "elixir", fn -> exit(:dead_buffer) end, server: server)
+
+      assert :ok = Manager.restart(server)
+      assert :sys.get_state(server)
+      assert Manager.buffer_id(buffer, server) == nil
+      assert Manager.resolve_buffer(buffer_id, server) == nil
+    end
+
+    test "restart preserves parser identity and rebuilds registered buffers" do
+      server = start_parser_manager()
+      content = "defmodule Recovered do\nend\n"
+      buffer_id = Manager.register_buffer(self(), "elixir", fn -> content end, server: server)
+      :ok = Manager.subscribe(server)
+
+      assert :ok = Manager.restart(server)
+      assert Manager.buffer_id(self(), server) == buffer_id
+      assert Manager.resolve_buffer(buffer_id, server) == self()
+      assert_receive {:minga_highlight, :parser_restarted}, 2_000
+      assert_receive {:minga_highlight, {:highlight_names, ^buffer_id, _names}}, 2_000
+      assert_receive {:minga_highlight, {:highlight_spans, ^buffer_id, 0, _spans}}, 2_000
     end
   end
 
@@ -171,12 +222,11 @@ defmodule Minga.Parser.ManagerTest do
   describe "config-document key highlighting" do
     test "captures YAML mapping keys as @property" do
       server = start_parser_manager()
-      buffer_id = 42
       # A mapping key, a quoted value, and a comment.
       content = "name: \"minga\" # editor\n"
 
       :ok = Manager.subscribe(server)
-      setup_buffer(server, buffer_id, "yaml", content)
+      buffer_id = setup_buffer(server, "yaml", content)
 
       captures = receive_captures(server, buffer_id, content)
 
@@ -191,12 +241,11 @@ defmodule Minga.Parser.ManagerTest do
 
     test "captures Rust struct field access as @variable.member, not @property" do
       server = start_parser_manager()
-      buffer_id = 43
       # `cfg.name` is code field access; it should not collide with config keys.
       content = "fn f(cfg: Config) { let _ = cfg.name; }\n"
 
       :ok = Manager.subscribe(server)
-      setup_buffer(server, buffer_id, "rust", content)
+      buffer_id = setup_buffer(server, "rust", content)
 
       captures = receive_captures(server, buffer_id, content)
 
@@ -245,17 +294,24 @@ defmodule Minga.Parser.ManagerTest do
     end)
   end
 
-  defp setup_buffer(server, buffer_id, content) do
-    setup_buffer(server, buffer_id, "elixir", content)
+  defp setup_buffer(server, content) do
+    setup_buffer(server, "elixir", content)
   end
 
-  defp setup_buffer(server, buffer_id, language, content) do
-    Manager.send_commands(server, [
-      Protocol.encode_set_language(buffer_id, language),
-      Protocol.encode_parse_buffer(buffer_id, 0, content)
-    ])
+  defp setup_buffer(server, language, content) do
+    buffer_id = Manager.register_buffer(self(), language, fn -> content end, server: server)
 
-    Manager.register_buffer(buffer_id, language, fn -> content end, server: server)
+    Manager.send_buffer_commands(
+      self(),
+      buffer_id,
+      [
+        Protocol.encode_set_language(buffer_id, language),
+        Protocol.encode_parse_buffer(buffer_id, 0, content)
+      ],
+      server
+    )
+
+    buffer_id
   end
 
   defp start_parser_manager(opts \\ []) do

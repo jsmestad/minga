@@ -17,7 +17,6 @@ defmodule MingaEditor.Session.State do
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Dired, as: DiredState
   alias MingaEditor.State.FileTree, as: FileTreeState
-  alias MingaEditor.State.Highlighting
   alias MingaEditor.State.Mouse
   alias MingaEditor.State.Search
   alias MingaEditor.State.Tab.Context, as: TabContext
@@ -58,9 +57,7 @@ defmodule MingaEditor.Session.State do
           file_tree: FileTreeState.t(),
           viewport: Viewport.t(),
           mouse: Mouse.t(),
-          highlight: Highlighting.t(),
           lsp_pending: %{reference() => atom() | tuple()},
-          injection_ranges: %{pid() => [Minga.Language.Highlight.InjectionRange.t()]},
           search: Search.t(),
           editing: VimState.t(),
           feature_state: FeatureState.t(),
@@ -79,9 +76,7 @@ defmodule MingaEditor.Session.State do
             file_tree: %FileTreeState{},
             viewport: nil,
             mouse: %Mouse{},
-            highlight: %Highlighting{},
             lsp_pending: %{},
-            injection_ranges: %{},
             search: %Search{},
             editing: VimState.new(),
             feature_state: FeatureState.new(),
@@ -324,18 +319,6 @@ defmodule MingaEditor.Session.State do
     %{wspace | dired: dired}
   end
 
-  @doc "Updates the highlighting sub-struct."
-  @spec set_highlight(t(), Highlighting.t()) :: t()
-  def set_highlight(%__MODULE__{} = wspace, highlight) do
-    %{wspace | highlight: highlight}
-  end
-
-  @doc "Updates the highlighting sub-struct via a mapper function."
-  @spec update_highlight(t(), (Highlighting.t() -> Highlighting.t())) :: t()
-  def update_highlight(%__MODULE__{highlight: hl} = wspace, fun) when is_function(fun, 1) do
-    %{wspace | highlight: fun.(hl)}
-  end
-
   @doc "Updates the mouse sub-struct."
   @spec set_mouse(t(), Mouse.t()) :: t()
   def set_mouse(%__MODULE__{} = wspace, mouse) do
@@ -489,12 +472,5 @@ defmodule MingaEditor.Session.State do
   @spec set_launchpad(t(), MingaEditor.State.Launchpad.t() | nil) :: t()
   def set_launchpad(%__MODULE__{} = wspace, launchpad) do
     %{wspace | launchpad: launchpad}
-  end
-
-  @doc "Updates the injection ranges map."
-  @spec set_injection_ranges(t(), %{pid() => [Minga.Language.Highlight.InjectionRange.t()]}) ::
-          t()
-  def set_injection_ranges(%__MODULE__{} = wspace, ranges) do
-    %{wspace | injection_ranges: ranges}
   end
 end

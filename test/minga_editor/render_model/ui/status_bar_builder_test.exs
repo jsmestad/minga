@@ -58,8 +58,7 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilderTest do
           map: %{},
           active: 1,
           next_id: 2
-        },
-        highlight: %MingaEditor.State.Highlighting{}
+        }
       }
     }
   end

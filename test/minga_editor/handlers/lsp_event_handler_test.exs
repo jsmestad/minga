@@ -165,7 +165,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       assert new_state.workspace.lsp_pending == %{}
       assert effects == [:render_now]
 
-      highlight = Map.fetch!(new_state.workspace.highlight.highlights, buffer)
+      highlight = Map.fetch!(new_state.highlighting.highlights, buffer)
       assert Tuple.to_list(highlight.capture_names) == ["@lsp.type.variable"]
       assert [%{layer: 2}] = Tuple.to_list(highlight.spans)
     end

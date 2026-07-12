@@ -23,7 +23,10 @@ defmodule MingaEditor.Handlers.SessionRestore do
     case Session.load(EditorSessionState.session_opts(state.session)) do
       {:ok, session} ->
         Minga.Log.info(:editor, "Restored from previous session")
-        Enum.reduce(session.buffers, state, &restore_session_buffer/2)
+
+        session.buffers
+        |> Enum.reduce(state, &restore_session_buffer/2)
+        |> restore_active_file(session.active_file)
 
       {:error, _} ->
         state
@@ -66,6 +69,20 @@ defmodule MingaEditor.Handlers.SessionRestore do
       end
     else
       state
+    end
+  end
+
+  @spec restore_active_file(state(), String.t() | nil) :: state()
+  defp restore_active_file(state, nil), do: state
+
+  defp restore_active_file(state, active_file) do
+    case BufferRegistry.file_tab_for_path_in_active_workspace(state, active_file) do
+      %{id: tab_id} ->
+        EditorState.switch_tab(state, tab_id)
+
+      nil ->
+        Minga.Log.warning(:editor, "Session active file no longer exists: #{active_file}")
+        state
     end
   end
 
