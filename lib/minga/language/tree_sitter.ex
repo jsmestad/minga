@@ -285,32 +285,29 @@ defmodule Minga.Language.TreeSitter do
 
   @spec send_queries(String.t(), keyword()) :: :ok
   defp send_queries(name, opts) do
-    # Dynamic grammar loading uses buffer_id 0 (global/default).
-    ParserManager.set_language(0, name)
-
-    send_query(name, opts, :highlights, &ParserManager.set_highlight_query(0, &1))
-    send_query(name, opts, :injections, &ParserManager.set_injection_query(0, &1))
-
-    :ok
+    highlight_query = read_configured_query(name, opts, :highlights)
+    injection_query = read_configured_query(name, opts, :injections)
+    ParserManager.configure_dynamic_grammar(name, highlight_query, injection_query)
   end
 
-  @spec send_query(String.t(), keyword(), atom(), (String.t() -> :ok)) :: :ok
-  defp send_query(name, opts, query_type, send_fn) do
+  @spec read_configured_query(String.t(), keyword(), atom()) :: String.t() | nil
+  defp read_configured_query(name, opts, query_type) do
     case Keyword.get(opts, query_type) do
       nil ->
-        :ok
+        nil
 
       path ->
         case File.read(Path.expand(path)) do
           {:ok, query} ->
-            resolved = resolve_query_inherits(query, query_type)
-            send_fn.(resolved)
+            resolve_query_inherits(query, query_type)
 
           {:error, reason} ->
             Log.warning(
               :editor,
               "Could not read #{query_type} for #{name}: #{inspect(reason)}"
             )
+
+            nil
         end
     end
   end

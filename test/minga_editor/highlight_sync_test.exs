@@ -126,14 +126,13 @@ defmodule MingaEditor.HighlightSyncTest do
       assert Map.has_key?(new_state.highlighting.highlights, md_buf)
     end
 
-    test "registers activity metadata in Parser.Manager" do
+    test "registers parser metadata in Parser.Manager" do
       state = base_state()
       {:ok, md_buf} = BufferProcess.start_link(content: "# Hello", filetype: :markdown)
 
       _new_state = HighlightSync.setup_for_buffer_pid(state, md_buf)
 
-      assert {:ok, _id, version} = Manager.begin_parse(md_buf, manager())
-      assert version > 0
+      assert is_integer(Manager.buffer_id(md_buf, manager()))
     end
 
     test "initializes highlight entry for the buffer" do
@@ -235,7 +234,7 @@ defmodule MingaEditor.HighlightSyncTest do
       assert Manager.buffer_id(buffer, manager()) == nil
     end
 
-    test "requests another parse before initial highlight results arrive" do
+    test "explicit repair request preserves presentation while manager owns parsing" do
       {:ok, buffer} =
         BufferProcess.start_link(content: "defmodule Pending do\nend\n", filetype: :elixir)
 
@@ -244,24 +243,7 @@ defmodule MingaEditor.HighlightSyncTest do
       assert get_hl(state).capture_names == {}
 
       assert HighlightSync.request_reparse(state) == state
-      assert {:ok, _buffer_id, 3} = Manager.begin_parse(buffer, manager())
-    end
-  end
-
-  describe "resolve_buffer_pid/2" do
-    test "returns the buffer PID for a known buffer_id" do
-      state = base_state()
-      {:ok, md_buf} = BufferProcess.start_link(content: "# Hello", filetype: :markdown)
-
-      new_state = HighlightSync.setup_for_buffer_pid(state, md_buf)
-      buffer_id = Manager.buffer_id(md_buf, manager())
-
-      assert HighlightSync.resolve_buffer_pid(new_state, buffer_id) == md_buf
-    end
-
-    test "returns nil for an unknown buffer_id" do
-      state = base_state()
-      assert HighlightSync.resolve_buffer_pid(state, 999) == nil
+      assert is_integer(Manager.buffer_id(buffer, manager()))
     end
   end
 end

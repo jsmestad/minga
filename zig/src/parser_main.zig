@@ -127,12 +127,19 @@ pub fn main(init: std.process.Init) !void {
 
             // edit_buffer needs special handling: decode full edits from raw payload.
             if (remaining[0] == protocol.OP_EDIT_BUFFER) {
-                handleEditBuffer(&hl, remaining[1..cmd_size], stdout, alloc, &buffers) catch {};
+                handleEditBuffer(&hl, remaining[1..cmd_size], stdout, alloc, &buffers) catch |err| {
+                    std.log.err("edit_buffer command failed: {}", .{err});
+                };
             } else if (remaining[0] == protocol.OP_CLOSE_BUFFER) {
                 handleCloseBuffer(remaining[1..cmd_size], alloc, &buffers);
             } else {
-                const cmd = protocol.decodeCommand(remaining) catch break;
-                handleCommand(&hl, cmd, stdout, alloc, &buffers) catch {};
+                const cmd = protocol.decodeCommand(remaining) catch |err| {
+                    std.log.err("parser command decode failed: {}", .{err});
+                    break;
+                };
+                handleCommand(&hl, cmd, stdout, alloc, &buffers) catch |err| {
+                    std.log.err("parser command failed: {}", .{err});
+                };
             }
             offset += cmd_size;
         }
@@ -252,19 +259,27 @@ fn handleCommand(
         },
         .parse_buffer => |pb| {
             const bs = try getOrCreateBuffer(buffers, alloc, pb.buffer_id);
-            bs.setSource(alloc, pb.source) catch return;
-
-            // Activate this buffer (sets language, installs its tree).
-            if (!activateBuffer(hl, bs)) return;
-
-            hl.parse(bs.source.items) catch {
-                saveTreeToBuffer(hl, bs);
+            bs.setSource(alloc, pb.source) catch |err| {
+                std.log.err("parse_buffer: source update failed for buffer {d}: {}", .{ pb.buffer_id, err });
+                sendEmptyHighlightSpans(pb.buffer_id, pb.version, stdout, alloc) catch {};
                 return;
             };
 
-            if (hl.query != null) {
-                sendHighlightResults(hl, pb.buffer_id, pb.version, stdout, alloc) catch {};
+            // Activate this buffer (sets language, installs its tree).
+            if (!activateBuffer(hl, bs)) {
+                std.log.err("parse_buffer: activation failed for buffer {d}", .{pb.buffer_id});
+                sendEmptyHighlightSpans(pb.buffer_id, pb.version, stdout, alloc) catch {};
+                return;
             }
+
+            hl.parse(bs.source.items) catch |err| {
+                std.log.err("parse_buffer: parse failed for buffer {d}: {}", .{ pb.buffer_id, err });
+                saveTreeToBuffer(hl, bs);
+                sendEmptyHighlightSpans(pb.buffer_id, pb.version, stdout, alloc) catch {};
+                return;
+            };
+
+            sendHighlightCompletion(hl, pb.buffer_id, pb.version, stdout, alloc) catch {};
             if (hl.fold_query != null) {
                 sendFoldResults(hl, pb.buffer_id, pb.version, stdout, alloc) catch {};
             }
@@ -455,20 +470,24 @@ fn handleEditBuffer(
     };
 
     // Activate this buffer (sets language, installs its tree for incremental parsing).
-    if (!activateBuffer(hl, bs)) return;
+    if (!activateBuffer(hl, bs)) {
+        std.log.err("edit_buffer: activation failed for buffer {d}", .{decoded.buffer_id});
+        sendEmptyHighlightSpans(decoded.buffer_id, decoded.version, stdout, alloc) catch {};
+        return;
+    }
 
     // Incremental parse using the patched source.
     hl.parseIncremental(decoded.edits, bs.source.items) catch {
         // Fallback: full parse on the patched source.
-        hl.parse(bs.source.items) catch {
+        hl.parse(bs.source.items) catch |err| {
+            std.log.err("edit_buffer: incremental and full parse failed for buffer {d}: {}", .{ decoded.buffer_id, err });
             saveTreeToBuffer(hl, bs);
+            sendEmptyHighlightSpans(decoded.buffer_id, decoded.version, stdout, alloc) catch {};
             return;
         };
     };
 
-    if (hl.query != null) {
-        sendHighlightResults(hl, decoded.buffer_id, decoded.version, stdout, alloc) catch {};
-    }
+    sendHighlightCompletion(hl, decoded.buffer_id, decoded.version, stdout, alloc) catch {};
     if (hl.fold_query != null) {
         sendFoldResults(hl, decoded.buffer_id, decoded.version, stdout, alloc) catch {};
     }
@@ -577,6 +596,37 @@ fn sendFoldResults(
     try stdout.flush();
 }
 
+/// Sends highlight results when configured, or an empty completion when highlighting is unavailable.
+fn sendHighlightCompletion(
+    hl: *highlighter_mod.Highlighter,
+    buffer_id: u32,
+    version: u32,
+    stdout: *std.Io.Writer,
+    alloc: std.mem.Allocator,
+) !void {
+    if (hl.query != null) {
+        sendHighlightResults(hl, buffer_id, version, stdout, alloc) catch |err| {
+            std.log.err("highlight generation failed for buffer {d}: {}", .{ buffer_id, err });
+            try sendEmptyHighlightSpans(buffer_id, version, stdout, alloc);
+        };
+    } else {
+        try sendEmptyHighlightSpans(buffer_id, version, stdout, alloc);
+    }
+}
+
+/// Sends an empty highlight response that still completes the manager's in-flight parse.
+fn sendEmptyHighlightSpans(
+    buffer_id: u32,
+    version: u32,
+    stdout: *std.Io.Writer,
+    alloc: std.mem.Allocator,
+) !void {
+    const spans_buf = try protocol.encodeHighlightSpans(alloc, buffer_id, version, &.{});
+    defer alloc.free(spans_buf);
+    try protocol.writeMessage(stdout, spans_buf);
+    try stdout.flush();
+}
+
 /// Send highlight results (names, spans, conceal spans, injection ranges) to stdout.
 fn sendHighlightResults(
     hl: *highlighter_mod.Highlighter,
@@ -585,7 +635,7 @@ fn sendHighlightResults(
     stdout: *std.Io.Writer,
     alloc: std.mem.Allocator,
 ) !void {
-    var result = hl.highlightWithInjections() catch return;
+    var result = try hl.highlightWithInjections();
     defer result.deinit();
 
     const names_buf = try protocol.encodeHighlightNames(alloc, buffer_id, result.capture_names);

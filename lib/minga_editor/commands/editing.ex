@@ -12,7 +12,6 @@ defmodule MingaEditor.Commands.Editing do
   alias Minga.Parser.Manager, as: ParserManager
 
   alias MingaEditor.Commands.Helpers
-  alias MingaEditor.HighlightSync
   alias MingaEditor.Indent
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.UI.Highlight
@@ -98,7 +97,6 @@ defmodule MingaEditor.Commands.Editing do
     block_closing = block_closing_for_enter(state, buf, line, col)
     Buffer.insert_char(buf, "\n")
 
-    state = HighlightSync.request_reparse(state)
     indent = Indent.compute_for_line(buf, line + 1, indent_opts(state, buf))
     indent = block_inner_indent(buf, indent, block_closing)
     insert_indent(buf, indent)
@@ -137,7 +135,6 @@ defmodule MingaEditor.Commands.Editing do
     Buffer.move_to(buf, {line, end_col})
     Buffer.insert_char(buf, "\n")
 
-    state = HighlightSync.request_reparse(state)
     indent = Indent.compute_for_line(buf, line + 1, indent_opts(state, buf))
     insert_indent(buf, indent)
 
@@ -152,7 +149,6 @@ defmodule MingaEditor.Commands.Editing do
     Buffer.insert_char(buf, "\n")
     Buffer.move_to(buf, {line, 0})
 
-    state = HighlightSync.request_reparse(state)
     opts = Keyword.put(indent_opts(state, buf), :fallback, fallback_indent)
     indent = Indent.compute_for_line(buf, line, opts)
     insert_indent(buf, indent)
@@ -477,8 +473,7 @@ defmodule MingaEditor.Commands.Editing do
       when is_pid(buf) do
     gb = Buffer.snapshot(buf)
     cursor = Document.cursor(gb)
-    buffer_id = HighlightSync.buffer_id_for(state, buf)
-    range = Helpers.compute_text_object_range(gb, cursor, modifier, spec, buffer_id)
+    range = Helpers.compute_text_object_range(gb, cursor, modifier, spec, buf)
 
     case range do
       nil ->
@@ -884,10 +879,9 @@ defmodule MingaEditor.Commands.Editing do
     state = Helpers.setup_for_motion(state, motion)
     gb = Buffer.snapshot(buf)
     cursor = Document.cursor(gb)
-    buffer_id = Helpers.buffer_id_for_motion(state, buf, motion)
 
     range =
-      case Helpers.resolve_motion_target(gb, cursor, motion, buffer_id) do
+      case Helpers.resolve_motion_target(gb, cursor, motion, buf) do
         nil ->
           nil
 
@@ -905,11 +899,8 @@ defmodule MingaEditor.Commands.Editing do
   @keystroke_indent_timeout_ms 200
 
   @spec indent_opts(state(), pid()) :: [Indent.compute_opt()]
-  defp indent_opts(state, buf) do
-    [
-      buffer_id: HighlightSync.buffer_id_for(state, buf),
-      request_indent: &request_indent_on_keystroke/2
-    ]
+  defp indent_opts(_state, _buf) do
+    [request_indent: &request_indent_on_keystroke/2]
   end
 
   @spec copy_indent_for_line_above(pid(), non_neg_integer()) :: String.t()
@@ -924,9 +915,9 @@ defmodule MingaEditor.Commands.Editing do
     end
   end
 
-  @spec request_indent_on_keystroke(non_neg_integer(), non_neg_integer()) :: integer() | nil
-  defp request_indent_on_keystroke(buffer_id, line) do
-    ParserManager.request_indent(buffer_id, line, ParserManager, @keystroke_indent_timeout_ms)
+  @spec request_indent_on_keystroke(pid(), non_neg_integer()) :: integer() | nil
+  defp request_indent_on_keystroke(buffer_pid, line) do
+    ParserManager.request_indent(buffer_pid, line, ParserManager, @keystroke_indent_timeout_ms)
   end
 
   @spec insert_indent(pid(), String.t()) :: :ok

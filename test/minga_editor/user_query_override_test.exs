@@ -40,8 +40,7 @@ defmodule MingaEditor.UserQueryOverrideTest do
       assert HighlightSync.get_active_highlight(state).spans == {}
       assert HighlightSync.get_active_highlight(state).version == 0
 
-      assert {:ok, _buffer_id, 2} =
-               Minga.Parser.Manager.begin_parse(state.workspace.buffers.active, manager)
+      assert is_integer(Minga.Parser.Manager.buffer_id(state.workspace.buffers.active, manager))
     end
   end
 

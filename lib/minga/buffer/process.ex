@@ -374,6 +374,20 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, {:changes_since, sequence})
   end
 
+  @doc "Requests an atomic synchronization snapshot and replies asynchronously to `reply_to`."
+  @spec request_sync_snapshot(
+          GenServer.server(),
+          :full | Minga.Buffer.ChangeLog.sequence(),
+          pid(),
+          reference()
+        ) :: :ok
+  def request_sync_snapshot(server, cursor, reply_to, token)
+      when (cursor == :full or (is_integer(cursor) and cursor >= 0)) and is_pid(reply_to) and
+             is_reference(token) do
+    send(server, {:request_sync_snapshot, cursor, reply_to, token})
+    :ok
+  end
+
   @doc """
   Returns edit deltas accumulated since the given consumer's last read.
 
@@ -584,6 +598,7 @@ defmodule Minga.Buffer.Process do
 
   alias Minga.Buffer.RenderSnapshot
   alias Minga.Buffer.RendererConsume
+  alias Minga.Buffer.SyncSnapshot
 
   @doc "Returns bounded render metadata and only the requested lines."
   @spec render_snapshot(GenServer.server(), non_neg_integer(), non_neg_integer()) ::
@@ -1778,6 +1793,19 @@ defmodule Minga.Buffer.Process do
   # ── Deferred broadcasts (avoid deadlock in handle_call) ──
 
   @impl true
+  def handle_info({:request_sync_snapshot, cursor, reply_to, token}, state) do
+    sequence = ChangeLog.sequence(state.change_log)
+    changes = sync_snapshot_changes(state, cursor)
+
+    send(
+      reply_to,
+      {:buffer_sync_snapshot,
+       %SyncSnapshot{buffer: self(), token: token, sequence: sequence, changes: changes}}
+    )
+
+    {:noreply, state}
+  end
+
   def handle_info({:deferred_broadcast, topic, payload}, state) do
     Events.broadcast(topic, payload, state.events_registry)
     {:noreply, state}
@@ -1920,7 +1948,8 @@ defmodule Minga.Buffer.Process do
          buffer: self(),
          delta: delta,
          source: source,
-         version: BufState.version(state)
+         version: BufState.version(state),
+         sequence: ChangeLog.sequence(state.change_log)
        }}
     )
 
@@ -2375,8 +2404,20 @@ defmodule Minga.Buffer.Process do
   # (undo, redo, multi-edit batches, full content replacement).
   @spec clear_edits(state(), EditSource.t()) :: state()
   defp clear_edits(state, source) do
+    state = %{state | change_log: ChangeLog.clear(state.change_log)}
     defer_buffer_changed(state, nil, source)
-    %{state | change_log: ChangeLog.clear(state.change_log)}
+    state
+  end
+
+  @spec sync_snapshot_changes(state(), :full | ChangeLog.sequence()) :: SyncSnapshot.changes()
+  defp sync_snapshot_changes(state, :full), do: {:full, Document.content(state.document)}
+
+  defp sync_snapshot_changes(state, cursor) do
+    case ChangeLog.changes_since(state.change_log, cursor) do
+      {:ok, _sequence, []} -> :unchanged
+      {:ok, _sequence, edits} -> {:edits, edits}
+      {:reset_required, _sequence} -> {:full, Document.content(state.document)}
+    end
   end
 
   # ── move_if_possible helpers ──

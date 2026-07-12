@@ -206,7 +206,6 @@ defmodule MingaEditor.RenderPipeline.Input do
       diff_views: state.diff_views,
       status_bar_data: safe_status_bar_data(state),
       highlighting: state.highlighting,
-      caches: state.caches,
       terminal_viewport: state.terminal_viewport,
       last_input_seq: state.last_input_seq,
       force_keyframe?: Map.get(state, :keyframe_pending?, false),

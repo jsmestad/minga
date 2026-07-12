@@ -72,24 +72,9 @@ defmodule MingaEditor.HighlightEvents do
     end
   end
 
-  @doc """
-  Re-parses the buffer for syntax highlighting if content changed.
-
-  Compares the buffer's mutation version before/after key handling.
-  Also notifies LSP and Git of the content change.
-  """
+  @doc "Returns editor presentation state unchanged; parser synchronization is event-driven."
   @spec maybe_reparse(EditorState.t(), non_neg_integer()) :: EditorState.t()
-  def maybe_reparse(state, version_before) do
-    content_changed = buffer_version(state) != version_before
-
-    # Buffer.Process broadcasts :buffer_changed with delta from record_edit.
-
-    if content_changed do
-      HighlightSync.request_reparse(state)
-    else
-      state
-    end
-  end
+  def maybe_reparse(state, _version_before), do: state
 
   @doc """
   Handles `:conceal_spans` events from the parser.
@@ -202,8 +187,4 @@ defmodule MingaEditor.HighlightEvents do
     send(self(), :setup_highlight)
     state
   end
-
-  @spec buffer_version(EditorState.t()) :: non_neg_integer()
-  defp buffer_version(%{workspace: %{buffers: %{active: nil}}}), do: 0
-  defp buffer_version(%{workspace: %{buffers: %{active: buf}}}), do: Buffer.version(buf)
 end

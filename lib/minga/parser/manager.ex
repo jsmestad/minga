@@ -34,10 +34,16 @@ defmodule Minga.Parser.Manager do
 
   use GenServer
 
+  alias Minga.Buffer
+  alias Minga.Buffer.SyncSnapshot
+  alias Minga.Events
   alias Minga.Language.Grammar
   alias Minga.Language.Highlight.Span
   alias Minga.Language.Registry, as: LanguageRegistry
+  alias Minga.Parser.BufferConfig
+  alias Minga.Parser.BufferRegistration
   alias Minga.Parser.BufferRegistry
+  alias Minga.Parser.ParseScheduler
   alias Minga.Parser.Protocol
   alias Minga.Parser.StructuralNavResult
 
@@ -54,11 +60,13 @@ defmodule Minga.Parser.Manager do
   @default_match_item_request_timeout_ms 2_000
   @default_structural_nav_request_timeout_ms 2_000
   @request_client_timeout_slack_ms 50
+  @parse_admission_timeout_ms 10_000
 
   @typedoc "Options for starting the parser manager."
   @type start_opt ::
           {:name, GenServer.name()}
           | {:parser_path, String.t()}
+          | {:events_registry, Events.registry()}
 
   @typedoc "Synchronous syntax highlight result for a small source snippet."
   @type highlight_source_result ::
@@ -78,8 +86,6 @@ defmodule Minga.Parser.Manager do
   @typedoc "Structural navigation result returned by the parser."
   @type structural_nav_result :: StructuralNavResult.t()
 
-  @type buffer_meta :: BufferRegistry.meta()
-
   @enforce_keys [:parser_path]
   defstruct port: nil,
             subscribers: %{},
@@ -92,7 +98,9 @@ defmodule Minga.Parser.Manager do
             restart_timestamps: [],
             current_backoff_ms: @initial_backoff_ms,
             gave_up: false,
-            buffers: BufferRegistry.new()
+            events_registry: Events.default_registry(),
+            buffers: BufferRegistry.new(),
+            parse_scheduler: ParseScheduler.new()
 
   @type t :: %__MODULE__{
           port: port() | nil,
@@ -106,7 +114,9 @@ defmodule Minga.Parser.Manager do
           restart_timestamps: [integer()],
           current_backoff_ms: non_neg_integer(),
           gave_up: boolean(),
-          buffers: BufferRegistry.t()
+          events_registry: Events.registry(),
+          buffers: BufferRegistry.t(),
+          parse_scheduler: ParseScheduler.t()
         }
 
   # ── Client API ──
@@ -124,11 +134,10 @@ defmodule Minga.Parser.Manager do
     GenServer.cast(server, {:send_commands, commands})
   end
 
-  @doc "Sends encoded commands only while the PID still owns the supplied parser buffer ID."
-  @spec send_buffer_commands(pid(), pos_integer(), [binary()], GenServer.server()) :: :ok
-  def send_buffer_commands(buffer_pid, buffer_id, commands, server \\ __MODULE__)
-      when is_pid(buffer_pid) and is_integer(buffer_id) and buffer_id > 0 and is_list(commands) do
-    GenServer.cast(server, {:send_buffer_commands, buffer_pid, buffer_id, commands})
+  @doc "Forces a callback-free full parse request for a registered buffer."
+  @spec request_parse(pid(), GenServer.server()) :: :ok
+  def request_parse(buffer_pid, server \\ __MODULE__) when is_pid(buffer_pid) do
+    GenServer.cast(server, {:request_parse, buffer_pid})
   end
 
   @doc "Subscribes the calling process to receive highlight events."
@@ -159,30 +168,29 @@ defmodule Minga.Parser.Manager do
 
   Returns a non-negative indent level, or `nil` if the parser is unavailable.
   """
-  @spec request_indent(non_neg_integer(), non_neg_integer()) :: integer() | nil
-  @spec request_indent(non_neg_integer(), non_neg_integer(), GenServer.server()) ::
+  @spec request_indent(pid(), non_neg_integer()) :: integer() | nil
+  @spec request_indent(pid(), non_neg_integer(), GenServer.server()) :: integer() | nil
+  @spec request_indent(pid(), non_neg_integer(), GenServer.server(), pos_integer()) ::
           integer() | nil
-  @spec request_indent(non_neg_integer(), non_neg_integer(), GenServer.server(), pos_integer()) ::
-          integer() | nil
-  def request_indent(buffer_id, line), do: request_indent(buffer_id, line, __MODULE__)
+  def request_indent(buffer_pid, line), do: request_indent(buffer_pid, line, __MODULE__)
 
-  def request_indent(buffer_id, line, server) do
-    request_indent(buffer_id, line, server, @default_indent_request_timeout_ms)
+  def request_indent(buffer_pid, line, server) do
+    request_indent(buffer_pid, line, server, @default_indent_request_timeout_ms)
   end
 
-  def request_indent(buffer_id, line, server, timeout_ms)
-      when is_integer(buffer_id) and buffer_id > 0 and is_integer(line) and line >= 0 and
-             is_integer(timeout_ms) and timeout_ms > 0 do
+  def request_indent(buffer_pid, line, server, timeout_ms)
+      when is_pid(buffer_pid) and is_integer(line) and line >= 0 and is_integer(timeout_ms) and
+             timeout_ms > 0 do
     GenServer.call(
       server,
-      {:request_indent, buffer_id, line, timeout_ms},
+      {:request_indent, buffer_pid, line, timeout_ms},
       timeout_ms + @request_client_timeout_slack_ms
     )
   catch
     :exit, _ -> nil
   end
 
-  def request_indent(_buffer_id, _line, _server, _timeout_ms), do: nil
+  def request_indent(_buffer_pid, _line, _server, _timeout_ms), do: nil
 
   @doc """
   Requests a tree-sitter text object range synchronously.
@@ -193,19 +201,18 @@ defmodule Minga.Parser.Manager do
   Returns `{start_row, start_col, end_row, end_col}` or `nil` if no match.
   """
   @spec request_textobject(
-          non_neg_integer(),
+          pid(),
           non_neg_integer(),
           non_neg_integer(),
           String.t(),
           GenServer.server()
         ) ::
           {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil
-  def request_textobject(buffer_id, row, col, capture_name, server \\ __MODULE__)
-      when is_integer(buffer_id) and is_integer(row) and is_integer(col) and
-             is_binary(capture_name) do
+  def request_textobject(buffer_pid, row, col, capture_name, server \\ __MODULE__)
+      when is_pid(buffer_pid) and is_integer(row) and is_integer(col) and is_binary(capture_name) do
     GenServer.call(
       server,
-      {:request_textobject, buffer_id, row, col, capture_name,
+      {:request_textobject, buffer_pid, row, col, capture_name,
        @default_textobject_request_timeout_ms},
       @default_textobject_request_timeout_ms + @request_client_timeout_slack_ms
     )
@@ -218,17 +225,13 @@ defmodule Minga.Parser.Manager do
 
   Returns `{row, col}` for the matched delimiter/keyword/tag/quote, or `nil` if no tree-sitter match is available.
   """
-  @spec request_match_item(
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          GenServer.server()
-        ) :: {non_neg_integer(), non_neg_integer()} | nil
-  def request_match_item(buffer_id, row, col, server \\ __MODULE__)
-      when is_integer(buffer_id) and is_integer(row) and is_integer(col) do
+  @spec request_match_item(pid(), non_neg_integer(), non_neg_integer(), GenServer.server()) ::
+          {non_neg_integer(), non_neg_integer()} | nil
+  def request_match_item(buffer_pid, row, col, server \\ __MODULE__)
+      when is_pid(buffer_pid) and is_integer(row) and is_integer(col) do
     GenServer.call(
       server,
-      {:request_match_item, buffer_id, row, col, @default_match_item_request_timeout_ms},
+      {:request_match_item, buffer_pid, row, col, @default_match_item_request_timeout_ms},
       @default_match_item_request_timeout_ms + @request_client_timeout_slack_ms
     )
   catch
@@ -243,18 +246,18 @@ defmodule Minga.Parser.Manager do
   Returns `%Minga.Parser.StructuralNavResult{}` for the target node, or `nil` if no target exists or the parser is unavailable.
   """
   @spec request_structural_nav(
-          non_neg_integer(),
+          pid(),
           non_neg_integer(),
           non_neg_integer(),
           0..3,
           GenServer.server()
         ) :: structural_nav_result() | nil
-  def request_structural_nav(buffer_id, row, col, action, server \\ __MODULE__)
-      when is_integer(buffer_id) and is_integer(row) and is_integer(col) and
-             is_integer(action) and action >= 0 and action <= 3 do
+  def request_structural_nav(buffer_pid, row, col, action, server \\ __MODULE__)
+      when is_pid(buffer_pid) and is_integer(row) and is_integer(col) and is_integer(action) and
+             action >= 0 and action <= 3 do
     GenServer.call(
       server,
-      {:request_structural_nav, buffer_id, row, col, action,
+      {:request_structural_nav, buffer_pid, row, col, action,
        @default_structural_nav_request_timeout_ms},
       @default_structural_nav_request_timeout_ms + @request_client_timeout_slack_ms
     )
@@ -262,59 +265,36 @@ defmodule Minga.Parser.Manager do
     :exit, _ -> nil
   end
 
-  @doc """
-  Sets the active tree-sitter language for a buffer.
-  """
-  @spec set_language(non_neg_integer(), String.t(), GenServer.server()) :: :ok
-  def set_language(buffer_id, name, server \\ __MODULE__)
-      when is_integer(buffer_id) and is_binary(name) do
-    send_commands(server, [Protocol.encode_set_language(buffer_id, name)])
+  @doc "Configures the parser's default dynamic-grammar language and queries."
+  @spec configure_dynamic_grammar(
+          String.t(),
+          String.t() | nil,
+          String.t() | nil,
+          GenServer.server()
+        ) :: :ok
+  def configure_dynamic_grammar(
+        language,
+        highlight_query,
+        injection_query,
+        server \\ __MODULE__
+      )
+      when is_binary(language) do
+    commands =
+      [Protocol.encode_set_language(0, language)]
+      |> append_query(highlight_query, &Protocol.encode_set_highlight_query(0, &1))
+      |> append_query(injection_query, &Protocol.encode_set_injection_query(0, &1))
+
+    send_commands(server, commands)
   end
 
-  @doc """
-  Sets a custom highlight query for a buffer.
-  """
-  @spec set_highlight_query(non_neg_integer(), String.t(), GenServer.server()) :: :ok
-  def set_highlight_query(buffer_id, query, server \\ __MODULE__)
-      when is_integer(buffer_id) and is_binary(query) do
-    send_commands(server, [Protocol.encode_set_highlight_query(buffer_id, query)])
-  end
+  @typedoc "Options for `register_buffer/3`."
+  @type register_opt :: {:server, GenServer.server()}
 
-  @doc """
-  Sets a custom injection query for a buffer.
-  """
-  @spec set_injection_query(non_neg_integer(), String.t(), GenServer.server()) :: :ok
-  def set_injection_query(buffer_id, query, server \\ __MODULE__)
-      when is_integer(buffer_id) and is_binary(query) do
-    send_commands(server, [Protocol.encode_set_injection_query(buffer_id, query)])
-  end
-
-  @doc """
-  Closes a buffer in the parser, freeing its tree and source.
-  """
-  @spec close_buffer(non_neg_integer(), GenServer.server()) :: :ok
-  def close_buffer(buffer_id, server \\ __MODULE__)
-      when is_integer(buffer_id) do
-    send_commands(server, [Protocol.encode_close_buffer(buffer_id)])
-  end
-
-  @typedoc "Options for `register_buffer/4`."
-  @type register_opt ::
-          {:setup_commands_fn, (non_neg_integer() -> [binary()])}
-          | {:server, GenServer.server()}
-
-  @doc """
-  Registers an editor buffer and returns its stable parser buffer ID.
-
-  Registration is idempotent for a buffer PID and refreshes the language and crash-recovery callbacks. `setup_commands_fn`, when present, must rebuild the complete parser setup for the supplied ID, including custom queries and a version-zero parse.
-  """
-  @spec register_buffer(pid(), String.t(), (-> String.t()), [register_opt()]) :: pos_integer()
-  def register_buffer(buffer_pid, language, content_fn, opts \\ [])
-      when is_pid(buffer_pid) and is_binary(language) and is_function(content_fn, 0) do
+  @doc "Registers or refreshes a buffer using inert parser configuration."
+  @spec register_buffer(pid(), BufferConfig.t(), [register_opt()]) :: pos_integer()
+  def register_buffer(buffer_pid, %BufferConfig{} = config, opts \\ []) when is_pid(buffer_pid) do
     server = Keyword.get(opts, :server, __MODULE__)
-    setup_fn = Keyword.get(opts, :setup_commands_fn)
-
-    GenServer.call(server, {:register_buffer, buffer_pid, language, content_fn, setup_fn})
+    GenServer.call(server, {:register_buffer, buffer_pid, config})
   end
 
   @doc "Returns the parser buffer ID for an editor buffer, or `nil` when unregistered."
@@ -331,14 +311,6 @@ defmodule Minga.Parser.Manager do
     GenServer.call(server, {:resolve_buffer, buffer_id})
   catch
     :exit, reason -> log_unavailable(:resolve_buffer, reason, nil)
-  end
-
-  @doc "Allocates the next outgoing parse version for a registered buffer and marks it active."
-  @spec begin_parse(pid(), GenServer.server()) :: {:ok, pos_integer(), pos_integer()} | :error
-  def begin_parse(buffer_pid, server \\ __MODULE__) when is_pid(buffer_pid) do
-    GenServer.call(server, {:begin_parse, buffer_pid})
-  catch
-    :exit, reason -> log_unavailable(:begin_parse, reason, :error)
   end
 
   @doc "Refreshes the parser activity timestamp for a registered buffer."
@@ -431,7 +403,9 @@ defmodule Minga.Parser.Manager do
   def init(opts) do
     Minga.Telemetry.StartupTimer.mark(:parser_port_spawn)
     parser_path = Keyword.get(opts, :parser_path, default_parser_path())
-    state = %__MODULE__{parser_path: parser_path}
+    events_registry = Keyword.get(opts, :events_registry, Events.default_registry())
+    :ok = Events.subscribe(:buffer_changed, events_registry)
+    state = %__MODULE__{parser_path: parser_path, events_registry: events_registry}
     result = {:ok, start_port(state)}
     Minga.Telemetry.StartupTimer.mark(:parser_port_ready)
     result
@@ -451,14 +425,10 @@ defmodule Minga.Parser.Manager do
     {:reply, nil, state}
   end
 
-  def handle_call({:request_indent, buffer_id, line, timeout_ms}, from, state) do
-    if BufferRegistry.registered_id?(state.buffers, buffer_id) do
-      request_id = state.next_request_id
-      cmd = Protocol.encode_request_indent(buffer_id, request_id, line)
-      enqueue_pending_request(state, from, request_id, cmd, timeout_ms)
-    else
-      {:reply, nil, state}
-    end
+  def handle_call({:request_indent, buffer_pid, line, timeout_ms}, from, state) do
+    enqueue_buffer_request(state, buffer_pid, from, timeout_ms, fn buffer_id, request_id ->
+      Protocol.encode_request_indent(buffer_id, request_id, line)
+    end)
   end
 
   def handle_call(
@@ -470,13 +440,13 @@ defmodule Minga.Parser.Manager do
   end
 
   def handle_call(
-        {:request_textobject, buffer_id, row, col, capture_name, timeout_ms},
+        {:request_textobject, buffer_pid, row, col, capture_name, timeout_ms},
         from,
         state
       ) do
-    request_id = state.next_request_id
-    cmd = Protocol.encode_request_textobject(buffer_id, request_id, row, col, capture_name)
-    enqueue_pending_request(state, from, request_id, cmd, timeout_ms)
+    enqueue_buffer_request(state, buffer_pid, from, timeout_ms, fn buffer_id, request_id ->
+      Protocol.encode_request_textobject(buffer_id, request_id, row, col, capture_name)
+    end)
   end
 
   def handle_call(
@@ -487,10 +457,10 @@ defmodule Minga.Parser.Manager do
     {:reply, nil, state}
   end
 
-  def handle_call({:request_match_item, buffer_id, row, col, timeout_ms}, from, state) do
-    request_id = state.next_request_id
-    cmd = Protocol.encode_request_match_item(buffer_id, request_id, row, col)
-    enqueue_pending_request(state, from, request_id, cmd, timeout_ms)
+  def handle_call({:request_match_item, buffer_pid, row, col, timeout_ms}, from, state) do
+    enqueue_buffer_request(state, buffer_pid, from, timeout_ms, fn buffer_id, request_id ->
+      Protocol.encode_request_match_item(buffer_id, request_id, row, col)
+    end)
   end
 
   def handle_call(
@@ -501,10 +471,14 @@ defmodule Minga.Parser.Manager do
     {:reply, nil, state}
   end
 
-  def handle_call({:request_structural_nav, buffer_id, row, col, action, timeout_ms}, from, state) do
-    request_id = state.next_request_id
-    cmd = Protocol.encode_request_structural_nav(buffer_id, request_id, row, col, action)
-    enqueue_pending_request(state, from, request_id, cmd, timeout_ms)
+  def handle_call(
+        {:request_structural_nav, buffer_pid, row, col, action, timeout_ms},
+        from,
+        state
+      ) do
+    enqueue_buffer_request(state, buffer_pid, from, timeout_ms, fn buffer_id, request_id ->
+      Protocol.encode_request_structural_nav(buffer_id, request_id, row, col, action)
+    end)
   end
 
   def handle_call({:highlight_source, _language, _source, _timeout}, _from, %{port: nil} = state) do
@@ -536,7 +510,7 @@ defmodule Minga.Parser.Manager do
 
     if state.port != nil do
       Minga.Log.info(:port, "Parser: manual restart successful")
-      state = resync_all_buffers(state)
+      state = restart_parse_pumps(state)
       broadcast(state.subscribers, {:minga_highlight, :parser_restarted})
       {:reply, :ok, state}
     else
@@ -548,9 +522,9 @@ defmodule Minga.Parser.Manager do
     {:reply, state.port != nil and state.ready, state}
   end
 
-  def handle_call({:register_buffer, buffer_pid, language, content_fn, setup_fn}, _from, state) do
-    {buffer_id, state} = register_editor_buffer(state, buffer_pid, language, content_fn, setup_fn)
-    {:reply, buffer_id, state}
+  def handle_call({:register_buffer, buffer_pid, config}, _from, state) do
+    {buffer_id, state} = register_editor_buffer(state, buffer_pid, config)
+    {:reply, buffer_id, pump_buffer(state, buffer_pid)}
   end
 
   def handle_call({:buffer_id, buffer_pid}, _from, state) do
@@ -559,16 +533,6 @@ defmodule Minga.Parser.Manager do
 
   def handle_call({:resolve_buffer, buffer_id}, _from, state) do
     {:reply, BufferRegistry.resolve(state.buffers, buffer_id), state}
-  end
-
-  def handle_call({:begin_parse, buffer_pid}, _from, state) do
-    case BufferRegistry.begin_parse(state.buffers, buffer_pid, monotonic_ms()) do
-      {:ok, buffer_id, version, buffers} ->
-        {:reply, {:ok, buffer_id, version}, %{state | buffers: buffers}}
-
-      :error ->
-        {:reply, :error, state}
-    end
   end
 
   def handle_call({:unregister_buffer, buffer_pid}, _from, state) do
@@ -586,23 +550,17 @@ defmodule Minga.Parser.Manager do
   end
 
   def handle_cast({:send_commands, commands}, state) do
-    send_command_batch(state.port, commands)
-    {:noreply, state}
-  end
-
-  def handle_cast(
-        {:send_buffer_commands, _buffer_pid, _buffer_id, _commands},
-        %{port: nil} = state
-      ) do
-    {:noreply, state}
-  end
-
-  def handle_cast({:send_buffer_commands, buffer_pid, buffer_id, commands}, state) do
-    if BufferRegistry.buffer_id(state.buffers, buffer_pid) == buffer_id do
-      send_command_batch(state.port, commands)
+    if send_command_batch(state.port, commands) do
+      {:noreply, state}
+    else
+      Minga.Log.warning(:port, "Parser: command write failed; scheduling restart")
+      state = state |> fail_pending_requests() |> reset_parse_admission() |> close_port()
+      {:noreply, schedule_restart(state)}
     end
+  end
 
-    {:noreply, state}
+  def handle_cast({:request_parse, buffer_pid}, state) do
+    {:noreply, force_parse(state, buffer_pid)}
   end
 
   def handle_cast({:touch_buffer, buffer_pid}, state) do
@@ -611,6 +569,18 @@ defmodule Minga.Parser.Manager do
   end
 
   @impl true
+  def handle_info(
+        {:minga_event, :buffer_changed,
+         %Events.BufferChangedEvent{buffer: buffer_pid, sequence: sequence}},
+        state
+      ) do
+    {:noreply, mark_buffer_dirty(state, buffer_pid, sequence)}
+  end
+
+  def handle_info({:buffer_sync_snapshot, %SyncSnapshot{} = snapshot}, state) do
+    {:noreply, handle_sync_snapshot(state, snapshot)}
+  end
+
   def handle_info({port, {:data, data}}, %{port: port} = state) do
     case Protocol.decode_event(data) do
       {:ok, {:indent_result, request_id, _line, indent_level}} ->
@@ -631,6 +601,9 @@ defmodule Minga.Parser.Manager do
       {:ok, {:highlight_spans, _buffer_id, _version, _spans} = event} ->
         handle_highlight_source_event_or_broadcast(event, state)
 
+      {:ok, {:request_reparse, buffer_id}} ->
+        {:noreply, recover_parser_buffer(state, buffer_id)}
+
       {:ok, {:log_message, _level, _text} = event} ->
         broadcast(state.subscribers, {:minga_highlight, event})
         {:noreply, state}
@@ -649,17 +622,15 @@ defmodule Minga.Parser.Manager do
   end
 
   def handle_info({port, {:exit_status, 0}}, %{port: port} = state) do
-    Minga.Log.info(:port, "Parser process exited normally")
-    # Fail any pending synchronous requests so callers don't hang.
-    state = fail_pending_requests(state)
-    {:noreply, %{state | port: nil, ready: false}}
+    Minga.Log.warning(:port, "Parser process exited unexpectedly")
+    state = state |> fail_pending_requests() |> reset_parse_admission() |> close_port()
+    {:noreply, schedule_restart(state)}
   end
 
   def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
     Minga.Log.error(:port, "Parser process crashed (exit status #{status})")
     # Fail any pending synchronous requests so callers don't hang.
-    state = fail_pending_requests(state)
-    state = %{state | port: nil, ready: false}
+    state = state |> fail_pending_requests() |> reset_parse_admission() |> close_port()
     broadcast(state.subscribers, {:minga_highlight, :parser_crashed})
     state = schedule_restart(state)
     {:noreply, state}
@@ -684,6 +655,28 @@ defmodule Minga.Parser.Manager do
 
   def handle_info({:request_timeout, request_id}, state) do
     reply_to_pending_request(state, request_id, nil)
+  end
+
+  def handle_info({:parse_admission_timeout, buffer_pid, token}, state) do
+    if ParseScheduler.timeout?(state.parse_scheduler, buffer_pid, token) do
+      Minga.Log.error(
+        :port,
+        "Parser: synchronization timed out for buffer #{inspect(buffer_pid)}; restarting"
+      )
+
+      broadcast(state.subscribers, {:minga_highlight, :parser_crashed})
+
+      state =
+        state
+        |> fail_pending_requests()
+        |> reset_parse_admission()
+        |> close_port()
+        |> schedule_restart()
+
+      {:noreply, state}
+    else
+      {:noreply, state}
+    end
   end
 
   def handle_info({:DOWN, ref, :process, pid, _reason}, state) do
@@ -764,8 +757,141 @@ defmodule Minga.Parser.Manager do
 
       {:noreply, state}
     else
-      broadcast(state.subscribers, {:minga_highlight, event})
-      {:noreply, state}
+      broadcast_editor_event(event, state)
+    end
+  end
+
+  @spec broadcast_editor_event(term(), t()) :: {:noreply, t()}
+  defp broadcast_editor_event({:highlight_spans, buffer_id, version, _spans} = event, state) do
+    case BufferRegistry.resolve(state.buffers, buffer_id) do
+      nil ->
+        {:noreply, state}
+
+      buffer_pid ->
+        complete_editor_parse(state, buffer_pid, version, event)
+    end
+  end
+
+  defp broadcast_editor_event(event, state) do
+    case editor_event_identity(event) do
+      {:versioned, buffer_id, version} ->
+        broadcast_versioned_editor_event(state, buffer_id, version, event)
+
+      {:unversioned, buffer_id} ->
+        broadcast_registered_editor_event(state, buffer_id, event)
+
+      :global ->
+        broadcast(state.subscribers, {:minga_highlight, event})
+        {:noreply, state}
+    end
+  end
+
+  @spec editor_event_identity(term()) ::
+          {:versioned, non_neg_integer(), pos_integer()}
+          | {:unversioned, non_neg_integer()}
+          | :global
+  defp editor_event_identity({:conceal_spans, buffer_id, version, _spans}),
+    do: {:versioned, buffer_id, version}
+
+  defp editor_event_identity({:fold_ranges, buffer_id, version, _ranges}),
+    do: {:versioned, buffer_id, version}
+
+  defp editor_event_identity({:textobject_positions, buffer_id, version, _positions}),
+    do: {:versioned, buffer_id, version}
+
+  defp editor_event_identity({:document_symbols, buffer_id, version, _symbols}),
+    do: {:versioned, buffer_id, version}
+
+  defp editor_event_identity({:highlight_names, buffer_id, _names}),
+    do: {:unversioned, buffer_id}
+
+  defp editor_event_identity({:injection_ranges, buffer_id, _ranges}),
+    do: {:unversioned, buffer_id}
+
+  defp editor_event_identity(_event), do: :global
+
+  @spec broadcast_versioned_editor_event(t(), non_neg_integer(), pos_integer(), term()) ::
+          {:noreply, t()}
+  defp broadcast_versioned_editor_event(state, buffer_id, version, event) do
+    with buffer_pid when is_pid(buffer_pid) <- BufferRegistry.resolve(state.buffers, buffer_id),
+         {:ok, registration} <- BufferRegistry.fetch(state.buffers, buffer_pid),
+         true <- BufferRegistration.accepts_version?(registration, version) do
+      editor_event = tag_editor_buffer(event, buffer_pid)
+      broadcast(state.subscribers, {:minga_highlight, editor_event})
+    end
+
+    {:noreply, state}
+  end
+
+  @spec broadcast_registered_editor_event(t(), non_neg_integer(), term()) :: {:noreply, t()}
+  defp broadcast_registered_editor_event(state, buffer_id, event) do
+    case BufferRegistry.resolve(state.buffers, buffer_id) do
+      buffer_pid when is_pid(buffer_pid) ->
+        editor_event = tag_editor_buffer(event, buffer_pid)
+        broadcast(state.subscribers, {:minga_highlight, editor_event})
+
+      nil ->
+        :ok
+    end
+
+    {:noreply, state}
+  end
+
+  @spec tag_editor_buffer(term(), pid()) :: term()
+  defp tag_editor_buffer({:highlight_names, _buffer_id, names}, buffer_pid),
+    do: {:highlight_names, buffer_pid, names}
+
+  defp tag_editor_buffer({:highlight_spans, _buffer_id, _version, spans}, buffer_pid),
+    do: {:highlight_spans, buffer_pid, spans}
+
+  defp tag_editor_buffer({:injection_ranges, _buffer_id, ranges}, buffer_pid),
+    do: {:injection_ranges, buffer_pid, ranges}
+
+  defp tag_editor_buffer({:conceal_spans, _buffer_id, _version, spans}, buffer_pid),
+    do: {:conceal_spans, buffer_pid, spans}
+
+  defp tag_editor_buffer({:fold_ranges, _buffer_id, _version, ranges}, buffer_pid),
+    do: {:fold_ranges, buffer_pid, ranges}
+
+  defp tag_editor_buffer({:textobject_positions, _buffer_id, _version, positions}, buffer_pid),
+    do: {:textobject_positions, buffer_pid, positions}
+
+  defp tag_editor_buffer({:document_symbols, _buffer_id, _version, symbols}, buffer_pid),
+    do: {:document_symbols, buffer_pid, symbols}
+
+  defp tag_editor_buffer(event, _buffer_pid), do: event
+
+  @spec complete_editor_parse(t(), pid(), pos_integer(), term()) :: {:noreply, t()}
+  defp complete_editor_parse(state, buffer_pid, version, event) do
+    case BufferRegistry.fetch(state.buffers, buffer_pid) do
+      {:ok, registration} ->
+        finish_matching_parse(state, buffer_pid, registration, version, event)
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
+  @spec finish_matching_parse(t(), pid(), BufferRegistration.t(), pos_integer(), term()) ::
+          {:noreply, t()}
+  defp finish_matching_parse(state, buffer_pid, registration, version, event) do
+    case BufferRegistration.complete_parse(registration, version) do
+      {:ok, completed} ->
+        buffers = BufferRegistry.put(state.buffers, buffer_pid, completed)
+
+        state =
+          state
+          |> Map.put(:buffers, buffers)
+          |> release_parse_admission(buffer_pid)
+          |> pump_buffer(buffer_pid)
+          |> dispatch_next_parse()
+
+        editor_event = tag_editor_buffer(event, buffer_pid)
+        broadcast(state.subscribers, {:minga_highlight, editor_event})
+        {:noreply, state}
+
+      :stale ->
+        {:noreply, state}
     end
   end
 
@@ -784,7 +910,6 @@ defmodule Minga.Parser.Manager do
   defp event_buffer_id({:textobject_positions, buffer_id, _version, _positions}), do: buffer_id
   defp event_buffer_id({:document_symbols, buffer_id, _version, _symbols}), do: buffer_id
   defp event_buffer_id({:conceal_spans, buffer_id, _version, _spans}), do: buffer_id
-  defp event_buffer_id({:request_reparse, buffer_id}), do: buffer_id
   defp event_buffer_id(_event), do: nil
 
   @spec snippet_buffer_id?(non_neg_integer() | nil) :: boolean()
@@ -921,7 +1046,7 @@ defmodule Minga.Parser.Manager do
 
     if state.port != nil do
       Minga.Log.info(:port, "Parser: restarted successfully")
-      state = resync_all_buffers(state)
+      state = restart_parse_pumps(state)
       broadcast(state.subscribers, {:minga_highlight, :parser_restarted})
       # Reset backoff on success
       %{state | current_backoff_ms: @initial_backoff_ms}
@@ -931,26 +1056,31 @@ defmodule Minga.Parser.Manager do
     end
   end
 
-  @spec register_editor_buffer(t(), pid(), String.t(), (-> String.t()), function() | nil) ::
-          {pos_integer(), t()}
-  defp register_editor_buffer(state, buffer_pid, language, content_fn, setup_fn) do
+  @spec register_editor_buffer(t(), pid(), BufferConfig.t()) :: {pos_integer(), t()}
+  defp register_editor_buffer(state, buffer_pid, %BufferConfig{} = config) do
     {buffer_id, status, buffers} =
-      BufferRegistry.register(
-        state.buffers,
-        buffer_pid,
-        language,
-        content_fn,
-        setup_fn,
-        monotonic_ms()
-      )
+      BufferRegistry.register(state.buffers, buffer_pid, config, monotonic_ms())
 
     buffers =
       case status do
-        :new -> BufferRegistry.put_monitor(buffers, buffer_pid, Process.monitor(buffer_pid))
-        :existing -> buffers
+        :new ->
+          BufferRegistry.put_monitor(buffers, buffer_pid, Process.monitor(buffer_pid))
+
+        :existing ->
+          buffers
+
+        {:replaced, old_id} ->
+          maybe_close_editor_buffer(state.port, old_id)
+          buffers
       end
 
-    {buffer_id, %{state | buffers: buffers}}
+    parse_scheduler =
+      case status do
+        {:replaced, _old_id} -> ParseScheduler.release(state.parse_scheduler, buffer_pid)
+        _other -> state.parse_scheduler
+      end
+
+    {buffer_id, %{state | buffers: buffers, parse_scheduler: parse_scheduler}}
   end
 
   @spec unregister_editor_buffer(t(), pid(), boolean()) :: t()
@@ -958,7 +1088,8 @@ defmodule Minga.Parser.Manager do
     {buffer_id, monitor_ref, buffers} = BufferRegistry.unregister(state.buffers, buffer_pid)
     maybe_demonitor(monitor_ref, demonitor?)
     maybe_close_editor_buffer(state.port, buffer_id)
-    %{state | buffers: buffers}
+    parse_scheduler = ParseScheduler.release(state.parse_scheduler, buffer_pid)
+    dispatch_next_parse(%{state | buffers: buffers, parse_scheduler: parse_scheduler})
   end
 
   @spec handle_buffer_down(t(), pid(), reference()) :: t()
@@ -979,11 +1110,229 @@ defmodule Minga.Parser.Manager do
     :ok
   end
 
-  @spec send_command_batch(port(), [binary()]) :: true
+  @spec recover_parser_buffer(t(), non_neg_integer()) :: t()
+  defp recover_parser_buffer(state, buffer_id) do
+    case BufferRegistry.resolve(state.buffers, buffer_id) do
+      buffer_pid when is_pid(buffer_pid) -> force_parse(state, buffer_pid)
+      nil -> state
+    end
+  end
+
+  @spec force_parse(t(), pid()) :: t()
+  defp force_parse(state, buffer_pid) do
+    case BufferRegistry.fetch(state.buffers, buffer_pid) do
+      {:ok, registration} ->
+        buffers =
+          BufferRegistry.put(state.buffers, buffer_pid, BufferRegistration.restart(registration))
+
+        parse_scheduler = ParseScheduler.release(state.parse_scheduler, buffer_pid)
+        pump_buffer(%{state | buffers: buffers, parse_scheduler: parse_scheduler}, buffer_pid)
+
+      :error ->
+        state
+    end
+  end
+
+  @spec mark_buffer_dirty(t(), pid(), non_neg_integer()) :: t()
+  defp mark_buffer_dirty(state, buffer_pid, sequence) do
+    case BufferRegistry.fetch(state.buffers, buffer_pid) do
+      {:ok, registration} ->
+        registration = BufferRegistration.mark_dirty(registration, sequence)
+
+        buffers =
+          state.buffers
+          |> BufferRegistry.put(buffer_pid, registration)
+          |> BufferRegistry.touch(buffer_pid, monotonic_ms())
+
+        pump_buffer(%{state | buffers: buffers}, buffer_pid)
+
+      :error ->
+        state
+    end
+  end
+
+  @spec pump_buffer(t(), pid()) :: t()
+  defp pump_buffer(%{port: nil} = state, _buffer_pid), do: state
+
+  defp pump_buffer(state, buffer_pid) do
+    case BufferRegistry.fetch(state.buffers, buffer_pid) do
+      {:ok, registration} ->
+        if BufferRegistration.pumpable?(registration) do
+          parse_scheduler = ParseScheduler.enqueue(state.parse_scheduler, buffer_pid)
+          dispatch_next_parse(%{state | parse_scheduler: parse_scheduler})
+        else
+          state
+        end
+
+      :error ->
+        state
+    end
+  end
+
+  @spec dispatch_next_parse(t()) :: t()
+  defp dispatch_next_parse(%{port: nil} = state), do: state
+
+  defp dispatch_next_parse(state) do
+    case ParseScheduler.activate_next(state.parse_scheduler) do
+      {:ok, buffer_pid, parse_scheduler} ->
+        state
+        |> Map.put(:parse_scheduler, parse_scheduler)
+        |> dispatch_activated_buffer(buffer_pid)
+
+      :busy ->
+        state
+
+      :empty ->
+        state
+    end
+  end
+
+  @spec dispatch_activated_buffer(t(), pid()) :: t()
+  defp dispatch_activated_buffer(state, buffer_pid) do
+    case BufferRegistry.fetch(state.buffers, buffer_pid) do
+      {:ok, registration} ->
+        if BufferRegistration.pumpable?(registration) do
+          request_active_snapshot(state, buffer_pid, registration)
+        else
+          continue_parse_dispatch(state, buffer_pid)
+        end
+
+      :error ->
+        continue_parse_dispatch(state, buffer_pid)
+    end
+  end
+
+  @spec continue_parse_dispatch(t(), pid()) :: t()
+  defp continue_parse_dispatch(state, buffer_pid) do
+    state
+    |> release_parse_admission(buffer_pid)
+    |> dispatch_next_parse()
+  end
+
+  @spec request_active_snapshot(t(), pid(), BufferRegistration.t()) :: t()
+  defp request_active_snapshot(state, buffer_pid, registration) do
+    token = make_ref()
+    cursor = BufferRegistration.snapshot_cursor(registration)
+    awaiting = BufferRegistration.await_snapshot(registration, token)
+    buffers = BufferRegistry.put(state.buffers, buffer_pid, awaiting)
+    :ok = Buffer.request_sync_snapshot(buffer_pid, cursor, self(), token)
+
+    state
+    |> Map.put(:buffers, buffers)
+    |> arm_parse_admission_timeout(buffer_pid, {:snapshot, token})
+  end
+
+  @spec handle_sync_snapshot(t(), SyncSnapshot.t()) :: t()
+  defp handle_sync_snapshot(state, %SyncSnapshot{buffer: buffer_pid, token: token} = snapshot) do
+    case BufferRegistry.fetch(state.buffers, buffer_pid) do
+      {:ok, registration} ->
+        handle_current_snapshot(state, buffer_pid, registration, snapshot, token)
+
+      :error ->
+        state
+    end
+  end
+
+  @spec handle_current_snapshot(t(), pid(), BufferRegistration.t(), SyncSnapshot.t(), reference()) ::
+          t()
+  defp handle_current_snapshot(state, buffer_pid, registration, snapshot, token) do
+    if BufferRegistration.awaiting?(registration, token) do
+      apply_sync_snapshot(state, buffer_pid, registration, snapshot)
+    else
+      state
+    end
+  end
+
+  @spec apply_sync_snapshot(t(), pid(), BufferRegistration.t(), SyncSnapshot.t()) :: t()
+  defp apply_sync_snapshot(state, buffer_pid, registration, %SyncSnapshot{
+         changes: :unchanged,
+         sequence: sequence
+       }) do
+    completed = BufferRegistration.complete_unchanged(registration, sequence)
+    buffers = BufferRegistry.put(state.buffers, buffer_pid, completed)
+
+    state
+    |> Map.put(:buffers, buffers)
+    |> release_parse_admission(buffer_pid)
+    |> pump_buffer(buffer_pid)
+    |> dispatch_next_parse()
+  end
+
+  defp apply_sync_snapshot(%{port: nil} = state, buffer_pid, registration, _snapshot) do
+    buffers =
+      BufferRegistry.put(state.buffers, buffer_pid, BufferRegistration.restart(registration))
+
+    state |> Map.put(:buffers, buffers) |> release_parse_admission(buffer_pid)
+  end
+
+  defp apply_sync_snapshot(state, buffer_pid, registration, snapshot) do
+    {version, buffers} = BufferRegistry.next_parse_version(state.buffers)
+    commands = snapshot_commands(registration, version, snapshot.changes)
+    full? = match?({:full, _content}, snapshot.changes)
+
+    if send_command_batch(state.port, commands) do
+      parsing = BufferRegistration.begin_parse(registration, version, snapshot.sequence, full?)
+
+      state
+      |> Map.put(:buffers, BufferRegistry.put(buffers, buffer_pid, parsing))
+      |> arm_parse_admission_timeout(buffer_pid, {:parse, make_ref()})
+    else
+      Minga.Log.warning(:port, "Parser: parse write failed; scheduling restart")
+      retained = BufferRegistration.restart(registration)
+      buffers = BufferRegistry.put(buffers, buffer_pid, retained)
+
+      state
+      |> Map.put(:buffers, buffers)
+      |> fail_pending_requests()
+      |> reset_parse_admission()
+      |> close_port()
+      |> schedule_restart()
+    end
+  end
+
+  @spec snapshot_commands(BufferRegistration.t(), pos_integer(), SyncSnapshot.changes()) :: [
+          binary()
+        ]
+  defp snapshot_commands(registration, version, {:full, content}) do
+    parse = Protocol.encode_parse_buffer(registration.id, version, content)
+
+    if registration.force_full? do
+      setup_commands(registration.id, registration.config) ++ [parse]
+    else
+      [parse]
+    end
+  end
+
+  defp snapshot_commands(registration, version, {:edits, edits}) do
+    encoded_edits = Enum.map(edits, &Map.from_struct/1)
+    [Protocol.encode_edit_buffer(registration.id, version, encoded_edits)]
+  end
+
+  @spec setup_commands(pos_integer(), BufferConfig.t()) :: [binary()]
+  defp setup_commands(buffer_id, %BufferConfig{} = config) do
+    [Protocol.encode_set_language(buffer_id, config.language)]
+    |> append_query(config.highlight_query, &Protocol.encode_set_highlight_query(buffer_id, &1))
+    |> append_query(config.injection_query, &Protocol.encode_set_injection_query(buffer_id, &1))
+    |> append_query(config.fold_query, &Protocol.encode_set_fold_query(buffer_id, &1))
+    |> append_query(config.textobject_query, &Protocol.encode_set_textobject_query(buffer_id, &1))
+    |> append_query(config.tags_query, &Protocol.encode_set_tags_query(buffer_id, &1))
+  end
+
+  @spec append_query([binary()], String.t() | nil, (String.t() -> binary())) :: [binary()]
+  defp append_query(commands, nil, _encoder), do: commands
+  defp append_query(commands, query, encoder), do: commands ++ [encoder.(query)]
+
+  @spec send_command_batch(port(), [binary()]) :: boolean()
   defp send_command_batch(port, commands) do
-    commands
-    |> IO.iodata_to_binary()
-    |> then(&Port.command(port, &1))
+    payload = IO.iodata_to_binary(commands)
+
+    try do
+      Port.command(port, payload)
+    rescue
+      ArgumentError -> false
+    catch
+      :exit, _reason -> false
+    end
   end
 
   @spec maybe_close_editor_buffer(port() | nil, pos_integer() | nil) :: :ok
@@ -991,7 +1340,7 @@ defmodule Minga.Parser.Manager do
   defp maybe_close_editor_buffer(nil, _buffer_id), do: :ok
 
   defp maybe_close_editor_buffer(port, buffer_id) do
-    Port.command(port, Protocol.encode_close_buffer(buffer_id))
+    _sent? = send_command_batch(port, [Protocol.encode_close_buffer(buffer_id)])
     :ok
   end
 
@@ -1005,103 +1354,104 @@ defmodule Minga.Parser.Manager do
       maybe_close_editor_buffer(state.port, buffer_id)
     end)
 
-    {Enum.map(evicted, &elem(&1, 0)), %{state | buffers: buffers}}
+    evicted_pids = Enum.map(evicted, &elem(&1, 0))
+
+    parse_scheduler =
+      Enum.reduce(evicted_pids, state.parse_scheduler, &ParseScheduler.release(&2, &1))
+
+    state = %{state | buffers: buffers, parse_scheduler: parse_scheduler}
+    {evicted_pids, dispatch_next_parse(state)}
   end
 
   @spec monotonic_ms() :: integer()
   defp monotonic_ms, do: System.monotonic_time(:millisecond)
 
-  @spec resync_all_buffers(t()) :: t()
-  defp resync_all_buffers(state) do
+  @spec arm_parse_admission_timeout(t(), pid(), term()) :: t()
+  defp arm_parse_admission_timeout(state, buffer_pid, token) do
+    state = cancel_parse_admission_timer(state)
+
+    timer_ref =
+      Process.send_after(
+        self(),
+        {:parse_admission_timeout, buffer_pid, token},
+        @parse_admission_timeout_ms
+      )
+
+    %{
+      state
+      | parse_scheduler: ParseScheduler.arm_timeout(state.parse_scheduler, token, timer_ref)
+    }
+  end
+
+  @spec release_parse_admission(t(), pid()) :: t()
+  defp release_parse_admission(state, buffer_pid) do
+    if ParseScheduler.active?(state.parse_scheduler, buffer_pid) do
+      state = cancel_parse_admission_timer(state)
+      %{state | parse_scheduler: ParseScheduler.release(state.parse_scheduler, buffer_pid)}
+    else
+      state
+    end
+  end
+
+  @spec reset_parse_admission(t()) :: t()
+  defp reset_parse_admission(state) do
+    state = cancel_parse_admission_timer(state)
+    %{state | parse_scheduler: ParseScheduler.reset(state.parse_scheduler)}
+  end
+
+  @spec cancel_parse_admission_timer(t()) :: t()
+  defp cancel_parse_admission_timer(state) do
+    case ParseScheduler.timeout_ref(state.parse_scheduler) do
+      nil ->
+        state
+
+      timer_ref ->
+        Process.cancel_timer(timer_ref)
+        state
+    end
+  end
+
+  @spec restart_parse_pumps(t()) :: t()
+  defp restart_parse_pumps(state) do
     buffer_count = BufferRegistry.count(state.buffers)
 
     if buffer_count > 0 do
       Minga.Log.info(:port, "Parser: re-syncing #{buffer_count} buffer(s)")
     end
 
-    {commands, stale_pids} = resync_commands(state.buffers)
-    state = Enum.reduce(stale_pids, state, &unregister_editor_buffer(&2, &1))
+    state = %{
+      state
+      | buffers: BufferRegistry.restart_all(state.buffers),
+        parse_scheduler: ParseScheduler.reset(state.parse_scheduler)
+    }
 
-    if commands != [] do
-      batch = IO.iodata_to_binary(commands)
-      Port.command(state.port, batch)
-    end
-
-    %{state | buffers: BufferRegistry.reset_parse_version(state.buffers)}
-  end
-
-  @spec resync_commands(BufferRegistry.t()) :: {[binary()], [pid()]}
-  defp resync_commands(buffers) do
-    buffers
+    state.buffers
     |> BufferRegistry.entries()
-    |> Enum.reduce({[], []}, fn {buffer_pid, meta}, {commands, stale_pids} ->
-      case resync_buffer_commands(meta.id, meta) do
-        {:ok, buffer_commands} -> {[buffer_commands | commands], stale_pids}
-        :stale -> {commands, [buffer_pid | stale_pids]}
-      end
-    end)
-    |> then(fn {commands, stale_pids} ->
-      {commands |> Enum.reverse() |> List.flatten(), stale_pids}
-    end)
+    |> Map.keys()
+    |> Enum.reduce(state, &pump_buffer(&2, &1))
   end
 
-  # Uses the full setup_commands_fn if available (replays custom queries),
-  # otherwise falls back to set_language + parse_buffer.
-  @spec resync_buffer_commands(non_neg_integer(), buffer_meta()) :: {:ok, [binary()]} | :stale
-  defp resync_buffer_commands(buffer_id, meta) do
-    if is_function(meta.setup_commands_fn, 1) do
-      case invoke_callback(meta.setup_commands_fn, [buffer_id]) do
-        {:ok, commands} ->
-          {:ok, commands}
+  @spec enqueue_buffer_request(
+          t(),
+          pid(),
+          GenServer.from(),
+          pos_integer(),
+          (pos_integer(), non_neg_integer() -> binary())
+        ) :: {:noreply, t()} | {:reply, nil, t()}
+  defp enqueue_buffer_request(state, buffer_pid, from, timeout_ms, command_fn) do
+    case BufferRegistry.fetch(state.buffers, buffer_pid) do
+      {:ok, registration} ->
+        if BufferRegistration.ready?(registration) do
+          request_id = state.next_request_id
+          command = command_fn.(registration.id, request_id)
+          enqueue_pending_request(state, from, request_id, command, timeout_ms)
+        else
+          {:reply, nil, state}
+        end
 
-        {:error, reason} ->
-          Minga.Log.warning(
-            :port,
-            "Parser: setup callback failed for buffer #{buffer_id}: #{inspect(reason)}; falling back"
-          )
-
-          resync_buffer_fallback(buffer_id, meta)
-      end
-    else
-      resync_buffer_fallback(buffer_id, meta)
+      :error ->
+        {:reply, nil, state}
     end
-  end
-
-  @spec resync_buffer_fallback(non_neg_integer(), buffer_meta()) :: {:ok, [binary()]} | :stale
-  defp resync_buffer_fallback(buffer_id, meta) do
-    case invoke_callback(meta.content_fn, []) do
-      {:ok, text} when is_binary(text) ->
-        {:ok,
-         [
-           Protocol.encode_set_language(buffer_id, meta.language),
-           Protocol.encode_parse_buffer(buffer_id, 0, text)
-         ]}
-
-      {:ok, other} ->
-        Minga.Log.warning(
-          :port,
-          "Parser: content callback returned #{inspect(other)} for buffer #{buffer_id}; unregistering"
-        )
-
-        :stale
-
-      {:error, reason} ->
-        Minga.Log.warning(
-          :port,
-          "Parser: content callback failed for buffer #{buffer_id}: #{inspect(reason)}; unregistering"
-        )
-
-        :stale
-    end
-  end
-
-  @spec invoke_callback(function(), [term()]) :: {:ok, term()} | {:error, term()}
-  defp invoke_callback(callback, args) do
-    {:ok, apply(callback, args)}
-  rescue
-    error -> {:error, {:exception, error}}
-  catch
-    kind, reason -> {:error, {kind, reason}}
   end
 
   @spec enqueue_pending_request(
@@ -1112,10 +1462,23 @@ defmodule Minga.Parser.Manager do
           pos_integer()
         ) :: {:noreply, t()}
   defp enqueue_pending_request(state, from, request_id, cmd, timeout_ms) do
-    Port.command(state.port, cmd)
-    pending = Map.put(state.pending_requests, request_id, from)
-    Process.send_after(self(), {:request_timeout, request_id}, timeout_ms)
-    {:noreply, %{state | next_request_id: request_id + 1, pending_requests: pending}}
+    if send_command_batch(state.port, [cmd]) do
+      pending = Map.put(state.pending_requests, request_id, from)
+      Process.send_after(self(), {:request_timeout, request_id}, timeout_ms)
+      {:noreply, %{state | next_request_id: request_id + 1, pending_requests: pending}}
+    else
+      Minga.Log.warning(:port, "Parser: command write failed; scheduling restart")
+      GenServer.reply(from, nil)
+
+      state =
+        state
+        |> close_port()
+        |> fail_pending_requests()
+        |> reset_parse_admission()
+        |> schedule_restart()
+
+      {:noreply, state}
+    end
   end
 
   @spec fail_pending_requests(t()) :: t()

@@ -24,13 +24,6 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
     %{TestHelpers.base_state() | parser_manager: manager}
   end
 
-  @spec with_buffer_id(EditorState.t(), pid(), pos_integer()) :: EditorState.t()
-  defp with_buffer_id(state, pid, expected_id) do
-    id = Manager.register_buffer(pid, "elixir", fn -> "" end, server: state.parser_manager)
-    assert id == expected_id
-    state
-  end
-
   @spec with_highlight(EditorState.t(), pid()) :: EditorState.t()
   defp with_highlight(state, pid) do
     hl = state.highlighting
@@ -137,60 +130,68 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
     end
   end
 
-  describe "unknown buffer ids" do
-    test "highlight messages for missing buffer ids log warnings without changing state" do
-      state = base_state()
-
-      messages = [
-        {:minga_highlight, {:highlight_names, 999, ["keyword"]}},
-        {:minga_highlight, {:injection_ranges, 999, []}},
-        {:minga_highlight, {:highlight_spans, 999, 1, []}},
-        {:minga_highlight, {:conceal_spans, 999, 1, []}},
-        {:minga_highlight, {:fold_ranges, 999, 1, []}},
-        {:minga_highlight, {:textobject_positions, 999, 1, %{}}},
-        {:minga_highlight, {:document_symbols, 999, 1, []}}
-      ]
-
-      for message <- messages do
-        {new_state, effects} = HighlightHandler.handle(state, message)
-        assert new_state == state
-        assert warning_effect?(effects)
-      end
-    end
-  end
-
   describe "highlight metadata" do
-    test "highlight names support active, non-active, and input-tagged buffers" do
+    test "highlight names support active and non-active buffers" do
       state = base_state()
       buf = active_buffer(state)
-      state = state |> with_buffer_id(buf, 1) |> with_highlight(buf)
+      state = with_highlight(state, buf)
 
       assert {_, []} =
                HighlightHandler.handle(
                  state,
-                 {:minga_highlight, {:highlight_names, 1, ["keyword"]}}
+                 {:minga_highlight, {:highlight_names, buf, ["keyword"]}}
                )
 
-      assert {_, []} =
-               HighlightHandler.handle(state, {:minga_input, {:highlight_names, 1, ["keyword"]}})
-
-      {state, other_buf} = state_with_other_buffer(base_state(), 2)
+      {state, other_buf} = state_with_other_buffer(base_state())
       state = with_highlight(state, other_buf)
 
       {new_state, []} =
-        HighlightHandler.handle(state, {:minga_highlight, {:highlight_names, 2, ["string"]}})
+        HighlightHandler.handle(
+          state,
+          {:minga_highlight, {:highlight_names, other_buf, ["string"]}}
+        )
 
       assert new_state.highlighting.highlights[other_buf] != nil
+    end
+
+    test "queued parser events cannot recreate removed presentation state" do
+      state = base_state()
+      buffer = active_buffer(state)
+      spans = [%{start_byte: 0, end_byte: 1, capture_id: 0}]
+
+      assert {^state, []} =
+               HighlightHandler.handle(
+                 state,
+                 {:minga_highlight, {:highlight_names, buffer, ["keyword"]}}
+               )
+
+      assert {^state, []} =
+               HighlightHandler.handle(
+                 state,
+                 {:minga_highlight, {:highlight_spans, buffer, spans}}
+               )
+
+      assert {^state, []} =
+               HighlightHandler.handle(
+                 state,
+                 {:minga_highlight, {:injection_ranges, buffer, []}}
+               )
+
+      assert {^state, []} =
+               HighlightHandler.handle(
+                 state,
+                 {:minga_highlight, {:conceal_spans, buffer, spans}}
+               )
     end
 
     test "injection ranges and language responses update only the public highlight state" do
       state = base_state()
       buf = active_buffer(state)
-      state = with_buffer_id(state, buf, 1)
+      state = with_highlight(state, buf)
       ranges = [%{start: 0, end: 10, language: "elixir"}]
 
       {new_state, []} =
-        HighlightHandler.handle(state, {:minga_highlight, {:injection_ranges, 1, ranges}})
+        HighlightHandler.handle(state, {:minga_highlight, {:injection_ranges, buf, ranges}})
 
       assert new_state.injection_ranges[buf] == ranges
 
@@ -204,10 +205,10 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
     test "highlight and conceal spans produce visible-buffer effects and skip invisible buffers" do
       state = base_state()
       buf = active_buffer(state)
-      state = state |> with_buffer_id(buf, 1) |> with_highlight(buf)
+      state = with_highlight(state, buf)
 
       {_, effects} =
-        HighlightHandler.handle(state, {:minga_highlight, {:highlight_spans, 1, 1, []}})
+        HighlightHandler.handle(state, {:minga_highlight, {:highlight_spans, buf, []}})
 
       assert :render in effects
       assert Enum.any?(effects, &match?({:prettify_symbols, _}, &1))
@@ -215,15 +216,18 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
       spans = [%{start_byte: 0, end_byte: 5, replacement: ""}]
 
       {_, effects} =
-        HighlightHandler.handle(state, {:minga_highlight, {:conceal_spans, 1, 1, spans}})
+        HighlightHandler.handle(state, {:minga_highlight, {:conceal_spans, buf, spans}})
 
       assert {:conceal_spans, buf, spans} in effects
 
-      {state, other_buf} = state_with_other_buffer(base_state(), 2)
+      {state, other_buf} = state_with_other_buffer(base_state())
       state = with_highlight(state, other_buf)
 
       assert {_, []} =
-               HighlightHandler.handle(state, {:minga_highlight, {:highlight_spans, 2, 1, []}})
+               HighlightHandler.handle(
+                 state,
+                 {:minga_highlight, {:highlight_spans, other_buf, []}}
+               )
     end
   end
 
@@ -231,12 +235,11 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
     test "fold ranges and textobject positions update the active window and ignore invisible buffers" do
       state = base_state()
       buf = active_buffer(state)
-      state = with_buffer_id(state, buf, 1)
 
       {new_state, _effects} =
         HighlightHandler.handle(
           state,
-          {:minga_highlight, {:fold_ranges, 1, 1, [{0, 5}, {10, 15}]}}
+          {:minga_highlight, {:fold_ranges, buf, [{0, 5}, {10, 15}]}}
         )
 
       assert Enum.count(active_window(new_state).fold_ranges) == 2
@@ -246,34 +249,33 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
       {new_state, []} =
         HighlightHandler.handle(
           new_state,
-          {:minga_highlight, {:textobject_positions, 1, 1, positions}}
+          {:minga_highlight, {:textobject_positions, buf, positions}}
         )
 
       assert active_window(new_state).textobject_positions == positions
 
-      {other_state, _other_buf} = state_with_other_buffer(base_state(), 2)
+      {other_state, other_buf} = state_with_other_buffer(base_state())
 
       assert {^other_state, []} =
                HighlightHandler.handle(
                  other_state,
-                 {:minga_highlight, {:fold_ranges, 2, 1, [{0, 5}]}}
+                 {:minga_highlight, {:fold_ranges, other_buf, [{0, 5}]}}
                )
 
       assert {^other_state, []} =
                HighlightHandler.handle(
                  other_state,
-                 {:minga_highlight, {:textobject_positions, 2, 1, %{}}}
+                 {:minga_highlight, {:textobject_positions, other_buf, %{}}}
                )
     end
 
     test "document symbols update active and visible matching windows" do
       state = base_state()
       buf = active_buffer(state)
-      state = with_buffer_id(state, buf, 1)
       symbols = [%Minga.Language.Symbol{kind: :function, name: "run", range: {0, 0, 3, 3}}]
 
       {new_state, []} =
-        HighlightHandler.handle(state, {:minga_highlight, {:document_symbols, 1, 1, symbols}})
+        HighlightHandler.handle(state, {:minga_highlight, {:document_symbols, buf, symbols}})
 
       assert active_window(new_state).document_symbols == symbols
 
@@ -283,7 +285,7 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
       {updated, []} =
         HighlightHandler.handle(
           visible_state,
-          {:minga_highlight, {:document_symbols, 1, 1, fresh_symbols}}
+          {:minga_highlight, {:document_symbols, buf, fresh_symbols}}
         )
 
       assert Map.fetch!(updated.workspace.windows.map, 1).document_symbols == fresh_symbols
@@ -296,17 +298,9 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
   defp active_window(state),
     do: Map.fetch!(state.workspace.windows.map, state.workspace.windows.active)
 
-  defp state_with_other_buffer(state, buffer_id) do
-    state = with_buffer_id(state, active_buffer(state), 1)
+  defp state_with_other_buffer(state) do
     {:ok, other_buf} = Minga.Buffer.Process.start_link(content: "other")
-    {with_buffer_id(state, other_buf, buffer_id), other_buf}
-  end
-
-  defp warning_effect?(effects) do
-    Enum.any?(effects, fn
-      {:log, :editor, :warning, _message} -> true
-      _ -> false
-    end)
+    {state, other_buf}
   end
 
   defp mark_parser_restarting(state) do
@@ -320,11 +314,9 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
   end
 
   defp state_with_visible_inactive_buffer_symbols(state) do
-    first_buf = active_buffer(state)
     {:ok, other_buf} = Minga.Buffer.Process.start_link(content: "other")
     stale_symbols = [%Minga.Language.Symbol{kind: :function, name: "old", range: {0, 0, 0, 3}}]
 
-    state = with_buffer_id(state, first_buf, 1)
     win_id = state.workspace.windows.active
 
     state =

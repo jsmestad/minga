@@ -41,13 +41,12 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
     second_buffer = second_tab.context.buffers.active
     assert Minga.Buffer.file_path(second_buffer) == second_path
 
-    second_id = HighlightSync.buffer_id_for(restored, second_buffer)
-    assert second_id > 0
+    assert Manager.buffer_id(second_buffer, restored.parser_manager) > 0
 
     {with_names, []} =
       HighlightHandler.handle(
         restored,
-        {:minga_highlight, {:highlight_names, second_id, ["keyword"]}}
+        {:minga_highlight, {:highlight_names, second_buffer, ["keyword"]}}
       )
 
     spans = [%{start_byte: 0, end_byte: 9, capture_id: 0}]
@@ -55,7 +54,7 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
     {with_spans, _effects} =
       HighlightHandler.handle(
         with_names,
-        {:minga_highlight, {:highlight_spans, second_id, 1, spans}}
+        {:minga_highlight, {:highlight_spans, second_buffer, spans}}
       )
 
     switched = EditorState.switch_tab(with_spans, second_tab.id)

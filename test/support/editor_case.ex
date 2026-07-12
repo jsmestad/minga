@@ -334,9 +334,10 @@ defmodule Minga.Test.EditorCase do
 
       buffer_pid ->
         Minga.Parser.Manager.buffer_id(buffer_pid) ||
-          Minga.Parser.Manager.register_buffer(buffer_pid, "elixir", fn ->
-            Minga.Buffer.content(buffer_pid)
-          end)
+          Minga.Parser.Manager.register_buffer(
+            buffer_pid,
+            %Minga.Parser.BufferConfig{language: "elixir"}
+          )
     end
   end
 

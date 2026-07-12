@@ -7,6 +7,7 @@ defmodule MingaEditor.Commands.StructuralNavigationTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Parser.Manager, as: ParserManager
   alias MingaEditor
+  alias MingaEditor.HighlightSync
   alias MingaEditor.State, as: EditorState
 
   @moduletag timeout: 15_000
@@ -15,6 +16,7 @@ defmodule MingaEditor.Commands.StructuralNavigationTest do
 
   setup do
     start_supervised!({ParserManager, name: ParserManager, parser_path: parser_path()})
+    :ok = ParserManager.subscribe()
     :ok
   end
 
@@ -91,6 +93,9 @@ defmodule MingaEditor.Commands.StructuralNavigationTest do
         suppress_tool_prompts: true
       )
 
+    editor_state = :sys.get_state(editor, @sync_timeout)
+    _state_with_presentation = HighlightSync.setup_for_buffer(editor_state)
+    assert_receive {:minga_highlight, {:highlight_spans, ^buffer, _spans}}, @sync_timeout
     {editor, buffer}
   end
 

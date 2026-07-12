@@ -93,7 +93,7 @@ defmodule Minga.LSP.SyncServerTest do
   end
 
   defp changed_event(buf, delta, source \\ EditSource.user()) do
-    %Events.BufferChangedEvent{buffer: buf, source: source, delta: delta}
+    %Events.BufferChangedEvent{sequence: 1, buffer: buf, source: source, delta: delta}
   end
 
   defp start_client(sync_kind \\ :full) do

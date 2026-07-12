@@ -43,6 +43,7 @@ defmodule Minga.FileWatcher do
          }
 
   @default_debounce_ms 100
+  @call_timeout_ms 15_000
 
   # ── Client API ──────────────────────────────────────────────────────────────
 
@@ -56,37 +57,37 @@ defmodule Minga.FileWatcher do
   @doc "Registers a file path to watch for external changes."
   @spec watch_path(GenServer.server(), String.t()) :: :ok
   def watch_path(server \\ __MODULE__, path) when is_binary(path) do
-    GenServer.call(server, {:watch_path, Path.expand(path)})
+    GenServer.call(server, {:watch_path, Path.expand(path)}, @call_timeout_ms)
   end
 
   @doc "Registers a directory so child create, delete, rename, and modify events refresh project surfaces."
   @spec watch_directory(GenServer.server(), String.t()) :: :ok
   def watch_directory(server \\ __MODULE__, path) when is_binary(path) do
-    GenServer.call(server, {:watch_directory, Path.expand(path)})
+    GenServer.call(server, {:watch_directory, Path.expand(path)}, @call_timeout_ms)
   end
 
   @doc "Unregisters a file path. Stops watching the directory when no files remain in it."
   @spec unwatch_path(GenServer.server(), String.t()) :: :ok
   def unwatch_path(server \\ __MODULE__, path) when is_binary(path) do
-    GenServer.call(server, {:unwatch_path, Path.expand(path)})
+    GenServer.call(server, {:unwatch_path, Path.expand(path)}, @call_timeout_ms)
   end
 
   @doc "Unregisters a watched directory."
   @spec unwatch_directory(GenServer.server(), String.t()) :: :ok
   def unwatch_directory(server \\ __MODULE__, path) when is_binary(path) do
-    GenServer.call(server, {:unwatch_directory, Path.expand(path)})
+    GenServer.call(server, {:unwatch_directory, Path.expand(path)}, @call_timeout_ms)
   end
 
   @doc "Unregisters all watched project directories under a root."
   @spec unwatch_directory_tree(GenServer.server(), String.t()) :: :ok
   def unwatch_directory_tree(server \\ __MODULE__, root) when is_binary(root) do
-    GenServer.call(server, {:unwatch_directory_tree, Path.expand(root)})
+    GenServer.call(server, {:unwatch_directory_tree, Path.expand(root)}, @call_timeout_ms)
   end
 
   @doc "Sets the subscriber process that receives `{:file_changed_on_disk, path}` messages."
   @spec subscribe(GenServer.server(), pid()) :: :ok
   def subscribe(server \\ __MODULE__, pid) when is_pid(pid) do
-    GenServer.call(server, {:subscribe, pid})
+    GenServer.call(server, {:subscribe, pid}, @call_timeout_ms)
   end
 
   @doc "Checks all watched files for mtime changes and notifies the subscriber."

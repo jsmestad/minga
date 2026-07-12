@@ -382,43 +382,17 @@ defmodule MingaEditor.Commands.Helpers do
   def setup_for_motion(state, :nav_prev_sibling), do: setup_for_tree_sitter_motion(state)
   def setup_for_motion(state, _motion), do: state
 
-  @doc "Returns the parser buffer id only for motions that need tree-sitter."
-  @spec buffer_id_for_motion(state(), pid(), atom()) :: non_neg_integer()
-  def buffer_id_for_motion(state, buf, :match_bracket),
-    do: HighlightSync.buffer_id_for(state, buf)
-
-  def buffer_id_for_motion(state, buf, :nav_parent), do: HighlightSync.buffer_id_for(state, buf)
-
-  def buffer_id_for_motion(state, buf, :nav_first_child),
-    do: HighlightSync.buffer_id_for(state, buf)
-
-  def buffer_id_for_motion(state, buf, :nav_next_sibling),
-    do: HighlightSync.buffer_id_for(state, buf)
-
-  def buffer_id_for_motion(state, buf, :nav_prev_sibling),
-    do: HighlightSync.buffer_id_for(state, buf)
-
-  def buffer_id_for_motion(_state, _buf, _motion), do: 0
-
   @spec setup_for_tree_sitter_motion(state()) :: state()
   defp setup_for_tree_sitter_motion(%{workspace: %{buffers: %{active: buf}}} = state)
        when is_pid(buf) do
-    if HighlightSync.buffer_id_for(state, buf) == 0 do
-      HighlightSync.setup_for_buffer(state)
-    else
-      state
-    end
+    HighlightSync.setup_for_buffer(state)
   end
 
   defp setup_for_tree_sitter_motion(state), do: state
 
   @doc "Resolves a motion atom to a new position in the buffer."
-  @spec resolve_motion(
-          Buffer.document(),
-          CoreEditing.Motion.position(),
-          atom(),
-          non_neg_integer()
-        ) :: CoreEditing.Motion.position()
+  @spec resolve_motion(Buffer.document(), CoreEditing.Motion.position(), atom(), pid()) ::
+          CoreEditing.Motion.position()
   def resolve_motion(buf, cursor, :word_forward, _buffer_id),
     do: CoreEditing.word_forward(buf, cursor)
 
@@ -460,8 +434,8 @@ defmodule MingaEditor.Commands.Helpers do
   def resolve_motion(buf, cursor, :paragraph_backward, _buffer_id),
     do: CoreEditing.paragraph_backward(buf, cursor)
 
-  def resolve_motion(_buf, cursor, :match_bracket, buffer_id) do
-    case request_match_item(buffer_id, cursor) do
+  def resolve_motion(_buf, cursor, :match_bracket, buffer_pid) do
+    case request_match_item(buffer_pid, cursor) do
       nil -> cursor
       match -> match
     end
@@ -470,17 +444,13 @@ defmodule MingaEditor.Commands.Helpers do
   def resolve_motion(_buf, cursor, _unknown, _buffer_id), do: cursor
 
   @doc "Resolves a motion target, preserving no-match results for tree-sitter motions."
-  @spec resolve_motion_target(
-          Buffer.document(),
-          CoreEditing.Motion.position(),
-          atom(),
-          non_neg_integer()
-        ) :: CoreEditing.Motion.position() | nil
-  def resolve_motion_target(_buf, cursor, :match_bracket, buffer_id),
-    do: request_match_item(buffer_id, cursor)
+  @spec resolve_motion_target(Buffer.document(), CoreEditing.Motion.position(), atom(), pid()) ::
+          CoreEditing.Motion.position() | nil
+  def resolve_motion_target(_buf, cursor, :match_bracket, buffer_pid),
+    do: request_match_item(buffer_pid, cursor)
 
-  def resolve_motion_target(buf, cursor, motion, buffer_id),
-    do: resolve_motion(buf, cursor, motion, buffer_id)
+  def resolve_motion_target(buf, cursor, motion, buffer_pid),
+    do: resolve_motion(buf, cursor, motion, buffer_pid)
 
   @doc "Applies a find-char motion in the given direction."
   @spec apply_find_char(pid(), ModeState.find_direction(), String.t()) :: :ok
@@ -511,9 +481,8 @@ defmodule MingaEditor.Commands.Helpers do
     state = setup_for_motion(state, motion)
     gb = Buffer.snapshot(buf)
     cursor = Document.cursor(gb)
-    buffer_id = buffer_id_for_motion(state, buf, motion)
 
-    case resolve_motion_target(gb, cursor, motion, buffer_id) do
+    case resolve_motion_target(gb, cursor, motion, buf) do
       nil ->
         state
 
@@ -577,8 +546,7 @@ defmodule MingaEditor.Commands.Helpers do
   def apply_text_object(%{workspace: %{buffers: %{active: buf}}} = state, modifier, spec, action) do
     gb = Buffer.snapshot(buf)
     cursor = Document.cursor(gb)
-    buffer_id = HighlightSync.buffer_id_for(state, buf)
-    range = compute_text_object_range(gb, cursor, modifier, spec, buffer_id)
+    range = compute_text_object_range(gb, cursor, modifier, spec, buf)
 
     case {linewise_spec?(spec), action, range} do
       {_, _, nil} ->
@@ -650,52 +618,52 @@ defmodule MingaEditor.Commands.Helpers do
           CoreEditing.TextObject.position(),
           atom(),
           term(),
-          non_neg_integer()
+          pid()
         ) ::
           CoreEditing.TextObject.range()
-  def compute_text_object_range(buf, pos, :inner, :word, _bid),
+  def compute_text_object_range(buf, pos, :inner, :word, _buffer_pid),
     do: CoreEditing.select_inner_word(buf, pos)
 
-  def compute_text_object_range(buf, pos, :around, :word, _bid),
+  def compute_text_object_range(buf, pos, :around, :word, _buffer_pid),
     do: CoreEditing.select_around_word(buf, pos)
 
-  def compute_text_object_range(buf, pos, :inner, {:quote, q}, _bid),
+  def compute_text_object_range(buf, pos, :inner, {:quote, q}, _buffer_pid),
     do: CoreEditing.select_inner_quotes(buf, pos, q)
 
-  def compute_text_object_range(buf, pos, :around, {:quote, q}, _bid),
+  def compute_text_object_range(buf, pos, :around, {:quote, q}, _buffer_pid),
     do: CoreEditing.select_around_quotes(buf, pos, q)
 
-  def compute_text_object_range(buf, pos, :inner, {:paren, open, close}, _bid),
+  def compute_text_object_range(buf, pos, :inner, {:paren, open, close}, _buffer_pid),
     do: CoreEditing.select_inner_parens(buf, pos, open, close)
 
-  def compute_text_object_range(buf, pos, :around, {:paren, open, close}, _bid),
+  def compute_text_object_range(buf, pos, :around, {:paren, open, close}, _buffer_pid),
     do: CoreEditing.select_around_parens(buf, pos, open, close)
 
-  def compute_text_object_range(buf, pos, :inner, :paragraph, _bid),
+  def compute_text_object_range(buf, pos, :inner, :paragraph, _buffer_pid),
     do: CoreEditing.select_inner_paragraph(buf, pos)
 
-  def compute_text_object_range(buf, pos, :around, :paragraph, _bid),
+  def compute_text_object_range(buf, pos, :around, :paragraph, _buffer_pid),
     do: CoreEditing.select_around_paragraph(buf, pos)
 
-  def compute_text_object_range(buf, pos, :inner, :sentence, _bid),
+  def compute_text_object_range(buf, pos, :inner, :sentence, _buffer_pid),
     do: CoreEditing.select_inner_sentence(buf, pos)
 
-  def compute_text_object_range(buf, pos, :around, :sentence, _bid),
+  def compute_text_object_range(buf, pos, :around, :sentence, _buffer_pid),
     do: CoreEditing.select_around_sentence(buf, pos)
 
-  def compute_text_object_range(_buf, {line, col}, :inner, {:structural, type}, bid) do
+  def compute_text_object_range(_buf, {line, col}, :inner, {:structural, type}, buffer_pid) do
     capture = Atom.to_string(type) <> ".inside"
-    tree_data = request_textobject(bid, line, col, capture)
+    tree_data = request_textobject(buffer_pid, line, col, capture)
     CoreEditing.select_structural_inner(tree_data)
   end
 
-  def compute_text_object_range(_buf, {line, col}, :around, {:structural, type}, bid) do
+  def compute_text_object_range(_buf, {line, col}, :around, {:structural, type}, buffer_pid) do
     capture = Atom.to_string(type) <> ".around"
-    tree_data = request_textobject(bid, line, col, capture)
+    tree_data = request_textobject(buffer_pid, line, col, capture)
     CoreEditing.select_structural_around(tree_data)
   end
 
-  def compute_text_object_range(_buf, _pos, _modifier, _spec, _bid), do: nil
+  def compute_text_object_range(_buf, _pos, _modifier, _spec, _buffer_pid), do: nil
 
   @doc "Scrolls the buffer cursor by `delta` lines, clamping to bounds."
   @spec page_move(pid(), Viewport.t(), integer()) :: :ok
@@ -741,17 +709,17 @@ defmodule MingaEditor.Commands.Helpers do
 
   # Queries the tree-sitter parser for a textobject range, returning the raw
   # 4-tuple or nil. Gracefully returns nil when the parser is not running.
-  @spec request_textobject(non_neg_integer(), non_neg_integer(), non_neg_integer(), String.t()) ::
+  @spec request_textobject(pid(), non_neg_integer(), non_neg_integer(), String.t()) ::
           CoreEditing.TextObject.tree_range()
-  defp request_textobject(buffer_id, row, col, capture_name) do
-    ParserManager.request_textobject(buffer_id, row, col, capture_name)
+  defp request_textobject(buffer_pid, row, col, capture_name) do
+    ParserManager.request_textobject(buffer_pid, row, col, capture_name)
   catch
     :exit, _ -> nil
   end
 
-  @spec request_match_item(non_neg_integer(), CoreEditing.Motion.position()) ::
+  @spec request_match_item(pid(), CoreEditing.Motion.position()) ::
           CoreEditing.Motion.position() | nil
-  defp request_match_item(buffer_id, {line, col}) do
-    ParserManager.request_match_item(buffer_id, line, col)
+  defp request_match_item(buffer_pid, {line, col}) do
+    ParserManager.request_match_item(buffer_pid, line, col)
   end
 end

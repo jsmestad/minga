@@ -3,6 +3,7 @@ defmodule MingaEditor.HighlightSyncEvictionTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.Parser.BufferConfig
   alias Minga.Parser.Manager
   alias MingaEditor.HighlightSync
   alias MingaEditor.State, as: EditorState
@@ -66,13 +67,12 @@ defmodule MingaEditor.HighlightSyncEvictionTest do
   end
 
   describe "manager-backed identity" do
-    test "ensure_buffer_id reads registration without allocating duplicate editor maps" do
-      active = tracked_pid()
-      state = base_state() |> put_active(active)
+    test "parser identity remains outside editor presentation state" do
+      buffer = tracked_pid()
+      state = base_state() |> put_active(buffer)
+      id = register(buffer)
 
-      assert HighlightSync.ensure_buffer_id(state) == {0, state}
-      id = register(active)
-      assert HighlightSync.ensure_buffer_id(state) == {id, state}
+      assert Manager.buffer_id(buffer, manager()) == id
 
       assert state.highlighting |> Map.from_struct() |> Map.keys() |> Enum.sort() ==
                [:highlights, :syntax_overrides]
@@ -135,7 +135,7 @@ defmodule MingaEditor.HighlightSyncEvictionTest do
   defp manager, do: Process.get(:parser_manager)
 
   defp register(pid) do
-    Manager.register_buffer(pid, "elixir", fn -> "" end, server: manager())
+    Manager.register_buffer(pid, %BufferConfig{language: "elixir"}, server: manager())
   end
 
   defp tracked_pid do

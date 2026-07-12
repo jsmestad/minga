@@ -437,6 +437,10 @@ defmodule Minga.Buffer do
   @spec changes_since(t(), ChangeLog.sequence()) :: ChangeLog.sequence_changes()
   defdelegate changes_since(server, sequence), to: BufferProcess
 
+  @doc "Requests an atomic asynchronous parser synchronization snapshot."
+  @spec request_sync_snapshot(t(), :full | ChangeLog.sequence(), pid(), reference()) :: :ok
+  defdelegate request_sync_snapshot(server, cursor, reply_to, token), to: BufferProcess
+
   # ── Edit deltas (for LSP incremental sync) ─────────────────────────
 
   @doc "Consume edit deltas accumulated since the given consumer's last read, or return `:reset_required` when the consumer must full-sync."

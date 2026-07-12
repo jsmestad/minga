@@ -1,15 +1,12 @@
 defmodule Minga.Parser.BufferRegistry do
   @moduledoc """
-  Pure ownership for editor-buffer identity and lifecycle inside the parser process.
-
-  The parser manager process owns one registry value. This module keeps parser IDs, crash-resync metadata, parse sequencing, activity timestamps, and eviction decisions coherent without spreading raw map updates through GenServer callbacks.
+  Pure identity and lifecycle registry owned by `Minga.Parser.Manager`.
   """
 
+  alias Minga.Parser.BufferConfig
   alias Minga.Parser.BufferRegistration
 
-  @typedoc "Tracked buffer metadata used to rebuild parser state after a restart."
   @type meta :: BufferRegistration.t()
-
   @type t :: %__MODULE__{
           entries: %{pid() => meta()},
           ids: %{pid() => pos_integer()},
@@ -32,50 +29,46 @@ defmodule Minga.Parser.BufferRegistry do
   @spec new() :: t()
   def new, do: %__MODULE__{}
 
-  @doc "Registers or refreshes a buffer and returns its stable ID and whether it was newly tracked."
-  @spec register(
-          t(),
-          pid(),
-          String.t(),
-          (-> String.t()),
-          (non_neg_integer() -> [binary()]) | nil,
-          integer()
-        ) ::
-          {pos_integer(), :new | :existing, t()}
-  def register(%__MODULE__{} = registry, buffer_pid, language, content_fn, setup_fn, now)
-      when is_pid(buffer_pid) and is_binary(language) and is_function(content_fn, 0) do
-    {buffer_id, status, next_id} = registration_identity(registry, buffer_pid)
+  @doc "Registers a buffer, preserving identity only while its inert configuration is unchanged."
+  @spec register(t(), pid(), BufferConfig.t(), integer()) ::
+          {pos_integer(), :new | :existing | {:replaced, pos_integer()}, t()}
+  def register(%__MODULE__{} = registry, buffer_pid, %BufferConfig{} = config, now) do
+    case Map.fetch(registry.entries, buffer_pid) do
+      {:ok, %BufferRegistration{config: ^config} = existing} ->
+        updated = %{registry | last_active_at: Map.put(registry.last_active_at, buffer_pid, now)}
+        {existing.id, :existing, updated}
 
-    meta = %BufferRegistration{
-      id: buffer_id,
-      language: language,
-      content_fn: content_fn,
-      setup_commands_fn: setup_fn
-    }
+      {:ok, %BufferRegistration{id: old_id}} ->
+        replace_registration(registry, buffer_pid, config, old_id, now)
 
-    registry = %{
-      registry
-      | entries: Map.put(registry.entries, buffer_pid, meta),
-        ids: Map.put(registry.ids, buffer_pid, buffer_id),
-        pids: Map.put(registry.pids, buffer_id, buffer_pid),
-        next_id: next_id,
-        last_active_at: Map.put(registry.last_active_at, buffer_pid, now)
-    }
-
-    {buffer_id, status, registry}
+      :error ->
+        insert_registration(registry, buffer_pid, config, now)
+    end
   end
 
-  @doc "Records the process monitor owned by the parser manager for a registered buffer."
+  @doc "Records the process monitor owned by the parser manager."
   @spec put_monitor(t(), pid(), reference()) :: t()
-  def put_monitor(%__MODULE__{} = registry, buffer_pid, monitor_ref)
-      when is_pid(buffer_pid) and is_reference(monitor_ref) do
+  def put_monitor(%__MODULE__{} = registry, buffer_pid, monitor_ref) do
     %{registry | monitors: Map.put(registry.monitors, buffer_pid, monitor_ref)}
   end
 
-  @doc "Returns whether a DOWN message belongs to the current monitor for a buffer."
+  @doc "Returns whether a DOWN message belongs to the current monitor."
   @spec monitored?(t(), pid(), reference()) :: boolean()
-  def monitored?(%__MODULE__{monitors: monitors}, buffer_pid, monitor_ref) do
-    Map.get(monitors, buffer_pid) == monitor_ref
+  def monitored?(%__MODULE__{monitors: monitors}, buffer_pid, ref),
+    do: Map.get(monitors, buffer_pid) == ref
+
+  @doc "Returns a registration by PID."
+  @spec fetch(t(), pid()) :: {:ok, meta()} | :error
+  def fetch(%__MODULE__{entries: entries}, buffer_pid), do: Map.fetch(entries, buffer_pid)
+
+  @doc "Replaces an existing registration; unknown PIDs are ignored."
+  @spec put(t(), pid(), meta()) :: t()
+  def put(%__MODULE__{} = registry, buffer_pid, %BufferRegistration{} = registration) do
+    if Map.has_key?(registry.entries, buffer_pid) do
+      %{registry | entries: Map.put(registry.entries, buffer_pid, registration)}
+    else
+      registry
+    end
   end
 
   @doc "Returns the parser ID for a buffer PID."
@@ -90,24 +83,11 @@ defmodule Minga.Parser.BufferRegistry do
   @spec registered_id?(t(), non_neg_integer()) :: boolean()
   def registered_id?(%__MODULE__{pids: pids}, buffer_id), do: Map.has_key?(pids, buffer_id)
 
-  @doc "Allocates the next parse version and refreshes activity for a registered buffer."
-  @spec begin_parse(t(), pid(), integer()) :: {:ok, pos_integer(), pos_integer(), t()} | :error
-  def begin_parse(%__MODULE__{} = registry, buffer_pid, now) do
-    case Map.fetch(registry.ids, buffer_pid) do
-      {:ok, buffer_id} ->
-        version = registry.parse_version + 1
-
-        registry = %{
-          registry
-          | parse_version: version,
-            last_active_at: Map.put(registry.last_active_at, buffer_pid, now)
-        }
-
-        {:ok, buffer_id, version, registry}
-
-      :error ->
-        :error
-    end
+  @doc "Allocates the next manager-owned parser version."
+  @spec next_parse_version(t()) :: {pos_integer(), t()}
+  def next_parse_version(%__MODULE__{} = registry) do
+    version = registry.parse_version + 1
+    {version, %{registry | parse_version: version}}
   end
 
   @doc "Refreshes activity for a registered buffer."
@@ -120,13 +100,13 @@ defmodule Minga.Parser.BufferRegistry do
     end
   end
 
-  @doc "Unregisters a buffer and returns its former parser ID and monitor reference."
+  @doc "Unregisters a buffer and returns its former parser ID and monitor."
   @spec unregister(t(), pid()) :: {pos_integer() | nil, reference() | nil, t()}
   def unregister(%__MODULE__{} = registry, buffer_pid) do
     {buffer_id, ids} = Map.pop(registry.ids, buffer_pid)
     {monitor_ref, monitors} = Map.pop(registry.monitors, buffer_pid)
 
-    registry = %{
+    updated = %{
       registry
       | entries: Map.delete(registry.entries, buffer_pid),
         ids: ids,
@@ -135,10 +115,10 @@ defmodule Minga.Parser.BufferRegistry do
         monitors: monitors
     }
 
-    {buffer_id, monitor_ref, registry}
+    {buffer_id, monitor_ref, updated}
   end
 
-  @doc "Evicts stale unprotected buffers and returns their PIDs and parser IDs."
+  @doc "Evicts stale unprotected buffers and returns their identities."
   @spec evict_inactive(t(), [pid()], non_neg_integer(), integer()) ::
           {[{pid(), pos_integer(), reference() | nil}], t()}
   def evict_inactive(%__MODULE__{} = registry, protected_pids, ttl_ms, now) do
@@ -146,29 +126,36 @@ defmodule Minga.Parser.BufferRegistry do
 
     stale_pids =
       registry.last_active_at
-      |> Enum.filter(fn {buffer_pid, last_active_at} ->
-        now - last_active_at > ttl_ms and not MapSet.member?(protected, buffer_pid)
+      |> Enum.filter(fn {pid, active_at} ->
+        now - active_at > ttl_ms and not MapSet.member?(protected, pid)
       end)
       |> Enum.map(&elem(&1, 0))
 
-    Enum.reduce(stale_pids, {[], registry}, fn buffer_pid, {evicted, acc} ->
-      {buffer_id, monitor_ref, acc} = unregister(acc, buffer_pid)
-      {[{buffer_pid, buffer_id, monitor_ref} | evicted], acc}
+    Enum.reduce(stale_pids, {[], registry}, fn pid, {evicted, acc} ->
+      {id, ref, acc} = unregister(acc, pid)
+      {[{pid, id, ref} | evicted], acc}
     end)
     |> then(fn {evicted, updated} -> {Enum.reverse(evicted), updated} end)
   end
 
-  @doc "Returns all crash-resync entries."
+  @doc "Returns all registrations."
   @spec entries(t()) :: %{pid() => meta()}
   def entries(%__MODULE__{entries: entries}), do: entries
 
-  @doc "Returns the number of tracked editor buffers."
+  @doc "Returns the number of registrations."
   @spec count(t()) :: non_neg_integer()
   def count(%__MODULE__{entries: entries}), do: map_size(entries)
 
-  @doc "Resets outgoing parse sequencing after parser restart."
-  @spec reset_parse_version(t()) :: t()
-  def reset_parse_version(%__MODULE__{} = registry), do: %{registry | parse_version: 0}
+  @doc "Resets parser versions and marks every registration for full resync."
+  @spec restart_all(t()) :: t()
+  def restart_all(%__MODULE__{} = registry) do
+    entries =
+      Map.new(registry.entries, fn {pid, registration} ->
+        {pid, BufferRegistration.restart(registration)}
+      end)
+
+    %{registry | entries: entries, parse_version: 0}
+  end
 
   @spec delete_reverse_id(%{pos_integer() => pid()}, pos_integer() | nil) :: %{
           pos_integer() => pid()
@@ -176,11 +163,39 @@ defmodule Minga.Parser.BufferRegistry do
   defp delete_reverse_id(pids, nil), do: pids
   defp delete_reverse_id(pids, buffer_id), do: Map.delete(pids, buffer_id)
 
-  @spec registration_identity(t(), pid()) :: {pos_integer(), :new | :existing, pos_integer()}
-  defp registration_identity(%__MODULE__{} = registry, buffer_pid) do
-    case Map.fetch(registry.ids, buffer_pid) do
-      {:ok, existing_id} -> {existing_id, :existing, registry.next_id}
-      :error -> {registry.next_id, :new, registry.next_id + 1}
-    end
+  @spec insert_registration(t(), pid(), BufferConfig.t(), integer()) ::
+          {pos_integer(), :new, t()}
+  defp insert_registration(registry, buffer_pid, config, now) do
+    buffer_id = registry.next_id
+    registration = BufferRegistration.new(buffer_id, config)
+
+    updated = %{
+      registry
+      | entries: Map.put(registry.entries, buffer_pid, registration),
+        ids: Map.put(registry.ids, buffer_pid, buffer_id),
+        pids: Map.put(registry.pids, buffer_id, buffer_pid),
+        next_id: buffer_id + 1,
+        last_active_at: Map.put(registry.last_active_at, buffer_pid, now)
+    }
+
+    {buffer_id, :new, updated}
+  end
+
+  @spec replace_registration(t(), pid(), BufferConfig.t(), pos_integer(), integer()) ::
+          {pos_integer(), {:replaced, pos_integer()}, t()}
+  defp replace_registration(registry, buffer_pid, config, old_id, now) do
+    buffer_id = registry.next_id
+    registration = BufferRegistration.new(buffer_id, config)
+
+    updated = %{
+      registry
+      | entries: Map.put(registry.entries, buffer_pid, registration),
+        ids: Map.put(registry.ids, buffer_pid, buffer_id),
+        pids: registry.pids |> Map.delete(old_id) |> Map.put(buffer_id, buffer_pid),
+        next_id: buffer_id + 1,
+        last_active_at: Map.put(registry.last_active_at, buffer_pid, now)
+    }
+
+    {buffer_id, {:replaced, old_id}, updated}
   end
 end

@@ -1,6 +1,8 @@
 defmodule Minga.Parser.ManagerRegistryTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer.SyncSnapshot
+  alias Minga.Parser.BufferConfig
   alias Minga.Parser.Manager
 
   setup do
@@ -9,7 +11,7 @@ defmodule Minga.Parser.ManagerRegistryTest do
     %{server: server}
   end
 
-  test "registration owns stable parser identity and parse sequencing", %{server: server} do
+  test "registration owns stable parser identity", %{server: server} do
     first = tracked_pid()
     second = tracked_pid()
 
@@ -20,10 +22,23 @@ defmodule Minga.Parser.ManagerRegistryTest do
     second_id = register(server, second)
     assert second_id == first_id + 1
     assert Manager.resolve_buffer(second_id, server) == second
+  end
 
-    assert {:ok, ^first_id, first_version} = Manager.begin_parse(first, server)
-    assert {:ok, ^second_id, second_version} = Manager.begin_parse(second, server)
-    assert second_version == first_version + 1
+  test "changed inert configuration replaces the parser identity", %{server: server} do
+    buffer = tracked_pid()
+    first_id = register(server, buffer)
+
+    second_id =
+      Manager.register_buffer(
+        buffer,
+        %BufferConfig{language: "elixir", highlight_query: "(identifier) @variable"},
+        server: server
+      )
+
+    assert second_id > first_id
+    assert Manager.resolve_buffer(first_id, server) == nil
+    assert Manager.resolve_buffer(second_id, server) == buffer
+    assert monitored?(server, buffer)
   end
 
   test "unregister is idempotent and removes both identity directions", %{server: server} do
@@ -34,7 +49,8 @@ defmodule Minga.Parser.ManagerRegistryTest do
     assert :ok = Manager.unregister_buffer(buffer, server)
     assert Manager.buffer_id(buffer, server) == nil
     assert Manager.resolve_buffer(id, server) == nil
-    assert Manager.begin_parse(buffer, server) == :error
+    assert :ok = Manager.request_parse(buffer, server)
+    assert :sys.get_state(server)
   end
 
   test "buffer monitors are idempotent, reference-aware, and removed on unregister", %{
@@ -51,6 +67,25 @@ defmodule Minga.Parser.ManagerRegistryTest do
 
     assert :ok = Manager.unregister_buffer(buffer, server)
     refute monitored?(server, buffer)
+  end
+
+  test "unknown parse requests and late snapshots are harmless no-ops", %{server: server} do
+    unknown = tracked_pid()
+    Manager.request_parse(unknown, server)
+
+    send(
+      server,
+      {:buffer_sync_snapshot,
+       %SyncSnapshot{
+         buffer: unknown,
+         token: make_ref(),
+         sequence: 1,
+         changes: {:full, "ignored"}
+       }}
+    )
+
+    :sys.get_state(server)
+    assert Manager.buffer_id(unknown, server) == nil
   end
 
   test "eviction removes stale registrations and preserves protected buffers", %{server: server} do
@@ -72,7 +107,7 @@ defmodule Minga.Parser.ManagerRegistryTest do
   end
 
   defp register(server, buffer) do
-    Manager.register_buffer(buffer, "elixir", fn -> "" end, server: server)
+    Manager.register_buffer(buffer, %BufferConfig{language: "elixir"}, server: server)
   end
 
   defp monitored?(server, buffer) do

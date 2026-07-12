@@ -17,12 +17,14 @@ defmodule MingaEditor.Commands.MatchBracketCommandTest do
   alias MingaEditor.RenderPipeline.TestHelpers
 
   @moduletag timeout: 15_000
+  @sync_timeout 15_000
 
   setup do
     if Process.whereis(Minga.Parser.Manager) == nil do
       start_supervised!({ParserManager, []})
     end
 
+    :ok = ParserManager.subscribe()
     :ok
   end
 
@@ -54,7 +56,10 @@ defmodule MingaEditor.Commands.MatchBracketCommandTest do
 
   defp prepared_state(content, filetype) do
     state = TestHelpers.base_state(content: content, filetype: filetype)
-    {HighlightSync.setup_for_buffer(state), state.workspace.buffers.active}
+    buffer = state.workspace.buffers.active
+    state = HighlightSync.setup_for_buffer(state)
+    assert_receive {:minga_highlight, {:highlight_spans, ^buffer, _spans}}, @sync_timeout
+    {state, buffer}
   end
 
   defp authoritative_seq(state) do

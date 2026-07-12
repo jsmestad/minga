@@ -117,6 +117,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       intent = Intent.from_editor_state(state, 7)
 
       assert intent.revision == 7
+      assert intent.frame.highlighting == state.highlighting
       assert Enum.all?(intent.windows, fn {_id, window} -> match?(%WindowIntent{}, window) end)
 
       refute Enum.any?(intent.windows, fn {_id, window} ->
