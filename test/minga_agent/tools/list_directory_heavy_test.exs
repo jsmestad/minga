@@ -23,6 +23,16 @@ defmodule MingaAgent.Tools.ListDirectoryHeavyTest do
     assert String.split(listing, "\n") == ["subdir/", "file.txt"]
   end
 
+  test "returns an empty listing for statically ignored roots", %{tmp_dir: dir} do
+    for ignored <- ["node_modules", ".env.local"] do
+      ignored_dir = Path.join(dir, ignored)
+      File.mkdir_p!(ignored_dir)
+      File.write!(Path.join(ignored_dir, "leaked.txt"), "")
+
+      assert {:ok, ""} = ListDirectory.execute(ignored_dir)
+    end
+  end
+
   test "returns an empty listing for a gitignored directory", %{tmp_dir: dir} do
     {_output, 0} = System.cmd("git", ["init"], cd: dir, stderr_to_stdout: true)
     File.write!(Path.join(dir, ".gitignore"), "ignored_dir/\n")

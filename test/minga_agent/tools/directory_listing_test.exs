@@ -44,6 +44,10 @@ defmodule MingaAgent.Tools.DirectoryListingTest do
     assert DirectoryListing.format_entries(entries) == "lib/"
   end
 
+  test "formats an empty listing" do
+    assert DirectoryListing.format_entries([]) == ""
+  end
+
   test "caps large listings" do
     entries =
       Enum.map(
@@ -52,8 +56,9 @@ defmodule MingaAgent.Tools.DirectoryListingTest do
       )
 
     lines = entries |> DirectoryListing.format_entries() |> String.split("\n")
+    {visible, truncation} = Enum.split(lines, 500)
 
-    assert Enum.count(lines) == 501
-    assert List.last(lines) == "... (truncated, 5 more entries)"
+    assert Enum.count_until(visible, 501) == 500
+    assert truncation == ["... (truncated, 5 more entries)"]
   end
 end
