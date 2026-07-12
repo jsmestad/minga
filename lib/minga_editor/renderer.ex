@@ -6,9 +6,7 @@ defmodule MingaEditor.Renderer do
   `RenderPipeline`, which decomposes rendering into seven named stages:
   Invalidation, Layout, Scroll, Content, Chrome, Compose, Emit.
 
-  `render/1` returns the updated editor state with per-window render
-  caches populated. Callers must use the returned state so that
-  dirty-line tracking works across frames.
+  Every rendering path uses `Renderer.Server` as the persistent owner of window caches, resident content, and frontend acknowledgement state. The Editor submits typed, cache-free intents and applies only focused editor-owned receipts.
 
   Sub-modules handle focused rendering concerns:
 
@@ -19,8 +17,7 @@ defmodule MingaEditor.Renderer do
   * `Renderer.Regions`         — region definition commands
   """
 
-  alias MingaEditor.RenderPipeline
-  alias MingaEditor.RenderPipeline.Input
+  alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.Renderer.Server, as: RendererServer
   alias MingaEditor.State, as: EditorState
 
@@ -35,9 +32,7 @@ defmodule MingaEditor.Renderer do
   @doc """
   Renders the current editor state and returns updated state.
 
-  The returned state contains per-window render caches that enable
-  dirty-line tracking on subsequent frames. Callers must use the
-  returned state for the optimization to work.
+  Persistent render state remains in `Renderer.Server`. The returned editor state contains only editor-owned observations from the focused render receipt.
   """
   @spec render(state()) :: state()
   def render(%EditorState{rendering: :disabled} = state), do: state
@@ -48,13 +43,9 @@ defmodule MingaEditor.Renderer do
   end
 
   @doc """
-  Pushes a render snapshot to the Renderer.Server for async rendering.
-  Returns the editor state unchanged; the Renderer's `{:render_done, ...}`
-  writeback will update caches and layout later.
+  Pushes a typed, cache-free render intent to `Renderer.Server` for asynchronous rendering. The focused receipt later updates only editor-owned layout, focus, and interaction observations.
 
-  Falls back to synchronous render when no Renderer.Server is available
-  (headless backend, or Editor started outside the supervisor in tests),
-  or when the active shell cannot use the async RenderPipeline path.
+  Headless and other synchronous paths use a persistent unnamed `Renderer.Server`, so they preserve the same renderer-owned state boundary without copying caches into the Editor.
   """
   @spec render_or_async(state()) :: state()
   def render_or_async(%EditorState{rendering: :disabled} = state), do: state
@@ -64,9 +55,10 @@ defmodule MingaEditor.Renderer do
     state = EditorState.ensure_shell_available(state)
 
     if async_render?(state) do
-      snapshot = Input.from_editor_state(state)
+      {state, revision} = EditorState.submit_render_intent(state)
+      intent = Intent.from_editor_state(state, revision)
       seq = System.unique_integer([:positive, :monotonic])
-      RendererServer.cast_snapshot(pid, snapshot, seq)
+      RendererServer.cast_snapshot(pid, intent, seq)
       state
     else
       render(state)
@@ -84,15 +76,27 @@ defmodule MingaEditor.Renderer do
   """
   @spec reset_connection(state()) :: state()
   def reset_connection(%EditorState{rendering: :disabled} = state), do: state
-  def reset_connection(%{backend: :headless} = state), do: render(state)
+
+  def reset_connection(%{backend: :headless} = state) do
+    {state, renderer} = ensure_synchronous_renderer(state)
+    {state, revision} = EditorState.submit_render_intent(state)
+    intent = Intent.from_editor_state(state, revision)
+    seq = System.unique_integer([:positive, :monotonic])
+
+    case RendererServer.reset_sync(renderer, intent, seq) do
+      {:ok, receipt} -> EditorState.apply_synchronous_renderer_receipt(state, receipt)
+      {:error, error} -> log_synchronous_error(state, seq, error)
+    end
+  end
 
   def reset_connection(%{renderer: pid} = state) when is_pid(pid) do
     state = EditorState.ensure_shell_available(state)
 
     if async_render?(state) do
-      snapshot = Input.from_editor_state(state)
+      {state, revision} = EditorState.submit_render_intent(state)
+      intent = Intent.from_editor_state(state, revision)
       seq = System.unique_integer([:positive, :monotonic])
-      :ok = RendererServer.reset_connection(pid, snapshot, seq)
+      :ok = RendererServer.reset_connection(pid, intent, seq)
       state
     else
       render(state)
@@ -111,14 +115,35 @@ defmodule MingaEditor.Renderer do
   """
   @spec render_buffer(state()) :: state()
   def render_buffer(state) do
-    input = Input.from_editor_state(state)
-    output = RenderPipeline.run(input)
-    EditorState.apply_render_output(state, output)
-  rescue
-    e ->
-      msg = Exception.message(e)
-      trace = Exception.format_stacktrace(__STACKTRACE__) |> String.slice(0, 500)
-      Minga.Log.warning(:render, "Render pipeline crashed: #{msg}\n#{trace}")
-      state
+    {state, renderer} = ensure_synchronous_renderer(state)
+    seq = System.unique_integer([:positive, :monotonic])
+    intent = Intent.from_editor_state(state)
+
+    case RendererServer.render_sync(renderer, intent, seq) do
+      {:ok, receipt} -> EditorState.apply_synchronous_renderer_receipt(state, receipt)
+      {:error, error} -> log_synchronous_error(state, seq, error)
+    end
+  end
+
+  @spec ensure_synchronous_renderer(state()) :: {state(), pid()}
+  defp ensure_synchronous_renderer(%EditorState{renderer: renderer} = state)
+       when is_pid(renderer),
+       do: {state, renderer}
+
+  defp ensure_synchronous_renderer(%EditorState{} = state) do
+    {:ok, renderer} =
+      RendererServer.start_link(name: nil, editor_pid: nil, require_ack?: false)
+
+    {EditorState.set_renderer(state, renderer), renderer}
+  end
+
+  @spec log_synchronous_error(state(), non_neg_integer(), Exception.t()) :: state()
+  defp log_synchronous_error(state, seq, error) do
+    Minga.Log.warning(
+      :render,
+      "Synchronous renderer frame #{seq} dropped: #{Exception.message(error)}"
+    )
+
+    state
   end
 end

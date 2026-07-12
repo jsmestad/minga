@@ -292,11 +292,17 @@ defmodule Minga.Frontend.Adapter.GUI do
     previous_hashes = Map.new(previous_row_keys)
 
     {delta, _has_refs?} =
-      if viewport_delta?(window.rows, previous_hashes) do
-        WindowEncoder.encode_viewport_delta(window, previous_hashes)
-      else
-        row_delta = RowDelta.from_snapshots(previous_rows, window.rows)
-        WindowEncoder.encode_rows_delta(window, row_delta, previous_hashes)
+      case window.row_delta do
+        %RowDelta{} = row_delta ->
+          WindowEncoder.encode_rows_delta(window, row_delta, previous_hashes)
+
+        nil ->
+          if viewport_delta?(window.rows, previous_hashes) do
+            WindowEncoder.encode_viewport_delta(window, previous_hashes)
+          else
+            row_delta = RowDelta.from_snapshots(previous_rows, window.rows)
+            WindowEncoder.encode_rows_delta(window, row_delta, previous_hashes)
+          end
       end
 
     encoded = [delta | metadata]

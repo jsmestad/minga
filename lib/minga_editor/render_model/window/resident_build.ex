@@ -1,228 +1,257 @@
 defmodule MingaEditor.RenderModel.Window.ResidentBuild do
-  @moduledoc """
-  Per-window incremental build state for full-document residence (#2658).
+  @moduledoc "Renderer-owned delta-driven resident composition state."
 
-  Carried across frames in the window render cache. Given the current frame's
-  line texts and the composition-context fingerprints, it decides between three
-  outcomes and keeps the resident entry list, its retained-row map, and its
-  `Minga.RenderModel.Window.ContentDigest` in sync in O(changed rows):
-
-    * **full rebuild** — first residence frame, a frontend reset, a composition
-      context change (theme, decorations, search overlay, tab width…), a
-      tree-sitter re-highlight, or a row-count change (insert/delete). Runs the
-      caller's `build_all` closure (the ordinary #2287 build, which itself reuses
-      unchanged composed rows), then recomputes the digest from scratch.
-    * **splice** — some line texts changed with the context and row count stable
-      (in-place edits, substitution preview). Only the changed line indices are
-      recomposed via the caller's `build_dirty` closure; the rest of the entry
-      list and the digest are updated incrementally.
-    * **reuse** — nothing changed (scroll, cursor motion). The prior resident
-      entry list, retained-row map, and digest are returned unchanged.
-
-  The dirty set is derived by comparing this frame's line texts against the prior
-  frame's, so every source that alters a resident row's rendered content routes
-  to either a precise splice (buffer text edits) or a conservative full rebuild
-  (everything the context fingerprint or the highlight fingerprint captures:
-  search-driven and diagnostic-underline decoration spans, generic decorations,
-  re-highlight spans). Overlay- and gutter-only sources (selection, git signs,
-  diagnostic signs) are viewport-windowed fields of the window model, not baked
-  into `Row.content_hash`, so off-screen changes to them correctly produce no
-  resident re-emit. Nothing that changes a row's rendered content is allowed to
-  skip the digest, which is the completeness guarantee AC 2 depends on.
-  """
-
-  alias Minga.RenderModel.Window.ContentDigest
+  alias Minga.Buffer.EditDelta
   alias Minga.RenderModel.Window.Row
+  alias Minga.RenderModel.Window.RowDelta
+  alias Minga.RenderModel.Window.RowSplice
   alias MingaEditor.RenderModel.Window.ResidentStore
 
-  @typedoc "A composed visual-row entry (`MingaEditor.RenderModel.Window.Builder` shape)."
   @type payload :: %{required(:row) => Row.t(), optional(atom()) => term()}
-
-  @typedoc "Retained composed rows keyed by row id, for #2287 reuse and classifier state."
   @type retained_rows :: %{optional(Row.row_id()) => {non_neg_integer(), Row.t()}}
-
   @type t :: %__MODULE__{
           store: ResidentStore.t(),
           compose_fp: integer() | nil,
           highlight_fp: integer() | nil,
-          line_count: integer(),
-          line_texts: [String.t()]
+          line_count: non_neg_integer()
         }
+  defstruct store: %ResidentStore{}, compose_fp: nil, highlight_fp: nil, line_count: 0
 
-  defstruct store: %ResidentStore{},
-            compose_fp: nil,
-            highlight_fp: nil,
-            line_count: -1,
-            line_texts: []
-
-  @typedoc """
-  Per-frame residence build inputs.
-
-  * `line_texts` — the full document's line texts (index = buffer line).
-  * `compose_fp` — the shared composition-context fingerprint (decorations,
-    invisibles, tab width, todo faces…); any change forces a full rebuild.
-  * `highlight_fp` — a fingerprint of the tree-sitter highlight; a re-highlight
-    forces a full rebuild so re-colored rows never stay stale.
-  * `reset?` — a frontend/geometry reset for this frame.
-  * `build_all` — builds every resident entry (the ordinary #2287 build).
-  * `build_dirty` — builds entries for exactly the given dirty line indices.
-  """
   @type inputs :: %{
           required(:line_texts) => [String.t()],
+          required(:line_count) => non_neg_integer(),
           required(:compose_fp) => integer(),
           required(:highlight_fp) => integer() | nil,
           required(:reset?) => boolean(),
+          required(:hydration_reason) => atom() | nil,
+          required(:keyframe?) => boolean(),
           required(:retained_rows) => retained_rows(),
+          required(:edit_deltas) => [EditDelta.t()],
           required(:build_all) => (-> [payload()]),
           required(:build_dirty) => (MapSet.t(non_neg_integer()) ->
                                        %{non_neg_integer() => payload()})
         }
 
-  @typedoc """
-  Per-frame residence build result.
-
-  `payloads` is the full resident entry list; `digest` is the incremental
-  content digest; `retained_rows` carries the #2287 reuse map; `rasterized`
-  counts freshly composed rows; `spliced` counts rows touched by the incremental
-  splice (0 on full rebuild and reuse).
-  """
-  @type result :: %{
-          payloads: [payload()],
-          digest: ContentDigest.t(),
-          retained_rows: retained_rows(),
-          rasterized: non_neg_integer(),
-          spliced: non_neg_integer()
-        }
-
-  @doc """
-  Runs one residence build frame, returning the next persistent state and the
-  frame result.
-  """
-  @spec run(t() | nil, inputs()) :: {t(), result()}
+  @spec run(t() | nil, inputs()) :: {t(), map()}
   def run(prev, inputs) do
-    if full_rebuild?(prev, inputs) do
-      full_rebuild(inputs)
+    {state, result} =
+      case transition(prev, inputs) do
+        :hydrate ->
+          hydrate(inputs, hydration_reason(prev, inputs))
+
+        :reuse ->
+          reuse(prev)
+
+        {:splice, start, delete_count, insert_count} ->
+          splice(prev, inputs, start, delete_count, insert_count)
+
+        {:splices, lines} ->
+          splice_lines(prev, inputs, lines)
+      end
+
+    if inputs.keyframe?, do: materialize_keyframe(state, result), else: {state, result}
+  end
+
+  defp transition(nil, _), do: :hydrate
+
+  defp transition(prev, inputs) do
+    if inputs.reset? or prev.compose_fp != inputs.compose_fp or
+         prev.highlight_fp != inputs.highlight_fp do
+      :hydrate
     else
-      incremental(prev, inputs)
+      delta_transition(inputs.edit_deltas, prev.line_count, inputs.line_count)
     end
   end
 
-  @spec full_rebuild?(t() | nil, inputs()) :: boolean()
-  defp full_rebuild?(nil, _inputs), do: true
+  defp delta_transition([], count, count), do: :reuse
+  defp delta_transition([], _, _), do: :hydrate
 
-  defp full_rebuild?(%__MODULE__{} = prev, inputs) do
-    inputs.reset? or
-      prev.compose_fp != inputs.compose_fp or
-      prev.highlight_fp != inputs.highlight_fp or
-      prev.line_count != length(inputs.line_texts)
+  defp delta_transition(deltas, count, count) do
+    case in_place_edit_lines(deltas, []) do
+      {:ok, lines} -> {:splices, lines |> Enum.uniq() |> Enum.sort()}
+      :structural -> structural_delta_transition(deltas, count, count)
+    end
   end
 
-  @spec full_rebuild(inputs()) :: {t(), result()}
-  defp full_rebuild(inputs) do
+  defp delta_transition(deltas, old_count, new_count),
+    do: structural_delta_transition(deltas, old_count, new_count)
+
+  defp structural_delta_transition(deltas, old_count, new_count) do
+    start = deltas |> Enum.map(&elem(&1.start_position, 0)) |> Enum.min()
+    old_last = deltas |> Enum.map(&elem(&1.old_end_position, 0)) |> Enum.max()
+    delete_count = min(max(old_last - start + 1, 1), max(old_count - start, 0))
+    insert_count = new_count - (old_count - delete_count)
+
+    if insert_count >= 0 and start + delete_count <= old_count,
+      do: {:splice, start, delete_count, insert_count},
+      else: :hydrate
+  end
+
+  @spec in_place_edit_lines([EditDelta.t()], [non_neg_integer()]) ::
+          {:ok, [non_neg_integer()]} | :structural
+  defp in_place_edit_lines([], lines), do: {:ok, Enum.reverse(lines)}
+
+  defp in_place_edit_lines(
+         [
+           %EditDelta{
+             start_position: {line, _},
+             old_end_position: {line, _},
+             new_end_position: {line, _}
+           }
+           | rest
+         ],
+         lines
+       ),
+       do: in_place_edit_lines(rest, [line | lines])
+
+  defp in_place_edit_lines(_deltas, _lines), do: :structural
+
+  defp hydrate(inputs, reason) do
+    Minga.Telemetry.execute([:minga, :render, :full_hydration], %{count: 1}, %{reason: reason})
     payloads = inputs.build_all.()
     store = ResidentStore.from_entries(Enum.map(payloads, &to_store_entry/1))
-    retained = retained_of(payloads)
 
     state = %__MODULE__{
       store: store,
       compose_fp: inputs.compose_fp,
       highlight_fp: inputs.highlight_fp,
-      line_count: length(payloads),
-      line_texts: inputs.line_texts
+      line_count: inputs.line_count
     }
 
     {state,
      %{
        payloads: payloads,
+       inserted_payloads: payloads,
+       row_delta: nil,
        digest: ResidentStore.digest(store),
-       retained_rows: retained,
+       retained_rows: retained_of(payloads),
        rasterized: rasterized_of(payloads),
-       spliced: 0
+       spliced: 0,
+       work: ResidentStore.work(store)
      }}
   end
 
-  @spec incremental(t(), inputs()) :: {t(), result()}
-  defp incremental(%__MODULE__{} = prev, inputs) do
-    dirty = dirty_indices(prev.line_texts, inputs.line_texts)
-
-    if MapSet.size(dirty) == 0 do
-      reuse(prev, inputs)
-    else
-      splice(prev, inputs, dirty)
-    end
-  end
-
-  @spec reuse(t(), inputs()) :: {t(), result()}
-  defp reuse(%__MODULE__{} = prev, inputs) do
-    state = %{prev | line_texts: inputs.line_texts}
-
-    {state,
+  defp reuse(prev) do
+    {prev,
      %{
-       payloads: ResidentStore.payloads(prev.store),
+       payloads: [],
+       inserted_payloads: [],
+       row_delta: empty_delta(prev.line_count),
        digest: ResidentStore.digest(prev.store),
-       retained_rows: inputs.retained_rows,
+       retained_rows: %{},
        rasterized: 0,
-       spliced: 0
+       spliced: 0,
+       work: %{rows_visited: 0, rows_copied: 0, rows_emitted: 0, chunks_touched: 0}
      }}
   end
 
-  @spec splice(t(), inputs(), MapSet.t(non_neg_integer())) :: {t(), result()}
-  defp splice(%__MODULE__{} = prev, inputs, dirty) do
-    dirty_payloads = inputs.build_dirty.(dirty)
+  # A frontend keyframe cannot reference or patch its now-empty adapter cache.
+  # Materialize the already-complete renderer-owned store directly; this avoids
+  # recomposing or refetching the whole buffer while still emitting every row.
+  defp materialize_keyframe(state, %{row_delta: nil} = result), do: {state, result}
 
-    store =
-      ResidentStore.rebuild(prev.store, dirty, fn index ->
-        to_store_entry(Map.fetch!(dirty_payloads, index))
-      end)
-
-    retained =
-      Enum.reduce(dirty_payloads, inputs.retained_rows, fn {_index, payload}, acc ->
-        Map.put(acc, payload.row.row_id, {retain_hash(payload), payload.row})
-      end)
-
-    state = %{prev | store: store, line_texts: inputs.line_texts}
+  defp materialize_keyframe(state, result) do
+    payloads = ResidentStore.payloads(state.store)
 
     {state,
      %{
-       payloads: ResidentStore.payloads(store),
-       digest: ResidentStore.digest(store),
-       retained_rows: retained,
-       rasterized: map_size(dirty_payloads),
-       spliced: MapSet.size(dirty)
+       result
+       | payloads: payloads,
+         inserted_payloads: payloads,
+         row_delta: nil,
+         retained_rows: retained_of(payloads),
+         rasterized: result.rasterized,
+         work: %{result.work | rows_emitted: length(payloads)}
      }}
   end
 
-  # Indices where the line text changed between frames. The lists are the same
-  # length (a row-count change forces a full rebuild before we reach here).
-  @spec dirty_indices([String.t()], [String.t()]) :: MapSet.t(non_neg_integer())
-  defp dirty_indices(prev_texts, new_texts) do
-    prev_texts
-    |> Enum.zip(new_texts)
-    |> Enum.with_index()
-    |> Enum.reduce(MapSet.new(), fn {{prev_text, new_text}, index}, acc ->
-      if prev_text == new_text, do: acc, else: MapSet.put(acc, index)
-    end)
+  defp splice(prev, inputs, start, delete_count, insert_count) do
+    dirty =
+      if insert_count == 0, do: MapSet.new(), else: MapSet.new(start..(start + insert_count - 1))
+
+    dirty_payloads = if insert_count == 0, do: %{}, else: inputs.build_dirty.(dirty)
+
+    inserted_payloads =
+      if insert_count == 0,
+        do: [],
+        else: Enum.map(start..(start + insert_count - 1), &Map.fetch!(dirty_payloads, &1))
+
+    inserted = Enum.map(inserted_payloads, &to_store_entry/1)
+    store = ResidentStore.replace_range(prev.store, start, delete_count, inserted)
+    work = ResidentStore.work(store)
+    Minga.Telemetry.execute([:minga, :render, :resident_work], work, %{operation: :splice})
+    result_count = prev.line_count - delete_count + insert_count
+
+    {:ok, row_delta} =
+      RowDelta.new(prev.line_count, result_count, [
+        RowSplice.new(start, delete_count, Enum.map(inserted_payloads, & &1.row))
+      ])
+
+    state = %{prev | store: store, line_count: result_count}
+
+    {state,
+     %{
+       payloads: inserted_payloads,
+       inserted_payloads: inserted_payloads,
+       row_delta: row_delta,
+       digest: ResidentStore.digest(store),
+       retained_rows: retained_of(inserted_payloads),
+       rasterized: length(inserted_payloads),
+       spliced: max(delete_count, insert_count),
+       work: work
+     }}
   end
 
-  @spec to_store_entry(payload()) :: ResidentStore.entry()
-  defp to_store_entry(%{row: %Row{} = row} = payload) do
-    ResidentStore.entry(row.row_id, row.content_hash, payload)
+  @spec splice_lines(t(), inputs(), [non_neg_integer()]) :: {t(), map()}
+  defp splice_lines(prev, inputs, lines) do
+    dirty_payloads = inputs.build_dirty.(MapSet.new(lines))
+
+    {store, inserted_payloads, splices} =
+      Enum.reduce(lines, {prev.store, [], []}, fn line, {store, payloads, splices} ->
+        payload = Map.fetch!(dirty_payloads, line)
+        entry = to_store_entry(payload)
+        store = ResidentStore.replace_at(store, line, entry)
+        splice = RowSplice.new(line, 1, [payload.row])
+        {store, [payload | payloads], [splice | splices]}
+      end)
+
+    inserted_payloads = Enum.reverse(inserted_payloads)
+    {:ok, row_delta} = RowDelta.new(prev.line_count, prev.line_count, Enum.reverse(splices))
+    work = ResidentStore.work(store)
+    Minga.Telemetry.execute([:minga, :render, :resident_work], work, %{operation: :splices})
+    state = %{prev | store: store}
+
+    {state,
+     %{
+       payloads: inserted_payloads,
+       inserted_payloads: inserted_payloads,
+       row_delta: row_delta,
+       digest: ResidentStore.digest(store),
+       retained_rows: retained_of(inserted_payloads),
+       rasterized: rasterized_of(inserted_payloads),
+       spliced: length(lines),
+       work: work
+     }}
   end
 
-  @spec retained_of([payload()]) :: retained_rows()
-  defp retained_of(payloads) do
-    Map.new(payloads, fn %{row: %Row{} = row} = payload ->
-      {row.row_id, {retain_hash(payload), row}}
-    end)
+  defp empty_delta(count) do
+    {:ok, delta} = RowDelta.new(count, count, [])
+    delta
   end
 
-  @spec retain_hash(payload()) :: non_neg_integer()
-  defp retain_hash(%{row: %Row{content_hash: content_hash}} = payload) do
-    Map.get(payload, :input_hash, content_hash)
-  end
+  defp hydration_reason(_previous, %{hydration_reason: reason}) when reason != nil, do: reason
+  defp hydration_reason(nil, _), do: :initial
+  defp hydration_reason(_, %{reset?: true}), do: :reset_required
+  defp hydration_reason(_, _), do: :composition_context
 
-  @spec rasterized_of([payload()]) :: non_neg_integer()
-  defp rasterized_of(payloads) do
-    Enum.count(payloads, fn payload -> not Map.get(payload, :reused?, false) end)
-  end
+  defp to_store_entry(%{row: %Row{} = row} = payload),
+    do: ResidentStore.entry(row.row_id, row.content_hash, payload)
+
+  defp retained_of(payloads),
+    do:
+      Map.new(payloads, fn %{row: %Row{} = row} = payload ->
+        {row.row_id, {Map.get(payload, :input_hash, row.content_hash), row}}
+      end)
+
+  defp rasterized_of(payloads), do: Enum.count(payloads, &(not Map.get(&1, :reused?, false)))
 end

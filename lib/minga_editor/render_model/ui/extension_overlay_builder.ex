@@ -38,7 +38,7 @@ defmodule MingaEditor.RenderModel.UI.ExtensionOverlayBuilder do
   defp maybe_overlay_entry(overlay, %{buffer: buf} = window, win_id, win_layout)
        when is_pid(buf) do
     if buf == overlay.buffer do
-      viewport_top = max(window.render_cache.last_viewport_top, 0)
+      viewport_top = max(Map.get(window.render_cache, :last_viewport_top, window.viewport.top), 0)
       {_row, _col, _w, content_height} = win_layout.content
       {line, col} = overlay.position
       row = line - viewport_top

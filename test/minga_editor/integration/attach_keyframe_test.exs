@@ -82,8 +82,11 @@ defmodule Minga.Integration.AttachKeyframeTest do
     assert Enum.any?(committed.rows, &String.contains?(&1, "first line!")),
            "expected first client to have committed the edit, got rows: #{inspect(committed.rows)}"
 
-    assert editor_state(ctx).caches.last_emitted_frame_seq > 0,
-           "expected the running session to have a non-zero committed frame base"
+    editor = editor_state(ctx)
+    refute Map.has_key?(Map.from_struct(editor), :caches)
+
+    assert :sys.get_state(editor.renderer).caches.last_emitted_frame_seq > 0,
+           "expected the renderer to have a non-zero committed frame base"
 
     # ── Second client connects mid-session ────────────────────────────────────
     # The new frontend becomes the editor's port_manager. The first client's

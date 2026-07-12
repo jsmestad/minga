@@ -1,26 +1,20 @@
 defmodule Minga.Buffer.RenderSnapshot do
   @moduledoc """
-  Atomic render and change-lineage snapshot from a buffer process.
+  A bounded, version-qualified buffer line view for rendering.
 
-  The immutable document, metadata, version, line count, change horizon, and
-  sequence-qualified deltas are captured in one GenServer call. `slice/3`
-  derives range views without observing a newer buffer state.
+  Unlike the historical render snapshot this value never contains a
+  `Minga.Buffer.Document`. `lines` contains only the range requested from the
+  buffer process. Renderer callers first atomically consume the ChangeLog and
+  then fetch a range at that exact version; a concurrent edit returns `:stale`.
   """
 
-  alias Minga.Buffer.ChangeLog
-  alias Minga.Buffer.Document
-  alias Minga.Buffer.EditDelta
-  alias Minga.Buffer.Lines
-  alias Minga.Buffer.Position
   alias Minga.Buffer.State, as: BufState
 
-  @type changes :: {:ok, [EditDelta.t()]} | :reset_required
-
   @enforce_keys [
-    :document,
     :cursor,
     :line_count,
     :lines,
+    :first_line,
     :file_path,
     :filetype,
     :buffer_type,
@@ -31,18 +25,15 @@ defmodule Minga.Buffer.RenderSnapshot do
     :version,
     :options,
     :decorations,
-    :change_sequence,
-    :change_horizon,
-    :changes
+    :change_sequence
   ]
-
   defstruct @enforce_keys
 
   @type t :: %__MODULE__{
-          document: Document.t(),
-          cursor: Document.position(),
+          cursor: Minga.Buffer.Document.position(),
           line_count: pos_integer(),
           lines: [String.t()],
+          first_line: non_neg_integer(),
           file_path: String.t() | nil,
           filetype: atom(),
           buffer_type: BufState.buffer_type(),
@@ -53,21 +44,6 @@ defmodule Minga.Buffer.RenderSnapshot do
           version: non_neg_integer(),
           options: %{atom() => term()},
           decorations: Minga.Core.Decorations.t(),
-          change_sequence: ChangeLog.sequence(),
-          change_horizon: ChangeLog.sequence(),
-          changes: changes()
+          change_sequence: non_neg_integer()
         }
-
-  @doc "Returns a range view derived from the same immutable document snapshot."
-  @spec slice(t(), non_neg_integer(), non_neg_integer()) :: t()
-  def slice(%__MODULE__{document: document} = snapshot, first_line, count)
-      when first_line >= 0 and count >= 0 do
-    lines = if count == 0, do: [], else: Lines.slice(document, first_line, count)
-
-    %{
-      snapshot
-      | lines: lines,
-        first_line_byte_offset: Position.point_for(document, {first_line, 0})
-    }
-  end
 end

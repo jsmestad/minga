@@ -141,7 +141,7 @@ defmodule MingaEditor.MouseTest do
       assert window.viewport.top > before_top
     end
 
-    test "a non-resident GUI window keeps viewport-only wheel behavior byte-identically" do
+    test "an eligible GUI window uses semantic free-scroll without renderer residence state" do
       {state, buffer} = start_mouse_state(lines(0..99), width: 40, height: 20)
       state = native_gui_state(state)
       win_id = state.workspace.windows.active
@@ -152,7 +152,7 @@ defmodule MingaEditor.MouseTest do
       state = mouse(state, 0, 0, :wheel_down, :press)
 
       window = Map.fetch!(state.workspace.windows.map, win_id)
-      assert window.scroll_echo_top == nil
+      assert window.scroll_echo_top == window.viewport.top
       assert BufferProcess.cursor(buffer) == {50, 0}
       assert window.viewport.top > before_top
     end
@@ -734,8 +734,7 @@ defmodule MingaEditor.MouseTest do
   defp native_gui_state(state),
     do: %{state | capabilities: %Capabilities{frontend_type: :native_gui}}
 
-  defp mark_resident(state, window_id),
-    do: EditorState.update_window(state, window_id, &Window.set_resident(&1, true))
+  defp mark_resident(state, _window_id), do: state
 
   defp set_window_top(state, window_id, top) do
     EditorState.update_window(state, window_id, fn window ->

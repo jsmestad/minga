@@ -421,10 +421,14 @@ defmodule Minga.Buffer do
           Minga.Buffer.RenderSnapshot.t()
   defdelegate render_snapshot(server, first_line, count), to: BufferProcess
 
-  @doc "Atomic render snapshot with non-mutating deltas after a sequence."
-  @spec render_snapshot(t(), non_neg_integer(), non_neg_integer(), ChangeLog.sequence()) ::
-          Minga.Buffer.RenderSnapshot.t()
-  defdelegate render_snapshot(server, first_line, count, since_sequence), to: BufferProcess
+  @doc "Atomically consumes renderer deltas with the current version/count/sequence."
+  @spec renderer_consume(t()) :: Minga.Buffer.RendererConsume.t()
+  defdelegate renderer_consume(server), to: BufferProcess
+
+  @doc "Returns a bounded line range only when the expected version is still current."
+  @spec render_lines(t(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          {:ok, Minga.Buffer.RenderSnapshot.t()} | :stale
+  defdelegate render_lines(server, expected_version, first_line, count), to: BufferProcess
 
   @doc "Returns sequence-qualified changes without advancing a consumer cursor."
   @spec changes_since(t(), ChangeLog.sequence()) :: ChangeLog.sequence_changes()

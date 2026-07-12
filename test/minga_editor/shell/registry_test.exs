@@ -147,14 +147,16 @@ defmodule MingaEditor.Shell.RegistryTest do
                capabilities: [:tui]
              })
 
-    writeback = %{
-      caches: input.caches,
+    writeback = %MingaEditor.Renderer.RenderReceipt{
       layout: :rendered_layout,
       focus_tree: :rendered_focus_tree,
-      windows: state.workspace.windows,
       shell_id: :fake,
       shell_identity: input.shell_identity,
-      shell_state: Map.put(state.shell_state, :modeline_click_regions, [{:old, 1}])
+      modeline_click_regions: [{:old, 1}],
+      tab_bar_click_regions: [],
+      frame_seq: 1,
+      keyframe?: false,
+      render_sent_at: 0
     }
 
     result = EditorState.apply_renderer_writeback(state, writeback)

@@ -222,11 +222,7 @@ defmodule MingaEditor.Frontend.Emit do
       Map.new(layout.window_layouts, fn {win_id, _wl} ->
         window = Map.get(ctx.windows.map, win_id)
 
-        if window do
-          {win_id, window.render_cache.last_viewport_top}
-        else
-          {win_id, -1}
-        end
+        {win_id, window_cache_field(window, :last_viewport_top, :viewport_top)}
       end)
 
     rects =
@@ -238,33 +234,21 @@ defmodule MingaEditor.Frontend.Emit do
       Map.new(layout.window_layouts, fn {win_id, _wl} ->
         window = Map.get(ctx.windows.map, win_id)
 
-        if window do
-          {win_id, window.render_cache.last_gutter_w}
-        else
-          {win_id, -1}
-        end
+        {win_id, window_cache_field(window, :last_gutter_w)}
       end)
 
     buf_versions =
       Map.new(layout.window_layouts, fn {win_id, _wl} ->
         window = Map.get(ctx.windows.map, win_id)
 
-        if window do
-          {win_id, window.render_cache.last_buf_version}
-        else
-          {win_id, -1}
-        end
+        {win_id, window_cache_field(window, :last_buf_version, :buffer_version)}
       end)
 
     cursor_lines =
       Map.new(layout.window_layouts, fn {win_id, _wl} ->
         window = Map.get(ctx.windows.map, win_id)
 
-        if window do
-          {win_id, window.render_cache.last_cursor_line}
-        else
-          {win_id, -1}
-        end
+        {win_id, window_cache_field(window, :last_cursor_line, :cursor_line)}
       end)
 
     editing_mode = if ctx.editing, do: ctx.editing.mode, else: nil
@@ -279,6 +263,15 @@ defmodule MingaEditor.Frontend.Emit do
         emit_prev_editing_mode: editing_mode
     }
   end
+
+  @spec window_cache_field(map() | nil, atom(), atom() | nil) :: integer()
+  defp window_cache_field(window, renderer_field, editor_field \\ nil)
+
+  defp window_cache_field(%{render_cache: cache}, renderer_field, editor_field) do
+    Map.get(cache, renderer_field, Map.get(cache, editor_field, -1))
+  end
+
+  defp window_cache_field(nil, _renderer_field, _editor_field), do: -1
 
   # ── Side-channel writes (shared) ─────────────────────────────────────────
 

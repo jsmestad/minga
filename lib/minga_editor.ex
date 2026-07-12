@@ -527,9 +527,9 @@ defmodule MingaEditor do
 
   def handle_info(
         {:minga_input, {:request_keyframe, last_good_frame_seq, failed_generation}},
-        %{renderer: renderer} = state
+        %{renderer: renderer, backend: backend} = state
       )
-      when is_pid(renderer) do
+      when is_pid(renderer) and backend != :headless do
     Minga.Log.warning(
       :render,
       "Frontend requested recovery from frame #{last_good_frame_seq} generation #{failed_generation}"
@@ -736,8 +736,8 @@ defmodule MingaEditor do
 
   # Renderer.Server writeback after each async frame completes.
   # EditorState narrows the merge to renderer-owned fields only.
-  def handle_info({:render_done, %{caches: _caches, layout: _layout} = wb}, state) do
-    {:noreply, RenderHandler.handle_render_done(state, wb)}
+  def handle_info({:render_done, %MingaEditor.Renderer.RenderReceipt{} = receipt}, state) do
+    {:noreply, RenderHandler.handle_render_done(state, receipt)}
   end
 
   # Nav-flash timer step — advance the fade or clear the flash.

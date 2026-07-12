@@ -74,7 +74,7 @@ defmodule MingaEditor.RenderModel.UI.ExtensionOverlayBuilderTest do
     ctx = MingaEditor.Frontend.Emit.Context.from_editor_state(state)
     viewport_top = Keyword.get(opts, :viewport_top, 0)
     window = Map.fetch!(ctx.windows.map, ctx.windows.active)
-    window = %{window | render_cache: %{window.render_cache | last_viewport_top: viewport_top}}
+    window = %{window | viewport: MingaEditor.Viewport.put_top(window.viewport, viewport_top)}
     windows = %{ctx.windows | map: Map.put(ctx.windows.map, ctx.windows.active, window)}
     %{ctx | windows: windows}
   end

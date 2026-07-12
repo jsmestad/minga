@@ -30,7 +30,7 @@ defmodule MingaEditor.RenderPipeline.Classifier do
 
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
-  alias MingaEditor.Window
+  alias MingaEditor.Renderer.RenderWindow, as: Window
 
   @type path :: :patch | :full
   @type scrolls :: %{Window.id() => WindowScroll.t()}

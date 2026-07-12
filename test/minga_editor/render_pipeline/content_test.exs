@@ -15,8 +15,12 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
   alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline
   alias MingaEditor.RenderPipeline.Content
+  alias MingaEditor.RenderPipeline.Input
+  alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.RenderPipeline.Scroll
+  alias MingaEditor.Renderer.BufferChanges
   alias MingaEditor.Renderer.Gutter
+  alias MingaEditor.Renderer.State, as: RendererState
   alias MingaEditor.Viewport
   alias MingaEditor.Window
   alias MingaEditor.State, as: EditorState
@@ -64,7 +68,7 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
       assert is_integer(row)
       assert is_integer(col)
       assert shape in [:block, :beam, :underline]
-      assert %EditorState{} = state
+      assert %Input{} = state
     end
 
     test "window content carries the semantic window model" do
@@ -131,13 +135,16 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
       windows = %{state.workspace.windows | map: %{win_id => window}}
       agent_ui = UIState.new() |> UIState.ensure_prompt_buffer()
       state = %{state | workspace: %{state.workspace | windows: windows, agent_ui: agent_ui}}
-      layout = Layout.put(state) |> Layout.get()
+      intent = Intent.from_editor_state(state)
+      renderer = RendererState.new(editor_pid: nil, pipeline: &RenderPipeline.run/1)
+      {_renderer, input} = BufferChanges.prepare(renderer, intent)
+      layout = Layout.put(input) |> Layout.get()
 
-      {[content], _cursor, state} =
-        Content.build_agent_chat_content(state, layout, %{})
+      {[content], _cursor, output} =
+        Content.build_agent_chat_content(input, layout, %{})
 
       [prompt_model] = content.models
-      updated_window = Map.fetch!(state.workspace.windows.map, win_id)
+      updated_window = Map.fetch!(output.workspace.windows.map, win_id)
 
       {content_row, _content_col, _content_width, _content_height} =
         layout.window_layouts[win_id].content

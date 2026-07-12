@@ -53,6 +53,7 @@ defmodule MingaEditor.State do
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.WhichKey
   alias MingaEditor.State.Windows
+  alias MingaEditor.Renderer.RenderWindow
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Window
@@ -137,7 +138,6 @@ defmodule MingaEditor.State do
             buffer_monitors: %{},
             diff_views: %{},
             face_override_registries: %{},
-            caches: MingaEditor.Renderer.Caches.new(),
             session: %EditorSessionState{},
             buffer_add_context: :open,
             remote: %Remote{},
@@ -154,6 +154,11 @@ defmodule MingaEditor.State do
             # frame is forced to a keyframe (base_frame_seq 0, full snapshots) and the
             # flag is cleared once that frame goes out.
             keyframe_pending?: false,
+            # Editor-owned render correlation. Submission advances independently
+            # of acknowledgement so an older pending receipt is already stale.
+            latest_render_intent_revision: 0,
+            last_render_receipt_revision: 0,
+            last_render_receipt_seq: 0,
             # Cached native settings snapshot emitted in-frame as the config_state
             # semantic model (#2119). Rebuilt only when a settings option changes
             # (see MingaEditor.refresh_gui_config_state/1), so the render pipeline
@@ -216,7 +221,6 @@ defmodule MingaEditor.State do
           buffer_monitors: %{pid() => reference()},
           diff_views: %{pid() => diff_view_info()},
           face_override_registries: %{pid() => MingaEditor.UI.Face.Registry.t()},
-          caches: MingaEditor.Renderer.Caches.t(),
           buffer_add_context: MingaEditor.Shell.buffer_add_context(),
           remote: Remote.t(),
           resource_pressure: ResourcePressure.t(),
@@ -227,6 +231,9 @@ defmodule MingaEditor.State do
           font_size_override: pos_integer() | nil,
           last_input_seq: non_neg_integer(),
           keyframe_pending?: boolean(),
+          latest_render_intent_revision: non_neg_integer(),
+          last_render_receipt_revision: non_neg_integer(),
+          last_render_receipt_seq: non_neg_integer(),
           gui_config_state: Minga.RenderModel.UI.ConfigState.t() | nil,
           session_started?: boolean()
         }
@@ -689,30 +696,51 @@ defmodule MingaEditor.State do
   @doc """
   Applies render pipeline mutations back to the editor state.
 
-  The render pipeline updates window caches (invalidation tracking,
-  context fingerprints), click regions, and layout during rendering.
-  This function writes those mutations back after the pipeline completes.
-
-  The `render_output` is a `RenderPipeline.Input` struct with the mutated
-  fields. Only `windows`, `shell_state`, `layout`, and `caches` carry meaningful
-  changes; other fields are unchanged.
+  This compatibility path applies only editor-owned observations from a synchronous pipeline output: window viewport observations, shell state, layout, focus, and click regions. Renderer caches, resident content, font state, and acknowledgement state remain owned by `Renderer.Server` and are never copied into Editor state.
   """
   @spec apply_render_output(t(), MingaEditor.RenderPipeline.Input.t()) :: t()
   def apply_render_output(%__MODULE__{workspace: ws} = state, render_output) do
+    windows = apply_synchronous_window_observations(ws.windows, render_output.workspace.windows)
+
     %{
       state
-      | workspace: %{ws | windows: render_output.workspace.windows},
+      | workspace: %{ws | windows: windows},
         shell_state: render_output.shell_state,
         shell_identity: Map.get(render_output, :shell_identity, state.shell_identity),
         layout: render_output.layout,
         focus_tree: render_output.focus_tree,
-        caches: render_output.caches,
-        message_store: render_output.message_store,
+        message_store: state.message_store,
         # Clear keyframe_pending? only when the frame that just emitted actually
         # carried the keyframe. A render that started before the request (or one
         # that the request didn't force) must not swallow the still-pending flag (#2219).
         keyframe_pending?: clear_keyframe_pending?(state, render_output.caches)
     }
+  end
+
+  @spec apply_synchronous_window_observations(Windows.t(), Windows.t()) :: Windows.t()
+  defp apply_synchronous_window_observations(editor_windows, rendered_windows) do
+    Enum.reduce(rendered_windows.map, editor_windows, fn rendered, windows ->
+      apply_synchronous_window_observation(windows, rendered)
+    end)
+  end
+
+  @spec apply_synchronous_window_observation(Windows.t(), {Window.id(), term()}) :: Windows.t()
+  defp apply_synchronous_window_observation(windows, {id, %RenderWindow{} = rendered}) do
+    case Windows.fetch(windows, id) do
+      {:ok, %Window{} = editor_window} ->
+        version = max(rendered.render_cache.last_buf_version, 0)
+
+        Windows.update(windows, id, fn _window ->
+          Window.observe_render(editor_window, rendered.viewport, version)
+        end)
+
+      :error ->
+        windows
+    end
+  end
+
+  defp apply_synchronous_window_observation(windows, {id, %Window{} = editor_window}) do
+    Windows.update(windows, id, fn _window -> editor_window end)
   end
 
   # The flag stays set until a frame that genuinely honored force_keyframe? reaches
@@ -724,67 +752,92 @@ defmodule MingaEditor.State do
     not Map.get(caches, :last_frame_keyframe?, false)
   end
 
-  @doc """
-  Applies asynchronous renderer writeback without overwriting editor-owned state.
+  @doc "Advances editor-owned correlation before submitting an async intent."
+  @spec submit_render_intent(t()) :: {t(), pos_integer()}
+  def submit_render_intent(%__MODULE__{} = state) do
+    revision = state.latest_render_intent_revision + 1
+    {%{state | latest_render_intent_revision: revision}, revision}
+  end
 
-  Async rendering runs from an older `RenderPipeline.Input` snapshot while the
-  Editor process continues handling input. The renderer may return stale copies
-  of windows and shell state, so this function only merges fields owned by the
-  renderer: global render caches, layout, per-window render caches, and chrome
-  click regions.
-  """
-  @spec apply_renderer_writeback(t(), map()) :: t()
-  def apply_renderer_writeback(%__MODULE__{} = state, %{caches: caches, layout: layout} = wb) do
-    state = %{
+  @doc "Applies a synchronous focused renderer receipt without importing renderer state."
+  @spec apply_synchronous_renderer_receipt(t(), MingaEditor.Renderer.RenderReceipt.t()) :: t()
+  def apply_synchronous_renderer_receipt(%__MODULE__{} = state, receipt) do
+    shell_state =
+      state.shell_state
+      |> merge_renderer_shell_field(:modeline_click_regions, receipt.modeline_click_regions)
+      |> merge_renderer_shell_field(:tab_bar_click_regions, receipt.tab_bar_click_regions)
+
+    %{
       state
-      | message_store:
-          merge_renderer_message_store(state.message_store, Map.get(wb, :message_store))
+      | layout: receipt.layout,
+        focus_tree: receipt.focus_tree,
+        shell_state: shell_state,
+        keyframe_pending?: clear_keyframe_pending_from_receipt?(state, receipt),
+        last_render_receipt_revision:
+          max(state.last_render_receipt_revision, receipt.intent_revision),
+        last_render_receipt_seq: max(state.last_render_receipt_seq, receipt.frame_seq)
     }
+  end
 
-    if renderer_writeback_shell_current?(state, wb) do
-      # Clear keyframe_pending? only when this writeback's frame actually carried
-      # the keyframe. An in-flight delta render that started before the request
-      # writes back without the keyframe flag, so the pending request survives until
-      # a forced frame reaches emit (#2219). The writeback threads last_frame_keyframe?
-      # via writeback_from_output/2.
-      state = %{
+  @doc "Applies a correlation-protected focused renderer receipt."
+  @spec apply_renderer_writeback(t(), MingaEditor.Renderer.RenderReceipt.t()) :: t()
+  def apply_renderer_writeback(
+        %__MODULE__{} = state,
+        %MingaEditor.Renderer.RenderReceipt{} = receipt
+      ) do
+    revision =
+      if receipt.intent_revision == 0 and state.latest_render_intent_revision == 0,
+        do: receipt.frame_seq,
+        else: receipt.intent_revision
+
+    receipt = %{receipt | intent_revision: revision}
+
+    fresh? =
+      revision >= state.latest_render_intent_revision and
+        revision > state.last_render_receipt_revision and
+        receipt.frame_seq > state.last_render_receipt_seq
+
+    apply_renderer_receipt(state, receipt, fresh?)
+  end
+
+  @spec apply_renderer_receipt(t(), MingaEditor.Renderer.RenderReceipt.t(), boolean()) :: t()
+  defp apply_renderer_receipt(state, _receipt, false), do: state
+
+  defp apply_renderer_receipt(state, receipt, true) do
+    if renderer_receipt_shell_current?(state, receipt) do
+      shell_state =
+        state.shell_state
+        |> merge_renderer_shell_field(:modeline_click_regions, receipt.modeline_click_regions)
+        |> merge_renderer_shell_field(:tab_bar_click_regions, receipt.tab_bar_click_regions)
+
+      %{
         state
-        | caches: caches,
-          layout: layout,
-          focus_tree: Map.get(wb, :focus_tree),
-          keyframe_pending?: clear_keyframe_pending_from_writeback?(state, wb)
+        | layout: receipt.layout,
+          focus_tree: receipt.focus_tree,
+          shell_state: shell_state,
+          keyframe_pending?: clear_keyframe_pending_from_receipt?(state, receipt),
+          last_render_receipt_revision: receipt.intent_revision,
+          last_render_receipt_seq: receipt.frame_seq
       }
-
-      state = merge_renderer_windows_from_writeback(state, wb)
-      merge_renderer_shell_from_writeback(state, wb)
     else
-      log_stale_renderer_writeback(state, wb)
+      log_stale_renderer_receipt(state, receipt)
       state
     end
   end
 
-  # Keeps keyframe_pending? set until an async frame that actually honored the
-  # request writes back. The flag lives on the writeback's `keyframe?` field, stamped
-  # from the emitted caches in Renderer.Server.writeback_from_output/2 (#2219).
-  @spec merge_renderer_message_store(MessageStore.t(), MessageStore.t() | nil) :: MessageStore.t()
-  defp merge_renderer_message_store(%MessageStore{} = current, %MessageStore{} = emitted) do
-    MessageStore.merge_sent_cursor(current, emitted)
-  end
-
-  defp merge_renderer_message_store(%MessageStore{} = current, _emitted), do: current
-
-  @spec clear_keyframe_pending_from_writeback?(t(), map()) :: boolean()
-  defp clear_keyframe_pending_from_writeback?(%__MODULE__{keyframe_pending?: false}, _wb),
+  @spec clear_keyframe_pending_from_receipt?(t(), MingaEditor.Renderer.RenderReceipt.t()) ::
+          boolean()
+  defp clear_keyframe_pending_from_receipt?(%__MODULE__{keyframe_pending?: false}, _receipt),
     do: false
 
-  defp clear_keyframe_pending_from_writeback?(%__MODULE__{keyframe_pending?: true}, wb) do
-    not Map.get(wb, :keyframe?, false)
+  defp clear_keyframe_pending_from_receipt?(%__MODULE__{keyframe_pending?: true}, receipt) do
+    not receipt.keyframe?
   end
 
-  @spec renderer_writeback_shell_current?(t(), map()) :: boolean()
-  defp renderer_writeback_shell_current?(%__MODULE__{} = state, wb) do
-    case Map.fetch(wb, :shell_identity) do
-      {:ok, %ShellIdentity{} = identity} -> renderer_identity_current?(state, identity)
+  @spec renderer_receipt_shell_current?(t(), MingaEditor.Renderer.RenderReceipt.t()) :: boolean()
+  defp renderer_receipt_shell_current?(%__MODULE__{} = state, receipt) do
+    case receipt.shell_identity do
+      %ShellIdentity{} = identity -> renderer_identity_current?(state, identity)
       _missing_or_invalid -> false
     end
   end
@@ -797,75 +850,18 @@ defmodule MingaEditor.State do
     end
   end
 
-  @spec log_stale_renderer_writeback(t(), map()) :: :ok
-  defp log_stale_renderer_writeback(%__MODULE__{} = state, wb) do
+  @spec log_stale_renderer_receipt(t(), MingaEditor.Renderer.RenderReceipt.t()) :: :ok
+  defp log_stale_renderer_receipt(%__MODULE__{} = state, receipt) do
     Log.debug(:render, fn ->
-      "Dropping stale renderer writeback frame=#{inspect(Map.get(wb, :frame_seq))} shell=#{inspect(Map.get(wb, :shell_id))} identity=#{inspect(Map.get(wb, :shell_identity))} active_shell=#{inspect(active_shell_id(state))}"
+      "Dropping stale renderer receipt frame=#{receipt.frame_seq} shell=#{inspect(receipt.shell_id)} identity=#{inspect(receipt.shell_identity)} active_shell=#{inspect(active_shell_id(state))}"
     end)
   end
 
-  @spec merge_renderer_windows_from_writeback(t(), map()) :: t()
-  defp merge_renderer_windows_from_writeback(%__MODULE__{workspace: ws} = state, wb) do
-    case Map.fetch(wb, :windows) do
-      {:ok, %Windows{} = rendered_windows} ->
-        windows = merge_renderer_windows(ws.windows, rendered_windows)
-        %{state | workspace: %{ws | windows: windows}}
-
-      _ ->
-        state
-    end
-  end
-
-  @spec merge_renderer_windows(Windows.t(), Windows.t()) :: Windows.t()
-  defp merge_renderer_windows(%Windows{} = live_windows, %Windows{} = rendered_windows) do
-    map =
-      Map.new(live_windows.map, fn {id, live_window} ->
-        {id, merge_renderer_window(live_window, Map.get(rendered_windows.map, id))}
-      end)
-
-    %{live_windows | map: map}
-  end
-
-  # Only `render_cache` is renderer-owned and round-trips through the async
-  # writeback. Any other `Window` field written during a render is dropped here:
-  # editor-owned state (e.g. `scroll_echo_top`) must be written only by the
-  # input/editor path, and renderer-computed state must live in the render cache
-  # (e.g. `scroll_seq`, `resident`).
-  @spec merge_renderer_window(Window.t(), Window.t() | nil) :: Window.t()
-  defp merge_renderer_window(%Window{} = live_window, %Window{} = rendered_window) do
-    %{live_window | render_cache: rendered_window.render_cache}
-  end
-
-  defp merge_renderer_window(%Window{} = live_window, _rendered_window), do: live_window
-
-  @spec merge_renderer_shell_from_writeback(t(), map()) :: t()
-  defp merge_renderer_shell_from_writeback(%__MODULE__{} = state, wb) do
-    with {:ok, shell_id} <- Map.fetch(wb, :shell_id),
-         ^shell_id <- active_shell_id(state),
-         {:ok, rendered_shell_state} <- Map.fetch(wb, :shell_state) do
-      %{
-        state
-        | shell_state: merge_renderer_shell_state(state.shell_state, rendered_shell_state)
-      }
-    else
-      _other -> state
-    end
-  end
-
-  @spec merge_renderer_shell_state(shell_state(), term()) :: shell_state()
-  defp merge_renderer_shell_state(live_shell_state, rendered_shell_state) do
-    live_shell_state
-    |> merge_renderer_shell_field(rendered_shell_state, :modeline_click_regions)
-    |> merge_renderer_shell_field(rendered_shell_state, :tab_bar_click_regions)
-  end
-
-  @spec merge_renderer_shell_field(shell_state(), term(), atom()) :: shell_state()
-  defp merge_renderer_shell_field(live_shell_state, rendered_shell_state, field) do
-    if Map.has_key?(live_shell_state, field) and Map.has_key?(rendered_shell_state, field) do
-      Map.put(live_shell_state, field, Map.fetch!(rendered_shell_state, field))
-    else
-      live_shell_state
-    end
+  @spec merge_renderer_shell_field(shell_state(), atom(), term()) :: shell_state()
+  defp merge_renderer_shell_field(live_shell_state, field, value) do
+    if Map.has_key?(live_shell_state, field),
+      do: Map.put(live_shell_state, field, value),
+      else: live_shell_state
   end
 
   @doc "Applies a function to the shell state and returns the updated state."
@@ -1811,11 +1807,7 @@ defmodule MingaEditor.State do
     state
     |> update_workspace(&SessionState.mark_frontend_reset_pending/1)
     |> then(fn state ->
-      %{
-        state
-        | caches: MingaEditor.Renderer.Caches.reset_frontend_state(state.caches),
-          message_store: MessageStore.reset_sent_cursor(state.message_store)
-      }
+      %{state | message_store: MessageStore.reset_sent_cursor(state.message_store)}
     end)
   end
 

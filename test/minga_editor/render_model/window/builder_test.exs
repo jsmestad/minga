@@ -1,6 +1,7 @@
 defmodule MingaEditor.RenderModel.Window.BuilderTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Core.Decorations
   alias Minga.Core.Face
@@ -9,9 +10,12 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
   alias Minga.Language.Highlight.Span, as: HighlightSpan
   alias MingaEditor.Layout
   alias MingaEditor.RenderModel.Window.Builder
+  alias MingaEditor.RenderModel.Window.ResidentStore
   alias MingaEditor.RenderPipeline.Content
+  alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.Scroll
   alias MingaEditor.Renderer.Context
+  alias MingaEditor.Renderer.WindowCache
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Highlighting
   alias MingaEditor.State.Windows
@@ -29,14 +33,64 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
   # Runs the Content stage and reshapes each WindowContent carrier into a map
   # exposing the primary window model, any additional models, and the cursor,
   # so these builder tests can assert against the window model directly.
-  defp build_content(state) do
+  defp build_content(%EditorState{} = state) do
     state = EditorState.sync_active_window_cursor(state)
     state = MingaEditor.RenderPipeline.compute_layout(state)
     layout = Layout.get(state)
-    {scrolls, state} = Scroll.scroll_windows(state, layout)
-    {contents, cursor, state} = Content.build_content(state, scrolls)
-    {Enum.map(contents, &to_window_view/1), cursor, state}
+    {scrolls, input} = Scroll.scroll_windows(state, layout)
+    finish_content(input, scrolls)
   end
+
+  defp build_content(%Input{} = input) do
+    input = prepare_renderer_windows(input)
+    input = MingaEditor.RenderPipeline.compute_layout(input)
+    layout = Layout.get(input)
+    {scrolls, input} = Scroll.scroll_windows(input, layout)
+    finish_content(input, scrolls)
+  end
+
+  defp finish_content(input, scrolls) do
+    {contents, cursor, input} = Content.build_content(input, scrolls)
+    {Enum.map(contents, &to_window_view/1), cursor, input}
+  end
+
+  defp prepare_renderer_windows(%Input{} = input) do
+    buffer = input.workspace.buffers.active
+
+    if is_pid(buffer) do
+      consumed = Buffer.renderer_consume(buffer)
+
+      map =
+        Map.new(input.workspace.windows.map, fn entry ->
+          update_renderer_window(entry, buffer, consumed)
+        end)
+
+      windows = %{input.workspace.windows | map: map}
+      %{input | workspace: %{input.workspace | windows: windows}}
+    else
+      input
+    end
+  end
+
+  defp update_renderer_window({id, %{buffer: buffer} = window}, buffer, consumed) do
+    cache = update_renderer_cache(window.render_cache, buffer, consumed)
+    {id, %{window | render_cache: cache}}
+  end
+
+  defp update_renderer_window(entry, _buffer, _consumed), do: entry
+
+  defp update_renderer_cache(existing, buffer, consumed) do
+    cache = renderer_cache(existing)
+
+    case consumed.changes do
+      {:ok, deltas} -> WindowCache.apply_edit_deltas(cache, buffer, deltas)
+      :reset_required -> WindowCache.mark_identity_reset(cache)
+    end
+    |> WindowCache.with_fetch_version(Buffer.render_snapshot(buffer, 0, 1).version)
+  end
+
+  defp renderer_cache(%WindowCache{} = cache), do: cache
+  defp renderer_cache(_editor_cache), do: WindowCache.reset()
 
   defp to_window_view(%MingaEditor.RenderPipeline.WindowContent{models: models, cursor: cursor}) do
     %{
@@ -84,11 +138,23 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
     %{state | workspace: %{state.workspace | windows: windows}}
   end
 
-  defp build_window_model(state, ctx_overrides) do
+  defp build_window_model(%EditorState{} = state, ctx_overrides) do
     state = EditorState.sync_active_window_cursor(state)
     state = MingaEditor.RenderPipeline.compute_layout(state)
     layout = Layout.get(state)
-    {scrolls, state} = Scroll.scroll_windows(state, layout)
+    {scrolls, input} = Scroll.scroll_windows(state, layout)
+    finish_window_model(input, scrolls, ctx_overrides)
+  end
+
+  defp build_window_model(%Input{} = input, ctx_overrides) do
+    input = prepare_renderer_windows(input)
+    input = MingaEditor.RenderPipeline.compute_layout(input)
+    layout = Layout.get(input)
+    {scrolls, input} = Scroll.scroll_windows(input, layout)
+    finish_window_model(input, scrolls, ctx_overrides)
+  end
+
+  defp finish_window_model(input, scrolls, ctx_overrides) do
     scroll = scrolls |> Map.values() |> hd()
 
     ctx =
@@ -107,7 +173,7 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
         )
       )
 
-    Builder.build(state, scroll, ctx)
+    Builder.build(input, scroll, ctx)
   end
 
   describe "GUI content stage" do
@@ -132,20 +198,21 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
 
       :ok = BufferProcess.insert_text(buffer, "new\n")
       {[inserted], _cursor, state} = build_content(state)
-      [new_row | surviving] = inserted.window_model.rows
-
+      [new_row | _changed_rows] = inserted.window_model.rows
       assert new_row.text == "new"
 
-      assert Enum.map(surviving, & &1.row_id) == [
+      inserted_ids = resident_row_ids(state)
+
+      assert Enum.slice(inserted_ids, 1, 3) == [
                original["duplicate0"],
                original["duplicate1"],
                original["tail2"]
              ]
 
       :ok = BufferProcess.delete_lines(buffer, 0, 0)
-      {[restored], _cursor, _state} = build_content(state)
+      {[_restored], _cursor, state} = build_content(state)
 
-      assert Enum.map(restored.window_model.rows, & &1.row_id) == [
+      assert resident_row_ids(state) == [
                original["duplicate0"],
                original["duplicate1"],
                original["tail2"]
@@ -496,26 +563,28 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
           placement: :above
         )
 
-      win_id = state.workspace.windows.active
-      window = Map.fetch!(state.workspace.windows.map, win_id)
+      {[warm], _cursor, input} = build_content(state)
+      win_id = input.workspace.windows.active
+      window = Map.fetch!(input.workspace.windows.map, win_id)
 
       exhausted = %RowSlotAllocator{
         slots: %{},
-        next: %{{1, 0, :virtual_line} => 0x1000_0000}
+        next: %{{warm.window_model.content_epoch, 0, :virtual_line} => 0x1000_0000}
       }
 
-      window = EditorWindow.put_row_slot_allocator(window, exhausted)
+      renderer_cache = WindowCache.put_row_slot_allocator(window.render_cache, exhausted)
+      window = %{window | render_cache: renderer_cache}
 
       windows = %{
-        state.workspace.windows
-        | map: Map.put(state.workspace.windows.map, win_id, window)
+        input.workspace.windows
+        | map: Map.put(input.workspace.windows.map, win_id, window)
       }
 
-      state = put_in(state.workspace.windows, windows)
+      input = %{input | workspace: %{input.workspace | windows: windows}}
 
-      {[wf], _cursor, _state} = build_content(state)
+      {[wf], _cursor, _state} = build_content(input)
 
-      assert wf.window_model.content_epoch == 2
+      assert wf.window_model.content_epoch > warm.window_model.content_epoch
       assert wf.window_model.full_refresh == true
       assert Enum.any?(wf.window_model.rows, &(&1.row_type == :virtual_line))
     end
@@ -874,5 +943,13 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       assert wf.window_model.gutter.entries != []
       assert wf.window_model.indent_guides.window_id == state.workspace.windows.active
     end
+  end
+
+  defp resident_row_ids(state) do
+    window = MingaEditor.State.Windows.active_struct(state.workspace.windows)
+
+    window.render_cache.resident_build.store
+    |> ResidentStore.entries()
+    |> Enum.map(& &1.id)
   end
 end

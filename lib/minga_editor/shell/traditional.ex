@@ -767,11 +767,7 @@ defmodule MingaEditor.Shell.Traditional do
       {:ok, %Window{}} ->
         windows =
           Windows.update(windows, id, fn window ->
-            %{
-              Window.invalidate(window)
-              | buffer: buffers.active,
-                content: Content.buffer(buffers.active)
-            }
+            %{window | buffer: buffers.active, content: Content.buffer(buffers.active)}
           end)
 
         SessionState.set_windows(workspace, windows)

@@ -29,6 +29,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   alias MingaEditor.DisplayMap
   alias MingaEditor.FoldMap
   alias MingaEditor.Layout
+  alias MingaEditor.RenderModel.Window.ResidentStore
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
   alias MingaEditor.Renderer.Composition
   alias MingaEditor.Renderer.Context
@@ -195,7 +196,20 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     # is byte identical.
     {all_visual_entries, resident_result} =
       if scroll.full_residence do
-        build_resident_entries(scroll, lines, first_line, ctx, snapshot, retain_ctx, opts)
+        materialize_full? =
+          state.force_keyframe? or adapter_full_snapshot_pending?(state, win_id)
+
+        resident_opts = Keyword.put(opts, :keyframe?, materialize_full?)
+
+        build_resident_entries(
+          scroll,
+          lines,
+          first_line,
+          ctx,
+          snapshot,
+          retain_ctx,
+          resident_opts
+        )
       else
         {build_visual_entries(
            lines,
@@ -218,13 +232,18 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         do: min(raw_overscan_before, visible_row_count),
         else: raw_overscan_before
 
+    resident_context_start =
+      if resident_result, do: Map.get(resident_result, :context_start, 0), else: 0
+
+    local_visible_start = max(visible_row_start_index - resident_context_start, 0)
+
     visual_entries =
-      trim_visual_entries(all_visual_entries, visible_row_start_index, visible_row_count)
+      trim_visual_entries(all_visual_entries, local_visible_start, visible_row_count)
 
     presentation_entries =
       presentation_visual_entries(
         all_visual_entries,
-        visible_row_start_index,
+        local_visible_start,
         visible_row_count,
         payload_overscan_before
       )
@@ -240,11 +259,12 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     # which never carries the entry-level `display_row`, so the residence path
     # skips the whole-document re-index `trim_visual_entries/3` would do (#2658).
     resident_entries =
-      if scroll.full_residence do
-        all_visual_entries
-      else
+      resident_presentation_entries(
+        scroll,
+        resident_result,
+        all_visual_entries,
         presentation_entries
-      end
+      )
 
     {new_retained, rasterized, content_digest, resident_build_state, resident_rows_spliced} =
       resolve_retained_and_digest(resident_result, resident_entries, retain_ctx)
@@ -395,7 +415,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       contiguous_rows: is_nil(visible_line_map) and not wrap_on,
       # Set only on the residence path; the GUI adapter gates the content
       # frame-emit on it instead of hashing the full rows list (#2658).
-      content_digest: content_digest
+      content_digest: content_digest,
+      row_delta: if(resident_result, do: resident_result.row_delta, else: nil)
     }
 
     {render_window,
@@ -408,6 +429,31 @@ defmodule MingaEditor.RenderModel.Window.Builder do
        row_slot_allocator: row_slot_allocator
      }}
   end
+
+  @spec adapter_full_snapshot_pending?(map(), non_neg_integer()) :: boolean()
+  defp adapter_full_snapshot_pending?(state, window_id) do
+    state.caches.adapter_gui_caches.pending_window_delta_ids
+    |> MapSet.member?(window_id)
+  end
+
+  @spec resident_presentation_entries(
+          WindowScroll.t(),
+          map() | nil,
+          [visual_row_entry()],
+          [visual_row_entry()]
+        ) :: [visual_row_entry()]
+  defp resident_presentation_entries(
+         %{full_residence: true},
+         %{row_delta: %Minga.RenderModel.Window.RowDelta{}, inserted_payloads: payloads},
+         _all,
+         _presentation
+       ),
+       do: payloads
+
+  defp resident_presentation_entries(%{full_residence: true}, _result, all, _presentation),
+    do: all
+
+  defp resident_presentation_entries(_scroll, _result, _all, presentation), do: presentation
 
   # ── Full-document residence incremental build (#2658) ──────────────────────
 
@@ -427,11 +473,17 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   defp build_resident_entries(scroll, lines, first_line, ctx, snapshot, retain_ctx, opts) do
     inputs = %{
       line_texts: lines,
+      line_count: snapshot.line_count,
       compose_fp: retain_ctx.compose_fp,
       highlight_fp: highlight_content_fingerprint(ctx.highlight),
       reset?: scroll.full_refresh,
+      hydration_reason: Keyword.get(opts, :hydration_reason),
+      keyframe?: Keyword.get(opts, :keyframe?, false),
       retained_rows: retain_ctx.prev,
+      edit_deltas: Keyword.get(opts, :edit_deltas, []),
       build_all: fn ->
+        # Hydration is the one path where BufferPrefetch explicitly supplied the
+        # whole bounded line range. No retained Document is sliced here.
         build_visual_entries(lines, first_line, nil, false, ctx, snapshot, retain_ctx)
       end,
       build_dirty: fn dirty ->
@@ -440,7 +492,20 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     }
 
     {state, result} = ResidentBuild.run(Keyword.get(opts, :resident_build), inputs)
-    {result.payloads, Map.put(result, :state, state)}
+
+    if result.row_delta == nil do
+      {result.payloads, Map.put(result, :state, state)}
+    else
+      context_before = 8
+      context_start = max(scroll.visible_row_start_index - context_before, 0)
+      context_count = MingaEditor.Viewport.content_rows(scroll.viewport) + context_before * 2
+      context_payloads = ResidentStore.payload_range(state.store, context_start, context_count)
+
+      {context_payloads,
+       result
+       |> Map.put(:state, state)
+       |> Map.put(:context_start, context_start)}
+    end
   end
 
   # Composes entries for exactly the dirty sequential line indices, reusing the
@@ -455,23 +520,25 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         ) :: %{non_neg_integer() => visual_row_entry()}
   defp build_dirty_sequential_entries(dirty, lines, first_line, ctx, snapshot, retain_ctx) do
     first_byte_off = snapshot.first_line_byte_offset
-    offsets = dirty_line_offsets(lines, first_byte_off, dirty)
-    masked = masked_highlight_by_index(ctx.highlight, lines, first_byte_off, dirty)
+    local_dirty = MapSet.new(dirty, &(&1 - first_line))
+    offsets = dirty_line_offsets(lines, first_byte_off, local_dirty)
+    masked = masked_highlight_by_index(ctx.highlight, lines, first_byte_off, local_dirty)
 
-    Enum.reduce(dirty, %{}, fn index, acc ->
-      {line_text, line_byte_offset} = Map.fetch!(offsets, index)
+    Enum.reduce(dirty, %{}, fn absolute_index, acc ->
+      local_index = absolute_index - first_line
+      {line_text, line_byte_offset} = Map.fetch!(offsets, local_index)
 
       entry =
         compose_sequential_entry(
-          first_line + index,
+          absolute_index,
           line_text,
-          Map.get(masked, index),
+          Map.get(masked, local_index),
           line_byte_offset,
           ctx,
           retain_ctx
         )
 
-      Map.put(acc, index, entry)
+      Map.put(acc, absolute_index, entry)
     end)
   end
 
