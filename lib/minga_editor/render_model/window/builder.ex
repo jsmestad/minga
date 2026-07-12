@@ -44,8 +44,11 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   alias Minga.RenderModel.Window.GutterMetrics
   alias Minga.RenderModel.Window.HitRegion
   alias Minga.RenderModel.Window.IndentGuides
+  alias Minga.RenderModel.Window.LineIdentity
   alias Minga.RenderModel.Window.PaneGeometry
   alias Minga.RenderModel.Window.Row
+  alias Minga.RenderModel.Window.RowSlotAllocator
+  alias Minga.RenderModel.Window.RowSlotExhaustedError
   alias Minga.RenderModel.Window.SearchMatch
   alias Minga.RenderModel.Window.Selection
   alias Minga.RenderModel.Window.Span
@@ -94,7 +97,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           retained_rows: %{optional(non_neg_integer()) => {non_neg_integer(), Row.t()}},
           retained_wrap_lines: %{optional(non_neg_integer()) => {non_neg_integer(), [map()]}},
           resident_build: ResidentBuild.t() | nil,
-          resident_rows_spliced: non_neg_integer()
+          resident_rows_spliced: non_neg_integer(),
+          row_slot_allocator: RowSlotAllocator.t()
         }
 
   # Threaded through the visual-entry builders to drive upstream row reuse
@@ -105,12 +109,16 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   @typep retain_ctx :: %{
            prev: %{optional(non_neg_integer()) => {non_neg_integer(), Row.t()}},
            prev_wrap: %{optional(non_neg_integer()) => {non_neg_integer(), [visual_row_entry()]}},
-           compose_fp: non_neg_integer()
+           compose_fp: non_neg_integer(),
+           line_identity: LineIdentity.t() | nil,
+           decoration_slots: %{optional(term()) => Row.row_slot()}
          }
 
   @typep folded_source_ctx :: %{
            line_byte_offsets: %{non_neg_integer() => non_neg_integer()},
-           highlight_segments_by_line: %{non_neg_integer() => [Highlight.styled_segment()]}
+           highlight_segments_by_line: %{non_neg_integer() => [Highlight.styled_segment()]},
+           line_identity: LineIdentity.t() | nil,
+           decoration_slots: %{optional(term()) => Row.row_slot()}
          }
 
   @doc """
@@ -157,11 +165,21 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     rect = win_layout.content
     {content_row, _content_col, _content_width, _content_height} = rect
 
+    {decoration_slots, row_slot_allocator} =
+      allocate_decoration_slots(
+        Keyword.get(opts, :row_slot_allocator, RowSlotAllocator.new()),
+        scroll.content_epoch,
+        scroll.line_identity,
+        visible_line_map
+      )
+
     retain_ctx =
       retain_ctx(
         ctx,
         Keyword.get(opts, :retained_rows, %{}),
-        Keyword.get(opts, :retained_wrap_lines, %{})
+        Keyword.get(opts, :retained_wrap_lines, %{}),
+        scroll.line_identity,
+        decoration_slots
       )
 
     # Build visual rows from the same data the draw path uses. Unchanged rows
@@ -386,7 +404,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
        retained_rows: new_retained,
        retained_wrap_lines: new_retained_wrap,
        resident_build: resident_build_state,
-       resident_rows_spliced: resident_rows_spliced
+       resident_rows_spliced: resident_rows_spliced,
+       row_slot_allocator: row_slot_allocator
      }}
   end
 
@@ -515,9 +534,12 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   @spec retain_ctx(
           Context.t(),
           %{optional(non_neg_integer()) => {non_neg_integer(), Row.t()}},
-          %{optional(non_neg_integer()) => {non_neg_integer(), [visual_row_entry()]}}
+          %{optional(non_neg_integer()) => {non_neg_integer(), [visual_row_entry()]}},
+          LineIdentity.t() | nil,
+          map()
         ) :: retain_ctx()
-  defp retain_ctx(%Context{} = ctx, prev, prev_wrap) when is_map(prev) and is_map(prev_wrap) do
+  defp retain_ctx(%Context{} = ctx, prev, prev_wrap, line_identity, decoration_slots)
+       when is_map(prev) and is_map(prev_wrap) and is_map(decoration_slots) do
     conceal_cursor =
       if Decorations.has_conceal_ranges?(ctx.decorations), do: ctx.cursor_line, else: nil
 
@@ -532,7 +554,13 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         conceal_cursor
       })
 
-    %{prev: prev, prev_wrap: prev_wrap, compose_fp: compose_fp}
+    %{
+      prev: prev,
+      prev_wrap: prev_wrap,
+      compose_fp: compose_fp,
+      line_identity: line_identity,
+      decoration_slots: decoration_slots
+    }
   end
 
   # Cheap per-row input fingerprint: the line text, its highlight segments, and
@@ -541,6 +569,101 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   @spec row_input_hash(retain_ctx(), term()) :: non_neg_integer()
   defp row_input_hash(%{compose_fp: compose_fp}, key) do
     :erlang.phash2({key, compose_fp})
+  end
+
+  @spec durable_source_id(map(), non_neg_integer()) :: non_neg_integer()
+  defp durable_source_id(%{line_identity: identity}, buf_line) when identity != nil do
+    case LineIdentity.source_id(identity, buf_line) do
+      {:ok, source_id} -> source_id
+      :error -> raise ArgumentError, "missing durable identity for buffer line #{buf_line}"
+    end
+  end
+
+  defp durable_source_id(_context, buf_line) do
+    raise ArgumentError, "missing line identity for buffer line #{buf_line}"
+  end
+
+  @spec allocate_decoration_slots(
+          RowSlotAllocator.t(),
+          non_neg_integer(),
+          LineIdentity.t() | nil,
+          DisplayMap.t() | [DisplayMap.entry()] | nil
+        ) :: {map(), RowSlotAllocator.t()}
+  defp allocate_decoration_slots(allocator, _epoch, _identity, nil), do: {%{}, allocator}
+
+  defp allocate_decoration_slots(
+         allocator,
+         epoch,
+         identity,
+         %DisplayMap{entries: entries}
+       )
+       when identity != nil do
+    allocate_decoration_slots(allocator, epoch, identity, entries)
+  end
+
+  defp allocate_decoration_slots(allocator, epoch, identity, entries)
+       when identity != nil and is_list(entries) do
+    Enum.reduce(entries, {%{}, allocator}, fn entry, accumulator ->
+      reserve_decoration_slot(decoration_slot_key(entry), accumulator, epoch, identity)
+    end)
+  end
+
+  defp allocate_decoration_slots(_allocator, _epoch, nil, visible_line_map)
+       when visible_line_map != nil do
+    raise ArgumentError, "decoration rows require durable line identity"
+  end
+
+  @spec reserve_decoration_slot(
+          {non_neg_integer(), atom(), term()} | nil,
+          {map(), RowSlotAllocator.t()},
+          non_neg_integer(),
+          LineIdentity.t()
+        ) :: {map(), RowSlotAllocator.t()}
+  defp reserve_decoration_slot(nil, accumulator, _epoch, _identity), do: accumulator
+
+  defp reserve_decoration_slot(
+         {buf_line, kind, key},
+         {slots, allocator},
+         epoch,
+         identity
+       ) do
+    source_id = durable_source_id(%{line_identity: identity}, buf_line)
+    scope = {epoch, source_id, kind}
+
+    put_allocated_decoration_slot(RowSlotAllocator.allocate(allocator, scope, key), slots, {
+      buf_line,
+      kind,
+      key
+    })
+  end
+
+  @spec put_allocated_decoration_slot(
+          {:ok, Row.row_slot(), RowSlotAllocator.t()} | :reset_required,
+          map(),
+          term()
+        ) :: {map(), RowSlotAllocator.t()}
+  defp put_allocated_decoration_slot({:ok, slot, allocator}, slots, key),
+    do: {Map.put(slots, key, slot), allocator}
+
+  defp put_allocated_decoration_slot(:reset_required, _slots, _key),
+    do: raise(RowSlotExhaustedError)
+
+  @spec decoration_slot_key(DisplayMap.entry()) ::
+          {non_neg_integer(), atom(), term()} | nil
+  defp decoration_slot_key({buf_line, {:virtual_line, virtual_text}}),
+    do: {buf_line, :virtual_line, virtual_text.id}
+
+  defp decoration_slot_key({buf_line, {:block, block, line_index}}),
+    do: {buf_line, :block, {block.id, line_index}}
+
+  defp decoration_slot_key({buf_line, {:decoration_fold, fold}}),
+    do: {buf_line, :decoration_fold, fold.id}
+
+  defp decoration_slot_key(_entry), do: nil
+
+  @spec decoration_slot(map(), non_neg_integer(), atom(), term()) :: Row.row_slot()
+  defp decoration_slot(%{decoration_slots: slots}, buf_line, kind, key) do
+    Map.fetch!(slots, {buf_line, kind, key})
   end
 
   # Returns the composed Row for a visual row, reusing the retained Row when the
@@ -599,10 +722,10 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   defp retained_wrap_lines(visual_entries, true) do
     visual_entries
     |> Enum.group_by(& &1.buf_line)
-    |> Enum.reduce(%{}, fn {buf_line, entries}, acc ->
+    |> Enum.reduce(%{}, fn {_buf_line, entries}, acc ->
       case wrap_line_cache_entry(entries) do
         nil -> acc
-        cached -> Map.put(acc, buf_line, cached)
+        {row_id, cached} -> Map.put(acc, row_id, cached)
       end
     end)
   end
@@ -610,7 +733,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   # A logical line is cacheable only when its full visual-row set is present
   # (first row is visual_index 0) and every row shares one wrap-line fingerprint.
   @spec wrap_line_cache_entry([visual_row_entry()]) ::
-          {non_neg_integer(), [visual_row_entry()]} | nil
+          {non_neg_integer(), {non_neg_integer(), [visual_row_entry()]}} | nil
   defp wrap_line_cache_entry([%{visual_index: 0} = first | _] = entries) do
     case Map.get(first, :wrap_line_hash) do
       nil ->
@@ -618,7 +741,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
       hash ->
         normalized = Enum.map(entries, fn entry -> %{entry | display_row: 0} end)
-        {hash, normalized}
+        {first.row.row_id, {hash, normalized}}
     end
   end
 
@@ -648,7 +771,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       first_line,
       ctx,
       %{first_line_byte_offset: 0, options: options},
-      no_retain()
+      no_retain(LineIdentity.new(first_line + length(lines)))
     )
     |> Enum.at(visual_row)
     |> source_position_from_visual_entry(display_col, ctx.decorations)
@@ -700,8 +823,15 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   end
 
   # Click hit-testing builds entries without retention (no previous-frame cache).
-  @spec no_retain() :: retain_ctx()
-  defp no_retain, do: %{prev: %{}, prev_wrap: %{}, compose_fp: 0}
+  @spec no_retain(LineIdentity.t()) :: retain_ctx()
+  defp no_retain(line_identity),
+    do: %{
+      prev: %{},
+      prev_wrap: %{},
+      compose_fp: 0,
+      line_identity: line_identity,
+      decoration_slots: %{}
+    }
 
   @spec build_visual_entries_for_mode(
           [String.t()],
@@ -787,7 +917,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          ctx,
          retain_ctx
        ) do
-    row_id = Row.stable_id(:normal, buf_line)
+    row_id = Row.stable_id(:normal, durable_source_id(retain_ctx, buf_line))
 
     {row, input_hash, reused?} =
       compose_or_reuse(retain_ctx, row_id, {:seq, line_text, hl_segments}, fn ->
@@ -805,6 +935,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       end)
 
     row
+    |> Row.reposition(buf_line)
     |> visual_entry(0, Unicode.display_width(row.text), 0)
     |> with_retain_meta(input_hash, reused?)
   end
@@ -867,7 +998,9 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     wrap_line_hash =
       row_input_hash(retain_ctx, {:wrap_line, line_text, hl_segments, content_width})
 
-    case reuse_wrapped_line(retain_ctx, buf_line, wrap_line_hash) do
+    source_id = durable_source_id(retain_ctx, buf_line)
+
+    case reuse_wrapped_line(retain_ctx, source_id, buf_line, wrap_line_hash) do
       {:reuse, entries} -> entries
       :miss -> compose_wrapped_logical_line(params, wrap_line_hash)
     end
@@ -888,7 +1021,12 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       compose_line(line_text, hl_segments, ctx, buf_line, line_byte_offset)
 
     composed_text
-    |> wrap_composed_entries(spans, buf_line, wrap_opts)
+    |> wrap_composed_entries(
+      spans,
+      buf_line,
+      durable_source_id(params.retain_ctx, buf_line),
+      wrap_opts
+    )
     |> Enum.map(&stamp_wrapped_entry(&1, wrap_line_hash))
   end
 
@@ -902,21 +1040,30 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   # Replays a cached wrapped logical line when its fingerprint is unchanged. The
   # cached entries already carry their Rows (ids, text, spans, hashes) and wrap
   # metadata, so reuse reproduces the exact visual-row set with no recomposition.
-  @spec reuse_wrapped_line(retain_ctx(), non_neg_integer(), non_neg_integer()) ::
-          {:reuse, [visual_row_entry()]} | :miss
-  defp reuse_wrapped_line(%{prev_wrap: prev_wrap}, buf_line, wrap_line_hash) do
-    case Map.get(prev_wrap, buf_line) do
+  @spec reuse_wrapped_line(
+          retain_ctx(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: {:reuse, [visual_row_entry()]} | :miss
+  defp reuse_wrapped_line(%{prev_wrap: prev_wrap}, source_id, buf_line, wrap_line_hash) do
+    row_id = Row.stable_id(:normal, source_id)
+
+    case Map.get(prev_wrap, row_id) do
       {^wrap_line_hash, entries} when is_list(entries) ->
-        {:reuse, Enum.map(entries, &mark_wrapped_reused(&1, wrap_line_hash))}
+        {:reuse, Enum.map(entries, &mark_wrapped_reused(&1, buf_line, wrap_line_hash))}
 
       _ ->
         :miss
     end
   end
 
-  @spec mark_wrapped_reused(map(), non_neg_integer()) :: visual_row_entry()
-  defp mark_wrapped_reused(entry, wrap_line_hash) do
+  @spec mark_wrapped_reused(map(), non_neg_integer(), non_neg_integer()) ::
+          visual_row_entry()
+  defp mark_wrapped_reused(entry, buf_line, wrap_line_hash) do
     entry
+    |> Map.put(:buf_line, buf_line)
+    |> Map.update!(:row, &Row.reposition(&1, buf_line))
     |> with_retain_meta(wrap_line_hash, true)
     |> Map.put(:wrap_line_hash, wrap_line_hash)
   end
@@ -928,10 +1075,14 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     |> Map.put(:reused?, reused?)
   end
 
-  @spec wrap_composed_entries(String.t(), [Span.t()], non_neg_integer(), keyword()) :: [
-          visual_row_entry()
-        ]
-  defp wrap_composed_entries(composed_text, spans, buf_line, opts) do
+  @spec wrap_composed_entries(
+          String.t(),
+          [Span.t()],
+          non_neg_integer(),
+          non_neg_integer(),
+          keyword()
+        ) :: [visual_row_entry()]
+  defp wrap_composed_entries(composed_text, spans, buf_line, source_id, opts) do
     [visual_rows] = WrapMap.compute([composed_text], Keyword.fetch!(opts, :content_width), opts)
 
     visual_rows
@@ -951,7 +1102,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       indent_width = Map.get(visual_row, :indent_width, 0)
 
       row = %Row{
-        row_id: Row.stable_id(row_type, buf_line, visual_index),
+        row_id: Row.stable_id(row_type, source_id, visual_index),
         row_type: row_type,
         buf_line: buf_line,
         visual_index: visual_index,
@@ -1096,7 +1247,9 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
     source_ctx = %{
       line_byte_offsets: line_byte_offsets,
-      highlight_segments_by_line: highlight_segments_by_line
+      highlight_segments_by_line: highlight_segments_by_line,
+      line_identity: retain_ctx.line_identity,
+      decoration_slots: retain_ctx.decoration_slots
     }
 
     {entries, _counters} =
@@ -1190,11 +1343,14 @@ defmodule MingaEditor.RenderModel.Window.Builder do
        ) do
     line_text = line_at(lines, buf_line, first_line)
     hl_segments = Map.get(source_ctx.highlight_segments_by_line, buf_line)
-    row_id = Row.stable_id(:normal, buf_line)
+    row_id = Row.stable_id(:normal, durable_source_id(retain_ctx, buf_line))
 
-    compose_or_reuse(retain_ctx, row_id, {:fold_normal, line_text, hl_segments}, fn ->
-      build_visual_row_entry(buf_line, :normal, lines, first_line, ctx, source_ctx, index)
-    end)
+    {row, input_hash, reused?} =
+      compose_or_reuse(retain_ctx, row_id, {:fold_normal, line_text, hl_segments}, fn ->
+        build_visual_row_entry(buf_line, :normal, lines, first_line, ctx, source_ctx, index)
+      end)
+
+    {Row.reposition(row, buf_line), input_hash, reused?}
   end
 
   defp build_visual_row_entry_retained(
@@ -1253,7 +1409,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     {composed, spans} = compose_line(line_text, hl_segments, ctx, buf_line, line_byte_offset)
 
     %Row{
-      row_id: Row.stable_id(:normal, buf_line),
+      row_id: Row.stable_id(:normal, durable_source_id(source_ctx, buf_line)),
       row_type: :normal,
       buf_line: buf_line,
       text: composed,
@@ -1278,7 +1434,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     {composed, spans} = append_fold_summary(composed, spans, hidden_count, ctx)
 
     %Row{
-      row_id: Row.stable_id(:fold_start, buf_line, 0, hidden_count),
+      row_id: Row.stable_id(:fold_start, durable_source_id(source_ctx, buf_line)),
       row_type: :fold_start,
       buf_line: buf_line,
       text: composed,
@@ -1293,7 +1449,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          _lines,
          _first_line,
          _ctx,
-         _source_ctx,
+         source_ctx,
          visual_identity_index
        ) do
     text = virtual_text_to_string(vt)
@@ -1301,7 +1457,12 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     spans = virtual_text_spans(vt)
 
     %Row{
-      row_id: Row.stable_decoration_id(:virtual_line, buf_line, vt.id),
+      row_id:
+        Row.stable_decoration_id(
+          :virtual_line,
+          durable_source_id(source_ctx, buf_line),
+          decoration_slot(source_ctx, buf_line, :virtual_line, vt.id)
+        ),
       row_type: :virtual_line,
       buf_line: buf_line,
       visual_index: visual_identity_index,
@@ -1317,7 +1478,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          _lines,
          _first_line,
          ctx,
-         _source_ctx,
+         source_ctx,
          visual_identity_index
        ) do
     # Block decorations render via callback; capture the rendered text using the same text width as the draw path.
@@ -1328,7 +1489,12 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     spans = segments_to_spans(segments)
 
     %Row{
-      row_id: Row.stable_decoration_id(:block, buf_line, {block.id, line_idx}),
+      row_id:
+        Row.stable_decoration_id(
+          :block,
+          durable_source_id(source_ctx, buf_line),
+          decoration_slot(source_ctx, buf_line, :block, {block.id, line_idx})
+        ),
       row_type: :block,
       buf_line: buf_line,
       visual_index: visual_identity_index,
@@ -1344,14 +1510,19 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          _lines,
          _first_line,
          _ctx,
-         _source_ctx,
+         source_ctx,
          _index
        ) do
     hidden = FoldRegion.hidden_count(fold)
     text = " ··· #{hidden} lines"
 
     %Row{
-      row_id: Row.stable_decoration_id(:fold_start, buf_line, fold.id),
+      row_id:
+        Row.stable_decoration_id(
+          :fold_start,
+          durable_source_id(source_ctx, buf_line),
+          decoration_slot(source_ctx, buf_line, :decoration_fold, fold.id)
+        ),
       row_type: :fold_start,
       buf_line: buf_line,
       text: text,

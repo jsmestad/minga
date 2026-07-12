@@ -1104,10 +1104,10 @@ defmodule Minga.Buffer.ProcessTest do
       # Insert more than 1000 chars with only :lsp reading periodically
       for _ <- 1..1100, do: BufferProcess.insert_char(pid, "x")
 
-      # Only one consumer has ever called consume_edit_deltas
-      _deltas = consume_edit_deltas(pid, :lsp)
+      # The first reader is already behind the bounded non-destructive horizon.
+      assert :reset_required = BufferProcess.consume_edit_deltas(pid, :lsp)
 
-      # A late-arriving consumer is behind compacted history, so it must full-sync.
+      # A late-arriving consumer is also behind compacted history.
       assert :reset_required = BufferProcess.consume_edit_deltas(pid, :late_arrival)
     end
   end

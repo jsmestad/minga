@@ -246,6 +246,41 @@ defmodule MingaEditor.RenderPipeline.Input do
     %{input | font_registry: font_registry}
   end
 
+  @doc "Overlays renderer-owned durable lineage onto one matching window snapshot."
+  @spec put_window_lineage(
+          t(),
+          non_neg_integer(),
+          pid(),
+          Minga.RenderModel.Window.LineIdentity.t(),
+          non_neg_integer(),
+          Minga.RenderModel.Window.RowSlotAllocator.t()
+        ) :: t()
+  def put_window_lineage(input, window_id, buffer, identity, sequence, allocator) do
+    case MingaEditor.Session.State.update_snapshot_window(
+           input.workspace,
+           window_id,
+           &overlay_matching_window(&1, buffer, identity, sequence, allocator)
+         ) do
+      {:ok, workspace} -> %{input | workspace: workspace}
+      :error -> input
+    end
+  end
+
+  @spec overlay_matching_window(
+          MingaEditor.Window.t(),
+          pid(),
+          Minga.RenderModel.Window.LineIdentity.t(),
+          non_neg_integer(),
+          Minga.RenderModel.Window.RowSlotAllocator.t()
+        ) :: MingaEditor.Window.t()
+  defp overlay_matching_window(%{buffer: buffer} = window, buffer, identity, sequence, allocator) do
+    window
+    |> MingaEditor.Window.put_lineage(identity, sequence)
+    |> MingaEditor.Window.put_row_slot_allocator(allocator)
+  end
+
+  defp overlay_matching_window(window, _buffer, _identity, _sequence, _allocator), do: window
+
   @doc "Invalidates one window in the owned render snapshot for targeted recovery."
   @spec invalidate_window(t(), non_neg_integer()) :: {:ok, t()} | :error
   def invalidate_window(%__MODULE__{workspace: workspace} = input, window_id) do

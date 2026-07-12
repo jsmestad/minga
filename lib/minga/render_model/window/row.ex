@@ -1,33 +1,20 @@
 defmodule Minga.RenderModel.Window.Row do
   @moduledoc """
-  A single visual row in the semantic window.
+  A semantic visual row with an injective retained-render identity.
 
-  Represents one display row as the GUI should render it. The BEAM has
-  already resolved word wrap, folding, virtual text splicing, and conceal
-  ranges. The `text` field contains the final composed UTF-8 string.
-
-  ## Row Types
-
-  - `:normal` — a regular buffer line (or the visible portion after wrapping)
-  - `:fold_start` — a fold summary line (text includes the fold indicator)
-  - `:virtual_line` — an injected virtual line from decorations (no buffer content)
-  - `:block` — a block decoration row rendered by a callback
-  - `:wrap_continuation` — a continuation row from word wrapping
+  Row ids use the fixed unsigned 64-bit layout `kind:4 | source_id:32 |
+  row_slot:28`. Producers must allocate stable row slots; this module never
+  hashes, truncates, or derives a positional fallback.
   """
 
   import Bitwise
 
   alias Minga.RenderModel.Window.Span
 
-  @row_id_kind_shift 60
-  @row_id_line_shift 28
-  @row_id_visual_shift 12
-  @row_id_line_mask 0xFFFF_FFFF
-  @row_id_visual_mask 0xFFFF
-  @row_id_decoration_mask 0x0FFF_FFFF
-  @row_id_discriminator_mask 0x0FFF
-  @row_id_discriminator_range @row_id_discriminator_mask + 1
-  @row_id_decoration_range @row_id_decoration_mask + 1
+  @kind_shift 60
+  @source_shift 28
+  @max_source_id 0xFFFF_FFFF
+  @max_row_slot 0x0FFF_FFFF
 
   @enforce_keys [:row_id, :row_type, :buf_line, :text, :spans]
   defstruct row_id: 0,
@@ -39,7 +26,15 @@ defmodule Minga.RenderModel.Window.Row do
             content_hash: 0
 
   @type row_type :: :normal | :fold_start | :virtual_line | :block | :wrap_continuation
-  @type row_id :: non_neg_integer()
+  @type identity_kind ::
+          :normal
+          | :wrap_continuation
+          | :fold_start
+          | :virtual_line
+          | :block
+          | :decoration_fold
+  @type row_id :: 0..0xFFFF_FFFF_FFFF_FFFF
+  @type row_slot :: 0..0x0FFF_FFFF
 
   @type t :: %__MODULE__{
           row_id: row_id(),
@@ -51,41 +46,43 @@ defmodule Minga.RenderModel.Window.Row do
           content_hash: non_neg_integer()
         }
 
-  @doc "Builds a compact, deterministic row identity for retained GUI texture reuse."
-  @spec stable_id(row_type(), non_neg_integer(), non_neg_integer(), non_neg_integer()) :: row_id()
-  def stable_id(row_type, buf_line, visual_index \\ 0, discriminator \\ 0) do
-    kind_bits = row_type_tag(row_type) <<< @row_id_kind_shift
-    line_bits = (buf_line &&& @row_id_line_mask) <<< @row_id_line_shift
-    visual_bits = (visual_index &&& @row_id_visual_mask) <<< @row_id_visual_shift
-    discriminator_bits = discriminator &&& @row_id_discriminator_mask
-
-    kind_bits ||| line_bits ||| visual_bits ||| discriminator_bits
+  @doc "Builds an injective row id from identity kind, durable source, and stable slot."
+  @spec stable_id(identity_kind(), non_neg_integer(), row_slot()) :: row_id()
+  def stable_id(kind, source_id, row_slot \\ 0)
+      when source_id >= 0 and source_id <= @max_source_id and row_slot >= 0 and
+             row_slot <= @max_row_slot do
+    kind_bits = identity_kind_tag(kind) <<< @kind_shift
+    source_bits = source_id <<< @source_shift
+    kind_bits ||| source_bits ||| row_slot
   end
 
-  @doc "Returns a small discriminator suitable for the low bits of `stable_id/4`."
-  @spec discriminator(term()) :: non_neg_integer()
-  def discriminator(value), do: :erlang.phash2(value, @row_id_discriminator_range)
-
-  @doc "Builds a stable row identity for decoration-driven rows."
-  @spec stable_decoration_id(row_type(), non_neg_integer(), term()) :: row_id()
-  def stable_decoration_id(row_type, buf_line, decoration_key) do
-    kind_bits = row_type_tag(row_type) <<< @row_id_kind_shift
-    line_bits = (buf_line &&& @row_id_line_mask) <<< @row_id_line_shift
-    decoration_bits = :erlang.phash2(decoration_key, @row_id_decoration_range)
-
-    kind_bits ||| line_bits ||| decoration_bits
+  @doc "Builds a decoration identity; `row_slot` must be producer-allocated integer state."
+  @spec stable_decoration_id(row_type(), non_neg_integer(), row_slot()) :: row_id()
+  def stable_decoration_id(row_type, source_id, row_slot) when is_integer(row_slot) do
+    stable_id(decoration_kind(row_type), source_id, row_slot)
   end
 
-  @doc "Computes a content hash for cache invalidation."
+  @doc "Updates transient positional metadata while preserving semantic identity and content."
+  @spec reposition(t(), non_neg_integer()) :: t()
+  def reposition(%__MODULE__{} = row, buf_line) when is_integer(buf_line) and buf_line >= 0 do
+    %{row | buf_line: buf_line}
+  end
+
+  @doc "Computes a content hash for cache invalidation, not identity."
   @spec compute_hash(String.t(), [Span.t()]) :: non_neg_integer()
-  def compute_hash(text, spans) do
-    :erlang.phash2({text, spans})
-  end
+  def compute_hash(text, spans), do: :erlang.phash2({text, spans})
 
-  @spec row_type_tag(row_type()) :: non_neg_integer()
-  defp row_type_tag(:normal), do: 1
-  defp row_type_tag(:fold_start), do: 2
-  defp row_type_tag(:virtual_line), do: 3
-  defp row_type_tag(:block), do: 4
-  defp row_type_tag(:wrap_continuation), do: 5
+  @spec decoration_kind(row_type()) :: identity_kind()
+  defp decoration_kind(:fold_start), do: :decoration_fold
+  defp decoration_kind(:virtual_line), do: :virtual_line
+  defp decoration_kind(:block), do: :block
+  defp decoration_kind(other), do: other
+
+  @spec identity_kind_tag(identity_kind()) :: 1..6
+  defp identity_kind_tag(:normal), do: 1
+  defp identity_kind_tag(:wrap_continuation), do: 2
+  defp identity_kind_tag(:fold_start), do: 3
+  defp identity_kind_tag(:virtual_line), do: 4
+  defp identity_kind_tag(:block), do: 5
+  defp identity_kind_tag(:decoration_fold), do: 6
 end

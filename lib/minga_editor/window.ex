@@ -621,6 +621,61 @@ defmodule MingaEditor.Window do
     %{window | render_cache: RenderCache.put_retained_wrap_lines(cache, lines)}
   end
 
+  @doc "Reconciles durable logical-line identities from an atomic buffer snapshot."
+  @spec sync_line_identity(t(), Minga.Buffer.RenderSnapshot.t()) :: t()
+  def sync_line_identity(%__MODULE__{render_cache: cache, buffer: buffer} = window, snapshot) do
+    %{window | render_cache: RenderCache.sync_line_identity(cache, buffer, snapshot)}
+  end
+
+  @doc "Overlays renderer-owned committed lineage onto a window snapshot."
+  @spec put_lineage(
+          t(),
+          Minga.RenderModel.Window.LineIdentity.t(),
+          non_neg_integer()
+        ) :: t()
+  def put_lineage(
+        %__MODULE__{render_cache: cache, buffer: buffer} = window,
+        identity,
+        sequence
+      ) do
+    %{window | render_cache: RenderCache.put_lineage(cache, buffer, identity, sequence)}
+  end
+
+  @doc "Returns the producer-owned stable row-slot allocator."
+  @spec row_slot_allocator(t()) :: Minga.RenderModel.Window.RowSlotAllocator.t()
+  def row_slot_allocator(%__MODULE__{render_cache: cache}) do
+    RenderCache.row_slot_allocator(cache)
+  end
+
+  @doc "Stores the producer-owned stable row-slot allocator."
+  @spec put_row_slot_allocator(t(), Minga.RenderModel.Window.RowSlotAllocator.t()) :: t()
+  def put_row_slot_allocator(%__MODULE__{render_cache: cache} = window, allocator) do
+    %{window | render_cache: RenderCache.put_row_slot_allocator(cache, allocator)}
+  end
+
+  @doc "Returns the applied buffer change sequence for durable line identity."
+  @spec applied_change_sequence(t()) :: non_neg_integer()
+  def applied_change_sequence(%__MODULE__{render_cache: cache}) do
+    RenderCache.applied_change_sequence(cache)
+  end
+
+  @doc "Explicitly rebuilds durable content identity in a fresh epoch."
+  @spec reset_content_identity(t(), Minga.Buffer.RenderSnapshot.t()) :: t()
+  def reset_content_identity(
+        %__MODULE__{render_cache: cache, buffer: buffer} = window,
+        snapshot
+      ) do
+    %{window | render_cache: RenderCache.reset_content_identity(cache, buffer, snapshot)}
+  end
+
+  @doc "Returns the window's durable content epoch."
+  @spec content_epoch(t()) :: non_neg_integer()
+  def content_epoch(%__MODULE__{render_cache: cache}), do: RenderCache.content_epoch(cache)
+
+  @doc "Returns the window's durable logical-line identity sequence."
+  @spec line_identity(t()) :: Minga.RenderModel.Window.LineIdentity.t() | nil
+  def line_identity(%__MODULE__{render_cache: cache}), do: RenderCache.line_identity(cache)
+
   @doc "Returns the persistent full-document residence build state (#2658)."
   @spec resident_build(t()) :: MingaEditor.RenderModel.Window.ResidentBuild.t() | nil
   def resident_build(%__MODULE__{render_cache: cache}), do: RenderCache.resident_build(cache)

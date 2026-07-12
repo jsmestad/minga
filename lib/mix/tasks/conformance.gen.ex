@@ -93,6 +93,7 @@ defmodule Mix.Tasks.Conformance.Gen do
     [
       keyframe_decode(),
       rows_delta_ref_resolution(),
+      structural_insert_preserves_identity(),
       ref_miss_full_recovery(),
       cursor_only_overlay_delta(),
       layout_generation_full_replace(),
@@ -165,6 +166,49 @@ defmodule Mix.Tasks.Conformance.Gen do
           "rows" => rows_expect(rows2),
           "anchor" => anchor(win2),
           "offset_discarded" => discarded?(scroll(win1), scroll(win2))
+        })
+      ]
+    )
+  end
+
+  @spec structural_insert_preserves_identity() :: transcript()
+  defp structural_insert_preserves_identity do
+    rows1 = [
+      source_row(0, 0, "duplicate"),
+      source_row(1, 1, "duplicate"),
+      source_row(2, 2, "tail")
+    ]
+
+    win1 = window(window_id: 1, rows: rows1, top: 0, epoch: 1, full_refresh: true)
+
+    rows2 = [
+      source_row(3, 0, "inserted"),
+      source_row(0, 1, "duplicate"),
+      source_row(1, 2, "duplicate"),
+      source_row(2, 3, "tail")
+    ]
+
+    win2 = window(window_id: 1, rows: rows2, top: 0, epoch: 1, full_refresh: false)
+    {rows_delta, false} = WindowEncoder.encode_rows_delta(win2, %{})
+
+    transcript(
+      "structural_insert_preserves_identity",
+      "store",
+      %{swift: true, go: true},
+      "Inserting a logical line at the top keeps duplicate surviving row IDs while updating their positional buf_line metadata in one transactional A2 snapshot.",
+      [
+        frame(
+          @op_window_content,
+          "duplicate-line keyframe",
+          WindowEncoder.encode_window_content(win1),
+          %{
+            "store_present" => true,
+            "rows" => rows_expect(rows1)
+          }
+        ),
+        frame(@op_rows_delta, "top insert (durable IDs, updated positions)", rows_delta, %{
+          "store_present" => true,
+          "rows" => rows_expect(rows2)
         })
       ]
     )
@@ -947,6 +991,19 @@ defmodule Mix.Tasks.Conformance.Gen do
       row_type: :normal,
       buf_line: buf_line,
       visual_index: buf_line,
+      text: text,
+      spans: [],
+      content_hash: Row.compute_hash(text, [])
+    }
+  end
+
+  @spec source_row(non_neg_integer(), non_neg_integer(), String.t()) :: Row.t()
+  defp source_row(source_id, buf_line, text) do
+    %Row{
+      row_id: Row.stable_id(:normal, source_id),
+      row_type: :normal,
+      buf_line: buf_line,
+      visual_index: 0,
       text: text,
       spans: [],
       content_hash: Row.compute_hash(text, [])

@@ -51,12 +51,14 @@ defmodule MingaEditor.Renderer.Server do
 
   use GenServer
 
+  alias Minga.RenderModel.Window.LineIdentity
   alias Minga.Telemetry
   alias MingaEditor.RenderPipeline
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.Renderer.Caches
   alias MingaEditor.UI.FontRegistry
   alias MingaEditor.UI.Panel.MessageStore
+  alias MingaEditor.Window
 
   @typedoc "Render pipeline output after a frame has run."
   @type render_output :: Input.t()
@@ -103,6 +105,12 @@ defmodule MingaEditor.Renderer.Server do
           font_registry: FontRegistry.t(),
           caches: Caches.t(),
           message_store: MessageStore.t() | nil,
+          lineages: %{
+            optional({Window.id(), pid()}) => {LineIdentity.t(), non_neg_integer()}
+          },
+          row_slot_allocators: %{
+            optional({Window.id(), pid()}) => Minga.RenderModel.Window.RowSlotAllocator.t()
+          },
           pipeline: pipeline(),
           require_ack?: boolean()
         }
@@ -116,6 +124,8 @@ defmodule MingaEditor.Renderer.Server do
             font_registry: FontRegistry.new(),
             caches: Caches.new(),
             message_store: nil,
+            lineages: %{},
+            row_slot_allocators: %{},
             pipeline: &RenderPipeline.run/1,
             require_ack?: true
 
@@ -260,6 +270,8 @@ defmodule MingaEditor.Renderer.Server do
   @impl true
   @spec handle_info(:do_render, t()) :: {:noreply, t()}
   def handle_info(:do_render, %__MODULE__{in_flight: {snap, seq, pushed_at}} = state) do
+    snap = overlay_lineages(snap, state.lineages, state.row_slot_allocators)
+
     output =
       Telemetry.span(
         [:minga, :render, :pipeline],
@@ -280,8 +292,14 @@ defmodule MingaEditor.Renderer.Server do
       %{frame_seq: seq}
     )
 
-    # Port write is not proof of commit. Keep the prepared output private until
-    # the matching generation/sequence acknowledgement returns the single credit.
+    # Lineage follows successful BEAM pipeline application, not frontend cache
+    # acknowledgement. Rejection/ref-miss retries therefore rebase from it, while
+    # the rescue path below deliberately leaves it unchanged.
+    {lineages, row_slot_allocators} =
+      commit_lineages(state.lineages, state.row_slot_allocators, output)
+
+    # Port write is not proof of frontend commit. Keep the prepared output private
+    # until the matching generation/sequence acknowledgement returns the credit.
     if state.require_ack? do
       generation = output.caches.recovery_generation
 
@@ -300,6 +318,8 @@ defmodule MingaEditor.Renderer.Server do
       state = %{
         state
         | font_registry: output.font_registry,
+          lineages: lineages,
+          row_slot_allocators: row_slot_allocators,
           in_flight: nil,
           awaiting_ack: lease
       }
@@ -312,7 +332,9 @@ defmodule MingaEditor.Renderer.Server do
         state
         | font_registry: output.font_registry,
           caches: output.caches,
-          message_store: output.message_store
+          message_store: output.message_store,
+          lineages: lineages,
+          row_slot_allocators: row_slot_allocators
       }
 
       send_writeback(state.editor_pid, output, seq)
@@ -590,6 +612,48 @@ defmodule MingaEditor.Renderer.Server do
          %MessageStore{} = latest
        ) do
     %{snap | message_store: MessageStore.merge_sent_cursor(store, latest)}
+  end
+
+  @typep lineage_map :: %{
+           optional({Window.id(), pid()}) => {LineIdentity.t(), non_neg_integer()}
+         }
+
+  @typep row_slot_allocator_map :: %{
+           optional({Window.id(), pid()}) => Minga.RenderModel.Window.RowSlotAllocator.t()
+         }
+
+  @spec overlay_lineages(Input.t(), lineage_map(), row_slot_allocator_map()) :: Input.t()
+  defp overlay_lineages(input, lineages, row_slot_allocators) do
+    Enum.reduce(lineages, input, fn {{window_id, buffer} = key, {identity, sequence}}, acc ->
+      allocator = Map.fetch!(row_slot_allocators, key)
+      Input.put_window_lineage(acc, window_id, buffer, identity, sequence, allocator)
+    end)
+  end
+
+  @spec commit_lineages(lineage_map(), row_slot_allocator_map(), Input.t()) ::
+          {lineage_map(), row_slot_allocator_map()}
+  defp commit_lineages(lineages, row_slot_allocators, %Input{workspace: %{windows: windows}}) do
+    Enum.reduce(windows.map, {lineages, row_slot_allocators}, fn
+      {window_id, window}, accumulators ->
+        commit_window_lineage(Window.line_identity(window), window_id, window, accumulators)
+    end)
+  end
+
+  @spec commit_window_lineage(
+          LineIdentity.t() | nil,
+          Window.id(),
+          Window.t(),
+          {lineage_map(), row_slot_allocator_map()}
+        ) :: {lineage_map(), row_slot_allocator_map()}
+  defp commit_window_lineage(nil, _window_id, _window, accumulators), do: accumulators
+
+  defp commit_window_lineage(identity, window_id, window, {lineages, allocators}) do
+    key = {window_id, window.buffer}
+
+    {
+      Map.put(lineages, key, {identity, Window.applied_change_sequence(window)}),
+      Map.put(allocators, key, Window.row_slot_allocator(window))
+    }
   end
 
   @spec monotonic_now() :: integer()

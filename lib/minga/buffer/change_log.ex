@@ -15,6 +15,8 @@ defmodule Minga.Buffer.ChangeLog do
   @type sequence :: non_neg_integer()
   @type entry :: {sequence(), EditDelta.t()}
   @type unseen_changes :: {:ok, [EditDelta.t()]} | :reset_required
+  @type sequence_changes ::
+          {:ok, sequence(), [EditDelta.t()]} | {:reset_required, sequence()}
 
   defstruct pending_changes: [],
             sequence: 0,
@@ -41,7 +43,7 @@ defmodule Minga.Buffer.ChangeLog do
       log
       | pending_changes: [delta | log.pending_changes],
         sequence: sequence,
-        entries: [{sequence, delta} | log.entries]
+        entries: Enum.take([{sequence, delta} | log.entries], @max_single_consumer_entries)
     }
   end
 
@@ -66,10 +68,28 @@ defmodule Minga.Buffer.ChangeLog do
     {result, compact(log)}
   end
 
-  @doc "Clears all recorded changes and consumer cursors."
+  @doc "Returns sequence-qualified changes without mutating or registering a consumer."
+  @spec changes_since(t(), sequence()) :: sequence_changes()
+  def changes_since(%__MODULE__{} = log, cursor) when is_integer(cursor) and cursor >= 0 do
+    case unseen_changes(log, cursor) do
+      {:ok, deltas} -> {:ok, log.sequence, deltas}
+      :reset_required -> {:reset_required, log.sequence}
+    end
+  end
+
+  @doc "Returns the first sequence still retained, or the next sequence when empty."
+  @spec horizon(t()) :: sequence()
+  def horizon(%__MODULE__{entries: [], sequence: sequence}), do: sequence + 1
+  def horizon(%__MODULE__{entries: entries}), do: earliest_retained_sequence(entries)
+
+  @doc "Returns the latest recorded sequence."
+  @spec sequence(t()) :: sequence()
+  def sequence(%__MODULE__{sequence: sequence}), do: sequence
+
+  @doc "Clears all recorded changes and consumer cursors without rewinding sequence."
   @spec clear(t()) :: t()
   def clear(%__MODULE__{} = log) do
-    %{log | pending_changes: [], entries: [], consumer_cursors: %{}}
+    %{log | pending_changes: [], sequence: log.sequence + 1, entries: [], consumer_cursors: %{}}
   end
 
   @doc false
@@ -110,7 +130,13 @@ defmodule Minga.Buffer.ChangeLog do
   @spec compact(t()) :: t()
   defp compact(%__MODULE__{consumer_cursors: cursors} = log) when map_size(cursors) >= 2 do
     min_cursor = cursors |> Map.values() |> Enum.min()
-    %{log | entries: Enum.filter(log.entries, fn {sequence, _delta} -> sequence > min_cursor end)}
+
+    retained =
+      log.entries
+      |> Enum.filter(fn {sequence, _delta} -> sequence > min_cursor end)
+      |> Enum.take(@max_single_consumer_entries)
+
+    %{log | entries: retained}
   end
 
   defp compact(%__MODULE__{} = log) do

@@ -367,6 +367,13 @@ defmodule Minga.Buffer.Process do
   @spec version(GenServer.server()) :: non_neg_integer()
   def version(server), do: GenServer.call(server, :version)
 
+  @doc "Returns a non-mutating sequence-qualified change query."
+  @spec changes_since(GenServer.server(), Minga.Buffer.ChangeLog.sequence()) ::
+          Minga.Buffer.ChangeLog.sequence_changes()
+  def changes_since(server, sequence) do
+    GenServer.call(server, {:changes_since, sequence})
+  end
+
   @doc """
   Returns edit deltas accumulated since the given consumer's last read.
 
@@ -384,7 +391,8 @@ defmodule Minga.Buffer.Process do
   HighlightSync still uses this during the migration period since it runs
   synchronously inside the Editor GenServer before the deferred broadcast fires.
   """
-  @spec consume_edit_deltas(GenServer.server(), atom()) :: edit_delta_update()
+  @spec consume_edit_deltas(GenServer.server(), Minga.Buffer.ChangeLog.consumer()) ::
+          edit_delta_update()
   def consume_edit_deltas(server, consumer_id) do
     GenServer.call(server, {:consume_edit_deltas, consumer_id})
   end
@@ -588,6 +596,18 @@ defmodule Minga.Buffer.Process do
           RenderSnapshot.t()
   def render_snapshot(server, first_line, count) when first_line >= 0 and count >= 0 do
     GenServer.call(server, {:render_snapshot, first_line, count})
+  end
+
+  @doc "Returns an atomic render snapshot plus changes after the supplied sequence."
+  @spec render_snapshot(
+          GenServer.server(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Minga.Buffer.ChangeLog.sequence()
+        ) :: RenderSnapshot.t()
+  def render_snapshot(server, first_line, count, since_sequence)
+      when first_line >= 0 and count >= 0 and since_sequence >= 0 do
+    GenServer.call(server, {:render_snapshot, first_line, count, since_sequence})
   end
 
   @doc "Deletes the text between two positions (from_pos inclusive, to_pos exclusive), placing the cursor at the start of the range."
@@ -1349,6 +1369,10 @@ defmodule Minga.Buffer.Process do
     {:reply, result, %{state | change_log: change_log}}
   end
 
+  def handle_call({:changes_since, sequence}, _from, state) do
+    {:reply, ChangeLog.changes_since(state.change_log, sequence), state}
+  end
+
   def handle_call(:version, _from, state) do
     {:reply, BufState.version(state), state}
   end
@@ -1468,17 +1492,29 @@ defmodule Minga.Buffer.Process do
     {:reply, :ok, %{state | document: new_buf}}
   end
 
-  def handle_call({:render_snapshot, first_line, count}, _from, state) do
-    buf = state.document
+  def handle_call({:render_snapshot, first_line, count}, from, state) do
+    handle_call(
+      {:render_snapshot, first_line, count, ChangeLog.sequence(state.change_log)},
+      from,
+      state
+    )
+  end
 
-    # Use position_to_offset for O(1) byte offset lookup via line index,
-    # instead of iterating all lines before first_line.
+  def handle_call({:render_snapshot, first_line, count, since_sequence}, _from, state) do
+    buf = state.document
     first_line_byte_offset = Position.point_for(buf, {first_line, 0})
 
+    changes =
+      case ChangeLog.changes_since(state.change_log, since_sequence) do
+        {:ok, _sequence, deltas} -> {:ok, deltas}
+        {:reset_required, _sequence} -> :reset_required
+      end
+
     snapshot = %RenderSnapshot{
+      document: buf,
       cursor: Document.cursor(buf),
       line_count: Document.line_count(buf),
-      lines: Lines.slice(buf, first_line, count),
+      lines: snapshot_lines(buf, first_line, count),
       file_path: state.file_path,
       filetype: state.filetype,
       buffer_type: state.buffer_type,
@@ -1488,7 +1524,10 @@ defmodule Minga.Buffer.Process do
       first_line_byte_offset: first_line_byte_offset,
       version: BufState.version(state),
       options: resolved_buffer_local_options(state),
-      decorations: state.decorations
+      decorations: state.decorations,
+      change_sequence: ChangeLog.sequence(state.change_log),
+      change_horizon: ChangeLog.horizon(state.change_log),
+      changes: changes
     }
 
     {:reply, snapshot, state}
@@ -2356,6 +2395,10 @@ defmodule Minga.Buffer.Process do
   end
 
   # ── move_if_possible helpers ──
+
+  @spec snapshot_lines(Document.t(), non_neg_integer(), non_neg_integer()) :: [String.t()]
+  defp snapshot_lines(_document, _first_line, 0), do: []
+  defp snapshot_lines(document, first_line, count), do: Lines.slice(document, first_line, count)
 
   @spec right_boundary(Document.t(), non_neg_integer()) :: non_neg_integer()
   defp right_boundary(doc, line) do

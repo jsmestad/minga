@@ -44,7 +44,7 @@ defmodule MingaEditor.Window.RenderCache do
   A retained wrapped logical line: the cheap input fingerprint that produced its
   visual rows plus the full visual-row entry list (Rows and their wrap metadata).
 
-  The Content stage (semantic Builder) keys these by `buf_line`. On the next
+  The Content stage keys these by the first visual row's durable row id. On the next
   frame, when the logical line's fingerprint (line text, highlight segments,
   compose context, and content width) is unchanged, the Builder reuses the
   entire visual-row set verbatim instead of recomposing the line and recomputing
@@ -63,6 +63,10 @@ defmodule MingaEditor.Window.RenderCache do
   """
   @type context_fingerprint :: term()
 
+  alias Minga.Buffer.RenderSnapshot
+  alias Minga.RenderModel.Window.LineIdentity
+  alias Minga.RenderModel.Window.RowSlotAllocator
+
   @type t :: %__MODULE__{
           dirty_lines: :all | %{optional(non_neg_integer()) => true},
           last_viewport_top: integer(),
@@ -78,6 +82,10 @@ defmodule MingaEditor.Window.RenderCache do
           total_visual_rows_cache: {term(), non_neg_integer()} | nil,
           retained_rows: %{optional(non_neg_integer()) => retained_row()},
           retained_wrap_lines: %{optional(non_neg_integer()) => retained_wrap_line()},
+          line_identity: LineIdentity.t() | nil,
+          identity_buffer: pid() | nil,
+          applied_change_sequence: non_neg_integer(),
+          row_slot_allocator: RowSlotAllocator.t(),
           resident_build: MingaEditor.RenderModel.Window.ResidentBuild.t() | nil,
           resident: boolean(),
           residence_armed: boolean(),
@@ -94,12 +102,16 @@ defmodule MingaEditor.Window.RenderCache do
             last_cursor_line: -1,
             last_buf_version: -1,
             last_context_fingerprint: nil,
-            content_epoch: 0,
+            content_epoch: 1,
             reset_pending: true,
             last_reset_fingerprint: nil,
             total_visual_rows_cache: nil,
             retained_rows: %{},
             retained_wrap_lines: %{},
+            line_identity: nil,
+            identity_buffer: nil,
+            applied_change_sequence: 0,
+            row_slot_allocator: RowSlotAllocator.new(),
             resident_build: nil,
             resident: false,
             residence_armed: false,
@@ -285,18 +297,126 @@ defmodule MingaEditor.Window.RenderCache do
     %{cache | reset_pending: true}
   end
 
+  @doc "Reconciles durable logical-line identity from one atomic buffer snapshot."
+  @spec sync_line_identity(t(), pid(), RenderSnapshot.t()) :: t()
+  def sync_line_identity(
+        %__MODULE__{identity_buffer: existing_buffer} = cache,
+        buffer,
+        %RenderSnapshot{} = snapshot
+      )
+      when is_pid(existing_buffer) and existing_buffer != buffer do
+    request_line_identity_reset(cache, buffer, snapshot)
+  end
+
+  def sync_line_identity(
+        %__MODULE__{line_identity: nil} = cache,
+        buffer,
+        %RenderSnapshot{} = snapshot
+      ) do
+    epoch = max(cache.content_epoch, 1)
+
+    %{
+      cache
+      | content_epoch: epoch,
+        line_identity: LineIdentity.new(snapshot.line_count, epoch),
+        identity_buffer: buffer,
+        applied_change_sequence: snapshot.change_sequence
+    }
+  end
+
+  def sync_line_identity(
+        %__MODULE__{} = cache,
+        _buffer,
+        %RenderSnapshot{changes: {:ok, changes}} = snapshot
+      ) do
+    case LineIdentity.apply_edits(cache.line_identity, changes) do
+      {:ok, identity} -> validate_line_identity_count(cache, identity, snapshot)
+      :reset_required -> request_line_identity_reset(cache, cache.identity_buffer, snapshot)
+    end
+  end
+
+  def sync_line_identity(%__MODULE__{} = cache, buffer, %RenderSnapshot{} = snapshot) do
+    request_line_identity_reset(cache, buffer, snapshot)
+  end
+
+  @doc "Overlays renderer-owned committed lineage onto a stale editor snapshot."
+  @spec put_lineage(t(), pid(), LineIdentity.t(), non_neg_integer()) :: t()
+  def put_lineage(%__MODULE__{} = cache, buffer, identity, sequence) do
+    %{
+      cache
+      | line_identity: identity,
+        identity_buffer: buffer,
+        applied_change_sequence: sequence,
+        content_epoch: LineIdentity.content_epoch(identity)
+    }
+  end
+
+  @doc "Returns the persistent producer row-slot allocator."
+  @spec row_slot_allocator(t()) :: RowSlotAllocator.t()
+  def row_slot_allocator(%__MODULE__{row_slot_allocator: allocator}), do: allocator
+
+  @doc "Stores the producer row-slot allocator after a successful content build."
+  @spec put_row_slot_allocator(t(), RowSlotAllocator.t()) :: t()
+  def put_row_slot_allocator(%__MODULE__{} = cache, %RowSlotAllocator{} = allocator) do
+    %{cache | row_slot_allocator: allocator}
+  end
+
+  @doc "Returns the sequence through which the line identity has been applied."
+  @spec applied_change_sequence(t()) :: non_neg_integer()
+  def applied_change_sequence(%__MODULE__{applied_change_sequence: sequence}), do: sequence
+
+  @doc "Explicitly rebuilds durable content identity in a fresh epoch."
+  @spec reset_content_identity(t(), pid(), RenderSnapshot.t()) :: t()
+  def reset_content_identity(%__MODULE__{} = cache, buffer, %RenderSnapshot{} = snapshot) do
+    request_line_identity_reset(cache, buffer, snapshot)
+  end
+
+  @doc "Returns the durable content epoch."
+  @spec content_epoch(t()) :: non_neg_integer()
+  def content_epoch(%__MODULE__{content_epoch: epoch}), do: epoch
+
+  @doc "Returns the durable logical-line identity sequence."
+  @spec line_identity(t()) :: LineIdentity.t() | nil
+  def line_identity(%__MODULE__{line_identity: identity}), do: identity
+
   @doc "Prepares the retained GUI content epoch for the current frame."
   @spec prepare_epoch(t(), term()) :: {t(), non_neg_integer(), boolean()}
   def prepare_epoch(%__MODULE__{} = cache, reset_fingerprint) do
     reset? = cache.reset_pending or cache.last_reset_fingerprint != reset_fingerprint
-    epoch = if reset?, do: cache.content_epoch + 1, else: cache.content_epoch
 
     {%{
        cache
-       | content_epoch: epoch,
-         reset_pending: false,
+       | reset_pending: false,
          last_reset_fingerprint: reset_fingerprint
-     }, epoch, reset?}
+     }, cache.content_epoch, reset?}
+  end
+
+  @spec validate_line_identity_count(t(), LineIdentity.t(), RenderSnapshot.t()) :: t()
+  defp validate_line_identity_count(cache, identity, snapshot) do
+    if LineIdentity.line_count(identity) == snapshot.line_count do
+      %{
+        cache
+        | line_identity: identity,
+          applied_change_sequence: snapshot.change_sequence
+      }
+    else
+      request_line_identity_reset(cache, cache.identity_buffer, snapshot)
+    end
+  end
+
+  @spec request_line_identity_reset(t(), pid(), RenderSnapshot.t()) :: t()
+  defp request_line_identity_reset(cache, buffer, snapshot) do
+    epoch = cache.content_epoch + 1
+
+    %{
+      cache
+      | content_epoch: epoch,
+        line_identity: LineIdentity.new(snapshot.line_count, epoch),
+        identity_buffer: buffer,
+        applied_change_sequence: snapshot.change_sequence,
+        row_slot_allocator: RowSlotAllocator.new(),
+        reset_pending: true
+    }
   end
 
   @doc "Returns a cached wrapped visual row total when the key matches."
@@ -401,7 +521,7 @@ defmodule MingaEditor.Window.RenderCache do
   end
 
   @doc """
-  Returns the `{buf_line => {input_hash, entries}}` map captured by the last
+  Returns the `{durable_row_id => {input_hash, entries}}` map captured by the last
   semantic content build for wrapped windows. The Builder consults it to skip
   recomposing and re-wrapping logical lines whose input fingerprint is unchanged.
   """
