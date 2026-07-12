@@ -34,24 +34,34 @@ enum PreparedFrameRejection: Error, Sendable, Equatable {
     case transcriptDesynced
     case decodeFailure(frameSeq: UInt32)
     case outOfTransactionCommand(opcode: UInt8?)
+    case resourcePolicy
 
-    /// Stable wire value shared with docs/protocol_schema.toml and Go.
+    /// Stable wire value generated from docs/protocol_schema.toml.
     var wireCode: UInt8 {
         switch self {
-        case .beginWhileOpen: return 1
-        case .commitWithoutBegin, .commitSequenceMismatch: return 2
-        case .frameSequenceNotIncreasing: return 3
-        case .baseSequenceMismatch: return 4
-        case .missingTheme: return 5
-        case .incompleteTheme: return 6
-        case .missingWindowReference: return 7
-        case .windowEpochMismatch: return 8
-        case .invalidRetainedRows: return 9
-        case .missingFontResource: return 10
-        case .transcriptBeforeSeed, .transcriptEpochMismatch, .transcriptDesynced: return 11
-        case .decodeFailure: return 12
-        case .outOfTransactionCommand: return 13
-        case .invalidRowSplice: return 14
+        case .beginWhileOpen: return GeneratedProtocol.FrameRejectionReason.truncation.rawValue
+        case .commitWithoutBegin, .commitSequenceMismatch: return GeneratedProtocol.FrameRejectionReason.commitSequenceMismatch.rawValue
+        case .frameSequenceNotIncreasing: return GeneratedProtocol.FrameRejectionReason.frameSequenceNotIncreasing.rawValue
+        case .baseSequenceMismatch: return GeneratedProtocol.FrameRejectionReason.baseSequenceMismatch.rawValue
+        case .missingTheme: return GeneratedProtocol.FrameRejectionReason.missingTheme.rawValue
+        case .incompleteTheme: return GeneratedProtocol.FrameRejectionReason.incompleteTheme.rawValue
+        case .missingWindowReference: return GeneratedProtocol.FrameRejectionReason.missingWindowReference.rawValue
+        case .windowEpochMismatch: return GeneratedProtocol.FrameRejectionReason.windowEpochMismatch.rawValue
+        case .invalidRetainedRows: return GeneratedProtocol.FrameRejectionReason.invalidRetainedRows.rawValue
+        case .missingFontResource: return GeneratedProtocol.FrameRejectionReason.missingFontResource.rawValue
+        case .transcriptBeforeSeed, .transcriptEpochMismatch, .transcriptDesynced: return GeneratedProtocol.FrameRejectionReason.transcriptDesync.rawValue
+        case .decodeFailure: return GeneratedProtocol.FrameRejectionReason.decodeFailure.rawValue
+        case .outOfTransactionCommand: return GeneratedProtocol.FrameRejectionReason.outOfTransactionCommand.rawValue
+        case .invalidRowSplice: return GeneratedProtocol.FrameRejectionReason.invalidRowSplice.rawValue
+        case .resourcePolicy: return GeneratedProtocol.FrameRejectionReason.resourcePolicy.rawValue
+        }
+    }
+
+    /// Resource-policy rejection is terminal by default; lineage failures recover.
+    var disposition: GeneratedProtocol.FrameRejectionDisposition {
+        switch self {
+        case .resourcePolicy: return .terminalFrontendFailure
+        default: return .retryableRecovery
         }
     }
 
@@ -92,6 +102,8 @@ enum PreparedFrameRejection: Error, Sendable, Equatable {
             return "decode failure in frame \(frameSeq)"
         case .outOfTransactionCommand:
             return "out-of-transaction command"
+        case .resourcePolicy:
+            return "frontend resource policy exceeded"
         }
     }
 }

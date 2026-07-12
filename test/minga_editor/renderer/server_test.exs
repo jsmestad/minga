@@ -9,10 +9,12 @@ defmodule MingaEditor.Renderer.ServerTest do
   use ExUnit.Case, async: false
 
   alias Minga.RenderModel.Window.LineIdentity
+  alias MingaEditor.Frontend.ResourcePolicy
   alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline
   alias MingaEditor.RenderPipeline.Content
   alias MingaEditor.RenderPipeline.Input
+  alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.RenderPipeline.Scroll
   alias MingaEditor.Renderer.Caches
   alias MingaEditor.Renderer.RenderReceipt
@@ -354,18 +356,170 @@ defmodule MingaEditor.Renderer.ServerTest do
       assert_receive {:ack_pipeline, 31, 1, 30, false}, @async_render_timeout
     end
 
-    test "rejected frame N renders only latest pending N+1 as a fresh-generation keyframe" do
+    test "retryable rejection renders only latest pending intent as a fresh-generation keyframe" do
       renderer = start_ack_renderer(self())
 
       RendererServer.cast_snapshot(renderer, stub_snapshot(), 20)
       assert_receive {:ack_pipeline, 20, 1, 0, true}, @async_render_timeout
       RendererServer.cast_snapshot(renderer, stub_snapshot(), 21)
 
-      RendererServer.frame_status(renderer, {:frame_rejected, 1, 20, 0, :base_sequence_mismatch})
+      RendererServer.frame_status(
+        renderer,
+        {:frame_rejected, 1, 20, 0, :base_sequence_mismatch, :retryable_recovery}
+      )
+
       assert_receive {:ack_pipeline, 21, 2, 0, true}, @async_render_timeout
       assert RendererServer.acknowledgement_state(renderer) == {2, 0}
       refute_receive {:ack_pipeline, _, 3, _, _}, 50
       refute_receive {:render_done, %RenderReceipt{frame_seq: 20}}, 50
+    end
+
+    test "terminal resource rejection cancels credit, preserves last good, and ignores stale duplicates" do
+      renderer = start_ack_renderer(self())
+      snapshot = stub_snapshot()
+
+      RendererServer.cast_snapshot(renderer, snapshot, 10)
+      assert_receive {:ack_pipeline, 10, 1, 0, true}, @async_render_timeout
+      RendererServer.frame_status(renderer, {:frame_applied, 1, 10})
+      assert_receive {:render_done, %RenderReceipt{frame_seq: 10}}, @async_render_timeout
+
+      RendererServer.cast_snapshot(renderer, snapshot, 11)
+      assert_receive {:ack_pipeline, 11, 1, 10, false}, @async_render_timeout
+
+      terminal = {:frame_rejected, 1, 11, 10, :resource_policy, :terminal_frontend_failure}
+      RendererServer.frame_status(renderer, terminal)
+
+      refute RendererServer.rendering?(renderer)
+      assert RendererServer.acknowledgement_state(renderer) == {1, 10}
+
+      assert %{generation: 1, frame_seq: 11, last_good_frame_seq: 10, reason: :resource_policy} =
+               RendererServer.terminal_failure(renderer)
+
+      refute_receive {:render_done, %RenderReceipt{frame_seq: 11}}, 50
+
+      RendererServer.frame_status(renderer, terminal)
+
+      RendererServer.frame_status(
+        renderer,
+        {:frame_rejected, 0, 11, 10, :resource_policy, :terminal_frontend_failure}
+      )
+
+      assert RendererServer.acknowledgement_state(renderer) == {1, 10}
+      refute_receive {:ack_pipeline, _, _, _, _}, 50
+    end
+
+    test "identical terminal intent stays blocked until capability state changes" do
+      renderer = start_ack_renderer(self())
+      snapshot = stub_snapshot()
+
+      RendererServer.cast_snapshot(renderer, snapshot, 20)
+      assert_receive {:ack_pipeline, 20, 1, 0, true}, @async_render_timeout
+
+      RendererServer.frame_status(
+        renderer,
+        {:frame_rejected, 1, 20, 0, :resource_policy, :terminal_frontend_failure}
+      )
+
+      refute RendererServer.rendering?(renderer)
+      RendererServer.cast_snapshot(renderer, snapshot, 21)
+      refute_receive {:ack_pipeline, 21, _, _, _}, 50
+
+      changed = %{
+        snapshot
+        | capabilities: %{snapshot.capabilities | semantic_ui: true}
+      }
+
+      RendererServer.cast_snapshot(renderer, changed, 22)
+      assert_receive {:ack_pipeline, 22, 1, 0, true}, @async_render_timeout
+      assert RendererServer.terminal_failure(renderer) == nil
+    end
+
+    test "adapted retry consumes only matching evidence and renders the changed intent" do
+      renderer = start_ack_renderer(self(), pipeline: adaptation_probe_pipeline(self()))
+
+      snapshot = stub_snapshot()
+      policy = ResourcePolicy.new(1, 64 * 1_048_576, 0, 0)
+      snapshot = %{snapshot | capabilities: %{snapshot.capabilities | resource_policy: policy}}
+      rejected_intent = Intent.from_input(snapshot)
+
+      adapted_snapshot = %{snapshot | capabilities: %{snapshot.capabilities | semantic_ui: true}}
+      adapted_intent = Intent.from_input(adapted_snapshot)
+
+      RendererServer.cast_snapshot(renderer, snapshot, 30)
+      assert_receive {:adaptation_pipeline, 30, 1, 0, true, false}, @async_render_timeout
+
+      assert RendererServer.record_adaptation(
+               renderer,
+               1,
+               30,
+               :frame_bytes,
+               1_000,
+               1_000,
+               adapted_intent
+             ) == :error
+
+      assert RendererServer.record_adaptation(
+               renderer,
+               1,
+               30,
+               :frame_commands,
+               1_000,
+               800,
+               adapted_intent
+             ) == :error
+
+      assert RendererServer.record_adaptation(
+               renderer,
+               2,
+               30,
+               :frame_bytes,
+               1_000,
+               800,
+               adapted_intent
+             ) == :error
+
+      assert RendererServer.record_adaptation(
+               renderer,
+               1,
+               30,
+               :frame_bytes,
+               1_000,
+               800,
+               rejected_intent
+             ) == :error
+
+      assert RendererServer.record_adaptation(
+               renderer,
+               1,
+               30,
+               :frame_bytes,
+               1_000,
+               800,
+               adapted_intent
+             ) == :ok
+
+      RendererServer.frame_status(
+        renderer,
+        {:frame_rejected, 1, 30, 0, :resource_policy, :adapted_retry}
+      )
+
+      assert_receive {:adaptation_pipeline, retry_seq, 2, 0, true, true},
+                     @async_render_timeout
+
+      assert retry_seq > 30
+      assert RendererServer.acknowledgement_state(renderer) == {2, 0}
+
+      RendererServer.frame_status(
+        renderer,
+        {:frame_rejected, 2, retry_seq, 0, :resource_policy, :adapted_retry}
+      )
+
+      refute RendererServer.rendering?(renderer)
+
+      assert %{frame_seq: ^retry_seq, reason: :resource_policy} =
+               RendererServer.terminal_failure(renderer)
+
+      refute_receive {:adaptation_pipeline, _, 3, _, _, _}, 50
     end
 
     test "manual retry returns the credit and advances recovery generation every time" do
@@ -803,6 +957,30 @@ defmodule MingaEditor.Renderer.ServerTest do
         input.caches.recovery_generation,
         input.caches.last_acknowledged_frame_seq,
         keyframe?
+      })
+
+      %{
+        input
+        | caches: %{
+            input.caches
+            | last_emitted_frame_seq: input.frame_seq,
+              last_frame_keyframe?: keyframe?
+          }
+      }
+    end
+  end
+
+  defp adaptation_probe_pipeline(parent) do
+    fn input ->
+      keyframe? = input.force_keyframe? or input.caches.last_acknowledged_frame_seq == 0
+
+      send(parent, {
+        :adaptation_pipeline,
+        input.frame_seq,
+        input.caches.recovery_generation,
+        input.caches.last_acknowledged_frame_seq,
+        keyframe?,
+        input.capabilities.semantic_ui
       })
 
       %{

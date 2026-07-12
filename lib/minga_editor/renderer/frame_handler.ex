@@ -14,13 +14,21 @@ defmodule MingaEditor.Renderer.FrameHandler do
   @max_stale_retries 3
 
   @spec enqueue(State.t(), Intent.t(), non_neg_integer(), integer()) :: result()
-  def enqueue(%State{rendering?: true} = state, intent, seq, pushed_at) do
+  def enqueue(%State{} = state, %Intent{} = intent, seq, pushed_at) do
+    case State.accept_intent(state, intent) do
+      {:accepted, accepted} -> enqueue_accepted(accepted, intent, seq, pushed_at)
+      {:blocked, blocked} -> {:noreply, blocked}
+    end
+  end
+
+  @spec enqueue_accepted(State.t(), Intent.t(), non_neg_integer(), integer()) :: result()
+  defp enqueue_accepted(%State{rendering?: true} = state, intent, seq, pushed_at) do
     Telemetry.hop_latency(:cast_snapshot, pushed_at)
     emit_coalesced(state.pending, seq)
     {:noreply, %{state | pending: {intent, seq, pushed_at}}}
   end
 
-  def enqueue(%State{rendering?: false} = state, intent, seq, pushed_at) do
+  defp enqueue_accepted(%State{rendering?: false} = state, intent, seq, pushed_at) do
     Telemetry.hop_latency(:cast_snapshot, pushed_at)
     token = schedule_render()
 

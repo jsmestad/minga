@@ -2,6 +2,48 @@
 
 package generated
 
+// FrameRejectionReason is a generated enum (repr u8).
+type FrameRejectionReason uint8
+
+const (
+	FrameRejectionReasonTruncation                 FrameRejectionReason = 1
+	FrameRejectionReasonCommitSequenceMismatch     FrameRejectionReason = 2
+	FrameRejectionReasonFrameSequenceNotIncreasing FrameRejectionReason = 3
+	FrameRejectionReasonBaseSequenceMismatch       FrameRejectionReason = 4
+	FrameRejectionReasonMissingTheme               FrameRejectionReason = 5
+	FrameRejectionReasonIncompleteTheme            FrameRejectionReason = 6
+	FrameRejectionReasonMissingWindowReference     FrameRejectionReason = 7
+	FrameRejectionReasonWindowEpochMismatch        FrameRejectionReason = 8
+	FrameRejectionReasonInvalidRetainedRows        FrameRejectionReason = 9
+	FrameRejectionReasonMissingFontResource        FrameRejectionReason = 10
+	FrameRejectionReasonTranscriptDesync           FrameRejectionReason = 11
+	FrameRejectionReasonDecodeFailure              FrameRejectionReason = 12
+	FrameRejectionReasonOutOfTransactionCommand    FrameRejectionReason = 13
+	FrameRejectionReasonInvalidRowSplice           FrameRejectionReason = 14
+	FrameRejectionReasonResourcePolicy             FrameRejectionReason = 15
+	FrameRejectionReasonUnknown                    FrameRejectionReason = 255
+)
+
+// FrameRejectionDisposition is a generated enum (repr u8).
+type FrameRejectionDisposition uint8
+
+const (
+	FrameRejectionDispositionRetryableRecovery       FrameRejectionDisposition = 1
+	FrameRejectionDispositionTargetedReplacement     FrameRejectionDisposition = 2
+	FrameRejectionDispositionAdaptedRetry            FrameRejectionDisposition = 3
+	FrameRejectionDispositionTerminalFrontendFailure FrameRejectionDisposition = 4
+)
+
+// ResourcePolicyDimension is a generated enum (repr u8).
+type ResourcePolicyDimension uint8
+
+const (
+	ResourcePolicyDimensionUnknown       ResourcePolicyDimension = 0
+	ResourcePolicyDimensionFrameBytes    ResourcePolicyDimension = 1
+	ResourcePolicyDimensionFrameCommands ResourcePolicyDimension = 2
+	ResourcePolicyDimensionWindowRows    ResourcePolicyDimension = 3
+)
+
 // CompletionKind is a generated enum (repr u8).
 type CompletionKind uint8
 

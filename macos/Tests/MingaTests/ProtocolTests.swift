@@ -875,12 +875,12 @@ struct ProtocolEncoderTests {
     // by verifying the ready event structure.
     @Test("Ready event has correct size")
     func readyEventSize() {
-        // The ready payload should be 14 bytes:
-        // opcode:1, cols:2, rows:2, caps_version:1, caps_len:1, fields:7
-        // Total frame: 4 (length prefix) + 14 = 18 bytes
+        // The ready payload is 29 bytes in capability format 2:
+        // opcode:1, cols:2, rows:2, caps_version:1, caps_len:1, fields:20, protocol:2
+        // Total frame: 4 (length prefix) + 29 = 33 bytes.
         // We can't easily capture stdout in tests, but we verify the
         // constants are correct.
-        #expect(CAPS_VERSION == 1)
+        #expect(CAPS_VERSION == 2)
         #expect(FRONTEND_NATIVE_GUI == 1)
         #expect(COLOR_RGB == 2)
         #expect(SEMANTIC_UI_ENABLED == 1)

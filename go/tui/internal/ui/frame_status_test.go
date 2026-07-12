@@ -45,6 +45,33 @@ func TestRejectedTransactionEmitsOnlyTypedRejectionAndDoesNotPublish(t *testing.
 	}
 }
 
+func TestTerminalResourcePolicyRejectionPreservesLastGoodAndEmitsOnce(t *testing.T) {
+	out := make(chan []byte, 16)
+	m := New(40, 8, out, nil)
+	m = applyTo(t, m, beginFrame(1, 0), testThemeCommand(), windowRowsCommand(1, "baseline"), commitFrame(1))
+	drainOutboundPackets(out)
+
+	m = applyTo(t, m, beginFrame(2, 1), windowRowsCommand(1, "must not publish"))
+	m.rejectStagingWithDisposition(nil, protocol.RejectResourcePolicy, protocol.DispositionTerminal, "resource policy")
+	packets := drainOutboundPackets(out)
+	if len(packets) != 2 || packets[0][0] != generated.OPFrameRejected || packets[0][13] != protocol.RejectResourcePolicy || packets[0][14] != byte(protocol.DispositionTerminal) {
+		t.Fatalf("expected terminal resource rejection plus one diagnostic: %v", packets)
+	}
+	if m.lastCommittedSeq != 1 || m.lastCommittedGeneration != 1 {
+		t.Fatalf("terminal rejection changed last-good frame: generation=%d seq=%d", m.lastCommittedGeneration, m.lastCommittedSeq)
+	}
+	if got := m.windows[1].Rows[0].Text; got != "baseline" {
+		t.Fatalf("terminal rejection partially published %q", got)
+	}
+
+	// Re-processing the same correlated terminal intent must not emit again.
+	m.staging = &frameStaging{generation: 1, seq: 2}
+	m.rejectStagingWithDisposition(nil, protocol.RejectResourcePolicy, protocol.DispositionTerminal, "resource policy")
+	if duplicate := drainOutboundPackets(out); len(duplicate) != 0 {
+		t.Fatalf("duplicate terminal rejection emitted again: %v", duplicate)
+	}
+}
+
 func TestWrongWindowEpochRejectsTransactionWithoutPartialApply(t *testing.T) {
 	out := make(chan []byte, 16)
 	m := New(40, 8, out, nil)

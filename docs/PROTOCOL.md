@@ -80,12 +80,12 @@ The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, and the re
 |--------|------|------|-------------|
 | `0x01` | key_press | 6 | A key was pressed |
 | `0x02` | resize | 5 | Terminal/window was resized |
-| `0x03` | ready | 5, 13, or 15+ | Frontend is initialized and ready (15+ carries a u16 protocol_version) |
+| `0x03` | ready | 5, 13, or 29 | Frontend is initialized and ready (29 carries capability format 2 and protocol version) |
 | `0x04` | mouse_event | 9 | Mouse button, wheel, or motion (8-byte legacy also accepted) |
-| `0x05` | capabilities_updated | 9 | Updated capabilities after async detection |
+| `0x05` | capabilities_updated | 9 or 23 | Updated versioned capabilities after async detection |
 | `0x08` | request_keyframe | 9 | Ask the BEAM to start a fresh recovery generation (last_good_frame_seq + failed generation) |
 | `0x0A` | frame_applied | 9 | Report semantic publication of a complete frame |
-| `0x0B` | frame_rejected | 14 | Reject a frame with generation, last applied frame, and stable reason |
+| `0x0B` | frame_rejected | 15 | Reject a correlated frame with stable reason and disposition |
 | `0x0C` | window_ref_miss | 15 | Reject a missing row/window reference and identify the affected window |
 
 ### Frontend → BEAM (Highlight Responses)
@@ -338,7 +338,7 @@ height: u16           initial content rows available at current presentation met
 opcode:           u8  = 0x03
 width:            u16           initial content columns available at current presentation metrics
 height:           u16           initial content rows available at current presentation metrics
-caps_version:     u8            capability format version (currently 1)
+caps_version:     u8            capability format version (currently 2)
 caps_len:         u8            length of capability data
 caps_data:        [caps_len]u8  capability fields (see "Capability Negotiation" section)
 protocol_version: u16           OPTIONAL: the wire-contract version the frontend was generated against
@@ -394,11 +394,13 @@ Total size: 9 bytes.
 
 `frame_applied` (0x0A), fixed 9 bytes: `generation:u32, frame_seq:u32`. Emit it only after the complete transaction has validated and its semantic state has been published atomically. Do not wait for Metal submission, terminal drawing, visibility, or vsync.
 
-`frame_rejected` (0x0B), fixed 14 bytes: `generation:u32, frame_seq:u32, last_applied_frame_seq:u32, reason:u8`.
+`frame_rejected` (0x0B), fixed 15 bytes: `generation:u32, frame_seq:u32, last_applied_frame_seq:u32, reason:u8, disposition:u8`. The disposition byte is appended, so generation, frame sequence, last-good base, and reason retain their protocol-version-11 positions.
 
 `window_ref_miss` (0x0C), fixed 15 bytes: `generation:u32, frame_seq:u32, last_applied_frame_seq:u32, window_id:u16`. It is the targeted form for a missing retained row/window reference; sibling windows and chrome remain committed at `last_applied_frame_seq`.
 
-Stable rejection reasons are: 1 truncation, 2 commit sequence mismatch, 3 non-increasing frame sequence, 4 base sequence mismatch, 5 missing theme, 6 incomplete theme, 7 missing window reference, 8 window epoch mismatch, 9 invalid retained rows, 10 missing font resource, 11 transcript desync, 12 decode failure, 13 out-of-transaction command, 14 invalid row splice, and 255 unknown.
+Stable rejection reasons are: 1 truncation, 2 commit sequence mismatch, 3 non-increasing frame sequence, 4 base sequence mismatch, 5 missing theme, 6 incomplete theme, 7 missing window reference, 8 window epoch mismatch, 9 invalid retained rows, 10 missing font resource, 11 transcript desync, 12 decode failure, 13 out-of-transaction command, 14 invalid row splice, 15 resource policy, and 255 unknown.
+
+Disposition values are generated from the shared schema: 1 retryable recovery, 2 targeted replacement, 3 adapted retry, and 4 terminal frontend failure. Ordinary lineage failures remain retryable. Missing retained references use `window_ref_miss` and stay scoped. Resource-policy rejection defaults terminal. An adapted retry is valid only when the producer has one-shot local evidence bound to the rejected generation and frame, a non-zero advertised dimension (`frame_bytes`, `frame_commands`, or `window_rows`), distinct rejected/adapted values, and a concrete adapted intent distinct from the rejected intent; the evidence is deliberately not sent because detailed resource usage belongs only in privacy-safe telemetry. Terminal failure preserves `last_applied_frame_seq`, cancels outstanding credit, and must not emit or request the unchanged frame again. Current macOS and TUI frontends enforce and advertise only the 64 MiB packet-byte ceiling; command-count and window-row dimensions remain zero (unadvertised) until their hard admission checks exist.
 
 ---
 
@@ -806,7 +808,7 @@ The `ready` event supports an extended format with capability fields. This lets 
 0x03 ready (extended):
   width:          u16
   height:         u16
-  caps_version:   u8    (currently 1)
+  caps_version:   u8    (currently 2)
   caps_len:       u8    (length of remaining fields)
   frontend_type:  u8    (0=tui, 1=native_gui, 2=web)
   color_depth:    u8    (0=mono, 1=256color, 2=rgb)
@@ -814,9 +816,14 @@ The `ready` event supports an extended format with capability fields. This lets 
   image_support:  u8    (0=none, 1=kitty, 2=sixel, 3=native)
   float_support:  u8    (0=emulated, 1=native)
   text_rendering: u8    (0=monospace, 1=proportional)
+  semantic_ui:    u8    (0=disabled, 1=enabled)
+  resource_policy_version: u8
+  max_frame_bytes:        u32
+  max_frame_commands:     u32
+  max_window_rows:        u32
 ```
 
-Total size: 13 bytes.
+Capability format 2 carries 20 capability bytes and the complete ready event is 29 bytes including the protocol-version tail. Format 1's original fields remain in the same positions.
 
 Frontends that send the short 5-byte `ready` format are assumed to have default capabilities: `{tui, rgb, wcwidth, none, emulated, monospace}`.
 
@@ -826,7 +833,7 @@ Sent after the initial `ready` event when the frontend detects additional capabi
 
 ```
 opcode:         u8  = 0x05
-caps_version:   u8    (currently 1)
+caps_version:   u8    (currently 2)
 caps_len:       u8    (length of remaining fields)
 frontend_type:  u8
 color_depth:    u8
@@ -834,9 +841,14 @@ unicode_width:  u8
 image_support:  u8
 float_support:  u8
 text_rendering: u8
+semantic_ui:    u8
+resource_policy_version: u8
+max_frame_bytes:        u32
+max_frame_commands:     u32
+max_window_rows:        u32
 ```
 
-Total size: 9 bytes.
+Capability format 2 has 20 payload bytes (23 bytes including opcode/version/length).
 
 **Behavior:** The BEAM updates its stored capabilities for this frontend. No re-render is triggered; the updated caps take effect on the next frame.
 
@@ -850,6 +862,11 @@ Total size: 9 bytes.
 | `image_support` | 0=none, 1=kitty, 2=sixel, 3=native | Inline image protocol |
 | `float_support` | 0=emulated, 1=native | Floating window support |
 | `text_rendering` | 0=monospace, 1=proportional | Font rendering model |
+| `semantic_ui` | 0=disabled, 1=enabled | Semantic render-model support |
+| `resource_policy_version` | 0=unadvertised, 1=current | Version of hard-dimension policy |
+| `max_frame_bytes` | u32; 0=unadvertised | Maximum admitted encoded frame bytes |
+| `max_frame_commands` | u32; 0=unadvertised | Maximum admitted commands in one frame |
+| `max_window_rows` | u32; 0=unadvertised | Maximum admitted rows for one semantic window |
 
 ### Implementation Notes
 

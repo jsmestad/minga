@@ -9,7 +9,7 @@ defmodule MingaEditor.Renderer.RecoveryHandler do
   @spec reset(State.t(), Intent.t(), non_neg_integer(), integer()) :: {:reply, :ok, State.t()}
   def reset(state, intent, seq, pushed_at) do
     cancel_timer(state.awaiting_ack)
-    state = State.reset_frontend(state, :renderer_restart)
+    state = state |> State.reset_frontend(:renderer_restart) |> State.clear_rejection()
     token = schedule_render()
 
     {:reply, :ok,
@@ -33,6 +33,7 @@ defmodule MingaEditor.Renderer.RecoveryHandler do
 
     state
     |> State.reset_frontend(:renderer_restart)
+    |> State.clear_rejection()
     |> FrameHandler.render_sync(Intent.force_keyframe(intent), seq, pushed_at)
   end
 
@@ -45,6 +46,40 @@ defmodule MingaEditor.Renderer.RecoveryHandler do
 
   def request(state), do: {:noreply, state}
 
+  @doc "Starts one fresh-generation retry only after consuming explicit adaptation evidence."
+  @spec adapted(State.t(), non_neg_integer(), atom()) :: {:noreply, State.t()}
+  def adapted(
+        %State{
+          awaiting_ack: %{
+            generation: generation,
+            seq: rejected_seq,
+            pushed_at: pushed_at
+          }
+        } = state,
+        last_applied,
+        reason
+      ) do
+    case State.consume_adaptation(state, generation, rejected_seq) do
+      {:ok, adapted_state, adapted_intent} ->
+        adapted_transaction(adapted_state, adapted_intent, rejected_seq, pushed_at)
+
+      :error ->
+        terminal_without_adaptation(state, last_applied, reason)
+    end
+  end
+
+  @spec adapted_transaction(State.t(), Intent.t(), non_neg_integer(), integer()) ::
+          {:noreply, State.t()}
+  defp adapted_transaction(state, adapted_intent, rejected_seq, pushed_at) do
+    cancel_timer(state.awaiting_ack)
+    retry_seq = max(System.unique_integer([:positive, :monotonic]), rejected_seq + 1)
+
+    state
+    |> State.reset_frontend()
+    |> State.queue_frame({adapted_intent, retry_seq, pushed_at})
+    |> FrameHandler.advance()
+  end
+
   @doc "Starts transaction recovery from the latest semantic intent."
   @spec transaction(State.t(), Intent.t(), non_neg_integer(), integer()) ::
           {:noreply, State.t()}
@@ -56,8 +91,7 @@ defmodule MingaEditor.Renderer.RecoveryHandler do
 
     state
     |> State.reset_frontend()
-    |> Map.put(:awaiting_ack, nil)
-    |> Map.put(:pending, {Intent.force_keyframe(latest), seq, pushed_at})
+    |> State.queue_frame({Intent.force_keyframe(latest), seq, pushed_at})
     |> FrameHandler.advance()
   end
 
@@ -94,12 +128,18 @@ defmodule MingaEditor.Renderer.RecoveryHandler do
     if Map.has_key?(intent.windows, window_id) do
       state
       |> BufferChanges.invalidate_window(window_id)
-      |> Map.put(:awaiting_ack, nil)
-      |> Map.put(:pending, {intent, seq, pushed_at})
+      |> State.queue_frame({intent, seq, pushed_at})
       |> FrameHandler.advance()
     else
       transaction(state, intent, seq, pushed_at)
     end
+  end
+
+  @spec terminal_without_adaptation(State.t(), non_neg_integer(), atom()) ::
+          {:noreply, State.t()}
+  defp terminal_without_adaptation(state, last_applied, reason) do
+    cancel_timer(state.awaiting_ack)
+    {:noreply, State.terminal_failure(state, last_applied, reason)}
   end
 
   @spec latest(State.frame_work() | nil, Intent.t(), non_neg_integer(), integer()) ::

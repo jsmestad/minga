@@ -167,6 +167,44 @@ struct NonBlockingEncoderTests {
 
 @Suite("ProtocolReader")
 struct ProtocolReaderTests {
+    @Test("rejects an oversized packet before reading or decoding its payload")
+    func rejectsOversizedPacketBeforeDecode() throws {
+        let stream = Data([0, 0, 0, 9])
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("minga-protocol-reader-limit-\(UUID().uuidString).bin")
+        try stream.write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let capture = ProtocolReaderCapture()
+        let disconnected = DispatchSemaphore(value: 0)
+        let handle = try FileHandle(forReadingFrom: url)
+        let reader = ProtocolReader(
+            input: handle,
+            maxPayloadLength: 8,
+            decoder: { data in
+                capture.append(data)
+                return DecodedFrame(
+                    commands: [],
+                    metrics: FrameDecodeMetrics(
+                        packetBytes: data.count,
+                        bytesCopied: 0,
+                        allocations: 0,
+                        decodeDuration: .zero,
+                        actorHopCount: 0
+                    )
+                )
+            },
+            handler: { _ in },
+            onDecodeFailure: { _ in disconnected.signal() },
+            onDisconnect: { disconnected.signal() }
+        )
+
+        reader.start()
+        #expect(disconnected.wait(timeout: .now() + 2) == .success)
+        try handle.close()
+        #expect(capture.snapshot().isEmpty)
+    }
+
     @Test("accepts large render payloads and preserves packet alignment")
     func acceptsLargeRenderPayloads() throws {
         let largePayload = Data(repeating: 0xAB, count: 1_100_000)

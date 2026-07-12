@@ -1944,6 +1944,50 @@ struct CommandDispatcherStagingTests {
         #expect(dispatcher.frameState.windowIndentGuides[1]?.guideCols == [4, 8])
     }
 
+    @Test("terminal resource-policy rejection preserves committed state and emits once")
+    @MainActor func terminalResourcePolicyRejectionPreservesLastGood() {
+        let (dispatcher, gui) = makeDispatcher()
+        var results: [FrameTransactionResult] = []
+        var requested: [UInt32] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+        dispatcher.onRequestKeyframe = { requested.append($0) }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("committed.ex")]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("rejected.ex")]))
+        dispatcher.resourcePolicyRejected()
+        dispatcher.resourcePolicyRejected()
+
+        #expect(dispatcher.lastCommittedFrameSeq == 1)
+        #expect(gui.tabBarState.tabs.first?.label == "committed.ex")
+        #expect(gui.resyncState.pending == false)
+        #expect(requested.isEmpty)
+        #expect(results.count == 2)
+        guard case .rejected(
+            generation: 1,
+            frameSeq: 2,
+            lastAppliedFrameSeq: 1,
+            reason: .resourcePolicy
+        ) = results.last else {
+            Issue.record("expected one terminal resource-policy rejection")
+            return
+        }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 1, generation: 1))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("adapted.ex")]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 3, seq: 0))
+
+        #expect(dispatcher.lastCommittedFrameSeq == 3)
+        #expect(gui.tabBarState.tabs.first?.label == "adapted.ex")
+        #expect(gui.resyncState.pending == false)
+        #expect(results.count == 3)
+        #expect(results.last == .applied(generation: 1, frameSeq: 3))
+    }
+
     @Test("a later invalid domain rejects the whole frame without publication")
     @MainActor func partialFrameRejectionPublishesNothing() {
         let (dispatcher, gui) = makeDispatcher()
