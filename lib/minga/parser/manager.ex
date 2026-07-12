@@ -722,18 +722,6 @@ defmodule Minga.Parser.Manager do
         snippets: snippets
     }
 
-  defp install_route_result(state, {:port_write_failed, buffers, scheduler, requests, snippets}) do
-    state = %{
-      state
-      | buffers: buffers,
-        parse_scheduler: scheduler,
-        requests: requests,
-        snippets: snippets
-    }
-
-    recover_write_failure(state)
-  end
-
   @spec handle_manual_restart(t()) :: {:reply, :ok | {:error, :binary_not_found}, t()}
   defp handle_manual_restart(state) do
     port_state = PortState.reset_restart_policy(state.port)
