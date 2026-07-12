@@ -5,7 +5,7 @@ defmodule MingaEditor.Commands.FileTreeEditingIntegrationTest do
   Classification: deterministic editing state transitions live in `FileTreeEditingTest`; these tests stay full-editor because they prove user-facing key routing still creates and renames real filesystem entries through the visible file tree.
   """
 
-  use Minga.Test.EditorCase, async: true
+  use Minga.Test.EditorCase, async: true, rendering: :disabled
 
   @moduletag :tmp_dir
 

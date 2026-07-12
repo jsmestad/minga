@@ -1,5 +1,5 @@
 defmodule MingaEditor.Commands.RemoteFilesTest do
-  use Minga.Test.EditorCase, async: true
+  use Minga.Test.EditorCase, async: true, rendering: :disabled
 
   alias MingaEditor.Commands.RemoteFiles
 

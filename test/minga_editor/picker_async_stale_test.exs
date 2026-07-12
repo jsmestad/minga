@@ -12,7 +12,7 @@ defmodule MingaEditor.PickerAsyncStaleTest do
   never appear, regardless of whether the real fetch has landed.
   """
 
-  use Minga.Test.EditorCase, async: true
+  use Minga.Test.EditorCase, async: true, rendering: :disabled
 
   alias MingaEditor.UI.Picker.Candidate
   alias MingaEditor.UI.Picker.Item

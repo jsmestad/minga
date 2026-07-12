@@ -17,7 +17,7 @@ defmodule MingaEditor.Commands.FileTreeRevealTest do
   GenServer) and the assertion in this test. `assert_file_visible/2` searches
   by path rather than cursor index, so it is stable even when list order differs.
   """
-  use Minga.Test.EditorCase, async: true
+  use Minga.Test.EditorCase, async: true, rendering: :disabled
 
   alias Minga.Project.FileTree
 

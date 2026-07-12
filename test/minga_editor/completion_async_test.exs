@@ -21,7 +21,7 @@ defmodule MingaEditor.CompletionAsyncTest do
       pending menu instead of leaving it stuck.
   """
 
-  use Minga.Test.EditorCase, async: true
+  use Minga.Test.EditorCase, async: true, rendering: :disabled
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Editing.Completion

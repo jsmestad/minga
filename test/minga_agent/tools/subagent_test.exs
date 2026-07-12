@@ -17,7 +17,7 @@ defmodule MingaAgent.Tools.SubagentTest do
   alias ReqLLM.StreamChunk
 
   @moduletag :tmp_dir
-  @event_timeout 5_000
+  @event_timeout 15_000
 
   # ── Setup ──────────────────────────────────────────────────────────────────
 

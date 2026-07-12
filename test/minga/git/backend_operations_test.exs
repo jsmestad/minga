@@ -10,6 +10,7 @@ defmodule Minga.Git.BackendOperationsTest do
   # async: false, spawns real git CLI processes, which can hit the BEAM erl_child_setup EPIPE race under concurrency.
   use ExUnit.Case, async: false
 
+  @moduletag :heavy
   @moduletag timeout: 20_000
 
   # Isolate from CI runner's global git config

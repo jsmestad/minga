@@ -1,5 +1,5 @@
 defmodule MingaEditor.Agent.RemoteFileEventsTest do
-  use Minga.Test.EditorCase, async: true
+  use Minga.Test.EditorCase, async: true, rendering: :disabled
 
   alias Minga.Buffer
   alias MingaEditor.Agent.DiffReview

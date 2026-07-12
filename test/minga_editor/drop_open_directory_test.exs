@@ -2,7 +2,7 @@ defmodule MingaEditor.DropOpenDirectoryTest do
   @moduledoc "Tests dropped-directory GUI actions that switch the active project."
 
   # Dropped-directory handling switches the global Minga.Project singleton before opening the picker.
-  use Minga.Test.EditorCase, async: false
+  use Minga.Test.EditorCase, async: false, rendering: :disabled
 
   setup do
     reset_global_project!()
