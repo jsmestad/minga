@@ -131,6 +131,55 @@ defmodule MingaEditor.Renderer.ServerTest do
       refute_receive {:render_done, %{frame_seq: 12}}, 50
     end
 
+    test "acknowledgement timeout retries the latest pending frame as a fresh-generation keyframe" do
+      renderer = start_ack_renderer(self())
+
+      RendererServer.cast_snapshot(renderer, stub_snapshot(), 10)
+      assert_receive {:ack_pipeline, 10, 1, 0, true}, @async_render_timeout
+      RendererServer.cast_snapshot(renderer, stub_snapshot(), 11)
+
+      send(renderer, {:frame_ack_timeout, 1, 10})
+
+      assert_receive {:ack_pipeline, 11, 2, 0, true}, @async_render_timeout
+      assert RendererServer.acknowledgement_state(renderer) == {2, 0}
+      refute_receive {:render_done, %{frame_seq: 10}}, 50
+    end
+
+    test "late acknowledgement from a timed-out generation cannot release current credit" do
+      renderer = start_ack_renderer(self())
+
+      RendererServer.cast_snapshot(renderer, stub_snapshot(), 20)
+      assert_receive {:ack_pipeline, 20, 1, 0, true}, @async_render_timeout
+      RendererServer.cast_snapshot(renderer, stub_snapshot(), 21)
+      send(renderer, {:frame_ack_timeout, 1, 20})
+      assert_receive {:ack_pipeline, 21, 2, 0, true}, @async_render_timeout
+
+      RendererServer.frame_status(renderer, {:frame_applied, 1, 20})
+      assert RendererServer.acknowledgement_state(renderer) == {2, 0}
+      refute_receive {:render_done, %{frame_seq: 20}}, 50
+
+      RendererServer.frame_status(renderer, {:frame_applied, 2, 21})
+      assert_receive {:render_done, %{frame_seq: 21}}, @async_render_timeout
+      assert RendererServer.acknowledgement_state(renderer) == {2, 21}
+    end
+
+    test "normal acknowledgement makes its queued timeout message harmless" do
+      renderer = start_ack_renderer(self())
+
+      RendererServer.cast_snapshot(renderer, stub_snapshot(), 30)
+      assert_receive {:ack_pipeline, 30, 1, 0, true}, @async_render_timeout
+      RendererServer.frame_status(renderer, {:frame_applied, 1, 30})
+      assert_receive {:render_done, %{frame_seq: 30}}, @async_render_timeout
+
+      send(renderer, {:frame_ack_timeout, 1, 30})
+      refute RendererServer.rendering?(renderer)
+      assert RendererServer.acknowledgement_state(renderer) == {1, 30}
+      refute_receive {:ack_pipeline, _, _, _, _}, 50
+
+      RendererServer.cast_snapshot(renderer, stub_snapshot(), 31)
+      assert_receive {:ack_pipeline, 31, 1, 30, false}, @async_render_timeout
+    end
+
     test "rejected frame N renders only latest pending N+1 as a fresh-generation keyframe" do
       renderer = start_ack_renderer(self())
 

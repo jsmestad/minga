@@ -110,6 +110,6 @@ final class RecoveryManager {
     private static func sendRestartSignalToParent() {
         let parentPid = getppid()
         guard parentPid > 1 else { return }
-        kill(parentPid, SIGUSR1)
+        kill(parentPid, SIGUSR2)
     }
 }

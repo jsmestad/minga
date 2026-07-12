@@ -5,7 +5,7 @@ defmodule Minga.Runtime.Supervisor do
   Uses `one_for_one` so that each child restarts independently:
 
       Runtime.Supervisor (one_for_one)
-      ├── MingaEditor.Watchdog      SIGUSR1 recovery (independent leaf)
+      ├── MingaEditor.Watchdog      SIGUSR2 recovery (independent leaf)
       ├── Minga.FileWatcher          FSEvents/inotify watcher (independent leaf)
       └── MingaEditor.Supervisor    Parser → Port → Renderer → Editor (rest_for_one)
 
@@ -37,7 +37,7 @@ defmodule Minga.Runtime.Supervisor do
     backend = Keyword.get(opts, :backend, :tui)
 
     children = [
-      # Watchdog starts first so it's ready to receive SIGUSR1 from the
+      # Watchdog starts first so it's ready to receive SIGUSR2 from the
       # moment the Editor boots. It's an independent leaf: its crash
       # restarts only itself under one_for_one.
       MingaEditor.Watchdog,

@@ -311,7 +311,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 manager.sendRecoveryRestartSignal()
             } else {
                 let parentPid = getppid()
-                if parentPid > 1 { kill(parentPid, SIGUSR1) }
+                if parentPid > 1 { kill(parentPid, SIGUSR2) }
             }
         }
         self.recoveryManager = recovery

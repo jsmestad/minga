@@ -2,11 +2,7 @@ defmodule MingaEditor.Watchdog do
   @moduledoc """
   Out-of-band recovery process for the Editor GenServer.
 
-  Registers for SIGUSR1 via `:os.set_signal/2`. When the Zig
-  renderer (or macOS GUI) detects that the BEAM is unresponsive, it sends
-  SIGUSR1 to the parent BEAM OS process. The Watchdog receives the signal
-  as a `{:signal, :sigusr1}` message and kills the Editor GenServer,
-  letting the supervisor restart it.
+  Registers for SIGUSR2 via `:os.set_signal/2` and `erl_signal_server`. When the renderer or macOS GUI detects that the BEAM is unresponsive, it sends SIGUSR2 to the parent BEAM OS process. The signal handler forwards it to the Watchdog as a `{:signal, :sigusr2}` message, which kills the Editor GenServer and lets the supervisor restart it.
 
   This process has no periodic work. It exists solely to receive the
   out-of-band kill signal when the normal protocol channel is blocked.
@@ -29,6 +25,7 @@ defmodule MingaEditor.Watchdog do
 
   use GenServer
   alias Minga.Log
+  alias MingaEditor.Watchdog.SignalHandler
 
   @typedoc "Options for starting the watchdog."
   @type start_opt :: {:name, GenServer.name()} | {:editor_name, GenServer.name()}
@@ -53,19 +50,20 @@ defmodule MingaEditor.Watchdog do
   def init(opts) do
     editor_name = Keyword.get(opts, :editor_name, MingaEditor)
 
-    # Register for SIGUSR1. OTP 26+ delivers signals as messages
-    # to the calling process: {:signal, :sigusr1}
-    :os.set_signal(:sigusr1, :handle)
+    # OTP's built-in erl_signal_handler reserves SIGUSR1 for crash-dump shutdown.
+    # SIGUSR2 is otherwise ignored, so Minga handles it through erl_signal_server.
+    :ok = :os.set_signal(:sigusr2, :handle)
+    :ok = :gen_event.add_sup_handler(:erl_signal_server, {SignalHandler, self()}, self())
 
-    Log.info(:editor, "Watchdog started, listening for SIGUSR1")
+    Log.info(:editor, "Watchdog started, listening for SIGUSR2")
 
     {:ok, %{editor_name: editor_name}}
   end
 
   @impl true
   @spec handle_info(term(), state()) :: {:noreply, state()}
-  def handle_info({:signal, :sigusr1}, state) do
-    Log.warning(:editor, "Watchdog received SIGUSR1, killing Editor for recovery")
+  def handle_info({:signal, :sigusr2}, state) do
+    Log.warning(:editor, "Watchdog received SIGUSR2, killing Editor for recovery")
 
     case Process.whereis(state.editor_name) do
       nil ->
