@@ -1,5 +1,5 @@
 defmodule MingaEditor.RemoteNodeEventsTest do
-  use Minga.Test.EditorCase, async: false
+  use Minga.Test.EditorCase, async: false, rendering: :disabled
 
   alias Minga.Distribution.Events.NodeConnectedEvent
   alias Minga.Distribution.Events.NodeDisconnectedEvent

@@ -2,7 +2,7 @@ defmodule MingaEditor.UI.Picker.ProjectSourceTest do
   @moduledoc "Tests project picker selection behavior."
 
   # Uses the global Minga.Project singleton and FileSource shells out for file discovery.
-  use Minga.Test.EditorCase, async: false
+  use Minga.Test.EditorCase, async: false, rendering: :disabled
 
   alias MingaEditor.Input.Picker, as: PickerInput
   alias MingaEditor.State, as: EditorState

@@ -5,7 +5,7 @@ defmodule MingaEditor.DropOpenTest do
   macOS Open With menu, and `open -a Minga` from the terminal.
   """
 
-  use Minga.Test.EditorCase, async: true
+  use Minga.Test.EditorCase, async: true, rendering: :disabled
 
   describe "drop file" do
     @tag :tmp_dir

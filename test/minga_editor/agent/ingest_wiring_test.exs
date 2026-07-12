@@ -9,7 +9,7 @@ defmodule MingaEditor.Agent.IngestWiringTest do
   `MingaEditor.Agent.IngestTest`; this is a thin wiring smoke test.
   """
 
-  use Minga.Test.EditorCase, async: true
+  use Minga.Test.EditorCase, async: true, rendering: :disabled
 
   alias MingaAgent.Session
   alias MingaEditor.State, as: EditorState

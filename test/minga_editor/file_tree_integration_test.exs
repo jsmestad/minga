@@ -4,7 +4,7 @@ defmodule MingaEditor.FileTreeIntegrationTest do
 
   File tree data-structure behavior, rendering, navigation, and editing commands have focused tests elsewhere. This file only keeps the cross-Editor contracts that are easiest to verify through visible behavior.
   """
-  use Minga.Test.EditorCase, async: true
+  use Minga.Test.EditorCase, async: true, rendering: :disabled
 
   @moduletag :tmp_dir
 
@@ -37,8 +37,7 @@ defmodule MingaEditor.FileTreeIntegrationTest do
       ctx.events_registry
     )
 
-    editor_state(ctx)
-    sync_screen(ctx)
+    _ = editor_state(ctx)
 
     assert_tree_visible(ctx)
   end

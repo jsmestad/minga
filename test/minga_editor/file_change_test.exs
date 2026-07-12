@@ -5,7 +5,7 @@ defmodule MingaEditor.FileChangeTest do
   These tests assert observable buffer outcomes and the conflict prompt contract. Lower-level save-state and mtime conflict rules live in buffer tests.
   """
 
-  use Minga.Test.EditorCase, async: true
+  use Minga.Test.EditorCase, async: true, rendering: :disabled
 
   @tag :tmp_dir
   test "unmodified buffer silently reloads on file change", %{tmp_dir: tmp_dir} do
@@ -44,7 +44,6 @@ defmodule MingaEditor.FileChangeTest do
     File.write!(path, "reloaded content")
     notify_file_changed(ctx, path)
     send_key_sync(ctx, ?r)
-    sync_screen(ctx)
 
     assert buffer_content(ctx) == "reloaded content"
     assert status_msg(ctx) =~ "reloaded"
@@ -61,7 +60,6 @@ defmodule MingaEditor.FileChangeTest do
     File.write!(path, "external modification")
     notify_file_changed(ctx, path)
     send_key_sync(ctx, ?k)
-    sync_screen(ctx)
 
     assert String.contains?(buffer_content(ctx), "local")
     refute conflict_open?(ctx)
@@ -78,15 +76,13 @@ defmodule MingaEditor.FileChangeTest do
     File.write!(path, "external modification")
     notify_file_changed(ctx, path)
     send_key_sync(ctx, ?j)
-    sync_screen(ctx)
 
     assert conflict_open?(ctx)
   end
 
   defp notify_file_changed(ctx, path) do
     send(ctx.editor, {:file_changed_on_disk, Path.expand(path)})
-    editor_state(ctx)
-    sync_screen(ctx)
+    _ = editor_state(ctx)
     :ok
   end
 end
