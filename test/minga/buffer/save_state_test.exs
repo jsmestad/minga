@@ -15,6 +15,18 @@ defmodule Minga.Buffer.SaveStateTest do
       refute SaveState.dirty?(restored)
     end
 
+    test "a branch after undo allocates a new revision instead of reusing the saved revision" do
+      saved =
+        SaveState.new()
+        |> SaveState.mark_changed()
+        |> SaveState.mark_saved({123, 5}, "saved")
+
+      branch = saved |> SaveState.restore_version(0) |> SaveState.mark_changed()
+
+      assert SaveState.version(branch) == 2
+      assert SaveState.dirty?(branch)
+    end
+
     test "mark_saved records the current version as the clean baseline" do
       save_state = SaveState.new() |> SaveState.mark_changed()
 

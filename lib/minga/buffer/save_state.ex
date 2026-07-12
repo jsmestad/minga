@@ -12,6 +12,7 @@ defmodule Minga.Buffer.SaveState do
             dirty: boolean(),
             version: non_neg_integer(),
             saved_version: non_neg_integer(),
+            next_version: pos_integer(),
             mtime: integer() | nil,
             file_size: non_neg_integer() | nil,
             file_hash: binary() | nil
@@ -20,6 +21,7 @@ defmodule Minga.Buffer.SaveState do
   defstruct dirty: false,
             version: 0,
             saved_version: 0,
+            next_version: 1,
             mtime: nil,
             file_size: nil,
             file_hash: nil
@@ -38,29 +40,35 @@ defmodule Minga.Buffer.SaveState do
     }
   end
 
-  @doc "Marks the buffer as changed and advances the mutation version."
+  @doc "Marks the buffer as changed and allocates a unique content revision."
   @spec mark_changed(t()) :: t()
   def mark_changed(%__MODULE__{} = save_state) do
-    new_version = save_state.version + 1
-    %{save_state | dirty: new_version != save_state.saved_version, version: new_version}
+    {version, save_state} = allocate_revision(save_state)
+    %{save_state | dirty: version != save_state.saved_version}
   end
 
   @doc "Records a content change that should not by itself make a clean buffer dirty."
   @spec record_clean_change(t()) :: t()
   def record_clean_change(%__MODULE__{dirty: true} = save_state) do
-    %{save_state | version: save_state.version + 1}
+    {_version, save_state} = allocate_revision(save_state)
+    save_state
   end
 
   def record_clean_change(%__MODULE__{} = save_state) do
-    new_version = save_state.version + 1
-    %{save_state | version: new_version, saved_version: new_version}
+    {version, save_state} = allocate_revision(save_state)
+    %{save_state | saved_version: version}
   end
 
-  @doc "Restores the mutation version and recalculates dirty state from the saved version."
+  @doc "Restores a content revision and recalculates dirty state from the saved revision."
   @spec restore_version(t(), non_neg_integer()) :: t()
   def restore_version(%__MODULE__{} = save_state, version)
       when is_integer(version) and version >= 0 do
-    %{save_state | version: version, dirty: version != save_state.saved_version}
+    %{
+      save_state
+      | version: version,
+        dirty: version != save_state.saved_version,
+        next_version: max(save_state.next_version, version + 1)
+    }
   end
 
   @doc "Acknowledges the latest disk metadata while preserving the saved content fingerprint."
@@ -82,16 +90,15 @@ defmodule Minga.Buffer.SaveState do
     }
   end
 
-  @doc "Accepts replacement content as a new saved baseline and advances the mutation version once."
+  @doc "Accepts replacement content as a new saved baseline and allocates a unique revision."
   @spec accept_saved_content(t(), metadata(), String.t()) :: t()
   def accept_saved_content(%__MODULE__{} = save_state, {mtime, file_size}, content) do
-    new_version = save_state.version + 1
+    {version, save_state} = allocate_revision(save_state)
 
     %{
       save_state
       | dirty: false,
-        version: new_version,
-        saved_version: new_version,
+        saved_version: version,
         mtime: mtime,
         file_size: file_size,
         file_hash: content_fingerprint(content)
@@ -123,11 +130,11 @@ defmodule Minga.Buffer.SaveState do
   @spec dirty?(t()) :: boolean()
   def dirty?(%__MODULE__{} = save_state), do: save_state.dirty
 
-  @doc "Returns the current mutation version."
+  @doc "Returns the current content revision."
   @spec version(t()) :: non_neg_integer()
   def version(%__MODULE__{} = save_state), do: save_state.version
 
-  @doc "Returns the saved baseline version."
+  @doc "Returns the saved baseline revision."
   @spec saved_version(t()) :: non_neg_integer()
   def saved_version(%__MODULE__{} = save_state), do: save_state.saved_version
 
@@ -142,6 +149,12 @@ defmodule Minga.Buffer.SaveState do
   @doc "Returns the saved content fingerprint, if one is known."
   @spec file_hash(t()) :: binary() | nil
   def file_hash(%__MODULE__{} = save_state), do: save_state.file_hash
+
+  @spec allocate_revision(t()) :: {non_neg_integer(), t()}
+  defp allocate_revision(%__MODULE__{} = save_state) do
+    version = save_state.next_version
+    {version, %{save_state | version: version, next_version: version + 1}}
+  end
 
   @doc "Fingerprints content with the algorithm used to track saved file baselines."
   @spec content_fingerprint(String.t()) :: binary()
