@@ -248,7 +248,12 @@ extension PreviewRegistry {
     static func latencyHUDPreview() -> some View {
         let theme = PreviewFixtures.theme()
         let state = LatencyHUDState(environment: ["MINGA_LATENCY_HUD": "1"])
-        state.stats = LatencyRecorder.Stats(count: 128, p50Micros: 812, p99Micros: 2450, maxMicros: 5100)
+        state.stats = LatencyRecorder.Stats(
+            apply: .init(count: 128, p50Micros: 812, p95Micros: 1_200),
+            present: .init(count: 120, p50Micros: 2_450, p95Micros: 5_100),
+            submittedCount: 120,
+            discardCounts: [.superseded: 8]
+        )
 
         return LatencyHUDOverlay(state: state)
             .frame(width: 520, height: 120)

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "fixtureVersion": "native-visible-v1",
+  "decodeApplyP95Ms": 0.762125,
+  "commandPreparationP95Ms": 0.026,
+  "combinedP95Ms": 1.362917,
+  "provenance": {
+    "measuredAt": "2026-07-12",
+    "environment": "GitHub-hosted macos-15 arm64 runner, macOS 15.7.7 (24G720)",
+    "toolchain": "GitHub Actions macos-15 default Xcode toolchain, swiftc -O",
+    "rationale": "Initial CI calibration for native-visible-v1 from the optimized 200-warmup/1000-measurement gate in run 29176725578; the references are the measured CI p95 values, while hard-coded 4 ms stage and 8 ms combined ceilings remain unchanged."
+  }
+}

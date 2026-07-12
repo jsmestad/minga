@@ -2266,3 +2266,45 @@ private func wireFileTreeEntry(
         editingText: editingText
     )
 }
+
+@Suite("CommandDispatcher presentation samples")
+struct CommandDispatcherPresentationSampleTests {
+    @MainActor
+    private func makeDispatcher() -> CommandDispatcher {
+        CommandDispatcher(cols: 80, rows: 24, guiState: GUIState())
+    }
+
+    @MainActor
+    private func commit(_ dispatcher: CommandDispatcher, frameSeq: UInt32,
+                        baseFrameSeq: UInt32, inputSeq: UInt32) {
+        dispatcher.dispatch(.beginFrame(frameSeq: frameSeq, baseFrameSeq: baseFrameSeq, generation: 1))
+        if frameSeq == 1 {
+            dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        }
+        dispatcher.dispatch(.commitFrame(frameSeq: frameSeq, seq: inputSeq))
+    }
+
+    @Test("a newer semantic frame discards the unsubmitted sample as superseded")
+    @MainActor func supersededSampleIsDiscarded() {
+        let dispatcher = makeDispatcher()
+        let first = dispatcher.latency.stamp()
+        commit(dispatcher, frameSeq: 1, baseFrameSeq: 0, inputSeq: first)
+        let second = dispatcher.latency.stamp()
+        commit(dispatcher, frameSeq: 2, baseFrameSeq: 1, inputSeq: second)
+
+        #expect(dispatcher.latency.snapshot().discardCounts[.superseded] == 1)
+        #expect(dispatcher.takePresentationInputSeq() == second)
+    }
+
+    @Test("an unavailable surface discards rather than selects the pending sample")
+    @MainActor func unavailableSurfaceDiscardsPendingSample() {
+        let dispatcher = makeDispatcher()
+        let seq = dispatcher.latency.stamp()
+        commit(dispatcher, frameSeq: 1, baseFrameSeq: 0, inputSeq: seq)
+
+        dispatcher.discardPendingPresentation(reason: .occluded)
+
+        #expect(dispatcher.takePresentationInputSeq() == 0)
+        #expect(dispatcher.latency.snapshot().discardCounts[.occluded] == 1)
+    }
+}

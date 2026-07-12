@@ -1,13 +1,7 @@
-/// Observable state for the on-screen keystroke-to-present latency HUD (ticket
-/// #2215).
+/// Observable state for honest native input latency milestones.
 ///
-/// The macOS GUI's `LatencyRecorder` (owned by `CommandDispatcher`) records
-/// keystroke-to-present samples: the input path stamps a correlation sequence
-/// into each key packet, and `commit_frame` resolves the sample when the frame is
-/// presented. This state object is the client-local, ephemeral display layer for
-/// those numbers, mirroring the Go TUI's HUD: it shows live p50/p99/max and the
-/// sample count, refreshed on a coarse timer so reading the recorder never
-/// happens inside the measured critical sections.
+/// Semantic apply and Metal completion/presentation are displayed separately;
+/// a frame acknowledgement can update apply statistics but never presentation.
 ///
 /// `visible` is enabled at boot when `MINGA_LATENCY_HUD=1` and toggled at runtime
 /// from the View menu (cmd-ctrl-l). This is a frontend-local debug surface in the
@@ -127,23 +121,20 @@ public struct LatencyHUDModel: Sendable, Equatable {
     }
     public let stats: LatencyRecorder.Stats
 
-    /// True when there are no resolved samples yet.
-    public var isEmpty: Bool { stats.count == 0 }
+    /// True when neither milestone has samples yet.
+    public var isEmpty: Bool { stats.apply.count == 0 && stats.present.count == 0 }
 
-    /// p50 formatted as a duration string (e.g. `812µs`, `1.20ms`).
-    public var p50: String { LatencyHUDModel.formatMicros(stats.p50Micros) }
-    /// p99 formatted as a duration string.
-    public var p99: String { LatencyHUDModel.formatMicros(stats.p99Micros) }
-    /// max formatted as a duration string.
-    public var max: String { LatencyHUDModel.formatMicros(stats.maxMicros) }
-    /// Resolved sample count backing the percentiles.
-    public var sampleCount: Int { stats.count }
-
-    /// One-line badge text, matching the Go HUD layout. Shows a placeholder until
-    /// the first sample resolves.
     public var line: String {
-        guard !isEmpty else { return "lat: (no samples)" }
-        return "lat p50 \(p50)  p99 \(p99)  max \(max)  n=\(sampleCount)"
+        guard !isEmpty else { return "lat: (no apply/present samples)" }
+        let apply = stageLine(label: "apply", stats: stats.apply)
+        let present = stageLine(label: "present", stats: stats.present)
+        let discarded = stats.discardCounts.values.reduce(0, +)
+        return "\(apply)  \(present)  discarded=\(discarded)"
+    }
+
+    private func stageLine(label: String, stats: LatencyRecorder.StageStats) -> String {
+        guard stats.count > 0 else { return "\(label) —" }
+        return "\(label) p50 \(Self.formatMicros(stats.p50Micros)) p95 \(Self.formatMicros(stats.p95Micros)) n=\(stats.count)"
     }
 
     /// Formats a microsecond value as `µs` below 1ms and `ms` at or above, with

@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BUILD_DIR="${ROOT}/_build/render-performance"
+BINARY="${BUILD_DIR}/minga-render-performance"
+BASELINE="${1:-${ROOT}/performance/baselines/macos_render_release.json}"
+
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  echo "error: optimized native render gate requires macOS" >&2
+  exit 2
+fi
+if [[ ! -f "${BASELINE}" ]]; then
+  echo "error: baseline not found: ${BASELINE}" >&2
+  exit 2
+fi
+
+mkdir -p "${BUILD_DIR}"
+swiftc --version
+swiftc -O \
+  "${ROOT}/macos/Sources/Protocol/RenderPerformanceGate.swift" \
+  "${ROOT}/macos/Tests/Performance/main.swift" \
+  -o "${BINARY}"
+
+"${BINARY}" "${BASELINE}"

@@ -16,8 +16,7 @@ struct LatencyHUDStateTests {
     func emptyPlaceholder() {
         let model = LatencyHUDModel(stats: LatencyRecorder.Stats())
         #expect(model.isEmpty)
-        #expect(model.sampleCount == 0)
-        #expect(model.line == "lat: (no samples)")
+        #expect(model.line == "lat: (no apply/present samples)")
     }
 
     @Test("sub-millisecond values format as microseconds")
@@ -38,14 +37,15 @@ struct LatencyHUDStateTests {
 
     @Test("populated stats render the full badge line")
     func populatedLine() {
-        let stats = LatencyRecorder.Stats(count: 128, p50Micros: 812, p99Micros: 2450, maxMicros: 5100)
+        let stats = LatencyRecorder.Stats(
+            apply: .init(count: 128, p50Micros: 812, p95Micros: 1_200),
+            present: .init(count: 120, p50Micros: 2_450, p95Micros: 5_100),
+            submittedCount: 120,
+            discardCounts: [.superseded: 8]
+        )
         let model = LatencyHUDModel(stats: stats)
         #expect(!model.isEmpty)
-        #expect(model.p50 == "812µs")
-        #expect(model.p99 == "2.45ms")
-        #expect(model.max == "5.10ms")
-        #expect(model.sampleCount == 128)
-        #expect(model.line == "lat p50 812µs  p99 2.45ms  max 5.10ms  n=128")
+        #expect(model.line == "apply p50 812µs p95 1.20ms n=128  present p50 2.45ms p95 5.10ms n=120  discarded=8")
     }
 
     // MARK: - Boot visibility (MINGA_LATENCY_HUD)
@@ -90,15 +90,17 @@ struct LatencyHUDStateTests {
     func connectRefreshesWhenVisible() {
         let recorder = LatencyRecorder()
         let seq = recorder.stamp()
-        recorder.resolve(seq: seq)
+        recorder.markApplied(seq: seq)
+        recorder.markSubmitted(seq: seq)
+        recorder.markPresented(seq: seq)
 
         let state = LatencyHUDState(
             environment: ["MINGA_LATENCY_HUD": "1"],
             refreshInterval: .seconds(60)
         )
-        #expect(state.stats.count == 0)
+        #expect(state.stats.present.count == 0)
         state.connect { recorder.snapshot() }
-        #expect(state.stats.count == 1)
+        #expect(state.stats.present.count == 1)
     }
 
     @MainActor
@@ -110,9 +112,11 @@ struct LatencyHUDStateTests {
         #expect(state.model.isEmpty)
 
         let seq = recorder.stamp()
-        recorder.resolve(seq: seq)
+        recorder.markApplied(seq: seq)
+        recorder.markSubmitted(seq: seq)
+        recorder.markPresented(seq: seq)
         state.refresh()
-        #expect(state.stats.count == 1)
+        #expect(state.stats.present.count == 1)
         #expect(!state.model.isEmpty)
     }
 }
