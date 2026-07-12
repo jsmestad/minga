@@ -1026,7 +1026,10 @@ defmodule Minga.Integration.GUIProtocolTest do
     test "round-trips a large full row through the rows delta", %{harness: harness} do
       assert_large_delta_row_round_trip(
         harness,
-        &WindowEncoder.encode_rows_delta/2,
+        fn window, hashes ->
+          delta = Minga.RenderModel.Window.RowDelta.from_snapshots([], window.rows)
+          WindowEncoder.encode_rows_delta(window, delta, hashes)
+        end,
         "gui_window_rows_delta"
       )
     end
@@ -1034,6 +1037,8 @@ defmodule Minga.Integration.GUIProtocolTest do
     test "round-trips rows delta with ref and full entries", %{harness: harness} do
       alias Minga.RenderModel.Window
       alias Minga.RenderModel.Window.Row
+      alias Minga.RenderModel.Window.RowDelta
+      alias Minga.RenderModel.Window.RowSplice
 
       retained = %Row{
         row_id: Row.stable_id(:normal, 0),
@@ -1066,8 +1071,15 @@ defmodule Minga.Integration.GUIProtocolTest do
         rows: [retained, replacement]
       }
 
+      {:ok, delta} =
+        RowDelta.new(1, 2, [RowSplice.new(0, 1, [retained, replacement])])
+
       {cmd, true} =
-        WindowEncoder.encode_rows_delta(window, %{retained.row_id => retained.content_hash})
+        WindowEncoder.encode_rows_delta(
+          window,
+          delta,
+          %{retained.row_id => retained.content_hash}
+        )
 
       decoded = round_trip(harness, cmd, "gui_window_rows_delta")
 
@@ -1076,7 +1088,9 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["content_epoch"] == 42
       assert decoded["scroll_left"] == 2
 
-      assert [ref, full] = decoded["rows"]
+      assert [%{"start_index" => 0, "delete_count" => 1, "insert_entries" => [ref, full]}] =
+               decoded["row_splices"]
+
       assert ref["entry_type"] == "ref"
       assert ref["row_id"] == Row.stable_id(:normal, 0)
       assert full["entry_type"] == "full"
@@ -1117,10 +1131,22 @@ defmodule Minga.Integration.GUIProtocolTest do
     }
 
     {command, false} = encode_delta.(window, %{})
-    rows_payload = section_payload(command, 0x02)
+    section_id = if expected_type == "gui_window_rows_delta", do: 0x0B, else: 0x02
+    rows_payload = section_payload(command, section_id)
 
-    assert <<1::32, 1::8, _row_type::8, _row_id::64, _buf_line::32, _content_hash::32,
-             text_length::32, row_text::binary-size(text_length), 0::16>> = rows_payload
+    row_entry =
+      case section_id do
+        0x0B ->
+          assert <<0::32, 1::32, 1::32, 0::32, 0::32, 1::32, entry::binary>> = rows_payload
+          entry
+
+        0x02 ->
+          assert <<1::32, entry::binary>> = rows_payload
+          entry
+      end
+
+    assert <<1::8, _row_type::8, _row_id::64, _buf_line::32, _content_hash::32, text_length::32,
+             row_text::binary-size(text_length), 0::16>> = row_entry
 
     assert text_length == byte_size(text)
     assert text_length > 65_535
@@ -1129,7 +1155,14 @@ defmodule Minga.Integration.GUIProtocolTest do
 
     decoded = round_trip(harness, command, expected_type)
     assert decoded["type"] == expected_type
-    assert [%{"entry_type" => "full", "text" => ^text}] = decoded["rows"]
+
+    if section_id == 0x0B do
+      assert [%{"insert_entries" => [%{"entry_type" => "full", "text" => ^text}]}] =
+               decoded["row_splices"]
+    else
+      assert [%{"entry_type" => "full", "text" => ^text}] = decoded["rows"]
+    end
+
     :ok
   end
 

@@ -446,8 +446,11 @@ defmodule Minga.Test.HeadlessPort do
 
   defp apply_command(<<opcode, _rest::binary>> = binary, state)
        when opcode in [@op_gui_window_viewport_delta, @op_gui_window_rows_delta] do
-    {window, row_cache} = decode_window_rows_delta(binary, state.row_cache)
-    current = Map.get(state.windows, window.window_id, %{})
+    <<_opcode, _count, _header_id, _header_len::32, window_id::16, _rest::binary>> = binary
+    current = Map.get(state.windows, window_id, %{})
+
+    {window, row_cache} =
+      decode_window_rows_delta(binary, state.row_cache, Map.get(current, :rows, []))
 
     %{
       state
@@ -877,8 +880,12 @@ defmodule Minga.Test.HeadlessPort do
     Map.put(row_cache, window_id, Map.merge(window_cache, rows_by_id))
   end
 
-  @spec decode_window_rows_delta(binary(), map()) :: {map(), map()}
-  defp decode_window_rows_delta(<<_opcode::8, section_count::8, rest::binary>>, row_cache) do
+  @spec decode_window_rows_delta(binary(), map(), [map()]) :: {map(), map()}
+  defp decode_window_rows_delta(
+         <<_opcode::8, section_count::8, rest::binary>>,
+         row_cache,
+         base_rows
+       ) do
     base = %{
       window_id: 0,
       rows: [],
@@ -888,10 +895,12 @@ defmodule Minga.Test.HeadlessPort do
       cursor_shape: :block,
       scroll_left: 0,
       content_epoch: 0,
-      geometry: nil
+      geometry: nil,
+      base_rows: base_rows
     }
 
     {window, <<>>} = decode_delta_sections(rest, section_count, base, row_cache)
+    window = Map.delete(window, :base_rows)
     {window, remember_rows(row_cache, window.window_id, window.rows)}
   end
 
@@ -936,6 +945,27 @@ defmodule Minga.Test.HeadlessPort do
     %{result | rows: rows}
   end
 
+  defp decode_delta_section(
+         0x0B,
+         <<base_count::32, result_count::32, splice_count::32, rest::binary>>,
+         %{window_id: window_id, base_rows: base_rows} = result,
+         row_cache
+       ) do
+    true = length(base_rows) == base_count
+    window_cache = Map.get(row_cache, window_id, %{})
+    {splices, <<>>} = decode_row_splices(rest, splice_count, window_cache, [])
+
+    {rows, _offset} =
+      Enum.reduce(splices, {base_rows, 0}, fn {start, delete_count, inserted}, {rows, offset} ->
+        index = start + offset
+        next_rows = Enum.take(rows, index) ++ inserted ++ Enum.drop(rows, index + delete_count)
+        {next_rows, offset + length(inserted) - delete_count}
+      end)
+
+    true = length(rows) == result_count
+    %{result | rows: rows}
+  end
+
   defp decode_delta_section(0x08, payload, result, _row_cache),
     do: Map.put(result, :geometry, decode_geometry_payload(payload))
 
@@ -943,6 +973,18 @@ defmodule Minga.Test.HeadlessPort do
     do: Map.put(result, :cursorline, %{row: row, bg_rgb: r <<< 16 ||| g <<< 8 ||| b})
 
   defp decode_delta_section(_section_id, _payload, result, _row_cache), do: result
+
+  defp decode_row_splices(rest, 0, _window_cache, acc), do: {Enum.reverse(acc), rest}
+
+  defp decode_row_splices(
+         <<start::32, delete_count::32, insert_count::32, rest::binary>>,
+         remaining,
+         window_cache,
+         acc
+       ) do
+    {inserted, rest} = decode_delta_rows(rest, insert_count, window_cache, [])
+    decode_row_splices(rest, remaining - 1, window_cache, [{start, delete_count, inserted} | acc])
+  end
 
   defp decode_delta_rows(rest, 0, _window_cache, acc), do: {Enum.reverse(acc), rest}
 

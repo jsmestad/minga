@@ -861,29 +861,40 @@ The frontend applies the delta only when it already has `gui_window_content` for
 
 ### 0xA1 - gui_window_viewport_delta and 0xA2 - gui_window_rows_delta
 
-Complete visible-window snapshots for retained GUI windows. Both opcodes carry the same payload shape: `gui_window_viewport_delta` is used when row order or viewport state changes without mutating retained row content, and `gui_window_rows_delta` is used when one or more visible rows have new durable content. The row list is ordered and complete for the window's current visible rows.
+`gui_window_viewport_delta` (A1) remains a complete ordered row snapshot for viewport-only changes. `gui_window_rows_delta` (A2) evolves in protocol v11 to carry bounded structural splices. This is an evolution of A2, not a new opcode or semantic surface.
 
 ```
 opcode(1) + section_count(1) + sections...
 
-Each section is `section_id(1) + section_len(4) + payload(section_len)`. Decoders must validate each declared section length against the remaining command bytes before allocating or applying any section.
+Each section is `section_id(1) + section_len(4) + payload(section_len)`. Decoders validate every declared section length before allocating or staging it.
 
 Header section 0x01:
   window_id(2) + content_epoch(4) + flags(1) + cursor_row(2) + cursor_col(2) + cursor_shape(1) + scroll_left(2)
 
-Rows section 0x02:
+A1 Rows section 0x02 (complete snapshot):
   row_count(4) + row_entries...
 
-Per row entry:
+Legacy protocol-v10 A2 Rows section 0x02 (complete snapshot, decode/replay only):
+  row_count(4) + row_entries...
+
+Protocol-v11 A2 RowSplices section 0x0B:
+  base_row_count(4) + result_row_count(4) + splice_count(4) + splices...
+
+Per splice:
+  start_index(4) + delete_count(4) + insert_count(4) + insert_entries...
+
+Per row or insert entry:
   entry_type(1)
   if entry_type == 0: row_id(8) + content_hash(4)
   if entry_type == 1: full row payload, same row encoding used by 0x80 section 0x02
 
-Sections 0x03-0x09:
-  same selection, search, diagnostics, document highlights, annotations, geometry, and cursorline sections used by 0x80
+Sections 0x03-0x0A:
+  same selection, search, diagnostics, document highlights, annotations, geometry, cursorline, and scroll-presentation sections used by 0x80
 ```
 
-The frontend applies the delta only when it already has retained content for the same `window_id` and `content_epoch`. Ref entries must resolve by `row_id + content_hash`; if any ref is missing, the frontend drops that retained window state and waits for the next full 0x80 recovery frame. The BEAM marks row and viewport deltas as pending and follows them with a full content frame, so a missed delta cannot silently advance the backend cache forever.
+A v11 producer emits section 0x0B for A2 and omits section 0x02. Decoders keep the v10 section 0x02 form for replay, but reject an A2 command that carries both forms. All splice coordinates address the same immutable base sequence. Splices must be strictly ascending and non-overlapping, each deletion must fit within `base_row_count`, and applying the exact arithmetic `base - deleted + inserted` must equal `result_row_count`. Empty or trailing bytes, duplicate row identities, invalid buffer-line ordering, and malformed entry tags reject the staged frame.
+
+The frontend applies a delta only when it has retained content for the same `window_id` and `content_epoch`, and its retained row count equals `base_row_count`. It validates all splices and resolves every ref by `row_id + content_hash` against the immutable base before mutating a staged store. A missing ref retains the typed `window_ref_miss` outcome. Any malformed splice reports `invalid_row_splice`; neither failure partially publishes the frame. A1 and full 0x80 remain complete snapshots.
 
 ### 0xA5 — gui_empty_state
 

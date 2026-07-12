@@ -37,6 +37,7 @@ defmodule Minga.Frontend.Adapter.GUI do
   alias Minga.Frontend.Adapter.GUI.WindowEncoder
   alias Minga.Frontend.Adapter.GUI.WorkspacesEncoder
   alias Minga.RenderModel
+  alias Minga.RenderModel.Window.RowDelta
 
   # Ordered list of {field, encoder_module} pairs for component encoding.
   # Each encoder exposes encode/2 that returns {binary(), Caches.t()}.
@@ -165,6 +166,7 @@ defmodule Minga.Frontend.Adapter.GUI do
     previous_overlay_fp = Map.get(caches.last_window_overlay_fps, window.window_id)
     previous_content_epoch = Map.get(caches.last_window_content_epochs, window.window_id)
     previous_row_keys = Map.get(caches.last_window_row_keys, window.window_id, [])
+    previous_rows = Map.get(caches.last_window_rows, window.window_id, [])
 
     change = %{
       metadata: metadata,
@@ -175,6 +177,7 @@ defmodule Minga.Frontend.Adapter.GUI do
       previous_overlay_fp: previous_overlay_fp,
       previous_content_epoch: previous_content_epoch,
       previous_row_keys: previous_row_keys,
+      previous_rows: previous_rows,
       delta_pending?: MapSet.member?(caches.pending_window_delta_ids, window.window_id)
     }
 
@@ -282,15 +285,19 @@ defmodule Minga.Frontend.Adapter.GUI do
            metadata_metrics: metadata_metrics,
            content_fp: content_fp,
            overlay_fp: overlay_fp,
-           previous_row_keys: previous_row_keys
+           previous_row_keys: previous_row_keys,
+           previous_rows: previous_rows
          }
        ) do
     previous_hashes = Map.new(previous_row_keys)
 
     {delta, _has_refs?} =
-      if viewport_delta?(window.rows, previous_hashes),
-        do: WindowEncoder.encode_viewport_delta(window, previous_hashes),
-        else: WindowEncoder.encode_rows_delta(window, previous_hashes)
+      if viewport_delta?(window.rows, previous_hashes) do
+        WindowEncoder.encode_viewport_delta(window, previous_hashes)
+      else
+        row_delta = RowDelta.from_snapshots(previous_rows, window.rows)
+        WindowEncoder.encode_rows_delta(window, row_delta, previous_hashes)
+      end
 
     encoded = [delta | metadata]
 
@@ -360,7 +367,8 @@ defmodule Minga.Frontend.Adapter.GUI do
       caches
       | last_window_content_epochs:
           Map.put(caches.last_window_content_epochs, window_id, window.content_epoch),
-        last_window_row_keys: Map.put(caches.last_window_row_keys, window_id, row_keys)
+        last_window_row_keys: Map.put(caches.last_window_row_keys, window_id, row_keys),
+        last_window_rows: Map.put(caches.last_window_rows, window_id, window.rows)
     }
   end
 

@@ -42,6 +42,7 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
           last_window_overlay_fps: %{non_neg_integer() => integer()},
           last_window_content_epochs: %{non_neg_integer() => non_neg_integer()},
           last_window_row_keys: %{non_neg_integer() => [{non_neg_integer(), non_neg_integer()}]},
+          last_window_rows: %{non_neg_integer() => [Minga.RenderModel.Window.Row.t()]},
           pending_window_delta_ids: MapSet.t(non_neg_integer())
         }
 
@@ -81,6 +82,7 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
             last_window_overlay_fps: %{},
             last_window_content_epochs: %{},
             last_window_row_keys: %{},
+            last_window_rows: %{},
             pending_window_delta_ids: MapSet.new()
 
   @spec new() :: t()

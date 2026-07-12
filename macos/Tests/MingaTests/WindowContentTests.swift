@@ -303,6 +303,27 @@ struct WindowContentDecoderTests {
         return data
     }
 
+    private func buildRowSplicesDelta(_ payload: Data, includeLegacyRows: Bool = false) -> Data {
+        var header = Data()
+        deltaAppendU16(&header, 7)
+        deltaAppendU32(&header, 42)
+        header.append(1)
+        deltaAppendU16(&header, 1)
+        deltaAppendU16(&header, 3)
+        header.append(1)
+        deltaAppendU16(&header, 2)
+        var sections = [deltaSection(0x01, header)]
+        if includeLegacyRows {
+            var rows = Data()
+            deltaAppendU32(&rows, 0)
+            sections.append(deltaSection(0x02, rows))
+        }
+        sections.append(deltaSection(0x0B, payload))
+        var data = Data([OP_GUI_WINDOW_ROWS_DELTA, UInt8(sections.count)])
+        for section in sections { data.append(section) }
+        return data
+    }
+
     private func deltaSection(_ id: UInt8, _ payload: Data) -> Data {
         var section = Data()
         section.append(id)
@@ -816,6 +837,53 @@ struct WindowContentDecoderTests {
         #expect(delta.rows.count == 2)
     }
 
+    @Test("Decode protocol-v11 row splices and reject ambiguous legacy rows")
+    func decodeRowSplices() throws {
+        var payload = Data()
+        deltaAppendU32(&payload, 3)
+        deltaAppendU32(&payload, 3)
+        deltaAppendU32(&payload, 1)
+        deltaAppendU32(&payload, 1)
+        deltaAppendU32(&payload, 1)
+        deltaAppendU32(&payload, 1)
+        payload.append(0)
+        deltaAppendU64(&payload, 2)
+        deltaAppendU32(&payload, 22)
+
+        let (command, _) = try decodeCommand(data: buildRowSplicesDelta(payload), offset: 0)
+        guard case .guiWindowRowsDelta(let delta) = command,
+              let splice = delta.rowSplices?.first else {
+            Issue.record("Expected v11 row splice"); return
+        }
+        #expect(delta.baseRowCount == 3)
+        #expect(delta.resultRowCount == 3)
+        #expect(splice.startIndex == 1)
+        #expect(splice.deleteCount == 1)
+        #expect(splice.insertEntries.count == 1)
+
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: buildRowSplicesDelta(payload, includeLegacyRows: true), offset: 0)
+        }
+    }
+
+    @Test("Row splice decoder rejects overlap, range, and result arithmetic")
+    func rejectMalformedRowSplices() {
+        var overlap = Data()
+        deltaAppendU32(&overlap, 4); deltaAppendU32(&overlap, 2); deltaAppendU32(&overlap, 2)
+        deltaAppendU32(&overlap, 1); deltaAppendU32(&overlap, 2); deltaAppendU32(&overlap, 0)
+        deltaAppendU32(&overlap, 2); deltaAppendU32(&overlap, 2); deltaAppendU32(&overlap, 0)
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: buildRowSplicesDelta(overlap), offset: 0)
+        }
+
+        var badResult = Data()
+        deltaAppendU32(&badResult, 1); deltaAppendU32(&badResult, 9); deltaAppendU32(&badResult, 1)
+        deltaAppendU32(&badResult, 0); deltaAppendU32(&badResult, 1); deltaAppendU32(&badResult, 0)
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: buildRowSplicesDelta(badResult), offset: 0)
+        }
+    }
+
     @Test("Decode rows delta with scroll presentation metadata")
     func decodeRowsDeltaScrollPresentation() throws {
         let data = buildRowsDelta(opcode: OP_GUI_WINDOW_ROWS_DELTA, scrollPresentationPayload: WindowContentBuilder.sampleScrollPresentationPayload(windowId: 7))
@@ -973,6 +1041,204 @@ struct WindowContentDecoderTests {
         )
 
         #expect(content.applyingRowsDelta(delta) == nil)
+    }
+
+    @Test("Rows delta supports front and middle deletion plus retained moves")
+    func rowsDeltaStructuralChanges() throws {
+        let a = GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 0, contentHash: 11, text: "A", spans: [])
+        let b = GUIVisualRow(rowType: .normal, rowId: 2, bufLine: 1, contentHash: 22, text: "B", spans: [])
+        let c = GUIVisualRow(rowType: .normal, rowId: 3, bufLine: 2, contentHash: 33, text: "C", spans: [])
+        let content = GUIWindowContent(windowId: 7, fullRefresh: true, contentEpoch: 42,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: [a, b, c], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [], documentHighlights: [])
+
+        let front = GUIWindowRowsDelta(windowId: 7, contentEpoch: 42, cursorVisible: true,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block, scrollLeft: 0,
+            rows: [.reference(rowId: 2, contentHash: 22), .reference(rowId: 3, contentHash: 33)],
+            selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [],
+            lineAnnotations: [], paneGeometry: nil, cursorline: nil)
+        let frontResult = try content.applyingRowsDeltaChecked(front).get()
+        #expect(frontResult.rows.map(\.rowId) == [2, 3])
+
+        let middle = GUIWindowRowsDelta(windowId: 7, contentEpoch: 42, cursorVisible: true,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block, scrollLeft: 0,
+            rows: [.reference(rowId: 1, contentHash: 11), .reference(rowId: 3, contentHash: 33)],
+            selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [],
+            lineAnnotations: [], paneGeometry: nil, cursorline: nil)
+        #expect(try content.applyingRowsDeltaChecked(middle).get().rows.map(\.rowId) == [1, 3])
+
+        let wrap = GUIVisualRow(rowType: .wrapContinuation, rowId: 4, bufLine: 1, contentHash: 44, text: "wrap", spans: [])
+        let movable = GUIWindowContent(windowId: 7, fullRefresh: true, contentEpoch: 42,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: [b, wrap], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [], documentHighlights: [])
+        let move = GUIWindowRowsDelta(windowId: 7, contentEpoch: 42, cursorVisible: true,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block, scrollLeft: 0,
+            rows: [.reference(rowId: 4, contentHash: 44), .reference(rowId: 2, contentHash: 22)],
+            selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [],
+            lineAnnotations: [], paneGeometry: nil, cursorline: nil)
+        #expect(try movable.applyingRowsDeltaChecked(move).get().rows.map(\.rowId) == [4, 2])
+    }
+
+    @Test("65,536 retained references validate without reset or chunk rewrite")
+    func rowsDeltaLargeNoOpReferences() throws {
+        let count = 65_536
+        var rows: [GUIVisualRow] = []
+        rows.reserveCapacity(count)
+        for index in 0..<count {
+            rows.append(GUIVisualRow(
+                rowType: .normal, rowId: UInt64(index + 1), bufLine: UInt32(index),
+                contentHash: UInt32(index + 1), text: "row", spans: []
+            ))
+        }
+        let content = GUIWindowContent(
+            windowId: 7, fullRefresh: true, contentEpoch: 42,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block,
+            rows: rows, selection: nil, searchMatches: [],
+            diagnosticUnderlines: [], documentHighlights: []
+        )
+        let references: [GUIWindowRowDeltaEntry] = rows.map {
+            GUIWindowRowDeltaEntry.reference(rowId: $0.rowId, contentHash: $0.contentHash)
+        }
+        let delta = GUIWindowRowsDelta(
+            windowId: 7, contentEpoch: 42, cursorVisible: true,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block, scrollLeft: 0,
+            rows: references,
+            selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [],
+            lineAnnotations: [], paneGeometry: nil, cursorline: nil
+        )
+
+        let updated = try content.applyingRowsDeltaChecked(delta).get()
+        #expect(updated.rowStore.count == count)
+        #expect(updated.rowStoreOperationCounters.rowsVisited == count * 2)
+        #expect(updated.rowStoreOperationCounters.idsResolved == count)
+        #expect(updated.rowStoreOperationCounters.chunksTouched == 0)
+        #expect(updated.rowStoreOperationCounters.fullResets == 0)
+    }
+
+    @Test("large changed middle rewrites only bounded chunks")
+    func rowsDeltaLargeChangedMiddle() throws {
+        let count = 65_536
+        let middle = count / 2
+        var rows: [GUIVisualRow] = []
+        rows.reserveCapacity(count)
+        for index in 0..<count {
+            rows.append(GUIVisualRow(
+                rowType: .normal, rowId: UInt64(index + 1), bufLine: UInt32(index),
+                contentHash: UInt32(index + 1), text: "row", spans: []
+            ))
+        }
+        let content = GUIWindowContent(
+            windowId: 7, fullRefresh: true, contentEpoch: 42,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block,
+            rows: rows, selection: nil, searchMatches: [],
+            diagnosticUnderlines: [], documentHighlights: []
+        )
+        let replacement = GUIVisualRow(
+            rowType: .normal, rowId: UInt64(count + 1), bufLine: UInt32(middle),
+            contentHash: UInt32(count + 1), text: "changed", spans: []
+        )
+        var entries = rows.map { GUIWindowRowDeltaEntry.reference(rowId: $0.rowId, contentHash: $0.contentHash) }
+        entries[middle] = GUIWindowRowDeltaEntry.full(replacement)
+        let delta = GUIWindowRowsDelta(
+            windowId: 7, contentEpoch: 42, cursorVisible: true,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block, scrollLeft: 0,
+            rows: entries, selection: nil, searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [], lineAnnotations: [], paneGeometry: nil, cursorline: nil
+        )
+
+        let updated = try content.applyingRowsDeltaChecked(delta).get()
+        #expect(updated.rowStore.row(at: middle) == replacement)
+        #expect(updated.rowStoreOperationCounters.idsResolved == count - 1)
+        #expect(updated.rowStoreOperationCounters.chunksTouched <= 4)
+        #expect(updated.rowStoreOperationCounters.fullResets == 0)
+    }
+
+    @Test("Rows delta rejects duplicate final IDs and late missing refs atomically")
+    func rowsDeltaValidationRollback() throws {
+        let a = GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 0, contentHash: 11, text: "A", spans: [])
+        let b = GUIVisualRow(rowType: .normal, rowId: 2, bufLine: 1, contentHash: 22, text: "B", spans: [])
+        let content = GUIWindowContent(windowId: 7, fullRefresh: true, contentEpoch: 42,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: [a, b], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [], documentHighlights: [])
+        let beforeRows = content.rows
+        let beforeCounters = content.rowStore.counters
+
+        func delta(_ rows: [GUIWindowRowDeltaEntry]) -> GUIWindowRowsDelta {
+            GUIWindowRowsDelta(windowId: 7, contentEpoch: 42, cursorVisible: true,
+                cursorRow: 0, cursorCol: 0, cursorShape: .block, scrollLeft: 0, rows: rows,
+                selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [],
+                lineAnnotations: [], paneGeometry: nil, cursorline: nil)
+        }
+
+        if case .failure(.duplicateRowID(1)) = content.applyingRowsDeltaChecked(delta([
+            .reference(rowId: 1, contentHash: 11), .reference(rowId: 1, contentHash: 11)
+        ])) {} else { Issue.record("Expected duplicate final row identity rejection") }
+        if case .failure(.missingRowID(999)) = content.applyingRowsDeltaChecked(delta([
+            .reference(rowId: 1, contentHash: 11), .reference(rowId: 999, contentHash: 99)
+        ])) {} else { Issue.record("Expected late missing reference rejection") }
+        #expect(content.rows == beforeRows)
+        #expect(content.rowStore.counters == beforeCounters)
+    }
+
+    @Test("V11 row splices apply disjoint changes and keep one-row work document-size independent")
+    func applyBoundedRowSplices() throws {
+        let count = 65_536
+        var rows: [GUIVisualRow] = []
+        rows.reserveCapacity(count)
+        for index in 0..<count {
+            let rowID = UInt64(index + 1)
+            let bufferLine = UInt32(index)
+            let contentHash = UInt32(index + 1)
+            rows.append(GUIVisualRow(
+                rowType: .normal, rowId: rowID, bufLine: bufferLine,
+                contentHash: contentHash, text: "row", spans: []
+            ))
+        }
+        let content = GUIWindowContent(
+            windowId: 7, fullRefresh: true, contentEpoch: 42,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: rows,
+            selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: []
+        )
+        let middle = count / 2
+        let front = GUIVisualRow(
+            rowType: .normal, rowId: UInt64(count + 3), bufLine: 0,
+            contentHash: 999_000, text: "front", spans: []
+        )
+        let replacement = GUIVisualRow(
+            rowType: .normal, rowId: UInt64(count + 1), bufLine: UInt32(middle),
+            contentHash: 999_001, text: "changed", spans: []
+        )
+        let tail = GUIVisualRow(
+            rowType: .normal, rowId: UInt64(count + 2), bufLine: UInt32(count - 1),
+            contentHash: 999_002, text: "tail", spans: []
+        )
+        let delta = GUIWindowRowsDelta(
+            windowId: 7, contentEpoch: 42, cursorVisible: true,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block, scrollLeft: 0,
+            baseRowCount: UInt32(count), resultRowCount: UInt32(count),
+            rowSplices: [
+                GUIWindowRowSplice(startIndex: 0, deleteCount: 1,
+                                   insertEntries: [.full(front)]),
+                GUIWindowRowSplice(startIndex: UInt32(middle), deleteCount: 1,
+                                   insertEntries: [.full(replacement)]),
+                GUIWindowRowSplice(startIndex: UInt32(count - 1), deleteCount: 1,
+                                   insertEntries: [.full(tail)])
+            ],
+            selection: nil, searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [], lineAnnotations: [], paneGeometry: nil, cursorline: nil
+        )
+
+        let updated = try content.applyingRowsDeltaChecked(delta).get()
+        #expect(updated.rowStore.row(at: 0) == front)
+        #expect(updated.rowStore.row(at: middle) == replacement)
+        #expect(updated.rowStore.row(at: count - 1) == tail)
+        #expect(updated.rowStoreOperationCounters.splices == 3)
+        #expect(updated.rowStoreOperationCounters.changedRowsValidated == 3)
+        #expect(updated.rowStoreOperationCounters.idsResolved == 0)
+        #expect(updated.rowStoreOperationCounters.rowsVisited < 3_000)
+        #expect(updated.rowStoreOperationCounters.chunksTouched <= 12)
+        #expect(updated.rowStoreOperationCounters.locatorNodesCopied < 40_000)
+        #expect(updated.rowStoreOperationCounters.fullResets == 0)
     }
 
     @Test("Complete window with all sections decodes correctly")

@@ -431,6 +431,9 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       assert {:ok, {:frame_rejected, 3, 9, 7, :base_sequence_mismatch}} =
                Protocol.decode_event(<<0x0B, 3::32, 9::32, 7::32, 4>>)
 
+      assert {:ok, {:frame_rejected, 3, 10, 9, :invalid_row_splice}} =
+               Protocol.decode_event(<<0x0B, 3::32, 10::32, 9::32, 14>>)
+
       assert {:ok, {:window_ref_miss, 3, 9, 7, 12}} =
                Protocol.decode_event(<<0x0C, 3::32, 9::32, 7::32, 12::16>>)
     end

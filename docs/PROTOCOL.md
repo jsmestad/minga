@@ -27,7 +27,7 @@ The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM
 
 **Text encoding:** All text fields (titles, language names, query source, semantic content) are UTF-8 encoded.
 
-**Protocol version:** The schema carries a `protocol_version` integer (currently 11). The BEAM and every frontend compile against it and exchange it in the `ready` handshake. The BEAM rejects a frontend whose version does not match and sends an explicit `protocol_error` instead of streaming frames the frontend cannot decode. Version 11 makes frame transactions generation-aware and adds explicit applied, rejected, and targeted window-reference-miss status. See "Protocol Version Negotiation" below.
+**Protocol version:** The schema carries a `protocol_version` integer (currently 11). The BEAM and every frontend compile against it and exchange it in the `ready` handshake. The BEAM rejects a frontend whose version does not match and sends an explicit `protocol_error` instead of streaming frames the frontend cannot decode. Version 11 makes frame transactions generation-aware, adds explicit applied, rejected, and targeted window-reference-miss status, and evolves A2 with bounded immutable-base RowSplices. Version-10 A2 complete snapshots remain replay-decodable. See "Protocol Version Negotiation" below.
 
 ---
 
@@ -398,7 +398,7 @@ Total size: 9 bytes.
 
 `window_ref_miss` (0x0C), fixed 15 bytes: `generation:u32, frame_seq:u32, last_applied_frame_seq:u32, window_id:u16`. It is the targeted form for a missing retained row/window reference; sibling windows and chrome remain committed at `last_applied_frame_seq`.
 
-Stable rejection reasons are: 1 truncation, 2 commit sequence mismatch, 3 non-increasing frame sequence, 4 base sequence mismatch, 5 missing theme, 6 incomplete theme, 7 missing window reference, 8 window epoch mismatch, 9 invalid retained rows, 10 missing font resource, 11 transcript desync, 12 decode failure, 13 out-of-transaction command, and 255 unknown.
+Stable rejection reasons are: 1 truncation, 2 commit sequence mismatch, 3 non-increasing frame sequence, 4 base sequence mismatch, 5 missing theme, 6 incomplete theme, 7 missing window reference, 8 window epoch mismatch, 9 invalid retained rows, 10 missing font resource, 11 transcript desync, 12 decode failure, 13 out-of-transaction command, 14 invalid row splice, and 255 unknown.
 
 ---
 
