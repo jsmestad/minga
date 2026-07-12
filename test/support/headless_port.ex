@@ -89,7 +89,11 @@ defmodule Minga.Test.HeadlessPort do
       agent_chat: nil,
       subscribers: [],
       waiters: [],
-      frame_count: 0
+      frame_count: 0,
+      transaction: nil,
+      last_frame_seq: 0,
+      recovery_generation: 0,
+      production_outcome: :unknown
     ]
 
     @type t :: %__MODULE__{
@@ -109,7 +113,12 @@ defmodule Minga.Test.HeadlessPort do
             agent_chat: map() | nil,
             subscribers: [pid()],
             waiters: [{pid(), reference()}],
-            frame_count: non_neg_integer()
+            frame_count: non_neg_integer(),
+            transaction: map() | nil,
+            last_frame_seq: non_neg_integer(),
+            recovery_generation: non_neg_integer(),
+            production_outcome:
+              :unknown | :accepted | :recovery_required | :stale_discarded | :rejected
           }
   end
 
@@ -132,6 +141,26 @@ defmodule Minga.Test.HeadlessPort do
   def send_commands(server, commands) when is_list(commands) do
     GenServer.cast(server, {:send_commands, commands})
   end
+
+  @doc "Submits commands through the production begin/commit transaction gate."
+  @spec send_transaction(
+          GenServer.server(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          [binary()]
+        ) :: :ok
+  def send_transaction(server, seq, base, generation, commands) do
+    send_commands(
+      server,
+      [Protocol.encode_begin_frame(seq, base, generation) | commands] ++
+        [Protocol.encode_commit_frame(seq, 0)]
+    )
+  end
+
+  @doc "Returns observed decoder/apply transaction state for production-gate tests."
+  @spec production_state(GenServer.server()) :: map()
+  def production_state(server), do: GenServer.call(server, :production_state)
 
   @doc "Subscribes the calling process to receive input events."
   @impl MingaEditor.Frontend.Adapter
@@ -364,6 +393,22 @@ defmodule Minga.Test.HeadlessPort do
     {:reply, cell, state}
   end
 
+  def handle_call(:production_state, _from, state) do
+    windows =
+      Map.new(state.windows, fn {id, window} ->
+        {id,
+         %{row_count: length(window.rows), rows: window.rows, content_epoch: window.content_epoch}}
+      end)
+
+    {:reply,
+     %{
+       outcome: state.production_outcome,
+       last_frame_seq: state.last_frame_seq,
+       recovery_generation: state.recovery_generation,
+       windows: windows
+     }, state}
+  end
+
   def handle_call(:frame_count, _from, state) do
     {:reply, state.frame_count, state}
   end
@@ -425,17 +470,25 @@ defmodule Minga.Test.HeadlessPort do
 
   @spec apply_command(binary(), State.t()) :: State.t()
 
-  # begin_frame opens a frame transaction (#2219). The harness presents one packet
-  # per frame, so it decodes the marker and ignores it (staging is children C/D).
-  defp apply_command(<<@op_begin_frame, _frame_seq::32, _base_frame_seq::32>>, state) do
-    state
+  # Production transaction gate. Commands are decoded/applied only at commit,
+  # against an immutable state value, so rejection cannot partially publish.
+  defp apply_command(<<@op_begin_frame, frame_seq::32, base::32, generation::32>>, state) do
+    %{state | transaction: %{seq: frame_seq, base: base, generation: generation, commands: []}}
   end
 
-  # commit_frame closes a frame transaction (#2219), carrying the echoed input
-  # correlation sequence (ticket #2215, formerly on batch_end). It marks frame
-  # completion and notifies waiters.
-  defp apply_command(<<@op_commit_frame, _frame_seq::32, input_seq::32>>, state) do
-    apply_commit_frame(state, input_seq)
+  defp apply_command(
+         <<@op_commit_frame, frame_seq::32, input_seq::32>>,
+         %{transaction: tx} = state
+       )
+       when not is_nil(tx) do
+    commit_transaction(state, tx, frame_seq, input_seq)
+  end
+
+  defp apply_command(<<@op_commit_frame, _frame_seq::32, input_seq::32>>, state),
+    do: apply_commit_frame(state, input_seq)
+
+  defp apply_command(command, %{transaction: tx} = state) when not is_nil(tx) do
+    %{state | transaction: %{tx | commands: tx.commands ++ [command]}}
   end
 
   defp apply_command(<<@op_gui_window_content, _rest::binary>> = binary, state) do
@@ -517,6 +570,54 @@ defmodule Minga.Test.HeadlessPort do
        do: state
 
   defp apply_command(_cmd_binary, state), do: state
+
+  @spec commit_transaction(State.t(), map(), non_neg_integer(), non_neg_integer()) :: State.t()
+  defp commit_transaction(state, tx, frame_seq, input_seq) do
+    valid_base? = tx.base == 0 or tx.base == state.last_frame_seq
+
+    case {frame_seq == tx.seq and valid_base?, tx.generation < state.recovery_generation} do
+      {_, true} -> %{state | transaction: nil, production_outcome: :stale_discarded}
+      {false, _} -> %{state | transaction: nil, production_outcome: :rejected}
+      {true, false} -> apply_staged_transaction(state, tx, input_seq)
+    end
+  end
+
+  @spec apply_staged_transaction(State.t(), map(), non_neg_integer()) :: State.t()
+  defp apply_staged_transaction(state, tx, input_seq) do
+    base = %{state | transaction: nil}
+
+    try do
+      next = Enum.reduce(tx.commands, base, &apply_staged_command/2)
+      next = apply_commit_frame(next, input_seq)
+
+      %{
+        next
+        | last_frame_seq: tx.seq,
+          recovery_generation: tx.generation,
+          production_outcome: :accepted
+      }
+    rescue
+      KeyError -> %{base | production_outcome: :recovery_required}
+      MatchError -> %{base | production_outcome: :rejected}
+      ArgumentError -> %{base | production_outcome: :rejected}
+    catch
+      :throw, :stale_content_epoch -> %{base | production_outcome: :stale_discarded}
+    end
+  end
+
+  @spec apply_staged_command(binary(), State.t()) :: State.t()
+  defp apply_staged_command(<<opcode, _rest::binary>> = command, state)
+       when opcode in [@op_gui_window_viewport_delta, @op_gui_window_rows_delta] do
+    <<_opcode, _count, _header_id, _header_len::32, window_id::16, content_epoch::32,
+      _rest::binary>> = command
+
+    case state.windows do
+      %{^window_id => %{content_epoch: ^content_epoch}} -> apply_command(command, state)
+      _ -> throw(:stale_content_epoch)
+    end
+  end
+
+  defp apply_staged_command(command, state), do: apply_command(command, state)
 
   @spec apply_commit_frame(State.t(), non_neg_integer()) :: State.t()
   defp apply_commit_frame(state, input_seq) do
@@ -996,12 +1097,7 @@ defmodule Minga.Test.HeadlessPort do
        ),
        do:
          decode_delta_rows(rest, remaining - 1, window_cache, [
-           Map.get(window_cache, {row_id, content_hash}, %{
-             row_id: row_id,
-             content_hash: content_hash,
-             text: ""
-           })
-           | acc
+           Map.fetch!(window_cache, {row_id, content_hash}) | acc
          ])
 
   defp decode_delta_rows(

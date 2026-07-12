@@ -92,7 +92,7 @@ defmodule MingaEditor.Renderer.BufferChanges do
 
     Telemetry.execute(
       [:minga, :render, :buffer_deltas],
-      %{deltas_consumed: delta_count},
+      %{deltas_consumed: delta_count, changelog_consumes: 1},
       %{
         buffer: buffer,
         version: consumed.version,

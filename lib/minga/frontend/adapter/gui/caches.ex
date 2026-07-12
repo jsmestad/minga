@@ -87,4 +87,13 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
 
   @spec new() :: t()
   def new, do: %__MODULE__{}
+
+  @doc "Acknowledges that a production frontend applied the pending window delta."
+  @spec acknowledge_window_delta(t(), non_neg_integer()) :: t()
+  def acknowledge_window_delta(%__MODULE__{} = caches, window_id) do
+    %{
+      caches
+      | pending_window_delta_ids: MapSet.delete(caches.pending_window_delta_ids, window_id)
+    }
+  end
 end

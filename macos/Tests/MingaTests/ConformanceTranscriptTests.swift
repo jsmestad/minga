@@ -19,6 +19,13 @@ import MingaProtocol
 
 // MARK: - Corpus model
 
+private enum ProductionCorpusStatus: String {
+    case accepted
+    case recoveryRequired = "recovery_required"
+    case staleDiscarded = "stale_discarded"
+    case unknown
+}
+
 struct ConformanceIndexEntry: Sendable, CustomTestStringConvertible {
     let name: String
     let category: String
@@ -67,6 +74,11 @@ struct ConformanceTranscriptTests {
                     Self.assertFrame(expect, gui: gui, windowId: windowId,
                                      offsetDiscarded: frameReset, index: i, name: entry.name)
                 }
+
+            case "production_fixture":
+                try Self.assertProductionFixture(
+                    step, index: i, name: entry.name, dispatcher: dispatcher, gui: gui
+                )
 
             case "inject_offset":
                 let windowId = UInt16(step["window_id"] as? Int ?? 1)
@@ -196,6 +208,200 @@ struct ConformanceTranscriptTests {
         let gotId = state.messages[anchorIndex].id
         #expect(gotId == anchorId,
                 "\(name) step \(index): id at store index \(anchorIndex) = \(gotId), want \(anchorId)")
+    }
+
+    // MARK: - Compact production fixture
+
+    @MainActor
+    static func assertProductionFixture(
+        _ step: [String: Any], index: Int, name: String,
+        dispatcher: CommandDispatcher, gui: GUIState
+    ) throws {
+        guard let fixture = step["fixture"] as? [String: Any],
+              let operations = step["operations"] as? [[String: Any]] else {
+            throw ConformanceError.badTranscript("\(name) step \(index)")
+        }
+        let rowCount = fixture["row_count"] as? Int ?? 0
+        let wideTextBytes = fixture["wide_text_bytes"] as? Int ?? 0
+        let editIndex = fixture["ordinary_edit_index"] as? Int ?? 0
+        let structuralIndex = fixture["structural_edit_index"] as? Int ?? 0
+        let prefix = fixture["row_text_prefix"] as? String ?? "row-"
+        #expect(rowCount == 65_536)
+        #expect(wideTextBytes > UInt16.max)
+
+        let wideText = String(repeating: "w", count: wideTextBytes)
+        var rows = (0..<rowCount).map { row in
+            let text = row == 0 ? wideText : prefix + String(row)
+            return GUIVisualRow(
+                rowType: .normal, rowId: UInt64(row + 1), bufLine: UInt32(row),
+                contentHash: UInt32(row + 1), text: text, spans: []
+            )
+        }
+        #expect(rows[0].text.utf8.count == wideTextBytes)
+        let originalRows = rows
+
+        var store = try ResidentRowStore(rows: rows)
+        #expect(store.count == rowCount)
+        #expect(store.counters.fullResets == expectedCount("keyframe", "full_resets", operations))
+
+        var before = store.counters
+        rows[editIndex] = GUIVisualRow(
+            rowType: .normal, rowId: rows[editIndex].rowId, bufLine: UInt32(editIndex),
+            contentHash: rows[editIndex].contentHash &+ 1, text: "edited", spans: [])
+        try store.replace(at: editIndex, with: rows[editIndex])
+        var delta = store.counters - before
+        #expect(delta.fullResets == expectedCount("ordinary_edit", "full_resets", operations))
+        #expect(delta.splices == expectedCount("ordinary_edit", "splices", operations))
+        #expect(delta.changedRowsValidated == expectedCount("ordinary_edit", "changed_rows", operations))
+        #expect(delta.chunksTouched <= 4)
+
+        before = store.counters
+        let inserted = GUIVisualRow(rowType: .normal, rowId: UInt64.max - 1,
+                                    bufLine: UInt32(structuralIndex), contentHash: 0xA11CE,
+                                    text: "inserted-near-start", spans: [])
+        try store.splice(at: structuralIndex, removeCount: 0, inserting: [inserted])
+        delta = store.counters - before
+        #expect(delta.fullResets == expectedCount("structural_edit_near_start", "full_resets", operations))
+        #expect(delta.splices == expectedCount("structural_edit_near_start", "splices", operations))
+        #expect(delta.changedRowsValidated == expectedCount("structural_edit_near_start", "changed_rows", operations))
+
+        before = store.counters
+        _ = try store.resolve(rowID: rows[editIndex].rowId, contentHash: rows[editIndex].contentHash)
+        delta = store.counters - before
+        #expect(delta.idsResolved == expectedCount("retained_reference", "ids_resolved", operations))
+
+        let epoch = UInt32(fixture["content_epoch"] as? Int ?? 0)
+        let staleEpoch = UInt32(fixture["stale_content_epoch"] as? Int ?? 0)
+        let generation = UInt32(fixture["recovery_generation"] as? Int ?? 0)
+        let staleGeneration = UInt32(fixture["stale_recovery_generation"] as? Int ?? 0)
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+        let theme = CommandDispatcher.requiredThemeSlots.map { ($0, $0, $0, $0) }
+        let epochContent = GUIWindowContent(
+            windowId: 1, fullRefresh: true, contentEpoch: epoch,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: originalRows,
+            selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: []
+        )
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: generation))
+        dispatcher.dispatch(.guiTheme(slots: theme))
+        dispatcher.dispatch(.guiWindowContent(data: epochContent))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        let keyframePublication = gui.framePublicationCount
+
+        let ordinaryDelta = GUIWindowRowsDelta(
+            windowId: 1, contentEpoch: epoch, cursorVisible: true,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block, scrollLeft: 0,
+            baseRowCount: UInt32(rowCount), resultRowCount: UInt32(rowCount),
+            rowSplices: [GUIWindowRowSplice(startIndex: UInt32(editIndex), deleteCount: 1,
+                                            insertEntries: [.full(rows[editIndex])])],
+            selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [],
+            lineAnnotations: [], paneGeometry: nil, cursorline: nil
+        )
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: generation))
+        dispatcher.dispatch(.guiWindowRowsDelta(data: ordinaryDelta))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+
+        let structuralDelta = GUIWindowRowsDelta(
+            windowId: 1, contentEpoch: epoch, cursorVisible: true,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block, scrollLeft: 0,
+            baseRowCount: UInt32(rowCount), resultRowCount: UInt32(rowCount + 1),
+            rowSplices: [GUIWindowRowSplice(startIndex: UInt32(structuralIndex), deleteCount: 0,
+                                            insertEntries: [.full(inserted)])],
+            selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [],
+            lineAnnotations: [], paneGeometry: nil, cursorline: nil
+        )
+        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 2, generation: generation))
+        dispatcher.dispatch(.guiWindowRowsDelta(data: structuralDelta))
+        dispatcher.dispatch(.commitFrame(frameSeq: 3, seq: 0))
+
+        let retainedIndex = editIndex + 1
+        let retainedDelta = GUIWindowRowsDelta(
+            windowId: 1, contentEpoch: epoch, cursorVisible: true,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block, scrollLeft: 0,
+            baseRowCount: UInt32(rowCount + 1), resultRowCount: UInt32(rowCount + 1),
+            rowSplices: [GUIWindowRowSplice(startIndex: UInt32(retainedIndex), deleteCount: 1,
+                insertEntries: [.reference(rowId: rows[editIndex].rowId,
+                                           contentHash: rows[editIndex].contentHash)])],
+            selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [],
+            lineAnnotations: [], paneGeometry: nil, cursorline: nil
+        )
+        dispatcher.dispatch(.beginFrame(frameSeq: 4, baseFrameSeq: 3, generation: generation))
+        dispatcher.dispatch(.guiWindowRowsDelta(data: retainedDelta))
+        dispatcher.dispatch(.commitFrame(frameSeq: 4, seq: 0))
+        #expect(gui.windowContents[1]?.rowStore.count == rowCount + 1)
+        let committedPublication = gui.framePublicationCount
+        #expect(committedPublication == keyframePublication + 3)
+
+        let missing = GUIWindowRowsDelta(
+            windowId: 1, contentEpoch: epoch, cursorVisible: true,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block, scrollLeft: 0,
+            rows: [.reference(rowId: UInt64.max, contentHash: 1)],
+            selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [],
+            lineAnnotations: [], paneGeometry: nil, cursorline: nil
+        )
+        dispatcher.dispatch(.beginFrame(frameSeq: 5, baseFrameSeq: 4, generation: generation))
+        dispatcher.dispatch(.guiWindowRowsDelta(data: missing))
+        dispatcher.dispatch(.commitFrame(frameSeq: 5, seq: 0))
+        let referenceMissStatus = results.last.map(Self.productionStatus) ?? .unknown
+
+        let staleOverlay = GUIWindowOverlayDelta(
+            windowId: 1, contentEpoch: staleEpoch, cursorVisible: true,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block, cursorline: nil
+        )
+        dispatcher.dispatch(.beginFrame(frameSeq: 6, baseFrameSeq: 4, generation: generation))
+        dispatcher.dispatch(.guiWindowOverlayDelta(data: staleOverlay))
+        dispatcher.dispatch(.commitFrame(frameSeq: 6, seq: 0))
+        let staleEpochStatus: ProductionCorpusStatus =
+            gui.framePublicationCount == committedPublication ? .staleDiscarded : .accepted
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 7, baseFrameSeq: 4, generation: staleGeneration))
+        dispatcher.dispatch(.guiWindowContent(data: GUIWindowContent(
+            windowId: 1, fullRefresh: true, contentEpoch: epoch,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block,
+            rows: [GUIVisualRow(rowType: .normal, rowId: 999, bufLine: 0,
+                                contentHash: 999, text: "must-not-publish", spans: [])],
+            selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: []
+        )))
+        dispatcher.dispatch(.commitFrame(frameSeq: 7, seq: 0))
+        let staleGenerationStatus: ProductionCorpusStatus =
+            gui.framePublicationCount == committedPublication
+                && dispatcher.lastCommittedGeneration == generation ? .staleDiscarded : .accepted
+
+        #expect(expectedStatus("reference_miss", operations) == referenceMissStatus)
+        #expect(expectedStatus("stale_content_epoch", operations) == staleEpochStatus)
+        #expect(expectedStatus("stale_recovery_generation", operations) == staleGenerationStatus)
+
+        before = store.counters
+        try store.replaceAll(with: rows)
+        delta = store.counters - before
+        #expect(delta.fullResets == expectedCount("reset_full_recovery", "full_resets", operations))
+        #expect(store.count == rowCount)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 8, baseFrameSeq: 0, generation: generation))
+        dispatcher.dispatch(.guiTheme(slots: theme))
+        dispatcher.dispatch(.guiWindowContent(data: epochContent))
+        dispatcher.dispatch(.commitFrame(frameSeq: 8, seq: 0))
+        #expect(gui.windowContents[1]?.rowStore.count == rowCount)
+    }
+
+    static func expectedCount(_ operation: String, _ field: String,
+                              _ operations: [[String: Any]]) -> Int {
+        operations.first { $0["name"] as? String == operation }?[field] as? Int ?? 0
+    }
+
+    private static func productionStatus(_ result: FrameTransactionResult) -> ProductionCorpusStatus {
+        switch result {
+        case .applied: .accepted
+        case .windowRefMiss: .recoveryRequired
+        case .rejected: .staleDiscarded
+        }
+    }
+
+    private static func expectedStatus(
+        _ operation: String, _ operations: [[String: Any]]
+    ) -> ProductionCorpusStatus {
+        let raw = operations.first { $0["name"] as? String == operation }?["expect_status"] as? String
+        return raw.flatMap(ProductionCorpusStatus.init(rawValue:)) ?? .unknown
     }
 
     // MARK: - Pointer normalization

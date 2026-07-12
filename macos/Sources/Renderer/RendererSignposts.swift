@@ -19,34 +19,23 @@ enum RendererSignposts {
         fallbackVisibleRows: Int,
         overscanRows: Int = configuredOverscanRows
     ) -> RendererRowSlice {
-        let store = content.rowStore
-        let visibleStart: Int
-        let visibleEnd: Int
+        let prepared = ResidentRenderPreparation.prepare(
+            content: content,
+            fallbackVisibleRows: fallbackVisibleRows,
+            overscanRows: overscanRows
+        )
+        return rowSlice(for: prepared)
+    }
 
-        if let presentation = content.scrollPresentation {
-            let indexedStart = store.lowerBound(bufferLine: presentation.visibleStartLine)
-            let anchorStart = store.lowerBound(bufferLine: presentation.anchorTop)
-            let anchoredVisualStart = min(
-                anchorStart + Int(presentation.anchorVisualRowOffset),
-                store.count
-            )
-            visibleStart = anchoredVisualStart < store.count ? anchoredVisualStart : min(indexedStart, store.count)
-            let indexedEnd = store.lowerBound(bufferLine: presentation.visibleEndLine)
-            visibleEnd = max(indexedEnd, min(visibleStart + fallbackVisibleRows, store.count))
-        } else {
-            visibleStart = 0
-            visibleEnd = min(fallbackVisibleRows, store.count)
-        }
-
-        let lower = max(visibleStart - max(overscanRows, 0), 0)
-        let upper = min(max(visibleEnd, visibleStart) + max(overscanRows, 0), store.count)
-        let result = store.rows(in: lower..<upper)
-        return RendererRowSlice(
-            range: lower..<upper,
-            rows: result.rows,
-            visibleStartIndex: visibleStart,
-            overscanBeforeRows: visibleStart - lower,
-            counters: result.counters
+    /// Adapts shared preparation output for gutter and atlas range consumers
+    /// without traversing the resident store again.
+    static func rowSlice(for prepared: ResidentRenderPreparationResult) -> RendererRowSlice {
+        RendererRowSlice(
+            range: prepared.range,
+            rows: prepared.rows,
+            visibleStartIndex: prepared.visibleStartIndex,
+            overscanBeforeRows: prepared.overscanBeforeRows,
+            counters: prepared.counters
         )
     }
 
@@ -70,7 +59,17 @@ enum RendererSignposts {
         return lower..<upper
     }
 
-    static func record(_ counters: ResidentRowStoreCounters, in metrics: inout FrameMetrics) {
+    /// Records visible-range traversal separately from semantic update work.
+    static func recordVisibleSlice(_ slice: RendererRowSlice, in metrics: inout FrameMetrics) {
+        metrics.editorRowsVisited += slice.counters.rowsVisited
+    }
+
+    /// Counts overlay records the renderer's decoration passes traverse.
+    static func decorationCount(for content: GUIWindowContent) -> Int {
+        ResidentRenderPreparation.decorationCount(content: content)
+    }
+
+    static func recordOperation(_ counters: ResidentRowStoreCounters, in metrics: inout FrameMetrics) {
         metrics.residentRowsVisited += counters.rowsVisited
         metrics.residentChunksTouched += counters.chunksTouched
         metrics.residentIDsResolved += counters.idsResolved

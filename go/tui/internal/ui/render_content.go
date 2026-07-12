@@ -188,9 +188,25 @@ func visibleSidebars(sidebars protocol.Sidebars) []protocol.Sidebar {
 	return visible
 }
 
+func (m Model) windowRowCount(window protocol.WindowContent) int {
+	if store, ok := m.residentRows[window.ID]; ok {
+		return store.count()
+	}
+	return len(window.Rows)
+}
+func (m Model) windowRow(window protocol.WindowContent, index int) (protocol.WindowRow, bool) {
+	if store, ok := m.residentRows[window.ID]; ok {
+		return store.get(index)
+	}
+	if index < 0 || index >= len(window.Rows) {
+		return protocol.WindowRow{}, false
+	}
+	return window.Rows[index], true
+}
+
 func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 	gutter, hasGutter := m.windowGutter(window.ID)
-	height := len(window.Rows)
+	height := m.windowRowCount(window)
 	width := m.width
 	if placement, ok := m.semanticWindowPlacement(window); ok {
 		if placement.width > 0 {
@@ -237,10 +253,16 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 	sourceStart := m.presentationSourceStart(window, height)
 	overscanBefore := presentationPayloadOverscanBefore(window)
 	lines := make([]string, 0, height)
+	m.renderWork.decorationVisits += len(window.SearchMatches) + len(window.Diagnostics) +
+		len(window.Highlights) + len(window.Annotations)
+	if window.SelectionSet {
+		m.renderWork.decorationVisits++
+	}
 	for rowIndex := 0; rowIndex < height; rowIndex++ {
+		m.renderWork.editorRowVisits++
 		sourceRowIndex := rowIndex + sourceStart
 		contentRowIndex := sourceRowIndex - overscanBefore
-		key, cacheable := lineCacheKeyFor(window, sourceRowIndex)
+		key, cacheable := m.lineCacheKeyFor(window, sourceRowIndex)
 		if cacheable {
 			if cached, ok := builder.lookup(key); ok {
 				m.lineCache.hits++
@@ -265,6 +287,7 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 		line := lipgloss.JoinHorizontal(lipgloss.Top, gutterText, content)
 		if cacheable {
 			m.lineCache.misses++
+			m.renderWork.rowsComposed++
 			builder.store(key, line)
 		}
 		if sb.active {
@@ -285,13 +308,13 @@ func (m Model) presentationSourceStart(window protocol.WindowContent, height int
 	if !window.ScrollSet {
 		return 0
 	}
-	before, _ := presentationPayloadOverscanBounds(window, height)
+	before, _ := m.presentationPayloadOverscanBounds(window, height)
 	// Scroll-past-end: the last document line can reach the top of the
 	// viewport, so maxStart is rows-1 (not rows-height). Rows past the
 	// document end render as tilde fills.
-	maxStart := max(len(window.Rows)-1, 0)
-	if !windowCoversDocument(window) {
-		maxStart = max(len(window.Rows)-height, 0)
+	maxStart := max(m.windowRowCount(window)-1, 0)
+	if !m.windowCoversDocument(window) {
+		maxStart = max(m.windowRowCount(window)-height, 0)
 	}
 	start := min(before, maxStart)
 	if scroll, ok := m.localPresentation.scrolls[window.ID]; ok && scroll.keysMatch(window.Scroll) {
@@ -323,11 +346,11 @@ func scrollOverscanAfter(scroll protocol.ScrollPresentation) int {
 // already covers the document the two are equal; the split clamps resident
 // scrolling against the authoritative document extent rather than a windowing
 // concept that no longer applies.
-func presentationScrollRowBounds(window protocol.WindowContent, visibleRows int) (before int, after int) {
-	if windowCoversDocument(window) {
+func (m Model) presentationScrollRowBounds(window protocol.WindowContent, visibleRows int) (before int, after int) {
+	if m.windowCoversDocument(window) {
 		return presentationDocumentRowBounds(window, visibleRows)
 	}
-	return presentationPayloadOverscanBounds(window, visibleRows)
+	return m.presentationPayloadOverscanBounds(window, visibleRows)
 }
 
 // windowCoversDocument reports whether the resident row payload spans the whole
@@ -341,9 +364,16 @@ func windowCoversDocument(window protocol.WindowContent) bool {
 	if !window.ScrollSet || !window.GeometrySet || window.Geometry.TotalLines == 0 {
 		return false
 	}
+	return window.Scroll.OverscanStartLine == 0 && window.Scroll.OverscanEndLine >= window.Geometry.TotalLines && len(window.Rows) >= int(window.Geometry.TotalLines)
+}
+
+func (m Model) windowCoversDocument(window protocol.WindowContent) bool {
+	if !window.ScrollSet || !window.GeometrySet || window.Geometry.TotalLines == 0 {
+		return false
+	}
 	return window.Scroll.OverscanStartLine == 0 &&
 		window.Scroll.OverscanEndLine >= window.Geometry.TotalLines &&
-		len(window.Rows) >= int(window.Geometry.TotalLines)
+		m.windowRowCount(window) >= int(window.Geometry.TotalLines)
 }
 
 // presentationDocumentRowBounds clamps the local offset to the resident document.
@@ -357,10 +387,10 @@ func presentationDocumentRowBounds(window protocol.WindowContent, visibleRows in
 	return before, max(documentRows-1-before, 0)
 }
 
-func presentationPayloadOverscanBounds(window protocol.WindowContent, visibleRows int) (before int, after int) {
+func (m Model) presentationPayloadOverscanBounds(window protocol.WindowContent, visibleRows int) (before int, after int) {
 	before = presentationPayloadOverscanBefore(window)
 	if visibleRows > 0 {
-		return before, max(len(window.Rows)-visibleRows-before, 0)
+		return before, max(m.windowRowCount(window)-visibleRows-before, 0)
 	}
 	return before, scrollOverscanAfter(window.Scroll)
 }
@@ -437,23 +467,30 @@ func (m Model) presentationScrollEffectiveLeft(window protocol.WindowContent) in
 	return max(scrollLeft+scroll.colOffset, 0)
 }
 
-func lineCacheKeyFor(window protocol.WindowContent, rowIndex int) (lineCacheKey, bool) {
-	if rowIndex >= len(window.Rows) {
+func (m Model) lineCacheKeyFor(window protocol.WindowContent, rowIndex int) (lineCacheKey, bool) {
+	row, ok := m.windowRow(window, rowIndex)
+	if !ok {
 		return lineCacheKey{}, false
 	}
-	row := window.Rows[rowIndex]
 	if row.ID == 0 || row.ContentHash == 0 {
 		return lineCacheKey{}, false
 	}
-	return lineCacheKey{rowID: row.ID, hash: row.ContentHash, rowIndex: rowIndex}, true
+	position := 0
+	_, hasGutter := m.gutters[window.ID]
+	_, hasIndentGuides := m.indentGuides[window.ID]
+	if hasGutter || hasIndentGuides || window.Cursorline.Visible || window.SelectionSet || window.SearchSet || window.DiagnosticsSet || window.HighlightsSet || window.AnnotationsSet {
+		position = rowIndex
+	}
+	return lineCacheKey{rowID: row.ID, hash: row.ContentHash, rowIndex: position}, true
 }
 
 func (m Model) renderSemanticContentRow(window protocol.WindowContent, sourceRowIndex int, contentRowIndex int, width int) string {
 	cursorline := window.Cursorline.Visible && contentRowIndex == int(window.Cursorline.Row)
-	if sourceRowIndex < 0 || sourceRowIndex >= len(window.Rows) {
+	row, ok := m.windowRow(window, sourceRowIndex)
+	if !ok {
 		return m.renderTildeRow(width, cursorline, window.Cursorline.BG)
 	}
-	return m.renderRow(window, window.Rows[sourceRowIndex], contentRowIndex, width, cursorline, window.Cursorline.BG)
+	return m.renderRow(window, row, contentRowIndex, width, cursorline, window.Cursorline.BG)
 }
 
 func (m Model) renderTildeRow(width int, cursorline bool, cursorlineBG uint32) string {

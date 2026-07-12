@@ -25,12 +25,15 @@ const (
 )
 
 type Model struct {
-	width            int
-	height           int
-	out              chan<- []byte
-	viewport         viewport.Model
-	zones            *zoneManager
-	windows          map[uint16]protocol.WindowContent
+	width    int
+	height   int
+	out      chan<- []byte
+	viewport viewport.Model
+	zones    *zoneManager
+	windows  map[uint16]protocol.WindowContent
+	// residentRows is the indexed, value-semantic authority for window rows.
+	// WindowContent.Rows is retained only as a small-fixture compatibility view.
+	residentRows     map[uint16]residentRows
 	windowOrder      []uint16
 	chrome           map[byte]protocol.ChromePayload
 	activePalette    palette
@@ -74,6 +77,9 @@ type Model struct {
 	// latency). Structural commands, resize, and keyframe resync clear it; see
 	// invalidateLineCache and the keyframe reset in commitStaging.
 	lineCache *lineCache
+	// renderWork records production mutation and compose operations for the
+	// deterministic complexity gate. Pointer lifetime follows lineCache.
+	renderWork *renderWorkCollector
 	// mouseDrag tracks an in-progress press-drag over a draggable chrome zone
 	// (a tab or a file-tree row), so a release over a different target can emit
 	// a tab_reorder or file_tree_drop gui_action (ticket #2229, AC3). It is nil
@@ -97,11 +103,15 @@ type Model struct {
 	// transaction. It validates a delta transaction's base_frame_seq and is the
 	// last_good_frame_seq carried by request_keyframe. 0 means no frame committed
 	// yet (only a base-0 keyframe is valid until then).
-	lastCommittedSeq uint32
+	lastCommittedSeq        uint32
+	lastCommittedGeneration uint32
 	// resyncPending is set when the model rejected a transaction. It drives a
 	// subtle footer indicator while the BEAM performs typed-status recovery, and
 	// clears when a valid commit applies.
 	resyncPending bool
+	// lastFrameOutcome is set by the production transaction gate itself. Corpus
+	// tests observe it after submission; they never infer or pre-populate status.
+	lastFrameOutcome frameOutcome
 	// surfacePlacements is the BEAM's authoritative per-frame surface layout from
 	// gui_surface_layout (0xA4, #2268): one rect+z list. Compositing reads the z
 	// of a placed surface to order it instead of the old hand-coded
@@ -131,6 +141,8 @@ type frameStaging struct {
 	base uint32
 	// generation is echoed on every status event.
 	generation uint32
+	// staleGeneration marks a delayed transaction from an older recovery lineage.
+	staleGeneration bool
 	// commands are the buffered semantic/chrome commands in arrival order.
 	commands []protocol.Command
 }
@@ -144,6 +156,7 @@ func New(width, height uint16, out chan<- []byte, filter *InputFilter) Model {
 		viewport:          vp,
 		zones:             newZoneManager(),
 		windows:           map[uint16]protocol.WindowContent{},
+		residentRows:      map[uint16]residentRows{},
 		chrome:            map[byte]protocol.ChromePayload{},
 		activePalette:     bootstrapPalette(),
 		gutters:           map[uint16]protocol.Gutter{},
@@ -152,6 +165,7 @@ func New(width, height uint16, out chan<- []byte, filter *InputFilter) Model {
 		latency:           latency.New(),
 		hudVisible:        latencyHUDEnvEnabled(),
 		lineCache:         newLineCache(),
+		renderWork:        &renderWorkCollector{},
 		localPresentation: newLocalPresentation(),
 		inputFilter:       filter,
 		transcript:        newResidentTranscript(),
@@ -531,10 +545,11 @@ func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 				cmds = m.invalidateStaging(cmds, "truncated frame transaction (begin while open)")
 			}
 			m.staging = &frameStaging{
-				seq:        command.FrameSeq,
-				base:       command.BaseFrameSeq,
-				generation: command.Generation,
-				commands:   make([]protocol.Command, 0, 16),
+				seq:             command.FrameSeq,
+				base:            command.BaseFrameSeq,
+				generation:      command.Generation,
+				staleGeneration: m.lastCommittedGeneration != 0 && command.Generation < m.lastCommittedGeneration,
+				commands:        make([]protocol.Command, 0, 16),
 			}
 		case protocol.CommandCommitFrame:
 			cmds = m.commitStaging(cmds, command)
@@ -596,6 +611,11 @@ func stagingThemeValidation(commands []protocol.Command) (found bool, missing []
 // then fires the commit-gated behaviors (latency resolve). An invalid or missing
 // transaction discards staging and emits typed rejection (#2219), except a missing theme on a keyframe latches a protocol error because the BEAM must own theme selection.
 func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cmd {
+	if m.staging != nil && m.staging.staleGeneration {
+		m.staging = nil
+		m.lastFrameOutcome = frameOutcomeStale
+		return cmds
+	}
 	if m.staging == nil {
 		// commit with no open begin: the begin was lost or truncated. Resync.
 		return m.invalidateStaging(cmds, "commit_frame with no open transaction")
@@ -628,6 +648,7 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 			return m.invalidateStaging(cmds, "missing gui_theme in keyframe")
 		}
 		m.lineCache.reset()
+		m.renderWork.fullResets++
 	}
 
 	// Validate every window reference against a temporary snapshot before any
@@ -635,6 +656,7 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 	// entire frame through the generation-aware status contract.
 	if failure := m.validateWindowReferences(); failure != nil {
 		if failure.targeted {
+			m.lastFrameOutcome = frameOutcomeRecoveryRequired
 			generation, seq := m.staging.generation, m.staging.seq
 			m.send(protocol.EncodeWindowRefMiss(generation, seq, m.lastCommittedSeq, failure.windowID))
 			m.staging = nil
@@ -653,10 +675,12 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 		m.applyMutation(staged)
 	}
 	m.lastCommittedSeq = seq
+	m.lastCommittedGeneration = generation
 	m.staging = nil
 	// A clean commit clears any pending resync indicator: the frontend is back
 	// in sync with the BEAM (#2219).
 	m.resyncPending = false
+	m.lastFrameOutcome = frameOutcomeApplied
 
 	// Commit-gated behaviors: the frame is fully applied and about to be written
 	// to the terminal, so resolve the keystroke-to-write latency sample now for
@@ -677,6 +701,7 @@ func (m *Model) invalidateStaging(cmds []tea.Cmd, reason string) []tea.Cmd {
 }
 
 func (m *Model) rejectStaging(cmds []tea.Cmd, reason byte, description string) []tea.Cmd {
+	m.lastFrameOutcome = frameOutcomeRejected
 	generation, frameSeq := uint32(0), uint32(0)
 	if m.staging != nil {
 		generation, frameSeq = m.staging.generation, m.staging.seq
@@ -714,6 +739,16 @@ func rejectionCode(reason string) byte {
 	}
 }
 
+type frameOutcome byte
+
+const (
+	frameOutcomeUnknown frameOutcome = iota
+	frameOutcomeApplied
+	frameOutcomeRecoveryRequired
+	frameOutcomeStale
+	frameOutcomeRejected
+)
+
 type windowReferenceFailure struct {
 	windowID uint16
 	reason   byte
@@ -724,13 +759,22 @@ type windowReferenceFailure struct {
 // It performs no observable writes, so any failure is reported before publication.
 func (m *Model) validateWindowReferences() *windowReferenceFailure {
 	working := make(map[uint16]protocol.WindowContent, len(m.windows))
+	stores := make(map[uint16]residentRows, len(m.residentRows))
 	for id, window := range m.windows {
 		working[id] = window
+	}
+	for id, store := range m.residentRows {
+		stores[id] = store
 	}
 	for _, command := range m.staging.commands {
 		switch command.Kind {
 		case protocol.CommandWindowContent:
+			store, err := newResidentRows(command.Window.Rows)
+			if err != nil {
+				return &windowReferenceFailure{windowID: command.Window.ID, reason: protocol.RejectInvalidRowSplice}
+			}
 			working[command.Window.ID] = command.Window
+			stores[command.Window.ID] = store
 		case protocol.CommandWindowDelta:
 			previous, ok := working[command.Window.ID]
 			if !ok {
@@ -740,20 +784,30 @@ func (m *Model) validateWindowReferences() *windowReferenceFailure {
 				return &windowReferenceFailure{windowID: command.Window.ID, reason: protocol.RejectWindowEpoch}
 			}
 			if command.Window.RowSplicesSet {
-				rows, refMiss, err := resolveWindowRowSplices(previous.Rows, command.Window)
+				store, exists := stores[command.Window.ID]
+				if !exists {
+					return &windowReferenceFailure{windowID: command.Window.ID, targeted: true}
+				}
+				next, refMiss, err := store.splice(command.Window, m.renderWork)
 				if err != nil {
 					if refMiss {
 						return &windowReferenceFailure{windowID: command.Window.ID, targeted: true}
 					}
 					return &windowReferenceFailure{windowID: command.Window.ID, reason: protocol.RejectInvalidRowSplice}
 				}
-				previous.Rows = rows
+				stores[command.Window.ID] = next
+				previous.Rows = compatibilityRows(next)
 			} else if command.Window.Rows != nil {
-				rows, err := resolveWindowRows(previous.Rows, command.Window.Rows)
-				if err != nil {
+				store, exists := stores[command.Window.ID]
+				if !exists {
 					return &windowReferenceFailure{windowID: command.Window.ID, targeted: true}
 				}
-				previous.Rows = rows
+				next, refMiss, err := store.resolveRows(command.Window.Rows)
+				if err != nil {
+					return &windowReferenceFailure{windowID: command.Window.ID, targeted: refMiss}
+				}
+				stores[command.Window.ID] = next
+				previous.Rows = compatibilityRows(next)
 			}
 			working[command.Window.ID] = previous
 		}
@@ -883,6 +937,13 @@ func (m *Model) applyExtensionRuntime(payload protocol.ExtensionRuntimePayload) 
 }
 
 func (m *Model) putWindow(window protocol.WindowContent) {
+	store, err := newResidentRows(window.Rows)
+	if err != nil {
+		m.removeWindow(window.ID)
+		return
+	}
+	m.residentRows[window.ID] = store
+	window.Rows = compatibilityRows(store)
 	if _, ok := m.windows[window.ID]; !ok {
 		m.windowOrder = append(m.windowOrder, window.ID)
 		sort.Slice(m.windowOrder, func(i, j int) bool { return m.windowOrder[i] < m.windowOrder[j] })
@@ -944,19 +1005,32 @@ func (m *Model) applyWindowDelta(delta protocol.WindowContent) {
 		window.ScrollSet = false
 	}
 	if delta.RowSplicesSet {
-		rows, _, err := resolveWindowRowSplices(window.Rows, delta)
+		m.renderWork.rowUpdates += len(delta.RowSplices)
+		store, exists := m.residentRows[delta.ID]
+		if !exists {
+			m.removeWindow(delta.ID)
+			return
+		}
+		next, _, err := store.splice(delta, m.renderWork)
 		if err != nil {
 			m.removeWindow(delta.ID)
 			return
 		}
-		window.Rows = rows
+		m.residentRows[delta.ID] = next
+		window.Rows = compatibilityRows(next)
 	} else if delta.Rows != nil {
-		rows, err := resolveWindowRows(window.Rows, delta.Rows)
+		store, exists := m.residentRows[delta.ID]
+		if !exists {
+			m.removeWindow(delta.ID)
+			return
+		}
+		next, _, err := store.resolveRows(delta.Rows)
 		if err != nil {
 			m.removeWindow(delta.ID)
 			return
 		}
-		window.Rows = rows
+		m.residentRows[delta.ID] = next
+		window.Rows = compatibilityRows(next)
 	}
 	m.reconcilePresentationScroll(window)
 	m.windows[delta.ID] = window
@@ -979,95 +1053,9 @@ func (m *Model) refreshCursorFromWindows() {
 	}
 }
 
-func resolveWindowRows(previous []protocol.WindowRow, delta []protocol.WindowRow) ([]protocol.WindowRow, error) {
-	byID := make(map[uint64]protocol.WindowRow, len(previous))
-	for _, row := range previous {
-		byID[row.ID] = row
-	}
-	rows := make([]protocol.WindowRow, 0, len(delta))
-	for _, row := range delta {
-		if row.Ref {
-			existing, ok := byID[row.ID]
-			if !ok {
-				return nil, fmt.Errorf("missing retained row ref %d", row.ID)
-			}
-			if existing.ContentHash != row.ContentHash {
-				return nil, fmt.Errorf("retained row ref %d hash mismatch", row.ID)
-			}
-			rows = append(rows, existing)
-			continue
-		}
-		rows = append(rows, row)
-	}
-	if err := validateResolvedRows(rows); err != nil {
-		return nil, err
-	}
-	return rows, nil
-}
-
-func resolveWindowRowSplices(previous []protocol.WindowRow, delta protocol.WindowContent) ([]protocol.WindowRow, bool, error) {
-	if uint64(len(previous)) != uint64(delta.BaseRowCount) {
-		return nil, false, fmt.Errorf("row splice base count mismatch")
-	}
-	byID := make(map[uint64]protocol.WindowRow, len(previous))
-	for _, row := range previous {
-		byID[row.ID] = row
-	}
-	result := make([]protocol.WindowRow, 0, int(delta.ResultRowCount))
-	baseCursor := 0
-	previousStart := -1
-	previousEnd := 0
-	for _, splice := range delta.RowSplices {
-		start := int(splice.StartIndex)
-		deleteCount := int(splice.DeleteCount)
-		if start <= previousStart || start < previousEnd || start < baseCursor || start > len(previous) ||
-			deleteCount < 0 || start+deleteCount > len(previous) || (deleteCount == 0 && len(splice.InsertRows) == 0) {
-			return nil, false, fmt.Errorf("invalid row splice range")
-		}
-		result = append(result, previous[baseCursor:start]...)
-		for _, row := range splice.InsertRows {
-			if row.Ref {
-				existing, ok := byID[row.ID]
-				if !ok || existing.ContentHash != row.ContentHash {
-					return nil, true, fmt.Errorf("missing retained row splice ref")
-				}
-				result = append(result, existing)
-			} else {
-				result = append(result, row)
-			}
-		}
-		baseCursor = start + deleteCount
-		previousStart = start
-		previousEnd = baseCursor
-	}
-	result = append(result, previous[baseCursor:]...)
-	if len(result) != int(delta.ResultRowCount) {
-		return nil, false, fmt.Errorf("row splice result count mismatch")
-	}
-	if err := validateResolvedRows(result); err != nil {
-		return nil, false, err
-	}
-	return result, false, nil
-}
-
-func validateResolvedRows(rows []protocol.WindowRow) error {
-	ids := make(map[uint64]struct{}, len(rows))
-	var previousLine uint32
-	for index, row := range rows {
-		if _, exists := ids[row.ID]; exists {
-			return fmt.Errorf("duplicate retained row id %d", row.ID)
-		}
-		ids[row.ID] = struct{}{}
-		if index > 0 && row.BufferLine < previousLine {
-			return fmt.Errorf("retained rows out of buffer-line order")
-		}
-		previousLine = row.BufferLine
-	}
-	return nil
-}
-
 func (m *Model) removeWindow(id uint16) {
 	delete(m.windows, id)
+	delete(m.residentRows, id)
 	m.localPresentation.removeWindow(id)
 	m.lineCache.dropWindow(id)
 	for index, windowID := range m.windowOrder {

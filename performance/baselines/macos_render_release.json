@@ -1,13 +1,13 @@
 {
   "version": 1,
-  "fixtureVersion": "native-visible-v1",
-  "decodeApplyP95Ms": 0.762125,
-  "commandPreparationP95Ms": 0.026,
-  "combinedP95Ms": 1.362917,
+  "fixtureVersion": "resident-ordinary-edit-v2",
+  "decodeApplyP95Ms": 0.029584,
+  "commandPreparationP95Ms": 0.347542,
+  "combinedP95Ms": 0.392416,
   "provenance": {
     "measuredAt": "2026-07-12",
     "environment": "GitHub-hosted macos-15 arm64 runner, macOS 15.7.7 (24G720)",
-    "toolchain": "GitHub Actions macos-15 default Xcode toolchain, swiftc -O",
-    "rationale": "Initial CI calibration for native-visible-v1 from the optimized 200-warmup/1000-measurement gate in run 29176725578; the references are the measured CI p95 values, while hard-coded 4 ms stage and 8 ms combined ceilings remain unchanged."
+    "toolchain": "Apple Swift 6.1.2 (swiftlang-6.1.2.1.2 clang-1700.0.13.5), swiftc -O",
+    "rationale": "Recalibrated for resident-ordinary-edit-v2 from CI run 29197434526 rerun job 86663882497 after the harness moved to the shipping 65,536-row protocol decode, bounded resident replacement, and shared CoreText command-preparation paths. Two macos-15 runs measured 0.030/0.342/0.384 ms and 0.030/0.348/0.392 ms p95 for decode/apply, command preparation, and combined work; the conservative second run is checked in. Hard-coded 4 ms stage and 8 ms combined ceilings remain authoritative."
   }
 }

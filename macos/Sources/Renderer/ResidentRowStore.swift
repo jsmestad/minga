@@ -425,6 +425,13 @@ public struct ResidentRowStore: Sendable {
             throw ResidentRowStoreError.invalidRange(index: computed, removeCount: 0, rowCount: resultRowCount)
         }
 
+        if !splices.isEmpty, let replacements = try inPlaceReplacements(for: splices) {
+            var staged = self
+            staged.applyInPlaceReplacements(replacements)
+            self = staged
+            return
+        }
+
         var staged = self
         var coordinateAdjustment = 0
         for splice in splices {
@@ -549,6 +556,87 @@ public struct ResidentRowStore: Sendable {
     /// Chunk occupancies exposed for structural invariant tests.
     public var chunkOccupancies: [Int] { Self.flattenChunks(storage.root).map { $0.rows.count } }
 
+    private struct InPlaceReplacement {
+        let index: Int
+        let oldRow: GUIVisualRow
+        let newRow: GUIVisualRow
+        let chunkID: UInt64
+        let offset: Int
+    }
+
+    /// Recognizes identity-preserving one-for-one edits and validates their final
+    /// ordering against the immutable base before any path is copied.
+    private func inPlaceReplacements(
+        for splices: [ResidentRowSplice]
+    ) throws -> [InPlaceReplacement]? {
+        guard splices.allSatisfy({ $0.deleteCount == 1 && $0.insertedRows.count == 1 }) else {
+            return nil
+        }
+
+        var finalRows: [Int: GUIVisualRow] = [:]
+        finalRows.reserveCapacity(splices.count)
+        var replacements: [InPlaceReplacement] = []
+        replacements.reserveCapacity(splices.count)
+
+        for splice in splices {
+            let newRow = splice.insertedRows[0]
+            guard let oldRow = row(at: splice.startIndex), oldRow.rowId == newRow.rowId,
+                  let locator = storage.locators[oldRow.rowId], locator.row == oldRow else {
+                return nil
+            }
+            finalRows[splice.startIndex] = newRow
+            replacements.append(InPlaceReplacement(
+                index: splice.startIndex,
+                oldRow: oldRow,
+                newRow: newRow,
+                chunkID: locator.chunkID,
+                offset: locator.offset
+            ))
+        }
+
+        for replacement in replacements where replacement.newRow.bufLine != replacement.oldRow.bufLine {
+            if replacement.index > 0,
+               let previous = finalRows[replacement.index - 1] ?? row(at: replacement.index - 1),
+               previous.bufLine > replacement.newRow.bufLine {
+                throw ResidentRowStoreError.unsortedBufferLine(
+                    previous: previous.bufLine, next: replacement.newRow.bufLine
+                )
+            }
+            if replacement.index + 1 < count,
+               let following = finalRows[replacement.index + 1] ?? row(at: replacement.index + 1),
+               replacement.newRow.bufLine > following.bufLine {
+                throw ResidentRowStoreError.unsortedBufferLine(
+                    previous: replacement.newRow.bufLine, next: following.bufLine
+                )
+            }
+        }
+        return replacements
+    }
+
+    /// Publishes only immutable path copies. Chunk IDs remain stable, so each
+    /// durable locator needs one radix update and no neighboring row is reindexed.
+    private mutating func applyInPlaceReplacements(_ replacements: [InPlaceReplacement]) {
+        ensureUniqueStorage()
+        for replacement in replacements {
+            storage.root = Self.replacingRow(
+                storage.root, at: replacement.index, with: replacement.newRow
+            )
+            storage.locators.set(
+                Locator(
+                    chunkID: replacement.chunkID,
+                    offset: replacement.offset,
+                    row: replacement.newRow
+                ),
+                for: replacement.newRow.rowId,
+                copiedNodes: &storage.counters.locatorNodesCopied
+            )
+        }
+        storage.counters.rowsVisited += replacements.count * 2
+        storage.counters.chunksTouched += replacements.count
+        storage.counters.splices += replacements.count
+        storage.counters.changedRowsValidated += replacements.count
+    }
+
     private mutating func ensureUniqueStorage() {
         if !isKnownUniquelyReferenced(&storage) { storage = storage.copy() }
     }
@@ -666,6 +754,35 @@ public struct ResidentRowStore: Sendable {
 
     private static func buildTree(_ chunks: [Chunk]) -> Node? {
         chunks.reduce(nil as Node?) { merge($0, Node(chunk: $1)) }
+    }
+
+    private static func replacingRow(_ node: Node?, at index: Int, with row: GUIVisualRow) -> Node? {
+        guard let node else { return nil }
+        let leftCount = node.left?.rowCount ?? 0
+        if index < leftCount {
+            return Node(
+                chunk: node.chunk,
+                left: replacingRow(node.left, at: index, with: row),
+                right: node.right
+            )
+        }
+        let localIndex = index - leftCount
+        if localIndex < node.chunk.rows.count {
+            var rows = node.chunk.rows
+            rows[localIndex] = row
+            return Node(
+                chunk: Chunk(id: node.chunk.id, rows: rows),
+                left: node.left,
+                right: node.right
+            )
+        }
+        return Node(
+            chunk: node.chunk,
+            left: node.left,
+            right: replacingRow(
+                node.right, at: localIndex - node.chunk.rows.count, with: row
+            )
+        )
     }
 
     private static func flattenChunks(_ node: Node?) -> [Chunk] {

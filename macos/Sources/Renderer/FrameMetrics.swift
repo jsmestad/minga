@@ -11,6 +11,11 @@ struct FrameMetrics: Equatable {
     var atlasNewKeys: Int = 0
     var atlasHashChanges: Int = 0
     var atlasEvictions: Int = 0
+    /// Rows visited by visible editor preparation only (excludes delta validation).
+    var editorRowsVisited: Int = 0
+    /// Decoration records visited by overlay preparation, reported separately.
+    var decorationsVisited: Int = 0
+    /// Rows visited while validating/applying resident updates.
     var residentRowsVisited: Int = 0
     var residentChunksTouched: Int = 0
     var residentIDsResolved: Int = 0
@@ -30,6 +35,8 @@ struct FrameMetrics: Equatable {
         atlasNewKeys = 0
         atlasHashChanges = 0
         atlasEvictions = 0
+        editorRowsVisited = 0
+        decorationsVisited = 0
         residentRowsVisited = 0
         residentChunksTouched = 0
         residentIDsResolved = 0

@@ -99,6 +99,7 @@ defmodule Mix.Tasks.Conformance.Gen do
       cursor_only_overlay_delta(),
       layout_generation_full_replace(),
       reset_required_discard(),
+      production_render_boundaries(),
       drag_selection_active_offset(),
       hml_after_scroll_report(),
       scroll_seq_strictly_newer_discard(),
@@ -389,6 +390,61 @@ defmodule Mix.Tasks.Conformance.Gen do
             "offset_discarded" => true
           }
         )
+      ]
+    )
+  end
+
+  @spec production_render_boundaries() :: transcript()
+  defp production_render_boundaries do
+    transcript(
+      "production_render_boundaries",
+      "store",
+      %{swift: true, go: true},
+      "Compact production fixture expanded deterministically by every client: a >65,535-byte row carrier, exactly 65,536 resident rows, a near-start structural edit, retained refs and ref miss, stale content epoch and recovery generation, then reset/full recovery.",
+      [
+        %{
+          "kind" => "production_fixture",
+          "fixture" => %{
+            "row_count" => 65_536,
+            "comparison_row_count" => 5_000,
+            "wide_text_bytes" => 65_536,
+            "visible_rows" => 24,
+            "overscan_rows" => 2,
+            "ordinary_edit_index" => 32_768,
+            "structural_edit_index" => 1,
+            "content_epoch" => 7,
+            "stale_content_epoch" => 6,
+            "recovery_generation" => 11,
+            "stale_recovery_generation" => 10,
+            "row_text_prefix" => "production-row-"
+          },
+          "operations" => [
+            %{"name" => "keyframe", "expect_status" => "accepted", "full_resets" => 1},
+            %{
+              "name" => "ordinary_edit",
+              "expect_status" => "accepted",
+              "full_resets" => 0,
+              "splices" => 1,
+              "changed_rows" => 1
+            },
+            %{
+              "name" => "structural_edit_near_start",
+              "expect_status" => "accepted",
+              "full_resets" => 0,
+              "splices" => 1,
+              "changed_rows" => 1
+            },
+            %{"name" => "retained_reference", "expect_status" => "accepted", "ids_resolved" => 1},
+            %{"name" => "reference_miss", "expect_status" => "recovery_required"},
+            %{"name" => "stale_content_epoch", "expect_status" => "stale_discarded"},
+            %{"name" => "stale_recovery_generation", "expect_status" => "stale_discarded"},
+            %{
+              "name" => "reset_full_recovery",
+              "expect_status" => "accepted",
+              "full_resets" => 1
+            }
+          ]
+        }
       ]
     )
   end

@@ -11,7 +11,7 @@ struct RenderPerformanceGateTests {
     private var baseline: RenderPerformanceBaseline {
         RenderPerformanceBaseline(
             version: 1,
-            fixtureVersion: "native-visible-v1",
+            fixtureVersion: "resident-ordinary-edit-v2",
             decodeApplyP95Ms: 1.0,
             commandPreparationP95Ms: 1.0,
             combinedP95Ms: 2.0,
@@ -28,7 +28,7 @@ struct RenderPerformanceGateTests {
     @Test("exact absolute boundaries pass and the next representable values fail")
     func absoluteBoundaries() {
         let absoluteBaseline = RenderPerformanceBaseline(
-            version: 1, fixtureVersion: "native-visible-v1", decodeApplyP95Ms: 4.0,
+            version: 1, fixtureVersion: "resident-ordinary-edit-v2", decodeApplyP95Ms: 4.0,
             commandPreparationP95Ms: 4.0, combinedP95Ms: 8.0, provenance: provenance)
 
         let pass = measurement(stage: 4.0, combined: 8.0)
@@ -48,7 +48,7 @@ struct RenderPerformanceGateTests {
         let json = """
         {
           "version": 1,
-          "fixtureVersion": "native-visible-v1",
+          "fixtureVersion": "resident-ordinary-edit-v2",
           "decodeApplyP95Ms": 4.0,
           "commandPreparationP95Ms": 4.0,
           "combinedP95Ms": 8.0,
@@ -86,7 +86,7 @@ struct RenderPerformanceGateTests {
     ])
     func invalidReference(value: Double) {
         let invalid = RenderPerformanceBaseline(
-            version: 1, fixtureVersion: "native-visible-v1", decodeApplyP95Ms: value,
+            version: 1, fixtureVersion: "resident-ordinary-edit-v2", decodeApplyP95Ms: value,
             commandPreparationP95Ms: 1, combinedP95Ms: 2, provenance: provenance)
         #expect(RenderPerformanceGate.failures(
             measurement: measurement(stage: 1, combined: 2), baseline: invalid

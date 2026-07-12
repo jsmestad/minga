@@ -384,11 +384,12 @@ final class CoreTextMetalRenderer {
         os_signpost(.begin, log: renderLog, name: "Frame", signpostID: renderSignpostID)
         defer {
             os_signpost(.end, log: renderLog, name: "Frame", signpostID: renderSignpostID,
-                        "buffer_rows_rasterized=%{public}d buffer_rows_reused=%{public}d other_textures_rasterized=%{public}d other_textures_reused=%{public}d texture_uploads=%{public}d texture_upload_bytes=%{public}d atlas_new_keys=%{public}d atlas_hash_changes=%{public}d atlas_evictions=%{public}d resident_rows_visited=%{public}d resident_chunks_touched=%{public}d resident_ids_resolved=%{public}d resident_splices=%{public}d resident_changed_rows=%{public}d resident_locator_nodes_copied=%{public}d resident_full_resets=%{public}d",
+                        "buffer_rows_rasterized=%{public}d buffer_rows_reused=%{public}d other_textures_rasterized=%{public}d other_textures_reused=%{public}d texture_uploads=%{public}d texture_upload_bytes=%{public}d atlas_new_keys=%{public}d atlas_hash_changes=%{public}d atlas_evictions=%{public}d editor_rows_visited=%{public}d decorations_visited=%{public}d resident_rows_visited=%{public}d resident_chunks_touched=%{public}d resident_ids_resolved=%{public}d resident_splices=%{public}d resident_changed_rows=%{public}d resident_locator_nodes_copied=%{public}d resident_full_resets=%{public}d",
                         frameMetrics.bufferRowsRasterized, frameMetrics.bufferRowsReused,
                         frameMetrics.otherTexturesRasterized, frameMetrics.otherTexturesReused,
                         frameMetrics.textureUploads, frameMetrics.textureUploadBytes,
                         frameMetrics.atlasNewKeys, frameMetrics.atlasHashChanges, frameMetrics.atlasEvictions,
+                        frameMetrics.editorRowsVisited, frameMetrics.decorationsVisited,
                         frameMetrics.residentRowsVisited, frameMetrics.residentChunksTouched,
                         frameMetrics.residentIDsResolved, frameMetrics.residentSplices,
                         frameMetrics.residentChangedRowsValidated,
@@ -402,26 +403,6 @@ final class CoreTextMetalRenderer {
         let scrollTargetWindowId = presentationWindowId
 
         frameMetrics.reset()
-        var visibleSlices: [UInt16: RendererRowSlice] = [:]
-        visibleSlices.reserveCapacity(windowContents.count)
-        for content in windowContents.values {
-            let fallbackRows = Int(content.paneGeometry?.textRect.height
-                ?? frameState.windowGutters[content.windowId]?.contentHeight
-                ?? frameState.rows)
-            let slice = RendererSignposts.visibleSlice(
-                for: content,
-                fallbackVisibleRows: fallbackRows
-            )
-            visibleSlices[content.windowId] = slice
-            RendererSignposts.record(slice.counters, in: &frameMetrics)
-            RendererSignposts.record(
-                RendererSignposts.operationCounters(
-                    for: content,
-                    lastContentIdentities: &residentMetricContentIdentities
-                ),
-                in: &frameMetrics
-            )
-        }
         // Store theme colors reference for helper methods.
         self.currentThemeColors = themeColors
 
@@ -432,6 +413,59 @@ final class CoreTextMetalRenderer {
         // and quad heights. The original cellH is used for text texture sizing only.
         let displayCellH = cellH * frameState.lineSpacing
         let smoothScrollOffsetPx = SIMD2<Float>(scrollOffset.x * scale, scrollOffset.y * scale)
+
+        // Gutter spacing is also needed to derive the exact clipped command
+        // viewport. Prepare each resident window once, then reuse that result
+        // for metrics, atlas demand, gutters, and CoreText rendering.
+        let hasGutterChrome = frameState.gutterCol > 0 || !frameState.windowGutters.isEmpty
+        let gutterLeftMarginPt: Float = hasGutterChrome ? round(Float(Self.gutterLeftMarginPt) * scale) / scale : 0
+        let gutterLeftMarginPx = gutterLeftMarginPt * scale
+        let gutterPaddingPt: Float = hasGutterChrome ? round(Float(Self.gutterRightGapPt) * scale) / scale : 0
+        let gutterPaddingPx = gutterPaddingPt * scale
+
+        var preparedRowsByWindow: [UInt16: ResidentRenderPreparationResult] = [:]
+        var visibleSlices: [UInt16: RendererRowSlice] = [:]
+        preparedRowsByWindow.reserveCapacity(windowContents.count)
+        visibleSlices.reserveCapacity(windowContents.count)
+        for content in windowContents.values {
+            let fallbackRows = Int(content.paneGeometry?.textRect.height
+                ?? frameState.windowGutters[content.windowId]?.contentHeight
+                ?? frameState.rows)
+            let gutter = frameState.windowGutters[content.windowId]
+            let contentCols = gutter.map {
+                CoreTextMetalRenderer.visibleTextCols(
+                    geometry: content.paneGeometry,
+                    gutter: $0,
+                    frameCols: frameState.cols,
+                    cellW: cellW,
+                    scale: scale,
+                    gutterLeftMarginPx: gutterLeftMarginPx,
+                    gutterPaddingPx: gutterPaddingPx
+                )
+            } ?? Int(frameState.cols)
+            let scrollLeftInt = Int(content.scrollLeft)
+            let localScrollInsetCols = scrollLeftInt > 0 ? 1 : 0
+            let prepared = ResidentRenderPreparation.prepare(
+                content: content,
+                fallbackVisibleRows: fallbackRows,
+                overscanRows: RendererSignposts.configuredOverscanRows,
+                scrollLeft: max(scrollLeftInt - localScrollInsetCols, 0),
+                viewportCols: contentCols + 2
+            )
+            preparedRowsByWindow[content.windowId] = prepared
+            let slice = RendererSignposts.rowSlice(for: prepared)
+            visibleSlices[content.windowId] = slice
+            // This is the sole production resident traversal counter update.
+            RendererSignposts.recordVisibleSlice(slice, in: &frameMetrics)
+            frameMetrics.decorationsVisited += prepared.decorationsVisited
+            RendererSignposts.recordOperation(
+                RendererSignposts.operationCounters(
+                    for: content,
+                    lastContentIdentities: &residentMetricContentIdentities
+                ),
+                in: &frameMetrics
+            )
+        }
 
         // Advance semantic content renderer.
         if let wcr = windowContentRenderer {
@@ -447,7 +481,7 @@ final class CoreTextMetalRenderer {
             let neededSlots = CoreTextMetalRenderer.atlasSlotDemand(
                 frameState: frameState,
                 windowContents: windowContents,
-                visibleSlices: visibleSlices
+                preparedRows: preparedRowsByWindow
             )
             let atlasPixelWidth = Int(ceil(CGFloat(frameState.cols) * CGFloat(cellW) * CGFloat(scale)))
             atlas.ensureCapacity(maxSlots: neededSlots, width: atlasPixelWidth)
@@ -485,14 +519,6 @@ final class CoreTextMetalRenderer {
                 clearColor = ctBgClearColorDefault
             }
         }
-
-        // Gutter spacing: left margin for breathing room, right padding before separator.
-        // The sign column is always reserved (2 cell widths) for consistent layout.
-        let hasGutterChrome = frameState.gutterCol > 0 || !frameState.windowGutters.isEmpty
-        let gutterLeftMarginPt: Float = hasGutterChrome ? round(Float(Self.gutterLeftMarginPt) * scale) / scale : 0
-        let gutterLeftMarginPx = gutterLeftMarginPt * scale
-        let gutterPaddingPt: Float = hasGutterChrome ? round(Float(Self.gutterRightGapPt) * scale) / scale : 0
-        let gutterPaddingPx = gutterPaddingPt * scale
 
         let resolvedCursor = CoreTextMetalRenderer.resolveCursor(
             frameState: frameState,
@@ -549,10 +575,7 @@ final class CoreTextMetalRenderer {
                 )
                 let contentRightPx = windowBounds.x + windowBounds.width
                 let contentTopPx = Float(paneGeometry?.textRect.row ?? gutter.contentRow) * displayCellH * scale
-                let visibleSlice = visibleSlices[content.windowId] ?? RendererSignposts.visibleSlice(
-                    for: content,
-                    fallbackVisibleRows: Int(gutter.contentHeight)
-                )
+                guard let visibleSlice = visibleSlices[content.windowId] else { continue }
                 let overscanBeforeRows = visibleSlice.overscanBeforeRows
                 let committedVisibleRows = CoreTextMetalRenderer.committedVisibleRows(
                     paneGeometry: paneGeometry,
@@ -696,21 +719,21 @@ final class CoreTextMetalRenderer {
                 // columns from the start and limits to viewport width, so each
                 // texture is at most viewport-wide.
                 let localScrollInsetCols = scrollLeftInt > 0 ? 1 : 0
-                let localClipScrollLeft = max(scrollLeftInt - localScrollInsetCols, 0)
                 let localClipXOffset = Float(localScrollInsetCols) * cellW * scale
 
-                // Render pre-clipped line textures into atlas.
+                // Reuse the shared Metal-free CoreText commands prepared once
+                // at the start of this frame.
+                guard let preparedRows = preparedRowsByWindow[content.windowId] else { continue }
                 var visibleRowWidths: [UInt16: Int] = [:]
-                for (rowIdx, row) in visibleSlice.rows.enumerated() {
-                    let displayRow = UInt16(rowIdx)
-                    let presentationRow = rowIdx - overscanBeforeRows
+                for command in preparedRows.commands {
+                    let displayRow = command.displayRow
+                    let presentationRow = command.presentationRow
                     let yPos = scrollableWindowRowOffset + Float(presentationRow) * displayCellH * scale
                     let textYOffset = (displayCellH - cellH) * scale * 0.5
                     let rawLineY = yPos + textYOffset
                     guard CoreTextMetalRenderer.clipVerticalQuad(y: rawLineY, height: Float(wcr.linePixelHeight), top: contentTopPx, bottom: contentBottomPx) != nil else { continue }
 
-                    let clippedRow = wcr.clipRowToViewport(row, scrollLeft: localClipScrollLeft, viewportCols: contentCols + 2)
-                    if let atlas, let entry = wcr.renderRowToAtlas(displayRow: displayRow, row: clippedRow, windowId: content.windowId, contentEpoch: content.contentEpoch, atlas: atlas, metrics: &frameMetrics) {
+                    if let atlas, let entry = wcr.renderRowToAtlas(displayRow: displayRow, row: command.row, windowId: content.windowId, contentEpoch: content.contentEpoch, atlas: atlas, metrics: &frameMetrics) {
                         if presentationRow >= 0 && presentationRow < committedVisibleRows {
                             visibleRowWidths[UInt16(presentationRow)] = entry.pixelWidth
                         }
@@ -1775,6 +1798,17 @@ final class CoreTextMetalRenderer {
                 ?? frameState.windowGutters[content.windowId]?.contentHeight
                 ?? frameState.rows)
             return (content.windowId, RendererSignposts.visibleSlice(for: content, fallbackVisibleRows: fallback))
+        })
+        return atlasSlotDemand(frameState: frameState, windowContents: windowContents, visibleSlices: slices)
+    }
+
+    nonisolated static func atlasSlotDemand(
+        frameState: FrameState,
+        windowContents: [UInt16: GUIWindowContent],
+        preparedRows: [UInt16: ResidentRenderPreparationResult]
+    ) -> Int {
+        let slices = Dictionary(uniqueKeysWithValues: preparedRows.map { windowID, prepared in
+            (windowID, RendererSignposts.rowSlice(for: prepared))
         })
         return atlasSlotDemand(frameState: frameState, windowContents: windowContents, visibleSlices: slices)
     }

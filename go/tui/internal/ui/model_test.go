@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"image/color"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -755,6 +756,34 @@ func TestApplyWindowDeltaResolvesRefsAndReplacesRowSnapshot(t *testing.T) {
 	}
 	if rows[0].Text != "old one" || rows[1].Text != "new two" {
 		t.Fatalf("delta rows resolved incorrectly: %+v", rows)
+	}
+}
+
+func TestInvalidFullReplaceWithDecreasingBufferLinesPreservesCommittedState(t *testing.T) {
+	model := New(80, 24, nil, nil)
+	_ = model.applyCommands(frame(protocol.Command{Kind: protocol.CommandWindowContent, Window: protocol.WindowContent{
+		ID: 7,
+		Rows: []protocol.WindowRow{
+			{ID: 1, ContentHash: 11, BufferLine: 10, Text: "committed one"},
+			{ID: 2, ContentHash: 22, BufferLine: 11, Text: "committed two"},
+		},
+	}}))
+
+	_ = model.applyCommands([]protocol.Command{
+		{Kind: protocol.CommandBeginFrame, FrameSeq: 2, BaseFrameSeq: 1},
+		{Kind: protocol.CommandWindowContent, Window: protocol.WindowContent{
+			ID: 7,
+			Rows: []protocol.WindowRow{
+				{ID: 3, ContentHash: 33, BufferLine: 12, Text: "invalid one"},
+				{ID: 4, ContentHash: 44, BufferLine: 9, Text: "invalid two"},
+			},
+		}},
+		{Kind: protocol.CommandCommitFrame, FrameSeq: 2},
+	})
+
+	rows := model.residentRows[7].materialize()
+	if !reflect.DeepEqual(rows, model.windows[7].Rows) || rows[0].Text != "committed one" || rows[1].Text != "committed two" {
+		t.Fatalf("invalid full replace changed committed rows: resident=%+v window=%+v", rows, model.windows[7].Rows)
 	}
 }
 

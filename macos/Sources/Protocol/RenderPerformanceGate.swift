@@ -84,7 +84,7 @@ public enum RenderPerformanceGate {
     /// Baseline schema version accepted by the gate.
     public static let supportedBaselineVersion = 1
     /// Fixture identity accepted by the gate.
-    public static let supportedFixtureVersion = "native-visible-v1"
+    public static let supportedFixtureVersion = "resident-ordinary-edit-v2"
     /// Absolute p95 ceiling for each measured stage.
     public static let stageAbsoluteBudgetMs = 4.0
     /// Absolute p95 ceiling for the combined native preparation path.

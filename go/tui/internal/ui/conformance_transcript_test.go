@@ -54,6 +54,8 @@ type conformanceTranscript struct {
 
 type conformanceStep struct {
 	Kind          string                    `json:"kind"`
+	Fixture       *productionFixture        `json:"fixture"`
+	Operations    []productionOperation     `json:"operations"`
 	Opcode        int                       `json:"opcode"`
 	Note          string                    `json:"note"`
 	PayloadBase64 string                    `json:"payload_base64"`
@@ -66,6 +68,30 @@ type conformanceStep struct {
 	Go            *conformanceGoSelector    `json:"go"`
 	Swift         *conformanceSwiftSelector `json:"swift"`
 	Expect        *conformanceExpect        `json:"expect"`
+}
+
+type productionFixture struct {
+	RowCount                int    `json:"row_count"`
+	ComparisonRowCount      int    `json:"comparison_row_count"`
+	WideTextBytes           int    `json:"wide_text_bytes"`
+	VisibleRows             int    `json:"visible_rows"`
+	OverscanRows            int    `json:"overscan_rows"`
+	OrdinaryEditIndex       int    `json:"ordinary_edit_index"`
+	StructuralEditIndex     int    `json:"structural_edit_index"`
+	ContentEpoch            uint32 `json:"content_epoch"`
+	StaleContentEpoch       uint32 `json:"stale_content_epoch"`
+	RecoveryGeneration      uint32 `json:"recovery_generation"`
+	StaleRecoveryGeneration uint32 `json:"stale_recovery_generation"`
+	RowTextPrefix           string `json:"row_text_prefix"`
+}
+
+type productionOperation struct {
+	Name         string `json:"name"`
+	ExpectStatus string `json:"expect_status"`
+	FullResets   int    `json:"full_resets"`
+	Splices      int    `json:"splices"`
+	ChangedRows  int    `json:"changed_rows"`
+	IDsResolved  int    `json:"ids_resolved"`
 }
 
 type conformanceExpect struct {
@@ -145,6 +171,8 @@ func runConformanceTranscript(t *testing.T, transcript conformanceTranscript) {
 		switch step.Kind {
 		case "frame":
 			applyConformanceFrame(t, &model, i, step)
+		case "production_fixture":
+			applyProductionFixture(t, &model, i, step)
 		case "inject_offset":
 			injectConformanceOffset(&model, step)
 		case "pointer":
@@ -159,6 +187,184 @@ func runConformanceTranscript(t *testing.T, transcript conformanceTranscript) {
 			t.Fatalf("step %d: unknown kind %q", i, step.Kind)
 		}
 	}
+}
+
+func applyProductionFixture(t *testing.T, model *Model, i int, step conformanceStep) {
+	t.Helper()
+	fixture := step.Fixture
+	if fixture == nil {
+		t.Fatalf("step %d: production fixture descriptor missing", i)
+	}
+	if fixture.RowCount != 65_536 || fixture.WideTextBytes <= 65_535 {
+		t.Fatalf("step %d: production boundaries = rows %d bytes %d", i, fixture.RowCount, fixture.WideTextBytes)
+	}
+	wide := make([]byte, fixture.WideTextBytes)
+	for j := range wide {
+		wide[j] = 'w'
+	}
+	rows := make([]protocol.WindowRow, fixture.RowCount)
+	for row := range rows {
+		text := fixture.RowTextPrefix + strconv.Itoa(row)
+		if row == 0 {
+			text = string(wide)
+		}
+		rows[row] = protocol.WindowRow{ID: uint64(row + 1), BufferLine: uint32(row), ContentHash: uint32(row + 1), Text: text}
+	}
+	applyProductionFrame(model, 1, 0, fixture.RecoveryGeneration,
+		testThemeCommand(), protocol.Command{Kind: protocol.CommandWindowContent, Window: protocol.WindowContent{
+			ID: 1, ContentEpoch: fixture.ContentEpoch, Rows: rows,
+		}})
+	observed := map[string]productionStatus{"keyframe": statusFromOutcome(model.lastFrameOutcome)}
+	if got := model.residentRows[1].count(); got != fixture.RowCount {
+		t.Fatalf("step %d: keyframe rows = %d, want %d", i, got, fixture.RowCount)
+	}
+	first, _ := model.residentRows[1].get(0)
+	if len(first.Text) != fixture.WideTextBytes {
+		t.Fatalf("step %d: wide carrier did not survive", i)
+	}
+
+	model.renderWork.reset()
+	edit := rows[fixture.OrdinaryEditIndex]
+	edit.ContentHash++
+	edit.Text = "edited"
+	applyProductionFrame(model, 2, 1, fixture.RecoveryGeneration,
+		protocol.Command{Kind: protocol.CommandWindowDelta, Window: protocol.WindowContent{
+			ID: 1, ContentEpoch: fixture.ContentEpoch, BaseRowCount: uint32(fixture.RowCount), ResultRowCount: uint32(fixture.RowCount),
+			RowSplicesSet: true, RowSplices: []protocol.WindowRowSplice{{StartIndex: uint32(fixture.OrdinaryEditIndex), DeleteCount: 1, InsertRows: []protocol.WindowRow{edit}}},
+		}})
+	observed["ordinary_edit"] = statusFromOutcome(model.lastFrameOutcome)
+	if model.renderWork.rowUpdates != 1 || model.renderWork.rowsFetched > 8 {
+		t.Fatalf("step %d: ordinary production work = %+v", i, *model.renderWork)
+	}
+	gotEdit, _ := model.residentRows[1].get(fixture.OrdinaryEditIndex)
+	if got := gotEdit; got.ContentHash != edit.ContentHash || got.Text != "edited" {
+		t.Fatalf("step %d: ordinary splice was not applied", i)
+	}
+
+	inserted := protocol.WindowRow{ID: ^uint64(1), BufferLine: uint32(fixture.StructuralEditIndex), ContentHash: 0xA11CE, Text: "inserted-near-start"}
+	applyProductionFrame(model, 3, 2, fixture.RecoveryGeneration,
+		protocol.Command{Kind: protocol.CommandWindowDelta, Window: protocol.WindowContent{
+			ID: 1, ContentEpoch: fixture.ContentEpoch, BaseRowCount: uint32(fixture.RowCount), ResultRowCount: uint32(fixture.RowCount + 1),
+			RowSplicesSet: true, RowSplices: []protocol.WindowRowSplice{{StartIndex: uint32(fixture.StructuralEditIndex), InsertRows: []protocol.WindowRow{inserted}}},
+		}})
+	observed["structural_edit_near_start"] = statusFromOutcome(model.lastFrameOutcome)
+	gotInserted, _ := model.residentRows[1].get(fixture.StructuralEditIndex)
+	if got := gotInserted.ID; got != inserted.ID {
+		t.Fatalf("step %d: near-start structural splice id = %d", i, got)
+	}
+
+	retainedIndex := fixture.OrdinaryEditIndex + 1 // insertion shifted the edited row right
+	retained, _ := model.residentRows[1].get(retainedIndex)
+	applyProductionFrame(model, 4, 3, fixture.RecoveryGeneration,
+		protocol.Command{Kind: protocol.CommandWindowDelta, Window: protocol.WindowContent{
+			ID: 1, ContentEpoch: fixture.ContentEpoch, BaseRowCount: uint32(fixture.RowCount + 1), ResultRowCount: uint32(fixture.RowCount + 1),
+			RowSplicesSet: true, RowSplices: []protocol.WindowRowSplice{{StartIndex: uint32(retainedIndex), DeleteCount: 1, InsertRows: []protocol.WindowRow{{Ref: true, ID: retained.ID, ContentHash: retained.ContentHash}}}},
+		}})
+	observed["retained_reference"] = statusFromOutcome(model.lastFrameOutcome)
+	gotRetained, _ := model.residentRows[1].get(retainedIndex)
+	if got := gotRetained; got.ID != retained.ID || got.ContentHash != retained.ContentHash {
+		t.Fatalf("step %d: retained reference did not resolve", i)
+	}
+
+	if fixture.StaleContentEpoch >= fixture.ContentEpoch || fixture.StaleRecoveryGeneration >= fixture.RecoveryGeneration {
+		t.Fatalf("step %d: stale epoch/generation descriptor is not stale", i)
+	}
+	beforeCount := model.residentRows[1].count()
+	applyProductionFrame(model, 5, 4, fixture.RecoveryGeneration,
+		protocol.Command{Kind: protocol.CommandWindowDelta, Window: protocol.WindowContent{
+			ID: 1, ContentEpoch: fixture.ContentEpoch, BaseRowCount: uint32(fixture.RowCount + 1), ResultRowCount: 1,
+			RowSplicesSet: true, RowSplices: []protocol.WindowRowSplice{{StartIndex: 0, DeleteCount: uint32(fixture.RowCount + 1), InsertRows: []protocol.WindowRow{{Ref: true, ID: ^uint64(0), ContentHash: 1}}}},
+		}})
+	observed["reference_miss"] = statusFromOutcome(model.lastFrameOutcome)
+	if model.residentRows[1].count() != beforeCount {
+		t.Fatalf("step %d: ref miss changed committed rows", i)
+	}
+
+	applyProductionFrame(model, 6, 4, fixture.RecoveryGeneration,
+		protocol.Command{Kind: protocol.CommandWindowDelta, Window: protocol.WindowContent{
+			ID: 1, ContentEpoch: fixture.StaleContentEpoch, Rows: []protocol.WindowRow{{Ref: true, ID: 1, ContentHash: 1}},
+		}})
+	observed["stale_content_epoch"] = statusFromOutcome(model.lastFrameOutcome)
+	if model.residentRows[1].count() != beforeCount {
+		t.Fatalf("step %d: stale epoch changed committed rows", i)
+	}
+
+	applyProductionFrame(model, 7, 4, fixture.StaleRecoveryGeneration,
+		windowRowsCommand(1, "must-not-publish"))
+	observed["stale_recovery_generation"] = statusFromOutcome(model.lastFrameOutcome)
+
+	applyProductionFrame(model, 8, 0, fixture.RecoveryGeneration,
+		testThemeCommand(), protocol.Command{Kind: protocol.CommandWindowContent, Window: protocol.WindowContent{
+			ID: 1, ContentEpoch: fixture.ContentEpoch + 1, Rows: rows,
+		}})
+	observed["reset_full_recovery"] = statusFromOutcome(model.lastFrameOutcome)
+	if model.residentRows[1].count() != fixture.RowCount {
+		t.Fatalf("step %d: reset recovery count mismatch", i)
+	}
+	for _, operation := range step.Operations {
+		if got := observed[operation.Name].String(); got != operation.ExpectStatus {
+			t.Fatalf("step %d: %s production status %q, want %q", i, operation.Name, got, operation.ExpectStatus)
+		}
+	}
+}
+
+type productionStatus byte
+
+const (
+	productionUnknown productionStatus = iota
+	productionAccepted
+	productionRecoveryRequired
+	productionStaleDiscarded
+)
+
+func (s productionStatus) String() string {
+	switch s {
+	case productionAccepted:
+		return "accepted"
+	case productionRecoveryRequired:
+		return "recovery_required"
+	case productionStaleDiscarded:
+		return "stale_discarded"
+	default:
+		return "unknown"
+	}
+}
+
+func statusFromOutcome(outcome frameOutcome) productionStatus {
+	switch outcome {
+	case frameOutcomeApplied:
+		return productionAccepted
+	case frameOutcomeRecoveryRequired:
+		return productionRecoveryRequired
+	case frameOutcomeStale, frameOutcomeRejected:
+		return productionStaleDiscarded
+	default:
+		return productionUnknown
+	}
+}
+
+func applyProductionFrame(model *Model, seq, base, generation uint32, commands ...protocol.Command) {
+	begin := protocol.Command{Kind: protocol.CommandBeginFrame, FrameSeq: seq, BaseFrameSeq: base, Generation: generation}
+	model.applyCommands(append(append([]protocol.Command{begin}, commands...), protocol.Command{Kind: protocol.CommandCommitFrame, FrameSeq: seq}))
+}
+
+func operationCount(operations []productionOperation, name, field string) int {
+	for _, operation := range operations {
+		if operation.Name != name {
+			continue
+		}
+		switch field {
+		case "full_resets":
+			return operation.FullResets
+		case "splices":
+			return operation.Splices
+		case "changed_rows":
+			return operation.ChangedRows
+		case "ids_resolved":
+			return operation.IDsResolved
+		}
+	}
+	return 0
 }
 
 func applyConformanceFrame(t *testing.T, model *Model, i int, step conformanceStep) {
