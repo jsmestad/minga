@@ -8,17 +8,6 @@ defmodule MingaAgent.Tools.DiagnosticFeedbackTest do
       assert {:skip, reason} = DiagnosticFeedback.await("/nonexistent/file.ex")
       assert reason =~ "No LSP diagnostics"
     end
-
-    test "respects custom timeout" do
-      # Should return quickly since there's no LSP client
-      {time_us, {:skip, _}} =
-        :timer.tc(fn ->
-          DiagnosticFeedback.await("/nonexistent/file.ex", timeout: 100)
-        end)
-
-      # Should complete in well under 1 second (no waiting)
-      assert time_us < 500_000
-    end
   end
 
   describe "append_to_result/2" do

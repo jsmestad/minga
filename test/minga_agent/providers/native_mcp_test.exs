@@ -78,7 +78,7 @@ defmodule MingaAgent.Providers.NativeMCPTest do
       {:agent_provider_event, %Event.AgentEnd{} = event} -> Enum.reverse([event | acc])
       {:agent_provider_event, event} -> collect_until_end([event | acc])
     after
-      1_000 -> Enum.reverse(acc)
+      @receive_timeout -> flunk("provider did not emit AgentEnd")
     end
   end
 

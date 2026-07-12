@@ -104,9 +104,8 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
     test "full-document residence is on by default for a nowrap buffer under the ceiling (#2679)" do
       # Residence now ships on (resident_store_max_lines default 65_535), so a
       # nowrap buffer under the ceiling becomes fully resident regardless of scroll
-      # position. This test relies on the default rather than mutating global config
-      # so it stays async-safe; threshold-boundary and disabled-path behavior are
-      # covered in the async:false suite (full_document_residence_threshold_test.exs).
+      # position. This test relies on the default rather than mutating global config,
+      # so it stays async-safe.
       state = base_state(rows: 10, cols: 40, content: long_content(500))
       win_id = state.workspace.windows.active
       window = Map.fetch!(state.workspace.windows.map, win_id)

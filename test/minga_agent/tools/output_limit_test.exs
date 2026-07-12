@@ -2,6 +2,8 @@ defmodule MingaAgent.Tools.OutputLimitTest do
   # Spawns OS processes through Port command collection.
   use ExUnit.Case, async: false
 
+  @moduletag :heavy
+
   alias MingaAgent.Tools.OutputLimit
 
   describe "collect_command/3" do

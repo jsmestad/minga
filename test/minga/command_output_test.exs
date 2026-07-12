@@ -3,6 +3,8 @@ defmodule Minga.CommandOutputTest do
   # can race with ExUnit's :standard_error capture/restore lifecycle
   use ExUnit.Case, async: false
 
+  @moduletag :heavy
+
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.CommandOutput
   alias Minga.Events

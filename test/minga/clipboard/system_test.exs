@@ -9,7 +9,10 @@ defmodule Minga.Clipboard.SystemTest do
   Tagged `:system_clipboard` so they can be excluded in CI environments
   that lack a clipboard tool.
   """
+  # Uses the shared system clipboard and real clipboard OS processes.
   use ExUnit.Case, async: false
+
+  @moduletag :heavy
 
   @moduletag :system_clipboard
 

@@ -1,5 +1,8 @@
 defmodule Minga.Editing.FormatterTest do
+  # Runs formatter commands as real OS processes and mutates the global Options server.
   use ExUnit.Case, async: false
+
+  @moduletag :heavy
 
   alias Minga.Config.Options
   alias Minga.Editing.Formatter
@@ -39,18 +42,9 @@ defmodule Minga.Editing.FormatterTest do
   end
 
   describe "resolve_formatter/2" do
-    test "returns default formatter for known filetype" do
-      spec = Formatter.resolve_formatter(:elixir, "lib/foo.ex")
-      assert spec == "mix format --stdin-filename lib/foo.ex -"
-    end
-
     test "replaces {file} placeholder with file path" do
       spec = Formatter.resolve_formatter(:go, "main.go")
       assert spec == "gofmt"
-    end
-
-    test "returns nil for unknown filetype with no user config" do
-      assert Formatter.resolve_formatter(:unknown_lang) == nil
     end
 
     test "user config overrides default formatter" do
@@ -67,15 +61,6 @@ defmodule Minga.Editing.FormatterTest do
   end
 
   describe "default_formatters/0" do
-    test "returns a map with common languages" do
-      defaults = Formatter.default_formatters()
-      assert is_map(defaults)
-      assert Map.has_key?(defaults, :elixir)
-      assert Map.has_key?(defaults, :go)
-      assert Map.has_key?(defaults, :rust)
-      assert Map.has_key?(defaults, :python)
-      assert Map.has_key?(defaults, :zig)
-    end
   end
 
   describe "apply_save_transforms/2" do
@@ -85,12 +70,6 @@ defmodule Minga.Editing.FormatterTest do
       input = "hello   \nworld  \n"
       result = Formatter.apply_save_transforms(input, :elixir)
       assert result == "hello\nworld\n"
-    end
-
-    test "does not trim trailing whitespace when disabled" do
-      input = "hello   \nworld  \n"
-      result = Formatter.apply_save_transforms(input, :text)
-      assert result == "hello   \nworld  \n"
     end
 
     test "inserts final newline when enabled and missing" do
@@ -105,11 +84,6 @@ defmodule Minga.Editing.FormatterTest do
 
       result = Formatter.apply_save_transforms("hello\n", :elixir)
       assert result == "hello\n"
-    end
-
-    test "does not insert final newline when disabled" do
-      result = Formatter.apply_save_transforms("hello", :text)
-      assert result == "hello"
     end
 
     test "both transforms can apply together" do

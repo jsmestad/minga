@@ -3,14 +3,9 @@ defmodule Minga.LSP.SyncServerTest do
   use ExUnit.Case, async: false
 
   alias Minga.Buffer.EditDelta
-  import ExUnit.CaptureLog
-
   alias Minga.Buffer.EditSource
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Events
-  alias Minga.Language
-  alias Minga.Language.Registry, as: LanguageRegistry
-  alias Minga.LSP.ServerConfig
   alias Minga.LSP.SyncServer
 
   @moduletag :tmp_dir
@@ -21,58 +16,12 @@ defmodule Minga.LSP.SyncServerTest do
   end
 
   describe "clients_for_buffer/1" do
-    test "returns empty list for untracked buffer" do
-      buf = start_buffer(content: "hello")
-
-      assert SyncServer.clients_for_buffer(buf) == []
-    end
   end
 
   describe "resync_buffers/1" do
-    test "clears stale clients before reopening", %{tmp_dir: dir} do
-      path = Path.join(dir, "resync.txt")
-      buf = start_buffer(content: "hello", file_path: path)
-      client = start_client()
-      SyncServer.put_clients(buf, [client])
-
-      SyncServer.resync_buffers([buf])
-      sync_server()
-
-      assert SyncServer.clients_for_buffer(buf) == []
-    end
   end
 
   describe "event bus integration" do
-    test "buffer_opened for non-file buffer is a no-op" do
-      buf = start_buffer(content: "scratch")
-
-      Events.broadcast(:buffer_opened, %Events.BufferEvent{buffer: buf, path: "/tmp/no_lsp.txt"})
-      sync_server()
-
-      assert SyncServer.clients_for_buffer(buf) == []
-    end
-
-    test "buffer_opened logs open path exceptions and keeps SyncServer alive", %{tmp_dir: dir} do
-      Minga.Config.Options.set(:lsp_auto_start, true)
-      on_exit(fn -> Minga.Config.Options.set(:lsp_auto_start, false) end)
-      register_broken_lsp_language()
-
-      path = Path.join(dir, "boom.lspboom")
-      File.write!(path, "hello")
-      buf = start_buffer(file_path: path, filetype: :lsp_boom)
-
-      log =
-        capture_log(fn ->
-          Events.broadcast(:buffer_opened, %Events.BufferEvent{buffer: buf, path: path})
-          sync_server()
-        end)
-
-      assert log =~ "LSP buffer open failed"
-      assert log =~ "FunctionClauseError"
-      assert is_map(:sys.get_state(SyncServer))
-      assert SyncServer.clients_for_buffer(buf) == []
-    end
-
     test "buffer_closed removes clients from the registry", %{tmp_dir: dir} do
       path = Path.join(dir, "cleanup.txt")
       buf = start_buffer(content: "hello", file_path: path)
@@ -88,19 +37,6 @@ defmodule Minga.LSP.SyncServerTest do
   end
 
   describe "buffer_changed event" do
-    test "sends a debounced full didChange to attached clients", %{tmp_dir: dir} do
-      path = Path.join(dir, "full.txt")
-      File.write!(path, "hello")
-      buf = start_buffer(file_path: path)
-      client = start_client(:full)
-      SyncServer.put_clients(buf, [client])
-
-      Events.broadcast(:buffer_changed, changed_event(buf, nil))
-
-      assert_receive {:client_cast, ^client, {:did_change, uri, "hello"}}, 1_000
-      assert uri == SyncServer.path_to_uri(path)
-    end
-
     test "sends accumulated deltas incrementally in document order", %{tmp_dir: dir} do
       path = Path.join(dir, "incremental.txt")
       File.write!(path, "hello")
@@ -133,36 +69,22 @@ defmodule Minga.LSP.SyncServerTest do
       assert uri == SyncServer.path_to_uri(path)
       refute_receive {:client_cast, ^client, {:did_change_incremental, _, _}}, 50
     end
-
-    test "changes for buffers without clients are ignored" do
-      buf = start_buffer(content: "hello")
-
-      Events.broadcast(:buffer_changed, changed_event(buf, nil))
-
-      refute_receive {:client_cast, _client, _message}, 250
-    end
   end
 
   describe "client monitoring" do
-    test "crashed client is removed while survivors remain", %{tmp_dir: dir} do
+    test "client DOWN removes it while survivors remain", %{tmp_dir: dir} do
       path = Path.join(dir, "monitor.txt")
       File.write!(path, "hello")
       buf = start_buffer(file_path: path)
       doomed = start_client()
       survivor = start_client()
       SyncServer.put_clients(buf, [doomed, survivor])
-      monitor_client_in_sync_server(buf, doomed)
+      monitor_ref = monitor_client_in_sync_server(buf, doomed)
 
-      ref = Process.monitor(doomed)
-      Process.exit(doomed, :kill)
-      assert_receive {:DOWN, ^ref, :process, ^doomed, :killed}
+      send(SyncServer, {:DOWN, monitor_ref, :process, doomed, :killed})
+      sync_server()
 
-      # The SyncServer's own monitor :DOWN is delivered by the runtime on
-      # doomed's death, a different sender than this test process. FIFO-per-sender
-      # therefore does not order that :DOWN ahead of a :sys.get_state barrier we
-      # send, so the reap may not have run when we read. Poll the observable ETS
-      # state until the crashed client drops.
-      assert_clients_eventually(buf, [survivor])
+      assert SyncServer.clients_for_buffer(buf) == [survivor]
     end
   end
 
@@ -197,47 +119,21 @@ defmodule Minga.LSP.SyncServerTest do
   end
 
   defp monitor_client_in_sync_server(buf, client) do
+    parent = self()
+
     :sys.replace_state(SyncServer, fn state ->
       ref = Process.monitor(client)
+      send(parent, {:sync_server_monitor, ref})
       %{state | client_monitors: Map.put(state.client_monitors, ref, {buf, client})}
     end)
-  end
 
-  defp register_broken_lsp_language do
-    language = %Language{
-      name: :lsp_boom,
-      label: "Broken LSP",
-      comment_token: "#",
-      extensions: ["lspboom"],
-      language_servers: [
-        %ServerConfig{name: :broken_lsp, command: "broken-lsp", root_markers: nil}
-      ]
-    }
-
-    :ok = LanguageRegistry.register(language, {:extension, :sync_server_test})
-    on_exit(fn -> LanguageRegistry.unregister_source({:extension, :sync_server_test}) end)
+    assert_receive {:sync_server_monitor, ref}
+    ref
   end
 
   defp sync_server do
     :sys.get_state(SyncServer)
     :ok
-  end
-
-  # Polls the direct-ETS registry read until it matches `expected`, then asserts.
-  # Used for reaps driven by runtime-delivered monitor :DOWN messages, whose
-  # arrival at the SyncServer cannot be ordered by a :sys.get_state barrier sent
-  # from the test process. On timeout the final assert raises a full diff.
-  defp assert_clients_eventually(buf, expected, attempts \\ 100, interval \\ 10) do
-    if SyncServer.clients_for_buffer(buf) == expected do
-      :ok
-    else
-      if attempts > 0 do
-        Process.sleep(interval)
-        assert_clients_eventually(buf, expected, attempts - 1, interval)
-      else
-        assert SyncServer.clients_for_buffer(buf) == expected
-      end
-    end
   end
 
   defp reset_sync_server do

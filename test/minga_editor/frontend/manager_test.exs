@@ -1,5 +1,5 @@
 defmodule MingaEditor.Frontend.ManagerTest do
-  # Uses real OS ports in connected-mode tests, so serialize to avoid BEAM erl_child_setup races.
+  # Connected-mode tests use real OS ports, so this mixed module remains serialized.
   use ExUnit.Case, async: false
 
   alias MingaEditor.Frontend.Manager
@@ -16,6 +16,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
       assert Manager.terminal_size(name) == nil
     end
 
+    @tag :heavy
     test "spawn mode opens renderer executable with tty env" do
       name = unique_name()
 
@@ -217,6 +218,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
       refute_receive {:minga_input, {:ready, _, _}}, 50
     end
 
+    @tag :heavy
     test "late subscriber in connected mode receives replayed ready" do
       name = unique_name()
       {pid, fake_port} = start_connected(name)
@@ -229,6 +231,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
       assert_receive {:minga_input, {:ready, 80, 24}}
     end
 
+    @tag :heavy
     test "no replay after port EOF clears ready state" do
       name = unique_name()
       {pid, fake_port} = start_connected(name)
@@ -256,6 +259,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
   end
 
   describe "connected mode" do
+    @describetag :heavy
     test "starts successfully in connected mode" do
       name = unique_name()
       {_pid, _fake_port} = start_connected(name)

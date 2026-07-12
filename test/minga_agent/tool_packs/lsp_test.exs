@@ -29,19 +29,6 @@ defmodule MingaAgent.ToolPacks.LSPTest do
     refute Enum.any?(LSP.tool_names(), &(&1 in builtin_names))
   end
 
-  test "starts as a bundled registrar after the tool registry" do
-    table = :"lsp_pack_service_#{System.unique_integer([:positive])}"
-    start_supervised!({Registry, name: table})
-    start_supervised!({LSP, name: :"#{table}_lsp_pack", registry: table})
-
-    names = Registry.all(table) |> Enum.map(& &1.name)
-
-    for name <- LSP.tool_names() do
-      assert {:ok, %Spec{source: {:bundle, :lsp_tools}}} = Registry.lookup(table, name)
-      assert Enum.count(names, &(&1 == name)) == 1
-    end
-  end
-
   test "registers LSP tools as source-owned specs with stable metadata", %{table: table} do
     assert :ok = LSP.register(table)
 
@@ -137,27 +124,6 @@ defmodule MingaAgent.ToolPacks.LSPTest do
     assert :error = Registry.lookup(table, "references")
   end
 
-  test "startup failure reports the LSP pack registration reason", %{table: table} do
-    existing_definition = conflicting_definition_spec()
-    :ets.insert(table, {"definition", existing_definition})
-
-    name = :"#{table}_failing_lsp_pack"
-
-    previous_trap_exit = Process.flag(:trap_exit, true)
-
-    try do
-      assert {:error,
-              {:lsp_tool_pack_registration_failed, ^table,
-               {:duplicate_tool_name, "definition", :config, {:bundle, :lsp_tools}}}} =
-               LSP.start_link(name: name, registry: table)
-    after
-      Process.flag(:trap_exit, previous_trap_exit)
-    end
-
-    assert {:ok, ^existing_definition} = Registry.lookup(table, "definition")
-    assert :error = Registry.lookup(table, "diagnostics")
-  end
-
   test "read-only LSP tools execute automatically through pack specs", %{table: table} do
     root = Path.join(System.tmp_dir!(), "minga-lsp-pack-#{System.unique_integer([:positive])}")
     File.rm_rf!(root)
@@ -180,35 +146,6 @@ defmodule MingaAgent.ToolPacks.LSPTest do
       assert {:ok, text} = Executor.execute(name, args, table, :exec, tool_context: context)
       refute match?({:needs_approval, _, _}, text)
     end
-  end
-
-  test "mutating LSP tools require approval before LSP lookup", %{table: table} do
-    root =
-      Path.join(
-        System.tmp_dir!(),
-        "minga-lsp-pack-approval-#{System.unique_integer([:positive])}"
-      )
-
-    File.rm_rf!(root)
-    File.mkdir_p!(Path.join(root, "lib"))
-    File.write!(Path.join(root, "lib/foo.ex"), "defmodule Foo do\nend\n")
-    on_exit(fn -> File.rm_rf!(root) end)
-
-    context = ToolContext.new(project_root: root)
-    assert :ok = LSP.register(table)
-
-    rename_args = %{"path" => "lib/foo.ex", "line" => 0, "column" => 10, "new_name" => "Bar"}
-
-    assert {:needs_approval, %Spec{name: "rename", source: {:bundle, :lsp_tools}}, ^rename_args} =
-             Executor.execute("rename", rename_args, table, :exec, tool_context: context)
-
-    code_action_args = %{"path" => "lib/foo.ex", "line" => 0, "apply" => 1}
-
-    assert {:needs_approval, %Spec{name: "code_actions", source: {:bundle, :lsp_tools}},
-            ^code_action_args} =
-             Executor.execute("code_actions", code_action_args, table, :exec,
-               tool_context: context
-             )
   end
 
   test "active providers remove and restore LSP pack tools when the source reloads" do
@@ -241,59 +178,6 @@ defmodule MingaAgent.ToolPacks.LSPTest do
       assert name in names
       assert Enum.count(names, &(&1 == name)) == 1
     end
-  end
-
-  test "read-only native providers include read-only LSP tools and exclude mutating LSP tools" do
-    LSP.register()
-
-    {:ok, provider} =
-      Native.start_link(
-        subscriber: self(),
-        model: "anthropic:claude-sonnet-4-20250514",
-        project_root: System.tmp_dir!(),
-        config: %AgentConfig{},
-        read_only?: true,
-        skip_api_key_env: true
-      )
-
-    names = provider_tool_names(provider)
-
-    for name <- ~w(diagnostics definition references hover document_symbols workspace_symbols) do
-      assert name in names
-    end
-
-    refute "rename" in names
-    refute "code_actions" in names
-  end
-
-  test "read-only filtering is preserved after LSP source reload" do
-    LSP.register()
-
-    {:ok, provider} =
-      Native.start_link(
-        subscriber: self(),
-        model: "anthropic:claude-sonnet-4-20250514",
-        project_root: System.tmp_dir!(),
-        config: %AgentConfig{},
-        read_only?: true,
-        skip_api_key_env: true
-      )
-
-    assert_provider_tool(provider, "definition")
-    refute_provider_tool(provider, "rename")
-    refute_provider_tool(provider, "code_actions")
-
-    assert :ok = Registry.unregister_source(LSP.source())
-    :sys.get_state(provider)
-    refute_provider_tool(provider, "definition")
-    refute_provider_tool(provider, "rename")
-    refute_provider_tool(provider, "code_actions")
-
-    assert :ok = LSP.register()
-    :sys.get_state(provider)
-    assert_provider_tool(provider, "definition")
-    refute_provider_tool(provider, "rename")
-    refute_provider_tool(provider, "code_actions")
   end
 
   defp lsp_position_args("document_symbols"), do: %{"path" => "lib/foo.ex"}

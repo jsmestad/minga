@@ -25,6 +25,8 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
+  alias MingaEditor.UI.Notification
+  alias MingaEditor.UI.NotificationCenter
   alias MingaEditor.UI.Popup.Active, as: PopupActive
   alias Minga.Popup.Rule
 
@@ -34,6 +36,33 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     start_supervised!({Sidebar, name: table, notify: false})
     start_supervised!({SemanticUIRegistry, name: semantic_table, notify: false})
     %{sidebar_registry: table, semantic_registry: semantic_table}
+  end
+
+  test "notification dismiss removes only the selected notification", %{sidebar_registry: table} do
+    state =
+      table
+      |> base_state()
+      |> EditorState.upsert_notification(
+        Notification.new(
+          id: "build:test",
+          level: :progress,
+          title: "Building Minga",
+          created_at: 1_715_000_000
+        )
+      )
+      |> EditorState.upsert_notification(
+        Notification.new(
+          id: "other",
+          level: :info,
+          title: "Still here",
+          created_at: 1_715_000_010
+        )
+      )
+
+    state = GuiActionHandler.dispatch(state, {:notification_dismiss, "build:test"})
+
+    assert NotificationCenter.find(state.notifications, "build:test") == nil
+    assert [%{id: "other"}] = NotificationCenter.list(state.notifications)
   end
 
   test "tab context actions target the requested tab without selecting it", %{

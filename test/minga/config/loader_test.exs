@@ -132,6 +132,7 @@ defmodule Minga.Config.LoaderTest do
     end
   end
 
+  @tag :heavy
   test "starts extensions declared in project and after config after all config sources load" do
     {minga_dir, config_home, cleanup} =
       make_config_dir("""
@@ -1148,6 +1149,7 @@ defmodule Minga.Config.LoaderTest do
       assert ExtRegistry.get(:loader_reload_blocked_ext) == :error
     end
 
+    @tag :heavy
     test "reload surfaces start_all failures with cleanup details" do
       {minga_dir, config_home, cleanup} =
         make_config_dir("""
