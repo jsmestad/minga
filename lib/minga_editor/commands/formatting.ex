@@ -18,6 +18,7 @@ defmodule MingaEditor.Commands.Formatting do
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
+  @type format_commit_error :: :not_alive | :read_only | :stale
 
   @spec format_buffer(state()) :: state()
   def format_buffer(%{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
@@ -98,11 +99,15 @@ defmodule MingaEditor.Commands.Formatting do
     end)
   end
 
-  @doc "Applies LSP text edits to a buffer and restores the cursor to the nearest valid line."
-  @spec apply_lsp_edits(pid(), [map()]) :: :ok
-  def apply_lsp_edits(buf, edits) when is_pid(buf) and is_list(edits) do
-    if edits != [] do
-      {cursor_line, cursor_col} = Buffer.cursor(buf)
+  @doc "Applies LSP text edits only when the buffer still has `expected_version`."
+  @spec apply_lsp_edits(pid(), [map()], non_neg_integer()) ::
+          :ok | {:error, format_commit_error()}
+  def apply_lsp_edits(_buf, [], _expected_version), do: :ok
+
+  def apply_lsp_edits(buf, edits, expected_version)
+      when is_pid(buf) and is_list(edits) and is_integer(expected_version) and
+             expected_version >= 0 do
+    safely_commit(fn ->
       content = Buffer.content(buf)
 
       new_content =
@@ -117,14 +122,8 @@ defmodule MingaEditor.Commands.Formatting do
           apply_single_edit(acc, start_line, start_col, end_line, end_col, new_text)
         end)
 
-      Buffer.replace_content(buf, new_content)
-      line_count = Buffer.line_count(buf)
-      safe_line = min(cursor_line, max(line_count - 1, 0))
-      Buffer.move_to(buf, {safe_line, cursor_col})
-      Minga.Log.info(:editor, "Formatted (LSP)")
-    end
-
-    :ok
+      commit_formatted_content(buf, expected_version, new_content, :lsp)
+    end)
   end
 
   @spec apply_single_edit(
@@ -190,8 +189,7 @@ defmodule MingaEditor.Commands.Formatting do
 
   @spec format_and_replace(state(), pid(), Minga.Editing.Formatter.formatter_spec()) :: state()
   defp format_and_replace(state, buf, spec) do
-    content = Buffer.content(buf)
-    version = Buffer.version(buf)
+    {content, version} = Buffer.content_with_version(buf)
 
     state
     |> EditorState.set_status("Formatting…")
@@ -206,23 +204,59 @@ defmodule MingaEditor.Commands.Formatting do
   @doc "Applies the result of an asynchronous external formatter run."
   @spec apply_format_external_result(state(), term()) :: state()
   def apply_format_external_result(state, {:ok, formatted, buf, version}) do
-    if Process.alive?(buf) and Buffer.version(buf) == version do
-      {cursor_line, cursor_col} = Buffer.cursor(buf)
-      Buffer.replace_content(buf, formatted)
-      line_count = Buffer.line_count(buf)
-      safe_line = min(cursor_line, max(line_count - 1, 0))
-      Buffer.move_to(buf, {safe_line, cursor_col})
-      buf_name = (Buffer.file_path(buf) || "scratch") |> Path.basename()
-      Minga.Log.info(:editor, "Formatted: #{buf_name}")
-      EditorState.set_status(state, "Formatted")
-    else
-      EditorState.set_status(state, "Buffer changed, format skipped")
-    end
+    result =
+      safely_commit(fn ->
+        case commit_formatted_content(buf, version, formatted, :user) do
+          :ok -> {:ok, Buffer.file_path(buf)}
+          {:error, reason} -> {:error, reason}
+        end
+      end)
+
+    apply_external_commit_status(state, result)
   end
 
   def apply_format_external_result(state, {:error, msg}) do
     Minga.Log.warning(:editor, "Formatter failed: #{msg}")
     EditorState.set_status(state, "Format error: #{msg}")
+  end
+
+  @spec commit_formatted_content(
+          pid(),
+          non_neg_integer(),
+          String.t(),
+          Minga.Buffer.State.edit_source()
+        ) :: :ok | {:error, :read_only | :stale}
+  defp commit_formatted_content(buf, expected_version, content, source) do
+    Buffer.replace_content_if_version(buf, expected_version, content, source)
+  end
+
+  @spec safely_commit((-> term())) :: term()
+  defp safely_commit(fun) do
+    fun.()
+  catch
+    :exit, _reason -> {:error, :not_alive}
+  end
+
+  @spec apply_external_commit_status(
+          state(),
+          {:ok, String.t() | nil} | {:error, format_commit_error()}
+        ) :: state()
+  defp apply_external_commit_status(state, {:ok, file_path}) do
+    buf_name = (file_path || "scratch") |> Path.basename()
+    Minga.Log.info(:editor, "Formatted: #{buf_name}")
+    EditorState.set_status(state, "Formatted")
+  end
+
+  defp apply_external_commit_status(state, {:error, :stale}) do
+    EditorState.set_status(state, "Buffer changed, format skipped")
+  end
+
+  defp apply_external_commit_status(state, {:error, :read_only}) do
+    EditorState.set_status(state, "Buffer is read-only, format skipped")
+  end
+
+  defp apply_external_commit_status(state, {:error, :not_alive}) do
+    EditorState.set_status(state, "Buffer closed, format skipped")
   end
 
   # When the formatter binary is missing and a tool recipe exists for it,

@@ -286,6 +286,19 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, {:replace_content, new_content, source})
   end
 
+  @doc "Atomically replaces content at `expected_version`, preserving the nearest valid cursor position."
+  @spec replace_content_if_version(
+          GenServer.server(),
+          non_neg_integer(),
+          String.t(),
+          BufState.edit_source()
+        ) :: :ok | {:error, :read_only | :stale}
+  def replace_content_if_version(server, expected_version, new_content, source \\ :user)
+      when is_integer(expected_version) and expected_version >= 0 and is_binary(new_content) and
+             source in [:user, :agent, :lsp, :recovery] do
+    GenServer.call(server, {:replace_content_if_version, expected_version, new_content, source})
+  end
+
   @doc "Replaces buffer content bypassing read-only. For programmatic panel updates."
   @spec replace_generated_content(GenServer.server(), String.t()) :: :ok
   def replace_generated_content(server, new_content) do
@@ -308,6 +321,12 @@ defmodule Minga.Buffer.Process do
   @spec content(GenServer.server()) :: String.t()
   def content(server) do
     GenServer.call(server, :content)
+  end
+
+  @doc "Returns content and mutation version atomically in one call."
+  @spec content_with_version(GenServer.server()) :: {String.t(), non_neg_integer()}
+  def content_with_version(server) do
+    GenServer.call(server, :content_with_version)
   end
 
   @doc "Returns the byte offset for the start of a given line."
@@ -1262,13 +1281,29 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call({:replace_content, new_content, source}, _from, state) do
-    new_buf = Document.new(new_content)
-    event_source = EditSource.from_undo_source(source)
+    {:reply, :ok, replace_content_state(state, new_content, source)}
+  end
 
-    new_state =
-      apply_operation(state, {:full, new_buf}, event_source, {:force_full, source, :clear})
+  def handle_call(
+        {:replace_content_if_version, _expected_version, _new_content, _source},
+        _from,
+        %{read_only: true} = state
+      ) do
+    {:reply, {:error, :read_only}, state}
+  end
 
-    {:reply, :ok, new_state}
+  def handle_call(
+        {:replace_content_if_version, expected_version, new_content, source},
+        _from,
+        state
+      ) do
+    case BufState.version(state) do
+      ^expected_version ->
+        {:reply, :ok, replace_content_preserving_cursor_state(state, new_content, source)}
+
+      _other_version ->
+        {:reply, {:error, :stale}, state}
+    end
   end
 
   # Force replace bypasses read_only. Used by panel buffers (file tree, agent)
@@ -1320,6 +1355,10 @@ defmodule Minga.Buffer.Process do
 
   def handle_call(:content, _from, state) do
     {:reply, Document.content(state.document), state}
+  end
+
+  def handle_call(:content_with_version, _from, state) do
+    {:reply, {Document.content(state.document), BufState.version(state)}, state}
   end
 
   def handle_call({:byte_offset_for_line, line}, _from, state) do
@@ -2064,6 +2103,28 @@ defmodule Minga.Buffer.Process do
 
     seed_options(state.options_server, filetype)
     |> Map.merge(explicit_values)
+  end
+
+  @spec replace_content_state(state(), String.t(), BufState.edit_source()) :: state()
+  defp replace_content_state(state, new_content, source) do
+    replace_content_document_state(state, Document.new(new_content), source)
+  end
+
+  @spec replace_content_preserving_cursor_state(state(), String.t(), BufState.edit_source()) ::
+          state()
+  defp replace_content_preserving_cursor_state(state, new_content, source) do
+    new_document =
+      new_content
+      |> Document.new()
+      |> Document.move_to(Document.cursor(state.document))
+
+    replace_content_document_state(state, new_document, source)
+  end
+
+  @spec replace_content_document_state(state(), Document.t(), BufState.edit_source()) :: state()
+  defp replace_content_document_state(state, new_document, source) do
+    event_source = EditSource.from_undo_source(source)
+    apply_operation(state, {:full, new_document}, event_source, {:force_full, source, :clear})
   end
 
   @spec apply_operation(state(), operation_result(), EditSource.t(), operation_opts()) :: state()

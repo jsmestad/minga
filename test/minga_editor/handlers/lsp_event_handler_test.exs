@@ -268,6 +268,108 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       assert new_state.shell_state.status_msg =~ "Buffer changed"
     end
 
+    test "a mutation queued after the LSP content read makes the commit stale" do
+      state = base_state()
+      buf = state.workspace.buffers.active
+      version = Minga.Buffer.version(buf)
+      ref = make_ref()
+      state = put_lsp_pending(state, ref, {:format, buf, version})
+
+      edits = [
+        %{
+          "range" => %{
+            "start" => %{"line" => 0, "character" => 0},
+            "end" => %{"line" => 0, "character" => 8}
+          },
+          "newText" => "STALE"
+        }
+      ]
+
+      :ok = :sys.suspend(buf)
+
+      task =
+        Task.async(fn ->
+          receive do
+            :apply_result ->
+              LspEventHandler.handle(state, {:lsp_response, ref, {:ok, edits}})
+          end
+        end)
+
+      task_pid = task.pid
+      1 = :erlang.trace(task_pid, true, [:send])
+      send(task_pid, :apply_result)
+
+      assert_receive {:trace, ^task_pid, :send, {:"$gen_call", {_from, _tag}, :content}, ^buf}
+
+      insert_tag = make_ref()
+
+      send(
+        buf,
+        {:"$gen_call", {self(), insert_tag}, {:insert_text, "!", Minga.Buffer.EditSource.user()}}
+      )
+
+      :ok = :sys.resume(buf)
+      assert_receive {^insert_tag, :ok}
+      {new_state, effects} = Task.await(task)
+
+      assert effects == [:render_now]
+      assert Minga.Buffer.content(buf) =~ "!line one"
+      assert new_state.shell_state.status_msg =~ "Buffer changed"
+    end
+
+    test "does not apply edits to a read-only buffer" do
+      state = base_state()
+      buf = state.workspace.buffers.active
+      version = Minga.Buffer.version(buf)
+      :ok = Minga.Buffer.set_read_only(buf, true)
+      ref = make_ref()
+      state = put_lsp_pending(state, ref, {:format, buf, version})
+
+      edits = [
+        %{
+          "range" => %{
+            "start" => %{"line" => 0, "character" => 0},
+            "end" => %{"line" => 0, "character" => 8}
+          },
+          "newText" => "READ ONLY"
+        }
+      ]
+
+      {new_state, effects} =
+        LspEventHandler.handle(state, {:lsp_response, ref, {:ok, edits}})
+
+      assert effects == [:render_now]
+      assert Minga.Buffer.content(buf) =~ "line one"
+      assert new_state.shell_state.status_msg =~ "read-only"
+    end
+
+    test "drops edits when the target buffer exited" do
+      state = base_state()
+      buf = state.workspace.buffers.active
+      version = Minga.Buffer.version(buf)
+      ref = make_ref()
+      state = put_lsp_pending(state, ref, {:format, buf, version})
+      monitor = Process.monitor(buf)
+      Process.exit(buf, :kill)
+      assert_receive {:DOWN, ^monitor, :process, ^buf, :killed}
+
+      edits = [
+        %{
+          "range" => %{
+            "start" => %{"line" => 0, "character" => 0},
+            "end" => %{"line" => 0, "character" => 8}
+          },
+          "newText" => "CLOSED"
+        }
+      ]
+
+      {new_state, effects} =
+        LspEventHandler.handle(state, {:lsp_response, ref, {:ok, edits}})
+
+      assert effects == [:render_now]
+      assert new_state.shell_state.status_msg =~ "closed"
+    end
+
     test "handles nil response (no formatting changes)" do
       state = base_state()
       buf = state.workspace.buffers.active

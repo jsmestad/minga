@@ -822,6 +822,88 @@ defmodule Minga.Buffer.ProcessTest do
       assert BufferProcess.last_undo_source(pid) == :user
     end
 
+    test "content_with_version captures a matching content and version pair" do
+      pid = start_supervised!({BufferProcess, content: "hello"})
+
+      assert {"hello", version} = Buffer.content_with_version(pid)
+      assert version == Buffer.version(pid)
+
+      Buffer.insert_text(pid, "!")
+      assert {"!hello", next_version} = Buffer.content_with_version(pid)
+      assert next_version == version + 1
+    end
+
+    test "replace_content_if_version atomically replaces the expected version" do
+      pid = start_supervised!({BufferProcess, content: "hello\nworld"})
+      Buffer.move_to(pid, {1, 4})
+      version = Buffer.version(pid)
+
+      assert :ok = Buffer.replace_content_if_version(pid, version, "goodbye", :lsp)
+      assert Buffer.content(pid) == "goodbye"
+      assert Buffer.cursor(pid) == {0, 4}
+      assert Buffer.version(pid) == version + 1
+      assert BufferProcess.last_undo_source(pid) == :lsp
+    end
+
+    test "replace_content_if_version leaves all buffer state unchanged when stale" do
+      pid = start_supervised!({BufferProcess, content: "hello"})
+      stale_version = Buffer.version(pid)
+      Buffer.move_to(pid, {0, 3})
+      Buffer.insert_text(pid, "!")
+
+      content = Buffer.content(pid)
+      cursor = Buffer.cursor(pid)
+      version = Buffer.version(pid)
+      dirty? = Buffer.dirty?(pid)
+      undo_source = BufferProcess.last_undo_source(pid)
+
+      assert {:error, :stale} =
+               Buffer.replace_content_if_version(pid, stale_version, "stale", :lsp)
+
+      assert Buffer.content(pid) == content
+      assert Buffer.cursor(pid) == cursor
+      assert Buffer.version(pid) == version
+      assert Buffer.dirty?(pid) == dirty?
+      assert BufferProcess.last_undo_source(pid) == undo_source
+
+      assert :ok = Buffer.undo(pid)
+      assert Buffer.content(pid) == "hello"
+    end
+
+    test "replace_content_if_version rejects read-only buffers without mutation" do
+      pid = start_supervised!({BufferProcess, content: "hello", read_only: true})
+      version = Buffer.version(pid)
+
+      assert {:error, :read_only} =
+               Buffer.replace_content_if_version(pid, version, "goodbye", :lsp)
+
+      assert Buffer.content(pid) == "hello"
+      assert Buffer.version(pid) == version
+      refute Buffer.dirty?(pid)
+    end
+
+    test "a queued prior mutation makes version-checked replacement stale" do
+      pid = start_supervised!({BufferProcess, content: "hello"})
+      expected_version = Buffer.version(pid)
+      insert_tag = make_ref()
+      replace_tag = make_ref()
+
+      send(
+        pid,
+        {:"$gen_call", {self(), insert_tag}, {:insert_text, "!", Minga.Buffer.EditSource.user()}}
+      )
+
+      send(
+        pid,
+        {:"$gen_call", {self(), replace_tag},
+         {:replace_content_if_version, expected_version, "stale", :lsp}}
+      )
+
+      assert_receive {^insert_tag, :ok}
+      assert_receive {^replace_tag, {:error, :stale}}
+      assert Buffer.content(pid) == "!hello"
+    end
+
     test "generated replacement APIs clear stale undo history" do
       cases = [
         {"generated", fn pid -> BufferProcess.replace_generated_content(pid, "generated") end},
