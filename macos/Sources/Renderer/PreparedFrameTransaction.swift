@@ -444,6 +444,11 @@ struct PreparedFrameTransactionBuilder {
         for entry in delta.rows {
             if case .full(let row) = entry { recordFontResources(in: row) }
         }
+        for splice in delta.rowSplices ?? [] {
+            for entry in splice.insertEntries {
+                if case .full(let row) = entry { recordFontResources(in: row) }
+            }
+        }
     }
 
     private mutating func recordFontResources(in row: GUIVisualRow) {

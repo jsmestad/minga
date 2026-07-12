@@ -14,6 +14,8 @@ defmodule MingaEditor.Input.RouterTest do
   alias MingaEditor.Input
   alias MingaEditor.Input.Router
 
+  @async_render_timeout 5_000
+
   setup do
     table = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
     start_supervised!({Sidebar, name: table, notify: false})
@@ -289,15 +291,15 @@ defmodule MingaEditor.Input.RouterTest do
 
       pending_state = Router.dispatch(state, ?d, 0)
       assert pending_state.workspace.editing.mode == :operator_pending
-      assert_receive {:acknowledged_render, first_seq, 1, 0}
+      assert_receive {:acknowledged_render, first_seq, 1, 0}, @async_render_timeout
       refute_receive {:"$gen_cast", {:send_commands, _commands}}, 20
 
       RendererServer.frame_status(renderer, {:frame_applied, 1, first_seq})
-      assert_receive {:render_done, %{frame_seq: ^first_seq}}
+      assert_receive {:render_done, %{frame_seq: ^first_seq}}, @async_render_timeout
 
       normal_state = Router.dispatch(pending_state, ?w, 0)
       assert normal_state.workspace.editing.mode == :normal
-      assert_receive {:acknowledged_render, second_seq, 1, ^first_seq}
+      assert_receive {:acknowledged_render, second_seq, 1, ^first_seq}, @async_render_timeout
       assert second_seq > first_seq
       assert RendererServer.acknowledgement_state(renderer) == {1, first_seq}
     end

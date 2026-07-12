@@ -71,6 +71,53 @@ defmodule MingaEditor.Renderer.ServerTest do
     assert Process.alive?(renderer)
   end
 
+  test "synchronous stale-buffer retries stop at the configured bound" do
+    attempts = start_supervised!({Agent, fn -> 0 end})
+
+    pipeline = fn _input ->
+      Agent.update(attempts, &(&1 + 1))
+      raise MingaEditor.Renderer.StaleBufferError, buffer: self(), expected_version: 0
+    end
+
+    renderer = start_renderer(self(), pipeline: pipeline)
+
+    assert {:error, %MingaEditor.Renderer.StaleBufferError{}} =
+             RendererServer.render_sync(renderer, stub_snapshot(), 42)
+
+    assert Agent.get(attempts, & &1) == 4
+    refute renderer_busy?(renderer)
+  end
+
+  test "exhausted async stale retries advance to the latest pending intent" do
+    parent = self()
+
+    pipeline = fn input ->
+      send(parent, {:stale_retry_attempt, input.frame_seq})
+
+      case input.frame_seq do
+        10 ->
+          raise MingaEditor.Renderer.StaleBufferError, buffer: self(), expected_version: 0
+
+        11 ->
+          input
+      end
+    end
+
+    renderer = start_renderer(self(), pipeline: pipeline)
+    :ok = :sys.suspend(renderer)
+    RendererServer.cast_snapshot(renderer, stub_snapshot(), 10)
+    RendererServer.cast_snapshot(renderer, stub_snapshot(), 11)
+    :ok = :sys.resume(renderer)
+
+    for _attempt <- 1..4 do
+      assert_receive {:stale_retry_attempt, 10}, @async_render_timeout
+    end
+
+    assert_receive {:stale_retry_attempt, 11}, @async_render_timeout
+    assert_receive {:render_done, %RenderReceipt{frame_seq: 11}}, @async_render_timeout
+    refute renderer_busy?(renderer)
+  end
+
   test "successful async render sends writeback and emits a frame" do
     renderer = start_renderer(self(), pipeline: &emit_commit_frame/1)
     state = build_editor_state(:tui, nil)
@@ -337,6 +384,35 @@ defmodule MingaEditor.Renderer.ServerTest do
       assert RendererServer.acknowledgement_state(renderer) == {3, 0}
     end
 
+    test "connection reset clears stale retry exhaustion before recovery" do
+      parent = self()
+      attempts = start_supervised!({Agent, fn -> 0 end})
+
+      pipeline = fn input ->
+        attempt = Agent.get_and_update(attempts, fn count -> {count + 1, count + 1} end)
+        send(parent, {:reset_retry_attempt, attempt})
+
+        case attempt do
+          1 ->
+            raise MingaEditor.Renderer.StaleBufferError,
+              buffer: self(),
+              expected_version: 0
+
+          2 ->
+            input
+        end
+      end
+
+      renderer = start_renderer(self(), pipeline: pipeline)
+      :sys.replace_state(renderer, &%{&1 | stale_retry_count: 3})
+
+      :ok = RendererServer.reset_connection(renderer, stub_snapshot(), 60)
+
+      assert_receive {:reset_retry_attempt, 1}, @async_render_timeout
+      assert_receive {:reset_retry_attempt, 2}, @async_render_timeout
+      assert_receive {:render_done, %RenderReceipt{frame_seq: 60}}, @async_render_timeout
+    end
+
     test "connection reset abandons outstanding credit and resumes from a base-zero keyframe" do
       renderer = start_ack_renderer(self())
 
@@ -447,6 +523,27 @@ defmodule MingaEditor.Renderer.ServerTest do
 
       assert_receive {:resident_probe, 11, 2, false, 1, [{64, 1, 1}], ^fresh_epoch},
                      @async_render_timeout
+    end
+
+    test "stale retry composes separated structural edits in current coordinates" do
+      gate = start_supervised!({Agent, fn -> :pause_once end})
+      pipeline = stale_once_resident_probe_pipeline(self(), gate)
+      {renderer, snapshot, buffer, epoch} = start_warm_resident_renderer(300, pipeline)
+
+      :ok = Minga.Buffer.Process.move_to(buffer, {0, 0})
+      :ok = Minga.Buffer.Process.insert_text(buffer, "first\n")
+      RendererServer.cast_snapshot(renderer, snapshot, 20)
+
+      assert_receive {:resident_probe_paused, 20}, @async_render_timeout
+      :ok = Minga.Buffer.Process.move_to(buffer, {100, 0})
+      :ok = Minga.Buffer.Process.insert_text(buffer, "second\n")
+      send(renderer, :continue_resident_probe)
+
+      assert_receive {:resident_probe, 20, 1, false, 102, [{0, 100, 102}], ^epoch},
+                     @async_render_timeout
+
+      RendererServer.frame_status(renderer, {:frame_applied, 1, 20})
+      assert_receive {:render_done, %RenderReceipt{frame_seq: 20}}, @async_render_timeout
     end
 
     test "transaction recovery materializes every warm resident row then resumes targeted deltas" do
@@ -574,7 +671,7 @@ defmodule MingaEditor.Renderer.ServerTest do
     end
   end
 
-  defp start_warm_resident_renderer(line_count) do
+  defp start_warm_resident_renderer(line_count, pipeline \\ nil) do
     content = Enum.map_join(0..(line_count - 1), "\n", &"line #{&1}")
     state = build_editor_state(:tui, nil, content)
     buffer = state.workspace.buffers.active
@@ -589,7 +686,7 @@ defmodule MingaEditor.Renderer.ServerTest do
     }
 
     snapshot = Input.from_editor_state(%{state | capabilities: capabilities})
-    renderer = start_ack_renderer(self(), pipeline: resident_probe_pipeline(self()))
+    renderer = start_ack_renderer(self(), pipeline: pipeline || resident_probe_pipeline(self()))
 
     RendererServer.cast_snapshot(renderer, snapshot, 1)
 
@@ -613,6 +710,40 @@ defmodule MingaEditor.Renderer.ServerTest do
     assert_receive {:render_done, %RenderReceipt{frame_seq: 3}}, @async_render_timeout
 
     {renderer, snapshot, buffer, epoch}
+  end
+
+  defp stale_once_resident_probe_pipeline(parent, gate) do
+    delegate = resident_probe_pipeline(parent)
+
+    fn input ->
+      maybe_pause_resident_probe(input, parent, gate)
+      delegate.(input)
+    end
+  end
+
+  defp maybe_pause_resident_probe(%{frame_seq: 20} = input, parent, gate) do
+    gate
+    |> Agent.get_and_update(fn
+      :pause_once -> {:pause, :open}
+      :open -> {:continue, :open}
+    end)
+    |> handle_resident_probe_gate(input, parent)
+  end
+
+  defp maybe_pause_resident_probe(_input, _parent, _gate), do: :ok
+
+  defp handle_resident_probe_gate(:continue, _input, _parent), do: :ok
+
+  defp handle_resident_probe_gate(:pause, input, parent) do
+    send(parent, {:resident_probe_paused, input.frame_seq})
+
+    receive do
+      :continue_resident_probe -> :ok
+    end
+
+    raise MingaEditor.Renderer.StaleBufferError,
+      buffer: input.workspace.buffers.active,
+      expected_version: 1
   end
 
   defp resident_probe_pipeline(parent) do

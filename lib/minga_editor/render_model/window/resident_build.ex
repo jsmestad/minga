@@ -77,12 +77,11 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuild do
     do: structural_delta_transition(deltas, old_count, new_count)
 
   defp structural_delta_transition(deltas, old_count, new_count) do
-    start = deltas |> Enum.map(&elem(&1.start_position, 0)) |> Enum.min()
-    old_last = deltas |> Enum.map(&elem(&1.old_end_position, 0)) |> Enum.max()
-    delete_count = min(max(old_last - start + 1, 1), max(old_count - start, 0))
-    insert_count = new_count - (old_count - delete_count)
+    {start, current_last} = EditDelta.affected_line_range(deltas)
+    insert_count = current_last - start + 1
+    delete_count = insert_count - (new_count - old_count)
 
-    if insert_count >= 0 and start + delete_count <= old_count,
+    if delete_count >= 0 and start + delete_count <= old_count,
       do: {:splice, start, delete_count, insert_count},
       else: :hydrate
   end
