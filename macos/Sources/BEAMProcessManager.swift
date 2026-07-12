@@ -244,10 +244,10 @@ final class BEAMProcessManager {
         return urls
     }
 
-    /// Sends SIGUSR1 to the BEAM so the Watchdog restarts the editor core while preserving buffers.
+    /// Sends SIGUSR2 to the BEAM so the Watchdog restarts the editor core while preserving buffers.
     func sendRecoveryRestartSignal() {
         guard let proc = process, proc.isRunning else { return }
-        kill(proc.processIdentifier, SIGUSR1)
+        kill(proc.processIdentifier, SIGUSR2)
     }
 
     /// Re-spawns the BEAM after the automatic restart budget was exhausted.

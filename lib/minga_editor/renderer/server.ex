@@ -82,13 +82,24 @@ defmodule MingaEditor.Renderer.Server do
   @typedoc "Editor process reference used for renderer writebacks."
   @type editor_ref :: pid() | atom() | nil
 
+  @typedoc "Generation-scoped lease for one frame awaiting frontend acknowledgement."
+  @type ack_lease :: %{
+          required(:generation) => non_neg_integer(),
+          required(:seq) => non_neg_integer(),
+          required(:timer_ref) => reference(),
+          required(:output) => render_output(),
+          required(:snapshot) => Input.t(),
+          required(:pushed_at) => integer()
+        }
+
   @typedoc "Renderer server state."
   @type t :: %__MODULE__{
           editor_pid: editor_ref(),
           rendering?: boolean(),
           pending: {Input.t(), non_neg_integer(), integer()} | nil,
           in_flight: {Input.t(), non_neg_integer(), integer()} | nil,
-          awaiting_ack: {render_output(), Input.t(), non_neg_integer(), integer()} | nil,
+          awaiting_ack: ack_lease() | nil,
+          ack_timeout_ms: pos_integer(),
           font_registry: FontRegistry.t(),
           caches: Caches.t(),
           message_store: MessageStore.t() | nil,
@@ -101,6 +112,7 @@ defmodule MingaEditor.Renderer.Server do
             pending: nil,
             in_flight: nil,
             awaiting_ack: nil,
+            ack_timeout_ms: 2_000,
             font_registry: FontRegistry.new(),
             caches: Caches.new(),
             message_store: nil,
@@ -175,7 +187,15 @@ defmodule MingaEditor.Renderer.Server do
     editor_pid = Keyword.get(opts, :editor_pid, MingaEditor)
     pipeline = Keyword.get(opts, :pipeline, &RenderPipeline.run/1)
     require_ack? = Keyword.get(opts, :require_ack?, not Keyword.has_key?(opts, :pipeline))
-    {:ok, %__MODULE__{editor_pid: editor_pid, pipeline: pipeline, require_ack?: require_ack?}}
+    ack_timeout_ms = Keyword.get(opts, :ack_timeout_ms, 2_000)
+
+    {:ok,
+     %__MODULE__{
+       editor_pid: editor_pid,
+       pipeline: pipeline,
+       require_ack?: require_ack?,
+       ack_timeout_ms: ack_timeout_ms
+     }}
   end
 
   @impl true
@@ -188,6 +208,7 @@ defmodule MingaEditor.Renderer.Server do
   end
 
   def handle_call({:reset_connection, snap, seq, pushed_at}, _from, state) do
+    cancel_ack_timer(state.awaiting_ack)
     caches = Caches.reset_frontend_state(state.caches)
 
     # The Editor snapshot has already reset all frontend-retained cursors for
@@ -262,11 +283,25 @@ defmodule MingaEditor.Renderer.Server do
     # Port write is not proof of commit. Keep the prepared output private until
     # the matching generation/sequence acknowledgement returns the single credit.
     if state.require_ack? do
+      generation = output.caches.recovery_generation
+
+      timer_ref =
+        Process.send_after(self(), {:frame_ack_timeout, generation, seq}, state.ack_timeout_ms)
+
+      lease = %{
+        generation: generation,
+        seq: seq,
+        timer_ref: timer_ref,
+        output: output,
+        snapshot: snap,
+        pushed_at: pushed_at
+      }
+
       state = %{
         state
         | font_registry: output.font_registry,
           in_flight: nil,
-          awaiting_ack: {output, snap, seq, pushed_at}
+          awaiting_ack: lease
       }
 
       {:noreply, state}
@@ -297,9 +332,10 @@ defmodule MingaEditor.Renderer.Server do
 
   def handle_info(
         {:frame_status, {:frame_applied, generation, seq}},
-        %__MODULE__{awaiting_ack: {output, _snap, seq, _pushed_at}} = state
-      )
-      when generation == state.caches.recovery_generation do
+        %__MODULE__{awaiting_ack: %{generation: generation, seq: seq, output: output} = lease} =
+          state
+      ) do
+    cancel_ack_timer(lease)
     acknowledged = Caches.acknowledge_frame(output.caches, seq, generation)
 
     output = %{output | caches: acknowledged}
@@ -317,20 +353,32 @@ defmodule MingaEditor.Renderer.Server do
 
   def handle_info(
         {:frame_status, {:frame_rejected, generation, seq, last_applied, reason}},
-        %__MODULE__{awaiting_ack: {_output, snap, seq, pushed_at}} = state
+        %__MODULE__{
+          awaiting_ack: %{
+            generation: generation,
+            seq: seq,
+            snapshot: snap,
+            pushed_at: pushed_at
+          }
+        } = state
       )
-      when generation == state.caches.recovery_generation and
-             last_applied == state.caches.last_acknowledged_frame_seq do
+      when last_applied == state.caches.last_acknowledged_frame_seq do
     Minga.Log.warning(:render, "Frontend rejected frame #{seq}: #{reason}")
     recover_transaction(state, snap, seq, pushed_at)
   end
 
   def handle_info(
         {:frame_status, {:window_ref_miss, generation, seq, last_applied, window_id}},
-        %__MODULE__{awaiting_ack: {_output, snap, seq, pushed_at}} = state
+        %__MODULE__{
+          awaiting_ack: %{
+            generation: generation,
+            seq: seq,
+            snapshot: snap,
+            pushed_at: pushed_at
+          }
+        } = state
       )
-      when generation == state.caches.recovery_generation and
-             last_applied == state.caches.last_acknowledged_frame_seq do
+      when last_applied == state.caches.last_acknowledged_frame_seq do
     Minga.Log.warning(:render, "Frontend missed window #{window_id} in frame #{seq}")
     recover_window(state, snap, seq, pushed_at, window_id)
   end
@@ -340,8 +388,25 @@ defmodule MingaEditor.Renderer.Server do
   def handle_info({:frame_status, _status}, state), do: {:noreply, state}
 
   def handle_info(
+        {:frame_ack_timeout, generation, seq},
+        %__MODULE__{
+          awaiting_ack: %{
+            generation: generation,
+            seq: seq,
+            snapshot: snap,
+            pushed_at: pushed_at
+          }
+        } = state
+      ) do
+    Minga.Log.warning(:render, "Frontend acknowledgement timed out for frame #{seq}")
+    recover_transaction(state, snap, seq, pushed_at)
+  end
+
+  def handle_info({:frame_ack_timeout, _generation, _seq}, state), do: {:noreply, state}
+
+  def handle_info(
         :request_recovery,
-        %__MODULE__{awaiting_ack: {_output, snap, seq, pushed_at}} = state
+        %__MODULE__{awaiting_ack: %{snapshot: snap, seq: seq, pushed_at: pushed_at}} = state
       ) do
     recover_transaction(state, snap, seq, pushed_at)
   end
@@ -418,6 +483,8 @@ defmodule MingaEditor.Renderer.Server do
 
   @spec recover_transaction(t(), Input.t(), non_neg_integer(), integer()) :: {:noreply, t()}
   defp recover_transaction(state, rejected_snap, rejected_seq, rejected_pushed_at) do
+    cancel_ack_timer(state.awaiting_ack)
+
     {latest_snap, latest_seq, latest_pushed_at} =
       latest_intent(state.pending, rejected_snap, rejected_seq, rejected_pushed_at)
 
@@ -437,6 +504,8 @@ defmodule MingaEditor.Renderer.Server do
   @spec recover_window(t(), Input.t(), non_neg_integer(), integer(), non_neg_integer()) ::
           {:noreply, t()}
   defp recover_window(state, rejected_snap, rejected_seq, rejected_pushed_at, window_id) do
+    cancel_ack_timer(state.awaiting_ack)
+
     {latest_snap, latest_seq, latest_pushed_at} =
       latest_intent(state.pending, rejected_snap, rejected_seq, rejected_pushed_at)
 
@@ -455,6 +524,14 @@ defmodule MingaEditor.Renderer.Server do
       :error ->
         recover_transaction(state, latest_snap, latest_seq, latest_pushed_at)
     end
+  end
+
+  @spec cancel_ack_timer(ack_lease() | nil) :: :ok
+  defp cancel_ack_timer(nil), do: :ok
+
+  defp cancel_ack_timer(%{timer_ref: timer_ref}) do
+    _ = Process.cancel_timer(timer_ref)
+    :ok
   end
 
   @spec latest_intent(
