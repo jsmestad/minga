@@ -32,7 +32,7 @@ let CURSOR_UNDERLINE: UInt8 = 0x02
 
 // MARK: - Capability constants
 
-let CAPS_VERSION: UInt8 = 1
+let CAPS_VERSION: UInt8 = 2
 
 let FRONTEND_TUI: UInt8 = 0
 let FRONTEND_NATIVE_GUI: UInt8 = 1
@@ -43,6 +43,14 @@ let IMAGE_NATIVE: UInt8 = 3
 let FLOAT_NATIVE: UInt8 = 1
 let TEXT_PROPORTIONAL: UInt8 = 1
 let SEMANTIC_UI_ENABLED: UInt8 = 1
+
+// Capability-format-2 resource-policy tail. Values are hard admission bounds;
+// zero leaves a dimension unadvertised until that limit is enforced. The packet
+// byte ceiling is enforced by ProtocolReader before payload allocation.
+let RESOURCE_POLICY_VERSION: UInt8 = 1
+let RESOURCE_MAX_FRAME_BYTES: UInt32 = 64 * 1024 * 1024
+let RESOURCE_MAX_FRAME_COMMANDS: UInt32 = 0
+let RESOURCE_MAX_WINDOW_ROWS: UInt32 = 0
 
 // MARK: - Text attribute bits
 

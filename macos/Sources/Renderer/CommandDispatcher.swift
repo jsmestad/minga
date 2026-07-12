@@ -39,6 +39,13 @@ private enum PickerNavigationCodepoints {
     static let upArrow: UInt32 = 57352
 }
 
+private struct TerminalRejectionSignature: Equatable {
+    let generation: UInt32
+    let frameSeq: UInt32
+    let lastGoodFrameSeq: UInt32
+    let reason: UInt8
+}
+
 private enum CompletionNavigationCodepoints {
     static let ctrlN: UInt32 = 110
     static let ctrlP: UInt32 = 112
@@ -176,6 +183,7 @@ final class CommandDispatcher {
     /// by `request_keyframe` on invalidation. 0 until the first clean commit.
     private(set) var lastCommittedFrameSeq: UInt32 = 0
     private(set) var lastCommittedGeneration: UInt32 = 0
+    private var lastTerminalRejection: TerminalRejectionSignature?
 
     /// True once at least one frame has committed, so `lastCommittedFrameSeq == 0`
     /// can still be told apart from "never committed" when validating a base.
@@ -380,6 +388,7 @@ final class CommandDispatcher {
         lastCommittedFrameSeq = frameSeq
         lastCommittedGeneration = openGeneration
         hasCommitted = true
+        lastTerminalRejection = nil
         openFrameSeq = nil
         self.transactionBuilder = nil
 
@@ -484,21 +493,40 @@ final class CommandDispatcher {
             return
         }
 
-        let shouldRequestKeyframe = resyncRecoveryState != .awaitingKeyframe
-        resyncRecoveryState = .awaitingKeyframe
-        PortLogger.warn("Frame transaction rejected (\(logReason)\(opcodeContext)); awaiting BEAM recovery from \(lastCommittedFrameSeq)")
-        guiState.performOutOfBandPublication {
-            guiState.resyncState.markPending(
-                lastGoodFrameSeq: lastCommittedFrameSeq,
-                generation: openGeneration,
-                rejection: rejection.logDescription
-            )
+        let terminal = rejection.disposition == .terminalFrontendFailure
+        if terminal {
+            resyncRecoveryState = .clean
+            if guiState.resyncState.pending {
+                guiState.performOutOfBandPublication {
+                    guiState.resyncState.clear()
+                }
+            }
+            PortLogger.error("Frame transaction terminally rejected (\(logReason)\(opcodeContext)); preserving last-good frame \(lastCommittedFrameSeq)")
+        } else {
+            let shouldRequestKeyframe = resyncRecoveryState != .awaitingKeyframe
+            resyncRecoveryState = .awaitingKeyframe
+            PortLogger.warn("Frame transaction rejected (\(logReason)\(opcodeContext)); awaiting BEAM recovery from \(lastCommittedFrameSeq)")
+            guiState.performOutOfBandPublication {
+                guiState.resyncState.markPending(
+                    lastGoodFrameSeq: lastCommittedFrameSeq,
+                    generation: openGeneration,
+                    rejection: rejection.logDescription
+                )
+            }
+            if shouldRequestKeyframe {
+                // Compatibility/test seam only. Production recovery is driven by the
+                // typed onTransactionResult status wired in MingaApp.
+                onRequestKeyframe?(lastCommittedFrameSeq)
+            }
         }
-        if shouldRequestKeyframe {
-            // Compatibility/test seam only. Production recovery is driven by the
-            // typed onTransactionResult status wired in MingaApp.
-            onRequestKeyframe?(lastCommittedFrameSeq)
-        }
+        let terminalSignature = TerminalRejectionSignature(
+            generation: openGeneration,
+            frameSeq: rejectedFrameSeq,
+            lastGoodFrameSeq: lastCommittedFrameSeq,
+            reason: rejection.wireCode
+        )
+        guard !terminal || lastTerminalRejection != terminalSignature else { return }
+        if terminal { lastTerminalRejection = terminalSignature }
         onTransactionResult?(.rejected(
             generation: openGeneration,
             frameSeq: rejectedFrameSeq,
@@ -519,6 +547,17 @@ final class CommandDispatcher {
             .decodeFailure(frameSeq: openFrameSeq),
             frameSeq: openFrameSeq,
             logReason: "decode failure inside an open transaction"
+        )
+    }
+
+    /// Rejects the open frame under the deterministic hard resource policy.
+    /// The last-good semantic publication remains active and no keyframe is requested.
+    func resourcePolicyRejected() {
+        guard let openFrameSeq else { return }
+        reject(
+            .resourcePolicy,
+            frameSeq: openFrameSeq,
+            logReason: "frontend resource policy exceeded"
         )
     }
 

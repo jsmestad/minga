@@ -9,20 +9,29 @@ import (
 
 func TestEncodeReadyReportsSemanticTUI(t *testing.T) {
 	packet := EncodeReady(120, 40)
-	// 14 caps bytes + a u16 protocol_version tail (protocol_version 2).
-	if len(packet) != 16 {
-		t.Fatalf("ready packet length = %d, want 16", len(packet))
+	// Capability format 2 carries 20 fields plus a u16 protocol-version tail.
+	if len(packet) != 29 {
+		t.Fatalf("ready packet length = %d, want 29", len(packet))
 	}
 	if packet[0] != generated.OPReady {
 		t.Fatalf("opcode = 0x%02X, want ready", packet[0])
 	}
-	if packet[5] != 1 || packet[6] != 7 {
-		t.Fatalf("capability header = {%d,%d}, want {1,7}", packet[5], packet[6])
+	if packet[5] != 2 || packet[6] != 20 {
+		t.Fatalf("capability header = {%d,%d}, want {2,20}", packet[5], packet[6])
 	}
-	if packet[7] != 0 || packet[13] != 1 {
-		t.Fatalf("capabilities should report tui with semantic_ui=true: %#v", packet[7:])
+	if packet[7] != 0 || packet[13] != 1 || packet[14] != 1 {
+		t.Fatalf("capabilities should report semantic TUI resource policy: %#v", packet[7:])
 	}
-	version := uint16(packet[14])<<8 | uint16(packet[15])
+	if got := binary.BigEndian.Uint32(packet[15:19]); got != 64*1024*1024 {
+		t.Fatalf("max_frame_bytes = %d", got)
+	}
+	if got := binary.BigEndian.Uint32(packet[19:23]); got != 0 {
+		t.Fatalf("max_frame_commands = %d, want unadvertised", got)
+	}
+	if got := binary.BigEndian.Uint32(packet[23:27]); got != 0 {
+		t.Fatalf("max_window_rows = %d, want unadvertised", got)
+	}
+	version := uint16(packet[27])<<8 | uint16(packet[28])
 	if version != generated.ProtocolVersion {
 		t.Fatalf("protocol_version tail = %d, want %d", version, generated.ProtocolVersion)
 	}

@@ -370,7 +370,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     generation: generation,
                     frameSeq: frameSeq,
                     lastAppliedFrameSeq: lastApplied,
-                    reason: reason.wireCode
+                    reason: reason.wireCode,
+                    disposition: reason.disposition
                 )
             case .windowRefMiss(let generation, let frameSeq, let lastApplied, let windowId):
                 encoder.sendWindowRefMiss(

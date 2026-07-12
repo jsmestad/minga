@@ -150,7 +150,15 @@ defmodule MingaEditor.Frontend.Protocol do
           | :transcript_desync
           | :decode_failure
           | :out_of_transaction_command
+          | :resource_policy
           | :unknown
+
+  @typedoc "Shared disposition for a rejected frontend frame."
+  @type frame_rejection_disposition ::
+          :retryable_recovery
+          | :targeted_replacement
+          | :adapted_retry
+          | :terminal_frontend_failure
 
   @typedoc "An input event decoded from a frontend."
   @type input_event ::
@@ -192,7 +200,8 @@ defmodule MingaEditor.Frontend.Protocol do
              generation :: non_neg_integer()}
           | {:frame_applied, generation :: non_neg_integer(), frame_seq :: non_neg_integer()}
           | {:frame_rejected, generation :: non_neg_integer(), frame_seq :: non_neg_integer(),
-             last_applied_frame_seq :: non_neg_integer(), frame_rejection_reason()}
+             last_applied_frame_seq :: non_neg_integer(), frame_rejection_reason(),
+             frame_rejection_disposition()}
           | {:window_ref_miss, generation :: non_neg_integer(), frame_seq :: non_neg_integer(),
              last_applied_frame_seq :: non_neg_integer(), window_id :: non_neg_integer()}
           | {:scroll_batch, window_id :: non_neg_integer(), delta_lines :: integer(),
@@ -483,10 +492,10 @@ defmodule MingaEditor.Frontend.Protocol do
   # (protocol_version 2+). The frontend stamps the wire-contract version it was
   # generated against so the BEAM can reject a mismatch before streaming frames.
   def decode_event(
-        <<@op_ready, width::16, height::16, _caps_version::8, caps_len::8,
+        <<@op_ready, width::16, height::16, caps_version::8, caps_len::8,
           caps_data::binary-size(caps_len), protocol_version::16>>
       ) do
-    caps = Capabilities.from_binary(caps_data)
+    caps = Capabilities.from_binary(caps_data, caps_version)
     {:ok, {:ready, width, height, caps, protocol_version}}
   end
 
@@ -494,10 +503,10 @@ defmodule MingaEditor.Frontend.Protocol do
   # + width(2) + height(2) + caps_version(1) + caps_len(1) + caps_data. Surfaced
   # as protocol_version 0 ("unversioned") so the Manager can reject it explicitly.
   def decode_event(
-        <<@op_ready, width::16, height::16, _caps_version::8, caps_len::8,
+        <<@op_ready, width::16, height::16, caps_version::8, caps_len::8,
           caps_data::binary-size(caps_len)>>
       ) do
-    caps = Capabilities.from_binary(caps_data)
+    caps = Capabilities.from_binary(caps_data, caps_version)
     {:ok, {:ready, width, height, caps, 0}}
   end
 
@@ -508,10 +517,10 @@ defmodule MingaEditor.Frontend.Protocol do
 
   # Capabilities updated event (sent after async capability detection).
   def decode_event(
-        <<@op_capabilities_updated, _caps_version::8, caps_len::8,
+        <<@op_capabilities_updated, caps_version::8, caps_len::8,
           caps_data::binary-size(caps_len)>>
       ) do
-    caps = Capabilities.from_binary(caps_data)
+    caps = Capabilities.from_binary(caps_data, caps_version)
     {:ok, {:capabilities_updated, caps}}
   end
 
@@ -550,9 +559,21 @@ defmodule MingaEditor.Frontend.Protocol do
   end
 
   def decode_event(
+        <<@op_frame_rejected, generation::32, frame_seq::32, last_applied::32, reason::8,
+          disposition::8>>
+      ) do
+    {:ok,
+     {:frame_rejected, generation, frame_seq, last_applied, decode_rejection_reason(reason),
+      decode_rejection_disposition(disposition)}}
+  end
+
+  # Compatibility for a protocol-version-11 status already draining on reconnect.
+  def decode_event(
         <<@op_frame_rejected, generation::32, frame_seq::32, last_applied::32, reason::8>>
       ) do
-    {:ok, {:frame_rejected, generation, frame_seq, last_applied, decode_rejection_reason(reason)}}
+    {:ok,
+     {:frame_rejected, generation, frame_seq, last_applied, decode_rejection_reason(reason),
+      :retryable_recovery}}
   end
 
   def decode_event(
@@ -628,7 +649,15 @@ defmodule MingaEditor.Frontend.Protocol do
   defp decode_rejection_reason(12), do: :decode_failure
   defp decode_rejection_reason(13), do: :out_of_transaction_command
   defp decode_rejection_reason(14), do: :invalid_row_splice
+  defp decode_rejection_reason(15), do: :resource_policy
   defp decode_rejection_reason(_), do: :unknown
+
+  @spec decode_rejection_disposition(non_neg_integer()) :: frame_rejection_disposition()
+  defp decode_rejection_disposition(1), do: :retryable_recovery
+  defp decode_rejection_disposition(2), do: :targeted_replacement
+  defp decode_rejection_disposition(3), do: :adapted_retry
+  defp decode_rejection_disposition(4), do: :terminal_frontend_failure
+  defp decode_rejection_disposition(_), do: :terminal_frontend_failure
 
   @spec decode_mouse_button(non_neg_integer()) :: mouse_button()
   defp decode_mouse_button(@mouse_left), do: :left

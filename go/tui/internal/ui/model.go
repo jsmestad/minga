@@ -111,7 +111,8 @@ type Model struct {
 	resyncPending bool
 	// lastFrameOutcome is set by the production transaction gate itself. Corpus
 	// tests observe it after submission; they never infer or pre-populate status.
-	lastFrameOutcome frameOutcome
+	lastFrameOutcome      frameOutcome
+	lastTerminalRejection *terminalRejection
 	// surfacePlacements is the BEAM's authoritative per-frame surface layout from
 	// gui_surface_layout (0xA4, #2268): one rect+z list. Compositing reads the z
 	// of a placed surface to order it instead of the old hand-coded
@@ -127,6 +128,14 @@ type Model struct {
 	// a pointer so it persists across the value-copied Update loop (same lifetime
 	// trick as lineCache/latency).
 	transcript *residentTranscript
+}
+
+// terminalRejection deduplicates an identical deterministic terminal status.
+type terminalRejection struct {
+	generation uint32
+	frameSeq   uint32
+	lastGood   uint32
+	reason     byte
 }
 
 // frameStaging is the open frame transaction buffer (#2219). It lives only
@@ -677,6 +686,7 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 	m.lastCommittedSeq = seq
 	m.lastCommittedGeneration = generation
 	m.staging = nil
+	m.lastTerminalRejection = nil
 	// A clean commit clears any pending resync indicator: the frontend is back
 	// in sync with the BEAM (#2219).
 	m.resyncPending = false
@@ -701,12 +711,22 @@ func (m *Model) invalidateStaging(cmds []tea.Cmd, reason string) []tea.Cmd {
 }
 
 func (m *Model) rejectStaging(cmds []tea.Cmd, reason byte, description string) []tea.Cmd {
+	return m.rejectStagingWithDisposition(cmds, reason, protocol.DefaultRejectionDisposition(reason), description)
+}
+
+func (m *Model) rejectStagingWithDisposition(cmds []tea.Cmd, reason byte, disposition protocol.RejectionDisposition, description string) []tea.Cmd {
 	m.lastFrameOutcome = frameOutcomeRejected
 	generation, frameSeq := uint32(0), uint32(0)
 	if m.staging != nil {
 		generation, frameSeq = m.staging.generation, m.staging.seq
 	}
-	m.send(protocol.EncodeFrameRejected(generation, frameSeq, m.lastCommittedSeq, reason))
+	terminal := terminalRejection{generation: generation, frameSeq: frameSeq, lastGood: m.lastCommittedSeq, reason: reason}
+	if disposition != protocol.DispositionTerminal || m.lastTerminalRejection == nil || *m.lastTerminalRejection != terminal {
+		m.send(protocol.EncodeFrameRejected(generation, frameSeq, m.lastCommittedSeq, reason, disposition))
+	}
+	if disposition == protocol.DispositionTerminal {
+		m.lastTerminalRejection = &terminal
+	}
 	m.staging = nil
 	// Typed rejection is the automatic recovery trigger. Keep diagnostics and
 	// the visible resync state debounced while stale frames from the old credit

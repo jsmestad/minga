@@ -14,6 +14,7 @@ defmodule MingaEditor.Frontend.Capabilities do
   alias Minga.Core.WidthOracle
   alias Minga.Core.WidthOracle.Measured
   alias Minga.Core.WidthOracle.Monospace
+  alias MingaEditor.Frontend.ResourcePolicy
 
   defstruct frontend_type: :tui,
             color_depth: :rgb,
@@ -21,7 +22,8 @@ defmodule MingaEditor.Frontend.Capabilities do
             image_support: :none,
             float_support: :emulated,
             text_rendering: :monospace,
-            semantic_ui: false
+            semantic_ui: false,
+            resource_policy: ResourcePolicy.unadvertised()
 
   @type frontend_type :: :tui | :native_gui | :web
   @type color_depth :: :mono | :color_256 | :rgb
@@ -37,18 +39,48 @@ defmodule MingaEditor.Frontend.Capabilities do
           image_support: image_support(),
           float_support: float_support(),
           text_rendering: text_rendering(),
-          semantic_ui: boolean()
+          semantic_ui: boolean(),
+          resource_policy: ResourcePolicy.t()
         }
 
   @doc "Returns the default capabilities (TUI with full RGB, monospace)."
   @spec default() :: t()
   def default, do: %__MODULE__{}
 
-  @doc "Decodes capability fields from the binary payload (7 bytes with semantic_ui; 6- and 5-byte legacy forms decode with semantic_ui false)."
+  @doc "Decodes capability fields, including the capability-format-2 resource-policy tail."
   @spec from_binary(binary()) :: t()
+  def from_binary(data), do: from_binary(data, inferred_version(data))
+
+  @doc "Decodes capability fields under the explicitly reported capability format version."
+  @spec from_binary(binary(), non_neg_integer()) :: t()
   def from_binary(
         <<frontend_type::8, color_depth::8, unicode_width::8, image_support::8, float_support::8,
-          text_rendering::8, semantic_ui::8>>
+          text_rendering::8, semantic_ui::8, policy_version::8, max_frame_bytes::32,
+          max_frame_commands::32, max_window_rows::32>>,
+        version
+      )
+      when version >= 2 do
+    from_fields(
+      frontend_type,
+      color_depth,
+      unicode_width,
+      image_support,
+      float_support,
+      text_rendering,
+      semantic_ui,
+      ResourcePolicy.new(
+        policy_version,
+        max_frame_bytes,
+        max_frame_commands,
+        max_window_rows
+      )
+    )
+  end
+
+  def from_binary(
+        <<frontend_type::8, color_depth::8, unicode_width::8, image_support::8, float_support::8,
+          text_rendering::8, semantic_ui::8>>,
+        _version
       ) do
     from_fields(
       frontend_type,
@@ -57,13 +89,15 @@ defmodule MingaEditor.Frontend.Capabilities do
       image_support,
       float_support,
       text_rendering,
-      semantic_ui
+      semantic_ui,
+      ResourcePolicy.unadvertised()
     )
   end
 
   def from_binary(
         <<frontend_type::8, color_depth::8, unicode_width::8, image_support::8, float_support::8,
-          text_rendering::8>>
+          text_rendering::8>>,
+        _version
       ) do
     from_fields(
       frontend_type,
@@ -72,11 +106,12 @@ defmodule MingaEditor.Frontend.Capabilities do
       image_support,
       float_support,
       text_rendering,
-      0
+      0,
+      ResourcePolicy.unadvertised()
     )
   end
 
-  def from_binary(_), do: default()
+  def from_binary(_data, _version), do: default()
 
   @spec from_fields(
           non_neg_integer(),
@@ -85,7 +120,8 @@ defmodule MingaEditor.Frontend.Capabilities do
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
-          non_neg_integer()
+          non_neg_integer(),
+          ResourcePolicy.t()
         ) :: t()
   defp from_fields(
          frontend_type,
@@ -94,7 +130,8 @@ defmodule MingaEditor.Frontend.Capabilities do
          image_support,
          float_support,
          text_rendering,
-         semantic_ui
+         semantic_ui,
+         resource_policy
        ) do
     %__MODULE__{
       frontend_type: decode_frontend_type(frontend_type),
@@ -103,7 +140,8 @@ defmodule MingaEditor.Frontend.Capabilities do
       image_support: decode_image_support(image_support),
       float_support: decode_float_support(float_support),
       text_rendering: decode_text_rendering(text_rendering),
-      semantic_ui: semantic_ui != 0
+      semantic_ui: semantic_ui != 0,
+      resource_policy: resource_policy
     }
   end
 
@@ -151,6 +189,10 @@ defmodule MingaEditor.Frontend.Capabilities do
   def width_oracle(%__MODULE__{}, _cache), do: %Monospace{}
 
   # ── Decoders ──
+
+  @spec inferred_version(binary()) :: non_neg_integer()
+  defp inferred_version(data) when byte_size(data) == 20, do: 2
+  defp inferred_version(_data), do: 1
 
   @spec decode_frontend_type(non_neg_integer()) :: frontend_type()
   defp decode_frontend_type(0), do: :tui

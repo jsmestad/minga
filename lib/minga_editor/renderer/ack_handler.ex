@@ -28,11 +28,41 @@ defmodule MingaEditor.Renderer.AckHandler do
         %State{
           awaiting_ack: %{generation: generation, seq: seq, intent: intent, pushed_at: pushed_at}
         } = state,
-        {:frame_rejected, generation, seq, last_applied, reason}
+        {:frame_rejected, generation, seq, last_applied, reason, :retryable_recovery}
       )
-      when last_applied == state.caches.last_acknowledged_frame_seq do
+      when reason != :resource_policy and last_applied == state.caches.last_acknowledged_frame_seq do
     Minga.Log.warning(:render, "Frontend rejected frame #{seq}: #{reason}")
     RecoveryHandler.transaction(state, intent, seq, pushed_at)
+  end
+
+  def handle(
+        %State{awaiting_ack: %{generation: generation, seq: seq}} = state,
+        {:frame_rejected, generation, seq, last_applied, reason, :adapted_retry}
+      )
+      when last_applied == state.caches.last_acknowledged_frame_seq do
+    Minga.Log.warning(:render, "Frontend requested adapted retry for frame #{seq}: #{reason}")
+    RecoveryHandler.adapted(state, last_applied, reason)
+  end
+
+  def handle(
+        %State{awaiting_ack: %{generation: generation, seq: seq}} = state,
+        {:frame_rejected, generation, seq, last_applied, reason, disposition}
+      )
+      when last_applied == state.caches.last_acknowledged_frame_seq and
+             disposition in [
+               :retryable_recovery,
+               :targeted_replacement,
+               :terminal_frontend_failure
+             ] do
+    terminal(state, last_applied, reason, disposition)
+  end
+
+  # Keep direct callers from the protocol-version-11 contract retryable.
+  def handle(state, {:frame_rejected, generation, seq, last_applied, reason}) do
+    handle(
+      state,
+      {:frame_rejected, generation, seq, last_applied, reason, :retryable_recovery}
+    )
   end
 
   def handle(
@@ -61,4 +91,16 @@ defmodule MingaEditor.Renderer.AckHandler do
   end
 
   def timeout(state, _generation, _seq), do: {:noreply, state}
+
+  @spec terminal(State.t(), non_neg_integer(), atom(), atom()) :: {:noreply, State.t()}
+  defp terminal(state, last_applied, reason, disposition) do
+    RecoveryHandler.cancel_timer(state.awaiting_ack)
+
+    Minga.Log.warning(
+      :render,
+      "Frontend terminally rejected frame #{state.awaiting_ack.seq}: #{reason} (#{disposition})"
+    )
+
+    {:noreply, State.terminal_failure(state, last_applied, reason)}
+  end
 end

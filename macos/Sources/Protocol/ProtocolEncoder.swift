@@ -102,12 +102,12 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     /// `semantic_ui = true`. The BEAM uses this capability, not `frontend_type`,
     /// to select the semantic render/chrome path shared with the Go TUI.
     func sendReady(cols: UInt16, rows: UInt16) {
-        var buf = Data(count: 16)
+        var buf = Data(count: 29)
         buf[0] = OP_READY
         writeU16(&buf, 1, cols)
         writeU16(&buf, 3, rows)
         buf[5] = CAPS_VERSION
-        buf[6] = 7 // 7 capability fields
+        buf[6] = 20 // original 7 fields plus capability-format-2 policy tail
         buf[7] = FRONTEND_NATIVE_GUI
         buf[8] = COLOR_RGB
         buf[9] = UNICODE_15
@@ -115,9 +115,13 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         buf[11] = FLOAT_NATIVE
         buf[12] = TEXT_PROPORTIONAL
         buf[13] = SEMANTIC_UI_ENABLED
+        buf[14] = RESOURCE_POLICY_VERSION
+        writeU32(&buf, 15, RESOURCE_MAX_FRAME_BYTES)
+        writeU32(&buf, 19, RESOURCE_MAX_FRAME_COMMANDS)
+        writeU32(&buf, 23, RESOURCE_MAX_WINDOW_ROWS)
         // protocol_version (u16): the wire contract this frontend was generated
         // against. The BEAM rejects a mismatch with an explicit protocol_error.
-        writeU16(&buf, 14, PROTOCOL_VERSION)
+        writeU16(&buf, 27, PROTOCOL_VERSION)
         writeFrame(buf)
     }
 
@@ -165,13 +169,38 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    func sendFrameRejected(generation: UInt32, frameSeq: UInt32, lastAppliedFrameSeq: UInt32, reason: UInt8) {
-        var buf = Data(count: 14)
+    func sendFrameRejected(
+        generation: UInt32,
+        frameSeq: UInt32,
+        lastAppliedFrameSeq: UInt32,
+        reason: UInt8
+    ) {
+        let generatedReason = GeneratedProtocol.FrameRejectionReason.decode(reason)
+        let disposition: GeneratedProtocol.FrameRejectionDisposition =
+            generatedReason == .resourcePolicy ? .terminalFrontendFailure : .retryableRecovery
+        sendFrameRejected(
+            generation: generation,
+            frameSeq: frameSeq,
+            lastAppliedFrameSeq: lastAppliedFrameSeq,
+            reason: reason,
+            disposition: disposition
+        )
+    }
+
+    func sendFrameRejected(
+        generation: UInt32,
+        frameSeq: UInt32,
+        lastAppliedFrameSeq: UInt32,
+        reason: UInt8,
+        disposition: GeneratedProtocol.FrameRejectionDisposition
+    ) {
+        var buf = Data(count: 15)
         buf[0] = OP_FRAME_REJECTED
         writeU32(&buf, 1, generation)
         writeU32(&buf, 5, frameSeq)
         writeU32(&buf, 9, lastAppliedFrameSeq)
         buf[13] = reason
+        buf[14] = disposition.rawValue
         writeFrame(buf)
     }
 

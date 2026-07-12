@@ -56,13 +56,13 @@ struct EncoderReadyTests {
     func readyLayout() {
         let payload = captureFrame { $0.sendReady(cols: 120, rows: 40) }
 
-        // 14 caps bytes + a u16 protocol_version tail (the compiled PROTOCOL_VERSION).
-        #expect(payload.count == 16)
+        // Capability format 2 carries 20 fields plus a u16 protocol-version tail.
+        #expect(payload.count == 29)
         #expect(payload[0] == OP_READY)
         #expect(readU16(payload, 1) == 120) // cols
         #expect(readU16(payload, 3) == 40)  // rows
         #expect(payload[5] == CAPS_VERSION)
-        #expect(payload[6] == 7) // 7 capability fields
+        #expect(payload[6] == 20) // original fields plus resource-policy tail
         #expect(payload[7] == FRONTEND_NATIVE_GUI)
         #expect(payload[8] == COLOR_RGB)
         #expect(payload[9] == UNICODE_15)
@@ -70,7 +70,11 @@ struct EncoderReadyTests {
         #expect(payload[11] == FLOAT_NATIVE)
         #expect(payload[12] == TEXT_PROPORTIONAL)
         #expect(payload[13] == SEMANTIC_UI_ENABLED)
-        #expect(readU16(payload, 14) == PROTOCOL_VERSION) // protocol_version tail
+        #expect(payload[14] == RESOURCE_POLICY_VERSION)
+        #expect(readU32(payload, 15) == 64 * 1024 * 1024)
+        #expect(readU32(payload, 19) == 0) // command admission is not enforced yet
+        #expect(readU32(payload, 23) == 0) // per-window row admission is not enforced yet
+        #expect(readU16(payload, 27) == PROTOCOL_VERSION) // protocol_version tail
     }
 }
 
@@ -106,17 +110,37 @@ struct EncoderRequestKeyframeTests {
         #expect(readU32(payload, 5) == 9)
     }
 
-    @Test("frame_rejected encodes stable status fields")
+    @Test("frame_rejected appends the protocol-v12 disposition byte")
     func frameRejectedLayout() {
         let payload = captureFrame {
-            $0.sendFrameRejected(generation: 3, frameSeq: 9, lastAppliedFrameSeq: 7, reason: 4)
+            $0.sendFrameRejected(
+                generation: 3,
+                frameSeq: 9,
+                lastAppliedFrameSeq: 7,
+                reason: GeneratedProtocol.FrameRejectionReason.resourcePolicy.rawValue,
+                disposition: .terminalFrontendFailure
+            )
         }
-        #expect(payload.count == 14)
+        #expect(payload.count == 15)
         #expect(payload[0] == OP_FRAME_REJECTED)
         #expect(readU32(payload, 1) == 3)
         #expect(readU32(payload, 5) == 9)
         #expect(readU32(payload, 9) == 7)
-        #expect(payload[13] == 4)
+        #expect(payload[13] == GeneratedProtocol.FrameRejectionReason.resourcePolicy.rawValue)
+        #expect(payload[14] == GeneratedProtocol.FrameRejectionDisposition.terminalFrontendFailure.rawValue)
+    }
+
+    @Test("resource-policy rejection defaults to terminal disposition")
+    func frameRejectedResourcePolicyDefault() {
+        let payload = captureFrame {
+            $0.sendFrameRejected(
+                generation: 4,
+                frameSeq: 10,
+                lastAppliedFrameSeq: 9,
+                reason: GeneratedProtocol.FrameRejectionReason.resourcePolicy.rawValue
+            )
+        }
+        #expect(payload[14] == GeneratedProtocol.FrameRejectionDisposition.terminalFrontendFailure.rawValue)
     }
 
     @Test("window_ref_miss encodes the targeted window")

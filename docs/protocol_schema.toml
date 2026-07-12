@@ -28,7 +28,9 @@ version = "2.0.0"
 # applied/rejected/window-reference-miss acknowledgements (#2739), and evolves
 # A2 row updates from legacy complete section 0x02 snapshots to immutable-base
 # RowSplices section 0x0B (#2741).
-protocol_version = 11
+# protocol_version 12 appends a disposition byte to frame_rejected and appends
+# the versioned hard-dimension resource policy to frontend capabilities (#2801).
+protocol_version = 12
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -101,12 +103,11 @@ value = 0x09
 direction = "frontend_to_beam"
 framing = "fixed:6"
 
-# Frame status events (#2739). Rejection reasons are stable wire values:
-# 1 truncation, 2 commit_sequence_mismatch, 3 frame_sequence_not_increasing,
-# 4 base_sequence_mismatch, 5 missing_theme, 6 incomplete_theme,
-# 7 missing_window_reference, 8 window_epoch_mismatch, 9 invalid_retained_rows,
-# 10 missing_font_resource, 11 transcript_desync, 12 decode_failure,
-# 13 out_of_transaction_command, 14 invalid_row_splice, 255 unknown.
+# Frame status events (#2739, #2801). Rejection reasons and dispositions are
+# generated from the enum vocabularies below. frame_rejected appends disposition
+# after the original correlated fields, preserving generation, frame sequence,
+# last-good base, and reason positions. Resource-policy rejection is terminal by
+# default; an adapted retry requires a producer-local named-dimension descriptor.
 [[opcodes]]
 category = "input"
 name = "frame_applied"
@@ -119,7 +120,7 @@ category = "input"
 name = "frame_rejected"
 value = 0x0B
 direction = "frontend_to_beam"
-framing = "fixed:14"
+framing = "fixed:15"
 
 [[opcodes]]
 category = "input"
@@ -1178,6 +1179,36 @@ value = 0x5C
 name = "chat_returned_to_bottom"
 value = 0x5D
 
+# ── Versioned frontend resource policy (#2801) ─────────────────────────────
+#
+# Capability payload version 2 appends these fields after the original seven
+# bytes. Zero means that the dimension is not advertised and must not be used as
+# evidence for adapted retry. Non-zero limits are hard admission dimensions.
+# The BEAM may retry an adapted frame only with one-shot evidence bound to the
+# rejected generation/frame, a non-zero advertised dimension with distinct
+# values, and a concrete adapted intent distinct from the rejected intent.
+# Evidence stays producer-local and telemetry-safe.
+
+[[capability_fields]]
+name = "resource_policy_version"
+type = "u8"
+introduced_in = 2
+
+[[capability_fields]]
+name = "max_frame_bytes"
+type = "u32"
+introduced_in = 2
+
+[[capability_fields]]
+name = "max_frame_commands"
+type = "u32"
+introduced_in = 2
+
+[[capability_fields]]
+name = "max_window_rows"
+type = "u32"
+introduced_in = 2
+
 # ── Enum vocabularies ─────────────────────────────────────────────────────
 #
 # An [[enums]] entry names a closed set of wire byte values with a stable
@@ -1187,6 +1218,51 @@ value = 0x5D
 # a bare integer. The optional `default` is the byte value an encoder emits for
 # an unmapped atom (it must appear in `values`). Validation requires unique
 # value bytes, every byte in range for the repr, and a resolvable `default`.
+
+[[enums]]
+name = "frame_rejection_reason"
+repr = "u8"
+default = "unknown"
+values = [
+  { name = "truncation", value = 1 },
+  { name = "commit_sequence_mismatch", value = 2 },
+  { name = "frame_sequence_not_increasing", value = 3 },
+  { name = "base_sequence_mismatch", value = 4 },
+  { name = "missing_theme", value = 5 },
+  { name = "incomplete_theme", value = 6 },
+  { name = "missing_window_reference", value = 7 },
+  { name = "window_epoch_mismatch", value = 8 },
+  { name = "invalid_retained_rows", value = 9 },
+  { name = "missing_font_resource", value = 10 },
+  { name = "transcript_desync", value = 11 },
+  { name = "decode_failure", value = 12 },
+  { name = "out_of_transaction_command", value = 13 },
+  { name = "invalid_row_splice", value = 14 },
+  { name = "resource_policy", value = 15 },
+  { name = "unknown", value = 255 },
+]
+
+[[enums]]
+name = "frame_rejection_disposition"
+repr = "u8"
+default = "terminal_frontend_failure"
+values = [
+  { name = "retryable_recovery", value = 1 },
+  { name = "targeted_replacement", value = 2 },
+  { name = "adapted_retry", value = 3 },
+  { name = "terminal_frontend_failure", value = 4 },
+]
+
+[[enums]]
+name = "resource_policy_dimension"
+repr = "u8"
+default = "unknown"
+values = [
+  { name = "unknown", value = 0 },
+  { name = "frame_bytes", value = 1 },
+  { name = "frame_commands", value = 2 },
+  { name = "window_rows", value = 3 },
+]
 
 [[enums]]
 name = "completion_kind"

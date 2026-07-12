@@ -9,6 +9,7 @@ defmodule MingaEditor.Renderer.Server do
 
   use GenServer
 
+  alias MingaEditor.Frontend.ResourcePolicy
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.Renderer.FrameHandler
@@ -65,6 +66,37 @@ defmodule MingaEditor.Renderer.Server do
   def acknowledgement_state(server \\ __MODULE__),
     do: GenServer.call(server, :acknowledgement_state)
 
+  @doc "Returns the visible terminal frontend failure, if one has stopped frame credit."
+  @spec terminal_failure(GenServer.server()) ::
+          MingaEditor.Renderer.RejectionState.terminal() | nil
+  def terminal_failure(server \\ __MODULE__), do: GenServer.call(server, :terminal_failure)
+
+  @doc "Records one-shot adaptation evidence bound to an outstanding rejected transaction."
+  @spec record_adaptation(
+          GenServer.server(),
+          non_neg_integer(),
+          non_neg_integer(),
+          ResourcePolicy.dimension(),
+          integer(),
+          integer(),
+          Intent.t()
+        ) :: :ok | :error
+  def record_adaptation(
+        server \\ __MODULE__,
+        generation,
+        frame_seq,
+        dimension,
+        rejected_value,
+        adapted_value,
+        %Intent{} = adapted_intent
+      ) do
+    GenServer.call(
+      server,
+      {:record_adaptation, generation, frame_seq, dimension, rejected_value, adapted_value,
+       adapted_intent}
+    )
+  end
+
   @doc "Routes a typed frontend frame status to the renderer."
   @spec frame_status(GenServer.server(), MingaEditor.Frontend.Protocol.input_event()) :: :ok
   def frame_status(server \\ __MODULE__, status) do
@@ -101,6 +133,25 @@ defmodule MingaEditor.Renderer.Server do
     do:
       {:reply, {state.caches.recovery_generation, state.caches.last_acknowledged_frame_seq},
        state}
+
+  def handle_call(:terminal_failure, _from, state),
+    do: {:reply, State.terminal_failure(state), state}
+
+  def handle_call(
+        {:record_adaptation, generation, frame_seq, dimension, rejected_value, adapted_value,
+         adapted_intent},
+        _from,
+        state
+      ) do
+    with {:ok, descriptor} <- ResourcePolicy.adaptation(dimension, rejected_value, adapted_value),
+         {:ok, adapted_state} <-
+           State.record_adaptation(state, generation, frame_seq, descriptor, adapted_intent) do
+      {:reply, :ok, adapted_state}
+    else
+      :error -> {:reply, :error, state}
+      {:error, unchanged} -> {:reply, :error, unchanged}
+    end
+  end
 
   def handle_call({:reset_connection, intent, seq, pushed_at}, _from, state),
     do: RecoveryHandler.reset(state, intent, seq, pushed_at)

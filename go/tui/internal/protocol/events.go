@@ -47,15 +47,19 @@ func EncodeReady(width, height uint16) []byte {
 		generated.OPReady,
 		byte(width >> 8), byte(width),
 		byte(height >> 8), byte(height),
-		1,
-		7,
-		0, // frontend_type: tui
-		2, // color_depth: rgb
-		1, // unicode_width: unicode_15
-		0, // image_support: none
-		0, // float_support: emulated
-		0, // text_rendering: monospace
-		1, // semantic_ui: true
+		2,          // capability format version
+		20,         // original 7 fields plus resource-policy tail
+		0,          // frontend_type: tui
+		2,          // color_depth: rgb
+		1,          // unicode_width: unicode_15
+		0,          // image_support: none
+		0,          // float_support: emulated
+		0,          // text_rendering: monospace
+		1,          // semantic_ui: true
+		1,          // resource_policy_version
+		4, 0, 0, 0, // max_frame_bytes: 64 MiB, enforced by ReadPacket
+		0, 0, 0, 0, // max_frame_commands: unadvertised
+		0, 0, 0, 0, // max_window_rows: unadvertised
 		// protocol_version (u16): the wire contract this frontend was generated
 		// against. The BEAM rejects a mismatch with an explicit protocol_error.
 		byte(generated.ProtocolVersion >> 8), byte(generated.ProtocolVersion),
@@ -94,17 +98,36 @@ const (
 	RejectTranscriptDesync       byte = 11
 	RejectDecodeFailure          byte = 12
 	RejectOutOfTransaction       byte = 13
-	RejectInvalidRowSplice       byte = 14
+	RejectInvalidRowSplice       byte = byte(generated.FrameRejectionReasonInvalidRowSplice)
+	RejectResourcePolicy         byte = byte(generated.FrameRejectionReasonResourcePolicy)
+)
+
+// RejectionDisposition is generated from the shared schema vocabulary.
+type RejectionDisposition = generated.FrameRejectionDisposition
+
+const (
+	DispositionRetryable = generated.FrameRejectionDispositionRetryableRecovery
+	DispositionTargeted  = generated.FrameRejectionDispositionTargetedReplacement
+	DispositionAdapted   = generated.FrameRejectionDispositionAdaptedRetry
+	DispositionTerminal  = generated.FrameRejectionDispositionTerminalFrontendFailure
 )
 
 func EncodeFrameApplied(generation, frameSeq uint32) []byte {
 	return encodeFrameStatus(generated.OPFrameApplied, generation, frameSeq)
 }
 
-func EncodeFrameRejected(generation, frameSeq, lastApplied uint32, reason byte) []byte {
+func EncodeFrameRejected(generation, frameSeq, lastApplied uint32, reason byte, disposition RejectionDisposition) []byte {
 	out := encodeFrameStatus(generated.OPFrameRejected, generation, frameSeq)
-	out = append(out, byte(lastApplied>>24), byte(lastApplied>>16), byte(lastApplied>>8), byte(lastApplied), reason)
+	out = append(out, byte(lastApplied>>24), byte(lastApplied>>16), byte(lastApplied>>8), byte(lastApplied), reason, byte(disposition))
 	return out
+}
+
+// DefaultRejectionDisposition makes deterministic resource-policy failure terminal.
+func DefaultRejectionDisposition(reason byte) RejectionDisposition {
+	if reason == RejectResourcePolicy {
+		return DispositionTerminal
+	}
+	return DispositionRetryable
 }
 
 func EncodeWindowRefMiss(generation, frameSeq, lastApplied uint32, windowID uint16) []byte {

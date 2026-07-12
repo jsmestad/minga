@@ -8,10 +8,13 @@ defmodule MingaEditor.Renderer.State do
   reset, and exact monitor `:DOWN` all discard the same state.
   """
 
+  alias MingaEditor.Frontend.Capabilities
+  alias MingaEditor.Frontend.ResourcePolicy
   alias MingaEditor.RenderPipeline
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.Renderer.Caches
+  alias MingaEditor.Renderer.RejectionState
   alias MingaEditor.Renderer.ResidentWindowState
   alias MingaEditor.UI.FontRegistry
   alias MingaEditor.UI.Panel.MessageStore
@@ -45,7 +48,8 @@ defmodule MingaEditor.Renderer.State do
           buffer_monitors: %{optional(pid()) => reference()},
           buffer_versions: %{optional(pid()) => non_neg_integer()},
           pipeline: pipeline(),
-          require_ack?: boolean()
+          require_ack?: boolean(),
+          rejection_state: RejectionState.t()
         }
 
   defstruct editor_pid: nil,
@@ -63,7 +67,8 @@ defmodule MingaEditor.Renderer.State do
             buffer_monitors: %{},
             buffer_versions: %{},
             pipeline: &RenderPipeline.run/1,
-            require_ack?: true
+            require_ack?: true,
+            rejection_state: RejectionState.new()
 
   @doc "Constructs renderer state with injected process dependencies."
   @spec new(keyword()) :: t()
@@ -74,6 +79,126 @@ defmodule MingaEditor.Renderer.State do
       require_ack?: Keyword.get(opts, :require_ack?, not Keyword.has_key?(opts, :pipeline)),
       ack_timeout_ms: Keyword.get(opts, :ack_timeout_ms, 2_000)
     }
+  end
+
+  @doc "Accepts changed semantic work and blocks an identical terminally rejected intent."
+  @spec accept_intent(t(), Intent.t()) :: {:accepted, t()} | {:blocked, t()}
+  def accept_intent(%__MODULE__{} = state, %Intent{} = intent) do
+    if RejectionState.blocks?(state.rejection_state, intent) do
+      {:blocked, state}
+    else
+      {:accepted, %{state | rejection_state: RejectionState.clear(state.rejection_state)}}
+    end
+  end
+
+  @doc "Records adapted-retry evidence only for the matching outstanding transaction."
+  @spec record_adaptation(
+          t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          ResourcePolicy.adaptation_descriptor(),
+          Intent.t()
+        ) :: {:ok, t()} | {:error, t()}
+  def record_adaptation(
+        %__MODULE__{awaiting_ack: %{generation: generation, seq: frame_seq, intent: rejected}} =
+          state,
+        generation,
+        frame_seq,
+        %{dimension: dimension} = descriptor,
+        %Intent{} = adapted
+      )
+      when adapted != rejected do
+    if advertised_dimension?(rejected, dimension) do
+      rejection_state =
+        RejectionState.adapt(state.rejection_state, generation, frame_seq, descriptor, adapted)
+
+      {:ok, %{state | rejection_state: rejection_state}}
+    else
+      {:error, state}
+    end
+  end
+
+  def record_adaptation(%__MODULE__{} = state, _generation, _frame_seq, _descriptor, %Intent{}),
+    do: {:error, state}
+
+  @doc "Releases the outstanding acknowledgement lease without committing its output."
+  @spec release_credit(t()) :: t()
+  def release_credit(%__MODULE__{} = state), do: %{state | awaiting_ack: nil}
+
+  @doc "Returns frame credit and queues the next semantic frame through the state owner."
+  @spec queue_frame(t(), frame_work()) :: t()
+  def queue_frame(%__MODULE__{} = state, work) do
+    %{state | awaiting_ack: nil, pending: work}
+  end
+
+  @doc "Enters a visible terminal frontend failure while preserving acknowledged caches."
+  @spec terminal_failure(t(), non_neg_integer(), atom()) :: t()
+  def terminal_failure(
+        %__MODULE__{awaiting_ack: %{generation: generation, seq: seq, intent: intent}} = state,
+        last_good_frame_seq,
+        reason
+      ) do
+    rejection_state =
+      RejectionState.terminal(
+        state.rejection_state,
+        generation,
+        seq,
+        last_good_frame_seq,
+        reason,
+        intent
+      )
+
+    %{
+      state
+      | awaiting_ack: nil,
+        pending: nil,
+        in_flight: nil,
+        rendering?: false,
+        render_token: nil,
+        stale_retry_count: 0,
+        rejection_state: rejection_state
+    }
+  end
+
+  @doc "Returns the currently visible terminal frontend failure, if any."
+  @spec terminal_failure(t()) :: RejectionState.terminal() | nil
+  def terminal_failure(%__MODULE__{} = state), do: state.rejection_state.terminal
+
+  @doc "Consumes matching one-shot evidence and returns its concrete adapted intent."
+  @spec consume_adaptation(t(), non_neg_integer(), non_neg_integer()) ::
+          {:ok, t(), Intent.t()} | :error
+  def consume_adaptation(
+        %__MODULE__{
+          awaiting_ack: %{generation: generation, seq: frame_seq, intent: rejected},
+          rejection_state: %{
+            adaptation: %{
+              generation: generation,
+              frame_seq: frame_seq,
+              dimension: dimension,
+              rejected_value: rejected_value,
+              adapted_value: adapted_value,
+              intent: %Intent{} = adapted
+            }
+          }
+        } = state,
+        generation,
+        frame_seq
+      )
+      when rejected_value != adapted_value and adapted != rejected do
+    if advertised_dimension?(rejected, dimension) do
+      cleared = %{state | rejection_state: RejectionState.clear(state.rejection_state)}
+      {:ok, cleared, adapted}
+    else
+      :error
+    end
+  end
+
+  def consume_adaptation(%__MODULE__{}, _generation, _frame_seq), do: :error
+
+  @doc "Clears rejection visibility after reconnect or another external state change."
+  @spec clear_rejection(t()) :: t()
+  def clear_rejection(%__MODULE__{} = state) do
+    %{state | rejection_state: RejectionState.clear(state.rejection_state)}
   end
 
   @doc "Drops windows absent from the latest intent and monitors each live buffer once."
@@ -163,6 +288,15 @@ defmodule MingaEditor.Renderer.State do
         resident_windows: residents
     }
   end
+
+  @spec advertised_dimension?(Intent.t(), ResourcePolicy.dimension()) :: boolean()
+  defp advertised_dimension?(
+         %Intent{frame: %{capabilities: %Capabilities{resource_policy: policy}}},
+         dimension
+       ),
+       do: ResourcePolicy.advertised?(policy, dimension)
+
+  defp advertised_dimension?(%Intent{}, _dimension), do: false
 
   @spec reconcile_monitors(t(), MapSet.t(pid())) ::
           {%{optional(pid()) => reference()}, %{optional(pid()) => non_neg_integer()}}

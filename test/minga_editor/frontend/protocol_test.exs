@@ -163,26 +163,34 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       assert caps.float_support == :emulated
     end
 
-    test "decodes a versioned ready (extended caps + u16 protocol_version tail)" do
-      # 7 caps fields then a u16 protocol_version of 2.
-      payload = <<0x03, 200::16, 60::16, 1, 7, 1, 2, 1, 3, 1, 1, 1, 2::16>>
+    test "decodes a protocol-v12 ready with capability-format-2 resource policy" do
+      capabilities = <<1, 2, 1, 3, 1, 1, 1, 1, 16_777_216::32, 250_000::32, 16_384::32>>
+      payload = <<0x03, 200::16, 60::16, 2, 20, capabilities::binary, 12::16>>
 
-      assert {:ok, {:ready, 200, 60, caps, 2}} = Protocol.decode_event(payload)
+      assert {:ok, {:ready, 200, 60, caps, 12}} = Protocol.decode_event(payload)
       assert caps.frontend_type == :native_gui
       assert caps.image_support == :native
       assert caps.float_support == :native
+      assert caps.resource_policy.version == 1
+      assert caps.resource_policy.max_frame_bytes == 16_777_216
+      assert caps.resource_policy.max_frame_commands == 250_000
+      assert caps.resource_policy.max_window_rows == 16_384
     end
   end
 
   describe "decode_event/1 — capabilities_updated" do
-    test "decodes a capabilities_updated event" do
-      payload = <<0x05, 1, 6, 0, 2, 1, 1, 0, 0>>
+    test "decodes a capability-format-2 capabilities_updated event" do
+      capabilities = <<0, 2, 1, 1, 0, 0, 1, 1, 67_108_864::32, 1_000_000::32, 65_536::32>>
+      payload = <<0x05, 2, 20, capabilities::binary>>
 
       assert {:ok, {:capabilities_updated, caps}} = Protocol.decode_event(payload)
       assert caps.frontend_type == :tui
       assert caps.color_depth == :rgb
       assert caps.unicode_width == :unicode_15
       assert caps.image_support == :kitty
+      assert caps.resource_policy.max_frame_bytes == 67_108_864
+      assert caps.resource_policy.max_frame_commands == 1_000_000
+      assert caps.resource_policy.max_window_rows == 65_536
     end
   end
 
@@ -425,17 +433,30 @@ defmodule MingaEditor.Frontend.ProtocolTest do
   end
 
   describe "decode_event/1 — frame status" do
-    test "decodes generation-aware applied, rejected, and window ref miss statuses" do
+    test "decodes protocol-v12 rejection reasons and dispositions" do
       assert {:ok, {:frame_applied, 3, 9}} = Protocol.decode_event(<<0x0A, 3::32, 9::32>>)
 
-      assert {:ok, {:frame_rejected, 3, 9, 7, :base_sequence_mismatch}} =
-               Protocol.decode_event(<<0x0B, 3::32, 9::32, 7::32, 4>>)
+      assert {:ok, {:frame_rejected, 3, 9, 7, :base_sequence_mismatch, :retryable_recovery}} =
+               Protocol.decode_event(<<0x0B, 3::32, 9::32, 7::32, 4, 1>>)
 
-      assert {:ok, {:frame_rejected, 3, 10, 9, :invalid_row_splice}} =
-               Protocol.decode_event(<<0x0B, 3::32, 10::32, 9::32, 14>>)
+      assert {:ok, {:frame_rejected, 3, 10, 9, :invalid_row_splice, :adapted_retry}} =
+               Protocol.decode_event(<<0x0B, 3::32, 10::32, 9::32, 14, 3>>)
+
+      assert {:ok, {:frame_rejected, 4, 11, 9, :resource_policy, :terminal_frontend_failure}} =
+               Protocol.decode_event(<<0x0B, 4::32, 11::32, 9::32, 15, 4>>)
 
       assert {:ok, {:window_ref_miss, 3, 9, 7, 12}} =
                Protocol.decode_event(<<0x0C, 3::32, 9::32, 7::32, 12::16>>)
+    end
+
+    test "treats a draining protocol-v11 rejection as retryable" do
+      assert {:ok, {:frame_rejected, 3, 9, 7, :base_sequence_mismatch, :retryable_recovery}} =
+               Protocol.decode_event(<<0x0B, 3::32, 9::32, 7::32, 4>>)
+    end
+
+    test "unknown dispositions fail closed as terminal" do
+      assert {:ok, {:frame_rejected, 3, 9, 7, :unknown, :terminal_frontend_failure}} =
+               Protocol.decode_event(<<0x0B, 3::32, 9::32, 7::32, 254, 255>>)
     end
   end
 
