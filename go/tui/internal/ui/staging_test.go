@@ -12,7 +12,7 @@ import (
 
 // beginFrame builds a begin_frame command for a transaction (#2219).
 func beginFrame(seq, base uint32) protocol.Command {
-	return protocol.Command{Kind: protocol.CommandBeginFrame, FrameSeq: seq, BaseFrameSeq: base}
+	return protocol.Command{Kind: protocol.CommandBeginFrame, FrameSeq: seq, BaseFrameSeq: base, Generation: 1}
 }
 
 // commitFrame builds a commit_frame command for a transaction (#2219).
@@ -60,7 +60,7 @@ func drainOutboundPackets(out chan []byte) [][]byte {
 }
 
 func decodeKeyframeRequest(packet []byte) (uint32, bool) {
-	if len(packet) != 5 || packet[0] != generated.OPRequestKeyframe {
+	if len(packet) != 9 || packet[0] != generated.OPRequestKeyframe {
 		return 0, false
 	}
 	return uint32(packet[1])<<24 | uint32(packet[2])<<16 | uint32(packet[3])<<8 | uint32(packet[4]), true
@@ -83,17 +83,16 @@ func applyTo(t *testing.T, model Model, commands ...protocol.Command) Model {
 	return updated.(Model)
 }
 
-// Stale in-flight frames after an invalidation each fail their base check,
-// but only the FIRST invalidation sends request_keyframe; the rest discard
-// silently until a valid commit clears the pending flag (#2266 review).
-func TestInvalidationDebouncesKeyframeRequests(t *testing.T) {
+// Automatic invalidation emits typed rejection only. Stale in-flight frames may
+// reject too, but none may duplicate recovery with request_keyframe.
+func TestInvalidationNeverAutomaticallyRequestsKeyframe(t *testing.T) {
 	out := make(chan []byte, 8)
 	m := New(80, 24, out, nil)
 
 	// First invalidation: commit with no open transaction.
 	m = applyTo(t, m, commitFrame(7))
-	if seqs := drainKeyframeRequests(t, out); len(seqs) != 1 {
-		t.Fatalf("first invalidation should send one request_keyframe, got %d", len(seqs))
+	if seqs := drainKeyframeRequests(t, out); len(seqs) != 0 {
+		t.Fatalf("automatic invalidation must not request_keyframe, got %d", len(seqs))
 	}
 
 	// Stale in-flight frame: base mismatch while resync is already pending.
@@ -133,8 +132,8 @@ func TestInvalidationLogsToMessagesAndDebouncesDiagnostics(t *testing.T) {
 		}
 	}
 
-	if len(keyframes) != 1 || keyframes[0] != 0 {
-		t.Fatalf("first invalidation should request keyframe from last good seq 0, got %v", keyframes)
+	if len(keyframes) != 0 {
+		t.Fatalf("automatic invalidation must not request a keyframe, got %v", keyframes)
 	}
 	if len(logs) != 1 {
 		t.Fatalf("first invalidation should send one log_message, got %d", len(logs))
@@ -144,8 +143,14 @@ func TestInvalidationLogsToMessagesAndDebouncesDiagnostics(t *testing.T) {
 	}
 
 	m = applyTo(t, m, beginFrame(8, 7), windowRowsCommand(1, "stale"), commitFrame(8))
-	if packets := drainOutboundPackets(out); len(packets) != 0 {
-		t.Fatalf("pending resync should debounce duplicate keyframe requests and logs, got %d packets", len(packets))
+	packets = drainOutboundPackets(out)
+	for _, packet := range packets {
+		if _, ok := decodeKeyframeRequest(packet); ok {
+			t.Fatal("pending resync must debounce duplicate keyframe recovery")
+		}
+		if _, _, ok := decodeLogMessage(packet); ok {
+			t.Fatal("pending resync must debounce duplicate diagnostics")
+		}
 	}
 }
 
@@ -202,9 +207,9 @@ func TestStagingAppliesAtomicallyOnCommit(t *testing.T) {
 	}
 }
 
-// AC-3: a truncated transaction (new begin before commit) requests a keyframe and
-// does NOT partially paint; the prior committed frame stays on screen.
-func TestTruncatedTransactionRequestsKeyframeAndKeepsPriorFrame(t *testing.T) {
+// AC-3: a truncated transaction does not partially paint or automatically ask
+// for a keyframe; the prior committed frame stays on screen.
+func TestTruncatedTransactionRejectsAndKeepsPriorFrame(t *testing.T) {
 	out := make(chan []byte, 16)
 	model := New(40, 8, out, nil)
 	model = applyTo(t, model, beginFrame(7, 0), testThemeCommand(), windowRowsCommand(1, "good frame"), commitFrame(7))
@@ -220,18 +225,17 @@ func TestTruncatedTransactionRequestsKeyframeAndKeepsPriorFrame(t *testing.T) {
 	if !strings.Contains(got, "good frame") {
 		t.Fatalf("prior committed frame should remain on screen: %q", got)
 	}
-	reqs := drainKeyframeRequests(t, out)
-	if len(reqs) != 1 || reqs[0] != 7 {
-		t.Fatalf("truncation should request a keyframe from last good seq 7, got %v", reqs)
+	if reqs := drainKeyframeRequests(t, out); len(reqs) != 0 {
+		t.Fatalf("truncation must not automatically request a keyframe, got %v", reqs)
 	}
 	if !model.resyncPending {
 		t.Fatal("model should mark resync pending after truncation")
 	}
 }
 
-// AC-3: a malformed transaction (stream error inside it) requests a keyframe and
-// keeps the prior frame.
-func TestStreamErrorInsideTransactionRequestsKeyframe(t *testing.T) {
+// AC-3: a malformed transaction is rejected without an automatic keyframe
+// request and keeps the prior frame.
+func TestStreamErrorInsideTransactionRejects(t *testing.T) {
 	out := make(chan []byte, 16)
 	model := New(40, 8, out, nil)
 	model = applyTo(t, model, beginFrame(3, 0), testThemeCommand(), windowRowsCommand(1, "stable"), commitFrame(3))
@@ -252,9 +256,8 @@ func TestStreamErrorInsideTransactionRequestsKeyframe(t *testing.T) {
 	if !strings.Contains(got, "stable") {
 		t.Fatalf("prior committed frame should remain: %q", got)
 	}
-	reqs := drainKeyframeRequests(t, out)
-	if len(reqs) != 1 || reqs[0] != 3 {
-		t.Fatalf("stream error should request keyframe from seq 3, got %v", reqs)
+	if reqs := drainKeyframeRequests(t, out); len(reqs) != 0 {
+		t.Fatalf("stream error must not automatically request a keyframe, got %v", reqs)
 	}
 }
 
@@ -269,8 +272,8 @@ func TestStreamErrorOutsideTransactionIsHarmless(t *testing.T) {
 	}
 }
 
-// AC-2: a commit whose seq does not match the open begin requests a keyframe.
-func TestCommitSeqMismatchRequestsKeyframe(t *testing.T) {
+// AC-2: a commit whose seq does not match the open begin is rejected.
+func TestCommitSeqMismatchRejects(t *testing.T) {
 	out := make(chan []byte, 16)
 	model := New(40, 8, out, nil)
 	model = applyTo(t, model, beginFrame(10, 0), testThemeCommand(), windowRowsCommand(1, "base"), commitFrame(10))
@@ -281,9 +284,8 @@ func TestCommitSeqMismatchRequestsKeyframe(t *testing.T) {
 	if got := renderedBody(model); strings.Contains(got, "mismatch") {
 		t.Fatalf("a seq-mismatched commit must not apply staged content: %q", got)
 	}
-	reqs := drainKeyframeRequests(t, out)
-	if len(reqs) != 1 || reqs[0] != 10 {
-		t.Fatalf("seq mismatch should request keyframe from seq 10, got %v", reqs)
+	if reqs := drainKeyframeRequests(t, out); len(reqs) != 0 {
+		t.Fatalf("seq mismatch must not automatically request a keyframe, got %v", reqs)
 	}
 	if model.lastCommittedSeq != 10 {
 		t.Fatalf("lastCommittedSeq should stay at 10 after a rejected commit, got %d", model.lastCommittedSeq)
@@ -291,8 +293,8 @@ func TestCommitSeqMismatchRequestsKeyframe(t *testing.T) {
 }
 
 // AC-2: a delta transaction whose base does not match the last committed frame
-// requests a keyframe.
-func TestBaseMismatchRequestsKeyframe(t *testing.T) {
+// is rejected without a second automatic recovery trigger.
+func TestBaseMismatchRejects(t *testing.T) {
 	out := make(chan []byte, 16)
 	model := New(40, 8, out, nil)
 	model = applyTo(t, model, beginFrame(20, 0), testThemeCommand(), windowRowsCommand(1, "committed"), commitFrame(20))
@@ -304,9 +306,8 @@ func TestBaseMismatchRequestsKeyframe(t *testing.T) {
 	if got := renderedBody(model); strings.Contains(got, "bad base") {
 		t.Fatalf("a base-mismatched transaction must not apply: %q", got)
 	}
-	reqs := drainKeyframeRequests(t, out)
-	if len(reqs) != 1 || reqs[0] != 20 {
-		t.Fatalf("base mismatch should request keyframe from seq 20, got %v", reqs)
+	if reqs := drainKeyframeRequests(t, out); len(reqs) != 0 {
+		t.Fatalf("base mismatch must not automatically request a keyframe, got %v", reqs)
 	}
 }
 
@@ -382,8 +383,8 @@ func TestOutOfBandSideChannelsApplyWithoutTransaction(t *testing.T) {
 }
 
 // A semantic command with no open transaction is a protocol violation under the
-// staged model: it must NOT apply and must request a keyframe.
-func TestSemanticCommandOutsideTransactionRequestsKeyframe(t *testing.T) {
+// staged model: it must NOT apply and is reported by typed rejection only.
+func TestSemanticCommandOutsideTransactionRejects(t *testing.T) {
 	out := make(chan []byte, 16)
 	model := New(40, 8, out, nil)
 	model = applyTo(t, model, beginFrame(50, 0), testThemeCommand(), windowRowsCommand(1, "committed"), commitFrame(50))
@@ -394,9 +395,8 @@ func TestSemanticCommandOutsideTransactionRequestsKeyframe(t *testing.T) {
 	if got := renderedBody(model); strings.Contains(got, "stray semantic") {
 		t.Fatalf("a stray out-of-transaction semantic command must not paint: %q", got)
 	}
-	reqs := drainKeyframeRequests(t, out)
-	if len(reqs) != 1 || reqs[0] != 50 {
-		t.Fatalf("stray semantic command should request keyframe from seq 50, got %v", reqs)
+	if reqs := drainKeyframeRequests(t, out); len(reqs) != 0 {
+		t.Fatalf("stray semantic command must not automatically request a keyframe, got %v", reqs)
 	}
 }
 

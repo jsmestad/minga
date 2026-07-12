@@ -27,7 +27,7 @@ The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM
 
 **Text encoding:** All text fields (titles, language names, query source, semantic content) are UTF-8 encoded.
 
-**Protocol version:** The schema carries a `protocol_version` integer (currently 6). The BEAM and every frontend compile against it and exchange it in the `ready` handshake. The BEAM rejects a frontend whose version does not match and sends an explicit `protocol_error` instead of streaming frames the frontend cannot decode. Version 6 bumps the semantic agent chrome contract so `gui_agent_context` is length-framed and `gui_edit_timeline` appends file summaries after the entry list. See "Protocol Version Negotiation" below.
+**Protocol version:** The schema carries a `protocol_version` integer (currently 11). The BEAM and every frontend compile against it and exchange it in the `ready` handshake. The BEAM rejects a frontend whose version does not match and sends an explicit `protocol_error` instead of streaming frames the frontend cannot decode. Version 11 makes frame transactions generation-aware and adds explicit applied, rejected, and targeted window-reference-miss status. See "Protocol Version Negotiation" below.
 
 ---
 
@@ -39,7 +39,7 @@ The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, and the re
 
 | Opcode | Name | Size | Description |
 |--------|------|------|-------------|
-| `0x10` | begin_frame | 9 | Open a frame transaction (frame_seq + base_frame_seq); see Frame Transactions |
+| `0x10` | begin_frame | 13 | Open a generation-aware frame transaction (frame_seq + base_frame_seq + generation); see Frame Transactions |
 | `0x11` | commit_frame | 9 | Close a frame transaction; promote staging and present (frame_seq + input_seq) |
 | `0x13` | _(reserved)_ | — | Freed by retiring batch_end in v3; do not reassign before a version bump past 3 |
 | `0x15` | set_cursor_shape | 2 | Change cursor appearance |
@@ -83,7 +83,10 @@ The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, and the re
 | `0x03` | ready | 5, 13, or 15+ | Frontend is initialized and ready (15+ carries a u16 protocol_version) |
 | `0x04` | mouse_event | 9 | Mouse button, wheel, or motion (8-byte legacy also accepted) |
 | `0x05` | capabilities_updated | 9 | Updated capabilities after async detection |
-| `0x08` | request_keyframe | 5 | Ask the BEAM for a full keyframe after an invalidation (last_good_frame_seq) |
+| `0x08` | request_keyframe | 9 | Ask the BEAM to start a fresh recovery generation (last_good_frame_seq + failed generation) |
+| `0x0A` | frame_applied | 9 | Report semantic publication of a complete frame |
+| `0x0B` | frame_rejected | 14 | Reject a frame with generation, last applied frame, and stable reason |
+| `0x0C` | window_ref_miss | 15 | Reject a missing row/window reference and identify the affected window |
 
 ### Frontend → BEAM (Highlight Responses)
 
@@ -211,18 +214,19 @@ Between frames, the frontend must not mutate committed editor state or present n
 
 ## Frame Transactions
 
-> Status: protocol_version 4 keeps the transaction vocabulary introduced in protocol_version 3 (#2219 child A) and the BEAM now brackets every emitted frame with `begin_frame`/`commit_frame` (#2219 child B). Both frontends decode the markers and gate frames and latency on `commit_frame` exactly as they did `batch_end`; they ignore `base_frame_seq` for now. Children C/D move the frontends onto real staging/commit (paint nothing until the matching `commit_frame`, resync on truncation). This section is the authoritative spec those children build against.
+> Status: protocol_version 11 makes every transaction recovery-generation-aware. Frontends stage and validate the complete semantic transaction, publish it atomically on `commit_frame`, and then report whether it was applied, rejected, or missed a window reference. The BEAM grants one in-flight frame credit per frontend connection and uses only an applied frame from the current generation as a later delta base.
 
 A frame transaction makes a frame atomic: the BEAM brackets a frame's semantic commands between `begin_frame` and `commit_frame`, and a frontend paints nothing until it sees the matching `commit_frame`. This replaces the single `batch_end` terminator with an explicit open/close pair so a truncated or out-of-order stream can never paint a partial frame.
 
 ### Wire shapes
 
-`begin_frame` (0x10), fixed 9 bytes:
+`begin_frame` (0x10), fixed 13 bytes:
 
 ```
 opcode:         u8  = 0x10
-frame_seq:      u32           strictly monotonic global frame sequence
-base_frame_seq: u32           the frame these deltas assume; 0 = keyframe
+frame_seq:      u32           strictly monotonic frame sequence for this connection
+base_frame_seq: u32           acknowledged frame these deltas assume; 0 = keyframe
+generation:     u32           BEAM-owned recovery generation
 ```
 
 `commit_frame` (0x11), fixed 9 bytes:
@@ -233,11 +237,12 @@ frame_seq: u32                must equal the open begin_frame's frame_seq
 input_seq: u32                echoed input correlation sequence (#2215); 0 = no correlation
 ```
 
-`request_keyframe` (0x08, Frontend → BEAM), fixed 5 bytes:
+`request_keyframe` (0x08, Frontend → BEAM), fixed 9 bytes:
 
 ```
 opcode:              u8  = 0x08
-last_good_frame_seq: u32      last frame_seq the frontend committed cleanly; 0 if none
+last_good_frame_seq: u32      last frame_seq the frontend applied cleanly; 0 if none
+failed_generation:   u32      generation whose recovery is being retried
 ```
 
 A frame is therefore: `begin_frame ++ gui_* semantic/chrome commands ++ gui_surface_layout ++ commit_frame`. The placement envelope (`gui_surface_layout` 0xA4) is sent inside the transaction; see GUI_PROTOCOL.md for its section layout.
@@ -266,7 +271,9 @@ Four conditions invalidate the in-flight frame. In every case the frontend disca
 
 ### request_keyframe flow
 
-After any invalidation, the frontend emits `request_keyframe(last_good_frame_seq)`. The BEAM responds by sending the next frame as a full keyframe (`base_frame_seq == 0`), which re-establishes a known base for subsequent deltas. `last_good_frame_seq` is informational for the BEAM (the cleanly committed frame the client last held); the recovery action is the same regardless of its value: send a full keyframe. In the child-B single-client prototype, an inbound `request_keyframe` simply forces the next frame full.
+After any invalidation the frontend emits a typed rejection status. `window_ref_miss` identifies the affected window so the BEAM can preserve the acknowledged surrounding frame and emit a full replacement only for that window. Transaction-level rejection starts a fresh generation and sends the latest coalesced render intent as a full keyframe (`base_frame_seq == 0`). A manual `request_keyframe` also starts a fresh generation; it never merely repeats the failed generation.
+
+The BEAM keeps one frame credit **per frontend connection**. A Port write consumes the credit but does not advance the delta base. While status is outstanding, newer render requests replace the single pending intent. Only a matching `frame_applied` returns the credit and advances the acknowledged base. Rejected, duplicate, stale, out-of-order, wrong-generation, and inconsistent-last-applied statuses cannot advance the base or clear recovery. Recovery clears only when the requested base-zero keyframe is semantically published and its matching applied status reaches the BEAM. Metal/GPU presentation is deliberately outside this contract.
 
 ---
 
@@ -381,18 +388,17 @@ Total size: 9 bytes.
 | `0x02` | Motion (no button held) |
 | `0x03` | Drag (button held during motion) |
 
-### `0x08` request_keyframe
+### Frame recovery status (`0x08`, `0x0A`–`0x0C`)
 
-Ask the BEAM to send the next frame as a full keyframe. A frontend emits this after a frame transaction is invalidated (see "Frame Transactions"). Decoders ship in protocol_version 3; nothing on either frontend emits it until the staging/commit children (#2219 C/D) land.
+`request_keyframe` has the 9-byte generation-aware shape documented under Frame Transactions. It is the manual/general retry control and causes the BEAM to advance generation.
 
-```
-opcode:              u8  = 0x08
-last_good_frame_seq: u32      last frame_seq the frontend committed cleanly; 0 if none
-```
+`frame_applied` (0x0A), fixed 9 bytes: `generation:u32, frame_seq:u32`. Emit it only after the complete transaction has validated and its semantic state has been published atomically. Do not wait for Metal submission, terminal drawing, visibility, or vsync.
 
-Total size: 5 bytes.
+`frame_rejected` (0x0B), fixed 14 bytes: `generation:u32, frame_seq:u32, last_applied_frame_seq:u32, reason:u8`.
 
-**Behavior:** The BEAM forces the next frame full (`base_frame_seq == 0`), re-establishing a known delta base. See "Frame Transactions" for the full recovery flow.
+`window_ref_miss` (0x0C), fixed 15 bytes: `generation:u32, frame_seq:u32, last_applied_frame_seq:u32, window_id:u16`. It is the targeted form for a missing retained row/window reference; sibling windows and chrome remain committed at `last_applied_frame_seq`.
+
+Stable rejection reasons are: 1 truncation, 2 commit sequence mismatch, 3 non-increasing frame sequence, 4 base sequence mismatch, 5 missing theme, 6 incomplete theme, 7 missing window reference, 8 window epoch mismatch, 9 invalid retained rows, 10 missing font resource, 11 transcript desync, 12 decode failure, 13 out-of-transaction command, and 255 unknown.
 
 ---
 
@@ -764,7 +770,7 @@ Total size: 4 + msg_len bytes.
 
 ## Protocol Version Negotiation
 
-The schema (`docs/protocol_schema.toml`) carries a `protocol_version` integer (currently 10). `mix protocol.gen` emits it as a constant on every side: `Minga.Protocol.Opcodes.protocol_version()` (Elixir), `generated.ProtocolVersion` (Go), `PROTOCOL_VERSION` (Swift), `PROTOCOL_VERSION` (Zig parser). Bump it whenever the wire contract changes incompatibly; protocol_version 2 retired the 9 cell-paradigm render opcodes, protocol_version 3 (#2219) added the frame-transaction vocabulary (`begin_frame`, `commit_frame`, `request_keyframe`) and authoritative layout (`surface_placement`, `gui_surface_layout`), protocol_version 4 added the `gui_file_tree` row `heat_level` byte, protocol_version 5 added producer-assigned `stream_instance` identity to the Messages stream, protocol_version 6 frames `gui_agent_context` and appends `gui_edit_timeline` file summaries, protocol_version 7 established the current baseline, protocol_version 8 added `set_link_cursor`, protocol_version 9 widened `gui_window_content` framing and section lengths, and protocol_version 10 widens clipboard and retained-window delta framing. A frontend built against an older protocol handshakes with its old version and receives the `protocol_error` blocking surface instead of a desynced stream.
+The schema (`docs/protocol_schema.toml`) carries a `protocol_version` integer (currently 11). `mix protocol.gen` emits it as a constant on every side: `Minga.Protocol.Opcodes.protocol_version()` (Elixir), `generated.ProtocolVersion` (Go), `PROTOCOL_VERSION` (Swift), `PROTOCOL_VERSION` (Zig parser). Bump it whenever the wire contract changes incompatibly; protocol_version 2 retired the 9 cell-paradigm render opcodes, protocol_version 3 (#2219) added the frame-transaction vocabulary (`begin_frame`, `commit_frame`, `request_keyframe`) and authoritative layout (`surface_placement`, `gui_surface_layout`), protocol_version 4 added the `gui_file_tree` row `heat_level` byte, protocol_version 5 added producer-assigned `stream_instance` identity to the Messages stream, protocol_version 6 frames `gui_agent_context` and appends `gui_edit_timeline` file summaries, protocol_version 7 established the current baseline, protocol_version 8 added `set_link_cursor`, protocol_version 9 widened `gui_window_content` framing and section lengths, and protocol_version 10 widens clipboard and retained-window delta framing, and protocol_version 11 makes `begin_frame` generation-aware and adds explicit frame status/retry events. A frontend built against an older protocol handshakes with its old version and receives the `protocol_error` blocking surface instead of a desynced stream.
 
 **Handshake.** A frontend appends its compiled-in `protocol_version` as a u16 tail on the extended `ready` event (after `caps_data`). A frontend that omits the tail (short ready, or extended ready without the tail) is treated as protocol_version 0.
 

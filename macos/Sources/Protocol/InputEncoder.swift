@@ -20,9 +20,11 @@ public protocol InputEncoder: AnyObject, Sendable {
     func sendKeyPress(codepoint: UInt32, modifiers: UInt8, seq: UInt32)
     func sendResize(cols: UInt16, rows: UInt16)
     /// Ask the BEAM to send the next frame as a full keyframe (#2219 child D).
-    /// Emitted by `CommandDispatcher` after a frame-transaction invalidation,
-    /// carrying the last frame_seq this frontend committed cleanly (0 if none).
-    func sendRequestKeyframe(lastGoodFrameSeq: UInt32)
+    /// Manual recovery request carrying the failed BEAM generation.
+    func sendRequestKeyframe(lastGoodFrameSeq: UInt32, generation: UInt32)
+    func sendFrameApplied(generation: UInt32, frameSeq: UInt32)
+    func sendFrameRejected(generation: UInt32, frameSeq: UInt32, lastAppliedFrameSeq: UInt32, reason: UInt8)
+    func sendWindowRefMiss(generation: UInt32, frameSeq: UInt32, lastAppliedFrameSeq: UInt32, windowId: UInt16)
     func sendMouseEvent(row: Int16, col: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8, clickCount: UInt8)
     func sendPasteEvent(text: String)
     func sendLog(level: UInt8, message: String)
@@ -170,9 +172,11 @@ public extension InputEncoder {
         sendKeyPress(codepoint: codepoint, modifiers: modifiers)
     }
 
-    /// Default no-op so existing test spies do not need to implement the
-    /// frame-transaction resync request (#2219 child D).
-    func sendRequestKeyframe(lastGoodFrameSeq: UInt32) {}
+    /// Default no-ops so existing test spies need not implement frame status.
+    func sendRequestKeyframe(lastGoodFrameSeq: UInt32, generation: UInt32) {}
+    func sendFrameApplied(generation: UInt32, frameSeq: UInt32) {}
+    func sendFrameRejected(generation: UInt32, frameSeq: UInt32, lastAppliedFrameSeq: UInt32, reason: UInt8) {}
+    func sendWindowRefMiss(generation: UInt32, frameSeq: UInt32, lastAppliedFrameSeq: UInt32, windowId: UInt16) {}
 
     /// Default no-op so existing test spies do not need to implement settings actions.
     func sendConfigQuery() {}

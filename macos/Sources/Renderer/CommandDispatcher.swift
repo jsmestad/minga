@@ -134,9 +134,9 @@ final class CommandDispatcher {
     /// is open. Set on `begin_frame`, cleared on `commit_frame` or invalidation.
     private(set) var openFrameSeq: UInt32?
 
-    /// base_frame_seq of the currently open transaction (0 means keyframe).
-    /// Validated against `lastCommittedFrameSeq` at commit.
+    /// base_frame_seq and BEAM-owned generation of the open transaction.
     private var openBaseFrameSeq: UInt32 = 0
+    private var openGeneration: UInt32 = 0
 
     /// Value-semantic builder for the open frame. Commands are classified and
     /// window deltas are resolved during staging; commit only freezes and publishes.
@@ -215,8 +215,8 @@ final class CommandDispatcher {
 
     func dispatch(_ command: RenderCommand, opcode: UInt8? = nil) {
         switch command {
-        case .beginFrame(let frameSeq, let baseFrameSeq):
-            beginTransaction(frameSeq: frameSeq, baseFrameSeq: baseFrameSeq)
+        case .beginFrame(let frameSeq, let baseFrameSeq, let generation):
+            beginTransaction(frameSeq: frameSeq, baseFrameSeq: baseFrameSeq, generation: generation)
 
         case .commitFrame(let frameSeq, let seq):
             commitTransaction(frameSeq: frameSeq, inputSeq: seq)
@@ -272,7 +272,7 @@ final class CommandDispatcher {
     /// Opens a frame transaction. A second `begin_frame` before its matching
     /// `commit_frame` is truncation: the prior frame never closed, so its staged
     /// commands are discarded and we resync before opening the new transaction.
-    private func beginTransaction(frameSeq: UInt32, baseFrameSeq: UInt32) {
+    private func beginTransaction(frameSeq: UInt32, baseFrameSeq: UInt32, generation: UInt32) {
         if let openFrameSeq {
             // Double-begin = truncation of the previous frame.
             reject(
@@ -283,9 +283,11 @@ final class CommandDispatcher {
         }
         openFrameSeq = frameSeq
         openBaseFrameSeq = baseFrameSeq
+        openGeneration = generation
         transactionBuilder = PreparedFrameTransactionBuilder(
             frameSeq: frameSeq,
             baseFrameSeq: baseFrameSeq,
+            generation: generation,
             committedWindows: guiState.windowContents,
             registeredFontIds: registeredFontIds,
             committedTranscript: guiState.agentChatState.transcriptSnapshot
@@ -357,7 +359,7 @@ final class CommandDispatcher {
 
         os_signpost(.event, log: renderLog, name: "CommitFrame", "frame=%{public}u input=%{public}u", frameSeq, inputSeq)
         latency.resolve(seq: inputSeq)
-        onTransactionResult?(.published(frameSeq: frameSeq))
+        onTransactionResult?(.applied(generation: openGeneration, frameSeq: frameSeq))
         if let firstRender = onFirstRender {
             firstRender()
             onFirstRender = nil
@@ -432,19 +434,46 @@ final class CommandDispatcher {
         sourceOpcode: UInt8? = nil
     ) {
         let opcodeContext = sourceOpcode.map { String(format: ", opcode=0x%02X", $0) } ?? ""
-        let shouldRequestKeyframe = resyncRecoveryState != .awaitingKeyframe
-        resyncRecoveryState = .awaitingKeyframe
-        PortLogger.warn("Frame transaction rejected (\(logReason)\(opcodeContext)); \(shouldRequestKeyframe ? "requesting" : "awaiting") keyframe from \(lastCommittedFrameSeq)")
+        let rejectedFrameSeq = frameSeq ?? 0
         openFrameSeq = nil
         openBaseFrameSeq = 0
         transactionBuilder = nil
-        guiState.performOutOfBandPublication {
-            guiState.resyncState.markPending(lastGoodFrameSeq: lastCommittedFrameSeq)
+
+        if case .missingWindowReference(let windowId) = rejection {
+            // A row/window reference miss has a targeted BEAM recovery path. Keep
+            // unrelated committed surfaces live and do not enter global base-zero
+            // resync; the replacement window arrives on the acknowledged base.
+            PortLogger.warn("Frame transaction missed window \(windowId) (\(logReason)\(opcodeContext)); awaiting targeted replacement")
+            onTransactionResult?(.windowRefMiss(
+                generation: openGeneration,
+                frameSeq: rejectedFrameSeq,
+                lastAppliedFrameSeq: lastCommittedFrameSeq,
+                windowId: windowId
+            ))
+            return
         }
-        onTransactionResult?(.rejected(frameSeq: frameSeq, reason: rejection))
+
+        let shouldRequestKeyframe = resyncRecoveryState != .awaitingKeyframe
+        resyncRecoveryState = .awaitingKeyframe
+        PortLogger.warn("Frame transaction rejected (\(logReason)\(opcodeContext)); awaiting BEAM recovery from \(lastCommittedFrameSeq)")
+        guiState.performOutOfBandPublication {
+            guiState.resyncState.markPending(
+                lastGoodFrameSeq: lastCommittedFrameSeq,
+                generation: openGeneration,
+                rejection: rejection.logDescription
+            )
+        }
         if shouldRequestKeyframe {
+            // Compatibility/test seam only. Production recovery is driven by the
+            // typed onTransactionResult status wired in MingaApp.
             onRequestKeyframe?(lastCommittedFrameSeq)
         }
+        onTransactionResult?(.rejected(
+            generation: openGeneration,
+            frameSeq: rejectedFrameSeq,
+            lastAppliedFrameSeq: lastCommittedFrameSeq,
+            reason: rejection
+        ))
     }
 
     /// Surfaced by the protocol reader when `decodeCommands` throws mid-stream.

@@ -275,10 +275,16 @@ func TestProtocolErrorRendersBlockingSurfaceAndTakesPrecedence(t *testing.T) {
 	}
 
 	packets := drainOutboundPackets(out)
-	if len(packets) != 1 {
-		t.Fatalf("protocol error should send one log_message packet, got %d", len(packets))
+	var logPacket []byte
+	for _, packet := range packets {
+		if _, _, ok := decodeLogMessage(packet); ok {
+			logPacket = packet
+		}
 	}
-	level, text, ok := decodeLogMessage(packets[0])
+	if logPacket == nil {
+		t.Fatalf("protocol error should send a log_message packet, got %d packets", len(packets))
+	}
+	level, text, ok := decodeLogMessage(logPacket)
 	if !ok {
 		t.Fatalf("protocol error packet should be log_message, got %v", packets[0])
 	}

@@ -26,7 +26,7 @@ enum RenderCommand: Sendable {
     /// set_cursor, and the region commands) were retired in protocol_version 2;
     /// all content now flows through gui_window_content (0x80) and the dedicated
     /// gui_* semantic opcodes.
-    case beginFrame(frameSeq: UInt32, baseFrameSeq: UInt32)
+    case beginFrame(frameSeq: UInt32, baseFrameSeq: UInt32, generation: UInt32)
     /// Closes a frame transaction (#2219): frameSeq matches the open begin_frame;
     /// seq is the echoed input correlation sequence (ticket #2215, formerly carried
     /// by batch_end). The frontend presents the frame and resolves keystroke latency
@@ -352,11 +352,12 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         return (nil, 18)
 
     case OP_BEGIN_FRAME:
-        // begin_frame (#2219): <opcode, frame_seq:u32, base_frame_seq:u32>.
-        guard data.count >= rest + 8 else { throw ProtocolDecodeError.malformed }
+        // begin_frame (#2739): <opcode, frame_seq:u32, base_frame_seq:u32, generation:u32>.
+        guard data.count >= rest + 12 else { throw ProtocolDecodeError.malformed }
         let frameSeq = try readU32(data, rest)
         let baseFrameSeq = try readU32(data, rest + 4)
-        return (.beginFrame(frameSeq: frameSeq, baseFrameSeq: baseFrameSeq), 9)
+        let generation = try readU32(data, rest + 8)
+        return (.beginFrame(frameSeq: frameSeq, baseFrameSeq: baseFrameSeq, generation: generation), 13)
 
     case OP_COMMIT_FRAME:
         // commit_frame (#2219): <opcode, frame_seq:u32, input_seq:u32>. input_seq is

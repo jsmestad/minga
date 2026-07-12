@@ -47,6 +47,8 @@ type Command struct {
 	// keyframe (#2219). A non-zero base must equal the last committed frame_seq or
 	// the transaction is invalidated.
 	BaseFrameSeq uint32
+	// Generation is the BEAM-owned recovery generation echoed by frame status.
+	Generation uint32
 	// InputSeq is the echoed input correlation sequence carried by a
 	// CommandCommitFrame (ticket #2215, wire field input_seq). 0 means "no correlation".
 	InputSeq         uint32
@@ -175,16 +177,16 @@ func DecodeCommand(payload []byte) (Command, error) {
 
 	switch payload[0] {
 	case generated.OPBeginFrame:
-		// begin_frame opens a frame transaction (#2219): <opcode, frame_seq:u32,
-		// base_frame_seq:u32>. Decoded but ignored for rendering today.
-		if len(payload) < 9 {
+		// begin_frame (#2739): frame_seq:u32 + base_frame_seq:u32 + generation:u32.
+		if len(payload) < 13 {
 			return Command{}, fmt.Errorf("short begin_frame")
 		}
 		return Command{
 			Kind:         CommandBeginFrame,
-			Size:         9,
+			Size:         13,
 			FrameSeq:     binary.BigEndian.Uint32(payload[1:5]),
 			BaseFrameSeq: binary.BigEndian.Uint32(payload[5:9]),
+			Generation:   binary.BigEndian.Uint32(payload[9:13]),
 		}, nil
 	case generated.OPCommitFrame:
 		// commit_frame closes a frame transaction (#2219): <opcode, frame_seq:u32,

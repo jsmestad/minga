@@ -242,8 +242,8 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
                 "height_percent": Int(heightPercent), "filter_preset": Int(filterPreset),
                 "tabs": tabList, "entries": entryList]
 
-    case .beginFrame(let frameSeq, let baseFrameSeq):
-        return ["type": "begin_frame", "frame_seq": Int(frameSeq), "base_frame_seq": Int(baseFrameSeq)]
+    case .beginFrame(let frameSeq, let baseFrameSeq, let generation):
+        return ["type": "begin_frame", "frame_seq": Int(frameSeq), "base_frame_seq": Int(baseFrameSeq), "generation": Int(generation)]
 
     case .commitFrame(let frameSeq, let seq):
         return ["type": "commit_frame", "frame_seq": Int(frameSeq), "input_seq": Int(seq)]

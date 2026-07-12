@@ -48,8 +48,14 @@ defmodule MingaEditor.Frontend.Emit do
     # adapter delta caches so every window emits full content and every chrome
     # surface re-emits, and brackets the frame with base_frame_seq 0.
     frame_seq = frame_seq(ctx)
-    keyframe? = ctx.force_keyframe? or caches.last_emitted_frame_seq == 0
-    base_frame_seq = if keyframe?, do: 0, else: caches.last_emitted_frame_seq
+
+    acknowledged_base =
+      if ctx.acknowledgement_required?,
+        do: caches.last_acknowledged_frame_seq,
+        else: caches.last_emitted_frame_seq
+
+    keyframe? = ctx.force_keyframe? or acknowledged_base == 0
+    base_frame_seq = if keyframe?, do: 0, else: acknowledged_base
 
     caches =
       if keyframe? do
@@ -72,11 +78,7 @@ defmodule MingaEditor.Frontend.Emit do
       {:error, error} ->
         Minga.Log.warning(:render, "Discarded invalid GUI frame: #{Exception.message(error)}")
 
-        {%{
-           caches
-           | adapter_gui_caches: Minga.Frontend.Adapter.GUI.Caches.new(),
-             last_emitted_frame_seq: 0
-         }, ctx}
+        {Caches.reset_frontend_state(caches), ctx}
 
       {:ok, encoded_frame} ->
         emit_encoded_frame(
@@ -130,7 +132,7 @@ defmodule MingaEditor.Frontend.Emit do
       Minga.Frontend.Adapter.GUI.SurfaceLayoutEncoder.encode_command(ctx.surface_placements)
 
     commands =
-      [Protocol.encode_begin_frame(frame_seq, base_frame_seq)] ++
+      [Protocol.encode_begin_frame(frame_seq, base_frame_seq, caches.recovery_generation)] ++
         flush_font_registration_commands() ++
         encoded_frame.metal_commands ++
         encoded_frame.chrome_commands ++
@@ -145,6 +147,12 @@ defmodule MingaEditor.Frontend.Emit do
 
     caches = update_tracking(ctx, caches)
     caches = %{caches | last_emitted_frame_seq: frame_seq, last_frame_keyframe?: keyframe?}
+
+    caches =
+      if ctx.acknowledgement_required?,
+        do: caches,
+        else: Caches.acknowledge_frame(caches, frame_seq, caches.recovery_generation)
+
     byte_count = IO.iodata_length(commands)
 
     Telemetry.span(
@@ -161,11 +169,7 @@ defmodule MingaEditor.Frontend.Emit do
     error in [Minga.Protocol.EncodingError, Minga.Frontend.Adapter.GUI.EncodingError] ->
       Minga.Log.warning(:render, "Discarded invalid GUI frame: #{Exception.message(error)}")
 
-      {%{
-         caches
-         | adapter_gui_caches: Minga.Frontend.Adapter.GUI.Caches.new(),
-           last_emitted_frame_seq: 0
-       }, ctx}
+      {Caches.reset_frontend_state(caches), ctx}
   end
 
   # The async render path threads Renderer.Server's monotonic seq through the

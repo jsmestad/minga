@@ -143,6 +143,17 @@ defmodule MingaEditor.Session.State do
     %{wspace | windows: Windows.update(ws, id, fun)}
   end
 
+  @doc "Updates one window in a render-pipeline workspace snapshot."
+  @spec update_snapshot_window(map(), Window.id(), (Window.t() -> Window.t())) ::
+          {:ok, map()} | :error
+  def update_snapshot_window(%{windows: %Windows{} = windows} = snapshot, id, fun)
+      when is_function(fun, 1) do
+    case Windows.fetch(windows, id) do
+      {:ok, _window} -> {:ok, %{snapshot | windows: Windows.update(windows, id, fun)}}
+      :error -> :error
+    end
+  end
+
   @doc "Updates every window that shows the given buffer via a mapper function."
   @spec update_windows_for_buffer(t(), pid(), (Window.t() -> Window.t())) :: t()
   def update_windows_for_buffer(%__MODULE__{windows: ws} = wspace, buffer, fun)

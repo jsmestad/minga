@@ -10,12 +10,12 @@
 import SwiftUI
 
 public struct ResyncOverlay: View {
-    public init(state: ResyncState, onRetry: ((UInt32) -> Void)? = nil) {
+    public init(state: ResyncState, onRetry: ((UInt32, UInt32) -> Void)? = nil) {
         self.state = state
         self.onRetry = onRetry
     }
     public var state: ResyncState
-    public var onRetry: ((UInt32) -> Void)?
+    public var onRetry: ((UInt32, UInt32) -> Void)?
     @Environment(\.themeColors) private var theme
     @State private var retryVisible = false
 
@@ -46,7 +46,7 @@ public struct ResyncOverlay: View {
     private var badge: some View {
         if retryVisible, let onRetry {
             Button {
-                onRetry(state.lastGoodFrameSeq)
+                onRetry(state.lastGoodFrameSeq, state.generation)
             } label: {
                 badgeContent(showRetryIcon: true)
             }
@@ -62,7 +62,7 @@ public struct ResyncOverlay: View {
         HStack(spacing: 6) {
             ProgressView()
                 .controlSize(.small)
-            Text("Resyncing…")
+            Text(state.rejection.map { "Resyncing generation \(state.generation): \($0)" } ?? "Resyncing generation \(state.generation)…")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(theme.tabActiveFg)
             if showRetryIcon {

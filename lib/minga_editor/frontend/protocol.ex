@@ -45,6 +45,9 @@ defmodule MingaEditor.Frontend.Protocol do
   @op_begin_frame Opcodes.begin_frame()
   @op_commit_frame Opcodes.commit_frame()
   @op_request_keyframe Opcodes.request_keyframe()
+  @op_frame_applied Opcodes.frame_applied()
+  @op_frame_rejected Opcodes.frame_rejected()
+  @op_window_ref_miss Opcodes.window_ref_miss()
   @op_scroll_batch Opcodes.scroll_batch()
   @op_set_title Opcodes.set_title()
   @op_set_window_bg Opcodes.set_window_bg()
@@ -131,7 +134,24 @@ defmodule MingaEditor.Frontend.Protocol do
   """
   @type input_seq :: non_neg_integer()
 
-  @typedoc "An input event decoded from Zig."
+  @typedoc "Stable frontend frame-transaction rejection reason."
+  @type frame_rejection_reason ::
+          :truncation
+          | :commit_sequence_mismatch
+          | :frame_sequence_not_increasing
+          | :base_sequence_mismatch
+          | :missing_theme
+          | :incomplete_theme
+          | :missing_window_reference
+          | :window_epoch_mismatch
+          | :invalid_retained_rows
+          | :missing_font_resource
+          | :transcript_desync
+          | :decode_failure
+          | :out_of_transaction_command
+          | :unknown
+
+  @typedoc "An input event decoded from a frontend."
   @type input_event ::
           {:key_press, codepoint :: non_neg_integer(), modifiers(), input_seq()}
           | {:resize, width :: pos_integer(), height :: pos_integer()}
@@ -167,7 +187,13 @@ defmodule MingaEditor.Frontend.Protocol do
           | {:request_reparse, buffer_id :: non_neg_integer()}
           | {:log_message, level :: String.t(), text :: String.t()}
           | {:gui_action, ProtocolGUI.gui_action()}
-          | {:request_keyframe, last_good_frame_seq :: non_neg_integer()}
+          | {:request_keyframe, last_good_frame_seq :: non_neg_integer(),
+             generation :: non_neg_integer()}
+          | {:frame_applied, generation :: non_neg_integer(), frame_seq :: non_neg_integer()}
+          | {:frame_rejected, generation :: non_neg_integer(), frame_seq :: non_neg_integer(),
+             last_applied_frame_seq :: non_neg_integer(), frame_rejection_reason()}
+          | {:window_ref_miss, generation :: non_neg_integer(), frame_seq :: non_neg_integer(),
+             last_applied_frame_seq :: non_neg_integer(), window_id :: non_neg_integer()}
           | {:scroll_batch, window_id :: non_neg_integer(), delta_lines :: integer(),
              direction :: :down | :up}
 
@@ -217,6 +243,11 @@ defmodule MingaEditor.Frontend.Protocol do
     <<@op_protocol_error, byte_size(message)::16, message::binary>>
   end
 
+  @doc "Encodes a begin-frame command in the initial recovery generation."
+  @spec encode_begin_frame(non_neg_integer(), non_neg_integer()) :: binary()
+  def encode_begin_frame(frame_seq, base_frame_seq),
+    do: encode_begin_frame(frame_seq, base_frame_seq, 1)
+
   @doc """
   Encodes a begin_frame command that opens a frame transaction (#2219).
 
@@ -224,13 +255,14 @@ defmodule MingaEditor.Frontend.Protocol do
   Renderer.Server's seq) used for resync/attach ordering. `base_frame_seq` names
   the frame this transaction's deltas assume; `base_frame_seq == 0` means keyframe
   (full snapshots, no deltas). Both fields are masked to u32 so a large monotonic
-  `frame_seq` stays wire-safe. fixed:9 = opcode(1) + frame_seq(u32) + base(u32).
+  `frame_seq` stays wire-safe. `generation` identifies the BEAM-owned recovery
+  attempt. fixed:13 = opcode(1) + frame_seq(u32) + base(u32) + generation(u32).
   """
-  @spec encode_begin_frame(non_neg_integer(), non_neg_integer()) :: binary()
-  def encode_begin_frame(frame_seq, base_frame_seq)
+  @spec encode_begin_frame(non_neg_integer(), non_neg_integer(), non_neg_integer()) :: binary()
+  def encode_begin_frame(frame_seq, base_frame_seq, generation)
       when is_integer(frame_seq) and frame_seq >= 0 and is_integer(base_frame_seq) and
-             base_frame_seq >= 0 do
-    <<@op_begin_frame, u32(frame_seq)::32, u32(base_frame_seq)::32>>
+             base_frame_seq >= 0 and is_integer(generation) and generation >= 0 do
+    <<@op_begin_frame, u32(frame_seq)::32, u32(base_frame_seq)::32, u32(generation)::32>>
   end
 
   @doc """
@@ -506,11 +538,26 @@ defmodule MingaEditor.Frontend.Protocol do
     {:ok, {:paste_event, text}}
   end
 
-  # request_keyframe (#2219): a frontend asks the BEAM to send the next frame as a
-  # full keyframe after an invalidation. fixed:5 = opcode(1) + last_good_frame_seq(u32).
-  # The BEAM forces the next frame to base_frame_seq 0 + full snapshots.
-  def decode_event(<<@op_request_keyframe, last_good_frame_seq::32>>) do
-    {:ok, {:request_keyframe, last_good_frame_seq}}
+  # Generation-aware frame status (#2739). All values are fixed-width so malformed
+  # statuses fail closed in the generic decoder rather than partially advancing state.
+  def decode_event(<<@op_request_keyframe, last_good_frame_seq::32, generation::32>>) do
+    {:ok, {:request_keyframe, last_good_frame_seq, generation}}
+  end
+
+  def decode_event(<<@op_frame_applied, generation::32, frame_seq::32>>) do
+    {:ok, {:frame_applied, generation, frame_seq}}
+  end
+
+  def decode_event(
+        <<@op_frame_rejected, generation::32, frame_seq::32, last_applied::32, reason::8>>
+      ) do
+    {:ok, {:frame_rejected, generation, frame_seq, last_applied, decode_rejection_reason(reason)}}
+  end
+
+  def decode_event(
+        <<@op_window_ref_miss, generation::32, frame_seq::32, last_applied::32, window_id::16>>
+      ) do
+    {:ok, {:window_ref_miss, generation, frame_seq, last_applied, window_id}}
   end
 
   def decode_event(<<@op_scroll_batch, window_id::16, delta_lines::16-signed, direction::8>>) do
@@ -544,6 +591,10 @@ defmodule MingaEditor.Frontend.Protocol do
              @op_ready,
              @op_mouse_event,
              @op_capabilities_updated,
+             @op_request_keyframe,
+             @op_frame_applied,
+             @op_frame_rejected,
+             @op_window_ref_miss,
              @op_scroll_batch
            ] do
     {:error, :malformed}
@@ -560,6 +611,22 @@ defmodule MingaEditor.Frontend.Protocol do
   @type conceal_span :: Minga.Parser.Protocol.conceal_span()
 
   # ── Mouse helpers ──
+
+  @spec decode_rejection_reason(non_neg_integer()) :: frame_rejection_reason()
+  defp decode_rejection_reason(1), do: :truncation
+  defp decode_rejection_reason(2), do: :commit_sequence_mismatch
+  defp decode_rejection_reason(3), do: :frame_sequence_not_increasing
+  defp decode_rejection_reason(4), do: :base_sequence_mismatch
+  defp decode_rejection_reason(5), do: :missing_theme
+  defp decode_rejection_reason(6), do: :incomplete_theme
+  defp decode_rejection_reason(7), do: :missing_window_reference
+  defp decode_rejection_reason(8), do: :window_epoch_mismatch
+  defp decode_rejection_reason(9), do: :invalid_retained_rows
+  defp decode_rejection_reason(10), do: :missing_font_resource
+  defp decode_rejection_reason(11), do: :transcript_desync
+  defp decode_rejection_reason(12), do: :decode_failure
+  defp decode_rejection_reason(13), do: :out_of_transaction_command
+  defp decode_rejection_reason(_), do: :unknown
 
   @spec decode_mouse_button(non_neg_integer()) :: mouse_button()
   defp decode_mouse_button(@mouse_left), do: :left

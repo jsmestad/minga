@@ -24,8 +24,8 @@ struct ProtocolCommandSizeTests {
     }
 
     @Test func sizesFrameTransactionMarkers() {
-        // begin_frame/commit_frame (#2219 child A) are fixed:9 = opcode + two u32.
-        #expect(commandSize([OP_BEGIN_FRAME, 0, 0, 0, 7, 0, 0, 0, 0]) == .sized(9))
+        // begin_frame adds generation in protocol v11; commit_frame remains fixed:9.
+        #expect(commandSize([OP_BEGIN_FRAME, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 1]) == .sized(13))
         #expect(commandSize([OP_COMMIT_FRAME, 0, 0, 0, 7, 0, 0, 0, 5]) == .sized(9))
         #expect(commandSize([OP_BEGIN_FRAME, 0, 0, 0]) == .incomplete)
     }

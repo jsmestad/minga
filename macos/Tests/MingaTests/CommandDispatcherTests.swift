@@ -55,7 +55,7 @@ struct CommandDispatcherRoutingTests {
         #expect(dispatcher.frameState.gutterCol == 7)
         #expect(dispatcher.frameState.viewportTopLine == 9)
 
-        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
 
@@ -87,7 +87,7 @@ struct CommandDispatcherRoutingTests {
             guideCols: [], lineIndentLevels: []
         )))
 
-        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiWindowContent(data: GUIWindowContent(
             windowId: 1, fullRefresh: false,
@@ -1339,13 +1339,13 @@ struct CommandDispatcherRoutingTests {
         dispatcher.onFirstRender = { callCount += 1 }
 
         // Two well-formed keyframe transactions; onFirstRender fires only once.
-        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
         #expect(callCount == 1)
         #expect(dispatcher.onFirstRender == nil)
 
-        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
         #expect(callCount == 1)
@@ -1374,13 +1374,13 @@ struct CommandDispatcherRoutingTests {
         var results: [FrameTransactionResult] = []
         dispatcher.onTransactionResult = { results.append($0) }
 
-        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [Wire.TabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "unthemed.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
 
         #expect(gui.protocolErrorState.isPresented == false)
         #expect(gui.tabBarState.tabs.isEmpty)
-        #expect(results == [.rejected(frameSeq: 1, reason: .missingTheme)])
+        #expect(results == [.rejected(generation: 1, frameSeq: 1, lastAppliedFrameSeq: 0, reason: .missingTheme)])
     }
 
     @Test("keyframe with empty guiTheme rejects promotion")
@@ -1389,7 +1389,7 @@ struct CommandDispatcherRoutingTests {
         var results: [FrameTransactionResult] = []
         dispatcher.onTransactionResult = { results.append($0) }
 
-        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: []))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [Wire.TabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "empty.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
@@ -1397,7 +1397,7 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.protocolErrorState.isPresented == false)
         #expect(gui.themeColors.hasAppliedTheme == false)
         #expect(gui.tabBarState.tabs.isEmpty)
-        guard case .rejected(frameSeq: 2, reason: .incompleteTheme(let missing)) = results.first else {
+        guard case .rejected(generation: 1, frameSeq: 2, lastAppliedFrameSeq: _, reason: .incompleteTheme(let missing)) = results.first else {
             Issue.record("expected incomplete-theme rejection")
             return
         }
@@ -1410,7 +1410,7 @@ struct CommandDispatcherRoutingTests {
         var results: [FrameTransactionResult] = []
         dispatcher.onTransactionResult = { results.append($0) }
 
-        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: [(GUI_COLOR_EDITOR_BG, 0x00, 0x00, 0x00)]))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [Wire.TabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "partial.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 3, seq: 0))
@@ -1418,7 +1418,7 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.protocolErrorState.isPresented == false)
         #expect(gui.themeColors.hasAppliedTheme == false)
         #expect(gui.tabBarState.tabs.isEmpty)
-        guard case .rejected(frameSeq: 3, reason: .incompleteTheme(let missing)) = results.first else {
+        guard case .rejected(generation: 1, frameSeq: 3, lastAppliedFrameSeq: _, reason: .incompleteTheme(let missing)) = results.first else {
             Issue.record("expected incomplete-theme rejection")
             return
         }
@@ -1480,14 +1480,14 @@ struct CommandDispatcherStagingTests {
         let (dispatcher, gui) = makeDispatcher()
 
         // Establish a committed baseline so we have a "presented" tab bar.
-        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("old.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
         #expect(gui.tabBarState.tabs.first?.label == "old.ex")
 
         // Open a new transaction and stage a different tab bar, but do NOT commit.
-        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1))
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("new.ex")]))
 
         // The presented state still shows the last committed frame.
@@ -1498,14 +1498,14 @@ struct CommandDispatcherStagingTests {
     @MainActor func frameStateUnchangedMidTransaction() {
         let (dispatcher, _) = makeDispatcher()
 
-        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.setCursorShape(.block))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
         #expect(dispatcher.frameState.cursorShape == .block)
 
         // Stage a shape change without committing; the presented shape holds.
-        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1))
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
         dispatcher.dispatch(.setCursorShape(.beam))
         #expect(dispatcher.frameState.cursorShape == .block)
     }
@@ -1516,7 +1516,7 @@ struct CommandDispatcherStagingTests {
     @MainActor func commitPromotesStagedCommands() {
         let (dispatcher, gui) = makeDispatcher()
 
-        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("a.ex")]))
         dispatcher.dispatch(.setCursorShape(.beam))
@@ -1538,7 +1538,7 @@ struct CommandDispatcherStagingTests {
         var readyCount = 0
         dispatcher.onFrameReady = { readyCount += 1 }
 
-        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("a.ex")]))
         #expect(readyCount == 0)
@@ -1553,13 +1553,13 @@ struct CommandDispatcherStagingTests {
     @MainActor func deltaBaseMatchesCommits() {
         let (dispatcher, gui) = makeDispatcher()
 
-        dispatcher.dispatch(.beginFrame(frameSeq: 5, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 5, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("base.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 5, seq: 0))
 
         // Next frame is a delta whose base names the frame we just committed.
-        dispatcher.dispatch(.beginFrame(frameSeq: 6, baseFrameSeq: 5))
+        dispatcher.dispatch(.beginFrame(frameSeq: 6, baseFrameSeq: 5, generation: 1))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("delta.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 6, seq: 0))
 
@@ -1573,13 +1573,13 @@ struct CommandDispatcherStagingTests {
         var results: [FrameTransactionResult] = []
         dispatcher.onTransactionResult = { results.append($0) }
 
-        dispatcher.dispatch(.beginFrame(frameSeq: 5, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 5, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("base.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 5, seq: 0))
         let baselineThemeBg = gui.themeColors.editorBg
 
-        dispatcher.dispatch(.beginFrame(frameSeq: 6, baseFrameSeq: 5))
+        dispatcher.dispatch(.beginFrame(frameSeq: 6, baseFrameSeq: 5, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: []))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("empty-delta.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 6, seq: 0))
@@ -1588,7 +1588,7 @@ struct CommandDispatcherStagingTests {
         #expect(gui.themeColors.editorBg == baselineThemeBg)
         #expect(gui.tabBarState.tabs.first?.label == "base.ex")
         #expect(results.count == 2)
-        guard case .rejected(frameSeq: 6, reason: .incompleteTheme(let missing)) = results.last else {
+        guard case .rejected(generation: 1, frameSeq: 6, lastAppliedFrameSeq: _, reason: .incompleteTheme(let missing)) = results.last else {
             Issue.record("expected incomplete-theme rejection")
             return
         }
@@ -1602,13 +1602,13 @@ struct CommandDispatcherStagingTests {
         var results: [FrameTransactionResult] = []
         dispatcher.onTransactionResult = { results.append($0) }
 
-        dispatcher.dispatch(.beginFrame(frameSeq: 5, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 5, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("base.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 5, seq: 0))
         let baselineThemeBg = gui.themeColors.editorBg
 
-        dispatcher.dispatch(.beginFrame(frameSeq: 6, baseFrameSeq: 5))
+        dispatcher.dispatch(.beginFrame(frameSeq: 6, baseFrameSeq: 5, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: [(GUI_COLOR_EDITOR_BG, 0x00, 0x00, 0x00)]))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("partial-delta.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 6, seq: 0))
@@ -1617,7 +1617,7 @@ struct CommandDispatcherStagingTests {
         #expect(gui.themeColors.editorBg == baselineThemeBg)
         #expect(gui.tabBarState.tabs.first?.label == "base.ex")
         #expect(results.count == 2)
-        guard case .rejected(frameSeq: 6, reason: .incompleteTheme(let missing)) = results.last else {
+        guard case .rejected(generation: 1, frameSeq: 6, lastAppliedFrameSeq: _, reason: .incompleteTheme(let missing)) = results.last else {
             Issue.record("expected incomplete-theme rejection")
             return
         }
@@ -1634,13 +1634,13 @@ struct CommandDispatcherStagingTests {
         dispatcher.onRequestKeyframe = { requested.append($0) }
 
         // Commit a clean baseline so lastCommittedFrameSeq is known.
-        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("good.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 3, seq: 0))
 
         // Open a frame, stage a change, then commit with the WRONG seq.
-        dispatcher.dispatch(.beginFrame(frameSeq: 4, baseFrameSeq: 3))
+        dispatcher.dispatch(.beginFrame(frameSeq: 4, baseFrameSeq: 3, generation: 1))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("bad.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 99, seq: 0))
 
@@ -1668,13 +1668,13 @@ struct CommandDispatcherStagingTests {
         // It must discard silently without re-requesting (#2267 review: every
         // stale frame after an invalidation fails its base check; re-requesting
         // per frame would force a duplicate BEAM render each).
-        dispatcher.dispatch(.beginFrame(frameSeq: 8, baseFrameSeq: 7))
+        dispatcher.dispatch(.beginFrame(frameSeq: 8, baseFrameSeq: 7, generation: 1))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("stale.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 8, seq: 0))
         #expect(requested == [0])
 
         // The keyframe arrives: pending clears and content promotes.
-        dispatcher.dispatch(.beginFrame(frameSeq: 9, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 9, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("fresh.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 9, seq: 0))
@@ -1688,7 +1688,7 @@ struct CommandDispatcherStagingTests {
         var requested: [UInt32] = []
         dispatcher.onRequestKeyframe = { requested.append($0) }
 
-        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("rogue.ex")]))
@@ -1696,12 +1696,12 @@ struct CommandDispatcherStagingTests {
 
         // This delta is valid against our retained baseline, but it is not the
         // requested base-0 recovery frame and must not dismiss the pending hint.
-        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1))
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("stale.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
         #expect(gui.resyncState.pending == true)
 
-        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.commitFrame(frameSeq: 3, seq: 0))
         #expect(gui.resyncState.pending == false)
@@ -1719,13 +1719,13 @@ struct CommandDispatcherStagingTests {
 
         // A base-0 frame has answered the request, but fails validation before it
         // can commit. It must reopen the request window instead of hanging forever.
-        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: []))
         dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
         #expect(requested == [0, 0])
         #expect(gui.resyncState.pending == true)
 
-        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.commitFrame(frameSeq: 3, seq: 0))
         #expect(gui.resyncState.pending == false)
@@ -1737,11 +1737,11 @@ struct CommandDispatcherStagingTests {
         var requested: [UInt32] = []
         dispatcher.onRequestKeyframe = { requested.append($0) }
 
-        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("staged.ex")]))
         // A new begin before commit: the first frame was truncated.
-        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
 
         // The truncated frame promoted nothing.
@@ -1756,13 +1756,13 @@ struct CommandDispatcherStagingTests {
         var requested: [UInt32] = []
         dispatcher.onRequestKeyframe = { requested.append($0) }
 
-        dispatcher.dispatch(.beginFrame(frameSeq: 10, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 10, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("base.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 10, seq: 0))
 
         // Delta whose base names a frame this client never committed (7, not 10).
-        dispatcher.dispatch(.beginFrame(frameSeq: 11, baseFrameSeq: 7))
+        dispatcher.dispatch(.beginFrame(frameSeq: 11, baseFrameSeq: 7, generation: 1))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("orphan.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 11, seq: 0))
 
@@ -1788,7 +1788,7 @@ struct CommandDispatcherStagingTests {
         var requested: [UInt32] = []
         dispatcher.onRequestKeyframe = { requested.append($0) }
 
-        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("partial.ex")]))
         dispatcher.decodeFailed()
@@ -1812,7 +1812,7 @@ struct CommandDispatcherStagingTests {
         #expect(gui.resyncState.pending == true)
 
         // The recovering keyframe arrives and commits cleanly.
-        dispatcher.dispatch(.beginFrame(frameSeq: 7, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 7, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("recovered.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 7, seq: 0))
@@ -1837,7 +1837,7 @@ struct CommandDispatcherStagingTests {
         ]
 
         for command in commands { direct.applyForTesting(command) }
-        prepared.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        prepared.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         for command in commands { prepared.dispatch(command) }
         prepared.dispatch(.commitFrame(frameSeq: 1, seq: 0))
 
@@ -1853,7 +1853,7 @@ struct CommandDispatcherStagingTests {
         var results: [FrameTransactionResult] = []
         dispatcher.onTransactionResult = { results.append($0) }
 
-        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiWindowContent(data: windowContent()))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("prepared.ex")]))
@@ -1861,9 +1861,30 @@ struct CommandDispatcherStagingTests {
 
         #expect(gui.framePublicationCount == 1)
         #expect(dispatcher.publicationCount == 1)
-        #expect(results == [.published(frameSeq: 1)])
+        #expect(results == [.applied(generation: 1, frameSeq: 1)])
         #expect(gui.windowContents[7]?.rows.first?.text == "old")
         #expect(gui.tabBarState.tabs.first?.label == "prepared.ex")
+    }
+
+    @Test("applied follows semantic publication and does not wait for Metal presentation")
+    @MainActor func appliedAtSemanticBoundary() {
+        let (dispatcher, gui) = makeDispatcher()
+        var readyCount = 0
+        var publicationSeenByApplied = false
+        dispatcher.onFrameReady = { readyCount += 1 }
+        dispatcher.onTransactionResult = { result in
+            guard case .applied(generation: 4, frameSeq: 8) = result else { return }
+            publicationSeenByApplied = gui.framePublicationCount == 1 &&
+                gui.tabBarState.tabs.first?.label == "semantic.ex" && readyCount == 0
+        }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 8, baseFrameSeq: 0, generation: 4))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("semantic.ex")]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 8, seq: 0))
+
+        #expect(publicationSeenByApplied)
+        #expect(readyCount == 1)
     }
 
     @Test("one aggregate observation callback sees all sibling domains committed")
@@ -1880,7 +1901,7 @@ struct CommandDispatcherStagingTests {
             notificationCount.withLock { $0 += 1 }
         }
 
-        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("atomic.ex")]))
         dispatcher.dispatch(.guiAgentChat(
@@ -1911,7 +1932,7 @@ struct CommandDispatcherStagingTests {
             guideCols: [4, 8], lineIndentLevels: [2]
         )
 
-        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiWindowContent(data: windowContent(windowId: 1001)))
         dispatcher.dispatch(.guiWindowContent(data: windowContent(windowId: 1)))
@@ -1929,7 +1950,7 @@ struct CommandDispatcherStagingTests {
         var results: [FrameTransactionResult] = []
         dispatcher.onTransactionResult = { results.append($0) }
 
-        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("must-not-publish.ex")]))
         dispatcher.dispatch(.guiWindowOverlayDelta(data: overlayDelta(windowId: 99)))
@@ -1937,7 +1958,8 @@ struct CommandDispatcherStagingTests {
 
         #expect(gui.framePublicationCount == 0)
         #expect(gui.tabBarState.tabs.isEmpty)
-        #expect(results == [.rejected(frameSeq: 1, reason: .missingWindowReference(windowId: 99))])
+        #expect(gui.resyncState.pending == false)
+        #expect(results == [.windowRefMiss(generation: 1, frameSeq: 1, lastAppliedFrameSeq: 0, windowId: 99)])
     }
 
     @Test("invalid transcript operations reject without publishing sibling state")
@@ -1963,7 +1985,7 @@ struct CommandDispatcherStagingTests {
             dispatcher.onTransactionResult = { results.append($0) }
 
             if index > 0 {
-                dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+                dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
                 dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
                 dispatcher.dispatch(.guiAgentTranscript(
                     mode: 0, epoch: 1, truncated: false, trimFront: 0, baseCount: 0,
@@ -1976,7 +1998,7 @@ struct CommandDispatcherStagingTests {
             let baselinePublications = gui.framePublicationCount
             let frameSeq = UInt32(index > 0 ? 2 : 1)
             let baseSeq = UInt32(index > 0 ? 1 : 0)
-            dispatcher.dispatch(.beginFrame(frameSeq: frameSeq, baseFrameSeq: baseSeq))
+            dispatcher.dispatch(.beginFrame(frameSeq: frameSeq, baseFrameSeq: baseSeq, generation: 1))
             if baseSeq == 0 { dispatcher.dispatch(.guiTheme(slots: completeThemeSlots())) }
             dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("must-not-publish.ex")]))
             dispatcher.dispatch(invalid.0)
@@ -1984,7 +2006,7 @@ struct CommandDispatcherStagingTests {
 
             #expect(gui.framePublicationCount == baselinePublications)
             #expect(gui.tabBarState.tabs.first?.label == (index > 0 ? "baseline.ex" : nil))
-            #expect(results.last == .rejected(frameSeq: frameSeq, reason: invalid.1))
+            #expect(results.last == .rejected(generation: 1, frameSeq: frameSeq, lastAppliedFrameSeq: UInt32(index > 0 ? 1 : 0), reason: invalid.1))
             #expect(gui.agentChatState.messages.map(\.id) == (index > 0 ? [1] : []))
         }
     }
@@ -1995,18 +2017,15 @@ struct CommandDispatcherStagingTests {
             let (dispatcher, _) = makeDispatcher()
             var results: [FrameTransactionResult] = []
             dispatcher.onTransactionResult = { results.append($0) }
-            dispatcher.dispatch(.beginFrame(frameSeq: 5, baseFrameSeq: 0))
+            dispatcher.dispatch(.beginFrame(frameSeq: 5, baseFrameSeq: 0, generation: 1))
             dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
             dispatcher.dispatch(.commitFrame(frameSeq: 5, seq: 0))
 
-            dispatcher.dispatch(.beginFrame(frameSeq: incoming, baseFrameSeq: 0))
+            dispatcher.dispatch(.beginFrame(frameSeq: incoming, baseFrameSeq: 0, generation: 1))
             dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
             dispatcher.dispatch(.commitFrame(frameSeq: incoming, seq: 0))
 
-            #expect(results.last == .rejected(
-                frameSeq: incoming,
-                reason: .frameSequenceNotIncreasing(lastFrameSeq: 5, incomingFrameSeq: incoming)
-            ))
+            #expect(results.last == .rejected(generation: 1, frameSeq: incoming, lastAppliedFrameSeq: 5, reason: .frameSequenceNotIncreasing(lastFrameSeq: 5, incomingFrameSeq: incoming)))
             #expect(dispatcher.publicationCount == 1)
         }
     }
@@ -2017,20 +2036,17 @@ struct CommandDispatcherStagingTests {
         var results: [FrameTransactionResult] = []
         dispatcher.onTransactionResult = { results.append($0) }
 
-        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiWindowContent(data: windowContent()))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
 
-        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1))
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
         dispatcher.dispatch(.guiWindowOverlayDelta(data: overlayDelta(epoch: 41)))
         dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
 
         #expect(gui.framePublicationCount == 1)
-        #expect(results.last == .rejected(
-            frameSeq: 2,
-            reason: .windowEpochMismatch(windowId: 7, expected: 42, actual: 41)
-        ))
+        #expect(results.last == .rejected(generation: 1, frameSeq: 2, lastAppliedFrameSeq: 1, reason: .windowEpochMismatch(windowId: 7, expected: 42, actual: 41)))
         #expect(gui.windowContents[7]?.cursorShape == .block)
     }
 
@@ -2040,23 +2056,23 @@ struct CommandDispatcherStagingTests {
         var results: [FrameTransactionResult] = []
         dispatcher.onTransactionResult = { results.append($0) }
 
-        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiWindowContent(data: windowContent(fontId: 3)))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
 
         #expect(gui.framePublicationCount == 0)
-        #expect(results == [.rejected(frameSeq: 1, reason: .missingFontResource(fontId: 3))])
+        #expect(results == [.rejected(generation: 1, frameSeq: 1, lastAppliedFrameSeq: 0, reason: .missingFontResource(fontId: 3))])
     }
 
     @Test("publication operation count depends on changed domains, not command count")
     @MainActor func changedDomainOperationCount() {
         let (dispatcher, gui) = makeDispatcher()
-        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
 
-        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1))
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
         for index in 0..<100 {
             dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("\(index).ex")]))
         }

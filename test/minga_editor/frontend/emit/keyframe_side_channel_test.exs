@@ -42,8 +42,10 @@ defmodule MingaEditor.Frontend.Emit.KeyframeSideChannelTest do
     # Establish populated side-channel caches via two frames. The first frame is a
     # keyframe (no committed base) and sends both side channels; flush them.
     {_c1, caches} = emit_and_capture(frame, state, %Caches{}, frame_seq: 11)
+    caches = Caches.acknowledge_frame(caches, 11, caches.recovery_generation)
     flush_side_channels(title_op, bg_op)
     {_c2, caches} = emit_and_capture(frame, state, caches, frame_seq: 22)
+    caches = Caches.acknowledge_frame(caches, 22, caches.recovery_generation)
 
     assert is_binary(caches.last_title)
     assert is_integer(caches.last_window_bg)

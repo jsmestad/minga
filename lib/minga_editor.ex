@@ -407,7 +407,7 @@ defmodule MingaEditor do
 
     Startup.send_font_config(new_state)
     new_state = refresh_gui_config_state(new_state)
-    new_state = Renderer.render_or_async(new_state)
+    new_state = Renderer.reset_connection(new_state)
     StartupTimer.mark(:first_render_dispatched)
     StartupTimer.report()
 
@@ -520,10 +520,40 @@ defmodule MingaEditor do
     {:noreply, new_state}
   end
 
+  # Legacy in-process fixtures omit generation; treat them as an explicit retry.
   def handle_info({:minga_input, {:request_keyframe, last_good_frame_seq}}, state) do
-    Minga.Log.warning(:render, "Frontend requested keyframe from frame #{last_good_frame_seq}")
+    handle_info({:minga_input, {:request_keyframe, last_good_frame_seq, 0}}, state)
+  end
+
+  def handle_info(
+        {:minga_input, {:request_keyframe, last_good_frame_seq, failed_generation}},
+        %{renderer: renderer} = state
+      )
+      when is_pid(renderer) do
+    Minga.Log.warning(
+      :render,
+      "Frontend requested recovery from frame #{last_good_frame_seq} generation #{failed_generation}"
+    )
+
+    MingaEditor.Renderer.Server.request_recovery(renderer)
+    {:noreply, state}
+  end
+
+  def handle_info({:minga_input, {:request_keyframe, _last_good, _generation}}, state) do
     new_state = %{state | keyframe_pending?: true}
     {:noreply, Renderer.render_or_async(new_state)}
+  end
+
+  def handle_info({:minga_input, {kind, _, _} = status}, %{renderer: renderer} = state)
+      when kind == :frame_applied and is_pid(renderer) do
+    MingaEditor.Renderer.Server.frame_status(renderer, status)
+    {:noreply, state}
+  end
+
+  def handle_info({:minga_input, {kind, _, _, _, _} = status}, %{renderer: renderer} = state)
+      when kind in [:frame_rejected, :window_ref_miss] and is_pid(renderer) do
+    MingaEditor.Renderer.Server.frame_status(renderer, status)
+    {:noreply, state}
   end
 
   # ── GUI action events (semantic commands from SwiftUI chrome) ────────────

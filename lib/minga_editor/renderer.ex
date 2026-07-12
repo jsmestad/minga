@@ -75,6 +75,32 @@ defmodule MingaEditor.Renderer do
 
   def render_or_async(state), do: render(state)
 
+  @doc """
+  Renders the first frame for a newly ready frontend connection.
+
+  Async renderers synchronously abandon credit owned by the replaced connection
+  before preparing a base-zero keyframe in a fresh recovery generation. Other
+  rendering paths keep their normal synchronous behavior.
+  """
+  @spec reset_connection(state()) :: state()
+  def reset_connection(%EditorState{rendering: :disabled} = state), do: state
+  def reset_connection(%{backend: :headless} = state), do: render(state)
+
+  def reset_connection(%{renderer: pid} = state) when is_pid(pid) do
+    state = EditorState.ensure_shell_available(state)
+
+    if async_render?(state) do
+      snapshot = Input.from_editor_state(state)
+      seq = System.unique_integer([:positive, :monotonic])
+      :ok = RendererServer.reset_connection(pid, snapshot, seq)
+      state
+    else
+      render(state)
+    end
+  end
+
+  def reset_connection(state), do: render(state)
+
   @spec async_render?(state()) :: boolean()
   defp async_render?(state), do: EditorState.active_shell_module(state).async_render?(state)
 

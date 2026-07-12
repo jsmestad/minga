@@ -13,7 +13,7 @@
 /// Render commands (BEAM → frontend), transport survivors only. The
 /// cell-paradigm opcodes (draw_text, set_cursor, clear, region commands,
 /// draw_styled_text) were retired in protocol_version 2 with the Zig renderer:
-///   0x10 begin_frame:      frame_seq:u32, base_frame_seq:u32
+///   0x10 begin_frame:      frame_seq:u32, base_frame_seq:u32, generation:u32
 ///   0x11 commit_frame:     frame_seq:u32, input_seq:u32
 ///   0x15 set_cursor_shape: shape:u8
 ///
@@ -35,6 +35,9 @@ pub const OP_PASTE_EVENT = opcodes.OP_PASTE_EVENT;
 pub const OP_GUI_ACTION = opcodes.OP_GUI_ACTION;
 pub const OP_REQUEST_KEYFRAME = opcodes.OP_REQUEST_KEYFRAME;
 pub const OP_SCROLL_BATCH = opcodes.OP_SCROLL_BATCH;
+pub const OP_FRAME_APPLIED = opcodes.OP_FRAME_APPLIED;
+pub const OP_FRAME_REJECTED = opcodes.OP_FRAME_REJECTED;
+pub const OP_WINDOW_REF_MISS = opcodes.OP_WINDOW_REF_MISS;
 pub const OP_LOG_MESSAGE = opcodes.OP_LOG_MESSAGE;
 
 // Render
@@ -835,8 +838,14 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
     const rest = data[1..];
 
     switch (opcode) {
-        OP_BEGIN_FRAME => return .begin_frame,
-        OP_COMMIT_FRAME => return .commit_frame,
+        OP_BEGIN_FRAME => {
+            if (rest.len < 12) return error.Malformed;
+            return .begin_frame;
+        },
+        OP_COMMIT_FRAME => {
+            if (rest.len < 8) return error.Malformed;
+            return .commit_frame;
+        },
         OP_SET_CURSOR_SHAPE => {
             if (rest.len < 1) return error.Malformed;
             switch (rest[0]) {
@@ -1095,7 +1104,7 @@ fn decodeStructuralNavAction(action: u8) !StructuralNavAction {
 /// each command.
 ///
 /// Fixed sizes:
-///   0x10 begin_frame:      9 bytes (opcode + frame_seq:4 + base_frame_seq:4)
+///   0x10 begin_frame:     13 bytes (opcode + frame_seq:4 + base_frame_seq:4 + generation:4)
 ///   0x11 commit_frame:     9 bytes (opcode + frame_seq:4 + input_seq:4)
 ///   0x15 set_cursor_shape: 2 bytes (opcode + shape:1)
 pub fn commandSize(payload: []const u8) usize {
@@ -1939,10 +1948,15 @@ test "encode and verify resize" {
     try std.testing.expectEqual(@as(u8, OP_RESIZE), buf[0]);
 }
 
-test "decode begin_frame command" {
-    const data = [_]u8{ OP_BEGIN_FRAME, 0, 0, 0, 7, 0, 0, 0, 0 };
+test "decode generation-aware begin_frame command" {
+    const data = [_]u8{ OP_BEGIN_FRAME, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 3 };
     const cmd = try decodeCommand(&data);
     try std.testing.expect(cmd == .begin_frame);
+}
+
+test "reject legacy truncated begin_frame command" {
+    const data = [_]u8{ OP_BEGIN_FRAME, 0, 0, 0, 7, 0, 0, 0, 0 };
+    try std.testing.expectError(error.Malformed, decodeCommand(&data));
 }
 
 test "decode commit_frame command" {
@@ -2369,9 +2383,9 @@ test "commandSize: commit_frame is 9 bytes when complete" {
     try std.testing.expectEqual(@as(usize, 9), commandSize(&data));
 }
 
-test "commandSize: begin_frame is 9 bytes when complete" {
-    const data = [_]u8{ OP_BEGIN_FRAME, 0, 0, 0, 7, 0, 0, 0, 0 };
-    try std.testing.expectEqual(@as(usize, 9), commandSize(&data));
+test "commandSize: generation-aware begin_frame is 13 bytes when complete" {
+    const data = [_]u8{ OP_BEGIN_FRAME, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 3 };
+    try std.testing.expectEqual(@as(usize, 13), commandSize(&data));
 }
 
 test "commandSize: fixed-size commands clamp to available payload" {
@@ -3540,8 +3554,8 @@ test "generated commandSize matches protocol.commandSize" {
 
 test "generated-sized unrendered opcode does not consume following command" {
     const cases = [_][]const u8{
-        &[_]u8{ opcodes.OP_GUI_INDENT_GUIDES, 0x00, 0x06, 1, 2, 3, 4, 5, 6, OP_COMMIT_FRAME },
-        &[_]u8{ 0xB7, 0x00, 0x02, 0xAA, 0xBB, OP_COMMIT_FRAME },
+        &[_]u8{ opcodes.OP_GUI_INDENT_GUIDES, 0x00, 0x06, 1, 2, 3, 4, 5, 6, OP_COMMIT_FRAME, 0, 0, 0, 1, 0, 0, 0, 0 },
+        &[_]u8{ 0xB7, 0x00, 0x02, 0xAA, 0xBB, OP_COMMIT_FRAME, 0, 0, 0, 1, 0, 0, 0, 0 },
     };
 
     for (cases) |packet| {

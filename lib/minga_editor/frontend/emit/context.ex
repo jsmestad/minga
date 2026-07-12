@@ -26,7 +26,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
   alias MingaEditor.State
 
   @type t :: %__MODULE__{
-          port_manager: pid(),
+          port_manager: GenServer.server() | nil,
           capabilities: Capabilities.t(),
           theme: Theme.t() | nil,
           font_registry: FontRegistry.t(),
@@ -56,6 +56,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
           last_input_seq: non_neg_integer(),
           frame_seq: non_neg_integer() | nil,
           force_keyframe?: boolean(),
+          acknowledgement_required?: boolean(),
           surface_placements: [MingaEditor.Layout.SurfaceRegistry.wire_placement()],
           gui?: boolean(),
           line_spacing: number() | nil,
@@ -95,6 +96,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
             last_input_seq: 0,
             frame_seq: nil,
             force_keyframe?: false,
+            acknowledgement_required?: false,
             surface_placements: [],
             gui?: false,
             line_spacing: nil,
@@ -141,6 +143,8 @@ defmodule MingaEditor.Frontend.Emit.Context do
       last_input_seq: Map.get(state, :last_input_seq, 0),
       frame_seq: Map.get(state, :frame_seq),
       force_keyframe?: Map.get(state, :force_keyframe?, false),
+      acknowledgement_required?:
+        Map.get(state, :backend) != :headless and not is_nil(state.port_manager),
       # The single per-frame surface layout authority (#2268), already projected
       # to wire shape by the registry. Derived from the same focus tree mouse
       # routing hit-tests against, so the emitted placement rect for every surface

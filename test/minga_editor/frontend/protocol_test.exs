@@ -269,16 +269,16 @@ defmodule MingaEditor.Frontend.ProtocolTest do
 
   describe "encode_begin_frame/2" do
     test "encodes begin_frame with frame_seq and base_frame_seq (#2219)" do
-      assert <<0x10, 7::32, 6::32>> = Protocol.encode_begin_frame(7, 6)
+      assert <<0x10, 7::32, 6::32, 1::32>> = Protocol.encode_begin_frame(7, 6)
     end
 
     test "encodes a keyframe as base_frame_seq 0" do
-      assert <<0x10, 9::32, 0::32>> = Protocol.encode_begin_frame(9, 0)
+      assert <<0x10, 9::32, 0::32, 1::32>> = Protocol.encode_begin_frame(9, 0)
     end
 
     test "masks large monotonic frame_seq values to u32" do
       big = 0x1_0000_0001
-      assert <<0x10, 1::32, 0::32>> = Protocol.encode_begin_frame(big, 0)
+      assert <<0x10, 1::32, 0::32, 1::32>> = Protocol.encode_begin_frame(big, 0)
     end
   end
 
@@ -303,12 +303,12 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       assert <<0x11, 0::32, 0::32>> = Protocol.encode_commit_frame(0)
     end
 
-    test "begin_frame carries frame_seq + base_frame_seq (opcode + 8 bytes)" do
-      assert <<0x10, 0::32, 0::32>> = Protocol.encode_begin_frame(0, 0)
+    test "begin_frame carries frame_seq + base_frame_seq + generation" do
+      assert <<0x10, 0::32, 0::32, 1::32>> = Protocol.encode_begin_frame(0, 0)
     end
 
-    test "request_keyframe decodes last_good_frame_seq (#2219)" do
-      assert {:ok, {:request_keyframe, 12}} = Protocol.decode_event(<<0x08, 12::32>>)
+    test "request_keyframe decodes last_good_frame_seq and generation" do
+      assert {:ok, {:request_keyframe, 12, 3}} = Protocol.decode_event(<<0x08, 12::32, 3::32>>)
     end
 
     test "key_press event has correct byte layout" do
@@ -424,14 +424,15 @@ defmodule MingaEditor.Frontend.ProtocolTest do
     end
   end
 
-  # The scroll_prefetch_hint opcode (0x0A) and its decode were deleted with the
-  # velocity-aware overscan prefetch (#2680, epic #2652); 0x0A is now an unknown
-  # opcode.
-  describe "decode_event/1 — retired scroll_prefetch_hint opcode" do
-    test "former scroll_prefetch_hint opcode (0x0A) is unknown" do
-      payload = <<0x0A, 1::16, 100::32, 0, 42::32>>
+  describe "decode_event/1 — frame status" do
+    test "decodes generation-aware applied, rejected, and window ref miss statuses" do
+      assert {:ok, {:frame_applied, 3, 9}} = Protocol.decode_event(<<0x0A, 3::32, 9::32>>)
 
-      assert {:error, :unknown_opcode} = Protocol.decode_event(payload)
+      assert {:ok, {:frame_rejected, 3, 9, 7, :base_sequence_mismatch}} =
+               Protocol.decode_event(<<0x0B, 3::32, 9::32, 7::32, 4>>)
+
+      assert {:ok, {:window_ref_miss, 3, 9, 7, 12}} =
+               Protocol.decode_event(<<0x0C, 3::32, 9::32, 7::32, 12::16>>)
     end
   end
 

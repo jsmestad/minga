@@ -18,12 +18,11 @@ defmodule MingaEditor.Renderer.Server do
   snapshot is dropped (most-recent-wins coalescing) and a
   `[:minga, :render, :coalesced]` telemetry event fires. Each snapshot
   is normalized against the renderer-owned cache state before it renders.
-  After each render emit completes, the Renderer stores the emitted
-  cache state and threads it into any pending snapshot before starting
-  the next frame; otherwise it goes idle. If the Editor emits a direct
-  bare frame boundary, that newer snapshot cache wins instead. That keeps
-  delta frame bases aligned with what the frontend just received, even
-  when the Editor has not yet processed the prior render writeback.
+  After each acknowledged render completes, the Renderer stores the committed
+  cache state and threads it into any pending snapshot before starting the next
+  frame; otherwise it goes idle. The Renderer is the sole production frame
+  emitter, keeping delta bases aligned with the frontend's acknowledged state
+  even when the Editor has not yet processed the prior render writeback.
 
   ## Click-region writeback
 
@@ -89,20 +88,24 @@ defmodule MingaEditor.Renderer.Server do
           rendering?: boolean(),
           pending: {Input.t(), non_neg_integer(), integer()} | nil,
           in_flight: {Input.t(), non_neg_integer(), integer()} | nil,
+          awaiting_ack: {render_output(), Input.t(), non_neg_integer(), integer()} | nil,
           font_registry: FontRegistry.t(),
           caches: Caches.t(),
           message_store: MessageStore.t() | nil,
-          pipeline: pipeline()
+          pipeline: pipeline(),
+          require_ack?: boolean()
         }
 
   defstruct editor_pid: nil,
             rendering?: false,
             pending: nil,
             in_flight: nil,
+            awaiting_ack: nil,
             font_registry: FontRegistry.new(),
             caches: Caches.new(),
             message_store: nil,
-            pipeline: &RenderPipeline.run/1
+            pipeline: &RenderPipeline.run/1,
+            require_ack?: true
 
   # ── API ────────────────────────────────────────────────────────────────────
 
@@ -127,10 +130,41 @@ defmodule MingaEditor.Renderer.Server do
     GenServer.cast(server, {:render, snapshot, frame_seq, monotonic_now()})
   end
 
-  @doc "Returns true while a render pass is in progress."
+  @doc "Returns true while rendering or waiting for the frontend's one frame credit."
   @spec rendering?(GenServer.server()) :: boolean()
   def rendering?(server \\ __MODULE__) do
     GenServer.call(server, :rendering?)
+  end
+
+  @doc "Returns the current recovery generation and acknowledged frame for diagnostics."
+  @spec acknowledgement_state(GenServer.server()) :: {non_neg_integer(), non_neg_integer()}
+  def acknowledgement_state(server \\ __MODULE__) do
+    GenServer.call(server, :acknowledgement_state)
+  end
+
+  @doc "Returns one frame credit after a typed frontend status."
+  @spec frame_status(GenServer.server(), MingaEditor.Frontend.Protocol.input_event()) :: :ok
+  def frame_status(server \\ __MODULE__, status) do
+    send(server, {:frame_status, status})
+    :ok
+  end
+
+  @doc "Starts a fresh recovery generation for automatic or manual retry."
+  @spec request_recovery(GenServer.server()) :: :ok
+  def request_recovery(server \\ __MODULE__) do
+    send(server, :request_recovery)
+    :ok
+  end
+
+  @doc """
+  Replaces all work tied to the previous frontend connection with the latest
+  editor intent. The replacement starts at base zero in a fresh recovery
+  generation and owns the connection's single frame credit.
+  """
+  @spec reset_connection(GenServer.server(), Input.t(), non_neg_integer()) :: :ok
+  def reset_connection(server \\ __MODULE__, %Input{} = snapshot, frame_seq)
+      when is_integer(frame_seq) and frame_seq >= 0 do
+    GenServer.call(server, {:reset_connection, snapshot, frame_seq, monotonic_now()})
   end
 
   # ── GenServer callbacks ───────────────────────────────────────────────────
@@ -140,12 +174,41 @@ defmodule MingaEditor.Renderer.Server do
   def init(opts) do
     editor_pid = Keyword.get(opts, :editor_pid, MingaEditor)
     pipeline = Keyword.get(opts, :pipeline, &RenderPipeline.run/1)
-    {:ok, %__MODULE__{editor_pid: editor_pid, pipeline: pipeline}}
+    require_ack? = Keyword.get(opts, :require_ack?, not Keyword.has_key?(opts, :pipeline))
+    {:ok, %__MODULE__{editor_pid: editor_pid, pipeline: pipeline, require_ack?: require_ack?}}
   end
 
   @impl true
   def handle_call(:rendering?, _from, state) do
     {:reply, state.rendering?, state}
+  end
+
+  def handle_call(:acknowledgement_state, _from, state) do
+    {:reply, {state.caches.recovery_generation, state.caches.last_acknowledged_frame_seq}, state}
+  end
+
+  def handle_call({:reset_connection, snap, seq, pushed_at}, _from, state) do
+    caches = Caches.reset_frontend_state(state.caches)
+
+    # The Editor snapshot has already reset all frontend-retained cursors for
+    # this connection (including MessageStore). Do not merge state from the
+    # replaced frontend back into it.
+    retry = %{snap | caches: caches, force_keyframe?: true}
+
+    # Every queued or awaiting frame belongs to the replaced connection. Abandon
+    # that credit and render only the latest Editor snapshot for the new one.
+    send(self(), :do_render)
+
+    state = %{
+      state
+      | rendering?: true,
+        pending: nil,
+        in_flight: {retry, seq, pushed_at},
+        awaiting_ack: nil,
+        caches: caches
+    }
+
+    {:reply, :ok, state}
   end
 
   @impl true
@@ -196,15 +259,30 @@ defmodule MingaEditor.Renderer.Server do
       %{frame_seq: seq}
     )
 
-    state = %{
-      state
-      | font_registry: output.font_registry,
-        caches: output.caches,
-        message_store: output.message_store
-    }
+    # Port write is not proof of commit. Keep the prepared output private until
+    # the matching generation/sequence acknowledgement returns the single credit.
+    if state.require_ack? do
+      state = %{
+        state
+        | font_registry: output.font_registry,
+          in_flight: nil,
+          awaiting_ack: {output, snap, seq, pushed_at}
+      }
 
-    send_writeback(state.editor_pid, output, seq)
-    advance_pending(state, output.caches, output.message_store)
+      {:noreply, state}
+    else
+      # Injected pure pipelines are used by legacy server unit tests and have no
+      # frontend transport. Their return is the commit boundary.
+      state = %{
+        state
+        | font_registry: output.font_registry,
+          caches: output.caches,
+          message_store: output.message_store
+      }
+
+      send_writeback(state.editor_pid, output, seq)
+      advance_pending(state, output.caches, output.message_store)
+    end
   rescue
     e ->
       trace = Exception.format_stacktrace(__STACKTRACE__) |> String.slice(0, 500)
@@ -217,6 +295,62 @@ defmodule MingaEditor.Renderer.Server do
       advance_pending(state, state.caches, state.message_store)
   end
 
+  def handle_info(
+        {:frame_status, {:frame_applied, generation, seq}},
+        %__MODULE__{awaiting_ack: {output, _snap, seq, _pushed_at}} = state
+      )
+      when generation == state.caches.recovery_generation do
+    acknowledged = Caches.acknowledge_frame(output.caches, seq, generation)
+
+    output = %{output | caches: acknowledged}
+    send_writeback(state.editor_pid, output, seq)
+
+    state = %{
+      state
+      | caches: acknowledged,
+        message_store: output.message_store,
+        awaiting_ack: nil
+    }
+
+    advance_pending(state, acknowledged, output.message_store)
+  end
+
+  def handle_info(
+        {:frame_status, {:frame_rejected, generation, seq, last_applied, reason}},
+        %__MODULE__{awaiting_ack: {_output, snap, seq, pushed_at}} = state
+      )
+      when generation == state.caches.recovery_generation and
+             last_applied == state.caches.last_acknowledged_frame_seq do
+    Minga.Log.warning(:render, "Frontend rejected frame #{seq}: #{reason}")
+    recover_transaction(state, snap, seq, pushed_at)
+  end
+
+  def handle_info(
+        {:frame_status, {:window_ref_miss, generation, seq, last_applied, window_id}},
+        %__MODULE__{awaiting_ack: {_output, snap, seq, pushed_at}} = state
+      )
+      when generation == state.caches.recovery_generation and
+             last_applied == state.caches.last_acknowledged_frame_seq do
+    Minga.Log.warning(:render, "Frontend missed window #{window_id} in frame #{seq}")
+    recover_window(state, snap, seq, pushed_at, window_id)
+  end
+
+  # Stale, duplicate, out-of-order, wrong-generation, and unsolicited statuses
+  # are intentionally side-effect free: they cannot return credit or retrigger recovery.
+  def handle_info({:frame_status, _status}, state), do: {:noreply, state}
+
+  def handle_info(
+        :request_recovery,
+        %__MODULE__{awaiting_ack: {_output, snap, seq, pushed_at}} = state
+      ) do
+    recover_transaction(state, snap, seq, pushed_at)
+  end
+
+  def handle_info(:request_recovery, %__MODULE__{pending: {snap, seq, pushed_at}} = state) do
+    recover_transaction(state, snap, seq, pushed_at)
+  end
+
+  def handle_info(:request_recovery, state), do: {:noreply, state}
   def handle_info(_other, state), do: {:noreply, state}
 
   # ── Helpers ────────────────────────────────────────────────────────────────
@@ -282,6 +416,67 @@ defmodule MingaEditor.Renderer.Server do
     end
   end
 
+  @spec recover_transaction(t(), Input.t(), non_neg_integer(), integer()) :: {:noreply, t()}
+  defp recover_transaction(state, rejected_snap, rejected_seq, rejected_pushed_at) do
+    {latest_snap, latest_seq, latest_pushed_at} =
+      latest_intent(state.pending, rejected_snap, rejected_seq, rejected_pushed_at)
+
+    caches = Caches.reset_frontend_state(state.caches)
+    retry = %{latest_snap | caches: caches, force_keyframe?: true}
+
+    state = %{
+      state
+      | caches: caches,
+        awaiting_ack: nil,
+        pending: {retry, latest_seq, latest_pushed_at}
+    }
+
+    advance_pending(state, caches, state.message_store)
+  end
+
+  @spec recover_window(t(), Input.t(), non_neg_integer(), integer(), non_neg_integer()) ::
+          {:noreply, t()}
+  defp recover_window(state, rejected_snap, rejected_seq, rejected_pushed_at, window_id) do
+    {latest_snap, latest_seq, latest_pushed_at} =
+      latest_intent(state.pending, rejected_snap, rejected_seq, rejected_pushed_at)
+
+    latest_snap = %{latest_snap | caches: state.caches}
+
+    case Input.invalidate_window(latest_snap, window_id) do
+      {:ok, retry} ->
+        state = %{
+          state
+          | awaiting_ack: nil,
+            pending: {retry, latest_seq, latest_pushed_at}
+        }
+
+        advance_pending(state, state.caches, state.message_store)
+
+      :error ->
+        recover_transaction(state, latest_snap, latest_seq, latest_pushed_at)
+    end
+  end
+
+  @spec latest_intent(
+          {Input.t(), non_neg_integer(), integer()} | nil,
+          Input.t(),
+          non_neg_integer(),
+          integer()
+        ) :: {Input.t(), non_neg_integer(), integer()}
+  defp latest_intent(
+         {%Input{} = snap, seq, pushed_at},
+         _fallback,
+         rejected_seq,
+         _fallback_pushed_at
+       )
+       when seq > rejected_seq,
+       do: {snap, seq, pushed_at}
+
+  defp latest_intent(_pending, %Input{} = fallback, rejected_seq, fallback_pushed_at) do
+    unique_seq = System.unique_integer([:positive, :monotonic])
+    {fallback, max(unique_seq, rejected_seq + 1), fallback_pushed_at}
+  end
+
   @spec use_latest_renderer_state(Input.t(), Caches.t(), MessageStore.t() | nil) :: Input.t()
   defp use_latest_renderer_state(%Input{} = snap, %Caches{} = latest_caches, latest_message_store) do
     snap
@@ -291,10 +486,10 @@ defmodule MingaEditor.Renderer.Server do
 
   @spec use_latest_caches(Input.t(), Caches.t()) :: Input.t()
   defp use_latest_caches(
-         %Input{caches: %Caches{last_emitted_frame_seq: 0}} = snap,
-         %Caches{last_emitted_frame_seq: latest_seq}
+         %Input{caches: %Caches{recovery_generation: snap_generation}} = snap,
+         %Caches{recovery_generation: latest_generation}
        )
-       when latest_seq > 0 do
+       when snap_generation > latest_generation do
     snap
   end
 

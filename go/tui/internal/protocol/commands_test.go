@@ -60,8 +60,8 @@ func TestDecodeProtocolError(t *testing.T) {
 }
 
 func TestDecodeBeginFrame(t *testing.T) {
-	// begin_frame (#2219): opcode + frame_seq:u32 + base_frame_seq:u32.
-	packet := []byte{generated.OPBeginFrame, 0, 0, 0, 7, 0, 0, 0, 3}
+	// begin_frame (#2739): opcode + frame_seq:u32 + base_frame_seq:u32 + generation:u32.
+	packet := []byte{generated.OPBeginFrame, 0, 0, 0, 7, 0, 0, 0, 3, 0, 0, 0, 9}
 	cmd, err := DecodeCommand(packet)
 	if err != nil {
 		t.Fatalf("DecodeCommand returned error: %v", err)
@@ -69,11 +69,11 @@ func TestDecodeBeginFrame(t *testing.T) {
 	if cmd.Kind != CommandBeginFrame {
 		t.Fatalf("kind = %v, want begin frame", cmd.Kind)
 	}
-	if cmd.Size != 9 {
-		t.Fatalf("size = %d, want 9", cmd.Size)
+	if cmd.Size != 13 {
+		t.Fatalf("size = %d, want 13", cmd.Size)
 	}
-	if cmd.FrameSeq != 7 || cmd.BaseFrameSeq != 3 {
-		t.Fatalf("frame_seq/base = %d/%d, want 7/3", cmd.FrameSeq, cmd.BaseFrameSeq)
+	if cmd.FrameSeq != 7 || cmd.BaseFrameSeq != 3 || cmd.Generation != 9 {
+		t.Fatalf("frame_seq/base/generation = %d/%d/%d, want 7/3/9", cmd.FrameSeq, cmd.BaseFrameSeq, cmd.Generation)
 	}
 }
 

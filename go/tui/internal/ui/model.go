@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/viewport"
@@ -97,9 +98,9 @@ type Model struct {
 	// last_good_frame_seq carried by request_keyframe. 0 means no frame committed
 	// yet (only a base-0 keyframe is valid until then).
 	lastCommittedSeq uint32
-	// resyncPending is set when the model discarded a transaction and asked the
-	// BEAM for a keyframe (#2219). It drives a subtle footer indicator while the
-	// frontend waits, and clears when a valid commit applies.
+	// resyncPending is set when the model rejected a transaction. It drives a
+	// subtle footer indicator while the BEAM performs typed-status recovery, and
+	// clears when a valid commit applies.
 	resyncPending bool
 	// surfacePlacements is the BEAM's authoritative per-frame surface layout from
 	// gui_surface_layout (0xA4, #2268): one rect+z list. Compositing reads the z
@@ -128,8 +129,9 @@ type frameStaging struct {
 	// base is the begin_frame's base_frame_seq; 0 means keyframe (always valid),
 	// otherwise it must equal lastCommittedSeq.
 	base uint32
-	// commands are the buffered semantic/chrome commands in arrival order,
-	// replayed through the live mutation switch at a valid commit.
+	// generation is echoed on every status event.
+	generation uint32
+	// commands are the buffered semantic/chrome commands in arrival order.
 	commands []protocol.Command
 }
 
@@ -517,7 +519,7 @@ func (m Model) cursorStyleSequence() string {
 // accumulate in it without touching the live model; commit_frame validates and
 // replays the buffer atomically. Out-of-band commands (set_title/set_window_bg, clipboard writes, no-op compatibility commands, protocol_error, transport survivors) apply directly with no open transaction; the same command inside a transaction stages and applies at commit. A semantic/chrome command with NO open transaction, or any stream
 // error / invalidation, is a protocol violation under the staged model and
-// triggers request_keyframe instead of a partial paint.
+// triggers typed frame rejection instead of a partial paint.
 func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 	cmds := make([]tea.Cmd, 0, 1)
 	for _, command := range commands {
@@ -529,9 +531,10 @@ func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 				cmds = m.invalidateStaging(cmds, "truncated frame transaction (begin while open)")
 			}
 			m.staging = &frameStaging{
-				seq:      command.FrameSeq,
-				base:     command.BaseFrameSeq,
-				commands: make([]protocol.Command, 0, 16),
+				seq:        command.FrameSeq,
+				base:       command.BaseFrameSeq,
+				generation: command.Generation,
+				commands:   make([]protocol.Command, 0, 16),
 			}
 		case protocol.CommandCommitFrame:
 			cmds = m.commitStaging(cmds, command)
@@ -591,7 +594,7 @@ func stagingThemeValidation(commands []protocol.Command) (found bool, missing []
 // commitStaging validates the open transaction against the commit and, if valid,
 // replays its buffered commands through the live mutation switch in one shot,
 // then fires the commit-gated behaviors (latency resolve). An invalid or missing
-// transaction discards staging and requests a keyframe (#2219), except a missing theme on a keyframe latches a protocol error because the BEAM must own theme selection.
+// transaction discards staging and emits typed rejection (#2219), except a missing theme on a keyframe latches a protocol error because the BEAM must own theme selection.
 func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cmd {
 	if m.staging == nil {
 		// commit with no open begin: the begin was lost or truncated. Resync.
@@ -627,11 +630,21 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 		m.lineCache.reset()
 	}
 
+	// Validate every window reference against a temporary snapshot before any
+	// publication. A miss returns targeted status and leaves surrounding state live.
+	if windowID, missed := m.validateWindowReferences(); missed {
+		generation, seq := m.staging.generation, m.staging.seq
+		m.send(protocol.EncodeWindowRefMiss(generation, seq, m.lastCommittedSeq, windowID))
+		m.staging = nil
+		return cmds
+	}
+
 	// Valid: replay the buffer atomically through the live mutation path.
+	generation, seq := m.staging.generation, m.staging.seq
 	for _, staged := range m.staging.commands {
 		m.applyMutation(staged)
 	}
-	m.lastCommittedSeq = m.staging.seq
+	m.lastCommittedSeq = seq
 	m.staging = nil
 	// A clean commit clears any pending resync indicator: the frontend is back
 	// in sync with the BEAM (#2219).
@@ -641,29 +654,81 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 	// to the terminal, so resolve the keystroke-to-write latency sample now for
 	// the echoed correlation sequence (ticket #2215, resolved on commit).
 	m.latency.Resolve(command.InputSeq)
+	m.send(protocol.EncodeFrameApplied(generation, seq))
 	return cmds
 }
 
-// invalidateStaging discards any open transaction and emits a request_keyframe
-// carrying the last cleanly committed frame_seq (#2219). It is the single sink
-// for every invalidation: truncation, seq mismatch, base mismatch, a stream
-// error inside a transaction, and an out-of-transaction semantic command. The
-// live model keeps the last committed frame, so View() never paints a partial.
+// invalidateStaging discards any open transaction and emits one typed
+// frame_rejected status. It is the single sink for every invalidation: truncation,
+// seq mismatch, base mismatch, a stream error inside a transaction, and an
+// out-of-transaction semantic command. The live model keeps the last committed
+// frame, so View() never paints a partial. request_keyframe remains reserved for
+// an explicit manual retry rather than duplicating automatic typed recovery.
 func (m *Model) invalidateStaging(cmds []tea.Cmd, reason string) []tea.Cmd {
+	generation, frameSeq := uint32(0), uint32(0)
+	if m.staging != nil {
+		generation, frameSeq = m.staging.generation, m.staging.seq
+	}
+	m.send(protocol.EncodeFrameRejected(generation, frameSeq, m.lastCommittedSeq, rejectionCode(reason)))
 	m.staging = nil
-	// Debounce the keyframe request: after an invalidation, every stale
-	// in-flight frame also fails its base check (the BEAM advances
-	// base_frame_seq for frames we discarded), and re-requesting per frame
-	// would force a duplicate BEAM render each. One request per resync
-	// window; the pending flag clears when a valid commit applies. The diagnostic
-	// follows the same debounce and is sent to BEAM's *Messages* log instead of
-	// raw stderr, because stderr writes can corrupt the terminal renderer.
+	// Typed rejection is the automatic recovery trigger. Keep diagnostics and
+	// the visible resync state debounced while stale frames from the old credit
+	// drain, but never send a second recovery trigger automatically.
 	if !m.resyncPending {
 		m.resyncPending = true
-		m.logToMessages(protocol.LogLevelWarn, "Go TUI frame invalidated (%s), requesting keyframe from %d", reason, m.lastCommittedSeq)
-		m.send(protocol.EncodeRequestKeyframe(m.lastCommittedSeq))
+		m.logToMessages(protocol.LogLevelWarn, "Go TUI frame invalidated (%s), awaiting recovery from %d", reason, m.lastCommittedSeq)
 	}
 	return cmds
+}
+
+func rejectionCode(reason string) byte {
+	switch {
+	case strings.Contains(reason, "begin while open"):
+		return protocol.RejectTruncation
+	case strings.Contains(reason, "commit_frame"):
+		return protocol.RejectCommitSequence
+	case strings.Contains(reason, "base mismatch"):
+		return protocol.RejectBaseSequence
+	case strings.Contains(reason, "missing gui_theme slots"):
+		return protocol.RejectIncompleteTheme
+	case strings.Contains(reason, "missing gui_theme"):
+		return protocol.RejectMissingTheme
+	case strings.Contains(reason, "stream error"):
+		return protocol.RejectDecodeFailure
+	case strings.Contains(reason, "outside frame transaction"):
+		return protocol.RejectOutOfTransaction
+	default:
+		return 255
+	}
+}
+
+// validateWindowReferences resolves deltas against a temporary window snapshot.
+// It performs no observable writes, so a miss can be reported before publication.
+func (m *Model) validateWindowReferences() (uint16, bool) {
+	working := make(map[uint16]protocol.WindowContent, len(m.windows))
+	for id, window := range m.windows {
+		working[id] = window
+	}
+	for _, command := range m.staging.commands {
+		switch command.Kind {
+		case protocol.CommandWindowContent:
+			working[command.Window.ID] = command.Window
+		case protocol.CommandWindowDelta:
+			previous, ok := working[command.Window.ID]
+			if !ok || previous.ContentEpoch != command.Window.ContentEpoch {
+				return command.Window.ID, true
+			}
+			if command.Window.Rows != nil {
+				rows, err := resolveWindowRows(previous.Rows, command.Window.Rows)
+				if err != nil {
+					return command.Window.ID, true
+				}
+				previous.Rows = rows
+			}
+			working[command.Window.ID] = previous
+		}
+	}
+	return 0, false
 }
 
 // applyMutation runs a single command through the live per-command mutation
@@ -960,7 +1025,7 @@ func (m Model) send(payload []byte) {
 	}
 }
 
-func (m Model) logToMessages(level byte, format string, args ...any) {
+func (m Model) logToMessages(level byte, format string, args ...interface{}) {
 	m.send(protocol.EncodeLogMessage(level, fmt.Sprintf(format, args...)))
 }
 
