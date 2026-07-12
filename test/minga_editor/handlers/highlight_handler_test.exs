@@ -5,8 +5,10 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.Parser.EventCorrelation
   alias Minga.Parser.Manager
   alias MingaEditor.Handlers.HighlightHandler
+  alias MingaEditor.HighlightSync
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.UI.Highlight
@@ -152,6 +154,40 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
         )
 
       assert new_state.highlighting.highlights[other_buf] != nil
+    end
+
+    test "an old queued event is rejected after registration presentation replacement" do
+      state = base_state()
+      buffer = active_buffer(state)
+      old_correlation = EventCorrelation.new(make_ref(), 4)
+      current_correlation = EventCorrelation.new(make_ref(), 0)
+
+      state =
+        state
+        |> with_highlight(buffer)
+        |> then(fn state ->
+          current = HighlightSync.get_highlight(state, buffer)
+
+          HighlightSync.put_highlight(
+            state,
+            buffer,
+            Highlight.correlate(current, current_correlation)
+          )
+        end)
+
+      old_event =
+        {:minga_highlight,
+         {:buffer_event, buffer, old_correlation, {:highlight_spans, [%{start_byte: 0}]}}}
+
+      assert {^state, []} = HighlightHandler.handle(state, old_event)
+
+      current_event =
+        {:minga_highlight,
+         {:buffer_event, buffer, %{current_correlation | version: 1}, {:highlight_spans, []}}}
+
+      {accepted, effects} = HighlightHandler.handle(state, current_event)
+      assert :render in effects
+      assert HighlightSync.get_highlight(accepted, buffer).parser_correlation.version == 1
     end
 
     test "queued parser events cannot recreate removed presentation state" do

@@ -13,6 +13,7 @@ defmodule MingaEditor.Handlers.HighlightHandler do
   scheduling) are expressed as effects.
   """
 
+  alias Minga.Parser.EventCorrelation
   alias MingaEditor.HighlightEvents
   alias MingaEditor.HighlightSync
   alias MingaEditor.State, as: EditorState
@@ -47,6 +48,30 @@ defmodule MingaEditor.Handlers.HighlightHandler do
   def handle(state, :setup_highlight) do
     new_state = HighlightSync.setup_for_buffer(state)
     {new_state, [{:request_semantic_tokens}]}
+  end
+
+  # ── correlated buffer events ─────────────────────────────────────────────
+
+  def handle(
+        state,
+        {:minga_highlight,
+         {:buffer_event, buffer_pid, %EventCorrelation{} = correlation, payload}}
+      )
+      when is_pid(buffer_pid) do
+    highlight = HighlightSync.get_highlight(state, buffer_pid)
+
+    if MingaEditor.UI.Highlight.accepts_correlation?(highlight, correlation) do
+      {state, effects} = handle(state, {:minga_highlight, attach_buffer(payload, buffer_pid)})
+
+      updated =
+        state
+        |> HighlightSync.get_highlight(buffer_pid)
+        |> MingaEditor.UI.Highlight.accept_correlation(correlation)
+
+      {HighlightSync.put_highlight(state, buffer_pid, updated), effects}
+    else
+      {state, []}
+    end
   end
 
   # ── highlight_names ──────────────────────────────────────────────────────
@@ -168,6 +193,19 @@ defmodule MingaEditor.Handlers.HighlightHandler do
   end
 
   # ── Private helpers ──────────────────────────────────────────────────────
+
+  @spec attach_buffer(term(), pid()) :: term()
+  defp attach_buffer({:highlight_names, names}, pid), do: {:highlight_names, pid, names}
+  defp attach_buffer({:highlight_spans, spans}, pid), do: {:highlight_spans, pid, spans}
+  defp attach_buffer({:injection_ranges, ranges}, pid), do: {:injection_ranges, pid, ranges}
+  defp attach_buffer({:conceal_spans, spans}, pid), do: {:conceal_spans, pid, spans}
+  defp attach_buffer({:fold_ranges, ranges}, pid), do: {:fold_ranges, pid, ranges}
+
+  defp attach_buffer({:textobject_positions, positions}, pid),
+    do: {:textobject_positions, pid, positions}
+
+  defp attach_buffer({:document_symbols, symbols}, pid), do: {:document_symbols, pid, symbols}
+  defp attach_buffer(payload, _pid), do: payload
 
   @spec handle_highlight_names(EditorState.t(), pid(), [String.t()]) ::
           {EditorState.t(), [highlight_effect()]}
@@ -291,7 +329,12 @@ defmodule MingaEditor.Handlers.HighlightHandler do
   defp handle_parser_restarted(state) do
     reset_highlights =
       Map.new(state.highlighting.highlights, fn {pid, buffer_highlight} ->
-        {pid, %{buffer_highlight | version: 0}}
+        reset =
+          buffer_highlight
+          |> Map.put(:version, 0)
+          |> MingaEditor.UI.Highlight.reset_parser_version()
+
+        {pid, reset}
       end)
 
     new_state =

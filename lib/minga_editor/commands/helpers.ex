@@ -452,6 +452,20 @@ defmodule MingaEditor.Commands.Helpers do
   def resolve_motion_target(buf, cursor, motion, buffer_pid),
     do: resolve_motion(buf, cursor, motion, buffer_pid)
 
+  @doc "Resolves a motion target through the configured parser manager."
+  @spec resolve_motion_target(
+          Buffer.document(),
+          CoreEditing.Motion.position(),
+          atom(),
+          pid(),
+          GenServer.server()
+        ) :: CoreEditing.Motion.position() | nil
+  def resolve_motion_target(_buf, cursor, :match_bracket, buffer_pid, parser_manager),
+    do: request_match_item(buffer_pid, cursor, parser_manager)
+
+  def resolve_motion_target(buf, cursor, motion, buffer_pid, _parser_manager),
+    do: resolve_motion(buf, cursor, motion, buffer_pid)
+
   @doc "Applies a find-char motion in the given direction."
   @spec apply_find_char(pid(), ModeState.find_direction(), String.t()) :: :ok
   def apply_find_char(buf, dir, char) do
@@ -482,7 +496,7 @@ defmodule MingaEditor.Commands.Helpers do
     gb = Buffer.snapshot(buf)
     cursor = Document.cursor(gb)
 
-    case resolve_motion_target(gb, cursor, motion, buf) do
+    case resolve_motion_target(gb, cursor, motion, buf, state.parser_manager) do
       nil ->
         state
 
@@ -546,7 +560,7 @@ defmodule MingaEditor.Commands.Helpers do
   def apply_text_object(%{workspace: %{buffers: %{active: buf}}} = state, modifier, spec, action) do
     gb = Buffer.snapshot(buf)
     cursor = Document.cursor(gb)
-    range = compute_text_object_range(gb, cursor, modifier, spec, buf)
+    range = compute_text_object_range(gb, cursor, modifier, spec, buf, state.parser_manager)
 
     case {linewise_spec?(spec), action, range} do
       {_, _, nil} ->
@@ -618,52 +632,75 @@ defmodule MingaEditor.Commands.Helpers do
           CoreEditing.TextObject.position(),
           atom(),
           term(),
-          pid()
-        ) ::
-          CoreEditing.TextObject.range()
-  def compute_text_object_range(buf, pos, :inner, :word, _buffer_pid),
+          pid(),
+          GenServer.server()
+        ) :: CoreEditing.TextObject.range()
+  def compute_text_object_range(
+        buf,
+        pos,
+        modifier,
+        spec,
+        buffer_pid,
+        parser_manager \\ ParserManager
+      )
+
+  def compute_text_object_range(buf, pos, :inner, :word, _buffer_pid, _manager),
     do: CoreEditing.select_inner_word(buf, pos)
 
-  def compute_text_object_range(buf, pos, :around, :word, _buffer_pid),
+  def compute_text_object_range(buf, pos, :around, :word, _buffer_pid, _manager),
     do: CoreEditing.select_around_word(buf, pos)
 
-  def compute_text_object_range(buf, pos, :inner, {:quote, q}, _buffer_pid),
+  def compute_text_object_range(buf, pos, :inner, {:quote, q}, _buffer_pid, _manager),
     do: CoreEditing.select_inner_quotes(buf, pos, q)
 
-  def compute_text_object_range(buf, pos, :around, {:quote, q}, _buffer_pid),
+  def compute_text_object_range(buf, pos, :around, {:quote, q}, _buffer_pid, _manager),
     do: CoreEditing.select_around_quotes(buf, pos, q)
 
-  def compute_text_object_range(buf, pos, :inner, {:paren, open, close}, _buffer_pid),
+  def compute_text_object_range(buf, pos, :inner, {:paren, open, close}, _buffer_pid, _manager),
     do: CoreEditing.select_inner_parens(buf, pos, open, close)
 
-  def compute_text_object_range(buf, pos, :around, {:paren, open, close}, _buffer_pid),
+  def compute_text_object_range(buf, pos, :around, {:paren, open, close}, _buffer_pid, _manager),
     do: CoreEditing.select_around_parens(buf, pos, open, close)
 
-  def compute_text_object_range(buf, pos, :inner, :paragraph, _buffer_pid),
+  def compute_text_object_range(buf, pos, :inner, :paragraph, _buffer_pid, _manager),
     do: CoreEditing.select_inner_paragraph(buf, pos)
 
-  def compute_text_object_range(buf, pos, :around, :paragraph, _buffer_pid),
+  def compute_text_object_range(buf, pos, :around, :paragraph, _buffer_pid, _manager),
     do: CoreEditing.select_around_paragraph(buf, pos)
 
-  def compute_text_object_range(buf, pos, :inner, :sentence, _buffer_pid),
+  def compute_text_object_range(buf, pos, :inner, :sentence, _buffer_pid, _manager),
     do: CoreEditing.select_inner_sentence(buf, pos)
 
-  def compute_text_object_range(buf, pos, :around, :sentence, _buffer_pid),
+  def compute_text_object_range(buf, pos, :around, :sentence, _buffer_pid, _manager),
     do: CoreEditing.select_around_sentence(buf, pos)
 
-  def compute_text_object_range(_buf, {line, col}, :inner, {:structural, type}, buffer_pid) do
+  def compute_text_object_range(
+        _buf,
+        {line, col},
+        :inner,
+        {:structural, type},
+        buffer_pid,
+        parser_manager
+      ) do
     capture = Atom.to_string(type) <> ".inside"
-    tree_data = request_textobject(buffer_pid, line, col, capture)
+    tree_data = request_textobject(buffer_pid, line, col, capture, parser_manager)
     CoreEditing.select_structural_inner(tree_data)
   end
 
-  def compute_text_object_range(_buf, {line, col}, :around, {:structural, type}, buffer_pid) do
+  def compute_text_object_range(
+        _buf,
+        {line, col},
+        :around,
+        {:structural, type},
+        buffer_pid,
+        parser_manager
+      ) do
     capture = Atom.to_string(type) <> ".around"
-    tree_data = request_textobject(buffer_pid, line, col, capture)
+    tree_data = request_textobject(buffer_pid, line, col, capture, parser_manager)
     CoreEditing.select_structural_around(tree_data)
   end
 
-  def compute_text_object_range(_buf, _pos, _modifier, _spec, _buffer_pid), do: nil
+  def compute_text_object_range(_buf, _pos, _modifier, _spec, _buffer_pid, _manager), do: nil
 
   @doc "Scrolls the buffer cursor by `delta` lines, clamping to bounds."
   @spec page_move(pid(), Viewport.t(), integer()) :: :ok
@@ -709,17 +746,27 @@ defmodule MingaEditor.Commands.Helpers do
 
   # Queries the tree-sitter parser for a textobject range, returning the raw
   # 4-tuple or nil. Gracefully returns nil when the parser is not running.
-  @spec request_textobject(pid(), non_neg_integer(), non_neg_integer(), String.t()) ::
-          CoreEditing.TextObject.tree_range()
-  defp request_textobject(buffer_pid, row, col, capture_name) do
-    ParserManager.request_textobject(buffer_pid, row, col, capture_name)
+  @spec request_textobject(
+          pid(),
+          non_neg_integer(),
+          non_neg_integer(),
+          String.t(),
+          GenServer.server()
+        ) :: CoreEditing.TextObject.tree_range()
+  defp request_textobject(buffer_pid, row, col, capture_name, parser_manager) do
+    ParserManager.request_textobject(buffer_pid, row, col, capture_name, parser_manager)
   catch
     :exit, _ -> nil
   end
 
+  @spec request_match_item(pid(), CoreEditing.Motion.position(), GenServer.server()) ::
+          CoreEditing.Motion.position() | nil
+  defp request_match_item(buffer_pid, {line, col}, parser_manager) do
+    ParserManager.request_match_item(buffer_pid, line, col, parser_manager)
+  end
+
   @spec request_match_item(pid(), CoreEditing.Motion.position()) ::
           CoreEditing.Motion.position() | nil
-  defp request_match_item(buffer_pid, {line, col}) do
-    ParserManager.request_match_item(buffer_pid, line, col)
-  end
+  defp request_match_item(buffer_pid, position),
+    do: request_match_item(buffer_pid, position, ParserManager)
 end

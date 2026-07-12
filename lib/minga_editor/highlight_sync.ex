@@ -93,8 +93,10 @@ defmodule MingaEditor.HighlightSync do
     config = buffer_config(language)
 
     try do
-      ParserManager.register_buffer(buf_pid, config, server: state.parser_manager)
-      put_buffer_presentation(state, buf_pid, Keyword.get(opts, :syntax))
+      correlation =
+        ParserManager.register_buffer_correlated(buf_pid, config, server: state.parser_manager)
+
+      put_buffer_presentation(state, buf_pid, Keyword.get(opts, :syntax), correlation)
     catch
       :exit, reason ->
         Minga.Log.warning(:port, "Parser registration unavailable: #{inspect(reason)}")
@@ -114,14 +116,19 @@ defmodule MingaEditor.HighlightSync do
     }
   end
 
-  @spec put_buffer_presentation(EditorState.t(), pid(), MingaEditor.UI.Theme.syntax() | nil) ::
-          EditorState.t()
-  defp put_buffer_presentation(state, buf_pid, custom_syntax) do
+  @spec put_buffer_presentation(
+          EditorState.t(),
+          pid(),
+          MingaEditor.UI.Theme.syntax() | nil,
+          Minga.Parser.EventCorrelation.t()
+        ) :: EditorState.t()
+  defp put_buffer_presentation(state, buf_pid, custom_syntax, correlation) do
     highlight =
       case custom_syntax do
         nil -> Highlight.from_theme(state.theme)
         syntax -> Highlight.new(syntax)
       end
+      |> Highlight.correlate(correlation)
 
     state = put_highlight(state, buf_pid, highlight)
 

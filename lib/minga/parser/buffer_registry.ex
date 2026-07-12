@@ -7,6 +7,7 @@ defmodule Minga.Parser.BufferRegistry do
   alias Minga.Parser.BufferRegistration
 
   @type meta :: BufferRegistration.t()
+  @type register_status :: :new | :existing | {:replaced, pos_integer()}
   @type t :: %__MODULE__{
           entries: %{pid() => meta()},
           ids: %{pid() => pos_integer()},
@@ -31,7 +32,7 @@ defmodule Minga.Parser.BufferRegistry do
 
   @doc "Registers a buffer, preserving identity only while its inert configuration is unchanged."
   @spec register(t(), pid(), BufferConfig.t(), integer()) ::
-          {pos_integer(), :new | :existing | {:replaced, pos_integer()}, t()}
+          {pos_integer(), register_status(), t()}
   def register(%__MODULE__{} = registry, buffer_pid, %BufferConfig{} = config, now) do
     case Map.fetch(registry.entries, buffer_pid) do
       {:ok, %BufferRegistration{config: ^config} = existing} ->
@@ -167,7 +168,7 @@ defmodule Minga.Parser.BufferRegistry do
           {pos_integer(), :new, t()}
   defp insert_registration(registry, buffer_pid, config, now) do
     buffer_id = registry.next_id
-    registration = BufferRegistration.new(buffer_id, config)
+    registration = BufferRegistration.new(buffer_id, config, make_ref())
 
     updated = %{
       registry
@@ -185,7 +186,7 @@ defmodule Minga.Parser.BufferRegistry do
           {pos_integer(), {:replaced, pos_integer()}, t()}
   defp replace_registration(registry, buffer_pid, config, old_id, now) do
     buffer_id = registry.next_id
-    registration = BufferRegistration.new(buffer_id, config)
+    registration = BufferRegistration.new(buffer_id, config, make_ref())
 
     updated = %{
       registry

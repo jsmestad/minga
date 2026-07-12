@@ -304,7 +304,7 @@ defmodule MingaEditor.Commands.Movement do
     # a match on the same committed top still discards a frontend-held local
     # offset; no matching bracket is a no-op and must not mark.
     state =
-      case ParserManager.request_match_item(buf, row, col) do
+      case ParserManager.request_match_item(buf, row, col, state.parser_manager) do
         nil ->
           state
 
@@ -720,7 +720,8 @@ defmodule MingaEditor.Commands.Movement do
            buf,
            row,
            col,
-           structural_nav_action_code(action)
+           structural_nav_action_code(action),
+           state.parser_manager
          ) do
       %StructuralNavResult{type_name: type_name} = result ->
         Buffer.move_to(buf, StructuralNavResult.start_position(result))

@@ -14,6 +14,8 @@ const protocol = @import("protocol.zig");
 const highlighter_mod = @import("highlighter.zig");
 const c = highlighter_mod.c;
 
+const max_inbound_frame_size = 64 * 1024 * 1024;
+
 // ── Custom log function ───────────────────────────────────────────────────────
 // Routes std.log calls over the port protocol to the BEAM instead of stderr.
 // The parser uses a blocking writer since it has a simple stdin/stdout loop
@@ -86,7 +88,6 @@ pub fn main(init: std.process.Init) !void {
     g_port_writer = stdout;
 
     const stdin_fd = std.posix.STDIN_FILENO;
-    var msg_buf: [65536]u8 = undefined;
 
     // Per-buffer state: each buffer_id maps to its own source mirror.
     var buffers = BufferMap{};
@@ -105,18 +106,16 @@ pub fn main(init: std.process.Init) !void {
 
         const msg_len: usize = std.mem.readInt(u32, &len_buf, .big);
         if (msg_len == 0) continue;
-        if (msg_len > msg_buf.len) {
-            // Message too large; skip it.
-            var skip_remaining = msg_len;
-            while (skip_remaining > 0) {
-                const chunk = @min(skip_remaining, msg_buf.len);
-                if (!try readExact(stdin_fd, msg_buf[0..chunk])) return;
-                skip_remaining -= chunk;
-            }
-            continue;
+        if (msg_len > max_inbound_frame_size) {
+            std.log.err("inbound parser frame exceeds {} byte limit: {}", .{
+                max_inbound_frame_size,
+                msg_len,
+            });
+            return error.FrameTooLarge;
         }
 
-        const payload = msg_buf[0..msg_len];
+        const payload = try alloc.alloc(u8, msg_len);
+        defer alloc.free(payload);
         if (!try readExact(stdin_fd, payload)) break;
 
         // Dispatch commands within the payload.

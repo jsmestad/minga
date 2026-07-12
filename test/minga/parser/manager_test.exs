@@ -18,7 +18,10 @@ defmodule Minga.Parser.ManagerTest do
       buffer = setup_buffer(server, content)
       _indent = Manager.request_indent(buffer, 1, server)
 
-      assert_receive {:minga_highlight, {:document_symbols, ^buffer, symbols}}, 2_000
+      assert_receive {:minga_highlight,
+                      {:buffer_event, ^buffer, _correlation, {:document_symbols, symbols}}},
+                     2_000
+
       assert Enum.any?(symbols, &match?(%Minga.Language.Symbol{kind: :module, name: "Foo"}, &1))
       assert Enum.any?(symbols, &match?(%Minga.Language.Symbol{kind: :function, name: "bar"}, &1))
     end
@@ -30,7 +33,9 @@ defmodule Minga.Parser.ManagerTest do
       :ok = Manager.subscribe(server)
       buffer = setup_buffer(server, content)
 
-      assert_receive {:minga_highlight, {:document_symbols, ^buffer, initial_symbols}}, 2_000
+      assert_receive {:minga_highlight,
+                      {:buffer_event, ^buffer, _correlation, {:document_symbols, initial_symbols}}},
+                     2_000
 
       assert Enum.any?(
                initial_symbols,
@@ -39,7 +44,9 @@ defmodule Minga.Parser.ManagerTest do
 
       :ok = Minga.Buffer.apply_edit(buffer, 1, 6, 1, 8, "bar")
 
-      assert_receive {:minga_highlight, {:document_symbols, ^buffer, edited_symbols}}, 2_000
+      assert_receive {:minga_highlight,
+                      {:buffer_event, ^buffer, _correlation, {:document_symbols, edited_symbols}}},
+                     2_000
 
       assert Enum.any?(
                edited_symbols,
@@ -76,6 +83,17 @@ defmodule Minga.Parser.ManagerTest do
       buffer = setup_buffer_ready(server, "elixir", content)
 
       assert Manager.request_indent(buffer, 1, server) == 1
+    end
+  end
+
+  describe "sequence-fenced requests" do
+    test "an immediate query observes the buffer edit that completed before the call" do
+      server = start_parser_manager()
+      buffer = setup_buffer_ready(server, "elixir", "def foo do\nvalue\nend\n")
+
+      :ok = Minga.Buffer.apply_edit(buffer, 1, 0, 1, 0, "if true do\n")
+
+      assert Manager.request_indent(buffer, 2, server) == 2
     end
   end
 
@@ -116,9 +134,16 @@ defmodule Minga.Parser.ManagerTest do
       first = setup_buffer(server, "defmodule First do\nend\n")
       second = setup_buffer(server, "defmodule Second do\nend\n")
 
-      assert_receive {:minga_highlight, {:highlight_spans, ^first, _spans}}, 2_000
-      refute_received {:minga_highlight, {:highlight_names, ^second, _names}}
-      assert_receive {:minga_highlight, {:highlight_spans, ^second, _spans}}, 2_000
+      assert_receive {:minga_highlight,
+                      {:buffer_event, ^first, _correlation, {:highlight_spans, _spans}}},
+                     2_000
+
+      refute_received {:minga_highlight,
+                       {:buffer_event, ^second, _correlation, {:highlight_names, _names}}}
+
+      assert_receive {:minga_highlight,
+                      {:buffer_event, ^second, _correlation, {:highlight_spans, _spans}}},
+                     2_000
     end
 
     test "parser-side parse failure emits completion and leaves the registration pumpable" do
@@ -131,9 +156,15 @@ defmodule Minga.Parser.ManagerTest do
           server: server
         )
 
-      assert_receive {:minga_highlight, {:highlight_spans, ^buffer, []}}, 2_000
+      assert_receive {:minga_highlight,
+                      {:buffer_event, ^buffer, _correlation, {:highlight_spans, []}}},
+                     2_000
+
       assert :ok = Manager.request_parse(buffer, server)
-      assert_receive {:minga_highlight, {:highlight_spans, ^buffer, []}}, 2_000
+
+      assert_receive {:minga_highlight,
+                      {:buffer_event, ^buffer, _correlation, {:highlight_spans, []}}},
+                     2_000
     end
 
     test "parser-requested recovery autonomously forces a fresh full parse" do
@@ -143,7 +174,9 @@ defmodule Minga.Parser.ManagerTest do
       buffer = setup_buffer(server, content)
       buffer_id = Manager.buffer_id(buffer, server)
 
-      assert_receive {:minga_highlight, {:highlight_spans, ^buffer, _initial_spans}}, 2_000
+      assert_receive {:minga_highlight,
+                      {:buffer_event, ^buffer, _correlation, {:highlight_spans, _initial_spans}}},
+                     2_000
 
       invalid_edit = %{
         start_byte: 10_000,
@@ -159,7 +192,10 @@ defmodule Minga.Parser.ManagerTest do
         Protocol.encode_edit_buffer(buffer_id, 2, [invalid_edit])
       ])
 
-      assert_receive {:minga_highlight, {:highlight_spans, ^buffer, _recovered_spans}}, 2_000
+      assert_receive {:minga_highlight,
+                      {:buffer_event, ^buffer, _correlation, {:highlight_spans, _recovered_spans}}},
+                     2_000
+
       refute_receive {:minga_highlight, {:request_reparse, ^buffer}}, 100
     end
 
@@ -177,8 +213,67 @@ defmodule Minga.Parser.ManagerTest do
       assert Manager.buffer_id(buffer, server) == buffer_id
       assert Manager.resolve_buffer(buffer_id, server) == buffer
       assert_receive {:minga_highlight, :parser_restarted}, 2_000
-      assert_receive {:minga_highlight, {:highlight_names, ^buffer, _names}}, 2_000
-      assert_receive {:minga_highlight, {:highlight_spans, ^buffer, _spans}}, 2_000
+
+      assert_receive {:minga_highlight,
+                      {:buffer_event, ^buffer, _correlation, {:highlight_names, _names}}},
+                     2_000
+
+      assert_receive {:minga_highlight,
+                      {:buffer_event, ^buffer, _correlation, {:highlight_spans, _spans}}},
+                     2_000
+    end
+  end
+
+  describe "frame and admission isolation" do
+    test "a source snapshot above 64 KiB parses and leaves another buffer usable" do
+      server = start_parser_manager()
+      :ok = Manager.subscribe(server)
+
+      # Exercise Port framing rather than highlighter throughput: one JSON string
+      # crosses 64 KiB while producing a single syntax node and capture span.
+      large_source = "\"" <> String.duplicate("x", 70_000) <> "\""
+
+      large = setup_buffer(server, "json", large_source)
+      healthy = setup_buffer(server, "defmodule Healthy do\nend\n")
+
+      assert byte_size(large_source) > 65_536
+
+      assert_receive {:minga_highlight,
+                      {:buffer_event, ^large, _correlation, {:highlight_spans, _spans}}},
+                     4_000
+
+      assert_receive {:minga_highlight,
+                      {:buffer_event, ^healthy, _correlation, {:highlight_spans, _spans}}},
+                     2_000
+
+      assert is_integer(Manager.request_indent(healthy, 1, server))
+    end
+
+    test "a stalled snapshot drops only that buffer and continues queued work" do
+      server = start_parser_manager()
+      :ok = Manager.subscribe(server)
+
+      stalled =
+        start_supervised!(
+          {Task, fn -> stalled_snapshot_provider() end},
+          id: {:stalled_snapshot, System.unique_integer([:positive])}
+        )
+
+      _stalled_id =
+        Manager.register_buffer(stalled, %BufferConfig{language: "elixir"}, server: server)
+
+      healthy = setup_buffer(server, "defmodule HealthyAfterTimeout do\nend\n")
+      scheduler = :sys.get_state(server).parse_scheduler
+      token = scheduler.timeout_token
+      send(server, {:parse_admission_timeout, stalled, token})
+
+      assert_receive {:minga_highlight,
+                      {:buffer_event, ^healthy, _correlation, {:highlight_spans, _spans}}},
+                     2_000
+
+      assert Manager.buffer_id(stalled, server) == nil
+      assert Manager.available?(server)
+      refute_received {:minga_highlight, :parser_crashed}
     end
   end
 
@@ -273,8 +368,13 @@ defmodule Minga.Parser.ManagerTest do
   # Waits for the highlight broadcast for `buffer` and returns a list of
   # `{capture_name, captured_text}` tuples for the parsed `content`.
   defp receive_captures(_server, buffer, content) do
-    assert_receive {:minga_highlight, {:highlight_names, ^buffer, names}}, 2_000
-    assert_receive {:minga_highlight, {:highlight_spans, ^buffer, spans}}, 2_000
+    assert_receive {:minga_highlight,
+                    {:buffer_event, ^buffer, _correlation, {:highlight_names, names}}},
+                   2_000
+
+    assert_receive {:minga_highlight,
+                    {:buffer_event, ^buffer, _correlation, {:highlight_spans, spans}}},
+                   2_000
 
     names = List.to_tuple(names)
 
@@ -292,7 +392,11 @@ defmodule Minga.Parser.ManagerTest do
   defp setup_buffer_ready(server, language, content) do
     :ok = Manager.subscribe(server)
     buffer = setup_buffer(server, language, content)
-    assert_receive {:minga_highlight, {:highlight_spans, ^buffer, _spans}}, 2_000
+
+    assert_receive {:minga_highlight,
+                    {:buffer_event, ^buffer, _correlation, {:highlight_spans, _spans}}},
+                   2_000
+
     buffer
   end
 
@@ -309,6 +413,12 @@ defmodule Minga.Parser.ManagerTest do
       Manager.register_buffer(buffer, %BufferConfig{language: language}, server: server)
 
     buffer
+  end
+
+  defp stalled_snapshot_provider do
+    receive do
+      _message -> stalled_snapshot_provider()
+    end
   end
 
   defp start_parser_manager(opts \\ []) do

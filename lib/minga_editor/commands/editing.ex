@@ -473,7 +473,9 @@ defmodule MingaEditor.Commands.Editing do
       when is_pid(buf) do
     gb = Buffer.snapshot(buf)
     cursor = Document.cursor(gb)
-    range = Helpers.compute_text_object_range(gb, cursor, modifier, spec, buf)
+
+    range =
+      Helpers.compute_text_object_range(gb, cursor, modifier, spec, buf, state.parser_manager)
 
     case range do
       nil ->
@@ -881,7 +883,7 @@ defmodule MingaEditor.Commands.Editing do
     cursor = Document.cursor(gb)
 
     range =
-      case Helpers.resolve_motion_target(gb, cursor, motion, buf) do
+      case Helpers.resolve_motion_target(gb, cursor, motion, buf, state.parser_manager) do
         nil ->
           nil
 
@@ -899,8 +901,9 @@ defmodule MingaEditor.Commands.Editing do
   @keystroke_indent_timeout_ms 200
 
   @spec indent_opts(state(), pid()) :: [Indent.compute_opt()]
-  defp indent_opts(_state, _buf) do
-    [request_indent: &request_indent_on_keystroke/2]
+  defp indent_opts(state, _buf) do
+    parser_manager = state.parser_manager
+    [request_indent: &request_indent_on_keystroke(&1, &2, parser_manager)]
   end
 
   @spec copy_indent_for_line_above(pid(), non_neg_integer()) :: String.t()
@@ -915,9 +918,10 @@ defmodule MingaEditor.Commands.Editing do
     end
   end
 
-  @spec request_indent_on_keystroke(pid(), non_neg_integer()) :: integer() | nil
-  defp request_indent_on_keystroke(buffer_pid, line) do
-    ParserManager.request_indent(buffer_pid, line, ParserManager, @keystroke_indent_timeout_ms)
+  @spec request_indent_on_keystroke(pid(), non_neg_integer(), GenServer.server()) ::
+          integer() | nil
+  defp request_indent_on_keystroke(buffer_pid, line, parser_manager) do
+    ParserManager.request_indent(buffer_pid, line, parser_manager, @keystroke_indent_timeout_ms)
   end
 
   @spec insert_indent(pid(), String.t()) :: :ok

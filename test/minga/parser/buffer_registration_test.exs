@@ -5,11 +5,11 @@ defmodule Minga.Parser.BufferRegistrationTest do
   alias Minga.Parser.BufferRegistration
 
   test "coalesces changes during one parse into a trailing pump" do
-    registration = BufferRegistration.new(1, %BufferConfig{language: "elixir"})
+    registration = BufferRegistration.new(1, %BufferConfig{language: "elixir"}, make_ref())
     token = make_ref()
 
     assert BufferRegistration.pumpable?(registration)
-    refute BufferRegistration.ready?(registration)
+    refute BufferRegistration.synchronized?(registration, 3)
 
     awaiting = BufferRegistration.await_snapshot(registration, token)
     refute BufferRegistration.pumpable?(awaiting)
@@ -22,7 +22,7 @@ defmodule Minga.Parser.BufferRegistrationTest do
 
     assert {:ok, completed} = BufferRegistration.complete_parse(dirty, 1)
     assert completed.synced_sequence == 3
-    assert BufferRegistration.ready?(completed)
+    assert BufferRegistration.synchronized?(completed, 3)
     assert BufferRegistration.accepts_version?(completed, 1)
     refute BufferRegistration.accepts_version?(completed, 2)
     assert BufferRegistration.pumpable?(completed)
@@ -30,7 +30,7 @@ defmodule Minga.Parser.BufferRegistrationTest do
 
   test "stale completion cannot finish a newer parse" do
     registration =
-      BufferRegistration.new(1, %BufferConfig{language: "elixir"})
+      BufferRegistration.new(1, %BufferConfig{language: "elixir"}, make_ref())
       |> BufferRegistration.await_snapshot(make_ref())
       |> BufferRegistration.begin_parse(4, 7, true)
 
@@ -42,7 +42,7 @@ defmodule Minga.Parser.BufferRegistrationTest do
 
   test "restart discards in-flight work and requires a full snapshot" do
     registration =
-      BufferRegistration.new(1, %BufferConfig{language: "elixir"})
+      BufferRegistration.new(1, %BufferConfig{language: "elixir"}, make_ref())
       |> BufferRegistration.await_snapshot(make_ref())
       |> BufferRegistration.begin_parse(2, 4, true)
       |> BufferRegistration.restart()

@@ -13,10 +13,11 @@ defmodule Minga.Parser.BufferRegistration do
           | {:awaiting_snapshot, reference()}
           | {:parsing, pos_integer(), ChangeLog.sequence()}
 
-  @enforce_keys [:id, :config]
+  @enforce_keys [:id, :config, :generation]
   defstruct [
     :id,
     :config,
+    :generation,
     synced_sequence: 0,
     latest_dirty_sequence: 0,
     last_completed_version: 0,
@@ -27,6 +28,7 @@ defmodule Minga.Parser.BufferRegistration do
   @type t :: %__MODULE__{
           id: pos_integer(),
           config: BufferConfig.t(),
+          generation: reference(),
           synced_sequence: ChangeLog.sequence(),
           latest_dirty_sequence: ChangeLog.sequence(),
           last_completed_version: non_neg_integer(),
@@ -35,8 +37,10 @@ defmodule Minga.Parser.BufferRegistration do
         }
 
   @doc "Creates a registration that requires an initial full parse."
-  @spec new(pos_integer(), BufferConfig.t()) :: t()
-  def new(id, %BufferConfig{} = config), do: %__MODULE__{id: id, config: config}
+  @spec new(pos_integer(), BufferConfig.t(), reference()) :: t()
+  def new(id, %BufferConfig{} = config, generation) when is_reference(generation) do
+    %__MODULE__{id: id, config: config, generation: generation}
+  end
 
   @doc "Records the newest observed buffer change sequence."
   @spec mark_dirty(t(), ChangeLog.sequence()) :: t()
@@ -101,9 +105,13 @@ defmodule Minga.Parser.BufferRegistration do
 
   def complete_parse(%__MODULE__{}, _version), do: :stale
 
-  @doc "Returns whether the parser has completed at least one parse for this registration."
-  @spec ready?(t()) :: boolean()
-  def ready?(%__MODULE__{last_completed_version: version}), do: version > 0
+  @doc "Returns whether the parser is synchronized through the required buffer sequence."
+  @spec synchronized?(t(), ChangeLog.sequence()) :: boolean()
+  def synchronized?(%__MODULE__{phase: :idle, synced_sequence: synced}, required_sequence) do
+    synced >= required_sequence
+  end
+
+  def synchronized?(%__MODULE__{}, _required_sequence), do: false
 
   @doc "Returns whether a version belongs to the current or most recently completed parse."
   @spec accepts_version?(t(), pos_integer()) :: boolean()

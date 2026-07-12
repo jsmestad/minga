@@ -95,7 +95,11 @@ defmodule MingaEditor.Commands.StructuralNavigationTest do
 
     editor_state = :sys.get_state(editor, @sync_timeout)
     _state_with_presentation = HighlightSync.setup_for_buffer(editor_state)
-    assert_receive {:minga_highlight, {:highlight_spans, ^buffer, _spans}}, @sync_timeout
+
+    assert_receive {:minga_highlight,
+                    {:buffer_event, ^buffer, _correlation, {:highlight_spans, _spans}}},
+                   @sync_timeout
+
     {editor, buffer}
   end
 

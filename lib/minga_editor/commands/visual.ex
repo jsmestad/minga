@@ -138,7 +138,9 @@ defmodule MingaEditor.Commands.Visual do
       ) do
     gb = Buffer.snapshot(buf)
     cursor = Document.cursor(gb)
-    range = Helpers.compute_text_object_range(gb, cursor, modifier, spec, buf)
+
+    range =
+      Helpers.compute_text_object_range(gb, cursor, modifier, spec, buf, state.parser_manager)
 
     case range do
       nil ->
