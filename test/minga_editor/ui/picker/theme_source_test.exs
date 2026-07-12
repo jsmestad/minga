@@ -61,8 +61,11 @@ defmodule MingaEditor.UI.Picker.ThemeSourceTest do
       assert new_state.theme.name == :one_dark
     end
 
-    test "marks editor window retained state reset-pending" do
-      state = base_state() |> clear_window_reset_pending()
+    test "does not write renderer state into editor windows" do
+      state = base_state()
+
+      before =
+        Map.new(state.workspace.windows.map, fn {id, window} -> {id, window.render_cache} end)
 
       new_state =
         ThemeSource.on_select(
@@ -70,9 +73,9 @@ defmodule MingaEditor.UI.Picker.ThemeSourceTest do
           state
         )
 
-      assert Enum.all?(Map.values(new_state.workspace.windows.map), fn %Window{} = window ->
-               window.render_cache.reset_pending == true
-             end)
+      assert Map.new(new_state.workspace.windows.map, fn {id, window} ->
+               {id, window.render_cache}
+             end) == before
     end
   end
 
@@ -94,7 +97,6 @@ defmodule MingaEditor.UI.Picker.ThemeSourceTest do
 
       state =
         base_state()
-        |> clear_window_reset_pending()
         |> Map.put(:theme, Theme.get!(:one_dark))
 
       state =
@@ -109,7 +111,7 @@ defmodule MingaEditor.UI.Picker.ThemeSourceTest do
       assert restored.theme.name == :doom_one
 
       assert Enum.all?(Map.values(restored.workspace.windows.map), fn %Window{} = window ->
-               window.render_cache.reset_pending == true
+               match?(%MingaEditor.Window.RenderCache{}, window.render_cache)
              end)
     end
 
@@ -121,16 +123,5 @@ defmodule MingaEditor.UI.Picker.ThemeSourceTest do
 
       assert ThemeSource.on_cancel(state) == state
     end
-  end
-
-  @spec clear_window_reset_pending(MingaEditor.State.t()) :: MingaEditor.State.t()
-  defp clear_window_reset_pending(state) do
-    windows =
-      Map.new(state.workspace.windows.map, fn {id, %Window{} = window} ->
-        {window, _epoch, _full_refresh?} = Window.prepare_render_epoch(window, {:stable})
-        {id, window}
-      end)
-
-    put_in(state.workspace.windows.map, windows)
   end
 end

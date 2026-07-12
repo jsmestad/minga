@@ -22,13 +22,13 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   alias MingaEditor.Renderer.Context
   alias MingaEditor.Renderer.SearchHighlight
   alias MingaEditor.RenderPipeline.Input
-  alias MingaEditor.Window
   alias Minga.Git
   alias Minga.LSP.SyncServer
   alias Minga.Mode.VisualState
   alias MingaEditor.UI.Highlight
 
   @type state :: Input.t()
+  @type window :: MingaEditor.Renderer.RenderWindow.t() | MingaEditor.Window.t()
 
   @type visual_selection :: Context.visual_selection()
 
@@ -40,7 +40,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   Returns the context and an updated state with inter-frame caches
   (search decorations, document-highlight decorations) written back.
   """
-  @spec build_render_ctx(state(), Window.t(), map()) :: {Context.t(), state()}
+  @spec build_render_ctx(state(), window(), map()) :: {Context.t(), state()}
   def build_render_ctx(state, window, params) do
     %{
       viewport: viewport,
@@ -404,7 +404,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   end
 
   @doc "Returns the decorations for a window's buffer."
-  @spec window_decorations(term(), Window.t(), Decorations.t() | nil) :: Decorations.t()
+  @spec window_decorations(term(), window(), Decorations.t() | nil) :: Decorations.t()
   def window_decorations(state, %{buffer: buf}, %Decorations{} = decorations) when is_pid(buf) do
     decorations
     |> InlineAskRender.merge_decorations(state, buf)
@@ -421,7 +421,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
     do: Decorations.build_vt_line_cache(decorations)
 
   @doc "Returns the highlight state for a window's buffer."
-  @spec window_highlight(state(), Window.t()) :: MingaEditor.UI.Highlight.t() | nil
+  @spec window_highlight(state(), window()) :: MingaEditor.UI.Highlight.t() | nil
   def window_highlight(state, window) do
     hl =
       case Map.fetch(state.workspace.highlight.highlights, window.buffer) do
@@ -449,7 +449,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   end
 
   @doc "Returns diff-view signs when a diff view is active, otherwise git signs for a window's buffer."
-  @spec signs_for_window(state(), Window.t()) :: %{non_neg_integer() => atom()}
+  @spec signs_for_window(state(), window()) :: %{non_neg_integer() => atom()}
   def signs_for_window(%{diff_views: diff_views}, %{buffer: buf} = window)
       when is_pid(buf) and is_map(diff_views) do
     case Map.get(diff_views, buf) do
@@ -472,12 +472,12 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
     end)
   end
 
-  @spec prefetched_git_signs(map(), state(), Window.t()) :: %{non_neg_integer() => atom()}
+  @spec prefetched_git_signs(map(), state(), window()) :: %{non_neg_integer() => atom()}
   defp prefetched_git_signs(%{git_signs: signs}, _state, _window) when is_map(signs), do: signs
   defp prefetched_git_signs(_params, state, window), do: signs_for_window(state, window)
 
   @doc "Returns git signs for a window's buffer."
-  @spec git_signs_for_window(Window.t()) :: %{non_neg_integer() => atom()}
+  @spec git_signs_for_window(window()) :: %{non_neg_integer() => atom()}
   def git_signs_for_window(%{buffer: buf}) when is_pid(buf) do
     case Git.tracking_pid(buf) do
       nil ->
@@ -493,7 +493,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   end
 
   @doc "Returns diagnostic signs for a window's buffer."
-  @spec diagnostic_signs_for_window(Window.t()) :: %{non_neg_integer() => atom()}
+  @spec diagnostic_signs_for_window(window()) :: %{non_neg_integer() => atom()}
   def diagnostic_signs_for_window(%{buffer: buf}) when is_pid(buf) do
     case Buffer.file_path(buf) do
       nil -> %{}
@@ -562,7 +562,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
 
   @doc "Computes a fingerprint from the render context for change detection."
   @spec context_fingerprint(Context.t(), boolean()) ::
-          MingaEditor.Window.RenderCache.context_fingerprint()
+          MingaEditor.Renderer.WindowCache.context_fingerprint()
   def context_fingerprint(%Context{} = ctx, is_active) do
     {
       ctx.visual_selection,

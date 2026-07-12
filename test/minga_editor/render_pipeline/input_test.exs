@@ -2,7 +2,9 @@ defmodule MingaEditor.RenderPipeline.InputTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.RenderPipeline.Input
+  alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.RenderPipeline.TestHelpers
+  alias MingaEditor.RenderPipeline.WindowIntent
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
@@ -110,15 +112,29 @@ defmodule MingaEditor.RenderPipeline.InputTest do
     end
   end
 
+  describe "cache-free render intent" do
+    test "contains only semantic window carriers", %{state: state} do
+      intent = Intent.from_editor_state(state, 7)
+
+      assert intent.revision == 7
+      assert Enum.all?(intent.windows, fn {_id, window} -> match?(%WindowIntent{}, window) end)
+
+      refute Enum.any?(intent.windows, fn {_id, window} ->
+               Map.has_key?(Map.from_struct(window), :render_cache)
+             end)
+
+      refute Map.has_key?(intent.frame, :caches)
+      refute Map.has_key?(intent.frame, :font_registry)
+    end
+  end
+
   describe "EditorState.apply_render_output/2" do
-    test "writes back mutated windows", %{state: state} do
+    test "writes back bounded editor window observations", %{state: state} do
       input = Input.from_editor_state(state)
-
-      # Simulate a mutation the pipeline would make (new window in map)
       win_id = input.workspace.windows.active
-      window = Map.get(input.workspace.windows.map, win_id)
+      window = Map.fetch!(input.workspace.windows.map, win_id)
 
-      mutated_cache = %{window.render_cache | last_viewport_top: 42}
+      mutated_cache = %{window.render_cache | viewport_top: 42}
       mutated_window = %{window | render_cache: mutated_cache}
       mutated_map = Map.put(input.workspace.windows.map, win_id, mutated_window)
       ws = input.workspace
@@ -126,7 +142,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
 
       result = EditorState.apply_render_output(state, mutated_input)
 
-      assert result.workspace.windows.map[win_id].render_cache.last_viewport_top == 42
+      assert result.workspace.windows.map[win_id].render_cache.viewport_top == 42
     end
 
     test "preserves fields not in Input", %{state: state} do
@@ -151,7 +167,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       assert result.layout == layout
     end
 
-    test "writes back message store cursor advances", %{state: state} do
+    test "does not write renderer-owned message cursor back to Editor", %{state: state} do
       input = Input.from_editor_state(state)
 
       message_store =
@@ -162,234 +178,82 @@ defmodule MingaEditor.RenderPipeline.InputTest do
 
       result = EditorState.apply_render_output(state, %{input | message_store: message_store})
 
-      assert result.message_store.last_sent_id == 2
-      assert result.message_store.stream_instance == message_store.stream_instance
-      assert Enum.map(result.message_store.entries, & &1.text) == ["first", "second"]
+      assert result.message_store == state.message_store
     end
   end
 
   describe "EditorState.apply_renderer_writeback/2" do
-    test "merges renderer-owned fields without overwriting newer editor-owned state", %{
-      state: state
-    } do
+    test "applies only editor-owned receipt fields and Editor has no renderer caches",
+         %{state: state} do
       input = Input.from_editor_state(state)
-      win_id = state.workspace.windows.active
-      live_window = state.workspace.windows.map[win_id]
+      windows = state.workspace.windows
 
-      live_window = %{
-        live_window
-        | cursor: {2, 0},
-          viewport: %{live_window.viewport | top: 9}
-      }
-
-      state =
-        put_in(state.workspace.windows.map[win_id], live_window)
-        |> put_in([Access.key(:shell_state), Access.key(:status_msg)], "new status")
-
-      rendered_window = %{
-        live_window
-        | cursor: {0, 0},
-          viewport: %{live_window.viewport | top: 1},
-          render_cache: %{live_window.render_cache | last_viewport_top: 42}
-      }
-
-      rendered_windows = %{
-        state.workspace.windows
-        | map: %{win_id => rendered_window},
-          active: 999
-      }
-
-      rendered_shell_state = %{
-        state.shell_state
-        | status_msg: "old snapshot",
+      receipt =
+        receipt(input, 10, false,
+          layout: :rendered_layout,
           modeline_click_regions: [{:modeline, 1}],
           tab_bar_click_regions: [{:tab, 2}]
-      }
+        )
 
-      writeback = %{
-        caches: input.caches,
-        layout: :rendered_layout,
-        windows: rendered_windows,
-        shell_id: :traditional,
-        shell_identity: input.shell_identity,
-        shell_state: rendered_shell_state
-      }
-
-      result = EditorState.apply_renderer_writeback(state, writeback)
-      result_window = result.workspace.windows.map[win_id]
+      result = EditorState.apply_renderer_writeback(state, receipt)
 
       assert result.layout == :rendered_layout
-      assert result_window.render_cache.last_viewport_top == 42
-      assert result_window.cursor == {2, 0}
-      assert result_window.viewport.top == 9
-      assert result.workspace.windows.active == win_id
-      assert result.shell_state.status_msg == "new status"
+      assert result.workspace.windows == windows
+      refute Map.has_key?(Map.from_struct(result), :caches)
       assert result.shell_state.modeline_click_regions == [{:modeline, 1}]
       assert result.shell_state.tab_bar_click_regions == [{:tab, 2}]
     end
 
-    test "merges renderer message-store writeback", %{state: state} do
-      current_store =
-        state.message_store
-        |> MessageStore.append("first", :info, :editor)
-        |> MessageStore.append("second", :info, :editor)
-
-      state = %{state | message_store: current_store}
+    test "stale receipt cannot overwrite newer editor-owned transitions", %{state: state} do
       input = Input.from_editor_state(state)
-      emitted_store = MessageStore.mark_sent(current_store, 1)
+      newer = receipt(input, 20, false, layout: :newer)
+      older = receipt(input, 19, false, layout: :older)
 
-      writeback = %{
-        caches: input.caches,
-        layout: :rendered_layout,
-        windows: state.workspace.windows,
-        shell_id: :traditional,
-        shell_identity: input.shell_identity,
-        shell_state: state.shell_state,
-        message_store: emitted_store
-      }
+      result =
+        state
+        |> EditorState.apply_renderer_writeback(newer)
+        |> EditorState.apply_renderer_writeback(older)
 
-      result = EditorState.apply_renderer_writeback(state, writeback)
-
-      assert result.message_store.last_sent_id == 1
-      assert result.message_store.stream_instance == current_store.stream_instance
-      assert Enum.map(result.message_store.entries, & &1.text) == ["first", "second"]
+      assert result.layout == :newer
+      assert result.last_render_receipt_seq == 20
     end
 
-    test "drops renderer writeback without shell identity but keeps message cursor", %{
+    test "pending acknowledgement is stale after a newer resize/focus/shell intent", %{
       state: state
     } do
-      current_store = MessageStore.append(state.message_store, "first", :info, :editor)
-      state = %{state | message_store: current_store}
       input = Input.from_editor_state(state)
+      {state, old_revision} = EditorState.submit_render_intent(state)
+      pending = receipt(input, 20, false, layout: :old_layout, intent_revision: old_revision)
+      {state, new_revision} = EditorState.submit_render_intent(state)
+      changed = %{state | layout: :resized_layout, focus_tree: :new_focus}
 
-      writeback = %{
-        caches: input.caches,
-        layout: :rendered_layout,
-        focus_tree: :rendered_focus_tree,
-        windows: state.workspace.windows,
-        shell_id: :traditional,
-        shell_state: %{state.shell_state | modeline_click_regions: [{:old, 1}]},
-        message_store: MessageStore.mark_sent(current_store, 1)
-      }
-
-      result = EditorState.apply_renderer_writeback(state, writeback)
-
-      assert result.layout == nil
-      assert result.focus_tree == nil
-      assert result.shell_state.modeline_click_regions == []
-      assert result.message_store.last_sent_id == 1
+      assert new_revision == old_revision + 1
+      assert EditorState.apply_renderer_writeback(changed, pending) == changed
     end
 
-    test "drops stale renderer writeback after shell changes", %{state: state} do
+    test "receipt from a replaced shell identity is side-effect free", %{state: state} do
       input = Input.from_editor_state(state)
+      stale = receipt(input, 10, false, layout: :rendered_layout)
 
-      writeback = %{
-        caches: input.caches,
-        layout: :rendered_layout,
-        focus_tree: :rendered_focus_tree,
-        windows: state.workspace.windows,
-        shell_id: :traditional,
-        shell_identity: input.shell_identity,
-        shell_state: %{state.shell_state | modeline_click_regions: [{:old, 1}]}
-      }
-
-      state = %{
+      switched = %{
         state
         | shell_id: :fake,
           shell: MingaEditor.Test.FakeShell,
           shell_state: %{modeline_click_regions: [], tab_bar_click_regions: []}
       }
 
-      result = EditorState.apply_renderer_writeback(state, writeback)
-
-      assert result.layout == nil
-      assert result.focus_tree == nil
-      assert result.shell_id == :fake
-      assert result.shell_state.modeline_click_regions == []
+      assert EditorState.apply_renderer_writeback(switched, stale) == switched
     end
 
-    # Regression (#2219): an in-flight delta render's writeback must not clear a
-    # keyframe request that arrived after the render started. The delta writeback
-    # carries keyframe?: false, so the pending flag survives until a frame that
-    # actually honored the request writes back.
-    test "a delta writeback does not clear a pending keyframe request", %{state: state} do
+    test "only an applied keyframe receipt clears a pending keyframe request", %{state: state} do
       input = Input.from_editor_state(state)
       state = %{state | keyframe_pending?: true}
 
-      delta_writeback = %{
-        caches: input.caches,
-        layout: :rendered_layout,
-        focus_tree: :rendered_focus_tree,
-        windows: state.workspace.windows,
-        shell_id: :traditional,
-        shell_identity: input.shell_identity,
-        shell_state: state.shell_state,
-        keyframe?: false
-      }
+      state = EditorState.apply_renderer_writeback(state, receipt(input, 10, false))
+      assert state.keyframe_pending?
 
-      result = EditorState.apply_renderer_writeback(state, delta_writeback)
-
-      assert result.keyframe_pending?,
-             "delta writeback must leave the pending keyframe request set"
-    end
-
-    test "a keyframe writeback clears the pending keyframe request", %{state: state} do
-      input = Input.from_editor_state(state)
-      state = %{state | keyframe_pending?: true}
-
-      keyframe_writeback = %{
-        caches: input.caches,
-        layout: :rendered_layout,
-        focus_tree: :rendered_focus_tree,
-        windows: state.workspace.windows,
-        shell_id: :traditional,
-        shell_identity: input.shell_identity,
-        shell_state: state.shell_state,
-        keyframe?: true
-      }
-
-      result = EditorState.apply_renderer_writeback(state, keyframe_writeback)
-
-      refute result.keyframe_pending?,
-             "a writeback whose frame carried the keyframe clears the request"
-    end
-
-    # Regression (#2219), full async sequence: an in-flight delta render A is still
-    # rendering when request_keyframe arrives (sets keyframe_pending?) and a keyframe
-    # render B is cast. A's delta writeback lands first; a keystroke then coalesces B
-    # away. The next render C must STILL carry force_keyframe? so a base-0 keyframe is
-    # eventually emitted and the requester is not left desynced.
-    test "pending keyframe survives an in-flight delta writeback + coalescing and forces the next frame to keyframe",
-         %{state: state} do
-      input_a = Input.from_editor_state(state)
-
-      # request_keyframe arrives while delta render A is in-flight.
-      state = %{state | keyframe_pending?: true}
-
-      # A's writeback (a delta frame that started before the request) lands first.
-      delta_writeback = %{
-        caches: input_a.caches,
-        layout: :rendered_layout,
-        focus_tree: :rendered_focus_tree,
-        windows: state.workspace.windows,
-        shell_id: :traditional,
-        shell_identity: input_a.shell_identity,
-        shell_state: state.shell_state,
-        keyframe?: false
-      }
-
-      state = EditorState.apply_renderer_writeback(state, delta_writeback)
-
-      assert state.keyframe_pending?,
-             "A's delta writeback must not swallow the keyframe request"
-
-      # Render B (the keyframe render) is coalesced away by a later keystroke, so it
-      # never reaches emit. The keystroke builds render C from the live state. C must
-      # still force a keyframe because the request is still pending.
-      input_c = Input.from_editor_state(state)
-
-      assert input_c.force_keyframe?,
-             "render C inherits the still-pending keyframe request, so it emits base 0"
+      state = EditorState.apply_renderer_writeback(state, receipt(input, 11, true))
+      refute state.keyframe_pending?
     end
   end
 
@@ -431,5 +295,26 @@ defmodule MingaEditor.RenderPipeline.InputTest do
 
       assert Input.sync_active_window_cursor(input) == input
     end
+  end
+
+  defp receipt(input, frame_seq, keyframe?, overrides \\ []) do
+    struct!(
+      MingaEditor.Renderer.RenderReceipt,
+      Keyword.merge(
+        [
+          layout: nil,
+          focus_tree: nil,
+          shell_id: input.shell_id,
+          shell_identity: input.shell_identity,
+          modeline_click_regions: [],
+          tab_bar_click_regions: [],
+          frame_seq: frame_seq,
+          keyframe?: keyframe?,
+          render_sent_at: 0,
+          intent_revision: 0
+        ],
+        overrides
+      )
+    )
   end
 end

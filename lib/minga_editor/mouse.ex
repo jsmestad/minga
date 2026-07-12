@@ -140,7 +140,6 @@ defmodule MingaEditor.Mouse do
         total_lines = Buffer.line_count(buf)
         cursor_pos = Buffer.cursor(buf)
 
-        window = sync_viewport_to_rendered_top(window)
         scrolled = Window.scroll_viewport(window, delta_lines, total_lines)
 
         updated =
@@ -154,19 +153,6 @@ defmodule MingaEditor.Mouse do
         state
     end
   end
-
-  # Cursor-movement commands (j, k, G, Ctrl-D, etc.) move the buffer cursor but
-  # do not update Window.viewport. Under async rendering the render pipeline
-  # adjusts the viewport in a snapshot that is never written back. The live
-  # viewport can therefore be stale by many screens. Sync it from the last
-  # rendered position so mouse/trackpad scroll starts where the user actually sees
-  # the content.
-  defp sync_viewport_to_rendered_top(%Window{render_cache: %{scroll_seq_last_top: top}} = window)
-       when is_integer(top) do
-    %{window | viewport: Viewport.put_top(window.viewport, top)}
-  end
-
-  defp sync_viewport_to_rendered_top(window), do: window
 
   @spec native_gui?(state()) :: boolean()
   defp native_gui?(%{capabilities: %Capabilities{frontend_type: :native_gui}}), do: true
@@ -693,8 +679,7 @@ defmodule MingaEditor.Mouse do
   @spec active_resident_gui_window(state()) :: {:ok, Window.id()} | :error
   defp active_resident_gui_window(%{workspace: %{windows: %{active: win_id, map: map}}} = state) do
     with true <- native_gui?(state),
-         {:ok, %Window{} = window} <- Map.fetch(map, win_id),
-         true <- Window.resident?(window) do
+         {:ok, %Window{}} <- Map.fetch(map, win_id) do
       {:ok, win_id}
     else
       _ -> :error

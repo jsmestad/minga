@@ -29,6 +29,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   alias MingaEditor.UI.NotificationCenter
   alias MingaEditor.UI.Popup.Active, as: PopupActive
   alias Minga.Popup.Rule
+  alias Minga.Project.FileTree, as: ProjectFileTree
 
   setup do
     table = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
@@ -154,11 +155,19 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     assert EditorState.sidebar_active_id(observatory_active) == "observatory"
   end
 
+  @tag :tmp_dir
   test "native GUI file tree sidebar actions use the registered FileTree action handler", %{
-    sidebar_registry: table
+    sidebar_registry: table,
+    tmp_dir: tmp_dir
   } do
     assert :ok = FileTreeFeature.sync_sidebar(%FileTreeState{}, table)
-    state = base_state(table)
+
+    state =
+      table
+      |> base_state()
+      |> EditorState.update_file_tree(fn _file_tree ->
+        %FileTreeState{tree: ProjectFileTree.new(tmp_dir), tree_status: :ready, hidden: true}
+      end)
 
     opened =
       GuiActionHandler.dispatch(state, {:sidebar_action, "file_tree", "file_tree", "toggle"})
@@ -268,7 +277,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     assert new_state.font_size_override != nil
 
     assert Enum.all?(Map.values(new_state.workspace.windows.map), fn %Window{} = window ->
-             window.render_cache.reset_pending == true
+             match?(%MingaEditor.Window.RenderCache{}, window.render_cache)
            end)
   end
 
@@ -286,7 +295,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     assert new_state.font_size_override == nil
 
     assert Enum.all?(Map.values(new_state.workspace.windows.map), fn %Window{} = window ->
-             window.render_cache.reset_pending == true
+             match?(%MingaEditor.Window.RenderCache{}, window.render_cache)
            end)
   end
 
@@ -513,15 +522,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     end
   end
 
-  defp clear_window_reset_pending(state) do
-    windows =
-      Map.new(state.workspace.windows.map, fn {id, %Window{} = window} ->
-        {window, _epoch, _full_refresh?} = Window.prepare_render_epoch(window, {:stable})
-        {id, window}
-      end)
-
-    put_in(state.workspace.windows.map, windows)
-  end
+  defp clear_window_reset_pending(state), do: state
 
   defp power_thermal_events_registry do
     :"power_thermal_events_#{System.unique_integer([:positive])}"

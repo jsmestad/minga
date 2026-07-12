@@ -53,6 +53,7 @@ defmodule Minga.RenderModel.Window do
             full_refresh: true,
             contiguous_rows: false,
             content_digest: nil,
+            row_delta: nil,
             scroll_seq: 0
 
   @type t :: %__MODULE__{
@@ -78,6 +79,7 @@ defmodule Minga.RenderModel.Window do
           full_refresh: boolean(),
           contiguous_rows: boolean(),
           content_digest: Minga.RenderModel.Window.ContentDigest.t() | nil,
+          row_delta: Minga.RenderModel.Window.RowDelta.t() | nil,
           scroll_seq: non_neg_integer()
         }
 end

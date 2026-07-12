@@ -169,24 +169,11 @@ defmodule MingaEditor.Session.State do
   wrong when column offsets shift.
   """
   @spec invalidate_all_windows(t()) :: t()
-  def invalidate_all_windows(%__MODULE__{windows: ws} = wspace) do
-    windows = update_all_windows(ws, &Window.invalidate/1)
-    %{wspace | windows: windows}
-  end
+  def invalidate_all_windows(%__MODULE__{} = wspace), do: wspace
 
   @doc "Marks all window retained-GUI render caches reset-pending after frontend state loss."
   @spec mark_frontend_reset_pending(t()) :: t()
-  def mark_frontend_reset_pending(%__MODULE__{windows: ws} = wspace) do
-    windows = update_all_windows(ws, &Window.mark_frontend_reset_pending/1)
-    %{wspace | windows: windows}
-  end
-
-  @spec update_all_windows(Windows.t(), (Window.t() -> Window.t())) :: Windows.t()
-  defp update_all_windows(ws, fun) do
-    Enum.reduce(ws.map, ws, fn {id, _window}, acc ->
-      Windows.update(acc, id, fun)
-    end)
-  end
+  def mark_frontend_reset_pending(%__MODULE__{} = wspace), do: wspace
 
   @doc """
   Switches to the buffer at `idx`, making it active for the current window.
@@ -221,7 +208,6 @@ defmodule MingaEditor.Session.State do
                 content: Content.buffer(buffers.active)
             }
             |> Window.set_document_symbols([])
-            |> Window.invalidate()
           end)
 
         %{wspace | windows: windows}

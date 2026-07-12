@@ -162,7 +162,8 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
 
   describe "build_render_ctx/3" do
     test "threads the supplied width oracle into the render context" do
-      state = TestHelpers.base_state()
+      editor = TestHelpers.base_state()
+      state = MingaEditor.RenderPipeline.Input.from_editor_state(editor)
       window = state.workspace.windows.map[state.workspace.windows.active]
       oracle = %Minga.Core.WidthOracle.Measured{cache: %{"hello" => 2}}
 

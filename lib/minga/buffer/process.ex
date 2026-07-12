@@ -583,31 +583,25 @@ defmodule Minga.Buffer.Process do
   end
 
   alias Minga.Buffer.RenderSnapshot
+  alias Minga.Buffer.RendererConsume
 
-  @doc """
-  Returns all data needed to render a single frame in one GenServer call.
-
-  Fetches cursor position, total line count, the visible line range starting at
-  `first_line` (up to `count` lines), file path, and dirty flag atomically.
-  This replaces 5 individual calls (cursor, line_count, lines, file_path,
-  dirty?) with a single round-trip.
-  """
+  @doc "Returns bounded render metadata and only the requested lines."
   @spec render_snapshot(GenServer.server(), non_neg_integer(), non_neg_integer()) ::
           RenderSnapshot.t()
   def render_snapshot(server, first_line, count) when first_line >= 0 and count >= 0 do
     GenServer.call(server, {:render_snapshot, first_line, count})
   end
 
-  @doc "Returns an atomic render snapshot plus changes after the supplied sequence."
-  @spec render_snapshot(
-          GenServer.server(),
-          non_neg_integer(),
-          non_neg_integer(),
-          Minga.Buffer.ChangeLog.sequence()
-        ) :: RenderSnapshot.t()
-  def render_snapshot(server, first_line, count, since_sequence)
-      when first_line >= 0 and count >= 0 and since_sequence >= 0 do
-    GenServer.call(server, {:render_snapshot, first_line, count, since_sequence})
+  @doc "Atomically advances the renderer ChangeLog cursor and observes its version/count."
+  @spec renderer_consume(GenServer.server()) :: RendererConsume.t()
+  def renderer_consume(server), do: GenServer.call(server, :renderer_consume)
+
+  @doc "Fetches only a requested line range when the buffer is still at `expected_version`."
+  @spec render_lines(GenServer.server(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          {:ok, RenderSnapshot.t()} | :stale
+  def render_lines(server, expected_version, first_line, count)
+      when expected_version >= 0 and first_line >= 0 and count >= 0 do
+    GenServer.call(server, {:render_lines, expected_version, first_line, count})
   end
 
   @doc "Deletes the text between two positions (from_pos inclusive, to_pos exclusive), placing the cursor at the start of the range."
@@ -1369,6 +1363,19 @@ defmodule Minga.Buffer.Process do
     {:reply, result, %{state | change_log: change_log}}
   end
 
+  def handle_call(:renderer_consume, _from, state) do
+    {changes, change_log} = ChangeLog.take_unseen_changes(state.change_log, :renderer)
+
+    result = %Minga.Buffer.RendererConsume{
+      version: BufState.version(state),
+      line_count: Document.line_count(state.document),
+      change_sequence: ChangeLog.sequence(change_log),
+      changes: changes
+    }
+
+    {:reply, result, %{state | change_log: change_log}}
+  end
+
   def handle_call({:changes_since, sequence}, _from, state) do
     {:reply, ChangeLog.changes_since(state.change_log, sequence), state}
   end
@@ -1492,45 +1499,16 @@ defmodule Minga.Buffer.Process do
     {:reply, :ok, %{state | document: new_buf}}
   end
 
-  def handle_call({:render_snapshot, first_line, count}, from, state) do
-    handle_call(
-      {:render_snapshot, first_line, count, ChangeLog.sequence(state.change_log)},
-      from,
-      state
-    )
+  def handle_call({:render_snapshot, first_line, count}, _from, state) do
+    {:reply, bounded_render_snapshot(state, first_line, count), state}
   end
 
-  def handle_call({:render_snapshot, first_line, count, since_sequence}, _from, state) do
-    buf = state.document
-    first_line_byte_offset = Position.point_for(buf, {first_line, 0})
-
-    changes =
-      case ChangeLog.changes_since(state.change_log, since_sequence) do
-        {:ok, _sequence, deltas} -> {:ok, deltas}
-        {:reset_required, _sequence} -> :reset_required
-      end
-
-    snapshot = %RenderSnapshot{
-      document: buf,
-      cursor: Document.cursor(buf),
-      line_count: Document.line_count(buf),
-      lines: snapshot_lines(buf, first_line, count),
-      file_path: state.file_path,
-      filetype: state.filetype,
-      buffer_type: state.buffer_type,
-      dirty: BufState.dirty?(state),
-      name: state.name,
-      read_only: state.read_only,
-      first_line_byte_offset: first_line_byte_offset,
-      version: BufState.version(state),
-      options: resolved_buffer_local_options(state),
-      decorations: state.decorations,
-      change_sequence: ChangeLog.sequence(state.change_log),
-      change_horizon: ChangeLog.horizon(state.change_log),
-      changes: changes
-    }
-
-    {:reply, snapshot, state}
+  def handle_call({:render_lines, expected_version, first_line, count}, _from, state) do
+    if BufState.version(state) == expected_version do
+      {:reply, {:ok, bounded_render_snapshot(state, first_line, count)}, state}
+    else
+      {:reply, :stale, state}
+    end
   end
 
   def handle_call({:delete_range, _from_pos, _to_pos}, _from, %{read_only: true} = state) do
@@ -2397,6 +2375,30 @@ defmodule Minga.Buffer.Process do
   # ── move_if_possible helpers ──
 
   @spec snapshot_lines(Document.t(), non_neg_integer(), non_neg_integer()) :: [String.t()]
+  @spec bounded_render_snapshot(BufState.t(), non_neg_integer(), non_neg_integer()) ::
+          RenderSnapshot.t()
+  defp bounded_render_snapshot(state, first_line, count) do
+    document = state.document
+
+    %RenderSnapshot{
+      cursor: Document.cursor(document),
+      line_count: Document.line_count(document),
+      lines: snapshot_lines(document, first_line, count),
+      first_line: first_line,
+      file_path: state.file_path,
+      filetype: state.filetype,
+      buffer_type: state.buffer_type,
+      dirty: BufState.dirty?(state),
+      name: state.name,
+      read_only: state.read_only,
+      first_line_byte_offset: Position.point_for(document, {first_line, 0}),
+      version: BufState.version(state),
+      options: resolved_buffer_local_options(state),
+      decorations: state.decorations,
+      change_sequence: ChangeLog.sequence(state.change_log)
+    }
+  end
+
   defp snapshot_lines(_document, _first_line, 0), do: []
   defp snapshot_lines(document, first_line, count), do: Lines.slice(document, first_line, count)
 

@@ -23,6 +23,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Layout
   alias MingaEditor.BufferDecorations
+  alias MingaEditor.RenderModel.Window.ResidentBuild
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.Renderer.SearchHighlight
   alias MingaEditor.RenderPipeline.ContentHelpers
@@ -30,7 +31,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
   alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
-  alias MingaEditor.Window
+  alias MingaEditor.Renderer.RenderWindow, as: Window
 
   @typedoc "Render pipeline input."
   @type state :: Input.t()
@@ -203,8 +204,8 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
         do: Window.scroll_follow_cursor?(window, {cursor_line, cursor_byte_col}, now),
         else: {window, true}
 
-    base_snapshot =
-      Buffer.render_snapshot(window.buffer, 0, 0, Window.applied_change_sequence(window))
+    expected_version = Window.expected_buffer_version(window) || Buffer.version(window.buffer)
+    base_snapshot = fetch_at_version!(window.buffer, expected_version, 0, 0)
 
     window = Window.sync_line_identity(window, base_snapshot)
     line_count = base_snapshot.line_count
@@ -294,14 +295,22 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
         window: window,
         visible_line_map: visible_line_map,
         full_residence?: full_residence?,
+        keyframe?: state.force_keyframe?,
         first_line: first_line,
         visible_rows: visible_rows,
         line_count: line_count,
         wrap_on: wrap_on
       })
 
-    snapshot = RenderSnapshot.slice(base_snapshot, fetch_first, fetch_count)
+    snapshot = fetch_at_version!(window.buffer, expected_version, fetch_first, fetch_count)
     lines = snapshot.lines
+
+    Minga.Telemetry.execute(
+      [:minga, :render, :line_fetch],
+      %{lines_fetched: length(lines)},
+      %{window_id: win_id, buffer: window.buffer, full_residence?: full_residence?}
+    )
+
     # Cursor byte → display col
     {viewport, first_line, snapshot, lines, _cursor_line_text, cursor_col} =
       maybe_adjust_wrapped_viewport(%{
@@ -388,16 +397,60 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     }
   end
 
+  @spec fetch_at_version!(pid(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          RenderSnapshot.t()
+  defp fetch_at_version!(buffer, expected_version, first_line, count) do
+    case Buffer.render_lines(buffer, expected_version, first_line, count) do
+      {:ok, snapshot} ->
+        snapshot
+
+      :stale ->
+        raise MingaEditor.Renderer.StaleBufferError,
+          buffer: buffer,
+          expected_version: expected_version
+    end
+  end
+
   # Resolves the buffer line range to fetch and the visible viewport's offset
   # within it. Three cases: full-document residence (whole doc from line 0),
   # folded/decorated windows (the visible_line_map's exact buffer span), and the
   # default viewport-plus-fixed-overscan window (wrapped/folded/arming remnant).
   @spec resolve_fetch_range(map()) ::
           {non_neg_integer(), non_neg_integer(), non_neg_integer()}
+  defp resolve_fetch_range(
+         %{
+           visible_line_map: nil,
+           full_residence?: true,
+           keyframe?: true,
+           window: window
+         } = params
+       ) do
+    # A complete renderer-owned store can materialize a frontend keyframe
+    # without fetching the document again. Keep only the visible source range
+    # needed by the remaining viewport presentation calculations. Pending edits
+    # still win: their exact rows must be fetched and spliced before materializing.
+    resident_build = Window.resident_build(window)
+
+    case {resident_delta_fetch_range(window, params.line_count), resident_build} do
+      {nil, %ResidentBuild{}} ->
+        count = min(params.visible_rows, max(params.line_count - params.first_line, 1))
+        {params.first_line, count, 0}
+
+      {nil, nil} ->
+        {0, params.line_count, params.first_line}
+
+      {{fetch_first, fetch_count}, _resident_build} ->
+        {fetch_first, fetch_count, params.first_line}
+    end
+  end
+
   defp resolve_fetch_range(%{visible_line_map: nil, full_residence?: true} = params) do
-    # first_line is the viewport-top buffer line; the fetch starts at 0, so
-    # first_line doubles as the visible viewport's offset within the store.
-    {0, params.line_count, params.first_line}
+    # A hydrated resident store needs only the lines touched by renderer-consumed
+    # deltas. Initial/reset/global-context hydration still fetches the whole file.
+    case resident_delta_fetch_range(params.window, params.line_count) do
+      nil -> {0, params.line_count, params.first_line}
+      {fetch_first, fetch_count} -> {fetch_first, fetch_count, params.first_line}
+    end
   end
 
   defp resolve_fetch_range(%{
@@ -430,10 +483,25 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     {buf_first, buf_last - buf_first + 1, 0}
   end
 
+  @spec resident_delta_fetch_range(Window.t(), non_neg_integer()) ::
+          {non_neg_integer(), pos_integer()} | nil
+  defp resident_delta_fetch_range(window, line_count) do
+    deltas = Window.pending_edit_deltas(window)
+
+    if Window.resident_build(window) != nil and deltas != [] do
+      first = deltas |> Enum.map(&elem(&1.start_position, 0)) |> Enum.min()
+      last = deltas |> Enum.map(&elem(&1.new_end_position, 0)) |> Enum.max()
+      bounded_first = min(first, max(line_count - 1, 0))
+      {bounded_first, max(min(last, line_count - 1) - bounded_first + 1, 1)}
+    else
+      nil
+    end
+  end
+
   # Wire-format ceiling: gui_window_content and its row/viewport deltas encode the
   # row count as a u16, so a resident store may not exceed 65_535 rows regardless
   # of the configured line threshold. Above this, fall back to windowed emit.
-  @wire_max_rows 0xFFFF
+  @wire_max_rows 65_536
   @default_resident_store_max_bytes 10_485_760
 
   # A buffer qualifies for full-document residence when it is not wrapped, not
@@ -524,7 +592,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
 
       case Window.cached_total_visual_rows(window, key) do
         nil ->
-          total = visual_rows_to_eof(window.buffer, 0, content_w, oracle)
+          total = visual_rows_to_eof(window.buffer, snapshot.version, 0, content_w, oracle)
           {total, Window.put_total_visual_rows(window, key, total)}
 
         total ->
@@ -701,7 +769,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
 
     total_visual_rows_to_eof =
       if near_eof do
-        visual_rows_to_eof(buf, first_line, content_w, oracle)
+        visual_rows_to_eof(buf, snapshot.version, first_line, content_w, oracle)
       else
         top_count
       end
@@ -763,7 +831,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
 
     total_visual_rows_to_eof =
       if near_eof do
-        visual_rows_to_eof(buf, new_top, content_w, oracle)
+        visual_rows_to_eof(buf, snapshot.version, new_top, content_w, oracle)
       else
         top_count
       end
@@ -800,6 +868,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
           {Viewport.t(), non_neg_integer(), map(), [String.t()], String.t(), non_neg_integer()}
   defp refetch_wrapped_viewport(%{
          viewport: viewport,
+         snapshot: prior_snapshot,
          top: top,
          offset: offset,
          buf: buf,
@@ -809,7 +878,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
          fetch_count: fetch_count,
          oracle: oracle
        }) do
-    snapshot = Buffer.render_snapshot(buf, top, fetch_count)
+    snapshot = fetch_at_version!(buf, prior_snapshot.version, top, fetch_count)
     lines = snapshot.lines
     wrap_map = compute_wrap_map(buf, lines, content_w, oracle)
 
@@ -867,12 +936,18 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     end
   end
 
-  @spec visual_rows_to_eof(pid(), non_neg_integer(), pos_integer(), Minga.Core.WidthOracle.t()) ::
+  @spec visual_rows_to_eof(
+          pid(),
+          non_neg_integer(),
+          non_neg_integer(),
+          pos_integer(),
+          Minga.Core.WidthOracle.t()
+        ) ::
           pos_integer()
-  defp visual_rows_to_eof(buf, start_line, content_w, oracle) do
+  defp visual_rows_to_eof(buf, expected_version, start_line, content_w, oracle) do
     total_lines = Buffer.line_count(buf)
     fetch_count = max(total_lines - start_line, 1)
-    snapshot = Buffer.render_snapshot(buf, start_line, fetch_count)
+    snapshot = fetch_at_version!(buf, expected_version, start_line, fetch_count)
 
     WrapMap.compute(snapshot.lines, content_w,
       breakindent: wrap_option(buf, :breakindent),

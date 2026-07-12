@@ -217,6 +217,62 @@ defmodule MingaEditor.RenderModel.Window.ResidentStoreTest do
     end
   end
 
+  describe "persistent mutation work counters" do
+    test "counts rows copied by both split boundaries and the inserted row" do
+      entries = for i <- 0..63, do: make_entry(i, i)
+      store = ResidentStore.from_entries(entries)
+      changed = ResidentStore.replace_at(store, 32, make_entry(32, 999))
+
+      assert ResidentStore.work(changed) == %{
+               # The removed entry and replacement are both examined for digest updates.
+               rows_visited: 2,
+               # Split 32/32 copies 64 rows, splitting its 32-row tail copies 32,
+               # and the replacement copies one: no boundary work is hidden.
+               rows_copied: 97,
+               rows_emitted: 1,
+               chunks_touched: 11
+             }
+    end
+
+    test "an edit on the 64-row chunk boundary reports its actual smaller copy" do
+      entries = for i <- 0..64, do: make_entry(i, i)
+      store = ResidentStore.from_entries(entries)
+      changed = ResidentStore.replace_at(store, 64, make_entry(64, 999))
+
+      assert ResidentStore.work(changed) == %{
+               rows_visited: 2,
+               rows_copied: 2,
+               rows_emitted: 1,
+               chunks_touched: 5
+             }
+    end
+
+    @tag :perf
+    test "a 65,536-row one-line edit has fixed row work and logarithmic chunk work" do
+      small_entries = for i <- 0..255, do: make_entry(i, i)
+      large_entries = for i <- 0..65_535, do: make_entry(i, i)
+
+      small =
+        small_entries
+        |> ResidentStore.from_entries()
+        |> ResidentStore.replace_at(64, make_entry(64, 999))
+        |> ResidentStore.work()
+
+      large =
+        large_entries
+        |> ResidentStore.from_entries()
+        |> ResidentStore.replace_at(32_768, make_entry(32_768, 999))
+        |> ResidentStore.work()
+
+      assert small.rows_visited == large.rows_visited
+      assert small.rows_copied == large.rows_copied
+      assert small.rows_emitted == large.rows_emitted
+      assert large.rows_copied == 129
+      assert large.rows_emitted == 1
+      assert large.chunks_touched <= 64
+    end
+  end
+
   # ── Edge cases from the test strategy ────────────────────────────────────
 
   describe "edge cases" do

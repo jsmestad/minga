@@ -1,203 +1,368 @@
 defmodule MingaEditor.RenderModel.Window.ResidentStore do
   @moduledoc """
-  Persistent per-window resident row entry list plus its content digest (#2658).
+  Persistent indexed resident-row sequence.
 
-  With full-document residence a window's row set is the whole document. Rebuilding
-  that list, its retained-row map, and its content fingerprint from scratch every
-  frame makes edit-frame build cost O(document). This structure carries the
-  resident entry list and an incrementally maintained
-  `Minga.RenderModel.Window.ContentDigest` across frames so the per-frame build
-  splices only the rows a dirty set marks changed and updates the digest in O(1)
-  per changed row.
-
-  The store is the single persistent structure the ticket introduces: the render
-  pipeline stashes it in the window render cache and threads it through
-  `MingaEditor.RenderModel.Window.Builder` on the residence path. Off the
-  residence path (the default) it is never constructed, so behaviour is byte
-  identical to the windowed build.
-
-  ## Entries
-
-  An entry is a plain map `%{id, content_hash, payload}`:
-
-  * `id` — the row identity (a `Row.row_id`), unique within the window.
-  * `content_hash` — the row's rendered-content hash, what the digest folds.
-  * `payload` — opaque to the store; the builder stashes the composed visual-row
-    entry (its `Row` and retention metadata) here.
-
-  ## Value-keyed, not identity-memoized
-
-  Reuse keys off `content_hash` (a value), never pointer identity, so this respects
-  the #2445 ruling against identity memoization. The oracle for every operation is
-  a from-scratch rebuild over the same entries; the incremental result must always
-  equal it.
+  Rows are held in an implicit chunk treap. Rank split/concatenation copy only
+  the search paths and the at-most-64-row boundary chunks; untouched prefix and
+  suffix subtrees are shared verbatim. Buffer positions are therefore not
+  stored eagerly in suffix payloads: `payload_at/2` and `payload_range/3`
+  project positional metadata when a caller actually reads a row.
   """
 
   alias Minga.RenderModel.Window.ContentDigest
+  alias Minga.RenderModel.Window.Row
 
-  @typedoc "A resident row entry. `payload` is opaque to the store."
+  @chunk_size 64
   @type entry :: %{
           required(:id) => term(),
           required(:content_hash) => non_neg_integer(),
           required(:payload) => term()
         }
-
+  @type tree :: nil | {:chunk, non_neg_integer(), pos_integer(), tree(), tuple(), tree()}
+  @type work :: %{
+          rows_visited: non_neg_integer(),
+          rows_copied: non_neg_integer(),
+          rows_emitted: non_neg_integer(),
+          chunks_touched: non_neg_integer()
+        }
   @type t :: %__MODULE__{
-          entries: [entry()],
-          digest: ContentDigest.t()
+          root: tree(),
+          size: non_neg_integer(),
+          digest: ContentDigest.t(),
+          work: work()
         }
 
-  defstruct entries: [], digest: 0
+  defstruct root: nil,
+            size: 0,
+            digest: 0,
+            work: %{rows_visited: 0, rows_copied: 0, rows_emitted: 0, chunks_touched: 0}
 
-  @doc "Returns an empty store."
   @spec new() :: t()
-  def new, do: %__MODULE__{entries: [], digest: ContentDigest.empty()}
+  def new, do: %__MODULE__{digest: ContentDigest.empty()}
 
-  @doc "Builds an entry from its id, content hash, and opaque payload."
   @spec entry(term(), non_neg_integer(), term()) :: entry()
-  def entry(id, content_hash, payload) when is_integer(content_hash) do
-    %{id: id, content_hash: content_hash, payload: payload}
-  end
+  def entry(id, content_hash, payload),
+    do: %{id: id, content_hash: content_hash, payload: payload}
 
-  @doc "Builds a store from an ordered entry list, computing the digest from scratch."
   @spec from_entries([entry()]) :: t()
-  def from_entries(entries) when is_list(entries) do
-    %__MODULE__{entries: entries, digest: digest_of(entries)}
-  end
+  def from_entries(entries) do
+    root =
+      entries
+      |> Enum.chunk_every(@chunk_size)
+      |> Enum.with_index()
+      |> Enum.reduce(nil, fn {chunk, ordinal}, tree -> merge(tree, chunk_node(chunk, ordinal)) end)
 
-  @doc "Returns the ordered entry list."
-  @spec entries(t()) :: [entry()]
-  def entries(%__MODULE__{entries: entries}), do: entries
-
-  @doc "Returns the ordered opaque payloads."
-  @spec payloads(t()) :: [term()]
-  def payloads(%__MODULE__{entries: entries}), do: Enum.map(entries, & &1.payload)
-
-  @doc "Returns the current content digest."
-  @spec digest(t()) :: ContentDigest.t()
-  def digest(%__MODULE__{digest: digest}), do: digest
-
-  @doc "Returns the number of resident rows."
-  @spec size(t()) :: non_neg_integer()
-  def size(%__MODULE__{entries: entries}), do: length(entries)
-
-  @doc "Returns true when the store holds no rows."
-  @spec empty?(t()) :: boolean()
-  def empty?(%__MODULE__{entries: []}), do: true
-  def empty?(%__MODULE__{}), do: false
-
-  @doc """
-  Replaces the entry at `index`, updating the digest incrementally.
-
-  Out-of-range indices are ignored (returns the store unchanged), keeping the
-  operation total for property-test sequences.
-  """
-  @spec replace_at(t(), non_neg_integer(), entry()) :: t()
-  def replace_at(%__MODULE__{entries: entries, digest: digest} = store, index, new_entry)
-      when is_integer(index) and index >= 0 do
-    case Enum.fetch(entries, index) do
-      {:ok, old_entry} ->
-        %{
-          store
-          | entries: List.replace_at(entries, index, new_entry),
-            digest: swap_digest(digest, old_entry, new_entry)
-        }
-
-      :error ->
-        store
-    end
-  end
-
-  def replace_at(%__MODULE__{} = store, _index, _new_entry), do: store
-
-  @doc """
-  Inserts `new_entry` at `index`, shifting later entries right and folding the
-  new row into the digest.
-
-  Existing entries keep their `id`/`content_hash`, so their digest cells are
-  unchanged; only the inserted row's cell is added.
-  """
-  @spec insert_at(t(), non_neg_integer(), entry()) :: t()
-  def insert_at(%__MODULE__{entries: entries, digest: digest} = store, index, new_entry)
-      when is_integer(index) and index >= 0 do
-    %{
-      store
-      | entries: List.insert_at(entries, index, new_entry),
-        digest: ContentDigest.add(digest, new_entry.id, new_entry.content_hash)
+    %__MODULE__{
+      root: root,
+      size: length(entries),
+      digest: digest_of(entries),
+      work: %{
+        rows_visited: length(entries),
+        rows_copied: length(entries),
+        rows_emitted: length(entries),
+        chunks_touched: chunk_count(root)
+      }
     }
   end
 
-  def insert_at(%__MODULE__{} = store, _index, _new_entry), do: store
+  @spec size(t()) :: non_neg_integer()
+  def size(%__MODULE__{size: size}), do: size
+  @spec empty?(t()) :: boolean()
+  def empty?(store), do: size(store) == 0
+  @spec digest(t()) :: ContentDigest.t()
+  def digest(%__MODULE__{digest: digest}), do: digest
+  @spec work(t()) :: work()
+  def work(%__MODULE__{work: work}), do: work
 
-  @doc """
-  Deletes the entry at `index`, shifting later entries left and folding the
-  removed row out of the digest.
-  """
-  @spec delete_at(t(), non_neg_integer()) :: t()
-  def delete_at(%__MODULE__{entries: entries, digest: digest} = store, index)
-      when is_integer(index) and index >= 0 do
-    case Enum.fetch(entries, index) do
-      {:ok, removed} ->
-        %{
-          store
-          | entries: List.delete_at(entries, index),
-            digest: ContentDigest.remove(digest, removed.id, removed.content_hash)
-        }
+  @doc "Materializes all entries. Reserved for hydration/debug/oracle paths."
+  @spec entries(t()) :: [entry()]
+  def entries(%__MODULE__{root: root}), do: tree_entries(root, [])
 
-      :error ->
-        store
+  @doc "Materializes all projected payloads. Reserved for explicit full hydration."
+  @spec payloads(t()) :: [term()]
+  def payloads(store), do: payload_range(store, 0, store.size)
+
+  @spec entry_at(t(), non_neg_integer()) :: {:ok, entry()} | :error
+  def entry_at(%__MODULE__{root: root, size: size}, index) when index >= 0 and index < size,
+    do: lookup(root, index)
+
+  def entry_at(_, _), do: :error
+
+  @spec payload_at(t(), non_neg_integer()) :: {:ok, term()} | :error
+  def payload_at(store, index) do
+    case entry_at(store, index) do
+      {:ok, entry} -> {:ok, project_payload(entry.payload, index)}
+      :error -> :error
     end
   end
 
-  def delete_at(%__MODULE__{} = store, _index), do: store
-
-  @doc """
-  Rebuilds only the entries at the dirty indices, reusing the rest verbatim.
-
-  `dirty_indices` is a `MapSet` of positions into the current entry list;
-  `build_fun.(index)` composes the fresh entry for a dirty position. The entry
-  count is unchanged (this is the in-place-edit splice; row insert/delete that
-  changes the count is handled by a full `from_entries/1` rebuild upstream). An
-  empty dirty set returns the store unchanged, so pure scroll and cursor frames
-  reuse the resident list and digest with no per-row work.
-  """
-  @spec rebuild(t(), MapSet.t(non_neg_integer()), (non_neg_integer() -> entry())) :: t()
-  def rebuild(%__MODULE__{} = store, dirty_indices, build_fun) when is_function(build_fun, 1) do
-    if MapSet.size(dirty_indices) == 0 do
-      store
-    else
-      splice(store, dirty_indices, build_fun)
-    end
+  @spec payload_range(t(), non_neg_integer(), non_neg_integer()) :: [term()]
+  def payload_range(%__MODULE__{} = store, start, count) do
+    range_entries(store.root, start, count)
+    |> Enum.with_index(start)
+    |> Enum.map(fn {entry, index} -> project_payload(entry.payload, index) end)
   end
 
-  @spec splice(t(), MapSet.t(non_neg_integer()), (non_neg_integer() -> entry())) :: t()
-  defp splice(%__MODULE__{entries: entries, digest: digest} = store, dirty_indices, build_fun) do
-    {reversed, new_digest} =
-      entries
+  @doc "Persistent rank splice. Only boundary/search chunks are copied."
+  @spec replace_range(t(), non_neg_integer(), non_neg_integer(), [entry()]) :: t()
+  def replace_range(%__MODULE__{} = store, start, delete_count, inserted) do
+    start = min(start, store.size)
+    delete_count = min(delete_count, store.size - start)
+    work = empty_work()
+    {left, tail, work} = split_counted(store.root, start, work)
+    {removed, right, work} = split_counted(tail, delete_count, work)
+    {removed_entries, removed_chunks} = tree_entries_counted(removed)
+
+    work = %{
+      work
+      | rows_visited: length(removed_entries) + length(inserted),
+        rows_emitted: length(inserted),
+        chunks_touched: work.chunks_touched + removed_chunks
+    }
+
+    {inserted_tree, work} =
+      inserted
+      |> Enum.chunk_every(@chunk_size)
       |> Enum.with_index()
-      |> Enum.reduce({[], digest}, fn {old_entry, index}, {acc, acc_digest} ->
-        if MapSet.member?(dirty_indices, index) do
-          new_entry = build_fun.(index)
-          {[new_entry | acc], swap_digest(acc_digest, old_entry, new_entry)}
-        else
-          {[old_entry | acc], acc_digest}
-        end
+      |> Enum.reduce({nil, work}, fn {chunk, ordinal}, {tree, acc} ->
+        {new_chunk, acc} = chunk_node_counted(chunk, {start, ordinal, store.size}, acc)
+        merge_counted(tree, new_chunk, acc)
       end)
 
-    %{store | entries: Enum.reverse(reversed), digest: new_digest}
+    digest =
+      removed_entries
+      |> Enum.reduce(store.digest, fn item, acc ->
+        ContentDigest.remove(acc, item.id, item.content_hash)
+      end)
+      |> then(fn value ->
+        Enum.reduce(inserted, value, fn item, acc ->
+          ContentDigest.add(acc, item.id, item.content_hash)
+        end)
+      end)
+
+    {joined, work} = merge_counted(left, inserted_tree, work)
+    {root, work} = merge_counted(joined, right, work)
+
+    %{
+      store
+      | root: root,
+        size: store.size - delete_count + length(inserted),
+        digest: digest,
+        work: work
+    }
   end
 
-  @spec swap_digest(ContentDigest.t(), entry(), entry()) :: ContentDigest.t()
-  defp swap_digest(digest, old_entry, new_entry) do
-    digest
-    |> ContentDigest.remove(old_entry.id, old_entry.content_hash)
-    |> ContentDigest.add(new_entry.id, new_entry.content_hash)
+  @spec replace_at(t(), non_neg_integer(), entry()) :: t()
+  def replace_at(store, index, item),
+    do: if(index < store.size, do: replace_range(store, index, 1, [item]), else: store)
+
+  @spec insert_at(t(), non_neg_integer(), entry()) :: t()
+  def insert_at(store, index, item), do: replace_range(store, index, 0, [item])
+  @spec delete_at(t(), non_neg_integer()) :: t()
+  def delete_at(store, index),
+    do: if(index < store.size, do: replace_range(store, index, 1, []), else: store)
+
+  @spec rebuild(t(), MapSet.t(non_neg_integer()), (non_neg_integer() -> entry())) :: t()
+  def rebuild(store, dirty, fun) do
+    dirty
+    |> Enum.sort()
+    |> Enum.reduce(store, fn index, acc -> replace_at(acc, index, fun.(index)) end)
   end
 
-  @spec digest_of([entry()]) :: ContentDigest.t()
+  defp project_payload(%{row: %Row{} = row} = payload, index) do
+    payload |> Map.put(:buf_line, index) |> Map.put(:row, Row.reposition(row, index))
+  end
+
+  defp project_payload(payload, _index), do: payload
+
+  defp chunk_node([], _salt), do: nil
+
+  defp chunk_node(entries, salt) do
+    tuple = List.to_tuple(entries)
+    {:chunk, :erlang.phash2({salt, hd(entries).id}), tuple_size(tuple), nil, tuple, nil}
+  end
+
+  defp chunk_node_counted([], _salt, work), do: {nil, work}
+
+  defp chunk_node_counted(entries, salt, work) do
+    work = %{
+      work
+      | rows_copied: work.rows_copied + length(entries),
+        chunks_touched: work.chunks_touched + 1
+    }
+
+    {chunk_node(entries, salt), work}
+  end
+
+  defp node(priority, left, tuple, right),
+    do:
+      {:chunk, priority, tree_size(left) + tuple_size(tuple) + tree_size(right), left, tuple,
+       right}
+
+  defp merge(nil, right), do: right
+  defp merge(left, nil), do: left
+
+  defp merge({:chunk, lp, _, ll, le, lr} = left, {:chunk, rp, _, rl, re, rr} = right) do
+    if lp <= rp, do: node(lp, ll, le, merge(lr, right)), else: node(rp, merge(left, rl), re, rr)
+  end
+
+  # Counted variants are used by persistent mutations. Each compared/rebuilt
+  # treap node is one touched chunk; each boundary/insert chunk records the
+  # exact number of rows copied into its new tuple.
+  defp merge_counted(nil, right, work), do: {right, work}
+  defp merge_counted(left, nil, work), do: {left, work}
+
+  defp merge_counted(
+         {:chunk, lp, _, ll, le, lr} = left,
+         {:chunk, rp, _, rl, re, rr} = right,
+         work
+       ) do
+    work = touch_chunk(work)
+
+    if lp <= rp do
+      {merged, work} = merge_counted(lr, right, work)
+      {node(lp, ll, le, merged), work}
+    else
+      {merged, work} = merge_counted(left, rl, work)
+      {node(rp, merged, re, rr), work}
+    end
+  end
+
+  defp split(nil, _rank), do: {nil, nil, 0}
+  defp split(tree, rank) when rank <= 0, do: {nil, tree, 0}
+
+  defp split(tree, rank) do
+    if rank >= tree_size(tree) do
+      {tree, nil, 0}
+    else
+      do_split(tree, rank)
+    end
+  end
+
+  defp do_split({:chunk, priority, _, left, entries, right}, rank) do
+    split_chunk(priority, left, entries, right, rank, tree_size(left), tuple_size(entries))
+  end
+
+  defp split_chunk(priority, left, entries, right, rank, left_size, _own)
+       when rank < left_size do
+    {a, b, touched} = split(left, rank)
+    {a, node(priority, b, entries, right), touched + 1}
+  end
+
+  defp split_chunk(priority, left, entries, right, rank, left_size, own)
+       when rank > left_size + own do
+    {a, b, touched} = split(right, rank - left_size - own)
+    {node(priority, left, entries, a), b, touched + 1}
+  end
+
+  defp split_chunk(priority, left, entries, right, rank, left_size, own) do
+    within = rank - left_size
+    before = tuple_slice(entries, 0, within)
+    after_entries = tuple_slice(entries, within, own - within)
+    left_tree = merge(left, chunk_node(Tuple.to_list(before), {priority, :left, within}))
+
+    right_tree =
+      merge(chunk_node(Tuple.to_list(after_entries), {priority, :right, within}), right)
+
+    {left_tree, right_tree, 1}
+  end
+
+  defp split_counted(nil, _rank, work), do: {nil, nil, work}
+  defp split_counted(tree, rank, work) when rank <= 0, do: {nil, tree, work}
+
+  defp split_counted(tree, rank, work) do
+    if rank >= tree_size(tree) do
+      {tree, nil, work}
+    else
+      do_split_counted(tree, rank, work)
+    end
+  end
+
+  defp do_split_counted({:chunk, priority, _, left, entries, right}, rank, work) do
+    split_counted_chunk(
+      priority,
+      left,
+      entries,
+      right,
+      rank,
+      tree_size(left),
+      tuple_size(entries),
+      touch_chunk(work)
+    )
+  end
+
+  defp split_counted_chunk(priority, left, entries, right, rank, left_size, _own, work)
+       when rank < left_size do
+    {a, b, work} = split_counted(left, rank, work)
+    {a, node(priority, b, entries, right), work}
+  end
+
+  defp split_counted_chunk(priority, left, entries, right, rank, left_size, own, work)
+       when rank > left_size + own do
+    {a, b, work} = split_counted(right, rank - left_size - own, work)
+    {node(priority, left, entries, a), b, work}
+  end
+
+  defp split_counted_chunk(priority, left, entries, right, rank, left_size, own, work) do
+    within = rank - left_size
+    before = entries |> tuple_slice(0, within) |> Tuple.to_list()
+    after_entries = entries |> tuple_slice(within, own - within) |> Tuple.to_list()
+    {before_chunk, work} = chunk_node_counted(before, {priority, :left, within}, work)
+    {after_chunk, work} = chunk_node_counted(after_entries, {priority, :right, within}, work)
+    {left_tree, work} = merge_counted(left, before_chunk, work)
+    {right_tree, work} = merge_counted(after_chunk, right, work)
+    {left_tree, right_tree, work}
+  end
+
+  defp lookup({:chunk, _, _, left, entries, right}, index),
+    do: lookup_chunk(left, entries, right, index, tree_size(left))
+
+  defp lookup_chunk(left, _entries, _right, index, left_size) when index < left_size,
+    do: lookup(left, index)
+
+  defp lookup_chunk(_left, entries, _right, index, left_size)
+       when index < left_size + tuple_size(entries),
+       do: {:ok, elem(entries, index - left_size)}
+
+  defp lookup_chunk(_left, entries, right, index, left_size),
+    do: lookup(right, index - left_size - tuple_size(entries))
+
+  defp range_entries(_tree, _start, count) when count <= 0, do: []
+  defp range_entries(nil, _start, _count), do: []
+
+  defp range_entries(tree, start, count) do
+    {_left, tail, _} = split(tree, max(start, 0))
+    {wanted, _right, _} = split(tail, count)
+    tree_entries(wanted, [])
+  end
+
+  defp tree_entries(nil, acc), do: acc
+
+  defp tree_entries({:chunk, _, _, left, entries, right}, acc) do
+    left_entries = tree_entries(left, [])
+    right_entries = tree_entries(right, [])
+    acc ++ left_entries ++ Tuple.to_list(entries) ++ right_entries
+  end
+
+  defp tree_entries_counted(tree), do: {tree_entries(tree, []), chunk_count(tree)}
+
+  defp empty_work,
+    do: %{rows_visited: 0, rows_copied: 0, rows_emitted: 0, chunks_touched: 0}
+
+  defp touch_chunk(work), do: %{work | chunks_touched: work.chunks_touched + 1}
+
+  defp tree_size(nil), do: 0
+  defp tree_size({:chunk, _, size, _, _, _}), do: size
+  defp chunk_count(nil), do: 0
+  defp chunk_count({:chunk, _, _, left, _, right}), do: 1 + chunk_count(left) + chunk_count(right)
+  defp tuple_slice(_tuple, _start, 0), do: {}
+
+  defp tuple_slice(tuple, start, count),
+    do: tuple |> Tuple.to_list() |> Enum.slice(start, count) |> List.to_tuple()
+
   defp digest_of(entries) do
-    Enum.reduce(entries, ContentDigest.empty(), fn %{id: id, content_hash: content_hash}, acc ->
-      ContentDigest.add(acc, id, content_hash)
+    Enum.reduce(entries, ContentDigest.empty(), fn item, acc ->
+      ContentDigest.add(acc, item.id, item.content_hash)
     end)
   end
 end

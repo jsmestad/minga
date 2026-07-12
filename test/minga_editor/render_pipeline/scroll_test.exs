@@ -10,6 +10,7 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
   alias Minga.Core.WrapMap
   alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline
+  alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.Scroll
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
   alias MingaEditor.Renderer.Gutter
@@ -20,12 +21,18 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
   import MingaEditor.RenderPipeline.TestHelpers
 
   # Helper to run through layout and scroll
-  defp run_through_scroll(state) do
+  defp run_through_scroll(%EditorState{} = state) do
     state = EditorState.sync_active_window_cursor(state)
     state = RenderPipeline.compute_layout(state)
     layout = Layout.get(state)
-    {scrolls, state} = Scroll.scroll_windows(state, layout)
-    {scrolls, state, layout}
+    {scrolls, input} = Scroll.scroll_windows(state, layout)
+    {scrolls, input, layout}
+  end
+
+  defp run_through_scroll(%Input{} = input) do
+    layout = Layout.get(input)
+    {scrolls, input} = Scroll.scroll_windows(input, layout)
+    {scrolls, input, layout}
   end
 
   defp wrapped_content_width(state, buffer) do
@@ -56,7 +63,7 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
       assert map_size(scrolls) == 1
       [{_win_id, scroll}] = Map.to_list(scrolls)
       assert %WindowScroll{} = scroll
-      assert %EditorState{} = state
+      assert %Input{} = state
     end
 
     test "scroll result contains buffer lines" do

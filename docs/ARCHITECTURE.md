@@ -254,8 +254,8 @@ graph TD
     EDSUP --> RENDER["Renderer.Server"]
     EDSUP --> ED["Editor"]
 
-    ED -. "snapshots" .-> RENDER
-    RENDER -. "writebacks" .-> ED
+    ED -. "bounded RenderIntent" .-> RENDER
+    RENDER -. "focused RenderReceipt" .-> ED
     RENDER -. "render commands" .-> PM
     PM -. "stdin/stdout<br/>Port protocol" .-> FE["Frontend<br/><i>Swift/Metal, GTK4, or Go/Bubble Tea</i>"]
     PARSER -. "stdin/stdout<br/>Port protocol" .-> ZIG_P["minga-parser<br/><i>Zig + tree-sitter</i>"]
@@ -351,10 +351,12 @@ Any process that implements the frontend behavior and speaks this protocol can s
 
 The BEAM does not paint cells. It builds a **semantic render model** (`Minga.RenderModel`) and hands it to per-frontend adapter encoders, which serialize it to the wire. Every live frontend (macOS GUI and Go TUI) decodes that model and draws it with its own native primitives. There is no shared cell grid, no styled-text-run IR sitting between editor state and the protocol, and no last-mile text-run translation on any frontend. The TUI decodes the same semantic models as the GUI; it is a semantic client, not a terminal-cell renderer (the legacy cell-grid TUI was removed in #2223).
 
-The render path runs as an explicit pipeline whose stages narrow editor state down to the literal product the adapters encode:
+The render path runs as an explicit pipeline whose stages narrow editor intent down to the literal product the adapters encode. The Editor and Renderer are separate BEAM processes with an explicit ownership boundary: the Editor sends a bounded `MingaEditor.RenderPipeline.Intent` containing window/buffer identities, observed versions, viewport/cursor/chrome state, and immutable semantic inputs. It never sends resident row stores, full document line lists, adapter caches, font registration, or acknowledgement state. `MingaEditor.Renderer.State` is the single writer for those values, with one `ResidentWindowState` per stable window/buffer pair. The Renderer returns only a `RenderReceipt` containing layout/focus/click-region and shell transitions plus frame correlation metadata; stale receipt sequences and replaced shell identities are side-effect free.
+
+For changed buffers, the Renderer groups all windows by buffer PID, consumes `Buffer.consume_edit_deltas(buffer, :renderer)` once per observed version, and fans the ordered deltas to every matching resident window. Durable logical-line identity and resident composition splice from those deltas. Initial hydration, `:reset_required`, buffer replacement/restart, irreconcilable identity, or a global composition-context change performs one explicit full hydration in a fresh content epoch, then resumes delta consumption. Window close, buffer switch, reset, and exact monitored-buffer `:DOWN` all use the centralized `Renderer.State` cleanup path.
 
 ```
-EditorState
+RenderIntent + Renderer.State
    │  Content stage (RenderPipeline.Content)
    ▼  builds Minga.RenderModel.Window models per editor window
 WindowContent carriers (RenderPipeline.WindowContent)
@@ -430,7 +432,7 @@ Worked examples. Completion menu, notifications (dismiss and action), observator
 
 Rendering avoids redundant work on both sides of the protocol, with telemetry so the savings are observable rather than assumed.
 
-**BEAM: retained-row reuse with patch/full classification (#2287).** `MingaEditor.RenderPipeline.Classifier` tags each frame `:patch` or `:full`. Both paths run the same seven stages and emit the same transaction with the same encodings; the tag is observability, not a fork. On a `:patch` frame (cursor motion or a single-line edit confined to the active window's current viewport) the upstream row-retention cache lets unchanged rows skip composition, so the frame rasterizes only the rows that changed. Anything structural (split/open/close, resize, theme change, chrome state change, forced keyframe, first frame, scroll, multi-window) classifies `:full`. Classification is conservative by construction: it only ever labels the frame, so a mislabel is at worst pessimistic, never wrong.
+**BEAM: renderer-owned retained rows and delta composition (#2287, #2742).** `MingaEditor.RenderPipeline.Classifier` tags each frame `:patch` or `:full`. Both paths run the same seven stages and emit the same transaction with the same encodings; the tag is observability, not a fork. Renderer-owned resident and row-retention state lets unchanged rows skip composition. Ordinary edits derive dirty/source ranges from ordered buffer `EditDelta` values and preserve durable row identity while the #2741 `RowDelta` encoder emits structural splices. Anything requiring global composition context (resize, theme/font change, full re-highlight, reset, or unreconcilable identity) performs an explicit hydration/full replacement, after which the same resident state returns to deltas. Classification remains observability only, so a pessimistic label cannot change correctness.
 
 **Go: composed-line cache (#2288).** The Go TUI memoizes each window body row's rendered string (`go/tui/internal/ui/line_cache.go`) so a window-content delta whose rows are mostly refs reuses the previously composed lines instead of re-running the lipgloss tree per row per frame. Correctness over cleverness: a cached line is returned only when every input that produced it (content hash, per-window context, and row index) is identical, so patched output is byte-identical to a from-scratch compose. Per-frame hit/miss counters feed the latency HUD and tests.
 
@@ -468,10 +470,11 @@ sequenceDiagram
     Buf->>Buf: update gap buffer + push undo
 
     Note over Ed,Render: Render cycle
-    Ed->>Render: render snapshot
-    Render->>Render: content, compose, build render model
+    Ed->>Render: bounded RenderIntent (ids, viewport, versions, semantic inputs)
+    Render->>Buf: consume_edit_deltas(:renderer) once per changed buffer
+    Render->>Render: fan out deltas; splice resident identity/rows; compose render model
     Render->>PM: begin_frame, gui_window_content (delta or full), commit_frame
-    Render-->>Ed: renderer-owned cache writeback
+    Render-->>Ed: focused RenderReceipt (layout/click/focus + frame metadata)
     PM->>FE: render commands via stdin
     FE->>FE: decode model, render to screen (Metal/terminal)
 ```

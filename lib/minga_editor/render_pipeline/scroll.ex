@@ -9,8 +9,11 @@ defmodule MingaEditor.RenderPipeline.Scroll do
   alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline.BufferPrefetch
   alias MingaEditor.RenderPipeline.Input
+  alias MingaEditor.RenderPipeline.Intent
+  alias MingaEditor.Renderer.BufferChanges
+  alias MingaEditor.Renderer.State, as: RendererState
   alias MingaEditor.Viewport
-  alias MingaEditor.Window
+  alias MingaEditor.Renderer.RenderWindow, as: Window
 
   defmodule WindowScroll do
     @moduledoc """
@@ -22,7 +25,7 @@ defmodule MingaEditor.RenderPipeline.Scroll do
     alias MingaEditor.FoldMap.VisibleLines
     alias MingaEditor.Layout
     alias MingaEditor.Viewport
-    alias MingaEditor.Window
+    alias MingaEditor.Renderer.RenderWindow, as: Window
 
     @enforce_keys [
       :win_id,
@@ -137,8 +140,9 @@ defmodule MingaEditor.RenderPipeline.Scroll do
   end
 
   def scroll_windows(%MingaEditor.State{} = state, %Layout{} = layout) do
-    input = Input.from_editor_state(state)
-    {scrolls, output} = BufferPrefetch.prefetch_scrolls(input, layout)
-    {scrolls, MingaEditor.State.apply_render_output(state, output)}
+    intent = Intent.from_editor_state(state)
+    renderer = RendererState.new(editor_pid: nil, pipeline: &MingaEditor.RenderPipeline.run/1)
+    {_renderer, input} = BufferChanges.prepare(renderer, intent)
+    BufferPrefetch.prefetch_scrolls(input, layout)
   end
 end

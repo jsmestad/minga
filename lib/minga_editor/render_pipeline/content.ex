@@ -27,7 +27,7 @@ defmodule MingaEditor.RenderPipeline.Content do
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.WindowContent
   alias MingaEditor.Viewport
-  alias MingaEditor.Window
+  alias MingaEditor.Renderer.RenderWindow, as: Window
 
   @typedoc "Render pipeline input."
   @type state :: Input.t()
@@ -98,6 +98,8 @@ defmodule MingaEditor.RenderPipeline.Content do
           retained_rows: Window.retained_rows(window),
           retained_wrap_lines: Window.retained_wrap_lines(window),
           resident_build: Window.resident_build(window),
+          hydration_reason: Window.hydration_reason(window),
+          edit_deltas: Window.pending_edit_deltas(window),
           row_slot_allocator: Window.row_slot_allocator(window)
         )
       end)

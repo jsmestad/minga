@@ -13,7 +13,6 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
   alias MingaEditor.RenderPipeline.ComposedFrame
   alias MingaEditor.RenderPipeline.Content
   alias MingaEditor.RenderPipeline.Scroll
-  alias MingaEditor.RenderPipeline.Input, as: PipelineInput
   alias MingaEditor.Shell.Identity, as: ShellIdentity
   alias MingaEditor.Shell.Registry, as: ShellRegistry
   alias MingaEditor.State, as: EditorState
@@ -110,17 +109,8 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
     win_id = state.workspace.windows.active
     window = Map.get(state.workspace.windows.map, win_id)
 
-    updated_window = %{
-      window
-      | render_cache: %{
-          window.render_cache
-          | last_viewport_top: new_top,
-            last_gutter_w: 4,
-            last_buf_version: 1,
-            last_line_count: 100,
-            last_cursor_line: new_top
-        }
-    }
+    viewport = Viewport.put_top(window.viewport, new_top)
+    updated_window = Window.observe_render(window, viewport, 1)
 
     new_map = Map.put(state.workspace.windows.map, win_id, updated_window)
     put_in(state.workspace.windows.map, new_map)
@@ -162,9 +152,5 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
   `RenderPipeline.run(state)` pattern in tests.
   """
   @spec run_pipeline(EditorState.t()) :: EditorState.t()
-  def run_pipeline(state) do
-    input = PipelineInput.from_editor_state(state)
-    output = MingaEditor.RenderPipeline.run(input)
-    EditorState.apply_render_output(state, output)
-  end
+  def run_pipeline(state), do: MingaEditor.Renderer.render_buffer(state)
 end
