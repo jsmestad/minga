@@ -349,11 +349,33 @@ public struct GUIWindowOverlayDelta: Sendable, Equatable {
     }
 }
 
+/// A retained reference or complete row carried by an A1/A2 update.
 public enum GUIWindowRowDeltaEntry: Sendable, Equatable {
+    /// Reuses an immutable-base row by durable identity and content hash.
     case reference(rowId: UInt64, contentHash: UInt32)
+    /// Carries a complete semantic visual row.
     case full(GUIVisualRow)
 }
 
+/// One protocol-v11 A2 splice expressed in immutable-base coordinates.
+public struct GUIWindowRowSplice: Sendable, Equatable {
+    /// Zero-based start coordinate in the immutable base.
+    public let startIndex: UInt32
+    /// Number of immutable-base rows deleted.
+    public let deleteCount: UInt32
+    /// Ref-or-full entries inserted at `startIndex`.
+    public let insertEntries: [GUIWindowRowDeltaEntry]
+
+    /// Creates one decoded A2 row splice.
+    public init(startIndex: UInt32, deleteCount: UInt32,
+                insertEntries: [GUIWindowRowDeltaEntry]) {
+        self.startIndex = startIndex
+        self.deleteCount = deleteCount
+        self.insertEntries = insertEntries
+    }
+}
+
+/// A decoded A1 complete snapshot, legacy-v10 A2 snapshot, or v11 A2 splice plan.
 public struct GUIWindowRowsDelta: Sendable, Equatable {
     public let windowId: UInt16
     public let contentEpoch: UInt32
@@ -362,7 +384,14 @@ public struct GUIWindowRowsDelta: Sendable, Equatable {
     public let cursorCol: UInt16
     public let cursorShape: CursorShape
     public let scrollLeft: UInt16
+    /// Complete entries for A1 or legacy-v10 A2; empty for v11 A2.
     public let rows: [GUIWindowRowDeltaEntry]
+    /// Immutable base row count for v11 A2.
+    public let baseRowCount: UInt32?
+    /// Exact result row count for v11 A2.
+    public let resultRowCount: UInt32?
+    /// V11 A2 row splices; nil for complete snapshots.
+    public let rowSplices: [GUIWindowRowSplice]?
     public let selection: GUISelectionOverlay?
     public let searchMatches: [GUISearchMatch]
     public let diagnosticUnderlines: [GUIDiagnosticUnderline]
@@ -387,6 +416,39 @@ public struct GUIWindowRowsDelta: Sendable, Equatable {
         self.cursorShape = cursorShape
         self.scrollLeft = scrollLeft
         self.rows = rows
+        self.baseRowCount = nil
+        self.resultRowCount = nil
+        self.rowSplices = nil
+        self.selection = selection
+        self.searchMatches = searchMatches
+        self.diagnosticUnderlines = diagnosticUnderlines
+        self.documentHighlights = documentHighlights
+        self.lineAnnotations = lineAnnotations
+        self.paneGeometry = paneGeometry
+        self.cursorline = cursorline
+        self.scrollPresentation = scrollPresentation
+    }
+
+    /// Creates a protocol-v11 A2 delta containing immutable-base row splices.
+    public init(windowId: UInt16, contentEpoch: UInt32, cursorVisible: Bool, cursorRow: UInt16,
+         cursorCol: UInt16, cursorShape: CursorShape, scrollLeft: UInt16,
+         baseRowCount: UInt32, resultRowCount: UInt32, rowSplices: [GUIWindowRowSplice],
+         selection: GUISelectionOverlay?, searchMatches: [GUISearchMatch],
+         diagnosticUnderlines: [GUIDiagnosticUnderline],
+         documentHighlights: [GUIDocumentHighlight], lineAnnotations: [GUILineAnnotation],
+         paneGeometry: GUIPaneGeometry?, cursorline: GUICursorline?,
+         scrollPresentation: GUIScrollPresentation? = nil) {
+        self.windowId = windowId
+        self.contentEpoch = contentEpoch
+        self.cursorVisible = cursorVisible
+        self.cursorRow = cursorRow
+        self.cursorCol = cursorCol
+        self.cursorShape = cursorShape
+        self.scrollLeft = scrollLeft
+        self.rows = []
+        self.baseRowCount = baseRowCount
+        self.resultRowCount = resultRowCount
+        self.rowSplices = rowSplices
         self.selection = selection
         self.searchMatches = searchMatches
         self.diagnosticUnderlines = diagnosticUnderlines
@@ -458,7 +520,15 @@ public final class GUIWindowContent: Sendable {
     /// and overlay quads must be shifted left by `scrollLeft * cellWidth` pixels
     /// so content past the viewport edge becomes visible.
     public let scrollLeft: UInt16
-    public let rows: [GUIVisualRow]
+    /// Chunked owner for both resident and explicitly windowed row content.
+    public let rowStore: ResidentRowStore
+    /// Work performed while producing this immutable content value. Lifetime
+    /// totals remain available from `rowStore.counters`.
+    public let rowStoreOperationCounters: ResidentRowStoreCounters
+
+    /// Compatibility view for protocol tests and non-rendering diagnostics.
+    /// Renderer hot paths must request a bounded slice from `rowStore`.
+    public var rows: [GUIVisualRow] { rowStore.rows(in: 0..<rowStore.count).rows }
     public let selection: GUISelectionOverlay?
     public let searchMatches: [GUISearchMatch]
     public let diagnosticUnderlines: [GUIDiagnosticUnderline]
@@ -467,11 +537,6 @@ public final class GUIWindowContent: Sendable {
     public let paneGeometry: GUIPaneGeometry?
     public let cursorline: GUICursorline?
     public let scrollPresentation: GUIScrollPresentation?
-
-    /// Pre-built index mapping retained-row keys to their visual rows.
-    /// Used by `applyingRowsDelta` to resolve reference entries without
-    /// rebuilding the dictionary on every delta application.
-    public let retainedRowIndex: [GUIRetainedRowKey: GUIVisualRow]
 
     public init(windowId: UInt16, fullRefresh: Bool, contentEpoch: UInt32 = 0, cursorVisible: Bool = true,
          cursorRow: UInt16, cursorCol: UInt16, cursorShape: CursorShape,
@@ -483,8 +548,8 @@ public final class GUIWindowContent: Sendable {
          lineAnnotations: [GUILineAnnotation] = [],
          paneGeometry: GUIPaneGeometry? = nil,
          cursorline: GUICursorline? = nil,
-         scrollPresentation: GUIScrollPresentation? = nil,
-         retainedRowIndex existingIndex: [GUIRetainedRowKey: GUIVisualRow]? = nil) {
+         scrollPresentation: GUIScrollPresentation? = nil) {
+        let store = ResidentRowStore(decodedRows: rows)
         self.windowId = windowId
         self.fullRefresh = fullRefresh
         self.contentEpoch = contentEpoch
@@ -493,7 +558,8 @@ public final class GUIWindowContent: Sendable {
         self.cursorCol = cursorCol
         self.cursorShape = cursorShape
         self.scrollLeft = scrollLeft
-        self.rows = rows
+        self.rowStore = store
+        self.rowStoreOperationCounters = store.counters
         self.selection = selection
         self.searchMatches = searchMatches
         self.diagnosticUnderlines = diagnosticUnderlines
@@ -502,17 +568,48 @@ public final class GUIWindowContent: Sendable {
         self.paneGeometry = paneGeometry
         self.cursorline = cursorline
         self.scrollPresentation = scrollPresentation
+    }
 
-        if let existingIndex {
-            self.retainedRowIndex = existingIndex
-        } else {
-            var index: [GUIRetainedRowKey: GUIVisualRow] = [:]
-            index.reserveCapacity(rows.count)
-            for row in rows {
-                index[GUIRetainedRowKey(rowId: row.rowId, contentHash: row.contentHash)] = row
-            }
-            self.retainedRowIndex = index
-        }
+    private init(windowId: UInt16, fullRefresh: Bool, contentEpoch: UInt32,
+         cursorVisible: Bool, cursorRow: UInt16, cursorCol: UInt16, cursorShape: CursorShape,
+         scrollLeft: UInt16, rowStore: ResidentRowStore,
+         rowStoreOperationCounters: ResidentRowStoreCounters,
+         selection: GUISelectionOverlay?, searchMatches: [GUISearchMatch],
+         diagnosticUnderlines: [GUIDiagnosticUnderline], documentHighlights: [GUIDocumentHighlight],
+         lineAnnotations: [GUILineAnnotation], paneGeometry: GUIPaneGeometry?,
+         cursorline: GUICursorline?, scrollPresentation: GUIScrollPresentation?) {
+        self.windowId = windowId
+        self.fullRefresh = fullRefresh
+        self.contentEpoch = contentEpoch
+        self.cursorVisible = cursorVisible
+        self.cursorRow = cursorRow
+        self.cursorCol = cursorCol
+        self.cursorShape = cursorShape
+        self.scrollLeft = scrollLeft
+        self.rowStore = rowStore
+        self.rowStoreOperationCounters = rowStoreOperationCounters
+        self.selection = selection
+        self.searchMatches = searchMatches
+        self.diagnosticUnderlines = diagnosticUnderlines
+        self.documentHighlights = documentHighlights
+        self.lineAnnotations = lineAnnotations
+        self.paneGeometry = paneGeometry
+        self.cursorline = cursorline
+        self.scrollPresentation = scrollPresentation
+    }
+
+    /// Returns the same immutable content while replacing per-frame operation counters.
+    public func reportingOperationCounters(_ counters: ResidentRowStoreCounters) -> GUIWindowContent {
+        GUIWindowContent(
+            windowId: windowId, fullRefresh: fullRefresh, contentEpoch: contentEpoch,
+            cursorVisible: cursorVisible, cursorRow: cursorRow, cursorCol: cursorCol,
+            cursorShape: cursorShape, scrollLeft: scrollLeft, rowStore: rowStore,
+            rowStoreOperationCounters: counters, selection: selection,
+            searchMatches: searchMatches, diagnosticUnderlines: diagnosticUnderlines,
+            documentHighlights: documentHighlights, lineAnnotations: lineAnnotations,
+            paneGeometry: paneGeometry, cursorline: cursorline,
+            scrollPresentation: scrollPresentation
+        )
     }
 
     public func applyingOverlayDelta(_ delta: GUIWindowOverlayDelta) -> GUIWindowContent? {
@@ -529,7 +626,8 @@ public final class GUIWindowContent: Sendable {
             cursorCol: delta.cursorCol,
             cursorShape: delta.cursorShape,
             scrollLeft: scrollLeft,
-            rows: rows,
+            rowStore: rowStore,
+            rowStoreOperationCounters: .init(),
             selection: selection,
             searchMatches: searchMatches,
             diagnosticUnderlines: diagnosticUnderlines,
@@ -537,33 +635,175 @@ public final class GUIWindowContent: Sendable {
             lineAnnotations: lineAnnotations,
             paneGeometry: paneGeometry,
             cursorline: delta.cursorline,
-            scrollPresentation: scrollPresentation,
-            retainedRowIndex: retainedRowIndex
+            scrollPresentation: scrollPresentation
         )
     }
 
     public func applyingRowsDelta(_ delta: GUIWindowRowsDelta) -> GUIWindowContent? {
+        try? applyingRowsDeltaChecked(delta).get()
+    }
+
+    /// Applies A1/A2 entries directly to a COW store copy. References resolve
+    /// through durable IDs; no second full resident-row array is materialized.
+    public func applyingRowsDeltaChecked(
+        _ delta: GUIWindowRowsDelta
+    ) -> Result<GUIWindowContent, ResidentRowStoreError> {
         guard delta.windowId == windowId, delta.contentEpoch == contentEpoch else {
-            return nil
+            return .failure(.invalidRange(index: 0, removeCount: 0, rowCount: rowStore.count))
+        }
+        if delta.rowSplices != nil {
+            return applyingRowSplices(delta)
         }
 
-        var resolvedRows: [GUIVisualRow] = []
-        resolvedRows.reserveCapacity(delta.rows.count)
+        var sourceStore = rowStore
+        var nextStore = rowStore
+        do {
+            // Validate the complete result against the immutable base using
+            // identity/hash/order metadata only. Keeping metadata here avoids
+            // constructing a second document-sized GUIVisualRow array.
+            var metadata: [ResidentRowMetadata] = []
+            metadata.reserveCapacity(delta.rows.count)
+            var seenRowIDs = Set<UInt64>()
+            seenRowIDs.reserveCapacity(delta.rows.count)
+            var previousBufferLine: UInt32?
 
-        for entry in delta.rows {
-            switch entry {
-            case .reference(let rowId, let contentHash):
-                let key = GUIRetainedRowKey(rowId: rowId, contentHash: contentHash)
-                guard let row = retainedRowIndex[key] else { return nil }
-                resolvedRows.append(row)
-            case .full(let row):
-                resolvedRows.append(row)
+            for entry in delta.rows {
+                sourceStore.recordRowsVisited(1)
+                let item: ResidentRowMetadata
+                switch entry {
+                case .reference(let rowID, let contentHash):
+                    item = try sourceStore.inspectReference(rowID: rowID, contentHash: contentHash)
+                case .full(let row):
+                    item = ResidentRowMetadata(
+                        rowID: row.rowId,
+                        contentHash: row.contentHash,
+                        bufferLine: row.bufLine
+                    )
+                }
+
+                guard seenRowIDs.insert(item.rowID).inserted else {
+                    throw ResidentRowStoreError.duplicateRowID(item.rowID)
+                }
+                if let previousBufferLine, previousBufferLine > item.bufferLine {
+                    throw ResidentRowStoreError.unsortedBufferLine(
+                        previous: previousBufferLine,
+                        next: item.bufferLine
+                    )
+                }
+                previousBufferLine = item.bufferLine
+                metadata.append(item)
             }
+
+            // Identity plus content hash is the retained-reference wire contract.
+            // Full entries remain authoritative for positional metadata such as
+            // bufLine, so they are unchanged only when their payload also matches.
+            var prefix = 0
+            while prefix < min(rowStore.count, metadata.count) {
+                sourceStore.recordRowsVisited(1)
+                guard let base = rowStore.row(at: prefix),
+                      base.rowId == metadata[prefix].rowID,
+                      base.contentHash == metadata[prefix].contentHash else { break }
+                if case .full(let row) = delta.rows[prefix], row != base { break }
+                prefix += 1
+            }
+
+            var suffix = 0
+            while suffix < rowStore.count - prefix, suffix < metadata.count - prefix {
+                let baseIndex = rowStore.count - suffix - 1
+                let finalIndex = metadata.count - suffix - 1
+                sourceStore.recordRowsVisited(1)
+                guard let base = rowStore.row(at: baseIndex),
+                      base.rowId == metadata[finalIndex].rowID,
+                      base.contentHash == metadata[finalIndex].contentHash else { break }
+                if case .full(let row) = delta.rows[finalIndex], row != base { break }
+                suffix += 1
+            }
+
+            let removedCount = rowStore.count - prefix - suffix
+            let insertedEnd = metadata.count - suffix
+            if removedCount > 0 || prefix < insertedEnd {
+                var insertedRows: [GUIVisualRow] = []
+                insertedRows.reserveCapacity(insertedEnd - prefix)
+                for entry in delta.rows[prefix..<insertedEnd] {
+                    switch entry {
+                    case .reference(let rowID, let contentHash):
+                        insertedRows.append(try sourceStore.resolve(rowID: rowID, contentHash: contentHash))
+                    case .full(let row):
+                        insertedRows.append(row)
+                    }
+                }
+                try nextStore.splice(at: prefix, removeCount: removedCount, inserting: insertedRows)
+            }
+
+            nextStore.recordStagingCounters(sourceStore.counters - rowStore.counters)
+        } catch let error as ResidentRowStoreError {
+            return .failure(error)
+        } catch {
+            return .failure(.invalidRange(index: 0, removeCount: 0, rowCount: rowStore.count))
         }
 
-        let nextScrollPresentation = delta.scrollPresentation?.belongsTo(windowId: windowId, contentEpoch: contentEpoch) == true ? delta.scrollPresentation : nil
+        let nextScrollPresentation = delta.scrollPresentation?.belongsTo(
+            windowId: windowId, contentEpoch: contentEpoch
+        ) == true ? delta.scrollPresentation : nil
 
-        return GUIWindowContent(
+        return .success(content(afterApplying: delta, store: nextStore,
+                                scrollPresentation: nextScrollPresentation))
+    }
+
+    private func applyingRowSplices(
+        _ delta: GUIWindowRowsDelta
+    ) -> Result<GUIWindowContent, ResidentRowStoreError> {
+        guard let baseRowCount = delta.baseRowCount,
+              let resultRowCount = delta.resultRowCount,
+              let wireSplices = delta.rowSplices else {
+            return .failure(.invalidRange(index: 0, removeCount: 0, rowCount: rowStore.count))
+        }
+
+        var sourceStore = rowStore
+        var resolvedSplices: [ResidentRowSplice] = []
+        resolvedSplices.reserveCapacity(wireSplices.count)
+        do {
+            for splice in wireSplices {
+                var rows: [GUIVisualRow] = []
+                rows.reserveCapacity(splice.insertEntries.count)
+                for entry in splice.insertEntries {
+                    sourceStore.recordRowsVisited(1)
+                    switch entry {
+                    case .reference(let rowID, let contentHash):
+                        rows.append(try sourceStore.resolve(rowID: rowID, contentHash: contentHash))
+                    case .full(let row):
+                        rows.append(row)
+                    }
+                }
+                resolvedSplices.append(ResidentRowSplice(
+                    startIndex: Int(splice.startIndex),
+                    deleteCount: Int(splice.deleteCount),
+                    insertedRows: rows
+                ))
+            }
+
+            var nextStore = rowStore
+            try nextStore.applyBatch(
+                resolvedSplices,
+                baseRowCount: Int(baseRowCount),
+                resultRowCount: Int(resultRowCount)
+            )
+            nextStore.recordStagingCounters(sourceStore.counters - rowStore.counters)
+            let nextScroll = delta.scrollPresentation?.belongsTo(
+                windowId: windowId, contentEpoch: contentEpoch
+            ) == true ? delta.scrollPresentation : nil
+            return .success(content(afterApplying: delta, store: nextStore,
+                                    scrollPresentation: nextScroll))
+        } catch let error as ResidentRowStoreError {
+            return .failure(error)
+        } catch {
+            return .failure(.invalidRange(index: 0, removeCount: 0, rowCount: rowStore.count))
+        }
+    }
+
+    private func content(afterApplying delta: GUIWindowRowsDelta, store: ResidentRowStore,
+                         scrollPresentation: GUIScrollPresentation?) -> GUIWindowContent {
+        GUIWindowContent(
             windowId: windowId,
             fullRefresh: false,
             contentEpoch: contentEpoch,
@@ -572,7 +812,8 @@ public final class GUIWindowContent: Sendable {
             cursorCol: delta.cursorCol,
             cursorShape: delta.cursorShape,
             scrollLeft: delta.scrollLeft,
-            rows: resolvedRows,
+            rowStore: store,
+            rowStoreOperationCounters: store.counters - rowStore.counters,
             selection: delta.selection,
             searchMatches: delta.searchMatches,
             diagnosticUnderlines: delta.diagnosticUnderlines,
@@ -580,7 +821,7 @@ public final class GUIWindowContent: Sendable {
             lineAnnotations: delta.lineAnnotations,
             paneGeometry: delta.paneGeometry,
             cursorline: delta.cursorline,
-            scrollPresentation: nextScrollPresentation
+            scrollPresentation: scrollPresentation
         )
     }
 }

@@ -27,6 +27,7 @@ enum PreparedFrameRejection: Error, Sendable, Equatable {
     case missingWindowReference(windowId: UInt16)
     case windowEpochMismatch(windowId: UInt16, expected: UInt32, actual: UInt32)
     case invalidRetainedRows(windowId: UInt16, contentEpoch: UInt32)
+    case invalidRowSplice(windowId: UInt16, contentEpoch: UInt32)
     case missingFontResource(fontId: UInt8)
     case transcriptBeforeSeed
     case transcriptEpochMismatch
@@ -50,6 +51,7 @@ enum PreparedFrameRejection: Error, Sendable, Equatable {
         case .transcriptBeforeSeed, .transcriptEpochMismatch, .transcriptDesynced: return 11
         case .decodeFailure: return 12
         case .outOfTransactionCommand: return 13
+        case .invalidRowSplice: return 14
         }
     }
 
@@ -76,6 +78,8 @@ enum PreparedFrameRejection: Error, Sendable, Equatable {
             return "window \(windowId) epoch \(actual) != \(expected)"
         case .invalidRetainedRows(let windowId, let epoch):
             return "window \(windowId) has invalid retained rows for epoch \(epoch)"
+        case .invalidRowSplice(let windowId, let epoch):
+            return "window \(windowId) has an invalid row splice for epoch \(epoch)"
         case .missingFontResource(let fontId):
             return "missing font resource \(fontId)"
         case .transcriptBeforeSeed:
@@ -224,8 +228,16 @@ struct PreparedFrameTransactionBuilder {
             theme = PreparedThemeUpdate(slots: slots)
 
         case .guiWindowContent(let content):
-            workingWindows[content.windowId] = content
-            changedWindows[content.windowId] = content
+            guard content.rowStore.validateInvariants() else {
+                rejection = .invalidRetainedRows(
+                    windowId: content.windowId,
+                    contentEpoch: content.contentEpoch
+                )
+                return
+            }
+            let aggregated = aggregatingOperationCounters(for: content)
+            workingWindows[content.windowId] = aggregated
+            changedWindows[content.windowId] = aggregated
             touchedWindowIds.insert(content.windowId)
             recordFontResources(in: content)
 
@@ -377,8 +389,9 @@ struct PreparedFrameTransactionBuilder {
             )
             return
         }
-        workingWindows[delta.windowId] = updated
-        changedWindows[delta.windowId] = updated
+        let aggregated = aggregatingOperationCounters(for: updated)
+        workingWindows[delta.windowId] = aggregated
+        changedWindows[delta.windowId] = aggregated
     }
 
     private mutating func resolveRowsDelta(_ delta: GUIWindowRowsDelta) {
@@ -396,20 +409,46 @@ struct PreparedFrameTransactionBuilder {
             )
             return
         }
-        guard let updated = current.applyingRowsDelta(delta) else {
+        let updated: GUIWindowContent
+        switch current.applyingRowsDeltaChecked(delta) {
+        case .success(let content):
+            updated = content
+        case .failure(.missingRowID), .failure(.contentHashMismatch):
             rejection = .missingWindowReference(windowId: delta.windowId)
             return
+        case .failure:
+            rejection = delta.rowSplices == nil
+                ? .invalidRetainedRows(windowId: delta.windowId, contentEpoch: delta.contentEpoch)
+                : .invalidRowSplice(windowId: delta.windowId, contentEpoch: delta.contentEpoch)
+            return
         }
-        workingWindows[delta.windowId] = updated
-        changedWindows[delta.windowId] = updated
-        recordFontResources(in: updated)
+        let aggregated = aggregatingOperationCounters(for: updated)
+        workingWindows[delta.windowId] = aggregated
+        changedWindows[delta.windowId] = aggregated
+        recordFontResources(in: delta)
+    }
+
+    private func aggregatingOperationCounters(for content: GUIWindowContent) -> GUIWindowContent {
+        let prior = changedWindows[content.windowId]?.rowStoreOperationCounters ?? .init()
+        return content.reportingOperationCounters(prior + content.rowStoreOperationCounters)
     }
 
     private mutating func recordFontResources(in content: GUIWindowContent) {
-        for row in content.rows {
-            for span in row.spans where span.fontId != 0 {
-                requiredFontIds.insert(span.fontId)
-            }
+        let allRows = content.rowStore.rows(in: 0..<content.rowStore.count).rows
+        for row in allRows {
+            recordFontResources(in: row)
+        }
+    }
+
+    private mutating func recordFontResources(in delta: GUIWindowRowsDelta) {
+        for entry in delta.rows {
+            if case .full(let row) = entry { recordFontResources(in: row) }
+        }
+    }
+
+    private mutating func recordFontResources(in row: GUIVisualRow) {
+        for span in row.spans where span.fontId != 0 {
+            requiredFontIds.insert(span.fontId)
         }
     }
 }

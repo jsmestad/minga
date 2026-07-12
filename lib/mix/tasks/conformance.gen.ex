@@ -37,6 +37,7 @@ defmodule Mix.Tasks.Conformance.Gen do
   alias Minga.RenderModel.Window.GutterMetrics
   alias Minga.RenderModel.Window.PaneGeometry
   alias Minga.RenderModel.Window.Row
+  alias Minga.RenderModel.Window.RowDelta
   alias Minga.RenderModel.Window.ScrollPresentation
   alias Minga.RenderModel.Window.Viewport
 
@@ -145,13 +146,15 @@ defmodule Mix.Tasks.Conformance.Gen do
     rows2 = List.replace_at(rows1, 2, changed)
     retained = rows1 |> List.delete_at(2) |> hashes()
     win2 = window(window_id: 1, rows: rows2, top: 0, epoch: 1, full_refresh: false)
-    {rows_delta, true} = WindowEncoder.encode_rows_delta(win2, retained)
+
+    {rows_delta, false} =
+      WindowEncoder.encode_rows_delta(win2, RowDelta.from_snapshots(rows1, rows2), retained)
 
     transcript(
       "rows_delta_ref_resolution",
       "store",
       %{swift: true, go: true},
-      "A 0xA2 row-delta resolves four retained refs by row_id + content_hash and one full row, producing the same resident set the encoder built.",
+      "A v11 0xA2 row splice carries only the changed full row while retaining the immutable prefix and suffix in place.",
       [
         frame(@op_window_content, "keyframe", WindowEncoder.encode_window_content(win1), %{
           "store_present" => true,
@@ -161,7 +164,7 @@ defmodule Mix.Tasks.Conformance.Gen do
         # assertion that the row-delta PRESERVED the offset, not a trivial pass on
         # a window that never had one (#2667 coverage note).
         inject_offset(1, 2, 0),
-        frame(@op_rows_delta, "rows-delta (4 refs + 1 full)", rows_delta, %{
+        frame(@op_rows_delta, "row splice (1 full insert)", rows_delta, %{
           "store_present" => true,
           "rows" => rows_expect(rows2),
           "anchor" => anchor(win2),
@@ -189,7 +192,9 @@ defmodule Mix.Tasks.Conformance.Gen do
     ]
 
     win2 = window(window_id: 1, rows: rows2, top: 0, epoch: 1, full_refresh: false)
-    {rows_delta, false} = WindowEncoder.encode_rows_delta(win2, %{})
+
+    {rows_delta, false} =
+      WindowEncoder.encode_rows_delta(win2, RowDelta.from_snapshots(rows1, rows2), %{})
 
     transcript(
       "structural_insert_preserves_identity",
@@ -225,7 +230,9 @@ defmodule Mix.Tasks.Conformance.Gen do
     rows2 = [Enum.at(rows1, 0), absent]
     retained = hashes([Enum.at(rows1, 0), absent])
     win2 = window(window_id: 1, rows: rows2, top: 0, epoch: 1, full_refresh: false)
-    {rows_delta, true} = WindowEncoder.encode_rows_delta(win2, retained)
+
+    {rows_delta, true} =
+      WindowEncoder.encode_rows_delta(win2, RowDelta.from_snapshots(rows1, rows2), retained)
 
     rows3 = rows_for(0, 5)
     win3 = window(window_id: 1, rows: rows3, top: 0, epoch: 2, full_refresh: true)

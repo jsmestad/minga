@@ -11,6 +11,13 @@ struct FrameMetrics: Equatable {
     var atlasNewKeys: Int = 0
     var atlasHashChanges: Int = 0
     var atlasEvictions: Int = 0
+    var residentRowsVisited: Int = 0
+    var residentChunksTouched: Int = 0
+    var residentIDsResolved: Int = 0
+    var residentSplices: Int = 0
+    var residentChangedRowsValidated: Int = 0
+    var residentLocatorNodesCopied: Int = 0
+    var residentFullResets: Int = 0
 
     /// Reset all counters for a new frame.
     mutating func reset() {
@@ -23,6 +30,13 @@ struct FrameMetrics: Equatable {
         atlasNewKeys = 0
         atlasHashChanges = 0
         atlasEvictions = 0
+        residentRowsVisited = 0
+        residentChunksTouched = 0
+        residentIDsResolved = 0
+        residentSplices = 0
+        residentChangedRowsValidated = 0
+        residentLocatorNodesCopied = 0
+        residentFullResets = 0
     }
 
     /// Record an atlas miss reason against the appropriate per-frame counter.

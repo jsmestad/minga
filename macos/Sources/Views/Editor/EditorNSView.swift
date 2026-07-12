@@ -2432,7 +2432,7 @@ final class EditorNSView: MTKView {
         guard let scrollPresentation else { return .zero }
 
         let before = windowContent.map {
-            CoreTextMetalRenderer.presentationPayloadOverscanBeforeRows(rows: $0.rows, scrollPresentation: scrollPresentation)
+            CoreTextMetalRenderer.presentationOverscanBeforeRows($0)
         } ?? CoreTextMetalRenderer.scrollOverscanBefore(scrollPresentation)
 
         let totalLines = windowContent?.paneGeometry?.viewport.totalLines
@@ -2444,7 +2444,7 @@ final class EditorNSView: MTKView {
         if let windowContent {
             let visibleRows = presentationPayloadVisibleRows(for: windowContent)
             if visibleRows > 0 {
-                let rawAfter = max(windowContent.rows.count - visibleRows - before, 0)
+                let rawAfter = max(windowContent.rowStore.count - visibleRows - before, 0)
                 if rawAfter > 0 {
                     payloadAfter = rawAfter
                 } else if isResident {

@@ -142,6 +142,10 @@ type WindowContent struct {
 	Geometry       PaneGeometry
 	Scroll         ScrollPresentation
 	Rows           []WindowRow
+	BaseRowCount   uint32
+	ResultRowCount uint32
+	RowSplices     []WindowRowSplice
+	RowSplicesSet  bool
 	SelectionSet   bool
 	SearchSet      bool
 	DiagnosticsSet bool
@@ -155,6 +159,12 @@ type Cursorline struct {
 	Visible bool
 	Row     uint16
 	BG      uint32
+}
+
+type WindowRowSplice struct {
+	StartIndex  uint32
+	DeleteCount uint32
+	InsertRows  []WindowRow
 }
 
 type WindowRow struct {
@@ -274,6 +284,7 @@ func decodeWindowContent(payload []byte) (Command, error) {
 
 	sawHeader := false
 	sawRows := false
+	sawRowSplices := false
 	window := WindowContent{}
 
 	for i := 0; i < sectionCount; i++ {
@@ -296,10 +307,15 @@ func decodeWindowContent(payload []byte) (Command, error) {
 			}
 			sawHeader = true
 		case 0x02:
-			if sawRows || !decodeRows(section, &window, opcode != generated.OPGuiWindowContent) {
+			if sawRows || sawRowSplices || !decodeRows(section, &window, opcode != generated.OPGuiWindowContent) {
 				return Command{}, fmt.Errorf("malformed semantic window rows")
 			}
 			sawRows = true
+		case 0x0B:
+			if opcode != generated.OPGuiWindowRowsDelta || sawRows || sawRowSplices || !decodeRowSplices(section, &window) {
+				return Command{}, fmt.Errorf("malformed semantic window row splices")
+			}
+			sawRowSplices = true
 		case 0x03:
 			decodeSelection(section, &window)
 		case 0x04:
@@ -322,8 +338,8 @@ func decodeWindowContent(payload []byte) (Command, error) {
 	if !sawHeader {
 		return Command{}, fmt.Errorf("missing required semantic window header")
 	}
-	if !sawRows {
-		return Command{}, fmt.Errorf("missing required semantic window rows")
+	if sawRows == sawRowSplices {
+		return Command{}, fmt.Errorf("missing or ambiguous semantic window rows")
 	}
 
 	validateScrollPresentation(&window)
@@ -424,6 +440,64 @@ func decodeCursorline(section []byte, window *WindowContent) {
 	window.Cursorline = Cursorline{Visible: true, Row: cl.Row, BG: cl.BG}
 }
 
+func decodeRowSplices(section []byte, window *WindowContent) bool {
+	if len(section) < 12 {
+		return false
+	}
+	baseCount := u32(section, 0)
+	resultCount := u32(section, 4)
+	spliceCount := int(u32(section, 8))
+	offset := 12
+	if spliceCount > (len(section)-offset)/12 {
+		return false
+	}
+	splices := make([]WindowRowSplice, 0, spliceCount)
+	var previousStart uint32
+	var previousEnd uint64
+	var havePrevious bool
+	computed := int64(baseCount)
+	for i := 0; i < spliceCount; i++ {
+		if len(section) < offset+12 {
+			return false
+		}
+		start := u32(section, offset)
+		deleteCount := u32(section, offset+4)
+		insertCount := int(u32(section, offset+8))
+		offset += 12
+		deleteEnd := uint64(start) + uint64(deleteCount)
+		if deleteEnd > uint64(baseCount) || (havePrevious && start <= previousStart) ||
+			uint64(start) < previousEnd || (deleteCount == 0 && insertCount == 0) ||
+			insertCount > (len(section)-offset)/13 {
+			return false
+		}
+		insertRows := make([]WindowRow, 0, insertCount)
+		for j := 0; j < insertCount; j++ {
+			row, next, ok := decodeDeltaRowEntry(section, offset)
+			if !ok {
+				return false
+			}
+			insertRows = append(insertRows, row)
+			offset = next
+		}
+		splices = append(splices, WindowRowSplice{StartIndex: start, DeleteCount: deleteCount, InsertRows: insertRows})
+		previousStart = start
+		previousEnd = deleteEnd
+		havePrevious = true
+		computed = computed - int64(deleteCount) + int64(insertCount)
+		if computed < 0 || computed > int64(^uint32(0)) {
+			return false
+		}
+	}
+	if offset != len(section) || computed != int64(resultCount) {
+		return false
+	}
+	window.BaseRowCount = baseCount
+	window.ResultRowCount = resultCount
+	window.RowSplices = splices
+	window.RowSplicesSet = true
+	return true
+}
+
 func decodeRows(section []byte, window *WindowContent, delta bool) bool {
 	if len(section) < 4 {
 		return false
@@ -441,17 +515,14 @@ func decodeRows(section []byte, window *WindowContent, delta bool) bool {
 	rows := make([]WindowRow, 0, count)
 
 	for i := 0; i < count; i++ {
-		if delta && section[offset] == 0 && len(section) >= offset+13 {
-			rows = append(rows, WindowRow{
-				Ref:         true,
-				ID:          binary.BigEndian.Uint64(section[offset+1 : offset+9]),
-				ContentHash: u32(section, offset+9),
-			})
-			offset += 13
+		if delta {
+			row, next, ok := decodeDeltaRowEntry(section, offset)
+			if !ok {
+				return false
+			}
+			rows = append(rows, row)
+			offset = next
 			continue
-		}
-		if delta && section[offset] == 1 {
-			offset++
 		}
 
 		row, next, ok := decodeRow(section, offset)
@@ -467,6 +538,27 @@ func decodeRows(section []byte, window *WindowContent, delta bool) bool {
 	}
 	window.Rows = rows
 	return true
+}
+
+func decodeDeltaRowEntry(section []byte, offset int) (WindowRow, int, bool) {
+	if offset >= len(section) {
+		return WindowRow{}, offset, false
+	}
+	switch section[offset] {
+	case 0:
+		if len(section) < offset+13 {
+			return WindowRow{}, offset, false
+		}
+		return WindowRow{
+			Ref:         true,
+			ID:          binary.BigEndian.Uint64(section[offset+1 : offset+9]),
+			ContentHash: u32(section, offset+9),
+		}, offset + 13, true
+	case 1:
+		return decodeRow(section, offset+1)
+	default:
+		return WindowRow{}, offset, false
+	}
 }
 
 func decodeRow(section []byte, offset int) (WindowRow, int, bool) {

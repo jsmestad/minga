@@ -18,6 +18,8 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
   alias Minga.RenderModel.Window.IndentGuides
   alias Minga.RenderModel.Window.PaneGeometry
   alias Minga.RenderModel.Window.Row
+  alias Minga.RenderModel.Window.RowDelta
+  alias Minga.RenderModel.Window.RowSplice
   alias Minga.RenderModel.Window.SearchMatch
   alias Minga.RenderModel.Window.Selection
   alias Minga.RenderModel.Window.Span
@@ -180,6 +182,34 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
 
     decoded = GUIWindowDecoder.decode(encoded)
     assert hd(decoded.rows).text == text
+  end
+
+  test "one-row A2 edit in 65,536 rows emits one bounded splice entry" do
+    rows =
+      for line <- 0..65_535 do
+        %Row{
+          row_id: Row.stable_id(:normal, line),
+          row_type: :normal,
+          buf_line: line,
+          text: "",
+          spans: [],
+          content_hash: line
+        }
+      end
+
+    replacement = %{Enum.at(rows, 32_768) | text: "x", content_hash: 999_999}
+    {:ok, delta} = RowDelta.new(65_536, 65_536, [RowSplice.new(32_768, 1, [replacement])])
+
+    {encoded, false} =
+      WindowEncoder.encode_rows_delta(
+        window(rows: List.replace_at(rows, 32_768, replacement)),
+        delta,
+        Map.new(rows, &{&1.row_id, &1.content_hash})
+      )
+
+    assert <<0xA2, _section_count, sections::binary>> = encoded
+    assert :binary.match(sections, <<0x0B>>) != :nomatch
+    assert byte_size(encoded) < 256
   end
 
   test "encodes 65,536 rows with a u32 row count" do

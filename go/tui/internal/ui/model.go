@@ -640,7 +640,11 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 			m.staging = nil
 			return cmds
 		}
-		return m.rejectStaging(cmds, failure.reason, "window epoch mismatch")
+		description := "window epoch mismatch"
+		if failure.reason == protocol.RejectInvalidRowSplice {
+			description = "invalid row splice"
+		}
+		return m.rejectStaging(cmds, failure.reason, description)
 	}
 
 	// Valid: replay the buffer atomically through the live mutation path.
@@ -735,7 +739,16 @@ func (m *Model) validateWindowReferences() *windowReferenceFailure {
 			if previous.ContentEpoch != command.Window.ContentEpoch {
 				return &windowReferenceFailure{windowID: command.Window.ID, reason: protocol.RejectWindowEpoch}
 			}
-			if command.Window.Rows != nil {
+			if command.Window.RowSplicesSet {
+				rows, refMiss, err := resolveWindowRowSplices(previous.Rows, command.Window)
+				if err != nil {
+					if refMiss {
+						return &windowReferenceFailure{windowID: command.Window.ID, targeted: true}
+					}
+					return &windowReferenceFailure{windowID: command.Window.ID, reason: protocol.RejectInvalidRowSplice}
+				}
+				previous.Rows = rows
+			} else if command.Window.Rows != nil {
 				rows, err := resolveWindowRows(previous.Rows, command.Window.Rows)
 				if err != nil {
 					return &windowReferenceFailure{windowID: command.Window.ID, targeted: true}
@@ -917,7 +930,8 @@ func (m *Model) applyWindowDelta(delta protocol.WindowContent) {
 		window.Geometry = delta.Geometry
 		window.GeometrySet = true
 	}
-	if delta.Rows == nil {
+	rowsChanged := delta.Rows != nil || delta.RowSplicesSet
+	if !rowsChanged {
 		if delta.ScrollSet && delta.Scroll.WindowID == window.ID && delta.Scroll.ContentEpoch == window.ContentEpoch {
 			window.Scroll = delta.Scroll
 			window.ScrollSet = true
@@ -929,7 +943,14 @@ func (m *Model) applyWindowDelta(delta protocol.WindowContent) {
 		window.Scroll = protocol.ScrollPresentation{}
 		window.ScrollSet = false
 	}
-	if delta.Rows != nil {
+	if delta.RowSplicesSet {
+		rows, _, err := resolveWindowRowSplices(window.Rows, delta)
+		if err != nil {
+			m.removeWindow(delta.ID)
+			return
+		}
+		window.Rows = rows
+	} else if delta.Rows != nil {
 		rows, err := resolveWindowRows(window.Rows, delta.Rows)
 		if err != nil {
 			m.removeWindow(delta.ID)
@@ -978,7 +999,71 @@ func resolveWindowRows(previous []protocol.WindowRow, delta []protocol.WindowRow
 		}
 		rows = append(rows, row)
 	}
+	if err := validateResolvedRows(rows); err != nil {
+		return nil, err
+	}
 	return rows, nil
+}
+
+func resolveWindowRowSplices(previous []protocol.WindowRow, delta protocol.WindowContent) ([]protocol.WindowRow, bool, error) {
+	if uint64(len(previous)) != uint64(delta.BaseRowCount) {
+		return nil, false, fmt.Errorf("row splice base count mismatch")
+	}
+	byID := make(map[uint64]protocol.WindowRow, len(previous))
+	for _, row := range previous {
+		byID[row.ID] = row
+	}
+	result := make([]protocol.WindowRow, 0, int(delta.ResultRowCount))
+	baseCursor := 0
+	previousStart := -1
+	previousEnd := 0
+	for _, splice := range delta.RowSplices {
+		start := int(splice.StartIndex)
+		deleteCount := int(splice.DeleteCount)
+		if start <= previousStart || start < previousEnd || start < baseCursor || start > len(previous) ||
+			deleteCount < 0 || start+deleteCount > len(previous) || (deleteCount == 0 && len(splice.InsertRows) == 0) {
+			return nil, false, fmt.Errorf("invalid row splice range")
+		}
+		result = append(result, previous[baseCursor:start]...)
+		for _, row := range splice.InsertRows {
+			if row.Ref {
+				existing, ok := byID[row.ID]
+				if !ok || existing.ContentHash != row.ContentHash {
+					return nil, true, fmt.Errorf("missing retained row splice ref")
+				}
+				result = append(result, existing)
+			} else {
+				result = append(result, row)
+			}
+		}
+		baseCursor = start + deleteCount
+		previousStart = start
+		previousEnd = baseCursor
+	}
+	result = append(result, previous[baseCursor:]...)
+	if len(result) != int(delta.ResultRowCount) {
+		return nil, false, fmt.Errorf("row splice result count mismatch")
+	}
+	if err := validateResolvedRows(result); err != nil {
+		return nil, false, err
+	}
+	return result, false, nil
+}
+
+func validateResolvedRows(rows []protocol.WindowRow) error {
+	ids := make(map[uint64]struct{}, len(rows))
+	var previousLine uint32
+	for index, row := range rows {
+		if _, exists := ids[row.ID]; exists {
+			return fmt.Errorf("duplicate retained row id %d", row.ID)
+		}
+		ids[row.ID] = struct{}{}
+		if index > 0 && row.BufferLine < previousLine {
+			return fmt.Errorf("retained rows out of buffer-line order")
+		}
+		previousLine = row.BufferLine
+	}
+	return nil
 }
 
 func (m *Model) removeWindow(id uint16) {

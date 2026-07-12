@@ -24,8 +24,10 @@ version = "2.0.0"
 # to len32 command framing with u32 inner section lengths.
 # protocol_version 10 widens clipboard_write and the A1/A2 window delta section
 # carriers and row counts to u32 so large payloads cannot silently wrap.
-# protocol_version 11 makes frame transactions generation-aware and adds explicit
-# applied/rejected/window-reference-miss acknowledgements (#2739).
+# protocol_version 11 makes frame transactions generation-aware, adds explicit
+# applied/rejected/window-reference-miss acknowledgements (#2739), and evolves
+# A2 row updates from legacy complete section 0x02 snapshots to immutable-base
+# RowSplices section 0x0B (#2741).
 protocol_version = 11
 description = "Minga port protocol opcode registry"
 
@@ -104,7 +106,7 @@ framing = "fixed:6"
 # 4 base_sequence_mismatch, 5 missing_theme, 6 incomplete_theme,
 # 7 missing_window_reference, 8 window_epoch_mismatch, 9 invalid_retained_rows,
 # 10 missing_font_resource, 11 transcript_desync, 12 decode_failure,
-# 13 out_of_transaction_command, 255 unknown.
+# 13 out_of_transaction_command, 14 invalid_row_splice, 255 unknown.
 [[opcodes]]
 category = "input"
 name = "frame_applied"
@@ -1830,6 +1832,9 @@ fields = [
   { name = "scroll_left", type = "u16" },
 ]
 
+# Legacy protocol-v10 complete A2 row snapshot. Decoders retain this section for
+# replay, but a current v11 producer never emits it. Section 0x02 and 0x0B are
+# mutually exclusive.
 [[sections]]
 opcode = "gui_window_rows_delta"
 id = 0x02
@@ -1837,6 +1842,16 @@ name = "rows"
 layout = "counted_array"
 count_type = "u32"
 element = "row"
+
+# Protocol-v11 immutable-base row splices. Custom layout:
+# base_row_count:u32 + result_row_count:u32 + splice_count:u32, then each splice
+# start_index:u32 + delete_count:u32 + insert_count:u32 + insert entries. Insert
+# entries use the existing A2 tagged ref/full row encodings.
+[[sections]]
+opcode = "gui_window_rows_delta"
+id = 0x0B
+name = "row_splices"
+layout = "custom"
 
 # gui_surface_layout (0xA4) sections
 

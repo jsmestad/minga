@@ -94,6 +94,7 @@ const (
 	RejectTranscriptDesync       byte = 11
 	RejectDecodeFailure          byte = 12
 	RejectOutOfTransaction       byte = 13
+	RejectInvalidRowSplice       byte = 14
 )
 
 func EncodeFrameApplied(generation, frameSeq uint32) []byte {

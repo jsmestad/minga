@@ -1768,11 +1768,11 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         }
 
     case OP_GUI_WINDOW_VIEWPORT_DELTA:
-        let (delta, consumed) = try decodeWindowRowsDelta(data: data, offset: offset)
+        let (delta, consumed) = try decodeWindowRowsDelta(data: data, offset: offset, allowsRowSplices: false)
         return (.guiWindowViewportDelta(data: delta), consumed)
 
     case OP_GUI_WINDOW_ROWS_DELTA:
-        let (delta, consumed) = try decodeWindowRowsDelta(data: data, offset: offset)
+        let (delta, consumed) = try decodeWindowRowsDelta(data: data, offset: offset, allowsRowSplices: true)
         return (.guiWindowRowsDelta(data: delta), consumed)
 
     case OP_GUI_TOOL_MANAGER:
@@ -3149,7 +3149,8 @@ private func decodeOverlaySection(id: UInt8, data: Data, start: Int, length: Int
     return true
 }
 
-private func decodeWindowRowsDelta(data: Data, offset: Int) throws -> (GUIWindowRowsDelta, Int) {
+private func decodeWindowRowsDelta(data: Data, offset: Int,
+                                   allowsRowSplices: Bool) throws -> (GUIWindowRowsDelta, Int) {
     let rest = offset + 1
     guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
     let sectionCount = Int(data[rest])
@@ -3163,9 +3164,13 @@ private func decodeWindowRowsDelta(data: Data, offset: Int) throws -> (GUIWindow
     var cursorShape: CursorShape = .block
     var scrollLeft: UInt16 = 0
     var rows: [GUIWindowRowDeltaEntry] = []
+    var baseRowCount: UInt32?
+    var resultRowCount: UInt32?
+    var rowSplices: [GUIWindowRowSplice]?
     var overlays = DecodedOverlaySections()
     var sawHeader = false
     var sawRows = false
+    var sawRowSplices = false
 
     for _ in 0..<sectionCount {
         let section = try readSection32(data, at: pos, containingEnd: data.endIndex)
@@ -3187,9 +3192,18 @@ private func decodeWindowRowsDelta(data: Data, offset: Int) throws -> (GUIWindow
             scrollLeft = try readU16(data, sectionStart + 12)
 
         case 0x02:
-            guard !sawRows else { throw ProtocolDecodeError.malformed }
+            guard !sawRows, !sawRowSplices else { throw ProtocolDecodeError.malformed }
             sawRows = true
             rows = try decodeWindowDeltaRows(data: data, start: sectionStart, end: sectionEnd)
+
+        case 0x0B:
+            guard allowsRowSplices, !sawRows, !sawRowSplices else {
+                throw ProtocolDecodeError.malformed
+            }
+            sawRowSplices = true
+            (baseRowCount, resultRowCount, rowSplices) = try decodeWindowRowSplices(
+                data: data, start: sectionStart, end: sectionEnd
+            )
 
         case 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A:
             _ = try decodeOverlaySection(id: sectionId, data: data, start: sectionStart, length: sectionLen, end: sectionEnd, into: &overlays)
@@ -3201,29 +3215,102 @@ private func decodeWindowRowsDelta(data: Data, offset: Int) throws -> (GUIWindow
         pos = sectionEnd
     }
 
-    guard sawHeader, sawRows else { throw ProtocolDecodeError.malformed }
+    guard sawHeader, sawRows != sawRowSplices else { throw ProtocolDecodeError.malformed }
     let scrollPresentation = try validatedScrollPresentation(overlays.scrollPresentation, windowId: windowId, contentEpoch: contentEpoch)
 
-    let delta = GUIWindowRowsDelta(
-        windowId: windowId,
-        contentEpoch: contentEpoch,
-        cursorVisible: cursorVisible,
-        cursorRow: cursorRow,
-        cursorCol: cursorCol,
-        cursorShape: cursorShape,
-        scrollLeft: scrollLeft,
-        rows: rows,
-        selection: overlays.selection,
-        searchMatches: overlays.searchMatches,
-        diagnosticUnderlines: overlays.diagnosticUnderlines,
-        documentHighlights: overlays.documentHighlights,
-        lineAnnotations: overlays.lineAnnotations,
-        paneGeometry: overlays.paneGeometry,
-        cursorline: overlays.cursorline,
-        scrollPresentation: scrollPresentation
-    )
+    let delta: GUIWindowRowsDelta
+    if let baseRowCount, let resultRowCount, let rowSplices {
+        delta = GUIWindowRowsDelta(
+            windowId: windowId, contentEpoch: contentEpoch, cursorVisible: cursorVisible,
+            cursorRow: cursorRow, cursorCol: cursorCol, cursorShape: cursorShape,
+            scrollLeft: scrollLeft, baseRowCount: baseRowCount,
+            resultRowCount: resultRowCount, rowSplices: rowSplices,
+            selection: overlays.selection, searchMatches: overlays.searchMatches,
+            diagnosticUnderlines: overlays.diagnosticUnderlines,
+            documentHighlights: overlays.documentHighlights,
+            lineAnnotations: overlays.lineAnnotations, paneGeometry: overlays.paneGeometry,
+            cursorline: overlays.cursorline, scrollPresentation: scrollPresentation
+        )
+    } else {
+        delta = GUIWindowRowsDelta(
+            windowId: windowId, contentEpoch: contentEpoch, cursorVisible: cursorVisible,
+            cursorRow: cursorRow, cursorCol: cursorCol, cursorShape: cursorShape,
+            scrollLeft: scrollLeft, rows: rows, selection: overlays.selection,
+            searchMatches: overlays.searchMatches,
+            diagnosticUnderlines: overlays.diagnosticUnderlines,
+            documentHighlights: overlays.documentHighlights,
+            lineAnnotations: overlays.lineAnnotations, paneGeometry: overlays.paneGeometry,
+            cursorline: overlays.cursorline, scrollPresentation: scrollPresentation
+        )
+    }
 
     return (delta, pos - offset)
+}
+
+private func decodeWindowRowSplices(data: Data, start: Int, end: Int) throws ->
+    (UInt32, UInt32, [GUIWindowRowSplice]) {
+    guard start + 12 <= end else { throw ProtocolDecodeError.malformed }
+    let baseCount = try readU32(data, start)
+    let resultCount = try readU32(data, start + 4)
+    let spliceCount = Int(try readU32(data, start + 8))
+    var pos = start + 12
+    guard spliceCount <= (end - pos) / 12 else { throw ProtocolDecodeError.malformed }
+    var splices: [GUIWindowRowSplice] = []
+    splices.reserveCapacity(spliceCount)
+    var previousStart: UInt32?
+    var previousEnd: UInt64 = 0
+    var computedCount = Int64(baseCount)
+
+    for _ in 0..<spliceCount {
+        guard pos + 12 <= end else { throw ProtocolDecodeError.malformed }
+        let spliceStart = try readU32(data, pos)
+        let deleteCount = try readU32(data, pos + 4)
+        let insertCount = Int(try readU32(data, pos + 8))
+        pos += 12
+        let deleteEnd = UInt64(spliceStart) + UInt64(deleteCount)
+        guard deleteEnd <= UInt64(baseCount),
+              previousStart.map({ spliceStart > $0 }) ?? true,
+              UInt64(spliceStart) >= previousEnd,
+              deleteCount > 0 || insertCount > 0,
+              insertCount <= (end - pos) / 13 else {
+            throw ProtocolDecodeError.malformed
+        }
+
+        var entries: [GUIWindowRowDeltaEntry] = []
+        entries.reserveCapacity(insertCount)
+        for _ in 0..<insertCount {
+            guard pos < end else { throw ProtocolDecodeError.malformed }
+            let kind = data[pos]
+            pos += 1
+            switch kind {
+            case 0:
+                guard pos + 12 <= end else { throw ProtocolDecodeError.malformed }
+                entries.append(.reference(
+                    rowId: try readU64(data, pos),
+                    contentHash: try readU32(data, pos + 8)
+                ))
+                pos += 12
+            case 1:
+                entries.append(.full(try decodeWindowContentRow(data: data, pos: &pos, end: end)))
+            default:
+                throw ProtocolDecodeError.malformed
+            }
+        }
+        previousStart = spliceStart
+        previousEnd = deleteEnd
+        computedCount = computedCount - Int64(deleteCount) + Int64(insertCount)
+        guard computedCount >= 0, computedCount <= Int64(UInt32.max) else {
+            throw ProtocolDecodeError.malformed
+        }
+        splices.append(GUIWindowRowSplice(
+            startIndex: spliceStart, deleteCount: deleteCount, insertEntries: entries
+        ))
+    }
+
+    guard pos == end, computedCount == Int64(resultCount) else {
+        throw ProtocolDecodeError.malformed
+    }
+    return (baseCount, resultCount, splices)
 }
 
 private func decodeWindowDeltaRows(data: Data, start: Int, end: Int) throws -> [GUIWindowRowDeltaEntry] {

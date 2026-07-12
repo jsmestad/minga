@@ -75,6 +75,8 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   alias Minga.RenderModel.Window.IndentGuides
   alias Minga.RenderModel.Window.PaneGeometry
   alias Minga.RenderModel.Window.Row
+  alias Minga.RenderModel.Window.RowDelta
+  alias Minga.RenderModel.Window.RowSplice
   alias Minga.RenderModel.Window.ScrollPresentation
   alias Minga.RenderModel.Window.SearchMatch
   alias Minga.RenderModel.Window.Selection
@@ -100,6 +102,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   @section_wc_geometry 0x08
   @section_wc_cursorline 0x09
   @section_wc_scroll_presentation 0x0A
+  @section_wc_row_splices 0x0B
 
   @section_gutter_window 0x01
   @section_gutter_config 0x02
@@ -156,11 +159,16 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
     encode_rows_snapshot_delta(@op_gui_window_viewport_delta, window, previous_hashes)
   end
 
-  @doc "Encodes a retained rows delta with ordered ref-or-full row entries."
-  @spec encode_rows_delta(RenderWindow.t(), %{non_neg_integer() => non_neg_integer()}) ::
-          {binary(), boolean()}
-  def encode_rows_delta(%RenderWindow{} = window, previous_hashes) when is_map(previous_hashes) do
-    encode_rows_snapshot_delta(@op_gui_window_rows_delta, window, previous_hashes)
+  @doc "Encodes a validated A2 row-splice plan using retained refs where hashes match."
+  @spec encode_rows_delta(
+          RenderWindow.t(),
+          RowDelta.t(),
+          %{non_neg_integer() => non_neg_integer()}
+        ) :: {binary(), boolean()}
+  def encode_rows_delta(%RenderWindow{} = window, %RowDelta{} = delta, previous_hashes)
+      when is_map(previous_hashes) do
+    :ok = validate_row_delta!(delta)
+    encode_row_splices_delta(window, delta, previous_hashes)
   end
 
   @doc "Encodes per-frame window metadata that the GUI clears and rebuilds every batch."
@@ -266,7 +274,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
       |> Writer.append(row_entries)
       |> Writer.finish()
 
-    sections = delta_sections(sw, rows_payload, command)
+    sections = delta_sections(sw, @section_wc_rows, rows_payload, command)
 
     binary =
       command
@@ -279,8 +287,60 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
     {binary, has_refs?}
   end
 
-  @spec delta_sections(RenderWindow.t(), binary(), atom()) :: [binary()]
-  defp delta_sections(%RenderWindow{} = sw, rows_payload, command) do
+  @spec encode_row_splices_delta(RenderWindow.t(), RowDelta.t(), map()) ::
+          {binary(), boolean()}
+  defp encode_row_splices_delta(%RenderWindow{} = sw, %RowDelta{} = delta, previous_hashes) do
+    command = :gui_window_rows_delta
+
+    {splice_entries, has_refs?} =
+      Enum.map_reduce(delta.splices, false, fn %RowSplice{} = splice, has_refs? ->
+        {insert_entries, splice_has_refs?} =
+          encode_delta_row_entries(splice.insert_rows, previous_hashes, command)
+
+        encoded =
+          command
+          |> Writer.new()
+          |> Writer.uint32(:start_index, splice.start_index)
+          |> Writer.uint32(:delete_count, splice.delete_count)
+          |> Writer.uint32(:insert_count, RowSplice.insert_count(splice))
+          |> Writer.append(insert_entries)
+          |> Writer.finish()
+
+        {[encoded], has_refs? or splice_has_refs?}
+      end)
+
+    splices_payload =
+      command
+      |> Writer.new()
+      |> Writer.uint32(:base_row_count, delta.base_row_count)
+      |> Writer.uint32(:result_row_count, delta.result_row_count)
+      |> Writer.uint32(:splice_count, length(delta.splices))
+      |> Writer.append(splice_entries)
+      |> Writer.finish()
+
+    sections = delta_sections(sw, @section_wc_row_splices, splices_payload, command)
+
+    binary =
+      command
+      |> Writer.new()
+      |> Writer.append(<<@op_gui_window_rows_delta>>)
+      |> Writer.uint8(:section_count, length(sections))
+      |> Writer.append(sections)
+      |> Writer.finish()
+
+    {binary, has_refs?}
+  end
+
+  @spec validate_row_delta!(RowDelta.t()) :: :ok
+  defp validate_row_delta!(%RowDelta{} = delta) do
+    case RowDelta.validate(delta) do
+      :ok -> :ok
+      {:error, reason} -> raise ArgumentError, "invalid row splice plan: #{reason}"
+    end
+  end
+
+  @spec delta_sections(RenderWindow.t(), non_neg_integer(), binary(), atom()) :: [binary()]
+  defp delta_sections(%RenderWindow{} = sw, row_section_id, rows_payload, command) do
     flags = if Map.get(sw, :cursor_visible, true), do: 0x01, else: 0x00
 
     header_payload =
@@ -296,7 +356,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
       |> Writer.finish()
 
     header_section = encode_section(command, @section_wc_header, header_payload)
-    rows_section = encode_section(command, @section_wc_rows, rows_payload)
+    rows_section = encode_section(command, row_section_id, rows_payload)
     overlay = overlay_sections(sw, command)
 
     [header_section, rows_section | overlay.sections] ++
@@ -878,5 +938,4 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
 
   @spec delta_command(non_neg_integer()) :: atom()
   defp delta_command(@op_gui_window_viewport_delta), do: :gui_window_viewport_delta
-  defp delta_command(@op_gui_window_rows_delta), do: :gui_window_rows_delta
 end

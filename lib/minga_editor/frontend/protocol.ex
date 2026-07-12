@@ -145,6 +145,7 @@ defmodule MingaEditor.Frontend.Protocol do
           | :missing_window_reference
           | :window_epoch_mismatch
           | :invalid_retained_rows
+          | :invalid_row_splice
           | :missing_font_resource
           | :transcript_desync
           | :decode_failure
@@ -626,6 +627,7 @@ defmodule MingaEditor.Frontend.Protocol do
   defp decode_rejection_reason(11), do: :transcript_desync
   defp decode_rejection_reason(12), do: :decode_failure
   defp decode_rejection_reason(13), do: :out_of_transaction_command
+  defp decode_rejection_reason(14), do: :invalid_row_splice
   defp decode_rejection_reason(_), do: :unknown
 
   @spec decode_mouse_button(non_neg_integer()) :: mouse_button()

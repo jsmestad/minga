@@ -124,8 +124,8 @@ struct CoreTextMetalRendererCursorTests {
         #expect(clipped?.uvSize.y == 0.30)
     }
 
-    @Test("payload overscan ignores document visual row offset")
-    func payloadOverscanIgnoresDocumentVisualRowOffset() {
+    @Test("renderer row origin includes document visual row offset")
+    func rendererRowOriginIncludesDocumentVisualRowOffset() {
         let geometry = GUIPaneGeometry(
             windowId: 7,
             totalRect: GUICellRect(row: 0, col: 0, width: 10, height: 5),
@@ -155,9 +155,9 @@ struct CoreTextMetalRendererCursorTests {
         )
 
         let payload = EditorNSView.presentationScrollPayloadOverscanBounds(for: content, scrollPresentation: content.scrollPresentation)
-        #expect(payload.before == 0)
-        #expect(payload.after == 1)
-        #expect(CoreTextMetalRenderer.presentationOverscanBeforeRows(content) == 0)
+        #expect(payload.before == 1)
+        #expect(payload.after == 0)
+        #expect(CoreTextMetalRenderer.presentationOverscanBeforeRows(content) == 1)
     }
 
     @Test("payload overscan preserves line-delta rows before viewport")
@@ -604,6 +604,29 @@ struct CoreTextMetalRendererCursorTests {
         )
 
         #expect(CoreTextMetalRenderer.resolvedSemanticCursorCol(content) == 3)
+    }
+
+    @Test("wrapped block cursor uses anchored visual-row width at end of line")
+    func wrappedBlockCursorUsesAnchoredVisualRowWidth() {
+        let content = GUIWindowContent(
+            windowId: 1, fullRefresh: true, contentEpoch: 1,
+            cursorRow: 0, cursorCol: 4, cursorShape: .block,
+            rows: [
+                GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 10, contentHash: 1,
+                             text: "longtext", spans: []),
+                GUIVisualRow(rowType: .wrapContinuation, rowId: 2, bufLine: 10, contentHash: 2,
+                             text: "x", spans: [])
+            ],
+            selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [],
+            scrollPresentation: GUIScrollPresentation(
+                windowId: 1, resetRequired: false, anchorTop: 10, anchorLeft: 0,
+                anchorVisualRowOffset: 1, visibleStartLine: 10, visibleEndLine: 11,
+                overscanStartLine: 10, overscanEndLine: 11, contentEpoch: 1,
+                layoutGeneration: 1
+            )
+        )
+
+        #expect(CoreTextMetalRenderer.resolvedSemanticCursorCol(content) == 0)
     }
 
     @Test("vertical clipping helper preserves partial quads and drops fully hidden ones")

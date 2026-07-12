@@ -61,7 +61,7 @@ func jsonUInt64(_ value: UInt64) -> Any {
 }
 
 func windowRowsDeltaResult(type: String, delta: GUIWindowRowsDelta) -> [String: Any] {
-    let rows = delta.rows.map { entry -> [String: Any] in
+    func entryJSON(_ entry: GUIWindowRowDeltaEntry) -> [String: Any] {
         switch entry {
         case .reference(let rowId, let contentHash):
             return ["entry_type": "ref", "row_id": jsonUInt64(rowId), "content_hash": Int(contentHash)]
@@ -70,7 +70,7 @@ func windowRowsDeltaResult(type: String, delta: GUIWindowRowsDelta) -> [String: 
         }
     }
 
-    return [
+    var result: [String: Any] = [
         "type": type,
         "window_id": Int(delta.windowId),
         "content_epoch": Int(delta.contentEpoch),
@@ -78,8 +78,18 @@ func windowRowsDeltaResult(type: String, delta: GUIWindowRowsDelta) -> [String: 
         "cursor_row": Int(delta.cursorRow),
         "cursor_col": Int(delta.cursorCol),
         "scroll_left": Int(delta.scrollLeft),
-        "rows": rows
+        "rows": delta.rows.map(entryJSON)
     ]
+    if let splices = delta.rowSplices, let base = delta.baseRowCount, let final = delta.resultRowCount {
+        result["base_row_count"] = Int(base)
+        result["result_row_count"] = Int(final)
+        result["row_splices"] = splices.map { splice in
+            ["start_index": Int(splice.startIndex),
+             "delete_count": Int(splice.deleteCount),
+             "insert_entries": splice.insertEntries.map(entryJSON)] as [String: Any]
+        }
+    }
+    return result
 }
 
 func commandToJSON(_ command: RenderCommand) -> [String: Any]? {

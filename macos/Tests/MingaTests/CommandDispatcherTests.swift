@@ -2050,6 +2050,31 @@ struct CommandDispatcherStagingTests {
         #expect(gui.windowContents[7]?.cursorShape == .block)
     }
 
+    @Test("unsorted full content rejects without partial transaction publication")
+    @MainActor func unsortedContentIsTransactional() {
+        let (dispatcher, gui) = makeDispatcher()
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+        let high = GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 2,
+            contentHash: 11, text: "high", spans: [])
+        let low = GUIVisualRow(rowType: .normal, rowId: 2, bufLine: 1,
+            contentHash: 22, text: "low", spans: [])
+        let unsorted = GUIWindowContent(windowId: 7, fullRefresh: true, contentEpoch: 42,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: [high, low], selection: nil,
+            searchMatches: [], diagnosticUnderlines: [], documentHighlights: [])
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: unsorted))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        #expect(gui.framePublicationCount == 0)
+        #expect(gui.windowContents.isEmpty)
+        #expect(results.last == .rejected(generation: 1, frameSeq: 1,
+            lastAppliedFrameSeq: 0,
+            reason: .invalidRetainedRows(windowId: 7, contentEpoch: 42)))
+    }
+
     @Test("missing retained row reports targeted miss without partial publication")
     @MainActor func missingRetainedRowIsTransactional() {
         let (dispatcher, gui) = makeDispatcher()
@@ -2065,7 +2090,10 @@ struct CommandDispatcherStagingTests {
         let missing = GUIWindowRowsDelta(
             windowId: 7, contentEpoch: 42, cursorVisible: true,
             cursorRow: 0, cursorCol: 0, cursorShape: .block, scrollLeft: 0,
-            rows: [.reference(rowId: 999, contentHash: 999)], selection: nil,
+            rows: [
+                .reference(rowId: 1, contentHash: 11),
+                .reference(rowId: 999, contentHash: 999)
+            ], selection: nil,
             searchMatches: [], diagnosticUnderlines: [], documentHighlights: [],
             lineAnnotations: [], paneGeometry: nil, cursorline: nil
         )

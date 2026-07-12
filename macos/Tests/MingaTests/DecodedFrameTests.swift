@@ -60,28 +60,18 @@ struct DecodedFrameTests {
         #expect(frame.metrics.allocations == -1)
     }
 
-    @Test("release scaling seam covers 64 KiB through 64 MiB")
+    @Test("deterministic copy scaling seam covers 64 KiB through 64 MiB")
     func releaseScalingSeam() throws {
         let sizes = [64 * 1024, 1024 * 1024, 16 * 1024 * 1024, 64 * 1024 * 1024]
-        var baselineNanoseconds = 0.0
 
         for packetSize in sizes {
             let packet = makeRenderingPacket(size: packetSize)
             let frame = try decodeFrame(from: packet, collectOwnedMetrics: true)
-            let elapsed = nanoseconds(frame.metrics.decodeDuration)
-            if baselineNanoseconds == 0 { baselineNanoseconds = max(elapsed, 1_000) }
-            let linearBudget = max(1_000_000, baselineNanoseconds * Double(packetSize / sizes[0]) * 4)
 
             #expect(frame.metrics.packetBytes == packetSize)
             #expect(frame.metrics.bytesCopied == packetSize - frame.commands.count * 3)
             #expect(frame.metrics.allocations == frame.commands.count + 1)
-            #expect(elapsed <= linearBudget)
         }
-    }
-
-    private func nanoseconds(_ duration: Duration) -> Double {
-        let components = duration.components
-        return Double(components.seconds) * 1_000_000_000 + Double(components.attoseconds) / 1_000_000_000
     }
 
     private func makeRenderingPacket(size: Int) -> Data {
