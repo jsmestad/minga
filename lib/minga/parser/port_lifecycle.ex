@@ -57,7 +57,7 @@ defmodule Minga.Parser.PortLifecycle do
     payload = IO.iodata_to_binary(commands)
 
     try do
-      Port.command(port, payload)
+      Port.command(port, payload, [:nosuspend])
     rescue
       ArgumentError -> false
     catch
