@@ -254,6 +254,7 @@ final class EditorNSView: MTKView {
 
     /// Cleans up window-bound observers and monitors.
     private func cleanupWindowResources() {
+        dispatcher.discardPendingPresentation(reason: .hidden)
         cleanupBlinkResources()
         cancelThumbDragWithFlush()
         resetSmoothScrollState()
@@ -337,6 +338,7 @@ final class EditorNSView: MTKView {
     /// Pauses Metal rendering and cursor blinking while the screens are asleep.
     func pauseForScreenSleep() {
         isScreenAsleep = true
+        dispatcher.discardPendingPresentation(reason: .screenSleep)
         blinkTask?.cancel()
         cursorBlinkVisible = true
     }
@@ -498,8 +500,16 @@ final class EditorNSView: MTKView {
 
     /// Called by MTKView's display link at vsync when needsDisplay is true.
     override func draw(_ dirtyRect: NSRect) {
-        guard !isScreenAsleep else { return }
-        guard let drawable = currentDrawable else { return }
+        // Fail before currentDrawable can vend a retained surface and before an input
+        // sequence is claimed. In particular, an occluded drawable is not presentation.
+        if let reason = presentationPreflightDiscardReason() {
+            dispatcher.discardPendingPresentation(reason: reason)
+            return
+        }
+        guard let drawable = currentDrawable else {
+            dispatcher.discardPendingPresentation(reason: .nilDrawable)
+            return
+        }
         let scale = Float(window?.backingScaleFactor ?? 2.0)
 
         // Check for cursor movement to post accessibility notifications.
@@ -531,6 +541,7 @@ final class EditorNSView: MTKView {
         let validGutterHoverRow = validGutterHoverWindowId == nil ? nil : gutterHoverRow
         let validMouseInGutter = isMouseInGutter && validGutterHoverWindowId != nil
         let cursorAnimationGeneration = coreTextRenderer.cursorAnimationGeneration
+        let presentationInputSeq = dispatcher.takePresentationInputSeq()
         coreTextRenderer.render(frameState: fs, fontManager: fontManager,
                                 cursorBlinkVisible: cursorBlinkVisible,
                                 windowContents: guiState?.windowContents ?? [:],
@@ -541,7 +552,9 @@ final class EditorNSView: MTKView {
                                 drawable: drawable, viewportSize: drawableSize,
                                 contentScale: scale,
                                 scrollOffset: SIMD2<Float>(Float(scrollPixelOffset.x), Float(scrollPixelOffset.y + scrollElasticOffsetY)),
-                                presentationWindowId: presentationScrollWindowId)
+                                presentationWindowId: presentationScrollWindowId,
+                                presentationInputSeq: presentationInputSeq,
+                                latencyRecorder: dispatcher.latency)
         if coreTextRenderer.cursorAnimationGeneration != cursorAnimationGeneration {
             resetCursorBlink()
         }
@@ -646,6 +659,11 @@ final class EditorNSView: MTKView {
         displayConfigurationChanged(newScale: window.backingScaleFactor)
     }
 
+    override func viewDidHide() {
+        super.viewDidHide()
+        dispatcher.discardPendingPresentation(reason: .hidden)
+    }
+
     /// Applies a live display configuration update to the Metal surface.
     func displayConfigurationChanged(newScale: CGFloat, forceResizeEvent: Bool = false, sendDimensions: Bool = true) {
         updateMetalBackingScale(newScale)
@@ -729,6 +747,18 @@ final class EditorNSView: MTKView {
             name: NSWindow.didExitFullScreenNotification,
             object: window
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowPresentationAvailabilityDidChange),
+            name: NSWindow.didChangeOcclusionStateNotification,
+            object: window
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowPresentationAvailabilityDidChange),
+            name: NSWindow.didMiniaturizeNotification,
+            object: window
+        )
         onFullScreenChanged?(window.styleMask.contains(.fullScreen))
 
         firstResponderGuard = FirstResponderGuard(window: window, editorView: self)
@@ -755,6 +785,16 @@ final class EditorNSView: MTKView {
         NotificationCenter.default.removeObserver(
             self,
             name: NSWindow.didExitFullScreenNotification,
+            object: observedWindow
+        )
+        NotificationCenter.default.removeObserver(
+            self,
+            name: NSWindow.didChangeOcclusionStateNotification,
+            object: observedWindow
+        )
+        NotificationCenter.default.removeObserver(
+            self,
+            name: NSWindow.didMiniaturizeNotification,
             object: observedWindow
         )
         onFullScreenChanged?(false)
@@ -800,6 +840,20 @@ final class EditorNSView: MTKView {
         // Control): no mouseUp is guaranteed, so discard the drag with its final target flushed
         // rather than leave the reconcile gate stuck open (Critical 1b / Critical 2, policy b).
         cancelThumbDragWithFlush()
+    }
+
+    @objc private func windowPresentationAvailabilityDidChange(_ notification: Notification) {
+        if let reason = presentationPreflightDiscardReason() {
+            dispatcher.discardPendingPresentation(reason: reason)
+        }
+    }
+
+    private func presentationPreflightDiscardReason() -> LatencyRecorder.DiscardReason? {
+        let hidden = isHiddenOrHasHiddenAncestor || window?.isVisible == false || window?.isMiniaturized == true
+        let occluded = window.map { !$0.occlusionState.contains(.visible) } ?? false
+        return PresentationSamplePreflight.discardReason(
+            screenAsleep: isScreenAsleep, hidden: hidden, occluded: occluded
+        )
     }
 
     override func becomeFirstResponder() -> Bool {

@@ -375,7 +375,9 @@ final class CoreTextMetalRenderer {
                 gutterHoverRow: UInt16? = nil,
                 drawable: CAMetalDrawable, viewportSize: CGSize,
                 contentScale: Float, scrollOffset: SIMD2<Float> = .zero,
-                presentationWindowId: UInt16? = nil) {
+                presentationWindowId: UInt16? = nil,
+                presentationInputSeq: UInt32 = 0,
+                latencyRecorder: LatencyRecorder? = nil) {
         // The window that owns the current presentation scroll offset. During a live gesture this
         // is the gesture target; during a settle / spring-back / discrete ease the gesture target
         // is already nil, so the view resolves this from the settle/elastic window instead. The
@@ -797,7 +799,10 @@ final class CoreTextMetalRenderer {
         renderDesc.colorAttachments[0].clearColor = clearColor
 
         guard let cmdBuf = commandQueue.makeCommandBuffer(),
-              let encoder = cmdBuf.makeRenderCommandEncoder(descriptor: renderDesc) else { return }
+              let encoder = cmdBuf.makeRenderCommandEncoder(descriptor: renderDesc) else {
+            latencyRecorder?.discard(seq: presentationInputSeq, reason: .schedulingImpossible)
+            return
+        }
 
         // Triple-buffered quad uploads: wait until a quad buffer is free (at most
         // `quadBufferFrameCount` frames in flight), then rotate to it and reset
@@ -1249,6 +1254,15 @@ final class CoreTextMetalRenderer {
         let quadFrameSemaphore = self.quadFrameSemaphore
         cmdBuf.addCompletedHandler { completedBuffer in
             quadFrameSemaphore.signal()
+            if completedBuffer.status == .completed {
+                latencyRecorder?.markPresented(seq: presentationInputSeq)
+                os_signpost(.event, log: renderLog, name: "PresentationComplete", signpostID: renderSignpostID,
+                            "input=%{public}u", presentationInputSeq)
+            } else {
+                latencyRecorder?.discard(seq: presentationInputSeq, reason: .gpuFailure)
+                os_signpost(.event, log: renderLog, name: "PresentationDropped", signpostID: renderSignpostID,
+                            "input=%{public}u status=%{public}d", presentationInputSeq, completedBuffer.status.rawValue)
+            }
             let completionLatencyMs = (CACurrentMediaTime() - commitTime) * 1000.0
             let gpuStart = completedBuffer.gpuStartTime
             let gpuEnd = completedBuffer.gpuEndTime
@@ -1259,6 +1273,9 @@ final class CoreTextMetalRenderer {
                 os_signpost(.event, log: renderLog, name: "GPU Timing", signpostID: renderSignpostID, "gpu_ms=%{public}.3f commit_to_complete_ms=%{public}.3f", 0.0, completionLatencyMs)
             }
         }
+        latencyRecorder?.markSubmitted(seq: presentationInputSeq)
+        os_signpost(.event, log: renderLog, name: "MetalSubmit", signpostID: renderSignpostID,
+                    "input=%{public}u", presentationInputSeq)
         cmdBuf.commit()
     }
 

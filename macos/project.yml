@@ -37,6 +37,8 @@ targets:
         type: file
       - path: Sources/Protocol/LatencyRecorder.swift
         type: file
+      - path: Sources/Protocol/RenderPerformanceGate.swift
+        type: file
       - path: Sources/Protocol/FrontendExtensionRuntimeMessage.swift
         type: file
     settings:
@@ -111,6 +113,7 @@ targets:
           - "Renderer/WindowContent.swift"
           - "Protocol/AgentSurfaceTypes.swift"
           - "Protocol/LatencyRecorder.swift"
+          - "Protocol/RenderPerformanceGate.swift"
           - "Protocol/FrontendExtensionRuntimeMessage.swift"
           # MingaUI-owned (Slice 3)
           - "Protocol/InputEncoder.swift"
@@ -213,6 +216,8 @@ targets:
           # Snapshot test outputs are gitignored local artifacts; never bundle
           # them as test resources or the checked-in project fails on missing inputs.
           - "Snapshots/**"
+          # Standalone optimized executable; unit tests cover its comparator separately.
+          - "Performance/**"
       - path: Sources
         type: group
         excludes:
@@ -226,6 +231,7 @@ targets:
           - "Renderer/WindowContent.swift"
           - "Protocol/AgentSurfaceTypes.swift"
           - "Protocol/LatencyRecorder.swift"
+          - "Protocol/RenderPerformanceGate.swift"
           - "Protocol/FrontendExtensionRuntimeMessage.swift"
           # MingaUI-owned (Slice 3)
           - "Protocol/InputEncoder.swift"
@@ -298,6 +304,7 @@ targets:
           - "Renderer/WindowContent.swift"
           - "Protocol/AgentSurfaceTypes.swift"
           - "Protocol/LatencyRecorder.swift"
+          - "Protocol/RenderPerformanceGate.swift"
           - "Protocol/FrontendExtensionRuntimeMessage.swift"
           # MingaUI-owned (Slice 3)
           - "Protocol/InputEncoder.swift"

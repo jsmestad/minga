@@ -116,10 +116,26 @@ final class CommandDispatcher {
     /// Non-optional: forgetting to wire this is a compile-time error.
     let guiState: GUIState
 
-    /// Records end-to-end keystroke-to-present latency (ticket #2215). The input
-    /// path stamps a correlation sequence into each key packet; this dispatcher
-    /// resolves the sample when the echoed sequence arrives on `commit_frame`.
+    /// Records input-to-apply and input-to-presentation as separate milestones.
+    /// A committed transaction marks apply only; Metal owns submission/completion.
     let latency = LatencyRecorder()
+
+    /// Input sequence attached to the newest applied frame awaiting a draw.
+    private var pendingPresentationInputSeq: UInt32 = 0
+
+    /// Claims the newest applied input sequence for one Metal submission.
+    func takePresentationInputSeq() -> UInt32 {
+        let seq = pendingPresentationInputSeq
+        pendingPresentationInputSeq = 0
+        return seq
+    }
+
+    /// Discards an applied frame that cannot acquire a drawable/presentation path.
+    func discardPendingPresentation(reason: LatencyRecorder.DiscardReason) {
+        guard pendingPresentationInputSeq != 0 else { return }
+        latency.discard(seq: pendingPresentationInputSeq, reason: reason)
+        pendingPresentationInputSeq = 0
+    }
 
     /// Window ids that arrived in the current frame batch. Used for input hit testing so stale
     /// retained pane geometry can still render without being clickable.
@@ -357,8 +373,12 @@ final class CommandDispatcher {
         openFrameSeq = nil
         self.transactionBuilder = nil
 
-        os_signpost(.event, log: renderLog, name: "CommitFrame", "frame=%{public}u input=%{public}u", frameSeq, inputSeq)
-        latency.resolve(seq: inputSeq)
+        os_signpost(.event, log: renderLog, name: "SemanticApply", "frame=%{public}u input=%{public}u", frameSeq, inputSeq)
+        if pendingPresentationInputSeq != 0, pendingPresentationInputSeq != inputSeq {
+            latency.discard(seq: pendingPresentationInputSeq, reason: .superseded)
+        }
+        latency.markApplied(seq: inputSeq)
+        pendingPresentationInputSeq = inputSeq
         onTransactionResult?(.applied(generation: openGeneration, frameSeq: frameSeq))
         if let firstRender = onFirstRender {
             firstRender()

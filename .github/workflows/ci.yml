@@ -316,6 +316,9 @@ jobs:
       - name: Verify Release optimization
         run: scripts/check_macos_release_optimization
 
+      - name: Gate optimized native render preparation
+        run: scripts/check_render_performance
+
       - name: Build
         run: |
           cd macos
