@@ -1,4 +1,5 @@
 defmodule MingaEditor.RemoteNodeEventsTest do
+  # Uses the global SessionManager and SessionStore while replacing remote session state.
   use Minga.Test.EditorCase, async: false, rendering: :disabled
 
   alias Minga.Distribution.Events.NodeConnectedEvent
