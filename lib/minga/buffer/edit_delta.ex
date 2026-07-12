@@ -38,6 +38,8 @@ defmodule Minga.Buffer.EditDelta do
     :inserted_text
   ]
 
+  @type line_range :: {non_neg_integer(), non_neg_integer()}
+
   @type t :: %__MODULE__{
           start_byte: non_neg_integer(),
           old_end_byte: non_neg_integer(),
@@ -47,6 +49,16 @@ defmodule Minga.Buffer.EditDelta do
           new_end_position: {non_neg_integer(), non_neg_integer()},
           inserted_text: String.t()
         }
+
+  @doc "Returns the current-coordinate line range affected by ordered deltas."
+  @spec affected_line_range([t()], line_range() | nil) :: line_range() | nil
+  def affected_line_range(deltas, prior_range \\ nil) when is_list(deltas) do
+    Enum.reduce(deltas, prior_range, fn delta, range ->
+      range
+      |> transform_line_range(delta)
+      |> union_line_range(delta_range(delta))
+    end)
+  end
 
   @doc "Creates a delta for an insertion at a position (no text removed)."
   @spec insertion(
@@ -85,6 +97,50 @@ defmodule Minga.Buffer.EditDelta do
       inserted_text: ""
     }
   end
+
+  @spec transform_line_range(line_range() | nil, t()) :: line_range() | nil
+  defp transform_line_range(nil, _delta), do: nil
+
+  defp transform_line_range({_first, last} = range, %__MODULE__{start_position: {start, _}})
+       when last < start,
+       do: range
+
+  defp transform_line_range(
+         {first, last},
+         %__MODULE__{
+           old_end_position: {old_end, _},
+           new_end_position: {new_end, _}
+         }
+       )
+       when first > old_end do
+    shift = new_end - old_end
+    {first + shift, last + shift}
+  end
+
+  defp transform_line_range(
+         {first, last},
+         %__MODULE__{
+           start_position: {start, _},
+           old_end_position: {old_end, _},
+           new_end_position: {new_end, _}
+         }
+       ) do
+    shifted_last = if last > old_end, do: last + new_end - old_end, else: new_end
+    {min(first, start), max(new_end, shifted_last)}
+  end
+
+  @spec delta_range(t()) :: line_range()
+  defp delta_range(%__MODULE__{
+         start_position: {start, _},
+         new_end_position: {new_end, _}
+       }),
+       do: {start, max(start, new_end)}
+
+  @spec union_line_range(line_range() | nil, line_range()) :: line_range()
+  defp union_line_range(nil, range), do: range
+
+  defp union_line_range({first, last}, {new_first, new_last}),
+    do: {min(first, new_first), max(last, new_last)}
 
   @doc "Creates a delta for a replacement (text removed and text inserted)."
   @spec replacement(

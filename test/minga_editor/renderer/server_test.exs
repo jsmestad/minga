@@ -455,7 +455,7 @@ defmodule MingaEditor.Renderer.ServerTest do
 
       RendererServer.cast_snapshot(renderer, snapshot, 20)
       assert_receive {:resident_probe, 20, 1, false, 0, [], ^epoch}, @async_render_timeout
-      assert_receive {:line_fetch, %{lines_fetched: 130}, %{full_residence?: true}}
+      assert_receive {:line_fetch, %{lines_fetched: 24}, %{full_residence?: true}}
 
       RendererServer.frame_status(
         renderer,

@@ -94,6 +94,37 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
       assert after_model.row_delta.result_row_count == 300
     end
 
+    test "a warm no-edit frame never fetches the full resident document" do
+      state = warm(resident_state(300))
+      buffer = state.editor.workspace.buffers.active
+
+      calls = trace_buffer_calls(buffer, fn -> build_frame(state) end)
+
+      refute Enum.any?(calls.messages, fn
+               {:render_lines, _version, 0, 300} -> true
+               _ -> false
+             end)
+
+      assert Enum.all?(calls.messages, fn
+               {:render_lines, _version, _first, count} -> count <= 12
+               _ -> true
+             end)
+    end
+
+    test "an ordinary resident edit uses one atomic consume snapshot and no render_lines" do
+      state = warm(resident_state(300))
+      buffer = state.editor.workspace.buffers.active
+
+      BufferProcess.move_to(buffer, {150, 0})
+      BufferProcess.insert_text(buffer, "Z")
+
+      calls = trace_buffer_calls(buffer, fn -> build_frame(state) end)
+
+      assert Enum.count(calls.messages, &match?({:renderer_consume, _}, &1)) == 1
+      refute Enum.any?(calls.messages, &match?({:render_lines, _, _, _}, &1))
+      refute Enum.any?(calls.messages, &match?(:version, &1))
+    end
+
     test "a pure cursor move reuses the resident rows and leaves the digest unchanged" do
       state = warm(resident_state(300))
       buffer = state.editor.workspace.buffers.active
@@ -108,8 +139,8 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
     end
   end
 
-  describe "stale consume/fetch retry" do
-    test "two ordered edits survive a forced stale fetch and compose once on both rows" do
+  describe "uncommitted consume retry" do
+    test "two ordered edits union their snapshots and compose once on both rows" do
       state = warm(resident_state(300))
       buffer = state.editor.workspace.buffers.active
 
@@ -126,9 +157,11 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
       stale_input = RenderPipeline.compute_layout(stale_input)
       stale_layout = Layout.get(stale_input)
 
-      assert_raise MingaEditor.Renderer.StaleBufferError, fn ->
-        Scroll.scroll_windows(stale_input, stale_layout)
-      end
+      # The resident fast path owns an atomic version-qualified snapshot, so
+      # this frame can finish consistently without a second buffer fetch even
+      # though another edit landed after consume. We intentionally do not
+      # commit it; the retry must retain its pending range and union edit B.
+      {_stale_scrolls, _stale_input} = Scroll.scroll_windows(stale_input, stale_layout)
 
       {renderer, input} = BufferChanges.prepare(renderer, intent)
       input = Content.reset_rows_rasterized(input)
@@ -151,6 +184,31 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
       assert first.row_id != second.row_id
       assert model.row_delta.base_row_count == 300
       assert model.row_delta.result_row_count == 300
+    end
+  end
+
+  defp trace_buffer_calls(buffer, fun) do
+    :erlang.trace(buffer, true, [:receive, {:tracer, self()}])
+
+    try do
+      result = fun.()
+      delivery_ref = :erlang.trace_delivered(buffer)
+      assert_receive {:trace_delivered, ^buffer, ^delivery_ref}
+      %{result: result, messages: drain_buffer_calls(buffer, [])}
+    after
+      :erlang.trace(buffer, false, [:receive])
+    end
+  end
+
+  defp drain_buffer_calls(buffer, acc) do
+    receive do
+      {:trace, ^buffer, :receive, {:"$gen_call", _from, message}} ->
+        drain_buffer_calls(buffer, [message | acc])
+
+      {:trace, ^buffer, :receive, _message} ->
+        drain_buffer_calls(buffer, acc)
+    after
+      0 -> Enum.reverse(acc)
     end
   end
 

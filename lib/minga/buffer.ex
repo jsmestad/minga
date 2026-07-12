@@ -421,9 +421,12 @@ defmodule Minga.Buffer do
           Minga.Buffer.RenderSnapshot.t()
   defdelegate render_snapshot(server, first_line, count), to: BufferProcess
 
-  @doc "Atomically consumes renderer deltas with the current version/count/sequence."
-  @spec renderer_consume(t()) :: Minga.Buffer.RendererConsume.t()
-  defdelegate renderer_consume(server), to: BufferProcess
+  @doc "Atomically consumes renderer deltas and snapshots their bounded affected range."
+  @spec renderer_consume(
+          t(),
+          {non_neg_integer(), non_neg_integer()} | nil
+        ) :: Minga.Buffer.RendererConsume.t()
+  defdelegate renderer_consume(server, prior_affected_range \\ nil), to: BufferProcess
 
   @doc "Returns a bounded line range only when the expected version is still current."
   @spec render_lines(t(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::

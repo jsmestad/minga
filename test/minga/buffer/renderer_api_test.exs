@@ -21,6 +21,68 @@ defmodule Minga.Buffer.RendererAPITest do
     assert {:ok, []} = Buffer.consume_edit_deltas(buffer, :renderer)
   end
 
+  test "renderer consume returns one bounded changed snapshot with no Document" do
+    buffer = start_supervised!({Buffer, content: "zero\none\ntwo\nthree"})
+    _initial = Buffer.renderer_consume(buffer)
+
+    :ok = Buffer.move_to(buffer, {2, 0})
+    :ok = Buffer.insert_text(buffer, "changed ")
+
+    assert %RendererConsume{
+             version: 1,
+             changes: {:ok, [_]},
+             snapshot:
+               %RenderSnapshot{first_line: 2, lines: ["changed two"], version: 1} = snapshot
+           } = Buffer.renderer_consume(buffer)
+
+    refute Map.has_key?(Map.from_struct(snapshot), :document)
+  end
+
+  test "retry consume snapshots the union of a prior pending range and a second edit" do
+    buffer = start_supervised!({Buffer, content: "zero\none\ntwo\nthree\nfour"})
+    _initial = Buffer.renderer_consume(buffer)
+
+    :ok = Buffer.move_to(buffer, {1, 0})
+    :ok = Buffer.insert_text(buffer, "A")
+
+    assert %RendererConsume{snapshot: %RenderSnapshot{first_line: 1, lines: ["Aone"]}} =
+             Buffer.renderer_consume(buffer)
+
+    :ok = Buffer.move_to(buffer, {3, 0})
+    :ok = Buffer.insert_text(buffer, "B")
+
+    assert %RendererConsume{
+             version: 2,
+             changes: {:ok, [_]},
+             snapshot: %RenderSnapshot{
+               first_line: 1,
+               lines: ["Aone", "two", "Bthree"],
+               version: 2
+             }
+           } = Buffer.renderer_consume(buffer, {1, 1})
+  end
+
+  test "retry range follows pending content shifted by a structural edit" do
+    buffer = start_supervised!({Buffer, content: "zero\none\ntwo\nthree\nfour"})
+    _initial = Buffer.renderer_consume(buffer)
+
+    :ok = Buffer.move_to(buffer, {3, 0})
+    :ok = Buffer.insert_text(buffer, "X")
+
+    assert %RendererConsume{snapshot: %RenderSnapshot{first_line: 3, lines: ["Xthree"]}} =
+             Buffer.renderer_consume(buffer)
+
+    :ok = Buffer.move_to(buffer, {0, 0})
+    :ok = Buffer.insert_text(buffer, "new\n")
+
+    assert %RendererConsume{
+             snapshot: %RenderSnapshot{
+               first_line: 0,
+               lines: ["new", "zero", "one", "two", "Xthree"]
+             }
+           } = Buffer.renderer_consume(buffer, {3, 3})
+  end
+
   test "version-checked range fetch returns no Document and rejects an intervening edit" do
     buffer = start_supervised!({Buffer, content: "zero\none\ntwo\nthree"})
     consume = Buffer.renderer_consume(buffer)

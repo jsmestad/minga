@@ -9,7 +9,6 @@ defmodule MingaEditor.Renderer.Server do
 
   use GenServer
 
-  alias Minga.Telemetry
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.Renderer.FrameHandler
@@ -33,7 +32,6 @@ defmodule MingaEditor.Renderer.Server do
 
   def cast_snapshot(server, %Intent{} = intent, frame_seq)
       when is_integer(frame_seq) and frame_seq >= 0 do
-    emit_request_size(intent)
     GenServer.cast(server, {:render, intent, frame_seq, monotonic_now()})
   end
 
@@ -47,7 +45,6 @@ defmodule MingaEditor.Renderer.Server do
 
   def render_sync(server, %Intent{} = intent, frame_seq)
       when is_integer(frame_seq) and frame_seq >= 0 do
-    emit_request_size(intent)
     GenServer.call(server, {:render_sync, intent, frame_seq, monotonic_now()}, :infinity)
   end
 
@@ -56,7 +53,6 @@ defmodule MingaEditor.Renderer.Server do
           {:ok, MingaEditor.Renderer.RenderReceipt.t()} | {:error, Exception.t()}
   def reset_sync(server, %Intent{} = intent, frame_seq)
       when is_integer(frame_seq) and frame_seq >= 0 do
-    emit_request_size(intent)
     GenServer.call(server, {:reset_sync, intent, frame_seq, monotonic_now()}, :infinity)
   end
 
@@ -121,15 +117,6 @@ defmodule MingaEditor.Renderer.Server do
 
   @impl true
   def handle_info(message, state), do: FrameHandler.dispatch(message, state)
-
-  @spec emit_request_size(Intent.t()) :: :ok
-  defp emit_request_size(intent) do
-    Telemetry.execute(
-      [:minga, :render, :boundary],
-      %{request_bytes: :erlang.external_size(intent)},
-      %{}
-    )
-  end
 
   @spec monotonic_now() :: integer()
   defp monotonic_now, do: System.monotonic_time(:microsecond)
