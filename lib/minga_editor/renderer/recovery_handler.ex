@@ -17,6 +17,7 @@ defmodule MingaEditor.Renderer.RecoveryHandler do
        state
        | rendering?: true,
          render_token: token,
+         stale_retry_count: 0,
          pending: nil,
          in_flight: {Intent.force_keyframe(intent), seq, pushed_at},
          awaiting_ack: nil

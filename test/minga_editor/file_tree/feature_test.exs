@@ -1,5 +1,6 @@
 defmodule MingaEditor.FileTree.FeatureTest do
-  use ExUnit.Case, async: true
+  # File-tree toggle reads the process-global Minga.Project singleton.
+  use ExUnit.Case, async: false
 
   alias Minga.Project.FileTree
   alias MingaEditor.Extension.Sidebar

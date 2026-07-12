@@ -204,6 +204,34 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       assert result.shell_state.tab_bar_click_regions == [{:tab, 2}]
     end
 
+    test "fresh receipt commits renderer-computed viewport observations", %{state: state} do
+      input = Input.from_editor_state(state)
+      id = state.workspace.windows.active
+      window = Map.fetch!(state.workspace.windows.map, id)
+      viewport = MingaEditor.Viewport.put_top(window.viewport, 12)
+
+      render_window =
+        window
+        |> WindowIntent.from_window()
+        |> WindowIntent.materialize(%MingaEditor.Renderer.WindowCache{
+          last_buf_version: window.render_cache.buffer_version
+        })
+        |> MingaEditor.Renderer.RenderWindow.set_viewport(viewport)
+
+      windows = MingaEditor.State.Windows.set_map(input.workspace.windows, %{id => render_window})
+      output = %{input | workspace: %{input.workspace | windows: windows}}
+      receipt = MingaEditor.Renderer.RenderReceipt.from_output(output, 10, 0, 0)
+
+      assert %MingaEditor.Renderer.WindowObservation{viewport: ^viewport} =
+               receipt.window_observations[id]
+
+      result = EditorState.apply_renderer_writeback(state, receipt)
+      observed = Map.fetch!(result.workspace.windows.map, id)
+
+      assert observed.viewport.top == 12
+      assert observed.render_cache.viewport_top == 12
+    end
+
     test "stale receipt cannot overwrite newer editor-owned transitions", %{state: state} do
       input = Input.from_editor_state(state)
       newer = receipt(input, 20, false, layout: :newer)

@@ -54,6 +54,7 @@ defmodule MingaEditor.State do
   alias MingaEditor.State.WhichKey
   alias MingaEditor.State.Windows
   alias MingaEditor.Renderer.RenderWindow
+  alias MingaEditor.Renderer.WindowObservation
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Window
@@ -767,11 +768,14 @@ defmodule MingaEditor.State do
       |> merge_renderer_shell_field(:modeline_click_regions, receipt.modeline_click_regions)
       |> merge_renderer_shell_field(:tab_bar_click_regions, receipt.tab_bar_click_regions)
 
+    workspace = apply_window_observations(state.workspace, receipt.window_observations)
+
     %{
       state
       | layout: receipt.layout,
         focus_tree: receipt.focus_tree,
         shell_state: shell_state,
+        workspace: workspace,
         keyframe_pending?: clear_keyframe_pending_from_receipt?(state, receipt),
         last_render_receipt_revision:
           max(state.last_render_receipt_revision, receipt.intent_revision),
@@ -810,11 +814,14 @@ defmodule MingaEditor.State do
         |> merge_renderer_shell_field(:modeline_click_regions, receipt.modeline_click_regions)
         |> merge_renderer_shell_field(:tab_bar_click_regions, receipt.tab_bar_click_regions)
 
+      workspace = apply_window_observations(state.workspace, receipt.window_observations)
+
       %{
         state
         | layout: receipt.layout,
           focus_tree: receipt.focus_tree,
           shell_state: shell_state,
+          workspace: workspace,
           keyframe_pending?: clear_keyframe_pending_from_receipt?(state, receipt),
           last_render_receipt_revision: receipt.intent_revision,
           last_render_receipt_seq: receipt.frame_seq
@@ -824,6 +831,34 @@ defmodule MingaEditor.State do
       state
     end
   end
+
+  @spec apply_window_observations(SessionState.t(), map()) :: SessionState.t()
+  defp apply_window_observations(%SessionState{} = workspace, observations) do
+    Enum.reduce(observations, workspace, fn
+      {id,
+       %WindowObservation{
+         buffer: buffer,
+         buffer_version: version,
+         viewport: %Viewport{} = viewport
+       }},
+      acc ->
+        SessionState.update_window(acc, id, fn window ->
+          observe_renderer_window(window, buffer, viewport, version)
+        end)
+    end)
+  end
+
+  @spec observe_renderer_window(Window.t(), pid(), Viewport.t(), non_neg_integer()) :: Window.t()
+  defp observe_renderer_window(
+         %Window{buffer: buffer, render_cache: %{buffer_version: current_version}} = window,
+         buffer,
+         viewport,
+         version
+       )
+       when current_version <= version,
+       do: Window.observe_render(window, viewport, version)
+
+  defp observe_renderer_window(window, _buffer, _viewport, _version), do: window
 
   @spec clear_keyframe_pending_from_receipt?(t(), MingaEditor.Renderer.RenderReceipt.t()) ::
           boolean()

@@ -11,6 +11,8 @@ defmodule MingaEditor.Renderer.FrameHandler do
 
   @type result :: {:noreply, State.t()}
 
+  @max_stale_retries 3
+
   @spec enqueue(State.t(), Intent.t(), non_neg_integer(), integer()) :: result()
   def enqueue(%State{rendering?: true} = state, intent, seq, pushed_at) do
     Telemetry.hop_latency(:cast_snapshot, pushed_at)
@@ -23,7 +25,13 @@ defmodule MingaEditor.Renderer.FrameHandler do
     token = schedule_render()
 
     {:noreply,
-     %{state | rendering?: true, render_token: token, in_flight: {intent, seq, pushed_at}}}
+     %{
+       state
+       | rendering?: true,
+         render_token: token,
+         stale_retry_count: 0,
+         in_flight: {intent, seq, pushed_at}
+     }}
   end
 
   @spec dispatch(term(), State.t()) :: result()
@@ -50,7 +58,12 @@ defmodule MingaEditor.Renderer.FrameHandler do
   @doc "Runs one synchronous frame while retaining all renderer state in the server process."
   @spec render_sync(State.t(), Intent.t(), non_neg_integer(), integer()) ::
           {:reply, {:ok, RenderReceipt.t()} | {:error, Exception.t()}, State.t()}
-  def render_sync(%State{} = state, %Intent{} = intent, seq, pushed_at) do
+  def render_sync(%State{} = state, %Intent{} = intent, seq, pushed_at),
+    do: do_render_sync(state, intent, seq, pushed_at, 0)
+
+  @spec do_render_sync(State.t(), Intent.t(), non_neg_integer(), integer(), non_neg_integer()) ::
+          {:reply, {:ok, RenderReceipt.t()} | {:error, Exception.t()}, State.t()}
+  defp do_render_sync(state, intent, seq, pushed_at, retry_count) do
     {prepared, input} = BufferChanges.prepare(state, intent)
 
     case execute_pipeline(prepared, input, intent, seq, pushed_at) do
@@ -59,8 +72,11 @@ defmodule MingaEditor.Renderer.FrameHandler do
         receipt = receipt(output, seq, intent)
         {:reply, {:ok, receipt}, committed}
 
-      {:stale, retained} ->
-        render_sync(retained, intent, seq, pushed_at)
+      {:stale, _error, retained} when retry_count < @max_stale_retries ->
+        do_render_sync(retained, intent, seq, pushed_at, retry_count + 1)
+
+      {:stale, error, retained} ->
+        {:reply, {:error, error}, retained}
 
       {:error, error, retained} ->
         {:reply, {:error, error}, retained}
@@ -77,7 +93,7 @@ defmodule MingaEditor.Renderer.FrameHandler do
 
     case execute_pipeline(prepared, input, intent, seq, pushed_at) do
       {:ok, committed, output} -> await_or_commit(committed, output, intent, seq, pushed_at)
-      {:stale, retained} -> retry_stale(retained, intent, seq, pushed_at)
+      {:stale, error, retained} -> retry_stale(retained, intent, seq, pushed_at, error)
       {:error, error, retained} -> drop_failed(retained, error, seq)
     end
   end
@@ -85,12 +101,27 @@ defmodule MingaEditor.Renderer.FrameHandler do
   @doc "Advances to the latest coalesced intent or returns the renderer to idle."
   @spec advance(State.t()) :: result()
   def advance(%State{pending: nil} = state),
-    do: {:noreply, %{state | rendering?: false, render_token: nil, in_flight: nil}}
+    do:
+      {:noreply,
+       %{
+         state
+         | rendering?: false,
+           render_token: nil,
+           stale_retry_count: 0,
+           in_flight: nil
+       }}
 
   def advance(%State{pending: {intent, seq, pushed_at}} = state) do
     token = schedule_render()
 
-    {:noreply, %{state | render_token: token, in_flight: {intent, seq, pushed_at}, pending: nil}}
+    {:noreply,
+     %{
+       state
+       | render_token: token,
+         stale_retry_count: 0,
+         in_flight: {intent, seq, pushed_at},
+         pending: nil
+     }}
   end
 
   @doc "Commits pipeline-global renderer state after composition or acknowledgement."
@@ -134,7 +165,7 @@ defmodule MingaEditor.Renderer.FrameHandler do
 
   @spec execute_pipeline(State.t(), Input.t(), Intent.t(), non_neg_integer(), integer()) ::
           {:ok, State.t(), Input.t()}
-          | {:stale, State.t()}
+          | {:stale, StaleBufferError.t(), State.t()}
           | {:error, Exception.t(), State.t()}
   defp execute_pipeline(state, input, intent, seq, pushed_at) do
     output =
@@ -146,7 +177,7 @@ defmodule MingaEditor.Renderer.FrameHandler do
     emit_frame_telemetry(output, seq, pushed_at)
     {:ok, committed, output}
   rescue
-    _error in [StaleBufferError] -> {:stale, state}
+    error in [StaleBufferError] -> {:stale, error, state}
     error -> {:error, error, state}
   end
 
@@ -177,10 +208,39 @@ defmodule MingaEditor.Renderer.FrameHandler do
     advance(state)
   end
 
-  @spec retry_stale(State.t(), Intent.t(), non_neg_integer(), integer()) :: result()
-  defp retry_stale(state, intent, seq, pushed_at) do
+  @spec retry_stale(
+          State.t(),
+          Intent.t(),
+          non_neg_integer(),
+          integer(),
+          StaleBufferError.t()
+        ) :: result()
+  defp retry_stale(
+         %State{stale_retry_count: retry_count} = state,
+         intent,
+         seq,
+         pushed_at,
+         _error
+       )
+       when retry_count < @max_stale_retries do
     token = schedule_render()
-    {:noreply, %{state | render_token: token, in_flight: {intent, seq, pushed_at}}}
+
+    {:noreply,
+     %{
+       state
+       | render_token: token,
+         stale_retry_count: retry_count + 1,
+         in_flight: {intent, seq, pushed_at}
+     }}
+  end
+
+  defp retry_stale(state, _intent, seq, _pushed_at, error) do
+    Minga.Log.warning(
+      :render,
+      "Renderer frame #{seq} exhausted stale-buffer retries: #{Exception.message(error)}"
+    )
+
+    advance(state)
   end
 
   @spec drop_failed(State.t(), Exception.t(), non_neg_integer()) :: result()

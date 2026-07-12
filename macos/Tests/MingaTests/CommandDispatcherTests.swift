@@ -2124,6 +2124,47 @@ struct CommandDispatcherStagingTests {
         #expect(results == [.rejected(generation: 1, frameSeq: 1, lastAppliedFrameSeq: 0, reason: .missingFontResource(fontId: 3))])
     }
 
+    @Test("unregistered font resources in row splices reject a prepared frame")
+    @MainActor func missingSpliceFontResourceRejects() {
+        let (dispatcher, gui) = makeDispatcher()
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: windowContent()))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        let replacement = GUIVisualRow(
+            rowType: .normal, rowId: 2, bufLine: 0, contentHash: 22,
+            text: "new", spans: [GUIHighlightSpan(
+                startCol: 0, endCol: 3, fg: 0xFFFFFF, bg: 0,
+                attrs: 0, fontWeight: 0, fontId: 3
+            )]
+        )
+        let delta = GUIWindowRowsDelta(
+            windowId: 7, contentEpoch: 42, cursorVisible: true,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block, scrollLeft: 0,
+            baseRowCount: 1, resultRowCount: 1,
+            rowSplices: [GUIWindowRowSplice(
+                startIndex: 0, deleteCount: 1, insertEntries: [.full(replacement)]
+            )],
+            selection: nil, searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [], lineAnnotations: [], paneGeometry: nil,
+            cursorline: nil
+        )
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        dispatcher.dispatch(.guiWindowRowsDelta(data: delta))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+
+        #expect(gui.framePublicationCount == 1)
+        #expect(results.last == .rejected(
+            generation: 1, frameSeq: 2, lastAppliedFrameSeq: 1,
+            reason: .missingFontResource(fontId: 3)
+        ))
+    }
+
     @Test("publication operation count depends on changed domains, not command count")
     @MainActor func changedDomainOperationCount() {
         let (dispatcher, gui) = makeDispatcher()

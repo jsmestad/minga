@@ -8,6 +8,8 @@ defmodule MingaEditor.Renderer.RenderReceipt do
   """
 
   alias MingaEditor.RenderPipeline.Input
+  alias MingaEditor.Renderer.WindowObservation
+  alias MingaEditor.State.Windows
 
   @enforce_keys [
     :layout,
@@ -30,7 +32,8 @@ defmodule MingaEditor.Renderer.RenderReceipt do
     :frame_seq,
     :keyframe?,
     :render_sent_at,
-    intent_revision: 0
+    intent_revision: 0,
+    window_observations: %{}
   ]
 
   @type t :: %__MODULE__{
@@ -43,7 +46,8 @@ defmodule MingaEditor.Renderer.RenderReceipt do
           frame_seq: non_neg_integer(),
           keyframe?: boolean(),
           render_sent_at: integer(),
-          intent_revision: non_neg_integer()
+          intent_revision: non_neg_integer(),
+          window_observations: %{optional(MingaEditor.Window.id()) => WindowObservation.t()}
         }
 
   @doc "Builds a focused receipt from a completed pipeline frame."
@@ -60,8 +64,21 @@ defmodule MingaEditor.Renderer.RenderReceipt do
       frame_seq: frame_seq,
       keyframe?: output.caches.last_frame_keyframe?,
       render_sent_at: sent_at,
-      intent_revision: intent_revision
+      intent_revision: intent_revision,
+      window_observations: window_observations(output)
     }
+  end
+
+  @spec window_observations(Input.t()) :: %{
+          optional(MingaEditor.Window.id()) => WindowObservation.t()
+        }
+  defp window_observations(%Input{workspace: %{windows: %Windows{map: windows}}}) do
+    Enum.reduce(windows, %{}, fn {id, window}, observations ->
+      case WindowObservation.from_window(window) do
+        %WindowObservation{} = observation -> Map.put(observations, id, observation)
+        nil -> observations
+      end
+    end)
   end
 
   @spec shell_field(term(), atom()) :: term()
