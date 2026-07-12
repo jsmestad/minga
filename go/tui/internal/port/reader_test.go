@@ -76,9 +76,9 @@ func TestDecodePacketDoesNotSwallowAfterOverlayDelta(t *testing.T) {
 // The model uses the marker to abort an open frame transaction and resync.
 func TestDecodePacketSurfacesStreamErrorOnUnknownOpcode(t *testing.T) {
 	var batch []byte
-	batch = append(batch, generated.OPBeginFrame, 0, 0, 0, 5, 0, 0, 0, 0) // open transaction (seq 5, base 0)
-	batch = append(batch, generated.OPSetCursorShape, 0)                  // a valid command before the failure
-	batch = append(batch, 0x6F)                                           // unknown opcode (below chrome range, no schema size)
+	batch = append(batch, generated.OPBeginFrame, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 1) // seq 5, base 0, generation 1
+	batch = append(batch, generated.OPSetCursorShape, 0)                              // a valid command before the failure
+	batch = append(batch, 0x6F)                                                       // unknown opcode (below chrome range, no schema size)
 
 	var warnings []string
 	cmds := decodePacket(batch, func(_ byte, text string) { warnings = append(warnings, text) })

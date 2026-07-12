@@ -77,11 +77,11 @@ defmodule MingaEditor.Frontend.ManagerTest do
       pid = start_manager(name)
       :ok = Manager.subscribe(name)
 
-      # opcode 0x08 + last_good_frame_seq:u32. The Manager stays opaque transport
+      # opcode 0x08 + last_good_frame_seq:u32 + generation:u32. The Manager stays opaque transport
       # and only broadcasts the decoded event; the BEAM owns keyframe forcing.
-      send_port_data(pid, nil, <<0x08, 42::32>>)
+      send_port_data(pid, nil, <<0x08, 42::32, 7::32>>)
 
-      assert_receive {:minga_input, {:request_keyframe, 42}}
+      assert_receive {:minga_input, {:request_keyframe, 42, 7}}
     end
 
     test "duplicate subscriptions receive one copy of each event" do

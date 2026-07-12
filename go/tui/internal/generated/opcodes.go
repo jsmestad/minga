@@ -4,7 +4,7 @@ package generated
 
 // ProtocolVersion is the wire-contract version the frontend exchanges with
 // the BEAM in the ready handshake. A mismatch yields an explicit protocol_error.
-const ProtocolVersion uint16 = 10
+const ProtocolVersion uint16 = 11
 
 const (
 	// Input
@@ -17,6 +17,9 @@ const (
 	OPGuiAction           byte = 0x07
 	OPRequestKeyframe     byte = 0x08
 	OPScrollBatch         byte = 0x09
+	OPFrameApplied        byte = 0x0A
+	OPFrameRejected       byte = 0x0B
+	OPWindowRefMiss       byte = 0x0C
 	OPLogMessage          byte = 0x60
 
 	// Render

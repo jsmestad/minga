@@ -10,8 +10,9 @@ import MingaUI
 
 /// The single typed result consumed by the frame-status protocol in #2739.
 enum FrameTransactionResult: Sendable, Equatable {
-    case published(frameSeq: UInt32)
-    case rejected(frameSeq: UInt32?, reason: PreparedFrameRejection)
+    case applied(generation: UInt32, frameSeq: UInt32)
+    case rejected(generation: UInt32, frameSeq: UInt32, lastAppliedFrameSeq: UInt32, reason: PreparedFrameRejection)
+    case windowRefMiss(generation: UInt32, frameSeq: UInt32, lastAppliedFrameSeq: UInt32, windowId: UInt16)
 }
 
 /// A rejection is complete and stable before any observable state is changed.
@@ -32,6 +33,25 @@ enum PreparedFrameRejection: Error, Sendable, Equatable {
     case transcriptDesynced
     case decodeFailure(frameSeq: UInt32)
     case outOfTransactionCommand(opcode: UInt8?)
+
+    /// Stable wire value shared with docs/protocol_schema.toml and Go.
+    var wireCode: UInt8 {
+        switch self {
+        case .beginWhileOpen: return 1
+        case .commitWithoutBegin, .commitSequenceMismatch: return 2
+        case .frameSequenceNotIncreasing: return 3
+        case .baseSequenceMismatch: return 4
+        case .missingTheme: return 5
+        case .incompleteTheme: return 6
+        case .missingWindowReference: return 7
+        case .windowEpochMismatch: return 8
+        case .invalidRetainedRows: return 9
+        case .missingFontResource: return 10
+        case .transcriptBeforeSeed, .transcriptEpochMismatch, .transcriptDesynced: return 11
+        case .decodeFailure: return 12
+        case .outOfTransactionCommand: return 13
+        }
+    }
 
     var logDescription: String {
         switch self {
@@ -110,6 +130,7 @@ struct PreparedMetadataUpdates: Sendable { let commands: [RenderCommand] }
 struct PreparedFrameTransaction {
     let frameSeq: UInt32
     let baseFrameSeq: UInt32
+    let generation: UInt32
     let theme: PreparedThemeUpdate?
     let windows: PreparedWindowUpdates?
     let chrome: PreparedChromeUpdates?
@@ -161,6 +182,7 @@ private struct PreparedDomainBuffer {
 struct PreparedFrameTransactionBuilder {
     let frameSeq: UInt32
     let baseFrameSeq: UInt32
+    let generation: UInt32
 
     private var theme: PreparedThemeUpdate?
     private var workingWindows: [UInt16: GUIWindowContent]
@@ -182,12 +204,14 @@ struct PreparedFrameTransactionBuilder {
     init(
         frameSeq: UInt32,
         baseFrameSeq: UInt32,
+        generation: UInt32,
         committedWindows: [UInt16: GUIWindowContent],
         registeredFontIds: Set<UInt8>,
         committedTranscript: AgentTranscriptSnapshot
     ) {
         self.frameSeq = frameSeq
         self.baseFrameSeq = baseFrameSeq
+        self.generation = generation
         self.workingWindows = baseFrameSeq == 0 ? [:] : committedWindows
         self.registeredFontIds = registeredFontIds
         self.registeredFontIds.insert(0)
@@ -301,6 +325,7 @@ struct PreparedFrameTransactionBuilder {
         let transaction = PreparedFrameTransaction(
             frameSeq: frameSeq,
             baseFrameSeq: baseFrameSeq,
+            generation: generation,
             theme: theme,
             windows: windowsChanged ? PreparedWindowUpdates(
                 replacements: changedWindows,

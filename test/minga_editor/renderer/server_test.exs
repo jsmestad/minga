@@ -143,7 +143,11 @@ defmodule MingaEditor.Renderer.ServerTest do
   test "frontend reset snapshots keep their reset caches" do
     parent = self()
     renderer = start_renderer(parent, pipeline: cache_probe_pipeline(parent))
-    reset_snapshot = %{stub_snapshot() | caches: %Caches{last_emitted_frame_seq: 0}}
+
+    reset_snapshot = %{
+      stub_snapshot()
+      | caches: %Caches{last_emitted_frame_seq: 0, recovery_generation: 2}
+    }
 
     :sys.replace_state(renderer, fn state ->
       %{state | caches: %Caches{last_emitted_frame_seq: 11}}
@@ -157,21 +161,124 @@ defmodule MingaEditor.Renderer.ServerTest do
                    @async_render_timeout
   end
 
-  test "direct editor-emitted frame boundaries can advance beyond renderer caches" do
-    parent = self()
-    renderer = start_renderer(parent, pipeline: cache_probe_pipeline(parent))
-    boundary_advanced_snapshot = %{stub_snapshot() | caches: %Caches{last_emitted_frame_seq: 12}}
+  describe "frame acknowledgement credit" do
+    test "apply advances the base while duplicate, out-of-order, stale, and wrong-generation statuses do not" do
+      renderer = start_ack_renderer(self())
 
-    :sys.replace_state(renderer, fn state ->
-      %{state | caches: %Caches{last_emitted_frame_seq: 11}}
-    end)
+      RendererServer.cast_snapshot(renderer, stub_snapshot(), 10)
+      assert_receive {:ack_pipeline, 10, 1, 0, true}, @async_render_timeout
 
-    RendererServer.cast_snapshot(renderer, boundary_advanced_snapshot, 13)
+      RendererServer.cast_snapshot(renderer, stub_snapshot(), 11)
+      RendererServer.cast_snapshot(renderer, stub_snapshot(), 12)
 
-    assert_receive {:pipeline_input, 13, 12}, @async_render_timeout
+      RendererServer.frame_status(renderer, {:frame_applied, 2, 10})
+      RendererServer.frame_status(renderer, {:frame_applied, 1, 9})
+      RendererServer.frame_status(renderer, {:frame_rejected, 1, 10, 99, :base_sequence_mismatch})
+      assert RendererServer.acknowledgement_state(renderer) == {1, 0}
+      refute_receive {:ack_pipeline, _, _, _, _}, 50
 
-    assert_receive {:render_done, %{frame_seq: 13, caches: %Caches{last_emitted_frame_seq: 13}}},
-                   @async_render_timeout
+      RendererServer.frame_status(renderer, {:frame_applied, 1, 10})
+      assert_receive {:render_done, %{frame_seq: 10, keyframe?: true}}, @async_render_timeout
+      assert_receive {:ack_pipeline, 12, 1, 10, false}, @async_render_timeout
+      assert RendererServer.acknowledgement_state(renderer) == {1, 10}
+
+      RendererServer.frame_status(renderer, {:frame_applied, 1, 10})
+      RendererServer.frame_status(renderer, {:frame_rejected, 0, 12, 10, :base_sequence_mismatch})
+      assert RendererServer.acknowledgement_state(renderer) == {1, 10}
+      refute_receive {:render_done, %{frame_seq: 12}}, 50
+    end
+
+    test "rejected frame N renders only latest pending N+1 as a fresh-generation keyframe" do
+      renderer = start_ack_renderer(self())
+
+      RendererServer.cast_snapshot(renderer, stub_snapshot(), 20)
+      assert_receive {:ack_pipeline, 20, 1, 0, true}, @async_render_timeout
+      RendererServer.cast_snapshot(renderer, stub_snapshot(), 21)
+
+      RendererServer.frame_status(renderer, {:frame_rejected, 1, 20, 0, :base_sequence_mismatch})
+      assert_receive {:ack_pipeline, 21, 2, 0, true}, @async_render_timeout
+      assert RendererServer.acknowledgement_state(renderer) == {2, 0}
+      refute_receive {:ack_pipeline, _, 3, _, _}, 50
+      refute_receive {:render_done, %{frame_seq: 20}}, 50
+    end
+
+    test "manual retry returns the credit and advances recovery generation every time" do
+      renderer = start_ack_renderer(self())
+
+      RendererServer.cast_snapshot(renderer, stub_snapshot(), 30)
+      assert_receive {:ack_pipeline, 30, 1, 0, true}, @async_render_timeout
+
+      RendererServer.request_recovery(renderer)
+      assert_receive {:ack_pipeline, first_retry, 2, 0, true}, @async_render_timeout
+      assert RendererServer.acknowledgement_state(renderer) == {2, 0}
+
+      RendererServer.request_recovery(renderer)
+      assert_receive {:ack_pipeline, second_retry, 3, 0, true}, @async_render_timeout
+      assert second_retry > first_retry
+      assert RendererServer.acknowledgement_state(renderer) == {3, 0}
+    end
+
+    test "connection reset abandons outstanding credit and resumes from a base-zero keyframe" do
+      renderer = start_ack_renderer(self())
+
+      RendererServer.cast_snapshot(renderer, stub_snapshot(), 50)
+      assert_receive {:ack_pipeline, 50, 1, 0, true}, @async_render_timeout
+      RendererServer.cast_snapshot(renderer, stub_snapshot(), 51)
+
+      :ok = RendererServer.reset_connection(renderer, stub_snapshot(), 60)
+      assert_receive {:ack_pipeline, 60, 2, 0, true}, @async_render_timeout
+      refute_receive {:ack_pipeline, 51, _, _, _}, 50
+
+      RendererServer.frame_status(renderer, {:frame_applied, 1, 50})
+      assert RendererServer.acknowledgement_state(renderer) == {2, 0}
+      refute_receive {:render_done, %{frame_seq: 50}}, 50
+
+      RendererServer.frame_status(renderer, {:frame_applied, 2, 60})
+      assert_receive {:render_done, %{frame_seq: 60}}, @async_render_timeout
+
+      RendererServer.cast_snapshot(renderer, stub_snapshot(), 61)
+      assert_receive {:ack_pipeline, 61, 2, 60, false}, @async_render_timeout
+      assert RendererServer.acknowledgement_state(renderer) == {2, 60}
+    end
+
+    test "window ref miss keeps the acknowledged generation/base and invalidates only its window" do
+      renderer = start_ack_renderer(self(), pipeline: targeted_probe_pipeline(self()))
+      state = build_editor_state(:tui, nil)
+      snapshot = Input.from_editor_state(state)
+
+      RendererServer.cast_snapshot(renderer, snapshot, 40)
+      assert_receive {:targeted_pipeline, 40, 1, 0, true, [1]}, @async_render_timeout
+      RendererServer.frame_status(renderer, {:frame_applied, 1, 40})
+      assert_receive {:render_done, %{frame_seq: 40}}, @async_render_timeout
+
+      clean_snapshot =
+        snapshot
+        |> Map.update!(:caches, fn caches ->
+          %{caches | last_emitted_frame_seq: 40, last_acknowledged_frame_seq: 40}
+        end)
+        |> update_in(
+          [
+            Access.key!(:workspace),
+            Access.key!(:windows),
+            Access.key!(:map),
+            1,
+            Access.key!(:render_cache)
+          ],
+          fn cache ->
+            %{cache | dirty_lines: %{}, reset_pending: false}
+          end
+        )
+
+      RendererServer.cast_snapshot(renderer, clean_snapshot, 41)
+      assert_receive {:targeted_pipeline, 41, 1, 40, false, []}, @async_render_timeout
+      RendererServer.frame_status(renderer, {:window_ref_miss, 1, 41, 40, 1})
+
+      assert_receive {:targeted_pipeline, targeted_retry, 1, 40, false, [1]},
+                     @async_render_timeout
+
+      assert targeted_retry > 41
+      assert RendererServer.acknowledgement_state(renderer) == {1, 40}
+    end
   end
 
   describe "render_or_async dispatch" do
@@ -211,6 +318,64 @@ defmodule MingaEditor.Renderer.ServerTest do
   defp start_renderer(editor_pid, opts \\ []) do
     opts = Keyword.merge([name: nil, editor_pid: editor_pid], opts)
     start_supervised!({RendererServer, opts})
+  end
+
+  defp start_ack_renderer(editor_pid, opts \\ []) do
+    pipeline = Keyword.get(opts, :pipeline, acknowledgement_probe_pipeline(editor_pid))
+    start_renderer(editor_pid, Keyword.merge(opts, pipeline: pipeline, require_ack?: true))
+  end
+
+  defp acknowledgement_probe_pipeline(parent) do
+    fn input ->
+      keyframe? = input.force_keyframe? or input.caches.last_acknowledged_frame_seq == 0
+
+      send(parent, {
+        :ack_pipeline,
+        input.frame_seq,
+        input.caches.recovery_generation,
+        input.caches.last_acknowledged_frame_seq,
+        keyframe?
+      })
+
+      %{
+        input
+        | caches: %{
+            input.caches
+            | last_emitted_frame_seq: input.frame_seq,
+              last_frame_keyframe?: keyframe?
+          }
+      }
+    end
+  end
+
+  defp targeted_probe_pipeline(parent) do
+    fn input ->
+      reset_windows =
+        input.workspace.windows.map
+        |> Enum.filter(fn {_id, window} -> window.render_cache.reset_pending end)
+        |> Enum.map(&elem(&1, 0))
+        |> Enum.sort()
+
+      keyframe? = input.force_keyframe? or input.caches.last_acknowledged_frame_seq == 0
+
+      send(parent, {
+        :targeted_pipeline,
+        input.frame_seq,
+        input.caches.recovery_generation,
+        input.caches.last_acknowledged_frame_seq,
+        keyframe?,
+        reset_windows
+      })
+
+      %{
+        input
+        | caches: %{
+            input.caches
+            | last_emitted_frame_seq: input.frame_seq,
+              last_frame_keyframe?: keyframe?
+          }
+      }
+    end
   end
 
   defp emit_commit_frame(input) do

@@ -93,7 +93,7 @@ defmodule MingaEditor.Frontend do
         ) :: :ok
   def send_frame_boundary(port, frame_seq, base_frame_seq, input_seq \\ 0) do
     send_commands(port, [
-      Protocol.encode_begin_frame(frame_seq, base_frame_seq),
+      Protocol.encode_begin_frame(frame_seq, base_frame_seq, 1),
       Protocol.encode_commit_frame(frame_seq, input_seq)
     ])
   end

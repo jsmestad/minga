@@ -105,6 +105,8 @@ defmodule MingaEditor.RenderPipeline.Input do
     # Renderer.Server's seq here; sync/headless paths default to a fresh monotonic
     # value so every emit still carries a unique, advancing frame_seq.
     frame_seq: nil,
+    # BEAM-owned recovery generation carried by begin_frame and echoed by statuses.
+    recovery_generation: 1,
     # When true, the emitter forces this frame to a keyframe (base_frame_seq 0,
     # full window snapshots, every chrome surface re-emitted). Set by the BEAM
     # after an inbound request_keyframe (#2219).
@@ -165,6 +167,7 @@ defmodule MingaEditor.RenderPipeline.Input do
           terminal_viewport: Viewport.t(),
           last_input_seq: non_neg_integer(),
           frame_seq: non_neg_integer() | nil,
+          recovery_generation: non_neg_integer(),
           force_keyframe?: boolean(),
           line_spacing: number() | nil,
           cursor_animate: boolean() | nil,
@@ -241,6 +244,19 @@ defmodule MingaEditor.RenderPipeline.Input do
   @spec with_font_registry(t(), FontRegistry.t()) :: t()
   def with_font_registry(%__MODULE__{} = input, %FontRegistry{} = font_registry) do
     %{input | font_registry: font_registry}
+  end
+
+  @doc "Invalidates one window in the owned render snapshot for targeted recovery."
+  @spec invalidate_window(t(), non_neg_integer()) :: {:ok, t()} | :error
+  def invalidate_window(%__MODULE__{workspace: workspace} = input, window_id) do
+    case MingaEditor.Session.State.update_snapshot_window(
+           workspace,
+           window_id,
+           &MingaEditor.Window.invalidate/1
+         ) do
+      {:ok, updated_workspace} -> {:ok, %{input | workspace: updated_workspace}}
+      :error -> :error
+    end
   end
 
   # ── Chrome dirty tracking ──────────────────────────────────────────────────

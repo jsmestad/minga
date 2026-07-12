@@ -59,11 +59,14 @@ defmodule MingaEditor.Frontend.FrameTransaction do
   defp validate([], {:inside, frame_seq}), do: {:error, {:unterminated_frame, frame_seq}}
   defp validate([<<>> | _commands], _state), do: {:error, :malformed_command}
 
-  defp validate([<<@op_begin_frame, frame_seq::32, _base_frame_seq::32>> | commands], :outside),
-    do: validate(commands, {:inside, frame_seq})
+  defp validate(
+         [<<@op_begin_frame, frame_seq::32, _base_frame_seq::32, _generation::32>> | commands],
+         :outside
+       ),
+       do: validate(commands, {:inside, frame_seq})
 
   defp validate(
-         [<<@op_begin_frame, _frame_seq::32, _base_frame_seq::32>> | _commands],
+         [<<@op_begin_frame, _frame_seq::32, _base_frame_seq::32, _generation::32>> | _commands],
          {:inside, open_frame_seq}
        ),
        do: {:error, {:begin_while_open, open_frame_seq}}

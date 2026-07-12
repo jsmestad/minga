@@ -161,20 +161,15 @@ defmodule MingaEditor.Input.RouterTest do
       _new_state = Router.dispatch(state, ?j, 0)
     end
 
-    test "entering operator_pending mode skips full render but emits a bare frame transaction" do
+    test "entering operator_pending mode still renders a committed frame" do
       state = base_state()
-      # Flush any startup messages
       flush_mailbox()
 
-      # Press 'd' to enter operator_pending mode (no buffer mutation)
       new_state = Router.dispatch(state, ?d, 0)
       assert new_state.workspace.editing.mode == :operator_pending
 
-      # A single no-op frame boundary (begin_frame + commit_frame in one
-      # send_commands cast) is sent, not a full render (#2219). port_manager is
-      # self(), so GenServer.cast sends one $gen_cast message.
       msg_count = flush_mailbox()
-      assert msg_count == 1, "Expected exactly 1 frame-boundary message, got #{msg_count}"
+      assert msg_count > 0, "Expected render messages for operator-pending transition"
     end
 
     test "normal motion triggers full render (more than one message)" do
@@ -234,24 +229,9 @@ defmodule MingaEditor.Input.RouterTest do
     end
   end
 
-  describe "operator-pending frame ordering (#2219)" do
+  describe "operator-pending frame acknowledgement (#2739)" do
     alias MingaEditor.Renderer.Server, as: RendererServer
     alias MingaEditor.Viewport
-    alias Minga.Protocol.Opcodes
-
-    # A bare boundary is exactly two commands in one send_commands cast:
-    # begin_frame then commit_frame, no content between.
-    defp bare_boundary_cast? do
-      begin_op = Opcodes.begin_frame()
-      commit_op = Opcodes.commit_frame()
-
-      receive do
-        {:"$gen_cast", {:send_commands, [<<^begin_op, _::binary>>, <<^commit_op, _::binary>>]}} ->
-          true
-      after
-        0 -> false
-      end
-    end
 
     defp async_state(renderer_pid) do
       buf = start_supervised!({BufferProcess, content: "hello\nworld\nthird"})
@@ -277,65 +257,49 @@ defmodule MingaEditor.Input.RouterTest do
       }
     end
 
-    defp park_busy(renderer) do
-      :sys.replace_state(renderer, fn s ->
+    defp acknowledged_probe(parent) do
+      fn input ->
+        send(parent, {
+          :acknowledged_render,
+          input.frame_seq,
+          input.caches.recovery_generation,
+          input.caches.last_acknowledged_frame_seq
+        })
+
         %{
-          s
-          | rendering?: true,
-            in_flight:
-              {%MingaEditor.RenderPipeline.Input{
-                 port_manager: self(),
-                 theme: MingaEditor.UI.Theme.get!(:doom_one),
-                 capabilities: %MingaEditor.Frontend.Capabilities{},
-                 shell_id: :traditional,
-                 shell: MingaEditor.Shell.Traditional,
-                 workspace: %{
-                   windows: %MingaEditor.State.Windows{},
-                   viewport: Viewport.new(24, 80)
-                 }
-               }, 0, 0}
+          input
+          | caches: %{
+              input.caches
+              | last_emitted_frame_seq: input.frame_seq,
+                last_frame_keyframe?: input.caches.last_acknowledged_frame_seq == 0
+            }
         }
-      end)
+      end
     end
 
-    test "an operator-pending no-op emits a bare boundary when the renderer is idle" do
+    test "operator-pending followed by a normal render uses only the acknowledged renderer base" do
       renderer =
-        start_supervised!({RendererServer, name: nil, editor_pid: self(), pipeline: & &1})
+        start_supervised!(
+          {RendererServer,
+           name: nil, editor_pid: self(), pipeline: acknowledged_probe(self()), require_ack?: true}
+        )
 
       state = async_state(renderer)
       flush_mailbox()
 
-      new_state = Router.dispatch(state, ?d, 0)
-      assert new_state.workspace.editing.mode == :operator_pending
+      pending_state = Router.dispatch(state, ?d, 0)
+      assert pending_state.workspace.editing.mode == :operator_pending
+      assert_receive {:acknowledged_render, first_seq, 1, 0}
+      refute_receive {:"$gen_cast", {:send_commands, _commands}}, 20
 
-      # The idle renderer is the sole writer, so the boundary is emitted directly and
-      # the editor's last_emitted_frame_seq advances.
-      assert bare_boundary_cast?(), "idle path emits a bare frame boundary"
-      assert new_state.caches.last_emitted_frame_seq > state.caches.last_emitted_frame_seq
-    end
+      RendererServer.frame_status(renderer, {:frame_applied, 1, first_seq})
+      assert_receive {:render_done, %{frame_seq: ^first_seq}}
 
-    test "an operator-pending no-op routes through the renderer (no bare boundary) when busy" do
-      renderer =
-        start_supervised!({RendererServer, name: nil, editor_pid: self(), pipeline: & &1})
-
-      state = async_state(renderer)
-      park_busy(renderer)
-      flush_mailbox()
-
-      new_state = Router.dispatch(state, ?d, 0)
-      assert new_state.workspace.editing.mode == :operator_pending
-
-      # Ordering invariant: while a lower-seq render is in-flight, the boundary must
-      # NOT be written straight to the port (that would put a decreasing frame_seq on
-      # the wire). It is serialized through the renderer instead.
-      refute bare_boundary_cast?(),
-             "busy path must not emit a bare boundary straight to the port"
-
-      # The async render was cast to the parked-busy renderer, which holds it as the
-      # pending snapshot (most-recent-wins) instead of writing the port out of order.
-      assert {_snap, _seq, _pushed_at} = :sys.get_state(renderer).pending
-      # last_emitted_frame_seq is NOT advanced at cast time; it advances on writeback.
-      assert new_state.caches.last_emitted_frame_seq == state.caches.last_emitted_frame_seq
+      normal_state = Router.dispatch(pending_state, ?w, 0)
+      assert normal_state.workspace.editing.mode == :normal
+      assert_receive {:acknowledged_render, second_seq, 1, ^first_seq}
+      assert second_seq > first_seq
+      assert RendererServer.acknowledgement_state(renderer) == {1, first_seq}
     end
   end
 

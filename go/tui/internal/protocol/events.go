@@ -66,17 +66,55 @@ func EncodeResize(width, height uint16) []byte {
 	return []byte{generated.OPResize, byte(width >> 8), byte(width), byte(height >> 8), byte(height)}
 }
 
-// EncodeRequestKeyframe asks the BEAM to send the next frame as a full keyframe
-// after the frontend invalidated its staged/committed state (#2219). The frontend
-// emits it when a frame transaction is truncated, carries a mismatched seq/base,
-// or fails to size/decode mid-transaction. last_good_frame_seq is the last frame
-// the frontend committed cleanly (informational under single-client scope; the
-// BEAM forces the next frame full regardless). Wire format: fixed:5 =
+// EncodeRequestKeyframe asks the BEAM to manually retry with a full keyframe.
+// Automatic invalidation recovery uses frame_rejected alone; emitting both would
+// advance the BEAM recovery generation twice. last_good_frame_seq is the last
+// frame the frontend committed cleanly (informational under single-client scope;
+// the BEAM forces the next frame full regardless). Wire format: fixed:5 =
 // opcode(1) + last_good_frame_seq(u32), matching protocol.ex decode_event/1.
-func EncodeRequestKeyframe(lastGoodFrameSeq uint32) []byte {
+func EncodeRequestKeyframe(lastGoodFrameSeq, generation uint32) []byte {
 	return []byte{
 		generated.OPRequestKeyframe,
 		byte(lastGoodFrameSeq >> 24), byte(lastGoodFrameSeq >> 16), byte(lastGoodFrameSeq >> 8), byte(lastGoodFrameSeq),
+		byte(generation >> 24), byte(generation >> 16), byte(generation >> 8), byte(generation),
+	}
+}
+
+const (
+	RejectTruncation             byte = 1
+	RejectCommitSequence         byte = 2
+	RejectFrameSequence          byte = 3
+	RejectBaseSequence           byte = 4
+	RejectMissingTheme           byte = 5
+	RejectIncompleteTheme        byte = 6
+	RejectMissingWindowReference byte = 7
+	RejectWindowEpoch            byte = 8
+	RejectInvalidRetainedRows    byte = 9
+	RejectMissingFont            byte = 10
+	RejectTranscriptDesync       byte = 11
+	RejectDecodeFailure          byte = 12
+	RejectOutOfTransaction       byte = 13
+)
+
+func EncodeFrameApplied(generation, frameSeq uint32) []byte {
+	return encodeFrameStatus(generated.OPFrameApplied, generation, frameSeq)
+}
+
+func EncodeFrameRejected(generation, frameSeq, lastApplied uint32, reason byte) []byte {
+	out := encodeFrameStatus(generated.OPFrameRejected, generation, frameSeq)
+	out = append(out, byte(lastApplied>>24), byte(lastApplied>>16), byte(lastApplied>>8), byte(lastApplied), reason)
+	return out
+}
+
+func EncodeWindowRefMiss(generation, frameSeq, lastApplied uint32, windowID uint16) []byte {
+	out := encodeFrameStatus(generated.OPWindowRefMiss, generation, frameSeq)
+	return append(out, byte(lastApplied>>24), byte(lastApplied>>16), byte(lastApplied>>8), byte(lastApplied), byte(windowID>>8), byte(windowID))
+}
+
+func encodeFrameStatus(op byte, generation, frameSeq uint32) []byte {
+	return []byte{op,
+		byte(generation >> 24), byte(generation >> 16), byte(generation >> 8), byte(generation),
+		byte(frameSeq >> 24), byte(frameSeq >> 16), byte(frameSeq >> 8), byte(frameSeq),
 	}
 }
 

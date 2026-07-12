@@ -80,21 +80,56 @@ struct EncoderReadyTests {
 struct EncoderRequestKeyframeTests {
     @Test("request_keyframe encodes opcode and last_good_frame_seq (#2219 child D)")
     func requestKeyframeLayout() {
-        let payload = captureFrame { $0.sendRequestKeyframe(lastGoodFrameSeq: 0x0A0B_0C0D) }
+        let payload = captureFrame { $0.sendRequestKeyframe(lastGoodFrameSeq: 0x0A0B_0C0D, generation: 7) }
 
-        // fixed:5 = opcode(1) + last_good_frame_seq(u32, big-endian).
-        #expect(payload.count == 5)
+        #expect(payload.count == 9)
         #expect(payload[0] == OP_REQUEST_KEYFRAME)
         #expect(readU32(payload, 1) == 0x0A0B_0C0D)
+        #expect(readU32(payload, 5) == 7)
     }
 
     @Test("request_keyframe carries a zero seq when the frontend has no good frame")
     func requestKeyframeZeroSeq() {
-        let payload = captureFrame { $0.sendRequestKeyframe(lastGoodFrameSeq: 0) }
+        let payload = captureFrame { $0.sendRequestKeyframe(lastGoodFrameSeq: 0, generation: 0) }
 
-        #expect(payload.count == 5)
+        #expect(payload.count == 9)
         #expect(payload[0] == OP_REQUEST_KEYFRAME)
         #expect(readU32(payload, 1) == 0)
+    }
+
+    @Test("frame_applied encodes generation and frame")
+    func frameAppliedLayout() {
+        let payload = captureFrame { $0.sendFrameApplied(generation: 3, frameSeq: 9) }
+        #expect(payload.count == 9)
+        #expect(payload[0] == OP_FRAME_APPLIED)
+        #expect(readU32(payload, 1) == 3)
+        #expect(readU32(payload, 5) == 9)
+    }
+
+    @Test("frame_rejected encodes stable status fields")
+    func frameRejectedLayout() {
+        let payload = captureFrame {
+            $0.sendFrameRejected(generation: 3, frameSeq: 9, lastAppliedFrameSeq: 7, reason: 4)
+        }
+        #expect(payload.count == 14)
+        #expect(payload[0] == OP_FRAME_REJECTED)
+        #expect(readU32(payload, 1) == 3)
+        #expect(readU32(payload, 5) == 9)
+        #expect(readU32(payload, 9) == 7)
+        #expect(payload[13] == 4)
+    }
+
+    @Test("window_ref_miss encodes the targeted window")
+    func windowRefMissLayout() {
+        let payload = captureFrame {
+            $0.sendWindowRefMiss(generation: 3, frameSeq: 9, lastAppliedFrameSeq: 7, windowId: 12)
+        }
+        #expect(payload.count == 15)
+        #expect(payload[0] == OP_WINDOW_REF_MISS)
+        #expect(readU32(payload, 1) == 3)
+        #expect(readU32(payload, 5) == 9)
+        #expect(readU32(payload, 9) == 7)
+        #expect(readU16(payload, 13) == 12)
     }
 }
 

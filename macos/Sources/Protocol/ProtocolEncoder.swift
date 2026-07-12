@@ -147,14 +147,41 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    /// Send a request_keyframe event (#2219 child D).
-    /// Layout: opcode(1) + last_good_frame_seq(4, big-endian). Asks the BEAM to
-    /// emit the next frame as a keyframe (base_frame_seq == 0, full snapshots)
-    /// after this frontend invalidated an in-flight frame transaction.
-    func sendRequestKeyframe(lastGoodFrameSeq: UInt32) {
-        var buf = Data(count: 5)
+    /// Request a fresh BEAM recovery generation.
+    func sendRequestKeyframe(lastGoodFrameSeq: UInt32, generation: UInt32) {
+        var buf = Data(count: 9)
         buf[0] = OP_REQUEST_KEYFRAME
         writeU32(&buf, 1, lastGoodFrameSeq)
+        writeU32(&buf, 5, generation)
+        writeFrame(buf)
+    }
+
+    /// Report semantic publication, deliberately independent of Metal presentation.
+    func sendFrameApplied(generation: UInt32, frameSeq: UInt32) {
+        var buf = Data(count: 9)
+        buf[0] = OP_FRAME_APPLIED
+        writeU32(&buf, 1, generation)
+        writeU32(&buf, 5, frameSeq)
+        writeFrame(buf)
+    }
+
+    func sendFrameRejected(generation: UInt32, frameSeq: UInt32, lastAppliedFrameSeq: UInt32, reason: UInt8) {
+        var buf = Data(count: 14)
+        buf[0] = OP_FRAME_REJECTED
+        writeU32(&buf, 1, generation)
+        writeU32(&buf, 5, frameSeq)
+        writeU32(&buf, 9, lastAppliedFrameSeq)
+        buf[13] = reason
+        writeFrame(buf)
+    }
+
+    func sendWindowRefMiss(generation: UInt32, frameSeq: UInt32, lastAppliedFrameSeq: UInt32, windowId: UInt16) {
+        var buf = Data(count: 15)
+        buf[0] = OP_WINDOW_REF_MISS
+        writeU32(&buf, 1, generation)
+        writeU32(&buf, 5, frameSeq)
+        writeU32(&buf, 9, lastAppliedFrameSeq)
+        writeU16(&buf, 13, windowId)
         writeFrame(buf)
     }
 

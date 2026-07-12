@@ -1073,8 +1073,8 @@ public struct ContentView<EditorSurface: View>: View {
         // If recovery stalls, the badge becomes a small manual retry control.
         ResyncOverlay(
             state: gui.resyncState,
-            onRetry: { lastGoodFrameSeq in
-                encoder?.sendRequestKeyframe(lastGoodFrameSeq: lastGoodFrameSeq)
+            onRetry: { lastGoodFrameSeq, generation in
+                encoder?.sendRequestKeyframe(lastGoodFrameSeq: lastGoodFrameSeq, generation: generation)
             }
         )
 

@@ -39,7 +39,7 @@ defmodule MingaEditor.Frontend.EmitTest do
       # transaction (#2219): every frame opens with begin_frame (0x10) and closes
       # with commit_frame (0x11). The frame no longer starts with a cell-grid clear.
       refute Enum.any?(commands, &match?(<<0x12, _::binary>>, &1))
-      assert [<<first_opcode, frame_seq::32, base_frame_seq::32>> | _] = commands
+      assert [<<first_opcode, frame_seq::32, base_frame_seq::32, _generation::32>> | _] = commands
       assert first_opcode == Opcodes.begin_frame()
       # First frame is a keyframe (no committed base), so base_frame_seq is 0.
       assert base_frame_seq == 0
@@ -110,11 +110,11 @@ defmodule MingaEditor.Frontend.EmitTest do
       {commands1, _caches} = emit_and_capture(frame, state, caches, frame_seq: 100)
       {commands2, _caches} = emit_and_capture(frame, state, caches, frame_seq: 200)
 
-      assert [<<op_begin, fs1::32, _base::32>> | _] = commands1
+      assert [<<op_begin, fs1::32, _base::32, _generation::32>> | _] = commands1
       assert op_begin == Opcodes.begin_frame()
       assert Enum.at(commands1, -1) == <<Opcodes.commit_frame(), fs1::32, 0::32>>
 
-      assert [<<_, fs2::32, _::32>> | _] = commands2
+      assert [<<_, fs2::32, _base::32, _generation::32>> | _] = commands2
       # frame_seq advances per emit even though the snapshot is identical.
       assert fs2 > fs1
     end
@@ -125,11 +125,36 @@ defmodule MingaEditor.Frontend.EmitTest do
 
       {commands, _caches} = emit_and_capture(frame, state, %Caches{}, frame_seq: 7)
 
-      assert [<<_, 7::32, base_frame_seq::32>> | _] = commands
+      assert [<<_, 7::32, base_frame_seq::32, _generation::32>> | _] = commands
       assert base_frame_seq == 0
 
       assert Enum.any?(commands, &match?(<<0x80, _::binary>>, &1)),
              "keyframe carries full window content"
+    end
+
+    test "a successful Port write does not become a delta base without acknowledgement" do
+      frame = window_frame_with_content()
+      state = semantic_state()
+
+      {_commands, unacknowledged} = emit_and_capture(frame, state, %Caches{}, frame_seq: 11)
+      {commands, _caches} = emit_and_capture(frame, state, unacknowledged, frame_seq: 22)
+
+      assert [<<_, 22::32, 0::32, _generation::32>> | _] = commands
+      assert Enum.any?(commands, &match?(<<0x80, _::binary>>, &1))
+    end
+
+    test "a renderer without a frontend treats synchronous emission as the commit boundary" do
+      frame = window_frame_with_content()
+      ctx = %{Context.from_editor_state(semantic_state()) | port_manager: nil, frame_seq: 11}
+
+      {caches, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, %Caches{})
+      assert caches.last_acknowledged_frame_seq == 11
+      assert caches.last_frame_keyframe?
+
+      ctx = %{ctx | frame_seq: 22}
+      {caches, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, caches)
+      assert caches.last_acknowledged_frame_seq == 22
+      refute caches.last_frame_keyframe?
     end
 
     test "a later frame names the previous frame_seq as its delta base" do
@@ -137,10 +162,11 @@ defmodule MingaEditor.Frontend.EmitTest do
       state = semantic_state()
 
       {_c1, caches} = emit_and_capture(frame, state, %Caches{}, frame_seq: 11)
+      caches = acknowledge(caches, 11)
       {commands, _c2} = emit_and_capture(frame, state, caches, frame_seq: 22)
 
-      assert [<<_, 22::32, base_frame_seq::32>> | _] = commands
-      assert base_frame_seq == 11, "non-keyframe bases on the previously emitted frame_seq"
+      assert [<<_, 22::32, base_frame_seq::32, _generation::32>> | _] = commands
+      assert base_frame_seq == 11, "non-keyframe bases on the previously acknowledged frame_seq"
     end
 
     test "an invalid late window field writes nothing and the next valid frame recovers with a keyframe" do
@@ -148,6 +174,7 @@ defmodule MingaEditor.Frontend.EmitTest do
       state = semantic_state()
 
       {_commands, caches} = emit_and_capture(frame, state, %Caches{}, frame_seq: 11)
+      caches = acknowledge(caches, 11)
       invalid_frame = frame_with_invalid_indent_level(frame)
       ctx = %{Context.from_editor_state(state) | frame_seq: 22}
 
@@ -160,7 +187,7 @@ defmodule MingaEditor.Frontend.EmitTest do
 
       {commands, _caches} = emit_and_capture(frame, state, recovered_caches, frame_seq: 33)
 
-      assert [<<_, 33::32, 0::32>> | _] = commands
+      assert [<<_, 33::32, 0::32, _generation::32>> | _] = commands
       assert Enum.any?(commands, &match?(<<0x80, _::binary>>, &1))
     end
 
@@ -170,6 +197,7 @@ defmodule MingaEditor.Frontend.EmitTest do
 
       # Establish a delta base: frame two bases on frame one and skips full content.
       {_c1, caches} = emit_and_capture(frame, state, %Caches{}, frame_seq: 11)
+      caches = acknowledge(caches, 11)
       {delta_commands, caches} = emit_and_capture(frame, state, caches, frame_seq: 22)
 
       refute Enum.any?(delta_commands, &match?(<<0x80, _::binary>>, &1)),
@@ -179,7 +207,7 @@ defmodule MingaEditor.Frontend.EmitTest do
       {key_commands, _caches} =
         emit_and_capture(frame, state, caches, frame_seq: 33, force_keyframe?: true)
 
-      assert [<<_, 33::32, 0::32>> | _] = key_commands
+      assert [<<_, 33::32, 0::32, _generation::32>> | _] = key_commands
 
       assert Enum.any?(key_commands, &match?(<<0x80, _::binary>>, &1)),
              "forced keyframe resends full window content"
@@ -204,7 +232,8 @@ defmodule MingaEditor.Frontend.EmitTest do
       seeded = %Caches{
         last_title: "stale title",
         last_window_bg: 0x123456,
-        last_emitted_frame_seq: 22
+        last_emitted_frame_seq: 22,
+        last_acknowledged_frame_seq: 22
       }
 
       {_key, key_caches} =
@@ -375,11 +404,16 @@ defmodule MingaEditor.Frontend.EmitTest do
 
   # Drives Emit.emit/4 with an explicit frame_seq and optional keyframe forcing,
   # capturing the single send_commands cast (port_manager is self()).
+  defp acknowledge(caches, frame_seq) do
+    Caches.acknowledge_frame(caches, frame_seq, caches.recovery_generation)
+  end
+
   defp emit_and_capture(frame, state, caches, opts) do
     ctx = %{
       Context.from_editor_state(state)
       | frame_seq: Keyword.fetch!(opts, :frame_seq),
-        force_keyframe?: Keyword.get(opts, :force_keyframe?, false)
+        force_keyframe?: Keyword.get(opts, :force_keyframe?, false),
+        acknowledgement_required?: true
     }
 
     {new_caches, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, caches)

@@ -316,7 +316,7 @@ defmodule Minga.Integration.AttachKeyframeTest do
   #   * closes with commit_frame whose frame_seq matches the begin
   #   * carries at least one full gui_window_content (full snapshot, no deltas)
   defp assert_keyframe_transaction!(commands) do
-    [<<@op_begin_frame, frame_seq::32, base_frame_seq::32>> | _] = commands
+    [<<@op_begin_frame, frame_seq::32, base_frame_seq::32, _generation::32>> | _] = commands
 
     assert base_frame_seq == 0,
            "attach handshake must produce a keyframe (base_frame_seq 0), got #{base_frame_seq}"

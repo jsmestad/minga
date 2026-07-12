@@ -291,80 +291,12 @@ defmodule MingaEditor.Input.Router do
     :exit, _ -> nil
   end
 
-  # Skips the full render when entering operator-pending mode with no buffer
-  # change. This prevents the visible flicker between keystrokes of compound
-  # operators like `dd`, `cc`, `yy`, etc. The first keystroke is a zero-cost
-  # state flag, not a mode change that warrants a screen redraw.
-  #
-  # A bare frame transaction (begin_frame + commit_frame, no content) is still
-  # emitted so frame-synchronization contracts (HeadlessPort in tests, future
-  # frame-pacing in production) and keystroke-latency correlation remain satisfied
-  # (#2219). A pending keyframe request forces a real render so the keyframe carries
-  # full content rather than an empty boundary.
+  # Every action produces a normal render intent. In production, including for
+  # operator-pending transitions with no buffer mutation, Renderer.Server owns
+  # emission so its single credit, recovery generation, and acknowledged delta
+  # base remain authoritative (#2739).
   @spec maybe_render(EditorState.t(), non_neg_integer()) :: EditorState.t()
-  defp maybe_render(state, buf_version_before) do
-    if Editing.mode(state) == :operator_pending and
-         buffer_version(state) == buf_version_before and not state.keyframe_pending? do
-      emit_operator_pending_frame(state)
-    else
-      MingaEditor.do_render(state)
-    end
-  end
-
-  # Frame-emission ORDERING INVARIANT (#2219): on-wire frame_seq must be strictly
-  # monotonic. The bare boundary mints its seq and writes the port directly from the
-  # Editor process, while async real frames are emitted by Renderer.Server. If a
-  # lower-seq render is still in-flight there, emitting a higher-seq boundary straight
-  # to the port would put a decreasing frame_seq on the wire (and duplicate the
-  # base_frame_seq, since last_emitted_frame_seq only advances on writeback).
-  #
-  # To serialize ordering at one process without losing the latency-correlation
-  # contract (every input_seq is eventually echoed), fall back to a full async render
-  # whenever the Renderer.Server is busy: that frame is emitted in order by the server
-  # and still echoes the current last_input_seq on its commit_frame. The bare-boundary
-  # shortcut is only taken when nothing else can be writing the port concurrently:
-  # either there is no async renderer (sync/headless paths), or the renderer is idle.
-  @spec emit_operator_pending_frame(EditorState.t()) :: EditorState.t()
-  defp emit_operator_pending_frame(%EditorState{rendering: :disabled} = state) do
-    MingaEditor.do_render(state)
-  end
-
-  defp emit_operator_pending_frame(state) do
-    if async_renderer_busy?(state) do
-      MingaEditor.do_render(state)
-    else
-      emit_bare_frame_boundary(state)
-    end
-  end
-
-  @spec async_renderer_busy?(EditorState.t()) :: boolean()
-  defp async_renderer_busy?(%{renderer: pid}) when is_pid(pid) do
-    MingaEditor.Renderer.Server.rendering?(pid)
-  catch
-    # A dead or unresponsive renderer can't be writing the port; the bare boundary
-    # is safe and we must not crash the Editor on its hot path.
-    :exit, _ -> false
-  end
-
-  defp async_renderer_busy?(_state), do: false
-
-  # Emits a content-free frame transaction and advances the emitter's frame_seq so
-  # the next real frame names this one as its delta base (#2219). Only safe when the
-  # Editor is the sole writer of the port (see emit_operator_pending_frame/1).
-  @spec emit_bare_frame_boundary(EditorState.t()) :: EditorState.t()
-  defp emit_bare_frame_boundary(state) do
-    frame_seq = System.unique_integer([:positive, :monotonic])
-    base_frame_seq = state.caches.last_emitted_frame_seq
-
-    MingaEditor.Frontend.send_frame_boundary(
-      state.port_manager,
-      frame_seq,
-      base_frame_seq,
-      state.last_input_seq
-    )
-
-    %{state | caches: %{state.caches | last_emitted_frame_seq: frame_seq}}
-  end
+  defp maybe_render(state, _buf_version_before), do: MingaEditor.do_render(state)
 
   @doc """
   Dispatches a mouse event through the focus tree.

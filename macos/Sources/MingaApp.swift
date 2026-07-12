@@ -358,11 +358,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         disp.onFramePresented = { [weak recovery] in
             recovery?.onRenderReceived()
         }
-        // Route through the app delegate's live encoder, not the encoder captured
-        // at startup: a BEAM crash restart swaps `self.encoder` for a new pipe, so
-        // a resync request must reach the current process, not the dead one.
-        disp.onRequestKeyframe = { [weak self] lastGoodFrameSeq in
-            self?.encoder?.sendRequestKeyframe(lastGoodFrameSeq: lastGoodFrameSeq)
+        // #2739 status is emitted at semantic publication/rejection, never from
+        // the old replay loop and never delayed until Metal presentation.
+        disp.onTransactionResult = { [weak self] result in
+            guard let encoder = self?.encoder else { return }
+            switch result {
+            case .applied(let generation, let frameSeq):
+                encoder.sendFrameApplied(generation: generation, frameSeq: frameSeq)
+            case .rejected(let generation, let frameSeq, let lastApplied, let reason):
+                encoder.sendFrameRejected(
+                    generation: generation,
+                    frameSeq: frameSeq,
+                    lastAppliedFrameSeq: lastApplied,
+                    reason: reason.wireCode
+                )
+            case .windowRefMiss(let generation, let frameSeq, let lastApplied, let windowId):
+                encoder.sendWindowRefMiss(
+                    generation: generation,
+                    frameSeq: frameSeq,
+                    lastAppliedFrameSeq: lastApplied,
+                    windowId: windowId
+                )
+            }
         }
         disp.onFrameReady = { [weak nsView] in
             nsView?.renderFrame()

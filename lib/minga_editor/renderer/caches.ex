@@ -54,10 +54,11 @@ defmodule MingaEditor.Renderer.Caches do
     last_link_cursor: nil,
 
     # ── Frame transaction (#2219) ────────────────────────────────────────────
-    # The frame_seq of the last successfully-emitted frame. A delta frame names
-    # it as its begin_frame base_frame_seq; a keyframe forces base 0. Starts at 0
-    # so the very first frame is a keyframe by construction.
+    # The last frame written and the last frame explicitly acknowledged by the
+    # current frontend generation. Only the acknowledged value may be a delta base.
     last_emitted_frame_seq: 0,
+    last_acknowledged_frame_seq: 0,
+    recovery_generation: 1,
 
     # Whether the most recently emitted frame was a keyframe (base_frame_seq 0,
     # full window snapshots). The Editor reads this to clear `keyframe_pending?`
@@ -88,6 +89,8 @@ defmodule MingaEditor.Renderer.Caches do
           last_window_bg: non_neg_integer() | nil,
           last_link_cursor: boolean() | nil,
           last_emitted_frame_seq: non_neg_integer(),
+          last_acknowledged_frame_seq: non_neg_integer(),
+          recovery_generation: non_neg_integer(),
           last_frame_keyframe?: boolean(),
           adapter_gui_caches: Minga.Frontend.Adapter.GUI.Caches.t()
         }
@@ -95,6 +98,13 @@ defmodule MingaEditor.Renderer.Caches do
   @doc "Creates a fresh Caches struct with first-frame defaults."
   @spec new() :: t()
   def new, do: %__MODULE__{}
+
+  @doc "Records the frame explicitly applied by the current frontend generation."
+  @spec acknowledge_frame(t(), non_neg_integer(), non_neg_integer()) :: t()
+  def acknowledge_frame(%__MODULE__{} = caches, frame_seq, generation)
+      when is_integer(frame_seq) and frame_seq >= 0 and is_integer(generation) and generation >= 0 do
+    %{caches | last_acknowledged_frame_seq: frame_seq, recovery_generation: generation}
+  end
 
   @doc "Clears frontend-retained state tracking after the frontend reports ready again."
   @spec reset_frontend_state(t()) :: t()
@@ -105,9 +115,10 @@ defmodule MingaEditor.Renderer.Caches do
         last_title: nil,
         last_window_bg: nil,
         last_link_cursor: nil,
-        # A reconnecting frontend has no committed base, so force the next frame to
-        # a keyframe (base_frame_seq 0) by clearing the last-emitted frame_seq.
-        last_emitted_frame_seq: 0
+        # A reconnecting frontend has no acknowledged base in the fresh generation.
+        last_emitted_frame_seq: 0,
+        last_acknowledged_frame_seq: 0,
+        recovery_generation: caches.recovery_generation + 1
     }
   end
 end

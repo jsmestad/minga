@@ -133,16 +133,17 @@ struct ProtocolDecoderTests {
 
     @Test("Decode begin_frame command")
     func decodeBeginFrame() throws {
-        // begin_frame (#2219): frame_seq:u32 + base_frame_seq:u32.
-        let data = Data([OP_BEGIN_FRAME, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x03])
+        // begin_frame (#2739): frame_seq:u32 + base_frame_seq:u32 + generation:u32.
+        let data = Data([OP_BEGIN_FRAME, 0, 0, 0, 7, 0, 0, 0, 3, 0, 0, 0, 9])
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
-        #expect(size == 9)
-        guard case .beginFrame(let frameSeq, let baseFrameSeq) = cmd else {
+        #expect(size == 13)
+        guard case .beginFrame(let frameSeq, let baseFrameSeq, let generation) = cmd else {
             Issue.record("Expected .beginFrame, got \(String(describing: cmd))")
             return
         }
         #expect(frameSeq == 7)
         #expect(baseFrameSeq == 3)
+        #expect(generation == 9)
     }
 
     @Test("Decode framed gui_agent_context payload")

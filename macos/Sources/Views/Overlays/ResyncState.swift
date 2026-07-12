@@ -24,10 +24,14 @@ public final class ResyncState {
     /// Most recent frame_seq that committed cleanly before recovery began.
     /// Manual retry uses this to ask the BEAM for the same keyframe recovery the automatic path requested.
     public private(set) var lastGoodFrameSeq: UInt32 = 0
+    public private(set) var generation: UInt32 = 0
+    public private(set) var rejection: String?
 
-    /// Raise the resync-pending hint. Called by `CommandDispatcher.invalidate`.
-    public func markPending(lastGoodFrameSeq: UInt32) {
+    /// Raise the resync-pending hint and expose the active generation/rejection.
+    public func markPending(lastGoodFrameSeq: UInt32, generation: UInt32, rejection: String) {
         self.lastGoodFrameSeq = lastGoodFrameSeq
+        self.generation = generation
+        self.rejection = rejection
         pending = true
     }
 
@@ -36,5 +40,6 @@ public final class ResyncState {
     public func clear() {
         pending = false
         lastGoodFrameSeq = 0
+        rejection = nil
     }
 }
