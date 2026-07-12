@@ -12,6 +12,8 @@ defmodule MingaEditor.RenderPipeline.Intent do
   alias MingaEditor.RenderPipeline.WindowIntent
   alias MingaEditor.RenderPipeline.WorkspaceIntent
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Window
+  alias MingaEditor.Window.RenderCache
 
   @enforce_keys [:frame, :workspace, :windows, :window_layout, :buffer_versions, :revision]
   defstruct @enforce_keys
@@ -39,7 +41,7 @@ defmodule MingaEditor.RenderPipeline.Intent do
       workspace: WorkspaceIntent.from_workspace(input.workspace),
       windows: carriers,
       window_layout: %{tree: windows.tree, active: windows.active, next_id: windows.next_id},
-      buffer_versions: buffer_versions(carriers),
+      buffer_versions: buffer_versions(windows.map),
       revision: revision
     }
   end
@@ -49,20 +51,24 @@ defmodule MingaEditor.RenderPipeline.Intent do
   def force_keyframe(%__MODULE__{} = intent),
     do: %{intent | frame: FrameIntent.force_keyframe(intent.frame)}
 
-  @spec buffer_versions(map()) :: map()
+  @spec buffer_versions(%{optional(Window.id()) => Window.t()}) ::
+          %{optional(pid()) => non_neg_integer()}
   defp buffer_versions(windows) do
     Enum.reduce(windows, %{}, fn
-      {_id, %WindowIntent{buffer: buffer}}, acc when is_pid(buffer) ->
-        Map.put_new_lazy(acc, buffer, fn -> safe_version(buffer) end)
+      {_id,
+       %Window{
+         buffer: buffer,
+         render_cache: %RenderCache{buffer_version: observed_version}
+       }},
+      acc
+      when is_pid(buffer) and is_integer(observed_version) and observed_version >= 0 ->
+        Map.update(acc, buffer, observed_version, &max(&1, observed_version))
+
+      {_id, %Window{buffer: buffer}}, acc when is_pid(buffer) ->
+        Map.put_new(acc, buffer, 0)
 
       _, acc ->
         acc
     end)
-  end
-
-  defp safe_version(buffer) do
-    Minga.Buffer.version(buffer)
-  catch
-    :exit, _ -> 0
   end
 end

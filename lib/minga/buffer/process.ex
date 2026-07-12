@@ -592,9 +592,14 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, {:render_snapshot, first_line, count})
   end
 
-  @doc "Atomically advances the renderer ChangeLog cursor and observes its version/count."
-  @spec renderer_consume(GenServer.server()) :: RendererConsume.t()
-  def renderer_consume(server), do: GenServer.call(server, :renderer_consume)
+  @doc "Atomically consumes renderer changes and snapshots their affected line range."
+  @spec renderer_consume(
+          GenServer.server(),
+          {non_neg_integer(), non_neg_integer()} | nil
+        ) :: RendererConsume.t()
+  def renderer_consume(server, prior_affected_range \\ nil) do
+    GenServer.call(server, {:renderer_consume, prior_affected_range})
+  end
 
   @doc "Fetches only a requested line range when the buffer is still at `expected_version`."
   @spec render_lines(GenServer.server(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
@@ -1363,17 +1368,19 @@ defmodule Minga.Buffer.Process do
     {:reply, result, %{state | change_log: change_log}}
   end
 
-  def handle_call(:renderer_consume, _from, state) do
+  def handle_call({:renderer_consume, prior_affected_range}, _from, state) do
     {changes, change_log} = ChangeLog.take_unseen_changes(state.change_log, :renderer)
+    state = %{state | change_log: change_log}
 
-    result = %Minga.Buffer.RendererConsume{
+    result = %RendererConsume{
       version: BufState.version(state),
       line_count: Document.line_count(state.document),
       change_sequence: ChangeLog.sequence(change_log),
-      changes: changes
+      changes: changes,
+      snapshot: renderer_changed_snapshot(state, changes, prior_affected_range)
     }
 
-    {:reply, result, %{state | change_log: change_log}}
+    {:reply, result, state}
   end
 
   def handle_call({:changes_since, sequence}, _from, state) do
@@ -2373,6 +2380,26 @@ defmodule Minga.Buffer.Process do
   end
 
   # ── move_if_possible helpers ──
+
+  @spec renderer_changed_snapshot(
+          BufState.t(),
+          {:ok, [Minga.Buffer.EditDelta.t()]} | :reset_required,
+          {non_neg_integer(), non_neg_integer()} | nil
+        ) :: RenderSnapshot.t() | nil
+  defp renderer_changed_snapshot(_state, :reset_required, _prior_range), do: nil
+
+  defp renderer_changed_snapshot(state, {:ok, changes}, prior_range) do
+    case EditDelta.affected_line_range(changes, prior_range) do
+      nil ->
+        nil
+
+      {first_line, last_line} ->
+        line_count = Document.line_count(state.document)
+        bounded_first = min(first_line, line_count - 1)
+        bounded_last = min(max(last_line, bounded_first), line_count - 1)
+        bounded_render_snapshot(state, bounded_first, bounded_last - bounded_first + 1)
+    end
+  end
 
   @spec snapshot_lines(Document.t(), non_neg_integer(), non_neg_integer()) :: [String.t()]
   @spec bounded_render_snapshot(BufState.t(), non_neg_integer(), non_neg_integer()) ::

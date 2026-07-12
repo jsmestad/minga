@@ -7,6 +7,8 @@ defmodule MingaEditor.Renderer.BufferChanges do
   to every resident window showing that PID.
   """
 
+  alias Minga.Buffer.EditDelta
+  alias Minga.Buffer.RenderSnapshot
   alias Minga.Buffer.RendererConsume
   alias Minga.Telemetry
   alias MingaEditor.RenderPipeline.Intent
@@ -28,12 +30,12 @@ defmodule MingaEditor.Renderer.BufferChanges do
 
   @doc "Commits renderer-owned per-window cache state after a successful pipeline frame."
   @spec commit(State.t(), Input.t(), Intent.t()) :: State.t()
-  def commit(%State{} = state, %Input{} = output, %Intent{} = intent) do
+  def commit(%State{} = state, %Input{} = output, %Intent{}) do
     residents =
       Enum.reduce(output.workspace.windows.map, state.resident_windows, fn {id, window}, acc ->
         case Map.get(acc, id) do
           %ResidentWindowState{} = resident ->
-            version = Map.get(intent.buffer_versions, resident.buffer)
+            version = Map.get(state.buffer_versions, resident.buffer)
             Map.put(acc, id, ResidentWindowState.commit_window(resident, window, version))
 
           nil ->
@@ -41,7 +43,7 @@ defmodule MingaEditor.Renderer.BufferChanges do
         end
       end)
 
-    %{state | resident_windows: residents, buffer_versions: intent.buffer_versions}
+    %{state | resident_windows: residents}
   end
 
   @doc "Invalidates one renderer-owned window for targeted frontend recovery."
@@ -78,7 +80,8 @@ defmodule MingaEditor.Renderer.BufferChanges do
   defp consume_buffer_if_changed(%State{} = state, buffer, observed_version) do
     # This call is intentionally unconditional. Besides advancing changed buffers,
     # it closes the consume/fetch race when a retry reuses an older editor intent.
-    consumed = safe_consume(buffer, observed_version)
+    prior_range = pending_affected_range(state.resident_windows, buffer)
+    consumed = safe_consume(buffer, observed_version, prior_range)
     residents = fanout(state.resident_windows, buffer, consumed)
 
     delta_count =
@@ -104,16 +107,21 @@ defmodule MingaEditor.Renderer.BufferChanges do
     }
   end
 
-  @spec safe_consume(pid(), non_neg_integer()) :: RendererConsume.t()
-  defp safe_consume(buffer, fallback_version) do
-    Minga.Buffer.renderer_consume(buffer)
+  @spec safe_consume(
+          pid(),
+          non_neg_integer(),
+          {non_neg_integer(), non_neg_integer()} | nil
+        ) :: RendererConsume.t()
+  defp safe_consume(buffer, fallback_version, prior_range) do
+    Minga.Buffer.renderer_consume(buffer, prior_range)
   catch
     :exit, _ ->
       %RendererConsume{
         version: fallback_version,
         line_count: 1,
         change_sequence: 0,
-        changes: :reset_required
+        changes: :reset_required,
+        snapshot: nil
       }
   end
 
@@ -131,6 +139,7 @@ defmodule MingaEditor.Renderer.BufferChanges do
               ResidentWindowState.apply_deltas(
                 resident,
                 deltas,
+                consumed.snapshot,
                 consumed.version,
                 consumed.line_count,
                 consumed.change_sequence
@@ -152,6 +161,63 @@ defmodule MingaEditor.Renderer.BufferChanges do
         pair
     end)
   end
+
+  @spec pending_affected_range(
+          %{optional(MingaEditor.Window.id()) => ResidentWindowState.t()},
+          pid()
+        ) :: {non_neg_integer(), non_neg_integer()} | nil
+  defp pending_affected_range(residents, buffer) do
+    snapshots =
+      Enum.flat_map(residents, fn
+        {_id, %ResidentWindowState{buffer: ^buffer, render_cache: cache}} ->
+          case MingaEditor.Renderer.WindowCache.changed_snapshot(cache) do
+            %RenderSnapshot{} = snapshot -> [snapshot]
+            nil -> []
+          end
+
+        _ ->
+          []
+      end)
+
+    pending_range_from_snapshots(snapshots, residents, buffer)
+  end
+
+  @spec pending_range_from_snapshots(
+          [RenderSnapshot.t()],
+          %{optional(MingaEditor.Window.id()) => ResidentWindowState.t()},
+          pid()
+        ) :: {non_neg_integer(), non_neg_integer()} | nil
+  defp pending_range_from_snapshots([_ | _] = snapshots, _residents, _buffer) do
+    Enum.reduce(snapshots, nil, fn snapshot, range ->
+      last = snapshot.first_line + max(length(snapshot.lines) - 1, 0)
+      union_range(range, {snapshot.first_line, last})
+    end)
+  end
+
+  defp pending_range_from_snapshots([], residents, buffer) do
+    deltas =
+      Enum.find_value(residents, [], fn
+        {_id, %ResidentWindowState{buffer: ^buffer, render_cache: cache}} ->
+          case MingaEditor.Renderer.WindowCache.pending_edit_deltas(cache) do
+            [] -> nil
+            pending -> pending
+          end
+
+        _ ->
+          nil
+      end)
+
+    EditDelta.affected_line_range(deltas)
+  end
+
+  @spec union_range(
+          {non_neg_integer(), non_neg_integer()} | nil,
+          {non_neg_integer(), non_neg_integer()}
+        ) :: {non_neg_integer(), non_neg_integer()}
+  defp union_range(nil, range), do: range
+
+  defp union_range({first, last}, {new_first, new_last}),
+    do: {min(first, new_first), max(last, new_last)}
 
   @spec materialize(State.t(), Intent.t()) :: Input.t()
   defp materialize(%State{} = state, %Intent{} = intent) do

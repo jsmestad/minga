@@ -9,6 +9,7 @@ defmodule MingaEditor.Renderer.ResidentWindowState do
   """
 
   alias Minga.Buffer.EditDelta
+  alias Minga.Buffer.RenderSnapshot
   alias MingaEditor.Renderer.RenderWindow
   alias MingaEditor.Window
   alias MingaEditor.Renderer.WindowCache, as: RenderCache
@@ -62,11 +63,31 @@ defmodule MingaEditor.Renderer.ResidentWindowState do
   end
 
   @doc "Applies newly consumed deltas exactly once and retains them until a frame commits."
-  @spec apply_deltas(t(), [EditDelta.t()], non_neg_integer(), pos_integer(), non_neg_integer()) ::
-          t()
-  def apply_deltas(%__MODULE__{} = state, deltas, version, line_count, change_sequence)
+  @spec apply_deltas(
+          t(),
+          [EditDelta.t()],
+          RenderSnapshot.t() | nil,
+          non_neg_integer(),
+          pos_integer(),
+          non_neg_integer()
+        ) :: t()
+  def apply_deltas(
+        %__MODULE__{} = state,
+        deltas,
+        changed_snapshot,
+        version,
+        line_count,
+        change_sequence
+      )
       when is_list(deltas) do
-    cache = RenderCache.apply_edit_deltas(state.render_cache, state.buffer, deltas)
+    cache =
+      RenderCache.apply_edit_deltas(
+        state.render_cache,
+        state.buffer,
+        deltas,
+        changed_snapshot
+      )
+
     dirty = dirty_lines(deltas)
 
     %{

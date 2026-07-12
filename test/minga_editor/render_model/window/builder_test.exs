@@ -83,10 +83,10 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
     cache = renderer_cache(existing)
 
     case consumed.changes do
-      {:ok, deltas} -> WindowCache.apply_edit_deltas(cache, buffer, deltas)
+      {:ok, deltas} -> WindowCache.apply_edit_deltas(cache, buffer, deltas, consumed.snapshot)
       :reset_required -> WindowCache.mark_identity_reset(cache)
     end
-    |> WindowCache.with_fetch_version(Buffer.render_snapshot(buffer, 0, 1).version)
+    |> WindowCache.with_fetch_version(consumed.version)
   end
 
   defp renderer_cache(%WindowCache{} = cache), do: cache

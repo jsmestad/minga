@@ -694,6 +694,11 @@ defmodule MingaEditor.Renderer.RenderWindow do
   def pending_edit_deltas(%__MODULE__{render_cache: cache}),
     do: RenderCache.pending_edit_deltas(cache)
 
+  @doc "Returns the atomic bounded snapshot for pending resident deltas."
+  @spec changed_snapshot(t()) :: Minga.Buffer.RenderSnapshot.t() | nil
+  def changed_snapshot(%__MODULE__{render_cache: cache}),
+    do: RenderCache.changed_snapshot(cache)
+
   @doc "Returns the persistent full-document residence build state (#2658)."
   @spec resident_build(t()) :: MingaEditor.RenderModel.Window.ResidentBuild.t() | nil
   def resident_build(%__MODULE__{render_cache: cache}), do: RenderCache.resident_build(cache)

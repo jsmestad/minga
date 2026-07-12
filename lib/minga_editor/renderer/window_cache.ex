@@ -90,6 +90,7 @@ defmodule MingaEditor.Renderer.WindowCache do
           row_slot_allocator: RowSlotAllocator.t(),
           resident_build: MingaEditor.RenderModel.Window.ResidentBuild.t() | nil,
           pending_edit_deltas: [Minga.Buffer.EditDelta.t()],
+          changed_snapshot: RenderSnapshot.t() | nil,
           hydration_reason: atom() | nil,
           resident: boolean(),
           residence_armed: boolean(),
@@ -119,6 +120,7 @@ defmodule MingaEditor.Renderer.WindowCache do
             row_slot_allocator: RowSlotAllocator.new(),
             resident_build: nil,
             pending_edit_deltas: [],
+            changed_snapshot: nil,
             hydration_reason: nil,
             resident: false,
             residence_armed: false,
@@ -169,6 +171,7 @@ defmodule MingaEditor.Renderer.WindowCache do
         retained_wrap_lines: %{},
         resident_build: nil,
         pending_edit_deltas: [],
+        changed_snapshot: nil,
         residence_armed: false
     }
   end
@@ -399,12 +402,27 @@ defmodule MingaEditor.Renderer.WindowCache do
     %{cache | row_slot_allocator: allocator}
   end
 
-  @doc "Applies renderer-consumed ordered edit deltas without a full buffer snapshot."
-  @spec apply_edit_deltas(t(), pid(), [Minga.Buffer.EditDelta.t()]) :: t()
-  def apply_edit_deltas(%__MODULE__{line_identity: nil} = cache, _buffer, deltas),
-    do: %{cache | pending_edit_deltas: cache.pending_edit_deltas ++ deltas}
+  @doc "Applies renderer-consumed deltas and retains their atomic changed snapshot."
+  @spec apply_edit_deltas(
+          t(),
+          pid(),
+          [Minga.Buffer.EditDelta.t()],
+          RenderSnapshot.t() | nil
+        ) :: t()
+  def apply_edit_deltas(
+        %__MODULE__{line_identity: nil} = cache,
+        _buffer,
+        deltas,
+        changed_snapshot
+      ) do
+    %{
+      cache
+      | pending_edit_deltas: cache.pending_edit_deltas ++ deltas,
+        changed_snapshot: changed_snapshot || cache.changed_snapshot
+    }
+  end
 
-  def apply_edit_deltas(%__MODULE__{} = cache, buffer, deltas)
+  def apply_edit_deltas(%__MODULE__{} = cache, buffer, deltas, changed_snapshot)
       when is_pid(buffer) and is_list(deltas) do
     case LineIdentity.apply_edits(cache.line_identity, deltas) do
       {:ok, identity} ->
@@ -413,7 +431,8 @@ defmodule MingaEditor.Renderer.WindowCache do
           | line_identity: identity,
             identity_buffer: buffer,
             applied_change_sequence: cache.applied_change_sequence + length(deltas),
-            pending_edit_deltas: cache.pending_edit_deltas ++ deltas
+            pending_edit_deltas: cache.pending_edit_deltas ++ deltas,
+            changed_snapshot: changed_snapshot || cache.changed_snapshot
         }
 
       :reset_required ->
@@ -450,6 +469,7 @@ defmodule MingaEditor.Renderer.WindowCache do
         row_slot_allocator: RowSlotAllocator.new(),
         resident_build: nil,
         pending_edit_deltas: [],
+        changed_snapshot: nil,
         hydration_reason: :identity_reset,
         reset_pending: true
     }
@@ -636,10 +656,20 @@ defmodule MingaEditor.Renderer.WindowCache do
   @spec pending_edit_deltas(t()) :: [Minga.Buffer.EditDelta.t()]
   def pending_edit_deltas(%__MODULE__{pending_edit_deltas: deltas}), do: deltas
 
+  @doc "Returns the atomic bounded snapshot for pending resident deltas."
+  @spec changed_snapshot(t()) :: RenderSnapshot.t() | nil
+  def changed_snapshot(%__MODULE__{changed_snapshot: snapshot}), do: snapshot
+
   @doc "Replaces the persistent residence build state captured by the last frame."
   @spec put_resident_build(t(), MingaEditor.RenderModel.Window.ResidentBuild.t() | nil) :: t()
   def put_resident_build(%__MODULE__{} = cache, state) do
-    %{cache | resident_build: state, pending_edit_deltas: [], hydration_reason: nil}
+    %{
+      cache
+      | resident_build: state,
+        pending_edit_deltas: [],
+        changed_snapshot: nil,
+        hydration_reason: nil
+    }
   end
 
   @doc "Returns the explicit reason for the next full resident hydration."

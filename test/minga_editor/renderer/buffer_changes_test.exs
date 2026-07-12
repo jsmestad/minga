@@ -23,13 +23,68 @@ defmodule MingaEditor.Renderer.BufferChangesTest do
     :ok = Minga.Buffer.insert_text(buffer, "changed ")
     changed = %{intent | buffer_versions: %{buffer => Minga.Buffer.version(buffer)}}
 
-    {state, _input} = BufferChanges.prepare(state, changed)
+    calls = trace_buffer_calls(buffer, fn -> BufferChanges.prepare(state, changed) end)
+    {state, _input} = calls.result
+
+    assert Enum.count(calls.messages, &match?({:renderer_consume, _}, &1)) == 1
+    refute Enum.any?(calls.messages, &match?(:version, &1))
 
     first_pending = state.resident_windows[1].render_cache.pending_edit_deltas
     second_pending = state.resident_windows[2].render_cache.pending_edit_deltas
+    first_snapshot = state.resident_windows[1].render_cache.changed_snapshot
+    second_snapshot = state.resident_windows[2].render_cache.changed_snapshot
+
     assert first_pending != []
     assert first_pending == second_pending
+    assert first_snapshot == second_snapshot
+    assert first_snapshot.lines == ["changed two"]
+    refute Map.has_key?(Map.from_struct(first_snapshot), :document)
     assert {:ok, []} = Minga.Buffer.consume_edit_deltas(buffer, :renderer)
+  end
+
+  test "a third uncommitted consume preserves a pending range shifted by structural edits" do
+    buffer = start_supervised!({Minga.Buffer, content: "zero\none\ntwo\nthree\nfour"})
+    intent = intent(buffer, 0)
+    {state, _input} = BufferChanges.prepare(State.new([]), intent)
+
+    :ok = Minga.Buffer.move_to(buffer, {3, 0})
+    :ok = Minga.Buffer.insert_text(buffer, "X")
+    {state, _input} = BufferChanges.prepare(state, intent)
+
+    :ok = Minga.Buffer.move_to(buffer, {0, 0})
+    :ok = Minga.Buffer.insert_text(buffer, "new\n")
+    {state, _input} = BufferChanges.prepare(state, intent)
+
+    :ok = Minga.Buffer.move_to(buffer, {0, 0})
+    :ok = Minga.Buffer.insert_text(buffer, "Y")
+    {state, _input} = BufferChanges.prepare(state, intent)
+
+    first_snapshot = state.resident_windows[1].render_cache.changed_snapshot
+    second_snapshot = state.resident_windows[2].render_cache.changed_snapshot
+
+    assert first_snapshot == second_snapshot
+    assert first_snapshot.first_line == 0
+    assert first_snapshot.lines == ["Ynew", "zero", "one", "two", "Xthree"]
+  end
+
+  test "intent derives typed observed versions without calling the buffer" do
+    buffer = start_supervised!({Minga.Buffer, content: "one"})
+    one = Window.new(1, buffer, 24, 80)
+    windows = %Windows{map: %{1 => one}, active: 1, tree: {:leaf, 1}, next_id: 2}
+
+    input = %Input{
+      port_manager: nil,
+      theme: Fallback.theme(),
+      capabilities: %Capabilities{},
+      shell_id: :traditional,
+      shell: MingaEditor.Shell.Traditional,
+      message_store: %MingaEditor.UI.Panel.MessageStore{},
+      workspace: %{windows: windows}
+    }
+
+    calls = trace_buffer_calls(buffer, fn -> Intent.from_input(input) end)
+    assert calls.result.buffer_versions == %{buffer => 0}
+    assert calls.messages == []
   end
 
   test "window close, buffer replacement, and exact buffer DOWN share centralized cleanup" do
@@ -137,6 +192,31 @@ defmodule MingaEditor.Renderer.BufferChangesTest do
     assert Enum.all?(bounded.windows, fn {_id, carrier} ->
              carrier.__struct__ == MingaEditor.RenderPipeline.WindowIntent
            end)
+  end
+
+  defp trace_buffer_calls(buffer, fun) do
+    :erlang.trace(buffer, true, [:receive, {:tracer, self()}])
+
+    try do
+      result = fun.()
+      delivery_ref = :erlang.trace_delivered(buffer)
+      assert_receive {:trace_delivered, ^buffer, ^delivery_ref}
+      %{result: result, messages: drain_buffer_calls(buffer, [])}
+    after
+      :erlang.trace(buffer, false, [:receive])
+    end
+  end
+
+  defp drain_buffer_calls(buffer, acc) do
+    receive do
+      {:trace, ^buffer, :receive, {:"$gen_call", _from, message}} ->
+        drain_buffer_calls(buffer, [message | acc])
+
+      {:trace, ^buffer, :receive, _message} ->
+        drain_buffer_calls(buffer, acc)
+    after
+      0 -> Enum.reverse(acc)
+    end
   end
 
   defp intent(buffer, version) do

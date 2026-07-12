@@ -11,6 +11,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   """
 
   alias Minga.Buffer
+  alias Minga.Buffer.EditDelta
   alias Minga.Buffer.RenderSnapshot
   alias Minga.Config
   alias Minga.Core.Decorations
@@ -204,8 +205,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
         do: Window.scroll_follow_cursor?(window, {cursor_line, cursor_byte_col}, now),
         else: {window, true}
 
-    expected_version = Window.expected_buffer_version(window) || Buffer.version(window.buffer)
-    base_snapshot = fetch_at_version!(window.buffer, expected_version, 0, 0)
+    {expected_version, changed_snapshot, base_snapshot} = render_observation!(window)
 
     window = Window.sync_line_identity(window, base_snapshot)
     line_count = base_snapshot.line_count
@@ -302,7 +302,15 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
         wrap_on: wrap_on
       })
 
-    snapshot = fetch_at_version!(window.buffer, expected_version, fetch_first, fetch_count)
+    snapshot =
+      fetch_snapshot!(
+        window.buffer,
+        expected_version,
+        fetch_first,
+        fetch_count,
+        changed_snapshot
+      )
+
     lines = snapshot.lines
 
     Minga.Telemetry.execute(
@@ -397,6 +405,41 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     }
   end
 
+  @spec render_observation!(Window.t()) ::
+          {non_neg_integer(), RenderSnapshot.t() | nil, RenderSnapshot.t()}
+  defp render_observation!(window) do
+    expected_version = Window.expected_buffer_version(window) || Buffer.version(window.buffer)
+    changed_snapshot = Window.changed_snapshot(window)
+    base_snapshot = changed_snapshot || fetch_at_version!(window.buffer, expected_version, 0, 0)
+    {expected_version, changed_snapshot, base_snapshot}
+  end
+
+  @spec fetch_snapshot!(
+          pid(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          RenderSnapshot.t() | nil
+        ) :: RenderSnapshot.t()
+  defp fetch_snapshot!(
+         buffer,
+         expected_version,
+         first_line,
+         count,
+         %RenderSnapshot{
+           version: expected_version,
+           first_line: first_line,
+           lines: lines
+         } = snapshot
+       ) do
+    if length(lines) == count,
+      do: snapshot,
+      else: fetch_at_version!(buffer, expected_version, first_line, count)
+  end
+
+  defp fetch_snapshot!(buffer, expected_version, first_line, count, _changed_snapshot),
+    do: fetch_at_version!(buffer, expected_version, first_line, count)
+
   @spec fetch_at_version!(pid(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
           RenderSnapshot.t()
   defp fetch_at_version!(buffer, expected_version, first_line, count) do
@@ -445,11 +488,19 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   end
 
   defp resolve_fetch_range(%{visible_line_map: nil, full_residence?: true} = params) do
-    # A hydrated resident store needs only the lines touched by renderer-consumed
-    # deltas. Initial/reset/global-context hydration still fetches the whole file.
-    case resident_delta_fetch_range(params.window, params.line_count) do
-      nil -> {0, params.line_count, params.first_line}
-      {fetch_first, fetch_count} -> {fetch_first, fetch_count, params.first_line}
+    # A hydrated resident store needs only changed rows. A no-edit warm frame
+    # reuses the store and fetches only bounded visible presentation data.
+    case {resident_delta_fetch_range(params.window, params.line_count),
+          Window.resident_build(params.window)} do
+      {{fetch_first, fetch_count}, _resident_build} ->
+        {fetch_first, fetch_count, params.first_line}
+
+      {nil, %ResidentBuild{}} ->
+        count = min(params.visible_rows, max(params.line_count - params.first_line, 1))
+        {params.first_line, count, 0}
+
+      {nil, nil} ->
+        {0, params.line_count, params.first_line}
     end
   end
 
@@ -489,8 +540,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     deltas = Window.pending_edit_deltas(window)
 
     if Window.resident_build(window) != nil and deltas != [] do
-      first = deltas |> Enum.map(&elem(&1.start_position, 0)) |> Enum.min()
-      last = deltas |> Enum.map(&elem(&1.new_end_position, 0)) |> Enum.max()
+      {first, last} = EditDelta.affected_line_range(deltas)
       bounded_first = min(first, max(line_count - 1, 0))
       {bounded_first, max(min(last, line_count - 1) - bounded_first + 1, 1)}
     else

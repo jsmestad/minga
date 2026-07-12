@@ -84,9 +84,7 @@ defmodule Minga.SystemObserverTest do
       Minga.Events.subscribe(:supervisor_restarted)
       dummy_pid = spawn(fn -> receive do: (:stop -> :ok) end)
       on_exit(fn -> if Process.alive?(dummy_pid), do: Process.exit(dummy_pid, :kill) end)
-      monitor_as_supervisor(name, dummy_pid, :dummy_supervisor)
-
-      Process.exit(dummy_pid, :kill)
+      monitor_and_kill_as_supervisor(name, dummy_pid, :dummy_supervisor)
 
       assert_receive {:minga_event, :supervisor_restarted, payload}, 1_000
       assert payload.name == :dummy_supervisor
@@ -205,9 +203,10 @@ defmodule Minga.SystemObserverTest do
     :ok
   end
 
-  defp monitor_as_supervisor(name, pid, supervisor_name) do
+  defp monitor_and_kill_as_supervisor(name, pid, supervisor_name) do
     :sys.replace_state(name, fn state ->
       ref = Process.monitor(pid)
+      Process.exit(pid, :kill)
       %{state | monitors: Map.put(state.monitors, ref, supervisor_name)}
     end)
   end

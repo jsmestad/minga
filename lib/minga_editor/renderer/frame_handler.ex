@@ -143,7 +143,7 @@ defmodule MingaEditor.Renderer.FrameHandler do
       end)
 
     committed = BufferChanges.commit(state, output, intent)
-    emit_frame_telemetry(output, intent, seq, pushed_at)
+    emit_frame_telemetry(output, seq, pushed_at)
     {:ok, committed, output}
   rescue
     _error in [StaleBufferError] -> {:stale, state}
@@ -193,12 +193,7 @@ defmodule MingaEditor.Renderer.FrameHandler do
   defp receipt(output, seq, intent) do
     receipt = RenderReceipt.from_output(output, seq, monotonic_now(), intent.revision)
 
-    Telemetry.execute(
-      [:minga, :render, :boundary],
-      %{receipt_bytes: :erlang.external_size(receipt)},
-      %{}
-    )
-
+    emit_boundary_sizes(intent, receipt)
     receipt
   end
 
@@ -212,8 +207,8 @@ defmodule MingaEditor.Renderer.FrameHandler do
     })
   end
 
-  @spec emit_frame_telemetry(Input.t(), Intent.t(), non_neg_integer(), integer()) :: :ok
-  defp emit_frame_telemetry(output, intent, seq, pushed_at) do
+  @spec emit_frame_telemetry(Input.t(), non_neg_integer(), integer()) :: :ok
+  defp emit_frame_telemetry(output, seq, pushed_at) do
     Telemetry.execute(
       [:minga, :render, :frame_latency],
       %{microseconds: monotonic_now() - pushed_at},
@@ -222,12 +217,29 @@ defmodule MingaEditor.Renderer.FrameHandler do
 
     Telemetry.execute(
       [:minga, :render, :work],
-      %{
-        rows_composed: output.caches.frame_rows_rasterized,
-        request_bytes: :erlang.external_size(intent)
-      },
+      %{rows_composed: output.caches.frame_rows_rasterized},
       %{frame_seq: seq, path: output.caches.frame_render_path}
     )
+  end
+
+  @spec emit_boundary_sizes(Intent.t(), RenderReceipt.t()) :: :ok
+  defp emit_boundary_sizes(intent, receipt) do
+    event = [:minga, :render, :boundary]
+
+    case :telemetry.list_handlers(event) do
+      [] ->
+        :ok
+
+      _handlers ->
+        Telemetry.execute(
+          event,
+          %{
+            request_bytes: :erlang.external_size(intent),
+            receipt_bytes: :erlang.external_size(receipt)
+          },
+          %{}
+        )
+    end
   end
 
   @spec schedule_render() :: reference()
