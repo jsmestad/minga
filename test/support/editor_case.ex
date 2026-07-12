@@ -325,39 +325,19 @@ defmodule Minga.Test.EditorCase do
     ctx
   end
 
-  # Ensures the active buffer has a registered parser buffer_id.
-  # Returns the buffer_id (existing or newly assigned).
+  # Ensures the active buffer has a registered parser buffer ID.
   @spec ensure_test_buffer_id(pid()) :: non_neg_integer()
   defp ensure_test_buffer_id(editor) do
-    state = get_editor_state(editor)
-    buf = state.workspace.buffers.active
+    case get_editor_state(editor).workspace.buffers.active do
+      nil ->
+        0
 
-    if buf == nil do
-      0
-    else
-      hl = state.workspace.highlight
-
-      case Map.fetch(hl.buffer_ids, buf) do
-        {:ok, id} ->
-          id
-
-        :error ->
-          # Assign a buffer_id directly via :sys.replace_state
-          id = hl.next_buffer_id
-
-          :sys.replace_state(editor, fn st ->
-            h = st.workspace.highlight
-
-            put_in(st.workspace.highlight, %{
-              h
-              | buffer_ids: Map.put(h.buffer_ids, buf, id),
-                reverse_buffer_ids: Map.put(h.reverse_buffer_ids, id, buf),
-                next_buffer_id: id + 1
-            })
-          end)
-
-          id
-      end
+      buffer_pid ->
+        Minga.Parser.Manager.buffer_id(buffer_pid) ||
+          Minga.Parser.Manager.register_buffer(
+            buffer_pid,
+            %Minga.Parser.BufferConfig{language: "elixir"}
+          )
     end
   end
 

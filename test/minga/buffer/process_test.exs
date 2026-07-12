@@ -15,6 +15,55 @@ defmodule Minga.Buffer.ProcessTest do
     end
   end
 
+  describe "request_sync_snapshot/4" do
+    test "atomically returns full, edits, unchanged, and reset-required full snapshots" do
+      {:ok, buffer} = BufferProcess.start_link(content: "one")
+
+      full_token = make_ref()
+      assert :ok = Buffer.request_sync_snapshot(buffer, :full, self(), full_token)
+
+      assert_receive {:buffer_sync_snapshot,
+                      %Buffer.SyncSnapshot{
+                        buffer: ^buffer,
+                        token: ^full_token,
+                        sequence: 0,
+                        changes: {:full, "one"}
+                      }}
+
+      :ok = Buffer.insert_text(buffer, "!")
+      edits_token = make_ref()
+      assert :ok = Buffer.request_sync_snapshot(buffer, 0, self(), edits_token)
+
+      assert_receive {:buffer_sync_snapshot,
+                      %Buffer.SyncSnapshot{
+                        token: ^edits_token,
+                        sequence: 1,
+                        changes: {:edits, [_delta]}
+                      }}
+
+      unchanged_token = make_ref()
+      assert :ok = Buffer.request_sync_snapshot(buffer, 1, self(), unchanged_token)
+
+      assert_receive {:buffer_sync_snapshot,
+                      %Buffer.SyncSnapshot{
+                        token: ^unchanged_token,
+                        sequence: 1,
+                        changes: :unchanged
+                      }}
+
+      :ok = Buffer.replace_content(buffer, "replacement")
+      reset_token = make_ref()
+      assert :ok = Buffer.request_sync_snapshot(buffer, 1, self(), reset_token)
+
+      assert_receive {:buffer_sync_snapshot,
+                      %Buffer.SyncSnapshot{
+                        token: ^reset_token,
+                        sequence: 2,
+                        changes: {:full, "replacement"}
+                      }}
+    end
+  end
+
   describe "child_spec/1" do
     test "uses restart: :temporary so crashed buffers stay dead" do
       spec = BufferProcess.child_spec(file_path: "test.ex")

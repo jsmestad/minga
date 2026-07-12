@@ -226,7 +226,11 @@ defmodule Minga.Git.TrackerTest do
 
       Events.broadcast(
         :buffer_changed,
-        %Events.BufferChangedEvent{buffer: buf, source: Minga.Buffer.EditSource.user()},
+        %Events.BufferChangedEvent{
+          sequence: 1,
+          buffer: buf,
+          source: Minga.Buffer.EditSource.user()
+        },
         events_registry
       )
 
@@ -240,7 +244,11 @@ defmodule Minga.Git.TrackerTest do
 
       Events.broadcast(
         :buffer_changed,
-        %Events.BufferChangedEvent{buffer: buf, source: Minga.Buffer.EditSource.user()},
+        %Events.BufferChangedEvent{
+          sequence: 1,
+          buffer: buf,
+          source: Minga.Buffer.EditSource.user()
+        },
         events_registry
       )
 

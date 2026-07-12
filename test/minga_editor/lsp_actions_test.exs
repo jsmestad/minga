@@ -403,7 +403,8 @@ defmodule MingaEditor.LspActionsTest do
     %EditorState{
       port_manager: nil,
       terminal_viewport: viewport,
-      workspace: %SessionState{viewport: viewport, highlight: %Highlighting{}}
+      highlighting: %Highlighting{},
+      workspace: %SessionState{viewport: viewport}
     }
   end
 

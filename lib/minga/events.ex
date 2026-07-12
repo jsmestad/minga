@@ -31,7 +31,7 @@ defmodule Minga.Events do
   | `:buffer_saved`   | `BufferEvent`        | `buffer: pid(), path: String.t()`              |
   | `:buffer_opened`  | `BufferEvent`        | `buffer: pid(), path: String.t()`              |
   | `:buffer_closed`  | `BufferClosedEvent`  | `buffer: pid(), path: String.t() \| :scratch`  |
-  | `:buffer_changed` | `BufferChangedEvent` | `buffer: pid(), source: EditSource.t()`  |
+  | `:buffer_changed` | `BufferChangedEvent` | `buffer: pid(), source: EditSource.t(), sequence: ChangeLog.sequence()`  |
   | `:mode_changed`   | `ModeEvent`          | `old: atom(), new: atom()`        |
   | `:git_status_changed` | `GitStatusEvent` | `git_root, entries, branch, ahead, behind` plus cached `last_commit_message` |
   | `:diagnostics_updated` | `DiagnosticsUpdatedEvent` | `uri: String.t(), source: atom()` |
@@ -88,22 +88,21 @@ defmodule Minga.Events do
     @moduledoc """
     Payload for `:buffer_changed` events.
 
-    Carries the edit delta and source identity so subscribers can do
-    incremental work directly from the event payload without calling
-    back to the buffer.
+    Carries the edit delta, source identity, and monotonic change sequence so subscribers can detect and coalesce synchronization work without calling back to the buffer.
 
     When `delta` is `nil`, the edit was a bulk operation (undo, redo,
     content replacement) and subscribers should fall back to full sync.
     """
 
-    @enforce_keys [:buffer, :source]
-    defstruct [:buffer, :source, :delta, :version]
+    @enforce_keys [:buffer, :source, :sequence]
+    defstruct [:buffer, :source, :delta, :version, :sequence]
 
     @type t :: %__MODULE__{
             buffer: pid(),
             source: Minga.Buffer.EditSource.t(),
             delta: Minga.Buffer.EditDelta.t() | nil,
-            version: non_neg_integer() | nil
+            version: non_neg_integer() | nil,
+            sequence: Minga.Buffer.ChangeLog.sequence()
           }
   end
 

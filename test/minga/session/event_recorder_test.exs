@@ -96,7 +96,11 @@ defmodule Minga.Session.EventRecorderTest do
       send(
         recorder,
         {:minga_event, :buffer_changed,
-         %Events.BufferChangedEvent{buffer: self(), source: Minga.Buffer.EditSource.user()}}
+         %Events.BufferChangedEvent{
+           sequence: 1,
+           buffer: self(),
+           source: Minga.Buffer.EditSource.user()
+         }}
       )
 
       wait_for_processing(recorder)
@@ -400,7 +404,11 @@ defmodule Minga.Session.EventRecorderTest do
       send(
         recorder,
         {:minga_event, :buffer_changed,
-         %Events.BufferChangedEvent{buffer: self(), source: Minga.Buffer.EditSource.user()}}
+         %Events.BufferChangedEvent{
+           sequence: 1,
+           buffer: self(),
+           source: Minga.Buffer.EditSource.user()
+         }}
       )
 
       wait_for_processing(recorder)

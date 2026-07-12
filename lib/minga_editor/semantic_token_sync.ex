@@ -89,7 +89,7 @@ defmodule MingaEditor.SemanticTokenSync do
 
   @spec merge_tokens(EditorState.t(), pid(), [SemanticTokens.token()]) :: EditorState.t()
   defp merge_tokens(state, buf_pid, tokens) do
-    hl = Map.get(state.workspace.highlight.highlights, buf_pid)
+    hl = Map.get(state.highlighting.highlights, buf_pid)
 
     if hl == nil do
       state
@@ -127,7 +127,7 @@ defmodule MingaEditor.SemanticTokenSync do
 
       hl = %{hl | spans: List.to_tuple(merged)}
 
-      highlights = Map.put(state.workspace.highlight.highlights, buf_pid, hl)
+      highlights = Map.put(state.highlighting.highlights, buf_pid, hl)
 
       EditorState.update_highlight(state, &Highlighting.set_highlights(&1, highlights))
     end

@@ -298,14 +298,13 @@ defmodule MingaEditor.Commands.Movement do
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :match_bracket) do
     state = Helpers.setup_for_motion(state, :match_bracket)
-    buffer_id = Helpers.buffer_id_for_motion(state, buf, :match_bracket)
     {row, col} = Buffer.cursor(buf)
 
     # A successful bracket jump marks the authoritative-scroll marker (#2652) so
     # a match on the same committed top still discards a frontend-held local
     # offset; no matching bracket is a no-op and must not mark.
     state =
-      case ParserManager.request_match_item(buffer_id, row, col) do
+      case ParserManager.request_match_item(buf, row, col, state.parser_manager) do
         nil ->
           state
 
@@ -715,14 +714,14 @@ defmodule MingaEditor.Commands.Movement do
        when is_pid(buf) do
     command = structural_nav_command(action)
     state = Helpers.setup_for_motion(state, command)
-    buffer_id = Helpers.buffer_id_for_motion(state, buf, command)
     {row, col} = Buffer.cursor(buf)
 
     case ParserManager.request_structural_nav(
-           buffer_id,
+           buf,
            row,
            col,
-           structural_nav_action_code(action)
+           structural_nav_action_code(action),
+           state.parser_manager
          ) do
       %StructuralNavResult{type_name: type_name} = result ->
         Buffer.move_to(buf, StructuralNavResult.start_position(result))

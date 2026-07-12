@@ -11,7 +11,6 @@ defmodule MingaEditor.State.Tab.Context do
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Dired, as: DiredState
   alias MingaEditor.State.FileTree, as: FileTreeState
-  alias MingaEditor.State.Highlighting
   alias MingaEditor.State.Mouse
   alias MingaEditor.State.Search
   alias MingaEditor.State.Windows
@@ -36,7 +35,7 @@ defmodule MingaEditor.State.Tab.Context do
     :document_highlights
   ]
 
-  @shared_fields [:highlight, :injection_ranges, :agent_ui]
+  @shared_fields [:agent_ui]
 
   @workspace_fields @snapshot_fields ++ @shared_fields
 
@@ -62,9 +61,7 @@ defmodule MingaEditor.State.Tab.Context do
           | :file_tree
           | :viewport
           | :mouse
-          | :highlight
           | :lsp_pending
-          | :injection_ranges
           | :search
           | :editing
           | :feature_state
@@ -87,9 +84,7 @@ defmodule MingaEditor.State.Tab.Context do
           file_tree: FileTreeState.t() | nil,
           viewport: Viewport.t() | nil,
           mouse: Mouse.t() | nil,
-          highlight: Highlighting.t() | nil,
           lsp_pending: %{reference() => atom() | tuple()} | nil,
-          injection_ranges: %{pid() => [Minga.Language.Highlight.InjectionRange.t()]} | nil,
           search: Search.t() | nil,
           editing: VimState.t() | nil,
           feature_state: FeatureState.t() | nil,
@@ -106,9 +101,7 @@ defmodule MingaEditor.State.Tab.Context do
             file_tree: nil,
             viewport: nil,
             mouse: nil,
-            highlight: nil,
             lsp_pending: nil,
-            injection_ranges: nil,
             search: nil,
             editing: nil,
             feature_state: nil,
@@ -310,9 +303,7 @@ defmodule MingaEditor.State.Tab.Context do
   defp valid_field?(:file_tree, %FileTreeState{}), do: true
   defp valid_field?(:viewport, %Viewport{}), do: true
   defp valid_field?(:mouse, %Mouse{}), do: true
-  defp valid_field?(:highlight, %Highlighting{}), do: true
   defp valid_field?(:lsp_pending, value) when is_map(value), do: true
-  defp valid_field?(:injection_ranges, value) when is_map(value), do: true
   defp valid_field?(:search, %Search{}), do: true
   defp valid_field?(:editing, %VimState{}), do: true
   defp valid_field?(:feature_state, %FeatureState{}), do: true

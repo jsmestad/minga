@@ -378,7 +378,8 @@ struct StartupOverlay: View {
 /// One shared background eliminates visual seams between sidebar and editor.
 public struct ContentView<EditorSurface: View>: View {
     let gui: GUIState
-    let encoder: InputEncoder?
+    let encoderProvider: () -> InputEncoder?
+    var encoder: InputEncoder? { encoderProvider() }
     /// Editor geometry read just-in-time inside the body. This is a closure (not
     /// a stored value) so each read reflects the live editor metrics: a value
     /// computed in MingaApp's body would go stale because MingaApp under-renders
@@ -402,14 +403,14 @@ public struct ContentView<EditorSurface: View>: View {
 
     public init(
         gui: GUIState,
-        encoder: InputEncoder?,
+        encoder: @escaping () -> InputEncoder?,
         editorGeometry: @escaping () -> EditorGeometry,
         chrome: WindowChrome,
         onAgentChatVisibleChange: @escaping (Bool) -> Void,
         @ViewBuilder makeEditorSurface: @escaping () -> EditorSurface
     ) {
         self.gui = gui
-        self.encoder = encoder
+        self.encoderProvider = encoder
         self.editorGeometry = editorGeometry
         self.chrome = chrome
         self.onAgentChatVisibleChange = onAgentChatVisibleChange
@@ -1134,7 +1135,7 @@ private func fullShellPreviewGUI() -> GUIState {
 #Preview("Full Shell", traits: .mingaChrome) {
     ContentView(
         gui: fullShellPreviewGUI(),
-        encoder: NullInputEncoder(),
+        encoder: { NullInputEncoder() },
         editorGeometry: { .preview },
         chrome: .preview,
         onAgentChatVisibleChange: { _ in }

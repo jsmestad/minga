@@ -8,11 +8,12 @@ defmodule MingaEditor.UI.Highlight do
   """
 
   alias Minga.Core.Face
+  alias Minga.Parser.EventCorrelation
   alias MingaEditor.UI.Face.Registry, as: FaceRegistry
   alias MingaEditor.UI.Theme
 
   @enforce_keys [:version, :spans, :capture_names, :theme, :face_registry]
-  defstruct [:version, :spans, :capture_names, :theme, :face_registry]
+  defstruct [:version, :spans, :capture_names, :theme, :face_registry, :parser_correlation]
 
   @typedoc "Highlight state for a buffer."
   @type t :: %__MODULE__{
@@ -20,7 +21,8 @@ defmodule MingaEditor.UI.Highlight do
           spans: tuple() | [map()],
           capture_names: tuple(),
           theme: Theme.syntax(),
-          face_registry: FaceRegistry.t()
+          face_registry: FaceRegistry.t(),
+          parser_correlation: EventCorrelation.t() | nil
         }
 
   @typedoc "Style resolver: a function that maps capture names to Face structs."
@@ -54,7 +56,8 @@ defmodule MingaEditor.UI.Highlight do
       spans: {},
       capture_names: {},
       theme: syntax,
-      face_registry: registry
+      face_registry: registry,
+      parser_correlation: nil
     }
   end
 
@@ -68,9 +71,44 @@ defmodule MingaEditor.UI.Highlight do
       spans: {},
       capture_names: {},
       theme: theme.syntax,
-      face_registry: registry
+      face_registry: registry,
+      parser_correlation: nil
     }
   end
+
+  @doc "Stores the manager-owned correlation for parser events targeting this presentation."
+  @spec correlate(t(), EventCorrelation.t()) :: t()
+  def correlate(%__MODULE__{} = highlight, %EventCorrelation{} = correlation) do
+    %{highlight | parser_correlation: correlation}
+  end
+
+  @doc "Returns whether an event belongs to the current generation and is not stale."
+  @spec accepts_correlation?(t(), EventCorrelation.t()) :: boolean()
+  def accepts_correlation?(
+        %__MODULE__{
+          parser_correlation: %EventCorrelation{generation: generation, version: current}
+        },
+        %EventCorrelation{generation: generation, version: version}
+      ),
+      do: version >= current
+
+  def accepts_correlation?(%__MODULE__{}, %EventCorrelation{}), do: false
+
+  @doc "Advances the accepted parser correlation after applying an event."
+  @spec accept_correlation(t(), EventCorrelation.t()) :: t()
+  def accept_correlation(%__MODULE__{} = highlight, %EventCorrelation{} = correlation) do
+    %{highlight | parser_correlation: correlation}
+  end
+
+  @doc "Resets only parser-version correlation while preserving its registration generation."
+  @spec reset_parser_version(t()) :: t()
+  def reset_parser_version(
+        %__MODULE__{parser_correlation: %EventCorrelation{} = correlation} = highlight
+      ) do
+    %{highlight | parser_correlation: %{correlation | version: 0}}
+  end
+
+  def reset_parser_version(%__MODULE__{} = highlight), do: highlight
 
   @doc """
   Rebuilds the theme and face registry from a new `MingaEditor.UI.Theme.t()`.

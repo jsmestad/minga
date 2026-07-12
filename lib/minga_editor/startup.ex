@@ -73,6 +73,7 @@ defmodule MingaEditor.Startup do
     backend = Keyword.get(opts, :backend, :headless)
     rendering = rendering_policy(opts)
     port_manager = Keyword.get(opts, :port_manager, MingaEditor.Frontend.Manager)
+    parser_manager = Keyword.get(opts, :parser_manager, Minga.Parser.Manager)
     keymap_server = Keyword.get(opts, :keymap_server, Minga.Keymap.default_server())
     events_registry = Keyword.get(opts, :events_registry, Minga.Events.default_registry())
 
@@ -90,7 +91,7 @@ defmodule MingaEditor.Startup do
     buffer = Keyword.get(opts, :buffer)
 
     subscribe_port(port_manager)
-    subscribe_to_parser(Keyword.get(opts, :parser_manager))
+    subscribe_to_parser(parser_manager)
     FileWatcherHelpers.maybe_watch_buffer(buffer)
 
     log_safe_mode_startup()
@@ -170,6 +171,7 @@ defmodule MingaEditor.Startup do
       rendering: rendering,
       workspace: workspace,
       port_manager: port_manager,
+      parser_manager: parser_manager,
       agent_provider_module: Keyword.get(opts, :agent_provider_module),
       agent_provider_opts: Keyword.get(opts, :agent_provider_opts, []),
       keymap_server: keymap_server,

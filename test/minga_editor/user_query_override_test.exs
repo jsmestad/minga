@@ -14,7 +14,19 @@ defmodule MingaEditor.UserQueryOverrideTest do
 
   describe ":reload-highlights command" do
     test "resets active highlights and requests a new parse" do
-      state = TestHelpers.base_state(content: "defmodule Foo do\nend\n", filetype: :elixir)
+      manager_name = Module.concat(__MODULE__, "Parser#{System.unique_integer([:positive])}")
+
+      manager =
+        start_supervised!(
+          {Minga.Parser.Manager, name: manager_name, parser_path: "/missing/parser"}
+        )
+
+      state =
+        TestHelpers.base_state(
+          content: "defmodule Foo do\nend\n",
+          filetype: :elixir,
+          parser_manager: manager
+        )
 
       state =
         state
@@ -22,12 +34,13 @@ defmodule MingaEditor.UserQueryOverrideTest do
         |> HighlightSync.handle_spans(1, [%{start_byte: 0, end_byte: 9, capture_id: 0}])
 
       refute HighlightSync.get_active_highlight(state).spans == {}
-      version_before = state.workspace.highlight.version
 
       state = BufferManagement.execute(state, {:execute_ex_command, {:reload_highlights, []}})
 
       assert HighlightSync.get_active_highlight(state).spans == {}
-      assert state.workspace.highlight.version > version_before
+      assert HighlightSync.get_active_highlight(state).version == 0
+
+      assert is_integer(Minga.Parser.Manager.buffer_id(state.workspace.buffers.active, manager))
     end
   end
 

@@ -484,7 +484,7 @@ defmodule MingaEditor.Mouse do
   # buffer) the scope degrades to `:code`, matching `Highlight.scope_at/2`.
   @spec navigable_scope?(state(), pid(), non_neg_integer(), non_neg_integer()) :: boolean()
   defp navigable_scope?(state, buf, line, col) do
-    case Map.fetch(state.workspace.highlight.highlights, buf) do
+    case Map.fetch(state.highlighting.highlights, buf) do
       {:ok, %Highlight{} = hl} ->
         offset = Buffer.byte_offset_for_line(buf, line) + col
         Highlight.scope_at(hl, offset) == :code

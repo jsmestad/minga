@@ -9,7 +9,7 @@ defmodule MingaEditor.HighlightSync do
   alias Minga.Buffer
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Highlighting
-  alias MingaEditor.Frontend.Protocol
+  alias Minga.Parser.BufferConfig
   alias Minga.Parser.Manager, as: ParserManager
   alias MingaEditor.UI.Highlight
   alias MingaEditor.UI.Highlight.Grammar
@@ -46,7 +46,7 @@ defmodule MingaEditor.HighlightSync do
   @doc """
   Sets up highlighting for a specific buffer PID that may not be the active buffer.
 
-  Used for non-active buffers that need tree-sitter parsing even when they're not the focused buffer. Assigns a buffer_id, sends set_language + parse_buffer to the parser, and initializes the highlight entry.
+  Used for non-active buffers that need tree-sitter parsing even when they are not focused. Registers the buffer and inert language configuration with the parser manager, which schedules the initial parse, then initializes editor-owned presentation state.
 
   ## Options
 
@@ -70,35 +70,12 @@ defmodule MingaEditor.HighlightSync do
   @doc """
   Requests a full reparse of a specific buffer PID.
 
-  Used after content changes to non-active buffers. Sends a parse_buffer command with the full content since replace_generated_content clears pending edit deltas.
+  Used after bulk content changes to non-active buffers. The parser manager requests an atomic full snapshot and schedules it through the parse pump.
   """
   @spec request_reparse_buffer(EditorState.t(), pid()) :: EditorState.t()
   def request_reparse_buffer(%EditorState{} = state, buf_pid) when is_pid(buf_pid) do
-    hl = state.workspace.highlight
-
-    case Map.fetch(hl.buffer_ids, buf_pid) do
-      {:ok, buffer_id} ->
-        version = hl.version + 1
-        content = Buffer.content(buf_pid)
-        parse_cmd = Protocol.encode_parse_buffer(buffer_id, version, content)
-        ParserManager.send_commands([parse_cmd])
-
-        state =
-          EditorState.update_highlight(state, fn h -> %{h | version: version} end)
-
-        touch_buffer(state, buf_pid)
-
-      :error ->
-        # Buffer not registered with parser yet; set up from scratch.
-        # Recover any stored syntax override.
-        opts =
-          case Map.get(hl.syntax_overrides, buf_pid) do
-            nil -> []
-            syntax -> [syntax: syntax]
-          end
-
-        setup_for_buffer_pid(state, buf_pid, opts)
-    end
+    ParserManager.request_parse(buf_pid, state.parser_manager)
+    state
   end
 
   @spec clear_active_document_symbols(EditorState.t()) :: EditorState.t()
@@ -113,258 +90,88 @@ defmodule MingaEditor.HighlightSync do
 
   @spec send_parse_for_pid(EditorState.t(), pid(), String.t(), [setup_opt()]) :: EditorState.t()
   defp send_parse_for_pid(state, buf_pid, language, opts) do
-    {buffer_id, state} = ensure_buffer_id_for(state, buf_pid)
-    hl = state.workspace.highlight
-    version = hl.version + 1
-    content = Buffer.content(buf_pid)
+    config = buffer_config(language)
 
-    query_override = user_query_override(buffer_id, language)
-    injection_override = user_injection_query_override(buffer_id, language)
-    fold_override = user_fold_query_override(buffer_id, language)
-    textobject_override = user_textobject_query_override(buffer_id, language)
-    tags_override = user_tags_query_override(buffer_id, language)
+    try do
+      correlation =
+        ParserManager.register_buffer_correlated(buf_pid, config, server: state.parser_manager)
 
-    parse_cmd = Protocol.encode_parse_buffer(buffer_id, version, content)
-
-    commands =
-      Enum.concat([
-        [Protocol.encode_set_language(buffer_id, language)],
-        query_override,
-        injection_override,
-        fold_override,
-        textobject_override,
-        tags_override,
-        [parse_cmd]
-      ])
-
-    ParserManager.send_commands(commands)
-
-    # Register this buffer for crash recovery re-sync. The setup_commands_fn
-    # replays the full command set (including custom queries) so user overrides
-    # survive a parser crash.
-    setup_fn = fn bid ->
-      fresh_content = Buffer.content(buf_pid)
-
-      Enum.concat([
-        [Protocol.encode_set_language(bid, language)],
-        user_query_override(bid, language),
-        user_injection_query_override(bid, language),
-        user_fold_query_override(bid, language),
-        user_textobject_query_override(bid, language),
-        user_tags_query_override(bid, language),
-        [Protocol.encode_parse_buffer(bid, 0, fresh_content)]
-      ])
+      put_buffer_presentation(state, buf_pid, Keyword.get(opts, :syntax), correlation)
+    catch
+      :exit, reason ->
+        Minga.Log.warning(:port, "Parser registration unavailable: #{inspect(reason)}")
+        state
     end
+  end
 
-    ParserManager.register_buffer(
-      buffer_id,
-      language,
-      fn -> Buffer.content(buf_pid) end,
-      setup_commands_fn: setup_fn
-    )
+  @spec buffer_config(String.t()) :: BufferConfig.t()
+  defp buffer_config(language) do
+    %BufferConfig{
+      language: language,
+      highlight_query: user_query_text(language, &user_query_path/1),
+      injection_query: user_query_text(language, &user_injection_query_path/1),
+      fold_query: user_query_text(language, &user_fold_query_path/1),
+      textobject_query: user_query_text(language, &user_textobject_query_path/1),
+      tags_query: user_query_text(language, &user_tags_query_path/1)
+    }
+  end
 
-    # Use custom syntax theme if provided, otherwise use the global editor theme. Store the override so
-    # request_reparse_buffer can recover it if the buffer_id is lost.
-    custom_syntax = Keyword.get(opts, :syntax)
-
-    hl_data =
+  @spec put_buffer_presentation(
+          EditorState.t(),
+          pid(),
+          MingaEditor.UI.Theme.syntax() | nil,
+          Minga.Parser.EventCorrelation.t()
+        ) :: EditorState.t()
+  defp put_buffer_presentation(state, buf_pid, custom_syntax, correlation) do
+    highlight =
       case custom_syntax do
         nil -> Highlight.from_theme(state.theme)
         syntax -> Highlight.new(syntax)
       end
+      |> Highlight.correlate(correlation)
 
-    state = put_highlight(state, buf_pid, hl_data)
+    state = put_highlight(state, buf_pid, highlight)
 
-    hl2 = state.workspace.highlight
+    case custom_syntax do
+      nil ->
+        state
 
-    syntax_overrides =
-      if custom_syntax do
-        Map.put(hl2.syntax_overrides, buf_pid, custom_syntax)
-      else
-        hl2.syntax_overrides
-      end
-
-    state =
-      EditorState.update_highlight(state, fn highlight ->
-        highlight
-        |> Highlighting.set_version(version)
-        |> Highlighting.set_syntax_overrides(syntax_overrides)
-      end)
-
-    touch_buffer(state, buf_pid)
-  end
-
-  # Returns the parser buffer_id for a given buffer PID, assigning one if needed.
-  # Private: callers should use setup_for_buffer_pid/2 or request_reparse_buffer/2
-  # which handle the full language + parse protocol.
-  @spec ensure_buffer_id_for(EditorState.t(), pid()) :: {non_neg_integer(), EditorState.t()}
-  defp ensure_buffer_id_for(%EditorState{workspace: %{highlight: hl}} = state, buf_pid) do
-    case Map.fetch(hl.buffer_ids, buf_pid) do
-      {:ok, id} ->
-        {id, state}
-
-      :error ->
-        assign_new_buffer_id(state, hl, buf_pid)
+      syntax ->
+        EditorState.update_highlight(state, fn presentation ->
+          overrides = Map.put(presentation.syntax_overrides, buf_pid, syntax)
+          Highlighting.set_syntax_overrides(presentation, overrides)
+        end)
     end
-  end
-
-  # Touches the last_active_at timestamp for a specific buffer PID.
-  @spec touch_buffer(EditorState.t(), pid()) :: EditorState.t()
-  defp touch_buffer(%EditorState{} = state, buf_pid) do
-    hl = state.workspace.highlight
-    now = System.monotonic_time(:millisecond)
-    timestamps = Map.put(hl.last_active_at, buf_pid, now)
-
-    EditorState.update_highlight(state, fn h -> %{h | last_active_at: timestamps} end)
   end
 
   @spec send_parse_only(EditorState.t(), String.t()) :: EditorState.t()
   defp send_parse_only(state, language) do
-    {buffer_id, state} = ensure_buffer_id(state)
-    hl = state.workspace.highlight
-    version = hl.version + 1
-    content = Buffer.content(state.workspace.buffers.active)
-
-    query_override = user_query_override(buffer_id, language)
-    injection_override = user_injection_query_override(buffer_id, language)
-    fold_override = user_fold_query_override(buffer_id, language)
-    textobject_override = user_textobject_query_override(buffer_id, language)
-    tags_override = user_tags_query_override(buffer_id, language)
-
-    parse_cmd = Protocol.encode_parse_buffer(buffer_id, version, content)
-
-    commands =
-      Enum.concat([
-        [Protocol.encode_set_language(buffer_id, language)],
-        query_override,
-        injection_override,
-        fold_override,
-        textobject_override,
-        tags_override,
-        [parse_cmd]
-      ])
-
-    ParserManager.send_commands(commands)
-
-    # Register for crash recovery re-sync (including custom queries).
-    active = state.workspace.buffers.active
-
-    setup_fn = fn bid ->
-      fresh_content = Buffer.content(active)
-
-      Enum.concat([
-        [Protocol.encode_set_language(bid, language)],
-        user_query_override(bid, language),
-        user_injection_query_override(bid, language),
-        user_fold_query_override(bid, language),
-        user_textobject_query_override(bid, language),
-        user_tags_query_override(bid, language),
-        [Protocol.encode_parse_buffer(bid, 0, fresh_content)]
-      ])
-    end
-
-    ParserManager.register_buffer(
-      buffer_id,
-      language,
-      fn -> Buffer.content(active) end,
-      setup_commands_fn: setup_fn
-    )
-
-    state = put_active_highlight(state, Highlight.from_theme(state.theme))
-
-    state =
-      EditorState.update_highlight(state, &Highlighting.set_version(&1, version))
-
-    touch_active(state)
+    send_parse_for_pid(state, state.workspace.buffers.active, language, [])
   end
 
   @doc """
-  Returns the parser buffer_id for the active buffer, assigning one if needed.
-
-  Returns `{buffer_id, updated_state}`. The buffer_id is a monotonically
-  incrementing u32 stored in `highlight.buffer_ids`.
-  """
-  @spec ensure_buffer_id(EditorState.t()) :: {non_neg_integer(), EditorState.t()}
-  def ensure_buffer_id(%EditorState{workspace: %{buffers: %{active: nil}}} = state),
-    do: {0, state}
-
-  def ensure_buffer_id(%EditorState{workspace: %{highlight: hl, buffers: %{active: buf}}} = state) do
-    case Map.fetch(hl.buffer_ids, buf) do
-      {:ok, id} ->
-        {id, state}
-
-      :error ->
-        assign_new_buffer_id(state, hl, buf)
-    end
-  end
-
-  @spec assign_new_buffer_id(EditorState.t(), MingaEditor.State.Highlighting.t(), pid()) ::
-          {non_neg_integer(), EditorState.t()}
-  defp assign_new_buffer_id(state, hl, buf) do
-    id = hl.next_buffer_id
-
-    new_hl = %{
-      hl
-      | buffer_ids: Map.put(hl.buffer_ids, buf, id),
-        reverse_buffer_ids: Map.put(hl.reverse_buffer_ids, id, buf),
-        next_buffer_id: id + 1
-    }
-
-    {id, EditorState.set_highlight(state, new_hl)}
-  end
-
-  @doc """
-  Sends a close_buffer command to the parser for a buffer that's being closed.
-  Removes the buffer ID mapping.
+  Unregisters a closed buffer from the parser manager and removes its editor-owned presentation state.
   """
   @spec close_buffer(EditorState.t(), pid()) :: EditorState.t()
   def close_buffer(%EditorState{} = state, buffer_pid) do
-    hl = state.workspace.highlight
+    :ok = ParserManager.unregister_buffer(buffer_pid, state.parser_manager)
 
-    case Map.pop(hl.buffer_ids, buffer_pid) do
-      {nil, _ids} ->
-        state
+    EditorState.drop_parser_presentation(state, buffer_pid)
+  end
 
-      {buffer_id, remaining_ids} ->
-        ParserManager.close_buffer(buffer_id)
-        ParserManager.unregister_buffer(buffer_id)
-
-        EditorState.update_highlight(
-          state,
-          &Highlighting.remove_buffer(&1, buffer_pid, buffer_id, remaining_ids)
-        )
+  @spec user_query_text(String.t(), (String.t() -> String.t() | nil)) :: String.t() | nil
+  defp user_query_text(language, path_fn) do
+    case path_fn.(language) do
+      nil -> nil
+      path -> read_query_text(path)
     end
   end
 
-  # Returns a list with a set_highlight_query command if the user has a custom
-  # query file for this language, or an empty list to use the Zig built-in.
-  @spec user_query_override(non_neg_integer(), String.t()) :: [binary()]
-  defp user_query_override(buffer_id, language) do
-    user_path = user_query_path(language)
-
-    if user_path != nil and File.exists?(user_path) do
-      case File.read(user_path) do
-        {:ok, query_text} -> [Protocol.encode_set_highlight_query(buffer_id, query_text)]
-        {:error, _} -> []
-      end
-    else
-      []
-    end
-  end
-
-  # Returns a list with a set_injection_query command if the user has a custom
-  # injection query file for this language, or an empty list to use the Zig built-in.
-  @spec user_injection_query_override(non_neg_integer(), String.t()) :: [binary()]
-  defp user_injection_query_override(buffer_id, language) do
-    user_path = user_injection_query_path(language)
-
-    if user_path != nil and File.exists?(user_path) do
-      case File.read(user_path) do
-        {:ok, query_text} -> [Protocol.encode_set_injection_query(buffer_id, query_text)]
-        {:error, _} -> []
-      end
-    else
-      []
+  @spec read_query_text(String.t()) :: String.t() | nil
+  defp read_query_text(path) do
+    case File.read(path) do
+      {:ok, query_text} -> query_text
+      {:error, _reason} -> nil
     end
   end
 
@@ -384,22 +191,6 @@ defmodule MingaEditor.HighlightSync do
     end
   end
 
-  # Returns a list with a set_fold_query command if the user has a custom
-  # fold query file for this language, or an empty list to use the Zig built-in.
-  @spec user_fold_query_override(non_neg_integer(), String.t()) :: [binary()]
-  defp user_fold_query_override(buffer_id, language) do
-    user_path = user_fold_query_path(language)
-
-    if user_path != nil and File.exists?(user_path) do
-      case File.read(user_path) do
-        {:ok, query_text} -> [Protocol.encode_set_fold_query(buffer_id, query_text)]
-        {:error, _} -> []
-      end
-    else
-      []
-    end
-  end
-
   @spec user_fold_query_path(String.t()) :: String.t() | nil
   defp user_fold_query_path(language) do
     case System.user_home() do
@@ -408,43 +199,11 @@ defmodule MingaEditor.HighlightSync do
     end
   end
 
-  # Returns a list with a set_textobject_query command if the user has a custom
-  # textobject query file for this language, or an empty list to use the Zig built-in.
-  @spec user_textobject_query_override(non_neg_integer(), String.t()) :: [binary()]
-  defp user_textobject_query_override(buffer_id, language) do
-    user_path = user_textobject_query_path(language)
-
-    if user_path != nil and File.exists?(user_path) do
-      case File.read(user_path) do
-        {:ok, query_text} -> [Protocol.encode_set_textobject_query(buffer_id, query_text)]
-        {:error, _} -> []
-      end
-    else
-      []
-    end
-  end
-
   @spec user_textobject_query_path(String.t()) :: String.t() | nil
   defp user_textobject_query_path(language) do
     case System.user_home() do
       nil -> nil
       home -> Path.join([home, ".config", "minga", "queries", language, "textobjects.scm"])
-    end
-  end
-
-  # Returns a list with a set_tags_query command if the user has a custom
-  # tags query file for this language, or an empty list to use the Zig built-in.
-  @spec user_tags_query_override(non_neg_integer(), String.t()) :: [binary()]
-  defp user_tags_query_override(buffer_id, language) do
-    user_path = user_tags_query_path(language)
-
-    if user_path != nil and File.exists?(user_path) do
-      case File.read(user_path) do
-        {:ok, query_text} -> [Protocol.encode_set_tags_query(buffer_id, query_text)]
-        {:error, _} -> []
-      end
-    else
-      []
     end
   end
 
@@ -465,45 +224,8 @@ defmodule MingaEditor.HighlightSync do
   def request_reparse(%EditorState{workspace: %{buffers: %{active: nil}}} = state), do: state
 
   def request_reparse(%EditorState{} = state) when state.workspace.buffers.active != nil do
-    active_hl = get_active_highlight(state)
-
-    if active_hl.spans == {} and active_hl.capture_names == {} do
-      # No highlighting active for this buffer — skip
-      state
-    else
-      do_request_reparse(state)
-    end
-  end
-
-  defp do_request_reparse(%EditorState{} = state) do
-    {buffer_id, state} = ensure_buffer_id(state)
-    hl = state.workspace.highlight
-    version = hl.version + 1
-
-    # Try incremental sync first: if the buffer has pending edit deltas,
-    # send them as an edit_buffer command instead of the full content.
-    commands =
-      case Buffer.consume_edit_deltas(state.workspace.buffers.active, :highlight) do
-        {:ok, []} ->
-          # No deltas (e.g., undo/redo, content replaced externally): full sync
-          content = Buffer.content(state.workspace.buffers.active)
-          [Protocol.encode_parse_buffer(buffer_id, version, content)]
-
-        {:ok, edits} ->
-          delta_maps = Enum.map(edits, &Map.from_struct/1)
-          [Protocol.encode_edit_buffer(buffer_id, version, delta_maps)]
-
-        :reset_required ->
-          content = Buffer.content(state.workspace.buffers.active)
-          [Protocol.encode_parse_buffer(buffer_id, version, content)]
-      end
-
-    ParserManager.send_commands(commands)
-
-    state =
-      EditorState.update_highlight(state, fn h -> %{h | version: version} end)
-
-    touch_active(state)
+    ParserManager.request_parse(state.workspace.buffers.active, state.parser_manager)
+    state
   end
 
   # ── LRU eviction ──────────────────────────────────────────────────────────────
@@ -526,11 +248,8 @@ defmodule MingaEditor.HighlightSync do
   def touch_active(%EditorState{workspace: %{buffers: %{active: nil}}} = state), do: state
 
   def touch_active(%EditorState{} = state) do
-    hl = state.workspace.highlight
-    now = System.monotonic_time(:millisecond)
-    timestamps = Map.put(hl.last_active_at, state.workspace.buffers.active, now)
-
-    EditorState.update_highlight(state, fn h -> %{h | last_active_at: timestamps} end)
+    ParserManager.touch_buffer(state.workspace.buffers.active, state.parser_manager)
+    state
   end
 
   @doc """
@@ -538,8 +257,7 @@ defmodule MingaEditor.HighlightSync do
 
   Buffers whose last_active_at exceeds the TTL are evicted by sending
   close_buffer to the parser (frees tree + source on the Zig side).
-  The buffer_id mapping is removed; on next access, `ensure_buffer_id`
-  assigns a fresh ID and `setup_for_buffer` sends set_language + parse_buffer.
+  Parser registration is removed; activating the buffer again registers it and requests a fresh full parse.
 
   The active buffer and any PIDs in `protected_pids` are never evicted.
   """
@@ -548,106 +266,31 @@ defmodule MingaEditor.HighlightSync do
 
   @spec evict_inactive(EditorState.t(), [evict_opt()]) :: EditorState.t()
   def evict_inactive(%EditorState{} = state, opts \\ []) do
-    hl = state.workspace.highlight
-    now = System.monotonic_time(:millisecond)
     ttl_ms = Keyword.get(opts, :ttl_ms, 300_000)
     protected_pids = Keyword.get(opts, :protected_pids, [])
-
     active = state.workspace.buffers.active
-    protected = MapSet.new([active | protected_pids] |> Enum.reject(&is_nil/1))
+    protected = [active | protected_pids] |> Enum.reject(&is_nil/1) |> Enum.uniq()
 
-    {evicted_ids, remaining_timestamps} =
-      find_stale_buffers(hl, now, ttl_ms, protected)
+    case ParserManager.evict_inactive(protected, ttl_ms, state.parser_manager) do
+      {:ok, []} ->
+        state
 
-    apply_evictions(state, evicted_ids, remaining_timestamps)
-  end
+      {:ok, pids} ->
+        Minga.Log.debug(
+          :editor,
+          "Parser LRU: evicted #{Enum.count(pids)} inactive buffer tree(s)"
+        )
 
-  @spec find_stale_buffers(
-          MingaEditor.State.Highlighting.t(),
-          integer(),
-          non_neg_integer(),
-          MapSet.t()
-        ) ::
-          {[{pid(), non_neg_integer()}], %{pid() => integer()}}
-  defp find_stale_buffers(hl, now, ttl, protected) do
-    Enum.reduce(hl.last_active_at, {[], %{}}, fn {pid, last_ts}, {evicted, kept} ->
-      stale? = now - last_ts > ttl
-      guarded? = MapSet.member?(protected, pid)
+        Enum.reduce(pids, state, &remove_evicted_presentation(&2, &1))
 
-      if stale? and not guarded? do
-        classify_stale_buffer(hl, pid, evicted, kept)
-      else
-        {evicted, Map.put(kept, pid, last_ts)}
-      end
-    end)
-  end
-
-  @spec classify_stale_buffer(
-          MingaEditor.State.Highlighting.t(),
-          pid(),
-          [{pid(), non_neg_integer()}],
-          %{pid() => integer()}
-        ) :: {[{pid(), non_neg_integer()}], %{pid() => integer()}}
-  defp classify_stale_buffer(hl, pid, evicted, kept) do
-    case Map.get(hl.buffer_ids, pid) do
-      nil -> {evicted, kept}
-      id -> {[{pid, id} | evicted], kept}
+      {:error, :unavailable} ->
+        state
     end
   end
 
-  @spec apply_evictions(EditorState.t(), [{pid(), non_neg_integer()}], %{pid() => integer()}) ::
-          EditorState.t()
-  defp apply_evictions(state, [], _remaining_timestamps), do: state
-
-  defp apply_evictions(state, evicted_ids, remaining_timestamps) do
-    # Action: close parser state and drop crash-recovery tracking.
-    # Hidden buffers stay evicted until they are shown again.
-    Enum.each(evicted_ids, fn {_pid, id} ->
-      ParserManager.close_buffer(id)
-      ParserManager.unregister_buffer(id)
-    end)
-
-    Minga.Log.debug(
-      :editor,
-      "Parser LRU: evicted #{Enum.count(evicted_ids)} inactive buffer tree(s)"
-    )
-
-    # Calculation: compute the new highlighting state with evicted entries removed.
-    new_hl =
-      compute_post_eviction_state(state.workspace.highlight, evicted_ids, remaining_timestamps)
-
-    EditorState.set_highlight(state, new_hl)
-  end
-
-  # Pure calculation: produces the new Highlighting struct with evicted entries removed.
-  @spec compute_post_eviction_state(
-          MingaEditor.State.Highlighting.t(),
-          [{pid(), non_neg_integer()}],
-          %{pid() => integer()}
-        ) :: MingaEditor.State.Highlighting.t()
-  defp compute_post_eviction_state(hl, evicted_ids, remaining_timestamps) do
-    evicted_pids = MapSet.new(evicted_ids, fn {pid, _id} -> pid end)
-    evicted_id_set = MapSet.new(evicted_ids, fn {_pid, id} -> id end)
-
-    %{
-      hl
-      | buffer_ids:
-          Map.reject(hl.buffer_ids, fn {pid, _} -> MapSet.member?(evicted_pids, pid) end),
-        reverse_buffer_ids:
-          Map.reject(hl.reverse_buffer_ids, fn {id, _} -> MapSet.member?(evicted_id_set, id) end),
-        highlights:
-          Map.reject(hl.highlights, fn {pid, _} -> MapSet.member?(evicted_pids, pid) end),
-        last_active_at: remaining_timestamps
-    }
-  end
-
-  @doc """
-  Resolves a parser buffer_id to the buffer PID that owns it.
-  Returns nil if the buffer_id is unknown (e.g., the buffer was closed).
-  """
-  @spec resolve_buffer_pid(EditorState.t(), non_neg_integer()) :: pid() | nil
-  def resolve_buffer_pid(%EditorState{workspace: %{highlight: hl}}, buffer_id) do
-    Map.get(hl.reverse_buffer_ids, buffer_id)
+  @spec remove_evicted_presentation(EditorState.t(), pid()) :: EditorState.t()
+  defp remove_evicted_presentation(state, buffer_pid) do
+    EditorState.drop_parser_presentation(state, buffer_pid)
   end
 
   @doc "Handles a highlight_names event for the active buffer."
@@ -667,25 +310,22 @@ defmodule MingaEditor.HighlightSync do
 
   # ── Per-buffer highlight helpers ─────────────────────────────────────────────
 
-  @doc "Returns the parser buffer_id for a given buffer PID (read-only, no allocation)."
-  @spec buffer_id_for(EditorState.t(), pid()) :: non_neg_integer()
-  def buffer_id_for(%EditorState{workspace: %{highlight: hl}}, buf_pid) do
-    Map.get(hl.buffer_ids, buf_pid, 0)
-  end
-
   @doc "Returns the highlight data for the active buffer."
   @spec get_active_highlight(EditorState.t()) :: Highlight.t()
   def get_active_highlight(%EditorState{workspace: %{buffers: %{active: nil}}}),
     do: Highlight.new()
 
-  def get_active_highlight(%EditorState{workspace: %{highlight: hl, buffers: %{active: buf}}}) do
-    Map.get(hl.highlights, buf, Highlight.new())
+  def get_active_highlight(%EditorState{
+        highlighting: highlighting,
+        workspace: %{buffers: %{active: buf}}
+      }) do
+    Map.get(highlighting.highlights, buf, Highlight.new())
   end
 
   @doc "Returns the highlight data for a specific buffer PID."
   @spec get_highlight(EditorState.t(), pid()) :: Highlight.t()
-  def get_highlight(%EditorState{workspace: %{highlight: hl}}, buf_pid) do
-    Map.get(hl.highlights, buf_pid, Highlight.new())
+  def get_highlight(%EditorState{highlighting: highlighting}, buf_pid) do
+    Map.get(highlighting.highlights, buf_pid, Highlight.new())
   end
 
   @doc "Stores highlight data for the active buffer."

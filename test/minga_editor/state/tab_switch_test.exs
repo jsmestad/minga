@@ -332,7 +332,7 @@ defmodule MingaEditor.State.TabSwitchTest do
                pending_target
     end
 
-    test "tab switch restores target highlight and snapshots outgoing highlight" do
+    test "tab switch preserves live highlighting and ignores stale target parser state" do
       {state, buf1, buf2} = state_with_two_file_tabs()
       tb = state.shell_state.tab_bar
       current_id = tb.active_id
@@ -340,71 +340,61 @@ defmodule MingaEditor.State.TabSwitchTest do
 
       hl_data = Highlight.new()
 
-      current_highlight = %Highlighting{
-        buffer_ids: %{buf1 => 1},
-        reverse_buffer_ids: %{1 => buf1},
-        next_buffer_id: 2,
-        version: 5,
-        highlights: %{buf1 => hl_data},
-        last_active_at: %{buf1 => 100}
+      live_highlight = %Highlighting{
+        highlights: %{buf1 => hl_data, buf2 => Highlight.put_spans(hl_data, 5, [])}
       }
 
-      target_highlight = %Highlighting{
-        buffer_ids: %{buf2 => 7},
-        reverse_buffer_ids: %{7 => buf2},
-        next_buffer_id: 8,
-        version: 9,
-        highlights: %{buf2 => hl_data},
-        last_active_at: %{buf2 => 200}
-      }
+      stale_highlight = %Highlighting{highlights: %{buf2 => Highlight.new()}}
 
-      state = put_in(state.workspace.highlight, current_highlight)
+      state = put_in(state.highlighting, live_highlight)
       target_tab = TabBar.get(tb, target_id)
-      target_context = Context.put_fields(target_tab.context, highlight: target_highlight)
+
+      target_context =
+        target_tab.context
+        |> Map.put(:highlight, stale_highlight)
+        |> Map.update!(:present_fields, &[:highlight | &1])
+
       state = EditorState.set_tab_bar(state, TabBar.update_context(tb, target_id, target_context))
 
       {switched, _effects} = EditorState.switch_tab_pure(state, target_id)
 
-      assert switched.workspace.highlight == target_highlight
+      assert switched.highlighting == live_highlight
 
-      assert TabBar.get(switched.shell_state.tab_bar, current_id).context.highlight ==
-               current_highlight
+      refute :highlight in TabBar.get(switched.shell_state.tab_bar, current_id).context.present_fields
 
       {switched_back, _effects} = EditorState.switch_tab_pure(switched, current_id)
 
-      assert switched_back.workspace.highlight == current_highlight
-
-      assert TabBar.get(switched_back.shell_state.tab_bar, target_id).context.highlight ==
-               target_highlight
+      assert switched_back.highlighting == live_highlight
     end
 
-    test "tab switch restores target injection_ranges and snapshots outgoing ranges" do
+    test "tab switch preserves live injection ranges and ignores stale target ranges" do
       {state, buf1, buf2} = state_with_two_file_tabs()
       tb = state.shell_state.tab_bar
       current_id = tb.active_id
       target_id = Enum.find(tb.tabs, &(&1.id != tb.active_id)).id
 
-      current_ranges = %{buf1 => [:current_range]}
-      target_ranges = %{buf2 => [:target_range]}
+      live_ranges = %{buf1 => [:current_range], buf2 => [:parsed_after_restore]}
+      stale_ranges = %{buf2 => [:stale_range]}
 
-      state = put_in(state.workspace.injection_ranges, current_ranges)
+      state = put_in(state.injection_ranges, live_ranges)
       target_tab = TabBar.get(tb, target_id)
-      target_context = Context.put_fields(target_tab.context, injection_ranges: target_ranges)
+
+      target_context =
+        target_tab.context
+        |> Map.put(:injection_ranges, stale_ranges)
+        |> Map.update!(:present_fields, &[:injection_ranges | &1])
+
       state = EditorState.set_tab_bar(state, TabBar.update_context(tb, target_id, target_context))
 
       {switched, _effects} = EditorState.switch_tab_pure(state, target_id)
 
-      assert switched.workspace.injection_ranges == target_ranges
+      assert switched.injection_ranges == live_ranges
 
-      assert TabBar.get(switched.shell_state.tab_bar, current_id).context.injection_ranges ==
-               current_ranges
+      refute :injection_ranges in TabBar.get(switched.shell_state.tab_bar, current_id).context.present_fields
 
       {switched_back, _effects} = EditorState.switch_tab_pure(switched, current_id)
 
-      assert switched_back.workspace.injection_ranges == current_ranges
-
-      assert TabBar.get(switched_back.shell_state.tab_bar, target_id).context.injection_ranges ==
-               target_ranges
+      assert switched_back.injection_ranges == live_ranges
     end
   end
 end

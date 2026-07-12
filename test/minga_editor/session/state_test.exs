@@ -123,7 +123,7 @@ defmodule MingaEditor.Session.StateTest do
       assert ctx.buffers == ws.buffers
       assert ctx.windows == ws.windows
       assert ctx.viewport == ws.viewport
-      snapshot_fields = SessionState.field_names() -- [:highlight, :injection_ranges, :agent_ui]
+      snapshot_fields = SessionState.field_names() -- [:agent_ui]
       assert Enum.sort(snapshot_fields) == Enum.sort(ctx.present_fields)
     end
 

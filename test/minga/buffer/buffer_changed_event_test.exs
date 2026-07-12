@@ -24,7 +24,8 @@ defmodule Minga.Buffer.BufferChangedEventTest do
                       %BufferChangedEvent{
                         buffer: ^buf,
                         source: :user,
-                        delta: %EditDelta{inserted_text: "!"}
+                        delta: %EditDelta{inserted_text: "!"},
+                        sequence: 1
                       }}
     end
   end
@@ -161,7 +162,8 @@ defmodule Minga.Buffer.BufferChangedEventTest do
                       %BufferChangedEvent{
                         buffer: ^buf,
                         source: {:lsp, :unknown},
-                        delta: nil
+                        delta: nil,
+                        sequence: 1
                       }}
     end
   end

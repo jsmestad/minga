@@ -13,8 +13,7 @@ defmodule MingaEditor.State do
   **Shell fields** live in `state.shell_state` and hold presentation concerns: chrome, overlays, transient UI state. The active shell id is `state.shell_id`; `state.shell` is the registered module cached for hot-path compatibility. See `MingaEditor.Shell` for the behaviour definition.
 
   **Global fields** are shared across all tabs and never snapshotted:
-  `port_manager`, `theme`, `render_timer`, `focus_stack`,
-  `capabilities`.
+  `port_manager`, `parser_manager`, `highlighting`, `injection_ranges`, `theme`, `render_timer`, `focus_stack`, and `capabilities`.
 
   ## Composed sub-structs
 
@@ -22,6 +21,7 @@ defmodule MingaEditor.State do
   * `MingaEditor.Shell.Traditional.State`   — default presentation state (nav_flash, hover, status_msg, etc.)
   * `MingaEditor.State.WhichKey`     — which-key popup node, timer, visibility
   * `MingaEditor.State.Registers`    — named registers and active register selection
+  * `MingaEditor.State.Highlighting` — live per-buffer highlight presentation caches
   """
 
   alias MingaAgent.Session, as: AgentSession
@@ -102,6 +102,7 @@ defmodule MingaEditor.State do
   defstruct backend: :headless,
             rendering: :enabled,
             port_manager: nil,
+            parser_manager: Minga.Parser.Manager,
             renderer: nil,
             agent_ingest: nil,
             agent_provider_module: nil,
@@ -112,6 +113,8 @@ defmodule MingaEditor.State do
             sidebar_registry: MingaEditor.Extension.Sidebar.default_table(),
             agent_semantic_ui_registry: MingaEditor.Agent.SemanticUI.Registry.default_table(),
             workspace: nil,
+            highlighting: %Highlighting{},
+            injection_ranges: %{},
             terminal_viewport: Viewport.new(24, 80),
             editing_model: :vim,
             shell_id: :traditional,
@@ -188,6 +191,7 @@ defmodule MingaEditor.State do
           backend: backend(),
           rendering: rendering_policy(),
           port_manager: GenServer.server() | nil,
+          parser_manager: GenServer.server(),
           renderer: pid() | nil,
           agent_ingest: pid() | nil,
           agent_provider_module: module() | nil,
@@ -198,6 +202,8 @@ defmodule MingaEditor.State do
           sidebar_registry: MingaEditor.Extension.Sidebar.table(),
           agent_semantic_ui_registry: MingaEditor.Agent.SemanticUI.Registry.table(),
           workspace: SessionState.t(),
+          highlighting: Highlighting.t(),
+          injection_ranges: %{pid() => [Minga.Language.Highlight.InjectionRange.t()]},
           terminal_viewport: Viewport.t(),
           editing_model: :vim | :cua,
           shell_id: shell_id(),
@@ -523,16 +529,16 @@ defmodule MingaEditor.State do
     update_workspace(state, fn workspace -> SessionState.update_search(workspace, fun) end)
   end
 
-  @doc "Replaces the active workspace highlighting state."
+  @doc "Replaces the live syntax-highlight presentation caches."
   @spec set_highlight(t(), Highlighting.t()) :: t()
-  def set_highlight(%__MODULE__{} = state, %Highlighting{} = highlight) do
-    update_workspace(state, &SessionState.set_highlight(&1, highlight))
+  def set_highlight(%__MODULE__{} = state, %Highlighting{} = highlighting) do
+    %{state | highlighting: highlighting}
   end
 
-  @doc "Updates the active workspace highlighting state."
+  @doc "Updates the live syntax-highlight presentation caches."
   @spec update_highlight(t(), (Highlighting.t() -> Highlighting.t())) :: t()
   def update_highlight(%__MODULE__{} = state, fun) when is_function(fun, 1) do
-    update_workspace(state, fn workspace -> SessionState.update_highlight(workspace, fun) end)
+    set_highlight(state, fun.(state.highlighting))
   end
 
   @doc """
@@ -675,21 +681,29 @@ defmodule MingaEditor.State do
     update_workspace(state, &SessionState.set_agent_ui(&1, agent_ui))
   end
 
-  @doc "Replaces the active workspace injection ranges map."
+  @doc "Replaces the live parser injection ranges map."
   @spec set_injection_ranges(t(), %{pid() => [Minga.Language.Highlight.InjectionRange.t()]}) ::
           t()
   def set_injection_ranges(%__MODULE__{} = state, ranges) when is_map(ranges) do
-    update_workspace(state, &SessionState.set_injection_ranges(&1, ranges))
+    %{state | injection_ranges: ranges}
   end
 
-  @doc "Updates the active workspace injection ranges map."
+  @doc "Updates the live parser injection ranges map."
   @spec update_injection_ranges(t(), (%{pid() => [Minga.Language.Highlight.InjectionRange.t()]} ->
                                         %{pid() => [Minga.Language.Highlight.InjectionRange.t()]})) ::
           t()
   def update_injection_ranges(%__MODULE__{} = state, fun) when is_function(fun, 1) do
-    update_workspace(state, fn workspace ->
-      SessionState.set_injection_ranges(workspace, fun.(workspace.injection_ranges))
-    end)
+    set_injection_ranges(state, fun.(state.injection_ranges))
+  end
+
+  @doc "Drops all parser-derived presentation caches for a buffer."
+  @spec drop_parser_presentation(t(), pid()) :: t()
+  def drop_parser_presentation(%__MODULE__{} = state, buffer_pid) when is_pid(buffer_pid) do
+    %{
+      state
+      | highlighting: Highlighting.remove_buffer(state.highlighting, buffer_pid),
+        injection_ranges: Map.delete(state.injection_ranges, buffer_pid)
+    }
   end
 
   # ── Render pipeline write-back ─────────────────────────────────────────────
@@ -1693,6 +1707,7 @@ defmodule MingaEditor.State do
          %__MODULE__{workspace: %{buffers: %Buffers{} = bs}, buffer_monitors: monitors} = state,
          pid
        ) do
+    state = drop_parser_presentation(state, pid)
     monitors = Map.delete(monitors, pid)
     new_bs = Buffers.remove(bs, pid)
 
@@ -2431,23 +2446,16 @@ defmodule MingaEditor.State do
   defp snapshot_workspace_fields(%SessionState{} = ws) do
     ws
     |> SessionState.to_tab_context()
-    |> put_non_default_shared_tab_fields(ws)
+    |> put_non_default_agent_ui(ws.agent_ui)
   end
 
-  @spec put_non_default_shared_tab_fields(Tab.context(), SessionState.t()) :: Tab.context()
-  defp put_non_default_shared_tab_fields(context, %SessionState{} = ws) do
-    context
-    |> put_shared_tab_field(:highlight, ws.highlight, %Highlighting{})
-    |> put_shared_tab_field(:injection_ranges, ws.injection_ranges, %{})
-    |> put_shared_tab_field(:agent_ui, ws.agent_ui, UIState.new())
-  end
-
-  @spec put_shared_tab_field(Tab.context(), TabContext.field_name(), term(), term()) ::
-          Tab.context()
-  defp put_shared_tab_field(context, _field, default_value, default_value), do: context
-
-  defp put_shared_tab_field(context, field, value, _default_value) do
-    TabContext.put_fields(context, %{field => value})
+  @spec put_non_default_agent_ui(Tab.context(), UIState.t()) :: Tab.context()
+  defp put_non_default_agent_ui(context, %UIState{} = agent_ui) do
+    if agent_ui == UIState.new() do
+      context
+    else
+      TabContext.put_fields(context, agent_ui: agent_ui)
+    end
   end
 
   @doc """

@@ -7,9 +7,9 @@ defmodule MingaEditor.IndentTest do
   describe "compute_for_line/3" do
     test "converts tree-sitter indent levels to spaces" do
       buf = start_buffer("def foo do\nbar\nend", filetype: :elixir)
-      request_indent = fn 42, 1 -> 2 end
+      request_indent = fn ^buf, 1 -> 2 end
 
-      indent = Indent.compute_for_line(buf, 1, buffer_id: 42, request_indent: request_indent)
+      indent = Indent.compute_for_line(buf, 1, request_indent: request_indent)
 
       assert indent == "    "
     end
@@ -17,9 +17,9 @@ defmodule MingaEditor.IndentTest do
     test "converts tree-sitter indent levels to tabs" do
       buf = start_buffer("fn main() {\nbody\n}", filetype: :rust)
       {:ok, :tabs} = BufferProcess.set_option(buf, :indent_with, :tabs)
-      request_indent = fn 42, 1 -> 2 end
+      request_indent = fn ^buf, 1 -> 2 end
 
-      indent = Indent.compute_for_line(buf, 1, buffer_id: 42, request_indent: request_indent)
+      indent = Indent.compute_for_line(buf, 1, request_indent: request_indent)
 
       assert indent == "\t\t"
     end
@@ -44,27 +44,27 @@ defmodule MingaEditor.IndentTest do
 
     test "falls back when parser returns nil" do
       buf = start_buffer("  parent\nchild")
-      request_indent = fn 42, 1 -> nil end
+      request_indent = fn ^buf, 1 -> nil end
 
-      indent = Indent.compute_for_line(buf, 1, buffer_id: 42, request_indent: request_indent)
+      indent = Indent.compute_for_line(buf, 1, request_indent: request_indent)
 
       assert indent == "  "
     end
 
     test "falls back when parser exits" do
       buf = start_buffer("  parent\nchild")
-      request_indent = fn 42, 1 -> exit(:noproc) end
+      request_indent = fn ^buf, 1 -> exit(:noproc) end
 
-      indent = Indent.compute_for_line(buf, 1, buffer_id: 42, request_indent: request_indent)
+      indent = Indent.compute_for_line(buf, 1, request_indent: request_indent)
 
       assert indent == "  "
     end
 
     test "falls back when parser returns a negative level" do
       buf = start_buffer("  parent\nchild")
-      request_indent = fn 42, 1 -> -1 end
+      request_indent = fn ^buf, 1 -> -1 end
 
-      indent = Indent.compute_for_line(buf, 1, buffer_id: 42, request_indent: request_indent)
+      indent = Indent.compute_for_line(buf, 1, request_indent: request_indent)
 
       assert indent == "  "
     end

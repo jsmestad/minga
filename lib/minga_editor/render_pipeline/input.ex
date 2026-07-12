@@ -22,7 +22,7 @@ defmodule MingaEditor.RenderPipeline.Input do
 
   **From `state` (top-level):**
   `theme`, `capabilities`, `shell_id`, `shell`, `shell_state`, `port_manager`,
-  `message_store`, `notifications`, `face_override_registries`,
+  `message_store`, `notifications`, `face_override_registries`, `highlighting`,
   `editing_model`, `backend`, `layout`, `focus_tree`
 
   `font_registry` is renderer-owned state. Editor-created snapshots carry a
@@ -30,7 +30,7 @@ defmodule MingaEditor.RenderPipeline.Input do
   before it runs the pipeline.
 
   **From `state.workspace` (per-tab editing context, stored as `workspace` map):**
-  `windows`, `buffers`, `viewport`, `file_tree` (FileTree feature state), `highlight`,
+  `windows`, `buffers`, `viewport`, `file_tree` (FileTree feature state),
   `agent_ui`, `editing`, `document_highlights`, `cmd_hover_link`, `mouse`,
   `search`, `keymap_scope`, `launchpad`
 
@@ -87,6 +87,7 @@ defmodule MingaEditor.RenderPipeline.Input do
     :parser_status,
     :diff_views,
     :status_bar_data,
+    :highlighting,
     # Workspace as a plain map (enables state.workspace.X pattern-matching)
     :workspace,
     # Terminal-level viewport (screen dimensions reported by frontend on resize)
@@ -131,7 +132,6 @@ defmodule MingaEditor.RenderPipeline.Input do
           buffers: Buffers.t(),
           viewport: Viewport.t(),
           file_tree: FileTreeState.t(),
-          highlight: Highlighting.t(),
           agent_ui: UIState.t(),
           editing: VimState.t(),
           document_highlights: [EditorState.document_highlight()] | nil,
@@ -163,6 +163,7 @@ defmodule MingaEditor.RenderPipeline.Input do
           parser_status: atom(),
           diff_views: %{pid() => EditorState.diff_view_info()},
           status_bar_data: StatusBarData.t() | nil,
+          highlighting: Highlighting.t(),
           caches: Caches.t(),
           terminal_viewport: Viewport.t(),
           last_input_seq: non_neg_integer(),
@@ -204,6 +205,7 @@ defmodule MingaEditor.RenderPipeline.Input do
       parser_status: state.parser_status,
       diff_views: state.diff_views,
       status_bar_data: safe_status_bar_data(state),
+      highlighting: state.highlighting,
       terminal_viewport: state.terminal_viewport,
       last_input_seq: state.last_input_seq,
       force_keyframe?: Map.get(state, :keyframe_pending?, false),
@@ -215,7 +217,6 @@ defmodule MingaEditor.RenderPipeline.Input do
         buffers: ws.buffers,
         viewport: ws.viewport,
         file_tree: MingaEditor.Session.State.file_tree_state(ws),
-        highlight: ws.highlight,
         agent_ui: ws.agent_ui,
         editing: ws.editing,
         document_highlights: ws.document_highlights,

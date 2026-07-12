@@ -468,7 +468,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
         FileEventHandler.handle(state, {
           :minga_event,
           :buffer_changed,
-          %Minga.Events.BufferChangedEvent{buffer: buffer, source: :test}
+          %Minga.Events.BufferChangedEvent{sequence: 1, buffer: buffer, source: :test}
         })
 
       assert effects == [{:render, 16}]
@@ -486,7 +486,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
         FileEventHandler.handle(state, {
           :minga_event,
           :buffer_changed,
-          %Minga.Events.BufferChangedEvent{buffer: buffer, source: :test}
+          %Minga.Events.BufferChangedEvent{sequence: 1, buffer: buffer, source: :test}
         })
 
       assert effects == []
