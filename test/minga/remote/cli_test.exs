@@ -2,6 +2,8 @@ defmodule Minga.Remote.CLITest do
   # Uses Application env and a real distributed peer node, so this file must stay serial.
   use Minga.Test.DistributedCase, async: false
 
+  @moduletag :heavy
+
   import ExUnit.CaptureIO
 
   alias Minga.Remote.Bootstrap

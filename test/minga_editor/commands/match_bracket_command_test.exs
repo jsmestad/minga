@@ -8,6 +8,8 @@ defmodule MingaEditor.Commands.MatchBracketCommandTest do
   # Starts the real parser Port under its global production name, so these tests must not run concurrently.
   use ExUnit.Case, async: false
 
+  @moduletag :heavy
+
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Parser.Manager, as: ParserManager
   alias MingaEditor.Commands.Movement

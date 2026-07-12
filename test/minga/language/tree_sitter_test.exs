@@ -2,6 +2,8 @@ defmodule Minga.Language.TreeSitterTest do
   # Serial because grammar compilation shells out to cc and writes fixed shared-library cache paths.
   use ExUnit.Case, async: false
 
+  @moduletag :heavy
+
   alias Minga.Language.TreeSitter
   alias Minga.Language.Grammar, as: HLGrammar
 

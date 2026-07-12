@@ -133,12 +133,12 @@ defmodule MingaEditor.Agent.SlashCommand do
   def unknown_command_message(_text), do: "Not a slash command"
 
   @doc "Returns completion candidates for the current slash input, without the leading slash."
-  @spec completion_candidates(state(), String.t()) :: [completion_candidate()]
-  def completion_candidates(state, input) when is_binary(input) do
+  @spec completion_candidates(state(), String.t(), [String.t()] | nil) :: [completion_candidate()]
+  def completion_candidates(state, input, configured_models \\ nil) when is_binary(input) do
     if model_argument_input?(input) do
       input
       |> model_argument_prefix()
-      |> model_completion_candidates(state)
+      |> model_completion_candidates(state, configured_models)
     else
       input
       |> completions()
@@ -177,10 +177,11 @@ defmodule MingaEditor.Agent.SlashCommand do
     |> String.trim_leading()
   end
 
-  @spec model_completion_candidates(String.t(), state()) :: [completion_candidate()]
-  defp model_completion_candidates(prefix, state) do
+  @spec model_completion_candidates(String.t(), state(), [String.t()] | nil) ::
+          [completion_candidate()]
+  defp model_completion_candidates(prefix, state, configured_models) do
     state
-    |> available_model_entries()
+    |> available_model_entries(configured_models)
     |> filter_model_entries(prefix)
     |> Enum.map(&model_completion_candidate/1)
   end
@@ -241,8 +242,8 @@ defmodule MingaEditor.Agent.SlashCommand do
     end)
   end
 
-  @spec available_model_entries(state()) :: [map()]
-  defp available_model_entries(state) do
+  @spec available_model_entries(state(), [String.t()] | nil) :: [map()]
+  defp available_model_entries(state, configured_models) do
     current_model = current_model(state)
 
     session_models =
@@ -251,7 +252,7 @@ defmodule MingaEditor.Agent.SlashCommand do
         _ -> []
       end
 
-    configured_model_entries()
+    configured_model_entries(configured_models)
     |> Kernel.++(session_models)
     |> Kernel.++(ModelCatalog.available_models(current_model))
     |> uniq_model_entries()
@@ -267,10 +268,11 @@ defmodule MingaEditor.Agent.SlashCommand do
     :exit, _ -> []
   end
 
-  @spec configured_model_entries() :: [map()]
-  defp configured_model_entries do
-    :agent_models
-    |> Config.get()
+  @spec configured_model_entries([String.t()] | nil) :: [map()]
+  defp configured_model_entries(nil), do: configured_model_entries(Config.get(:agent_models))
+
+  defp configured_model_entries(models) do
+    models
     |> List.wrap()
     |> Enum.filter(&is_binary/1)
     |> Enum.map(&configured_model_entry/1)
@@ -1337,8 +1339,6 @@ defmodule MingaEditor.Agent.SlashCommand do
     first_line = message |> String.split("\n", parts: 2) |> hd() |> String.trim()
     State.set_status(state, String.slice(first_line, 0, 80))
   end
-
-  # ── Dynamic commands from extensions ────────────────────────────────────────
 
   @doc "Returns slash commands contributed by loaded extensions."
   @spec dynamic_commands() :: [Command.t()]

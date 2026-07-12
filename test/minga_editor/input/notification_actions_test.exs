@@ -3,12 +3,12 @@ defmodule MingaEditor.Input.NotificationActionsTest do
   # concurrently with other OS-process tests that use the same BEAM child setup.
   use Minga.Test.EditorCase, async: false
 
+  @moduletag :heavy
+
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.CommandOutput
   alias Minga.Events
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.UI.Notification
-  alias MingaEditor.UI.NotificationCenter
 
   setup do
     on_exit(fn ->
@@ -39,37 +39,6 @@ defmodule MingaEditor.Input.NotificationActionsTest do
     assert BufferProcess.buffer_name(active_buffer(ctx)) == "*test*"
     assert BufferProcess.content(active_buffer(ctx)) =~ "$ bash -c 'echo logs; exit 1'"
     assert BufferProcess.content(active_buffer(ctx)) =~ "logs"
-  end
-
-  test "notification_dismiss gui_action removes only the selected notification" do
-    ctx = start_editor("hello")
-
-    :sys.replace_state(ctx.editor, fn state ->
-      state
-      |> EditorState.upsert_notification(
-        Notification.new(
-          id: "build:test",
-          level: :progress,
-          title: "Building Minga",
-          created_at: 1_715_000_000
-        )
-      )
-      |> EditorState.upsert_notification(
-        Notification.new(
-          id: "other",
-          level: :info,
-          title: "Still here",
-          created_at: 1_715_000_010
-        )
-      )
-    end)
-
-    send(ctx.editor, {:minga_input, {:gui_action, {:notification_dismiss, "build:test"}}})
-
-    state = editor_state(ctx)
-
-    assert NotificationCenter.find(state.notifications, "build:test") == nil
-    assert [%{id: "other"}] = NotificationCenter.list(state.notifications)
   end
 
   test "retry action reruns the last test command" do

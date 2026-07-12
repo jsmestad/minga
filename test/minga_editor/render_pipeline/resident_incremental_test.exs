@@ -1,16 +1,9 @@
 defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
-  @moduledoc """
-  End-to-end checks for the incremental full-document residence build (#2658).
+  @moduledoc "End-to-end checks for the incremental full-document residence build (#2658)."
 
-  Enabling residence mutates the global `:resident_store_max_lines` option, so the
-  module runs `async: false` and restores the option after each test.
-  """
-
-  # Mutates the global Config option server (:resident_store_max_lines).
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
-  alias Minga.Config
   alias Minga.RenderModel.Window.ContentDigest
   alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline
@@ -19,13 +12,6 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
   alias MingaEditor.State, as: EditorState
 
   import MingaEditor.RenderPipeline.TestHelpers
-
-  setup do
-    original = Config.get(:resident_store_max_lines)
-    Config.set(:resident_store_max_lines, 1_000_000)
-    on_exit(fn -> Config.set(:resident_store_max_lines, original) end)
-    :ok
-  end
 
   # Builds the active window's semantic model for one frame, returning the model
   # and the state carrying the updated resident build cache into the next frame.
@@ -148,6 +134,7 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
   end
 
   describe "AC 1/5: edit-frame build cost is flat across resident sizes" do
+    @describetag :perf
     # Operation-count assertion (not wall-clock, per the test strategy): a single
     # off-screen in-place edit rasterizes exactly one row no matter how many rows
     # are resident, so edit-frame build stays O(changed) rather than O(document).

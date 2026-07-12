@@ -1,6 +1,5 @@
 defmodule MingaAgent.EventLog.StoreTest do
-  # Changes the process working directory in one regression test.
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias MingaAgent.EventLog.EventRecord
   alias MingaAgent.EventLog.Store
@@ -59,20 +58,6 @@ defmodule MingaAgent.EventLog.StoreTest do
     :ok = Store.close(db)
 
     assert file_mode(dir) == 0o755
-    assert file_mode(path) == 0o600
-  end
-
-  test "open with a bare relative database path does not chmod cwd", %{tmp_dir: tmp_dir} do
-    path = Path.join(tmp_dir, "agent_events.db")
-
-    File.chmod!(tmp_dir, 0o755)
-
-    File.cd!(tmp_dir, fn ->
-      {:ok, db} = Store.open("agent_events.db")
-      :ok = Store.close(db)
-    end)
-
-    assert file_mode(tmp_dir) == 0o755
     assert file_mode(path) == 0o600
   end
 

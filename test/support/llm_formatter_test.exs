@@ -55,6 +55,7 @@ defmodule Minga.Test.LLMFormatterTest do
     refute output =~ "Failed test locations"
   end
 
+  @tag :heavy
   test "does not double-count failures when module teardown also fails", %{tmp_dir: tmp_dir} do
     fixture = Path.join(tmp_dir, "formatter_teardown_failure_test.exs")
 

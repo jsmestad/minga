@@ -2,6 +2,8 @@ defmodule MingaAgent.StatusCommandTest do
   # Uses System.cmd through the status command runner; OS process tests stay serialized.
   use ExUnit.Case, async: false
 
+  @moduletag :heavy
+
   @moduletag timeout: 5_000
 
   alias Minga.Config.Options

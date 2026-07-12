@@ -1,6 +1,5 @@
 defmodule MingaAgent.Tools.PathIgnoreTest do
-  # Spawns OS processes through git check-ignore, which must not run async.
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias MingaAgent.Tools.PathIgnore
 
@@ -30,6 +29,7 @@ defmodule MingaAgent.Tools.PathIgnoreTest do
   end
 
   describe "filter_paths/2" do
+    @tag :heavy
     test "drops gitignored paths and secret env files while keeping visible results", %{
       tmp_dir: dir
     } do
@@ -46,6 +46,7 @@ defmodule MingaAgent.Tools.PathIgnoreTest do
   end
 
   describe "filter_grep_lines/2" do
+    @tag :heavy
     test "drops gitignored result lines and keeps visible results", %{tmp_dir: dir} do
       {_out, 0} = System.cmd("git", ["init"], cd: dir, stderr_to_stdout: true)
       File.write!(Path.join(dir, ".gitignore"), "ignored_dir/\n")

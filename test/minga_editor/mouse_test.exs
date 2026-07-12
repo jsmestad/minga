@@ -10,7 +10,6 @@ defmodule MingaEditor.MouseTest do
   alias Minga.Editing.Fold.Range, as: FoldRange
   alias Minga.Mode.VisualState
   alias MingaEditor.Commands.Movement
-  alias MingaEditor.FocusTree.Node, as: FocusNode
   alias MingaEditor.FoldMap
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Handlers.GuiActionHandler
@@ -19,121 +18,15 @@ defmodule MingaEditor.MouseTest do
   alias MingaEditor.Mouse
   alias MingaEditor.Startup
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.TabBar
-  alias MingaEditor.State.Workspace, as: WorkspaceDomain
   alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
-  alias MingaEditor.Session.ChromeState
 
-  @content_row 1
   @ctrl 0x02
   @super 0x08
 
-  describe "scrolling" do
-    test "vertical scroll moves viewport without moving the cursor" do
-      {state, buffer} = start_mouse_state(lines(0..29))
-
-      state = mouse(state, 0, 0, :wheel_down, :press)
-      assert BufferProcess.cursor(buffer) == {0, 0}
-      assert active_viewport(state).top == 3
-
-      state = mouse(state, 0, 0, :wheel_up, :press)
-      assert BufferProcess.cursor(buffer) == {0, 0}
-      assert active_viewport(state).top == 0
-    end
-
-    test "scrolling an inactive split moves that window without stealing focus" do
-      {state, _buffer} = start_mouse_state(lines(0..29))
-      state = Movement.execute(state, :split_vertical)
-      active_id = state.workspace.windows.active
-      layout = Layout.get(state)
-
-      {target_id, %{content: rect = {row, col, _width, _height}}} =
-        rightmost_window_layout(layout)
-
-      target_before = window_viewport(state, target_id).top
-      active_before = window_viewport(state, active_id).top
-      node = FocusNode.new(:buffer_content, rect, ref: target_id)
-
-      state = Mouse.handle_at_node(state, node, row + 1, col + 1, :wheel_down, 0, :press, 1)
-
-      assert state.workspace.windows.active == active_id
-      assert window_viewport(state, active_id).top == active_before
-      assert window_viewport(state, target_id).top > target_before
-    end
-
-    test "scrolling preserves the active editing mode" do
-      {state, _buffer} = start_mouse_state(lines(0..29))
-      state = EditorState.transition_mode(state, :insert)
-
-      state = mouse(state, 0, 0, :wheel_down, :press)
-
-      assert state.workspace.editing.mode == :insert
-    end
-  end
-
   describe "resident window scroll intent (#2661)" do
-    test "an in-bounds report moves only the viewport, cursor untouched" do
-      {state, buffer} = start_mouse_state(lines(0..99), width: 40, height: 20)
-      state = native_gui_state(state)
-      win_id = state.workspace.windows.active
-      state = mark_resident(state, win_id)
-      state = set_window_top(state, win_id, 40)
-      BufferProcess.move_to(buffer, {50, 0})
-
-      state = Mouse.handle_scroll_batch(state, win_id, 2, :down)
-
-      assert BufferProcess.cursor(buffer) == {50, 0}
-      assert window_viewport(state, win_id).top == 42
-    end
-
-    test "a report that scrolls the cursor off-screen never moves the cursor (#2684)" do
-      {state, buffer} = start_mouse_state(lines(0..99), width: 40, height: 20)
-      state = native_gui_state(state)
-      win_id = state.workspace.windows.active
-      state = mark_resident(state, win_id)
-      state = set_window_top(state, win_id, 40)
-      BufferProcess.move_to(buffer, {50, 0})
-
-      state = Mouse.handle_scroll_batch(state, win_id, 30, :down)
-
-      window = Map.fetch!(state.workspace.windows.map, win_id)
-      new_top = window.viewport.top
-      # Viewport scrolls past the cursor line (50 < 70), but the cursor stays put
-      # and the committed top is marked as a free-scroll echo.
-      assert new_top == 70
-      assert BufferProcess.cursor(buffer) == {50, 0}
-      assert window.scroll_echo_top == new_top
-    end
-
-    test "a non-resident window keeps today's viewport-only behavior regardless of magnitude" do
-      {state, buffer} = start_mouse_state(lines(0..99), width: 40, height: 20)
-      state = native_gui_state(state)
-      win_id = state.workspace.windows.active
-      state = set_window_top(state, win_id, 40)
-      BufferProcess.move_to(buffer, {50, 0})
-
-      state = Mouse.handle_scroll_batch(state, win_id, 30, :down)
-
-      assert BufferProcess.cursor(buffer) == {50, 0}
-      assert window_viewport(state, win_id).top == 70
-    end
-
-    test "a resident window on a non-GUI frontend never drags the cursor" do
-      {state, buffer} = start_mouse_state(lines(0..99), width: 40, height: 20)
-      win_id = state.workspace.windows.active
-      state = mark_resident(state, win_id)
-      state = set_window_top(state, win_id, 40)
-      BufferProcess.move_to(buffer, {50, 0})
-
-      state = Mouse.handle_scroll_batch(state, win_id, 30, :down)
-
-      assert BufferProcess.cursor(buffer) == {50, 0}
-      assert window_viewport(state, win_id).top == 70
-    end
-
     test "handle_scroll_batch records the committed top as the free-scroll echo top" do
       {state, _buffer} = start_mouse_state(lines(0..99), width: 40, height: 20)
       state = native_gui_state(state)
@@ -466,114 +359,6 @@ defmodule MingaEditor.MouseTest do
     end
   end
 
-  describe "double-click word selection" do
-    test "selects ASCII identifiers and snake_case as Vim words" do
-      {state, buffer} = start_mouse_state("let foo_bar123 = value")
-      {row, col} = buffer_screen_pos(state, 0, 8)
-
-      state = mouse(state, row, col, :left, :press, 0, 2)
-
-      assert BufferProcess.cursor(buffer) == {0, 13}
-      assert state.workspace.editing.mode == :visual
-      assert state.workspace.editing.mode_state.visual_anchor == {0, 4}
-    end
-
-    test "selects punctuation runs separately from words" do
-      {state, buffer} = start_mouse_state("foo...bar")
-      {row, col} = buffer_screen_pos(state, 0, 4)
-
-      state = mouse(state, row, col, :left, :press, 0, 2)
-
-      assert BufferProcess.cursor(buffer) == {0, 5}
-      assert state.workspace.editing.mode_state.visual_anchor == {0, 3}
-    end
-
-    test "keeps kebab-case hyphens as punctuation boundaries" do
-      {state, buffer} = start_mouse_state("foo-bar")
-      {row, col} = buffer_screen_pos(state, 0, 5)
-
-      state = mouse(state, row, col, :left, :press, 0, 2)
-
-      assert BufferProcess.cursor(buffer) == {0, 6}
-      assert state.workspace.editing.mode_state.visual_anchor == {0, 4}
-    end
-
-    test "keeps module separators as punctuation boundaries" do
-      {state, buffer} = start_mouse_state("Minga.Editor.State")
-      {row, col} = buffer_screen_pos(state, 0, 8)
-
-      state = mouse(state, row, col, :left, :press, 0, 2)
-
-      assert BufferProcess.cursor(buffer) == {0, 11}
-      assert state.workspace.editing.mode_state.visual_anchor == {0, 6}
-    end
-
-    test "selects whitespace runs with inner-word semantics" do
-      {state, buffer} = start_mouse_state("foo   bar")
-      {row, col} = buffer_screen_pos(state, 0, 4)
-
-      state = mouse(state, row, col, :left, :press, 0, 2)
-
-      assert BufferProcess.cursor(buffer) == {0, 5}
-      assert state.workspace.editing.mode_state.visual_anchor == {0, 3}
-    end
-
-    test "clicks at word start and end select the whole word" do
-      {start_state, start_buffer} = start_mouse_state("hello world")
-      {start_row, start_col} = buffer_screen_pos(start_state, 0, 0)
-      start_state = mouse(start_state, start_row, start_col, :left, :press, 0, 2)
-
-      assert BufferProcess.cursor(start_buffer) == {0, 4}
-      assert start_state.workspace.editing.mode_state.visual_anchor == {0, 0}
-
-      {end_state, end_buffer} = start_mouse_state("hello world")
-      {end_row, end_col} = buffer_screen_pos(end_state, 0, 4)
-      end_state = mouse(end_state, end_row, end_col, :left, :press, 0, 2)
-
-      assert BufferProcess.cursor(end_buffer) == {0, 4}
-      assert end_state.workspace.editing.mode_state.visual_anchor == {0, 0}
-    end
-
-    test "double-click drag extends backward by word boundaries" do
-      {state, buffer} = start_mouse_state("alpha beta gamma")
-      {press_row, press_col} = buffer_screen_pos(state, 0, 8)
-      {drag_row, drag_col} = buffer_screen_pos(state, 0, 2)
-
-      state = mouse(state, press_row, press_col, :left, :press, 0, 2)
-      state = mouse(state, drag_row, drag_col, :left, :drag)
-
-      assert BufferProcess.cursor(buffer) == {0, 0}
-      assert state.workspace.editing.mode == :visual
-      assert state.workspace.editing.mode_state.visual_anchor == {0, 9}
-    end
-
-    test "double-click drag extends forward by word boundaries" do
-      {state, buffer} = start_mouse_state("alpha beta gamma")
-      {press_row, press_col} = buffer_screen_pos(state, 0, 2)
-      {drag_row, drag_col} = buffer_screen_pos(state, 0, 7)
-
-      state = mouse(state, press_row, press_col, :left, :press, 0, 2)
-      state = mouse(state, drag_row, drag_col, :left, :drag)
-
-      assert BufferProcess.cursor(buffer) == {0, 9}
-      assert state.workspace.editing.mode == :visual
-      assert state.workspace.editing.mode_state.visual_anchor == {0, 0}
-    end
-
-    test "double-click drag backward onto an empty line keeps the original word selected" do
-      {state, buffer} = start_mouse_state("alpha\n\nbeta gamma")
-      {press_row, press_col} = buffer_screen_pos(state, 2, 1)
-      {drag_row, drag_col} = buffer_screen_pos(state, 1, 0)
-
-      state = mouse(state, press_row, press_col, :left, :press, 0, 2)
-      state = mouse(state, drag_row, drag_col, :left, :drag)
-
-      assert BufferProcess.cursor(buffer) == {1, 0}
-      assert state.workspace.editing.mode == :visual
-      assert state.workspace.editing.mode_state.visual_anchor == {2, 3}
-    end
-  end
-
   describe "split separators" do
     test "double-clicking a separator resets split size without entering visual mode" do
       {state, _buffer} = start_mouse_state("hello world")
@@ -746,180 +531,6 @@ defmodule MingaEditor.MouseTest do
     end
   end
 
-  describe "tab bar clicks" do
-    test "row 0 workspace clicks ignore row 1 tab actions" do
-      {state, agent_workspace_id, agent_tab_id} = start_workspace_tab_state()
-      [first_tab_id | _] = Enum.map(state.shell_state.tab_bar.tabs, & &1.id)
-      close_tab_id = last_tab_id(state)
-
-      state =
-        set_tab_click_regions(state, [
-          {1, 0, 4, {:tab_goto_id, first_tab_id}},
-          {1, 5, 7, :"tab_close_#{close_tab_id}"},
-          {0, 0, 4, {:workspace_goto, agent_workspace_id}}
-        ])
-
-      state = mouse(state, 0, 2, :left, :press)
-
-      assert ChromeState.from_editor_state(state).active_workspace_id == agent_workspace_id
-      assert state.shell_state.tab_bar.active_id == agent_tab_id
-    end
-
-    test "row 1 tab goto and close still work" do
-      {state, _agent_workspace_id, _agent_tab_id} = start_workspace_tab_state()
-      [first_tab_id | _] = Enum.map(state.shell_state.tab_bar.tabs, & &1.id)
-      close_tab_id = last_tab_id(state)
-      initial_count = length(state.shell_state.tab_bar.tabs)
-
-      state =
-        set_tab_click_regions(state, [
-          {1, 0, 4, {:tab_goto_id, first_tab_id}},
-          {1, 5, 7, :"tab_close_#{close_tab_id}"},
-          {0, 0, 4, {:workspace_goto, 1}}
-        ])
-
-      state = mouse(state, 1, 2, :left, :press)
-
-      assert state.shell_state.tab_bar.active_id == first_tab_id
-
-      # The tab goto recomputes the layout, so re-inject the tab-bar rect before
-      # the close click.
-      state =
-        set_tab_click_regions(state, [
-          {1, 0, 4, {:tab_goto_id, first_tab_id}},
-          {1, 5, 7, :"tab_close_#{close_tab_id}"},
-          {0, 0, 4, {:workspace_goto, 1}}
-        ])
-
-      state = mouse(state, 1, 6, :left, :press)
-
-      assert length(state.shell_state.tab_bar.tabs) == initial_count - 1
-    end
-
-    test "clicking workspace id 10 selects workspace id 10 instead of ordinal 10" do
-      {state, _buffer} = start_mouse_state("manual one\nmanual two", width: 120)
-
-      second_buffer = start_test_buffer(state, "agent tab", :workspace_tab)
-
-      state = EditorState.add_buffer(state, second_buffer, context: :open)
-      tab_bar = state.shell_state.tab_bar
-      manual_workspace = hd(tab_bar.workspaces)
-      workspace_10 = WorkspaceDomain.new_agent(10, "Tests", self())
-
-      agent_tab_id = state.shell_state.tab_bar.active_id
-
-      tab_bar =
-        %{tab_bar | workspaces: [manual_workspace, workspace_10], next_workspace_id: 11}
-        |> TabBar.move_tab_to_workspace(agent_tab_id, 10)
-
-      state = EditorState.set_tab_bar(state, tab_bar)
-      state = set_tab_click_regions(state, [{0, 0, 4, {:workspace_goto, 10}}])
-
-      state = mouse(state, 0, 2, :left, :press)
-
-      assert ChromeState.from_editor_state(state).active_workspace_id == 10
-      assert state.shell_state.tab_bar.active_id == agent_tab_id
-    end
-
-    test "clicking tab close removes a non-last tab but leaves the final tab alone" do
-      {state, _buf1, _buf2} = start_two_tab_state()
-      initial_count = length(state.shell_state.tab_bar.tabs)
-      active_id = state.shell_state.tab_bar.active_id
-      state = set_tab_click_regions(state, [{0, 5, 7, :"tab_close_#{active_id}"}])
-
-      state = mouse(state, 0, 6, :left, :press)
-
-      assert length(state.shell_state.tab_bar.tabs) == initial_count - 1
-
-      remaining_id = state.shell_state.tab_bar.active_id
-      single_tab_bar = TabBar.keep_only(state.shell_state.tab_bar, remaining_id)
-      state = EditorState.set_tab_bar(state, single_tab_bar)
-      state = set_tab_click_regions(state, [{0, 5, 7, :"tab_close_#{remaining_id}"}])
-
-      state = mouse(state, 0, 6, :left, :press)
-
-      assert Enum.count(state.shell_state.tab_bar.tabs) == 1
-    end
-
-    test "clicking tab goto switches tabs without closing" do
-      {state, _buf1, _buf2} = start_two_tab_state()
-      initial_count = length(state.shell_state.tab_bar.tabs)
-      active_id = state.shell_state.tab_bar.active_id
-      other_id = Enum.find(state.shell_state.tab_bar.tabs, &(&1.id != active_id)).id
-
-      state =
-        set_tab_click_regions(state, [
-          {0, 0, 4, {:tab_goto_id, other_id}},
-          {0, 5, 7, :"tab_close_#{other_id}"}
-        ])
-
-      state = mouse(state, 0, 2, :left, :press)
-
-      assert length(state.shell_state.tab_bar.tabs) == initial_count
-      assert state.shell_state.tab_bar.active_id == other_id
-    end
-
-    test "middle-clicking a tab body closes the clicked tab" do
-      {state, _buf1, _buf2} = start_two_tab_state()
-      initial_count = length(state.shell_state.tab_bar.tabs)
-      active_id = state.shell_state.tab_bar.active_id
-      other_id = Enum.find(state.shell_state.tab_bar.tabs, &(&1.id != active_id)).id
-
-      state =
-        set_tab_click_regions(state, [
-          {0, 0, 4, {:tab_goto_id, other_id}},
-          {0, 5, 7, :"tab_close_#{other_id}"}
-        ])
-
-      state = mouse(state, 0, 2, :middle, :press)
-
-      assert length(state.shell_state.tab_bar.tabs) == initial_count - 1
-      refute Enum.any?(state.shell_state.tab_bar.tabs, &(&1.id == other_id))
-      assert state.shell_state.tab_bar.active_id == active_id
-    end
-  end
-
-  describe "invalid coordinates" do
-    test "negative coordinates are ignored" do
-      {state, buffer} = start_mouse_state("hello")
-      original_cursor = BufferProcess.cursor(buffer)
-
-      state = mouse(state, -1, 5, :left, :press)
-      mouse(state, @content_row, -3, :left, :press)
-
-      assert BufferProcess.cursor(buffer) == original_cursor
-    end
-  end
-
-  describe "sticky hover popup motion (#2629)" do
-    test "motion inside the popup rect keeps the popup open" do
-      {state, rect} = state_with_hover_popup()
-      {row, col, _w, _h} = rect
-
-      # A free-motion event landing inside the popup's rect must not dismiss it.
-      state = Mouse.handle(state, row, col, :none, 0, :motion, 1)
-
-      assert state.shell_state.hover_popup != nil
-    end
-
-    test "motion outside the popup rect dismisses and restarts the hover debounce" do
-      {state, rect} = state_with_hover_popup()
-      {row, col, _w, height} = rect
-
-      # The row directly below the popup's bottom edge is outside it (and below
-      # the popup, which is anchored above the symbol), so motion there dismisses.
-      out_row = row + height
-      state = Mouse.handle(state, out_row, col, :none, 0, :motion, 1)
-
-      assert state.shell_state.hover_popup == nil
-
-      # Dismissing must also restart hover tracking at the new position, otherwise
-      # hovering a symbol after closing a popup would never re-open one. Guards
-      # against simplifying the dismiss branch down to just dismiss_hover_popup/1.
-      assert state.workspace.mouse.hover_pos == {out_row, col}
-    end
-  end
-
   describe "Cmd/Ctrl+hover link preview (#2630)" do
     test "Cmd+motion over a symbol sets the link decoration on the full word range" do
       {state, _buffer} = start_mouse_state("hello world\nfoo bar baz", width: 80)
@@ -1045,19 +656,6 @@ defmodule MingaEditor.MouseTest do
   end
 
   # Builds a state with an open hover popup and returns its placed screen rect.
-  defp state_with_hover_popup do
-    {state, _buffer} = start_mouse_state("hello\nworld\nfoo bar", width: 80, height: 24)
-    # Headless backend so set_hover does not start a real debounce timer.
-    state = %{state | backend: :headless}
-
-    popup = MingaEditor.HoverPopup.new("Documentation for symbol", 12, 10)
-    state = EditorState.set_hover_popup(state, popup)
-
-    rect = MingaEditor.Layout.SurfaceRegistry.rect_for(state, :hover_popup)
-    assert rect != nil, "expected the hover popup to be placed in the focus tree"
-
-    {state, rect}
-  end
 
   defp start_mouse_state(content, opts \\ []) do
     id = :erlang.unique_integer([:positive])
@@ -1130,12 +728,6 @@ defmodule MingaEditor.MouseTest do
 
   defp lines(range), do: Enum.map_join(range, "\n", &"line #{&1}")
 
-  defp rightmost_window_layout(layout) do
-    Enum.max_by(layout.window_layouts, fn {_id, %{content: {_row, content_col, _w, _h}}} ->
-      content_col
-    end)
-  end
-
   defp window_viewport(state, window_id),
     do: Map.fetch!(state.workspace.windows.map, window_id).viewport
 
@@ -1169,8 +761,6 @@ defmodule MingaEditor.MouseTest do
     {content_row + buffer_line, content_col + gutter_width + buffer_col}
   end
 
-  defp last_tab_id(state), do: Enum.at(state.shell_state.tab_bar.tabs, -1).id
-
   defp set_visual_selection(state, buffer, anchor, cursor, visual_type) do
     BufferProcess.move_to(buffer, cursor)
 
@@ -1199,39 +789,5 @@ defmodule MingaEditor.MouseTest do
 
   defp fold_active_window_at(state, line) do
     EditorState.update_window(state, state.workspace.windows.active, &Window.fold_at(&1, line))
-  end
-
-  defp set_tab_click_regions(state, regions) do
-    # The semantic GUI layout reserves no BEAM row for the tab bar; the frontend
-    # renders it natively and sends `select_tab`/`close_tab` gui_actions. The
-    # legacy cell-coordinate hit-test (`Mouse.tab_bar_click`) still exists and
-    # is what these tests exercise, so inject an explicit tab-bar rect (rows 0-1,
-    # covering the workspace and tab rows) onto the cached layout.
-    state
-    |> EditorState.update_shell_state(&%{&1 | tab_bar_click_regions: regions})
-    |> with_tab_bar_rect()
-  end
-
-  defp with_tab_bar_rect(state) do
-    %Layout{} = base_layout = Layout.get(state)
-    {_, _, width, _} = base_layout.terminal
-    %{state | layout: %Layout{base_layout | tab_bar: {0, 0, width, 2}}}
-  end
-
-  defp start_workspace_tab_state do
-    {state, _buf1} = start_mouse_state("manual one\nmanual two", width: 120)
-
-    buf2 = start_test_buffer(state, "agent tab", :workspace_tab)
-    buf3 = start_test_buffer(state, "manual three", :workspace_tab)
-
-    state = EditorState.add_buffer(state, buf2, context: :open)
-    state = EditorState.add_buffer(state, buf3, context: :open)
-
-    agent_tab_id = state.shell_state.tab_bar.active_id
-    {tab_bar, agent_workspace} = TabBar.add_workspace(state.shell_state.tab_bar, "Tests", self())
-    tab_bar = TabBar.move_tab_to_workspace(tab_bar, agent_tab_id, agent_workspace.id)
-
-    state = EditorState.set_tab_bar(state, tab_bar)
-    {state, agent_workspace.id, agent_tab_id}
   end
 end

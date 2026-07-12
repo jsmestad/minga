@@ -26,6 +26,10 @@ defmodule MingaEditor.UI.Picker.HelpSource do
     cached_candidates(entries)
   end
 
+  @doc false
+  @spec candidates_from_exports([module_exports()]) :: [Item.t()]
+  def candidates_from_exports(entries) when is_list(entries), do: build_candidates(entries)
+
   @impl true
   @spec on_select(Item.t(), term()) :: term()
   def on_select(%Item{id: {:module, module}}, state) when is_atom(module) do

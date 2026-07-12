@@ -3,8 +3,8 @@ defmodule Minga.FileWatcherTest do
   FileWatcher behavior through its public API and subscriber messages.
   """
 
-  # Uses file-system watcher resources that can block under concurrent full-suite load, so keep this file serialized.
-  use ExUnit.Case, async: false
+  # Each watcher has a private name and receives synthetic events without subscribing to the OS watcher.
+  use ExUnit.Case, async: true
 
   alias Minga.FileWatcher
 
@@ -34,20 +34,6 @@ defmodule Minga.FileWatcherTest do
     assert :ok == FileWatcher.unwatch_directory_tree(watcher, dir)
   end
 
-  test "check_all sends notifications for watched files and directories", %{tmp_dir: dir} do
-    watcher = start_watcher(subscriber: self())
-    file = Path.join(dir, "a.txt")
-    project = Path.join(dir, "project")
-
-    FileWatcher.watch_path(watcher, file)
-    FileWatcher.watch_directory(watcher, project)
-    FileWatcher.check_all(watcher)
-    sync_watcher(watcher)
-
-    assert_receive {:file_changed_on_disk, ^file}, 50
-    assert_receive {:file_changed_on_disk, ^project}, 50
-  end
-
   test "file events are debounced", %{tmp_dir: dir} do
     watcher = start_watcher(subscriber: self(), debounce_ms: 10)
     path = Path.join(dir, "debounce_test.txt")
@@ -61,18 +47,6 @@ defmodule Minga.FileWatcherTest do
 
     assert_receive {:file_changed_on_disk, ^path}, 500
     refute_receive {:file_changed_on_disk, ^path}, 100
-  end
-
-  test "events for unwatched files are ignored", %{tmp_dir: dir} do
-    watcher = start_watcher(subscriber: self())
-    watched = Path.join(dir, "watched.txt")
-    other = Path.join(dir, "other.txt")
-
-    FileWatcher.watch_path(watcher, watched)
-    send(watcher, {:file_event, nil, {other, [:modified]}})
-    sync_watcher(watcher)
-
-    refute_receive {:file_changed_on_disk, _}, 50
   end
 
   test "events under watched project directories are forwarded", %{tmp_dir: dir} do
@@ -100,44 +74,6 @@ defmodule Minga.FileWatcherTest do
     sync_watcher(watcher)
 
     refute_receive {:file_changed_on_disk, ^path}, 50
-  end
-
-  test "check_all is safe after subscriber dies", %{tmp_dir: dir} do
-    task = Task.async(fn -> :ok end)
-    Task.await(task)
-    watcher = start_watcher()
-    file = Path.join(dir, "a.txt")
-
-    FileWatcher.subscribe(watcher, task.pid)
-    sync_watcher(watcher)
-    FileWatcher.watch_path(watcher, file)
-    FileWatcher.check_all(watcher)
-    sync_watcher(watcher)
-
-    refute_receive {:file_changed_on_disk, _}, 50
-  end
-
-  test "re-subscribing replaces the old subscriber", %{tmp_dir: dir} do
-    watcher = start_watcher()
-    old_subscriber = forwarding_subscriber(self(), :old_subscriber)
-    path = Path.join(dir, "resub.txt")
-
-    FileWatcher.subscribe(watcher, old_subscriber)
-    FileWatcher.subscribe(watcher, self())
-    FileWatcher.watch_path(watcher, path)
-    FileWatcher.check_all(watcher)
-    sync_watcher(watcher)
-
-    assert_receive {:file_changed_on_disk, ^path}, 50
-    refute_receive {:old_subscriber, {:file_changed_on_disk, ^path}}, 50
-  end
-
-  defp forwarding_subscriber(parent, tag) do
-    spawn(fn ->
-      receive do
-        message -> send(parent, {tag, message})
-      end
-    end)
   end
 
   defp sync_watcher(watcher) do

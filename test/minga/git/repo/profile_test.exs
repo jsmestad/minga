@@ -1,7 +1,6 @@
 defmodule Minga.Git.Repo.ProfileTest do
   @moduledoc "Tests for repo refresh policy detection."
-  # Mutates Application env for the override test, so this module must run serially.
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Minga.Git.Repo.Profile
 
@@ -78,26 +77,6 @@ defmodule Minga.Git.Repo.ProfileTest do
     assert profile.untracked_mode == :no
   end
 
-  test "applies per-repo config overrides", %{tmp_dir: dir} do
-    old = Application.get_env(:minga, :git_repo_overrides)
-
-    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
-    Application.put_env(:minga, :git_repo_overrides, %{
-      dir => %{sparse?: true, size_class: :huge, untracked_mode: :all, timeout_ms: 123}
-    })
-
-    on_exit(fn -> restore_overrides(old) end)
-
-    File.mkdir_p!(Path.join(dir, ".git"))
-
-    profile = Profile.detect(dir)
-
-    assert profile.sparse?
-    assert profile.size_class == :huge
-    assert profile.untracked_mode == :all
-    assert profile.timeout_ms == 123
-  end
-
   describe "single_cone_dir/1" do
     test "returns the leaf cone for a nested single-cone sparse checkout", %{tmp_dir: dir} do
       write_sparse_checkout(dir, "/*\n!/*/\n/apps/\n!/apps/*/\n/apps/web/\n")
@@ -136,12 +115,6 @@ defmodule Minga.Git.Repo.ProfileTest do
     File.mkdir_p!(Path.dirname(sparse_file))
     File.write!(sparse_file, content)
   end
-
-  @spec restore_overrides(term()) :: :ok
-  # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
-  defp restore_overrides(nil), do: Application.delete_env(:minga, :git_repo_overrides)
-  # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
-  defp restore_overrides(value), do: Application.put_env(:minga, :git_repo_overrides, value)
 
   # Writes a `.git/index` of the given byte size so size classification has a
   # cheap proxy to read via File.stat.

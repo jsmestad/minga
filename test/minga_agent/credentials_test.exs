@@ -25,7 +25,12 @@ defmodule MingaAgent.CredentialsTest do
       File.rm_rf!(dir)
     end)
 
-    opts = [config_dir: parent_dir, env: @nil_env]
+    opts = [
+      config_dir: parent_dir,
+      env: @nil_env,
+      oauth_probe: fn -> false end,
+      ollama_probe: fn -> false end
+    ]
 
     %{
       dir: dir,

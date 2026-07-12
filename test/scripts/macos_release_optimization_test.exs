@@ -1,6 +1,8 @@
-# Runs a shell verifier against fixture output and therefore invokes an OS process.
 defmodule Minga.Scripts.MacosReleaseOptimizationTest do
+  # Runs a shell verifier against fixture output and therefore invokes an OS process.
   use ExUnit.Case, async: false
+
+  @moduletag :heavy
 
   @script Path.join([File.cwd!(), "scripts", "check_macos_release_optimization"])
   @fixtures Path.join([File.cwd!(), "test", "fixtures", "xcodebuild"])
