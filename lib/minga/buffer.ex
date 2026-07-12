@@ -108,6 +108,10 @@ defmodule Minga.Buffer do
   @spec content(t()) :: String.t()
   defdelegate content(server), to: BufferProcess
 
+  @doc "Content and mutation version captured atomically in one call."
+  @spec content_with_version(t()) :: {String.t(), non_neg_integer()}
+  defdelegate content_with_version(server), to: BufferProcess
+
   @doc "Content and cursor position in a single call (avoids two round-trips)."
   @spec content_and_cursor(t()) :: {String.t(), position()}
   defdelegate content_and_cursor(server), to: BufferProcess
@@ -229,6 +233,16 @@ defmodule Minga.Buffer do
   @spec replace_content(t(), String.t(), Minga.Buffer.State.edit_source()) ::
           :ok | {:error, term()}
   defdelegate replace_content(server, new_content, source \\ :user), to: BufferProcess
+
+  @doc "Atomically replaces content at `expected_version`, preserving the nearest valid cursor position."
+  @spec replace_content_if_version(
+          t(),
+          non_neg_integer(),
+          String.t(),
+          Minga.Buffer.State.edit_source()
+        ) :: :ok | {:error, :read_only | :stale}
+  defdelegate replace_content_if_version(server, expected_version, new_content, source \\ :user),
+    to: BufferProcess
 
   @doc "Replace generated/internal content, bypassing user read-only restrictions."
   @spec replace_generated_content(t(), String.t()) :: :ok

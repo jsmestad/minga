@@ -1027,11 +1027,11 @@ defmodule MingaEditor.LspActions do
   end
 
   def handle_formatting_response(state, {:ok, edits}, buf, version) when is_list(edits) do
-    if Process.alive?(buf) and Buffer.version(buf) == version do
-      MingaEditor.Commands.Formatting.apply_lsp_edits(buf, edits)
-      EditorState.set_status(state, "Formatted (LSP)")
-    else
-      EditorState.set_status(state, "Buffer changed, format skipped")
+    case Commands.Formatting.apply_lsp_edits(buf, edits, version) do
+      :ok -> EditorState.set_status(state, "Formatted (LSP)")
+      {:error, :stale} -> EditorState.set_status(state, "Buffer changed, format skipped")
+      {:error, :read_only} -> EditorState.set_status(state, "Buffer is read-only, format skipped")
+      {:error, :not_alive} -> EditorState.set_status(state, "Buffer closed, format skipped")
     end
   end
 
