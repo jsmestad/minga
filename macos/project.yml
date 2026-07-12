@@ -35,6 +35,8 @@ targets:
         type: file
       - path: Sources/Renderer/ResidentRowStore.swift
         type: file
+      - path: Sources/Renderer/ResidentRenderPreparation.swift
+        type: file
       - path: Sources/Protocol/AgentSurfaceTypes.swift
         type: file
       - path: Sources/Protocol/LatencyRecorder.swift
@@ -114,6 +116,7 @@ targets:
           # MingaProtocol-owned (Slice 3)
           - "Renderer/WindowContent.swift"
           - "Renderer/ResidentRowStore.swift"
+          - "Renderer/ResidentRenderPreparation.swift"
           - "Protocol/AgentSurfaceTypes.swift"
           - "Protocol/LatencyRecorder.swift"
           - "Protocol/RenderPerformanceGate.swift"
@@ -233,6 +236,7 @@ targets:
           # MingaProtocol-owned (Slice 3)
           - "Renderer/WindowContent.swift"
           - "Renderer/ResidentRowStore.swift"
+          - "Renderer/ResidentRenderPreparation.swift"
           - "Protocol/AgentSurfaceTypes.swift"
           - "Protocol/LatencyRecorder.swift"
           - "Protocol/RenderPerformanceGate.swift"
@@ -307,6 +311,7 @@ targets:
           # MingaProtocol-owned (Slice 3)
           - "Renderer/WindowContent.swift"
           - "Renderer/ResidentRowStore.swift"
+          - "Renderer/ResidentRenderPreparation.swift"
           - "Protocol/AgentSurfaceTypes.swift"
           - "Protocol/LatencyRecorder.swift"
           - "Protocol/RenderPerformanceGate.swift"

@@ -153,6 +153,7 @@ final class CommandDispatcher {
     /// base_frame_seq and BEAM-owned generation of the open transaction.
     private var openBaseFrameSeq: UInt32 = 0
     private var openGeneration: UInt32 = 0
+    private var openGenerationIsStale = false
 
     /// Value-semantic builder for the open frame. Commands are classified and
     /// window deltas are resolved during staging; commit only freezes and publishes.
@@ -174,6 +175,7 @@ final class CommandDispatcher {
     /// Doubles as the delta base validator and the `last_good_frame_seq` carried
     /// by `request_keyframe` on invalidation. 0 until the first clean commit.
     private(set) var lastCommittedFrameSeq: UInt32 = 0
+    private(set) var lastCommittedGeneration: UInt32 = 0
 
     /// True once at least one frame has committed, so `lastCommittedFrameSeq == 0`
     /// can still be told apart from "never committed" when validating a base.
@@ -300,6 +302,7 @@ final class CommandDispatcher {
         openFrameSeq = frameSeq
         openBaseFrameSeq = baseFrameSeq
         openGeneration = generation
+        openGenerationIsStale = hasCommitted && generation < lastCommittedGeneration
         transactionBuilder = PreparedFrameTransactionBuilder(
             frameSeq: frameSeq,
             baseFrameSeq: baseFrameSeq,
@@ -316,6 +319,12 @@ final class CommandDispatcher {
     /// Closes, freezes, and publishes the open transaction. Validation completes
     /// before `publish(_:)` is entered, so a rejected frame has no observable writes.
     private func commitTransaction(frameSeq: UInt32, inputSeq: UInt32) {
+        if openGenerationIsStale {
+            openFrameSeq = nil
+            transactionBuilder = nil
+            openGenerationIsStale = false
+            return
+        }
         guard let open = openFrameSeq else {
             reject(
                 .commitWithoutBegin(frameSeq: frameSeq),
@@ -369,6 +378,7 @@ final class CommandDispatcher {
         }
 
         lastCommittedFrameSeq = frameSeq
+        lastCommittedGeneration = openGeneration
         hasCommitted = true
         openFrameSeq = nil
         self.transactionBuilder = nil
@@ -458,6 +468,7 @@ final class CommandDispatcher {
         openFrameSeq = nil
         openBaseFrameSeq = 0
         transactionBuilder = nil
+        openGenerationIsStale = false
 
         if case .missingWindowReference(let windowId) = rejection {
             // A row/window reference miss has a targeted BEAM recovery path. Keep

@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${ROOT}/_build/render-performance"
+MODULE_DIR="${BUILD_DIR}/module"
 BINARY="${BUILD_DIR}/minga-render-performance"
 BASELINE="${1:-${ROOT}/performance/baselines/macos_render_release.json}"
 
@@ -15,11 +16,38 @@ if [[ ! -f "${BASELINE}" ]]; then
   exit 2
 fi
 
-mkdir -p "${BUILD_DIR}"
+mkdir -p "${MODULE_DIR}"
+cd "${ROOT}"
+mix protocol.gen >/dev/null
 swiftc --version
-swiftc -O \
-  "${ROOT}/macos/Sources/Protocol/RenderPerformanceGate.swift" \
-  "${ROOT}/macos/Tests/Performance/main.swift" \
+
+# Build the exact Metal-free production resident types with optimization. The
+# benchmark executable then compiles the shipping ProtocolDecoder against this
+# module and measures real A2 decode/apply plus shared renderer preparation.
+swiftc -O -emit-library -emit-module -module-name MingaProtocol \
+  macos/Sources/Protocol/ProtocolTypes.swift \
+  macos/Sources/Protocol/StatusBarUpdate.swift \
+  macos/Sources/Protocol/GUIColorSlots.swift \
+  macos/Sources/Renderer/WindowContent.swift \
+  macos/Sources/Renderer/ResidentRowStore.swift \
+  macos/Sources/Renderer/ResidentRenderPreparation.swift \
+  macos/Sources/Protocol/AgentSurfaceTypes.swift \
+  macos/Sources/Protocol/LatencyRecorder.swift \
+  macos/Sources/Protocol/RenderPerformanceGate.swift \
+  macos/Sources/Protocol/FrontendExtensionRuntimeMessage.swift \
+  -emit-module-path "${MODULE_DIR}/MingaProtocol.swiftmodule" \
+  -o "${MODULE_DIR}/libMingaProtocol.dylib"
+
+swiftc -O -I "${MODULE_DIR}" -L "${MODULE_DIR}" -lMingaProtocol \
+  macos/.generated/protocol/ProtocolOpcodes.generated.swift \
+  macos/.generated/protocol/ProtocolCommandSize.generated.swift \
+  macos/.generated/protocol/ProtocolSemanticDecode.generated.swift \
+  macos/Sources/Protocol/ProtocolConstants.swift \
+  macos/Sources/Protocol/ByteCursor.swift \
+  macos/Sources/Protocol/DecodedFrame.swift \
+  macos/Sources/Protocol/ProtocolDecoder.swift \
+  macos/Tests/Performance/main.swift \
   -o "${BINARY}"
 
-"${BINARY}" "${BASELINE}"
+DYLD_LIBRARY_PATH="${MODULE_DIR}${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}" \
+  "${BINARY}" "${BASELINE}"

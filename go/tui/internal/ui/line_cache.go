@@ -61,9 +61,8 @@ type windowLineCache struct {
 }
 
 // lineCacheKey identifies a cached rendered row within a window context. The
-// row index is part of the key because a row's rendered output depends on its
-// position (cursorline, gutter, indent guides, overlays), so a row that moves
-// must recompose rather than reuse a line composed for a different position.
+// rowIndex is zero for position-independent rows and the actual index when
+// cursorline, gutter, indent guides, or overlays make composition positional.
 type lineCacheKey struct {
 	rowID    uint64
 	hash     uint32

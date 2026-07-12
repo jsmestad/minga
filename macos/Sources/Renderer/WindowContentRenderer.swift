@@ -415,45 +415,8 @@ final class WindowContentRenderer {
     /// `viewportCols` display columns. Span boundaries are adjusted to
     /// the clipped coordinate system (0-based from the visible left edge).
     func clipRowToViewport(_ row: GUIVisualRow, scrollLeft: Int, viewportCols: Int) -> GUIVisualRow {
-        let text = row.text
-        guard !text.isEmpty else { return row }
-
-        let totalDisplayCols: Int
-        let clippedText: String
-
-        if text.utf8.allSatisfy({ $0 < 0x80 }) {
-            totalDisplayCols = text.count
-            let clipStart = min(scrollLeft, totalDisplayCols)
-            let clipEnd = min(scrollLeft + viewportCols, totalDisplayCols)
-            guard clipStart < clipEnd else {
-                return GUIVisualRow(rowType: row.rowType, rowId: row.rowId, bufLine: row.bufLine,
-                                   contentHash: scrollContentHash(row.contentHash, scrollLeft: scrollLeft),
-                                   text: "", spans: [])
-            }
-            let startIndex = text.index(text.startIndex, offsetBy: clipStart)
-            let endIndex = text.index(text.startIndex, offsetBy: clipEnd)
-            clippedText = String(text[startIndex..<endIndex])
-        } else {
-            let columnMap = buildDisplayColumnMap(for: text)
-            totalDisplayCols = max(columnMap.count - 1, 0)
-            let clipStart = min(scrollLeft, totalDisplayCols)
-            let clipEnd = min(scrollLeft + viewportCols, totalDisplayCols)
-            guard clipStart < clipEnd, clipEnd < columnMap.count else {
-                return GUIVisualRow(rowType: row.rowType, rowId: row.rowId, bufLine: row.bufLine,
-                                   contentHash: scrollContentHash(row.contentHash, scrollLeft: scrollLeft),
-                                   text: "", spans: [])
-            }
-            let startIdx = columnMap[clipStart]
-            let endIdx = columnMap[clipEnd]
-            clippedText = String(text[startIdx..<endIdx])
-        }
-
-        let clippedSpans = clipSpans(row.spans, scrollLeft: scrollLeft, viewportCols: viewportCols)
-        let newHash = scrollContentHash(row.contentHash, scrollLeft: scrollLeft)
-
-        return GUIVisualRow(
-            rowType: row.rowType, rowId: row.rowId, bufLine: row.bufLine,
-            contentHash: newHash, text: clippedText, spans: clippedSpans
+        ResidentRenderPreparation.clip(
+            row: row, scrollLeft: scrollLeft, viewportCols: viewportCols
         )
     }
 

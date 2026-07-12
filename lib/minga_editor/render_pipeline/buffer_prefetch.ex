@@ -1095,9 +1095,31 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
 
   @spec fetch_decorations(term(), pid()) :: Decorations.t()
   defp fetch_decorations(state, buf) do
-    BufferDecorations.compose(state, buf)
+    decorations = BufferDecorations.compose(state, buf)
+
+    Minga.Telemetry.execute(
+      [:minga, :render, :decorations],
+      %{decorations_visited: decoration_count(decorations)},
+      %{buffer: buf}
+    )
+
+    decorations
   catch
-    :exit, _ -> Decorations.new()
+    :exit, _ ->
+      Minga.Telemetry.execute(
+        [:minga, :render, :decorations],
+        %{decorations_visited: 0},
+        %{buffer: buf}
+      )
+
+      Decorations.new()
+  end
+
+  @spec decoration_count(Decorations.t()) :: non_neg_integer()
+  defp decoration_count(%Decorations{} = decorations) do
+    Decorations.highlight_count(decorations) + length(decorations.virtual_texts) +
+      length(decorations.annotations) + length(decorations.fold_regions) +
+      length(decorations.block_decorations) + length(decorations.conceal_ranges)
   end
 
   # Compute buffer range from a visible_line_map (works for both

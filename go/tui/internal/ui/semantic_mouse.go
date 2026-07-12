@@ -124,7 +124,7 @@ func (m Model) applyPresentationScrollDelta(msg tea.MouseMsg, delta int) Model {
 	if body := m.bodyHeight(); visibleRows > body && body > 0 {
 		visibleRows = body
 	}
-	before, after := presentationScrollRowBounds(window, visibleRows)
+	before, after := m.presentationScrollRowBounds(window, visibleRows)
 	switch mouse.Button {
 	case tea.MouseWheelDown, tea.MouseWheelUp:
 		if mouse.Mod.Contains(tea.ModShift) {
@@ -133,12 +133,12 @@ func (m Model) applyPresentationScrollDelta(msg tea.MouseMsg, delta int) Model {
 			if delta < 0 {
 				colDelta = -1
 			}
-			scroll.colOffset = max(min(scroll.colOffset+colDelta, maxPresentationColOffset(window)), minPresentationColOffset(window))
+			scroll.colOffset = max(min(scroll.colOffset+colDelta, m.maxPresentationColOffset(window)), minPresentationColOffset(window))
 		} else {
 			scroll.rowOffset = max(min(scroll.rowOffset+delta, after), -before)
 		}
 	case tea.MouseWheelRight:
-		scroll.colOffset = min(scroll.colOffset+1, maxPresentationColOffset(window))
+		scroll.colOffset = min(scroll.colOffset+1, m.maxPresentationColOffset(window))
 	case tea.MouseWheelLeft:
 		scroll.colOffset = max(scroll.colOffset-1, minPresentationColOffset(window))
 	}
@@ -150,22 +150,30 @@ func (m Model) applyPresentationScrollDelta(msg tea.MouseMsg, delta int) Model {
 	return m
 }
 
-func maxPresentationColOffset(window protocol.WindowContent) int {
-	return maxPresentationLeft(window) - int(window.ScrollLeft)
+func (m Model) maxPresentationColOffset(window protocol.WindowContent) int {
+	return m.maxPresentationLeft(window) - int(window.ScrollLeft)
 }
 
 func minPresentationColOffset(window protocol.WindowContent) int {
 	return -int(window.ScrollLeft)
 }
 
-func maxPresentationLeft(window protocol.WindowContent) int {
+func (m Model) maxPresentationLeft(window protocol.WindowContent) int {
 	textWidth := int(window.Geometry.TextRect.Width)
 	if textWidth <= 0 {
 		textWidth = int(window.Geometry.ContentRect.Width)
 	}
 	textWidth = max(textWidth, 1)
 	maxRowWidth := 0
-	for _, row := range window.Rows {
+	visible := max(presentationVisibleRows(window), 1)
+	start := m.presentationSourceStart(window, visible)
+	rows := window.Rows
+	if store, ok := m.residentRows[window.ID]; ok {
+		rows = store.rangeRows(start, visible+4)
+	} else if start < len(rows) {
+		rows = rows[start:min(start+visible+4, len(rows))]
+	}
+	for _, row := range rows {
 		maxRowWidth = max(maxRowWidth, displayWidth(row.Text))
 	}
 	return max(maxRowWidth-textWidth, 0)

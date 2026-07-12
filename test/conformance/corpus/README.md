@@ -125,10 +125,13 @@ A runner asserts only the keys present on a step; absent keys are not checked.
 | `offset_discarded` | Whether applying this frame forced the frontend to discard its local offset (the real reconciliation decision). |
 | `normalized_buffer_line` | (pointer steps) `anchor_top + normalized_content_row` after the offset transform. |
 
+A `production_fixture` step is the compact production-size form. Its `fixture` object defines deterministic carrier sizes, row counts, edit coordinates, epochs, and generations; `operations` defines shared expected statuses and row-operation counts. It intentionally has no `payload_base64`: each client expands the same descriptor through its real resident store so repeated multi-megabyte JSON is never checked in.
+
 ## What each transcript covers
 
 Store lifecycle (AC1):
 
+- **production_render_boundaries** — compact descriptor expanded by BEAM, Swift, and Go into exactly 65,536 resident rows and one 65,536-byte text carrier. The shared operation transcript covers an ordinary edit, a structural insertion near row zero, retained reference and miss, stale content epoch, stale recovery generation, and reset/full recovery. The checked-in JSON stays near 1 KiB; clients deterministically expand it in memory and assert the same statuses and semantic row-operation counts.
 - **keyframe_decode** — 0x80 keyframe decodes to a resident row set keyed by `row_id + content_hash`, with the committed anchor.
 - **rows_delta_ref_resolution** — 0xA2 resolves retained refs by `row_id + content_hash` alongside one full row.
 - **ref_miss_full_recovery** — a 0xA2 ref to an unretained row drops the window; the next 0x80 recovery frame rebuilds it.

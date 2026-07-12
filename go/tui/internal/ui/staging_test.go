@@ -154,6 +154,24 @@ func TestInvalidationLogsToMessagesAndDebouncesDiagnostics(t *testing.T) {
 	}
 }
 
+func TestStaleRecoveryGenerationIsConsumedWithoutPublication(t *testing.T) {
+	model := New(40, 8, nil, nil)
+	freshBegin := beginFrame(1, 0)
+	freshBegin.Generation = 11
+	model = applyTo(t, model, freshBegin, testThemeCommand(), windowRowsCommand(1, "fresh"), commitFrame(1))
+	before := renderedBody(model)
+
+	staleBegin := beginFrame(2, 1)
+	staleBegin.Generation = 10
+	model = applyTo(t, model, staleBegin, windowRowsCommand(1, "stale"), commitFrame(2))
+	if got := renderedBody(model); got != before {
+		t.Fatalf("stale recovery generation published content: %q", got)
+	}
+	if model.lastCommittedSeq != 1 || model.lastCommittedGeneration != 11 {
+		t.Fatalf("stale generation advanced committed lineage: seq=%d generation=%d", model.lastCommittedSeq, model.lastCommittedGeneration)
+	}
+}
+
 // AC-3: a begin + partial content leaves View() output unchanged until commit.
 
 func TestStagingDoesNotPaintBeforeCommit(t *testing.T) {

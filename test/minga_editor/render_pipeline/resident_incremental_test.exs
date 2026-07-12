@@ -10,6 +10,7 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.RenderPipeline.Scroll
   alias MingaEditor.Renderer.BufferChanges
+  alias MingaEditor.Renderer.ProductionGate
   alias MingaEditor.Renderer.State, as: RendererState
   alias MingaEditor.State, as: EditorState
 
@@ -261,6 +262,17 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
     # Operation-count assertion (not wall-clock, per the test strategy): a single
     # off-screen in-place edit rasterizes exactly one row no matter how many rows
     # are resident, so edit-frame build stays O(changed) rather than O(document).
+    @tag :perf
+    test "RenderIntent and RenderReceipt sizes do not scale with resident content" do
+      {small_request, small_receipt} = boundary_sizes(5_000)
+      {large_request, large_receipt} = boundary_sizes(65_536)
+
+      assert abs(large_request - small_request) <= 64
+      assert abs(large_receipt - small_receipt) <= 64
+      assert large_request <= 256 * 1024
+      assert large_receipt <= 256 * 1024
+    end
+
     for line_count <- [500, 5_000, 65_536] do
       test "a single-line edit rasterizes exactly one row at #{line_count} resident lines" do
         line_count = unquote(line_count)
@@ -269,19 +281,26 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
         handler_id = {__MODULE__, line_count, make_ref()}
         parent = self()
 
+        events = [
+          [:minga, :render, :line_fetch],
+          [:minga, :render, :buffer_deltas],
+          [:minga, :render, :full_hydration],
+          [:minga, :render, :decorations]
+        ]
+
         :ok =
-          :telemetry.attach(
+          :telemetry.attach_many(
             handler_id,
-            [:minga, :render, :line_fetch],
-            fn _event, measurements, metadata, _config ->
-              send(parent, {:line_fetch, measurements, metadata})
+            events,
+            fn event, measurements, metadata, _config ->
+              send(parent, {:render_measurement, event, measurements, metadata})
             end,
             nil
           )
 
         on_exit(fn -> :telemetry.detach(handler_id) end)
 
-        edit_line = if line_count == 65_536, do: 5, else: div(line_count, 2)
+        edit_line = if line_count == 65_536, do: 32_768, else: div(line_count, 2)
         BufferProcess.move_to(buffer, {edit_line, 0})
         BufferProcess.insert_text(buffer, "Z")
         intent = Intent.from_editor_state(state.editor, 1)
@@ -289,29 +308,97 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
         {model, state} = build_frame(state)
 
         assert Content.rows_rasterized(state.output) == 1
-        assert_receive {:line_fetch, %{lines_fetched: fetched}, metadata}
+
+        measurements = drain_render_measurements([])
+        fetched = sum_measurement(measurements, [:minga, :render, :line_fetch], :lines_fetched)
+
+        consumes =
+          sum_measurement(measurements, [:minga, :render, :buffer_deltas], :changelog_consumes)
+
+        resets = sum_measurement(measurements, [:minga, :render, :full_hydration], :count)
+
+        decorations =
+          sum_measurement(measurements, [:minga, :render, :decorations], :decorations_visited)
 
         assert fetched == 1
-        assert metadata.full_residence? == true
+        assert consumes == 1
+        assert resets == 0
+        assert is_integer(decorations)
+
+        assert Enum.any?(measurements, fn {event, _measurements, metadata} ->
+                 event == [:minga, :render, :line_fetch] and metadata.full_residence? == true
+               end)
 
         assert model.row_delta.base_row_count == line_count
         assert model.row_delta.result_row_count == line_count
         assert Enum.count_until(model.rows, 2) <= 1
         assert Enum.sum(Enum.map(model.row_delta.splices, &length(&1.insert_rows))) <= 1
 
-        if line_count == 65_536 do
-          receipt =
-            MingaEditor.Renderer.RenderReceipt.from_output(
-              state.output,
-              1,
-              System.monotonic_time(),
-              intent.revision
-            )
+        receipt =
+          MingaEditor.Renderer.RenderReceipt.from_output(
+            state.output,
+            1,
+            System.monotonic_time(),
+            intent.revision
+          )
 
-          assert :erlang.external_size(intent) < 100_000
-          assert :erlang.external_size(receipt) < 10_000
-        end
+        request_bytes = :erlang.external_size(intent)
+        receipt_bytes = :erlang.external_size(receipt)
+
+        measurement = %{
+          full_resets: resets,
+          changelog_consumes: consumes,
+          lines_fetched: fetched,
+          rows_composed: Content.rows_rasterized(state.output),
+          swift_chunks_touched: 0,
+          editor_rows_visited: 0,
+          visible_rows: 0,
+          overscan_rows: 0,
+          decorations_visited: decorations,
+          request_bytes: request_bytes,
+          receipt_bytes: receipt_bytes
+        }
+
+        assert ProductionGate.beam_failures(measurement) == []
+        assert ProductionGate.boundary_failures(measurement) == []
+        assert request_bytes < 100_000
+        assert receipt_bytes < 10_000
       end
     end
+  end
+
+  defp boundary_sizes(line_count) do
+    state = warm(resident_state(line_count))
+    buffer = state.editor.workspace.buffers.active
+    BufferProcess.move_to(buffer, {div(line_count, 2), 0})
+    BufferProcess.insert_text(buffer, "Z")
+    intent = Intent.from_editor_state(state.editor, 1)
+    {_model, state} = build_frame(state)
+
+    receipt =
+      MingaEditor.Renderer.RenderReceipt.from_output(
+        state.output,
+        1,
+        System.monotonic_time(),
+        intent.revision
+      )
+
+    {:erlang.external_size(intent), :erlang.external_size(receipt)}
+  end
+
+  defp drain_render_measurements(acc) do
+    receive do
+      {:render_measurement, event, measurements, metadata} ->
+        drain_render_measurements([{event, measurements, metadata} | acc])
+    after
+      0 -> Enum.reverse(acc)
+    end
+  end
+
+  defp sum_measurement(measurements, event, key) do
+    Enum.reduce(measurements, 0, fn
+      {^event, values, _metadata}, total -> total + Map.get(values, key, 0)
+      _, total -> total
+    end)
   end
 end

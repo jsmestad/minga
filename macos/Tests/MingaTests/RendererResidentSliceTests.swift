@@ -82,6 +82,118 @@ struct RendererResidentSliceTests {
         #expect(rowsIdle.fullResets == 0)
     }
 
+    @Test("ordinary edit and visible preparation satisfy the deterministic native gate")
+    func deterministicComplexityGate() throws {
+        let visibleRows = 40
+        for rowCount in [5_000, 65_536] {
+            let content = content(rowCount: rowCount, visibleStart: 2_000, visibleRows: visibleRows)
+            let replacement = GUIVisualRow(
+                rowType: .normal, rowId: 2_001, bufLine: 2_000,
+                contentHash: 999_001, text: "edited", spans: []
+            )
+            let delta = GUIWindowRowsDelta(
+                windowId: 1, contentEpoch: 8, cursorVisible: true,
+                cursorRow: 0, cursorCol: 0, cursorShape: .block, scrollLeft: 0,
+                baseRowCount: UInt32(rowCount), resultRowCount: UInt32(rowCount),
+                rowSplices: [GUIWindowRowSplice(startIndex: 2_000, deleteCount: 1,
+                    insertEntries: [.full(replacement)])],
+                selection: content.selection, searchMatches: content.searchMatches,
+                diagnosticUnderlines: content.diagnosticUnderlines,
+                documentHighlights: content.documentHighlights,
+                lineAnnotations: content.lineAnnotations, paneGeometry: content.paneGeometry,
+                cursorline: content.cursorline, scrollPresentation: content.scrollPresentation
+            )
+            let updated = try content.applyingRowsDeltaChecked(delta).get()
+            let slice = RendererSignposts.visibleSlice(for: updated, fallbackVisibleRows: visibleRows)
+            var metrics = FrameMetrics()
+            RendererSignposts.recordVisibleSlice(slice, in: &metrics)
+            RendererSignposts.recordOperation(updated.rowStoreOperationCounters, in: &metrics)
+            metrics.decorationsVisited = RendererSignposts.decorationCount(for: updated)
+
+            let measurement = RendererComplexityMeasurement(
+                fullResets: metrics.residentFullResets,
+                chunksTouched: metrics.residentChunksTouched,
+                editorRowsVisited: metrics.editorRowsVisited,
+                visibleRows: visibleRows,
+                overscanRows: RendererSignposts.configuredOverscanRows * 2,
+                decorationsVisited: metrics.decorationsVisited
+            )
+            #expect(RendererComplexityGate.failures(measurement).isEmpty)
+            #expect(metrics.editorRowsVisited == visibleRows + RendererSignposts.configuredOverscanRows * 2)
+            #expect(metrics.decorationsVisited == 2)
+            #expect(metrics.residentRowsVisited != metrics.editorRowsVisited)
+        }
+    }
+
+    @Test("shared CoreText preparation clips text and spans with bounded gutter commands")
+    func sharedCommandPreparationParity() {
+        let resident = content(rowCount: 65_536, visibleStart: 2_000, visibleRows: 40)
+        let prepared = ResidentRenderPreparation.prepare(
+            content: resident, fallbackVisibleRows: 40, overscanRows: 2,
+            scrollLeft: 2, viewportCols: 4
+        )
+
+        #expect(prepared.commands.count == 44)
+        #expect(prepared.commands.count == prepared.rows.count)
+        #expect(prepared.commands.first?.presentationRow == -2)
+        #expect(prepared.commands.first?.gutterBufferLine == prepared.rows.first?.bufLine)
+        #expect(prepared.commands.allSatisfy { $0.row.text.count <= 4 })
+        #expect(prepared.counters.chunksTouched <= 2)
+        #expect(prepared.decorationsVisited == 2)
+
+        let styled = GUIVisualRow(
+            rowType: .normal, rowId: 1, bufLine: 7, contentHash: 9,
+            text: "abcdef", spans: [GUIHighlightSpan(
+                startCol: 1, endCol: 5, fg: 1, bg: 2,
+                attrs: 0, fontWeight: 0, fontId: 0
+            )]
+        )
+        let clipped = ResidentRenderPreparation.clip(row: styled, scrollLeft: 2, viewportCols: 3)
+        #expect(clipped.text == "cde")
+        #expect(clipped.spans.first?.startCol == 0)
+        #expect(clipped.spans.first?.endCol == 3)
+    }
+
+    @Test("shared preparation feeds atlas demand and row counters once")
+    func sharedPreparationCounterParity() {
+        let resident = content(rowCount: 65_536, visibleStart: 2_000, visibleRows: 40)
+        let prepared = ResidentRenderPreparation.prepare(
+            content: resident, fallbackVisibleRows: 40, overscanRows: RendererSignposts.configuredOverscanRows,
+            scrollLeft: 0, viewportCols: 80
+        )
+        var metrics = FrameMetrics()
+        RendererSignposts.recordVisibleSlice(RendererSignposts.rowSlice(for: prepared), in: &metrics)
+
+        var frame = FrameState(cols: 80, rows: 40)
+        frame.windowGutters = [1: gutter(entries: [])]
+        let demand = CoreTextMetalRenderer.atlasSlotDemand(
+            frameState: frame, windowContents: [1: resident], preparedRows: [1: prepared]
+        )
+
+        #expect(prepared.rows.count == 44)
+        #expect(metrics.editorRowsVisited == prepared.counters.rowsVisited)
+        #expect(metrics.editorRowsVisited == 44)
+        #expect(demand > prepared.rows.count)
+    }
+
+    @Test("failure seams reject an extra reset, chunk, or full-row scan")
+    func deterministicComplexityFailureSeams() {
+        let boundary = RendererComplexityMeasurement(
+            fullResets: 0, chunksTouched: 4, editorRowsVisited: 44,
+            visibleRows: 40, overscanRows: 4, decorationsVisited: 10_000
+        )
+        #expect(RendererComplexityGate.failures(boundary).isEmpty)
+        #expect(!RendererComplexityGate.failures(RendererComplexityMeasurement(
+            fullResets: 1, chunksTouched: 4, editorRowsVisited: 44,
+            visibleRows: 40, overscanRows: 4, decorationsVisited: 0)).isEmpty)
+        #expect(!RendererComplexityGate.failures(RendererComplexityMeasurement(
+            fullResets: 0, chunksTouched: 5, editorRowsVisited: 44,
+            visibleRows: 40, overscanRows: 4, decorationsVisited: 0)).isEmpty)
+        #expect(!RendererComplexityGate.failures(RendererComplexityMeasurement(
+            fullResets: 0, chunksTouched: 4, editorRowsVisited: 65_536,
+            visibleRows: 40, overscanRows: 4, decorationsVisited: 0)).isEmpty)
+    }
+
     @Test("far-down resident viewport keeps cursor, selection, and annotation rows viewport-local")
     func viewportLocalOverlayCoordinates() throws {
         let resident = content(rowCount: 65_536, visibleStart: 50_000, visibleRows: 40, visualOffset: 3)
