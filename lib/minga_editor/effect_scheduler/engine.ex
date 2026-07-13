@@ -7,7 +7,11 @@ defmodule MingaEditor.EffectScheduler.Engine do
   alias MingaEditor.EffectScheduler.State
 
   @type admission_error ::
-          :owner_unavailable | :policy_mismatch | :queue_full | :scheduler_full
+          :already_admitted
+          | :owner_unavailable
+          | :policy_mismatch
+          | :queue_full
+          | :scheduler_full
   @type admission :: {:ok, reference(), :running | :queued} | {:error, admission_error()}
   @type handoff :: admission() | {:error, :not_found}
   @type claim :: :ok | {:error, :not_pending}
@@ -57,6 +61,7 @@ defmodule MingaEditor.EffectScheduler.Engine do
 
       {:ok, state} ->
         {reply, state} = admit(state, request)
+        state = start_next(state, outcome.request.resource)
         notify_terminal(state.observer, handoff_outcome(outcome, reply))
         {reply, state}
     end
@@ -95,6 +100,7 @@ defmodule MingaEditor.EffectScheduler.Engine do
         state
 
       {:ok, state} ->
+        state = start_next(state, outcome.request.resource)
         notify_terminal(state.observer, outcome)
         state
     end
@@ -147,13 +153,25 @@ defmodule MingaEditor.EffectScheduler.Engine do
   defp handoff_outcome(outcome, {:error, reason}), do: Outcome.failed(outcome.request, reason)
 
   @spec admit(State.t(), Request.t()) :: {admission(), State.t()}
-  defp admit(state, %Request{resource: resource, policy: policy} = request) do
+  defp admit(state, %Request{id: request_id} = request) do
+    if MapSet.member?(state.admitted, request_id) do
+      {{:error, :already_admitted}, state}
+    else
+      admit_available(state, request)
+    end
+  end
+
+  @spec admit_available(State.t(), Request.t()) :: {admission(), State.t()}
+  defp admit_available(state, %Request{resource: resource, policy: policy} = request) do
     case Map.get(state.lanes, resource) do
       nil ->
         admit_new_lane(state, resource, policy, request)
 
       %{policy: existing_policy} when existing_policy != policy ->
         {{:error, :policy_mismatch}, state}
+
+      %{running: nil} ->
+        admit_idle_lane(state, resource, request)
 
       %{policy: %Policy{mode: :fifo}} = lane ->
         admit_fifo(state, resource, lane, request)
@@ -166,6 +184,17 @@ defmodule MingaEditor.EffectScheduler.Engine do
 
       %{policy: %Policy{mode: :coalescing}} = lane ->
         admit_coalescing(state, resource, lane, request)
+    end
+  end
+
+  @spec admit_idle_lane(State.t(), Request.resource(), Request.t()) ::
+          {admission(), State.t()}
+  defp admit_idle_lane(state, resource, request) do
+    if capacity_available?(state) do
+      state = state |> admit_request(request) |> start_request(resource, request)
+      {{:ok, request.id, :running}, state}
+    else
+      {{:error, :scheduler_full}, state}
     end
   end
 
@@ -430,6 +459,7 @@ defmodule MingaEditor.EffectScheduler.Engine do
     request_id = outcome.request.id
 
     if MapSet.member?(state.admitted, request_id) do
+      notify_lifecycle(state.owner, outcome)
       notify_terminal(state.observer, outcome)
 
       state
@@ -458,9 +488,7 @@ defmodule MingaEditor.EffectScheduler.Engine do
   defp release_current(state, %Request{resource: resource, id: request_id}) do
     case Map.get(state.lanes, resource) do
       %{running: %{request: %{id: ^request_id}}} = lane ->
-        state
-        |> put_lane(resource, %{lane | running: nil})
-        |> start_next(resource)
+        put_lane(state, resource, %{lane | running: nil})
 
       _lane ->
         state

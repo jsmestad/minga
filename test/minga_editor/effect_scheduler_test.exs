@@ -25,6 +25,26 @@ defmodule MingaEditor.EffectSchedulerTest do
     assert EffectScheduler.cancel(scheduler, request.id) == {:error, :not_found}
   end
 
+  test "duplicate request identity is rejected while its first admission is pending" do
+    scheduler = start_scheduler()
+
+    request =
+      EffectProbe.request(self(), :duplicate, :resource, Policy.latest_wins(), {
+        :return,
+        :done
+      })
+
+    assert EffectScheduler.schedule(scheduler, request) == {:ok, request.id, :running}
+    assert_receive {:effect_started, :duplicate, _worker, [:duplicate]}
+    outcome = receive_candidate(scheduler, request.id, :completed)
+
+    assert EffectScheduler.schedule(scheduler, request) == {:error, :already_admitted}
+    assert EffectScheduler.stats(scheduler) == stats(1, 0, 0, 1, 1)
+
+    finalize_once(scheduler, outcome)
+    refute_received {:effect_started, :duplicate, _worker, _payloads}
+  end
+
   test "raised and killed workers each produce one failed terminal outcome" do
     scheduler = start_scheduler()
 
@@ -126,6 +146,98 @@ defmodule MingaEditor.EffectSchedulerTest do
     send(new_worker, {:release_effect, :new})
     new_outcome = receive_candidate(scheduler, new.id, :completed)
     finalize_once(scheduler, new_outcome)
+  end
+
+  test "direct terminal outcomes reach the owner when no observer is configured" do
+    scheduler = start_scheduler(attach?: false, observer: nil)
+    owner = start_owner_proxy()
+    :ok = EffectScheduler.attach(scheduler, owner)
+    policy = Policy.latest_wins()
+    old = EffectProbe.request(self(), :old_direct, :resource, policy)
+    new = EffectProbe.request(self(), :new_direct, :resource, policy, {:return, :done})
+
+    assert EffectScheduler.schedule(scheduler, old) == {:ok, old.id, :running}
+    assert_owner_lifecycle(old.id, :running)
+    assert_receive {:effect_started, :old_direct, _worker, [:old_direct]}
+
+    assert EffectScheduler.schedule(scheduler, new) == {:ok, new.id, :running}
+    assert_owner_lifecycle(old.id, :canceled, :superseded)
+    assert_owner_lifecycle(new.id, :running)
+    old_id = old.id
+    refute_received {:effect_terminal, %Outcome{request: %{id: ^old_id}}}
+
+    outcome = receive_owner_candidate(scheduler, new.id, :completed)
+    :ok = EffectScheduler.claim(scheduler, outcome)
+    EffectScheduler.finalize(scheduler, outcome)
+    _stats = EffectScheduler.stats(scheduler)
+    new_id = new.id
+    refute_received {:effect_terminal, %Outcome{request: %{id: ^new_id}}}
+  end
+
+  test "follow-up admission precedes advancement of the source lane" do
+    scheduler = start_scheduler(attach?: false)
+    owner = start_owner_proxy()
+    :ok = EffectScheduler.attach(scheduler, owner)
+    source_policy = Policy.fifo(1)
+
+    first =
+      EffectProbe.request(self(), :first_source, :source, source_policy, {:return, :resolved})
+
+    second =
+      EffectProbe.request(self(), :second_source, :source, source_policy, {:return, :resolved})
+
+    follow_up =
+      EffectProbe.request(self(), :follow_up, :target, Policy.fifo(0), {:return, :done})
+
+    assert EffectScheduler.schedule(scheduler, first) == {:ok, first.id, :running}
+    assert_owner_lifecycle(first.id, :running)
+    assert_receive {:effect_started, :first_source, _worker, [:first_source]}
+
+    assert EffectScheduler.schedule(scheduler, second) == {:ok, second.id, :queued}
+    assert_owner_lifecycle(second.id, :queued)
+    first_outcome = receive_owner_candidate(scheduler, first.id, :completed)
+    :ok = EffectScheduler.claim(scheduler, first_outcome)
+
+    assert EffectScheduler.finalize_and_schedule(scheduler, first_outcome, follow_up) ==
+             {:ok, follow_up.id, :running}
+
+    assert_owner_lifecycle(follow_up.id, :running)
+    assert_owner_lifecycle(second.id, :running)
+    assert_terminal_direct(first.id, :completed, nil)
+
+    follow_up_outcome = receive_owner_candidate(scheduler, follow_up.id, :completed)
+    second_outcome = receive_owner_candidate(scheduler, second.id, :completed)
+    :ok = EffectScheduler.claim(scheduler, follow_up_outcome)
+    EffectScheduler.finalize(scheduler, follow_up_outcome)
+    :ok = EffectScheduler.claim(scheduler, second_outcome)
+    EffectScheduler.finalize(scheduler, second_outcome)
+    assert_terminal_direct(follow_up.id, :completed, nil)
+    assert_terminal_direct(second.id, :completed, nil)
+  end
+
+  test "same-resource follow-up starts immediately on a zero-queue FIFO lane" do
+    scheduler = start_scheduler(attach?: false)
+    owner = start_owner_proxy()
+    :ok = EffectScheduler.attach(scheduler, owner)
+    policy = Policy.fifo(0)
+    first = EffectProbe.request(self(), :first_same, :resource, policy, {:return, :resolved})
+    follow_up = EffectProbe.request(self(), :follow_up_same, :resource, policy, {:return, :done})
+
+    assert EffectScheduler.schedule(scheduler, first) == {:ok, first.id, :running}
+    assert_owner_lifecycle(first.id, :running)
+    assert_receive {:effect_started, :first_same, _worker, [:first_same]}
+    first_outcome = receive_owner_candidate(scheduler, first.id, :completed)
+    :ok = EffectScheduler.claim(scheduler, first_outcome)
+
+    assert EffectScheduler.finalize_and_schedule(scheduler, first_outcome, follow_up) ==
+             {:ok, follow_up.id, :running}
+
+    assert_owner_lifecycle(follow_up.id, :running)
+    assert_terminal_direct(first.id, :completed, nil)
+    follow_up_outcome = receive_owner_candidate(scheduler, follow_up.id, :completed)
+    :ok = EffectScheduler.claim(scheduler, follow_up_outcome)
+    EffectScheduler.finalize(scheduler, follow_up_outcome)
+    assert_terminal_direct(follow_up.id, :completed, nil)
   end
 
   test "bounded FIFO rejects overflow without admitting the request" do
@@ -358,7 +470,7 @@ defmodule MingaEditor.EffectSchedulerTest do
       start_supervised!(Supervisor.child_spec({Task.Supervisor, []}, id: make_ref()))
 
     scheduler_opts =
-      [task_supervisor: task_supervisor, observer: self()]
+      [task_supervisor: task_supervisor, observer: Keyword.get(opts, :observer, self())]
       |> Keyword.put(:max_admitted, Keyword.get(opts, :max_admitted, 64))
 
     scheduler =
@@ -366,6 +478,44 @@ defmodule MingaEditor.EffectSchedulerTest do
 
     if Keyword.get(opts, :attach?, true), do: :ok = EffectScheduler.attach(scheduler, self())
     scheduler
+  end
+
+  @spec start_owner_proxy() :: pid()
+  defp start_owner_proxy do
+    test_pid = self()
+
+    start_supervised!(
+      Supervisor.child_spec({Task, fn -> forward_owner_messages(test_pid) end}, id: make_ref())
+    )
+  end
+
+  @spec forward_owner_messages(pid()) :: no_return()
+  defp forward_owner_messages(test_pid) do
+    receive do
+      message ->
+        send(test_pid, {:owner_message, message})
+        forward_owner_messages(test_pid)
+    end
+  end
+
+  @spec assert_owner_lifecycle(reference(), Outcome.status(), term() | nil) :: :ok
+  defp assert_owner_lifecycle(request_id, status, reason \\ nil) do
+    assert_receive {:owner_message,
+                    {:effect_lifecycle,
+                     %Outcome{request: %{id: ^request_id}, status: ^status, reason: ^reason}}},
+                   @effect_timeout
+
+    :ok
+  end
+
+  @spec receive_owner_candidate(pid(), reference(), Outcome.terminal_status()) :: Outcome.t()
+  defp receive_owner_candidate(scheduler, request_id, status) do
+    assert_receive {:owner_message,
+                    {:effect_result, ^scheduler,
+                     %Outcome{request: %{id: ^request_id}, status: ^status} = outcome}},
+                   @effect_timeout
+
+    outcome
   end
 
   @spec receive_candidate(pid(), reference(), Outcome.terminal_status()) :: Outcome.t()

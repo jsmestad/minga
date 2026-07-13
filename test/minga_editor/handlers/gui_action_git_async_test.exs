@@ -126,7 +126,8 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
 
     state = GuiActionHandler.dispatch(state, {:git_stage_file, "lib/nonblocking.ex"}, opts)
     assert EditorState.status_msg(state) == "Staging lib/nonblocking.ex…"
-    assert_receive {:git_resolver_blocked, ^tag, resolver_worker}
+    assert_receive {:git_resolver_blocked, ^tag, resolver_worker}, @effect_timeout
+    assert Context.from_editor_state(state).git_syncing
 
     send(resolver_worker, {:release_git_resolver, tag})
     {state, request} = receive_resolved_mutation(state, scheduler, :stage, :running)

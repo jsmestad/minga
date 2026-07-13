@@ -43,6 +43,27 @@ defmodule MingaEditor.Commands.FormattingAsyncTest do
     assert outcome.status == :completed
   end
 
+  test "successful replacement does not query a buffer that closes after replying" do
+    buffer =
+      spawn(fn ->
+        receive do
+          {:"$gen_call", from, {:replace_content_if_version, 0, "FORMATTED\n", :user}} ->
+            GenServer.reply(from, :ok)
+        end
+      end)
+
+    monitor = Process.monitor(buffer)
+    state = base_state("hello\n")
+    request = ExternalFormat.request(buffer, "cat")
+    result = ExternalFormatResult.new(buffer, 0, "FORMATTED\n", "closed.ex")
+
+    {new_state, outcome} = ExternalFormat.apply(state, Outcome.completed(request, result))
+
+    assert_receive {:DOWN, ^monitor, :process, ^buffer, :normal}
+    assert EditorState.status_msg(new_state) == "Formatted"
+    assert outcome.status == :completed
+  end
+
   test "buffer mutation makes a completed worker result stale without overwriting content" do
     state = base_state("hello world\n")
     buffer = state.workspace.buffers.active

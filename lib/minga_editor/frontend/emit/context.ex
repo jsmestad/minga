@@ -20,6 +20,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
   alias MingaEditor.Viewport
   alias MingaEditor.EffectScheduler
   alias MingaEditor.Effects.GitMutation
+  alias MingaEditor.Effects.GitMutationAdmission
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.UI.FontRegistry
@@ -171,9 +172,10 @@ defmodule MingaEditor.Frontend.Emit.Context do
 
   @spec git_effect_active?(map()) :: boolean()
   defp git_effect_active?(state) do
-    state
-    |> Map.get(:effect_scheduler)
-    |> EffectScheduler.active?(GitMutation)
+    scheduler = Map.get(state, :effect_scheduler)
+
+    EffectScheduler.active?(scheduler, GitMutationAdmission) or
+      EffectScheduler.active?(scheduler, GitMutation)
   end
 
   @spec gui_only(boolean(), value) :: value | nil when value: var

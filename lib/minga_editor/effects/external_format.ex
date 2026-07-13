@@ -38,10 +38,14 @@ defmodule MingaEditor.Effects.ExternalFormat do
   @spec run(t()) :: {:ok, ExternalFormatResult.t()} | {:error, term()}
   def run(%__MODULE__{buffer: buffer, formatter: formatter}) do
     {content, version} = Buffer.content_with_version(buffer)
+    file_name = (Buffer.file_path(buffer) || "scratch") |> Path.basename()
 
     case Minga.Editing.format(content, formatter) do
-      {:ok, formatted} -> {:ok, ExternalFormatResult.new(buffer, version, formatted)}
-      {:error, reason} -> {:error, reason}
+      {:ok, formatted} ->
+        {:ok, ExternalFormatResult.new(buffer, version, formatted, file_name)}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -85,8 +89,7 @@ defmodule MingaEditor.Effects.ExternalFormat do
   defp apply_formatted_content(state, outcome, result) do
     case replace_if_current(result) do
       :ok ->
-        file_name = (Buffer.file_path(result.buffer) || "scratch") |> Path.basename()
-        Minga.Log.info(:editor, "Formatted: #{file_name}")
+        Minga.Log.info(:editor, "Formatted: #{result.file_name}")
         {EditorState.set_status(state, "Formatted"), outcome}
 
       {:error, :stale} ->
