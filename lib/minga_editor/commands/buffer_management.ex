@@ -1060,18 +1060,25 @@ defmodule MingaEditor.Commands.BufferManagement do
   """
   @spec handle_agent_session_down(state(), pid(), term()) :: state()
   def handle_agent_session_down(state, session_pid, :noconnection) do
-    handle_remote_session_disconnected(state, session_pid)
+    state
+    |> EditorState.ensure_shell_available()
+    |> handle_remote_session_disconnected(session_pid)
   end
 
   def handle_agent_session_down(state, session_pid, {:nodedown, _node}) do
-    handle_remote_session_disconnected(state, session_pid)
+    state
+    |> EditorState.ensure_shell_available()
+    |> handle_remote_session_disconnected(session_pid)
   end
 
   def handle_agent_session_down(state, session_pid, {:noconnection, _node}) do
-    handle_remote_session_disconnected(state, session_pid)
+    state
+    |> EditorState.ensure_shell_available()
+    |> handle_remote_session_disconnected(session_pid)
   end
 
   def handle_agent_session_down(state, session_pid, reason) do
+    state = EditorState.ensure_shell_available(state)
     {state, owned?} = update_active_shell_session_down(state, session_pid, reason)
 
     if owned? do
@@ -1081,16 +1088,25 @@ defmodule MingaEditor.Commands.BufferManagement do
     end
   end
 
-  @spec agent_session_restart_owned?(state(), pid()) :: boolean()
-  def agent_session_restart_owned?(state, old_pid) when is_pid(old_pid) do
+  @type session_restart_ownership :: {:owned, state()} | {:stale, state()}
+
+  @doc "Normalizes shell identity and returns whether the old session is still owned."
+  @spec prepare_agent_session_restart(state(), pid()) :: session_restart_ownership()
+  def prepare_agent_session_restart(state, old_pid) when is_pid(old_pid) do
+    state = EditorState.ensure_shell_available(state)
     shell_owned? = shell_state_restart_owned?(state.shell_state, old_pid)
     stash_owned? = stashed_shell_restart_owned?(state.shell_state_stash, old_pid)
-    shell_owned? or stash_owned?
+    session_restart_ownership(state, shell_owned? or stash_owned?)
   end
+
+  @spec session_restart_ownership(state(), boolean()) :: session_restart_ownership()
+  defp session_restart_ownership(state, true), do: {:owned, state}
+  defp session_restart_ownership(state, false), do: {:stale, state}
 
   @doc "Refreshes editor state after SessionManager restarts a managed session."
   @spec handle_agent_session_restarted(state(), String.t(), pid(), pid(), term()) :: state()
   def handle_agent_session_restarted(state, session_id, old_pid, new_pid, reason) do
+    state = EditorState.ensure_shell_available(state)
     state = update_active_shell_session_restarted(state, session_id, old_pid, new_pid, reason)
     state = update_stashed_shell_session_restarted(state, session_id, old_pid, new_pid, reason)
     maybe_rebuild_active_agent_after_restart(state, new_pid)
@@ -1122,8 +1138,17 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec stashed_shell_restart_owned?(EditorState.shell_state_stash(), pid()) :: boolean()
   defp stashed_shell_restart_owned?(stash, old_pid) do
-    Enum.any?(stash, fn {_shell_id, %StateStash{state: shell_state}} ->
-      shell_state_restart_owned?(shell_state, old_pid)
+    Enum.any?(stash, fn {shell_id, %StateStash{} = stashed} ->
+      case MingaEditor.Shell.Registry.get(shell_id) do
+        %MingaEditor.Shell.Entry{} = entry ->
+          case StateStash.restore(stashed, entry) do
+            {:ok, shell_state} -> shell_state_restart_owned?(shell_state, old_pid)
+            :mismatch -> false
+          end
+
+        nil ->
+          false
+      end
     end)
   end
 
@@ -1555,56 +1580,27 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec update_stashed_shell_for_session(state(), atom(), [term()]) :: {state(), boolean()}
   defp update_stashed_shell_for_session(state, callback, args) do
-    {stash, handled?} =
-      Enum.reduce(state.shell_state_stash, {state.shell_state_stash, false}, fn
-        {shell_id, %StateStash{} = stashed}, {stash_acc, false} ->
-          update_matching_stashed_shell(stash_acc, shell_id, stashed, callback, args)
+    EditorState.transform_first_stashed_shell_state(state, fn module, shell_state, state_acc ->
+      if function_exported?(module, callback, length(args) + 1) do
+        case apply(module, callback, [shell_state | args]) do
+          {updated_shell_state, true} ->
+            Minga.Log.info(
+              :agent,
+              "Agent session update applied to stashed #{inspect(module)} shell"
+            )
 
-        _entry, acc ->
-          acc
-      end)
+            updated_shell_state =
+              maybe_persist_owned_shell_state(module, updated_shell_state, true)
 
-    {%{state | shell_state_stash: stash}, handled?}
-  end
+            {{:updated, updated_shell_state}, state_acc}
 
-  @spec update_matching_stashed_shell(
-          EditorState.shell_state_stash(),
-          EditorState.shell_id(),
-          StateStash.t(),
-          atom(),
-          [term()]
-        ) :: {EditorState.shell_state_stash(), boolean()}
-  defp update_matching_stashed_shell(stash, shell_id, %StateStash{} = stashed, callback, args) do
-    arity = length(args) + 1
-
-    if function_exported?(stashed.module, callback, arity) do
-      apply_stashed_shell_callback(stash, shell_id, stashed, callback, args)
-    else
-      {stash, false}
-    end
-  end
-
-  @spec apply_stashed_shell_callback(
-          EditorState.shell_state_stash(),
-          EditorState.shell_id(),
-          StateStash.t(),
-          atom(),
-          [term()]
-        ) :: {EditorState.shell_state_stash(), boolean()}
-  defp apply_stashed_shell_callback(stash, shell_id, %StateStash{} = stashed, callback, args) do
-    case apply(stashed.module, callback, [stashed.state | args]) do
-      {shell_state, true} ->
-        Minga.Log.info(
-          :agent,
-          "Agent session update applied to stashed #{inspect(shell_id)} shell"
-        )
-
-        shell_state = maybe_persist_owned_shell_state(stashed.module, shell_state, true)
-        {Map.put(stash, shell_id, %StateStash{stashed | state: shell_state}), true}
-
-      {_shell_state, false} ->
-        {stash, false}
-    end
+          {_updated_shell_state, false} ->
+            {:unchanged, state_acc}
+        end
+      else
+        {:unchanged, state_acc}
+      end
+    end)
   end
 
   # Shared state cleanup for agent sessions: stops spinner, clears agent state session,

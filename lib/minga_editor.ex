@@ -39,7 +39,6 @@ defmodule MingaEditor do
   alias MingaEditor.SemanticTokenSync
   alias MingaEditor.Startup
   alias MingaEditor.State.ResourcePressure
-  alias MingaEditor.Shell.StateStash
   alias MingaEditor.Viewport
 
   alias MingaEditor.Handlers.BufferRegistry
@@ -1291,79 +1290,68 @@ defmodule MingaEditor do
       )
 
     state
-    |> Map.replace!(:shell_state, shell_state)
-    |> Map.replace!(:workspace, workspace)
+    |> EditorState.update_shell_state(fn _shell_state -> shell_state end)
+    |> EditorState.set_workspace(workspace)
     |> EffectHandler.apply_effects(shell_effects)
   end
 
   @spec route_stashed_shell_agent_event(EditorState.t(), pid(), term()) :: EditorState.t()
   defp route_stashed_shell_agent_event(state, session_pid, event) do
-    {stash, state} =
-      Enum.reduce(state.shell_state_stash, {state.shell_state_stash, state}, fn
-        {shell_id, %StateStash{} = stashed}, {stash_acc, state_acc} ->
-          route_stashed_shell_agent_event(
-            stash_acc,
-            state_acc,
-            shell_id,
-            stashed,
-            session_pid,
-            event
-          )
-
-        _entry, acc ->
-          acc
+    {state, _changed?} =
+      EditorState.transform_stashed_shell_states(state, fn module, shell_state, state_acc ->
+        transform_stashed_shell_agent_event(module, shell_state, state_acc, session_pid, event)
       end)
 
-    %{state | shell_state_stash: stash}
+    state
   end
 
-  @spec route_stashed_shell_agent_event(
-          EditorState.shell_state_stash(),
+  @spec transform_stashed_shell_agent_event(
+          module(),
+          MingaEditor.Shell.shell_state(),
           EditorState.t(),
-          EditorState.shell_id(),
-          StateStash.t(),
           pid(),
           term()
-        ) :: {EditorState.shell_state_stash(), EditorState.t()}
-  defp route_stashed_shell_agent_event(
-         stash,
-         state,
-         shell_id,
-         %StateStash{} = stashed,
-         session_pid,
-         event
-       ) do
-    if function_exported?(stashed.module, :on_agent_event, 4) do
-      apply_stashed_shell_agent_event(stash, state, shell_id, stashed, session_pid, event)
+        ) :: {MingaEditor.Shell.StateStash.transformation(), EditorState.t()}
+  defp transform_stashed_shell_agent_event(module, shell_state, state, session_pid, event) do
+    if function_exported?(module, :on_agent_event, 4) do
+      apply_stashed_shell_agent_event(module, shell_state, state, session_pid, event)
     else
-      {stash, state}
+      {:unchanged, state}
     end
   end
 
   @spec apply_stashed_shell_agent_event(
-          EditorState.shell_state_stash(),
+          module(),
+          MingaEditor.Shell.shell_state(),
           EditorState.t(),
-          EditorState.shell_id(),
-          StateStash.t(),
           pid(),
           term()
-        ) :: {EditorState.shell_state_stash(), EditorState.t()}
-  defp apply_stashed_shell_agent_event(
-         stash,
-         state,
-         shell_id,
-         %StateStash{} = stashed,
-         session_pid,
-         event
-       ) do
-    {shell_state, workspace, effects} =
-      stashed.module.on_agent_event(stashed.state, state.workspace, session_pid, event)
+        ) :: {MingaEditor.Shell.StateStash.transformation(), EditorState.t()}
+  defp apply_stashed_shell_agent_event(module, shell_state, state, session_pid, event) do
+    {updated_shell_state, workspace, effects} =
+      module.on_agent_event(shell_state, state.workspace, session_pid, event)
 
-    shell_state = maybe_persist_stashed_shell_state(stashed.module, stashed.state, shell_state)
-    stash = Map.put(stash, shell_id, %StateStash{stashed | state: shell_state})
-    state = EffectHandler.apply_effects(%{state | workspace: workspace}, effects)
-    {stash, state}
+    updated_shell_state =
+      maybe_persist_stashed_shell_state(module, shell_state, updated_shell_state)
+
+    state =
+      state
+      |> EditorState.set_workspace(workspace)
+      |> EffectHandler.apply_effects(effects)
+
+    stashed_shell_agent_transformation(shell_state, updated_shell_state, state)
   end
+
+  @spec stashed_shell_agent_transformation(
+          MingaEditor.Shell.shell_state(),
+          MingaEditor.Shell.shell_state(),
+          EditorState.t()
+        ) :: {MingaEditor.Shell.StateStash.transformation(), EditorState.t()}
+  defp stashed_shell_agent_transformation(shell_state, shell_state, state),
+    do: {:unchanged, state}
+
+  defp stashed_shell_agent_transformation(_old_shell_state, updated_shell_state, state),
+    do: {{:updated, updated_shell_state}, state}
 
   @spec maybe_persist_stashed_shell_state(module(), term(), term()) :: term()
   defp maybe_persist_stashed_shell_state(module, old_state, new_state) do

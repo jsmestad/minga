@@ -88,12 +88,38 @@ defmodule MingaEditor.Test.FakeShell do
   @impl true
   @spec on_agent_event(map(), MingaEditor.Session.State.t(), pid(), term()) ::
           {map(), MingaEditor.Session.State.t(), [MingaEditor.effect()]}
+  def on_agent_event(%{record_agent_events?: true} = shell_state, workspace, _session, event) do
+    {%{shell_state | events: [event | Map.get(shell_state, :events, [])]}, workspace, []}
+  end
+
   def on_agent_event(shell_state, workspace, _session, _event), do: {shell_state, workspace, []}
 
   @impl true
   @spec handle_agent_session_restarted(map(), pid(), pid(), term()) :: {map(), boolean()}
+  def handle_agent_session_restarted(%{session: old_pid} = shell_state, old_pid, new_pid, _reason) do
+    {Map.put(shell_state, :session, new_pid), true}
+  end
+
   def handle_agent_session_restarted(shell_state, _old_pid, _new_pid, _reason),
     do: {shell_state, false}
+
+  @spec handle_agent_session_down(map(), pid(), term()) :: {map(), boolean()}
+  def handle_agent_session_down(%{session: session} = shell_state, session, _reason),
+    do: {Map.put(shell_state, :session_down?, true), true}
+
+  def handle_agent_session_down(shell_state, _session, _reason), do: {shell_state, false}
+
+  @spec handle_remote_session_disconnected(map(), pid()) :: {map(), boolean()}
+  def handle_remote_session_disconnected(%{session: session} = shell_state, session),
+    do: {Map.put(shell_state, :remote_disconnected?, true), true}
+
+  def handle_remote_session_disconnected(shell_state, _session), do: {shell_state, false}
+
+  @spec sync_agent_status(map(), pid(), atom()) :: map()
+  def sync_agent_status(%{session: session} = shell_state, session, status),
+    do: Map.put(shell_state, :synced_agent_status, status)
+
+  def sync_agent_status(shell_state, _session, _status), do: shell_state
 
   @impl true
   @spec active_tab(map()) :: nil
@@ -112,7 +138,8 @@ defmodule MingaEditor.Test.FakeShell do
   def set_tab_session(shell_state, _tab_id, _session_pid), do: shell_state
 
   @impl true
-  @spec active_session(map()) :: nil
+  @spec active_session(map()) :: pid() | nil
+  def active_session(%{session: session}) when is_pid(session), do: session
   def active_session(_shell_state), do: nil
 
   @spec drop_feature_state_source(map(), MingaEditor.FeatureState.source()) :: map()

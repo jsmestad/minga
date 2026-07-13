@@ -69,6 +69,37 @@ defmodule MingaEditor.FeatureStateShellCleanupTest do
              :stashed_other
   end
 
+  test "editor cleanup does not transform a stash from an obsolete registration" do
+    stashed_context = context_with_feature_state(:stashed_owned, :stashed_other)
+    stale_entry = Registry.get(:fake_shell)
+
+    state = %EditorState{
+      port_manager: self(),
+      workspace: workspace(),
+      shell_state_stash: %{
+        fake_shell: StateStash.new(stale_entry, %{contexts: [stashed_context]})
+      }
+    }
+
+    assert :ok = Registry.unregister_source({:extension, :fake_shell})
+
+    assert :ok =
+             Registry.register({:extension, :fake_shell}, %{
+               id: :fake_shell,
+               module: MingaEditor.Test.FakeShell,
+               display_name: "Fake Shell",
+               description: "Replacement shell",
+               default?: false,
+               capabilities: []
+             })
+
+    cleaned = EditorState.drop_feature_state_source(state, @source)
+    %StateStash{state: %{contexts: [unchanged_context]}} = cleaned.shell_state_stash.fake_shell
+    restored = SessionState.restore_tab_context(workspace(), unchanged_context)
+
+    assert SessionState.get_feature_state(restored, @source, @feature) == :stashed_owned
+  end
+
   @spec context_with_feature_state(atom(), atom()) :: MingaEditor.State.Tab.Context.t()
   defp context_with_feature_state(owned, other) do
     workspace()

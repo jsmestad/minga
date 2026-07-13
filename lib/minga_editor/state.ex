@@ -920,6 +920,86 @@ defmodule MingaEditor.State do
     %{state | shell_state: fun.(ss)}
   end
 
+  @type stashed_shell_transform ::
+          (module(), shell_state(), t() -> {StateStash.transformation(), t()})
+
+  @doc "Transforms current stashed shell states and reports whether any matching value changed."
+  @spec transform_stashed_shell_states(t(), stashed_shell_transform()) :: {t(), boolean()}
+  def transform_stashed_shell_states(%__MODULE__{} = state, fun) when is_function(fun, 3) do
+    state.shell_state_stash
+    |> Map.keys()
+    |> Enum.reduce({state, false}, fn shell_id, {state_acc, changed?} ->
+      transform_stashed_shell_state(state_acc, changed?, shell_id, fun)
+    end)
+  end
+
+  @doc "Transforms the first matching stashed shell that accepts the change."
+  @spec transform_first_stashed_shell_state(t(), stashed_shell_transform()) :: {t(), boolean()}
+  def transform_first_stashed_shell_state(%__MODULE__{} = state, fun) when is_function(fun, 3) do
+    state.shell_state_stash
+    |> Map.keys()
+    |> Enum.reduce_while({state, false}, fn shell_id, {state_acc, false} ->
+      state_acc
+      |> transform_stashed_shell_state(false, shell_id, fun)
+      |> continue_stashed_shell_transform()
+    end)
+  end
+
+  @spec continue_stashed_shell_transform({t(), boolean()}) ::
+          {:cont, {t(), boolean()}} | {:halt, {t(), boolean()}}
+  defp continue_stashed_shell_transform({_state, true} = result), do: {:halt, result}
+  defp continue_stashed_shell_transform(result), do: {:cont, result}
+
+  @spec transform_stashed_shell_state(t(), boolean(), shell_id(), stashed_shell_transform()) ::
+          {t(), boolean()}
+  defp transform_stashed_shell_state(state, changed?, shell_id, fun) do
+    stashed = Map.get(state.shell_state_stash, shell_id)
+    entry = MingaEditor.Shell.Registry.get(shell_id)
+    transform_stashed_shell_state(state, changed?, shell_id, stashed, entry, fun)
+  end
+
+  @spec transform_stashed_shell_state(
+          t(),
+          boolean(),
+          shell_id(),
+          StateStash.t() | nil,
+          MingaEditor.Shell.Entry.t() | nil,
+          stashed_shell_transform()
+        ) :: {t(), boolean()}
+  defp transform_stashed_shell_state(state, changed?, _shell_id, _stashed, nil, _fun),
+    do: {state, changed?}
+
+  defp transform_stashed_shell_state(state, changed?, _shell_id, nil, _entry, _fun),
+    do: {state, changed?}
+
+  defp transform_stashed_shell_state(state, changed?, shell_id, stashed, entry, fun) do
+    stashed
+    |> StateStash.transform(entry, state, fn shell_state, state_acc ->
+      fun.(entry.module, shell_state, state_acc)
+    end)
+    |> merge_stashed_shell_transformation(shell_id, changed?)
+  end
+
+  @spec merge_stashed_shell_transformation(
+          StateStash.transform_result(t()),
+          shell_id(),
+          boolean()
+        ) :: {t(), boolean()}
+  defp merge_stashed_shell_transformation({:updated, updated, state}, shell_id, _changed?) do
+    stash = Map.put(state.shell_state_stash, shell_id, updated)
+    {%{state | shell_state_stash: stash}, true}
+  end
+
+  defp merge_stashed_shell_transformation(
+         {:unchanged, _unchanged, state},
+         _shell_id,
+         changed?
+       ),
+       do: {state, changed?}
+
+  defp merge_stashed_shell_transformation({:mismatch, state}, _shell_id, changed?),
+    do: {state, changed?}
+
   @doc "Returns the active shell id, preserving compatibility with tests that still set only `:shell`."
   @spec active_shell_id(t() | map()) :: shell_id()
   def active_shell_id(%{shell_id: id, shell: shell}) do
@@ -1180,7 +1260,10 @@ defmodule MingaEditor.State do
        ) do
     case Map.get(stash, target_entry.id) do
       %StateStash{} = stashed ->
-        restore_matching_shell_state(stashed, target_entry, module, previous_shell_state)
+        case StateStash.restore(stashed, target_entry) do
+          {:ok, shell_state} -> shell_state
+          :mismatch -> init_shell_state(module, previous_shell_state)
+        end
 
       _other ->
         init_shell_state(module, previous_shell_state)
@@ -1189,21 +1272,6 @@ defmodule MingaEditor.State do
 
   defp restore_shell_state(_stash, _target_entry, module, previous_shell_state) do
     init_shell_state(module, previous_shell_state)
-  end
-
-  @spec restore_matching_shell_state(
-          StateStash.t(),
-          MingaEditor.Shell.Entry.t(),
-          module(),
-          shell_state()
-        ) ::
-          shell_state()
-  defp restore_matching_shell_state(stashed, target_entry, module, previous_shell_state) do
-    if StateStash.matches?(stashed, target_entry) do
-      stashed.state
-    else
-      init_shell_state(module, previous_shell_state)
-    end
   end
 
   @spec init_shell_state(module(), shell_state()) :: shell_state()
@@ -1419,41 +1487,23 @@ defmodule MingaEditor.State do
     module = active_shell_module(state)
 
     case apply_optional_shell_callback(module, state.shell_state, callback, args) do
-      {:ok, shell_state} -> %{state | shell_state: shell_state}
+      {:ok, shell_state} -> update_shell_state(state, fn _shell_state -> shell_state end)
       :missing -> state
     end
   end
 
   @spec update_stashed_shell_feature_state(t(), atom(), [term()]) :: t()
-  defp update_stashed_shell_feature_state(
-         %__MODULE__{shell_state_stash: stash} = state,
-         callback,
-         args
-       ) do
-    stash =
-      Map.new(stash, fn {shell_id, shell_state} ->
-        {shell_id, clean_stashed_shell_state(shell_id, shell_state, callback, args)}
+  defp update_stashed_shell_feature_state(%__MODULE__{} = state, callback, args) do
+    {state, _changed?} =
+      transform_stashed_shell_states(state, fn module, shell_state, state_acc ->
+        case apply_optional_shell_callback(module, shell_state, callback, args) do
+          {:ok, ^shell_state} -> {:unchanged, state_acc}
+          {:ok, cleaned_shell_state} -> {{:updated, cleaned_shell_state}, state_acc}
+          :missing -> {:unchanged, state_acc}
+        end
       end)
 
-    %{state | shell_state_stash: stash}
-  end
-
-  @spec clean_stashed_shell_state(shell_id(), StateStash.t() | term(), atom(), [term()]) ::
-          StateStash.t() | term()
-  defp clean_stashed_shell_state(_shell_id, %StateStash{} = stashed, callback, args) do
-    case apply_optional_shell_callback(stashed.module, stashed.state, callback, args) do
-      {:ok, cleaned_shell_state} -> %StateStash{stashed | state: cleaned_shell_state}
-      :missing -> stashed
-    end
-  end
-
-  defp clean_stashed_shell_state(shell_id, shell_state, callback, args) do
-    module = MingaEditor.Shell.Registry.module_for(shell_id)
-
-    case apply_optional_shell_callback(module, shell_state, callback, args) do
-      {:ok, cleaned_shell_state} -> cleaned_shell_state
-      :missing -> shell_state
-    end
+    state
   end
 
   @spec apply_optional_shell_callback(module() | nil, term(), atom(), [term()]) ::
