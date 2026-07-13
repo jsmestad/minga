@@ -136,12 +136,13 @@ BEAM processes are organized into supervision trees that encode dependency relat
 
 ### High-level overview
 
-The top-level supervisor splits the system into four tiers. Each tier is isolated so that a crash in one doesn't cascade into the others. `rest_for_one` means tiers restart in order: if Foundation restarts, everything below it restarts too (they depend on config and events). But a crash in Runtime doesn't touch Services, Buffers, or Foundation.
+The top-level supervisor splits the system into four tiers and starts `MingaEditor.Shell.Registry` as the serialized publisher that all shell selection paths depend on. Each tier is isolated so that a crash in one doesn't cascade into the others. `rest_for_one` means tiers restart in order: if the shell registry or Foundation restarts, everything below it restarts too. A Runtime crash does not touch Services, Buffers, Foundation, or the shell registry.
 
 ```mermaid
 graph TD
     SUP["Minga.Supervisor<br/><i>rest_for_one</i>"]
 
+    SUP --> SHELLS["Shell.Registry<br/><i>serialized shell publication</i>"]
     SUP --> FOUND["Foundation.Supervisor<br/><i>config, keymaps, events, registries</i>"]
     SUP --> BUFSUP["Buffer.Supervisor<br/><i>one process per open file + git tracking</i>"]
     SUP --> SVC["Services.Supervisor<br/><i>LSP, extensions, diagnostics, agents</i>"]
@@ -151,6 +152,7 @@ graph TD
     RT -. "stdin/stdout" .-> PARSER["Parser Process<br/><i>Zig + tree-sitter</i>"]
 
     style SUP fill:#6c3483,stroke:#4a235a,color:#fff
+    style SHELLS fill:#6c3483,stroke:#4a235a,color:#fff
     style FOUND fill:#6c3483,stroke:#4a235a,color:#fff
     style BUFSUP fill:#1a5276,stroke:#154360,color:#fff
     style SVC fill:#6c3483,stroke:#4a235a,color:#fff

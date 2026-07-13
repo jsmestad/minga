@@ -604,17 +604,7 @@ defmodule MingaEditor.Startup do
   end
 
   @spec resolve_shell_entry(atom()) :: MingaEditor.Shell.Entry.t() | nil
-  defp resolve_shell_entry(id_or_module) do
-    MingaEditor.Shell.Registry.get(id_or_module) || resolve_shell_module(id_or_module)
-  end
-
-  @spec resolve_shell_module(module()) :: MingaEditor.Shell.Entry.t() | nil
-  defp resolve_shell_module(module) do
-    case MingaEditor.Shell.Registry.id_for_module(module) do
-      nil -> nil
-      id -> MingaEditor.Shell.Registry.get(id)
-    end
-  end
+  defp resolve_shell_entry(id_or_module), do: MingaEditor.Shell.Registry.resolve(id_or_module)
 
   @spec init_shell_state(module(), keyword()) :: term()
   defp init_shell_state(MingaEditor.Shell.Traditional, opts) do
