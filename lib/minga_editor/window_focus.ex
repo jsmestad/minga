@@ -6,6 +6,7 @@ defmodule MingaEditor.WindowFocus do
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Buffers
   alias MingaEditor.State.Windows
   alias MingaEditor.BottomPanel
   alias MingaEditor.Window
@@ -38,20 +39,30 @@ defmodule MingaEditor.WindowFocus do
   end
 
   @doc "Restores focus without reading the outgoing window's buffer, for popup dismissal."
-  @spec restore_focus(state(), Window.id()) :: state()
+  @spec restore_focus(state(), Window.id()) :: {:ok, state()} | :error
   def restore_focus(%EditorState{} = state, target_id) do
     with {:ok, target_window} <- Windows.fetch(state.workspace.windows, target_id),
          :ok <- restore_target_cursor(target_window) do
       workspace = SessionState.focus_window(state.workspace, target_id, nil)
 
-      state
-      |> EditorState.set_workspace(workspace)
-      |> blur_bottom_panel()
-    else
-      :error -> state
+      restored =
+        state
+        |> EditorState.set_workspace(workspace)
+        |> blur_bottom_panel()
+
+      {:ok, restored}
     end
   catch
-    :exit, _reason -> state
+    :exit, _reason -> :error
+  end
+
+  @doc "Repairs a window with a viable buffer or empty surface, then restores focus to it."
+  @spec repair_focus(state(), Window.id()) :: {:ok, state()} | :error
+  def repair_focus(%EditorState{} = state, target_id) do
+    case Windows.fetch(state.workspace.windows, target_id) do
+      {:ok, target_window} -> repair_focus_target(state, target_id, target_window)
+      :error -> :error
+    end
   end
 
   @doc "Focuses a surviving window after the active split was removed."
@@ -97,6 +108,60 @@ defmodule MingaEditor.WindowFocus do
   end
 
   defp restore_target_cursor(%Window{}), do: :ok
+
+  @spec repair_focus_target(state(), Window.id(), Window.t()) :: {:ok, state()}
+  defp repair_focus_target(%EditorState{} = state, target_id, %Window{cursor: cursor}) do
+    case find_restorable_buffer(state.workspace.buffers.list, cursor) do
+      {:ok, buffer} -> repair_focus_with_buffer(state, target_id, buffer)
+      :error -> repair_focus_with_empty_surface(state, target_id)
+    end
+  end
+
+  @spec find_restorable_buffer([pid()], SessionState.position()) :: {:ok, pid()} | :error
+  defp find_restorable_buffer(buffers, cursor) do
+    Enum.reduce_while(buffers, :error, fn buffer, :error ->
+      case restore_buffer_cursor(buffer, cursor) do
+        :ok -> {:halt, {:ok, buffer}}
+        :error -> {:cont, :error}
+      end
+    end)
+  end
+
+  @spec restore_buffer_cursor(pid(), SessionState.position()) :: :ok | :error
+  defp restore_buffer_cursor(buffer, cursor) when is_pid(buffer) do
+    Buffer.move_to(buffer, cursor)
+  catch
+    :exit, _reason -> :error
+  end
+
+  @spec repair_focus_with_buffer(state(), Window.id(), pid()) :: {:ok, state()}
+  defp repair_focus_with_buffer(%EditorState{} = state, target_id, buffer) do
+    workspace = SessionState.focus_window(state.workspace, target_id, nil)
+    buffers = Buffers.switch_to_pid(workspace.buffers, buffer)
+    workspace = SessionState.activate_buffer(workspace, buffers)
+
+    repaired =
+      state
+      |> EditorState.set_workspace(workspace)
+      |> blur_bottom_panel()
+
+    {:ok, repaired}
+  end
+
+  @spec repair_focus_with_empty_surface(state(), Window.id()) :: {:ok, state()}
+  defp repair_focus_with_empty_surface(%EditorState{} = state, target_id) do
+    workspace =
+      state.workspace
+      |> SessionState.focus_window(target_id, nil)
+      |> SessionState.enter_empty_state()
+
+    repaired =
+      state
+      |> EditorState.set_workspace(workspace)
+      |> blur_bottom_panel()
+
+    {:ok, repaired}
+  end
 
   @spec blur_bottom_panel(state()) :: state()
   defp blur_bottom_panel(%EditorState{} = state) do
