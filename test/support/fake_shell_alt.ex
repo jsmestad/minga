@@ -90,6 +90,12 @@ defmodule MingaEditor.Test.FakeShellAlt do
   def handle_agent_session_restarted(shell_state, _old_pid, _new_pid, _reason),
     do: {shell_state, false}
 
+  @spec sync_agent_status(map(), pid(), atom()) :: map()
+  def sync_agent_status(%{session: session} = shell_state, session, status),
+    do: Map.put(shell_state, :synced_agent_status, status)
+
+  def sync_agent_status(shell_state, _session, _status), do: shell_state
+
   @impl true
   @spec active_tab(map()) :: nil
   def active_tab(_shell_state), do: nil
@@ -107,6 +113,7 @@ defmodule MingaEditor.Test.FakeShellAlt do
   def set_tab_session(shell_state, _tab_id, _session_pid), do: shell_state
 
   @impl true
-  @spec active_session(map()) :: nil
+  @spec active_session(map()) :: pid() | nil
+  def active_session(%{session: session}) when is_pid(session), do: session
   def active_session(_shell_state), do: nil
 end

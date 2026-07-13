@@ -306,28 +306,37 @@ defmodule MingaEditor.Handlers.EventDispatcher do
     new_pid = event.new_pid
 
     with {:ok, ^new_pid} <- safe_session_lookup(event.session_id),
-         true <- Commands.BufferManagement.agent_session_restart_owned?(state, event.old_pid),
-         :ok <- subscribe_to_restarted_session(state, event) do
-      {:ok,
-       Commands.BufferManagement.handle_agent_session_restarted(
-         state,
-         event.session_id,
-         event.old_pid,
-         new_pid,
-         event.reason
-       )}
+         {:owned, state} <-
+           Commands.BufferManagement.prepare_agent_session_restart(state, event.old_pid) do
+      finish_agent_session_restart(state, event)
     else
       {:ok, current_pid} ->
         log_stale_agent_session_restart(event, {:current_pid, current_pid})
         {:stale, state}
 
-      false ->
+      {:stale, normalized_state} ->
         log_stale_agent_session_restart(event, :unowned_old_pid)
-        {:stale, state}
+        {:stale, normalized_state}
 
       {:error, reason} ->
         log_stale_agent_session_restart(event, reason)
         {:stale, state}
+    end
+  end
+
+  @spec finish_agent_session_restart(EditorState.t(), SessionManager.SessionRestartedEvent.t()) ::
+          {:ok, EditorState.t()} | {:stale, EditorState.t()}
+  defp finish_agent_session_restart(state, %SessionManager.SessionRestartedEvent{} = event) do
+    case subscribe_to_restarted_session(state, event) do
+      :ok ->
+        {:ok,
+         Commands.BufferManagement.handle_agent_session_restarted(
+           state,
+           event.session_id,
+           event.old_pid,
+           event.new_pid,
+           event.reason
+         )}
 
       :stale ->
         {:stale, state}

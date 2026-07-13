@@ -1088,13 +1088,20 @@ defmodule MingaEditor.Commands.BufferManagement do
     end
   end
 
-  @spec agent_session_restart_owned?(state(), pid()) :: boolean()
-  def agent_session_restart_owned?(state, old_pid) when is_pid(old_pid) do
+  @type session_restart_ownership :: {:owned, state()} | {:stale, state()}
+
+  @doc "Normalizes shell identity and returns whether the old session is still owned."
+  @spec prepare_agent_session_restart(state(), pid()) :: session_restart_ownership()
+  def prepare_agent_session_restart(state, old_pid) when is_pid(old_pid) do
     state = EditorState.ensure_shell_available(state)
     shell_owned? = shell_state_restart_owned?(state.shell_state, old_pid)
     stash_owned? = stashed_shell_restart_owned?(state.shell_state_stash, old_pid)
-    shell_owned? or stash_owned?
+    session_restart_ownership(state, shell_owned? or stash_owned?)
   end
+
+  @spec session_restart_ownership(state(), boolean()) :: session_restart_ownership()
+  defp session_restart_ownership(state, true), do: {:owned, state}
+  defp session_restart_ownership(state, false), do: {:stale, state}
 
   @doc "Refreshes editor state after SessionManager restarts a managed session."
   @spec handle_agent_session_restarted(state(), String.t(), pid(), pid(), term()) :: state()

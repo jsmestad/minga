@@ -926,101 +926,79 @@ defmodule MingaEditor.State do
   @doc "Transforms current stashed shell states and reports whether any matching value changed."
   @spec transform_stashed_shell_states(t(), stashed_shell_transform()) :: {t(), boolean()}
   def transform_stashed_shell_states(%__MODULE__{} = state, fun) when is_function(fun, 3) do
-    {stash, state, changed?} =
-      Enum.reduce(state.shell_state_stash, {state.shell_state_stash, state, false}, fn
-        {shell_id, %StateStash{} = stashed}, {stash_acc, state_acc, changed?} ->
-          transform_stashed_shell_state(
-            stash_acc,
-            state_acc,
-            changed?,
-            shell_id,
-            stashed,
-            fun
-          )
-
-        _entry, acc ->
-          acc
-      end)
-
-    {%{state | shell_state_stash: stash}, changed?}
+    state.shell_state_stash
+    |> Map.keys()
+    |> Enum.reduce({state, false}, fn shell_id, {state_acc, changed?} ->
+      transform_stashed_shell_state(state_acc, changed?, shell_id, fun)
+    end)
   end
 
   @doc "Transforms the first matching stashed shell that accepts the change."
   @spec transform_first_stashed_shell_state(t(), stashed_shell_transform()) :: {t(), boolean()}
   def transform_first_stashed_shell_state(%__MODULE__{} = state, fun) when is_function(fun, 3) do
-    {stash, state, changed?} =
-      Enum.reduce_while(state.shell_state_stash, {state.shell_state_stash, state, false}, fn
-        {shell_id, %StateStash{} = stashed}, {stash_acc, state_acc, false} ->
-          result =
-            transform_stashed_shell_state(stash_acc, state_acc, false, shell_id, stashed, fun)
-
-          continue_stashed_shell_transform(result)
-
-        _entry, acc ->
-          {:cont, acc}
-      end)
-
-    {%{state | shell_state_stash: stash}, changed?}
+    state.shell_state_stash
+    |> Map.keys()
+    |> Enum.reduce_while({state, false}, fn shell_id, {state_acc, false} ->
+      state_acc
+      |> transform_stashed_shell_state(false, shell_id, fun)
+      |> continue_stashed_shell_transform()
+    end)
   end
 
-  @spec continue_stashed_shell_transform({shell_state_stash(), t(), boolean()}) ::
-          {:cont, {shell_state_stash(), t(), boolean()}}
-          | {:halt, {shell_state_stash(), t(), boolean()}}
-  defp continue_stashed_shell_transform({_stash, _state, true} = result), do: {:halt, result}
+  @spec continue_stashed_shell_transform({t(), boolean()}) ::
+          {:cont, {t(), boolean()}} | {:halt, {t(), boolean()}}
+  defp continue_stashed_shell_transform({_state, true} = result), do: {:halt, result}
   defp continue_stashed_shell_transform(result), do: {:cont, result}
 
-  @spec transform_stashed_shell_state(
-          shell_state_stash(),
-          t(),
-          boolean(),
-          shell_id(),
-          StateStash.t(),
-          stashed_shell_transform()
-        ) :: {shell_state_stash(), t(), boolean()}
-  defp transform_stashed_shell_state(stash, state, changed?, shell_id, stashed, fun) do
+  @spec transform_stashed_shell_state(t(), boolean(), shell_id(), stashed_shell_transform()) ::
+          {t(), boolean()}
+  defp transform_stashed_shell_state(state, changed?, shell_id, fun) do
+    stashed = Map.get(state.shell_state_stash, shell_id)
     entry = MingaEditor.Shell.Registry.get(shell_id)
-    transform_stashed_shell_state(stash, state, changed?, shell_id, stashed, entry, fun)
+    transform_stashed_shell_state(state, changed?, shell_id, stashed, entry, fun)
   end
 
   @spec transform_stashed_shell_state(
-          shell_state_stash(),
           t(),
           boolean(),
           shell_id(),
-          StateStash.t(),
+          StateStash.t() | nil,
           MingaEditor.Shell.Entry.t() | nil,
           stashed_shell_transform()
-        ) :: {shell_state_stash(), t(), boolean()}
-  defp transform_stashed_shell_state(stash, state, changed?, _shell_id, _stashed, nil, _fun),
-    do: {stash, state, changed?}
+        ) :: {t(), boolean()}
+  defp transform_stashed_shell_state(state, changed?, _shell_id, _stashed, nil, _fun),
+    do: {state, changed?}
 
-  defp transform_stashed_shell_state(stash, state, changed?, shell_id, stashed, entry, fun) do
+  defp transform_stashed_shell_state(state, changed?, _shell_id, nil, _entry, _fun),
+    do: {state, changed?}
+
+  defp transform_stashed_shell_state(state, changed?, shell_id, stashed, entry, fun) do
     stashed
     |> StateStash.transform(entry, state, fn shell_state, state_acc ->
       fun.(entry.module, shell_state, state_acc)
     end)
-    |> merge_stashed_shell_transformation(stash, shell_id, changed?)
+    |> merge_stashed_shell_transformation(shell_id, changed?)
   end
 
   @spec merge_stashed_shell_transformation(
           StateStash.transform_result(t()),
-          shell_state_stash(),
           shell_id(),
           boolean()
-        ) :: {shell_state_stash(), t(), boolean()}
-  defp merge_stashed_shell_transformation({:updated, updated, state}, stash, shell_id, _changed?),
-    do: {Map.put(stash, shell_id, updated), state, true}
+        ) :: {t(), boolean()}
+  defp merge_stashed_shell_transformation({:updated, updated, state}, shell_id, _changed?) do
+    stash = Map.put(state.shell_state_stash, shell_id, updated)
+    {%{state | shell_state_stash: stash}, true}
+  end
 
   defp merge_stashed_shell_transformation(
          {:unchanged, _unchanged, state},
-         stash,
          _shell_id,
          changed?
        ),
-       do: {stash, state, changed?}
+       do: {state, changed?}
 
-  defp merge_stashed_shell_transformation({:mismatch, state}, stash, _shell_id, changed?),
-    do: {stash, state, changed?}
+  defp merge_stashed_shell_transformation({:mismatch, state}, _shell_id, changed?),
+    do: {state, changed?}
 
   @doc "Returns the active shell id, preserving compatibility with tests that still set only `:shell`."
   @spec active_shell_id(t() | map()) :: shell_id()

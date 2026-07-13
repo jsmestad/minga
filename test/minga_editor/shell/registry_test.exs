@@ -3,7 +3,11 @@ defmodule MingaEditor.Shell.RegistryTest do
   use ExUnit.Case, async: false
 
   alias Minga.Extension.ContributionCleanup
+  alias MingaAgent.SessionManager
+  alias MingaAgent.SessionManager.SessionRestartedEvent
+  alias MingaEditor.Agent.Events
   alias MingaEditor.Commands.BufferManagement
+  alias MingaEditor.Handlers.EventDispatcher
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.Shell.Entry
@@ -12,6 +16,7 @@ defmodule MingaEditor.Shell.RegistryTest do
   alias MingaEditor.Shell.Registry
   alias MingaEditor.Shell.StateStash
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.Test.FakeShell
   alias MingaEditor.Test.FakeShellAlt
 
@@ -255,6 +260,58 @@ defmodule MingaEditor.Shell.RegistryTest do
     Process.cancel_timer(stale.render_timer)
   end
 
+  test "Agent.Events updates matching stashes but skips a replaced registration" do
+    Registry.seed_builtin()
+    session = self()
+
+    assert :ok =
+             Registry.register({:extension, :fake}, %{
+               id: :fake,
+               module: FakeShell,
+               display_name: "Fake",
+               description: "Fake shell",
+               capabilities: [:tui]
+             })
+
+    assert :ok =
+             Registry.register({:extension, :fake_alt}, %{
+               id: :fake_alt,
+               module: FakeShellAlt,
+               display_name: "Fake Alt",
+               description: "Fake shell alt",
+               capabilities: [:tui]
+             })
+
+    fake_entry = Registry.get(:fake)
+
+    state =
+      TestHelpers.base_state()
+      |> EditorState.switch_shell(:fake_alt)
+      |> EditorState.update_shell_state(fn shell_state ->
+        Map.merge(shell_state, %{agent: %AgentState{}, session: session, tab_bar: nil})
+      end)
+      |> Map.put(:shell_state_stash, %{
+        fake: StateStash.new(fake_entry, %{session: session})
+      })
+
+    {matching, _effects} = Events.handle(state, {:status_changed, :thinking})
+    assert matching.shell_state_stash.fake.state.synced_agent_status == :thinking
+
+    assert :ok = Registry.unregister_source({:extension, :fake})
+
+    assert :ok =
+             Registry.register({:extension, :fake_replacement}, %{
+               id: :fake,
+               module: FakeShell,
+               display_name: "Fake replacement",
+               description: "Replacement registration",
+               capabilities: [:tui]
+             })
+
+    {stale, _effects} = Events.handle(matching, {:status_changed, :idle})
+    assert stale.shell_state_stash.fake.state.synced_agent_status == :thinking
+  end
+
   test "buffer session restart updates a matching stash but not a replaced registration" do
     Registry.seed_builtin()
     old_pid = self()
@@ -314,7 +371,7 @@ defmodule MingaEditor.Shell.RegistryTest do
       )
 
     assert stale.shell_state_stash.fake.state.session == old_pid
-    refute BufferManagement.agent_session_restart_owned?(stale, old_pid)
+    assert {:stale, _normalized} = BufferManagement.prepare_agent_session_restart(stale, old_pid)
   end
 
   test "active shell session restart resets obsolete registration state before callbacks" do
@@ -362,7 +419,121 @@ defmodule MingaEditor.Shell.RegistryTest do
     assert Map.take(restarted.shell_state, [:name, :events]) == %{name: :fake, events: []}
     refute Map.has_key?(restarted.shell_state, :session)
     assert Identity.matches?(restarted.shell_identity, current_entry)
-    refute BufferManagement.agent_session_restart_owned?(state, old_pid)
+
+    assert {:stale, normalized} = BufferManagement.prepare_agent_session_restart(state, old_pid)
+    assert Identity.matches?(normalized.shell_identity, current_entry)
+    refute Map.has_key?(normalized.shell_state, :session)
+  end
+
+  test "restart dispatch retains normalized state when subscription is stale" do
+    Registry.seed_builtin()
+    old_pid = self()
+    session_id = "registry-restart-#{System.unique_integer([:positive])}"
+    assert {:ok, ^session_id, new_pid} = SessionManager.start_session(session_id: session_id)
+    on_exit(fn -> SessionManager.stop_session(session_id) end)
+
+    assert :ok =
+             Registry.register({:extension, :fake}, %{
+               id: :fake,
+               module: FakeShell,
+               display_name: "Fake",
+               description: "Fake shell",
+               capabilities: [:tui]
+             })
+
+    assert :ok =
+             Registry.register({:extension, :valid}, %{
+               id: :valid,
+               module: FakeShellAlt,
+               display_name: "Valid",
+               description: "Valid shell",
+               capabilities: [:tui]
+             })
+
+    valid_entry = Registry.get(:valid)
+    dead_ingest = spawn(fn -> :ok end)
+    monitor = Process.monitor(dead_ingest)
+    assert_receive {:DOWN, ^monitor, :process, ^dead_ingest, :normal}
+
+    state =
+      TestHelpers.base_state()
+      |> EditorState.switch_shell(:fake)
+      |> EditorState.update_shell_state(&Map.put(&1, :session, old_pid))
+      |> Map.put(:agent_ingest, dead_ingest)
+      |> Map.put(:shell_state_stash, %{
+        valid: StateStash.new(valid_entry, %{session: old_pid})
+      })
+
+    assert :ok = Registry.unregister_source({:extension, :fake})
+
+    assert :ok =
+             Registry.register({:extension, :fake_replacement}, %{
+               id: :fake,
+               module: FakeShell,
+               display_name: "Fake replacement",
+               description: "Replacement registration",
+               capabilities: [:tui]
+             })
+
+    current_entry = Registry.get(:fake)
+
+    normalized =
+      EventDispatcher.dispatch(
+        state,
+        :agent_session_restarted,
+        %SessionRestartedEvent{
+          session_id: session_id,
+          old_pid: old_pid,
+          new_pid: new_pid,
+          reason: :restarted
+        },
+        nil
+      )
+
+    assert Identity.matches?(normalized.shell_identity, current_entry)
+    refute Map.has_key?(normalized.shell_state, :session)
+    assert normalized.shell_state_stash.valid.state.session == old_pid
+  end
+
+  test "session down and disconnect reset obsolete active shell state before callbacks" do
+    Registry.seed_builtin()
+    session = self()
+
+    assert :ok =
+             Registry.register({:extension, :fake}, %{
+               id: :fake,
+               module: FakeShell,
+               display_name: "Fake",
+               description: "Fake shell",
+               capabilities: [:tui]
+             })
+
+    state =
+      TestHelpers.base_state()
+      |> EditorState.switch_shell(:fake)
+      |> EditorState.update_shell_state(&Map.put(&1, :session, session))
+
+    assert :ok = Registry.unregister_source({:extension, :fake})
+
+    assert :ok =
+             Registry.register({:extension, :fake_replacement}, %{
+               id: :fake,
+               module: FakeShell,
+               display_name: "Fake replacement",
+               description: "Replacement registration",
+               capabilities: [:tui]
+             })
+
+    current_entry = Registry.get(:fake)
+    normal = BufferManagement.handle_agent_session_down(state, session, :boom)
+    disconnected = BufferManagement.handle_agent_session_down(state, session, :noconnection)
+
+    for normalized <- [normal, disconnected] do
+      assert Identity.matches?(normalized.shell_identity, current_entry)
+      refute Map.has_key?(normalized.shell_state, :session)
+      refute Map.has_key?(normalized.shell_state, :session_down?)
+      refute Map.has_key?(normalized.shell_state, :remote_disconnected?)
+    end
   end
 
   test "buffer lifecycle stops after the first stashed shell handles a restart" do
@@ -409,6 +580,110 @@ defmodule MingaEditor.Shell.RegistryTest do
     sessions = Enum.map(restarted.shell_state_stash, fn {_id, stash} -> stash.state.session end)
     assert Enum.count(sessions, &(&1 == new_pid)) == 1
     assert Enum.count(sessions, &(&1 == old_pid)) == 1
+  end
+
+  test "buffer lifecycle skips a stale stash before the matching owner" do
+    Registry.seed_builtin()
+    old_pid = self()
+    new_pid = spawn(fn -> receive do: (:stop -> :ok) end)
+    on_exit(fn -> send(new_pid, :stop) end)
+
+    assert :ok =
+             Registry.register({:extension, :stale}, %{
+               id: :a_stale,
+               module: FakeShell,
+               display_name: "Stale",
+               description: "Stale shell",
+               capabilities: [:tui]
+             })
+
+    assert :ok =
+             Registry.register({:extension, :valid}, %{
+               id: :z_valid,
+               module: FakeShellAlt,
+               display_name: "Valid",
+               description: "Valid shell",
+               capabilities: [:tui]
+             })
+
+    stale_entry = Registry.get(:a_stale)
+    valid_entry = Registry.get(:z_valid)
+    assert :ok = Registry.unregister_source({:extension, :stale})
+
+    assert :ok =
+             Registry.register({:extension, :stale_replacement}, %{
+               id: :a_stale,
+               module: FakeShell,
+               display_name: "Stale replacement",
+               description: "Replacement registration",
+               capabilities: [:tui]
+             })
+
+    state = %{
+      TestHelpers.base_state()
+      | shell_state_stash: %{
+          a_stale: StateStash.new(stale_entry, %{session: old_pid}),
+          z_valid: StateStash.new(valid_entry, %{session: old_pid})
+        }
+    }
+
+    restarted =
+      BufferManagement.handle_agent_session_restarted(
+        state,
+        "session-id",
+        old_pid,
+        new_pid,
+        :restarted
+      )
+
+    assert restarted.shell_state_stash.a_stale.state.session == old_pid
+    assert restarted.shell_state_stash.z_valid.state.session == new_pid
+  end
+
+  test "stash transformations thread the current aggregate into later callbacks" do
+    Registry.seed_builtin()
+
+    assert :ok =
+             Registry.register({:extension, :first}, %{
+               id: :first,
+               module: FakeShell,
+               display_name: "First",
+               description: "First shell",
+               capabilities: [:tui]
+             })
+
+    assert :ok =
+             Registry.register({:extension, :second}, %{
+               id: :second,
+               module: FakeShellAlt,
+               display_name: "Second",
+               description: "Second shell",
+               capabilities: [:tui]
+             })
+
+    state = %{
+      TestHelpers.base_state()
+      | shell_state_stash: %{
+          first: StateStash.new(Registry.get(:first), %{}),
+          second: StateStash.new(Registry.get(:second), %{})
+        }
+    }
+
+    {transformed, true} =
+      EditorState.transform_stashed_shell_states(state, fn _module, shell_state, state_acc ->
+        transformed_count =
+          Enum.count(state_acc.shell_state_stash, fn {_id, stash} ->
+            Map.get(stash.state, :transformed?, false)
+          end)
+
+        send(self(), {:transformed_count, transformed_count})
+        {{:updated, Map.put(shell_state, :transformed?, true)}, state_acc}
+      end)
+
+    assert_receive {:transformed_count, 0}
+    assert_receive {:transformed_count, 1}
+    assert transformed.shell_state_stash.first.state.transformed?
+    assert transformed.shell_state_stash.second.state.transformed?
   end
 
   test "renderer writeback drops stale output after a shell id is re-registered" do
