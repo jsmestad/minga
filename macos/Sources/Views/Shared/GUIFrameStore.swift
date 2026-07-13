@@ -132,11 +132,7 @@ public final class GUIFrameStore {
 
     /// Publishes one synchronous client-local or recovery mutation without replacing the latest committed frame.
     public func publishLocal(impact: GUIFrameImpact, mutation: () -> Void) {
-        publish(
-            committed: installed.shell.lastCommitted,
-            source: .local,
-            impact: impact
-        ) {
+        publish(committed: nil, source: .local, impact: impact) {
             mutation()
             return true
         }
@@ -148,12 +144,7 @@ public final class GUIFrameStore {
         impact: GUIFrameImpact,
         mutation: () -> Bool
     ) -> Bool {
-        publish(
-            committed: installed.shell.lastCommitted,
-            source: .local,
-            impact: impact,
-            mutation: mutation
-        )
+        publish(committed: nil, source: .local, impact: impact, mutation: mutation)
     }
 
     @discardableResult
@@ -171,11 +162,19 @@ public final class GUIFrameStore {
         onPublicationEvent?(.mutated)
 
         let prior = installed
+        // Focused commits can leave channel identities divergent from the complete installed bundle.
+        // A local publication stays correlated with what each affected consumer currently displays.
+        let published = GUIFrameVersions(
+            shell: shell.value,
+            editor: editor.value,
+            editorOverlay: editorOverlay.value,
+            windowOverlay: windowOverlay.value
+        )
         let next = GUIFrameVersions(
-            shell: version(after: prior.shell, committed: committed, source: source, affected: impact.contains(.shell)),
-            editor: version(after: prior.editor, committed: committed, source: source, affected: impact.contains(.editor)),
-            editorOverlay: version(after: prior.editorOverlay, committed: committed, source: source, affected: impact.contains(.editorOverlay)),
-            windowOverlay: version(after: prior.windowOverlay, committed: committed, source: source, affected: impact.contains(.windowOverlay))
+            shell: version(after: prior.shell, published: published.shell, committed: committed, source: source, affected: impact.contains(.shell)),
+            editor: version(after: prior.editor, published: published.editor, committed: committed, source: source, affected: impact.contains(.editor)),
+            editorOverlay: version(after: prior.editorOverlay, published: published.editorOverlay, committed: committed, source: source, affected: impact.contains(.editorOverlay)),
+            windowOverlay: version(after: prior.windowOverlay, published: published.windowOverlay, committed: committed, source: source, affected: impact.contains(.windowOverlay))
         )
         installed = next
         onPublicationEvent?(.installed)
@@ -202,12 +201,18 @@ public final class GUIFrameStore {
 
     private func version(
         after prior: GUIFrameVersion,
+        published: GUIFrameVersion,
         committed: GUICommittedFrame?,
         source: GUIFrameVersion.Source,
         affected: Bool
     ) -> GUIFrameVersion {
-        if source == .local, !affected {
-            return prior
+        if source == .local {
+            guard affected else { return prior }
+            return GUIFrameVersion(
+                revision: prior.revision &+ 1,
+                lastCommitted: published.lastCommitted,
+                source: source
+            )
         }
         return GUIFrameVersion(
             revision: affected ? prior.revision &+ 1 : prior.revision,

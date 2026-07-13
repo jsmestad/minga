@@ -98,24 +98,51 @@ struct GUIFrameStoreTests {
         #expect(store.windowOverlay.value == channelValues[3])
     }
 
-    @Test("local publication preserves committed identity and false preview stays silent")
-    @MainActor func localPublication() {
+    @Test("local publication preserves each affected domain's published committed identity")
+    @MainActor func localPublicationPreservesDivergentDomains() {
         let store = GUIFrameStore()
         store.publishCommitted(generation: 4, frameSeq: 12, impact: .shell) {}
-        let shell = store.shell.value
+        store.publishCommitted(generation: 4, frameSeq: 13, impact: .editorOverlay) {}
+        #expect(store.shell.value.lastCommitted?.frameSeq == 12)
+        #expect(store.editorOverlay.value.lastCommitted?.frameSeq == 13)
+        #expect(store.installed.shell.lastCommitted?.frameSeq == 13)
+
         var events: [GUIFrameStore.PublicationEvent] = []
         store.onPublicationEvent = { events.append($0) }
+        store.publishLocal(impact: [.shell, .editorOverlay]) {}
 
-        store.publishLocal(impact: .editorOverlay) {}
-
+        #expect(store.shell.value.source == .local)
+        #expect(store.shell.value.lastCommitted?.frameSeq == 12)
         #expect(store.editorOverlay.value.source == .local)
-        #expect(store.editorOverlay.value.lastCommitted?.frameSeq == 12)
-        #expect(store.shell.value == shell)
-        #expect(events == [.mutated, .installed, .channel(.editorOverlay)])
+        #expect(store.editorOverlay.value.lastCommitted?.frameSeq == 13)
+        #expect(events == [
+            .mutated,
+            .installed,
+            .channel(.shell),
+            .channel(.editorOverlay)
+        ])
+    }
 
-        events.removeAll()
-        let changed = store.publishLocalIfChanged(impact: .windowOverlay) { false }
-        #expect(!changed)
+    @Test("changed local publication preserves divergent domains and rejected preview stays silent")
+    @MainActor func changedLocalPublicationPreservesDivergentDomains() {
+        let store = GUIFrameStore()
+        store.publishCommitted(generation: 5, frameSeq: 20, impact: .editor) {}
+        store.publishCommitted(generation: 5, frameSeq: 21, impact: .windowOverlay) {}
+        #expect(store.editor.value.lastCommitted?.frameSeq == 20)
+        #expect(store.windowOverlay.value.lastCommitted?.frameSeq == 21)
+        #expect(store.installed.editor.lastCommitted?.frameSeq == 21)
+
+        let changed = store.publishLocalIfChanged(impact: [.editor, .windowOverlay]) { true }
+        #expect(changed)
+        #expect(store.editor.value.source == .local)
+        #expect(store.editor.value.lastCommitted?.frameSeq == 20)
+        #expect(store.windowOverlay.value.source == .local)
+        #expect(store.windowOverlay.value.lastCommitted?.frameSeq == 21)
+
+        var events: [GUIFrameStore.PublicationEvent] = []
+        store.onPublicationEvent = { events.append($0) }
+        let rejected = store.publishLocalIfChanged(impact: .windowOverlay) { false }
+        #expect(!rejected)
         #expect(events.isEmpty)
     }
 
@@ -241,6 +268,36 @@ struct GUIFrameStoreTests {
 
 @Suite("GUI frame presentation metrics")
 struct GUIFramePresentationMetricsTests {
+    @Test("local publication keeps divergent native-draw correlation")
+    @MainActor func localPublicationNativeDrawCorrelation() {
+        let store = GUIFrameStore()
+        let metrics = GUIFramePresentationMetrics()
+        let shellFrame = GUICommittedFrame(generation: 7, frameSeq: 30)
+        let overlayFrame = GUICommittedFrame(generation: 7, frameSeq: 31)
+
+        store.publishCommitted(
+            generation: shellFrame.generation,
+            frameSeq: shellFrame.frameSeq,
+            impact: .shell
+        ) {}
+        metrics.beginCommitted(frame: shellFrame, impact: .shell)
+        store.publishCommitted(
+            generation: overlayFrame.generation,
+            frameSeq: overlayFrame.frameSeq,
+            impact: .editorOverlay
+        ) {}
+        metrics.beginCommitted(frame: overlayFrame, impact: .editorOverlay)
+
+        store.publishLocal(impact: [.shell, .editorOverlay]) {}
+        metrics.recordNativeDraw(domain: .shell, version: store.shell.value)
+        metrics.recordNativeDraw(domain: .editorOverlay, version: store.editorOverlay.value)
+
+        #expect(metrics.snapshot() == [
+            .init(frame: shellFrame, domain: .shell, outcome: .nativeDraw),
+            .init(frame: overlayFrame, domain: .editorOverlay, outcome: .nativeDraw)
+        ])
+    }
+
     @Test("successful native draw and Metal milestones keep committed frame identity")
     @MainActor func successfulOutcomes() {
         let metrics = GUIFramePresentationMetrics()
