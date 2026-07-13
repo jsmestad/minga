@@ -83,6 +83,10 @@ defmodule MingaEditor.Test.FakeShellAlt do
 
   @impl true
   @spec handle_agent_session_restarted(map(), pid(), pid(), term()) :: {map(), boolean()}
+  def handle_agent_session_restarted(%{session: old_pid} = shell_state, old_pid, new_pid, _reason) do
+    {Map.put(shell_state, :session, new_pid), true}
+  end
+
   def handle_agent_session_restarted(shell_state, _old_pid, _new_pid, _reason),
     do: {shell_state, false}
 

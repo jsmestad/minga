@@ -136,6 +136,8 @@ defmodule MingaAgent.SessionTranscriptTest do
          }}
       )
 
+      :sys.get_state(session)
+
       assert_receive {:agent_event, _,
                       {:file_changed, "lib/foo.ex", "old content", "new content", "tc1",
                        _tool_name}},

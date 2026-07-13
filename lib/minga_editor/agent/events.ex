@@ -18,6 +18,7 @@ defmodule MingaEditor.Agent.Events do
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.View.Preview
   alias MingaEditor.PickerUI
+  alias MingaEditor.Shell.StateStash
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
@@ -29,7 +30,6 @@ defmodule MingaEditor.Agent.Events do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
-  alias MingaEditor.Shell.StateStash
 
   @type effect ::
           :render
@@ -724,7 +724,9 @@ defmodule MingaEditor.Agent.Events do
     shell = EditorState.active_shell_module(state)
 
     if function_exported?(shell, callback, Enum.count(args) + 1) do
-      %{state | shell_state: apply(shell, callback, [state.shell_state | args])}
+      EditorState.update_shell_state(state, fn shell_state ->
+        apply(shell, callback, [shell_state | args])
+      end)
     else
       state
     end
@@ -732,24 +734,40 @@ defmodule MingaEditor.Agent.Events do
 
   @spec update_stashed_shells_for_session(EditorState.t(), atom(), [term()]) :: EditorState.t()
   defp update_stashed_shells_for_session(state, callback, args) do
-    stash =
-      Map.new(state.shell_state_stash, fn
-        {shell_id, %StateStash{} = stashed} ->
-          {shell_id, update_stashed_shell_for_session(stashed, callback, args)}
-
-        entry ->
-          entry
+    {state, _changed?} =
+      EditorState.transform_stashed_shell_states(state, fn module, shell_state, state_acc ->
+        transform_stashed_shell_for_session(module, shell_state, state_acc, callback, args)
       end)
 
-    %{state | shell_state_stash: stash}
+    state
   end
 
-  @spec update_stashed_shell_for_session(StateStash.t(), atom(), [term()]) :: StateStash.t()
-  defp update_stashed_shell_for_session(%StateStash{} = stashed, callback, args) do
-    if function_exported?(stashed.module, callback, Enum.count(args) + 1) do
-      %StateStash{stashed | state: apply(stashed.module, callback, [stashed.state | args])}
+  @spec transform_stashed_shell_for_session(
+          module(),
+          MingaEditor.Shell.shell_state(),
+          EditorState.t(),
+          atom(),
+          [term()]
+        ) :: {StateStash.transformation(), EditorState.t()}
+  defp transform_stashed_shell_for_session(module, shell_state, state, callback, args) do
+    if function_exported?(module, callback, Enum.count(args) + 1) do
+      transformed_shell_for_session(module, shell_state, state, callback, args)
     else
-      stashed
+      {:unchanged, state}
+    end
+  end
+
+  @spec transformed_shell_for_session(
+          module(),
+          MingaEditor.Shell.shell_state(),
+          EditorState.t(),
+          atom(),
+          [term()]
+        ) :: {StateStash.transformation(), EditorState.t()}
+  defp transformed_shell_for_session(module, shell_state, state, callback, args) do
+    case apply(module, callback, [shell_state | args]) do
+      ^shell_state -> {:unchanged, state}
+      updated -> {{:updated, updated}, state}
     end
   end
 
