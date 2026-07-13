@@ -28,6 +28,7 @@ defmodule MingaAgent.Session do
   alias MingaAgent.Credentials
   alias MingaAgent.Event
   alias MingaAgent.EventLog
+  alias MingaAgent.EventLog.Failure
   alias MingaAgent.Hooks.Dispatcher, as: HookDispatcher
   alias MingaAgent.Hooks.SessionEndPayload
   alias MingaAgent.Hooks.SessionStartPayload
@@ -76,6 +77,9 @@ defmodule MingaAgent.Session do
   @typedoc "Remote attachment role."
   @type attachment_role :: :driver | :viewer
 
+  @typedoc "Latest EventLog admission or persistence failure retained for reconnecting subscribers."
+  @type event_log_failure :: Failure.t()
+
   @typedoc "How a session handles tool approvals when no interactive driver should answer them."
   @type tool_approval_policy ::
           :interactive | {:auto_approve, trust_scope()} | {:reject, String.t()}
@@ -103,6 +107,7 @@ defmodule MingaAgent.Session do
           remote_token: String.t() | nil,
           workdir: String.t() | nil,
           event_log_server: GenServer.server(),
+          event_log_failure: event_log_failure() | nil,
           provider: pid() | nil,
           provider_module: module(),
           provider_id: String.t(),
@@ -733,6 +738,7 @@ defmodule MingaAgent.Session do
       remote_token: Keyword.get(opts, :remote_token),
       workdir: Keyword.get(opts, :workdir),
       event_log_server: Keyword.get(opts, :event_log_server, EventLog),
+      event_log_failure: nil,
       provider: nil,
       provider_module: provider_module,
       provider_id: provider_resolution.id,
@@ -788,16 +794,11 @@ defmodule MingaAgent.Session do
 
     maybe_mark_interrupted_work(state, Keyword.get(opts, :recover_interrupted_work?, true))
 
-    EventLog.record(
-      state.session_id,
-      :session_started,
-      %{
-        model: state.model_name,
-        provider: state.provider_name,
-        background_subagent: state.background_subagent
-      },
-      state.event_log_server
-    )
+    record_critical_event(state, :session_started, %{
+      model: state.model_name,
+      provider: state.provider_name,
+      background_subagent: state.background_subagent
+    })
 
     # Start provider asynchronously so init doesn't block. An unconfigured local
     # session is still useful for draft preservation, but must not boot a provider.
@@ -809,6 +810,7 @@ defmodule MingaAgent.Session do
   end
 
   @impl GenServer
+  @spec handle_call(term(), GenServer.from(), state()) :: {:reply, term(), state()}
   def handle_call({:seed_messages, messages}, _from, state) do
     state =
       state
@@ -963,12 +965,7 @@ defmodule MingaAgent.Session do
       state.provider_module.new_session(state.provider)
     end
 
-    EventLog.record(
-      state.session_id,
-      :session_stopped,
-      %{reason: "new_session", status: state.status},
-      state.event_log_server
-    )
+    record_critical_event(state, :session_stopped, %{reason: "new_session", status: state.status})
 
     now = DateTime.utc_now()
     timestamp = Calendar.strftime(now, "%H:%M:%S UTC")
@@ -997,16 +994,11 @@ defmodule MingaAgent.Session do
 
     state = reset_messages(state, [Message.system("Session cleared · #{timestamp}")])
 
-    EventLog.record(
-      state.session_id,
-      :session_started,
-      %{
-        model: state.model_name,
-        provider: state.provider_name,
-        background_subagent: state.background_subagent
-      },
-      state.event_log_server
-    )
+    record_critical_event(state, :session_started, %{
+      model: state.model_name,
+      provider: state.provider_name,
+      background_subagent: state.background_subagent
+    })
 
     broadcast(state, {:status_changed, :idle})
     state = notify_messages_changed(state)
@@ -1190,6 +1182,7 @@ defmodule MingaAgent.Session do
       Process.monitor(pid)
       state = state |> cancel_idle_gc_timer() |> put_subscriber(pid, role)
       send(pid, {:agent_event, self(), {:credentials_status, state.credentials_configured}})
+      notify_retained_event_log_failure(pid, state.event_log_failure)
       {:reply, :ok, state}
     else
       {:reply, {:error, :invalid_role}, state}
@@ -1404,6 +1397,7 @@ defmodule MingaAgent.Session do
   end
 
   @impl GenServer
+  @spec handle_cast(term(), state()) :: {:noreply, state()}
   def handle_cast({:add_system_message, text, level}, state) do
     state = append_system_message(state, text, level)
     state = notify_messages_changed(state)
@@ -1415,6 +1409,7 @@ defmodule MingaAgent.Session do
   end
 
   @impl GenServer
+  @spec handle_info(term(), state()) :: {:noreply, state()} | {:stop, term(), state()}
   def handle_info(:start_provider, state) do
     {:noreply, refresh_credentials_state(state)}
   end
@@ -1431,6 +1426,37 @@ defmodule MingaAgent.Session do
   def handle_info({:agent_provider_event, event}, state) do
     state = handle_provider_event(event, state)
     {:noreply, state}
+  end
+
+  def handle_info(
+        {:event_log_commit, _receipt, _event_type, {:persisted, _event_id}},
+        state
+      ) do
+    {:noreply, state}
+  end
+
+  def handle_info(
+        {:event_log_commit, receipt, event_type, {:error, {:persistence_failed, reason}}},
+        state
+      ) do
+    Minga.Log.error(
+      :agent,
+      "[Agent.Session] event-log persistence failed for #{event_type}: #{inspect(reason)}"
+    )
+
+    failure = Failure.persistence(receipt, event_type, reason)
+    notify_event_log_failure(state, failure)
+    {:noreply, %{state | event_log_failure: failure}}
+  end
+
+  def handle_info({:event_log_failure, %Failure{} = failure}, state) do
+    Minga.Log.error(
+      :agent,
+      "[Agent.Session] event-log admission failed for #{failure.event_type}: #{inspect(failure.reason)}"
+    )
+
+    notify_event_log_failure(state, failure)
+    {:noreply, %{state | event_log_failure: failure}}
   end
 
   def handle_info({:DOWN, _ref, :process, pid, reason}, %{provider: pid} = state) do
@@ -1522,17 +1548,12 @@ defmodule MingaAgent.Session do
     # Send the execution decision directly to the blocked Task process.
     send(reply_to, {:tool_approval_response, tool_call_id, execution_decision(decision)})
 
-    EventLog.record(
-      state.session_id,
-      :approval_resolved,
-      %{
-        approval_id: tool_call_id,
-        tool_call_id: tool_call_id,
-        name: approval.name,
-        decision: decision
-      },
-      state.event_log_server
-    )
+    record_critical_event(state, :approval_resolved, %{
+      approval_id: tool_call_id,
+      tool_call_id: tool_call_id,
+      name: approval.name,
+      decision: decision
+    })
 
     state = maybe_record_rejection(state, approval, decision)
     state = %{state | pending_approval: nil}
@@ -1699,12 +1720,11 @@ defmodule MingaAgent.Session do
     state = track_active_tool_start(state, event.tool_call_id, event.name)
     state = set_working_status(state, :tool_executing)
 
-    EventLog.record(
-      state.session_id,
-      :tool_call_started,
-      %{tool_call_id: event.tool_call_id, name: event.name, args: event.args},
-      state.event_log_server
-    )
+    record_critical_event(state, :tool_call_started, %{
+      tool_call_id: event.tool_call_id,
+      name: event.name,
+      args: event.args
+    })
 
     broadcast(state, {:tool_started, event.name, event.args})
     notify_messages_changed(state)
@@ -1774,12 +1794,12 @@ defmodule MingaAgent.Session do
     state = track_active_tool_end(state, event.tool_call_id)
     status = if event.is_error, do: :error, else: :done
 
-    EventLog.record(
-      state.session_id,
-      :tool_call_finished,
-      %{tool_call_id: event.tool_call_id, name: event.name, result: event.result, status: status},
-      state.event_log_server
-    )
+    record_critical_event(state, :tool_call_finished, %{
+      tool_call_id: event.tool_call_id,
+      name: event.name,
+      result: event.result,
+      status: status
+    })
 
     broadcast(state, {:tool_ended, event.name, event.result, status})
     notify_messages_changed(state)
@@ -1944,12 +1964,7 @@ defmodule MingaAgent.Session do
 
   @spec append_system_message(state(), String.t(), Message.system_level()) :: state()
   defp append_system_message(state, text, level) do
-    EventLog.record(
-      state.session_id,
-      :system_message,
-      %{message: text, level: level},
-      state.event_log_server
-    )
+    record_critical_event(state, :system_message, %{message: text, level: level})
 
     msg = Message.system(text, level)
     append_msg(state, msg)
@@ -2289,14 +2304,14 @@ defmodule MingaAgent.Session do
     maybe_schedule_idle_gc(state)
   end
 
-  @spec record_user_disconnected(state(), pid(), attachment_role() | nil, term()) :: :ok
+  @spec record_user_disconnected(state(), pid(), attachment_role() | nil, term()) ::
+          EventLog.admission_result()
   defp record_user_disconnected(state, pid, role, reason) do
-    EventLog.record(
-      state.session_id,
-      :user_disconnected,
-      %{pid: inspect(pid), role: role, reason: inspect(reason)},
-      state.event_log_server
-    )
+    record_critical_event(state, :user_disconnected, %{
+      pid: inspect(pid),
+      role: role,
+      reason: inspect(reason)
+    })
   end
 
   @spec maybe_schedule_idle_gc(map()) :: map()
@@ -2359,6 +2374,23 @@ defmodule MingaAgent.Session do
     Enum.each(state.subscribers, fn pid ->
       send(pid, {:agent_event, session_pid, event})
     end)
+  end
+
+  @spec notify_event_log_failure(state(), Failure.t()) :: :ok
+  defp notify_event_log_failure(state, failure) do
+    session_pid = self()
+
+    Enum.each(state.subscribers, fn pid ->
+      send(pid, {:agent_event, session_pid, failure})
+    end)
+  end
+
+  @spec notify_retained_event_log_failure(pid(), event_log_failure() | nil) :: :ok
+  defp notify_retained_event_log_failure(_pid, nil), do: :ok
+
+  defp notify_retained_event_log_failure(pid, failure) do
+    send(pid, {:agent_event, self(), Failure.retained(failure)})
+    :ok
   end
 
   @spec maybe_mark_interrupted_work(state(), boolean()) :: :ok
@@ -2433,21 +2465,14 @@ defmodule MingaAgent.Session do
     approval_ids = open_approval_ids(events)
 
     Enum.each(tool_ids, fn tool_call_id ->
-      EventLog.record(
-        state.session_id,
-        :tool_call_interrupted,
-        %{tool_call_id: tool_call_id},
-        state.event_log_server
-      )
+      record_critical_event(state, :tool_call_interrupted, %{tool_call_id: tool_call_id})
     end)
 
     Enum.each(approval_ids, fn approval_id ->
-      EventLog.record(
-        state.session_id,
-        :approval_interrupted,
-        %{approval_id: approval_id, tool_call_id: approval_id},
-        state.event_log_server
-      )
+      record_critical_event(state, :approval_interrupted, %{
+        approval_id: approval_id,
+        tool_call_id: approval_id
+      })
     end)
   end
 
@@ -2483,15 +2508,60 @@ defmodule MingaAgent.Session do
     |> Enum.filter(&is_binary/1)
   end
 
-  @spec record_broadcast_event(state(), term()) :: :ok
+  @spec record_broadcast_event(state(), term()) ::
+          EventLog.admission_result() | EventLog.best_effort_admission_result() | :ok
   defp record_broadcast_event(state, event) do
     case event_log_entry(event) do
       {event_type, payload} ->
-        EventLog.record(state.session_id, event_type, payload, state.event_log_server)
+        record_event_log_entry(state, event_type, payload)
 
       nil ->
         :ok
     end
+  end
+
+  @spec record_event_log_entry(state(), EventLog.EventRecord.event_type(), map()) ::
+          EventLog.admission_result() | EventLog.best_effort_admission_result()
+  defp record_event_log_entry(state, :assistant_delta, payload) do
+    EventLog.record_best_effort(
+      state.session_id,
+      :assistant_delta,
+      payload,
+      state.event_log_server
+    )
+  end
+
+  defp record_event_log_entry(state, :thinking_delta, payload) do
+    EventLog.record_best_effort(
+      state.session_id,
+      :thinking_delta,
+      payload,
+      state.event_log_server
+    )
+  end
+
+  defp record_event_log_entry(state, event_type, payload) do
+    record_critical_event(state, event_type, payload)
+  end
+
+  @spec record_critical_event(state(), EventLog.EventRecord.event_type(), map()) ::
+          EventLog.admission_result()
+  defp record_critical_event(state, event_type, payload) do
+    result = EventLog.record(state.session_id, event_type, payload, state.event_log_server)
+    report_admission_failure(state, event_type, result)
+    result
+  end
+
+  @spec report_admission_failure(
+          state(),
+          EventLog.EventRecord.event_type(),
+          EventLog.admission_result()
+        ) :: :ok
+  defp report_admission_failure(_state, _event_type, {:queued, _receipt}), do: :ok
+
+  defp report_admission_failure(_state, event_type, {:error, reason}) do
+    send(self(), {:event_log_failure, Failure.admission(event_type, reason)})
+    :ok
   end
 
   @spec event_log_entry(term()) :: {EventLog.EventRecord.event_type(), map()} | nil
@@ -2613,23 +2683,13 @@ defmodule MingaAgent.Session do
     {Message.user(text, attachments), parts}
   end
 
-  @spec record_user_message(state(), Message.t()) :: :ok
+  @spec record_user_message(state(), Message.t()) :: EventLog.admission_result()
   defp record_user_message(state, {:user, text}) do
-    EventLog.record(
-      state.session_id,
-      :user_message,
-      %{text: text, attachments: []},
-      state.event_log_server
-    )
+    record_critical_event(state, :user_message, %{text: text, attachments: []})
   end
 
   defp record_user_message(state, {:user, text, attachments}) do
-    EventLog.record(
-      state.session_id,
-      :user_message,
-      %{text: text, attachments: attachments},
-      state.event_log_server
-    )
+    record_critical_event(state, :user_message, %{text: text, attachments: attachments})
   end
 
   @spec parse_size_kb(String.t()) :: non_neg_integer()
@@ -3802,13 +3862,12 @@ defmodule MingaAgent.Session do
   end
 
   @impl GenServer
+  @spec terminate(term(), state()) :: :ok
   def terminate(reason, state) do
-    EventLog.record(
-      state.session_id,
-      :session_stopped,
-      %{reason: inspect(reason), status: state.status},
-      state.event_log_server
-    )
+    record_critical_event(state, :session_stopped, %{
+      reason: inspect(reason),
+      status: state.status
+    })
 
     dispatch_session_end(state, reason)
     release_provider_lease(state.provider_lease)

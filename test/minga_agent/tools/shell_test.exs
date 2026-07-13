@@ -90,20 +90,22 @@ defmodule MingaAgent.Tools.ShellTest do
         :ok
       end
 
-      # Sleep for 0.5s (longer than the 250ms running indicator threshold).
-      # The debounce cycle is 200ms, so the indicator fires at ~400ms.
-      assert {:ok, _output} =
-               Shell.execute("sleep 0.5 && echo done", dir, 5,
-                 on_output: on_output,
-                 running_indicator_ms: 250
-               )
+      fifo = Path.join(dir, "silent-command-release")
+      assert {"", 0} = System.cmd("mkfifo", [fifo])
 
-      chunks = collect_shell_chunks()
-      combined = IO.iodata_to_binary(chunks)
+      task =
+        Task.async(fn ->
+          Shell.execute("cat #{inspect(fifo)} >/dev/null && echo done", dir, 5,
+            on_output: on_output,
+            running_indicator_ms: 250
+          )
+        end)
 
-      # Should have received at least one running indicator
-      assert combined =~ "[running...]"
-      # And the final output
+      assert_receive {:shell_chunk, "[running...]\n"}, 2_000
+      File.write!(fifo, "release\n")
+      assert {:ok, _output} = Task.await(task)
+
+      combined = collect_shell_chunks() |> IO.iodata_to_binary()
       assert combined =~ "done"
     end
 
