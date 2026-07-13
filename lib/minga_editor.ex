@@ -87,6 +87,7 @@ defmodule MingaEditor do
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalShellState
 
   alias MingaEditor.MouseHoverTooltip
 
@@ -852,38 +853,20 @@ defmodule MingaEditor do
 
   def handle_info({:git_commit_message_generated, {:ok, message}}, state) do
     state = %{state | git_commit_gen_ref: nil}
-
-    state =
-      if ModalOverlay.active?(state.shell_runtime.state.modal) do
-        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
-          state,
-          "Commit message ready (prompt already open)"
-        )
-      else
-        state
-        |> open_git_commit_prompt(default: message)
-        |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("Commit message generated")
-      end
-
+    state = apply_git_commit_generation_result(state, {:ok, message})
     {:noreply, Renderer.render_or_async(state)}
   end
 
   def handle_info({:git_commit_message_generated, {:error, reason}}, state) do
     state = %{state | git_commit_gen_ref: nil}
-    state = MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, reason)
+    state = apply_git_commit_generation_result(state, {:error, reason})
     {:noreply, Renderer.render_or_async(state)}
   end
 
   def handle_info(:git_generate_timeout, %{git_commit_gen_ref: ref} = state)
       when ref != nil do
     state = %{state | git_commit_gen_ref: nil}
-
-    state =
-      MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
-        state,
-        "Commit message generation timed out"
-      )
-
+    state = apply_git_commit_generation_result(state, :timeout)
     {:noreply, Renderer.render_or_async(state)}
   end
 
@@ -939,19 +922,26 @@ defmodule MingaEditor do
   # mints a new revision (or drops the picker), so older in-flight fetches land
   # here as stale and are discarded. Picker fetches retain this read-only
   # latest-wins path; #2805 migrates external formatting and git mutations.
-  def handle_info({:picker_candidates_result, source_module, revision, result}, state) do
-    case state.shell_runtime.state.modal do
-      {:picker, %{picker_ui: %{source: ^source_module} = picker_ui} = payload} ->
-        if MingaEditor.State.Picker.current_fetch?(picker_ui, revision) do
-          new_state = handle_picker_candidates(state, payload, result)
-          {:noreply, Renderer.render_or_async(new_state)}
-        else
-          {:noreply, state}
-        end
-
-      _ ->
-        {:noreply, state}
+  def handle_info(
+        {:picker_candidates_result, source_module, revision, result},
+        %{
+          shell_runtime: %{
+            state: %TraditionalShellState{
+              modal: {:picker, %{picker_ui: %{source: source_module} = picker_ui} = payload}
+            }
+          }
+        } = state
+      ) do
+    if MingaEditor.State.Picker.current_fetch?(picker_ui, revision) do
+      new_state = handle_picker_candidates(state, payload, result)
+      {:noreply, Renderer.render_or_async(new_state)}
+    else
+      {:noreply, state}
     end
+  end
+
+  def handle_info({:picker_candidates_result, _source_module, _revision, _result}, state) do
+    {:noreply, state}
   end
 
   # ── Async completion processing result ──────────────────────────────────
@@ -987,6 +977,45 @@ defmodule MingaEditor do
   def handle_info(_msg, state) do
     {:noreply, state}
   end
+
+  @spec apply_git_commit_generation_result(
+          state(),
+          {:ok, String.t()} | {:error, String.t()} | :timeout
+        ) :: state()
+  defp apply_git_commit_generation_result(
+         %{shell_runtime: %{state: %TraditionalShellState{modal: modal}}} = state,
+         {:ok, message}
+       ) do
+    if ModalOverlay.active?(modal) do
+      MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+        state,
+        "Commit message ready (prompt already open)"
+      )
+    else
+      state
+      |> open_git_commit_prompt(default: message)
+      |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("Commit message generated")
+    end
+  end
+
+  defp apply_git_commit_generation_result(
+         %{shell_runtime: %{state: %TraditionalShellState{}}} = state,
+         {:error, reason}
+       ) do
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, reason)
+  end
+
+  defp apply_git_commit_generation_result(
+         %{shell_runtime: %{state: %TraditionalShellState{}}} = state,
+         :timeout
+       ) do
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      "Commit message generation timed out"
+    )
+  end
+
+  defp apply_git_commit_generation_result(state, _result), do: state
 
   @spec apply_effect_outcome(state(), Outcome.t()) :: {state(), Outcome.t()}
   defp apply_effect_outcome(state, %Outcome{request: %Request{handler: handler}} = outcome) do
