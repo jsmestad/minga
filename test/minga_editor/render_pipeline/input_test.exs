@@ -43,7 +43,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       assert input.shell_id == Runtime.id(state.shell_runtime)
       assert input.shell == Runtime.module(state.shell_runtime)
       assert input.shell_identity == Runtime.identity(state.shell_runtime)
-      assert input.shell_state == Runtime.state(state.shell_runtime)
+      assert input.shell_runtime.state == Runtime.state(state.shell_runtime)
       assert input.font_registry == MingaEditor.UI.FontRegistry.new()
       assert input.message_store == state.message_store
       assert input.editing_model == state.editing_model

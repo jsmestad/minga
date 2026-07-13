@@ -186,7 +186,7 @@ defmodule MingaEditor.Commands.FileTree do
          %{path: path} <- FileTree.selected_entry(tree) do
       state
       |> Helpers.force_clipboard_sync(Path.expand(path))
-      |> EditorState.set_status("Copied #{Path.expand(path)}")
+      |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("Copied #{Path.expand(path)}")
     else
       _ -> state
     end
@@ -208,7 +208,10 @@ defmodule MingaEditor.Commands.FileTree do
         state
 
       %FileTreeState{clipboard_mark: nil} ->
-        EditorState.set_status(state, "No file tree copy or move is pending")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "No file tree copy or move is pending"
+        )
 
       %FileTreeState{clipboard_mark: mark, tree: tree} ->
         target_dir = selected_target_dir(tree)
@@ -719,7 +722,10 @@ defmodule MingaEditor.Commands.FileTree do
         )
       )
 
-    EditorState.set_status(state, "Marked #{entry.name} for #{label}")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      "Marked #{entry.name} for #{label}"
+    )
   end
 
   @spec selected_target_dir(FileTree.t()) :: String.t()
@@ -944,10 +950,16 @@ defmodule MingaEditor.Commands.FileTree do
             BufferRegistry.do_file_tree_open(state, pid, path, tree)
 
           {:error, :binary_file} ->
-            EditorState.set_status(state, "Cannot open binary file: #{Path.basename(path)}")
+            MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+              state,
+              "Cannot open binary file: #{Path.basename(path)}"
+            )
 
           {:error, _} ->
-            EditorState.set_status(state, "Cannot open: #{Path.basename(path)}")
+            MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+              state,
+              "Cannot open: #{Path.basename(path)}"
+            )
         end
 
       idx ->

@@ -1048,7 +1048,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       background_subagent_count: 2,
       active_background_subagent_label: "session-3: tests",
       active_tool_name: "read_file",
-      status_msg: nil
+      notice: nil
     }
   end
 

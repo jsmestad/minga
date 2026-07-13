@@ -100,7 +100,12 @@ defmodule MingaEditor.Agent.SemanticUI.BundledStatusNoteTest do
     table: table
   } do
     state = base_state(table)
-    cleanup_state = EditorState.set_status(state, "approval and transcript state stay core-owned")
+
+    cleanup_state =
+      MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+        state,
+        "approval and transcript state stay core-owned"
+      )
 
     :ok = BundledStatusNote.register(table)
 
@@ -111,7 +116,7 @@ defmodule MingaEditor.Agent.SemanticUI.BundledStatusNoteTest do
 
     assert Registry.transcript_enrichments(table) == []
 
-    assert EditorState.status_msg(cleanup_state) ==
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(cleanup_state) ==
              "approval and transcript state stay core-owned"
   end
 

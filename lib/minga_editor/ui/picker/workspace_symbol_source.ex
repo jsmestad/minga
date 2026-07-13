@@ -141,8 +141,14 @@ defmodule MingaEditor.UI.Picker.WorkspaceSymbolSource do
     case idx do
       nil ->
         case Commands.start_buffer(file_path, EditorState.options_server(state)) do
-          {:ok, pid} -> Commands.add_buffer(state, pid)
-          {:error, _} -> EditorState.set_status(state, "Could not open #{file_path}")
+          {:ok, pid} ->
+            Commands.add_buffer(state, pid)
+
+          {:error, _} ->
+            MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+              state,
+              "Could not open #{file_path}"
+            )
         end
 
       i ->

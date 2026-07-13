@@ -77,12 +77,19 @@ defmodule MingaEditor.UI.Picker.OptionScopeSource do
       Buffer.set_option(buf, name, value)
     end
 
-    MingaEditor.State.set_status(state, format_confirmation(name, value, "this buffer"))
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      format_confirmation(name, value, "this buffer")
+    )
   end
 
   defp apply_scoped(:global, name, value, state) do
     Config.set_option(name, value)
-    MingaEditor.State.set_status(state, format_confirmation(name, value, "all buffers"))
+
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      format_confirmation(name, value, "all buffers")
+    )
   end
 
   @spec format_confirmation(atom(), term(), String.t()) :: String.t()

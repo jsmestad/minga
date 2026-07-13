@@ -58,7 +58,7 @@ defmodule MingaGitPorcelain.CommandsConflictTest do
     state = GitCommands.execute(state, :git_accept_current_conflict)
 
     assert BufferProcess.content(buffer) == "before\nours\nafter"
-    assert EditorState.status_msg(state) == "Resolved all merge conflicts"
+    assert state.shell_runtime.state.notice.message == "Resolved all merge conflicts"
   end
 
   test "click command accepts incoming for the current conflict start line" do
@@ -84,7 +84,7 @@ defmodule MingaGitPorcelain.CommandsConflictTest do
     assert File.read!(path) == content
     assert GitStub.staged_paths(root) == []
     refute_receive {:minga_event, :buffer_saved, _}
-    assert EditorState.status_msg(state) == "Resolved merge conflict"
+    assert state.shell_runtime.state.notice.message == "Resolved merge conflict"
   end
 
   test "click command rejects stale start lines" do
@@ -95,7 +95,7 @@ defmodule MingaGitPorcelain.CommandsConflictTest do
     state = GitCommands.execute(state, {:git_accept_conflict, :incoming, 0})
 
     assert BufferProcess.content(buffer) == content
-    assert EditorState.status_msg(state) == "Merge conflict action is stale"
+    assert state.shell_runtime.state.notice.message == "Merge conflict action is stale"
   end
 
   test "resolving the final file-backed conflict saves, stages, and publishes buffer_saved", %{
@@ -116,7 +116,9 @@ defmodule MingaGitPorcelain.CommandsConflictTest do
 
     assert File.read!(path) == "ours\ntheirs"
     assert GitStub.staged_paths(root) == ["conflict.txt"]
-    assert EditorState.status_msg(state) == "Resolved all merge conflicts and staged conflict.txt"
+
+    assert state.shell_runtime.state.notice.message ==
+             "Resolved all merge conflicts and staged conflict.txt"
   end
 
   defp start_buffer(content) do

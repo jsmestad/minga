@@ -38,53 +38,64 @@ defmodule MingaEditor.Commands.Lsp do
 
     case clients do
       [] ->
-        EditorState.set_status(state, "No language servers running")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No language servers running")
 
       _ ->
         markdown = build_lsp_info_markdown(clients)
         vp = state.terminal_viewport
-        popup = HoverPopup.new(markdown, div(vp.rows, 2), div(vp.cols, 4), theme: state.theme)
+
+        popup =
+          MingaEditor.HoverPopup.Builder.new(markdown, div(vp.rows, 2), div(vp.cols, 4),
+            theme: state.theme
+          )
+
         popup = HoverPopup.focus(popup)
-        EditorState.set_hover_popup(state, popup)
+        MingaEditor.Shell.Traditional.HoverPopupWorkflow.show(state, popup)
     end
   end
 
   def execute(%{workspace: %{buffers: %{active: nil}}} = state, :lsp_restart) do
-    EditorState.set_status(state, "No active buffer")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No active buffer")
   end
 
   def execute(state, :lsp_restart) do
     case clients_and_keys_for_active(state) do
       [] ->
-        EditorState.set_status(state, "No LSP server for this buffer")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "No LSP server for this buffer"
+        )
 
       client_keys ->
         results = Enum.map(client_keys, &restart_one/1)
         msg = format_results(results, "Restarted", "Failed to restart")
         # Status will update via :lsp_status_changed events from the new clients
-        EditorState.set_status(state, msg)
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, msg)
     end
   end
 
   def execute(%{workspace: %{buffers: %{active: nil}}} = state, :lsp_stop) do
-    EditorState.set_status(state, "No active buffer")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No active buffer")
   end
 
   def execute(state, :lsp_stop) do
     case clients_and_keys_for_active(state) do
       [] ->
-        EditorState.set_status(state, "No LSP server for this buffer")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "No LSP server for this buffer"
+        )
 
       client_keys ->
         results = Enum.map(client_keys, &stop_one/1)
         msg = format_results(results, "Stopped", "Failed to stop")
         # Status will update via :lsp_status_changed events from the stopped clients
-        EditorState.set_status(state, msg)
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, msg)
     end
   end
 
   def execute(%{workspace: %{buffers: %{active: nil}}} = state, :lsp_start) do
-    EditorState.set_status(state, "No active buffer")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No active buffer")
   end
 
   def execute(state, :lsp_start) do
@@ -94,14 +105,17 @@ defmodule MingaEditor.Commands.Lsp do
 
     case configs do
       [] ->
-        EditorState.set_status(state, "No LSP server available for #{filetype}")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "No LSP server available for #{filetype}"
+        )
 
       _ ->
         root = Minga.Project.root() || "."
         {results, state} = start_servers(configs, root, state, buf)
         msg = format_results(results, "Started", "Failed to start")
         # Status will update via :lsp_status_changed events from the new clients
-        EditorState.set_status(state, msg)
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, msg)
     end
   end
 

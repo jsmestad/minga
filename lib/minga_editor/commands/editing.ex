@@ -557,7 +557,7 @@ defmodule MingaEditor.Commands.Editing do
         :cmd_cut
       ) do
     if Buffer.read_only?(buf) do
-      EditorState.set_status(state, "Buffer is read-only")
+      MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Buffer is read-only")
     else
       cursor = Buffer.cursor(buf)
       {yanked, reg_type} = cmd_visual_delete_text(buf, ms, cursor)
@@ -569,7 +569,7 @@ defmodule MingaEditor.Commands.Editing do
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :cmd_cut) when is_pid(buf) do
     if Buffer.read_only?(buf) do
-      EditorState.set_status(state, "Buffer is read-only")
+      MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Buffer is read-only")
     else
       {line, _col} = Buffer.cursor(buf)
       yanked = Buffer.content_on_lines(buf, line, line) <> "\n"

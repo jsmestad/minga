@@ -289,10 +289,11 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
       assert result.shell_runtime.state.tab_bar == state.shell_runtime.state.tab_bar
 
-      assert EditorState.status_msg(result) =~
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) =~
                "Actions: Keep workspace, Review drafts, Discard drafts and close"
 
-      assert EditorState.status_msg(result) =~ "Dirty buffers are separate"
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) =~
+               "Dirty buffers are separate"
     end
 
     test "discard and close removes a workspace with drafts" do
@@ -343,7 +344,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
       assert workspace.review.state == :needs_review
       assert workspace.review.changed_files == [changed_file]
 
-      assert EditorState.status_msg(result) ==
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) ==
                "Stop the agent session before closing this workspace"
 
       assert :ok = ProjectView.write_file(project_view, "lib/a.ex", "draft-again\n")
@@ -402,7 +403,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
       assert workspace != nil
 
-      assert EditorState.status_msg(result) ==
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) ==
                "Stop the agent session before closing this workspace"
 
       assert result.shell_runtime.state.tab_bar == state.shell_runtime.state.tab_bar
@@ -449,7 +450,9 @@ defmodule MingaEditor.Commands.WorkspaceTest do
       assert workspace.review.state == :needs_review
       assert workspace.review.last_error == :close_failed
       assert workspace.agent_status == :error
-      assert EditorState.status_msg(result) == "Workspace close failed: :close_failed"
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) ==
+               "Workspace close failed: :close_failed"
     end
 
     test "resolve conflicts keeps workspace conflicted when promote still conflicts", %{
@@ -538,7 +541,9 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
       assert review.state == :needs_review
       assert review.changed_files == [file_ref()]
-      assert EditorState.status_msg(result) =~ "Workspace review transition failed"
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) =~
+               "Workspace review transition failed"
     end
   end
 
@@ -564,7 +569,9 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
       assert review.state == :needs_review
       assert review.changed_files == [file_ref()]
-      assert EditorState.status_msg(result) =~ "Workspace review transition failed"
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) =~
+               "Workspace review transition failed"
     end
 
     test "workspace_discard reports a dead project view instead of clearing review state", %{
@@ -590,7 +597,9 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
       assert review.state == :needs_review
       assert review.changed_files == [file_ref()]
-      assert EditorState.status_msg(result) =~ "Workspace review transition failed"
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) =~
+               "Workspace review transition failed"
     end
 
     test "workspace_discard_and_close keeps the workspace open when discard fails", %{
@@ -615,7 +624,9 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
       assert TabBar.get_workspace(result.shell_runtime.state.tab_bar, 1) != nil
       assert TabBar.active_workspace_id(result.shell_runtime.state.tab_bar) == 1
-      assert EditorState.status_msg(result) =~ "Workspace review transition failed"
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) =~
+               "Workspace review transition failed"
     end
 
     test "workspace_discard reports direct discard_not_supported and keeps review state", %{
@@ -637,7 +648,9 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
       assert review.state == :needs_review
       assert review.changed_files == [file_ref()]
-      assert EditorState.status_msg(result) =~ "discard_not_supported"
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) =~
+               "discard_not_supported"
     end
   end
 
@@ -674,7 +687,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
       result = Workspace.workspace_move_file(state)
 
-      assert EditorState.status_msg(result) == "No other workspaces"
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) == "No other workspaces"
     end
   end
 

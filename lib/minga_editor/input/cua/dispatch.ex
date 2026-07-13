@@ -45,7 +45,6 @@ defmodule MingaEditor.Input.CUA.Dispatch do
     state =
       Enum.reduce(commands, state, fn cmd, acc ->
         case Commands.execute(acc, cmd) do
-          {s2, {:whichkey_update, wk}} -> EditorState.set_whichkey(s2, wk)
           s2 when is_map(s2) -> s2
           {s2, _action} -> s2
         end

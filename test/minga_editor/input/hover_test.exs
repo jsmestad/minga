@@ -26,7 +26,7 @@ defmodule MingaEditor.Input.HoverTest do
         do: HoverPopup.focus(popup),
         else: popup
 
-    MingaEditor.State.set_hover_popup(state, popup)
+    MingaEditor.Shell.Traditional.HoverPopupWorkflow.show(state, popup)
   end
 
   describe "handle_key/3 with no hover popup" do
@@ -61,7 +61,7 @@ defmodule MingaEditor.Input.HoverTest do
       state = state_with_hover(focused: true)
       # Scroll down first so we can scroll up
       state =
-        MingaEditor.State.set_hover_popup(
+        MingaEditor.Shell.Traditional.HoverPopupWorkflow.show(
           state,
           HoverPopup.scroll_down(EditorState.hover_popup(state))
         )
@@ -124,7 +124,7 @@ defmodule MingaEditor.Input.HoverTest do
         |> HoverPopup.new(10, 20, expanded: "the full expanded text")
         |> HoverPopup.focus()
 
-      MingaEditor.State.set_hover_popup(base_state(), popup)
+      MingaEditor.Shell.Traditional.HoverPopupWorkflow.show(base_state(), popup)
     end
 
     test "o toggles an expandable popup without dismissing it" do

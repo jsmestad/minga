@@ -39,9 +39,9 @@ defmodule MingaEditor.Commands.Project do
 
   def execute(state, :project_invalidate) do
     Project.invalidate()
-    EditorState.set_status(state, "Project file cache invalidated")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Project file cache invalidated")
   catch
-    :exit, _ -> EditorState.set_status(state, "No project active")
+    :exit, _ -> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No project active")
   end
 
   def execute(state, :project_add) do

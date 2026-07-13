@@ -88,7 +88,7 @@ defmodule MingaEditor.Renderer.Context do
           confirm_match: Match.t() | nil,
           highlight: Highlight.t() | nil,
           cursorline_bg: MingaEditor.UI.Theme.color() | nil,
-          nav_flash: MingaEditor.NavFlash.t() | nil,
+          nav_flash: MingaEditor.Shell.Traditional.NavFlash.t() | nil,
           nav_flash_bg: MingaEditor.UI.Theme.color() | nil,
           editor_bg: MingaEditor.UI.Theme.color(),
           has_sign_column: boolean(),

@@ -17,7 +17,7 @@ defmodule MingaEditor.FileChangeTest do
     notify_file_changed(ctx, path)
 
     assert buffer_content(ctx) == "updated externally"
-    assert status_msg(ctx) =~ "reloaded"
+    assert notice_message(ctx) =~ "reloaded"
   end
 
   @tag :tmp_dir
@@ -30,8 +30,8 @@ defmodule MingaEditor.FileChangeTest do
     File.write!(path, "external change that is longer")
     notify_file_changed(ctx, path)
 
-    assert status_msg(ctx) =~ "[r]eload"
-    assert status_msg(ctx) =~ "[k]eep"
+    assert notice_message(ctx) =~ "[r]eload"
+    assert notice_message(ctx) =~ "[k]eep"
   end
 
   @tag :tmp_dir
@@ -46,7 +46,7 @@ defmodule MingaEditor.FileChangeTest do
     send_key_sync(ctx, ?r)
 
     assert buffer_content(ctx) == "reloaded content"
-    assert status_msg(ctx) =~ "reloaded"
+    assert notice_message(ctx) =~ "reloaded"
     refute conflict_open?(ctx)
   end
 

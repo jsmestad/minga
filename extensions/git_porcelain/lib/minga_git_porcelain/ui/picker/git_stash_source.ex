@@ -33,7 +33,7 @@ defmodule MingaGitPorcelain.UI.Picker.GitStashSource do
   end
 
   def on_select(%Item{id: {:stash, _git_root, _index, _action}, label: label}, state) do
-    EditorState.set_status(state, "Stash: #{label}")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Stash: #{label}")
   end
 
   def on_select(_, state), do: state
@@ -101,10 +101,13 @@ defmodule MingaGitPorcelain.UI.Picker.GitStashSource do
     case Git.stash_drop(git_root, index) do
       :ok ->
         refresh_repo(git_root)
-        EditorState.set_status(state, "Dropped stash@{#{index}}")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Dropped stash@{#{index}}")
 
       {:error, reason} ->
-        EditorState.set_status(state, "Drop stash failed: #{reason}")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Drop stash failed: #{reason}"
+        )
     end
   end
 

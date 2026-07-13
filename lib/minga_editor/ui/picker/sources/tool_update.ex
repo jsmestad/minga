@@ -33,10 +33,13 @@ defmodule MingaEditor.UI.Picker.Sources.ToolUpdate do
   def on_select(%Item{id: name}, state) do
     case ToolManager.update(name) do
       :ok ->
-        MingaEditor.State.set_status(state, "Updating #{name}...")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Updating #{name}...")
 
       {:error, reason} ->
-        MingaEditor.State.set_status(state, "Failed to update #{name}: #{reason}")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Failed to update #{name}: #{reason}"
+        )
     end
   end
 

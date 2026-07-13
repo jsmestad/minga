@@ -109,6 +109,44 @@ defmodule MingaEditor.EffectSchedulerTest do
     refute_received {:effect_result, ^scheduler, %Outcome{request: %{id: ^request_id}}}
   end
 
+  test "operation cancellation distinguishes an unavailable scheduler" do
+    assert EffectScheduler.cancel_operation(nil, 1) == {:error, :scheduler_unavailable}
+  end
+
+  test "semantic operation identity cancels its correlated request" do
+    scheduler = start_scheduler()
+    request = EffectProbe.request(self(), :cancel_operation, :resource, Policy.fifo(0))
+
+    assert EffectScheduler.schedule(scheduler, request) == {:ok, request.id, :running}
+    assert_receive {:effect_started, :cancel_operation, _worker, [:cancel_operation]}
+
+    assert :ok = EffectScheduler.cancel_operation(scheduler, request.operation_id)
+    outcome = receive_candidate(scheduler, request.id, :canceled)
+    assert outcome.reason == :requested
+    finalize_once(scheduler, outcome)
+
+    assert EffectScheduler.cancel_operation(scheduler, request.operation_id) ==
+             {:error, :not_found}
+  end
+
+  test "semantic operation identity cancels a queued request" do
+    scheduler = start_scheduler()
+    first = EffectProbe.request(self(), :running_operation, :resource, Policy.fifo(1))
+    queued = EffectProbe.request(self(), :queued_operation, :resource, Policy.fifo(1))
+
+    assert {:ok, first_id, :running} = EffectScheduler.schedule(scheduler, first)
+    assert {:ok, queued_id, :queued} = EffectScheduler.schedule(scheduler, queued)
+    assert_receive {:effect_started, :running_operation, _worker, [:running_operation]}
+
+    assert :ok = EffectScheduler.cancel_operation(scheduler, queued.operation_id)
+    queued_outcome = receive_candidate(scheduler, queued_id, :canceled)
+    assert queued_outcome.reason == :requested
+    finalize_once(scheduler, queued_outcome)
+
+    assert :ok = EffectScheduler.cancel_operation(scheduler, first.operation_id)
+    finalize_once(scheduler, receive_candidate(scheduler, first_id, :canceled))
+  end
+
   test "completion wins a cancellation race without a second terminal outcome" do
     scheduler = start_scheduler()
     request = EffectProbe.request(self(), :complete_first, :resource, Policy.fifo(0))

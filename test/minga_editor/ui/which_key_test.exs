@@ -200,25 +200,4 @@ defmodule MingaEditor.UI.WhichKeyTest do
       assert WhichKey.bindings_from_node(leaf) == []
     end
   end
-
-  # ── start_timeout/1 and cancel_timeout/1 ─────────────────────────────────────
-
-  describe "timer functions" do
-    test "start_timeout sends :whichkey_timeout after delay" do
-      ref = WhichKey.start_timeout(10)
-      assert_receive {:whichkey_timeout, ^ref}, 200
-    end
-
-    test "cancel_timeout prevents the timer from firing" do
-      ref = WhichKey.start_timeout(500)
-      :ok = WhichKey.cancel_timeout(ref)
-      refute_receive {:whichkey_timeout, ^ref}, 100
-    end
-
-    test "start_timeout returns a reference" do
-      ref = WhichKey.start_timeout(10_000)
-      assert is_reference(ref)
-      WhichKey.cancel_timeout(ref)
-    end
-  end
 end

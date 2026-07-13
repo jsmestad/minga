@@ -18,7 +18,6 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
   alias MingaEditor.SignatureHelp
   alias MingaEditor.State.Highlighting
   alias MingaEditor.State.LSP, as: LSPState
-  alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.OperationFeedback
   alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
   alias MingaEditor.State.Windows
@@ -179,7 +178,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       timer = make_ref()
       trigger = %{CompletionTrigger.new() | debounce_timer: timer}
       payload = CompletionPayload.new(:tab1, trigger: trigger)
-      state = EditorState.set_modal(state, {:completion, payload})
+      state = ModalWorkflow.transition(state, :completion, payload)
       buffer = state.workspace.buffers.active
 
       {new_state, effects} =
@@ -189,7 +188,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       assert_receive {:lsp_request, "textDocument/completion", _params, caller, ref}
       assert caller == self()
 
-      new_trigger = ModalOverlay.completion_trigger(new_state)
+      new_trigger = ModalWorkflow.completion_trigger(new_state)
       assert new_trigger.pending_ref == ref
       assert MapSet.member?(new_trigger.pending_refs, ref)
       assert new_trigger.debounce_timer == timer
@@ -211,7 +210,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       completion = Completion.new(Completion.parse_response(%{"items" => [item]}), {0, 0})
       trigger = %{CompletionTrigger.new() | pending_ref: make_ref(), pending_refs: MapSet.new()}
       payload = CompletionPayload.new(:tab1, completion: completion, trigger: trigger)
-      state = EditorState.set_modal(state, {:completion, payload})
+      state = ModalWorkflow.transition(state, :completion, payload)
 
       {new_state, effects} = LspEventHandler.handle(state, {:completion_resolve, 0})
 
@@ -278,7 +277,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       ref = make_ref()
       trigger = %{CompletionTrigger.new() | pending_ref: ref, pending_refs: MapSet.new([ref])}
       payload = CompletionPayload.new(:tab1, trigger: trigger)
-      state = EditorState.set_modal(state, {:completion, payload})
+      state = ModalWorkflow.transition(state, :completion, payload)
 
       completion_result = %{
         "items" => [
@@ -299,9 +298,9 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       # The handler only does cheap ref bookkeeping: pending refs are cleared
       # synchronously, but the parse/sort/filter is deferred to a Task (#2633),
       # so the menu is not yet visible right after handle/2 returns.
-      assert ModalOverlay.completion(new_state) == nil
+      assert ModalWorkflow.completion(new_state) == nil
 
-      new_trigger = ModalOverlay.completion_trigger(new_state)
+      new_trigger = ModalWorkflow.completion_trigger(new_state)
       assert new_trigger.pending_ref == nil
       assert MapSet.new() == new_trigger.pending_refs
 
@@ -311,7 +310,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       assert_receive {:completion_processed, gen, mode, processed, trigger_pos}, 5_000
       applied = CompletionHandling.apply_processed(new_state, gen, mode, processed, trigger_pos)
 
-      completion = ModalOverlay.completion(applied)
+      completion = ModalWorkflow.completion(applied)
       assert %Completion{} = completion
       assert [%{label: "hello_world"}] = completion.filtered
       assert completion.selected == 0

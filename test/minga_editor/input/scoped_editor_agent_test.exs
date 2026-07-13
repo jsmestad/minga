@@ -172,7 +172,7 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
       assert TabBar.filter_by_kind(EditorState.tab_bar(new_state), :file) == []
       assert new_state.workspace.buffers.active == file_buffer
       assert hd(new_state.workspace.buffers.list) == file_buffer
-      assert EditorState.status_msg(new_state) == "No file tabs in this workspace"
+      assert new_state.shell_runtime.state.notice.message == "No file tabs in this workspace"
     end
 
     test "? toggles help", %{state: state} do

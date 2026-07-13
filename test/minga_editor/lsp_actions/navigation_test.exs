@@ -23,34 +23,34 @@ defmodule MingaEditor.LspActions.NavigationTest do
   describe "handle_type_definition_response/2" do
     test "error sets status message" do
       state = LspActions.handle_type_definition_response(stub_state(), {:error, "timeout"})
-      assert EditorState.status_msg(state) == "Type definition request failed"
+      assert state.shell_runtime.state.notice.message == "Type definition request failed"
     end
 
     test "nil result sets status message" do
       state = LspActions.handle_type_definition_response(stub_state(), {:ok, nil})
-      assert EditorState.status_msg(state) == "No type definition found"
+      assert state.shell_runtime.state.notice.message == "No type definition found"
     end
 
     test "empty list sets status message" do
       state = LspActions.handle_type_definition_response(stub_state(), {:ok, []})
-      assert EditorState.status_msg(state) == "No type definition found"
+      assert state.shell_runtime.state.notice.message == "No type definition found"
     end
   end
 
   describe "handle_implementation_response/2" do
     test "error sets status message" do
       state = LspActions.handle_implementation_response(stub_state(), {:error, "timeout"})
-      assert EditorState.status_msg(state) == "Implementation request failed"
+      assert state.shell_runtime.state.notice.message == "Implementation request failed"
     end
 
     test "nil result sets status message" do
       state = LspActions.handle_implementation_response(stub_state(), {:ok, nil})
-      assert EditorState.status_msg(state) == "No implementation found"
+      assert state.shell_runtime.state.notice.message == "No implementation found"
     end
 
     test "empty list sets status message" do
       state = LspActions.handle_implementation_response(stub_state(), {:ok, []})
-      assert EditorState.status_msg(state) == "No implementation found"
+      assert state.shell_runtime.state.notice.message == "No implementation found"
     end
   end
 end

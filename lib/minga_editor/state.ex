@@ -18,8 +18,8 @@ defmodule MingaEditor.State do
   ## Composed sub-structs
 
   * `MingaEditor.Session.State`           — per-tab editing context (buffers, windows, vim, etc.)
-  * `MingaEditor.Shell.Traditional.State`   — default presentation state (nav_flash, hover, status_msg, etc.)
-  * `MingaEditor.State.WhichKey`     — which-key popup node, timer, visibility
+  * `MingaEditor.Shell.Traditional.State` — default presentation aggregate with focused notice, flash, toast, modal, hover, signature-help, and which-key owners
+  * `MingaEditor.State.WhichKey` — which-key popup node, timer, visibility
   * `MingaEditor.State.Registers`    — named registers and active register selection
   * `MingaEditor.State.Highlighting` — live per-buffer highlight presentation caches
   """
@@ -54,7 +54,6 @@ defmodule MingaEditor.State do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
-  alias MingaEditor.State.WhichKey
   alias MingaEditor.State.Windows
   alias MingaEditor.Renderer.WindowObservation
   alias MingaEditor.Viewport
@@ -862,64 +861,21 @@ defmodule MingaEditor.State do
   # These transitional helpers move in later shell-state work.
   # The resolved Traditional entry guards extension state.
 
-  @spec update_traditional_shell_state(t(), (shell_state() -> shell_state())) :: t()
-  defp update_traditional_shell_state(%__MODULE__{} = state, fun) when is_function(fun, 1) do
+  @doc "Applies a Traditional shell-state transition without mutating extension shell state."
+  @spec update_shell_state(t(), (shell_state() -> shell_state())) :: t()
+  def update_shell_state(%__MODULE__{} = state, fun) when is_function(fun, 1) do
     runtime = ShellRuntime.update_traditional_state(state.shell_runtime, fun)
     apply_shell_runtime_transition(state, runtime)
   end
 
-  @spec status_msg(t()) :: String.t() | nil
-  def status_msg(%{
-        shell_runtime: %ShellRuntime{
-          entry: %{module: MingaEditor.Shell.Traditional},
-          state: shell_state
-        }
-      }),
-      do: ShellState.status_msg(shell_state)
-
-  def status_msg(_state), do: nil
-  @spec set_status(t(), String.t()) :: t()
-  def set_status(s, msg), do: update_traditional_shell_state(s, &ShellState.set_status(&1, msg))
-  @spec clear_status(t()) :: t()
-  def clear_status(s), do: update_traditional_shell_state(s, &ShellState.clear_status/1)
+  @spec update_traditional_shell_state(t(), (shell_state() -> shell_state())) :: t()
+  defp update_traditional_shell_state(%__MODULE__{} = state, fun),
+    do: update_shell_state(state, fun)
 
   @spec set_suppress_tool_prompts(t(), boolean()) :: t()
   def set_suppress_tool_prompts(s, suppress?) when is_boolean(suppress?) do
     update_traditional_shell_state(s, &ShellState.set_suppress_tool_prompts(&1, suppress?))
   end
-
-  @spec nav_flash(t()) :: MingaEditor.NavFlash.t() | nil
-  def nav_flash(%{shell_runtime: %ShellRuntime{state: ss}}), do: ShellState.nav_flash(ss)
-  @spec set_nav_flash(t(), MingaEditor.NavFlash.t()) :: t()
-  def set_nav_flash(s, flash),
-    do: update_traditional_shell_state(s, &ShellState.set_nav_flash(&1, flash))
-
-  @spec cancel_nav_flash(t()) :: t()
-  def cancel_nav_flash(s), do: update_traditional_shell_state(s, &ShellState.cancel_nav_flash/1)
-
-  @spec yank_flash(t()) :: MingaEditor.YankFlash.t() | nil
-  def yank_flash(%{shell_runtime: %ShellRuntime{state: ss}}), do: ShellState.yank_flash(ss)
-  @spec set_yank_flash(t(), MingaEditor.YankFlash.t()) :: t()
-  def set_yank_flash(s, flash),
-    do: update_traditional_shell_state(s, &ShellState.set_yank_flash(&1, flash))
-
-  @spec cancel_yank_flash(t()) :: t()
-  def cancel_yank_flash(s), do: update_traditional_shell_state(s, &ShellState.cancel_yank_flash/1)
-
-  @spec hover_popup(t()) :: MingaEditor.HoverPopup.t() | nil
-  def hover_popup(%{shell_runtime: %ShellRuntime{state: ss}}), do: ShellState.hover_popup(ss)
-  @spec set_hover_popup(t(), MingaEditor.HoverPopup.t()) :: t()
-  def set_hover_popup(s, popup),
-    do: update_traditional_shell_state(s, &ShellState.set_hover_popup(&1, popup))
-
-  @spec dismiss_hover_popup(t()) :: t()
-  def dismiss_hover_popup(s),
-    do: update_traditional_shell_state(s, &ShellState.dismiss_hover_popup/1)
-
-  @spec whichkey(t()) :: WhichKey.t()
-  def whichkey(%{shell_runtime: %ShellRuntime{state: ss}}), do: ShellState.whichkey(ss)
-  @spec set_whichkey(t(), WhichKey.t()) :: t()
-  def set_whichkey(s, wk), do: update_traditional_shell_state(s, &ShellState.set_whichkey(&1, wk))
 
   @spec bottom_panel(t()) :: BottomPanel.t()
   def bottom_panel(%{shell_runtime: %ShellRuntime{state: ss}}), do: ShellState.bottom_panel(ss)
@@ -1037,17 +993,6 @@ defmodule MingaEditor.State do
   def set_observatory_inspection(s, inspection),
     do: update_traditional_shell_state(s, &ShellState.set_observatory_inspection(&1, inspection))
 
-  @spec set_git_toast(t(), ShellState.git_toast()) :: t()
-  def set_git_toast(s, toast),
-    do: update_traditional_shell_state(s, &ShellState.set_git_toast(&1, toast))
-
-  @spec clear_git_toast(t()) :: t()
-  def clear_git_toast(s), do: update_traditional_shell_state(s, &ShellState.clear_git_toast/1)
-
-  @spec clear_git_toast(t(), reference()) :: t()
-  def clear_git_toast(s, dismiss_ref),
-    do: update_traditional_shell_state(s, &ShellState.clear_git_toast(&1, dismiss_ref))
-
   @spec tab_bar(t()) :: TabBar.t() | nil
   def tab_bar(%{shell_runtime: %ShellRuntime{state: ss}}), do: ShellState.tab_bar(ss)
   @spec set_tab_bar(t(), TabBar.t() | nil) :: t()
@@ -1106,11 +1051,6 @@ defmodule MingaEditor.State do
   @spec set_agent(t(), AgentState.t()) :: t()
   def set_agent(s, agent), do: update_traditional_shell_state(s, &ShellState.set_agent(&1, agent))
 
-  @spec modal(t()) :: MingaEditor.State.ModalOverlay.t()
-  def modal(%{shell_runtime: %ShellRuntime{state: ss}}), do: ShellState.modal(ss)
-  @spec set_modal(t(), MingaEditor.State.ModalOverlay.t()) :: t()
-  def set_modal(s, modal), do: update_traditional_shell_state(s, &ShellState.set_modal(&1, modal))
-
   @spec inline_asks(t()) :: MingaEditor.State.InlineAsk.store()
   def inline_asks(%{shell_runtime: %ShellRuntime{state: ss}}), do: ShellState.inline_asks(ss)
   @spec set_inline_asks(t(), MingaEditor.State.InlineAsk.store()) :: t()
@@ -1122,18 +1062,6 @@ defmodule MingaEditor.State do
   @spec set_inline_edits(t(), MingaEditor.State.InlineEdit.store()) :: t()
   def set_inline_edits(s, edits),
     do: update_traditional_shell_state(s, &ShellState.set_inline_edits(&1, edits))
-
-  @doc "Replaces Traditional signature-help presentation state."
-  @spec set_signature_help(t(), MingaEditor.SignatureHelp.t() | nil) :: t()
-  def set_signature_help(state, signature_help) do
-    update_traditional_shell_state(state, &ShellState.set_signature_help(&1, signature_help))
-  end
-
-  @doc "Replaces the Traditional delayed warning-popup timer."
-  @spec set_warning_popup_timer(t(), reference() | nil) :: t()
-  def set_warning_popup_timer(state, timer) do
-    update_traditional_shell_state(state, &ShellState.set_warning_popup_timer(&1, timer))
-  end
 
   @doc "Replaces the Traditional tool-install prompt queue."
   @spec set_tool_prompt_queue(t(), [atom()]) :: t()
@@ -2163,7 +2091,7 @@ defmodule MingaEditor.State do
 
         # If the active modal is completion belonging to the leaving tab,
         # dismiss it so it doesn't follow us to the new tab.
-        state = MingaEditor.State.ModalOverlay.dismiss_if_stale(state)
+        state = MingaEditor.Shell.Traditional.ModalWorkflow.dismiss_if_stale(state)
 
         # Clear attention flag on the tab we're switching to.
         state =

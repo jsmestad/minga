@@ -60,13 +60,21 @@ defmodule MingaEditor.UI.Picker.RemoteFileConflictSource do
   @spec on_select(Item.t(), EditorState.t()) :: EditorState.t()
   def on_select(%Item{id: {:remote_conflict, :reload, buffer, path, content}}, state) do
     Buffer.accept_saved_content(buffer, content)
-    EditorState.set_status(state, "Reloaded #{Path.basename(path)} from remote")
+
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      "Reloaded #{Path.basename(path)} from remote"
+    )
   catch
-    :exit, reason -> EditorState.set_status(state, "Remote reload failed: #{inspect(reason)}")
+    :exit, reason ->
+      MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+        state,
+        "Remote reload failed: #{inspect(reason)}"
+      )
   end
 
   def on_select(%Item{id: {:remote_conflict, :keep, _buffer, path, _content}}, state) do
-    EditorState.set_status(
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
       state,
       "Keeping local edits for #{Path.basename(path)}; save will check for conflicts"
     )
@@ -78,10 +86,17 @@ defmodule MingaEditor.UI.Picker.RemoteFileConflictSource do
         show_diff(state, path, review)
 
       nil ->
-        EditorState.set_status(state, "No remote changes to show for #{Path.basename(path)}")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "No remote changes to show for #{Path.basename(path)}"
+        )
     end
   catch
-    :exit, reason -> EditorState.set_status(state, "Remote diff failed: #{inspect(reason)}")
+    :exit, reason ->
+      MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+        state,
+        "Remote diff failed: #{inspect(reason)}"
+      )
   end
 
   @impl true
@@ -92,7 +107,9 @@ defmodule MingaEditor.UI.Picker.RemoteFileConflictSource do
   defp show_diff(state, path, review) do
     state
     |> AgentAccess.update_agent_ui(&set_diff_preview(&1, review))
-    |> EditorState.set_status("Showing diff for #{Path.basename(path)}")
+    |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      "Showing diff for #{Path.basename(path)}"
+    )
   end
 
   @spec set_diff_preview(UIState.t(), DiffReview.t()) :: UIState.t()

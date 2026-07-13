@@ -5,14 +5,8 @@ defmodule MingaEditor.UI.WhichKey do
   Provides key formatting and binding display helpers used when the editor
   is waiting for the next key in a leader-key sequence. After a configurable
   timeout (default 300 ms), a popup is shown listing all available continuations
-  of the current prefix.
-
-  ## Timer contract
-
-  `start_timeout/1` sends `{:whichkey_timeout, ref}` to the **calling process**
-  after the given number of milliseconds, where `ref` is the opaque reference
-  returned by the call. The caller can cancel the timer with `cancel_timeout/1`
-  before it fires.
+  of the current prefix. `MingaEditor.Shell.Traditional.WhichKeyWorkflow` owns
+  the identity-tagged reveal timer.
 
   ## Key formatting
 
@@ -26,83 +20,11 @@ defmodule MingaEditor.UI.WhichKey do
   """
 
   alias Minga.Keymap.Bindings
+  alias MingaEditor.UI.WhichKey.Binding
   alias MingaEditor.UI.WhichKey.Icons
-
-  defmodule Binding do
-    @moduledoc "A formatted key binding entry for which-key popup display."
-
-    @enforce_keys [:key, :description, :kind]
-    defstruct [:key, :description, :kind, :icon]
-
-    @type kind :: :command | :group
-
-    @type t :: %__MODULE__{
-            key: String.t(),
-            description: String.t(),
-            kind: kind(),
-            icon: String.t() | nil
-          }
-  end
 
   @typedoc "A formatted binding entry for display."
   @type binding :: Binding.t()
-
-  @typedoc "An opaque timer reference returned by `start_timeout/1`."
-  @type timer_ref :: reference()
-
-  @default_timeout_ms 300
-
-  # ── Timer API ────────────────────────────────────────────────────────────────
-
-  @doc """
-  Starts a which-key popup timer.
-
-  After `timeout_ms` milliseconds (default #{@default_timeout_ms} ms), sends
-  `{:whichkey_timeout, ref}` to the calling process. Returns the `ref` that
-  will be included in the message so the caller can identify it.
-
-  When the application config `:whichkey_timeout_ms` is set to `:infinity`
-  (e.g., in test mode), no timer is started. The returned `ref` is still
-  safe to pass to `cancel_timeout/1`, which will be a no-op.
-  """
-  @spec start_timeout(non_neg_integer() | nil) :: timer_ref()
-  def start_timeout(timeout_ms \\ nil) do
-    ref = make_ref()
-
-    effective =
-      case timeout_ms do
-        nil -> Application.get_env(:minga, :whichkey_timeout_ms, @default_timeout_ms)
-        ms when is_integer(ms) and ms >= 0 -> ms
-      end
-
-    case effective do
-      :infinity ->
-        :ok
-
-      ms when is_integer(ms) and ms >= 0 ->
-        Process.send_after(self(), {:whichkey_timeout, ref}, ms)
-
-      bad ->
-        raise ArgumentError,
-              "whichkey_timeout_ms must be a non-negative integer or :infinity, got: #{inspect(bad)}"
-    end
-
-    ref
-  end
-
-  @doc """
-  Cancels a which-key timer before it fires.
-
-  Safe to call even if the timer has already fired; in that case the message
-  may already be in the process mailbox.
-
-  Always returns `:ok`.
-  """
-  @spec cancel_timeout(timer_ref()) :: :ok
-  def cancel_timeout(ref) when is_reference(ref) do
-    Process.cancel_timer(ref)
-    :ok
-  end
 
   # ── Key formatting ────────────────────────────────────────────────────────────
 

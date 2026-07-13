@@ -79,7 +79,7 @@ defmodule MingaEditor.LspActionsTest do
 
       for {response, expected_status} <- cases do
         result = LspActions.handle_definition_response(fake_state(), response)
-        assert EditorState.status_msg(result) == expected_status
+        assert result.shell_runtime.state.notice.message == expected_status
       end
     end
 
@@ -110,9 +110,8 @@ defmodule MingaEditor.LspActionsTest do
       ]
 
       for {response, expected_status} <- empty_cases do
-        assert fake_state()
-               |> LspActions.handle_hover_response(response)
-               |> EditorState.status_msg() == expected_status
+        assert LspActions.handle_hover_response(fake_state(), response).shell_runtime.state.notice.message ==
+                 expected_status
       end
 
       for hover <- [
@@ -170,11 +169,11 @@ defmodule MingaEditor.LspActionsTest do
 
   describe "code lens responses" do
     test "code_lens reports missing buffers and no-ops when no client is registered" do
-      assert fake_state() |> LspActions.code_lens() |> EditorState.status_msg() ==
+      assert LspActions.code_lens(fake_state()).shell_runtime.state.notice.message ==
                "No active buffer"
 
       state = fake_state_with_buffer(start_buffer!("hello"))
-      assert state |> LspActions.code_lens() |> EditorState.status_msg() == nil
+      assert LspActions.code_lens(state).shell_runtime.state.notice.message == nil
     end
 
     test "stores resolved lenses with commands directly" do
@@ -320,7 +319,7 @@ defmodule MingaEditor.LspActionsTest do
     test "reports cannot-rename for failed responses" do
       for response <- [{:error, "not renameable"}, {:ok, nil}] do
         result = LspActions.handle_prepare_rename_response(fake_state_with_vim(), response)
-        assert EditorState.status_msg(result) == "Cannot rename at this position"
+        assert result.shell_runtime.state.notice.message == "Cannot rename at this position"
       end
     end
   end

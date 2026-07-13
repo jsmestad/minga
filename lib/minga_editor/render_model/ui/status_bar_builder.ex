@@ -63,7 +63,10 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilder do
         icon: icon,
         icon_color: icon_color
       },
-      message: Map.get(data, :status_msg),
+      # Macro recording is emitted independently and the frontend gives it
+      # first priority. The text projection selects an active structured operation over
+      # an ordinary notice; terminal operation dwell remains frontend-owned.
+      message: projected_message(data),
       recording: Map.get(data, :macro_recording, false),
       indent: %Indent{
         type: Map.get(data, :indent_type, :spaces),
@@ -83,6 +86,18 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilder do
       pending_keys: Map.get(data, :pending_keys, "")
     }
   end
+
+  @spec projected_message(map()) :: String.t() | nil
+  defp projected_message(%{macro_recording: {true, register}}), do: "recording @#{register}"
+
+  defp projected_message(%{
+         selected_operation: %EditorOperation{status: status, message: message}
+       })
+       when status in [:pending, :queued, :running],
+       do: message
+
+  defp projected_message(%{notice: message}) when is_binary(message), do: message
+  defp projected_message(data), do: Map.get(data, :diagnostic_hint)
 
   @spec operation_model(EditorOperation.t() | nil) :: StatusOperation.t() | nil
   defp operation_model(nil), do: nil

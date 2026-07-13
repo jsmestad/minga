@@ -28,6 +28,7 @@ defmodule MingaEditor.CompletionAsyncTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.CompletionHandling
   alias MingaEditor.CompletionTrigger
+  alias MingaEditor.Shell.Traditional.ModalWorkflow
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
 
@@ -46,7 +47,7 @@ defmodule MingaEditor.CompletionAsyncTest do
     owner = EditorState.tab_bar(state).active_id
     trigger = %{CompletionTrigger.new() | gen: gen}
     payload = CompletionPayload.new(owner, completion: completion, trigger: trigger)
-    ModalOverlay.open(state, :completion, payload)
+    ModalWorkflow.open(state, :completion, payload)
   end
 
   defp labels(%Completion{filtered: filtered}), do: Enum.map(filtered, & &1.label)
@@ -68,7 +69,7 @@ defmodule MingaEditor.CompletionAsyncTest do
           gen: 1
       }
 
-      state = ModalOverlay.put_completion_trigger(state, trigger)
+      state = ModalWorkflow.put_completion_trigger(state, trigger)
 
       # sortText is deliberately out of label order to prove sorting happened in
       # the Task, not on the Editor.
@@ -84,7 +85,7 @@ defmodule MingaEditor.CompletionAsyncTest do
       returned = CompletionHandling.handle_response(state, ref, result)
 
       # The Editor path itself never parsed/built the menu: it is still pending.
-      assert ModalOverlay.completion(returned) == nil
+      assert MingaEditor.Shell.Traditional.ModalWorkflow.completion(returned) == nil
 
       # The built menu arrives later, off-process, already sorted and filtered.
       assert_receive {:completion_processed, 1, :primary, %Completion{} = built, {0, 0}},
@@ -111,12 +112,15 @@ defmodule MingaEditor.CompletionAsyncTest do
 
       # Generation 4 is stale relative to the live generation 5: discard it.
       discarded = CompletionHandling.apply_processed(state, 4, :primary, stale, {0, 0})
-      assert labels(ModalOverlay.completion(discarded)) == ["keep"]
+      assert labels(MingaEditor.Shell.Traditional.ModalWorkflow.completion(discarded)) == ["keep"]
 
       # The same result on the live generation 5 is applied (sanity check that the
       # guard is about the generation, not the payload).
       applied = CompletionHandling.apply_processed(state, 5, :primary, stale, {0, 0})
-      assert "stale-sentinel" in labels(ModalOverlay.completion(applied))
+
+      assert "stale-sentinel" in labels(
+               MingaEditor.Shell.Traditional.ModalWorkflow.completion(applied)
+             )
     end
 
     test "a result is discarded when the completion menu has been dismissed" do
@@ -127,7 +131,7 @@ defmodule MingaEditor.CompletionAsyncTest do
       built = completion_from([%{"label" => "ghost", "filterText" => "ghost"}], {0, 0}, "")
       result = CompletionHandling.apply_processed(state, 1, :primary, built, {0, 0})
 
-      assert ModalOverlay.completion(result) == nil
+      assert MingaEditor.Shell.Traditional.ModalWorkflow.completion(result) == nil
     end
   end
 
@@ -154,7 +158,7 @@ defmodule MingaEditor.CompletionAsyncTest do
         ])
 
       merged = CompletionHandling.apply_processed(state, 5, :merge, merge_items, {0, 0})
-      completion = ModalOverlay.completion(merged)
+      completion = MingaEditor.Shell.Traditional.ModalWorkflow.completion(merged)
 
       # Union of both servers, sorted by sortText, with "goodbye" filtered out by
       # the "hello" prefix.
@@ -175,7 +179,7 @@ defmodule MingaEditor.CompletionAsyncTest do
         completion_from([%{"label" => "from_primary"}], {0, 0}, "")
 
       merged = CompletionHandling.apply_processed(state, 5, :primary, primary, {0, 0})
-      result_labels = labels(ModalOverlay.completion(merged))
+      result_labels = labels(MingaEditor.Shell.Traditional.ModalWorkflow.completion(merged))
 
       assert "from_secondary" in result_labels
       assert "from_primary" in result_labels
@@ -200,7 +204,7 @@ defmodule MingaEditor.CompletionAsyncTest do
         }
 
         payload = CompletionPayload.new(owner, trigger: trigger)
-        ModalOverlay.open(state, :completion, payload)
+        ModalWorkflow.open(state, :completion, payload)
       end)
     end
 
@@ -224,13 +228,17 @@ defmodule MingaEditor.CompletionAsyncTest do
       send(ctx.editor, {:lsp_response, ref, result})
 
       final =
-        wait_until(ctx, fn state -> match?(%Completion{}, ModalOverlay.completion(state)) end,
+        wait_until(
+          ctx,
+          fn state ->
+            match?(%Completion{}, MingaEditor.Shell.Traditional.ModalWorkflow.completion(state))
+          end,
           max_attempts: 200,
           interval_ms: 10,
           message: "completion never became visible via the live Editor handle_info"
         )
 
-      completion = ModalOverlay.completion(final)
+      completion = MingaEditor.Shell.Traditional.ModalWorkflow.completion(final)
       assert %Completion{} = completion
       # Sorted in the Task (sortText order), not response order.
       assert Enum.map(completion.filtered, & &1.label) == ["alpha", "zeta"]
@@ -258,8 +266,8 @@ defmodule MingaEditor.CompletionAsyncTest do
         )
 
       final = editor_state(ctx)
-      refute ModalOverlay.match(EditorState.modal(final), :completion)
-      assert ModalOverlay.completion(final) == nil
+      refute ModalOverlay.match(final.shell_runtime.state.modal, :completion)
+      assert MingaEditor.Shell.Traditional.ModalWorkflow.completion(final) == nil
     end
   end
 end

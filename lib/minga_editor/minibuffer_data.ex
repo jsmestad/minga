@@ -319,9 +319,12 @@ defmodule MingaEditor.MinibufferData do
   end
 
   @spec quit_confirmation_prompt(:quit | :quit_all, map()) :: String.t()
-  defp quit_confirmation_prompt(_kind, %{status_msg: status_msg})
-       when is_binary(status_msg) and status_msg != "",
-       do: status_msg
+  defp quit_confirmation_prompt(
+         _kind,
+         %{notice: %MingaEditor.Shell.Traditional.Notice{message: message}}
+       )
+       when is_binary(message) and message != "",
+       do: message
 
   defp quit_confirmation_prompt(:quit, _shell_state), do: "Quit Minga? (y/n)"
 

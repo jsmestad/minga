@@ -36,16 +36,20 @@ defmodule MingaGitPorcelain.UI.Picker.GitBranchSource do
   def on_select(%Item{id: {:create, name}}, state) do
     case resolve_git_root() do
       nil ->
-        MingaEditor.State.set_status(state, "Not in a git repository")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Not in a git repository")
 
       git_root ->
         case Git.branch_create(git_root, name) do
           :ok ->
             refresh_repo(git_root)
-            MingaEditor.State.set_status(state, "Created and switched to #{name}")
+
+            MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+              state,
+              "Created and switched to #{name}"
+            )
 
           {:error, reason} ->
-            MingaEditor.State.set_status(state, "Failed: #{reason}")
+            MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Failed: #{reason}")
         end
     end
   end
@@ -68,13 +72,13 @@ defmodule MingaGitPorcelain.UI.Picker.GitBranchSource do
   @impl true
   @spec on_action(atom(), Item.t(), term()) :: term()
   def on_action(:delete, %Item{id: {:branch, _name, true, false}}, state) do
-    MingaEditor.State.set_status(state, "Cannot delete current branch")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Cannot delete current branch")
   end
 
   def on_action(:delete, %Item{id: {:branch, name, false, false}}, state) do
     case resolve_git_root() do
       nil ->
-        MingaEditor.State.set_status(state, "Not in a git repository")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Not in a git repository")
 
       git_root ->
         mode_state = Minga.Mode.BranchDeleteConfirmState.new(git_root, name)
@@ -93,16 +97,16 @@ defmodule MingaGitPorcelain.UI.Picker.GitBranchSource do
   defp switch_branch(name, state) do
     case resolve_git_root() do
       nil ->
-        MingaEditor.State.set_status(state, "Not in a git repository")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Not in a git repository")
 
       git_root ->
         case Git.branch_switch(git_root, name) do
           :ok ->
             refresh_repo(git_root)
-            MingaEditor.State.set_status(state, "Switched to #{name}")
+            MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Switched to #{name}")
 
           {:error, reason} ->
-            MingaEditor.State.set_status(state, "Failed: #{reason}")
+            MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Failed: #{reason}")
         end
     end
   end

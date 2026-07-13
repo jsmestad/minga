@@ -39,7 +39,11 @@ defmodule MingaEditor.Commands.HelpTest do
 
   describe "describe-key help" do
     test "describe_key_result opens or reuses read-only *Help* and clears status" do
-      state = MingaEditor.State.set_status(build_state(), "Press key to describe:")
+      state =
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          build_state(),
+          "Press key to describe:"
+        )
 
       assert {:ok, false} =
                Options.set_for_filetype(state.options_server, :text, :autopair_block, false)
@@ -49,7 +53,7 @@ defmodule MingaEditor.Commands.HelpTest do
 
       assert is_pid(help)
       assert result.workspace.buffers.active == help
-      assert EditorState.status_msg(result) == nil
+      assert result.shell_runtime.state.notice.message == nil
       assert BufferProcess.read_only?(help)
       assert BufferProcess.get_option(help, :autopair_block) == false
 

@@ -284,7 +284,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     assert workspace.session == session
     assert workspace.files == [file_ref]
 
-    assert state.shell_runtime.state.status_msg ==
+    assert state.shell_runtime.state.notice.message ==
              "Stop the agent session before closing this workspace"
   end
 

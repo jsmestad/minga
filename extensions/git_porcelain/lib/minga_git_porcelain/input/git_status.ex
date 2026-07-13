@@ -112,7 +112,7 @@ defmodule MingaGitPorcelain.Input.GitStatus do
   defp execute_command(state, :git_status_stage_all) do
     case resolve_git_root() do
       nil ->
-        EditorState.set_status(state, "Not in a git repository")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Not in a git repository")
 
       git_root ->
         handle_git_write_result(
@@ -128,7 +128,7 @@ defmodule MingaGitPorcelain.Input.GitStatus do
   defp execute_command(state, :git_status_unstage_all) do
     case resolve_git_root() do
       nil ->
-        EditorState.set_status(state, "Not in a git repository")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Not in a git repository")
 
       git_root ->
         handle_git_write_result(
@@ -171,7 +171,7 @@ defmodule MingaGitPorcelain.Input.GitStatus do
         result = Git.discard(git_root, entry.path)
         refresh_repo(git_root)
 
-        status_msg =
+        notice_message =
           case result do
             :ok ->
               "Discarded #{entry.path}"
@@ -184,7 +184,7 @@ defmodule MingaGitPorcelain.Input.GitStatus do
 
         state
         |> update_tui_state(fn tui, _entries -> TuiState.clear_discard_confirmation(tui) end)
-        |> EditorState.set_status(status_msg)
+        |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(notice_message)
 
       nil ->
         state
@@ -198,7 +198,7 @@ defmodule MingaGitPorcelain.Input.GitStatus do
   defp execute_command(state, :git_status_push) do
     case resolve_git_root() do
       nil ->
-        EditorState.set_status(state, "Not in a git repository")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Not in a git repository")
 
       git_root ->
         do_git_remote_op(state, git_root, &Git.push/1, "Pushing…", "Pushed", "Push failed")
@@ -208,7 +208,7 @@ defmodule MingaGitPorcelain.Input.GitStatus do
   defp execute_command(state, :git_status_pull) do
     case resolve_git_root() do
       nil ->
-        EditorState.set_status(state, "Not in a git repository")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Not in a git repository")
 
       git_root ->
         do_git_remote_op(state, git_root, &Git.pull/1, "Pulling…", "Pulled", "Pull failed")
@@ -218,7 +218,7 @@ defmodule MingaGitPorcelain.Input.GitStatus do
   defp execute_command(state, :git_status_fetch) do
     case resolve_git_root() do
       nil ->
-        EditorState.set_status(state, "Not in a git repository")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Not in a git repository")
 
       git_root ->
         do_git_remote_op(
@@ -235,7 +235,7 @@ defmodule MingaGitPorcelain.Input.GitStatus do
   defp execute_command(state, :git_status_amend) do
     case resolve_git_root() do
       nil ->
-        EditorState.set_status(state, "Not in a git repository")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Not in a git repository")
 
       _git_root ->
         update_tui_state(state, fn tui, _entries -> TuiState.toggle_amend(tui) end)
@@ -290,7 +290,7 @@ defmodule MingaGitPorcelain.Input.GitStatus do
         )
 
       {:error, message} ->
-        EditorState.set_status(state, message)
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, message)
     end
   end
 
@@ -335,12 +335,12 @@ defmodule MingaGitPorcelain.Input.GitStatus do
     case operation.(git_root) do
       :ok ->
         refresh_repo(git_root)
-        EditorState.set_status(state, success_msg)
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, success_msg)
 
       {:error, reason} ->
         error_msg = "#{error_prefix}: #{reason}"
         Log.warning(:ext, error_msg)
-        EditorState.set_status(state, error_msg)
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, error_msg)
     end
   end
 
@@ -358,8 +358,14 @@ defmodule MingaGitPorcelain.Input.GitStatus do
     case idx do
       nil ->
         case Commands.start_buffer(abs_path, EditorState.options_server(state)) do
-          {:ok, pid} -> Commands.add_buffer(state, pid)
-          {:error, _} -> EditorState.set_status(state, "Could not open #{abs_path}")
+          {:ok, pid} ->
+            Commands.add_buffer(state, pid)
+
+          {:error, _} ->
+            MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+              state,
+              "Could not open #{abs_path}"
+            )
         end
 
       i ->
@@ -389,7 +395,7 @@ defmodule MingaGitPorcelain.Input.GitStatus do
   defp with_selected_file(state, fun) do
     case resolve_git_root() do
       nil ->
-        EditorState.set_status(state, "Not in a git repository")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Not in a git repository")
 
       git_root ->
         panel = EditorState.git_status_panel(state)
@@ -412,7 +418,7 @@ defmodule MingaGitPorcelain.Input.GitStatus do
         ) :: EditorState.t()
   defp handle_git_write_result(state, git_root, :ok, success_message, _failure_prefix) do
     refresh_repo(git_root)
-    EditorState.set_status(state, success_message)
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, success_message)
   end
 
   defp handle_git_write_result(
@@ -424,7 +430,7 @@ defmodule MingaGitPorcelain.Input.GitStatus do
        ) do
     message = "#{failure_prefix}: #{inspect(reason)}"
     Log.warning(:editor, message)
-    EditorState.set_status(state, message)
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, message)
   end
 
   @spec refresh_repo(String.t()) :: :ok

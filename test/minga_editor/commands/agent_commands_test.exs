@@ -281,7 +281,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       assert UIState.prompt_text(AgentAccess.panel(new_state)) == "/modle"
 
-      assert new_state.shell_runtime.state.status_msg ==
+      assert new_state.shell_runtime.state.notice.message ==
                "Unknown command: /modle. Did you mean /model?"
 
       assert_receive {:stub_system_message, "Unknown command: /modle. Did you mean /model?",
@@ -305,7 +305,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       new_state = AgentCommands.submit_prompt(state)
 
-      assert new_state.shell_runtime.state.status_msg =~ "No model configured"
+      assert new_state.shell_runtime.state.notice.message =~ "No model configured"
       assert UIState.prompt_text(AgentAccess.panel(new_state)) == "hello agent"
     end
 
@@ -328,7 +328,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       new_state = AgentCommands.submit_prompt(state)
 
-      assert new_state.shell_runtime.state.status_msg =~ "No agent session"
+      assert new_state.shell_runtime.state.notice.message =~ "No agent session"
       assert UIState.prompt_text(AgentAccess.panel(new_state)) == "hello agent"
     end
 
@@ -351,7 +351,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       new_state = AgentCommands.submit_prompt(state)
 
-      assert new_state.shell_runtime.state.status_msg =~
+      assert new_state.shell_runtime.state.notice.message =~
                "No provider credentials are configured for this model"
 
       assert UIState.prompt_text(AgentAccess.panel(new_state)) == "draft prompt"
@@ -376,7 +376,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       new_state = AgentCommands.submit_prompt(state)
 
-      assert new_state.shell_runtime.state.status_msg =~ "Agent provider still starting"
+      assert new_state.shell_runtime.state.notice.message =~ "Agent provider still starting"
       assert UIState.prompt_text(AgentAccess.panel(new_state)) == "draft prompt"
     end
 
@@ -399,7 +399,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       new_state = AgentCommands.submit_prompt(state)
 
-      assert new_state.shell_runtime.state.status_msg ==
+      assert new_state.shell_runtime.state.notice.message ==
                "Failed to start agent: boom. Your prompt was preserved."
 
       assert UIState.prompt_text(AgentAccess.panel(new_state)) == "draft prompt"
@@ -443,7 +443,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       new_state = AgentCommands.submit_prompt(state)
 
-      assert new_state.shell_runtime.state.status_msg =~ "Cannot resolve file mentions"
+      assert new_state.shell_runtime.state.notice.message =~ "Cannot resolve file mentions"
       assert UIState.prompt_text(AgentAccess.panel(new_state)) == "@missing.ex explain"
       refute_receive {:readiness_session_prompt, _prompt}
     end
@@ -473,7 +473,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       new_state = AgentCommands.submit_prompt(state)
 
       assert_receive {:readiness_session_prompt, "stale panel prompt"}
-      assert is_nil(new_state.shell_runtime.state.status_msg)
+      assert is_nil(new_state.shell_runtime.state.notice.message)
       assert UIState.prompt_text(AgentAccess.panel(new_state)) == ""
     end
 
@@ -508,7 +508,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
         new_state = AgentCommands.submit_prompt(state)
 
-        assert new_state.shell_runtime.state.status_msg =~ expected_message
+        assert new_state.shell_runtime.state.notice.message =~ expected_message
         assert UIState.prompt_text(AgentAccess.panel(new_state)) == "draft prompt"
       end
     end
@@ -684,7 +684,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       new_state = AgentCommands.scope_ctrl_c(state)
 
       assert_receive :restart_provider_called
-      assert new_state.shell_runtime.state.status_msg == "Agent provider restarted"
+      assert new_state.shell_runtime.state.notice.message == "Agent provider restarted"
     end
   end
 
@@ -705,7 +705,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       state = base_state(session: nil)
       new_state = AgentCommands.cycle_thinking_level(state)
 
-      assert new_state.shell_runtime.state.status_msg =~ "No agent session"
+      assert new_state.shell_runtime.state.notice.message =~ "No agent session"
     end
   end
 
@@ -715,14 +715,14 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       new_state = AgentCommands.set_thinking_level(state, "high")
 
       assert AgentAccess.panel(new_state).thinking_level == "high"
-      assert new_state.shell_runtime.state.status_msg == "Thinking: high"
+      assert new_state.shell_runtime.state.notice.message == "Thinking: high"
     end
 
     test "sets status message when no session exists" do
       state = base_state(session: nil)
       new_state = AgentCommands.set_thinking_level(state, "high")
 
-      assert new_state.shell_runtime.state.status_msg =~ "No agent session"
+      assert new_state.shell_runtime.state.notice.message =~ "No agent session"
     end
   end
 
@@ -745,7 +745,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       new_state = command.execute.(state)
 
-      assert new_state.shell_runtime.state.status_msg =~ "No agent session"
+      assert new_state.shell_runtime.state.notice.message =~ "No agent session"
     end
 
     test "agent_thinking_* commands set fixed levels" do
@@ -758,7 +758,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
         new_state = command!(command_name).execute.(base_state())
 
         assert AgentAccess.panel(new_state).thinking_level == expected_level
-        assert new_state.shell_runtime.state.status_msg == "Thinking: #{expected_level}"
+        assert new_state.shell_runtime.state.notice.message == "Thinking: #{expected_level}"
       end
     end
   end
@@ -784,7 +784,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       assert AgentAccess.panel(new_state).model_name == "openai:o4-mini"
       assert AgentAccess.panel(new_state).thinking_level == "high"
-      assert new_state.shell_runtime.state.status_msg == "Model: openai:o4-mini [2/3]"
+      assert new_state.shell_runtime.state.notice.message == "Model: openai:o4-mini [2/3]"
     end
   end
 

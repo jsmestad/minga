@@ -13,25 +13,35 @@ defmodule MingaKnowledgeGraph.Commands do
   def briefing(state) do
     case EditorAPI.active_path(state) do
       nil ->
-        EditorAPI.set_status(state, "Knowledge: no current file to brief")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Knowledge: no current file to brief"
+        )
 
       path ->
         Tracker.request_briefing(path)
-        EditorAPI.set_status(state, "Generating briefing for #{Path.basename(path)}…")
+
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Generating briefing for #{Path.basename(path)}…"
+        )
     end
   end
 
   @spec familiarity(EditorAPI.state()) :: EditorAPI.state()
   def familiarity(state) do
     case EditorAPI.active_path(state) do
-      nil -> EditorAPI.set_status(state, "Knowledge: no current file")
-      path -> EditorAPI.set_status(state, Tracker.familiarity(path))
+      nil ->
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Knowledge: no current file")
+
+      path ->
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, Tracker.familiarity(path))
     end
   end
 
   @spec refresh_heat(EditorAPI.state()) :: EditorAPI.state()
   def refresh_heat(state) do
     Tracker.refresh_heat()
-    EditorAPI.set_status(state, "Knowledge: heat map refreshed")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Knowledge: heat map refreshed")
   end
 end

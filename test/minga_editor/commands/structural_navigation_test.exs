@@ -8,7 +8,6 @@ defmodule MingaEditor.Commands.StructuralNavigationTest do
   alias Minga.Parser.Manager, as: ParserManager
   alias MingaEditor
   alias MingaEditor.HighlightSync
-  alias MingaEditor.State, as: EditorState
 
   @moduletag timeout: 15_000
   @sync_timeout 15_000
@@ -27,7 +26,7 @@ defmodule MingaEditor.Commands.StructuralNavigationTest do
     state = send_key(editor, ?h, @alt)
 
     assert BufferProcess.cursor(buffer) == {0, 0}
-    assert EditorState.status_msg(state) == "→ function_declaration"
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) == "→ function_declaration"
   end
 
   test "Alt+l moves to the first child AST node" do
@@ -37,7 +36,7 @@ defmodule MingaEditor.Commands.StructuralNavigationTest do
     state = send_key(editor, ?l, @alt)
 
     assert BufferProcess.cursor(buffer) == {0, 9}
-    assert EditorState.status_msg(state) == "→ identifier"
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) == "→ identifier"
   end
 
   test "Alt+j and Alt+k move between sibling AST nodes" do
@@ -46,12 +45,12 @@ defmodule MingaEditor.Commands.StructuralNavigationTest do
 
     state = send_key(editor, ?j, @alt)
     assert BufferProcess.cursor(buffer) == {0, 5}
-    assert EditorState.status_msg(state) == "→ identifier"
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) == "→ identifier"
 
     BufferProcess.move_to(buffer, {0, 8})
     state = send_key(editor, ?k, @alt)
     assert BufferProcess.cursor(buffer) == {0, 5}
-    assert EditorState.status_msg(state) == "→ identifier"
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) == "→ identifier"
   end
 
   test "structural movement keeps visual selection active" do
@@ -64,7 +63,7 @@ defmodule MingaEditor.Commands.StructuralNavigationTest do
     assert BufferProcess.cursor(buffer) == {0, 9}
     assert Minga.Editing.mode(state) == :visual
     assert MingaEditor.Editing.visual_anchor(state) == {0, 0}
-    assert EditorState.status_msg(state) == "→ identifier"
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) == "→ identifier"
   end
 
   defp start_editor(content) do

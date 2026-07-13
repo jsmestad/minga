@@ -10,6 +10,7 @@ defmodule MingaEditor.Commands.Agent do
   @behaviour Minga.Command.Provider
 
   alias MingaEditor.Agent.DiffReview
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.FileMention
   alias MingaAgent.Markdown
@@ -115,7 +116,10 @@ defmodule MingaEditor.Commands.Agent do
 
         case AgentAccess.session(state) do
           nil ->
-            EditorState.set_status(state, "No agent session available")
+            NoticeWorkflow.publish(
+              state,
+              "No agent session available"
+            )
 
           session_pid ->
             load_persisted_session(session_pid, session_id)
@@ -124,7 +128,7 @@ defmodule MingaEditor.Commands.Agent do
         end
 
       nil ->
-        EditorState.set_status(state, "Could not open agent")
+        NoticeWorkflow.publish(state, "Could not open agent")
     end
   end
 
@@ -337,7 +341,7 @@ defmodule MingaEditor.Commands.Agent do
     state
     |> mark_agent_view_inactive()
     |> EditorState.set_keymap_scope(:editor)
-    |> EditorState.set_status("No file tabs in this workspace")
+    |> NoticeWorkflow.publish("No file tabs in this workspace")
   end
 
   defp restore_return_target_without_tab(state, return_target) do
@@ -345,7 +349,7 @@ defmodule MingaEditor.Commands.Agent do
     |> mark_agent_view_inactive()
     |> restore_workspace_return_target(return_target)
     |> restore_prompt_focus(return_target.prompt_focused)
-    |> EditorState.set_status("No file tabs in this workspace")
+    |> NoticeWorkflow.publish("No file tabs in this workspace")
   end
 
   @spec restore_workspace_return_target(state(), UIState.View.return_target()) :: state()
@@ -418,10 +422,13 @@ defmodule MingaEditor.Commands.Agent do
   defp submit_prompt(state, panel, false, nil) do
     case prompt_readiness(state, panel, nil) do
       :no_model ->
-        EditorState.set_status(state, no_model_status())
+        NoticeWorkflow.publish(state, no_model_status())
 
       _readiness ->
-        EditorState.set_status(state, "No agent session, try closing and reopening the panel")
+        NoticeWorkflow.publish(
+          state,
+          "No agent session, try closing and reopening the panel"
+        )
     end
   end
 
@@ -462,7 +469,7 @@ defmodule MingaEditor.Commands.Agent do
   defp execute_slash_command(state, text) do
     case SlashCommand.execute(state, text) do
       {:ok, state} -> state
-      {:error, msg} -> EditorState.set_status(state, msg)
+      {:error, msg} -> NoticeWorkflow.publish(state, msg)
     end
   end
 
@@ -474,13 +481,16 @@ defmodule MingaEditor.Commands.Agent do
       Session.add_system_message(AgentAccess.session(state), message, :error)
     end
 
-    EditorState.set_status(state, message)
+    NoticeWorkflow.publish(state, message)
   end
 
   @spec send_prompt_to_llm(state(), String.t()) :: state()
   defp send_prompt_to_llm(state, text) do
     if remote_session_disconnected?(state) do
-      EditorState.set_status(state, "Session disconnected. Your prompt will be preserved.")
+      NoticeWorkflow.publish(
+        state,
+        "Session disconnected. Your prompt will be preserved."
+      )
     else
       panel = AgentAccess.panel(state)
 
@@ -491,12 +501,15 @@ defmodule MingaEditor.Commands.Agent do
           |> resolve_and_deliver_prompt(text, panel.model_name)
 
         {:blocked, msg} ->
-          EditorState.set_status(state, msg)
+          NoticeWorkflow.publish(state, msg)
       end
     end
   catch
     :exit, _ ->
-      EditorState.set_status(state, "Agent session unavailable. Your prompt was preserved.")
+      NoticeWorkflow.publish(
+        state,
+        "Agent session unavailable. Your prompt was preserved."
+      )
   end
 
   @spec resolve_and_deliver_prompt(state(), String.t(), String.t()) :: state()
@@ -506,7 +519,7 @@ defmodule MingaEditor.Commands.Agent do
         deliver_prompt(state, resolved)
 
       {:error, msg} ->
-        EditorState.set_status(state, msg)
+        NoticeWorkflow.publish(state, msg)
     end
   end
 
@@ -533,34 +546,43 @@ defmodule MingaEditor.Commands.Agent do
         |> update_agent_ui(&UIState.push_toast(&1, "⏳ Queued (steer). Ctrl-C to cancel.", :info))
 
       {:error, :provider_not_ready} ->
-        EditorState.set_status(state, provider_starting_status())
+        NoticeWorkflow.publish(state, provider_starting_status())
 
       {:error, :credentials_not_configured} ->
-        EditorState.set_status(state, credentials_missing_status())
+        NoticeWorkflow.publish(state, credentials_missing_status())
 
       {:error, msg} when is_binary(msg) ->
-        EditorState.set_status(state, msg)
+        NoticeWorkflow.publish(state, msg)
 
       {:error, reason} ->
-        EditorState.set_status(state, "Agent error: #{inspect(reason)}")
+        NoticeWorkflow.publish(
+          state,
+          "Agent error: #{inspect(reason)}"
+        )
     end
   end
 
   @spec send_follow_up_to_llm(state(), String.t()) :: state()
   defp send_follow_up_to_llm(state, text) do
     if remote_session_disconnected?(state) do
-      EditorState.set_status(state, "Session disconnected. Your prompt will be preserved.")
+      NoticeWorkflow.publish(
+        state,
+        "Session disconnected. Your prompt will be preserved."
+      )
     else
       panel = AgentAccess.panel(state)
 
       case prompt_submit_status(state, panel) do
         :ready -> resolve_and_deliver_follow_up(state, text, panel.model_name)
-        {:blocked, msg} -> EditorState.set_status(state, msg)
+        {:blocked, msg} -> NoticeWorkflow.publish(state, msg)
       end
     end
   catch
     :exit, _ ->
-      EditorState.set_status(state, "Agent session unavailable. Your prompt was preserved.")
+      NoticeWorkflow.publish(
+        state,
+        "Agent session unavailable. Your prompt was preserved."
+      )
   end
 
   @spec resolve_and_deliver_follow_up(state(), String.t(), String.t()) :: state()
@@ -570,7 +592,7 @@ defmodule MingaEditor.Commands.Agent do
         deliver_follow_up(state, resolved)
 
       {:error, msg} ->
-        EditorState.set_status(state, msg)
+        NoticeWorkflow.publish(state, msg)
     end
   end
 
@@ -718,16 +740,19 @@ defmodule MingaEditor.Commands.Agent do
         )
 
       {:error, :provider_not_ready} ->
-        EditorState.set_status(state, provider_starting_status())
+        NoticeWorkflow.publish(state, provider_starting_status())
 
       {:error, :credentials_not_configured} ->
-        EditorState.set_status(state, credentials_missing_status())
+        NoticeWorkflow.publish(state, credentials_missing_status())
 
       {:error, msg} when is_binary(msg) ->
-        EditorState.set_status(state, msg)
+        NoticeWorkflow.publish(state, msg)
 
       {:error, reason} ->
-        EditorState.set_status(state, "Agent error: #{inspect(reason)}")
+        NoticeWorkflow.publish(
+          state,
+          "Agent error: #{inspect(reason)}"
+        )
     end
   end
 
@@ -794,19 +819,26 @@ defmodule MingaEditor.Commands.Agent do
   def restart_agent_provider(state) do
     case AgentAccess.session(state) do
       nil ->
-        EditorState.set_status(state, "No agent session to restart")
+        NoticeWorkflow.publish(state, "No agent session to restart")
 
       session ->
         case Session.restart_provider(session) do
           :ok ->
-            EditorState.set_status(state, "Agent provider restarted")
+            NoticeWorkflow.publish(
+              state,
+              "Agent provider restarted"
+            )
 
           {:error, reason} ->
-            EditorState.set_status(state, "Agent restart failed: #{inspect(reason)}")
+            NoticeWorkflow.publish(
+              state,
+              "Agent restart failed: #{inspect(reason)}"
+            )
         end
     end
   catch
-    :exit, _ -> EditorState.set_status(state, "Agent restart failed")
+    :exit, _ ->
+      NoticeWorkflow.publish(state, "Agent restart failed")
   end
 
   @doc """
@@ -836,7 +868,10 @@ defmodule MingaEditor.Commands.Agent do
         state
 
       AgentAccess.session(state) == nil ->
-        EditorState.set_status(state, "No agent session, try closing and reopening the panel")
+        NoticeWorkflow.publish(
+          state,
+          "No agent session, try closing and reopening the panel"
+        )
 
       AgentAccess.agent(state).runtime.status in [:thinking, :tool_executing] ->
         text = UIState.prompt_text(panel)
@@ -956,7 +991,7 @@ defmodule MingaEditor.Commands.Agent do
         n -> "Cleared #{n} agent sessions"
       end
 
-    EditorState.set_status(state, msg)
+    NoticeWorkflow.publish(state, msg)
   end
 
   @doc "Scrolls the chat panel up by half the panel height."
@@ -1004,7 +1039,7 @@ defmodule MingaEditor.Commands.Agent do
   def cycle_thinking_level(state) do
     case AgentAccess.session(state) do
       nil ->
-        EditorState.set_status(state, "No agent session")
+        NoticeWorkflow.publish(state, "No agent session")
 
       session ->
         case Session.cycle_thinking_level(session) do
@@ -1012,10 +1047,16 @@ defmodule MingaEditor.Commands.Agent do
             apply_thinking_level(state, session, level)
 
           {:ok, nil} ->
-            EditorState.set_status(state, "Model does not support thinking levels")
+            NoticeWorkflow.publish(
+              state,
+              "Model does not support thinking levels"
+            )
 
           {:error, reason} ->
-            EditorState.set_status(state, "Error: #{inspect(reason)}")
+            NoticeWorkflow.publish(
+              state,
+              "Error: #{inspect(reason)}"
+            )
         end
     end
   end
@@ -1041,12 +1082,18 @@ defmodule MingaEditor.Commands.Agent do
   def set_thinking_level(state, level) when is_binary(level) do
     case AgentAccess.session(state) do
       nil ->
-        EditorState.set_status(state, "No agent session")
+        NoticeWorkflow.publish(state, "No agent session")
 
       session ->
         case Session.set_thinking_level(session, level) do
-          :ok -> apply_thinking_level(state, session, level)
-          {:error, reason} -> EditorState.set_status(state, "Error: #{inspect(reason)}")
+          :ok ->
+            apply_thinking_level(state, session, level)
+
+          {:error, reason} ->
+            NoticeWorkflow.publish(
+              state,
+              "Error: #{inspect(reason)}"
+            )
         end
     end
   end
@@ -1055,7 +1102,7 @@ defmodule MingaEditor.Commands.Agent do
   @spec pick_thinking_level(state()) :: state()
   def pick_thinking_level(state) do
     if AgentAccess.session(state) == nil do
-      EditorState.set_status(state, "No agent session")
+      NoticeWorkflow.publish(state, "No agent session")
     else
       current_level = AgentAccess.panel(state).thinking_level
 
@@ -1069,14 +1116,14 @@ defmodule MingaEditor.Commands.Agent do
   defp apply_thinking_level(state, session, level) do
     state = update_agent_ui(state, &UIState.set_thinking_level(&1, level))
     Session.add_system_message(session, "Thinking: #{level}")
-    EditorState.set_status(state, "Thinking: #{level}")
+    NoticeWorkflow.publish(state, "Thinking: #{level}")
   end
 
   @doc "Cycles to the next model in the configured rotation."
   @spec cycle_model(state()) :: state()
   def cycle_model(state) do
     if AgentAccess.session(state) == nil do
-      EditorState.set_status(state, "No agent session")
+      NoticeWorkflow.publish(state, "No agent session")
     else
       case Session.cycle_model(AgentAccess.session(state)) do
         {:ok, %{"model" => model, "index" => index, "total" => total} = result} ->
@@ -1088,13 +1135,16 @@ defmodule MingaEditor.Commands.Agent do
             "Model: #{model} [#{index}/#{total}]"
           )
 
-          EditorState.set_status(state, "Model: #{model} [#{index}/#{total}]")
+          NoticeWorkflow.publish(
+            state,
+            "Model: #{model} [#{index}/#{total}]"
+          )
 
         {:error, reason} when is_binary(reason) ->
-          EditorState.set_status(state, reason)
+          NoticeWorkflow.publish(state, reason)
 
         {:error, reason} ->
-          EditorState.set_status(state, "Error: #{inspect(reason)}")
+          NoticeWorkflow.publish(state, "Error: #{inspect(reason)}")
       end
     end
   end
@@ -1122,19 +1172,22 @@ defmodule MingaEditor.Commands.Agent do
 
     case AgentAccess.session(state) do
       nil ->
-        EditorState.set_status(state, "Model: #{model}")
+        NoticeWorkflow.publish(state, "Model: #{model}")
 
       session ->
         case Session.set_model(session, model) do
           :ok ->
             Session.add_system_message(session, "Model: #{model}")
-            EditorState.set_status(state, "Model: #{model}")
+            NoticeWorkflow.publish(state, "Model: #{model}")
 
           {:error, reason} when is_binary(reason) ->
-            EditorState.set_status(state, reason)
+            NoticeWorkflow.publish(state, reason)
 
           {:error, reason} ->
-            EditorState.set_status(state, "Error: #{inspect(reason)}")
+            NoticeWorkflow.publish(
+              state,
+              "Error: #{inspect(reason)}"
+            )
         end
     end
   end
@@ -1297,7 +1350,7 @@ defmodule MingaEditor.Commands.Agent do
   defp apply_code_block(state, message_text, block, block_index) do
     case Markdown.infer_target_path(message_text, block_index) do
       nil ->
-        EditorState.set_status(
+        NoticeWorkflow.publish(
           state,
           "No file path found near code block. Copy with `yy` instead."
         )
@@ -1327,7 +1380,10 @@ defmodule MingaEditor.Commands.Agent do
         create_file_from_code_block(state, full_path, content, display_path)
 
       {:error, reason} ->
-        EditorState.set_status(state, "Cannot read #{display_path}: #{inspect(reason)}")
+        NoticeWorkflow.publish(
+          state,
+          "Cannot read #{display_path}: #{inspect(reason)}"
+        )
     end
   end
 
@@ -1335,13 +1391,20 @@ defmodule MingaEditor.Commands.Agent do
   defp apply_code_block_diff(state, path, before_content, content, display_path) do
     case DiffReview.new(path, before_content, content) do
       nil ->
-        EditorState.set_status(state, "No changes detected for #{display_path}")
+        NoticeWorkflow.publish(
+          state,
+          "No changes detected for #{display_path}"
+        )
 
       review ->
         state = update_preview(state, &Preview.set_diff(&1, review))
         state = update_agent_ui(state, &UIState.set_focus(&1, :file_viewer))
         log_system_message(state, "Applying code block to #{display_path}")
-        EditorState.set_status(state, "Diff preview for #{display_path}. Accept/reject hunks.")
+
+        NoticeWorkflow.publish(
+          state,
+          "Diff preview for #{display_path}. Accept/reject hunks."
+        )
     end
   end
 
@@ -1350,10 +1413,13 @@ defmodule MingaEditor.Commands.Agent do
     with :ok <- File.mkdir_p(Path.dirname(full_path)),
          :ok <- File.write(full_path, content) do
       log_system_message(state, "Created #{display_path}")
-      EditorState.set_status(state, "Created #{display_path}")
+      NoticeWorkflow.publish(state, "Created #{display_path}")
     else
       {:error, reason} ->
-        EditorState.set_status(state, "Failed to create #{display_path}: #{inspect(reason)}")
+        NoticeWorkflow.publish(
+          state,
+          "Failed to create #{display_path}: #{inspect(reason)}"
+        )
     end
   end
 
@@ -1507,7 +1573,7 @@ defmodule MingaEditor.Commands.Agent do
         |> return_to_origin(path, line)
 
       _ ->
-        EditorState.set_status(state, "No source line to return to")
+        NoticeWorkflow.publish(state, "No source line to return to")
     end
   end
 
@@ -1536,7 +1602,10 @@ defmodule MingaEditor.Commands.Agent do
             state
 
           {:error, _reason} ->
-            EditorState.set_status(state, "Could not reopen #{Path.basename(path)}")
+            NoticeWorkflow.publish(
+              state,
+              "Could not reopen #{Path.basename(path)}"
+            )
         end
 
       idx ->
@@ -1591,7 +1660,7 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec dismiss_agent_panel_or_modal(state(), Panel.t()) :: state()
   defp dismiss_agent_panel_or_modal(state, %{mention_completion: nil}) do
-    dismiss_agent_modal_or_hover(state, EditorState.modal(state))
+    dismiss_agent_modal_or_hover(state, state.shell_runtime.state.modal)
   end
 
   defp dismiss_agent_panel_or_modal(state, _panel) do
@@ -1600,14 +1669,17 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec dismiss_agent_modal_or_hover(state(), ModalOverlay.t()) :: state()
   defp dismiss_agent_modal_or_hover(state, :none) do
-    dismiss_agent_hover_or_input(state, EditorState.hover_popup(state))
+    dismiss_agent_hover_or_input(state, state.shell_runtime.state.hover_popup)
   end
 
-  defp dismiss_agent_modal_or_hover(state, _modal), do: ModalOverlay.dismiss(state)
+  defp dismiss_agent_modal_or_hover(state, _modal),
+    do: MingaEditor.Shell.Traditional.ModalWorkflow.dismiss(state)
 
   @spec dismiss_agent_hover_or_input(state(), term()) :: state()
   defp dismiss_agent_hover_or_input(state, nil), do: dismiss_agent_input_or_return(state)
-  defp dismiss_agent_hover_or_input(state, _hover), do: EditorState.dismiss_hover_popup(state)
+
+  defp dismiss_agent_hover_or_input(state, _hover),
+    do: MingaEditor.Shell.Traditional.HoverPopupWorkflow.dismiss(state)
 
   @spec dismiss_agent_input_or_return(state()) :: state()
   defp dismiss_agent_input_or_return(state) do
@@ -1795,13 +1867,18 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec do_dequeue_to_editor(state(), [String.t() | [ReqLLM.Message.ContentPart.t()]]) ::
           state()
-  defp do_dequeue_to_editor(state, []), do: EditorState.set_status(state, "No queued messages")
+  defp do_dequeue_to_editor(state, []),
+    do: NoticeWorkflow.publish(state, "No queued messages")
 
   defp do_dequeue_to_editor(state, all_queued) do
     count = Enum.count(all_queued)
     label = if count == 1, do: "message", else: "messages"
     state = restore_queued_to_prompt(state, all_queued)
-    EditorState.set_status(state, "Restored #{count} queued #{label} to editor")
+
+    NoticeWorkflow.publish(
+      state,
+      "Restored #{count} queued #{label} to editor"
+    )
   end
 
   @spec update_agent_ui(state(), (UIState.t() -> UIState.t())) :: state()

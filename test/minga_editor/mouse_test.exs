@@ -334,7 +334,7 @@ defmodule MingaEditor.MouseTest do
       state = mouse(state, row, col, :left, :press, @ctrl)
 
       assert BufferProcess.cursor(buffer) == {1, 3}
-      refute EditorState.status_msg(state) == "No language server"
+      refute MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) == "No language server"
     end
 
     test "TUI Ctrl-left click keeps goto-definition feedback" do
@@ -344,7 +344,7 @@ defmodule MingaEditor.MouseTest do
       state = mouse(state, row, col, :left, :press, @ctrl)
 
       assert BufferProcess.cursor(buffer) == {1, 3}
-      assert EditorState.status_msg(state) == "No language server"
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) == "No language server"
     end
 
     test "double-click selects a Unicode word by character offsets" do

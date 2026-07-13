@@ -65,8 +65,8 @@ defmodule MingaGitPorcelain.PickerBranchDeleteShortcutTest do
 
     result = PickerUI.handle_key(state, ?d, MingaEditor.Input.mod_ctrl())
 
-    assert EditorState.modal(result) == :none
-    assert EditorState.status_msg(result) == "Cannot delete current branch"
+    assert result.shell_runtime.state.modal == :none
+    assert result.shell_runtime.state.notice.message == "Cannot delete current branch"
     assert result.workspace.editing.mode == :normal
   end
 

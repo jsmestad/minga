@@ -15,7 +15,6 @@ defmodule MingaEditor.Handlers.GuiActionVolumeUnmountTest do
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Handlers.GuiActionHandler
   alias MingaEditor.RenderPipeline.TestHelpers
-  alias MingaEditor.State, as: EditorState
 
   @moduletag :tmp_dir
 
@@ -56,7 +55,7 @@ defmodule MingaEditor.Handlers.GuiActionVolumeUnmountTest do
     assert Buffer.read_only?(buf)
     assert {:error, :read_only} = BufferProcess.insert_text(buf, "MORE")
 
-    status = EditorState.status_msg(new_state)
+    status = MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state)
     assert status =~ "Volume unmounted"
     assert status =~ volume
   end
@@ -109,6 +108,7 @@ defmodule MingaEditor.Handlers.GuiActionVolumeUnmountTest do
     state = base_state(table)
     new_state = GuiActionHandler.dispatch(state, {:system_will_unmount, Path.join(dir, "Empty")})
 
-    assert EditorState.status_msg(new_state) == EditorState.status_msg(state)
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state) ==
+             MingaEditor.Shell.Traditional.NoticeWorkflow.message(state)
   end
 end

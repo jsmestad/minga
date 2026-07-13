@@ -147,7 +147,7 @@ defmodule Minga.Integration.GUIProtocolTest do
            agent_status: :thinking,
            active_tool_name: "read_file",
            agent_theme_colors: nil,
-           status_msg: "Wrote foo.ex",
+           notice: "Wrote foo.ex",
            modeline_segments: %{
              left: [{" NORMAL ", 0xBBC2CF, 0x51AFEF, [bold: true], nil}],
              right: [{" Elixir ", 0xC678DD, 0x282C34, [], :set_language}]
@@ -226,7 +226,7 @@ defmodule Minga.Integration.GUIProtocolTest do
            parser_status: :available,
            buf_index: 2,
            buf_count: 4,
-           status_msg: nil
+           notice: nil
          }}
 
       cmd = ProtocolGUI.encode_gui_status_bar(data)

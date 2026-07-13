@@ -69,7 +69,7 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
     state = GuiActionHandler.dispatch(state, {:git_commit, "fix the thing"}, opts)
     assert feedback(state).message == "Committing…"
     assert feedback(state).status in [:pending, :running]
-    assert EditorState.status_msg(state) == nil
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) == nil
 
     {state, request} = receive_resolved_mutation(state, scheduler, :commit, :running)
     assert request.resource == {:git_repository, Path.expand(git_root)}
@@ -125,7 +125,7 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
     assert running_commit.id == commit_request.id
     assert feedback(state).message == "Committing…"
     assert feedback(state).status in [:pending, :running]
-    assert EditorState.status_msg(state) == nil
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) == nil
     assert_receive {:stub_git_commit, ^git_root, "after stage", []}
 
     {state, commit_outcome} = receive_result(state, scheduler, commit_request.id)

@@ -6,6 +6,7 @@ defmodule MingaEditor.UI.Prompt.ProjectRemoveConfirm do
   @behaviour MingaEditor.UI.Prompt.Handler
 
   alias Minga.Project
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.State, as: EditorState
 
   @impl true
@@ -20,19 +21,20 @@ defmodule MingaEditor.UI.Prompt.ProjectRemoveConfirm do
     case {answer, project_path(state)} do
       {answer, path} when answer in ["y", "yes"] and is_binary(path) ->
         Project.remove(path)
-        EditorState.set_status(state, "Removed project: #{path}")
+        NoticeWorkflow.publish(state, "Removed project: #{path}")
 
       {answer, _path} when answer in ["y", "yes"] ->
-        EditorState.set_status(state, "No project selected")
+        NoticeWorkflow.publish(state, "No project selected")
 
       _ ->
-        EditorState.set_status(state, "Project removal cancelled")
+        NoticeWorkflow.publish(state, "Project removal cancelled")
     end
   end
 
   @impl true
   @spec on_cancel(EditorState.t()) :: EditorState.t()
-  def on_cancel(state), do: EditorState.set_status(state, "Project removal cancelled")
+  def on_cancel(state),
+    do: NoticeWorkflow.publish(state, "Project removal cancelled")
 
   @spec project_path(EditorState.t()) :: String.t() | nil
   defp project_path(%{

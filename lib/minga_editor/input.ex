@@ -34,6 +34,7 @@ defmodule MingaEditor.Input do
   alias MingaEditor.Input.Interrupt
   alias MingaEditor.Input.MentionCompletion
   alias MingaEditor.Input.ModeFSM
+  alias MingaEditor.Input.OperationCancellation
   alias MingaEditor.Input.Picker
   alias MingaEditor.Input.Popup
   alias MingaEditor.Input.Prompt
@@ -41,6 +42,7 @@ defmodule MingaEditor.Input do
   alias MingaEditor.Input.Sidebar
   alias MingaEditor.Input.SignatureHelp
   alias MingaEditor.Input.ToolApproval
+  alias MingaEditor.Input.WhichKey
 
   @typedoc "Source that contributed registry entries."
   @type contribution_source :: :builtin | :config | {:extension, atom()}
@@ -73,12 +75,14 @@ defmodule MingaEditor.Input do
 
   Priority order (first handler wins):
   0. Interrupt — Ctrl-G escape hatch, always active, resets to known-good state
-  1. ConflictPrompt — modal, swallows all keys when active
-  2. Picker — modal overlay, blocks all input while active
-  3. Completion — insert-mode sub-dispatch for popup navigation
-  4. Scoped — keymap scope resolution (agent, file_tree, editor + side panel)
-  5. GlobalBindings — Ctrl+S save, Ctrl+Q quit (always active)
-  6. ModeFSM — the normal vim mode system (fallback)
+  1. ConflictPrompt and Picker — exclusive modal surfaces
+  2. Completion — insert-mode popup navigation
+  3. WhichKey — active prefix Escape ownership
+  4. Focused Hover — popup scrolling and dismissal
+  5. SignatureHelp — overload cycling and dismissal
+  6. OperationCancellation — Escape for the selected cancelable operation
+  7. Scoped and GlobalBindings — contextual and global commands
+  8. ModeFSM — the normal vim mode system (fallback)
 
   UI overlays (Picker, Completion) sit above Scoped so they intercept
   keys when active regardless of keymap scope. Without this ordering,
@@ -92,9 +96,11 @@ defmodule MingaEditor.Input do
       Interrupt,
       ConflictPrompt,
       Picker,
+      Completion,
+      WhichKey,
       Hover,
       SignatureHelp,
-      Completion,
+      OperationCancellation,
       Scoped,
       GlobalBindings,
       BottomPanel,
@@ -103,12 +109,9 @@ defmodule MingaEditor.Input do
   end
 
   @doc """
-  Returns the overlay handlers that sit above the surface.
+  Returns interactive transient handlers in precedence order above the active surface.
 
-  These are modal UI elements (picker, completion menu, conflict
-  prompt) that must intercept keys before any surface sees them.
-  The Editor walks these first; if none consume the key, it
-  delegates to the active surface.
+  Exclusive modals and completion run first, followed by which-key, focused hover, signature help, and finally operation cancellation. If none consumes the key, the Editor delegates to the active surface.
   """
   @spec overlay_handlers() :: [module()]
   def overlay_handlers do
@@ -119,7 +122,11 @@ defmodule MingaEditor.Input do
       InlineAsk,
       Prompt,
       Picker,
-      Completion
+      Completion,
+      WhichKey,
+      Hover,
+      SignatureHelp,
+      OperationCancellation
     ]
   end
 

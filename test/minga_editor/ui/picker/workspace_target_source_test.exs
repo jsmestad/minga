@@ -135,7 +135,9 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
 
       assert Workspace.has_file?(workspace(result, 0), ref)
       assert Workspace.has_file?(workspace(result, agent_a.id), ref)
-      assert EditorState.status_msg(result) == "Copied `auth.ex` to `Agent: refactor`"
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) ==
+               "Copied `auth.ex` to `Agent: refactor`"
     end
 
     test "reports duplicate destination without changing source", %{tmp_dir: root} do
@@ -145,7 +147,9 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
 
       assert Workspace.has_file?(workspace(result, 0), ref)
       assert Workspace.has_file?(workspace(result, agent_a.id), ref)
-      assert EditorState.status_msg(result) == "`auth.ex` is already in `Agent: refactor`"
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) ==
+               "`auth.ex` is already in `Agent: refactor`"
     end
   end
 
@@ -167,7 +171,9 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
 
       refute Workspace.has_file?(workspace(result, 0), ref)
       assert Workspace.has_file?(workspace(result, agent_a.id), ref)
-      assert EditorState.status_msg(result) == "Moved `auth.ex` to `Agent: refactor`"
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) ==
+               "Moved `auth.ex` to `Agent: refactor`"
     end
 
     test "moves from agent workspace to project workspace when there are no drafts", %{
@@ -209,7 +215,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
       assert {:picker, %{picker_ui: %{source: WorkspaceTargetSource}}} =
                result.shell_runtime.state.modal
 
-      assert EditorState.status_msg(result) ==
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) ==
                "Drafts for auth.ex will be discarded. Continue / Promote first / Cancel."
     end
 
@@ -229,7 +235,9 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
       assert Workspace.has_file?(workspace(result, agent_a.id), ref)
       assert Workspace.has_file?(workspace(result, 0), ref)
       assert workspace(result, agent_a.id).review.changed_files == []
-      assert EditorState.status_msg(result) == "Workspace move failed: :diff_failed"
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) ==
+               "Workspace move failed: :diff_failed"
     end
 
     test "blocks agent to agent moves", %{tmp_dir: root} do
@@ -242,7 +250,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
       assert Workspace.has_file?(workspace(result, agent_a.id), ref)
       assert Workspace.has_file?(workspace(result, agent_b.id), ref)
 
-      assert EditorState.status_msg(result) ==
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) ==
                "Move between agent workspaces is not supported in this release. Promote or discard drafts in the source workspace first."
     end
 
@@ -267,7 +275,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
       assert {:picker, %{picker_ui: %{source: WorkspaceTargetSource}}} =
                result.shell_runtime.state.modal
 
-      assert EditorState.status_msg(result) ==
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) ==
                "Drafts for auth.ex will be discarded. Continue / Promote first / Cancel."
     end
 
@@ -294,7 +302,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
 
       assert Workspace.has_file?(workspace(result, agent_a.id), ref)
       assert workspace(result, agent_a.id).review.changed_files == [ref]
-      assert EditorState.status_msg(result) == "Cancelled"
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) == "Cancelled"
     end
 
     test "promote first moves the file after a successful promote", %{tmp_dir: root} do
@@ -334,7 +342,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
       assert workspace(result, agent_a.id).review.state == :clean
       assert File.read!(Path.join(root, ref.relative_path)) == "agent version"
 
-      assert EditorState.status_msg(result) ==
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) ==
                "Moved `auth.ex` to `#{workspace(result, 0).label}`"
     end
 
@@ -378,8 +386,11 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
       assert review.state == :conflict
       assert review.changed_files == [ref]
       assert review.conflict_files == [ref]
-      assert EditorState.status_msg(result) =~ "Workspace promote found conflicts"
-      refute EditorState.status_msg(result) =~ "Moved `auth.ex`"
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) =~
+               "Workspace promote found conflicts"
+
+      refute MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) =~ "Moved `auth.ex`"
     end
 
     test "continue reports a missing project view instead of silently moving", %{tmp_dir: root} do
@@ -409,7 +420,9 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
 
       assert Workspace.has_file?(workspace(result, agent_a.id), file_ref)
       assert workspace(result, agent_a.id).review.changed_files == [file_ref]
-      assert EditorState.status_msg(result) == "Workspace move failed: missing project view"
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) ==
+               "Workspace move failed: missing project view"
     end
 
     test "continue reports a dead project view instead of crashing", %{tmp_dir: root} do
@@ -445,7 +458,9 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
 
       assert Workspace.has_file?(workspace(result, agent_a.id), file_ref)
       assert workspace(result, agent_a.id).review.changed_files == [file_ref]
-      assert EditorState.status_msg(result) =~ "Workspace move failed"
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) =~
+               "Workspace move failed"
     end
 
     test "promote first reports a dead project view instead of crashing", %{tmp_dir: root} do
@@ -481,7 +496,9 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
 
       assert Workspace.has_file?(workspace(result, agent_a.id), file_ref)
       assert workspace(result, agent_a.id).review.changed_files == [file_ref]
-      assert EditorState.status_msg(result) =~ "Workspace promote failed"
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) =~
+               "Workspace promote failed"
     end
 
     test "promote first reports diff errors instead of hiding them", %{tmp_dir: root} do
@@ -513,7 +530,9 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
 
       assert Workspace.has_file?(workspace(result, agent_a.id), ref)
       assert workspace(result, agent_a.id).review.state == :needs_review
-      assert EditorState.status_msg(result) == "Workspace promote failed: :diff_failed"
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) ==
+               "Workspace promote failed: :diff_failed"
     end
 
     test "continue after draft confirmation discards the file draft and moves", %{tmp_dir: root} do

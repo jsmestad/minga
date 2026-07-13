@@ -17,17 +17,17 @@ defmodule MingaEditor.LspActions.CodeActionTest do
   describe "handle_code_action_response/2" do
     test "error sets status message" do
       state = LspActions.handle_code_action_response(stub_state(), {:error, "timeout"})
-      assert EditorState.status_msg(state) == "Code action request failed"
+      assert state.shell_runtime.state.notice.message == "Code action request failed"
     end
 
     test "nil result sets status message" do
       state = LspActions.handle_code_action_response(stub_state(), {:ok, nil})
-      assert EditorState.status_msg(state) == "No code actions available"
+      assert state.shell_runtime.state.notice.message == "No code actions available"
     end
 
     test "empty list sets status message" do
       state = LspActions.handle_code_action_response(stub_state(), {:ok, []})
-      assert EditorState.status_msg(state) == "No code actions available"
+      assert state.shell_runtime.state.notice.message == "No code actions available"
     end
 
     test "actions with non-empty list opens picker" do

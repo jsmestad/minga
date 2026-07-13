@@ -208,7 +208,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
     toggled = GuiActionHandler.dispatch(state, {:toggle_panel, 2})
 
-    assert EditorState.status_msg(toggled) ==
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(toggled) ==
              "Git porcelain extension is disabled or failed to load"
 
     assert toggled.workspace.keymap_scope == state.workspace.keymap_scope
@@ -217,7 +217,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     activated =
       GuiActionHandler.dispatch(state, {:sidebar_action, "git_status", "git_status", "activate"})
 
-    assert EditorState.status_msg(activated) ==
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(activated) ==
              "Git porcelain extension is disabled or failed to load"
 
     assert activated.workspace.keymap_scope == state.workspace.keymap_scope
@@ -264,7 +264,8 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
             {:extension_panel_action, "missing_extension_for_gui_action", :refresh, %{}}
           )
 
-        assert EditorState.status_msg(new_state) == "Extension panel action unavailable"
+        assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state) ==
+                 "Extension panel action unavailable"
       end)
 
     assert log =~ "Extension panel action ignored"
@@ -307,7 +308,10 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
                id: "outline",
                display_name: "Outline",
                action_handler: fn state, action, context ->
-                 EditorState.set_status(state, "#{action}:#{context.kind}")
+                 MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+                   state,
+                   "#{action}:#{context.kind}"
+                 )
                end
              })
 
@@ -316,7 +320,8 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     new_state =
       GuiActionHandler.dispatch(state, {:sidebar_action, "outline", "generic_tree", "activate"})
 
-    assert EditorState.status_msg(new_state) == "activate:generic_tree"
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state) ==
+             "activate:generic_tree"
   end
 
   test "unknown sidebar action is reported instead of silently ignored", %{
@@ -329,7 +334,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
         new_state =
           GuiActionHandler.dispatch(state, {:sidebar_action, "custom", "custom_kind", "toggle"})
 
-        assert EditorState.status_msg(new_state) ==
+        assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state) ==
                  "Unsupported sidebar action: custom_kind/toggle"
       end)
 

@@ -3,6 +3,7 @@ defmodule MingaEditor.PromptUITest do
 
   alias MingaEditor.PromptUI
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Shell.Traditional.ModalWorkflow
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.Prompt, as: PromptState
   alias MingaEditor.Viewport
@@ -109,7 +110,7 @@ defmodule MingaEditor.PromptUITest do
 
       state =
         base_state()
-        |> ModalOverlay.open(:picker, PickerPayload.new(picker_struct))
+        |> ModalWorkflow.open(:picker, PickerPayload.new(picker_struct))
         |> PromptUI.open(TestHandler)
 
       assert prompt_state(state).handler == TestHandler

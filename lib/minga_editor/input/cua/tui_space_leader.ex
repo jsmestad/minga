@@ -143,7 +143,7 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
 
   @spec active_leader_node(EditorState.t()) :: Bindings.node_t() | nil
   defp active_leader_node(state) do
-    if active?(state), do: EditorState.whichkey(state).node, else: nil
+    if active?(state), do: state.shell_runtime.state.whichkey.node, else: nil
   end
 
   @spec put_space_leader_pending(EditorState.t(), boolean()) :: EditorState.t()
@@ -184,8 +184,7 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
     if node.command != nil do
       execute_command(state, node.command)
     else
-      {s, {:whichkey_update, wk}} = Commands.execute(state, {:leader_start, node})
-      EditorState.set_whichkey(s, wk)
+      Commands.execute(state, {:leader_start, node})
     end
   end
 
@@ -207,20 +206,17 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
 
   @spec advance_leader(EditorState.t(), Bindings.node_t()) :: EditorState.t()
   defp advance_leader(state, node) do
-    {s, {:whichkey_update, wk}} = Commands.execute(state, {:leader_progress, node})
-    EditorState.set_whichkey(s, wk)
+    Commands.execute(state, {:leader_progress, node})
   end
 
   @spec cancel_leader(EditorState.t()) :: EditorState.t()
   defp cancel_leader(state) do
-    {s, {:whichkey_update, wk}} = Commands.execute(state, :leader_cancel)
-    EditorState.set_whichkey(s, wk)
+    Commands.execute(state, :leader_cancel)
   end
 
   @spec execute_command(EditorState.t(), atom() | tuple()) :: EditorState.t()
   defp execute_command(state, cmd) do
     case Commands.execute(state, cmd) do
-      {s, {:whichkey_update, wk}} -> EditorState.set_whichkey(s, wk)
       s when is_map(s) -> s
       {s, _action} -> s
     end

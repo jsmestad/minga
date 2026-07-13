@@ -266,8 +266,8 @@ defmodule MingaEditor.Commands.Helpers do
   # ── Yank flash ─────────────────────────────────────────────────────────────
 
   alias Minga.Config
-  alias Minga.Core.Face
-  alias MingaEditor.YankFlash
+  alias MingaEditor.Shell.Traditional.FlashesWorkflow
+  alias MingaEditor.Shell.Traditional.YankFlash
 
   @doc """
   Starts a yank flash highlight on the yanked region if the feature is enabled.
@@ -298,54 +298,8 @@ defmodule MingaEditor.Commands.Helpers do
           Buffer.position(),
           YankFlash.range_type()
         ) :: state()
-  defp do_start_yank_flash(state, buf, start_pos, end_pos, range_type) do
-    old_flash = EditorState.yank_flash(state)
-
-    if old_flash do
-      cancel_existing_yank_flash(old_flash)
-    end
-
-    {flash, effects} = YankFlash.start(buf, start_pos, end_pos, range_type)
-
-    flash_bg = yank_flash_color(state)
-    {hl_start, hl_end} = YankFlash.highlight_bounds(buf, start_pos, end_pos, range_type)
-
-    try do
-      Buffer.add_highlight(buf, hl_start, hl_end,
-        style: Face.new(bg: flash_bg),
-        group: YankFlash.flash_group(),
-        priority: 50
-      )
-    catch
-      :exit, _ -> :ok
-    end
-
-    flash = MingaEditor.FlashEffects.apply(state, flash, effects)
-    EditorState.set_yank_flash(state, flash)
-  end
-
-  @spec cancel_existing_yank_flash(YankFlash.t()) :: :ok
-  defp cancel_existing_yank_flash(%YankFlash{buf: buf} = flash) do
-    for {:cancel_timer, ref} <- YankFlash.cancel_effects(flash) do
-      Process.cancel_timer(ref)
-    end
-
-    try do
-      Buffer.remove_highlight_group(buf, YankFlash.flash_group())
-    catch
-      :exit, _ -> :ok
-    end
-
-    :ok
-  end
-
-  @spec yank_flash_color(state()) :: non_neg_integer()
-  defp yank_flash_color(state) do
-    case state do
-      %{theme: %{editor: %{yank_flash_bg: bg}}} when bg != nil -> bg
-      _ -> YankFlash.default_flash_bg()
-    end
-  end
+  defp do_start_yank_flash(state, buf, start_pos, end_pos, range_type),
+    do: FlashesWorkflow.replace_yank(state, buf, start_pos, end_pos, range_type)
 
   # ── Positional helpers ──────────────────────────────────────────────────────
 

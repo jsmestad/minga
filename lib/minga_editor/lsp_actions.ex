@@ -25,6 +25,7 @@ defmodule MingaEditor.LspActions do
   """
 
   alias Minga.Buffer
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Commands
   alias MingaEditor.HoverPopup
   alias MingaEditor.LspDecorations
@@ -52,13 +53,13 @@ defmodule MingaEditor.LspActions do
   @doc "Sends a textDocument/definition request for the symbol under the cursor."
   @spec goto_definition(state()) :: state()
   def goto_definition(%{workspace: %{buffers: %{active: nil}}} = state) do
-    EditorState.set_status(state, "No active buffer")
+    NoticeWorkflow.publish(state, "No active buffer")
   end
 
   def goto_definition(%{workspace: %{buffers: %{active: buf}}} = state) do
     case lsp_client_for(state, buf) do
       nil ->
-        EditorState.set_status(state, "No language server")
+        NoticeWorkflow.publish(state, "No language server")
 
       client ->
         send_lsp_request(state, client, buf, "textDocument/definition", :definition)
@@ -68,13 +69,13 @@ defmodule MingaEditor.LspActions do
   @doc "Sends a textDocument/definition request and previews the target in a popup."
   @spec peek_definition(state()) :: state()
   def peek_definition(%{workspace: %{buffers: %{active: nil}}} = state) do
-    EditorState.set_status(state, "No active buffer")
+    NoticeWorkflow.publish(state, "No active buffer")
   end
 
   def peek_definition(%{workspace: %{buffers: %{active: buf}}} = state) do
     case lsp_client_for(state, buf) do
       nil ->
-        EditorState.set_status(state, "No language server")
+        NoticeWorkflow.publish(state, "No language server")
 
       client ->
         send_lsp_request(state, client, buf, "textDocument/definition", :peek_definition)
@@ -84,7 +85,7 @@ defmodule MingaEditor.LspActions do
   @doc "Jumps to an already-resolved LSP location."
   @spec open_location(state(), String.t(), non_neg_integer(), non_neg_integer()) :: state()
   def open_location(%{workspace: %{buffers: %{active: nil}}} = state, _uri, _line, _col) do
-    EditorState.set_status(state, "No active buffer")
+    NoticeWorkflow.publish(state, "No active buffer")
   end
 
   def open_location(state, uri, line, col) do
@@ -94,13 +95,13 @@ defmodule MingaEditor.LspActions do
   @doc "Sends a textDocument/hover request for the symbol under the cursor."
   @spec hover(state()) :: state()
   def hover(%{workspace: %{buffers: %{active: nil}}} = state) do
-    EditorState.set_status(state, "No active buffer")
+    NoticeWorkflow.publish(state, "No active buffer")
   end
 
   def hover(%{workspace: %{buffers: %{active: buf}}} = state) do
     case lsp_client_for(state, buf) do
       nil ->
-        EditorState.set_status(state, "No language server")
+        NoticeWorkflow.publish(state, "No language server")
 
       client ->
         send_lsp_request(state, client, buf, "textDocument/hover", :hover)
@@ -112,20 +113,20 @@ defmodule MingaEditor.LspActions do
   @doc "Sends a textDocument/references request for the symbol under the cursor."
   @spec find_references(state()) :: state()
   def find_references(%{workspace: %{buffers: %{active: nil}}} = state) do
-    EditorState.set_status(state, "No active buffer")
+    NoticeWorkflow.publish(state, "No active buffer")
   end
 
   def find_references(%{workspace: %{buffers: %{active: buf}}} = state) do
     case lsp_client_for(state, buf) do
       nil ->
-        EditorState.set_status(state, "No language server")
+        NoticeWorkflow.publish(state, "No language server")
 
       client ->
         file_path = Buffer.file_path(buf)
 
         case file_path do
           nil ->
-            EditorState.set_status(state, "Buffer has no file path")
+            NoticeWorkflow.publish(state, "Buffer has no file path")
 
           path ->
             uri = SyncServer.path_to_uri(path)
@@ -238,20 +239,20 @@ defmodule MingaEditor.LspActions do
   @doc "Sends a textDocument/codeAction request for the cursor position."
   @spec code_action(state()) :: state()
   def code_action(%{workspace: %{buffers: %{active: nil}}} = state) do
-    EditorState.set_status(state, "No active buffer")
+    NoticeWorkflow.publish(state, "No active buffer")
   end
 
   def code_action(%{workspace: %{buffers: %{active: buf}}} = state) do
     case lsp_client_for(state, buf) do
       nil ->
-        EditorState.set_status(state, "No language server")
+        NoticeWorkflow.publish(state, "No language server")
 
       client ->
         file_path = Buffer.file_path(buf)
 
         case file_path do
           nil ->
-            EditorState.set_status(state, "Buffer has no file path")
+            NoticeWorkflow.publish(state, "Buffer has no file path")
 
           path ->
             uri = SyncServer.path_to_uri(path)
@@ -282,13 +283,13 @@ defmodule MingaEditor.LspActions do
   @doc "Sends a textDocument/prepareRename request to validate the rename position."
   @spec prepare_rename(state()) :: state()
   def prepare_rename(%{workspace: %{buffers: %{active: nil}}} = state) do
-    EditorState.set_status(state, "No active buffer")
+    NoticeWorkflow.publish(state, "No active buffer")
   end
 
   def prepare_rename(%{workspace: %{buffers: %{active: buf}}} = state) do
     case lsp_client_for(state, buf) do
       nil ->
-        EditorState.set_status(state, "No language server")
+        NoticeWorkflow.publish(state, "No language server")
 
       client ->
         send_lsp_request(state, client, buf, "textDocument/prepareRename", :prepare_rename)
@@ -298,20 +299,20 @@ defmodule MingaEditor.LspActions do
   @doc "Sends a textDocument/rename request with the given new name."
   @spec rename(state(), String.t()) :: state()
   def rename(%{workspace: %{buffers: %{active: nil}}} = state, _new_name) do
-    EditorState.set_status(state, "No active buffer")
+    NoticeWorkflow.publish(state, "No active buffer")
   end
 
   def rename(%{workspace: %{buffers: %{active: buf}}} = state, new_name) do
     case lsp_client_for(state, buf) do
       nil ->
-        EditorState.set_status(state, "No language server")
+        NoticeWorkflow.publish(state, "No language server")
 
       client ->
         file_path = Buffer.file_path(buf)
 
         case file_path do
           nil ->
-            EditorState.set_status(state, "Buffer has no file path")
+            NoticeWorkflow.publish(state, "Buffer has no file path")
 
           path ->
             uri = SyncServer.path_to_uri(path)
@@ -346,13 +347,13 @@ defmodule MingaEditor.LspActions do
   @doc "Sends a textDocument/typeDefinition request."
   @spec goto_type_definition(state()) :: state()
   def goto_type_definition(%{workspace: %{buffers: %{active: nil}}} = state) do
-    EditorState.set_status(state, "No active buffer")
+    NoticeWorkflow.publish(state, "No active buffer")
   end
 
   def goto_type_definition(%{workspace: %{buffers: %{active: buf}}} = state) do
     case lsp_client_for(state, buf) do
       nil ->
-        EditorState.set_status(state, "No language server")
+        NoticeWorkflow.publish(state, "No language server")
 
       client ->
         send_lsp_request(state, client, buf, "textDocument/typeDefinition", :type_definition)
@@ -362,13 +363,13 @@ defmodule MingaEditor.LspActions do
   @doc "Sends a textDocument/implementation request."
   @spec goto_implementation(state()) :: state()
   def goto_implementation(%{workspace: %{buffers: %{active: nil}}} = state) do
-    EditorState.set_status(state, "No active buffer")
+    NoticeWorkflow.publish(state, "No active buffer")
   end
 
   def goto_implementation(%{workspace: %{buffers: %{active: buf}}} = state) do
     case lsp_client_for(state, buf) do
       nil ->
-        EditorState.set_status(state, "No language server")
+        NoticeWorkflow.publish(state, "No language server")
 
       client ->
         send_lsp_request(state, client, buf, "textDocument/implementation", :implementation)
@@ -380,20 +381,20 @@ defmodule MingaEditor.LspActions do
   @doc "Sends a textDocument/documentSymbol request."
   @spec document_symbols(state()) :: state()
   def document_symbols(%{workspace: %{buffers: %{active: nil}}} = state) do
-    EditorState.set_status(state, "No active buffer")
+    NoticeWorkflow.publish(state, "No active buffer")
   end
 
   def document_symbols(%{workspace: %{buffers: %{active: buf}}} = state) do
     case lsp_client_for(state, buf) do
       nil ->
-        EditorState.set_status(state, "No language server")
+        NoticeWorkflow.publish(state, "No language server")
 
       client ->
         file_path = Buffer.file_path(buf)
 
         case file_path do
           nil ->
-            EditorState.set_status(state, "Buffer has no file path")
+            NoticeWorkflow.publish(state, "Buffer has no file path")
 
           path ->
             uri = SyncServer.path_to_uri(path)
@@ -414,13 +415,13 @@ defmodule MingaEditor.LspActions do
   @doc "Sends a workspace/symbol request with the given query."
   @spec workspace_symbols(state(), String.t()) :: state()
   def workspace_symbols(%{workspace: %{buffers: %{active: nil}}} = state, _query) do
-    EditorState.set_status(state, "No active buffer")
+    NoticeWorkflow.publish(state, "No active buffer")
   end
 
   def workspace_symbols(%{workspace: %{buffers: %{active: buf}}} = state, query) do
     case lsp_client_for(state, buf) do
       nil ->
-        EditorState.set_status(state, "No language server")
+        NoticeWorkflow.publish(state, "No language server")
 
       client ->
         params = %{"query" => query}
@@ -435,20 +436,20 @@ defmodule MingaEditor.LspActions do
   @doc "Sends a textDocument/selectionRange request."
   @spec selection_range(state()) :: state()
   def selection_range(%{workspace: %{buffers: %{active: nil}}} = state) do
-    EditorState.set_status(state, "No active buffer")
+    NoticeWorkflow.publish(state, "No active buffer")
   end
 
   def selection_range(%{workspace: %{buffers: %{active: buf}}} = state) do
     case lsp_client_for(state, buf) do
       nil ->
-        EditorState.set_status(state, "No language server")
+        NoticeWorkflow.publish(state, "No language server")
 
       client ->
         file_path = Buffer.file_path(buf)
 
         case file_path do
           nil ->
-            EditorState.set_status(state, "Buffer has no file path")
+            NoticeWorkflow.publish(state, "Buffer has no file path")
 
           path ->
             uri = SyncServer.path_to_uri(path)
@@ -517,7 +518,7 @@ defmodule MingaEditor.LspActions do
   end
 
   def selection_shrink(state) do
-    EditorState.set_status(state, "No selection ranges to shrink")
+    NoticeWorkflow.publish(state, "No selection ranges to shrink")
   end
 
   # ── Call hierarchy ────────────────────────────────────────────────────────
@@ -525,13 +526,13 @@ defmodule MingaEditor.LspActions do
   @doc "Sends a textDocument/prepareCallHierarchy request."
   @spec prepare_call_hierarchy(state()) :: state()
   def prepare_call_hierarchy(%{workspace: %{buffers: %{active: nil}}} = state) do
-    EditorState.set_status(state, "No active buffer")
+    NoticeWorkflow.publish(state, "No active buffer")
   end
 
   def prepare_call_hierarchy(%{workspace: %{buffers: %{active: buf}}} = state) do
     case lsp_client_for(state, buf) do
       nil ->
-        EditorState.set_status(state, "No language server")
+        NoticeWorkflow.publish(state, "No language server")
 
       client ->
         send_lsp_request(
@@ -547,13 +548,13 @@ defmodule MingaEditor.LspActions do
   @doc "Sends a textDocument/prepareCallHierarchy request for outgoing calls."
   @spec prepare_outgoing_call_hierarchy(state()) :: state()
   def prepare_outgoing_call_hierarchy(%{workspace: %{buffers: %{active: nil}}} = state) do
-    EditorState.set_status(state, "No active buffer")
+    NoticeWorkflow.publish(state, "No active buffer")
   end
 
   def prepare_outgoing_call_hierarchy(%{workspace: %{buffers: %{active: buf}}} = state) do
     case lsp_client_for(state, buf) do
       nil ->
-        EditorState.set_status(state, "No language server")
+        NoticeWorkflow.publish(state, "No language server")
 
       client ->
         send_lsp_request(
@@ -571,7 +572,7 @@ defmodule MingaEditor.LspActions do
   @doc "Sends a textDocument/codeLens request."
   @spec code_lens(state()) :: state()
   def code_lens(%{workspace: %{buffers: %{active: nil}}} = state) do
-    EditorState.set_status(state, "No active buffer")
+    NoticeWorkflow.publish(state, "No active buffer")
   end
 
   def code_lens(%{workspace: %{buffers: %{active: buf}}} = state) do
@@ -599,7 +600,7 @@ defmodule MingaEditor.LspActions do
 
   @spec request_code_lens_for_path(state(), pid(), String.t() | nil) :: state()
   defp request_code_lens_for_path(state, _client, nil) do
-    EditorState.set_status(state, "Buffer has no file path")
+    NoticeWorkflow.publish(state, "Buffer has no file path")
   end
 
   defp request_code_lens_for_path(state, client, path) do
@@ -615,7 +616,7 @@ defmodule MingaEditor.LspActions do
   @doc "Sends a textDocument/inlayHint request for the visible range."
   @spec inlay_hints(state()) :: state()
   def inlay_hints(%{workspace: %{buffers: %{active: nil}}} = state) do
-    EditorState.set_status(state, "No active buffer")
+    NoticeWorkflow.publish(state, "No active buffer")
   end
 
   def inlay_hints(%{workspace: %{buffers: %{active: buf}}} = state) do
@@ -715,21 +716,21 @@ defmodule MingaEditor.LspActions do
   @spec handle_definition_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_definition_response(state, {:error, error}) do
     Log.debug(:lsp, "Definition request failed: #{inspect(error)}")
-    EditorState.set_status(state, "Definition request failed")
+    NoticeWorkflow.publish(state, "Definition request failed")
   end
 
   def handle_definition_response(state, {:ok, nil}) do
-    EditorState.set_status(state, "No definition found")
+    NoticeWorkflow.publish(state, "No definition found")
   end
 
   def handle_definition_response(state, {:ok, []}) do
-    EditorState.set_status(state, "No definition found")
+    NoticeWorkflow.publish(state, "No definition found")
   end
 
   def handle_definition_response(state, {:ok, result}) do
     case parse_location(result) do
       nil ->
-        EditorState.set_status(state, "No definition found")
+        NoticeWorkflow.publish(state, "No definition found")
 
       {uri, line, col} ->
         jump_to_location(state, uri, line, col)
@@ -745,21 +746,21 @@ defmodule MingaEditor.LspActions do
   @spec handle_peek_definition_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_peek_definition_response(state, {:error, error}) do
     Log.debug(:lsp, "Peek definition request failed: #{inspect(error)}")
-    EditorState.set_status(state, "Peek definition request failed")
+    NoticeWorkflow.publish(state, "Peek definition request failed")
   end
 
   def handle_peek_definition_response(state, {:ok, nil}) do
-    EditorState.set_status(state, "No definition found")
+    NoticeWorkflow.publish(state, "No definition found")
   end
 
   def handle_peek_definition_response(state, {:ok, []}) do
-    EditorState.set_status(state, "No definition found")
+    NoticeWorkflow.publish(state, "No definition found")
   end
 
   def handle_peek_definition_response(state, {:ok, result}) do
     case parse_location(result) do
       nil ->
-        EditorState.set_status(state, "No definition found")
+        NoticeWorkflow.publish(state, "No definition found")
 
       {uri, line, col} ->
         show_peek_definition_popup(state, uri, line, col)
@@ -776,11 +777,11 @@ defmodule MingaEditor.LspActions do
   @spec handle_hover_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_hover_response(state, {:error, error}) do
     Log.debug(:lsp, "Hover request failed: #{inspect(error)}")
-    EditorState.set_status(state, "Hover request failed")
+    NoticeWorkflow.publish(state, "Hover request failed")
   end
 
   def handle_hover_response(state, {:ok, nil}) do
-    EditorState.set_status(state, "No hover information")
+    NoticeWorkflow.publish(state, "No hover information")
   end
 
   def handle_hover_response(state, {:ok, %{"contents" => contents}}) do
@@ -788,17 +789,20 @@ defmodule MingaEditor.LspActions do
 
     case markdown do
       "" ->
-        EditorState.set_status(state, "No hover information")
+        NoticeWorkflow.publish(state, "No hover information")
 
       text ->
         {cursor_row, cursor_col} = hover_cursor_screen_position(state)
-        popup = HoverPopup.new(text, cursor_row, cursor_col, theme: state.theme)
-        MingaEditor.State.set_hover_popup(state, popup)
+
+        popup =
+          MingaEditor.HoverPopup.Builder.new(text, cursor_row, cursor_col, theme: state.theme)
+
+        MingaEditor.Shell.Traditional.HoverPopupWorkflow.show(state, popup)
     end
   end
 
   def handle_hover_response(state, {:ok, _}) do
-    EditorState.set_status(state, "No hover information")
+    NoticeWorkflow.publish(state, "No hover information")
   end
 
   @doc """
@@ -877,8 +881,8 @@ defmodule MingaEditor.LspActions do
         state
 
       text ->
-        popup = HoverPopup.new(text, row, col, theme: state.theme)
-        MingaEditor.State.set_hover_popup(state, popup)
+        popup = MingaEditor.HoverPopup.Builder.new(text, row, col, theme: state.theme)
+        MingaEditor.Shell.Traditional.HoverPopupWorkflow.show(state, popup)
     end
   end
 
@@ -995,15 +999,15 @@ defmodule MingaEditor.LspActions do
   @spec handle_code_action_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_code_action_response(state, {:error, error}) do
     Log.debug(:lsp, "Code action request failed: #{inspect(error)}")
-    EditorState.set_status(state, "Code action request failed")
+    NoticeWorkflow.publish(state, "Code action request failed")
   end
 
   def handle_code_action_response(state, {:ok, nil}) do
-    EditorState.set_status(state, "No code actions available")
+    NoticeWorkflow.publish(state, "No code actions available")
   end
 
   def handle_code_action_response(state, {:ok, []}) do
-    EditorState.set_status(state, "No code actions available")
+    NoticeWorkflow.publish(state, "No code actions available")
   end
 
   def handle_code_action_response(state, {:ok, actions}) when is_list(actions) do
@@ -1021,11 +1025,11 @@ defmodule MingaEditor.LspActions do
   @spec handle_prepare_rename_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_prepare_rename_response(state, {:error, error}) do
     Log.debug(:lsp, "Prepare rename failed: #{inspect(error)}")
-    EditorState.set_status(state, "Cannot rename at this position")
+    NoticeWorkflow.publish(state, "Cannot rename at this position")
   end
 
   def handle_prepare_rename_response(state, {:ok, nil}) do
-    EditorState.set_status(state, "Cannot rename at this position")
+    NoticeWorkflow.publish(state, "Cannot rename at this position")
   end
 
   def handle_prepare_rename_response(state, {:ok, result}) do
@@ -1091,37 +1095,41 @@ defmodule MingaEditor.LspActions do
         ) :: state()
   def handle_formatting_response(state, {:error, reason}, _buf, _version, _encoding) do
     Log.warning(:lsp, "LSP formatting error: #{inspect(reason)}")
-    EditorState.set_status(state, "Format error: LSP request failed")
+
+    NoticeWorkflow.publish(
+      state,
+      "Format error: LSP request failed"
+    )
   end
 
   def handle_formatting_response(state, {:ok, response}, _buf, _version, _encoding)
       when response in [nil, []] do
-    EditorState.set_status(state, "No formatting changes")
+    NoticeWorkflow.publish(state, "No formatting changes")
   end
 
   def handle_formatting_response(state, {:ok, edits}, buf, version, encoding)
       when is_list(edits) do
     case Commands.Formatting.apply_lsp_edits(buf, edits, version, encoding) do
       :ok ->
-        EditorState.set_status(state, "Formatted (LSP)")
+        NoticeWorkflow.publish(state, "Formatted (LSP)")
 
       {:error, :invalid_edits} ->
-        EditorState.set_status(state, "Invalid LSP formatting edits skipped")
+        NoticeWorkflow.publish(state, "Invalid LSP formatting edits skipped")
 
       {:error, :stale} ->
-        EditorState.set_status(state, "Buffer changed, format skipped")
+        NoticeWorkflow.publish(state, "Buffer changed, format skipped")
 
       {:error, :read_only} ->
-        EditorState.set_status(state, "Buffer is read-only, format skipped")
+        NoticeWorkflow.publish(state, "Buffer is read-only, format skipped")
 
       {:error, :not_alive} ->
-        EditorState.set_status(state, "Buffer closed, format skipped")
+        NoticeWorkflow.publish(state, "Buffer closed, format skipped")
     end
   end
 
   def handle_formatting_response(state, {:ok, malformed}, _buf, _version, _encoding) do
     Log.warning(:lsp, "Invalid LSP formatting response: #{inspect(malformed)}")
-    EditorState.set_status(state, "Invalid LSP formatting response skipped")
+    NoticeWorkflow.publish(state, "Invalid LSP formatting response skipped")
   end
 
   # ── Type definition / Implementation responses ────────────────────────────
@@ -1130,21 +1138,24 @@ defmodule MingaEditor.LspActions do
   @spec handle_type_definition_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_type_definition_response(state, {:error, error}) do
     Log.debug(:lsp, "Type definition request failed: #{inspect(error)}")
-    EditorState.set_status(state, "Type definition request failed")
+    NoticeWorkflow.publish(state, "Type definition request failed")
   end
 
   def handle_type_definition_response(state, {:ok, nil}) do
-    EditorState.set_status(state, "No type definition found")
+    NoticeWorkflow.publish(state, "No type definition found")
   end
 
   def handle_type_definition_response(state, {:ok, []}) do
-    EditorState.set_status(state, "No type definition found")
+    NoticeWorkflow.publish(state, "No type definition found")
   end
 
   def handle_type_definition_response(state, {:ok, result}) do
     case parse_location(result) do
-      nil -> EditorState.set_status(state, "No type definition found")
-      {uri, line, col} -> jump_to_location(state, uri, line, col)
+      nil ->
+        NoticeWorkflow.publish(state, "No type definition found")
+
+      {uri, line, col} ->
+        jump_to_location(state, uri, line, col)
     end
   end
 
@@ -1152,15 +1163,15 @@ defmodule MingaEditor.LspActions do
   @spec handle_implementation_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_implementation_response(state, {:error, error}) do
     Log.debug(:lsp, "Implementation request failed: #{inspect(error)}")
-    EditorState.set_status(state, "Implementation request failed")
+    NoticeWorkflow.publish(state, "Implementation request failed")
   end
 
   def handle_implementation_response(state, {:ok, nil}) do
-    EditorState.set_status(state, "No implementation found")
+    NoticeWorkflow.publish(state, "No implementation found")
   end
 
   def handle_implementation_response(state, {:ok, []}) do
-    EditorState.set_status(state, "No implementation found")
+    NoticeWorkflow.publish(state, "No implementation found")
   end
 
   def handle_implementation_response(state, {:ok, result}) do
@@ -1168,8 +1179,11 @@ defmodule MingaEditor.LspActions do
     case result do
       [single] ->
         case parse_single_location(single) do
-          nil -> EditorState.set_status(state, "No implementation found")
-          {uri, line, col} -> jump_to_location(state, uri, line, col)
+          nil ->
+            NoticeWorkflow.publish(state, "No implementation found")
+
+          {uri, line, col} ->
+            jump_to_location(state, uri, line, col)
         end
 
       locations when is_list(locations) ->
@@ -1178,8 +1192,11 @@ defmodule MingaEditor.LspActions do
 
       single when is_map(single) ->
         case parse_single_location(single) do
-          nil -> EditorState.set_status(state, "No implementation found")
-          {uri, line, col} -> jump_to_location(state, uri, line, col)
+          nil ->
+            NoticeWorkflow.publish(state, "No implementation found")
+
+          {uri, line, col} ->
+            jump_to_location(state, uri, line, col)
         end
     end
   end
@@ -1190,15 +1207,15 @@ defmodule MingaEditor.LspActions do
   @spec handle_document_symbol_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_document_symbol_response(state, {:error, error}) do
     Log.debug(:lsp, "Document symbol request failed: #{inspect(error)}")
-    EditorState.set_status(state, "Document symbol request failed")
+    NoticeWorkflow.publish(state, "Document symbol request failed")
   end
 
   def handle_document_symbol_response(state, {:ok, nil}) do
-    EditorState.set_status(state, "No symbols found")
+    NoticeWorkflow.publish(state, "No symbols found")
   end
 
   def handle_document_symbol_response(state, {:ok, []}) do
-    EditorState.set_status(state, "No symbols found")
+    NoticeWorkflow.publish(state, "No symbols found")
   end
 
   def handle_document_symbol_response(state, {:ok, symbols}) when is_list(symbols) do
@@ -1206,7 +1223,7 @@ defmodule MingaEditor.LspActions do
 
     case items do
       [] ->
-        EditorState.set_status(state, "No symbols found")
+        NoticeWorkflow.publish(state, "No symbols found")
 
       _ ->
         PickerUI.open(state, LocationSource, %{
@@ -1222,15 +1239,15 @@ defmodule MingaEditor.LspActions do
   @spec handle_workspace_symbol_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_workspace_symbol_response(state, {:error, error}) do
     Log.debug(:lsp, "Workspace symbol request failed: #{inspect(error)}")
-    EditorState.set_status(state, "Workspace symbol request failed")
+    NoticeWorkflow.publish(state, "Workspace symbol request failed")
   end
 
   def handle_workspace_symbol_response(state, {:ok, nil}) do
-    EditorState.set_status(state, "No symbols found")
+    NoticeWorkflow.publish(state, "No symbols found")
   end
 
   def handle_workspace_symbol_response(state, {:ok, []}) do
-    EditorState.set_status(state, "No symbols found")
+    NoticeWorkflow.publish(state, "No symbols found")
   end
 
   def handle_workspace_symbol_response(state, {:ok, symbols}) when is_list(symbols) do
@@ -1238,7 +1255,7 @@ defmodule MingaEditor.LspActions do
 
     case items do
       [] ->
-        EditorState.set_status(state, "No symbols found")
+        NoticeWorkflow.publish(state, "No symbols found")
 
       _ ->
         PickerUI.open(state, LocationSource, %{
@@ -1259,15 +1276,15 @@ defmodule MingaEditor.LspActions do
   @spec handle_selection_range_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_selection_range_response(state, {:error, error}) do
     Log.debug(:lsp, "Selection range request failed: #{inspect(error)}")
-    EditorState.set_status(state, "Selection range request failed")
+    NoticeWorkflow.publish(state, "Selection range request failed")
   end
 
   def handle_selection_range_response(state, {:ok, nil}) do
-    EditorState.set_status(state, "No selection ranges available")
+    NoticeWorkflow.publish(state, "No selection ranges available")
   end
 
   def handle_selection_range_response(state, {:ok, []}) do
-    EditorState.set_status(state, "No selection ranges available")
+    NoticeWorkflow.publish(state, "No selection ranges available")
   end
 
   def handle_selection_range_response(state, {:ok, [range | _]}) do
@@ -1276,7 +1293,10 @@ defmodule MingaEditor.LspActions do
 
     case ranges do
       [] ->
-        EditorState.set_status(state, "No selection ranges available")
+        NoticeWorkflow.publish(
+          state,
+          "No selection ranges available"
+        )
 
       [first | _] ->
         # Store the range chain for subsequent expand/shrink operations
@@ -1292,15 +1312,15 @@ defmodule MingaEditor.LspActions do
           state()
   def handle_prepare_call_hierarchy_response(state, {:error, error}) do
     Log.debug(:lsp, "Call hierarchy request failed: #{inspect(error)}")
-    EditorState.set_status(state, "Call hierarchy request failed")
+    NoticeWorkflow.publish(state, "Call hierarchy request failed")
   end
 
   def handle_prepare_call_hierarchy_response(state, {:ok, nil}) do
-    EditorState.set_status(state, "No call hierarchy available")
+    NoticeWorkflow.publish(state, "No call hierarchy available")
   end
 
   def handle_prepare_call_hierarchy_response(state, {:ok, []}) do
-    EditorState.set_status(state, "No call hierarchy available")
+    NoticeWorkflow.publish(state, "No call hierarchy available")
   end
 
   def handle_prepare_call_hierarchy_response(state, {:ok, [item | _]}) do
@@ -1312,15 +1332,15 @@ defmodule MingaEditor.LspActions do
           state()
   def handle_prepare_outgoing_hierarchy_response(state, {:error, error}) do
     Log.debug(:lsp, "Call hierarchy request failed: #{inspect(error)}")
-    EditorState.set_status(state, "Call hierarchy request failed")
+    NoticeWorkflow.publish(state, "Call hierarchy request failed")
   end
 
   def handle_prepare_outgoing_hierarchy_response(state, {:ok, nil}) do
-    EditorState.set_status(state, "No call hierarchy available")
+    NoticeWorkflow.publish(state, "No call hierarchy available")
   end
 
   def handle_prepare_outgoing_hierarchy_response(state, {:ok, []}) do
-    EditorState.set_status(state, "No call hierarchy available")
+    NoticeWorkflow.publish(state, "No call hierarchy available")
   end
 
   def handle_prepare_outgoing_hierarchy_response(state, {:ok, [item | _]}) do
@@ -1330,15 +1350,15 @@ defmodule MingaEditor.LspActions do
   @doc "Handles a callHierarchy/incomingCalls response."
   @spec handle_incoming_calls_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_incoming_calls_response(state, {:error, _}) do
-    EditorState.set_status(state, "Failed to fetch incoming calls")
+    NoticeWorkflow.publish(state, "Failed to fetch incoming calls")
   end
 
   def handle_incoming_calls_response(state, {:ok, nil}) do
-    EditorState.set_status(state, "No incoming calls")
+    NoticeWorkflow.publish(state, "No incoming calls")
   end
 
   def handle_incoming_calls_response(state, {:ok, []}) do
-    EditorState.set_status(state, "No incoming calls")
+    NoticeWorkflow.publish(state, "No incoming calls")
   end
 
   def handle_incoming_calls_response(state, {:ok, calls}) when is_list(calls) do
@@ -1361,15 +1381,15 @@ defmodule MingaEditor.LspActions do
   @doc "Handles a callHierarchy/outgoingCalls response."
   @spec handle_outgoing_calls_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_outgoing_calls_response(state, {:error, _}) do
-    EditorState.set_status(state, "Failed to fetch outgoing calls")
+    NoticeWorkflow.publish(state, "Failed to fetch outgoing calls")
   end
 
   def handle_outgoing_calls_response(state, {:ok, nil}) do
-    EditorState.set_status(state, "No outgoing calls")
+    NoticeWorkflow.publish(state, "No outgoing calls")
   end
 
   def handle_outgoing_calls_response(state, {:ok, []}) do
-    EditorState.set_status(state, "No outgoing calls")
+    NoticeWorkflow.publish(state, "No outgoing calls")
   end
 
   def handle_outgoing_calls_response(state, {:ok, calls}) when is_list(calls) do
@@ -1473,8 +1493,11 @@ defmodule MingaEditor.LspActions do
   @spec apply_workspace_edit(state(), map(), String.t()) :: state()
   def apply_workspace_edit(state, workspace_edit, label) do
     case apply_workspace_edit_result(state, workspace_edit, label) do
-      {:ok, state, message} -> EditorState.set_status(state, message)
-      {:error, state, message} -> EditorState.set_status(state, message)
+      {:ok, state, message} ->
+        NoticeWorkflow.publish(state, message)
+
+      {:error, state, message} ->
+        NoticeWorkflow.publish(state, message)
     end
   end
 
@@ -1630,7 +1653,7 @@ defmodule MingaEditor.LspActions do
 
     case file_path do
       nil ->
-        EditorState.set_status(state, "Buffer has no file path")
+        NoticeWorkflow.publish(state, "Buffer has no file path")
 
       path ->
         uri = SyncServer.path_to_uri(path)
@@ -1728,14 +1751,17 @@ defmodule MingaEditor.LspActions do
 
         popup =
           markdown
-          |> HoverPopup.new(cursor_row, cursor_col)
+          |> MingaEditor.HoverPopup.Builder.new(cursor_row, cursor_col)
           |> HoverPopup.focus()
           |> HoverPopup.with_open_action({:goto_location, uri, line, col})
 
-        EditorState.set_hover_popup(state, popup)
+        MingaEditor.Shell.Traditional.HoverPopupWorkflow.show(state, popup)
 
       {:error, reason} ->
-        EditorState.set_status(state, "Could not read definition: #{inspect(reason)}")
+        NoticeWorkflow.publish(
+          state,
+          "Could not read definition: #{inspect(reason)}"
+        )
     end
   end
 
@@ -1779,8 +1805,14 @@ defmodule MingaEditor.LspActions do
     case idx do
       nil ->
         case Commands.start_buffer(file_path, EditorState.options_server(state)) do
-          {:ok, pid} -> Commands.add_buffer(state, pid)
-          {:error, _reason} -> EditorState.set_status(state, "Could not open #{file_path}")
+          {:ok, pid} ->
+            Commands.add_buffer(state, pid)
+
+          {:error, _reason} ->
+            NoticeWorkflow.publish(
+              state,
+              "Could not open #{file_path}"
+            )
         end
 
       i ->
@@ -2190,7 +2222,7 @@ defmodule MingaEditor.LspActions do
 
     case lsp_client_for(state, buf) do
       nil ->
-        EditorState.set_status(state, "No language server")
+        NoticeWorkflow.publish(state, "No language server")
 
       client ->
         params = %{"item" => item}
@@ -2206,7 +2238,7 @@ defmodule MingaEditor.LspActions do
 
     case lsp_client_for(state, buf) do
       nil ->
-        EditorState.set_status(state, "No language server")
+        NoticeWorkflow.publish(state, "No language server")
 
       client ->
         params = %{"item" => item}

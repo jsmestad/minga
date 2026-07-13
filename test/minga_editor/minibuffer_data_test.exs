@@ -42,7 +42,7 @@ defmodule MingaEditor.MinibufferDataTest do
     test "returns a visible confirmation prompt while quit is pending" do
       state = %{
         pending_quit: :quit,
-        shell_state: %{status_msg: "Quit Minga? (y/n)"},
+        shell_state: %{notice: %{message: "Quit Minga? (y/n)"}},
         workspace: %{editing: %{mode: :normal, mode_state: %{}}}
       }
 

@@ -37,8 +37,11 @@ defmodule MingaEditor.Handlers.BufferRegistry do
   @spec open_file_by_path(state(), String.t()) :: state()
   def open_file_by_path(state, abs_path) do
     case open_file_by_path_result(state, abs_path) do
-      {:ok, new_state} -> new_state
-      {:error, _reason} -> EditorState.set_status(state, "Could not open #{abs_path}")
+      {:ok, new_state} ->
+        new_state
+
+      {:error, _reason} ->
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Could not open #{abs_path}")
     end
   end
 

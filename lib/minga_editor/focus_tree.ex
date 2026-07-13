@@ -13,14 +13,15 @@ defmodule MingaEditor.FocusTree do
   alias MingaEditor.CompletionUI
   alias MingaEditor.FocusTree.Node, as: TreeNode
   alias MingaEditor.HoverPopup
+  alias MingaEditor.HoverPopup.Presenter, as: HoverPresenter
   alias MingaEditor.Input
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Layout
   alias MingaEditor.Layout.FooterOverlays
   alias MingaEditor.Layout.OverlayBand
   alias MingaEditor.SignatureHelp
+  alias MingaEditor.SignatureHelp.Presenter, as: SignatureHelpPresenter
   alias MingaEditor.Renderer.Gutter
-  alias MingaEditor.State.ModalOverlay
   alias MingaEditor.UI.Picker, as: PickerData
   alias MingaEditor.Viewport
   alias MingaEditor.Window.Content
@@ -417,7 +418,7 @@ defmodule MingaEditor.FocusTree do
          terminal_viewport: vp,
          theme: theme
        }) do
-    case HoverPopup.box(popup, {vp.rows, vp.cols}, theme) do
+    case HoverPresenter.box(popup, {vp.rows, vp.cols}, theme) do
       nil ->
         root
 
@@ -453,7 +454,7 @@ defmodule MingaEditor.FocusTree do
          terminal_viewport: vp,
          theme: theme
        }) do
-    case SignatureHelp.box(sh, {vp.rows, vp.cols}, theme) do
+    case SignatureHelpPresenter.box(sh, {vp.rows, vp.cols}, theme) do
       nil ->
         root
 
@@ -487,7 +488,7 @@ defmodule MingaEditor.FocusTree do
   end
 
   defp add_modal_overlays(%TreeNode{} = root, state, layout) do
-    case ModalOverlay.completion(state) do
+    case MingaEditor.Shell.Traditional.ModalWorkflow.completion(state) do
       %Completion{} = completion -> add_completion_overlay(root, completion, state, layout)
       _ -> root
     end

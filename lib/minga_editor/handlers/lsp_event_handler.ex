@@ -10,9 +10,9 @@ defmodule MingaEditor.Handlers.LspEventHandler do
   alias MingaEditor.LSP.FormatLifecycle
   alias MingaEditor.LspActions
   alias MingaEditor.SemanticTokenSync
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.LSP, as: LSPState
-  alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.OperationFeedback
 
   @typedoc "Effects that the LSP event handler may return."
@@ -28,12 +28,12 @@ defmodule MingaEditor.Handlers.LspEventHandler do
   def handle(state, {:completion_debounce, clients, buffer_pid}) do
     new_bridge =
       CompletionTrigger.flush_debounce(
-        ModalOverlay.completion_trigger(state),
+        MingaEditor.Shell.Traditional.ModalWorkflow.completion_trigger(state),
         clients,
         buffer_pid
       )
 
-    {ModalOverlay.put_completion_trigger(state, new_bridge), []}
+    {MingaEditor.Shell.Traditional.ModalWorkflow.put_completion_trigger(state, new_bridge), []}
   end
 
   def handle(state, {:lsp_response, ref, result}) do
@@ -67,7 +67,7 @@ defmodule MingaEditor.Handlers.LspEventHandler do
 
   def handle(state, {:lsp_format_spinner, ref}) do
     if LSPState.format_active?(state.lsp, ref) do
-      {EditorState.set_status(state, "Formatting…"), [:render_now]}
+      {NoticeWorkflow.publish(state, "Formatting…"), [:render_now]}
     else
       {state, []}
     end
@@ -75,7 +75,7 @@ defmodule MingaEditor.Handlers.LspEventHandler do
 
   def handle(state, {:lsp_format_cancellable, ref}) do
     if LSPState.format_active?(state.lsp, ref) do
-      {EditorState.set_status(state, "Formatting… [Esc to cancel]"), [:render_now]}
+      {NoticeWorkflow.publish(state, "Formatting… [Esc to cancel]"), [:render_now]}
     else
       {state, []}
     end
@@ -89,7 +89,7 @@ defmodule MingaEditor.Handlers.LspEventHandler do
       {:ok, operation} ->
         state = EditorState.update_lsp(state, &LSPState.drop_format(&1, ref))
         FormatLifecycle.cancel(operation)
-        {EditorState.set_status(state, "Format timed out [r to retry]"), [:render_now]}
+        {NoticeWorkflow.publish(state, "Format timed out [r to retry]"), [:render_now]}
     end
   end
 

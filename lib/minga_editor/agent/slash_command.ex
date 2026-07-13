@@ -9,6 +9,8 @@ defmodule MingaEditor.Agent.SlashCommand do
   """
 
   alias MingaAgent.Credentials
+  alias MingaAgent.DynamicSlashCommand
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaAgent.Instructions
   alias MingaAgent.Memory
   alias MingaAgent.ModelCatalog
@@ -28,7 +30,6 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   alias MingaEditor.Agent.SlashCommand.Command
   alias MingaEditor.Agent.SlashCommand.Registry, as: SlashCommandRegistry
-  alias MingaEditor.State
 
   @typedoc "A registered slash command."
   @type command :: Command.t()
@@ -476,13 +477,13 @@ defmodule MingaEditor.Agent.SlashCommand do
         :ok ->
           state = AgentAccess.update_agent_ui(state, &UIState.set_thinking_level(&1, level))
           Session.add_system_message(AgentAccess.session(state), "Thinking: #{level}")
-          State.set_status(state, "Thinking: #{level}")
+          NoticeWorkflow.publish(state, "Thinking: #{level}")
 
         {:error, reason} ->
-          State.set_status(state, "Error: #{inspect(reason)}")
+          NoticeWorkflow.publish(state, "Error: #{inspect(reason)}")
       end
     else
-      State.set_status(state, "No agent session")
+      NoticeWorkflow.publish(state, "No agent session")
     end
   end
 
@@ -663,7 +664,7 @@ defmodule MingaEditor.Agent.SlashCommand do
       Session.add_system_message(AgentAccess.session(state), "Available commands:\n#{help_text}")
     end
 
-    State.set_status(state, "Commands listed in chat")
+    NoticeWorkflow.publish(state, "Commands listed in chat")
   end
 
   @spec do_plan(state()) :: {:ok, state()} | {:error, String.t()}
@@ -674,7 +675,7 @@ defmodule MingaEditor.Agent.SlashCommand do
       state =
         state
         |> AgentAccess.update_agent(&AgentState.set_status(&1, :plan))
-        |> State.set_status("Plan mode enabled")
+        |> NoticeWorkflow.publish("Plan mode enabled")
 
       {:ok, state}
     end
@@ -688,7 +689,7 @@ defmodule MingaEditor.Agent.SlashCommand do
       state =
         state
         |> AgentAccess.update_agent(&AgentState.set_status(&1, :idle))
-        |> State.set_status("Execution mode enabled")
+        |> NoticeWorkflow.publish("Execution mode enabled")
 
       {:ok, state}
     end
@@ -911,7 +912,12 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   @spec start_manual_oauth_flow(state()) :: state()
   defp start_manual_oauth_flow(state) do
-    state = State.set_status(state, "Starting manual ChatGPT sign-in...")
+    state =
+      NoticeWorkflow.publish(
+        state,
+        "Starting manual ChatGPT sign-in..."
+      )
+
     session = AgentAccess.session(state)
     client_pid = self()
 
@@ -930,7 +936,12 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   @spec complete_manual_oauth_flow(state(), String.t(), String.t()) :: state()
   defp complete_manual_oauth_flow(state, ref, pasted) do
-    state = State.set_status(state, "Completing manual ChatGPT sign-in...")
+    state =
+      NoticeWorkflow.publish(
+        state,
+        "Completing manual ChatGPT sign-in..."
+      )
+
     session = AgentAccess.session(state)
     client_pid = self()
 
@@ -1224,7 +1235,7 @@ defmodule MingaEditor.Agent.SlashCommand do
     if is_pid(session) do
       case Session.compact(session) do
         {:ok, info} ->
-          {:ok, State.set_status(state, info)}
+          {:ok, NoticeWorkflow.publish(state, info)}
 
         {:error, reason} ->
           {:error, reason}
@@ -1337,7 +1348,7 @@ defmodule MingaEditor.Agent.SlashCommand do
     # Take only the first line for the single-line minibuffer status bar.
     # The full message is visible in the semantic agent transcript via add_system_message.
     first_line = message |> String.split("\n", parts: 2) |> hd() |> String.trim()
-    State.set_status(state, String.slice(first_line, 0, 80))
+    NoticeWorkflow.publish(state, String.slice(first_line, 0, 80))
   end
 
   @doc "Returns slash commands contributed by loaded extensions."
@@ -1364,21 +1375,76 @@ defmodule MingaEditor.Agent.SlashCommand do
   defp execute_dynamic_command(state, cmd, args) do
     command_path = cmd.execute
     trimmed_args = String.trim(args)
-    cmd_args = if trimmed_args == "", do: [], else: [trimmed_args]
+    command_args = if trimmed_args == "", do: [], else: [trimmed_args]
 
-    task = Task.async(fn -> System.cmd(command_path, cmd_args, stderr_to_stdout: true) end)
+    start_dynamic_command(
+      state,
+      cmd,
+      command_path,
+      command_args,
+      AgentAccess.session(state)
+    )
+  end
 
-    case Task.await(task, :infinity) do
+  @spec start_dynamic_command(state(), Command.t(), String.t(), [String.t()], pid() | nil) ::
+          {:ok, state()} | {:error, String.t()}
+  defp start_dynamic_command(_state, _cmd, _command_path, _command_args, nil),
+    do: {:error, "No active agent session"}
+
+  defp start_dynamic_command(state, cmd, command_path, command_args, session) do
+    case Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
+           run_dynamic_command(session, cmd, command_path, command_args)
+         end) do
+      {:ok, _task_pid} ->
+        {:ok, NoticeWorkflow.publish(state, "Running /#{cmd.name}…")}
+
+      {:error, reason} ->
+        {:error, "Command /#{cmd.name} could not start: #{inspect(reason)}"}
+    end
+  catch
+    :exit, reason -> {:error, "Command /#{cmd.name} could not start: #{inspect(reason)}"}
+  end
+
+  @spec run_dynamic_command(pid(), Command.t(), String.t(), [String.t()]) :: :ok
+  defp run_dynamic_command(session, cmd, command_path, command_args) do
+    case DynamicSlashCommand.run(command_path, command_args) do
       {output, 0} ->
-        {:ok, emit_system_message(state, String.trim(output))}
+        deliver_dynamic_command_message(session, String.trim(output), :info)
 
       {output, _code} ->
-        {:error, "Command /#{cmd.name} failed: #{String.trim(output)}"}
+        deliver_dynamic_command_message(
+          session,
+          "Command /#{cmd.name} failed: #{String.trim(output)}",
+          :error
+        )
     end
   rescue
-    e -> {:error, "Command /#{cmd.name} error: #{Exception.message(e)}"}
+    error ->
+      deliver_dynamic_command_message(
+        session,
+        "Command /#{cmd.name} error: #{Exception.message(error)}",
+        :error
+      )
   catch
-    :exit, reason -> {:error, "Command /#{cmd.name} exited: #{inspect(reason)}"}
+    :exit, reason ->
+      deliver_dynamic_command_message(
+        session,
+        "Command /#{cmd.name} exited: #{inspect(reason)}",
+        :error
+      )
+  end
+
+  @spec deliver_dynamic_command_message(pid(), String.t(), :info | :error) :: :ok
+  defp deliver_dynamic_command_message(session, message, level) do
+    Session.add_system_message(session, message, level)
+  catch
+    :exit, reason ->
+      Minga.Log.warning(
+        :agent,
+        "Dynamic slash command result could not reach its session: #{inspect(reason)}"
+      )
+
+      :ok
   end
 
   # ── Helpers ─────────────────────────────────────────────────────────────────

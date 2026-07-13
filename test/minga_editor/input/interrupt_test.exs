@@ -11,14 +11,17 @@ defmodule MingaEditor.Input.InterruptTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
+  alias MingaEditor.Shell.Traditional.HoverPopupWorkflow
+  alias MingaEditor.Shell.Traditional.ModalWorkflow
+  alias MingaEditor.Shell.Traditional.WhichKeyWorkflow
   alias MingaEditor.State.ModalOverlay
+  alias MingaEditor.State.OperationFeedback
   alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
   alias MingaEditor.State.ModalOverlay.Conflict, as: ConflictPayload
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
   alias MingaEditor.State.ModalOverlay.Prompt, as: PromptPayload
   alias MingaEditor.State.Picker
   alias MingaEditor.State.Prompt, as: PromptState
-  alias MingaEditor.State.WhichKey
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
 
@@ -47,21 +50,21 @@ defmodule MingaEditor.Input.InterruptTest do
   @spec open_modal_variant(EditorState.t(), ModalOverlay.variant()) :: EditorState.t()
   defp open_modal_variant(state, :picker) do
     picker = MingaEditor.UI.Picker.new([%MingaEditor.UI.Picker.Item{id: "x", label: "x"}])
-    ModalOverlay.open(state, :picker, PickerPayload.new(%Picker{picker: picker}))
+    ModalWorkflow.open(state, :picker, PickerPayload.new(%Picker{picker: picker}))
   end
 
   defp open_modal_variant(state, :prompt) do
     prompt = %PromptState{handler: __MODULE__, text: "query", cursor: 5, label: "Find"}
-    ModalOverlay.open(state, :prompt, PromptPayload.new(prompt))
+    ModalWorkflow.open(state, :prompt, PromptPayload.new(prompt))
   end
 
   defp open_modal_variant(state, :completion) do
     completion = %Completion{items: [], trigger_position: {0, 0}}
-    ModalOverlay.open(state, :completion, CompletionPayload.new(:tab1, completion: completion))
+    ModalWorkflow.open(state, :completion, CompletionPayload.new(:tab1, completion: completion))
   end
 
   defp open_modal_variant(state, :conflict) do
-    ModalOverlay.open(
+    ModalWorkflow.open(
       state,
       :conflict,
       ConflictPayload.new(state.workspace.buffers.active, "/tmp/test.txt")
@@ -87,18 +90,20 @@ defmodule MingaEditor.Input.InterruptTest do
       | workspace: %{state.workspace | keymap_scope: :agent, editing: vim}
     }
 
+    state = WhichKeyWorkflow.begin(state, %{}, [])
+    state = WhichKeyWorkflow.reveal(state, state.shell_runtime.state.whichkey.generation)
+
     state =
       state
-      |> EditorState.set_whichkey(%WhichKey{node: %{}, show: true})
-      |> EditorState.set_status("stale status")
-      |> EditorState.set_hover_popup(hover)
+      |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("stale status")
+      |> HoverPopupWorkflow.show(hover)
       |> AgentAccess.update_agent_ui(&UIState.set_prefix(&1, :g))
 
     {state, hover}
   end
 
   @spec assert_known_good_after_interrupt(EditorState.t(), HoverPopup.t()) :: true
-  defp assert_known_good_after_interrupt(state, hover) do
+  defp assert_known_good_after_interrupt(state, _hover) do
     assert state.workspace.keymap_scope == :editor
     assert state.workspace.editing.mode == :normal
     assert state.workspace.editing.mode_state == Mode.initial_state()
@@ -106,8 +111,8 @@ defmodule MingaEditor.Input.InterruptTest do
     assert EditorState.whichkey(state).node == nil
     assert EditorState.whichkey(state).show == false
     assert AgentAccess.view(state).pending_prefix == nil
-    assert EditorState.status_msg(state) == nil
-    assert EditorState.hover_popup(state) == hover
+    assert state.shell_runtime.state.notice.message == nil
+    assert state.shell_runtime.state.hover_popup == nil
   end
 
   describe "Ctrl-G basics" do
@@ -249,15 +254,19 @@ defmodule MingaEditor.Input.InterruptTest do
         ])
 
       state =
-        ModalOverlay.open(state, :picker, PickerPayload.new(%Picker{picker: picker, source: nil}))
+        ModalWorkflow.open(
+          state,
+          :picker,
+          PickerPayload.new(%Picker{picker: picker, source: nil})
+        )
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
       assert EditorState.modal(new_state) == :none
     end
 
     test "dismisses which-key popup" do
-      state = base_state()
-      state = MingaEditor.State.set_whichkey(state, %WhichKey{node: %{}, show: true})
+      state = WhichKeyWorkflow.begin(base_state(), %{}, [])
+      state = WhichKeyWorkflow.reveal(state, state.shell_runtime.state.whichkey.generation)
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
       assert EditorState.whichkey(new_state).node == nil
@@ -267,7 +276,7 @@ defmodule MingaEditor.Input.InterruptTest do
     test "dismisses conflict prompt" do
       state = base_state()
       buf = state.workspace.buffers.active
-      state = ModalOverlay.open(state, :conflict, ConflictPayload.new(buf, "/tmp/test.txt"))
+      state = ModalWorkflow.open(state, :conflict, ConflictPayload.new(buf, "/tmp/test.txt"))
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
       refute ModalOverlay.match(EditorState.modal(new_state), :conflict)
@@ -280,18 +289,24 @@ defmodule MingaEditor.Input.InterruptTest do
       payload =
         MingaEditor.State.ModalOverlay.Completion.new(:tab1, completion: completion)
 
-      state = ModalOverlay.open(state, :completion, payload)
+      state = ModalWorkflow.open(state, :completion, payload)
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
-      assert MingaEditor.State.ModalOverlay.completion(new_state) == nil
-      refute ModalOverlay.match(EditorState.modal(new_state), :completion)
+      assert MingaEditor.Shell.Traditional.ModalWorkflow.completion(new_state) == nil
+      refute ModalOverlay.match(new_state.shell_runtime.state.modal, :completion)
     end
 
-    test "clears status message" do
-      state = MingaEditor.State.set_status(base_state(), "some message")
+    test "clears the notice without mutating operation feedback" do
+      {state, _operation} =
+        base_state()
+        |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("some message")
+        |> OperationFeedback.start_in(:external_format, "buffer:ctrl-g", "Formatting")
+
+      operation_feedback = state.operation_feedback
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
-      assert EditorState.status_msg(new_state) == nil
+      assert new_state.shell_runtime.state.notice.message == nil
+      assert new_state.operation_feedback == operation_feedback
     end
   end
 

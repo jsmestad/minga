@@ -7,6 +7,7 @@ defmodule MingaEditor.Commands.AgentSession do
   """
 
   alias MingaAgent.ProjectView
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaAgent.Session
   alias Minga.Buffer
   alias MingaEditor.Agent.UIState.Panel
@@ -52,12 +53,15 @@ defmodule MingaEditor.Commands.AgentSession do
     end
 
     state = state |> clear_restart_session(session) |> reset_agent_cache()
-    state = EditorState.set_status(state, message)
+    state = NoticeWorkflow.publish(state, message)
     if AgentAccess.panel(state).visible, do: start_agent_session(state), else: state
   end
 
   def restart_session(state, _message) do
-    EditorState.set_status(state, "Session restart is not supported on this shell")
+    NoticeWorkflow.publish(
+      state,
+      "Session restart is not supported on this shell"
+    )
   end
 
   @spec clear_restart_session(state(), pid() | nil) :: state()
@@ -183,10 +187,16 @@ defmodule MingaEditor.Commands.AgentSession do
           |> EventReplay.replay_active(events)
           |> apply_remote_snapshot(snapshot)
 
-        EditorState.set_status(state, "Connected to #{server_name} session #{session_id}")
+        NoticeWorkflow.publish(
+          state,
+          "Connected to #{server_name} session #{session_id}"
+        )
 
       {:error, reason} ->
-        EditorState.set_status(state, "Remote session unavailable: #{inspect(reason)}")
+        NoticeWorkflow.publish(
+          state,
+          "Remote session unavailable: #{inspect(reason)}"
+        )
     end
   end
 
@@ -198,10 +208,16 @@ defmodule MingaEditor.Commands.AgentSession do
         start_remote_session_on_node(state, server_name, remote_node)
 
       {:error, :disconnected} ->
-        EditorState.set_status(state, "Remote server #{server_name} is disconnected")
+        NoticeWorkflow.publish(
+          state,
+          "Remote server #{server_name} is disconnected"
+        )
 
       {:error, :not_found} ->
-        EditorState.set_status(state, "Unknown remote server #{server_name}")
+        NoticeWorkflow.publish(
+          state,
+          "Unknown remote server #{server_name}"
+        )
     end
   end
 
@@ -261,11 +277,14 @@ defmodule MingaEditor.Commands.AgentSession do
         detach_remote_session(state, session)
 
       _other ->
-        EditorState.set_status(state, "No attached remote session")
+        NoticeWorkflow.publish(state, "No attached remote session")
     end
   catch
     :exit, reason ->
-      EditorState.set_status(state, "Failed to detach remote session: #{inspect(reason)}")
+      NoticeWorkflow.publish(
+        state,
+        "Failed to detach remote session: #{inspect(reason)}"
+      )
   end
 
   @doc "Stops the current agent session, routing remote sessions to their remote manager."
@@ -283,7 +302,11 @@ defmodule MingaEditor.Commands.AgentSession do
         stop_remote_session(state, session)
     end
   catch
-    :exit, reason -> EditorState.set_status(state, "Failed to stop session: #{inspect(reason)}")
+    :exit, reason ->
+      NoticeWorkflow.publish(
+        state,
+        "Failed to stop session: #{inspect(reason)}"
+      )
   end
 
   # ── Code block helpers ─────────────────────────────────────────────────────
@@ -311,7 +334,10 @@ defmodule MingaEditor.Commands.AgentSession do
         |> maybe_log_code_block_opened(language)
 
       {:error, reason} ->
-        EditorState.set_status(state, "Failed to open code block: #{inspect(reason)}")
+        NoticeWorkflow.publish(
+          state,
+          "Failed to open code block: #{inspect(reason)}"
+        )
     end
   end
 
@@ -397,7 +423,10 @@ defmodule MingaEditor.Commands.AgentSession do
         connect_remote_session(state, server_name, session_id, remote_pid, token)
 
       {:error, reason} ->
-        EditorState.set_status(state, "Failed to start remote session: #{inspect(reason)}")
+        NoticeWorkflow.publish(
+          state,
+          "Failed to start remote session: #{inspect(reason)}"
+        )
     end
   end
 
@@ -578,14 +607,20 @@ defmodule MingaEditor.Commands.AgentSession do
             state
             |> clear_restart_session(session)
             |> mark_remote_session_disconnected(session_id)
-            |> EditorState.set_status("Detached remote session #{session_id}")
+            |> NoticeWorkflow.publish("Detached remote session #{session_id}")
 
           {:error, reason} ->
-            EditorState.set_status(state, "Failed to detach remote session: #{inspect(reason)}")
+            NoticeWorkflow.publish(
+              state,
+              "Failed to detach remote session: #{inspect(reason)}"
+            )
         end
 
       _ ->
-        EditorState.set_status(state, "Remote session id is unavailable")
+        NoticeWorkflow.publish(
+          state,
+          "Remote session id is unavailable"
+        )
     end
   end
 
@@ -631,15 +666,24 @@ defmodule MingaEditor.Commands.AgentSession do
             state
 
           {:error, reason} ->
-            EditorState.set_status(state, "Failed to stop remote session: #{inspect(reason)}")
+            NoticeWorkflow.publish(
+              state,
+              "Failed to stop remote session: #{inspect(reason)}"
+            )
         end
 
       _ ->
-        EditorState.set_status(state, "Remote session id is unavailable")
+        NoticeWorkflow.publish(
+          state,
+          "Remote session id is unavailable"
+        )
     end
   catch
     :exit, reason ->
-      EditorState.set_status(state, "Remote server unavailable: #{inspect(reason)}")
+      NoticeWorkflow.publish(
+        state,
+        "Remote server unavailable: #{inspect(reason)}"
+      )
   end
 
   defp stop_remote_session(state, _session), do: state

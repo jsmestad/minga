@@ -34,7 +34,7 @@ defmodule MingaEditor.Commands.Extensions do
           ["Extensions:" | lines] |> Enum.join("\n")
       end
 
-    EditorState.set_status(state, msg)
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, msg)
   end
 
   @spec update_all(state()) :: state()
@@ -42,7 +42,11 @@ defmodule MingaEditor.Commands.Extensions do
     alias Minga.Extension.Updater
 
     Task.start(fn -> Updater.check_all() end)
-    EditorState.set_status(state, "Checking for extension updates...")
+
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      "Checking for extension updates..."
+    )
   end
 
   @spec update(state()) :: state()
@@ -58,7 +62,7 @@ defmodule MingaEditor.Commands.Extensions do
     ms = Editing.mode_state(state)
     Task.start(fn -> Updater.apply_accepted(ms) end)
 
-    EditorState.set_status(state, "Applying extension updates...")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Applying extension updates...")
   end
 
   @spec confirm_details(state()) :: state()

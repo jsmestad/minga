@@ -22,6 +22,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   alias MingaEditor.Renderer.Context
   alias MingaEditor.Renderer.SearchHighlight
   alias MingaEditor.RenderPipeline.Input
+  alias MingaEditor.Shell.Traditional.NavFlash
   alias Minga.Git
   alias Minga.LSP.SyncServer
   alias Minga.Mode.VisualState
@@ -138,7 +139,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       confirm_match: confirm_match,
       highlight: window_highlight(state, window),
       cursorline_bg: cursorline_bg,
-      nav_flash: state.shell_state.nav_flash,
+      nav_flash: active_nav_flash(state.shell_state.flashes.nav),
       nav_flash_bg: state.theme.editor.nav_flash_bg,
       editor_bg: state.theme.editor.bg,
       has_sign_column: has_sign_column,
@@ -557,6 +558,11 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   end
 
   def visual_selection_bounds(_state, _cursor), do: nil
+
+  @spec active_nav_flash(NavFlash.t()) :: NavFlash.t() | nil
+  defp active_nav_flash(%NavFlash{} = flash) do
+    if NavFlash.active?(flash), do: flash, else: nil
+  end
 
   # ── Context fingerprint ─────────────────────────────────────────────────────
 

@@ -548,7 +548,7 @@ defmodule Minga.Test.EditorCase do
         |> Enum.reject(&(&1 == ""))
         |> Enum.join(" ")
 
-      status = MingaEditor.State.status_msg(state) ->
+      status = MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) ->
         status
 
       true ->
@@ -615,6 +615,12 @@ defmodule Minga.Test.EditorCase do
   @spec message_store_entries(editor_ctx()) :: [map()]
   def message_store_entries(%{editor: editor}) do
     get_editor_state(editor).message_store.entries
+  end
+
+  @doc "Returns the bottom-panel lifecycle value after synchronizing with the editor process."
+  @spec bottom_panel(editor_ctx()) :: MingaEditor.BottomPanel.t()
+  def bottom_panel(%{editor: editor}) do
+    get_editor_state(editor).shell_state.bottom_panel
   end
 
   @doc "Returns the number of open buffers."
@@ -738,10 +744,10 @@ defmodule Minga.Test.EditorCase do
     get_editor_state(editor).pending_quit
   end
 
-  @doc "Returns the current status/command message."
-  @spec status_msg(editor_ctx()) :: String.t() | nil
-  def status_msg(%{editor: editor}) do
-    MingaEditor.State.status_msg(get_editor_state(editor))
+  @doc "Returns the current ordinary notice message."
+  @spec notice_message(editor_ctx()) :: String.t() | nil
+  def notice_message(%{editor: editor}) do
+    MingaEditor.Shell.Traditional.NoticeWorkflow.message(get_editor_state(editor))
   end
 
   @doc "Returns the tab bar labels."

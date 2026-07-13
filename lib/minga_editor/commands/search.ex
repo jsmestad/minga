@@ -78,7 +78,12 @@ defmodule MingaEditor.Commands.Search do
         state
         |> put_in_search(:last_pattern, ms.input)
         |> put_in_search(:last_direction, ms.direction)
-        |> then(&EditorState.set_status(&1, "Pattern not found: #{ms.input}"))
+        |> then(
+          &MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+            &1,
+            "Pattern not found: #{ms.input}"
+          )
+        )
 
       {line, col} ->
         Buffer.move_to(buf, {line, col})
@@ -115,7 +120,10 @@ defmodule MingaEditor.Commands.Search do
 
     case Minga.Editing.search_next(content, pattern, cursor, dir) do
       nil ->
-        EditorState.set_status(state, "Pattern not found: #{pattern}")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Pattern not found: #{pattern}"
+        )
 
       {line, col} ->
         Buffer.move_to(buf, {line, col})
@@ -127,7 +135,7 @@ defmodule MingaEditor.Commands.Search do
   end
 
   def execute(state, :search_next) do
-    EditorState.set_status(state, "No previous search pattern")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No previous search pattern")
   end
 
   def execute(
@@ -146,7 +154,10 @@ defmodule MingaEditor.Commands.Search do
 
     case Minga.Editing.search_next(content, pattern, cursor, reverse) do
       nil ->
-        EditorState.set_status(state, "Pattern not found: #{pattern}")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Pattern not found: #{pattern}"
+        )
 
       {line, col} ->
         Buffer.move_to(buf, {line, col})
@@ -158,7 +169,7 @@ defmodule MingaEditor.Commands.Search do
   end
 
   def execute(state, :search_prev) do
-    EditorState.set_status(state, "No previous search pattern")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No previous search pattern")
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :search_word_under_cursor_forward) do
@@ -167,7 +178,7 @@ defmodule MingaEditor.Commands.Search do
 
     case Minga.Editing.word_under_cursor(tmp_buf, cursor) do
       nil ->
-        EditorState.set_status(state, "No word under cursor")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No word under cursor")
 
       word ->
         case Minga.Editing.search_next(content, word, cursor, :forward) do
@@ -175,7 +186,12 @@ defmodule MingaEditor.Commands.Search do
             state
             |> put_in_search(:last_pattern, word)
             |> put_in_search(:last_direction, :forward)
-            |> then(&EditorState.set_status(&1, "Pattern not found: #{word}"))
+            |> then(
+              &MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+                &1,
+                "Pattern not found: #{word}"
+              )
+            )
 
           {line, col} ->
             Buffer.move_to(buf, {line, col})
@@ -198,7 +214,7 @@ defmodule MingaEditor.Commands.Search do
 
     case Minga.Editing.word_under_cursor(tmp_buf, cursor) do
       nil ->
-        EditorState.set_status(state, "No word under cursor")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No word under cursor")
 
       word ->
         case Minga.Editing.search_next(content, word, cursor, :backward) do
@@ -206,7 +222,12 @@ defmodule MingaEditor.Commands.Search do
             state
             |> put_in_search(:last_pattern, word)
             |> put_in_search(:last_direction, :backward)
-            |> then(&EditorState.set_status(&1, "Pattern not found: #{word}"))
+            |> then(
+              &MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+                &1,
+                "Pattern not found: #{word}"
+              )
+            )
 
           {line, col} ->
             Buffer.move_to(buf, {line, col})
@@ -234,7 +255,7 @@ defmodule MingaEditor.Commands.Search do
   end
 
   def execute(state, :confirm_project_search) do
-    EditorState.set_status(state, "Empty search query")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Empty search query")
   end
 
   # Advance cursor to current match during substitute confirm
@@ -274,7 +295,7 @@ defmodule MingaEditor.Commands.Search do
     total = Enum.count(ms.matches)
 
     if accepted_count == 0 do
-      EditorState.set_status(state, "No substitutions made")
+      MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No substitutions made")
     else
       # Apply replacements in reverse order to preserve positions
       sorted_indices =
@@ -304,7 +325,7 @@ defmodule MingaEditor.Commands.Search do
 
       state
       |> put_in_search(:last_pattern, ms.pattern)
-      |> then(&EditorState.set_status(&1, msg))
+      |> then(&MingaEditor.Shell.Traditional.NoticeWorkflow.publish(&1, msg))
     end
   end
 
@@ -326,7 +347,7 @@ defmodule MingaEditor.Commands.Search do
         MingaEditor.Frontend.clipboard_write(state.port_manager, text, :find)
       end
 
-      EditorState.set_status(state, "Using \"#{text}\" for Find")
+      MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Using \"#{text}\" for Find")
     else
       state
     end
@@ -352,7 +373,10 @@ defmodule MingaEditor.Commands.Search do
 
     case matches do
       [] ->
-        EditorState.set_status(state, "Pattern not found: #{pattern}")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Pattern not found: #{pattern}"
+        )
 
       _ ->
         %Minga.Editing.Search.Match{line: first_line, col: first_col} = hd(matches)
@@ -378,7 +402,7 @@ defmodule MingaEditor.Commands.Search do
     {new_content, count} = Minga.Editing.substitute(content, pattern, replacement, global?)
 
     if count == 0 do
-      EditorState.set_status(state, "Pattern not found: #{pattern}")
+      MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Pattern not found: #{pattern}")
     else
       cursor = Buffer.cursor(buf)
       Buffer.replace_content(buf, new_content)
@@ -401,7 +425,7 @@ defmodule MingaEditor.Commands.Search do
 
       state
       |> put_in_search(:last_pattern, pattern)
-      |> then(&EditorState.set_status(&1, msg))
+      |> then(&MingaEditor.Shell.Traditional.NoticeWorkflow.publish(&1, msg))
     end
   end
 

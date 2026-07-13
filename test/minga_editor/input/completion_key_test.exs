@@ -7,7 +7,6 @@ defmodule MingaEditor.Input.CompletionKeyTest do
   alias MingaEditor.Input.Completion, as: CompletionInput
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
   alias MingaEditor.State.WhichKey
   alias MingaEditor.Viewport
@@ -69,30 +68,30 @@ defmodule MingaEditor.Input.CompletionKeyTest do
       state = completion_state()
 
       {:handled, state} = CompletionInput.handle_key(state, @arrow_down_kitty, 0)
-      assert ModalOverlay.completion(state).selected == 1
+      assert MingaEditor.Shell.Traditional.ModalWorkflow.completion(state).selected == 1
 
       {:handled, state} = CompletionInput.handle_key(state, @arrow_up_kitty, 0)
-      assert ModalOverlay.completion(state).selected == 0
+      assert MingaEditor.Shell.Traditional.ModalWorkflow.completion(state).selected == 0
     end
 
     test "macOS down/up arrows navigate completion selection" do
       state = completion_state()
 
       {:handled, state} = CompletionInput.handle_key(state, @arrow_down_mac, 0)
-      assert ModalOverlay.completion(state).selected == 1
+      assert MingaEditor.Shell.Traditional.ModalWorkflow.completion(state).selected == 1
 
       {:handled, state} = CompletionInput.handle_key(state, @arrow_up_mac, 0)
-      assert ModalOverlay.completion(state).selected == 0
+      assert MingaEditor.Shell.Traditional.ModalWorkflow.completion(state).selected == 0
     end
 
     test "legacy escape-sequence down/up arrows still navigate completion selection" do
       state = completion_state()
 
       {:handled, state} = CompletionInput.handle_key(state, @arrow_down_legacy, 0)
-      assert ModalOverlay.completion(state).selected == 1
+      assert MingaEditor.Shell.Traditional.ModalWorkflow.completion(state).selected == 1
 
       {:handled, state} = CompletionInput.handle_key(state, @arrow_up_legacy, 0)
-      assert ModalOverlay.completion(state).selected == 0
+      assert MingaEditor.Shell.Traditional.ModalWorkflow.completion(state).selected == 0
     end
   end
 end

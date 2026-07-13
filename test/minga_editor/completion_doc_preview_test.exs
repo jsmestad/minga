@@ -11,7 +11,6 @@ defmodule MingaEditor.CompletionDocPreviewTest do
   alias MingaEditor.CompletionUI
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
   alias MingaEditor.Viewport
   alias MingaEditor.Session.State, as: SessionState
@@ -33,7 +32,7 @@ defmodule MingaEditor.CompletionDocPreviewTest do
     }
   end
 
-  defp completion_from(state), do: ModalOverlay.completion(state)
+  defp completion_from(state), do: MingaEditor.Shell.Traditional.ModalWorkflow.completion(state)
 
   # ── Completion item parsing ──────────────────────────────────────────────
 
