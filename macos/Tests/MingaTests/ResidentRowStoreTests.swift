@@ -201,6 +201,19 @@ struct ResidentRowStoreTests {
         }
     }
 
+    @Test("full-corpus removal uses cached aggregate resource weight")
+    func fullCorpusRemovalUsesCachedWeight() throws {
+        let count = 65_536
+        var store = try ResidentRowStore(rows: rows(0..<count))
+        let before = store.counters.resourceWeightRowsVisited
+
+        try store.splice(at: 0, removeCount: count, inserting: [])
+
+        #expect(store.isEmpty)
+        #expect(store.counters.resourceWeightRowsVisited - before == 0)
+        #expect(store.validateInvariants())
+    }
+
     @Test("structural updates do not touch chunks after the splice")
     func boundedChunkUpdates() throws {
         var store = try ResidentRowStore(rows: rows(0..<65_536))

@@ -240,11 +240,25 @@ final class CommandDispatcher {
     /// prepared-transaction builder. Packet decoding itself remains off-main.
     func dispatch(_ frame: DecodedFrame) {
         for decoded in frame.commands {
-            dispatch(decoded.command, opcode: decoded.opcode)
+            dispatch(
+                decoded.command, opcode: decoded.opcode,
+                resourceWeight: decoded.resourceWeight
+            )
         }
     }
 
     func dispatch(_ command: RenderCommand, opcode: UInt8? = nil) {
+        let measured = (try? FrameResourceWeight.measuringOwnedPayload(command))
+            ?? FrameResourceWeight()
+        let resourceWeight = (try? measured.adding(FrameResourceWeight(commands: 1)))
+            ?? FrameResourceWeight(commands: 1)
+        dispatch(command, opcode: opcode, resourceWeight: resourceWeight)
+    }
+
+    private func dispatch(
+        _ command: RenderCommand, opcode: UInt8?,
+        resourceWeight: FrameResourceWeight
+    ) {
         switch command {
         case .beginFrame(let frameSeq, let baseFrameSeq, let generation):
             beginTransaction(frameSeq: frameSeq, baseFrameSeq: baseFrameSeq, generation: generation)
@@ -273,7 +287,7 @@ final class CommandDispatcher {
         case .setTitle, .setWindowBg, .setLinkCursor, .protocolError,
              .setFont, .setFontFallback, .registerFont, .clipboardWrite:
             if openFrameSeq != nil {
-                transactionBuilder?.stage(command)
+                transactionBuilder?.stage(command, resourceWeight: resourceWeight)
             } else {
                 guiState.performOutOfBandPublication {
                     apply(command)
@@ -283,7 +297,7 @@ final class CommandDispatcher {
         default:
             if openFrameSeq != nil {
                 // Inside a transaction: compile into typed domain updates.
-                transactionBuilder?.stage(command)
+                transactionBuilder?.stage(command, resourceWeight: resourceWeight)
             } else {
                 // A command arrived with no open transaction and no sanctioned
                 // out-of-band match above. Either a new BEAM out-of-band command
@@ -543,6 +557,20 @@ final class CommandDispatcher {
         ))
     }
 
+    /// Classifies one packet failure against the currently open transaction.
+    func decodedFrameFailed(_ failure: DecodedFrameFailure) {
+        if failure.error.isResourceFailure {
+            if let envelope = failure.envelope {
+                resourcePolicyRejected(envelope: envelope)
+            } else if !resourcePolicyRejected() {
+                PortLogger.error("Protocol resource error outside a frame: \(failure.error)")
+            }
+            return
+        }
+        PortLogger.error("Protocol decode error: \(failure.error)")
+        decodeFailed()
+    }
+
     /// Surfaced by the protocol reader when `decodeCommands` throws mid-stream.
     /// Per the AC-1 consult, a sizing failure or unknown opcode INSIDE an open
     /// transaction tightens the reader's usual warn-and-continue policy: the byte
@@ -560,13 +588,15 @@ final class CommandDispatcher {
 
     /// Rejects the open frame under the deterministic hard resource policy.
     /// The last-good semantic publication remains active and no keyframe is requested.
-    func resourcePolicyRejected() {
-        guard let openFrameSeq else { return }
+    @discardableResult
+    func resourcePolicyRejected() -> Bool {
+        guard let openFrameSeq else { return false }
         reject(
             .resourcePolicy,
             frameSeq: openFrameSeq,
             logReason: "frontend resource policy exceeded"
         )
+        return true
     }
 
     /// Publishes a correlated terminal result when decode failed before the

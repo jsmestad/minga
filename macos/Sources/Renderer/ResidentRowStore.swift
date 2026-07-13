@@ -16,6 +16,8 @@ public struct ResidentRowStoreCounters: Sendable, Equatable {
     public var locatorNodesCopied = 0
     /// Complete store resets.
     public var fullResets = 0
+    /// Boundary rows inspected while aggregating cached resource weights.
+    public var resourceWeightRowsVisited = 0
 
     /// Creates zeroed counters.
     public init() {}
@@ -29,7 +31,8 @@ public struct ResidentRowStoreCounters: Sendable, Equatable {
             splices: lhs.splices + rhs.splices,
             changedRowsValidated: lhs.changedRowsValidated + rhs.changedRowsValidated,
             locatorNodesCopied: lhs.locatorNodesCopied + rhs.locatorNodesCopied,
-            fullResets: lhs.fullResets + rhs.fullResets
+            fullResets: lhs.fullResets + rhs.fullResets,
+            resourceWeightRowsVisited: lhs.resourceWeightRowsVisited + rhs.resourceWeightRowsVisited
         )
     }
 
@@ -42,12 +45,16 @@ public struct ResidentRowStoreCounters: Sendable, Equatable {
             splices: max(lhs.splices - rhs.splices, 0),
             changedRowsValidated: max(lhs.changedRowsValidated - rhs.changedRowsValidated, 0),
             locatorNodesCopied: max(lhs.locatorNodesCopied - rhs.locatorNodesCopied, 0),
-            fullResets: max(lhs.fullResets - rhs.fullResets, 0)
+            fullResets: max(lhs.fullResets - rhs.fullResets, 0),
+            resourceWeightRowsVisited: max(
+                lhs.resourceWeightRowsVisited - rhs.resourceWeightRowsVisited, 0
+            )
         )
     }
 
     private init(rowsVisited: Int, chunksTouched: Int, idsResolved: Int, splices: Int,
-                 changedRowsValidated: Int, locatorNodesCopied: Int, fullResets: Int) {
+                 changedRowsValidated: Int, locatorNodesCopied: Int, fullResets: Int,
+                 resourceWeightRowsVisited: Int) {
         self.rowsVisited = rowsVisited
         self.chunksTouched = chunksTouched
         self.idsResolved = idsResolved
@@ -55,6 +62,7 @@ public struct ResidentRowStoreCounters: Sendable, Equatable {
         self.changedRowsValidated = changedRowsValidated
         self.locatorNodesCopied = locatorNodesCopied
         self.fullResets = fullResets
+        self.resourceWeightRowsVisited = resourceWeightRowsVisited
     }
 }
 
@@ -115,12 +123,16 @@ public struct ResidentRowStore: Sendable {
         let rows: [GUIVisualRow]
         let minBufferLine: UInt32
         let maxBufferLine: UInt32
+        let resourceWeight: FrameResourceWeight
 
         init(id: UInt64, rows: [GUIVisualRow]) {
             self.id = id
             self.rows = rows
             minBufferLine = rows.first?.bufLine ?? 0
             maxBufferLine = rows.last?.bufLine ?? 0
+            resourceWeight = rows.reduce(into: FrameResourceWeight()) { weight, row in
+                weight = weight.addingPrevalidated(ResidentRowStore.weight(of: row))
+            }
         }
     }
 
@@ -133,6 +145,7 @@ public struct ResidentRowStore: Sendable {
         let chunkCount: Int
         let minBufferLine: UInt32
         let maxBufferLine: UInt32
+        let resourceWeight: FrameResourceWeight
 
         init(chunk: Chunk, left: Node? = nil, right: Node? = nil) {
             self.chunk = chunk
@@ -143,6 +156,9 @@ public struct ResidentRowStore: Sendable {
             chunkCount = (left?.chunkCount ?? 0) + 1 + (right?.chunkCount ?? 0)
             minBufferLine = left?.minBufferLine ?? chunk.minBufferLine
             maxBufferLine = right?.maxBufferLine ?? chunk.maxBufferLine
+            resourceWeight = (left?.resourceWeight ?? FrameResourceWeight())
+                .addingPrevalidated(chunk.resourceWeight)
+                .addingPrevalidated(right?.resourceWeight ?? FrameResourceWeight())
         }
     }
 
@@ -455,19 +471,24 @@ public struct ResidentRowStore: Sendable {
 
         let removedWeight: FrameResourceWeight
         let insertedWeight: FrameResourceWeight
+        let resourceWeightRowsVisited: Int
         do {
             var removed = FrameResourceWeight()
             var inserted = FrameResourceWeight()
+            var rowsVisited = 0
             for splice in splices {
-                removed = try removed.adding(
-                    try weight(in: splice.startIndex..<(splice.startIndex + splice.deleteCount))
+                let removedRange = try weight(
+                    in: splice.startIndex..<(splice.startIndex + splice.deleteCount)
                 )
+                removed = try removed.adding(removedRange.weight)
+                rowsVisited += removedRange.rowsVisited
                 inserted = try inserted.adding(try Self.weight(of: splice.insertedRows))
             }
             let resulting = try storage.resourceWeight.subtracting(removed).adding(inserted)
             try Self.validate(resulting, limit: limit)
             removedWeight = removed
             insertedWeight = inserted
+            resourceWeightRowsVisited = rowsVisited
         } catch is FrameResourceError {
             throw ResidentRowStoreError.resourcePolicy
         }
@@ -477,11 +498,13 @@ public struct ResidentRowStore: Sendable {
             staged.applyInPlaceReplacements(replacements)
             staged.storage.resourceWeight = try staged.storage.resourceWeight
                 .subtracting(removedWeight).adding(insertedWeight)
+            staged.storage.counters.resourceWeightRowsVisited += resourceWeightRowsVisited
             self = staged
             return
         }
 
         var staged = self
+        staged.storage.counters.resourceWeightRowsVisited += resourceWeightRowsVisited
         var coordinateAdjustment = 0
         for splice in splices {
             try staged.splice(
@@ -510,9 +533,12 @@ public struct ResidentRowStore: Sendable {
 
         let removedResourceWeight: FrameResourceWeight
         let insertedResourceWeight: FrameResourceWeight
+        let resourceWeightRowsVisited: Int
         do {
-            removedResourceWeight = try weight(in: index..<(index + removeCount))
+            let removedRange = try weight(in: index..<(index + removeCount))
+            removedResourceWeight = removedRange.weight
             insertedResourceWeight = try Self.weight(of: insertedRows)
+            resourceWeightRowsVisited = removedRange.rowsVisited
             let resulting = try storage.resourceWeight
                 .subtracting(removedResourceWeight).adding(insertedResourceWeight)
             try Self.validate(resulting, limit: limit)
@@ -544,6 +570,7 @@ public struct ResidentRowStore: Sendable {
             storage.root = Self.buildTree(chunks)
             indexChunks(chunks)
             storage.resourceWeight = insertedResourceWeight
+            storage.counters.resourceWeightRowsVisited += resourceWeightRowsVisited
             recordSplice(oldRows: 0, newRows: insertedRows.count, changedRows: insertedRows.count,
                          oldChunks: 0, newChunks: chunks.count)
             return
@@ -603,6 +630,7 @@ public struct ResidentRowStore: Sendable {
         storage.root = Self.merge(Self.merge(left, Self.buildTree(newChunks)), right)
         storage.resourceWeight = try storage.resourceWeight
             .subtracting(removedResourceWeight).adding(insertedResourceWeight)
+        storage.counters.resourceWeightRowsVisited += resourceWeightRowsVisited
         recordSplice(
             oldRows: removedChunks.reduce(0) { $0 + $1.rows.count },
             newRows: selectedRows.count,
@@ -615,7 +643,13 @@ public struct ResidentRowStore: Sendable {
     /// Debug invariant seam used by deterministic and randomized tests.
     public func validateInvariants() -> Bool {
         let chunks = Self.flattenChunks(storage.root)
-        guard chunks.allSatisfy({ !$0.rows.isEmpty && $0.rows.count <= Self.chunkCapacity }) else { return false }
+        guard chunks.allSatisfy({
+            !$0.rows.isEmpty && $0.rows.count <= Self.chunkCapacity &&
+                (try? Self.weight(of: $0.rows)) == $0.resourceWeight
+        }) else { return false }
+        guard (storage.root?.resourceWeight ?? FrameResourceWeight()) == storage.resourceWeight else {
+            return false
+        }
         if chunks.count > 2 {
             guard chunks.dropFirst().dropLast().allSatisfy({ $0.rows.count >= Self.minimumChunkOccupancy }) else { return false }
         }
@@ -793,15 +827,56 @@ public struct ResidentRowStore: Sendable {
         return Self.flattenChunks(selected).flatMap(\.rows)
     }
 
-    private func weight(in range: Range<Int>) throws -> FrameResourceWeight {
+    private func weight(
+        in range: Range<Int>
+    ) throws -> (weight: FrameResourceWeight, rowsVisited: Int) {
+        guard range.lowerBound >= 0, range.upperBound <= count else {
+            throw ResidentRowStoreError.invalidRange(
+                index: range.lowerBound, removeCount: range.count, rowCount: count
+            )
+        }
+        var rowsVisited = 0
+        let result = try Self.weight(
+            in: storage.root, nodeStart: 0, range: range, rowsVisited: &rowsVisited
+        )
+        return (result, rowsVisited)
+    }
+
+    private static func weight(
+        in node: Node?, nodeStart: Int, range: Range<Int>, rowsVisited: inout Int
+    ) throws -> FrameResourceWeight {
+        guard let node, !range.isEmpty else { return FrameResourceWeight() }
+        let nodeEnd = nodeStart + node.rowCount
+        if range.lowerBound <= nodeStart, range.upperBound >= nodeEnd {
+            return node.resourceWeight
+        }
+
+        let leftCount = node.left?.rowCount ?? 0
+        let chunkStart = nodeStart + leftCount
+        let chunkEnd = chunkStart + node.chunk.rows.count
         var result = FrameResourceWeight()
-        for index in range {
-            guard let row = row(at: index) else {
-                throw ResidentRowStoreError.invalidRange(
-                    index: range.lowerBound, removeCount: range.count, rowCount: count
-                )
+
+        if range.lowerBound < chunkStart {
+            result = try result.adding(try weight(
+                in: node.left, nodeStart: nodeStart,
+                range: range, rowsVisited: &rowsVisited
+            ))
+        }
+
+        let overlapStart = max(range.lowerBound, chunkStart)
+        let overlapEnd = min(range.upperBound, chunkEnd)
+        if overlapStart < overlapEnd {
+            rowsVisited += overlapEnd - overlapStart
+            for row in node.chunk.rows[(overlapStart - chunkStart)..<(overlapEnd - chunkStart)] {
+                result = try result.adding(weight(of: row))
             }
-            result = try result.adding(Self.weight(of: row))
+        }
+
+        if range.upperBound > chunkEnd {
+            result = try result.adding(try weight(
+                in: node.right, nodeStart: chunkEnd,
+                range: range, rowsVisited: &rowsVisited
+            ))
         }
         return result
     }

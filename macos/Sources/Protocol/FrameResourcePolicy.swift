@@ -106,6 +106,15 @@ public struct FrameResourceWeight: Sendable, Equatable {
         )
     }
 
+    /// Returns a component-wise sum after an earlier checked aggregate admitted it.
+    func addingPrevalidated(_ other: Self) -> Self {
+        do {
+            return try adding(other)
+        } catch {
+            preconditionFailure("prevalidated frame resource weight overflowed")
+        }
+    }
+
     /// Returns the checked component-wise difference.
     public func subtracting(_ other: Self) throws -> Self {
         guard commands >= other.commands, ownedUTF8Bytes >= other.ownedUTF8Bytes,
@@ -143,6 +152,31 @@ public struct FrameResourceWeight: Sendable, Equatable {
         case .spliceEntries: spliceEntries
         case .locatorEntries: locatorEntries
         }
+    }
+
+    /// Measures owned strings, data, and collection entries in an already-materialized value.
+    public static func measuringOwnedPayload(_ value: Any) throws -> Self {
+        if let string = value as? String {
+            return Self(ownedUTF8Bytes: string.utf8.count)
+        }
+        if let data = value as? Data {
+            return Self(ownedUTF8Bytes: data.count)
+        }
+
+        let mirror = Mirror(reflecting: value)
+        let collectionEntries: Int
+        switch mirror.displayStyle {
+        case .collection, .dictionary, .set:
+            collectionEntries = mirror.children.count
+        default:
+            collectionEntries = 0
+        }
+
+        var weight = Self(arrayEntries: collectionEntries)
+        for child in mirror.children {
+            weight = try weight.adding(try measuringOwnedPayload(child.value))
+        }
+        return weight
     }
 
     private static func add(_ lhs: Int, _ rhs: Int, _ dimension: FrameResourceDimension) throws -> Int {

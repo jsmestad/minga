@@ -200,6 +200,7 @@ func decodeFrame(
 
             while !cursor.isAtEnd {
                 let commandOffset = cursor.offset
+                let commandStartWeight = usage.checkpoint()
                 let opcode: UInt8
                 do {
                     opcode = try cursor.readUInt8()
@@ -251,7 +252,10 @@ func decodeFrame(
                     if collectOwnedMetrics { ownedMetrics.record(command) }
                     // Child-local scratch is published only after the complete command validated.
                     try FrameDecodeAccounting.reserve(.arrayEntries, 1)
-                    commands.append(DecodedCommand(command: command, opcode: opcode))
+                    let commandWeight = try usage.weight.subtracting(commandStartWeight)
+                    commands.append(DecodedCommand(
+                        command: command, opcode: opcode, resourceWeight: commandWeight
+                    ))
                 }
             }
 

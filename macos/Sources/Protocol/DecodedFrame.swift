@@ -6,6 +6,7 @@ import MingaProtocol
 struct DecodedCommand: Sendable {
     let command: RenderCommand
     let opcode: UInt8
+    let resourceWeight: FrameResourceWeight
 }
 
 struct DecoderOwnedMetrics {

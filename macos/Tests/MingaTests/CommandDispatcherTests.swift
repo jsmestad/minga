@@ -1473,6 +1473,14 @@ struct CommandDispatcherStagingTests {
         )
     }
 
+    private func policy(stagingWeight: FrameResourceWeight) -> FrameResourcePolicy {
+        let defaults = FrameResourcePolicy.default
+        return FrameResourcePolicy(
+            wire: defaults.wire, decode: defaults.decode,
+            staging: .init(weight: stagingWeight), resident: defaults.resident
+        )
+    }
+
     // MARK: - Nothing paints between begin and commit
 
     @Test("observable GUIState is unchanged between begin and a partial frame")
@@ -1986,6 +1994,132 @@ struct CommandDispatcherStagingTests {
         #expect(gui.resyncState.pending == false)
         #expect(results.count == 3)
         #expect(results.last == .applied(generation: 1, frameSeq: 3))
+    }
+
+    @Test("semantic staging subtracts coalesced command replacements")
+    @MainActor func stagingSubtractsCoalescedReplacements() throws {
+        let staging = FrameResourceWeight(
+            commands: 2, ownedUTF8Bytes: .max, arrayEntries: .max,
+            rows: .max, spans: .max, overlays: .max,
+            spliceEntries: .max, locatorEntries: .max
+        )
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(
+            cols: 80, rows: 24, guiState: gui,
+            resourcePolicy: policy(stagingWeight: staging)
+        )
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("first.ex")]))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("replacement.ex")]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        #expect(gui.tabBarState.tabs.first?.label == "replacement.ex")
+        #expect(results == [.applied(generation: 1, frameSeq: 1)])
+    }
+
+    @Test("semantic staging bounds append-only chrome across packets")
+    @MainActor func stagingBoundsAppendOnlyChrome() throws {
+        let staging = FrameResourceWeight(
+            commands: 2, ownedUTF8Bytes: .max, arrayEntries: .max,
+            rows: .max, spans: .max, overlays: .max,
+            spliceEntries: .max, locatorEntries: .max
+        )
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(
+            cols: 80, rows: 24, guiState: gui,
+            resourcePolicy: policy(stagingWeight: staging)
+        )
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+        let tabs = [Wire.BottomPanelTab(tabType: 0, name: "Messages")]
+        let entry = Wire.MessageEntry(
+            streamInstance: 1, id: 1, level: 1, subsystem: 0,
+            timestampSecs: 0, filePath: "", text: "entry"
+        )
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiBottomPanel(
+            visible: true, activeTabIndex: 0, heightPercent: 30,
+            filterPreset: 0, tabs: tabs, entries: [entry]
+        ))
+        dispatcher.dispatch(.guiBottomPanel(
+            visible: true, activeTabIndex: 0, heightPercent: 30,
+            filterPreset: 0, tabs: tabs, entries: [entry]
+        ))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        #expect(gui.framePublicationCount == 0)
+        #expect(results == [.rejected(
+            generation: 1, frameSeq: 1, lastAppliedFrameSeq: 0,
+            reason: .resourcePolicy
+        )])
+    }
+
+    @Test("semantic staging bounds the resulting transcript before mapping")
+    @MainActor func stagingBoundsResultingTranscript() throws {
+        let staging = FrameResourceWeight(
+            commands: .max, ownedUTF8Bytes: 5, arrayEntries: .max,
+            rows: .max, spans: .max, overlays: .max,
+            spliceEntries: .max, locatorEntries: .max
+        )
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(
+            cols: 80, rows: 24, guiState: gui,
+            resourcePolicy: policy(stagingWeight: staging)
+        )
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiAgentTranscript(
+            mode: 0, epoch: 1, truncated: false, trimFront: 0, baseCount: 0,
+            messages: [Wire.ChatMessage(beamId: 1, content: .user(text: "seed"))]
+        ))
+        dispatcher.dispatch(.guiAgentTranscript(
+            mode: 1, epoch: 1, truncated: false, trimFront: 0, baseCount: 1,
+            messages: [Wire.ChatMessage(beamId: 2, content: .assistant(text: "more"))]
+        ))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        #expect(gui.agentChatState.messages.isEmpty)
+        #expect(results == [.rejected(
+            generation: 1, frameSeq: 1, lastAppliedFrameSeq: 0,
+            reason: .resourcePolicy
+        )])
+    }
+
+    @Test("resource failure in a later packet terminally rejects the open frame")
+    @MainActor func crossPacketResourceFailureIsTerminal() throws {
+        let (dispatcher, gui) = makeDispatcher()
+        var results: [FrameTransactionResult] = []
+        var requested: [UInt32] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+        dispatcher.onRequestKeyframe = { requested.append($0) }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("last-good.ex")]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        dispatcher.decodedFrameFailed(DecodedFrameFailure(
+            error: .resource(.limitExceeded(
+                dimension: .ownedUTF8Bytes, used: 4, requested: 8, limit: 5
+            )),
+            envelope: nil
+        ))
+
+        #expect(gui.tabBarState.tabs.first?.label == "last-good.ex")
+        #expect(requested.isEmpty)
+        #expect(results.last == .rejected(
+            generation: 1, frameSeq: 2, lastAppliedFrameSeq: 1,
+            reason: .resourcePolicy
+        ))
     }
 
     @Test("semantic staging rejects resident result weight before publication")

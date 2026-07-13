@@ -864,11 +864,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleProtocolDecodeFailure(_ failure: DecodedFrameFailure) {
         // The packet is transactional: no command from it crossed actor isolation.
-        if failure.error.isResourceFailure, let envelope = failure.envelope {
-            dispatcher?.resourcePolicyRejected(envelope: envelope)
-            return
-        }
-        PortLogger.error("Protocol decode error: \(failure.error)")
-        dispatcher?.decodeFailed()
+        dispatcher?.decodedFrameFailed(failure)
     }
 }

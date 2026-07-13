@@ -172,23 +172,42 @@ private enum PreparedCoalescingKey: Hashable {
     case appended(Int)
 }
 
+private enum PreparedDomain {
+    case window
+    case chrome
+    case overlay
+    case resource
+    case focus
+    case metadata
+}
+
 private struct PreparedDomainBuffer {
     private var order: [PreparedCoalescingKey] = []
     private var commandsByKey: [PreparedCoalescingKey: RenderCommand] = [:]
+    private var weightsByKey: [PreparedCoalescingKey: FrameResourceWeight] = [:]
     private var nextAppendKey = 0
 
     var isEmpty: Bool { order.isEmpty }
     var commands: [RenderCommand] { order.compactMap { commandsByKey[$0] } }
 
-    mutating func replace(_ command: RenderCommand, key: PreparedCoalescingKey) {
-        if commandsByKey[key] == nil { order.append(key) }
-        commandsByKey[key] = command
+    func weight(for key: PreparedCoalescingKey) -> FrameResourceWeight {
+        weightsByKey[key] ?? FrameResourceWeight()
     }
 
-    mutating func append(_ command: RenderCommand) {
+    mutating func replace(
+        _ command: RenderCommand, key: PreparedCoalescingKey,
+        weight: FrameResourceWeight
+    ) {
+        if commandsByKey[key] == nil { order.append(key) }
+        commandsByKey[key] = command
+        weightsByKey[key] = weight
+    }
+
+    mutating func append(_ command: RenderCommand, weight: FrameResourceWeight) {
         let key = PreparedCoalescingKey.appended(nextAppendKey)
         order.append(key)
         commandsByKey[key] = command
+        weightsByKey[key] = weight
         nextAppendKey += 1
     }
 }
@@ -215,6 +234,9 @@ struct PreparedFrameTransactionBuilder {
     private var requiredFontIds: Set<UInt8> = []
     private var workingTranscript: AgentTranscriptSnapshot
     private var changedTranscript: AgentTranscriptSnapshot?
+    private var themeWeight = FrameResourceWeight()
+    private var transcriptWeight = FrameResourceWeight()
+    private var stagingWeight = FrameResourceWeight()
     private var rejection: PreparedFrameRejection?
     private let stagingLimit: FrameResourceWeight
     private let residentLimit: FrameResourceWeight
@@ -238,11 +260,30 @@ struct PreparedFrameTransactionBuilder {
         self.workingTranscript = committedTranscript
         self.stagingLimit = stagingLimit
         self.residentLimit = residentLimit
+
+        do {
+            transcriptWeight = try committedTranscript.exactResourceWeight()
+            stagingWeight = transcriptWeight
+            for content in workingWindows.values {
+                stagingWeight = try stagingWeight.adding(content.exactResourceWeight())
+            }
+            if stagingWeight.firstExceeded(limit: stagingLimit) != nil {
+                rejection = .resourcePolicy
+            }
+        } catch {
+            rejection = .resourcePolicy
+        }
     }
 
-    mutating func stage(_ command: RenderCommand) {
+    mutating func stage(
+        _ command: RenderCommand,
+        resourceWeight: FrameResourceWeight = FrameResourceWeight(commands: 1)
+    ) {
+        guard rejection == nil else { return }
         switch command {
         case .guiTheme(let slots):
+            guard replaceStagingWeight(removing: themeWeight, adding: resourceWeight) else { return }
+            themeWeight = resourceWeight
             theme = PreparedThemeUpdate(slots: slots)
 
         case .guiWindowContent(let content):
@@ -267,65 +308,70 @@ struct PreparedFrameTransactionBuilder {
         case .guiGutter(let data):
             referencedWindowIds.insert(data.windowId)
             touchedWindowIds.insert(data.windowId)
-            windowCommands.replace(command, key: .window(kind: .gutter, id: data.windowId))
+            stageReplacing(
+                command, key: .window(kind: .gutter, id: data.windowId),
+                weight: resourceWeight, domain: .window
+            )
 
         case .guiIndentGuides(let data):
             referencedWindowIds.insert(data.windowId)
             touchedWindowIds.insert(data.windowId)
-            windowCommands.replace(command, key: .window(kind: .indentGuides, id: data.windowId))
+            stageReplacing(
+                command, key: .window(kind: .indentGuides, id: data.windowId),
+                weight: resourceWeight, domain: .window
+            )
 
         case .setFont, .setFontFallback, .guiConfigState:
-            resourceCommands.replace(command, key: .command(command.preparedUpdateKey))
+            stageReplacing(
+                command, key: .command(command.preparedUpdateKey),
+                weight: resourceWeight, domain: .resource
+            )
 
         case .registerFont(let id, _):
             registeredFontIds.insert(id)
-            resourceCommands.replace(command, key: .font(id))
+            stageReplacing(command, key: .font(id), weight: resourceWeight, domain: .resource)
 
         case .setCursorShape, .setLinkCursor, .guiFileTreeSelection:
-            focusCommands.replace(command, key: .command(command.preparedUpdateKey))
+            stageReplacing(
+                command, key: .command(command.preparedUpdateKey),
+                weight: resourceWeight, domain: .focus
+            )
 
         case .guiCompletion, .guiWhichKey, .guiPicker, .guiPickerPreview,
              .guiAgentChat, .guiMinibuffer, .guiHoverPopup, .guiHoverAction,
              .guiSignatureHelp, .guiFloatPopup, .guiExtensionOverlay,
              .guiSearchState, .guiEmptyState, .protocolError:
-            overlayCommands.replace(command, key: .command(command.preparedUpdateKey))
+            stageReplacing(
+                command, key: .command(command.preparedUpdateKey),
+                weight: resourceWeight, domain: .overlay
+            )
 
         case .setTitle, .setWindowBg, .guiGutterSeparator, .guiCursorline,
              .guiLineSpacing, .guiCursorAnimation, .guiSplitSeparators,
              .guiStatusBar, .clipboardWrite:
-            metadataCommands.replace(command, key: .command(command.preparedUpdateKey))
+            stageReplacing(
+                command, key: .command(command.preparedUpdateKey),
+                weight: resourceWeight, domain: .metadata
+            )
 
         case .guiAgentTranscript(let mode, let epoch, let truncated, let trimFront, let baseCount, let messages):
-            guard rejection == nil else { return }
-            switch AgentChatState.prepareTranscript(
-                from: workingTranscript,
-                mode: mode,
-                epoch: epoch,
-                truncated: truncated,
-                trimFront: Int(trimFront),
-                baseCount: Int(baseCount),
-                messages: messages
-            ) {
-            case .success(let prepared):
-                workingTranscript = prepared
-                changedTranscript = prepared
-            case .failure(.beforeSeed):
-                rejection = .transcriptBeforeSeed
-            case .failure(.epochMismatch):
-                rejection = .transcriptEpochMismatch
-            case .failure(.desynced):
-                rejection = .transcriptDesynced
-            }
+            stageTranscript(
+                mode: mode, epoch: epoch, truncated: truncated,
+                trimFront: Int(trimFront), baseCount: Int(baseCount), messages: messages
+            )
 
         case .guiBottomPanel, .guiExtensionRuntime:
             // These carry append/upsert semantics; every payload is meaningful.
-            chromeCommands.append(command)
+            stageAppending(command, weight: resourceWeight, domain: .chrome)
 
         case .guiTabBar, .guiFileTree, .guiObservatory, .guiBreadcrumb,
              .guiToolManager, .guiGitStatus, .guiWorkspaces, .guiAgentContext,
              .guiChangeSummary, .guiNotifications, .guiEditTimeline,
              .guiExtensionPanel, .guiSidebars:
-            chromeCommands.replace(command, key: .command(command.preparedUpdateKey))
+            stageReplacing(
+                command, key: .command(command.preparedUpdateKey),
+                weight: resourceWeight, domain: .chrome
+            )
 
         case .beginFrame, .commitFrame:
             break
@@ -448,6 +494,126 @@ struct PreparedFrameTransactionBuilder {
         recordFontResources(in: delta)
     }
 
+    private mutating func stageTranscript(
+        mode: UInt8, epoch: UInt32, truncated: Bool,
+        trimFront: Int, baseCount: Int, messages: [Wire.ChatMessage]
+    ) {
+        let nextTranscriptWeight: FrameResourceWeight
+        let nextStagingWeight: FrameResourceWeight
+        do {
+            nextTranscriptWeight = try workingTranscript.resourceWeightAfterPreparing(
+                mode: mode, epoch: epoch, trimFront: trimFront,
+                baseCount: baseCount, messages: messages
+            )
+            nextStagingWeight = try prospectiveStagingWeight(
+                removing: transcriptWeight, adding: nextTranscriptWeight
+            )
+            guard nextStagingWeight.firstExceeded(limit: stagingLimit) == nil else {
+                rejection = .resourcePolicy
+                return
+            }
+        } catch let failure as AgentTranscriptPreparationFailure {
+            switch failure {
+            case .beforeSeed: rejection = .transcriptBeforeSeed
+            case .epochMismatch: rejection = .transcriptEpochMismatch
+            case .desynced: rejection = .transcriptDesynced
+            }
+            return
+        } catch {
+            rejection = .resourcePolicy
+            return
+        }
+
+        switch AgentChatState.prepareTranscript(
+            from: workingTranscript, mode: mode, epoch: epoch,
+            truncated: truncated, trimFront: trimFront,
+            baseCount: baseCount, messages: messages
+        ) {
+        case .success(let prepared):
+            stagingWeight = nextStagingWeight
+            transcriptWeight = nextTranscriptWeight
+            workingTranscript = prepared
+            changedTranscript = prepared
+        case .failure(.beforeSeed): rejection = .transcriptBeforeSeed
+        case .failure(.epochMismatch): rejection = .transcriptEpochMismatch
+        case .failure(.desynced): rejection = .transcriptDesynced
+        }
+    }
+
+    private mutating func stageReplacing(
+        _ command: RenderCommand, key: PreparedCoalescingKey,
+        weight: FrameResourceWeight, domain: PreparedDomain
+    ) {
+        let previousWeight = domainWeight(domain, key: key)
+        guard replaceStagingWeight(removing: previousWeight, adding: weight) else { return }
+        replaceDomainCommand(command, key: key, weight: weight, domain: domain)
+    }
+
+    private mutating func stageAppending(
+        _ command: RenderCommand, weight: FrameResourceWeight, domain: PreparedDomain
+    ) {
+        guard replaceStagingWeight(removing: FrameResourceWeight(), adding: weight) else { return }
+        switch domain {
+        case .chrome: chromeCommands.append(command, weight: weight)
+        case .window, .overlay, .resource, .focus, .metadata:
+            rejection = .resourcePolicy
+        }
+    }
+
+    private func domainWeight(
+        _ domain: PreparedDomain, key: PreparedCoalescingKey
+    ) -> FrameResourceWeight {
+        switch domain {
+        case .window: windowCommands.weight(for: key)
+        case .chrome: chromeCommands.weight(for: key)
+        case .overlay: overlayCommands.weight(for: key)
+        case .resource: resourceCommands.weight(for: key)
+        case .focus: focusCommands.weight(for: key)
+        case .metadata: metadataCommands.weight(for: key)
+        }
+    }
+
+    private mutating func replaceDomainCommand(
+        _ command: RenderCommand, key: PreparedCoalescingKey,
+        weight: FrameResourceWeight, domain: PreparedDomain
+    ) {
+        switch domain {
+        case .window: windowCommands.replace(command, key: key, weight: weight)
+        case .chrome: chromeCommands.replace(command, key: key, weight: weight)
+        case .overlay: overlayCommands.replace(command, key: key, weight: weight)
+        case .resource: resourceCommands.replace(command, key: key, weight: weight)
+        case .focus: focusCommands.replace(command, key: key, weight: weight)
+        case .metadata: metadataCommands.replace(command, key: key, weight: weight)
+        }
+    }
+
+    private func prospectiveStagingWeight(
+        removing previousWeight: FrameResourceWeight,
+        adding nextWeight: FrameResourceWeight
+    ) throws -> FrameResourceWeight {
+        try stagingWeight.subtracting(previousWeight).adding(nextWeight)
+    }
+
+    private mutating func replaceStagingWeight(
+        removing previousWeight: FrameResourceWeight,
+        adding nextWeight: FrameResourceWeight
+    ) -> Bool {
+        do {
+            let prospective = try prospectiveStagingWeight(
+                removing: previousWeight, adding: nextWeight
+            )
+            guard prospective.firstExceeded(limit: stagingLimit) == nil else {
+                rejection = .resourcePolicy
+                return false
+            }
+            stagingWeight = prospective
+            return true
+        } catch {
+            rejection = .resourcePolicy
+            return false
+        }
+    }
+
     private mutating func stageWindow(_ content: GUIWindowContent) -> Bool {
         do {
             let residentWeight = content.exactResourceWeight()
@@ -455,15 +621,11 @@ struct PreparedFrameTransactionBuilder {
                 rejection = .resourcePolicy
                 return false
             }
-            var stagingWeight = FrameResourceWeight()
-            for (windowID, existing) in workingWindows where windowID != content.windowId {
-                stagingWeight = try stagingWeight.adding(existing.exactResourceWeight())
-            }
-            stagingWeight = try stagingWeight.adding(residentWeight)
-            if stagingWeight.firstExceeded(limit: stagingLimit) != nil {
-                rejection = .resourcePolicy
-                return false
-            }
+            let previousWeight = try workingWindows[content.windowId]?.exactResourceWeight()
+                ?? FrameResourceWeight()
+            guard replaceStagingWeight(
+                removing: previousWeight, adding: residentWeight
+            ) else { return false }
             workingWindows[content.windowId] = content
             changedWindows[content.windowId] = content
             return true
