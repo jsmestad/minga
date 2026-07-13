@@ -27,19 +27,23 @@ defmodule MingaEditor.Input.SignatureHelp do
   end
 
   # C-j: next signature overload
-  def handle_key(%{shell_state: %{signature_help: %SigHelp{}}} = state, ?j, mods)
+  def handle_key(%{shell_runtime: %{state: %{signature_help: %SigHelp{}}}} = state, ?j, mods)
       when band(mods, @ctrl) != 0 do
     {:handled, SignatureHelpWorkflow.next(state)}
   end
 
   # C-k: previous signature overload
-  def handle_key(%{shell_state: %{signature_help: %SigHelp{}}} = state, ?k, mods)
+  def handle_key(%{shell_runtime: %{state: %{signature_help: %SigHelp{}}}} = state, ?k, mods)
       when band(mods, @ctrl) != 0 do
     {:handled, SignatureHelpWorkflow.previous(state)}
   end
 
   # Escape: dismiss signature help
-  def handle_key(%{shell_state: %{signature_help: %SigHelp{}}} = state, @key_escape, _mods) do
+  def handle_key(
+        %{shell_runtime: %{state: %{signature_help: %SigHelp{}}}} = state,
+        @key_escape,
+        _mods
+      ) do
     {:handled, SignatureHelpWorkflow.dismiss(state)}
   end
 

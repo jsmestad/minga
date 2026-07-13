@@ -75,7 +75,8 @@ defmodule MingaEditor.Shell.Traditional.NoticeWorkflow do
         shell_runtime: %{
           state: %{notice: %MingaEditor.Shell.Traditional.Notice{message: message}}
         }
-      }), do: message
+      }),
+      do: message
 
   def message(_state), do: nil
 
