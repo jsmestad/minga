@@ -34,6 +34,7 @@ public final class LatencyRecorder: @unchecked Sendable {
         case nilDrawable = "nil_drawable"
         case superseded
         case schedulingImpossible = "scheduling_impossible"
+        case nativeResourceFailure = "native_resource_failure"
         case dropped
         case gpuFailure = "gpu_failure"
     }

@@ -26,12 +26,46 @@ struct RasterizeResult {
     let bytesPerRow: Int
 }
 
+/// Owns the cached CGContext and its backing allocation as one teardown unit.
+/// Property destruction releases the context before `deinit` frees the pool.
+private final class BitmapRasterStorage {
+    var pool: UnsafeMutableRawPointer?
+    var lineContext: CGContext?
+    var lineContextWidth: Int = 0
+    var lineContextHeight: Int = 0
+    var lineContextBytesPerRow: Int = 0
+
+    private let deallocate: (UnsafeMutableRawPointer) -> Void
+
+    init(deallocate: @escaping (UnsafeMutableRawPointer) -> Void) {
+        self.deallocate = deallocate
+    }
+
+    deinit {
+        lineContext = nil
+        if let pool { deallocate(pool) }
+    }
+}
+
 @MainActor
 final class BitmapRasterizer {
-    /// Pooled raw memory buffer. Grows to fit the largest line seen.
-    /// nonisolated(unsafe) so deinit can deallocate without actor isolation.
-    /// Safe because deinit runs after all actor-isolated access has ended.
-    nonisolated(unsafe) private var pool: UnsafeMutableRawPointer?
+    struct Factories {
+        var allocate: (Int) -> UnsafeMutableRawPointer?
+        var deallocate: (UnsafeMutableRawPointer) -> Void
+        var makeContext: (UnsafeMutableRawPointer, Int, Int, Int, CGColorSpace, UInt32) -> CGContext?
+
+        @MainActor static let production = Self(
+            allocate: { byteCount in malloc(byteCount) },
+            deallocate: { free($0) },
+            makeContext: { data, width, height, bytesPerRow, colorSpace, bitmapInfo in
+                CGContext(data: data, width: width, height: height, bitsPerComponent: 8,
+                          bytesPerRow: bytesPerRow, space: colorSpace, bitmapInfo: bitmapInfo)
+            }
+        )
+    }
+
+    private let factories: Factories
+    private let storage: BitmapRasterStorage
 
     /// Current capacity of the pool in bytes.
     private var poolByteCount: Int = 0
@@ -42,20 +76,12 @@ final class BitmapRasterizer {
     /// Bitmap info flags for BGRA premultiplied alpha.
     private let bitmapInfo: UInt32
 
-    /// Reusable line rasterization context for repeated same-size rows.
-    private var lineContext: CGContext?
-    private var lineContextWidth: Int = 0
-    private var lineContextHeight: Int = 0
-    private var lineContextBytesPerRow: Int = 0
-
-    init() {
-        self.colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+    init(factories: Factories = .production) {
+        self.factories = factories
+        self.storage = BitmapRasterStorage(deallocate: factories.deallocate)
+        self.colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
         self.bitmapInfo = CGImageAlphaInfo.premultipliedFirst.rawValue
             | CGBitmapInfo.byteOrder32Little.rawValue
-    }
-
-    deinit {
-        pool?.deallocate()
     }
 
     /// Rasterizes a CTLine into the pooled BGRA bitmap buffer.
@@ -72,27 +98,23 @@ final class BitmapRasterizer {
     ///   - descent: Font descent in points (for baseline positioning).
     /// - Returns: A `RasterizeResult` with the raw pointer and bytesPerRow.
     func rasterize(_ ctLine: CTLine, width: Int, height: Int,
-                   scale: CGFloat, descent: CGFloat) -> RasterizeResult {
-        let bytesPerRow = width * 4
-        let byteCount = bytesPerRow * height
+                   scale: CGFloat, descent: CGFloat) throws -> RasterizeResult {
+        let bytesPerRow = try checkedMultiply(width, 4)
+        let byteCount = try checkedMultiply(bytesPerRow, height)
 
-        ensureCapacity(byteCount: byteCount)
+        try ensureCapacity(byteCount: byteCount)
 
-        guard let ptr = pool else {
-            // Fallback: allocate and store so deinit cleans up.
-            // Should never happen after ensureCapacity with byteCount > 0.
-            let fallback = UnsafeMutableRawPointer.allocate(byteCount: byteCount, alignment: 16)
-            pool = fallback
-            poolByteCount = byteCount
-            memset(fallback, 0, byteCount)
-            return RasterizeResult(pointer: UnsafeRawPointer(fallback), bytesPerRow: bytesPerRow)
+        guard let ptr = storage.pool else {
+            throw NativePresentationFailure(phase: .raster, dimension: .buffer,
+                                            reason: .allocation)
         }
 
         // Zero only the used region (not the full pool capacity).
         memset(ptr, 0, byteCount)
 
         guard let ctx = lineRasterContext(width: width, height: height, bytesPerRow: bytesPerRow, data: ptr, scale: scale) else {
-            return RasterizeResult(pointer: UnsafeRawPointer(ptr), bytesPerRow: bytesPerRow)
+            throw NativePresentationFailure(phase: .raster, dimension: .rasterContext,
+                                            requested: byteCount, reason: .context)
         }
 
         // CoreText baseline positioning.
@@ -112,32 +134,24 @@ final class BitmapRasterizer {
                        bgColor: CGColor,
                        width: Int, height: Int,
                        scale: CGFloat, descent: CGFloat, ascent: CGFloat,
-                       hPad: CGFloat, cornerRadius: CGFloat) -> RasterizeResult {
-        let bytesPerRow = width * 4
-        let byteCount = bytesPerRow * height
+                       hPad: CGFloat, cornerRadius: CGFloat) throws -> RasterizeResult {
+        let bytesPerRow = try checkedMultiply(width, 4)
+        let byteCount = try checkedMultiply(bytesPerRow, height)
 
-        ensureCapacity(byteCount: byteCount)
+        try ensureCapacity(byteCount: byteCount)
 
-        guard let ptr = pool else {
-            let fallback = UnsafeMutableRawPointer.allocate(byteCount: byteCount, alignment: 16)
-            pool = fallback
-            poolByteCount = byteCount
-            memset(fallback, 0, byteCount)
-            return RasterizeResult(pointer: UnsafeRawPointer(fallback), bytesPerRow: bytesPerRow)
+        guard let ptr = storage.pool else {
+            throw NativePresentationFailure(phase: .raster, dimension: .buffer,
+                                            reason: .allocation)
         }
 
         memset(ptr, 0, byteCount)
 
-        guard let ctx = CGContext(
-            data: ptr,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: bytesPerRow,
-            space: colorSpace,
-            bitmapInfo: bitmapInfo
+        guard let ctx = factories.makeContext(
+            ptr, width, height, bytesPerRow, colorSpace, bitmapInfo
         ) else {
-            return RasterizeResult(pointer: UnsafeRawPointer(ptr), bytesPerRow: bytesPerRow)
+            throw NativePresentationFailure(phase: .raster, dimension: .rasterContext,
+                                            requested: byteCount, reason: .context)
         }
 
         ctx.scaleBy(x: scale, y: scale)
@@ -178,34 +192,39 @@ final class BitmapRasterizer {
     // MARK: - Private
 
     /// Grows the pool if needed. Never shrinks.
-    private func ensureCapacity(byteCount: Int) {
+    private func ensureCapacity(byteCount: Int) throws {
         guard byteCount > poolByteCount else { return }
+        guard let candidate = factories.allocate(byteCount) else {
+            throw NativePresentationFailure(phase: .raster, dimension: .buffer,
+                                            requested: byteCount, reason: .allocation)
+        }
 
-        pool?.deallocate()
-        pool = .allocate(byteCount: byteCount, alignment: 16)
+        storage.lineContext = nil
+        if let pool = storage.pool { factories.deallocate(pool) }
+        storage.pool = candidate
         poolByteCount = byteCount
-        lineContext = nil
+    }
+
+    private func checkedMultiply(_ lhs: Int, _ rhs: Int) throws -> Int {
+        let (value, overflow) = lhs.multipliedReportingOverflow(by: rhs)
+        guard !overflow else {
+            throw NativePresentationFailure(phase: .raster, dimension: .arithmetic,
+                                            reason: .overflow)
+        }
+        return value
     }
 
     private func lineRasterContext(width: Int, height: Int, bytesPerRow: Int, data: UnsafeMutableRawPointer, scale: CGFloat) -> CGContext? {
-        if let ctx = lineContext,
-           width == lineContextWidth,
-           height == lineContextHeight,
-           bytesPerRow == lineContextBytesPerRow {
+        if let ctx = storage.lineContext,
+           width == storage.lineContextWidth,
+           height == storage.lineContextHeight,
+           bytesPerRow == storage.lineContextBytesPerRow {
             return ctx
         }
 
-        guard let ctx = CGContext(
-            data: data,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: bytesPerRow,
-            space: colorSpace,
-            bitmapInfo: bitmapInfo
-        ) else {
-            return nil
-        }
+        guard let ctx = factories.makeContext(
+            data, width, height, bytesPerRow, colorSpace, bitmapInfo
+        ) else { return nil }
 
         ctx.scaleBy(x: scale, y: scale)
         ctx.setAllowsFontSmoothing(true)
@@ -215,10 +234,10 @@ final class BitmapRasterizer {
         ctx.setAllowsAntialiasing(true)
         ctx.setShouldAntialias(true)
 
-        lineContext = ctx
-        lineContextWidth = width
-        lineContextHeight = height
-        lineContextBytesPerRow = bytesPerRow
+        storage.lineContext = ctx
+        storage.lineContextWidth = width
+        storage.lineContextHeight = height
+        storage.lineContextBytesPerRow = bytesPerRow
         return ctx
     }
 }
