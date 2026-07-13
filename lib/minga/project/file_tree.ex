@@ -369,6 +369,10 @@ defmodule Minga.Project.FileTree do
     }
   end
 
+  @doc "Starts filtering without invalidating the currently visible unfiltered entries."
+  @spec begin_filter(t()) :: t()
+  def begin_filter(%__MODULE__{} = tree), do: %{tree | filter: ""}
+
   @doc "Sets the active substring filter and resets selection to the first match."
   @spec set_filter(t(), String.t()) :: t()
   def set_filter(%__MODULE__{} = tree, filter) when is_binary(filter) do

@@ -280,7 +280,7 @@ defmodule MingaEditor.FileTree.RowsTest do
     test "distinguishes hidden, empty, ready, loading, and error states", %{tmp_dir: tmp_dir} do
       assert FileTreeState.status(%FileTreeState{}) == :hidden
 
-      empty_tree = FileTree.new(tmp_dir)
+      empty_tree = tmp_dir |> FileTree.new() |> FileTree.ensure_entries()
       assert FileTreeState.status(FileTreeState.open(%FileTreeState{}, empty_tree, nil)) == :empty
 
       ready_tree = flat_tree(tmp_dir)
@@ -289,11 +289,8 @@ defmodule MingaEditor.FileTree.RowsTest do
       loading = FileTreeState.loading(%FileTreeState{project_root: tmp_dir})
       assert FileTreeState.status(loading) == :loading
 
-      missing_tree = FileTree.new(Path.join(tmp_dir, "missing"))
-
-      assert {:error, reason} =
-               FileTreeState.status(FileTreeState.open(%FileTreeState{}, missing_tree, nil))
-
+      errored = FileTreeState.error(%FileTreeState{}, :enoent)
+      assert {:error, reason} = FileTreeState.status(errored)
       assert reason != ""
     end
 
@@ -313,6 +310,16 @@ defmodule MingaEditor.FileTree.RowsTest do
         |> FileTreeState.replace_tree(ready_tree)
 
       assert FileTreeState.status(errored) == :ready
+    end
+
+    test "entry-invalidating transitions preserve the current visible status", %{tmp_dir: tmp_dir} do
+      file_tree = FileTreeState.open(%FileTreeState{}, flat_tree(tmp_dir), nil)
+      invalidated = FileTree.collapse_all(file_tree.tree)
+
+      assert invalidated.entries == nil
+
+      assert file_tree |> FileTreeState.replace_tree(invalidated) |> FileTreeState.status() ==
+               :ready
     end
 
     test "open and replace_tree keep cached visible entries on the stored tree", %{
@@ -343,11 +350,11 @@ defmodule MingaEditor.FileTree.RowsTest do
   defp flat_tree(tmp_dir) do
     File.write!(Path.join(tmp_dir, "alpha.ex"), "")
     File.write!(Path.join(tmp_dir, "beta.ex"), "")
-    FileTree.new(tmp_dir)
+    tmp_dir |> FileTree.new() |> FileTree.ensure_entries()
   end
 
   defp state_with_tree(root) do
-    tree = FileTree.new(root)
+    tree = root |> FileTree.new() |> FileTree.ensure_entries()
     file_tree = FileTreeState.open(%FileTreeState{}, tree, nil)
 
     EditorState.set_file_tree(base_state(), file_tree)

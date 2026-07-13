@@ -11,6 +11,7 @@ defmodule MingaEditor.State.FileTree do
   alias MingaEditor.FileTree.FilterWalk
   alias MingaEditor.FileTree.ProjectCache
   alias MingaEditor.State.FileTree.ClipboardMark
+  alias MingaEditor.State.FileTree.Refresh
 
   @typedoc """
   Inline editing state for creating files/folders or renaming entries.
@@ -46,9 +47,7 @@ defmodule MingaEditor.State.FileTree do
           original_root: String.t() | nil,
           tree_status: tree_status(),
           tree_width: pos_integer(),
-          refresh_timer: reference() | nil,
-          refresh_inflight: reference() | nil,
-          refresh_pending?: boolean(),
+          refresh: Refresh.t(),
           clipboard_mark: clipboard_mark() | nil,
           filtering: boolean(),
           help_visible: boolean()
@@ -63,9 +62,7 @@ defmodule MingaEditor.State.FileTree do
             original_root: nil,
             tree_status: :hidden,
             tree_width: 30,
-            refresh_timer: nil,
-            refresh_inflight: nil,
-            refresh_pending?: false,
+            refresh: %Refresh{},
             clipboard_mark: nil,
             filtering: false,
             help_visible: false
@@ -150,8 +147,6 @@ defmodule MingaEditor.State.FileTree do
   @doc "Opens the tree with the given data, buffer, and focused state."
   @spec open(t(), FileTree.t(), pid() | nil) :: t()
   def open(%__MODULE__{} = ft, tree, buffer) do
-    tree = ensure_tree_entries(tree)
-
     %{
       ft
       | tree: tree,
@@ -161,21 +156,23 @@ defmodule MingaEditor.State.FileTree do
         project_root: tree.root,
         original_root: ft.original_root || tree.root,
         tree_status: classify_tree(tree),
-        tree_width: tree.width
+        tree_width: tree.width,
+        refresh: refresh_for_tree(ft, tree.root)
     }
   end
 
   @doc "Replaces the backing tree and refreshes the presentation status."
   @spec replace_tree(t(), FileTree.t()) :: t()
   def replace_tree(%__MODULE__{} = ft, %FileTree{} = tree) do
-    tree = ensure_tree_entries(tree)
+    refresh = refresh_for_tree(ft, tree.root)
 
     %{
       ft
       | tree: tree,
         project_root: tree.root,
-        tree_status: classify_tree(tree),
-        tree_width: tree.width
+        tree_status: replacement_status(ft, tree),
+        tree_width: tree.width,
+        refresh: refresh
     }
   end
 
@@ -201,58 +198,69 @@ defmodule MingaEditor.State.FileTree do
     %{ft | project_root: expanded, original_root: expanded}
   end
 
-  @doc "Returns true when a filesystem refresh timer is pending."
-  @spec refresh_scheduled?(t()) :: boolean()
-  def refresh_scheduled?(%__MODULE__{refresh_timer: ref}) when is_reference(ref), do: true
-  def refresh_scheduled?(%__MODULE__{}), do: false
-
-  @doc "Stores the pending filesystem refresh timer reference."
-  @spec schedule_refresh(t(), reference()) :: t()
-  def schedule_refresh(%__MODULE__{} = ft, ref) when is_reference(ref) do
-    %{ft | refresh_timer: ref}
+  @doc "Records one debounced request to refresh the open tree."
+  @spec request_refresh_debounce(t(), Refresh.debounce_token()) ::
+          {:scheduled | :already_scheduled, t()}
+  def request_refresh_debounce(%__MODULE__{} = ft, token) when is_reference(token) do
+    {status, refresh} = Refresh.request_debounce(ft.refresh, token)
+    {status, %{ft | refresh: refresh}}
   end
 
-  @doc "Clears the pending filesystem refresh timer reference."
-  @spec clear_refresh(t()) :: t()
-  def clear_refresh(%__MODULE__{} = ft), do: %{ft | refresh_timer: nil}
+  @doc "Consumes a correlated debounce message and focuses the result on the live tree."
+  @spec refresh_debounce_elapsed(t(), Refresh.debounce_token()) ::
+          {:ready, FileTree.t(), t()} | {:closed | :stale, t()}
+  def refresh_debounce_elapsed(%__MODULE__{} = ft, token) when is_reference(token) do
+    case Refresh.debounce_elapsed(ft.refresh, token) do
+      {:stale, refresh} ->
+        {:stale, %{ft | refresh: refresh}}
 
-  @doc "Returns true when an async refresh Task is currently in flight."
-  @spec refresh_inflight?(t()) :: boolean()
-  def refresh_inflight?(%__MODULE__{refresh_inflight: ref}) when is_reference(ref), do: true
-  def refresh_inflight?(%__MODULE__{}), do: false
-
-  @doc "Returns the token of the in-flight refresh Task, or nil when none is running."
-  @spec refresh_inflight_token(t()) :: reference() | nil
-  def refresh_inflight_token(%__MODULE__{refresh_inflight: ref}), do: ref
-
-  @doc "Returns true when another refresh was requested while one was in flight."
-  @spec refresh_pending?(t()) :: boolean()
-  def refresh_pending?(%__MODULE__{refresh_pending?: pending?}), do: pending?
-
-  @doc """
-  Marks an async refresh as in flight under `token` and clears the debounce timer.
-
-  Also clears any `refresh_pending?` flag: the freshly spawned Task supersedes a
-  request that was coalesced while a previous Task was running.
-  """
-  @spec begin_inflight_refresh(t(), reference()) :: t()
-  def begin_inflight_refresh(%__MODULE__{} = ft, token) when is_reference(token) do
-    %{ft | refresh_inflight: token, refresh_pending?: false, refresh_timer: nil}
+      {:current, refresh} ->
+        refresh_debounce_tree(%{ft | refresh: refresh})
+    end
   end
 
-  @doc "Records that a refresh was requested while one was already in flight."
-  @spec mark_refresh_pending(t()) :: t()
-  def mark_refresh_pending(%__MODULE__{} = ft), do: %{ft | refresh_pending?: true}
+  @doc "Correlates an admitted typed refresh request with the root it scans."
+  @spec track_refresh_request(t(), String.t(), Refresh.request_token()) :: t()
+  def track_refresh_request(%__MODULE__{} = ft, root, token)
+      when is_binary(root) and is_reference(token) do
+    %{ft | refresh: Refresh.request_admitted(ft.refresh, root, token)}
+  end
 
-  @doc "Clears in-flight and pending refresh tracking once a Task result is handled."
-  @spec clear_inflight_refresh(t()) :: t()
-  def clear_inflight_refresh(%__MODULE__{} = ft),
-    do: %{ft | refresh_inflight: nil, refresh_pending?: false}
+  @doc "Atomically accepts a current refresh result or identifies why it cannot apply."
+  @spec accept_refresh_result(t(), String.t(), Refresh.request_token(), FileTree.t()) ::
+          {:accepted | :closed | :rerooted | :stale, t()}
+  def accept_refresh_result(%__MODULE__{} = ft, root, token, %FileTree{} = refreshed_tree)
+      when is_binary(root) and is_reference(token) do
+    case Refresh.request_finished(ft.refresh, root, token) do
+      {:stale, refresh} ->
+        {:stale, %{ft | refresh: refresh}}
+
+      {:current, refresh} ->
+        accept_current_refresh(%{ft | refresh: refresh}, root, refreshed_tree)
+    end
+  end
+
+  @doc "Finishes a failed or canceled current request without changing tree content."
+  @spec finish_refresh(t(), String.t(), Refresh.request_token()) ::
+          {:current | :closed | :rerooted | :stale, t()}
+  def finish_refresh(%__MODULE__{} = ft, root, token)
+      when is_binary(root) and is_reference(token) do
+    case Refresh.request_finished(ft.refresh, root, token) do
+      {:stale, refresh} -> {:stale, %{ft | refresh: refresh}}
+      {:current, refresh} -> classify_current_tree(%{ft | refresh: refresh}, root)
+    end
+  end
 
   @doc "Marks the sidebar as failed with a displayable reason."
   @spec error(t(), term()) :: t()
   def error(%__MODULE__{} = ft, reason) do
     %{ft | focused: false, editing: nil, tree_status: {:error, format_error_reason(reason)}}
+  end
+
+  @doc "Reports a refresh failure while preserving the open tree interaction state."
+  @spec refresh_failed(t(), term()) :: t()
+  def refresh_failed(%__MODULE__{} = ft, reason) do
+    %{ft | tree_status: {:error, format_error_reason(reason)}}
   end
 
   @doc "Closes the tree and clears the buffer."
@@ -269,8 +277,7 @@ defmodule MingaEditor.State.FileTree do
         clipboard_mark: nil,
         filtering: false,
         help_visible: false,
-        refresh_inflight: nil,
-        refresh_pending?: false
+        refresh: Refresh.invalidate(ft.refresh)
     }
   end
 
@@ -316,9 +323,13 @@ defmodule MingaEditor.State.FileTree do
 
   @doc "Starts inline file tree filtering."
   @spec start_filtering(t()) :: t()
+  def start_filtering(%__MODULE__{tree: %FileTree{filter: filter} = tree} = ft)
+      when filter in [nil, ""] do
+    %{ft | tree: FileTree.begin_filter(tree), filtering: true, editing: nil, help_visible: false}
+  end
+
   def start_filtering(%__MODULE__{tree: %FileTree{} = tree} = ft) do
-    filter = tree.filter || ""
-    {tree, status} = filtered_tree(tree, filter)
+    {tree, status} = filtered_tree(tree, tree.filter)
 
     %{
       ft
@@ -344,7 +355,8 @@ defmodule MingaEditor.State.FileTree do
   reports a `:loading` pending state instead of silently re-shelling out.
   """
   @spec update_filter(t(), String.t()) :: t()
-  def update_filter(%__MODULE__{tree: %FileTree{} = tree} = ft, filter) when is_binary(filter) do
+  def update_filter(%__MODULE__{tree: %FileTree{} = tree} = ft, filter)
+      when is_binary(filter) and filter != "" do
     {tree, status} = filtered_tree(tree, filter)
     %{ft | tree: tree, tree_status: status}
   end
@@ -389,11 +401,6 @@ defmodule MingaEditor.State.FileTree do
   # rebuilding (empty) cache reports `:loading`; other roots defer to an async
   # filesystem walk (`:loading` until the walk result arrives).
   @spec filtered_tree(FileTree.t(), String.t()) :: {FileTree.t(), tree_status()}
-  defp filtered_tree(%FileTree{} = tree, "") do
-    tree = tree |> FileTree.put_cached_files(nil) |> FileTree.set_filter("")
-    {tree, classify_tree(tree)}
-  end
-
   defp filtered_tree(%FileTree{root: root} = tree, filter) do
     if ProjectCache.active_root?(root) do
       filtered_from_cache(tree, filter, ProjectCache.files())
@@ -430,16 +437,6 @@ defmodule MingaEditor.State.FileTree do
   @spec accept_filter(t()) :: t()
   def accept_filter(%__MODULE__{} = ft), do: %{ft | filtering: false}
 
-  @doc "Clears the active filter and exits filtering mode."
-  @spec clear_filter(t()) :: t()
-  def clear_filter(%__MODULE__{tree: %FileTree{} = tree} = ft) do
-    # Drop the cache so non-filtered browsing resumes lazy filesystem walking.
-    tree = tree |> FileTree.put_cached_files(nil) |> FileTree.clear_filter()
-    %{ft | tree: tree, filtering: false, tree_status: classify_tree(tree)}
-  end
-
-  def clear_filter(%__MODULE__{} = ft), do: %{ft | filtering: false}
-
   @doc "Toggles the file tree help overlay."
   @spec toggle_help(t()) :: t()
   def toggle_help(%__MODULE__{} = ft),
@@ -457,19 +454,60 @@ defmodule MingaEditor.State.FileTree do
 
   @doc "Replaces the tree data."
   @spec set_tree(t(), FileTree.t() | nil) :: t()
-  def set_tree(%__MODULE__{} = ft, nil), do: %{ft | tree: nil, tree_status: :hidden}
+  def set_tree(%__MODULE__{} = ft, nil) do
+    %{ft | tree: nil, tree_status: :hidden, refresh: Refresh.invalidate(ft.refresh)}
+  end
+
   def set_tree(%__MODULE__{} = ft, %FileTree{} = tree), do: replace_tree(ft, tree)
 
-  @spec ensure_tree_entries(FileTree.t()) :: FileTree.t()
-  defp ensure_tree_entries(%FileTree{} = tree), do: FileTree.ensure_entries(tree)
+  @spec refresh_debounce_tree(t()) :: {:ready, FileTree.t(), t()} | {:closed, t()}
+  defp refresh_debounce_tree(%__MODULE__{tree: %FileTree{} = tree} = ft), do: {:ready, tree, ft}
+  defp refresh_debounce_tree(%__MODULE__{} = ft), do: {:closed, ft}
 
-  @spec classify_tree(FileTree.t()) :: tree_status()
-  defp classify_tree(%FileTree{} = tree) do
-    case File.ls(tree.root) do
-      {:ok, _names} -> classify_entries(FileTree.visible_entries(tree))
-      {:error, reason} -> {:error, format_error_reason(reason)}
+  @spec accept_current_refresh(t(), String.t(), FileTree.t()) ::
+          {:accepted | :closed | :rerooted | :stale, t()}
+  defp accept_current_refresh(%__MODULE__{tree: nil} = ft, _root, _tree), do: {:closed, ft}
+
+  defp accept_current_refresh(
+         %__MODULE__{tree: %FileTree{root: live_root}} = ft,
+         root,
+         %FileTree{root: result_root} = refreshed_tree
+       ) do
+    case {Path.expand(live_root) == Path.expand(root),
+          Path.expand(result_root) == Path.expand(root)} do
+      {false, _result_matches?} -> {:rerooted, ft}
+      {true, false} -> {:stale, ft}
+      {true, true} -> {:accepted, replace_tree(ft, refreshed_tree)}
     end
   end
+
+  @spec classify_current_tree(t(), String.t()) :: {:current | :closed | :rerooted, t()}
+  defp classify_current_tree(%__MODULE__{tree: nil} = ft, _root), do: {:closed, ft}
+
+  defp classify_current_tree(%__MODULE__{tree: %FileTree{root: live_root}} = ft, root) do
+    if Path.expand(live_root) == Path.expand(root), do: {:current, ft}, else: {:rerooted, ft}
+  end
+
+  @spec refresh_for_tree(t(), String.t()) :: Refresh.t()
+  defp refresh_for_tree(
+         %__MODULE__{tree: %FileTree{root: root}, refresh: refresh},
+         root
+       ),
+       do: refresh
+
+  defp refresh_for_tree(%__MODULE__{refresh: refresh}, _root), do: Refresh.invalidate(refresh)
+
+  @spec replacement_status(t(), FileTree.t()) :: tree_status()
+  defp replacement_status(%__MODULE__{tree: %FileTree{}, tree_status: status}, %FileTree{
+         entries: nil
+       }),
+       do: status
+
+  defp replacement_status(%__MODULE__{}, %FileTree{} = tree), do: classify_tree(tree)
+
+  @spec classify_tree(FileTree.t()) :: tree_status()
+  defp classify_tree(%FileTree{entries: nil}), do: :loading
+  defp classify_tree(%FileTree{entries: entries}), do: classify_entries(entries)
 
   @spec classify_entries([FileTree.entry()]) :: tree_status()
   defp classify_entries([]), do: :empty

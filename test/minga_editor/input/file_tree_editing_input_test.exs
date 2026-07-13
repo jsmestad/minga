@@ -184,6 +184,28 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
       assert ft(state).tree.filter == nil
     end
 
+    test "clearing a no-match filter restores existing rows", %{tmp_dir: dir} do
+      state = make_state(dir)
+      File.write!(Path.join(dir, "visible.txt"), "visible")
+      tree = FileTree.refresh(ft(state).tree)
+      state = EditorState.update_file_tree(state, &FileTreeState.replace_tree(&1, tree))
+
+      {:handled, state} = FileTreeHandler.handle_key(state, ?/, 0)
+      {:handled, state} = FileTreeHandler.handle_key(state, ?z, 0)
+
+      no_matches = FileTreeState.apply_filter_walk(ft(state), tree.root, "z", [])
+      state = EditorState.set_file_tree(state, no_matches)
+      assert FileTreeState.status(ft(state)) == :empty
+
+      {:handled, state} = FileTreeHandler.handle_key(state, @escape, 0)
+
+      assert ft(state).filtering == false
+      assert ft(state).tree.filter == nil
+      assert FileTreeState.status(ft(state)) == :ready
+      assert Enum.any?(FileTree.visible_entries(ft(state).tree), &(&1.name == "visible.txt"))
+      assert BufferProcess.content(ft(state).buffer) =~ "visible.txt"
+    end
+
     test "/ while help is open starts filtering and hides help", %{tmp_dir: dir} do
       state = make_state(dir)
 

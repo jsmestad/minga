@@ -136,6 +136,10 @@ defmodule MingaEditor.Effects.GitMutationAdmission do
     {EditorState.set_status(state, "Git action skipped"), outcome}
   end
 
+  @impl true
+  @spec render?(Outcome.t()) :: boolean()
+  def render?(%Outcome{}), do: true
+
   @spec mutation_request(t(), GitRepositoryIdentity.t()) :: Request.t()
   defp mutation_request(effect, identity) do
     opts =
