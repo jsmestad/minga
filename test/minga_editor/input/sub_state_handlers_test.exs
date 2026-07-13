@@ -48,12 +48,15 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
         model_name: "claude-sonnet-4",
         thinking_level: "medium",
         prompt_buffer: prompt_buf
-      },
-      view: %UIState.View{
-        active: Keyword.get(opts, :agentic_active, false),
-        focus: Keyword.get(opts, :focus, :chat)
       }
     }
+
+    agentic =
+      if Keyword.get(opts, :agentic_active, false),
+        do: UIState.activate(agentic, nil, nil),
+        else: agentic
+
+    agentic = UIState.set_focus(agentic, Keyword.get(opts, :focus, :chat))
 
     tab_bar =
       if Keyword.get(opts, :agentic_active, false) do
@@ -75,7 +78,13 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),
-          %MingaEditor.Shell.Traditional.State{agent: agent, tab_bar: tab_bar}
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Traditional.State.replace_agent(
+              %MingaEditor.Shell.Traditional.State{},
+              agent
+            ),
+            tab_bar
+          )
         )
     }
   end

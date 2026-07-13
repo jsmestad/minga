@@ -202,7 +202,7 @@ defmodule MingaEditor.Input.Scoped do
     key = {cp, mods}
 
     # Check if we're continuing a prefix sequence
-    case AgentAccess.view(state).pending_prefix do
+    case state |> AgentAccess.view() |> UIState.View.pending_prefix() do
       nil ->
         # Fresh lookup
         resolve_scope_key(state, :agent, vim_state, key, cp, mods)

@@ -429,7 +429,7 @@ defmodule MingaEditor.Startup do
   @spec agent_view_state() :: {atom(), UIState.t()}
   defp agent_view_state do
     base = UIState.new()
-    av = %UIState{base | view: %{base.view | active: true, focus: :chat}}
+    av = %UIState{base | view: MingaEditor.Agent.UIState.View.activate(base.view, nil, nil)}
     {:agent, av}
   end
 
@@ -605,9 +605,10 @@ defmodule MingaEditor.Startup do
 
   @spec init_shell_state(module(), keyword()) :: term()
   defp init_shell_state(MingaEditor.Shell.Traditional, opts) do
-    %MingaEditor.Shell.Traditional.State{
-      suppress_tool_prompts: Keyword.get(opts, :suppress_tool_prompts, false)
-    }
+    MingaEditor.Shell.Traditional.State.set_suppress_tool_prompts(
+      %MingaEditor.Shell.Traditional.State{},
+      Keyword.get(opts, :suppress_tool_prompts, false)
+    )
   end
 
   defp init_shell_state(module, opts) do

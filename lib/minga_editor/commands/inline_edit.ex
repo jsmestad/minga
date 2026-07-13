@@ -10,6 +10,7 @@ defmodule MingaEditor.Commands.InlineEdit do
   alias Minga.Mode.VisualState
   alias Minga.Project.FileRef
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.InlineEdit
 
   @type state :: EditorState.t()
@@ -42,10 +43,9 @@ defmodule MingaEditor.Commands.InlineEdit do
     {:ok, file_ref, label} = file_ref_for_active_buffer(state, buffer_pid)
     original = Buffer.content_on_lines(buffer_pid, first, last)
     edit = InlineEdit.new(buffer_pid, file_ref, label, {first, last}, original)
-    edits = state |> EditorState.inline_edits() |> InlineEdit.put(edit)
 
     state
-    |> EditorState.set_inline_edits(edits)
+    |> AgentAccess.replace_inline_edit(edit)
     |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
       "Inline edit: type rewrite instruction"
     )
@@ -89,11 +89,9 @@ defmodule MingaEditor.Commands.InlineEdit do
 
   @spec accept_success(state(), InlineEdit.t()) :: state()
   defp accept_success(state, %InlineEdit{} = edit) do
-    {edits, _session_pid} =
-      state |> EditorState.inline_edits() |> InlineEdit.dismiss(edit.buffer_pid)
+    {state, _session_pid} = AgentAccess.cancel_inline_edit(state, edit.buffer_pid)
 
     state
-    |> EditorState.set_inline_edits(edits)
     |> EditorState.transition_mode(:normal)
     |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("Inline edit accepted")
   end
@@ -103,10 +101,8 @@ defmodule MingaEditor.Commands.InlineEdit do
   def reject(state, %InlineEdit{} = edit) do
     MingaAgent.EphemeralSession.stop(edit.session_pid)
 
-    {edits, _session_pid} =
-      state |> EditorState.inline_edits() |> InlineEdit.dismiss(edit.buffer_pid)
-
-    EditorState.set_inline_edits(state, edits)
+    {state, _session_pid} = AgentAccess.cancel_inline_edit(state, edit.buffer_pid)
+    state
   end
 
   @spec selection_range(state()) :: {non_neg_integer(), non_neg_integer()}

@@ -7,6 +7,7 @@ defmodule MingaEditor.RenderModel.UI.ObservatoryBuilderTest do
   alias Minga.SystemObserver.TreeNode
   alias MingaEditor.Observatory.Data, as: ObservatoryData
   alias MingaEditor.RenderModel.UI.ObservatoryBuilder
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
 
   describe "build/1" do
     test "builds hidden observatory when not visible" do
@@ -17,8 +18,8 @@ defmodule MingaEditor.RenderModel.UI.ObservatoryBuilderTest do
       assert model.nodes == []
     end
 
-    test "builds hidden observatory when observatory_visible is false" do
-      model = ObservatoryBuilder.build(%{observatory_visible: false})
+    test "builds hidden observatory when Traditional observatory is closed" do
+      model = ObservatoryBuilder.build(%TraditionalState{})
 
       refute model.visible?
     end
@@ -27,7 +28,10 @@ defmodule MingaEditor.RenderModel.UI.ObservatoryBuilderTest do
       data =
         ObservatoryData.visible(tree_node(), [%{processes: %{self() => %{message_queue_len: 5}}}])
 
-      shell_state = %{observatory_visible: true, observatory_data: data}
+      shell_state =
+        %TraditionalState{}
+        |> TraditionalState.open_observatory(nil)
+        |> TraditionalState.replace_observatory_data(data)
 
       model = ObservatoryBuilder.build(shell_state)
 
@@ -52,7 +56,7 @@ defmodule MingaEditor.RenderModel.UI.ObservatoryBuilderTest do
     end
 
     test "builds visible observatory with nil data as empty visible" do
-      shell_state = %{observatory_visible: true, observatory_data: nil}
+      shell_state = TraditionalState.open_observatory(%TraditionalState{}, nil)
 
       model = ObservatoryBuilder.build(shell_state)
 

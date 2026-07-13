@@ -13,6 +13,7 @@ defmodule MingaEditor.Commands.InlineAskTest do
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.InlineAsk
@@ -60,7 +61,7 @@ defmodule MingaEditor.Commands.InlineAskTest do
 
     state = InlineAskCommand.open(state)
     ask = active_ask(state, buffer) |> InlineAsk.thinking(session_pid)
-    state = EditorState.set_inline_asks(state, InlineAsk.put(EditorState.inline_asks(state), ask))
+    state = AgentAccess.replace_inline_ask(state, ask)
 
     state = InlineAskEvents.handle_prompt_result(state, session_pid, {:error, :provider_down})
 
@@ -211,7 +212,7 @@ defmodule MingaEditor.Commands.InlineAskTest do
   end
 
   defp active_ask(state, buffer) do
-    state |> EditorState.inline_asks() |> InlineAsk.active(buffer)
+    state |> AgentAccess.inline_asks() |> InlineAsk.active(buffer)
   end
 
   defp put_active_buffer(state, buffer) do

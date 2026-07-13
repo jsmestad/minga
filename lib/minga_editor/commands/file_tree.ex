@@ -11,6 +11,7 @@ defmodule MingaEditor.Commands.FileTree do
   alias MingaEditor.Commands.Helpers
   alias MingaEditor.Handlers.BufferRegistry
   alias MingaEditor.Layout
+  alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias Minga.Mode.DeleteConfirmState
@@ -59,7 +60,7 @@ defmodule MingaEditor.Commands.FileTree do
     state
     |> EditorState.update_file_tree(&FileTreeState.focus/1)
     |> EditorState.set_keymap_scope(:file_tree)
-    |> EditorState.set_sidebar_active_id("file_tree")
+    |> SidebarWorkflow.select("file_tree")
     |> Layout.invalidate()
     |> EditorState.invalidate_all_windows()
   end
@@ -71,7 +72,7 @@ defmodule MingaEditor.Commands.FileTree do
     state
     |> EditorState.update_file_tree(&FileTreeState.show/1)
     |> EditorState.set_keymap_scope(:file_tree)
-    |> EditorState.set_sidebar_active_id("file_tree")
+    |> SidebarWorkflow.select("file_tree")
     |> Layout.invalidate()
     |> EditorState.invalidate_all_windows()
   end
@@ -86,7 +87,7 @@ defmodule MingaEditor.Commands.FileTree do
     state
     |> EditorState.update_file_tree(&FileTreeState.hide/1)
     |> EditorState.set_keymap_scope(scope)
-    |> EditorState.set_sidebar_active_id(nil)
+    |> SidebarWorkflow.select(nil)
     |> Layout.invalidate()
     |> EditorState.invalidate_all_windows()
   end
@@ -659,7 +660,7 @@ defmodule MingaEditor.Commands.FileTree do
 
         state
         |> EditorState.set_keymap_scope(:file_tree)
-        |> EditorState.set_sidebar_active_id("file_tree")
+        |> SidebarWorkflow.select("file_tree")
         |> Layout.invalidate()
         |> EditorState.invalidate_all_windows()
     end
@@ -690,7 +691,7 @@ defmodule MingaEditor.Commands.FileTree do
     state
     |> EditorState.update_file_tree(&FileTreeState.close/1)
     |> EditorState.set_keymap_scope(scope)
-    |> EditorState.set_sidebar_active_id(nil)
+    |> SidebarWorkflow.select(nil)
   end
 
   # ── Private helpers ───────────────────────────────────────────────────────
@@ -927,14 +928,17 @@ defmodule MingaEditor.Commands.FileTree do
   # Explicitly resets keymap_scope to :editor so we don't leave orphaned
   # :git_status scope if a future refactor separates the open steps.
   @spec close_git_status_if_open(state()) :: state()
-  defp close_git_status_if_open(%{shell_runtime: %{state: %{git_status_panel: nil}}} = state),
-    do: state
+  defp close_git_status_if_open(state) do
+    case SidebarWorkflow.git_status_panel(state) do
+      nil ->
+        state
 
-  defp close_git_status_if_open(state),
-    do:
-      state
-      |> EditorState.set_keymap_scope(:editor)
-      |> EditorState.close_git_status_panel()
+      _panel ->
+        state
+        |> EditorState.set_keymap_scope(:editor)
+        |> SidebarWorkflow.close_git_status()
+    end
+  end
 
   # Opens a file from the tree, reusing an existing buffer when one exists
   # for the same path. Without the dedup check, the file tree creates
@@ -1051,7 +1055,7 @@ defmodule MingaEditor.Commands.FileTree do
       if error_reason, do: FileTreeState.refresh_failed(file_tree, error_reason), else: file_tree
     end)
     |> EditorState.set_keymap_scope(:file_tree)
-    |> EditorState.set_sidebar_active_id("file_tree")
+    |> SidebarWorkflow.select("file_tree")
     |> Layout.invalidate()
     |> EditorState.invalidate_all_windows()
   end

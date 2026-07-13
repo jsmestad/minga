@@ -63,7 +63,13 @@ defmodule MingaEditor.Input.AgentMouseTest do
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),
-          %MingaEditor.Shell.Traditional.State{agent: agent, tab_bar: tab_bar}
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Traditional.State.replace_agent(
+              %MingaEditor.Shell.Traditional.State{},
+              agent
+            ),
+            tab_bar
+          )
         )
     }
   end

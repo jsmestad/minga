@@ -5,6 +5,7 @@ defmodule MingaGitPorcelain.Shell.Traditional.GitStatusRendererTest do
   alias Minga.Git.StatusEntry
   alias MingaGitPorcelain.Shell.Traditional.GitStatus.TuiState
   alias MingaGitPorcelain.Shell.Traditional.GitStatusRenderer
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
 
   @rect {1, 0, 30, 21}
 
@@ -14,13 +15,18 @@ defmodule MingaGitPorcelain.Shell.Traditional.GitStatusRendererTest do
     viewport_cols = Keyword.get(opts, :cols, 80)
     tui_state = Keyword.get(opts, :tui_state)
 
+    shell_state =
+      %TraditionalState{}
+      |> TraditionalState.replace_git_status_panel(panel)
+      |> TraditionalState.replace_git_status_tui_state(tui_state)
+
     %{
       workspace: %{
         file_tree: %{tree: %Minga.Project.FileTree{root: "/tmp", width: 30}},
         viewport: %{rows: viewport_rows, cols: viewport_cols},
         keymap_scope: :git_status
       },
-      shell_state: %{git_status_panel: panel, git_status_tui_state: tui_state},
+      shell_state: shell_state,
       theme: theme
     }
   end

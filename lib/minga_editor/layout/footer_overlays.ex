@@ -65,6 +65,8 @@ defmodule MingaEditor.Layout.FooterOverlays do
   """
 
   alias MingaEditor.RenderModel.UI.AgentContextBuilder
+  alias MingaEditor.Shell.Traditional.Observatory
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
 
   @typedoc "A visible footer overlay: its registry surface id and its band content height."
   @type entry :: {surface_id :: atom(), content_height :: non_neg_integer() | :max}
@@ -136,15 +138,18 @@ defmodule MingaEditor.Layout.FooterOverlays do
   defp notification_actions?(_item), do: false
 
   @spec content_height_observatory(map()) :: non_neg_integer()
-  defp content_height_observatory(%{shell_runtime: %{state: shell_state}}) do
-    content_height_observatory(%{shell_state: shell_state})
+  defp content_height_observatory(state) do
+    case observatory(state) do
+      %Observatory{} = observatory -> observatory_content_height(Observatory.data(observatory))
+      nil -> 1
+    end
   end
 
-  defp content_height_observatory(%{shell_state: %{observatory_data: %{tree: tree}}}) do
-    1 + Enum.count(Minga.SystemObserver.TreeNode.flatten(tree))
-  end
+  @spec observatory_content_height(MingaEditor.Observatory.Data.t() | nil) :: non_neg_integer()
+  defp observatory_content_height(%{tree: tree}),
+    do: 1 + Enum.count(Minga.SystemObserver.TreeNode.flatten(tree))
 
-  defp content_height_observatory(_state), do: 1
+  defp observatory_content_height(nil), do: 1
 
   @spec content_height_edit_timeline(map()) :: non_neg_integer()
   defp content_height_edit_timeline(state) do
@@ -173,17 +178,18 @@ defmodule MingaEditor.Layout.FooterOverlays do
   # Float popup: an observatory inspection float, or a window carrying a :float
   # popup rule. Mirrors MingaEditor.RenderModel.UI.FloatPopupBuilder.
   @spec float_popup_visible?(map()) :: boolean()
-  defp float_popup_visible?(%{shell_runtime: %{state: shell_state}} = state) do
-    state
-    |> Map.delete(:shell_runtime)
-    |> Map.put(:shell_state, shell_state)
-    |> float_popup_visible?()
+  defp float_popup_visible?(state) do
+    observatory_inspection_visible?(observatory(state)) or float_window_visible?(state)
   end
 
-  defp float_popup_visible?(%{shell_state: %{observatory_inspection: %{visible: true}}}),
-    do: true
+  @spec observatory_inspection_visible?(Observatory.t() | nil) :: boolean()
+  defp observatory_inspection_visible?(%Observatory{} = observatory),
+    do: match?(%{visible: true}, Observatory.inspection(observatory))
 
-  defp float_popup_visible?(%{workspace: %{windows: %{map: map}}}) when is_map(map) do
+  defp observatory_inspection_visible?(nil), do: false
+
+  @spec float_window_visible?(map()) :: boolean()
+  defp float_window_visible?(%{workspace: %{windows: %{map: map}}}) when is_map(map) do
     Enum.any?(map, fn
       {_id,
        %{
@@ -198,7 +204,7 @@ defmodule MingaEditor.Layout.FooterOverlays do
     end)
   end
 
-  defp float_popup_visible?(_state), do: false
+  defp float_window_visible?(_state), do: false
 
   # Agent context: live BEAM-owned agent activity projection. The builder's
   # visibility predicate reads the same live editor state as the render model but
@@ -224,11 +230,21 @@ defmodule MingaEditor.Layout.FooterOverlays do
   # Observatory: the BEAM observatory panel is toggled on in shell_state.
   # Mirrors MingaEditor.RenderModel.UI.ObservatoryBuilder.
   @spec observatory_visible?(map()) :: boolean()
-  defp observatory_visible?(%{shell_runtime: %{state: shell_state}}),
-    do: observatory_visible?(%{shell_state: shell_state})
+  defp observatory_visible?(state) do
+    case observatory(state) do
+      %Observatory{} = observatory -> Observatory.visible?(observatory)
+      nil -> false
+    end
+  end
 
-  defp observatory_visible?(%{shell_state: %{observatory_visible: true}}), do: true
-  defp observatory_visible?(_state), do: false
+  @spec observatory(map()) :: Observatory.t() | nil
+  defp observatory(%{shell_runtime: %{state: %TraditionalState{} = shell_state}}),
+    do: TraditionalState.observatory(shell_state)
+
+  defp observatory(%{shell_state: %TraditionalState{} = shell_state}),
+    do: TraditionalState.observatory(shell_state)
+
+  defp observatory(_state), do: nil
 
   # Edit timeline: the active buffer has timeline entries.
   # Mirrors MingaEditor.RenderModel.UI.EditTimelineBuilder.

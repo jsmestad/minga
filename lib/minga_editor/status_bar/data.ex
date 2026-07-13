@@ -273,9 +273,7 @@ defmodule MingaEditor.StatusBar.Data do
   defp active_register_name(_state), do: ""
 
   @spec agent_state(EditorState.t() | map()) :: AgentState.t()
-  defp agent_state(%EditorState{} = state), do: AgentAccess.agent(state)
-  defp agent_state(%{shell_state: %{agent: %AgentState{} = agent}}), do: agent
-  defp agent_state(_state), do: %AgentState{}
+  defp agent_state(state), do: AgentAccess.agent(state)
 
   @spec agent_session(EditorState.t() | map()) :: pid() | nil
   defp agent_session(%EditorState{} = state), do: AgentAccess.session(state)

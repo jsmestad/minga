@@ -6,11 +6,12 @@ defmodule MingaEditor.Handlers.ToolHandler do
   GenServer into pure `{state, [effect]}` functions. The Editor delegates
   to this module via catch-all clauses and applies the returned effects.
 
-  Each function reads and writes only tool-related state slices
-  (`state.shell_runtime.state.tool_prompt_queue`, `state.shell_runtime.state.tool_declined`,
-  status messages).
+  Each function reads and writes only the focused tool-prompt owner and
+  status notices.
   """
 
+  alias MingaEditor.Shell.Traditional.ToolPrompts
+  alias MingaEditor.Shell.Traditional.ToolPromptWorkflow
   alias MingaEditor.State, as: EditorState
 
   @typedoc "Effects that the tool handler may return."
@@ -111,36 +112,14 @@ defmodule MingaEditor.Handlers.ToolHandler do
     {new_state, [:render]}
   end
 
-  # ── Tool missing prompt (suppressed) ─────────────────────────────────────
-
-  def handle(
-        %{shell_runtime: %{state: %{suppress_tool_prompts: true}}} = state,
-        {:minga_event, :tool_missing, %Minga.Events.ToolMissingEvent{command: command}}
-      ) do
-    {state, [{:log, :editor, :debug, "[Editor] tool_missing suppressed for #{command}"}]}
-  end
-
-  # ── Tool missing prompt (active) ─────────────────────────────────────────
+  # ── Tool missing prompt ──────────────────────────────────────────────────
 
   def handle(
         state,
         {:minga_event, :tool_missing, %Minga.Events.ToolMissingEvent{command: command}}
       ) do
-    recipe = Minga.Tool.Recipe.Registry.for_command(command)
-
-    new_state =
-      if recipe && not EditorState.skip_tool_prompt?(state, recipe.name) do
-        queue = Enum.concat(state.shell_runtime.state.tool_prompt_queue, [recipe.name])
-
-        state_with_queue =
-          EditorState.set_tool_prompt_queue(state, queue)
-
-        maybe_show_tool_prompt(state_with_queue)
-      else
-        state
-      end
-
-    {new_state, [:render]}
+    prompts = ToolPromptWorkflow.prompts(state)
+    handle_tool_missing(state, command, ToolPrompts.suppressed?(prompts))
   end
 
   # ── Catch-all ────────────────────────────────────────────────────────────
@@ -151,24 +130,46 @@ defmodule MingaEditor.Handlers.ToolHandler do
 
   # ── Private helpers ──────────────────────────────────────────────────────
 
+  @spec handle_tool_missing(EditorState.t(), String.t(), boolean()) ::
+          {EditorState.t(), [tool_effect()]}
+  defp handle_tool_missing(state, command, true) do
+    {state, [{:log, :editor, :debug, "[Editor] tool_missing suppressed for #{command}"}]}
+  end
+
+  defp handle_tool_missing(state, command, false) do
+    recipe = Minga.Tool.Recipe.Registry.for_command(command)
+
+    new_state =
+      if recipe && not ToolPromptWorkflow.skip?(state, recipe.name) do
+        state
+        |> ToolPromptWorkflow.enqueue(recipe.name)
+        |> maybe_show_tool_prompt()
+      else
+        state
+      end
+
+    {new_state, [:render]}
+  end
+
   # Transitions to :tool_confirm mode if in normal mode and there are
   # pending tool prompts. Otherwise the prompt waits until the user
   # returns to normal mode.
   @spec maybe_show_tool_prompt(EditorState.t()) :: EditorState.t()
-  defp maybe_show_tool_prompt(
-         %{
-           workspace: %{editing: %{mode: :normal}},
-           shell_runtime: %{state: %{tool_prompt_queue: pending}}
-         } = state
-       )
-       when pending != [] do
-    ms = %Minga.Mode.ToolConfirmState{
-      pending: pending,
-      declined: state.shell_runtime.state.tool_declined
-    }
-
-    EditorState.transition_mode(state, :tool_confirm, ms)
+  defp maybe_show_tool_prompt(%{workspace: %{editing: %{mode: :normal}}} = state) do
+    prompts = ToolPromptWorkflow.prompts(state)
+    show_tool_prompt(state, ToolPrompts.queue(prompts), ToolPrompts.declined(prompts))
   end
 
   defp maybe_show_tool_prompt(state), do: state
+
+  @spec show_tool_prompt(EditorState.t(), [atom()], MapSet.t(atom())) :: EditorState.t()
+  defp show_tool_prompt(state, [], _declined), do: state
+
+  defp show_tool_prompt(state, pending, declined) do
+    EditorState.transition_mode(
+      state,
+      :tool_confirm,
+      %Minga.Mode.ToolConfirmState{pending: pending, declined: declined}
+    )
+  end
 end

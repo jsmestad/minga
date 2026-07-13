@@ -121,9 +121,16 @@ defmodule MingaEditor.Shell.Workflow do
 
   @spec initialize_shell_state(module(), term()) :: term()
   defp initialize_shell_state(MingaEditor.Shell.Traditional, previous_state) do
-    %TraditionalState{
-      suppress_tool_prompts: Map.get(previous_state, :suppress_tool_prompts, false)
-    }
+    suppressed? =
+      case previous_state do
+        %TraditionalState{tool_prompts: prompts} ->
+          MingaEditor.Shell.Traditional.ToolPrompts.suppressed?(prompts)
+
+        _other ->
+          false
+      end
+
+    TraditionalState.set_suppress_tool_prompts(%TraditionalState{}, suppressed?)
   end
 
   defp initialize_shell_state(module, _previous_state), do: module.init([])

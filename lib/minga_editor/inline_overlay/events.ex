@@ -10,8 +10,8 @@ defmodule MingaEditor.InlineOverlay.Events do
   variant-specific transitions (`apply_event`, the failure message) stay
   in the adapters and are passed in as callbacks.
 
-  The `spec` map carries the store accessor, store setter, and the
-  `session?` predicate over the variant's state store.
+  The `spec` map carries the store accessor, focused replacement operation,
+  and the `session?` predicate over the variant's state store.
   """
 
   alias MingaAgent.EphemeralSession
@@ -21,12 +21,12 @@ defmodule MingaEditor.InlineOverlay.Events do
   Variant behaviour for an inline overlay event router.
 
   * `:store` reads the variant's per-buffer overlay store off editor state.
-  * `:set_store` writes an updated store back onto editor state.
+  * `:replace` writes one transitioned overlay through its focused owner.
   * `:session?` is true when a session pid belongs to this variant's store.
   """
   @type spec :: %{
           store: (EditorState.t() -> %{pid() => struct()} | nil),
-          set_store: (EditorState.t(), %{pid() => struct()} -> EditorState.t()),
+          replace: (EditorState.t(), struct() -> EditorState.t()),
           session?: (%{pid() => struct()}, pid() -> boolean())
         }
 
@@ -78,13 +78,9 @@ defmodule MingaEditor.InlineOverlay.Events do
   def update_for_session(state, session_pid, spec, fun) do
     case spec.store.(state) do
       store when is_map(store) ->
-        {buffer_pid, overlay} = find_by_session(store, session_pid)
+        {_buffer_pid, overlay} = find_by_session(store, session_pid)
 
-        if overlay do
-          spec.set_store.(state, Map.put(store, buffer_pid, fun.(overlay)))
-        else
-          state
-        end
+        if overlay, do: spec.replace.(state, fun.(overlay)), else: state
 
       _ ->
         state

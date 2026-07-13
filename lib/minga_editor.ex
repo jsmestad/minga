@@ -87,6 +87,7 @@ defmodule MingaEditor do
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
+  alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.Shell.Traditional.State, as: TraditionalShellState
 
   alias MingaEditor.MouseHoverTooltip
@@ -613,8 +614,8 @@ defmodule MingaEditor do
 
   # ── TUI SPC leader timeout ──────────────────────────────────────────────
 
-  def handle_info(:space_leader_timeout, state) do
-    new_state = MingaEditor.Input.CUA.TUISpaceLeader.handle_timeout(state)
+  def handle_info({:space_leader_timeout, generation}, state) do
+    new_state = MingaEditor.Input.CUA.TUISpaceLeader.handle_timeout(state, generation)
     {:noreply, new_state}
   end
 
@@ -624,8 +625,14 @@ defmodule MingaEditor do
   # :observatory_data_result clause), not here, so a collection that takes
   # longer than the 1s interval is effectively skipped, never queued.
   def handle_info({:observatory_tick, token}, state) do
-    if current_observatory_token?(state, token), do: spawn_observatory_collection(token)
-    {:noreply, state}
+    case SidebarWorkflow.expire_observatory_refresh(state, token) do
+      {:collect, new_state} ->
+        spawn_observatory_collection(token)
+        {:noreply, new_state}
+
+      {:stale, new_state} ->
+        {:noreply, new_state}
+    end
   end
 
   def handle_info(:observatory_tick, state) do
@@ -638,16 +645,19 @@ defmodule MingaEditor do
   # A result carrying a stale token (panel closed, or a newer tick already
   # superseded this one) is dropped without scheduling anything.
   def handle_info({:observatory_data_result, token, data}, state) do
-    if current_observatory_token?(state, token) do
+    if SidebarWorkflow.observatory_collection_current?(state, token) do
       next_token = make_ref()
       timer = Process.send_after(self(), {:observatory_tick, next_token}, 1_000)
 
-      new_state =
-        state
-        |> EditorState.set_observatory_data(data)
-        |> EditorState.set_observatory_timer({timer, next_token})
-
-      {:noreply, Renderer.render_or_async(new_state)}
+      case SidebarWorkflow.complete_observatory_refresh(
+             state,
+             token,
+             data,
+             {timer, next_token}
+           ) do
+        {:accepted, new_state} -> {:noreply, Renderer.render_or_async(new_state)}
+        {:stale, new_state} -> {:noreply, new_state}
+      end
     else
       {:noreply, state}
     end
@@ -1090,19 +1100,6 @@ defmodule MingaEditor do
   end
 
   defp apply_fetch_status(state, _meta), do: state
-
-  @spec current_observatory_token?(state(), reference()) :: boolean()
-  defp current_observatory_token?(
-         %{
-           shell_runtime: %{
-             state: %{observatory_visible: true, observatory_timer: {_timer, token}}
-           }
-         },
-         token
-       ),
-       do: true
-
-  defp current_observatory_token?(_state, _token), do: false
 
   # Run the blocking SystemObserver collection in a supervised Task so the
   # Editor GenServer mailbox stays free. The token is echoed back with the

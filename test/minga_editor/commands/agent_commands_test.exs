@@ -18,6 +18,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
+  alias MingaEditor.Agent.UIState.View
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Project.FileRef
   alias MingaEditor.Commands.Agent, as: AgentCommands
@@ -115,7 +116,13 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),
-          %MingaEditor.Shell.Traditional.State{agent: agent, tab_bar: tb}
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Traditional.State.replace_agent(
+              %MingaEditor.Shell.Traditional.State{},
+              agent
+            ),
+            tb
+          )
         ),
       focus_stack: Input.default_stack()
     }
@@ -805,26 +812,30 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       state = base_state(panel_visible: true)
 
       state =
-        AgentAccess.update_view(state, fn v ->
-          %{v | active: true, focus: :chat}
+        AgentAccess.update_view(state, fn view ->
+          view
+          |> View.activate(nil, nil)
+          |> View.set_focus(:chat)
         end)
 
       new_state = AgentCommands.scope_switch_focus(state)
 
-      assert AgentAccess.view(new_state).focus == :file_viewer
+      assert new_state |> AgentAccess.view() |> View.focus() == :file_viewer
     end
 
     test "switches from non-chat back to chat" do
       state = base_state(panel_visible: true)
 
       state =
-        AgentAccess.update_view(state, fn v ->
-          %{v | active: true, focus: :file_viewer}
+        AgentAccess.update_view(state, fn view ->
+          view
+          |> View.activate(nil, nil)
+          |> View.set_focus(:file_viewer)
         end)
 
       new_state = AgentCommands.scope_switch_focus(state)
 
-      assert AgentAccess.view(new_state).focus == :chat
+      assert new_state |> AgentAccess.view() |> View.focus() == :chat
     end
   end
 

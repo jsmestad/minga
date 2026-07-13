@@ -9,6 +9,8 @@ defmodule MingaEditor.Renderer.RenderReceipt do
 
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.Renderer.WindowObservation
+  alias MingaEditor.Shell.Traditional.ClickRegions
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State.Windows
 
   @enforce_keys [
@@ -16,8 +18,7 @@ defmodule MingaEditor.Renderer.RenderReceipt do
     :focus_tree,
     :shell_id,
     :shell_identity,
-    :modeline_click_regions,
-    :tab_bar_click_regions,
+    :click_regions,
     :frame_seq,
     :keyframe?,
     :render_sent_at
@@ -27,8 +28,7 @@ defmodule MingaEditor.Renderer.RenderReceipt do
     :focus_tree,
     :shell_id,
     :shell_identity,
-    :modeline_click_regions,
-    :tab_bar_click_regions,
+    :click_regions,
     :frame_seq,
     :keyframe?,
     :render_sent_at,
@@ -41,8 +41,7 @@ defmodule MingaEditor.Renderer.RenderReceipt do
           focus_tree: MingaEditor.FocusTree.t() | nil,
           shell_id: atom(),
           shell_identity: MingaEditor.Shell.Identity.t() | nil,
-          modeline_click_regions: term(),
-          tab_bar_click_regions: term(),
+          click_regions: ClickRegions.t() | nil,
           frame_seq: non_neg_integer(),
           keyframe?: boolean(),
           render_sent_at: integer(),
@@ -59,8 +58,7 @@ defmodule MingaEditor.Renderer.RenderReceipt do
       focus_tree: output.focus_tree,
       shell_id: output.shell_id,
       shell_identity: output.shell_identity,
-      modeline_click_regions: shell_field(output.shell_state, :modeline_click_regions),
-      tab_bar_click_regions: shell_field(output.shell_state, :tab_bar_click_regions),
+      click_regions: click_regions(output.shell_state),
       frame_seq: frame_seq,
       keyframe?: output.caches.last_frame_keyframe?,
       render_sent_at: sent_at,
@@ -87,7 +85,9 @@ defmodule MingaEditor.Renderer.RenderReceipt do
     end)
   end
 
-  @spec shell_field(term(), atom()) :: term()
-  defp shell_field(shell_state, field) when is_map(shell_state), do: Map.get(shell_state, field)
-  defp shell_field(_shell_state, _field), do: nil
+  @spec click_regions(term()) :: ClickRegions.t() | nil
+  defp click_regions(%TraditionalState{} = shell_state),
+    do: TraditionalState.click_regions(shell_state)
+
+  defp click_regions(_shell_state), do: nil
 end

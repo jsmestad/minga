@@ -48,7 +48,7 @@ defmodule MingaEditor.Shell.Traditional do
   @spec handle_event(ShellState.t(), MingaEditor.Session.State.t(), term()) ::
           {ShellState.t(), MingaEditor.Session.State.t()}
   def handle_event(%ShellState{} = shell_state, workspace, {:git_status_changed, entries}) do
-    {ShellState.refresh_git_status_tui_state(shell_state, entries), workspace}
+    {refresh_git_status_tui_state(shell_state, entries), workspace}
   end
 
   def handle_event(%ShellState{tab_bar: nil} = shell_state, workspace, _event) do
@@ -87,6 +87,54 @@ defmodule MingaEditor.Shell.Traditional do
 
   def handle_event(shell_state, workspace, _event) do
     {shell_state, workspace}
+  end
+
+  @git_status_tui_state_module :"Elixir.MingaGitPorcelain.Shell.Traditional.GitStatus.TuiState"
+
+  @spec refresh_git_status_tui_state(ShellState.t(), [Minga.Git.StatusEntry.t()]) ::
+          ShellState.t()
+  defp refresh_git_status_tui_state(%ShellState{} = shell_state, entries) do
+    case ShellState.git_status_tui_state(shell_state) do
+      nil -> shell_state
+      tui -> maybe_refresh_git_status_tui_state(shell_state, tui, entries)
+    end
+  end
+
+  @spec maybe_refresh_git_status_tui_state(ShellState.t(), struct(), [Minga.Git.StatusEntry.t()]) ::
+          ShellState.t()
+  defp maybe_refresh_git_status_tui_state(shell_state, tui, entries) do
+    if git_status_tui_refresh_available?() do
+      refreshed = :erlang.apply(@git_status_tui_state_module, :refresh, [tui, entries])
+      install_refreshed_git_status_tui_state(shell_state, refreshed)
+    else
+      shell_state
+    end
+  end
+
+  @spec install_refreshed_git_status_tui_state(ShellState.t(), term()) :: ShellState.t()
+  defp install_refreshed_git_status_tui_state(shell_state, refreshed) do
+    if is_struct(refreshed, @git_status_tui_state_module),
+      do: ShellState.replace_git_status_tui_state(shell_state, refreshed),
+      else: shell_state
+  end
+
+  @spec git_status_tui_refresh_available?() :: boolean()
+  defp git_status_tui_refresh_available? do
+    git_porcelain_running?() and Code.ensure_loaded?(@git_status_tui_state_module) and
+      function_exported?(@git_status_tui_state_module, :refresh, 2)
+  end
+
+  @spec git_porcelain_running?() :: boolean()
+  defp git_porcelain_running? do
+    case Process.whereis(Minga.Extension.Registry) do
+      nil ->
+        false
+
+      _pid ->
+        match?({:ok, %{status: :running}}, Minga.Extension.Registry.get(:minga_git_porcelain))
+    end
+  catch
+    :exit, _reason -> false
   end
 
   @impl true

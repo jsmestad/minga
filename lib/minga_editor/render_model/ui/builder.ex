@@ -28,6 +28,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   alias MingaEditor.RenderModel.UI.SidebarsBuilder
   alias MingaEditor.RenderModel.UI.SignatureHelpBuilder
   alias MingaEditor.RenderModel.UI.SplitSeparatorsBuilder
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.RenderModel.UI.StatusBarBuilder
   alias MingaEditor.RenderModel.UI.TabBarBuilder
   alias MingaEditor.RenderModel.UI.ThemeBuilder
@@ -96,11 +97,11 @@ defmodule MingaEditor.RenderModel.UI.Builder do
 
   @spec build_git_status(Context.t()) :: Minga.RenderModel.UI.GitStatus.t()
   defp build_git_status(%{
-         shell_state: %{git_status_panel: %{} = data},
+         shell_state: %TraditionalState{} = shell_state,
          git_syncing: syncing,
          git_toast: toast
        }) do
-    GitStatusBuilder.build(data, syncing, toast)
+    GitStatusBuilder.build(TraditionalState.git_status_panel(shell_state), syncing, toast)
   end
 
   defp build_git_status(%{git_syncing: syncing, git_toast: toast}) do

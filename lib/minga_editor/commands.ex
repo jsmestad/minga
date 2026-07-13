@@ -26,6 +26,8 @@ defmodule MingaEditor.Commands do
 
   alias Minga.Buffer
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
+  alias MingaEditor.Shell.Traditional.ToolPrompts
+  alias MingaEditor.Shell.Traditional.ToolPromptWorkflow
   alias Minga.Command
   alias Minga.Git
   alias MingaEditor.Commands.Agent, as: AgentCommands
@@ -229,19 +231,16 @@ defmodule MingaEditor.Commands do
   end
 
   def execute(state, {:tool_confirm_decline, name}) do
-    state =
-      EditorState.set_tool_prompt_state(
-        state,
-        state.shell_runtime.state.tool_prompt_queue,
-        MapSet.put(state.shell_runtime.state.tool_declined, name)
-      )
-
+    prompts = ToolPromptWorkflow.prompts(state)
+    declined = MapSet.put(ToolPrompts.declined(prompts), name)
+    state = ToolPromptWorkflow.replace(state, ToolPrompts.queue(prompts), declined)
     drain_tool_prompt_queue(state)
   end
 
   def execute(state, {:tool_confirm_dismiss, declined_set}) do
-    declined = MapSet.union(state.shell_runtime.state.tool_declined, declined_set)
-    EditorState.set_tool_prompt_state(state, [], declined)
+    prompts = ToolPromptWorkflow.prompts(state)
+    declined = MapSet.union(ToolPrompts.declined(prompts), declined_set)
+    ToolPromptWorkflow.replace(state, [], declined)
   end
 
   # ── File tree delete confirmation commands ─────────────────────────────────
@@ -857,12 +856,7 @@ defmodule MingaEditor.Commands do
     end
   end
 
-  defp drain_tool_prompt_queue(state) do
-    case state.shell_runtime.state.tool_prompt_queue do
-      [_current | rest] -> EditorState.set_tool_prompt_queue(state, rest)
-      [] -> state
-    end
-  end
+  defp drain_tool_prompt_queue(state), do: ToolPromptWorkflow.advance(state)
 
   @spec accept_command_candidate(state()) :: state()
   defp accept_command_candidate(state) do

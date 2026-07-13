@@ -1792,9 +1792,9 @@ defmodule MingaEditor.Mouse do
 
   @spec close_tab_at(state(), non_neg_integer(), non_neg_integer()) :: state()
   defp close_tab_at(state, row, col) do
-    case find_tab_bar_region(state.shell_runtime.state.tab_bar_click_regions, row, col) do
-      {:command, cmd} -> close_tab_by_command(state, cmd)
-      :not_tab_bar -> state
+    case tab_bar_command_at(state, row, col) do
+      nil -> state
+      command -> close_tab_by_command(state, command)
     end
   end
 
@@ -1846,37 +1846,24 @@ defmodule MingaEditor.Mouse do
           {:command, tab_command()} | :not_tab_bar
   defp tab_bar_click(state, row, col) do
     if SurfaceRegistry.within?(state, :tab_bar, row, col) do
-      find_tab_bar_region(state.shell_runtime.state.tab_bar_click_regions, row, col)
+      case tab_bar_command_at(state, row, col) do
+        nil -> :not_tab_bar
+        command -> {:command, command}
+      end
     else
       :not_tab_bar
     end
   end
 
-  @spec find_tab_bar_region(
-          [TraditionalState.tab_bar_click_region()],
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: {:command, tab_command()} | :not_tab_bar
-  defp find_tab_bar_region(regions, row, col) do
-    case Enum.find(regions, &tab_bar_region_hit?(&1, row, col)) do
-      {_, _, cmd} -> {:command, cmd}
-      {_, _, _, cmd} -> {:command, cmd}
-      nil -> :not_tab_bar
-    end
-  end
+  @spec tab_bar_command_at(state(), non_neg_integer(), non_neg_integer()) :: tab_command() | nil
+  defp tab_bar_command_at(
+         %{shell_runtime: %{state: %TraditionalState{} = shell_state}},
+         row,
+         col
+       ),
+       do: TraditionalState.tab_bar_command_at(shell_state, row, col)
 
-  @spec tab_bar_region_hit?(
-          TraditionalState.tab_bar_click_region(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: boolean()
-  defp tab_bar_region_hit?({start_col, end_col, _cmd}, _row, col) do
-    col >= start_col and col <= end_col
-  end
-
-  defp tab_bar_region_hit?({region_row, start_col, end_col, _cmd}, row, col) do
-    row == region_row and col >= start_col and col <= end_col
-  end
+  defp tab_bar_command_at(_state, _row, _col), do: nil
 
   # ── Modeline segment click detection ─────────────────────────────────────
 
@@ -1896,7 +1883,10 @@ defmodule MingaEditor.Mouse do
       end)
 
     if is_modeline do
-      find_click_region(state.shell_runtime.state.modeline_click_regions, col)
+      case modeline_command_at(state, col) do
+        nil -> :not_modeline
+        command -> {:command, command}
+      end
     else
       :not_modeline
     end
@@ -1927,17 +1917,12 @@ defmodule MingaEditor.Mouse do
   defp update_current_viewport(state, new_vp),
     do: EditorState.update_current_viewport(state, new_vp)
 
-  @spec find_click_region(
-          [MingaEditor.Shell.Traditional.Modeline.click_region()],
-          non_neg_integer()
-        ) ::
-          {:command, atom()} | :not_modeline
-  defp find_click_region(regions, col) do
-    case Enum.find(regions, fn {col_start, col_end, _cmd} ->
-           col >= col_start and col < col_end
-         end) do
-      {_start, _end, command} -> {:command, command}
-      nil -> :not_modeline
-    end
-  end
+  @spec modeline_command_at(state(), non_neg_integer()) :: atom() | nil
+  defp modeline_command_at(
+         %{shell_runtime: %{state: %TraditionalState{} = shell_state}},
+         col
+       ),
+       do: TraditionalState.modeline_command_at(shell_state, col)
+
+  defp modeline_command_at(_state, _col), do: nil
 end

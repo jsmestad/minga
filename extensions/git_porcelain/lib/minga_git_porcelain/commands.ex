@@ -18,6 +18,7 @@ defmodule MingaGitPorcelain.Commands do
   alias MingaEditor.Shell.Traditional.GitToast
   alias MingaEditor.Shell.Traditional.GitToastWorkflow
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
+  alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias Minga.Git
@@ -89,8 +90,7 @@ defmodule MingaGitPorcelain.Commands do
     if state.workspace.keymap_scope == :git_status do
       state
       |> EditorState.set_keymap_scope(:editor)
-      |> EditorState.close_git_status_panel()
-      |> EditorState.set_sidebar_active_id(nil)
+      |> SidebarWorkflow.close_git_status()
       |> Layout.invalidate()
       |> EditorState.invalidate_all_windows()
     else
@@ -1309,8 +1309,8 @@ defmodule MingaGitPorcelain.Commands do
           EditorState.set_keymap_scope(state, :git_status)
 
         state
-        |> EditorState.set_git_status_panel(panel_data)
-        |> EditorState.set_sidebar_active_id("git_status")
+        |> SidebarWorkflow.replace_git_status(panel_data)
+        |> SidebarWorkflow.select("git_status")
         |> Layout.invalidate()
         |> EditorState.invalidate_all_windows()
     end
@@ -1335,15 +1335,15 @@ defmodule MingaGitPorcelain.Commands do
       EditorState.set_keymap_scope(state, :git_status)
 
     state
-    |> EditorState.set_git_status_panel(panel_data)
-    |> EditorState.set_sidebar_active_id("git_status")
+    |> SidebarWorkflow.replace_git_status(panel_data)
+    |> SidebarWorkflow.select("git_status")
     |> Layout.invalidate()
     |> EditorState.invalidate_all_windows()
   end
 
   @spec git_status_last_commit_message(state()) :: String.t()
   defp git_status_last_commit_message(state) do
-    case EditorState.git_status_panel(state) do
+    case SidebarWorkflow.git_status_panel(state) do
       nil -> ""
       panel -> Map.get(panel, :last_commit_message, "")
     end

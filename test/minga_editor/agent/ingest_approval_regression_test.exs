@@ -31,6 +31,7 @@ defmodule MingaEditor.Agent.IngestApprovalRegressionTest do
   alias MingaEditor.Commands.AgentSession
   alias MingaEditor.Commands.AgentSubStates
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
@@ -172,10 +173,9 @@ defmodule MingaEditor.Agent.IngestApprovalRegressionTest do
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),
-          %MingaEditor.Shell.Traditional.State{
-            tab_bar: tb,
-            agent: agent
-          }
+          %TraditionalState{}
+          |> TraditionalState.replace_agent(agent)
+          |> TraditionalState.set_tab_bar(tb)
         )
     }
   end

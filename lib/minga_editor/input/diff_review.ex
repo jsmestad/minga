@@ -12,6 +12,7 @@ defmodule MingaEditor.Input.DiffReview do
 
   @type state :: MingaEditor.Input.Handler.handler_state()
 
+  alias MingaEditor.Agent.UIState.View
   alias MingaEditor.Agent.View.Preview
   alias MingaEditor.Commands
   alias MingaEditor.State, as: EditorState
@@ -25,7 +26,7 @@ defmodule MingaEditor.Input.DiffReview do
     view = AgentAccess.view(state)
     panel = AgentAccess.panel(state)
 
-    if view.focus == :file_viewer and
+    if View.focus(view) == :file_viewer and
          match?(%Preview{content: {:diff, _}}, view.preview) and
          not panel.input_focused do
       dispatch_diff_key(state, cp)

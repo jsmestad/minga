@@ -10,6 +10,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
   alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
   alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.Shell.Workflow
   alias MingaEditor.State, as: EditorState
 
@@ -97,7 +98,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
        ) do
     state = FileTreeFreshness.refresh_git_status(state, event)
 
-    case EditorState.git_status_panel(state) do
+    case SidebarWorkflow.git_status_panel(state) do
       nil ->
         if FileTreeFreshness.open?(state), do: {state, [{:render, 16}]}, else: {state, []}
 
@@ -115,7 +116,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
 
         state =
           state
-          |> EditorState.set_git_status_panel(GitStatusPanel.new(git_status_data))
+          |> SidebarWorkflow.replace_git_status(GitStatusPanel.new(git_status_data))
           |> Workflow.ensure_available()
 
         {runtime, workspace} =

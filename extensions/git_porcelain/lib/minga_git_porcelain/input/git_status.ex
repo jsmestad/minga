@@ -13,6 +13,7 @@ defmodule MingaGitPorcelain.Input.GitStatus do
 
   alias Minga.Buffer
   alias MingaEditor.Commands
+  alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.State, as: EditorState
   alias Minga.Git
   alias Minga.Log
@@ -262,7 +263,7 @@ defmodule MingaGitPorcelain.Input.GitStatus do
   defp close_panel(state) do
     state
     |> EditorState.set_keymap_scope(:editor)
-    |> EditorState.close_git_status_panel()
+    |> SidebarWorkflow.close_git_status()
     |> Layout.invalidate()
     |> EditorState.invalidate_all_windows()
   end
@@ -316,7 +317,7 @@ defmodule MingaGitPorcelain.Input.GitStatus do
 
   @spec get_discard_confirmation(EditorState.t()) :: {Git.StatusEntry.t(), String.t()} | nil
   defp get_discard_confirmation(state) do
-    case EditorState.git_status_panel(state) do
+    case SidebarWorkflow.git_status_panel(state) do
       nil -> nil
       _panel -> git_status_tui_state(state).discard_confirmation
     end
@@ -375,19 +376,21 @@ defmodule MingaGitPorcelain.Input.GitStatus do
 
   @spec update_tui_state(EditorState.t(), (TuiState.t(), [Git.StatusEntry.t()] -> TuiState.t())) ::
           EditorState.t()
-  defp update_tui_state(%{shell_runtime: %{state: %{git_status_panel: nil}}} = state, _fun),
-    do: state
-
   defp update_tui_state(state, fun) do
-    panel = EditorState.git_status_panel(state)
-    entries = Map.get(panel, :entries) || []
-    tui = git_status_tui_state(state)
+    case SidebarWorkflow.git_status_panel(state) do
+      nil ->
+        state
 
-    updated =
-      fun.(tui, entries)
-      |> TuiState.clamp_cursor(entries)
+      panel ->
+        entries = panel.entries || []
+        tui = git_status_tui_state(state)
 
-    EditorState.set_git_status_tui_state(state, updated)
+        updated =
+          fun.(tui, entries)
+          |> TuiState.clamp_cursor(entries)
+
+        SidebarWorkflow.replace_git_status_tui(state, updated)
+    end
   end
 
   @spec with_selected_file(EditorState.t(), (Git.StatusEntry.t(), String.t() -> EditorState.t())) ::
@@ -398,7 +401,7 @@ defmodule MingaGitPorcelain.Input.GitStatus do
         MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Not in a git repository")
 
       git_root ->
-        panel = EditorState.git_status_panel(state)
+        panel = SidebarWorkflow.git_status_panel(state)
         entries = Map.get(panel || %{}, :entries) || []
         tui = git_status_tui_state(state)
 
@@ -452,10 +455,10 @@ defmodule MingaGitPorcelain.Input.GitStatus do
   end
 
   @spec git_status_tui_state(EditorState.t()) :: TuiState.t()
-  defp git_status_tui_state(%{
-         shell_runtime: %{state: %{git_status_tui_state: %TuiState{} = tui}}
-       }),
-       do: tui
-
-  defp git_status_tui_state(_state), do: TuiState.new()
+  defp git_status_tui_state(state) do
+    case SidebarWorkflow.git_status_tui_state(state) do
+      %TuiState{} = tui -> tui
+      nil -> TuiState.new()
+    end
+  end
 end
