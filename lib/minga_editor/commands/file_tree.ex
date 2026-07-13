@@ -18,10 +18,13 @@ defmodule MingaEditor.Commands.FileTree do
   alias Minga.Project.FileTree.BufferSync
   alias MingaEditor.FileTree.DropIntent
   alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
+  alias MingaEditor.FileTree.Refresh, as: FileTreeRefresh
+  alias MingaEditor.FileTree.Refresh.FilesystemScanner
   alias Minga.Log
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
+  @typep tree_resolution :: {:ok, FileTree.t()} | {:error, File.posix()}
 
   @doc "Handles semantic sidebar actions from native frontends or generic sidebar input."
   @spec handle_sidebar_action(state(), String.t(), map()) :: state()
@@ -165,13 +168,7 @@ defmodule MingaEditor.Commands.FileTree do
   def collapse_all(state), do: with_tree(state, &FileTree.collapse_all/1)
 
   @spec refresh(state()) :: state()
-  def refresh(state) do
-    with_tree(state, fn tree ->
-      tree
-      |> FileTree.refresh()
-      |> FileTreeFreshness.refresh_tree_git_status_from_cache(EditorState.events_registry(state))
-    end)
-  end
+  def refresh(state), do: FileTreeFreshness.request_refresh(state, 0)
 
   @spec with_tree(state(), (FileTree.t() -> FileTree.t())) :: state()
   defp with_tree(state, fun) do
@@ -267,6 +264,43 @@ defmodule MingaEditor.Commands.FileTree do
     update_file_tree(state, fn _ -> file_tree end)
   end
 
+  @doc "Restores unfiltered rows while keeping the filter input active."
+  @spec reset_filter_query(state()) :: state()
+  def reset_filter_query(state), do: restore_unfiltered_filter(state, :keep_open)
+
+  @doc "Restores unfiltered rows and dismisses filter input."
+  @spec clear_filter(state()) :: state()
+  def clear_filter(state), do: restore_unfiltered_filter(state, :dismiss)
+
+  @spec restore_unfiltered_filter(state(), :keep_open | :dismiss) :: state()
+  defp restore_unfiltered_filter(state, disposition) do
+    case file_tree_state(state).tree do
+      %FileTree{} = tree ->
+        tree = tree |> FileTree.put_cached_files(nil) |> FileTree.clear_filter()
+        restore_resolved_filter(resolve_tree_entries(tree), state, disposition)
+
+      nil ->
+        state
+    end
+  end
+
+  @spec restore_resolved_filter(tree_resolution(), state(), :keep_open | :dismiss) :: state()
+  defp restore_resolved_filter({:error, reason}, state, _disposition) do
+    update_file_tree(state, &FileTreeState.refresh_failed(&1, reason))
+  end
+
+  defp restore_resolved_filter({:ok, tree}, state, disposition) do
+    tree = if disposition == :keep_open, do: FileTree.begin_filter(tree), else: tree
+    file_tree = FileTreeState.replace_tree(file_tree_state(state), tree)
+    file_tree = dismiss_filter(file_tree, disposition)
+    state = set_file_tree(state, file_tree)
+    sync_buffer(state)
+  end
+
+  @spec dismiss_filter(FileTreeState.t(), :keep_open | :dismiss) :: FileTreeState.t()
+  defp dismiss_filter(file_tree, :keep_open), do: file_tree
+  defp dismiss_filter(file_tree, :dismiss), do: FileTreeState.accept_filter(file_tree)
+
   # Spawns the async no-cache filesystem walk when re-entering filtering carries
   # a pre-existing filter on a root the project cache does not cover (#2377 AC4).
   @spec maybe_spawn_filter_walk(FileTreeState.t()) :: :ok
@@ -312,21 +346,45 @@ defmodule MingaEditor.Commands.FileTree do
 
   @spec start_new_entry_edit(state(), :new_file | :new_folder) :: state()
   defp start_new_entry_edit(state, type) do
-    case file_tree_state(state) do
-      %FileTreeState{tree: nil} ->
-        state
+    state |> file_tree_state() |> prepare_new_entry_edit(state, type)
+  end
 
-      %FileTreeState{tree: tree} ->
-        {index, tree} = editing_insertion_index(tree)
+  @spec prepare_new_entry_edit(FileTreeState.t(), state(), :new_file | :new_folder) :: state()
+  defp prepare_new_entry_edit(%FileTreeState{tree: nil}, state, _type), do: state
 
-        ft =
-          file_tree_state(state)
-          |> FileTreeState.start_editing(index, type)
-          |> FileTreeState.replace_tree(tree)
+  defp prepare_new_entry_edit(%FileTreeState{tree: tree}, state, type) do
+    continue_new_entry_edit(resolve_tree_entries(tree), state, type)
+  end
 
-        state = set_file_tree(state, ft)
-        sync_buffer(state)
-    end
+  @spec continue_new_entry_edit(tree_resolution(), state(), :new_file | :new_folder) :: state()
+  defp continue_new_entry_edit({:error, reason}, state, _type) do
+    update_file_tree(state, &FileTreeState.refresh_failed(&1, reason))
+  end
+
+  defp continue_new_entry_edit({:ok, tree}, state, type) do
+    {index, tree} = editing_insertion_index(tree)
+    install_new_entry_edit(resolve_tree_entries(tree), state, index, type)
+  end
+
+  @spec install_new_entry_edit(
+          tree_resolution(),
+          state(),
+          non_neg_integer(),
+          :new_file | :new_folder
+        ) :: state()
+  defp install_new_entry_edit({:error, reason}, state, _index, _type) do
+    update_file_tree(state, &FileTreeState.refresh_failed(&1, reason))
+  end
+
+  defp install_new_entry_edit({:ok, tree}, state, index, type) do
+    ft =
+      state
+      |> file_tree_state()
+      |> FileTreeState.start_editing(index, type)
+      |> FileTreeState.replace_tree(tree)
+
+    state = set_file_tree(state, ft)
+    sync_buffer(state)
   end
 
   @doc """
@@ -613,6 +671,11 @@ defmodule MingaEditor.Commands.FileTree do
 
   @spec close(state()) :: state()
   def close(state) do
+    case file_tree_state(state).tree do
+      %FileTree{} = tree -> FileTreeFreshness.unwatch_expanded_dirs(tree)
+      nil -> :ok
+    end
+
     case file_tree_state(state).buffer do
       buf when is_pid(buf) -> GenServer.stop(buf, :normal)
       _ -> :ok
@@ -831,16 +894,22 @@ defmodule MingaEditor.Commands.FileTree do
     case file_tree_state(state).tree do
       %FileTree{} = tree ->
         FileTreeFreshness.unwatch_expanded_dirs(tree)
+        new_tree = FileTree.reroot(tree, root)
 
-        new_tree =
-          tree
-          |> FileTree.reroot(root)
-          |> FileTreeFreshness.refresh_tree_git_status_from_cache(
-            EditorState.events_registry(state)
-          )
+        case resolve_tree_entries(new_tree) do
+          {:ok, new_tree} ->
+            new_tree =
+              FileTreeRefresh.with_cached_git_status(
+                new_tree,
+                EditorState.events_registry(state)
+              )
 
-        FileTreeFreshness.watch_expanded_dirs(new_tree)
-        sync_and_update(state, new_tree)
+            FileTreeFreshness.watch_expanded_dirs(new_tree)
+            sync_and_update(state, new_tree)
+
+          {:error, reason} ->
+            install_tree_error(state, new_tree, reason)
+        end
 
       nil ->
         state
@@ -909,26 +978,19 @@ defmodule MingaEditor.Commands.FileTree do
   @spec open(state()) :: state()
   defp open(state) do
     state = close_git_status_if_open(state)
-
     root = file_tree_state(state).project_root || Minga.Project.root() || File.cwd!()
     tree = FileTree.new(root)
 
-    tree =
-      FileTreeFreshness.refresh_tree_git_status_from_cache(
-        tree,
-        EditorState.events_registry(state)
-      )
+    case resolve_tree_entries(tree) do
+      {:ok, tree} ->
+        tree = FileTreeRefresh.with_cached_git_status(tree, EditorState.events_registry(state))
+        tree = reveal_active(tree, state.workspace.buffers.active)
+        FileTreeFreshness.watch_expanded_dirs(tree)
+        install_open_tree(state, tree, nil)
 
-    tree = reveal_active(tree, state.workspace.buffers.active)
-    FileTreeFreshness.watch_expanded_dirs(tree)
-    buf = BufferSync.start_buffer(tree, EditorState.options_server(state))
-
-    state
-    |> EditorState.update_file_tree(&FileTreeState.open(&1, tree, buf))
-    |> EditorState.set_keymap_scope(:file_tree)
-    |> EditorState.set_sidebar_active_id("file_tree")
-    |> Layout.invalidate()
-    |> EditorState.invalidate_all_windows()
+      {:error, reason} ->
+        install_open_tree(state, FileTree.put_entries(tree, []), reason)
+    end
   end
 
   @spec reveal_active(FileTree.t(), pid() | nil) :: FileTree.t()
@@ -943,14 +1005,61 @@ defmodule MingaEditor.Commands.FileTree do
 
   @spec sync_and_update(state(), FileTree.t()) :: state()
   defp sync_and_update(state, new_tree) do
-    FileTreeFreshness.watch_expanded_dirs(new_tree)
+    case resolve_tree_entries(new_tree) do
+      {:ok, new_tree} ->
+        FileTreeFreshness.watch_expanded_dirs(new_tree)
+        sync_tree_buffer(state, new_tree)
+        update_file_tree(state, &FileTreeState.set_tree(&1, new_tree))
 
+      {:error, reason} ->
+        install_tree_error(state, new_tree, reason)
+    end
+  end
+
+  @spec resolve_tree_entries(FileTree.t()) :: tree_resolution()
+  defp resolve_tree_entries(%FileTree{entries: entries} = tree) when is_list(entries),
+    do: {:ok, tree}
+
+  defp resolve_tree_entries(%FileTree{} = tree) do
+    case FilesystemScanner.scan(tree, nil) do
+      %FileTree{} = resolved -> {:ok, resolved}
+      {:error, {:root_unavailable, reason}} -> {:error, reason}
+    end
+  end
+
+  @spec install_open_tree(state(), FileTree.t(), File.posix() | nil) :: state()
+  defp install_open_tree(state, tree, error_reason) do
+    buf = BufferSync.start_buffer(tree, EditorState.options_server(state))
+
+    state
+    |> EditorState.update_file_tree(fn file_tree ->
+      file_tree = FileTreeState.open(file_tree, tree, buf)
+      if error_reason, do: FileTreeState.refresh_failed(file_tree, error_reason), else: file_tree
+    end)
+    |> EditorState.set_keymap_scope(:file_tree)
+    |> EditorState.set_sidebar_active_id("file_tree")
+    |> Layout.invalidate()
+    |> EditorState.invalidate_all_windows()
+  end
+
+  @spec install_tree_error(state(), FileTree.t(), File.posix()) :: state()
+  defp install_tree_error(state, tree, reason) do
+    failed_tree = FileTree.put_entries(tree, [])
+    sync_tree_buffer(state, failed_tree)
+
+    update_file_tree(state, fn file_tree ->
+      file_tree
+      |> FileTreeState.set_tree(failed_tree)
+      |> FileTreeState.refresh_failed(reason)
+    end)
+  end
+
+  @spec sync_tree_buffer(state(), FileTree.t()) :: :ok
+  defp sync_tree_buffer(state, tree) do
     case file_tree_state(state).buffer do
-      buf when is_pid(buf) -> BufferSync.sync(buf, new_tree)
+      buf when is_pid(buf) -> BufferSync.sync(buf, tree)
       _ -> :ok
     end
-
-    update_file_tree(state, &FileTreeState.set_tree(&1, new_tree))
   end
 
   # Computes the insertion index for a new file/folder.

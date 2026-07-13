@@ -1,14 +1,12 @@
 defmodule MingaEditor.Handlers.FileEventHandler do
   @moduledoc """
-  Pure handler for file and git status events.
+  Handler for file and git status events.
 
-  Extracts the `{:minga_event, :git_status_changed, ...}`,
-  `{:minga_event, :buffer_saved, ...}`, and `{:git_remote_result, ...}`
-  clauses from the Editor GenServer into pure `{state, [effect]}`
-  functions.
+  File-tree events enter their workflow directly so timer and scheduler
+  correlation stay in the Editor process. Unrelated generic editor effects are
+  still returned for the existing universal dispatcher.
   """
 
-  alias Minga.Project.FileTree
   alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
   alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
   alias MingaEditor.State, as: EditorState
@@ -18,8 +16,6 @@ defmodule MingaEditor.Handlers.FileEventHandler do
           :render
           | {:render, pos_integer()}
           | {:log_message, String.t()}
-          | {:schedule_file_tree_refresh, non_neg_integer()}
-          | {:start_file_tree_refresh, FileTree.t(), reference()}
           | {:request_code_lens}
           | {:request_inlay_hints}
           | {:save_session_deferred}
@@ -73,19 +69,6 @@ defmodule MingaEditor.Handlers.FileEventHandler do
   def handle(state, {:file_tree_filter_walk, root, filter, entries})
       when is_binary(root) and is_binary(filter) and is_list(entries) do
     handle_filter_walk_result(state, root, filter, entries)
-  end
-
-  def handle(state, :file_tree_refresh_timer) do
-    FileTreeFreshness.begin_refresh(state)
-  end
-
-  def handle(state, {:file_tree_refresh_result, %FileTree{} = refreshed_tree, token})
-      when is_reference(token) do
-    FileTreeFreshness.apply_refresh_result(state, refreshed_tree, token)
-  end
-
-  def handle(state, {:file_tree_refresh_failed, token}) when is_reference(token) do
-    FileTreeFreshness.apply_refresh_failure(state, token)
   end
 
   def handle(state, {:git_remote_result, ref, result}) when is_reference(ref) do
@@ -222,7 +205,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
   @spec handle_file_changed(EditorState.t(), String.t()) :: {EditorState.t(), [file_effect()]}
   defp handle_file_changed(state, path) do
     if FileTreeFreshness.path_under_tree?(state, path) do
-      {state, [{:schedule_file_tree_refresh, 50}]}
+      {FileTreeFreshness.request_refresh(state, 50), []}
     else
       {state, []}
     end

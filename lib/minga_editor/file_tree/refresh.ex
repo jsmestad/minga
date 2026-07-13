@@ -1,111 +1,129 @@
 defmodule MingaEditor.FileTree.Refresh do
   @moduledoc """
-  Async filesystem rescan for the open file tree (#2632).
+  Typed, bounded filesystem rescan for one file-tree root.
 
-  A burst of filesystem events debounces into one `:file_tree_refresh_timer`.
-  When that timer fires the Editor must *not* run `FileTree.refresh/1` inline:
-  the rescan does recursive `File.ls`/`File.lstat` per expanded directory and
-  would block the Editor mailbox for all that I/O on projects with many
-  expanded dirs.
-
-  Instead the Editor spawns this Task. It captures the current tree, runs the
-  filesystem rescan and the cached git-status refresh off the Editor process,
-  then sends `{:file_tree_refresh_result, refreshed_tree, token}` back. The
-  Editor applies the result with a cheap, atomic whole-tree swap and discards
-  it if the user re-rooted or closed the tree while the walk was running (the
-  `token` plus root comparison in `MingaEditor.FileTree.Freshness`).
+  The expanded root is the scheduler resource identity. One scan may run while
+  at most one follow-up waits; newer bursts coalesce into that queued request.
+  Execution, coalescing, and application remain owned by this domain effect.
   """
 
+  @behaviour MingaEditor.Effect
+
+  alias Minga.Git.Repo, as: GitRepo
+  alias Minga.Git.Repo.StatusSnapshot
   alias Minga.Project.FileTree
+  alias Minga.Project.FileTree.GitStatus
+  alias MingaEditor.Effect.Outcome
+  alias MingaEditor.Effect.Policy
+  alias MingaEditor.Effect.Request
   alias MingaEditor.FileTree.Freshness
+  alias MingaEditor.State, as: EditorState
 
-  @typedoc "Opaque token identifying one in-flight refresh; minted per spawn."
-  @type token :: reference()
+  @enforce_keys [:root, :tree, :events_registry, :scanner, :scanner_context]
+  defstruct [:root, :tree, :events_registry, :scanner, :scanner_context]
 
-  @typedoc "The result message the Editor receives when a refresh Task finishes."
-  @type result ::
-          {:file_tree_refresh_result, FileTree.t(), token()}
-          | {:file_tree_refresh_failed, token()}
+  @typedoc "Scanner module input kept as data in the scheduler request."
+  @type scanner_context :: term()
 
-  @doc """
-  Spawns a supervised Task that rescans `tree` off the calling process.
+  @type t :: %__MODULE__{
+          root: String.t(),
+          tree: FileTree.t(),
+          events_registry: Minga.Events.registry(),
+          scanner: module(),
+          scanner_context: scanner_context()
+        }
 
-  The Task runs `FileTree.refresh/1` (filesystem I/O) followed by the cached
-  git-status refresh, then sends `{:file_tree_refresh_result, refreshed_tree,
-  token}` to `reply_to`.
+  @doc "Builds a coalescing request keyed by the expanded file-tree root."
+  @spec request(FileTree.t(), Minga.Events.registry(), keyword()) :: Request.t()
+  def request(%FileTree{root: root} = tree, events_registry, opts \\ []) when is_binary(root) do
+    expanded_root = Path.expand(root)
 
-  The Task body is wrapped in `try/rescue/catch` so it *always* replies, even
-  when the filesystem walk or git-status decode raises or throws. On failure it
-  sends `{:file_tree_refresh_failed, token}` so the Editor can clear its
-  in-flight tracking and honour a coalesced refresh; the in-flight flag is never
-  left stuck (which would otherwise wedge all future refreshes, since the
-  coalescing path never spawns while one is "in flight").
+    effect = %__MODULE__{
+      root: expanded_root,
+      tree: tree,
+      events_registry: events_registry,
+      scanner: Keyword.get(opts, :scanner, MingaEditor.FileTree.Refresh.FilesystemScanner),
+      scanner_context: Keyword.get(opts, :scanner_context)
+    }
 
-  Returns `:ok` when the Task was spawned, or `{:error, reason}` when the
-  supervisor refused (e.g. max children); the caller clears in-flight so a later
-  timer can retry rather than wedging.
-  """
-  @spec start(FileTree.t(), token(), Minga.Events.registry(), pid()) :: :ok | {:error, term()}
-  def start(%FileTree{} = tree, token, events_registry, reply_to)
-      when is_reference(token) and is_pid(reply_to) do
-    case Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
-           run(tree, token, events_registry, reply_to)
-         end) do
-      {:ok, _pid} -> :ok
-      {:ok, _pid, _info} -> :ok
-      {:error, reason} -> {:error, reason}
+    Request.new(effect, {:file_tree_root, expanded_root}, Policy.coalescing(1))
+  end
+
+  @impl true
+  @spec run(t()) :: {:ok, FileTree.t()} | {:error, term()}
+  def run(%__MODULE__{} = effect) do
+    case effect.scanner.scan(effect.tree, effect.scanner_context) do
+      %FileTree{} = refreshed_tree ->
+        {:ok, with_cached_git_status(refreshed_tree, effect.events_registry)}
+
+      {:error, reason} ->
+        {:error, reason}
+
+      other ->
+        {:error, {:invalid_refresh_result, other}}
     end
   end
 
-  # Runs the rescan and ALWAYS sends a reply, converting any raise/throw/exit
-  # into a failure sentinel so the Editor's in-flight flag is always cleared.
-  #
-  # The reply is computed with NO risky work (just building a tuple) and sent
-  # BEFORE any logging. Logging a failure can itself raise (a custom exception's
-  # `message/1` callback, or the logger), so it is deferred to an isolated,
-  # self-guarding helper after the send — the terminal message is guaranteed to
-  # go out no matter what the logging does, preserving the no-wedge invariant.
-  @spec run(FileTree.t(), token(), Minga.Events.registry(), pid()) :: :ok
-  defp run(tree, token, events_registry, reply_to) do
-    {message, failure} =
-      try do
-        refreshed_tree =
-          tree
-          |> FileTree.refresh()
-          |> Freshness.refresh_tree_git_status_from_cache(events_registry)
+  @impl true
+  @spec coalesce(t(), t()) :: t()
+  def coalesce(%__MODULE__{}, %__MODULE__{} = newer), do: newer
 
-        {{:file_tree_refresh_result, refreshed_tree, token}, nil}
-      rescue
-        e -> {{:file_tree_refresh_failed, token}, {:rescue, e}}
-      catch
-        kind, reason -> {{:file_tree_refresh_failed, token}, {:catch, kind, reason}}
-      end
-
-    send(reply_to, message)
-    log_failure(failure)
-    :ok
+  @impl true
+  @spec apply(EditorState.t(), Outcome.t()) :: {EditorState.t(), Outcome.t()}
+  def apply(%EditorState{} = state, %Outcome{} = outcome) do
+    Freshness.apply_refresh_outcome(state, outcome)
   end
 
-  # Logs a failure after the reply is already sent. Self-guarded so a raising
-  # `Exception.message/1` or logger can never propagate out of `run/4`.
-  @spec log_failure(nil | {:rescue, Exception.t()} | {:catch, atom(), term()}) :: :ok
-  defp log_failure(nil), do: :ok
+  @impl true
+  @spec render?(Outcome.t()) :: boolean()
+  def render?(%Outcome{}), do: false
 
-  defp log_failure({:rescue, exception}) do
-    Minga.Log.warning(:editor, "File tree refresh failed: #{Exception.message(exception)}")
-    :ok
-  rescue
-    _ -> :ok
+  @doc "Adds cached git badges without performing a synchronous git status query."
+  @spec with_cached_git_status(FileTree.t(), Minga.Events.registry()) :: FileTree.t()
+  def with_cached_git_status(%FileTree{} = tree, events_registry) do
+    case GitRepo.cached_status_for_path(tree.root) do
+      {:ok, %StatusSnapshot{entry_base_path: entry_base_path, entries: entries}} ->
+        status = GitStatus.from_entries(entries, entry_base_path, tree.root)
+        FileTree.replace_git_status(tree, status)
+
+      :not_tracked ->
+        ensure_repo_started(tree.root, events_registry)
+        tree
+    end
   catch
-    _, _ -> :ok
+    :exit, _reason -> tree
   end
 
-  defp log_failure({:catch, kind, reason}) do
-    Minga.Log.warning(:editor, "File tree refresh #{kind}: #{inspect(reason)}")
-    :ok
-  rescue
-    _ -> :ok
+  @spec ensure_repo_started(String.t(), Minga.Events.registry()) :: :ok
+  defp ensure_repo_started(root, events_registry) when is_binary(root) do
+    case Minga.Git.root_for(root) do
+      {:ok, git_root} -> start_repo(git_root, root, events_registry)
+      :not_git -> :ok
+    end
   catch
-    _, _ -> :ok
+    :exit, reason ->
+      Minga.Log.warning(
+        :editor,
+        "File tree git repo lookup failed for #{root}: #{inspect(reason)}"
+      )
+
+      :ok
+  end
+
+  @spec start_repo(String.t(), String.t(), Minga.Events.registry()) :: :ok
+  defp start_repo(git_root, root, events_registry) do
+    case GitRepo.ensure_started(git_root, root, events_registry) do
+      {:ok, _pid} ->
+        :ok
+
+      {:error, {:already_started, _pid}} ->
+        :ok
+
+      {:error, reason} ->
+        Minga.Log.warning(
+          :editor,
+          "File tree git repo start failed for #{root}: #{inspect(reason)}"
+        )
+    end
   end
 end

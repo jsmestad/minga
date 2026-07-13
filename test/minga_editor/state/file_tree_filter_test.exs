@@ -27,8 +27,9 @@ defmodule MingaEditor.State.FileTreeFilterTest do
   end
 
   test "an empty filter never needs an async walk" do
-    ft = open_tree("/nonexistent_root") |> FileTreeState.update_filter("")
+    ft = open_tree("/nonexistent_root") |> FileTreeState.start_filtering()
 
+    assert ft.tree.filter == ""
     refute FileTreeState.needs_filter_walk?(ft)
   end
 

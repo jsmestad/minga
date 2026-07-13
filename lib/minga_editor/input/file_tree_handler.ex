@@ -376,9 +376,7 @@ defmodule MingaEditor.Input.FileTreeHandler do
     set_file_tree(state, FileTreeState.accept_filter(file_tree_state(state)))
   end
 
-  defp handle_filter_key(state, @escape, 0) do
-    set_file_tree(state, FileTreeState.clear_filter(file_tree_state(state)))
-  end
+  defp handle_filter_key(state, @escape, 0), do: Commands.FileTree.clear_filter(state)
 
   defp handle_filter_key(state, ??, 0), do: Commands.FileTree.toggle_help(state)
 
@@ -386,7 +384,7 @@ defmodule MingaEditor.Input.FileTreeHandler do
     text = current_filter_text(state)
 
     if text == "" do
-      set_file_tree(state, FileTreeState.clear_filter(file_tree_state(state)))
+      Commands.FileTree.clear_filter(state)
     else
       new_text = String.slice(text, 0, max(String.length(text) - 1, 0))
       apply_filter_update(state, new_text)
@@ -414,6 +412,8 @@ defmodule MingaEditor.Input.FileTreeHandler do
   # only spawned for other roots. The walk result arrives as a
   # {:file_tree_filter_walk, ...} message handled by the editor.
   @spec apply_filter_update(EditorState.t(), String.t()) :: EditorState.t()
+  defp apply_filter_update(state, ""), do: Commands.FileTree.reset_filter_query(state)
+
   defp apply_filter_update(state, filter_text) do
     file_tree = FileTreeState.update_filter(file_tree_state(state), filter_text)
     maybe_spawn_filter_walk(file_tree)

@@ -60,8 +60,6 @@ defmodule MingaEditor.Handlers.EffectHandler do
   * `{:request_inlay_hints}` — request fresh inlay hints from LSP
   * `:render_now` — render immediately after a handler updates state
   * `{:save_session_deferred}` — send :save_session to self
-  * `{:schedule_file_tree_refresh, delay}` — debounce one filesystem tree refresh
-  * `{:start_file_tree_refresh, tree, token}` — spawn the async tree rescan Task
   * `{:handle_git_remote_result, ref, result}` — process git remote result
   """
   @type effect ::
@@ -99,8 +97,6 @@ defmodule MingaEditor.Handlers.EffectHandler do
           | {:request_code_lens}
           | {:request_inlay_hints}
           | {:save_session_deferred}
-          | {:schedule_file_tree_refresh, non_neg_integer()}
-          | {:start_file_tree_refresh, Minga.Project.FileTree.t(), reference()}
           | {:handle_git_remote_result, reference(), term()}
 
   @doc """
@@ -209,33 +205,6 @@ defmodule MingaEditor.Handlers.EffectHandler do
     end
 
     state
-  end
-
-  defp apply_effect(state, {:schedule_file_tree_refresh, delay}) when is_integer(delay) do
-    if MingaEditor.FileTree.Freshness.refresh_scheduled?(state) do
-      state
-    else
-      ref = Process.send_after(self(), :file_tree_refresh_timer, delay)
-      MingaEditor.FileTree.Freshness.schedule_refresh(state, ref)
-    end
-  end
-
-  defp apply_effect(state, {:start_file_tree_refresh, tree, token}) when is_reference(token) do
-    case MingaEditor.FileTree.Refresh.start(
-           tree,
-           token,
-           EditorState.events_registry(state),
-           self()
-         ) do
-      :ok ->
-        state
-
-      {:error, reason} ->
-        # The supervisor refused the Task (e.g. max children). Clear in-flight so
-        # a later timer can retry instead of wedging the refresh loop (#2632).
-        Minga.Log.warning(:editor, "File tree refresh spawn failed: #{inspect(reason)}")
-        MingaEditor.FileTree.Freshness.cancel_inflight_refresh(state, token)
-    end
   end
 
   defp apply_effect(state, {:conceal_spans, pid, spans}) when is_pid(pid) do

@@ -724,25 +724,9 @@ defmodule MingaEditor do
     {:noreply, RenderHandler.handle_debounced_render(state)}
   end
 
-  # Debounced file-tree refresh timer fired — spawn an off-process rescan (#2632)
-  # so the recursive filesystem walk never blocks the Editor mailbox.
-  def handle_info(:file_tree_refresh_timer, state) do
-    {state, effects} = FileEventHandler.handle(state, :file_tree_refresh_timer)
-    {:noreply, EffectHandler.apply_effects(state, effects)}
-  end
-
-  # Async file-tree rescan finished — apply the refreshed tree with a cheap,
-  # atomic whole-tree swap, discarding it if the tree was re-rooted or closed.
-  def handle_info({:file_tree_refresh_result, _refreshed_tree, _token} = msg, state) do
-    {state, effects} = FileEventHandler.handle(state, msg)
-    {:noreply, EffectHandler.apply_effects(state, effects)}
-  end
-
-  # Async file-tree rescan crashed — clear in-flight tracking and honour a
-  # coalesced refresh so the refresh loop never wedges (#2632).
-  def handle_info({:file_tree_refresh_failed, _token} = msg, state) do
-    {state, effects} = FileEventHandler.handle(state, msg)
-    {:noreply, EffectHandler.apply_effects(state, effects)}
+  # Correlated file-tree debounce timers enter the domain workflow directly.
+  def handle_info({:file_tree_refresh_timer, token}, state) when is_reference(token) do
+    {:noreply, MingaEditor.FileTree.Freshness.begin_refresh(state, token)}
   end
 
   # Renderer.Server writeback after each async frame completes.
@@ -967,8 +951,8 @@ defmodule MingaEditor do
   # Slow-effect lifecycle and terminal candidates dispatch through the typed
   # request's domain handler. The Editor has no resource- or lane-specific switch.
   def handle_info({:effect_lifecycle, %Outcome{} = outcome}, state) do
-    {new_state, _outcome} = apply_effect_outcome(state, outcome)
-    {:noreply, Renderer.render_or_async(new_state)}
+    {new_state, final_outcome} = apply_effect_outcome(state, outcome)
+    {:noreply, maybe_render_effect_outcome(new_state, final_outcome)}
   end
 
   def handle_info({:effect_result, scheduler, %Outcome{} = outcome}, state) do
@@ -976,7 +960,7 @@ defmodule MingaEditor do
       :ok ->
         {new_state, final_outcome} = apply_effect_outcome(state, outcome)
         EffectScheduler.finalize(scheduler, final_outcome)
-        {:noreply, Renderer.render_or_async(new_state)}
+        {:noreply, maybe_render_effect_outcome(new_state, final_outcome)}
 
       {:error, :not_pending} ->
         {:noreply, state}
@@ -990,6 +974,11 @@ defmodule MingaEditor do
   @spec apply_effect_outcome(state(), Outcome.t()) :: {state(), Outcome.t()}
   defp apply_effect_outcome(state, %Outcome{request: %Request{handler: handler}} = outcome) do
     handler.apply(state, outcome)
+  end
+
+  @spec maybe_render_effect_outcome(state(), Outcome.t()) :: state()
+  defp maybe_render_effect_outcome(state, %Outcome{request: %Request{handler: handler}} = outcome) do
+    if handler.render?(outcome), do: Renderer.render_or_async(state), else: state
   end
 
   # Identifies the GUI action for the dispatch telemetry span (issue #2357 AC7),

@@ -84,6 +84,10 @@ defmodule MingaEditor.Effects.ExternalFormat do
     {EditorState.set_status(state, "Buffer changed, format skipped"), outcome}
   end
 
+  @impl true
+  @spec render?(Outcome.t()) :: boolean()
+  def render?(%Outcome{}), do: true
+
   @spec apply_formatted_content(EditorState.t(), Outcome.t(), ExternalFormatResult.t()) ::
           {EditorState.t(), Outcome.t()}
   defp apply_formatted_content(state, outcome, result) do

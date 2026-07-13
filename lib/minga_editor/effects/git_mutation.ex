@@ -108,6 +108,10 @@ defmodule MingaEditor.Effects.GitMutation do
     {EditorState.set_status(state, "Git action skipped"), outcome}
   end
 
+  @impl true
+  @spec render?(Outcome.t()) :: boolean()
+  def render?(%Outcome{}), do: true
+
   @spec perform(t()) :: :ok | {:ok, String.t()} | {:error, term()}
   defp perform(%__MODULE__{operation: :stage, git_root: root, path: path}) do
     Minga.Git.stage(root, path)

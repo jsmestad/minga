@@ -7,20 +7,18 @@ defmodule MingaEditor.FileTree.Freshness do
 
   alias Minga.Buffer
   alias Minga.LSP.SyncServer
-  alias Minga.Git.Repo, as: GitRepo
-  alias Minga.Git.Repo.StatusSnapshot
   alias Minga.Project.FileTree
   alias Minga.Project.FileTree.BufferSync
   alias Minga.Project.FileTree.GitStatus
+  alias MingaEditor.Effect.Outcome
+  alias MingaEditor.Effect.Request
+  alias MingaEditor.EffectScheduler
+  alias MingaEditor.FileTree.Refresh
+  alias MingaEditor.FileTree.Refresh.FilesystemScanner
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
 
   @type state :: EditorState.t()
-
-  @typedoc "Effects emitted by the async refresh orchestration (interpreted by EffectHandler)."
-  @type effect ::
-          {:render, pos_integer()}
-          | {:start_file_tree_refresh, FileTree.t(), reference()}
 
   @doc "Returns true when the file tree is open."
   @spec open?(state()) :: boolean()
@@ -61,188 +59,143 @@ defmodule MingaEditor.FileTree.Freshness do
     :exit, _ -> false
   end
 
-  @doc "Marks a debounced filesystem refresh as scheduled."
-  @spec schedule_refresh(state(), reference()) :: state()
-  def schedule_refresh(state, ref) when is_reference(ref) do
-    set_file_tree(state, FileTreeState.schedule_refresh(file_tree_state(state), ref))
+  @doc "Debounces one refresh request in the Editor mailbox."
+  @spec request_refresh(state(), non_neg_integer()) :: state()
+  def request_refresh(state, delay_ms) when is_integer(delay_ms) and delay_ms >= 0 do
+    token = make_ref()
+    file_tree = file_tree_state(state)
+
+    case FileTreeState.request_refresh_debounce(file_tree, token) do
+      {:already_scheduled, file_tree} ->
+        set_file_tree(state, file_tree)
+
+      {:scheduled, file_tree} ->
+        Process.send_after(self(), {:file_tree_refresh_timer, token}, delay_ms)
+        set_file_tree(state, file_tree)
+    end
   end
 
-  @doc "Returns true when a filesystem refresh timer is already pending."
-  @spec refresh_scheduled?(state()) :: boolean()
-  def refresh_scheduled?(state) do
+  @doc "Consumes a correlated debounce timer and admits a typed refresh request."
+  @spec begin_refresh(state(), reference()) :: state()
+  def begin_refresh(state, timer_token) when is_reference(timer_token) do
+    case FileTreeState.refresh_debounce_elapsed(file_tree_state(state), timer_token) do
+      {:ready, tree, file_tree} ->
+        state
+        |> set_file_tree(file_tree)
+        |> schedule_refresh(tree)
+
+      {_status, file_tree} ->
+        set_file_tree(state, file_tree)
+    end
+  end
+
+  @doc "Applies one scheduler lifecycle or terminal outcome for the file-tree domain."
+  @spec apply_refresh_outcome(state(), Outcome.t()) :: {state(), Outcome.t()}
+  def apply_refresh_outcome(
+        state,
+        %Outcome{
+          status: :completed,
+          request: %Request{effect: %Refresh{} = effect},
+          result: %FileTree{} = tree
+        } =
+          outcome
+      ) do
+    apply_completed_refresh(state, effect, tree, outcome)
+  end
+
+  def apply_refresh_outcome(
+        state,
+        %Outcome{
+          status: :failed,
+          request: %Request{effect: %Refresh{} = effect} = request,
+          reason: {:root_unavailable, reason}
+        } = outcome
+      ) do
+    {finish_failed_refresh(state, effect, request.id, reason), outcome}
+  end
+
+  def apply_refresh_outcome(
+        state,
+        %Outcome{status: status, request: %Request{effect: %Refresh{} = effect} = request} =
+          outcome
+      )
+      when status in [:failed, :canceled, :stale] do
+    {finish_terminal_refresh(state, effect, request.id), outcome}
+  end
+
+  def apply_refresh_outcome(state, %Outcome{} = outcome), do: {state, outcome}
+
+  @spec schedule_refresh(state(), FileTree.t()) :: state()
+  defp schedule_refresh(%EditorState{effect_scheduler: nil} = state, _tree) do
+    Minga.Log.warning(:editor, "File tree refresh scheduler unavailable")
     state
-    |> file_tree_state()
-    |> FileTreeState.refresh_scheduled?()
   end
 
-  @doc """
-  Starts an async filesystem rescan after the debounce timer fires (#2632).
+  defp schedule_refresh(state, %FileTree{} = tree) do
+    request = Refresh.request(tree, EditorState.events_registry(state))
 
-  The heavy recursive `File.ls`/`File.lstat` walk must not run on the Editor
-  GenServer. This clears the debounce timer and, unless a rescan is already in
-  flight, mints a token and emits a `{:start_file_tree_refresh, tree, token}`
-  effect so `EffectHandler` can spawn the work off-process. The Task replies with
-  `{:file_tree_refresh_result, refreshed_tree, token}`, handled by
-  `apply_refresh_result/3`.
+    case EffectScheduler.schedule(state.effect_scheduler, request) do
+      {:ok, _request_id, _disposition} ->
+        file_tree =
+          state
+          |> file_tree_state()
+          |> FileTreeState.track_refresh_request(tree.root, request.id)
 
-  If a rescan is already in flight, the request is coalesced into a single
-  follow-up (`refresh_pending?`) instead of piling up Tasks (AC3): the in-flight
-  walk finishes, then exactly one fresh rescan starts.
-  """
-  @spec begin_refresh(state()) :: {state(), [effect()]}
-  def begin_refresh(state) do
-    state |> file_tree_state() |> begin_refresh(state)
+        set_file_tree(state, file_tree)
+
+      {:error, reason} ->
+        Minga.Log.warning(:editor, "File tree refresh not scheduled: #{inspect(reason)}")
+        state
+    end
   end
 
-  # No open tree: just drop the debounce timer.
-  @spec begin_refresh(FileTreeState.t(), state()) :: {state(), [effect()]}
-  defp begin_refresh(%FileTreeState{tree: nil} = file_tree, state) do
-    {set_file_tree(state, FileTreeState.clear_refresh(file_tree)), []}
+  @spec apply_completed_refresh(state(), Refresh.t(), FileTree.t(), Outcome.t()) ::
+          {state(), Outcome.t()}
+  defp apply_completed_refresh(state, effect, refreshed_tree, outcome) do
+    file_tree = file_tree_state(state)
+
+    case FileTreeState.accept_refresh_result(
+           file_tree,
+           effect.root,
+           outcome.request.id,
+           refreshed_tree
+         ) do
+      {:accepted, file_tree} ->
+        state = set_file_tree(state, file_tree)
+        watch_expanded_dirs(refreshed_tree)
+
+        state =
+          state
+          |> sync_buffer(refreshed_tree)
+          |> MingaEditor.schedule_render(16)
+
+        {state, outcome}
+
+      {reason, file_tree} ->
+        {set_file_tree(state, file_tree), Outcome.stale(outcome, reason)}
+    end
   end
 
-  # A rescan is already running: coalesce instead of spawning another Task.
-  defp begin_refresh(%FileTreeState{tree: %FileTree{}, refresh_inflight: ref} = file_tree, state)
-       when is_reference(ref) do
-    file_tree =
-      file_tree
-      |> FileTreeState.clear_refresh()
-      |> FileTreeState.mark_refresh_pending()
-
-    {set_file_tree(state, file_tree), []}
-  end
-
-  # Idle: mint a token, mark in-flight, and emit the spawn effect.
-  defp begin_refresh(%FileTreeState{tree: %FileTree{} = tree} = file_tree, state) do
-    token = make_ref()
-    file_tree = FileTreeState.begin_inflight_refresh(file_tree, token)
-    {set_file_tree(state, file_tree), [{:start_file_tree_refresh, tree, token}]}
-  end
-
-  @doc """
-  Applies a finished async rescan, swapping the whole tree atomically (#2632 AC4).
-
-  The result is discarded when stale: the token no longer matches the in-flight
-  refresh, or the user re-rooted/closed the tree while the walk ran, so the
-  refreshed tree's root no longer matches the live tree (AC3/AC4 staleness
-  guard). After applying or dropping, a coalesced `refresh_pending?` request, if
-  any, starts exactly one fresh rescan.
-  """
-  @spec apply_refresh_result(state(), FileTree.t(), reference()) :: {state(), [effect()]}
-  def apply_refresh_result(state, %FileTree{} = refreshed_tree, token) when is_reference(token) do
-    state |> file_tree_state() |> apply_refresh_result(state, refreshed_tree, token)
-  end
-
-  # Fresh: the in-flight token matches and the tree is still rooted where the
-  # walk ran. Swap the whole tree in one cheap assignment (no FS walk here).
-  @spec apply_refresh_result(FileTreeState.t(), state(), FileTree.t(), reference()) ::
-          {state(), [effect()]}
-  defp apply_refresh_result(
-         %FileTreeState{refresh_inflight: token, tree: %FileTree{root: root}} = file_tree,
-         state,
-         %FileTree{root: root} = refreshed_tree,
-         token
-       ) do
-    watch_expanded_dirs(refreshed_tree)
-
-    file_tree = FileTreeState.replace_tree(file_tree, refreshed_tree)
-
-    state =
-      state
-      |> set_file_tree(file_tree)
-      |> sync_buffer(refreshed_tree)
-
-    finish_refresh(state, refreshed_tree, [{:render, 16}])
-  end
-
-  # Current in-flight refresh completed, but the tree was re-rooted/closed while
-  # the walk ran so its root no longer matches. Drop the tree, but still finish
-  # the in-flight bookkeeping (clear in-flight, honour a coalesced refresh).
-  defp apply_refresh_result(
-         %FileTreeState{refresh_inflight: token},
-         state,
-         _refreshed_tree,
-         token
-       ) do
-    finish_refresh(state, current_tree(state), [])
-  end
-
-  # Superseded result: the token is no longer the current in-flight refresh
-  # (a newer refresh replaced it). Ignore it without touching in-flight tracking.
-  defp apply_refresh_result(%FileTreeState{}, state, _refreshed_tree, _token) do
-    {state, []}
-  end
-
-  @doc """
-  Handles a failed async rescan (#2632): the Task raised/threw or could not
-  finish, so no tree is applied. Clears in-flight tracking and honours a
-  coalesced refresh so the refresh loop never wedges. Ignored when the token is
-  no longer the current in-flight refresh.
-  """
-  @spec apply_refresh_failure(state(), reference()) :: {state(), [effect()]}
-  def apply_refresh_failure(state, token) when is_reference(token) do
-    state |> file_tree_state() |> apply_refresh_failure(state, token)
-  end
-
-  @spec apply_refresh_failure(FileTreeState.t(), state(), reference()) :: {state(), [effect()]}
-  defp apply_refresh_failure(%FileTreeState{refresh_inflight: token}, state, token) do
-    finish_refresh(state, current_tree(state), [])
-  end
-
-  defp apply_refresh_failure(%FileTreeState{}, state, _token) do
-    {state, []}
-  end
-
-  @doc """
-  Clears in-flight tracking when a refresh Task could not be spawned (#2632), so
-  a later timer can retry instead of wedging. No-op when the token is not the
-  current in-flight refresh.
-  """
-  @spec cancel_inflight_refresh(state(), reference()) :: state()
-  def cancel_inflight_refresh(state, token) when is_reference(token) do
-    state |> file_tree_state() |> cancel_inflight_refresh(state, token)
-  end
-
-  @spec cancel_inflight_refresh(FileTreeState.t(), state(), reference()) :: state()
-  defp cancel_inflight_refresh(%FileTreeState{refresh_inflight: token} = file_tree, state, token) do
-    set_file_tree(state, FileTreeState.clear_inflight_refresh(file_tree))
-  end
-
-  defp cancel_inflight_refresh(%FileTreeState{}, state, _token), do: state
-
-  # Clears in-flight tracking and, when a refresh was coalesced while the Task
-  # ran, starts exactly one fresh rescan of the current tree (#2632 AC3).
-  @spec finish_refresh(state(), FileTree.t() | nil, [effect()]) :: {state(), [effect()]}
-  defp finish_refresh(state, tree, effects) do
-    state |> file_tree_state() |> finish_refresh(state, tree, effects)
-  end
-
-  @spec finish_refresh(FileTreeState.t(), state(), FileTree.t() | nil, [effect()]) ::
-          {state(), [effect()]}
-  defp finish_refresh(%FileTreeState{refresh_pending?: true}, state, %FileTree{} = tree, effects) do
-    token = make_ref()
-
-    file_tree =
+  @spec finish_terminal_refresh(state(), Refresh.t(), reference()) :: state()
+  defp finish_terminal_refresh(state, effect, request_token) do
+    {_status, file_tree} =
       state
       |> file_tree_state()
-      |> FileTreeState.begin_inflight_refresh(token)
+      |> FileTreeState.finish_refresh(effect.root, request_token)
 
-    {set_file_tree(state, file_tree), [{:start_file_tree_refresh, tree, token} | effects]}
+    set_file_tree(state, file_tree)
   end
 
-  defp finish_refresh(%FileTreeState{}, state, _tree, effects) do
-    file_tree =
-      state
-      |> file_tree_state()
-      |> FileTreeState.clear_inflight_refresh()
+  @spec finish_failed_refresh(state(), Refresh.t(), reference(), term()) :: state()
+  defp finish_failed_refresh(state, effect, request_token, reason) do
+    case FileTreeState.finish_refresh(file_tree_state(state), effect.root, request_token) do
+      {:current, file_tree} ->
+        state
+        |> set_file_tree(FileTreeState.refresh_failed(file_tree, reason))
+        |> MingaEditor.schedule_render(16)
 
-    {set_file_tree(state, file_tree), effects}
-  end
-
-  @spec current_tree(state()) :: FileTree.t() | nil
-  defp current_tree(state) do
-    case file_tree_state(state) do
-      %FileTreeState{tree: %FileTree{} = tree} -> tree
-      %FileTreeState{} -> nil
+      {_status, file_tree} ->
+        set_file_tree(state, file_tree)
     end
   end
 
@@ -269,25 +222,6 @@ defmodule MingaEditor.FileTree.Freshness do
   end
 
   @doc "Refreshes tree git badges from the cached Git.Repo snapshot without shelling out to git."
-  @spec refresh_tree_git_status_from_cache(FileTree.t(), Minga.Events.registry()) :: FileTree.t()
-  def refresh_tree_git_status_from_cache(
-        %FileTree{} = tree,
-        events_registry \\ Minga.Events.default_registry()
-      ) do
-    case GitRepo.cached_status_for_path(tree.root) do
-      {:ok, %StatusSnapshot{entry_base_path: entry_base_path, entries: entries}} ->
-        status = GitStatus.from_entries(entries, entry_base_path, tree.root)
-        FileTree.replace_git_status(tree, status)
-
-      :not_tracked ->
-        ensure_repo_started(tree.root, events_registry)
-        tree
-    end
-  catch
-    :exit, _ -> tree
-  end
-
-  @doc "Refreshes tree git badges from the cached Git.Repo snapshot without shelling out to git."
   @spec refresh_git_status_from_cache(state()) :: state()
   def refresh_git_status_from_cache(state) do
     case file_tree_state(state) do
@@ -295,8 +229,7 @@ defmodule MingaEditor.FileTree.Freshness do
         state
 
       %FileTreeState{tree: %FileTree{} = tree} = file_tree ->
-        updated_tree =
-          refresh_tree_git_status_from_cache(tree, EditorState.events_registry(state))
+        updated_tree = Refresh.with_cached_git_status(tree, EditorState.events_registry(state))
 
         file_tree = FileTreeState.replace_tree(file_tree, updated_tree)
 
@@ -321,22 +254,37 @@ defmodule MingaEditor.FileTree.Freshness do
 
       %FileTree{} = old_tree ->
         unwatch_expanded_dirs(old_tree)
+        new_tree = FileTree.new(expanded_root, width: old_tree.width)
 
-        new_tree =
-          expanded_root
-          |> FileTree.new(width: old_tree.width)
-          |> refresh_tree_git_status_from_cache(EditorState.events_registry(state))
+        case FilesystemScanner.scan(new_tree, nil) do
+          %FileTree{} = new_tree ->
+            new_tree =
+              Refresh.with_cached_git_status(new_tree, EditorState.events_registry(state))
 
-        watch_expanded_dirs(new_tree)
+            watch_expanded_dirs(new_tree)
 
-        file_tree =
-          file_tree
-          |> FileTreeState.set_project_root(expanded_root)
-          |> FileTreeState.replace_tree(new_tree)
+            file_tree =
+              file_tree
+              |> FileTreeState.set_project_root(expanded_root)
+              |> FileTreeState.replace_tree(new_tree)
 
-        state
-        |> set_file_tree(file_tree)
-        |> sync_buffer(new_tree)
+            state
+            |> set_file_tree(file_tree)
+            |> sync_buffer(new_tree)
+
+          {:error, {:root_unavailable, reason}} ->
+            failed_tree = FileTree.put_entries(new_tree, [])
+
+            file_tree =
+              file_tree
+              |> FileTreeState.set_project_root(expanded_root)
+              |> FileTreeState.replace_tree(failed_tree)
+              |> FileTreeState.refresh_failed(reason)
+
+            state
+            |> set_file_tree(file_tree)
+            |> sync_buffer(failed_tree)
+        end
 
       nil ->
         set_file_tree(state, FileTreeState.set_project_root(file_tree, expanded_root))
@@ -364,37 +312,6 @@ defmodule MingaEditor.FileTree.Freshness do
   @spec unwatch_expanded_dirs(FileTree.t()) :: :ok
   def unwatch_expanded_dirs(%FileTree{root: root}) do
     safe_unwatch_directory_tree(root)
-  end
-
-  @spec ensure_repo_started(String.t(), Minga.Events.registry()) :: :ok
-  defp ensure_repo_started(root, events_registry) when is_binary(root) do
-    case Minga.Git.root_for(root) do
-      {:ok, git_root} ->
-        case GitRepo.ensure_started(git_root, root, events_registry) do
-          {:ok, _pid} ->
-            :ok
-
-          {:error, {:already_started, _pid}} ->
-            :ok
-
-          {:error, reason} ->
-            Minga.Log.warning(
-              :editor,
-              "File tree git repo start failed for #{root}: #{inspect(reason)}"
-            )
-        end
-
-      :not_git ->
-        :ok
-    end
-  catch
-    :exit, reason ->
-      Minga.Log.warning(
-        :editor,
-        "File tree git repo lookup failed for #{root}: #{inspect(reason)}"
-      )
-
-      :ok
   end
 
   @spec sync_buffer(state(), FileTree.t()) :: state()

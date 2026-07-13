@@ -73,6 +73,22 @@ defmodule MingaEditor.FileTree.FeatureTest do
     assert %{id: "file_tree", visible?: false} = Sidebar.get(table, "file_tree")
   end
 
+  test "opening an unavailable project root exposes an error instead of an empty tree", %{
+    sidebar_registry: table
+  } do
+    missing_root =
+      Path.join(System.tmp_dir!(), "minga-missing-tree-#{System.unique_integer([:positive])}")
+
+    state = base_state(cols: 80, rows: 24, sidebar_registry: table)
+    state = EditorState.set_file_tree(state, %FileTreeState{project_root: missing_root})
+    state = MingaEditor.Commands.FileTree.toggle(state)
+    file_tree = EditorState.file_tree_state(state)
+
+    assert file_tree.tree.root == Path.expand(missing_root)
+    assert {:error, reason} = FileTreeState.status(file_tree)
+    assert reason != ""
+  end
+
   test "dropping FileTree feature state is safe and toggle recreates it", %{
     sidebar_registry: table
   } do

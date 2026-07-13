@@ -54,6 +54,10 @@ defmodule Minga.Test.EffectProbe do
     {state, outcome}
   end
 
+  @impl true
+  @spec render?(Outcome.t()) :: boolean()
+  def render?(%Outcome{}), do: false
+
   @spec perform(t()) :: {:ok, term()} | {:error, term()}
   defp perform(%__MODULE__{action: :wait} = effect) do
     receive do
