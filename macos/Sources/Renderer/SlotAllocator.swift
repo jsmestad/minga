@@ -53,7 +53,7 @@ struct AtlasKey: Hashable, CustomStringConvertible {
 }
 
 /// Metadata for one slot in the atlas.
-struct AtlasSlot {
+struct AtlasSlot: Equatable {
     var contentHash: Int = 0
     var pixelWidth: Int = 0
     var lastWrittenFrame: UInt64 = 0
@@ -79,7 +79,7 @@ enum LookupResult: Equatable {
     case full
 }
 
-struct SlotAllocator {
+struct SlotAllocator: Equatable {
     /// Per-slot metadata.
     private var slots: [AtlasSlot] = []
 

@@ -28,6 +28,7 @@ defmodule Mix.Tasks.Swift.Harness do
     "macos/Sources/Protocol/FrameResourcePolicy.swift",
     "macos/Sources/Renderer/WindowContent.swift",
     "macos/Sources/Renderer/ResidentRowStore.swift",
+    "macos/Sources/Renderer/ResidentRenderPreparation.swift",
     "macos/Sources/Protocol/AgentSurfaceTypes.swift",
     "macos/Sources/Protocol/LatencyRecorder.swift",
     "macos/Sources/Protocol/RenderPerformanceGate.swift",

@@ -48,6 +48,24 @@ struct RendererResidentSliceTests {
         let largeDemand = CoreTextMetalRenderer.atlasSlotDemand(frameState: largeFrame, windowContents: [1: large])
         #expect(smallDemand == largeDemand)
         #expect(largeDemand < 200)
+
+        let prepared = ResidentRenderPreparation.prepare(
+            content: large, fallbackVisibleRows: 40,
+            overscanRows: RendererSignposts.configuredOverscanRows,
+            scrollLeft: 0, viewportCols: 80
+        )
+        let nativeDemand = try NativeRenderDemand.checked(
+            textureWidth: 640, slotHeight: 20, atlasSlots: largeDemand,
+            lineInstances: prepared.commands.count, lineStride: MemoryLayout<LineGPU>.stride,
+            quadInstances: largeDemand * 4, quadStride: MemoryLayout<QuadGPU>.stride,
+            quadBufferCount: 3, policy: .default,
+            deviceTextureWidth: 16_384, deviceTextureHeight: 16_384,
+            deviceMaxBufferLength: 1_073_741_824
+        )
+        #expect(prepared.commands.count == 44)
+        #expect(nativeDemand.atlasSlots == largeDemand)
+        #expect(nativeDemand.textureHeight < 16_384)
+        #expect(nativeDemand.aggregateDrawBufferBytes < FrameResourcePolicy.NativeRendererLimits.default.aggregateDrawBufferBytes)
     }
 
     @Test("idle and overlay-only frames report zero reset and reference work")

@@ -39,6 +39,10 @@ final class EditorNSView: MTKView {
     /// CoreText-based renderer.
     let coreTextRenderer: CoreTextMetalRenderer
 
+    /// Narrow drawable acquisition seam. Production leaves this nil and uses
+    /// MTKView.currentDrawable; tests may inject nil without retaining a drawable.
+    var drawableProvider: (() -> CAMetalDrawable?)?
+
     /// Font manager for per-span font family support.
     let fontManager: FontManager
 
@@ -231,8 +235,10 @@ final class EditorNSView: MTKView {
         isPaused = true
         enableSetNeedsDisplay = true
 
-        // Standard Metal layer config.
+        // The renderer copies a completed offscreen candidate into the drawable
+        // only after the candidate render succeeds, so drawable blits must be enabled.
         colorPixelFormat = .bgra8Unorm_srgb
+        framebufferOnly = false
         layer?.isOpaque = true
         (layer as? CAMetalLayer)?.maximumDrawableCount = 3
 
@@ -530,14 +536,10 @@ final class EditorNSView: MTKView {
 
     /// Called by MTKView's display link at vsync when needsDisplay is true.
     override func draw(_ dirtyRect: NSRect) {
-        // Fail before currentDrawable can vend a retained surface and before an input
-        // sequence is claimed. In particular, an occluded drawable is not presentation.
+        // Reject known non-presentable states before claiming an input sequence.
+        // The renderer acquires a drawable only after its offscreen candidate completes.
         if let reason = presentationPreflightDiscardReason() {
             dispatcher.discardPendingPresentation(reason: reason)
-            return
-        }
-        guard let drawable = currentDrawable else {
-            dispatcher.discardPendingPresentation(reason: .nilDrawable)
             return
         }
         let scale = Float(window?.backingScaleFactor ?? 2.0)
@@ -580,7 +582,14 @@ final class EditorNSView: MTKView {
                                 isMouseInGutter: validMouseInGutter,
                                 gutterHoverWindowId: validGutterHoverWindowId,
                                 gutterHoverRow: validGutterHoverRow,
-                                drawable: drawable, viewportSize: drawableSize,
+                                drawableProvider: { [weak self] in
+                                    guard let self else { return nil }
+                                    if let drawableProvider = self.drawableProvider {
+                                        return drawableProvider()
+                                    }
+                                    return self.currentDrawable
+                                },
+                                viewportSize: drawableSize,
                                 contentScale: scale,
                                 scrollOffset: SIMD2<Float>(
                                     Float(localScrollPresentation?.offset.x ?? 0),

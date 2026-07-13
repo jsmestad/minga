@@ -17,6 +17,20 @@ import Metal
 import AppKit
 
 /// Renders `GUIWindowContent` rows into cached Metal line textures.
+/// Stable semantic/cache state used by renderer transaction tests.
+struct WindowContentCacheSnapshot: Equatable {
+    struct Entry: Equatable {
+        let texture: ObjectIdentifier
+        let contentHash: Int
+        let lastUsedFrame: UInt64
+        let pixelWidth: Int
+        let pixelHeight: Int
+    }
+    let entries: [UInt64: Entry]
+    let frameCounter: UInt64
+    let maxLinePixelWidth: Int
+}
+
 ///
 /// Each row's text + spans produce an `NSAttributedString` → `CTLine` →
 /// bitmap → `MTLTexture`, cached by stable row identity plus content hash.
@@ -24,12 +38,18 @@ import AppKit
 final class WindowContentRenderer {
     /// Metal device for texture creation.
     private let device: MTLDevice
+    private let makeTexture: (MTLDevice, MTLTextureDescriptor) -> MTLTexture?
+    private let resourcePolicy: FrameResourcePolicy.NativeRendererLimits
 
     /// Font manager for resolving font faces.
     private let fontManager: FontManager
 
     /// Shared pooled bitmap rasterizer.
     private let rasterizer: BitmapRasterizer
+
+    /// First typed raster/context failure in this frame. Callers discard the
+    /// whole candidate generation rather than treating a missing row as success.
+    private(set) var nativePresentationFailure: NativePresentationFailure?
 
     /// Per-row texture cache keyed by BEAM-authored row identity.
     private var lineCache: [UInt64: CachedLineTexture] = [:]
@@ -89,8 +109,14 @@ final class WindowContentRenderer {
     /// Gap between consecutive annotations (points).
     let annotationSpacing: CGFloat = 4.0
 
-    init(device: MTLDevice, fontManager: FontManager, rasterizer: BitmapRasterizer) {
+    init(device: MTLDevice, fontManager: FontManager, rasterizer: BitmapRasterizer,
+         resourcePolicy: FrameResourcePolicy.NativeRendererLimits = .default,
+         makeTexture: @escaping (MTLDevice, MTLTextureDescriptor) -> MTLTexture? = {
+             $0.makeTexture(descriptor: $1)
+         }) {
         self.device = device
+        self.makeTexture = makeTexture
+        self.resourcePolicy = resourcePolicy
         self.fontManager = fontManager
         self.rasterizer = rasterizer
         self.scale = fontManager.scale
@@ -112,6 +138,32 @@ final class WindowContentRenderer {
         self.pillDescent = CTFontGetDescent(pillFont)
     }
 
+    /// Creates a frame-private cache generation backed by a private raster pool.
+    /// Cache insertion, eviction, and frame counters cannot affect the active renderer.
+    func makeCandidate(rasterizer: BitmapRasterizer) -> WindowContentRenderer {
+        let candidate = WindowContentRenderer(
+            device: device, fontManager: fontManager, rasterizer: rasterizer,
+            resourcePolicy: resourcePolicy, makeTexture: makeTexture
+        )
+        candidate.lineCache = lineCache
+        candidate.frameCounter = frameCounter
+        candidate.maxLinePixelWidth = maxLinePixelWidth
+        candidate.defaultFgRGB = defaultFgRGB
+        candidate.nsColorCache = nsColorCache
+        return candidate
+    }
+
+    func cacheSnapshot() -> WindowContentCacheSnapshot {
+        WindowContentCacheSnapshot(
+            entries: lineCache.mapValues {
+                .init(texture: ObjectIdentifier($0.texture), contentHash: $0.contentHash,
+                      lastUsedFrame: $0.lastUsedFrame, pixelWidth: $0.pixelWidth,
+                      pixelHeight: $0.pixelHeight)
+            },
+            frameCounter: frameCounter, maxLinePixelWidth: maxLinePixelWidth
+        )
+    }
+
     /// Update max line width on viewport resize.
     func updateViewportWidth(cols: UInt16) {
         let newWidth = Int(ceil(CGFloat(cols) * cellWidth * scale))
@@ -123,6 +175,7 @@ final class WindowContentRenderer {
 
     /// Advance frame counter and evict stale textures.
     func beginFrame() {
+        nativePresentationFailure = nil
         frameCounter += 1
         let threshold = frameCounter > evictionThreshold ? frameCounter - evictionThreshold : 0
         lineCache = lineCache.filter { $0.value.lastUsedFrame >= threshold }
@@ -165,8 +218,18 @@ final class WindowContentRenderer {
         guard pixelWidth > 0, pixelHeight > 0 else { return nil }
 
         // Rasterize into the pooled BGRA bitmap.
-        let result = rasterizer.rasterize(ctLine, width: pixelWidth, height: pixelHeight,
-                                          scale: scale, descent: descent)
+        let result: RasterizeResult
+        do {
+            result = try rasterizer.rasterize(ctLine, width: pixelWidth, height: pixelHeight,
+                                              scale: scale, descent: descent)
+        } catch let failure as NativePresentationFailure {
+            nativePresentationFailure = nativePresentationFailure ?? failure
+            return nil
+        } catch {
+            nativePresentationFailure = nativePresentationFailure ?? NativePresentationFailure(
+                phase: .raster, dimension: .rasterContext, reason: .unavailable)
+            return nil
+        }
 
         // Create texture.
         let texDesc = MTLTextureDescriptor.texture2DDescriptor(
@@ -178,7 +241,11 @@ final class WindowContentRenderer {
         texDesc.usage = [.shaderRead]
         texDesc.storageMode = .managed
 
-        guard let texture = device.makeTexture(descriptor: texDesc) else { return nil }
+        guard let texture = makeTexture(device, texDesc) else {
+            nativePresentationFailure = nativePresentationFailure ?? NativePresentationFailure(
+                phase: .raster, dimension: .texture, reason: .allocation)
+            return nil
+        }
 
         // Upload bitmap data. Pooled pointer valid until next rasterize() call.
         let region = MTLRegion(origin: MTLOrigin(x: 0, y: 0, z: 0),
@@ -234,12 +301,25 @@ final class WindowContentRenderer {
         let pixelWidth = min(Int(ceil(lineWidth * scale)), maxLinePixelWidth)
         guard pixelWidth > 0, linePixelHeight > 0 else { return nil }
 
-        let result = rasterizer.rasterize(ctLine, width: pixelWidth, height: linePixelHeight,
-                                          scale: scale, descent: descent)
+        let result: RasterizeResult
+        do {
+            result = try rasterizer.rasterize(ctLine, width: pixelWidth, height: linePixelHeight,
+                                              scale: scale, descent: descent)
+        } catch let failure as NativePresentationFailure {
+            nativePresentationFailure = nativePresentationFailure ?? failure
+            return nil
+        } catch {
+            nativePresentationFailure = nativePresentationFailure ?? NativePresentationFailure(
+                phase: .raster, dimension: .rasterContext, reason: .unavailable)
+            return nil
+        }
 
         guard let entry = atlas.commitUpload(reservation: reservation,
                                              pointer: result.pointer, pixelWidth: pixelWidth,
-                                             bytesPerRow: result.bytesPerRow) else { return nil }
+                                             bytesPerRow: result.bytesPerRow) else {
+            nativePresentationFailure = nativePresentationFailure ?? atlas.nativePresentationFailure
+            return nil
+        }
         metrics.bufferRowsRasterized += 1
         metrics.recordMiss(reservation.reason)
         return entry
@@ -299,12 +379,25 @@ final class WindowContentRenderer {
         let pixelWidth = min(Int(ceil(lineWidth * scale)), maxLinePixelWidth)
         guard pixelWidth > 0, linePixelHeight > 0 else { return nil }
 
-        let result = rasterizer.rasterize(ctLine, width: pixelWidth, height: linePixelHeight,
-                                          scale: scale, descent: descent)
+        let result: RasterizeResult
+        do {
+            result = try rasterizer.rasterize(ctLine, width: pixelWidth, height: linePixelHeight,
+                                              scale: scale, descent: descent)
+        } catch let failure as NativePresentationFailure {
+            nativePresentationFailure = nativePresentationFailure ?? failure
+            return nil
+        } catch {
+            nativePresentationFailure = nativePresentationFailure ?? NativePresentationFailure(
+                phase: .raster, dimension: .rasterContext, reason: .unavailable)
+            return nil
+        }
 
         guard let entry = atlas.commitUpload(reservation: reservation,
                                              pointer: result.pointer, pixelWidth: pixelWidth,
-                                             bytesPerRow: result.bytesPerRow) else { return nil }
+                                             bytesPerRow: result.bytesPerRow) else {
+            nativePresentationFailure = nativePresentationFailure ?? atlas.nativePresentationFailure
+            return nil
+        }
         metrics.otherTexturesRasterized += 1
         metrics.recordMiss(reservation.reason)
         return entry
@@ -317,20 +410,7 @@ final class WindowContentRenderer {
                            key: AtlasKey, contentHash: Int,
                            atlas: LineTextureAtlas, metrics: inout FrameMetrics) -> AtlasEntry? {
         guard !text.isEmpty else { return nil }
-        guard let lookup = atlas.lookupOrReserve(key: key, contentHash: contentHash) else { return nil }
 
-        switch lookup {
-        case .hit(let entry):
-            metrics.otherTexturesReused += 1
-            return entry
-        case .reserved(let reservation):
-            return rasterizePillToAtlas(text: text, fg: fg, bg: bg, reservation: reservation, atlas: atlas, metrics: &metrics)
-        }
-    }
-
-    private func rasterizePillToAtlas(text: String, fg: UInt32, bg: UInt32,
-                                      reservation: Reservation, atlas: LineTextureAtlas,
-                                      metrics: inout FrameMetrics) -> AtlasEntry? {
         let fgColor = nsColor(from: fg)
         let ligatures = fontManager.primary.ligaturesEnabled ? 2 : 0
         let attrs: [NSAttributedString.Key: Any] = [
@@ -340,37 +420,112 @@ final class WindowContentRenderer {
         ]
         let attrStr = NSAttributedString(string: text, attributes: attrs)
         let ctLine = CTLineCreateWithAttributedString(attrStr)
-
-        var lineAscent: CGFloat = 0
-        var lineDescent: CGFloat = 0
-        var lineLeading: CGFloat = 0
-        let textWidth = CTLineGetTypographicBounds(ctLine, &lineAscent, &lineDescent, &lineLeading)
-
-        // Pill dimensions: text + horizontal padding, clamped to min width.
+        let textWidth = CTLineGetTypographicBounds(ctLine, nil, nil, nil)
         let pillWidth = textWidth + 2 * pillHPad
         let pillContentHeight = pillAscent + pillDescent + 3.0
         let clampedWidth = max(pillWidth, pillContentHeight)
 
-        let pixelWidth = Int(ceil(clampedWidth * scale))
-        let pixelHeight = linePixelHeight
-        guard pixelWidth > 0, pixelHeight > 0 else { return nil }
+        guard let dimensions = validatedPillRasterDimensions(
+            pointWidth: clampedWidth, atlas: atlas
+        ) else { return nil }
+        guard let lookup = atlas.lookupOrReserve(key: key, contentHash: contentHash) else { return nil }
 
+        switch lookup {
+        case .hit(let entry):
+            metrics.otherTexturesReused += 1
+            return entry
+        case .reserved(let reservation):
+            return rasterizePillToAtlas(
+                ctLine: ctLine, textWidth: textWidth, bg: bg,
+                pixelWidth: dimensions.width, pixelHeight: dimensions.height,
+                reservation: reservation, atlas: atlas, metrics: &metrics
+            )
+        }
+    }
+
+    private func validatedPillRasterDimensions(
+        pointWidth: CGFloat, atlas: LineTextureAtlas
+    ) -> (width: Int, height: Int, rowBytes: Int, rasterBytes: Int)? {
+        let scaledWidth = pointWidth * scale
+        guard scaledWidth.isFinite, scaledWidth > 0,
+              scaledWidth < CGFloat(Int.max) else {
+            nativePresentationFailure = nativePresentationFailure ?? NativePresentationFailure(
+                phase: .raster, dimension: .arithmetic, reason: .overflow
+            )
+            return nil
+        }
+        let pixelWidth = Int(scaledWidth.rounded(.up))
+        let pixelHeight = linePixelHeight
+        let widthLimit = min(resourcePolicy.textureWidth,
+                             nativeDeviceTextureDimensionLimit(device), atlas.atlasWidth)
+        guard pixelWidth <= widthLimit else {
+            nativePresentationFailure = nativePresentationFailure ?? NativePresentationFailure(
+                phase: .raster, dimension: .textureWidth,
+                requested: pixelWidth, limit: widthLimit, reason: .limit
+            )
+            return nil
+        }
+        let heightLimit = min(resourcePolicy.textureHeight,
+                              nativeDeviceTextureDimensionLimit(device), atlas.slotHeight)
+        guard pixelHeight > 0, pixelHeight <= heightLimit else {
+            nativePresentationFailure = nativePresentationFailure ?? NativePresentationFailure(
+                phase: .raster, dimension: .textureHeight,
+                requested: pixelHeight, limit: heightLimit, reason: .limit
+            )
+            return nil
+        }
+        let (rowBytes, rowOverflow) = pixelWidth.multipliedReportingOverflow(by: 4)
+        let (rasterBytes, rasterOverflow) = rowBytes.multipliedReportingOverflow(by: pixelHeight)
+        guard !rowOverflow, !rasterOverflow else {
+            nativePresentationFailure = nativePresentationFailure ?? NativePresentationFailure(
+                phase: .raster, dimension: .arithmetic, reason: .overflow
+            )
+            return nil
+        }
+        guard rasterBytes <= resourcePolicy.rasterBytes else {
+            nativePresentationFailure = nativePresentationFailure ?? NativePresentationFailure(
+                phase: .raster, dimension: .rasterBytes,
+                requested: rasterBytes, limit: resourcePolicy.rasterBytes, reason: .limit
+            )
+            return nil
+        }
+        return (pixelWidth, pixelHeight, rowBytes, rasterBytes)
+    }
+
+    private func rasterizePillToAtlas(
+        ctLine: CTLine, textWidth: CGFloat, bg: UInt32,
+        pixelWidth: Int, pixelHeight: Int,
+        reservation: Reservation, atlas: LineTextureAtlas,
+        metrics: inout FrameMetrics
+    ) -> AtlasEntry? {
         let bgR = CGFloat((bg >> 16) & 0xFF) / 255.0
         let bgG = CGFloat((bg >> 8) & 0xFF) / 255.0
         let bgB = CGFloat(bg & 0xFF) / 255.0
         let bgCGColor = CGColor(srgbRed: bgR, green: bgG, blue: bgB, alpha: 1.0)
 
-        let result = rasterizer.rasterizePill(
-            ctLine, textWidth: CGFloat(textWidth),
-            bgColor: bgCGColor,
-            width: pixelWidth, height: pixelHeight,
-            scale: scale, descent: pillDescent, ascent: pillAscent,
-            hPad: pillHPad, cornerRadius: pillCornerRadius
-        )
+        let result: RasterizeResult
+        do {
+            result = try rasterizer.rasterizePill(
+                ctLine, textWidth: textWidth, bgColor: bgCGColor,
+                width: pixelWidth, height: pixelHeight,
+                scale: scale, descent: pillDescent, ascent: pillAscent,
+                hPad: pillHPad, cornerRadius: pillCornerRadius
+            )
+        } catch let failure as NativePresentationFailure {
+            nativePresentationFailure = nativePresentationFailure ?? failure
+            return nil
+        } catch {
+            nativePresentationFailure = nativePresentationFailure ?? NativePresentationFailure(
+                phase: .raster, dimension: .rasterContext, reason: .unavailable)
+            return nil
+        }
 
         guard let entry = atlas.commitUpload(reservation: reservation,
                                              pointer: result.pointer, pixelWidth: pixelWidth,
-                                             bytesPerRow: result.bytesPerRow) else { return nil }
+                                             bytesPerRow: result.bytesPerRow) else {
+            nativePresentationFailure = nativePresentationFailure ?? atlas.nativePresentationFailure
+            return nil
+        }
         metrics.otherTexturesRasterized += 1
         metrics.recordMiss(reservation.reason)
         return entry

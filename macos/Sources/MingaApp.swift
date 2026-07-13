@@ -236,7 +236,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let rows = UInt16(defaultWindowHeight / CGFloat(face.cellHeight))
 
         // CoreText renderer.
-        guard let ctRenderer = CoreTextMetalRenderer() else {
+        guard let ctRenderer = CoreTextMetalRenderer(
+            resourcePolicy: frameResourcePolicy.nativeRenderer
+        ) else {
             NSLog("Failed to initialize CoreText Metal renderer")
             NSApp.terminate(nil)
             return

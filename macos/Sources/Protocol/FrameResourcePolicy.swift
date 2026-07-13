@@ -26,21 +26,53 @@ public struct FrameResourcePolicy: Sendable, Equatable {
         /// Creates a per-window resident weight ceiling.
         public init(weightPerWindow: FrameResourceWeight) { self.weightPerWindow = weightPerWindow }
     }
+    /// Renderer-owned native allocation ceilings. These are presentation-health
+    /// limits only and are never consulted by semantic frame publication.
+    public struct NativeRendererLimits: Sendable, Equatable {
+        public let rasterBytes: Int
+        public let atlasBytes: Int
+        public let aggregateDrawBufferBytes: Int
+        public let renderTargetBytes: Int
+        public let textureWidth: Int
+        public let textureHeight: Int
+
+        /// Creates deterministic native allocation ceilings for one renderer instance.
+        public init(rasterBytes: Int, atlasBytes: Int, aggregateDrawBufferBytes: Int,
+                    renderTargetBytes: Int = 256 * 1_048_576,
+                    textureWidth: Int, textureHeight: Int) {
+            self.rasterBytes = rasterBytes
+            self.atlasBytes = atlasBytes
+            self.aggregateDrawBufferBytes = aggregateDrawBufferBytes
+            self.renderTargetBytes = renderTargetBytes
+            self.textureWidth = textureWidth
+            self.textureHeight = textureHeight
+        }
+
+        public static let `default` = NativeRendererLimits(
+            rasterBytes: 64 * 1_048_576, atlasBytes: 256 * 1_048_576,
+            aggregateDrawBufferBytes: 64 * 1_048_576,
+            renderTargetBytes: 256 * 1_048_576,
+            textureWidth: 16_384, textureHeight: 16_384
+        )
+    }
 
     public let wire: WireLimits
     public let decode: DecodeLimits
     public let staging: StagingLimits
     public let resident: ResidentLimits
+    public let nativeRenderer: NativeRendererLimits
 
     /// Creates immutable phase slices at the composition root.
     public init(
         wire: WireLimits, decode: DecodeLimits,
-        staging: StagingLimits, resident: ResidentLimits
+        staging: StagingLimits, resident: ResidentLimits,
+        nativeRenderer: NativeRendererLimits = .default
     ) {
         self.wire = wire
         self.decode = decode
         self.staging = staging
         self.resident = resident
+        self.nativeRenderer = nativeRenderer
     }
 
     /// Production policy. Decode, staging, and per-window residence retain

@@ -362,15 +362,115 @@ struct WindowContentFrameMetricsTests {
         #expect(demand >= 40)
     }
 
-    @Test("LineTextureAtlas caps capacity to Metal texture height")
-    @MainActor func lineTextureAtlasCapsCapacityToTextureHeight() {
+    @Test("extreme pill width fails before raster allocation or atlas reservation")
+    @MainActor func extremePillWidthFailsBeforeAllocation() {
+        guard let device = MTLCreateSystemDefaultDevice() else { return }
+        let policy = FrameResourcePolicy.NativeRendererLimits(
+            rasterBytes: 1_048_576, atlasBytes: 16_777_216,
+            aggregateDrawBufferBytes: 1_048_576,
+            textureWidth: 32, textureHeight: 1_024
+        )
+        let fm = FontManager(name: "Menlo", size: 13.0, scale: 2.0)
+        var allocations = 0
+        let production = BitmapRasterizer.Factories.production
+        let rasterizer = BitmapRasterizer(factories: .init(
+            allocate: { byteCount in
+                allocations += 1
+                return malloc(byteCount)
+            },
+            deallocate: { free($0) },
+            makeContext: production.makeContext
+        ))
+        let renderer = WindowContentRenderer(
+            device: device, fontManager: fm, rasterizer: rasterizer,
+            resourcePolicy: policy
+        )
+        let atlas = LineTextureAtlas(device: device, slotHeight: renderer.linePixelHeight)
+        guard case .success = atlas.ensureCapacity(maxSlots: 4, width: 1_024) else { return }
+        atlas.beginFrame()
+        let allocatorBefore = atlas.allocator
+        var metrics = FrameMetrics()
+        let annotation = GUILineAnnotation(
+            row: 0, kind: .inlinePill, fg: 0xFFFFFF, bg: 0x112233,
+            text: String(repeating: "W", count: 1_024)
+        )
+
+        let entry = renderer.renderAnnotationToAtlas(
+            annotation: annotation,
+            key: .lineAnnotation(windowId: 1, row: 0, subIndex: 0),
+            atlas: atlas, metrics: &metrics
+        )
+
+        #expect(entry == nil)
+        #expect(renderer.nativePresentationFailure?.dimension == .textureWidth)
+        #expect(allocations == 0)
+        #expect(atlas.frameTextureUploads == 0)
+        #expect(atlas.allocator == allocatorBefore)
+        #expect(metrics.otherTexturesRasterized == 0)
+    }
+
+    @Test("pill raster byte excess fails before allocation and partial upload")
+    @MainActor func pillRasterBytesFailBeforeAllocation() {
+        guard let device = MTLCreateSystemDefaultDevice() else { return }
+        let policy = FrameResourcePolicy.NativeRendererLimits(
+            rasterBytes: 64, atlasBytes: 16_777_216,
+            aggregateDrawBufferBytes: 1_048_576,
+            textureWidth: 1_024, textureHeight: 1_024
+        )
+        let fm = FontManager(name: "Menlo", size: 13.0, scale: 2.0)
+        var allocations = 0
+        let production = BitmapRasterizer.Factories.production
+        let rasterizer = BitmapRasterizer(factories: .init(
+            allocate: { byteCount in
+                allocations += 1
+                return malloc(byteCount)
+            },
+            deallocate: { free($0) },
+            makeContext: production.makeContext
+        ))
+        let renderer = WindowContentRenderer(
+            device: device, fontManager: fm, rasterizer: rasterizer,
+            resourcePolicy: policy
+        )
+        let atlas = LineTextureAtlas(device: device, slotHeight: renderer.linePixelHeight)
+        guard case .success = atlas.ensureCapacity(maxSlots: 4, width: 1_024) else { return }
+        atlas.beginFrame()
+        let allocatorBefore = atlas.allocator
+        var metrics = FrameMetrics()
+        let annotation = GUILineAnnotation(
+            row: 0, kind: .inlinePill, fg: 0xFFFFFF, bg: 0x112233,
+            text: "oversized raster"
+        )
+
+        let entry = renderer.renderAnnotationToAtlas(
+            annotation: annotation,
+            key: .lineAnnotation(windowId: 1, row: 0, subIndex: 0),
+            atlas: atlas, metrics: &metrics
+        )
+
+        #expect(entry == nil)
+        #expect(renderer.nativePresentationFailure?.dimension == .rasterBytes)
+        #expect(allocations == 0)
+        #expect(atlas.frameTextureUploads == 0)
+        #expect(atlas.allocator == allocatorBefore)
+        #expect(metrics.otherTexturesRasterized == 0)
+    }
+
+    @Test("LineTextureAtlas refuses rather than truncates over device height")
+    @MainActor func lineTextureAtlasRefusesCapacityOverTextureHeight() {
         guard let (_, atlas) = makeRendererAndAtlas() else { return }
+        let originalSlots = atlas.slotCount
+        let originalHeight = atlas.atlasHeight
         let oversizedSlots = atlas.maxSlotCapacity + 1_000
 
-        atlas.ensureCapacity(maxSlots: oversizedSlots, width: 1024)
+        let result = atlas.ensureCapacity(maxSlots: oversizedSlots, width: 1024)
 
-        #expect(atlas.slotCount == atlas.maxSlotCapacity)
-        #expect(atlas.atlasHeight <= LineTextureAtlas.maxTextureDimension)
+        guard case .failure = result else {
+            Issue.record("oversized atlas unexpectedly succeeded")
+            return
+        }
+        #expect(atlas.slotCount == originalSlots)
+        #expect(atlas.atlasHeight == originalHeight)
     }
 
     @Test("FrameMetrics reset clears all counters")
