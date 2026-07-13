@@ -9,6 +9,8 @@ defmodule MingaAgent.Tools.ShellTest do
   # Excluded from test.llm; runs in test.heavy and full suite.
   @moduletag :heavy
 
+  @external_command_timeout_seconds 15
+
   # Drains all shell chunks from the mailbox. Uses a short timeout since
   # Shell.execute blocks until the command completes, so by the time we
   # call this the chunks are already in the mailbox.
@@ -34,7 +36,12 @@ defmodule MingaAgent.Tools.ShellTest do
       end
 
       assert {:ok, output} =
-               Shell.execute("echo line1; echo line2; echo line3", dir, 5, on_output: on_output)
+               Shell.execute(
+                 "echo line1; echo line2; echo line3",
+                 dir,
+                 @external_command_timeout_seconds,
+                 on_output: on_output
+               )
 
       # Should have received at least one chunk
       chunks = collect_shell_chunks()
@@ -64,7 +71,7 @@ defmodule MingaAgent.Tools.ShellTest do
                Shell.execute(
                  "for i in $(seq 1 20); do echo \"line $i\"; done",
                  dir,
-                 5,
+                 @external_command_timeout_seconds,
                  on_output: on_output
                )
 
@@ -95,7 +102,10 @@ defmodule MingaAgent.Tools.ShellTest do
 
       task =
         Task.async(fn ->
-          Shell.execute("cat #{inspect(fifo)} >/dev/null && echo done", dir, 5,
+          Shell.execute(
+            "cat #{inspect(fifo)} >/dev/null && echo done",
+            dir,
+            @external_command_timeout_seconds,
             on_output: on_output,
             running_indicator_ms: 250
           )
@@ -118,7 +128,10 @@ defmodule MingaAgent.Tools.ShellTest do
       end
 
       assert {:ok, _output} =
-               Shell.execute("elixir -e 'IO.write(String.duplicate(\"x\", 70000))'", dir, 5,
+               Shell.execute(
+                 "elixir -e 'IO.write(String.duplicate(\"x\", 70000))'",
+                 dir,
+                 @external_command_timeout_seconds,
                  on_output: on_output
                )
 
@@ -139,7 +152,10 @@ defmodule MingaAgent.Tools.ShellTest do
       end
 
       assert {:ok, _output} =
-               Shell.execute("elixir -e 'IO.write(String.duplicate(\"€\", 30000))'", dir, 5,
+               Shell.execute(
+                 "elixir -e 'IO.write(String.duplicate(\"€\", 30000))'",
+                 dir,
+                 @external_command_timeout_seconds,
                  on_output: on_output
                )
 
@@ -164,7 +180,10 @@ defmodule MingaAgent.Tools.ShellTest do
       command =
         "elixir -e 'IO.write(String.duplicate(\"x\", 51199)); IO.binwrite(:stdio, <<226>>); Process.sleep(50); IO.binwrite(:stdio, <<130, 172>>)'"
 
-      assert {:ok, _output} = Shell.execute(command, dir, 5, on_output: on_output)
+      assert {:ok, _output} =
+               Shell.execute(command, dir, @external_command_timeout_seconds,
+                 on_output: on_output
+               )
 
       combined = collect_shell_chunks() |> IO.iodata_to_binary()
 
@@ -174,7 +193,9 @@ defmodule MingaAgent.Tools.ShellTest do
     end
 
     test "works without on_output callback", %{tmp_dir: dir} do
-      assert {:ok, output} = Shell.execute("echo hello", dir, 5, [])
+      assert {:ok, output} =
+               Shell.execute("echo hello", dir, @external_command_timeout_seconds, [])
+
       assert output == "hello"
     end
   end

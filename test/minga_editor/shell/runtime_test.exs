@@ -4,6 +4,8 @@ defmodule MingaEditor.Shell.RuntimeTest do
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Entry
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.State.Tab
+  alias MingaEditor.State.TabBar
   alias MingaEditor.Test.FakeShell
   alias MingaEditor.Test.FakeShellAlt
   alias MingaEditor.Viewport
@@ -158,6 +160,43 @@ defmodule MingaEditor.Shell.RuntimeTest do
     stashed = Runtime.accept_persisted_state(stashed, fake, %{marker: :persisted_stash})
     assert Runtime.state(stashed) == %{marker: :alternate}
     assert Runtime.stash(stashed).fake.state == %{marker: :persisted_stash}
+  end
+
+  test "legacy shells without an ownership callback retain restart ownership" do
+    session = self()
+    legacy = entry(:legacy, FakeShellAlt, 1)
+
+    tab_bar =
+      1
+      |> Tab.new_agent("Agent")
+      |> Tab.set_session(session)
+      |> TabBar.new()
+
+    for shell_state <- [
+          %{session: session},
+          %{cards: %{one: %{session: session}}},
+          %{tab_bar: tab_bar}
+        ] do
+      runtime = Runtime.new(legacy, shell_state)
+      assert Runtime.owns_agent_session?(runtime, [legacy], session)
+
+      stashed = Runtime.activate(runtime, entry(:active, FakeShell, 2), %{})
+      assert Runtime.owns_agent_session?(stashed, [legacy], session)
+    end
+  end
+
+  test "rejected stashed callbacks leave runtime state unchanged" do
+    stashed_entry = entry(:fake, FakeShell, 1)
+
+    runtime =
+      stashed_entry
+      |> Runtime.new(%{mutate_rejected_callback?: true})
+      |> Runtime.activate(entry(:active, FakeShellAlt, 2), %{})
+
+    assert {^runtime, false, []} =
+             Runtime.route_stashed_session_down(runtime, [stashed_entry], self(), :foreign)
+
+    refute Map.has_key?(Runtime.stash(runtime).fake.state, :foreign_mutation)
   end
 
   test "active and stashed session lifecycle routes through exact entry contracts" do

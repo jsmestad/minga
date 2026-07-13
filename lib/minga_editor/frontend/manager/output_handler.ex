@@ -1,6 +1,7 @@
 defmodule MingaEditor.Frontend.Manager.OutputHandler do
   @moduledoc "Owns non-suspending Port admission, bounded frame retention, and recovery correlation."
 
+  alias Minga.Protocol.Opcodes
   alias Minga.Telemetry
   alias MingaEditor.Frontend.FrameTransaction
   alias MingaEditor.Frontend.Manager
@@ -8,6 +9,8 @@ defmodule MingaEditor.Frontend.Manager.OutputHandler do
   alias MingaEditor.Frontend.Manager.PendingFrame
   alias MingaEditor.Frontend.Manager.State
   alias MingaEditor.Frontend.Protocol
+
+  @clipboard_write Opcodes.clipboard_write()
 
   @doc "Attempts one command batch without suspending the Port owner."
   @spec admit_commands(State.t(), [binary()]) :: {Manager.admission(), State.t()}
@@ -78,9 +81,19 @@ defmodule MingaEditor.Frontend.Manager.OutputHandler do
 
   @spec attempt_output(State.t()) :: {Manager.admission(), State.t()}
   defp attempt_output(state) do
+    now = System.monotonic_time(:millisecond)
+
+    case expired_current(state, now) do
+      nil -> attempt_next_output(state)
+      failed -> {:unwritable, require_keyframe_recovery(state, failed)}
+    end
+  end
+
+  @spec attempt_next_output(State.t()) :: {Manager.admission(), State.t()}
+  defp attempt_next_output(state) do
     case OutputPressure.next_control(state.output_pressure) do
       nil -> attempt_current(state)
-      {opcode, batch} -> attempt_control(state, opcode, batch)
+      {key, batch} -> attempt_control(state, key, batch)
     end
   end
 
@@ -123,15 +136,30 @@ defmodule MingaEditor.Frontend.Manager.OutputHandler do
   end
 
   @spec current_unwritable(State.t(), PendingFrame.t()) :: {Manager.admission(), State.t()}
-  defp current_unwritable(state, current) do
+  defp current_unwritable(state, _current) do
     now = System.monotonic_time(:millisecond)
+    retry_or_recover_current(state, now)
+  end
 
-    if OutputPressure.expired?(state.output_pressure, now, state.output_failure_ms) do
-      {:unwritable, require_keyframe_recovery(state, current)}
-    else
-      {:unwritable, ensure_retry(state, now)}
+  @spec retry_or_recover_current(State.t(), integer()) :: {Manager.admission(), State.t()}
+  defp retry_or_recover_current(state, now) do
+    case expired_current(state, now) do
+      nil -> {:unwritable, ensure_retry(state, now)}
+      failed -> {:unwritable, require_keyframe_recovery(state, failed)}
     end
   end
+
+  @spec expired_current(State.t(), integer()) :: PendingFrame.t() | nil
+  defp expired_current(
+         %{output_pressure: %OutputPressure{current: %PendingFrame{} = current}} = state,
+         now
+       ) do
+    if OutputPressure.expired?(state.output_pressure, now, state.output_failure_ms),
+      do: current,
+      else: nil
+  end
+
+  defp expired_current(%{output_pressure: %OutputPressure{current: nil}}, _now), do: nil
 
   @spec ensure_retry(State.t(), integer()) :: State.t()
   defp ensure_retry(state, now) do
@@ -160,11 +188,7 @@ defmodule MingaEditor.Frontend.Manager.OutputHandler do
       {:minga_input, {:request_keyframe, stats.last_applied_frame_seq, failed.generation}}
     )
 
-    state = %{state | output_pressure: output_pressure}
-
-    if OutputPressure.controls_pending?(output_pressure),
-      do: ensure_retry(state, System.monotonic_time(:millisecond)),
-      else: state
+    %{state | output_pressure: output_pressure}
   end
 
   @spec admit_control(State.t(), [binary()]) :: {Manager.admission(), State.t()}
@@ -186,23 +210,24 @@ defmodule MingaEditor.Frontend.Manager.OutputHandler do
     end
   end
 
-  @spec attempt_control(State.t(), non_neg_integer(), binary()) ::
+  @spec attempt_control(State.t(), OutputPressure.control_key(), binary()) ::
           {Manager.admission(), State.t()}
-  defp attempt_control(state, opcode, batch) do
+  defp attempt_control(state, key, batch) do
     case write_batch(state, batch) do
       :accepted ->
-        output_pressure = OutputPressure.control_admitted(state.output_pressure, opcode)
+        output_pressure = OutputPressure.control_admitted(state.output_pressure, key)
         attempt_output(%{state | output_pressure: output_pressure})
 
       :unwritable ->
-        {:unwritable, ensure_retry(state, System.monotonic_time(:millisecond))}
+        retry_or_recover_current(state, System.monotonic_time(:millisecond))
     end
   end
 
   @spec retain_control(State.t(), non_neg_integer(), binary()) ::
           {Manager.admission(), State.t()}
   defp retain_control(state, opcode, batch) do
-    output_pressure = OutputPressure.retain_control(state.output_pressure, opcode, batch)
+    key = control_key(opcode, batch)
+    output_pressure = OutputPressure.retain_control(state.output_pressure, key, batch)
     state = %{state | output_pressure: output_pressure}
     {:unwritable, ensure_retry(state, System.monotonic_time(:millisecond))}
   end
@@ -210,6 +235,15 @@ defmodule MingaEditor.Frontend.Manager.OutputHandler do
   @spec output_pending?(OutputPressure.t()) :: boolean()
   defp output_pending?(%OutputPressure{current: current} = pressure),
     do: current != nil or OutputPressure.controls_pending?(pressure)
+
+  @spec control_key(non_neg_integer(), binary()) :: OutputPressure.control_key()
+  defp control_key(
+         @clipboard_write,
+         <<@clipboard_write, _payload_length::32, target::8, _payload::binary>>
+       ),
+       do: {@clipboard_write, target}
+
+  defp control_key(opcode, _batch), do: opcode
 
   @spec first_opcode(binary()) :: non_neg_integer()
   defp first_opcode(<<opcode, _::binary>>), do: opcode

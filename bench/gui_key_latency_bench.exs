@@ -67,7 +67,7 @@ defmodule Minga.Bench.GUIKeyLatency do
         theme_change: measure_theme_change(ctx)
       }
     after
-      stop_if_alive(ctx.editor)
+      stop_if_alive(ctx.generation)
       stop_if_alive(ctx.buffer)
       stop_if_alive(ctx.port)
       stop_if_alive(ctx.sidebar)
@@ -102,8 +102,8 @@ defmodule Minga.Bench.GUIKeyLatency do
 
     {:ok, buffer} = BufferProcess.start_link(buffer_opts)
 
-    {:ok, editor} =
-      MingaEditor.start_link(
+    {:ok, generation} =
+      MingaEditor.GenerationSupervisor.start_editor_generation_link(
         name: :"gui_bench_editor_#{id}",
         backend: :headless,
         port_manager: port,
@@ -116,13 +116,22 @@ defmodule Minga.Bench.GUIKeyLatency do
         suppress_tool_prompts: true
       )
 
+    {:ok, editor} = MingaEditor.GenerationSupervisor.editor_owner(generation)
     ref = HeadlessPort.prepare_await(port)
     send(editor, {:minga_input, {:ready, width, height}})
     {:ok, _snapshot} = HeadlessPort.collect_frame(ref, 15_000)
     _ = :sys.get_state(editor)
     _ = HeadlessPort.get_screen(port)
 
-    %{editor: editor, buffer: buffer, port: port, sidebar: sidebar, width: width, height: height}
+    %{
+      generation: generation,
+      editor: editor,
+      buffer: buffer,
+      port: port,
+      sidebar: sidebar,
+      width: width,
+      height: height
+    }
   end
 
   defp measure_cursor_move(ctx), do: measure_key(ctx, ?j)

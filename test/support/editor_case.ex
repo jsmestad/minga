@@ -18,6 +18,7 @@ defmodule Minga.Test.EditorCase do
   alias Minga.Test.HeadlessPort
   alias Minga.Test.Snapshot
   alias MingaEditor.Extension.Sidebar
+  alias MingaEditor.GenerationSupervisor
   alias MingaEditor.MinibufferData
   alias MingaEditor.Shell.Traditional.Modeline
   alias MingaEditor.StatusBar.Data, as: StatusBarData
@@ -48,6 +49,7 @@ defmodule Minga.Test.EditorCase do
   @typedoc "Test context with editor processes."
   @type editor_ctx :: %{
           optional(:rendering) => MingaEditor.State.rendering_policy(),
+          generation: pid(),
           editor: pid(),
           buffer: pid(),
           port: pid(),
@@ -179,11 +181,14 @@ defmodule Minga.Test.EditorCase do
     editor_opts =
       if project_root, do: [{:project_root, project_root} | editor_opts], else: editor_opts
 
-    {:ok, editor} = MingaEditor.start_link(editor_opts)
+    generation =
+      start_supervised!(Supervisor.child_spec({MingaEditor, editor_opts}, id: make_ref()))
 
+    {:ok, editor} = GenerationSupervisor.editor_owner(generation)
     synchronize_ready(editor, port, width, height, rendering)
 
     Map.merge(ctx, %{
+      generation: generation,
       editor: editor,
       buffer: buffer,
       port: port,
@@ -249,11 +254,14 @@ defmodule Minga.Test.EditorCase do
     editor_opts =
       if project_root, do: [{:project_root, project_root} | editor_opts], else: editor_opts
 
-    {:ok, editor} = MingaEditor.start_link(editor_opts)
+    generation =
+      start_supervised!(Supervisor.child_spec({MingaEditor, editor_opts}, id: make_ref()))
 
+    {:ok, editor} = GenerationSupervisor.editor_owner(generation)
     synchronize_ready(editor, port, width, height, rendering)
 
     %{
+      generation: generation,
       editor: editor,
       buffer: buffer,
       port: port,

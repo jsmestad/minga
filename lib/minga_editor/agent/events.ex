@@ -29,6 +29,8 @@ defmodule MingaEditor.Agent.Events do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
+  alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Workflow
 
   @type effect ::
           :render
@@ -697,26 +699,33 @@ defmodule MingaEditor.Agent.Events do
   end
 
   @spec sync_active_shell_agent_status(EditorState.t(), Tab.agent_status()) :: EditorState.t()
-  defp sync_active_shell_agent_status(state, status) do
-    session = AgentAccess.session(state)
-    update_shell_for_session(state, :sync_agent_status, [session, status])
-  end
+  defp sync_active_shell_agent_status(state, status),
+    do: update_shell_for_active_session(state, :sync_agent_status, [status])
 
   @spec track_active_shell_agent_file(EditorState.t(), String.t()) :: EditorState.t()
-  defp track_active_shell_agent_file(state, path) do
-    session = AgentAccess.session(state)
-    update_shell_for_session(state, :track_agent_file, [session, path])
+  defp track_active_shell_agent_file(state, path),
+    do: update_shell_for_active_session(state, :track_agent_file, [path])
+
+  @spec update_shell_for_active_session(EditorState.t() | map(), atom(), [term()]) ::
+          EditorState.t() | map()
+  defp update_shell_for_active_session(%EditorState{} = state, callback, args) do
+    state = Workflow.ensure_available(state)
+    session = Runtime.active_session(state.shell_runtime)
+    update_shell_for_session(state, callback, session, args)
   end
 
-  @spec update_shell_for_session(EditorState.t(), atom(), [term()]) :: EditorState.t()
-  defp update_shell_for_session(state, _callback, [session | _args]) when not is_pid(session),
+  defp update_shell_for_active_session(state, _callback, _args), do: state
+
+  @spec update_shell_for_session(EditorState.t(), atom(), pid() | nil, [term()]) ::
+          EditorState.t()
+  defp update_shell_for_session(state, _callback, session, _args) when not is_pid(session),
     do: state
 
-  defp update_shell_for_session(state, :sync_agent_status, [session, status]) do
+  defp update_shell_for_session(state, :sync_agent_status, session, [status]) do
     runtime =
-      MingaEditor.Shell.Runtime.sync_agent_status(
+      Runtime.sync_agent_status(
         state.shell_runtime,
-        MingaEditor.Shell.Workflow.resolved_entries(),
+        Workflow.resolved_entries(),
         session,
         status
       )
@@ -724,11 +733,11 @@ defmodule MingaEditor.Agent.Events do
     EditorState.apply_shell_runtime_transition(state, runtime)
   end
 
-  defp update_shell_for_session(state, :track_agent_file, [session, path]) do
+  defp update_shell_for_session(state, :track_agent_file, session, [path]) do
     runtime =
-      MingaEditor.Shell.Runtime.track_agent_file(
+      Runtime.track_agent_file(
         state.shell_runtime,
-        MingaEditor.Shell.Workflow.resolved_entries(),
+        Workflow.resolved_entries(),
         session,
         path
       )

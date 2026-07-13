@@ -9,16 +9,22 @@ defmodule MingaEditor.Frontend.Manager.OutputPressure do
             unwritable_since: nil,
             retry_token: nil,
             minimum_ack_generation: 0,
+            last_admitted_generation: 0,
+            last_admitted_frame_seq: 0,
             last_applied_generation: 0,
             last_applied_frame_seq: 0
+
+  @type control_key :: non_neg_integer() | {non_neg_integer(), non_neg_integer()}
 
   @type t :: %__MODULE__{
           current: PendingFrame.t() | nil,
           replacement: PendingFrame.t() | nil,
-          controls: %{non_neg_integer() => binary()},
+          controls: %{control_key() => binary()},
           unwritable_since: integer() | nil,
           retry_token: reference() | nil,
           minimum_ack_generation: non_neg_integer(),
+          last_admitted_generation: non_neg_integer(),
+          last_admitted_frame_seq: non_neg_integer(),
           last_applied_generation: non_neg_integer(),
           last_applied_frame_seq: non_neg_integer()
         }
@@ -33,6 +39,8 @@ defmodule MingaEditor.Frontend.Manager.OutputPressure do
           control_bytes: non_neg_integer(),
           total_retained_bytes: non_neg_integer(),
           minimum_ack_generation: non_neg_integer(),
+          last_admitted_generation: non_neg_integer(),
+          last_admitted_frame_seq: non_neg_integer(),
           last_applied_generation: non_neg_integer(),
           last_applied_frame_seq: non_neg_integer()
         }
@@ -49,25 +57,30 @@ defmodule MingaEditor.Frontend.Manager.OutputPressure do
   def enqueue(%__MODULE__{} = pressure, %PendingFrame{} = frame),
     do: {:coalesced, %{pressure | replacement: frame}}
 
-  @doc "Coalesces the latest unwritable out-of-band control batch by opcode."
-  @spec retain_control(t(), non_neg_integer(), binary()) :: t()
-  def retain_control(%__MODULE__{} = pressure, opcode, batch)
-      when is_integer(opcode) and opcode >= 0 and is_binary(batch),
-      do: %{pressure | controls: Map.put(pressure.controls, opcode, batch)}
+  @doc "Coalesces the latest unwritable out-of-band control batch by resource key."
+  @spec retain_control(t(), control_key(), binary()) :: t()
+  def retain_control(%__MODULE__{} = pressure, key, batch)
+      when is_integer(key) and key >= 0 and is_binary(batch),
+      do: put_control(pressure, key, batch)
 
-  @doc "Returns the next retained control batch in deterministic opcode order."
-  @spec next_control(t()) :: {non_neg_integer(), binary()} | nil
+  def retain_control(%__MODULE__{} = pressure, {opcode, resource} = key, batch)
+      when is_integer(opcode) and opcode >= 0 and is_integer(resource) and resource >= 0 and
+             is_binary(batch),
+      do: put_control(pressure, key, batch)
+
+  @doc "Returns the next retained control batch in deterministic resource-key order."
+  @spec next_control(t()) :: {control_key(), binary()} | nil
   def next_control(%__MODULE__{controls: controls}) when map_size(controls) == 0, do: nil
 
   def next_control(%__MODULE__{controls: controls}) do
-    opcode = controls |> Map.keys() |> Enum.min()
-    {opcode, Map.fetch!(controls, opcode)}
+    key = controls |> Map.keys() |> Enum.min()
+    {key, Map.fetch!(controls, key)}
   end
 
   @doc "Drops one admitted control batch."
-  @spec control_admitted(t(), non_neg_integer()) :: t()
-  def control_admitted(%__MODULE__{} = pressure, opcode),
-    do: %{pressure | controls: Map.delete(pressure.controls, opcode)}
+  @spec control_admitted(t(), control_key()) :: t()
+  def control_admitted(%__MODULE__{} = pressure, key),
+    do: %{pressure | controls: Map.delete(pressure.controls, key)}
 
   @doc "Clears the unwritable interval after every retained batch drains."
   @spec settled(t()) :: t()
@@ -111,13 +124,15 @@ defmodule MingaEditor.Frontend.Manager.OutputPressure do
   @doc "Advances after the current frame is admitted and returns the admitted frame."
   @spec admitted(t()) :: {PendingFrame.t(), t()}
   def admitted(%__MODULE__{current: %PendingFrame{} = current} = pressure) do
+    {generation, frame_seq} = admission_watermark(pressure, current)
+
     {current,
      %{
        pressure
        | current: pressure.replacement,
          replacement: nil,
-         unwritable_since: nil,
-         retry_token: nil
+         last_admitted_generation: generation,
+         last_admitted_frame_seq: frame_seq
      }}
   end
 
@@ -128,6 +143,7 @@ defmodule MingaEditor.Frontend.Manager.OutputPressure do
       pressure
       | current: nil,
         replacement: nil,
+        controls: %{},
         unwritable_since: nil,
         retry_token: nil,
         minimum_ack_generation: max(pressure.minimum_ack_generation, failed.generation + 1)
@@ -171,6 +187,8 @@ defmodule MingaEditor.Frontend.Manager.OutputPressure do
       control_bytes: control_bytes,
       total_retained_bytes: current_bytes + replacement_bytes + control_bytes,
       minimum_ack_generation: pressure.minimum_ack_generation,
+      last_admitted_generation: pressure.last_admitted_generation,
+      last_admitted_frame_seq: pressure.last_admitted_frame_seq,
       last_applied_generation: pressure.last_applied_generation,
       last_applied_frame_seq: pressure.last_applied_frame_seq
     }
@@ -179,10 +197,31 @@ defmodule MingaEditor.Frontend.Manager.OutputPressure do
   @spec stale_ack?(t(), non_neg_integer(), non_neg_integer()) :: boolean()
   defp stale_ack?(pressure, generation, frame_seq) do
     generation < pressure.minimum_ack_generation or
+      generation > pressure.last_admitted_generation or
+      (generation == pressure.last_admitted_generation and
+         frame_seq > pressure.last_admitted_frame_seq) or
       generation < pressure.last_applied_generation or
       (generation == pressure.last_applied_generation and
          frame_seq <= pressure.last_applied_frame_seq)
   end
+
+  @spec admission_watermark(t(), PendingFrame.t()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp admission_watermark(pressure, %PendingFrame{generation: generation, frame_seq: frame_seq})
+       when generation > pressure.last_admitted_generation,
+       do: {generation, frame_seq}
+
+  defp admission_watermark(pressure, %PendingFrame{generation: generation, frame_seq: frame_seq})
+       when generation == pressure.last_admitted_generation and
+              frame_seq > pressure.last_admitted_frame_seq,
+       do: {generation, frame_seq}
+
+  defp admission_watermark(pressure, %PendingFrame{}),
+    do: {pressure.last_admitted_generation, pressure.last_admitted_frame_seq}
+
+  @spec put_control(t(), control_key(), binary()) :: t()
+  defp put_control(pressure, key, batch),
+    do: %{pressure | controls: Map.put(pressure.controls, key, batch)}
 
   @spec frame_bytes(PendingFrame.t() | nil) :: non_neg_integer()
   defp frame_bytes(nil), do: 0

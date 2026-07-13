@@ -4,6 +4,7 @@ defmodule MingaEditor.SystemWakeTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.LSP.SyncServer
+  alias MingaEditor.GenerationSupervisor
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
@@ -20,7 +21,7 @@ defmodule MingaEditor.SystemWakeTest do
         id: :wake_inactive_buffer
       )
 
-    editor =
+    generation =
       start_supervised!(
         {MingaEditor,
          name: :"editor_#{System.unique_integer([:positive])}",
@@ -31,6 +32,8 @@ defmodule MingaEditor.SystemWakeTest do
          height: 10,
          editing_model: :vim}
       )
+
+    assert {:ok, editor} = GenerationSupervisor.editor_owner(generation)
 
     stale_client = spawn(fn -> receive do: (_ -> :ok) end)
     on_exit(fn -> Process.exit(stale_client, :kill) end)

@@ -30,7 +30,7 @@ struct RenderPerformanceGateTests {
         let tinyBaseline = RenderPerformanceBaseline(
             version: 1, fixtureVersion: "resident-ordinary-edit-v2", decodeApplyP95Ms: 0.03,
             commandPreparationP95Ms: 0.35, combinedP95Ms: 0.39, provenance: provenance)
-        let boundary = 0.03 + RenderPerformanceGate.minimumRegressionAllowanceMs
+        let boundary = 0.08
         let pass = RenderPerformanceMeasurement(
             decodeApplyP50Ms: 0.01, decodeApplyP95Ms: boundary,
             commandPreparationP50Ms: 0.13, commandPreparationP95Ms: 0.35,

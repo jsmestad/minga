@@ -20,6 +20,9 @@ defmodule MingaEditor.FileTree.Freshness do
 
   @type state :: EditorState.t()
 
+  @refresh_retry_base_ms 25
+  @refresh_retry_max_ms 1_000
+
   @doc "Returns true when the file tree is open."
   @spec open?(state()) :: boolean()
   def open?(state), do: match?(%FileTreeState{tree: %FileTree{}}, file_tree_state(state))
@@ -145,8 +148,22 @@ defmodule MingaEditor.FileTree.Freshness do
 
       {:error, reason} ->
         Minga.Log.warning(:editor, "File tree refresh not scheduled: #{inspect(reason)}")
-        state
+        schedule_refresh_retry(state)
     end
+  end
+
+  @spec schedule_refresh_retry(state()) :: state()
+  defp schedule_refresh_retry(state) do
+    token = make_ref()
+    {attempt, file_tree} = FileTreeState.track_refresh_retry(file_tree_state(state), token)
+    Process.send_after(self(), {:file_tree_refresh_timer, token}, refresh_retry_delay(attempt))
+    set_file_tree(state, file_tree)
+  end
+
+  @spec refresh_retry_delay(pos_integer()) :: pos_integer()
+  defp refresh_retry_delay(attempt) do
+    exponent = min(attempt - 1, 6)
+    min(@refresh_retry_base_ms * Integer.pow(2, exponent), @refresh_retry_max_ms)
   end
 
   @spec apply_completed_refresh(state(), Refresh.t(), FileTree.t(), Outcome.t()) ::
@@ -213,7 +230,7 @@ defmodule MingaEditor.FileTree.Freshness do
       %FileTreeState{tree: %FileTree{} = tree} = file_tree ->
         status = GitStatus.from_entries(entries, entry_base_path || git_root, tree.root)
         updated_tree = FileTree.replace_git_status(tree, status)
-        file_tree = FileTreeState.replace_tree(file_tree, updated_tree)
+        file_tree = FileTreeState.replace_tree_metadata(file_tree, updated_tree)
 
         state
         |> set_file_tree(file_tree)
@@ -231,7 +248,7 @@ defmodule MingaEditor.FileTree.Freshness do
       %FileTreeState{tree: %FileTree{} = tree} = file_tree ->
         updated_tree = Refresh.with_cached_git_status(tree, EditorState.events_registry(state))
 
-        file_tree = FileTreeState.replace_tree(file_tree, updated_tree)
+        file_tree = FileTreeState.replace_tree_metadata(file_tree, updated_tree)
 
         state
         |> set_file_tree(file_tree)

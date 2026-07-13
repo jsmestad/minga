@@ -15,6 +15,7 @@ defmodule MingaEditor.Frontend.Emit.SurfaceLayoutEmitTest do
 
   alias Minga.Protocol.Opcodes
   alias Minga.Test.RecordingFrontend
+  alias MingaEditor.FocusTree
   alias MingaEditor.Frontend.Emit
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.HoverPopup
@@ -59,6 +60,7 @@ defmodule MingaEditor.Frontend.Emit.SurfaceLayoutEmitTest do
     state
     |> EditorState.set_hover_popup(hover)
     |> EditorState.set_signature_help(signature)
+    |> freeze_focus_tree()
   end
 
   defp emit_commands(state) do
@@ -73,8 +75,13 @@ defmodule MingaEditor.Frontend.Emit.SurfaceLayoutEmitTest do
   end
 
   defp emit_state(opts \\ []) do
-    base_state(Keyword.put(opts, :port_manager, Process.get(:surface_layout_frontend)))
+    opts
+    |> Keyword.put(:port_manager, Process.get(:surface_layout_frontend))
+    |> base_state()
+    |> freeze_focus_tree()
   end
+
+  defp freeze_focus_tree(state), do: %{state | focus_tree: FocusTree.from_state(state)}
 
   defp surface_layout_command(commands) do
     Enum.find(commands, &match?(<<@op_surface_layout, _::binary>>, &1))
@@ -221,7 +228,7 @@ defmodule MingaEditor.Frontend.Emit.SurfaceLayoutEmitTest do
     center =
       MingaEditor.UI.NotificationCenter.upsert(MingaEditor.UI.NotificationCenter.new(), note)
 
-    state = %{emit_state() | notifications: center}
+    state = emit_state() |> Map.put(:notifications, center) |> freeze_focus_tree()
 
     commands = emit_commands(state)
     decoded = commands |> surface_layout_command() |> decode_placements()

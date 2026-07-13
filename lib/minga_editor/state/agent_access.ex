@@ -16,6 +16,7 @@ defmodule MingaEditor.State.AgentAccess do
   alias MingaEditor.State.Workspace
   alias MingaEditor.Shell.Entry
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Workflow
   alias MingaEditor.Session.State, as: WorkspaceState
 
   # ── Readers ────────────────────────────────────────────────────────────────
@@ -49,11 +50,14 @@ defmodule MingaEditor.State.AgentAccess do
   Traditional reads the active workspace. Extension shells read through shell behaviours until they move onto the same workspace model.
   """
   @spec session(EditorState.t() | map()) :: pid() | nil
-  def session(%EditorState{shell_runtime: %Runtime{entry: %Entry{id: :traditional}}} = state),
-    do: active_workspace_session(state)
+  def session(%EditorState{} = state) do
+    state = Workflow.ensure_available(state)
 
-  def session(%EditorState{shell_runtime: %Runtime{} = runtime}),
-    do: Runtime.active_session(runtime)
+    case state.shell_runtime do
+      %Runtime{entry: %Entry{id: :traditional}} -> active_workspace_session(state)
+      %Runtime{} = runtime -> Runtime.active_session(runtime)
+    end
+  end
 
   def session(_), do: nil
 

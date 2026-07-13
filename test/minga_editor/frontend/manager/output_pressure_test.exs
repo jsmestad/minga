@@ -36,23 +36,46 @@ defmodule MingaEditor.Frontend.Manager.OutputPressureTest do
     assert PendingFrame.follows?(frame(12, 0, 2), first)
   end
 
-  test "recovery raises the acknowledgement generation floor and rejects stale acknowledgements" do
+  test "recovery raises the acknowledgement floor and only admitted frames can acknowledge" do
     failed = frame(11, 10, 3)
     {:attempt, pressure} = OutputPressure.enqueue(OutputPressure.new(), failed)
     pressure = OutputPressure.require_recovery(pressure, failed)
 
     assert OutputPressure.acknowledge(pressure, 3, 11) == :stale
+    assert OutputPressure.acknowledge(pressure, 4, 12) == :stale
+
+    recovery = frame(12, 0, 4)
+    {:attempt, pressure} = OutputPressure.enqueue(pressure, recovery)
+    assert {^recovery, pressure} = OutputPressure.admitted(pressure)
     assert {:accepted, pressure} = OutputPressure.acknowledge(pressure, 4, 12)
     assert OutputPressure.acknowledge(pressure, 4, 11) == :stale
 
     stats = OutputPressure.stats(pressure)
     assert stats.minimum_ack_generation == 4
+    assert stats.last_admitted_generation == 4
+    assert stats.last_admitted_frame_seq == 12
     assert stats.last_applied_generation == 4
     assert stats.last_applied_frame_seq == 12
     assert stats.retained_bytes == 0
   end
 
-  test "control batches coalesce by opcode and survive frame recovery" do
+  test "frame admission bounds acknowledgements without future acknowledgements moving diagnostics" do
+    first = frame(10, 9, 1)
+    {:attempt, pressure} = OutputPressure.enqueue(OutputPressure.new(), first)
+    assert {^first, pressure} = OutputPressure.admitted(pressure)
+    assert {:accepted, pressure} = OutputPressure.acknowledge(pressure, 1, 10)
+
+    assert OutputPressure.acknowledge(pressure, 1, 11) == :stale
+    assert OutputPressure.acknowledge(pressure, 0xFFFFFFFF, 1) == :stale
+
+    stats = OutputPressure.stats(pressure)
+    assert stats.last_admitted_generation == 1
+    assert stats.last_admitted_frame_seq == 10
+    assert stats.last_applied_generation == 1
+    assert stats.last_applied_frame_seq == 10
+  end
+
+  test "control batches coalesce by opcode and are cleared with failed output" do
     first_font = Protocol.encode_set_font("First", 14, true, :regular)
     latest_font = Protocol.encode_set_font("Latest", 16, true, :regular)
     title = Protocol.encode_set_title("Minga")
@@ -68,8 +91,8 @@ defmodule MingaEditor.Frontend.Manager.OutputPressureTest do
     failed = frame(11, 10, 3)
     {:attempt, pressure} = OutputPressure.enqueue(pressure, failed)
     pressure = OutputPressure.require_recovery(pressure, failed)
-    assert OutputPressure.controls_pending?(pressure)
-    assert OutputPressure.stats(pressure).control_batches == 2
+    refute OutputPressure.controls_pending?(pressure)
+    assert OutputPressure.stats(pressure).control_batches == 0
   end
 
   test "unwritable failure timing starts once and retry tokens are correlated" do

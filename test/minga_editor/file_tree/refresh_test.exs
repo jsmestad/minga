@@ -7,7 +7,12 @@ defmodule MingaEditor.FileTree.RefreshTest do
   alias Minga.Test.FileTreeRefreshScanner
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.EffectScheduler
+  alias MingaEditor.FileTree.Freshness
   alias MingaEditor.FileTree.Refresh
+  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.FileTree, as: FileTreeState
+
+  import MingaEditor.RenderPipeline.TestHelpers
 
   @moduletag :tmp_dir
   @timeout 2_000
@@ -78,6 +83,72 @@ defmodule MingaEditor.FileTree.RefreshTest do
     assert_terminal(third.id, :completed)
   end
 
+  test "composed workflow rejects the first completion and applies only the coalesced latest tree",
+       %{
+         tmp_dir: root
+       } do
+    scheduler = start_scheduler()
+    original = tree(root)
+    first_tree = tree(root, ["first.ex"])
+    second_tree = tree(root, ["second.ex"])
+    latest_tree = tree(root, ["latest.ex"])
+    first = request(original, :first_composed, :wait)
+    second = request(original, :second_composed, :wait)
+    latest = request(original, :latest_composed, :wait)
+    state = state_with_tree(original, scheduler)
+
+    assert EffectScheduler.schedule(scheduler, first) == {:ok, first.id, :running}
+
+    {state, %Outcome{status: :running}} =
+      Refresh.apply(state, receive_lifecycle(first.id, :running))
+
+    assert_receive {:file_tree_scan_started, :first_composed, first_worker}, @timeout
+    state = track(state, first)
+    send(first_worker, {:release_file_tree_scan, :first_composed, {:return, first_tree}})
+    first_outcome = receive_outcome(scheduler, first.id, :completed)
+
+    state = invalidate_current(state)
+    assert EffectScheduler.schedule(scheduler, second) == {:ok, second.id, :queued}
+
+    {state, %Outcome{status: :queued}} =
+      Refresh.apply(state, receive_lifecycle(second.id, :queued))
+
+    state = track(state, second)
+
+    state = invalidate_current(state)
+    assert EffectScheduler.schedule(scheduler, latest) == {:ok, latest.id, :queued}
+    state = track(state, latest)
+
+    {state, %Outcome{status: :stale}} =
+      Refresh.apply(state, receive_lifecycle(second.id, :stale))
+
+    {state, %Outcome{status: :queued}} =
+      Refresh.apply(state, receive_lifecycle(latest.id, :queued))
+
+    assert :ok = EffectScheduler.claim(scheduler, first_outcome)
+
+    assert {state, %Outcome{status: :stale} = stale_first} =
+             Refresh.apply(state, first_outcome)
+
+    assert state |> file_tree() |> then(& &1.tree) == original
+    EffectScheduler.finalize(scheduler, stale_first)
+
+    assert_receive {:file_tree_scan_started, :latest_composed, latest_worker}, @timeout
+    send(latest_worker, {:release_file_tree_scan, :latest_composed, {:return, latest_tree}})
+    latest_outcome = receive_outcome(scheduler, latest.id, :completed)
+    assert :ok = EffectScheduler.claim(scheduler, latest_outcome)
+
+    assert {state, %Outcome{status: :completed} = accepted_latest} =
+             Refresh.apply(state, latest_outcome)
+
+    EffectScheduler.finalize(scheduler, accepted_latest)
+    Process.cancel_timer(state.render_correlation.timer)
+    assert state |> file_tree() |> then(& &1.tree) == latest_tree
+    refute state |> file_tree() |> then(& &1.tree) == second_tree
+    assert EffectScheduler.stats(scheduler).admitted == 0
+    refute EffectScheduler.active?(scheduler, Refresh)
+  end
+
   test "failed work terminalizes and leaves the root schedulable", %{tmp_dir: root} do
     scheduler = start_scheduler()
     failed = request(tree(root), :failed_work, {:error, :gone})
@@ -123,7 +194,23 @@ defmodule MingaEditor.FileTree.RefreshTest do
     assert_receive {:file_tree_scan_started, :after_cancel, _worker}, @timeout
   end
 
-  defp tree(root), do: root |> FileTree.new() |> FileTree.put_entries([])
+  defp tree(root), do: tree(root, [])
+
+  defp tree(root, names) do
+    entries =
+      Enum.map(names, fn name ->
+        %{
+          name: name,
+          path: Path.join(root, name),
+          dir?: false,
+          depth: 0,
+          last_child?: true,
+          guides: []
+        }
+      end)
+
+    root |> FileTree.new() |> FileTree.put_entries(entries)
+  end
 
   defp request(tree, label, action) do
     Refresh.request(tree, Minga.Events.default_registry(),
@@ -148,9 +235,43 @@ defmodule MingaEditor.FileTree.RefreshTest do
     scheduler
   end
 
+  defp state_with_tree(tree, scheduler) do
+    file_tree = FileTreeState.open(%FileTreeState{}, tree, nil)
+
+    state = base_state()
+    state = %{state | backend: :tui, effect_scheduler: scheduler}
+    EditorState.set_file_tree(state, file_tree)
+  end
+
+  defp track(state, request) do
+    EditorState.update_file_tree(
+      state,
+      &FileTreeState.track_refresh_request(&1, request.effect.root, request.id)
+    )
+  end
+
+  defp invalidate_current(state) do
+    state = Freshness.request_refresh(state, 60_000)
+    token = file_tree(state).refresh.debounce
+
+    EditorState.update_file_tree(state, fn file_tree ->
+      {:ready, _tree, elapsed} = FileTreeState.refresh_debounce_elapsed(file_tree, token)
+      elapsed
+    end)
+  end
+
+  defp file_tree(state), do: EditorState.file_tree_state(state)
+
   defp assert_lifecycle(request_id, status) do
-    assert_receive {:effect_lifecycle, %Outcome{request: %{id: ^request_id}, status: ^status}},
+    assert %Outcome{} = receive_lifecycle(request_id, status)
+  end
+
+  defp receive_lifecycle(request_id, status) do
+    assert_receive {:effect_lifecycle,
+                    %Outcome{request: %{id: ^request_id}, status: ^status} = outcome},
                    @timeout
+
+    outcome
   end
 
   defp receive_outcome(scheduler, request_id, status) do
