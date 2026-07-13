@@ -276,7 +276,7 @@ struct WindowContentFrameMetricsTests {
         #expect(first != nil)
         #expect(metrics.bufferRowsRasterized == 1)
 
-        let content = GUIWindowContent(windowId: 1, fullRefresh: true, cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: [row], selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [])
+        let content = try GUIWindowContent(windowId: 1, fullRefresh: true, cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: [row], selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [])
         atlas.beginFrame()
         CoreTextMetalRenderer.invalidateFullRefreshWindows(in: atlas, windowContents: [1: content])
         metrics.reset()
@@ -314,10 +314,10 @@ struct WindowContentFrameMetricsTests {
     }
 
     @Test("Atlas slot demand accounts for split-window texture entries")
-    func atlasDemandCountsSplitWindows() {
+    func atlasDemandCountsSplitWindows() throws {
         let rows = [GUIVisualRow(rowType: .normal, rowId: 700, bufLine: 0, contentHash: 1, text: "row", spans: [])]
-        let left = GUIWindowContent(windowId: 1, fullRefresh: true, cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: rows, selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [], lineAnnotations: [GUILineAnnotation(row: 0, kind: .inlineText, fg: 0xFFFFFF, bg: 0, text: "hint")])
-        let right = GUIWindowContent(windowId: 2, fullRefresh: true, cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: rows, selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [])
+        let left = try GUIWindowContent(windowId: 1, fullRefresh: true, cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: rows, selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [], lineAnnotations: [GUILineAnnotation(row: 0, kind: .inlineText, fg: 0xFFFFFF, bg: 0, text: "hint")])
+        let right = try GUIWindowContent(windowId: 2, fullRefresh: true, cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: rows, selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [])
 
         var frameState = FrameState(cols: 80, rows: 2)
         frameState.windowGutters = [
@@ -332,7 +332,7 @@ struct WindowContentFrameMetricsTests {
     }
 
     @Test("Atlas slot demand ignores retained rows outside the visible pane")
-    func atlasDemandIgnoresOffscreenRecoveryRows() {
+    func atlasDemandIgnoresOffscreenRecoveryRows() throws {
         let rows = (0..<5_000).map { index in
             GUIVisualRow(rowType: .normal, rowId: UInt64(index + 1), bufLine: UInt32(index), contentHash: UInt32(index), text: "row", spans: [])
         }
@@ -349,7 +349,7 @@ struct WindowContentFrameMetricsTests {
             hitRegions: []
         )
 
-        let content = GUIWindowContent(
+        let content = try GUIWindowContent(
             windowId: 1, fullRefresh: true, cursorRow: 0, cursorCol: 0, cursorShape: .block,
             rows: rows, selection: nil, searchMatches: [], diagnosticUnderlines: [],
             documentHighlights: [], paneGeometry: geometry
@@ -384,9 +384,9 @@ struct WindowContentFrameMetricsTests {
 @Suite("GUIState Frame Lifecycle")
 struct GUIStateFrameTests {
     @Test("beginFrame preserves windowContents as fallback")
-    @MainActor func beginFramePreservesContents() {
+    @MainActor func beginFramePreservesContents() throws {
         let state = GUIState()
-        let content = GUIWindowContent(
+        let content = try GUIWindowContent(
             windowId: 1, fullRefresh: true,
             cursorRow: 0, cursorCol: 0, cursorShape: .block,
             rows: [], selection: nil,

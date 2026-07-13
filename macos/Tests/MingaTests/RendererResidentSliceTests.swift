@@ -4,9 +4,9 @@ import Testing
 @Suite("Renderer resident row slicing")
 struct RendererResidentSliceTests {
     @Test("fixed viewport visits the same rows for 5,000 and 65,536 row documents")
-    func boundedVisitedRows() {
-        let small = content(rowCount: 5_000, visibleStart: 2_000, visibleRows: 40)
-        let large = content(rowCount: 65_536, visibleStart: 2_000, visibleRows: 40)
+    func boundedVisitedRows() throws {
+        let small = try content(rowCount: 5_000, visibleStart: 2_000, visibleRows: 40)
+        let large = try content(rowCount: 65_536, visibleStart: 2_000, visibleRows: 40)
 
         let smallSlice = RendererSignposts.visibleSlice(for: small, fallbackVisibleRows: 40)
         let largeSlice = RendererSignposts.visibleSlice(for: large, fallbackVisibleRows: 40)
@@ -21,9 +21,9 @@ struct RendererResidentSliceTests {
     }
 
     @Test("content, gutters, and atlas demand stay bounded to one identical range")
-    func boundedCompletePreparation() {
-        let small = content(rowCount: 5_000, visibleStart: 2_000, visibleRows: 40, visualOffset: 3)
-        let large = content(rowCount: 65_536, visibleStart: 2_000, visibleRows: 40, visualOffset: 3)
+    func boundedCompletePreparation() throws {
+        let small = try content(rowCount: 5_000, visibleStart: 2_000, visibleRows: 40, visualOffset: 3)
+        let large = try content(rowCount: 65_536, visibleStart: 2_000, visibleRows: 40, visualOffset: 3)
         let entries = (0..<65_536).map {
             Wire.GutterEntry(bufLine: UInt32($0), displayType: .normal, signType: $0.isMultiple(of: 7) ? .diagError : .none)
         }
@@ -52,7 +52,7 @@ struct RendererResidentSliceTests {
 
     @Test("idle and overlay-only frames report zero reset and reference work")
     func perFrameOperationCounters() throws {
-        let resident = content(rowCount: 65_536, visibleStart: 2_000, visibleRows: 40)
+        let resident = try content(rowCount: 65_536, visibleStart: 2_000, visibleRows: 40)
         var identities: [UInt16: ObjectIdentifier] = [:]
         let first = RendererSignposts.operationCounters(for: resident, lastContentIdentities: &identities)
         let idle = RendererSignposts.operationCounters(for: resident, lastContentIdentities: &identities)
@@ -86,7 +86,7 @@ struct RendererResidentSliceTests {
     func deterministicComplexityGate() throws {
         let visibleRows = 40
         for rowCount in [5_000, 65_536] {
-            let content = content(rowCount: rowCount, visibleStart: 2_000, visibleRows: visibleRows)
+            let content = try content(rowCount: rowCount, visibleStart: 2_000, visibleRows: visibleRows)
             let replacement = GUIVisualRow(
                 rowType: .normal, rowId: 2_001, bufLine: 2_000,
                 contentHash: 999_001, text: "edited", spans: []
@@ -126,8 +126,8 @@ struct RendererResidentSliceTests {
     }
 
     @Test("shared CoreText preparation clips text and spans with bounded gutter commands")
-    func sharedCommandPreparationParity() {
-        let resident = content(rowCount: 65_536, visibleStart: 2_000, visibleRows: 40)
+    func sharedCommandPreparationParity() throws {
+        let resident = try content(rowCount: 65_536, visibleStart: 2_000, visibleRows: 40)
         let prepared = ResidentRenderPreparation.prepare(
             content: resident, fallbackVisibleRows: 40, overscanRows: 2,
             scrollLeft: 2, viewportCols: 4
@@ -155,8 +155,8 @@ struct RendererResidentSliceTests {
     }
 
     @Test("shared preparation feeds atlas demand and row counters once")
-    func sharedPreparationCounterParity() {
-        let resident = content(rowCount: 65_536, visibleStart: 2_000, visibleRows: 40)
+    func sharedPreparationCounterParity() throws {
+        let resident = try content(rowCount: 65_536, visibleStart: 2_000, visibleRows: 40)
         let prepared = ResidentRenderPreparation.prepare(
             content: resident, fallbackVisibleRows: 40, overscanRows: RendererSignposts.configuredOverscanRows,
             scrollLeft: 0, viewportCols: 80
@@ -177,7 +177,7 @@ struct RendererResidentSliceTests {
     }
 
     @Test("failure seams reject an extra reset, chunk, or full-row scan")
-    func deterministicComplexityFailureSeams() {
+    func deterministicComplexityFailureSeams() throws {
         let boundary = RendererComplexityMeasurement(
             fullResets: 0, chunksTouched: 4, editorRowsVisited: 44,
             visibleRows: 40, overscanRows: 4, decorationsVisited: 10_000
@@ -196,7 +196,7 @@ struct RendererResidentSliceTests {
 
     @Test("far-down resident viewport keeps cursor, selection, and annotation rows viewport-local")
     func viewportLocalOverlayCoordinates() throws {
-        let resident = content(rowCount: 65_536, visibleStart: 50_000, visibleRows: 40, visualOffset: 3)
+        let resident = try content(rowCount: 65_536, visibleStart: 50_000, visibleRows: 40, visualOffset: 3)
         let slice = RendererSignposts.visibleSlice(for: resident, fallbackVisibleRows: 40)
         #expect(slice.visibleStartIndex == 50_003)
 
@@ -225,7 +225,7 @@ struct RendererResidentSliceTests {
     }
 
     @Test("slice origin preserves wraps and decorations sharing a buffer line")
-    func wrappedRows() {
+    func wrappedRows() throws {
         let rows = [
             row(id: 1, line: 9),
             row(id: 2, line: 10),
@@ -234,7 +234,7 @@ struct RendererResidentSliceTests {
             row(id: 5, line: 11),
             row(id: 6, line: 12)
         ]
-        let content = GUIWindowContent(
+        let content = try GUIWindowContent(
             windowId: 1, fullRefresh: true, contentEpoch: 8,
             cursorRow: 0, cursorCol: 0, cursorShape: .block,
             rows: rows, selection: nil, searchMatches: [], diagnosticUnderlines: [],
@@ -248,8 +248,8 @@ struct RendererResidentSliceTests {
         #expect(slice.overscanBeforeRows == 0)
     }
 
-    private func content(rowCount: Int, visibleStart: Int, visibleRows: Int, visualOffset: Int = 0) -> GUIWindowContent {
-        GUIWindowContent(
+    private func content(rowCount: Int, visibleStart: Int, visibleRows: Int, visualOffset: Int = 0) throws -> GUIWindowContent {
+        try GUIWindowContent(
             windowId: 1, fullRefresh: true, contentEpoch: 8,
             cursorRow: 0, cursorCol: 0, cursorShape: .block,
             rows: (0..<rowCount).map { row(id: UInt64($0 + 1), line: UInt32($0)) },

@@ -12,7 +12,7 @@ private struct Fixture {
     let base: GUIWindowContent
     let deltaPayload: Data
 
-    static func make() -> Fixture {
+    static func make() throws -> Fixture {
         let rows = (0..<fixtureRows).map { index in
             let indexText = String(index)
             return GUIVisualRow(
@@ -34,7 +34,7 @@ private struct Fixture {
             overscanEndLine: UInt32(editIndex + visibleRows / 2 + overscanRows),
             contentEpoch: 7, layoutGeneration: 1
         )
-        let content = GUIWindowContent(
+        let content = try GUIWindowContent(
             windowId: 1, fullRefresh: true, contentEpoch: 7,
             cursorRow: UInt16(visibleRows / 2), cursorCol: 0, cursorShape: .block,
             rows: rows, selection: nil, searchMatches: [], diagnosticUnderlines: [],
@@ -150,7 +150,7 @@ guard CommandLine.arguments.count == 2 else {
     exit(2)
 }
 
-private let fixture = Fixture.make()
+private let fixture = try Fixture.make()
 for _ in 0..<warmupIterations {
     let content = try decodeAndApply(fixture)
     _ = consumePreparedCommands(prepareVisibleCommands(content))

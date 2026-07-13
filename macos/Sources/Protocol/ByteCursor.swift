@@ -1,6 +1,7 @@
 /// Checked, zero-copy cursor primitives for protocol packet decoding.
 
 import Foundation
+import MingaProtocol
 
 /// A bounds-checked, `Sendable` cursor over an immutable `Data` range.
 ///
@@ -88,6 +89,8 @@ struct ByteCursor: Sendable {
 
     /// Decodes one final immutable UTF-8 value and accounts for its owned bytes.
     mutating func readString(count: Int) throws -> String {
+        // Reserve before creating the owned String backing storage.
+        try FrameDecodeAccounting.reserve(.ownedUTF8Bytes, count)
         let slice = try readSlice(count: count)
         guard let value = String(data: slice, encoding: .utf8) else {
             throw ProtocolDecodeError.malformed

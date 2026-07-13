@@ -216,6 +216,8 @@ struct PreparedFrameTransactionBuilder {
     private var workingTranscript: AgentTranscriptSnapshot
     private var changedTranscript: AgentTranscriptSnapshot?
     private var rejection: PreparedFrameRejection?
+    private let stagingLimit: FrameResourceWeight
+    private let residentLimit: FrameResourceWeight
 
     init(
         frameSeq: UInt32,
@@ -223,7 +225,9 @@ struct PreparedFrameTransactionBuilder {
         generation: UInt32,
         committedWindows: [UInt16: GUIWindowContent],
         registeredFontIds: Set<UInt8>,
-        committedTranscript: AgentTranscriptSnapshot
+        committedTranscript: AgentTranscriptSnapshot,
+        stagingLimit: FrameResourceWeight = FrameResourcePolicy.default.staging.weight,
+        residentLimit: FrameResourceWeight = FrameResourcePolicy.default.resident.weightPerWindow
     ) {
         self.frameSeq = frameSeq
         self.baseFrameSeq = baseFrameSeq
@@ -232,6 +236,8 @@ struct PreparedFrameTransactionBuilder {
         self.registeredFontIds = registeredFontIds
         self.registeredFontIds.insert(0)
         self.workingTranscript = committedTranscript
+        self.stagingLimit = stagingLimit
+        self.residentLimit = residentLimit
     }
 
     mutating func stage(_ command: RenderCommand) {
@@ -248,8 +254,7 @@ struct PreparedFrameTransactionBuilder {
                 return
             }
             let aggregated = aggregatingOperationCounters(for: content)
-            workingWindows[content.windowId] = aggregated
-            changedWindows[content.windowId] = aggregated
+            guard stageWindow(aggregated) else { return }
             touchedWindowIds.insert(content.windowId)
             recordFontResources(in: content)
 
@@ -402,8 +407,7 @@ struct PreparedFrameTransactionBuilder {
             return
         }
         let aggregated = aggregatingOperationCounters(for: updated)
-        workingWindows[delta.windowId] = aggregated
-        changedWindows[delta.windowId] = aggregated
+        _ = stageWindow(aggregated)
     }
 
     private mutating func resolveRowsDelta(_ delta: GUIWindowRowsDelta) {
@@ -422,11 +426,16 @@ struct PreparedFrameTransactionBuilder {
             return
         }
         let updated: GUIWindowContent
-        switch current.applyingRowsDeltaChecked(delta) {
+        switch current.applyingRowsDeltaChecked(
+            delta, residentLimit: residentLimit, stagingLimit: stagingLimit
+        ) {
         case .success(let content):
             updated = content
         case .failure(.missingRowID), .failure(.contentHashMismatch):
             rejection = .missingWindowReference(windowId: delta.windowId)
+            return
+        case .failure(.resourcePolicy):
+            rejection = .resourcePolicy
             return
         case .failure:
             rejection = delta.rowSplices == nil
@@ -435,9 +444,33 @@ struct PreparedFrameTransactionBuilder {
             return
         }
         let aggregated = aggregatingOperationCounters(for: updated)
-        workingWindows[delta.windowId] = aggregated
-        changedWindows[delta.windowId] = aggregated
+        guard stageWindow(aggregated) else { return }
         recordFontResources(in: delta)
+    }
+
+    private mutating func stageWindow(_ content: GUIWindowContent) -> Bool {
+        do {
+            let residentWeight = content.exactResourceWeight()
+            if residentWeight.firstExceeded(limit: residentLimit) != nil {
+                rejection = .resourcePolicy
+                return false
+            }
+            var stagingWeight = FrameResourceWeight()
+            for (windowID, existing) in workingWindows where windowID != content.windowId {
+                stagingWeight = try stagingWeight.adding(existing.exactResourceWeight())
+            }
+            stagingWeight = try stagingWeight.adding(residentWeight)
+            if stagingWeight.firstExceeded(limit: stagingLimit) != nil {
+                rejection = .resourcePolicy
+                return false
+            }
+            workingWindows[content.windowId] = content
+            changedWindows[content.windowId] = content
+            return true
+        } catch {
+            rejection = .resourcePolicy
+            return false
+        }
     }
 
     private func aggregatingOperationCounters(for content: GUIWindowContent) -> GUIWindowContent {

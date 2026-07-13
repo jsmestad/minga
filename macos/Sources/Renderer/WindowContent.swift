@@ -537,6 +537,8 @@ public final class GUIWindowContent: Sendable {
     public let paneGeometry: GUIPaneGeometry?
     public let cursorline: GUICursorline?
     public let scrollPresentation: GUIScrollPresentation?
+    /// Exact immutable ownership retained by this published window.
+    public let resourceWeight: FrameResourceWeight
 
     public init(windowId: UInt16, fullRefresh: Bool, contentEpoch: UInt32 = 0, cursorVisible: Bool = true,
          cursorRow: UInt16, cursorCol: UInt16, cursorShape: CursorShape,
@@ -548,8 +550,19 @@ public final class GUIWindowContent: Sendable {
          lineAnnotations: [GUILineAnnotation] = [],
          paneGeometry: GUIPaneGeometry? = nil,
          cursorline: GUICursorline? = nil,
-         scrollPresentation: GUIScrollPresentation? = nil) {
-        let store = ResidentRowStore(decodedRows: rows)
+         scrollPresentation: GUIScrollPresentation? = nil,
+         residentLimit: FrameResourceWeight = FrameResourcePolicy.default.resident.weightPerWindow) throws {
+        let rowWeight = try ResidentRowStore.weight(of: rows)
+        let completeWeight = try Self.resourceWeight(
+            rowWeight: rowWeight, selection: selection, searchMatches: searchMatches,
+            diagnosticUnderlines: diagnosticUnderlines,
+            documentHighlights: documentHighlights, lineAnnotations: lineAnnotations,
+            paneGeometry: paneGeometry
+        )
+        try Self.validate(completeWeight, limit: residentLimit)
+        let store = try ResidentRowStore(
+            decodedRows: rows, resourceWeight: rowWeight, limit: residentLimit
+        )
         self.windowId = windowId
         self.fullRefresh = fullRefresh
         self.contentEpoch = contentEpoch
@@ -568,6 +581,7 @@ public final class GUIWindowContent: Sendable {
         self.paneGeometry = paneGeometry
         self.cursorline = cursorline
         self.scrollPresentation = scrollPresentation
+        self.resourceWeight = completeWeight
     }
 
     private init(windowId: UInt16, fullRefresh: Bool, contentEpoch: UInt32,
@@ -577,7 +591,8 @@ public final class GUIWindowContent: Sendable {
          selection: GUISelectionOverlay?, searchMatches: [GUISearchMatch],
          diagnosticUnderlines: [GUIDiagnosticUnderline], documentHighlights: [GUIDocumentHighlight],
          lineAnnotations: [GUILineAnnotation], paneGeometry: GUIPaneGeometry?,
-         cursorline: GUICursorline?, scrollPresentation: GUIScrollPresentation?) {
+         cursorline: GUICursorline?, scrollPresentation: GUIScrollPresentation?,
+         resourceWeight: FrameResourceWeight) {
         self.windowId = windowId
         self.fullRefresh = fullRefresh
         self.contentEpoch = contentEpoch
@@ -596,6 +611,7 @@ public final class GUIWindowContent: Sendable {
         self.paneGeometry = paneGeometry
         self.cursorline = cursorline
         self.scrollPresentation = scrollPresentation
+        self.resourceWeight = resourceWeight
     }
 
     /// Returns the same immutable content while replacing per-frame operation counters.
@@ -608,7 +624,7 @@ public final class GUIWindowContent: Sendable {
             searchMatches: searchMatches, diagnosticUnderlines: diagnosticUnderlines,
             documentHighlights: documentHighlights, lineAnnotations: lineAnnotations,
             paneGeometry: paneGeometry, cursorline: cursorline,
-            scrollPresentation: scrollPresentation
+            scrollPresentation: scrollPresentation, resourceWeight: resourceWeight
         )
     }
 
@@ -635,7 +651,8 @@ public final class GUIWindowContent: Sendable {
             lineAnnotations: lineAnnotations,
             paneGeometry: paneGeometry,
             cursorline: delta.cursorline,
-            scrollPresentation: scrollPresentation
+            scrollPresentation: scrollPresentation,
+            resourceWeight: resourceWeight
         )
     }
 
@@ -643,24 +660,37 @@ public final class GUIWindowContent: Sendable {
         try? applyingRowsDeltaChecked(delta).get()
     }
 
+    /// Exact ownership retained by this immutable window value in O(1).
+    public func exactResourceWeight() -> FrameResourceWeight { resourceWeight }
+
     /// Applies A1/A2 entries directly to a COW store copy. References resolve
     /// through durable IDs; no second full resident-row array is materialized.
     public func applyingRowsDeltaChecked(
-        _ delta: GUIWindowRowsDelta
+        _ delta: GUIWindowRowsDelta,
+        residentLimit: FrameResourceWeight? = nil,
+        stagingLimit: FrameResourceWeight? = nil
     ) -> Result<GUIWindowContent, ResidentRowStoreError> {
+        let effectiveResidentLimit = residentLimit ?? FrameResourcePolicy.default.resident.weightPerWindow
+        let effectiveStagingLimit = stagingLimit ?? FrameResourcePolicy.default.staging.weight
         guard delta.windowId == windowId, delta.contentEpoch == contentEpoch else {
             return .failure(.invalidRange(index: 0, removeCount: 0, rowCount: rowStore.count))
         }
         if delta.rowSplices != nil {
-            return applyingRowSplices(delta)
+            return applyingRowSplices(
+                delta, residentLimit: effectiveResidentLimit, stagingLimit: effectiveStagingLimit
+            )
         }
 
+        let stagingUsage = FrameResourceUsageBuilder(limit: effectiveStagingLimit)
         var sourceStore = rowStore
         var nextStore = rowStore
         do {
             // Validate the complete result against the immutable base using
             // identity/hash/order metadata only. Keeping metadata here avoids
             // constructing a second document-sized GUIVisualRow array.
+            try stagingUsage.reserve(.arrayEntries, delta.rows.count)
+            try stagingUsage.reserve(.arrayEntries, delta.rows.count)
+            try stagingUsage.reserve(.rows, delta.rows.count)
             var metadata: [ResidentRowMetadata] = []
             metadata.reserveCapacity(delta.rows.count)
             var seenRowIDs = Set<UInt64>()
@@ -722,6 +752,7 @@ public final class GUIWindowContent: Sendable {
             let removedCount = rowStore.count - prefix - suffix
             let insertedEnd = metadata.count - suffix
             if removedCount > 0 || prefix < insertedEnd {
+                try stagingUsage.reserve(.arrayEntries, insertedEnd - prefix)
                 var insertedRows: [GUIVisualRow] = []
                 insertedRows.reserveCapacity(insertedEnd - prefix)
                 for entry in delta.rows[prefix..<insertedEnd] {
@@ -732,12 +763,17 @@ public final class GUIWindowContent: Sendable {
                         insertedRows.append(row)
                     }
                 }
-                try nextStore.splice(at: prefix, removeCount: removedCount, inserting: insertedRows)
+                try nextStore.splice(
+                    at: prefix, removeCount: removedCount, inserting: insertedRows,
+                    limit: effectiveResidentLimit
+                )
             }
 
             nextStore.recordStagingCounters(sourceStore.counters - rowStore.counters)
         } catch let error as ResidentRowStoreError {
             return .failure(error)
+        } catch is FrameResourceError {
+            return .failure(.resourcePolicy)
         } catch {
             return .failure(.invalidRange(index: 0, removeCount: 0, rowCount: rowStore.count))
         }
@@ -746,12 +782,20 @@ public final class GUIWindowContent: Sendable {
             windowId: windowId, contentEpoch: contentEpoch
         ) == true ? delta.scrollPresentation : nil
 
-        return .success(content(afterApplying: delta, store: nextStore,
-                                scrollPresentation: nextScrollPresentation))
+        do {
+            return .success(try content(
+                afterApplying: delta, store: nextStore,
+                scrollPresentation: nextScrollPresentation, residentLimit: effectiveResidentLimit
+            ))
+        } catch {
+            return .failure(.resourcePolicy)
+        }
     }
 
     private func applyingRowSplices(
-        _ delta: GUIWindowRowsDelta
+        _ delta: GUIWindowRowsDelta,
+        residentLimit: FrameResourceWeight,
+        stagingLimit: FrameResourceWeight
     ) -> Result<GUIWindowContent, ResidentRowStoreError> {
         guard let baseRowCount = delta.baseRowCount,
               let resultRowCount = delta.resultRowCount,
@@ -759,11 +803,17 @@ public final class GUIWindowContent: Sendable {
             return .failure(.invalidRange(index: 0, removeCount: 0, rowCount: rowStore.count))
         }
 
+        let stagingUsage = FrameResourceUsageBuilder(limit: stagingLimit)
         var sourceStore = rowStore
         var resolvedSplices: [ResidentRowSplice] = []
-        resolvedSplices.reserveCapacity(wireSplices.count)
         do {
+            try stagingUsage.reserve(.arrayEntries, wireSplices.count)
+            try stagingUsage.reserve(.spliceEntries, wireSplices.count)
+            resolvedSplices.reserveCapacity(wireSplices.count)
             for splice in wireSplices {
+                try stagingUsage.reserve(.arrayEntries, splice.insertEntries.count)
+                try stagingUsage.reserve(.rows, splice.insertEntries.count)
+                try stagingUsage.reserve(.locatorEntries, splice.insertEntries.count)
                 var rows: [GUIVisualRow] = []
                 rows.reserveCapacity(splice.insertEntries.count)
                 for entry in splice.insertEntries {
@@ -786,24 +836,39 @@ public final class GUIWindowContent: Sendable {
             try nextStore.applyBatch(
                 resolvedSplices,
                 baseRowCount: Int(baseRowCount),
-                resultRowCount: Int(resultRowCount)
+                resultRowCount: Int(resultRowCount),
+                limit: residentLimit
             )
             nextStore.recordStagingCounters(sourceStore.counters - rowStore.counters)
             let nextScroll = delta.scrollPresentation?.belongsTo(
                 windowId: windowId, contentEpoch: contentEpoch
             ) == true ? delta.scrollPresentation : nil
-            return .success(content(afterApplying: delta, store: nextStore,
-                                    scrollPresentation: nextScroll))
+            return .success(try content(
+                afterApplying: delta, store: nextStore,
+                scrollPresentation: nextScroll, residentLimit: residentLimit
+            ))
         } catch let error as ResidentRowStoreError {
             return .failure(error)
+        } catch is FrameResourceError {
+            return .failure(.resourcePolicy)
         } catch {
             return .failure(.invalidRange(index: 0, removeCount: 0, rowCount: rowStore.count))
         }
     }
 
-    private func content(afterApplying delta: GUIWindowRowsDelta, store: ResidentRowStore,
-                         scrollPresentation: GUIScrollPresentation?) -> GUIWindowContent {
-        GUIWindowContent(
+    private func content(
+        afterApplying delta: GUIWindowRowsDelta, store: ResidentRowStore,
+        scrollPresentation: GUIScrollPresentation?, residentLimit: FrameResourceWeight
+    ) throws -> GUIWindowContent {
+        let resultingWeight = try Self.resourceWeight(
+            rowWeight: store.resourceWeight, selection: delta.selection,
+            searchMatches: delta.searchMatches,
+            diagnosticUnderlines: delta.diagnosticUnderlines,
+            documentHighlights: delta.documentHighlights,
+            lineAnnotations: delta.lineAnnotations, paneGeometry: delta.paneGeometry
+        )
+        try Self.validate(resultingWeight, limit: residentLimit)
+        return GUIWindowContent(
             windowId: windowId,
             fullRefresh: false,
             contentEpoch: contentEpoch,
@@ -821,7 +886,48 @@ public final class GUIWindowContent: Sendable {
             lineAnnotations: delta.lineAnnotations,
             paneGeometry: delta.paneGeometry,
             cursorline: delta.cursorline,
-            scrollPresentation: scrollPresentation
+            scrollPresentation: scrollPresentation,
+            resourceWeight: resultingWeight
+        )
+    }
+
+    private static func resourceWeight(
+        rowWeight: FrameResourceWeight, selection: GUISelectionOverlay?,
+        searchMatches: [GUISearchMatch],
+        diagnosticUnderlines: [GUIDiagnosticUnderline],
+        documentHighlights: [GUIDocumentHighlight],
+        lineAnnotations: [GUILineAnnotation], paneGeometry: GUIPaneGeometry?
+    ) throws -> FrameResourceWeight {
+        let overlayCount = try [
+            searchMatches.count, diagnosticUnderlines.count, documentHighlights.count,
+            lineAnnotations.count, selection == nil ? 0 : 1
+        ].reduce(into: 0) { total, count in
+            let (next, overflow) = total.addingReportingOverflow(count)
+            guard !overflow else { throw FrameResourceError.arithmeticOverflow }
+            total = next
+        }
+        let hitRegionCount = paneGeometry?.hitRegions.count ?? 0
+        let (arrayEntries, arrayOverflow) = overlayCount.addingReportingOverflow(hitRegionCount)
+        guard !arrayOverflow else { throw FrameResourceError.arithmeticOverflow }
+        let annotationBytes = try lineAnnotations.reduce(into: 0) { total, annotation in
+            let (next, overflow) = total.addingReportingOverflow(annotation.text.utf8.count)
+            guard !overflow else { throw FrameResourceError.arithmeticOverflow }
+            total = next
+        }
+        return try rowWeight.adding(FrameResourceWeight(
+            ownedUTF8Bytes: annotationBytes,
+            arrayEntries: arrayEntries,
+            overlays: overlayCount
+        ))
+    }
+
+    private static func validate(
+        _ weight: FrameResourceWeight, limit: FrameResourceWeight
+    ) throws {
+        guard let dimension = weight.firstExceeded(limit: limit) else { return }
+        throw FrameResourceError.limitExceeded(
+            dimension: dimension, used: 0, requested: weight.value(dimension),
+            limit: limit.value(dimension)
         )
     }
 }

@@ -115,6 +115,92 @@ struct ResidentRowStoreTests {
         #expect(staged.counters == committed.counters)
     }
 
+    @Test("cached resident weight exactly owns UTF-8, spans, rows, and locators")
+    func exactResidentWeight() throws {
+        let styled = GUIVisualRow(
+            rowType: .normal, rowId: 1, bufLine: 0, contentHash: 1,
+            text: "a😀", spans: [
+                GUIHighlightSpan(
+                    startCol: 0, endCol: 1, fg: 1, bg: 0,
+                    attrs: 0, fontWeight: 0, fontId: 0
+                )
+            ]
+        )
+        var store = try ResidentRowStore(rows: [styled, row(2, text: "xy")])
+
+        #expect(store.resourceWeight == FrameResourceWeight(
+            ownedUTF8Bytes: 7, arrayEntries: 1, rows: 2, spans: 1,
+            locatorEntries: 2
+        ))
+
+        let replacement = row(2, bufferLine: 1, text: "four", hash: 9)
+        try store.replace(at: 1, with: replacement)
+        #expect(store.resourceWeight.ownedUTF8Bytes == 9)
+        #expect(store.resourceWeight.rows == 2)
+        #expect(store.resourceWeight.locatorEntries == 2)
+    }
+
+    @Test("decoded construction rejects checked weight and identities before indexing")
+    func decodedConstructionRejectsBeforeIndexing() throws {
+        let validRows = [row(1, bufferLine: 0, text: "ok")]
+        let overLimit = FrameResourceWeight(
+            commands: .max, ownedUTF8Bytes: 3, arrayEntries: .max,
+            rows: 1, spans: .max, overlays: .max,
+            spliceEntries: .max, locatorEntries: 1
+        )
+
+        #expect(throws: ResidentRowStoreError.resourcePolicy) {
+            _ = try ResidentRowStore(
+                decodedRows: validRows,
+                resourceWeight: FrameResourceWeight(ownedUTF8Bytes: .max),
+                limit: overLimit
+            )
+        }
+        #expect(throws: ResidentRowStoreError.duplicateRowID(1)) {
+            _ = try ResidentRowStore(
+                decodedRows: validRows + validRows,
+                resourceWeight: FrameResourceWeight(rows: 2, locatorEntries: 2)
+            )
+        }
+    }
+
+    @Test("replacement validates exact resulting weight before publication")
+    func replacementWeightRejectsAtomically() throws {
+        let original = try ResidentRowStore(rows: [row(1, bufferLine: 0, text: "ok")])
+        var staged = original
+        let limit = FrameResourceWeight(
+            commands: .max, ownedUTF8Bytes: 3, arrayEntries: .max,
+            rows: 1, spans: .max, overlays: .max,
+            spliceEntries: .max, locatorEntries: 1
+        )
+
+        #expect(throws: ResidentRowStoreError.resourcePolicy) {
+            try staged.splice(
+                at: 0, removeCount: 1,
+                inserting: [row(1, bufferLine: 0, text: "four")], limit: limit
+            )
+        }
+        #expect(staged.resourceWeight == original.resourceWeight)
+        #expect(staged.row(at: 0) == original.row(at: 0))
+    }
+
+    @Test("5k and 65,536-row corpora retain calibrated default headroom")
+    func calibratedCorpusHeadroom() throws {
+        for count in [5_000, 65_536] {
+            let fixture = rows(0..<count)
+            let store = try ResidentRowStore(rows: fixture)
+            let limit = FrameResourcePolicy.default.resident.weightPerWindow
+
+            #expect(store.resourceWeight.rows == count)
+            #expect(store.resourceWeight.locatorEntries == count)
+            #expect(store.resourceWeight.spans == 0)
+            #expect(store.resourceWeight.ownedUTF8Bytes == fixture.reduce(0) {
+                $0 + $1.text.utf8.count
+            })
+            #expect(store.resourceWeight.firstExceeded(limit: limit) == nil)
+        }
+    }
+
     @Test("structural updates do not touch chunks after the splice")
     func boundedChunkUpdates() throws {
         var store = try ResidentRowStore(rows: rows(0..<65_536))

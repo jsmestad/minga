@@ -70,6 +70,8 @@ public enum ResidentRowStoreError: Error, Sendable, Equatable {
     case missingRowID(UInt64)
     /// A retained identity exists but its content hash differs.
     case contentHashMismatch(rowID: UInt64, expected: UInt32, actual: UInt32)
+    /// The exact resulting resident weight exceeds policy or overflows.
+    case resourcePolicy
 }
 
 /// One resolved immutable-base splice for atomic store application.
@@ -241,17 +243,21 @@ public struct ResidentRowStore: Sendable {
         var locators: LocatorTable
         var nextChunkID: UInt64
         var counters: ResidentRowStoreCounters
+        var resourceWeight: FrameResourceWeight
 
         init(root: Node? = nil, locators: LocatorTable = .init(), nextChunkID: UInt64 = 1,
-             counters: ResidentRowStoreCounters = .init()) {
+             counters: ResidentRowStoreCounters = .init(),
+             resourceWeight: FrameResourceWeight = .init()) {
             self.root = root
             self.locators = locators
             self.nextChunkID = nextChunkID
             self.counters = counters
+            self.resourceWeight = resourceWeight
         }
 
         func copy() -> Storage {
-            Storage(root: root, locators: locators, nextChunkID: nextChunkID, counters: counters)
+            Storage(root: root, locators: locators, nextChunkID: nextChunkID,
+                    counters: counters, resourceWeight: resourceWeight)
         }
     }
 
@@ -265,10 +271,23 @@ public struct ResidentRowStore: Sendable {
         try replaceAll(with: rows)
     }
 
-    /// Builds decoded protocol content without trapping; callers reject the
-    /// transaction when `validateInvariants()` reports duplicate identities.
-    public init(decodedRows rows: [GUIVisualRow]) {
-        self.storage = Storage()
+    /// Builds decoded protocol content from a checked row weight. Identity,
+    /// ordering, and policy validation all complete before chunks or indexes exist.
+    public init(
+        decodedRows rows: [GUIVisualRow],
+        resourceWeight: FrameResourceWeight,
+        limit: FrameResourceWeight? = nil
+    ) throws {
+        do {
+            try Self.validateRows(rows)
+            try Self.validate(resourceWeight, limit: limit)
+        } catch let error as ResidentRowStoreError {
+            throw error
+        } catch is FrameResourceError {
+            throw ResidentRowStoreError.resourcePolicy
+        }
+
+        self.storage = Storage(resourceWeight: resourceWeight)
         let chunks = makeChunks(rows)
         storage.root = Self.buildTree(chunks)
         indexChunks(chunks)
@@ -285,16 +304,23 @@ public struct ResidentRowStore: Sendable {
     public var chunkCount: Int { storage.root?.chunkCount ?? 0 }
     /// Cumulative deterministic store-operation counters.
     public var counters: ResidentRowStoreCounters { storage.counters }
+    /// Exact cached ownership of resident row strings, spans, and locators.
+    public var resourceWeight: FrameResourceWeight { storage.resourceWeight }
 
     /// Replaces the complete sequence and records one explicit full reset.
-    public mutating func replaceAll(with rows: [GUIVisualRow]) throws {
+    public mutating func replaceAll(
+        with rows: [GUIVisualRow], limit: FrameResourceWeight? = nil
+    ) throws {
         try Self.validateRows(rows)
+        let resultingWeight = try Self.weight(of: rows)
+        try Self.validate(resultingWeight, limit: limit)
         ensureUniqueStorage()
         storage.root = nil
         storage.locators.removeAll()
         let chunks = makeChunks(rows)
         storage.root = Self.buildTree(chunks)
         indexChunks(chunks)
+        storage.resourceWeight = resultingWeight
         storage.counters.rowsVisited += rows.count
         storage.counters.chunksTouched += chunks.count
         storage.counters.fullResets += 1
@@ -397,8 +423,10 @@ public struct ResidentRowStore: Sendable {
     /// Applies disjoint immutable-base splices as one value-semantic batch.
     ///
     /// Every range and result count is validated before the receiver is replaced.
-    public mutating func applyBatch(_ splices: [ResidentRowSplice], baseRowCount: Int,
-                                    resultRowCount: Int) throws {
+    public mutating func applyBatch(
+        _ splices: [ResidentRowSplice], baseRowCount: Int,
+        resultRowCount: Int, limit: FrameResourceWeight? = nil
+    ) throws {
         guard baseRowCount == count, resultRowCount >= 0 else {
             throw ResidentRowStoreError.invalidRange(index: 0, removeCount: 0, rowCount: count)
         }
@@ -425,9 +453,30 @@ public struct ResidentRowStore: Sendable {
             throw ResidentRowStoreError.invalidRange(index: computed, removeCount: 0, rowCount: resultRowCount)
         }
 
+        let removedWeight: FrameResourceWeight
+        let insertedWeight: FrameResourceWeight
+        do {
+            var removed = FrameResourceWeight()
+            var inserted = FrameResourceWeight()
+            for splice in splices {
+                removed = try removed.adding(
+                    try weight(in: splice.startIndex..<(splice.startIndex + splice.deleteCount))
+                )
+                inserted = try inserted.adding(try Self.weight(of: splice.insertedRows))
+            }
+            let resulting = try storage.resourceWeight.subtracting(removed).adding(inserted)
+            try Self.validate(resulting, limit: limit)
+            removedWeight = removed
+            insertedWeight = inserted
+        } catch is FrameResourceError {
+            throw ResidentRowStoreError.resourcePolicy
+        }
+
         if !splices.isEmpty, let replacements = try inPlaceReplacements(for: splices) {
             var staged = self
             staged.applyInPlaceReplacements(replacements)
+            staged.storage.resourceWeight = try staged.storage.resourceWeight
+                .subtracting(removedWeight).adding(insertedWeight)
             self = staged
             return
         }
@@ -438,7 +487,8 @@ public struct ResidentRowStore: Sendable {
             try staged.splice(
                 at: splice.startIndex + coordinateAdjustment,
                 removeCount: splice.deleteCount,
-                inserting: splice.insertedRows
+                inserting: splice.insertedRows,
+                limit: nil
             )
             coordinateAdjustment += splice.insertedRows.count - splice.deleteCount
         }
@@ -449,11 +499,26 @@ public struct ResidentRowStore: Sendable {
     }
 
     /// Applies a validated structural edit while preserving unaffected chunk IDs.
-    public mutating func splice(at index: Int, removeCount: Int, inserting insertedRows: [GUIVisualRow]) throws {
+    public mutating func splice(
+        at index: Int, removeCount: Int, inserting insertedRows: [GUIVisualRow],
+        limit: FrameResourceWeight? = nil
+    ) throws {
         guard index >= 0, removeCount >= 0, index <= count, index + removeCount <= count else {
             throw ResidentRowStoreError.invalidRange(index: index, removeCount: removeCount, rowCount: count)
         }
         guard removeCount > 0 || !insertedRows.isEmpty else { return }
+
+        let removedResourceWeight: FrameResourceWeight
+        let insertedResourceWeight: FrameResourceWeight
+        do {
+            removedResourceWeight = try weight(in: index..<(index + removeCount))
+            insertedResourceWeight = try Self.weight(of: insertedRows)
+            let resulting = try storage.resourceWeight
+                .subtracting(removedResourceWeight).adding(insertedResourceWeight)
+            try Self.validate(resulting, limit: limit)
+        } catch is FrameResourceError {
+            throw ResidentRowStoreError.resourcePolicy
+        }
 
         let removedIDs = Set((index..<(index + removeCount)).compactMap { row(at: $0)?.rowId })
         for row in insertedRows where storage.locators[row.rowId] != nil && !removedIDs.contains(row.rowId) {
@@ -478,15 +543,30 @@ public struct ResidentRowStore: Sendable {
             let chunks = makeChunks(insertedRows)
             storage.root = Self.buildTree(chunks)
             indexChunks(chunks)
+            storage.resourceWeight = insertedResourceWeight
             recordSplice(oldRows: 0, newRows: insertedRows.count, changedRows: insertedRows.count,
                          oldChunks: 0, newChunks: chunks.count)
             return
         }
 
-        let startLocation = chunkLocation(forRowIndex: min(index, max(count - 1, 0)))!
-        let endLocation = removeCount == 0
-            ? startLocation
-            : chunkLocation(forRowIndex: index + removeCount - 1)!
+        guard let startLocation = chunkLocation(
+            forRowIndex: min(index, max(count - 1, 0))
+        ) else {
+            throw ResidentRowStoreError.invalidRange(
+                index: index, removeCount: removeCount, rowCount: count
+            )
+        }
+        let endLocation: (rank: Int, offset: Int)
+        if removeCount == 0 {
+            endLocation = startLocation
+        } else {
+            guard let resolvedEnd = chunkLocation(forRowIndex: index + removeCount - 1) else {
+                throw ResidentRowStoreError.invalidRange(
+                    index: index, removeCount: removeCount, rowCount: count
+                )
+            }
+            endLocation = resolvedEnd
+        }
         var firstChunk = max(startLocation.rank - 1, 0)
         var lastChunk = min(endLocation.rank + 1, chunkCount - 1)
         var firstRow = rowPrefix(beforeChunk: firstChunk)
@@ -521,6 +601,8 @@ public struct ResidentRowStore: Sendable {
         let newChunks = makeChunks(selectedRows)
         indexChunks(newChunks)
         storage.root = Self.merge(Self.merge(left, Self.buildTree(newChunks)), right)
+        storage.resourceWeight = try storage.resourceWeight
+            .subtracting(removedResourceWeight).adding(insertedResourceWeight)
         recordSplice(
             oldRows: removedChunks.reduce(0) { $0 + $1.rows.count },
             newRows: selectedRows.count,
@@ -709,6 +791,45 @@ public struct ResidentRowStore: Sendable {
         let (_, remainder) = Self.splitByChunk(storage.root, count: ranks.lowerBound)
         let (selected, _) = Self.splitByChunk(remainder, count: ranks.count)
         return Self.flattenChunks(selected).flatMap(\.rows)
+    }
+
+    private func weight(in range: Range<Int>) throws -> FrameResourceWeight {
+        var result = FrameResourceWeight()
+        for index in range {
+            guard let row = row(at: index) else {
+                throw ResidentRowStoreError.invalidRange(
+                    index: range.lowerBound, removeCount: range.count, rowCount: count
+                )
+            }
+            result = try result.adding(Self.weight(of: row))
+        }
+        return result
+    }
+
+    static func weight(of row: GUIVisualRow) -> FrameResourceWeight {
+        FrameResourceWeight(
+            ownedUTF8Bytes: row.text.utf8.count,
+            arrayEntries: row.spans.count,
+            rows: 1,
+            spans: row.spans.count,
+            locatorEntries: 1
+        )
+    }
+
+    static func weight(of rows: [GUIVisualRow]) throws -> FrameResourceWeight {
+        try rows.reduce(into: FrameResourceWeight()) { result, row in
+            result = try result.adding(weight(of: row))
+        }
+    }
+
+    private static func validate(
+        _ weight: FrameResourceWeight, limit: FrameResourceWeight?
+    ) throws {
+        guard let limit, let dimension = weight.firstExceeded(limit: limit) else { return }
+        throw FrameResourceError.limitExceeded(
+            dimension: dimension, used: 0, requested: weight.value(dimension),
+            limit: limit.value(dimension)
+        )
     }
 
     static func validateRows(_ rows: [GUIVisualRow]) throws {

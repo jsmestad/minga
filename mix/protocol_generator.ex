@@ -2824,7 +2824,8 @@ defmodule Minga.Mix.ProtocolGenerator do
       "//\n",
       "// Structural twin of the Go semantic decoders. The production ProtocolDecoder\n",
       "// calls these and maps the result into its `RenderCommand` cases.\n\n",
-      "import Foundation\n\n",
+      "import Foundation\n",
+      "import MingaProtocol\n\n",
       "/// Namespace for schema-generated payload decoders, enum types, and struct types.\n",
       "enum GeneratedProtocol {\n\n",
       swift_decode_error(),
@@ -2899,6 +2900,7 @@ defmodule Minga.Mix.ProtocolGenerator do
             let l = Int(data[offset])
             let body = offset + 1
             try requireWindow(windowEnd, body + l, "string8 body")
+            try FrameDecodeAccounting.reserve(.ownedUTF8Bytes, l)
             let s = String(data: data[body..<(body + l)], encoding: .utf8) ?? ""
             return (s, body + l)
         }
@@ -2908,6 +2910,7 @@ defmodule Minga.Mix.ProtocolGenerator do
             let l = Int(decodeU16(data, offset))
             let body = offset + 2
             try requireWindow(windowEnd, body + l, "string16 body")
+            try FrameDecodeAccounting.reserve(.ownedUTF8Bytes, l)
             let s = String(data: data[body..<(body + l)], encoding: .utf8) ?? ""
             return (s, body + l)
         }
@@ -2917,6 +2920,7 @@ defmodule Minga.Mix.ProtocolGenerator do
             let l = Int(decodeU32(data, offset))
             let body = offset + 4
             try requireWindow(windowEnd, body + l, "string32 body")
+            try FrameDecodeAccounting.reserve(.ownedUTF8Bytes, l)
             let s = String(data: data[body..<(body + l)], encoding: .utf8) ?? ""
             return (s, body + l)
         }
@@ -3260,6 +3264,7 @@ defmodule Minga.Mix.ProtocolGenerator do
       "#{ind}let #{local}Count = Int(#{count_read})\n",
       "#{ind}pos += #{count_size}\n",
       stride_check,
+      "#{ind}try FrameDecodeAccounting.reserve(.arrayEntries, #{local}Count)\n",
       "#{ind}#{bind}#{local} = #{swift_array_type(element, smap)}()\n",
       "#{ind}#{local}.reserveCapacity(#{swift_prealloc("#{local}Count", element, smap)})\n",
       "#{ind}for _ in 0..<#{local}Count {\n",
@@ -3367,6 +3372,7 @@ defmodule Minga.Mix.ProtocolGenerator do
       "        let count = Int(#{count_read})\n",
       "        pos += #{count_size}\n",
       stride_check,
+      "        try FrameDecodeAccounting.reserve(.arrayEntries, count)\n",
       "        var items = #{array_type}()\n",
       "        items.reserveCapacity(#{swift_prealloc("count", element, smap)})\n",
       "        for _ in 0..<count {\n",

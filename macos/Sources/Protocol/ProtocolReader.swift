@@ -5,6 +5,7 @@
 /// (the BEAM batches an entire render frame into one message).
 
 import Foundation
+import MingaProtocol
 import os
 import Synchronization
 
@@ -13,14 +14,16 @@ import Synchronization
 /// Defaults to stdin (BEAM is parent, spawned us). In bundle mode, the
 /// BEAMProcessManager passes the child process's stdout pipe instead.
 final class ProtocolReader: @unchecked Sendable {
-    private static let defaultMaxPayloadLength = 64 * 1_048_576
+    private static let defaultMaxPayloadLength = FrameResourcePolicy.default.wire.payloadBytes
 
     private var thread: Thread?
     private let input: FileHandle
     private let decoder: @Sendable (Data) throws -> DecodedFrame
     private let handler: @Sendable (DecodedFrame) -> Void
-    private let onDecodeFailure: @Sendable (ProtocolDecodeError) -> Void
+    private let onDecodeFailure: @Sendable (DecodedFrameFailure) -> Void
     private let onDisconnect: @Sendable () -> Void
+    private let acquireAdmission: @Sendable () -> Bool
+    private let cancelAdmission: @Sendable () -> Void
     private let maxPayloadLength: Int
     private let running = Mutex(false)
 
@@ -31,8 +34,10 @@ final class ProtocolReader: @unchecked Sendable {
         maxPayloadLength: Int = ProtocolReader.defaultMaxPayloadLength,
         decoder: @escaping @Sendable (Data) throws -> DecodedFrame = { data in try decodeFrame(from: data) },
         handler: @escaping @Sendable (DecodedFrame) -> Void,
-        onDecodeFailure: @escaping @Sendable (ProtocolDecodeError) -> Void,
-        onDisconnect: @escaping @Sendable () -> Void
+        onDecodeFailure: @escaping @Sendable (DecodedFrameFailure) -> Void,
+        onDisconnect: @escaping @Sendable () -> Void,
+        acquireAdmission: @escaping @Sendable () -> Bool = { true },
+        cancelAdmission: @escaping @Sendable () -> Void = {}
     ) {
         self.input = input
         self.maxPayloadLength = maxPayloadLength
@@ -40,6 +45,8 @@ final class ProtocolReader: @unchecked Sendable {
         self.handler = handler
         self.onDecodeFailure = onDecodeFailure
         self.onDisconnect = onDisconnect
+        self.acquireAdmission = acquireAdmission
+        self.cancelAdmission = cancelAdmission
     }
 
     /// Start reading on a background thread.
@@ -64,16 +71,20 @@ final class ProtocolReader: @unchecked Sendable {
     /// only takes effect after the current read completes or stdin closes.
     func stop() {
         running.withLock { $0 = false }
+        cancelAdmission()
     }
 
     // MARK: - Private
 
     private func readLoop() {
         while running.withLock({ $0 }) {
+            // Reserve the sole reader-to-main slot before reading any payload bytes.
+            guard acquireAdmission() else { return }
             // Read 4-byte length header.
             let lenData = input.readData(ofLength: 4)
             guard lenData.count == 4 else {
                 // stdin closed or short read: BEAM has exited.
+                cancelAdmission()
                 onDisconnect()
                 return
             }
@@ -83,6 +94,7 @@ final class ProtocolReader: @unchecked Sendable {
 
             guard length > 0, length <= maxPayloadLength else {
                 os_log(.error, log: protocolLog, "Protocol payload length %{public}d outside valid range 1...%{public}d; disconnecting to avoid stream desync", length, maxPayloadLength)
+                cancelAdmission()
                 onDisconnect()
                 return
             }
@@ -93,6 +105,7 @@ final class ProtocolReader: @unchecked Sendable {
             while remaining > 0 {
                 let chunk = input.readData(ofLength: remaining)
                 guard !chunk.isEmpty else {
+                    cancelAdmission()
                     onDisconnect()
                     return
                 }
@@ -113,10 +126,15 @@ final class ProtocolReader: @unchecked Sendable {
                     frame.metrics.allocations
                 )
                 handler(frame)
+            } catch let failure as DecodedFrameFailure {
+                onDecodeFailure(failure)
             } catch let error as ProtocolDecodeError {
-                onDecodeFailure(error)
+                onDecodeFailure(DecodedFrameFailure(
+                    error: error.unwrappedFrameFailure,
+                    envelope: error.frameEnvelope
+                ))
             } catch {
-                onDecodeFailure(.malformed)
+                onDecodeFailure(DecodedFrameFailure(error: .malformed, envelope: nil))
             }
         }
     }
