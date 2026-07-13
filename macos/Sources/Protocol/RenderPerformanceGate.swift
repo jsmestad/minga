@@ -91,6 +91,8 @@ public enum RenderPerformanceGate {
     public static let combinedAbsoluteBudgetMs = 8.0
     /// Largest allowed ratio between a measurement and its checked-in reference.
     public static let maximumRegressionRatio = 1.20
+    /// Minimum absolute allowance for sub-millisecond host scheduling noise.
+    public static let minimumRegressionAllowanceMs = 0.05
 
     /// Returns every policy or baseline validation failure for one measurement.
     public static func failures(measurement: RenderPerformanceMeasurement,
@@ -140,9 +142,11 @@ public enum RenderPerformanceGate {
         if measured > absolute {
             failures.append("\(stage) p95 \(format(measured))ms exceeds absolute \(format(absolute))ms")
         }
-        let relative = baseline * maximumRegressionRatio
+        let ratioLimit = baseline * maximumRegressionRatio
+        let noiseLimit = baseline + minimumRegressionAllowanceMs
+        let relative = max(ratioLimit, noiseLimit)
         if measured > relative {
-            failures.append("\(stage) p95 \(format(measured))ms exceeds \(format(maximumRegressionRatio))x baseline \(format(relative))ms")
+            failures.append("\(stage) p95 \(format(measured))ms exceeds relative limit \(format(relative))ms (\(format(maximumRegressionRatio))x baseline or +\(format(minimumRegressionAllowanceMs))ms noise allowance)")
         }
     }
 

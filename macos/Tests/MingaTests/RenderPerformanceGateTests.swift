@@ -25,6 +25,26 @@ struct RenderPerformanceGateTests {
         #expect(failures(stage: 1.20.nextUp, combined: 2.40).contains { $0.contains("1.20x baseline") })
     }
 
+    @Test("sub-millisecond references include a fixed host-noise allowance")
+    func subMillisecondNoiseAllowance() {
+        let tinyBaseline = RenderPerformanceBaseline(
+            version: 1, fixtureVersion: "resident-ordinary-edit-v2", decodeApplyP95Ms: 0.03,
+            commandPreparationP95Ms: 0.35, combinedP95Ms: 0.39, provenance: provenance)
+        let boundary = 0.03 + RenderPerformanceGate.minimumRegressionAllowanceMs
+        let pass = RenderPerformanceMeasurement(
+            decodeApplyP50Ms: 0.01, decodeApplyP95Ms: boundary,
+            commandPreparationP50Ms: 0.13, commandPreparationP95Ms: 0.35,
+            combinedP50Ms: 0.15, combinedP95Ms: 0.39)
+        #expect(RenderPerformanceGate.failures(measurement: pass, baseline: tinyBaseline).isEmpty)
+
+        let fail = RenderPerformanceMeasurement(
+            decodeApplyP50Ms: 0.01, decodeApplyP95Ms: boundary.nextUp,
+            commandPreparationP50Ms: 0.13, commandPreparationP95Ms: 0.35,
+            combinedP50Ms: 0.15, combinedP95Ms: 0.39)
+        #expect(RenderPerformanceGate.failures(measurement: fail, baseline: tinyBaseline)
+            .contains { $0.contains("noise allowance") })
+    }
+
     @Test("exact absolute boundaries pass and the next representable values fail")
     func absoluteBoundaries() {
         let absoluteBaseline = RenderPerformanceBaseline(
