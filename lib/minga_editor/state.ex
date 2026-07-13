@@ -2144,45 +2144,50 @@ defmodule MingaEditor.State do
         {state, []}
 
       %TabBar{active_id: current_id} = tb ->
-        log_switch_tab(tb, current_id, target_id)
-        state = retire_lsp_operations_for_tab(state, current_id)
+        case TabBar.get(tb, target_id) do
+          nil ->
+            {state, []}
 
-        # Snapshot current tab (spinner stop is deferred as effect)
-        context = snapshot_tab_context_no_sync(state)
-        tb = TabBar.update_context(tb, current_id, context)
+          %Tab{} = target ->
+            log_switch_tab(tb, current_id, target_id)
+            state = retire_lsp_operations_for_tab(state, current_id)
 
-        # Switch pointer
-        tb = TabBar.switch_to(tb, target_id)
+            # Snapshot current tab (spinner stop is deferred as effect)
+            context = snapshot_tab_context_no_sync(state)
+            tb = TabBar.update_context(tb, current_id, context)
 
-        # Restore target tab's context
-        %Tab{} = target = TabBar.active(tb)
-        state = set_tab_bar(state, tb)
+            # Switch pointer
+            tb = TabBar.switch_to(tb, target_id)
 
-        state = restore_tab_context(state, target.context)
-        state = sync_agent_ui_from_active_workspace(state)
+            # Restore target tab's context
+            state = set_tab_bar(state, tb)
 
-        # If the active modal is completion belonging to the leaving tab,
-        # dismiss it so it doesn't follow us to the new tab.
-        state = MingaEditor.State.ModalOverlay.dismiss_if_stale(state)
+            state = restore_tab_context(state, target.context)
+            state = sync_agent_ui_from_active_workspace(state)
 
-        # Clear attention flag on the tab we're switching to.
-        state =
-          set_tab_bar(
-            state,
-            TabBar.update_tab(tab_bar(state), target_id, &Tab.set_attention(&1, false))
-          )
+            # If the active modal is completion belonging to the leaving tab,
+            # dismiss it so it doesn't follow us to the new tab.
+            state = MingaEditor.State.ModalOverlay.dismiss_if_stale(state)
 
-        log_switch_tab_result(state)
+            # Clear attention flag on the tab we're switching to.
+            state =
+              set_tab_bar(
+                state,
+                TabBar.update_tab(tab_bar(state), target_id, &Tab.set_attention(&1, false))
+              )
 
-        state =
-          state
-          |> invalidate_all_windows()
-          |> Map.put(:layout, nil)
+            log_switch_tab_result(state)
 
-        # Collect side effects: stop outgoing spinner, rebuild session, maybe restart spinner
-        effects = [:stop_spinner, {:rebuild_agent_session, target}, :start_spinner]
+            state =
+              state
+              |> invalidate_all_windows()
+              |> Map.put(:layout, nil)
 
-        {state, effects}
+            # Collect side effects: stop outgoing spinner, rebuild session, maybe restart spinner
+            effects = [:stop_spinner, {:rebuild_agent_session, target}, :start_spinner]
+
+            {state, effects}
+        end
     end
   end
 
@@ -2202,8 +2207,9 @@ defmodule MingaEditor.State do
     apply_buffer_effects(state, effects)
   end
 
+  @doc "Retires correlated references and rename requests owned by a departing tab."
   @spec retire_lsp_operations_for_tab(t(), Tab.id()) :: t()
-  defp retire_lsp_operations_for_tab(%__MODULE__{} = state, tab_id) do
+  def retire_lsp_operations_for_tab(%__MODULE__{} = state, tab_id) do
     {requests, lsp} = LSPState.take_operation_requests_for_tab(state.lsp, tab_id)
     state = update_lsp(state, fn _current -> lsp end)
 

@@ -106,16 +106,16 @@ defmodule MingaAgent.Tools.LspRename do
       edits ->
         {file_count, edit_count, errors} = apply_file_edits(edits)
 
-        result =
-          "Renamed to `#{new_name}` across #{file_count} file#{if file_count == 1, do: "", else: "s"} (#{edit_count} edits)"
+        case errors do
+          [] ->
+            {:ok,
+             "Renamed to `#{new_name}` across #{file_count} file#{if file_count == 1, do: "", else: "s"} (#{edit_count} edits)"}
 
-        result =
-          case errors do
-            [] -> result
-            _ -> result <> "\n\nWarnings:\n" <> Enum.join(errors, "\n")
-          end
-
-        {:ok, result}
+          _ ->
+            {:error,
+             "Failed to rename to `#{new_name}`: #{edit_count} edits across #{file_count} files\n" <>
+               Enum.join(errors, "\n")}
+        end
     end
   end
 
@@ -137,8 +137,10 @@ defmodule MingaAgent.Tools.LspRename do
   defp apply_edits_to_file(path, edits) do
     case Buffer.pid_for_path(path) do
       {:ok, pid} ->
-        Buffer.apply_edits(pid, edits)
-        :ok
+        case Buffer.apply_edits(pid, edits) do
+          :ok -> :ok
+          {:error, :read_only} -> {:error, "buffer is read-only"}
+        end
 
       :not_found ->
         apply_edits_via_filesystem(path, edits)

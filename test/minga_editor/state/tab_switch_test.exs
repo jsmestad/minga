@@ -12,11 +12,13 @@ defmodule MingaEditor.State.TabSwitchTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias MingaEditor.Commands.BufferManagement
   alias MingaEditor.Handlers.LspEventHandler
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.State.LSP.FormatOperation
+  alias MingaEditor.State.Operation
   alias MingaEditor.State.OperationFeedback
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context
@@ -158,6 +160,42 @@ defmodule MingaEditor.State.TabSwitchTest do
     {state, file_tab.id, agent_tab.id, file_buf}
   end
 
+  @spec track_tab_operations(EditorState.t(), Tab.id()) ::
+          {EditorState.t(), Operation.t(), Operation.t()}
+  defp track_tab_operations(state, tab_id) do
+    {state, references} =
+      OperationFeedback.start_in(
+        state,
+        :lsp_references,
+        "lsp:references:one.ex",
+        "Finding references…",
+        cancelable?: false,
+        replace?: false
+      )
+
+    {state, rename} =
+      OperationFeedback.start_in(
+        state,
+        :lsp_rename,
+        "lsp:rename:one.ex",
+        "Renaming…",
+        cancelable?: false,
+        replace?: false
+      )
+
+    state =
+      EditorState.update_lsp(state, fn lsp ->
+        lsp
+        |> LSPState.track_operation_request(
+          make_ref(),
+          {:references, references.id, tab_id}
+        )
+        |> LSPState.track_operation_request(make_ref(), {:rename, rename.id, tab_id})
+      end)
+
+    {state, references, rename}
+  end
+
   # ── switch_tab_pure/2 ─────────────────────────────────────────────────────────
 
   describe "switch_tab_pure/2" do
@@ -180,6 +218,28 @@ defmodule MingaEditor.State.TabSwitchTest do
 
       assert new_state == state
       assert effects == []
+    end
+
+    test "missing target leaves current references and rename requests pending" do
+      {state, _buf1, _buf2} = state_with_two_file_tabs()
+      current_id = EditorState.tab_bar(state).active_id
+      {state, references, rename} = track_tab_operations(state, current_id)
+      requests = state.lsp.operation_requests
+
+      {unchanged, effects} = EditorState.switch_tab_pure(state, 999_999)
+
+      assert effects == []
+      assert unchanged.lsp.operation_requests == requests
+
+      assert {:ok, pending_references} =
+               OperationFeedback.fetch(unchanged.operation_feedback, references.id)
+
+      assert pending_references.status == :pending
+
+      assert {:ok, pending_rename} =
+               OperationFeedback.fetch(unchanged.operation_feedback, rename.id)
+
+      assert pending_rename.status == :pending
     end
 
     test "file-to-file preserves both tab contexts" do
@@ -342,38 +402,7 @@ defmodule MingaEditor.State.TabSwitchTest do
       current_id = tab_bar.active_id
       target_id = Enum.find(tab_bar.tabs, &(&1.id != current_id)).id
 
-      {state, references} =
-        OperationFeedback.start_in(
-          state,
-          :lsp_references,
-          "lsp:references:one.ex",
-          "Finding references…",
-          cancelable?: false,
-          replace?: false
-        )
-
-      {state, rename} =
-        OperationFeedback.start_in(
-          state,
-          :lsp_rename,
-          "lsp:rename:one.ex",
-          "Renaming…",
-          cancelable?: false,
-          replace?: false
-        )
-
-      references_ref = make_ref()
-      rename_ref = make_ref()
-
-      state =
-        EditorState.update_lsp(state, fn lsp ->
-          lsp
-          |> LSPState.track_operation_request(
-            references_ref,
-            {:references, references.id, current_id}
-          )
-          |> LSPState.track_operation_request(rename_ref, {:rename, rename.id, current_id})
-        end)
+      {state, references, rename} = track_tab_operations(state, current_id)
 
       {switched, _effects} = EditorState.switch_tab_pure(state, target_id)
 
@@ -387,6 +416,24 @@ defmodule MingaEditor.State.TabSwitchTest do
       assert {:ok, rename} = OperationFeedback.fetch(switched.operation_feedback, rename.id)
       assert rename.status == :stale
       assert rename.message == "Rename response ignored after tab switch"
+    end
+
+    test "closing the active tab retires its references and rename requests" do
+      {state, _buf1, _buf2} = state_with_two_file_tabs()
+      current_id = EditorState.tab_bar(state).active_id
+      {state, references, rename} = track_tab_operations(state, current_id)
+
+      closed = BufferManagement.execute(state, :force_quit)
+
+      assert TabBar.get(EditorState.tab_bar(closed), current_id) == nil
+      assert closed.lsp.operation_requests == %{}
+
+      assert {:ok, closed_references} =
+               OperationFeedback.fetch(closed.operation_feedback, references.id)
+
+      assert closed_references.status == :stale
+      assert {:ok, closed_rename} = OperationFeedback.fetch(closed.operation_feedback, rename.id)
+      assert closed_rename.status == :stale
     end
 
     test "tab switch preserves Editor-global formatting ownership" do

@@ -1989,7 +1989,9 @@ defmodule MingaEditor.Commands.BufferManagement do
        ) do
     case TabBar.remove(tb, tb.active_id) do
       {:ok, new_tb} ->
-        EditorState.set_tab_bar(state, maybe_switch_to_replacement(new_tb, replacement_id))
+        state
+        |> EditorState.retire_lsp_operations_for_tab(tb.active_id)
+        |> EditorState.set_tab_bar(maybe_switch_to_replacement(new_tb, replacement_id))
 
       :last_tab ->
         state

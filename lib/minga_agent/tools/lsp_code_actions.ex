@@ -189,22 +189,27 @@ defmodule MingaAgent.Tools.LspCodeActions do
       workspace_edit ->
         file_edits = WorkspaceEdit.parse(workspace_edit)
         {file_count, edit_count, errors} = apply_file_edits(file_edits)
-        result = "Applied \"#{title}\": #{edit_count} edits across #{file_count} files"
-
-        result =
-          case errors do
-            [] -> result
-            _ -> result <> "\nWarnings:\n" <> Enum.join(errors, "\n")
-          end
-
-        # Also execute the command if present (some actions have both edit + command)
-        case Map.get(action, "command") do
-          nil -> :ok
-          command -> execute_command(client, command)
-        end
-
-        {:ok, result}
+        finish_workspace_edit(client, action, title, file_count, edit_count, errors)
     end
+  end
+
+  @spec finish_workspace_edit(pid(), map(), String.t(), non_neg_integer(), non_neg_integer(), [
+          String.t()
+        ]) ::
+          {:ok, String.t()} | {:error, String.t()}
+  defp finish_workspace_edit(client, action, title, file_count, edit_count, []) do
+    case Map.get(action, "command") do
+      nil -> :ok
+      command -> execute_command(client, command)
+    end
+
+    {:ok, "Applied \"#{title}\": #{edit_count} edits across #{file_count} files"}
+  end
+
+  defp finish_workspace_edit(_client, _action, title, file_count, edit_count, errors) do
+    {:error,
+     "Failed to apply \"#{title}\": #{edit_count} edits across #{file_count} files\n" <>
+       Enum.join(errors, "\n")}
   end
 
   @spec resolve_action(pid(), map()) :: map()
@@ -245,8 +250,10 @@ defmodule MingaAgent.Tools.LspCodeActions do
   defp apply_edits_to_file(path, edits) do
     case Buffer.pid_for_path(path) do
       {:ok, pid} ->
-        Buffer.apply_edits(pid, edits)
-        :ok
+        case Buffer.apply_edits(pid, edits) do
+          :ok -> :ok
+          {:error, :read_only} -> {:error, "buffer is read-only"}
+        end
 
       :not_found ->
         apply_edits_via_filesystem(path, edits)
