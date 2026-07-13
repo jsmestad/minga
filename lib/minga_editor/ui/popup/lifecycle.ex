@@ -258,17 +258,59 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
   @spec maybe_restore_popup_focus(state(), Window.id(), PopupActive.t(), boolean()) :: state()
   defp maybe_restore_popup_focus(state, window_id, meta, true) do
     windows = state.workspace.windows
+    candidates = restore_candidates(windows, window_id, meta.previous_active)
 
-    restore_id =
-      case Windows.fetch(windows, meta.previous_active) do
-        {:ok, _window} -> meta.previous_active
-        :error -> find_non_popup_window(windows, window_id)
-      end
-
-    MingaEditor.WindowFocus.restore_focus(state, restore_id)
+    case restore_first_focus(state, candidates) do
+      {:ok, restored} -> restored
+      :error -> repair_popup_focus(state, windows, window_id, meta.previous_active)
+    end
   end
 
   defp maybe_restore_popup_focus(state, _window_id, _meta, false), do: state
+
+  @spec restore_first_focus(state(), [Window.id()]) :: {:ok, state()} | :error
+  defp restore_first_focus(state, candidates) do
+    Enum.reduce_while(candidates, :error, fn candidate_id, :error ->
+      case MingaEditor.WindowFocus.restore_focus(state, candidate_id) do
+        {:ok, restored} -> {:halt, {:ok, restored}}
+        :error -> {:cont, :error}
+      end
+    end)
+  end
+
+  @spec repair_popup_focus(state(), Windows.t(), Window.id(), Window.id()) :: state()
+  defp repair_popup_focus(state, windows, window_id, previous_active) do
+    case non_popup_window_ids(windows, window_id, previous_active) do
+      [fallback_id | _] ->
+        case MingaEditor.WindowFocus.repair_focus(state, fallback_id) do
+          {:ok, repaired} -> repaired
+          :error -> state
+        end
+
+      [] ->
+        state
+    end
+  end
+
+  @spec restore_candidates(Windows.t(), Window.id(), Window.id()) :: [Window.id()]
+  defp restore_candidates(windows, window_id, previous_active) do
+    [previous_active | non_popup_window_ids(windows, window_id, previous_active)]
+    |> Enum.reject(&(&1 == window_id))
+    |> Enum.uniq()
+  end
+
+  @spec non_popup_window_ids(Windows.t(), Window.id(), Window.id()) :: [Window.id()]
+  defp non_popup_window_ids(%Windows{map: window_map}, window_id, previous_active) do
+    ids =
+      window_map
+      |> Enum.filter(fn {id, window} -> id != window_id and not Window.popup?(window) end)
+      |> Enum.map(&elem(&1, 0))
+      |> Enum.sort()
+
+    if previous_active in ids,
+      do: [previous_active | List.delete(ids, previous_active)],
+      else: ids
+  end
 
   @spec finish_popup_close(state(), Window.id(), PopupActive.t(), boolean()) :: state()
   defp finish_popup_close(
@@ -352,16 +394,6 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
     case Windows.remove_window(ws, window_id) do
       {:ok, windows} -> windows
       :error -> Windows.delete_window(ws, window_id)
-    end
-  end
-
-  @spec find_non_popup_window(Windows.t(), Window.id()) :: Window.id()
-  defp find_non_popup_window(windows, exclude_id) do
-    case Windows.find_by_content(windows, fn window ->
-           window.id != exclude_id and not Window.popup?(window)
-         end) do
-      {id, _window} -> id
-      nil -> exclude_id
     end
   end
 end

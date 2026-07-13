@@ -97,6 +97,15 @@ defmodule MingaEditor.WindowFocusTest do
     assert WindowFocus.remember_active_cursor(mismatched) == mismatched
   end
 
+  test "active cursor snapshot leaves state unchanged when the matching buffer has died" do
+    {state, first_buffer, _second_buffer} = split_state()
+    monitor = Process.monitor(first_buffer)
+    GenServer.stop(first_buffer, :normal)
+    assert_receive {:DOWN, ^monitor, :process, ^first_buffer, :normal}
+
+    assert WindowFocus.remember_active_cursor(state) == state
+  end
+
   defp split_state do
     state = base_state(content: "first\nline\nend")
     first_buffer = state.workspace.buffers.active
