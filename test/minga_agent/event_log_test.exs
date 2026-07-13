@@ -3,6 +3,7 @@ defmodule MingaAgent.EventLogTest do
 
   alias MingaAgent.EventLog
   alias MingaAgent.EventLog.ControllableStore
+  alias MingaAgent.EventLog.EventRecord
   alias MingaAgent.EventLog.Store
 
   @moduletag :tmp_dir
@@ -28,7 +29,9 @@ defmodule MingaAgent.EventLogTest do
                name
              )
 
-    assert_receive {:event_log_commit, ^receipt, :tool_call_started, {:persisted, event_id}}
+    assert_receive {:event_log_commit, ^receipt, :tool_call_started, {:persisted, event_id}},
+                   @event_timeout
+
     assert is_integer(event_id)
 
     {:ok, db} = EventLog.open_read_connection(db_dir: tmp_dir)
@@ -79,6 +82,94 @@ defmodule MingaAgent.EventLogTest do
     assert final_record.payload["sequence"] == 4
     send(writer, {:event_log_store_insert_result, {:ok, 13}})
     assert {:persisted, 13} = EventLog.await(final_receipt)
+  end
+
+  test "oversized and invalid payloads are rejected before reaching the writer" do
+    name = unique_name("payload-limits-log")
+    start_controlled_event_log(name)
+    writer = open_controlled_writer()
+
+    assert {:error, :payload_too_large} =
+             EventLog.record(
+               "session",
+               :system_message,
+               %{message: String.duplicate("x", 300_000)},
+               name
+             )
+
+    assert {:error, :invalid_payload} =
+             EventLog.record("session", :system_message, %{message: <<255>>}, name)
+
+    assert {:error, :invalid_payload} =
+             EventLog.record("session", :system_message, %{callback: fn -> :ok end}, name)
+
+    refute_receive {:event_log_store_insert, ^writer, _record}
+  end
+
+  test "outstanding byte accounting includes best-effort work and releases terminal events" do
+    name = unique_name("byte-bounds-log")
+    start_controlled_event_log(name, max_queue_bytes: 48)
+    writer = open_controlled_writer()
+
+    assert :queued =
+             EventLog.record_best_effort(
+               "session",
+               :assistant_delta,
+               %{delta: "1234567890"},
+               name
+             )
+
+    assert_receive {:event_log_store_insert, ^writer, _record}
+
+    assert {:error, :overloaded} =
+             EventLog.record("session", :system_message, %{message: "1234567890"}, name)
+
+    send(writer, {:event_log_store_insert_result, {:ok, 1}})
+    assert :ok = EventLog.await_idle(name)
+
+    assert {:queued, failed_receipt} =
+             EventLog.record("session", :system_message, %{message: "1234567890"}, name)
+
+    assert_receive {:event_log_store_insert, ^writer, _record}
+    send(writer, {:event_log_store_insert_result, {:error, :disk_full}})
+
+    assert {:error, {:persistence_failed, :disk_full}} = EventLog.await(failed_receipt)
+
+    assert {:queued, final_receipt} =
+             EventLog.record("session", :system_message, %{message: "1234567890"}, name)
+
+    assert_receive {:event_log_store_insert, ^writer, _record}
+    send(writer, {:event_log_store_insert_result, {:ok, 2}})
+    assert {:persisted, 2} = EventLog.await(final_receipt)
+  end
+
+  test "serialization failure is terminal and later FIFO work still persists", %{tmp_dir: tmp_dir} do
+    name = unique_name("poison-log")
+    start_event_log(name, db_dir: tmp_dir)
+
+    poison = EventRecord.new("session", :system_message, %{"callback" => fn -> :ok end})
+
+    assert {:queued, poison_receipt} =
+             GenServer.call(
+               name,
+               {:admit, :critical, poison, :erlang.external_size(poison.payload)},
+               :infinity
+             )
+
+    assert {:queued, valid_receipt} =
+             EventLog.record("session", :system_message, %{message: "valid"}, name)
+
+    assert {:error, {:persistence_failed, {:serialization_failed, _exception}}} =
+             EventLog.await(poison_receipt)
+
+    assert {:persisted, _id} = EventLog.await(valid_receipt)
+
+    {:ok, db} = EventLog.open_read_connection(db_dir: tmp_dir)
+
+    assert {:ok, [%{payload: %{"message" => "valid"}}]} =
+             EventLog.events_after(db, "session", 0, 10)
+
+    :ok = Store.close(db)
   end
 
   test "insert failure produces an explicit post-store persistence failure" do
@@ -184,6 +275,29 @@ defmodule MingaAgent.EventLogTest do
     assert recovered_record.payload["sequence"] == 3
     send(second_writer, {:event_log_store_insert_result, {:ok, 31}})
     assert {:persisted, 31} = EventLog.await(recovered_receipt)
+  end
+
+  test "retention survives writer death followed by replacement open failure" do
+    name = unique_name("retention-recovery-log")
+    log = start_controlled_event_log(name, writer_restart_delay_ms: 60_000)
+    first_writer = open_controlled_writer()
+
+    send(log, :retention_sweep)
+    assert_receive {:event_log_store_delete_before, ^first_writer, _cutoff}
+    Process.exit(first_writer, :kill)
+
+    assert_receive {:event_log_store_open, second_writer, _path}, @event_timeout
+    second_ref = Process.monitor(second_writer)
+    send(second_writer, {:event_log_store_open_result, {:error, :permission_denied}})
+    assert_receive {:DOWN, ^second_ref, :process, ^second_writer, _reason}
+    assert %{status: :unavailable, pending_retention: true} = :sys.get_state(log)
+
+    assert :ok = EventLog.restart_writer(name)
+    third_writer = open_controlled_writer()
+
+    assert_receive {:event_log_store_delete_before, ^third_writer, _cutoff}
+    send(third_writer, {:event_log_store_delete_before_result, {:ok, 0}})
+    assert :ok = EventLog.await_idle(name)
   end
 
   test "acknowledged critical boundaries remain ordered and unique after a full log restart", %{

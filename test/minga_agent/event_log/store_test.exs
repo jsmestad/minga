@@ -91,20 +91,49 @@ defmodule MingaAgent.EventLog.StoreTest do
     assert file_mode(path) == 0o600
   end
 
-  test "open does not chmod an existing database parent directory", %{tmp_dir: tmp_dir} do
-    dir = Path.join(tmp_dir, "shared-parent")
+  test "open protects an existing application-owned directory and database before SQLite setup",
+       %{
+         tmp_dir: tmp_dir
+       } do
+    dir = Path.join(tmp_dir, "agent-log")
     path = Path.join(dir, "agent_events.db")
 
     File.mkdir_p!(dir)
-    File.write!(path, "")
+    File.write!(path, "not a sqlite database")
     File.chmod!(dir, 0o755)
     File.chmod!(path, 0o666)
 
-    {:ok, db} = Store.open(path)
-    :ok = Store.close(db)
-
-    assert file_mode(dir) == 0o755
+    assert {:error, _reason} = Store.open(path)
+    assert file_mode(dir) == 0o700
     assert file_mode(path) == 0o600
+  end
+
+  test "open rejects symlink and non-regular database paths", %{tmp_dir: tmp_dir} do
+    dir = Path.join(tmp_dir, "agent-log")
+    File.mkdir_p!(dir)
+
+    target = Path.join(tmp_dir, "outside.db")
+    File.write!(target, "outside")
+    symlink_path = Path.join(dir, "agent_events.db")
+    File.ln_s!(target, symlink_path)
+
+    assert {:error, {:unsafe_database_path, ^symlink_path, :symlink}} = Store.open(symlink_path)
+    assert File.read!(target) == "outside"
+
+    File.rm!(symlink_path)
+    File.mkdir!(symlink_path)
+
+    assert {:error, {:unsafe_database_path, ^symlink_path, :directory}} = Store.open(symlink_path)
+  end
+
+  test "open rejects a symlink database directory", %{tmp_dir: tmp_dir} do
+    real_dir = Path.join(tmp_dir, "real")
+    linked_dir = Path.join(tmp_dir, "linked")
+    File.mkdir_p!(real_dir)
+    File.ln_s!(real_dir, linked_dir)
+
+    assert {:error, {:unsafe_database_directory, :symlink}} =
+             Store.open(Path.join(linked_dir, "agent_events.db"))
   end
 
   test "writes keep SQLite WAL and SHM files private", %{tmp_dir: tmp_dir} do
@@ -123,6 +152,25 @@ defmodule MingaAgent.EventLog.StoreTest do
     end
 
     :ok = Store.close(db)
+  end
+
+  test "writer open quarantines a corrupt database instead of deleting the evidence", %{
+    tmp_dir: tmp_dir
+  } do
+    path = Path.join(tmp_dir, "agent_events.db")
+    {:ok, db} = Store.open(path)
+    :ok = Store.close(db)
+
+    {:ok, file} = :file.open(path, [:read, :write, :binary, :raw])
+    :ok = :file.pwrite(file, 100, :binary.copy(<<255>>, 512))
+    :ok = :file.close(file)
+
+    {:ok, replacement} = Store.open_writer(path, [])
+    :ok = Store.close(replacement)
+
+    assert [quarantined] = Path.wildcard(path <> ".corrupt-*")
+    assert File.stat!(quarantined).size > 0
+    assert File.exists?(path)
   end
 
   test "records survive reopening the database", %{tmp_dir: tmp_dir} do

@@ -14,7 +14,8 @@ defmodule MingaAgent.EventLog.Store do
   @doc "Opens or creates the agent event database."
   @spec open(String.t()) :: {:ok, db()} | {:error, term()}
   def open(db_path) do
-    with :ok <- ensure_database_directory(db_path) do
+    with :ok <- ensure_database_directory(db_path),
+         :ok <- ensure_private_database_files(db_path) do
       case Sqlite3.open(db_path) do
         {:ok, db} -> setup_opened(db, db_path)
         {:error, reason} -> {:error, reason}
@@ -53,34 +54,8 @@ defmodule MingaAgent.EventLog.Store do
   @impl MingaAgent.EventLog.StoreBackend
   @spec insert(db(), EventRecord.t()) :: {:ok, pos_integer()} | {:error, term()}
   def insert(db, %EventRecord{} = record) do
-    sql = """
-    INSERT INTO events (event_key, session_id, event_type, payload, wall_clock, monotonic_ts)
-    VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-    ON CONFLICT(event_key) DO NOTHING
-    RETURNING id
-    """
-
-    params = [
-      record.event_key,
-      record.session_id,
-      Atom.to_string(record.event_type),
-      JSON.encode!(record.payload),
-      DateTime.to_iso8601(record.wall_clock),
-      record.monotonic_ts
-    ]
-
-    case Sqlite3.prepare(db, sql) do
-      {:ok, stmt} ->
-        result =
-          with :ok <- Sqlite3.bind(stmt, params) do
-            insert_result(db, stmt, record.event_key)
-          end
-
-        Sqlite3.release(db, stmt)
-        result
-
-      {:error, reason} ->
-        {:error, reason}
+    with {:ok, payload_json} <- encode_payload(record.payload) do
+      insert_encoded(db, record, payload_json)
     end
   end
 
@@ -196,6 +171,49 @@ defmodule MingaAgent.EventLog.Store do
     end
   end
 
+  @spec insert_encoded(db(), EventRecord.t(), String.t()) ::
+          {:ok, pos_integer()} | {:error, term()}
+  defp insert_encoded(db, record, payload_json) do
+    sql = """
+    INSERT INTO events (event_key, session_id, event_type, payload, wall_clock, monotonic_ts)
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+    ON CONFLICT(event_key) DO NOTHING
+    RETURNING id
+    """
+
+    params = [
+      record.event_key,
+      record.session_id,
+      Atom.to_string(record.event_type),
+      payload_json,
+      DateTime.to_iso8601(record.wall_clock),
+      record.monotonic_ts
+    ]
+
+    case Sqlite3.prepare(db, sql) do
+      {:ok, stmt} ->
+        result =
+          with :ok <- Sqlite3.bind(stmt, params) do
+            insert_result(db, stmt, record.event_key)
+          end
+
+        Sqlite3.release(db, stmt)
+        result
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @spec encode_payload(map()) :: {:ok, String.t()} | {:error, term()}
+  defp encode_payload(payload) do
+    {:ok, JSON.encode!(payload)}
+  rescue
+    exception -> {:error, {:serialization_failed, exception.__struct__}}
+  catch
+    kind, _reason -> {:error, {:serialization_failed, kind}}
+  end
+
   @spec insert_result(db(), Sqlite3.statement(), String.t()) ::
           {:ok, pos_integer()} | {:error, term()}
   defp insert_result(db, stmt, event_key) do
@@ -241,15 +259,16 @@ defmodule MingaAgent.EventLog.Store do
   @spec recreate_corrupt_database(String.t(), term(), boolean()) ::
           {:ok, db()} | {:error, term()}
   defp recreate_corrupt_database(path, reason, true) do
+    suffix = ".corrupt-#{System.system_time(:millisecond)}-#{System.unique_integer([:positive])}"
+
     Minga.Log.warning(
       :agent,
-      "[AgentEventLog] corrupt database, recreating: #{inspect(reason)}"
+      "[AgentEventLog] corrupt database, quarantining before recreation: #{inspect(reason)}"
     )
 
-    _ = File.rm(path)
-    _ = File.rm(path <> "-wal")
-    _ = File.rm(path <> "-shm")
-    open(path)
+    with :ok <- quarantine_database_files(path, suffix) do
+      open(path)
+    end
   end
 
   defp recreate_corrupt_database(_path, reason, false), do: {:error, reason}
@@ -397,28 +416,26 @@ defmodule MingaAgent.EventLog.Store do
   @spec ensure_private_created_directory(String.t()) :: :ok | {:error, term()}
   defp ensure_private_created_directory(dir) do
     expanded_dir = Path.expand(dir)
-    ensure_private_created_directory(expanded_dir, File.cwd!(), File.stat(expanded_dir))
+    ensure_private_created_directory(expanded_dir, File.lstat(expanded_dir))
   end
 
   @spec ensure_private_created_directory(
           String.t(),
-          String.t(),
           {:ok, File.Stat.t()} | {:error, term()}
-        ) ::
-          :ok | {:error, term()}
-  defp ensure_private_created_directory(dir, dir, _stat), do: :ok
+        ) :: :ok | {:error, term()}
+  defp ensure_private_created_directory(dir, {:ok, %File.Stat{type: :directory}}),
+    do: File.chmod(dir, 0o700)
 
-  defp ensure_private_created_directory(_dir, _cwd, {:ok, %File.Stat{type: :directory}}), do: :ok
+  defp ensure_private_created_directory(_dir, {:ok, %File.Stat{type: type}}),
+    do: {:error, {:unsafe_database_directory, type}}
 
-  defp ensure_private_created_directory(_dir, _cwd, {:ok, %File.Stat{}}), do: {:error, :enotdir}
-
-  defp ensure_private_created_directory(dir, _cwd, {:error, :enoent}) do
+  defp ensure_private_created_directory(dir, {:error, :enoent}) do
     with :ok <- File.mkdir_p(dir) do
       File.chmod(dir, 0o700)
     end
   end
 
-  defp ensure_private_created_directory(_dir, _cwd, {:error, reason}), do: {:error, reason}
+  defp ensure_private_created_directory(_dir, {:error, reason}), do: {:error, reason}
 
   @spec ensure_private_database_files(String.t() | nil) :: :ok | {:error, term()}
   defp ensure_private_database_files(nil), do: :ok
@@ -435,13 +452,49 @@ defmodule MingaAgent.EventLog.Store do
   @spec chmod_existing_file(String.t(), non_neg_integer()) ::
           {:cont, :ok} | {:halt, {:error, term()}}
   defp chmod_existing_file(path, mode) do
-    if File.exists?(path) do
-      case File.chmod(path, mode) do
-        :ok -> {:cont, :ok}
-        {:error, reason} -> {:halt, {:error, reason}}
-      end
-    else
-      {:cont, :ok}
+    case File.lstat(path) do
+      {:ok, %File.Stat{type: :regular}} ->
+        case File.chmod(path, mode) do
+          :ok -> {:cont, :ok}
+          {:error, reason} -> {:halt, {:error, reason}}
+        end
+
+      {:ok, %File.Stat{type: type}} ->
+        {:halt, {:error, {:unsafe_database_path, path, type}}}
+
+      {:error, :enoent} ->
+        {:cont, :ok}
+
+      {:error, reason} ->
+        {:halt, {:error, reason}}
+    end
+  end
+
+  @spec quarantine_database_files(String.t(), String.t()) :: :ok | {:error, term()}
+  defp quarantine_database_files(path, suffix) do
+    path
+    |> database_file_paths()
+    |> Enum.reduce_while(:ok, fn file_path, :ok -> quarantine_existing_file(file_path, suffix) end)
+  end
+
+  @spec quarantine_existing_file(String.t(), String.t()) ::
+          {:cont, :ok} | {:halt, {:error, term()}}
+  defp quarantine_existing_file(path, suffix) do
+    case File.lstat(path) do
+      {:ok, %File.Stat{type: :regular}} ->
+        case File.rename(path, path <> suffix) do
+          :ok -> {:cont, :ok}
+          {:error, reason} -> {:halt, {:error, {:quarantine_failed, path, reason}}}
+        end
+
+      {:ok, %File.Stat{type: type}} ->
+        {:halt, {:error, {:unsafe_database_path, path, type}}}
+
+      {:error, :enoent} ->
+        {:cont, :ok}
+
+      {:error, reason} ->
+        {:halt, {:error, reason}}
     end
   end
 

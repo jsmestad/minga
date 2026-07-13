@@ -810,6 +810,7 @@ defmodule MingaAgent.Session do
   end
 
   @impl GenServer
+  @spec handle_call(term(), GenServer.from(), state()) :: {:reply, term(), state()}
   def handle_call({:seed_messages, messages}, _from, state) do
     state =
       state
@@ -1396,6 +1397,7 @@ defmodule MingaAgent.Session do
   end
 
   @impl GenServer
+  @spec handle_cast(term(), state()) :: {:noreply, state()}
   def handle_cast({:add_system_message, text, level}, state) do
     state = append_system_message(state, text, level)
     state = notify_messages_changed(state)
@@ -1407,6 +1409,7 @@ defmodule MingaAgent.Session do
   end
 
   @impl GenServer
+  @spec handle_info(term(), state()) :: {:noreply, state()} | {:stop, term(), state()}
   def handle_info(:start_provider, state) do
     {:noreply, refresh_credentials_state(state)}
   end
@@ -3859,6 +3862,7 @@ defmodule MingaAgent.Session do
   end
 
   @impl GenServer
+  @spec terminate(term(), state()) :: :ok
   def terminate(reason, state) do
     record_critical_event(state, :session_stopped, %{
       reason: inspect(reason),

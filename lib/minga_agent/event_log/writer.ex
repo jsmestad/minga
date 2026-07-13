@@ -33,6 +33,8 @@ defmodule MingaAgent.EventLog.Writer do
   end
 
   @impl GenServer
+  @spec handle_continue(:open, WriterState.t()) ::
+          {:noreply, WriterState.t()} | {:stop, term(), WriterState.t()}
   def handle_continue(:open, state) do
     case state.backend.open_writer(state.path, state.backend_opts) do
       {:ok, db} ->
@@ -46,6 +48,8 @@ defmodule MingaAgent.EventLog.Writer do
   end
 
   @impl GenServer
+  @spec handle_info(term(), WriterState.t()) ::
+          {:noreply, WriterState.t()} | {:stop, term(), WriterState.t()}
   def handle_info({:write_event, token, %EventRecord{} = record}, state) do
     result = state.backend.insert(state.db, record)
     send(state.owner, {:event_log_writer_result, self(), token, record.event_type, result})
@@ -63,6 +67,7 @@ defmodule MingaAgent.EventLog.Writer do
   end
 
   @impl GenServer
+  @spec terminate(term(), WriterState.t()) :: :ok
   def terminate(_reason, %{db: nil}), do: :ok
 
   def terminate(_reason, state) do
