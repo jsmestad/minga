@@ -1330,6 +1330,38 @@ values = [
   { name = "pull_and_retry", value = 1 },
 ]
 
+[[enums]]
+name = "operation_kind"
+repr = "u8"
+default = "unknown"
+values = [
+  { name = "unknown", value = 0 },
+  { name = "external_format", value = 1 },
+  { name = "git_stage", value = 2 },
+  { name = "git_unstage", value = 3 },
+  { name = "git_discard", value = 4 },
+  { name = "git_stage_all", value = 5 },
+  { name = "git_unstage_all", value = 6 },
+  { name = "git_commit", value = 7 },
+  { name = "lsp_references", value = 8 },
+  { name = "lsp_rename", value = 9 },
+]
+
+[[enums]]
+name = "operation_status"
+repr = "u8"
+default = "pending"
+values = [
+  { name = "pending", value = 1 },
+  { name = "queued", value = 2 },
+  { name = "running", value = 3 },
+  { name = "success", value = 4 },
+  { name = "error", value = 5 },
+  { name = "timeout", value = 6 },
+  { name = "canceled", value = 7 },
+  { name = "stale", value = 8 },
+]
+
 # ── Shared wire structures ────────────────────────────────────────────────
 #
 # Reusable fixed-size and variable-length sub-structures referenced by name
@@ -1833,6 +1865,22 @@ opcode = "gui_status_bar"
 id = 0x0E
 name = "pending_keys"
 fields = [{ name = "keys", type = "string16" }]
+
+[[sections]]
+opcode = "gui_status_bar"
+id = 0x0F
+name = "operation"
+fields = [
+  { name = "operation_id", type = "u64" },
+  { name = "kind", type = "enum", enum = "operation_kind" },
+  { name = "status", type = "enum", enum = "operation_status" },
+  { name = "flags", type = "u8" },
+  { name = "message", type = "string16" },
+  { name = "queue_position", type = "u16" },
+  { name = "queue_total", type = "u16" },
+  { name = "progress_current", type = "u32" },
+  { name = "progress_total", type = "u32" },
+]
 
 # gui_gutter (0x7B) sections
 

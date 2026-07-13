@@ -10,10 +10,12 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilder do
   alias Minga.RenderModel.UI.StatusBar.Git
   alias Minga.RenderModel.UI.StatusBar.Indent
   alias Minga.RenderModel.UI.StatusBar.Language
+  alias Minga.RenderModel.UI.StatusBar.Operation, as: StatusOperation
   alias Minga.RenderModel.UI.StatusBar.Selection
   alias Minga.RenderModel.UI.StatusBar.Workspace, as: StatusWorkspace
   alias MingaEditor.Session.ChromeState
   alias MingaEditor.Session.ChromeState.WorkspaceSummary
+  alias MingaEditor.State.Operation, as: EditorOperation
   alias MingaEditor.StatusBar.Data, as: StatusBarData
   alias Minga.Language.Devicon
 
@@ -25,7 +27,8 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilder do
     %StatusBar{
       content_kind: content_kind,
       data: data_model(data),
-      workspace: active_workspace_model(chrome_state)
+      workspace: active_workspace_model(chrome_state),
+      operation: operation_model(Map.get(data, :selected_operation))
     }
   end
 
@@ -80,6 +83,27 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilder do
       pending_keys: Map.get(data, :pending_keys, "")
     }
   end
+
+  @spec operation_model(EditorOperation.t() | nil) :: StatusOperation.t() | nil
+  defp operation_model(nil), do: nil
+
+  defp operation_model(%EditorOperation{} = operation) do
+    %StatusOperation{
+      id: operation.id,
+      kind: operation.kind,
+      status: operation.status,
+      message: operation.message,
+      queue_position: nested_value(operation.queue, :position),
+      queue_total: nested_value(operation.queue, :total),
+      progress_current: nested_value(operation.progress, :current),
+      progress_total: nested_value(operation.progress, :total),
+      cancelable?: operation.cancelable?
+    }
+  end
+
+  @spec nested_value(struct() | nil, atom()) :: term() | nil
+  defp nested_value(nil, _field), do: nil
+  defp nested_value(value, field), do: Map.fetch!(value, field)
 
   @spec diagnostic_counts(term()) :: Diagnostics.counts()
   defp diagnostic_counts({errors, warnings, info, hints}), do: {errors, warnings, info, hints}

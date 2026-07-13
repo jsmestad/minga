@@ -12,6 +12,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
   alias Minga.RenderModel.UI.StatusBar.Git
   alias Minga.RenderModel.UI.StatusBar.Indent
   alias Minga.RenderModel.UI.StatusBar.Language
+  alias Minga.RenderModel.UI.StatusBar.Operation
   alias Minga.RenderModel.UI.StatusBar.Selection
   alias Minga.RenderModel.UI.StatusBar.Workspace
 
@@ -31,6 +32,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
   @section_selection 0x0C
   @section_workspace 0x0D
   @section_pending_keys 0x0E
+  @section_operation 0x0F
 
   @spec encode(StatusBar.t(), Caches.t()) :: {binary(), Caches.t()}
   def encode(%StatusBar{} = model, %Caches{} = caches), do: {encode_command(model), caches}
@@ -50,7 +52,8 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
   defp encode_sections(%StatusBar{
          content_kind: content_kind,
          data: %Data{} = data,
-         workspace: workspace
+         workspace: workspace,
+         operation: operation
        }) do
     {selection_mode, selection_size} = encode_selection_info(data.selection)
     {error_count, warning_count, info_count, hint_count} = data.diagnostics.counts
@@ -136,6 +139,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
     Enum.concat([
       sections,
       workspace_sections(workspace),
+      operation_sections(operation),
       [agent_section(content_kind, data.agent)]
     ])
   end
@@ -210,6 +214,63 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
 
     section(@section_agent, payload)
   end
+
+  @spec operation_sections(Operation.t() | nil) :: [binary()]
+  defp operation_sections(nil), do: []
+
+  defp operation_sections(%Operation{} = operation) do
+    payload =
+      Writer.new(@command)
+      |> Writer.uint64(:operation_id, operation.id)
+      |> Writer.uint8(:operation_kind, encode_operation_kind(operation.kind))
+      |> Writer.uint8(:operation_status, encode_operation_status(operation.status))
+      |> Writer.uint8(:operation_flags, operation_flags(operation))
+      |> Writer.string16(:operation_message, operation.message)
+      |> Writer.uint16(:operation_queue_position, optional_integer(operation.queue_position))
+      |> Writer.uint16(:operation_queue_total, optional_integer(operation.queue_total))
+      |> Writer.uint32(:operation_progress_current, optional_integer(operation.progress_current))
+      |> Writer.uint32(:operation_progress_total, optional_integer(operation.progress_total))
+      |> Writer.finish()
+
+    [section(@section_operation, payload)]
+  end
+
+  @spec operation_flags(Operation.t()) :: non_neg_integer()
+  defp operation_flags(%Operation{} = operation) do
+    0
+    |> maybe_operation_flag(operation.cancelable?, 0x01)
+    |> maybe_operation_flag(is_integer(operation.queue_position), 0x02)
+    |> maybe_operation_flag(is_integer(operation.progress_current), 0x04)
+  end
+
+  @spec maybe_operation_flag(non_neg_integer(), boolean(), non_neg_integer()) :: non_neg_integer()
+  defp maybe_operation_flag(flags, true, bit), do: flags ||| bit
+  defp maybe_operation_flag(flags, false, _bit), do: flags
+
+  @spec optional_integer(non_neg_integer() | nil) :: non_neg_integer()
+  defp optional_integer(nil), do: 0
+  defp optional_integer(value), do: value
+
+  @spec encode_operation_kind(Operation.kind()) :: non_neg_integer()
+  defp encode_operation_kind(:external_format), do: 1
+  defp encode_operation_kind(:git_stage), do: 2
+  defp encode_operation_kind(:git_unstage), do: 3
+  defp encode_operation_kind(:git_discard), do: 4
+  defp encode_operation_kind(:git_stage_all), do: 5
+  defp encode_operation_kind(:git_unstage_all), do: 6
+  defp encode_operation_kind(:git_commit), do: 7
+  defp encode_operation_kind(:lsp_references), do: 8
+  defp encode_operation_kind(:lsp_rename), do: 9
+
+  @spec encode_operation_status(Operation.status()) :: non_neg_integer()
+  defp encode_operation_status(:pending), do: 1
+  defp encode_operation_status(:queued), do: 2
+  defp encode_operation_status(:running), do: 3
+  defp encode_operation_status(:success), do: 4
+  defp encode_operation_status(:error), do: 5
+  defp encode_operation_status(:timeout), do: 6
+  defp encode_operation_status(:canceled), do: 7
+  defp encode_operation_status(:stale), do: 8
 
   @spec pending_keys_sections(String.t() | nil) :: [binary()]
   defp pending_keys_sections(pending) when pending in [nil, ""], do: []

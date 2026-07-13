@@ -46,6 +46,7 @@ defmodule MingaEditor.State do
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Highlighting
   alias MingaEditor.State.Mouse
+  alias MingaEditor.State.OperationFeedback
   alias MingaEditor.State.Remote
   alias MingaEditor.State.RenderCorrelation
   alias MingaEditor.State.ResourcePressure
@@ -124,6 +125,7 @@ defmodule MingaEditor.State do
             notifications: NotificationCenter.new(),
             git_remote_op: nil,
             effect_scheduler: nil,
+            operation_feedback: OperationFeedback.new(),
             lsp: %LSPState{},
             parser_status: :available,
             focus_stack: [],
@@ -188,6 +190,7 @@ defmodule MingaEditor.State do
           notifications: NotificationCenter.t(),
           git_remote_op: git_remote_op(),
           effect_scheduler: GenServer.server() | nil,
+          operation_feedback: OperationFeedback.t(),
           lsp: LSPState.t(),
           parser_status: MingaEditor.Shell.Traditional.Modeline.parser_status(),
           focus_stack: [module()],
@@ -2142,6 +2145,7 @@ defmodule MingaEditor.State do
 
       %TabBar{active_id: current_id} = tb ->
         log_switch_tab(tb, current_id, target_id)
+        state = retire_lsp_operations_for_tab(state, current_id)
 
         # Snapshot current tab (spinner stop is deferred as effect)
         context = snapshot_tab_context_no_sync(state)
@@ -2197,6 +2201,28 @@ defmodule MingaEditor.State do
     {state, effects} = switch_tab_pure(state, target_id)
     apply_buffer_effects(state, effects)
   end
+
+  @spec retire_lsp_operations_for_tab(t(), Tab.id()) :: t()
+  defp retire_lsp_operations_for_tab(%__MODULE__{} = state, tab_id) do
+    {requests, lsp} = LSPState.take_operation_requests_for_tab(state.lsp, tab_id)
+    state = update_lsp(state, fn _current -> lsp end)
+
+    Enum.reduce(requests, state, fn {kind, operation_id, ^tab_id}, state ->
+      OperationFeedback.finish_in(
+        state,
+        operation_id,
+        :stale,
+        lsp_operation_tab_departure_message(kind)
+      )
+    end)
+  end
+
+  @spec lsp_operation_tab_departure_message(:references | :rename) :: String.t()
+  defp lsp_operation_tab_departure_message(:references),
+    do: "References response ignored after tab switch"
+
+  defp lsp_operation_tab_departure_message(:rename),
+    do: "Rename response ignored after tab switch"
 
   @doc "Syncs the live workspace agent UI mirror from the active workspace."
   @spec sync_agent_ui_from_active_workspace(t()) :: t()

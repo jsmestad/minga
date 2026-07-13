@@ -205,7 +205,8 @@ defmodule Minga.Buffer do
               to: BufferProcess
 
   @doc "Apply a batch of edits atomically (for LSP workspace edits)."
-  @spec apply_edits(t(), [text_edit()], Minga.Buffer.EditSource.t()) :: :ok
+  @spec apply_edits(t(), [text_edit()], Minga.Buffer.EditSource.t()) ::
+          :ok | {:error, :read_only}
   defdelegate apply_edits(server, edits, source \\ Minga.Buffer.EditSource.lsp(:unknown)),
     to: BufferProcess
 

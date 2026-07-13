@@ -1427,6 +1427,65 @@ func DecodeGuiStatusBarPendingKeys(data []byte, offset int, windowEnd int) (GuiS
 	}, pos, nil
 }
 
+func DecodeGuiStatusBarOperation(data []byte, offset int, windowEnd int) (GuiStatusBarOperation, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+8, "operation_id"); err != nil {
+		return GuiStatusBarOperation{}, offset, err
+	}
+	operationID := decodeU64(data, pos)
+	pos += 8
+	if err := decodeRequireWindow(windowEnd, pos+1, "kind"); err != nil {
+		return GuiStatusBarOperation{}, offset, err
+	}
+	kind := OperationKind(data[pos])
+	pos++
+	if err := decodeRequireWindow(windowEnd, pos+1, "status"); err != nil {
+		return GuiStatusBarOperation{}, offset, err
+	}
+	status := OperationStatus(data[pos])
+	pos++
+	if err := decodeRequireWindow(windowEnd, pos+1, "flags"); err != nil {
+		return GuiStatusBarOperation{}, offset, err
+	}
+	flags := data[pos]
+	pos++
+	message, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return GuiStatusBarOperation{}, offset, err
+	}
+	if err := decodeRequireWindow(windowEnd, pos+2, "queue_position"); err != nil {
+		return GuiStatusBarOperation{}, offset, err
+	}
+	queuePosition := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireWindow(windowEnd, pos+2, "queue_total"); err != nil {
+		return GuiStatusBarOperation{}, offset, err
+	}
+	queueTotal := decodeU16(data, pos)
+	pos += 2
+	if err := decodeRequireWindow(windowEnd, pos+4, "progress_current"); err != nil {
+		return GuiStatusBarOperation{}, offset, err
+	}
+	progressCurrent := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireWindow(windowEnd, pos+4, "progress_total"); err != nil {
+		return GuiStatusBarOperation{}, offset, err
+	}
+	progressTotal := decodeU32(data, pos)
+	pos += 4
+	return GuiStatusBarOperation{
+		OperationID:     operationID,
+		Kind:            kind,
+		Status:          status,
+		Flags:           flags,
+		Message:         message,
+		QueuePosition:   queuePosition,
+		QueueTotal:      queueTotal,
+		ProgressCurrent: progressCurrent,
+		ProgressTotal:   progressTotal,
+	}, pos, nil
+}
+
 // Section decoders for gui_surface_layout
 
 func DecodeGuiSurfaceLayoutPlacements(data []byte, offset int, windowEnd int) ([]SurfacePlacement, int, error) {

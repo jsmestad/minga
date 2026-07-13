@@ -25,7 +25,8 @@ defmodule Minga.Test.EffectProbe do
   @spec request(pid(), term(), term(), Policy.t(), action()) :: Request.t()
   def request(test_pid, label, resource, policy, action \\ :wait) when is_pid(test_pid) do
     effect = %__MODULE__{test_pid: test_pid, label: label, payloads: [label], action: action}
-    Request.new(effect, resource, policy)
+    operation_id = System.unique_integer([:positive, :monotonic])
+    Request.new(effect, resource, policy, operation_id)
   end
 
   @impl true

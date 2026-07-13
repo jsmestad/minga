@@ -43,7 +43,7 @@ defmodule MingaEditor.EffectScheduler do
   def schedule(server, %Request{} = request), do: GenServer.call(server, {:schedule, request})
 
   @doc "Cancels an admitted request by id."
-  @spec cancel(server(), reference()) :: :ok | {:error, :not_found}
+  @spec cancel(server(), Request.id()) :: :ok | {:error, :not_found}
   def cancel(server, request_id) when is_reference(request_id),
     do: GenServer.call(server, {:cancel, request_id})
 

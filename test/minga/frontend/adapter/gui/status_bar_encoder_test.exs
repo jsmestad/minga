@@ -13,6 +13,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoderTest do
   alias Minga.RenderModel.UI.StatusBar.Git
   alias Minga.RenderModel.UI.StatusBar.Indent
   alias Minga.RenderModel.UI.StatusBar.Language
+  alias Minga.RenderModel.UI.StatusBar.Operation
   alias Minga.RenderModel.UI.StatusBar.Selection
   alias Minga.RenderModel.UI.StatusBar.Workspace
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
@@ -109,6 +110,73 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoderTest do
       assert keys == "\"a2d"
     end
 
+    test "encodes structured-only operation feedback with every optional field" do
+      operation = %Operation{
+        id: 4_294_967_297,
+        kind: :git_commit,
+        status: :queued,
+        message: "Committing...",
+        queue_position: 2,
+        queue_total: 5,
+        progress_current: 7,
+        progress_total: 10,
+        cancelable?: true
+      }
+
+      data = %{status_data() | message: nil}
+      model = %StatusBar{content_kind: :buffer, data: data, operation: operation}
+      {cmd, _caches} = StatusBarEncoder.encode(model, Caches.new())
+      sections = decode_sections(cmd)
+
+      assert sections[0x07] == <<0::16>>
+
+      assert <<4_294_967_297::64, 7::8, 2::8, 0x07::8, message_len::16,
+               message::binary-size(message_len), 2::16, 5::16, 7::32, 10::32>> = sections[0x0F]
+
+      assert message == "Committing..."
+    end
+
+    test "operation kind and status bytes do not depend on message punctuation" do
+      kinds = [
+        external_format: 1,
+        git_stage: 2,
+        git_unstage: 3,
+        git_discard: 4,
+        git_stage_all: 5,
+        git_unstage_all: 6,
+        git_commit: 7,
+        lsp_references: 8,
+        lsp_rename: 9
+      ]
+
+      statuses = [
+        pending: 1,
+        queued: 2,
+        running: 3,
+        success: 4,
+        error: 5,
+        timeout: 6,
+        canceled: 7,
+        stale: 8
+      ]
+
+      for {kind, kind_code} <- kinds, {status, status_code} <- statuses do
+        base = %Operation{
+          id: 1,
+          kind: kind,
+          status: status,
+          message: "Working...",
+          cancelable?: false
+        }
+
+        punctuated = operation_payload(base)
+        plain = operation_payload(%{base | message: "Working"})
+
+        assert <<1::64, ^kind_code::8, ^status_code::8, _rest::binary>> = punctuated
+        assert <<1::64, ^kind_code::8, ^status_code::8, _rest::binary>> = plain
+      end
+    end
+
     test "encodes semantic agent status section" do
       data = %{
         status_data()
@@ -184,6 +252,13 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoderTest do
 
       assert cmd1 == cmd2
     end
+  end
+
+  @spec operation_payload(Operation.t()) :: binary()
+  defp operation_payload(operation) do
+    model = %StatusBar{content_kind: :buffer, data: status_data(), operation: operation}
+    {command, _caches} = StatusBarEncoder.encode(model, Caches.new())
+    command |> decode_sections() |> Map.fetch!(0x0F)
   end
 
   @spec legacy_status_data() :: map()

@@ -17,6 +17,7 @@ defmodule MingaEditor.State.TabSwitchTest do
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.State.LSP.FormatOperation
+  alias MingaEditor.State.OperationFeedback
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context
   alias MingaEditor.State.TabBar
@@ -333,6 +334,59 @@ defmodule MingaEditor.State.TabSwitchTest do
 
       assert TabBar.get(EditorState.tab_bar(switched_back), target_id).context.lsp_pending ==
                pending_target
+    end
+
+    test "tab switch retires outgoing references and rename requests" do
+      {state, _buf1, _buf2} = state_with_two_file_tabs()
+      tab_bar = EditorState.tab_bar(state)
+      current_id = tab_bar.active_id
+      target_id = Enum.find(tab_bar.tabs, &(&1.id != current_id)).id
+
+      {state, references} =
+        OperationFeedback.start_in(
+          state,
+          :lsp_references,
+          "lsp:references:one.ex",
+          "Finding references…",
+          cancelable?: false,
+          replace?: false
+        )
+
+      {state, rename} =
+        OperationFeedback.start_in(
+          state,
+          :lsp_rename,
+          "lsp:rename:one.ex",
+          "Renaming…",
+          cancelable?: false,
+          replace?: false
+        )
+
+      references_ref = make_ref()
+      rename_ref = make_ref()
+
+      state =
+        EditorState.update_lsp(state, fn lsp ->
+          lsp
+          |> LSPState.track_operation_request(
+            references_ref,
+            {:references, references.id, current_id}
+          )
+          |> LSPState.track_operation_request(rename_ref, {:rename, rename.id, current_id})
+        end)
+
+      {switched, _effects} = EditorState.switch_tab_pure(state, target_id)
+
+      assert switched.lsp.operation_requests == %{}
+
+      assert {:ok, references} =
+               OperationFeedback.fetch(switched.operation_feedback, references.id)
+
+      assert references.status == :stale
+      assert references.message == "References response ignored after tab switch"
+      assert {:ok, rename} = OperationFeedback.fetch(switched.operation_feedback, rename.id)
+      assert rename.status == :stale
+      assert rename.message == "Rename response ignored after tab switch"
     end
 
     test "tab switch preserves Editor-global formatting ownership" do

@@ -18,6 +18,8 @@ defmodule MingaEditor.StatusBar.Data do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
+  alias MingaEditor.State.Operation
+  alias MingaEditor.State.OperationFeedback
   alias MingaEditor.Window.Content
   alias Minga.Config.Options
   alias Minga.Git
@@ -79,6 +81,7 @@ defmodule MingaEditor.StatusBar.Data do
           background_subagent_count: non_neg_integer(),
           active_background_subagent_label: String.t() | nil,
           status_msg: String.t() | nil,
+          selected_operation: Operation.t() | nil,
           pending_keys: String.t(),
           workspace_label: String.t(),
           workspace_draft_count: non_neg_integer(),
@@ -123,6 +126,7 @@ defmodule MingaEditor.StatusBar.Data do
           background_subagent_count: non_neg_integer(),
           active_background_subagent_label: String.t() | nil,
           status_msg: String.t() | nil,
+          selected_operation: Operation.t() | nil,
           pending_keys: String.t(),
           workspace_label: String.t(),
           workspace_draft_count: non_neg_integer(),
@@ -222,6 +226,7 @@ defmodule MingaEditor.StatusBar.Data do
       background_subagent_count: background.count,
       active_background_subagent_label: background.label,
       status_msg: status_message(state),
+      selected_operation: OperationFeedback.selected_from(state),
       pending_keys: pending_keys(state, mode, mode_state),
       workspace_label: workspace.label,
       workspace_draft_count: workspace.draft_count,
@@ -435,6 +440,7 @@ defmodule MingaEditor.StatusBar.Data do
       background_subagent_count: background.count,
       active_background_subagent_label: background.label,
       status_msg: status_message(state),
+      selected_operation: OperationFeedback.selected_from(state),
       pending_keys: pending_keys(state, mode, mode_state),
       workspace_label: workspace.label,
       workspace_draft_count: workspace.draft_count,

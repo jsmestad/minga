@@ -12,7 +12,7 @@ defmodule MingaEditor.EffectScheduler.Engine do
           | :policy_mismatch
           | :queue_full
           | :scheduler_full
-  @type admission :: {:ok, reference(), :running | :queued} | {:error, admission_error()}
+  @type admission :: {:ok, Request.id(), :running | :queued} | {:error, admission_error()}
   @type handoff :: admission() | {:error, :not_found}
   @type claim :: :ok | {:error, :not_pending}
 
@@ -33,7 +33,7 @@ defmodule MingaEditor.EffectScheduler.Engine do
   def schedule(%State{} = state, %Request{} = request), do: admit(state, request)
 
   @doc "Cancels an admitted request."
-  @spec cancel(State.t(), reference()) :: {:ok | {:error, :not_found}, State.t()}
+  @spec cancel(State.t(), Request.id()) :: {:ok | {:error, :not_found}, State.t()}
   def cancel(%State{} = state, request_id) do
     case cancel_request(state, request_id) do
       {:ok, state} -> {:ok, state}
@@ -228,12 +228,12 @@ defmodule MingaEditor.EffectScheduler.Engine do
 
       {true, true} ->
         queue = :queue.in(request, lane.queue)
-        notify_lifecycle(state.owner, Outcome.queued(request))
 
         state =
           state
           |> admit_request(request)
           |> put_lane(resource, %{lane | queue: queue})
+          |> notify_queued_lifecycle(queue)
 
         {{:ok, request.id, :queued}, state}
     end
@@ -250,12 +250,12 @@ defmodule MingaEditor.EffectScheduler.Engine do
 
       {true, true} ->
         queue = :queue.in(request, lane.queue)
-        notify_lifecycle(state.owner, Outcome.queued(request))
 
         state =
           state
           |> admit_request(request)
           |> put_lane(resource, %{lane | queue: queue})
+          |> notify_queued_lifecycle(queue)
 
         {{:ok, request.id, :queued}, state}
 
@@ -270,8 +270,8 @@ defmodule MingaEditor.EffectScheduler.Engine do
           |> put_lane(resource, %{lane | queue: queue})
           |> terminalize_direct(Outcome.stale(Outcome.canceled(older, :coalesced), :coalesced))
           |> admit_request(request)
+          |> notify_queued_lifecycle(queue)
 
-        notify_lifecycle(state.owner, Outcome.queued(request))
         {{:ok, request.id, :queued}, state}
     end
   end
@@ -340,6 +340,7 @@ defmodule MingaEditor.EffectScheduler.Engine do
           {{:value, request}, rest} ->
             state
             |> put_lane(resource, %{lane | queue: rest})
+            |> notify_queued_lifecycle(rest)
             |> start_request(resource, request)
         end
 
@@ -387,7 +388,7 @@ defmodule MingaEditor.EffectScheduler.Engine do
     |> deliver_result(Outcome.canceled(running.request, reason))
   end
 
-  @spec cancel_request(State.t(), reference()) :: {:ok, State.t()} | :not_found
+  @spec cancel_request(State.t(), Request.id()) :: {:ok, State.t()} | :not_found
   defp cancel_request(state, request_id) do
     Enum.reduce_while(state.lanes, :not_found, fn {resource, lane}, _acc ->
       case cancel_in_lane(state, resource, lane, request_id) do
@@ -397,7 +398,7 @@ defmodule MingaEditor.EffectScheduler.Engine do
     end)
   end
 
-  @spec cancel_in_lane(State.t(), Request.resource(), State.lane(), reference()) ::
+  @spec cancel_in_lane(State.t(), Request.resource(), State.lane(), Request.id()) ::
           {:ok, State.t()} | :not_found
   defp cancel_in_lane(
          state,
@@ -416,7 +417,13 @@ defmodule MingaEditor.EffectScheduler.Engine do
         :not_found
 
       {[request], rest} ->
-        state = put_lane(state, resource, %{lane | queue: :queue.from_list(rest)})
+        queue = :queue.from_list(rest)
+
+        state =
+          state
+          |> put_lane(resource, %{lane | queue: queue})
+          |> notify_queued_lifecycle(queue)
+
         {:ok, deliver_result(state, Outcome.canceled(request, :requested))}
     end
   end
@@ -476,7 +483,7 @@ defmodule MingaEditor.EffectScheduler.Engine do
     %{state | admitted: MapSet.put(state.admitted, request_id)}
   end
 
-  @spec release_admission(State.t(), reference()) :: State.t()
+  @spec release_admission(State.t(), Request.id()) :: State.t()
   defp release_admission(state, request_id) do
     %{state | admitted: MapSet.delete(state.admitted, request_id)}
   end
@@ -493,6 +500,20 @@ defmodule MingaEditor.EffectScheduler.Engine do
       _lane ->
         state
     end
+  end
+
+  @spec notify_queued_lifecycle(State.t(), :queue.queue(Request.t())) :: State.t()
+  defp notify_queued_lifecycle(%State{} = state, queue) do
+    requests = :queue.to_list(queue)
+    total = Enum.count(requests)
+
+    requests
+    |> Enum.with_index(1)
+    |> Enum.each(fn {request, position} ->
+      notify_lifecycle(state.owner, Outcome.queued(request, position, total))
+    end)
+
+    state
   end
 
   @spec notify_lifecycle(pid() | nil, Outcome.t()) :: :ok

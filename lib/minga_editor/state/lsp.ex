@@ -15,6 +15,7 @@ defmodule MingaEditor.State.LSP do
   alias MingaEditor.State.LSP.FormatOperations
 
   @type server_status :: :starting | :initializing | :ready | :crashed
+  @type operation_request :: {:references | :rename, pos_integer(), pos_integer() | nil}
 
   @type t :: %__MODULE__{
           status: MingaEditor.Shell.Traditional.Modeline.lsp_status(),
@@ -24,6 +25,7 @@ defmodule MingaEditor.State.LSP do
           selection_ranges: [map()] | nil,
           selection_range_index: non_neg_integer(),
           format_operations: FormatOperations.t(),
+          operation_requests: %{reference() => operation_request()},
           highlight_debounce_timer: reference() | nil,
           inlay_hint_debounce_timer: reference() | nil,
           last_inlay_viewport_top: non_neg_integer() | nil
@@ -36,6 +38,7 @@ defmodule MingaEditor.State.LSP do
             selection_ranges: nil,
             selection_range_index: 0,
             format_operations: FormatOperations.new(),
+            operation_requests: %{},
             highlight_debounce_timer: nil,
             inlay_hint_debounce_timer: nil,
             last_inlay_viewport_top: nil
@@ -141,6 +144,42 @@ defmodule MingaEditor.State.LSP do
   @spec format_active?(t(), reference()) :: boolean()
   def format_active?(%__MODULE__{} = lsp, ref) when is_reference(ref) do
     match?({:ok, %FormatOperation{}}, fetch_format(lsp, ref))
+  end
+
+  # ── Correlated operation requests ────────────────────────────────────────
+
+  @doc "Tracks an Editor-global LSP request for a structured operation."
+  @spec track_operation_request(t(), reference(), operation_request()) :: t()
+  def track_operation_request(%__MODULE__{} = lsp, ref, {kind, operation_id, tab_id} = request)
+      when is_reference(ref) and kind in [:references, :rename] and is_integer(operation_id) and
+             operation_id > 0 and (is_nil(tab_id) or (is_integer(tab_id) and tab_id > 0)) do
+    %{lsp | operation_requests: Map.put(lsp.operation_requests, ref, request)}
+  end
+
+  @doc "Takes an Editor-global LSP operation request by response reference."
+  @spec take_operation_request(t(), reference()) ::
+          {:ok, operation_request(), t()} | :error
+  def take_operation_request(%__MODULE__{} = lsp, ref) when is_reference(ref) do
+    case Map.pop(lsp.operation_requests, ref) do
+      {nil, _requests} -> :error
+      {request, requests} -> {:ok, request, %{lsp | operation_requests: requests}}
+    end
+  end
+
+  @doc "Takes all structured operation requests originating from one departing tab."
+  @spec take_operation_requests_for_tab(t(), pos_integer()) :: {[operation_request()], t()}
+  def take_operation_requests_for_tab(%__MODULE__{} = lsp, tab_id)
+      when is_integer(tab_id) and tab_id > 0 do
+    {requests, retained} =
+      Enum.reduce(lsp.operation_requests, {[], %{}}, fn
+        {_ref, {_kind, _operation_id, ^tab_id} = request}, {requests, retained} ->
+          {[request | requests], retained}
+
+        {ref, request}, {requests, retained} ->
+          {requests, Map.put(retained, ref, request)}
+      end)
+
+    {Enum.reverse(requests), %{lsp | operation_requests: retained}}
   end
 
   # ── Highlight debounce timer ─────────────────────────────────────────────

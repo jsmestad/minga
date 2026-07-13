@@ -16,6 +16,7 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
   alias MingaEditor.Handlers.GuiActionHandler
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.OperationFeedback
 
   @effect_timeout 2_000
 
@@ -66,7 +67,9 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
     %{state: state, scheduler: scheduler, git_root: git_root, dispatch_opts: opts} = context
 
     state = GuiActionHandler.dispatch(state, {:git_commit, "fix the thing"}, opts)
-    assert EditorState.status_msg(state) == "Committing…"
+    assert feedback(state).message == "Committing…"
+    assert feedback(state).status in [:pending, :running]
+    assert EditorState.status_msg(state) == nil
 
     {state, request} = receive_resolved_mutation(state, scheduler, :commit, :running)
     assert request.resource == {:git_repository, Path.expand(git_root)}
@@ -75,7 +78,8 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
 
     {state, success} = receive_result(state, scheduler, request.id)
     assert success.status == :completed
-    assert EditorState.status_msg(state) == "Committed stub000"
+    assert feedback(state).message == "Committed stub000"
+    assert feedback(state).status == :success
 
     Stub.set_commit_result(git_root, {:error, "boom commit"})
     state = GuiActionHandler.dispatch(state, {:git_commit, "fail commit", true}, opts)
@@ -85,7 +89,8 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
 
     {state, failure} = receive_result(state, scheduler, request.id)
     assert failure.status == :failed
-    assert EditorState.status_msg(state) == "Amend failed: boom commit"
+    assert feedback_for(state, request.operation_id).message == "Amend failed: boom commit"
+    assert feedback_for(state, request.operation_id).status == :error
   end
 
   test "same-repository mutations are bounded FIFO and keep frontend activity visible", context do
@@ -118,12 +123,15 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
 
     {state, running_commit} = receive_running_lifecycle(state, :commit)
     assert running_commit.id == commit_request.id
-    assert EditorState.status_msg(state) == "Committing…"
+    assert feedback(state).message == "Committing…"
+    assert feedback(state).status in [:pending, :running]
+    assert EditorState.status_msg(state) == nil
     assert_receive {:stub_git_commit, ^git_root, "after stage", []}
 
     {state, commit_outcome} = receive_result(state, scheduler, commit_request.id)
     assert commit_outcome.status == :completed
-    assert EditorState.status_msg(state) == "Committed stub000"
+    assert feedback(state).message == "Committed stub000"
+    assert feedback(state).status == :success
     refute EffectScheduler.active?(scheduler, GitMutation)
     refute Context.from_editor_state(state).git_syncing
   end
@@ -137,7 +145,8 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
     ]
 
     state = GuiActionHandler.dispatch(state, {:git_stage_file, "lib/nonblocking.ex"}, opts)
-    assert EditorState.status_msg(state) == "Staging lib/nonblocking.ex…"
+    assert feedback(state).message == "Staging lib/nonblocking.ex…"
+    assert feedback(state).status == :pending
     assert_receive {:git_resolver_blocked, ^tag, resolver_worker}, @effect_timeout
     assert Context.from_editor_state(state).git_syncing
 
@@ -147,7 +156,8 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
 
     {state, outcome} = receive_result(state, scheduler, request.id)
     assert outcome.status == :completed
-    assert EditorState.status_msg(state) == "Staged lib/nonblocking.ex"
+    assert feedback_for(state, request.operation_id).message == "Staged lib/nonblocking.ex"
+    assert feedback_for(state, request.operation_id).status == :success
   end
 
   test "queue overflow and missing repository have explicit feedback", context do
@@ -168,6 +178,7 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
     overflow_state = GuiActionHandler.dispatch(state, {:git_stage_file, "overflow.ex"}, opts)
     {overflow_state, overflow} = receive_admission_result(overflow_state, scheduler, :stage)
     overflow_id = overflow.request.id
+    overflow_operation_id = overflow.request.operation_id
 
     assert_receive {:effect_terminal,
                     %Outcome{
@@ -177,7 +188,10 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
                     }},
                    @effect_timeout
 
-    assert EditorState.status_msg(overflow_state) == "Git action queue is full"
+    assert feedback_for(overflow_state, overflow_operation_id).message ==
+             "Git action queue is full"
+
+    assert feedback_for(overflow_state, overflow_operation_id).status == :error
 
     assert EffectScheduler.stats(scheduler) == %{
              resources: 1,
@@ -194,7 +208,11 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
     missing_state = GuiActionHandler.dispatch(state, :git_stage_all, missing_opts)
     {missing_state, missing} = receive_admission_result(missing_state, scheduler, :stage_all)
     assert missing.status == :failed
-    assert EditorState.status_msg(missing_state) == "Not in a git repository"
+
+    assert feedback_for(missing_state, missing.request.operation_id).message ==
+             "Not in a git repository"
+
+    assert feedback_for(missing_state, missing.request.operation_id).status == :error
   end
 
   @spec receive_resolved_mutation(
@@ -204,12 +222,18 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
           :running | :queued
         ) :: {EditorState.t(), Request.t()}
   defp receive_resolved_mutation(state, scheduler, operation, disposition) do
-    {state, _admission} = receive_admission_result(state, scheduler, operation)
+    {state, admission} = receive_admission_result(state, scheduler, operation)
 
-    case disposition do
-      :running -> receive_running_lifecycle(state, operation)
-      :queued -> receive_queued_lifecycle(state, operation)
-    end
+    {state, request} =
+      case disposition do
+        :running -> receive_running_lifecycle(state, operation)
+        :queued -> receive_queued_lifecycle(state, operation, admission.request.operation_id)
+      end
+
+    assert request.operation_id == admission.request.operation_id
+    refute request.id == admission.request.id
+    refute feedback_for(state, request.operation_id).status == :success
+    {state, request}
   end
 
   @spec receive_admission_result(EditorState.t(), pid(), GitMutation.operation()) ::
@@ -235,6 +259,7 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
                    @effect_timeout
 
     {:noreply, state} = MingaEditor.handle_info({:effect_result, scheduler, outcome}, state)
+    refute feedback_for(state, outcome.request.operation_id).status == :success
     {state, outcome}
   end
 
@@ -251,17 +276,30 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
     {apply_lifecycle(state, outcome), request}
   end
 
-  @spec receive_queued_lifecycle(EditorState.t(), GitMutation.operation()) ::
+  @spec receive_queued_lifecycle(EditorState.t(), GitMutation.operation(), pos_integer()) ::
           {EditorState.t(), Request.t()}
-  defp receive_queued_lifecycle(state, operation) do
-    assert_receive {:effect_lifecycle,
-                    %Outcome{
-                      request: %Request{effect: %GitMutation{operation: ^operation}} = request,
-                      status: :queued
-                    } = outcome},
-                   @effect_timeout
+  defp receive_queued_lifecycle(state, operation, expected_operation_id) do
+    receive do
+      {:effect_lifecycle,
+       %Outcome{
+         request: %Request{effect: %GitMutation{operation: ^operation}} = request,
+         status: :queued,
+         queue_position: position,
+         queue_total: total
+       } = outcome} ->
+        assert position > 0
+        assert total >= position
+        state = apply_lifecycle(state, outcome)
 
-    {apply_lifecycle(state, outcome), request}
+        if request.operation_id == expected_operation_id do
+          {state, request}
+        else
+          receive_queued_lifecycle(state, operation, expected_operation_id)
+        end
+    after
+      @effect_timeout ->
+        flunk("timed out waiting for queued #{operation} operation #{expected_operation_id}")
+    end
   end
 
   @spec receive_result(EditorState.t(), pid(), reference()) :: {EditorState.t(), Outcome.t()}
@@ -272,6 +310,15 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
 
     {:noreply, state} = MingaEditor.handle_info({:effect_result, scheduler, outcome}, state)
     {state, outcome}
+  end
+
+  @spec feedback(EditorState.t()) :: MingaEditor.State.Operation.t()
+  defp feedback(state), do: OperationFeedback.selected(state.operation_feedback)
+
+  @spec feedback_for(EditorState.t(), pos_integer()) :: MingaEditor.State.Operation.t()
+  defp feedback_for(state, operation_id) do
+    {:ok, operation} = OperationFeedback.fetch(state.operation_feedback, operation_id)
+    operation
   end
 
   @spec apply_lifecycle(EditorState.t(), Outcome.t()) :: EditorState.t()

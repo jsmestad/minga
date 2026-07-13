@@ -948,7 +948,7 @@ Total size: 7 + (40 + text_len) per edit.
 
 Semantic-capable frontends receive additional structured data opcodes for chrome elements like tab bars, file trees, status bars, and popups. These opcodes start at 0x70. Many opcode and module names still use `GUI` because the Swift frontend was the first semantic client; treat that as historical naming. The product contract is Semantic UI for every capable frontend, including terminal clients. Capability negotiation decides whether a frontend receives and renders these models.
 
-See [GUI_PROTOCOL.md](GUI_PROTOCOL.md) for the complete specification of Semantic UI opcodes, `gui_action` input events, theme color slots, and the behavioral contract for semantic frontends. The sectioned `gui_status_bar` opcode (`0x76`) is specified there, including the identity flags (with safe mode), the indent section (`0x0A`), named modeline segment section (`0x0B`), and selection section (`0x0C`). The opcode names remain stable for compatibility.
+See [GUI_PROTOCOL.md](GUI_PROTOCOL.md) for the complete specification of Semantic UI opcodes, `gui_action` input events, theme color slots, and the behavioral contract for semantic frontends. The sectioned `gui_status_bar` opcode (`0x76`) is specified there, including the identity flags (with safe mode), the indent section (`0x0A`), named modeline segment section (`0x0B`), selection section (`0x0C`), and Editor-authored operation feedback section (`0x0F`). The operation section is independent of ordinary status messages, and generated operation kind and semantic status values—not message punctuation—define its meaning. The opcode names remain stable for compatibility.
 
 ---
 

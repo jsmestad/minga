@@ -100,6 +100,36 @@ const (
 	GitToastActionPullAndRetry GitToastAction = 1
 )
 
+// OperationKind is a generated enum (repr u8).
+type OperationKind uint8
+
+const (
+	OperationKindUnknown        OperationKind = 0
+	OperationKindExternalFormat OperationKind = 1
+	OperationKindGitStage       OperationKind = 2
+	OperationKindGitUnstage     OperationKind = 3
+	OperationKindGitDiscard     OperationKind = 4
+	OperationKindGitStageAll    OperationKind = 5
+	OperationKindGitUnstageAll  OperationKind = 6
+	OperationKindGitCommit      OperationKind = 7
+	OperationKindLspReferences  OperationKind = 8
+	OperationKindLspRename      OperationKind = 9
+)
+
+// OperationStatus is a generated enum (repr u8).
+type OperationStatus uint8
+
+const (
+	OperationStatusPending  OperationStatus = 1
+	OperationStatusQueued   OperationStatus = 2
+	OperationStatusRunning  OperationStatus = 3
+	OperationStatusSuccess  OperationStatus = 4
+	OperationStatusError    OperationStatus = 5
+	OperationStatusTimeout  OperationStatus = 6
+	OperationStatusCanceled OperationStatus = 7
+	OperationStatusStale    OperationStatus = 8
+)
+
 type Rect struct {
 	Row    uint16
 	Col    uint16
@@ -410,6 +440,18 @@ type GuiStatusBarWorkspace struct {
 
 type GuiStatusBarPendingKeys struct {
 	Keys string
+}
+
+type GuiStatusBarOperation struct {
+	OperationID     uint64
+	Kind            OperationKind
+	Status          OperationStatus
+	Flags           uint8
+	Message         string
+	QueuePosition   uint16
+	QueueTotal      uint16
+	ProgressCurrent uint32
+	ProgressTotal   uint32
 }
 
 type GuiGutterWindow struct {
