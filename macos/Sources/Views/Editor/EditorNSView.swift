@@ -416,16 +416,24 @@ final class EditorNSView: MTKView {
     /// after `scrollTargetWindowId` has been released.
     private var scrollElasticWindowId: UInt16?
 
-    /// The pane that should receive the presentation scroll/elastic offset this frame.
+    /// One immutable snapshot of the pane and effective offset used by both drawing and pointer normalization.
+    struct LocalScrollPresentation: Equatable {
+        let windowId: UInt16
+        let offset: CGPoint
+    }
+
+    /// The local scroll presentation for this frame or input event.
     /// Decouples "which window shows the offset" from "a gesture is active": during a settle or
     /// spring-back the gesture target is nil (so `onScrollPresentationReset` discards can win),
     /// but the offset must still land on the settling/elastic pane.
-    private var presentationScrollWindowId: UInt16? {
-        Self.presentationScrollWindowId(
+    private var localScrollPresentation: LocalScrollPresentation? {
+        Self.localScrollPresentation(
             targetWindowId: scrollTargetWindowId,
             thumbDragWindowId: thumbDragSession?.windowId,
             settleWindowId: scrollSettleWindowId,
-            elasticWindowId: scrollElasticWindowId
+            elasticWindowId: scrollElasticWindowId,
+            scrollPixelOffset: scrollPixelOffset,
+            scrollElasticOffsetY: scrollElasticOffsetY
         )
     }
 
@@ -436,6 +444,28 @@ final class EditorNSView: MTKView {
     /// immaterial; both must win over settle/elastic. Pure for testability.
     nonisolated static func presentationScrollWindowId(targetWindowId: UInt16?, thumbDragWindowId: UInt16?, settleWindowId: UInt16?, elasticWindowId: UInt16?) -> UInt16? {
         targetWindowId ?? thumbDragWindowId ?? settleWindowId ?? elasticWindowId
+    }
+
+    /// Resolves the exact owner and effective offset shared by drawing and pointer normalization.
+    nonisolated static func localScrollPresentation(
+        targetWindowId: UInt16?,
+        thumbDragWindowId: UInt16?,
+        settleWindowId: UInt16?,
+        elasticWindowId: UInt16?,
+        scrollPixelOffset: CGPoint,
+        scrollElasticOffsetY: CGFloat
+    ) -> LocalScrollPresentation? {
+        guard let windowId = presentationScrollWindowId(
+            targetWindowId: targetWindowId,
+            thumbDragWindowId: thumbDragWindowId,
+            settleWindowId: settleWindowId,
+            elasticWindowId: elasticWindowId
+        ) else { return nil }
+        let elasticOffsetY = elasticWindowId == windowId ? scrollElasticOffsetY : 0
+        return LocalScrollPresentation(
+            windowId: windowId,
+            offset: CGPoint(x: scrollPixelOffset.x, y: scrollPixelOffset.y + elasticOffsetY)
+        )
     }
 
     /// System Reduce Motion state, which disables all presentation scroll animations (AC4).
@@ -542,6 +572,7 @@ final class EditorNSView: MTKView {
         let validMouseInGutter = isMouseInGutter && validGutterHoverWindowId != nil
         let cursorAnimationGeneration = coreTextRenderer.cursorAnimationGeneration
         let presentationInputSeq = dispatcher.takePresentationInputSeq()
+        let localScrollPresentation = localScrollPresentation
         coreTextRenderer.render(frameState: fs, fontManager: fontManager,
                                 cursorBlinkVisible: cursorBlinkVisible,
                                 windowContents: guiState?.windowContents ?? [:],
@@ -551,8 +582,11 @@ final class EditorNSView: MTKView {
                                 gutterHoverRow: validGutterHoverRow,
                                 drawable: drawable, viewportSize: drawableSize,
                                 contentScale: scale,
-                                scrollOffset: SIMD2<Float>(Float(scrollPixelOffset.x), Float(scrollPixelOffset.y + scrollElasticOffsetY)),
-                                presentationWindowId: presentationScrollWindowId,
+                                scrollOffset: SIMD2<Float>(
+                                    Float(localScrollPresentation?.offset.x ?? 0),
+                                    Float(localScrollPresentation?.offset.y ?? 0)
+                                ),
+                                presentationWindowId: localScrollPresentation?.windowId,
                                 presentationInputSeq: presentationInputSeq,
                                 latencyRecorder: dispatcher.latency)
         if coreTextRenderer.cursorAnimationGeneration != cursorAnimationGeneration {
@@ -1094,6 +1128,10 @@ final class EditorNSView: MTKView {
     /// leave `thumbDragSession` nil and keep the round-trip path; the residency decision is made
     /// once here and never re-checked (see `ThumbDragSession` gate policy).
     private func beginThumbDragPresentation(targetLine: UInt32) {
+        // A thumb interaction supersedes every trackpad/discrete presentation, including
+        // accumulator and reconciliation bookkeeping. Reset before residency routing so the
+        // round-trip path cannot leave an old settle or rebound visible either.
+        resetSmoothScrollState()
         guard let windowId = activeWindowId,
               let content = guiState?.windowContents[windowId],
               Self.thumbDragCanPresentLocally(
@@ -2336,14 +2374,12 @@ final class EditorNSView: MTKView {
 
     nonisolated static func presentationNormalizedGutterPoint(
         _ point: NSPoint,
-        scrollTargetWindowId: UInt16?,
+        presentation: LocalScrollPresentation?,
         targetGutterRect: GUICellRect?,
-        scrollPixelOffset: CGPoint,
-        scrollElasticOffsetY: CGFloat,
         cellWidth: CGFloat,
         cellHeight: CGFloat
     ) -> NSPoint {
-        guard scrollTargetWindowId != nil, let targetGutterRect else { return point }
+        guard let presentation, let targetGutterRect else { return point }
         guard cellWidth > 0, cellHeight > 0 else { return point }
 
         let rawCol = Int(point.x / cellWidth)
@@ -2353,13 +2389,11 @@ final class EditorNSView: MTKView {
         let startCol = Int(targetGutterRect.col)
         let endCol = startCol + Int(targetGutterRect.width)
         guard rawRow >= startRow && rawRow < endRow && rawCol >= startCol && rawCol < endCol else { return point }
-
-        let offsetY = scrollPixelOffset.y + scrollElasticOffsetY
-        guard offsetY != 0 else { return point }
+        guard presentation.offset.y != 0 else { return point }
 
         let minY = CGFloat(startRow) * cellHeight
         let maxY = CGFloat(endRow) * cellHeight - 0.001
-        let normalizedY = min(max(point.y + offsetY, minY), maxY)
+        let normalizedY = min(max(point.y + presentation.offset.y, minY), maxY)
         return NSPoint(x: point.x, y: normalizedY)
     }
 
@@ -2590,6 +2624,13 @@ final class EditorNSView: MTKView {
             boundaryBefore: boundary.before,
             boundaryAfter: boundary.after
         ) else { return }
+
+        // A discrete tick supersedes an elastic rebound. Clear it before seeding the settle so a
+        // rebound owned by another pane cannot be combined with this pane's presentation offset.
+        scrollElasticAnimator.cancel()
+        scrollElasticWindowId = nil
+        scrollElasticOffsetY = 0
+        scrollElasticRawDistance = 0
 
         // Extend any in-flight settle from its current position so rapid ticks accumulate smoothly.
         let residualNow = scrollSettleAnimator.offset()
@@ -2823,12 +2864,11 @@ final class EditorNSView: MTKView {
     }
 
     private func foldChevronEntry(at point: NSPoint) -> (gutter: Wire.WindowGutter, entry: Wire.GutterEntry)? {
+        let presentation = localScrollPresentation
         let point = Self.presentationNormalizedGutterPoint(
             point,
-            scrollTargetWindowId: scrollTargetWindowId,
-            targetGutterRect: scrollTargetWindowId.flatMap { guiState?.windowContents[$0]?.paneGeometry?.gutterRect },
-            scrollPixelOffset: scrollPixelOffset,
-            scrollElasticOffsetY: scrollElasticOffsetY,
+            presentation: presentation,
+            targetGutterRect: presentation.flatMap { guiState?.windowContents[$0.windowId]?.paneGeometry?.gutterRect },
             cellWidth: cellWidth,
             cellHeight: effectiveCellHeight
         )
@@ -2858,12 +2898,11 @@ final class EditorNSView: MTKView {
     }
 
     private func updateGutterHover(at point: NSPoint) {
+        let presentation = localScrollPresentation
         let point = Self.presentationNormalizedGutterPoint(
             point,
-            scrollTargetWindowId: scrollTargetWindowId,
-            targetGutterRect: scrollTargetWindowId.flatMap { guiState?.windowContents[$0]?.paneGeometry?.gutterRect },
-            scrollPixelOffset: scrollPixelOffset,
-            scrollElasticOffsetY: scrollElasticOffsetY,
+            presentation: presentation,
+            targetGutterRect: presentation.flatMap { guiState?.windowContents[$0.windowId]?.paneGeometry?.gutterRect },
             cellWidth: cellWidth,
             cellHeight: effectiveCellHeight
         )
@@ -2924,17 +2963,38 @@ final class EditorNSView: MTKView {
     }
 
     private func presentationNormalizedPoint(_ point: NSPoint) -> NSPoint {
-        guard Self.hasActivePresentationOffset(scrollPixelOffset: scrollPixelOffset, scrollElasticOffsetY: scrollElasticOffsetY) else { return point }
+        let presentation = localScrollPresentation
         let rawRow = Int16(point.y / effectiveCellHeight)
         let rawCol = max(0, Int16(point.x / cellWidth))
-        guard smoothScrollTargetWindowId(row: rawRow, col: rawCol) == scrollTargetWindowId else { return point }
-        let scrollLeft = scrollTargetWindowId.flatMap { guiState?.windowContents[$0]?.scrollLeft } ?? 0
-        let presentationOffset = CGPoint(x: scrollPixelOffset.x, y: scrollPixelOffset.y + scrollElasticOffsetY)
-        let offset = Self.presentationScrollOffset(scrollLeft: scrollLeft, scrollOffset: presentationOffset)
+        let rawPointWindowId = smoothScrollTargetWindowId(row: rawRow, col: rawCol)
+        let content = presentation.flatMap { guiState?.windowContents[$0.windowId] }
+        return Self.presentationNormalizedPoint(
+            point,
+            rawPointWindowId: rawPointWindowId,
+            presentation: presentation,
+            targetContentRect: content?.paneGeometry?.contentRect,
+            scrollLeft: content?.scrollLeft ?? 0,
+            cellWidth: cellWidth,
+            cellHeight: effectiveCellHeight
+        )
+    }
+
+    /// Maps a raw pointer point through the exact local transform used to draw its pane.
+    nonisolated static func presentationNormalizedPoint(
+        _ point: NSPoint,
+        rawPointWindowId: UInt16?,
+        presentation: LocalScrollPresentation?,
+        targetContentRect: GUICellRect?,
+        scrollLeft: UInt16,
+        cellWidth: CGFloat,
+        cellHeight: CGFloat
+    ) -> NSPoint {
+        guard let presentation, rawPointWindowId == presentation.windowId else { return point }
+        guard hasActivePresentationOffset(scrollPixelOffset: presentation.offset, scrollElasticOffsetY: 0) else { return point }
+        let offset = presentationScrollOffset(scrollLeft: scrollLeft, scrollOffset: presentation.offset)
         let normalized = NSPoint(x: point.x + offset.x, y: point.y + offset.y)
-        guard let targetWindowId = scrollTargetWindowId,
-              let rect = guiState?.windowContents[targetWindowId]?.paneGeometry?.contentRect else { return normalized }
-        return Self.clampPresentationPoint(normalized, to: rect, cellWidth: cellWidth, cellHeight: effectiveCellHeight)
+        guard let targetContentRect else { return normalized }
+        return clampPresentationPoint(normalized, to: targetContentRect, cellWidth: cellWidth, cellHeight: cellHeight)
     }
 
     nonisolated static func hasActivePresentationOffset(scrollPixelOffset: CGPoint, scrollElasticOffsetY: CGFloat) -> Bool {

@@ -433,10 +433,8 @@ struct MouseInputTests {
     @MainActor func presentationScrollNormalizationShiftsFoldHitTestingVerticallyOnly() {
         let normalized = EditorNSView.presentationNormalizedGutterPoint(
             NSPoint(x: 18.0, y: 3.0),
-            scrollTargetWindowId: 7,
+            presentation: EditorNSView.LocalScrollPresentation(windowId: 7, offset: CGPoint(x: 0, y: 8.0)),
             targetGutterRect: GUICellRect(row: 0, col: 2, width: 6, height: 4),
-            scrollPixelOffset: CGPoint(x: 0, y: 8.0),
-            scrollElasticOffsetY: 0,
             cellWidth: 8.0,
             cellHeight: 8.0
         )
@@ -506,6 +504,131 @@ struct MouseInputTests {
         #expect(EditorNSView.hasActivePresentationOffset(scrollPixelOffset: .zero, scrollElasticOffsetY: 4) == true)
         #expect(EditorNSView.hasActivePresentationOffset(scrollPixelOffset: CGPoint(x: 3, y: 0), scrollElasticOffsetY: 0) == true)
         #expect(EditorNSView.hasActivePresentationOffset(scrollPixelOffset: .zero, scrollElasticOffsetY: 0) == false)
+    }
+
+    @Test("gesture-end settle uses the presented pane and effective offset")
+    func gestureEndSettleNormalizesPresentedRow() throws {
+        let presentation = try #require(EditorNSView.localScrollPresentation(
+            targetWindowId: nil,
+            thumbDragWindowId: nil,
+            settleWindowId: 7,
+            elasticWindowId: nil,
+            scrollPixelOffset: CGPoint(x: 0, y: 12),
+            scrollElasticOffsetY: 0
+        ))
+
+        let normalized = normalizedPoint(NSPoint(x: 25, y: 25), rawPointWindowId: 7, presentation: presentation)
+        #expect(presentation.windowId == 7)
+        #expect(normalized.y == 37)
+        #expect(Int(normalized.y / 10) == 3)
+    }
+
+    @Test("elastic rebound is included in the effective pointer offset")
+    func elasticReboundNormalizesPresentedRow() throws {
+        let presentation = try #require(EditorNSView.localScrollPresentation(
+            targetWindowId: nil,
+            thumbDragWindowId: nil,
+            settleWindowId: nil,
+            elasticWindowId: 7,
+            scrollPixelOffset: .zero,
+            scrollElasticOffsetY: 8
+        ))
+
+        let normalized = normalizedPoint(NSPoint(x: 25, y: 25), rawPointWindowId: 7, presentation: presentation)
+        #expect(presentation.offset.y == 8)
+        #expect(normalized.y == 33)
+    }
+
+    @Test("elastic offset contributes only to its presentation owner")
+    func elasticOffsetStaysWithItsOwner() throws {
+        let differentOwner = try #require(EditorNSView.localScrollPresentation(
+            targetWindowId: nil,
+            thumbDragWindowId: nil,
+            settleWindowId: 7,
+            elasticWindowId: 8,
+            scrollPixelOffset: CGPoint(x: 0, y: 6),
+            scrollElasticOffsetY: 9
+        ))
+        let sharedOwner = try #require(EditorNSView.localScrollPresentation(
+            targetWindowId: nil,
+            thumbDragWindowId: nil,
+            settleWindowId: 7,
+            elasticWindowId: 7,
+            scrollPixelOffset: CGPoint(x: 0, y: 6),
+            scrollElasticOffsetY: 9
+        ))
+
+        #expect(differentOwner.offset.y == 6)
+        #expect(sharedOwner.offset.y == 15)
+    }
+
+    @Test("thumb-drag reconciliation uses its presented pane")
+    func thumbDragReconciliationNormalizesPresentedRow() throws {
+        let presentation = try #require(EditorNSView.localScrollPresentation(
+            targetWindowId: nil,
+            thumbDragWindowId: 7,
+            settleWindowId: 8,
+            elasticWindowId: 9,
+            scrollPixelOffset: CGPoint(x: 0, y: -10),
+            scrollElasticOffsetY: 0
+        ))
+
+        let normalized = normalizedPoint(NSPoint(x: 25, y: 35), rawPointWindowId: 7, presentation: presentation)
+        #expect(presentation.windowId == 7)
+        #expect(normalized.y == 25)
+    }
+
+    @Test("authoritative re-anchor removes pointer normalization")
+    func authoritativeReanchorRemovesPointerTransform() {
+        let presentation = EditorNSView.localScrollPresentation(
+            targetWindowId: nil,
+            thumbDragWindowId: nil,
+            settleWindowId: nil,
+            elasticWindowId: nil,
+            scrollPixelOffset: CGPoint(x: 0, y: 12),
+            scrollElasticOffsetY: 4
+        )
+        let point = NSPoint(x: 25, y: 25)
+
+        #expect(presentation == nil)
+        #expect(normalizedPoint(point, rawPointWindowId: 7, presentation: presentation) == point)
+    }
+
+    @Test("pointer normalization classifies the raw pane before translation")
+    func rawPaneOwnershipPreventsCrossPaneTranslation() {
+        let presentation = EditorNSView.LocalScrollPresentation(windowId: 7, offset: CGPoint(x: 0, y: 12))
+        let point = NSPoint(x: 25, y: 25)
+
+        #expect(normalizedPoint(point, rawPointWindowId: 8, presentation: presentation) == point)
+    }
+
+    @Test("pointer normalization clamps clicks at visible top and bottom boundaries")
+    func boundaryClicksStayInPresentedPane() {
+        let down = EditorNSView.LocalScrollPresentation(windowId: 7, offset: CGPoint(x: 0, y: 15))
+        let up = EditorNSView.LocalScrollPresentation(windowId: 7, offset: CGPoint(x: 0, y: -15))
+        let top = normalizedPoint(NSPoint(x: 25, y: 20.001), rawPointWindowId: 7, presentation: up)
+        let bottom = normalizedPoint(NSPoint(x: 25, y: 49.999), rawPointWindowId: 7, presentation: down)
+
+        #expect(Int(top.y / 10) == 2)
+        #expect(Int(bottom.y / 10) == 4)
+        #expect(top.y >= 20)
+        #expect(bottom.y < 50)
+    }
+
+    private func normalizedPoint(
+        _ point: NSPoint,
+        rawPointWindowId: UInt16?,
+        presentation: EditorNSView.LocalScrollPresentation?
+    ) -> NSPoint {
+        EditorNSView.presentationNormalizedPoint(
+            point,
+            rawPointWindowId: rawPointWindowId,
+            presentation: presentation,
+            targetContentRect: GUICellRect(row: 2, col: 2, width: 4, height: 3),
+            scrollLeft: 0,
+            cellWidth: 10,
+            cellHeight: 10
+        )
     }
 
     @Test("selection drag active only while the mouse button is down for a plain text drag (#2661)")
