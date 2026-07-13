@@ -39,15 +39,15 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
       assert_receive {:lsp_request, "textDocument/references", _params, caller, ref}
       assert caller == self()
-      assert {:references, operation_id} = state.workspace.lsp_pending[ref]
+      assert {:references, operation_id, nil} = state.lsp.operation_requests[ref]
       assert OperationFeedback.selected(state.operation_feedback).id == operation_id
-      assert OperationFeedback.selected(state.operation_feedback).status == :pending
+      assert OperationFeedback.selected(state.operation_feedback).status == :running
       assert EditorState.status_msg(state) == nil
 
       {state, effects} = LspEventHandler.handle(state, {:lsp_response, ref, {:ok, []}})
 
       assert effects == [:render_now]
-      assert state.workspace.lsp_pending == %{}
+      assert state.lsp.operation_requests == %{}
       assert OperationFeedback.selected(state.operation_feedback).id == operation_id
       assert OperationFeedback.selected(state.operation_feedback).status == :success
       assert OperationFeedback.selected(state.operation_feedback).message == "No references found"
@@ -63,20 +63,70 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
       assert_receive {:lsp_request, "textDocument/rename", _params, caller, ref}
       assert caller == self()
-      assert {:rename, operation_id} = state.workspace.lsp_pending[ref]
+      assert {:rename, operation_id, nil} = state.lsp.operation_requests[ref]
       assert OperationFeedback.selected(state.operation_feedback).id == operation_id
-      assert OperationFeedback.selected(state.operation_feedback).status == :pending
+      assert OperationFeedback.selected(state.operation_feedback).status == :running
       assert EditorState.status_msg(state) == nil
 
       {state, effects} = LspEventHandler.handle(state, {:lsp_response, ref, {:ok, nil}})
 
       assert effects == [:render_now]
-      assert state.workspace.lsp_pending == %{}
+      assert state.lsp.operation_requests == %{}
       assert OperationFeedback.selected(state.operation_feedback).id == operation_id
       assert OperationFeedback.selected(state.operation_feedback).status == :success
 
       assert OperationFeedback.selected(state.operation_feedback).message ==
                "Rename returned no edits"
+    end
+
+    test "operation response remains correlated after the active workspace changes" do
+      state = file_buffer_state("hello\n")
+      client = start_fake_lsp_client()
+      buffer = state.workspace.buffers.active
+      register_lsp_client(buffer, client)
+      state = MingaEditor.LspActions.find_references(state)
+
+      assert_receive {:lsp_request, "textDocument/references", _params, _caller, ref}
+      {:references, operation_id, nil} = state.lsp.operation_requests[ref]
+
+      switched_state = %{state | workspace: base_state().workspace}
+      {result, effects} = LspEventHandler.handle(switched_state, {:lsp_response, ref, {:ok, []}})
+
+      assert effects == [:render_now]
+      assert result.lsp.operation_requests == %{}
+      assert OperationFeedback.selected(result.operation_feedback).id == operation_id
+      assert OperationFeedback.selected(result.operation_feedback).status == :success
+
+      assert OperationFeedback.selected(result.operation_feedback).message ==
+               "No references found"
+    end
+
+    test "operation response for a different active tab terminalizes without domain effects" do
+      {state, operation} =
+        OperationFeedback.start_in(
+          base_state(),
+          :lsp_references,
+          "lsp:references:file.ex",
+          "Finding references…",
+          cancelable?: false
+        )
+
+      ref = make_ref()
+
+      state =
+        EditorState.update_lsp(
+          state,
+          &LSPState.track_operation_request(&1, ref, {:references, operation.id, 999})
+        )
+
+      {result, effects} = LspEventHandler.handle(state, {:lsp_response, ref, {:ok, []}})
+      selected = OperationFeedback.selected(result.operation_feedback)
+
+      assert effects == [:render_now]
+      assert result.lsp.operation_requests == %{}
+      assert selected.id == operation.id
+      assert selected.status == :stale
+      assert selected.message == "References response ignored after tab switch"
     end
 
     test "tracked atom response deletes pending ref and returns render_now" do

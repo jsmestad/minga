@@ -101,6 +101,7 @@ defmodule MingaEditor.LspActions.RenameTest do
     test "error, no-result, and empty application outcomes finish one identity" do
       cases = [
         {{:error, "failed"}, :error, "Rename failed"},
+        {{:error, :timeout}, :timeout, "Rename timed out"},
         {{:ok, nil}, :success, "Rename returned no edits"},
         {{:ok, %{}}, :success, "Rename: no edits to apply"}
       ]
@@ -116,6 +117,70 @@ defmodule MingaEditor.LspActions.RenameTest do
         assert EditorState.status_msg(state) == nil
       end
     end
+
+    test "a response for a replaced identity cannot apply workspace edits" do
+      path = Path.join(System.tmp_dir!(), "stale-rename-#{System.unique_integer([:positive])}.ex")
+      File.write!(path, "old_name\n")
+      on_exit(fn -> File.rm(path) end)
+      state = file_state(path)
+
+      {state, old} =
+        OperationFeedback.start_in(
+          state,
+          :lsp_rename,
+          "lsp:rename:" <> path,
+          "Renaming...",
+          cancelable?: false
+        )
+
+      {state, current} =
+        OperationFeedback.start_in(
+          state,
+          :lsp_rename,
+          "lsp:rename:" <> path,
+          "Renaming again...",
+          cancelable?: false
+        )
+
+      result = LspActions.handle_rename_response(state, {:ok, rename_edit(path)}, old.id)
+
+      assert result == state
+      assert Minga.Buffer.content(result.workspace.buffers.active) == "old_name\n"
+      assert OperationFeedback.selected(result.operation_feedback).id == current.id
+      assert OperationFeedback.selected(result.operation_feedback).status == :pending
+    end
+
+    test "partial workspace edit application reports an error with applied and requested counts" do
+      path =
+        Path.join(System.tmp_dir!(), "partial-rename-#{System.unique_integer([:positive])}.ex")
+
+      missing =
+        Path.join(System.tmp_dir!(), "missing-rename-#{System.unique_integer([:positive])}.ex")
+
+      File.write!(path, "old_name\n")
+      on_exit(fn -> File.rm(path) end)
+      state = file_state(path)
+
+      {state, operation} =
+        OperationFeedback.start_in(
+          state,
+          :lsp_rename,
+          "lsp:rename:" <> path,
+          "Renaming...",
+          cancelable?: false
+        )
+
+      edit =
+        rename_edit(path)
+        |> put_in(["changes", "file://#{missing}"], rename_edit_for_range())
+
+      result = LspActions.handle_rename_response(state, {:ok, edit}, operation.id)
+      selected = OperationFeedback.selected(result.operation_feedback)
+
+      assert Minga.Buffer.content(result.workspace.buffers.active) == "new_name"
+      assert selected.status == :error
+      assert selected.message == "Rename: applied 1 edits across 1 of 2 files"
+    end
   end
 
   describe "rename command parser" do
@@ -123,6 +188,24 @@ defmodule MingaEditor.LspActions.RenameTest do
       assert {:rename, "new_name"} = Parser.parse("rename new_name")
       assert {:rename, "new_name"} = Parser.parse("rename   new_name  ")
     end
+  end
+
+  @spec rename_edit(String.t()) :: map()
+  defp rename_edit(path) do
+    %{"changes" => %{"file://#{path}" => rename_edit_for_range()}}
+  end
+
+  @spec rename_edit_for_range() :: [map()]
+  defp rename_edit_for_range do
+    [
+      %{
+        "range" => %{
+          "start" => %{"line" => 0, "character" => 0},
+          "end" => %{"line" => 0, "character" => 8}
+        },
+        "newText" => "new_name"
+      }
+    ]
   end
 
   @spec file_state(String.t()) :: EditorState.t()

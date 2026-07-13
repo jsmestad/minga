@@ -319,6 +319,57 @@ defmodule MingaEditor.EffectSchedulerTest do
     finalize_once(scheduler, receive_candidate(scheduler, second.id, :completed))
   end
 
+  test "FIFO advances the third request after the first of three completes" do
+    scheduler = start_scheduler()
+    policy = Policy.fifo(2)
+    first = EffectProbe.request(self(), :first, :repository, policy)
+    second = EffectProbe.request(self(), :second, :repository, policy)
+    third = EffectProbe.request(self(), :third, :repository, policy)
+
+    assert EffectScheduler.schedule(scheduler, first) == {:ok, first.id, :running}
+    assert_receive {:effect_started, :first, first_worker, [:first]}
+    assert EffectScheduler.schedule(scheduler, second) == {:ok, second.id, :queued}
+
+    assert_receive {:effect_lifecycle,
+                    %Outcome{request: %Request{id: second_id}, queue_position: 1, queue_total: 1}}
+
+    assert second_id == second.id
+    assert EffectScheduler.schedule(scheduler, third) == {:ok, third.id, :queued}
+
+    assert_receive {:effect_lifecycle,
+                    %Outcome{
+                      request: %Request{id: refreshed_second_id},
+                      queue_position: 1,
+                      queue_total: 2
+                    }}
+
+    assert refreshed_second_id == second.id
+
+    assert_receive {:effect_lifecycle,
+                    %Outcome{request: %Request{id: third_id}, queue_position: 2, queue_total: 2}}
+
+    assert third_id == third.id
+    send(first_worker, {:release_effect, :first})
+    finalize_once(scheduler, receive_candidate(scheduler, first.id, :completed))
+
+    assert_receive {:effect_lifecycle,
+                    %Outcome{
+                      request: %Request{id: advanced_third_id},
+                      status: :queued,
+                      queue_position: 1,
+                      queue_total: 1
+                    }}
+
+    assert advanced_third_id == third.id
+    assert_receive {:effect_started, :second, second_worker, [:second]}
+
+    send(second_worker, {:release_effect, :second})
+    finalize_once(scheduler, receive_candidate(scheduler, second.id, :completed))
+    assert_receive {:effect_started, :third, third_worker, [:third]}
+    send(third_worker, {:release_effect, :third})
+    finalize_once(scheduler, receive_candidate(scheduler, third.id, :completed))
+  end
+
   test "FIFO refreshes queue positions after admission and cancellation" do
     scheduler = start_scheduler()
     policy = Policy.fifo(3)

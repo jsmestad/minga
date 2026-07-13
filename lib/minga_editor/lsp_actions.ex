@@ -147,7 +147,10 @@ defmodule MingaEditor.LspActions do
               )
 
             ref = Client.request(client, "textDocument/references", params)
-            put_lsp_pending(state, ref, {:references, operation.id})
+
+            state
+            |> track_operation_request(ref, {:references, operation.id, active_tab_id(state)})
+            |> OperationFeedback.running_in(operation.id, "Finding references…")
         end
     end
   end
@@ -330,7 +333,10 @@ defmodule MingaEditor.LspActions do
               )
 
             ref = Client.request(client, "textDocument/rename", params)
-            put_lsp_pending(state, ref, {:rename, operation.id})
+
+            state
+            |> track_operation_request(ref, {:rename, operation.id, active_tab_id(state)})
+            |> OperationFeedback.running_in(operation.id, "Renaming…")
         end
     end
   end
@@ -883,28 +889,45 @@ defmodule MingaEditor.LspActions do
   @doc """
   Handles a textDocument/references response.
 
-  If a single reference is found, jumps directly. If multiple, opens a
-  location picker. If none, shows a status message.
+  Domain effects are applied only while the correlated operation identity is active. A stale or
+  replaced response is an identity-safe no-op.
   """
   @spec handle_references_response(
           state(),
           {:ok, term()} | {:error, term()},
           pos_integer()
         ) :: state()
-  def handle_references_response(state, {:error, error}, operation_id) do
+  def handle_references_response(state, response, operation_id) do
+    if OperationFeedback.active_in?(state, operation_id) do
+      do_handle_references_response(state, response, operation_id)
+    else
+      state
+    end
+  end
+
+  @spec do_handle_references_response(
+          state(),
+          {:ok, term()} | {:error, term()},
+          pos_integer()
+        ) :: state()
+  defp do_handle_references_response(state, {:error, :timeout}, operation_id) do
+    OperationFeedback.finish_in(state, operation_id, :timeout, "References request timed out")
+  end
+
+  defp do_handle_references_response(state, {:error, error}, operation_id) do
     Log.debug(:lsp, "References request failed: #{inspect(error)}")
     OperationFeedback.finish_in(state, operation_id, :error, "References request failed")
   end
 
-  def handle_references_response(state, {:ok, nil}, operation_id) do
+  defp do_handle_references_response(state, {:ok, nil}, operation_id) do
     OperationFeedback.finish_in(state, operation_id, :success, "No references found")
   end
 
-  def handle_references_response(state, {:ok, []}, operation_id) do
+  defp do_handle_references_response(state, {:ok, []}, operation_id) do
     OperationFeedback.finish_in(state, operation_id, :success, "No references found")
   end
 
-  def handle_references_response(state, {:ok, [single]}, operation_id) do
+  defp do_handle_references_response(state, {:ok, [single]}, operation_id) do
     case parse_single_location(single) do
       nil ->
         OperationFeedback.finish_in(state, operation_id, :success, "No references found")
@@ -916,8 +939,8 @@ defmodule MingaEditor.LspActions do
     end
   end
 
-  def handle_references_response(state, {:ok, locations}, operation_id)
-      when is_list(locations) do
+  defp do_handle_references_response(state, {:ok, locations}, operation_id)
+       when is_list(locations) do
     items = locations_to_picker_items(locations)
     finish_references_picker(state, operation_id, items)
   end
@@ -1018,20 +1041,35 @@ defmodule MingaEditor.LspActions do
   @doc """
   Handles a textDocument/rename response.
 
-  Applies the returned WorkspaceEdit across all affected files.
+  Workspace edits are applied only while the correlated operation identity is active. A stale or
+  replaced response is an identity-safe no-op.
   """
   @spec handle_rename_response(state(), {:ok, term()} | {:error, term()}, pos_integer()) ::
           state()
-  def handle_rename_response(state, {:error, error}, operation_id) do
+  def handle_rename_response(state, response, operation_id) do
+    if OperationFeedback.active_in?(state, operation_id) do
+      do_handle_rename_response(state, response, operation_id)
+    else
+      state
+    end
+  end
+
+  @spec do_handle_rename_response(state(), {:ok, term()} | {:error, term()}, pos_integer()) ::
+          state()
+  defp do_handle_rename_response(state, {:error, :timeout}, operation_id) do
+    OperationFeedback.finish_in(state, operation_id, :timeout, "Rename timed out")
+  end
+
+  defp do_handle_rename_response(state, {:error, error}, operation_id) do
     Log.debug(:lsp, "Rename failed: #{inspect(error)}")
     OperationFeedback.finish_in(state, operation_id, :error, "Rename failed")
   end
 
-  def handle_rename_response(state, {:ok, nil}, operation_id) do
+  defp do_handle_rename_response(state, {:ok, nil}, operation_id) do
     OperationFeedback.finish_in(state, operation_id, :success, "Rename returned no edits")
   end
 
-  def handle_rename_response(state, {:ok, workspace_edit}, operation_id) do
+  defp do_handle_rename_response(state, {:ok, workspace_edit}, operation_id) do
     case apply_workspace_edit_result(state, workspace_edit, "Rename") do
       {:ok, state, message} ->
         OperationFeedback.finish_in(state, operation_id, :success, message)
@@ -1471,6 +1509,12 @@ defmodule MingaEditor.LspActions do
     {:error, state, "#{label}: could not apply edits"}
   end
 
+  defp workspace_edit_result({state, requested_files, file_count, edit_count}, label)
+       when file_count < requested_files do
+    {:error, state,
+     "#{label}: applied #{edit_count} edits across #{file_count} of #{requested_files} files"}
+  end
+
   defp workspace_edit_result({state, _requested_files, file_count, edit_count}, label) do
     {:ok, state, "#{label}: applied #{edit_count} edits across #{file_count} files"}
   end
@@ -1489,8 +1533,25 @@ defmodule MingaEditor.LspActions do
         {st, fc, ec}
 
       pid ->
-        Buffer.apply_edits(pid, edits)
-        {st, fc + 1, ec + Enum.count(edits)}
+        apply_buffer_edits(pid, edits, {st, fc, ec}, path, label)
+    end
+  end
+
+  @spec apply_buffer_edits(
+          pid(),
+          [WorkspaceEdit.text_edit()],
+          {state(), non_neg_integer(), non_neg_integer()},
+          String.t(),
+          String.t()
+        ) :: {state(), non_neg_integer(), non_neg_integer()}
+  defp apply_buffer_edits(pid, edits, {state, file_count, edit_count}, path, label) do
+    case Buffer.apply_edits(pid, edits) do
+      :ok ->
+        {state, file_count + 1, edit_count + Enum.count(edits)}
+
+      {:error, reason} ->
+        Log.warning(:lsp, "#{label}: could not apply edits to #{path}: #{inspect(reason)}")
+        {state, file_count, edit_count}
     end
   end
 
@@ -1589,6 +1650,19 @@ defmodule MingaEditor.LspActions do
   @spec put_lsp_pending(state(), reference(), atom() | tuple()) :: state()
   defp put_lsp_pending(state, ref, kind) do
     EditorState.put_lsp_pending(state, ref, kind)
+  end
+
+  @spec track_operation_request(state(), reference(), LSPState.operation_request()) :: state()
+  defp track_operation_request(state, ref, request) do
+    EditorState.update_lsp(state, &LSPState.track_operation_request(&1, ref, request))
+  end
+
+  @spec active_tab_id(state()) :: pos_integer() | nil
+  defp active_tab_id(state) do
+    case EditorState.active_tab(state) do
+      %{id: id} -> id
+      nil -> nil
+    end
   end
 
   @spec set_document_highlights(state(), [DocumentHighlight.t()] | nil) :: state()

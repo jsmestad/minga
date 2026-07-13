@@ -12,6 +12,7 @@ defmodule MingaEditor.LspActions.ReferencesTest do
   test "error, nil, and empty responses finish the same correlated operation" do
     cases = [
       {{:error, "timeout"}, :error, "References request failed"},
+      {{:error, :timeout}, :timeout, "References request timed out"},
       {{:ok, nil}, :success, "No references found"},
       {{:ok, []}, :success, "No references found"}
     ]
@@ -44,7 +45,7 @@ defmodule MingaEditor.LspActions.ReferencesTest do
     assert EditorState.status_msg(state) == nil
   end
 
-  test "a response for a replaced identity cannot mutate the current operation" do
+  test "a response for a replaced identity cannot mutate feedback or perform picker effects" do
     {state, old} = start_operation()
 
     {state, current} =
@@ -56,10 +57,22 @@ defmodule MingaEditor.LspActions.ReferencesTest do
         cancelable?: false
       )
 
-    state = LspActions.handle_references_response(state, {:error, "late"}, old.id)
+    path =
+      Path.join(System.tmp_dir!(), "stale-references-#{System.unique_integer([:positive])}.ex")
 
-    assert OperationFeedback.selected(state.operation_feedback).id == current.id
-    assert OperationFeedback.selected(state.operation_feedback).status == :pending
+    File.write!(path, "first\nsecond\n")
+    on_exit(fn -> File.rm(path) end)
+
+    result =
+      LspActions.handle_references_response(
+        state,
+        {:ok, [location(path, 0), location(path, 1)]},
+        old.id
+      )
+
+    assert result == state
+    assert OperationFeedback.selected(result.operation_feedback).id == current.id
+    assert OperationFeedback.selected(result.operation_feedback).status == :pending
   end
 
   @spec location(String.t(), non_neg_integer()) :: map()

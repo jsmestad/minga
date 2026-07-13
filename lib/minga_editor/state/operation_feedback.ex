@@ -160,6 +160,19 @@ defmodule MingaEditor.State.OperationFeedback do
   @spec size(t()) :: non_neg_integer()
   def size(%__MODULE__{} = feedback), do: map_size(feedback.operations)
 
+  @doc "Returns whether the correlated operation can still receive lifecycle updates."
+  @spec active?(t(), Operation.id()) :: boolean()
+  def active?(%__MODULE__{} = feedback, id) when is_integer(id) and id > 0 do
+    case fetch(feedback, id) do
+      {:ok, operation} -> Operation.active?(operation)
+      :error -> false
+    end
+  end
+
+  @doc "Returns whether the correlated operation in Editor state is still active."
+  @spec active_in?(map(), Operation.id()) :: boolean()
+  def active_in?(%{operation_feedback: %__MODULE__{} = feedback}, id), do: active?(feedback, id)
+
   @doc "Selects the newest active operation, otherwise the newest retained terminal operation."
   @spec selected(t()) :: Operation.t() | nil
   def selected(%__MODULE__{} = feedback) do
@@ -197,7 +210,9 @@ defmodule MingaEditor.State.OperationFeedback do
   defp update_active(%__MODULE__{} = feedback, id, update) do
     case Map.fetch(feedback.operations, id) do
       {:ok, %Operation{} = operation} ->
-        %{feedback | operations: Map.put(feedback.operations, id, update.(operation))}
+        feedback
+        |> Map.put(:operations, Map.put(feedback.operations, id, update.(operation)))
+        |> enforce_limit()
 
       :error ->
         feedback
@@ -206,30 +221,26 @@ defmodule MingaEditor.State.OperationFeedback do
 
   @spec enforce_limit(t()) :: t()
   defp enforce_limit(%__MODULE__{} = feedback) do
-    if map_size(feedback.operations) > feedback.limit do
-      eviction = eviction_candidate(feedback.operations)
-      enforce_limit(%{feedback | operations: Map.delete(feedback.operations, eviction.id)})
-    else
-      feedback
-    end
-  end
+    terminals =
+      feedback.operations
+      |> Map.values()
+      |> Enum.filter(&Operation.terminal?/1)
+      |> Enum.sort_by(& &1.order)
 
-  @spec eviction_candidate(%{Operation.id() => Operation.t()}) :: Operation.t()
-  defp eviction_candidate(operations) do
-    values = Map.values(operations)
-    terminals = Enum.filter(values, &Operation.terminal?/1)
+    eviction_count =
+      min(max(map_size(feedback.operations) - feedback.limit, 0), length(terminals))
 
-    case oldest(terminals) do
-      nil -> oldest(values)
-      operation -> operation
-    end
+    operations =
+      terminals
+      |> Enum.take(eviction_count)
+      |> Enum.reduce(feedback.operations, fn operation, operations ->
+        Map.delete(operations, operation.id)
+      end)
+
+    %{feedback | operations: operations}
   end
 
   @spec newest([Operation.t()]) :: Operation.t() | nil
   defp newest([]), do: nil
   defp newest(operations), do: Enum.max_by(operations, & &1.order)
-
-  @spec oldest([Operation.t()]) :: Operation.t() | nil
-  defp oldest([]), do: nil
-  defp oldest(operations), do: Enum.min_by(operations, & &1.order)
 end

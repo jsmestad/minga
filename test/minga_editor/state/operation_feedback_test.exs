@@ -79,6 +79,37 @@ defmodule MingaEditor.State.OperationFeedbackTest do
     assert {:ok, _} = OperationFeedback.fetch(feedback, third.id)
   end
 
+  test "retention never evicts active operations when they exceed the history bound" do
+    {feedback, first} =
+      OperationFeedback.start(
+        OperationFeedback.new(2),
+        :git_stage,
+        "one",
+        "One",
+        replace?: false
+      )
+
+    {feedback, second} =
+      OperationFeedback.start(feedback, :git_commit, "two", "Two", replace?: false)
+
+    {feedback, third} =
+      OperationFeedback.start(feedback, :lsp_rename, "three", "Three", replace?: false)
+
+    assert OperationFeedback.size(feedback) == 3
+
+    for operation <- [first, second, third] do
+      assert {:ok, retained} = OperationFeedback.fetch(feedback, operation.id)
+      assert retained.status == :pending
+    end
+
+    feedback = OperationFeedback.finish(feedback, first.id, :success, "One done")
+
+    assert OperationFeedback.size(feedback) == 2
+    assert OperationFeedback.fetch(feedback, first.id) == :error
+    assert {:ok, _second} = OperationFeedback.fetch(feedback, second.id)
+    assert {:ok, _third} = OperationFeedback.fetch(feedback, third.id)
+  end
+
   test "dismissal removes exactly one retained identity" do
     {feedback, first} = OperationFeedback.start(OperationFeedback.new(), :git_stage, "one", "One")
     {feedback, second} = OperationFeedback.start(feedback, :git_commit, "two", "Two")

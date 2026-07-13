@@ -168,7 +168,8 @@ defmodule Minga.Buffer.Process do
   Source defaults to `{:lsp, :unknown}` (not `:user`) because batch edits
   are typically LSP code actions or agent tool calls, not interactive typing.
   """
-  @spec apply_edits(GenServer.server(), [text_edit()], EditSource.t()) :: :ok
+  @spec apply_edits(GenServer.server(), [text_edit()], EditSource.t()) ::
+          :ok | {:error, :read_only}
   def apply_edits(server, edits, source \\ EditSource.lsp(:unknown)) when is_list(edits) do
     GenServer.call(server, {:apply_edits, edits, source})
   end

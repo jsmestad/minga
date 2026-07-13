@@ -25,6 +25,7 @@ defmodule MingaEditor.Commands.FormattingSchedulerTest do
 
     state =
       TestHelpers.base_state(content: "defmodule Example, do: nil\n", effect_scheduler: scheduler)
+      |> Map.put(:rendering, :disabled)
 
     state = Formatting.format_buffer(state)
     operation = OperationFeedback.selected(state.operation_feedback)

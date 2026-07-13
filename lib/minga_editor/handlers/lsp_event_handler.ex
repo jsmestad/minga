@@ -13,6 +13,7 @@ defmodule MingaEditor.Handlers.LspEventHandler do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.State.ModalOverlay
+  alias MingaEditor.State.OperationFeedback
 
   @typedoc "Effects that the LSP event handler may return."
   @type lsp_effect :: :render_now
@@ -41,7 +42,7 @@ defmodule MingaEditor.Handlers.LspEventHandler do
         dispatch_format_response(state, ref, result)
 
       :error ->
-        dispatch_tracked_response(state, ref, result, Map.fetch(state.workspace.lsp_pending, ref))
+        dispatch_operation_response(state, ref, result)
     end
   end
 
@@ -118,6 +119,19 @@ defmodule MingaEditor.Handlers.LspEventHandler do
     end
   end
 
+  @spec dispatch_operation_response(EditorState.t(), reference(), term()) ::
+          {EditorState.t(), [lsp_effect()]}
+  defp dispatch_operation_response(state, ref, result) do
+    case LSPState.take_operation_request(state.lsp, ref) do
+      {:ok, request, lsp} ->
+        state = EditorState.update_lsp(state, fn _current -> lsp end)
+        {dispatch_lsp_response(request, state, result), [:render_now]}
+
+      :error ->
+        dispatch_tracked_response(state, ref, result, Map.fetch(state.workspace.lsp_pending, ref))
+    end
+  end
+
   @spec dispatch_tracked_response(EditorState.t(), reference(), term(), {:ok, term()} | :error) ::
           {EditorState.t(), [lsp_effect()]}
   defp dispatch_tracked_response(state, ref, result, {:ok, :completion_resolve}) do
@@ -184,6 +198,20 @@ defmodule MingaEditor.Handlers.LspEventHandler do
            version
          )
 
+  defp dispatch_lsp_response({kind, operation_id, origin_tab_id}, state, result)
+       when kind in [:references, :rename] do
+    if active_tab_id(state) == origin_tab_id do
+      dispatch_lsp_response({kind, operation_id}, state, result)
+    else
+      OperationFeedback.finish_in(
+        state,
+        operation_id,
+        :stale,
+        operation_tab_changed_message(kind)
+      )
+    end
+  end
+
   defp dispatch_lsp_response({:references, operation_id}, state, result),
     do: LspActions.handle_references_response(state, result, operation_id)
 
@@ -239,4 +267,18 @@ defmodule MingaEditor.Handlers.LspEventHandler do
     Minga.Log.debug(:lsp, "Unhandled LSP response kind: #{inspect(kind)}")
     state
   end
+
+  @spec active_tab_id(EditorState.t()) :: pos_integer() | nil
+  defp active_tab_id(state) do
+    case EditorState.active_tab(state) do
+      %{id: id} -> id
+      nil -> nil
+    end
+  end
+
+  @spec operation_tab_changed_message(:references | :rename) :: String.t()
+  defp operation_tab_changed_message(:references),
+    do: "References response ignored after tab switch"
+
+  defp operation_tab_changed_message(:rename), do: "Rename response ignored after tab switch"
 end
