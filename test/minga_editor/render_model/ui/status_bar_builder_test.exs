@@ -2,7 +2,11 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilderTest do
   use ExUnit.Case, async: true
 
   alias Minga.RenderModel.UI.StatusBar
+  alias Minga.RenderModel.UI.StatusBar.Operation, as: StatusOperation
   alias Minga.RenderModel.UI.StatusBar.Workspace
+  alias MingaEditor.State.Operation
+  alias MingaEditor.State.OperationProgress
+  alias MingaEditor.State.OperationQueue
   alias MingaEditor.RenderModel.UI.StatusBarBuilder
 
   defp minimal_buffer_data do
@@ -71,6 +75,40 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilderTest do
       assert data.file.name == "test.ex"
       assert is_binary(data.file.icon)
       assert is_integer(data.file.icon_color)
+    end
+
+    test "projects every selected operation field without interpreting punctuation" do
+      operation =
+        Operation.new(42, :git_commit, "repo", "Committing...", true, 42)
+        |> Operation.queued("Committing...", OperationQueue.new!(2, 3))
+        |> Operation.report_progress(OperationProgress.new!(4, 10))
+
+      {:buffer, data} = minimal_buffer_data()
+      status_data = {:buffer, Map.put(data, :selected_operation, operation)}
+      model = StatusBarBuilder.build(status_data, minimal_theme(), minimal_ctx())
+
+      assert %StatusOperation{
+               id: 42,
+               kind: :git_commit,
+               status: :queued,
+               message: "Committing...",
+               queue_position: 2,
+               queue_total: 3,
+               progress_current: 4,
+               progress_total: 10,
+               cancelable?: true
+             } = model.operation
+
+      without_ellipsis =
+        Operation.new(42, :git_commit, "repo", "Committing", true, 42)
+        |> Operation.queued("Committing", OperationQueue.new!(2, 3))
+        |> Operation.report_progress(OperationProgress.new!(4, 10))
+
+      status_data = {:buffer, Map.put(data, :selected_operation, without_ellipsis)}
+      without_ellipsis_model = StatusBarBuilder.build(status_data, minimal_theme(), minimal_ctx())
+
+      assert without_ellipsis_model.operation.status == model.operation.status
+      assert without_ellipsis_model.operation.kind == model.operation.kind
     end
 
     test "includes active workspace summary when available" do

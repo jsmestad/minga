@@ -6,6 +6,7 @@ defmodule Minga.RenderModel.UI.StatusBar do
   """
 
   alias Minga.RenderModel.UI.StatusBar.Data
+  alias Minga.RenderModel.UI.StatusBar.Operation
   alias Minga.RenderModel.UI.StatusBar.Workspace
 
   @type content_kind :: :buffer | :agent
@@ -13,9 +14,10 @@ defmodule Minga.RenderModel.UI.StatusBar do
   @type t :: %__MODULE__{
           content_kind: content_kind(),
           data: Data.t(),
-          workspace: Workspace.t() | nil
+          workspace: Workspace.t() | nil,
+          operation: Operation.t() | nil
         }
 
   @enforce_keys [:content_kind, :data]
-  defstruct [:content_kind, :data, :workspace]
+  defstruct [:content_kind, :data, :workspace, :operation]
 end

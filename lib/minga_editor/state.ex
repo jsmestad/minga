@@ -46,6 +46,7 @@ defmodule MingaEditor.State do
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Highlighting
   alias MingaEditor.State.Mouse
+  alias MingaEditor.State.OperationFeedback
   alias MingaEditor.State.Remote
   alias MingaEditor.State.RenderCorrelation
   alias MingaEditor.State.ResourcePressure
@@ -124,6 +125,7 @@ defmodule MingaEditor.State do
             notifications: NotificationCenter.new(),
             git_remote_op: nil,
             effect_scheduler: nil,
+            operation_feedback: OperationFeedback.new(),
             lsp: %LSPState{},
             parser_status: :available,
             focus_stack: [],
@@ -188,6 +190,7 @@ defmodule MingaEditor.State do
           notifications: NotificationCenter.t(),
           git_remote_op: git_remote_op(),
           effect_scheduler: GenServer.server() | nil,
+          operation_feedback: OperationFeedback.t(),
           lsp: LSPState.t(),
           parser_status: MingaEditor.Shell.Traditional.Modeline.parser_status(),
           focus_stack: [module()],

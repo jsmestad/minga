@@ -22,6 +22,7 @@ defmodule MingaEditor.FileTree.RefreshTest do
     request = Refresh.request(tree, Minga.Events.default_registry())
 
     assert request.resource == {:file_tree_root, Path.expand(root)}
+    assert request.operation_id == nil
     assert request.policy.mode == :coalescing
     assert request.policy.max_queued == 1
     assert request.effect.root == Path.expand(root)

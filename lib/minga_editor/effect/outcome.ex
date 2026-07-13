@@ -10,7 +10,7 @@ defmodule MingaEditor.Effect.Outcome do
   alias MingaEditor.Effect.Request
 
   @enforce_keys [:request, :status]
-  defstruct [:request, :status, :result, :reason]
+  defstruct [:request, :status, :result, :reason, :queue_position, :queue_total]
 
   @type lifecycle_status :: :queued | :running
   @type terminal_status :: :canceled | :failed | :stale | :completed
@@ -20,12 +20,25 @@ defmodule MingaEditor.Effect.Outcome do
           request: Request.t(),
           status: status(),
           result: term() | nil,
-          reason: term() | nil
+          reason: term() | nil,
+          queue_position: pos_integer() | nil,
+          queue_total: pos_integer() | nil
         }
 
-  @doc "Builds a queued lifecycle outcome."
-  @spec queued(Request.t()) :: t()
-  def queued(%Request{} = request), do: %__MODULE__{request: request, status: :queued}
+  @max_queue_wire_value 0xFFFF
+
+  @doc "Builds a queued lifecycle outcome with scheduler-authored queue metadata."
+  @spec queued(Request.t(), pos_integer(), pos_integer()) :: t()
+  def queued(%Request{} = request, position, total)
+      when is_integer(position) and is_integer(total) and position > 0 and total > 0 and
+             position <= total and total <= @max_queue_wire_value do
+    %__MODULE__{
+      request: request,
+      status: :queued,
+      queue_position: position,
+      queue_total: total
+    }
+  end
 
   @doc "Builds a running lifecycle outcome."
   @spec running(Request.t()) :: t()
@@ -52,7 +65,7 @@ defmodule MingaEditor.Effect.Outcome do
   @doc "Reclassifies an outcome as stale after domain-owned application."
   @spec stale(t(), term()) :: t()
   def stale(%__MODULE__{} = outcome, reason) do
-    %{outcome | status: :stale, reason: reason}
+    %{outcome | status: :stale, reason: reason, queue_position: nil, queue_total: nil}
   end
 
   @doc "Returns whether the outcome is terminal."

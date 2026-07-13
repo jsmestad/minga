@@ -784,6 +784,7 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
     alias Minga.RenderModel.UI.StatusBar.Git
     alias Minga.RenderModel.UI.StatusBar.Indent
     alias Minga.RenderModel.UI.StatusBar.Language
+    alias Minga.RenderModel.UI.StatusBar.Operation
     alias Minga.RenderModel.UI.StatusBar.Selection
     alias Minga.RenderModel.UI.StatusBar.Workspace
 
@@ -819,6 +820,13 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
     %StatusBar{
       content_kind: :buffer,
       data: data,
+      operation: %Operation{
+        id: 1,
+        kind: :external_format,
+        status: :running,
+        message: "Formatting",
+        cancelable?: true
+      },
       workspace: %Workspace{
         id: 1,
         kind: :manual,

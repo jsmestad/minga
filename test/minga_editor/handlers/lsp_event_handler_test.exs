@@ -19,6 +19,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
   alias MingaEditor.State.Highlighting
   alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.State.ModalOverlay
+  alias MingaEditor.State.OperationFeedback
   alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
   alias MingaEditor.State.Windows
   alias MingaEditor.VimState
@@ -28,6 +29,56 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
   alias MingaEditor.WindowTree
 
   describe "handle/2" do
+    test "references uses one structured identity from request through no-result response" do
+      state = file_buffer_state("hello\n")
+      client = start_fake_lsp_client()
+      buffer = state.workspace.buffers.active
+      register_lsp_client(buffer, client)
+
+      state = MingaEditor.LspActions.find_references(state)
+
+      assert_receive {:lsp_request, "textDocument/references", _params, caller, ref}
+      assert caller == self()
+      assert {:references, operation_id} = state.workspace.lsp_pending[ref]
+      assert OperationFeedback.selected(state.operation_feedback).id == operation_id
+      assert OperationFeedback.selected(state.operation_feedback).status == :pending
+      assert EditorState.status_msg(state) == nil
+
+      {state, effects} = LspEventHandler.handle(state, {:lsp_response, ref, {:ok, []}})
+
+      assert effects == [:render_now]
+      assert state.workspace.lsp_pending == %{}
+      assert OperationFeedback.selected(state.operation_feedback).id == operation_id
+      assert OperationFeedback.selected(state.operation_feedback).status == :success
+      assert OperationFeedback.selected(state.operation_feedback).message == "No references found"
+    end
+
+    test "rename uses one structured identity from request through no-result response" do
+      state = file_buffer_state("hello\n")
+      client = start_fake_lsp_client()
+      buffer = state.workspace.buffers.active
+      register_lsp_client(buffer, client)
+
+      state = MingaEditor.LspActions.rename(state, "renamed")
+
+      assert_receive {:lsp_request, "textDocument/rename", _params, caller, ref}
+      assert caller == self()
+      assert {:rename, operation_id} = state.workspace.lsp_pending[ref]
+      assert OperationFeedback.selected(state.operation_feedback).id == operation_id
+      assert OperationFeedback.selected(state.operation_feedback).status == :pending
+      assert EditorState.status_msg(state) == nil
+
+      {state, effects} = LspEventHandler.handle(state, {:lsp_response, ref, {:ok, nil}})
+
+      assert effects == [:render_now]
+      assert state.workspace.lsp_pending == %{}
+      assert OperationFeedback.selected(state.operation_feedback).id == operation_id
+      assert OperationFeedback.selected(state.operation_feedback).status == :success
+
+      assert OperationFeedback.selected(state.operation_feedback).message ==
+               "Rename returned no edits"
+    end
+
     test "tracked atom response deletes pending ref and returns render_now" do
       state = base_state()
       ref = make_ref()

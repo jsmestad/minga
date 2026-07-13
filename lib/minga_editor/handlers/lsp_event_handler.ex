@@ -184,8 +184,8 @@ defmodule MingaEditor.Handlers.LspEventHandler do
            version
          )
 
-  defp dispatch_lsp_response(:references, state, result),
-    do: LspActions.handle_references_response(state, result)
+  defp dispatch_lsp_response({:references, operation_id}, state, result),
+    do: LspActions.handle_references_response(state, result, operation_id)
 
   defp dispatch_lsp_response(:document_highlight, state, result),
     do: LspActions.handle_document_highlight_response(state, result)
@@ -196,8 +196,8 @@ defmodule MingaEditor.Handlers.LspEventHandler do
   defp dispatch_lsp_response(:prepare_rename, state, result),
     do: LspActions.handle_prepare_rename_response(state, result)
 
-  defp dispatch_lsp_response(:rename, state, result),
-    do: LspActions.handle_rename_response(state, result)
+  defp dispatch_lsp_response({:rename, operation_id}, state, result),
+    do: LspActions.handle_rename_response(state, result, operation_id)
 
   defp dispatch_lsp_response(:type_definition, state, result),
     do: LspActions.handle_type_definition_response(state, result)

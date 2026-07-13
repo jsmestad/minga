@@ -19,11 +19,14 @@ defmodule MingaEditor.Effects.GitMutationAdmission do
   alias MingaEditor.GitRepositoryIdentity
   alias MingaEditor.GitRepositoryResolver
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Operation
+  alias MingaEditor.State.OperationFeedback
 
   @max_queued 16
 
   @enforce_keys [
     :scheduler,
+    :operation_id,
     :resolver,
     :resolver_input,
     :operation,
@@ -32,6 +35,7 @@ defmodule MingaEditor.Effects.GitMutationAdmission do
   ]
   defstruct [
     :scheduler,
+    :operation_id,
     :resolver,
     :resolver_input,
     :operation,
@@ -44,6 +48,7 @@ defmodule MingaEditor.Effects.GitMutationAdmission do
 
   @type t :: %__MODULE__{
           scheduler: GenServer.server(),
+          operation_id: Operation.id(),
           resolver: module(),
           resolver_input: GitRepositoryResolver.input(),
           operation: GitMutation.operation(),
@@ -55,11 +60,13 @@ defmodule MingaEditor.Effects.GitMutationAdmission do
         }
 
   @doc "Builds a generation-ordered repository resolution request."
-  @spec request(GenServer.server(), GitMutation.operation(), keyword()) :: Request.t()
-  def request(scheduler, operation, opts)
+  @spec request(GenServer.server(), GitMutation.operation(), Operation.id(), keyword()) ::
+          Request.t()
+  def request(scheduler, operation, operation_id, opts)
       when operation in [:stage, :unstage, :discard, :stage_all, :unstage_all, :commit] do
     effect = %__MODULE__{
       scheduler: scheduler,
+      operation_id: operation_id,
       resolver: Keyword.get(opts, :resolver, GitRepositoryResolver),
       resolver_input: Keyword.get(opts, :resolver_input, :current_project),
       operation: operation,
@@ -70,7 +77,12 @@ defmodule MingaEditor.Effects.GitMutationAdmission do
       amend?: Keyword.get(opts, :amend?, false)
     }
 
-    Request.new(effect, {:git_repository_resolution, scheduler}, Policy.fifo(@max_queued))
+    Request.new(
+      effect,
+      {:git_repository_resolution, scheduler},
+      Policy.fifo(@max_queued),
+      operation_id
+    )
   end
 
   @impl true
@@ -78,7 +90,7 @@ defmodule MingaEditor.Effects.GitMutationAdmission do
   def run(%__MODULE__{} = effect) do
     case effect.resolver.resolve(effect.resolver_input) do
       {:ok, %GitRepositoryIdentity{} = identity} ->
-        {:ok, mutation_request(effect, identity)}
+        {:ok, mutation_request(effect, identity, effect.operation_id)}
 
       :not_git ->
         {:error, :not_git}
@@ -94,54 +106,79 @@ defmodule MingaEditor.Effects.GitMutationAdmission do
 
   @impl true
   @spec apply(EditorState.t(), Outcome.t()) :: {EditorState.t(), Outcome.t()}
-  def apply(state, %Outcome{status: :queued, request: %{effect: effect}} = outcome) do
-    {EditorState.set_status(state, "Queued: #{effect.pending_message}"), outcome}
+  def apply(
+        state,
+        %Outcome{
+          status: :queued,
+          request: %{operation_id: id, effect: effect},
+          queue_position: position,
+          queue_total: total
+        } = outcome
+      ) do
+    message = "Queued: #{effect.pending_message}"
+    {OperationFeedback.queued_in(state, id, message, position, total), outcome}
   end
 
-  def apply(state, %Outcome{status: :running, request: %{effect: effect}} = outcome) do
-    {EditorState.set_status(state, effect.pending_message), outcome}
+  def apply(
+        state,
+        %Outcome{status: :running, request: %{operation_id: id, effect: effect}} = outcome
+      ) do
+    {OperationFeedback.running_in(state, id, effect.pending_message), outcome}
   end
 
   def apply(state, %Outcome{status: :completed, result: %Request{} = request} = outcome) do
     case EffectScheduler.finalize_and_schedule(state.effect_scheduler, outcome, request) do
       {:ok, _request_id, :running} ->
-        effect = outcome.request.effect
-        {EditorState.set_status(state, effect.pending_message), outcome}
+        {state, outcome}
 
       {:ok, _request_id, :queued} ->
-        effect = outcome.request.effect
-        {EditorState.set_status(state, "Queued: #{effect.pending_message}"), outcome}
+        {state, outcome}
 
       {:error, reason} ->
         message = admission_error_message(reason)
-        {EditorState.set_status(state, message), Outcome.failed(outcome.request, reason)}
+        state = OperationFeedback.finish_in(state, outcome.request.operation_id, :error, message)
+        {state, Outcome.failed(outcome.request, reason)}
     end
   end
 
-  def apply(state, %Outcome{status: :failed, reason: :not_git} = outcome) do
-    {EditorState.set_status(state, "Not in a git repository"), outcome}
+  def apply(
+        state,
+        %Outcome{status: :failed, request: %{operation_id: id}, reason: :not_git} = outcome
+      ) do
+    {OperationFeedback.finish_in(state, id, :error, "Not in a git repository"), outcome}
   end
 
-  def apply(state, %Outcome{status: :failed, reason: reason} = outcome) do
+  def apply(
+        state,
+        %Outcome{status: :failed, request: %{operation_id: id}, reason: :timeout} = outcome
+      ) do
+    {OperationFeedback.finish_in(state, id, :timeout, "Git repository resolution timed out"),
+     outcome}
+  end
+
+  def apply(
+        state,
+        %Outcome{status: :failed, request: %{operation_id: id}, reason: reason} = outcome
+      ) do
     message = "Git repository resolution failed: #{inspect(reason)}"
     Minga.Log.error(:editor, message)
-    {EditorState.set_status(state, message), outcome}
+    {OperationFeedback.finish_in(state, id, :error, message), outcome}
   end
 
-  def apply(state, %Outcome{status: :canceled} = outcome) do
-    {EditorState.set_status(state, "Git action canceled"), outcome}
+  def apply(state, %Outcome{status: :canceled, request: %{operation_id: id}} = outcome) do
+    {OperationFeedback.finish_in(state, id, :canceled, "Git action canceled"), outcome}
   end
 
-  def apply(state, %Outcome{status: :stale} = outcome) do
-    {EditorState.set_status(state, "Git action skipped"), outcome}
+  def apply(state, %Outcome{status: :stale, request: %{operation_id: id}} = outcome) do
+    {OperationFeedback.finish_in(state, id, :stale, "Git action skipped"), outcome}
   end
 
   @impl true
   @spec render?(Outcome.t()) :: boolean()
   def render?(%Outcome{}), do: true
 
-  @spec mutation_request(t(), GitRepositoryIdentity.t()) :: Request.t()
-  defp mutation_request(effect, identity) do
+  @spec mutation_request(t(), GitRepositoryIdentity.t(), Operation.id()) :: Request.t()
+  defp mutation_request(effect, identity, operation_id) do
     opts =
       [
         pending_message: effect.pending_message,
@@ -151,7 +188,7 @@ defmodule MingaEditor.Effects.GitMutationAdmission do
       ]
       |> maybe_put_relative_path(effect.path, identity)
 
-    GitMutation.request(identity.git_root, effect.operation, opts)
+    GitMutation.request(identity.git_root, effect.operation, operation_id, opts)
   end
 
   @spec maybe_put_relative_path(keyword(), String.t() | nil, GitRepositoryIdentity.t()) ::

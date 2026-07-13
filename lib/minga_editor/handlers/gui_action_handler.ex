@@ -42,6 +42,8 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaEditor.Window
 
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Operation
+  alias MingaEditor.State.OperationFeedback
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
@@ -1241,10 +1243,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   @spec git_action(state(), String.t(), GitMutation.operation(), String.t(), keyword()) :: state()
   defp git_action(state, pending_msg, operation, success_msg, opts \\ [])
 
-  defp git_action(%{effect_scheduler: nil} = state, _pending, _operation, _success, _opts) do
-    EditorState.set_status(state, "Git scheduler unavailable")
-  end
-
   defp git_action(state, pending_msg, operation, success_msg, opts)
        when is_binary(pending_msg) and is_binary(success_msg) do
     {resolver, resolver_input} =
@@ -1260,16 +1258,63 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       |> Keyword.put(:resolver, resolver)
       |> Keyword.put(:resolver_input, resolver_input)
 
-    request = GitMutationAdmission.request(state.effect_scheduler, operation, request_opts)
+    resource =
+      "git:" <>
+        Atom.to_string(operation) <> ":" <> to_string(Keyword.get(opts, :path, "repository"))
+
+    {state, feedback_operation} =
+      OperationFeedback.start_in(
+        state,
+        git_operation_kind(operation),
+        resource,
+        pending_msg,
+        replace?: false
+      )
+
+    schedule_git_action(state, operation, feedback_operation.id, request_opts)
+  end
+
+  @spec schedule_git_action(state(), GitMutation.operation(), Operation.id(), keyword()) ::
+          state()
+  defp schedule_git_action(%{effect_scheduler: nil} = state, _operation, operation_id, _opts) do
+    OperationFeedback.finish_in(state, operation_id, :error, "Git scheduler unavailable")
+  end
+
+  defp schedule_git_action(state, operation, operation_id, request_opts) do
+    request =
+      GitMutationAdmission.request(
+        state.effect_scheduler,
+        operation,
+        operation_id,
+        request_opts
+      )
 
     case EffectScheduler.schedule(state.effect_scheduler, request) do
-      {:ok, _request_id, :running} -> EditorState.set_status(state, pending_msg)
-      {:ok, _request_id, :queued} -> EditorState.set_status(state, "Queued: #{pending_msg}")
-      {:error, :queue_full} -> EditorState.set_status(state, "Git action queue is full")
-      {:error, :scheduler_full} -> EditorState.set_status(state, "Git effect scheduler is full")
-      {:error, reason} -> EditorState.set_status(state, "Git action not scheduled: #{reason}")
+      {:ok, _request_id, _disposition} ->
+        state
+
+      {:error, reason} ->
+        OperationFeedback.finish_in(
+          state,
+          operation_id,
+          :error,
+          git_admission_error_message(reason)
+        )
     end
   end
+
+  @spec git_operation_kind(GitMutation.operation()) :: Operation.kind()
+  defp git_operation_kind(:stage), do: :git_stage
+  defp git_operation_kind(:unstage), do: :git_unstage
+  defp git_operation_kind(:discard), do: :git_discard
+  defp git_operation_kind(:stage_all), do: :git_stage_all
+  defp git_operation_kind(:unstage_all), do: :git_unstage_all
+  defp git_operation_kind(:commit), do: :git_commit
+
+  @spec git_admission_error_message(EffectScheduler.admission_error()) :: String.t()
+  defp git_admission_error_message(:queue_full), do: "Git action queue is full"
+  defp git_admission_error_message(:scheduler_full), do: "Git effect scheduler is full"
+  defp git_admission_error_message(reason), do: "Git action not scheduled: #{reason}"
 
   # ── Completion helpers ─────────────────────────────────────────────
 

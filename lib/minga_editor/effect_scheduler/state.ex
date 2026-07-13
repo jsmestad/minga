@@ -46,11 +46,11 @@ defmodule MingaEditor.EffectScheduler.State do
           owner_monitor: reference() | nil,
           observer: pid() | nil,
           max_admitted: pos_integer(),
-          admitted: MapSet.t(reference()),
+          admitted: MapSet.t(Request.id()),
           lanes: %{optional(Request.resource()) => lane()},
           tasks: %{optional(reference()) => Request.resource()},
-          pending: %{optional(reference()) => Outcome.t()},
-          claimed: MapSet.t(reference())
+          pending: %{optional(Request.id()) => Outcome.t()},
+          claimed: MapSet.t(Request.id())
         }
 
   @doc "Builds initial scheduler state from validated process options."

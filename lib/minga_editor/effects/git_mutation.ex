@@ -14,6 +14,8 @@ defmodule MingaEditor.Effects.GitMutation do
   alias MingaEditor.Effect.Request
   alias MingaEditor.Effects.GitMutationResult
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Operation
+  alias MingaEditor.State.OperationFeedback
 
   @max_queued 16
 
@@ -41,8 +43,8 @@ defmodule MingaEditor.Effects.GitMutation do
         }
 
   @doc "Builds a bounded FIFO scheduler request keyed by the actual repository."
-  @spec request(String.t(), operation(), keyword()) :: Request.t()
-  def request(git_root, operation, opts)
+  @spec request(String.t(), operation(), Operation.id(), keyword()) :: Request.t()
+  def request(git_root, operation, operation_id, opts)
       when is_binary(git_root) and
              operation in [:stage, :unstage, :discard, :stage_all, :unstage_all, :commit] do
     effect = %__MODULE__{
@@ -55,7 +57,12 @@ defmodule MingaEditor.Effects.GitMutation do
       amend?: Keyword.get(opts, :amend?, false)
     }
 
-    Request.new(effect, {:git_repository, effect.git_root}, Policy.fifo(@max_queued))
+    Request.new(
+      effect,
+      {:git_repository, effect.git_root},
+      Policy.fifo(@max_queued),
+      operation_id
+    )
   end
 
   @impl true
@@ -77,35 +84,73 @@ defmodule MingaEditor.Effects.GitMutation do
 
   @impl true
   @spec apply(EditorState.t(), Outcome.t()) :: {EditorState.t(), Outcome.t()}
-  def apply(state, %Outcome{status: :queued, request: %{effect: effect}} = outcome) do
-    {EditorState.set_status(state, "Queued: #{effect.pending_message}"), outcome}
-  end
-
-  def apply(state, %Outcome{status: :running, request: %{effect: effect}} = outcome) do
-    {EditorState.set_status(state, effect.pending_message), outcome}
-  end
-
-  def apply(state, %Outcome{status: :completed, result: %GitMutationResult{} = result} = outcome) do
-    MingaEditor.refresh_git_repo(result.git_root)
-    {EditorState.set_status(state, result.message), outcome}
+  def apply(
+        state,
+        %Outcome{
+          status: :queued,
+          request: %{operation_id: id, effect: effect},
+          queue_position: position,
+          queue_total: total
+        } = outcome
+      ) do
+    message = "Queued: #{effect.pending_message}"
+    {OperationFeedback.queued_in(state, id, message, position, total), outcome}
   end
 
   def apply(
         state,
-        %Outcome{status: :failed, request: %{effect: effect}, reason: reason} = outcome
+        %Outcome{status: :running, request: %{operation_id: id, effect: effect}} = outcome
+      ) do
+    {OperationFeedback.running_in(state, id, effect.pending_message), outcome}
+  end
+
+  def apply(
+        state,
+        %Outcome{
+          status: :completed,
+          request: %{operation_id: id},
+          result: %GitMutationResult{} = result
+        } =
+          outcome
+      ) do
+    MingaEditor.refresh_git_repo(result.git_root)
+    {OperationFeedback.finish_in(state, id, :success, result.message), outcome}
+  end
+
+  def apply(
+        state,
+        %Outcome{status: :failed, request: %{operation_id: id, effect: effect}, reason: :timeout} =
+          outcome
+      ) do
+    MingaEditor.refresh_git_repo(effect.git_root)
+    {OperationFeedback.finish_in(state, id, :timeout, "Git action timed out"), outcome}
+  end
+
+  def apply(
+        state,
+        %Outcome{status: :failed, request: %{operation_id: id, effect: effect}, reason: reason} =
+          outcome
       ) do
     MingaEditor.refresh_git_repo(effect.git_root)
     message = failure_message(reason)
     Minga.Log.error(:editor, message)
-    {EditorState.set_status(state, message), outcome}
+    {OperationFeedback.finish_in(state, id, :error, message), outcome}
   end
 
-  def apply(state, %Outcome{status: :canceled} = outcome) do
-    {EditorState.set_status(state, "Git action canceled"), outcome}
+  def apply(
+        state,
+        %Outcome{status: :canceled, request: %{operation_id: id}, reason: reason} = outcome
+      )
+      when reason in [:superseded, :coalesced] do
+    {OperationFeedback.finish_in(state, id, :stale, "Git action skipped"), outcome}
   end
 
-  def apply(state, %Outcome{status: :stale} = outcome) do
-    {EditorState.set_status(state, "Git action skipped"), outcome}
+  def apply(state, %Outcome{status: :canceled, request: %{operation_id: id}} = outcome) do
+    {OperationFeedback.finish_in(state, id, :canceled, "Git action canceled"), outcome}
+  end
+
+  def apply(state, %Outcome{status: :stale, request: %{operation_id: id}} = outcome) do
+    {OperationFeedback.finish_in(state, id, :stale, "Git action skipped"), outcome}
   end
 
   @impl true

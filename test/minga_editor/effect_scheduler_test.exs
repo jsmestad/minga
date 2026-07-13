@@ -7,6 +7,7 @@ defmodule MingaEditor.EffectSchedulerTest do
   alias Minga.Test.EffectProbe
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.Effect.Policy
+  alias MingaEditor.Effect.Request
   alias MingaEditor.EffectScheduler
   alias MingaEditor.GenerationSupervisor
 
@@ -250,11 +251,24 @@ defmodule MingaEditor.EffectSchedulerTest do
     assert EffectScheduler.schedule(scheduler, first) == {:ok, first.id, :running}
     assert_receive {:effect_started, :first, _worker, [:first]}
     assert EffectScheduler.schedule(scheduler, second) == {:ok, second.id, :queued}
+
+    assert_receive {:effect_lifecycle,
+                    %Outcome{
+                      request: %Request{id: second_id},
+                      status: :queued,
+                      queue_position: 1,
+                      queue_total: 1
+                    }}
+
+    assert second_id == second.id
     assert {:error, :queue_full} = EffectScheduler.schedule(scheduler, overflow)
     assert EffectScheduler.stats(scheduler) == stats(1, 1, 1, 0, 2)
 
     assert :ok = EffectScheduler.cancel(scheduler, second.id)
-    finalize_once(scheduler, receive_candidate(scheduler, second.id, :canceled))
+    canceled = receive_candidate(scheduler, second.id, :canceled)
+    assert canceled.queue_position == nil
+    assert canceled.queue_total == nil
+    finalize_once(scheduler, canceled)
     assert :ok = EffectScheduler.cancel(scheduler, first.id)
     finalize_once(scheduler, receive_candidate(scheduler, first.id, :canceled))
     refute_received {:effect_started, :overflow, _worker, _payloads}
@@ -303,6 +317,67 @@ defmodule MingaEditor.EffectSchedulerTest do
 
     send(second_worker, {:release_effect, :second})
     finalize_once(scheduler, receive_candidate(scheduler, second.id, :completed))
+  end
+
+  test "FIFO refreshes queue positions after admission and cancellation" do
+    scheduler = start_scheduler()
+    policy = Policy.fifo(3)
+    first = EffectProbe.request(self(), :first, :repository, policy)
+    second = EffectProbe.request(self(), :second, :repository, policy)
+    third = EffectProbe.request(self(), :third, :repository, policy)
+
+    assert EffectScheduler.schedule(scheduler, first) == {:ok, first.id, :running}
+    assert_receive {:effect_started, :first, _worker, [:first]}
+
+    assert EffectScheduler.schedule(scheduler, second) == {:ok, second.id, :queued}
+
+    assert_receive {:effect_lifecycle,
+                    %Outcome{
+                      request: %Request{id: second_id},
+                      status: :queued,
+                      queue_position: 1,
+                      queue_total: 1
+                    }}
+
+    assert second_id == second.id
+    assert EffectScheduler.schedule(scheduler, third) == {:ok, third.id, :queued}
+
+    assert_receive {:effect_lifecycle,
+                    %Outcome{
+                      request: %Request{id: refreshed_second_id},
+                      status: :queued,
+                      queue_position: 1,
+                      queue_total: 2
+                    }}
+
+    assert refreshed_second_id == second.id
+
+    assert_receive {:effect_lifecycle,
+                    %Outcome{
+                      request: %Request{id: third_id},
+                      status: :queued,
+                      queue_position: 2,
+                      queue_total: 2
+                    }}
+
+    assert third_id == third.id
+    assert :ok = EffectScheduler.cancel(scheduler, second.id)
+
+    assert_receive {:effect_lifecycle,
+                    %Outcome{
+                      request: %Request{id: refreshed_third_id},
+                      status: :queued,
+                      queue_position: 1,
+                      queue_total: 1
+                    }}
+
+    assert refreshed_third_id == third.id
+    finalize_once(scheduler, receive_candidate(scheduler, second.id, :canceled))
+    assert :ok = EffectScheduler.cancel(scheduler, first.id)
+    finalize_once(scheduler, receive_candidate(scheduler, first.id, :canceled))
+    assert_receive {:effect_started, :third, _worker, [:third]}
+    assert :ok = EffectScheduler.cancel(scheduler, third.id)
+    finalize_once(scheduler, receive_candidate(scheduler, third.id, :canceled))
   end
 
   test "different resources run concurrently" do

@@ -16,6 +16,7 @@ defmodule MingaEditor.StatusBar.DataTest do
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.OperationFeedback
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
@@ -49,6 +50,17 @@ defmodule MingaEditor.StatusBar.DataTest do
 
       {:reply, metadata, state}
     end
+  end
+
+  test "from_state carries the selected global operation separately from plain messages" do
+    state = state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
+
+    {state, operation} =
+      OperationFeedback.start_in(state, :lsp_references, "main.ex", "Finding references...")
+
+    assert {:buffer, data} = Data.from_state(state)
+    assert data.selected_operation == operation
+    assert data.status_msg == nil
   end
 
   test "from_state leaves GUI modeline segments detached by default" do

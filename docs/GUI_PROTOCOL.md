@@ -327,6 +327,13 @@ opcode(1) + section_count(1) + [section_id(1) + section_len(2) + payload(section
 | 0x0C | Selection | selection_mode(1: 0=none, 1=chars, 2=lines) + selection_size(4) |
 | 0x0D | Workspace | id(2) + kind(1) + status(1) + flags(2) + draft_count(2) + conflict_count(2) + background_count(2) + attention_count(2) + label_len(1) + label + icon_len(1) + icon |
 | 0x0E | PendingKeys | keys_len(2) + keys |
+| 0x0F | Operation | operation_id(8) + kind(1) + status(1) + flags(1) + message_len(2) + message + queue_position(2) + queue_total(2) + progress_current(4) + progress_total(4) |
+
+The Operation section is omitted when the Editor-global operation store is empty. It is independent of the Message section, so a structured-only payload remains discoverable. Operation selection prefers the newest active (`pending`, `queued`, or `running`) record and otherwise the newest retained terminal record. An older terminal outcome never displaces a newer active operation.
+
+Operation kind values: 0=unknown, 1=external_format, 2=git_stage, 3=git_unstage, 4=git_discard, 5=git_stage_all, 6=git_unstage_all, 7=git_commit, 8=lsp_references, 9=lsp_rename.
+
+Operation status values: 1=pending, 2=queued, 3=running, 4=success, 5=error, 6=timeout, 7=canceled, 8=stale. Flags: bit 0=cancelable, bit 1=queue values present, bit 2=progress values present. Queue and progress integer fields are zero placeholders when their presence flag is clear. Message punctuation has no semantic meaning; clients must use the generated status value.
 
 `content_kind`: 0 = buffer window, 1 = agent chat window. When `content_kind == 1`, the standard sections (cursor, git, diagnostics, etc.) contain background buffer data and section 0x09 includes agent-specific fields. `background_count` is the number of currently running background sub-agents. `background_label` is the active background child label when focused, otherwise the first running child label. `active_tool_name` is the currently running tool label when the agent status is `tool_executing`; it is empty otherwise.
 

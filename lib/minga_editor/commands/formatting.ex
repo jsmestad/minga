@@ -16,6 +16,7 @@ defmodule MingaEditor.Commands.Formatting do
   alias MingaEditor.LSP.FormatLifecycle
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.LSP, as: LSPState
+  alias MingaEditor.State.OperationFeedback
   alias Minga.Mode.ToolConfirmState
   alias Minga.Tool.Recipe.Registry, as: RecipeRegistry
   alias Minga.LSP.Client
@@ -158,19 +159,45 @@ defmodule MingaEditor.Commands.Formatting do
   # ── Private helpers ───────────────────────────────────────────────────────
 
   @spec format_and_replace(state(), pid(), Minga.Editing.Formatter.formatter_spec()) :: state()
-  defp format_and_replace(%{effect_scheduler: nil} = state, _buf, _spec) do
-    EditorState.set_status(state, "Formatter scheduler unavailable")
+  defp format_and_replace(state, buf, spec) do
+    resource = "buffer:" <> inspect(buf)
+
+    {state, operation} =
+      OperationFeedback.start_in(state, :external_format, resource, "Formatting…")
+
+    schedule_external_format(state, buf, spec, operation.id)
   end
 
-  defp format_and_replace(state, buf, spec) do
-    request = ExternalFormat.request(buf, spec)
+  @spec schedule_external_format(
+          state(),
+          pid(),
+          Minga.Editing.Formatter.formatter_spec(),
+          pos_integer()
+        ) ::
+          state()
+  defp schedule_external_format(%{effect_scheduler: nil} = state, _buf, _spec, operation_id) do
+    OperationFeedback.finish_in(
+      state,
+      operation_id,
+      :error,
+      "Formatter scheduler unavailable"
+    )
+  end
+
+  defp schedule_external_format(state, buf, spec, operation_id) do
+    request = ExternalFormat.request(buf, spec, operation_id)
 
     case EffectScheduler.schedule(state.effect_scheduler, request) do
       {:ok, _request_id, _disposition} ->
-        EditorState.set_status(state, "Formatting…")
+        state
 
       {:error, reason} ->
-        EditorState.set_status(state, "Format not scheduled: #{reason}")
+        OperationFeedback.finish_in(
+          state,
+          operation_id,
+          :error,
+          "Format not scheduled: #{reason}"
+        )
     end
   end
 
