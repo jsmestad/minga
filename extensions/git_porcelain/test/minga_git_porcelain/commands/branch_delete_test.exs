@@ -45,7 +45,7 @@ defmodule MingaGitPorcelain.CommandsBranchDeleteTest do
 
     assert {:picker,
             %{picker_ui: %{source: MingaGitPorcelain.UI.Picker.GitBranchSource, picker: picker}}} =
-             EditorState.modal(result)
+             MingaEditor.Shell.Runtime.state(result.shell_runtime).modal
 
     assert %Picker{items: items} = picker
     refute Enum.any?(items, fn item -> item.label == "feature" end)

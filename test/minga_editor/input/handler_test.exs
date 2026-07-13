@@ -62,7 +62,11 @@ defmodule MingaEditor.Input.HandlerTest do
       state = ModalWorkflow.open(state, :conflict, ConflictPayload.new(buf, path))
 
       assert {:handled, new_state} = ConflictPrompt.handle_key(state, ?k, 0)
-      refute ModalOverlay.match(EditorState.modal(new_state), :conflict)
+
+      refute ModalOverlay.match(
+               MingaEditor.Shell.Runtime.state(new_state.shell_runtime).modal,
+               :conflict
+             )
     end
 
     test "swallows unrecognized keys during conflict" do
@@ -72,7 +76,8 @@ defmodule MingaEditor.Input.HandlerTest do
 
       assert {:handled, new_state} = ConflictPrompt.handle_key(state, ?x, 0)
       # State unchanged except for swallowing the key
-      assert EditorState.modal(new_state) == EditorState.modal(state)
+      assert MingaEditor.Shell.Runtime.state(new_state.shell_runtime).modal ==
+               MingaEditor.Shell.Runtime.state(state.shell_runtime).modal
     end
   end
 

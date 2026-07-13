@@ -683,16 +683,13 @@ defmodule Minga.Test.EditorCase do
   @doc "Returns true if a picker is currently open."
   @spec picker_open?(editor_ctx()) :: boolean()
   def picker_open?(%{editor: editor}) do
-    MingaEditor.State.ModalOverlay.match(
-      MingaEditor.State.modal(get_editor_state(editor)),
-      :picker
-    )
+    MingaEditor.State.ModalOverlay.match(active_modal(editor), :picker)
   end
 
   @doc "Returns the active picker state, or nil."
   @spec picker_state(editor_ctx()) :: MingaEditor.UI.Picker.t() | nil
   def picker_state(%{editor: editor}) do
-    case MingaEditor.State.modal(get_editor_state(editor)) do
+    case active_modal(editor) do
       {:picker, %{picker_ui: %{picker: picker}}} -> picker
       _ -> nil
     end
@@ -723,19 +720,13 @@ defmodule Minga.Test.EditorCase do
   @doc "Returns true if the completion menu is visible."
   @spec completion_visible?(editor_ctx()) :: boolean()
   def completion_visible?(%{editor: editor}) do
-    MingaEditor.State.ModalOverlay.match(
-      MingaEditor.State.modal(get_editor_state(editor)),
-      :completion
-    )
+    MingaEditor.State.ModalOverlay.match(active_modal(editor), :completion)
   end
 
   @doc "Returns true if a file conflict prompt is open."
   @spec conflict_open?(editor_ctx()) :: boolean()
   def conflict_open?(%{editor: editor}) do
-    MingaEditor.State.ModalOverlay.match(
-      MingaEditor.State.modal(get_editor_state(editor)),
-      :conflict
-    )
+    MingaEditor.State.ModalOverlay.match(active_modal(editor), :conflict)
   end
 
   @doc "Returns the pending quit mode (:quit | :quit_all | nil)."
@@ -776,7 +767,7 @@ defmodule Minga.Test.EditorCase do
   @doc "Returns the picker payload (ModalOverlay.Picker) when a picker is open, or nil."
   @spec modal_picker(editor_ctx()) :: MingaEditor.State.ModalOverlay.Picker.t() | nil
   def modal_picker(%{editor: editor}) do
-    case MingaEditor.State.modal(get_editor_state(editor)) do
+    case active_modal(editor) do
       {:picker, payload} -> payload
       _ -> nil
     end
@@ -791,13 +782,16 @@ defmodule Minga.Test.EditorCase do
   def modal_picker!(ctx) do
     case modal_picker(ctx) do
       nil ->
-        modal = MingaEditor.State.modal(get_editor_state(ctx.editor))
+        modal = active_modal(ctx.editor)
         raise "expected picker payload, but modal was: #{inspect(modal)}"
 
       payload ->
         payload
     end
   end
+
+  @spec active_modal(pid()) :: MingaEditor.State.ModalOverlay.t()
+  defp active_modal(editor), do: get_editor_state(editor).shell_runtime.state.modal
 
   @doc "Returns the cell at a given screen row and col."
   @spec screen_cell(editor_ctx(), non_neg_integer(), non_neg_integer()) :: map()

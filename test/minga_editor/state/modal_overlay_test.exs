@@ -4,8 +4,6 @@ defmodule MingaEditor.State.ModalOverlayTest do
   alias Minga.Editing.Completion
   alias MingaEditor.CompletionTrigger
   alias MingaEditor.State.ModalOverlay
-  alias MingaEditor.CompletionTrigger
-  alias MingaEditor.State.ModalOverlay.CommandCompletion, as: CommandCompletionPayload
   alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
   alias MingaEditor.State.ModalOverlay.Conflict, as: ConflictPayload
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload

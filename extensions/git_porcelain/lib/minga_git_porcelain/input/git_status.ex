@@ -452,6 +452,10 @@ defmodule MingaGitPorcelain.Input.GitStatus do
   end
 
   @spec git_status_tui_state(EditorState.t()) :: TuiState.t()
-  defp git_status_tui_state(%{shell_state: %{git_status_tui_state: %TuiState{} = tui}}), do: tui
+  defp git_status_tui_state(%{
+         shell_runtime: %{state: %{git_status_tui_state: %TuiState{} = tui}}
+       }),
+       do: tui
+
   defp git_status_tui_state(_state), do: TuiState.new()
 end

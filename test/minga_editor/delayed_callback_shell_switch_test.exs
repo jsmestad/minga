@@ -5,8 +5,9 @@ defmodule MingaEditor.DelayedCallbackShellSwitchTest do
   alias MingaEditor.PickerUI
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.Shell.Registry
+  alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Workflow, as: ShellWorkflow
   alias MingaEditor.Shell.Traditional.State, as: TraditionalShellState
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.Test.FakeShell
   alias MingaEditor.UI.Picker.Candidate
   alias MingaEditor.UI.Picker.Item
@@ -58,8 +59,8 @@ defmodule MingaEditor.DelayedCallbackShellSwitchTest do
     assert_receive {:picker_fetch_candidates, TodoSearchSource, revision, _ctx}
     assert is_reference(revision)
 
-    state = EditorState.switch_shell(traditional_state, :fake)
-    foreign_shell_state = state.shell_state
+    state = ShellWorkflow.switch(traditional_state, :fake)
+    foreign_shell_state = Runtime.state(state.shell_runtime)
     message_store = state.message_store
     items = [%Item{id: %{path: "/tmp/stale.ex", line: 1}, label: "stale candidate"}]
     result = {:ok, items, Candidate.from_items(items), %{status: "stale status"}}
@@ -71,13 +72,13 @@ defmodule MingaEditor.DelayedCallbackShellSwitchTest do
              )
 
     assert new_state == state
-    assert new_state.shell_state == foreign_shell_state
+    assert Runtime.state(new_state.shell_runtime) == foreign_shell_state
     assert new_state.message_store == message_store
 
-    restored = EditorState.switch_shell(new_state, :traditional)
-    assert %TraditionalShellState{} = restored.shell_state
-    assert restored.shell_state.modal == :none
-    assert restored.shell_state.notice.message == nil
+    restored = ShellWorkflow.switch(new_state, :traditional)
+    assert %TraditionalShellState{} = Runtime.state(restored.shell_runtime)
+    assert Runtime.state(restored.shell_runtime).modal == :none
+    assert Runtime.state(restored.shell_runtime).notice.message == nil
     assert restored.message_store == message_store
   end
 
@@ -88,21 +89,21 @@ defmodule MingaEditor.DelayedCallbackShellSwitchTest do
       TestHelpers.base_state()
       |> Map.put(:rendering, :disabled)
       |> Map.put(:git_commit_gen_ref, generation_ref)
-      |> EditorState.switch_shell(:fake)
+      |> ShellWorkflow.switch(:fake)
 
-    foreign_shell_state = state.shell_state
+    foreign_shell_state = Runtime.state(state.shell_runtime)
     message_store = state.message_store
 
     assert {:noreply, new_state} = MingaEditor.handle_info(message, state)
     assert new_state.git_commit_gen_ref == nil
-    assert new_state.shell_state == foreign_shell_state
+    assert Runtime.state(new_state.shell_runtime) == foreign_shell_state
     assert new_state.message_store == message_store
     assert new_state == %{state | git_commit_gen_ref: nil}
 
-    restored = EditorState.switch_shell(new_state, :traditional)
-    assert %TraditionalShellState{} = restored.shell_state
-    assert restored.shell_state.modal == :none
-    assert restored.shell_state.notice.message == nil
+    restored = ShellWorkflow.switch(new_state, :traditional)
+    assert %TraditionalShellState{} = Runtime.state(restored.shell_runtime)
+    assert Runtime.state(restored.shell_runtime).modal == :none
+    assert Runtime.state(restored.shell_runtime).notice.message == nil
     assert restored.message_store == message_store
   end
 end

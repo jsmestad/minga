@@ -46,7 +46,11 @@ defmodule MingaEditor.Shell.Traditional.GitToastTest do
   end
 
   test "Editor timeout messages cannot dismiss a replacement" do
-    first = GitToastWorkflow.publish(base_state(), "Fetched", :success)
+    first =
+      base_state()
+      |> Map.put(:rendering, :disabled)
+      |> GitToastWorkflow.publish("Fetched", :success)
+
     first_id = first.shell_runtime.state.git_toast.id
     replacement = GitToastWorkflow.publish(first, "Push failed", :error)
 

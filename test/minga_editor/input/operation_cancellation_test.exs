@@ -43,7 +43,11 @@ defmodule MingaEditor.Input.OperationCancellationTest do
   end
 
   test "Editor reveal messages cannot reveal a replacement which-key generation" do
-    first = WhichKeyWorkflow.begin(base_state(), %{?a => :first}, ["SPC"])
+    first =
+      base_state()
+      |> Map.put(:rendering, :disabled)
+      |> WhichKeyWorkflow.begin(%{?a => :first}, ["SPC"])
+
     first_generation = first.shell_runtime.state.whichkey.generation
     replacement = WhichKeyWorkflow.progress(first, %{?b => :second}, ["SPC", "b"])
 
@@ -113,7 +117,10 @@ defmodule MingaEditor.Input.OperationCancellationTest do
 
     assert :ok = EffectScheduler.attach(scheduler, self())
 
-    state = Map.put(base_state(), :effect_scheduler, scheduler)
+    state =
+      base_state()
+      |> Map.put(:rendering, :disabled)
+      |> Map.put(:effect_scheduler, scheduler)
 
     {state, operation} =
       OperationFeedback.start_in(state, :external_format, "buffer:escape", "Formatting",

@@ -33,7 +33,11 @@ defmodule MingaEditor.Shell.Traditional.NoticeWorkflowTest do
   end
 
   test "Editor timer messages expire only the matching notice identity" do
-    first = NoticeWorkflow.publish(base_state(), "first")
+    first =
+      base_state()
+      |> Map.put(:rendering, :disabled)
+      |> NoticeWorkflow.publish("first")
+
     first_id = first.shell_runtime.state.notice.id
     replacement = NoticeWorkflow.publish(first, "replacement")
     replacement_id = replacement.shell_runtime.state.notice.id

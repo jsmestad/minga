@@ -259,7 +259,12 @@ defmodule MingaEditor.CompletionAsyncTest do
       _ =
         wait_until(
           ctx,
-          fn state -> not ModalOverlay.match(EditorState.modal(state), :completion) end,
+          fn state ->
+            not ModalOverlay.match(
+              MingaEditor.Shell.Runtime.state(state.shell_runtime).modal,
+              :completion
+            )
+          end,
           max_attempts: 200,
           interval_ms: 10,
           message: "pending completion modal was left stuck after a Task crash"

@@ -1,9 +1,9 @@
 defmodule MingaEditor.Input.HoverTest do
   use ExUnit.Case, async: true
 
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.HoverPopup
   alias MingaEditor.Input.Hover
+  alias MingaEditor.Shell.Runtime
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -40,13 +40,13 @@ defmodule MingaEditor.Input.HoverTest do
     test "K focuses into the hover" do
       state = state_with_hover()
       assert {:handled, new_state} = Hover.handle_key(state, @key_upper_k, @none)
-      assert EditorState.hover_popup(new_state).focused == true
+      assert Runtime.state(new_state.shell_runtime).hover_popup.focused == true
     end
 
     test "any other key dismisses hover and passes through" do
       state = state_with_hover()
       assert {:passthrough, new_state} = Hover.handle_key(state, @key_h, @none)
-      assert EditorState.hover_popup(new_state) == nil
+      assert Runtime.state(new_state.shell_runtime).hover_popup == nil
     end
   end
 
@@ -54,7 +54,7 @@ defmodule MingaEditor.Input.HoverTest do
     test "j scrolls down" do
       state = state_with_hover(focused: true)
       assert {:handled, new_state} = Hover.handle_key(state, @key_j, @none)
-      assert EditorState.hover_popup(new_state).scroll_offset > 0
+      assert Runtime.state(new_state.shell_runtime).hover_popup.scroll_offset > 0
     end
 
     test "k scrolls up" do
@@ -63,29 +63,29 @@ defmodule MingaEditor.Input.HoverTest do
       state =
         MingaEditor.Shell.Traditional.HoverPopupWorkflow.show(
           state,
-          HoverPopup.scroll_down(EditorState.hover_popup(state))
+          HoverPopup.scroll_down(Runtime.state(state.shell_runtime).hover_popup)
         )
 
       assert {:handled, new_state} = Hover.handle_key(state, @key_k, @none)
-      assert EditorState.hover_popup(new_state).scroll_offset == 0
+      assert Runtime.state(new_state.shell_runtime).hover_popup.scroll_offset == 0
     end
 
     test "q dismisses" do
       state = state_with_hover(focused: true)
       assert {:handled, new_state} = Hover.handle_key(state, @key_q, @none)
-      assert EditorState.hover_popup(new_state) == nil
+      assert Runtime.state(new_state.shell_runtime).hover_popup == nil
     end
 
     test "Escape dismisses" do
       state = state_with_hover(focused: true)
       assert {:handled, new_state} = Hover.handle_key(state, @key_escape, @none)
-      assert EditorState.hover_popup(new_state) == nil
+      assert Runtime.state(new_state.shell_runtime).hover_popup == nil
     end
 
     test "other keys dismiss and pass through" do
       state = state_with_hover(focused: true)
       assert {:passthrough, new_state} = Hover.handle_key(state, @key_h, @none)
-      assert EditorState.hover_popup(new_state) == nil
+      assert Runtime.state(new_state.shell_runtime).hover_popup == nil
     end
   end
 
@@ -96,7 +96,7 @@ defmodule MingaEditor.Input.HoverTest do
       # rect, so this handler keeps the popup for any motion that reaches it; the
       # coordinate-gated routing is tested in MingaEditor.MouseTest.
       assert {:handled, new_state} = Hover.handle_mouse(state, 0, 0, :none, @none, :motion, 1)
-      assert %HoverPopup{} = EditorState.hover_popup(new_state)
+      assert %HoverPopup{} = Runtime.state(new_state.shell_runtime).hover_popup
     end
 
     test "wheel scrolls the popup even when not focused" do
@@ -105,13 +105,13 @@ defmodule MingaEditor.Input.HoverTest do
       assert {:handled, new_state} =
                Hover.handle_mouse(state, 0, 0, :wheel_down, @none, :press, 1)
 
-      assert EditorState.hover_popup(new_state).scroll_offset > 0
+      assert Runtime.state(new_state.shell_runtime).hover_popup.scroll_offset > 0
     end
 
     test "clicking inside the popup focuses it instead of dismissing" do
       state = state_with_hover()
       assert {:handled, new_state} = Hover.handle_mouse(state, 0, 0, :left, @none, :press, 1)
-      assert %HoverPopup{focused: true} = EditorState.hover_popup(new_state)
+      assert %HoverPopup{focused: true} = Runtime.state(new_state.shell_runtime).hover_popup
     end
   end
 
@@ -130,7 +130,7 @@ defmodule MingaEditor.Input.HoverTest do
     test "o toggles an expandable popup without dismissing it" do
       state = state_with_expandable_hover()
       assert {:handled, new_state} = Hover.handle_key(state, @key_o, @none)
-      popup = EditorState.hover_popup(new_state)
+      popup = Runtime.state(new_state.shell_runtime).hover_popup
       assert popup != nil
       assert popup.expanded?
     end
@@ -138,7 +138,7 @@ defmodule MingaEditor.Input.HoverTest do
     test "o dismisses a non-expandable popup (no special behavior)" do
       state = state_with_hover(focused: true)
       assert {:passthrough, new_state} = Hover.handle_key(state, @key_o, @none)
-      assert EditorState.hover_popup(new_state) == nil
+      assert Runtime.state(new_state.shell_runtime).hover_popup == nil
     end
   end
 end

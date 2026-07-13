@@ -8,7 +8,6 @@ defmodule MingaGitPorcelain.CommandsConflictTest do
   alias Minga.Keymap.NormalPrefixes
   alias MingaGitPorcelain.Commands, as: GitCommands
   alias MingaEditor.Session.State, as: SessionState
-  alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Windows
@@ -137,8 +136,7 @@ defmodule MingaGitPorcelain.CommandsConflictTest do
           active: 1,
           next_id: 2
         }
-      },
-      shell_state: %ShellState{}
+      }
     }
   end
 

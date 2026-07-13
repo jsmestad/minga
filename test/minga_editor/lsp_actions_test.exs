@@ -99,7 +99,7 @@ defmodule MingaEditor.LspActionsTest do
         )
 
       assert %HoverPopup{focused: true, open_action: {:goto_location, ^uri, 1, 6}} =
-               EditorState.hover_popup(result)
+               MingaEditor.Shell.Runtime.state(result.shell_runtime).hover_popup
     end
 
     test "hover response reports empty results or creates an unfocused popup" do
@@ -124,8 +124,12 @@ defmodule MingaEditor.LspActionsTest do
             }
           ] do
         result = LspActions.handle_hover_response(fake_state(), {:ok, hover})
-        assert %HoverPopup{focused: false} = EditorState.hover_popup(result)
-        assert EditorState.hover_popup(result).content_lines != []
+
+        assert %HoverPopup{focused: false} =
+                 MingaEditor.Shell.Runtime.state(result.shell_runtime).hover_popup
+
+        assert MingaEditor.Shell.Runtime.state(result.shell_runtime).hover_popup.content_lines !=
+                 []
       end
     end
 
@@ -145,8 +149,10 @@ defmodule MingaEditor.LspActionsTest do
             20
           )
 
-        assert %HoverPopup{} = EditorState.hover_popup(result)
-        assert EditorState.hover_popup(result).content_lines != []
+        assert %HoverPopup{} = MingaEditor.Shell.Runtime.state(result.shell_runtime).hover_popup
+
+        assert MingaEditor.Shell.Runtime.state(result.shell_runtime).hover_popup.content_lines !=
+                 []
       end
 
       for response <- [

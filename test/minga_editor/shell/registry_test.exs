@@ -16,7 +16,6 @@ defmodule MingaEditor.Shell.RegistryTest do
   alias MingaEditor.Shell.Registry
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Workflow
-  alias MingaEditor.Shell.StateStash
   alias MingaEditor.Shell.Traditional.FlashesWorkflow
   alias MingaEditor.Shell.Traditional.GitToastWorkflow
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
@@ -522,14 +521,14 @@ defmodule MingaEditor.Shell.RegistryTest do
     toast_id = traditional.shell_runtime.state.git_toast.id
     whichkey_generation = traditional.shell_runtime.state.whichkey.generation
 
-    fake = EditorState.switch_shell(traditional, :fake)
+    fake = Workflow.switch(traditional, :fake)
 
     assert NoticeWorkflow.timeout(fake, notice_id) == fake
     assert FlashesWorkflow.advance_nav(fake, nav_generation) == fake
     assert GitToastWorkflow.timeout(fake, toast_id) == fake
     assert WhichKeyWorkflow.reveal(fake, whichkey_generation) == fake
 
-    restored = EditorState.switch_shell(fake, :traditional)
+    restored = Workflow.switch(fake, :traditional)
 
     assert restored.shell_runtime.state.notice.message == nil
     refute restored.shell_runtime.state.flashes.nav.line
@@ -549,7 +548,7 @@ defmodule MingaEditor.Shell.RegistryTest do
                capabilities: [:tui]
              })
 
-    fake = TestHelpers.base_state() |> EditorState.switch_shell(:fake)
+    fake = TestHelpers.base_state() |> Workflow.switch(:fake)
     updated = NoticeWorkflow.publish(fake, "durable notice")
 
     assert [%{text: "durable notice"}] = updated.message_store.entries
@@ -1203,12 +1202,12 @@ defmodule MingaEditor.Shell.RegistryTest do
                capabilities: [:tui]
              })
 
-    state = TestHelpers.base_state() |> EditorState.switch_shell(:fake)
+    state = TestHelpers.base_state() |> Workflow.switch(:fake)
 
     assert {:noreply, updated} =
              MingaEditor.handle_info({:minga_input, {:key_press, ?j, 0, 42}}, state)
 
-    assert updated.shell_id == :fake
+    assert Runtime.id(updated.shell_runtime) == :fake
     assert updated.last_input_seq == 42
   end
 

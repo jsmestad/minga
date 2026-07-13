@@ -101,7 +101,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
 
       state =
         build_state(%{git_remote_op: make_remote_op(ref, {"/tmp/repo", "Pushed", "Push failed"})})
-        |> EditorState.switch_shell(:fake)
+        |> MingaEditor.Shell.Workflow.switch(:fake)
 
       foreign_shell_state = Runtime.state(state.shell_runtime)
       message_store = state.message_store
@@ -112,7 +112,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
       assert Runtime.state(result.shell_runtime) == foreign_shell_state
       assert result.message_store == message_store
 
-      restored = EditorState.switch_shell(result, :traditional)
+      restored = MingaEditor.Shell.Workflow.switch(result, :traditional)
       assert Runtime.state(restored.shell_runtime).notice.message == nil
       refute GitToast.present?(Runtime.state(restored.shell_runtime).git_toast)
     end

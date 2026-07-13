@@ -7,6 +7,7 @@ defmodule MingaGitPorcelain.PickerBranchDeleteShortcutTest do
   alias Minga.Git
   alias Minga.Git.Stub, as: GitStub
   alias MingaEditor.PickerUI
+  alias MingaEditor.Shell.Traditional.ModalWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
   alias MingaEditor.State.Picker, as: PickerState
@@ -48,7 +49,7 @@ defmodule MingaGitPorcelain.PickerBranchDeleteShortcutTest do
 
     result = PickerUI.handle_key(state, ?d, MingaEditor.Input.mod_ctrl())
 
-    assert EditorState.modal(result) == :none
+    assert MingaEditor.Shell.Runtime.state(result.shell_runtime).modal == :none
     assert result.workspace.editing.mode == :branch_delete_confirm
 
     assert %Minga.Mode.BranchDeleteConfirmState{git_root: ^git_root, name: "feature"} =
@@ -79,11 +80,9 @@ defmodule MingaGitPorcelain.PickerBranchDeleteShortcutTest do
 
     %EditorState{
       port_manager: nil,
-      workspace: %SessionState{viewport: Viewport.new(24, 80), editing: VimState.new()},
-      shell_state: %MingaEditor.Shell.Traditional.State{
-        modal: {:picker, PickerPayload.new(picker_state)}
-      }
+      workspace: %SessionState{viewport: Viewport.new(24, 80), editing: VimState.new()}
     }
+    |> ModalWorkflow.transition(:picker, PickerPayload.new(picker_state))
   end
 
   defp reset_global_project! do
