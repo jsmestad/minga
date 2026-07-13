@@ -1015,24 +1015,42 @@ defmodule MingaEditor.LspActions do
           state(),
           {:ok, term()} | {:error, term()},
           pid(),
-          non_neg_integer()
+          non_neg_integer(),
+          Minga.LSP.PositionEncoding.encoding()
         ) :: state()
-  def handle_formatting_response(state, {:error, reason}, _buf, _version) do
+  def handle_formatting_response(state, {:error, reason}, _buf, _version, _encoding) do
     Log.warning(:lsp, "LSP formatting error: #{inspect(reason)}")
     EditorState.set_status(state, "Format error: LSP request failed")
   end
 
-  def handle_formatting_response(state, {:ok, nil}, _buf, _version) do
+  def handle_formatting_response(state, {:ok, response}, _buf, _version, _encoding)
+      when response in [nil, []] do
     EditorState.set_status(state, "No formatting changes")
   end
 
-  def handle_formatting_response(state, {:ok, edits}, buf, version) when is_list(edits) do
-    case Commands.Formatting.apply_lsp_edits(buf, edits, version) do
-      :ok -> EditorState.set_status(state, "Formatted (LSP)")
-      {:error, :stale} -> EditorState.set_status(state, "Buffer changed, format skipped")
-      {:error, :read_only} -> EditorState.set_status(state, "Buffer is read-only, format skipped")
-      {:error, :not_alive} -> EditorState.set_status(state, "Buffer closed, format skipped")
+  def handle_formatting_response(state, {:ok, edits}, buf, version, encoding)
+      when is_list(edits) do
+    case Commands.Formatting.apply_lsp_edits(buf, edits, version, encoding) do
+      :ok ->
+        EditorState.set_status(state, "Formatted (LSP)")
+
+      {:error, :invalid_edits} ->
+        EditorState.set_status(state, "Invalid LSP formatting edits skipped")
+
+      {:error, :stale} ->
+        EditorState.set_status(state, "Buffer changed, format skipped")
+
+      {:error, :read_only} ->
+        EditorState.set_status(state, "Buffer is read-only, format skipped")
+
+      {:error, :not_alive} ->
+        EditorState.set_status(state, "Buffer closed, format skipped")
     end
+  end
+
+  def handle_formatting_response(state, {:ok, malformed}, _buf, _version, _encoding) do
+    Log.warning(:lsp, "Invalid LSP formatting response: #{inspect(malformed)}")
+    EditorState.set_status(state, "Invalid LSP formatting response skipped")
   end
 
   # ── Type definition / Implementation responses ────────────────────────────

@@ -10,9 +10,12 @@ defmodule MingaEditor.Commands.Formatting do
   use MingaEditor.Commands.Provider
 
   alias Minga.Buffer
+  alias Minga.LSP.TextEdit
   alias MingaEditor.EffectScheduler
   alias MingaEditor.Effects.ExternalFormat
+  alias MingaEditor.LSP.FormatLifecycle
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.LSP, as: LSPState
   alias Minga.Mode.ToolConfirmState
   alias Minga.Tool.Recipe.Registry, as: RecipeRegistry
   alias Minga.LSP.Client
@@ -20,7 +23,7 @@ defmodule MingaEditor.Commands.Formatting do
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
-  @type format_commit_error :: :not_alive | :read_only | :stale
+  @type format_commit_error :: :invalid_edits | :not_alive | :read_only | :stale
 
   @spec format_buffer(state()) :: state()
   def format_buffer(%{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
@@ -39,33 +42,35 @@ defmodule MingaEditor.Commands.Formatting do
 
   @spec try_lsp_format(state(), pid()) :: {:ok, state()} | :not_available
   defp try_lsp_format(state, buf) when is_pid(buf) do
-    clients = SyncServer.clients_for_buffer(buf)
+    buf
+    |> SyncServer.clients_for_buffer()
+    |> Enum.find_value(:not_available, fn client ->
+      case formatting_encoding(client) do
+        {:ok, encoding} -> {:ok, request_lsp_format(state, buf, client, encoding)}
+        :not_available -> false
+      end
+    end)
+  end
 
-    case Enum.find(clients, &supports_formatting?/1) do
-      nil ->
-        :not_available
+  @spec formatting_encoding(pid()) ::
+          {:ok, Minga.LSP.PositionEncoding.encoding()} | :not_available
+  defp formatting_encoding(client) do
+    capabilities = Client.capabilities(client)
+    provider = get_in(capabilities, ["documentFormattingProvider"])
 
-      client ->
-        {:ok, request_lsp_format(state, buf, client)}
+    if match?(%{}, provider) or provider == true do
+      {:ok, Client.encoding(client)}
+    else
+      :not_available
     end
+  catch
+    :exit, _reason -> :not_available
   end
 
-  @spec supports_formatting?(pid()) :: boolean()
-  defp supports_formatting?(client) do
-    caps = Client.capabilities(client)
-
-    match?(%{}, get_in(caps, ["documentFormattingProvider"])) or
-      get_in(caps, ["documentFormattingProvider"]) == true
-  end
-
-  @lsp_format_timeout 5_000
-  @lsp_format_spinner_delay 100
-  @lsp_format_cancel_delay 1_000
-
-  @spec request_lsp_format(state(), pid(), pid()) :: state()
-  defp request_lsp_format(state, buf, client) do
-    state = cancel_pending_format(state)
-
+  @spec request_lsp_format(state(), pid(), pid(), Minga.LSP.PositionEncoding.encoding()) ::
+          state()
+  defp request_lsp_format(state, buf, client, encoding) do
+    state = cancel_buffer_format(state, buf)
     file_path = Buffer.file_path(buf)
     uri = SyncServer.path_to_uri(file_path)
     tab_width = Buffer.get_option(buf, :tab_width) || 2
@@ -78,87 +83,52 @@ defmodule MingaEditor.Commands.Formatting do
 
     version = Buffer.version(buf)
     ref = Client.request(client, "textDocument/formatting", params)
-    Process.send_after(self(), {:lsp_format_spinner, ref}, @lsp_format_spinner_delay)
-    Process.send_after(self(), {:lsp_format_cancellable, ref}, @lsp_format_cancel_delay)
-    Process.send_after(self(), {:lsp_format_timeout, ref}, @lsp_format_timeout)
-    EditorState.put_lsp_pending(state, ref, {:format, buf, version})
+    operation = FormatLifecycle.arm(client, ref, buf, version, encoding)
+    EditorState.update_lsp(state, &LSPState.track_format(&1, operation))
   end
 
-  @spec cancel_pending_format(state()) :: state()
-  defp cancel_pending_format(state) do
-    case find_pending_format(state) do
-      nil -> state
-      {ref, _kind} -> EditorState.delete_lsp_pending(state, ref)
+  @doc "Cancels the newest active LSP formatting request, if one exists."
+  @spec cancel_pending_format(state()) :: {:canceled, state()} | :none
+  def cancel_pending_format(state) do
+    case LSPState.newest_format(state.lsp) do
+      nil ->
+        :none
+
+      operation ->
+        state = EditorState.update_lsp(state, &LSPState.drop_format(&1, operation.ref))
+        FormatLifecycle.cancel(operation)
+        {:canceled, state}
     end
   end
 
-  @doc "Finds the active pending LSP formatting request, if one exists."
-  @spec find_pending_format(state()) :: {reference(), tuple()} | nil
-  def find_pending_format(state) do
-    Enum.find(state.workspace.lsp_pending, fn
-      {_ref, {:format, _buf, _version}} -> true
-      _ -> false
-    end)
-  end
-
   @doc "Applies LSP text edits only when the buffer still has `expected_version`."
-  @spec apply_lsp_edits(pid(), [map()], non_neg_integer()) ::
+  @spec apply_lsp_edits(pid(), [map()], non_neg_integer(), Minga.LSP.PositionEncoding.encoding()) ::
           :ok | {:error, format_commit_error()}
-  def apply_lsp_edits(_buf, [], _expected_version), do: :ok
+  def apply_lsp_edits(_buf, [], _expected_version, _encoding), do: :ok
 
-  def apply_lsp_edits(buf, edits, expected_version)
+  def apply_lsp_edits(buf, edits, expected_version, encoding)
       when is_pid(buf) and is_list(edits) and is_integer(expected_version) and
-             expected_version >= 0 do
+             expected_version >= 0 and encoding in [:utf8, :utf16, :utf32] do
     safely_commit(fn ->
       content = Buffer.content(buf)
 
-      new_content =
-        Enum.reduce(Enum.reverse(edits), content, fn edit, acc ->
-          range = Map.get(edit, "range", %{})
-          new_text = Map.get(edit, "newText", "")
-          start_line = get_in(range, ["start", "line"]) || 0
-          start_col = get_in(range, ["start", "character"]) || 0
-          end_line = get_in(range, ["end", "line"]) || 0
-          end_col = get_in(range, ["end", "character"]) || 0
-
-          apply_single_edit(acc, start_line, start_col, end_line, end_col, new_text)
-        end)
-
-      commit_formatted_content(buf, expected_version, new_content, :lsp)
+      case TextEdit.apply(content, edits, encoding) do
+        {:ok, new_content} -> commit_formatted_content(buf, expected_version, new_content, :lsp)
+        {:error, _reason} -> {:error, :invalid_edits}
+      end
     end)
   end
 
-  @spec apply_single_edit(
-          String.t(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          String.t()
-        ) :: String.t()
-  defp apply_single_edit(content, start_line, start_col, end_line, end_col, new_text) do
-    lines = String.split(content, "\n")
-
-    case Enum.at(lines, start_line) do
+  @spec cancel_buffer_format(state(), pid()) :: state()
+  defp cancel_buffer_format(state, buffer) do
+    case LSPState.format_for_buffer(state.lsp, buffer) do
       nil ->
-        content
+        state
 
-      start_text ->
-        case Enum.at(lines, end_line) do
-          nil ->
-            content
-
-          end_text ->
-            before = String.slice(start_text, 0, start_col)
-            after_end = String.slice(end_text, end_col..-1//1)
-            replacement = before <> new_text <> after_end
-
-            {before_lines, rest} = Enum.split(lines, start_line)
-            {_removed, after_lines} = Enum.split(rest, end_line - start_line + 1)
-
-            new_lines = before_lines ++ [replacement] ++ after_lines
-            Enum.join(new_lines, "\n")
-        end
+      operation ->
+        state = EditorState.update_lsp(state, &LSPState.drop_format(&1, operation.ref))
+        FormatLifecycle.cancel(operation)
+        state
     end
   end
 

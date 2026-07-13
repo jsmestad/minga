@@ -22,13 +22,15 @@ defmodule Minga.LSP.ClientTest do
         request_unknown: Map.get(context, :request_unknown, false),
         show_message: Map.get(context, :show_message, false),
         show_message_request: Map.get(context, :show_message_request, false),
+        report_cancellations: Map.get(context, :report_cancellations, false),
         position_encoding: Map.get(context, :position_encoding, "utf-8"),
         settings: server_settings
       )
 
     if Map.get(context, :request_configuration, false) or
          Map.get(context, :request_unknown, false) or
-         Map.get(context, :show_message_request, false) do
+         Map.get(context, :show_message_request, false) or
+         Map.get(context, :report_cancellations, false) do
       Minga.Events.subscribe(:diagnostics_updated)
     end
 
@@ -279,20 +281,73 @@ defmodule Minga.LSP.ClientTest do
   end
 
   describe "async request/response" do
-    test "request/3 returns unique references while the client stays ready", %{client: client} do
-      ref1 =
-        Client.request(client, "textDocument/completion", %{
-          "textDocument" => %{"uri" => @uri},
-          "position" => %{"line" => 0, "character" => 0}
-        })
+    @tag report_cancellations: true
+    test "completing one concurrent request preserves the other's ref correlation", %{
+      client: client,
+      diag_server: diag_server
+    } do
+      stalled_ref = Client.request(client, "mock/stall", %{})
+      completed_ref = Client.request(client, "textDocument/hover", %{})
 
-      ref2 = Client.request(client, "textDocument/hover", %{})
+      assert is_reference(stalled_ref)
+      assert is_reference(completed_ref)
+      assert stalled_ref != completed_ref
+      assert_receive {:lsp_response, ^completed_ref, {:ok, nil}}
 
-      assert is_reference(ref1)
-      assert is_reference(ref2)
-      assert ref1 != ref2
+      assert Client.cancel_request(client, stalled_ref) == :ok
+      assert_cancel_diagnostic(diag_server)
+      refute_receive {:lsp_response, ^stalled_ref, _result}, 100
       assert Client.status(client) == :ready
     end
+
+    @tag report_cancellations: true
+    test "canceling one concurrent request preserves the other's ref correlation", %{
+      client: client,
+      diag_server: diag_server
+    } do
+      canceled_ref = Client.request(client, "mock/stall", %{})
+      assert Client.cancel_request(client, canceled_ref) == :ok
+      completed_ref = Client.request(client, "textDocument/hover", %{})
+
+      assert_receive {:lsp_response, ^completed_ref, {:ok, nil}}
+      assert_cancel_diagnostic(diag_server)
+      refute_receive {:lsp_response, ^canceled_ref, _result}, 100
+    end
+
+    @tag report_cancellations: true
+    test "an async caller exit cancels only its request", %{
+      client: client,
+      diag_server: diag_server
+    } do
+      parent = self()
+
+      caller =
+        spawn(fn ->
+          ref = Client.request(client, "mock/stall", %{})
+          send(parent, {:request_ref, ref})
+          receive do: (:stop -> :ok)
+        end)
+
+      assert_receive {:request_ref, abandoned_ref}
+      completed_ref = Client.request(client, "textDocument/hover", %{})
+      monitor = Process.monitor(caller)
+      Process.exit(caller, :kill)
+      assert_receive {:DOWN, ^monitor, :process, ^caller, :killed}
+      assert_receive {:lsp_response, ^completed_ref, {:ok, nil}}
+      assert_cancel_diagnostic(diag_server)
+      refute_receive {:lsp_response, ^abandoned_ref, _result}, 100
+    end
+  end
+
+  defp assert_cancel_diagnostic(diag_server) do
+    assert_receive {:minga_event, :diagnostics_updated,
+                    %Minga.Events.DiagnosticsUpdatedEvent{
+                      uri: "file:///tmp/cancel-request-test.ex"
+                    }},
+                   @event_timeout
+
+    assert [%{code: "CANCEL"}] =
+             Diagnostics.for_uri(diag_server, "file:///tmp/cancel-request-test.ex")
   end
 
   defp wait_until_ready(client) do

@@ -30,6 +30,7 @@ defmodule Minga.LSP.Client do
   alias Minga.Config
   alias Minga.Diagnostics
   alias Minga.Diagnostics.Diagnostic
+  alias Minga.LSP.Client.RequestRegistry
   alias Minga.LSP.Client.State
   alias Minga.LSP.GlobMatcher
   alias Minga.LSP.JsonRpc
@@ -38,6 +39,7 @@ defmodule Minga.LSP.Client do
   alias Minga.Log
 
   @request_timeout 30_000
+  @canceled_request_tombstone_ttl 30_000
 
   # ── Client API ─────────────────────────────────────────────────────────────
 
@@ -151,6 +153,12 @@ defmodule Minga.LSP.Client do
     ref = make_ref()
     GenServer.cast(server, {:async_request, method, params, self(), ref})
     ref
+  end
+
+  @doc "Queues cancellation of an asynchronous request by the reference returned from `request/3`."
+  @spec cancel_request(GenServer.server(), reference()) :: :ok
+  def cancel_request(server, ref) when is_reference(ref) do
+    GenServer.cast(server, {:cancel_request, ref})
   end
 
   @doc """
@@ -335,6 +343,8 @@ defmodule Minga.LSP.Client do
   end
 
   @impl true
+  @spec handle_call(term(), GenServer.from(), State.t()) ::
+          {:reply, term(), State.t()} | {:noreply, State.t()}
   def handle_call(:capabilities, _from, state) do
     {:reply, state.capabilities, state}
   end
@@ -479,6 +489,17 @@ defmodule Minga.LSP.Client do
     {:noreply, state}
   end
 
+  def handle_cast({:cancel_request, ref}, state) do
+    case cancel_request_by_ref(state, ref) do
+      {:ok, state} ->
+        {:noreply, state}
+
+      {:error, :not_found, state} ->
+        Log.debug(:lsp, "Skipping cancellation for unknown LSP request ref=#{inspect(ref)}")
+        {:noreply, state}
+    end
+  end
+
   def handle_cast({:notify_file_changes, changes}, %{status: :ready} = state) do
     matching = filter_matching_changes(state, changes)
 
@@ -495,6 +516,8 @@ defmodule Minga.LSP.Client do
   end
 
   @impl true
+  @spec handle_info(term(), State.t()) ::
+          {:noreply, State.t()} | {:stop, term(), State.t()}
   def handle_info(:send_initialize, state) do
     root_uri = "file://#{state.root_path}"
 
@@ -553,14 +576,27 @@ defmodule Minga.LSP.Client do
   end
 
   def handle_info({:request_timeout, id}, state) do
-    case Map.pop(state.pending, id) do
-      {nil, _pending} ->
+    case RequestRegistry.fetch(state.requests, id) do
+      :error ->
         {:noreply, state}
 
-      {%{from: from, method: method}, pending} ->
+      {:ok, %{from: from, method: method}} ->
         Log.warning(:lsp, "LSP request #{method} (id=#{id}) timed out")
+        state = cancel_request_by_id(state, id)
         reply_to_caller(from, {:error, :timeout})
-        {:noreply, %{state | pending: pending}}
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({:expire_canceled_request, id}, state) do
+    requests = RequestRegistry.drop_canceled(state.requests, id)
+    {:noreply, %{state | requests: requests}}
+  end
+
+  def handle_info({:DOWN, monitor, :process, _caller, _reason}, state) do
+    case RequestRegistry.id_for_monitor(state.requests, monitor) do
+      {:ok, id} -> {:noreply, cancel_request_by_id(state, id)}
+      :error -> {:noreply, state}
     end
   end
 
@@ -613,13 +649,12 @@ defmodule Minga.LSP.Client do
 
   @spec handle_response(JsonRpc.id(), {:ok, term()} | {:error, map()}, State.t()) :: State.t()
   defp handle_response(id, result, state) do
-    case Map.pop(state.pending, id) do
-      {nil, _pending} ->
-        Log.warning(:lsp, "Received response for unknown request id=#{id}")
-        state
+    case RequestRegistry.fetch(state.requests, id) do
+      :error ->
+        discard_or_log_unknown_response(state, id)
 
-      {%{method: method, from: from, timer: timer}, pending} ->
-        if timer, do: Process.cancel_timer(timer)
+      {:ok, %{method: method, from: from}} ->
+        state = drop_pending(state, id)
 
         case result do
           {:ok, _} ->
@@ -629,7 +664,6 @@ defmodule Minga.LSP.Client do
             Log.debug(:lsp, "← #{method} (id: #{id}, error: #{inspect(err)})")
         end
 
-        state = %{state | pending: pending}
         handle_method_response(method, result, from, state)
     end
   end
@@ -1086,9 +1120,79 @@ defmodule Minga.LSP.Client do
   @spec put_pending(State.t(), integer(), String.t(), State.pending_from()) :: State.t()
   defp put_pending(state, id, method, from) do
     timer = Process.send_after(self(), {:request_timeout, id}, @request_timeout)
+    {request_ref, caller_monitor} = pending_identity(from)
 
-    entry = %{method: method, from: from, timer: timer}
-    %{state | pending: Map.put(state.pending, id, entry)}
+    entry = %{
+      method: method,
+      from: from,
+      timer: timer,
+      request_ref: request_ref,
+      caller_monitor: caller_monitor
+    }
+
+    %{state | requests: RequestRegistry.put(state.requests, id, entry)}
+  end
+
+  @spec pending_identity(State.pending_from()) :: {reference() | nil, reference() | nil}
+  defp pending_identity({:async, caller, request_ref}) do
+    {request_ref, Process.monitor(caller)}
+  end
+
+  defp pending_identity(_from), do: {nil, nil}
+
+  @spec cancel_request_by_ref(State.t(), reference()) ::
+          {:ok, State.t()} | {:error, :not_found, State.t()}
+  defp cancel_request_by_ref(state, ref) do
+    case RequestRegistry.id_for_ref(state.requests, ref) do
+      {:ok, id} -> {:ok, cancel_request_by_id(state, id)}
+      :error -> {:error, :not_found, state}
+    end
+  end
+
+  @spec cancel_request_by_id(State.t(), integer()) :: State.t()
+  defp cancel_request_by_id(state, id) do
+    case RequestRegistry.fetch(state.requests, id) do
+      {:ok, _entry} ->
+        send_notification(state, "$/cancelRequest", %{"id" => id})
+        state |> drop_pending(id) |> put_canceled_tombstone(id)
+
+      :error ->
+        state
+    end
+  end
+
+  @spec drop_pending(State.t(), integer()) :: State.t()
+  defp drop_pending(state, id) do
+    case RequestRegistry.pop(state.requests, id) do
+      {nil, _requests} ->
+        state
+
+      {entry, requests} ->
+        if entry.timer, do: Process.cancel_timer(entry.timer)
+        if entry.caller_monitor, do: Process.demonitor(entry.caller_monitor, [:flush])
+        %{state | requests: requests}
+    end
+  end
+
+  @spec put_canceled_tombstone(State.t(), integer()) :: State.t()
+  defp put_canceled_tombstone(state, id) do
+    timer =
+      Process.send_after(self(), {:expire_canceled_request, id}, @canceled_request_tombstone_ttl)
+
+    %{state | requests: RequestRegistry.put_canceled(state.requests, id, timer)}
+  end
+
+  @spec discard_or_log_unknown_response(State.t(), integer()) :: State.t()
+  defp discard_or_log_unknown_response(state, id) do
+    case RequestRegistry.pop_canceled(state.requests, id) do
+      {nil, _requests} ->
+        Log.warning(:lsp, "Received response for unknown request id=#{id}")
+        state
+
+      {timer, requests} ->
+        Process.cancel_timer(timer)
+        %{state | requests: requests}
+    end
   end
 
   @spec client_capabilities() :: map()

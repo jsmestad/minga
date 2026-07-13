@@ -13,7 +13,7 @@ defmodule MingaEditor.State do
   **Shell runtime** lives in `state.shell_runtime` and owns the resolved active entry, shell-specific presentation state, and exact-identity state stash. See `MingaEditor.Shell.Runtime`.
 
   **Global fields** are shared across all tabs and never snapshotted:
-  `port_manager`, `parser_manager`, `highlighting`, `injection_ranges`, `theme`, `render_correlation`, `focus_stack`, and `capabilities`.
+  `port_manager`, `parser_manager`, `highlighting`, `injection_ranges`, `theme`, `render_correlation`, `focus_stack`, `lsp`, and `capabilities`.
 
   ## Composed sub-structs
 

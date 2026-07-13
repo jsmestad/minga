@@ -3,6 +3,7 @@ defmodule Minga.LSP.Client.State do
   Internal state for an `LSP.Client` GenServer.
   """
 
+  alias Minga.LSP.Client.RequestRegistry
   alias Minga.LSP.ServerConfig
 
   @enforce_keys [:server_config, :root_path]
@@ -14,7 +15,7 @@ defmodule Minga.LSP.Client.State do
     buffer: "",
     next_id: 1,
     started_at: nil,
-    pending: %{},
+    requests: RequestRegistry.new(),
     pending_document_opens: %{},
     open_documents: %{},
     capabilities: %{},
@@ -27,14 +28,10 @@ defmodule Minga.LSP.Client.State do
   @type status :: :starting | :initializing | :ready | :shutdown
 
   @typedoc "Caller for a pending request: a GenServer reply target, an async caller, or nil."
-  @type pending_from :: GenServer.from() | {:async, pid(), reference()} | nil
+  @type pending_from :: RequestRegistry.pending_from()
 
   @typedoc "A pending request awaiting a response."
-  @type pending_entry :: %{
-          method: String.t(),
-          from: pending_from(),
-          timer: reference() | nil
-        }
+  @type pending_entry :: RequestRegistry.pending_entry()
 
   @typedoc "A document open notification queued until the client is ready."
   @type pending_document_open :: %{
@@ -64,7 +61,7 @@ defmodule Minga.LSP.Client.State do
           buffer: binary(),
           started_at: integer() | nil,
           next_id: pos_integer(),
-          pending: %{integer() => pending_entry()},
+          requests: RequestRegistry.t(),
           pending_document_opens: %{String.t() => pending_document_open()},
           open_documents: %{String.t() => open_doc()},
           capabilities: map(),

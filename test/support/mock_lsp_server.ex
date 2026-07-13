@@ -29,6 +29,7 @@ defmodule Minga.Test.MockLSPServer do
           | {:request_unknown, boolean()}
           | {:show_message, boolean()}
           | {:show_message_request, boolean()}
+          | {:report_cancellations, boolean()}
           | {:stderr_banner, boolean()}
           | {:position_encoding, String.t()}
           | {:settings, map()}
@@ -46,6 +47,7 @@ defmodule Minga.Test.MockLSPServer do
         {Keyword.get(opts, :request_unknown, false), "--request-unknown"},
         {Keyword.get(opts, :show_message, false), "--show-message"},
         {Keyword.get(opts, :show_message_request, false), "--show-message-request"},
+        {Keyword.get(opts, :report_cancellations, false), "--report-cancellations"},
         {Keyword.get(opts, :stderr_banner, false), "--stderr-banner"},
         {true, "--position-encoding=#{Keyword.get(opts, :position_encoding, "utf-8")}"}
       ]
