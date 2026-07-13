@@ -10,6 +10,7 @@ defmodule Minga.Application do
   ## Supervision Tree
 
       Minga.Supervisor (rest_for_one)
+      ├── MingaEditor.Shell.Registry         (serialized shell publication)
       ├── Minga.Foundation.Supervisor (rest_for_one)
       │   ├── Minga.Language.Registry
       │   ├── Minga.Extensions.LanguagePacks
@@ -82,7 +83,6 @@ defmodule Minga.Application do
     Grammar.init_registry()
     DevHandler.attach()
     Minga.Config.ThemeRegistry.seed_builtin()
-    MingaEditor.Shell.Registry.seed_builtin()
 
     # Prepend managed tools bin directory to PATH so System.find_executable
     # discovers managed tools. Done before supervisors start so LSP and
@@ -107,6 +107,7 @@ defmodule Minga.Application do
 
     base_children =
       [
+        MingaEditor.Shell.Registry,
         Minga.Foundation.Supervisor,
         {Registry, keys: :unique, name: Minga.Buffer.Registry},
         {DynamicSupervisor, name: Minga.Buffer.Supervisor, strategy: :one_for_one},

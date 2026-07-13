@@ -41,6 +41,15 @@ defmodule MingaEditor.Shell.RegistryTest do
     assert Registry.id_for_module(MingaEditor.Shell.Traditional) == :traditional
   end
 
+  test "resolve reads ids and modules from one publication" do
+    Registry.seed_builtin()
+    assert :ok = Registry.register({:extension, :fake}, shell_attrs(:fake, FakeShell, "Fake"))
+
+    snapshot = Registry.snapshot()
+    assert Registry.resolve(:fake) == snapshot.entries.fake
+    assert Registry.resolve(FakeShell) == snapshot.entries.fake
+  end
+
   test "register rejects duplicate shell ids" do
     assert :ok =
              Registry.register({:extension, :fake}, %{
@@ -91,6 +100,148 @@ defmodule MingaEditor.Shell.RegistryTest do
     assert Registry.available?(:fake)
     assert :ok = ContributionCleanup.unregister_source({:extension, :fake})
     refute Registry.available?(:fake)
+  end
+
+  test "concurrent non-conflicting registrations preserve both contributions" do
+    Registry.seed_builtin()
+    parent = self()
+
+    first =
+      Task.async(fn ->
+        send(parent, {:writer_ready, self()})
+
+        receive do: (:publish ->
+                       Registry.register(
+                         {:extension, :first},
+                         shell_attrs(:first, FakeShell, "First")
+                       ))
+      end)
+
+    second =
+      Task.async(fn ->
+        send(parent, {:writer_ready, self()})
+
+        receive do: (:publish ->
+                       Registry.register(
+                         {:extension, :second},
+                         shell_attrs(:second, FakeShellAlt, "Second")
+                       ))
+      end)
+
+    assert_receive {:writer_ready, first_pid}
+    assert_receive {:writer_ready, second_pid}
+    send(first_pid, :publish)
+    send(second_pid, :publish)
+
+    assert Task.await(first) == :ok
+    assert Task.await(second) == :ok
+
+    snapshot = Registry.snapshot()
+    assert snapshot.entries.first.source == {:extension, :first}
+    assert snapshot.entries.first.module == FakeShell
+    assert snapshot.entries.second.source == {:extension, :second}
+    assert snapshot.entries.second.module == FakeShellAlt
+  end
+
+  test "concurrent duplicate decisions publish exactly one coherent owner" do
+    Registry.seed_builtin()
+    parent = self()
+
+    writers = [
+      {{:extension, :first}, FakeShell, "First"},
+      {{:extension, :second}, FakeShellAlt, "Second"}
+    ]
+
+    tasks =
+      Enum.map(writers, fn {source, module, label} ->
+        Task.async(fn ->
+          send(parent, {:duplicate_writer_ready, self()})
+          receive do: (:publish -> Registry.register(source, shell_attrs(:shared, module, label)))
+        end)
+      end)
+
+    pids =
+      Enum.map(tasks, fn _task ->
+        assert_receive {:duplicate_writer_ready, pid}
+        pid
+      end)
+
+    Enum.each(pids, &send(&1, :publish))
+    results = Enum.map(tasks, &Task.await/1)
+
+    assert Enum.count(results, &(&1 == :ok)) == 1
+    assert Enum.count(results, &match?({:error, {:duplicate_id, :shared}}, &1)) == 1
+
+    entry = Registry.snapshot().entries.shared
+
+    assert {entry.source, entry.module} in [
+             {{:extension, :first}, FakeShell},
+             {{:extension, :second}, FakeShellAlt}
+           ]
+  end
+
+  test "source cleanup removes all owned shells in one generation and preserves fallback" do
+    Registry.seed_builtin()
+    source = {:extension, :owned}
+    assert :ok = Registry.register(source, shell_attrs(:first, FakeShell, "First"))
+    assert :ok = Registry.register(source, shell_attrs(:second, FakeShellAlt, "Second"))
+    before_cleanup = Registry.snapshot()
+
+    assert :ok = Registry.unregister_source(source)
+
+    after_cleanup = Registry.snapshot()
+    assert after_cleanup.generation == before_cleanup.generation + 1
+    refute Map.has_key?(after_cleanup.entries, :first)
+    refute Map.has_key?(after_cleanup.entries, :second)
+    assert after_cleanup.entries.traditional.source == :builtin
+    assert after_cleanup.default_id == :traditional
+  end
+
+  test "readers observe coherent cleanup and reload publication boundaries" do
+    Registry.seed_builtin()
+    parent = self()
+    old_source = {:extension, :old}
+    new_source = {:extension, :new}
+    assert :ok = Registry.register(old_source, shell_attrs(:first, FakeShell, "First"))
+    assert :ok = Registry.register(old_source, shell_attrs(:second, FakeShellAlt, "Second"))
+    before_cleanup = Registry.snapshot()
+
+    writer =
+      Task.async(fn ->
+        assert :ok = Registry.unregister_source(old_source)
+        send(parent, :cleanup_published)
+
+        receive do
+          :cleanup_observed -> :ok
+        end
+
+        assert :ok = Registry.register(new_source, shell_attrs(:first, FakeShellAlt, "Reloaded"))
+        send(parent, :reload_published)
+
+        receive do
+          :reload_observed -> :ok
+        end
+      end)
+
+    assert_receive :cleanup_published
+    cleanup = Registry.snapshot()
+    assert cleanup.generation == before_cleanup.generation + 1
+    refute Map.has_key?(cleanup.entries, :first)
+    refute Map.has_key?(cleanup.entries, :second)
+    assert cleanup.entries.traditional.source == :builtin
+    assert cleanup.default_id == :traditional
+    send(writer.pid, :cleanup_observed)
+
+    assert_receive :reload_published
+    reload = Registry.snapshot()
+    assert reload.generation == cleanup.generation + 1
+    assert reload.entries.first.source == new_source
+    assert reload.entries.first.module == FakeShellAlt
+    refute Map.has_key?(reload.entries, :second)
+    assert Enum.find(reload.ordered, &(&1.id == :first)) == reload.entries.first
+    send(writer.pid, :reload_observed)
+
+    assert Task.await(writer) == :ok
   end
 
   test "shell state stash does not restore after shell id is re-registered with a new identity" do
@@ -451,8 +602,9 @@ defmodule MingaEditor.Shell.RegistryTest do
              })
 
     valid_entry = Registry.get(:valid)
-    dead_ingest = spawn(fn -> :ok end)
+    dead_ingest = spawn(fn -> receive do: (:stop -> :ok) end)
     monitor = Process.monitor(dead_ingest)
+    send(dead_ingest, :stop)
     assert_receive {:DOWN, ^monitor, :process, ^dead_ingest, :normal}
 
     state =
@@ -751,5 +903,15 @@ defmodule MingaEditor.Shell.RegistryTest do
 
     assert result.shell_id == :traditional
     assert result.shell == MingaEditor.Shell.Traditional
+  end
+
+  defp shell_attrs(id, module, label) do
+    %{
+      id: id,
+      module: module,
+      display_name: label,
+      description: "#{label} shell",
+      capabilities: [:tui]
+    }
   end
 end

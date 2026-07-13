@@ -7,7 +7,16 @@ defmodule Minga.ArchitectureTest do
   they must not run concurrently with tests that stop/restart supervisors.
   """
 
+  # Serial because this inspects the process-global application supervision tree.
   use ExUnit.Case, async: false
+
+  test "Shell.Registry is a top-level serialized publisher" do
+    top_children = Supervisor.which_children(Minga.Supervisor)
+    top_ids = Enum.map(top_children, &elem(&1, 0))
+
+    assert MingaEditor.Shell.Registry in top_ids
+    assert Process.whereis(MingaEditor.Shell.Registry) != nil
+  end
 
   test "MingaAgent.Supervisor is a top-level peer, not nested under Services" do
     top_children = Supervisor.which_children(Minga.Supervisor)
