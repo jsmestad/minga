@@ -22,6 +22,8 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   alias MingaEditor.Remote.EventReplay
   alias MingaEditor.Remote.SessionClient
   alias MingaEditor.Renderer
+  alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Workflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
@@ -216,16 +218,20 @@ defmodule MingaEditor.Handlers.EventDispatcher do
       ) do
     case subscribe_to_session(state, handle.pid) do
       :ok ->
-        state = EditorState.ensure_shell_available(state)
+        state = Workflow.ensure_available(state)
 
-        {shell_state, workspace} =
-          EditorState.active_shell_module(state).handle_event(
-            state.shell_state,
+        {runtime, workspace} =
+          Runtime.route_event(
+            state.shell_runtime,
             state.workspace,
             {:background_subagent_started, handle}
           )
 
-        state = %{state | shell_state: shell_state, workspace: workspace}
+        state =
+          state
+          |> EditorState.apply_shell_runtime_transition(runtime)
+          |> EditorState.set_workspace(workspace)
+
         MingaEditor.schedule_render(state, 16)
 
       {:error, reason} ->
@@ -471,7 +477,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
 
   @spec reconnect_remote_tabs(EditorState.t(), String.t(), node()) :: EditorState.t()
   defp reconnect_remote_tabs(
-         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
          server_name,
          remote_node
        ) do
@@ -533,7 +539,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   @spec restore_ended_remote_workspace(EditorState.t(), Workspace.t(), [term()]) ::
           EditorState.t()
   defp restore_ended_remote_workspace(
-         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
          %Workspace{id: workspace_id} = workspace,
          messages
        ) do
@@ -554,7 +560,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
 
   @spec restore_remote_workspace(EditorState.t(), Workspace.t(), node(), pid()) :: EditorState.t()
   defp restore_remote_workspace(
-         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
          %Workspace{
            id: workspace_id,
            remote_session: %RemoteSession{session_id: session_id, last_seen_event_id: last_seen}
@@ -602,7 +608,11 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   defp restore_remote_workspace(state, %Workspace{}, _remote_node, _pid), do: state
 
   @spec mark_remote_tabs(EditorState.t(), String.t(), Tab.connection_status()) :: EditorState.t()
-  defp mark_remote_tabs(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, server_name, status) do
+  defp mark_remote_tabs(
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
+         server_name,
+         status
+       ) do
     EditorState.set_tab_bar(state, TabBar.set_remote_connection_status(tb, server_name, status))
   end
 
@@ -619,7 +629,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   end
 
   defp mark_remote_workspace_status(
-         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
          %Workspace{} = workspace,
          status
        ) do
@@ -637,7 +647,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
           :unavailable
         ) :: EditorState.t()
   defp mark_remote_workspace_without_live_session(
-         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
          %Workspace{} = workspace,
          status
        ) do
@@ -715,7 +725,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
 
   @spec maybe_rebuild_agent_from_workspace(EditorState.t(), non_neg_integer()) :: EditorState.t()
   defp maybe_rebuild_agent_from_workspace(
-         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
          workspace_id
        ) do
     case workspace_agent_tab(tb, workspace_id) do
@@ -738,7 +748,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
     do: TabBar.active_workspace_id(tb) == workspace_id
 
   @spec active_remote_server?(EditorState.t(), String.t()) :: boolean()
-  defp active_remote_server?(%{shell_state: %{tab_bar: %TabBar{} = tb}}, server_name) do
+  defp active_remote_server?(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}}, server_name) do
     case TabBar.active_workspace(tb) do
       %Workspace{} = workspace -> Workspace.remote_server?(workspace, server_name)
       _workspace -> false
@@ -746,9 +756,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   end
 
   defp active_remote_server?(%EditorState{} = state, server_name) do
-    state = EditorState.ensure_shell_available(state)
-
-    case EditorState.active_shell_module(state).active_tab(state.shell_state) do
+    case Runtime.active_tab(state.shell_runtime) do
       %Tab{server_name: ^server_name} -> true
       _ -> false
     end

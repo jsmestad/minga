@@ -10,6 +10,8 @@ defmodule MingaEditor.StatusBar.DataTest do
   alias MingaAgent.SessionMetadata
   alias MingaAgent.Subagent.Handle
   alias MingaEditor.StatusBar.Data
+  alias MingaEditor.Shell.Registry
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
@@ -234,7 +236,8 @@ defmodule MingaEditor.StatusBar.DataTest do
       port_manager: self(),
       options_server: options,
       workspace: %SessionState{viewport: Viewport.new(24, 80)},
-      shell_state: %MingaEditor.Shell.Traditional.State{}
+      shell_runtime:
+        Runtime.new(Registry.get(:traditional), %MingaEditor.Shell.Traditional.State{})
     }
 
     {:buffer, data} = Data.from_state(state)
@@ -322,7 +325,11 @@ defmodule MingaEditor.StatusBar.DataTest do
     %EditorState{
       port_manager: self(),
       workspace: %SessionState{viewport: Viewport.new(24, 80)},
-      shell_state: %MingaEditor.Shell.Traditional.State{tab_bar: tab_bar}
+      shell_runtime:
+        Runtime.new(
+          Registry.get(:traditional),
+          %MingaEditor.Shell.Traditional.State{tab_bar: tab_bar}
+        )
     }
   end
 
@@ -339,7 +346,11 @@ defmodule MingaEditor.StatusBar.DataTest do
           next_id: 2
         }
       },
-      shell_state: %MingaEditor.Shell.Traditional.State{tab_bar: tab_bar}
+      shell_runtime:
+        Runtime.new(
+          Registry.get(:traditional),
+          %MingaEditor.Shell.Traditional.State{tab_bar: tab_bar}
+        )
     }
   end
 
@@ -353,7 +364,8 @@ defmodule MingaEditor.StatusBar.DataTest do
         port_manager: self(),
         options_server: options_server,
         workspace: workspace,
-        shell_state: %MingaEditor.Shell.Traditional.State{}
+        shell_runtime:
+          Runtime.new(Registry.get(:traditional), %MingaEditor.Shell.Traditional.State{})
       }
 
     {state, buf}

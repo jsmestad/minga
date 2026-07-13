@@ -235,8 +235,10 @@ defmodule MingaEditor.Commands.Agent do
   def cycle_agent_tabs(state), do: toggle_agent_split(state)
 
   @spec find_agent_tab(state()) :: Tab.t() | nil
-  defp find_agent_tab(%{shell_state: %{tab_bar: nil}}), do: nil
-  defp find_agent_tab(%{shell_state: %{tab_bar: tb}}), do: TabBar.find_by_kind(tb, :agent)
+  defp find_agent_tab(%{shell_runtime: %{state: %{tab_bar: nil}}}), do: nil
+
+  defp find_agent_tab(%{shell_runtime: %{state: %{tab_bar: tb}}}),
+    do: TabBar.find_by_kind(tb, :agent)
 
   # Starts an agent session after switching into the agent tab.
   # Called only after the tab switch so AgentAccess.session/1 sees the tab's pid.
@@ -911,7 +913,7 @@ defmodule MingaEditor.Commands.Agent do
   end
 
   @spec create_active_agent_tab(state()) :: state()
-  defp create_active_agent_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+  defp create_active_agent_tab(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     rows = max(state.terminal_viewport.rows, 1)
     cols = max(state.terminal_viewport.cols, 1)
     windows = agent_tab_windows(rows, cols)

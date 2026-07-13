@@ -17,6 +17,7 @@ defmodule MingaEditor.Layout.SurfaceRegistryTest do
   alias MingaEditor.Layout.SurfaceRegistry
   alias MingaEditor.Layout.SurfaceRegistry.Placement
   alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
@@ -231,7 +232,11 @@ defmodule MingaEditor.Layout.SurfaceRegistryTest do
         port_manager: self(),
         workspace: %SessionState{viewport: Viewport.new(24, 80), editing: VimState.new()},
         layout: single_window_layout(),
-        shell_state: %ShellState{bottom_panel: %BottomPanel{visible: true, height_percent: 25}}
+        shell_runtime:
+          Runtime.new(
+            Runtime.default_entry(),
+            %ShellState{bottom_panel: %BottomPanel{visible: true, height_percent: 25}}
+          )
       }
 
       placements = SurfaceRegistry.placements(state)

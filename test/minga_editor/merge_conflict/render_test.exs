@@ -9,6 +9,7 @@ defmodule MingaEditor.MergeConflict.RenderTest do
   alias MingaEditor.Mouse
   alias MingaEditor.Mouse.HitTest
   alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
@@ -106,7 +107,7 @@ defmodule MingaEditor.MergeConflict.RenderTest do
     state = Mouse.handle(state, row, col + gutter_width + 1, :left, 0, :press, 1)
 
     assert BufferProcess.content(buffer) == before_content
-    assert state.shell_state.status_msg == nil
+    assert EditorState.status_msg(state) == nil
   end
 
   test "mouse click on action block separators is a no-op", %{
@@ -135,7 +136,7 @@ defmodule MingaEditor.MergeConflict.RenderTest do
 
     assert BufferProcess.content(buffer) == before_content
     assert BufferProcess.cursor(buffer) == before_cursor
-    assert state.shell_state.status_msg == nil
+    assert EditorState.status_msg(state) == nil
   end
 
   defp start_conflict_buffer(events_registry, options_server) do
@@ -168,7 +169,7 @@ defmodule MingaEditor.MergeConflict.RenderTest do
           next_id: 2
         }
       },
-      shell_state: %ShellState{}
+      shell_runtime: Runtime.new(Runtime.default_entry(), %ShellState{})
     }
   end
 

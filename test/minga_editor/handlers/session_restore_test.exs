@@ -30,11 +30,11 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
     assert :ok = Session.save(snapshot, session_dir: dir)
 
     restored = dir |> initial_state() |> SessionRestore.restore_session()
-    assert [_, _] = TabBar.visible_file_tabs(restored.shell_state.tab_bar)
+    assert [_, _] = TabBar.visible_file_tabs(EditorState.tab_bar(restored))
     assert Minga.Buffer.file_path(restored.workspace.buffers.active) == first_path
 
     second_tab =
-      Enum.find(TabBar.visible_file_tabs(restored.shell_state.tab_bar), fn tab ->
+      Enum.find(TabBar.visible_file_tabs(EditorState.tab_bar(restored)), fn tab ->
         tab.label == "second.ex"
       end)
 
@@ -81,7 +81,7 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
 
     restored = dir |> initial_state() |> SessionRestore.restore_session()
 
-    assert [_] = TabBar.visible_file_tabs(restored.shell_state.tab_bar)
+    assert [_] = TabBar.visible_file_tabs(EditorState.tab_bar(restored))
     assert Minga.Buffer.file_path(restored.workspace.buffers.active) == existing_path
     refute File.exists?(missing_path)
   end

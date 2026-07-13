@@ -628,7 +628,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
   end
 
   @spec active_project_view(state()) :: ProjectView.t() | nil
-  defp active_project_view(%{shell_state: %{tab_bar: %TabBar{} = tab_bar}}) do
+  defp active_project_view(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tab_bar}}}) do
     case TabBar.active_workspace(tab_bar) do
       %{project_view: %ProjectView{} = project_view} -> project_view
       _workspace -> nil

@@ -6,6 +6,7 @@ defmodule MingaEditor.PickerUITest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.PickerUI
   alias MingaEditor.RenderPipeline.TestHelpers
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.ModalOverlay
@@ -96,7 +97,11 @@ defmodule MingaEditor.PickerUITest do
     state = %EditorState{
       port_manager: self(),
       workspace: preview_workspace,
-      shell_state: %ShellState{tab_bar: tb, modal: {:picker, PickerPayload.new(picker_state)}}
+      shell_runtime:
+        Runtime.new(
+          Runtime.default_entry(),
+          %ShellState{tab_bar: tb, modal: {:picker, PickerPayload.new(picker_state)}}
+        )
     }
 
     {state, original_buf, preview_buf}
@@ -181,7 +186,7 @@ defmodule MingaEditor.PickerUITest do
       state = picker_state_with_buffers(["alpha", "beta", "gamma"])
 
       new_state = PickerUI.handle_key(state, ?o, MingaEditor.Input.mod_ctrl())
-      {:picker, %{picker_ui: %{action_menu: {actions, 0}}}} = new_state.shell_state.modal
+      {:picker, %{picker_ui: %{action_menu: {actions, 0}}}} = new_state.shell_runtime.state.modal
 
       assert actions == [
                {"Kill all marked",
@@ -194,7 +199,7 @@ defmodule MingaEditor.PickerUITest do
 
       new_state = PickerUI.handle_key(state, 13, 0)
 
-      assert new_state.shell_state.modal == :none
+      assert new_state.shell_runtime.state.modal == :none
       assert Enum.count(new_state.workspace.buffers.list) == 1
       assert Minga.Buffer.content(new_state.workspace.buffers.active) == "alpha"
     end
@@ -214,14 +219,18 @@ defmodule MingaEditor.PickerUITest do
       state = %EditorState{
         port_manager: nil,
         workspace: %SessionState{viewport: Viewport.new(24, 80), editing: VimState.new()},
-        shell_state: %ShellState{modal: {:picker, PickerPayload.new(picker_state)}}
+        shell_runtime:
+          Runtime.new(
+            Runtime.default_entry(),
+            %ShellState{modal: {:picker, PickerPayload.new(picker_state)}}
+          )
       }
 
       result = PickerUI.handle_key(state, ?d, 0)
-      {:picker, %{picker_ui: picker_ui}} = result.shell_state.modal
+      {:picker, %{picker_ui: picker_ui}} = result.shell_runtime.state.modal
 
       assert picker_ui.picker.query == "d"
-      assert result.shell_state.status_msg == nil
+      assert result.shell_runtime.state.status_msg == nil
       assert result.workspace.editing.mode == :normal
     end
   end
@@ -238,7 +247,7 @@ defmodule MingaEditor.PickerUITest do
 
       new_state = PickerUI.handle_key(picker_state, 13, 0)
 
-      assert new_state.shell_state.modal == :none
+      assert new_state.shell_runtime.state.modal == :none
       assert Map.get(new_state, :selected_item_id) == :first
       refute Map.has_key?(new_state, :bulk_selected)
     end
@@ -254,12 +263,14 @@ defmodule MingaEditor.PickerUITest do
 
       menu_state = PickerUI.handle_key(picker_state, ?o, MingaEditor.Input.mod_ctrl())
 
-      assert {:picker, %{picker_ui: %{action_menu: {actions, 0}}}} = menu_state.shell_state.modal
+      assert {:picker, %{picker_ui: %{action_menu: {actions, 0}}}} =
+               menu_state.shell_runtime.state.modal
+
       assert Enum.map(actions, &elem(&1, 0)) == ["Open", "Delete"]
 
       new_state = PickerUI.handle_key(menu_state, 13, 0)
 
-      assert new_state.shell_state.modal == :none
+      assert new_state.shell_runtime.state.modal == :none
       assert Map.get(new_state, :action_item_id) == :first
       refute Map.has_key?(new_state, :bulk_selected)
     end
@@ -271,8 +282,8 @@ defmodule MingaEditor.PickerUITest do
 
       new_state = PickerUI.handle_key(state, 13, 0)
 
-      tb = new_state.shell_state.tab_bar
-      assert new_state.shell_state.modal == :none
+      tb = new_state.shell_runtime.state.tab_bar
+      assert new_state.shell_runtime.state.modal == :none
       assert TabBar.count(tb) == 2
       assert %Buffers{active: ^original_buf} = TabBar.get(tb, 1).context.buffers
       assert %Buffers{active: ^preview_buf} = TabBar.get(tb, 2).context.buffers
@@ -283,13 +294,13 @@ defmodule MingaEditor.PickerUITest do
       {state, _original_buf, _preview_buf} = preview_promotion_state()
 
       switched_state = PickerUI.handle_key(state, ?>, 0)
-      {:picker, %{picker_ui: switched_pui}} = switched_state.shell_state.modal
+      {:picker, %{picker_ui: switched_pui}} = switched_state.shell_runtime.state.modal
       assert switched_pui.source == MingaEditor.UI.Picker.CommandSource
       assert switched_pui.original_source == MingaEditor.UI.Picker.FileSource
       assert switched_pui.mode_prefix == ">"
 
       reverted_state = PickerUI.handle_key(switched_state, 127, 0)
-      {:picker, %{picker_ui: reverted_pui}} = reverted_state.shell_state.modal
+      {:picker, %{picker_ui: reverted_pui}} = reverted_state.shell_runtime.state.modal
       assert reverted_pui.source == MingaEditor.UI.Picker.FileSource
       assert reverted_pui.original_source == nil
       assert reverted_pui.mode_prefix == ""
@@ -299,13 +310,13 @@ defmodule MingaEditor.PickerUITest do
       {state, _original_buf, _preview_buf} = preview_promotion_state()
 
       switched_state = PickerUI.handle_key(state, ?#, 0)
-      {:picker, %{picker_ui: switched_pui}} = switched_state.shell_state.modal
+      {:picker, %{picker_ui: switched_pui}} = switched_state.shell_runtime.state.modal
       assert switched_pui.source == MingaEditor.UI.Picker.ProjectSearchSource
       assert switched_pui.original_source == MingaEditor.UI.Picker.FileSource
       assert switched_pui.mode_prefix == "#"
 
       reverted_state = PickerUI.handle_key(switched_state, 127, 0)
-      {:picker, %{picker_ui: reverted_pui}} = reverted_state.shell_state.modal
+      {:picker, %{picker_ui: reverted_pui}} = reverted_state.shell_runtime.state.modal
       assert reverted_pui.source == MingaEditor.UI.Picker.FileSource
       assert reverted_pui.original_source == nil
       assert reverted_pui.mode_prefix == ""
@@ -317,10 +328,10 @@ defmodule MingaEditor.PickerUITest do
       source = :"Elixir.MingaEditor.PickerUITest.GitLogSource"
       picker = Picker.new([%Item{id: "abc123", label: "abc123"}], title: "Git Log")
       picker_state = %PickerState{picker: picker, source: source}
-      state = put_in(state.shell_state.modal, {:picker, PickerPayload.new(picker_state)})
+      state = ModalOverlay.open(state, :picker, PickerPayload.new(picker_state))
 
       state = Enum.reduce(~c"fix", state, fn cp, acc -> PickerUI.handle_key(acc, cp, 0) end)
-      {:picker, %{picker_ui: pui}} = state.shell_state.modal
+      {:picker, %{picker_ui: pui}} = state.shell_runtime.state.modal
 
       assert pui.source == source
       assert pui.picker.query == "fix"
@@ -364,7 +375,7 @@ defmodule MingaEditor.PickerUITest do
       final =
         Enum.reduce(["c", "co", "con", "conf", "config"], state, fn query, _acc ->
           typed = type_string(state, query)
-          {:picker, %{picker_ui: %{picker: picker}}} = typed.shell_state.modal
+          {:picker, %{picker_ui: %{picker: picker}}} = typed.shell_runtime.state.modal
 
           assert picker.query == query
           assert Picker.count(picker) == @result_limit
@@ -372,7 +383,7 @@ defmodule MingaEditor.PickerUITest do
           typed
         end)
 
-      {:picker, %{picker_ui: %{picker: picker}}} = final.shell_state.modal
+      {:picker, %{picker_ui: %{picker: picker}}} = final.shell_runtime.state.modal
       assert Picker.count(picker) == @result_limit
     end
 
@@ -382,7 +393,7 @@ defmodule MingaEditor.PickerUITest do
       # path quietly diverging from Picker.refilter (e.g. an unbounded code path
       # sneaking back in).
       typed = type_string(large_picker_state(NoBulkActionsSource, 10_000), "config")
-      {:picker, %{picker_ui: %{picker: picker}}} = typed.shell_state.modal
+      {:picker, %{picker_ui: %{picker: picker}}} = typed.shell_runtime.state.modal
 
       reference =
         for(i <- 1..10_000, do: %Item{id: i, label: "config_module_#{i}.ex"})
@@ -399,8 +410,8 @@ defmodule MingaEditor.PickerUITest do
       small = type_string(large_picker_state(NoBulkActionsSource, 1_000), "config")
       large = type_string(large_picker_state(NoBulkActionsSource, 50_000), "config")
 
-      {:picker, %{picker_ui: %{picker: small_picker}}} = small.shell_state.modal
-      {:picker, %{picker_ui: %{picker: large_picker}}} = large.shell_state.modal
+      {:picker, %{picker_ui: %{picker: small_picker}}} = small.shell_runtime.state.modal
+      {:picker, %{picker_ui: %{picker: large_picker}}} = large.shell_runtime.state.modal
 
       assert Picker.count(small_picker) == @result_limit
       assert Picker.count(large_picker) == @result_limit
@@ -420,7 +431,7 @@ defmodule MingaEditor.PickerUITest do
           Enum.reduce(keystrokes, state, fn cp, acc -> PickerUI.handle_key(acc, cp, 0) end)
         end)
 
-      {:picker, %{picker_ui: %{picker: picker}}} = final.shell_state.modal
+      {:picker, %{picker_ui: %{picker: picker}}} = final.shell_runtime.state.modal
       assert picker.query == "config"
       assert Picker.count(picker) == @result_limit
 
@@ -434,7 +445,7 @@ defmodule MingaEditor.PickerUITest do
       state = large_picker_state(LargePreviewSource, 10_000)
 
       typed = type_string(state, "config_module_1.ex")
-      {:picker, %{picker_ui: %{picker: picker}}} = typed.shell_state.modal
+      {:picker, %{picker_ui: %{picker: picker}}} = typed.shell_runtime.state.modal
 
       # Selection landed on a real match and preview applied on_select for it.
       assert Picker.selected_item(picker) != nil
@@ -448,7 +459,7 @@ defmodule MingaEditor.PickerUITest do
       state = large_file_picker_state(50_000)
 
       switched = PickerUI.handle_key(state, ?>, 0)
-      {:picker, %{picker_ui: pui}} = switched.shell_state.modal
+      {:picker, %{picker_ui: pui}} = switched.shell_runtime.state.modal
 
       assert pui.source == MingaEditor.UI.Picker.CommandSource
       assert pui.original_source == MingaEditor.UI.Picker.FileSource

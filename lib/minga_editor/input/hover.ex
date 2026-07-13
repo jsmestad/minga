@@ -29,33 +29,53 @@ defmodule MingaEditor.Input.Hover do
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
-  def handle_key(%{shell_state: %{hover_popup: nil}} = state, _codepoint, _modifiers) do
+  def handle_key(%{shell_runtime: %{state: %{hover_popup: nil}}} = state, _codepoint, _modifiers) do
     {:passthrough, state}
   end
 
   # K pressed while hover is visible but not focused: focus into it.
   # The frontend sends uppercase K as codepoint ?K (75) with no shift modifier,
   # matching how normal.ex binds {?K, 0} to :hover.
-  def handle_key(%{shell_state: %{hover_popup: %HoverPopup{focused: false}}} = state, ?K, 0) do
+  def handle_key(
+        %{shell_runtime: %{state: %{hover_popup: %HoverPopup{focused: false}}}} = state,
+        ?K,
+        0
+      ) do
     {:handled,
-     EditorState.set_hover_popup(state, HoverPopup.focus(state.shell_state.hover_popup))}
+     EditorState.set_hover_popup(state, HoverPopup.focus(state.shell_runtime.state.hover_popup))}
   end
 
   # When focused, j scrolls down
-  def handle_key(%{shell_state: %{hover_popup: %HoverPopup{focused: true}}} = state, ?j, 0) do
+  def handle_key(
+        %{shell_runtime: %{state: %{hover_popup: %HoverPopup{focused: true}}}} = state,
+        ?j,
+        0
+      ) do
     {:handled,
-     EditorState.set_hover_popup(state, HoverPopup.scroll_down(state.shell_state.hover_popup))}
+     EditorState.set_hover_popup(
+       state,
+       HoverPopup.scroll_down(state.shell_runtime.state.hover_popup)
+     )}
   end
 
   # When focused, k scrolls up
-  def handle_key(%{shell_state: %{hover_popup: %HoverPopup{focused: true}}} = state, ?k, 0) do
+  def handle_key(
+        %{shell_runtime: %{state: %{hover_popup: %HoverPopup{focused: true}}}} = state,
+        ?k,
+        0
+      ) do
     {:handled,
-     EditorState.set_hover_popup(state, HoverPopup.scroll_up(state.shell_state.hover_popup))}
+     EditorState.set_hover_popup(
+       state,
+       HoverPopup.scroll_up(state.shell_runtime.state.hover_popup)
+     )}
   end
 
   # When focused, Enter accepts the popup's Open action when one exists.
   def handle_key(
-        %{shell_state: %{hover_popup: %HoverPopup{focused: true, open_action: action}}} = state,
+        %{
+          shell_runtime: %{state: %{hover_popup: %HoverPopup{focused: true, open_action: action}}}
+        } = state,
         @key_enter,
         _mods
       )
@@ -66,7 +86,7 @@ defmodule MingaEditor.Input.Hover do
 
   # When focused, o toggles an expandable popup (e.g. full vs truncated thinking).
   def handle_key(
-        %{shell_state: %{hover_popup: %HoverPopup{focused: true} = popup}} = state,
+        %{shell_runtime: %{state: %{hover_popup: %HoverPopup{focused: true} = popup}}} = state,
         ?o,
         0
       ) do
@@ -78,12 +98,16 @@ defmodule MingaEditor.Input.Hover do
   end
 
   # When focused, q or Escape dismisses
-  def handle_key(%{shell_state: %{hover_popup: %HoverPopup{focused: true}}} = state, ?q, 0) do
+  def handle_key(
+        %{shell_runtime: %{state: %{hover_popup: %HoverPopup{focused: true}}}} = state,
+        ?q,
+        0
+      ) do
     {:handled, EditorState.dismiss_hover_popup(state)}
   end
 
   def handle_key(
-        %{shell_state: %{hover_popup: %HoverPopup{focused: true}}} = state,
+        %{shell_runtime: %{state: %{hover_popup: %HoverPopup{focused: true}}}} = state,
         @key_escape,
         _mods
       ) do
@@ -91,12 +115,20 @@ defmodule MingaEditor.Input.Hover do
   end
 
   # When focused, any other key dismisses and passes through
-  def handle_key(%{shell_state: %{hover_popup: %HoverPopup{focused: true}}} = state, _cp, _mods) do
+  def handle_key(
+        %{shell_runtime: %{state: %{hover_popup: %HoverPopup{focused: true}}}} = state,
+        _cp,
+        _mods
+      ) do
     {:passthrough, EditorState.dismiss_hover_popup(state)}
   end
 
   # Not focused: any key dismisses and passes through
-  def handle_key(%{shell_state: %{hover_popup: %HoverPopup{focused: false}}} = state, _cp, _mods) do
+  def handle_key(
+        %{shell_runtime: %{state: %{hover_popup: %HoverPopup{focused: false}}}} = state,
+        _cp,
+        _mods
+      ) do
     {:passthrough, EditorState.dismiss_hover_popup(state)}
   end
 
@@ -130,7 +162,7 @@ defmodule MingaEditor.Input.Hover do
         ) :: MingaEditor.Input.Handler.result()
 
   def handle_mouse(
-        %{shell_state: %{hover_popup: nil}} = state,
+        %{shell_runtime: %{state: %{hover_popup: nil}}} = state,
         _row,
         _col,
         _btn,
@@ -145,7 +177,7 @@ defmodule MingaEditor.Input.Hover do
   # wheel events when the pointer is inside its rect (scroll routing), so scrolling
   # works whether or not the popup is keyboard-focused (#2629, AC-3).
   def handle_mouse(
-        %{shell_state: %{hover_popup: %HoverPopup{}}} = state,
+        %{shell_runtime: %{state: %{hover_popup: %HoverPopup{}}}} = state,
         _r,
         _c,
         :wheel_down,
@@ -154,11 +186,14 @@ defmodule MingaEditor.Input.Hover do
         _cc
       ) do
     {:handled,
-     EditorState.set_hover_popup(state, HoverPopup.scroll_down(state.shell_state.hover_popup))}
+     EditorState.set_hover_popup(
+       state,
+       HoverPopup.scroll_down(state.shell_runtime.state.hover_popup)
+     )}
   end
 
   def handle_mouse(
-        %{shell_state: %{hover_popup: %HoverPopup{}}} = state,
+        %{shell_runtime: %{state: %{hover_popup: %HoverPopup{}}}} = state,
         _r,
         _c,
         :wheel_up,
@@ -167,14 +202,17 @@ defmodule MingaEditor.Input.Hover do
         _cc
       ) do
     {:handled,
-     EditorState.set_hover_popup(state, HoverPopup.scroll_up(state.shell_state.hover_popup))}
+     EditorState.set_hover_popup(
+       state,
+       HoverPopup.scroll_up(state.shell_runtime.state.hover_popup)
+     )}
   end
 
   # A click inside the popup focuses it for scrolling rather than dismissing it
   # (#2629, AC-4). This clause only runs when the pointer hit the popup rect, so a
   # click outside still falls through to the buffer (which dismisses on motion).
   def handle_mouse(
-        %{shell_state: %{hover_popup: %HoverPopup{}}} = state,
+        %{shell_runtime: %{state: %{hover_popup: %HoverPopup{}}}} = state,
         _r,
         _c,
         :left,
@@ -183,13 +221,13 @@ defmodule MingaEditor.Input.Hover do
         _cc
       ) do
     {:handled,
-     EditorState.set_hover_popup(state, HoverPopup.focus(state.shell_state.hover_popup))}
+     EditorState.set_hover_popup(state, HoverPopup.focus(state.shell_runtime.state.hover_popup))}
   end
 
   # Pointer motion inside the popup keeps it alive (#2629, AC-1). Swallowing the
   # event here stops it bubbling to the buffer handler that would dismiss it.
   def handle_mouse(
-        %{shell_state: %{hover_popup: %HoverPopup{}}} = state,
+        %{shell_runtime: %{state: %{hover_popup: %HoverPopup{}}}} = state,
         _r,
         _c,
         _btn,

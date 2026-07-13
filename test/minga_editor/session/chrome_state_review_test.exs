@@ -21,7 +21,7 @@ defmodule MingaEditor.Session.ChromeStateReviewTest do
     }
 
     tb = TabBar.update_workspace(tb, workspace.id, &WorkspaceModel.set_review(&1, review))
-    chrome = ChromeState.from_editor_state(%{shell_state: %{tab_bar: tb}})
+    chrome = ChromeState.from_editor_state(%{tab_bar: tb})
     agent_summary = Enum.find(chrome.workspaces, &(&1.id == workspace.id))
 
     assert agent_summary.draft_count == 1

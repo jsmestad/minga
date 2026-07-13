@@ -51,7 +51,7 @@ defmodule Minga.Credo.NoDirectModalOverlayWriteCheckTest do
     """
     defmodule MingaEditor.State.ModalOverlay do
       def close(state) do
-        %{state.shell_state | modal: :none}
+        %{state.shell_runtime.state | modal: :none}
       end
     end
     """

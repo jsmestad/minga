@@ -6,7 +6,8 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Observatory
   alias MingaEditor.Session.State, as: SessionState
-  alias MingaEditor.Shell.Traditional.State, as: ShellState
+  alias MingaEditor.Shell.Entry
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Viewport
 
@@ -23,7 +24,11 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
       port_manager: self(),
       capabilities: caps,
       workspace: %SessionState{viewport: Viewport.new(24, 80)},
-      shell_state: %MingaEditor.Shell.Traditional.State{bottom_panel: %BottomPanel{}}
+      shell_runtime:
+        Runtime.new(
+          Runtime.default_entry(),
+          %MingaEditor.Shell.Traditional.State{bottom_panel: %BottomPanel{}}
+        )
     }
   end
 
@@ -31,7 +36,7 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
     for {label, caps} <- [{"GUI", @gui}, {"Go TUI", @go_tui}] do
       test "#{label} toggle_bottom_panel opens panel when hidden" do
         state = Commands.execute(base_state(unquote(Macro.escape(caps))), :toggle_bottom_panel)
-        assert state.shell_state.bottom_panel.visible == true
+        assert state.shell_runtime.state.bottom_panel.visible == true
       end
 
       test "#{label} toggle_bottom_panel closes panel when visible" do
@@ -42,7 +47,7 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
           )
 
         state = Commands.execute(state, :toggle_bottom_panel)
-        assert state.shell_state.bottom_panel.visible == false
+        assert state.shell_runtime.state.bottom_panel.visible == false
       end
 
       test "#{label} bottom_panel_next_tab cycles to next tab" do
@@ -53,7 +58,7 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
           )
 
         state = Commands.execute(state, :bottom_panel_next_tab)
-        assert state.shell_state.bottom_panel.active_tab == :diagnostics
+        assert state.shell_runtime.state.bottom_panel.active_tab == :diagnostics
       end
 
       test "#{label} bottom_panel_prev_tab cycles to previous tab" do
@@ -64,7 +69,7 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
           )
 
         state = Commands.execute(state, :bottom_panel_prev_tab)
-        assert state.shell_state.bottom_panel.active_tab == :messages
+        assert state.shell_runtime.state.bottom_panel.active_tab == :messages
       end
     end
   end
@@ -75,8 +80,8 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
         state =
           Commands.execute(base_state(unquote(Macro.escape(caps))), :toggle_beam_observatory)
 
-        assert state.shell_state.observatory_visible == true
-        assert {timer, _token} = state.shell_state.observatory_timer
+        assert state.shell_runtime.state.observatory_visible == true
+        assert {timer, _token} = state.shell_runtime.state.observatory_timer
 
         Process.cancel_timer(timer)
       end
@@ -86,21 +91,14 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
       token = make_ref()
       timer = Process.send_after(self(), {:observatory_tick, token}, 60_000)
 
-      state = %{
-        base_state(@gui)
-        | shell_state:
-            MingaEditor.Shell.Traditional.State.open_observatory(
-              base_state(@gui).shell_state,
-              {timer, token}
-            )
-      }
+      state = MingaEditor.State.open_observatory(base_state(@gui), {timer, token})
 
       state = MingaEditor.State.set_observatory_data(state, %{tree: :placeholder})
       state = Commands.execute(state, :toggle_beam_observatory)
 
-      assert state.shell_state.observatory_visible == false
-      assert state.shell_state.observatory_timer == nil
-      assert state.shell_state.observatory_data == nil
+      assert state.shell_runtime.state.observatory_visible == false
+      assert state.shell_runtime.state.observatory_timer == nil
+      assert state.shell_runtime.state.observatory_data == nil
     end
 
     test "is a no-op for the legacy Zig cell-grid frontend (no semantic_ui)" do
@@ -110,14 +108,25 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
     end
 
     test "is a no-op when the active shell has no observatory fields" do
-      state = %{base_state(@gui) | shell_state: %{}}
+      entry = %Entry{
+        id: :fake,
+        source: {:extension, :test},
+        module: MingaEditor.Test.FakeShell,
+        display_name: "Fake",
+        description: "Shell without observatory fields",
+        capabilities: [:gui],
+        default?: false,
+        generation: 1
+      }
+
+      state = %{base_state(@gui) | shell_runtime: Runtime.new(entry, %{})}
 
       assert Commands.execute(state, :toggle_beam_observatory) == state
     end
 
     test "ignores stale refresh ticks" do
       state = Commands.execute(base_state(@gui), :toggle_beam_observatory)
-      assert {timer, _token} = state.shell_state.observatory_timer
+      assert {timer, _token} = state.shell_runtime.state.observatory_timer
 
       assert {:noreply, ^state} = MingaEditor.handle_info({:observatory_tick, make_ref()}, state)
 
@@ -133,7 +142,7 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
       # The tick handler returns the *unchanged* state: collection does not run
       # inline (no data set) and no next tick is scheduled here.
       assert {:noreply, ^state} = MingaEditor.handle_info({:observatory_tick, token}, state)
-      assert state.shell_state.observatory_data == nil
+      assert state.shell_runtime.state.observatory_data == nil
 
       # The collection ran in a supervised Task and reported back as a message,
       # exactly like a picker/async-action result.
@@ -157,9 +166,9 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
       assert {:noreply, new_state} =
                MingaEditor.handle_info({:observatory_data_result, token, data}, state)
 
-      assert new_state.shell_state.observatory_data == data
+      assert new_state.shell_runtime.state.observatory_data == data
 
-      assert {next_timer, next_token} = new_state.shell_state.observatory_timer
+      assert {next_timer, next_token} = new_state.shell_runtime.state.observatory_timer
       assert is_reference(next_timer)
       # A fresh token gates the next cycle; the prior token is now stale.
       assert next_token != token
@@ -178,15 +187,13 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
       assert {:noreply, ^state} =
                MingaEditor.handle_info({:observatory_data_result, make_ref(), data}, state)
 
-      assert state.shell_state.observatory_data == nil
+      assert state.shell_runtime.state.observatory_data == nil
     end
   end
 
   # Builds editor state with the observatory open and a known refresh token, so
   # current_observatory_token?/2 matches without scheduling a real timer.
   defp observatory_state(caps, token) do
-    base = base_state(caps)
-    shell = ShellState.open_observatory(base.shell_state, {make_ref(), token})
-    %{base | shell_state: shell}
+    MingaEditor.State.open_observatory(base_state(caps), {make_ref(), token})
   end
 end

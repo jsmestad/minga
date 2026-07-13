@@ -129,11 +129,11 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
 
       {:handled, new_state} = Scoped.handle_key(state, ?q, 0)
       assert new_state.workspace.keymap_scope == :editor
-      assert new_state.shell_state.tab_bar.active_id == 1
-      assert TabBar.filter_by_kind(new_state.shell_state.tab_bar, :agent) != []
+      assert EditorState.tab_bar(new_state).active_id == 1
+      assert TabBar.filter_by_kind(EditorState.tab_bar(new_state), :agent) != []
 
       assert Enum.any?(
-               new_state.shell_state.tab_bar.tabs,
+               EditorState.tab_bar(new_state).tabs,
                &(&1.kind == :agent and &1.session == session)
              )
     end
@@ -144,35 +144,35 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
 
       {:handled, new_state} = Scoped.handle_key(state, 27, 0)
       assert new_state.workspace.keymap_scope == :editor
-      assert new_state.shell_state.tab_bar.active_id == 1
-      assert TabBar.filter_by_kind(new_state.shell_state.tab_bar, :agent) != []
+      assert EditorState.tab_bar(new_state).active_id == 1
+      assert TabBar.filter_by_kind(EditorState.tab_bar(new_state), :agent) != []
     end
 
     test "return falls back to the most recent remaining file tab when the target closed", %{
       state: state
     } do
-      {tb, fallback_tab} = TabBar.insert(state.shell_state.tab_bar, :file, "fallback.ex")
+      {tb, fallback_tab} = TabBar.insert(EditorState.tab_bar(state), :file, "fallback.ex")
       {:ok, tb} = TabBar.remove(tb, 1)
-      state = put_in(state.shell_state.tab_bar, tb)
+      state = EditorState.set_tab_bar(state, tb)
 
       {:handled, new_state} = Scoped.handle_key(state, ?q, 0)
       assert new_state.workspace.keymap_scope == :editor
-      assert new_state.shell_state.tab_bar.active_id == fallback_tab.id
+      assert EditorState.tab_bar(new_state).active_id == fallback_tab.id
     end
 
     test "return without file tabs does not create an untitled fallback", %{
       state: state,
       file_buffer: file_buffer
     } do
-      {:ok, tb} = TabBar.remove(state.shell_state.tab_bar, 1)
-      state = put_in(state.shell_state.tab_bar, tb)
+      {:ok, tb} = TabBar.remove(EditorState.tab_bar(state), 1)
+      state = EditorState.set_tab_bar(state, tb)
 
       {:handled, new_state} = Scoped.handle_key(state, ?q, 0)
       assert new_state.workspace.keymap_scope == :editor
-      assert TabBar.filter_by_kind(new_state.shell_state.tab_bar, :file) == []
+      assert TabBar.filter_by_kind(EditorState.tab_bar(new_state), :file) == []
       assert new_state.workspace.buffers.active == file_buffer
       assert hd(new_state.workspace.buffers.list) == file_buffer
-      assert new_state.shell_state.status_msg == "No file tabs in this workspace"
+      assert EditorState.status_msg(new_state) == "No file tabs in this workspace"
     end
 
     test "? toggles help", %{state: state} do
@@ -228,12 +228,12 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
       {:handled, new_state} = Scoped.handle_key(state, 27, 0)
       refute AgentAccess.view(new_state).help_visible
       assert new_state.workspace.keymap_scope == :agent
-      assert new_state.shell_state.tab_bar.active_id == state.shell_state.tab_bar.active_id
+      assert EditorState.tab_bar(new_state).active_id == EditorState.tab_bar(state).active_id
     end
 
     test "ESC leaves prompt focus without clearing prompt text before returning", %{state: state} do
       state = focus_prompt(state, "keep this")
-      agent_tab_id = TabBar.find_by_kind(state.shell_state.tab_bar, :agent).id
+      agent_tab_id = TabBar.find_by_kind(EditorState.tab_bar(state), :agent).id
 
       {:handled, unfocused_state} = Scoped.handle_key(state, 27, 0)
       refute AgentAccess.input_focused?(unfocused_state)
@@ -242,7 +242,7 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
 
       {:handled, returned_state} = Scoped.handle_key(unfocused_state, 27, 0)
       assert returned_state.workspace.keymap_scope == :editor
-      assert returned_state.shell_state.tab_bar.active_id == 1
+      assert EditorState.tab_bar(returned_state).active_id == 1
 
       reopened_state = EditorState.switch_tab(returned_state, agent_tab_id)
       assert UIState.prompt_text(AgentAccess.agent_ui(reopened_state)) == "keep this"

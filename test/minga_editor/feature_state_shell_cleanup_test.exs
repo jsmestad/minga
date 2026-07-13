@@ -5,6 +5,7 @@ defmodule MingaEditor.FeatureStateShellCleanupTest do
   alias MingaEditor.FeatureState
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Registry
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.StateStash
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Viewport
@@ -27,6 +28,16 @@ defmodule MingaEditor.FeatureStateShellCleanupTest do
         capabilities: []
       })
 
+    :ok =
+      Registry.register({:extension, :fake_shell_alt}, %{
+        id: :fake_shell_alt,
+        module: MingaEditor.Test.FakeShellAlt,
+        display_name: "Fake Shell Alt",
+        description: "Alternate test shell",
+        default?: false,
+        capabilities: []
+      })
+
     on_exit(fn ->
       Registry.reset_for_test()
       Registry.seed_builtin()
@@ -40,22 +51,24 @@ defmodule MingaEditor.FeatureStateShellCleanupTest do
     stashed_context = context_with_feature_state(:stashed_owned, :stashed_other)
 
     entry = Registry.get(:fake_shell)
+    stashed_entry = Registry.get(:fake_shell_alt)
+
+    runtime =
+      Runtime.new(stashed_entry, %{contexts: [stashed_context]})
+      |> Runtime.activate(entry, %{contexts: [active_context]})
 
     state = %EditorState{
       port_manager: self(),
       workspace: workspace(),
-      shell_id: :fake_shell,
-      shell: MingaEditor.Test.FakeShell,
-      shell_state: %{contexts: [active_context]},
-      shell_state_stash: %{fake_shell: StateStash.new(entry, %{contexts: [stashed_context]})}
+      shell_runtime: runtime
     }
 
     cleaned = EditorState.drop_feature_state_source(state, @source)
 
-    [cleaned_context] = cleaned.shell_state.contexts
+    [cleaned_context] = Runtime.state(cleaned.shell_runtime).contexts
 
-    assert %StateStash{module: MingaEditor.Test.FakeShell, state: stashed_shell_state} =
-             cleaned.shell_state_stash.fake_shell
+    assert %StateStash{module: MingaEditor.Test.FakeShellAlt, state: stashed_shell_state} =
+             Runtime.stash(cleaned.shell_runtime).fake_shell_alt
 
     [cleaned_stashed_context] = stashed_shell_state.contexts
     restored = SessionState.restore_tab_context(workspace(), cleaned_context)
@@ -73,12 +86,14 @@ defmodule MingaEditor.FeatureStateShellCleanupTest do
     stashed_context = context_with_feature_state(:stashed_owned, :stashed_other)
     stale_entry = Registry.get(:fake_shell)
 
+    runtime =
+      Runtime.new(stale_entry, %{contexts: [stashed_context]})
+      |> Runtime.activate(Runtime.default_entry(), %MingaEditor.Shell.Traditional.State{})
+
     state = %EditorState{
       port_manager: self(),
       workspace: workspace(),
-      shell_state_stash: %{
-        fake_shell: StateStash.new(stale_entry, %{contexts: [stashed_context]})
-      }
+      shell_runtime: runtime
     }
 
     assert :ok = Registry.unregister_source({:extension, :fake_shell})
@@ -94,7 +109,10 @@ defmodule MingaEditor.FeatureStateShellCleanupTest do
              })
 
     cleaned = EditorState.drop_feature_state_source(state, @source)
-    %StateStash{state: %{contexts: [unchanged_context]}} = cleaned.shell_state_stash.fake_shell
+
+    %StateStash{state: %{contexts: [unchanged_context]}} =
+      Runtime.stash(cleaned.shell_runtime).fake_shell
+
     restored = SessionState.restore_tab_context(workspace(), unchanged_context)
 
     assert SessionState.get_feature_state(restored, @source, @feature) == :stashed_owned

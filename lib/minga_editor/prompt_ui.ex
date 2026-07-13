@@ -84,7 +84,7 @@ defmodule MingaEditor.PromptUI do
   Returns true if a prompt is currently open.
   """
   @spec open?(state()) :: boolean()
-  def open?(state), do: ModalOverlay.match(state.shell_state.modal, :prompt)
+  def open?(state), do: ModalOverlay.match(state.shell_runtime.state.modal, :prompt)
 
   @doc """
   Handles a key event while the prompt is active.
@@ -94,7 +94,7 @@ defmodule MingaEditor.PromptUI do
   """
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) :: {state(), action()}
   def handle_key(state, key, _mods) do
-    {:prompt, %{prompt_ui: prompt}} = state.shell_state.modal
+    {:prompt, %{prompt_ui: prompt}} = state.shell_runtime.state.modal
 
     case key do
       @escape ->
@@ -147,7 +147,7 @@ defmodule MingaEditor.PromptUI do
   """
   @spec update_prompt(state(), (PromptState.t() -> PromptState.t())) :: state()
   def update_prompt(state, fun) do
-    {:prompt, payload} = state.shell_state.modal
+    {:prompt, payload} = state.shell_runtime.state.modal
     new_pui = fun.(payload.prompt_ui)
     ModalOverlay.transition(state, :prompt, PromptPayload.put_prompt_ui(payload, new_pui))
   end
@@ -156,7 +156,7 @@ defmodule MingaEditor.PromptUI do
 
   @spec current_prompt(state()) :: PromptState.t()
   defp current_prompt(state) do
-    case state.shell_state.modal do
+    case state.shell_runtime.state.modal do
       {:prompt, %{prompt_ui: prompt}} -> prompt
       _ -> %PromptState{}
     end

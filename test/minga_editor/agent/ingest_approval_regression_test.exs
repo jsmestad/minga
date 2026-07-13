@@ -30,6 +30,7 @@ defmodule MingaEditor.Agent.IngestApprovalRegressionTest do
   alias MingaEditor.Agent.Ingest
   alias MingaEditor.Commands.AgentSession
   alias MingaEditor.Commands.AgentSubStates
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
@@ -165,14 +166,17 @@ defmodule MingaEditor.Agent.IngestApprovalRegressionTest do
 
     %EditorState{
       port_manager: self(),
-      shell: MingaEditor.Shell.Traditional,
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80)
       },
-      shell_state: %MingaEditor.Shell.Traditional.State{
-        tab_bar: tb,
-        agent: agent
-      }
+      shell_runtime:
+        Runtime.new(
+          Runtime.default_entry(),
+          %MingaEditor.Shell.Traditional.State{
+            tab_bar: tb,
+            agent: agent
+          }
+        )
     }
   end
 end

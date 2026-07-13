@@ -9,6 +9,8 @@ defmodule MingaEditor.Commands.InlineAskTest do
   alias MingaEditor.InlineAsk.Events, as: InlineAskEvents
   alias MingaEditor.Input.InlineAsk, as: InlineAskInput
   alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.Shell.Registry
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
@@ -37,7 +39,7 @@ defmodule MingaEditor.Commands.InlineAskTest do
     state = InlineAskCommand.open(state)
 
     original_content = Buffer.content(buffer)
-    original_workspace_count = Enum.count(state.shell_state.tab_bar.workspaces)
+    original_workspace_count = Enum.count(state.shell_runtime.state.tab_bar.workspaces)
 
     assert {:handled, state} = InlineAskInput.handle_key(state, ?w, 0)
     assert {:handled, state} = InlineAskInput.handle_key(state, ?h, 0)
@@ -49,7 +51,7 @@ defmodule MingaEditor.Commands.InlineAskTest do
     assert {:handled, state} = InlineAskInput.handle_key(state, 27, 0)
     assert active_ask(state, buffer) == nil
     assert Buffer.content(buffer) == original_content
-    assert Enum.count(state.shell_state.tab_bar.workspaces) == original_workspace_count
+    assert Enum.count(state.shell_runtime.state.tab_bar.workspaces) == original_workspace_count
   end
 
   test "prompt send failure marks ask failed and clears session", %{tmp_dir: root} do
@@ -167,7 +169,7 @@ defmodule MingaEditor.Commands.InlineAskTest do
 
     assert_receive {:seeded, "What is this?", "It authenticates users."}
     assert active_ask(state, buffer) == nil
-    assert %{shell_state: %{tab_bar: tb}} = state
+    assert %EditorState{shell_runtime: %Runtime{state: %{tab_bar: tb}}} = state
     assert %{kind: :agent} = TabBar.active(tb)
     assert workspace = TabBar.active_workspace(tb)
     assert Enum.any?(workspace.files, &(&1.display_name == "auth.ex"))
@@ -196,9 +198,13 @@ defmodule MingaEditor.Commands.InlineAskTest do
           }
         }
         |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
-      shell_state: %TraditionalState{
-        tab_bar: TabBar.new(Tab.new_file(1, Path.basename(rel_path)), root)
-      }
+      shell_runtime:
+        Runtime.new(
+          Registry.get(:traditional),
+          %TraditionalState{
+            tab_bar: TabBar.new(Tab.new_file(1, Path.basename(rel_path)), root)
+          }
+        )
     }
 
     {state, buffer}
@@ -219,7 +225,9 @@ defmodule MingaEditor.Commands.InlineAskTest do
     %{state | workspace: workspace}
   end
 
-  defp fake_start_agent_session(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+  defp fake_start_agent_session(
+         %EditorState{shell_runtime: %Runtime{state: %{tab_bar: %TabBar{} = tb}}} = state
+       ) do
     session_pid = self()
     active_tab = TabBar.active(tb)
     {tb, workspace} = TabBar.add_workspace(tb, "Inline Ask", session_pid)

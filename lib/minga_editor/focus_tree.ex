@@ -188,13 +188,33 @@ defmodule MingaEditor.FocusTree do
   defp bottom_panel_rect(_layout, nil), do: nil
 
   defp bottom_panel_rect(
-         %Layout{terminal: {row, col, width, rows}},
+         %Layout{} = layout,
+         %{
+           shell_runtime: %{
+             state: %{
+               bottom_panel: %BottomPanel{visible: true, height_percent: height_percent}
+             }
+           }
+         }
+       ),
+       do: bottom_panel_rect(layout, height_percent)
+
+  defp bottom_panel_rect(
+         %Layout{} = layout,
          %{
            shell_state: %{
              bottom_panel: %BottomPanel{visible: true, height_percent: height_percent}
            }
          }
-       ) do
+       ),
+       do: bottom_panel_rect(layout, height_percent)
+
+  @spec bottom_panel_rect(Layout.t(), non_neg_integer()) :: Layout.rect()
+  defp bottom_panel_rect(
+         %Layout{terminal: {row, col, width, rows}},
+         height_percent
+       )
+       when is_integer(height_percent) and height_percent >= 0 do
     panel_height = bottom_panel_height(rows, height_percent)
     {row + rows - panel_height, col, width, panel_height}
   end
@@ -385,6 +405,14 @@ defmodule MingaEditor.FocusTree do
 
   @spec maybe_add_hover_overlay(t(), map()) :: t()
   defp maybe_add_hover_overlay(%TreeNode{} = root, %{
+         shell_runtime: %{state: shell_state},
+         terminal_viewport: vp,
+         theme: theme
+       }) do
+    maybe_add_hover_overlay(root, %{shell_state: shell_state, terminal_viewport: vp, theme: theme})
+  end
+
+  defp maybe_add_hover_overlay(%TreeNode{} = root, %{
          shell_state: %{hover_popup: %HoverPopup{} = popup},
          terminal_viewport: vp,
          theme: theme
@@ -409,6 +437,18 @@ defmodule MingaEditor.FocusTree do
 
   @spec maybe_add_signature_overlay(t(), map()) :: t()
   defp maybe_add_signature_overlay(%TreeNode{} = root, %{
+         shell_runtime: %{state: shell_state},
+         terminal_viewport: vp,
+         theme: theme
+       }) do
+    maybe_add_signature_overlay(root, %{
+      shell_state: shell_state,
+      terminal_viewport: vp,
+      theme: theme
+    })
+  end
+
+  defp maybe_add_signature_overlay(%TreeNode{} = root, %{
          shell_state: %{signature_help: %SignatureHelp{} = sh},
          terminal_viewport: vp,
          theme: theme
@@ -430,6 +470,14 @@ defmodule MingaEditor.FocusTree do
   # ── Overlay builders ──────────────────────────────────────────────────────
 
   @spec add_modal_overlays(t(), map(), Layout.t()) :: t()
+  defp add_modal_overlays(
+         %TreeNode{} = root,
+         %{shell_runtime: %{state: %{modal: {:picker, payload}}}},
+         layout
+       ) do
+    add_picker_overlay(root, payload.picker_ui, layout)
+  end
+
   defp add_modal_overlays(
          %TreeNode{} = root,
          %{shell_state: %{modal: {:picker, payload}}},

@@ -80,6 +80,7 @@ defmodule MingaEditor.InlineAsk.Render do
   defp face(:help), do: Face.new(fg: 0x808080)
 
   @spec inline_asks(term()) :: InlineAsk.store()
+  defp inline_asks(%{shell_runtime: %{state: %{inline_asks: asks}}}) when is_map(asks), do: asks
   defp inline_asks(%{shell_state: %{inline_asks: asks}}) when is_map(asks), do: asks
   defp inline_asks(_state), do: %{}
 end

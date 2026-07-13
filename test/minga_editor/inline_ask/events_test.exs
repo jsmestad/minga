@@ -6,9 +6,12 @@ defmodule MingaEditor.InlineAsk.EventsTest do
   alias MingaAgent.Session
   alias MingaAgent.SessionManager
   alias MingaEditor.InlineAsk.Events
+  alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.InlineAsk
+  alias MingaEditor.Viewport
 
   test "text deltas append to the matching inline ask" do
     session = self()
@@ -97,7 +100,16 @@ defmodule MingaEditor.InlineAsk.EventsTest do
       )
       |> InlineAsk.thinking(session_pid)
 
-    state = %{shell_state: %TraditionalState{inline_asks: %{buffer_pid => ask}}}
+    state = %EditorState{
+      port_manager: nil,
+      workspace: %SessionState{viewport: Viewport.new(24, 80)},
+      shell_runtime:
+        Runtime.new(
+          Runtime.default_entry(),
+          %TraditionalState{inline_asks: %{buffer_pid => ask}}
+        )
+    }
+
     {state, buffer_pid}
   end
 

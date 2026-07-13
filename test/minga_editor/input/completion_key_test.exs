@@ -5,6 +5,7 @@ defmodule MingaEditor.Input.CompletionKeyTest do
   alias Minga.Editing.Completion
   alias Minga.Mode
   alias MingaEditor.Input.Completion, as: CompletionInput
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
@@ -26,10 +27,14 @@ defmodule MingaEditor.Input.CompletionKeyTest do
     %EditorState{
       port_manager: nil,
       backend: :headless,
-      shell_state: %MingaEditor.Shell.Traditional.State{
-        modal: {:completion, payload},
-        whichkey: %WhichKey{}
-      },
+      shell_runtime:
+        Runtime.new(
+          Runtime.default_entry(),
+          %MingaEditor.Shell.Traditional.State{
+            modal: {:completion, payload},
+            whichkey: %WhichKey{}
+          }
+        ),
       workspace: %MingaEditor.Session.State{
         editing: %VimState{mode: :insert, mode_state: Mode.initial_state()},
         viewport: Viewport.new(30, 80)

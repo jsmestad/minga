@@ -25,6 +25,7 @@ defmodule MingaEditor.CompletionAsyncTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Editing.Completion
+  alias MingaEditor.State, as: EditorState
   alias MingaEditor.CompletionHandling
   alias MingaEditor.CompletionTrigger
   alias MingaEditor.State.ModalOverlay
@@ -42,7 +43,7 @@ defmodule MingaEditor.CompletionAsyncTest do
   end
 
   defp open_completion_modal(state, completion, gen) do
-    owner = state.shell_state.tab_bar.active_id
+    owner = EditorState.tab_bar(state).active_id
     trigger = %{CompletionTrigger.new() | gen: gen}
     payload = CompletionPayload.new(owner, completion: completion, trigger: trigger)
     ModalOverlay.open(state, :completion, payload)
@@ -188,7 +189,7 @@ defmodule MingaEditor.CompletionAsyncTest do
     # {:completion_processed, ...} -> the Editor's handle_info apply clause.
     defp inject_pending_completion(ctx, ref) do
       :sys.replace_state(ctx.editor, fn state ->
-        owner = state.shell_state.tab_bar.active_id
+        owner = EditorState.tab_bar(state).active_id
 
         trigger = %{
           CompletionTrigger.new()
@@ -250,14 +251,14 @@ defmodule MingaEditor.CompletionAsyncTest do
       _ =
         wait_until(
           ctx,
-          fn state -> not ModalOverlay.match(state.shell_state.modal, :completion) end,
+          fn state -> not ModalOverlay.match(EditorState.modal(state), :completion) end,
           max_attempts: 200,
           interval_ms: 10,
           message: "pending completion modal was left stuck after a Task crash"
         )
 
       final = editor_state(ctx)
-      refute ModalOverlay.match(final.shell_state.modal, :completion)
+      refute ModalOverlay.match(EditorState.modal(final), :completion)
       assert ModalOverlay.completion(final) == nil
     end
   end

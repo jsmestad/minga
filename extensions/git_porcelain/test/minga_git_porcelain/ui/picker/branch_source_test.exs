@@ -32,7 +32,7 @@ defmodule MingaGitPorcelain.UI.Picker.GitBranchSourceTest do
 
     result = GitBranchSource.on_action(:delete, item, state)
 
-    assert result.shell_state.status_msg == "Cannot delete current branch"
+    assert EditorState.status_msg(result) == "Cannot delete current branch"
     assert result.workspace.editing.mode == :normal
   end
 end

@@ -13,6 +13,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
   alias Minga.Project.FileTree
   alias MingaEditor.Commands
   alias MingaEditor.Input.FileTreeHandler
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
@@ -188,10 +189,18 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       assert Buffer.dirty?(buffer)
       assert File.read!(renamed) == "content"
       refute File.exists?(file)
-      assert TabBar.active(state.shell_state.tab_bar).file_ref == new_ref
-      assert TabBar.get_workspace(state.shell_state.tab_bar, 0).active_file == new_ref
-      assert WorkspaceModel.has_file?(TabBar.get_workspace(state.shell_state.tab_bar, 0), new_ref)
-      refute WorkspaceModel.has_file?(TabBar.get_workspace(state.shell_state.tab_bar, 0), old_ref)
+      assert TabBar.active(state.shell_runtime.state.tab_bar).file_ref == new_ref
+      assert TabBar.get_workspace(state.shell_runtime.state.tab_bar, 0).active_file == new_ref
+
+      assert WorkspaceModel.has_file?(
+               TabBar.get_workspace(state.shell_runtime.state.tab_bar, 0),
+               new_ref
+             )
+
+      refute WorkspaceModel.has_file?(
+               TabBar.get_workspace(state.shell_runtime.state.tab_bar, 0),
+               old_ref
+             )
 
       assert :ok = Buffer.save(buffer)
       assert File.read!(renamed) == "!content"
@@ -260,7 +269,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
           |> SessionState.set_file_tree(
             FileTreeState.open(%FileTreeState{}, FileTree.new(dir) |> FileTree.refresh(), nil)
           ),
-        shell_state: %ShellState{tab_bar: tab_bar},
+        shell_runtime: Runtime.new(Runtime.default_entry(), %ShellState{tab_bar: tab_bar}),
         focus_stack: [MingaEditor.Input.Scoped, MingaEditor.Input.ModeFSM]
       }
 
@@ -274,11 +283,19 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
 
       assert ft(state).editing == nil
       assert Buffer.file_path(target_buffer) == renamed
-      assert TabBar.active(state.shell_state.tab_bar).id == active_tab.id
-      assert TabBar.get(state.shell_state.tab_bar, inactive_tab.id).file_ref == new_ref
-      assert TabBar.get_workspace(state.shell_state.tab_bar, 0).active_file == active_ref
-      assert WorkspaceModel.has_file?(TabBar.get_workspace(state.shell_state.tab_bar, 0), new_ref)
-      refute WorkspaceModel.has_file?(TabBar.get_workspace(state.shell_state.tab_bar, 0), old_ref)
+      assert TabBar.active(state.shell_runtime.state.tab_bar).id == active_tab.id
+      assert TabBar.get(state.shell_runtime.state.tab_bar, inactive_tab.id).file_ref == new_ref
+      assert TabBar.get_workspace(state.shell_runtime.state.tab_bar, 0).active_file == active_ref
+
+      assert WorkspaceModel.has_file?(
+               TabBar.get_workspace(state.shell_runtime.state.tab_bar, 0),
+               new_ref
+             )
+
+      refute WorkspaceModel.has_file?(
+               TabBar.get_workspace(state.shell_runtime.state.tab_bar, 0),
+               old_ref
+             )
     end
 
     test "rename reports a dead buffer retarget as an error instead of crashing", %{
@@ -436,7 +453,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       port_manager: self(),
       events_registry: events_registry,
       workspace: workspace,
-      shell_state: shell_state,
+      shell_runtime: Runtime.new(Runtime.default_entry(), shell_state),
       focus_stack: [MingaEditor.Input.Scoped, MingaEditor.Input.ModeFSM]
     }
   end

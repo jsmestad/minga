@@ -131,7 +131,7 @@ defmodule MingaEditor.Commands.UI do
   @spec close_beam_observatory(EditorState.t()) :: EditorState.t()
   defp close_beam_observatory(state) do
     unsubscribe_observatory()
-    cancel_timer(state.shell_state.observatory_timer)
+    cancel_timer(state.shell_runtime.state.observatory_timer)
 
     state
     |> EditorState.close_observatory()
@@ -169,7 +169,7 @@ defmodule MingaEditor.Commands.UI do
   end
 
   @spec observatory_shell_supported?(EditorState.t()) :: boolean()
-  defp observatory_shell_supported?(%{shell_state: shell_state}) do
+  defp observatory_shell_supported?(%{shell_runtime: %{state: shell_state}}) do
     Map.has_key?(shell_state, :observatory_visible) and
       Map.has_key?(shell_state, :observatory_timer) and
       Map.has_key?(shell_state, :observatory_data) and

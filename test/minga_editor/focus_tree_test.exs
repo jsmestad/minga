@@ -14,6 +14,8 @@ defmodule MingaEditor.FocusTreeTest do
   alias MingaEditor.FocusTree.Node, as: TreeNode
   alias MingaEditor.Layout
   alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.Shell.Registry
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
@@ -181,7 +183,11 @@ defmodule MingaEditor.FocusTreeTest do
         port_manager: self(),
         workspace: %SessionState{viewport: Viewport.new(24, 80), editing: VimState.new()},
         layout: single_window_layout(),
-        shell_state: %ShellState{bottom_panel: %BottomPanel{visible: true, height_percent: 25}}
+        shell_runtime:
+          Runtime.new(
+            Registry.get(:traditional),
+            %ShellState{bottom_panel: %BottomPanel{visible: true, height_percent: 25}}
+          )
       }
 
       tree = FocusTree.from_state(state)

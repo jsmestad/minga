@@ -37,7 +37,7 @@ defmodule MingaEditor.Session.ChromeStateTest do
       chrome =
         ChromeState.from_editor_state(%{
           workspace: %{custom_name: "Client App", file_tree: %FileTreeState{}},
-          shell_state: %{tab_bar: nil}
+          tab_bar: nil
         })
 
       assert hd(chrome.workspaces).label == "Client App"
@@ -230,7 +230,7 @@ defmodule MingaEditor.Session.ChromeStateTest do
           buffers: %Buffers{active: active_buffer, list: List.wrap(active_buffer)}
         }
         |> SessionState.set_file_tree(%FileTreeState{project_root: project_root}),
-      shell_state: %{tab_bar: tb}
+      tab_bar: tb
     }
   end
 

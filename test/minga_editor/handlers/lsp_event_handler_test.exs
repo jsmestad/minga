@@ -11,6 +11,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
   alias MingaEditor.CompletionHandling
   alias MingaEditor.CompletionTrigger
   alias MingaEditor.Handlers.LspEventHandler
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.SignatureHelp
@@ -141,7 +142,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       assert effects == [:render_now]
 
       assert %SignatureHelp{signatures: [%{label: "foo(arg)"}]} =
-               new_state.shell_state.signature_help
+               Runtime.state(new_state.shell_runtime).signature_help
     end
 
     test "tracked semantic token response updates highlights and returns render_now" do
@@ -265,7 +266,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
       assert effects == [:render_now]
       assert Minga.Buffer.content(buf) == "modified content\n"
-      assert new_state.shell_state.status_msg =~ "Buffer changed"
+      assert EditorState.status_msg(new_state) =~ "Buffer changed"
     end
 
     test "a mutation queued after the LSP content read makes the commit stale" do
@@ -314,7 +315,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
       assert effects == [:render_now]
       assert Minga.Buffer.content(buf) =~ "!line one"
-      assert new_state.shell_state.status_msg =~ "Buffer changed"
+      assert EditorState.status_msg(new_state) =~ "Buffer changed"
     end
 
     test "does not apply edits to a read-only buffer" do
@@ -340,7 +341,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
       assert effects == [:render_now]
       assert Minga.Buffer.content(buf) =~ "line one"
-      assert new_state.shell_state.status_msg =~ "read-only"
+      assert EditorState.status_msg(new_state) =~ "read-only"
     end
 
     test "drops edits when the target buffer exited" do
@@ -367,7 +368,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
         LspEventHandler.handle(state, {:lsp_response, ref, {:ok, edits}})
 
       assert effects == [:render_now]
-      assert new_state.shell_state.status_msg =~ "closed"
+      assert EditorState.status_msg(new_state) =~ "closed"
     end
 
     test "handles nil response (no formatting changes)" do
@@ -380,7 +381,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
         LspEventHandler.handle(state, {:lsp_response, ref, {:ok, nil}})
 
       assert effects == [:render_now]
-      assert new_state.shell_state.status_msg =~ "No formatting changes"
+      assert EditorState.status_msg(new_state) =~ "No formatting changes"
     end
 
     test "handles error response" do
@@ -393,7 +394,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
         LspEventHandler.handle(state, {:lsp_response, ref, {:error, :timeout}})
 
       assert effects == [:render_now]
-      assert new_state.shell_state.status_msg =~ "Format error"
+      assert EditorState.status_msg(new_state) =~ "Format error"
     end
   end
 
@@ -407,7 +408,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       {new_state, effects} = LspEventHandler.handle(state, {:lsp_format_spinner, ref})
 
       assert effects == [:render_now]
-      assert new_state.shell_state.status_msg =~ "Formatting"
+      assert EditorState.status_msg(new_state) =~ "Formatting"
     end
 
     test "spinner is no-op when format already completed" do
@@ -429,7 +430,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       {new_state, effects} = LspEventHandler.handle(state, {:lsp_format_cancellable, ref})
 
       assert effects == [:render_now]
-      assert new_state.shell_state.status_msg =~ "Esc to cancel"
+      assert EditorState.status_msg(new_state) =~ "Esc to cancel"
     end
 
     test "timeout drops pending and sets timeout status" do
@@ -442,7 +443,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
       assert effects == [:render_now]
       assert new_state.workspace.lsp_pending == %{}
-      assert new_state.shell_state.status_msg =~ "timed out"
+      assert EditorState.status_msg(new_state) =~ "timed out"
     end
 
     test "timeout is no-op when format already completed" do

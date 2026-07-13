@@ -35,7 +35,9 @@ defmodule MingaEditor.UI.Prompt.ProjectRemoveConfirm do
   def on_cancel(state), do: EditorState.set_status(state, "Project removal cancelled")
 
   @spec project_path(EditorState.t()) :: String.t() | nil
-  defp project_path(%{shell_state: %{modal: {:prompt, %{prompt_ui: %{context: %{path: path}}}}}})
+  defp project_path(%{
+         shell_runtime: %{state: %{modal: {:prompt, %{prompt_ui: %{context: %{path: path}}}}}}
+       })
        when is_binary(path),
        do: path
 

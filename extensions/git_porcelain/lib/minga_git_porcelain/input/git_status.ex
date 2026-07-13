@@ -19,7 +19,6 @@ defmodule MingaGitPorcelain.Input.GitStatus do
   alias MingaEditor.Input
   alias MingaEditor.Layout
   alias MingaGitPorcelain.Shell.Traditional.GitStatus.TuiState
-  alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias Minga.Keymap
   alias MingaEditor.PromptUI
   alias MingaGitPorcelain.UI.Prompt.GitCommit, as: CommitPrompt
@@ -370,7 +369,8 @@ defmodule MingaGitPorcelain.Input.GitStatus do
 
   @spec update_tui_state(EditorState.t(), (TuiState.t(), [Git.StatusEntry.t()] -> TuiState.t())) ::
           EditorState.t()
-  defp update_tui_state(%{shell_state: %{git_status_panel: nil}} = state, _fun), do: state
+  defp update_tui_state(%{shell_runtime: %{state: %{git_status_panel: nil}}} = state, _fun),
+    do: state
 
   defp update_tui_state(state, fun) do
     panel = EditorState.git_status_panel(state)
@@ -381,7 +381,7 @@ defmodule MingaGitPorcelain.Input.GitStatus do
       fun.(tui, entries)
       |> TuiState.clamp_cursor(entries)
 
-    EditorState.update_shell_state(state, &ShellState.set_git_status_tui_state(&1, updated))
+    EditorState.set_git_status_tui_state(state, updated)
   end
 
   @spec with_selected_file(EditorState.t(), (Git.StatusEntry.t(), String.t() -> EditorState.t())) ::

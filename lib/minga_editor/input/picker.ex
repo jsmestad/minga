@@ -23,7 +23,7 @@ defmodule MingaEditor.Input.Picker do
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
   def handle_key(state, codepoint, modifiers) do
-    if ModalOverlay.match(state.shell_state.modal, :picker) do
+    if ModalOverlay.match(state.shell_runtime.state.modal, :picker) do
       new_state =
         case PickerUI.handle_key(state, codepoint, modifiers) do
           {s, {:execute_command, cmd}} -> MingaEditor.dispatch_command(s, cmd)
@@ -72,8 +72,10 @@ defmodule MingaEditor.Input.Picker do
   # Picker active: intercept scroll and clicks routed by the focus tree.
   def handle_mouse_at_node(
         %{
-          shell_state: %{
-            modal: {:picker, %{picker_ui: %{picker: %PickerData{} = picker, source: source}}}
+          shell_runtime: %{
+            state: %{
+              modal: {:picker, %{picker_ui: %{picker: %PickerData{} = picker, source: source}}}
+            }
           }
         } = state,
         %FocusNode{} = node,
@@ -134,7 +136,7 @@ defmodule MingaEditor.Input.Picker do
          _source,
          _row
        ) do
-    {:picker, %{picker_ui: %{layout: layout}}} = state.shell_state.modal
+    {:picker, %{picker_ui: %{layout: layout}}} = state.shell_runtime.state.modal
 
     case layout do
       :centered -> PickerUI.close(state)
@@ -149,7 +151,7 @@ defmodule MingaEditor.Input.Picker do
   @spec handle_picker_click(EditorState.t(), FocusNode.t(), PickerData.t(), module(), integer()) ::
           EditorState.t()
   defp handle_picker_click(state, node, picker, source, row) do
-    {:picker, %{picker_ui: %{layout: layout}}} = state.shell_state.modal
+    {:picker, %{picker_ui: %{layout: layout}}} = state.shell_runtime.state.modal
 
     case clicked_item(layout, state, node, picker, row) do
       nil -> state

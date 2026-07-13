@@ -41,11 +41,11 @@ defmodule MingaGitPorcelain.CommandsBranchDeleteTest do
 
     result = Commands.execute(state, {:branch_delete_confirm, git_root, "feature", false})
 
-    assert result.shell_state.status_msg == "Deleted branch feature"
+    assert EditorState.status_msg(result) == "Deleted branch feature"
 
     assert {:picker,
             %{picker_ui: %{source: MingaGitPorcelain.UI.Picker.GitBranchSource, picker: picker}}} =
-             result.shell_state.modal
+             EditorState.modal(result)
 
     assert %Picker{items: items} = picker
     refute Enum.any?(items, fn item -> item.label == "feature" end)
@@ -58,7 +58,7 @@ defmodule MingaGitPorcelain.CommandsBranchDeleteTest do
 
     result = Commands.execute(state, {:branch_delete_confirm, git_root, "feature", false})
 
-    assert result.shell_state.status_msg == "Delete failed: not fully merged"
+    assert EditorState.status_msg(result) == "Delete failed: not fully merged"
     assert result.workspace.editing.mode == :branch_delete_confirm
 
     assert %BranchDeleteConfirmState{name: "feature", phase: :force, reason: "not fully merged"} =
@@ -72,7 +72,7 @@ defmodule MingaGitPorcelain.CommandsBranchDeleteTest do
 
     result = Commands.execute(state, {:branch_delete_confirm, git_root, "feature", true})
 
-    assert result.shell_state.status_msg == "Force delete failed: branch not found"
+    assert EditorState.status_msg(result) == "Force delete failed: branch not found"
   end
 
   defp build_state do

@@ -22,17 +22,17 @@ defmodule MingaEditor.LspActions.ReferencesTest do
   describe "handle_references_response/2" do
     test "error result sets status message" do
       state = LspActions.handle_references_response(stub_state(), {:error, "timeout"})
-      assert state.shell_state.status_msg == "References request failed"
+      assert EditorState.status_msg(state) == "References request failed"
     end
 
     test "nil result sets status message" do
       state = LspActions.handle_references_response(stub_state(), {:ok, nil})
-      assert state.shell_state.status_msg == "No references found"
+      assert EditorState.status_msg(state) == "No references found"
     end
 
     test "empty list sets status message" do
       state = LspActions.handle_references_response(stub_state(), {:ok, []})
-      assert state.shell_state.status_msg == "No references found"
+      assert EditorState.status_msg(state) == "No references found"
     end
   end
 end

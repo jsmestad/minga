@@ -65,7 +65,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceSource do
   @spec on_select(Item.t(), term()) :: term()
   def on_select(
         %Item{id: workspace_id},
-        %{shell_state: %{tab_bar: %TabBar{} = tb}} = state
+        %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state
       ) do
     target_id = TabBar.switch_to_workspace(tb, workspace_id).active_id
     EditorState.switch_tab(state, target_id)

@@ -40,7 +40,7 @@ defmodule MingaEditor.UI.Picker.PendingReviewsSource do
 
   def on_select(
         %Item{id: workspace_id},
-        %{shell_state: %{tab_bar: %TabBar{} = tab_bar}} = state
+        %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tab_bar}}} = state
       )
       when is_integer(workspace_id) do
     switch_to_workspace(state, tab_bar, workspace_id)

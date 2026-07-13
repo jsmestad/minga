@@ -19,8 +19,10 @@ defmodule MingaEditor.Input.Prompt do
           MingaEditor.Input.Handler.result()
   def handle_key(
         %{
-          shell_state: %{
-            modal: {:prompt, %{prompt_ui: %PromptState{handler: handler}}}
+          shell_runtime: %{
+            state: %{
+              modal: {:prompt, %{prompt_ui: %PromptState{handler: handler}}}
+            }
           }
         } = state,
         codepoint,

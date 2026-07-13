@@ -9,6 +9,7 @@ defmodule MingaEditor.CompletionDocPreviewTest do
   alias Minga.Editing.Completion
   alias MingaEditor.CompletionHandling
   alias MingaEditor.CompletionUI
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
@@ -27,7 +28,8 @@ defmodule MingaEditor.CompletionDocPreviewTest do
     %EditorState{
       port_manager: self(),
       workspace: ws,
-      shell_state: %MingaEditor.Shell.Traditional.State{modal: modal}
+      shell_runtime:
+        Runtime.new(Runtime.default_entry(), %MingaEditor.Shell.Traditional.State{modal: modal})
     }
   end
 

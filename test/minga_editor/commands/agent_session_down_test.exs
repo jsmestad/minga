@@ -80,10 +80,10 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
 
       result = BufferManagement.handle_agent_session_down(state, foreign_pid, :killed)
 
-      assert result.shell_state.status_msg == "original message",
+      assert EditorState.status_msg(result) == "original message",
              "status_msg must not be overwritten by crashes from other editors' sessions"
 
-      assert result.shell_state.tab_bar == state.shell_state.tab_bar,
+      assert EditorState.tab_bar(result) == EditorState.tab_bar(state),
              "tab_bar must be untouched when no tab references the crashed session"
     end
 
@@ -96,7 +96,7 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
 
       result = BufferManagement.handle_agent_session_down(state, foreign_pid, :normal)
 
-      assert result.shell_state.status_msg == "original message"
+      assert EditorState.status_msg(result) == "original message"
     end
 
     test "sets crash status when a tab references the crashed session" do
@@ -105,7 +105,7 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
 
       result = BufferManagement.handle_agent_session_down(state, session_pid, :killed)
 
-      assert result.shell_state.status_msg == "Agent session crashed (SPC a n to restart)"
+      assert EditorState.status_msg(result) == "Agent session crashed (SPC a n to restart)"
     end
 
     test "sets ended status when an owned session exits normally" do
@@ -114,7 +114,7 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
 
       result = BufferManagement.handle_agent_session_down(state, session_pid, :normal)
 
-      assert result.shell_state.status_msg == "Agent session ended"
+      assert EditorState.status_msg(result) == "Agent session ended"
     end
 
     test "treats workspaces membership as ownership" do
@@ -124,7 +124,7 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
 
       result = BufferManagement.handle_agent_session_down(state, session_pid, :killed)
 
-      assert result.shell_state.status_msg == "Agent session crashed (SPC a n to restart)"
+      assert EditorState.status_msg(result) == "Agent session crashed (SPC a n to restart)"
     end
 
     test "removes a clean project view workspace on normal session end", %{tmp_dir: dir} do
@@ -139,9 +139,9 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
 
       assert_receive {:DOWN, ^changeset_ref, :process, _, _}
       assert_receive {:DOWN, ^fork_store_ref, :process, _, _}
-      assert TabBar.get_workspace(result.shell_state.tab_bar, workspace_id) == nil
-      assert TabBar.find_workspace_by_session(result.shell_state.tab_bar, session_pid) == nil
-      assert result.shell_state.status_msg == "Agent session ended"
+      assert TabBar.get_workspace(EditorState.tab_bar(result), workspace_id) == nil
+      assert TabBar.find_workspace_by_session(EditorState.tab_bar(result), session_pid) == nil
+      assert EditorState.status_msg(result) == "Agent session ended"
     end
 
     test "keeps a dirty project view workspace and marks review attention", %{tmp_dir: dir} do
@@ -157,13 +157,13 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
       {state, workspace_id} = workspace_state_with_project_view(session_pid, project_view)
 
       result = BufferManagement.handle_agent_session_down(state, session_pid, :normal)
-      workspace = TabBar.get_workspace(result.shell_state.tab_bar, workspace_id)
+      workspace = TabBar.get_workspace(EditorState.tab_bar(result), workspace_id)
 
       assert workspace.session == nil
       assert workspace.agent_status == :error
       assert workspace.review.state == :needs_review
       assert WorkspaceReview.pending?(workspace.review)
-      assert result.shell_state.status_msg == "Agent session ended, workspace drafts need review"
+      assert EditorState.status_msg(result) == "Agent session ended, workspace drafts need review"
       assert Minga.Buffer.content(buffer) == "one\n"
     end
 
@@ -176,7 +176,7 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
       {state, workspace_id} = workspace_state_with_project_view(session_pid, project_view)
 
       result = BufferManagement.handle_agent_session_down(state, session_pid, :normal)
-      workspace = TabBar.get_workspace(result.shell_state.tab_bar, workspace_id)
+      workspace = TabBar.get_workspace(EditorState.tab_bar(result), workspace_id)
 
       assert_receive {:project_view_close_called, ^dir}
       assert workspace.session == nil
@@ -185,7 +185,7 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
       assert workspace.review.last_error == :close_failed
       assert WorkspaceReview.pending?(workspace.review)
 
-      assert result.shell_state.status_msg ==
+      assert EditorState.status_msg(result) ==
                "Agent session ended, workspace review needs attention"
     end
 
@@ -200,7 +200,7 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
       {state, workspace_id} = workspace_state_with_project_view(session_pid, project_view)
 
       result = BufferManagement.handle_agent_session_down(state, session_pid, :killed)
-      workspace = TabBar.get_workspace(result.shell_state.tab_bar, workspace_id)
+      workspace = TabBar.get_workspace(EditorState.tab_bar(result), workspace_id)
 
       assert workspace.session == nil
       assert workspace.agent_status == :error
@@ -208,7 +208,7 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
       assert workspace.review.last_error == :diff_failed
       assert WorkspaceReview.pending?(workspace.review)
 
-      assert result.shell_state.status_msg ==
+      assert EditorState.status_msg(result) ==
                "Agent session crashed, workspace review needs attention"
     end
 
@@ -217,10 +217,10 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
       state = build_state(tab_bar_with_remote_session(session_pid))
 
       result = BufferManagement.handle_agent_session_down(state, session_pid, :noconnection)
-      remote_tab = Enum.find(result.shell_state.tab_bar.tabs, &(&1.session == session_pid))
+      remote_tab = Enum.find(EditorState.tab_bar(result).tabs, &(&1.session == session_pid))
 
       assert remote_tab.connection_status == :disconnected
-      assert result.shell_state.status_msg == "[home] disconnected, reconnecting..."
+      assert EditorState.status_msg(result) == "[home] disconnected, reconnecting..."
     end
   end
 end

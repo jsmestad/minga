@@ -79,7 +79,7 @@ defmodule MingaEditor.LspActionsTest do
 
       for {response, expected_status} <- cases do
         result = LspActions.handle_definition_response(fake_state(), response)
-        assert result.shell_state.status_msg == expected_status
+        assert EditorState.status_msg(result) == expected_status
       end
     end
 
@@ -99,7 +99,7 @@ defmodule MingaEditor.LspActionsTest do
         )
 
       assert %HoverPopup{focused: true, open_action: {:goto_location, ^uri, 1, 6}} =
-               result.shell_state.hover_popup
+               EditorState.hover_popup(result)
     end
 
     test "hover response reports empty results or creates an unfocused popup" do
@@ -110,8 +110,9 @@ defmodule MingaEditor.LspActionsTest do
       ]
 
       for {response, expected_status} <- empty_cases do
-        assert LspActions.handle_hover_response(fake_state(), response).shell_state.status_msg ==
-                 expected_status
+        assert fake_state()
+               |> LspActions.handle_hover_response(response)
+               |> EditorState.status_msg() == expected_status
       end
 
       for hover <- [
@@ -124,8 +125,8 @@ defmodule MingaEditor.LspActionsTest do
             }
           ] do
         result = LspActions.handle_hover_response(fake_state(), {:ok, hover})
-        assert %HoverPopup{focused: false} = result.shell_state.hover_popup
-        assert result.shell_state.hover_popup.content_lines != []
+        assert %HoverPopup{focused: false} = EditorState.hover_popup(result)
+        assert EditorState.hover_popup(result).content_lines != []
       end
     end
 
@@ -145,8 +146,8 @@ defmodule MingaEditor.LspActionsTest do
             20
           )
 
-        assert %HoverPopup{} = result.shell_state.hover_popup
-        assert result.shell_state.hover_popup.content_lines != []
+        assert %HoverPopup{} = EditorState.hover_popup(result)
+        assert EditorState.hover_popup(result).content_lines != []
       end
 
       for response <- [
@@ -169,10 +170,11 @@ defmodule MingaEditor.LspActionsTest do
 
   describe "code lens responses" do
     test "code_lens reports missing buffers and no-ops when no client is registered" do
-      assert LspActions.code_lens(fake_state()).shell_state.status_msg == "No active buffer"
+      assert fake_state() |> LspActions.code_lens() |> EditorState.status_msg() ==
+               "No active buffer"
 
       state = fake_state_with_buffer(start_buffer!("hello"))
-      assert LspActions.code_lens(state).shell_state.status_msg == nil
+      assert state |> LspActions.code_lens() |> EditorState.status_msg() == nil
     end
 
     test "stores resolved lenses with commands directly" do
@@ -318,7 +320,7 @@ defmodule MingaEditor.LspActionsTest do
     test "reports cannot-rename for failed responses" do
       for response <- [{:error, "not renameable"}, {:ok, nil}] do
         result = LspActions.handle_prepare_rename_response(fake_state_with_vim(), response)
-        assert result.shell_state.status_msg == "Cannot rename at this position"
+        assert EditorState.status_msg(result) == "Cannot rename at this position"
       end
     end
   end

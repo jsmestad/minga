@@ -37,7 +37,7 @@ defmodule MingaEditor.Input.PromptTest do
       state = PromptUI.open(base_state(), TestHandler)
       assert {:handled, new_state} = InputPrompt.handle_key(state, ?a, 0)
 
-      {:prompt, %{prompt_ui: pui}} = new_state.shell_state.modal
+      {:prompt, %{prompt_ui: pui}} = EditorState.modal(new_state)
       assert pui.text == "a"
     end
 

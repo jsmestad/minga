@@ -4,7 +4,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
   switching tabs while one session is mid-stream does not interrupt
   it or route its events to the wrong tab.
 
-  These tests exercise per-workspace session ownership: workspaces are the source of truth, while legacy tab session fields remain only as locators for event routing and migration paths. The editor's `state.shell_state.agent` struct holds rendering caches only.
+  These tests exercise per-workspace session ownership: workspaces are the source of truth, while legacy tab session fields remain only as locators for event routing and migration paths. The active Traditional runtime state holds rendering caches only.
   """
 
   use ExUnit.Case, async: true
@@ -12,6 +12,8 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.AgentLifecycle
+  alias MingaEditor.Shell.Registry
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
@@ -30,17 +32,20 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
 
     %EditorState{
       port_manager: self(),
-      shell: MingaEditor.Shell.Traditional,
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
         keymap_scope: :editor,
         agent_ui: UIState.new()
       },
-      shell_state: %MingaEditor.Shell.Traditional.State{
-        agent: %AgentState{},
-        tab_bar: tb
-      }
+      shell_runtime:
+        Runtime.new(
+          Registry.get(:traditional),
+          %MingaEditor.Shell.Traditional.State{
+            agent: %AgentState{},
+            tab_bar: tb
+          }
+        )
     }
   end
 
@@ -123,7 +128,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       # Switching tabs only repoints the active_id; it does not stop or
       # restart either session process.
       switched =
-        EditorState.set_tab_bar(state, %{state.shell_state.tab_bar | active_id: 2})
+        EditorState.set_tab_bar(state, %{state.shell_runtime.state.tab_bar | active_id: 2})
 
       assert AgentAccess.session(switched) == session_b
       assert GenServer.call(session_a, :status) == :idle
@@ -165,7 +170,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       assert AgentAccess.session(switched) == idle
       assert GenServer.call(streaming, :status) == :idle
 
-      tab_one = Enum.find(switched.shell_state.tab_bar.tabs, &(&1.id == 1))
+      tab_one = Enum.find(switched.shell_runtime.state.tab_bar.tabs, &(&1.id == 1))
       assert tab_one.session == streaming
 
       # Switching back restores the streaming session as the active one.

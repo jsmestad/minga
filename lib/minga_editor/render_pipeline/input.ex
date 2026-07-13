@@ -39,7 +39,7 @@ defmodule MingaEditor.RenderPipeline.Input do
   `test/minga_editor/render_pipeline/input_launchpad_test.exs` — a field in
   neither silently disappears on the async render path (#2689).
 
-  Note: completion lives on `state.shell_state.modal` after #1426; the
+  Note: completion lives on `state.shell_runtime.state.modal` after #1426; the
   fingerprint includes the modal sum type, so completion changes are
   picked up there.
   """
@@ -60,6 +60,7 @@ defmodule MingaEditor.RenderPipeline.Input do
   alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.StatusBar.Data, as: StatusBarData
   alias MingaEditor.Renderer.Caches
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.UI.FontRegistry
   alias MingaEditor.UI.NotificationCenter
   alias MingaEditor.UI.Panel.MessageStore
@@ -146,7 +147,7 @@ defmodule MingaEditor.RenderPipeline.Input do
           port_manager: GenServer.server() | nil,
           theme: Theme.t(),
           capabilities: Capabilities.t(),
-          shell_id: EditorState.shell_id(),
+          shell_id: atom(),
           shell: module(),
           shell_identity: MingaEditor.Shell.Identity.t() | nil,
           shell_state: term(),
@@ -189,10 +190,10 @@ defmodule MingaEditor.RenderPipeline.Input do
       port_manager: state.port_manager,
       theme: state.theme,
       capabilities: state.capabilities,
-      shell_id: state.shell_id,
-      shell: EditorState.active_shell_module(state),
-      shell_identity: state.shell_identity,
-      shell_state: state.shell_state,
+      shell_id: Runtime.id(state.shell_runtime),
+      shell: Runtime.module(state.shell_runtime),
+      shell_identity: Runtime.identity(state.shell_runtime),
+      shell_state: Runtime.state(state.shell_runtime),
       message_store: state.message_store,
       notifications: state.notifications,
       sidebar_registry: state.sidebar_registry,

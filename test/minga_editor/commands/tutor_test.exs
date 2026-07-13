@@ -109,7 +109,7 @@ defmodule MingaEditor.Commands.TutorTest do
       state = build_state()
       result = Tutor.execute(state, :tutor)
 
-      assert result.shell_state.status_msg =~ "Tutorial"
+      assert EditorState.status_msg(result) =~ "Tutorial"
     end
 
     test "includes Minga-specific lessons" do

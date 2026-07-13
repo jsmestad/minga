@@ -13,6 +13,9 @@ defmodule MingaEditor.State.ShellCallbacksTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias MingaEditor.Shell.Registry
+  alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
@@ -52,6 +55,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
 
     state = %EditorState{
       port_manager: self(),
+      shell_runtime: Runtime.new(Registry.get(:traditional), %TraditionalState{}),
       workspace: %SessionState{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
@@ -76,6 +80,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
 
     state = %EditorState{
       port_manager: self(),
+      shell_runtime: Runtime.new(Registry.get(:traditional), %TraditionalState{}),
       workspace: %SessionState{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
@@ -111,7 +116,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
 
       assert new_state.workspace.buffers.active == buf2
 
-      active_tab = TabBar.active(new_state.shell_state.tab_bar)
+      active_tab = TabBar.active(EditorState.tab_bar(new_state))
       assert active_tab.context.buffers.active == buf2
       assert active_tab.context.buffers.active == new_state.workspace.buffers.active
     end
@@ -132,7 +137,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
 
       assert new_state.workspace.buffers.active == buf2
 
-      active_tab = TabBar.active(new_state.shell_state.tab_bar)
+      active_tab = TabBar.active(EditorState.tab_bar(new_state))
       assert active_tab.kind == :agent
       assert active_tab.context.buffers.active == buf2
       assert active_tab.context.buffers.active == new_state.workspace.buffers.active
@@ -147,7 +152,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
 
       tab = EditorState.find_tab_by_buffer(new_state, buf2)
       assert %Tab{kind: :file} = tab
-      assert tab.id == new_state.shell_state.tab_bar.active_id
+      assert tab.id == EditorState.tab_bar(new_state).active_id
     end
 
     test "Traditional: dirty marker queries correct buffer after switch" do
@@ -162,7 +167,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
 
       new_state = EditorState.switch_buffer(state, 1)
 
-      active_tab = TabBar.active(new_state.shell_state.tab_bar)
+      active_tab = TabBar.active(EditorState.tab_bar(new_state))
       tab_buf = active_tab.context.buffers.active
       assert tab_buf == buf2
       refute BufferProcess.dirty?(tab_buf)
@@ -176,14 +181,14 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       state = EditorState.add_buffer(state, buf3)
 
       state = EditorState.switch_buffer(state, 1)
-      assert TabBar.active(state.shell_state.tab_bar).context.buffers.active == buf2
+      assert TabBar.active(EditorState.tab_bar(state)).context.buffers.active == buf2
 
       state = EditorState.switch_buffer(state, 2)
-      assert TabBar.active(state.shell_state.tab_bar).context.buffers.active == buf3
+      assert TabBar.active(EditorState.tab_bar(state)).context.buffers.active == buf3
 
       state = EditorState.switch_buffer(state, 0)
       buf1 = state.workspace.buffers.active
-      assert TabBar.active(state.shell_state.tab_bar).context.buffers.active == buf1
+      assert TabBar.active(EditorState.tab_bar(state)).context.buffers.active == buf1
 
       assert EditorState.find_tab_by_buffer(state, buf1) != nil
     end
@@ -336,7 +341,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
 
       # Should not crash
       new_state = EditorState.set_tab_session(state, 1, session_pid)
-      assert new_state.shell_state == state.shell_state
+      assert new_state.shell_runtime == state.shell_runtime
     end
   end
 
@@ -352,7 +357,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
 
     test "no-op when switching to already active tab" do
       state = state_with_file_tab()
-      tb = state.shell_state.tab_bar
+      tb = EditorState.tab_bar(state)
       active_id = tb.active_id
 
       {new_state, effects} = EditorState.switch_tab_pure(state, active_id)

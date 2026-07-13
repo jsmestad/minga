@@ -12,6 +12,8 @@ defmodule MingaEditor.Frontend.Emit.AdapterGUIChromeCacheTest do
   alias Minga.Frontend.Adapter.GUI.Caches, as: AdapterCaches
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.RenderModel.UI.Builder
+  alias MingaEditor.Shell.Runtime
+  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.StatusBar.Data, as: StatusBarData
@@ -88,7 +90,7 @@ defmodule MingaEditor.Frontend.Emit.AdapterGUIChromeCacheTest do
     end
 
     test "tab bar is emitted through adapter" do
-      state = put_in(gui_state().shell_state.tab_bar, TabBar.new(Tab.new_file(1, "test.ex")))
+      state = EditorState.set_tab_bar(gui_state(), TabBar.new(Tab.new_file(1, "test.ex")))
       {_ctx, _caches, cmds} = encode_via_adapter(state)
 
       assert opcode_count(cmds, 0x71) == 1,
@@ -96,7 +98,13 @@ defmodule MingaEditor.Frontend.Emit.AdapterGUIChromeCacheTest do
     end
 
     test "unsupported shell GUI payload logs and keeps standard chrome" do
-      unsupported_state = %{gui_state() | shell: UnknownGuiPayloadShell}
+      state = gui_state()
+      entry = %{Runtime.entry(state.shell_runtime) | module: UnknownGuiPayloadShell}
+
+      unsupported_state = %{
+        state
+        | shell_runtime: Runtime.new(entry, Runtime.state(state.shell_runtime))
+      }
 
       {{_ctx, _caches, cmds}, log} =
         with_log(fn -> encode_via_adapter(unsupported_state) end)
@@ -108,7 +116,7 @@ defmodule MingaEditor.Frontend.Emit.AdapterGUIChromeCacheTest do
     test "workspaces are emitted through adapter" do
       state = gui_state()
       tab_bar = tab_bar_with_two_workspaces()
-      state_with_agents = put_in(state.shell_state.tab_bar, tab_bar)
+      state_with_agents = EditorState.set_tab_bar(state, tab_bar)
       {_ctx, _caches, first_cmds} = encode_via_adapter(state_with_agents)
 
       assert opcode_count(first_cmds, 0x98) == 1,

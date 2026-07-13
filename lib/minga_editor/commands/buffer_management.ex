@@ -32,7 +32,8 @@ defmodule MingaEditor.Commands.BufferManagement do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
-  alias MingaEditor.Shell.StateStash
+  alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Workflow
   alias MingaEditor.State.Workspace, as: WorkspaceModel
   alias MingaEditor.State.WorkspaceReview
   alias MingaEditor.Window
@@ -670,7 +671,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   # ── Tab goto ──────────────────────────────────────────────────────────────
 
   @spec tab_goto(state(), atom()) :: state()
-  def tab_goto(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, cmd) do
+  def tab_goto(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state, cmd) do
     case parse_tab_goto(cmd) do
       {:ok, n} -> switch_tab_by_visible_index(state, tb, n)
       :error -> state
@@ -710,7 +711,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec open_file_in_active_workspace(state(), String.t()) :: state()
   defp open_file_in_active_workspace(
-         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
          file_path
        ) do
     file_ref = ProjectFileRef.from_file_path(file_path)
@@ -764,8 +765,10 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec switch_to_buffer(state(), non_neg_integer()) :: state()
   defp switch_to_buffer(
-         %{shell_state: %{tab_bar: %TabBar{} = tb}, workspace: %{buffers: %{list: buffers}}} =
-           state,
+         %{
+           shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}},
+           workspace: %{buffers: %{list: buffers}}
+         } = state,
          idx
        ) do
     target_buf = Enum.at(buffers, idx)
@@ -809,7 +812,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp cycle_buffer_from_active(_buffers, state, _active, _step), do: state
 
   @spec buffer_cycle_order([pid()], state()) :: [pid()]
-  defp buffer_cycle_order(buffers, %{shell_state: %{tab_bar: %TabBar{} = tb}}) do
+  defp buffer_cycle_order(buffers, %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}}) do
     tab_buffers = visible_file_tab_buffers(tb)
     buffers ++ Enum.reject(tab_buffers, &(&1 in buffers))
   end
@@ -827,7 +830,10 @@ defmodule MingaEditor.Commands.BufferManagement do
   end
 
   @spec cycle_buffer_in_tab(state(), pid() | nil) :: state()
-  defp cycle_buffer_in_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, target_buf) do
+  defp cycle_buffer_in_tab(
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
+         target_buf
+       ) do
     case find_tab_for_buffer(tb, target_buf) do
       nil -> switch_to_buffer_pid(state, target_buf)
       tab_id when tab_id == tb.active_id -> switch_to_buffer_pid(state, target_buf)
@@ -883,7 +889,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   end
 
   @spec next_tab(state()) :: state()
-  defp next_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+  defp next_tab(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     next_tb = TabBar.next(tb)
 
     if next_tb.active_id != tb.active_id do
@@ -896,7 +902,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp next_tab(state), do: state
 
   @spec prev_tab(state()) :: state()
-  defp prev_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+  defp prev_tab(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     prev_tb = TabBar.prev(tb)
 
     if prev_tb.active_id != tb.active_id do
@@ -909,7 +915,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp prev_tab(state), do: state
 
   @spec toggle_tab_pin(state()) :: state()
-  defp toggle_tab_pin(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+  defp toggle_tab_pin(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     state
     |> EditorState.set_tab_bar(TabBar.toggle_active_pin(tb))
     |> EditorState.set_status(tab_pin_status(tb))
@@ -918,7 +924,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp toggle_tab_pin(state), do: state
 
   @spec unpin_active_tab(state()) :: state()
-  defp unpin_active_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+  defp unpin_active_tab(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     state
     |> EditorState.set_tab_bar(TabBar.unpin_tab(tb, tb.active_id))
     |> EditorState.set_status("Tab unpinned")
@@ -927,7 +933,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp unpin_active_tab(state), do: state
 
   @spec move_active_tab(state(), :left | :right) :: state()
-  defp move_active_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, direction) do
+  defp move_active_tab(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state, direction) do
     EditorState.set_tab_bar(state, move_tab_bar(tb, direction))
   end
 
@@ -1032,7 +1038,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   # Workspace and tab removal are handled by the caller so ProjectView-aware
   # close paths can decide whether to release or preserve the workspace first.
   @spec cleanup_agent_session(state()) :: state()
-  defp cleanup_agent_session(%{shell_state: %{tab_bar: %TabBar{}}} = state) do
+  defp cleanup_agent_session(%{shell_runtime: %{state: %{tab_bar: %TabBar{}}}} = state) do
     session = AgentAccess.session(state)
 
     if session do
@@ -1061,24 +1067,24 @@ defmodule MingaEditor.Commands.BufferManagement do
   @spec handle_agent_session_down(state(), pid(), term()) :: state()
   def handle_agent_session_down(state, session_pid, :noconnection) do
     state
-    |> EditorState.ensure_shell_available()
+    |> Workflow.ensure_available()
     |> handle_remote_session_disconnected(session_pid)
   end
 
   def handle_agent_session_down(state, session_pid, {:nodedown, _node}) do
     state
-    |> EditorState.ensure_shell_available()
+    |> Workflow.ensure_available()
     |> handle_remote_session_disconnected(session_pid)
   end
 
   def handle_agent_session_down(state, session_pid, {:noconnection, _node}) do
     state
-    |> EditorState.ensure_shell_available()
+    |> Workflow.ensure_available()
     |> handle_remote_session_disconnected(session_pid)
   end
 
   def handle_agent_session_down(state, session_pid, reason) do
-    state = EditorState.ensure_shell_available(state)
+    state = Workflow.ensure_available(state)
     {state, owned?} = update_active_shell_session_down(state, session_pid, reason)
 
     if owned? do
@@ -1093,10 +1099,12 @@ defmodule MingaEditor.Commands.BufferManagement do
   @doc "Normalizes shell identity and returns whether the old session is still owned."
   @spec prepare_agent_session_restart(state(), pid()) :: session_restart_ownership()
   def prepare_agent_session_restart(state, old_pid) when is_pid(old_pid) do
-    state = EditorState.ensure_shell_available(state)
-    shell_owned? = shell_state_restart_owned?(state.shell_state, old_pid)
-    stash_owned? = stashed_shell_restart_owned?(state.shell_state_stash, old_pid)
-    session_restart_ownership(state, shell_owned? or stash_owned?)
+    state = Workflow.ensure_available(state)
+
+    owned? =
+      Runtime.owns_agent_session?(state.shell_runtime, Workflow.resolved_entries(), old_pid)
+
+    session_restart_ownership(state, owned?)
   end
 
   @spec session_restart_ownership(state(), boolean()) :: session_restart_ownership()
@@ -1105,102 +1113,37 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @doc "Refreshes editor state after SessionManager restarts a managed session."
   @spec handle_agent_session_restarted(state(), String.t(), pid(), pid(), term()) :: state()
-  def handle_agent_session_restarted(state, session_id, old_pid, new_pid, reason) do
-    state = EditorState.ensure_shell_available(state)
-    state = update_active_shell_session_restarted(state, session_id, old_pid, new_pid, reason)
-    state = update_stashed_shell_session_restarted(state, session_id, old_pid, new_pid, reason)
-    maybe_rebuild_active_agent_after_restart(state, new_pid)
-  end
+  def handle_agent_session_restarted(state, _session_id, old_pid, new_pid, reason) do
+    state = Workflow.ensure_available(state)
 
-  @spec shell_state_restart_owned?(term(), pid()) :: boolean()
-  defp shell_state_restart_owned?(%{cards: cards} = shell_state, old_pid) when is_map(cards) do
-    card_owned? = Enum.any?(cards, fn {_card_id, card} -> Map.get(card, :session) == old_pid end)
+    {runtime, _handled?, persistence_changes} =
+      Runtime.route_session_restarted(
+        state.shell_runtime,
+        Workflow.resolved_entries(),
+        old_pid,
+        new_pid,
+        reason
+      )
 
-    tab_owned? =
-      case Map.get(shell_state, :tab_bar) do
-        %TabBar{} = tb ->
-          not is_nil(TabBar.find_by_session(tb, old_pid)) or
-            not is_nil(TabBar.find_workspace_by_session(tb, old_pid))
+    runtime = persist_shell_changes(runtime, persistence_changes)
 
-        _ ->
-          false
-      end
-
-    card_owned? or tab_owned?
-  end
-
-  defp shell_state_restart_owned?(%{tab_bar: %TabBar{} = tb}, old_pid) do
-    not is_nil(TabBar.find_by_session(tb, old_pid)) or
-      not is_nil(TabBar.find_workspace_by_session(tb, old_pid))
-  end
-
-  defp shell_state_restart_owned?(_shell_state, _old_pid), do: false
-
-  @spec stashed_shell_restart_owned?(EditorState.shell_state_stash(), pid()) :: boolean()
-  defp stashed_shell_restart_owned?(stash, old_pid) do
-    Enum.any?(stash, fn {shell_id, %StateStash{} = stashed} ->
-      case MingaEditor.Shell.Registry.get(shell_id) do
-        %MingaEditor.Shell.Entry{} = entry ->
-          case StateStash.restore(stashed, entry) do
-            {:ok, shell_state} -> shell_state_restart_owned?(shell_state, old_pid)
-            :mismatch -> false
-          end
-
-        nil ->
-          false
-      end
-    end)
+    state
+    |> EditorState.apply_shell_runtime_transition(runtime)
+    |> maybe_rebuild_active_agent_after_restart(new_pid)
   end
 
   @spec update_active_shell_session_down(state(), pid(), term()) :: {state(), boolean()}
   defp update_active_shell_session_down(state, session_pid, reason) do
-    shell = EditorState.active_shell_module(state)
+    {runtime, owned?, persistence_change} =
+      Runtime.route_session_down(state.shell_runtime, session_pid, reason)
 
-    if function_exported?(shell, :handle_agent_session_down, 3) do
-      {shell_state, owned?} =
-        shell.handle_agent_session_down(state.shell_state, session_pid, reason)
-
-      shell_state = maybe_persist_owned_shell_state(shell, shell_state, owned?)
-      {EditorState.update_shell_state(state, fn _ -> shell_state end), owned?}
-    else
-      {state, false}
-    end
-  end
-
-  @spec update_active_shell_session_restarted(state(), String.t(), pid(), pid(), term()) ::
-          state()
-  defp update_active_shell_session_restarted(state, _session_id, old_pid, new_pid, reason) do
-    shell = EditorState.active_shell_module(state)
-
-    if function_exported?(shell, :handle_agent_session_restarted, 4) do
-      {shell_state, handled?} =
-        shell.handle_agent_session_restarted(state.shell_state, old_pid, new_pid, reason)
-
-      shell_state = maybe_persist_owned_shell_state(shell, shell_state, handled?)
-      EditorState.update_shell_state(state, fn _ -> shell_state end)
-    else
-      state
-    end
-  end
-
-  @spec update_stashed_shell_session_restarted(state(), String.t(), pid(), pid(), term()) ::
-          state()
-  defp update_stashed_shell_session_restarted(state, _session_id, old_pid, new_pid, reason) do
-    {state, _handled?} =
-      update_stashed_shell_for_session(state, :handle_agent_session_restarted, [
-        old_pid,
-        new_pid,
-        reason
-      ])
-
-    state
+    runtime = persist_shell_changes(runtime, List.wrap(persistence_change))
+    {EditorState.apply_shell_runtime_transition(state, runtime), owned?}
   end
 
   @spec maybe_rebuild_active_agent_after_restart(state(), pid()) :: state()
   defp maybe_rebuild_active_agent_after_restart(state, new_pid) do
-    shell = EditorState.active_shell_module(state)
-
-    case function_exported?(shell, :active_tab, 1) && shell.active_tab(state.shell_state) do
+    case Runtime.active_tab(state.shell_runtime) do
       %Tab{kind: :agent, session: ^new_pid} = tab ->
         EditorState.rebuild_agent_from_session(state, tab)
 
@@ -1233,12 +1176,26 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec update_stashed_shell_session_down(state(), pid(), term()) :: {state(), boolean()}
   defp update_stashed_shell_session_down(state, session_pid, reason) do
-    update_stashed_shell_for_session(state, :handle_agent_session_down, [session_pid, reason])
+    {runtime, handled?, persistence_changes} =
+      Runtime.route_stashed_session_down(
+        state.shell_runtime,
+        Workflow.resolved_entries(),
+        session_pid,
+        reason
+      )
+
+    runtime = persist_shell_changes(runtime, persistence_changes)
+
+    if handled? do
+      Minga.Log.info(:agent, "Agent session update applied to a stashed shell")
+    end
+
+    {EditorState.apply_shell_runtime_transition(state, runtime), handled?}
   end
 
   @spec handle_agent_session_down_for_tabs(state(), pid(), term()) :: state()
   defp handle_agent_session_down_for_tabs(
-         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
          session_pid,
          reason
        ) do
@@ -1383,7 +1340,9 @@ defmodule MingaEditor.Commands.BufferManagement do
 
     state =
       state
-      |> EditorState.set_tab_bar(TabBar.remove_workspace(state.shell_state.tab_bar, workspace.id))
+      |> EditorState.set_tab_bar(
+        TabBar.remove_workspace(state.shell_runtime.state.tab_bar, workspace.id)
+      )
       |> EditorState.sync_agent_ui_from_active_workspace()
 
     msg =
@@ -1427,7 +1386,7 @@ defmodule MingaEditor.Commands.BufferManagement do
       |> WorkspaceModel.set_review(review)
 
     tb =
-      TabBar.update_workspace(state.shell_state.tab_bar, workspace.id, fn _ ->
+      TabBar.update_workspace(state.shell_runtime.state.tab_bar, workspace.id, fn _ ->
         updated_workspace
       end)
 
@@ -1509,7 +1468,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec handle_remote_session_disconnected(state(), pid()) :: state()
   defp handle_remote_session_disconnected(
-         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
          session_pid
        ) do
     case TabBar.find_by_session(tb, session_pid) do
@@ -1539,25 +1498,31 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec update_active_shell_remote_disconnected(state(), pid()) :: {state(), boolean()}
   defp update_active_shell_remote_disconnected(state, session_pid) do
-    shell = EditorState.active_shell_module(state)
+    {runtime, handled?, persistence_change} =
+      Runtime.route_remote_session_disconnected(state.shell_runtime, session_pid)
 
-    if function_exported?(shell, :handle_remote_session_disconnected, 2) do
-      {shell_state, handled?} =
-        shell.handle_remote_session_disconnected(state.shell_state, session_pid)
-
-      shell_state = maybe_persist_owned_shell_state(shell, shell_state, handled?)
-      {EditorState.update_shell_state(state, fn _ -> shell_state end), handled?}
-    else
-      {state, false}
-    end
+    runtime = persist_shell_changes(runtime, List.wrap(persistence_change))
+    {EditorState.apply_shell_runtime_transition(state, runtime), handled?}
   end
 
   @spec handle_stashed_remote_session_disconnected(state(), pid()) :: state()
   defp handle_stashed_remote_session_disconnected(state, session_pid) do
-    {state, handled?} =
-      update_stashed_shell_for_session(state, :handle_remote_session_disconnected, [session_pid])
+    {runtime, handled?, persistence_changes} =
+      Runtime.route_stashed_remote_session_disconnected(
+        state.shell_runtime,
+        Workflow.resolved_entries(),
+        session_pid
+      )
 
-    if handled?, do: finish_remote_session_disconnected(state), else: state
+    runtime = persist_shell_changes(runtime, persistence_changes)
+    state = EditorState.apply_shell_runtime_transition(state, runtime)
+
+    if handled? do
+      Minga.Log.info(:agent, "Remote disconnect applied to a stashed shell")
+      finish_remote_session_disconnected(state)
+    else
+      state
+    end
   end
 
   @spec finish_remote_session_disconnected(state()) :: state()
@@ -1567,40 +1532,20 @@ defmodule MingaEditor.Commands.BufferManagement do
     |> EditorState.set_status("Remote agent disconnected, reconnecting...")
   end
 
-  @spec maybe_persist_owned_shell_state(module(), term(), boolean()) :: term()
-  defp maybe_persist_owned_shell_state(module, shell_state, true) do
-    if function_exported?(module, :persist_shell_state, 1) do
-      module.persist_shell_state(shell_state)
-    else
-      shell_state
-    end
+  @spec persist_shell_changes(Runtime.t(), [Runtime.persistence_change()]) :: Runtime.t()
+  defp persist_shell_changes(runtime, changes) do
+    Enum.reduce(changes, runtime, fn {entry, _old_state, new_state}, runtime_acc ->
+      persisted_state = persist_shell_state(entry.module, new_state)
+      Runtime.accept_persisted_state(runtime_acc, entry, persisted_state)
+    end)
   end
 
-  defp maybe_persist_owned_shell_state(_module, shell_state, false), do: shell_state
-
-  @spec update_stashed_shell_for_session(state(), atom(), [term()]) :: {state(), boolean()}
-  defp update_stashed_shell_for_session(state, callback, args) do
-    EditorState.transform_first_stashed_shell_state(state, fn module, shell_state, state_acc ->
-      if function_exported?(module, callback, length(args) + 1) do
-        case apply(module, callback, [shell_state | args]) do
-          {updated_shell_state, true} ->
-            Minga.Log.info(
-              :agent,
-              "Agent session update applied to stashed #{inspect(module)} shell"
-            )
-
-            updated_shell_state =
-              maybe_persist_owned_shell_state(module, updated_shell_state, true)
-
-            {{:updated, updated_shell_state}, state_acc}
-
-          {_updated_shell_state, false} ->
-            {:unchanged, state_acc}
-        end
-      else
-        {:unchanged, state_acc}
-      end
-    end)
+  @spec persist_shell_state(module(), MingaEditor.Shell.shell_state()) ::
+          MingaEditor.Shell.shell_state()
+  defp persist_shell_state(module, shell_state) do
+    if function_exported?(module, :persist_shell_state, 1),
+      do: module.persist_shell_state(shell_state),
+      else: shell_state
   end
 
   # Shared state cleanup for agent sessions: stops spinner, clears agent state session,
@@ -1613,11 +1558,11 @@ defmodule MingaEditor.Commands.BufferManagement do
     # Clear session and status on any tab that referenced this session.
     state = clear_session_from_tabs(state, session, tab_status)
 
-    case TabBar.find_workspace_by_session(state.shell_state.tab_bar, session) do
+    case TabBar.find_workspace_by_session(state.shell_runtime.state.tab_bar, session) do
       %{id: workspace_id} ->
         EditorState.set_tab_bar(
           state,
-          TabBar.remove_workspace(state.shell_state.tab_bar, workspace_id)
+          TabBar.remove_workspace(state.shell_runtime.state.tab_bar, workspace_id)
         )
 
       _ ->
@@ -1628,7 +1573,11 @@ defmodule MingaEditor.Commands.BufferManagement do
   # Clears session pid and sets agent_status on all tabs that reference
   # the given session pid.
   @spec clear_session_from_tabs(state(), pid(), Tab.agent_status()) :: state()
-  defp clear_session_from_tabs(%{shell_state: %{tab_bar: tb}} = state, session_pid, status) do
+  defp clear_session_from_tabs(
+         %{shell_runtime: %{state: %{tab_bar: tb}}} = state,
+         session_pid,
+         status
+       ) do
     updated_tb =
       Enum.reduce(tb.tabs, tb, fn tab, acc ->
         if tab.session == session_pid do
@@ -1645,7 +1594,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec clear_session_from_workspace(state(), non_neg_integer(), Tab.agent_status()) :: state()
   defp clear_session_from_workspace(
-         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
          workspace_id,
          status
        ) do
@@ -1667,7 +1616,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   # cleanup/preservation pass first, and only cleanly closed workspaces have
   # their tab removed.
   @spec close_agent_tab(state()) :: state()
-  defp close_agent_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+  defp close_agent_tab(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     workspace = TabBar.active_workspace(tb)
 
     session_pid =
@@ -1754,7 +1703,10 @@ defmodule MingaEditor.Commands.BufferManagement do
   end
 
   @spec finish_agent_tab_close(state(), non_neg_integer()) :: state()
-  defp finish_agent_tab_close(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, workspace_id) do
+  defp finish_agent_tab_close(
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
+         workspace_id
+       ) do
     if TabBar.get_workspace(tb, workspace_id) == nil do
       Minga.Log.info(:editor, "Closed agent tab")
 
@@ -1840,7 +1792,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   end
 
   @spec close_tab_or_quit(state()) :: state()
-  defp close_tab_or_quit(%{shell_state: %{tab_bar: %TabBar{}}} = state) do
+  defp close_tab_or_quit(%{shell_runtime: %{state: %{tab_bar: %TabBar{}}}} = state) do
     case EditorState.active_tab(state) do
       %Tab{kind: :agent} -> close_agent_tab_or_quit(state)
       %Tab{kind: :file, id: active_id} -> close_file_tab_or_quit(state, active_id)
@@ -1851,7 +1803,9 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp close_tab_or_quit(state), do: shutdown_editor(state)
 
   @spec close_agent_tab_or_quit(state()) :: state()
-  defp close_agent_tab_or_quit(%{shell_state: %{tab_bar: %TabBar{tabs: [_single]}}} = state) do
+  defp close_agent_tab_or_quit(
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{tabs: [_single]}}}} = state
+       ) do
     state
     |> cleanup_agent_session()
     |> shutdown_editor()
@@ -1889,7 +1843,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   end
 
   @spec quit_would_exit_editor?(state()) :: boolean()
-  defp quit_would_exit_editor?(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+  defp quit_would_exit_editor?(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     case EditorState.active_tab(state) do
       %Tab{kind: :file} -> TabBar.count(tb) == 1 and quit_last_tab_option(state) == :quit
       %Tab{kind: :agent} -> TabBar.count(tb) == 1
@@ -1900,7 +1854,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp quit_would_exit_editor?(_state), do: true
 
   @spec close_other_tabs(state()) :: state()
-  defp close_other_tabs(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+  defp close_other_tabs(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     active_id = tb.active_id
     closed_tabs = Enum.reject(TabBar.visible_file_tabs(tb), &(&1.id == active_id))
     tb = remove_tabs(tb, closed_tabs)
@@ -1912,7 +1866,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp close_other_tabs(state), do: state
 
   @spec close_tabs_to_right(state()) :: state()
-  defp close_tabs_to_right(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+  defp close_tabs_to_right(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     visible = TabBar.visible_file_tabs(tb)
 
     case Enum.find_index(visible, &(&1.id == tb.active_id)) do
@@ -1935,7 +1889,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp close_tabs_to_right(state), do: state
 
   @spec close_all_file_tabs(state()) :: state()
-  defp close_all_file_tabs(%{shell_state: %{tab_bar: %TabBar{}}} = state) do
+  defp close_all_file_tabs(%{shell_runtime: %{state: %{tab_bar: %TabBar{}}}} = state) do
     state
     |> close_other_tabs()
     |> execute(:kill_buffer)
@@ -1993,7 +1947,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   # stays in the buffer pool (matching Neovim's `:q` which closes the
   # window but leaves the buffer in the background buffer list).
   @spec close_file_tab(state()) :: state()
-  defp close_file_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+  defp close_file_tab(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     active_tab = EditorState.active_tab(state)
     label = if active_tab, do: active_tab.label, else: "tab"
     replacement_id = active_tab && replacement_tab_id(tb, active_tab)
@@ -2005,7 +1959,9 @@ defmodule MingaEditor.Commands.BufferManagement do
   end
 
   @spec has_neighbor_tab?(state()) :: boolean()
-  defp has_neighbor_tab?(%{shell_state: %{tab_bar: %TabBar{tabs: [_, _ | _]}}}), do: true
+  defp has_neighbor_tab?(%{shell_runtime: %{state: %{tab_bar: %TabBar{tabs: [_, _ | _]}}}}),
+    do: true
+
   defp has_neighbor_tab?(_state), do: false
 
   @spec restore_neighbor_tab_or_create_fallback(
@@ -2030,7 +1986,10 @@ defmodule MingaEditor.Commands.BufferManagement do
   @spec remove_current_tab(state(), Tab.id() | nil) :: state()
   defp remove_current_tab(state, replacement_id \\ nil)
 
-  defp remove_current_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, replacement_id) do
+  defp remove_current_tab(
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
+         replacement_id
+       ) do
     case TabBar.remove(tb, tb.active_id) do
       {:ok, new_tb} ->
         EditorState.set_tab_bar(state, maybe_switch_to_replacement(new_tb, replacement_id))
@@ -2370,8 +2329,8 @@ defmodule MingaEditor.Commands.BufferManagement do
         if EditorState.skip_tool_prompt?(state, recipe.name) do
           state
         else
-          queue = Enum.concat(state.shell_state.tool_prompt_queue, [recipe.name])
-          state = EditorState.update_shell_state(state, &%{&1 | tool_prompt_queue: queue})
+          queue = Enum.concat(state.shell_runtime.state.tool_prompt_queue, [recipe.name])
+          state = EditorState.set_tool_prompt_queue(state, queue)
           show_tool_prompt_if_normal(state)
         end
     end
@@ -2379,11 +2338,13 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec show_tool_prompt_if_normal(state()) :: state()
   defp show_tool_prompt_if_normal(
-         %{workspace: %{editing: %{mode: :normal}}, shell_state: %{tool_prompt_queue: pending}} =
-           state
+         %{
+           workspace: %{editing: %{mode: :normal}},
+           shell_runtime: %{state: %{tool_prompt_queue: pending}}
+         } = state
        )
        when pending != [] do
-    ms = %ToolConfirmState{pending: pending, declined: state.shell_state.tool_declined}
+    ms = %ToolConfirmState{pending: pending, declined: state.shell_runtime.state.tool_declined}
     EditorState.transition_mode(state, :tool_confirm, ms)
   end
 

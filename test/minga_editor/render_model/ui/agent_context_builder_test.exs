@@ -57,7 +57,7 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
 
       state =
         %{
-          shell_state: %{agent: AgentState.set_pending_approval(%AgentState{}, approval)},
+          agent: AgentState.set_pending_approval(%AgentState{}, approval),
           workspace: %{agent_ui: UIState.new()}
         }
         |> then(fn state -> elem(AgentEvents.handle(state, {:approval_pending, approval}), 0) end)
@@ -73,7 +73,7 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
         windows: nil,
         layout: nil,
         shell: MingaEditor.Shell.Traditional,
-        shell_state: state.shell_state,
+        shell_state: %{agent: AgentAccess.agent(state)},
         agent_ui: AgentAccess.agent_ui(state)
       }
 

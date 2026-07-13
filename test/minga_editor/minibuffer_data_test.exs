@@ -12,6 +12,7 @@ defmodule MingaEditor.MinibufferDataTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.MinibufferData
+  alias MingaEditor.State.ModalOverlay.CommandCompletion
   alias MingaEditor.State.Prompt, as: PromptState
 
   describe "clamp_index/2" do
@@ -108,6 +109,29 @@ defmodule MingaEditor.MinibufferDataTest do
 
       # candidate_index 1 should be clamped and set as selected_index
       assert result.selected_index == 1
+    end
+
+    test "reuses command candidates from flattened render-pipeline shell state" do
+      candidate = %{
+        label: "write",
+        description: "cached",
+        match_score: 1,
+        match_positions: [0],
+        annotation: ""
+      }
+
+      state = %{
+        shell_state: %{
+          modal:
+            {:command_completion,
+             CommandCompletion.new(filter_text: "wri", candidates: [candidate], total: 1)}
+        },
+        workspace: %{editing: %{mode: :command, mode_state: %{input: "wri", candidate_index: 0}}}
+      }
+
+      result = MinibufferData.from_state(state)
+      assert result.candidates == [candidate]
+      assert result.total_candidates == 1
     end
 
     test "generates completion candidates for non-empty input" do

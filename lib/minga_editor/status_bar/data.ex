@@ -188,7 +188,7 @@ defmodule MingaEditor.StatusBar.Data do
     {indent_type, indent_size} = indent_info(state, buf, filetype)
     selection_info = selection_info(mode, mode_state, buf, {line, col})
 
-    agent = AgentAccess.agent(state)
+    agent = agent_state(state)
     background = background_subagent_summary(state)
     workspace = workspace_modeline_summary(state)
 
@@ -221,7 +221,7 @@ defmodule MingaEditor.StatusBar.Data do
       agent_theme_colors: if(agent.runtime.status, do: Theme.agent_theme(state.theme), else: nil),
       background_subagent_count: background.count,
       active_background_subagent_label: background.label,
-      status_msg: Map.get(state.shell_state, :status_msg),
+      status_msg: status_message(state),
       pending_keys: pending_keys(state, mode, mode_state),
       workspace_label: workspace.label,
       workspace_draft_count: workspace.draft_count,
@@ -247,12 +247,33 @@ defmodule MingaEditor.StatusBar.Data do
   end
 
   @spec whichkey_showing?(EditorState.t() | map()) :: boolean()
+  defp whichkey_showing?(%EditorState{shell_runtime: %{state: %{whichkey: %{show: true}}}}),
+    do: true
+
   defp whichkey_showing?(%{shell_state: %{whichkey: %{show: true}}}), do: true
   defp whichkey_showing?(_state), do: false
 
   @spec active_register_name(EditorState.t() | map()) :: String.t()
   defp active_register_name(%EditorState{} = state), do: Editing.active_register(state)
   defp active_register_name(_state), do: ""
+
+  @spec agent_state(EditorState.t() | map()) :: AgentState.t()
+  defp agent_state(%EditorState{} = state), do: AgentAccess.agent(state)
+  defp agent_state(%{shell_state: %{agent: %AgentState{} = agent}}), do: agent
+  defp agent_state(_state), do: %AgentState{}
+
+  @spec status_message(EditorState.t() | map()) :: String.t() | nil
+  defp status_message(%EditorState{} = state), do: EditorState.status_msg(state)
+  defp status_message(%{shell_state: %{status_msg: status_msg}}), do: status_msg
+  defp status_message(_state), do: nil
+
+  @spec agent_session(EditorState.t() | map()) :: pid() | nil
+  defp agent_session(%EditorState{} = state), do: AgentAccess.session(state)
+
+  defp agent_session(%{shell: shell, shell_state: shell_state}) when is_atom(shell),
+    do: shell.active_session(shell_state)
+
+  defp agent_session(_state), do: nil
 
   @spec register_prefix(String.t()) :: String.t()
   defp register_prefix(""), do: ""
@@ -352,9 +373,9 @@ defmodule MingaEditor.StatusBar.Data do
 
   @spec build_agent_data(EditorState.t() | map()) :: agent_data()
   defp build_agent_data(state) do
-    agent = AgentAccess.agent(state)
+    agent = agent_state(state)
     panel = AgentAccess.panel(state)
-    session = AgentAccess.session(state)
+    session = agent_session(state)
 
     message_count = agent_message_count(session)
 
@@ -413,7 +434,7 @@ defmodule MingaEditor.StatusBar.Data do
       buf_count: Enum.count(state.workspace.buffers.list),
       background_subagent_count: background.count,
       active_background_subagent_label: background.label,
-      status_msg: Map.get(state.shell_state, :status_msg),
+      status_msg: status_message(state),
       pending_keys: pending_keys(state, mode, mode_state),
       workspace_label: workspace.label,
       workspace_draft_count: workspace.draft_count,
@@ -691,7 +712,19 @@ defmodule MingaEditor.StatusBar.Data do
           count: non_neg_integer(),
           label: String.t() | nil
         }
-  defp background_subagent_summary(%{shell_state: %{tab_bar: %MingaEditor.State.TabBar{} = tb}}) do
+  defp background_subagent_summary(%EditorState{shell_runtime: %{state: %{tab_bar: tb}}}) do
+    background_subagent_summary(tb)
+  end
+
+  defp background_subagent_summary(%{shell_state: %{tab_bar: tb}}) do
+    background_subagent_summary(tb)
+  end
+
+  @spec background_subagent_summary(MingaEditor.State.TabBar.t()) :: %{
+          count: non_neg_integer(),
+          label: String.t() | nil
+        }
+  defp background_subagent_summary(%MingaEditor.State.TabBar{} = tb) do
     tabs = Enum.filter(tb.tabs, &MingaEditor.State.Tab.background_subagent?/1)
     running = Enum.filter(tabs, &(&1.agent_status in [:thinking, :tool_executing]))
     active = Enum.find(tabs, &(&1.id == tb.active_id))

@@ -5,6 +5,7 @@ defmodule Minga.Test.ScopedInputHelpers do
 
   alias MingaEditor.Agent.UIState
   alias Minga.Buffer.Process, as: BufferProcess
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
@@ -65,7 +66,11 @@ defmodule Minga.Test.ScopedInputHelpers do
         keymap_scope: Keyword.get(opts, :keymap_scope, :editor),
         agent_ui: agentic
       },
-      shell_state: %MingaEditor.Shell.Traditional.State{agent: agent, tab_bar: tab_bar}
+      shell_runtime:
+        Runtime.new(
+          Runtime.default_entry(),
+          %MingaEditor.Shell.Traditional.State{agent: agent, tab_bar: tab_bar}
+        )
     }
   end
 
@@ -93,7 +98,7 @@ defmodule Minga.Test.ScopedInputHelpers do
         return_target
       )
 
-    {tab_bar, agent_tab} = TabBar.add(state.shell_state.tab_bar, :agent, "Agent")
+    {tab_bar, agent_tab} = TabBar.add(state.shell_runtime.state.tab_bar, :agent, "Agent")
     {tab_bar, workspace} = TabBar.add_workspace(tab_bar, "Agent", session)
     workspace = Workspace.set_agent_ui(workspace, agent_ui)
 
@@ -104,13 +109,12 @@ defmodule Minga.Test.ScopedInputHelpers do
         tab |> Tab.set_session(session) |> Tab.set_group(workspace.id)
       end)
 
-    shell_state = %{
-      state.shell_state
-      | tab_bar: tab_bar
-    }
-
     workspace_state = %{state.workspace | agent_ui: agent_ui, keymap_scope: :agent}
-    state = %{state | shell_state: shell_state, workspace: workspace_state}
+
+    state =
+      state
+      |> EditorState.set_tab_bar(tab_bar)
+      |> EditorState.set_workspace(workspace_state)
 
     {state, session, file_buffer}
   end

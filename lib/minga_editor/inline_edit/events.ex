@@ -41,7 +41,7 @@ defmodule MingaEditor.InlineEdit.Events do
   end
 
   @spec store(state()) :: InlineEdit.store() | nil
-  defp store(%{shell_state: %{inline_edits: edits}}) when is_map(edits), do: edits
+  defp store(%{shell_runtime: %{state: %{inline_edits: edits}}}) when is_map(edits), do: edits
   defp store(_state), do: nil
 
   @spec fail(InlineEdit.t(), term()) :: InlineEdit.t()

@@ -30,7 +30,6 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
   alias Minga.Buffer
   alias MingaEditor.Commands
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias Minga.Keymap
   alias Minga.Keymap.Bindings
 
@@ -139,7 +138,7 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
   # ── Private ──────────────────────────────────────────────────────────────
 
   @spec pending?(map()) :: boolean()
-  defp pending?(%{shell_state: %{space_leader_pending: true}}), do: true
+  defp pending?(%{shell_runtime: %{state: %{space_leader_pending: true}}}), do: true
   defp pending?(_state), do: false
 
   @spec active_leader_node(EditorState.t()) :: Bindings.node_t() | nil
@@ -149,18 +148,18 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
 
   @spec put_space_leader_pending(EditorState.t(), boolean()) :: EditorState.t()
   defp put_space_leader_pending(state, value) do
-    EditorState.update_shell_state(state, &ShellState.set_space_leader_pending(&1, value))
+    EditorState.set_space_leader_pending(state, value)
   end
 
   @spec put_space_leader_timer(EditorState.t(), reference() | nil) :: EditorState.t()
   defp put_space_leader_timer(state, timer) do
-    EditorState.update_shell_state(state, &ShellState.set_space_leader_timer(&1, timer))
+    EditorState.set_space_leader_timer(state, timer)
   end
 
   @spec cancel_timer(EditorState.t()) :: EditorState.t()
-  defp cancel_timer(%{shell_state: %{space_leader_timer: nil}} = state), do: state
+  defp cancel_timer(%{shell_runtime: %{state: %{space_leader_timer: nil}}} = state), do: state
 
-  defp cancel_timer(%{shell_state: %{space_leader_timer: timer}} = state) do
+  defp cancel_timer(%{shell_runtime: %{state: %{space_leader_timer: timer}}} = state) do
     Process.cancel_timer(timer)
     put_space_leader_timer(state, nil)
   end

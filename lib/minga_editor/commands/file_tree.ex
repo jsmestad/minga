@@ -920,7 +920,8 @@ defmodule MingaEditor.Commands.FileTree do
   # Explicitly resets keymap_scope to :editor so we don't leave orphaned
   # :git_status scope if a future refactor separates the open steps.
   @spec close_git_status_if_open(state()) :: state()
-  defp close_git_status_if_open(%{shell_state: %{git_status_panel: nil}} = state), do: state
+  defp close_git_status_if_open(%{shell_runtime: %{state: %{git_status_panel: nil}}} = state),
+    do: state
 
   defp close_git_status_if_open(state),
     do:

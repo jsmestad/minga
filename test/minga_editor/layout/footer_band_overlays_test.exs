@@ -29,6 +29,7 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
   alias MingaEditor.Layout
   alias MingaEditor.Layout.OverlayBand
   alias MingaEditor.Layout.SurfaceRegistry
+  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.UI.Notification
@@ -47,21 +48,14 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
     %{state | notifications: center}
   end
 
-  defp with_observatory(state) do
-    put_in(state.shell_state.observatory_visible, true)
-  end
+  defp with_observatory(state), do: EditorState.open_observatory(state, nil)
 
   defp with_agent_context(state) do
     approval = %{tool_call_id: "tc1", name: "shell", args: %{}}
 
     state =
-      %{
-        state
-        | shell_state: %{
-            state.shell_state
-            | agent: AgentState.set_pending_approval(state.shell_state.agent, approval)
-          }
-      }
+      state
+      |> AgentAccess.update_agent(&AgentState.set_pending_approval(&1, approval))
       |> AgentAccess.update_agent_ui(fn ui ->
         UIState.update_activity(ui, fn _ -> Activity.new() end)
       end)
@@ -83,9 +77,9 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
 
     tree = %TreeNode{pid: spawn(fn -> :ok end), snapshot: snapshot, children: children, depth: 0}
 
-    state = with_observatory(state)
-    shell_state = %{state.shell_state | observatory_data: %{tree: tree}}
-    %{state | shell_state: shell_state}
+    state
+    |> with_observatory()
+    |> EditorState.set_observatory_data(%{tree: tree})
   end
 
   # Records `count` agent edits for the active buffer's path and wires the
@@ -192,6 +186,15 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
 
       assert height == 4
       assert row + height == 24
+
+      transfer_state =
+        state
+        |> Map.from_struct()
+        |> Map.delete(:shell_runtime)
+        |> Map.put(:shell, state.shell_runtime.entry.module)
+        |> Map.put(:shell_state, state.shell_runtime.state)
+
+      assert SurfaceRegistry.rect_for(transfer_state, :observatory) == {row, 0, 80, height}
     end
 
     test "the edit timeline band height is one header plus one row per entry" do

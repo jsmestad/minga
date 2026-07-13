@@ -5,6 +5,7 @@ defmodule MingaEditor.UI.Picker.CommandSourceTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Command
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.Viewport
@@ -36,7 +37,8 @@ defmodule MingaEditor.UI.Picker.CommandSourceTest do
           buffers: %Buffers{active: buf, list: [buf], active_index: 0},
           editing: VimState.new()
         },
-        shell_state: %MingaEditor.Shell.Traditional.State{}
+        shell_runtime:
+          Runtime.new(Runtime.default_entry(), %MingaEditor.Shell.Traditional.State{})
       }
 
       result =
@@ -48,7 +50,7 @@ defmodule MingaEditor.UI.Picker.CommandSourceTest do
       # Should have opened the scope picker, not set pending_command
       assert is_nil(Map.get(result, :pending_command))
       # The scope picker should be open
-      {:picker, %{picker_ui: picker_ui}} = result.shell_state.modal
+      {:picker, %{picker_ui: picker_ui}} = Runtime.state(result.shell_runtime).modal
       assert picker_ui.picker != nil
       assert picker_ui.source == MingaEditor.UI.Picker.OptionScopeSource
       # Context should carry the option info

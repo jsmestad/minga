@@ -38,8 +38,8 @@ defmodule MingaEditor.Renderer do
   def render(%EditorState{rendering: :disabled} = state), do: state
 
   def render(state) do
-    state = EditorState.ensure_shell_available(state)
-    EditorState.active_shell_module(state).render(state)
+    state = MingaEditor.Shell.Workflow.ensure_available(state)
+    MingaEditor.Shell.Runtime.module(state.shell_runtime).render(state)
   end
 
   @doc """
@@ -52,7 +52,7 @@ defmodule MingaEditor.Renderer do
   def render_or_async(%{backend: :headless} = state), do: render(state)
 
   def render_or_async(%{renderer: pid} = state) when is_pid(pid) do
-    state = EditorState.ensure_shell_available(state)
+    state = MingaEditor.Shell.Workflow.ensure_available(state)
 
     if async_render?(state) do
       {state, revision} = EditorState.submit_render_intent(state)
@@ -90,7 +90,7 @@ defmodule MingaEditor.Renderer do
   end
 
   def reset_connection(%{renderer: pid} = state) when is_pid(pid) do
-    state = EditorState.ensure_shell_available(state)
+    state = MingaEditor.Shell.Workflow.ensure_available(state)
 
     if async_render?(state) do
       {state, revision} = EditorState.submit_render_intent(state)
@@ -106,7 +106,8 @@ defmodule MingaEditor.Renderer do
   def reset_connection(state), do: render(state)
 
   @spec async_render?(state()) :: boolean()
-  defp async_render?(state), do: EditorState.active_shell_module(state).async_render?(state)
+  defp async_render?(state),
+    do: MingaEditor.Shell.Runtime.module(state.shell_runtime).async_render?(state)
 
   @doc """
   Runs the full render pipeline (content, chrome, compose, emit).

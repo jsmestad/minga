@@ -136,6 +136,10 @@ defmodule MingaEditor.Layout.FooterOverlays do
   defp notification_actions?(_item), do: false
 
   @spec content_height_observatory(map()) :: non_neg_integer()
+  defp content_height_observatory(%{shell_runtime: %{state: shell_state}}) do
+    content_height_observatory(%{shell_state: shell_state})
+  end
+
   defp content_height_observatory(%{shell_state: %{observatory_data: %{tree: tree}}}) do
     1 + Enum.count(Minga.SystemObserver.TreeNode.flatten(tree))
   end
@@ -169,7 +173,15 @@ defmodule MingaEditor.Layout.FooterOverlays do
   # Float popup: an observatory inspection float, or a window carrying a :float
   # popup rule. Mirrors MingaEditor.RenderModel.UI.FloatPopupBuilder.
   @spec float_popup_visible?(map()) :: boolean()
-  defp float_popup_visible?(%{shell_state: %{observatory_inspection: %{visible: true}}}), do: true
+  defp float_popup_visible?(%{shell_runtime: %{state: shell_state}} = state) do
+    state
+    |> Map.delete(:shell_runtime)
+    |> Map.put(:shell_state, shell_state)
+    |> float_popup_visible?()
+  end
+
+  defp float_popup_visible?(%{shell_state: %{observatory_inspection: %{visible: true}}}),
+    do: true
 
   defp float_popup_visible?(%{workspace: %{windows: %{map: map}}}) when is_map(map) do
     Enum.any?(map, fn
@@ -212,6 +224,9 @@ defmodule MingaEditor.Layout.FooterOverlays do
   # Observatory: the BEAM observatory panel is toggled on in shell_state.
   # Mirrors MingaEditor.RenderModel.UI.ObservatoryBuilder.
   @spec observatory_visible?(map()) :: boolean()
+  defp observatory_visible?(%{shell_runtime: %{state: shell_state}}),
+    do: observatory_visible?(%{shell_state: shell_state})
+
   defp observatory_visible?(%{shell_state: %{observatory_visible: true}}), do: true
   defp observatory_visible?(_state), do: false
 

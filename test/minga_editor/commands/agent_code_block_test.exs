@@ -4,6 +4,7 @@ defmodule MingaEditor.Commands.AgentCodeBlockTest do
   alias MingaEditor.Agent.UIState
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Commands.Agent, as: AgentCommands
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Buffers
@@ -19,7 +20,11 @@ defmodule MingaEditor.Commands.AgentCodeBlockTest do
         buffers: %Buffers{},
         agent_ui: %UIState{}
       },
-      shell_state: %MingaEditor.Shell.Traditional.State{agent: %AgentState{}}
+      shell_runtime:
+        Runtime.new(
+          Runtime.default_entry(),
+          %MingaEditor.Shell.Traditional.State{agent: %AgentState{}}
+        )
     }
   end
 

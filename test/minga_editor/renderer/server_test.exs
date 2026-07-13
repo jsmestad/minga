@@ -1160,15 +1160,9 @@ defmodule MingaEditor.Renderer.ServerTest do
   end
 
   defp build_sync_shell_state(renderer_pid) do
-    state = build_editor_state(:tui, renderer_pid)
-
-    %{
-      state
-      | shell_id: :fake,
-        shell: MingaEditor.Test.FakeShell,
-        shell_identity: MingaEditor.Shell.Identity.new(MingaEditor.Shell.Registry.get(:fake)),
-        shell_state: MingaEditor.Test.FakeShell.init([])
-    }
+    :tui
+    |> build_editor_state(renderer_pid)
+    |> MingaEditor.Shell.Workflow.switch(:fake)
   end
 
   defp build_editor_state(backend, renderer_pid, content \\ "test") do
@@ -1198,9 +1192,11 @@ defmodule MingaEditor.Renderer.ServerTest do
       port_manager: port,
       workspace: workspace,
       renderer: renderer_pid,
-      shell_id: :traditional,
-      shell: MingaEditor.Shell.Traditional,
-      shell_state: %MingaEditor.Shell.Traditional.State{}
+      shell_runtime:
+        MingaEditor.Shell.Runtime.new(
+          MingaEditor.Shell.Registry.get(:traditional),
+          %MingaEditor.Shell.Traditional.State{}
+        )
     }
   end
 end

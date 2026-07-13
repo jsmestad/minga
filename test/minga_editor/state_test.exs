@@ -3,6 +3,7 @@ defmodule MingaEditor.StateTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Project.FileRef
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
@@ -177,7 +178,7 @@ defmodule MingaEditor.StateTest do
       state = state_with_agent_tab()
       file_buf = start_buffer("file content")
       new_state = EditorState.add_buffer(state, file_buf)
-      active_tab = TabBar.active(new_state.shell_state.tab_bar)
+      active_tab = TabBar.active(new_state.shell_runtime.state.tab_bar)
       active_window = active_window(new_state)
       tab_window = active_tab.context.windows.map[active_tab.context.windows.active]
 
@@ -278,11 +279,11 @@ defmodule MingaEditor.StateTest do
         workspace:
           %SessionState{viewport: Viewport.new(24, 80)}
           |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
-        shell_state: %ShellState{tab_bar: tab_bar}
+        shell_runtime: Runtime.new(Runtime.default_entry(), %ShellState{tab_bar: tab_bar})
       }
 
       updated_state = EditorState.rebind_buffer_file_identity(state, target_buffer)
-      updated_tb = updated_state.shell_state.tab_bar
+      updated_tb = updated_state.shell_runtime.state.tab_bar
 
       assert TabBar.get(updated_tb, matching_tab.id).file_ref == target_ref
       assert TabBar.get(updated_tb, list_only_tab.id).file_ref == old_list_ref
@@ -367,11 +368,11 @@ defmodule MingaEditor.StateTest do
             buffers: %Buffers{active: active_buffer, list: [active_buffer], active_index: 0}
           }
           |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
-        shell_state: %ShellState{tab_bar: tab_bar}
+        shell_runtime: Runtime.new(Runtime.default_entry(), %ShellState{tab_bar: tab_bar})
       }
 
       updated_state = EditorState.rebind_buffer_file_identity(state, target_buffer)
-      updated_tb = updated_state.shell_state.tab_bar
+      updated_tb = updated_state.shell_runtime.state.tab_bar
 
       assert TabBar.get(updated_tb, inactive_tab.id).file_ref == new_ref
       assert TabBar.get(updated_tb, active_tab.id).file_ref == active_ref

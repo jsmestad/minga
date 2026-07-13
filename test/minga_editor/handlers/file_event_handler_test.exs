@@ -15,6 +15,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
   alias Minga.Project.FileRef
   alias Minga.Project.FileTree
   alias MingaEditor.Handlers.FileEventHandler
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
@@ -87,7 +88,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
 
       panel = EditorState.git_status_panel(new_state)
       refute Map.has_key?(panel, :tui_state)
-      assert ShellState.git_status_tui_state(new_state.shell_state) == nil
+      assert ShellState.git_status_tui_state(Runtime.state(new_state.shell_runtime)) == nil
     end
 
     test "without git panel or file tree open is a no-op" do
@@ -318,7 +319,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
         |> TabBar.update_workspace(0, fn ws -> WorkspaceModel.set_active_file(ws, old_ref) end)
 
       state = %EditorState{port_manager: self(), workspace: workspace}
-      state = EditorState.update_shell_state(state, fn _ -> %ShellState{tab_bar: tab_bar} end)
+      state = EditorState.set_tab_bar(state, tab_bar)
 
       :ok = BufferProcess.save_as(buffer, path)
 
@@ -327,16 +328,16 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
 
       {new_state, effects} = FileEventHandler.handle(state, event)
 
-      assert TabBar.active(new_state.shell_state.tab_bar).file_ref == new_ref
-      assert TabBar.get_workspace(new_state.shell_state.tab_bar, 0).active_file == new_ref
+      assert TabBar.active(EditorState.tab_bar(new_state)).file_ref == new_ref
+      assert TabBar.get_workspace(EditorState.tab_bar(new_state), 0).active_file == new_ref
 
       assert WorkspaceModel.has_file?(
-               TabBar.get_workspace(new_state.shell_state.tab_bar, 0),
+               TabBar.get_workspace(EditorState.tab_bar(new_state), 0),
                new_ref
              )
 
       refute WorkspaceModel.has_file?(
-               TabBar.get_workspace(new_state.shell_state.tab_bar, 0),
+               TabBar.get_workspace(EditorState.tab_bar(new_state), 0),
                old_ref
              )
 
@@ -405,7 +406,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
           |> SessionState.set_file_tree(%FileTreeState{project_root: root})
       }
 
-      state = EditorState.update_shell_state(state, fn _ -> %ShellState{tab_bar: tab_bar} end)
+      state = EditorState.set_tab_bar(state, tab_bar)
 
       :ok = BufferProcess.save_as(target_buffer, path)
 
@@ -414,7 +415,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
          %Minga.Events.BufferEvent{buffer: target_buffer, path: path}}
 
       {new_state, _effects} = FileEventHandler.handle(state, event)
-      updated_tb = new_state.shell_state.tab_bar
+      updated_tb = EditorState.tab_bar(new_state)
 
       assert TabBar.get(updated_tb, inactive_tab.id).file_ref == new_ref
       assert TabBar.get_workspace(updated_tb, 0).active_file == active_ref

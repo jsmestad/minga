@@ -25,19 +25,19 @@ defmodule MingaEditor.Commands.Workspace do
 
   @doc "Switch to the next workspace's first tab."
   @spec workspace_next(state()) :: state()
-  def workspace_next(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+  def workspace_next(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     switch_via_workspace(state, TabBar.next_agent_workspace(tb))
   end
 
   @doc "Switch to the previous workspace's first tab."
   @spec workspace_prev(state()) :: state()
-  def workspace_prev(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+  def workspace_prev(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     switch_via_workspace(state, TabBar.prev_agent_workspace(tb))
   end
 
   @doc "Switch to the first manual workspace tab."
   @spec switch_to_manual_workspace(state()) :: state()
-  def switch_to_manual_workspace(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+  def switch_to_manual_workspace(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     case TabBar.tabs_in_workspace(tb, 0) do
       [first | _] -> EditorState.switch_tab(state, first.id)
       [] -> state
@@ -46,7 +46,7 @@ defmodule MingaEditor.Commands.Workspace do
 
   @doc "Toggle between manual workspace tabs and the last agent workspace."
   @spec workspace_toggle(state()) :: state()
-  def workspace_toggle(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+  def workspace_toggle(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     current_ws = TabBar.active_workspace_id(tb)
     target_workspace_id = if current_ws == 0, do: last_agent_id(tb), else: 0
     target_tb = TabBar.switch_to_workspace(tb, target_workspace_id)
@@ -59,7 +59,7 @@ defmodule MingaEditor.Commands.Workspace do
   The manual workspace (id 0) cannot be closed.
   """
   @spec workspace_close(state()) :: state()
-  def workspace_close(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+  def workspace_close(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     workspace = TabBar.active_workspace(tb)
 
     if workspace_closure_requires_review?(workspace) do
@@ -77,7 +77,7 @@ defmodule MingaEditor.Commands.Workspace do
 
   @doc "Shows the active workspace draft summary."
   @spec workspace_review_drafts(state()) :: state()
-  def workspace_review_drafts(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+  def workspace_review_drafts(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     workspace_id = TabBar.active_workspace_id(tb)
 
     case TabBar.get_workspace(tb, workspace_id) do
@@ -124,7 +124,7 @@ defmodule MingaEditor.Commands.Workspace do
 
   @doc "Discards drafts and then closes the active workspace."
   @spec workspace_discard_and_close(state()) :: state()
-  def workspace_discard_and_close(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+  def workspace_discard_and_close(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     workspace_id = TabBar.active_workspace_id(tb)
 
     case TabBar.get_workspace(tb, workspace_id) do
@@ -194,7 +194,7 @@ defmodule MingaEditor.Commands.Workspace do
   (minibuffer) and GUI (native prompt rendering).
   """
   @spec workspace_rename(state()) :: state()
-  def workspace_rename(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+  def workspace_rename(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     ws = TabBar.active_workspace(tb)
     current_name = if ws, do: ws.label, else: ""
 
@@ -203,11 +203,11 @@ defmodule MingaEditor.Commands.Workspace do
 
   @doc "Jump to workspace by number (1-based, 0 = manual workspace)."
   @spec workspace_goto(state(), non_neg_integer()) :: state()
-  def workspace_goto(%{shell_state: %{tab_bar: %TabBar{}}} = state, 0) do
+  def workspace_goto(%{shell_runtime: %{state: %{tab_bar: %TabBar{}}}} = state, 0) do
     switch_to_manual_workspace(state)
   end
 
-  def workspace_goto(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, number) do
+  def workspace_goto(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state, number) do
     case Enum.at(agent_workspaces(tb), number - 1) do
       nil -> state
       %{id: id} -> switch_via_workspace(state, TabBar.switch_to_workspace(tb, id))
@@ -216,12 +216,18 @@ defmodule MingaEditor.Commands.Workspace do
 
   @doc "Jump directly to a workspace by id."
   @spec workspace_goto_by_id(state(), non_neg_integer()) :: state()
-  def workspace_goto_by_id(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, workspace_id) do
+  def workspace_goto_by_id(
+        %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
+        workspace_id
+      ) do
     switch_via_workspace(state, TabBar.switch_to_workspace(tb, workspace_id))
   end
 
   @spec open_workspace_target_picker(state(), :move | :copy) :: state()
-  defp open_workspace_target_picker(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, operation) do
+  defp open_workspace_target_picker(
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
+         operation
+       ) do
     with {:ok, file_ref} <- active_file_ref(state, tb),
          :ok <- other_workspace_available?(tb) do
       MingaEditor.PickerUI.open(state, MingaEditor.UI.Picker.WorkspaceTargetSource, %{
@@ -283,7 +289,7 @@ defmodule MingaEditor.Commands.Workspace do
   end
 
   @spec close_active_workspace(state()) :: state()
-  defp close_active_workspace(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+  defp close_active_workspace(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     workspace_id = TabBar.active_workspace_id(tb)
 
     case TabBar.get_workspace(tb, workspace_id) do
@@ -360,7 +366,9 @@ defmodule MingaEditor.Commands.Workspace do
   end
 
   @spec close_discarded_active_workspace(state()) :: state()
-  defp close_discarded_active_workspace(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+  defp close_discarded_active_workspace(
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state
+       ) do
     workspace_id = TabBar.active_workspace_id(tb)
 
     case TabBar.get_workspace(tb, workspace_id) do
@@ -432,7 +440,10 @@ defmodule MingaEditor.Commands.Workspace do
           state(),
           (WorkspaceModel.t() -> {:ok, WorkspaceModel.t()} | {:error, term()})
         ) :: state()
-  defp update_active_workspace_review(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, fun)
+  defp update_active_workspace_review(
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
+         fun
+       )
        when is_function(fun, 1) do
     workspace_id = TabBar.active_workspace_id(tb)
     workspace = TabBar.get_workspace(tb, workspace_id)
@@ -624,7 +635,7 @@ defmodule MingaEditor.Commands.Workspace do
   # No-op if the active tab didn't change.
   @spec switch_via_workspace(state(), TabBar.t()) :: state()
   defp switch_via_workspace(state, %TabBar{active_id: new_id}) do
-    if new_id == state.shell_state.tab_bar.active_id do
+    if new_id == state.shell_runtime.state.tab_bar.active_id do
       state
     else
       EditorState.switch_tab(state, new_id)

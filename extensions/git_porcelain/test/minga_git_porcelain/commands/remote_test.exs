@@ -7,6 +7,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor
   alias MingaGitPorcelain.Commands, as: GitCommands
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Viewport
 
@@ -36,7 +37,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
 
       result = GitCommands.handle_remote_result(state, ref, :ok)
 
-      assert result.shell_state.status_msg == "Pushed"
+      assert EditorState.status_msg(result) == "Pushed"
       assert result.git_remote_op == nil
     end
 
@@ -54,7 +55,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
                message: "Push failed: non-fast-forward rejected",
                level: :error,
                action: :pull_and_retry
-             } = result.shell_state.git_toast
+             } = Runtime.state(result.shell_runtime).git_toast
     end
 
     test "stale results leave the current operation untouched" do
@@ -64,7 +65,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
 
       result = GitCommands.handle_remote_result(state, make_ref(), :ok)
 
-      assert result.shell_state.status_msg == "Pushing…"
+      assert EditorState.status_msg(result) == "Pushing…"
       assert result.git_remote_op == op
     end
   end
@@ -81,10 +82,10 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
       result = GitCommands.handle_remote_task_down(state, task_monitor, :killed)
 
       assert result.git_remote_op == nil
-      assert result.shell_state.status_msg == "Git operation failed unexpectedly: killed"
+      assert EditorState.status_msg(result) == "Git operation failed unexpectedly: killed"
 
       assert %{message: "Git operation failed unexpectedly: killed", level: :error, action: nil} =
-               result.shell_state.git_toast
+               Runtime.state(result.shell_runtime).git_toast
     end
 
     test "normal task exit waits for the result message" do
@@ -95,8 +96,8 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
       result = GitCommands.handle_remote_task_down(state, task_monitor, :normal)
 
       assert result.git_remote_op == op
-      assert result.shell_state.status_msg == "Pushing…"
-      assert result.shell_state.git_toast == nil
+      assert EditorState.status_msg(result) == "Pushing…"
+      assert Runtime.state(result.shell_runtime).git_toast == nil
     end
   end
 
@@ -109,7 +110,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
       send(editor, {:git_remote_result, ref, :ok})
       state = get_state(editor)
 
-      assert state.shell_state.status_msg == "Fetched"
+      assert EditorState.status_msg(state) == "Fetched"
       assert state.git_remote_op == nil
     end
 
@@ -123,8 +124,8 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
       state = get_state(editor)
 
       assert state.git_remote_op == nil
-      assert state.shell_state.status_msg == "Git operation failed unexpectedly: killed"
-      assert %{level: :error, action: nil} = state.shell_state.git_toast
+      assert EditorState.status_msg(state) == "Git operation failed unexpectedly: killed"
+      assert %{level: :error, action: nil} = Runtime.state(state.shell_runtime).git_toast
     end
   end
 
@@ -135,7 +136,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
 
       result = GitCommands.execute(state, :git_pull)
 
-      assert result.shell_state.status_msg == "Git operation already in progress"
+      assert EditorState.status_msg(result) == "Git operation already in progress"
       assert result.git_remote_op == op
     end
   end

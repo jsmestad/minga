@@ -3,6 +3,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceSourceTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Mode
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Search
@@ -40,7 +41,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceSourceTest do
         buffers: %Buffers{list: [buffer], active: buffer, active_index: 0},
         keymap_scope: :editor
       },
-      shell_state: %ShellState{tab_bar: tab_bar}
+      shell_runtime: Runtime.new(Runtime.default_entry(), %ShellState{tab_bar: tab_bar})
     }
   end
 
@@ -121,10 +122,10 @@ defmodule MingaEditor.UI.Picker.WorkspaceSourceTest do
 
       assert switched.workspace.buffers.active == buf_b
       assert switched.workspace.editing.mode == :insert
-      assert switched.shell_state.tab_bar.active_id == tab2.id
+      assert EditorState.tab_bar(switched).active_id == tab2.id
       assert EditorState.active_tab(switched).id == tab2.id
-      assert TabBar.get(switched.shell_state.tab_bar, 1).context.buffers.active == buf_a
-      assert TabBar.get(switched.shell_state.tab_bar, tab2.id).context.buffers.active == buf_b
+      assert TabBar.get(EditorState.tab_bar(switched), 1).context.buffers.active == buf_a
+      assert TabBar.get(EditorState.tab_bar(switched), tab2.id).context.buffers.active == buf_b
     end
   end
 

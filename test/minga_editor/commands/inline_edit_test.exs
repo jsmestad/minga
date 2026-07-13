@@ -7,6 +7,7 @@ defmodule MingaEditor.Commands.InlineEditTest do
   alias MingaEditor.InlineEdit.Events, as: InlineEditEvents
   alias MingaEditor.Input.InlineEdit, as: InlineEditInput
   alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
@@ -193,9 +194,13 @@ defmodule MingaEditor.Commands.InlineEditTest do
           }
         }
         |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
-      shell_state: %TraditionalState{
-        tab_bar: TabBar.new(Tab.new_file(1, Path.basename(rel_path)), root)
-      }
+      shell_runtime:
+        Runtime.new(
+          Runtime.default_entry(),
+          %TraditionalState{
+            tab_bar: TabBar.new(Tab.new_file(1, Path.basename(rel_path)), root)
+          }
+        )
     }
 
     {state, buffer}

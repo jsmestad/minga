@@ -22,27 +22,29 @@ defmodule MingaEditor.Input.SignatureHelp do
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
-  def handle_key(%{shell_state: %{signature_help: nil}} = state, _cp, _mods) do
+  def handle_key(%{shell_runtime: %{state: %{signature_help: nil}}} = state, _cp, _mods) do
     {:passthrough, state}
   end
 
   # C-j: next signature overload
-  def handle_key(%{shell_state: %{signature_help: %SigHelp{} = sh}} = state, ?j, mods)
+  def handle_key(%{shell_runtime: %{state: %{signature_help: %SigHelp{} = sh}}} = state, ?j, mods)
       when band(mods, @ctrl) != 0 do
-    {:handled,
-     EditorState.update_shell_state(state, &%{&1 | signature_help: SigHelp.next_signature(sh)})}
+    {:handled, EditorState.set_signature_help(state, SigHelp.next_signature(sh))}
   end
 
   # C-k: previous signature overload
-  def handle_key(%{shell_state: %{signature_help: %SigHelp{} = sh}} = state, ?k, mods)
+  def handle_key(%{shell_runtime: %{state: %{signature_help: %SigHelp{} = sh}}} = state, ?k, mods)
       when band(mods, @ctrl) != 0 do
-    {:handled,
-     EditorState.update_shell_state(state, &%{&1 | signature_help: SigHelp.prev_signature(sh)})}
+    {:handled, EditorState.set_signature_help(state, SigHelp.prev_signature(sh))}
   end
 
   # Escape: dismiss signature help
-  def handle_key(%{shell_state: %{signature_help: %SigHelp{}}} = state, @key_escape, _mods) do
-    {:handled, EditorState.update_shell_state(state, &%{&1 | signature_help: nil})}
+  def handle_key(
+        %{shell_runtime: %{state: %{signature_help: %SigHelp{}}}} = state,
+        @key_escape,
+        _mods
+      ) do
+    {:handled, EditorState.set_signature_help(state, nil)}
   end
 
   # All other keys: pass through (signature help stays visible while typing)

@@ -4,6 +4,7 @@ defmodule MingaEditor.FeatureStateTest do
   alias MingaEditor.Commands.BufferManagement
   alias MingaEditor.FeatureState
   alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Tab
@@ -109,7 +110,7 @@ defmodule MingaEditor.FeatureStateTest do
     state = %EditorState{
       port_manager: self(),
       workspace: live_workspace,
-      shell_state: shell_state
+      shell_runtime: Runtime.new(Runtime.default_entry(), shell_state)
     }
 
     cleaned = EditorState.drop_feature_state_source(state, @source)
@@ -144,7 +145,7 @@ defmodule MingaEditor.FeatureStateTest do
     state = %EditorState{
       port_manager: self(),
       workspace: live_workspace,
-      shell_state: %ShellState{tab_bar: TabBar.new(tab)}
+      shell_runtime: Runtime.new(Runtime.default_entry(), %ShellState{tab_bar: TabBar.new(tab)})
     }
 
     reloaded =
@@ -154,7 +155,7 @@ defmodule MingaEditor.FeatureStateTest do
         assert EditorState.get_feature_state(cleaned_state, @other_source, @feature) == nil
         assert EditorState.get_feature_state(cleaned_state, :builtin, @feature) == :builtin
 
-        cleaned_tab = TabBar.get(cleaned_state.shell_state.tab_bar, 1)
+        cleaned_tab = TabBar.get(cleaned_state.shell_runtime.state.tab_bar, 1)
 
         assert_snapshot_feature_state(cleaned_tab.context,
           config: nil,
@@ -173,7 +174,7 @@ defmodule MingaEditor.FeatureStateTest do
     assert EditorState.get_feature_state(reloaded, @other_source, @feature) == nil
     assert EditorState.get_feature_state(reloaded, :builtin, @feature) == :builtin
 
-    reloaded_tab = TabBar.get(reloaded.shell_state.tab_bar, 1)
+    reloaded_tab = TabBar.get(reloaded.shell_runtime.state.tab_bar, 1)
 
     assert_snapshot_feature_state(reloaded_tab.context,
       config: nil,
@@ -190,7 +191,7 @@ defmodule MingaEditor.FeatureStateTest do
     state = %EditorState{
       port_manager: self(),
       workspace: live_workspace,
-      shell_state: shell_state
+      shell_runtime: Runtime.new(Runtime.default_entry(), shell_state)
     }
 
     restored = EditorState.restore_tab_context(state, TabContext.empty())
@@ -206,7 +207,7 @@ defmodule MingaEditor.FeatureStateTest do
     state = %EditorState{
       port_manager: self(),
       workspace: live_workspace,
-      shell_state: shell_state
+      shell_runtime: Runtime.new(Runtime.default_entry(), shell_state)
     }
 
     context = EditorState.build_agent_tab_defaults(state, %MingaEditor.State.Windows{})

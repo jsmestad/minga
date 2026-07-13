@@ -42,7 +42,7 @@ defmodule MingaEditor.UI.Picker.ThemeSource do
   @impl true
   @spec on_cancel(term()) :: term()
   def on_cancel(state) do
-    case state.shell_state.modal do
+    case state.shell_runtime.state.modal do
       {:picker, %{picker_ui: %{restore_theme: %Theme{} = theme}}} ->
         put_theme(state, theme)
 

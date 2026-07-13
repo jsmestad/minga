@@ -241,16 +241,16 @@ defmodule MingaEditor.Commands.Formatting do
 
   @spec queue_and_show_prompt(state(), atom()) :: state()
   defp queue_and_show_prompt(%{workspace: %{editing: %{mode: :normal}}} = state, tool_name) do
-    queue = Enum.concat(state.shell_state.tool_prompt_queue, [tool_name])
-    state = EditorState.update_shell_state(state, &%{&1 | tool_prompt_queue: queue})
-    ms = %ToolConfirmState{pending: queue, declined: state.shell_state.tool_declined}
+    queue = Enum.concat(state.shell_runtime.state.tool_prompt_queue, [tool_name])
+    state = EditorState.set_tool_prompt_queue(state, queue)
+    ms = %ToolConfirmState{pending: queue, declined: state.shell_runtime.state.tool_declined}
     EditorState.transition_mode(state, :tool_confirm, ms)
   end
 
   defp queue_and_show_prompt(state, tool_name) do
-    EditorState.update_shell_state(
+    EditorState.set_tool_prompt_queue(
       state,
-      &%{&1 | tool_prompt_queue: Enum.concat(state.shell_state.tool_prompt_queue, [tool_name])}
+      Enum.concat(state.shell_runtime.state.tool_prompt_queue, [tool_name])
     )
   end
 

@@ -7,6 +7,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
   alias MingaAgent.ProjectView
   alias MingaAgent.Test.ProjectView.CloseFailingBackend
   alias MingaEditor.Commands.Workspace
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
@@ -64,7 +65,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
           next_id: 2
         }
       },
-      shell_state: %TraditionalState{tab_bar: tb}
+      shell_runtime: Runtime.new(Runtime.default_entry(), %TraditionalState{tab_bar: tb})
     }
   end
 
@@ -99,7 +100,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
   end
 
   defp put_active_workspace_project_view(state, project_view) do
-    tb = state.shell_state.tab_bar
+    tb = state.shell_runtime.state.tab_bar
     workspace_id = TabBar.active_workspace_id(tb)
 
     EditorState.set_tab_bar(
@@ -113,7 +114,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
   end
 
   defp put_active_workspace_session(state, session_pid) do
-    tb = state.shell_state.tab_bar
+    tb = state.shell_runtime.state.tab_bar
     workspace_id = TabBar.active_workspace_id(tb)
 
     EditorState.set_tab_bar(
@@ -123,7 +124,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
   end
 
   defp put_active_workspace_review(state, review) do
-    tb = state.shell_state.tab_bar
+    tb = state.shell_runtime.state.tab_bar
     workspace_id = TabBar.active_workspace_id(tb)
 
     EditorState.set_tab_bar(
@@ -174,7 +175,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
     state = %EditorState{
       port_manager: self(),
       workspace: manual_workspace_state(manual_live_buf, :insert),
-      shell_state: %TraditionalState{tab_bar: tb}
+      shell_runtime: Runtime.new(Runtime.default_entry(), %TraditionalState{tab_bar: tb})
     }
 
     {state, manual_live_buf}
@@ -227,7 +228,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
       result = Workspace.workspace_next(state)
 
       assert %EditorState{} = result
-      assert result.shell_state.tab_bar.active_id == 2
+      assert result.shell_runtime.state.tab_bar.active_id == 2
     end
   end
 
@@ -237,7 +238,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
       result = Workspace.workspace_prev(state)
 
       assert %EditorState{} = result
-      assert result.shell_state.tab_bar.active_id == 3
+      assert result.shell_runtime.state.tab_bar.active_id == 3
     end
   end
 
@@ -247,11 +248,11 @@ defmodule MingaEditor.Commands.WorkspaceTest do
       result = Workspace.workspace_toggle(state)
 
       assert %EditorState{} = result
-      assert result.shell_state.tab_bar.active_id == 2
+      assert result.shell_runtime.state.tab_bar.active_id == 2
       assert result.workspace.buffers.active == nil
       assert result.workspace.editing.mode == :normal
 
-      manual_tab = TabBar.get(result.shell_state.tab_bar, 1)
+      manual_tab = TabBar.get(result.shell_runtime.state.tab_bar, 1)
       assert manual_tab.context.buffers.active == manual_live_buf
       assert manual_tab.context.editing.mode == :insert
     end
@@ -263,7 +264,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
       result = Workspace.workspace_close(state)
 
       assert %EditorState{} = result
-      tab_bar = result.shell_state.tab_bar
+      tab_bar = result.shell_runtime.state.tab_bar
       assert TabBar.active_workspace_id(tab_bar) == 0
       assert TabBar.get_workspace(tab_bar, 1) == nil
       assert Enum.map(TabBar.tabs_in_workspace(tab_bar, 0), & &1.id) == [1, 2]
@@ -286,7 +287,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
       result = Workspace.workspace_close(state)
 
-      assert result.shell_state.tab_bar == state.shell_state.tab_bar
+      assert result.shell_runtime.state.tab_bar == state.shell_runtime.state.tab_bar
 
       assert EditorState.status_msg(result) =~
                "Actions: Keep workspace, Review drafts, Discard drafts and close"
@@ -305,8 +306,8 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
       result = Workspace.workspace_discard_and_close(state)
 
-      assert TabBar.get_workspace(result.shell_state.tab_bar, 1) == nil
-      assert TabBar.active_workspace_id(result.shell_state.tab_bar) == 0
+      assert TabBar.get_workspace(result.shell_runtime.state.tab_bar, 1) == nil
+      assert TabBar.active_workspace_id(result.shell_runtime.state.tab_bar) == 0
     end
 
     test "workspace_discard_and_close refuses while the agent session is alive and keeps ProjectView drafts intact",
@@ -335,7 +336,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
         })
 
       result = Workspace.workspace_discard_and_close(state)
-      workspace = TabBar.get_workspace(result.shell_state.tab_bar, 1)
+      workspace = TabBar.get_workspace(result.shell_runtime.state.tab_bar, 1)
 
       assert workspace != nil
       assert workspace.session == session_pid
@@ -375,8 +376,8 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
       result = Workspace.workspace_discard_and_close(state)
 
-      assert TabBar.get_workspace(result.shell_state.tab_bar, 1) == nil
-      assert TabBar.active_workspace_id(result.shell_state.tab_bar) == 0
+      assert TabBar.get_workspace(result.shell_runtime.state.tab_bar, 1) == nil
+      assert TabBar.active_workspace_id(result.shell_runtime.state.tab_bar) == 0
       assert File.read!(path) == "one\n"
       assert_receive {:DOWN, ^changeset_ref, :process, _, _}
       assert_receive {:DOWN, ^fork_store_ref, :process, _, _}
@@ -397,14 +398,14 @@ defmodule MingaEditor.Commands.WorkspaceTest do
         |> put_active_workspace_session(session_pid)
 
       result = Workspace.workspace_close(state)
-      workspace = TabBar.get_workspace(result.shell_state.tab_bar, 1)
+      workspace = TabBar.get_workspace(result.shell_runtime.state.tab_bar, 1)
 
       assert workspace != nil
 
       assert EditorState.status_msg(result) ==
                "Stop the agent session before closing this workspace"
 
-      assert result.shell_state.tab_bar == state.shell_state.tab_bar
+      assert result.shell_runtime.state.tab_bar == state.shell_runtime.state.tab_bar
       assert :ok = ProjectView.write_file(project_view, "lib/a.ex", "still alive\n")
       assert {:ok, "still alive\n"} = ProjectView.read_file(project_view, "lib/a.ex")
       refute_receive {:DOWN, ^changeset_ref, :process, _, _}
@@ -425,8 +426,8 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
       result = Workspace.workspace_close(state)
 
-      assert TabBar.get_workspace(result.shell_state.tab_bar, 1) == nil
-      assert TabBar.active_workspace_id(result.shell_state.tab_bar) == 0
+      assert TabBar.get_workspace(result.shell_runtime.state.tab_bar, 1) == nil
+      assert TabBar.active_workspace_id(result.shell_runtime.state.tab_bar) == 0
       assert_receive {:DOWN, ^changeset_ref, :process, _, _}
       assert_receive {:DOWN, ^fork_store_ref, :process, _, _}
     end
@@ -442,7 +443,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
         |> put_active_workspace_project_view(view)
 
       result = Workspace.workspace_close(state)
-      workspace = TabBar.get_workspace(result.shell_state.tab_bar, 1)
+      workspace = TabBar.get_workspace(result.shell_runtime.state.tab_bar, 1)
 
       assert workspace != nil
       assert workspace.review.state == :needs_review
@@ -471,7 +472,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
         })
 
       result = Workspace.workspace_resolve_conflicts(state)
-      review = TabBar.get_workspace(result.shell_state.tab_bar, 1).review
+      review = TabBar.get_workspace(result.shell_runtime.state.tab_bar, 1).review
 
       assert review.state == :conflict
       assert review.conflict_files != []
@@ -485,7 +486,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
       assert {:picker,
               %{picker_ui: %{source: WorkspaceSource, picker: %{title: "Switch Workspace"}}}} =
-               result.shell_state.modal
+               result.shell_runtime.state.modal
 
       active_item =
         result
@@ -511,7 +512,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
       assert {:picker,
               %{picker_ui: %{source: PendingReviewsSource, picker: %{title: "Pending reviews"}}}} =
-               result.shell_state.modal
+               result.shell_runtime.state.modal
     end
   end
 
@@ -533,7 +534,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
         })
 
       result = Workspace.workspace_review_drafts(state)
-      review = TabBar.get_workspace(result.shell_state.tab_bar, 1).review
+      review = TabBar.get_workspace(result.shell_runtime.state.tab_bar, 1).review
 
       assert review.state == :needs_review
       assert review.changed_files == [file_ref()]
@@ -559,7 +560,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
         })
 
       result = Workspace.workspace_promote(state)
-      review = TabBar.get_workspace(result.shell_state.tab_bar, 1).review
+      review = TabBar.get_workspace(result.shell_runtime.state.tab_bar, 1).review
 
       assert review.state == :needs_review
       assert review.changed_files == [file_ref()]
@@ -585,7 +586,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
         })
 
       result = Workspace.workspace_discard(state)
-      review = TabBar.get_workspace(result.shell_state.tab_bar, 1).review
+      review = TabBar.get_workspace(result.shell_runtime.state.tab_bar, 1).review
 
       assert review.state == :needs_review
       assert review.changed_files == [file_ref()]
@@ -612,8 +613,8 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
       result = Workspace.workspace_discard_and_close(state)
 
-      assert TabBar.get_workspace(result.shell_state.tab_bar, 1) != nil
-      assert TabBar.active_workspace_id(result.shell_state.tab_bar) == 1
+      assert TabBar.get_workspace(result.shell_runtime.state.tab_bar, 1) != nil
+      assert TabBar.active_workspace_id(result.shell_runtime.state.tab_bar) == 1
       assert EditorState.status_msg(result) =~ "Workspace review transition failed"
     end
 
@@ -632,7 +633,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
         })
 
       result = Workspace.workspace_discard(state)
-      review = TabBar.get_workspace(result.shell_state.tab_bar, 1).review
+      review = TabBar.get_workspace(result.shell_runtime.state.tab_bar, 1).review
 
       assert review.state == :needs_review
       assert review.changed_files == [file_ref()]
@@ -648,7 +649,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
       assert {:picker,
               %{picker_ui: %{source: WorkspaceTargetSource, context: %{operation: :move}}}} =
-               result.shell_state.modal
+               result.shell_runtime.state.modal
     end
 
     test "workspace_copy_file opens the target workspace picker" do
@@ -658,7 +659,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
       assert {:picker,
               %{picker_ui: %{source: WorkspaceTargetSource, context: %{operation: :copy}}}} =
-               result.shell_state.modal
+               result.shell_runtime.state.modal
     end
 
     test "workspace_move_file reports when no other workspaces exist" do
@@ -668,7 +669,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
       state = %EditorState{
         port_manager: self(),
         workspace: %SessionState{viewport: Viewport.new(24, 80)},
-        shell_state: %TraditionalState{tab_bar: tb}
+        shell_runtime: Runtime.new(Runtime.default_entry(), %TraditionalState{tab_bar: tb})
       }
 
       result = Workspace.workspace_move_file(state)
@@ -684,7 +685,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
       assert {:picker,
               %{picker_ui: %{source: WorkspaceIconSource, picker: %{title: "Set Workspace Icon"}}}} =
-               result.shell_state.modal
+               result.shell_runtime.state.modal
 
       current_icon =
         result
@@ -710,7 +711,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
                   cursor: 7
                 }
               }} =
-               result.shell_state.modal
+               result.shell_runtime.state.modal
     end
   end
 
@@ -720,7 +721,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
       result = Workspace.switch_to_manual_workspace(state)
 
       assert %EditorState{} = result
-      assert result.shell_state.tab_bar.active_id == 1
+      assert result.shell_runtime.state.tab_bar.active_id == 1
     end
   end
 
@@ -730,14 +731,14 @@ defmodule MingaEditor.Commands.WorkspaceTest do
       result = Workspace.workspace_goto(state, 0)
 
       assert %EditorState{} = result
-      assert result.shell_state.tab_bar.active_id == 1
+      assert result.shell_runtime.state.tab_bar.active_id == 1
     end
 
     test "workspace numbers are one-based" do
       state = make_state()
 
-      assert Workspace.workspace_goto(state, 1).shell_state.tab_bar.active_id == 2
-      assert Workspace.workspace_goto(state, 2).shell_state.tab_bar.active_id == 3
+      assert Workspace.workspace_goto(state, 1).shell_runtime.state.tab_bar.active_id == 2
+      assert Workspace.workspace_goto(state, 2).shell_runtime.state.tab_bar.active_id == 3
     end
   end
 end
