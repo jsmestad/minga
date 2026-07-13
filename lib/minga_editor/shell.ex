@@ -64,19 +64,18 @@ defmodule MingaEditor.Shell do
               workspace(),
               buffer_pid :: pid(),
               context :: buffer_add_context()
-            ) :: {shell_state(), workspace(), [MingaEditor.effect()]}
+            ) :: {shell_state(), workspace()}
 
   @doc "The active buffer changed."
-  @callback on_buffer_switched(shell_state(), workspace()) ::
-              {shell_state(), workspace(), [MingaEditor.effect()]}
+  @callback on_buffer_switched(shell_state(), workspace()) :: {shell_state(), workspace()}
 
   @doc "A buffer process died."
   @callback on_buffer_died(shell_state(), workspace(), dead_pid :: pid()) ::
-              {shell_state(), workspace(), [MingaEditor.effect()]}
+              {shell_state(), workspace()}
 
   @doc "An agent session emitted a background event."
   @callback on_agent_event(shell_state(), workspace(), session_pid :: pid(), event :: term()) ::
-              {shell_state(), workspace(), [MingaEditor.effect()]}
+              {shell_state(), workspace()}
 
   @doc "Returns whether shell state owns an agent session pid."
   @callback owns_agent_session?(shell_state(), session_pid :: pid()) :: boolean()

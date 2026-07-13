@@ -21,28 +21,40 @@ defmodule MingaEditor.Handlers.SessionRestore do
   @spec restore_session(state()) :: state()
   def restore_session(state) do
     case Session.load(EditorSessionState.session_opts(state.session)) do
-      {:ok, session} ->
-        Minga.Log.info(:editor, "Restored from previous session")
-
-        session.buffers
-        |> Enum.reduce(state, &restore_session_buffer/2)
-        |> restore_active_file(session.active_file)
-
-      {:error, _} ->
-        state
+      {:ok, session} -> apply_session_snapshot(state, session)
+      {:error, _} -> state
     end
+  end
+
+  @doc "Applies already-loaded session metadata from the Editor process."
+  @spec apply_session_snapshot(state(), Session.snapshot()) :: state()
+  def apply_session_snapshot(state, session) do
+    Minga.Log.info(:editor, "Restored from previous session")
+
+    session.buffers
+    |> Enum.reduce(state, &restore_session_buffer/2)
+    |> restore_active_file(session.active_file)
   end
 
   @spec recover_swap_entries(state(), [Minga.Session.swap_entry()]) :: state()
   def recover_swap_entries(state, entries) do
-    count = length(entries)
+    recovered =
+      Enum.map(entries, fn entry -> {entry, Session.recover_swap_file(entry.swap_path)} end)
 
+    apply_recovered_entries(state, recovered)
+  end
+
+  @doc "Applies already-read swap contents from the Editor process."
+  @spec apply_recovered_entries(state(), [
+          {Session.swap_entry(), {:ok, String.t(), String.t()} | {:error, term()}}
+        ]) :: state()
+  def apply_recovered_entries(state, entries) do
     Minga.Log.info(
       :editor,
-      "Found #{count} file(s) with unsaved changes from a previous session"
+      "Found #{length(entries)} file(s) with unsaved changes from a previous session"
     )
 
-    Enum.reduce(entries, state, &recover_swap_entry/2)
+    Enum.reduce(entries, state, &apply_recovered_entry/2)
   end
 
   @spec maybe_check_swap_recovery(state()) :: :ok
@@ -86,21 +98,22 @@ defmodule MingaEditor.Handlers.SessionRestore do
     end
   end
 
-  @spec recover_swap_entry(Minga.Session.swap_entry(), state()) :: state()
-  defp recover_swap_entry(entry, state) do
-    case Minga.Session.recover_swap_file(entry.swap_path) do
-      {:ok, file_path, content} ->
-        Minga.Log.info(:editor, "Recovered: #{Path.basename(file_path)}")
-        recover_buffer(state, file_path, content)
+  @spec apply_recovered_entry(
+          {Session.swap_entry(), {:ok, String.t(), String.t()} | {:error, term()}},
+          state()
+        ) :: state()
+  defp apply_recovered_entry({_entry, {:ok, file_path, content}}, state) do
+    Minga.Log.info(:editor, "Recovered: #{Path.basename(file_path)}")
+    recover_buffer(state, file_path, content)
+  end
 
-      {:error, reason} ->
-        Minga.Log.info(
-          :editor,
-          "Failed to recover #{Path.basename(entry.path)}: #{inspect(reason)}"
-        )
+  defp apply_recovered_entry({entry, {:error, reason}}, state) do
+    Minga.Log.info(
+      :editor,
+      "Failed to recover #{Path.basename(entry.path)}: #{inspect(reason)}"
+    )
 
-        state
-    end
+    state
   end
 
   # Opens a file and replaces its content with recovered swap data.

@@ -1,13 +1,13 @@
 defmodule MingaEditor.Handlers.ToolHandler do
   @moduledoc """
-  Pure handler for tool installation/management events.
+  Owns tool installation/management transitions and external actions.
 
-  Extracts the 8 `handle_info` clauses for tool events from the Editor
-  GenServer into pure `{state, [effect]}` functions. The Editor delegates
-  to this module via catch-all clauses and applies the returned effects.
-
-  Each function reads and writes only the focused tool-prompt owner and
-  status notices.
+  `dispatch/2` updates tool prompts/notices first, then applies focused actions
+  in list order. Picker refreshes, logs, renders, and the clear-status timer run
+  in the Editor process, so the same process creates and receives timer
+  messages. Installer supervision remains with the tool service; this workflow
+  only presents its ordered events. Unknown/stale events are ignored, install
+  failures are logged and rendered, and headless mode creates no timer.
   """
 
   alias MingaEditor.Shell.Traditional.ToolPrompts
@@ -18,12 +18,16 @@ defmodule MingaEditor.Handlers.ToolHandler do
   @type tool_effect ::
           :render
           | {:log_message, String.t()}
-          | {:log, atom(), atom(), String.t()}
-          | {:set_status, String.t()}
-          | :clear_status
+          | {:log, atom(), :debug | :info | :warning | :error, String.t()}
           | {:refresh_tool_picker}
           | {:send_after, term(), non_neg_integer()}
-          | {:transition_mode, atom(), term()}
+
+  @doc "Applies one tool event and its focused actions."
+  @spec dispatch(EditorState.t(), term()) :: EditorState.t()
+  def dispatch(%EditorState{} = state, message) do
+    {state, effects} = handle(state, message)
+    apply_effects(state, effects)
+  end
 
   @doc """
   Dispatches a tool event to the appropriate handler.
@@ -129,6 +133,41 @@ defmodule MingaEditor.Handlers.ToolHandler do
   end
 
   # ── Private helpers ──────────────────────────────────────────────────────
+
+  @spec apply_effects(EditorState.t(), [tool_effect()]) :: EditorState.t()
+  defp apply_effects(state, []), do: state
+
+  defp apply_effects(state, [effect | rest]) do
+    state = apply_effect(state, effect)
+    apply_effects(state, rest)
+  end
+
+  @spec apply_effect(EditorState.t(), tool_effect()) :: EditorState.t()
+  defp apply_effect(state, :render), do: MingaEditor.schedule_render(state, 16)
+
+  defp apply_effect(state, {:log_message, message}) do
+    Minga.Log.info(:editor, message)
+    state
+  end
+
+  defp apply_effect(state, {:log, subsystem, level, message}) do
+    log(subsystem, level, message)
+    state
+  end
+
+  defp apply_effect(state, {:refresh_tool_picker}),
+    do: MingaEditor.maybe_refresh_tool_picker(state)
+
+  defp apply_effect(state, {:send_after, message, delay_ms}) do
+    if state.backend != :headless, do: Process.send_after(self(), message, delay_ms)
+    state
+  end
+
+  @spec log(atom(), :debug | :info | :warning | :error, String.t()) :: :ok
+  defp log(subsystem, :debug, message), do: Minga.Log.debug(subsystem, message)
+  defp log(subsystem, :info, message), do: Minga.Log.info(subsystem, message)
+  defp log(subsystem, :warning, message), do: Minga.Log.warning(subsystem, message)
+  defp log(subsystem, :error, message), do: Minga.Log.error(subsystem, message)
 
   @spec handle_tool_missing(EditorState.t(), String.t(), boolean()) ::
           {EditorState.t(), [tool_effect()]}

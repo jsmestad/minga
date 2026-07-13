@@ -1,8 +1,11 @@
 defmodule MingaEditor.Shell.Workflow do
   @moduledoc """
-  Effectful editor workflows around the pure shell runtime value.
+  Editor workflows around the pure shell runtime value.
 
-  This module resolves registry entries, initializes shell states, and owns user-visible logging and status policy. `MingaEditor.Shell.Runtime` receives only resolved values.
+  This module resolves registry entries, initializes shell states, and owns
+  user-visible logging and status policy. `MingaEditor.Shell.Runtime` receives
+  only resolved values. Shell lifecycle callbacks return updated values
+  directly and execute in the Editor process that owns their timers.
   """
 
   alias MingaEditor.Shell.Entry

@@ -2,7 +2,6 @@ defmodule MingaEditor.Remote.EventReplay do
   @moduledoc "Replays durable remote agent events into the foreground agent UI."
 
   alias MingaEditor.Agent.Events
-  alias MingaEditor.Handlers.EffectHandler
   alias MingaEditor.State, as: EditorState
   alias MingaAgent.EventLog.EventRecord
   alias MingaAgent.ToolApproval.Preview
@@ -18,8 +17,7 @@ defmodule MingaEditor.Remote.EventReplay do
           acc
 
         event ->
-          {acc, effects} = Events.handle(acc, event)
-          EffectHandler.apply_effects(acc, effects)
+          Events.dispatch(acc, event)
       end
     end)
   end

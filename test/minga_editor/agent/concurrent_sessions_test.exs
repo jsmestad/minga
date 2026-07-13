@@ -164,8 +164,8 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       state = base_state(tabs, 1)
       assert AgentAccess.session(state) == streaming
 
-      # Use the public switch_tab/2 path so the :rebuild_agent_session
-      # effect runs; that's how the Editor switches tabs in production.
+      # Use the public switch_tab/2 aggregate transition so presentation state
+      # refreshes from the target session as it does in production.
       switched = EditorState.switch_tab(state, 2)
 
       # Tab 2's session is now in scope; tab 1's session is still alive

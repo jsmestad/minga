@@ -60,8 +60,7 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
 
       shell_state = %ShellState{tab_bar: TabBar.new(Tab.new_file(1, "initial.ex"), root)}
 
-      {new_shell, _workspace, _effects} =
-        Traditional.on_buffer_added(shell_state, workspace, buf, :open)
+      {new_shell, _workspace} = Traditional.on_buffer_added(shell_state, workspace, buf, :open)
 
       active_tab = TabBar.active(new_shell.tab_bar)
       assert {:ok, expected_ref} = FileRef.from_path(root, path)
@@ -80,8 +79,7 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
 
       shell_state = %ShellState{tab_bar: TabBar.new(Tab.new_file(1, "initial.ex"), root)}
 
-      {new_shell, _workspace, _effects} =
-        Traditional.on_buffer_added(shell_state, workspace, buf, :open)
+      {new_shell, _workspace} = Traditional.on_buffer_added(shell_state, workspace, buf, :open)
 
       active_tab = TabBar.active(new_shell.tab_bar)
       workspace = TabBar.get_workspace(new_shell.tab_bar, 0)
@@ -105,8 +103,7 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
 
       shell_state = %ShellState{tab_bar: TabBar.new(Tab.new_file(1, "initial.ex"), root)}
 
-      {new_shell, _workspace, _effects} =
-        Traditional.on_buffer_added(shell_state, workspace, buf, :open)
+      {new_shell, _workspace} = Traditional.on_buffer_added(shell_state, workspace, buf, :open)
 
       active_tab = TabBar.active(new_shell.tab_bar)
       workspace = TabBar.get_workspace(new_shell.tab_bar, 0)

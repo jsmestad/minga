@@ -239,7 +239,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       state = EditorState.monitor_buffer(state, buf2)
 
       # Close the active buffer (buf2)
-      {new_state, _effects} = EditorState.close_buffer_pure(state, buf2)
+      new_state = EditorState.close_buffer_pure(state, buf2)
 
       # buf1 should become active
       assert new_state.workspace.buffers.active == buf1
@@ -264,7 +264,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       assert Content.agent_chat?(window.content)
 
       # Close the file buffer
-      {new_state, _effects} = EditorState.close_buffer_pure(state, file_buf)
+      new_state = EditorState.close_buffer_pure(state, file_buf)
 
       # Window should still show agent_chat (on_buffer_died respects content guard)
       window = Map.fetch!(new_state.workspace.windows.map, win_id)
@@ -350,9 +350,9 @@ defmodule MingaEditor.State.ShellCallbacksTest do
   describe "switch_tab_pure/2 accessor-based dispatch" do
     test "no-op when tab bar is nil" do
       state = base_state()
-      {new_state, effects} = EditorState.switch_tab_pure(state, 999)
+      {new_state, result} = EditorState.switch_tab_pure(state, 999)
       assert new_state == state
-      assert effects == []
+      assert result == :unchanged
     end
 
     test "no-op when switching to already active tab" do
@@ -360,9 +360,9 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       tb = EditorState.tab_bar(state)
       active_id = tb.active_id
 
-      {new_state, effects} = EditorState.switch_tab_pure(state, active_id)
+      {new_state, result} = EditorState.switch_tab_pure(state, active_id)
       assert new_state == state
-      assert effects == []
+      assert result == :unchanged
     end
   end
 end

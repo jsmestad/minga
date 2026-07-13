@@ -1,23 +1,26 @@
 defmodule MingaEditor.Handlers.HighlightHandler do
   @moduledoc """
-  Pure handler for highlight/parser events.
+  Owns highlight/parser transitions and their focused external actions.
 
-  Extracts the 15 `handle_info` clauses for `{:minga_highlight, _}` and
-  `{:minga_input, _}` parser messages from the Editor GenServer into
-  pure `{state, [effect]}` functions. The Editor delegates to this module
-  via 1-2 catch-all clauses and applies the returned effects.
+  `dispatch/2` applies parser state first, then actions in list order. Parser
+  correlation is checked before mutation, so stale buffer versions are
+  dropped. Rendering, semantic-token requests, conceal updates, prettification,
+  parser logs, and eviction timers all execute from the Editor process;
+  `Process.send_after/3` therefore targets the process that receives the timer.
 
-  Each function reads and writes only highlight-related state slices
-  (`state.highlighting`, `state.injection_ranges`,
-  `state.parser_status`). Cross-cutting concerns (render, log, timer
-  scheduling) are expressed as effects.
+  Parser work remains supervised by `Minga.Parser.Manager`. Prettification is
+  admitted to its Buffer-keyed latest-wins typed effect with immutable
+  highlight/filetype input. Parser failures become status/log transitions,
+  while stale or unknown messages are ignored.
   """
 
   alias Minga.Parser.EventCorrelation
   alias MingaEditor.HighlightEvents
   alias MingaEditor.HighlightSync
+  alias MingaEditor.SemanticTokenSync
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Highlighting
+  alias MingaEditor.UI.PrettifySymbolsEffect
   alias MingaEditor.Window
   alias Minga.Editing.Fold.Range, as: FoldRange
 
@@ -26,14 +29,18 @@ defmodule MingaEditor.Handlers.HighlightHandler do
           :render
           | {:render, pos_integer()}
           | {:log_message, String.t()}
-          | {:log, atom(), atom(), String.t()}
-          | {:setup_highlight_sync, pid()}
+          | {:log, atom(), :debug | :info | :warning | :error, String.t()}
           | {:request_semantic_tokens}
-          | {:send_after, term(), non_neg_integer()}
           | {:conceal_spans, pid(), [map()]}
           | {:prettify_symbols, pid()}
-          | {:update_agent_styled_cache}
           | {:evict_parser_trees_timer}
+
+  @doc "Applies one parser/highlight message and its focused actions."
+  @spec dispatch(EditorState.t(), term()) :: EditorState.t()
+  def dispatch(%EditorState{} = state, message) do
+    {state, effects} = handle(state, message)
+    apply_effects(state, effects)
+  end
 
   @doc """
   Dispatches a highlight/parser message to the appropriate handler.
@@ -193,6 +200,55 @@ defmodule MingaEditor.Handlers.HighlightHandler do
   end
 
   # ── Private helpers ──────────────────────────────────────────────────────
+
+  @spec apply_effects(EditorState.t(), [highlight_effect()]) :: EditorState.t()
+  defp apply_effects(state, []), do: state
+
+  defp apply_effects(state, [effect | rest]) do
+    state = apply_effect(state, effect)
+    apply_effects(state, rest)
+  end
+
+  @spec apply_effect(EditorState.t(), highlight_effect()) :: EditorState.t()
+  defp apply_effect(state, :render), do: MingaEditor.schedule_render(state, 16)
+
+  defp apply_effect(state, {:render, delay_ms}),
+    do: MingaEditor.schedule_render(state, delay_ms)
+
+  defp apply_effect(state, {:log_message, message}) do
+    Minga.Log.info(:editor, message)
+    state
+  end
+
+  defp apply_effect(state, {:log, subsystem, level, message}) do
+    log(subsystem, level, message)
+    state
+  end
+
+  defp apply_effect(state, {:request_semantic_tokens}),
+    do: SemanticTokenSync.request_tokens(state)
+
+  defp apply_effect(state, {:conceal_spans, pid, spans}) do
+    HighlightEvents.handle_conceal_spans(state, pid, spans)
+    state
+  end
+
+  defp apply_effect(state, {:prettify_symbols, pid}),
+    do: PrettifySymbolsEffect.schedule(state, pid)
+
+  defp apply_effect(state, {:evict_parser_trees_timer}) do
+    if state.backend != :headless do
+      Process.send_after(self(), :evict_parser_trees, HighlightSync.eviction_check_interval_ms())
+    end
+
+    state
+  end
+
+  @spec log(atom(), :debug | :info | :warning | :error, String.t()) :: :ok
+  defp log(subsystem, :debug, message), do: Minga.Log.debug(subsystem, message)
+  defp log(subsystem, :info, message), do: Minga.Log.info(subsystem, message)
+  defp log(subsystem, :warning, message), do: Minga.Log.warning(subsystem, message)
+  defp log(subsystem, :error, message), do: Minga.Log.error(subsystem, message)
 
   @spec attach_buffer(term(), pid()) :: term()
   defp attach_buffer({:highlight_names, names}, pid), do: {:highlight_names, pid, names}
