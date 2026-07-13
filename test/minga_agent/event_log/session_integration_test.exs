@@ -3,11 +3,14 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
 
   alias MingaAgent.Event
   alias MingaAgent.EventLog
+  alias MingaAgent.EventLog.ControllableStore
+  alias MingaAgent.EventLog.Failure
   alias MingaAgent.EventLog.Store
   alias MingaAgent.Session
   alias MingaAgent.TodoItem
 
   @moduletag :tmp_dir
+  @event_timeout 2_000
 
   defmodule SteeringProvider do
     @behaviour MingaAgent.Provider
@@ -254,23 +257,25 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
         {EventLog, name: log_name, db_dir: tmp_dir, retention_sweep?: false, health_check: :none}
       )
 
-    EventLog.record(
-      "redaction-session",
-      :system_message,
-      %{
-        remote_token: "remote-secret",
-        nested: %{
-          access_token: "access-secret",
-          refresh_token: "refresh-secret",
-          authorization: "Bearer secret",
-          owner_pid: self(),
-          owner_ref: make_ref()
-        }
-      },
-      log_name
-    )
+    assert {:queued, receipt} =
+             EventLog.record(
+               "redaction-session",
+               :system_message,
+               %{
+                 remote_token: "remote-secret",
+                 nested: %{
+                   access_token: "access-secret",
+                   refresh_token: "refresh-secret",
+                   authorization: "Bearer secret",
+                   owner_pid: self(),
+                   owner_ref: make_ref()
+                 }
+               },
+               log_name
+             )
 
-    :sys.get_state(log_pid)
+    assert {:persisted, _event_id} = EventLog.await(receipt)
+    assert :ok = EventLog.await_idle(log_pid)
 
     {:ok, db} = EventLog.open_read_connection(db_dir: tmp_dir)
     {:ok, [event]} = EventLog.events_after(db, "redaction-session", 0, 10)
@@ -282,6 +287,84 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
     assert event.payload["nested"]["authorization"] == "[REDACTED]"
     assert event.payload["nested"]["owner_pid"] == "[PID]"
     assert event.payload["nested"]["owner_ref"] == "[REFERENCE]"
+  end
+
+  test "session stays responsive to a stalled critical write and exposes commitment failure" do
+    log_name = unique_name("session-failure-log")
+
+    start_supervised!(
+      {EventLog,
+       name: log_name,
+       store_backend: ControllableStore,
+       store_backend_opts: [controller: self()],
+       writer_restart_delay_ms: 60_000,
+       retention_sweep?: false,
+       health_check: :none}
+    )
+
+    assert_receive {:event_log_store_open, writer, _path}, @event_timeout
+    send(writer, {:event_log_store_open_result, :ok})
+
+    session =
+      start_supervised!(
+        {Session,
+         session_id: "failure-session",
+         provider: ReplayProvider,
+         event_log_server: log_name,
+         persist?: false,
+         hooks_enabled?: false}
+      )
+
+    assert :ok = Session.subscribe(session, self(), role: :viewer)
+    assert_receive {:agent_event, ^session, {:credentials_status, _configured?}}
+    assert_receive {:event_log_store_insert, ^writer, %{event_type: :session_started}}
+    assert Session.status(session) == :idle
+
+    send(writer, {:event_log_store_insert_result, {:error, :disk_full}})
+
+    assert_receive {:agent_event, ^session,
+                    %Failure{
+                      stage: :persistence,
+                      receipt: receipt,
+                      event_type: :session_started,
+                      reason: :disk_full
+                    }}
+
+    assert is_reference(receipt)
+
+    Session.add_system_message(session, "persistence recovered", :info)
+    :sys.get_state(session)
+    assert_receive {:event_log_store_insert, ^writer, %{event_type: :system_message}}
+    send(writer, {:event_log_store_insert_result, {:ok, 41}})
+    assert :ok = EventLog.await_idle(log_name)
+    :sys.get_state(session)
+
+    parent = self()
+
+    late_subscriber =
+      spawn(fn ->
+        Enum.each(1..2, fn _index ->
+          receive do
+            event -> send(parent, {:late_subscriber, event})
+          end
+        end)
+      end)
+
+    assert :ok = Session.subscribe(session, late_subscriber, role: :viewer)
+
+    assert_receive {:late_subscriber,
+                    {:agent_event, ^session, {:credentials_status, _configured?}}}
+
+    assert_receive {:late_subscriber,
+                    {:agent_event, ^session,
+                     %Failure{
+                       stage: :persistence,
+                       receipt: nil,
+                       event_type: :session_started,
+                       reason: :disk_full
+                     }}}
+
+    refute_receive {:event_log_store_insert, ^writer, %{event_type: :error}}
   end
 
   test "subscriber disconnects are durably recorded", %{tmp_dir: tmp_dir} do
@@ -380,7 +463,7 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
     :sys.get_state(session)
     Session.add_system_message(session, "before crash", :info)
     :sys.get_state(session)
-    :sys.get_state(log_pid)
+    assert :ok = EventLog.await_idle(log_pid)
 
     ref = Process.monitor(session)
     Process.exit(session, :kill)
@@ -414,7 +497,7 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
 
   defp wait_for_user_texts(db, session_id, session_pid, log_pid, attempts) when attempts > 0 do
     :sys.get_state(session_pid)
-    :sys.get_state(log_pid)
+    assert :ok = EventLog.await_idle(log_pid)
     {:ok, events} = EventLog.events_after(db, session_id, 0, 50)
 
     user_texts =
@@ -445,7 +528,7 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
   defp wait_for_event(db, session_id, event_type, session_pid, log_pid, attempts)
        when attempts > 0 do
     :sys.get_state(session_pid)
-    :sys.get_state(log_pid)
+    assert :ok = EventLog.await_idle(log_pid)
     {:ok, events} = EventLog.events_after(db, session_id, 0, 50)
 
     if Enum.any?(events, &(&1.event_type == event_type)) do

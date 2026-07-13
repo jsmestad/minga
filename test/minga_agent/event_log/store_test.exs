@@ -34,6 +34,52 @@ defmodule MingaAgent.EventLog.StoreTest do
     assert {:ok, []} = Store.events_after(db, "session-a", second_id, 10)
   end
 
+  test "repeated insertion of one event key returns the committed id without duplication", %{
+    db: db
+  } do
+    record = EventRecord.new("session-a", :tool_call_started, %{"tool_call_id" => "tool-1"})
+    %EventRecord{event_key: expected_event_key} = record
+
+    assert {:ok, first_id} = Store.insert(db, record)
+    assert {:ok, ^first_id} = Store.insert(db, record)
+    assert {:ok, 1} = Store.count(db)
+
+    assert {:ok, [%{id: ^first_id, event_key: event_key}]} =
+             Store.events_after(db, "session-a", 0, 10)
+
+    assert event_key == expected_event_key
+  end
+
+  test "open migrates version one events to stable idempotency keys", %{tmp_dir: tmp_dir} do
+    path = Path.join(tmp_dir, "legacy-agent-events.db")
+    {:ok, legacy} = Exqlite.Sqlite3.open(path)
+
+    :ok =
+      Exqlite.Sqlite3.execute(
+        legacy,
+        "CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, event_type TEXT NOT NULL, payload TEXT NOT NULL DEFAULT '{}', wall_clock TEXT NOT NULL, monotonic_ts INTEGER NOT NULL)"
+      )
+
+    :ok =
+      Exqlite.Sqlite3.execute(legacy, "CREATE TABLE schema_version (version INTEGER NOT NULL)")
+
+    :ok = Exqlite.Sqlite3.execute(legacy, "INSERT INTO schema_version (version) VALUES (1)")
+
+    :ok =
+      Exqlite.Sqlite3.execute(
+        legacy,
+        "INSERT INTO events (session_id, event_type, payload, wall_clock, monotonic_ts) VALUES ('legacy-session', 'session_started', '{}', '2026-01-01T00:00:00Z', 1)"
+      )
+
+    :ok = Exqlite.Sqlite3.close(legacy)
+    {:ok, migrated} = Store.open(path)
+
+    assert {:ok, [%{id: 1, event_key: "legacy-1"}]} =
+             Store.events_after(migrated, "legacy-session", 0, 10)
+
+    :ok = Store.close(migrated)
+  end
+
   test "open creates a missing database directory as private", %{tmp_dir: tmp_dir} do
     dir = Path.join(tmp_dir, "agent-log")
     path = Path.join(dir, "agent_events.db")

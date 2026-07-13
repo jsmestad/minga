@@ -111,7 +111,7 @@ defmodule MingaEditor.Commands.FormattingAsyncTest do
     )
 
     :ok = :sys.resume(buffer)
-    assert_receive {^insert_tag, :ok}
+    assert_receive {^insert_tag, :ok}, @effect_timeout
     {new_state, outcome} = Task.await(task)
 
     assert Buffer.content(buffer) == "!FORMATTED\n"

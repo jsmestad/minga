@@ -1,13 +1,15 @@
 defmodule MingaAgent.EventLog.Store do
   @moduledoc "SQLite storage backend for durable agent session events."
 
+  @behaviour MingaAgent.EventLog.StoreBackend
+
   alias MingaAgent.EventLog.EventRecord
   alias MingaAgent.EventLog.Taxonomy
   alias Exqlite.Sqlite3
 
   @type db :: Sqlite3.db()
 
-  @schema_version 1
+  @schema_version 2
 
   @doc "Opens or creates the agent event database."
   @spec open(String.t()) :: {:ok, db()} | {:error, term()}
@@ -17,6 +19,19 @@ defmodule MingaAgent.EventLog.Store do
         {:ok, db} -> setup_opened(db, db_path)
         {:error, reason} -> {:error, reason}
       end
+    end
+  end
+
+  @doc "Opens the writer connection, recreating a database that fails an integrity check."
+  @impl MingaAgent.EventLog.StoreBackend
+  @spec open_writer(String.t(), keyword()) :: {:ok, db()} | {:error, term()}
+  def open_writer(db_path, _opts) do
+    case open(db_path) do
+      {:ok, db} ->
+        {:ok, db}
+
+      {:error, reason} ->
+        maybe_recreate_corrupt_database(db_path, reason)
     end
   end
 
@@ -30,18 +45,23 @@ defmodule MingaAgent.EventLog.Store do
   end
 
   @doc "Closes the database connection."
+  @impl MingaAgent.EventLog.StoreBackend
   @spec close(db()) :: :ok | {:error, term()}
   def close(db), do: Sqlite3.close(db)
 
   @doc "Inserts an append-only event record."
+  @impl MingaAgent.EventLog.StoreBackend
   @spec insert(db(), EventRecord.t()) :: {:ok, pos_integer()} | {:error, term()}
   def insert(db, %EventRecord{} = record) do
     sql = """
-    INSERT INTO events (session_id, event_type, payload, wall_clock, monotonic_ts)
-    VALUES (?1, ?2, ?3, ?4, ?5)
+    INSERT INTO events (event_key, session_id, event_type, payload, wall_clock, monotonic_ts)
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+    ON CONFLICT(event_key) DO NOTHING
+    RETURNING id
     """
 
     params = [
+      record.event_key,
       record.session_id,
       Atom.to_string(record.event_type),
       JSON.encode!(record.payload),
@@ -52,17 +72,12 @@ defmodule MingaAgent.EventLog.Store do
     case Sqlite3.prepare(db, sql) do
       {:ok, stmt} ->
         result =
-          with :ok <- Sqlite3.bind(stmt, params),
-               :done <- Sqlite3.step(db, stmt) do
-            :ok
+          with :ok <- Sqlite3.bind(stmt, params) do
+            insert_result(db, stmt, record.event_key)
           end
 
         Sqlite3.release(db, stmt)
-
-        case result do
-          :ok -> private_last_insert_rowid(db)
-          {:error, reason} -> {:error, reason}
-        end
+        result
 
       {:error, reason} ->
         {:error, reason}
@@ -76,7 +91,7 @@ defmodule MingaAgent.EventLog.Store do
       when is_binary(session_id) and is_integer(last_id) and last_id >= 0 and is_integer(limit) and
              limit > 0 do
     sql = """
-    SELECT id, session_id, event_type, payload, wall_clock, monotonic_ts
+    SELECT id, event_key, session_id, event_type, payload, wall_clock, monotonic_ts
     FROM events
     WHERE session_id = ?1 AND id > ?2
     ORDER BY id ASC
@@ -110,7 +125,7 @@ defmodule MingaAgent.EventLog.Store do
   def file_edits_for_path(db, path, limit \\ 200)
       when is_binary(path) and is_integer(limit) and limit > 0 do
     sql = """
-    SELECT id, session_id, event_type, payload, wall_clock, monotonic_ts
+    SELECT id, event_key, session_id, event_type, payload, wall_clock, monotonic_ts
     FROM events
     WHERE event_type = 'file_edit_proposed' AND json_extract(payload, '$.path') = ?1
     ORDER BY id DESC
@@ -140,6 +155,7 @@ defmodule MingaAgent.EventLog.Store do
   end
 
   @doc "Deletes events older than the given wall-clock time."
+  @impl MingaAgent.EventLog.StoreBackend
   @spec delete_before(db(), DateTime.t()) :: {:ok, non_neg_integer()} | {:error, term()}
   def delete_before(db, cutoff) do
     sql = "DELETE FROM events WHERE wall_clock < ?1"
@@ -180,6 +196,77 @@ defmodule MingaAgent.EventLog.Store do
     end
   end
 
+  @spec insert_result(db(), Sqlite3.statement(), String.t()) ::
+          {:ok, pos_integer()} | {:error, term()}
+  defp insert_result(db, stmt, event_key) do
+    case Sqlite3.step(db, stmt) do
+      {:row, [id]} -> finish_returning_insert(db, stmt, id)
+      :done -> event_id_by_key(db, event_key)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @spec finish_returning_insert(db(), Sqlite3.statement(), pos_integer()) ::
+          {:ok, pos_integer()} | {:error, term()}
+  defp finish_returning_insert(db, stmt, id) do
+    case Sqlite3.step(db, stmt) do
+      :done -> {:ok, id}
+      {:error, reason} -> {:error, reason}
+      other -> {:error, {:unexpected_result, other}}
+    end
+  end
+
+  @spec event_id_by_key(db(), String.t()) :: {:ok, pos_integer()} | {:error, term()}
+  defp event_id_by_key(db, event_key) do
+    with {:ok, stmt} <- Sqlite3.prepare(db, "SELECT id FROM events WHERE event_key = ?1"),
+         :ok <- Sqlite3.bind(stmt, [event_key]) do
+      result = Sqlite3.step(db, stmt)
+      Sqlite3.release(db, stmt)
+      normalize_event_id(result)
+    end
+  end
+
+  @spec normalize_event_id({:row, [pos_integer()]} | :done | {:error, term()}) ::
+          {:ok, pos_integer()} | {:error, term()}
+  defp normalize_event_id({:row, [id]}), do: {:ok, id}
+  defp normalize_event_id(:done), do: {:error, :event_not_found_after_conflict}
+  defp normalize_event_id({:error, reason}), do: {:error, reason}
+
+  @spec maybe_recreate_corrupt_database(String.t(), term()) ::
+          {:ok, db()} | {:error, term()}
+  defp maybe_recreate_corrupt_database(path, reason) do
+    recreate_corrupt_database(path, reason, File.exists?(path) and corrupt?(path))
+  end
+
+  @spec recreate_corrupt_database(String.t(), term(), boolean()) ::
+          {:ok, db()} | {:error, term()}
+  defp recreate_corrupt_database(path, reason, true) do
+    Minga.Log.warning(
+      :agent,
+      "[AgentEventLog] corrupt database, recreating: #{inspect(reason)}"
+    )
+
+    _ = File.rm(path)
+    _ = File.rm(path <> "-wal")
+    _ = File.rm(path <> "-shm")
+    open(path)
+  end
+
+  defp recreate_corrupt_database(_path, reason, false), do: {:error, reason}
+
+  @spec corrupt?(String.t()) :: boolean()
+  defp corrupt?(path) do
+    case Sqlite3.open(path) do
+      {:ok, db} ->
+        result = integrity_check(db, :quick)
+        _ = close(db)
+        match?({:error, _}, result)
+
+      {:error, _reason} ->
+        false
+    end
+  end
+
   @spec setup_opened(db(), String.t() | nil) :: {:ok, db()} | {:error, term()}
   defp setup_opened(db, db_path \\ nil) do
     result =
@@ -208,6 +295,7 @@ defmodule MingaAgent.EventLog.Store do
       """
       CREATE TABLE IF NOT EXISTS events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_key TEXT NOT NULL,
         session_id TEXT NOT NULL,
         event_type TEXT NOT NULL,
         payload TEXT NOT NULL DEFAULT '{}',
@@ -220,7 +308,13 @@ defmodule MingaAgent.EventLog.Store do
       "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)"
     ]
 
-    with :ok <- execute_all(db, statements), do: ensure_schema_version(db)
+    with :ok <- execute_all(db, statements),
+         :ok <- ensure_schema_version(db) do
+      execute(
+        db,
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_events_event_key ON events(event_key)"
+      )
+    end
   end
 
   @spec ensure_schema_version(db()) :: :ok | {:error, term()}
@@ -228,13 +322,42 @@ defmodule MingaAgent.EventLog.Store do
     with {:ok, stmt} <- Sqlite3.prepare(db, "SELECT version FROM schema_version LIMIT 1") do
       result = Sqlite3.step(db, stmt)
       Sqlite3.release(db, stmt)
-
-      case result do
-        :done -> execute(db, "INSERT INTO schema_version (version) VALUES (#{@schema_version})")
-        {:row, [@schema_version]} -> :ok
-        {:row, [_old_version]} -> :ok
-      end
+      apply_schema_version(db, result)
     end
+  end
+
+  @spec apply_schema_version(db(), :done | {:row, [integer()]} | {:error, term()}) ::
+          :ok | {:error, term()}
+  defp apply_schema_version(db, :done) do
+    execute(db, "INSERT INTO schema_version (version) VALUES (#{@schema_version})")
+  end
+
+  defp apply_schema_version(_db, {:row, [@schema_version]}), do: :ok
+  defp apply_schema_version(db, {:row, [1]}), do: migrate_schema_v1(db)
+  defp apply_schema_version(_db, {:row, [version]}), do: {:error, {:unsupported_schema, version}}
+  defp apply_schema_version(_db, {:error, reason}), do: {:error, reason}
+
+  @spec migrate_schema_v1(db()) :: :ok | {:error, term()}
+  defp migrate_schema_v1(db) do
+    with :ok <- execute(db, "BEGIN IMMEDIATE") do
+      result =
+        execute_all(db, [
+          "ALTER TABLE events ADD COLUMN event_key TEXT",
+          "UPDATE events SET event_key = 'legacy-' || id WHERE event_key IS NULL",
+          "CREATE UNIQUE INDEX idx_agent_events_event_key ON events(event_key)",
+          "UPDATE schema_version SET version = #{@schema_version}"
+        ])
+
+      finish_migration(db, result)
+    end
+  end
+
+  @spec finish_migration(db(), :ok | {:error, term()}) :: :ok | {:error, term()}
+  defp finish_migration(db, :ok), do: execute(db, "COMMIT")
+
+  defp finish_migration(db, {:error, _reason} = error) do
+    _ = execute(db, "ROLLBACK")
+    error
   end
 
   @spec execute_all(db(), [String.t()]) :: :ok | {:error, term()}
@@ -297,41 +420,6 @@ defmodule MingaAgent.EventLog.Store do
 
   defp ensure_private_created_directory(_dir, _cwd, {:error, reason}), do: {:error, reason}
 
-  @spec private_last_insert_rowid(db()) :: {:ok, pos_integer()} | {:error, term()}
-  defp private_last_insert_rowid(db) do
-    with {:ok, id} <- last_insert_rowid(db),
-         :ok <- ensure_private_open_database_files(db) do
-      {:ok, id}
-    end
-  end
-
-  @spec ensure_private_open_database_files(db()) :: :ok | {:error, term()}
-  defp ensure_private_open_database_files(db) do
-    case database_path(db) do
-      {:ok, path} -> ensure_private_database_files(path)
-      {:error, _reason} = error -> error
-    end
-  end
-
-  @spec database_path(db()) :: {:ok, String.t() | nil} | {:error, term()}
-  defp database_path(db) do
-    case Sqlite3.prepare(db, "PRAGMA database_list") do
-      {:ok, stmt} ->
-        result = Sqlite3.step(db, stmt)
-        Sqlite3.release(db, stmt)
-
-        case result do
-          {:row, [_seq, "main", ""]} -> {:ok, nil}
-          {:row, [_seq, "main", path]} when is_binary(path) -> {:ok, path}
-          {:error, reason} -> {:error, reason}
-          other -> {:error, {:unexpected_result, other}}
-        end
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
   @spec ensure_private_database_files(String.t() | nil) :: :ok | {:error, term()}
   defp ensure_private_database_files(nil), do: :ok
 
@@ -389,13 +477,22 @@ defmodule MingaAgent.EventLog.Store do
   end
 
   @spec row_to_record([term()]) :: EventRecord.t() | nil
-  defp row_to_record([id, session_id, event_type, payload_json, wall_clock_iso, monotonic_ts]) do
+  defp row_to_record([
+         id,
+         event_key,
+         session_id,
+         event_type,
+         payload_json,
+         wall_clock_iso,
+         monotonic_ts
+       ]) do
     case Taxonomy.from_string(event_type) do
       {:ok, atom_type} ->
         {:ok, wall_clock, _offset} = DateTime.from_iso8601(wall_clock_iso)
 
         %EventRecord{
           id: id,
+          event_key: event_key,
           session_id: session_id,
           event_type: atom_type,
           payload: JSON.decode!(payload_json),
@@ -405,24 +502,6 @@ defmodule MingaAgent.EventLog.Store do
 
       :error ->
         nil
-    end
-  end
-
-  @spec last_insert_rowid(db()) :: {:ok, pos_integer()} | {:error, term()}
-  defp last_insert_rowid(db) do
-    case Sqlite3.prepare(db, "SELECT last_insert_rowid()") do
-      {:ok, stmt} ->
-        result = Sqlite3.step(db, stmt)
-        Sqlite3.release(db, stmt)
-
-        case result do
-          {:row, [id]} -> {:ok, id}
-          {:error, reason} -> {:error, reason}
-          other -> {:error, {:unexpected_result, other}}
-        end
-
-      {:error, reason} ->
-        {:error, reason}
     end
   end
 
