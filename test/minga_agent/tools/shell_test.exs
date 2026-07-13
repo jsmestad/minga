@@ -129,7 +129,7 @@ defmodule MingaAgent.Tools.ShellTest do
 
       assert {:ok, _output} =
                Shell.execute(
-                 "elixir -e 'IO.write(String.duplicate(\"x\", 70000))'",
+                 "printf '%70000s' x | tr ' ' x",
                  dir,
                  @external_command_timeout_seconds,
                  on_output: on_output
