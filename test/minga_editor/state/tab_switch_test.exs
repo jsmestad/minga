@@ -165,10 +165,10 @@ defmodule MingaEditor.State.TabSwitchTest do
       state = base_state()
       assert EditorState.tab_bar(state) == nil
 
-      {new_state, effects} = EditorState.switch_tab_pure(state, 42)
+      {new_state, result} = EditorState.switch_tab_pure(state, 42)
 
       assert new_state == state
-      assert effects == []
+      assert result == :unchanged
     end
 
     test "no-op when switching to already active tab" do
@@ -176,10 +176,10 @@ defmodule MingaEditor.State.TabSwitchTest do
       tb = EditorState.tab_bar(state)
       active_id = tb.active_id
 
-      {new_state, effects} = EditorState.switch_tab_pure(state, active_id)
+      {new_state, result} = EditorState.switch_tab_pure(state, active_id)
 
       assert new_state == state
-      assert effects == []
+      assert result == :unchanged
     end
 
     test "file-to-file preserves both tab contexts" do
@@ -192,15 +192,12 @@ defmodule MingaEditor.State.TabSwitchTest do
       assert state.workspace.keymap_scope == :editor
 
       # Switch to tab 2
-      {new_state, effects} = EditorState.switch_tab_pure(state, tab2_id)
+      {new_state, result} = EditorState.switch_tab_pure(state, tab2_id)
 
       # Active buffer should now be buf2 (restored from tab 2's context)
       assert new_state.workspace.buffers.active == buf2
       assert new_state.workspace.keymap_scope == :editor
-
-      # Effects should include spinner lifecycle effects
-      assert :stop_spinner in effects
-      assert :start_spinner in effects
+      assert {:switched, %Tab{id: ^tab2_id}} = result
 
       # Tab 1's context should be snapshotted (preserved for later restore)
       tb = EditorState.tab_bar(new_state)
@@ -280,20 +277,13 @@ defmodule MingaEditor.State.TabSwitchTest do
       assert state_after_roundtrip.workspace.editing.mode == original_editing.mode
     end
 
-    test "effects include spinner lifecycle and agent session rebuild" do
+    test "returns the selected tab as a focused result" do
       {state, _file_tab_id, agent_tab_id, _file_buf} =
         state_with_file_and_agent_tabs()
 
-      {_new_state, effects} = EditorState.switch_tab_pure(state, agent_tab_id)
+      {_new_state, result} = EditorState.switch_tab_pure(state, agent_tab_id)
 
-      assert :stop_spinner in effects
-      assert :start_spinner in effects
-
-      # There should be a rebuild_agent_session effect with the target tab
-      assert Enum.any?(effects, fn
-               {:rebuild_agent_session, %Tab{}} -> true
-               _ -> false
-             end)
+      assert {:switched, %Tab{id: ^agent_tab_id, kind: :agent}} = result
     end
 
     test "invalidates layout after switch" do

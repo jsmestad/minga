@@ -108,12 +108,12 @@ defmodule MingaEditor.Shell.RuntimeTest do
     assert Runtime.state(updated).events == [:refresh]
   end
 
-  test "active agent events preserve identity and return effects and persistence as data" do
+  test "active agent events preserve identity and return persistence changes" do
     entry = entry(:fake, FakeShell, 1)
     old_state = %{events: [], record_agent_events?: true}
     runtime = Runtime.new(entry, old_state)
 
-    assert {updated, @workspace, [], {%Entry{} = changed_entry, ^old_state, new_state}} =
+    assert {updated, @workspace, {%Entry{} = changed_entry, ^old_state, new_state}} =
              Runtime.route_agent_event(runtime, @workspace, self(), :background)
 
     assert changed_entry == entry
@@ -131,7 +131,7 @@ defmodule MingaEditor.Shell.RuntimeTest do
       |> Runtime.new(%{events: [], record_agent_events?: true})
       |> Runtime.activate(alternate, %{events: []})
 
-    {updated, @workspace, [], changes} =
+    {updated, @workspace, changes} =
       Runtime.route_stashed_agent_event(runtime, [fake], @workspace, self(), :background)
 
     assert Runtime.entry(updated) == alternate
@@ -139,7 +139,7 @@ defmodule MingaEditor.Shell.RuntimeTest do
     assert Runtime.stash(updated).fake.state.events == [:background]
     assert [{%Entry{module: FakeShell}, _old_state, _new_state}] = changes
 
-    {unchanged, @workspace, [], []} =
+    {unchanged, @workspace, []} =
       Runtime.route_stashed_agent_event(runtime, [], @workspace, self(), :ignored)
 
     assert Runtime.stash(unchanged) == Runtime.stash(runtime)

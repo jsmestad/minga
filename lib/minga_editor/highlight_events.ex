@@ -16,8 +16,7 @@ defmodule MingaEditor.HighlightEvents do
   alias MingaEditor.Renderer
   alias MingaEditor.SemanticTokenSync
   alias MingaEditor.State, as: EditorState
-  alias Minga.Language
-  alias MingaEditor.UI.PrettifySymbols
+  alias MingaEditor.UI.PrettifySymbolsEffect
 
   @doc """
   Handles `:highlight_names` events from the parser (for the active buffer).
@@ -35,7 +34,14 @@ defmodule MingaEditor.HighlightEvents do
   @spec handle_spans(EditorState.t(), non_neg_integer(), term()) :: EditorState.t()
   def handle_spans(state, version, spans) do
     new_state = HighlightSync.handle_spans(state, version, spans)
-    maybe_apply_prettify_symbols(new_state)
+    buffer = new_state.workspace.buffers.active
+
+    new_state =
+      case buffer do
+        pid when is_pid(pid) -> PrettifySymbolsEffect.schedule(new_state, pid)
+        nil -> new_state
+      end
+
     Renderer.render(new_state)
   end
 
@@ -143,37 +149,6 @@ defmodule MingaEditor.HighlightEvents do
   defp grapheme_col(line, byte_offset) do
     prefix = binary_part(line, 0, min(byte_offset, byte_size(line)))
     String.length(prefix)
-  end
-
-  # Applies prettify-symbol conceals after highlights update.
-  # Skips entirely when the feature is disabled (the default) to avoid
-  # spawning a Task on every highlight event.
-  @spec maybe_apply_prettify_symbols(EditorState.t()) :: :ok
-  defp maybe_apply_prettify_symbols(%{workspace: %{buffers: %{active: nil}}}), do: :ok
-
-  defp maybe_apply_prettify_symbols(state) do
-    if PrettifySymbols.enabled?() do
-      spawn_prettify_task(state)
-    end
-
-    :ok
-  end
-
-  @spec spawn_prettify_task(EditorState.t()) :: :ok
-  defp spawn_prettify_task(state) do
-    buf = state.workspace.buffers.active
-    hl = HighlightSync.get_active_highlight(state)
-
-    if hl.capture_names != {} and tuple_size(hl.spans) > 0 do
-      file_path = Buffer.file_path(buf)
-      filetype = Language.detect_filetype(file_path)
-
-      Task.start(fn ->
-        PrettifySymbols.apply(buf, hl, filetype)
-      end)
-    end
-
-    :ok
   end
 
   # In headless mode, apply highlight setup synchronously; otherwise defer.

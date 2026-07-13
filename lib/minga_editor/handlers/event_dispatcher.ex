@@ -1,10 +1,11 @@
 defmodule MingaEditor.Handlers.EventDispatcher do
   @moduledoc """
-  Dispatches {:minga_event, event, payload} messages to the correct handler or inline logic.
+  Routes `{:minga_event, event, payload}` messages to the owning workflow.
 
-  Extracted from MingaEditor to keep the GenServer module focused on process
-  lifecycle. The editor's `handle_info` for `:minga_event` tuples delegates
-  to `dispatch/4`.
+  The editor's `handle_info` delegates here only to choose an origin family.
+  Tool and file workflows interpret their own focused actions; this module
+  neither defines an action union nor forwards actions between families.
+  Inline event branches already return final editor state.
   """
 
   alias Minga.Distribution.Events.NodeConnectedEvent
@@ -14,7 +15,6 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   alias MingaEditor.AgentLifecycle
   alias MingaEditor.Commands
   alias MingaEditor.Frontend.Protocol
-  alias MingaEditor.Handlers.EffectHandler
   alias MingaEditor.Handlers.FileEventHandler
   alias MingaEditor.Handlers.Notifications
   alias MingaEditor.Handlers.ToolHandler
@@ -57,15 +57,11 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   ]
 
   @spec dispatch(EditorState.t(), atom(), term(), term()) :: EditorState.t()
-  def dispatch(state, event, _payload, msg) when event in @tool_events do
-    {state, effects} = ToolHandler.handle(state, msg)
-    EffectHandler.apply_effects(state, effects)
-  end
+  def dispatch(state, event, _payload, msg) when event in @tool_events,
+    do: ToolHandler.dispatch(state, msg)
 
-  def dispatch(state, event, _payload, msg) when event in @file_events do
-    {state, effects} = FileEventHandler.handle(state, msg)
-    EffectHandler.apply_effects(state, effects)
-  end
+  def dispatch(state, event, _payload, msg) when event in @file_events,
+    do: FileEventHandler.dispatch(state, msg)
 
   def dispatch(
         state,
@@ -85,14 +81,11 @@ defmodule MingaEditor.Handlers.EventDispatcher do
         %Events.DiagnosticsUpdatedEvent{uri: uri},
         msg
       ) do
-    MingaEditor.apply_diagnostic_decorations(state, uri)
-    {state, effects} = FileEventHandler.handle(state, msg)
+    :ok = MingaEditor.apply_diagnostic_decorations(state, uri)
 
-    if effects == [] do
-      MingaEditor.schedule_render(state, 16)
-    else
-      EffectHandler.apply_effects(state, effects)
-    end
+    state
+    |> FileEventHandler.dispatch(msg)
+    |> MingaEditor.schedule_render(16)
   end
 
   def dispatch(

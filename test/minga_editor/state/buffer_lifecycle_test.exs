@@ -87,17 +87,17 @@ defmodule MingaEditor.State.BufferLifecycleTest do
     test "adds buffers with no tab bar, opens file tabs, previews without overwriting context, and avoids duplicate monitors" do
       no_tab = base_state()
       new_buf = start_buffer("new file")
-      {new_state, effects} = EditorState.add_buffer_pure(no_tab, new_buf)
+      {new_state, result} = EditorState.add_buffer_pure(no_tab, new_buf)
       assert new_buf in new_state.workspace.buffers.list
       assert new_state.workspace.buffers.active == new_buf
-      assert {:monitor, new_buf} in effects
+      assert result == {:monitor, new_buf}
 
       state = state_with_file_tab()
       original_buf = state.workspace.buffers.active
       opened_buf = start_buffer("opened")
-      {opened, effects} = EditorState.add_buffer_pure(state, opened_buf, context: :open)
+      {opened, result} = EditorState.add_buffer_pure(state, opened_buf, context: :open)
       tb = EditorState.tab_bar(opened)
-      assert {:monitor, opened_buf} in effects
+      assert result == {:monitor, opened_buf}
       assert TabBar.count(tb) == 2
       assert tb.active_id == 2
       assert %Buffers{active: ^original_buf} = TabBar.get(tb, 1).context.buffers
@@ -105,7 +105,10 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       assert opened.workspace.buffers.active == opened_buf
 
       preview_buf = start_buffer("preview")
-      {previewed, _effects} = EditorState.add_buffer_pure(state, preview_buf, context: :preview)
+
+      {previewed, {:monitor, ^preview_buf}} =
+        EditorState.add_buffer_pure(state, preview_buf, context: :preview)
+
       assert TabBar.count(EditorState.tab_bar(previewed)) == 1
       assert previewed.workspace.buffers.active == preview_buf
 
@@ -115,23 +118,26 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       assert previewed.buffer_add_context == :open
 
       duplicate = EditorState.add_buffer(state, opened_buf)
-      {switched_back, effects} = EditorState.add_buffer_pure(duplicate, original_buf)
+
+      {switched_back, :already_registered} =
+        EditorState.add_buffer_pure(duplicate, original_buf)
+
       assert switched_back.workspace.buffers.active == original_buf
-      assert effects == []
     end
 
     test "opening from an agent tab snapshots agent state, creates a file tab, switches scope, and stops the spinner" do
       state = state_with_agent_tab()
       file_buf = start_buffer("file content")
 
-      {new_state, effects} = EditorState.add_buffer_pure(state, file_buf, context: :open)
+      {new_state, {:monitor, ^file_buf}} =
+        EditorState.add_buffer_pure(state, file_buf, context: :open)
+
       tb = EditorState.tab_bar(new_state)
       agent_tab = TabBar.get(tb, 1)
       file_tab = TabBar.active(tb)
       window = active_window(new_state)
 
-      assert {:monitor, file_buf} in effects
-      assert :stop_spinner in effects
+      assert TraditionalState.agent(new_state.shell_runtime.state).spinner_timer == nil
       assert TabBar.count(tb) == 2
       assert agent_tab.kind == :agent
       assert %Buffers{active: nil, list: []} = agent_tab.context.buffers
@@ -152,9 +158,11 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       {state, buf1} = state_with_file_tab_for_path(path1, "one")
       buf2 = start_file_buffer(path2, "two")
 
-      {state, _effects} = EditorState.add_buffer_pure(state, buf2, context: :open)
-      {reactivated, effects} = EditorState.add_buffer_pure(state, buf1, context: :open)
-      assert effects == []
+      {state, {:monitor, ^buf2}} = EditorState.add_buffer_pure(state, buf2, context: :open)
+
+      {reactivated, :already_registered} =
+        EditorState.add_buffer_pure(state, buf1, context: :open)
+
       assert EditorState.tab_bar(reactivated).active_id == 1
       assert reactivated.workspace.buffers.active == buf1
 
@@ -173,8 +181,9 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       {state, same_buf1} = state_with_file_tab_for_path(same1, "one")
       same_buf2 = start_file_buffer(same2, "two")
 
-      {distinct, effects} = EditorState.add_buffer_pure(state, same_buf2, context: :open)
-      assert {:monitor, same_buf2} in effects
+      {distinct, {:monitor, ^same_buf2}} =
+        EditorState.add_buffer_pure(state, same_buf2, context: :open)
+
       assert TabBar.count(EditorState.tab_bar(distinct)) == 2
       assert TabBar.get(EditorState.tab_bar(distinct), 1).label == "same.ex"
       assert TabBar.get(EditorState.tab_bar(distinct), 2).label == "same.ex"
@@ -205,12 +214,11 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       }
 
       file_buf = start_buffer("file content")
-      {new_state, effects} = EditorState.add_buffer_pure(state, file_buf)
+      {new_state, {:monitor, ^file_buf}} = EditorState.add_buffer_pure(state, file_buf)
       window = active_window(new_state)
 
       assert file_buf in new_state.workspace.buffers.list
       assert new_state.workspace.buffers.active == file_buf
-      assert {:monitor, file_buf} in effects
       assert Content.agent_chat?(window.content)
       assert window.buffer == nil
     end
@@ -257,8 +265,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
         |> EditorState.monitor_buffer(buf1)
         |> EditorState.monitor_buffer(buf2)
 
-      {closed_active, effects} = EditorState.close_buffer_pure(state, buf2)
-      assert effects == []
+      closed_active = EditorState.close_buffer_pure(state, buf2)
       refute buf2 in closed_active.workspace.buffers.list
       assert closed_active.workspace.buffers.active == buf1
       refute Map.has_key?(closed_active.buffer_monitors, buf2)
@@ -270,15 +277,14 @@ defmodule MingaEditor.State.BufferLifecycleTest do
         |> EditorState.add_buffer(buf3)
         |> EditorState.monitor_buffer(buf3)
 
-      {closed_inactive, _effects} = EditorState.close_buffer_pure(inactive_state, buf1)
+      closed_inactive = EditorState.close_buffer_pure(inactive_state, buf1)
       assert closed_inactive.workspace.buffers.active == buf3
       refute buf1 in closed_inactive.workspace.buffers.list
 
       only_state = base_state()
       only_buf = only_state.workspace.buffers.active
       only_state = EditorState.monitor_buffer(only_state, only_buf)
-      {closed_only, effects} = EditorState.close_buffer_pure(only_state, only_buf)
-      assert effects == []
+      closed_only = EditorState.close_buffer_pure(only_state, only_buf)
       assert closed_only.workspace.buffers.list == []
       assert closed_only.workspace.buffers.active == nil
       refute Map.has_key?(closed_only.buffer_monitors, only_buf)
@@ -294,7 +300,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
 
       {state, tab_b} = state_with_inactive_tab_buffer(state, buf_b)
 
-      {new_state, _effects} = EditorState.close_buffer_pure(state, buf_b)
+      new_state = EditorState.close_buffer_pure(state, buf_b)
       tab_b_after = TabBar.get(EditorState.tab_bar(new_state), tab_b.id)
       refute buf_b in tab_b_after.context.buffers.list
       assert tab_b_after.context.buffers.active != buf_b
@@ -306,7 +312,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       only = start_buffer("only buffer")
       only_state = state_for_buffer(only) |> EditorState.monitor_buffer(only)
       {only_state, only_tab} = state_with_inactive_tab_buffer(only_state, only)
-      {closed_only, _effects} = EditorState.close_buffer_pure(only_state, only)
+      closed_only = EditorState.close_buffer_pure(only_state, only)
       only_tab_after = TabBar.get(EditorState.tab_bar(closed_only), only_tab.id)
       assert only_tab_after.context.buffers.list == []
       assert only_tab_after.context.buffers.active == nil

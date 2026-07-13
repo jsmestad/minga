@@ -49,15 +49,34 @@ defmodule MingaEditor.Handlers.SessionHandlerTest do
   end
 
   describe "check_swap_recovery" do
-    test "with no recoverable swaps and clean shutdown is a no-op" do
-      # When swap_dir is nil, scan_recoverable_swaps returns []
-      # and clean_shutdown? with nil session_dir returns true (no session file = clean)
+    test "headless mode does not initiate startup recovery" do
       state = base_state()
-      state = %{state | session: SessionState.new(swap_dir: nil, session_dir: nil)}
+
+      state = %{
+        state
+        | session: SessionState.new(swap_dir: "/tmp/swaps", session_dir: "/tmp/session")
+      }
 
       {new_state, effects} = SessionHandler.handle(state, :check_swap_recovery)
       assert new_state == state
       assert effects == []
+    end
+
+    test "non-headless mode emits immutable recovery input without reading files" do
+      state = base_state()
+
+      state =
+        %{
+          state
+          | backend: :tui,
+            session: SessionState.new(swap_dir: "/missing/swaps", session_dir: "/missing/session")
+        }
+
+      assert {^state,
+              [
+                {:recover_session_async, [swap_dir: "/missing/swaps"],
+                 [session_dir: "/missing/session"], true, true}
+              ]} = SessionHandler.handle(state, :check_swap_recovery)
     end
   end
 

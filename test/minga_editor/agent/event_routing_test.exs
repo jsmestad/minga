@@ -98,7 +98,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
     test "background :status_changed event sets the owning tab's badge without touching the active rendering cache",
          %{shell_state: ss, session_b: session_b} do
-      {ss2, ws2, effects} =
+      {ss2, ws2} =
         Traditional.on_agent_event(ss, workspace(), session_b, {:status_changed, :thinking})
 
       # Background tab's badge updates...
@@ -111,14 +111,13 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       # Workspace is also untouched: background events must not nudge the
       # active tab's editing surface.
       assert ws2 == workspace()
-      assert effects == []
     end
 
     test "background :status_changed -> :idle raises attention on the owning tab", %{
       shell_state: ss,
       session_b: session_b
     } do
-      {ss2, _ws, _effects} =
+      {ss2, _ws} =
         Traditional.on_agent_event(ss, workspace(), session_b, {:status_changed, :idle})
 
       assert tab(ss2.tab_bar, 2).attention == true
@@ -131,7 +130,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
     } do
       approval = %{tool_call_id: "x", name: "shell", args: %{}}
 
-      {ss2, _ws, _effects} =
+      {ss2, _ws} =
         Traditional.on_agent_event(ss, workspace(), session_b, {:approval_pending, approval})
 
       assert tab(ss2.tab_bar, 2).attention == true
@@ -142,8 +141,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       shell_state: ss,
       session_b: session_b
     } do
-      {ss2, _ws, _effects} =
-        Traditional.on_agent_event(ss, workspace(), session_b, {:error, "boom"})
+      {ss2, _ws} = Traditional.on_agent_event(ss, workspace(), session_b, {:error, "boom"})
 
       assert tab(ss2.tab_bar, 2).attention == true
       assert tab(ss2.tab_bar, 1).attention == false
@@ -156,12 +154,10 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       # Streaming text from a background session must not reach this callback's
       # mutation path — the delta is purely a no-op so the active tab's UI
       # never re-renders for unrelated streaming.
-      {ss2, ws2, effects} =
-        Traditional.on_agent_event(ss, workspace(), session_b, {:text_delta, "hello"})
+      {ss2, ws2} = Traditional.on_agent_event(ss, workspace(), session_b, {:text_delta, "hello"})
 
       assert ss2 == ss
       assert ws2 == workspace()
-      assert effects == []
     end
 
     test "events from a session that no longer maps to any tab are silently dropped", %{
@@ -169,8 +165,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
     } do
       ghost = spawn(fn -> :ok end)
 
-      {ss2, _ws, _effects} =
-        Traditional.on_agent_event(ss, workspace(), ghost, {:status_changed, :error})
+      {ss2, _ws} = Traditional.on_agent_event(ss, workspace(), ghost, {:status_changed, :error})
 
       assert ss2.tab_bar == ss.tab_bar
     end

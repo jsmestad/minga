@@ -161,6 +161,12 @@ defmodule MingaEditor.State do
 
   @type shell_state :: MingaEditor.Shell.shell_state()
 
+  @typedoc "Focused result from a pure buffer-registration transition."
+  @type buffer_registration_result :: :already_registered | {:monitor, pid()}
+
+  @typedoc "Focused result from a pure tab switch transition."
+  @type tab_switch_result :: :unchanged | {:switched, Tab.t()}
+
   @type t :: %__MODULE__{
           backend: backend(),
           rendering: rendering_policy(),
@@ -1056,7 +1062,12 @@ defmodule MingaEditor.State do
   @doc """
   Monitors a buffer pid so the Editor receives `:DOWN` when it dies.
 
-  Idempotent: if the pid is already monitored, returns state unchanged.
+  Production callers invoke this while applying a buffer lifecycle transition
+  in the Editor process, making that process both monitor creator and `:DOWN`
+  recipient. Buffers remain supervised by `Minga.Buffer.Supervisor`; the monitor
+  only correlates cleanup by the stored pid/ref pair. Duplicate requests are
+  ignored, unknown `:DOWN` messages are ignored by the Editor, and a terminal
+  buffer death removes its state before rendering.
   """
   @spec monitor_buffer(t(), pid()) :: t()
   def monitor_buffer(%__MODULE__{buffer_monitors: monitors} = state, pid)
@@ -1084,27 +1095,21 @@ defmodule MingaEditor.State do
   end
 
   @doc """
-  Pure variant of `remove_dead_buffer/2`. Returns `{state, effects}` instead
-  of performing side effects directly.
+  Purely removes a dead buffer from editor and shell lifecycle state.
 
-  Removes the pid from the buffer list, clears it from special buffer slots,
-  switches to another buffer if the active one died, and cleans up the
-  monitor ref. This function is already pure (no process calls), so the
-  effects list is always empty.
+  The process monitor has already delivered its terminal `:DOWN` message, so
+  this transition performs no external work and returns state directly.
   """
-  @spec close_buffer_pure(t(), pid()) :: {t(), [MingaEditor.effect()]}
+  @spec close_buffer_pure(t(), pid()) :: t()
   def close_buffer_pure(%__MODULE__{} = state, pid) do
     state = state |> do_remove_dead_buffer(pid) |> MingaEditor.Shell.Workflow.ensure_available()
 
-    {runtime, workspace, shell_effects} =
+    {runtime, workspace} =
       ShellRuntime.route_buffer_died(state.shell_runtime, state.workspace, pid)
 
-    state =
-      state
-      |> apply_shell_runtime_transition(runtime)
-      |> set_workspace(workspace)
-
-    {state, shell_effects}
+    state
+    |> apply_shell_runtime_transition(runtime)
+    |> set_workspace(workspace)
   end
 
   @doc """
@@ -1115,13 +1120,10 @@ defmodule MingaEditor.State do
   switches to another buffer if the active one died. Also cleans up the
   monitor ref.
 
-  Thin wrapper around `close_buffer_pure/2` that applies effects inline.
+  Delegates to the pure lifecycle transition.
   """
   @spec remove_dead_buffer(t(), pid()) :: t()
-  def remove_dead_buffer(%__MODULE__{} = state, pid) do
-    {state, effects} = close_buffer_pure(state, pid)
-    apply_buffer_effects(state, effects)
-  end
+  def remove_dead_buffer(%__MODULE__{} = state, pid), do: close_buffer_pure(state, pid)
 
   @spec do_remove_dead_buffer(t(), pid()) :: t()
   defp do_remove_dead_buffer(
@@ -1562,18 +1564,13 @@ defmodule MingaEditor.State do
   end
 
   @doc """
-  Pure variant of `add_buffer/2`. Returns `{state, effects}` instead of
-  performing side effects directly.
+  Purely adds or activates a buffer and returns its focused monitor result.
 
-  Generic concerns (buffer pool) are handled here. Shell-specific
-  presentation logic (tab bar, card routing) is dispatched through
-  `shell.on_buffer_added/5`. The only effect returned is `{:monitor, pid}`.
-
-  The buffer-add context is read from `state.buffer_add_context` (set by
-  picker preview) or overridden via `opts[:context]`. After dispatch the
-  field is reset to `:open`.
+  Generic concerns (buffer pool) are handled here. Shell-specific presentation
+  logic is dispatched through `shell.on_buffer_added/5`. The Editor-facing
+  wrapper creates a monitor only for a newly registered process.
   """
-  @spec add_buffer_pure(t(), pid(), keyword()) :: {t(), [MingaEditor.effect()]}
+  @spec add_buffer_pure(t(), pid(), keyword()) :: {t(), buffer_registration_result()}
   def add_buffer_pure(%__MODULE__{workspace: %{buffers: bs}} = state, pid, opts \\ []) do
     context = Keyword.get_lazy(opts, :context, fn -> state.buffer_add_context end)
 
@@ -1596,7 +1593,7 @@ defmodule MingaEditor.State do
       |> update_workspace(&SessionState.set_buffers(&1, new_bs))
       |> MingaEditor.Shell.Workflow.ensure_available()
 
-    {runtime, workspace, shell_effects} =
+    {runtime, workspace} =
       ShellRuntime.route_buffer_added(
         state.shell_runtime,
         prev_workspace,
@@ -1611,19 +1608,22 @@ defmodule MingaEditor.State do
       |> set_workspace(workspace)
       |> Map.put(:buffer_add_context, :open)
 
-    effects = if already_pooled, do: [], else: [{:monitor, pid}]
-    {state, effects ++ shell_effects}
+    result = if already_pooled, do: :already_registered, else: {:monitor, pid}
+    {state, result}
   end
 
   @doc """
   Adds a new buffer and makes it the active buffer for the current window.
 
-  Thin wrapper around `add_buffer_pure/3` that applies effects inline.
+  The wrapper creates the process monitor in the Editor process that receives
+  the resulting `:DOWN` message.
   """
   @spec add_buffer(t(), pid(), keyword()) :: t()
   def add_buffer(%__MODULE__{} = state, pid, opts \\ []) do
-    {state, effects} = add_buffer_pure(state, pid, opts)
-    apply_buffer_effects(state, effects)
+    case add_buffer_pure(state, pid, opts) do
+      {state, :already_registered} -> state
+      {state, {:monitor, monitored_pid}} -> monitor_buffer(state, monitored_pid)
+    end
   end
 
   @doc """
@@ -1892,28 +1892,20 @@ defmodule MingaEditor.State do
   end
 
   @doc """
-  Pure variant of `switch_tab/2`. Returns `{state, effects}` instead of
-  performing side effects directly.
-
-  Snapshots the current tab's context, updates the tab bar pointer,
-  restores the target tab's context, invalidates layout. Side effects
-  (spinner stop/start, agent session rebuild) are returned as effects.
-
-  The returned effects list may include:
-  - `:stop_spinner` — cancel the outgoing agent's spinner timer
-  - `{:rebuild_agent_session, tab}` — rebuild agent state from session process
-  - `:start_spinner` — conditionally restart spinner for incoming agent
+  Purely switches tab-owned editor state and returns the selected tab as a
+  focused result. The aggregate `switch_tab/2` transition uses that result to
+  refresh the session-backed agent presentation through owner APIs.
   """
-  @spec switch_tab_pure(t(), Tab.id()) :: {t(), [MingaEditor.effect()]}
+  @spec switch_tab_pure(t(), Tab.id()) :: {t(), tab_switch_result()}
   def switch_tab_pure(%__MODULE__{} = state, target_id) do
     state = MingaEditor.Shell.Workflow.ensure_available(state)
 
     case tab_bar(state) do
       nil ->
-        {state, []}
+        {state, :unchanged}
 
       %TabBar{active_id: ^target_id} ->
-        {state, []}
+        {state, :unchanged}
 
       %TabBar{active_id: current_id} = tb ->
         log_switch_tab(tb, current_id, target_id)
@@ -1951,10 +1943,7 @@ defmodule MingaEditor.State do
           |> invalidate_all_windows()
           |> Map.put(:layout, nil)
 
-        # Collect side effects: stop outgoing spinner, rebuild session, maybe restart spinner
-        effects = [:stop_spinner, {:rebuild_agent_session, target}, :start_spinner]
-
-        {state, effects}
+        {state, {:switched, target}}
     end
   end
 
@@ -1966,13 +1955,34 @@ defmodule MingaEditor.State do
   live editor state. Invalidates layout and window caches since the
   entire visual context changes.
 
-  Thin wrapper around `switch_tab_pure/2` that applies effects inline.
+  The aggregate transition applies spinner and session-cache changes through
+  their focused owners after the pure tab value changes.
   """
   @spec switch_tab(t(), Tab.id()) :: t()
   def switch_tab(%__MODULE__{} = state, target_id) do
-    {state, effects} = switch_tab_pure(state, target_id)
-    apply_buffer_effects(state, effects)
+    state
+    |> switch_tab_pure(target_id)
+    |> finish_tab_switch()
   end
+
+  @spec finish_tab_switch({t(), tab_switch_result()}) :: t()
+  defp finish_tab_switch({state, :unchanged}), do: state
+
+  defp finish_tab_switch({state, {:switched, %Tab{} = target}}) do
+    state
+    |> AgentAccess.update_agent(&AgentState.stop_spinner_timer/1)
+    |> rebuild_switched_agent(target)
+    |> maybe_restart_incoming_spinner()
+  end
+
+  @spec rebuild_switched_agent(t(), Tab.t()) :: t()
+  defp rebuild_switched_agent(state, %Tab{kind: :agent} = tab) do
+    state
+    |> rebuild_agent_from_session(tab)
+    |> sync_active_agent_transcript()
+  end
+
+  defp rebuild_switched_agent(state, %Tab{} = tab), do: rebuild_agent_from_session(state, tab)
 
   @spec retire_lsp_operations_for_tab(t(), Tab.id()) :: t()
   defp retire_lsp_operations_for_tab(%__MODULE__{} = state, tab_id) do
@@ -2072,11 +2082,6 @@ defmodule MingaEditor.State do
 
   # ── Spinner lifecycle for tab switching ──────────────────────────────────────
 
-  @spec stop_outgoing_spinner(t()) :: t()
-  defp stop_outgoing_spinner(%__MODULE__{} = state) do
-    AgentAccess.update_agent(state, &AgentState.stop_spinner_timer/1)
-  end
-
   @spec maybe_restart_incoming_spinner(t()) :: t()
   defp maybe_restart_incoming_spinner(state) do
     agent = AgentAccess.agent(state)
@@ -2158,46 +2163,10 @@ defmodule MingaEditor.State do
     update_workspace(state, &SessionState.transition_mode(&1, mode, mode_state))
   end
 
-  # ── Buffer lifecycle effect application ──────────────────────────────────────
-  #
-  # Applies effects returned by `add_buffer_pure/2`, `switch_tab_pure/2`, and
-  # `close_buffer_pure/2`. These thin wrappers live here (not in Editor) to
-  # avoid a circular dependency. Only handles the effect types produced by
-  # buffer lifecycle operations.
-
-  @spec apply_buffer_effects(t(), [MingaEditor.effect()]) :: t()
-  defp apply_buffer_effects(state, []), do: state
-
-  defp apply_buffer_effects(state, [effect | rest]) do
-    state = apply_buffer_effect(state, effect)
-    apply_buffer_effects(state, rest)
-  end
-
-  @spec apply_buffer_effect(t(), MingaEditor.effect()) :: t()
-  defp apply_buffer_effect(state, {:monitor, pid}) when is_pid(pid),
-    do: monitor_buffer(state, pid)
-
-  defp apply_buffer_effect(state, :stop_spinner),
-    do: stop_outgoing_spinner(state)
-
-  defp apply_buffer_effect(state, :start_spinner),
-    do: maybe_restart_incoming_spinner(state)
-
-  # Race safety: agent events queued during the blocking editor_snapshot/1 call
-  # cannot misroute. GenServer serialisation means no handle_info runs until this
-  # callback returns. Once it does, stale events from the outgoing session fail
-  # the AgentAccess.session/1 identity check (minga_editor.ex:692) and fall into
-  # the background path, where find_by_session matches by session pid (unique per
-  # tab, never reassigned on switch). See #1401 for the full analysis.
-  defp apply_buffer_effect(state, {:rebuild_agent_session, %Tab{kind: :agent} = tab}) do
-    state
-    |> rebuild_agent_from_session(tab)
-    |> sync_active_agent_transcript()
-  end
-
-  defp apply_buffer_effect(state, {:rebuild_agent_session, tab}),
-    do: rebuild_agent_from_session(state, tab)
-
+  # Agent events queued during the blocking editor snapshot call cannot
+  # misroute. GenServer serialization prevents message handling until the
+  # aggregate tab transition returns; stale outgoing events then route by their
+  # unchanged session pid. See #1401 for the full analysis.
   @spec sync_active_agent_transcript(t()) :: t()
   defp sync_active_agent_transcript(state) do
     session = AgentAccess.session(state)
