@@ -260,7 +260,8 @@ defmodule MingaAgent.EventLogTest do
     send(first_writer, {:event_log_store_open_result, {:error, :permission_denied}})
 
     assert_receive {:event_log_commit, ^receipt, :session_started,
-                    {:error, {:persistence_failed, {:writer_start_failed, :permission_denied}}}}
+                    {:error, {:persistence_failed, {:writer_start_failed, :permission_denied}}}},
+                   @event_timeout
 
     assert {:error, :unavailable} =
              EventLog.record("session", :session_started, %{sequence: 2}, name)
