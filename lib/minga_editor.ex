@@ -551,7 +551,7 @@ defmodule MingaEditor do
   end
 
   def handle_info({:minga_input, {:request_keyframe, _last_good, _generation}}, state) do
-    new_state = %{state | keyframe_pending?: true}
+    new_state = EditorState.request_render_keyframe(state)
     {:noreply, Renderer.render_or_async(new_state)}
   end
 
@@ -1357,7 +1357,7 @@ defmodule MingaEditor do
   # The first call renders immediately (delay_ms == 0 path) or schedules
   # at the given delay. Subsequent calls during an active window are
   # coalesced: the pending timer already covers them. The `:debounced_render`
-  # handler clears `render_timer` so the next event after the window can
+  # handler clears the correlation owner's timer so the next event after the window can
   # schedule again.
   #
   # For streaming agent responses, this ensures new text is visible within
@@ -1375,21 +1375,25 @@ defmodule MingaEditor do
   end
 
   @spec schedule_render(state(), non_neg_integer()) :: state()
-  def schedule_render(%{render_timer: ref} = state, _delay_ms) when is_reference(ref), do: state
+  def schedule_render(%EditorState{} = state, delay_ms)
+      when is_integer(delay_ms) and delay_ms >= 0 do
+    if EditorState.render_scheduled?(state), do: state, else: schedule_new_render(state, delay_ms)
+  end
 
   # In test mode (headless backend), render synchronously to eliminate timer
   # races that cause CI flakiness. No debounce needed when there's no real
   # display to coalesce frames for.
-  def schedule_render(%{backend: :headless} = state, _delay_ms) do
+  @spec schedule_new_render(state(), non_neg_integer()) :: state()
+  defp schedule_new_render(%{backend: :headless} = state, _delay_ms) do
     state = RenderHandler.maybe_trigger_nav_flash(state)
     state = Renderer.render_or_async(state)
-    %{state | render_timer: nil}
+    EditorState.clear_render_timer(state)
   end
 
-  def schedule_render(state, delay_ms) do
+  defp schedule_new_render(state, delay_ms) do
     effective_delay_ms = schedule_render_delay_ms(state, delay_ms)
     ref = Process.send_after(self(), :debounced_render, effective_delay_ms)
-    %{state | render_timer: ref}
+    EditorState.schedule_render_timer(state, ref)
   end
 
   # LSP status aggregation moved to MingaEditor.State.LSP

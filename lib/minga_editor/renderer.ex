@@ -84,7 +84,7 @@ defmodule MingaEditor.Renderer do
     seq = System.unique_integer([:positive, :monotonic])
 
     case RendererServer.reset_sync(renderer, intent, seq) do
-      {:ok, receipt} -> EditorState.apply_synchronous_renderer_receipt(state, receipt)
+      {:ok, receipt} -> EditorState.integrate_synchronous_renderer_receipt(state, receipt)
       {:error, error} -> log_synchronous_error(state, seq, error)
     end
   end
@@ -121,7 +121,7 @@ defmodule MingaEditor.Renderer do
     intent = Intent.from_editor_state(state)
 
     case RendererServer.render_sync(renderer, intent, seq) do
-      {:ok, receipt} -> EditorState.apply_synchronous_renderer_receipt(state, receipt)
+      {:ok, receipt} -> EditorState.integrate_synchronous_renderer_receipt(state, receipt)
       {:error, error} -> log_synchronous_error(state, seq, error)
     end
   end

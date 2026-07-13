@@ -33,6 +33,8 @@ Scheduler lifecycle state is not copied into Editor values. A domain value may r
 
 File-tree refresh is the first application of this rule. `MingaEditor.State.FileTree.Refresh` owns debounce and current-result correlation, `MingaEditor.State.FileTree` owns tree/root acceptance, `MingaEditor.FileTree.Freshness` owns the workflow and external ordering, and `MingaEditor.FileTree.Refresh` owns typed scan execution and outcome application. The scheduler owns the running scan and at most one coalesced follow-up.
 
+Render correlation follows the same boundary. `MingaEditor.State.RenderCorrelation` owns the render timer token, semantic intent revisions, receipt ordering, and pending keyframe request. `MingaEditor.State` retains one atomic receipt integration transition because shell identity, workspace observations, layout, focus, and click regions must agree. Timer creation, renderer submission, frontend communication, and stale-receipt logging stay in Editor workflows. `MingaEditor.Renderer.Server` remains authoritative for resident rows, render caches, acknowledgement credit, and renderer-private state.
+
 ## Migration ledger
 
 The epic assigns every broad ownership area to a committed convergence slice:

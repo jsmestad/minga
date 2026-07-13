@@ -3,12 +3,10 @@ defmodule MingaEditor.RenderPipeline.Input do
   Narrow rendering contract between the Editor GenServer and the render pipeline.
 
   Bundles exactly the fields that the pipeline stages read from EditorState,
-  excluding ~15 fields the pipeline never touches (render_timer, buffer_monitors,
-  focus_stack, lsp, parser_status, pending_quit, session, git_remote_op, etc.).
+  excluding Editor-owned process and correlation fields the pipeline never touches (`render_correlation`, buffer monitors, focus stack, session lifecycle, and similar state).
 
   The Editor builds this before calling `RenderPipeline.run/1`. Pipeline stages
-  read from Input and never reach back into EditorState. After the pipeline
-  completes, the caller writes mutations back via `EditorState.apply_render_output/2`.
+  read from Input and never reach back into EditorState. `Renderer.Server` returns a focused receipt that the Editor integrates atomically.
 
   ## Structural compatibility
 
@@ -58,6 +56,7 @@ defmodule MingaEditor.RenderPipeline.Input do
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.LSP, as: LSPState
+  alias MingaEditor.State.RenderCorrelation
   alias MingaEditor.StatusBar.Data, as: StatusBarData
   alias MingaEditor.Renderer.Caches
   alias MingaEditor.Shell.Runtime
@@ -180,9 +179,7 @@ defmodule MingaEditor.RenderPipeline.Input do
   @doc """
   Builds a render pipeline Input from the full editor state.
 
-  Extracts exactly the fields that the pipeline's seven stages read,
-  leaving GenServer-only fields (render_timer, buffer_monitors,
-  focus_stack, session, pending_quit, etc.) behind.
+  Extracts exactly the fields that the pipeline's seven stages read, leaving Editor process and correlation state behind.
   """
   @spec from_editor_state(EditorState.t()) :: t()
   def from_editor_state(%EditorState{workspace: ws} = state) do
@@ -209,7 +206,7 @@ defmodule MingaEditor.RenderPipeline.Input do
       highlighting: state.highlighting,
       terminal_viewport: state.terminal_viewport,
       last_input_seq: state.last_input_seq,
-      force_keyframe?: Map.get(state, :keyframe_pending?, false),
+      force_keyframe?: RenderCorrelation.force_keyframe?(state.render_correlation),
       line_spacing: Minga.Config.Options.get(state.options_server, :line_spacing) || 1.0,
       cursor_animate: Minga.Config.Options.get(state.options_server, :cursor_animate),
       gui_config_state: state.gui_config_state,

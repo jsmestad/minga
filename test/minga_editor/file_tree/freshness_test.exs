@@ -75,8 +75,8 @@ defmodule MingaEditor.FileTree.FreshnessTest do
 
     assert file_tree(accepted).tree == refreshed
     assert Minga.Buffer.content(buffer) =~ "fresh.ex"
-    assert is_reference(accepted.render_timer)
-    Process.cancel_timer(accepted.render_timer)
+    assert is_reference(accepted.render_correlation.timer)
+    Process.cancel_timer(accepted.render_correlation.timer)
   end
 
   test "failed and canceled outcomes clear current correlation without requesting rendering", %{
@@ -90,7 +90,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     assert {failed, %Outcome{status: :failed}} =
              Refresh.apply(tracked, Outcome.failed(request, :unreadable))
 
-    assert failed.render_timer == nil
+    assert failed.render_correlation.timer == nil
     assert failed |> file_tree() |> then(& &1.refresh.current) == nil
 
     retry = Refresh.request(file_tree(failed).tree, EditorState.events_registry(failed))
@@ -99,7 +99,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     assert {canceled, %Outcome{status: :canceled}} =
              Refresh.apply(retracked, Outcome.canceled(retry, :requested))
 
-    assert canceled.render_timer == nil
+    assert canceled.render_correlation.timer == nil
     assert canceled |> file_tree() |> then(& &1.refresh.current) == nil
   end
 
@@ -115,7 +115,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
              Refresh.apply(closed, Outcome.completed(request, refreshed))
 
     assert file_tree(closed_state).tree == nil
-    assert closed_state.render_timer == nil
+    assert closed_state.render_correlation.timer == nil
 
     rerooted =
       state_with_tree(old_root)
@@ -126,7 +126,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
              Refresh.apply(rerooted, Outcome.completed(request, refreshed))
 
     assert file_tree(rerooted_state).tree.root == Path.expand(new_root)
-    assert rerooted_state.render_timer == nil
+    assert rerooted_state.render_correlation.timer == nil
   end
 
   test "project-root replacement exposes unavailable roots as errors", %{tmp_dir: root} do
@@ -153,8 +153,8 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     assert {:error, reason} = FileTreeState.status(file_tree(failed))
     assert reason != ""
     assert file_tree(failed).refresh.current == nil
-    assert is_reference(failed.render_timer)
-    Process.cancel_timer(failed.render_timer)
+    assert is_reference(failed.render_correlation.timer)
+    Process.cancel_timer(failed.render_correlation.timer)
   end
 
   defp state_with_tree(root, scheduler \\ nil, buffer \\ nil) do

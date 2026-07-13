@@ -39,7 +39,7 @@ defmodule MingaEditor.Handlers.RenderHandler do
   def handle_debounced_render(state) do
     state = maybe_trigger_nav_flash(state)
     state = Renderer.render_or_async(state)
-    %{state | render_timer: nil}
+    EditorState.clear_render_timer(state)
   end
 
   @doc """
@@ -47,13 +47,26 @@ defmodule MingaEditor.Handlers.RenderHandler do
 
   Narrows the merge to renderer-owned fields only.
   """
-  @spec handle_render_done(state(), map()) :: state()
-  def handle_render_done(state, writeback) do
-    emit_render_done_hop(writeback)
-
+  @spec handle_render_done(state(), MingaEditor.Renderer.RenderReceipt.t()) :: state()
+  def handle_render_done(state, receipt) do
+    emit_render_done_hop(receipt)
+    state = Workflow.ensure_available(state)
+    {state, result} = EditorState.integrate_renderer_receipt(state, receipt)
+    log_receipt_result(result, state, receipt)
     state
-    |> Workflow.ensure_available()
-    |> EditorState.apply_renderer_writeback(writeback)
+  end
+
+  @spec log_receipt_result(
+          EditorState.render_receipt_result(),
+          state(),
+          MingaEditor.Renderer.RenderReceipt.t()
+        ) :: :ok
+  defp log_receipt_result(:applied, _state, _receipt), do: :ok
+
+  defp log_receipt_result({:stale, reason}, state, receipt) do
+    Minga.Log.debug(:render, fn ->
+      "Dropping stale renderer receipt reason=#{reason} frame=#{receipt.frame_seq} shell=#{inspect(receipt.shell_id)} identity=#{inspect(receipt.shell_identity)} active_shell=#{inspect(MingaEditor.Shell.Runtime.id(state.shell_runtime))}"
+    end)
   end
 
   # Measures the Renderer.Server → Editor writeback scheduling delay using the

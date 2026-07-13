@@ -3,9 +3,7 @@ defmodule MingaEditor.Renderer.Caches do
   Explicit render-pipeline cache state, replacing process-dictionary entries.
 
   Each field corresponds to a former `Process.put/get` key used across the
-  render pipeline stages. The struct is carried on `EditorState` and on
-  `RenderPipeline.Input`, survives across frames, and is written back via
-  `EditorState.apply_render_output/2` after each pipeline run.
+  render pipeline stages. `Renderer.Server` retains the struct across frames and injects it into `RenderPipeline.Input`; it never crosses back into Editor state.
 
   ## Ownership by stage
 
@@ -61,9 +59,8 @@ defmodule MingaEditor.Renderer.Caches do
     recovery_generation: 1,
 
     # Whether the most recently emitted frame was a keyframe (base_frame_seq 0,
-    # full window snapshots). The Editor reads this to clear `keyframe_pending?`
-    # only when a frame that actually honored the request reaches emit, so a
-    # concurrent delta writeback can't silently swallow a pending keyframe (#2219).
+    # full window snapshots). Renderer receipts carry this correlation fact so the
+    # Editor can fulfill a pending keyframe request only after actual emission.
     last_frame_keyframe?: false,
 
     # ── Core adapter caches (render-model migration) ─────────────────────────

@@ -69,6 +69,12 @@ defmodule MingaEditor.Renderer.RenderReceipt do
     }
   end
 
+  @doc "Returns the receipt correlated to the normalized Editor intent revision."
+  @spec correlate(t(), non_neg_integer()) :: t()
+  def correlate(%__MODULE__{} = receipt, revision)
+      when is_integer(revision) and revision >= 0,
+      do: %{receipt | intent_revision: revision}
+
   @spec window_observations(Input.t()) :: %{
           optional(MingaEditor.Window.id()) => WindowObservation.t()
         }
