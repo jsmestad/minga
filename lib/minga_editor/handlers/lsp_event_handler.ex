@@ -11,6 +11,7 @@ defmodule MingaEditor.Handlers.LspEventHandler do
   alias MingaEditor.LspActions
   alias MingaEditor.SemanticTokenSync
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
+  alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.State.OperationFeedback
@@ -25,7 +26,10 @@ defmodule MingaEditor.Handlers.LspEventHandler do
   """
   @spec handle(EditorState.t(), term()) :: {EditorState.t(), [lsp_effect()]}
 
-  def handle(state, {:completion_debounce, clients, buffer_pid}) do
+  def handle(
+        %{shell_runtime: %{state: %ShellState{}}} = state,
+        {:completion_debounce, clients, buffer_pid}
+      ) do
     new_bridge =
       CompletionTrigger.flush_debounce(
         MingaEditor.Shell.Traditional.ModalWorkflow.completion_trigger(state),
@@ -35,6 +39,8 @@ defmodule MingaEditor.Handlers.LspEventHandler do
 
     {MingaEditor.Shell.Traditional.ModalWorkflow.put_completion_trigger(state, new_bridge), []}
   end
+
+  def handle(state, {:completion_debounce, _clients, _buffer_pid}), do: {state, []}
 
   def handle(state, {:lsp_response, ref, result}) do
     case LSPState.fetch_format(state.lsp, ref) do
@@ -56,9 +62,11 @@ defmodule MingaEditor.Handlers.LspEventHandler do
     {LspActions.document_highlight(state), []}
   end
 
-  def handle(state, {:completion_resolve, index}) do
+  def handle(%{shell_runtime: %{state: %ShellState{}}} = state, {:completion_resolve, index}) do
     {CompletionHandling.flush_resolve(state, index), []}
   end
+
+  def handle(state, {:completion_resolve, _index}), do: {state, []}
 
   def handle(state, :request_code_lens_and_inlay_hints) do
     state = LspActions.code_lens(state)
@@ -136,12 +144,32 @@ defmodule MingaEditor.Handlers.LspEventHandler do
           {EditorState.t(), [lsp_effect()]}
   defp dispatch_tracked_response(state, ref, result, {:ok, :completion_resolve}) do
     state = delete_lsp_pending(state, ref)
-    {CompletionHandling.handle_resolve_response(state, result), [:render_now]}
+    {apply_completion_resolve_response(state, result), [:render_now]}
   end
 
   defp dispatch_tracked_response(state, ref, result, {:ok, :signature_help}) do
     state = delete_lsp_pending(state, ref)
-    {CompletionHandling.handle_signature_help_response(state, result), [:render_now]}
+    {apply_signature_help_response(state, result), [:render_now]}
+  end
+
+  defp dispatch_tracked_response(state, ref, result, {:ok, :hover}) do
+    state = delete_lsp_pending(state, ref)
+    {apply_traditional_lsp_response(:hover, state, result), [:render_now]}
+  end
+
+  defp dispatch_tracked_response(state, ref, result, {:ok, {:hover_mouse, _, _} = kind}) do
+    state = delete_lsp_pending(state, ref)
+    {apply_traditional_lsp_response(kind, state, result), [:render_now]}
+  end
+
+  defp dispatch_tracked_response(
+         state,
+         ref,
+         result,
+         {:ok, {:hover_mouse, _, _, _, _, _, _, _} = kind}
+       ) do
+    state = delete_lsp_pending(state, ref)
+    {apply_traditional_lsp_response(kind, state, result), [:render_now]}
   end
 
   defp dispatch_tracked_response(state, ref, result, {:ok, {:semantic_tokens, buf_pid}}) do
@@ -162,6 +190,31 @@ defmodule MingaEditor.Handlers.LspEventHandler do
   defp dispatch_tracked_response(state, ref, result, :error) do
     {CompletionHandling.handle_response(state, ref, result), [:render_now]}
   end
+
+  @spec apply_completion_resolve_response(EditorState.t(), term()) :: EditorState.t()
+  defp apply_completion_resolve_response(
+         %{shell_runtime: %{state: %ShellState{}}} = state,
+         result
+       ),
+       do: CompletionHandling.handle_resolve_response(state, result)
+
+  defp apply_completion_resolve_response(state, _result), do: state
+
+  @spec apply_signature_help_response(EditorState.t(), term()) :: EditorState.t()
+  defp apply_signature_help_response(%{shell_runtime: %{state: %ShellState{}}} = state, result),
+    do: CompletionHandling.handle_signature_help_response(state, result)
+
+  defp apply_signature_help_response(state, _result), do: state
+
+  @spec apply_traditional_lsp_response(term(), EditorState.t(), term()) :: EditorState.t()
+  defp apply_traditional_lsp_response(
+         kind,
+         %{shell_runtime: %{state: %ShellState{}}} = state,
+         result
+       ),
+       do: dispatch_lsp_response(kind, state, result)
+
+  defp apply_traditional_lsp_response(_kind, state, _result), do: state
 
   @spec delete_lsp_pending(EditorState.t(), reference()) :: EditorState.t()
   defp delete_lsp_pending(state, ref) do

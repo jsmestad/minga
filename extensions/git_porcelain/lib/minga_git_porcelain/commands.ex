@@ -14,9 +14,11 @@ defmodule MingaGitPorcelain.Commands do
   alias MingaEditor.Commands
   alias MingaEditor.Layout
   alias MingaEditor.PickerUI
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.GitToast
   alias MingaEditor.Shell.Traditional.GitToastWorkflow
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias Minga.Git
   alias Minga.Git.MergeConflict
@@ -1102,10 +1104,17 @@ defmodule MingaGitPorcelain.Commands do
         {notice_message, toast_level, toast_action} =
           remote_result_feedback(result, success_msg, error_prefix)
 
-        state
-        |> EditorState.clear_git_remote_op()
-        |> NoticeWorkflow.publish(notice_message)
-        |> GitToastWorkflow.publish(notice_message, toast_level, toast_action)
+        state = EditorState.clear_git_remote_op(state)
+
+        case Runtime.state(state.shell_runtime) do
+          %TraditionalState{} ->
+            state
+            |> NoticeWorkflow.publish(notice_message)
+            |> GitToastWorkflow.publish(notice_message, toast_level, toast_action)
+
+          _foreign_shell_state ->
+            state
+        end
 
       _ ->
         # Stale result from a superseded operation; ignore
@@ -1167,10 +1176,17 @@ defmodule MingaGitPorcelain.Commands do
         message = "Git operation failed unexpectedly: #{format_down_reason(reason)}"
         Minga.Log.warning(:editor, "Git remote task failed: #{inspect(reason)}")
 
-        state
-        |> EditorState.clear_git_remote_op()
-        |> NoticeWorkflow.publish(message)
-        |> GitToastWorkflow.publish(message, :error)
+        state = EditorState.clear_git_remote_op(state)
+
+        case Runtime.state(state.shell_runtime) do
+          %TraditionalState{} ->
+            state
+            |> NoticeWorkflow.publish(message)
+            |> GitToastWorkflow.publish(message, :error)
+
+          _foreign_shell_state ->
+            state
+        end
 
       _ ->
         :not_matched

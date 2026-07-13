@@ -18,20 +18,29 @@ defmodule MingaEditor.Shell.Traditional.SignatureHelpWorkflow do
   def show(%{shell_runtime: %{state: %{hover_popup: %{focused: true}}}} = state, _signature_help),
     do: state
 
-  def show(state, signature_help),
+  def show(%{shell_runtime: %{state: %ShellState{}}} = state, signature_help),
     do: EditorState.update_shell_state(state, &ShellState.show_signature_help(&1, signature_help))
+
+  def show(state, _signature_help), do: state
 
   @doc "Cycles to the next signature overload."
   @spec next(EditorState.t()) :: EditorState.t()
-  def next(state), do: EditorState.update_shell_state(state, &ShellState.next_signature_help/1)
+  def next(%{shell_runtime: %{state: %ShellState{}}} = state),
+    do: EditorState.update_shell_state(state, &ShellState.next_signature_help/1)
+
+  def next(state), do: state
 
   @doc "Cycles to the previous signature overload."
   @spec previous(EditorState.t()) :: EditorState.t()
-  def previous(state),
+  def previous(%{shell_runtime: %{state: %ShellState{}}} = state),
     do: EditorState.update_shell_state(state, &ShellState.previous_signature_help/1)
+
+  def previous(state), do: state
 
   @doc "Dismisses signature help."
   @spec dismiss(EditorState.t()) :: EditorState.t()
-  def dismiss(state),
+  def dismiss(%{shell_runtime: %{state: %ShellState{}}} = state),
     do: EditorState.update_shell_state(state, &ShellState.dismiss_signature_help/1)
+
+  def dismiss(state), do: state
 end

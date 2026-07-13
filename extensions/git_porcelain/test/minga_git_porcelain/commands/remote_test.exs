@@ -1,16 +1,42 @@
+Code.require_file("../../../../../test/support/fake_shell.ex", __DIR__)
+
 defmodule MingaGitPorcelain.CommandsRemoteTest do
   @moduledoc """
   Focused tests for async git remote operation feedback.
   """
-  use ExUnit.Case, async: true
+  # Serial because the shell-switch regression test uses the global shell registry.
+  use ExUnit.Case, async: false
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor
+  alias MingaEditor.Shell.Registry, as: ShellRegistry
   alias MingaEditor.Shell.Traditional.GitToast
-  alias MingaGitPorcelain.Commands, as: GitCommands
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Test.FakeShell
   alias MingaEditor.Viewport
+  alias MingaGitPorcelain.Commands, as: GitCommands
+
+  setup do
+    ShellRegistry.reset_for_test()
+    ShellRegistry.seed_builtin()
+
+    :ok =
+      ShellRegistry.register({:extension, :git_remote_fake_shell}, %{
+        id: :fake,
+        module: FakeShell,
+        display_name: "Fake",
+        description: "Fake shell",
+        capabilities: [:tui]
+      })
+
+    on_exit(fn ->
+      ShellRegistry.reset_for_test()
+      ShellRegistry.seed_builtin()
+    end)
+
+    :ok
+  end
 
   describe "command registration" do
     test "remote git commands are registered" do
@@ -68,6 +94,27 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
 
       assert result.shell_runtime.state.notice.message == "Pushing…"
       assert result.git_remote_op == op
+    end
+
+    test "delayed result clears the operation without touching or replaying a foreign shell" do
+      ref = make_ref()
+
+      state =
+        build_state(%{git_remote_op: make_remote_op(ref, {"/tmp/repo", "Pushed", "Push failed"})})
+        |> EditorState.switch_shell(:fake)
+
+      foreign_shell_state = Runtime.state(state.shell_runtime)
+      message_store = state.message_store
+
+      result = GitCommands.handle_remote_result(state, ref, :ok)
+
+      assert result.git_remote_op == nil
+      assert Runtime.state(result.shell_runtime) == foreign_shell_state
+      assert result.message_store == message_store
+
+      restored = EditorState.switch_shell(result, :traditional)
+      assert Runtime.state(restored.shell_runtime).notice.message == nil
+      refute GitToast.present?(Runtime.state(restored.shell_runtime).git_toast)
     end
   end
 

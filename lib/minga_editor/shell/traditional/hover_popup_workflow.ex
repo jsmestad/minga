@@ -15,22 +15,29 @@ defmodule MingaEditor.Shell.Traditional.HoverPopupWorkflow do
       when node != nil,
       do: state
 
-  def show(state, %HoverPopup{focused: true} = popup) do
+  def show(
+        %{shell_runtime: %{state: %ShellState{}}} = state,
+        %HoverPopup{focused: true} = popup
+      ) do
     state
     |> SignatureHelpWorkflow.dismiss()
     |> EditorState.update_shell_state(&ShellState.show_hover_popup(&1, popup))
   end
 
-  def show(state, popup),
+  def show(%{shell_runtime: %{state: %ShellState{}}} = state, popup),
     do: EditorState.update_shell_state(state, &ShellState.show_hover_popup(&1, popup))
+
+  def show(state, _popup), do: state
 
   @doc "Focuses the active hover popup and suppresses lower signature help."
   @spec focus(EditorState.t()) :: EditorState.t()
-  def focus(state) do
+  def focus(%{shell_runtime: %{state: %ShellState{}}} = state) do
     state
     |> SignatureHelpWorkflow.dismiss()
     |> update(&HoverPopup.focus/1)
   end
+
+  def focus(state), do: state
 
   @doc "Scrolls the active hover popup down."
   @spec scroll_down(EditorState.t()) :: EditorState.t()
@@ -46,7 +53,10 @@ defmodule MingaEditor.Shell.Traditional.HoverPopupWorkflow do
 
   @doc "Dismisses the active hover popup."
   @spec dismiss(EditorState.t()) :: EditorState.t()
-  def dismiss(state), do: EditorState.update_shell_state(state, &ShellState.dismiss_hover_popup/1)
+  def dismiss(%{shell_runtime: %{state: %ShellState{}}} = state),
+    do: EditorState.update_shell_state(state, &ShellState.dismiss_hover_popup/1)
+
+  def dismiss(state), do: state
 
   @spec update(EditorState.t(), (HoverPopup.t() -> HoverPopup.t())) :: EditorState.t()
   defp update(

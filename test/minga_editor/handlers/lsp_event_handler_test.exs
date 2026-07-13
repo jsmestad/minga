@@ -3,7 +3,8 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
   Handler tests for `MingaEditor.Handlers.LspEventHandler`.
   """
 
-  # async: false because these tests register clients in the singleton LSP SyncServer ETS table.
+  # async: false because these tests register clients in the singleton LSP SyncServer ETS table
+  # and exercise shell switching through the global shell registry.
   use ExUnit.Case, async: false
 
   alias Minga.Buffer.Process, as: BufferProcess
@@ -11,7 +12,9 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
   alias MingaEditor.CompletionHandling
   alias MingaEditor.CompletionTrigger
   alias MingaEditor.Handlers.LspEventHandler
+  alias MingaEditor.Shell.Registry, as: ShellRegistry
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.ModalWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.LSP.FormatOperation
   alias MingaEditor.State.Buffers
@@ -24,8 +27,30 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
   alias MingaEditor.VimState
   alias MingaEditor.Viewport
   alias MingaEditor.UI.Highlight
+  alias MingaEditor.Test.FakeShell
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
+
+  setup do
+    ShellRegistry.reset_for_test()
+    ShellRegistry.seed_builtin()
+
+    :ok =
+      ShellRegistry.register({:extension, :lsp_handler_fake_shell}, %{
+        id: :fake,
+        module: FakeShell,
+        display_name: "Fake",
+        description: "Fake shell",
+        capabilities: [:tui]
+      })
+
+    on_exit(fn ->
+      ShellRegistry.reset_for_test()
+      ShellRegistry.seed_builtin()
+    end)
+
+    :ok
+  end
 
   describe "handle/2" do
     test "references uses one structured identity from request through no-result response" do
@@ -244,6 +269,137 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
       assert %SignatureHelp{signatures: [%{label: "foo(arg)"}]} =
                Runtime.state(new_state.shell_runtime).signature_help
+    end
+
+    test "delayed hover response clears pending without touching or replaying a foreign shell" do
+      ref = make_ref()
+      state = base_state() |> put_lsp_pending(ref, :hover) |> EditorState.switch_shell(:fake)
+      foreign_shell_state = Runtime.state(state.shell_runtime)
+      message_store = state.message_store
+      response = {:ok, %{"contents" => %{"kind" => "markdown", "value" => "**hover**"}}}
+
+      {new_state, effects} = LspEventHandler.handle(state, {:lsp_response, ref, response})
+
+      assert effects == [:render_now]
+      assert new_state.workspace.lsp_pending == %{}
+      assert Runtime.state(new_state.shell_runtime) == foreign_shell_state
+      assert new_state.message_store == message_store
+
+      restored = EditorState.switch_shell(new_state, :traditional)
+      assert Runtime.state(restored.shell_runtime).hover_popup == nil
+      assert Runtime.state(restored.shell_runtime).notice.message == nil
+    end
+
+    test "delayed signature help clears pending without touching or replaying a foreign shell" do
+      ref = make_ref()
+
+      state =
+        base_state()
+        |> put_lsp_pending(ref, :signature_help)
+        |> EditorState.switch_shell(:fake)
+
+      foreign_shell_state = Runtime.state(state.shell_runtime)
+      message_store = state.message_store
+
+      response =
+        {:ok,
+         %{
+           "signatures" => [
+             %{"label" => "foo(arg)", "parameters" => [%{"label" => "arg"}]}
+           ],
+           "activeSignature" => 0,
+           "activeParameter" => 0
+         }}
+
+      {new_state, effects} = LspEventHandler.handle(state, {:lsp_response, ref, response})
+
+      assert effects == [:render_now]
+      assert new_state.workspace.lsp_pending == %{}
+      assert Runtime.state(new_state.shell_runtime) == foreign_shell_state
+      assert new_state.message_store == message_store
+
+      restored = EditorState.switch_shell(new_state, :traditional)
+      assert Runtime.state(restored.shell_runtime).signature_help == nil
+    end
+
+    test "delayed completion response does not spawn processing or replay after a shell switch" do
+      ref = make_ref()
+      trigger = %{CompletionTrigger.new() | pending_ref: ref, pending_refs: MapSet.new([ref])}
+      payload = CompletionPayload.new(:tab1, trigger: trigger)
+
+      state =
+        base_state()
+        |> ModalWorkflow.transition(:completion, payload)
+        |> EditorState.switch_shell(:fake)
+
+      foreign_shell_state = Runtime.state(state.shell_runtime)
+
+      response =
+        {:ok,
+         %{
+           "items" => [
+             %{"label" => "hello", "kind" => 3, "sortText" => "hello"}
+           ]
+         }}
+
+      {new_state, effects} = LspEventHandler.handle(state, {:lsp_response, ref, response})
+
+      assert effects == [:render_now]
+      assert new_state == state
+      assert Runtime.state(new_state.shell_runtime) == foreign_shell_state
+      refute_receive {:completion_processed, _, _, _, _}, 50
+
+      restored = EditorState.switch_shell(new_state, :traditional)
+      assert Runtime.state(restored.shell_runtime).modal == :none
+    end
+
+    test "delayed completion resolve clears pending without touching or replaying a foreign shell" do
+      ref = make_ref()
+      item = %{"label" => "resolved", "documentation" => "old", "sortText" => "resolved"}
+      completion = Completion.new(Completion.parse_response(%{"items" => [item]}), {0, 0})
+      payload = CompletionPayload.new(:tab1, completion: completion)
+
+      state =
+        base_state()
+        |> ModalWorkflow.transition(:completion, payload)
+        |> put_lsp_pending(ref, :completion_resolve)
+        |> EditorState.switch_shell(:fake)
+
+      foreign_shell_state = Runtime.state(state.shell_runtime)
+      response = {:ok, %{"label" => "resolved", "documentation" => "new"}}
+
+      {new_state, effects} = LspEventHandler.handle(state, {:lsp_response, ref, response})
+
+      assert effects == [:render_now]
+      assert new_state.workspace.lsp_pending == %{}
+      assert Runtime.state(new_state.shell_runtime) == foreign_shell_state
+
+      restored = EditorState.switch_shell(new_state, :traditional)
+      assert Runtime.state(restored.shell_runtime).modal == :none
+    end
+
+    test "delayed processed completion does not touch or replay a foreign shell" do
+      trigger = %{CompletionTrigger.new() | gen: 7}
+      payload = CompletionPayload.new(:tab1, trigger: trigger)
+
+      state =
+        base_state()
+        |> ModalWorkflow.transition(:completion, payload)
+        |> EditorState.switch_shell(:fake)
+
+      processed =
+        Completion.new(
+          Completion.parse_response(%{
+            "items" => [%{"label" => "hello", "kind" => 3, "sortText" => "hello"}]
+          }),
+          {0, 0}
+        )
+
+      new_state = CompletionHandling.apply_processed(state, 7, :primary, processed, {0, 0})
+
+      assert new_state == state
+      restored = EditorState.switch_shell(new_state, :traditional)
+      assert Runtime.state(restored.shell_runtime).modal == :none
     end
 
     test "tracked semantic token response updates highlights and returns render_now" do
