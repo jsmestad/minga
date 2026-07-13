@@ -10,6 +10,8 @@ defmodule MingaEditor.Commands.Formatting do
   use MingaEditor.Commands.Provider
 
   alias Minga.Buffer
+  alias MingaEditor.EffectScheduler
+  alias MingaEditor.Effects.ExternalFormat
   alias MingaEditor.State, as: EditorState
   alias Minga.Mode.ToolConfirmState
   alias Minga.Tool.Recipe.Registry, as: RecipeRegistry
@@ -185,39 +187,21 @@ defmodule MingaEditor.Commands.Formatting do
 
   # ── Private helpers ───────────────────────────────────────────────────────
 
-  @format_external_lane :format_external
-
   @spec format_and_replace(state(), pid(), Minga.Editing.Formatter.formatter_spec()) :: state()
+  defp format_and_replace(%{effect_scheduler: nil} = state, _buf, _spec) do
+    EditorState.set_status(state, "Formatter scheduler unavailable")
+  end
+
   defp format_and_replace(state, buf, spec) do
-    {content, version} = Buffer.content_with_version(buf)
+    request = ExternalFormat.request(buf, spec)
 
-    state
-    |> EditorState.set_status("Formatting…")
-    |> MingaEditor.AsyncAction.run(@format_external_lane, fn ->
-      case Minga.Editing.format(content, spec) do
-        {:ok, formatted} -> {:ok, formatted, buf, version}
-        {:error, msg} -> {:error, msg}
-      end
-    end)
-  end
+    case EffectScheduler.schedule(state.effect_scheduler, request) do
+      {:ok, _request_id, _disposition} ->
+        EditorState.set_status(state, "Formatting…")
 
-  @doc "Applies the result of an asynchronous external formatter run."
-  @spec apply_format_external_result(state(), term()) :: state()
-  def apply_format_external_result(state, {:ok, formatted, buf, version}) do
-    result =
-      safely_commit(fn ->
-        case commit_formatted_content(buf, version, formatted, :user) do
-          :ok -> {:ok, Buffer.file_path(buf)}
-          {:error, reason} -> {:error, reason}
-        end
-      end)
-
-    apply_external_commit_status(state, result)
-  end
-
-  def apply_format_external_result(state, {:error, msg}) do
-    Minga.Log.warning(:editor, "Formatter failed: #{msg}")
-    EditorState.set_status(state, "Format error: #{msg}")
+      {:error, reason} ->
+        EditorState.set_status(state, "Format not scheduled: #{reason}")
+    end
   end
 
   @spec commit_formatted_content(
@@ -235,28 +219,6 @@ defmodule MingaEditor.Commands.Formatting do
     fun.()
   catch
     :exit, _reason -> {:error, :not_alive}
-  end
-
-  @spec apply_external_commit_status(
-          state(),
-          {:ok, String.t() | nil} | {:error, format_commit_error()}
-        ) :: state()
-  defp apply_external_commit_status(state, {:ok, file_path}) do
-    buf_name = (file_path || "scratch") |> Path.basename()
-    Minga.Log.info(:editor, "Formatted: #{buf_name}")
-    EditorState.set_status(state, "Formatted")
-  end
-
-  defp apply_external_commit_status(state, {:error, :stale}) do
-    EditorState.set_status(state, "Buffer changed, format skipped")
-  end
-
-  defp apply_external_commit_status(state, {:error, :read_only}) do
-    EditorState.set_status(state, "Buffer is read-only, format skipped")
-  end
-
-  defp apply_external_commit_status(state, {:error, :not_alive}) do
-    EditorState.set_status(state, "Buffer closed, format skipped")
   end
 
   # When the formatter binary is missing and a tool recipe exists for it,

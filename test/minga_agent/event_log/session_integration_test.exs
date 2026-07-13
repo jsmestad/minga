@@ -314,6 +314,7 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
 
     assert :ok = Session.subscribe(session, client, role: :driver)
     assert :ok = Session.unsubscribe(session, client)
+    :sys.get_state(log_pid)
 
     {:ok, db} = EventLog.open_read_connection(db_dir: tmp_dir)
     events = wait_for_event(db, "disconnect-session", :user_disconnected, session, log_pid)

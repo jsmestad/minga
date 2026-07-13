@@ -19,7 +19,7 @@ defmodule MingaEditor.State.PickerTest do
       # A newer search / project switch / reopen mints a new revision on the same
       # picker. The older in-flight fetch is now stale and must be dropped, even
       # though it was requested first. This is the latest-wins behavior the ticket
-      # requires, distinct from the AsyncAction lane token's FIFO serialization.
+      # requires, distinct from serialized mutation effects.
       {ps, second} = PickerState.begin_fetch(ps)
 
       refute PickerState.current_fetch?(ps, first)

@@ -1,10 +1,14 @@
 defmodule MingaEditor.Commands.FormattingAsyncTest do
-  @moduledoc "Tests for async external formatter result application."
+  @moduledoc "Typed external-format effect application and version-safety tests."
+
   use ExUnit.Case, async: true
 
   alias Minga.Buffer
   alias Minga.Buffer.Process, as: BufferProcess
-  alias MingaEditor.Commands.Formatting
+  alias MingaEditor.Effect.Outcome
+  alias MingaEditor.Effect.Request
+  alias MingaEditor.Effects.ExternalFormat
+  alias MingaEditor.Effects.ExternalFormatResult
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Windows
@@ -13,128 +17,194 @@ defmodule MingaEditor.Commands.FormattingAsyncTest do
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
 
-  describe "apply_format_external_result/2" do
-    test "applies formatted content when buffer version matches" do
-      state = base_state("hello world\n")
-      buf = state.workspace.buffers.active
-      version = Buffer.version(buf)
+  @effect_timeout 2_000
 
-      new_state =
-        Formatting.apply_format_external_result(state, {:ok, "HELLO WORLD\n", buf, version})
+  test "request is latest-wins and keyed by Buffer process identity" do
+    state = base_state("hello\n")
+    buffer = state.workspace.buffers.active
 
-      assert Buffer.content(buf) == "HELLO WORLD\n"
-      assert new_state.shell_state.status_msg == "Formatted"
-    end
-
-    test "skips formatting when buffer version changed" do
-      state = base_state("hello world\n")
-      buf = state.workspace.buffers.active
-      old_version = Buffer.version(buf)
-
-      Buffer.replace_content(buf, "modified\n")
-
-      new_state =
-        Formatting.apply_format_external_result(state, {:ok, "STALE\n", buf, old_version})
-
-      assert Buffer.content(buf) == "modified\n"
-      assert new_state.shell_state.status_msg =~ "Buffer changed"
-    end
-
-    test "a mutation queued after the atomic external commit is not overwritten" do
-      state = base_state("hello world\n")
-      buf = state.workspace.buffers.active
-      version = Buffer.version(buf)
-      :ok = :sys.suspend(buf)
-
-      task =
-        Task.async(fn ->
-          receive do
-            :apply_result ->
-              Formatting.apply_format_external_result(
-                state,
-                {:ok, "FORMATTED\n", buf, version}
-              )
-          end
-        end)
-
-      task_pid = task.pid
-      1 = :erlang.trace(task_pid, true, [:send])
-      send(task_pid, :apply_result)
-
-      assert_receive {:trace, ^task_pid, :send,
-                      {:"$gen_call", {_from, _tag},
-                       {:replace_content_if_version, ^version, "FORMATTED\n", :user}}, ^buf}
-
-      insert_tag = make_ref()
-
-      send(
-        buf,
-        {:"$gen_call", {self(), insert_tag}, {:insert_text, "!", Minga.Buffer.EditSource.user()}}
-      )
-
-      :ok = :sys.resume(buf)
-      assert_receive {^insert_tag, :ok}
-      new_state = Task.await(task)
-
-      assert Buffer.content(buf) == "!FORMATTED\n"
-      assert new_state.shell_state.status_msg == "Formatted"
-      assert :ok = Buffer.undo(buf)
-      assert Buffer.content(buf) == "hello world\n"
-    end
-
-    test "rejects a matching-version result when the buffer is read-only" do
-      state = base_state("hello\n", read_only: true)
-      buf = state.workspace.buffers.active
-      version = Buffer.version(buf)
-
-      new_state = Formatting.apply_format_external_result(state, {:ok, "HELLO\n", buf, version})
-
-      assert Buffer.content(buf) == "hello\n"
-      assert new_state.shell_state.status_msg =~ "read-only"
-    end
-
-    test "drops a result when the target buffer exited" do
-      state = base_state("hello\n")
-      buf = state.workspace.buffers.active
-      version = Buffer.version(buf)
-      monitor = Process.monitor(buf)
-      Process.exit(buf, :kill)
-      assert_receive {:DOWN, ^monitor, :process, ^buf, :killed}
-
-      new_state = Formatting.apply_format_external_result(state, {:ok, "HELLO\n", buf, version})
-
-      assert new_state.shell_state.status_msg =~ "closed"
-    end
-
-    test "handles formatter error" do
-      state = base_state("hello\n")
-
-      new_state =
-        Formatting.apply_format_external_result(state, {:error, "formatter exited with code 1"})
-
-      assert new_state.shell_state.status_msg =~ "Format error"
-    end
-
-    test "preserves cursor position after formatting" do
-      state = base_state("line one\nline two\nline three\n")
-      buf = state.workspace.buffers.active
-      Buffer.move_to(buf, {1, 3})
-      version = Buffer.version(buf)
-
-      new_state =
-        Formatting.apply_format_external_result(
-          state,
-          {:ok, "LINE ONE\nLINE TWO\nLINE THREE\n", buf, version}
-        )
-
-      assert Buffer.content(buf) == "LINE ONE\nLINE TWO\nLINE THREE\n"
-      {line, col} = Buffer.cursor(buf)
-      assert line == 1
-      assert col == 3
-      assert new_state.shell_state.status_msg == "Formatted"
-    end
+    assert %Request{
+             resource: {:buffer, ^buffer},
+             policy: %{mode: :latest_wins, max_queued: 0},
+             effect: %ExternalFormat{buffer: ^buffer, formatter: "cat"}
+           } = ExternalFormat.request(buffer, "cat")
   end
 
+  test "completed formatting applies only to the captured buffer version" do
+    state = base_state("hello world\n")
+    buffer = state.workspace.buffers.active
+    request = ExternalFormat.request(buffer, "cat")
+    result = ExternalFormatResult.new(buffer, Buffer.version(buffer), "HELLO WORLD\n")
+
+    {new_state, outcome} = ExternalFormat.apply(state, Outcome.completed(request, result))
+
+    assert Buffer.content(buffer) == "HELLO WORLD\n"
+    assert EditorState.status_msg(new_state) == "Formatted"
+    assert outcome.status == :completed
+  end
+
+  test "successful replacement does not query a buffer that closes after replying" do
+    buffer =
+      spawn(fn ->
+        receive do
+          {:"$gen_call", from, {:replace_content_if_version, 0, "FORMATTED\n", :user}} ->
+            GenServer.reply(from, :ok)
+        end
+      end)
+
+    monitor = Process.monitor(buffer)
+    state = base_state("hello\n")
+    request = ExternalFormat.request(buffer, "cat")
+    result = ExternalFormatResult.new(buffer, 0, "FORMATTED\n", "closed.ex")
+
+    {new_state, outcome} = ExternalFormat.apply(state, Outcome.completed(request, result))
+
+    assert_receive {:DOWN, ^monitor, :process, ^buffer, :normal}
+    assert EditorState.status_msg(new_state) == "Formatted"
+    assert outcome.status == :completed
+  end
+
+  test "buffer mutation makes a completed worker result stale without overwriting content" do
+    state = base_state("hello world\n")
+    buffer = state.workspace.buffers.active
+    request = ExternalFormat.request(buffer, "cat")
+    result = ExternalFormatResult.new(buffer, Buffer.version(buffer), "STALE\n")
+    Buffer.replace_content(buffer, "modified\n")
+
+    {new_state, outcome} = ExternalFormat.apply(state, Outcome.completed(request, result))
+
+    assert Buffer.content(buffer) == "modified\n"
+    assert EditorState.status_msg(new_state) == "Buffer changed, format skipped"
+    assert outcome.status == :stale
+    assert outcome.reason == :buffer_version_changed
+  end
+
+  test "a mutation queued after the atomic external commit is not overwritten" do
+    state = base_state("hello world\n")
+    buffer = state.workspace.buffers.active
+    request = ExternalFormat.request(buffer, "cat")
+    version = Buffer.version(buffer)
+    result = ExternalFormatResult.new(buffer, version, "FORMATTED\n")
+    :ok = :sys.suspend(buffer)
+
+    task =
+      Task.async(fn ->
+        receive do
+          :apply_result -> ExternalFormat.apply(state, Outcome.completed(request, result))
+        end
+      end)
+
+    task_pid = task.pid
+    1 = :erlang.trace(task_pid, true, [:send])
+    send(task_pid, :apply_result)
+
+    assert_receive {:trace, ^task_pid, :send,
+                    {:"$gen_call", {_from, _tag},
+                     {:replace_content_if_version, ^version, "FORMATTED\n", :user}}, ^buffer},
+                   @effect_timeout
+
+    insert_tag = make_ref()
+
+    send(
+      buffer,
+      {:"$gen_call", {self(), insert_tag}, {:insert_text, "!", Minga.Buffer.EditSource.user()}}
+    )
+
+    :ok = :sys.resume(buffer)
+    assert_receive {^insert_tag, :ok}
+    {new_state, outcome} = Task.await(task)
+
+    assert Buffer.content(buffer) == "!FORMATTED\n"
+    assert EditorState.status_msg(new_state) == "Formatted"
+    assert outcome.status == :completed
+    assert :ok = Buffer.undo(buffer)
+    assert Buffer.content(buffer) == "hello world\n"
+  end
+
+  test "read-only and closed buffers produce typed failures" do
+    read_only_state = base_state("hello\n", read_only: true)
+    read_only_buffer = read_only_state.workspace.buffers.active
+    read_only_request = ExternalFormat.request(read_only_buffer, "cat")
+
+    read_only_result =
+      ExternalFormatResult.new(read_only_buffer, Buffer.version(read_only_buffer), "HELLO\n")
+
+    {read_only_state, read_only_outcome} =
+      ExternalFormat.apply(
+        read_only_state,
+        Outcome.completed(read_only_request, read_only_result)
+      )
+
+    assert Buffer.content(read_only_buffer) == "hello\n"
+    assert EditorState.status_msg(read_only_state) == "Buffer is read-only, format skipped"
+    assert read_only_outcome.status == :failed
+    assert read_only_outcome.reason == :read_only
+
+    closed_state = base_state("hello\n")
+    closed_buffer = closed_state.workspace.buffers.active
+    closed_request = ExternalFormat.request(closed_buffer, "cat")
+
+    closed_result =
+      ExternalFormatResult.new(closed_buffer, Buffer.version(closed_buffer), "HELLO\n")
+
+    monitor = Process.monitor(closed_buffer)
+    Process.exit(closed_buffer, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^closed_buffer, :killed}
+
+    {closed_state, closed_outcome} =
+      ExternalFormat.apply(closed_state, Outcome.completed(closed_request, closed_result))
+
+    assert EditorState.status_msg(closed_state) == "Buffer closed, format skipped"
+    assert closed_outcome.status == :failed
+    assert closed_outcome.reason == :buffer_closed
+  end
+
+  test "failed, canceled, and stale outcomes have user-visible feedback" do
+    state = base_state("hello\n")
+    buffer = state.workspace.buffers.active
+    request = ExternalFormat.request(buffer, "cat")
+
+    {failed_state, failed} =
+      ExternalFormat.apply(state, Outcome.failed(request, "formatter failed"))
+
+    assert EditorState.status_msg(failed_state) == "Format error: formatter failed"
+    assert failed.status == :failed
+
+    {canceled_state, canceled} =
+      ExternalFormat.apply(state, Outcome.canceled(request, :superseded))
+
+    assert EditorState.status_msg(canceled_state) == "Format canceled"
+    assert canceled.status == :canceled
+
+    {stale_state, stale} =
+      ExternalFormat.apply(state, Outcome.stale(Outcome.completed(request, nil), :changed))
+
+    assert EditorState.status_msg(stale_state) == "Buffer changed, format skipped"
+    assert stale.status == :stale
+  end
+
+  test "format application preserves cursor position" do
+    state = base_state("line one\nline two\nline three\n")
+    buffer = state.workspace.buffers.active
+    Buffer.move_to(buffer, {1, 3})
+    request = ExternalFormat.request(buffer, "cat")
+
+    result =
+      ExternalFormatResult.new(
+        buffer,
+        Buffer.version(buffer),
+        "LINE ONE\nLINE TWO\nLINE THREE\n"
+      )
+
+    {new_state, outcome} = ExternalFormat.apply(state, Outcome.completed(request, result))
+
+    assert Buffer.content(buffer) == "LINE ONE\nLINE TWO\nLINE THREE\n"
+    assert Buffer.cursor(buffer) == {1, 3}
+    assert EditorState.status_msg(new_state) == "Formatted"
+    assert outcome.status == :completed
+  end
+
+  @spec base_state(String.t(), keyword()) :: EditorState.t()
   defp base_state(content, opts \\ []) do
     buffer_opts = Keyword.merge([content: content], opts)
     buffer = start_supervised!({BufferProcess, buffer_opts}, id: {:buffer, make_ref()})

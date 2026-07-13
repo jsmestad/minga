@@ -16,8 +16,8 @@ defmodule MingaEditor.State.Picker do
   @typedoc """
   Latest-wins guard for async candidate fetches. Each `open_async` mints a fresh
   reference; a result whose revision doesn't match the live picker's is stale and
-  dropped. Unlike the AsyncAction lane token (FIFO serial), this drops *older*
-  in-flight fetches when a newer search, project switch, or reopen supersedes them.
+  dropped. A newer search, project switch, or reopen supersedes older in-flight
+  fetches.
   """
   @type fetch_revision :: reference() | nil
 

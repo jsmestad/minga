@@ -2,9 +2,9 @@ defmodule Minga.Credo.NoBlockingEditorCallCheck do
   @moduledoc """
   Flags synchronous blocking calls inside MingaEditor modules.
 
-  MingaEditor is a single GenServer. Synchronous calls to LSP (`Client.request_sync`), shell commands (`System.cmd`), task awaits (`Task.await`), and sleeps (`Process.sleep`) inside command and handler code head-of-line-block input echo and rendering. These should use `AsyncAction.run/3` or a `Task` instead.
+  MingaEditor is a single GenServer. Synchronous calls to LSP (`Client.request_sync`), shell commands (`System.cmd`), task awaits (`Task.await`), and sleeps (`Process.sleep`) inside command and handler code head-of-line-block input echo and rendering. Slow domain work should use a typed `EffectScheduler` request or a supervised Task instead.
 
-  Calls nested inside `AsyncAction.run(...)` blocks or `Task.start`/`Task.async` bodies are exempt because the work is already off the critical path.
+  Calls nested inside `Task.start`/`Task.async` bodies are exempt because the work is already off the critical path.
 
   ## Inline suppression
 
@@ -25,7 +25,7 @@ defmodule Minga.Credo.NoBlockingEditorCallCheck do
       check: """
       `Client.request_sync`, `System.cmd`, `Task.await`, and `Process.sleep` block the calling process. Inside MingaEditor modules these block the single editor GenServer, causing head-of-line blocking for input echo and rendering.
 
-      Use `AsyncAction.run/3` or a `Task` to move slow work off the critical path.
+      Use a typed `EffectScheduler` request or a supervised Task to move slow work off the critical path.
 
       To suppress a sanctioned exception, add `# minga:allow-blocking — <justification>` on the same line.
       """
@@ -40,8 +40,6 @@ defmodule Minga.Credo.NoBlockingEditorCallCheck do
   ]
 
   @exempt_wrappers [
-    {[:AsyncAction], :run},
-    {[:MingaEditor, :AsyncAction], :run},
     {[:Task], :start},
     {[:Task], :start_link},
     {[:Task], :async}
@@ -50,7 +48,7 @@ defmodule Minga.Credo.NoBlockingEditorCallCheck do
   @suppression_pattern ~r/# minga:allow-blocking\s+—\s+\S/
 
   # Known blocking-call sites awaiting D2 migration (#2450).
-  # Remove entries as each site is migrated to AsyncAction/Task.
+  # Remove entries as each site moves to a typed effect or supervised Task.
   @known_sites [
     {"lib/minga_editor/commands/formatting.ex", 72},
     {"lib/minga_editor/commands/buffer_management.ex", 2198},
@@ -80,7 +78,7 @@ defmodule Minga.Credo.NoBlockingEditorCallCheck do
 
   defp find_blocking_calls(ast, issue_meta, exempt?) do
     case ast do
-      # Pipe into an exempt wrapper: state |> AsyncAction.run(lane, fn -> ... end)
+      # Pipe into an exempt Task wrapper.
       {:|>, meta, [_lhs, {{:., _, [{:__aliases__, _, mod_parts}, func]}, _, args}]}
       when is_list(args) ->
         if exempt_wrapper?(mod_parts, func) do
@@ -90,7 +88,7 @@ defmodule Minga.Credo.NoBlockingEditorCallCheck do
             children_issues(args, issue_meta, exempt?)
         end
 
-      # Direct call: AsyncAction.run(state, lane, fn -> ... end)
+      # Direct call to an exempt Task wrapper.
       {{:., _, [{:__aliases__, _, mod_parts}, func]}, meta, args} when is_list(args) ->
         if exempt_wrapper?(mod_parts, func) do
           exempt_args_issues(args, issue_meta)
@@ -127,7 +125,7 @@ defmodule Minga.Credo.NoBlockingEditorCallCheck do
       [
         format_issue(issue_meta,
           message:
-            "#{trigger} blocks the editor GenServer. Use AsyncAction.run/3 or a Task to move this off the critical path.",
+            "#{trigger} blocks the editor GenServer. Use a typed EffectScheduler request or supervised Task to move this off the critical path.",
           trigger: trigger,
           line_no: meta[:line]
         )

@@ -126,10 +126,7 @@ defmodule MingaEditor.State do
             message_store: %MessageStore{},
             notifications: NotificationCenter.new(),
             git_remote_op: nil,
-            # Per-lane serial gates for slow work offloaded via
-            # MingaEditor.AsyncAction. lane (atom) => %{running: reference() | nil,
-            # queue: [work_fun]}. Operations on a lane run one at a time, in order.
-            async_actions: %{},
+            effect_scheduler: nil,
             lsp: %LSPState{},
             parser_status: :available,
             focus_stack: [],
@@ -176,12 +173,6 @@ defmodule MingaEditor.State do
   @type backend :: :tui | :gui | :native_gui | :headless
   @type rendering_policy :: :enabled | :disabled
 
-  @typedoc """
-  Per-lane serial gate for `MingaEditor.AsyncAction`: the in-flight operation's
-  token (or `nil` when idle) and a FIFO queue of pending zero-arity work funcs.
-  """
-  @type async_lane :: %{running: reference() | nil, queue: [(-> term())]}
-
   @type shell_id :: atom()
   @type shell_state :: term()
   @type shell_identity :: ShellIdentity.t() | nil
@@ -215,7 +206,7 @@ defmodule MingaEditor.State do
           message_store: MessageStore.t(),
           notifications: NotificationCenter.t(),
           git_remote_op: git_remote_op(),
-          async_actions: %{optional(atom()) => async_lane()},
+          effect_scheduler: GenServer.server() | nil,
           lsp: LSPState.t(),
           parser_status: MingaEditor.Shell.Traditional.Modeline.parser_status(),
           focus_stack: [module()],
@@ -1572,25 +1563,6 @@ defmodule MingaEditor.State do
 
   @spec clear_git_remote_op(t()) :: t()
   def clear_git_remote_op(%__MODULE__{} = state), do: %{state | git_remote_op: nil}
-
-  @doc "Returns the async-action gate state for `lane` (idle default when absent)."
-  @spec get_async_lane(t(), atom()) :: async_lane()
-  def get_async_lane(%__MODULE__{async_actions: actions}, lane) when is_atom(lane) do
-    Map.get(actions, lane, %{running: nil, queue: []})
-  end
-
-  @doc "Stores the async-action gate state for `lane`."
-  @spec put_async_lane(t(), atom(), async_lane()) :: t()
-  def put_async_lane(%__MODULE__{async_actions: actions} = state, lane, lane_state)
-      when is_atom(lane) and is_map(lane_state) do
-    %{state | async_actions: Map.put(actions, lane, lane_state)}
-  end
-
-  @doc "Removes the async-action gate state for `lane`, marking it idle."
-  @spec delete_async_lane(t(), atom()) :: t()
-  def delete_async_lane(%__MODULE__{async_actions: actions} = state, lane) when is_atom(lane) do
-    %{state | async_actions: Map.delete(actions, lane)}
-  end
 
   @spec register_diff_view(t(), pid(), diff_view_info()) :: t()
   def register_diff_view(%__MODULE__{} = state, diff_buf, info) when is_pid(diff_buf),

@@ -126,21 +126,6 @@ defmodule Minga.Credo.NoBlockingHandleInfoCheckTest do
     |> refute_issues()
   end
 
-  test "does not flag blocking work nested inside AsyncAction.run" do
-    """
-    defmodule MingaEditor do
-      def handle_info({:format_now, _meta}, state) do
-        state
-        |> MingaEditor.AsyncAction.run(:format, fn ->
-          File.read!("/etc/hosts")
-        end)
-      end
-    end
-    """
-    |> check()
-    |> refute_issues()
-  end
-
   test "does not flag Enum.map over a literal list" do
     """
     defmodule MingaEditor do
