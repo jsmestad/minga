@@ -76,7 +76,7 @@ func (m Model) fileTree() (protocol.FileTree, bool) {
 
 func (m Model) statusBar() (protocol.StatusBar, bool) {
 	for _, payload := range m.chrome {
-		if payload.Status.Filename != "" || payload.Status.Message != "" || payload.Status.Line != 0 || len(payload.Status.Left) > 0 || len(payload.Status.Right) > 0 {
+		if payload.Status.Filename != "" || payload.Status.Message != "" || payload.Status.Operation != nil || payload.Status.Line != 0 || len(payload.Status.Left) > 0 || len(payload.Status.Right) > 0 {
 			return payload.Status, true
 		}
 	}
