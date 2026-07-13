@@ -741,10 +741,10 @@ defmodule MingaEditor.Renderer.ServerTest do
 
       result = MingaEditor.Renderer.render_or_async(state)
 
-      assert result.latest_render_intent_revision == state.latest_render_intent_revision + 1
+      assert result.render_correlation.latest_intent_revision ==
+               state.render_correlation.latest_intent_revision + 1
 
-      assert %{result | latest_render_intent_revision: state.latest_render_intent_revision} ==
-               state
+      assert %{result | render_correlation: state.render_correlation} == state
 
       assert_receive {:render_done, %RenderReceipt{}},
                      @async_render_timeout

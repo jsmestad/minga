@@ -442,7 +442,7 @@ defmodule MingaEditor.Shell.RegistryTest do
       MingaEditor.handle_info({:agent_event, self(), {:status_changed, :idle}}, matching)
 
     assert Runtime.stash(stale.shell_runtime).fake.state.events == [event]
-    Process.cancel_timer(stale.render_timer)
+    Process.cancel_timer(stale.render_correlation.timer)
   end
 
   test "active agent event retains state returned by shell persistence" do
@@ -464,7 +464,7 @@ defmodule MingaEditor.Shell.RegistryTest do
       MingaEditor.handle_info({:agent_event, self(), {:status_changed, :error}}, state)
 
     assert Runtime.state(updated.shell_runtime) == persisted_state
-    Process.cancel_timer(updated.render_timer)
+    Process.cancel_timer(updated.render_correlation.timer)
   end
 
   test "Agent.Events updates matching stashes but skips a replaced registration" do
@@ -912,10 +912,8 @@ defmodule MingaEditor.Shell.RegistryTest do
       render_sent_at: 0
     }
 
-    result =
-      state
-      |> Workflow.ensure_available()
-      |> EditorState.apply_renderer_writeback(writeback)
+    available = Workflow.ensure_available(state)
+    {result, _receipt_result} = EditorState.integrate_renderer_receipt(available, writeback)
 
     assert result.layout == nil
     assert result.focus_tree == nil

@@ -57,9 +57,7 @@ defmodule MingaEditor.RenderPipeline do
   @doc """
   Runs the full render pipeline for the given Input.
 
-  Returns updated Input with per-window render caches populated.
-  The caller applies mutations back to EditorState via
-  `EditorState.apply_render_output/2`.
+  Returns updated Input with per-window render caches populated. `Renderer.Server` retains renderer-private state and returns a focused receipt for atomic Editor integration.
   """
   @spec run(input()) :: input()
   def run(input) do

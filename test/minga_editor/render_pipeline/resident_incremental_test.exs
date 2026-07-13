@@ -11,6 +11,7 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
   alias MingaEditor.RenderPipeline.Scroll
   alias MingaEditor.Renderer.BufferChanges
   alias MingaEditor.Renderer.ProductionGate
+  alias MingaEditor.Renderer.RenderReceipt
   alias MingaEditor.Renderer.State, as: RendererState
   alias MingaEditor.State, as: EditorState
 
@@ -37,7 +38,8 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
     {scrolls, input} = Scroll.scroll_windows(input, layout)
     {contents, _cursor, output} = Content.build_content(input, scrolls)
     renderer = BufferChanges.commit(renderer, output, intent)
-    editor = EditorState.apply_render_output(editor, output)
+    receipt = RenderReceipt.from_output(output, 0, 0, 0)
+    editor = EditorState.integrate_synchronous_renderer_receipt(editor, receipt)
     model = contents |> List.first() |> Map.fetch!(:models) |> List.first()
     {model, %{editor: editor, renderer: renderer, output: output}}
   end

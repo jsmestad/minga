@@ -1,6 +1,7 @@
 defmodule MingaEditor.RenderPipeline.InputTest do
   use ExUnit.Case, async: true
 
+  alias MingaEditor.FocusTree.Node, as: FocusNode
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.RenderPipeline.TestHelpers
@@ -57,7 +58,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
 
       # These GenServer-only or Editor-owned fields must NOT be in Input
       excluded = [
-        :render_timer,
+        :render_correlation,
         :buffer_monitors,
         :focus_stack,
         :pending_quit,
@@ -99,19 +100,24 @@ defmodule MingaEditor.RenderPipeline.InputTest do
   end
 
   describe "EditorState.reset_frontend_render_state/1" do
-    test "resets frontend caches and message send cursor", %{state: state} do
+    test "resets frontend cursors and requests a keyframe without resetting receipt ordering", %{
+      state: state
+    } do
       message_store =
         state.message_store
         |> MessageStore.append("first", :info, :editor)
         |> MessageStore.mark_sent(1)
 
       state = %{state | message_store: message_store}
+      {state, revision} = EditorState.submit_render_intent(state)
 
       result = EditorState.reset_frontend_render_state(state)
 
       assert result.message_store.last_sent_id == 0
       assert result.message_store.stream_instance == message_store.stream_instance
       assert Enum.map(result.message_store.entries, & &1.text) == ["first"]
+      assert result.render_correlation.keyframe_pending?
+      assert result.render_correlation.latest_intent_revision == revision
     end
   end
 
@@ -132,76 +138,25 @@ defmodule MingaEditor.RenderPipeline.InputTest do
     end
   end
 
-  describe "EditorState.apply_render_output/2" do
-    test "writes back bounded editor window observations", %{state: state} do
-      input = Input.from_editor_state(state)
-      win_id = input.workspace.windows.active
-      window = Map.fetch!(input.workspace.windows.map, win_id)
-
-      mutated_cache = %{window.render_cache | viewport_top: 42}
-      mutated_window = %{window | render_cache: mutated_cache}
-      mutated_map = Map.put(input.workspace.windows.map, win_id, mutated_window)
-      ws = input.workspace
-      mutated_input = %{input | workspace: %{ws | windows: %{ws.windows | map: mutated_map}}}
-
-      result = EditorState.apply_render_output(state, mutated_input)
-
-      assert result.workspace.windows.map[win_id].render_cache.viewport_top == 42
-    end
-
-    test "preserves fields not in Input", %{state: state} do
-      state = %{state | focus_stack: [:test_handler]}
-      input = Input.from_editor_state(state)
-
-      result = EditorState.apply_render_output(state, input)
-
-      assert result.focus_stack == [:test_handler]
-      assert result.render_timer == state.render_timer
-      assert result.buffer_monitors == state.buffer_monitors
-    end
-
-    test "writes back layout", %{state: state} do
-      input = Input.from_editor_state(state)
-
-      layout = MingaEditor.Layout.compute(state)
-      mutated_input = %{input | layout: layout}
-
-      result = EditorState.apply_render_output(state, mutated_input)
-
-      assert result.layout == layout
-    end
-
-    test "does not write renderer-owned message cursor back to Editor", %{state: state} do
-      input = Input.from_editor_state(state)
-
-      message_store =
-        state.message_store
-        |> MessageStore.append("first", :info, :editor)
-        |> MessageStore.append("second", :info, :editor)
-        |> MessageStore.mark_sent(2)
-
-      result = EditorState.apply_render_output(state, %{input | message_store: message_store})
-
-      assert result.message_store == state.message_store
-    end
-  end
-
-  describe "EditorState.apply_renderer_writeback/2" do
+  describe "EditorState.integrate_renderer_receipt/2" do
     test "applies only editor-owned receipt fields and Editor has no renderer caches",
          %{state: state} do
       input = Input.from_editor_state(state)
       windows = state.workspace.windows
+      focus_tree = FocusNode.new(:editor_area, {0, 0, 80, 24})
 
       receipt =
         receipt(input, 10, false,
           layout: :rendered_layout,
+          focus_tree: focus_tree,
           modeline_click_regions: [{:modeline, 1}],
           tab_bar_click_regions: [{:tab, 2}]
         )
 
-      result = EditorState.apply_renderer_writeback(state, receipt)
+      result = integrate_receipt(state, receipt)
 
       assert result.layout == :rendered_layout
+      assert result.focus_tree == focus_tree
       assert result.workspace.windows == windows
       refute Map.has_key?(Map.from_struct(result), :caches)
       assert Runtime.state(result.shell_runtime).modeline_click_regions == [{:modeline, 1}]
@@ -229,7 +184,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       assert %MingaEditor.Renderer.WindowObservation{viewport: ^viewport} =
                receipt.window_observations[id]
 
-      result = EditorState.apply_renderer_writeback(state, receipt)
+      result = integrate_receipt(state, receipt)
       observed = Map.fetch!(result.workspace.windows.map, id)
 
       assert observed.viewport.top == 12
@@ -243,11 +198,11 @@ defmodule MingaEditor.RenderPipeline.InputTest do
 
       result =
         state
-        |> EditorState.apply_renderer_writeback(newer)
-        |> EditorState.apply_renderer_writeback(older)
+        |> integrate_receipt(newer)
+        |> integrate_receipt(older)
 
       assert result.layout == :newer
-      assert result.last_render_receipt_seq == 20
+      assert result.render_correlation.last_receipt_seq == 20
     end
 
     test "pending acknowledgement is stale after a newer resize/focus/shell intent", %{
@@ -260,7 +215,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       changed = %{state | layout: :resized_layout, focus_tree: :new_focus}
 
       assert new_revision == old_revision + 1
-      assert EditorState.apply_renderer_writeback(changed, pending) == changed
+      assert integrate_receipt(changed, pending) == changed
     end
 
     test "receipt from a replaced shell identity is side-effect free", %{state: state} do
@@ -287,18 +242,18 @@ defmodule MingaEditor.RenderPipeline.InputTest do
             )
       }
 
-      assert EditorState.apply_renderer_writeback(switched, stale) == switched
+      assert integrate_receipt(switched, stale) == switched
     end
 
     test "only an applied keyframe receipt clears a pending keyframe request", %{state: state} do
       input = Input.from_editor_state(state)
-      state = %{state | keyframe_pending?: true}
+      state = EditorState.request_render_keyframe(state)
 
-      state = EditorState.apply_renderer_writeback(state, receipt(input, 10, false))
-      assert state.keyframe_pending?
+      state = integrate_receipt(state, receipt(input, 10, false))
+      assert state.render_correlation.keyframe_pending?
 
-      state = EditorState.apply_renderer_writeback(state, receipt(input, 11, true))
-      refute state.keyframe_pending?
+      state = integrate_receipt(state, receipt(input, 11, true))
+      refute state.render_correlation.keyframe_pending?
     end
   end
 
@@ -340,6 +295,11 @@ defmodule MingaEditor.RenderPipeline.InputTest do
 
       assert Input.sync_active_window_cursor(input) == input
     end
+  end
+
+  defp integrate_receipt(state, receipt) do
+    {state, _result} = EditorState.integrate_renderer_receipt(state, receipt)
+    state
   end
 
   defp receipt(input, frame_seq, keyframe?, overrides \\ []) do
