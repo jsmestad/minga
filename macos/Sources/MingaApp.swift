@@ -201,6 +201,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var editorNSView: EditorNSView?
     private var workspaceNotificationTasks: [Task<Void, Never>] = []
     private var protocolDeliveryTask: Task<Void, Never>?
+    private var protocolEventHandoff: ProtocolEventHandoff?
+    private let frameResourcePolicy = FrameResourcePolicy.default
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Ignore SIGPIPE so broken pipe writes return EPIPE instead of
@@ -290,7 +292,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         PortLogger.info("Initial grid: \(cols)x\(rows) cells")
 
         // Command dispatcher.
-        let disp = CommandDispatcher(cols: cols, rows: rows, guiState: appState.gui)
+        let disp = CommandDispatcher(
+            cols: cols, rows: rows, guiState: appState.gui,
+            resourcePolicy: frameResourcePolicy
+        )
         disp.fontManager = fm
         disp.onFontChanged = { [weak self] family, size, ligatures, weight in
             self?.handleFontChange(family: family, size: CGFloat(size), ligatures: ligatures, weight: weight)
@@ -437,8 +442,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Start reading protocol commands. One stream consumer preserves the
         // reader's wire order across successful packets and decode failures.
         let protocolHandoff = installProtocolEventHandoff()
+        let resourcePolicy = frameResourcePolicy
         let reader = ProtocolReader(
             input: protocolInput,
+            maxPayloadLength: resourcePolicy.wire.payloadBytes,
+            decoder: { [resourcePolicy] data in
+                try decodeFrame(from: data, policy: resourcePolicy)
+            },
             handler: { frame in
                 protocolHandoff.deliver(frame)
             },
@@ -461,7 +471,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         NSApp.terminate(nil)
                     }
                 }
-            }
+            },
+            acquireAdmission: { protocolHandoff.acquireAdmission() },
+            cancelAdmission: { protocolHandoff.cancel() }
         )
         reader.start()
         self.protocolReader = reader
@@ -680,8 +692,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Create new reader for the new pipe. Reconnection replaces the one
         // ordered stream consumer instead of spawning a task per event.
         let protocolHandoff = installProtocolEventHandoff()
+        let resourcePolicy = frameResourcePolicy
         let reader = ProtocolReader(
             input: readHandle,
+            maxPayloadLength: resourcePolicy.wire.payloadBytes,
+            decoder: { [resourcePolicy] data in
+                try decodeFrame(from: data, policy: resourcePolicy)
+            },
             handler: { frame in
                 protocolHandoff.deliver(frame)
             },
@@ -696,7 +713,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         NSApp.terminate(nil)
                     }
                 }
-            }
+            },
+            acquireAdmission: { protocolHandoff.acquireAdmission() },
+            cancelAdmission: { protocolHandoff.cancel() }
         )
         reader.start()
         self.protocolReader = reader
@@ -810,16 +829,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Protocol handling
 
     private func installProtocolEventHandoff() -> ProtocolEventHandoff {
+        // Cancel the old handoff first so its producer cannot deliver stale work.
+        protocolEventHandoff?.cancel()
         protocolDeliveryTask?.cancel()
         let handoff = ProtocolEventHandoff()
+        protocolEventHandoff = handoff
         protocolDeliveryTask = Task { @MainActor [weak self] in
             for await event in handoff.events {
+                handoff.releaseAdmission()
                 guard let self else { return }
                 switch event {
                 case .frame(let frame):
                     self.handleDecodedFrame(frame)
-                case .decodeFailure(let error):
-                    self.handleProtocolDecodeFailure(error)
+                case .failure(let failure):
+                    self.handleProtocolDecodeFailure(failure)
                 }
             }
         }
@@ -839,10 +862,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dispatcher.dispatch(frame)
     }
 
-    private func handleProtocolDecodeFailure(_ error: ProtocolDecodeError) {
-        // The packet is transactional: no command from it crossed actor isolation,
-        // so discarding the staged frame cannot leave a partially applied update.
-        PortLogger.error("Protocol decode error: \(error)")
-        dispatcher?.decodeFailed()
+    private func handleProtocolDecodeFailure(_ failure: DecodedFrameFailure) {
+        // The packet is transactional: no command from it crossed actor isolation.
+        dispatcher?.decodedFrameFailed(failure)
     }
 }

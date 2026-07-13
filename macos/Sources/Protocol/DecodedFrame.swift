@@ -1,10 +1,12 @@
 /// Immutable values and deterministic metrics produced by one packet decode.
 
 import Foundation
+import MingaProtocol
 
 struct DecodedCommand: Sendable {
     let command: RenderCommand
     let opcode: UInt8
+    let resourceWeight: FrameResourceWeight
 }
 
 struct DecoderOwnedMetrics {
@@ -66,11 +68,47 @@ struct FrameDecodeMetrics: Sendable, Equatable {
 /// The main-actor dispatcher consumes the whole value and compiles its commands
 /// directly into a `PreparedFrameTransactionBuilder`; it never stores packet views
 /// or publishes commands individually.
+/// Correlation recovered from a valid leading begin-frame command.
+struct FrameEnvelope: Sendable, Equatable {
+    let generation: UInt32
+    let frameSeq: UInt32
+    let baseFrameSeq: UInt32
+}
+
+/// A fully decoded failure. The optional envelope allows a resource rejection
+/// to use the same correlated terminal status as a staged-frame rejection.
+struct DecodedFrameFailure: Error, Sendable {
+    let error: ProtocolDecodeError
+    let envelope: FrameEnvelope?
+}
+
+enum DecodedFrameEvent: Sendable {
+    case frame(DecodedFrame)
+    case failure(DecodedFrameFailure)
+}
+
 struct DecodedFrame: Sendable {
     let commands: [DecodedCommand]
+    let envelope: FrameEnvelope?
+    let resourceWeight: FrameResourceWeight
     let metrics: FrameDecodeMetrics
 
+    init(
+        commands: [DecodedCommand], envelope: FrameEnvelope? = nil,
+        resourceWeight: FrameResourceWeight = .init(), metrics: FrameDecodeMetrics
+    ) {
+        self.commands = commands
+        self.envelope = envelope
+        self.resourceWeight = resourceWeight
+        self.metrics = metrics
+    }
+
     func recordingActorHop() -> DecodedFrame {
-        DecodedFrame(commands: commands, metrics: metrics.recordingActorHop())
+        DecodedFrame(
+            commands: commands,
+            envelope: envelope,
+            resourceWeight: resourceWeight,
+            metrics: metrics.recordingActorHop()
+        )
     }
 }

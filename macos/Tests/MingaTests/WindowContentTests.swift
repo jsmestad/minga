@@ -254,6 +254,29 @@ struct WindowContentBuilder {
 
 // MARK: - Tests
 
+private func resourceTestGeometry(hitRegionCount: Int) -> GUIPaneGeometry {
+    GUIPaneGeometry(
+        windowId: 7,
+        totalRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+        contentRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+        textRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+        gutterRect: GUICellRect(row: 0, col: 0, width: 0, height: 24),
+        clipRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
+        viewport: GUIViewportSummary(
+            top: 0, left: 0, rows: 24, cols: 80, totalLines: 24,
+            visualRowOffset: 0, totalVisualRows: 24
+        ),
+        gutterMetrics: GUIGutterMetrics(lineNumberWidth: 0, signColWidth: 0),
+        hitRegions: (0..<hitRegionCount).map { index in
+            GUIHitRegion(
+                kind: .text,
+                rect: GUICellRect(row: UInt16(index), col: 0, width: 1, height: 1),
+                windowId: 7
+            )
+        }
+    )
+}
+
 @Suite("GUI Window Content Decoder")
 struct WindowContentDecoderTests {
 
@@ -515,6 +538,98 @@ struct WindowContentDecoderTests {
         #expect(geometry.gutterMetrics.lineNumberWidth == 2)
         #expect(geometry.gutterMetrics.signColWidth == 3)
         #expect(geometry.hitRegions.map(\.kind) == [.text, .foldControl])
+        #expect(content.exactResourceWeight().arrayEntries == 2)
+    }
+
+    @Test("Cached window weight includes annotation bytes and pane hit regions")
+    func cachedExactWindowWeight() throws {
+        let row = GUIVisualRow(
+            rowType: .normal, rowId: 1, bufLine: 0, contentHash: 1,
+            text: "row", spans: []
+        )
+        let geometry = resourceTestGeometry(hitRegionCount: 2)
+        let content = try GUIWindowContent(
+            windowId: 7, fullRefresh: true,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block,
+            rows: [row], selection: nil, searchMatches: [],
+            diagnosticUnderlines: [], documentHighlights: [],
+            lineAnnotations: [GUILineAnnotation(
+                row: 0, kind: .inlineText, fg: 0, bg: 0, text: "😀"
+            )],
+            paneGeometry: geometry
+        )
+
+        let expected = FrameResourceWeight(
+            ownedUTF8Bytes: 7, arrayEntries: 3, rows: 1,
+            overlays: 1, locatorEntries: 1
+        )
+        #expect(content.resourceWeight == expected)
+        #expect(content.exactResourceWeight() == expected)
+        #expect(content.exactResourceWeight() == content.resourceWeight)
+        #expect(content.reportingOperationCounters(.init()).exactResourceWeight() == expected)
+    }
+
+    @Test("Full content rejects complete weight before row-store construction")
+    func fullContentRejectsBeforeStoreConstruction() {
+        let duplicate = GUIVisualRow(
+            rowType: .normal, rowId: 1, bufLine: 0, contentHash: 1,
+            text: "x", spans: []
+        )
+        let limit = FrameResourceWeight(
+            commands: .max, ownedUTF8Bytes: .max, arrayEntries: 0,
+            rows: 2, spans: .max, overlays: .max,
+            spliceEntries: .max, locatorEntries: 2
+        )
+
+        #expect(throws: FrameResourceError.self) {
+            _ = try GUIWindowContent(
+                windowId: 7, fullRefresh: true,
+                cursorRow: 0, cursorCol: 0, cursorShape: .block,
+                rows: [duplicate, duplicate], selection: nil, searchMatches: [],
+                diagnosticUnderlines: [], documentHighlights: [],
+                paneGeometry: resourceTestGeometry(hitRegionCount: 1),
+                residentLimit: limit
+            )
+        }
+    }
+
+    @Test("Rows delta rejects complete resulting weight without changing prior content")
+    func rowsDeltaCompleteWeightRollback() throws {
+        let row = GUIVisualRow(
+            rowType: .normal, rowId: 1, bufLine: 0, contentHash: 1,
+            text: "ok", spans: []
+        )
+        let content = try GUIWindowContent(
+            windowId: 7, fullRefresh: true, contentEpoch: 42,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block,
+            rows: [row], selection: nil, searchMatches: [],
+            diagnosticUnderlines: [], documentHighlights: []
+        )
+        let priorWeight = content.exactResourceWeight()
+        let limit = FrameResourceWeight(
+            commands: .max, ownedUTF8Bytes: 2, arrayEntries: .max,
+            rows: 1, spans: .max, overlays: .max,
+            spliceEntries: .max, locatorEntries: 1
+        )
+        let delta = GUIWindowRowsDelta(
+            windowId: 7, contentEpoch: 42, cursorVisible: true,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block, scrollLeft: 0,
+            rows: [.reference(rowId: 1, contentHash: 1)],
+            selection: nil, searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: [],
+            lineAnnotations: [GUILineAnnotation(
+                row: 0, kind: .inlineText, fg: 0, bg: 0, text: "overflow"
+            )],
+            paneGeometry: nil, cursorline: nil
+        )
+
+        if case .failure(.resourcePolicy) = content.applyingRowsDeltaChecked(
+            delta, residentLimit: limit
+        ) {} else {
+            Issue.record("Expected complete resulting window weight rejection")
+        }
+        #expect(content.rows == [row])
+        #expect(content.exactResourceWeight() == priorWeight)
     }
 
     @Test("Decode scroll presentation metadata")
@@ -928,7 +1043,7 @@ struct WindowContentDecoderTests {
         let replacement = GUIVisualRow(rowType: .normal, rowId: 2, bufLine: 1, contentHash: 22, text: "new", spans: [])
         let baseline = GUIScrollPresentation(windowId: 7, resetRequired: true, anchorTop: 10, anchorLeft: 2, anchorVisualRowOffset: 0, visibleStartLine: 10, visibleEndLine: 20, overscanStartLine: 9, overscanEndLine: 21, contentEpoch: 42, layoutGeneration: 11)
 
-        let content = GUIWindowContent(windowId: 7, fullRefresh: true, contentEpoch: 42, cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: [retained], selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [], scrollPresentation: baseline)
+        let content = try GUIWindowContent(windowId: 7, fullRefresh: true, contentEpoch: 42, cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: [retained], selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [], scrollPresentation: baseline)
         let delta = GUIWindowRowsDelta(windowId: 7, contentEpoch: 42, cursorVisible: true, cursorRow: 1, cursorCol: 2, cursorShape: .beam, scrollLeft: 3, rows: [.reference(rowId: 1, contentHash: 11), .full(replacement)], selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [], lineAnnotations: [], paneGeometry: nil, cursorline: nil)
 
         guard let updated = content.applyingRowsDelta(delta) else {
@@ -946,7 +1061,7 @@ struct WindowContentDecoderTests {
         let baseline = GUIScrollPresentation(windowId: 7, resetRequired: true, anchorTop: 10, anchorLeft: 2, anchorVisualRowOffset: 0, visibleStartLine: 10, visibleEndLine: 20, overscanStartLine: 9, overscanEndLine: 21, contentEpoch: 42, layoutGeneration: 11)
         let next = GUIScrollPresentation(windowId: 7, resetRequired: false, anchorTop: 12, anchorLeft: 3, anchorVisualRowOffset: 1, visibleStartLine: 12, visibleEndLine: 22, overscanStartLine: 11, overscanEndLine: 23, contentEpoch: 42, layoutGeneration: 12)
 
-        let content = GUIWindowContent(windowId: 7, fullRefresh: true, contentEpoch: 42, cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: [retained], selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [], scrollPresentation: baseline)
+        let content = try GUIWindowContent(windowId: 7, fullRefresh: true, contentEpoch: 42, cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: [retained], selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [], scrollPresentation: baseline)
         let delta = GUIWindowRowsDelta(windowId: 7, contentEpoch: 42, cursorVisible: true, cursorRow: 1, cursorCol: 2, cursorShape: .beam, scrollLeft: 3, rows: [.reference(rowId: 1, contentHash: 11), .full(replacement)], selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [], lineAnnotations: [], paneGeometry: nil, cursorline: nil, scrollPresentation: next)
 
         guard let updated = content.applyingRowsDelta(delta) else {
@@ -962,7 +1077,7 @@ struct WindowContentDecoderTests {
         let retained = GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 0, contentHash: 11, text: "old", spans: [])
         let replacement = GUIVisualRow(rowType: .normal, rowId: 2, bufLine: 1, contentHash: 22, text: "new", spans: [])
 
-        let content = GUIWindowContent(
+        let content = try GUIWindowContent(
             windowId: 7,
             fullRefresh: true,
             contentEpoch: 42,
@@ -1008,7 +1123,7 @@ struct WindowContentDecoderTests {
     func rowsDeltaMissingRefReturnsNil() throws {
         let retained = GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 0, contentHash: 11, text: "old", spans: [])
 
-        let content = GUIWindowContent(
+        let content = try GUIWindowContent(
             windowId: 7,
             fullRefresh: true,
             contentEpoch: 42,
@@ -1048,7 +1163,7 @@ struct WindowContentDecoderTests {
         let a = GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 0, contentHash: 11, text: "A", spans: [])
         let b = GUIVisualRow(rowType: .normal, rowId: 2, bufLine: 1, contentHash: 22, text: "B", spans: [])
         let c = GUIVisualRow(rowType: .normal, rowId: 3, bufLine: 2, contentHash: 33, text: "C", spans: [])
-        let content = GUIWindowContent(windowId: 7, fullRefresh: true, contentEpoch: 42,
+        let content = try GUIWindowContent(windowId: 7, fullRefresh: true, contentEpoch: 42,
             cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: [a, b, c], selection: nil,
             searchMatches: [], diagnosticUnderlines: [], documentHighlights: [])
 
@@ -1068,7 +1183,7 @@ struct WindowContentDecoderTests {
         #expect(try content.applyingRowsDeltaChecked(middle).get().rows.map(\.rowId) == [1, 3])
 
         let wrap = GUIVisualRow(rowType: .wrapContinuation, rowId: 4, bufLine: 1, contentHash: 44, text: "wrap", spans: [])
-        let movable = GUIWindowContent(windowId: 7, fullRefresh: true, contentEpoch: 42,
+        let movable = try GUIWindowContent(windowId: 7, fullRefresh: true, contentEpoch: 42,
             cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: [b, wrap], selection: nil,
             searchMatches: [], diagnosticUnderlines: [], documentHighlights: [])
         let move = GUIWindowRowsDelta(windowId: 7, contentEpoch: 42, cursorVisible: true,
@@ -1090,7 +1205,7 @@ struct WindowContentDecoderTests {
                 contentHash: UInt32(index + 1), text: "row", spans: []
             ))
         }
-        let content = GUIWindowContent(
+        let content = try GUIWindowContent(
             windowId: 7, fullRefresh: true, contentEpoch: 42,
             cursorRow: 0, cursorCol: 0, cursorShape: .block,
             rows: rows, selection: nil, searchMatches: [],
@@ -1127,7 +1242,7 @@ struct WindowContentDecoderTests {
                 contentHash: UInt32(index + 1), text: "row", spans: []
             ))
         }
-        let content = GUIWindowContent(
+        let content = try GUIWindowContent(
             windowId: 7, fullRefresh: true, contentEpoch: 42,
             cursorRow: 0, cursorCol: 0, cursorShape: .block,
             rows: rows, selection: nil, searchMatches: [],
@@ -1157,7 +1272,7 @@ struct WindowContentDecoderTests {
     func rowsDeltaValidationRollback() throws {
         let a = GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 0, contentHash: 11, text: "A", spans: [])
         let b = GUIVisualRow(rowType: .normal, rowId: 2, bufLine: 1, contentHash: 22, text: "B", spans: [])
-        let content = GUIWindowContent(windowId: 7, fullRefresh: true, contentEpoch: 42,
+        let content = try GUIWindowContent(windowId: 7, fullRefresh: true, contentEpoch: 42,
             cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: [a, b], selection: nil,
             searchMatches: [], diagnosticUnderlines: [], documentHighlights: [])
         let beforeRows = content.rows
@@ -1194,7 +1309,7 @@ struct WindowContentDecoderTests {
                 contentHash: contentHash, text: "row", spans: []
             ))
         }
-        let content = GUIWindowContent(
+        let content = try GUIWindowContent(
             windowId: 7, fullRefresh: true, contentEpoch: 42,
             cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: rows,
             selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: []

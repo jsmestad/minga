@@ -9,7 +9,7 @@ import MingaProtocol
 @Suite("CoreTextMetalRenderer cursor geometry")
 struct CoreTextMetalRendererCursorTests {
     @Test("semantic window cursor overrides legacy frameState cursor")
-    func semanticCursorOverridesLegacyCursor() {
+    func semanticCursorOverridesLegacyCursor() throws {
         let cellW: Float = 7.5
         let displayCellH: Float = 16.0
         let scale: Float = 2.0
@@ -26,7 +26,7 @@ struct CoreTextMetalRendererCursorTests {
             lineNumberWidth: 4, signColWidth: 1, entries: []
         )
 
-        let content = GUIWindowContent(
+        let content = try GUIWindowContent(
             windowId: 2, fullRefresh: true,
             cursorRow: 2, cursorCol: 10, cursorShape: .beam,
             scrollLeft: 3,
@@ -73,7 +73,7 @@ struct CoreTextMetalRendererCursorTests {
     }
 
     @Test("boundary availability uses BEAM document position")
-    func boundaryAvailabilityUsesBeamDocumentPosition() {
+    func boundaryAvailabilityUsesBeamDocumentPosition() throws {
         let geometry = GUIPaneGeometry(
             windowId: 7,
             totalRect: GUICellRect(row: 0, col: 0, width: 10, height: 5),
@@ -85,7 +85,7 @@ struct CoreTextMetalRendererCursorTests {
             gutterMetrics: GUIGutterMetrics(lineNumberWidth: 1, signColWidth: 1),
             hitRegions: []
         )
-        let content = GUIWindowContent(
+        let content = try GUIWindowContent(
             windowId: 7, fullRefresh: true, contentEpoch: 1, cursorVisible: true, cursorRow: 0, cursorCol: 0, cursorShape: .block,
             scrollLeft: 0, rows: [], selection: nil, searchMatches: [], diagnosticUnderlines: [],
             documentHighlights: [], lineAnnotations: [], paneGeometry: geometry, cursorline: nil,
@@ -125,7 +125,7 @@ struct CoreTextMetalRendererCursorTests {
     }
 
     @Test("renderer row origin includes document visual row offset")
-    func rendererRowOriginIncludesDocumentVisualRowOffset() {
+    func rendererRowOriginIncludesDocumentVisualRowOffset() throws {
         let geometry = GUIPaneGeometry(
             windowId: 7,
             totalRect: GUICellRect(row: 0, col: 0, width: 10, height: 5),
@@ -137,7 +137,7 @@ struct CoreTextMetalRendererCursorTests {
             gutterMetrics: GUIGutterMetrics(lineNumberWidth: 1, signColWidth: 1),
             hitRegions: []
         )
-        let content = GUIWindowContent(
+        let content = try GUIWindowContent(
             windowId: 7, fullRefresh: true, contentEpoch: 1, cursorVisible: true, cursorRow: 0, cursorCol: 0, cursorShape: .block,
             scrollLeft: 0,
             rows: [
@@ -161,8 +161,8 @@ struct CoreTextMetalRendererCursorTests {
     }
 
     @Test("payload overscan preserves line-delta rows before viewport")
-    func payloadOverscanPreservesLineDeltaRowsBeforeViewport() {
-        let content = GUIWindowContent(
+    func payloadOverscanPreservesLineDeltaRowsBeforeViewport() throws {
+        let content = try GUIWindowContent(
             windowId: 7, fullRefresh: true, contentEpoch: 1, cursorVisible: true, cursorRow: 0, cursorCol: 0, cursorShape: .block,
             scrollLeft: 0,
             rows: [
@@ -185,8 +185,8 @@ struct CoreTextMetalRendererCursorTests {
     }
 
     @Test("payload overscan counts wrapped visual rows before viewport")
-    func payloadOverscanCountsWrappedVisualRowsBeforeViewport() {
-        let content = GUIWindowContent(
+    func payloadOverscanCountsWrappedVisualRowsBeforeViewport() throws {
+        let content = try GUIWindowContent(
             windowId: 7, fullRefresh: true, contentEpoch: 1, cursorVisible: true, cursorRow: 0, cursorCol: 0, cursorShape: .block,
             scrollLeft: 0,
             rows: [
@@ -312,7 +312,7 @@ struct CoreTextMetalRendererCursorTests {
     }
 
     @Test("pane vertical bounds use the pane text rect")
-    func paneVerticalBoundsUsePaneTextRect() {
+    func paneVerticalBoundsUsePaneTextRect() throws {
         let geometry = GUIPaneGeometry(
             windowId: 1,
             totalRect: GUICellRect(row: 2, col: 4, width: 10, height: 14),
@@ -324,7 +324,7 @@ struct CoreTextMetalRendererCursorTests {
             gutterMetrics: GUIGutterMetrics(lineNumberWidth: 4, signColWidth: 1),
             hitRegions: []
         )
-        let content = GUIWindowContent(
+        let content = try GUIWindowContent(
             windowId: 1,
             fullRefresh: true,
             cursorRow: 0,
@@ -547,8 +547,8 @@ struct CoreTextMetalRendererCursorTests {
     }
 
     @Test("semantic block cursor at end of line renders over final character")
-    func semanticBlockCursorAtEndOfLineUsesFinalCharacterCell() {
-        let content = GUIWindowContent(
+    func semanticBlockCursorAtEndOfLineUsesFinalCharacterCell() throws {
+        let content = try GUIWindowContent(
             windowId: 1, fullRefresh: true,
             cursorRow: 0, cursorCol: 4, cursorShape: .block,
             rows: [GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 0, contentHash: 1, text: "this", spans: [])],
@@ -561,8 +561,8 @@ struct CoreTextMetalRendererCursorTests {
     }
 
     @Test("semantic beam cursor at end of line keeps insertion point column")
-    func semanticBeamCursorAtEndOfLineKeepsInsertionPointColumn() {
-        let content = GUIWindowContent(
+    func semanticBeamCursorAtEndOfLineKeepsInsertionPointColumn() throws {
+        let content = try GUIWindowContent(
             windowId: 1, fullRefresh: true,
             cursorRow: 0, cursorCol: 4, cursorShape: .beam,
             rows: [GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 0, contentHash: 1, text: "this", spans: [])],
@@ -575,8 +575,8 @@ struct CoreTextMetalRendererCursorTests {
     }
 
     @Test("semantic block cursor uses display width for wide characters")
-    func semanticBlockCursorUsesDisplayWidthForWideCharacters() {
-        let content = GUIWindowContent(
+    func semanticBlockCursorUsesDisplayWidthForWideCharacters() throws {
+        let content = try GUIWindowContent(
             windowId: 1, fullRefresh: true,
             cursorRow: 0, cursorCol: 2, cursorShape: .block,
             rows: [GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 0, contentHash: 1, text: "界", spans: [])],
@@ -589,8 +589,8 @@ struct CoreTextMetalRendererCursorTests {
     }
 
     @Test("semantic block cursor accounts for overscan rows before the viewport")
-    func semanticBlockCursorAccountsForOverscanRowsBeforeTheViewport() {
-        let content = GUIWindowContent(
+    func semanticBlockCursorAccountsForOverscanRowsBeforeTheViewport() throws {
+        let content = try GUIWindowContent(
             windowId: 1, fullRefresh: true,
             cursorRow: 0, cursorCol: 4, cursorShape: .block,
             rows: [
@@ -607,8 +607,8 @@ struct CoreTextMetalRendererCursorTests {
     }
 
     @Test("wrapped block cursor uses anchored visual-row width at end of line")
-    func wrappedBlockCursorUsesAnchoredVisualRowWidth() {
-        let content = GUIWindowContent(
+    func wrappedBlockCursorUsesAnchoredVisualRowWidth() throws {
+        let content = try GUIWindowContent(
             windowId: 1, fullRefresh: true, contentEpoch: 1,
             cursorRow: 0, cursorCol: 4, cursorShape: .block,
             rows: [
@@ -734,7 +734,7 @@ struct CoreTextMetalRendererCursorTests {
     }
 
     @Test("semantic window rows land on spaced positions at line spacing 1.2")
-    func semanticWindowRowsLandOnSpacedPositionsAtSpacing1_2() {
+    func semanticWindowRowsLandOnSpacedPositionsAtSpacing1_2() throws {
         // The semantic content path positions each row at rowIndex * displayCellH.
         // resolveCursor shares that formula through the window's contentRow +
         // cursorRow, so a spaced computation must place the cursor's row on the
@@ -757,7 +757,7 @@ struct CoreTextMetalRendererCursorTests {
         )
 
         // Cursor is on the 6th visible row of the window content.
-        let content = GUIWindowContent(
+        let content = try GUIWindowContent(
             windowId: 1, fullRefresh: true,
             cursorRow: 5, cursorCol: 0, cursorShape: .block,
             rows: [], selection: nil,
@@ -881,7 +881,7 @@ struct CoreTextMetalRendererCursorTests {
     }
 
     @Test("hidden active semantic cursor is skipped so visible prompt cursor wins")
-    func hiddenActiveSemanticCursorIsSkippedSoPromptWins() {
+    func hiddenActiveSemanticCursorIsSkippedSoPromptWins() throws {
         var frameState = FrameState(cols: 80, rows: 24)
         frameState.windowGutters[1] = Wire.WindowGutter(
             windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 20,
@@ -894,14 +894,14 @@ struct CoreTextMetalRendererCursorTests {
             lineNumberWidth: 0, signColWidth: 0, entries: []
         )
 
-        let hiddenChat = GUIWindowContent(
+        let hiddenChat = try GUIWindowContent(
             windowId: 1, fullRefresh: true, cursorVisible: false,
             cursorRow: 0, cursorCol: 0, cursorShape: .block,
             rows: [], selection: nil,
             searchMatches: [], diagnosticUnderlines: [],
             documentHighlights: []
         )
-        let visiblePrompt = GUIWindowContent(
+        let visiblePrompt = try GUIWindowContent(
             windowId: 65_534, fullRefresh: true, cursorVisible: true,
             cursorRow: 0, cursorCol: 3, cursorShape: .beam,
             rows: [], selection: nil,
@@ -926,7 +926,7 @@ struct CoreTextMetalRendererCursorTests {
     }
 
     @Test("hidden semantic cursor suppresses legacy fallback after dispatcher sync")
-    @MainActor func hiddenSemanticCursorSuppressesFallback() {
+    @MainActor func hiddenSemanticCursorSuppressesFallback() throws {
         let gui = GUIState()
         let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
         dispatcher.frameState.cursorRow = 3
@@ -938,7 +938,7 @@ struct CoreTextMetalRendererCursorTests {
             lineNumberWidth: 4, signColWidth: 1, entries: []
         )
 
-        let content = GUIWindowContent(
+        let content = try GUIWindowContent(
             windowId: 1, fullRefresh: true, cursorVisible: false,
             cursorRow: 0, cursorCol: 0, cursorShape: .beam,
             rows: [], selection: nil,

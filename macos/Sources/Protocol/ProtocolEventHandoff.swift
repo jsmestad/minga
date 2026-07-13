@@ -1,32 +1,48 @@
-/// Ordered, single-hop delivery of decoded protocol events to the main actor.
+/// Capacity-one, ordered delivery of decoded protocol events to the main actor.
 
 import Foundation
 
-enum ProtocolDeliveryEvent: Sendable {
-    case frame(DecodedFrame)
-    case decodeFailure(ProtocolDecodeError)
-}
+/// A single-producer/single-consumer admission handoff. The producer must own
+/// the sole slot before reading a payload. The consumer releases it immediately
+/// after dequeue, so payload memory cannot accumulate behind the main actor.
+final class ProtocolEventHandoff: @unchecked Sendable {
+    let events: AsyncStream<DecodedFrameEvent>
 
-/// A thread-safe FIFO handoff from the serial protocol reader to one consumer.
-///
-/// `AsyncStream.Continuation.yield` records each event synchronously in call
-/// order. The app owns exactly one main-actor consumer task for the stream, so
-/// packets and failures cannot overtake one another through independently
-/// scheduled tasks.
-struct ProtocolEventHandoff: Sendable {
-    let events: AsyncStream<ProtocolDeliveryEvent>
-    private let continuation: AsyncStream<ProtocolDeliveryEvent>.Continuation
+    private let continuation: AsyncStream<DecodedFrameEvent>.Continuation
+    private let condition = NSCondition()
+    private var slotOccupied = false
+    private var cancelled = false
 
     init() {
         let pair = AsyncStream.makeStream(
-            of: ProtocolDeliveryEvent.self,
-            bufferingPolicy: .unbounded
+            of: DecodedFrameEvent.self,
+            bufferingPolicy: .bufferingOldest(1)
         )
-        self.events = pair.stream
-        self.continuation = pair.continuation
+        events = pair.stream
+        continuation = pair.continuation
     }
 
-    /// Enqueues a decoded frame at the real reader-to-main-actor boundary.
+    /// Blocks only for the one FIFO permit. Returns false after shutdown.
+    func acquireAdmission() -> Bool {
+        condition.lock()
+        while slotOccupied && !cancelled { condition.wait() }
+        guard !cancelled else {
+            condition.unlock()
+            return false
+        }
+        slotOccupied = true
+        condition.unlock()
+        return true
+    }
+
+    /// Releases admission after the consumer has dequeued the event.
+    func releaseAdmission() {
+        condition.lock()
+        slotOccupied = false
+        condition.signal()
+        condition.unlock()
+    }
+
     @discardableResult
     func deliver(_ frame: DecodedFrame) -> DecodedFrame {
         let deliveredFrame = frame.recordingActorHop()
@@ -34,12 +50,19 @@ struct ProtocolEventHandoff: Sendable {
         return deliveredFrame
     }
 
-    /// Enqueues a decode failure in the same wire-order stream as frames.
-    func deliver(_ error: ProtocolDecodeError) {
-        continuation.yield(.decodeFailure(error))
+    func deliver(_ failure: DecodedFrameFailure) {
+        continuation.yield(.failure(failure))
     }
 
-    func finish() {
+    /// Wakes a blocked producer and ends a blocked consumer. Idempotent.
+    func cancel() {
+        condition.lock()
+        cancelled = true
+        slotOccupied = false
+        condition.broadcast()
+        condition.unlock()
         continuation.finish()
     }
+
+    func finish() { cancel() }
 }

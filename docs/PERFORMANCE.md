@@ -25,6 +25,20 @@ mix swift.test
 (cd go/tui && go test ./...)
 ```
 
+## macOS ingestion limits and calibrated headroom
+
+`FrameResourcePolicy.default` is immutable and is sliced at the macOS composition root into wire, decode, staging, and per-window resident limits. The wire payload ceiling remains 64 MiB. Decode and per-window residence permit 131,072 rows (2x the 65,536-row corpus), so an ordinary structural insertion at the supported corpus size does not turn a valid editor action into a terminal resource failure. Decode permits 2,097,152 spans (32 per row at its ceiling) and 1,048,576 overlays. Per-window residence permits 4,194,304 spans, 2,097,152 overlays, 131,072 locator entries, and 256 MiB of owned UTF-8.
+
+The deterministic no-span fixtures use text `"row <1-based-id>"`. Their exact owned UTF-8 weights are 38,893 bytes for 5,000 rows and 578,718 bytes for 65,536 rows; each owns exactly one locator per row. These values are derived from decimal digit counts, not a wall-clock or allocator measurement. `ResidentRowStoreTests.calibratedCorpusHeadroom` checks both corpus sizes against the shipping multidimensional policy, while replacement/splice tests check cached exact-weight deltas and atomic rejection.
+
+Allocator/RSS calibration is intentionally not claimed by those structural weights. The named Release measurement command is:
+
+```sh
+scripts/check_render_performance
+```
+
+Record environment metadata and raw JSON emitted by that command before changing a default; do not infer allocator headroom from the deterministic weights alone.
+
 ## Deterministic ordinary-edit gate
 
 At both 5,000 and 65,536 resident rows, CI enforces an ordinary one-line edit using production APIs and counters:

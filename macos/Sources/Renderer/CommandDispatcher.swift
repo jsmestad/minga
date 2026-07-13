@@ -122,6 +122,7 @@ final class CommandDispatcher {
     /// All GUI chrome sub-states. Injected at init from AppDelegate.
     /// Non-optional: forgetting to wire this is a compile-time error.
     let guiState: GUIState
+    private let resourcePolicy: FrameResourcePolicy
 
     /// Records input-to-apply and input-to-presentation as separate milestones.
     /// A committed transaction marks apply only; Metal owns submission/completion.
@@ -213,9 +214,13 @@ final class CommandDispatcher {
         0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE,
     ]
 
-    init(cols: UInt16, rows: UInt16, guiState: GUIState) {
+    init(
+        cols: UInt16, rows: UInt16, guiState: GUIState,
+        resourcePolicy: FrameResourcePolicy = .default
+    ) {
         self.frameState = FrameState(cols: cols, rows: rows)
         self.guiState = guiState
+        self.resourcePolicy = resourcePolicy
     }
 
     /// Entry point from the protocol reader. Routes a decoded command through the
@@ -235,11 +240,25 @@ final class CommandDispatcher {
     /// prepared-transaction builder. Packet decoding itself remains off-main.
     func dispatch(_ frame: DecodedFrame) {
         for decoded in frame.commands {
-            dispatch(decoded.command, opcode: decoded.opcode)
+            dispatch(
+                decoded.command, opcode: decoded.opcode,
+                resourceWeight: decoded.resourceWeight
+            )
         }
     }
 
     func dispatch(_ command: RenderCommand, opcode: UInt8? = nil) {
+        let measured = (try? FrameResourceWeight.measuringOwnedPayload(command))
+            ?? FrameResourceWeight()
+        let resourceWeight = (try? measured.adding(FrameResourceWeight(commands: 1)))
+            ?? FrameResourceWeight(commands: 1)
+        dispatch(command, opcode: opcode, resourceWeight: resourceWeight)
+    }
+
+    private func dispatch(
+        _ command: RenderCommand, opcode: UInt8?,
+        resourceWeight: FrameResourceWeight
+    ) {
         switch command {
         case .beginFrame(let frameSeq, let baseFrameSeq, let generation):
             beginTransaction(frameSeq: frameSeq, baseFrameSeq: baseFrameSeq, generation: generation)
@@ -268,7 +287,7 @@ final class CommandDispatcher {
         case .setTitle, .setWindowBg, .setLinkCursor, .protocolError,
              .setFont, .setFontFallback, .registerFont, .clipboardWrite:
             if openFrameSeq != nil {
-                transactionBuilder?.stage(command)
+                transactionBuilder?.stage(command, resourceWeight: resourceWeight)
             } else {
                 guiState.performOutOfBandPublication {
                     apply(command)
@@ -278,7 +297,7 @@ final class CommandDispatcher {
         default:
             if openFrameSeq != nil {
                 // Inside a transaction: compile into typed domain updates.
-                transactionBuilder?.stage(command)
+                transactionBuilder?.stage(command, resourceWeight: resourceWeight)
             } else {
                 // A command arrived with no open transaction and no sanctioned
                 // out-of-band match above. Either a new BEAM out-of-band command
@@ -317,7 +336,9 @@ final class CommandDispatcher {
             generation: generation,
             committedWindows: guiState.windowContents,
             registeredFontIds: registeredFontIds,
-            committedTranscript: guiState.agentChatState.transcriptSnapshot
+            committedTranscript: guiState.agentChatState.transcriptSnapshot,
+            stagingLimit: resourcePolicy.staging.weight,
+            residentLimit: resourcePolicy.resident.weightPerWindow
         )
         if baseFrameSeq == 0 && resyncRecoveryState == .awaitingKeyframe {
             resyncRecoveryState = .keyframeInFlight
@@ -494,6 +515,15 @@ final class CommandDispatcher {
         }
 
         let terminal = rejection.disposition == .terminalFrontendFailure
+        let terminalSignature = TerminalRejectionSignature(
+            generation: openGeneration,
+            frameSeq: rejectedFrameSeq,
+            lastGoodFrameSeq: lastCommittedFrameSeq,
+            reason: rejection.wireCode
+        )
+        guard !terminal || lastTerminalRejection != terminalSignature else { return }
+        if terminal { lastTerminalRejection = terminalSignature }
+
         if terminal {
             resyncRecoveryState = .clean
             if guiState.resyncState.pending {
@@ -519,20 +549,26 @@ final class CommandDispatcher {
                 onRequestKeyframe?(lastCommittedFrameSeq)
             }
         }
-        let terminalSignature = TerminalRejectionSignature(
-            generation: openGeneration,
-            frameSeq: rejectedFrameSeq,
-            lastGoodFrameSeq: lastCommittedFrameSeq,
-            reason: rejection.wireCode
-        )
-        guard !terminal || lastTerminalRejection != terminalSignature else { return }
-        if terminal { lastTerminalRejection = terminalSignature }
         onTransactionResult?(.rejected(
             generation: openGeneration,
             frameSeq: rejectedFrameSeq,
             lastAppliedFrameSeq: lastCommittedFrameSeq,
             reason: rejection
         ))
+    }
+
+    /// Classifies one packet failure against the currently open transaction.
+    func decodedFrameFailed(_ failure: DecodedFrameFailure) {
+        if failure.error.isResourceFailure {
+            if let envelope = failure.envelope {
+                resourcePolicyRejected(envelope: envelope)
+            } else if !resourcePolicyRejected() {
+                PortLogger.error("Protocol resource error outside a frame: \(failure.error)")
+            }
+            return
+        }
+        PortLogger.error("Protocol decode error: \(failure.error)")
+        decodeFailed()
     }
 
     /// Surfaced by the protocol reader when `decodeCommands` throws mid-stream.
@@ -552,12 +588,27 @@ final class CommandDispatcher {
 
     /// Rejects the open frame under the deterministic hard resource policy.
     /// The last-good semantic publication remains active and no keyframe is requested.
-    func resourcePolicyRejected() {
-        guard let openFrameSeq else { return }
+    @discardableResult
+    func resourcePolicyRejected() -> Bool {
+        guard let openFrameSeq else { return false }
         reject(
             .resourcePolicy,
             frameSeq: openFrameSeq,
             logReason: "frontend resource policy exceeded"
+        )
+        return true
+    }
+
+    /// Publishes a correlated terminal result when decode failed before the
+    /// transaction crossed actor isolation. Last-good semantic state is untouched.
+    func resourcePolicyRejected(envelope: FrameEnvelope) {
+        openGeneration = envelope.generation
+        openFrameSeq = envelope.frameSeq
+        openBaseFrameSeq = envelope.baseFrameSeq
+        reject(
+            .resourcePolicy,
+            frameSeq: envelope.frameSeq,
+            logReason: "frontend decode resource policy exceeded"
         )
     }
 

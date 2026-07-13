@@ -60,7 +60,7 @@ struct MouseInputTests {
     }
 
     @MainActor
-    private func installPaneGeometryDivider(view: EditorNSView, dividerCol: UInt16) {
+    private func installPaneGeometryDivider(view: EditorNSView, dividerCol: UInt16) throws {
         let geometry = GUIPaneGeometry(
             windowId: 1,
             totalRect: GUICellRect(row: 0, col: 0, width: 80, height: 24),
@@ -75,7 +75,7 @@ struct MouseInputTests {
             ]
         )
 
-        view.guiState?.windowContents[1] = GUIWindowContent(
+        view.guiState?.windowContents[1] = try GUIWindowContent(
             windowId: 1, fullRefresh: true,
             cursorRow: 0, cursorCol: 0, cursorShape: .block,
             rows: [], selection: nil,
@@ -194,7 +194,7 @@ struct MouseInputTests {
         guard let view = makeView(spy: spy) else { return }
         let cw = view.cellWidth
         let ch = view.cellHeight
-        installPaneGeometryDivider(view: view, dividerCol: 40)
+        try installPaneGeometryDivider(view: view, dividerCol: 40)
 
         guard let leftEvent = mouseEvent(type: .leftMouseDown, location: NSPoint(x: cw * 40 - 1, y: ch * 5.5)) else { return }
         view.mouseDown(with: leftEvent)
@@ -354,7 +354,7 @@ struct MouseInputTests {
         )
         view.dispatcher.applyForTesting(.guiGutter(data: activeGutter))
         view.dispatcher.applyForTesting(.guiGutter(data: inactiveGutter))
-        view.guiState?.windowContents[7] = GUIWindowContent(
+        view.guiState?.windowContents[7] = try GUIWindowContent(
             windowId: 7, fullRefresh: true,
             cursorRow: 0, cursorCol: 0, cursorShape: .block,
             rows: [], selection: nil,
@@ -404,7 +404,7 @@ struct MouseInputTests {
         )
 
         view.dispatcher.applyForTesting(.guiGutter(data: gutter))
-        view.guiState?.windowContents[7] = GUIWindowContent(
+        view.guiState?.windowContents[7] = try GUIWindowContent(
             windowId: 7, fullRefresh: true,
             cursorRow: 0, cursorCol: 0, cursorShape: .block,
             rows: [
@@ -777,7 +777,7 @@ struct MouseInputTests {
     }
 
     @Test("mid-document wrapped scroll with no payload rows before does not bounce at top")
-    func midDocumentWrappedScrollWithoutPayloadBeforeDoesNotBounceAtTop() {
+    func midDocumentWrappedScrollWithoutPayloadBeforeDoesNotBounceAtTop() throws {
         let geometry = GUIPaneGeometry(
             windowId: 1,
             totalRect: GUICellRect(row: 0, col: 0, width: 10, height: 5),
@@ -802,7 +802,7 @@ struct MouseInputTests {
             contentEpoch: 1,
             layoutGeneration: 1
         )
-        let content = GUIWindowContent(
+        let content = try GUIWindowContent(
             windowId: 1, fullRefresh: true, contentEpoch: 1, cursorVisible: true, cursorRow: 0, cursorCol: 0, cursorShape: .block,
             scrollLeft: 0,
             rows: [

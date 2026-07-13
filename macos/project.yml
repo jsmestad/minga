@@ -31,6 +31,8 @@ targets:
         type: file
       - path: Sources/Protocol/GUIColorSlots.swift
         type: file
+      - path: Sources/Protocol/FrameResourcePolicy.swift
+        type: file
       - path: Sources/Renderer/WindowContent.swift
         type: file
       - path: Sources/Renderer/ResidentRowStore.swift
@@ -113,6 +115,7 @@ targets:
           - "Protocol/ProtocolTypes.swift"
           - "Protocol/StatusBarUpdate.swift"
           - "Protocol/GUIColorSlots.swift"
+          - "Protocol/FrameResourcePolicy.swift"
           # MingaProtocol-owned (Slice 3)
           - "Renderer/WindowContent.swift"
           - "Renderer/ResidentRowStore.swift"
@@ -233,6 +236,7 @@ targets:
           - "Protocol/ProtocolTypes.swift"
           - "Protocol/StatusBarUpdate.swift"
           - "Protocol/GUIColorSlots.swift"
+          - "Protocol/FrameResourcePolicy.swift"
           # MingaProtocol-owned (Slice 3)
           - "Renderer/WindowContent.swift"
           - "Renderer/ResidentRowStore.swift"
@@ -308,6 +312,7 @@ targets:
           - "Protocol/ProtocolTypes.swift"
           - "Protocol/StatusBarUpdate.swift"
           - "Protocol/GUIColorSlots.swift"
+          - "Protocol/FrameResourcePolicy.swift"
           # MingaProtocol-owned (Slice 3)
           - "Renderer/WindowContent.swift"
           - "Renderer/ResidentRowStore.swift"

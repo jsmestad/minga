@@ -32,9 +32,9 @@ struct CommandDispatcherRoutingTests {
     // MARK: - Basic commands
 
     @Test("empty keyframe prunes retained windows and stale gutter globals")
-    @MainActor func emptyKeyframePrunesRetainedWindowState() {
+    @MainActor func emptyKeyframePrunesRetainedWindowState() throws {
         let (dispatcher, gui) = makeDispatcher()
-        gui.windowContents[1] = GUIWindowContent(
+        gui.windowContents[1] = try GUIWindowContent(
             windowId: 1, fullRefresh: false,
             cursorRow: 0, cursorCol: 0, cursorShape: .block,
             rows: [], selection: nil,
@@ -68,9 +68,9 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("keyframe commit prunes stale window content, gutters, and indent guides")
-    @MainActor func keyframeCommitPrunesStaleWindowState() {
+    @MainActor func keyframeCommitPrunesStaleWindowState() throws {
         let (dispatcher, gui) = makeDispatcher()
-        gui.windowContents[2] = GUIWindowContent(
+        gui.windowContents[2] = try GUIWindowContent(
             windowId: 2, fullRefresh: false,
             cursorRow: 0, cursorCol: 0, cursorShape: .block,
             rows: [], selection: nil,
@@ -89,7 +89,7 @@ struct CommandDispatcherRoutingTests {
 
         dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
-        dispatcher.dispatch(.guiWindowContent(data: GUIWindowContent(
+        dispatcher.dispatch(.guiWindowContent(data: try GUIWindowContent(
             windowId: 1, fullRefresh: false,
             cursorRow: 0, cursorCol: 0, cursorShape: .block,
             rows: [], selection: nil,
@@ -117,14 +117,14 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("setCursorShape updates frameState cursor shape")
-    @MainActor func setCursorShapeCommand() {
+    @MainActor func setCursorShapeCommand() throws {
         let (dispatcher, _) = makeDispatcher()
         dispatcher.applyForTesting(.setCursorShape(.beam))
         #expect(dispatcher.frameState.cursorShape == .beam)
     }
 
     @Test("protocolError latches a blocking message on protocolErrorState")
-    @MainActor func protocolErrorRouting() {
+    @MainActor func protocolErrorRouting() throws {
         let (dispatcher, gui) = makeDispatcher()
         #expect(gui.protocolErrorState.isPresented == false)
 
@@ -135,7 +135,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("setWindowBg updates frameState defaultBg")
-    @MainActor func setWindowBgCommand() {
+    @MainActor func setWindowBgCommand() throws {
         let (dispatcher, _) = makeDispatcher()
         dispatcher.applyForTesting(.setWindowBg(r: 0x28, g: 0x2C, b: 0x34))
         let expected: UInt32 = (0x28 << 16) | (0x2C << 8) | 0x34
@@ -145,7 +145,7 @@ struct CommandDispatcherRoutingTests {
     // MARK: - View-driven FrameState mutations
 
     @Test("applyViewportResize writes grid dimensions and marks dirty")
-    @MainActor func applyViewportResizeUpdatesGrid() {
+    @MainActor func applyViewportResizeUpdatesGrid() throws {
         let (dispatcher, _) = makeDispatcher()
         // Clear the dirty flag set at init so we can assert the resize sets it.
         dispatcher.markRendered()
@@ -160,7 +160,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("applyViewportResize is a no-op when dimensions are unchanged")
-    @MainActor func applyViewportResizeNoOp() {
+    @MainActor func applyViewportResizeNoOp() throws {
         let (dispatcher, _) = makeDispatcher()
         // Dispatcher starts at 80x24 (see makeDispatcher).
         dispatcher.markRendered()
@@ -174,7 +174,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("markRendered clears the dirty flag the view consumed")
-    @MainActor func markRenderedClearsDirty() {
+    @MainActor func markRenderedClearsDirty() throws {
         let (dispatcher, _) = makeDispatcher()
         dispatcher.applyViewportResize(newCols: 100, newRows: 30)
         #expect(dispatcher.frameState.dirty == true)
@@ -187,7 +187,7 @@ struct CommandDispatcherRoutingTests {
     // MARK: - GUI chrome routing
 
     @Test("guiTabBar updates tabBarState")
-    @MainActor func guiTabBarRouting() {
+    @MainActor func guiTabBarRouting() throws {
         let (dispatcher, gui) = makeDispatcher()
         let tabs = [
             Wire.TabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: false,
@@ -201,7 +201,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiObservatory updates observatoryState")
-    @MainActor func guiObservatoryRouting() {
+    @MainActor func guiObservatoryRouting() throws {
         let (dispatcher, gui) = makeDispatcher()
         let nodes = [Wire.ObservatoryNode(pid: "<0.1.0>", parentPid: "", name: "Minga.Supervisor", processClass: 0, depth: 0, memory: 1024, messageQueueLen: 0, reductions: 10, sparkline: [0, 0.5])]
 
@@ -214,7 +214,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiObservatory hidden payload hides observatoryState")
-    @MainActor func guiObservatoryHiddenRouting() {
+    @MainActor func guiObservatoryHiddenRouting() throws {
         let (dispatcher, gui) = makeDispatcher()
         let nodes = [Wire.ObservatoryNode(pid: "<0.1.0>", parentPid: "", name: "Minga.Supervisor", processClass: 0, depth: 0, memory: 1024, messageQueueLen: 0, reductions: 10, sparkline: [])]
         dispatcher.applyForTesting(.guiObservatory(visible: true, nodeCount: 1, nodes: nodes))
@@ -226,7 +226,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiFileTree updates fileTreeState when entries present")
-    @MainActor func guiFileTreeRouting() {
+    @MainActor func guiFileTreeRouting() throws {
         let (dispatcher, gui) = makeDispatcher()
         let entries = [wireFileTreeEntry(pathHash: 123, isDir: true, isExpanded: true, id: "/project/lib", path: "/project/lib", name: "lib", relPath: "lib")]
         dispatcher.applyForTesting(.guiFileTree(version: 2, treeFlags: 0x03, treeState: 3, selectedId: "/project/lib", treeWidth: 30,
@@ -241,7 +241,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiFileTreeSelection updates selection and focus without replacing entries")
-    @MainActor func guiFileTreeSelectionRouting() {
+    @MainActor func guiFileTreeSelectionRouting() throws {
         let (dispatcher, gui) = makeDispatcher()
         let entries = [
             wireFileTreeEntry(pathHash: 1, isSelected: true, isFocused: true, id: "/project/a", path: "/project/a", name: "a", relPath: "a"),
@@ -264,7 +264,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiFileTreeSelection ignores unknown selected id without clearing selection")
-    @MainActor func guiFileTreeSelectionIgnoresUnknownId() {
+    @MainActor func guiFileTreeSelectionIgnoresUnknownId() throws {
         let (dispatcher, gui) = makeDispatcher()
         let entries = [
             wireFileTreeEntry(pathHash: 1, isSelected: true, isFocused: true, id: "/project/a", path: "/project/a", name: "a", relPath: "a")
@@ -282,7 +282,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("file tree local navigation preview moves selection when eligible")
-    @MainActor func fileTreeLocalNavigationPreviewMovesSelectionWhenEligible() {
+    @MainActor func fileTreeLocalNavigationPreviewMovesSelectionWhenEligible() throws {
         let (dispatcher, gui) = makeDispatcher()
         let entries = [
             wireFileTreeEntry(pathHash: 1, isSelected: true, isFocused: true, id: "/project/a", path: "/project/a", name: "a", relPath: "a"),
@@ -301,7 +301,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("file tree local navigation preview is disabled without BEAM eligibility flag")
-    @MainActor func fileTreeLocalNavigationPreviewRequiresEligibilityFlag() {
+    @MainActor func fileTreeLocalNavigationPreviewRequiresEligibilityFlag() throws {
         let (dispatcher, gui) = makeDispatcher()
         let entries = [
             wireFileTreeEntry(pathHash: 1, isSelected: true, isFocused: true, id: "/project/a", path: "/project/a", name: "a", relPath: "a"),
@@ -320,7 +320,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiFileTree hides when explicit tree state is hidden")
-    @MainActor func guiFileTreeHidesOnHiddenState() {
+    @MainActor func guiFileTreeHidesOnHiddenState() throws {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.applyForTesting(.guiFileTree(version: 2, treeFlags: 0x01, treeState: 3, selectedId: "/project/a", treeWidth: 30,
                                           rootPath: "/project", errorReason: "",
@@ -334,7 +334,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiFileTree clears project root when hidden payload has no root")
-    @MainActor func guiFileTreeClearsRootOnHiddenPayload() {
+    @MainActor func guiFileTreeClearsRootOnHiddenPayload() throws {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.applyForTesting(.guiFileTree(version: 2, treeFlags: 0x01, treeState: 3, selectedId: "/project/a", treeWidth: 30,
                                           rootPath: "/project", errorReason: "",
@@ -348,7 +348,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiFileTree keeps an empty visible tree open")
-    @MainActor func guiFileTreeKeepsEmptyVisibleTreeOpen() {
+    @MainActor func guiFileTreeKeepsEmptyVisibleTreeOpen() throws {
         let (dispatcher, gui) = makeDispatcher()
 
         dispatcher.applyForTesting(.guiFileTree(version: 2, treeFlags: 0x11, treeState: 2, selectedId: "", treeWidth: 30,
@@ -361,7 +361,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiFileTree preserves loading and error states with empty entries")
-    @MainActor func guiFileTreePreservesLoadingAndErrorStates() {
+    @MainActor func guiFileTreePreservesLoadingAndErrorStates() throws {
         let (dispatcher, gui) = makeDispatcher()
 
         dispatcher.applyForTesting(.guiFileTree(version: 2, treeFlags: 0x01, treeState: 1, selectedId: "", treeWidth: 30,
@@ -377,7 +377,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiGitStatus updates state when repo has entries")
-    @MainActor func guiGitStatusRouting() {
+    @MainActor func guiGitStatusRouting() throws {
         let (dispatcher, gui) = makeDispatcher()
         let rawEntries = [
             Wire.GitStatusEntry(pathHash: 12345, section: 1, status: 1, path: "lib/editor.ex")
@@ -394,7 +394,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiGitStatus hides when notARepo with empty entries (panel closed signal)")
-    @MainActor func guiGitStatusHidesOnClearSignal() {
+    @MainActor func guiGitStatusHidesOnClearSignal() throws {
         let (dispatcher, gui) = makeDispatcher()
         // First show it with real data
         let rawEntries = [
@@ -414,7 +414,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiGitStatus keeps unknown git status entries")
-    @MainActor func guiGitStatusKeepsUnknownStatus() {
+    @MainActor func guiGitStatusKeepsUnknownStatus() throws {
         let (dispatcher, gui) = makeDispatcher()
         let rawEntries = [
             Wire.GitStatusEntry(pathHash: 12345, section: 1, status: 0, path: "lib/unknown.ex"),
@@ -429,7 +429,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiGitStatus drops entries with invalid sections")
-    @MainActor func guiGitStatusDropsInvalidSections() {
+    @MainActor func guiGitStatusDropsInvalidSections() throws {
         let (dispatcher, gui) = makeDispatcher()
         let rawEntries = [
             Wire.GitStatusEntry(pathHash: 12345, section: 99, status: 1, path: "lib/bad-section.ex")
@@ -441,7 +441,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiGitStatus shows not-a-repo panel when BEAM sends a project root")
-    @MainActor func guiGitStatusShowsNotARepoPanel() {
+    @MainActor func guiGitStatusShowsNotARepoPanel() throws {
         let (dispatcher, gui) = makeDispatcher()
 
         dispatcher.applyForTesting(.guiGitStatus(repoState: 1, syncing: false, ahead: 0, behind: 0,
@@ -453,7 +453,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiGitStatus shows panel for normal repo with clean working tree")
-    @MainActor func guiGitStatusShowsCleanRepo() {
+    @MainActor func guiGitStatusShowsCleanRepo() throws {
         let (dispatcher, gui) = makeDispatcher()
         // Normal repo (0) with zero entries is a clean working tree, NOT
         // a hide signal. Only notARepo + empty triggers hide.
@@ -464,7 +464,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiGitStatus preserves toast message when metadata is unknown")
-    @MainActor func guiGitStatusToastFallback() {
+    @MainActor func guiGitStatusToastFallback() throws {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.applyForTesting(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
                                            branchName: "main", entries: [], toast: (message: "Remote failed", level: 99, action: 99), entryBasePath: "", lastCommitMessage: "", stashCount: 0))
@@ -482,7 +482,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiCompletion visible updates completionState")
-    @MainActor func guiCompletionVisible() {
+    @MainActor func guiCompletionVisible() throws {
         let (dispatcher, gui) = makeDispatcher()
         let items = [Wire.CompletionItem(kind: 1, label: "def", detail: "keyword")]
         dispatcher.applyForTesting(.guiCompletion(visible: true, anchorRow: 5, anchorCol: 10,
@@ -495,7 +495,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiCompletion hidden clears completionState")
-    @MainActor func guiCompletionHidden() {
+    @MainActor func guiCompletionHidden() throws {
         let (dispatcher, gui) = makeDispatcher()
         // Show then hide
         let items = [Wire.CompletionItem(kind: 1, label: "def", detail: "keyword")]
@@ -510,7 +510,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiWhichKey visible updates whichKeyState")
-    @MainActor func guiWhichKeyVisible() {
+    @MainActor func guiWhichKeyVisible() throws {
         let (dispatcher, gui) = makeDispatcher()
         let bindings = [Wire.WhichKeyBinding(kind: 0, key: "f", description: "Find file", icon: "")]
         dispatcher.applyForTesting(.guiWhichKey(visible: true, prefix: "SPC",
@@ -522,7 +522,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiWhichKey hidden clears whichKeyState")
-    @MainActor func guiWhichKeyHidden() {
+    @MainActor func guiWhichKeyHidden() throws {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.applyForTesting(.guiWhichKey(visible: false, prefix: "", page: 0,
                                           pageCount: 0, bindings: []))
@@ -530,7 +530,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiStatusBar updates statusBarState and clears safeMode")
-    @MainActor func guiStatusBarRouting() {
+    @MainActor func guiStatusBarRouting() throws {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.applyForTesting(.guiStatusBar(StatusBarUpdate(contentKind: 0, mode: 1, cursorLine: 42,
                                            cursorCol: 9, lineCount: 500, flags: 0x0B, safeMode: true,
@@ -586,7 +586,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiStatusBar agent variant populates background buffer fields")
-    @MainActor func guiStatusBarAgentRouting() {
+    @MainActor func guiStatusBarAgentRouting() throws {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.applyForTesting(.guiStatusBar(StatusBarUpdate(contentKind: 1, mode: 0, cursorLine: 11,
                                            cursorCol: 6, lineCount: 100, flags: 0x03,
@@ -619,7 +619,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiBreadcrumb updates breadcrumbState")
-    @MainActor func guiBreadcrumbRouting() {
+    @MainActor func guiBreadcrumbRouting() throws {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.applyForTesting(.guiBreadcrumb(segments: ["lib", "minga", "editor.ex"]))
 
@@ -627,7 +627,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiPicker visible updates pickerState")
-    @MainActor func guiPickerVisible() {
+    @MainActor func guiPickerVisible() throws {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.applyForTesting(.guiPicker(visible: true, selectedIndex: 0, filteredCount: 5,
                                         totalCount: 100, markedCount: 2, title: "Find File", query: "edi",
@@ -641,7 +641,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiPicker hidden clears pickerState")
-    @MainActor func guiPickerHidden() {
+    @MainActor func guiPickerHidden() throws {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.applyForTesting(.guiPicker(visible: true, selectedIndex: 0, filteredCount: 5,
                                         totalCount: 100, markedCount: 2, title: "Find File", query: "edi",
@@ -657,7 +657,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiAgentChat updates chrome but ignores its 0x78 messages section")
-    @MainActor func guiAgentChatVisible() {
+    @MainActor func guiAgentChatVisible() throws {
         let (dispatcher, gui) = makeDispatcher()
         // The 0x78 messages section is intentionally ignored (#2654 slice 2): the
         // resident transcript is sourced from the 0x86 stream, not from here.
@@ -676,7 +676,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiAgentTranscript populates agentChatState messages")
-    @MainActor func guiAgentTranscriptPopulatesMessages() {
+    @MainActor func guiAgentTranscriptPopulatesMessages() throws {
         let (dispatcher, gui) = makeDispatcher()
         // Chrome frame first (visible), then the resident transcript stream.
         dispatcher.applyForTesting(.guiAgentChat(visible: true, status: 1, model: "claude",
@@ -695,7 +695,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiAgentChat hidden clears agentChatState")
-    @MainActor func guiAgentChatHidden() {
+    @MainActor func guiAgentChatHidden() throws {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.applyForTesting(.guiAgentChat(visible: false, status: 0, model: "",
                                            thinkingLevel: "", prompt: "", promptLineCount: 1,
@@ -709,7 +709,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiBottomPanel visible updates bottomPanelState and appends entries")
-    @MainActor func guiBottomPanelVisible() {
+    @MainActor func guiBottomPanelVisible() throws {
         let (dispatcher, gui) = makeDispatcher()
         let tabs = [Wire.BottomPanelTab(tabType: 0, name: "Messages")]
         let entries = [Wire.MessageEntry(streamInstance: 1, id: 1, level: 1, subsystem: 0,
@@ -724,7 +724,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiBottomPanel hidden hides bottomPanelState")
-    @MainActor func guiBottomPanelHidden() {
+    @MainActor func guiBottomPanelHidden() throws {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.applyForTesting(.guiBottomPanel(visible: false, activeTabIndex: 0,
                                              heightPercent: 30, filterPreset: 0,
@@ -733,7 +733,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiToolManager visible updates toolManagerState")
-    @MainActor func guiToolManagerVisible() {
+    @MainActor func guiToolManagerVisible() throws {
         let (dispatcher, gui) = makeDispatcher()
         let tools = [Wire.ToolEntry(name: "elixir_ls", label: "ElixirLS",
                                   description: "LSP", category: 0, status: 1,
@@ -749,7 +749,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiToolManager hidden clears toolManagerState")
-    @MainActor func guiToolManagerHidden() {
+    @MainActor func guiToolManagerHidden() throws {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.applyForTesting(.guiToolManager(visible: false, filter: 0,
                                              selectedIndex: 0, tools: []))
@@ -758,9 +758,9 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiWindowContent stores content in guiState")
-    @MainActor func guiWindowContentRouting() {
+    @MainActor func guiWindowContentRouting() throws {
         let (dispatcher, gui) = makeDispatcher()
-        let content = GUIWindowContent(
+        let content = try GUIWindowContent(
             windowId: 7, fullRefresh: true,
             cursorRow: 5, cursorCol: 10, cursorShape: .beam,
             rows: [], selection: nil,
@@ -774,7 +774,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("reset-required scroll presentation clears local smooth-scroll state once per promoted frame")
-    @MainActor func resetRequiredScrollPresentationClearsLocalStateOnce() {
+    @MainActor func resetRequiredScrollPresentationClearsLocalStateOnce() throws {
         let (dispatcher, gui) = makeDispatcher()
         var resetCount = 0
         dispatcher.onScrollPresentationReset = { resetCount += 1 }
@@ -793,7 +793,7 @@ struct CommandDispatcherRoutingTests {
             layoutGeneration: 77
         )
 
-        dispatcher.applyForTesting(.guiWindowContent(data: GUIWindowContent(
+        dispatcher.applyForTesting(.guiWindowContent(data: try GUIWindowContent(
             windowId: 7, fullRefresh: true, contentEpoch: 42,
             cursorRow: 5, cursorCol: 10, cursorShape: .beam,
             rows: [], selection: nil,
@@ -810,7 +810,7 @@ struct CommandDispatcherRoutingTests {
         )))
         #expect(resetCount == 1)
 
-        gui.windowContents[7] = GUIWindowContent(
+        gui.windowContents[7] = try GUIWindowContent(
             windowId: 7, fullRefresh: false, contentEpoch: 42,
             cursorRow: 5, cursorCol: 10, cursorShape: .beam,
             rows: [], selection: nil,
@@ -840,7 +840,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("layoutGeneration-only change fires scroll presentation discard")
-    @MainActor func layoutGenerationChangeFiresDiscard() {
+    @MainActor func layoutGenerationChangeFiresDiscard() throws {
         let (dispatcher, _) = makeDispatcher()
         var discardCount = 0
         dispatcher.onScrollPresentationReset = { discardCount += 1 }
@@ -853,7 +853,7 @@ struct CommandDispatcherRoutingTests {
             contentEpoch: 42, layoutGeneration: 1
         )
 
-        dispatcher.applyForTesting(.guiWindowContent(data: GUIWindowContent(
+        dispatcher.applyForTesting(.guiWindowContent(data: try GUIWindowContent(
             windowId: 7, fullRefresh: true, contentEpoch: 42,
             cursorRow: 5, cursorCol: 10, cursorShape: .beam,
             rows: [], selection: nil,
@@ -871,7 +871,7 @@ struct CommandDispatcherRoutingTests {
             contentEpoch: 42, layoutGeneration: 2
         )
 
-        dispatcher.applyForTesting(.guiWindowContent(data: GUIWindowContent(
+        dispatcher.applyForTesting(.guiWindowContent(data: try GUIWindowContent(
             windowId: 7, fullRefresh: true, contentEpoch: 42,
             cursorRow: 5, cursorCol: 10, cursorShape: .beam,
             rows: [], selection: nil,
@@ -883,7 +883,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("identical anchor key does not fire scroll presentation discard")
-    @MainActor func identicalAnchorKeyDoesNotDiscard() {
+    @MainActor func identicalAnchorKeyDoesNotDiscard() throws {
         let (dispatcher, _) = makeDispatcher()
         var discardCount = 0
         dispatcher.onScrollPresentationReset = { discardCount += 1 }
@@ -896,7 +896,7 @@ struct CommandDispatcherRoutingTests {
             contentEpoch: 42, layoutGeneration: 1
         )
 
-        dispatcher.applyForTesting(.guiWindowContent(data: GUIWindowContent(
+        dispatcher.applyForTesting(.guiWindowContent(data: try GUIWindowContent(
             windowId: 7, fullRefresh: true, contentEpoch: 42,
             cursorRow: 5, cursorCol: 10, cursorShape: .beam,
             rows: [], selection: nil,
@@ -906,7 +906,7 @@ struct CommandDispatcherRoutingTests {
         )))
         #expect(discardCount == 0)
 
-        dispatcher.applyForTesting(.guiWindowContent(data: GUIWindowContent(
+        dispatcher.applyForTesting(.guiWindowContent(data: try GUIWindowContent(
             windowId: 7, fullRefresh: true, contentEpoch: 42,
             cursorRow: 6, cursorCol: 10, cursorShape: .beam,
             rows: [], selection: nil,
@@ -918,7 +918,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("identical anchor key with a newer scroll_seq still fires discard (#2661 race case)")
-    @MainActor func newerScrollSeqDiscardsEvenWithSameAnchorKey() {
+    @MainActor func newerScrollSeqDiscardsEvenWithSameAnchorKey() throws {
         let (dispatcher, _) = makeDispatcher()
         var discardCount = 0
         dispatcher.onScrollPresentationReset = { discardCount += 1 }
@@ -931,7 +931,7 @@ struct CommandDispatcherRoutingTests {
             contentEpoch: 42, layoutGeneration: 1, scrollSeq: 3
         )
 
-        dispatcher.applyForTesting(.guiWindowContent(data: GUIWindowContent(
+        dispatcher.applyForTesting(.guiWindowContent(data: try GUIWindowContent(
             windowId: 7, fullRefresh: true, contentEpoch: 42,
             cursorRow: 5, cursorCol: 10, cursorShape: .beam,
             rows: [], selection: nil,
@@ -953,7 +953,7 @@ struct CommandDispatcherRoutingTests {
             contentEpoch: 42, layoutGeneration: 1, scrollSeq: 4
         )
 
-        dispatcher.applyForTesting(.guiWindowContent(data: GUIWindowContent(
+        dispatcher.applyForTesting(.guiWindowContent(data: try GUIWindowContent(
             windowId: 7, fullRefresh: true, contentEpoch: 42,
             cursorRow: 5, cursorCol: 10, cursorShape: .beam,
             rows: [], selection: nil,
@@ -965,7 +965,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("an unchanged or lower scroll_seq with the same anchor key does not discard")
-    @MainActor func unchangedScrollSeqDoesNotDiscard() {
+    @MainActor func unchangedScrollSeqDoesNotDiscard() throws {
         let (dispatcher, _) = makeDispatcher()
         var discardCount = 0
         dispatcher.onScrollPresentationReset = { discardCount += 1 }
@@ -978,7 +978,7 @@ struct CommandDispatcherRoutingTests {
             contentEpoch: 42, layoutGeneration: 1, scrollSeq: 5
         )
 
-        dispatcher.applyForTesting(.guiWindowContent(data: GUIWindowContent(
+        dispatcher.applyForTesting(.guiWindowContent(data: try GUIWindowContent(
             windowId: 7, fullRefresh: true, contentEpoch: 42,
             cursorRow: 5, cursorCol: 10, cursorShape: .beam,
             rows: [], selection: nil,
@@ -991,7 +991,7 @@ struct CommandDispatcherRoutingTests {
         // Same scroll_seq: this is the routine echo-loop case (#2661) — the
         // wheel report kept the cursor inside scrolloff, so the BEAM committed
         // the same anchor and did not advance the authority sequence.
-        dispatcher.applyForTesting(.guiWindowContent(data: GUIWindowContent(
+        dispatcher.applyForTesting(.guiWindowContent(data: try GUIWindowContent(
             windowId: 7, fullRefresh: true, contentEpoch: 42,
             cursorRow: 5, cursorCol: 10, cursorShape: .beam,
             rows: [], selection: nil,
@@ -1003,7 +1003,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("anchorTop-only change fires scroll presentation discard")
-    @MainActor func anchorTopChangeFiresDiscard() {
+    @MainActor func anchorTopChangeFiresDiscard() throws {
         let (dispatcher, _) = makeDispatcher()
         var discardCount = 0
         dispatcher.onScrollPresentationReset = { discardCount += 1 }
@@ -1016,7 +1016,7 @@ struct CommandDispatcherRoutingTests {
             contentEpoch: 42, layoutGeneration: 1
         )
 
-        dispatcher.applyForTesting(.guiWindowContent(data: GUIWindowContent(
+        dispatcher.applyForTesting(.guiWindowContent(data: try GUIWindowContent(
             windowId: 7, fullRefresh: true, contentEpoch: 42,
             cursorRow: 5, cursorCol: 10, cursorShape: .beam,
             rows: [], selection: nil,
@@ -1034,7 +1034,7 @@ struct CommandDispatcherRoutingTests {
             contentEpoch: 42, layoutGeneration: 1
         )
 
-        dispatcher.applyForTesting(.guiWindowContent(data: GUIWindowContent(
+        dispatcher.applyForTesting(.guiWindowContent(data: try GUIWindowContent(
             windowId: 7, fullRefresh: true, contentEpoch: 42,
             cursorRow: 5, cursorCol: 10, cursorShape: .beam,
             rows: [], selection: nil,
@@ -1046,9 +1046,9 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiWindowOverlayDelta updates matching retained content")
-    @MainActor func guiWindowOverlayDeltaRouting() {
+    @MainActor func guiWindowOverlayDeltaRouting() throws {
         let (dispatcher, gui) = makeDispatcher()
-        gui.windowContents[7] = GUIWindowContent(
+        gui.windowContents[7] = try GUIWindowContent(
             windowId: 7, fullRefresh: false, contentEpoch: 42,
             cursorRow: 5, cursorCol: 10, cursorShape: .block,
             rows: [], selection: nil,
@@ -1072,9 +1072,9 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiWindowOverlayDelta clears retained cursorline when cursorline is omitted")
-    @MainActor func guiWindowOverlayDeltaClearsRetainedCursorline() {
+    @MainActor func guiWindowOverlayDeltaClearsRetainedCursorline() throws {
         let (dispatcher, gui) = makeDispatcher()
-        gui.windowContents[7] = GUIWindowContent(
+        gui.windowContents[7] = try GUIWindowContent(
             windowId: 7, fullRefresh: false, contentEpoch: 42,
             cursorRow: 5, cursorCol: 10, cursorShape: .block,
             rows: [], selection: nil,
@@ -1097,9 +1097,9 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("stale guiWindowOverlayDelta is ignored without marking the window live")
-    @MainActor func staleGuiWindowOverlayDeltaIgnored() {
+    @MainActor func staleGuiWindowOverlayDeltaIgnored() throws {
         let (dispatcher, gui) = makeDispatcher()
-        let content = GUIWindowContent(
+        let content = try GUIWindowContent(
             windowId: 7, fullRefresh: false, contentEpoch: 42,
             cursorRow: 5, cursorCol: 10, cursorShape: .block,
             rows: [], selection: nil,
@@ -1121,7 +1121,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiWindowOverlayDelta without retained content is ignored")
-    @MainActor func missingGuiWindowOverlayDeltaIgnored() {
+    @MainActor func missingGuiWindowOverlayDeltaIgnored() throws {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.frameState.cursorVisible = true
 
@@ -1137,11 +1137,11 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiWindowRowsDelta updates retained rows and marks window live")
-    @MainActor func guiWindowRowsDeltaRouting() {
+    @MainActor func guiWindowRowsDeltaRouting() throws {
         let (dispatcher, gui) = makeDispatcher()
         let retained = GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 0, contentHash: 11, text: "old", spans: [])
         let replacement = GUIVisualRow(rowType: .normal, rowId: 2, bufLine: 1, contentHash: 22, text: "new", spans: [])
-        gui.windowContents[7] = GUIWindowContent(
+        gui.windowContents[7] = try GUIWindowContent(
             windowId: 7, fullRefresh: false, contentEpoch: 42,
             cursorRow: 5, cursorCol: 10, cursorShape: .block,
             rows: [retained], selection: nil,
@@ -1174,10 +1174,10 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiWindowViewportDelta updates retained rows and marks window live")
-    @MainActor func guiWindowViewportDeltaRouting() {
+    @MainActor func guiWindowViewportDeltaRouting() throws {
         let (dispatcher, gui) = makeDispatcher()
         let retained = GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 0, contentHash: 11, text: "old", spans: [])
-        gui.windowContents[7] = GUIWindowContent(
+        gui.windowContents[7] = try GUIWindowContent(
             windowId: 7, fullRefresh: false, contentEpoch: 42,
             cursorRow: 5, cursorCol: 10, cursorShape: .block,
             rows: [retained], selection: nil,
@@ -1210,10 +1210,10 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("stale guiWindowRowsDelta is ignored without clearing current content")
-    @MainActor func staleGuiWindowRowsDeltaIgnored() {
+    @MainActor func staleGuiWindowRowsDeltaIgnored() throws {
         let (dispatcher, gui) = makeDispatcher()
         let retained = GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 0, contentHash: 11, text: "old", spans: [])
-        let content = GUIWindowContent(
+        let content = try GUIWindowContent(
             windowId: 7, fullRefresh: false, contentEpoch: 42,
             cursorRow: 5, cursorCol: 10, cursorShape: .block,
             rows: [retained], selection: nil,
@@ -1245,10 +1245,10 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiWindowRowsDelta missing retained ref clears content for full-refresh recovery")
-    @MainActor func guiWindowRowsDeltaMissingRefClearsContent() {
+    @MainActor func guiWindowRowsDeltaMissingRefClearsContent() throws {
         let (dispatcher, gui) = makeDispatcher()
         let retained = GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 0, contentHash: 11, text: "old", spans: [])
-        gui.windowContents[7] = GUIWindowContent(
+        gui.windowContents[7] = try GUIWindowContent(
             windowId: 7, fullRefresh: false, contentEpoch: 42,
             cursorRow: 5, cursorCol: 10, cursorShape: .block,
             rows: [retained], selection: nil,
@@ -1279,7 +1279,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiGutterSeparator updates frameState gutter state")
-    @MainActor func guiGutterSepRouting() {
+    @MainActor func guiGutterSepRouting() throws {
         let (dispatcher, _) = makeDispatcher()
         dispatcher.applyForTesting(.guiGutterSeparator(col: 4, r: 0x3F, g: 0x44, b: 0x4A))
 
@@ -1289,7 +1289,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiCursorline updates frameState cursorline state")
-    @MainActor func guiCursorlineRouting() {
+    @MainActor func guiCursorlineRouting() throws {
         let (dispatcher, _) = makeDispatcher()
         dispatcher.applyForTesting(.guiCursorline(row: 12, r: 0x2C, g: 0x32, b: 0x3C))
 
@@ -1299,7 +1299,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiGutter stores gutter data in frameState")
-    @MainActor func guiGutterRouting() {
+    @MainActor func guiGutterRouting() throws {
         let (dispatcher, _) = makeDispatcher()
         let gutter = Wire.WindowGutter(
             windowId: 1, contentRow: 0, contentCol: 5, contentHeight: 24,
@@ -1315,7 +1315,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("guiHoverPopup exposes lines after scroll offset")
-    @MainActor func guiHoverPopupScrollOffset() {
+    @MainActor func guiHoverPopupScrollOffset() throws {
         let (dispatcher, gui) = makeDispatcher()
         let lines = [
             Wire.HoverLine(lineType: .text, segments: [Wire.HoverSegment(style: .plain, fgColor: nil, flags: 0, text: "one")]),
@@ -1333,7 +1333,7 @@ struct CommandDispatcherRoutingTests {
     // MARK: - Batch lifecycle
 
     @Test("commitFrame fires onFirstRender once then clears it")
-    @MainActor func commitFrameFiresFirstRenderOnce() {
+    @MainActor func commitFrameFiresFirstRenderOnce() throws {
         let (dispatcher, _) = makeDispatcher()
         var callCount = 0
         dispatcher.onFirstRender = { callCount += 1 }
@@ -1354,7 +1354,7 @@ struct CommandDispatcherRoutingTests {
     // MARK: - Theme
 
     @Test("guiTheme updates themeColors and syncs to frameState")
-    @MainActor func guiThemeRouting() {
+    @MainActor func guiThemeRouting() throws {
         let (dispatcher, gui) = makeDispatcher()
         let slots: [(slotId: UInt8, r: UInt8, g: UInt8, b: UInt8)] = [
             (GUI_COLOR_GUTTER_FG, 0xAA, 0xBB, 0xCC)
@@ -1369,7 +1369,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("keyframe with content but no guiTheme returns a typed rejection")
-    @MainActor func keyframeWithoutThemeErrors() {
+    @MainActor func keyframeWithoutThemeErrors() throws {
         let (dispatcher, gui) = makeDispatcher()
         var results: [FrameTransactionResult] = []
         dispatcher.onTransactionResult = { results.append($0) }
@@ -1384,7 +1384,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("keyframe with empty guiTheme rejects promotion")
-    @MainActor func keyframeWithEmptyThemeErrors() {
+    @MainActor func keyframeWithEmptyThemeErrors() throws {
         let (dispatcher, gui) = makeDispatcher()
         var results: [FrameTransactionResult] = []
         dispatcher.onTransactionResult = { results.append($0) }
@@ -1405,7 +1405,7 @@ struct CommandDispatcherRoutingTests {
     }
 
     @Test("keyframe with partial guiTheme rejects promotion")
-    @MainActor func keyframeWithPartialThemeErrors() {
+    @MainActor func keyframeWithPartialThemeErrors() throws {
         let (dispatcher, gui) = makeDispatcher()
         var results: [FrameTransactionResult] = []
         dispatcher.onTransactionResult = { results.append($0) }
@@ -1449,7 +1449,7 @@ struct CommandDispatcherStagingTests {
                       icon: "", label: label)
     }
 
-    private func windowContent(windowId: UInt16 = 7, epoch: UInt32 = 42, fontId: UInt8 = 0) -> GUIWindowContent {
+    private func windowContent(windowId: UInt16 = 7, epoch: UInt32 = 42, fontId: UInt8 = 0) throws -> GUIWindowContent {
         let span = GUIHighlightSpan(
             startCol: 0, endCol: 3, fg: 0xFFFFFF, bg: 0,
             attrs: 0, fontWeight: 0, fontId: fontId
@@ -1458,7 +1458,7 @@ struct CommandDispatcherStagingTests {
             rowType: .normal, rowId: 1, bufLine: 0,
             contentHash: 11, text: "old", spans: [span]
         )
-        return GUIWindowContent(
+        return try GUIWindowContent(
             windowId: windowId, fullRefresh: true, contentEpoch: epoch,
             cursorRow: 0, cursorCol: 0, cursorShape: .block,
             rows: [row], selection: nil, searchMatches: [],
@@ -1473,10 +1473,18 @@ struct CommandDispatcherStagingTests {
         )
     }
 
+    private func policy(stagingWeight: FrameResourceWeight) -> FrameResourcePolicy {
+        let defaults = FrameResourcePolicy.default
+        return FrameResourcePolicy(
+            wire: defaults.wire, decode: defaults.decode,
+            staging: .init(weight: stagingWeight), resident: defaults.resident
+        )
+    }
+
     // MARK: - Nothing paints between begin and commit
 
     @Test("observable GUIState is unchanged between begin and a partial frame")
-    @MainActor func guiStateUnchangedMidTransaction() {
+    @MainActor func guiStateUnchangedMidTransaction() throws {
         let (dispatcher, gui) = makeDispatcher()
 
         // Establish a committed baseline so we have a "presented" tab bar.
@@ -1495,7 +1503,7 @@ struct CommandDispatcherStagingTests {
     }
 
     @Test("observable FrameState is unchanged between begin and a partial frame")
-    @MainActor func frameStateUnchangedMidTransaction() {
+    @MainActor func frameStateUnchangedMidTransaction() throws {
         let (dispatcher, _) = makeDispatcher()
 
         dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
@@ -1513,7 +1521,7 @@ struct CommandDispatcherStagingTests {
     // MARK: - Commit promotes atomically
 
     @Test("commit promotes all staged commands in one batch")
-    @MainActor func commitPromotesStagedCommands() {
+    @MainActor func commitPromotesStagedCommands() throws {
         let (dispatcher, gui) = makeDispatcher()
 
         dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
@@ -1533,7 +1541,7 @@ struct CommandDispatcherStagingTests {
     }
 
     @Test("onFrameReady fires only at commit, not on staged commands")
-    @MainActor func frameReadyFiresAtCommit() {
+    @MainActor func frameReadyFiresAtCommit() throws {
         let (dispatcher, _) = makeDispatcher()
         var readyCount = 0
         dispatcher.onFrameReady = { readyCount += 1 }
@@ -1550,7 +1558,7 @@ struct CommandDispatcherStagingTests {
     // MARK: - Delta-base validation
 
     @Test("delta frame committing against the last committed seq promotes cleanly")
-    @MainActor func deltaBaseMatchesCommits() {
+    @MainActor func deltaBaseMatchesCommits() throws {
         let (dispatcher, gui) = makeDispatcher()
 
         dispatcher.dispatch(.beginFrame(frameSeq: 5, baseFrameSeq: 0, generation: 1))
@@ -1568,7 +1576,7 @@ struct CommandDispatcherStagingTests {
     }
 
     @Test("delta frame with empty guiTheme rejects promotion")
-    @MainActor func deltaFrameWithEmptyThemeErrors() {
+    @MainActor func deltaFrameWithEmptyThemeErrors() throws {
         let (dispatcher, gui) = makeDispatcher()
         var results: [FrameTransactionResult] = []
         dispatcher.onTransactionResult = { results.append($0) }
@@ -1597,7 +1605,7 @@ struct CommandDispatcherStagingTests {
     }
 
     @Test("delta frame with partial guiTheme rejects promotion")
-    @MainActor func deltaFrameWithPartialThemeErrors() {
+    @MainActor func deltaFrameWithPartialThemeErrors() throws {
         let (dispatcher, gui) = makeDispatcher()
         var results: [FrameTransactionResult] = []
         dispatcher.onTransactionResult = { results.append($0) }
@@ -1628,7 +1636,7 @@ struct CommandDispatcherStagingTests {
     // MARK: - Invalidation requests a keyframe with no partial promotion
 
     @Test("commit seq mismatch invalidates with no promotion and requests keyframe")
-    @MainActor func seqMismatchInvalidates() {
+    @MainActor func seqMismatchInvalidates() throws {
         let (dispatcher, gui) = makeDispatcher()
         var requested: [UInt32] = []
         dispatcher.onRequestKeyframe = { requested.append($0) }
@@ -1655,7 +1663,7 @@ struct CommandDispatcherStagingTests {
     }
 
     @Test("pending resync debounces further keyframe requests until a valid commit")
-    @MainActor func resyncDebouncesRequests() {
+    @MainActor func resyncDebouncesRequests() throws {
         let (dispatcher, gui) = makeDispatcher()
         var requested: [UInt32] = []
         dispatcher.onRequestKeyframe = { requested.append($0) }
@@ -1683,7 +1691,7 @@ struct CommandDispatcherStagingTests {
     }
 
     @Test("a stale delta commit does not clear a pending resync")
-    @MainActor func staleDeltaDoesNotClearPendingResync() {
+    @MainActor func staleDeltaDoesNotClearPendingResync() throws {
         let (dispatcher, gui) = makeDispatcher()
         var requested: [UInt32] = []
         dispatcher.onRequestKeyframe = { requested.append($0) }
@@ -1708,7 +1716,7 @@ struct CommandDispatcherStagingTests {
     }
 
     @Test("invalidating a requested keyframe sends one replacement request")
-    @MainActor func failedKeyframeRequestsReplacement() {
+    @MainActor func failedKeyframeRequestsReplacement() throws {
         let (dispatcher, gui) = makeDispatcher()
         var requested: [UInt32] = []
         dispatcher.onRequestKeyframe = { requested.append($0) }
@@ -1732,7 +1740,7 @@ struct CommandDispatcherStagingTests {
     }
 
     @Test("double begin (truncation) invalidates the open frame and requests keyframe")
-    @MainActor func doubleBeginTruncates() {
+    @MainActor func doubleBeginTruncates() throws {
         let (dispatcher, gui) = makeDispatcher()
         var requested: [UInt32] = []
         dispatcher.onRequestKeyframe = { requested.append($0) }
@@ -1751,7 +1759,7 @@ struct CommandDispatcherStagingTests {
     }
 
     @Test("base mismatch invalidates without promotion")
-    @MainActor func baseMismatchInvalidates() {
+    @MainActor func baseMismatchInvalidates() throws {
         let (dispatcher, gui) = makeDispatcher()
         var requested: [UInt32] = []
         dispatcher.onRequestKeyframe = { requested.append($0) }
@@ -1773,7 +1781,7 @@ struct CommandDispatcherStagingTests {
     }
 
     @Test("commit with no open begin invalidates and requests keyframe")
-    @MainActor func commitWithoutBeginInvalidates() {
+    @MainActor func commitWithoutBeginInvalidates() throws {
         let (dispatcher, _) = makeDispatcher()
         var requested: [UInt32] = []
         dispatcher.onRequestKeyframe = { requested.append($0) }
@@ -1783,7 +1791,7 @@ struct CommandDispatcherStagingTests {
     }
 
     @Test("decodeFailed inside an open transaction invalidates and requests keyframe")
-    @MainActor func decodeFailureInsideTransactionInvalidates() {
+    @MainActor func decodeFailureInsideTransactionInvalidates() throws {
         let (dispatcher, gui) = makeDispatcher()
         var requested: [UInt32] = []
         dispatcher.onRequestKeyframe = { requested.append($0) }
@@ -1803,7 +1811,7 @@ struct CommandDispatcherStagingTests {
     }
 
     @Test("a clean commit after a resync clears the pending hint")
-    @MainActor func cleanCommitClearsResyncHint() {
+    @MainActor func cleanCommitClearsResyncHint() throws {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.onRequestKeyframe = { _ in }
 
@@ -1825,10 +1833,10 @@ struct CommandDispatcherStagingTests {
     // MARK: - Prepared transaction publication contract (#2747)
 
     @Test("prepared publication is equivalent to the direct command fixture")
-    @MainActor func preparedPublicationEquivalence() {
+    @MainActor func preparedPublicationEquivalence() throws {
         let (direct, directGUI) = makeDispatcher()
         let (prepared, preparedGUI) = makeDispatcher()
-        let content = windowContent()
+        let content = try windowContent()
         let commands: [RenderCommand] = [
             .guiTheme(slots: completeThemeSlots()),
             .guiWindowContent(data: content),
@@ -1848,14 +1856,14 @@ struct CommandDispatcherStagingTests {
     }
 
     @Test("one valid frame enters the publication boundary exactly once")
-    @MainActor func onePublicationPerFrame() {
+    @MainActor func onePublicationPerFrame() throws {
         let (dispatcher, gui) = makeDispatcher()
         var results: [FrameTransactionResult] = []
         dispatcher.onTransactionResult = { results.append($0) }
 
         dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
-        dispatcher.dispatch(.guiWindowContent(data: windowContent()))
+        dispatcher.dispatch(.guiWindowContent(data: try windowContent()))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("prepared.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
 
@@ -1867,7 +1875,7 @@ struct CommandDispatcherStagingTests {
     }
 
     @Test("applied follows semantic publication and does not wait for Metal presentation")
-    @MainActor func appliedAtSemanticBoundary() {
+    @MainActor func appliedAtSemanticBoundary() throws {
         let (dispatcher, gui) = makeDispatcher()
         var readyCount = 0
         var publicationSeenByApplied = false
@@ -1888,7 +1896,7 @@ struct CommandDispatcherStagingTests {
     }
 
     @Test("one aggregate observation callback sees all sibling domains committed")
-    @MainActor func aggregateObservationIsAtomic() {
+    @MainActor func aggregateObservationIsAtomic() throws {
         let (dispatcher, gui) = makeDispatcher()
         let notificationCount = Mutex(0)
 
@@ -1920,7 +1928,7 @@ struct CommandDispatcherStagingTests {
     }
 
     @Test("gutter and indent guide keys cannot collide across window ids")
-    @MainActor func typedWindowCoalescingKeysDoNotCollide() {
+    @MainActor func typedWindowCoalescingKeysDoNotCollide() throws {
         let (dispatcher, _) = makeDispatcher()
         let gutter = Wire.WindowGutter(
             windowId: 1001, contentRow: 0, contentCol: 4, contentHeight: 1,
@@ -1934,8 +1942,8 @@ struct CommandDispatcherStagingTests {
 
         dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
-        dispatcher.dispatch(.guiWindowContent(data: windowContent(windowId: 1001)))
-        dispatcher.dispatch(.guiWindowContent(data: windowContent(windowId: 1)))
+        dispatcher.dispatch(.guiWindowContent(data: try windowContent(windowId: 1001)))
+        dispatcher.dispatch(.guiWindowContent(data: try windowContent(windowId: 1)))
         dispatcher.dispatch(.guiGutter(data: gutter))
         dispatcher.dispatch(.guiIndentGuides(data: guides))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
@@ -1945,7 +1953,7 @@ struct CommandDispatcherStagingTests {
     }
 
     @Test("terminal resource-policy rejection preserves committed state and emits once")
-    @MainActor func terminalResourcePolicyRejectionPreservesLastGood() {
+    @MainActor func terminalResourcePolicyRejectionPreservesLastGood() throws {
         let (dispatcher, gui) = makeDispatcher()
         var results: [FrameTransactionResult] = []
         var requested: [UInt32] = []
@@ -1988,8 +1996,209 @@ struct CommandDispatcherStagingTests {
         #expect(results.last == .applied(generation: 1, frameSeq: 3))
     }
 
+    @Test("semantic staging subtracts coalesced command replacements")
+    @MainActor func stagingSubtractsCoalescedReplacements() throws {
+        let staging = FrameResourceWeight(
+            commands: 2, ownedUTF8Bytes: .max, arrayEntries: .max,
+            rows: .max, spans: .max, overlays: .max,
+            spliceEntries: .max, locatorEntries: .max
+        )
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(
+            cols: 80, rows: 24, guiState: gui,
+            resourcePolicy: policy(stagingWeight: staging)
+        )
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("first.ex")]))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("replacement.ex")]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        #expect(gui.tabBarState.tabs.first?.label == "replacement.ex")
+        #expect(results == [.applied(generation: 1, frameSeq: 1)])
+    }
+
+    @Test("semantic staging bounds append-only chrome across packets")
+    @MainActor func stagingBoundsAppendOnlyChrome() throws {
+        let staging = FrameResourceWeight(
+            commands: 2, ownedUTF8Bytes: .max, arrayEntries: .max,
+            rows: .max, spans: .max, overlays: .max,
+            spliceEntries: .max, locatorEntries: .max
+        )
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(
+            cols: 80, rows: 24, guiState: gui,
+            resourcePolicy: policy(stagingWeight: staging)
+        )
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+        let tabs = [Wire.BottomPanelTab(tabType: 0, name: "Messages")]
+        let entry = Wire.MessageEntry(
+            streamInstance: 1, id: 1, level: 1, subsystem: 0,
+            timestampSecs: 0, filePath: "", text: "entry"
+        )
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiBottomPanel(
+            visible: true, activeTabIndex: 0, heightPercent: 30,
+            filterPreset: 0, tabs: tabs, entries: [entry]
+        ))
+        dispatcher.dispatch(.guiBottomPanel(
+            visible: true, activeTabIndex: 0, heightPercent: 30,
+            filterPreset: 0, tabs: tabs, entries: [entry]
+        ))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        #expect(gui.framePublicationCount == 0)
+        #expect(results == [.rejected(
+            generation: 1, frameSeq: 1, lastAppliedFrameSeq: 0,
+            reason: .resourcePolicy
+        )])
+    }
+
+    @Test("semantic staging bounds the resulting transcript before mapping")
+    @MainActor func stagingBoundsResultingTranscript() throws {
+        let staging = FrameResourceWeight(
+            commands: .max, ownedUTF8Bytes: 5, arrayEntries: .max,
+            rows: .max, spans: .max, overlays: .max,
+            spliceEntries: .max, locatorEntries: .max
+        )
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(
+            cols: 80, rows: 24, guiState: gui,
+            resourcePolicy: policy(stagingWeight: staging)
+        )
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiAgentTranscript(
+            mode: 0, epoch: 1, truncated: false, trimFront: 0, baseCount: 0,
+            messages: [Wire.ChatMessage(beamId: 1, content: .user(text: "seed"))]
+        ))
+        dispatcher.dispatch(.guiAgentTranscript(
+            mode: 1, epoch: 1, truncated: false, trimFront: 0, baseCount: 1,
+            messages: [Wire.ChatMessage(beamId: 2, content: .assistant(text: "more"))]
+        ))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        #expect(gui.agentChatState.messages.isEmpty)
+        #expect(results == [.rejected(
+            generation: 1, frameSeq: 1, lastAppliedFrameSeq: 0,
+            reason: .resourcePolicy
+        )])
+    }
+
+    @Test("resource failure in a later packet terminally rejects the open frame")
+    @MainActor func crossPacketResourceFailureIsTerminal() throws {
+        let (dispatcher, gui) = makeDispatcher()
+        var results: [FrameTransactionResult] = []
+        var requested: [UInt32] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+        dispatcher.onRequestKeyframe = { requested.append($0) }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("last-good.ex")]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        dispatcher.decodedFrameFailed(DecodedFrameFailure(
+            error: .resource(.limitExceeded(
+                dimension: .ownedUTF8Bytes, used: 4, requested: 8, limit: 5
+            )),
+            envelope: nil
+        ))
+
+        #expect(gui.tabBarState.tabs.first?.label == "last-good.ex")
+        #expect(requested.isEmpty)
+        #expect(results.last == .rejected(
+            generation: 1, frameSeq: 2, lastAppliedFrameSeq: 1,
+            reason: .resourcePolicy
+        ))
+    }
+
+    @Test("semantic staging rejects resident result weight before publication")
+    @MainActor func residentWeightRejectsBeforePublication() throws {
+        let defaults = FrameResourcePolicy.default
+        let residentLimit = FrameResourceWeight(
+            commands: .max, ownedUTF8Bytes: .max, arrayEntries: .max,
+            rows: 1, spans: .max, overlays: .max,
+            spliceEntries: .max, locatorEntries: 1
+        )
+        let policy = FrameResourcePolicy(
+            wire: defaults.wire,
+            decode: defaults.decode,
+            staging: defaults.staging,
+            resident: .init(weightPerWindow: residentLimit)
+        )
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(
+            cols: 80, rows: 24, guiState: gui, resourcePolicy: policy
+        )
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+        let content = try GUIWindowContent(
+            windowId: 1, fullRefresh: true, cursorRow: 0, cursorCol: 0,
+            cursorShape: .block,
+            rows: [
+                GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 0,
+                             contentHash: 1, text: "one", spans: []),
+                GUIVisualRow(rowType: .normal, rowId: 2, bufLine: 1,
+                             contentHash: 2, text: "two", spans: [])
+            ],
+            selection: nil, searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: []
+        )
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: content))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        #expect(gui.windowContents.isEmpty)
+        #expect(results == [.rejected(
+            generation: 1, frameSeq: 1, lastAppliedFrameSeq: 0,
+            reason: .resourcePolicy
+        )])
+    }
+
+    @Test("correlated decode rejection is terminal, deduplicated, and preserves last-good")
+    @MainActor func correlatedDecodeResourceRejection() throws {
+        let (dispatcher, gui) = makeDispatcher()
+        var results: [FrameTransactionResult] = []
+        var requested: [UInt32] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+        dispatcher.onRequestKeyframe = { requested.append($0) }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 4))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("last-good.ex")]))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        let envelope = FrameEnvelope(generation: 4, frameSeq: 2, baseFrameSeq: 1)
+        dispatcher.resourcePolicyRejected(envelope: envelope)
+        dispatcher.resourcePolicyRejected(envelope: envelope)
+
+        #expect(dispatcher.lastCommittedFrameSeq == 1)
+        #expect(gui.tabBarState.tabs.first?.label == "last-good.ex")
+        #expect(gui.resyncState.pending == false)
+        #expect(requested.isEmpty)
+        #expect(results == [
+            .applied(generation: 4, frameSeq: 1),
+            .rejected(
+                generation: 4, frameSeq: 2, lastAppliedFrameSeq: 1,
+                reason: .resourcePolicy
+            )
+        ])
+    }
+
     @Test("a later invalid domain rejects the whole frame without publication")
-    @MainActor func partialFrameRejectionPublishesNothing() {
+    @MainActor func partialFrameRejectionPublishesNothing() throws {
         let (dispatcher, gui) = makeDispatcher()
         var results: [FrameTransactionResult] = []
         dispatcher.onTransactionResult = { results.append($0) }
@@ -2007,7 +2216,7 @@ struct CommandDispatcherStagingTests {
     }
 
     @Test("invalid transcript operations reject without publishing sibling state")
-    @MainActor func invalidTranscriptRejectsWholeTransaction() {
+    @MainActor func invalidTranscriptRejectsWholeTransaction() throws {
         let invalidCommands: [(RenderCommand, PreparedFrameRejection)] = [
             (
                 .guiAgentTranscript(mode: 1, epoch: 1, truncated: false, trimFront: 0, baseCount: 0, messages: []),
@@ -2056,7 +2265,7 @@ struct CommandDispatcherStagingTests {
     }
 
     @Test("duplicate and out-of-order frame sequences return typed rejections")
-    @MainActor func duplicateAndOutOfOrderFramesReject() {
+    @MainActor func duplicateAndOutOfOrderFramesReject() throws {
         for incoming: UInt32 in [5, 4] {
             let (dispatcher, _) = makeDispatcher()
             var results: [FrameTransactionResult] = []
@@ -2075,14 +2284,14 @@ struct CommandDispatcherStagingTests {
     }
 
     @Test("missing window references and stale epochs reject before publication")
-    @MainActor func windowReferenceAndEpochValidation() {
+    @MainActor func windowReferenceAndEpochValidation() throws {
         let (dispatcher, gui) = makeDispatcher()
         var results: [FrameTransactionResult] = []
         dispatcher.onTransactionResult = { results.append($0) }
 
         dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
-        dispatcher.dispatch(.guiWindowContent(data: windowContent()))
+        dispatcher.dispatch(.guiWindowContent(data: try windowContent()))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
 
         dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
@@ -2094,40 +2303,33 @@ struct CommandDispatcherStagingTests {
         #expect(gui.windowContents[7]?.cursorShape == .block)
     }
 
-    @Test("unsorted full content rejects without partial transaction publication")
-    @MainActor func unsortedContentIsTransactional() {
-        let (dispatcher, gui) = makeDispatcher()
-        var results: [FrameTransactionResult] = []
-        dispatcher.onTransactionResult = { results.append($0) }
+    @Test("unsorted full content fails before resident construction or publication")
+    @MainActor func unsortedContentIsTransactional() throws {
+        let (_, gui) = makeDispatcher()
         let high = GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 2,
             contentHash: 11, text: "high", spans: [])
         let low = GUIVisualRow(rowType: .normal, rowId: 2, bufLine: 1,
             contentHash: 22, text: "low", spans: [])
-        let unsorted = GUIWindowContent(windowId: 7, fullRefresh: true, contentEpoch: 42,
-            cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: [high, low], selection: nil,
-            searchMatches: [], diagnosticUnderlines: [], documentHighlights: [])
 
-        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
-        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
-        dispatcher.dispatch(.guiWindowContent(data: unsorted))
-        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
-
+        #expect(throws: ResidentRowStoreError.unsortedBufferLine(previous: 2, next: 1)) {
+            _ = try GUIWindowContent(windowId: 7, fullRefresh: true, contentEpoch: 42,
+                cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: [high, low],
+                selection: nil, searchMatches: [], diagnosticUnderlines: [],
+                documentHighlights: [])
+        }
         #expect(gui.framePublicationCount == 0)
         #expect(gui.windowContents.isEmpty)
-        #expect(results.last == .rejected(generation: 1, frameSeq: 1,
-            lastAppliedFrameSeq: 0,
-            reason: .invalidRetainedRows(windowId: 7, contentEpoch: 42)))
     }
 
     @Test("missing retained row reports targeted miss without partial publication")
-    @MainActor func missingRetainedRowIsTransactional() {
+    @MainActor func missingRetainedRowIsTransactional() throws {
         let (dispatcher, gui) = makeDispatcher()
         var results: [FrameTransactionResult] = []
         dispatcher.onTransactionResult = { results.append($0) }
 
         dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
-        dispatcher.dispatch(.guiWindowContent(data: windowContent()))
+        dispatcher.dispatch(.guiWindowContent(data: try windowContent()))
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("baseline.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
 
@@ -2154,14 +2356,14 @@ struct CommandDispatcherStagingTests {
     }
 
     @Test("unregistered font resources reject a prepared frame")
-    @MainActor func missingFontResourceRejects() {
+    @MainActor func missingFontResourceRejects() throws {
         let (dispatcher, gui) = makeDispatcher()
         var results: [FrameTransactionResult] = []
         dispatcher.onTransactionResult = { results.append($0) }
 
         dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
-        dispatcher.dispatch(.guiWindowContent(data: windowContent(fontId: 3)))
+        dispatcher.dispatch(.guiWindowContent(data: try windowContent(fontId: 3)))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
 
         #expect(gui.framePublicationCount == 0)
@@ -2169,14 +2371,14 @@ struct CommandDispatcherStagingTests {
     }
 
     @Test("unregistered font resources in row splices reject a prepared frame")
-    @MainActor func missingSpliceFontResourceRejects() {
+    @MainActor func missingSpliceFontResourceRejects() throws {
         let (dispatcher, gui) = makeDispatcher()
         var results: [FrameTransactionResult] = []
         dispatcher.onTransactionResult = { results.append($0) }
 
         dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
-        dispatcher.dispatch(.guiWindowContent(data: windowContent()))
+        dispatcher.dispatch(.guiWindowContent(data: try windowContent()))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
 
         let replacement = GUIVisualRow(
@@ -2210,7 +2412,7 @@ struct CommandDispatcherStagingTests {
     }
 
     @Test("publication operation count depends on changed domains, not command count")
-    @MainActor func changedDomainOperationCount() {
+    @MainActor func changedDomainOperationCount() throws {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
@@ -2238,7 +2440,7 @@ struct CommandDispatcherStagingTests {
     // This is the negative-guard pattern from Go's model.go applyCommands.
 
     @Test("set_title applies immediately with no open transaction")
-    @MainActor func titleAppliesOutOfBand() {
+    @MainActor func titleAppliesOutOfBand() throws {
         let (dispatcher, _) = makeDispatcher()
         var requested: [UInt32] = []
         var title: String?
@@ -2252,7 +2454,7 @@ struct CommandDispatcherStagingTests {
     }
 
     @Test("set_window_bg applies immediately with no open transaction")
-    @MainActor func windowBgAppliesOutOfBand() {
+    @MainActor func windowBgAppliesOutOfBand() throws {
         let (dispatcher, _) = makeDispatcher()
         var requested: [UInt32] = []
         dispatcher.onRequestKeyframe = { requested.append($0) }
@@ -2265,7 +2467,7 @@ struct CommandDispatcherStagingTests {
     }
 
     @Test("protocol_error applies immediately with no open transaction")
-    @MainActor func protocolErrorAppliesOutOfBand() {
+    @MainActor func protocolErrorAppliesOutOfBand() throws {
         let (dispatcher, gui) = makeDispatcher()
         var requested: [UInt32] = []
         dispatcher.onRequestKeyframe = { requested.append($0) }
@@ -2277,7 +2479,7 @@ struct CommandDispatcherStagingTests {
     }
 
     @Test("set_font applies immediately with no open transaction")
-    @MainActor func setFontAppliesOutOfBand() {
+    @MainActor func setFontAppliesOutOfBand() throws {
         let (dispatcher, _) = makeDispatcher()
         var requested: [UInt32] = []
         var fontArgs: (family: String, size: UInt16, ligatures: Bool, weight: UInt8)?
@@ -2296,7 +2498,7 @@ struct CommandDispatcherStagingTests {
     }
 
     @Test("set_font_fallback applies immediately with no open transaction")
-    @MainActor func setFontFallbackAppliesOutOfBand() {
+    @MainActor func setFontFallbackAppliesOutOfBand() throws {
         let (dispatcher, _) = makeDispatcher()
         var requested: [UInt32] = []
         dispatcher.onRequestKeyframe = { requested.append($0) }
@@ -2309,7 +2511,7 @@ struct CommandDispatcherStagingTests {
     }
 
     @Test("register_font applies immediately with no open transaction")
-    @MainActor func registerFontAppliesOutOfBand() {
+    @MainActor func registerFontAppliesOutOfBand() throws {
         let (dispatcher, _) = makeDispatcher()
         var requested: [UInt32] = []
         dispatcher.onRequestKeyframe = { requested.append($0) }
@@ -2322,7 +2524,7 @@ struct CommandDispatcherStagingTests {
     }
 
     @Test("gui_config_state applies immediately with no open transaction")
-    @MainActor func guiConfigStateAppliesOutOfBand() {
+    @MainActor func guiConfigStateAppliesOutOfBand() throws {
         let (dispatcher, _) = makeDispatcher()
         var requested: [UInt32] = []
         dispatcher.onRequestKeyframe = { requested.append($0) }
@@ -2334,7 +2536,7 @@ struct CommandDispatcherStagingTests {
     }
 
     @Test("clipboard_write applies immediately with no open transaction")
-    @MainActor func clipboardWriteAppliesOutOfBand() {
+    @MainActor func clipboardWriteAppliesOutOfBand() throws {
         let (dispatcher, _) = makeDispatcher()
         var requested: [UInt32] = []
         dispatcher.onRequestKeyframe = { requested.append($0) }
@@ -2347,7 +2549,7 @@ struct CommandDispatcherStagingTests {
     }
 
     @Test("non-sanctioned command outside a transaction triggers keyframe request, not silent drop")
-    @MainActor func chromeOutOfBandInvalidates() {
+    @MainActor func chromeOutOfBandInvalidates() throws {
         let (dispatcher, gui) = makeDispatcher()
         var requested: [UInt32] = []
         dispatcher.onRequestKeyframe = { requested.append($0) }
@@ -2429,7 +2631,7 @@ struct CommandDispatcherPresentationSampleTests {
     }
 
     @Test("a newer semantic frame discards the unsubmitted sample as superseded")
-    @MainActor func supersededSampleIsDiscarded() {
+    @MainActor func supersededSampleIsDiscarded() throws {
         let dispatcher = makeDispatcher()
         let first = dispatcher.latency.stamp()
         commit(dispatcher, frameSeq: 1, baseFrameSeq: 0, inputSeq: first)
@@ -2441,7 +2643,7 @@ struct CommandDispatcherPresentationSampleTests {
     }
 
     @Test("an unavailable surface discards rather than selects the pending sample")
-    @MainActor func unavailableSurfaceDiscardsPendingSample() {
+    @MainActor func unavailableSurfaceDiscardsPendingSample() throws {
         let dispatcher = makeDispatcher()
         let seq = dispatcher.latency.stamp()
         commit(dispatcher, frameSeq: 1, baseFrameSeq: 0, inputSeq: seq)

@@ -277,7 +277,7 @@ struct ConformanceTranscriptTests {
         var results: [FrameTransactionResult] = []
         dispatcher.onTransactionResult = { results.append($0) }
         let theme = CommandDispatcher.requiredThemeSlots.map { ($0, $0, $0, $0) }
-        let epochContent = GUIWindowContent(
+        let epochContent = try GUIWindowContent(
             windowId: 1, fullRefresh: true, contentEpoch: epoch,
             cursorRow: 0, cursorCol: 0, cursorShape: .block, rows: originalRows,
             selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: []
@@ -355,7 +355,7 @@ struct ConformanceTranscriptTests {
             gui.framePublicationCount == committedPublication ? .staleDiscarded : .accepted
 
         dispatcher.dispatch(.beginFrame(frameSeq: 7, baseFrameSeq: 4, generation: staleGeneration))
-        dispatcher.dispatch(.guiWindowContent(data: GUIWindowContent(
+        dispatcher.dispatch(.guiWindowContent(data: try GUIWindowContent(
             windowId: 1, fullRefresh: true, contentEpoch: epoch,
             cursorRow: 0, cursorCol: 0, cursorShape: .block,
             rows: [GUIVisualRow(rowType: .normal, rowId: 999, bufLine: 0,

@@ -108,11 +108,13 @@ enum RenderCommand: Sendable {
 
 // MARK: - Decoder
 
-indirect enum ProtocolDecodeError: Error, CustomStringConvertible {
+indirect enum ProtocolDecodeError: Error, CustomStringConvertible, Sendable {
     case malformed
     case unknownOpcode(UInt8)
     case insufficientData
     case outOfBounds(offset: Int, required: Int, remaining: Int)
+    case resource(FrameResourceError)
+    case frameFailure(cause: ProtocolDecodeError, envelope: FrameEnvelope?)
     case commandFailed(opcode: UInt8, offset: Int, remaining: Int, cause: ProtocolDecodeError)
 
     var description: String {
@@ -125,16 +127,38 @@ indirect enum ProtocolDecodeError: Error, CustomStringConvertible {
             return "insufficient data"
         case .outOfBounds(let offset, let required, let remaining):
             return "out of bounds at offset \(offset) (required=\(required), remaining=\(remaining))"
+        case .resource(let error):
+            return "frame resource policy: \(error)"
+        case .frameFailure(let cause, _):
+            return cause.description
         case .commandFailed(let opcode, let offset, let remaining, let cause):
             return String(format: "opcode 0x%02X at offset %d failed with %@ (remaining=%d)", opcode, offset, String(describing: cause), remaining)
         }
     }
 
+    var isResourceFailure: Bool {
+        switch self {
+        case .resource: true
+        case .frameFailure(let cause, _), .commandFailed(_, _, _, let cause): cause.isResourceFailure
+        default: false
+        }
+    }
+
+    var frameEnvelope: FrameEnvelope? {
+        if case .frameFailure(_, let envelope) = self { return envelope }
+        return nil
+    }
+
+    var unwrappedFrameFailure: ProtocolDecodeError {
+        if case .frameFailure(let cause, _) = self { return cause }
+        return self
+    }
+
     func contextualized(opcode: UInt8, offset: Int, remaining: Int) -> ProtocolDecodeError {
         switch self {
-        case .commandFailed:
+        case .commandFailed, .frameFailure:
             return self
-        case .malformed, .unknownOpcode, .insufficientData, .outOfBounds:
+        case .malformed, .unknownOpcode, .insufficientData, .outOfBounds, .resource:
             return .commandFailed(opcode: opcode, offset: offset, remaining: remaining, cause: self)
         }
     }
@@ -145,75 +169,121 @@ indirect enum ProtocolDecodeError: Error, CustomStringConvertible {
 /// Command values are accumulated locally and become observable only after the
 /// final byte succeeds. This prevents partial frame application when a later
 /// command is malformed or unknown.
-func decodeFrame(from data: Data, collectOwnedMetrics: Bool = false) throws -> DecodedFrame {
-    let clock = ContinuousClock()
-    let started = clock.now
-    var cursor = ByteCursor(data)
-    var commands: [DecodedCommand] = []
-    var ownedMetrics = DecoderOwnedMetrics()
-
-    while !cursor.isAtEnd {
-        let commandOffset = cursor.offset
-        let opcode: UInt8
-        do {
-            opcode = try cursor.readUInt8()
-        } catch let error as ByteCursor.BoundsError {
-            throw ProtocolDecodeError.outOfBounds(
-                offset: error.offset,
-                required: error.required,
-                remaining: error.remaining
-            )
-        }
-
-        let commandAndSize: (RenderCommand?, Int)
-        do {
-            commandAndSize = try decodeCommand(data: data, offset: commandOffset)
-        } catch let error as ProtocolDecodeError {
-            throw error.contextualized(
-                opcode: opcode,
-                offset: commandOffset,
-                remaining: data.count - commandOffset
-            )
-        }
-
-        let (command, size) = commandAndSize
-        guard size > 0 else { throw ProtocolDecodeError.malformed }
-        do {
-            try cursor.advance(by: size - 1)
-        } catch let error as ByteCursor.BoundsError {
-            throw ProtocolDecodeError.outOfBounds(
-                offset: error.offset,
-                required: error.required,
-                remaining: error.remaining
-            ).contextualized(
-                opcode: opcode,
-                offset: commandOffset,
-                remaining: data.count - commandOffset
-            )
-        }
-        if let command {
-            if collectOwnedMetrics { ownedMetrics.record(command) }
-            commands.append(DecodedCommand(command: command, opcode: opcode))
-        }
+func decodeFrame(
+    from data: Data,
+    collectOwnedMetrics: Bool = false,
+    policy: FrameResourcePolicy = .default,
+    reservationProbe: FrameResourceUsageBuilder.ReservationProbe? = nil
+) throws -> DecodedFrame {
+    guard data.count <= policy.wire.payloadBytes else {
+        throw ProtocolDecodeError.frameFailure(
+            cause: .resource(.wirePayloadLimitExceeded(
+                requested: data.count, limit: policy.wire.payloadBytes
+            )),
+            envelope: nil
+        )
     }
 
-    if collectOwnedMetrics { ownedMetrics.recordFrameCommandStorage(count: commands.count) }
-    return DecodedFrame(
-        commands: commands,
-        metrics: FrameDecodeMetrics(
-            packetBytes: data.count,
-            bytesCopied: collectOwnedMetrics ? ownedMetrics.bytesCopied : -1,
-            allocations: collectOwnedMetrics ? ownedMetrics.allocations : -1,
-            decodeDuration: started.duration(to: clock.now),
-            actorHopCount: 0
-        )
+    let usage = FrameResourceUsageBuilder(
+        limit: policy.decode.weight, reservationProbe: reservationProbe
     )
+    var envelope: FrameEnvelope?
+    do {
+        return try FrameDecodeAccounting.withUsage(
+            usage, residentLimit: policy.resident.weightPerWindow
+        ) {
+            let clock = ContinuousClock()
+            let started = clock.now
+            var cursor = ByteCursor(data)
+            var commands: [DecodedCommand] = []
+            var ownedMetrics = DecoderOwnedMetrics()
+
+            while !cursor.isAtEnd {
+                let commandOffset = cursor.offset
+                let commandStartWeight = usage.checkpoint()
+                let opcode: UInt8
+                do {
+                    opcode = try cursor.readUInt8()
+                    // Admission precedes command decoding and all command-owned materialization.
+                    try usage.reserve(.commands, 1)
+                } catch let error as FrameResourceError {
+                    throw ProtocolDecodeError.resource(error)
+                } catch let error as ByteCursor.BoundsError {
+                    throw ProtocolDecodeError.outOfBounds(
+                        offset: error.offset, required: error.required, remaining: error.remaining
+                    )
+                }
+
+                let commandAndSize: (RenderCommand?, Int)
+                do {
+                    commandAndSize = try decodeCommand(data: data, offset: commandOffset)
+                } catch let error as ProtocolDecodeError {
+                    throw error.contextualized(
+                        opcode: opcode, offset: commandOffset,
+                        remaining: data.count - commandOffset
+                    )
+                } catch let error as FrameResourceError {
+                    throw ProtocolDecodeError.resource(error).contextualized(
+                        opcode: opcode, offset: commandOffset,
+                        remaining: data.count - commandOffset
+                    )
+                }
+
+                let (command, size) = commandAndSize
+                guard size > 0 else { throw ProtocolDecodeError.malformed }
+                do {
+                    try cursor.advance(by: size - 1)
+                } catch let error as ByteCursor.BoundsError {
+                    throw ProtocolDecodeError.outOfBounds(
+                        offset: error.offset, required: error.required, remaining: error.remaining
+                    ).contextualized(
+                        opcode: opcode, offset: commandOffset,
+                        remaining: data.count - commandOffset
+                    )
+                }
+                if let command {
+                    if commandOffset == 0,
+                       case .beginFrame(let frameSeq, let baseFrameSeq, let generation) = command {
+                        envelope = FrameEnvelope(
+                            generation: generation, frameSeq: frameSeq,
+                            baseFrameSeq: baseFrameSeq
+                        )
+                    }
+                    if collectOwnedMetrics { ownedMetrics.record(command) }
+                    // Child-local scratch is published only after the complete command validated.
+                    try FrameDecodeAccounting.reserve(.arrayEntries, 1)
+                    let commandWeight = try usage.weight.subtracting(commandStartWeight)
+                    commands.append(DecodedCommand(
+                        command: command, opcode: opcode, resourceWeight: commandWeight
+                    ))
+                }
+            }
+
+            if collectOwnedMetrics { ownedMetrics.recordFrameCommandStorage(count: commands.count) }
+            return DecodedFrame(
+                commands: commands,
+                envelope: envelope,
+                resourceWeight: usage.weight,
+                metrics: FrameDecodeMetrics(
+                    packetBytes: data.count,
+                    bytesCopied: collectOwnedMetrics ? ownedMetrics.bytesCopied : -1,
+                    allocations: collectOwnedMetrics ? ownedMetrics.allocations : -1,
+                    decodeDuration: started.duration(to: clock.now),
+                    actorHopCount: 0
+                )
+            )
+        }
+    } catch let error as ProtocolDecodeError {
+        throw ProtocolDecodeError.frameFailure(cause: error, envelope: envelope)
+    } catch let error as FrameResourceError {
+        throw ProtocolDecodeError.frameFailure(cause: .resource(error), envelope: envelope)
+    }
 }
 
 /// Compatibility adapter for tests and harness clients. Delivery is atomic:
 /// handlers run only after the entire packet has decoded successfully.
 func decodeCommands(from data: Data, handler: (RenderCommand) -> Void) throws {
-    let frame = try decodeFrame(from: data)
+    let frame = try decodeCompatibilityFrame(from: data)
     for decoded in frame.commands {
         handler(decoded.command)
     }
@@ -221,9 +291,17 @@ func decodeCommands(from data: Data, handler: (RenderCommand) -> Void) throws {
 
 /// Compatibility adapter that also reports command wire opcodes.
 func decodeCommands(from data: Data, handler: (RenderCommand, UInt8) -> Void) throws {
-    let frame = try decodeFrame(from: data)
+    let frame = try decodeCompatibilityFrame(from: data)
     for decoded in frame.commands {
         handler(decoded.command, decoded.opcode)
+    }
+}
+
+private func decodeCompatibilityFrame(from data: Data) throws -> DecodedFrame {
+    do {
+        return try decodeFrame(from: data)
+    } catch let error as ProtocolDecodeError {
+        throw error.unwrappedFrameFailure
     }
 }
 
@@ -414,6 +492,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             guard data.count >= offset + nameLen else { throw ProtocolDecodeError.malformed }
             let nameData = data[offset..<(offset + nameLen)]
             let name = try decodeUTF8(nameData) ?? ""
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             families.append(name)
             offset += nameLen
         }
@@ -472,6 +551,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let esSectionCount = Int(data[pos])
         pos += 1
         var esSections: [Wire.EmptyStateSection] = []
+        try FrameDecodeAccounting.reserve(.arrayEntries, esSectionCount)
         esSections.reserveCapacity(esSectionCount)
         for _ in 0..<esSectionCount {
             guard pos + 1 <= payloadEnd else { throw ProtocolDecodeError.malformed }
@@ -482,6 +562,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             let itemCount = Int(data[pos])
             pos += 1
             var items: [Wire.EmptyStateItem] = []
+            try FrameDecodeAccounting.reserve(.arrayEntries, itemCount)
             items.reserveCapacity(itemCount)
             for _ in 0..<itemCount {
                 guard pos + 1 <= payloadEnd else { throw ProtocolDecodeError.malformed }
@@ -496,8 +577,10 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                 guard pos + 4 <= payloadEnd else { throw ProtocolDecodeError.malformed }
                 let iconColor = try readU32(data, pos)
                 pos += 4
+                try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                 items.append(Wire.EmptyStateItem(kind: kind, id: itemId, label: label, detail: detail, jumpKey: jumpKey, chord: chord, icon: icon, iconColorRGB: iconColor))
             }
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             esSections.append(Wire.EmptyStateSection(sectionId: sectionId, title: title, items: items))
         }
         return (.guiEmptyState(visible: true, crashed: esCrashed, version: esVersion, focusedId: esFocusedId, sections: esSections), 1 + 2 + payloadLen)
@@ -553,6 +636,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         }
 
         var entries: [Wire.FileTreeEntry] = []
+        try FrameDecodeAccounting.reserve(.arrayEntries, rowCount)
         entries.reserveCapacity(rowCount)
 
         for _ in 0..<rowCount {
@@ -567,6 +651,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             let diagnosticHintCount = try readU16(data, pos); pos += 2
             let guideCount = Int(data[pos]); pos += 1
             guard pos + guideCount <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+            try FrameDecodeAccounting.reserve(.arrayEntries, guideCount)
             let guides = (0..<guideCount).map { index in data[pos + index] != 0 }
             pos += guideCount
 
@@ -615,6 +700,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             guard pos + 1 <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
             let heatLevel = data[pos]; pos += 1
 
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             entries.append(Wire.FileTreeEntry(
                 pathHash: pathHash,
                 id: id,
@@ -695,6 +781,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                     let memory = try readU32(data, nodePos); nodePos += 4
                     let messageQueueLen = try readU16(data, nodePos); nodePos += 2
                     let reductions = try readU32(data, nodePos); nodePos += 4
+                    try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                     nodeEntries.append(Wire.ObservatoryNode(pid: pid, parentPid: parentPid, name: name, processClass: processClass, depth: depth, memory: memory, messageQueueLen: messageQueueLen, reductions: reductions, sparkline: []))
                 }
 
@@ -709,9 +796,11 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                     let sampleCount = Int(data[sparkPos]); sparkPos += 1
                     guard sparkPos + sampleCount * 2 <= sectionEnd else { throw ProtocolDecodeError.malformed }
                     var samples: [Float] = []
+                    try FrameDecodeAccounting.reserve(.arrayEntries, sampleCount)
                     samples.reserveCapacity(sampleCount)
                     for _ in 0..<sampleCount {
                         let raw = try readU16(data, sparkPos)
+                        try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                         samples.append(Float(raw) / 65535.0)
                         sparkPos += 2
                     }
@@ -725,6 +814,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             pos = sectionEnd
         }
 
+        try FrameDecodeAccounting.reserve(.arrayEntries, nodeEntries.count)
         let nodes = nodeEntries.map { node in
             Wire.ObservatoryNode(pid: node.pid, parentPid: node.parentPid, name: node.name, processClass: node.processClass, depth: node.depth, memory: node.memory, messageQueueLen: node.messageQueueLen, reductions: node.reductions, sparkline: sparklinesByPid[node.pid] ?? [])
         }
@@ -751,6 +841,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let activeIndex = data[rest]
         let tabCount = Int(data[rest + 1])
         var tabs: [Wire.TabEntry] = []
+        try FrameDecodeAccounting.reserve(.arrayEntries, tabCount)
         tabs.reserveCapacity(tabCount)
         var pos = rest + 2
         for _ in 0..<tabCount {
@@ -770,6 +861,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             // Bits 4-6 are kind-scoped: agent status for agent tabs,
             // ephemeral (not-on-disk) marker in bit 4 for file tabs.
             let isAgent = flags & 0x04 != 0
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             tabs.append(Wire.TabEntry(
                 id: tabId,
                 groupId: groupId,
@@ -794,9 +886,11 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let count = Int(data[rest])
         guard data.count >= rest + 1 + count * 4 else { throw ProtocolDecodeError.malformed }
         var slots: [(slotId: UInt8, r: UInt8, g: UInt8, b: UInt8)] = []
+        try FrameDecodeAccounting.reserve(.arrayEntries, count)
         slots.reserveCapacity(count)
         for i in 0..<count {
             let base = rest + 1 + i * 4
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             slots.append((data[base], data[base + 1], data[base + 2], data[base + 3]))
         }
         return (.guiTheme(slots: slots), 1 + 1 + count * 4)
@@ -808,6 +902,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         // raw value matches the UInt8 kind the hand-written decoder produced.
         do {
             let (fields, nextPos) = try GeneratedProtocol.decodeGuiCompletionFields(data, rest, data.count)
+            try FrameDecodeAccounting.reserve(.arrayEntries, fields.items.count)
             let items = fields.items.map {
                 Wire.CompletionItem(kind: $0.kind.rawValue, label: $0.label, detail: $0.detail)
             }
@@ -819,6 +914,8 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                 items: items,
                 documentation: fields.documentation
             ), nextPos - offset)
+        } catch let error as FrameResourceError {
+            throw error
         } catch {
             throw ProtocolDecodeError.malformed
         }
@@ -837,6 +934,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let pageCount = data[rest + 4 + prefixLen]
         let bindingCount = Int(try readU16(data, rest + 5 + prefixLen))
         var bindings: [Wire.WhichKeyBinding] = []
+        try FrameDecodeAccounting.reserve(.arrayEntries, bindingCount)
         bindings.reserveCapacity(bindingCount)
         var pos = rest + 7 + prefixLen
         for _ in 0..<bindingCount {
@@ -851,6 +949,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             let iconLen = Int(data[pos + 4 + keyLen + descLen])
             guard data.count >= pos + 5 + keyLen + descLen + iconLen else { throw ProtocolDecodeError.malformed }
             let icon = try decodeUTF8(data[(pos + 5 + keyLen + descLen)..<(pos + 5 + keyLen + descLen + iconLen)]) ?? ""
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             bindings.append(Wire.WhichKeyBinding(kind: bKind, key: key, description: desc, icon: icon))
             pos += 5 + keyLen + descLen + iconLen
         }
@@ -862,6 +961,8 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         do {
             let (fields, nextPos) = try GeneratedProtocol.decodeGuiBreadcrumbFields(data, rest, data.count)
             return (.guiBreadcrumb(segments: fields.segments), nextPos - offset)
+        } catch let error as FrameResourceError {
+            throw error
         } catch {
             throw ProtocolDecodeError.malformed
         }
@@ -1196,6 +1297,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
 
                 case 0x03: // Items
                     let (items, _) = try GeneratedProtocol.decodeGuiPickerItems(data, psStart, psEnd)
+                    try FrameDecodeAccounting.reserve(.arrayEntries, items.count)
                     pkItems = items.map {
                         Wire.PickerItem(
                             iconColor: $0.iconColor, flags: $0.flags, label: $0.label,
@@ -1224,6 +1326,8 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
 
                 default: break
                 }
+            } catch let error as FrameResourceError {
+                throw error
             } catch {
                 throw ProtocolDecodeError.malformed
             }
@@ -1242,6 +1346,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         guard data.count >= rest + 3 else { throw ProtocolDecodeError.malformed }
         let lineCount = Int(try readU16(data, rest + 1))
         var lines: [Wire.PickerPreviewLine] = []
+        try FrameDecodeAccounting.reserve(.arrayEntries, lineCount)
         lines.reserveCapacity(lineCount)
         var pos2 = rest + 3
         for _ in 0..<lineCount {
@@ -1249,6 +1354,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             let segCount = Int(data[pos2])
             pos2 += 1
             var segments: Wire.PickerPreviewLine = []
+            try FrameDecodeAccounting.reserve(.arrayEntries, segCount)
             segments.reserveCapacity(segCount)
             for _ in 0..<segCount {
                 guard data.count >= pos2 + 6 else { throw ProtocolDecodeError.malformed }
@@ -1257,9 +1363,11 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                 let textLen = Int(try readU16(data, pos2 + 4))
                 guard data.count >= pos2 + 6 + textLen else { throw ProtocolDecodeError.malformed }
                 let text = try decodeUTF8(data[(pos2 + 6)..<(pos2 + 6 + textLen)]) ?? ""
+                try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                 segments.append(Wire.PickerPreviewSegment(fgColor: UInt32(fgColor), bold: segFlags & 0x01 != 0, text: text))
                 pos2 += 6 + textLen
             }
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             lines.append(segments)
         }
         return (.guiPickerPreview(visible: true, lines: lines), pos2 - offset)
@@ -1345,6 +1453,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                         let dLen = Int(try readU16(data, cp)); cp += 2
                         guard cp + dLen <= csStart + csLen else { break }
                         let desc = try decodeUTF8(data[cp..<(cp + dLen)]) ?? ""; cp += dLen
+                        try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                         candidates.append((name: name, description: desc))
                     }
                     promptCompletion = Wire.PromptCompletion(type: compType, selected: compSelected, anchorLine: compAnchorLine, anchorCol: compAnchorCol, candidates: candidates)
@@ -1388,8 +1497,10 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                             guard hp + dLen <= csStart + csLen else { break }
                             let desc = try decodeUTF8(data[hp..<(hp + dLen)]) ?? ""
                             hp += dLen
+                            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                             bindings.append((key: key, description: desc))
                         }
+                        try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                         helpGroups.append(Wire.HelpGroup(title: title, bindings: bindings))
                     }
                 }
@@ -1408,6 +1519,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                         end: messagesEnd,
                         count: msgCount
                     )
+                    try FrameDecodeAccounting.reserve(.arrayEntries, decodedMessages.count)
                     messages.append(contentsOf: decodedMessages)
                 } else {
                     let msgCount = Int(try readU16(data, csStart))
@@ -1418,6 +1530,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                         end: messagesEnd,
                         remaining: msgCount
                     )
+                    try FrameDecodeAccounting.reserve(.arrayEntries, decodedMessages.count)
                     messages.append(contentsOf: decodedMessages)
                     guard decodedEnd == messagesEnd else { throw ProtocolDecodeError.malformed }
                 }
@@ -1480,6 +1593,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             throw ProtocolDecodeError.malformed
         }
         var transcriptMessages: [Wire.ChatMessage] = []
+        try FrameDecodeAccounting.reserve(.arrayEntries, transcriptCount)
         transcriptMessages.reserveCapacity(transcriptCount)
         for _ in 0..<transcriptCount {
             guard transcriptPos + 8 <= transcriptEnd else { throw ProtocolDecodeError.malformed }
@@ -1493,6 +1607,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             guard let candidate = candidates.first(where: { $0.nextOffset == bodyEnd }) else {
                 throw ProtocolDecodeError.malformed
             }
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             transcriptMessages.append(candidate.message)
             transcriptPos = bodyEnd
         }
@@ -1558,6 +1673,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             case 0x03: // Entries: count(2) + entries...
                 guard gsLen >= 2 else { throw ProtocolDecodeError.malformed }
                 let lineCount = Int(try readU16(data, gsStart))
+                try FrameDecodeAccounting.reserve(.arrayEntries, lineCount)
                 entries.reserveCapacity(lineCount)
                 var ePos = gsStart + 2
                 for _ in 0..<lineCount {
@@ -1576,8 +1692,10 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                         guard gsEnd >= ePos + textLen else { throw ProtocolDecodeError.malformed }
                         let text = try decodeUTF8(data[ePos..<(ePos + textLen)]) ?? ""
                         ePos += textLen
+                        try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                         entries.append(Wire.GutterEntry(bufLine: bufLine, displayType: dt, signType: st, foldEndLine: foldEndLine, signFg: fg, signText: text))
                     } else {
+                        try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                         entries.append(Wire.GutterEntry(bufLine: bufLine, displayType: dt, signType: st, foldEndLine: foldEndLine))
                     }
                 }
@@ -1620,6 +1738,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             guard data.count >= pos + nameLen else { throw ProtocolDecodeError.malformed }
             let name = try decodeUTF8(data[pos..<(pos + nameLen)]) ?? ""
             pos += nameLen
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             tabs.append(Wire.BottomPanelTab(tabType: tabType, name: name))
         }
         // Messages content payload: stream_instance(4) + entry_count(2) + entries...
@@ -1651,6 +1770,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             guard data.count >= pos + textLen else { break }
             let text = try decodeUTF8(data[pos..<(pos + textLen)]) ?? ""
             pos += textLen
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             entries.append(Wire.MessageEntry(streamInstance: streamInstance, id: entryId, level: level, subsystem: subsystem,
                                             timestampSecs: tsSecs, filePath: filePath, text: text))
         }
@@ -1719,7 +1839,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
 
         let scrollPresentation = try validatedScrollPresentation(wcOverlays.scrollPresentation, windowId: wcWindowId, contentEpoch: wcContentEpoch)
 
-        let content = GUIWindowContent(
+        let content = try GUIWindowContent(
             windowId: wcWindowId,
             fullRefresh: (wcFlags & 0x01) != 0,
             contentEpoch: wcContentEpoch,
@@ -1736,7 +1856,8 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             lineAnnotations: wcOverlays.lineAnnotations,
             paneGeometry: wcOverlays.paneGeometry,
             cursorline: wcOverlays.cursorline,
-            scrollPresentation: scrollPresentation
+            scrollPresentation: scrollPresentation,
+            residentLimit: FrameDecodeAccounting.residentLimit
         )
         return (.guiWindowContent(data: content), 1 + 4 + wcPayloadLen)
 
@@ -1789,6 +1910,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let toolCount = Int(try readU16(data, rest + 4))
         var pos = rest + 6
         var tools: [Wire.ToolEntry] = []
+        try FrameDecodeAccounting.reserve(.arrayEntries, toolCount)
         tools.reserveCapacity(toolCount)
         for _ in 0..<toolCount {
             // name_len(1) + name
@@ -1823,6 +1945,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                 guard data.count >= pos + lLen else { break }
                 let lang = try decodeUTF8(data[pos..<(pos + lLen)]) ?? ""
                 pos += lLen
+                try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                 langs.append(lang)
             }
             // version_len(1) + version
@@ -1847,6 +1970,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                 guard data.count >= pos + cLen else { break }
                 let cmd = try decodeUTF8(data[pos..<(pos + cLen)]) ?? ""
                 pos += cLen
+                try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                 provides.append(cmd)
             }
             // error_reason_len(2) + error_reason
@@ -1857,6 +1981,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                 ? (try decodeUTF8(data[pos..<(pos + errLen)]) ?? "")
                 : ""
             pos += errLen
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             tools.append(Wire.ToolEntry(
                 name: name, label: toolLabel, description: desc,
                 category: cat, status: stat, method: meth,
@@ -1905,6 +2030,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let mbTotalCandidates = try readU16(data, mbPos); mbPos += 2
         // candidates
         var mbCandidates: [Wire.MinibufferCandidate] = []
+        try FrameDecodeAccounting.reserve(.arrayEntries, mbCandCount)
         mbCandidates.reserveCapacity(mbCandCount)
         for _ in 0..<mbCandCount {
             // match_score(1) + label_len(2)
@@ -1930,11 +2056,14 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             guard data.count >= mbPos + 1 else { break }
             let matchPosCount = Int(data[mbPos]); mbPos += 1
             var matchPositions: [UInt16] = []
+            try FrameDecodeAccounting.reserve(.arrayEntries, matchPosCount)
             matchPositions.reserveCapacity(matchPosCount)
             for _ in 0..<matchPosCount {
                 guard data.count >= mbPos + 2 else { break }
+                try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                 matchPositions.append(try readU16(data, mbPos)); mbPos += 2
             }
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             mbCandidates.append(Wire.MinibufferCandidate(matchScore: score, label: candLabel, description: candDesc, annotation: candAnnot, matchPositions: matchPositions))
         }
         return (.guiMinibuffer(visible: true, mode: mbMode, cursorPos: mbCursorPos,
@@ -1959,6 +2088,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let hLineCount = Int(try readU16(data, rest + 8))
         var hPos = rest + 10
         var hLines: [Wire.HoverLine] = []
+        try FrameDecodeAccounting.reserve(.arrayEntries, hLineCount)
         hLines.reserveCapacity(hLineCount)
         for _ in 0..<hLineCount {
             // line_type(1) + segment_count(2)
@@ -1967,6 +2097,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             let segCount = Int(try readU16(data, hPos + 1))
             hPos += 3
             var segments: [Wire.HoverSegment] = []
+            try FrameDecodeAccounting.reserve(.arrayEntries, segCount)
             segments.reserveCapacity(segCount)
             for _ in 0..<segCount {
                 // standard: style(1) + text_len(2) + text
@@ -1993,8 +2124,10 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                 guard data.count >= hPos + textLen else { throw ProtocolDecodeError.malformed }
                 let text = try decodeUTF8(data[hPos..<(hPos + textLen)]) ?? ""
                 hPos += textLen
+                try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                 segments.append(Wire.HoverSegment(style: style, fgColor: fgColor, flags: flags, text: text))
             }
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             hLines.append(Wire.HoverLine(lineType: lineType, segments: segments))
         }
         return (.guiHoverPopup(visible: true, anchorRow: hAnchorRow, anchorCol: hAnchorCol,
@@ -2033,6 +2166,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let shSigCount = Int(data[rest + 7])
         var shPos = rest + 8
         var signatures: [Wire.Signature] = []
+        try FrameDecodeAccounting.reserve(.arrayEntries, shSigCount)
         signatures.reserveCapacity(shSigCount)
         for _ in 0..<shSigCount {
             // label_len(2) + label
@@ -2051,6 +2185,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             guard data.count >= shPos + 1 else { break }
             let paramCount = Int(data[shPos]); shPos += 1
             var params: [Wire.SignatureParameter] = []
+            try FrameDecodeAccounting.reserve(.arrayEntries, paramCount)
             params.reserveCapacity(paramCount)
             for _ in 0..<paramCount {
                 // label_len(2) + label + doc_len(2) + doc
@@ -2064,8 +2199,10 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                 guard data.count >= shPos + pDocLen else { break }
                 let pDoc = try decodeUTF8(data[shPos..<(shPos + pDocLen)]) ?? ""
                 shPos += pDocLen
+                try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                 params.append(Wire.SignatureParameter(label: pLabel, documentation: pDoc))
             }
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             signatures.append(Wire.Signature(label: label, documentation: doc, parameters: params))
         }
         return (.guiSignatureHelp(visible: true, anchorRow: shAnchorRow, anchorCol: shAnchorCol,
@@ -2092,6 +2229,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         guard data.count >= fpPos + 2 else { throw ProtocolDecodeError.malformed }
         let fpLineCount = Int(try readU16(data, fpPos)); fpPos += 2
         var fpLines: [String] = []
+        try FrameDecodeAccounting.reserve(.arrayEntries, fpLineCount)
         fpLines.reserveCapacity(fpLineCount)
         for _ in 0..<fpLineCount {
             guard data.count >= fpPos + 2 else { throw ProtocolDecodeError.malformed }
@@ -2099,6 +2237,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             guard data.count >= fpPos + lineLen else { throw ProtocolDecodeError.malformed }
             let line = try decodeUTF8(data[fpPos..<(fpPos + lineLen)]) ?? ""
             fpPos += lineLen
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             fpLines.append(line)
         }
         return (.guiFloatPopup(visible: true, width: fpWidth, height: fpHeight,
@@ -2114,6 +2253,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let vertCount = Int(data[rest + 3])
         var sepPos = rest + 4
         var verts: [Wire.VerticalSeparator] = []
+        try FrameDecodeAccounting.reserve(.arrayEntries, vertCount)
         verts.reserveCapacity(vertCount)
         for _ in 0..<vertCount {
             // col(2) + start_row(2) + end_row(2)
@@ -2122,12 +2262,14 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             let startRow = try readU16(data, sepPos + 2)
             let endRow = try readU16(data, sepPos + 4)
             sepPos += 6
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             verts.append(Wire.VerticalSeparator(col: col, startRow: startRow, endRow: endRow))
         }
         // horizontal_count(1)
         guard data.count >= sepPos + 1 else { throw ProtocolDecodeError.malformed }
         let horizCount = Int(data[sepPos]); sepPos += 1
         var horizs: [Wire.HorizontalSeparator] = []
+        try FrameDecodeAccounting.reserve(.arrayEntries, horizCount)
         horizs.reserveCapacity(horizCount)
         for _ in 0..<horizCount {
             // row(2) + col(2) + width(2) + filename_len(2)
@@ -2140,6 +2282,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             guard data.count >= sepPos + fnLen else { throw ProtocolDecodeError.malformed }
             let fn = try decodeUTF8(data[sepPos..<(sepPos + fnLen)]) ?? ""
             sepPos += fnLen
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             horizs.append(Wire.HorizontalSeparator(row: hRow, col: hCol, width: hWidth, filename: fn))
         }
         return (.guiSplitSeparators(borderColor: sepColor, verticals: verts, horizontals: horizs),
@@ -2170,6 +2313,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let gsBranchName = try readRequiredUTF8(gsBranchData)
         let gsEntryCount = Int(try readU16(data, rest + 8 + gsBranchLen))
         var gsEntries: [Wire.GitStatusEntry] = []
+        try FrameDecodeAccounting.reserve(.arrayEntries, gsEntryCount)
         gsEntries.reserveCapacity(gsEntryCount)
         var gsPos = rest + 10 + gsBranchLen
         for _ in 0..<gsEntryCount {
@@ -2184,6 +2328,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             guard data.count >= gsPos + 8 + gsPathLen else { throw ProtocolDecodeError.malformed }
             let gsPathData = data[(gsPos + 8)..<(gsPos + 8 + gsPathLen)]
             let gsPath = try readRequiredUTF8(gsPathData)
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             gsEntries.append(Wire.GitStatusEntry(pathHash: gsPathHash, section: gsSection, status: gsStatus, path: gsPath))
             gsPos += 8 + gsPathLen
         }
@@ -2243,6 +2388,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let workspaceFlags = data[payloadStart + 4]
         let workspaceCount = Int(data[payloadStart + 5])
         var workspaces: [Wire.WorkspaceEntry] = []
+        try FrameDecodeAccounting.reserve(.arrayEntries, workspaceCount)
         workspaces.reserveCapacity(workspaceCount)
         var pos = payloadStart + 6
 
@@ -2267,6 +2413,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             guard iconLenPos + 1 + iconLen <= payloadEnd else { throw ProtocolDecodeError.malformed }
             let icon = try readRequiredUTF8(data[(iconLenPos + 1)..<(iconLenPos + 1 + iconLen)])
 
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             workspaces.append(Wire.WorkspaceEntry(
                 id: id,
                 kind: kind,
@@ -2289,6 +2436,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let visibleTabCount = Int(try readU16(data, pos))
         pos += 2
         var visibleTabs: [Wire.WorkspaceTabEntry] = []
+        try FrameDecodeAccounting.reserve(.arrayEntries, visibleTabCount)
         visibleTabs.reserveCapacity(visibleTabCount)
 
         for _ in 0..<visibleTabCount {
@@ -2312,6 +2460,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             let path = try readRequiredUTF8(data[(pathLenPos + 2)..<(pathLenPos + 2 + pathLen)])
             let tintColorRGB = version >= 2 ? try readU32(data, pathLenPos + 2 + pathLen) : 0
 
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             visibleTabs.append(Wire.WorkspaceTabEntry(
                 id: id,
                 workspaceId: workspaceId,
@@ -2387,6 +2536,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             if contextPos < payloadEnd {
                 let todoCount = Int(data[contextPos])
                 contextPos += 1
+                try FrameDecodeAccounting.reserve(.arrayEntries, todoCount)
                 todos.reserveCapacity(todoCount)
 
                 for _ in 0..<todoCount {
@@ -2396,6 +2546,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                     guard contextPos + 3 + descriptionLen <= payloadEnd else { break }
                     let descriptionStart = contextPos + 3
                     let description = try decodeUTF8(data[descriptionStart..<(descriptionStart + descriptionLen)]) ?? ""
+                    try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                     todos.append(Wire.AgentTodo(status: status, description: description))
                     contextPos = descriptionStart + descriptionLen
                 }
@@ -2414,6 +2565,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let csSelectedIndex = Int(try readU16(data, rest + 1))
         let entryCount = Int(try readU16(data, rest + 3))
         var csEntries: [ChangeSummaryEntry] = []
+        try FrameDecodeAccounting.reserve(.arrayEntries, entryCount)
         csEntries.reserveCapacity(entryCount)
         var csPos = rest + 5
         for idx in 0..<entryCount {
@@ -2426,6 +2578,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             let actionByte = data[csPos + 2 + pathLen]
             let linesAdded = try readU32(data, csPos + 2 + pathLen + 1)
             let linesRemoved = try readU32(data, csPos + 2 + pathLen + 5)
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             csEntries.append(ChangeSummaryEntry(
                 id: idx,
                 path: path,
@@ -2452,10 +2605,12 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let igActiveCol = try readU16(data, igStart + 3)
         let igGuideCount = Int(data[igStart + 5])
         var igCols: [UInt16] = []
+        try FrameDecodeAccounting.reserve(.arrayEntries, igGuideCount)
         igCols.reserveCapacity(igGuideCount)
         var igPos = igStart + 6
         for _ in 0..<igGuideCount {
             guard igPos + 2 <= rest + 2 + igPayloadLen else { break }
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             igCols.append(try readU16(data, igPos))
             igPos += 2
         }
@@ -2464,9 +2619,11 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         if igPos + 2 <= igEnd {
             let igLineCount = Int(try readU16(data, igPos))
             igPos += 2
+            try FrameDecodeAccounting.reserve(.arrayEntries, igLineCount)
             igLineLevels.reserveCapacity(igLineCount)
             for _ in 0..<igLineCount {
                 guard igPos < igEnd else { break }
+                try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                 igLineLevels.append(data[igPos])
                 igPos += 1
             }
@@ -2518,12 +2675,14 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             ePos += nameLen
             let tsDelta = try readU32(data, ePos)
             ePos += 4
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             entries.append(Wire.TimelineEntry(index: idx, toolName: toolName, timestampDelta: tsDelta))
         }
         var files: [Wire.TimelineFile] = []
         if ePos < pStart + payloadLen {
             let fileCount = Int(data[ePos])
             ePos += 1
+            try FrameDecodeAccounting.reserve(.arrayEntries, fileCount)
             files.reserveCapacity(fileCount)
 
             for _ in 0..<fileCount {
@@ -2538,6 +2697,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                 let linesRemoved = try readU32(data, ePos + 5)
                 let reviewStatus = data[ePos + 9]
                 ePos += 10
+                try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                 files.append(Wire.TimelineFile(path: path, entryCount: entryCount, linesAdded: linesAdded, linesRemoved: linesRemoved, reviewStatus: reviewStatus))
             }
         }
@@ -2578,6 +2738,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             guard eoPos + contentLen <= eoEnd else { break }
             let content = try decodeUTF8(data[eoPos..<(eoPos + contentLen)]) ?? ""
             eoPos += contentLen
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             eoEntries.append(Wire.ExtensionOverlayEntry(
                 extensionName: extName, overlayID: oid, windowID: winId,
                 row: row, col: col, shape: shape,
@@ -2632,6 +2793,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                     guard epPos + tLen <= epEnd else { break }
                     let t = try decodeUTF8(data[epPos..<(epPos + tLen)]) ?? ""
                     epPos += tLen
+                    try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                     blocks.append(.text(t))
                 case 1: // styled_text
                     guard epPos + 1 <= epEnd else { break }
@@ -2646,8 +2808,10 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                         let stR = data[epPos]; let stG = data[epPos + 1]; let stB = data[epPos + 2]
                         let stBold = data[epPos + 3] != 0; let stItalic = data[epPos + 4] != 0
                         epPos += 5
+                        try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                         runs.append((text: stText, r: stR, g: stG, b: stB, bold: stBold, italic: stItalic))
                     }
+                    try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                     blocks.append(.styledText(runs: runs))
                 case 2: // table
                     guard epPos + 5 <= epEnd else { break }
@@ -2660,6 +2824,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                         guard epPos + 2 <= epEnd else { break }
                         let cLen = Int(try readU16(data, epPos)); epPos += 2
                         guard epPos + cLen <= epEnd else { break }
+                        try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                         columns.append(try decodeUTF8(data[epPos..<(epPos + cLen)]) ?? "")
                         epPos += cLen
                     }
@@ -2670,11 +2835,14 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                             guard epPos + 2 <= epEnd else { break }
                             let cellLen = Int(try readU16(data, epPos)); epPos += 2
                             guard epPos + cellLen <= epEnd else { break }
+                            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                             row.append(try decodeUTF8(data[epPos..<(epPos + cellLen)]) ?? "")
                             epPos += cellLen
                         }
+                        try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                         rows.append(row)
                     }
+                    try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                     blocks.append(.table(columns: columns, rows: rows, selected: selected))
                 case 3: // key_value
                     guard epPos + 1 <= epEnd else { break }
@@ -2690,10 +2858,13 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                         guard epPos + vLen <= epEnd else { break }
                         let v = try decodeUTF8(data[epPos..<(epPos + vLen)]) ?? ""
                         epPos += vLen
+                        try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                         pairs.append((key: k, value: v))
                     }
+                    try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                     blocks.append(.keyValue(pairs: pairs))
                 case 4: // separator
+                    try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                     blocks.append(.separator)
                 case 5: // progress
                     guard epPos + 4 <= epEnd else { break }
@@ -2702,18 +2873,22 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                     let label = try decodeUTF8(data[epPos..<(epPos + labelLen)]) ?? ""
                     epPos += labelLen
                     let pctInt = try readU16(data, epPos); epPos += 2
+                    try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                     blocks.append(.progress(label: label, percent: Float(pctInt) / 100.0))
                 case 6: // tree (length-prefixed, skip payload)
                     guard epPos + 2 <= epEnd else { break }
                     let treeLen = Int(try readU16(data, epPos)); epPos += 2
                     guard epPos + treeLen <= epEnd else { break }
                     epPos += treeLen
+                    try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                     blocks.append(.unknown)
                 default:
+                    try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                     blocks.append(.unknown)
                     break
                 }
             }
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             epPanels.append(Wire.ExtensionPanelEntry(
                 extensionName: extName, panelID: panelId, title: title,
                 position: pos, sizeType: sizeType, sizeValue: sizeVal,
@@ -2760,6 +2935,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let count = Int(try readU16(data, pos)); pos += 2
         let activeId = try readString16(data: data, pos: &pos, end: payloadEnd)
         var sidebars: [Wire.SidebarMetadata] = []
+        try FrameDecodeAccounting.reserve(.arrayEntries, count)
         sidebars.reserveCapacity(count)
 
         for _ in 0..<count {
@@ -2774,6 +2950,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             let rawBadgeCount = try readU16(data, pos); pos += 2
             let badgeCount: UInt16? = rawBadgeCount == UInt16.max ? nil : rawBadgeCount
 
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             sidebars.append(Wire.SidebarMetadata(
                 id: id,
                 displayName: displayName,
@@ -2833,6 +3010,7 @@ private func decodeNotifications(data: Data, start: Int, end: Int) throws -> [Wi
     pos += 2
 
     var notifications: [Wire.EditorNotification] = []
+    try FrameDecodeAccounting.reserve(.arrayEntries, count)
     notifications.reserveCapacity(count)
 
     for _ in 0..<count {
@@ -2857,27 +3035,28 @@ private func decodeNotifications(data: Data, start: Int, end: Int) throws -> [Wi
         pos += 1
 
         var actions: [Wire.NotificationAction] = []
+        try FrameDecodeAccounting.reserve(.arrayEntries, actionCount)
         actions.reserveCapacity(actionCount)
         for _ in 0..<actionCount {
             let actionId = try readString16(data: data, pos: &pos, end: end)
             let label = try readString16(data: data, pos: &pos, end: end)
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             actions.append(Wire.NotificationAction(id: actionId, label: label))
         }
 
-        notifications.append(
-            Wire.EditorNotification(
-                id: id,
-                level: NotificationLevel(rawValue: level),
-                flags: flags,
-                createdAt: createdAt,
-                updatedAt: updatedAt,
-                autoDismissMs: rawAutoDismiss == UInt32.max ? nil : rawAutoDismiss,
-                title: title,
-                body: body,
-                source: source,
-                actions: actions
-            )
-        )
+        try FrameDecodeAccounting.reserve(.arrayEntries, 1)
+        notifications.append(Wire.EditorNotification(
+            id: id,
+            level: NotificationLevel(rawValue: level),
+            flags: flags,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            autoDismissMs: rawAutoDismiss == UInt32.max ? nil : rawAutoDismiss,
+            title: title,
+            body: body,
+            source: source,
+            actions: actions
+        ))
     }
 
     guard pos == end else { throw ProtocolDecodeError.malformed }
@@ -2904,6 +3083,7 @@ private func decodeConfigState(data: Data, start: Int, end: Int) throws -> Wire.
     pos += 2
 
     var previews: [Wire.ThemePreview] = []
+    try FrameDecodeAccounting.reserve(.arrayEntries, previewCount)
     previews.reserveCapacity(previewCount)
     for _ in 0..<previewCount {
         let name = try readString8(data: data, pos: &pos, end: end)
@@ -2913,6 +3093,7 @@ private func decodeConfigState(data: Data, start: Int, end: Int) throws -> Wire.
         let editorFg = try readU24(data, pos + 3)
         let accent = try readU24(data, pos + 6)
         pos += 9
+        try FrameDecodeAccounting.reserve(.arrayEntries, 1)
         previews.append(Wire.ThemePreview(name: name, atom: atom, editorBg: editorBg, editorFg: editorFg, accent: accent))
     }
 
@@ -2921,12 +3102,14 @@ private func decodeConfigState(data: Data, start: Int, end: Int) throws -> Wire.
     pos += 2
 
     var bindings: [Wire.KeybindingEntry] = []
+    try FrameDecodeAccounting.reserve(.arrayEntries, bindingCount)
     bindings.reserveCapacity(bindingCount)
     for _ in 0..<bindingCount {
         let mode = try readString8(data: data, pos: &pos, end: end)
         let key = try readString16(data: data, pos: &pos, end: end)
         let command = try readString16(data: data, pos: &pos, end: end)
         let description = try readString16(data: data, pos: &pos, end: end)
+        try FrameDecodeAccounting.reserve(.arrayEntries, 1)
         bindings.append(Wire.KeybindingEntry(mode: mode, key: key, command: command, description: description))
     }
 
@@ -3001,6 +3184,7 @@ private func readRequiredUTF8(_ data: Data.SubSequence) throws -> String {
 
 private func decodeStatusBarSegments(data: Data, pos: inout Int, count: Int, end: Int, version: UInt8) throws -> [Wire.StatusBarSegment] {
     var segments: [Wire.StatusBarSegment] = []
+    try FrameDecodeAccounting.reserve(.arrayEntries, count)
     segments.reserveCapacity(count)
 
     for index in 0..<count {
@@ -3026,6 +3210,7 @@ private func decodeStatusBarSegments(data: Data, pos: inout Int, count: Int, end
         guard pos + commandLen <= end else { throw ProtocolDecodeError.malformed }
         guard let command = try decodeUTF8(data[pos..<(pos + commandLen)]) else { throw ProtocolDecodeError.malformed }
         pos += commandLen
+        try FrameDecodeAccounting.reserve(.arrayEntries, 1)
         segments.append(Wire.StatusBarSegment(id: index, kind: kind, text: text, fgColor: fg, bgColor: bg, attrs: attrs, command: command))
     }
 
@@ -3066,10 +3251,13 @@ private func decodeOverlaySection(id: UInt8, data: Data, start: Int, length: Int
     case 0x04: // Search matches
         guard length >= 2 else { break }
         let count = Int(try readU16(data, start))
+        try FrameDecodeAccounting.reserve(.overlays, count)
+        try FrameDecodeAccounting.reserve(.arrayEntries, count)
         sections.searchMatches.reserveCapacity(count)
         var pos = start + 2
         for _ in 0..<count {
             guard pos + 7 <= end else { break }
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             sections.searchMatches.append(GUISearchMatch(
                 row: try readU16(data, pos), startCol: try readU16(data, pos + 2),
                 endCol: try readU16(data, pos + 4), isCurrent: data[pos + 6] != 0
@@ -3081,10 +3269,13 @@ private func decodeOverlaySection(id: UInt8, data: Data, start: Int, length: Int
     case 0x05: // Diagnostics
         guard length >= 2 else { break }
         let count = Int(try readU16(data, start))
+        try FrameDecodeAccounting.reserve(.overlays, count)
+        try FrameDecodeAccounting.reserve(.arrayEntries, count)
         sections.diagnosticUnderlines.reserveCapacity(count)
         var pos = start + 2
         for _ in 0..<count {
             guard pos + 9 <= end else { break }
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             sections.diagnosticUnderlines.append(GUIDiagnosticUnderline(
                 startRow: try readU16(data, pos), startCol: try readU16(data, pos + 2),
                 endRow: try readU16(data, pos + 4), endCol: try readU16(data, pos + 6),
@@ -3097,10 +3288,13 @@ private func decodeOverlaySection(id: UInt8, data: Data, start: Int, length: Int
     case 0x06: // Document highlights
         guard length >= 2 else { break }
         let count = Int(try readU16(data, start))
+        try FrameDecodeAccounting.reserve(.overlays, count)
+        try FrameDecodeAccounting.reserve(.arrayEntries, count)
         sections.documentHighlights.reserveCapacity(count)
         var pos = start + 2
         for _ in 0..<count {
             guard pos + 9 <= end else { break }
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             sections.documentHighlights.append(GUIDocumentHighlight(
                 startRow: try readU16(data, pos), startCol: try readU16(data, pos + 2),
                 endRow: try readU16(data, pos + 4), endCol: try readU16(data, pos + 6),
@@ -3113,6 +3307,8 @@ private func decodeOverlaySection(id: UInt8, data: Data, start: Int, length: Int
     case 0x07: // Line annotations
         guard length >= 2 else { break }
         let count = Int(try readU16(data, start))
+        try FrameDecodeAccounting.reserve(.overlays, count)
+        try FrameDecodeAccounting.reserve(.arrayEntries, count)
         sections.lineAnnotations.reserveCapacity(count)
         var pos = start + 2
         for _ in 0..<count {
@@ -3126,6 +3322,7 @@ private func decodeOverlaySection(id: UInt8, data: Data, start: Int, length: Int
             guard pos + annTextLen <= end else { break }
             let annText = try decodeUTF8(data[pos..<(pos + annTextLen)]) ?? ""
             pos += annTextLen
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             sections.lineAnnotations.append(GUILineAnnotation(row: annRow, kind: annKind, fg: annFg, bg: annBg, text: annText))
         }
         return true
@@ -3255,7 +3452,9 @@ private func decodeWindowRowSplices(data: Data, start: Int, end: Int) throws ->
     let spliceCount = Int(try readU32(data, start + 8))
     var pos = start + 12
     guard spliceCount <= (end - pos) / 12 else { throw ProtocolDecodeError.malformed }
+    try FrameDecodeAccounting.reserve(.spliceEntries, spliceCount)
     var splices: [GUIWindowRowSplice] = []
+    try FrameDecodeAccounting.reserve(.arrayEntries, spliceCount)
     splices.reserveCapacity(spliceCount)
     var previousStart: UInt32?
     var previousEnd: UInt64 = 0
@@ -3276,7 +3475,9 @@ private func decodeWindowRowSplices(data: Data, start: Int, end: Int) throws ->
             throw ProtocolDecodeError.malformed
         }
 
+        try FrameDecodeAccounting.reserve(.locatorEntries, insertCount)
         var entries: [GUIWindowRowDeltaEntry] = []
+        try FrameDecodeAccounting.reserve(.arrayEntries, insertCount)
         entries.reserveCapacity(insertCount)
         for _ in 0..<insertCount {
             guard pos < end else { throw ProtocolDecodeError.malformed }
@@ -3285,12 +3486,15 @@ private func decodeWindowRowSplices(data: Data, start: Int, end: Int) throws ->
             switch kind {
             case 0:
                 guard pos + 12 <= end else { throw ProtocolDecodeError.malformed }
+                try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                 entries.append(.reference(
                     rowId: try readU64(data, pos),
                     contentHash: try readU32(data, pos + 8)
                 ))
                 pos += 12
             case 1:
+                try FrameDecodeAccounting.reserve(.rows, 1)
+                try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                 entries.append(.full(try decodeWindowContentRow(data: data, pos: &pos, end: end)))
             default:
                 throw ProtocolDecodeError.malformed
@@ -3302,6 +3506,7 @@ private func decodeWindowRowSplices(data: Data, start: Int, end: Int) throws ->
         guard computedCount >= 0, computedCount <= Int64(UInt32.max) else {
             throw ProtocolDecodeError.malformed
         }
+        try FrameDecodeAccounting.reserve(.arrayEntries, 1)
         splices.append(GUIWindowRowSplice(
             startIndex: spliceStart, deleteCount: deleteCount, insertEntries: entries
         ))
@@ -3318,7 +3523,9 @@ private func decodeWindowDeltaRows(data: Data, start: Int, end: Int) throws -> [
     let rowCount = Int(try readU32(data, start))
     var pos = start + 4
     guard rowCount <= (end - pos) / 13 else { throw ProtocolDecodeError.malformed }
+    try FrameDecodeAccounting.reserve(.locatorEntries, rowCount)
     var rows: [GUIWindowRowDeltaEntry] = []
+    try FrameDecodeAccounting.reserve(.arrayEntries, rowCount)
     rows.reserveCapacity(rowCount)
 
     for _ in 0..<rowCount {
@@ -3329,10 +3536,13 @@ private func decodeWindowDeltaRows(data: Data, start: Int, end: Int) throws -> [
         switch entryKind {
         case 0:
             guard pos + 12 <= end else { throw ProtocolDecodeError.malformed }
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             rows.append(.reference(rowId: try readU64(data, pos), contentHash: try readU32(data, pos + 8)))
             pos += 12
         case 1:
+            try FrameDecodeAccounting.reserve(.rows, 1)
             let row = try decodeWindowContentRow(data: data, pos: &pos, end: end)
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             rows.append(.full(row))
         default:
             throw ProtocolDecodeError.malformed
@@ -3348,11 +3558,15 @@ private func decodeWindowContentRows(data: Data, start: Int, end: Int) throws ->
     let rowCount = Int(try readU32(data, start))
     var pos = start + 4
     guard rowCount <= (end - pos) / 23 else { throw ProtocolDecodeError.malformed }
+    try FrameDecodeAccounting.reserve(.rows, rowCount)
+    try FrameDecodeAccounting.reserve(.locatorEntries, rowCount)
     var rows: [GUIVisualRow] = []
+    try FrameDecodeAccounting.reserve(.arrayEntries, rowCount)
     rows.reserveCapacity(rowCount)
 
     for _ in 0..<rowCount {
         let row = try decodeWindowContentRow(data: data, pos: &pos, end: end)
+        try FrameDecodeAccounting.reserve(.arrayEntries, 1)
         rows.append(row)
     }
 
@@ -3377,11 +3591,14 @@ private func decodeWindowContentRow(data: Data, pos: inout Int, end: Int) throws
     let spanCount = Int(try readU16(data, pos))
     pos += 2
 
+    try FrameDecodeAccounting.reserve(.spans, spanCount)
     var spans: [GUIHighlightSpan] = []
+    try FrameDecodeAccounting.reserve(.arrayEntries, spanCount)
     spans.reserveCapacity(spanCount)
 
     for _ in 0..<spanCount {
         guard pos + 13 <= end else { throw ProtocolDecodeError.malformed }
+        try FrameDecodeAccounting.reserve(.arrayEntries, 1)
         spans.append(GUIHighlightSpan(
             startCol: try readU16(data, pos), endCol: try readU16(data, pos + 2),
             fg: try readU24(data, pos + 4), bg: try readU24(data, pos + 7),
@@ -3410,12 +3627,14 @@ private func decodeToolPreview(data: Data, start: Int, end: Int) throws -> Decod
     let lineCount = Int(try readU16(data, start + 1))
     var pos = start + 3
     var previewLines: [String] = []
+    try FrameDecodeAccounting.reserve(.arrayEntries, lineCount)
     previewLines.reserveCapacity(lineCount)
     for _ in 0..<lineCount {
         guard end >= pos + 2 else { throw ProtocolDecodeError.malformed }
         let lineLen = Int(try readU16(data, pos))
         guard end >= pos + 2 + lineLen else { throw ProtocolDecodeError.malformed }
         let line = try decodeUTF8(data[(pos + 2)..<(pos + 2 + lineLen)]) ?? ""
+        try FrameDecodeAccounting.reserve(.arrayEntries, 1)
         previewLines.append(line)
         pos += 2 + lineLen
     }
@@ -3424,6 +3643,7 @@ private func decodeToolPreview(data: Data, start: Int, end: Int) throws -> Decod
 
 private func decodeFramedChatMessages(data: Data, start: Int, end: Int, count: Int) throws -> [Wire.ChatMessage] {
     var messages: [Wire.ChatMessage] = []
+    try FrameDecodeAccounting.reserve(.arrayEntries, count)
     messages.reserveCapacity(count)
     var pos = start
 
@@ -3439,6 +3659,7 @@ private func decodeFramedChatMessages(data: Data, start: Int, end: Int, count: I
             throw ProtocolDecodeError.malformed
         }
 
+        try FrameDecodeAccounting.reserve(.arrayEntries, 1)
         messages.append(candidate.message)
         pos = messageEnd
     }
@@ -3456,12 +3677,17 @@ private func decodeLegacyChatMessages(data: Data, start: Int, end: Int, remainin
     let candidates = try decodeChatMessageCandidates(data: data, start: start, end: end)
 
     for candidate in candidates {
-        if let (rest, decodedEnd) = try? decodeLegacyChatMessages(
-            data: data,
-            start: candidate.nextOffset,
-            end: end,
-            remaining: remaining - 1
-        ) {
+        if let (rest, decodedEnd) = try? FrameDecodeAccounting.withCheckpoint({
+            try decodeLegacyChatMessages(
+                data: data,
+                start: candidate.nextOffset,
+                end: end,
+                remaining: remaining - 1
+            )
+        }) {
+            let (combinedCount, overflow) = rest.count.addingReportingOverflow(1)
+            guard !overflow else { throw FrameResourceError.arithmeticOverflow }
+            try FrameDecodeAccounting.reserve(.arrayEntries, combinedCount)
             return ([candidate.message] + rest, decodedEnd)
         }
     }
@@ -3473,12 +3699,14 @@ private func decodeAgentStyledLines(data: Data, start: Int, end: Int) throws -> 
     guard end >= start + 2 else { throw ProtocolDecodeError.malformed }
     let lineCount = Int(try readU16(data, start))
     var lines: [[Wire.StyledTextRun]] = []
+    try FrameDecodeAccounting.reserve(.arrayEntries, lineCount)
     lines.reserveCapacity(lineCount)
     var pos = start + 2
     for _ in 0..<lineCount {
         guard end >= pos + 2 else { throw ProtocolDecodeError.malformed }
         let runCount = Int(try readU16(data, pos))
         var runs: [Wire.StyledTextRun] = []
+        try FrameDecodeAccounting.reserve(.arrayEntries, runCount)
         runs.reserveCapacity(runCount)
         pos += 2
         for _ in 0..<runCount {
@@ -3498,6 +3726,7 @@ private func decodeAgentStyledLines(data: Data, start: Int, end: Int) throws -> 
                 linkURL = decodedLinkURL
                 nextRunPos += 2 + urlLen
             }
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             runs.append(Wire.StyledTextRun(
                 text: runText,
                 fgR: data[fgOff], fgG: data[fgOff + 1], fgB: data[fgOff + 2],
@@ -3510,6 +3739,7 @@ private func decodeAgentStyledLines(data: Data, start: Int, end: Int) throws -> 
             ))
             pos = nextRunPos
         }
+        try FrameDecodeAccounting.reserve(.arrayEntries, 1)
         lines.append(runs)
     }
     return (lines, pos)
@@ -3519,6 +3749,7 @@ private func decodeAgentMarkdownBlocks(data: Data, start: Int, end: Int) throws 
     guard end >= start + 2 else { throw ProtocolDecodeError.malformed }
     let blockCount = Int(try readU16(data, start))
     var blocks: [Wire.AgentMarkdownBlock] = []
+    try FrameDecodeAccounting.reserve(.arrayEntries, blockCount)
     blocks.reserveCapacity(blockCount)
     var pos = start + 2
     for _ in 0..<blockCount {
@@ -3568,6 +3799,7 @@ private func decodeAgentMarkdownBlocks(data: Data, start: Int, end: Int) throws 
             (lines, pos) = try decodeAgentStyledLines(data: data, start: pos, end: end)
         }
 
+        try FrameDecodeAccounting.reserve(.arrayEntries, 1)
         blocks.append(Wire.AgentMarkdownBlock(id: blockID, kind: kind, flags: flags, lines: lines, level: level, indent: indent, ordered: ordered, ordinal: ordinal, height: height, language: language, label: label, targetPath: targetPath, capabilityFlags: capabilityFlags))
     }
     return (blocks, pos)
@@ -3645,14 +3877,20 @@ private func decodeChatMessageBodyCandidates(data: Data, beamId: UInt32, bodySta
             let autoApprovedScope = data[baseOffset]
             if autoApprovedScope <= 2 {
                 let messageWithAuto = Wire.ChatMessage(beamId: beamId, content: .toolCall(name: name, summary: summary, status: tcStatus, isError: isError, collapsed: tcCollapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result, previewKind: 0, previewLines: []))
+                try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                 candidates.append(DecodedChatMessageCandidate(message: messageWithAuto, nextOffset: baseOffset + 1))
-                if end > baseOffset + 1, let preview = try? decodeToolPreview(data: data, start: baseOffset + 1, end: end) {
+                if end > baseOffset + 1,
+                   let preview = try? FrameDecodeAccounting.withCheckpoint({
+                       try decodeToolPreview(data: data, start: baseOffset + 1, end: end)
+                   }) {
                     let messageWithPreview = Wire.ChatMessage(beamId: beamId, content: .toolCall(name: name, summary: summary, status: tcStatus, isError: isError, collapsed: tcCollapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result, previewKind: preview.kind, previewLines: preview.lines))
+                    try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                     candidates.append(DecodedChatMessageCandidate(message: messageWithPreview, nextOffset: preview.nextOffset))
                 }
             }
         }
         let messageWithoutAuto = Wire.ChatMessage(beamId: beamId, content: .toolCall(name: name, summary: summary, status: tcStatus, isError: isError, collapsed: tcCollapsed, autoApprovedScope: 0, durationMs: duration, result: result, previewKind: 0, previewLines: []))
+        try FrameDecodeAccounting.reserve(.arrayEntries, 1)
         candidates.append(DecodedChatMessageCandidate(message: messageWithoutAuto, nextOffset: baseOffset))
         return candidates
 
@@ -3677,12 +3915,14 @@ private func decodeChatMessageBodyCandidates(data: Data, beamId: UInt32, bodySta
         guard end >= pos + 3 else { throw ProtocolDecodeError.malformed }
         let lineCount = Int(try readU16(data, pos + 1))
         var lines: [[Wire.StyledTextRun]] = []
+        try FrameDecodeAccounting.reserve(.arrayEntries, lineCount)
         lines.reserveCapacity(lineCount)
         var rPos = pos + 3
         for _ in 0..<lineCount {
             guard end >= rPos + 2 else { throw ProtocolDecodeError.malformed }
             let runCount = Int(try readU16(data, rPos))
             var runs: [Wire.StyledTextRun] = []
+            try FrameDecodeAccounting.reserve(.arrayEntries, runCount)
             runs.reserveCapacity(runCount)
             rPos += 2
             for _ in 0..<runCount {
@@ -3708,6 +3948,7 @@ private func decodeChatMessageBodyCandidates(data: Data, beamId: UInt32, bodySta
                     linkURL = decodedLinkURL
                     nextRunPos += 2 + urlLen
                 }
+                try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                 runs.append(Wire.StyledTextRun(
                     text: runText,
                     fgR: fgR, fgG: fgG, fgB: fgB,
@@ -3720,6 +3961,7 @@ private func decodeChatMessageBodyCandidates(data: Data, beamId: UInt32, bodySta
                 ))
                 rPos = nextRunPos
             }
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             lines.append(runs)
         }
         return [DecodedChatMessageCandidate(message: Wire.ChatMessage(beamId: beamId, content: .styledAssistant(lines: lines)), nextOffset: rPos)]
@@ -3738,12 +3980,14 @@ private func decodeChatMessageBodyCandidates(data: Data, beamId: UInt32, bodySta
         let stcSummary = try decodeUTF8(data[(pos + 12 + stcNameLen)..<(pos + 12 + stcNameLen + stcSummaryLen)]) ?? ""
         let stcLineCount = Int(try readU16(data, pos + 12 + stcNameLen + stcSummaryLen))
         var stcLines: [[Wire.StyledTextRun]] = []
+        try FrameDecodeAccounting.reserve(.arrayEntries, stcLineCount)
         stcLines.reserveCapacity(stcLineCount)
         var stcPos = pos + 14 + stcNameLen + stcSummaryLen
         for _ in 0..<stcLineCount {
             guard end >= stcPos + 2 else { throw ProtocolDecodeError.malformed }
             let runCount = Int(try readU16(data, stcPos))
             var runs: [Wire.StyledTextRun] = []
+            try FrameDecodeAccounting.reserve(.arrayEntries, runCount)
             runs.reserveCapacity(runCount)
             stcPos += 2
             for _ in 0..<runCount {
@@ -3763,6 +4007,7 @@ private func decodeChatMessageBodyCandidates(data: Data, beamId: UInt32, bodySta
                     linkURL = decodedLinkURL
                     nextRunPos += 2 + urlLen
                 }
+                try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                 runs.append(Wire.StyledTextRun(
                     text: runText,
                     fgR: data[fgOff], fgG: data[fgOff + 1], fgB: data[fgOff + 2],
@@ -3775,6 +4020,7 @@ private func decodeChatMessageBodyCandidates(data: Data, beamId: UInt32, bodySta
                 ))
                 stcPos = nextRunPos
             }
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             stcLines.append(runs)
         }
         let stcBaseOffset = stcPos
@@ -3784,14 +4030,20 @@ private func decodeChatMessageBodyCandidates(data: Data, beamId: UInt32, bodySta
             let stcAutoApprovedScope = data[stcBaseOffset]
             if stcAutoApprovedScope <= 2 {
                 let stcMessageWithAuto = Wire.ChatMessage(beamId: beamId, content: .styledToolCall(name: stcName, summary: stcSummary, status: stcStatus, isError: stcIsError, collapsed: stcCollapsed, autoApprovedScope: stcAutoApprovedScope, durationMs: stcDuration, resultLines: stcLines, previewKind: 0, previewLines: []))
+                try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                 stcCandidates.append(DecodedChatMessageCandidate(message: stcMessageWithAuto, nextOffset: stcBaseOffset + 1))
-                if end > stcBaseOffset + 1, let stcPreview = try? decodeToolPreview(data: data, start: stcBaseOffset + 1, end: end) {
+                if end > stcBaseOffset + 1,
+                   let stcPreview = try? FrameDecodeAccounting.withCheckpoint({
+                       try decodeToolPreview(data: data, start: stcBaseOffset + 1, end: end)
+                   }) {
                     let stcMessageWithPreview = Wire.ChatMessage(beamId: beamId, content: .styledToolCall(name: stcName, summary: stcSummary, status: stcStatus, isError: stcIsError, collapsed: stcCollapsed, autoApprovedScope: stcAutoApprovedScope, durationMs: stcDuration, resultLines: stcLines, previewKind: stcPreview.kind, previewLines: stcPreview.lines))
+                    try FrameDecodeAccounting.reserve(.arrayEntries, 1)
                     stcCandidates.append(DecodedChatMessageCandidate(message: stcMessageWithPreview, nextOffset: stcPreview.nextOffset))
                 }
             }
         }
         let stcMessageWithoutAuto = Wire.ChatMessage(beamId: beamId, content: .styledToolCall(name: stcName, summary: stcSummary, status: stcStatus, isError: stcIsError, collapsed: stcCollapsed, autoApprovedScope: 0, durationMs: stcDuration, resultLines: stcLines, previewKind: 0, previewLines: []))
+        try FrameDecodeAccounting.reserve(.arrayEntries, 1)
         stcCandidates.append(DecodedChatMessageCandidate(message: stcMessageWithoutAuto, nextOffset: stcBaseOffset))
         return stcCandidates
 
@@ -3814,12 +4066,14 @@ private func decodeChatMessageBodyCandidates(data: Data, beamId: UInt32, bodySta
         let lineCount = Int(try readU16(data, pos + 9 + nameLen + summaryLen + idLen))
         var approvalPos = pos + 11 + nameLen + summaryLen + idLen
         var previewLines: [String] = []
+        try FrameDecodeAccounting.reserve(.arrayEntries, lineCount)
         previewLines.reserveCapacity(lineCount)
         for _ in 0..<lineCount {
             guard end >= approvalPos + 2 else { throw ProtocolDecodeError.malformed }
             let lineLen = Int(try readU16(data, approvalPos))
             guard end >= approvalPos + 2 + lineLen else { throw ProtocolDecodeError.malformed }
             let line = try decodeUTF8(data[(approvalPos + 2)..<(approvalPos + 2 + lineLen)]) ?? ""
+            try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             previewLines.append(line)
             approvalPos += 2 + lineLen
         }
@@ -3892,12 +4146,14 @@ private func decodePaneGeometry(data: Data, start: Int, end: Int) throws -> GUIP
     pos += 5
 
     var hitRegions: [GUIHitRegion] = []
+    try FrameDecodeAccounting.reserve(.arrayEntries, hitCount)
     hitRegions.reserveCapacity(hitCount)
     for _ in 0..<hitCount {
         guard pos + 11 <= end else { throw ProtocolDecodeError.malformed }
         let kind = GUIHitRegion.Kind(rawValue: data[pos]) ?? .text
         let rect = try readCellRect(data, pos + 1, end)
         let regionWindowId = try readU16(data, pos + 9)
+        try FrameDecodeAccounting.reserve(.arrayEntries, 1)
         hitRegions.append(GUIHitRegion(kind: kind, rect: rect, windowId: regionWindowId))
         pos += 11
     }
@@ -3949,6 +4205,7 @@ private func readSection32(_ data: Data, at offset: Int, containingEnd: Int) thr
 
 private func decodeUTF8(_ data: Data) throws -> String? {
     var cursor = ByteCursor(data)
+    try FrameDecodeAccounting.reserve(.ownedUTF8Bytes, cursor.remaining)
     let bytes = try cursor.readSlice(count: cursor.remaining)
     return String(bytes: bytes, encoding: .utf8)
 }

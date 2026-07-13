@@ -339,7 +339,7 @@ enum PreviewRegistry {
             signColWidth: 1,
             entries: previewGutterEntries()
         )
-        guiState.windowContents[1] = GUIWindowContent(
+        guiState.windowContents[1] = try GUIWindowContent(
             windowId: 1,
             fullRefresh: true,
             cursorVisible: true,
@@ -483,7 +483,7 @@ enum PreviewRegistry {
             signColWidth: 1,
             entries: previewDiagnosticsGutterEntries()
         )
-        guiState.windowContents[1] = GUIWindowContent(
+        guiState.windowContents[1] = try GUIWindowContent(
             windowId: 1,
             fullRefresh: true,
             cursorVisible: true,

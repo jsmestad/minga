@@ -9,6 +9,7 @@
 
 import Testing
 import Foundation
+import MingaProtocol
 
 // MARK: - Binary builder helpers
 
@@ -1224,6 +1225,21 @@ struct GUIObservatoryDecoderTests {
         appendU32(&data, UInt32(payload.count))
         data.append(payload)
 
+        let defaults = FrameResourcePolicy.default
+        let mapConstrained = FrameResourcePolicy(
+            wire: defaults.wire,
+            decode: .init(weight: .init(
+                commands: 1, ownedUTF8Bytes: .max, arrayEntries: 8,
+                rows: .max, spans: .max, overlays: .max,
+                spliceEntries: .max, locatorEntries: .max
+            )),
+            staging: defaults.staging,
+            resident: defaults.resident
+        )
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeFrame(from: data, policy: mapConstrained)
+        }
+
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
@@ -1309,6 +1325,21 @@ struct GUIFileTreeDecoderTests {
         data.append(OP_GUI_FILE_TREE)
         appendU32(&data, UInt32(payload.count))
         data.append(payload)
+
+        let defaults = FrameResourcePolicy.default
+        let guideConstrained = FrameResourcePolicy(
+            wire: defaults.wire,
+            decode: .init(weight: .init(
+                commands: 1, ownedUTF8Bytes: .max, arrayEntries: 5,
+                rows: .max, spans: .max, overlays: .max,
+                spliceEntries: .max, locatorEntries: .max
+            )),
+            staging: defaults.staging,
+            resident: defaults.resident
+        )
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeFrame(from: data, policy: guideConstrained)
+        }
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)

@@ -53,6 +53,41 @@ public struct AgentTranscriptSnapshot {
     let hasTranscript: Bool
     let truncated: Bool
     let promptVersion: Int
+
+    /// Exact retained payload weight of the resident transcript.
+    public func exactResourceWeight() throws -> FrameResourceWeight {
+        var weight = FrameResourceWeight(arrayEntries: messages.count)
+        for message in messages {
+            weight = try weight.adding(try FrameResourceWeight.measuringOwnedPayload(message))
+        }
+        return weight
+    }
+
+    /// Computes the exact resulting transcript weight without materializing mapped messages.
+    public func resourceWeightAfterPreparing(
+        mode: UInt8, epoch: UInt32, trimFront: Int, baseCount: Int,
+        messages rawMessages: [Wire.ChatMessage]
+    ) throws -> FrameResourceWeight {
+        var weight: FrameResourceWeight
+        if mode == 0 {
+            weight = FrameResourceWeight(arrayEntries: rawMessages.count)
+        } else {
+            guard hasTranscript else { throw AgentTranscriptPreparationFailure.beforeSeed }
+            guard epoch == self.epoch else { throw AgentTranscriptPreparationFailure.epochMismatch }
+            guard trimFront >= 0, baseCount >= 0,
+                  messages.count >= trimFront + baseCount else {
+                throw AgentTranscriptPreparationFailure.desynced
+            }
+            weight = FrameResourceWeight(arrayEntries: baseCount + rawMessages.count)
+            for message in messages[trimFront ..< (trimFront + baseCount)] {
+                weight = try weight.adding(try FrameResourceWeight.measuringOwnedPayload(message))
+            }
+        }
+        for message in rawMessages {
+            weight = try weight.adding(try FrameResourceWeight.measuringOwnedPayload(message))
+        }
+        return weight
+    }
 }
 
 /// Stable reason that a transcript operation cannot join the resident transcript snapshot.
