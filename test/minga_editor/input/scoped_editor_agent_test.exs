@@ -7,6 +7,7 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
   import Minga.Test.ScopedInputHelpers
 
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.UIState.View
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.TabBar
@@ -124,8 +125,9 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
       file_buffer: file_buffer
     } do
       assert state.workspace.keymap_scope == :agent
-      assert AgentAccess.view(state).return_target.active_tab_id == 1
-      assert AgentAccess.view(state).return_target.active_buffer == file_buffer
+      return_target = state |> AgentAccess.view() |> View.return_target()
+      assert return_target.active_tab_id == 1
+      assert return_target.active_buffer == file_buffer
 
       {:handled, new_state} = Scoped.handle_key(state, ?q, 0)
       assert new_state.workspace.keymap_scope == :editor
@@ -140,7 +142,9 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
 
     test "ESC returns to the recorded file tab when nothing transient is open", %{state: state} do
       assert state.workspace.keymap_scope == :agent
-      assert AgentAccess.view(state).return_target.active_tab_id == 1
+
+      assert state |> AgentAccess.view() |> View.return_target() |> Map.fetch!(:active_tab_id) ==
+               1
 
       {:handled, new_state} = Scoped.handle_key(state, 27, 0)
       assert new_state.workspace.keymap_scope == :editor
@@ -182,7 +186,7 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
 
     test "Tab switches focus", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, 9, 0)
-      assert AgentAccess.view(new_state).focus == :file_viewer
+      assert new_state |> AgentAccess.view() |> View.focus() == :file_viewer
     end
 
     test "i focuses input", %{state: state} do
@@ -193,7 +197,7 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
     test "prefix keys start a prefix sequence", %{state: state} do
       for key <- [?g, ?z, 93, 91] do
         {:handled, new_state} = Scoped.handle_key(state, key, 0)
-        assert AgentAccess.view(new_state).pending_prefix != nil
+        assert new_state |> AgentAccess.view() |> View.pending_prefix() != nil
       end
     end
 
@@ -345,7 +349,7 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
     test "Tab switches back to chat from viewer" do
       state = base_state(keymap_scope: :agent, agentic_active: true, focus: :file_viewer)
       {:handled, new_state} = Scoped.handle_key(state, 9, 0)
-      assert AgentAccess.view(new_state).focus == :chat
+      assert new_state |> AgentAccess.view() |> View.focus() == :chat
     end
   end
 end

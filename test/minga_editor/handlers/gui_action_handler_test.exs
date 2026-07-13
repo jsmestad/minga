@@ -19,6 +19,8 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.Shell.Entry
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.Observatory
+  alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Window
   alias MingaEditor.State.FileTree, as: FileTreeState
@@ -128,9 +130,9 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
     assert EditorState.file_tree_state(file_tree_active).focused
     assert file_tree_active.workspace.keymap_scope == :file_tree
-    assert EditorState.sidebar_active_id(file_tree_active) == "file_tree"
+    assert SidebarWorkflow.active_id(file_tree_active) == "file_tree"
 
-    git_state = EditorState.set_git_status_panel(state, %{entries: []})
+    git_state = SidebarWorkflow.replace_git_status(state, %{entries: []})
 
     git_active =
       GuiActionHandler.dispatch(
@@ -139,11 +141,11 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
       )
 
     assert git_active.workspace.keymap_scope == :git_status
-    assert EditorState.sidebar_active_id(git_active) == "git_status"
+    assert SidebarWorkflow.active_id(git_active) == "git_status"
 
     observatory_state =
       state
-      |> EditorState.open_observatory(nil)
+      |> SidebarWorkflow.open_observatory(nil)
       |> EditorState.set_keymap_scope(:file_tree)
 
     observatory_active =
@@ -154,7 +156,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
     refute EditorState.file_tree_state(observatory_active).focused
     assert observatory_active.workspace.keymap_scope == :editor
-    assert EditorState.sidebar_active_id(observatory_active) == "observatory"
+    assert SidebarWorkflow.active_id(observatory_active) == "observatory"
   end
 
   @tag :tmp_dir
@@ -176,7 +178,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
     assert EditorState.file_tree_state(opened).tree != nil
     assert EditorState.file_tree_state(opened).focused
-    assert EditorState.sidebar_active_id(opened) == "file_tree"
+    assert SidebarWorkflow.active_id(opened) == "file_tree"
 
     focused =
       GuiActionHandler.dispatch(
@@ -186,7 +188,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
     assert EditorState.file_tree_state(focused).focused
     assert focused.workspace.keymap_scope == :file_tree
-    assert EditorState.sidebar_active_id(focused) == "file_tree"
+    assert SidebarWorkflow.active_id(focused) == "file_tree"
 
     hidden =
       GuiActionHandler.dispatch(focused, {:sidebar_action, "file_tree", "file_tree", "toggle"})
@@ -198,7 +200,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     assert hidden_state.tree != nil
     refute FileTreeState.visible?(hidden_state)
     refute hidden_state.focused
-    assert EditorState.sidebar_active_id(hidden) == nil
+    assert SidebarWorkflow.active_id(hidden) == nil
   end
 
   test "git porcelain GUI actions report disabled extension instead of no-op", %{
@@ -212,7 +214,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
              "Git porcelain extension is disabled or failed to load"
 
     assert toggled.workspace.keymap_scope == state.workspace.keymap_scope
-    assert EditorState.sidebar_active_id(toggled) == EditorState.sidebar_active_id(state)
+    assert SidebarWorkflow.active_id(toggled) == SidebarWorkflow.active_id(state)
 
     activated =
       GuiActionHandler.dispatch(state, {:sidebar_action, "git_status", "git_status", "activate"})
@@ -221,7 +223,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
              "Git porcelain extension is disabled or failed to load"
 
     assert activated.workspace.keymap_scope == state.workspace.keymap_scope
-    assert EditorState.sidebar_active_id(activated) == nil
+    assert SidebarWorkflow.active_id(activated) == nil
   end
 
   test "extension panel actions route semantic registry entries before legacy extensions", %{
@@ -350,12 +352,12 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
         %FileTreeState{tree_status: :loading, focused: true}
       end)
       |> EditorState.set_keymap_scope(:file_tree)
-      |> EditorState.set_sidebar_active_id("git_status")
+      |> SidebarWorkflow.select("git_status")
 
     new_state = Commands.execute(state, :toggle_beam_observatory)
 
-    assert EditorState.sidebar_active_id(new_state) == "observatory"
-    assert EditorState.observatory_visible?(new_state)
+    assert SidebarWorkflow.active_id(new_state) == "observatory"
+    assert SidebarWorkflow.observatory_visible?(new_state)
     refute EditorState.file_tree_state(new_state).focused
     assert new_state.workspace.keymap_scope == :editor
   end
@@ -392,11 +394,11 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
       height: 10
     }
 
-    state = base_state(table) |> EditorState.set_observatory_inspection(inspection)
+    state = base_state(table) |> SidebarWorkflow.inspect_observatory(inspection)
 
     new_state = GuiActionHandler.dispatch(state, :float_popup_dismiss)
 
-    assert Runtime.state(new_state.shell_runtime).observatory_inspection == nil
+    assert new_state |> SidebarWorkflow.observatory() |> Observatory.inspection() == nil
   end
 
   test "float_popup_dismiss closes the open :float popup window (#2338)", %{

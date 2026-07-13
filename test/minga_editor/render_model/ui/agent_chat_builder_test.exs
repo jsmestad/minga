@@ -398,7 +398,11 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
       windows: %Windows{map: %{1 => window}, active: 1},
       layout: nil,
       shell: Traditional,
-      shell_state: %TraditionalState{agent: %AgentState{}, tab_bar: tab_bar},
+      shell_state:
+        TraditionalState.set_tab_bar(
+          TraditionalState.replace_agent(%TraditionalState{}, %AgentState{}),
+          tab_bar
+        ),
       agent_ui: %UIState{panel: panel},
       viewport: Viewport.new(24, 80),
       editing: VimState.new()

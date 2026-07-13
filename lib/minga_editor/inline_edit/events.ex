@@ -11,6 +11,7 @@ defmodule MingaEditor.InlineEdit.Events do
   alias MingaAgent.EphemeralSession
   alias MingaEditor.InlineOverlay.Events, as: Overlay
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.InlineEdit
 
   @type state :: EditorState.t()
@@ -34,15 +35,11 @@ defmodule MingaEditor.InlineEdit.Events do
   @spec spec() :: Overlay.spec()
   defp spec do
     %{
-      store: &store/1,
-      set_store: &EditorState.set_inline_edits/2,
+      store: &AgentAccess.inline_edits/1,
+      replace: &AgentAccess.replace_inline_edit/2,
       session?: &InlineEdit.session?/2
     }
   end
-
-  @spec store(state()) :: InlineEdit.store() | nil
-  defp store(%{shell_runtime: %{state: %{inline_edits: edits}}}) when is_map(edits), do: edits
-  defp store(_state), do: nil
 
   @spec fail(InlineEdit.t(), term()) :: InlineEdit.t()
   defp fail(%InlineEdit{} = edit, reason),

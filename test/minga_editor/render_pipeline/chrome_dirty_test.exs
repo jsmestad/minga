@@ -7,7 +7,7 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.Session.State, as: SessionState
-  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Shell.Traditional.SidebarWorkflow
 
   setup do
     table = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
@@ -183,7 +183,7 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
       fp1 = Input.chrome_fingerprint(input)
 
       state =
-        EditorState.set_git_status_panel(state, %{
+        SidebarWorkflow.replace_git_status(state, %{
           repo_state: :normal,
           branch: "main",
           ahead: 0,

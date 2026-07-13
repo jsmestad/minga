@@ -22,6 +22,8 @@ defmodule MingaEditor.KeyDispatch do
   alias MingaEditor.MinibufferData
   alias MingaEditor.ModeTransitions
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Shell.Traditional.ToolPrompts
+  alias MingaEditor.Shell.Traditional.ToolPromptWorkflow
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.ModalOverlay.CommandCompletion, as: CommandCompletionPayload
   alias Minga.Keymap
@@ -107,11 +109,13 @@ defmodule MingaEditor.KeyDispatch do
 
     # When leaving :tool_confirm, check if more tools were queued during
     # the session and re-enter :tool_confirm to prompt for them.
-    if old_mode == :tool_confirm and CoreEditing.mode(result) == :normal and
-         result.shell_runtime.state.tool_prompt_queue != [] do
+    prompts = ToolPromptWorkflow.prompts(result)
+    pending = ToolPrompts.queue(prompts)
+
+    if old_mode == :tool_confirm and CoreEditing.mode(result) == :normal and pending != [] do
       ms = %Minga.Mode.ToolConfirmState{
-        pending: result.shell_runtime.state.tool_prompt_queue,
-        declined: result.shell_runtime.state.tool_declined
+        pending: pending,
+        declined: ToolPrompts.declined(prompts)
       }
 
       EditorState.transition_mode(result, :tool_confirm, ms)

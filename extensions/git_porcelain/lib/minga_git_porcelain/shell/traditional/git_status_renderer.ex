@@ -14,6 +14,8 @@ defmodule MingaGitPorcelain.Shell.Traditional.GitStatusRenderer do
   alias MingaEditor.DisplayList
   alias MingaEditor.Layout
   alias MingaGitPorcelain.Shell.Traditional.GitStatus.TuiState
+  alias MingaEditor.Shell.Traditional.SidebarWorkflow
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.UI.Theme
 
@@ -42,11 +44,17 @@ defmodule MingaGitPorcelain.Shell.Traditional.GitStatusRenderer do
   def render(_state, nil), do: []
 
   def render(state, rect) do
-    case EditorState.git_status_panel(state) do
+    case git_status_panel(state) do
       nil -> []
       panel -> do_render(panel, tui_state(state), rect, state.theme)
     end
   end
+
+  @spec git_status_panel(state()) :: MingaEditor.GitStatus.Panel.t() | nil
+  defp git_status_panel(%EditorState{} = state), do: SidebarWorkflow.git_status_panel(state)
+
+  defp git_status_panel(%{shell_state: %TraditionalState{} = shell_state}),
+    do: TraditionalState.git_status_panel(shell_state)
 
   @spec do_render(map(), TuiState.t(), Layout.rect(), Theme.t()) :: [DisplayList.draw()]
   defp do_render(panel, tui, {row_off, col_off, width, height}, theme) do
@@ -56,8 +64,19 @@ defmodule MingaGitPorcelain.Shell.Traditional.GitStatusRenderer do
   end
 
   @spec tui_state(state()) :: TuiState.t()
-  defp tui_state(%{shell_state: %{git_status_tui_state: %TuiState{} = tui}}), do: tui
-  defp tui_state(_state), do: TuiState.new()
+  defp tui_state(%EditorState{} = state) do
+    case SidebarWorkflow.git_status_tui_state(state) do
+      %TuiState{} = tui -> tui
+      nil -> TuiState.new()
+    end
+  end
+
+  defp tui_state(%{shell_state: %TraditionalState{} = shell_state}) do
+    case TraditionalState.git_status_tui_state(shell_state) do
+      %TuiState{} = tui -> tui
+      nil -> TuiState.new()
+    end
+  end
 
   @spec render_panel(
           map(),

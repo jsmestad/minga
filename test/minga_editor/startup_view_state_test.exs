@@ -2,13 +2,14 @@ defmodule MingaEditor.StartupViewStateTest do
   # Mutates the global :cli_startup_flags Application environment while verifying the startup boundary.
   use ExUnit.Case, async: false
 
+  alias MingaEditor.Agent.UIState.View
   alias MingaEditor.Startup
 
   test "defaults to editor view for TUI startup" do
     {scope, ui_state} = Startup.startup_view_state(:tui)
 
     assert scope == :editor
-    assert ui_state.view.active == false
+    assert View.active?(ui_state.view) == false
   end
 
   test "CLI startup flags select editor, agentic, and native GUI auto modes" do
@@ -24,7 +25,7 @@ defmodule MingaEditor.StartupViewStateTest do
     {scope, agentic} = Startup.startup_view_state(backend)
 
     assert scope == expected_scope
-    assert agentic.view.active == expected_active?
+    assert View.active?(agentic.view) == expected_active?
   after
     # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
     Application.delete_env(:minga, :cli_startup_flags)

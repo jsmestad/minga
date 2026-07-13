@@ -4,15 +4,24 @@ defmodule MingaEditor.RenderModel.UI.FloatPopupBuilder do
   alias Minga.Buffer
   alias Minga.RenderModel.UI.FloatPopup
   alias MingaEditor.Frontend.Emit.Context
+  alias MingaEditor.Observatory.Inspection
+  alias MingaEditor.Shell.Traditional.Observatory
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
 
   @max_native_popup_lines 400
 
   @spec build(Context.t()) :: FloatPopup.t()
-  def build(%Context{shell_state: %{observatory_inspection: %{visible: true} = data}} = _ctx) do
-    float_popup_model(data)
+  def build(%Context{shell_state: %TraditionalState{} = shell_state} = ctx) do
+    case shell_state |> TraditionalState.observatory() |> Observatory.inspection() do
+      %{visible: true} = inspection -> float_popup_model(inspection)
+      _hidden -> build_window_popup(ctx)
+    end
   end
 
-  def build(%Context{} = ctx) do
+  def build(%Context{} = ctx), do: build_window_popup(ctx)
+
+  @spec build_window_popup(Context.t()) :: FloatPopup.t()
+  defp build_window_popup(%Context{} = ctx) do
     case find_float_popup_window(ctx) do
       nil -> %FloatPopup{}
       float_window -> build_float_popup_model(ctx, float_window)
@@ -59,8 +68,8 @@ defmodule MingaEditor.RenderModel.UI.FloatPopupBuilder do
     %FloatPopup{visible?: true, title: title, lines: lines, width: width, height: height}
   end
 
-  @spec float_popup_model(map()) :: FloatPopup.t()
-  defp float_popup_model(%{
+  @spec float_popup_model(Inspection.t()) :: FloatPopup.t()
+  defp float_popup_model(%Inspection{
          visible: true,
          title: title,
          lines: lines,
@@ -69,8 +78,6 @@ defmodule MingaEditor.RenderModel.UI.FloatPopupBuilder do
        }) do
     %FloatPopup{visible?: true, title: title, lines: lines, width: width, height: height}
   end
-
-  defp float_popup_model(_data), do: %FloatPopup{}
 
   @spec resolve_float_dim(Minga.Popup.Rule.t(), :width | :height, pos_integer()) ::
           pos_integer()

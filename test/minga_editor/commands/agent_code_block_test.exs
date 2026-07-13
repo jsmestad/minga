@@ -23,7 +23,10 @@ defmodule MingaEditor.Commands.AgentCodeBlockTest do
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),
-          %MingaEditor.Shell.Traditional.State{agent: %AgentState{}}
+          MingaEditor.Shell.Traditional.State.replace_agent(
+            %MingaEditor.Shell.Traditional.State{},
+            %AgentState{}
+          )
         )
     }
   end

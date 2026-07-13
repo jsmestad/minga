@@ -44,7 +44,7 @@ defmodule MingaEditor.Input.AgentNav do
     else
       view = AgentAccess.view(state)
 
-      case view.focus do
+      case UIState.View.focus(view) do
         :chat -> handle_chat_nav(state, cp, mods)
         :file_viewer -> handle_viewer_nav(state, cp, mods)
       end

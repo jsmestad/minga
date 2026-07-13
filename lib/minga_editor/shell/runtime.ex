@@ -141,32 +141,6 @@ defmodule MingaEditor.Shell.Runtime do
       else: runtime
   end
 
-  @doc "Merges renderer-owned click regions into a matching active shell state."
-  @spec merge_renderer_observation(t(), atom(), Identity.t(), map()) :: t()
-  def merge_renderer_observation(
-        %__MODULE__{} = runtime,
-        shell_id,
-        %Identity{} = identity,
-        fields
-      ) do
-    if runtime.entry.id == shell_id and Identity.matches?(identity, runtime.entry) do
-      state = Enum.reduce(fields, runtime.state, &merge_renderer_field/2)
-      %__MODULE__{runtime | state: state}
-    else
-      runtime
-    end
-  end
-
-  @spec merge_renderer_field({atom(), term()}, shell_state()) :: shell_state()
-  defp merge_renderer_field({field, value}, shell_state) when is_map(shell_state) do
-    case Map.fetch(shell_state, field) do
-      {:ok, _current} -> Map.put(shell_state, field, value)
-      :error -> shell_state
-    end
-  end
-
-  defp merge_renderer_field({_field, _value}, shell_state), do: shell_state
-
   @doc "Installs state returned by persistence for the exact active or stashed registration."
   @spec accept_persisted_state(t(), Entry.t(), shell_state()) :: t()
   def accept_persisted_state(%__MODULE__{} = runtime, %Entry{} = entry, persisted_state) do

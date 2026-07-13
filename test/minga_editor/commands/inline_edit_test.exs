@@ -10,6 +10,7 @@ defmodule MingaEditor.Commands.InlineEditTest do
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.InlineEdit
@@ -30,7 +31,7 @@ defmodule MingaEditor.Commands.InlineEditTest do
     assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) ==
              "Inline edit requires a visual selection"
 
-    assert state |> EditorState.inline_edits() |> InlineEdit.active(buffer) == nil
+    assert state |> AgentAccess.inline_edits() |> InlineEdit.active(buffer) == nil
   end
 
   test "open stores selected lines and header", %{tmp_dir: root} do
@@ -69,7 +70,7 @@ defmodule MingaEditor.Commands.InlineEditTest do
     edit = active_edit(state, buffer) |> InlineEdit.thinking(fake_session)
 
     state =
-      EditorState.set_inline_edits(state, InlineEdit.put(EditorState.inline_edits(state), edit))
+      AgentAccess.replace_inline_edit(state, edit)
 
     state =
       InlineEditEvents.handle_event(
@@ -93,7 +94,7 @@ defmodule MingaEditor.Commands.InlineEditTest do
     edit = active_edit(state, buffer) |> InlineEdit.thinking(session_pid)
 
     state =
-      EditorState.set_inline_edits(state, InlineEdit.put(EditorState.inline_edits(state), edit))
+      AgentAccess.replace_inline_edit(state, edit)
 
     state = InlineEditEvents.handle_prompt_result(state, session_pid, {:error, :provider_down})
 
@@ -111,7 +112,7 @@ defmodule MingaEditor.Commands.InlineEditTest do
     edit = %{active_edit(state, buffer) | proposed_rewrite: "ONE\nTWO"} |> InlineEdit.proposed()
 
     state =
-      EditorState.set_inline_edits(state, InlineEdit.put(EditorState.inline_edits(state), edit))
+      AgentAccess.replace_inline_edit(state, edit)
 
     assert {:handled, state} = InlineEditInput.handle_key(state, ?y, 0)
     assert active_edit(state, buffer) == nil
@@ -127,7 +128,7 @@ defmodule MingaEditor.Commands.InlineEditTest do
     edit = %{active_edit(state, buffer) | proposed_rewrite: "X"} |> InlineEdit.proposed()
 
     state =
-      EditorState.set_inline_edits(state, InlineEdit.put(EditorState.inline_edits(state), edit))
+      AgentAccess.replace_inline_edit(state, edit)
 
     assert {:handled, _state} = InlineEditInput.handle_key(state, ?y, 0)
     assert Buffer.content(buffer) == "X\nthree"
@@ -139,7 +140,7 @@ defmodule MingaEditor.Commands.InlineEditTest do
     edit = %{active_edit(state, buffer) | proposed_rewrite: ""} |> InlineEdit.proposed()
 
     state =
-      EditorState.set_inline_edits(state, InlineEdit.put(EditorState.inline_edits(state), edit))
+      AgentAccess.replace_inline_edit(state, edit)
 
     assert {:handled, _state} = InlineEditInput.handle_key(state, ?y, 0)
     assert Buffer.content(buffer) == "two"
@@ -151,7 +152,7 @@ defmodule MingaEditor.Commands.InlineEditTest do
     edit = %{active_edit(state, buffer) | proposed_rewrite: "ONE"} |> InlineEdit.proposed()
 
     state =
-      EditorState.set_inline_edits(state, InlineEdit.put(EditorState.inline_edits(state), edit))
+      AgentAccess.replace_inline_edit(state, edit)
 
     assert {:handled, state} = InlineEditInput.handle_key(state, ?y, 0)
 
@@ -212,7 +213,7 @@ defmodule MingaEditor.Commands.InlineEditTest do
   end
 
   defp active_edit(state, buffer) do
-    state |> EditorState.inline_edits() |> InlineEdit.active(buffer)
+    state |> AgentAccess.inline_edits() |> InlineEdit.active(buffer)
   end
 
   defp put_visual_selection(state, anchor) do

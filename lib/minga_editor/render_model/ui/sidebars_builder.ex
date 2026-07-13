@@ -5,6 +5,7 @@ defmodule MingaEditor.RenderModel.UI.SidebarsBuilder do
   alias Minga.RenderModel.UI.Sidebars.Sidebar, as: SidebarModel
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Frontend.Emit.Context
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
 
   @spec build(Context.t()) :: Sidebars.t()
   def build(%Context{} = ctx) do
@@ -45,13 +46,19 @@ defmodule MingaEditor.RenderModel.UI.SidebarsBuilder do
   @spec active_sidebar_id(Context.t(), [SidebarModel.t()], Sidebar.entry() | nil) :: String.t()
   defp active_sidebar_id(ctx, sidebars, registered_active) do
     registered_id = active_registered_sidebar_id(sidebars, registered_active)
-    preferred_id = (ctx.shell_state || %{}) |> Map.get(:sidebar_active_id)
+    preferred_id = preferred_sidebar_id(ctx.shell_state)
 
     case registered_id || sidebar_visible_id(sidebars, preferred_id) do
       id when is_binary(id) -> id
       nil -> fallback_active_sidebar_id(sidebars)
     end
   end
+
+  @spec preferred_sidebar_id(term()) :: String.t() | nil
+  defp preferred_sidebar_id(%TraditionalState{} = shell_state),
+    do: TraditionalState.sidebar_active_id(shell_state)
+
+  defp preferred_sidebar_id(_shell_state), do: nil
 
   @spec active_registered_sidebar_id([SidebarModel.t()], Sidebar.entry() | nil) ::
           String.t() | nil

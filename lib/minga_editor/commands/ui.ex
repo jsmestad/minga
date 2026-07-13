@@ -9,6 +9,8 @@ defmodule MingaEditor.Commands.UI do
 
   alias MingaEditor.BottomPanel
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
+  alias MingaEditor.Shell.Traditional.SidebarWorkflow
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.Frontend
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.PickerUI
@@ -98,7 +100,7 @@ defmodule MingaEditor.Commands.UI do
   @spec toggle_beam_observatory(EditorState.t()) :: EditorState.t()
   defp toggle_beam_observatory(state) do
     if observatory_supported?(state) do
-      if EditorState.observatory_visible?(state),
+      if SidebarWorkflow.observatory_visible?(state),
         do: close_beam_observatory(state),
         else: open_beam_observatory(state)
     else
@@ -115,8 +117,7 @@ defmodule MingaEditor.Commands.UI do
 
       state
       |> focus_observatory_sidebar()
-      |> EditorState.open_observatory({timer, token})
-      |> EditorState.set_sidebar_active_id("observatory")
+      |> SidebarWorkflow.open_observatory({timer, token})
     else
       state
     end
@@ -132,11 +133,7 @@ defmodule MingaEditor.Commands.UI do
   @spec close_beam_observatory(EditorState.t()) :: EditorState.t()
   defp close_beam_observatory(state) do
     unsubscribe_observatory()
-    cancel_timer(state.shell_runtime.state.observatory_timer)
-
-    state
-    |> EditorState.close_observatory()
-    |> EditorState.set_sidebar_active_id(nil)
+    SidebarWorkflow.close_observatory(state)
   end
 
   @spec subscribe_observatory() :: :ok
@@ -153,14 +150,6 @@ defmodule MingaEditor.Commands.UI do
     :exit, _ -> :ok
   end
 
-  @spec cancel_timer(reference() | nil) :: :ok
-  defp cancel_timer(nil), do: :ok
-
-  defp cancel_timer({timer, _token}) do
-    Process.cancel_timer(timer)
-    :ok
-  end
-
   @spec observatory_supported?(EditorState.t()) :: boolean()
   defp observatory_supported?(state) do
     observatory_shell_supported?(state) and
@@ -170,12 +159,8 @@ defmodule MingaEditor.Commands.UI do
   end
 
   @spec observatory_shell_supported?(EditorState.t()) :: boolean()
-  defp observatory_shell_supported?(%{shell_runtime: %{state: shell_state}}) do
-    Map.has_key?(shell_state, :observatory_visible) and
-      Map.has_key?(shell_state, :observatory_timer) and
-      Map.has_key?(shell_state, :observatory_data) and
-      Map.has_key?(shell_state, :observatory_inspection)
-  end
+  defp observatory_shell_supported?(%{shell_runtime: %{state: %TraditionalState{}}}), do: true
+  defp observatory_shell_supported?(%EditorState{}), do: false
 
   @spec execute_parser_restart(EditorState.t()) :: EditorState.t()
   defp execute_parser_restart(state) do

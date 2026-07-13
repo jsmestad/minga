@@ -7,6 +7,8 @@ defmodule MingaEditor.Input.Observatory do
 
   alias Minga.Buffer
   alias MingaEditor.Observatory.Inspection
+  alias MingaEditor.Shell.Traditional.Observatory
+  alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.State, as: EditorState
 
   @type state :: EditorState.t()
@@ -15,7 +17,7 @@ defmodule MingaEditor.Input.Observatory do
   @doc "Inspects a process selected in the BEAM Observatory."
   @spec inspect_process(state(), String.t()) :: state()
   def inspect_process(state, "") do
-    EditorState.set_observatory_inspection(state, nil)
+    SidebarWorkflow.inspect_observatory(state, nil)
   end
 
   def inspect_process(state, pid_string) when is_binary(pid_string) do
@@ -24,7 +26,7 @@ defmodule MingaEditor.Input.Observatory do
       |> parse_pid()
       |> build_inspection(state, pid_string)
 
-    EditorState.set_observatory_inspection(state, inspection)
+    SidebarWorkflow.inspect_observatory(state, inspection)
   end
 
   @spec parse_pid(String.t()) :: {:ok, pid()} | :error
@@ -59,7 +61,15 @@ defmodule MingaEditor.Input.Observatory do
   end
 
   @spec find_process_class(state(), pid()) :: process_class()
-  defp find_process_class(%{shell_runtime: %{state: %{observatory_data: %{tree: tree}}}}, pid) do
+  defp find_process_class(state, pid) do
+    case SidebarWorkflow.observatory(state) do
+      %Observatory{} = observatory -> process_class(Observatory.data(observatory), pid)
+      nil -> :worker
+    end
+  end
+
+  @spec process_class(MingaEditor.Observatory.Data.t() | nil, pid()) :: process_class()
+  defp process_class(%{tree: tree}, pid) do
     tree
     |> Minga.SystemObserver.TreeNode.flatten()
     |> Enum.find_value(:worker, fn node ->
@@ -67,7 +77,7 @@ defmodule MingaEditor.Input.Observatory do
     end)
   end
 
-  defp find_process_class(_state, _pid), do: :worker
+  defp process_class(nil, _pid), do: :worker
 
   @spec format_process_state(term(), process_class(), pid()) :: [String.t()]
   defp format_process_state(process_state, :buffer, pid) do

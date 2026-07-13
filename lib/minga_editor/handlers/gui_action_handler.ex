@@ -13,6 +13,8 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   alias Minga.Buffer
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
+  alias MingaEditor.Shell.Traditional.Observatory, as: ObservatoryState
+  alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias Minga.Clipboard
   alias Minga.Editing.Completion
   alias Minga.FileWatcher
@@ -223,15 +225,12 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(
-         %{shell_runtime: %{state: shell_state}} = state,
+         %{shell_runtime: %{state: %MingaEditor.Shell.Traditional.State{}}} = state,
          {:observatory_inspect, pid_string}
-       ) do
-    if Map.has_key?(shell_state, :observatory_inspection) do
-      Observatory.inspect_process(state, pid_string)
-    else
-      state
-    end
-  end
+       ),
+       do: Observatory.inspect_process(state, pid_string)
+
+  defp dispatch_action(state, {:observatory_inspect, _pid_string}), do: state
 
   defp dispatch_action(state, {:timeline_navigate, index}) do
     MingaEditor.Commands.EditTimeline.navigate_to_index(state, index)
@@ -1058,9 +1057,9 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   @spec remember_visible_sidebar(EditorState.t(), String.t()) :: EditorState.t()
   defp remember_visible_sidebar(state, sidebar_id) do
     if sidebar_visible?(state, sidebar_id) do
-      EditorState.set_sidebar_active_id(state, sidebar_id)
+      SidebarWorkflow.select(state, sidebar_id)
     else
-      EditorState.set_sidebar_active_id(state, nil)
+      SidebarWorkflow.select(state, nil)
     end
   end
 
@@ -1072,8 +1071,8 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     |> FileTreeState.visible_status?()
   end
 
-  defp sidebar_visible?(state, "git_status"), do: EditorState.git_status_panel(state) != nil
-  defp sidebar_visible?(state, "observatory"), do: EditorState.observatory_visible?(state)
+  defp sidebar_visible?(state, "git_status"), do: SidebarWorkflow.git_status_panel(state) != nil
+  defp sidebar_visible?(state, "observatory"), do: SidebarWorkflow.observatory_visible?(state)
   defp sidebar_visible?(_state, _sidebar_id), do: false
 
   @spec ignored_sidebar_action(EditorState.t(), String.t(), String.t(), String.t()) ::
@@ -1154,7 +1153,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   @spec git_status_panel_entries(state()) :: [Git.StatusEntry.t()]
   defp git_status_panel_entries(state) do
-    case EditorState.git_status_panel(state) do
+    case SidebarWorkflow.git_status_panel(state) do
       nil -> []
       panel -> Map.get(panel, :entries) || []
     end
@@ -1802,13 +1801,22 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   # (the builder checks it first); otherwise close the :float popup window via
   # the popup lifecycle. Returns state unchanged when neither is present.
   @spec dismiss_float_popup(state()) :: state()
-  defp dismiss_float_popup(
-         %{shell_runtime: %{state: %{observatory_inspection: %{visible: true}}}} = state
-       ) do
-    Observatory.inspect_process(state, "")
+  defp dismiss_float_popup(state) do
+    case SidebarWorkflow.observatory(state) do
+      %ObservatoryState{} = observatory ->
+        dismiss_float_popup(state, ObservatoryState.inspection(observatory))
+
+      nil ->
+        dismiss_window_popup(state)
+    end
   end
 
-  defp dismiss_float_popup(state) do
+  @spec dismiss_float_popup(state(), MingaEditor.Observatory.Inspection.t() | nil) :: state()
+  defp dismiss_float_popup(state, %{visible: true}), do: Observatory.inspect_process(state, "")
+  defp dismiss_float_popup(state, _inspection), do: dismiss_window_popup(state)
+
+  @spec dismiss_window_popup(state()) :: state()
+  defp dismiss_window_popup(state) do
     case find_float_popup_window_id(state) do
       nil -> state
       window_id -> PopupLifecycle.close_popup(state, window_id)

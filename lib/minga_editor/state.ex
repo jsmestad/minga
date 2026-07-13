@@ -32,8 +32,6 @@ defmodule MingaEditor.State do
   alias MingaEditor.BottomPanel
   alias MingaEditor.KeystrokeHistory
   alias MingaEditor.FileTree.Feature, as: FileTreeFeature
-  alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
-  alias MingaEditor.Sidebar.BuiltinSurfaces
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Dired, as: DiredState
@@ -95,7 +93,7 @@ defmodule MingaEditor.State do
   @default_options_server Minga.Config.Options.default_server()
   @default_events_registry Minga.Events.default_registry()
 
-  alias MingaEditor.Observatory
+  alias MingaEditor.Shell.Traditional.ClickRegions
   alias MingaEditor.Shell.Traditional.State, as: ShellState
 
   @enforce_keys [:port_manager, :workspace]
@@ -835,12 +833,17 @@ defmodule MingaEditor.State do
   @spec merge_renderer_receipt(ShellRuntime.t(), MingaEditor.Renderer.RenderReceipt.t()) ::
           ShellRuntime.t()
   defp merge_renderer_receipt(runtime, receipt) do
-    case receipt.shell_identity do
-      %ShellIdentity{} = identity ->
-        ShellRuntime.merge_renderer_observation(runtime, receipt.shell_id, identity, %{
-          modeline_click_regions: receipt.modeline_click_regions,
-          tab_bar_click_regions: receipt.tab_bar_click_regions
-        })
+    case {receipt.shell_identity, receipt.click_regions} do
+      {%ShellIdentity{} = identity, %ClickRegions{} = regions} ->
+        if receipt.shell_id == ShellRuntime.id(runtime) and
+             ShellRuntime.matches_identity?(runtime, identity) do
+          ShellRuntime.update_traditional_state(
+            runtime,
+            &ShellState.install_click_regions(&1, regions)
+          )
+        else
+          runtime
+        end
 
       _missing_or_invalid ->
         runtime
@@ -872,126 +875,11 @@ defmodule MingaEditor.State do
   defp update_traditional_shell_state(%__MODULE__{} = state, fun),
     do: update_shell_state(state, fun)
 
-  @spec set_suppress_tool_prompts(t(), boolean()) :: t()
-  def set_suppress_tool_prompts(s, suppress?) when is_boolean(suppress?) do
-    update_traditional_shell_state(s, &ShellState.set_suppress_tool_prompts(&1, suppress?))
-  end
-
   @spec bottom_panel(t()) :: BottomPanel.t()
   def bottom_panel(%{shell_runtime: %ShellRuntime{state: ss}}), do: ShellState.bottom_panel(ss)
   @spec set_bottom_panel(t(), BottomPanel.t()) :: t()
   def set_bottom_panel(s, panel),
     do: update_traditional_shell_state(s, &ShellState.set_bottom_panel(&1, panel))
-
-  @spec git_status_panel(t()) :: ShellState.git_status_panel() | nil
-  def git_status_panel(%{shell_runtime: %ShellRuntime{state: ss}}),
-    do: ShellState.git_status_panel(ss)
-
-  @spec set_git_status_tui_state(t(), term()) :: t()
-  def set_git_status_tui_state(state, tui_state) do
-    update_traditional_shell_state(
-      state,
-      &ShellState.set_git_status_tui_state(&1, tui_state)
-    )
-  end
-
-  @spec set_git_status_panel(t(), ShellState.git_status_panel() | nil) :: t()
-  def set_git_status_panel(s, nil) do
-    sync_git_status_sidebar(s, nil)
-    update_traditional_shell_state(s, &ShellState.set_git_status_panel(&1, nil))
-  end
-
-  def set_git_status_panel(s, data) do
-    panel = GitStatusPanel.new(data)
-    sync_git_status_sidebar(s, panel)
-    update_traditional_shell_state(s, &ShellState.set_git_status_panel(&1, panel))
-  end
-
-  @spec sync_git_status_sidebar(t(), GitStatusPanel.t() | nil) :: :ok
-  defp sync_git_status_sidebar(state, panel) do
-    case BuiltinSurfaces.sync_git_status_panel(panel, sidebar_registry(state)) do
-      :ok ->
-        :ok
-
-      {:error, reason} ->
-        Log.warning(:editor, "Git Status sidebar sync failed: #{inspect(reason)}")
-    end
-  end
-
-  @spec close_git_status_panel(t()) :: t()
-  def close_git_status_panel(s) do
-    sync_git_status_sidebar(s, nil)
-    update_traditional_shell_state(s, &ShellState.close_git_status_panel/1)
-  end
-
-  @spec sidebar_active_id(t()) :: String.t() | nil
-  def sidebar_active_id(%{
-        shell_runtime: %ShellRuntime{
-          entry: %{module: MingaEditor.Shell.Traditional},
-          state: %{sidebar_active_id: id}
-        }
-      }),
-      do: id
-
-  def sidebar_active_id(_state), do: nil
-
-  @spec set_sidebar_active_id(t(), String.t() | nil) :: t()
-  def set_sidebar_active_id(s, id) when is_binary(id) or is_nil(id) do
-    sync_active_sidebar(s, id)
-
-    update_traditional_shell_state(s, fn ss ->
-      if Map.has_key?(ss, :sidebar_active_id),
-        do: ShellState.set_sidebar_active_id(ss, id),
-        else: ss
-    end)
-  end
-
-  @spec sync_active_sidebar(t(), String.t() | nil) :: :ok
-  defp sync_active_sidebar(state, id) do
-    case MingaEditor.Extension.Sidebar.focus_left(sidebar_registry(state), id) do
-      :ok -> :ok
-      {:error, reason} -> Log.warning(:editor, "Sidebar focus sync failed: #{inspect(reason)}")
-    end
-  end
-
-  @spec observatory_visible?(t()) :: boolean()
-  def observatory_visible?(%{shell_runtime: %ShellRuntime{state: ss}}),
-    do: ShellState.observatory_visible?(ss)
-
-  @spec open_observatory(t(), {reference(), reference()} | nil) :: t()
-  def open_observatory(s, timer) do
-    sync_observatory_sidebar(s, true)
-    update_traditional_shell_state(s, &ShellState.open_observatory(&1, timer))
-  end
-
-  @spec close_observatory(t()) :: t()
-  def close_observatory(s) do
-    sync_observatory_sidebar(s, false)
-    update_traditional_shell_state(s, &ShellState.close_observatory/1)
-  end
-
-  @spec sync_observatory_sidebar(t(), boolean()) :: :ok
-  defp sync_observatory_sidebar(state, visible?) do
-    case BuiltinSurfaces.sync_observatory(visible?, sidebar_registry(state)) do
-      :ok ->
-        :ok
-
-      {:error, reason} ->
-        Log.warning(:editor, "Observatory sidebar sync failed: #{inspect(reason)}")
-    end
-  end
-
-  @spec set_observatory_data(t(), Observatory.Data.t() | nil) :: t()
-  def set_observatory_data(s, data),
-    do: update_traditional_shell_state(s, &ShellState.set_observatory_data(&1, data))
-
-  @spec set_observatory_timer(t(), {reference(), reference()} | nil) :: t()
-  def set_observatory_timer(s, timer),
-    do: update_traditional_shell_state(s, &ShellState.set_observatory_timer(&1, timer))
-
-  @spec set_observatory_inspection(t(), Observatory.Inspection.t() | nil) :: t()
-  def set_observatory_inspection(s, inspection),
-    do: update_traditional_shell_state(s, &ShellState.set_observatory_inspection(&1, inspection))
 
   @spec tab_bar(t()) :: TabBar.t() | nil
   def tab_bar(%{shell_runtime: %ShellRuntime{state: ss}}), do: ShellState.tab_bar(ss)
@@ -1044,50 +932,6 @@ defmodule MingaEditor.State do
       )
 
     apply_shell_runtime_transition(state, runtime)
-  end
-
-  @spec agent(t()) :: AgentState.t()
-  def agent(%{shell_runtime: %ShellRuntime{state: ss}}), do: ShellState.agent(ss)
-  @spec set_agent(t(), AgentState.t()) :: t()
-  def set_agent(s, agent), do: update_traditional_shell_state(s, &ShellState.set_agent(&1, agent))
-
-  @spec inline_asks(t()) :: MingaEditor.State.InlineAsk.store()
-  def inline_asks(%{shell_runtime: %ShellRuntime{state: ss}}), do: ShellState.inline_asks(ss)
-  @spec set_inline_asks(t(), MingaEditor.State.InlineAsk.store()) :: t()
-  def set_inline_asks(s, asks),
-    do: update_traditional_shell_state(s, &ShellState.set_inline_asks(&1, asks))
-
-  @spec inline_edits(t()) :: MingaEditor.State.InlineEdit.store()
-  def inline_edits(%{shell_runtime: %ShellRuntime{state: ss}}), do: ShellState.inline_edits(ss)
-  @spec set_inline_edits(t(), MingaEditor.State.InlineEdit.store()) :: t()
-  def set_inline_edits(s, edits),
-    do: update_traditional_shell_state(s, &ShellState.set_inline_edits(&1, edits))
-
-  @doc "Replaces the Traditional tool-install prompt queue."
-  @spec set_tool_prompt_queue(t(), [atom()]) :: t()
-  def set_tool_prompt_queue(state, queue) do
-    update_traditional_shell_state(state, &ShellState.set_tool_prompt_queue(&1, queue))
-  end
-
-  @doc "Replaces Traditional tool-prompt decisions and pending queue atomically."
-  @spec set_tool_prompt_state(t(), [atom()], MapSet.t(atom())) :: t()
-  def set_tool_prompt_state(state, queue, declined) do
-    update_traditional_shell_state(
-      state,
-      &ShellState.set_tool_prompt_state(&1, queue, declined)
-    )
-  end
-
-  @doc "Sets whether the Traditional CUA space-leader sequence is pending."
-  @spec set_space_leader_pending(t(), boolean()) :: t()
-  def set_space_leader_pending(state, value) do
-    update_traditional_shell_state(state, &ShellState.set_space_leader_pending(&1, value))
-  end
-
-  @doc "Replaces the Traditional CUA space-leader timer."
-  @spec set_space_leader_timer(t(), reference() | nil) :: t()
-  def set_space_leader_timer(state, timer) do
-    update_traditional_shell_state(state, &ShellState.set_space_leader_timer(&1, timer))
   end
 
   # ── Global field accessors ─────────────────────────────────────────────────
@@ -2255,7 +2099,7 @@ defmodule MingaEditor.State do
   Rebuilds the agent rendering cache from the Session process when
   switching to an agent tab. The Session is the source of truth for
   status, pending approval, and error; the cache lives on
-  `state.shell_runtime.state.agent` and is repopulated from the Tab's session
+  the Traditional agent-surface owner and is repopulated from the Tab's session
   pid on every tab switch.
 
   The session pid itself lives on `Tab.session` (see `set_tab_session/3`),
@@ -2313,29 +2157,6 @@ defmodule MingaEditor.State do
   def transition_mode(%__MODULE__{} = state, mode, mode_state \\ nil) do
     update_workspace(state, &SessionState.transition_mode(&1, mode, mode_state))
   end
-
-  # ── Tool prompt helpers ──────────────────────────────────────────────────────
-
-  @doc """
-  Returns true if the given tool should NOT be prompted for installation.
-
-  A tool is skipped when it's already declined this session, already
-  installed, currently being installed, or already in the prompt queue.
-  """
-  @spec skip_tool_prompt?(t(), atom()) :: boolean()
-  def skip_tool_prompt?(
-        %__MODULE__{
-          shell_runtime: %ShellRuntime{
-            entry: %{module: MingaEditor.Shell.Traditional},
-            state: ss
-          }
-        },
-        tool_name
-      ) do
-    ShellState.skip_tool_prompt?(ss, tool_name)
-  end
-
-  def skip_tool_prompt?(%__MODULE__{}, _tool_name), do: true
 
   # ── Buffer lifecycle effect application ──────────────────────────────────────
   #

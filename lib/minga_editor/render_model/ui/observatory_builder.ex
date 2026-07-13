@@ -5,17 +5,21 @@ defmodule MingaEditor.RenderModel.UI.ObservatoryBuilder do
   alias Minga.RenderModel.UI.Observatory.Node
   alias Minga.SystemObserver.TreeNode
   alias MingaEditor.Observatory.Data, as: ObservatoryData
+  alias MingaEditor.Shell.Traditional.Observatory, as: ObservatoryState
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
 
-  @spec build(map()) :: Observatory.t()
-  def build(%{observatory_visible: true, observatory_data: %ObservatoryData{} = data}) do
-    observatory_model(data)
-  end
-
-  def build(%{observatory_visible: true}) do
-    observatory_model(ObservatoryData.visible(nil, []))
+  @spec build(term()) :: Observatory.t()
+  def build(%TraditionalState{} = shell_state) do
+    observatory = TraditionalState.observatory(shell_state)
+    build_observatory(ObservatoryState.visible?(observatory), ObservatoryState.data(observatory))
   end
 
   def build(_shell_state), do: %Observatory{}
+
+  @spec build_observatory(boolean(), ObservatoryData.t() | nil) :: Observatory.t()
+  defp build_observatory(true, %ObservatoryData{} = data), do: observatory_model(data)
+  defp build_observatory(true, nil), do: observatory_model(ObservatoryData.visible(nil, []))
+  defp build_observatory(false, _data), do: %Observatory{}
 
   @spec observatory_model(ObservatoryData.t()) :: Observatory.t()
   defp observatory_model(%ObservatoryData{visible: false}), do: %Observatory{}

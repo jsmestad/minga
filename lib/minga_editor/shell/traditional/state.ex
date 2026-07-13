@@ -2,42 +2,35 @@ defmodule MingaEditor.Shell.Traditional.State do
   @moduledoc """
   Presentation state for the traditional tab-based editor shell.
 
-  These fields are presentation concerns: they control how the editor
-  looks and behaves visually, but have no effect on the core editing
-  model. Each field was migrated from `MingaEditor.State` as part of
-  Phase F of the Core/Shell separation.
-
-  All `set_X`/`get_X` methods that operate on shell fields live here.
-  `MingaEditor.State` retains thin wrappers that delegate through
-  `update_shell_state/2` for backward compatibility.
+  This value coordinates focused owners for sidebar, agent-surface, input,
+  and existing independent transient lifecycles. Effects and Editor-root
+  transitions remain in their focused workflows and handlers.
   """
 
   alias MingaEditor.BottomPanel
   alias MingaEditor.HoverPopup
-  alias MingaEditor.Observatory
+  alias MingaEditor.Shell.Traditional.AgentSurfaces
+  alias MingaEditor.Shell.Traditional.ClickRegions
   alias MingaEditor.Shell.Traditional.Flashes
   alias MingaEditor.Shell.Traditional.GitToast
+  alias MingaEditor.Shell.Traditional.InputState
   alias MingaEditor.Shell.Traditional.Notice
+  alias MingaEditor.Shell.Traditional.Observatory
+  alias MingaEditor.Shell.Traditional.Sidebars
+  alias MingaEditor.Shell.Traditional.SpaceLeader
+  alias MingaEditor.Shell.Traditional.ToolPrompts
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.InlineAsk
   alias MingaEditor.State.InlineEdit
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.WhichKey
-  alias Minga.Tool.Manager, as: ToolManager
   alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
 
   @type git_status_panel :: GitStatusPanel.t()
-  @type git_status_tui_state :: struct()
-  @type tab_bar_command ::
-          atom() | {:workspace_goto, non_neg_integer()} | {:tab_goto_id, pos_integer()}
-  @type tab_bar_click_region ::
-          {col_start :: non_neg_integer(), col_end :: non_neg_integer(),
-           command :: tab_bar_command()}
-          | {row :: non_neg_integer(), col_start :: non_neg_integer(),
-             col_end :: non_neg_integer(), command :: tab_bar_command()}
-
-  @git_status_tui_state_module :"Elixir.MingaGitPorcelain.Shell.Traditional.GitStatus.TuiState"
+  @type git_status_tui_state :: Sidebars.git_status_tui_state()
+  @type tab_bar_command :: ClickRegions.tab_bar_command()
+  @type tab_bar_click_region :: ClickRegions.tab_bar_region()
 
   @type t :: %__MODULE__{
           flashes: Flashes.t(),
@@ -45,27 +38,14 @@ defmodule MingaEditor.Shell.Traditional.State do
           notice: Notice.t(),
           whichkey: WhichKey.t(),
           bottom_panel: BottomPanel.t(),
-          git_status_panel: git_status_panel() | nil,
-          git_status_tui_state: git_status_tui_state() | nil,
-          sidebar_active_id: String.t() | nil,
-          observatory_visible: boolean(),
-          observatory_data: Observatory.Data.t() | nil,
-          observatory_timer: {reference(), reference()} | nil,
-          observatory_inspection: Observatory.Inspection.t() | nil,
+          sidebars: Sidebars.t(),
           git_toast: GitToast.t(),
           tab_bar: TabBar.t() | nil,
-          agent: AgentState.t(),
+          agent_surfaces: AgentSurfaces.t(),
           modal: ModalOverlay.t(),
-          inline_asks: InlineAsk.store(),
-          inline_edits: InlineEdit.store(),
-          modeline_click_regions: [MingaEditor.Shell.Traditional.Modeline.click_region()],
-          tab_bar_click_regions: [tab_bar_click_region()],
+          input: InputState.t(),
           signature_help: MingaEditor.SignatureHelp.t() | nil,
-          tool_declined: MapSet.t(),
-          tool_prompt_queue: [atom()],
-          suppress_tool_prompts: boolean(),
-          space_leader_pending: boolean(),
-          space_leader_timer: reference() | nil
+          tool_prompts: ToolPrompts.t()
         }
 
   defstruct flashes: %Flashes{},
@@ -73,32 +53,19 @@ defmodule MingaEditor.Shell.Traditional.State do
             notice: %Notice{},
             whichkey: %WhichKey{},
             bottom_panel: %BottomPanel{},
-            git_status_panel: nil,
-            git_status_tui_state: nil,
-            sidebar_active_id: nil,
-            observatory_visible: false,
-            observatory_data: nil,
-            observatory_timer: nil,
-            observatory_inspection: nil,
+            sidebars: %Sidebars{},
             git_toast: %GitToast{},
             tab_bar: nil,
-            agent: %AgentState{},
+            agent_surfaces: %AgentSurfaces{},
             modal: :none,
-            inline_asks: %{},
-            inline_edits: %{},
-            modeline_click_regions: [],
-            tab_bar_click_regions: [],
+            input: %InputState{},
             signature_help: nil,
-            tool_declined: MapSet.new(),
-            tool_prompt_queue: [],
-            suppress_tool_prompts: false,
-            space_leader_pending: false,
-            space_leader_timer: nil
+            tool_prompts: %ToolPrompts{}
 
   @doc "Controls whether missing-tool prompts are suppressed."
   @spec set_suppress_tool_prompts(t(), boolean()) :: t()
   def set_suppress_tool_prompts(%__MODULE__{} = state, suppress?) when is_boolean(suppress?) do
-    %{state | suppress_tool_prompts: suppress?}
+    %{state | tool_prompts: ToolPrompts.suppress(state.tool_prompts, suppress?)}
   end
 
   # ── Focused transient owners ──────────────────────────────────────────────
@@ -318,130 +285,94 @@ defmodule MingaEditor.Shell.Traditional.State do
     %{ss | bottom_panel: panel}
   end
 
-  # ── Git status panel ───────────────────────────────────────────────────────
+  # ── Sidebar and Observatory lifecycle ─────────────────────────────────────
+
+  @doc "Returns the focused sidebar aggregate."
+  @spec sidebars(t()) :: Sidebars.t()
+  def sidebars(%__MODULE__{sidebars: sidebars}), do: sidebars
 
   @doc "Returns the git status panel data, or nil."
   @spec git_status_panel(t()) :: git_status_panel() | nil
-  def git_status_panel(%{git_status_panel: data}), do: data
+  def git_status_panel(%__MODULE__{sidebars: sidebars}), do: Sidebars.git_status_panel(sidebars)
 
-  @doc "Sets the git status panel data."
-  @spec set_git_status_panel(t(), git_status_panel() | nil) :: t()
-  def set_git_status_panel(%{} = ss, nil), do: %{ss | git_status_panel: nil}
-
-  def set_git_status_panel(%{} = ss, data) do
-    %{ss | git_status_panel: GitStatusPanel.new(data)}
-  end
+  @doc "Replaces the Git status panel through the sidebar owner."
+  @spec replace_git_status_panel(t(), git_status_panel() | map() | nil) :: t()
+  def replace_git_status_panel(%__MODULE__{} = state, panel),
+    do: %{state | sidebars: Sidebars.replace_git_status(state.sidebars, panel)}
 
   @doc "Returns the TUI-only git status view state, or nil."
   @spec git_status_tui_state(t()) :: git_status_tui_state() | nil
-  def git_status_tui_state(%{git_status_tui_state: tui}), do: tui
+  def git_status_tui_state(%__MODULE__{sidebars: sidebars}),
+    do: Sidebars.git_status_tui_state(sidebars)
 
-  @doc "Sets the TUI-only git status view state."
-  @spec set_git_status_tui_state(t(), git_status_tui_state() | nil) :: t()
-  def set_git_status_tui_state(%{} = ss, nil), do: %{ss | git_status_tui_state: nil}
+  @doc "Replaces the TUI-only Git status view state."
+  @spec replace_git_status_tui_state(t(), git_status_tui_state() | nil) :: t()
+  def replace_git_status_tui_state(%__MODULE__{} = state, tui),
+    do: %{state | sidebars: Sidebars.replace_git_status_tui(state.sidebars, tui)}
 
-  def set_git_status_tui_state(%{} = ss, tui) do
-    if git_status_tui_state?(tui), do: %{ss | git_status_tui_state: tui}, else: ss
-  end
-
-  @doc "Refreshes existing TUI-only git status view state after shared entries change."
-  @spec refresh_git_status_tui_state(t(), [Minga.Git.StatusEntry.t()]) :: t()
-  def refresh_git_status_tui_state(%{git_status_tui_state: nil} = ss, _entries), do: ss
-
-  def refresh_git_status_tui_state(%{git_status_tui_state: tui} = ss, entries) do
-    module = :"Elixir.MingaGitPorcelain.Shell.Traditional.GitStatus.TuiState"
-
-    if git_porcelain_running?() and Code.ensure_loaded?(module) and
-         function_exported?(module, :refresh, 2) do
-      refreshed = :erlang.apply(module, :refresh, [tui, entries])
-
-      if git_status_tui_state?(refreshed), do: %{ss | git_status_tui_state: refreshed}, else: ss
-    else
-      ss
-    end
-  end
-
-  @spec git_status_tui_state?(term()) :: boolean()
-  defp git_status_tui_state?(value) do
-    Code.ensure_loaded?(@git_status_tui_state_module) and
-      is_struct(value, @git_status_tui_state_module)
-  end
-
-  @spec git_porcelain_running?() :: boolean()
-  defp git_porcelain_running? do
-    case Process.whereis(Minga.Extension.Registry) do
-      nil -> false
-      _pid -> git_porcelain_running_in_registry?()
-    end
-  catch
-    :exit, _reason -> false
-  end
-
-  @spec git_porcelain_running_in_registry?() :: boolean()
-  defp git_porcelain_running_in_registry? do
-    case Minga.Extension.Registry.get(:minga_git_porcelain) do
-      {:ok, %{status: :running}} -> true
-      _ -> false
-    end
-  end
-
-  @doc "Clears the git status panel."
+  @doc "Closes the Git status sidebar and its paired TUI state."
   @spec close_git_status_panel(t()) :: t()
-  def close_git_status_panel(%{} = ss) do
-    %{ss | git_status_panel: nil, git_status_tui_state: nil}
-  end
+  def close_git_status_panel(%__MODULE__{} = state),
+    do: %{state | sidebars: Sidebars.close_git_status(state.sidebars)}
 
-  @doc "Returns the active native sidebar id, or nil when the renderer should derive one."
+  @doc "Returns the active native sidebar id."
   @spec sidebar_active_id(t()) :: String.t() | nil
-  def sidebar_active_id(%{sidebar_active_id: id}), do: id
+  def sidebar_active_id(%__MODULE__{sidebars: sidebars}), do: Sidebars.active_id(sidebars)
 
-  @doc "Sets the active native sidebar id."
-  @spec set_sidebar_active_id(t(), String.t() | nil) :: t()
-  def set_sidebar_active_id(%{} = ss, id) when is_binary(id) or is_nil(id) do
-    %{ss | sidebar_active_id: id}
-  end
+  @doc "Selects the active native sidebar id."
+  @spec select_sidebar(t(), String.t() | nil) :: t()
+  def select_sidebar(%__MODULE__{} = state, id),
+    do: %{state | sidebars: Sidebars.select(state.sidebars, id)}
 
-  # ── BEAM Observatory ──────────────────────────────────────────────────────
+  @doc "Returns the BEAM Observatory lifecycle value."
+  @spec observatory(t()) :: Observatory.t()
+  def observatory(%__MODULE__{sidebars: sidebars}), do: Sidebars.observatory(sidebars)
 
   @doc "Returns true when the BEAM Observatory sidebar is visible."
   @spec observatory_visible?(t()) :: boolean()
-  def observatory_visible?(%{observatory_visible: visible}), do: visible
+  def observatory_visible?(%__MODULE__{} = state),
+    do: state |> observatory() |> Observatory.visible?()
 
-  @doc "Opens the BEAM Observatory sidebar."
-  @spec open_observatory(t(), {reference(), reference()} | nil) :: t()
-  def open_observatory(%{} = ss, timer) do
-    %{ss | observatory_visible: true, observatory_timer: timer, observatory_inspection: nil}
-  end
+  @doc "Opens and selects the BEAM Observatory sidebar."
+  @spec open_observatory(t(), Observatory.timer() | nil) :: t()
+  def open_observatory(%__MODULE__{} = state, timer),
+    do: %{state | sidebars: Sidebars.open_observatory(state.sidebars, timer)}
 
   @doc "Closes the BEAM Observatory sidebar."
   @spec close_observatory(t()) :: t()
-  def close_observatory(%{} = ss) do
-    %{
-      ss
-      | observatory_visible: false,
-        observatory_data: nil,
-        observatory_timer: nil,
-        observatory_inspection: nil
-    }
+  def close_observatory(%__MODULE__{} = state),
+    do: %{state | sidebars: Sidebars.close_observatory(state.sidebars)}
+
+  @doc "Expires a matching Observatory refresh token."
+  @spec expire_observatory_refresh(t(), reference()) :: {:collect | :stale, t()}
+  def expire_observatory_refresh(%__MODULE__{} = state, token) do
+    case Sidebars.expire_observatory(state.sidebars, token) do
+      {result, sidebars} -> {result, %{state | sidebars: sidebars}}
+    end
   end
 
-  @doc "Stores the latest BEAM Observatory tree data."
-  @spec set_observatory_data(t(), Observatory.Data.t() | nil) :: t()
-  def set_observatory_data(%{} = ss, data) do
-    %{ss | observatory_data: data}
+  @doc "Completes a matching Observatory refresh and installs the next timer."
+  @spec complete_observatory_refresh(
+          t(),
+          reference(),
+          MingaEditor.Observatory.Data.t(),
+          Observatory.timer()
+        ) :: {:accepted | :stale, t()}
+  def complete_observatory_refresh(%__MODULE__{} = state, token, data, next_timer) do
+    case Sidebars.complete_observatory(state.sidebars, token, data, next_timer) do
+      {result, sidebars} -> {result, %{state | sidebars: sidebars}}
+    end
   end
 
-  @doc "Stores the timer reference for the next BEAM Observatory refresh."
-  @spec set_observatory_timer(t(), {reference(), reference()} | nil) :: t()
-  def set_observatory_timer(%{} = ss, timer) do
-    %{ss | observatory_timer: timer}
-  end
+  @doc "Replaces Observatory data without changing refresh correlation."
+  @spec replace_observatory_data(t(), MingaEditor.Observatory.Data.t() | nil) :: t()
+  def replace_observatory_data(%__MODULE__{} = state, data),
+    do: %{state | sidebars: Sidebars.replace_observatory_data(state.sidebars, data)}
 
-  @doc "Stores process inspection data for the native float popup."
-  @spec set_observatory_inspection(t(), Observatory.Inspection.t() | nil) :: t()
-  def set_observatory_inspection(%{} = ss, inspection) do
-    %{ss | observatory_inspection: inspection}
-  end
+  @doc "Shows or dismisses the Observatory process inspection."
+  @spec inspect_observatory(t(), MingaEditor.Observatory.Inspection.t() | nil) :: t()
+  def inspect_observatory(%__MODULE__{} = state, inspection),
+    do: %{state | sidebars: Sidebars.inspect_observatory(state.sidebars, inspection)}
 
   # ── Tab bar ────────────────────────────────────────────────────────────────
 
@@ -455,17 +386,21 @@ defmodule MingaEditor.Shell.Traditional.State do
     %{ss | tab_bar: tb}
   end
 
-  # ── Agent lifecycle ────────────────────────────────────────────────────────
+  # ── Agent presentation and inline surfaces ────────────────────────────────
 
-  @doc "Returns the agent session lifecycle state."
+  @doc "Returns the focused agent-surface owner."
+  @spec agent_surfaces(t()) :: AgentSurfaces.t()
+  def agent_surfaces(%__MODULE__{agent_surfaces: surfaces}), do: surfaces
+
+  @doc "Returns the agent presentation cache."
   @spec agent(t()) :: AgentState.t()
-  def agent(%{agent: a}), do: a
+  def agent(%__MODULE__{agent_surfaces: surfaces}),
+    do: AgentSurfaces.presentation(surfaces)
 
-  @doc "Replaces the agent session lifecycle state."
-  @spec set_agent(t(), AgentState.t()) :: t()
-  def set_agent(%{} = ss, agent) do
-    %{ss | agent: agent}
-  end
+  @doc "Replaces the agent presentation cache."
+  @spec replace_agent(t(), AgentState.t()) :: t()
+  def replace_agent(%__MODULE__{} = state, agent),
+    do: %{state | agent_surfaces: AgentSurfaces.replace_presentation(state.agent_surfaces, agent)}
 
   # ── Modal overlay ──────────────────────────────────────────────────────────
 
@@ -512,72 +447,147 @@ defmodule MingaEditor.Shell.Traditional.State do
   def dismiss_stale_modal_completion(%__MODULE__{} = state, active_tab_id),
     do: %{state | modal: ModalOverlay.dismiss_if_stale(state.modal, active_tab_id)}
 
-  # ── Inline ask ─────────────────────────────────────────────────────────────
+  # ── Inline agent surfaces ──────────────────────────────────────────────────
 
   @doc "Returns the inline ask store."
-  @spec inline_asks(t() | map()) :: InlineAsk.store()
-  def inline_asks(%{inline_asks: asks}), do: asks
-  def inline_asks(_ss), do: %{}
+  @spec inline_asks(t()) :: InlineAsk.store()
+  def inline_asks(%__MODULE__{agent_surfaces: surfaces}), do: AgentSurfaces.asks(surfaces)
 
-  @doc "Replaces the inline ask store."
-  @spec set_inline_asks(t() | map(), InlineAsk.store()) :: t() | map()
-  def set_inline_asks(%{inline_asks: _} = ss, asks) when is_map(asks) do
-    %{ss | inline_asks: asks}
+  @doc "Activates or replaces an inline ask."
+  @spec activate_inline_ask(t(), InlineAsk.t()) :: t()
+  def activate_inline_ask(%__MODULE__{} = state, ask),
+    do: %{state | agent_surfaces: AgentSurfaces.activate_ask(state.agent_surfaces, ask)}
+
+  @doc "Replaces an inline ask after a leaf transition."
+  @spec replace_inline_ask(t(), InlineAsk.t()) :: t()
+  def replace_inline_ask(%__MODULE__{} = state, ask),
+    do: %{state | agent_surfaces: AgentSurfaces.replace_ask(state.agent_surfaces, ask)}
+
+  @doc "Cancels an inline ask and returns its session pid."
+  @spec cancel_inline_ask(t(), pid() | nil) :: {t(), pid() | nil}
+  def cancel_inline_ask(%__MODULE__{} = state, buffer_pid) do
+    {surfaces, session_pid} = AgentSurfaces.cancel_ask(state.agent_surfaces, buffer_pid)
+    {%{state | agent_surfaces: surfaces}, session_pid}
   end
-
-  def set_inline_asks(ss, _asks), do: ss
 
   @doc "Returns the inline edit store."
-  @spec inline_edits(t() | map()) :: InlineEdit.store()
-  def inline_edits(%{inline_edits: edits}), do: edits
-  def inline_edits(_ss), do: %{}
+  @spec inline_edits(t()) :: InlineEdit.store()
+  def inline_edits(%__MODULE__{agent_surfaces: surfaces}), do: AgentSurfaces.edits(surfaces)
 
-  @doc "Replaces the inline edit store."
-  @spec set_inline_edits(t() | map(), InlineEdit.store()) :: t() | map()
-  def set_inline_edits(%{inline_edits: _} = ss, edits) when is_map(edits) do
-    %{ss | inline_edits: edits}
+  @doc "Activates or replaces an inline edit."
+  @spec activate_inline_edit(t(), InlineEdit.t()) :: t()
+  def activate_inline_edit(%__MODULE__{} = state, edit),
+    do: %{state | agent_surfaces: AgentSurfaces.activate_edit(state.agent_surfaces, edit)}
+
+  @doc "Replaces an inline edit after a leaf transition."
+  @spec replace_inline_edit(t(), InlineEdit.t()) :: t()
+  def replace_inline_edit(%__MODULE__{} = state, edit),
+    do: %{state | agent_surfaces: AgentSurfaces.replace_edit(state.agent_surfaces, edit)}
+
+  @doc "Cancels an inline edit and returns its session pid."
+  @spec cancel_inline_edit(t(), pid() | nil) :: {t(), pid() | nil}
+  def cancel_inline_edit(%__MODULE__{} = state, buffer_pid) do
+    {surfaces, session_pid} = AgentSurfaces.cancel_edit(state.agent_surfaces, buffer_pid)
+    {%{state | agent_surfaces: surfaces}, session_pid}
   end
 
-  def set_inline_edits(ss, _edits), do: ss
+  # ── Tool prompt lifecycle ──────────────────────────────────────────────────
 
-  # ── Tool prompt helpers ────────────────────────────────────────────────────
+  @doc "Returns the focused tool-prompt owner."
+  @spec tool_prompts(t()) :: ToolPrompts.t()
+  def tool_prompts(%__MODULE__{tool_prompts: prompts}), do: prompts
 
-  @doc """
-  Returns true if the given tool should NOT be prompted for installation.
+  @doc "Returns whether a tool was declined or is already queued."
+  @spec tool_prompt_decided?(t(), atom()) :: boolean()
+  def tool_prompt_decided?(%__MODULE__{} = state, tool_name),
+    do: ToolPrompts.decided?(state.tool_prompts, tool_name)
 
-  A tool is skipped when it's already declined this session, already
-  installed, currently being installed, or already in the prompt queue.
-  """
-  @spec skip_tool_prompt?(t(), atom()) :: boolean()
-  def skip_tool_prompt?(%{} = ss, tool_name) do
-    MapSet.member?(ss.tool_declined, tool_name) or
-      ToolManager.installed?(tool_name) or
-      MapSet.member?(ToolManager.installing(), tool_name) or
-      tool_name in ss.tool_prompt_queue
+  @doc "Queues a missing tool once."
+  @spec enqueue_tool_prompt(t(), atom()) :: t()
+  def enqueue_tool_prompt(%__MODULE__{} = state, tool_name),
+    do: %{state | tool_prompts: ToolPrompts.enqueue(state.tool_prompts, tool_name)}
+
+  @doc "Replaces tool-prompt decisions and pending queue atomically."
+  @spec replace_tool_prompts(t(), [atom()], MapSet.t(atom())) :: t()
+  def replace_tool_prompts(%__MODULE__{} = state, queue, declined),
+    do: %{state | tool_prompts: ToolPrompts.replace(state.tool_prompts, queue, declined)}
+
+  @doc "Advances to the next missing-tool prompt."
+  @spec advance_tool_prompt(t()) :: t()
+  def advance_tool_prompt(%__MODULE__{} = state),
+    do: %{state | tool_prompts: ToolPrompts.advance(state.tool_prompts)}
+
+  # ── Input lifecycle ────────────────────────────────────────────────────────
+
+  @doc "Returns Traditional input state."
+  @spec input(t()) :: InputState.t()
+  def input(%__MODULE__{input: input}), do: input
+
+  @doc "Returns the renderer-authored click-region value."
+  @spec click_regions(t()) :: ClickRegions.t()
+  def click_regions(%__MODULE__{input: input}), do: InputState.click_regions(input)
+
+  @doc "Installs both click-region sets from one render."
+  @spec install_click_regions(
+          t(),
+          [MingaEditor.Shell.Traditional.Modeline.click_region()],
+          [ClickRegions.tab_bar_region()]
+        ) :: t()
+  def install_click_regions(%__MODULE__{} = state, modeline, tab_bar),
+    do: %{state | input: InputState.install_click_regions(state.input, modeline, tab_bar)}
+
+  @doc "Installs one already-correlated click-region value."
+  @spec install_click_regions(t(), ClickRegions.t()) :: t()
+  def install_click_regions(%__MODULE__{} = state, %ClickRegions{} = regions),
+    do: %{state | input: InputState.install_click_regions(state.input, regions)}
+
+  @doc "Returns the modeline command under a rendered column."
+  @spec modeline_command_at(t(), non_neg_integer()) :: atom() | nil
+  def modeline_command_at(%__MODULE__{input: input}, col),
+    do: InputState.modeline_command_at(input, col)
+
+  @doc "Returns the tab-bar command under a rendered cell."
+  @spec tab_bar_command_at(t(), non_neg_integer(), non_neg_integer()) ::
+          tab_bar_command() | nil
+  def tab_bar_command_at(%__MODULE__{input: input}, row, col),
+    do: InputState.tab_bar_command_at(input, row, col)
+
+  @doc "Resets all renderer-authored click regions."
+  @spec reset_click_regions(t()) :: t()
+  def reset_click_regions(%__MODULE__{} = state),
+    do: %{state | input: InputState.reset_click_regions(state.input)}
+
+  @doc "Begins a new space-leader generation."
+  @spec begin_space_leader(t()) :: {SpaceLeader.generation(), t()}
+  def begin_space_leader(%__MODULE__{} = state) do
+    {generation, input} = InputState.begin_space_leader(state.input)
+    {generation, %{state | input: input}}
   end
 
-  @doc "Replaces the pending tool-install prompt queue."
-  @spec set_tool_prompt_queue(t(), [atom()]) :: t()
-  def set_tool_prompt_queue(%__MODULE__{} = state, queue) when is_list(queue) do
-    %{state | tool_prompt_queue: queue}
+  @doc "Records the current space-leader timer."
+  @spec install_space_leader_timer(t(), SpaceLeader.generation(), reference()) :: t()
+  def install_space_leader_timer(%__MODULE__{} = state, generation, timer),
+    do: %{state | input: InputState.install_space_leader_timer(state.input, generation, timer)}
+
+  @doc "Expires only the matching space-leader generation."
+  @spec expire_space_leader(t(), SpaceLeader.generation()) :: {:expired | :stale, t()}
+  def expire_space_leader(%__MODULE__{} = state, generation) do
+    case InputState.expire_space_leader(state.input, generation) do
+      {result, input} -> {result, %{state | input: input}}
+    end
   end
 
-  @doc "Replaces tool-prompt decisions and the pending queue atomically."
-  @spec set_tool_prompt_state(t(), [atom()], MapSet.t(atom())) :: t()
-  def set_tool_prompt_state(%__MODULE__{} = state, queue, declined)
-      when is_list(queue) do
-    %{state | tool_prompt_queue: queue, tool_declined: declined}
-  end
+  @doc "Returns whether the space-leader window is pending."
+  @spec space_leader_pending?(t()) :: boolean()
+  def space_leader_pending?(%__MODULE__{input: input}),
+    do: InputState.space_leader_pending?(input)
 
-  @doc "Sets whether a CUA space leader sequence is pending."
-  @spec set_space_leader_pending(t(), boolean()) :: t()
-  def set_space_leader_pending(%{} = ss, value) when is_boolean(value) do
-    %{ss | space_leader_pending: value}
-  end
+  @doc "Returns the current space-leader timer handle."
+  @spec space_leader_timer(t()) :: reference() | nil
+  def space_leader_timer(%__MODULE__{input: input}), do: InputState.space_leader_timer(input)
 
-  @doc "Sets the CUA space leader timer reference."
-  @spec set_space_leader_timer(t(), reference() | nil) :: t()
-  def set_space_leader_timer(%{} = ss, timer) do
-    %{ss | space_leader_timer: timer}
-  end
+  @doc "Resets the current space-leader window."
+  @spec reset_space_leader(t()) :: t()
+  def reset_space_leader(%__MODULE__{} = state),
+    do: %{state | input: InputState.reset_space_leader(state.input)}
 end

@@ -54,10 +54,8 @@ defmodule MingaEditor.Commands.InlineAsk do
         context_text(state, buffer_pid, line)
       )
 
-    asks = state |> EditorState.inline_asks() |> InlineAsk.put(ask)
-
     state
-    |> EditorState.set_inline_asks(asks)
+    |> AgentAccess.replace_inline_ask(ask)
     |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("Inline ask: type a question")
   end
 
@@ -156,8 +154,8 @@ defmodule MingaEditor.Commands.InlineAsk do
 
   @spec dismiss_without_stop(state(), pid()) :: state()
   defp dismiss_without_stop(state, buffer_pid) when is_pid(buffer_pid) do
-    {asks, _session_pid} = state |> EditorState.inline_asks() |> InlineAsk.dismiss(buffer_pid)
-    EditorState.set_inline_asks(state, asks)
+    {state, _session_pid} = AgentAccess.cancel_inline_ask(state, buffer_pid)
+    state
   end
 
   @spec file_ref_for_active_buffer(state(), pid()) ::

@@ -6,6 +6,7 @@ defmodule MingaEditor.Renderer.BufferChangesTest do
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.Renderer.BufferChanges
   alias MingaEditor.Renderer.State
+  alias MingaEditor.Shell.Traditional.ClickRegions
   alias MingaEditor.State.Windows
   alias MingaEditor.UI.Theme.Fallback
   alias MingaEditor.Window
@@ -117,8 +118,7 @@ defmodule MingaEditor.Renderer.BufferChangesTest do
       focus_tree: nil,
       shell_id: :traditional,
       shell_identity: nil,
-      modeline_click_regions: [],
-      tab_bar_click_regions: [],
+      click_regions: %ClickRegions{},
       frame_seq: 1,
       keyframe?: false,
       render_sent_at: 0

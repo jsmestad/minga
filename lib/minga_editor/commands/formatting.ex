@@ -14,6 +14,8 @@ defmodule MingaEditor.Commands.Formatting do
   alias MingaEditor.EffectScheduler
   alias MingaEditor.Effects.ExternalFormat
   alias MingaEditor.LSP.FormatLifecycle
+  alias MingaEditor.Shell.Traditional.ToolPrompts
+  alias MingaEditor.Shell.Traditional.ToolPromptWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.State.OperationFeedback
@@ -235,7 +237,7 @@ defmodule MingaEditor.Commands.Formatting do
         )
 
       recipe ->
-        if EditorState.skip_tool_prompt?(state, recipe.name) do
+        if ToolPromptWorkflow.skip?(state, recipe.name) do
           MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
             state,
             "Formatter not found: #{command}"
@@ -248,18 +250,18 @@ defmodule MingaEditor.Commands.Formatting do
 
   @spec queue_and_show_prompt(state(), atom()) :: state()
   defp queue_and_show_prompt(%{workspace: %{editing: %{mode: :normal}}} = state, tool_name) do
-    queue = Enum.concat(state.shell_runtime.state.tool_prompt_queue, [tool_name])
-    state = EditorState.set_tool_prompt_queue(state, queue)
-    ms = %ToolConfirmState{pending: queue, declined: state.shell_runtime.state.tool_declined}
+    state = ToolPromptWorkflow.enqueue(state, tool_name)
+    prompts = ToolPromptWorkflow.prompts(state)
+
+    ms = %ToolConfirmState{
+      pending: ToolPrompts.queue(prompts),
+      declined: ToolPrompts.declined(prompts)
+    }
+
     EditorState.transition_mode(state, :tool_confirm, ms)
   end
 
-  defp queue_and_show_prompt(state, tool_name) do
-    EditorState.set_tool_prompt_queue(
-      state,
-      Enum.concat(state.shell_runtime.state.tool_prompt_queue, [tool_name])
-    )
-  end
+  defp queue_and_show_prompt(state, tool_name), do: ToolPromptWorkflow.enqueue(state, tool_name)
 
   command(:format_buffer, "Format buffer", requires_buffer: true, execute: &format_buffer/1)
 end

@@ -11,6 +11,8 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   alias MingaAgent.Session
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
+  alias MingaEditor.Shell.Traditional.ToolPrompts
+  alias MingaEditor.Shell.Traditional.ToolPromptWorkflow
   alias MingaAgent.ProjectView
   alias Minga.Buffer
   alias Minga.Project.FileRef, as: ProjectFileRef
@@ -2356,29 +2358,34 @@ defmodule MingaEditor.Commands.BufferManagement do
         state
 
       recipe ->
-        if EditorState.skip_tool_prompt?(state, recipe.name) do
+        if ToolPromptWorkflow.skip?(state, recipe.name) do
           state
         else
-          queue = Enum.concat(state.shell_runtime.state.tool_prompt_queue, [recipe.name])
-          state = EditorState.set_tool_prompt_queue(state, queue)
-          show_tool_prompt_if_normal(state)
+          state
+          |> ToolPromptWorkflow.enqueue(recipe.name)
+          |> show_tool_prompt_if_normal()
         end
     end
   end
 
   @spec show_tool_prompt_if_normal(state()) :: state()
-  defp show_tool_prompt_if_normal(
-         %{
-           workspace: %{editing: %{mode: :normal}},
-           shell_runtime: %{state: %{tool_prompt_queue: pending}}
-         } = state
-       )
-       when pending != [] do
-    ms = %ToolConfirmState{pending: pending, declined: state.shell_runtime.state.tool_declined}
-    EditorState.transition_mode(state, :tool_confirm, ms)
+  defp show_tool_prompt_if_normal(%{workspace: %{editing: %{mode: :normal}}} = state) do
+    prompts = ToolPromptWorkflow.prompts(state)
+    show_tool_prompt(state, ToolPrompts.queue(prompts), ToolPrompts.declined(prompts))
   end
 
   defp show_tool_prompt_if_normal(state), do: state
+
+  @spec show_tool_prompt(state(), [atom()], MapSet.t(atom())) :: state()
+  defp show_tool_prompt(state, [], _declined), do: state
+
+  defp show_tool_prompt(state, pending, declined) do
+    EditorState.transition_mode(
+      state,
+      :tool_confirm,
+      %ToolConfirmState{pending: pending, declined: declined}
+    )
+  end
 
   @spec apply_whitespace_transforms(pid()) :: :ok
   defp apply_whitespace_transforms(buf) do

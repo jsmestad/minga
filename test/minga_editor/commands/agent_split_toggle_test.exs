@@ -3,7 +3,6 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
 
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
-  alias MingaEditor.Agent.View.Preview
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.Shell.Runtime
@@ -44,15 +43,19 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
         visible: false,
         input_focused: false,
         prompt_buffer: prompt_buf
-      },
-      view: %UIState.View{
-        active: active,
-        focus: :chat,
-        preview: Preview.new(),
-        saved_windows: Keyword.get(opts, :saved_windows, nil),
-        saved_file_tree: Keyword.get(opts, :saved_file_tree, nil)
       }
     }
+
+    agentic =
+      if active do
+        UIState.activate(
+          agentic,
+          Keyword.get(opts, :saved_windows),
+          Keyword.get(opts, :saved_file_tree)
+        )
+      else
+        agentic
+      end
 
     file_tab = Tab.new_file(1, "test.ex")
     tb = TabBar.new(file_tab)
@@ -76,7 +79,13 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),
-          %MingaEditor.Shell.Traditional.State{agent: agent, tab_bar: tb}
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Traditional.State.replace_agent(
+              %MingaEditor.Shell.Traditional.State{},
+              agent
+            ),
+            tb
+          )
         )
     }
 
@@ -104,11 +113,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
         |> TabBar.update_context(at.id, agent_ctx)
         |> TabBar.switch_to(file_tab.id)
 
-      state =
-        put_in(state.workspace.agent_ui, %{
-          agentic
-          | view: %{agentic.view | active: true, focus: :chat}
-        })
+      state = put_in(state.workspace.agent_ui, agentic)
 
       state = MingaEditor.State.set_tab_bar(state, tb)
 

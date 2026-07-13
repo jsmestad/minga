@@ -1174,8 +1174,7 @@ defmodule MingaEditor.Shell.RegistryTest do
       focus_tree: :rendered_focus_tree,
       shell_id: :fake,
       shell_identity: input.shell_identity,
-      modeline_click_regions: [{:old, 1}],
-      tab_bar_click_regions: [],
+      click_regions: nil,
       frame_seq: 1,
       keyframe?: false,
       render_sent_at: 0

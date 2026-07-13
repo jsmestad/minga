@@ -4,6 +4,7 @@ defmodule MingaEditor.State.EventRoutingTest do
   alias MingaEditor.Agent.Events, as: AgentEvents
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
@@ -26,10 +27,11 @@ defmodule MingaEditor.State.EventRoutingTest do
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),
-          %MingaEditor.Shell.Traditional.State{
-            tab_bar: tb,
-            agent: %AgentState{runtime: %RuntimeState{status: :idle}}
-          }
+          %TraditionalState{}
+          |> TraditionalState.replace_agent(%AgentState{
+            runtime: %RuntimeState{status: :idle}
+          })
+          |> TraditionalState.set_tab_bar(tb)
         )
     }
 

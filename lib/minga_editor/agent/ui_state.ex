@@ -546,13 +546,18 @@ defmodule MingaEditor.Agent.UIState do
   end
 
   @doc "Activates the view, saving the current window layout."
-  @spec activate(t(), Windows.t(), FileTreeState.t()) :: t()
+  @spec activate(t(), Windows.t() | nil, FileTreeState.t() | nil) :: t()
   def activate(%__MODULE__{view: view} = state, windows, file_tree) do
     %{state | view: View.activate(view, windows, file_tree)}
   end
 
   @doc "Activates the view with a recorded editor return target."
-  @spec activate(t(), Windows.t(), FileTreeState.t(), View.return_target() | nil) :: t()
+  @spec activate(
+          t(),
+          Windows.t() | nil,
+          FileTreeState.t() | nil,
+          View.return_target() | nil
+        ) :: t()
   def activate(%__MODULE__{view: view} = state, windows, file_tree, return_target) do
     %{state | view: View.activate(view, windows, file_tree, return_target)}
   end

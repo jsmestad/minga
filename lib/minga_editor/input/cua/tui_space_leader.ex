@@ -29,6 +29,8 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
 
   alias Minga.Buffer
   alias MingaEditor.Commands
+  alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias Minga.Keymap
   alias Minga.Keymap.Bindings
@@ -53,15 +55,9 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
         end
       end
 
-      # Start the timeout timer
-      timer = Process.send_after(self(), :space_leader_timeout, @timeout_ms)
-
-      state =
-        state
-        |> put_space_leader_pending(true)
-        |> put_space_leader_timer(timer)
-
-      {:handled, state}
+      {generation, state} = begin_window(state)
+      timer = Process.send_after(self(), {:space_leader_timeout, generation}, @timeout_ms)
+      {:handled, install_timer(state, generation, timer)}
     else
       {:passthrough, state}
     end
@@ -82,8 +78,7 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
         ) ::
           MingaEditor.Input.Handler.result()
   defp handle_non_space_key(state, cp, mods, true, _node) do
-    state = cancel_timer(state)
-    state = put_space_leader_pending(state, false)
+    state = cancel(state)
 
     trie = leader_trie(state)
     key = {cp, mods}
@@ -107,17 +102,30 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
     {:passthrough, state}
   end
 
-  @doc """
-  Handles the timeout message. Called from Editor's handle_info.
+  @doc "Expires a matching timeout generation and ignores stale deliveries."
+  @spec handle_timeout(EditorState.t(), non_neg_integer()) :: EditorState.t()
+  def handle_timeout(%EditorState{} = state, generation) do
+    case Runtime.state(state.shell_runtime) do
+      %TraditionalState{} = shell_state ->
+        {_result, shell_state} = TraditionalState.expire_space_leader(shell_state, generation)
+        install_shell_state(state, shell_state)
 
-  The space was real (no follow-up key within the timeout window).
-  Clear the pending state.
-  """
-  @spec handle_timeout(EditorState.t()) :: EditorState.t()
-  def handle_timeout(state) do
-    state
-    |> put_space_leader_pending(false)
-    |> put_space_leader_timer(nil)
+      _extension_state ->
+        state
+    end
+  end
+
+  @doc "Cancels and resets the current timeout window."
+  @spec cancel(EditorState.t()) :: EditorState.t()
+  def cancel(%EditorState{} = state) do
+    case Runtime.state(state.shell_runtime) do
+      %TraditionalState{} = shell_state ->
+        cancel_timer(TraditionalState.space_leader_timer(shell_state))
+        install_shell_state(state, TraditionalState.reset_space_leader(shell_state))
+
+      _extension_state ->
+        state
+    end
   end
 
   @doc """
@@ -128,7 +136,8 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
   """
   @spec active?(map()) :: boolean()
   def active?(state) do
-    Minga.Editing.active_model(state) == Minga.Editing.Model.CUA and
+    match?(%TraditionalState{}, Runtime.state(state.shell_runtime)) and
+      Minga.Editing.active_model(state) == Minga.Editing.Model.CUA and
       Minga.Config.get(:space_leader) == :chord and
       state.backend == :tui
   catch
@@ -138,7 +147,9 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
   # ── Private ──────────────────────────────────────────────────────────────
 
   @spec pending?(map()) :: boolean()
-  defp pending?(%{shell_runtime: %{state: %{space_leader_pending: true}}}), do: true
+  defp pending?(%{shell_runtime: %{state: %TraditionalState{} = shell_state}}),
+    do: TraditionalState.space_leader_pending?(shell_state)
+
   defp pending?(_state), do: false
 
   @spec active_leader_node(EditorState.t()) :: Bindings.node_t() | nil
@@ -146,22 +157,37 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
     if active?(state), do: state.shell_runtime.state.whichkey.node, else: nil
   end
 
-  @spec put_space_leader_pending(EditorState.t(), boolean()) :: EditorState.t()
-  defp put_space_leader_pending(state, value) do
-    EditorState.set_space_leader_pending(state, value)
+  @spec begin_window(EditorState.t()) :: {non_neg_integer(), EditorState.t()}
+  defp begin_window(%EditorState{} = state) do
+    %TraditionalState{} = shell_state = Runtime.state(state.shell_runtime)
+    {generation, shell_state} = TraditionalState.begin_space_leader(shell_state)
+    {generation, install_shell_state(state, shell_state)}
   end
 
-  @spec put_space_leader_timer(EditorState.t(), reference() | nil) :: EditorState.t()
-  defp put_space_leader_timer(state, timer) do
-    EditorState.set_space_leader_timer(state, timer)
+  @spec install_timer(EditorState.t(), non_neg_integer(), reference()) :: EditorState.t()
+  defp install_timer(%EditorState{} = state, generation, timer) do
+    %TraditionalState{} = shell_state = Runtime.state(state.shell_runtime)
+
+    install_shell_state(
+      state,
+      TraditionalState.install_space_leader_timer(shell_state, generation, timer)
+    )
   end
 
-  @spec cancel_timer(EditorState.t()) :: EditorState.t()
-  defp cancel_timer(%{shell_runtime: %{state: %{space_leader_timer: nil}}} = state), do: state
+  @spec install_shell_state(EditorState.t(), TraditionalState.t()) :: EditorState.t()
+  defp install_shell_state(%EditorState{} = state, %TraditionalState{} = shell_state) do
+    runtime =
+      Runtime.update_traditional_state(state.shell_runtime, fn _current -> shell_state end)
 
-  defp cancel_timer(%{shell_runtime: %{state: %{space_leader_timer: timer}}} = state) do
+    EditorState.apply_shell_runtime_transition(state, runtime)
+  end
+
+  @spec cancel_timer(reference() | nil) :: :ok
+  defp cancel_timer(nil), do: :ok
+
+  defp cancel_timer(timer) when is_reference(timer) do
     Process.cancel_timer(timer)
-    put_space_leader_timer(state, nil)
+    :ok
   end
 
   @spec retract_space(EditorState.t()) :: EditorState.t()

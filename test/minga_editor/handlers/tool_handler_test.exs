@@ -9,7 +9,7 @@ defmodule MingaEditor.Handlers.ToolHandlerTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.Handlers.ToolHandler
-  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Shell.Traditional.ToolPromptWorkflow
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -156,7 +156,7 @@ defmodule MingaEditor.Handlers.ToolHandlerTest do
   describe "tool_missing (suppressed)" do
     test "returns log effect when prompts are suppressed" do
       state = base_state()
-      state = EditorState.set_suppress_tool_prompts(state, true)
+      state = ToolPromptWorkflow.suppress(state, true)
 
       event = {:minga_event, :tool_missing, %Minga.Events.ToolMissingEvent{command: "rg"}}
       {new_state, effects} = ToolHandler.handle(state, event)

@@ -24,18 +24,17 @@ defmodule MingaEditor.Input.AgentNavTest do
       Scroll.new(Keyword.get(opts, :offset, 5))
       |> Scroll.update_metrics(40, 10)
 
-    agent_ui = %UIState{
-      panel: %UIState.Panel{
-        visible: true,
-        input_focused: Keyword.get(opts, :input_focused, false),
-        scroll: scroll,
-        prompt_buffer: prompt_buf
-      },
-      view: %UIState.View{
-        active: true,
-        focus: Keyword.get(opts, :focus, :chat)
+    agent_ui =
+      %UIState{
+        panel: %UIState.Panel{
+          visible: true,
+          input_focused: Keyword.get(opts, :input_focused, false),
+          scroll: scroll,
+          prompt_buffer: prompt_buf
+        }
       }
-    }
+      |> UIState.activate(nil, nil)
+      |> UIState.set_focus(Keyword.get(opts, :focus, :chat))
 
     window = Window.new_agent_chat(1, 24, 80)
 
@@ -56,7 +55,10 @@ defmodule MingaEditor.Input.AgentNavTest do
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),
-          %MingaEditor.Shell.Traditional.State{agent: %AgentState{}}
+          MingaEditor.Shell.Traditional.State.replace_agent(
+            %MingaEditor.Shell.Traditional.State{},
+            %AgentState{}
+          )
         )
     }
   end

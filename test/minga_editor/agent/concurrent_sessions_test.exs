@@ -41,10 +41,13 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       shell_runtime:
         Runtime.new(
           Registry.get(:traditional),
-          %MingaEditor.Shell.Traditional.State{
-            agent: %AgentState{},
-            tab_bar: tb
-          }
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Traditional.State.replace_agent(
+              %MingaEditor.Shell.Traditional.State{},
+              %AgentState{}
+            ),
+            tb
+          )
         )
     }
   end
@@ -179,7 +182,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
     end
 
     test "switch_tab repopulates the rendering cache from the incoming tab's session" do
-      # The session struct on shell_state.agent is a rendering cache,
+      # The Traditional agent-surface presentation value is a rendering cache,
       # not the source of truth. After switch_tab/2, status/error/
       # pending_approval should reflect the *incoming* tab's session.
       {:ok, session_a} = StubServer.start_link()
