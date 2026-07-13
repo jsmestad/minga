@@ -53,9 +53,8 @@ defmodule MingaEditor.Input.GlobalBindingsTest do
       {Task,
        fn ->
          receive do
-           {:"$gen_call", from, {:cancel_request, ref}} ->
+           {:"$gen_cast", {:cancel_request, ref}} ->
              send(parent, {:cancel_request, ref})
-             GenServer.reply(from, :ok)
          end
        end},
       id: {:fake_client, make_ref()}

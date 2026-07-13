@@ -1023,7 +1023,8 @@ defmodule MingaEditor.LspActions do
     EditorState.set_status(state, "Format error: LSP request failed")
   end
 
-  def handle_formatting_response(state, {:ok, nil}, _buf, _version, _encoding) do
+  def handle_formatting_response(state, {:ok, response}, _buf, _version, _encoding)
+      when response in [nil, []] do
     EditorState.set_status(state, "No formatting changes")
   end
 
@@ -1045,6 +1046,11 @@ defmodule MingaEditor.LspActions do
       {:error, :not_alive} ->
         EditorState.set_status(state, "Buffer closed, format skipped")
     end
+  end
+
+  def handle_formatting_response(state, {:ok, malformed}, _buf, _version, _encoding) do
+    Log.warning(:lsp, "Invalid LSP formatting response: #{inspect(malformed)}")
+    EditorState.set_status(state, "Invalid LSP formatting response skipped")
   end
 
   # ── Type definition / Implementation responses ────────────────────────────

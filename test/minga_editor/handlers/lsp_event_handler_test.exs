@@ -218,29 +218,34 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
   end
 
   describe "formatting response" do
-    test "applies edits when buffer version matches" do
-      state = base_state()
-      buf = state.workspace.buffers.active
-      version = Minga.Buffer.version(buf)
-      ref = make_ref()
-      state = track_format(state, ref, buf, version)
+    for {encoding, start_col, end_col} <- [utf8: {5, 6}, utf16: {3, 4}, utf32: {2, 3}] do
+      test "applies emoji-adjacent edits using negotiated #{encoding}" do
+        encoding = unquote(encoding)
+        start_col = unquote(start_col)
+        end_col = unquote(end_col)
+        state = buffer_state("a😀b\n")
+        buf = state.workspace.buffers.active
+        version = Minga.Buffer.version(buf)
+        ref = make_ref()
+        state = track_format(state, ref, buf, version, encoding: encoding)
 
-      edits = [
-        %{
-          "range" => %{
-            "start" => %{"line" => 0, "character" => 0},
-            "end" => %{"line" => 0, "character" => 8}
-          },
-          "newText" => "LINE ONE"
-        }
-      ]
+        edits = [
+          %{
+            "range" => %{
+              "start" => %{"line" => 0, "character" => start_col},
+              "end" => %{"line" => 0, "character" => end_col}
+            },
+            "newText" => "B"
+          }
+        ]
 
-      {new_state, effects} =
-        LspEventHandler.handle(state, {:lsp_response, ref, {:ok, edits}})
+        {new_state, effects} =
+          LspEventHandler.handle(state, {:lsp_response, ref, {:ok, edits}})
 
-      assert effects == [:render_now]
-      refute LSPState.format_active?(new_state.lsp, ref)
-      assert Minga.Buffer.content(buf) =~ "LINE ONE"
+        assert effects == [:render_now]
+        assert Minga.Buffer.content(buf) == "a😀B\n"
+        refute LSPState.format_active?(new_state.lsp, ref)
+      end
     end
 
     test "skips edits when buffer version changed (staleness guard)" do
@@ -315,7 +320,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       {new_state, effects} = Task.await(task)
 
       assert effects == [:render_now]
-      assert Minga.Buffer.content(buf) =~ "!line one"
+      assert Minga.Buffer.content(buf) == "!line one\nline two\nline three"
       assert EditorState.status_msg(new_state) =~ "Buffer changed"
     end
 
@@ -385,6 +390,45 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       assert EditorState.status_msg(new_state) =~ "No formatting changes"
     end
 
+    test "empty edits release ownership without changing buffer state" do
+      state = base_state()
+      buf = state.workspace.buffers.active
+      ref = make_ref()
+      content = Minga.Buffer.content(buf)
+      version = Minga.Buffer.version(buf)
+      dirty? = Minga.Buffer.dirty?(buf)
+      cursor = Minga.Buffer.cursor(buf)
+      undo_source = BufferProcess.last_undo_source(buf)
+      state = track_format(state, ref, buf, version)
+
+      {new_state, effects} =
+        LspEventHandler.handle(state, {:lsp_response, ref, {:ok, []}})
+
+      assert effects == [:render_now]
+      assert Minga.Buffer.content(buf) == content
+      assert Minga.Buffer.version(buf) == version
+      assert Minga.Buffer.dirty?(buf) == dirty?
+      assert Minga.Buffer.cursor(buf) == cursor
+      assert BufferProcess.last_undo_source(buf) == undo_source
+      refute LSPState.format_active?(new_state.lsp, ref)
+      assert EditorState.status_msg(new_state) == "No formatting changes"
+    end
+
+    test "malformed successful response is skipped without crashing the handler" do
+      state = base_state()
+      buf = state.workspace.buffers.active
+      ref = make_ref()
+      state = track_format(state, ref, buf, Minga.Buffer.version(buf))
+
+      {new_state, effects} =
+        LspEventHandler.handle(state, {:lsp_response, ref, {:ok, %{"edits" => :invalid}}})
+
+      assert effects == [:render_now]
+      assert Minga.Buffer.content(buf) == "line one\nline two\nline three"
+      refute LSPState.format_active?(new_state.lsp, ref)
+      assert EditorState.status_msg(new_state) == "Invalid LSP formatting response skipped"
+    end
+
     test "handles error response" do
       state = base_state()
       buf = state.workspace.buffers.active
@@ -426,7 +470,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
       assert effects == [:render_now]
       assert Minga.Buffer.content(buf) == "line one\nline two\nline three"
-      assert new_state.shell_state.status_msg =~ "Invalid LSP"
+      assert EditorState.status_msg(new_state) =~ "Invalid LSP"
     end
   end
 
@@ -615,9 +659,8 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
         GenServer.reply(from, :utf16)
         fake_lsp_client_loop(parent)
 
-      {:"$gen_call", from, {:cancel_request, ref}} ->
+      {:"$gen_cast", {:cancel_request, ref}} ->
         send(parent, {:lsp_cancel, ref})
-        GenServer.reply(from, :ok)
         fake_lsp_client_loop(parent)
 
       {:"$gen_cast", {:async_request, method, params, caller, ref}} ->

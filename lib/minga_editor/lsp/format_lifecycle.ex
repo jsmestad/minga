@@ -38,14 +38,6 @@ defmodule MingaEditor.LSP.FormatLifecycle do
   @spec cancel(FormatOperation.t()) :: :ok
   def cancel(%FormatOperation{} = operation) do
     finish(operation)
-
-    try do
-      case Client.cancel_request(operation.client, operation.ref) do
-        :ok -> :ok
-        {:error, :not_found} -> :ok
-      end
-    catch
-      :exit, _reason -> :ok
-    end
+    Client.cancel_request(operation.client, operation.ref)
   end
 end

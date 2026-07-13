@@ -155,10 +155,10 @@ defmodule Minga.LSP.Client do
     ref
   end
 
-  @doc "Cancels an asynchronous request by the opaque reference returned from `request/3`."
-  @spec cancel_request(GenServer.server(), reference()) :: :ok | {:error, :not_found}
+  @doc "Queues cancellation of an asynchronous request by the reference returned from `request/3`."
+  @spec cancel_request(GenServer.server(), reference()) :: :ok
   def cancel_request(server, ref) when is_reference(ref) do
-    GenServer.call(server, {:cancel_request, ref})
+    GenServer.cast(server, {:cancel_request, ref})
   end
 
   @doc """
@@ -381,13 +381,6 @@ defmodule Minga.LSP.Client do
     {:reply, state.started_at, state}
   end
 
-  def handle_call({:cancel_request, ref}, _from, state) do
-    case cancel_request_by_ref(state, ref) do
-      {:ok, state} -> {:reply, :ok, state}
-      {:error, :not_found, state} -> {:reply, {:error, :not_found}, state}
-    end
-  end
-
   def handle_call(:shutdown, from, %{status: :ready} = state) do
     {id, state} = send_request(state, "shutdown", %{})
     state = put_pending(state, id, "shutdown", from)
@@ -494,6 +487,17 @@ defmodule Minga.LSP.Client do
     {id, state} = send_request(state, method, params)
     state = put_pending(state, id, method, {:async, caller, ref})
     {:noreply, state}
+  end
+
+  def handle_cast({:cancel_request, ref}, state) do
+    case cancel_request_by_ref(state, ref) do
+      {:ok, state} ->
+        {:noreply, state}
+
+      {:error, :not_found, state} ->
+        Log.debug(:lsp, "Skipping cancellation for unknown LSP request ref=#{inspect(ref)}")
+        {:noreply, state}
+    end
   end
 
   def handle_cast({:notify_file_changes, changes}, %{status: :ready} = state) do

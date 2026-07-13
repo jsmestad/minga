@@ -281,36 +281,41 @@ defmodule Minga.LSP.ClientTest do
   end
 
   describe "async request/response" do
-    test "request/3 returns unique references while the client stays ready", %{client: client} do
-      ref1 =
-        Client.request(client, "textDocument/completion", %{
-          "textDocument" => %{"uri" => @uri},
-          "position" => %{"line" => 0, "character" => 0}
-        })
+    @tag report_cancellations: true
+    test "completing one concurrent request preserves the other's ref correlation", %{
+      client: client,
+      diag_server: diag_server
+    } do
+      stalled_ref = Client.request(client, "mock/stall", %{})
+      completed_ref = Client.request(client, "textDocument/hover", %{})
 
-      ref2 = Client.request(client, "textDocument/hover", %{})
+      assert is_reference(stalled_ref)
+      assert is_reference(completed_ref)
+      assert stalled_ref != completed_ref
+      assert_receive {:lsp_response, ^completed_ref, {:ok, nil}}
 
-      assert is_reference(ref1)
-      assert is_reference(ref2)
-      assert ref1 != ref2
+      assert Client.cancel_request(client, stalled_ref) == :ok
+      assert_cancel_diagnostic(diag_server)
+      refute_receive {:lsp_response, ^stalled_ref, _result}, 100
       assert Client.status(client) == :ready
     end
 
     @tag report_cancellations: true
-    test "cancel_request/2 maps the opaque ref to a wire cancellation and suppresses delivery", %{
+    test "canceling one concurrent request preserves the other's ref correlation", %{
       client: client,
       diag_server: diag_server
     } do
-      ref = Client.request(client, "mock/stall", %{})
+      canceled_ref = Client.request(client, "mock/stall", %{})
+      assert Client.cancel_request(client, canceled_ref) == :ok
+      completed_ref = Client.request(client, "textDocument/hover", %{})
 
-      assert Client.cancel_request(client, ref) == :ok
-      assert Client.cancel_request(client, ref) == {:error, :not_found}
+      assert_receive {:lsp_response, ^completed_ref, {:ok, nil}}
       assert_cancel_diagnostic(diag_server)
-      refute_receive {:lsp_response, ^ref, _result}, 100
+      refute_receive {:lsp_response, ^canceled_ref, _result}, 100
     end
 
     @tag report_cancellations: true
-    test "an async caller exit cancels its outstanding wire request", %{
+    test "an async caller exit cancels only its request", %{
       client: client,
       diag_server: diag_server
     } do
@@ -323,12 +328,14 @@ defmodule Minga.LSP.ClientTest do
           receive do: (:stop -> :ok)
         end)
 
-      assert_receive {:request_ref, ref}
+      assert_receive {:request_ref, abandoned_ref}
+      completed_ref = Client.request(client, "textDocument/hover", %{})
       monitor = Process.monitor(caller)
       Process.exit(caller, :kill)
       assert_receive {:DOWN, ^monitor, :process, ^caller, :killed}
+      assert_receive {:lsp_response, ^completed_ref, {:ok, nil}}
       assert_cancel_diagnostic(diag_server)
-      refute_receive {:lsp_response, ^ref, _result}, 100
+      refute_receive {:lsp_response, ^abandoned_ref, _result}, 100
     end
   end
 

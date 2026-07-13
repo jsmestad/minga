@@ -12,6 +12,7 @@ defmodule MingaEditor.State.TabSwitchTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias MingaEditor.Handlers.LspEventHandler
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.LSP, as: LSPState
@@ -336,7 +337,7 @@ defmodule MingaEditor.State.TabSwitchTest do
 
     test "tab switch preserves Editor-global formatting ownership" do
       {state, buf1, _buf2} = state_with_two_file_tabs()
-      tb = state.shell_state.tab_bar
+      tb = EditorState.tab_bar(state)
       current_id = tb.active_id
       target_id = Enum.find(tb.tabs, &(&1.id != current_id)).id
       ref = make_ref()
@@ -360,6 +361,68 @@ defmodule MingaEditor.State.TabSwitchTest do
       {switched_back, _effects} = EditorState.switch_tab_pure(switched, current_id)
 
       assert {:ok, ^operation} = LSPState.fetch_format(switched_back.lsp, ref)
+    end
+
+    test "format responses remain isolated across a tab switch" do
+      {state, buf_a, buf_b} = state_with_two_file_tabs()
+      tab_bar = EditorState.tab_bar(state)
+      target_id = Enum.find(tab_bar.tabs, &(&1.id != 1)).id
+      ref_a = make_ref()
+      ref_b = make_ref()
+
+      operation_a = %FormatOperation{
+        client: self(),
+        ref: ref_a,
+        buffer: buf_a,
+        version: Minga.Buffer.version(buf_a),
+        encoding: :utf8,
+        spinner_timer: make_ref(),
+        cancellable_timer: make_ref(),
+        timeout_timer: make_ref()
+      }
+
+      state = EditorState.update_lsp(state, &LSPState.track_format(&1, operation_a))
+      {state, _effects} = EditorState.switch_tab_pure(state, target_id)
+
+      operation_b = %FormatOperation{
+        client: self(),
+        ref: ref_b,
+        buffer: buf_b,
+        version: Minga.Buffer.version(buf_b),
+        encoding: :utf8,
+        spinner_timer: make_ref(),
+        cancellable_timer: make_ref(),
+        timeout_timer: make_ref()
+      }
+
+      state = EditorState.update_lsp(state, &LSPState.track_format(&1, operation_b))
+
+      edits_a = [
+        %{
+          "range" => %{
+            "start" => %{"line" => 0, "character" => 0},
+            "end" => %{"line" => 0, "character" => 8}
+          },
+          "newText" => "formatted A"
+        }
+      ]
+
+      {after_a, effects} =
+        LspEventHandler.handle(state, {:lsp_response, ref_a, {:ok, edits_a}})
+
+      assert effects == [:render_now]
+      assert Minga.Buffer.content(buf_a) == "formatted A"
+      assert Minga.Buffer.content(buf_b) == "file two"
+      refute LSPState.format_active?(after_a.lsp, ref_a)
+      assert LSPState.format_active?(after_a.lsp, ref_b)
+
+      {after_timeout, timeout_effects} =
+        LspEventHandler.handle(after_a, {:lsp_format_timeout, ref_b})
+
+      assert timeout_effects == [:render_now]
+      refute LSPState.format_active?(after_timeout.lsp, ref_b)
+      assert Minga.Buffer.content(buf_b) == "file two"
+      assert_receive {:"$gen_cast", {:cancel_request, ^ref_b}}
     end
 
     test "tab switch preserves live highlighting and ignores stale target parser state" do

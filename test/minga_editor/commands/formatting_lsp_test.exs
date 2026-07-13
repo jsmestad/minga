@@ -117,9 +117,8 @@ defmodule MingaEditor.Commands.FormattingLSPTest do
         GenServer.reply(from, :utf16)
         fake_client_loop(parent)
 
-      {:"$gen_call", from, {:cancel_request, ref}} ->
+      {:"$gen_cast", {:cancel_request, ref}} ->
         send(parent, {:cancel_request, ref})
-        GenServer.reply(from, :ok)
         fake_client_loop(parent)
 
       {:"$gen_cast", {:async_request, "textDocument/formatting", _params, caller, ref}} ->
