@@ -54,7 +54,7 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
     shell_entry = ShellRegistry.get(:traditional)
 
     %EditorState{
-      port_manager: self(),
+      port_manager: Keyword.get(opts, :port_manager, self()),
       parser_manager: Keyword.get(opts, :parser_manager, Minga.Parser.Manager),
       effect_scheduler: Keyword.get(opts, :effect_scheduler),
       terminal_viewport: vp,

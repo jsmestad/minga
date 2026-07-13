@@ -18,6 +18,7 @@ defmodule MingaEditor.Shell.RegistryTest do
   alias MingaEditor.Shell.Workflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
+  alias Minga.Test.RecordingFrontend
   alias MingaEditor.Test.FakeShell
   alias MingaEditor.Test.FakeShellAlt
 
@@ -934,7 +935,13 @@ defmodule MingaEditor.Shell.RegistryTest do
                capabilities: [:tui]
              })
 
-    state = TestHelpers.base_state() |> Workflow.switch(:fake)
+    frontend =
+      start_supervised!(
+        {RecordingFrontend, owner: self()},
+        id: {:registry_fallback_frontend, System.unique_integer([:positive])}
+      )
+
+    state = TestHelpers.base_state(port_manager: frontend) |> Workflow.switch(:fake)
     assert :ok = Registry.unregister_source({:extension, :fake})
 
     result = Router.dispatch(state, ?j, 0)

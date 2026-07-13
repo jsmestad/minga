@@ -19,17 +19,18 @@ defmodule MingaEditor.Frontend.Adapter do
   messages. The event types are defined in `MingaEditor.Frontend.Protocol`.
   """
 
+  @typedoc "Non-suspending frontend output admission result."
+  @type admission :: :accepted | :unwritable
+
   @doc "Starts the frontend process."
   @callback start_link(opts :: keyword()) :: GenServer.on_start()
 
   @doc """
   Sends a list of pre-encoded render command binaries to the frontend.
 
-  Commands are encoded via `MingaEditor.Frontend.Protocol.encode_*` functions.
-  The frontend processes them in order. A `commit_frame` command closes the
-  frame transaction and triggers a render flush (#2219).
+  Commands are encoded via `MingaEditor.Frontend.Protocol.encode_*` functions. The frontend returns `:accepted` when the batch entered its transport or `:unwritable` without suspending the caller. A `commit_frame` command closes the frame transaction and triggers a render flush (#2219).
   """
-  @callback send_commands(server :: GenServer.server(), commands :: [binary()]) :: :ok
+  @callback send_commands(server :: GenServer.server(), commands :: [binary()]) :: admission()
 
   @doc """
   Subscribes the calling process to receive input events.

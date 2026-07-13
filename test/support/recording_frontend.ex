@@ -30,9 +30,11 @@ defmodule Minga.Test.RecordingFrontend do
   end
 
   @impl MingaEditor.Frontend.Adapter
-  @spec send_commands(GenServer.server(), [binary()]) :: :ok
+  @spec send_commands(GenServer.server(), [binary()]) ::
+          MingaEditor.Frontend.Adapter.admission()
   def send_commands(server, commands) when is_list(commands) do
     GenServer.cast(server, {:send_commands, commands})
+    :accepted
   end
 
   @impl MingaEditor.Frontend.Adapter
@@ -108,14 +110,27 @@ defmodule Minga.Test.RecordingFrontend do
     {:reply, :ok, %{state | commands: []}}
   end
 
+  def handle_call({:send_commands, commands}, _from, state) do
+    {:reply, :accepted, record_commands(state, commands)}
+  end
+
+  def handle_call({:send_render_commands, commands, sent_at}, _from, state) do
+    Minga.Telemetry.hop_latency(:send_commands, sent_at)
+    {:reply, :accepted, record_commands(state, commands)}
+  end
+
   @impl GenServer
   def handle_cast({:hop_mark, hop, sent_at}, state) do
     Minga.Telemetry.hop_latency(hop, sent_at)
     {:noreply, state}
   end
 
-  def handle_cast({:send_commands, commands}, state) do
+  def handle_cast({:send_commands, commands}, state),
+    do: {:noreply, record_commands(state, commands)}
+
+  @spec record_commands(state(), [binary()]) :: state()
+  defp record_commands(state, commands) do
     send(state.owner, {:frontend_commands, self(), commands})
-    {:noreply, %{state | commands: Enum.reverse(commands) ++ state.commands}}
+    %{state | commands: Enum.reverse(commands) ++ state.commands}
   end
 end

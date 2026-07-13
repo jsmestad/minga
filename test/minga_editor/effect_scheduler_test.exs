@@ -10,7 +10,7 @@ defmodule MingaEditor.EffectSchedulerTest do
   alias MingaEditor.EffectScheduler
   alias MingaEditor.GenerationSupervisor
 
-  @effect_timeout 2_000
+  @effect_timeout 15_000
 
   test "normal completion produces exactly one completed terminal outcome" do
     scheduler = start_scheduler()

@@ -6,6 +6,7 @@ defmodule MingaEditor.Frontend.Manager.State do
   """
 
   alias MingaEditor.Frontend.Capabilities
+  alias MingaEditor.Frontend.Manager.OutputPressure
 
   @typedoc """
   Port connection mode.
@@ -14,8 +15,9 @@ defmodule MingaEditor.Frontend.Manager.State do
   - `:connected` — BEAM is the child; the GUI parent already set up stdin/stdout pipes. Port.Manager connects to fd 0/1 instead of spawning.
   """
   @type port_mode :: :spawn | :connected
+  @type port_commander :: (port(), iodata(), [:nosuspend] -> boolean())
 
-  @enforce_keys [:renderer_path]
+  @enforce_keys [:renderer_path, :output_pressure, :port_commander]
   defstruct port: nil,
             subscribers: [],
             renderer_path: "",
@@ -23,7 +25,11 @@ defmodule MingaEditor.Frontend.Manager.State do
             ready: false,
             terminal_size: nil,
             capabilities: %Capabilities{},
-            tty_path: nil
+            tty_path: nil,
+            output_pressure: nil,
+            port_commander: nil,
+            output_retry_ms: 2,
+            output_failure_ms: 50
 
   @type t :: %__MODULE__{
           port: port() | nil,
@@ -33,6 +39,10 @@ defmodule MingaEditor.Frontend.Manager.State do
           ready: boolean(),
           terminal_size: {width :: pos_integer(), height :: pos_integer()} | nil,
           capabilities: Capabilities.t(),
-          tty_path: String.t() | nil
+          tty_path: String.t() | nil,
+          output_pressure: OutputPressure.t(),
+          port_commander: port_commander(),
+          output_retry_ms: pos_integer(),
+          output_failure_ms: non_neg_integer()
         }
 end

@@ -159,10 +159,10 @@ defmodule MingaEditor.Frontend.Emit do
       [:minga, :render, :emit_prepare],
       %{byte_count: byte_count, input_seq: input_seq, frame_seq: frame_seq, keyframe?: keyframe?},
       fn ->
-        MingaEditor.Frontend.send_render_commands(ctx.port_manager, commands)
-        caches = send_title(render_model, caches)
-        caches = send_window_bg(render_model, caches)
-        {send_link_cursor(ctx, caches), ctx}
+        _admission = MingaEditor.Frontend.send_render_commands(ctx.port_manager, commands)
+        caches = send_title(render_model, ctx.port_manager, caches)
+        caches = send_window_bg(render_model, ctx.port_manager, caches)
+        {send_link_cursor(ctx, ctx.port_manager, caches), ctx}
       end
     )
   rescue
@@ -275,21 +275,27 @@ defmodule MingaEditor.Frontend.Emit do
 
   # ── Side-channel writes (shared) ─────────────────────────────────────────
 
-  @spec send_title(Minga.RenderModel.t() | ctx(), Caches.t()) :: Caches.t()
-  defp send_title(%Minga.RenderModel{title: title}, caches) do
+  @spec send_title(Minga.RenderModel.t() | ctx(), GenServer.server() | nil, Caches.t()) ::
+          Caches.t()
+  defp send_title(%Minga.RenderModel{title: title}, port_manager, caches) do
     if title != caches.last_title do
-      MingaEditor.Frontend.set_title(title)
-      %{caches | last_title: title}
+      case MingaEditor.Frontend.set_title(port_manager, title) do
+        :accepted -> %{caches | last_title: title}
+        :unwritable -> caches
+      end
     else
       caches
     end
   end
 
-  @spec send_window_bg(Minga.RenderModel.t() | ctx(), Caches.t()) :: Caches.t()
-  defp send_window_bg(%Minga.RenderModel{window_bg: bg}, caches) do
+  @spec send_window_bg(Minga.RenderModel.t() | ctx(), GenServer.server() | nil, Caches.t()) ::
+          Caches.t()
+  defp send_window_bg(%Minga.RenderModel{window_bg: bg}, port_manager, caches) do
     if bg != caches.last_window_bg do
-      MingaEditor.Frontend.set_window_bg(bg)
-      %{caches | last_window_bg: bg}
+      case MingaEditor.Frontend.set_window_bg(port_manager, bg) do
+        :accepted -> %{caches | last_window_bg: bg}
+        :unwritable -> caches
+      end
     else
       caches
     end
@@ -299,15 +305,17 @@ defmodule MingaEditor.Frontend.Emit do
   # (#2630). Mirrors send_title/send_window_bg: only emits when the navigable
   # state flips, so an unchanged preview never re-sends. GUI-only by construction
   # (ctx.link_cursor is gated on gui? when the context is built).
-  @spec send_link_cursor(ctx(), Caches.t()) :: Caches.t()
-  defp send_link_cursor(%{gui?: true, link_cursor: active}, caches) do
+  @spec send_link_cursor(ctx(), GenServer.server() | nil, Caches.t()) :: Caches.t()
+  defp send_link_cursor(%{gui?: true, link_cursor: active}, port_manager, caches) do
     if active != caches.last_link_cursor do
-      MingaEditor.Frontend.set_link_cursor(active)
-      %{caches | last_link_cursor: active}
+      case MingaEditor.Frontend.set_link_cursor(port_manager, active) do
+        :accepted -> %{caches | last_link_cursor: active}
+        :unwritable -> caches
+      end
     else
       caches
     end
   end
 
-  defp send_link_cursor(_ctx, caches), do: caches
+  defp send_link_cursor(_ctx, _port_manager, caches), do: caches
 end

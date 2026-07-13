@@ -137,9 +137,11 @@ defmodule Minga.Test.HeadlessPort do
 
   @doc "Sends encoded render commands to the headless screen grid."
   @impl MingaEditor.Frontend.Adapter
-  @spec send_commands(GenServer.server(), [binary()]) :: :ok
+  @spec send_commands(GenServer.server(), [binary()]) ::
+          MingaEditor.Frontend.Adapter.admission()
   def send_commands(server, commands) when is_list(commands) do
     GenServer.cast(server, {:send_commands, commands})
+    :accepted
   end
 
   @doc "Submits commands through the production begin/commit transaction gate."
@@ -149,7 +151,7 @@ defmodule Minga.Test.HeadlessPort do
           non_neg_integer(),
           non_neg_integer(),
           [binary()]
-        ) :: :ok
+        ) :: MingaEditor.Frontend.Adapter.admission()
   def send_transaction(server, seq, base, generation, commands) do
     send_commands(
       server,
@@ -443,6 +445,15 @@ defmodule Minga.Test.HeadlessPort do
     {:reply, :ok, %{state | waiters: [{pid, ref} | state.waiters]}}
   end
 
+  def handle_call({:send_commands, commands}, _from, state) do
+    {:reply, :accepted, apply_commands(state, commands)}
+  end
+
+  def handle_call({:send_render_commands, commands, sent_at}, _from, state) do
+    Minga.Telemetry.hop_latency(:send_commands, sent_at)
+    {:reply, :accepted, apply_commands(state, commands)}
+  end
+
   # ── send_commands — the core render capture ──
 
   @impl true
@@ -451,10 +462,11 @@ defmodule Minga.Test.HeadlessPort do
     {:noreply, state}
   end
 
-  def handle_cast({:send_commands, commands}, state) do
-    new_state = Enum.reduce(commands, state, &apply_command/2)
-    {:noreply, new_state}
-  end
+  def handle_cast({:send_commands, commands}, state),
+    do: {:noreply, apply_commands(state, commands)}
+
+  @spec apply_commands(State.t(), [binary()]) :: State.t()
+  defp apply_commands(state, commands), do: Enum.reduce(commands, state, &apply_command/2)
 
   @impl true
   def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do

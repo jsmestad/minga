@@ -53,12 +53,12 @@ defmodule MingaEditor.Frontend.ManagerTest do
   end
 
   describe "send_commands/2" do
-    test "returns ok when no port is open" do
+    test "returns unwritable when no port is open" do
       name = unique_name()
       start_manager(name)
 
-      assert :ok = Manager.send_commands(name, [])
-      assert :ok = Manager.send_commands(name, [Protocol.encode_commit_frame(0)])
+      assert :unwritable = Manager.send_commands(name, [])
+      assert :unwritable = Manager.send_commands(name, [Protocol.encode_commit_frame(0)])
     end
   end
 
@@ -247,6 +247,154 @@ defmodule MingaEditor.Frontend.ManagerTest do
     end
   end
 
+  describe "output pressure" do
+    test "unwritable transport requests correlated keyframe recovery and rejects stale acknowledgements" do
+      name = unique_name()
+      commander = fn _port, _batch, [:nosuspend] -> false end
+
+      {pid, fake_port} =
+        start_connected(name,
+          port_commander: commander,
+          output_retry_ms: 1,
+          output_failure_ms: 0
+        )
+
+      :ok = Manager.subscribe(name)
+      send_port_data(pid, fake_port, <<0x0A, 1::32, 10::32>>)
+      assert_receive {:minga_input, {:frame_applied, 1, 10}}
+
+      assert :unwritable = Manager.send_render_commands(name, frame_commands(11, 10, 1))
+      assert_receive {:minga_input, {:request_keyframe, 10, 1}}, 1_000
+
+      send_port_data(pid, fake_port, <<0x0A, 1::32, 11::32>>)
+      refute_receive {:minga_input, {:frame_applied, 1, 11}}, 50
+
+      send_port_data(pid, fake_port, <<0x0A, 2::32, 12::32>>)
+      assert_receive {:minga_input, {:frame_applied, 2, 12}}
+
+      pressure = Manager.output_pressure(name)
+      assert pressure.minimum_ack_generation == 2
+      assert pressure.last_applied_generation == 2
+      assert pressure.last_applied_frame_seq == 12
+      assert pressure.retained_bytes == 0
+    end
+
+    test "an unwritable font configuration is retained and retried before later frames" do
+      name = unique_name()
+      parent = self()
+      outcomes = start_supervised!({Agent, fn -> [false, true] end}, id: make_ref())
+
+      commander = fn _port, batch, [:nosuspend] ->
+        outcome =
+          Agent.get_and_update(outcomes, fn
+            [next | rest] -> {next, rest}
+            [] -> {true, []}
+          end)
+
+        send(parent, {:font_control_attempt, outcome, batch})
+        outcome
+      end
+
+      {_pid, _fake_port} =
+        start_connected(name,
+          port_commander: commander,
+          output_retry_ms: 20,
+          output_failure_ms: 1_000
+        )
+
+      font_command = Protocol.encode_set_font("Fira Code", 15, true, :regular)
+      assert :unwritable = Manager.send_commands(name, [font_command])
+      assert_receive {:font_control_attempt, false, ^font_command}
+
+      pressure = Manager.output_pressure(name)
+      assert pressure.control_batches == 1
+      assert pressure.control_bytes == byte_size(font_command)
+
+      assert_receive {:font_control_attempt, true, ^font_command}, 1_000
+      pressure = Manager.output_pressure(name)
+      assert pressure.control_batches == 0
+      assert pressure.control_bytes == 0
+    end
+
+    test "an incompatible coalesced replacement triggers keyframe recovery instead of skipping its base" do
+      name = unique_name()
+      outcomes = start_supervised!({Agent, fn -> [false, true] end}, id: make_ref())
+
+      commander = fn _port, _batch, [:nosuspend] ->
+        Agent.get_and_update(outcomes, fn
+          [outcome | rest] -> {outcome, rest}
+          [] -> {true, []}
+        end)
+      end
+
+      {_pid, _fake_port} =
+        start_connected(name,
+          port_commander: commander,
+          output_retry_ms: 20,
+          output_failure_ms: 1_000
+        )
+
+      :ok = Manager.subscribe(name)
+      assert :unwritable = Manager.send_render_commands(name, frame_commands(10, 9, 1))
+      assert :unwritable = Manager.send_render_commands(name, frame_commands(12, 11, 1))
+      assert_receive {:minga_input, {:request_keyframe, 0, 1}}, 1_000
+
+      pressure = Manager.output_pressure(name)
+      assert pressure.minimum_ack_generation == 2
+      assert pressure.retained_bytes == 0
+    end
+
+    @tag :heavy
+    test "a frontend that stops reading retains at most two frames and keeps input responsive" do
+      name = unique_name()
+      parent = self()
+
+      opener = fn _spec, _opts ->
+        port = Port.open({:spawn, "sleep 10"}, [:binary, {:packet, 4}])
+        send(parent, {:pressure_port, port})
+        port
+      end
+
+      pid =
+        start_supervised!(
+          {Manager,
+           name: name,
+           renderer_path: "/nonexistent",
+           port_mode: :connected,
+           port_opener: opener,
+           output_retry_ms: 1_000,
+           output_failure_ms: 10_000},
+          id: name
+        )
+
+      assert_receive {:pressure_port, port}
+      :ok = Manager.subscribe(name)
+      payload = :binary.copy(<<0>>, 128 * 1_024)
+
+      results =
+        Enum.map(1..100, fn frame_seq ->
+          Manager.send_render_commands(
+            name,
+            frame_commands(frame_seq, max(frame_seq - 1, 0), 1, payload)
+          )
+        end)
+
+      assert :unwritable in results
+      pressure = Manager.output_pressure(name)
+      frame_bytes = IO.iodata_length(frame_commands(100, 99, 1, payload))
+      assert pressure.current_bytes > 0
+      assert pressure.replacement_bytes > 0
+      assert pressure.retained_bytes <= frame_bytes * 2
+
+      send_port_data(pid, port, <<0x02, 101::16, 51::16>>)
+      assert_receive {:minga_input, {:resize, 101, 51}}, 1_000
+      assert Manager.terminal_size(name) == {101, 51}
+
+      {:message_queue_len, queue_len} = Process.info(pid, :message_queue_len)
+      assert queue_len <= 1
+    end
+  end
+
   describe "unknown messages" do
     test "unknown messages are ignored" do
       name = unique_name()
@@ -328,14 +476,14 @@ defmodule MingaEditor.Frontend.ManagerTest do
       refute Manager.ready?(name)
 
       send(pid, {fake_port, :eof})
-      assert :ok = Manager.send_commands(name, [Protocol.encode_commit_frame(0)])
+      assert :unwritable = Manager.send_commands(name, [Protocol.encode_commit_frame(0)])
     end
 
-    test "send_commands works when connected" do
+    test "send_commands returns accepted when connected" do
       name = unique_name()
       {_pid, _fake_port} = start_connected(name)
 
-      assert :ok = Manager.send_commands(name, [Protocol.encode_commit_frame(0)])
+      assert :accepted = Manager.send_commands(name, [Protocol.encode_commit_frame(0)])
     end
 
     test "send_commands emits actual port write telemetry when connected" do
@@ -356,8 +504,11 @@ defmodule MingaEditor.Frontend.ManagerTest do
         {_pid, _fake_port} = start_connected(name)
         command = Protocol.encode_commit_frame(0)
 
-        assert :ok = Manager.send_commands(name, [command])
-        assert_receive {:port_write, %{duration: duration}, %{byte_count: byte_count}}, 1_000
+        assert :accepted = Manager.send_commands(name, [command])
+
+        assert_receive {:port_write, %{duration: duration}, %{byte_count: byte_count}},
+                       1_000
+
         assert duration >= 0
         assert byte_count == byte_size(command)
       after
@@ -384,17 +535,28 @@ defmodule MingaEditor.Frontend.ManagerTest do
     end
   end
 
-  defp start_connected(name) do
+  defp start_connected(name, extra_opts \\ []) do
     opener = fake_port_opener()
 
-    pid =
-      start_supervised!(
-        {Manager,
-         name: name, renderer_path: "/nonexistent", port_mode: :connected, port_opener: opener},
-        id: name
-      )
+    opts =
+      [
+        name: name,
+        renderer_path: "/nonexistent",
+        port_mode: :connected,
+        port_opener: opener
+      ] ++ extra_opts
+
+    pid = start_supervised!({Manager, opts}, id: name)
 
     assert_receive {:fake_port, fake_port}
     {pid, fake_port}
+  end
+
+  defp frame_commands(frame_seq, base_frame_seq, generation, payload \\ <<>>) do
+    [
+      Protocol.encode_begin_frame(frame_seq, base_frame_seq, generation),
+      <<0x70, payload::binary>>,
+      Protocol.encode_commit_frame(frame_seq)
+    ]
   end
 end

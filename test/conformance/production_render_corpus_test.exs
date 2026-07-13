@@ -128,7 +128,7 @@ defmodule Minga.Conformance.ProductionRenderCorpusTest do
   end
 
   defp submit(port, seq, base, generation, commands) do
-    :ok = HeadlessPort.send_transaction(port, seq, base, generation, commands)
+    :accepted = HeadlessPort.send_transaction(port, seq, base, generation, commands)
     _ = HeadlessPort.production_state(port)
   end
 

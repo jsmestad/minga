@@ -1,6 +1,7 @@
 defmodule MingaEditor.Commands.UI.FrontendTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Test.RecordingFrontend
   alias MingaEditor.BottomPanel
   alias MingaEditor.Commands
   alias MingaEditor.Frontend.Capabilities
@@ -19,9 +20,20 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
   @go_tui %Capabilities{frontend_type: :tui, semantic_ui: true}
   @zig %Capabilities{frontend_type: :tui, semantic_ui: false}
 
+  setup do
+    frontend =
+      start_supervised!(
+        {RecordingFrontend, owner: self()},
+        id: {:ui_frontend_recorder, System.unique_integer([:positive])}
+      )
+
+    Process.put(:ui_frontend_recorder, frontend)
+    :ok
+  end
+
   defp base_state(caps) do
     %EditorState{
-      port_manager: self(),
+      port_manager: Process.get(:ui_frontend_recorder),
       capabilities: caps,
       workspace: %SessionState{viewport: Viewport.new(24, 80)},
       shell_runtime:

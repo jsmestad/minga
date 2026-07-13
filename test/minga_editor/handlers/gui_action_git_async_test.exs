@@ -5,6 +5,7 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
 
   alias Minga.Git.Stub
   alias Minga.Test.GitRepositoryResolver
+  alias Minga.Test.RecordingFrontend
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.Effect.Request
   alias MingaEditor.EffectScheduler
@@ -41,7 +42,18 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
 
     on_exit(fn -> Stub.clear(git_root) end)
 
-    state = TestHelpers.base_state(sidebar_registry: table, effect_scheduler: scheduler)
+    frontend =
+      start_supervised!(
+        {RecordingFrontend, owner: self()},
+        id: {:git_async_frontend, System.unique_integer([:positive])}
+      )
+
+    state =
+      TestHelpers.base_state(
+        sidebar_registry: table,
+        effect_scheduler: scheduler,
+        port_manager: frontend
+      )
 
     dispatch_opts = [
       git_root_resolver: {GitRepositoryResolver, {:return, git_root, git_root}}

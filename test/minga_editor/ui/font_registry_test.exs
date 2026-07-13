@@ -52,6 +52,17 @@ defmodule Minga.FontRegistryTest do
   end
 
   describe "pending registrations" do
+    test "recovery requires every allocated family to be registered again" do
+      reg = FontRegistry.new()
+      {_id, reg, _} = FontRegistry.get_or_register(reg, "Fira Code")
+      reg = FontRegistry.mark_registered(reg)
+
+      reg = FontRegistry.require_reregistration(reg)
+
+      assert FontRegistry.pending_registrations(reg) == [{1, "Fira Code"}]
+      assert FontRegistry.lookup(reg, "Fira Code") == 1
+    end
+
     test "mark_registered clears pending registrations without forgetting families" do
       reg = FontRegistry.new()
       {_id, reg, _} = FontRegistry.get_or_register(reg, "Fira Code")
