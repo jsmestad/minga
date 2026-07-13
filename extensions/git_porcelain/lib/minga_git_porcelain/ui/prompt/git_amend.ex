@@ -22,7 +22,7 @@ defmodule MingaGitPorcelain.UI.Prompt.GitAmend do
     trimmed = String.trim(text)
 
     if trimmed == "" do
-      EditorState.set_status(state, "Amend aborted: empty message")
+      MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Amend aborted: empty message")
     else
       do_amend(state, trimmed)
     end
@@ -39,14 +39,14 @@ defmodule MingaGitPorcelain.UI.Prompt.GitAmend do
         case Git.commit(git_root, message, amend: true) do
           {:ok, hash} ->
             refresh_repo(git_root)
-            EditorState.set_status(state, "Amended #{hash}")
+            MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Amended #{hash}")
 
           {:error, reason} ->
-            EditorState.set_status(state, "Amend failed: #{reason}")
+            MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Amend failed: #{reason}")
         end
 
       :not_git ->
-        EditorState.set_status(state, "Not in a git repository")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Not in a git repository")
     end
   end
 

@@ -58,7 +58,7 @@ defmodule MingaGitPorcelain.Input.GitStatusDiffOpenTest do
 
     assert Buffer.buffer_name(active_buf) == "deleted.txt [diff:staged]"
     assert buffer_content(active_buf) =~ "removed"
-    refute EditorState.status_msg(state) =~ "Could not read"
+    refute MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) =~ "Could not read"
   end
 
   test "GUI open diff uses section when duplicate paths exist", %{git_root: git_root} do
@@ -110,16 +110,15 @@ defmodule MingaGitPorcelain.Input.GitStatusDiffOpenTest do
 
     %EditorState{
       port_manager: self(),
+      rendering: :disabled,
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         keymap_scope: :git_status
       },
-      shell_state: %MingaEditor.Shell.Traditional.State{
-        git_status_panel: panel_data,
-        git_status_tui_state: tui
-      },
       focus_stack: [MingaEditor.Input.Scoped, MingaEditor.Input.ModeFSM]
     }
+    |> EditorState.set_git_status_panel(panel_data)
+    |> EditorState.set_git_status_tui_state(tui)
   end
 
   defp buffer_content(buf) do

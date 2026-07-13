@@ -38,7 +38,7 @@ defmodule MingaEditor.Commands.InlineAsk do
   @doc "Opens an inline ask for the active buffer."
   @spec open(state()) :: state()
   def open(%{workspace: %{buffers: %{active: nil}}} = state),
-    do: EditorState.set_status(state, "Open a file before asking")
+    do: MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Open a file before asking")
 
   def open(%{workspace: %{buffers: %{active: buffer_pid}}} = state) when is_pid(buffer_pid) do
     {:ok, file_ref, label} = file_ref_for_active_buffer(state, buffer_pid)
@@ -58,7 +58,7 @@ defmodule MingaEditor.Commands.InlineAsk do
 
     state
     |> EditorState.set_inline_asks(asks)
-    |> EditorState.set_status("Inline ask: type a question")
+    |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("Inline ask: type a question")
   end
 
   @doc "Promotes an answered inline ask into a normal agent workspace."
@@ -66,7 +66,10 @@ defmodule MingaEditor.Commands.InlineAsk do
   def promote(state, ask, opts \\ [])
 
   def promote(state, %InlineAsk{status: status}, _opts) when status != :answered do
-    EditorState.set_status(state, "Wait for the inline answer before promoting")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      "Wait for the inline answer before promoting"
+    )
   end
 
   def promote(state, %InlineAsk{} = ask, opts) do
@@ -78,7 +81,11 @@ defmodule MingaEditor.Commands.InlineAsk do
     state = session_starter.(state)
     state = seeder.(state, ask)
     state = add_file_to_active_workspace(state, ask.file_ref)
-    EditorState.set_status(state, "Promoted inline ask to workspace")
+
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      "Promoted inline ask to workspace"
+    )
   end
 
   @spec start_promoted_agent_session(state()) :: state()

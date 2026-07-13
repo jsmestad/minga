@@ -475,7 +475,7 @@ defmodule MingaEditor.Startup do
 
     case Config.load_error() do
       nil -> state
-      error -> EditorState.set_status(state, error)
+      error -> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, error)
     end
   end
 

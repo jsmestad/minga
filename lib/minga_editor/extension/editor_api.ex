@@ -79,17 +79,6 @@ defmodule MingaEditor.Extension.EditorAPI do
   end
 
   @doc """
-  Sets a transient status bar message.
-
-  The message clears on the next user action, matching the standard
-  editor status message behavior.
-  """
-  @spec set_status(state(), String.t()) :: state()
-  def set_status(state, message) when is_binary(message) do
-    EditorState.set_status(state, message)
-  end
-
-  @doc """
   Returns the absolute path of the file in the active buffer, or `nil` when
   the active buffer has no file (scratch buffer, no buffer, or a dead pid).
   """

@@ -9,7 +9,6 @@ defmodule MingaEditor.MouseHoverTooltip do
 
   alias Minga.Buffer
   alias Minga.Diagnostics
-  alias MingaEditor.HoverPopup
   alias MingaEditor.Mouse.HitTest
   alias MingaEditor.State, as: EditorState
   alias Minga.LSP.Client
@@ -35,8 +34,8 @@ defmodule MingaEditor.MouseHoverTooltip do
             send_hover_request(state, target.buffer, target.line, target.col, row, col)
 
           message ->
-            popup = HoverPopup.new(message, row, col, theme: state.theme)
-            EditorState.set_hover_popup(state, popup)
+            popup = MingaEditor.HoverPopup.Builder.new(message, row, col, theme: state.theme)
+            MingaEditor.Shell.Traditional.HoverPopupWorkflow.show(state, popup)
         end
 
       _ ->

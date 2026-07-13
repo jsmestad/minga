@@ -531,7 +531,7 @@ defmodule MingaEditor.Commands.Movement do
         %{ms | describe_key: %Minga.Mode.DescribeKey{}}
       end)
 
-    EditorState.set_status(state, "Press key to describe:")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Press key to describe:")
   end
 
   @spec split_window(state(), WindowTree.direction()) :: state()
@@ -679,7 +679,10 @@ defmodule MingaEditor.Commands.Movement do
         focus_remaining_window(state, removed_windows)
 
       :error ->
-        EditorState.set_status(state, "Cannot close the last window")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Cannot close the last window"
+        )
     end
   end
 
@@ -707,7 +710,7 @@ defmodule MingaEditor.Commands.Movement do
          ) do
       %StructuralNavResult{type_name: type_name} = result ->
         Buffer.move_to(buf, StructuralNavResult.start_position(result))
-        EditorState.set_status(state, "→ #{type_name}")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "→ #{type_name}")
 
       nil ->
         state

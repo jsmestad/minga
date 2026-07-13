@@ -2,6 +2,7 @@ defmodule MingaEditor.SignatureHelpTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.SignatureHelp
+  alias MingaEditor.SignatureHelp.Presenter
   alias MingaEditor.UI.Theme
 
   @theme Theme.get!(:doom_one)
@@ -113,12 +114,12 @@ defmodule MingaEditor.SignatureHelpTest do
         anchor_col: 20
       }
 
-      assert SignatureHelp.box(sh, @viewport, @theme) == nil
+      assert Presenter.box(sh, @viewport, @theme) == nil
     end
 
     test "returns a placement rect within the viewport for a valid signature" do
       sh = SignatureHelp.from_response(@sample_response, 10, 20)
-      {row, col, w, h} = SignatureHelp.box(sh, @viewport, @theme)
+      {row, col, w, h} = Presenter.box(sh, @viewport, @theme)
 
       assert row >= 0 and row + h <= 24
       assert col >= 0 and col + w <= 80
@@ -126,7 +127,7 @@ defmodule MingaEditor.SignatureHelpTest do
 
     test "positions above the cursor" do
       sh = SignatureHelp.from_response(@sample_response, 15, 20)
-      {row, _col, _w, h} = SignatureHelp.box(sh, @viewport, @theme)
+      {row, _col, _w, h} = Presenter.box(sh, @viewport, @theme)
 
       assert row + h <= 15
     end

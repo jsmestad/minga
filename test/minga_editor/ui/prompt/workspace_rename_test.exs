@@ -33,7 +33,7 @@ defmodule MingaEditor.UI.Prompt.WorkspaceRenameTest do
       assert TabBar.active_workspace(new_state.shell_runtime.state.tab_bar).custom_name ==
                "Research Bot"
 
-      assert new_state.shell_runtime.state.status_msg =~ "Renamed"
+      assert new_state.shell_runtime.state.notice.message =~ "Renamed"
     end
 
     test "trims whitespace from name" do
@@ -52,14 +52,14 @@ defmodule MingaEditor.UI.Prompt.WorkspaceRenameTest do
       tb = TabBar.new(Tab.new_file(1, "a.ex"))
       state = state_with_tab_bar(tb)
       new_state = WorkspaceRename.on_submit("", state)
-      assert new_state.shell_runtime.state.status_msg =~ "cannot be empty"
+      assert new_state.shell_runtime.state.notice.message =~ "cannot be empty"
     end
 
     test "rejects whitespace-only name" do
       state = state_with_tab_bar(TabBar.new(Tab.new_file(1, "a.ex")))
 
       new_state = WorkspaceRename.on_submit("   ", state)
-      assert new_state.shell_runtime.state.status_msg =~ "cannot be empty"
+      assert new_state.shell_runtime.state.notice.message =~ "cannot be empty"
     end
   end
 
@@ -75,8 +75,7 @@ defmodule MingaEditor.UI.Prompt.WorkspaceRenameTest do
     %EditorState{
       port_manager: self(),
       workspace: %SessionState{viewport: Viewport.new(24, 80)},
-      shell_runtime:
-        Runtime.new(Runtime.default_entry(), %TraditionalState{tab_bar: tab_bar, status_msg: ""})
+      shell_runtime: Runtime.new(Runtime.default_entry(), %TraditionalState{tab_bar: tab_bar})
     }
   end
 end

@@ -21,7 +21,7 @@ defmodule MingaEditor.Input.SignatureHelpTest do
   defp state_with_sig_help do
     state = base_state()
     sh = SigHelp.from_response(@sample_response, 10, 20)
-    MingaEditor.State.set_signature_help(state, sh)
+    MingaEditor.Shell.Traditional.SignatureHelpWorkflow.show(state, sh)
   end
 
   describe "handle_key/3 with no signature help" do

@@ -45,7 +45,8 @@ defmodule MingaEditor.Input.GlobalBindings do
   def handle_key(state, @escape, 0) do
     case MingaEditor.Commands.Formatting.cancel_pending_format(state) do
       {:canceled, state} ->
-        {:passthrough, MingaEditor.State.set_status(state, "Format canceled")}
+        {:passthrough,
+         MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Format canceled")}
 
       :none ->
         {:passthrough, state}

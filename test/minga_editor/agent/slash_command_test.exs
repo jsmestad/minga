@@ -7,7 +7,6 @@ defmodule MingaEditor.Agent.SlashCommandTest do
   alias MingaAgent.TurnUsage
   alias MingaEditor.Agent.SlashCommand
   alias MingaEditor.Agent.UIState
-  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
@@ -231,21 +230,14 @@ defmodule MingaEditor.Agent.SlashCommandTest do
           viewport: Viewport.new(24, 80),
           editing: VimState.new(),
           agent_ui: UIState.new()
-        },
-        shell_runtime:
-          Runtime.new(
-            Runtime.default_entry(),
-            %MingaEditor.Shell.Traditional.State{
-              status_msg: nil,
-              tab_bar: tab_bar,
-              agent: %AgentState{
-                runtime: %RuntimeState{status: :idle},
-                error: nil,
-                spinner_timer: nil
-              }
-            }
-          )
+        }
       }
+      |> EditorState.set_tab_bar(tab_bar)
+      |> EditorState.set_agent(%AgentState{
+        runtime: %RuntimeState{status: :idle},
+        error: nil,
+        spinner_timer: nil
+      })
     end
 
     test "returns error for non-slash input" do
@@ -258,7 +250,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
 
     test "/help returns ok and sets status message" do
       {:ok, state} = SlashCommand.execute(mock_state(), "/help")
-      assert state.shell_runtime.state.status_msg == "Commands listed in chat"
+      assert state.shell_runtime.state.notice.message == "Commands listed in chat"
     end
 
     test "/stop aborts agent (no-op without session)" do
@@ -277,12 +269,12 @@ defmodule MingaEditor.Agent.SlashCommandTest do
 
     test "/thinking without args cycles level (no session = status msg)" do
       {:ok, state} = SlashCommand.execute(mock_state(), "/thinking")
-      assert state.shell_runtime.state.status_msg != nil
+      assert state.shell_runtime.state.notice.message != nil
     end
 
     test "/thinking with arg sets level (no session = status msg)" do
       {:ok, state} = SlashCommand.execute(mock_state(), "/thinking high")
-      assert state.shell_runtime.state.status_msg == "No agent session"
+      assert state.shell_runtime.state.notice.message == "No agent session"
     end
 
     test "/model without name opens the model picker" do
@@ -298,12 +290,12 @@ defmodule MingaEditor.Agent.SlashCommandTest do
 
     test "command parsing is case-insensitive" do
       {:ok, state} = SlashCommand.execute(mock_state(), "/HELP")
-      assert state.shell_runtime.state.status_msg == "Commands listed in chat"
+      assert state.shell_runtime.state.notice.message == "Commands listed in chat"
     end
 
     test "command parsing trims whitespace" do
       {:ok, state} = SlashCommand.execute(mock_state(), "/help  ")
-      assert state.shell_runtime.state.status_msg == "Commands listed in chat"
+      assert state.shell_runtime.state.notice.message == "Commands listed in chat"
     end
 
     test "/resume opens the persisted agent session picker", %{tmp_dir: dir} do
@@ -342,7 +334,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       {:ok, state} = SlashCommand.execute(mock_state(session: session), "/plan")
 
       assert Session.status(session) == :plan
-      assert state.shell_runtime.state.status_msg == "Plan mode enabled"
+      assert state.shell_runtime.state.notice.message == "Plan mode enabled"
       assert state.shell_runtime.state.agent.runtime.status == :plan
 
       assert Enum.any?(Session.messages(session), fn
@@ -357,7 +349,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       {:ok, state} = SlashCommand.execute(mock_state(session: session), "/exec")
 
       assert Session.status(session) == :idle
-      assert state.shell_runtime.state.status_msg == "Execution mode enabled"
+      assert state.shell_runtime.state.notice.message == "Execution mode enabled"
       assert state.shell_runtime.state.agent.runtime.status == :idle
 
       assert Enum.any?(Session.messages(session), fn
@@ -386,7 +378,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
 
       {:ok, state} = SlashCommand.execute(mock_state(session: session), "/trust list")
 
-      assert state.shell_runtime.state.status_msg =~ "Trusted tools:"
+      assert state.shell_runtime.state.notice.message =~ "Trusted tools:"
       messages = Session.messages(session)
       assert Enum.any?(messages, &match?({:system, "Trusted tools:" <> _, :info}, &1))
     end
@@ -398,7 +390,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
 
       {:ok, state} = SlashCommand.execute(mock_state(session: session), "/trust revoke shell")
 
-      assert state.shell_runtime.state.status_msg == "Trust cleared for shell"
+      assert state.shell_runtime.state.notice.message == "Trust cleared for shell"
       assert Session.list_tool_trust(session) == %{"write_file" => :turn}
     end
 
@@ -409,7 +401,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
 
       {:ok, state} = SlashCommand.execute(mock_state(session: session), "/trust clear")
 
-      assert state.shell_runtime.state.status_msg == "All tool trust cleared"
+      assert state.shell_runtime.state.notice.message == "All tool trust cleared"
       assert Session.list_tool_trust(session) == %{}
     end
 
@@ -425,17 +417,17 @@ defmodule MingaEditor.Agent.SlashCommandTest do
 
     test "/memory add and clear replace /remember and /forget", %{tmp_dir: dir} do
       {:ok, state} = SlashCommand.execute(mock_state(), "/memory add prefer small diffs", dir)
-      assert state.shell_runtime.state.status_msg == "Saved to memory: prefer small diffs"
+      assert state.shell_runtime.state.notice.message == "Saved to memory: prefer small diffs"
       assert Memory.read(dir) =~ "prefer small diffs"
 
       {:ok, state} = SlashCommand.execute(mock_state(), "/memory clear", dir)
-      assert state.shell_runtime.state.status_msg == "Memory cleared."
+      assert state.shell_runtime.state.notice.message == "Memory cleared."
       assert Memory.read(dir) == nil
     end
 
     test "/memory shows memory usage", %{tmp_dir: dir} do
       {:ok, state} = SlashCommand.execute(mock_state(), "/memory", dir)
-      assert state.shell_runtime.state.status_msg =~ "No memory file found"
+      assert state.shell_runtime.state.notice.message =~ "No memory file found"
     end
 
     test "/memory rejects unknown subcommands" do
@@ -482,6 +474,11 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       names = Enum.map(dynamic, & &1.name)
       assert "greet" in names
       assert "farewell" in names
+    end
+
+    test "dynamic command execution requires an active session" do
+      assert {:error, "No active agent session"} =
+               SlashCommand.execute(mock_state(), "/greet hello")
     end
 
     test "dynamic commands appear in commands/0" do

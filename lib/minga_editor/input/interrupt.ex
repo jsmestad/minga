@@ -29,6 +29,9 @@ defmodule MingaEditor.Input.Interrupt do
   @type state :: MingaEditor.Input.Handler.handler_state()
 
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Shell.Traditional.ModalWorkflow
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
+  alias MingaEditor.Shell.Traditional.WhichKeyWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.ModalOverlay
@@ -114,8 +117,8 @@ defmodule MingaEditor.Input.Interrupt do
 
   @spec maybe_dismiss_modal(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
   defp maybe_dismiss_modal(state, resets) do
-    if ModalOverlay.active?(EditorState.modal(state)) do
-      {ModalOverlay.dismiss(state), ["modal dismissed" | resets]}
+    if ModalOverlay.active?(state.shell_runtime.state.modal) do
+      {ModalWorkflow.dismiss(state), ["modal dismissed" | resets]}
     else
       {state, resets}
     end
@@ -129,8 +132,7 @@ defmodule MingaEditor.Input.Interrupt do
        do: {state, resets}
 
   defp maybe_clear_whichkey(state, resets) do
-    wk = EditorState.whichkey(state)
-    {EditorState.set_whichkey(state, WhichKey.clear(wk)), ["which-key dismissed" | resets]}
+    {WhichKeyWorkflow.dismiss(state), ["which-key dismissed" | resets]}
   end
 
   @spec maybe_clear_agent_prefix(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
@@ -146,11 +148,16 @@ defmodule MingaEditor.Input.Interrupt do
   end
 
   @spec maybe_clear_status(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
-  defp maybe_clear_status(%{shell_runtime: %{state: %{status_msg: nil}}} = state, resets),
-    do: {state, resets}
+  defp maybe_clear_status(
+         %{
+           shell_runtime: %{state: %{notice: %MingaEditor.Shell.Traditional.Notice{message: nil}}}
+         } = state,
+         resets
+       ),
+       do: {state, resets}
 
   defp maybe_clear_status(state, resets) do
-    {EditorState.clear_status(state), ["status cleared" | resets]}
+    {NoticeWorkflow.dismiss(state), ["notice dismissed" | resets]}
   end
 
   # ── Logging ──────────────────────────────────────────────────────────────

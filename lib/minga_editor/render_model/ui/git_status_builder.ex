@@ -2,6 +2,7 @@ defmodule MingaEditor.RenderModel.UI.GitStatusBuilder do
   @moduledoc false
 
   alias Minga.RenderModel.UI.GitStatus
+  alias MingaEditor.Shell.Traditional.GitToast
 
   @spec build(map() | nil, boolean(), map() | nil) :: GitStatus.t()
   def build(nil, syncing, toast) do
@@ -68,7 +69,13 @@ defmodule MingaEditor.RenderModel.UI.GitStatusBuilder do
   @spec normalize_toast(map() | nil) :: GitStatus.wire_toast()
   defp normalize_toast(nil), do: %{present: 0}
 
-  defp normalize_toast(%{message: message, level: level, action: action}) do
+  defp normalize_toast(%GitToast{message: message, level: level, action: action})
+       when is_binary(message) and level in [:info, :success, :warning, :error] do
+    %{present: 1, level: level, action: action || :none, message: message}
+  end
+
+  defp normalize_toast(%{message: message, level: level, action: action})
+       when is_binary(message) and level in [:info, :success, :warning, :error] do
     %{present: 1, level: level, action: action || :none, message: message}
   end
 

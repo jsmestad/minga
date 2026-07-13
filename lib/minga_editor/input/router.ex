@@ -23,6 +23,7 @@ defmodule MingaEditor.Input.Router do
   alias MingaEditor.LspActions
   alias MingaEditor.Shell.Entry
   alias MingaEditor.Shell.Traditional
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.State, as: EditorState
 
   @typedoc "Pre-action snapshot for housekeeping comparisons."
@@ -66,6 +67,10 @@ defmodule MingaEditor.Input.Router do
   """
   @spec dispatch(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
   def dispatch(state, codepoint, modifiers) do
+    # Ctrl-G owns explicit notice dismissal in Interrupt. Every other keyboard
+    # command acknowledges an ordinary notice before any handler runs.
+    state = preclear_notice(state, codepoint, modifiers)
+
     # Intercept keys when a quit confirmation prompt is active.
     # y/n/Escape are handled here; all other keys are ignored.
     if state.pending_quit do
@@ -74,6 +79,10 @@ defmodule MingaEditor.Input.Router do
       dispatch_normal(state, codepoint, modifiers)
     end
   end
+
+  @spec preclear_notice(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
+  defp preclear_notice(state, 7, 0), do: state
+  defp preclear_notice(state, _codepoint, _modifiers), do: NoticeWorkflow.acknowledge(state)
 
   @spec return_dispatch_confirm_quit(EditorState.t(), non_neg_integer()) :: EditorState.t()
   defp return_dispatch_confirm_quit(state, codepoint) do
@@ -107,8 +116,6 @@ defmodule MingaEditor.Input.Router do
     was_inserting = Editing.inserting?(state)
     buf_version_before = buffer_version(state)
     old_cursor = safe_cursor(old_buffer)
-
-    state = EditorState.clear_status(state)
 
     state = dispatch_split(state, codepoint, modifiers)
     state = record_keystroke(state, codepoint, modifiers, old_mode)
@@ -145,7 +152,7 @@ defmodule MingaEditor.Input.Router do
   # Delegates a key press to surface handlers.
   #
   # Editor handlers (Scoped, GlobalBindings, ModeFSM) operate on EditorState
-  # directly. This preserves all side effects (status_msg, focus_stack changes,
+  # directly. This preserves all side effects (notice, focus-stack changes,
   # mode transitions) that handlers produce.
   @spec dispatch_to_surface(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()

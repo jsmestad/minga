@@ -3,7 +3,6 @@ defmodule Minga.Test.DeleteActionPickerSource do
 
   @behaviour MingaEditor.UI.Picker.Source
 
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.UI.Picker.Item
 
   @impl true
@@ -30,7 +29,7 @@ defmodule Minga.Test.DeleteActionPickerSource do
   @impl true
   @spec on_action(atom(), Item.t(), term()) :: term()
   def on_action(:delete, %Item{id: :delete_me}, state) do
-    EditorState.set_status(state, "Deleted via action")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Deleted via action")
   end
 
   def on_action(_action, _item, state), do: state

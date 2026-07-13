@@ -28,7 +28,7 @@ defmodule MingaEditor.Commands.RemoteFiles do
         root: root
       })
     else
-      {:error, message} -> EditorState.set_status(state, message)
+      {:error, message} -> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, message)
     end
   end
 
@@ -41,10 +41,16 @@ defmodule MingaEditor.Commands.RemoteFiles do
         open_remote_file(state, server_name, remote_node, remote_path)
 
       {:error, :disconnected} ->
-        EditorState.set_status(state, "Remote server #{server_name} is disconnected")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Remote server #{server_name} is disconnected"
+        )
 
       {:error, :not_found} ->
-        EditorState.set_status(state, "Unknown remote server #{server_name}")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Unknown remote server #{server_name}"
+        )
     end
   end
 
@@ -78,7 +84,10 @@ defmodule MingaEditor.Commands.RemoteFiles do
         |> EditorState.update_remote(&Remote.put_buffer(&1, server_name, remote_path, buffer))
 
       {:error, reason} ->
-        EditorState.set_status(state, "Failed to open remote file: #{format_open_error(reason)}")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Failed to open remote file: #{format_open_error(reason)}"
+        )
     end
   end
 

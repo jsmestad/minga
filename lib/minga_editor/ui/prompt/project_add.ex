@@ -8,6 +8,7 @@ defmodule MingaEditor.UI.Prompt.ProjectAdd do
 
   @behaviour MingaEditor.UI.Prompt.Handler
 
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.State, as: EditorState
   alias Minga.Project
 
@@ -21,15 +22,15 @@ defmodule MingaEditor.UI.Prompt.ProjectAdd do
     trimmed = String.trim(text)
 
     if trimmed == "" do
-      EditorState.set_status(state, "No path given")
+      NoticeWorkflow.publish(state, "No path given")
     else
       path = trimmed |> Project.expand_home() |> Path.expand()
 
       if File.dir?(path) do
         Project.add(path)
-        EditorState.set_status(state, "Added project: #{path}")
+        NoticeWorkflow.publish(state, "Added project: #{path}")
       else
-        EditorState.set_status(state, "Not a directory: #{path}")
+        NoticeWorkflow.publish(state, "Not a directory: #{path}")
       end
     end
   end

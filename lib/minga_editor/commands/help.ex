@@ -932,7 +932,7 @@ defmodule MingaEditor.Commands.Help do
         Commands.add_buffer(state, buffer)
       end
 
-    EditorState.clear_status(state)
+    MingaEditor.Shell.Traditional.NoticeWorkflow.dismiss(state)
   end
 
   @spec replace_help_content(pid(), String.t()) :: :ok

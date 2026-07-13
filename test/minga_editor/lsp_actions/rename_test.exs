@@ -26,8 +26,8 @@ defmodule MingaEditor.LspActions.RenameTest do
       error_state = LspActions.handle_prepare_rename_response(stub_state(), {:error, "invalid"})
       nil_state = LspActions.handle_prepare_rename_response(stub_state(), {:ok, nil})
 
-      assert EditorState.status_msg(error_state) == "Cannot rename at this position"
-      assert EditorState.status_msg(nil_state) == "Cannot rename at this position"
+      assert error_state.shell_runtime.state.notice.message == "Cannot rename at this position"
+      assert nil_state.shell_runtime.state.notice.message == "Cannot rename at this position"
     end
 
     test "successful prepare enters command mode with rename prompt" do
@@ -114,7 +114,7 @@ defmodule MingaEditor.LspActions.RenameTest do
         assert selected.id == operation.id
         assert selected.status == status
         assert selected.message == message
-        assert EditorState.status_msg(state) == nil
+        assert state.shell_runtime.state.notice.message == nil
       end
     end
 

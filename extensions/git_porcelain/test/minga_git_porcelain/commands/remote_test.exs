@@ -1,15 +1,42 @@
+Code.require_file("../../../../../test/support/fake_shell.ex", __DIR__)
+
 defmodule MingaGitPorcelain.CommandsRemoteTest do
   @moduledoc """
   Focused tests for async git remote operation feedback.
   """
-  use ExUnit.Case, async: true
+  # Serial because the shell-switch regression test uses the global shell registry.
+  use ExUnit.Case, async: false
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor
-  alias MingaGitPorcelain.Commands, as: GitCommands
+  alias MingaEditor.Shell.Registry, as: ShellRegistry
+  alias MingaEditor.Shell.Traditional.GitToast
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Test.FakeShell
   alias MingaEditor.Viewport
+  alias MingaGitPorcelain.Commands, as: GitCommands
+
+  setup do
+    ShellRegistry.reset_for_test()
+    ShellRegistry.seed_builtin()
+
+    :ok =
+      ShellRegistry.register({:extension, :git_remote_fake_shell}, %{
+        id: :fake,
+        module: FakeShell,
+        display_name: "Fake",
+        description: "Fake shell",
+        capabilities: [:tui]
+      })
+
+    on_exit(fn ->
+      ShellRegistry.reset_for_test()
+      ShellRegistry.seed_builtin()
+    end)
+
+    :ok
+  end
 
   describe "command registration" do
     test "remote git commands are registered" do
@@ -37,7 +64,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
 
       result = GitCommands.handle_remote_result(state, ref, :ok)
 
-      assert EditorState.status_msg(result) == "Pushed"
+      assert result.shell_runtime.state.notice.message == "Pushed"
       assert result.git_remote_op == nil
     end
 
@@ -61,12 +88,33 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
     test "stale results leave the current operation untouched" do
       current_ref = make_ref()
       op = make_remote_op(current_ref, {"/tmp/repo", "Pushed", "Push failed"})
-      state = build_state(%{git_remote_op: op, status_msg: "Pushing…"})
+      state = build_state(%{git_remote_op: op, notice_message: "Pushing…"})
 
       result = GitCommands.handle_remote_result(state, make_ref(), :ok)
 
-      assert EditorState.status_msg(result) == "Pushing…"
+      assert result.shell_runtime.state.notice.message == "Pushing…"
       assert result.git_remote_op == op
+    end
+
+    test "delayed result clears the operation without touching or replaying a foreign shell" do
+      ref = make_ref()
+
+      state =
+        build_state(%{git_remote_op: make_remote_op(ref, {"/tmp/repo", "Pushed", "Push failed"})})
+        |> MingaEditor.Shell.Workflow.switch(:fake)
+
+      foreign_shell_state = Runtime.state(state.shell_runtime)
+      message_store = state.message_store
+
+      result = GitCommands.handle_remote_result(state, ref, :ok)
+
+      assert result.git_remote_op == nil
+      assert Runtime.state(result.shell_runtime) == foreign_shell_state
+      assert result.message_store == message_store
+
+      restored = MingaEditor.Shell.Workflow.switch(result, :traditional)
+      assert Runtime.state(restored.shell_runtime).notice.message == nil
+      refute GitToast.present?(Runtime.state(restored.shell_runtime).git_toast)
     end
   end
 
@@ -82,7 +130,9 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
       result = GitCommands.handle_remote_task_down(state, task_monitor, :killed)
 
       assert result.git_remote_op == nil
-      assert EditorState.status_msg(result) == "Git operation failed unexpectedly: killed"
+
+      assert result.shell_runtime.state.notice.message ==
+               "Git operation failed unexpectedly: killed"
 
       assert %{message: "Git operation failed unexpectedly: killed", level: :error, action: nil} =
                Runtime.state(result.shell_runtime).git_toast
@@ -91,13 +141,13 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
     test "normal task exit waits for the result message" do
       task_monitor = make_ref()
       op = {make_ref(), task_monitor, {"/tmp/repo", "Pushed", "Push failed"}}
-      state = build_state(%{git_remote_op: op, status_msg: "Pushing…"})
+      state = build_state(%{git_remote_op: op, notice_message: "Pushing…"})
 
       result = GitCommands.handle_remote_task_down(state, task_monitor, :normal)
 
       assert result.git_remote_op == op
-      assert EditorState.status_msg(result) == "Pushing…"
-      assert Runtime.state(result.shell_runtime).git_toast == nil
+      assert result.shell_runtime.state.notice.message == "Pushing…"
+      refute GitToast.present?(result.shell_runtime.state.git_toast)
     end
   end
 
@@ -110,7 +160,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
       send(editor, {:git_remote_result, ref, :ok})
       state = get_state(editor)
 
-      assert EditorState.status_msg(state) == "Fetched"
+      assert state.shell_runtime.state.notice.message == "Fetched"
       assert state.git_remote_op == nil
     end
 
@@ -124,25 +174,28 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
       state = get_state(editor)
 
       assert state.git_remote_op == nil
-      assert EditorState.status_msg(state) == "Git operation failed unexpectedly: killed"
-      assert %{level: :error, action: nil} = Runtime.state(state.shell_runtime).git_toast
+
+      assert state.shell_runtime.state.notice.message ==
+               "Git operation failed unexpectedly: killed"
+
+      assert %{level: :error, action: nil} = state.shell_runtime.state.git_toast
     end
   end
 
   describe "concurrent operation guard" do
     test "rejects remote actions when an operation is already in flight" do
       op = make_remote_op(make_ref(), {"/tmp/repo", "Pushed", "Push failed"})
-      state = build_state(%{git_remote_op: op, status_msg: "Pushing…"})
+      state = build_state(%{git_remote_op: op, notice_message: "Pushing…"})
 
       result = GitCommands.execute(state, :git_pull)
 
-      assert EditorState.status_msg(result) == "Git operation already in progress"
+      assert result.shell_runtime.state.notice.message == "Git operation already in progress"
       assert result.git_remote_op == op
     end
   end
 
   defp build_state(overrides) do
-    {status_msg, overrides} = Map.pop(overrides, :status_msg)
+    {notice_message, overrides} = Map.pop(overrides, :notice_message)
 
     state =
       Map.merge(
@@ -153,7 +206,9 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
         overrides
       )
 
-    if status_msg, do: EditorState.set_status(state, status_msg), else: state
+    if notice_message,
+      do: MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, notice_message),
+      else: state
   end
 
   defp start_editor(content \\ "") do

@@ -16,6 +16,10 @@ defmodule MingaEditor.Shell.RegistryTest do
   alias MingaEditor.Shell.Registry
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Workflow
+  alias MingaEditor.Shell.Traditional.FlashesWorkflow
+  alias MingaEditor.Shell.Traditional.GitToastWorkflow
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
+  alias MingaEditor.Shell.Traditional.WhichKeyWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
@@ -493,6 +497,64 @@ defmodule MingaEditor.Shell.RegistryTest do
     refute_receive {:fake_shell_alt_initialized, _pid}
   end
 
+  test "switching away cancels Traditional transients and stale timer delivery is harmless" do
+    Registry.seed_builtin()
+
+    assert :ok =
+             Registry.register({:extension, :fake}, %{
+               id: :fake,
+               module: FakeShell,
+               display_name: "Fake",
+               description: "Fake shell",
+               capabilities: [:tui]
+             })
+
+    traditional =
+      TestHelpers.base_state()
+      |> NoticeWorkflow.publish("notice")
+      |> FlashesWorkflow.replace_nav(12)
+      |> GitToastWorkflow.publish("Fetched", :success)
+      |> WhichKeyWorkflow.begin(%{?a => :action}, ["SPC"])
+
+    notice_id = traditional.shell_runtime.state.notice.id
+    nav_generation = traditional.shell_runtime.state.flashes.nav.generation
+    toast_id = traditional.shell_runtime.state.git_toast.id
+    whichkey_generation = traditional.shell_runtime.state.whichkey.generation
+
+    fake = Workflow.switch(traditional, :fake)
+
+    assert NoticeWorkflow.timeout(fake, notice_id) == fake
+    assert FlashesWorkflow.advance_nav(fake, nav_generation) == fake
+    assert GitToastWorkflow.timeout(fake, toast_id) == fake
+    assert WhichKeyWorkflow.reveal(fake, whichkey_generation) == fake
+
+    restored = Workflow.switch(fake, :traditional)
+
+    assert restored.shell_runtime.state.notice.message == nil
+    refute restored.shell_runtime.state.flashes.nav.line
+    refute restored.shell_runtime.state.git_toast.message
+    refute restored.shell_runtime.state.whichkey.node
+  end
+
+  test "ordinary notices remain durable when a non-Traditional shell is active" do
+    Registry.seed_builtin()
+
+    assert :ok =
+             Registry.register({:extension, :fake}, %{
+               id: :fake,
+               module: FakeShell,
+               display_name: "Fake",
+               description: "Fake shell",
+               capabilities: [:tui]
+             })
+
+    fake = TestHelpers.base_state() |> Workflow.switch(:fake)
+    updated = NoticeWorkflow.publish(fake, "durable notice")
+
+    assert [%{text: "durable notice"}] = updated.message_store.entries
+    assert updated.shell_runtime.state == fake.shell_runtime.state
+  end
+
   test "switch invalidates layout and focus while active-shell selection remains a no-op" do
     Registry.seed_builtin()
 
@@ -518,7 +580,9 @@ defmodule MingaEditor.Shell.RegistryTest do
 
     assert unchanged.layout == :layout
     assert unchanged.focus_tree == :focus
-    assert EditorState.status_msg(unchanged) == "Already using Traditional"
+
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(unchanged) ==
+             "Already using Traditional"
   end
 
   test "unavailable active shell falls back with the default identity and fresh state" do
@@ -1124,6 +1188,27 @@ defmodule MingaEditor.Shell.RegistryTest do
     assert result.focus_tree == nil
     assert Runtime.id(result.shell_runtime) == :fake
     refute Map.has_key?(result.shell_runtime.state, :modeline_click_regions)
+  end
+
+  test "keyboard input is safe while a non-Traditional shell is active" do
+    Registry.seed_builtin()
+
+    assert :ok =
+             Registry.register({:extension, :fake}, %{
+               id: :fake,
+               module: FakeShell,
+               display_name: "Fake",
+               description: "Fake shell",
+               capabilities: [:tui]
+             })
+
+    state = TestHelpers.base_state() |> Workflow.switch(:fake)
+
+    assert {:noreply, updated} =
+             MingaEditor.handle_info({:minga_input, {:key_press, ?j, 0, 42}}, state)
+
+    assert Runtime.id(updated.shell_runtime) == :fake
+    assert updated.last_input_seq == 42
   end
 
   test "input dispatch falls back when the active shell has been unregistered" do

@@ -21,10 +21,8 @@ defmodule MingaEditor.PickerUI do
   """
 
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
   alias MingaEditor.State.Picker, as: PickerState
-  alias MingaEditor.State.WhichKey, as: WhichKeyState
   alias MingaEditor.UI.Picker
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
@@ -115,7 +113,12 @@ defmodule MingaEditor.PickerUI do
 
     {picker_state, revision} = PickerState.begin_fetch(picker_state)
 
-    new_state = ModalOverlay.open(new_state, :picker, PickerPayload.new(picker_state))
+    new_state =
+      MingaEditor.Shell.Traditional.ModalWorkflow.open(
+        new_state,
+        :picker,
+        PickerPayload.new(picker_state)
+      )
 
     send(
       self(),
@@ -143,17 +146,16 @@ defmodule MingaEditor.PickerUI do
       layout: layout
     }
 
-    ModalOverlay.open(new_state, :picker, PickerPayload.new(picker_state))
+    MingaEditor.Shell.Traditional.ModalWorkflow.open(
+      new_state,
+      :picker,
+      PickerPayload.new(picker_state)
+    )
   end
 
   @spec clear_whichkey(state()) :: state()
-  defp clear_whichkey(state) do
-    if EditorState.whichkey(state).timer do
-      EditorState.set_whichkey(state, WhichKeyState.clear(EditorState.whichkey(state)))
-    else
-      state
-    end
-  end
+  defp clear_whichkey(state),
+    do: MingaEditor.Shell.Traditional.WhichKeyWorkflow.dismiss(state)
 
   @doc """
   Handles a key event while the picker is open.
@@ -633,7 +635,7 @@ defmodule MingaEditor.PickerUI do
   def close(state) do
     state
     |> EditorState.set_buffer_add_context(:open)
-    |> ModalOverlay.dismiss()
+    |> MingaEditor.Shell.Traditional.ModalWorkflow.dismiss()
   end
 
   @doc """
@@ -669,7 +671,7 @@ defmodule MingaEditor.PickerUI do
 
   @doc """
   Applies `fun` to the current PickerState inside the modal and writes back
-  via ModalOverlay.transition, keeping the modal sum type and consistency
+  via MingaEditor.Shell.Traditional.ModalWorkflow.transition, keeping the modal sum type and consistency
   check in sync.
 
   Public so that `Input.Picker` (mouse handler) can update scroll position
@@ -679,7 +681,12 @@ defmodule MingaEditor.PickerUI do
   def update_picker(state, fun) do
     {:picker, payload} = state.shell_runtime.state.modal
     new_pui = fun.(payload.picker_ui)
-    ModalOverlay.transition(state, :picker, PickerPayload.put_picker_ui(payload, new_pui))
+
+    MingaEditor.Shell.Traditional.ModalWorkflow.transition(
+      state,
+      :picker,
+      PickerPayload.put_picker_ui(payload, new_pui)
+    )
   end
 
   # ── Mode switching ──────────────────────────────────────────────────────────

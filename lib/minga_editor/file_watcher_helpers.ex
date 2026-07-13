@@ -10,7 +10,6 @@ defmodule MingaEditor.FileWatcherHelpers do
   alias Minga.Buffer
   alias Minga.Buffer.State, as: BufState
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.ModalOverlay.Conflict, as: ConflictPayload
   alias Minga.FileWatcher
 
@@ -111,7 +110,11 @@ defmodule MingaEditor.FileWatcherHelpers do
        ) do
     Buffer.reload(buf)
     name = Path.basename(path)
-    EditorState.set_status(state, "#{name} reloaded (changed on disk)")
+
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      "#{name} reloaded (changed on disk)"
+    )
   end
 
   defp handle_known_change(
@@ -126,9 +129,17 @@ defmodule MingaEditor.FileWatcherHelpers do
        ) do
     name = Path.basename(path)
 
-    state = ModalOverlay.open(state, :conflict, ConflictPayload.new(buf, path))
+    state =
+      MingaEditor.Shell.Traditional.ModalWorkflow.open(
+        state,
+        :conflict,
+        ConflictPayload.new(buf, path)
+      )
 
-    EditorState.set_status(state, "#{name} changed on disk. [r]eload / [k]eep")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      "#{name} changed on disk. [r]eload / [k]eep"
+    )
   end
 
   @spec find_buffer_for_path(state(), String.t()) :: pid() | nil

@@ -23,7 +23,6 @@ defmodule MingaEditor.KeyDispatch do
   alias MingaEditor.ModeTransitions
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
-  alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.ModalOverlay.CommandCompletion, as: CommandCompletionPayload
   alias Minga.Keymap
   alias Minga.Keymap.Bindings
@@ -133,7 +132,6 @@ defmodule MingaEditor.KeyDispatch do
       case Commands.execute(s, cmd) do
         {s2, {:dot_repeat, count}} -> ChangeTracking.replay_last_change(s2, count)
         {s2, {:replay_macro, register}} -> MacroReplay.replay(s2, register)
-        {s2, {:whichkey_update, wk}} -> EditorState.set_whichkey(s2, wk)
         s2 -> s2
       end
     end
@@ -188,7 +186,8 @@ defmodule MingaEditor.KeyDispatch do
   defp guard_read_only(mode, commands, mode_state, state)
        when mode in [:insert, :replace] do
     if active_buffer_read_only?(state) do
-      {:normal, [], Mode.initial_state(), EditorState.set_status(state, @read_only_msg)}
+      {:normal, [], Mode.initial_state(),
+       MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, @read_only_msg)}
     else
       {mode, commands, mode_state, state}
     end
@@ -196,7 +195,8 @@ defmodule MingaEditor.KeyDispatch do
 
   defp guard_read_only(:operator_pending, commands, mode_state, state) do
     if mutating_operator?(mode_state) and active_buffer_read_only?(state) do
-      {:normal, [], Mode.initial_state(), EditorState.set_status(state, @read_only_msg)}
+      {:normal, [], Mode.initial_state(),
+       MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, @read_only_msg)}
     else
       {:operator_pending, commands, mode_state, state}
     end
@@ -250,12 +250,12 @@ defmodule MingaEditor.KeyDispatch do
         total: total
       )
 
-    ModalOverlay.open(state, :command_completion, payload)
+    MingaEditor.Shell.Traditional.ModalWorkflow.open(state, :command_completion, payload)
   end
 
   defp sync_command_completion_overlay(state, :command, new_mode) when new_mode != :command do
     case state.shell_runtime.state.modal do
-      {:command_completion, _} -> ModalOverlay.close(state)
+      {:command_completion, _} -> MingaEditor.Shell.Traditional.ModalWorkflow.close(state)
       _ -> state
     end
   end

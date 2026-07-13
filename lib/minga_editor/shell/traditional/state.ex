@@ -14,9 +14,10 @@ defmodule MingaEditor.Shell.Traditional.State do
 
   alias MingaEditor.BottomPanel
   alias MingaEditor.HoverPopup
-  alias MingaEditor.NavFlash
   alias MingaEditor.Observatory
-  alias MingaEditor.YankFlash
+  alias MingaEditor.Shell.Traditional.Flashes
+  alias MingaEditor.Shell.Traditional.GitToast
+  alias MingaEditor.Shell.Traditional.Notice
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.InlineAsk
   alias MingaEditor.State.InlineEdit
@@ -24,11 +25,8 @@ defmodule MingaEditor.Shell.Traditional.State do
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.WhichKey
   alias Minga.Tool.Manager, as: ToolManager
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
 
-  @typedoc "Git toast shown after a remote operation completes."
-  @type git_toast :: ProtocolGUI.git_toast() | nil
   @type git_status_panel :: GitStatusPanel.t()
   @type git_status_tui_state :: struct()
   @type tab_bar_command ::
@@ -42,10 +40,9 @@ defmodule MingaEditor.Shell.Traditional.State do
   @git_status_tui_state_module :"Elixir.MingaGitPorcelain.Shell.Traditional.GitStatus.TuiState"
 
   @type t :: %__MODULE__{
-          nav_flash: NavFlash.t() | nil,
-          yank_flash: YankFlash.t() | nil,
+          flashes: Flashes.t(),
           hover_popup: HoverPopup.t() | nil,
-          status_msg: String.t() | nil,
+          notice: Notice.t(),
           whichkey: WhichKey.t(),
           bottom_panel: BottomPanel.t(),
           git_status_panel: git_status_panel() | nil,
@@ -55,7 +52,7 @@ defmodule MingaEditor.Shell.Traditional.State do
           observatory_data: Observatory.Data.t() | nil,
           observatory_timer: {reference(), reference()} | nil,
           observatory_inspection: Observatory.Inspection.t() | nil,
-          git_toast: git_toast(),
+          git_toast: GitToast.t(),
           tab_bar: TabBar.t() | nil,
           agent: AgentState.t(),
           modal: ModalOverlay.t(),
@@ -63,7 +60,6 @@ defmodule MingaEditor.Shell.Traditional.State do
           inline_edits: InlineEdit.store(),
           modeline_click_regions: [MingaEditor.Shell.Traditional.Modeline.click_region()],
           tab_bar_click_regions: [tab_bar_click_region()],
-          warning_popup_timer: reference() | nil,
           signature_help: MingaEditor.SignatureHelp.t() | nil,
           tool_declined: MapSet.t(),
           tool_prompt_queue: [atom()],
@@ -72,10 +68,9 @@ defmodule MingaEditor.Shell.Traditional.State do
           space_leader_timer: reference() | nil
         }
 
-  defstruct nav_flash: nil,
-            yank_flash: nil,
+  defstruct flashes: %Flashes{},
             hover_popup: nil,
-            status_msg: nil,
+            notice: %Notice{},
             whichkey: %WhichKey{},
             bottom_panel: %BottomPanel{},
             git_status_panel: nil,
@@ -85,7 +80,7 @@ defmodule MingaEditor.Shell.Traditional.State do
             observatory_data: nil,
             observatory_timer: nil,
             observatory_inspection: nil,
-            git_toast: nil,
+            git_toast: %GitToast{},
             tab_bar: nil,
             agent: %AgentState{},
             modal: :none,
@@ -93,7 +88,6 @@ defmodule MingaEditor.Shell.Traditional.State do
             inline_edits: %{},
             modeline_click_regions: [],
             tab_bar_click_regions: [],
-            warning_popup_timer: nil,
             signature_help: nil,
             tool_declined: MapSet.new(),
             tool_prompt_queue: [],
@@ -101,67 +95,111 @@ defmodule MingaEditor.Shell.Traditional.State do
             space_leader_pending: false,
             space_leader_timer: nil
 
-  # ── Status message ─────────────────────────────────────────────────────────
-
-  @doc "Returns the transient status message, or nil."
-  @spec status_msg(t()) :: String.t() | nil
-  def status_msg(%{status_msg: msg}), do: msg
-
-  @doc "Sets the transient status message shown in the modeline."
-  @spec set_status(t(), String.t()) :: t()
-  def set_status(%{} = ss, msg) when is_binary(msg) do
-    Map.put(ss, :status_msg, msg)
-  end
-
-  @doc "Clears the transient status message."
-  @spec clear_status(t()) :: t()
-  def clear_status(%{status_msg: nil} = ss), do: ss
-
-  def clear_status(%{} = ss) do
-    Map.put(ss, :status_msg, nil)
-  end
-
   @doc "Controls whether missing-tool prompts are suppressed."
   @spec set_suppress_tool_prompts(t(), boolean()) :: t()
-  def set_suppress_tool_prompts(%{} = ss, suppress?) when is_boolean(suppress?) do
-    Map.put(ss, :suppress_tool_prompts, suppress?)
+  def set_suppress_tool_prompts(%__MODULE__{} = state, suppress?) when is_boolean(suppress?) do
+    %{state | suppress_tool_prompts: suppress?}
   end
 
-  # ── Nav flash ──────────────────────────────────────────────────────────────
+  # ── Focused transient owners ──────────────────────────────────────────────
 
-  @doc "Returns the nav flash state, or nil when inactive."
-  @spec nav_flash(t()) :: NavFlash.t() | nil
-  def nav_flash(%{nav_flash: flash}), do: flash
+  @doc "Applies the notice publish transition."
+  @spec publish_notice(t(), String.t()) :: t()
+  def publish_notice(%__MODULE__{} = state, message),
+    do: %{state | notice: Notice.publish(state.notice, message)}
 
-  @doc "Sets the nav flash state."
-  @spec set_nav_flash(t(), NavFlash.t()) :: t()
-  def set_nav_flash(%{} = ss, %NavFlash{} = flash) do
-    %{ss | nav_flash: flash}
+  @doc "Records a notice timer for the matching notice identity."
+  @spec record_notice_timer(t(), Notice.id(), reference()) :: t()
+  def record_notice_timer(%__MODULE__{} = state, id, timer),
+    do: %{state | notice: Notice.record_timer(state.notice, id, timer)}
+
+  @doc "Acknowledges the current notice."
+  @spec acknowledge_notice(t()) :: t()
+  def acknowledge_notice(%__MODULE__{} = state),
+    do: %{state | notice: Notice.acknowledge(state.notice)}
+
+  @doc "Dismisses the current notice."
+  @spec dismiss_notice(t()) :: t()
+  def dismiss_notice(%__MODULE__{} = state), do: %{state | notice: Notice.dismiss(state.notice)}
+
+  @doc "Applies a matching notice timeout."
+  @spec timeout_notice(t(), Notice.id()) :: t()
+  def timeout_notice(%__MODULE__{} = state, id),
+    do: %{state | notice: Notice.timeout(state.notice, id)}
+
+  @doc "Replaces only the navigation flash."
+  @spec replace_nav_flash(t(), non_neg_integer()) :: t()
+  def replace_nav_flash(%__MODULE__{} = state, line),
+    do: %{state | flashes: Flashes.replace_nav(state.flashes, line)}
+
+  @doc "Records only the matching navigation flash timer."
+  @spec record_nav_flash_timer(t(), non_neg_integer(), reference()) :: t()
+  def record_nav_flash_timer(%__MODULE__{} = state, generation, timer),
+    do: %{state | flashes: Flashes.record_nav_timer(state.flashes, generation, timer)}
+
+  @doc "Advances only the matching navigation flash generation."
+  @spec advance_nav_flash(t(), non_neg_integer()) :: {:continue | :done | :stale, t()}
+  def advance_nav_flash(%__MODULE__{} = state, generation) do
+    case Flashes.advance_nav(state.flashes, generation) do
+      {result, flashes} -> {result, %{state | flashes: flashes}}
+    end
   end
 
-  @doc "Cancels the nav flash animation."
+  @doc "Cancels only the navigation flash."
   @spec cancel_nav_flash(t()) :: t()
-  def cancel_nav_flash(%{} = ss) do
-    %{ss | nav_flash: nil}
+  def cancel_nav_flash(%__MODULE__{} = state),
+    do: %{state | flashes: Flashes.cancel_nav(state.flashes)}
+
+  @doc "Replaces only the yank flash."
+  @spec replace_yank_flash(t(), pid(), tuple(), tuple(), atom()) :: t()
+  def replace_yank_flash(%__MODULE__{} = state, buf, start_pos, end_pos, range_type),
+    do: %{
+      state
+      | flashes: Flashes.replace_yank(state.flashes, buf, start_pos, end_pos, range_type)
+    }
+
+  @doc "Records only the matching yank flash timer."
+  @spec record_yank_flash_timer(t(), non_neg_integer(), reference()) :: t()
+  def record_yank_flash_timer(%__MODULE__{} = state, generation, timer),
+    do: %{state | flashes: Flashes.record_yank_timer(state.flashes, generation, timer)}
+
+  @doc "Advances only the matching yank flash generation."
+  @spec advance_yank_flash(t(), non_neg_integer()) :: {:continue | :done | :stale, t()}
+  def advance_yank_flash(%__MODULE__{} = state, generation) do
+    case Flashes.advance_yank(state.flashes, generation) do
+      {result, flashes} -> {result, %{state | flashes: flashes}}
+    end
   end
 
-  # ── Yank flash ────────────────────────────────────────────────────────────
-
-  @doc "Returns the yank flash state, or nil when inactive."
-  @spec yank_flash(t()) :: YankFlash.t() | nil
-  def yank_flash(%{yank_flash: flash}), do: flash
-
-  @doc "Sets the yank flash state."
-  @spec set_yank_flash(t(), YankFlash.t()) :: t()
-  def set_yank_flash(%{} = ss, %YankFlash{} = flash) do
-    %{ss | yank_flash: flash}
-  end
-
-  @doc "Cancels the yank flash animation."
+  @doc "Cancels only the yank flash."
   @spec cancel_yank_flash(t()) :: t()
-  def cancel_yank_flash(%{} = ss) do
-    %{ss | yank_flash: nil}
-  end
+  def cancel_yank_flash(%__MODULE__{} = state),
+    do: %{state | flashes: Flashes.cancel_yank(state.flashes)}
+
+  @doc "Publishes a protocol-independent Git toast."
+  @spec publish_git_toast(t(), String.t(), GitToast.level(), GitToast.action()) :: t()
+  def publish_git_toast(%__MODULE__{} = state, message, level, action),
+    do: %{state | git_toast: GitToast.publish(state.git_toast, message, level, action)}
+
+  @doc "Records a Git-toast timer for the matching identity."
+  @spec record_git_toast_timer(t(), GitToast.id(), reference()) :: t()
+  def record_git_toast_timer(%__MODULE__{} = state, id, timer),
+    do: %{state | git_toast: GitToast.record_timer(state.git_toast, id, timer)}
+
+  @doc "Dismisses the current Git toast."
+  @spec dismiss_git_toast(t()) :: t()
+  def dismiss_git_toast(%__MODULE__{} = state),
+    do: %{state | git_toast: GitToast.dismiss(state.git_toast)}
+
+  @doc "Dismisses a Git toast only when its identity still matches."
+  @spec dismiss_git_toast(t(), GitToast.id()) :: t()
+  def dismiss_git_toast(%__MODULE__{} = state, id),
+    do: %{state | git_toast: GitToast.dismiss(state.git_toast, id)}
+
+  @doc "Times out a matching auto-dismiss Git toast."
+  @spec timeout_git_toast(t(), GitToast.id()) :: t()
+  def timeout_git_toast(%__MODULE__{} = state, id),
+    do: %{state | git_toast: GitToast.timeout(state.git_toast, id)}
 
   # ── Hover popup ────────────────────────────────────────────────────────────
 
@@ -169,16 +207,62 @@ defmodule MingaEditor.Shell.Traditional.State do
   @spec hover_popup(t()) :: HoverPopup.t() | nil
   def hover_popup(%{hover_popup: popup}), do: popup
 
-  @doc "Sets the hover popup state."
-  @spec set_hover_popup(t(), HoverPopup.t()) :: t()
-  def set_hover_popup(%{} = ss, %HoverPopup{} = popup) do
-    %{ss | hover_popup: popup}
-  end
+  @doc "Shows newly produced hover content, replacing prior content."
+  @spec show_hover_popup(t(), HoverPopup.t()) :: t()
+  def show_hover_popup(%__MODULE__{} = state, %HoverPopup{} = popup),
+    do: %{state | hover_popup: HoverPopup.replace(state.hover_popup, popup)}
 
   @doc "Dismisses the hover popup."
   @spec dismiss_hover_popup(t()) :: t()
-  def dismiss_hover_popup(%{} = ss) do
-    %{ss | hover_popup: nil}
+  def dismiss_hover_popup(%__MODULE__{} = state),
+    do: %{state | hover_popup: HoverPopup.dismiss(state.hover_popup)}
+
+  @doc "Shows newly produced signature-help content."
+  @spec show_signature_help(t(), MingaEditor.SignatureHelp.t()) :: t()
+  def show_signature_help(%__MODULE__{} = state, signature_help),
+    do: %{
+      state
+      | signature_help: MingaEditor.SignatureHelp.replace(state.signature_help, signature_help)
+    }
+
+  @doc "Cycles to the next signature through its value owner."
+  @spec next_signature_help(t()) :: t()
+  def next_signature_help(
+        %__MODULE__{signature_help: %MingaEditor.SignatureHelp{} = signature_help} = state
+      ),
+      do: %{
+        state
+        | signature_help: MingaEditor.SignatureHelp.next_signature(signature_help)
+      }
+
+  def next_signature_help(%__MODULE__{} = state), do: state
+
+  @doc "Cycles to the previous signature through its value owner."
+  @spec previous_signature_help(t()) :: t()
+  def previous_signature_help(
+        %__MODULE__{signature_help: %MingaEditor.SignatureHelp{} = signature_help} = state
+      ),
+      do: %{
+        state
+        | signature_help: MingaEditor.SignatureHelp.prev_signature(signature_help)
+      }
+
+  def previous_signature_help(%__MODULE__{} = state), do: state
+
+  @doc "Dismisses signature help through its value owner."
+  @spec dismiss_signature_help(t()) :: t()
+  def dismiss_signature_help(%__MODULE__{} = state),
+    do: %{
+      state
+      | signature_help: MingaEditor.SignatureHelp.dismiss(state.signature_help)
+    }
+
+  @doc "Suppresses hover and signature help below a higher interactive surface."
+  @spec suppress_lower_transients(t()) :: t()
+  def suppress_lower_transients(%__MODULE__{} = state) do
+    state
+    |> dismiss_hover_popup()
+    |> dismiss_signature_help()
   end
 
   # ── Which-key ──────────────────────────────────────────────────────────────
@@ -187,11 +271,40 @@ defmodule MingaEditor.Shell.Traditional.State do
   @spec whichkey(t()) :: WhichKey.t()
   def whichkey(%{whichkey: wk}), do: wk
 
-  @doc "Replaces the which-key popup state."
-  @spec set_whichkey(t(), WhichKey.t()) :: t()
-  def set_whichkey(%{} = ss, wk) do
-    %{ss | whichkey: wk}
-  end
+  @doc "Begins a hidden which-key lifecycle generation."
+  @spec begin_whichkey(t(), Minga.Keymap.Bindings.node_t(), [String.t()]) :: t()
+  def begin_whichkey(%__MODULE__{} = state, node, prefix_keys),
+    do: %{state | whichkey: WhichKey.begin(state.whichkey, node, prefix_keys)}
+
+  @doc "Advances the which-key leader prefix."
+  @spec progress_whichkey(t(), Minga.Keymap.Bindings.node_t(), [String.t()]) :: t()
+  def progress_whichkey(%__MODULE__{} = state, node, prefix_keys),
+    do: %{state | whichkey: WhichKey.progress(state.whichkey, node, prefix_keys)}
+
+  @doc "Records a which-key timer for the matching generation."
+  @spec record_whichkey_timer(t(), WhichKey.generation(), reference()) :: t()
+  def record_whichkey_timer(%__MODULE__{} = state, generation, timer),
+    do: %{state | whichkey: WhichKey.record_timer(state.whichkey, generation, timer)}
+
+  @doc "Reveals only the matching which-key generation."
+  @spec reveal_whichkey(t(), WhichKey.generation()) :: t()
+  def reveal_whichkey(%__MODULE__{} = state, generation),
+    do: %{state | whichkey: WhichKey.reveal(state.whichkey, generation)}
+
+  @doc "Dismisses which-key through its value owner."
+  @spec dismiss_whichkey(t()) :: t()
+  def dismiss_whichkey(%__MODULE__{} = state),
+    do: %{state | whichkey: WhichKey.dismiss(state.whichkey)}
+
+  @doc "Moves which-key to the next page."
+  @spec next_whichkey_page(t()) :: t()
+  def next_whichkey_page(%__MODULE__{} = state),
+    do: %{state | whichkey: WhichKey.next_page(state.whichkey)}
+
+  @doc "Moves which-key to the previous page."
+  @spec previous_whichkey_page(t()) :: t()
+  def previous_whichkey_page(%__MODULE__{} = state),
+    do: %{state | whichkey: WhichKey.previous_page(state.whichkey)}
 
   # ── Bottom panel ───────────────────────────────────────────────────────────
 
@@ -330,27 +443,6 @@ defmodule MingaEditor.Shell.Traditional.State do
     %{ss | observatory_inspection: inspection}
   end
 
-  # ── Git toast ─────────────────────────────────────────────────────────────
-
-  @doc "Returns the git toast, or nil."
-  @spec git_toast(t()) :: git_toast()
-  def git_toast(%{git_toast: toast}), do: toast
-
-  @doc "Sets the git toast shown after a remote operation."
-  @spec set_git_toast(t(), git_toast()) :: t()
-  def set_git_toast(%{} = ss, toast), do: %{ss | git_toast: toast}
-
-  @doc "Clears the git toast."
-  @spec clear_git_toast(t()) :: t()
-  def clear_git_toast(%{} = ss), do: %{ss | git_toast: nil}
-
-  @doc "Clears the git toast only when its dismissal reference matches."
-  @spec clear_git_toast(t(), reference()) :: t()
-  def clear_git_toast(%{git_toast: %{dismiss_ref: dismiss_ref}} = ss, dismiss_ref),
-    do: %{ss | git_toast: nil}
-
-  def clear_git_toast(%{} = ss, _dismiss_ref), do: ss
-
   # ── Tab bar ────────────────────────────────────────────────────────────────
 
   @doc "Returns the tab bar state, or nil."
@@ -381,17 +473,44 @@ defmodule MingaEditor.Shell.Traditional.State do
   @spec modal(t()) :: ModalOverlay.t()
   def modal(%{modal: m}), do: m
 
-  @doc """
-  Replaces the modal overlay value.
+  @doc "Opens a modal through the conflict-sticky value transition."
+  @spec open_modal(t(), ModalOverlay.variant(), ModalOverlay.payload()) :: t()
+  def open_modal(%__MODULE__{} = state, variant, payload),
+    do: %{state | modal: ModalOverlay.open(state.modal, variant, payload)}
 
-  This is a low-level setter for `MingaEditor.State.ModalOverlay`. Normal
-  callers should use `ModalOverlay.open/3`, `transition/3`, `close/1`, or
-  `dismiss/1` rather than calling this directly.
-  """
-  @spec set_modal(t(), ModalOverlay.t()) :: t()
-  def set_modal(%{} = ss, modal) do
-    %{ss | modal: modal}
-  end
+  @doc "Transitions the modal value unconditionally."
+  @spec transition_modal(t(), ModalOverlay.variant(), ModalOverlay.payload()) :: t()
+  def transition_modal(%__MODULE__{} = state, variant, payload),
+    do: %{state | modal: ModalOverlay.transition(state.modal, variant, payload)}
+
+  @doc "Closes a completed modal."
+  @spec close_modal(t()) :: t()
+  def close_modal(%__MODULE__{} = state), do: %{state | modal: ModalOverlay.close(state.modal)}
+
+  @doc "Dismisses a canceled modal."
+  @spec dismiss_modal(t()) :: t()
+  def dismiss_modal(%__MODULE__{} = state),
+    do: %{state | modal: ModalOverlay.dismiss(state.modal)}
+
+  @doc "Updates the active completion value."
+  @spec update_modal_completion(t(), (Minga.Editing.Completion.t() ->
+                                        Minga.Editing.Completion.t())) ::
+          t()
+  def update_modal_completion(%__MODULE__{} = state, update),
+    do: %{state | modal: ModalOverlay.update_completion(state.modal, update)}
+
+  @doc "Records completion trigger lifecycle with explicit active-tab context."
+  @spec put_modal_completion_trigger(t(), MingaEditor.CompletionTrigger.t(), term() | nil) :: t()
+  def put_modal_completion_trigger(%__MODULE__{} = state, trigger, active_tab_id),
+    do: %{
+      state
+      | modal: ModalOverlay.put_completion_trigger(state.modal, trigger, active_tab_id)
+    }
+
+  @doc "Dismisses stale completion using the now-active tab id."
+  @spec dismiss_stale_modal_completion(t(), term() | nil) :: t()
+  def dismiss_stale_modal_completion(%__MODULE__{} = state, active_tab_id),
+    do: %{state | modal: ModalOverlay.dismiss_if_stale(state.modal, active_tab_id)}
 
   # ── Inline ask ─────────────────────────────────────────────────────────────
 
@@ -435,18 +554,6 @@ defmodule MingaEditor.Shell.Traditional.State do
       ToolManager.installed?(tool_name) or
       MapSet.member?(ToolManager.installing(), tool_name) or
       tool_name in ss.tool_prompt_queue
-  end
-
-  @doc "Replaces signature-help presentation state."
-  @spec set_signature_help(t(), MingaEditor.SignatureHelp.t() | nil) :: t()
-  def set_signature_help(%__MODULE__{} = state, signature_help) do
-    %{state | signature_help: signature_help}
-  end
-
-  @doc "Replaces the delayed warning-popup timer."
-  @spec set_warning_popup_timer(t(), reference() | nil) :: t()
-  def set_warning_popup_timer(%__MODULE__{} = state, timer) do
-    %{state | warning_popup_timer: timer}
   end
 
   @doc "Replaces the pending tool-install prompt queue."

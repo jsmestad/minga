@@ -57,36 +57,54 @@ defmodule MingaEditor.UI.Picker.Sources.Tool do
   def on_select(%Item{id: {name, :not_installed}}, state) do
     case ToolManager.install(name) do
       :ok ->
-        MingaEditor.State.set_status(state, "Installing #{name}...")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Installing #{name}...")
 
       {:error, reason} ->
-        MingaEditor.State.set_status(state, "Cannot install #{name}: #{reason}")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Cannot install #{name}: #{reason}"
+        )
     end
   end
 
   def on_select(%Item{id: {name, :installed}}, state) do
-    MingaEditor.State.set_status(state, "#{name} is already installed. Press C-o for actions.")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      "#{name} is already installed. Press C-o for actions."
+    )
   end
 
   def on_select(%Item{id: {name, :update_available}}, state) do
     case ToolManager.update(name) do
-      :ok -> MingaEditor.State.set_status(state, "Updating #{name}...")
-      {:error, reason} -> MingaEditor.State.set_status(state, "Cannot update #{name}: #{reason}")
+      :ok ->
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Updating #{name}...")
+
+      {:error, reason} ->
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Cannot update #{name}: #{reason}"
+        )
     end
   end
 
   def on_select(%Item{id: {name, :installing}}, state) do
-    MingaEditor.State.set_status(state, "#{name} is currently being installed...")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      "#{name} is currently being installed..."
+    )
   end
 
   def on_select(%Item{id: {name, :failed}}, state) do
     # Retry on failed tool
     case ToolManager.install(name) do
       :ok ->
-        MingaEditor.State.set_status(state, "Retrying #{name}...")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Retrying #{name}...")
 
       {:error, reason} ->
-        MingaEditor.State.set_status(state, "Cannot install #{name}: #{reason}")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Cannot install #{name}: #{reason}"
+        )
     end
   end
 
@@ -114,22 +132,31 @@ defmodule MingaEditor.UI.Picker.Sources.Tool do
   @spec on_action(atom(), Item.t(), term()) :: term()
   def on_action(:install, %Item{id: {name, _}}, state) do
     case ToolManager.install(name) do
-      :ok -> MingaEditor.State.set_status(state, "Installing #{name}...")
-      {:error, reason} -> MingaEditor.State.set_status(state, "Cannot install: #{reason}")
+      :ok ->
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Installing #{name}...")
+
+      {:error, reason} ->
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Cannot install: #{reason}")
     end
   end
 
   def on_action(:uninstall, %Item{id: {name, _}}, state) do
     case ToolManager.uninstall(name) do
-      :ok -> MingaEditor.State.set_status(state, "Uninstalled #{name}")
-      {:error, reason} -> MingaEditor.State.set_status(state, "Cannot uninstall: #{reason}")
+      :ok ->
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Uninstalled #{name}")
+
+      {:error, reason} ->
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Cannot uninstall: #{reason}")
     end
   end
 
   def on_action(:update, %Item{id: {name, _}}, state) do
     case ToolManager.update(name) do
-      :ok -> MingaEditor.State.set_status(state, "Updating #{name}...")
-      {:error, reason} -> MingaEditor.State.set_status(state, "Cannot update: #{reason}")
+      :ok ->
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Updating #{name}...")
+
+      {:error, reason} ->
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Cannot update: #{reason}")
     end
   end
 

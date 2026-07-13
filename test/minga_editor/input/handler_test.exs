@@ -6,6 +6,7 @@ defmodule MingaEditor.Input.HandlerTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
+  alias MingaEditor.Shell.Traditional.ModalWorkflow
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.ModalOverlay.Conflict, as: ConflictPayload
   alias MingaEditor.Viewport
@@ -46,11 +47,11 @@ defmodule MingaEditor.Input.HandlerTest do
     test "handles 'r' key during conflict by reloading" do
       state = base_state()
       buf = state.workspace.buffers.active
-      state = ModalOverlay.open(state, :conflict, ConflictPayload.new(buf, "/tmp/test.txt"))
+      state = ModalWorkflow.open(state, :conflict, ConflictPayload.new(buf, "/tmp/test.txt"))
 
       assert {:handled, new_state} = ConflictPrompt.handle_key(state, ?r, 0)
-      refute ModalOverlay.match(EditorState.modal(new_state), :conflict)
-      assert EditorState.status_msg(new_state) =~ "reloaded"
+      refute ModalOverlay.match(new_state.shell_runtime.state.modal, :conflict)
+      assert new_state.shell_runtime.state.notice.message =~ "reloaded"
     end
 
     test "handles 'k' key during conflict by keeping local", %{tmp_dir: tmp_dir} do
@@ -58,20 +59,25 @@ defmodule MingaEditor.Input.HandlerTest do
       File.write!(path, "hello\nworld")
       state = base_state(buffer_opts: [file_path: path])
       buf = state.workspace.buffers.active
-      state = ModalOverlay.open(state, :conflict, ConflictPayload.new(buf, path))
+      state = ModalWorkflow.open(state, :conflict, ConflictPayload.new(buf, path))
 
       assert {:handled, new_state} = ConflictPrompt.handle_key(state, ?k, 0)
-      refute ModalOverlay.match(EditorState.modal(new_state), :conflict)
+
+      refute ModalOverlay.match(
+               MingaEditor.Shell.Runtime.state(new_state.shell_runtime).modal,
+               :conflict
+             )
     end
 
     test "swallows unrecognized keys during conflict" do
       state = base_state()
       buf = state.workspace.buffers.active
-      state = ModalOverlay.open(state, :conflict, ConflictPayload.new(buf, "/tmp/test.txt"))
+      state = ModalWorkflow.open(state, :conflict, ConflictPayload.new(buf, "/tmp/test.txt"))
 
       assert {:handled, new_state} = ConflictPrompt.handle_key(state, ?x, 0)
       # State unchanged except for swallowing the key
-      assert EditorState.modal(new_state) == EditorState.modal(state)
+      assert MingaEditor.Shell.Runtime.state(new_state.shell_runtime).modal ==
+               MingaEditor.Shell.Runtime.state(state.shell_runtime).modal
     end
   end
 
@@ -81,7 +87,9 @@ defmodule MingaEditor.Input.HandlerTest do
       ctrl = Protocol.mod_ctrl()
 
       assert {:handled, new_state} = GlobalBindings.handle_key(state, ?s, ctrl)
-      assert EditorState.status_msg(new_state) == "No file name — use :w <filename>"
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state) ==
+               "No file name — use :w <filename>"
     end
 
     test "passes through non-global keys" do

@@ -14,6 +14,11 @@ defmodule MingaGitPorcelain.Commands do
   alias MingaEditor.Commands
   alias MingaEditor.Layout
   alias MingaEditor.PickerUI
+  alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.GitToast
+  alias MingaEditor.Shell.Traditional.GitToastWorkflow
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias Minga.Git
   alias Minga.Git.MergeConflict
@@ -26,7 +31,6 @@ defmodule MingaGitPorcelain.Commands do
 
   @type state :: EditorState.t()
 
-  @git_toast_duration_ms 3_000
   @pull_retry_markers [
     "non-fast-forward",
     "fetch first",
@@ -119,7 +123,7 @@ defmodule MingaGitPorcelain.Commands do
       case Git.stash(git_root, include_untracked: true) do
         :ok ->
           refresh_repo(git_root)
-          EditorState.set_status(state, "Stashed changes")
+          MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Stashed changes")
 
         {:error, reason} ->
           stash_save_status(state, reason)
@@ -132,10 +136,13 @@ defmodule MingaGitPorcelain.Commands do
       case Git.stash_pop(git_root) do
         :ok ->
           refresh_repo(git_root)
-          EditorState.set_status(state, "Popped stash")
+          MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Popped stash")
 
         {:error, reason} ->
-          EditorState.set_status(state, "Stash pop failed: #{reason}")
+          MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+            state,
+            "Stash pop failed: #{reason}"
+          )
       end
     end)
   end
@@ -190,7 +197,10 @@ defmodule MingaGitPorcelain.Commands do
       active_buf = state.workspace.buffers.active
       toggle_diff_layout(state, active_buf)
     else
-      EditorState.set_status(state, "Side-by-side diff is only available in GUI")
+      MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+        state,
+        "Side-by-side diff is only available in GUI"
+      )
     end
   end
 
@@ -208,7 +218,7 @@ defmodule MingaGitPorcelain.Commands do
       hunks = Git.hunks(git_pid)
 
       case Diff.next_hunk_line(hunks, cursor_line) do
-        nil -> EditorState.set_status(state, "No next hunk")
+        nil -> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No next hunk")
         line -> jump_to_line(state, buf, line)
       end
     end)
@@ -220,7 +230,7 @@ defmodule MingaGitPorcelain.Commands do
       hunks = Git.hunks(git_pid)
 
       case Diff.prev_hunk_line(hunks, cursor_line) do
-        nil -> EditorState.set_status(state, "No previous hunk")
+        nil -> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No previous hunk")
         line -> jump_to_line(state, buf, line)
       end
     end)
@@ -259,10 +269,10 @@ defmodule MingaGitPorcelain.Commands do
       case Git.stage(git_root, rel_path) do
         :ok ->
           refresh_repo(git_root)
-          EditorState.set_status(state, "Staged: #{rel_path}")
+          MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Staged: #{rel_path}")
 
         {:error, reason} ->
-          EditorState.set_status(state, "Stage failed: #{reason}")
+          MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Stage failed: #{reason}")
       end
     end)
   end
@@ -275,10 +285,10 @@ defmodule MingaGitPorcelain.Commands do
       case Git.unstage(git_root, rel_path) do
         :ok ->
           refresh_repo(git_root)
-          EditorState.set_status(state, "Unstaged: #{rel_path}")
+          MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Unstaged: #{rel_path}")
 
         {:error, reason} ->
-          EditorState.set_status(state, "Unstage failed: #{reason}")
+          MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Unstage failed: #{reason}")
       end
     end)
   end
@@ -327,8 +337,11 @@ defmodule MingaGitPorcelain.Commands do
       {cursor_line, _col} = Buffer.cursor(buf)
 
       case Git.hunk_at(git_pid, cursor_line) do
-        nil -> EditorState.set_status(state, "No hunk at cursor")
-        hunk -> EditorState.set_status(state, format_hunk_preview(hunk))
+        nil ->
+          MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No hunk at cursor")
+
+        hunk ->
+          MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, format_hunk_preview(hunk))
       end
     end)
   end
@@ -342,8 +355,11 @@ defmodule MingaGitPorcelain.Commands do
       rel_path = Git.Buffer.relative_path(git_pid)
 
       case Git.blame_line(git_root, rel_path, cursor_line) do
-        {:ok, blame_text} -> EditorState.set_status(state, blame_text)
-        :error -> EditorState.set_status(state, "Blame unavailable")
+        {:ok, blame_text} ->
+          MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, blame_text)
+
+        :error ->
+          MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Blame unavailable")
       end
     end)
   end
@@ -355,7 +371,7 @@ defmodule MingaGitPorcelain.Commands do
     regions = current_conflicts(buf)
 
     case target_conflict(regions, cursor_line, direction) do
-      nil -> EditorState.set_status(state, "No merge conflicts")
+      nil -> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No merge conflicts")
       %Region{} = region -> jump_to_line(state, buf, region.start_line)
     end
   end
@@ -376,8 +392,11 @@ defmodule MingaGitPorcelain.Commands do
     content = Buffer.content(buf)
 
     case MergeConflict.replace_at_line(content, cursor_line, choice) do
-      {:ok, new_content} -> apply_conflict_resolution(state, buf, new_content, cursor_line)
-      :not_found -> EditorState.set_status(state, "No merge conflict at cursor")
+      {:ok, new_content} ->
+        apply_conflict_resolution(state, buf, new_content, cursor_line)
+
+      :not_found ->
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No merge conflict at cursor")
     end
   end
 
@@ -396,7 +415,10 @@ defmodule MingaGitPorcelain.Commands do
 
     case Enum.find(regions, fn region -> region.start_line == start_line end) do
       nil ->
-        EditorState.set_status(state, "Merge conflict action is stale")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Merge conflict action is stale"
+        )
 
       %Region{} = region ->
         apply_conflict_resolution(
@@ -418,7 +440,10 @@ defmodule MingaGitPorcelain.Commands do
         after_conflict_replacement(state, buf, new_content, cursor_line)
 
       {:error, reason} ->
-        EditorState.set_status(state, "Resolve conflict failed: #{inspect(reason)}")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Resolve conflict failed: #{inspect(reason)}"
+        )
     end
   end
 
@@ -429,15 +454,21 @@ defmodule MingaGitPorcelain.Commands do
     if MergeConflict.parse(new_content) == [] do
       save_and_stage_resolved_file(state, buf)
     else
-      EditorState.set_status(state, "Resolved merge conflict")
+      MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Resolved merge conflict")
     end
   end
 
   @spec save_and_stage_resolved_file(state(), pid()) :: state()
   defp save_and_stage_resolved_file(state, buf) do
     case Buffer.file_path(buf) do
-      nil -> EditorState.set_status(state, "Resolved all merge conflicts")
-      file_path -> save_and_stage_resolved_file(state, buf, file_path)
+      nil ->
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Resolved all merge conflicts"
+        )
+
+      file_path ->
+        save_and_stage_resolved_file(state, buf, file_path)
     end
   end
 
@@ -449,13 +480,20 @@ defmodule MingaGitPorcelain.Commands do
          rel_path = Git.relative_path(git_root, file_path),
          :ok <- Git.stage(git_root, rel_path) do
       refresh_repo(git_root)
-      EditorState.set_status(state, "Resolved all merge conflicts and staged #{rel_path}")
+
+      MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+        state,
+        "Resolved all merge conflicts and staged #{rel_path}"
+      )
     else
       :not_git ->
-        EditorState.set_status(state, "Resolved all merge conflicts; not in a git repository")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Resolved all merge conflicts; not in a git repository"
+        )
 
       {:error, reason} ->
-        EditorState.set_status(
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
           state,
           "Resolved conflicts, but save/stage failed: #{inspect(reason)}"
         )
@@ -541,12 +579,15 @@ defmodule MingaGitPorcelain.Commands do
         state
         |> EditorState.register_diff_view(diff_buf, diff_info)
         |> Commands.add_buffer(diff_buf)
-        |> EditorState.set_status(
+        |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
           "Diff (#{label}): #{filename} (#{length(diff_result.hunk_lines)} hunks)"
         )
 
       {:error, reason} ->
-        EditorState.set_status(state, "Failed to open diff: #{inspect(reason)}")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Failed to open diff: #{inspect(reason)}"
+        )
     end
   end
 
@@ -597,12 +638,15 @@ defmodule MingaGitPorcelain.Commands do
         state
         |> EditorState.register_diff_view(diff_buf, diff_info)
         |> Commands.add_buffer(diff_buf)
-        |> EditorState.set_status(
+        |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
           "Diff (#{label}): #{filename} (#{length(diff_result.hunk_lines)} hunks)"
         )
 
       {:error, reason} ->
-        EditorState.set_status(state, "Failed to open diff: #{inspect(reason)}")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Failed to open diff: #{inspect(reason)}"
+        )
     end
   end
 
@@ -924,10 +968,13 @@ defmodule MingaGitPorcelain.Commands do
   defp toggle_diff_staged(state, active_buf) do
     case EditorState.diff_view_info(state, active_buf) do
       nil ->
-        EditorState.set_status(state, "Not a diff view")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Not a diff view")
 
       %{source_buf: nil} ->
-        EditorState.set_status(state, "Cannot toggle staged: diff opened from status panel")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Cannot toggle staged: diff opened from status panel"
+        )
 
       %{source_buf: source_buf, staged: staged} = diff_info ->
         new_staged = not staged
@@ -939,7 +986,10 @@ defmodule MingaGitPorcelain.Commands do
           state = EditorState.unregister_diff_view(state, active_buf)
           open_diff_view(state, git_pid, source_buf, new_staged, view_mode)
         else
-          EditorState.set_status(state, "Source buffer no longer tracked by git")
+          MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+            state,
+            "Source buffer no longer tracked by git"
+          )
         end
     end
   end
@@ -948,11 +998,11 @@ defmodule MingaGitPorcelain.Commands do
   defp toggle_diff_layout(state, active_buf) do
     case EditorState.diff_view_info(state, active_buf) do
       nil ->
-        EditorState.set_status(state, "Not a diff view")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Not a diff view")
 
       %{view_mode: :side_by_side} = diff_info ->
         refresh_diff_view_content(state, active_buf, Map.put(diff_info, :view_mode, :unified))
-        |> EditorState.set_status("Diff layout: unified")
+        |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("Diff layout: unified")
 
       diff_info ->
         refresh_diff_view_content(
@@ -960,7 +1010,7 @@ defmodule MingaGitPorcelain.Commands do
           active_buf,
           Map.put(diff_info, :view_mode, :side_by_side)
         )
-        |> EditorState.set_status("Diff layout: side-by-side")
+        |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("Diff layout: side-by-side")
     end
   end
 
@@ -1050,12 +1100,21 @@ defmodule MingaGitPorcelain.Commands do
         Process.demonitor(task_monitor, [:flush])
 
         refresh_repo(git_root)
-        {status_msg, toast} = remote_result_feedback(result, success_msg, error_prefix)
 
-        state
-        |> EditorState.clear_git_remote_op()
-        |> EditorState.set_status(status_msg)
-        |> EditorState.set_git_toast(with_dismiss_ref(toast))
+        {notice_message, toast_level, toast_action} =
+          remote_result_feedback(result, success_msg, error_prefix)
+
+        state = EditorState.clear_git_remote_op(state)
+
+        case Runtime.state(state.shell_runtime) do
+          %TraditionalState{} ->
+            state
+            |> NoticeWorkflow.publish(notice_message)
+            |> GitToastWorkflow.publish(notice_message, toast_level, toast_action)
+
+          _foreign_shell_state ->
+            state
+        end
 
       _ ->
         # Stale result from a superseded operation; ignore
@@ -1064,15 +1123,13 @@ defmodule MingaGitPorcelain.Commands do
   end
 
   @spec remote_result_feedback(:ok | {:error, String.t()}, String.t(), String.t()) ::
-          {String.t(), MingaEditor.Shell.Traditional.State.git_toast()}
-  defp remote_result_feedback(:ok, success_msg, _error_prefix) do
-    {success_msg, %{message: success_msg, level: :success, action: nil}}
-  end
+          {String.t(), GitToast.level(), GitToast.action()}
+  defp remote_result_feedback(:ok, success_msg, _error_prefix),
+    do: {success_msg, :success, nil}
 
   defp remote_result_feedback({:error, reason}, _success_msg, error_prefix) do
-    error_msg = "#{error_prefix}: #{reason}"
-    action = push_rejection_action(error_prefix, reason)
-    {error_msg, %{message: error_msg, level: :error, action: action}}
+    error_message = "#{error_prefix}: #{reason}"
+    {error_message, :error, push_rejection_action(error_prefix, reason)}
   end
 
   @spec push_rejection_action(String.t(), String.t()) :: :pull_and_retry | nil
@@ -1087,18 +1144,6 @@ defmodule MingaGitPorcelain.Commands do
   end
 
   defp push_rejection_action(_error_prefix, _reason), do: nil
-
-  @spec with_dismiss_ref(map()) :: map()
-  defp with_dismiss_ref(toast) do
-    Map.put(toast, :dismiss_ref, schedule_toast_dismissal())
-  end
-
-  @spec schedule_toast_dismissal() :: reference()
-  defp schedule_toast_dismissal do
-    dismiss_ref = make_ref()
-    Process.send_after(self(), {:dismiss_git_toast, dismiss_ref}, @git_toast_duration_ms)
-    dismiss_ref
-  end
 
   @spec pull_then_push(String.t()) :: :ok | {:error, String.t()}
   defp pull_then_push(git_root) do
@@ -1131,12 +1176,17 @@ defmodule MingaGitPorcelain.Commands do
         message = "Git operation failed unexpectedly: #{format_down_reason(reason)}"
         Minga.Log.warning(:editor, "Git remote task failed: #{inspect(reason)}")
 
-        state
-        |> EditorState.clear_git_remote_op()
-        |> EditorState.set_status(message)
-        |> EditorState.set_git_toast(
-          with_dismiss_ref(%{message: message, level: :error, action: nil})
-        )
+        state = EditorState.clear_git_remote_op(state)
+
+        case Runtime.state(state.shell_runtime) do
+          %TraditionalState{} ->
+            state
+            |> NoticeWorkflow.publish(message)
+            |> GitToastWorkflow.publish(message, :error)
+
+          _foreign_shell_state ->
+            state
+        end
 
       _ ->
         :not_matched
@@ -1160,7 +1210,10 @@ defmodule MingaGitPorcelain.Commands do
           state()
   defp git_remote_action(state, _operation, _progress_msg, _success_msg, _error_prefix)
        when state.git_remote_op != nil do
-    EditorState.set_status(state, "Git operation already in progress")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      "Git operation already in progress"
+    )
   end
 
   defp git_remote_action(state, operation, progress_msg, success_msg, error_prefix) do
@@ -1176,26 +1229,26 @@ defmodule MingaGitPorcelain.Commands do
           end)
 
         state
-        |> EditorState.clear_git_toast()
+        |> GitToastWorkflow.dismiss()
         |> EditorState.set_git_remote_op(
           {ref, monitor_ref, {git_root, success_msg, error_prefix}}
         )
-        |> EditorState.set_status(progress_msg)
+        |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(progress_msg)
 
       :not_git ->
-        EditorState.set_status(state, "Not in a git repository")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Not in a git repository")
     end
   end
 
   @spec stash_save_status(state(), String.t()) :: state()
   defp stash_save_status(state, "No changes to stash"),
-    do: EditorState.set_status(state, "No changes to stash")
+    do: MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No changes to stash")
 
   defp stash_save_status(state, "No local changes to save"),
-    do: EditorState.set_status(state, "No changes to stash")
+    do: MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No changes to stash")
 
   defp stash_save_status(state, reason),
-    do: EditorState.set_status(state, "Stash failed: #{reason}")
+    do: MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Stash failed: #{reason}")
 
   @spec refresh_repo(String.t()) :: :ok
   defp refresh_repo(git_root) do
@@ -1210,8 +1263,11 @@ defmodule MingaGitPorcelain.Commands do
     project_root = Minga.Project.resolve_root()
 
     case Git.root_for(project_root) do
-      {:ok, git_root} -> fun.(git_root)
-      :not_git -> EditorState.set_status(state, "Not in a git repository")
+      {:ok, git_root} ->
+        fun.(git_root)
+
+      :not_git ->
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Not in a git repository")
     end
   end
 
@@ -1229,7 +1285,7 @@ defmodule MingaGitPorcelain.Commands do
   defp open_git_status_for_root(state, git_root) do
     case Git.lookup_repo(git_root) do
       nil ->
-        EditorState.set_status(state, "Git.Repo not available")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Git.Repo not available")
 
       repo_pid ->
         entries = Git.repo_status(repo_pid)
@@ -1320,7 +1376,7 @@ defmodule MingaGitPorcelain.Commands do
     {cursor_line, _col} = Buffer.cursor(buf)
 
     case Git.hunk_at(git_pid, cursor_line) do
-      nil -> EditorState.set_status(state, "No hunk at cursor")
+      nil -> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No hunk at cursor")
       hunk -> do_stage_hunk(state, git_pid, buf, hunk)
     end
   end
@@ -1335,7 +1391,7 @@ defmodule MingaGitPorcelain.Commands do
     {cursor_line, _col} = Buffer.cursor(buf)
 
     case Git.hunk_at(git_pid, cursor_line) do
-      nil -> EditorState.set_status(state, "No hunk at cursor")
+      nil -> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No hunk at cursor")
       hunk -> do_revert_hunk(state, git_pid, buf, hunk)
     end
   end
@@ -1349,7 +1405,7 @@ defmodule MingaGitPorcelain.Commands do
 
     Buffer.replace_content(buf, reverted_content)
     Git.Buffer.update(git_pid, reverted_content)
-    EditorState.set_status(state, "Hunk reverted")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Hunk reverted")
   end
 
   @spec do_stage_hunk(state(), pid(), pid(), Diff.hunk()) :: state()
@@ -1365,17 +1421,21 @@ defmodule MingaGitPorcelain.Commands do
     case Git.stage_patch(git_root, patch) do
       :ok ->
         Git.Buffer.invalidate_base(git_pid, content)
-        EditorState.set_status(state, "Hunk staged")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Hunk staged")
 
       {:error, reason} ->
-        EditorState.set_status(state, "Stage failed: #{reason}")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Stage failed: #{reason}")
     end
   end
 
   @spec stage_hunk_from_diff_view(state(), pid(), EditorState.diff_view_info()) :: state()
   defp stage_hunk_from_diff_view(state, diff_buf, %{staged: true}) do
     _ = diff_buf
-    EditorState.set_status(state, "Cannot stage from a staged diff view")
+
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      "Cannot stage from a staged diff view"
+    )
   end
 
   defp stage_hunk_from_diff_view(state, diff_buf, diff_info) do
@@ -1383,7 +1443,7 @@ defmodule MingaGitPorcelain.Commands do
     {cursor_line, _col} = Buffer.cursor(diff_buf)
 
     case find_diff_view_hunk_index(hunk_lines, diff_info.line_metadata, cursor_line) do
-      nil -> EditorState.set_status(state, "No hunk at cursor")
+      nil -> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No hunk at cursor")
       hunk_idx -> stage_diff_view_hunk(state, diff_buf, diff_info, hunk_idx)
     end
   end
@@ -1397,11 +1457,13 @@ defmodule MingaGitPorcelain.Commands do
     if stale_diff_view?(diff_buf, diff_info, base_lines, current_lines, hunks) do
       state
       |> refresh_diff_view_content(diff_buf, diff_info)
-      |> EditorState.set_status("Diff view changed; retry hunk action")
+      |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+        "Diff view changed; retry hunk action"
+      )
     else
       case Enum.at(hunks, hunk_idx) do
         nil ->
-          EditorState.set_status(state, "Hunk no longer exists")
+          MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Hunk no longer exists")
 
         hunk ->
           apply_diff_view_stage(
@@ -1442,20 +1504,28 @@ defmodule MingaGitPorcelain.Commands do
 
         state
         |> refresh_diff_view_content(diff_buf, diff_info)
-        |> EditorState.set_status("Hunk #{position}/#{total} staged")
+        |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          "Hunk #{position}/#{total} staged"
+        )
 
       {:error, reason} ->
-        EditorState.set_status(state, "Stage failed: #{reason}")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Stage failed: #{reason}")
     end
   end
 
   @spec revert_hunk_from_diff_view(state(), pid(), EditorState.diff_view_info()) :: state()
   defp revert_hunk_from_diff_view(state, _diff_buf, %{source_buf: nil}) do
-    EditorState.set_status(state, "Cannot revert: diff opened from status panel")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      "Cannot revert: diff opened from status panel"
+    )
   end
 
   defp revert_hunk_from_diff_view(state, _diff_buf, %{staged: true}) do
-    EditorState.set_status(state, "Cannot revert from a staged diff view")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      "Cannot revert from a staged diff view"
+    )
   end
 
   defp revert_hunk_from_diff_view(state, diff_buf, diff_info) do
@@ -1463,7 +1533,7 @@ defmodule MingaGitPorcelain.Commands do
     {cursor_line, _col} = Buffer.cursor(diff_buf)
 
     case find_diff_view_hunk_index(hunk_lines, diff_info.line_metadata, cursor_line) do
-      nil -> EditorState.set_status(state, "No hunk at cursor")
+      nil -> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No hunk at cursor")
       hunk_idx -> revert_diff_view_hunk(state, diff_buf, diff_info, hunk_idx)
     end
   end
@@ -1477,11 +1547,13 @@ defmodule MingaGitPorcelain.Commands do
     if stale_diff_view?(diff_buf, diff_info, base_lines, current_lines, hunks) do
       state
       |> refresh_diff_view_content(diff_buf, diff_info)
-      |> EditorState.set_status("Diff view changed; retry hunk action")
+      |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+        "Diff view changed; retry hunk action"
+      )
     else
       case Enum.at(hunks, hunk_idx) do
         nil ->
-          EditorState.set_status(state, "Hunk no longer exists")
+          MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Hunk no longer exists")
 
         hunk ->
           apply_diff_view_revert(
@@ -1525,7 +1597,7 @@ defmodule MingaGitPorcelain.Commands do
 
     state
     |> refresh_diff_view_content(diff_buf, diff_info)
-    |> EditorState.set_status("Hunk #{position}/#{total} reverted")
+    |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("Hunk #{position}/#{total} reverted")
   end
 
   @spec stale_diff_view?(
@@ -1679,7 +1751,7 @@ defmodule MingaGitPorcelain.Commands do
        when is_pid(buf) do
     case Git.tracking_pid(buf) do
       nil ->
-        EditorState.set_status(state, "Not in a git repository")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Not in a git repository")
 
       git_pid ->
         try do
@@ -1707,13 +1779,19 @@ defmodule MingaGitPorcelain.Commands do
   @spec generate_commit_message(state()) :: state()
   defp generate_commit_message(%{git_commit_gen_ref: ref} = state)
        when ref != nil do
-    EditorState.set_status(state, "Commit message generation already in progress")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      "Commit message generation already in progress"
+    )
   end
 
   defp generate_commit_message(state) do
     case resolve_git_root() do
-      nil -> EditorState.set_status(state, "Not in a git repository")
-      git_root -> generate_from_staged_diff(state, git_root)
+      nil ->
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Not in a git repository")
+
+      git_root ->
+        generate_from_staged_diff(state, git_root)
     end
   end
 
@@ -1721,13 +1799,19 @@ defmodule MingaGitPorcelain.Commands do
   defp generate_from_staged_diff(state, git_root) do
     case Git.diff(git_root, staged: true) do
       {:ok, ""} ->
-        EditorState.set_status(state, "Nothing staged to generate a message for")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Nothing staged to generate a message for"
+        )
 
       {:ok, diff} ->
         spawn_commit_message_task(state, diff)
 
       {:error, reason} ->
-        EditorState.set_status(state, "Failed to read staged diff: #{reason}")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Failed to read staged diff: #{reason}"
+        )
     end
   end
 
@@ -1741,10 +1825,13 @@ defmodule MingaGitPorcelain.Commands do
 
         state
         |> Map.put(:git_commit_gen_ref, ref)
-        |> EditorState.set_status("Generating commit message…")
+        |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("Generating commit message…")
 
       {:error, reason} ->
-        EditorState.set_status(state, "AI generation failed: #{inspect(reason)}")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "AI generation failed: #{inspect(reason)}"
+        )
     end
   end
 

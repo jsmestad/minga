@@ -27,6 +27,7 @@ defmodule MingaEditor.StatusBar.Data do
   alias Minga.Git.Repo, as: GitRepo
   alias Minga.LSP.SyncServer
   alias MingaEditor.Shell.Traditional.Modeline
+  alias MingaEditor.Shell.Traditional.Notice
   alias MingaAgent.StatusCommand
   alias MingaEditor.UI.Theme
   alias MingaEditor.Session.ChromeState
@@ -80,7 +81,7 @@ defmodule MingaEditor.StatusBar.Data do
           agent_theme_colors: Theme.Agent.t() | nil,
           background_subagent_count: non_neg_integer(),
           active_background_subagent_label: String.t() | nil,
-          status_msg: String.t() | nil,
+          notice: String.t() | nil,
           selected_operation: Operation.t() | nil,
           pending_keys: String.t(),
           workspace_label: String.t(),
@@ -125,7 +126,7 @@ defmodule MingaEditor.StatusBar.Data do
           buf_count: non_neg_integer(),
           background_subagent_count: non_neg_integer(),
           active_background_subagent_label: String.t() | nil,
-          status_msg: String.t() | nil,
+          notice: String.t() | nil,
           selected_operation: Operation.t() | nil,
           pending_keys: String.t(),
           workspace_label: String.t(),
@@ -225,7 +226,7 @@ defmodule MingaEditor.StatusBar.Data do
       agent_theme_colors: if(agent.runtime.status, do: Theme.agent_theme(state.theme), else: nil),
       background_subagent_count: background.count,
       active_background_subagent_label: background.label,
-      status_msg: status_message(state),
+      notice: notice_message(state),
       selected_operation: OperationFeedback.selected_from(state),
       pending_keys: pending_keys(state, mode, mode_state),
       workspace_label: workspace.label,
@@ -234,6 +235,15 @@ defmodule MingaEditor.StatusBar.Data do
       merge_conflict_count: merge_conflict_count(buf)
     }
   end
+
+  @spec notice_message(EditorState.t() | map()) :: String.t() | nil
+  defp notice_message(%EditorState{
+         shell_runtime: %{state: %{notice: %Notice{message: message}}}
+       }),
+       do: message
+
+  defp notice_message(%{shell_state: %{notice: %Notice{message: message}}}), do: message
+  defp notice_message(_state), do: nil
 
   # ── Pending-key echo (vim showcmd) ─────────────────────────────────────────
 
@@ -266,11 +276,6 @@ defmodule MingaEditor.StatusBar.Data do
   defp agent_state(%EditorState{} = state), do: AgentAccess.agent(state)
   defp agent_state(%{shell_state: %{agent: %AgentState{} = agent}}), do: agent
   defp agent_state(_state), do: %AgentState{}
-
-  @spec status_message(EditorState.t() | map()) :: String.t() | nil
-  defp status_message(%EditorState{} = state), do: EditorState.status_msg(state)
-  defp status_message(%{shell_state: %{status_msg: status_msg}}), do: status_msg
-  defp status_message(_state), do: nil
 
   @spec agent_session(EditorState.t() | map()) :: pid() | nil
   defp agent_session(%EditorState{} = state), do: AgentAccess.session(state)
@@ -439,7 +444,7 @@ defmodule MingaEditor.StatusBar.Data do
       buf_count: Enum.count(state.workspace.buffers.list),
       background_subagent_count: background.count,
       active_background_subagent_label: background.label,
-      status_msg: status_message(state),
+      notice: notice_message(state),
       selected_operation: OperationFeedback.selected_from(state),
       pending_keys: pending_keys(state, mode, mode_state),
       workspace_label: workspace.label,

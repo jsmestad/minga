@@ -3,6 +3,8 @@ defmodule MingaEditor.HoverPopupTest do
 
   alias Minga.Language.Highlight.Span
   alias MingaEditor.HoverPopup
+  alias MingaEditor.HoverPopup.Builder
+  alias MingaEditor.HoverPopup.Presenter
   alias MingaEditor.UI.Theme
 
   @theme Theme.get!(:doom_one)
@@ -10,7 +12,7 @@ defmodule MingaEditor.HoverPopupTest do
 
   describe "new/4" do
     test "creates a popup with parsed markdown content" do
-      popup = HoverPopup.new("**bold** text", 10, 20)
+      popup = Builder.new("**bold** text", 10, 20)
       assert %HoverPopup{} = popup
       assert popup.anchor_row == 10
       assert popup.anchor_col == 20
@@ -19,14 +21,22 @@ defmodule MingaEditor.HoverPopupTest do
       assert popup.content_lines != []
     end
 
+    test "lifecycle owner parses without invoking presentation services" do
+      highlighter = fn _language, _source, _opts -> flunk("owner invoked highlighter") end
+      popup = HoverPopup.new("```elixir\nvalue\n```", 5, 10, highlighter: highlighter)
+
+      assert %HoverPopup{} = popup
+      assert popup.content_lines != []
+    end
+
     test "handles multi-line markdown" do
       text = "# Header\n\nSome text\n\n```elixir\ndefmodule Foo do\nend\n```"
-      popup = HoverPopup.new(text, 5, 10)
+      popup = Builder.new(text, 5, 10)
       assert [_, _, _, _ | _] = popup.content_lines
     end
 
     test "handles plain text" do
-      popup = HoverPopup.new("just plain text", 5, 10)
+      popup = Builder.new("just plain text", 5, 10)
       assert [_] = popup.content_lines
     end
 
@@ -36,7 +46,7 @@ defmodule MingaEditor.HoverPopupTest do
       end
 
       popup =
-        HoverPopup.new("```elixir\ndef hello, do: :world\n```", 5, 10,
+        Builder.new("```elixir\ndef hello, do: :world\n```", 5, 10,
           theme: @theme,
           highlighter: highlighter
         )
@@ -52,7 +62,7 @@ defmodule MingaEditor.HoverPopupTest do
       end
 
       popup =
-        HoverPopup.new("```elixir title=\"example\"\ndef hello, do: :world\n```", 5, 10,
+        Builder.new("```elixir title=\"example\"\ndef hello, do: :world\n```", 5, 10,
           theme: @theme,
           highlighter: highlighter
         )
@@ -68,7 +78,7 @@ defmodule MingaEditor.HoverPopupTest do
       end
 
       popup =
-        HoverPopup.new("```elixir\nvalue\n```", 5, 10,
+        Builder.new("```elixir\nvalue\n```", 5, 10,
           theme: @theme,
           highlighter: highlighter
         )
@@ -82,7 +92,7 @@ defmodule MingaEditor.HoverPopupTest do
       end
 
       popup =
-        HoverPopup.new("```elixir\nfirst\nsecond\n```", 5, 10,
+        Builder.new("```elixir\nfirst\nsecond\n```", 5, 10,
           theme: @theme,
           highlighter: highlighter
         )
@@ -95,7 +105,7 @@ defmodule MingaEditor.HoverPopupTest do
       highlighter = fn "elixir", _source, _opts -> raise "parser unavailable" end
 
       popup =
-        HoverPopup.new("```elixir\nvalue\n```", 5, 10,
+        Builder.new("```elixir\nvalue\n```", 5, 10,
           theme: @theme,
           highlighter: highlighter
         )
@@ -109,7 +119,7 @@ defmodule MingaEditor.HoverPopupTest do
       end
 
       popup =
-        HoverPopup.new("```elixir\nvalue\n```", 5, 10,
+        Builder.new("```elixir\nvalue\n```", 5, 10,
           theme: @theme,
           timeout: 0,
           highlighter: highlighter
@@ -127,7 +137,7 @@ defmodule MingaEditor.HoverPopupTest do
       end
 
       popup =
-        HoverPopup.new("```elixir\nvalue\n```", 5, 10,
+        Builder.new("```elixir\nvalue\n```", 5, 10,
           theme: @theme,
           highlighter: highlighter
         )
@@ -141,7 +151,7 @@ defmodule MingaEditor.HoverPopupTest do
       highlighter = fn "unknown", _source, _opts -> :unsupported end
 
       popup =
-        HoverPopup.new("```unknown\nvalue\n```", 5, 10,
+        Builder.new("```unknown\nvalue\n```", 5, 10,
           theme: @theme,
           highlighter: highlighter
         )
@@ -152,7 +162,7 @@ defmodule MingaEditor.HoverPopupTest do
 
   describe "focus/1" do
     test "sets focused to true" do
-      popup = HoverPopup.new("text", 5, 10)
+      popup = Builder.new("text", 5, 10)
       assert popup.focused == false
       focused = HoverPopup.focus(popup)
       assert focused.focused == true
@@ -161,13 +171,13 @@ defmodule MingaEditor.HoverPopupTest do
 
   describe "scroll_down/1" do
     test "increases scroll offset" do
-      popup = HoverPopup.new("line1\nline2\nline3\nline4\nline5\nline6", 5, 10)
+      popup = Builder.new("line1\nline2\nline3\nline4\nline5\nline6", 5, 10)
       scrolled = HoverPopup.scroll_down(popup)
       assert scrolled.scroll_offset == 3
     end
 
     test "clamps at max offset" do
-      popup = HoverPopup.new("short", 5, 10)
+      popup = Builder.new("short", 5, 10)
       scrolled = popup |> HoverPopup.scroll_down() |> HoverPopup.scroll_down()
       assert scrolled.scroll_offset >= 0
     end
@@ -175,13 +185,13 @@ defmodule MingaEditor.HoverPopupTest do
 
   describe "scroll_up/1" do
     test "decreases scroll offset" do
-      popup = HoverPopup.new("line1\nline2\nline3\nline4\nline5", 5, 10)
+      popup = Builder.new("line1\nline2\nline3\nline4\nline5", 5, 10)
       scrolled = popup |> HoverPopup.scroll_down() |> HoverPopup.scroll_up()
       assert scrolled.scroll_offset == 0
     end
 
     test "clamps at zero" do
-      popup = HoverPopup.new("text", 5, 10)
+      popup = Builder.new("text", 5, 10)
       scrolled = HoverPopup.scroll_up(popup)
       assert scrolled.scroll_offset == 0
     end
@@ -193,42 +203,42 @@ defmodule MingaEditor.HoverPopupTest do
     # resolves the popup's placement rect for the FocusTree/SurfaceRegistry.
     test "returns nil for empty content" do
       popup = %HoverPopup{content_lines: [], anchor_row: 5, anchor_col: 10}
-      assert HoverPopup.box(popup, @viewport, @theme) == nil
+      assert Presenter.box(popup, @viewport, @theme) == nil
     end
 
     test "returns a placement rect within the viewport for non-empty content" do
-      popup = HoverPopup.new("Hello world\n\nSome documentation", 10, 20)
-      {row, col, w, h} = HoverPopup.box(popup, @viewport, @theme)
+      popup = Builder.new("Hello world\n\nSome documentation", 10, 20)
+      {row, col, w, h} = Presenter.box(popup, @viewport, @theme)
 
       assert row >= 0 and row + h <= 24
       assert col >= 0 and col + w <= 80
     end
 
     test "positions above the cursor when there is room" do
-      popup = HoverPopup.new("text", 15, 10)
-      {row, _col, _w, h} = HoverPopup.box(popup, @viewport, @theme)
+      popup = Builder.new("text", 15, 10)
+      {row, _col, _w, h} = Presenter.box(popup, @viewport, @theme)
 
       assert row + h <= 15, "Expected hover above cursor row 15, got #{row}+#{h}"
     end
 
     test "stays on screen when anchored near the top" do
-      popup = HoverPopup.new("text", 1, 10)
-      {row, _col, _w, _h} = HoverPopup.box(popup, @viewport, @theme)
+      popup = Builder.new("text", 1, 10)
+      {row, _col, _w, _h} = Presenter.box(popup, @viewport, @theme)
 
       assert row >= 0
     end
 
     test "places tall content below near the upper viewport without covering anchor row" do
-      popup = HoverPopup.new(tall_hover_text(), 7, 10)
-      {row, _col, _w, h} = HoverPopup.box(popup, @viewport, @theme)
+      popup = Builder.new(tall_hover_text(), 7, 10)
+      {row, _col, _w, h} = Presenter.box(popup, @viewport, @theme)
 
       assert row > 7
       assert row + h <= 24
     end
 
     test "places tall content above near the lower viewport without covering anchor row" do
-      popup = HoverPopup.new(tall_hover_text(), 18, 10)
-      {row, _col, _w, h} = HoverPopup.box(popup, @viewport, @theme)
+      popup = Builder.new(tall_hover_text(), 18, 10)
+      {row, _col, _w, h} = Presenter.box(popup, @viewport, @theme)
 
       assert row + h <= 18
     end
@@ -238,7 +248,7 @@ defmodule MingaEditor.HoverPopupTest do
     test "accepts an open_session action (with and without a tool_call_id) and exposes it" do
       popup =
         "x"
-        |> HoverPopup.new(1, 1)
+        |> Builder.new(1, 1)
         |> HoverPopup.with_open_action({:open_session, "sess-123", "tc1"})
 
       assert popup.open_action == {:open_session, "sess-123", "tc1"}
@@ -246,24 +256,24 @@ defmodule MingaEditor.HoverPopupTest do
       assert HoverPopup.open_action_name({:open_session, "sess-123", "tc1"}) == "open_session"
 
       # tool_call_id is optional (plain resume).
-      no_tc = HoverPopup.with_open_action(HoverPopup.new("x", 1, 1), {:open_session, "s", nil})
+      no_tc = HoverPopup.with_open_action(Builder.new("x", 1, 1), {:open_session, "s", nil})
       assert no_tc.open_action == {:open_session, "s", nil}
     end
 
     test "still accepts goto_location and atom actions" do
       goto =
-        HoverPopup.with_open_action(HoverPopup.new("x", 1, 1), {:goto_location, "f.ex", 0, 0})
+        HoverPopup.with_open_action(Builder.new("x", 1, 1), {:goto_location, "f.ex", 0, 0})
 
       assert goto.open_action == {:goto_location, "f.ex", 0, 0}
 
-      atom = HoverPopup.with_open_action(HoverPopup.new("x", 1, 1), :some_command)
+      atom = HoverPopup.with_open_action(Builder.new("x", 1, 1), :some_command)
       assert atom.open_action == :some_command
     end
   end
 
   describe "expandable popups" do
     test "a popup without :expanded is not expandable and toggle is a no-op" do
-      popup = HoverPopup.new("collapsed", 1, 1)
+      popup = Builder.new("collapsed", 1, 1)
       refute HoverPopup.expandable?(popup)
       assert HoverPopup.toggle_expand(popup) == popup
     end
@@ -271,7 +281,7 @@ defmodule MingaEditor.HoverPopupTest do
     test "toggle_expand swaps content and flips the flag, resetting scroll" do
       popup =
         "collapsed body"
-        |> HoverPopup.new(1, 1, expanded: "the full expanded body")
+        |> Builder.new(1, 1, expanded: "the full expanded body")
         |> Map.put(:scroll_offset, 5)
 
       assert HoverPopup.expandable?(popup)

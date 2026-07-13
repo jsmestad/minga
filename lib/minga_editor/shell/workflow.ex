@@ -8,6 +8,8 @@ defmodule MingaEditor.Shell.Workflow do
   alias MingaEditor.Shell.Entry
   alias MingaEditor.Shell.Registry
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.DeactivationWorkflow
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
 
@@ -53,7 +55,7 @@ defmodule MingaEditor.Shell.Workflow do
     state
     |> EditorState.apply_shell_runtime_transition(runtime)
     |> EditorState.reset_shell_layout()
-    |> EditorState.set_status("Shell #{resolved.display_name} reloaded")
+    |> NoticeWorkflow.publish("Shell #{resolved.display_name} reloaded")
   end
 
   @spec fall_back_from_removed_entry(EditorState.t(), Runtime.t(), Entry.t()) :: EditorState.t()
@@ -63,13 +65,15 @@ defmodule MingaEditor.Shell.Workflow do
       "Active shell #{inspect(Runtime.id(runtime))} (#{inspect(Runtime.module(runtime))}) is unavailable; switching to #{inspect(default.id)}"
     )
 
+    state = DeactivationWorkflow.run(state)
+    runtime = state.shell_runtime
     initialized_state = initialize_shell_state(default.module, Runtime.state(runtime))
     runtime = Runtime.fallback_from_removed(runtime, default, initialized_state)
 
     state
     |> EditorState.apply_shell_runtime_transition(runtime)
     |> EditorState.reset_shell_layout()
-    |> EditorState.set_status("Shell unavailable, switched to #{default.display_name}")
+    |> NoticeWorkflow.publish("Shell unavailable, switched to #{default.display_name}")
   end
 
   @spec switch_resolved(EditorState.t(), atom(), [Entry.t()]) :: EditorState.t()
@@ -79,7 +83,7 @@ defmodule MingaEditor.Shell.Workflow do
          [_only]
        )
        when shell_id != current_id do
-    EditorState.set_status(state, "Only one shell is available")
+    NoticeWorkflow.publish(state, "Only one shell is available")
   end
 
   defp switch_resolved(
@@ -87,18 +91,19 @@ defmodule MingaEditor.Shell.Workflow do
          shell_id,
          _entries
        ) do
-    EditorState.set_status(state, "Already using #{display_name(shell_id)}")
+    NoticeWorkflow.publish(state, "Already using #{display_name(shell_id)}")
   end
 
   defp switch_resolved(state, shell_id, _entries) do
     case Registry.get(shell_id) do
       %Entry{} = target -> activate_resolved(state, target)
-      nil -> EditorState.set_status(state, "Shell #{shell_id} is unavailable")
+      nil -> NoticeWorkflow.publish(state, "Shell #{shell_id} is unavailable")
     end
   end
 
   @spec activate_resolved(EditorState.t(), Entry.t()) :: EditorState.t()
   defp activate_resolved(state, target) do
+    state = DeactivationWorkflow.run(state)
     initialized_state = activation_default(state.shell_runtime, target)
     runtime = Runtime.activate(state.shell_runtime, target, initialized_state)
 

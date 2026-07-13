@@ -25,6 +25,7 @@ defmodule MingaEditor.Commands do
   """
 
   alias Minga.Buffer
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias Minga.Command
   alias Minga.Git
   alias MingaEditor.Commands.Agent, as: AgentCommands
@@ -50,7 +51,6 @@ defmodule MingaEditor.Commands do
   alias Minga.Keymap.Bindings
   alias Minga.Mode
   alias Minga.Parser.Manager, as: ParserManager
-  alias MingaEditor.UI.WhichKey
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
@@ -59,7 +59,6 @@ defmodule MingaEditor.Commands do
   @type action ::
           {:dot_repeat, non_neg_integer() | nil}
           | {:replay_macro, String.t()}
-          | {:whichkey_update, EditorState.WhichKey.t()}
 
   # These ex commands stay on the direct BufferManagement path so shutdown, save, and tab behavior stay as-is.
   @buffer_management_ex_commands [
@@ -164,65 +163,32 @@ defmodule MingaEditor.Commands do
   # ── Leader / which-key (return action tuples) ─────────────────────────────
 
   def execute(state, {:leader_start, node}) do
-    if EditorState.whichkey(state).timer,
-      do: WhichKey.cancel_timeout(EditorState.whichkey(state).timer)
-
-    timer = WhichKey.start_timeout()
-    prefix_keys = leader_keys_from_mode(state)
-
-    whichkey = %EditorState.WhichKey{
-      node: node,
-      timer: timer,
-      show: false,
-      prefix_keys: prefix_keys
-    }
-
-    {state, {:whichkey_update, whichkey}}
+    MingaEditor.Shell.Traditional.WhichKeyWorkflow.begin(
+      state,
+      node,
+      leader_keys_from_mode(state)
+    )
   end
 
   def execute(state, {:leader_progress, node}) do
-    if EditorState.whichkey(state).timer,
-      do: WhichKey.cancel_timeout(EditorState.whichkey(state).timer)
-
-    timer = WhichKey.start_timeout()
     prefix_keys = leader_keys_from_mode(state)
-
     {effective_node, state} = maybe_substitute_filetype_trie(state, node)
 
-    whichkey = %EditorState.WhichKey{
-      node: effective_node,
-      timer: timer,
-      show: EditorState.whichkey(state).show,
-      prefix_keys: prefix_keys
-    }
-
-    {state, {:whichkey_update, whichkey}}
+    MingaEditor.Shell.Traditional.WhichKeyWorkflow.progress(
+      state,
+      effective_node,
+      prefix_keys
+    )
   end
 
-  def execute(state, :leader_cancel) do
-    if EditorState.whichkey(state).timer,
-      do: WhichKey.cancel_timeout(EditorState.whichkey(state).timer)
+  def execute(state, :leader_cancel),
+    do: MingaEditor.Shell.Traditional.WhichKeyWorkflow.dismiss(state)
 
-    whichkey = %EditorState.WhichKey{
-      node: nil,
-      timer: nil,
-      show: false,
-      prefix_keys: [],
-      page: 0
-    }
+  def execute(state, :whichkey_next_page),
+    do: MingaEditor.Shell.Traditional.WhichKeyWorkflow.next_page(state)
 
-    {state, {:whichkey_update, whichkey}}
-  end
-
-  def execute(state, :whichkey_next_page) do
-    whichkey = %{EditorState.whichkey(state) | page: EditorState.whichkey(state).page + 1}
-    {state, {:whichkey_update, whichkey}}
-  end
-
-  def execute(state, :whichkey_prev_page) do
-    whichkey = %{EditorState.whichkey(state) | page: max(EditorState.whichkey(state).page - 1, 0)}
-    {state, {:whichkey_update, whichkey}}
-  end
+  def execute(state, :whichkey_prev_page),
+    do: MingaEditor.Shell.Traditional.WhichKeyWorkflow.previous_page(state)
 
   # ── Eval ───────────────────────────────────────────────────────────────────
 
@@ -249,11 +215,16 @@ defmodule MingaEditor.Commands do
   def execute(state, {:tool_confirm_accept, name}) do
     case Minga.Tool.Manager.install(name) do
       :ok ->
-        state = EditorState.set_status(state, "Installing #{name}...")
+        state =
+          NoticeWorkflow.publish(state, "Installing #{name}...")
+
         drain_tool_prompt_queue(state)
 
       {:error, reason} ->
-        EditorState.set_status(state, "Cannot install #{name}: #{reason}")
+        NoticeWorkflow.publish(
+          state,
+          "Cannot install #{name}: #{reason}"
+        )
     end
   end
 
@@ -327,7 +298,7 @@ defmodule MingaEditor.Commands do
         Minga.Log.info(:editor, "[git] Deleted branch: #{name}")
 
         state
-        |> EditorState.set_status("Deleted branch #{name}")
+        |> NoticeWorkflow.publish("Deleted branch #{name}")
         |> reopen_git_branch_picker()
 
       {:error, reason} ->
@@ -337,7 +308,7 @@ defmodule MingaEditor.Commands do
 
   def execute(state, :branch_delete_cancel) do
     state
-    |> EditorState.set_status("Branch delete cancelled")
+    |> NoticeWorkflow.publish("Branch delete cancelled")
     |> reopen_git_branch_picker()
   end
 
@@ -564,7 +535,10 @@ defmodule MingaEditor.Commands do
 
     case MacroRecorder.get_macro(Editing.macro_recorder(state), register) do
       nil ->
-        EditorState.set_status(state, "No macro in register @#{register}")
+        NoticeWorkflow.publish(
+          state,
+          "No macro in register @#{register}"
+        )
 
       _keys ->
         rec = %{Editing.macro_recorder(state) | last_register: register}
@@ -621,18 +595,24 @@ defmodule MingaEditor.Commands do
   def execute(state, {:execute_ex_command, {:parser_restart, []}}) do
     case ParserManager.restart() do
       :ok ->
-        EditorState.set_status(state, "Parser restarted")
+        NoticeWorkflow.publish(state, "Parser restarted")
 
       {:error, :binary_not_found} ->
-        EditorState.set_status(state, "Parser restart failed: binary not found")
+        NoticeWorkflow.publish(
+          state,
+          "Parser restart failed: binary not found"
+        )
     end
   catch
     :exit, _ ->
-      EditorState.set_status(state, "Parser restart failed: manager not available")
+      NoticeWorkflow.publish(
+        state,
+        "Parser restart failed: manager not available"
+      )
   end
 
   def execute(state, {:execute_ex_command, {:safe_mode_status, []}}) do
-    EditorState.set_status(state, safe_mode_status_message())
+    NoticeWorkflow.publish(state, safe_mode_status_message())
   end
 
   def execute(state, {:execute_ex_command, {:extensions, []}}) do
@@ -836,15 +816,15 @@ defmodule MingaEditor.Commands do
         |> Minga.Mode.BranchDeleteConfirmState.to_force(reason)
 
       state
-      |> EditorState.set_status("Delete failed: #{reason}")
+      |> NoticeWorkflow.publish("Delete failed: #{reason}")
       |> EditorState.transition_mode(:branch_delete_confirm, mode_state)
     else
-      EditorState.set_status(state, "Delete failed: #{reason}")
+      NoticeWorkflow.publish(state, "Delete failed: #{reason}")
     end
   end
 
   defp handle_branch_delete_error(state, _git_root, _name, true, reason) do
-    EditorState.set_status(state, "Force delete failed: #{reason}")
+    NoticeWorkflow.publish(state, "Force delete failed: #{reason}")
   end
 
   @spec forceable_branch_delete_error?(String.t()) :: boolean()
@@ -902,7 +882,7 @@ defmodule MingaEditor.Commands do
   defp execute_command_candidate(state, input, candidate_index) do
     case resolve_command_candidate(input, candidate_index) do
       nil ->
-        EditorState.set_status(state, "No matching command")
+        NoticeWorkflow.publish(state, "No matching command")
 
       %{label: label} ->
         parsed = Minga.Command.Parser.parse(label)

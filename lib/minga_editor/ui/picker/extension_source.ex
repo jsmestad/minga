@@ -41,7 +41,7 @@ defmodule MingaEditor.UI.Picker.ExtensionSource do
       Updater.check_single(name)
     end)
 
-    MingaEditor.State.set_status(state, "Checking #{name} for updates...")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Checking #{name} for updates...")
   end
 
   @impl true

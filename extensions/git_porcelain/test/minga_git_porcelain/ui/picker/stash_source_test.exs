@@ -42,7 +42,7 @@ defmodule MingaGitPorcelain.UI.Picker.GitStashSourceTest do
       state = test_state()
       item = %Item{id: {:stash, dir, 0, :list}, label: "WIP on main"}
 
-      assert %{shell_state: %{status_msg: "Stash: WIP on main"}} =
+      assert %{shell_state: %{notice: %{message: "Stash: WIP on main"}}} =
                GitStashSource.on_select(item, state)
     end
 
@@ -57,7 +57,7 @@ defmodule MingaGitPorcelain.UI.Picker.GitStashSourceTest do
       state = test_state()
       item = %Item{id: {:stash, dir, 1, :drop}, label: "WIP on feature"}
 
-      assert %{shell_state: %{status_msg: "Dropped stash@{1}"}} =
+      assert %{shell_state: %{notice: %{message: "Dropped stash@{1}"}}} =
                GitStashSource.on_select(item, state)
     end
 
@@ -72,7 +72,7 @@ defmodule MingaGitPorcelain.UI.Picker.GitStashSourceTest do
 
       assert GitStashSource.actions(item) == [{"Drop", :drop}]
 
-      assert %{shell_state: %{status_msg: "Dropped stash@{0}"}} =
+      assert %{shell_state: %{notice: %{message: "Dropped stash@{0}"}}} =
                GitStashSource.on_action(:drop, item, test_state())
     end
   end
@@ -91,6 +91,6 @@ defmodule MingaGitPorcelain.UI.Picker.GitStashSourceTest do
   end
 
   defp test_state do
-    %{shell_state: %{status_msg: nil}}
+    %{shell_state: %{notice: %{message: nil}}}
   end
 end

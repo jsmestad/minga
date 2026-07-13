@@ -3,7 +3,6 @@ defmodule MingaEditor.Commands.LspTest do
   use ExUnit.Case, async: false
 
   alias Minga.Test.LspIsolation
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.Commands.Lsp, as: LspCommands
 
   import MingaEditor.RenderPipeline.TestHelpers
@@ -18,7 +17,7 @@ defmodule MingaEditor.Commands.LspTest do
     test "shows 'no language servers running' when none active" do
       state = base_state()
       result = LspCommands.execute(state, :lsp_info)
-      assert EditorState.status_msg(result) == "No language servers running"
+      assert result.shell_runtime.state.notice.message == "No language servers running"
     end
   end
 
@@ -32,13 +31,13 @@ defmodule MingaEditor.Commands.LspTest do
       }
 
       result = LspCommands.execute(state, :lsp_restart)
-      assert EditorState.status_msg(result) == "No active buffer"
+      assert result.shell_runtime.state.notice.message == "No active buffer"
     end
 
     test "shows 'no LSP server' when no clients attached" do
       state = base_state()
       result = LspCommands.execute(state, :lsp_restart)
-      assert EditorState.status_msg(result) == "No LSP server for this buffer"
+      assert result.shell_runtime.state.notice.message == "No LSP server for this buffer"
     end
   end
 
@@ -52,13 +51,13 @@ defmodule MingaEditor.Commands.LspTest do
       }
 
       result = LspCommands.execute(state, :lsp_stop)
-      assert EditorState.status_msg(result) == "No active buffer"
+      assert result.shell_runtime.state.notice.message == "No active buffer"
     end
 
     test "shows 'no LSP server' when no clients attached" do
       state = base_state()
       result = LspCommands.execute(state, :lsp_stop)
-      assert EditorState.status_msg(result) == "No LSP server for this buffer"
+      assert result.shell_runtime.state.notice.message == "No LSP server for this buffer"
     end
   end
 
@@ -72,14 +71,17 @@ defmodule MingaEditor.Commands.LspTest do
       }
 
       result = LspCommands.execute(state, :lsp_start)
-      assert EditorState.status_msg(result) == "No active buffer"
+      assert result.shell_runtime.state.notice.message == "No active buffer"
     end
 
     test "shows 'no LSP server available' for unsupported filetype" do
       state = base_state(filetype: :unknown)
       result = LspCommands.execute(state, :lsp_start)
       # The test buffer has an unsupported filetype with no configured LSP server
-      assert String.contains?(EditorState.status_msg(result), "No LSP server available")
+      assert String.contains?(
+               result.shell_runtime.state.notice.message,
+               "No LSP server available"
+             )
     end
   end
 end

@@ -22,7 +22,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
   alias MingaEditor.Effects.GitMutation
   alias MingaEditor.Effects.GitMutationAdmission
   alias MingaEditor.Frontend.Capabilities
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
+  alias MingaEditor.Shell.Traditional.GitToast
   alias MingaEditor.UI.FontRegistry
   alias MingaEditor.UI.NotificationCenter
   alias MingaEditor.UI.Theme
@@ -56,7 +56,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
           title: String.t(),
           status_bar_data: term(),
           git_syncing: boolean(),
-          git_toast: ProtocolGUI.git_toast() | nil,
+          git_toast: GitToast.t(),
           search: Search.t(),
           last_input_seq: non_neg_integer(),
           frame_seq: non_neg_integer() | nil,
@@ -96,7 +96,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
             title: "Minga",
             status_bar_data: nil,
             git_syncing: false,
-            git_toast: nil,
+            git_toast: %GitToast{},
             search: %Search{},
             last_input_seq: 0,
             frame_seq: nil,
@@ -145,7 +145,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
       # Strict like every sibling field: a snapshot path that drops the
       # launchpad key must fail loudly, not render the launchpad hidden.
       launchpad: state.workspace.launchpad,
-      completion: State.ModalOverlay.completion(state),
+      completion: MingaEditor.Shell.Traditional.ModalWorkflow.completion(state),
       keymap_scope: state.workspace.keymap_scope,
       editing: state.workspace.editing,
       message_store: state.message_store,

@@ -4,7 +4,7 @@ defmodule MingaEditor.State.ModalOverlay.Completion do
 
   The completion menu is logically per-tab: it tracks the cursor position of
   the buffer that triggered it. The `owner` field carries the tab identifier
-  so the tab-switch hook (`ModalOverlay.dismiss_if_stale/1`) can auto-dismiss
+  so the tab-switch hook (`MingaEditor.Shell.Traditional.ModalWorkflow.dismiss_if_stale/1`) can auto-dismiss
   completion that no longer belongs to the active tab.
 
   ## Trigger lifecycle

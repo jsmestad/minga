@@ -15,26 +15,32 @@ defmodule MingaGitPorcelain.KeyDispatchGUIBindingsTest do
     tui_state = state_with_frontend(:tui)
 
     assert "Not a diff view" =
-             dispatch_keys(gui_state, [32, ?g, ?d, ?s]) |> EditorState.status_msg()
+             dispatch_keys(gui_state, [32, ?g, ?d, ?s])
+             |> MingaEditor.Shell.Traditional.NoticeWorkflow.message()
 
     assert "Not in a git repository" =
-             dispatch_keys(tui_state, [32, ?g, ?d, ?s]) |> EditorState.status_msg()
+             dispatch_keys(tui_state, [32, ?g, ?d, ?s])
+             |> MingaEditor.Shell.Traditional.NoticeWorkflow.message()
   end
 
   test "TUI keeps SPC g d as the direct diff command" do
     state = state_with_frontend(:tui)
 
     assert "Not in a git repository" =
-             dispatch_keys(state, [32, ?g, ?d]) |> EditorState.status_msg()
+             dispatch_keys(state, [32, ?g, ?d])
+             |> MingaEditor.Shell.Traditional.NoticeWorkflow.message()
   end
 
   test "GUI moves the default diff command to SPC g d f" do
     state = state_with_frontend(:native_gui)
 
-    assert nil == dispatch_keys(state, [32, ?g, ?d]) |> EditorState.status_msg()
+    assert nil ==
+             dispatch_keys(state, [32, ?g, ?d])
+             |> MingaEditor.Shell.Traditional.NoticeWorkflow.message()
 
     assert "Not in a git repository" =
-             dispatch_keys(state, [32, ?g, ?d, ?f]) |> EditorState.status_msg()
+             dispatch_keys(state, [32, ?g, ?d, ?f])
+             |> MingaEditor.Shell.Traditional.NoticeWorkflow.message()
   end
 
   test "an existing exact user binding for SPC g d s is preserved" do
@@ -45,7 +51,7 @@ defmodule MingaGitPorcelain.KeyDispatchGUIBindingsTest do
     state = dispatch_keys(state, [32, ?g, ?d, ?s])
 
     assert state.workspace.keymap_scope == :git_status
-    assert EditorState.status_msg(state) == nil
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) == nil
   end
 
   test "an existing exact user binding for SPC g d is preserved in GUI" do
@@ -56,7 +62,7 @@ defmodule MingaGitPorcelain.KeyDispatchGUIBindingsTest do
     state = dispatch_keys(state, [32, ?g, ?d])
 
     assert state.workspace.keymap_scope == :git_status
-    assert EditorState.status_msg(state) == nil
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) == nil
   end
 
   defp state_with_frontend(frontend_type, keymap_server \\ nil) do

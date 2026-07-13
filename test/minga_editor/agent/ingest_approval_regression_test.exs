@@ -143,7 +143,7 @@ defmodule MingaEditor.Agent.IngestApprovalRegressionTest do
       new_state = AgentSubStates.approve_tool(state)
 
       assert AgentAccess.agent(new_state).pending_approval == nil
-      assert EditorState.status_msg(new_state) =~ "already resolved"
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state) =~ "already resolved"
       refute_receive {:tool_approval_response, _, _}, 200
     end
   end

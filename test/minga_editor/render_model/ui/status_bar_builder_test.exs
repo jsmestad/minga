@@ -38,7 +38,7 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilderTest do
        agent_theme_colors: nil,
        background_subagent_count: 0,
        active_background_subagent_label: nil,
-       status_msg: nil,
+       notice: nil,
        workspace_label: "Default",
        workspace_draft_count: 0,
        workspace_conflict_count: 0,
@@ -109,6 +109,101 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilderTest do
 
       assert without_ellipsis_model.operation.status == model.operation.status
       assert without_ellipsis_model.operation.kind == model.operation.kind
+    end
+
+    test "arbitrates macro, operation, notice, then diagnostic while retaining operation data" do
+      {:buffer, base} = minimal_buffer_data()
+      operation = Operation.new(7, :lsp_rename, "main.ex", "Renaming", true, 7)
+
+      data =
+        Map.merge(base, %{
+          macro_recording: {true, "q"},
+          selected_operation: operation,
+          notice: "ordinary notice",
+          diagnostic_hint: "diagnostic hint"
+        })
+
+      model = StatusBarBuilder.build({:buffer, data}, minimal_theme(), minimal_ctx())
+      assert model.data.message == "recording @q"
+      assert %StatusOperation{id: 7, message: "Renaming"} = model.operation
+
+      operation_model =
+        StatusBarBuilder.build(
+          {:buffer, %{data | macro_recording: false}},
+          minimal_theme(),
+          minimal_ctx()
+        )
+
+      assert operation_model.data.message == "Renaming"
+
+      notice_model =
+        StatusBarBuilder.build(
+          {:buffer, %{data | macro_recording: false, selected_operation: nil}},
+          minimal_theme(),
+          minimal_ctx()
+        )
+
+      assert notice_model.data.message == "ordinary notice"
+
+      terminal_operation = Operation.finish(operation, :success, "Renamed")
+
+      terminal_dwell_model =
+        StatusBarBuilder.build(
+          {:buffer,
+           %{
+             data
+             | macro_recording: false,
+               selected_operation: terminal_operation
+           }},
+          minimal_theme(),
+          minimal_ctx()
+        )
+
+      assert terminal_dwell_model.data.message == "ordinary notice"
+
+      assert %StatusOperation{id: 7, status: :success, message: "Renamed"} =
+               terminal_dwell_model.operation
+
+      diagnostic_model =
+        StatusBarBuilder.build(
+          {:buffer, %{data | macro_recording: false, selected_operation: nil, notice: nil}},
+          minimal_theme(),
+          minimal_ctx()
+        )
+
+      assert diagnostic_model.data.message == "diagnostic hint"
+
+      terminal_with_diagnostic =
+        StatusBarBuilder.build(
+          {:buffer,
+           %{
+             data
+             | macro_recording: false,
+               selected_operation: terminal_operation,
+               notice: nil
+           }},
+          minimal_theme(),
+          minimal_ctx()
+        )
+
+      assert terminal_with_diagnostic.data.message == "diagnostic hint"
+      assert terminal_with_diagnostic.operation.status == :success
+    end
+
+    test "ordinary notice punctuation has no operation semantics" do
+      {:buffer, data} = minimal_buffer_data()
+
+      for message <- ["Saved", "Saved…", "Saved..."] do
+        model =
+          StatusBarBuilder.build(
+            {:buffer, %{data | notice: message}},
+            minimal_theme(),
+            minimal_ctx()
+          )
+
+        assert model.data.message == message
+        assert model.operation == nil
+      end
     end
 
     test "includes active workspace summary when available" do

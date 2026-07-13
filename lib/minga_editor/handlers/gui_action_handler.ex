@@ -12,6 +12,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   """
 
   alias Minga.Buffer
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias Minga.Clipboard
   alias Minga.Editing.Completion
   alias Minga.FileWatcher
@@ -391,7 +392,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, {:completion_select, index}) do
-    case MingaEditor.State.ModalOverlay.completion(state) do
+    case MingaEditor.Shell.Traditional.ModalWorkflow.completion(state) do
       %Completion{} = comp ->
         accept_visible_completion(state, comp, index)
 
@@ -477,33 +478,54 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     name = String.to_existing_atom(name_str)
 
     case Minga.Tool.Manager.install(name) do
-      :ok -> EditorState.set_status(state, "Installing #{name_str}...")
-      {:error, reason} -> EditorState.set_status(state, "Cannot install #{name_str}: #{reason}")
+      :ok ->
+        NoticeWorkflow.publish(state, "Installing #{name_str}...")
+
+      {:error, reason} ->
+        NoticeWorkflow.publish(
+          state,
+          "Cannot install #{name_str}: #{reason}"
+        )
     end
   rescue
-    ArgumentError -> EditorState.set_status(state, "Unknown tool: #{name_str}")
+    ArgumentError ->
+      NoticeWorkflow.publish(state, "Unknown tool: #{name_str}")
   end
 
   defp dispatch_action(state, {:tool_uninstall, name_str}) do
     name = String.to_existing_atom(name_str)
 
     case Minga.Tool.Manager.uninstall(name) do
-      :ok -> EditorState.set_status(state, "Uninstalled #{name_str}")
-      {:error, reason} -> EditorState.set_status(state, "Cannot uninstall #{name_str}: #{reason}")
+      :ok ->
+        NoticeWorkflow.publish(state, "Uninstalled #{name_str}")
+
+      {:error, reason} ->
+        NoticeWorkflow.publish(
+          state,
+          "Cannot uninstall #{name_str}: #{reason}"
+        )
     end
   rescue
-    ArgumentError -> EditorState.set_status(state, "Unknown tool: #{name_str}")
+    ArgumentError ->
+      NoticeWorkflow.publish(state, "Unknown tool: #{name_str}")
   end
 
   defp dispatch_action(state, {:tool_update, name_str}) do
     name = String.to_existing_atom(name_str)
 
     case Minga.Tool.Manager.update(name) do
-      :ok -> EditorState.set_status(state, "Updating #{name_str}...")
-      {:error, reason} -> EditorState.set_status(state, "Cannot update #{name_str}: #{reason}")
+      :ok ->
+        NoticeWorkflow.publish(state, "Updating #{name_str}...")
+
+      {:error, reason} ->
+        NoticeWorkflow.publish(
+          state,
+          "Cannot update #{name_str}: #{reason}"
+        )
     end
   rescue
-    ArgumentError -> EditorState.set_status(state, "Unknown tool: #{name_str}")
+    ArgumentError ->
+      NoticeWorkflow.publish(state, "Unknown tool: #{name_str}")
   end
 
   defp dispatch_action(state, :tool_dismiss) do
@@ -706,7 +728,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp dispatch_action(state, {:git_open_file, path}) do
     case MingaEditor.resolve_git_root() do
       nil ->
-        EditorState.set_status(state, "Not in a git repository")
+        NoticeWorkflow.publish(state, "Not in a git repository")
 
       git_root ->
         abs_path = Path.join(git_root, path)
@@ -717,7 +739,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp dispatch_action(state, {:git_open_diff, path, section}) do
     case MingaEditor.resolve_git_root() do
       nil ->
-        EditorState.set_status(state, "Not in a git repository")
+        NoticeWorkflow.publish(state, "Not in a git repository")
 
       git_root ->
         open_git_diff_from_panel(state, git_root, path, section)
@@ -726,7 +748,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   defp dispatch_action(state, :git_pull_and_retry) do
     state
-    |> EditorState.clear_git_toast()
+    |> MingaEditor.Shell.Traditional.GitToastWorkflow.dismiss()
     |> execute_git_porcelain_command(:git_pull_and_retry)
   end
 
@@ -823,7 +845,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
     case Minga.Editing.search_next(content, pattern, cursor, :forward, search_opts) do
       nil ->
-        EditorState.set_status(state, "No more matches")
+        NoticeWorkflow.publish(state, "No more matches")
 
       {line, col} ->
         Buffer.move_to(buf, {line, col})
@@ -861,9 +883,9 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     if count > 0 do
       Buffer.replace_content(buf, new_content)
       msg = if count == 1, do: "1 replacement", else: "#{count} replacements"
-      EditorState.set_status(state, msg)
+      NoticeWorkflow.publish(state, msg)
     else
-      EditorState.set_status(state, "No matches to replace")
+      NoticeWorkflow.publish(state, "No matches to replace")
     end
   end
 
@@ -1062,7 +1084,10 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       "Ignored sidebar action id=#{inspect(sidebar_id)} kind=#{inspect(kind)} action=#{inspect(action)}"
     )
 
-    EditorState.set_status(state, "Unsupported sidebar action: #{kind}/#{action}")
+    NoticeWorkflow.publish(
+      state,
+      "Unsupported sidebar action: #{kind}/#{action}"
+    )
   end
 
   # ── Git commit helpers ──────────────────────────────────────────────
@@ -1103,10 +1128,13 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
         open_git_diff_for_entry(state, git_root, entry)
 
       [] ->
-        EditorState.set_status(state, "No git diff entry for #{path}")
+        NoticeWorkflow.publish(
+          state,
+          "No git diff entry for #{path}"
+        )
 
       [_ | [_ | _]] ->
-        EditorState.set_status(
+        NoticeWorkflow.publish(
           state,
           "Ambiguous git diff entry for #{path}; use section-aware diff"
         )
@@ -1167,7 +1195,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp git_porcelain_unavailable(state) do
     message = "Git porcelain extension is disabled or failed to load"
     Minga.Log.warning(:editor, message)
-    EditorState.set_status(state, message)
+    NoticeWorkflow.publish(state, message)
   end
 
   @spec git_porcelain_running?() :: boolean()
@@ -1201,7 +1229,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
         )
 
       {:error, message} ->
-        EditorState.set_status(state, message)
+        NoticeWorkflow.publish(state, message)
     end
   end
 
@@ -1330,7 +1358,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
         updated = Completion.select_visible(comp, index)
 
         MingaEditor.do_accept_completion(
-          MingaEditor.State.ModalOverlay.update_completion(state, fn _ -> updated end),
+          MingaEditor.Shell.Traditional.ModalWorkflow.update_completion(state, fn _ -> updated end),
           updated
         )
     end
@@ -1423,9 +1451,9 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   @spec accept_hover_open_action(state()) :: state()
   defp accept_hover_open_action(state) do
-    case EditorState.hover_popup(state) do
+    case state.shell_runtime.state.hover_popup do
       %MingaEditor.HoverPopup{open_action: action} when action != nil ->
-        state = EditorState.dismiss_hover_popup(state)
+        state = MingaEditor.Shell.Traditional.HoverPopupWorkflow.dismiss(state)
         execute_hover_open_action(state, action)
 
       _ ->
@@ -1486,12 +1514,12 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
     case tab_file_path(state, id) do
       nil ->
-        EditorState.set_status(state, "Tab has no file path")
+        NoticeWorkflow.publish(state, "Tab has no file path")
 
       path ->
         Clipboard.write_async(path)
         maybe_send_gui_clipboard_write(state, path)
-        EditorState.set_status(state, "Copied #{path}")
+        NoticeWorkflow.publish(state, "Copied #{path}")
     end
   end
 
@@ -1589,7 +1617,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
           "Volume will unmount (#{volume_path}); disconnected #{Enum.count(pids)} buffer(s), saved #{saved}"
         )
 
-        EditorState.set_status(
+        NoticeWorkflow.publish(
           state,
           "Volume unmounted: saved #{saved} and disconnected #{Enum.count(pids)} buffer(s) under #{volume_path}"
         )
@@ -1688,10 +1716,16 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
             register_buffer_in_active_window(state, pid, abs_path)
 
           {:error, :binary_file} ->
-            EditorState.set_status(state, "Cannot open binary file: #{Path.basename(abs_path)}")
+            NoticeWorkflow.publish(
+              state,
+              "Cannot open binary file: #{Path.basename(abs_path)}"
+            )
 
           {:error, _reason} ->
-            EditorState.set_status(state, "Could not open #{abs_path}")
+            NoticeWorkflow.publish(
+              state,
+              "Could not open #{abs_path}"
+            )
         end
     end
   end
@@ -1699,8 +1733,11 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   @spec open_tab_buffer_in_active_window(state(), Tab.t(), String.t()) :: state()
   defp open_tab_buffer_in_active_window(state, tab, abs_path) do
     case tab_active_buffer(tab) do
-      pid when is_pid(pid) -> show_buffer_in_active_window(state, pid)
-      nil -> EditorState.set_status(state, "Could not open #{abs_path}")
+      pid when is_pid(pid) ->
+        show_buffer_in_active_window(state, pid)
+
+      nil ->
+        NoticeWorkflow.publish(state, "Could not open #{abs_path}")
     end
   end
 
@@ -1836,7 +1873,10 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       "Extension panel action ignored: #{ext_name}/#{action_name} unavailable"
     )
 
-    EditorState.set_status(state, "Extension panel action unavailable")
+    NoticeWorkflow.publish(
+      state,
+      "Extension panel action unavailable"
+    )
   end
 
   @spec replace_single_match(

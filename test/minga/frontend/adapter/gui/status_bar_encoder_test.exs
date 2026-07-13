@@ -55,7 +55,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoderTest do
             icon: icon,
             icon_color: icon_color
           },
-          message: legacy_data.status_msg,
+          message: legacy_data.notice,
           recording: legacy_data.macro_recording,
           indent: %Indent{type: legacy_data.indent_type, size: legacy_data.indent_size},
           selection: %Selection{mode: :chars, size: 5},
@@ -286,7 +286,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoderTest do
       active_tool_name: "grep",
       background_subagent_count: 2,
       active_background_subagent_label: "tests",
-      status_msg: "ok",
+      notice: "ok",
       modeline_segments: %{
         left: [{:mode, "NORMAL", 0xFFFFFF, 0x000000, [bold: true], nil}],
         right: []

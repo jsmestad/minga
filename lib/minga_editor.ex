@@ -35,9 +35,7 @@ defmodule MingaEditor do
   alias MingaEditor.InlineAsk.Events, as: InlineAskEvents
   alias MingaEditor.InlineEdit.Events, as: InlineEditEvents
 
-  alias MingaEditor.NavFlash
   alias MingaEditor.Observatory
-  alias MingaEditor.YankFlash
   alias MingaEditor.Renderer
   alias MingaEditor.SemanticTokenSync
   alias MingaEditor.Startup
@@ -89,6 +87,7 @@ defmodule MingaEditor do
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalShellState
 
   alias MingaEditor.MouseHoverTooltip
 
@@ -479,8 +478,8 @@ defmodule MingaEditor do
   # and runs centralized post-key housekeeping (highlight sync, reparse,
   # completion, render) exactly once.
   def handle_info({:minga_input, {:key_press, codepoint, modifiers, seq}}, state) do
-    state = cancel_nav_flash(state)
-    state = cancel_yank_flash(state)
+    state = MingaEditor.Shell.Traditional.FlashesWorkflow.cancel_nav(state)
+    state = MingaEditor.Shell.Traditional.FlashesWorkflow.cancel_yank(state)
     # Record the input correlation sequence (ticket #2215) so the render that
     # this keystroke triggers echoes it on commit_frame for latency resolution.
     state = %{state | last_input_seq: seq}
@@ -602,15 +601,14 @@ defmodule MingaEditor do
     {:noreply, new_state}
   end
 
-  def handle_info({:whichkey_timeout, ref}, state) do
-    if ref == state.shell_runtime.state.whichkey.timer do
-      wk = EditorState.whichkey(state)
-      new_state = EditorState.set_whichkey(state, %{wk | show: true})
-      {:noreply, Renderer.render_or_async(new_state)}
-    else
-      # Stale timer — ignore.
-      {:noreply, state}
-    end
+  def handle_info({:whichkey_reveal, generation}, state) do
+    new_state = MingaEditor.Shell.Traditional.WhichKeyWorkflow.reveal(state, generation)
+    {:noreply, Renderer.render_or_async(new_state)}
+  end
+
+  def handle_info({:notice_timeout, notice_id}, state) do
+    new_state = MingaEditor.Shell.Traditional.NoticeWorkflow.timeout(state, notice_id)
+    {:noreply, Renderer.render_or_async(new_state)}
   end
 
   # ── TUI SPC leader timeout ──────────────────────────────────────────────
@@ -753,20 +751,13 @@ defmodule MingaEditor do
     {:noreply, RenderHandler.handle_render_done(state, receipt)}
   end
 
-  # Nav-flash timer step — advance the fade or clear the flash.
-  def handle_info(:nav_flash_step, state) do
-    {:noreply, RenderHandler.handle_nav_flash_step(state)}
+  # Concern-specific animation messages carry semantic generations.
+  def handle_info({:nav_flash_step, generation}, state) do
+    {:noreply, MingaEditor.Shell.Traditional.FlashesWorkflow.advance_nav(state, generation)}
   end
 
-  # Yank-flash timer step — advance the fade or clear the flash.
-  def handle_info(:yank_flash_step, state) do
-    {:noreply, RenderHandler.handle_yank_flash_step(state)}
-  end
-
-  # Warning popup debounce timer fired — open the *Warnings* popup if not
-  # already visible.
-  def handle_info(:warning_popup_timeout, state) do
-    {:noreply, RenderHandler.handle_warning_popup_timeout(state)}
+  def handle_info({:yank_flash_step, generation}, state) do
+    {:noreply, MingaEditor.Shell.Traditional.FlashesWorkflow.advance_yank(state, generation)}
   end
 
   # ── Agent events ──────────────────────────────────────────────────────────
@@ -848,8 +839,8 @@ defmodule MingaEditor do
     {:noreply, state}
   end
 
-  def handle_info({:dismiss_git_toast, dismiss_ref}, state) do
-    state = EditorState.clear_git_toast(state, dismiss_ref)
+  def handle_info({:git_toast_timeout, toast_id}, state) do
+    state = MingaEditor.Shell.Traditional.GitToastWorkflow.timeout(state, toast_id)
     {:noreply, Renderer.render_or_async(state)}
   end
 
@@ -862,29 +853,20 @@ defmodule MingaEditor do
 
   def handle_info({:git_commit_message_generated, {:ok, message}}, state) do
     state = %{state | git_commit_gen_ref: nil}
-
-    state =
-      if ModalOverlay.active?(EditorState.modal(state)) do
-        EditorState.set_status(state, "Commit message ready (prompt already open)")
-      else
-        state
-        |> open_git_commit_prompt(default: message)
-        |> EditorState.set_status("Commit message generated")
-      end
-
+    state = apply_git_commit_generation_result(state, {:ok, message})
     {:noreply, Renderer.render_or_async(state)}
   end
 
   def handle_info({:git_commit_message_generated, {:error, reason}}, state) do
     state = %{state | git_commit_gen_ref: nil}
-    state = EditorState.set_status(state, reason)
+    state = apply_git_commit_generation_result(state, {:error, reason})
     {:noreply, Renderer.render_or_async(state)}
   end
 
   def handle_info(:git_generate_timeout, %{git_commit_gen_ref: ref} = state)
       when ref != nil do
     state = %{state | git_commit_gen_ref: nil}
-    state = EditorState.set_status(state, "Commit message generation timed out")
+    state = apply_git_commit_generation_result(state, :timeout)
     {:noreply, Renderer.render_or_async(state)}
   end
 
@@ -940,19 +922,26 @@ defmodule MingaEditor do
   # mints a new revision (or drops the picker), so older in-flight fetches land
   # here as stale and are discarded. Picker fetches retain this read-only
   # latest-wins path; #2805 migrates external formatting and git mutations.
-  def handle_info({:picker_candidates_result, source_module, revision, result}, state) do
-    case state.shell_runtime.state.modal do
-      {:picker, %{picker_ui: %{source: ^source_module} = picker_ui} = payload} ->
-        if MingaEditor.State.Picker.current_fetch?(picker_ui, revision) do
-          new_state = handle_picker_candidates(state, payload, result)
-          {:noreply, Renderer.render_or_async(new_state)}
-        else
-          {:noreply, state}
-        end
-
-      _ ->
-        {:noreply, state}
+  def handle_info(
+        {:picker_candidates_result, source_module, revision, result},
+        %{
+          shell_runtime: %{
+            state: %TraditionalShellState{
+              modal: {:picker, %{picker_ui: %{source: source_module} = picker_ui} = payload}
+            }
+          }
+        } = state
+      ) do
+    if MingaEditor.State.Picker.current_fetch?(picker_ui, revision) do
+      new_state = handle_picker_candidates(state, payload, result)
+      {:noreply, Renderer.render_or_async(new_state)}
+    else
+      {:noreply, state}
     end
+  end
+
+  def handle_info({:picker_candidates_result, _source_module, _revision, _result}, state) do
+    {:noreply, state}
   end
 
   # ── Async completion processing result ──────────────────────────────────
@@ -988,6 +977,45 @@ defmodule MingaEditor do
   def handle_info(_msg, state) do
     {:noreply, state}
   end
+
+  @spec apply_git_commit_generation_result(
+          state(),
+          {:ok, String.t()} | {:error, String.t()} | :timeout
+        ) :: state()
+  defp apply_git_commit_generation_result(
+         %{shell_runtime: %{state: %TraditionalShellState{modal: modal}}} = state,
+         {:ok, message}
+       ) do
+    if ModalOverlay.active?(modal) do
+      MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+        state,
+        "Commit message ready (prompt already open)"
+      )
+    else
+      state
+      |> open_git_commit_prompt(default: message)
+      |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("Commit message generated")
+    end
+  end
+
+  defp apply_git_commit_generation_result(
+         %{shell_runtime: %{state: %TraditionalShellState{}}} = state,
+         {:error, reason}
+       ) do
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, reason)
+  end
+
+  defp apply_git_commit_generation_result(
+         %{shell_runtime: %{state: %TraditionalShellState{}}} = state,
+         :timeout
+       ) do
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      "Commit message generation timed out"
+    )
+  end
+
+  defp apply_git_commit_generation_result(state, _result), do: state
 
   @spec apply_effect_outcome(state(), Outcome.t()) :: {state(), Outcome.t()}
   defp apply_effect_outcome(state, %Outcome{request: %Request{handler: handler}} = outcome) do
@@ -1038,7 +1066,10 @@ defmodule MingaEditor do
     new_picker_state = %{picker_state | picker: picker, load_status: :ready}
 
     state
-    |> ModalOverlay.transition(:picker, PickerPayload.put_picker_ui(payload, new_picker_state))
+    |> MingaEditor.Shell.Traditional.ModalWorkflow.transition(
+      :picker,
+      PickerPayload.put_picker_ui(payload, new_picker_state)
+    )
     |> apply_fetch_status(meta)
   end
 
@@ -1046,7 +1077,7 @@ defmodule MingaEditor do
     picker_state = payload.picker_ui
     new_picker_state = %{picker_state | load_status: {:error, reason}}
 
-    ModalOverlay.transition(
+    MingaEditor.Shell.Traditional.ModalWorkflow.transition(
       state,
       :picker,
       PickerPayload.put_picker_ui(payload, new_picker_state)
@@ -1055,7 +1086,7 @@ defmodule MingaEditor do
 
   @spec apply_fetch_status(state(), MingaEditor.UI.Picker.Source.fetch_meta()) :: state()
   defp apply_fetch_status(state, %{status: status}) when is_binary(status) do
-    EditorState.set_status(state, status)
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, status)
   end
 
   defp apply_fetch_status(state, _meta), do: state
@@ -1440,41 +1471,12 @@ defmodule MingaEditor do
     :ok
   end
 
-  # ── Nav/yank flash cancellation ────────────────────────────────────────────
-
-  # Resets nav-flash tracking after a buffer switch so the cursor
-  # position of the new buffer doesn't trigger a false-positive flash
-  # from the old buffer's cursor line.
+  # Resets nav-flash tracking after a buffer switch so the new buffer's
+  # cursor line cannot be compared with the old buffer's line.
   @spec reset_nav_flash_tracking(state()) :: state()
   def reset_nav_flash_tracking(state) do
-    state = cancel_nav_flash(state)
+    state = MingaEditor.Shell.Traditional.FlashesWorkflow.cancel_nav(state)
     %{state | last_cursor_line: nil}
-  end
-
-  # Cancels any active nav-flash. Called on every keypress.
-  @spec cancel_nav_flash(state()) :: state()
-  def cancel_nav_flash(%{shell_runtime: %{state: %{nav_flash: nil}}} = state), do: state
-
-  def cancel_nav_flash(state) do
-    effects = NavFlash.cancel_effects(EditorState.nav_flash(state))
-    MingaEditor.FlashEffects.execute(state, effects)
-    EditorState.cancel_nav_flash(state)
-  end
-
-  @spec cancel_yank_flash(state()) :: state()
-  def cancel_yank_flash(%{shell_runtime: %{state: %{yank_flash: nil}}} = state), do: state
-
-  def cancel_yank_flash(%{shell_runtime: %{state: %{yank_flash: flash}}} = state) do
-    effects = YankFlash.cancel_effects(flash)
-    MingaEditor.FlashEffects.execute(state, effects)
-
-    try do
-      Buffer.remove_highlight_group(flash.buf, YankFlash.flash_group())
-    catch
-      :exit, _ -> :ok
-    end
-
-    EditorState.cancel_yank_flash(state)
   end
 
   # ── Key dispatch ─────────────────────────────────────────────────────────────
@@ -1560,26 +1562,6 @@ defmodule MingaEditor do
       nil -> :ok
       pid -> Git.Repo.refresh(pid)
     end
-  end
-
-  # ── Warning popup debounce ───────────────────────────────────────────────
-
-  @warning_popup_debounce_ms 200
-
-  @spec maybe_schedule_warning_popup(state()) :: state()
-  def maybe_schedule_warning_popup(
-        %{shell_runtime: %{state: %{warning_popup_timer: ref}}} = state
-      )
-      when is_reference(ref) do
-    # Timer already running; the pending timeout will open the popup.
-    state
-  end
-
-  def maybe_schedule_warning_popup(%{backend: :headless} = state), do: state
-
-  def maybe_schedule_warning_popup(state) do
-    ref = Process.send_after(self(), :warning_popup_timeout, @warning_popup_debounce_ms)
-    EditorState.set_warning_popup_timer(state, ref)
   end
 
   # buffer_visible_in_window? moved to HighlightHandler

@@ -7,9 +7,10 @@ defmodule MingaEditor.MessagesBufferTest do
 
   use Minga.Test.EditorCase, async: true, rendering: :disabled
 
-  test "external broadcasts append to the editor MessageStore" do
+  test "external warning broadcasts append without opening or focusing Messages" do
     tag = "msgtest-#{System.unique_integer([:positive])}"
     ctx = start_editor("hello")
+    initial_panel = bottom_panel(ctx)
 
     Minga.Events.broadcast(
       :log_message,
@@ -20,5 +21,9 @@ defmodule MingaEditor.MessagesBufferTest do
     assert Enum.any?(message_store_entries(ctx), fn entry ->
              String.contains?(entry.text, tag) and entry.level == :warning
            end)
+
+    assert bottom_panel(ctx) == initial_panel
+    refute bottom_panel(ctx).visible
+    refute bottom_panel(ctx).focused
   end
 end

@@ -19,7 +19,9 @@ defmodule MingaEditor.Handlers.ToolHandlerTest do
       event = {:minga_event, :tool_install_started, %{name: "ripgrep"}}
       {new_state, effects} = ToolHandler.handle(state, event)
 
-      assert EditorState.status_msg(new_state) == "Installing ripgrep..."
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state) ==
+               "Installing ripgrep..."
+
       assert :render in effects
       assert {:refresh_tool_picker} in effects
     end
@@ -34,7 +36,9 @@ defmodule MingaEditor.Handlers.ToolHandlerTest do
 
       {new_state, effects} = ToolHandler.handle(state, event)
 
-      assert EditorState.status_msg(new_state) == "ripgrep: Downloading..."
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state) ==
+               "ripgrep: Downloading..."
+
       assert :render in effects
     end
   end
@@ -45,7 +49,11 @@ defmodule MingaEditor.Handlers.ToolHandlerTest do
       event = {:minga_event, :tool_install_complete, %{name: "ripgrep", version: "14.1"}}
       {new_state, effects} = ToolHandler.handle(state, event)
 
-      assert String.contains?(EditorState.status_msg(new_state), "ripgrep v14.1 installed")
+      assert String.contains?(
+               MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state),
+               "ripgrep v14.1 installed"
+             )
+
       assert {:log_message, "Tool installed: ripgrep v14.1"} in effects
       assert :render in effects
       assert {:refresh_tool_picker} in effects
@@ -79,7 +87,10 @@ defmodule MingaEditor.Handlers.ToolHandlerTest do
       event = {:minga_event, :tool_install_failed, %{name: "ripgrep", reason: "network error"}}
       {new_state, effects} = ToolHandler.handle(state, event)
 
-      assert String.contains?(EditorState.status_msg(new_state), "ripgrep install failed")
+      assert String.contains?(
+               MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state),
+               "ripgrep install failed"
+             )
 
       assert Enum.any?(effects, fn
                {:log_message, msg} -> String.contains?(msg, "Tool install failed")
@@ -116,21 +127,28 @@ defmodule MingaEditor.Handlers.ToolHandlerTest do
   describe "clear_tool_status" do
     test "clears status when it starts with a tool prefix" do
       state = base_state()
-      state = EditorState.set_status(state, "\u2713 ripgrep v14.1 installed")
+
+      state =
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "\u2713 ripgrep v14.1 installed"
+        )
 
       {new_state, effects} = ToolHandler.handle(state, :clear_tool_status)
 
-      assert EditorState.status_msg(new_state) == nil
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state) == nil
       assert :render in effects
     end
 
     test "preserves non-tool status messages" do
       state = base_state()
-      state = EditorState.set_status(state, "Some other message")
+      state = MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Some other message")
 
       {new_state, effects} = ToolHandler.handle(state, :clear_tool_status)
 
-      assert EditorState.status_msg(new_state) == "Some other message"
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state) ==
+               "Some other message"
+
       assert :render in effects
     end
   end

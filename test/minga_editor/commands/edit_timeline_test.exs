@@ -21,7 +21,7 @@ defmodule MingaEditor.Commands.EditTimelineTest do
 
       updated = EditTimelineCommands.execute(state, :timeline_next_file)
 
-      assert status = EditorState.status_msg(updated)
+      assert status = MingaEditor.Shell.Traditional.NoticeWorkflow.message(updated)
       assert String.contains?(status, "Could not open agent change file /tmp/a-missing.ex")
     end
 
@@ -30,7 +30,7 @@ defmodule MingaEditor.Commands.EditTimelineTest do
 
       updated = EditTimelineCommands.execute(state, :timeline_prev_file)
 
-      assert status = EditorState.status_msg(updated)
+      assert status = MingaEditor.Shell.Traditional.NoticeWorkflow.message(updated)
       assert String.contains?(status, "Could not open agent change file /tmp/b-missing.ex")
     end
   end

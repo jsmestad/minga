@@ -241,7 +241,9 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
 
       state = GitCommands.execute(state, :git_diff_toggle_layout)
 
-      assert EditorState.status_msg(state) == "Side-by-side diff is only available in GUI"
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) ==
+               "Side-by-side diff is only available in GUI"
+
       assert state.diff_views[diff_buf].view_mode == :unified
       refute buffer_content(diff_buf) =~ " │ "
     end
@@ -285,7 +287,7 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
 
       state = GitCommands.execute(state, :git_stage_hunk)
 
-      assert EditorState.status_msg(state) == "Hunk 1/1 staged"
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) == "Hunk 1/1 staged"
       assert state.diff_views[diff_buf].view_mode == :side_by_side
     end
 
@@ -328,7 +330,7 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
 
       state = GitCommands.execute(state, :git_revert_hunk)
 
-      assert EditorState.status_msg(state) == "Hunk 1/1 reverted"
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) == "Hunk 1/1 reverted"
       assert state.diff_views[diff_buf].view_mode == :side_by_side
       assert buffer_content(source_buf) == base
     end
@@ -417,7 +419,9 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
       state = GitCommands.execute(state, :git_stage_hunk)
 
       assert buffer_content(diff_buf) =~ "four"
-      assert EditorState.status_msg(state) == "Diff view changed; retry hunk action"
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) ==
+               "Diff view changed; retry hunk action"
     end
 
     test "revert hunk from staged diff view does not mutate working buffer" do
@@ -457,7 +461,9 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
       state = GitCommands.execute(state, :git_revert_hunk)
 
       assert buffer_content(source_buf) == working
-      assert EditorState.status_msg(state) == "Cannot revert from a staged diff view"
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) ==
+               "Cannot revert from a staged diff view"
     end
 
     test "GUI diff layout toggle rebuilds active diff as side-by-side" do
@@ -493,7 +499,9 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
 
       assert buffer_content(diff_buf) =~ " │ "
       assert state.diff_views[diff_buf].view_mode == :side_by_side
-      assert EditorState.status_msg(state) == "Diff layout: side-by-side"
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) ==
+               "Diff layout: side-by-side"
     end
 
     test "staged diff toggle treats staged deletions as empty index content" do

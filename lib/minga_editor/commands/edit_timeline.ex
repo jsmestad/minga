@@ -9,6 +9,7 @@ defmodule MingaEditor.Commands.EditTimeline do
   use MingaEditor.Commands.Provider
 
   alias Minga.Buffer
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Agent.EditTimeline
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Handlers.BufferRegistry
@@ -36,14 +37,17 @@ defmodule MingaEditor.Commands.EditTimeline do
           idx = EditTimeline.viewing_index(timeline, path)
           count = EditTimeline.entry_count(timeline, path)
           state = set_timeline(state, timeline)
-          EditorState.set_status(state, "Edit #{idx + 1}/#{count}")
+          NoticeWorkflow.publish(state, "Edit #{idx + 1}/#{count}")
 
         {_timeline, :at_end} ->
           state = set_timeline(state, EditTimeline.go_live(timeline, path))
-          EditorState.set_status(state, "Live (current state)")
+          NoticeWorkflow.publish(state, "Live (current state)")
 
         {_timeline, :no_entries} ->
-          EditorState.set_status(state, "No agent edits for this file")
+          NoticeWorkflow.publish(
+            state,
+            "No agent edits for this file"
+          )
       end
     end)
   end
@@ -55,13 +59,19 @@ defmodule MingaEditor.Commands.EditTimeline do
           idx = EditTimeline.viewing_index(timeline, path)
           count = EditTimeline.entry_count(timeline, path)
           state = set_timeline(state, timeline)
-          EditorState.set_status(state, "Edit #{idx + 1}/#{count}")
+          NoticeWorkflow.publish(state, "Edit #{idx + 1}/#{count}")
 
         {_timeline, :at_baseline} ->
-          EditorState.set_status(state, "At baseline (before agent)")
+          NoticeWorkflow.publish(
+            state,
+            "At baseline (before agent)"
+          )
 
         {_timeline, :no_entries} ->
-          EditorState.set_status(state, "No agent edits for this file")
+          NoticeWorkflow.publish(
+            state,
+            "No agent edits for this file"
+          )
       end
     end)
   end
@@ -69,7 +79,7 @@ defmodule MingaEditor.Commands.EditTimeline do
   def execute(state, :timeline_go_live) do
     with_timeline(state, fn path, timeline ->
       state = set_timeline(state, EditTimeline.go_live(timeline, path))
-      EditorState.set_status(state, "Live (current state)")
+      NoticeWorkflow.publish(state, "Live (current state)")
     end)
   end
 
@@ -77,7 +87,7 @@ defmodule MingaEditor.Commands.EditTimeline do
   def execute(state, :timeline_prev_file), do: navigate_file(state, -1)
 
   def execute(state, :timeline_toggle) do
-    EditorState.set_status(state, "Edit timeline toggled")
+    NoticeWorkflow.publish(state, "Edit timeline toggled")
   end
 
   @spec navigate_to_index(EditorState.t(), non_neg_integer()) :: EditorState.t()
@@ -88,7 +98,7 @@ defmodule MingaEditor.Commands.EditTimeline do
       if index < count do
         timeline = EditTimeline.set_viewing(timeline, path, index)
         state = set_timeline(state, timeline)
-        EditorState.set_status(state, "Edit #{index + 1}/#{count}")
+        NoticeWorkflow.publish(state, "Edit #{index + 1}/#{count}")
       else
         state
       end
@@ -100,7 +110,7 @@ defmodule MingaEditor.Commands.EditTimeline do
 
     case Buffer.file_path(buf) do
       nil ->
-        EditorState.set_status(state, "No file path")
+        NoticeWorkflow.publish(state, "No file path")
 
       path ->
         timeline = AgentAccess.view(state).edit_timeline
@@ -115,7 +125,7 @@ defmodule MingaEditor.Commands.EditTimeline do
 
     case paths do
       [] ->
-        EditorState.set_status(state, "No agent-changed files")
+        NoticeWorkflow.publish(state, "No agent-changed files")
 
       _ ->
         current_path = active_path(state)
@@ -123,10 +133,13 @@ defmodule MingaEditor.Commands.EditTimeline do
 
         case BufferRegistry.open_file_by_path_result(state, target_path) do
           {:ok, new_state} ->
-            EditorState.set_status(new_state, "Agent change file: #{target_path}")
+            NoticeWorkflow.publish(
+              new_state,
+              "Agent change file: #{target_path}"
+            )
 
           {:error, reason} ->
-            EditorState.set_status(
+            NoticeWorkflow.publish(
               state,
               "Could not open agent change file #{target_path}: #{inspect(reason)}"
             )

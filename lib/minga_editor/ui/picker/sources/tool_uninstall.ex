@@ -33,10 +33,13 @@ defmodule MingaEditor.UI.Picker.Sources.ToolUninstall do
   def on_select(%Item{id: name}, state) do
     case ToolManager.uninstall(name) do
       :ok ->
-        MingaEditor.State.set_status(state, "Uninstalled #{name}")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Uninstalled #{name}")
 
       {:error, reason} ->
-        MingaEditor.State.set_status(state, "Failed to uninstall #{name}: #{reason}")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Failed to uninstall #{name}: #{reason}"
+        )
     end
   end
 

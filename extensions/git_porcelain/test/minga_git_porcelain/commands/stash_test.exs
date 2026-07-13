@@ -32,9 +32,9 @@ defmodule MingaGitPorcelain.CommandsStashTest do
       repo = start_repo(dir, [tracked_change()], [])
 
       result = GitCommands.execute(build_state(), :git_stash_save)
-      :sys.get_state(repo)
+      Repo.await_refresh(repo)
 
-      assert EditorState.status_msg(result) == "Stashed changes"
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) == "Stashed changes"
       assert Repo.status(repo) == []
 
       summary = Repo.summary(repo)
@@ -49,9 +49,9 @@ defmodule MingaGitPorcelain.CommandsStashTest do
       repo = start_repo(dir, [], [])
 
       result = GitCommands.execute(build_state(), :git_stash_save)
-      :sys.get_state(repo)
+      Repo.await_refresh(repo)
 
-      assert EditorState.status_msg(result) == "No changes to stash"
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) == "No changes to stash"
       assert Repo.summary(repo).stash_count == 0
     end
 
@@ -59,16 +59,18 @@ defmodule MingaGitPorcelain.CommandsStashTest do
       repo = start_repo(dir, [tracked_change()], [])
 
       save_result = GitCommands.execute(build_state(), :git_stash_save)
-      :sys.get_state(repo)
+      Repo.await_refresh(repo)
 
-      assert EditorState.status_msg(save_result) == "Stashed changes"
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(save_result) ==
+               "Stashed changes"
+
       assert Repo.status(repo) == []
       assert Repo.summary(repo).stash_count == 1
 
       pop_result = GitCommands.execute(build_state(), :git_stash_pop)
-      :sys.get_state(repo)
+      Repo.await_refresh(repo)
 
-      assert EditorState.status_msg(pop_result) == "Popped stash"
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(pop_result) == "Popped stash"
       assert Repo.status(repo) == [tracked_change()]
 
       summary = Repo.summary(repo)
@@ -84,7 +86,8 @@ defmodule MingaGitPorcelain.CommandsStashTest do
 
       result = GitCommands.execute(build_state(), :git_stash_pop)
 
-      assert EditorState.status_msg(result) == "Stash pop failed: No stash entries to pop"
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) ==
+               "Stash pop failed: No stash entries to pop"
     end
   end
 
@@ -94,7 +97,8 @@ defmodule MingaGitPorcelain.CommandsStashTest do
 
       result = GitCommands.execute(build_state(), :git_stash_list)
 
-      assert {:picker, %{picker_ui: %{source: GitStashSource}}} = EditorState.modal(result)
+      assert {:picker, %{picker_ui: %{source: GitStashSource}}} =
+               MingaEditor.Shell.Runtime.state(result.shell_runtime).modal
     end
 
     test "drop opens the stash picker in drop mode", %{root: dir} do
@@ -103,7 +107,7 @@ defmodule MingaGitPorcelain.CommandsStashTest do
       result = GitCommands.execute(build_state(), :git_stash_drop)
 
       assert {:picker, %{picker_ui: %{source: GitStashSource, context: context}}} =
-               EditorState.modal(result)
+               MingaEditor.Shell.Runtime.state(result.shell_runtime).modal
 
       assert context == %{git_root: dir, action: :drop}
     end

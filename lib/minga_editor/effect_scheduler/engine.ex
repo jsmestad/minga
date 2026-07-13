@@ -41,6 +41,17 @@ defmodule MingaEditor.EffectScheduler.Engine do
     end
   end
 
+  @doc "Cancels the admitted request correlated with a semantic operation."
+  @spec cancel_operation(State.t(), MingaEditor.State.Operation.id()) ::
+          {:ok | {:error, :not_found}, State.t()}
+  def cancel_operation(%State{} = state, operation_id)
+      when is_integer(operation_id) and operation_id > 0 do
+    case request_id_for_operation(state, operation_id) do
+      nil -> {{:error, :not_found}, state}
+      request_id -> cancel(state, request_id)
+    end
+  end
+
   @doc "Atomically claims a still-pending candidate without releasing its resource."
   @spec claim(State.t(), Outcome.t()) :: {claim(), State.t()}
   def claim(%State{} = state, %Outcome{} = outcome) do
@@ -386,6 +397,31 @@ defmodule MingaEditor.EffectScheduler.Engine do
     |> Map.put(:tasks, Map.delete(state.tasks, task.ref))
     |> put_lane(resource, %{lane | running: %{running | task: nil}})
     |> deliver_result(Outcome.canceled(running.request, reason))
+  end
+
+  @spec request_id_for_operation(State.t(), MingaEditor.State.Operation.id()) ::
+          Request.id() | nil
+  defp request_id_for_operation(state, operation_id) do
+    Enum.find_value(state.lanes, fn {_resource, lane} ->
+      case lane.running do
+        %{request: %Request{operation_id: ^operation_id, id: request_id}} -> request_id
+        _running -> queued_request_id_for_operation(lane.queue, operation_id)
+      end
+    end)
+  end
+
+  @spec queued_request_id_for_operation(
+          :queue.queue(Request.t()),
+          MingaEditor.State.Operation.id()
+        ) ::
+          Request.id() | nil
+  defp queued_request_id_for_operation(queue, operation_id) do
+    queue
+    |> :queue.to_list()
+    |> Enum.find_value(fn
+      %Request{operation_id: ^operation_id, id: request_id} -> request_id
+      %Request{} -> nil
+    end)
   end
 
   @spec cancel_request(State.t(), Request.id()) :: {:ok, State.t()} | :not_found

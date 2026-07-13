@@ -7,6 +7,7 @@ defmodule MingaEditor.Commands.Eval do
   line and logged to the `*Messages*` buffer.
   """
 
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.State, as: EditorState
   alias Minga.Mode
 
@@ -34,7 +35,7 @@ defmodule MingaEditor.Commands.Eval do
         display = truncate(result_str, @max_status_length)
 
         state
-        |> then(&EditorState.set_status(&1, display))
+        |> then(&NoticeWorkflow.publish(&1, display))
         |> log_to_messages("Eval: #{input}\n  => #{result_str}")
 
       {:ok, {:error, kind, error, stacktrace}} ->
@@ -42,14 +43,19 @@ defmodule MingaEditor.Commands.Eval do
         display = truncate(format_error_oneline(kind, error), @max_status_length)
 
         state
-        |> then(&EditorState.set_status(&1, display))
+        |> then(&NoticeWorkflow.publish(&1, display))
         |> log_to_messages("Eval error: #{input}\n#{formatted}")
 
       nil ->
         timeout_display = "#{div(timeout, 1000)}s"
 
         state
-        |> then(&EditorState.set_status(&1, "Eval timed out (#{timeout_display})"))
+        |> then(
+          &NoticeWorkflow.publish(
+            &1,
+            "Eval timed out (#{timeout_display})"
+          )
+        )
         |> log_to_messages("Eval timeout: #{input}")
     end
   end

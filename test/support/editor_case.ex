@@ -548,7 +548,7 @@ defmodule Minga.Test.EditorCase do
         |> Enum.reject(&(&1 == ""))
         |> Enum.join(" ")
 
-      status = MingaEditor.State.status_msg(state) ->
+      status = MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) ->
         status
 
       true ->
@@ -617,6 +617,12 @@ defmodule Minga.Test.EditorCase do
     get_editor_state(editor).message_store.entries
   end
 
+  @doc "Returns the bottom-panel lifecycle value after synchronizing with the editor process."
+  @spec bottom_panel(editor_ctx()) :: MingaEditor.BottomPanel.t()
+  def bottom_panel(%{editor: editor}) do
+    get_editor_state(editor).shell_runtime.state.bottom_panel
+  end
+
   @doc "Returns the number of open buffers."
   @spec buffer_count(editor_ctx()) :: non_neg_integer()
   def buffer_count(%{editor: editor}) do
@@ -677,16 +683,13 @@ defmodule Minga.Test.EditorCase do
   @doc "Returns true if a picker is currently open."
   @spec picker_open?(editor_ctx()) :: boolean()
   def picker_open?(%{editor: editor}) do
-    MingaEditor.State.ModalOverlay.match(
-      MingaEditor.State.modal(get_editor_state(editor)),
-      :picker
-    )
+    MingaEditor.State.ModalOverlay.match(active_modal(editor), :picker)
   end
 
   @doc "Returns the active picker state, or nil."
   @spec picker_state(editor_ctx()) :: MingaEditor.UI.Picker.t() | nil
   def picker_state(%{editor: editor}) do
-    case MingaEditor.State.modal(get_editor_state(editor)) do
+    case active_modal(editor) do
       {:picker, %{picker_ui: %{picker: picker}}} -> picker
       _ -> nil
     end
@@ -717,19 +720,13 @@ defmodule Minga.Test.EditorCase do
   @doc "Returns true if the completion menu is visible."
   @spec completion_visible?(editor_ctx()) :: boolean()
   def completion_visible?(%{editor: editor}) do
-    MingaEditor.State.ModalOverlay.match(
-      MingaEditor.State.modal(get_editor_state(editor)),
-      :completion
-    )
+    MingaEditor.State.ModalOverlay.match(active_modal(editor), :completion)
   end
 
   @doc "Returns true if a file conflict prompt is open."
   @spec conflict_open?(editor_ctx()) :: boolean()
   def conflict_open?(%{editor: editor}) do
-    MingaEditor.State.ModalOverlay.match(
-      MingaEditor.State.modal(get_editor_state(editor)),
-      :conflict
-    )
+    MingaEditor.State.ModalOverlay.match(active_modal(editor), :conflict)
   end
 
   @doc "Returns the pending quit mode (:quit | :quit_all | nil)."
@@ -738,10 +735,10 @@ defmodule Minga.Test.EditorCase do
     get_editor_state(editor).pending_quit
   end
 
-  @doc "Returns the current status/command message."
-  @spec status_msg(editor_ctx()) :: String.t() | nil
-  def status_msg(%{editor: editor}) do
-    MingaEditor.State.status_msg(get_editor_state(editor))
+  @doc "Returns the current ordinary notice message."
+  @spec notice_message(editor_ctx()) :: String.t() | nil
+  def notice_message(%{editor: editor}) do
+    MingaEditor.Shell.Traditional.NoticeWorkflow.message(get_editor_state(editor))
   end
 
   @doc "Returns the tab bar labels."
@@ -770,7 +767,7 @@ defmodule Minga.Test.EditorCase do
   @doc "Returns the picker payload (ModalOverlay.Picker) when a picker is open, or nil."
   @spec modal_picker(editor_ctx()) :: MingaEditor.State.ModalOverlay.Picker.t() | nil
   def modal_picker(%{editor: editor}) do
-    case MingaEditor.State.modal(get_editor_state(editor)) do
+    case active_modal(editor) do
       {:picker, payload} -> payload
       _ -> nil
     end
@@ -785,13 +782,16 @@ defmodule Minga.Test.EditorCase do
   def modal_picker!(ctx) do
     case modal_picker(ctx) do
       nil ->
-        modal = MingaEditor.State.modal(get_editor_state(ctx.editor))
+        modal = active_modal(ctx.editor)
         raise "expected picker payload, but modal was: #{inspect(modal)}"
 
       payload ->
         payload
     end
   end
+
+  @spec active_modal(pid()) :: MingaEditor.State.ModalOverlay.t()
+  defp active_modal(editor), do: get_editor_state(editor).shell_runtime.state.modal
 
   @doc "Returns the cell at a given screen row and col."
   @spec screen_cell(editor_ctx(), non_neg_integer(), non_neg_integer()) :: map()

@@ -14,18 +14,24 @@ defmodule MingaAdversarial.Commands do
   def analyze(state) do
     case EditorAPI.active_path(state) do
       nil ->
-        EditorAPI.set_status(state, "Adversarial: no current file")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Adversarial: no current file"
+        )
 
       path ->
         case Watcher.analyze(path, live_content(state)) do
           :off ->
-            EditorAPI.set_status(
+            MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
               state,
               "Adversarial: dial is off (M-x adversarial-cycle-skepticism)"
             )
 
           :ok ->
-            EditorAPI.set_status(state, "Adversarial: challenging #{Path.basename(path)}…")
+            MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+              state,
+              "Adversarial: challenging #{Path.basename(path)}…"
+            )
         end
     end
   end
@@ -34,17 +40,27 @@ defmodule MingaAdversarial.Commands do
   def clear(state) do
     case EditorAPI.active_path(state) do
       nil ->
-        EditorAPI.set_status(state, "Adversarial: no current file")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Adversarial: no current file"
+        )
 
       path ->
         Watcher.clear(path)
-        EditorAPI.set_status(state, "Adversarial: cleared #{Path.basename(path)}")
+
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Adversarial: cleared #{Path.basename(path)}"
+        )
     end
   end
 
   @spec cycle_skepticism(EditorAPI.state()) :: EditorAPI.state()
   def cycle_skepticism(state) do
-    EditorAPI.set_status(state, "Adversarial skepticism: #{Watcher.cycle_skepticism()}")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      "Adversarial skepticism: #{Watcher.cycle_skepticism()}"
+    )
   end
 
   # Live (possibly unsaved) text of the active buffer, or nil to fall back to

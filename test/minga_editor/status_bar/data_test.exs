@@ -9,6 +9,7 @@ defmodule MingaEditor.StatusBar.DataTest do
   alias Minga.Mode.VisualState
   alias MingaAgent.SessionMetadata
   alias MingaAgent.Subagent.Handle
+  alias MingaEditor.Shell.Traditional.WhichKeyWorkflow
   alias MingaEditor.StatusBar.Data
   alias MingaEditor.Shell.Registry
   alias MingaEditor.Shell.Runtime
@@ -60,7 +61,7 @@ defmodule MingaEditor.StatusBar.DataTest do
 
     assert {:buffer, data} = Data.from_state(state)
     assert data.selected_operation == operation
-    assert data.status_msg == nil
+    assert data.notice == nil
   end
 
   test "from_state leaves GUI modeline segments detached by default" do
@@ -123,8 +124,9 @@ defmodule MingaEditor.StatusBar.DataTest do
       state =
         state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
         |> EditorState.update_mode_state(&%{&1 | count: 2})
-        |> EditorState.set_whichkey(%MingaEditor.State.WhichKey{show: true})
+        |> WhichKeyWorkflow.begin(%{}, [])
 
+      state = WhichKeyWorkflow.reveal(state, state.shell_runtime.state.whichkey.generation)
       {:buffer, data} = Data.from_state(state)
       assert data.pending_keys == ""
     end

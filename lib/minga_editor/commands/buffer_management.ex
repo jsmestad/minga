@@ -10,6 +10,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   use MingaEditor.Commands.Provider
 
   alias MingaAgent.Session
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaAgent.ProjectView
   alias Minga.Buffer
   alias Minga.Project.FileRef, as: ProjectFileRef
@@ -62,16 +63,22 @@ defmodule MingaEditor.Commands.BufferManagement do
       :ok ->
         name = Helpers.buffer_display_name(buf)
 
-        EditorState.set_status(state, "Wrote #{name}")
+        NoticeWorkflow.publish(state, "Wrote #{name}")
 
       {:error, :file_changed} ->
         handle_file_changed_on_save(state, buf)
 
       {:error, :no_file_path} ->
-        EditorState.set_status(state, "No file name — use :w <filename>")
+        NoticeWorkflow.publish(
+          state,
+          "No file name — use :w <filename>"
+        )
 
       {:error, reason} ->
-        EditorState.set_status(state, "Save failed: #{inspect(reason)}")
+        NoticeWorkflow.publish(
+          state,
+          "Save failed: #{inspect(reason)}"
+        )
     end
   end
 
@@ -79,13 +86,19 @@ defmodule MingaEditor.Commands.BufferManagement do
     case Buffer.force_save(buf) do
       :ok ->
         name = Helpers.buffer_display_name(buf)
-        EditorState.set_status(state, "Wrote #{name} (force)")
+        NoticeWorkflow.publish(state, "Wrote #{name} (force)")
 
       {:error, :no_file_path} ->
-        EditorState.set_status(state, "No file name — use :w <filename>")
+        NoticeWorkflow.publish(
+          state,
+          "No file name — use :w <filename>"
+        )
 
       {:error, reason} ->
-        EditorState.set_status(state, "Force save failed: #{inspect(reason)}")
+        NoticeWorkflow.publish(
+          state,
+          "Force save failed: #{inspect(reason)}"
+        )
     end
   end
 
@@ -93,13 +106,16 @@ defmodule MingaEditor.Commands.BufferManagement do
     case Buffer.reload(buf) do
       :ok ->
         name = Helpers.buffer_display_name(buf)
-        EditorState.set_status(state, "Reloaded #{name}")
+        NoticeWorkflow.publish(state, "Reloaded #{name}")
 
       {:error, :no_file_path} ->
-        EditorState.set_status(state, "No file to reload")
+        NoticeWorkflow.publish(state, "No file to reload")
 
       {:error, reason} ->
-        EditorState.set_status(state, "Reload failed: #{inspect(reason)}")
+        NoticeWorkflow.publish(
+          state,
+          "Reload failed: #{inspect(reason)}"
+        )
     end
   end
 
@@ -128,7 +144,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   def execute(state, :confirm_quit_no) do
     state
     |> EditorState.clear_pending_quit()
-    |> EditorState.clear_status()
+    |> MingaEditor.Shell.Traditional.NoticeWorkflow.dismiss()
   end
 
   # ── Buffer navigation ─────────────────────────────────────────────────────
@@ -205,7 +221,7 @@ defmodule MingaEditor.Commands.BufferManagement do
     current = Buffer.get_option(buf, :wrap)
     Buffer.set_option(buf, :wrap, !current)
     label = if current, do: "nowrap", else: "wrap"
-    EditorState.set_status(state, "wrap #{label}")
+    NoticeWorkflow.publish(state, "wrap #{label}")
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :toggle_invisible)
@@ -213,7 +229,7 @@ defmodule MingaEditor.Commands.BufferManagement do
     current = Buffer.get_option(buf, :show_invisible)
     Buffer.set_option(buf, :show_invisible, !current)
     label = if current, do: "off", else: "on"
-    EditorState.set_status(state, "invisible #{label}")
+    NoticeWorkflow.publish(state, "invisible #{label}")
   end
 
   # ── Ex commands ───────────────────────────────────────────────────────────
@@ -447,7 +463,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   def execute(state, {:execute_ex_command, {:set_filetype, [name]}}) do
     case resolve_filetype(name) do
       {:ok, filetype} -> apply_filetype_change(state, filetype)
-      {:error, message} -> EditorState.set_status(state, message)
+      {:error, message} -> NoticeWorkflow.publish(state, message)
     end
   end
 
@@ -603,12 +619,13 @@ defmodule MingaEditor.Commands.BufferManagement do
       try do
         Buffer.set_filetype(buf, filetype)
         state = setup_highlight_or_defer(state)
-        EditorState.set_status(state, "Language: #{filetype}")
+        NoticeWorkflow.publish(state, "Language: #{filetype}")
       catch
-        :exit, _ -> EditorState.set_status(state, "No active buffer")
+        :exit, _ ->
+          NoticeWorkflow.publish(state, "No active buffer")
       end
     else
-      EditorState.set_status(state, "No active buffer")
+      NoticeWorkflow.publish(state, "No active buffer")
     end
   end
 
@@ -631,11 +648,11 @@ defmodule MingaEditor.Commands.BufferManagement do
     case result do
       :ok ->
         Minga.Log.info(:editor, "Config reloaded")
-        EditorState.set_status(state, "Config reloaded")
+        NoticeWorkflow.publish(state, "Config reloaded")
 
       {:error, msg} ->
         Minga.Log.warning(:config, "Config reload error: #{msg}")
-        EditorState.set_status(state, "Config reload error: #{msg}")
+        NoticeWorkflow.publish(state, "Config reload error: #{msg}")
     end
   end
 
@@ -648,11 +665,12 @@ defmodule MingaEditor.Commands.BufferManagement do
     open_alternate(state, file_path, filetype)
   end
 
-  def alternate_file(state), do: EditorState.set_status(state, "No active buffer")
+  def alternate_file(state),
+    do: NoticeWorkflow.publish(state, "No active buffer")
 
   @spec open_alternate(state(), String.t() | nil, atom()) :: state()
   defp open_alternate(state, nil, _filetype),
-    do: EditorState.set_status(state, "Buffer has no file path")
+    do: NoticeWorkflow.publish(state, "Buffer has no file path")
 
   defp open_alternate(state, file_path, filetype) do
     project_root = Minga.Project.root() || Path.dirname(file_path)
@@ -660,7 +678,10 @@ defmodule MingaEditor.Commands.BufferManagement do
 
     case Enum.find(candidates, &File.exists?/1) do
       nil ->
-        EditorState.set_status(state, "No alternate file found for #{Path.basename(file_path)}")
+        NoticeWorkflow.publish(
+          state,
+          "No alternate file found for #{Path.basename(file_path)}"
+        )
 
       alt_path ->
         execute(state, {:execute_ex_command, {:edit, alt_path}})
@@ -705,7 +726,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec execute_terminal(state()) :: state()
   defp execute_terminal(state) do
-    EditorState.set_status(state, "Terminal not yet available")
+    NoticeWorkflow.publish(state, "Terminal not yet available")
   end
 
   @spec open_file_in_active_workspace(state(), String.t()) :: state()
@@ -917,7 +938,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp toggle_tab_pin(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     state
     |> EditorState.set_tab_bar(TabBar.toggle_active_pin(tb))
-    |> EditorState.set_status(tab_pin_status(tb))
+    |> NoticeWorkflow.publish(tab_pin_status(tb))
   end
 
   defp toggle_tab_pin(state), do: state
@@ -926,7 +947,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp unpin_active_tab(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     state
     |> EditorState.set_tab_bar(TabBar.unpin_tab(tb, tb.active_id))
-    |> EditorState.set_status("Tab unpinned")
+    |> NoticeWorkflow.publish("Tab unpinned")
   end
 
   defp unpin_active_tab(state), do: state
@@ -976,7 +997,10 @@ defmodule MingaEditor.Commands.BufferManagement do
         %{s | document: Document.new("")}
       end)
 
-      EditorState.set_status(state, "Buffer is persistent — content cleared")
+      NoticeWorkflow.publish(
+        state,
+        "Buffer is persistent — content cleared"
+      )
     else
       buf_name =
         if buf do
@@ -1168,7 +1192,7 @@ defmodule MingaEditor.Commands.BufferManagement do
     state
     |> AgentAccess.update_agent(&AgentState.stop_spinner_timer/1)
     |> AgentAccess.update_agent(&AgentState.reset_cache/1)
-    |> EditorState.set_status(msg)
+    |> NoticeWorkflow.publish(msg)
   end
 
   @spec update_stashed_shell_session_down(state(), pid(), term()) :: {state(), boolean()}
@@ -1249,7 +1273,7 @@ defmodule MingaEditor.Commands.BufferManagement do
           do: "Agent session ended",
           else: "Agent session crashed (SPC a n to restart)"
 
-      EditorState.set_status(state, msg)
+      NoticeWorkflow.publish(state, msg)
     else
       Minga.Log.debug(
         :agent,
@@ -1347,7 +1371,7 @@ defmodule MingaEditor.Commands.BufferManagement do
         do: "Agent session ended",
         else: "Agent session crashed (SPC a n to restart)"
 
-    EditorState.set_status(state, msg)
+    NoticeWorkflow.publish(state, msg)
   end
 
   @spec keep_workspace_after_session_down(
@@ -1397,7 +1421,7 @@ defmodule MingaEditor.Commands.BufferManagement do
         {false, _} -> "Agent session crashed, workspace review needs attention"
       end
 
-    EditorState.set_status(state, msg)
+    NoticeWorkflow.publish(state, msg)
   end
 
   @spec handle_tab_only_session_down(state(), TabBar.t(), pid(), term()) :: state()
@@ -1413,7 +1437,7 @@ defmodule MingaEditor.Commands.BufferManagement do
           do: "Agent session ended",
           else: "Agent session crashed (SPC a n to restart)"
 
-      EditorState.set_status(state, msg)
+      NoticeWorkflow.publish(state, msg)
     else
       Minga.Log.debug(
         :agent,
@@ -1476,7 +1500,7 @@ defmodule MingaEditor.Commands.BufferManagement do
         |> EditorState.set_tab_bar(tb)
         |> AgentAccess.update_agent(&AgentState.stop_spinner_timer/1)
         |> AgentAccess.update_agent(&AgentState.set_error(&1, "Disconnected from #{server_name}"))
-        |> EditorState.set_status("[#{server_name}] disconnected, reconnecting...")
+        |> NoticeWorkflow.publish("[#{server_name}] disconnected, reconnecting...")
 
       _ ->
         handle_stashed_remote_session_disconnected(state, session_pid)
@@ -1526,7 +1550,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp finish_remote_session_disconnected(state) do
     state
     |> AgentAccess.update_agent(&AgentState.stop_spinner_timer/1)
-    |> EditorState.set_status("Remote agent disconnected, reconnecting...")
+    |> NoticeWorkflow.publish("Remote agent disconnected, reconnecting...")
   end
 
   @spec persist_shell_changes(Runtime.t(), [Runtime.persistence_change()]) :: Runtime.t()
@@ -1733,7 +1757,7 @@ defmodule MingaEditor.Commands.BufferManagement do
     if dirty? or quit_would_exit_editor?(state) do
       state
       |> EditorState.set_pending_quit(:quit)
-      |> EditorState.set_status(quit_confirmation_message(dirty?))
+      |> NoticeWorkflow.publish(quit_confirmation_message(dirty?))
     else
       close_tab_or_quit(state)
     end
@@ -1743,7 +1767,7 @@ defmodule MingaEditor.Commands.BufferManagement do
     if dirty_quit_confirmation_needed?(state) do
       state
       |> EditorState.set_pending_quit(:quit_all)
-      |> EditorState.set_status("Modified buffers exist. Really quit? (y/n)")
+      |> NoticeWorkflow.publish("Modified buffers exist. Really quit? (y/n)")
     else
       shutdown_editor(state)
     end
@@ -1868,13 +1892,16 @@ defmodule MingaEditor.Commands.BufferManagement do
 
     case Enum.find_index(visible, &(&1.id == tb.active_id)) do
       nil ->
-        EditorState.set_status(state, "Active tab not found in visible tabs")
+        NoticeWorkflow.publish(
+          state,
+          "Active tab not found in visible tabs"
+        )
 
       idx ->
         right_tabs = Enum.drop(visible, idx + 1)
 
         if right_tabs == [] do
-          EditorState.set_status(state, "No tabs to the right")
+          NoticeWorkflow.publish(state, "No tabs to the right")
         else
           tb = remove_tabs(tb, right_tabs)
           Minga.Log.info(:editor, "Closed tabs to the right")
@@ -2097,14 +2124,17 @@ defmodule MingaEditor.Commands.BufferManagement do
     target = Path.expand(path)
 
     if not overwrite and File.exists?(target) and Buffer.file_path(buf) != target do
-      EditorState.set_status(state, "File exists: #{Path.basename(target)} (use :w! to override)")
+      NoticeWorkflow.publish(
+        state,
+        "File exists: #{Path.basename(target)} (use :w! to override)"
+      )
     else
       write_buffer_as(state, buf, target)
     end
   end
 
   defp save_buffer_as(state, _path, _opts) do
-    EditorState.set_status(state, "No active buffer")
+    NoticeWorkflow.publish(state, "No active buffer")
   end
 
   @spec write_buffer_as(state(), pid(), String.t()) :: state()
@@ -2117,10 +2147,13 @@ defmodule MingaEditor.Commands.BufferManagement do
         state
         |> MingaEditor.BufferActivation.refresh_presentation()
         |> setup_highlight_or_defer()
-        |> EditorState.set_status("Wrote #{Path.basename(target)}")
+        |> NoticeWorkflow.publish("Wrote #{Path.basename(target)}")
 
       {:error, reason} ->
-        EditorState.set_status(state, "Save failed: #{inspect(reason)}")
+        NoticeWorkflow.publish(
+          state,
+          "Save failed: #{inspect(reason)}"
+        )
     end
   end
 
@@ -2535,7 +2568,10 @@ defmodule MingaEditor.Commands.BufferManagement do
     {start_line, end_line} = resolve_range(range, buf, total_lines)
 
     if start_line < 0 or end_line >= total_lines or start_line > end_line do
-      EditorState.set_status(state, "Invalid range: #{start_line + 1},#{end_line + 1}")
+      NoticeWorkflow.publish(
+        state,
+        "Invalid range: #{start_line + 1},#{end_line + 1}"
+      )
     else
       content = Buffer.content(buf)
       lines = String.split(content, "\n")
@@ -2544,7 +2580,11 @@ defmodule MingaEditor.Commands.BufferManagement do
       new_content = Enum.join(sorted_lines, "\n")
 
       Buffer.replace_content(buf, new_content)
-      EditorState.set_status(state, "Sorted lines #{start_line + 1}-#{end_line + 1}")
+
+      NoticeWorkflow.publish(
+        state,
+        "Sorted lines #{start_line + 1}-#{end_line + 1}"
+      )
     end
   end
 
@@ -2611,10 +2651,13 @@ defmodule MingaEditor.Commands.BufferManagement do
           end
 
         Buffer.insert_text(buf, content_to_insert)
-        EditorState.set_status(state, "Read #{expanded_path}")
+        NoticeWorkflow.publish(state, "Read #{expanded_path}")
 
       {:error, reason} ->
-        EditorState.set_status(state, "Failed to read #{filename}: #{inspect(reason)}")
+        NoticeWorkflow.publish(
+          state,
+          "Failed to read #{filename}: #{inspect(reason)}"
+        )
     end
   end
 
@@ -2626,7 +2669,10 @@ defmodule MingaEditor.Commands.BufferManagement do
 
     case Minga.CommandOutput.buffer("*shell*") do
       nil ->
-        EditorState.set_status(state, "Failed to create output buffer")
+        NoticeWorkflow.publish(
+          state,
+          "Failed to create output buffer"
+        )
 
       buffer_pid ->
         Commands.add_buffer(state, buffer_pid)
@@ -2636,12 +2682,21 @@ defmodule MingaEditor.Commands.BufferManagement do
   @spec handle_file_changed_on_save(state(), GenServer.server()) :: state()
   defp handle_file_changed_on_save(state, buf) do
     case Buffer.storage(buf) do
-      {:remote, node, _base_path} -> handle_remote_file_changed_on_save(state, buf, node)
-      _ -> EditorState.set_status(state, "WARNING: File changed on disk. Use :w! to force save.")
+      {:remote, node, _base_path} ->
+        handle_remote_file_changed_on_save(state, buf, node)
+
+      _ ->
+        NoticeWorkflow.publish(
+          state,
+          "WARNING: File changed on disk. Use :w! to force save."
+        )
     end
   catch
     :exit, _reason ->
-      EditorState.set_status(state, "WARNING: File changed on disk. Use :w! to force save.")
+      NoticeWorkflow.publish(
+        state,
+        "WARNING: File changed on disk. Use :w! to force save."
+      )
   end
 
   @spec handle_remote_file_changed_on_save(state(), GenServer.server(), node()) :: state()
@@ -2651,7 +2706,7 @@ defmodule MingaEditor.Commands.BufferManagement do
     case read_remote_conflict_content(remote_node, path) do
       {:ok, content} ->
         state
-        |> EditorState.set_status(
+        |> NoticeWorkflow.publish(
           "File changed on server since you opened it. Reload first, keep editing, show diff, or force save."
         )
         |> PickerUI.open(MingaEditor.UI.Picker.RemoteFileConflictSource, %{
@@ -2661,14 +2716,14 @@ defmodule MingaEditor.Commands.BufferManagement do
         })
 
       {:error, reason} ->
-        EditorState.set_status(
+        NoticeWorkflow.publish(
           state,
           "File changed on server since you opened it. Reload first, or force save. Could not load remote version: #{inspect(reason)}"
         )
     end
   catch
     :exit, reason ->
-      EditorState.set_status(
+      NoticeWorkflow.publish(
         state,
         "File changed on server since you opened it. Reload first, or force save. Could not inspect remote conflict: #{inspect(reason)}"
       )
@@ -2705,7 +2760,10 @@ defmodule MingaEditor.Commands.BufferManagement do
 
     case matching_lines do
       [] ->
-        EditorState.set_status(state, "Pattern not found: #{pattern}")
+        NoticeWorkflow.publish(
+          state,
+          "Pattern not found: #{pattern}"
+        )
 
       matches ->
         Enum.reduce(matches, state, fn {_line_content, idx}, acc_state ->
@@ -2724,12 +2782,18 @@ defmodule MingaEditor.Commands.BufferManagement do
     {start_line, end_line} = resolve_range(range, buf, total_lines)
 
     if start_line < 0 or end_line >= total_lines or start_line > end_line do
-      EditorState.set_status(state, "Invalid range: #{start_line + 1},#{end_line + 1}")
+      NoticeWorkflow.publish(
+        state,
+        "Invalid range: #{start_line + 1},#{end_line + 1}"
+      )
     else
       state
       |> feed_keys_on_range(buf, start_line, end_line, keys)
       |> then(fn s ->
-        EditorState.set_status(s, "Normal executed on #{start_line + 1}-#{end_line + 1}")
+        NoticeWorkflow.publish(
+          s,
+          "Normal executed on #{start_line + 1}-#{end_line + 1}"
+        )
       end)
     end
   end

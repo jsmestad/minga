@@ -12,6 +12,9 @@ defmodule MingaEditor.CompletionHandling do
   alias Minga.Config
   alias Minga.Editing.Completion
   alias MingaEditor.CompletionTrigger
+  alias MingaEditor.Shell.Traditional.ModalWorkflow
+  alias MingaEditor.Shell.Traditional.SignatureHelpWorkflow
+  alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.SignatureHelp
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.ModalOverlay
@@ -28,8 +31,8 @@ defmodule MingaEditor.CompletionHandling do
   item doesn't already have documentation and the server supports resolve.
   """
   @spec maybe_resolve_selected(EditorState.t()) :: EditorState.t()
-  def maybe_resolve_selected(state) do
-    case ModalOverlay.completion(state) do
+  def maybe_resolve_selected(%{shell_runtime: %{state: %ShellState{}}} = state) do
+    case ModalWorkflow.completion(state) do
       nil ->
         state
 
@@ -37,6 +40,8 @@ defmodule MingaEditor.CompletionHandling do
         do_maybe_resolve_selected(state, completion)
     end
   end
+
+  def maybe_resolve_selected(state), do: state
 
   @spec do_maybe_resolve_selected(EditorState.t(), Completion.t()) :: EditorState.t()
   defp do_maybe_resolve_selected(state, completion) do
@@ -58,7 +63,9 @@ defmodule MingaEditor.CompletionHandling do
           Process.send_after(self(), {:completion_resolve, selected_idx}, @resolve_debounce_ms)
         end
 
-      ModalOverlay.update_completion(state, fn _ -> %{completion | resolve_timer: timer} end)
+      ModalWorkflow.update_completion(state, fn _ ->
+        %{completion | resolve_timer: timer}
+      end)
     end
   end
 
@@ -68,12 +75,14 @@ defmodule MingaEditor.CompletionHandling do
   Called from MingaEditor.handle_info({:completion_resolve, index}).
   """
   @spec flush_resolve(EditorState.t(), non_neg_integer()) :: EditorState.t()
-  def flush_resolve(state, index) do
-    case ModalOverlay.completion(state) do
+  def flush_resolve(%{shell_runtime: %{state: %ShellState{}}} = state, index) do
+    case ModalWorkflow.completion(state) do
       nil -> state
       completion -> do_flush_resolve(state, completion, index)
     end
   end
+
+  def flush_resolve(state, _index), do: state
 
   @spec do_flush_resolve(EditorState.t(), Completion.t(), non_neg_integer()) :: EditorState.t()
   defp do_flush_resolve(%{workspace: %{buffers: %{active: buf}}} = state, completion, index) do
@@ -104,21 +113,26 @@ defmodule MingaEditor.CompletionHandling do
           EditorState.t()
   def handle_resolve_response(state, {:error, _error}), do: state
 
-  def handle_resolve_response(state, {:ok, resolved}) do
-    case ModalOverlay.completion(state) do
+  def handle_resolve_response(
+        %{shell_runtime: %{state: %ShellState{}}} = state,
+        {:ok, resolved}
+      ) do
+    case ModalWorkflow.completion(state) do
       nil ->
         state
 
       _completion ->
         doc_text = extract_resolve_documentation(resolved)
 
-        ModalOverlay.update_completion(state, fn completion ->
+        ModalWorkflow.update_completion(state, fn completion ->
           completion
           |> Completion.update_selected_documentation(doc_text)
           |> Map.put(:last_resolved_index, completion.selected)
         end)
     end
   end
+
+  def handle_resolve_response(state, {:ok, _resolved}), do: state
 
   @doc """
   Accepts the currently selected completion item.
@@ -149,15 +163,22 @@ defmodule MingaEditor.CompletionHandling do
   """
   @spec maybe_handle(EditorState.t(), boolean(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()
-  def maybe_handle(state, was_inserting, codepoint, modifiers) do
+  def maybe_handle(
+        %{shell_runtime: %{state: %MingaEditor.Shell.Traditional.State{}}} = state,
+        was_inserting,
+        codepoint,
+        modifiers
+      ) do
     if Minga.Editing.inserting?(state) and was_inserting do
       maybe_update(state, codepoint, modifiers)
     else
-      state = dismiss(state)
-      # Dismiss signature help when leaving insert mode
-      EditorState.set_signature_help(state, nil)
+      state
+      |> dismiss()
+      |> SignatureHelpWorkflow.dismiss()
     end
   end
+
+  def maybe_handle(state, _was_inserting, _codepoint, _modifiers), do: state
 
   @doc """
   Dismisses the active completion popup and resets trigger state.
@@ -167,11 +188,11 @@ defmodule MingaEditor.CompletionHandling do
   displace the picker / prompt / etc.
   """
   @spec dismiss(EditorState.t()) :: EditorState.t()
-  def dismiss(state) do
+  def dismiss(%{shell_runtime: %{state: %ShellState{}}} = state) do
     if ModalOverlay.match(state.shell_runtime.state.modal, :completion) do
       # Cancel any pending resolve timer and dismiss the trigger to cancel
       # debounce timers and forget pending refs before the modal closes.
-      case ModalOverlay.completion(state) do
+      case ModalWorkflow.completion(state) do
         %Completion{resolve_timer: timer} when is_reference(timer) ->
           Process.cancel_timer(timer)
 
@@ -179,12 +200,16 @@ defmodule MingaEditor.CompletionHandling do
           :ok
       end
 
-      _ = CompletionTrigger.dismiss(ModalOverlay.completion_trigger(state))
-      ModalOverlay.dismiss(state)
+      _ =
+        CompletionTrigger.dismiss(ModalWorkflow.completion_trigger(state))
+
+      ModalWorkflow.dismiss(state)
     else
       state
     end
   end
+
+  def dismiss(state), do: state
 
   # ── Private helpers ────────────────────────────────────────────────────────
 
@@ -253,7 +278,7 @@ defmodule MingaEditor.CompletionHandling do
 
   @spec update_filter(EditorState.t(), pid()) :: EditorState.t()
   defp update_filter(state, buf) do
-    case ModalOverlay.completion(state) do
+    case ModalWorkflow.completion(state) do
       nil ->
         state
 
@@ -271,7 +296,7 @@ defmodule MingaEditor.CompletionHandling do
     filtered = Completion.filter(completion, prefix)
 
     if Completion.active?(filtered) do
-      ModalOverlay.update_completion(state, fn _ -> filtered end)
+      ModalWorkflow.update_completion(state, fn _ -> filtered end)
     else
       dismiss(state)
     end
@@ -285,9 +310,13 @@ defmodule MingaEditor.CompletionHandling do
 
       char ->
         {new_bridge, _comp} =
-          CompletionTrigger.maybe_trigger(ModalOverlay.completion_trigger(state), char, buf)
+          CompletionTrigger.maybe_trigger(
+            ModalWorkflow.completion_trigger(state),
+            char,
+            buf
+          )
 
-        ModalOverlay.put_completion_trigger(state, new_bridge)
+        ModalWorkflow.put_completion_trigger(state, new_bridge)
     end
   end
 
@@ -394,7 +423,7 @@ defmodule MingaEditor.CompletionHandling do
   @spec maybe_trigger_config_completion(EditorState.t(), pid(), active_config_context()) ::
           EditorState.t()
   defp maybe_trigger_config_completion(state, buf, context) do
-    if ModalOverlay.completion(state) != nil do
+    if ModalWorkflow.completion(state) != nil do
       # Already showing a completion; update_filter handles narrowing.
       state
     else
@@ -431,10 +460,10 @@ defmodule MingaEditor.CompletionHandling do
     payload =
       MingaEditor.State.ModalOverlay.Completion.new(active_tab_id(state),
         completion: completion,
-        trigger: ModalOverlay.completion_trigger(state)
+        trigger: ModalWorkflow.completion_trigger(state)
       )
 
-    ModalOverlay.open(state, :completion, payload)
+    ModalWorkflow.open(state, :completion, payload)
   end
 
   @spec active_tab_id(EditorState.t()) :: term() | nil
@@ -531,22 +560,34 @@ defmodule MingaEditor.CompletionHandling do
   completion items.
   """
   @spec handle_response(EditorState.t(), reference(), term()) :: EditorState.t()
-  def handle_response(%{workspace: %{buffers: %{active: nil}}} = state, _ref, _result), do: state
+  def handle_response(
+        %{
+          shell_runtime: %{state: %ShellState{}},
+          workspace: %{buffers: %{active: nil}}
+        } = state,
+        _ref,
+        _result
+      ),
+      do: state
 
-  def handle_response(state, ref, result) do
+  def handle_response(%{shell_runtime: %{state: %ShellState{}}} = state, ref, result) do
     buffer_pid = state.workspace.buffers.active
 
     {new_bridge, classification} =
       CompletionTrigger.classify_response(
-        ModalOverlay.completion_trigger(state),
+        ModalWorkflow.completion_trigger(state),
         ref,
         result,
         buffer_pid
       )
 
-    new_state = ModalOverlay.put_completion_trigger(state, new_bridge)
+    new_state =
+      ModalWorkflow.put_completion_trigger(state, new_bridge)
+
     dispatch_processing(new_state, classification, result)
   end
+
+  def handle_response(state, _ref, _result), do: state
 
   @spec dispatch_processing(EditorState.t(), CompletionTrigger.classification(), term()) ::
           EditorState.t()
@@ -669,8 +710,14 @@ defmodule MingaEditor.CompletionHandling do
           Completion.t() | [Completion.item()] | :failed,
           {non_neg_integer(), non_neg_integer()}
         ) :: EditorState.t()
-  def apply_processed(state, gen, mode, payload, trigger_pos) do
-    trigger = ModalOverlay.completion_trigger(state)
+  def apply_processed(
+        %{shell_runtime: %{state: %ShellState{}}} = state,
+        gen,
+        mode,
+        payload,
+        trigger_pos
+      ) do
+    trigger = ModalWorkflow.completion_trigger(state)
 
     if ModalOverlay.match(state.shell_runtime.state.modal, :completion) and trigger.gen == gen do
       apply_processed_current(state, mode, payload, trigger_pos)
@@ -679,6 +726,8 @@ defmodule MingaEditor.CompletionHandling do
       state
     end
   end
+
+  def apply_processed(state, _gen, _mode, _payload, _trigger_pos), do: state
 
   @spec apply_processed_current(
           EditorState.t(),
@@ -692,7 +741,7 @@ defmodule MingaEditor.CompletionHandling do
     # pending, but keep an already-populated menu (e.g. primary succeeded and a
     # secondary merge failed) intact. A dropped completion self-heals on the
     # next keystroke.
-    case ModalOverlay.completion(state) do
+    case ModalWorkflow.completion(state) do
       nil -> dismiss(state)
       %Completion{} -> state
     end
@@ -705,11 +754,11 @@ defmodule MingaEditor.CompletionHandling do
   end
 
   defp apply_processed_current(state, :primary, %Completion{} = built, _trigger_pos) do
-    case ModalOverlay.completion(state) do
+    case ModalWorkflow.completion(state) do
       nil ->
         # Fast path (single server / primary lands first): just assign the
         # already-sorted, already-filtered menu the Task produced.
-        ModalOverlay.update_completion(state, fn _ -> built end)
+        ModalWorkflow.update_completion(state, fn _ -> built end)
 
       %Completion{} ->
         # A secondary :merge result landed first; union the primary items in so
@@ -730,7 +779,7 @@ defmodule MingaEditor.CompletionHandling do
   defp merge_completion_items(state, [], _trigger_pos), do: state
 
   defp merge_completion_items(state, new_items, trigger_pos) do
-    case ModalOverlay.completion(state) do
+    case ModalWorkflow.completion(state) do
       nil ->
         # No existing completion; create a new one from the merged items
         completion = Completion.new(new_items, trigger_pos)
@@ -753,7 +802,10 @@ defmodule MingaEditor.CompletionHandling do
           )
 
         completion = Completion.filter(completion, prefix)
-        ModalOverlay.update_completion(state, fn _ -> completion end)
+
+        ModalWorkflow.update_completion(state, fn _ ->
+          completion
+        end)
     end
   end
 
@@ -778,13 +830,23 @@ defmodule MingaEditor.CompletionHandling do
           EditorState.t()
   def handle_signature_help_response(state, {:error, _}), do: state
 
-  def handle_signature_help_response(state, {:ok, nil}),
-    do: EditorState.set_signature_help(state, nil)
+  def handle_signature_help_response(
+        %{shell_runtime: %{state: %ShellState{}}} = state,
+        {:ok, nil}
+      ),
+      do: SignatureHelpWorkflow.dismiss(state)
 
-  def handle_signature_help_response(state, {:ok, result}) when is_map(result) do
+  def handle_signature_help_response(
+        %{shell_runtime: %{state: %ShellState{}}} = state,
+        {:ok, result}
+      )
+      when is_map(result) do
     {cursor_row, cursor_col} = approximate_cursor_screen_pos(state)
-    sh = SignatureHelp.from_response(result, cursor_row, cursor_col)
-    EditorState.set_signature_help(state, sh)
+
+    case SignatureHelp.from_response(result, cursor_row, cursor_col) do
+      nil -> SignatureHelpWorkflow.dismiss(state)
+      signature_help -> SignatureHelpWorkflow.show(state, signature_help)
+    end
   end
 
   def handle_signature_help_response(state, _), do: state
@@ -797,7 +859,7 @@ defmodule MingaEditor.CompletionHandling do
     cond do
       # ) always dismisses signature help
       codepoint == ?) ->
-        EditorState.set_signature_help(state, nil)
+        SignatureHelpWorkflow.dismiss(state)
 
       # Check if the character is a server-declared signature trigger
       char != nil and signature_trigger_char?(state, buf, char) ->

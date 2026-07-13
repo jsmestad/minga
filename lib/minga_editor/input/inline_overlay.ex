@@ -103,7 +103,7 @@ defmodule MingaEditor.Input.InlineOverlay do
   """
   @spec submit(state(), struct(), String.t(), spec()) :: state()
   def submit(state, %{prompt: ""}, empty_status, _spec),
-    do: EditorState.set_status(state, empty_status)
+    do: MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, empty_status)
 
   def submit(state, overlay, _empty_status, spec) do
     prompt = spec.state_module.agent_prompt(overlay)

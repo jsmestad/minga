@@ -8,7 +8,6 @@ defmodule MingaEditor.UI.Prompt.WorkspaceRename do
 
   @behaviour MingaEditor.UI.Prompt.Handler
 
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.TabBar
 
@@ -22,14 +21,17 @@ defmodule MingaEditor.UI.Prompt.WorkspaceRename do
     trimmed = String.trim(text)
 
     if trimmed == "" do
-      EditorState.set_status(state, "Workspace name cannot be empty")
+      MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+        state,
+        "Workspace name cannot be empty"
+      )
     else
       ws_id = TabBar.active_workspace_id(tb)
       tb = TabBar.update_workspace(tb, ws_id, &Workspace.rename(&1, trimmed))
 
       state
-      |> EditorState.set_tab_bar(tb)
-      |> EditorState.set_status("Renamed: #{trimmed}")
+      |> MingaEditor.State.set_tab_bar(tb)
+      |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("Renamed: #{trimmed}")
     end
   end
 

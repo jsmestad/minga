@@ -13,6 +13,7 @@ defmodule MingaEditor.Commands.Workspace do
   use MingaEditor.Commands.Provider
 
   alias Minga.Buffer
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias Minga.Project.FileRef
   alias MingaAgent.ProjectView
   alias MingaEditor.Commands.AgentSession
@@ -63,7 +64,10 @@ defmodule MingaEditor.Commands.Workspace do
     workspace = TabBar.active_workspace(tb)
 
     if workspace_closure_requires_review?(workspace) do
-      EditorState.set_status(state, workspace_close_confirmation_copy(workspace))
+      NoticeWorkflow.publish(
+        state,
+        workspace_close_confirmation_copy(workspace)
+      )
     else
       close_active_workspace(state)
     end
@@ -72,7 +76,7 @@ defmodule MingaEditor.Commands.Workspace do
   @doc "Keeps the active workspace open after a draft close prompt."
   @spec workspace_close_keep(state()) :: state()
   def workspace_close_keep(state) do
-    EditorState.set_status(state, "Keeping workspace open")
+    NoticeWorkflow.publish(state, "Keeping workspace open")
   end
 
   @doc "Shows the active workspace draft summary."
@@ -90,17 +94,20 @@ defmodule MingaEditor.Commands.Workspace do
                 TabBar.update_workspace(tb, workspace_id, fn _ -> updated end)
               )
 
-            EditorState.set_status(state, review_status_copy(updated))
+            NoticeWorkflow.publish(
+              state,
+              review_status_copy(updated)
+            )
 
           {:error, reason} ->
-            EditorState.set_status(
+            NoticeWorkflow.publish(
               state,
               "Workspace review transition failed: #{inspect(reason)}"
             )
         end
 
       nil ->
-        EditorState.set_status(state, "No active workspace")
+        NoticeWorkflow.publish(state, "No active workspace")
     end
   end
 
@@ -130,7 +137,10 @@ defmodule MingaEditor.Commands.Workspace do
     case TabBar.get_workspace(tb, workspace_id) do
       %WorkspaceModel{} = workspace ->
         if workspace_session_alive?(workspace) do
-          EditorState.set_status(state, "Stop the agent session before closing this workspace")
+          NoticeWorkflow.publish(
+            state,
+            "Stop the agent session before closing this workspace"
+          )
         else
           case discard_workspace(workspace) do
             {:ok, updated} ->
@@ -143,7 +153,7 @@ defmodule MingaEditor.Commands.Workspace do
               close_discarded_active_workspace(state)
 
             {:error, reason} ->
-              EditorState.set_status(
+              NoticeWorkflow.publish(
                 state,
                 "Workspace review transition failed: #{inspect(reason)}"
               )
@@ -151,7 +161,7 @@ defmodule MingaEditor.Commands.Workspace do
         end
 
       nil ->
-        EditorState.set_status(state, "No active workspace")
+        NoticeWorkflow.publish(state, "No active workspace")
     end
   end
 
@@ -236,12 +246,13 @@ defmodule MingaEditor.Commands.Workspace do
         file_ref: file_ref
       })
     else
-      {:error, message} when is_binary(message) -> EditorState.set_status(state, message)
+      {:error, message} when is_binary(message) ->
+        NoticeWorkflow.publish(state, message)
     end
   end
 
   defp open_workspace_target_picker(state, _operation),
-    do: EditorState.set_status(state, "No workspace tab bar")
+    do: NoticeWorkflow.publish(state, "No workspace tab bar")
 
   @spec active_file_ref(state(), TabBar.t()) :: {:ok, FileRef.t()} | {:error, String.t()}
   defp active_file_ref(%{workspace: %{buffers: %{active: active}}} = state, %TabBar{} = tb) do
@@ -308,7 +319,10 @@ defmodule MingaEditor.Commands.Workspace do
           state()
   defp close_project_view_workspace(state, tb, workspace, workspace_id) do
     if workspace_session_alive?(workspace) do
-      EditorState.set_status(state, "Stop the agent session before closing this workspace")
+      NoticeWorkflow.publish(
+        state,
+        "Stop the agent session before closing this workspace"
+      )
     else
       case project_view_changed_files(workspace) do
         {:ok, []} ->
@@ -351,7 +365,10 @@ defmodule MingaEditor.Commands.Workspace do
           state()
   defp close_standard_workspace(state, tb, workspace, workspace_id) do
     if workspace_session_alive?(workspace) and not WorkspaceModel.remote?(workspace) do
-      EditorState.set_status(state, "Stop the agent session before closing this workspace")
+      NoticeWorkflow.publish(
+        state,
+        "Stop the agent session before closing this workspace"
+      )
     else
       stop_workspace_session(workspace)
       remove_workspace_and_sync_agent_ui(state, tb, workspace_id)
@@ -374,7 +391,10 @@ defmodule MingaEditor.Commands.Workspace do
     case TabBar.get_workspace(tb, workspace_id) do
       %WorkspaceModel{} = workspace ->
         if workspace_session_alive?(workspace) do
-          EditorState.set_status(state, "Stop the agent session before closing this workspace")
+          NoticeWorkflow.publish(
+            state,
+            "Stop the agent session before closing this workspace"
+          )
         else
           case WorkspaceModel.close_project_view(workspace) do
             :ok ->
@@ -422,7 +442,7 @@ defmodule MingaEditor.Commands.Workspace do
     |> EditorState.set_tab_bar(
       TabBar.update_workspace(tb, workspace.id, fn _ -> updated_workspace end)
     )
-    |> EditorState.set_status("Workspace close failed: #{inspect(reason)}")
+    |> NoticeWorkflow.publish("Workspace close failed: #{inspect(reason)}")
   end
 
   @spec workspace_closure_requires_review?(WorkspaceModel.t() | nil) :: boolean()
@@ -464,7 +484,7 @@ defmodule MingaEditor.Commands.Workspace do
   end
 
   defp apply_workspace_review_update(state, _tb, _workspace_id, nil, _fun) do
-    EditorState.set_status(state, "No active workspace")
+    NoticeWorkflow.publish(state, "No active workspace")
   end
 
   @spec put_workspace_review_result(
@@ -478,7 +498,10 @@ defmodule MingaEditor.Commands.Workspace do
   end
 
   defp put_workspace_review_result({:error, reason}, state, _tb, _workspace_id) do
-    EditorState.set_status(state, "Workspace review transition failed: #{inspect(reason)}")
+    NoticeWorkflow.publish(
+      state,
+      "Workspace review transition failed: #{inspect(reason)}"
+    )
   end
 
   @spec review_drafts_workspace(WorkspaceModel.t()) ::

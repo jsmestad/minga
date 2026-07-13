@@ -9,7 +9,9 @@ defmodule MingaEditor.Extension.EditorAPITest do
   test "set_status/2 sets a transient status message" do
     state = base_state(content: "hello world")
 
-    assert state |> EditorAPI.set_status("Test status message") |> EditorState.status_msg() ==
+    assert state
+           |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("Test status message")
+           |> MingaEditor.Shell.Traditional.NoticeWorkflow.message() ==
              "Test status message"
   end
 

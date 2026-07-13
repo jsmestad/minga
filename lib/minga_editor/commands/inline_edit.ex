@@ -46,20 +46,33 @@ defmodule MingaEditor.Commands.InlineEdit do
 
     state
     |> EditorState.set_inline_edits(edits)
-    |> EditorState.set_status("Inline edit: type rewrite instruction")
+    |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      "Inline edit: type rewrite instruction"
+    )
   end
 
-  def open(state), do: EditorState.set_status(state, "Inline edit requires a visual selection")
+  def open(state),
+    do:
+      MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+        state,
+        "Inline edit requires a visual selection"
+      )
 
   @doc "Accepts a proposed inline edit into the buffer."
   @spec accept(state(), InlineEdit.t()) :: state()
   def accept(state, %InlineEdit{status: status}) when status != :proposed do
-    EditorState.set_status(state, "Wait for an inline edit proposal first")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      "Wait for an inline edit proposal first"
+    )
   end
 
   def accept(state, %InlineEdit{} = edit) do
     if Buffer.read_only?(edit.buffer_pid) do
-      EditorState.set_status(state, "Inline edit failed: :read_only")
+      MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+        state,
+        "Inline edit failed: :read_only"
+      )
     else
       apply_accepted_edit(state, edit)
     end
@@ -82,7 +95,7 @@ defmodule MingaEditor.Commands.InlineEdit do
     state
     |> EditorState.set_inline_edits(edits)
     |> EditorState.transition_mode(:normal)
-    |> EditorState.set_status("Inline edit accepted")
+    |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("Inline edit accepted")
   end
 
   @doc "Dismisses an inline edit without mutating the buffer."

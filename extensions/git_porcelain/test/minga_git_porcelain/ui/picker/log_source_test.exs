@@ -3,7 +3,6 @@ defmodule MingaGitPorcelain.UI.Picker.GitLogSourceTest do
 
   use ExUnit.Case, async: true
 
-  alias MingaEditor.State, as: EditorState
   alias Minga.Buffer
   alias Minga.Git
   alias Minga.Git.Stub, as: GitStub
@@ -12,7 +11,6 @@ defmodule MingaGitPorcelain.UI.Picker.GitLogSourceTest do
   alias MingaEditor.State
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Picker, as: PickerState
-  alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.UI.Picker
   alias MingaEditor.UI.Picker.Context
   alias MingaGitPorcelain.UI.Picker.GitLogFileSource
@@ -77,7 +75,9 @@ defmodule MingaGitPorcelain.UI.Picker.GitLogSourceTest do
     state = PickerUI.open(state, GitLogSource, %{git_root: root})
 
     state = Enum.reduce(1..50, state, fn _, acc -> PickerUI.handle_key(acc, 57_353, 0) end)
-    {:picker, %{picker_ui: picker_ui}} = EditorState.modal(state)
+
+    {:picker, %{picker_ui: picker_ui}} =
+      MingaEditor.Shell.Runtime.state(state.shell_runtime).modal
 
     assert picker_ui.source == GitLogSource
     assert picker_ui.context == %{git_root: root}
@@ -85,7 +85,9 @@ defmodule MingaGitPorcelain.UI.Picker.GitLogSourceTest do
     assert Picker.selected_item(picker_ui.picker).label == "Load more..."
 
     state = PickerUI.handle_key(state, 13, 0)
-    {:picker, %{picker_ui: picker_ui}} = EditorState.modal(state)
+
+    {:picker, %{picker_ui: picker_ui}} =
+      MingaEditor.Shell.Runtime.state(state.shell_runtime).modal
 
     assert picker_ui.source == GitLogSource
     assert picker_ui.context.source == GitLogSource
@@ -189,14 +191,18 @@ defmodule MingaGitPorcelain.UI.Picker.GitLogSourceTest do
     state = PickerUI.open(state, GitLogFileSource)
 
     state = Enum.reduce(1..50, state, fn _, acc -> PickerUI.handle_key(acc, 57_353, 0) end)
-    {:picker, %{picker_ui: picker_ui}} = EditorState.modal(state)
+
+    {:picker, %{picker_ui: picker_ui}} =
+      MingaEditor.Shell.Runtime.state(state.shell_runtime).modal
 
     assert picker_ui.source == GitLogFileSource
     assert Picker.count(picker_ui.picker) == 51
     assert Picker.selected_item(picker_ui.picker).label == "Load more..."
 
     state = PickerUI.handle_key(state, 13, 0)
-    {:picker, %{picker_ui: picker_ui}} = EditorState.modal(state)
+
+    {:picker, %{picker_ui: picker_ui}} =
+      MingaEditor.Shell.Runtime.state(state.shell_runtime).modal
 
     assert picker_ui.source == GitLogFileSource
     assert picker_ui.context.source == GitLogFileSource
@@ -223,8 +229,7 @@ defmodule MingaGitPorcelain.UI.Picker.GitLogSourceTest do
       workspace: %SessionState{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: active_buf, list: [active_buf], active_index: 0}
-      },
-      shell_state: %ShellState{}
+      }
     }
   end
 
