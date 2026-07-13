@@ -65,7 +65,9 @@ defmodule MingaEditor.Input.BottomPanel do
   defp close_panel(state, panel) do
     state
     |> EditorState.set_bottom_panel(BottomPanel.hide(panel))
-    |> EditorState.set_keymap_scope(EditorState.scope_for_active_window(state))
+    |> EditorState.set_keymap_scope(
+      MingaEditor.Session.State.scope_for_active_window(state.workspace)
+    )
   end
 
   @impl true
@@ -95,7 +97,9 @@ defmodule MingaEditor.Input.BottomPanel do
       state
       |> EditorState.set_bottom_panel(panel)
       |> EditorState.update_file_tree(&FileTreeState.unfocus/1)
-      |> EditorState.set_keymap_scope(EditorState.scope_for_active_window(state))
+      |> EditorState.set_keymap_scope(
+        MingaEditor.Session.State.scope_for_active_window(state.workspace)
+      )
 
     {:handled, state}
   end

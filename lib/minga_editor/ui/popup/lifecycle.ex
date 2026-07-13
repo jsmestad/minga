@@ -241,7 +241,7 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
   defp update_popup_windows(state, windows, next_id, true) do
     state
     |> EditorState.set_windows(windows)
-    |> EditorState.focus_window(next_id)
+    |> MingaEditor.WindowFocus.focus(next_id)
   end
 
   defp update_popup_windows(state, windows, _next_id, false) do
@@ -250,32 +250,45 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
 
   @spec do_close(state(), Window.id(), PopupActive.t()) :: state()
   defp do_close(state, window_id, %PopupActive{} = meta) do
-    ws = state.workspace.windows
+    focused? = state.workspace.windows.active == window_id
+    state = maybe_restore_popup_focus(state, window_id, meta, focused?)
+    finish_popup_close(state, window_id, meta, focused?)
+  end
 
-    # If the popup is focused, switch focus to the previously active window
-    state =
-      if ws.active == window_id do
-        # Restore focus to the previous active window, or find any non-popup window
-        restore_id =
-          case Windows.fetch(ws, meta.previous_active) do
-            {:ok, _window} -> meta.previous_active
-            :error -> find_non_popup_window(ws, window_id)
-          end
+  @spec maybe_restore_popup_focus(state(), Window.id(), PopupActive.t(), boolean()) :: state()
+  defp maybe_restore_popup_focus(state, window_id, meta, true) do
+    windows = state.workspace.windows
 
-        EditorState.focus_window(state, restore_id)
-      else
-        state
+    restore_id =
+      case Windows.fetch(windows, meta.previous_active) do
+        {:ok, _window} -> meta.previous_active
+        :error -> find_non_popup_window(windows, window_id)
       end
 
-    ws = state.workspace.windows
+    MingaEditor.WindowFocus.restore_focus(state, restore_id)
+  end
 
+  defp maybe_restore_popup_focus(state, _window_id, _meta, false), do: state
+
+  @spec finish_popup_close(state(), Window.id(), PopupActive.t(), boolean()) :: state()
+  defp finish_popup_close(
+         %{workspace: %{windows: %{active: active}}} = state,
+         window_id,
+         _meta,
+         true
+       )
+       when active == window_id,
+       do: state
+
+  defp finish_popup_close(state, window_id, meta, _focused?) do
     # Remove just this popup's window from the current tree (like
     # delete-window in Emacs). We used to restore a full tree snapshot,
     # but that clobbers any other popups that were opened after this one.
-    new_windows = remove_popup_window(ws, window_id, meta)
-    state = EditorState.set_windows(state, new_windows)
+    new_windows = remove_popup_window(state.workspace.windows, window_id, meta)
 
-    Layout.invalidate(state)
+    state
+    |> EditorState.set_windows(new_windows)
+    |> Layout.invalidate()
   end
 
   @spec split_direction(Rule.side()) :: WindowTree.direction()

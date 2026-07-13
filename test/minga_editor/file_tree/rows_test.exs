@@ -270,7 +270,7 @@ defmodule MingaEditor.FileTree.RowsTest do
 
       assert active_row_name(state) == "alpha.ex"
 
-      switched_state = EditorState.switch_buffer(state, 1)
+      switched_state = MingaEditor.BufferActivation.activate(state, 1)
 
       assert active_row_name(switched_state) == "beta.ex"
     end

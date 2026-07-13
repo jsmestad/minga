@@ -70,7 +70,7 @@ defmodule MingaEditor.UI.Picker.RecentFileSource do
         end
 
       idx ->
-        EditorState.switch_buffer(state, idx)
+        MingaEditor.BufferActivation.activate(state, idx)
     end
   end
 

@@ -182,7 +182,7 @@ defmodule MingaEditor.UI.Picker.TodoSearchSource do
 
   @spec jump_to_buffer(term(), non_neg_integer(), non_neg_integer(), non_neg_integer()) :: term()
   defp jump_to_buffer(state, buf_idx, line, col) do
-    new_state = EditorState.switch_buffer(state, buf_idx)
+    new_state = MingaEditor.BufferActivation.activate(state, buf_idx)
     pid = Enum.at(state.workspace.buffers.list, buf_idx)
     Buffer.move_to(pid, {line, col})
     new_state

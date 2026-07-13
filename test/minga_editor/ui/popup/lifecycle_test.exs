@@ -179,6 +179,62 @@ defmodule MingaEditor.UI.Popup.LifecycleTest do
       assert restored.workspace.buffers.active == state.workspace.buffers.active
     end
 
+    test "focused popup restores launchpad state and scope", %{
+      state: state,
+      popup_buf: popup_buf,
+      table: table
+    } do
+      workspace = MingaEditor.Session.State.enter_empty_state(state.workspace)
+      state = EditorState.set_workspace(state, workspace)
+      PopupRegistry.register(Rule.new("*Warnings*", focus: true), table)
+
+      {:ok, with_popup} = Lifecycle.open_popup(state, "*Warnings*", popup_buf, registry: table)
+      assert with_popup.workspace.launchpad != nil
+
+      restored = Lifecycle.close_popup(with_popup, 2)
+
+      assert restored.workspace.windows.active == 1
+      assert restored.workspace.buffers.active == nil
+      assert restored.workspace.keymap_scope == :editor
+      assert restored.workspace.launchpad == workspace.launchpad
+      assert Map.fetch!(restored.workspace.windows.map, 1).content == {:empty, :semantic}
+    end
+
+    test "focused popup closes even when its outgoing buffer process has died", %{
+      state: state,
+      popup_buf: popup_buf,
+      table: table
+    } do
+      PopupRegistry.register(Rule.new("*Warnings*", focus: true), table)
+      {:ok, with_popup} = Lifecycle.open_popup(state, "*Warnings*", popup_buf, registry: table)
+      monitor = Process.monitor(popup_buf)
+      Process.exit(popup_buf, :kill)
+      assert_receive {:DOWN, ^monitor, :process, ^popup_buf, :killed}
+
+      restored = Lifecycle.close_popup(with_popup, 2)
+
+      assert restored.workspace.windows.active == 1
+      refute Map.has_key?(restored.workspace.windows.map, 2)
+    end
+
+    test "focused popup stays open when its restore target process has died", %{
+      state: state,
+      main_buf: main_buf,
+      popup_buf: popup_buf,
+      table: table
+    } do
+      PopupRegistry.register(Rule.new("*Warnings*", focus: true), table)
+      {:ok, with_popup} = Lifecycle.open_popup(state, "*Warnings*", popup_buf, registry: table)
+      monitor = Process.monitor(main_buf)
+      Process.exit(main_buf, :kill)
+      assert_receive {:DOWN, ^monitor, :process, ^main_buf, :killed}
+
+      unchanged = Lifecycle.close_popup(with_popup, 2)
+
+      assert unchanged.workspace.windows.active == 2
+      assert Map.has_key?(unchanged.workspace.windows.map, 2)
+    end
+
     test "falls back to a remaining editor window when previous_active is gone", %{
       state: state,
       popup_buf: popup_buf

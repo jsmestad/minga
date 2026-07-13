@@ -10,7 +10,6 @@ defmodule MingaEditor.Commands.Tutor do
   alias Minga.Buffer.Document
   alias MingaEditor.Commands
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.Buffers
 
   @type state :: EditorState.t()
 
@@ -83,7 +82,7 @@ defmodule MingaEditor.Commands.Tutor do
 
     state =
       if idx do
-        EditorState.update_buffers(state, &Buffers.switch_to(&1, idx))
+        MingaEditor.BufferActivation.activate(state, idx)
       else
         Commands.add_buffer(state, buffer)
       end

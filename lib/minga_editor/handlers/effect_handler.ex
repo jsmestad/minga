@@ -114,6 +114,30 @@ defmodule MingaEditor.Handlers.EffectHandler do
     apply_effects(state, rest)
   end
 
+  @doc "Applies effects returned by a shell buffer-activation callback without recursively notifying that callback."
+  @spec apply_buffer_activation_effects(EditorState.t(), [effect()]) :: EditorState.t()
+  def apply_buffer_activation_effects(state, []), do: state
+
+  def apply_buffer_activation_effects(state, [effect | rest]) do
+    state = apply_buffer_activation_effect(state, effect)
+    apply_buffer_activation_effects(state, rest)
+  end
+
+  @spec apply_buffer_activation_effect(EditorState.t(), effect()) :: EditorState.t()
+  defp apply_buffer_activation_effect(state, {:switch_buffer, pid}) when is_pid(pid) do
+    case Enum.find_index(state.workspace.buffers.list, &(&1 == pid)) do
+      nil ->
+        state
+
+      idx ->
+        state
+        |> MingaEditor.BufferActivation.activate(idx, notify_shell?: false)
+        |> MingaEditor.reset_nav_flash_tracking()
+    end
+  end
+
+  defp apply_buffer_activation_effect(state, effect), do: apply_effect(state, effect)
+
   @spec compact_session_safely(pid()) :: {:ok, String.t()} | {:error, term()}
   defp compact_session_safely(session_pid) do
     MingaAgent.Session.compact(session_pid)
@@ -134,8 +158,12 @@ defmodule MingaEditor.Handlers.EffectHandler do
 
   defp apply_effect(state, {:switch_buffer, pid}) when is_pid(pid) do
     case Enum.find_index(state.workspace.buffers.list, &(&1 == pid)) do
-      nil -> state
-      idx -> EditorState.switch_buffer(state, idx) |> MingaEditor.reset_nav_flash_tracking()
+      nil ->
+        state
+
+      idx ->
+        MingaEditor.BufferActivation.activate(state, idx)
+        |> MingaEditor.reset_nav_flash_tracking()
     end
   end
 

@@ -56,7 +56,7 @@ defmodule MingaEditor.UI.Picker.TodoSearchSourceTest do
       state = base_state(content: "scratch")
       path_buffer = start_supervised!({BufferProcess, file_path: path})
       state = EditorState.add_buffer(state, path_buffer)
-      state = EditorState.switch_buffer(state, 0)
+      state = MingaEditor.BufferActivation.activate(state, 0)
 
       item = %Item{id: %{path: path, line: 3}, label: "todo"}
       new_state = TodoSearchSource.on_select(item, state)

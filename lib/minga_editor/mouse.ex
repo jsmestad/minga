@@ -1439,7 +1439,7 @@ defmodule MingaEditor.Mouse do
     screen = Layout.get(state).editor_area
 
     case WindowTree.window_at(state.workspace.windows.tree, screen, row, col) do
-      {:ok, id, _rect} -> EditorState.focus_window(state, id)
+      {:ok, id, _rect} -> MingaEditor.WindowFocus.focus(state, id)
       :error -> state
     end
   end

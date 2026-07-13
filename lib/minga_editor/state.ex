@@ -58,7 +58,6 @@ defmodule MingaEditor.State do
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Window
-  alias MingaEditor.Window.Content
   alias MingaEditor.WindowTree
   alias MingaEditor.Frontend.Capabilities
   alias Minga.Log
@@ -1647,17 +1646,6 @@ defmodule MingaEditor.State do
 
   # ── Cross-cutting window + buffer helpers ─────────────────────────────────
 
-  @doc """
-  Syncs the active window's buffer reference with `state.workspace.buffers.active`.
-
-  Call this after any operation that changes `state.workspace.buffers.active` to keep the
-  window tree consistent. No-op when windows aren't initialized.
-  """
-  @spec sync_active_window_buffer(t()) :: t()
-  def sync_active_window_buffer(%__MODULE__{} = state) do
-    update_workspace(state, &SessionState.sync_active_window_buffer/1)
-  end
-
   @doc "Returns the set of buffer pids known to the live workspace and tab snapshots."
   @spec known_open_buffer_pids(t()) :: [pid()]
   def known_open_buffer_pids(%__MODULE__{} = state) do
@@ -1863,44 +1851,11 @@ defmodule MingaEditor.State do
   end
 
   @doc """
-  Switches to the buffer at `idx`, making it active for the current window.
-
-  Centralizes `Buffers.switch_to` + window sync so callers don't need to
-  remember to call `sync_active_window_buffer/1`. Shell-specific
-  presentation logic (tab label updates, etc.) is dispatched through
-  `shell.on_buffer_switched/2`.
-  """
-  @spec switch_buffer(t(), non_neg_integer()) :: t()
-  def switch_buffer(%__MODULE__{} = state, idx) do
-    state =
-      state
-      |> update_workspace(&SessionState.switch_buffer(&1, idx))
-      |> MingaEditor.Shell.Workflow.ensure_available()
-
-    case state.buffer_add_context do
-      :preview ->
-        %{state | buffer_add_context: :open}
-
-      :open ->
-        {runtime, workspace, shell_effects} =
-          ShellRuntime.route_buffer_switched(state.shell_runtime, state.workspace)
-
-        state =
-          state
-          |> apply_shell_runtime_transition(runtime)
-          |> set_workspace(workspace)
-
-        apply_buffer_effects(state, shell_effects)
-    end
-  end
-
-  @doc """
   Enters the zero-buffers launchpad (#2689).
 
   Removes all file tabs from the tab bar (agent tabs stay), clears the
   buffer list, and switches the active window to the empty-state surface.
-  The reverse transition happens automatically in
-  `sync_active_window_buffer/1` when any buffer becomes active.
+  `MingaEditor.Session.State.activate_buffer/2` performs the reverse transition when a buffer becomes active.
   """
   @spec enter_empty_state(t()) :: t()
   def enter_empty_state(%__MODULE__{} = state) do
@@ -1924,157 +1879,6 @@ defmodule MingaEditor.State do
   end
 
   defp clear_file_tabs(%__MODULE__{} = state), do: state
-
-  @doc """
-  Re-syncs shell presentation (tab label, file ref, tab context) with the
-  active buffer.
-
-  Use when the active buffer's identity changes in place, e.g. save-as
-  retargeting an untitled buffer to a real file, so the tab bar reflects the
-  new name without a buffer switch.
-  """
-  @spec refresh_active_buffer_presentation(t()) :: t()
-  def refresh_active_buffer_presentation(%__MODULE__{} = state) do
-    state = MingaEditor.Shell.Workflow.ensure_available(state)
-
-    {runtime, workspace, shell_effects} =
-      ShellRuntime.route_buffer_switched(state.shell_runtime, state.workspace)
-
-    state
-    |> apply_shell_runtime_transition(runtime)
-    |> set_workspace(workspace)
-    |> apply_buffer_effects(shell_effects)
-  end
-
-  @doc """
-  Snapshots the active buffer's cursor into the active window struct.
-
-  Call this before rendering split views so inactive windows have a fresh
-  cursor position for the active window when it becomes inactive later.
-  """
-  @spec sync_active_window_cursor(t()) :: t()
-  def sync_active_window_cursor(%__MODULE__{workspace: %{buffers: %{active: nil}}} = state),
-    do: state
-
-  def sync_active_window_cursor(
-        %__MODULE__{
-          workspace:
-            %{windows: %{map: windows, active: id} = ws, buffers: %{active: buf}} = wspace
-        } = state
-      ) do
-    case Map.fetch(windows, id) do
-      {:ok, %{buffer: ^buf} = window} ->
-        cursor = Buffer.cursor(buf)
-
-        %{
-          state
-          | workspace: %{
-              wspace
-              | windows: %{ws | map: Map.put(windows, id, %{window | cursor: cursor})}
-            }
-        }
-
-      {:ok, _window} ->
-        state
-
-      :error ->
-        state
-    end
-  catch
-    :exit, _ -> state
-  end
-
-  @doc """
-  Switches focus to the given window, saving the current cursor to the
-  outgoing window and restoring the target window's stored cursor.
-
-  No-op if `target_id` is already the active window or windows aren't set up.
-  """
-  @spec focus_window(t(), Window.id()) :: t()
-  def focus_window(%__MODULE__{workspace: %{windows: %{active: active}}} = state, target_id)
-      when target_id == active do
-    set_bottom_panel(state, BottomPanel.blur(bottom_panel(state)))
-  end
-
-  def focus_window(
-        %__MODULE__{
-          workspace: %{windows: %{map: windows, active: old_id} = ws, buffers: buffers} = wspace
-        } = state,
-        target_id
-      ) do
-    case {Map.fetch(windows, old_id), Map.fetch(windows, target_id)} do
-      {{:ok, old_win}, {:ok, target_win}} ->
-        windows = Map.put(windows, old_id, save_window_cursor(old_win, buffers.active))
-
-        restore_window_cursor(target_win)
-
-        # Derive keymap_scope from the target window's content type.
-        # Agent chat windows use :agent scope; buffer windows use the
-        # current scope (preserving :file_tree if the tree is focused).
-        scope = scope_for_content(target_win.content, wspace.keymap_scope)
-
-        state = set_bottom_panel(state, BottomPanel.blur(bottom_panel(state)))
-
-        %{
-          state
-          | workspace: %{
-              wspace
-              | windows: %{ws | map: windows, active: target_id},
-                buffers: %{buffers | active: target_win.buffer},
-                keymap_scope: scope,
-                # Focusing another window can swap the active buffer; drop any
-                # standing Cmd/Ctrl-hover link so it never draws against the new
-                # buffer's coordinates before the next motion (#2630).
-                cmd_hover_link: nil,
-                cmd_hover_cell: nil
-            }
-        }
-
-      _ ->
-        state
-    end
-  catch
-    :exit, _ -> state
-  end
-
-  @spec save_window_cursor(Window.t(), pid() | nil) :: Window.t()
-  defp save_window_cursor(%Window{content: {:buffer, _pid}} = window, active_buffer)
-       when is_pid(active_buffer) do
-    %{window | cursor: Buffer.cursor(active_buffer)}
-  end
-
-  defp save_window_cursor(%Window{} = window, _active_buffer), do: window
-
-  @spec restore_window_cursor(Window.t()) :: :ok
-  defp restore_window_cursor(%Window{content: {:buffer, pid}, cursor: cursor}) when is_pid(pid) do
-    Buffer.move_to(pid, cursor)
-    :ok
-  end
-
-  defp restore_window_cursor(%Window{}), do: :ok
-
-  @doc """
-  Derives the keymap scope from a window's content type.
-
-  Agent chat windows always use `:agent` scope. Buffer windows use
-  `:editor` when coming from `:agent` scope, and preserve the current
-  scope otherwise (e.g., `:file_tree` stays as `:file_tree`).
-  """
-  @spec scope_for_content(Content.t(), Minga.Keymap.Scope.scope_name()) ::
-          Minga.Keymap.Scope.scope_name()
-  def scope_for_content(content, current_scope),
-    do: SessionState.scope_for_content(content, current_scope)
-
-  @doc """
-  Returns the appropriate keymap scope for the active window's content type.
-
-  Used when leaving the file tree (toggle, close, navigate right) to restore
-  the correct scope. Returns :agent for agent chat windows, :editor otherwise.
-  """
-  @spec scope_for_active_window(t()) :: atom()
-  def scope_for_active_window(%{workspace: ws}) do
-    SessionState.scope_for_active_window(ws)
-  end
 
   # ── Tab bar helpers ───────────────────────────────────────────────────────
 
@@ -2155,7 +1959,8 @@ defmodule MingaEditor.State do
 
   @spec sync_file_tab_active_window_buffer(t(), Tab.t() | nil) :: t()
   defp sync_file_tab_active_window_buffer(%__MODULE__{} = state, %Tab{kind: :file}) do
-    sync_active_window_buffer(state)
+    workspace = SessionState.activate_buffer(state.workspace, state.workspace.buffers)
+    set_workspace(state, workspace)
   end
 
   defp sync_file_tab_active_window_buffer(%__MODULE__{} = state, _tab), do: state

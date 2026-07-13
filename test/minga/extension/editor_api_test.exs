@@ -70,7 +70,7 @@ defmodule MingaEditor.Extension.EditorAPITest do
     state =
       state
       |> put_in([Access.key!(:workspace), Access.key!(:windows)], windows)
-      |> EditorState.focus_window(new_window_id)
+      |> MingaEditor.WindowFocus.focus(new_window_id)
 
     assert EditorAPI.focus_buffer(state, original_buffer).workspace.windows.active ==
              original_window

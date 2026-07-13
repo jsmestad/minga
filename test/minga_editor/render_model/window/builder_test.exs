@@ -34,7 +34,7 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
   # exposing the primary window model, any additional models, and the cursor,
   # so these builder tests can assert against the window model directly.
   defp build_content(%EditorState{} = state) do
-    state = EditorState.sync_active_window_cursor(state)
+    state = MingaEditor.WindowFocus.remember_active_cursor(state)
     state = MingaEditor.RenderPipeline.compute_layout(state)
     layout = Layout.get(state)
     {scrolls, input} = Scroll.scroll_windows(state, layout)
@@ -139,7 +139,7 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
   end
 
   defp build_window_model(%EditorState{} = state, ctx_overrides) do
-    state = EditorState.sync_active_window_cursor(state)
+    state = MingaEditor.WindowFocus.remember_active_cursor(state)
     state = MingaEditor.RenderPipeline.compute_layout(state)
     layout = Layout.get(state)
     {scrolls, input} = Scroll.scroll_windows(state, layout)

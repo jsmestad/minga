@@ -363,7 +363,7 @@ defmodule MingaGitPorcelain.Input.GitStatus do
         end
 
       i ->
-        EditorState.switch_buffer(state, i)
+        MingaEditor.BufferActivation.activate(state, i)
     end
   end
 

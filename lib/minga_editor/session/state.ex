@@ -118,8 +118,7 @@ defmodule MingaEditor.Session.State do
   # ── Pure workspace operations ─────────────────────────────────────────────
   #
   # These are pure functions (no side effects) on SessionState. The
-  # Editor GenServer calls these through EditorState wrappers that handle
-  # cross-cutting concerns (tab bar sync, process monitoring, etc.).
+  # Editor workflows compose these values with process and presentation work.
 
   alias MingaEditor.Window
   alias MingaEditor.Window.Content
@@ -170,53 +169,165 @@ defmodule MingaEditor.Session.State do
   @spec mark_frontend_reset_pending(t()) :: t()
   def mark_frontend_reset_pending(%__MODULE__{} = wspace), do: wspace
 
-  @doc """
-  Switches to the buffer at `idx`, making it active for the current window.
+  @typedoc "A leaf-owned buffer selection to activate in this session."
+  @type buffer_activation :: integer() | Buffers.t()
 
-  Pure workspace operation: updates Buffers and syncs the active window.
+  @doc """
+  Activates a buffer selection and synchronizes every session-owned observation.
+
+  Integer selections delegate wrapping and index semantics to `Buffers`. A prepared `Buffers` value supports close, restore, and add workflows that already performed their leaf transition. By default non-buffer surfaces remain visible; `replace_window_content?: true` lets a shell intentionally replace one with the activated buffer.
   """
-  @spec switch_buffer(t(), non_neg_integer()) :: t()
-  def switch_buffer(%__MODULE__{buffers: bs} = wspace, idx) do
-    %{wspace | buffers: Buffers.switch_to(bs, idx)}
-    |> sync_active_window_buffer()
+  @spec activate_buffer(t(), buffer_activation()) :: t()
+  @spec activate_buffer(t(), buffer_activation(), keyword()) :: t()
+  def activate_buffer(workspace, activation, opts \\ [])
+
+  def activate_buffer(%__MODULE__{buffers: buffers} = workspace, index, opts)
+      when is_integer(index) do
+    activate_buffer(workspace, Buffers.switch_to(buffers, index), opts)
   end
 
-  @doc """
-  Syncs the active window's buffer reference with `buffers.active`.
+  def activate_buffer(%__MODULE__{} = workspace, %Buffers{} = buffers, opts) do
+    workspace = %{
+      workspace
+      | buffers: buffers,
+        cmd_hover_link: nil,
+        cmd_hover_cell: nil
+    }
 
-  Call after any operation that changes `buffers.active` to keep the
-  window tree consistent. No-op when windows aren't initialized.
-  """
-  @spec sync_active_window_buffer(t()) :: t()
-  def sync_active_window_buffer(%__MODULE__{buffers: %{active: nil}} = wspace), do: wspace
+    synchronize_activated_window(
+      workspace,
+      Keyword.get(opts, :replace_window_content?, false)
+    )
+  end
 
-  def sync_active_window_buffer(%__MODULE__{windows: ws, buffers: buffers} = wspace) do
-    id = ws.active
+  @doc "Commits a pure window-focus transition after its required buffer calls succeed."
+  @spec focus_window(t(), Window.id(), position() | nil) :: t()
+  def focus_window(%__MODULE__{windows: %{active: active}} = workspace, target_id, _cursor)
+      when target_id == active,
+      do: workspace
 
-    case Windows.fetch(ws, id) do
-      {:ok, %Window{buffer: existing, content: {:buffer, _}}} when existing != buffers.active ->
-        windows =
-          Windows.update(ws, id, fn window ->
-            %{
-              window
-              | buffer: buffers.active,
-                content: Content.buffer(buffers.active)
-            }
-            |> Window.set_document_symbols([])
-          end)
-
-        %{wspace | windows: windows}
-
-      # A buffer became active while the window showed the launchpad:
-      # leave the empty state in the same frame (#2689).
-      {:ok, %Window{content: {:empty, :semantic}}} ->
-        windows = Windows.update(ws, id, &Window.show_buffer(&1, buffers.active))
-        %{wspace | windows: windows, launchpad: nil}
-
-      _ ->
-        wspace
+  def focus_window(%__MODULE__{windows: windows} = workspace, target_id, outgoing_cursor) do
+    with {:ok, old_window} <- Windows.fetch(windows, windows.active),
+         {:ok, target_window} <- Windows.fetch(windows, target_id) do
+      windows = remember_outgoing_cursor(windows, old_window, outgoing_cursor)
+      commit_focused_window(workspace, windows, target_id, target_window)
+    else
+      :error -> workspace
     end
   end
+
+  @doc "Commits focus to a surviving window after the active split was removed."
+  @spec focus_surviving_window(t(), Windows.t(), Window.id()) :: t()
+  def focus_surviving_window(%__MODULE__{} = workspace, %Windows{} = windows, target_id) do
+    case Windows.fetch(windows, target_id) do
+      {:ok, target_window} ->
+        commit_focused_window(workspace, windows, target_id, target_window)
+
+      :error ->
+        workspace
+    end
+  end
+
+  @doc "Stores the active buffer cursor in its matching active window."
+  @spec remember_active_window_cursor(t(), position()) :: t()
+  def remember_active_window_cursor(
+        %__MODULE__{windows: windows, buffers: %{active: buffer}} = workspace,
+        cursor
+      )
+      when is_pid(buffer) do
+    case Windows.fetch(windows, windows.active) do
+      {:ok, %Window{buffer: ^buffer}} ->
+        %{
+          workspace
+          | windows: Windows.update(windows, windows.active, &Window.remember_cursor(&1, cursor))
+        }
+
+      _ ->
+        workspace
+    end
+  end
+
+  def remember_active_window_cursor(%__MODULE__{} = workspace, _cursor), do: workspace
+
+  @spec synchronize_activated_window(t(), boolean()) :: t()
+  defp synchronize_activated_window(%__MODULE__{buffers: %{active: nil}} = workspace, _replace?),
+    do: workspace
+
+  defp synchronize_activated_window(
+         %__MODULE__{windows: windows, buffers: %{active: buffer}} = workspace,
+         replace?
+       ) do
+    case Windows.fetch(windows, windows.active) do
+      {:ok, %Window{buffer: ^buffer, content: {:buffer, ^buffer}}} ->
+        normalize_buffer_surface(workspace, buffer)
+
+      {:ok, %Window{content: {:buffer, _}}} ->
+        activate_buffer_surface(workspace, windows, buffer)
+
+      {:ok, %Window{content: {:empty, :semantic}}} ->
+        activate_buffer_surface(workspace, windows, buffer)
+
+      {:ok, %Window{}} when replace? ->
+        activate_buffer_surface(workspace, windows, buffer)
+
+      _ ->
+        workspace
+    end
+  end
+
+  @spec activate_buffer_surface(t(), Windows.t(), pid()) :: t()
+  defp activate_buffer_surface(workspace, windows, buffer) do
+    workspace = %{
+      workspace
+      | windows: Windows.update(windows, windows.active, &Window.show_buffer(&1, buffer))
+    }
+
+    normalize_buffer_surface(workspace, buffer)
+  end
+
+  @spec normalize_buffer_surface(t(), pid()) :: t()
+  defp normalize_buffer_surface(workspace, buffer) do
+    %{
+      workspace
+      | keymap_scope: scope_for_content(Content.buffer(buffer), workspace.keymap_scope),
+        launchpad: nil
+    }
+  end
+
+  @spec remember_outgoing_cursor(Windows.t(), Window.t(), position() | nil) :: Windows.t()
+  defp remember_outgoing_cursor(windows, %Window{content: {:buffer, _}}, {_, _} = cursor),
+    do: Windows.update(windows, windows.active, &Window.remember_cursor(&1, cursor))
+
+  defp remember_outgoing_cursor(windows, _window, _cursor), do: windows
+
+  @spec commit_focused_window(t(), Windows.t(), Window.id(), Window.t()) :: t()
+  defp commit_focused_window(workspace, windows, target_id, target_window) do
+    buffers = buffers_for_focused_window(workspace.buffers, target_window)
+
+    %{
+      workspace
+      | windows: Windows.set_active(windows, target_id),
+        buffers: buffers,
+        keymap_scope: scope_for_content(target_window.content, workspace.keymap_scope),
+        launchpad: launchpad_after_focus(workspace.launchpad, target_window),
+        cmd_hover_link: nil,
+        cmd_hover_cell: nil
+    }
+  end
+
+  @spec buffers_for_focused_window(Buffers.t(), Window.t()) :: Buffers.t()
+  defp buffers_for_focused_window(buffers, %Window{content: {:buffer, buffer}})
+       when is_pid(buffer) do
+    selected = Buffers.switch_to_pid(buffers, buffer)
+    if selected.active == buffer, do: selected, else: Buffers.set_active_override(buffers, buffer)
+  end
+
+  defp buffers_for_focused_window(buffers, %Window{}),
+    do: Buffers.set_active_override(buffers, nil)
+
+  @spec launchpad_after_focus(MingaEditor.State.Launchpad.t() | nil, Window.t()) ::
+          MingaEditor.State.Launchpad.t() | nil
+  defp launchpad_after_focus(launchpad, %Window{}), do: launchpad
 
   @doc """
   Enters the zero-buffers launchpad (#2689).
@@ -251,12 +362,11 @@ defmodule MingaEditor.Session.State do
   @doc """
   Derives the keymap scope from a window's content type.
 
-  Agent chat windows always use `:agent` scope. Buffer windows use
-  `:editor` when coming from `:agent` scope, and preserve the current
-  scope otherwise.
+  Agent chat windows use `:agent`, launchpad windows use `:editor`, and buffer windows return from `:agent` to `:editor` while preserving other scopes.
   """
   @spec scope_for_content(Content.t(), Scope.scope_name()) :: Scope.scope_name()
   def scope_for_content({:agent_chat, _pid}, _current_scope), do: :agent
+  def scope_for_content({:empty, :semantic}, _current_scope), do: :editor
   def scope_for_content({:buffer, _pid}, :agent), do: :editor
   def scope_for_content({:buffer, _pid}, current_scope), do: current_scope
 

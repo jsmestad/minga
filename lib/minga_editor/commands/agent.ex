@@ -371,9 +371,7 @@ defmodule MingaEditor.Commands.Agent do
         Buffers.replace_list(buffers, [active_buffer | buffers.list], 0)
       end
 
-    workspace
-    |> SessionState.set_buffers(buffers)
-    |> SessionState.sync_active_window_buffer()
+    SessionState.activate_buffer(workspace, buffers)
   end
 
   defp restore_return_target_buffer(workspace, _active_buffer), do: workspace
@@ -1542,7 +1540,7 @@ defmodule MingaEditor.Commands.Agent do
         end
 
       idx ->
-        state = EditorState.switch_buffer(state, idx)
+        state = MingaEditor.BufferActivation.activate(state, idx)
         safe_move_to(state.workspace.buffers.active, {line, 0})
         state
     end

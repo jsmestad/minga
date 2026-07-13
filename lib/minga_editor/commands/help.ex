@@ -927,7 +927,7 @@ defmodule MingaEditor.Commands.Help do
 
     state =
       if idx do
-        EditorState.switch_buffer(state, idx)
+        MingaEditor.BufferActivation.activate(state, idx)
       else
         Commands.add_buffer(state, buffer)
       end

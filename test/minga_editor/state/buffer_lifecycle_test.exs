@@ -216,14 +216,14 @@ defmodule MingaEditor.State.BufferLifecycleTest do
     end
   end
 
-  describe "switch_buffer/2" do
+  describe "BufferActivation.activate/2" do
     test "open switches refresh active file tab context, while preview switches keep the original context" do
       state = state_with_file_tab()
       original_buf = state.workspace.buffers.active
       other_buf = start_buffer("other")
       state = with_buffer_pool(state, [original_buf, other_buf])
 
-      opened = EditorState.switch_buffer(state, 1)
+      opened = MingaEditor.BufferActivation.activate(state, 1)
       assert opened.workspace.buffers.active == other_buf
 
       assert %Buffers{active: ^other_buf} =
@@ -236,7 +236,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
         |> with_buffer_pool([original_buf, preview_buf])
         |> EditorState.set_buffer_add_context(:preview)
 
-      previewed = EditorState.switch_buffer(preview_state, 1)
+      previewed = MingaEditor.BufferActivation.activate(preview_state, 1)
       assert previewed.workspace.buffers.active == preview_buf
       assert previewed.buffer_add_context == :open
 

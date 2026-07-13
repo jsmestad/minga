@@ -58,7 +58,7 @@ defmodule MingaEditor.StateTest do
   end
 
   describe "buffer and window selection" do
-    test "add_buffer and switch_buffer sync the active window while preserving inactive split windows" do
+    test "buffer activation synchronizes the active window while preserving inactive split windows" do
       {state, buf1} = state_with_buffer()
       buf2 = start_buffer("world")
 
@@ -68,13 +68,13 @@ defmodule MingaEditor.StateTest do
       assert added.workspace.buffers.list == [buf1, buf2]
       assert active_window(added).buffer == buf2
 
-      switched = EditorState.switch_buffer(added, 0)
+      switched = MingaEditor.BufferActivation.activate(added, 0)
       assert switched.workspace.buffers.active == buf1
       assert switched.workspace.buffers.active_index == 0
       assert active_window(switched).buffer == buf1
 
       split_state = added |> with_split_window(2, buf2)
-      split_switched = EditorState.switch_buffer(split_state, 0)
+      split_switched = MingaEditor.BufferActivation.activate(split_state, 0)
       assert Map.fetch!(split_switched.workspace.windows.map, 1).buffer == buf1
       assert Map.fetch!(split_switched.workspace.windows.map, 2).buffer == buf2
 
@@ -89,32 +89,32 @@ defmodule MingaEditor.StateTest do
       assert is_pid(no_window.workspace.buffers.active)
     end
 
-    test "focus_window and sync_active_window_cursor snapshot and restore buffer cursors" do
+    test "window focus snapshots and restores buffer cursors" do
       {state, buf} = state_with_buffer("hello\nworld\nfoo")
       BufferProcess.move_to(buf, {2, 0})
 
       state = state |> with_split_window(2, buf, second_cursor: {0, 0})
-      state = EditorState.sync_active_window_cursor(state)
+      state = MingaEditor.WindowFocus.remember_active_cursor(state)
       assert Map.fetch!(state.workspace.windows.map, 1).cursor == {2, 0}
 
       BufferProcess.move_to(buf, {1, 3})
-      focused = EditorState.focus_window(state, 2)
+      focused = MingaEditor.WindowFocus.focus(state, 2)
       assert focused.workspace.windows.active == 2
       assert BufferProcess.cursor(buf) == {0, 0}
       assert Map.fetch!(focused.workspace.windows.map, 1).cursor == {1, 3}
 
-      assert EditorState.focus_window(focused, 2) == focused
-      assert EditorState.focus_window(new_state(), 2) == new_state()
-      assert EditorState.sync_active_window_cursor(new_state()) == new_state()
+      assert MingaEditor.WindowFocus.focus(focused, 2) == focused
+      assert MingaEditor.WindowFocus.focus(new_state(), 2) == new_state()
+      assert MingaEditor.WindowFocus.remember_active_cursor(new_state()) == new_state()
     end
 
-    test "sync_active_window_cursor does not write active buffer cursor into another buffer window" do
+    test "cursor snapshot does not write an active buffer cursor into another buffer window" do
       {state, files_buf} = state_with_buffer("files")
       file_buf = start_buffer("typed text")
       BufferProcess.move_to(file_buf, {0, 5})
 
       state = put_in(state.workspace.buffers, Buffers.add(state.workspace.buffers, file_buf))
-      synced = EditorState.sync_active_window_cursor(state)
+      synced = MingaEditor.WindowFocus.remember_active_cursor(state)
 
       assert active_window(synced).buffer == files_buf
       assert active_window(synced).cursor == active_window(state).cursor
@@ -145,17 +145,26 @@ defmodule MingaEditor.StateTest do
   end
 
   describe "window content synchronization" do
-    test "screen rect and buffer sync update buffer windows without rewriting agent chat content" do
+    test "screen rect and buffer activation update buffer windows without rewriting agent chat content" do
       {state, buf1} = state_with_buffer("hello")
       assert EditorState.screen_rect(state) == {0, 0, 80, 23}
 
-      unchanged = EditorState.sync_active_window_buffer(state)
+      unchanged =
+        MingaEditor.BufferActivation.activate(state, state.workspace.buffers,
+          notify_shell?: false
+        )
+
       assert active_window(unchanged).buffer == buf1
       assert active_window(unchanged).content == active_window(state).content
 
       buf2 = start_buffer("world")
       state = put_in(state.workspace.buffers, Buffers.add(state.workspace.buffers, buf2))
-      synced = EditorState.sync_active_window_buffer(state)
+
+      synced =
+        MingaEditor.BufferActivation.activate(state, state.workspace.buffers,
+          notify_shell?: false
+        )
+
       assert active_window(synced).buffer == buf2
       assert Content.buffer?(active_window(synced).content)
       assert Content.buffer_pid(active_window(synced).content) == buf2
@@ -169,7 +178,11 @@ defmodule MingaEditor.StateTest do
           Buffers.add(agent_state.workspace.buffers, file_buf)
         )
 
-      synced_agent = EditorState.sync_active_window_buffer(agent_state)
+      synced_agent =
+        MingaEditor.BufferActivation.activate(agent_state, agent_state.workspace.buffers,
+          notify_shell?: false
+        )
+
       assert active_window(synced_agent).buffer == nil
       assert Content.agent_chat?(active_window(synced_agent).content)
     end

@@ -41,7 +41,7 @@ defmodule MingaEditor.Commands.Launchpad do
 
   The one-keystroke vim materialization (`i`/`a`/`o`/`O`) from the empty
   state: buffer creation flips the window back to buffer content and clears
-  the launchpad via `sync_active_window_buffer/1`.
+  the launchpad through `MingaEditor.Session.State.activate_buffer/2`.
   """
   @spec materialize_and_insert(state()) :: state()
   def materialize_and_insert(state) do

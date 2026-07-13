@@ -1661,14 +1661,13 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   @spec show_buffer_in_active_window(state(), pid()) :: state()
   defp show_buffer_in_active_window(state, pid) when is_pid(pid) do
-    state
-    |> EditorState.update_buffers(fn buffers ->
-      case Enum.find_index(buffers.list, &(&1 == pid)) do
-        nil -> Buffers.add(buffers, pid)
-        idx -> Buffers.switch_to(buffers, idx)
+    buffers =
+      case Enum.find_index(state.workspace.buffers.list, &(&1 == pid)) do
+        nil -> Buffers.add(state.workspace.buffers, pid)
+        idx -> Buffers.switch_to(state.workspace.buffers, idx)
       end
-    end)
-    |> EditorState.sync_active_window_buffer()
+
+    MingaEditor.BufferActivation.activate(state, buffers, notify_shell?: false)
   end
 
   @spec tab_active_buffer(Tab.t()) :: pid() | nil
@@ -1681,10 +1680,11 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   @spec register_buffer_in_active_window(state(), pid(), String.t()) :: state()
   defp register_buffer_in_active_window(state, buffer_pid, file_path) do
+    buffers = Buffers.add(state.workspace.buffers, buffer_pid)
+
     state =
       state
-      |> EditorState.update_buffers(&Buffers.add(&1, buffer_pid))
-      |> EditorState.sync_active_window_buffer()
+      |> MingaEditor.BufferActivation.activate(buffers, notify_shell?: false)
       |> EditorState.monitor_buffer(buffer_pid)
 
     Minga.Log.info(:editor, "Opened: #{file_path}")

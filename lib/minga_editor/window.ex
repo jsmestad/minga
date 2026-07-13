@@ -152,6 +152,12 @@ defmodule MingaEditor.Window do
     }
   end
 
+  @doc "Remembers the buffer cursor last observed while this window was active."
+  @spec remember_cursor(t(), Buffer.position()) :: t()
+  def remember_cursor(%__MODULE__{} = window, {line, col} = cursor)
+      when is_integer(line) and line >= 0 and is_integer(col) and col >= 0,
+      do: %{window | cursor: cursor}
+
   @doc "Updates the viewport dimensions for this window, marking all lines dirty."
   @spec resize(t(), non_neg_integer(), non_neg_integer()) :: t()
   def resize(%__MODULE__{} = window, rows, cols)

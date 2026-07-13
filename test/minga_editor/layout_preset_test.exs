@@ -93,6 +93,24 @@ defmodule MingaEditor.LayoutPresetTest do
   end
 
   describe "restore_default/1" do
+    test "keeps the agent pane when its focus restore target has died" do
+      state = make_state()
+      file_buffer = state.workspace.buffers.active
+
+      state =
+        state
+        |> LayoutPreset.apply(:agent_right, nil)
+        |> MingaEditor.WindowFocus.focus(2)
+
+      monitor = Process.monitor(file_buffer)
+      GenServer.stop(file_buffer, :normal)
+      assert_receive {:DOWN, ^monitor, :process, ^file_buffer, :normal}
+
+      assert LayoutPreset.restore_default(state) == state
+      assert state.workspace.windows.active == 2
+      assert Map.has_key?(state.workspace.windows.map, 2)
+    end
+
     test "switches active window away from agent before removing" do
       state = make_state()
       file_buffer = state.workspace.buffers.active
@@ -100,7 +118,7 @@ defmodule MingaEditor.LayoutPresetTest do
       state =
         state
         |> LayoutPreset.apply(:agent_right, nil)
-        |> EditorState.focus_window(2)
+        |> MingaEditor.WindowFocus.focus(2)
 
       assert state.workspace.windows.active == 2
       assert state.workspace.buffers.active == nil

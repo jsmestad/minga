@@ -1653,7 +1653,7 @@ defmodule MingaEditor.LspActions do
         end
 
       i ->
-        EditorState.switch_buffer(state, i)
+        MingaEditor.BufferActivation.activate(state, i)
     end
   end
 

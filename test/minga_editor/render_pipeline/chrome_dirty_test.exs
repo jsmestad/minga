@@ -278,7 +278,9 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
             list: [first_buf, second_buf],
             active_index: 1
         })
-        |> update_in([Access.key!(:workspace)], &SessionState.sync_active_window_buffer/1)
+        |> update_in([Access.key!(:workspace)], fn workspace ->
+          SessionState.activate_buffer(workspace, workspace.buffers)
+        end)
 
       state2 = TestHelpers.run_pipeline(switched)
       renderer_cache = :sys.get_state(state2.renderer).caches

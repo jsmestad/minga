@@ -38,7 +38,7 @@ defmodule MingaEditor.UI.Picker.SymbolSourceTest do
 
       new_state = SymbolSource.on_select(%Item{id: {2, 1}, label: "ƒ run"}, state)
 
-      assert new_state == EditorState.sync_active_window_cursor(state)
+      assert new_state == MingaEditor.WindowFocus.remember_active_cursor(state)
       assert Buffer.cursor(state.workspace.buffers.active) == {2, 1}
     end
   end
