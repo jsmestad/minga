@@ -24,6 +24,9 @@ defmodule MingaEditor do
   alias MingaEditor.AgentLifecycle
   alias MingaEditor.Commands
   alias MingaEditor.CompletionHandling
+  alias MingaEditor.Effect.Outcome
+  alias MingaEditor.Effect.Request
+  alias MingaEditor.EffectScheduler
   alias MingaEditor.FileWatcherHelpers
   alias MingaEditor.HighlightEvents
   alias MingaEditor.HighlightSync
@@ -70,6 +73,7 @@ defmodule MingaEditor do
           | {:keymap_server, GenServer.server()}
           | {:options_server, GenServer.server() | nil}
           | {:events_registry, EventBus.registry()}
+          | {:effect_scheduler, GenServer.server()}
           | {:buffer, pid()}
           | {:width, pos_integer()}
           | {:height, pos_integer()}
@@ -182,6 +186,7 @@ defmodule MingaEditor do
     Process.flag(:min_heap_size, 4096)
 
     state = Startup.build_initial_state(opts)
+    :ok = attach_effect_scheduler(state.effect_scheduler)
 
     renderer_pid = renderer_pid_for_backend(state.backend)
 
@@ -271,6 +276,13 @@ defmodule MingaEditor do
     # captures crash reports and flush_buffer/0 replays them on the next
     # init. Cleanup happens in Application.stop/1 (clean shutdown only).
     :ok
+  end
+
+  @spec attach_effect_scheduler(GenServer.server() | nil) :: :ok
+  defp attach_effect_scheduler(nil), do: :ok
+
+  defp attach_effect_scheduler(scheduler) do
+    :ok = EffectScheduler.attach(scheduler, self())
   end
 
   @spec renderer_pid_for_backend(EditorState.backend()) :: pid() | nil
@@ -562,8 +574,8 @@ defmodule MingaEditor do
     snapshot = Input.Router.capture_snapshot(state)
 
     # Span the synchronous dispatch so slow GUI actions still on the input path
-    # surface as structured, aggregatable timing (issue #2357 AC7). Slow work
-    # offloaded via MingaEditor.AsyncAction leaves the span fast by design.
+    # surface as structured, aggregatable timing (issue #2357 AC7). Slow effects
+    # admitted to the generation scheduler leave the span fast by design.
     new_state =
       Minga.Telemetry.span([:minga, :gui, :action], %{action: gui_action_tag(action)}, fn ->
         GuiActionHandler.dispatch(state, action)
@@ -925,8 +937,8 @@ defmodule MingaEditor do
   # live picker is still the same source *and* the result carries the picker's
   # current fetch revision. A newer search, project switch, reopen, or close
   # mints a new revision (or drops the picker), so older in-flight fetches land
-  # here as stale and are discarded. This is intentionally NOT the AsyncAction
-  # lane token, which serializes FIFO; here the newest fetch wins.
+  # here as stale and are discarded. Picker fetches retain this read-only
+  # latest-wins path; #2805 migrates external formatting and git mutations.
   def handle_info({:picker_candidates_result, source_module, revision, result}, state) do
     case state.shell_state.modal do
       {:picker, %{picker_ui: %{source: ^source_module} = picker_ui} = payload} ->
@@ -953,24 +965,22 @@ defmodule MingaEditor do
     {:noreply, Renderer.render_or_async(new_state)}
   end
 
-  # Async editor-action result: slow work offloaded via MingaEditor.AsyncAction
-  # sends this when it finishes. Apply the in-flight result, then advance the lane
-  # so the next queued op (if any) starts — lanes run one op at a time, in order.
-  # A token that is not the in-flight one (a defensive guard against duplicate or
-  # out-of-band messages) is dropped without advancing.
-  def handle_info({:async_action_result, lane, token, result}, state) do
-    if MingaEditor.AsyncAction.current?(state, lane, token) do
-      queued_status = queued_async_status(state, lane)
+  # Slow-effect lifecycle and terminal candidates dispatch through the typed
+  # request's domain handler. The Editor has no resource- or lane-specific switch.
+  def handle_info({:effect_lifecycle, %Outcome{} = outcome}, state) do
+    {new_state, _outcome} = apply_effect_outcome(state, outcome)
+    {:noreply, Renderer.render_or_async(new_state)}
+  end
 
-      new_state =
-        state
-        |> apply_async_result(lane, result)
-        |> restore_queued_async_status(queued_status)
-        |> MingaEditor.AsyncAction.advance(lane)
+  def handle_info({:effect_result, scheduler, %Outcome{} = outcome}, state) do
+    case EffectScheduler.claim(scheduler, outcome) do
+      :ok ->
+        {new_state, final_outcome} = apply_effect_outcome(state, outcome)
+        EffectScheduler.finalize(scheduler, final_outcome)
+        {:noreply, Renderer.render_or_async(new_state)}
 
-      {:noreply, Renderer.render_or_async(new_state)}
-    else
-      {:noreply, state}
+      {:error, :not_pending} ->
+        {:noreply, state}
     end
   end
 
@@ -978,37 +988,10 @@ defmodule MingaEditor do
     {:noreply, state}
   end
 
-  # Applies a current async-action result by routing it to the owning domain.
-  @spec apply_async_result(state(), atom(), term()) :: state()
-  defp apply_async_result(state, :git_worktree, result) do
-    GuiActionHandler.apply_git_result(state, result)
+  @spec apply_effect_outcome(state(), Outcome.t()) :: {state(), Outcome.t()}
+  defp apply_effect_outcome(state, %Outcome{request: %Request{handler: handler}} = outcome) do
+    handler.apply(state, outcome)
   end
-
-  defp apply_async_result(state, :format_external, result) do
-    MingaEditor.Commands.Formatting.apply_format_external_result(state, result)
-  end
-
-  # Defensive fallthrough: a lane with no apply handler degrades to a logged
-  # no-op rather than crashing the editor GenServer.
-  defp apply_async_result(state, lane, _result) do
-    Log.warning(:editor, "[async_action] no apply handler for lane #{inspect(lane)}")
-    state
-  end
-
-  @spec queued_async_status(state(), atom()) :: String.t() | nil
-  defp queued_async_status(state, lane) do
-    if async_action_queued?(state, lane), do: EditorState.status_msg(state), else: nil
-  end
-
-  @spec async_action_queued?(state(), atom()) :: boolean()
-  defp async_action_queued?(state, lane) do
-    match?(%{queue: [_ | _]}, EditorState.get_async_lane(state, lane))
-  end
-
-  @spec restore_queued_async_status(state(), String.t() | nil) :: state()
-  defp restore_queued_async_status(state, nil), do: state
-
-  defp restore_queued_async_status(state, status), do: EditorState.set_status(state, status)
 
   # Identifies the GUI action for the dispatch telemetry span (issue #2357 AC7),
   # so slow synchronous actions can be found by their tag without logging paths.

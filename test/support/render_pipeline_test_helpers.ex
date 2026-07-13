@@ -55,6 +55,7 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
     %EditorState{
       port_manager: self(),
       parser_manager: Keyword.get(opts, :parser_manager, Minga.Parser.Manager),
+      effect_scheduler: Keyword.get(opts, :effect_scheduler),
       terminal_viewport: vp,
       sidebar_registry: sidebar_registry,
       highlighting: %Highlighting{},

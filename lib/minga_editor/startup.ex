@@ -178,6 +178,7 @@ defmodule MingaEditor.Startup do
       options_server: options_server,
       events_registry: events_registry,
       sidebar_registry: sidebar_registry,
+      effect_scheduler: Keyword.get(opts, :effect_scheduler),
       editing_model: editing_model,
       focus_stack: MingaEditor.Input.default_stack(),
       shell_id: shell_entry.id,

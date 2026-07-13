@@ -1,16 +1,22 @@
 defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
-  @moduledoc """
-  GitOps GUI actions return control to the editor immediately and apply their
-  result asynchronously, so a slow `git` command never blocks the input path.
-  """
+  @moduledoc "Git GUI actions scheduled as typed, repository-keyed FIFO effects."
+
   use ExUnit.Case, async: true
 
   alias Minga.Git.Stub
-  alias MingaEditor.AsyncAction
+  alias Minga.Test.GitRepositoryResolver
+  alias MingaEditor.Effect.Outcome
+  alias MingaEditor.Effect.Request
+  alias MingaEditor.EffectScheduler
+  alias MingaEditor.Effects.GitMutation
+  alias MingaEditor.Effects.GitMutationAdmission
   alias MingaEditor.Extension.Sidebar
+  alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.Handlers.GuiActionHandler
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.State, as: EditorState
+
+  @effect_timeout 2_000
 
   setup do
     git_root = Path.join(System.tmp_dir!(), "stub_git_#{System.unique_integer([:positive])}")
@@ -20,175 +26,244 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
     table = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
     start_supervised!({Sidebar, name: table, notify: false})
 
+    task_supervisor =
+      start_supervised!(Supervisor.child_spec({Task.Supervisor, []}, id: make_ref()))
+
+    scheduler =
+      start_supervised!(
+        Supervisor.child_spec(
+          {EffectScheduler, task_supervisor: task_supervisor, observer: self()},
+          id: make_ref()
+        )
+      )
+
+    :ok = EffectScheduler.attach(scheduler, self())
+
     on_exit(fn -> Stub.clear(git_root) end)
 
-    state = TestHelpers.base_state(sidebar_registry: table)
-    dispatch_opts = [resolve_git_root: fn -> git_root end]
+    state = TestHelpers.base_state(sidebar_registry: table, effect_scheduler: scheduler)
 
-    %{state: state, git_root: git_root, dispatch_opts: dispatch_opts}
+    dispatch_opts = [
+      git_root_resolver: {GitRepositoryResolver, {:return, git_root, git_root}}
+    ]
+
+    %{state: state, scheduler: scheduler, git_root: git_root, dispatch_opts: dispatch_opts}
   end
 
-  test "git commit forwards message, keeps amend off, and applies the async result", %{
-    state: state,
-    git_root: git_root,
-    dispatch_opts: opts
-  } do
-    new_state = GuiActionHandler.dispatch(state, {:git_commit, "fix the thing"}, opts)
+  test "commit success and failure flow through typed domain outcomes", context do
+    %{state: state, scheduler: scheduler, git_root: git_root, dispatch_opts: opts} = context
 
-    assert EditorState.status_msg(new_state) == "Committing…"
-    assert map_size(new_state.async_actions) == 1
+    state = GuiActionHandler.dispatch(state, {:git_commit, "fix the thing"}, opts)
+    assert EditorState.status_msg(state) == "Committing…"
+
+    {state, request} = receive_resolved_mutation(state, scheduler, :commit, :running)
+    assert request.resource == {:git_repository, Path.expand(git_root)}
+    assert %GitMutation{message: "fix the thing", amend?: false} = request.effect
     assert_receive {:stub_git_commit, ^git_root, "fix the thing", []}
 
-    assert_receive {:async_action_result, :git_worktree, token,
-                    {:ok, "Committed stub000", ^git_root}}
+    {state, success} = receive_result(state, scheduler, request.id)
+    assert success.status == :completed
+    assert EditorState.status_msg(state) == "Committed stub000"
 
-    applied_state =
-      apply_async_result(
-        new_state,
-        {:async_action_result, :git_worktree, token, {:ok, "Committed stub000", git_root}}
-      )
-
-    assert EditorState.status_msg(applied_state) == "Committed stub000"
-    assert applied_state.async_actions == %{}
-  end
-
-  test "git commit failure preserves the legacy failure status", %{
-    state: state,
-    git_root: git_root,
-    dispatch_opts: opts
-  } do
     Stub.set_commit_result(git_root, {:error, "boom commit"})
+    state = GuiActionHandler.dispatch(state, {:git_commit, "fail commit", true}, opts)
+    {state, request} = receive_resolved_mutation(state, scheduler, :commit, :running)
+    assert %GitMutation{message: "fail commit", amend?: true} = request.effect
+    assert_receive {:stub_git_commit, ^git_root, "fail commit", [amend: true]}
 
-    new_state = GuiActionHandler.dispatch(state, {:git_commit, "fail commit"}, opts)
-
-    assert EditorState.status_msg(new_state) == "Committing…"
-    assert_receive {:stub_git_commit, ^git_root, "fail commit", []}
-
-    assert_receive {:async_action_result, :git_worktree, token,
-                    {:error, "boom commit", ^git_root, "Commit failed: boom commit"}}
-
-    applied_state =
-      apply_async_result(
-        new_state,
-        {:async_action_result, :git_worktree, token,
-         {:error, "boom commit", git_root, "Commit failed: boom commit"}}
-      )
-
-    assert EditorState.status_msg(applied_state) == "Commit failed: boom commit"
-    assert applied_state.async_actions == %{}
+    {state, failure} = receive_result(state, scheduler, request.id)
+    assert failure.status == :failed
+    assert EditorState.status_msg(state) == "Amend failed: boom commit"
   end
 
-  test "a stale git commit result is ignored by the editor handler", %{
-    state: state,
-    git_root: git_root,
-    dispatch_opts: opts
-  } do
-    state = GuiActionHandler.dispatch(state, {:git_commit, "first"}, opts)
-    assert_receive {:stub_git_commit, ^git_root, "first", []}
+  test "same-repository mutations are bounded FIFO and keep frontend activity visible", context do
+    %{state: state, scheduler: scheduler, git_root: git_root, dispatch_opts: opts} = context
+    Stub.set_stage_blocker(git_root, self())
+    state = GuiActionHandler.dispatch(state, {:git_stage_file, "lib/a.ex"}, opts)
+    {state, stage_request} = receive_resolved_mutation(state, scheduler, :stage, :running)
+    assert_receive {:stub_stage_blocked, stage_worker}
 
-    assert_receive {:async_action_result, :git_worktree, stale_token,
-                    {:ok, "Committed stub000", ^git_root}}
+    state = GuiActionHandler.dispatch(state, {:git_commit, "after stage"}, opts)
+    {state, commit_request} = receive_resolved_mutation(state, scheduler, :commit, :queued)
 
-    state = GuiActionHandler.dispatch(state, {:git_discard_file, "lib/bar.ex"}, opts)
-    state = AsyncAction.advance(state, :git_worktree)
-    current_status = EditorState.status_msg(state)
-    current_async_actions = state.async_actions
+    assert EffectScheduler.stats(scheduler) == %{
+             resources: 1,
+             running: 1,
+             queued: 1,
+             pending: 0,
+             admitted: 2,
+             capacity: 64
+           }
 
-    stale_state =
-      apply_async_result(
-        state,
-        {:async_action_result, :git_worktree, stale_token, {:ok, "Committed stub000", git_root}}
-      )
+    assert EffectScheduler.active?(scheduler, GitMutation)
+    assert Context.from_editor_state(state).git_syncing
+    refute_received {:stub_git_commit, ^git_root, "after stage", []}
 
-    assert stale_state == state
-    assert EditorState.status_msg(stale_state) == current_status
-    assert stale_state.async_actions == current_async_actions
+    send(stage_worker, :unblock_stub_stage)
+    {state, stage_outcome} = receive_result(state, scheduler, stage_request.id)
+    assert stage_outcome.status == :completed
+    assert Stub.staged_paths(git_root) == ["lib/a.ex"]
+
+    {state, running_commit} = receive_running_lifecycle(state, :commit)
+    assert running_commit.id == commit_request.id
+    assert EditorState.status_msg(state) == "Committing…"
+    assert_receive {:stub_git_commit, ^git_root, "after stage", []}
+
+    {state, commit_outcome} = receive_result(state, scheduler, commit_request.id)
+    assert commit_outcome.status == :completed
+    assert EditorState.status_msg(state) == "Committed stub000"
+    refute EffectScheduler.active?(scheduler, GitMutation)
+    refute Context.from_editor_state(state).git_syncing
   end
 
-  test "queued commit and amend keep their pending status when a prior git action finishes",
-       %{state: state, git_root: git_root, dispatch_opts: opts} do
+  test "dispatch returns before a blocked repository resolver is released", context do
+    %{state: state, scheduler: scheduler, git_root: git_root} = context
+    tag = make_ref()
+
+    opts = [
+      git_root_resolver: {GitRepositoryResolver, {:block, self(), tag, git_root, git_root}}
+    ]
+
+    state = GuiActionHandler.dispatch(state, {:git_stage_file, "lib/nonblocking.ex"}, opts)
+    assert EditorState.status_msg(state) == "Staging lib/nonblocking.ex…"
+    assert_receive {:git_resolver_blocked, ^tag, resolver_worker}
+
+    send(resolver_worker, {:release_git_resolver, tag})
+    {state, request} = receive_resolved_mutation(state, scheduler, :stage, :running)
+    assert request.resource == {:git_repository, Path.expand(git_root)}
+
+    {state, outcome} = receive_result(state, scheduler, request.id)
+    assert outcome.status == :completed
+    assert EditorState.status_msg(state) == "Staged lib/nonblocking.ex"
+  end
+
+  test "queue overflow and missing repository have explicit feedback", context do
+    %{state: state, scheduler: scheduler, git_root: git_root, dispatch_opts: opts} = context
+    Stub.set_stage_blocker(git_root, self())
+
+    state = GuiActionHandler.dispatch(state, {:git_stage_file, "first.ex"}, opts)
+    {state, running_request} = receive_resolved_mutation(state, scheduler, :stage, :running)
+    assert_receive {:stub_stage_blocked, _worker}
+
     state =
-      run_queued_git_status_regression(
-        state,
-        git_root,
-        opts,
-        {:git_commit, "keep pending"},
-        "Committing…",
-        "Committed stub000"
-      )
+      Enum.reduce(1..16, state, fn index, acc ->
+        acc = GuiActionHandler.dispatch(acc, {:git_stage_file, "queued-#{index}.ex"}, opts)
+        {acc, _request} = receive_resolved_mutation(acc, scheduler, :stage, :queued)
+        acc
+      end)
 
-    _state =
-      run_queued_git_status_regression(
-        state,
-        git_root,
-        opts,
-        {:git_commit, "keep pending", true},
-        "Amending…",
-        "Amended stub000"
-      )
+    overflow_state = GuiActionHandler.dispatch(state, {:git_stage_file, "overflow.ex"}, opts)
+    {overflow_state, overflow} = receive_admission_result(overflow_state, scheduler, :stage)
+    overflow_id = overflow.request.id
+
+    assert_receive {:effect_terminal,
+                    %Outcome{
+                      request: %Request{id: ^overflow_id},
+                      status: :failed,
+                      reason: :queue_full
+                    }},
+                   @effect_timeout
+
+    assert EditorState.status_msg(overflow_state) == "Git action queue is full"
+
+    assert EffectScheduler.stats(scheduler) == %{
+             resources: 1,
+             running: 1,
+             queued: 16,
+             pending: 0,
+             admitted: 17,
+             capacity: 64
+           }
+
+    assert :ok = EffectScheduler.cancel(scheduler, running_request.id)
+
+    missing_opts = [git_root_resolver: {GitRepositoryResolver, :not_git}]
+    missing_state = GuiActionHandler.dispatch(state, :git_stage_all, missing_opts)
+    {missing_state, missing} = receive_admission_result(missing_state, scheduler, :stage_all)
+    assert missing.status == :failed
+    assert EditorState.status_msg(missing_state) == "Not in a git repository"
   end
 
-  test "a generic (2-tuple) error from a raised op is surfaced, not crashed", %{state: state} do
-    applied = GuiActionHandler.apply_git_result(state, {:error, "boom"})
-    assert EditorState.status_msg(applied) == "Git error: boom"
-  end
-
-  test "an unexpected result shape degrades to a failure status", %{state: state} do
-    applied = GuiActionHandler.apply_git_result(state, :weird)
-    assert EditorState.status_msg(applied) == "Git action failed"
-  end
-
-  @spec run_queued_git_status_regression(
+  @spec receive_resolved_mutation(
           EditorState.t(),
-          String.t(),
-          keyword(),
-          tuple(),
-          String.t(),
-          String.t()
-        ) :: EditorState.t()
-  defp run_queued_git_status_regression(
-         state,
-         git_root,
-         opts,
-         queued_action,
-         pending_status,
-         complete_status
-       ) do
-    state = GuiActionHandler.dispatch(state, {:git_stage_file, "a.ex"}, opts)
-    state = GuiActionHandler.dispatch(state, queued_action, opts)
+          pid(),
+          GitMutation.operation(),
+          :running | :queued
+        ) :: {EditorState.t(), Request.t()}
+  defp receive_resolved_mutation(state, scheduler, operation, disposition) do
+    {state, _admission} = receive_admission_result(state, scheduler, operation)
 
-    assert EditorState.status_msg(state) == pending_status
-    assert Enum.count(state.async_actions[:git_worktree].queue) == 1
-
-    stage_token = current_git_token(state)
-
-    {:noreply, state} =
-      MingaEditor.handle_info(
-        {:async_action_result, :git_worktree, stage_token, {:ok, "Staged a.ex", git_root}},
-        state
-      )
-
-    assert EditorState.status_msg(state) == pending_status
-
-    queued_token = current_git_token(state)
-
-    {:noreply, state} =
-      MingaEditor.handle_info(
-        {:async_action_result, :git_worktree, queued_token, {:ok, complete_status, git_root}},
-        state
-      )
-
-    assert EditorState.status_msg(state) == complete_status
-    assert state.async_actions == %{}
-    state
+    case disposition do
+      :running -> receive_running_lifecycle(state, operation)
+      :queued -> receive_queued_lifecycle(state, operation)
+    end
   end
 
-  @spec current_git_token(EditorState.t()) :: reference()
-  defp current_git_token(state), do: state.async_actions[:git_worktree].running
+  @spec receive_admission_result(EditorState.t(), pid(), GitMutation.operation()) ::
+          {EditorState.t(), Outcome.t()}
+  defp receive_admission_result(state, scheduler, operation) do
+    assert_receive {:effect_lifecycle,
+                    %Outcome{
+                      request: %Request{
+                        effect: %GitMutationAdmission{operation: ^operation}
+                      },
+                      status: :running
+                    } = lifecycle},
+                   @effect_timeout
 
-  @spec apply_async_result(EditorState.t(), tuple()) :: EditorState.t()
-  defp apply_async_result(state, async_message) do
-    {:noreply, applied_state} = MingaEditor.handle_info(async_message, state)
-    applied_state
+    state = apply_lifecycle(state, lifecycle)
+
+    assert_receive {:effect_result, ^scheduler,
+                    %Outcome{
+                      request: %Request{
+                        effect: %GitMutationAdmission{operation: ^operation}
+                      }
+                    } = outcome},
+                   @effect_timeout
+
+    {:noreply, state} = MingaEditor.handle_info({:effect_result, scheduler, outcome}, state)
+    {state, outcome}
+  end
+
+  @spec receive_running_lifecycle(EditorState.t(), GitMutation.operation()) ::
+          {EditorState.t(), Request.t()}
+  defp receive_running_lifecycle(state, operation) do
+    assert_receive {:effect_lifecycle,
+                    %Outcome{
+                      request: %Request{effect: %GitMutation{operation: ^operation}} = request,
+                      status: :running
+                    } = outcome},
+                   @effect_timeout
+
+    {apply_lifecycle(state, outcome), request}
+  end
+
+  @spec receive_queued_lifecycle(EditorState.t(), GitMutation.operation()) ::
+          {EditorState.t(), Request.t()}
+  defp receive_queued_lifecycle(state, operation) do
+    assert_receive {:effect_lifecycle,
+                    %Outcome{
+                      request: %Request{effect: %GitMutation{operation: ^operation}} = request,
+                      status: :queued
+                    } = outcome},
+                   @effect_timeout
+
+    {apply_lifecycle(state, outcome), request}
+  end
+
+  @spec receive_result(EditorState.t(), pid(), reference()) :: {EditorState.t(), Outcome.t()}
+  defp receive_result(state, scheduler, request_id) do
+    assert_receive {:effect_result, ^scheduler,
+                    %Outcome{request: %Request{id: ^request_id}} = outcome},
+                   @effect_timeout
+
+    {:noreply, state} = MingaEditor.handle_info({:effect_result, scheduler, outcome}, state)
+    {state, outcome}
+  end
+
+  @spec apply_lifecycle(EditorState.t(), Outcome.t()) :: EditorState.t()
+  defp apply_lifecycle(state, outcome) do
+    {:noreply, state} = MingaEditor.handle_info({:effect_lifecycle, outcome}, state)
+    state
   end
 end

@@ -94,35 +94,6 @@ defmodule Minga.Credo.NoBlockingEditorCallCheckTest do
 
   # ── Exempt wrappers ────────────────────────────────────────────────────
 
-  test "passes System.cmd inside AsyncAction.run (pipe)" do
-    """
-    defmodule MingaEditor.Commands.Example do
-      def run(state) do
-        state
-        |> AsyncAction.run(:format, fn ->
-          System.cmd("formatter", ["--stdin"], input: content)
-        end)
-      end
-    end
-    """
-    |> check()
-    |> refute_issues()
-  end
-
-  test "passes System.cmd inside AsyncAction.run (direct call)" do
-    """
-    defmodule MingaEditor.Commands.Example do
-      def run(state) do
-        MingaEditor.AsyncAction.run(state, :format, fn ->
-          System.cmd("formatter", ["--stdin"], input: content)
-        end)
-      end
-    end
-    """
-    |> check()
-    |> refute_issues()
-  end
-
   test "passes blocking call inside Task.start body" do
     """
     defmodule MingaEditor.Commands.Example do

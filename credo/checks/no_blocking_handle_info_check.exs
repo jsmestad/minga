@@ -4,7 +4,7 @@ defmodule Minga.Credo.NoBlockingHandleInfoCheck do
 
   MingaEditor is a single GenServer. Its mailbox processes input, render, and timer messages in order, so any `handle_info` clause that does expensive synchronous work inline head-of-line-blocks input echo and rendering until it returns. A 1-second filesystem walk or unbounded `Enum.reduce` in a `handle_info` clause freezes the UI for that whole second.
 
-  This is the structural guard against the recurring class of bug where a new feature blocks the Editor mailbox. Expensive work that arrives as a message must be re-dispatched off the hot path: spawn a `Task`, hand it to `MingaEditor.AsyncAction`, schedule it with `Process.send_after`, or `GenServer.cast` it elsewhere, then apply the result in a later, cheap `handle_info`.
+  This is the structural guard against the recurring class of bug where a new feature blocks the Editor mailbox. Expensive work that arrives as a message must be re-dispatched off the hot path: submit a typed `EffectScheduler` request, spawn a supervised Task, schedule it with `Process.send_after`, or `GenServer.cast` it elsewhere, then apply the result in a later, cheap `handle_info`.
 
   The check flags a `handle_info` clause whose body directly calls a known-expensive primitive:
 
@@ -13,7 +13,7 @@ defmodule Minga.Credo.NoBlockingHandleInfoCheck do
     * cross-process synchronous calls: `GenServer.call`
     * synchronous LSP/request calls: any `*.request_sync`
 
-  Calls nested inside a sanctioned async wrapper (`AsyncAction.run`, `Task.async`/`start`/`start_link`, `Task.Supervisor.*`, `Process.send_after`, `GenServer.cast`) are exempt, because that work already runs off the critical path.
+  Calls nested inside a sanctioned async wrapper (`Task.async`/`start`/`start_link`, `Task.Supervisor.*`, `Process.send_after`, `GenServer.cast`) are exempt, because that work already runs off the critical path.
 
   ## Allowlist
 
@@ -38,7 +38,7 @@ defmodule Minga.Credo.NoBlockingHandleInfoCheck do
       check: """
       Expensive synchronous work inside a MingaEditor `handle_info/2` clause blocks the single editor GenServer mailbox, freezing input echo and rendering until it returns.
 
-      Re-dispatch the work off the hot path with `MingaEditor.AsyncAction.run/3`, a `Task`, `Process.send_after`, or a `GenServer.cast`, and apply the result in a later cheap `handle_info` clause.
+      Re-dispatch the work off the hot path with a typed `EffectScheduler` request, supervised Task, `Process.send_after`, or `GenServer.cast`, and apply the result in a later cheap `handle_info` clause.
 
       To suppress a sanctioned exception, add `# minga:allow-blocking — <justification>` on the same line.
       """
@@ -63,8 +63,6 @@ defmodule Minga.Credo.NoBlockingHandleInfoCheck do
   @enum_funcs [:map, :reduce, :flat_map, :each, :filter, :reduce_while, :map_reduce]
 
   @exempt_wrappers [
-    {[:AsyncAction], :run},
-    {[:MingaEditor, :AsyncAction], :run},
     {[:Task], :async},
     {[:Task], :start},
     {[:Task], :start_link},
@@ -199,7 +197,7 @@ defmodule Minga.Credo.NoBlockingHandleInfoCheck do
       [
         format_issue(issue_meta,
           message:
-            "#{trigger} runs inline in a handle_info clause and blocks the editor GenServer mailbox. Re-dispatch via AsyncAction.run/3, a Task, Process.send_after, or GenServer.cast.",
+            "#{trigger} runs inline in a handle_info clause and blocks the editor GenServer mailbox. Re-dispatch via a typed EffectScheduler request, supervised Task, Process.send_after, or GenServer.cast.",
           trigger: trigger,
           line_no: meta[:line]
         )

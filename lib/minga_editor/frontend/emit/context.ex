@@ -18,6 +18,8 @@ defmodule MingaEditor.Frontend.Emit.Context do
   alias MingaEditor.State.Windows
   alias MingaEditor.VimState
   alias MingaEditor.Viewport
+  alias MingaEditor.EffectScheduler
+  alias MingaEditor.Effects.GitMutation
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.UI.FontRegistry
@@ -137,7 +139,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
       sidebar_registry: State.sidebar_registry(state),
       title: title,
       status_bar_data: MingaEditor.StatusBar.Data.from_state(state),
-      git_syncing: Map.get(state, :git_remote_op) != nil or git_lane_active?(state),
+      git_syncing: Map.get(state, :git_remote_op) != nil or git_effect_active?(state),
       git_toast: Map.get(state.shell_state, :git_toast),
       search: state.workspace.search,
       last_input_seq: Map.get(state, :last_input_seq, 0),
@@ -167,15 +169,12 @@ defmodule MingaEditor.Frontend.Emit.Context do
     }
   end
 
-  @spec git_lane_active?(map()) :: boolean()
-  defp git_lane_active?(%{async_actions: actions}) do
-    case Map.get(actions, :git_worktree) do
-      %{running: ref} when is_reference(ref) -> true
-      _ -> false
-    end
+  @spec git_effect_active?(map()) :: boolean()
+  defp git_effect_active?(state) do
+    state
+    |> Map.get(:effect_scheduler)
+    |> EffectScheduler.active?(GitMutation)
   end
-
-  defp git_lane_active?(_state), do: false
 
   @spec gui_only(boolean(), value) :: value | nil when value: var
   defp gui_only(true, value), do: value

@@ -1,6 +1,6 @@
 defmodule MingaEditor.Supervisor do
   @moduledoc """
-  Supervises the editor runtime: parser, renderer server, and Editor GenServer.
+  Supervises the editor runtime: parser, renderer server, and Editor generation.
 
   Uses `rest_for_one` to enforce the dependency chain:
 
@@ -8,12 +8,16 @@ defmodule MingaEditor.Supervisor do
       ├── Minga.Parser.Manager            Tree-sitter parser Port
       ├── MingaEditor.Frontend.Manager    Zig/Metal frontend Port
       ├── MingaEditor.Renderer.Server     Async render pipeline
-      └── MingaEditor                     Editor orchestration GenServer
+      └── MingaEditor.GenerationSupervisor (one_for_all)
+          ├── MingaEditor.EffectTaskSupervisor
+          ├── MingaEditor.EffectScheduler
+          └── MingaEditor                 Editor orchestration GenServer
 
   If Parser.Manager crashes, everything below restarts. If Frontend.Manager
-  crashes, Renderer.Server and Editor restart. If Renderer.Server crashes,
-  Editor restarts (it holds a resolved pid that would be stale). An Editor
-  crash restarts only the Editor.
+  crashes, Renderer.Server and the Editor generation restart. If
+  Renderer.Server crashes, the generation restarts because the Editor holds a
+  resolved renderer pid. An Editor crash tears down its scheduler and every old
+  effect worker before replacement authority starts.
 
   This supervisor is conditionally started: it only appears in the
   supervision tree when the editor UI is active (not in test mode or
@@ -50,11 +54,15 @@ defmodule MingaEditor.Supervisor do
       ]
       |> Enum.concat(renderer_children())
       |> Enum.concat([
-        {MingaEditor,
+        {MingaEditor.GenerationSupervisor,
          [
-           backend: backend,
-           swap_dir: Minga.Session.swap_dir(),
-           session_dir: Path.dirname(Minga.Session.session_file())
+           editor:
+             {MingaEditor,
+              [
+                backend: backend,
+                swap_dir: Minga.Session.swap_dir(),
+                session_dir: Path.dirname(Minga.Session.session_file())
+              ]}
          ]}
       ])
 

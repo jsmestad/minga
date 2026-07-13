@@ -241,7 +241,7 @@ graph TD
 
 ### Runtime tier
 
-The runtime tier handles rendering and user interaction. `rest_for_one` keeps the render path ordered: if Frontend.Manager fails, the Renderer.Server and Editor restart because both depend on the frontend port. If Renderer.Server fails, the Editor restarts because it holds the renderer pid. Buffers are untouched: your undo history, cursor positions, and unsaved changes are all preserved.
+The runtime tier handles rendering and user interaction. `rest_for_one` keeps the render path ordered: if Frontend.Manager fails, Renderer.Server and the Editor generation restart because both depend on the frontend port. If Renderer.Server fails, the Editor generation restarts because Editor holds the renderer pid. The generation is a `one_for_all` boundary around Editor, its effect scheduler, and supervised effect workers. An Editor crash therefore stops every old formatting or git mutation worker before replacement authority starts. Buffers remain outside this boundary, so undo history, cursor positions, and unsaved changes are preserved.
 
 ```mermaid
 graph TD
@@ -252,8 +252,13 @@ graph TD
     EDSUP --> PARSER["Parser.Manager"]
     EDSUP --> PM["Frontend.Manager"]
     EDSUP --> RENDER["Renderer.Server"]
-    EDSUP --> ED["Editor"]
+    EDSUP --> GEN["Editor.GenerationSupervisor<br/><i>one_for_all</i>"]
+    GEN --> TASKS["EffectTaskSupervisor"]
+    GEN --> EFFECTS["EffectScheduler"]
+    GEN --> ED["Editor"]
 
+    ED -. "typed effect requests" .-> EFFECTS
+    EFFECTS -. "monitored async_nolink workers" .-> TASKS
     ED -. "bounded RenderIntent" .-> RENDER
     RENDER -. "focused RenderReceipt" .-> ED
     RENDER -. "render commands" .-> PM
@@ -264,6 +269,9 @@ graph TD
     style EDSUP fill:#6c3483,stroke:#4a235a,color:#fff
     style PM fill:#b7950b,stroke:#9a7d0a,color:#fff
     style RENDER fill:#b7950b,stroke:#9a7d0a,color:#fff
+    style GEN fill:#6c3483,stroke:#4a235a,color:#fff
+    style TASKS fill:#1a5276,stroke:#154360,color:#fff
+    style EFFECTS fill:#1a5276,stroke:#154360,color:#fff
     style ED fill:#b7950b,stroke:#9a7d0a,color:#fff
     style WD fill:#b7950b,stroke:#9a7d0a,color:#fff
     style FW fill:#b7950b,stroke:#9a7d0a,color:#fff
