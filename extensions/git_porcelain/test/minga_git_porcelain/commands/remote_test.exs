@@ -159,16 +159,21 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
   defp start_editor(content \\ "") do
     {:ok, buffer} = BufferProcess.start_link(content: content)
 
-    {:ok, editor} =
-      MingaEditor.start_link(
-        name: :"editor_#{:erlang.unique_integer([:positive])}",
-        port_manager: nil,
-        buffer: buffer,
-        width: 40,
-        height: 10,
-        editing_model: :vim
+    generation =
+      start_supervised!(
+        Supervisor.child_spec(
+          {MingaEditor,
+           name: :"editor_#{:erlang.unique_integer([:positive])}",
+           port_manager: nil,
+           buffer: buffer,
+           width: 40,
+           height: 10,
+           editing_model: :vim},
+          id: make_ref()
+        )
       )
 
+    {:ok, editor} = MingaEditor.GenerationSupervisor.editor_owner(generation)
     {editor, buffer}
   end
 

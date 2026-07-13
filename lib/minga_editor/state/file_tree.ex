@@ -176,6 +176,10 @@ defmodule MingaEditor.State.FileTree do
     }
   end
 
+  @doc "Replaces metadata on the current tree without changing topology status or refresh correlation."
+  @spec replace_tree_metadata(t(), FileTree.t()) :: t()
+  def replace_tree_metadata(%__MODULE__{} = ft, %FileTree{} = tree), do: %{ft | tree: tree}
+
   @doc "Marks the sidebar as loading."
   @spec loading(t()) :: t()
   def loading(%__MODULE__{} = ft) do
@@ -224,6 +228,13 @@ defmodule MingaEditor.State.FileTree do
   def track_refresh_request(%__MODULE__{} = ft, root, token)
       when is_binary(root) and is_reference(token) do
     %{ft | refresh: Refresh.request_admitted(ft.refresh, root, token)}
+  end
+
+  @doc "Re-arms one pending refresh intent after scheduler admission pressure."
+  @spec track_refresh_retry(t(), Refresh.debounce_token()) :: {pos_integer(), t()}
+  def track_refresh_retry(%__MODULE__{} = ft, token) when is_reference(token) do
+    {attempt, refresh} = Refresh.retry_debounce(ft.refresh, token)
+    {attempt, %{ft | refresh: refresh}}
   end
 
   @doc "Atomically accepts a current refresh result or identifies why it cannot apply."

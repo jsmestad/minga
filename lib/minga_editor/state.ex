@@ -40,6 +40,7 @@ defmodule MingaEditor.State do
   alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.Shell.Identity, as: ShellIdentity
   alias MingaEditor.Shell.Runtime, as: ShellRuntime
+  alias MingaEditor.Shell.Workflow, as: ShellWorkflow
   alias MingaEditor.State.Session, as: EditorSessionState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
@@ -2254,16 +2255,22 @@ defmodule MingaEditor.State do
   end
 
   @spec active_tab(t()) :: Tab.t() | nil
-  def active_tab(%__MODULE__{} = state), do: ShellRuntime.active_tab(state.shell_runtime)
+  def active_tab(%__MODULE__{} = state) do
+    state = ShellWorkflow.ensure_available(state)
+    ShellRuntime.active_tab(state.shell_runtime)
+  end
 
   @spec find_tab_by_buffer(t(), pid()) :: Tab.t() | nil
   def find_tab_by_buffer(%__MODULE__{} = state, pid) do
+    state = ShellWorkflow.ensure_available(state)
     ShellRuntime.find_tab_by_buffer(state.shell_runtime, pid)
   end
 
   @spec active_tab_kind(t()) :: Tab.kind()
-  def active_tab_kind(%__MODULE__{} = state),
-    do: ShellRuntime.active_tab_kind(state.shell_runtime)
+  def active_tab_kind(%__MODULE__{} = state) do
+    state = ShellWorkflow.ensure_available(state)
+    ShellRuntime.active_tab_kind(state.shell_runtime)
+  end
 
   # ── Spinner lifecycle for tab switching ──────────────────────────────────────
 
@@ -2285,6 +2292,7 @@ defmodule MingaEditor.State do
 
   @spec set_tab_session(t(), Tab.id(), pid() | nil) :: t()
   def set_tab_session(%__MODULE__{} = state, tab_id, session_pid) do
+    state = ShellWorkflow.ensure_available(state)
     runtime = ShellRuntime.set_tab_session(state.shell_runtime, tab_id, session_pid)
     apply_shell_runtime_transition(state, runtime)
   end

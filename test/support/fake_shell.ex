@@ -118,6 +118,13 @@ defmodule MingaEditor.Test.FakeShell do
   def handle_agent_session_down(%{session: session} = shell_state, session, _reason),
     do: {Map.put(shell_state, :session_down?, true), true}
 
+  def handle_agent_session_down(
+        %{mutate_rejected_callback?: true} = shell_state,
+        _session,
+        _reason
+      ),
+      do: {Map.put(shell_state, :foreign_mutation, true), false}
+
   def handle_agent_session_down(shell_state, _session, _reason), do: {shell_state, false}
 
   @impl true
@@ -129,6 +136,11 @@ defmodule MingaEditor.Test.FakeShell do
 
   @impl true
   @spec sync_agent_status(map(), pid(), atom()) :: map()
+  def sync_agent_status(%{callback_owner: owner} = shell_state, session, status) do
+    send(owner, {:fake_shell_sync_agent_status, session, status})
+    sync_agent_status(Map.delete(shell_state, :callback_owner), session, status)
+  end
+
   def sync_agent_status(%{session: session} = shell_state, session, status),
     do: Map.put(shell_state, :synced_agent_status, status)
 
@@ -141,22 +153,47 @@ defmodule MingaEditor.Test.FakeShell do
 
   @impl true
   @spec active_tab(map()) :: nil
+  def active_tab(%{callback_owner: owner}) do
+    send(owner, :fake_shell_active_tab)
+    nil
+  end
+
   def active_tab(_shell_state), do: nil
 
   @impl true
   @spec find_tab_by_buffer(map(), pid()) :: nil
+  def find_tab_by_buffer(%{callback_owner: owner}, pid) do
+    send(owner, {:fake_shell_find_tab_by_buffer, pid})
+    nil
+  end
+
   def find_tab_by_buffer(_shell_state, _pid), do: nil
 
   @impl true
   @spec active_tab_kind(map()) :: :none
+  def active_tab_kind(%{callback_owner: owner}) do
+    send(owner, :fake_shell_active_tab_kind)
+    :none
+  end
+
   def active_tab_kind(_shell_state), do: :none
 
   @impl true
   @spec set_tab_session(map(), term(), pid() | nil) :: map()
+  def set_tab_session(%{callback_owner: owner} = shell_state, tab_id, session_pid) do
+    send(owner, {:fake_shell_set_tab_session, tab_id, session_pid})
+    shell_state
+  end
+
   def set_tab_session(shell_state, _tab_id, _session_pid), do: shell_state
 
   @impl true
   @spec active_session(map()) :: pid() | nil
+  def active_session(%{callback_owner: owner} = shell_state) do
+    send(owner, :fake_shell_active_session)
+    Map.get(shell_state, :session)
+  end
+
   def active_session(%{session: session}) when is_pid(session), do: session
   def active_session(_shell_state), do: nil
 

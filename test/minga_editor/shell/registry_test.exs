@@ -18,6 +18,7 @@ defmodule MingaEditor.Shell.RegistryTest do
   alias MingaEditor.Shell.Workflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
+  alias MingaEditor.State.AgentAccess
   alias Minga.Test.RecordingFrontend
   alias MingaEditor.Test.FakeShell
   alias MingaEditor.Test.FakeShellAlt
@@ -211,6 +212,162 @@ defmodule MingaEditor.Shell.RegistryTest do
     assert after_cleanup.default_id == :traditional
   end
 
+  test "queued source cleanup preserves another source and a later unrelated registration" do
+    Registry.seed_builtin()
+    parent = self()
+    registry = Process.whereis(Registry)
+    source_a = {:extension, :source_a}
+    source_b = {:extension, :source_b}
+    unrelated_source = {:extension, :unrelated}
+
+    assert :ok = Registry.register(source_a, shell_attrs(:remove_me, FakeShell, "Remove Me"))
+    assert :ok = Registry.register(source_b, shell_attrs(:keep_me, FakeShellAlt, "Keep Me"))
+
+    before = Registry.snapshot()
+    traditional = before.entries.traditional
+    source_b_entry = before.entries.keep_me
+
+    cleanup =
+      Task.async(fn ->
+        send(parent, {:cleanup_ready, self()})
+        receive do: (:call_registry -> Registry.unregister_source(source_a))
+      end)
+
+    registration =
+      Task.async(fn ->
+        send(parent, {:registration_ready, self()})
+
+        receive do: (:call_registry ->
+                       Registry.register(
+                         unrelated_source,
+                         shell_attrs(:unrelated, FakeShell, "Unrelated")
+                       ))
+      end)
+
+    assert_receive {:cleanup_ready, cleanup_pid}
+    assert_receive {:registration_ready, registration_pid}
+    :ok = :sys.suspend(registry)
+
+    try do
+      1 = :erlang.trace(cleanup_pid, true, [:send])
+      send(cleanup_pid, :call_registry)
+
+      assert_receive {:trace, ^cleanup_pid, :send,
+                      {:"$gen_call", {_from, _tag}, {:unregister_source, ^source_a}}, ^registry}
+
+      1 = :erlang.trace(registration_pid, true, [:send])
+      send(registration_pid, :call_registry)
+
+      assert_receive {:trace, ^registration_pid, :send,
+                      {:"$gen_call", {_from, _tag}, {:register, %Entry{id: :unrelated}}},
+                      ^registry}
+
+      assert Registry.snapshot() == before
+    after
+      :ok = :sys.resume(registry)
+    end
+
+    assert Task.await(cleanup) == :ok
+    assert Task.await(registration) == :ok
+
+    after_calls = Registry.snapshot()
+    refute Map.has_key?(after_calls.entries, :remove_me)
+    refute Enum.any?(after_calls.entries, fn {_id, entry} -> entry.source == source_a end)
+    assert after_calls.entries.keep_me == source_b_entry
+    assert after_calls.entries.unrelated.source == unrelated_source
+    assert after_calls.entries.unrelated.module == FakeShell
+    assert after_calls.entries.traditional == traditional
+    assert after_calls.default_id == :traditional
+  end
+
+  test "reader resolves only complete old, absent, and new entries across queued reload calls" do
+    Registry.seed_builtin()
+    parent = self()
+    registry = Process.whereis(Registry)
+    old_source = {:extension, :old}
+    new_source = {:extension, :new}
+    assert :ok = Registry.register(old_source, shell_attrs(:reload, FakeShell, "Old"))
+    old_entry = Registry.get(:reload)
+
+    reader =
+      Task.async(fn ->
+        Enum.each([:old, :absent, :new], fn phase ->
+          receive do
+            {:observe, ^phase} ->
+              observation = {
+                Registry.resolve(:reload),
+                Registry.resolve(FakeShell),
+                Registry.resolve(FakeShellAlt)
+              }
+
+              send(parent, {:observation, phase, observation})
+          end
+        end)
+      end)
+
+    unregister =
+      Task.async(fn ->
+        send(parent, {:unregister_ready, self()})
+        receive do: (:call_registry -> Registry.unregister(old_source, :reload))
+      end)
+
+    assert_receive {:unregister_ready, unregister_pid}
+    :ok = :sys.suspend(registry)
+
+    try do
+      1 = :erlang.trace(unregister_pid, true, [:send])
+      send(unregister_pid, :call_registry)
+
+      assert_receive {:trace, ^unregister_pid, :send,
+                      {:"$gen_call", {_from, _tag}, {:unregister, ^old_source, :reload}},
+                      ^registry}
+
+      send(reader.pid, {:observe, :old})
+      assert_receive {:observation, :old, old_observation}
+      assert old_observation == {old_entry, old_entry, nil}
+    after
+      :ok = :sys.resume(registry)
+    end
+
+    assert Task.await(unregister) == :ok
+
+    registration =
+      Task.async(fn ->
+        send(parent, {:reload_ready, self()})
+
+        receive do: (:call_registry ->
+                       Registry.register(
+                         new_source,
+                         shell_attrs(:reload, FakeShellAlt, "New")
+                       ))
+      end)
+
+    assert_receive {:reload_ready, registration_pid}
+    :ok = :sys.suspend(registry)
+
+    try do
+      1 = :erlang.trace(registration_pid, true, [:send])
+      send(registration_pid, :call_registry)
+
+      assert_receive {:trace, ^registration_pid, :send,
+                      {:"$gen_call", {_from, _tag}, {:register, %Entry{id: :reload}}}, ^registry}
+
+      send(reader.pid, {:observe, :absent})
+      assert_receive {:observation, :absent, absent_observation}
+      assert absent_observation == {nil, nil, nil}
+    after
+      :ok = :sys.resume(registry)
+    end
+
+    assert Task.await(registration) == :ok
+    new_entry = Registry.get(:reload)
+
+    send(reader.pid, {:observe, :new})
+    assert_receive {:observation, :new, new_observation}
+    assert new_observation == {new_entry, nil, new_entry}
+    assert Task.await(reader) == :ok
+  end
+
   test "readers observe coherent cleanup and reload publication boundaries" do
     Registry.seed_builtin()
     parent = self()
@@ -291,7 +448,7 @@ defmodule MingaEditor.Shell.RegistryTest do
     switched = Workflow.switch(state, :fake)
 
     assert Runtime.module(switched.shell_runtime) == FakeShellAlt
-    assert switched.shell_runtime.state == %{name: :fake_alt, events: []}
+    assert switched.shell_runtime.state == %{name: :fake_alt, events: [], tab_bar: nil}
   end
 
   test "switching back restores state for the matching registration" do
@@ -874,31 +1031,79 @@ defmodule MingaEditor.Shell.RegistryTest do
     assert stash.second.state.synced_agent_status == :thinking
   end
 
-  test "renderer writeback drops stale output after a shell id is re-registered" do
+  test "active shell callbacks normalize a stale registration before dispatch" do
     Registry.seed_builtin()
+    source = {:extension, :fake}
+    assert :ok = Registry.register(source, shell_attrs(:fake, FakeShell, "Fake"))
+
+    state = TestHelpers.base_state() |> Workflow.switch(:fake)
+
+    {runtime, workspace} =
+      Runtime.route_event(
+        state.shell_runtime,
+        state.workspace,
+        {:replace_test_state, %{callback_owner: self(), session: self()}}
+      )
+
+    state =
+      state
+      |> EditorState.set_workspace(workspace)
+      |> EditorState.apply_shell_runtime_transition(runtime)
+
+    assert :ok = Registry.unregister_source(source)
 
     assert :ok =
-             Registry.register({:extension, :fake}, %{
-               id: :fake,
-               module: FakeShell,
-               display_name: "Fake",
-               description: "Fake shell",
-               capabilities: [:tui]
-             })
+             Registry.register(
+               source,
+               shell_attrs(:fake, FakeShellAlt, "Replacement")
+             )
+
+    replacement = Registry.get(:fake)
+    refute Runtime.active_entry?(state.shell_runtime, replacement)
+
+    assert AgentAccess.session(state) == nil
+    assert EditorState.active_tab(state) == nil
+    assert EditorState.find_tab_by_buffer(state, self()) == nil
+    assert EditorState.active_tab_kind(state) == :none
+
+    updated = EditorState.set_tab_session(state, 1, self())
+    assert Runtime.active_entry?(updated.shell_runtime, replacement)
+
+    {event_state, _effects} = Events.handle(state, {:status_changed, :thinking})
+    assert Runtime.active_entry?(event_state.shell_runtime, replacement)
+
+    refute_received :fake_shell_active_session
+    refute_received :fake_shell_active_tab
+    refute_received {:fake_shell_find_tab_by_buffer, _pid}
+    refute_received :fake_shell_active_tab_kind
+    refute_received {:fake_shell_set_tab_session, _tab_id, _session_pid}
+    refute_received {:fake_shell_sync_agent_status, _session, _status}
+  end
+
+  test "renderer writeback drops stale output after the same shell is re-registered" do
+    Registry.seed_builtin()
+    source = {:extension, :fake}
+
+    attrs = %{
+      id: :fake,
+      module: FakeShell,
+      display_name: "Fake",
+      description: "Fake shell",
+      capabilities: [:tui]
+    }
+
+    assert :ok = Registry.register(source, attrs)
+    old_entry = Registry.get(:fake)
 
     state = TestHelpers.base_state() |> Workflow.switch(:fake)
     input = Input.from_editor_state(state)
 
-    assert :ok = Registry.unregister_source({:extension, :fake})
+    assert :ok = Registry.unregister_source(source)
+    assert :ok = Registry.register(source, attrs)
 
-    assert :ok =
-             Registry.register({:extension, :fake_alt}, %{
-               id: :fake,
-               module: FakeShellAlt,
-               display_name: "Fake Alt",
-               description: "Fake shell alt",
-               capabilities: [:tui]
-             })
+    new_entry = Registry.get(:fake)
+    assert new_entry.generation > old_entry.generation
+    refute Identity.matches?(input.shell_identity, new_entry)
 
     writeback = %MingaEditor.Renderer.RenderReceipt{
       layout: :rendered_layout,

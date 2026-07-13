@@ -9,6 +9,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
   alias Minga.Git.Stub, as: GitStub
   alias Minga.Project.FileTree
   alias Minga.Project.FileTree.BufferSync
+  alias Minga.Test.FileTreeRefreshScanner
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.EffectScheduler
   alias MingaEditor.FileTree.Freshness
@@ -55,6 +56,55 @@ defmodule MingaEditor.FileTree.FreshnessTest do
 
     assert is_reference(current.token)
     assert current.root == Path.expand(root)
+    assert EffectScheduler.active?(scheduler, Refresh)
+  end
+
+  test "scheduler pressure preserves one pending intent and retries admission", %{tmp_dir: root} do
+    blocker_root = Path.join(root, "blocker")
+    File.mkdir_p!(blocker_root)
+    scheduler = start_scheduler(max_admitted: 1)
+
+    blocker =
+      Refresh.request(tree(blocker_root, []), Minga.Events.default_registry(),
+        scanner: FileTreeRefreshScanner,
+        scanner_context: {self(), :blocker, :wait}
+      )
+
+    assert EffectScheduler.schedule(scheduler, blocker) == {:ok, blocker.id, :running}
+    assert EffectScheduler.stats(scheduler).admitted == 1
+
+    old_request = Refresh.request(tree(root, []), Minga.Events.default_registry())
+
+    state =
+      root
+      |> state_with_tree(scheduler)
+      |> track(old_request)
+      |> Freshness.request_refresh(60_000)
+
+    assert file_tree(state).refresh.current == nil
+    timer_token = file_tree(state).refresh.debounce
+    retrying = Freshness.begin_refresh(state, timer_token)
+    retry_token = file_tree(retrying).refresh.debounce
+
+    assert is_reference(retry_token)
+    assert retry_token != timer_token
+    assert file_tree(retrying).refresh.retry_attempt == 1
+    assert EffectScheduler.stats(scheduler).admitted == 1
+
+    assert :ok = EffectScheduler.cancel(scheduler, blocker.id)
+
+    assert_receive {:effect_result, ^scheduler,
+                    %Outcome{request: %{id: blocker_id}, status: :canceled} = blocker_outcome}
+
+    assert blocker_id == blocker.id
+    assert :ok = EffectScheduler.claim(scheduler, blocker_outcome)
+    EffectScheduler.finalize(scheduler, blocker_outcome)
+
+    assert_receive {:file_tree_refresh_timer, ^retry_token}
+    admitted = Freshness.begin_refresh(retrying, retry_token)
+
+    assert is_reference(file_tree(admitted).refresh.current.token)
+    assert file_tree(admitted).refresh.retry_attempt == 0
     assert EffectScheduler.active?(scheduler, Refresh)
   end
 
@@ -141,6 +191,27 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     assert reason != ""
   end
 
+  test "git metadata updates preserve an unavailable-root error", %{tmp_dir: root} do
+    state =
+      root
+      |> state_with_tree()
+      |> EditorState.update_file_tree(&FileTreeState.refresh_failed(&1, :enoent))
+
+    event = %Events.GitStatusEvent{
+      git_root: root,
+      entries: [],
+      branch: nil,
+      ahead: 0,
+      behind: 0
+    }
+
+    from_event = Freshness.refresh_git_status(state, event)
+    assert {:error, _reason} = FileTreeState.status(file_tree(from_event))
+
+    from_cache = Freshness.refresh_git_status_from_cache(from_event)
+    assert {:error, _reason} = FileTreeState.status(file_tree(from_cache))
+  end
+
   test "current root failures preserve the tree and expose an error state", %{tmp_dir: root} do
     state = %{state_with_tree(root) | backend: :tui}
     request = Refresh.request(file_tree(state).tree, EditorState.events_registry(state))
@@ -186,13 +257,17 @@ defmodule MingaEditor.FileTree.FreshnessTest do
   defp close_tree(state), do: EditorState.update_file_tree(state, &FileTreeState.close/1)
   defp file_tree(state), do: EditorState.file_tree_state(state)
 
-  defp start_scheduler do
+  defp start_scheduler(opts \\ []) do
     task_supervisor =
       start_supervised!(Supervisor.child_spec({Task.Supervisor, []}, id: make_ref()))
 
     scheduler =
       start_supervised!(
-        Supervisor.child_spec({EffectScheduler, task_supervisor: task_supervisor}, id: make_ref())
+        Supervisor.child_spec(
+          {EffectScheduler,
+           task_supervisor: task_supervisor, max_admitted: Keyword.get(opts, :max_admitted, 64)},
+          id: make_ref()
+        )
       )
 
     :ok = EffectScheduler.attach(scheduler, self())

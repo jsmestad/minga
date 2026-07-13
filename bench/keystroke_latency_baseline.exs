@@ -294,7 +294,7 @@ defmodule Minga.Bench.KeystrokeLatencyBaseline do
     try do
       fun.(ctx)
     after
-      stop_if_alive(ctx.editor)
+      stop_if_alive(ctx.generation)
       stop_if_alive(ctx.buffer)
       stop_if_alive(ctx.port)
       stop_if_alive(ctx.sidebar)
@@ -317,8 +317,8 @@ defmodule Minga.Bench.KeystrokeLatencyBaseline do
 
     {:ok, buffer} = BufferProcess.start_link(content: document(), file_path: "bench_elixir.ex")
 
-    {:ok, editor} =
-      MingaEditor.start_link(
+    {:ok, generation} =
+      MingaEditor.GenerationSupervisor.start_editor_generation_link(
         name: :"kl_bench_editor_#{id}",
         backend: :headless,
         port_manager: port,
@@ -330,12 +330,21 @@ defmodule Minga.Bench.KeystrokeLatencyBaseline do
         suppress_tool_prompts: true
       )
 
+    {:ok, editor} = MingaEditor.GenerationSupervisor.editor_owner(generation)
     ref = HeadlessPort.prepare_await(port)
     send(editor, {:minga_input, {:ready, width, height}})
     {:ok, _snapshot} = HeadlessPort.collect_frame(ref, 15_000)
     _ = :sys.get_state(editor)
 
-    %{editor: editor, buffer: buffer, port: port, sidebar: sidebar, width: width, height: height}
+    %{
+      generation: generation,
+      editor: editor,
+      buffer: buffer,
+      port: port,
+      sidebar: sidebar,
+      width: width,
+      height: height
+    }
   end
 
   # Opens the file tree sidebar so the large-frame scenario renders it. Falls

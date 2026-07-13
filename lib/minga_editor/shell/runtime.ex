@@ -8,6 +8,7 @@ defmodule MingaEditor.Shell.Runtime do
   alias MingaEditor.Shell.Entry
   alias MingaEditor.Shell.Identity
   alias MingaEditor.Shell.StateStash
+  alias MingaEditor.State.TabBar
 
   @type shell_state :: MingaEditor.Shell.shell_state()
   @type stash :: %{atom() => StateStash.t()}
@@ -466,10 +467,7 @@ defmodule MingaEditor.Shell.Runtime do
 
   @spec active_owns_agent_session?(t(), pid()) :: boolean()
   defp active_owns_agent_session?(%__MODULE__{} = runtime, session_pid) do
-    module = runtime.entry.module
-
-    function_exported?(module, :owns_agent_session?, 2) and
-      module.owns_agent_session?(runtime.state, session_pid)
+    shell_state_owns_agent_session?(runtime.entry.module, runtime.state, session_pid)
   end
 
   @spec stashed_entry_owns_agent_session?(t(), Entry.t(), pid()) :: boolean()
@@ -480,17 +478,43 @@ defmodule MingaEditor.Shell.Runtime do
        ) do
     case Map.get(runtime.stash, entry.id) do
       %StateStash{} = stashed ->
-        with {:ok, state} <- StateStash.restore(stashed, entry),
-             true <- function_exported?(entry.module, :owns_agent_session?, 2) do
-          entry.module.owns_agent_session?(state, session_pid)
-        else
-          _ -> false
+        case StateStash.restore(stashed, entry) do
+          {:ok, state} -> shell_state_owns_agent_session?(entry.module, state, session_pid)
+          :mismatch -> false
         end
 
       nil ->
         false
     end
   end
+
+  @spec shell_state_owns_agent_session?(module(), shell_state(), pid()) :: boolean()
+  defp shell_state_owns_agent_session?(module, shell_state, session_pid) do
+    if function_exported?(module, :owns_agent_session?, 2) do
+      module.owns_agent_session?(shell_state, session_pid)
+    else
+      module.active_session(shell_state) == session_pid or
+        legacy_shell_state_owns_agent_session?(shell_state, session_pid)
+    end
+  end
+
+  @spec legacy_shell_state_owns_agent_session?(shell_state(), pid()) :: boolean()
+  defp legacy_shell_state_owns_agent_session?(%{cards: cards} = shell_state, session_pid)
+       when is_map(cards) do
+    Enum.any?(cards, fn {_card_id, card} -> Map.get(card, :session) == session_pid end) or
+      legacy_tab_bar_owns_agent_session?(shell_state, session_pid)
+  end
+
+  defp legacy_shell_state_owns_agent_session?(shell_state, session_pid),
+    do: legacy_tab_bar_owns_agent_session?(shell_state, session_pid)
+
+  @spec legacy_tab_bar_owns_agent_session?(shell_state(), pid()) :: boolean()
+  defp legacy_tab_bar_owns_agent_session?(%{tab_bar: %TabBar{} = tab_bar}, session_pid) do
+    not is_nil(TabBar.find_by_session(tab_bar, session_pid)) or
+      not is_nil(TabBar.find_workspace_by_session(tab_bar, session_pid))
+  end
+
+  defp legacy_tab_bar_owns_agent_session?(_shell_state, _session_pid), do: false
 
   @spec route_active_boolean_callback(t(), atom(), [term()]) ::
           {t(), boolean(), persistence_change() | nil}
@@ -565,11 +589,16 @@ defmodule MingaEditor.Shell.Runtime do
        ) do
     with {:ok, old_state} <- StateStash.restore(stashed, entry),
          true <- function_exported?(entry.module, callback, length(args) + 1) do
-      {new_state, handled?} = apply(entry.module, callback, [old_state | args])
-      updated = StateStash.new(entry, new_state)
-      runtime = %__MODULE__{runtime | stash: Map.put(runtime.stash, entry.id, updated)}
-      change = if handled?, do: persistence_change(entry, old_state, new_state), else: nil
-      {runtime, handled?, change}
+      case apply(entry.module, callback, [old_state | args]) do
+        {new_state, true} ->
+          updated = StateStash.new(entry, new_state)
+          runtime = %__MODULE__{runtime | stash: Map.put(runtime.stash, entry.id, updated)}
+          change = persistence_change(entry, old_state, new_state)
+          {runtime, true, change}
+
+        {_new_state, false} ->
+          {runtime, false, nil}
+      end
     else
       _ -> {runtime, false, nil}
     end

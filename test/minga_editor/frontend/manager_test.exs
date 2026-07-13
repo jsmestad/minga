@@ -4,6 +4,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
 
   alias MingaEditor.Frontend.Manager
   alias MingaEditor.Frontend.Protocol
+  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
 
   defp unique_name, do: :"port_mgr_#{:erlang.unique_integer([:positive])}"
 
@@ -248,35 +249,83 @@ defmodule MingaEditor.Frontend.ManagerTest do
   end
 
   describe "output pressure" do
-    test "unwritable transport requests correlated keyframe recovery and rejects stale acknowledgements" do
+    test "the output failure budget clears retained controls and stops retries per generation" do
       name = unique_name()
-      commander = fn _port, _batch, [:nosuspend] -> false end
+      transport = start_supervised!({Agent, fn -> %{attempts: 0, writable: false} end})
+
+      commander = fn _port, _batch, [:nosuspend] ->
+        Agent.get_and_update(transport, fn state ->
+          {state.writable, %{state | attempts: state.attempts + 1}}
+        end)
+      end
 
       {pid, fake_port} =
         start_connected(name,
           port_commander: commander,
           output_retry_ms: 1,
-          output_failure_ms: 0
+          output_failure_ms: 5
         )
 
       :ok = Manager.subscribe(name)
+      title = Protocol.encode_set_title("Retained title")
+
+      assert :unwritable = Manager.send_render_commands(name, frame_commands(11, 0, 1))
+      assert :unwritable = Manager.send_commands(name, [title])
+      assert_receive {:minga_input, {:request_keyframe, 0, 1}}, 100
+
+      pressure = Manager.output_pressure(name)
+      assert pressure.current_bytes == 0
+      assert pressure.replacement_bytes == 0
+      assert pressure.control_batches == 0
+      assert pressure.total_retained_bytes == 0
+
+      attempts_after_recovery = Agent.get(transport, & &1.attempts)
+      refute_receive {:minga_input, {:request_keyframe, 0, 1}}, 30
+      assert Agent.get(transport, & &1.attempts) == attempts_after_recovery
+
+      assert :unwritable = Manager.send_render_commands(name, frame_commands(12, 0, 2))
+      assert_receive {:minga_input, {:request_keyframe, 0, 2}}, 100
+
+      Agent.update(transport, &%{&1 | writable: true})
+      assert :accepted = Manager.send_render_commands(name, frame_commands(13, 0, 3))
+
+      send_port_data(pid, fake_port, <<0x0A, 1::32, 11::32>>)
+      send_port_data(pid, fake_port, <<0x0A, 2::32, 12::32>>)
+      refute_receive {:minga_input, {:frame_applied, _, _}}, 30
+
+      send_port_data(pid, fake_port, <<0x0A, 3::32, 13::32>>)
+      assert_receive {:minga_input, {:frame_applied, 3, 13}}
+
+      pressure = Manager.output_pressure(name)
+      assert pressure.minimum_ack_generation == 3
+      assert pressure.last_admitted_generation == 3
+      assert pressure.last_admitted_frame_seq == 13
+      assert pressure.last_applied_generation == 3
+      assert pressure.last_applied_frame_seq == 13
+    end
+
+    test "future acknowledgements do not poison correlation for later admitted frames" do
+      name = unique_name()
+      {pid, fake_port} = start_connected(name)
+      :ok = Manager.subscribe(name)
+
+      assert :accepted = Manager.send_render_commands(name, frame_commands(10, 0, 1))
       send_port_data(pid, fake_port, <<0x0A, 1::32, 10::32>>)
       assert_receive {:minga_input, {:frame_applied, 1, 10}}
 
-      assert :unwritable = Manager.send_render_commands(name, frame_commands(11, 10, 1))
-      assert_receive {:minga_input, {:request_keyframe, 10, 1}}, 1_000
-
       send_port_data(pid, fake_port, <<0x0A, 1::32, 11::32>>)
-      refute_receive {:minga_input, {:frame_applied, 1, 11}}, 50
-
-      send_port_data(pid, fake_port, <<0x0A, 2::32, 12::32>>)
-      assert_receive {:minga_input, {:frame_applied, 2, 12}}
+      send_port_data(pid, fake_port, <<0x0A, 0xFFFFFFFF::32, 1::32>>)
+      refute_receive {:minga_input, {:frame_applied, _, _}}, 30
 
       pressure = Manager.output_pressure(name)
-      assert pressure.minimum_ack_generation == 2
-      assert pressure.last_applied_generation == 2
-      assert pressure.last_applied_frame_seq == 12
-      assert pressure.retained_bytes == 0
+      assert pressure.last_admitted_generation == 1
+      assert pressure.last_admitted_frame_seq == 10
+      assert pressure.last_applied_generation == 1
+      assert pressure.last_applied_frame_seq == 10
+
+      assert :accepted = Manager.send_render_commands(name, frame_commands(11, 10, 1))
+      send_port_data(pid, fake_port, <<0x0A, 1::32, 11::32>>)
+      assert_receive {:minga_input, {:frame_applied, 1, 11}}
     end
 
     test "an unwritable font configuration is retained and retried before later frames" do
@@ -314,6 +363,73 @@ defmodule MingaEditor.Frontend.ManagerTest do
       pressure = Manager.output_pressure(name)
       assert pressure.control_batches == 0
       assert pressure.control_bytes == 0
+    end
+
+    test "clipboard writes for distinct pasteboards are both retained and admitted" do
+      name = unique_name()
+      parent = self()
+      writable = start_supervised!({Agent, fn -> false end}, id: make_ref())
+
+      commander = fn _port, batch, [:nosuspend] ->
+        admitted? = Agent.get(writable, & &1)
+        send(parent, {:clipboard_attempt, admitted?, batch})
+        admitted?
+      end
+
+      {_pid, _fake_port} =
+        start_connected(name,
+          port_commander: commander,
+          output_retry_ms: 20,
+          output_failure_ms: 1_000
+        )
+
+      general = ProtocolGUI.encode_clipboard_write("general", :general)
+      find = ProtocolGUI.encode_clipboard_write("find", :find)
+
+      assert :unwritable = Manager.send_commands(name, [general])
+      assert_receive {:clipboard_attempt, false, ^general}
+      assert :unwritable = Manager.send_commands(name, [find])
+      assert Manager.output_pressure(name).control_batches == 2
+
+      Agent.update(writable, fn _ -> true end)
+      assert_receive {:clipboard_attempt, true, ^general}, 1_000
+      assert_receive {:clipboard_attempt, true, ^find}, 1_000
+      assert Manager.output_pressure(name).control_batches == 0
+    end
+
+    test "clipboard writes coalesce only within the same pasteboard" do
+      name = unique_name()
+      parent = self()
+      writable = start_supervised!({Agent, fn -> false end}, id: make_ref())
+
+      commander = fn _port, batch, [:nosuspend] ->
+        admitted? = Agent.get(writable, & &1)
+        send(parent, {:clipboard_attempt, admitted?, batch})
+        admitted?
+      end
+
+      {_pid, _fake_port} =
+        start_connected(name,
+          port_commander: commander,
+          output_retry_ms: 20,
+          output_failure_ms: 1_000
+        )
+
+      old_general = ProtocolGUI.encode_clipboard_write("old", :general)
+      latest_general = ProtocolGUI.encode_clipboard_write("latest", :general)
+      find = ProtocolGUI.encode_clipboard_write("find", :find)
+
+      assert :unwritable = Manager.send_commands(name, [old_general])
+      assert_receive {:clipboard_attempt, false, ^old_general}
+      assert :unwritable = Manager.send_commands(name, [find])
+      assert :unwritable = Manager.send_commands(name, [latest_general])
+      assert Manager.output_pressure(name).control_batches == 2
+
+      Agent.update(writable, fn _ -> true end)
+      assert_receive {:clipboard_attempt, true, ^latest_general}, 1_000
+      assert_receive {:clipboard_attempt, true, ^find}, 1_000
+      refute_receive {:clipboard_attempt, true, ^old_general}, 30
+      assert Manager.output_pressure(name).control_batches == 0
     end
 
     test "an incompatible coalesced replacement triggers keyframe recovery instead of skipping its base" do

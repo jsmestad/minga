@@ -23,6 +23,36 @@ defmodule MingaEditor.State.FileTree.RefreshTest do
     assert {:stale, ^elapsed} = FileTreeState.refresh_debounce_elapsed(elapsed, timer)
   end
 
+  test "a newer debounce intent immediately invalidates older result authority" do
+    root = "/tmp/minga-refresh-newer-intent"
+    request = make_ref()
+    timer = make_ref()
+
+    tracked = open_tree(root) |> FileTreeState.track_refresh_request(root, request)
+    assert tracked.refresh.current.token == request
+
+    assert {:scheduled, pending} = FileTreeState.request_refresh_debounce(tracked, timer)
+    assert pending.refresh.current == nil
+    assert pending.refresh.debounce == timer
+  end
+
+  test "an admission retry keeps one correlated pending intent and advances backoff" do
+    file_tree = open_tree("/tmp/minga-refresh-retry")
+    first_timer = make_ref()
+    second_timer = make_ref()
+
+    assert {1, first} = FileTreeState.track_refresh_retry(file_tree, first_timer)
+    assert first.refresh.debounce == first_timer
+    assert first.refresh.retry_attempt == 1
+
+    assert {:ready, _tree, elapsed} =
+             FileTreeState.refresh_debounce_elapsed(first, first_timer)
+
+    assert {2, second} = FileTreeState.track_refresh_retry(elapsed, second_timer)
+    assert second.refresh.debounce == second_timer
+    assert second.refresh.retry_attempt == 2
+  end
+
   test "a current request atomically replaces the tree and clears correlation" do
     root = "/tmp/minga-refresh-current"
     original = open_tree(root)
@@ -103,6 +133,24 @@ defmodule MingaEditor.State.FileTree.RefreshTest do
              )
 
     assert Enum.map(current.tree.entries, & &1.name) == ["current.ex"]
+  end
+
+  test "metadata replacement preserves root errors and refresh correlation" do
+    root = "/tmp/minga-refresh-metadata"
+    request = make_ref()
+
+    file_tree =
+      root
+      |> open_tree()
+      |> FileTreeState.track_refresh_request(root, request)
+      |> FileTreeState.refresh_failed(:enoent)
+
+    metadata_tree = tree(root, [entry(root, "badged.ex")])
+    replaced = FileTreeState.replace_tree_metadata(file_tree, metadata_tree)
+
+    assert replaced.tree == metadata_tree
+    assert FileTreeState.status(replaced) == FileTreeState.status(file_tree)
+    assert replaced.refresh == file_tree.refresh
   end
 
   test "failed and canceled terminals clear only the matching request" do

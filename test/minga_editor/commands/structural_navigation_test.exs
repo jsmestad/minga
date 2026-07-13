@@ -80,19 +80,24 @@ defmodule MingaEditor.Commands.StructuralNavigationTest do
         filetype: :javascript
       )
 
-    {:ok, editor} =
-      MingaEditor.start_link(
-        name: :"structural_nav_editor_#{id}",
-        port_manager: nil,
-        buffer: buffer,
-        width: 40,
-        height: 10,
-        editing_model: :vim,
-        events_registry: events_registry,
-        project_root: project_root,
-        suppress_tool_prompts: true
+    generation =
+      start_supervised!(
+        Supervisor.child_spec(
+          {MingaEditor,
+           name: :"structural_nav_editor_#{id}",
+           port_manager: nil,
+           buffer: buffer,
+           width: 40,
+           height: 10,
+           editing_model: :vim,
+           events_registry: events_registry,
+           project_root: project_root,
+           suppress_tool_prompts: true},
+          id: make_ref()
+        )
       )
 
+    {:ok, editor} = MingaEditor.GenerationSupervisor.editor_owner(generation)
     editor_state = :sys.get_state(editor, @sync_timeout)
     _state_with_presentation = HighlightSync.setup_for_buffer(editor_state)
 

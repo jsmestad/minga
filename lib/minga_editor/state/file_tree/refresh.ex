@@ -18,19 +18,27 @@ defmodule MingaEditor.State.FileTree.Refresh do
 
   @type t :: %__MODULE__{
           debounce: debounce_token() | nil,
-          current: current_request() | nil
+          current: current_request() | nil,
+          retry_attempt: non_neg_integer()
         }
 
-  defstruct debounce: nil, current: nil
+  defstruct debounce: nil, current: nil, retry_attempt: 0
 
-  @doc "Records one debounce intent, leaving an existing timer authoritative."
+  @doc "Records one debounce intent, leaving an existing timer authoritative and invalidating older result authority."
   @spec request_debounce(t(), debounce_token()) :: {:scheduled | :already_scheduled, t()}
   def request_debounce(%__MODULE__{debounce: nil} = refresh, token) when is_reference(token) do
-    {:scheduled, %{refresh | debounce: token}}
+    {:scheduled, %{refresh | debounce: token, current: nil, retry_attempt: 0}}
   end
 
   def request_debounce(%__MODULE__{} = refresh, token) when is_reference(token) do
-    {:already_scheduled, refresh}
+    {:already_scheduled, %{refresh | current: nil, retry_attempt: 0}}
+  end
+
+  @doc "Re-arms one correlated debounce after scheduler admission pressure."
+  @spec retry_debounce(t(), debounce_token()) :: {pos_integer(), t()}
+  def retry_debounce(%__MODULE__{debounce: nil} = refresh, token) when is_reference(token) do
+    attempt = refresh.retry_attempt + 1
+    {attempt, %{refresh | debounce: token, current: nil, retry_attempt: attempt}}
   end
 
   @doc "Consumes only the currently correlated debounce timer message."
@@ -47,7 +55,7 @@ defmodule MingaEditor.State.FileTree.Refresh do
   @spec request_admitted(t(), String.t(), request_token()) :: t()
   def request_admitted(%__MODULE__{} = refresh, root, token)
       when is_binary(root) and is_reference(token) do
-    %{refresh | current: %{root: Path.expand(root), token: token}}
+    %{refresh | current: %{root: Path.expand(root), token: token}, retry_attempt: 0}
   end
 
   @doc "Classifies and consumes a terminal result for the semantic current request."
@@ -69,5 +77,6 @@ defmodule MingaEditor.State.FileTree.Refresh do
 
   @doc "Invalidates every timer and result correlation when the tree lifecycle changes."
   @spec invalidate(t()) :: t()
-  def invalidate(%__MODULE__{} = refresh), do: %{refresh | debounce: nil, current: nil}
+  def invalidate(%__MODULE__{} = refresh),
+    do: %{refresh | debounce: nil, current: nil, retry_attempt: 0}
 end

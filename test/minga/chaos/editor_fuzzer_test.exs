@@ -89,8 +89,8 @@ defmodule Minga.Chaos.EditorFuzzerTest do
       end
     end)
 
-    {:ok, editor} =
-      MingaEditor.start_link(
+    {:ok, generation} =
+      MingaEditor.GenerationSupervisor.start_editor_generation_link(
         name: :"chaos_editor_#{id}",
         port_manager: port,
         buffer: buffer,
@@ -98,6 +98,8 @@ defmodule Minga.Chaos.EditorFuzzerTest do
         height: height,
         editing_model: :vim
       )
+
+    {:ok, editor} = MingaEditor.GenerationSupervisor.editor_owner(generation)
 
     # Allow the editor process to use our Mox stubs
     Mox.allow(Minga.Clipboard.Mock, self(), editor)
@@ -116,6 +118,7 @@ defmodule Minga.Chaos.EditorFuzzerTest do
     {:ok, _snapshot} = HeadlessPort.collect_frame(ref)
 
     %{
+      generation: generation,
       editor: editor,
       buffer: buffer,
       port: port,
@@ -401,12 +404,12 @@ defmodule Minga.Chaos.EditorFuzzerTest do
   end
 
   defp cleanup_ctx(%{
-         editor: editor,
+         generation: generation,
          buffer: buffer,
          port: port,
          clipboard_table: clipboard_table
        }) do
-    stop_process(editor)
+    stop_process(generation)
     stop_process(port)
     stop_process(buffer)
     delete_table(clipboard_table)

@@ -7,7 +7,7 @@ defmodule MingaEditor.Test.FakeShellAlt do
   @spec init(keyword()) :: map()
   def init(opts) do
     send(self(), {:fake_shell_alt_initialized, self()})
-    %{name: Keyword.get(opts, :name, :fake_alt), events: []}
+    %{name: Keyword.get(opts, :name, :fake_alt), events: [], tab_bar: nil}
   end
 
   @impl true
@@ -87,11 +87,6 @@ defmodule MingaEditor.Test.FakeShellAlt do
   @spec on_agent_event(map(), MingaEditor.Session.State.t(), pid(), term()) ::
           {map(), MingaEditor.Session.State.t(), [MingaEditor.effect()]}
   def on_agent_event(shell_state, workspace, _session, _event), do: {shell_state, workspace, []}
-
-  @impl true
-  @spec owns_agent_session?(map(), pid()) :: boolean()
-  def owns_agent_session?(%{session: session}, session), do: true
-  def owns_agent_session?(_shell_state, _session), do: false
 
   @impl true
   @spec handle_agent_session_restarted(map(), pid(), pid(), term()) :: {map(), boolean()}

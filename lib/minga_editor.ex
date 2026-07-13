@@ -97,9 +97,26 @@ defmodule MingaEditor do
 
   # ── Client API ──────────────────────────────────────────────────────────────
 
-  @doc "Starts the editor."
+  @doc false
+  @spec child_spec([start_opt()]) :: Supervisor.child_spec()
+  def child_spec(opts) do
+    %{
+      id: __MODULE__,
+      start: {MingaEditor.GenerationSupervisor, :start_editor_generation_link, [opts]},
+      restart: :permanent,
+      shutdown: :infinity,
+      type: :supervisor,
+      modules: [MingaEditor.GenerationSupervisor]
+    }
+  end
+
+  @doc "Starts an Editor owner with an existing generation-owned effect scheduler."
   @spec start_link([start_opt()]) :: GenServer.on_start()
-  def start_link(opts \\ []) do
+  def start_link(opts \\ []), do: start_owner_link(opts)
+
+  @doc "OTP child start for the Editor owner inside a generation boundary."
+  @spec start_owner_link([start_opt()]) :: GenServer.on_start()
+  def start_owner_link(opts) do
     {name, opts} = Keyword.pop(opts, :name, __MODULE__)
     GenServer.start_link(__MODULE__, opts, name: name)
   end
@@ -278,7 +295,8 @@ defmodule MingaEditor do
   end
 
   @spec attach_effect_scheduler(GenServer.server() | nil) :: :ok
-  defp attach_effect_scheduler(nil), do: :ok
+  defp attach_effect_scheduler(nil),
+    do: raise(ArgumentError, "an Editor effect scheduler is required")
 
   defp attach_effect_scheduler(scheduler) do
     :ok = EffectScheduler.attach(scheduler, self())

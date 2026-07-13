@@ -403,6 +403,71 @@ defmodule MingaEditor.EffectSchedulerTest do
     refute_received {:effect_terminal, %Outcome{request: %{id: ^queued_id}}}
   end
 
+  test "manual headless Editor generation provisions a generation-owned scheduler" do
+    editor_name = {:global, {__MODULE__, make_ref(), :editor}}
+
+    assert {:ok, generation} =
+             GenerationSupervisor.start_editor_generation_link(
+               name: editor_name,
+               backend: :headless,
+               rendering: :disabled,
+               port_manager: nil,
+               suppress_tool_prompts: true
+             )
+
+    assert {:ok, editor} = GenerationSupervisor.editor_owner(generation)
+    assert GenServer.whereis(editor_name) == editor
+    scheduler = :sys.get_state(editor).effect_scheduler
+    assert is_pid(GenServer.whereis(scheduler))
+    assert EffectScheduler.stats(scheduler).capacity == 64
+    assert :ok = Supervisor.stop(generation)
+  end
+
+  test "supervised Editor tracks and tears down the whole generation" do
+    editor_name = {:global, {__MODULE__, make_ref(), :supervised_editor}}
+
+    generation =
+      start_supervised!(
+        {MingaEditor,
+         name: editor_name,
+         backend: :headless,
+         rendering: :disabled,
+         port_manager: nil,
+         suppress_tool_prompts: true},
+        restart: :temporary
+      )
+
+    assert {:ok, editor} = GenerationSupervisor.editor_owner(generation)
+    refute editor == generation
+    assert GenServer.whereis(editor_name) == editor
+
+    task_supervisor = generation_child!(generation, :effect_task_supervisor)
+    scheduler = generation_child!(generation, :effect_scheduler)
+    generation_monitor = Process.monitor(generation)
+    editor_monitor = Process.monitor(editor)
+    scheduler_monitor = Process.monitor(scheduler)
+    task_supervisor_monitor = Process.monitor(task_supervisor)
+
+    request = EffectProbe.request(self(), :supervised_generation, :resource, Policy.fifo(0))
+    assert EffectScheduler.schedule(scheduler, request) == {:ok, request.id, :running}
+
+    assert_receive {:effect_started, :supervised_generation, worker, [:supervised_generation]},
+                   @effect_timeout
+
+    worker_monitor = Process.monitor(worker)
+
+    assert :ok = stop_supervised(MingaEditor)
+    assert_receive {:DOWN, ^generation_monitor, :process, ^generation, :shutdown}, @effect_timeout
+    assert_receive {:DOWN, ^editor_monitor, :process, ^editor, :shutdown}, @effect_timeout
+    assert_receive {:DOWN, ^scheduler_monitor, :process, ^scheduler, :shutdown}, @effect_timeout
+
+    assert_receive {:DOWN, ^task_supervisor_monitor, :process, ^task_supervisor, :shutdown},
+                   @effect_timeout
+
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, _reason}, @effect_timeout
+    assert GenServer.whereis(editor_name) == nil
+  end
+
   test "generation restart kills old work before a replacement owner attaches" do
     generation_name = {:global, {__MODULE__, make_ref(), :generation}}
     task_name = {:global, {__MODULE__, make_ref(), :tasks}}
@@ -462,6 +527,14 @@ defmodule MingaEditor.EffectSchedulerTest do
 
     assert Supervisor.count_children(generation).active == 3
     refute_received {:effect_terminal, %Outcome{request: %{id: ^request_id}}}
+  end
+
+  @spec generation_child!(Supervisor.supervisor(), term()) :: pid()
+  defp generation_child!(generation, child_id) do
+    case List.keyfind(Supervisor.which_children(generation), child_id, 0) do
+      {^child_id, child, _type, _modules} when is_pid(child) -> child
+      _missing -> raise "missing generation child #{inspect(child_id)}"
+    end
   end
 
   @spec start_scheduler(keyword()) :: pid()
