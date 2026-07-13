@@ -33,8 +33,8 @@ public enum SidebarSizing {
 }
 
 public struct SidebarContainer: View {
-    public init(guiState: GUIState, activeSidebar: SidebarItem, encoder: InputEncoder? = nil, projectName: String, gitBranch: String, leadingPadding: CGFloat, sidebarWidth: Binding<CGFloat>) {
-        self.guiState = guiState
+    public init(input: ShellHostInput, activeSidebar: SidebarItem, encoder: InputEncoder? = nil, projectName: String, gitBranch: String, leadingPadding: CGFloat, sidebarWidth: Binding<CGFloat>) {
+        self.input = input
         self.activeSidebar = activeSidebar
         self.encoder = encoder
         self.projectName = projectName
@@ -42,7 +42,7 @@ public struct SidebarContainer: View {
         self.leadingPadding = leadingPadding
         self._sidebarWidth = sidebarWidth
     }
-    public let guiState: GUIState
+    public let input: ShellHostInput
     public let activeSidebar: SidebarItem
     @Environment(\.themeColors) private var theme
     public let encoder: InputEncoder?
@@ -70,7 +70,7 @@ public struct SidebarContainer: View {
 
     private var context: NativeSidebarContext {
         NativeSidebarContext(
-            guiState: guiState,
+            input: input,
             theme: theme,
             encoder: encoder,
             projectName: projectName,

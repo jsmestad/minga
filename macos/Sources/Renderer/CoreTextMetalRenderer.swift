@@ -105,6 +105,8 @@ final class CoreTextMetalRenderer {
     private var configurationEpoch: UInt64 = 0
     /// Most recent renderer-local presentation failure. Semantic publication is unaffected.
     private(set) var lastNativePresentationFailure: NativePresentationFailure?
+    /// Domain-frame presentation telemetry owned by the GUI state.
+    weak var presentationMetrics: GUIFramePresentationMetrics?
     /// Generation of the last GPU-completed presentation whose candidate resources were promoted.
     private(set) var lastCompletedPresentationGeneration: UInt64 = 0
     private let bgPipeline: MTLRenderPipelineState
@@ -346,6 +348,7 @@ final class CoreTextMetalRenderer {
                 contentScale: Float, scrollOffset: SIMD2<Float> = .zero,
                 presentationWindowId: UInt16? = nil,
                 presentationInputSeq: UInt32 = 0,
+                presentationFrameSeq: UInt32? = nil,
                 latencyRecorder: LatencyRecorder? = nil) {
         let renderSignpostID = OSSignpostID(log: renderLog)
         os_signpost(.begin, log: renderLog, name: "Frame", signpostID: renderSignpostID)
@@ -442,7 +445,7 @@ final class CoreTextMetalRenderer {
             recordNativeFailure(NativePresentationFailure(
                 phase: .atlas, dimension: .texture,
                 frameSequence: presentationInputSeq, reason: .unavailable
-            ), latencyRecorder: latencyRecorder)
+            ), latencyRecorder: latencyRecorder, presentationFrameSeq: presentationFrameSeq)
             return
         }
         let candidateConfigurationEpoch = configurationEpoch
@@ -459,7 +462,7 @@ final class CoreTextMetalRenderer {
         case .success:
             break
         case .failure(let failure):
-            recordNativeFailure(failure, latencyRecorder: latencyRecorder)
+            recordNativeFailure(failure, latencyRecorder: latencyRecorder, presentationFrameSeq: presentationFrameSeq)
             return
         }
 
@@ -846,7 +849,7 @@ final class CoreTextMetalRenderer {
 
         if let failure = windowContentRenderer?.nativePresentationFailure ?? candidateAtlas.nativePresentationFailure {
             recordNativeFailure(failure, frameSequence: presentationInputSeq,
-                                latencyRecorder: latencyRecorder)
+                                latencyRecorder: latencyRecorder, presentationFrameSeq: presentationFrameSeq)
             return
         }
 
@@ -880,13 +883,13 @@ final class CoreTextMetalRenderer {
                 frameSequence: presentationInputSeq
             )
         } catch let failure as NativePresentationFailure {
-            recordNativeFailure(failure, latencyRecorder: latencyRecorder)
+            recordNativeFailure(failure, latencyRecorder: latencyRecorder, presentationFrameSeq: presentationFrameSeq)
             return
         } catch {
             recordNativeFailure(NativePresentationFailure(
                 phase: .buffers, dimension: .arithmetic,
                 frameSequence: presentationInputSeq, reason: .overflow
-            ), latencyRecorder: latencyRecorder)
+            ), latencyRecorder: latencyRecorder, presentationFrameSeq: presentationFrameSeq)
             return
         }
         let candidateInstanceBuffer: MTLBuffer?
@@ -896,7 +899,7 @@ final class CoreTextMetalRenderer {
                     phase: .buffers, dimension: .lineBuffer,
                     requested: bufferDemand.lineBytes,
                     frameSequence: presentationInputSeq, reason: .allocation
-                ), latencyRecorder: latencyRecorder)
+                ), latencyRecorder: latencyRecorder, presentationFrameSeq: presentationFrameSeq)
                 return
             }
             candidateInstanceBuffer = buffer
@@ -913,7 +916,7 @@ final class CoreTextMetalRenderer {
                         phase: .buffers, dimension: dimensions[index],
                         requested: bufferDemand.quadBytesPerBuffer,
                         frameSequence: presentationInputSeq, reason: .allocation
-                    ), latencyRecorder: latencyRecorder)
+                    ), latencyRecorder: latencyRecorder, presentationFrameSeq: presentationFrameSeq)
                     return
                 }
                 candidateQuadBuffers.append(buffer)
@@ -927,7 +930,7 @@ final class CoreTextMetalRenderer {
             recordNativeFailure(NativePresentationFailure(
                 phase: .drawable, dimension: .renderTarget,
                 frameSequence: presentationInputSeq, reason: .overflow
-            ), latencyRecorder: latencyRecorder)
+            ), latencyRecorder: latencyRecorder, presentationFrameSeq: presentationFrameSeq)
             return
         }
         let deviceDimensionLimit = nativeDeviceTextureDimensionLimit(device)
@@ -940,7 +943,7 @@ final class CoreTextMetalRenderer {
                 phase: .drawable, dimension: .textureWidth,
                 requested: requested, limit: targetWidthLimit,
                 frameSequence: presentationInputSeq, reason: .limit
-            ), latencyRecorder: latencyRecorder)
+            ), latencyRecorder: latencyRecorder, presentationFrameSeq: presentationFrameSeq)
             return
         }
         guard viewportSize.height <= CGFloat(targetHeightLimit) else {
@@ -950,7 +953,7 @@ final class CoreTextMetalRenderer {
                 phase: .drawable, dimension: .textureHeight,
                 requested: requested, limit: targetHeightLimit,
                 frameSequence: presentationInputSeq, reason: .limit
-            ), latencyRecorder: latencyRecorder)
+            ), latencyRecorder: latencyRecorder, presentationFrameSeq: presentationFrameSeq)
             return
         }
         let targetWidth = Int(viewportSize.width.rounded(.up))
@@ -964,13 +967,13 @@ final class CoreTextMetalRenderer {
                 frameSequence: presentationInputSeq
             )
         } catch let failure as NativePresentationFailure {
-            recordNativeFailure(failure, latencyRecorder: latencyRecorder)
+            recordNativeFailure(failure, latencyRecorder: latencyRecorder, presentationFrameSeq: presentationFrameSeq)
             return
         } catch {
             recordNativeFailure(NativePresentationFailure(
                 phase: .drawable, dimension: .arithmetic,
                 frameSequence: presentationInputSeq, reason: .overflow
-            ), latencyRecorder: latencyRecorder)
+            ), latencyRecorder: latencyRecorder, presentationFrameSeq: presentationFrameSeq)
             return
         }
         let targetDescriptor = MTLTextureDescriptor.texture2DDescriptor(
@@ -986,7 +989,7 @@ final class CoreTextMetalRenderer {
                 phase: .drawable, dimension: .renderTarget,
                 requested: targetDemand.byteCount, limit: resourcePolicy.renderTargetBytes,
                 frameSequence: presentationInputSeq, reason: .allocation
-            ), latencyRecorder: latencyRecorder)
+            ), latencyRecorder: latencyRecorder, presentationFrameSeq: presentationFrameSeq)
             return
         }
 
@@ -1001,14 +1004,14 @@ final class CoreTextMetalRenderer {
             recordNativeFailure(NativePresentationFailure(
                 phase: .command, dimension: .commandBuffer,
                 frameSequence: presentationInputSeq, reason: .unavailable
-            ), latencyRecorder: latencyRecorder)
+            ), latencyRecorder: latencyRecorder, presentationFrameSeq: presentationFrameSeq)
             return
         }
         guard let encoder = factories.makeEncoder(cmdBuf, renderDesc) else {
             recordNativeFailure(NativePresentationFailure(
                 phase: .command, dimension: .encoder,
                 frameSequence: presentationInputSeq, reason: .unavailable
-            ), latencyRecorder: latencyRecorder)
+            ), latencyRecorder: latencyRecorder, presentationFrameSeq: presentationFrameSeq)
             return
         }
 
@@ -1453,7 +1456,7 @@ final class CoreTextMetalRenderer {
         if let failure = windowContentRenderer?.nativePresentationFailure ?? candidateAtlas.nativePresentationFailure {
             encoder.endEncoding()
             recordNativeFailure(failure, frameSequence: presentationInputSeq,
-                                latencyRecorder: latencyRecorder)
+                                latencyRecorder: latencyRecorder, presentationFrameSeq: presentationFrameSeq)
             return
         }
 
@@ -1466,7 +1469,7 @@ final class CoreTextMetalRenderer {
             recordNativeFailure(NativePresentationFailure(
                 phase: .submission, dimension: .submission,
                 frameSequence: presentationInputSeq, reason: .submission
-            ), latencyRecorder: latencyRecorder)
+            ), latencyRecorder: latencyRecorder, presentationFrameSeq: presentationFrameSeq)
             return
         }
 
@@ -1483,7 +1486,7 @@ final class CoreTextMetalRenderer {
                 self.recordNativeFailure(NativePresentationFailure(
                     phase: .completion, dimension: .completion,
                     frameSequence: presentationInputSeq, reason: .completion
-                ), discardLatency: false, latencyRecorder: latencyRecorder)
+                ), discardLatency: false, latencyRecorder: latencyRecorder, presentationFrameSeq: presentationFrameSeq)
                 latencyRecorder?.discard(seq: presentationInputSeq, reason: .gpuFailure)
                 os_signpost(.event, log: renderLog, name: "PresentationDropped", signpostID: renderSignpostID,
                             "input=%{public}u status=%{public}d", presentationInputSeq, status)
@@ -1491,13 +1494,18 @@ final class CoreTextMetalRenderer {
             }
             guard self.configurationEpoch == candidateConfigurationEpoch else {
                 latencyRecorder?.discard(seq: presentationInputSeq, reason: .superseded)
+                if let presentationFrameSeq {
+                    self.presentationMetrics?.discard(
+                        domain: .editor, outcome: .superseded, frameSeq: presentationFrameSeq
+                    )
+                }
                 return
             }
             guard let drawable = drawableProvider() else {
                 self.recordNativeFailure(NativePresentationFailure(
                     phase: .drawable, dimension: .drawable,
                     frameSequence: presentationInputSeq, reason: .unavailable
-                ), latencyRecorder: latencyRecorder)
+                ), latencyRecorder: latencyRecorder, presentationFrameSeq: presentationFrameSeq)
                 return
             }
             guard drawable.texture.width == candidateRenderTarget.width else {
@@ -1505,7 +1513,7 @@ final class CoreTextMetalRenderer {
                     phase: .drawable, dimension: .textureWidth,
                     requested: drawable.texture.width, limit: candidateRenderTarget.width,
                     frameSequence: presentationInputSeq, reason: .mismatch
-                ), latencyRecorder: latencyRecorder)
+                ), latencyRecorder: latencyRecorder, presentationFrameSeq: presentationFrameSeq)
                 return
             }
             guard drawable.texture.height == candidateRenderTarget.height else {
@@ -1513,28 +1521,28 @@ final class CoreTextMetalRenderer {
                     phase: .drawable, dimension: .textureHeight,
                     requested: drawable.texture.height, limit: candidateRenderTarget.height,
                     frameSequence: presentationInputSeq, reason: .mismatch
-                ), latencyRecorder: latencyRecorder)
+                ), latencyRecorder: latencyRecorder, presentationFrameSeq: presentationFrameSeq)
                 return
             }
             guard drawable.texture.pixelFormat == candidateRenderTarget.pixelFormat else {
                 self.recordNativeFailure(NativePresentationFailure(
                     phase: .drawable, dimension: .renderTarget,
                     frameSequence: presentationInputSeq, reason: .mismatch
-                ), latencyRecorder: latencyRecorder)
+                ), latencyRecorder: latencyRecorder, presentationFrameSeq: presentationFrameSeq)
                 return
             }
             guard let presentationBuffer = self.factories.makeCommandBuffer(self.commandQueue) else {
                 self.recordNativeFailure(NativePresentationFailure(
                     phase: .command, dimension: .presentationCommandBuffer,
                     frameSequence: presentationInputSeq, reason: .unavailable
-                ), latencyRecorder: latencyRecorder)
+                ), latencyRecorder: latencyRecorder, presentationFrameSeq: presentationFrameSeq)
                 return
             }
             guard let blit = self.factories.makeBlitEncoder(presentationBuffer) else {
                 self.recordNativeFailure(NativePresentationFailure(
                     phase: .command, dimension: .presentationEncoder,
                     frameSequence: presentationInputSeq, reason: .unavailable
-                ), latencyRecorder: latencyRecorder)
+                ), latencyRecorder: latencyRecorder, presentationFrameSeq: presentationFrameSeq)
                 return
             }
             blit.copy(
@@ -1554,7 +1562,7 @@ final class CoreTextMetalRenderer {
                 self.recordNativeFailure(NativePresentationFailure(
                     phase: .submission, dimension: .presentationCopy,
                     frameSequence: presentationInputSeq, reason: .submission
-                ), latencyRecorder: latencyRecorder)
+                ), latencyRecorder: latencyRecorder, presentationFrameSeq: presentationFrameSeq)
                 return
             }
 
@@ -1564,13 +1572,18 @@ final class CoreTextMetalRenderer {
                     self.recordNativeFailure(NativePresentationFailure(
                         phase: .completion, dimension: .presentationCopy,
                         frameSequence: presentationInputSeq, reason: .completion
-                    ), discardLatency: false, latencyRecorder: latencyRecorder)
+                    ), discardLatency: false, latencyRecorder: latencyRecorder, presentationFrameSeq: presentationFrameSeq)
                     latencyRecorder?.discard(seq: presentationInputSeq, reason: .gpuFailure)
                     return
                 }
                 guard self.configurationEpoch == candidateConfigurationEpoch,
                       generation > self.presentationGeneration.completed else {
                     latencyRecorder?.discard(seq: presentationInputSeq, reason: .superseded)
+                    if let presentationFrameSeq {
+                        self.presentationMetrics?.discard(
+                            domain: .editor, outcome: .superseded, frameSeq: presentationFrameSeq
+                        )
+                    }
                     return
                 }
                 do {
@@ -1579,11 +1592,16 @@ final class CoreTextMetalRenderer {
                     self.recordNativeFailure(NativePresentationFailure(
                         phase: .submission, dimension: .drawable,
                         frameSequence: presentationInputSeq, reason: .submission
-                    ), latencyRecorder: latencyRecorder)
+                    ), latencyRecorder: latencyRecorder, presentationFrameSeq: presentationFrameSeq)
                     return
                 }
                 guard self.presentationGeneration.complete(generation) else {
                     latencyRecorder?.discard(seq: presentationInputSeq, reason: .superseded)
+                    if let presentationFrameSeq {
+                        self.presentationMetrics?.discard(
+                            domain: .editor, outcome: .superseded, frameSeq: presentationFrameSeq
+                        )
+                    }
                     return
                 }
 
@@ -1596,16 +1614,25 @@ final class CoreTextMetalRenderer {
                 self.quadBufferCapacity = candidateQuadCapacity
                 self.lastCompletedPresentationGeneration = generation
                 latencyRecorder?.markPresented(seq: presentationInputSeq)
+                if let presentationFrameSeq {
+                    self.presentationMetrics?.recordMetalPresented(frameSeq: presentationFrameSeq)
+                }
                 os_signpost(.event, log: renderLog, name: "PresentationComplete",
                             signpostID: renderSignpostID,
                             "input=%{public}u", presentationInputSeq)
             }
             presentationBuffer.commit()
+            if let presentationFrameSeq {
+                self.presentationMetrics?.recordMetalSubmission(frameSeq: presentationFrameSeq)
+            }
+            os_signpost(.event, log: renderLog, name: "MetalPresentationSubmit", signpostID: renderSignpostID,
+                        "input=%{public}u frame=%{public}u", presentationInputSeq,
+                        presentationFrameSeq ?? 0)
         }
+        cmdBuf.commit()
         latencyRecorder?.markSubmitted(seq: presentationInputSeq)
         os_signpost(.event, log: renderLog, name: "MetalSubmit", signpostID: renderSignpostID,
                     "input=%{public}u", presentationInputSeq)
-        cmdBuf.commit()
     }
 
     func activeResourceSnapshot() -> NativeActiveResourceSnapshot {
@@ -1625,7 +1652,8 @@ final class CoreTextMetalRenderer {
         _ failure: NativePresentationFailure,
         frameSequence: UInt32? = nil,
         discardLatency: Bool = true,
-        latencyRecorder: LatencyRecorder?
+        latencyRecorder: LatencyRecorder?,
+        presentationFrameSeq: UInt32? = nil
     ) {
         let recorded = NativePresentationFailure(
             phase: failure.phase,
@@ -1639,6 +1667,13 @@ final class CoreTextMetalRenderer {
         factories.reportFailure(recorded)
         if discardLatency {
             latencyRecorder?.discard(seq: recorded.frameSequence, reason: .nativeResourceFailure)
+        }
+        if let presentationFrameSeq {
+            let outcome: GUIFramePresentationMetrics.Outcome =
+                recorded.reason == .unavailable ? .unavailable : .failed
+            presentationMetrics?.discard(
+                domain: .editor, outcome: outcome, frameSeq: presentationFrameSeq
+            )
         }
     }
 

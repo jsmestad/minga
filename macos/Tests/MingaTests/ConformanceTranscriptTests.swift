@@ -286,7 +286,7 @@ struct ConformanceTranscriptTests {
         dispatcher.dispatch(.guiTheme(slots: theme))
         dispatcher.dispatch(.guiWindowContent(data: epochContent))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
-        let keyframePublication = gui.framePublicationCount
+        let keyframePublication = dispatcher.publicationCount
 
         let ordinaryDelta = GUIWindowRowsDelta(
             windowId: 1, contentEpoch: epoch, cursorVisible: true,
@@ -329,7 +329,7 @@ struct ConformanceTranscriptTests {
         dispatcher.dispatch(.guiWindowRowsDelta(data: retainedDelta))
         dispatcher.dispatch(.commitFrame(frameSeq: 4, seq: 0))
         #expect(gui.windowContents[1]?.rowStore.count == rowCount + 1)
-        let committedPublication = gui.framePublicationCount
+        let committedPublication = dispatcher.publicationCount
         #expect(committedPublication == keyframePublication + 3)
 
         let missing = GUIWindowRowsDelta(
@@ -352,7 +352,7 @@ struct ConformanceTranscriptTests {
         dispatcher.dispatch(.guiWindowOverlayDelta(data: staleOverlay))
         dispatcher.dispatch(.commitFrame(frameSeq: 6, seq: 0))
         let staleEpochStatus: ProductionCorpusStatus =
-            gui.framePublicationCount == committedPublication ? .staleDiscarded : .accepted
+            dispatcher.publicationCount == committedPublication ? .staleDiscarded : .accepted
 
         dispatcher.dispatch(.beginFrame(frameSeq: 7, baseFrameSeq: 4, generation: staleGeneration))
         dispatcher.dispatch(.guiWindowContent(data: try GUIWindowContent(
@@ -364,7 +364,7 @@ struct ConformanceTranscriptTests {
         )))
         dispatcher.dispatch(.commitFrame(frameSeq: 7, seq: 0))
         let staleGenerationStatus: ProductionCorpusStatus =
-            gui.framePublicationCount == committedPublication
+            dispatcher.publicationCount == committedPublication
                 && dispatcher.lastCommittedGeneration == generation ? .staleDiscarded : .accepted
 
         #expect(expectedStatus("reference_miss", operations) == referenceMissStatus)

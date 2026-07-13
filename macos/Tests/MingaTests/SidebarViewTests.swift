@@ -31,7 +31,7 @@ struct ActivityBarViewTests {
     @MainActor func rendersPanelIcons() throws {
         let guiState = GUIState()
         guiState.sidebarHostState.update(activeId: "file_tree", sidebars: sidebarMetadata())
-        let sut = ActivityBar(guiState: guiState, sidebarHostState: guiState.sidebarHostState, encoder: nil)
+        let sut = ActivityBar(input: guiState.shellInput, sidebarHostState: guiState.sidebarHostState, encoder: nil)
             .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let buttons = body.findAll(ViewType.Button.self)
@@ -44,7 +44,7 @@ struct ActivityBarViewTests {
         let guiState = GUIState()
         guiState.sidebarHostState.update(activeId: "file_tree", sidebars: sidebarMetadata())
         let spy = SpyEncoder()
-        let sut = ActivityBar(guiState: guiState, sidebarHostState: guiState.sidebarHostState, encoder: spy)
+        let sut = ActivityBar(input: guiState.shellInput, sidebarHostState: guiState.sidebarHostState, encoder: spy)
             .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let buttons = body.findAll(ViewType.Button.self)
@@ -67,7 +67,7 @@ struct ActivityBarViewTests {
             GitStatusEntry(pathHash: UInt32(index), section: .changed, status: .modified, path: "file_\(index).ex")
         }
         guiState.sidebarHostState.update(activeId: "git_status", sidebars: sidebarMetadata())
-        let sut = ActivityBar(guiState: guiState, sidebarHostState: guiState.sidebarHostState, encoder: nil)
+        let sut = ActivityBar(input: guiState.shellInput, sidebarHostState: guiState.sidebarHostState, encoder: nil)
             .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
@@ -79,7 +79,7 @@ struct ActivityBarViewTests {
     @MainActor func gitBadgeAndLabels() throws {
         let guiState = GUIState()
         guiState.sidebarHostState.update(activeId: "git_status", sidebars: sidebarMetadata(gitBadgeCount: 7))
-        let sut = ActivityBar(guiState: guiState, sidebarHostState: guiState.sidebarHostState, encoder: nil)
+        let sut = ActivityBar(input: guiState.shellInput, sidebarHostState: guiState.sidebarHostState, encoder: nil)
             .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let buttons = body.findAll(ViewType.Button.self)
@@ -128,7 +128,7 @@ struct SidebarContainerViewTests {
         let item = Wire.SidebarMetadata(id: "custom", displayName: "Custom Tools", semanticKind: "custom_sidebar", icon: "sparkles", order: 40, visible: true, focused: true, preferredWidth: 30, badgeCount: nil)
         guiState.sidebarHostState.update(activeId: "custom", sidebars: [item])
         let active = try #require(guiState.sidebarHostState.activeSidebar)
-        let sut = SidebarContainer(guiState: guiState, activeSidebar: active, encoder: nil, projectName: "minga", gitBranch: "main", leadingPadding: 10, sidebarWidth: .constant(240))
+        let sut = SidebarContainer(input: guiState.shellInput, activeSidebar: active, encoder: nil, projectName: "minga", gitBranch: "main", leadingPadding: 10, sidebarWidth: .constant(240))
             .environment(\.themeColors, ThemeColors())
         let strings = try sut.inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
