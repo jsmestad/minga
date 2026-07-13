@@ -7,8 +7,6 @@ defmodule MingaEditor.Commands.UseSelectionForFindTest do
 
   use ExUnit.Case, async: true
 
-  alias MingaEditor.State, as: EditorState
-
   import MingaEditor.CommandStateHelpers
 
   describe "Layer 0/1 command state: use_selection_for_find" do

@@ -7,7 +7,6 @@ defmodule MingaEditor.Agent.SlashCommandTest do
   alias MingaAgent.TurnUsage
   alias MingaEditor.Agent.SlashCommand
   alias MingaEditor.Agent.UIState
-  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
@@ -231,16 +230,14 @@ defmodule MingaEditor.Agent.SlashCommandTest do
           viewport: Viewport.new(24, 80),
           editing: VimState.new(),
           agent_ui: UIState.new()
-        },
-        shell_state: %MingaEditor.Shell.Traditional.State{
-          tab_bar: tab_bar,
-          agent: %AgentState{
-            runtime: %RuntimeState{status: :idle},
-            error: nil,
-            spinner_timer: nil
-          }
         }
       }
+      |> EditorState.set_tab_bar(tab_bar)
+      |> EditorState.set_agent(%AgentState{
+        runtime: %RuntimeState{status: :idle},
+        error: nil,
+        spinner_timer: nil
+      })
     end
 
     test "returns error for non-slash input" do

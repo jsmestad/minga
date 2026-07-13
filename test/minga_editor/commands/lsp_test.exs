@@ -3,7 +3,6 @@ defmodule MingaEditor.Commands.LspTest do
   use ExUnit.Case, async: false
 
   alias Minga.Test.LspIsolation
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.Commands.Lsp, as: LspCommands
 
   import MingaEditor.RenderPipeline.TestHelpers
