@@ -32,9 +32,9 @@ defmodule MingaAgent.ToolPacks.LSPTest do
   test "registers LSP tools as source-owned specs with stable metadata", %{table: table} do
     assert :ok = LSP.register(table)
 
-    before_metadata =
-      MingaAgent.Tools.all(project_root: ".")
-      |> Map.new(fn tool -> {tool.name, {tool.description, tool.parameter_schema}} end)
+    canonical_metadata =
+      MingaAgent.Tools.specs()
+      |> Map.new(fn spec -> {spec.name, {spec.description, spec.parameter_schema}} end)
 
     for name <- LSP.tool_names() do
       assert {:ok, %Spec{} = spec} = Registry.lookup(table, name)
@@ -42,7 +42,7 @@ defmodule MingaAgent.ToolPacks.LSPTest do
       assert spec.category == :lsp
       assert spec.context_requirements == [:tool_context]
       assert spec.metadata.pack == :lsp_tools
-      assert {spec.description, spec.parameter_schema} == Map.fetch!(before_metadata, name)
+      assert {spec.description, spec.parameter_schema} == Map.fetch!(canonical_metadata, name)
     end
 
     for name <- ~w(diagnostics definition references hover document_symbols workspace_symbols) do

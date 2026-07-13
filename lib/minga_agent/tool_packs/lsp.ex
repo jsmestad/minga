@@ -8,13 +8,8 @@ defmodule MingaAgent.ToolPacks.LSP do
   use GenServer
 
   alias MingaAgent.Tool.BundledSources
-  alias MingaAgent.Tool.Context, as: ToolContext
   alias MingaAgent.Tool.Registry
   alias MingaAgent.Tool.Spec
-  alias ReqLLM.Tool
-
-  @read_only_names ~w(diagnostics definition references hover document_symbols workspace_symbols)
-  @mutating_names ~w(rename code_actions)
 
   @typedoc "Bundled LSP tool pack source."
   @type source :: {:bundle, :lsp_tools}
@@ -58,8 +53,8 @@ defmodule MingaAgent.ToolPacks.LSP do
   @doc "Returns source-owned specs for every bundled LSP tool."
   @spec specs() :: [Spec.t()]
   def specs do
-    tool_names()
-    |> Enum.map(&spec_for!/1)
+    MingaAgent.Tools.specs()
+    |> Enum.filter(&(&1.source == source()))
   end
 
   @doc "Registers all bundled LSP specs into a registry table or service."
@@ -120,55 +115,4 @@ defmodule MingaAgent.ToolPacks.LSP do
   rescue
     ArgumentError -> :ok
   end
-
-  @spec spec_for!(String.t()) :: Spec.t()
-  defp spec_for!(name) do
-    tool = tool_for!(name, MingaAgent.Tools.all(project_root: "."))
-
-    Spec.new!(
-      source: source(),
-      name: tool.name,
-      description: tool.description,
-      parameter_schema: tool.parameter_schema,
-      category: :lsp,
-      approval_level: approval_for(tool.name),
-      capabilities: capabilities_for(tool.name),
-      context_requirements: [:tool_context],
-      build: fn context -> callback_for(tool.name, context) end,
-      metadata: metadata_for(tool.name)
-    )
-  end
-
-  @spec callback_for(String.t(), ToolContext.t() | nil) :: Spec.callback()
-  defp callback_for(name, nil) do
-    name
-    |> tool_for!(MingaAgent.Tools.all(project_root: "."))
-    |> Map.fetch!(:callback)
-  end
-
-  defp callback_for(name, %ToolContext{} = context) do
-    name
-    |> tool_for!(MingaAgent.Tools.all(ToolContext.tools_opts(context)))
-    |> Map.fetch!(:callback)
-  end
-
-  @spec tool_for!(String.t(), [Tool.t()]) :: Tool.t()
-  defp tool_for!(name, tools) do
-    Enum.find(tools, &(&1.name == name)) ||
-      raise ArgumentError, "unknown LSP pack tool: #{name}"
-  end
-
-  @spec approval_for(String.t()) :: Spec.approval_level()
-  defp approval_for(name) when name in @mutating_names, do: :ask
-  defp approval_for(name) when name in @read_only_names, do: :auto
-
-  @spec capabilities_for(String.t()) :: [Spec.capability()]
-  defp capabilities_for("code_actions"), do: [:lsp_read, :lsp_mutate]
-  defp capabilities_for(name) when name in @mutating_names, do: [:lsp_mutate]
-  defp capabilities_for(name) when name in @read_only_names, do: [:lsp_read]
-
-  @spec metadata_for(String.t()) :: map()
-  defp metadata_for("code_actions"), do: %{pack: :lsp_tools, destructive: :conditional}
-  defp metadata_for(name) when name in @mutating_names, do: %{pack: :lsp_tools, destructive: true}
-  defp metadata_for(_name), do: %{pack: :lsp_tools, destructive: false}
 end

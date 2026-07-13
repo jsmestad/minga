@@ -32,16 +32,16 @@ defmodule MingaAgent.ToolPacks.ReadOnlyTest do
   test "registers read-only tools as source-owned specs with stable metadata", %{table: table} do
     assert :ok = ReadOnly.register(table)
 
-    before_metadata =
-      MingaAgent.Tools.all(project_root: ".")
-      |> Map.new(fn tool -> {tool.name, {tool.description, tool.parameter_schema}} end)
+    canonical_metadata =
+      MingaAgent.Tools.specs()
+      |> Map.new(fn spec -> {spec.name, {spec.description, spec.parameter_schema}} end)
 
     for name <- ReadOnly.tool_names() do
       assert {:ok, %Spec{} = spec} = Registry.lookup(table, name)
       assert spec.source == ReadOnly.source()
       assert spec.approval_level == :auto
       assert spec.metadata == %{pack: :read_only_tools}
-      assert {spec.description, spec.parameter_schema} == Map.fetch!(before_metadata, name)
+      assert {spec.description, spec.parameter_schema} == Map.fetch!(canonical_metadata, name)
     end
 
     assert {:ok, find_spec} = Registry.lookup(table, "find")

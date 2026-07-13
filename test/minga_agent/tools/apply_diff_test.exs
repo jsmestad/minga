@@ -202,8 +202,8 @@ defmodule MingaAgent.Tools.ApplyDiffTest do
     test "registers an apply_diff tool callback", %{tmp_dir: dir} do
       path = Path.join(dir, "tool.txt")
       File.write!(path, "old\n")
-      tools = Tools.all(project_root: dir)
-      tool = Enum.find(tools, &(&1.name == "apply_diff"))
+      context = MingaAgent.Tool.Context.new(project_root: dir)
+      spec = Enum.find(Tools.all(), &(&1.name == "apply_diff"))
 
       diff = """
       @@ -1,1 +1,1 @@
@@ -211,8 +211,9 @@ defmodule MingaAgent.Tools.ApplyDiffTest do
       +new
       """
 
-      assert tool != nil
-      assert {:ok, message} = tool.callback.(%{"path" => "tool.txt", "diff" => diff})
+      assert spec != nil
+      callback = MingaAgent.Tool.Spec.build_callback(spec, context)
+      assert {:ok, message} = callback.(%{"path" => "tool.txt", "diff" => diff})
       assert message =~ "applied 1 diff hunk"
       assert File.read!(path) == "new\n"
     end

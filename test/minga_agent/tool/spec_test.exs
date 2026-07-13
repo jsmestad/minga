@@ -33,6 +33,18 @@ defmodule MingaAgent.Tool.SpecTest do
     assert {:ok, {"/tmp/demo", %{"path" => "file.txt"}}} = callback.(%{"path" => "file.txt"})
   end
 
+  test "rejects conflicting callback and build declarations" do
+    assert {:error, {:conflicting_execution_declarations, [:build, :callback]}} =
+             Spec.new(
+               source: :config,
+               name: "conflicting",
+               description: "Conflicting",
+               parameter_schema: %{},
+               callback: fn _args -> :callback end,
+               build: fn _context -> fn _args -> :build end end
+             )
+  end
+
   test "rejects invalid context-bound build functions" do
     assert {:error, {:invalid_build, :not_a_function}} =
              Spec.new(

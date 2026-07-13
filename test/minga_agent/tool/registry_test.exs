@@ -1,6 +1,7 @@
 defmodule MingaAgent.Tool.RegistryTest do
   use ExUnit.Case, async: true
 
+  alias MingaAgent.Tool.Executor
   alias MingaAgent.Tool.Registry
   alias MingaAgent.Tool.Spec
 
@@ -35,6 +36,15 @@ defmodule MingaAgent.Tool.RegistryTest do
       spec = sample_spec()
       assert :ok = Registry.register(table, spec)
       assert {:ok, ^spec} = Registry.lookup(table, "test_tool")
+    end
+
+    test "revalidates directly constructed spec structs", %{table: table} do
+      malformed = %{sample_spec() | approval_level: :invalid}
+
+      assert {:error, {:invalid_spec, {:invalid_approval_level, :invalid}}} =
+               Registry.register(table, malformed)
+
+      assert :error = Registry.lookup(table, malformed.name)
     end
 
     test "same-source registration replaces an existing custom tool", %{table: table} do
@@ -260,6 +270,37 @@ defmodule MingaAgent.Tool.RegistryTest do
       assert write_spec.context_requirements == [:tool_context]
       assert is_function(write_spec.build, 1)
     end
+
+    test "startup builds no callbacks and execution builds only the requested factory" do
+      handler_id = "tool-factory-test-#{System.unique_integer([:positive])}"
+      test_pid = self()
+
+      :ok =
+        :telemetry.attach(
+          handler_id,
+          [:minga, :agent, :tool, :callback_built],
+          fn event, measurements, metadata, _config ->
+            send(test_pid, {:factory_built, self(), event, measurements, metadata})
+          end,
+          nil
+        )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      table = :"registry_allocation_#{System.unique_integer([:positive])}"
+      registry_pid = start_supervised!({Registry, name: table})
+      :sys.get_state(registry_pid)
+      refute_received {:factory_built, ^registry_pid, _, _, _}
+
+      caller = self()
+      assert {:ok, result} = Executor.execute("describe_runtime", %{}, table)
+      assert result =~ "Minga Runtime"
+
+      assert_receive {:factory_built, ^caller, [:minga, :agent, :tool, :callback_built],
+                      %{count: 1}, %{name: "describe_runtime", source: :builtin}}
+
+      refute_received {:factory_built, ^caller, _, _, _}
+    end
   end
 
   describe "from_req_tool/1" do
@@ -281,7 +322,7 @@ defmodule MingaAgent.Tool.RegistryTest do
       assert spec.approval_level == :auto
     end
 
-    test "marks destructive tools with :ask approval" do
+    test "derives canonical destructive approval" do
       req_tool =
         ReqLLM.Tool.new!(
           name: "write_file",

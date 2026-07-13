@@ -8,10 +8,8 @@ defmodule MingaAgent.ToolPacks.ReadOnly do
   use GenServer
 
   alias MingaAgent.Tool.BundledSources
-  alias MingaAgent.Tool.Context, as: ToolContext
   alias MingaAgent.Tool.Registry
   alias MingaAgent.Tool.Spec
-  alias ReqLLM.Tool
 
   @typedoc "Bundled read-only tool pack source."
   @type source :: {:bundle, :read_only_tools}
@@ -55,8 +53,8 @@ defmodule MingaAgent.ToolPacks.ReadOnly do
   @doc "Returns source-owned specs for every tool in the bundled pack."
   @spec specs() :: [Spec.t()]
   def specs do
-    tool_names()
-    |> Enum.map(&spec_for!/1)
+    MingaAgent.Tools.specs()
+    |> Enum.filter(&(&1.source == source()))
   end
 
   @doc "Registers all read-only pack specs into a registry table or service."
@@ -101,53 +99,4 @@ defmodule MingaAgent.ToolPacks.ReadOnly do
     Enum.each(previous_specs, fn spec -> :ok = Registry.register(table, spec) end)
     :ok
   end
-
-  @spec spec_for!(String.t()) :: Spec.t()
-  defp spec_for!(name) do
-    tool = tool_for!(name, MingaAgent.Tools.all(project_root: "."))
-
-    Spec.new!(
-      source: source(),
-      name: tool.name,
-      description: tool.description,
-      parameter_schema: tool.parameter_schema,
-      category: category_for(tool.name),
-      approval_level: :auto,
-      capabilities: capabilities_for(tool.name),
-      context_requirements: context_requirements_for(tool.name),
-      build: fn context -> callback_for(tool.name, context) end,
-      metadata: %{pack: :read_only_tools}
-    )
-  end
-
-  @spec callback_for(String.t(), ToolContext.t() | nil) :: Spec.callback()
-  defp callback_for(name, nil) do
-    name
-    |> tool_for!(MingaAgent.Tools.all(project_root: "."))
-    |> Map.fetch!(:callback)
-  end
-
-  defp callback_for(name, %ToolContext{} = context) do
-    name
-    |> tool_for!(MingaAgent.Tools.all(ToolContext.tools_opts(context)))
-    |> Map.fetch!(:callback)
-  end
-
-  @spec tool_for!(String.t(), [Tool.t()]) :: Tool.t()
-  defp tool_for!(name, tools) do
-    Enum.find(tools, &(&1.name == name)) ||
-      raise ArgumentError, "unknown read-only pack tool: #{name}"
-  end
-
-  @spec category_for(String.t()) :: Spec.category()
-  defp category_for("fetch_url"), do: :network
-  defp category_for(_name), do: :filesystem
-
-  @spec capabilities_for(String.t()) :: [Spec.capability()]
-  defp capabilities_for("fetch_url"), do: [:network]
-  defp capabilities_for(_name), do: [:read_project]
-
-  @spec context_requirements_for(String.t()) :: [Spec.context_requirement()]
-  defp context_requirements_for("fetch_url"), do: []
-  defp context_requirements_for(_name), do: [:tool_context]
 end
