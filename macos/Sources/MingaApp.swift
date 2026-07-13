@@ -337,7 +337,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         disp.onLinkCursorChanged = { [weak nsView] active in
             nsView?.setLinkCursorActive(active)
         }
-        nsView.guiState = appState.gui
+        nsView.editorInput = appState.gui.editorInput
+        ctRenderer.presentationMetrics = appState.gui.presentationMetrics
         nsView.statusBarState = appState.gui.statusBarState
         appState.gui.settingsState.encoder = enc
         appState.gui.settingsState.onCursorBlinkChanged = { [weak nsView] enabled in

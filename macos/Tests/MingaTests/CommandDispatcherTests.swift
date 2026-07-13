@@ -1867,7 +1867,6 @@ struct CommandDispatcherStagingTests {
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("prepared.ex")]))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
 
-        #expect(gui.framePublicationCount == 1)
         #expect(dispatcher.publicationCount == 1)
         #expect(results == [.applied(generation: 1, frameSeq: 1)])
         #expect(gui.windowContents[7]?.rows.first?.text == "old")
@@ -1882,7 +1881,7 @@ struct CommandDispatcherStagingTests {
         dispatcher.onFrameReady = { readyCount += 1 }
         dispatcher.onTransactionResult = { result in
             guard case .applied(generation: 4, frameSeq: 8) = result else { return }
-            publicationSeenByApplied = gui.framePublicationCount == 1 &&
+            publicationSeenByApplied = dispatcher.publicationCount == 1 &&
                 gui.tabBarState.tabs.first?.label == "semantic.ex" && readyCount == 0
         }
 
@@ -1895,16 +1894,13 @@ struct CommandDispatcherStagingTests {
         #expect(readyCount == 1)
     }
 
-    @Test("one aggregate observation callback sees all sibling domains committed")
-    @MainActor func aggregateObservationIsAtomic() throws {
+    @Test("focused channel callback sees the complete installed transaction")
+    @MainActor func focusedObservationIsAtomic() throws {
         let (dispatcher, gui) = makeDispatcher()
         let notificationCount = Mutex(0)
 
         withObservationTracking {
-            _ = gui.framePublication
-            // Reading the siblings documents the observation's consistency contract.
-            _ = gui.tabBarState.tabs
-            _ = gui.agentChatState.model
+            _ = gui.frameStore.shell.value
         } onChange: {
             notificationCount.withLock { $0 += 1 }
         }
@@ -1923,6 +1919,7 @@ struct CommandDispatcherStagingTests {
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
 
         #expect(notificationCount.withLock { $0 } == 1)
+        #expect(gui.frameStore.installed.shell.lastCommitted?.frameSeq == 1)
         #expect(gui.tabBarState.tabs.first?.label == "atomic.ex")
         #expect(gui.agentChatState.model == "prepared-model")
     }
@@ -2053,7 +2050,7 @@ struct CommandDispatcherStagingTests {
         ))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
 
-        #expect(gui.framePublicationCount == 0)
+        #expect(dispatcher.publicationCount == 0)
         #expect(results == [.rejected(
             generation: 1, frameSeq: 1, lastAppliedFrameSeq: 0,
             reason: .resourcePolicy
@@ -2209,7 +2206,7 @@ struct CommandDispatcherStagingTests {
         dispatcher.dispatch(.guiWindowOverlayDelta(data: overlayDelta(windowId: 99)))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
 
-        #expect(gui.framePublicationCount == 0)
+        #expect(dispatcher.publicationCount == 0)
         #expect(gui.tabBarState.tabs.isEmpty)
         #expect(gui.resyncState.pending == false)
         #expect(results == [.windowRefMiss(generation: 1, frameSeq: 1, lastAppliedFrameSeq: 0, windowId: 99)])
@@ -2248,7 +2245,7 @@ struct CommandDispatcherStagingTests {
                 dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
             }
 
-            let baselinePublications = gui.framePublicationCount
+            let baselinePublications = dispatcher.publicationCount
             let frameSeq = UInt32(index > 0 ? 2 : 1)
             let baseSeq = UInt32(index > 0 ? 1 : 0)
             dispatcher.dispatch(.beginFrame(frameSeq: frameSeq, baseFrameSeq: baseSeq, generation: 1))
@@ -2257,7 +2254,7 @@ struct CommandDispatcherStagingTests {
             dispatcher.dispatch(invalid.0)
             dispatcher.dispatch(.commitFrame(frameSeq: frameSeq, seq: 0))
 
-            #expect(gui.framePublicationCount == baselinePublications)
+            #expect(dispatcher.publicationCount == baselinePublications)
             #expect(gui.tabBarState.tabs.first?.label == (index > 0 ? "baseline.ex" : nil))
             #expect(results.last == .rejected(generation: 1, frameSeq: frameSeq, lastAppliedFrameSeq: UInt32(index > 0 ? 1 : 0), reason: invalid.1))
             #expect(gui.agentChatState.messages.map(\.id) == (index > 0 ? [1] : []))
@@ -2298,14 +2295,14 @@ struct CommandDispatcherStagingTests {
         dispatcher.dispatch(.guiWindowOverlayDelta(data: overlayDelta(epoch: 41)))
         dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
 
-        #expect(gui.framePublicationCount == 1)
+        #expect(dispatcher.publicationCount == 1)
         #expect(results.last == .rejected(generation: 1, frameSeq: 2, lastAppliedFrameSeq: 1, reason: .windowEpochMismatch(windowId: 7, expected: 42, actual: 41)))
         #expect(gui.windowContents[7]?.cursorShape == .block)
     }
 
     @Test("unsorted full content fails before resident construction or publication")
     @MainActor func unsortedContentIsTransactional() throws {
-        let (_, gui) = makeDispatcher()
+        let (dispatcher, gui) = makeDispatcher()
         let high = GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 2,
             contentHash: 11, text: "high", spans: [])
         let low = GUIVisualRow(rowType: .normal, rowId: 2, bufLine: 1,
@@ -2317,7 +2314,7 @@ struct CommandDispatcherStagingTests {
                 selection: nil, searchMatches: [], diagnosticUnderlines: [],
                 documentHighlights: [])
         }
-        #expect(gui.framePublicationCount == 0)
+        #expect(dispatcher.publicationCount == 0)
         #expect(gui.windowContents.isEmpty)
     }
 
@@ -2349,7 +2346,7 @@ struct CommandDispatcherStagingTests {
         dispatcher.dispatch(.guiWindowRowsDelta(data: missing))
         dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
 
-        #expect(gui.framePublicationCount == 1)
+        #expect(dispatcher.publicationCount == 1)
         #expect(gui.tabBarState.tabs.first?.label == "baseline.ex")
         #expect(gui.windowContents[7]?.rows.first?.text == "old")
         #expect(results.last == .windowRefMiss(generation: 1, frameSeq: 2, lastAppliedFrameSeq: 1, windowId: 7))
@@ -2357,7 +2354,7 @@ struct CommandDispatcherStagingTests {
 
     @Test("unregistered font resources reject a prepared frame")
     @MainActor func missingFontResourceRejects() throws {
-        let (dispatcher, gui) = makeDispatcher()
+        let (dispatcher, _) = makeDispatcher()
         var results: [FrameTransactionResult] = []
         dispatcher.onTransactionResult = { results.append($0) }
 
@@ -2366,13 +2363,13 @@ struct CommandDispatcherStagingTests {
         dispatcher.dispatch(.guiWindowContent(data: try windowContent(fontId: 3)))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
 
-        #expect(gui.framePublicationCount == 0)
+        #expect(dispatcher.publicationCount == 0)
         #expect(results == [.rejected(generation: 1, frameSeq: 1, lastAppliedFrameSeq: 0, reason: .missingFontResource(fontId: 3))])
     }
 
     @Test("unregistered font resources in row splices reject a prepared frame")
     @MainActor func missingSpliceFontResourceRejects() throws {
-        let (dispatcher, gui) = makeDispatcher()
+        let (dispatcher, _) = makeDispatcher()
         var results: [FrameTransactionResult] = []
         dispatcher.onTransactionResult = { results.append($0) }
 
@@ -2404,7 +2401,7 @@ struct CommandDispatcherStagingTests {
         dispatcher.dispatch(.guiWindowRowsDelta(data: delta))
         dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
 
-        #expect(gui.framePublicationCount == 1)
+        #expect(dispatcher.publicationCount == 1)
         #expect(results.last == .rejected(
             generation: 1, frameSeq: 2, lastAppliedFrameSeq: 1,
             reason: .missingFontResource(fontId: 3)
@@ -2428,7 +2425,7 @@ struct CommandDispatcherStagingTests {
             theme: 0, windows: 0, chrome: 1, overlays: 0,
             resources: 0, focus: 0, metadata: 0
         ))
-        #expect(gui.framePublicationCount == 2)
+        #expect(dispatcher.publicationCount == 2)
         #expect(gui.tabBarState.tabs.first?.label == "99.ex")
     }
 

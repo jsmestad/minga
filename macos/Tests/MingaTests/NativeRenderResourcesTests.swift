@@ -1,6 +1,7 @@
 import CoreText
 import Metal
 import MingaProtocol
+@testable import MingaUI
 import QuartzCore
 import Testing
 
@@ -671,10 +672,14 @@ struct NativeRenderResourcesTests {
         typealias Completion = @MainActor @Sendable (Bool, Int) -> Void
         var completions: [Completion] = []
         var presentCalls = 0
+        let metrics = GUIFramePresentationMetrics()
+        let committedFrame = GUICommittedFrame(generation: 3, frameSeq: 42)
+        metrics.beginCommitted(frame: committedFrame, impact: .editor)
         var factories = nativeTestFactories()
         factories.observeCompletion = { _, completion in completions.append(completion) }
         factories.present = { _ in presentCalls += 1 }
         guard let renderer = CoreTextMetalRenderer(factories: factories) else { return }
+        renderer.presentationMetrics = metrics
         let fontManager = FontManager(name: "Menlo", size: 13, scale: 1)
         renderer.setupRenderers(fontManager: fontManager)
         let before = renderer.activeResourceSnapshot()
@@ -683,19 +688,27 @@ struct NativeRenderResourcesTests {
             frameState: FrameState(cols: 4, rows: 4), fontManager: fontManager,
             drawableProvider: { NativeTestDrawable(texture: texture) },
             viewportSize: CGSize(width: 64, height: 64), contentScale: 1,
-            presentationInputSeq: 302
+            presentationInputSeq: 302, presentationFrameSeq: 42
         )
         #expect(completions.count == 1)
         #expect(presentCalls == 0)
+        #expect(metrics.snapshot().isEmpty)
         #expect(renderer.activeResourceSnapshot() == before)
 
         completions[0](true, Int(MTLCommandBufferStatus.completed.rawValue))
         #expect(completions.count == 2)
         #expect(presentCalls == 0)
+        #expect(metrics.snapshot() == [
+            .init(frame: committedFrame, domain: .editor, outcome: .submitted)
+        ])
         #expect(renderer.activeResourceSnapshot() == before)
 
         completions[1](true, Int(MTLCommandBufferStatus.completed.rawValue))
         #expect(presentCalls == 1)
+        #expect(metrics.snapshot() == [
+            .init(frame: committedFrame, domain: .editor, outcome: .submitted),
+            .init(frame: committedFrame, domain: .editor, outcome: .presented)
+        ])
         #expect(renderer.lastCompletedPresentationGeneration == 1)
         #expect(renderer.activeResourceSnapshot() != before)
     }

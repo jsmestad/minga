@@ -72,6 +72,10 @@ targets:
         type: file
       - path: Sources/Views/Shared/EditorGeometry.swift
         type: file
+      - path: Sources/Views/Shared/GUIFramePresentationMetrics.swift
+        type: file
+      - path: Sources/Views/Shared/GUIFrameStore.swift
+        type: file
       - path: Sources/Views/Shared/GUIState.swift
         type: file
       - path: Sources/Views/Shared/SparklineView.swift
@@ -142,6 +146,8 @@ targets:
           - "Views/Sidebar/**"
           - "Views/Shared/EditTimelineState.swift"
           - "Views/Shared/EditTimelineView.swift"
+          - "Views/Shared/GUIFramePresentationMetrics.swift"
+          - "Views/Shared/GUIFrameStore.swift"
           - "Views/Shared/GUIState.swift"
           - "Views/Shared/SparklineView.swift"
           - "Views/Shared/TextHighlighting.swift"
@@ -263,6 +269,8 @@ targets:
           - "Views/Sidebar/**"
           - "Views/Shared/EditTimelineState.swift"
           - "Views/Shared/EditTimelineView.swift"
+          - "Views/Shared/GUIFramePresentationMetrics.swift"
+          - "Views/Shared/GUIFrameStore.swift"
           - "Views/Shared/GUIState.swift"
           - "Views/Shared/SparklineView.swift"
           - "Views/Shared/TextHighlighting.swift"
@@ -339,6 +347,8 @@ targets:
           - "Views/Sidebar/**"
           - "Views/Shared/EditTimelineState.swift"
           - "Views/Shared/EditTimelineView.swift"
+          - "Views/Shared/GUIFramePresentationMetrics.swift"
+          - "Views/Shared/GUIFrameStore.swift"
           - "Views/Shared/GUIState.swift"
           - "Views/Shared/SparklineView.swift"
           - "Views/Shared/TextHighlighting.swift"
