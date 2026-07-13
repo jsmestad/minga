@@ -14,6 +14,8 @@ defmodule MingaEditor.State.TabSwitchTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.LSP, as: LSPState
+  alias MingaEditor.State.LSP.FormatOperation
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context
   alias MingaEditor.State.TabBar
@@ -330,6 +332,34 @@ defmodule MingaEditor.State.TabSwitchTest do
 
       assert TabBar.get(EditorState.tab_bar(switched_back), target_id).context.lsp_pending ==
                pending_target
+    end
+
+    test "tab switch preserves Editor-global formatting ownership" do
+      {state, buf1, _buf2} = state_with_two_file_tabs()
+      tb = state.shell_state.tab_bar
+      current_id = tb.active_id
+      target_id = Enum.find(tb.tabs, &(&1.id != current_id)).id
+      ref = make_ref()
+
+      operation = %FormatOperation{
+        client: self(),
+        ref: ref,
+        buffer: buf1,
+        version: 0,
+        encoding: :utf8,
+        spinner_timer: make_ref(),
+        cancellable_timer: make_ref(),
+        timeout_timer: make_ref()
+      }
+
+      state = EditorState.update_lsp(state, &LSPState.track_format(&1, operation))
+      {switched, _effects} = EditorState.switch_tab_pure(state, target_id)
+
+      assert {:ok, ^operation} = LSPState.fetch_format(switched.lsp, ref)
+
+      {switched_back, _effects} = EditorState.switch_tab_pure(switched, current_id)
+
+      assert {:ok, ^operation} = LSPState.fetch_format(switched_back.lsp, ref)
     end
 
     test "tab switch preserves live highlighting and ignores stale target parser state" do

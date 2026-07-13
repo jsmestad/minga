@@ -13,6 +13,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
   alias MingaEditor.Handlers.LspEventHandler
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.LSP.FormatOperation
   alias MingaEditor.State.Buffers
   alias MingaEditor.SignatureHelp
   alias MingaEditor.State.Highlighting
@@ -222,7 +223,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       buf = state.workspace.buffers.active
       version = Minga.Buffer.version(buf)
       ref = make_ref()
-      state = put_lsp_pending(state, ref, {:format, buf, version})
+      state = track_format(state, ref, buf, version)
 
       edits = [
         %{
@@ -238,7 +239,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
         LspEventHandler.handle(state, {:lsp_response, ref, {:ok, edits}})
 
       assert effects == [:render_now]
-      assert new_state.workspace.lsp_pending == %{}
+      refute LSPState.format_active?(new_state.lsp, ref)
       assert Minga.Buffer.content(buf) =~ "LINE ONE"
     end
 
@@ -247,7 +248,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       buf = state.workspace.buffers.active
       old_version = Minga.Buffer.version(buf)
       ref = make_ref()
-      state = put_lsp_pending(state, ref, {:format, buf, old_version})
+      state = track_format(state, ref, buf, old_version)
 
       Minga.Buffer.replace_content(buf, "modified content\n")
 
@@ -274,7 +275,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       buf = state.workspace.buffers.active
       version = Minga.Buffer.version(buf)
       ref = make_ref()
-      state = put_lsp_pending(state, ref, {:format, buf, version})
+      state = track_format(state, ref, buf, version)
 
       edits = [
         %{
@@ -324,7 +325,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       version = Minga.Buffer.version(buf)
       :ok = Minga.Buffer.set_read_only(buf, true)
       ref = make_ref()
-      state = put_lsp_pending(state, ref, {:format, buf, version})
+      state = track_format(state, ref, buf, version)
 
       edits = [
         %{
@@ -349,7 +350,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       buf = state.workspace.buffers.active
       version = Minga.Buffer.version(buf)
       ref = make_ref()
-      state = put_lsp_pending(state, ref, {:format, buf, version})
+      state = track_format(state, ref, buf, version)
       monitor = Process.monitor(buf)
       Process.exit(buf, :kill)
       assert_receive {:DOWN, ^monitor, :process, ^buf, :killed}
@@ -375,7 +376,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       state = base_state()
       buf = state.workspace.buffers.active
       ref = make_ref()
-      state = put_lsp_pending(state, ref, {:format, buf, Minga.Buffer.version(buf)})
+      state = track_format(state, ref, buf, Minga.Buffer.version(buf))
 
       {new_state, effects} =
         LspEventHandler.handle(state, {:lsp_response, ref, {:ok, nil}})
@@ -388,13 +389,44 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       state = base_state()
       buf = state.workspace.buffers.active
       ref = make_ref()
-      state = put_lsp_pending(state, ref, {:format, buf, Minga.Buffer.version(buf)})
+      state = track_format(state, ref, buf, Minga.Buffer.version(buf))
 
       {new_state, effects} =
         LspEventHandler.handle(state, {:lsp_response, ref, {:error, :timeout}})
 
       assert effects == [:render_now]
       assert EditorState.status_msg(new_state) =~ "Format error"
+    end
+
+    test "rejects invalid or overlapping server edits without changing content" do
+      state = base_state()
+      buf = state.workspace.buffers.active
+      ref = make_ref()
+      state = track_format(state, ref, buf, Minga.Buffer.version(buf))
+
+      edits = [
+        %{
+          "range" => %{
+            "start" => %{"line" => 0, "character" => 0},
+            "end" => %{"line" => 0, "character" => 8}
+          },
+          "newText" => "first"
+        },
+        %{
+          "range" => %{
+            "start" => %{"line" => 0, "character" => 4},
+            "end" => %{"line" => 0, "character" => 9}
+          },
+          "newText" => "second"
+        }
+      ]
+
+      {new_state, effects} =
+        LspEventHandler.handle(state, {:lsp_response, ref, {:ok, edits}})
+
+      assert effects == [:render_now]
+      assert Minga.Buffer.content(buf) == "line one\nline two\nline three"
+      assert new_state.shell_state.status_msg =~ "Invalid LSP"
     end
   end
 
@@ -403,7 +435,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       state = base_state()
       ref = make_ref()
       buf = state.workspace.buffers.active
-      state = put_lsp_pending(state, ref, {:format, buf, 0})
+      state = track_format(state, ref, buf, 0)
 
       {new_state, effects} = LspEventHandler.handle(state, {:lsp_format_spinner, ref})
 
@@ -425,7 +457,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       state = base_state()
       ref = make_ref()
       buf = state.workspace.buffers.active
-      state = put_lsp_pending(state, ref, {:format, buf, 0})
+      state = track_format(state, ref, buf, 0)
 
       {new_state, effects} = LspEventHandler.handle(state, {:lsp_format_cancellable, ref})
 
@@ -437,13 +469,43 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       state = base_state()
       ref = make_ref()
       buf = state.workspace.buffers.active
-      state = put_lsp_pending(state, ref, {:format, buf, 0})
+      state = track_format(state, ref, buf, 0)
 
       {new_state, effects} = LspEventHandler.handle(state, {:lsp_format_timeout, ref})
 
       assert effects == [:render_now]
-      assert new_state.workspace.lsp_pending == %{}
+      refute LSPState.format_active?(new_state.lsp, ref)
       assert EditorState.status_msg(new_state) =~ "timed out"
+      assert_receive {:lsp_cancel, ^ref}
+    end
+
+    test "late response after timeout is ignored" do
+      state = base_state()
+      ref = make_ref()
+      buf = state.workspace.buffers.active
+      state = track_format(state, ref, buf, Minga.Buffer.version(buf))
+
+      {timed_out, [:render_now]} =
+        LspEventHandler.handle(state, {:lsp_format_timeout, ref})
+
+      assert_receive {:lsp_cancel, ^ref}
+
+      edits = [
+        %{
+          "range" => %{
+            "start" => %{"line" => 0, "character" => 0},
+            "end" => %{"line" => 0, "character" => 8}
+          },
+          "newText" => "LATE"
+        }
+      ]
+
+      {after_late, effects} =
+        LspEventHandler.handle(timed_out, {:lsp_response, ref, {:ok, edits}})
+
+      assert effects == [:render_now]
+      assert Minga.Buffer.content(buf) == "line one\nline two\nline three"
+      assert EditorState.status_msg(after_late) =~ "timed out"
     end
 
     test "timeout is no-op when format already completed" do
@@ -459,6 +521,22 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
   defp put_lsp_pending(state, ref, kind) do
     EditorState.put_lsp_pending(state, ref, kind)
+  end
+
+  defp track_format(state, ref, buffer, version, opts \\ []) do
+    operation =
+      FormatOperation.new(
+        client: Keyword.get(opts, :client, start_fake_lsp_client()),
+        ref: ref,
+        buffer: buffer,
+        version: version,
+        encoding: Keyword.get(opts, :encoding, :utf8),
+        spinner_timer: make_ref(),
+        cancellable_timer: make_ref(),
+        timeout_timer: make_ref()
+      )
+
+    EditorState.update_lsp(state, &LSPState.track_format(&1, operation))
   end
 
   defp base_state do
@@ -535,6 +613,11 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
       {:"$gen_call", from, :encoding} ->
         GenServer.reply(from, :utf16)
+        fake_lsp_client_loop(parent)
+
+      {:"$gen_call", from, {:cancel_request, ref}} ->
+        send(parent, {:lsp_cancel, ref})
+        GenServer.reply(from, :ok)
         fake_lsp_client_loop(parent)
 
       {:"$gen_cast", {:async_request, method, params, caller, ref}} ->

@@ -7,6 +7,7 @@ defmodule MingaEditor.Handlers.LspEventHandler do
 
   alias MingaEditor.CompletionHandling
   alias MingaEditor.CompletionTrigger
+  alias MingaEditor.LSP.FormatLifecycle
   alias MingaEditor.LspActions
   alias MingaEditor.SemanticTokenSync
   alias MingaEditor.State, as: EditorState
@@ -35,7 +36,13 @@ defmodule MingaEditor.Handlers.LspEventHandler do
   end
 
   def handle(state, {:lsp_response, ref, result}) do
-    dispatch_tracked_response(state, ref, result, Map.fetch(state.workspace.lsp_pending, ref))
+    case LSPState.fetch_format(state.lsp, ref) do
+      {:ok, _operation} ->
+        dispatch_format_response(state, ref, result)
+
+      :error ->
+        dispatch_tracked_response(state, ref, result, Map.fetch(state.workspace.lsp_pending, ref))
+    end
   end
 
   def handle(state, :inlay_hint_scroll_debounce) do
@@ -58,7 +65,7 @@ defmodule MingaEditor.Handlers.LspEventHandler do
   end
 
   def handle(state, {:lsp_format_spinner, ref}) do
-    if Map.has_key?(state.workspace.lsp_pending, ref) do
+    if LSPState.format_active?(state.lsp, ref) do
       {EditorState.set_status(state, "Formatting…"), [:render_now]}
     else
       {state, []}
@@ -66,7 +73,7 @@ defmodule MingaEditor.Handlers.LspEventHandler do
   end
 
   def handle(state, {:lsp_format_cancellable, ref}) do
-    if Map.has_key?(state.workspace.lsp_pending, ref) do
+    if LSPState.format_active?(state.lsp, ref) do
       {EditorState.set_status(state, "Formatting… [Esc to cancel]"), [:render_now]}
     else
       {state, []}
@@ -74,15 +81,42 @@ defmodule MingaEditor.Handlers.LspEventHandler do
   end
 
   def handle(state, {:lsp_format_timeout, ref}) do
-    if Map.has_key?(state.workspace.lsp_pending, ref) do
-      state = delete_lsp_pending(state, ref)
-      {EditorState.set_status(state, "Format timed out [r to retry]"), [:render_now]}
-    else
-      {state, []}
+    case LSPState.fetch_format(state.lsp, ref) do
+      :error ->
+        {state, []}
+
+      {:ok, operation} ->
+        state = EditorState.update_lsp(state, &LSPState.drop_format(&1, ref))
+        FormatLifecycle.cancel(operation)
+        {EditorState.set_status(state, "Format timed out [r to retry]"), [:render_now]}
     end
   end
 
   def handle(state, _msg), do: {state, []}
+
+  @spec dispatch_format_response(EditorState.t(), reference(), term()) ::
+          {EditorState.t(), [lsp_effect()]}
+  defp dispatch_format_response(state, ref, result) do
+    case LSPState.fetch_format(state.lsp, ref) do
+      :error ->
+        {state, []}
+
+      {:ok, operation} ->
+        state = EditorState.update_lsp(state, &LSPState.drop_format(&1, ref))
+        FormatLifecycle.finish(operation)
+
+        state =
+          LspActions.handle_formatting_response(
+            state,
+            result,
+            operation.buffer,
+            operation.version,
+            operation.encoding
+          )
+
+        {state, [:render_now]}
+    end
+  end
 
   @spec dispatch_tracked_response(EditorState.t(), reference(), term(), {:ok, term()} | :error) ::
           {EditorState.t(), [lsp_effect()]}
@@ -129,9 +163,6 @@ defmodule MingaEditor.Handlers.LspEventHandler do
 
   defp dispatch_lsp_response(:hover, state, result),
     do: LspActions.handle_hover_response(state, result)
-
-  defp dispatch_lsp_response({:format, buf, version}, state, result),
-    do: LspActions.handle_formatting_response(state, result, buf, version)
 
   defp dispatch_lsp_response({:hover_mouse, row, col}, state, result),
     do: LspActions.handle_hover_mouse_response(state, result, row, col)

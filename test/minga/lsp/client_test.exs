@@ -22,13 +22,15 @@ defmodule Minga.LSP.ClientTest do
         request_unknown: Map.get(context, :request_unknown, false),
         show_message: Map.get(context, :show_message, false),
         show_message_request: Map.get(context, :show_message_request, false),
+        report_cancellations: Map.get(context, :report_cancellations, false),
         position_encoding: Map.get(context, :position_encoding, "utf-8"),
         settings: server_settings
       )
 
     if Map.get(context, :request_configuration, false) or
          Map.get(context, :request_unknown, false) or
-         Map.get(context, :show_message_request, false) do
+         Map.get(context, :show_message_request, false) or
+         Map.get(context, :report_cancellations, false) do
       Minga.Events.subscribe(:diagnostics_updated)
     end
 
@@ -293,6 +295,52 @@ defmodule Minga.LSP.ClientTest do
       assert ref1 != ref2
       assert Client.status(client) == :ready
     end
+
+    @tag report_cancellations: true
+    test "cancel_request/2 maps the opaque ref to a wire cancellation and suppresses delivery", %{
+      client: client,
+      diag_server: diag_server
+    } do
+      ref = Client.request(client, "mock/stall", %{})
+
+      assert Client.cancel_request(client, ref) == :ok
+      assert Client.cancel_request(client, ref) == {:error, :not_found}
+      assert_cancel_diagnostic(diag_server)
+      refute_receive {:lsp_response, ^ref, _result}, 100
+    end
+
+    @tag report_cancellations: true
+    test "an async caller exit cancels its outstanding wire request", %{
+      client: client,
+      diag_server: diag_server
+    } do
+      parent = self()
+
+      caller =
+        spawn(fn ->
+          ref = Client.request(client, "mock/stall", %{})
+          send(parent, {:request_ref, ref})
+          receive do: (:stop -> :ok)
+        end)
+
+      assert_receive {:request_ref, ref}
+      monitor = Process.monitor(caller)
+      Process.exit(caller, :kill)
+      assert_receive {:DOWN, ^monitor, :process, ^caller, :killed}
+      assert_cancel_diagnostic(diag_server)
+      refute_receive {:lsp_response, ^ref, _result}, 100
+    end
+  end
+
+  defp assert_cancel_diagnostic(diag_server) do
+    assert_receive {:minga_event, :diagnostics_updated,
+                    %Minga.Events.DiagnosticsUpdatedEvent{
+                      uri: "file:///tmp/cancel-request-test.ex"
+                    }},
+                   @event_timeout
+
+    assert [%{code: "CANCEL"}] =
+             Diagnostics.for_uri(diag_server, "file:///tmp/cancel-request-test.ex")
   end
 
   defp wait_until_ready(client) do

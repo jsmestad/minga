@@ -130,6 +130,19 @@ defmodule MockServer do
     :ok
   end
 
+  defp handle_message(%{"method" => "mock/stall", "id" => _id}) do
+    :ok
+  end
+
+  defp handle_message(%{"method" => "$/cancelRequest", "params" => %{"id" => id}}) do
+    if report_cancellations?() do
+      send_test_diagnostic("file:///tmp/cancel-request-test.ex", "CANCEL", inspect(id))
+      send_response(id, "late response after cancellation")
+    end
+
+    :ok
+  end
+
   defp handle_message(%{"id" => "configuration-900", "result" => result}) when is_list(result) do
     send_test_diagnostic("file:///tmp/configuration-test.ex", "CONFIG", JSON.encode!(result))
   end
@@ -232,6 +245,10 @@ defmodule MockServer do
 
   defp show_message_request? do
     "--show-message-request" in System.argv()
+  end
+
+  defp report_cancellations? do
+    "--report-cancellations" in System.argv()
   end
 
   defp position_encoding do

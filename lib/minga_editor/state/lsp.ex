@@ -11,6 +11,9 @@ defmodule MingaEditor.State.LSP do
   read fields directly but never do `%{lsp | field: value}`.
   """
 
+  alias MingaEditor.State.LSP.FormatOperation
+  alias MingaEditor.State.LSP.FormatOperations
+
   @type server_status :: :starting | :initializing | :ready | :crashed
 
   @type t :: %__MODULE__{
@@ -20,6 +23,7 @@ defmodule MingaEditor.State.LSP do
           inlay_hints: [map()],
           selection_ranges: [map()] | nil,
           selection_range_index: non_neg_integer(),
+          format_operations: FormatOperations.t(),
           highlight_debounce_timer: reference() | nil,
           inlay_hint_debounce_timer: reference() | nil,
           last_inlay_viewport_top: non_neg_integer() | nil
@@ -31,6 +35,7 @@ defmodule MingaEditor.State.LSP do
             inlay_hints: [],
             selection_ranges: nil,
             selection_range_index: 0,
+            format_operations: FormatOperations.new(),
             highlight_debounce_timer: nil,
             inlay_hint_debounce_timer: nil,
             last_inlay_viewport_top: nil
@@ -99,6 +104,43 @@ defmodule MingaEditor.State.LSP do
   @spec shrink_selection(t()) :: t()
   def shrink_selection(%__MODULE__{selection_range_index: idx} = lsp) when idx > 0 do
     %{lsp | selection_range_index: idx - 1}
+  end
+
+  # ── Formatting operations ────────────────────────────────────────────────
+
+  @doc "Tracks an Editor-global formatting operation."
+  @spec track_format(t(), FormatOperation.t()) :: t()
+  def track_format(%__MODULE__{} = lsp, %FormatOperation{} = operation) do
+    {:ok, operations} = FormatOperations.track(lsp.format_operations, operation)
+    %{lsp | format_operations: operations}
+  end
+
+  @doc "Fetches a formatting operation by request reference."
+  @spec fetch_format(t(), reference()) :: {:ok, FormatOperation.t()} | :error
+  def fetch_format(%__MODULE__{} = lsp, ref) when is_reference(ref) do
+    FormatOperations.fetch(lsp.format_operations, ref)
+  end
+
+  @doc "Returns the formatting operation for one Buffer."
+  @spec format_for_buffer(t(), pid()) :: FormatOperation.t() | nil
+  def format_for_buffer(%__MODULE__{} = lsp, buffer) when is_pid(buffer) do
+    FormatOperations.for_buffer(lsp.format_operations, buffer)
+  end
+
+  @doc "Returns the newest active formatting operation."
+  @spec newest_format(t()) :: FormatOperation.t() | nil
+  def newest_format(%__MODULE__{} = lsp), do: FormatOperations.newest(lsp.format_operations)
+
+  @doc "Drops a formatting operation by request reference."
+  @spec drop_format(t(), reference()) :: t()
+  def drop_format(%__MODULE__{} = lsp, ref) when is_reference(ref) do
+    %{lsp | format_operations: FormatOperations.drop(lsp.format_operations, ref)}
+  end
+
+  @doc "Returns whether a formatting operation is active."
+  @spec format_active?(t(), reference()) :: boolean()
+  def format_active?(%__MODULE__{} = lsp, ref) when is_reference(ref) do
+    match?({:ok, %FormatOperation{}}, fetch_format(lsp, ref))
   end
 
   # ── Highlight debounce timer ─────────────────────────────────────────────
