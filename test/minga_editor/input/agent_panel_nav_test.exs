@@ -7,6 +7,7 @@ defmodule MingaEditor.Input.AgentPanelNavTest do
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Input.AgentPanel
   alias MingaEditor.Input.Scoped
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
@@ -48,7 +49,11 @@ defmodule MingaEditor.Input.AgentPanelNavTest do
         viewport: Viewport.new(24, 80),
         agent_ui: agent_ui
       },
-      shell_state: %MingaEditor.Shell.Traditional.State{agent: %AgentState{}},
+      shell_runtime:
+        Runtime.new(
+          Runtime.default_entry(),
+          %MingaEditor.Shell.Traditional.State{agent: %AgentState{}}
+        ),
       focus_stack: [Scoped, MingaEditor.Input.ModeFSM]
     }
   end

@@ -94,7 +94,7 @@ defmodule MingaGitPorcelain.CommandsStashTest do
 
       result = GitCommands.execute(build_state(), :git_stash_list)
 
-      assert {:picker, %{picker_ui: %{source: GitStashSource}}} = result.shell_state.modal
+      assert {:picker, %{picker_ui: %{source: GitStashSource}}} = EditorState.modal(result)
     end
 
     test "drop opens the stash picker in drop mode", %{root: dir} do
@@ -103,7 +103,7 @@ defmodule MingaGitPorcelain.CommandsStashTest do
       result = GitCommands.execute(build_state(), :git_stash_drop)
 
       assert {:picker, %{picker_ui: %{source: GitStashSource, context: context}}} =
-               result.shell_state.modal
+               EditorState.modal(result)
 
       assert context == %{git_root: dir, action: :drop}
     end

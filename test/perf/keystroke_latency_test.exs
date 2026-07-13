@@ -202,9 +202,11 @@ defmodule Minga.Perf.KeystrokeLatencyTest do
       port_manager: port,
       workspace: workspace,
       renderer: renderer_pid,
-      shell_id: :traditional,
-      shell: MingaEditor.Shell.Traditional,
-      shell_state: %MingaEditor.Shell.Traditional.State{}
+      shell_runtime:
+        MingaEditor.Shell.Runtime.new(
+          MingaEditor.Shell.Runtime.default_entry(),
+          %MingaEditor.Shell.Traditional.State{}
+        )
     }
 
     {state, port}

@@ -121,6 +121,12 @@ defmodule MingaEditor.Shell.Traditional.State do
     Map.put(ss, :status_msg, nil)
   end
 
+  @doc "Controls whether missing-tool prompts are suppressed."
+  @spec set_suppress_tool_prompts(t(), boolean()) :: t()
+  def set_suppress_tool_prompts(%{} = ss, suppress?) when is_boolean(suppress?) do
+    Map.put(ss, :suppress_tool_prompts, suppress?)
+  end
+
   # ── Nav flash ──────────────────────────────────────────────────────────────
 
   @doc "Returns the nav flash state, or nil when inactive."
@@ -429,6 +435,31 @@ defmodule MingaEditor.Shell.Traditional.State do
       ToolManager.installed?(tool_name) or
       MapSet.member?(ToolManager.installing(), tool_name) or
       tool_name in ss.tool_prompt_queue
+  end
+
+  @doc "Replaces signature-help presentation state."
+  @spec set_signature_help(t(), MingaEditor.SignatureHelp.t() | nil) :: t()
+  def set_signature_help(%__MODULE__{} = state, signature_help) do
+    %{state | signature_help: signature_help}
+  end
+
+  @doc "Replaces the delayed warning-popup timer."
+  @spec set_warning_popup_timer(t(), reference() | nil) :: t()
+  def set_warning_popup_timer(%__MODULE__{} = state, timer) do
+    %{state | warning_popup_timer: timer}
+  end
+
+  @doc "Replaces the pending tool-install prompt queue."
+  @spec set_tool_prompt_queue(t(), [atom()]) :: t()
+  def set_tool_prompt_queue(%__MODULE__{} = state, queue) when is_list(queue) do
+    %{state | tool_prompt_queue: queue}
+  end
+
+  @doc "Replaces tool-prompt decisions and the pending queue atomically."
+  @spec set_tool_prompt_state(t(), [atom()], MapSet.t(atom())) :: t()
+  def set_tool_prompt_state(%__MODULE__{} = state, queue, declined)
+      when is_list(queue) do
+    %{state | tool_prompt_queue: queue, tool_declined: declined}
   end
 
   @doc "Sets whether a CUA space leader sequence is pending."

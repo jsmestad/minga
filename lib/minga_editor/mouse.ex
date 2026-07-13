@@ -502,7 +502,7 @@ defmodule MingaEditor.Mouse do
   # thrash and dismissing it would defeat the point. Anywhere else, motion
   # (re)starts the hover debounce, dismissing a stale popup first.
   @spec handle_hover_motion(state(), integer(), integer()) :: state()
-  defp handle_hover_motion(%{shell_state: %{hover_popup: nil}} = state, row, col) do
+  defp handle_hover_motion(%{shell_runtime: %{state: %{hover_popup: nil}}} = state, row, col) do
     update_mouse(state, &MouseState.set_hover(&1, row, col, backend: state.backend))
   end
 
@@ -1793,7 +1793,7 @@ defmodule MingaEditor.Mouse do
 
   @spec close_tab_at(state(), non_neg_integer(), non_neg_integer()) :: state()
   defp close_tab_at(state, row, col) do
-    case find_tab_bar_region(state.shell_state.tab_bar_click_regions, row, col) do
+    case find_tab_bar_region(state.shell_runtime.state.tab_bar_click_regions, row, col) do
       {:command, cmd} -> close_tab_by_command(state, cmd)
       :not_tab_bar -> state
     end
@@ -1847,7 +1847,7 @@ defmodule MingaEditor.Mouse do
           {:command, tab_command()} | :not_tab_bar
   defp tab_bar_click(state, row, col) do
     if SurfaceRegistry.within?(state, :tab_bar, row, col) do
-      find_tab_bar_region(state.shell_state.tab_bar_click_regions, row, col)
+      find_tab_bar_region(state.shell_runtime.state.tab_bar_click_regions, row, col)
     else
       :not_tab_bar
     end
@@ -1897,7 +1897,7 @@ defmodule MingaEditor.Mouse do
       end)
 
     if is_modeline do
-      find_click_region(state.shell_state.modeline_click_regions, col)
+      find_click_region(state.shell_runtime.state.modeline_click_regions, col)
     else
       :not_modeline
     end

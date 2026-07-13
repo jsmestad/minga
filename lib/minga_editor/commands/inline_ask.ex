@@ -87,7 +87,7 @@ defmodule MingaEditor.Commands.InlineAsk do
   end
 
   @spec create_agent_tab(state()) :: state()
-  defp create_agent_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+  defp create_agent_tab(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     win_id = 1
     rows = max(state.terminal_viewport.rows, 1)
     cols = max(state.terminal_viewport.cols, 1)
@@ -128,7 +128,7 @@ defmodule MingaEditor.Commands.InlineAsk do
 
   @spec add_file_to_active_workspace(state(), FileRef.t()) :: state()
   defp add_file_to_active_workspace(
-         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
          %FileRef{} = file_ref
        ) do
     case TabBar.active_workspace(tb) do

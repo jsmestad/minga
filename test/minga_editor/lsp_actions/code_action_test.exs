@@ -17,17 +17,17 @@ defmodule MingaEditor.LspActions.CodeActionTest do
   describe "handle_code_action_response/2" do
     test "error sets status message" do
       state = LspActions.handle_code_action_response(stub_state(), {:error, "timeout"})
-      assert state.shell_state.status_msg == "Code action request failed"
+      assert EditorState.status_msg(state) == "Code action request failed"
     end
 
     test "nil result sets status message" do
       state = LspActions.handle_code_action_response(stub_state(), {:ok, nil})
-      assert state.shell_state.status_msg == "No code actions available"
+      assert EditorState.status_msg(state) == "No code actions available"
     end
 
     test "empty list sets status message" do
       state = LspActions.handle_code_action_response(stub_state(), {:ok, []})
-      assert state.shell_state.status_msg == "No code actions available"
+      assert EditorState.status_msg(state) == "No code actions available"
     end
 
     test "actions with non-empty list opens picker" do
@@ -41,7 +41,7 @@ defmodule MingaEditor.LspActions.CodeActionTest do
       result = LspActions.handle_code_action_response(stub_state(), {:ok, actions})
 
       # When PickerUI.open succeeds, the picker is active in the modal.
-      {:picker, %{picker_ui: picker_ui}} = result.shell_state.modal
+      {:picker, %{picker_ui: picker_ui}} = EditorState.modal(result)
       assert picker_ui.source == MingaEditor.UI.Picker.CodeActionSource
     end
   end

@@ -611,7 +611,7 @@ defmodule MingaEditor.MouseTest do
 
     test "switching tabs clears a standing link preview" do
       {state, _buf1, _buf2} = start_two_tab_state()
-      [first_tab_id | _] = Enum.map(state.shell_state.tab_bar.tabs, & &1.id)
+      [first_tab_id | _] = Enum.map(EditorState.tab_bar(state).tabs, & &1.id)
       {row, col} = buffer_screen_pos(state, 0, 2)
 
       state = mouse(state, row, col, :none, :motion, @super)

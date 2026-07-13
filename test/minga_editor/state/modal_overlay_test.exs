@@ -2,9 +2,12 @@ defmodule MingaEditor.State.ModalOverlayTest do
   use ExUnit.Case, async: true
 
   alias Minga.Editing.Completion
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.ModalOverlay
+  alias MingaEditor.CompletionTrigger
+  alias MingaEditor.State.ModalOverlay.CommandCompletion, as: CommandCompletionPayload
   alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
   alias MingaEditor.State.ModalOverlay.Conflict, as: ConflictPayload
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
@@ -21,7 +24,7 @@ defmodule MingaEditor.State.ModalOverlayTest do
       workspace: %SessionState{
         viewport: %Viewport{top: 0, left: 0, rows: 10, cols: 40}
       },
-      shell_state: %ShellState{}
+      shell_runtime: Runtime.new(Runtime.default_entry(), %ShellState{})
     }
   end
 
@@ -95,7 +98,7 @@ defmodule MingaEditor.State.ModalOverlayTest do
 
       result = ModalOverlay.open(state, :picker, payload)
 
-      assert result.shell_state.modal == {:picker, payload}
+      assert result.shell_runtime.state.modal == {:picker, payload}
     end
 
     test "writes the prompt variant" do
@@ -104,7 +107,7 @@ defmodule MingaEditor.State.ModalOverlayTest do
 
       result = ModalOverlay.open(state, :prompt, payload)
 
-      assert result.shell_state.modal == {:prompt, payload}
+      assert result.shell_runtime.state.modal == {:prompt, payload}
     end
 
     test "writes the completion modal payload" do
@@ -113,8 +116,23 @@ defmodule MingaEditor.State.ModalOverlayTest do
 
       result = ModalOverlay.open(state, :completion, payload)
 
-      assert result.shell_state.modal == {:completion, payload}
+      assert result.shell_runtime.state.modal == {:completion, payload}
       assert ModalOverlay.completion(result) == payload.completion
+    end
+
+    test "accessors read flattened render-pipeline shell state" do
+      completion_payload = completion_payload(7)
+      transfer = %{shell_state: %{modal: {:completion, completion_payload}}}
+
+      assert ModalOverlay.completion(transfer) == completion_payload.completion
+      assert ModalOverlay.completion_trigger(transfer) == completion_payload.trigger
+
+      command_payload = CommandCompletionPayload.new(filter_text: "w")
+      transfer = %{shell_state: %{modal: {:command_completion, command_payload}}}
+      assert ModalOverlay.command_completion(transfer) == command_payload
+
+      assert ModalOverlay.completion_trigger(%{shell_state: %{modal: :none}}) ==
+               CompletionTrigger.new()
     end
 
     test "writes the conflict variant" do
@@ -124,7 +142,7 @@ defmodule MingaEditor.State.ModalOverlayTest do
 
       result = ModalOverlay.open(state, :conflict, payload)
 
-      assert result.shell_state.modal == {:conflict, payload}
+      assert result.shell_runtime.state.modal == {:conflict, payload}
     end
   end
 
@@ -137,7 +155,7 @@ defmodule MingaEditor.State.ModalOverlayTest do
       prompt = prompt_payload("hello")
       result = ModalOverlay.open(state, :prompt, prompt)
 
-      assert result.shell_state.modal == {:prompt, prompt}
+      assert result.shell_runtime.state.modal == {:prompt, prompt}
     end
 
     test "replacing completion with picker clears the completion accessor" do
@@ -148,7 +166,7 @@ defmodule MingaEditor.State.ModalOverlayTest do
       picker = picker_payload()
       result = ModalOverlay.open(state, :picker, picker)
 
-      assert result.shell_state.modal == {:picker, picker}
+      assert result.shell_runtime.state.modal == {:picker, picker}
       assert ModalOverlay.completion(result) == nil
     end
   end
@@ -182,7 +200,7 @@ defmodule MingaEditor.State.ModalOverlayTest do
       next = ConflictPayload.new(self(), "different message", opened_at: 2_000)
       result = ModalOverlay.open(state, :conflict, next)
 
-      assert result.shell_state.modal == {:conflict, next}
+      assert result.shell_runtime.state.modal == {:conflict, next}
     end
   end
 
@@ -195,7 +213,7 @@ defmodule MingaEditor.State.ModalOverlayTest do
       picker = picker_payload()
       result = ModalOverlay.transition(state, :picker, picker)
 
-      assert result.shell_state.modal == {:picker, picker}
+      assert result.shell_runtime.state.modal == {:picker, picker}
     end
   end
 
@@ -207,7 +225,7 @@ defmodule MingaEditor.State.ModalOverlayTest do
 
       result = ModalOverlay.close(state)
 
-      assert result.shell_state.modal == :none
+      assert result.shell_runtime.state.modal == :none
     end
 
     test "dismiss clears the active prompt" do
@@ -217,7 +235,7 @@ defmodule MingaEditor.State.ModalOverlayTest do
 
       result = ModalOverlay.dismiss(state)
 
-      assert result.shell_state.modal == :none
+      assert result.shell_runtime.state.modal == :none
     end
 
     test "dismiss clears an active conflict" do
@@ -227,7 +245,7 @@ defmodule MingaEditor.State.ModalOverlayTest do
 
       result = ModalOverlay.dismiss(state)
 
-      assert result.shell_state.modal == :none
+      assert result.shell_runtime.state.modal == :none
     end
 
     test "close clears the completion accessor when a completion is active" do
@@ -237,7 +255,7 @@ defmodule MingaEditor.State.ModalOverlayTest do
 
       result = ModalOverlay.close(state)
 
-      assert result.shell_state.modal == :none
+      assert result.shell_runtime.state.modal == :none
       assert ModalOverlay.completion(result) == nil
     end
 
@@ -252,32 +270,34 @@ defmodule MingaEditor.State.ModalOverlayTest do
     test "dismisses a completion modal whose owner doesn't match the active tab" do
       state = %{
         base_state()
-        | shell_state: %ShellState{
-            modal: :none,
-            tab_bar: tab_bar_with_active(99)
-          }
+        | shell_runtime:
+            Runtime.new(
+              Runtime.default_entry(),
+              %ShellState{modal: :none, tab_bar: tab_bar_with_active(99)}
+            )
       }
 
       state = ModalOverlay.open(state, :completion, completion_payload(1))
-      assert ModalOverlay.match(state.shell_state.modal, :completion)
+      assert ModalOverlay.match(state.shell_runtime.state.modal, :completion)
 
       result = ModalOverlay.dismiss_if_stale(state)
-      assert result.shell_state.modal == :none
+      assert result.shell_runtime.state.modal == :none
     end
 
     test "leaves completion alone when its owner matches the active tab" do
       state = %{
         base_state()
-        | shell_state: %ShellState{
-            modal: :none,
-            tab_bar: tab_bar_with_active(7)
-          }
+        | shell_runtime:
+            Runtime.new(
+              Runtime.default_entry(),
+              %ShellState{modal: :none, tab_bar: tab_bar_with_active(7)}
+            )
       }
 
       state = ModalOverlay.open(state, :completion, completion_payload(7))
       result = ModalOverlay.dismiss_if_stale(state)
 
-      assert ModalOverlay.match(result.shell_state.modal, :completion)
+      assert ModalOverlay.match(result.shell_runtime.state.modal, :completion)
     end
 
     test "no-op for non-completion modals" do

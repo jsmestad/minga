@@ -21,6 +21,8 @@ defmodule MingaEditor.Input.Router do
   alias MingaEditor.FocusTree.Node, as: FocusNode
   alias MingaEditor.KeystrokeHistory
   alias MingaEditor.LspActions
+  alias MingaEditor.Shell.Entry
+  alias MingaEditor.Shell.Traditional
   alias MingaEditor.State, as: EditorState
 
   @typedoc "Pre-action snapshot for housekeeping comparisons."
@@ -126,10 +128,10 @@ defmodule MingaEditor.Input.Router do
   # If none consume the key, delegates to surface handlers (Scoped, GlobalBindings, ModeFSM).
   @spec dispatch_split(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
   defp dispatch_split(%EditorState{} = state, codepoint, modifiers) do
-    state = EditorState.ensure_shell_available(state)
+    state = MingaEditor.Shell.Workflow.ensure_available(state)
 
     %{overlay: overlay_handlers, surface: _surface} =
-      EditorState.active_shell_module(state).input_handlers(state)
+      MingaEditor.Shell.Runtime.module(state.shell_runtime).input_handlers(state)
 
     case walk_handlers_until_passthrough(overlay_handlers, state, codepoint, modifiers) do
       {:handled, new_state} ->
@@ -152,7 +154,8 @@ defmodule MingaEditor.Input.Router do
          codepoint,
          modifiers
        ) do
-    %{surface: surface_handlers} = EditorState.active_shell_module(state).input_handlers(state)
+    %{surface: surface_handlers} =
+      MingaEditor.Shell.Runtime.module(state.shell_runtime).input_handlers(state)
 
     Enum.reduce_while(surface_handlers, state, fn handler, acc ->
       case handler.handle_key(acc, codepoint, modifiers) do
@@ -212,9 +215,21 @@ defmodule MingaEditor.Input.Router do
     }
 
     state
-    |> MingaEditor.do_maybe_handle_completion(was_inserting, codepoint, modifiers)
+    |> maybe_handle_completion(was_inserting, codepoint, modifiers)
     |> post_action_housekeeping(snapshot)
   end
+
+  @spec maybe_handle_completion(EditorState.t(), boolean(), non_neg_integer(), non_neg_integer()) ::
+          EditorState.t()
+  defp maybe_handle_completion(
+         %EditorState{shell_runtime: %{entry: %Entry{module: Traditional}}} = state,
+         was_inserting,
+         codepoint,
+         modifiers
+       ),
+       do: MingaEditor.do_maybe_handle_completion(state, was_inserting, codepoint, modifiers)
+
+  defp maybe_handle_completion(state, _was_inserting, _codepoint, _modifiers), do: state
 
   # Clears selection range state when leaving visual mode by any means.
   # This ensures the stored selection range chain doesn't linger after
@@ -322,7 +337,7 @@ defmodule MingaEditor.Input.Router do
         click_count
       )
       when event_type in [:drag, :release] do
-    state = EditorState.ensure_shell_available(state)
+    state = MingaEditor.Shell.Workflow.ensure_available(state)
     MingaEditor.Mouse.handle(state, row, col, :left, mods, event_type, click_count)
   end
 
@@ -332,7 +347,7 @@ defmodule MingaEditor.Input.Router do
   end
 
   def dispatch_mouse(state, row, col, button, mods, event_type, click_count) do
-    state = EditorState.ensure_shell_available(state)
+    state = MingaEditor.Shell.Workflow.ensure_available(state)
 
     event = %{
       row: row,

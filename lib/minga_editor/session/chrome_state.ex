@@ -79,7 +79,7 @@ defmodule MingaEditor.Session.ChromeState do
   def visible_tabs(%__MODULE__{visible_tabs: tabs}), do: tabs
 
   @spec tab_bar(map()) :: TabBar.t() | nil
-  defp tab_bar(%{shell_state: %{tab_bar: %TabBar{} = tb}}), do: tb
+  defp tab_bar(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}}), do: tb
   defp tab_bar(%{tab_bar: %TabBar{} = tb}), do: tb
   defp tab_bar(_state), do: nil
 

@@ -59,7 +59,7 @@ defmodule MingaEditor.Input.Observatory do
   end
 
   @spec find_process_class(state(), pid()) :: process_class()
-  defp find_process_class(%{shell_state: %{observatory_data: %{tree: tree}}}, pid) do
+  defp find_process_class(%{shell_runtime: %{state: %{observatory_data: %{tree: tree}}}}, pid) do
     tree
     |> Minga.SystemObserver.TreeNode.flatten()
     |> Enum.find_value(:worker, fn node ->

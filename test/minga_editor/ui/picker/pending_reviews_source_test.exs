@@ -3,6 +3,7 @@ defmodule MingaEditor.UI.Picker.PendingReviewsSourceTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Search
@@ -51,7 +52,7 @@ defmodule MingaEditor.UI.Picker.PendingReviewsSourceTest do
         buffers: %Buffers{list: [buffer], active: buffer, active_index: 0},
         keymap_scope: :editor
       },
-      shell_state: %ShellState{tab_bar: tab_bar}
+      shell_runtime: Runtime.new(Runtime.default_entry(), %ShellState{tab_bar: tab_bar})
     }
   end
 
@@ -152,8 +153,8 @@ defmodule MingaEditor.UI.Picker.PendingReviewsSourceTest do
           state
         )
 
-      assert TabBar.active_workspace_id(switched.shell_state.tab_bar) == workspace.id
-      assert [tab] = TabBar.tabs_in_workspace(switched.shell_state.tab_bar, workspace.id)
+      assert TabBar.active_workspace_id(EditorState.tab_bar(switched)) == workspace.id
+      assert [tab] = TabBar.tabs_in_workspace(EditorState.tab_bar(switched), workspace.id)
       assert tab.kind == :agent
     end
 
@@ -181,7 +182,7 @@ defmodule MingaEditor.UI.Picker.PendingReviewsSourceTest do
       switched =
         PendingReviewsSource.on_select(%Item{id: workspace.id, label: "Needs review"}, state)
 
-      assert switched.shell_state.tab_bar.active_id == tab2.id
+      assert EditorState.tab_bar(switched).active_id == tab2.id
       assert switched.workspace.buffers.active == buf_b
     end
   end

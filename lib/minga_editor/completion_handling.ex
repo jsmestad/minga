@@ -155,7 +155,7 @@ defmodule MingaEditor.CompletionHandling do
     else
       state = dismiss(state)
       # Dismiss signature help when leaving insert mode
-      EditorState.update_shell_state(state, &%{&1 | signature_help: nil})
+      EditorState.set_signature_help(state, nil)
     end
   end
 
@@ -168,7 +168,7 @@ defmodule MingaEditor.CompletionHandling do
   """
   @spec dismiss(EditorState.t()) :: EditorState.t()
   def dismiss(state) do
-    if ModalOverlay.match(state.shell_state.modal, :completion) do
+    if ModalOverlay.match(state.shell_runtime.state.modal, :completion) do
       # Cancel any pending resolve timer and dismiss the trigger to cancel
       # debounce timers and forget pending refs before the modal closes.
       case ModalOverlay.completion(state) do
@@ -438,7 +438,7 @@ defmodule MingaEditor.CompletionHandling do
   end
 
   @spec active_tab_id(EditorState.t()) :: term() | nil
-  defp active_tab_id(%{shell_state: %{tab_bar: %{active_id: id}}}), do: id
+  defp active_tab_id(%{shell_runtime: %{state: %{tab_bar: %{active_id: id}}}}), do: id
   defp active_tab_id(_), do: nil
 
   @typedoc "Config contexts that produce completion items (excludes :none)."
@@ -672,7 +672,7 @@ defmodule MingaEditor.CompletionHandling do
   def apply_processed(state, gen, mode, payload, trigger_pos) do
     trigger = ModalOverlay.completion_trigger(state)
 
-    if ModalOverlay.match(state.shell_state.modal, :completion) and trigger.gen == gen do
+    if ModalOverlay.match(state.shell_runtime.state.modal, :completion) and trigger.gen == gen do
       apply_processed_current(state, mode, payload, trigger_pos)
     else
       # Stale generation or the menu was dismissed/replaced; discard.
@@ -779,12 +779,12 @@ defmodule MingaEditor.CompletionHandling do
   def handle_signature_help_response(state, {:error, _}), do: state
 
   def handle_signature_help_response(state, {:ok, nil}),
-    do: EditorState.update_shell_state(state, &%{&1 | signature_help: nil})
+    do: EditorState.set_signature_help(state, nil)
 
   def handle_signature_help_response(state, {:ok, result}) when is_map(result) do
     {cursor_row, cursor_col} = approximate_cursor_screen_pos(state)
     sh = SignatureHelp.from_response(result, cursor_row, cursor_col)
-    EditorState.update_shell_state(state, &%{&1 | signature_help: sh})
+    EditorState.set_signature_help(state, sh)
   end
 
   def handle_signature_help_response(state, _), do: state
@@ -797,7 +797,7 @@ defmodule MingaEditor.CompletionHandling do
     cond do
       # ) always dismisses signature help
       codepoint == ?) ->
-        EditorState.update_shell_state(state, &%{&1 | signature_help: nil})
+        EditorState.set_signature_help(state, nil)
 
       # Check if the character is a server-declared signature trigger
       char != nil and signature_trigger_char?(state, buf, char) ->

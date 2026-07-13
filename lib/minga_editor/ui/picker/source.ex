@@ -53,9 +53,9 @@ defmodule MingaEditor.UI.Picker.Source do
   Called when the user selects an item. Returns the new editor state.
 
   Important: this callback runs *after* the picker has been closed
-  (`state.shell_state.modal` has been reset to `:none`). Any context the
+  (`state.shell_runtime.state.modal` has been reset to `:none`). Any context the
   callback needs must travel with the `Picker.item()` (typically embedded
-  in `Item.id`). Reading `state.shell_state.modal` here will see `:none`.
+  in `Item.id`). Reading `state.shell_runtime.state.modal` here will see `:none`.
   """
   @callback on_select(Picker.item(), state :: term()) :: term()
 
@@ -103,7 +103,7 @@ defmodule MingaEditor.UI.Picker.Source do
 
   Like `on_select/2`, this runs *after* the picker has been closed. Any
   context required must travel with the `Picker.item()`; do not read
-  `state.shell_state.modal` here.
+  `state.shell_runtime.state.modal` here.
   """
   @callback on_action(term(), Picker.item(), state :: term()) :: term()
 
@@ -196,7 +196,7 @@ defmodule MingaEditor.UI.Picker.Source do
   """
   @spec restore_or_keep(term()) :: term()
   def restore_or_keep(state) do
-    case state.shell_state.modal do
+    case state.shell_runtime.state.modal do
       {:picker, %{picker_ui: %{restore: idx}}} when is_integer(idx) ->
         EditorState.switch_buffer(state, idx)
 

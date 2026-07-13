@@ -20,7 +20,7 @@ defmodule MingaEditor.Frontend.Emit.SurfaceLayoutEmitTest do
   alias MingaEditor.Layout.SurfaceRegistry
   alias MingaEditor.Layout.SurfaceRegistry.Placement
   alias MingaEditor.SignatureHelp
-  alias MingaEditor.Shell.Traditional.State, as: ShellState
+  alias MingaEditor.State, as: EditorState
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -43,12 +43,9 @@ defmodule MingaEditor.Frontend.Emit.SurfaceLayoutEmitTest do
       anchor_col: 3
     }
 
-    shell_state =
-      state.shell_state
-      |> ShellState.set_hover_popup(hover)
-      |> Map.put(:signature_help, signature)
-
-    %{state | shell_state: shell_state}
+    state
+    |> EditorState.set_hover_popup(hover)
+    |> EditorState.set_signature_help(signature)
   end
 
   defp emit_commands(state) do

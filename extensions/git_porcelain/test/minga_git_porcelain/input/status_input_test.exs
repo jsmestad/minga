@@ -11,6 +11,7 @@ defmodule MingaGitPorcelain.Input.GitStatusInputTest do
   alias Minga.Git
   alias MingaGitPorcelain.Input.GitStatus
   alias MingaGitPorcelain.Shell.Traditional.GitStatus.TuiState
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Viewport
@@ -59,7 +60,7 @@ defmodule MingaGitPorcelain.Input.GitStatusInputTest do
     assert panel != nil
     refute Map.has_key?(panel, :tui_state)
 
-    tui = ShellState.git_status_tui_state(state.shell_state)
+    tui = ShellState.git_status_tui_state(Runtime.state(state.shell_runtime))
     assert tui != nil
     assert tui.cursor_index == 0
     assert tui.amend_mode == false

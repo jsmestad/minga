@@ -58,7 +58,7 @@ defmodule MingaEditor.PromptUITest do
   end
 
   defp prompt_state(state) do
-    case state.shell_state.modal do
+    case EditorState.modal(state) do
       {:prompt, %{prompt_ui: pui}} -> pui
       _ -> %PromptState{}
     end
@@ -113,7 +113,7 @@ defmodule MingaEditor.PromptUITest do
         |> PromptUI.open(TestHandler)
 
       assert prompt_state(state).handler == TestHandler
-      refute ModalOverlay.match(state.shell_state.modal, :picker)
+      refute ModalOverlay.match(EditorState.modal(state), :picker)
     end
   end
 
@@ -267,7 +267,7 @@ defmodule MingaEditor.PromptUITest do
         |> PromptUI.close()
 
       refute PromptUI.open?(state)
-      assert state.shell_state.modal == :none
+      assert EditorState.modal(state) == :none
     end
   end
 

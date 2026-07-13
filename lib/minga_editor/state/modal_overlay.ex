@@ -118,7 +118,7 @@ defmodule MingaEditor.State.ModalOverlay do
   """
   @spec open(EditorState.t(), variant(), payload()) :: EditorState.t()
   def open(%EditorState{} = state, variant, payload) do
-    case state.shell_state.modal do
+    case state.shell_runtime.state.modal do
       {:conflict, _} when variant != :conflict ->
         Minga.Log.info(
           :editor,
@@ -165,7 +165,7 @@ defmodule MingaEditor.State.ModalOverlay do
 
   @spec do_close(EditorState.t(), :close | :dismiss) :: EditorState.t()
   defp do_close(state, _kind) do
-    case state.shell_state.modal do
+    case state.shell_runtime.state.modal do
       :none -> state
       _ -> EditorState.set_modal(state, :none)
     end
@@ -182,6 +182,9 @@ defmodule MingaEditor.State.ModalOverlay do
   RenderPipeline.Input flavour of state works the same as EditorState.
   """
   @spec completion(map()) :: Completion.t() | nil
+  def completion(%{shell_runtime: %{state: %{modal: {:completion, %CompletionPayload{} = p}}}}),
+    do: p.completion
+
   def completion(%{shell_state: %{modal: {:completion, %CompletionPayload{} = p}}}),
     do: p.completion
 
@@ -194,6 +197,11 @@ defmodule MingaEditor.State.ModalOverlay do
   caring about completion state itself use this.
   """
   @spec completion_trigger(map()) :: CompletionTrigger.t()
+  def completion_trigger(%{
+        shell_runtime: %{state: %{modal: {:completion, %CompletionPayload{} = p}}}
+      }),
+      do: p.trigger || CompletionTrigger.new()
+
   def completion_trigger(%{shell_state: %{modal: {:completion, %CompletionPayload{} = p}}}),
     do: p.trigger || CompletionTrigger.new()
 
@@ -207,7 +215,7 @@ defmodule MingaEditor.State.ModalOverlay do
   """
   @spec update_completion(EditorState.t(), (Completion.t() -> Completion.t())) :: EditorState.t()
   def update_completion(%EditorState{} = state, fun) when is_function(fun, 1) do
-    case state.shell_state.modal do
+    case state.shell_runtime.state.modal do
       {:completion, %CompletionPayload{completion: comp} = payload} ->
         new_comp = fun.(comp)
         new_payload = CompletionPayload.put_completion(payload, new_comp)
@@ -233,7 +241,7 @@ defmodule MingaEditor.State.ModalOverlay do
   """
   @spec put_completion_trigger(EditorState.t(), CompletionTrigger.t()) :: EditorState.t()
   def put_completion_trigger(%EditorState{} = state, trigger) do
-    case state.shell_state.modal do
+    case state.shell_runtime.state.modal do
       {:completion, %CompletionPayload{} = payload} ->
         new_payload = CompletionPayload.put_trigger(payload, trigger)
         EditorState.set_modal(state, {:completion, new_payload})
@@ -270,6 +278,11 @@ defmodule MingaEditor.State.ModalOverlay do
   """
   @spec command_completion(map()) :: CommandCompletionPayload.t() | nil
   def command_completion(%{
+        shell_runtime: %{state: %{modal: {:command_completion, %CommandCompletionPayload{} = p}}}
+      }),
+      do: p
+
+  def command_completion(%{
         shell_state: %{modal: {:command_completion, %CommandCompletionPayload{} = p}}
       }),
       do: p
@@ -288,7 +301,7 @@ defmodule MingaEditor.State.ModalOverlay do
   """
   @spec dismiss_if_stale(EditorState.t()) :: EditorState.t()
   def dismiss_if_stale(%EditorState{} = state) do
-    case state.shell_state.modal do
+    case state.shell_runtime.state.modal do
       {:completion, %CompletionPayload{owner: owner}} ->
         if active_tab_id(state) == owner do
           state
@@ -302,6 +315,6 @@ defmodule MingaEditor.State.ModalOverlay do
   end
 
   @spec active_tab_id(EditorState.t()) :: term() | nil
-  defp active_tab_id(%EditorState{shell_state: %{tab_bar: %{active_id: id}}}), do: id
+  defp active_tab_id(%EditorState{shell_runtime: %{state: %{tab_bar: %{active_id: id}}}}), do: id
   defp active_tab_id(%EditorState{}), do: nil
 end

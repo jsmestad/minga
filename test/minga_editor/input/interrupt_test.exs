@@ -102,12 +102,12 @@ defmodule MingaEditor.Input.InterruptTest do
     assert state.workspace.keymap_scope == :editor
     assert state.workspace.editing.mode == :normal
     assert state.workspace.editing.mode_state == Mode.initial_state()
-    assert state.shell_state.modal == :none
-    assert state.shell_state.whichkey.node == nil
-    assert state.shell_state.whichkey.show == false
+    assert EditorState.modal(state) == :none
+    assert EditorState.whichkey(state).node == nil
+    assert EditorState.whichkey(state).show == false
     assert AgentAccess.view(state).pending_prefix == nil
-    assert state.shell_state.status_msg == nil
-    assert state.shell_state.hover_popup == hover
+    assert EditorState.status_msg(state) == nil
+    assert EditorState.hover_popup(state) == hover
   end
 
   describe "Ctrl-G basics" do
@@ -131,8 +131,8 @@ defmodule MingaEditor.Input.InterruptTest do
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
       assert new_state.workspace.keymap_scope == :editor
       assert new_state.workspace.editing.mode == :normal
-      assert new_state.shell_state.modal == :none
-      assert new_state.shell_state.whichkey.node == nil
+      assert EditorState.modal(new_state) == :none
+      assert EditorState.whichkey(new_state).node == nil
     end
   end
 
@@ -252,7 +252,7 @@ defmodule MingaEditor.Input.InterruptTest do
         ModalOverlay.open(state, :picker, PickerPayload.new(%Picker{picker: picker, source: nil}))
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
-      assert new_state.shell_state.modal == :none
+      assert EditorState.modal(new_state) == :none
     end
 
     test "dismisses which-key popup" do
@@ -260,8 +260,8 @@ defmodule MingaEditor.Input.InterruptTest do
       state = MingaEditor.State.set_whichkey(state, %WhichKey{node: %{}, show: true})
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
-      assert new_state.shell_state.whichkey.node == nil
-      assert new_state.shell_state.whichkey.show == false
+      assert EditorState.whichkey(new_state).node == nil
+      assert EditorState.whichkey(new_state).show == false
     end
 
     test "dismisses conflict prompt" do
@@ -270,7 +270,7 @@ defmodule MingaEditor.Input.InterruptTest do
       state = ModalOverlay.open(state, :conflict, ConflictPayload.new(buf, "/tmp/test.txt"))
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
-      refute ModalOverlay.match(new_state.shell_state.modal, :conflict)
+      refute ModalOverlay.match(EditorState.modal(new_state), :conflict)
     end
 
     test "closes completion menu" do
@@ -284,14 +284,14 @@ defmodule MingaEditor.Input.InterruptTest do
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
       assert MingaEditor.State.ModalOverlay.completion(new_state) == nil
-      refute ModalOverlay.match(new_state.shell_state.modal, :completion)
+      refute ModalOverlay.match(EditorState.modal(new_state), :completion)
     end
 
     test "clears status message" do
       state = MingaEditor.State.set_status(base_state(), "some message")
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
-      assert new_state.shell_state.status_msg == nil
+      assert EditorState.status_msg(new_state) == nil
     end
   end
 

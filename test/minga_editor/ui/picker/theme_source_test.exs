@@ -1,6 +1,7 @@
 defmodule MingaEditor.UI.Picker.ThemeSourceTest do
   use ExUnit.Case, async: true
 
+  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
   alias MingaEditor.State.Picker, as: PickerState
@@ -83,10 +84,13 @@ defmodule MingaEditor.UI.Picker.ThemeSourceTest do
     test "restores the original theme from picker state" do
       original = Theme.get!(:doom_one)
 
-      state = %{
-        theme: Theme.get!(:one_dark),
-        shell_state: %{modal: {:picker, %{picker_ui: %{restore_theme: original}}}}
-      }
+      state =
+        base_state()
+        |> EditorState.apply_theme(Theme.get!(:one_dark))
+        |> ModalOverlay.open(
+          :picker,
+          PickerPayload.new(%PickerState{restore_theme: original})
+        )
 
       restored = ThemeSource.on_cancel(state)
       assert restored.theme.name == :doom_one
@@ -116,10 +120,7 @@ defmodule MingaEditor.UI.Picker.ThemeSourceTest do
     end
 
     test "returns state unchanged when no restore_theme" do
-      state = %{
-        theme: Theme.get!(:one_dark),
-        shell_state: %{modal: :none}
-      }
+      state = base_state() |> EditorState.apply_theme(Theme.get!(:one_dark))
 
       assert ThemeSource.on_cancel(state) == state
     end

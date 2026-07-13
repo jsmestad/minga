@@ -4,6 +4,7 @@ defmodule MingaEditor.InlineAsk.RenderTest do
   alias Minga.Core.Decorations
   alias Minga.Project.FileRef
   alias MingaEditor.InlineAsk.Render
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State.InlineAsk
 
@@ -23,7 +24,11 @@ defmodule MingaEditor.InlineAsk.RenderTest do
     ask = InlineAsk.append_input(ask, "why?")
 
     state = %{
-      shell_state: %TraditionalState{inline_asks: %{buffer_pid => ask}}
+      shell_runtime:
+        Runtime.new(
+          Runtime.default_entry(),
+          %TraditionalState{inline_asks: %{buffer_pid => ask}}
+        )
     }
 
     decorations = Render.merge_decorations(Decorations.new(), state, buffer_pid)
@@ -46,6 +51,23 @@ defmodule MingaEditor.InlineAsk.RenderTest do
     assert text =~ "why?"
   end
 
+  test "merge_decorations reads flattened render-pipeline shell state" do
+    buffer_pid = self()
+
+    ask =
+      InlineAsk.new(
+        buffer_pid,
+        %FileRef{kind: :buffer, display_name: "scratch.ex", buffer_pid: buffer_pid},
+        "scratch.ex",
+        0
+      )
+
+    state = %{shell_state: %TraditionalState{inline_asks: %{buffer_pid => ask}}}
+    decorations = Render.merge_decorations(Decorations.new(), state, buffer_pid)
+
+    assert Decorations.has_block_decorations?(decorations)
+  end
+
   test "merge_decorations leaves other buffers unchanged" do
     active_buffer = self()
 
@@ -60,7 +82,13 @@ defmodule MingaEditor.InlineAsk.RenderTest do
         0
       )
 
-    state = %{shell_state: %TraditionalState{inline_asks: %{active_buffer => ask}}}
+    state = %{
+      shell_runtime:
+        Runtime.new(
+          Runtime.default_entry(),
+          %TraditionalState{inline_asks: %{active_buffer => ask}}
+        )
+    }
 
     decorations = Render.merge_decorations(Decorations.new(), state, other_buffer)
 

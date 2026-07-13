@@ -49,7 +49,7 @@ defmodule MingaEditor.Commands.HelpTest do
 
       assert is_pid(help)
       assert result.workspace.buffers.active == help
-      assert result.shell_state.status_msg == nil
+      assert EditorState.status_msg(result) == nil
       assert BufferProcess.read_only?(help)
       assert BufferProcess.get_option(help, :autopair_block) == false
 

@@ -22,8 +22,8 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   alias Minga.Project.FileRef
   alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.Commands.AgentSession
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
-  alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
@@ -100,7 +100,6 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
     %EditorState{
       port_manager: nil,
-      shell: MingaEditor.Shell.Traditional,
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
@@ -113,7 +112,11 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
         },
         agent_ui: agentic
       },
-      shell_state: %MingaEditor.Shell.Traditional.State{agent: agent, tab_bar: tb},
+      shell_runtime:
+        Runtime.new(
+          Runtime.default_entry(),
+          %MingaEditor.Shell.Traditional.State{agent: agent, tab_bar: tb}
+        ),
       focus_stack: Input.default_stack()
     }
   end
@@ -136,13 +139,13 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
         |> WorkspaceModel.set_active_file(source_ref)
       end)
 
-    %{state | shell_state: %{state.shell_state | tab_bar: tab_bar}}
+    EditorState.set_tab_bar(state, tab_bar)
   end
 
   defp source_workspace_with_background_agent_tab do
     state = source_workspace_state()
-    {tab_bar, _agent_tab} = TabBar.insert(state.shell_state.tab_bar, :agent, "Agent")
-    %{state | shell_state: %{state.shell_state | tab_bar: tab_bar}}
+    {tab_bar, _agent_tab} = TabBar.insert(state.shell_runtime.state.tab_bar, :agent, "Agent")
+    EditorState.set_tab_bar(state, tab_bar)
   end
 
   defp active_agent_workspace_state do
@@ -277,7 +280,9 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       new_state = AgentCommands.submit_prompt(state)
 
       assert UIState.prompt_text(AgentAccess.panel(new_state)) == "/modle"
-      assert new_state.shell_state.status_msg == "Unknown command: /modle. Did you mean /model?"
+
+      assert new_state.shell_runtime.state.status_msg ==
+               "Unknown command: /modle. Did you mean /model?"
 
       assert_receive {:stub_system_message, "Unknown command: /modle. Did you mean /model?",
                       :error}
@@ -300,7 +305,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       new_state = AgentCommands.submit_prompt(state)
 
-      assert new_state.shell_state.status_msg =~ "No model configured"
+      assert new_state.shell_runtime.state.status_msg =~ "No model configured"
       assert UIState.prompt_text(AgentAccess.panel(new_state)) == "hello agent"
     end
 
@@ -323,7 +328,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       new_state = AgentCommands.submit_prompt(state)
 
-      assert new_state.shell_state.status_msg =~ "No agent session"
+      assert new_state.shell_runtime.state.status_msg =~ "No agent session"
       assert UIState.prompt_text(AgentAccess.panel(new_state)) == "hello agent"
     end
 
@@ -346,7 +351,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       new_state = AgentCommands.submit_prompt(state)
 
-      assert new_state.shell_state.status_msg =~
+      assert new_state.shell_runtime.state.status_msg =~
                "No provider credentials are configured for this model"
 
       assert UIState.prompt_text(AgentAccess.panel(new_state)) == "draft prompt"
@@ -371,7 +376,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       new_state = AgentCommands.submit_prompt(state)
 
-      assert new_state.shell_state.status_msg =~ "Agent provider still starting"
+      assert new_state.shell_runtime.state.status_msg =~ "Agent provider still starting"
       assert UIState.prompt_text(AgentAccess.panel(new_state)) == "draft prompt"
     end
 
@@ -394,7 +399,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       new_state = AgentCommands.submit_prompt(state)
 
-      assert new_state.shell_state.status_msg ==
+      assert new_state.shell_runtime.state.status_msg ==
                "Failed to start agent: boom. Your prompt was preserved."
 
       assert UIState.prompt_text(AgentAccess.panel(new_state)) == "draft prompt"
@@ -438,7 +443,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       new_state = AgentCommands.submit_prompt(state)
 
-      assert new_state.shell_state.status_msg =~ "Cannot resolve file mentions"
+      assert new_state.shell_runtime.state.status_msg =~ "Cannot resolve file mentions"
       assert UIState.prompt_text(AgentAccess.panel(new_state)) == "@missing.ex explain"
       refute_receive {:readiness_session_prompt, _prompt}
     end
@@ -468,7 +473,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       new_state = AgentCommands.submit_prompt(state)
 
       assert_receive {:readiness_session_prompt, "stale panel prompt"}
-      assert is_nil(new_state.shell_state.status_msg)
+      assert is_nil(new_state.shell_runtime.state.status_msg)
       assert UIState.prompt_text(AgentAccess.panel(new_state)) == ""
     end
 
@@ -503,7 +508,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
         new_state = AgentCommands.submit_prompt(state)
 
-        assert new_state.shell_state.status_msg =~ expected_message
+        assert new_state.shell_runtime.state.status_msg =~ expected_message
         assert UIState.prompt_text(AgentAccess.panel(new_state)) == "draft prompt"
       end
     end
@@ -514,13 +519,8 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       state = base_state()
 
       state =
-        %{
-          state
-          | shell_state: %{
-              state.shell_state
-              | agent: %{state.shell_state.agent | runtime: %RuntimeState{status: :thinking}}
-            }
-        }
+        state
+        |> AgentAccess.update_agent(&AgentState.set_status(&1, :thinking))
         |> AgentAccess.update_agent_ui(
           &UIState.set_prompt_text(&1, "/login openai --complete ref code")
         )
@@ -684,7 +684,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       new_state = AgentCommands.scope_ctrl_c(state)
 
       assert_receive :restart_provider_called
-      assert new_state.shell_state.status_msg == "Agent provider restarted"
+      assert new_state.shell_runtime.state.status_msg == "Agent provider restarted"
     end
   end
 
@@ -705,7 +705,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       state = base_state(session: nil)
       new_state = AgentCommands.cycle_thinking_level(state)
 
-      assert new_state.shell_state.status_msg =~ "No agent session"
+      assert new_state.shell_runtime.state.status_msg =~ "No agent session"
     end
   end
 
@@ -715,14 +715,14 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       new_state = AgentCommands.set_thinking_level(state, "high")
 
       assert AgentAccess.panel(new_state).thinking_level == "high"
-      assert new_state.shell_state.status_msg == "Thinking: high"
+      assert new_state.shell_runtime.state.status_msg == "Thinking: high"
     end
 
     test "sets status message when no session exists" do
       state = base_state(session: nil)
       new_state = AgentCommands.set_thinking_level(state, "high")
 
-      assert new_state.shell_state.status_msg =~ "No agent session"
+      assert new_state.shell_runtime.state.status_msg =~ "No agent session"
     end
   end
 
@@ -734,7 +734,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       new_state = command.execute.(state)
 
-      assert {:picker, %{picker_ui: picker_ui}} = new_state.shell_state.modal
+      assert {:picker, %{picker_ui: picker_ui}} = new_state.shell_runtime.state.modal
       assert picker_ui.source == MingaEditor.UI.Picker.ThinkingLevelSource
       assert picker_ui.context == %{current_level: "low"}
     end
@@ -745,7 +745,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       new_state = command.execute.(state)
 
-      assert new_state.shell_state.status_msg =~ "No agent session"
+      assert new_state.shell_runtime.state.status_msg =~ "No agent session"
     end
 
     test "agent_thinking_* commands set fixed levels" do
@@ -758,7 +758,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
         new_state = command!(command_name).execute.(base_state())
 
         assert AgentAccess.panel(new_state).thinking_level == expected_level
-        assert new_state.shell_state.status_msg == "Thinking: #{expected_level}"
+        assert new_state.shell_runtime.state.status_msg == "Thinking: #{expected_level}"
       end
     end
   end
@@ -784,7 +784,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       assert AgentAccess.panel(new_state).model_name == "openai:o4-mini"
       assert AgentAccess.panel(new_state).thinking_level == "high"
-      assert new_state.shell_state.status_msg == "Model: openai:o4-mini [2/3]"
+      assert new_state.shell_runtime.state.status_msg == "Model: openai:o4-mini [2/3]"
     end
   end
 
@@ -866,10 +866,10 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
     test "creates an active agent workspace with no file context" do
       state = source_workspace_state()
-      source_workspace = TabBar.get_workspace(state.shell_state.tab_bar, 0)
+      source_workspace = TabBar.get_workspace(state.shell_runtime.state.tab_bar, 0)
 
       new_state = AgentCommands.new_agent_session(state)
-      tab_bar = new_state.shell_state.tab_bar
+      tab_bar = new_state.shell_runtime.state.tab_bar
       active_workspace = TabBar.active_workspace(tab_bar)
 
       assert active_workspace.kind == :agent
@@ -887,7 +887,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
     test "switching back to the source file tab restores file content" do
       state = source_workspace_state()
-      file_tab_id = state.shell_state.tab_bar.active_id
+      file_tab_id = state.shell_runtime.state.tab_bar.active_id
 
       new_state = AgentCommands.new_agent_session(state)
       switched = EditorState.switch_tab(new_state, file_tab_id)
@@ -900,14 +900,14 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
     test "switching to a file tab inside an agent workspace restores file content" do
       state = source_workspace_state()
-      file_tab_id = state.shell_state.tab_bar.active_id
-      file_tab = TabBar.get(state.shell_state.tab_bar, file_tab_id)
+      file_tab_id = state.shell_runtime.state.tab_bar.active_id
+      file_tab = TabBar.get(state.shell_runtime.state.tab_bar, file_tab_id)
 
       new_state = AgentCommands.new_agent_session(state)
-      agent_workspace_id = TabBar.active_workspace_id(new_state.shell_state.tab_bar)
+      agent_workspace_id = TabBar.active_workspace_id(new_state.shell_runtime.state.tab_bar)
 
       tab_bar =
-        new_state.shell_state.tab_bar
+        new_state.shell_runtime.state.tab_bar
         |> TabBar.move_tab_to_workspace(file_tab_id, agent_workspace_id)
         |> TabBar.update_context(file_tab_id, file_tab.context)
 
@@ -918,7 +918,9 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       active_window = switched.workspace.windows.map[switched.workspace.windows.active]
 
-      assert TabBar.active_workspace_id(switched.shell_state.tab_bar) == agent_workspace_id
+      assert TabBar.active_workspace_id(switched.shell_runtime.state.tab_bar) ==
+               agent_workspace_id
+
       assert EditorState.active_tab_kind(switched) == :file
       assert active_window.content == {:buffer, switched.workspace.buffers.active}
       refute MingaEditor.Window.Content.agent_chat?(active_window.content)
@@ -926,11 +928,11 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
     test "creating from an existing agent workspace preserves the source tab context" do
       state = active_agent_workspace_state()
-      old_tab = TabBar.active(state.shell_state.tab_bar)
+      old_tab = TabBar.active(state.shell_runtime.state.tab_bar)
       old_session = old_tab.session
 
       new_state = AgentCommands.new_agent_session(state)
-      tab_bar = new_state.shell_state.tab_bar
+      tab_bar = new_state.shell_runtime.state.tab_bar
       updated_old_tab = TabBar.get(tab_bar, old_tab.id)
       old_context = TabContext.to_workspace_map(updated_old_tab.context)
       new_session = TabBar.active(tab_bar).session
@@ -945,11 +947,11 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
     test "background agent session creation does not switch active workspace" do
       state = source_workspace_with_background_agent_tab()
-      source_active_id = state.shell_state.tab_bar.active_id
-      source_workspace = TabBar.get_workspace(state.shell_state.tab_bar, 0)
+      source_active_id = state.shell_runtime.state.tab_bar.active_id
+      source_workspace = TabBar.get_workspace(state.shell_runtime.state.tab_bar, 0)
 
       new_state = AgentSession.start_agent_session(state)
-      tab_bar = new_state.shell_state.tab_bar
+      tab_bar = new_state.shell_runtime.state.tab_bar
       agent_workspaces = Enum.filter(tab_bar.workspaces, &(&1.kind == :agent))
 
       assert tab_bar.active_id == source_active_id
@@ -970,7 +972,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       state = base_state()
       new_state = AgentCommands.cycle_agent_tabs(state)
 
-      agent_tabs = TabBar.filter_by_kind(new_state.shell_state.tab_bar, :agent)
+      agent_tabs = TabBar.filter_by_kind(new_state.shell_runtime.state.tab_bar, :agent)
       assert agent_tabs != []
     end
   end

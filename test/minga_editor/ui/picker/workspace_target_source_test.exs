@@ -5,6 +5,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
   alias MingaAgent.ProjectView
   alias MingaAgent.Test.ProjectView.FailingBackend
   alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
@@ -47,7 +48,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
     {%EditorState{
        port_manager: self(),
        workspace: %SessionState{viewport: Viewport.new(24, 80)},
-       shell_state: %ShellState{tab_bar: tb}
+       shell_runtime: Runtime.new(Runtime.default_entry(), %ShellState{tab_bar: tb})
      }, ref, agent_a, agent_b}
   end
 
@@ -78,7 +79,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
     }
   end
 
-  defp workspace(state, id), do: TabBar.get_workspace(state.shell_state.tab_bar, id)
+  defp workspace(state, id), do: TabBar.get_workspace(state.shell_runtime.state.tab_bar, id)
 
   defp review(state, files) do
     %WorkspaceReview{state: state, changed_files: files}
@@ -87,7 +88,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
   describe "candidates/1" do
     test "excludes the current workspace", %{tmp_dir: root} do
       {state, ref, _agent_a, _agent_b} = state_with_workspaces(root)
-      tb = state.shell_state.tab_bar
+      tb = state.shell_runtime.state.tab_bar
 
       items =
         WorkspaceTargetSource.candidates(
@@ -124,7 +125,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
         EditorState.set_tab_bar(
           state,
           TabBar.update_workspace(
-            state.shell_state.tab_bar,
+            state.shell_runtime.state.tab_bar,
             agent_a.id,
             &Workspace.remove_file(&1, ref)
           )
@@ -156,7 +157,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
         EditorState.set_tab_bar(
           state,
           TabBar.update_workspace(
-            state.shell_state.tab_bar,
+            state.shell_runtime.state.tab_bar,
             agent_a.id,
             &Workspace.remove_file(&1, ref)
           )
@@ -204,7 +205,9 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
 
       assert Workspace.has_file?(workspace(result, agent_a.id), ref)
       assert workspace(result, agent_a.id).review.changed_files == [ref]
-      assert {:picker, %{picker_ui: %{source: WorkspaceTargetSource}}} = result.shell_state.modal
+
+      assert {:picker, %{picker_ui: %{source: WorkspaceTargetSource}}} =
+               result.shell_runtime.state.modal
 
       assert EditorState.status_msg(result) ==
                "Drafts for auth.ex will be discarded. Continue / Promote first / Cancel."
@@ -260,7 +263,9 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
       result = WorkspaceTargetSource.on_select(transfer_item(:move, agent_a.id, 0, ref), state)
 
       assert Workspace.has_file?(workspace(result, agent_a.id), ref)
-      assert {:picker, %{picker_ui: %{source: WorkspaceTargetSource}}} = result.shell_state.modal
+
+      assert {:picker, %{picker_ui: %{source: WorkspaceTargetSource}}} =
+               result.shell_runtime.state.modal
 
       assert EditorState.status_msg(result) ==
                "Drafts for auth.ex will be discarded. Continue / Promote first / Cancel."
@@ -554,7 +559,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
 
   defp activate_workspace(state, workspace_id, file_ref) do
     tb =
-      state.shell_state.tab_bar
+      state.shell_runtime.state.tab_bar
       |> TabBar.update_tab(1, fn tab ->
         tab
         |> Tab.set_group(workspace_id)
@@ -567,7 +572,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
   defp update_workspace(state, workspace_id, fun) do
     EditorState.set_tab_bar(
       state,
-      TabBar.update_workspace(state.shell_state.tab_bar, workspace_id, fun)
+      TabBar.update_workspace(state.shell_runtime.state.tab_bar, workspace_id, fun)
     )
   end
 end

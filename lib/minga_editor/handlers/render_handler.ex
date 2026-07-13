@@ -20,6 +20,7 @@ defmodule MingaEditor.Handlers.RenderHandler do
   alias MingaEditor.FlashEffects
   alias MingaEditor.NavFlash
   alias MingaEditor.Renderer
+  alias MingaEditor.Shell.Workflow
   alias MingaEditor.YankFlash
 
   alias MingaEditor.State, as: EditorState
@@ -49,7 +50,10 @@ defmodule MingaEditor.Handlers.RenderHandler do
   @spec handle_render_done(state(), map()) :: state()
   def handle_render_done(state, writeback) do
     emit_render_done_hop(writeback)
-    EditorState.apply_renderer_writeback(state, writeback)
+
+    state
+    |> Workflow.ensure_available()
+    |> EditorState.apply_renderer_writeback(writeback)
   end
 
   # Measures the Renderer.Server → Editor writeback scheduling delay using the
@@ -65,10 +69,10 @@ defmodule MingaEditor.Handlers.RenderHandler do
   Handles the `:nav_flash_step` timer, advancing the fade or clearing the flash.
   """
   @spec handle_nav_flash_step(state()) :: state()
-  def handle_nav_flash_step(%{shell_state: %{nav_flash: nil}} = state), do: state
+  def handle_nav_flash_step(%{shell_runtime: %{state: %{nav_flash: nil}}} = state), do: state
 
   def handle_nav_flash_step(state) do
-    flash = state.shell_state.nav_flash
+    flash = state.shell_runtime.state.nav_flash
 
     case NavFlash.advance(flash) do
       {:continue, updated, effects} ->
@@ -84,10 +88,10 @@ defmodule MingaEditor.Handlers.RenderHandler do
   Handles the `:yank_flash_step` timer, advancing the fade or clearing the flash.
   """
   @spec handle_yank_flash_step(state()) :: state()
-  def handle_yank_flash_step(%{shell_state: %{yank_flash: nil}} = state), do: state
+  def handle_yank_flash_step(%{shell_runtime: %{state: %{yank_flash: nil}}} = state), do: state
 
   def handle_yank_flash_step(state) do
-    %YankFlash{buf: buf} = flash = state.shell_state.yank_flash
+    %YankFlash{buf: buf} = flash = state.shell_runtime.state.yank_flash
 
     case YankFlash.advance(flash) do
       {:continue, updated, effects} ->
@@ -107,7 +111,7 @@ defmodule MingaEditor.Handlers.RenderHandler do
   """
   @spec handle_warning_popup_timeout(state()) :: state()
   def handle_warning_popup_timeout(state) do
-    state = EditorState.update_shell_state(state, &%{&1 | warning_popup_timer: nil})
+    state = EditorState.set_warning_popup_timer(state, nil)
     open_warnings_popup_if_needed(state)
   end
 
@@ -155,7 +159,7 @@ defmodule MingaEditor.Handlers.RenderHandler do
   end
 
   @spec cancel_flash_if_active(state()) :: state()
-  defp cancel_flash_if_active(%{shell_state: %{nav_flash: nil}} = state), do: state
+  defp cancel_flash_if_active(%{shell_runtime: %{state: %{nav_flash: nil}}} = state), do: state
 
   defp cancel_flash_if_active(state) do
     effects = NavFlash.cancel_effects(EditorState.nav_flash(state))
@@ -209,11 +213,14 @@ defmodule MingaEditor.Handlers.RenderHandler do
   end
 
   @spec open_warnings_popup_if_needed(state()) :: state()
-  defp open_warnings_popup_if_needed(%{shell_state: %{bottom_panel: %{dismissed: true}}} = state),
-    do: state
+  defp open_warnings_popup_if_needed(
+         %{shell_runtime: %{state: %{bottom_panel: %{dismissed: true}}}} = state
+       ),
+       do: state
 
   defp open_warnings_popup_if_needed(
-         %{shell_state: %{bottom_panel: %{visible: true, active_tab: :messages}}} = state
+         %{shell_runtime: %{state: %{bottom_panel: %{visible: true, active_tab: :messages}}}} =
+           state
        ) do
     # Panel already visible on Messages tab; don't change the user's filter.
     MingaEditor.schedule_render(state, 16)

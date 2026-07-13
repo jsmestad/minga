@@ -17,6 +17,7 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
   alias MingaEditor.Agent.View.Preview
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Editing.Scroll
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
@@ -71,7 +72,11 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
         agent_ui: agentic
       },
       focus_stack: [],
-      shell_state: %MingaEditor.Shell.Traditional.State{agent: agent, tab_bar: tab_bar}
+      shell_runtime:
+        Runtime.new(
+          Runtime.default_entry(),
+          %MingaEditor.Shell.Traditional.State{agent: agent, tab_bar: tab_bar}
+        )
     }
   end
 

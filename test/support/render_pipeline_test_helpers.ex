@@ -13,8 +13,9 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
   alias MingaEditor.RenderPipeline.ComposedFrame
   alias MingaEditor.RenderPipeline.Content
   alias MingaEditor.RenderPipeline.Scroll
-  alias MingaEditor.Shell.Identity, as: ShellIdentity
   alias MingaEditor.Shell.Registry, as: ShellRegistry
+  alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.{Buffers, Highlighting, Windows}
   alias MingaEditor.Viewport
@@ -71,7 +72,7 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
         }
       },
       focus_stack: Input.default_stack(),
-      shell_identity: ShellIdentity.new(shell_entry),
+      shell_runtime: Runtime.new(shell_entry, %ShellState{}),
       theme: Theme.get!(:doom_one)
     }
   end

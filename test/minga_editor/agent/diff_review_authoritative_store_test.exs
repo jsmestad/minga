@@ -7,6 +7,7 @@ defmodule MingaEditor.Agent.DiffReviewAuthoritativeStoreTest do
   alias MingaEditor.Agent.View.Preview
   alias MingaEditor.Commands.AgentSubStates
   alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Tab
@@ -109,7 +110,7 @@ defmodule MingaEditor.Agent.DiffReviewAuthoritativeStoreTest do
     %EditorState{
       port_manager: self(),
       workspace: %SessionState{agent_ui: agent_ui, viewport: Viewport.new(24, 80)},
-      shell_state: %TraditionalState{tab_bar: tab_bar}
+      shell_runtime: Runtime.new(Runtime.default_entry(), %TraditionalState{tab_bar: tab_bar})
     }
   end
 end

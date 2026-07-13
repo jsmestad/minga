@@ -123,7 +123,7 @@ defmodule MingaEditor.Input.Interrupt do
 
   @spec maybe_clear_whichkey(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
   defp maybe_clear_whichkey(
-         %{shell_state: %{whichkey: %WhichKey{node: nil, show: false}}} = state,
+         %{shell_runtime: %{state: %{whichkey: %WhichKey{node: nil, show: false}}}} = state,
          resets
        ),
        do: {state, resets}
@@ -146,7 +146,8 @@ defmodule MingaEditor.Input.Interrupt do
   end
 
   @spec maybe_clear_status(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
-  defp maybe_clear_status(%{shell_state: %{status_msg: nil}} = state, resets), do: {state, resets}
+  defp maybe_clear_status(%{shell_runtime: %{state: %{status_msg: nil}}} = state, resets),
+    do: {state, resets}
 
   defp maybe_clear_status(state, resets) do
     {EditorState.clear_status(state), ["status cleared" | resets]}

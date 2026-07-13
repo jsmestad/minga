@@ -17,6 +17,8 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Handlers.GuiActionHandler
   alias MingaEditor.RenderPipeline.TestHelpers
+  alias MingaEditor.Shell.Entry
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Window
   alias MingaEditor.State.FileTree, as: FileTreeState
@@ -356,7 +358,17 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   test "observatory inspect is a no-op when the active shell has no observatory state", %{
     sidebar_registry: table
   } do
-    state = %{base_state(table) | shell_state: %{}}
+    entry = %Entry{
+      id: :fake,
+      source: :config,
+      module: MingaEditor.Test.FakeShell,
+      display_name: "Fake",
+      description: "Fake shell",
+      capabilities: [:gui],
+      generation: 1
+    }
+
+    state = %{base_state(table) | shell_runtime: Runtime.new(entry, %{})}
 
     assert GuiActionHandler.dispatch(state, {:observatory_inspect, "<0.1.0>"}) == state
   end
@@ -375,11 +387,11 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
       height: 10
     }
 
-    state = %{base_state(table) | shell_state: %{observatory_inspection: inspection}}
+    state = base_state(table) |> EditorState.set_observatory_inspection(inspection)
 
     new_state = GuiActionHandler.dispatch(state, :float_popup_dismiss)
 
-    assert new_state.shell_state.observatory_inspection == nil
+    assert Runtime.state(new_state.shell_runtime).observatory_inspection == nil
   end
 
   test "float_popup_dismiss closes the open :float popup window (#2338)", %{

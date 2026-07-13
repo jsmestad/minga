@@ -20,6 +20,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
   alias MingaEditor.Agent.UIState
   alias MingaAgent.Event
   alias MingaAgent.Session
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
@@ -172,10 +173,14 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
       tab_bar = TabBar.move_tab_to_workspace(tab_bar, 1, workspace.id)
 
-      state = %{
-        agent: %AgentState{},
-        shell: Traditional,
-        shell_state: %{tab_bar: tab_bar}
+      state = %EditorState{
+        port_manager: nil,
+        workspace: workspace(),
+        shell_runtime:
+          Runtime.new(
+            Runtime.default_entry(),
+            %TraditionalState{agent: %AgentState{}, tab_bar: tab_bar}
+          )
       }
 
       send(
@@ -185,7 +190,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
       :sys.get_state(session)
       {state, effects} = Events.handle(state, {:tool_started, "alpha", %{}})
-      assert AgentState.active_tool_name(state.agent) == "alpha"
+      assert AgentState.active_tool_name(AgentAccess.agent(state)) == "alpha"
       assert effects == [{:render, 16}]
 
       send(
@@ -195,7 +200,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
       :sys.get_state(session)
       {state, effects} = Events.handle(state, {:tool_started, "beta", %{}})
-      assert AgentState.active_tool_name(state.agent) == "beta"
+      assert AgentState.active_tool_name(AgentAccess.agent(state)) == "beta"
       assert effects == [{:render, 16}]
 
       send(
@@ -206,7 +211,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
       :sys.get_state(session)
       {state, effects} = Events.handle(state, {:tool_ended, "alpha", "contents", :done})
-      assert AgentState.active_tool_name(state.agent) == "beta"
+      assert AgentState.active_tool_name(AgentAccess.agent(state)) == "beta"
       assert effects == [{:render, 16}]
 
       send(
@@ -217,7 +222,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
       :sys.get_state(session)
       {state, effects} = Events.handle(state, {:tool_ended, "beta", "output", :done})
-      assert AgentState.active_tool_name(state.agent) == nil
+      assert AgentState.active_tool_name(AgentAccess.agent(state)) == nil
       assert effects == [{:render, 16}]
     end
 
@@ -255,9 +260,9 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
       state = %EditorState{
         port_manager: self(),
-        shell: Traditional,
         workspace: %SessionState{viewport: Viewport.new(24, 80), agent_ui: UIState.new()},
-        shell_state: %TraditionalState{agent: agent, tab_bar: tab_bar}
+        shell_runtime:
+          Runtime.new(Runtime.default_entry(), %TraditionalState{agent: agent, tab_bar: tab_bar})
       }
 
       {state, effects} = Events.handle(state, {:context_usage, 95, 100})
@@ -293,11 +298,14 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
       state = %EditorState{
         port_manager: self(),
-        shell: Traditional,
         workspace:
           %SessionState{viewport: Viewport.new(24, 80)}
           |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
-        shell_state: %TraditionalState{agent: %AgentState{}, tab_bar: tb}
+        shell_runtime:
+          Runtime.new(
+            Runtime.default_entry(),
+            %TraditionalState{agent: %AgentState{}, tab_bar: tb}
+          )
       }
 
       {state, _effects} =
@@ -306,7 +314,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
           {:file_changed, test_path, "before", "after", "tc_test", "edit_file"}
         )
 
-      tb = state.shell_state.tab_bar
+      tb = state.shell_runtime.state.tab_bar
       assert TabBar.get(tb, tab1.id).group_id == 0
       assert TabBar.get(tb, tab2.id).group_id == workspace.id
       assert Workspace.has_file?(TabBar.get_workspace(tb, workspace.id), test_ref)
@@ -341,11 +349,14 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
       state = %EditorState{
         port_manager: self(),
-        shell: Traditional,
         workspace:
           %SessionState{viewport: Viewport.new(24, 80)}
           |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
-        shell_state: %TraditionalState{agent: %AgentState{}, tab_bar: tb}
+        shell_runtime:
+          Runtime.new(
+            Runtime.default_entry(),
+            %TraditionalState{agent: %AgentState{}, tab_bar: tb}
+          )
       }
 
       {state, _effects} =
@@ -354,7 +365,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
           {:file_changed, test_path, "before", "after", "tc_test", "edit_file"}
         )
 
-      tb = state.shell_state.tab_bar
+      tb = state.shell_runtime.state.tab_bar
       agent_workspace = TabBar.get_workspace(tb, workspace.id)
       assert TabBar.get(tb, tab2.id).group_id == workspace.id
       assert Workspace.has_file?(agent_workspace, test_ref)
@@ -385,17 +396,20 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
       state = %EditorState{
         port_manager: self(),
-        shell: Traditional,
         workspace:
           %SessionState{viewport: Viewport.new(24, 80)}
           |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
-        shell_state: %TraditionalState{agent: %AgentState{}, tab_bar: tb}
+        shell_runtime:
+          Runtime.new(
+            Runtime.default_entry(),
+            %TraditionalState{agent: %AgentState{}, tab_bar: tb}
+          )
       }
 
       {state, _effects} =
         Events.handle(state, {:file_changed, path, "before", "after", "tc_test", "edit_file"})
 
-      tb = state.shell_state.tab_bar
+      tb = state.shell_runtime.state.tab_bar
       assert TabBar.get(tb, file_tab.id).group_id == workspace.id
       assert Workspace.has_file?(TabBar.get_workspace(tb, workspace.id), expected_ref)
     end
@@ -415,17 +429,20 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
       state = %EditorState{
         port_manager: self(),
-        shell: Traditional,
         workspace:
           %SessionState{viewport: Viewport.new(24, 80)}
           |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
-        shell_state: %TraditionalState{agent: %AgentState{}, tab_bar: tb}
+        shell_runtime:
+          Runtime.new(
+            Runtime.default_entry(),
+            %TraditionalState{agent: %AgentState{}, tab_bar: tb}
+          )
       }
 
       {state, _effects} =
         Events.handle(state, {:file_changed, path, "before", "after", "tc_test", "edit_file"})
 
-      tb = state.shell_state.tab_bar
+      tb = state.shell_runtime.state.tab_bar
       assert TabBar.get(tb, file_tab.id).group_id == 0
       assert TabBar.get(tb, agent_tab.id).group_id == workspace.id
       assert TabBar.get_workspace(tb, workspace.id).files == []

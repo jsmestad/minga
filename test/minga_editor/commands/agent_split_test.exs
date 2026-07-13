@@ -3,6 +3,7 @@ defmodule MingaEditor.Commands.AgentSplitTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Commands.Agent, as: AgentCommands
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Buffers
@@ -65,7 +66,6 @@ defmodule MingaEditor.Commands.AgentSplitTest do
 
     %EditorState{
       port_manager: self(),
-      shell: MingaEditor.Shell.Traditional,
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: buf, list: [buf]},
@@ -76,7 +76,11 @@ defmodule MingaEditor.Commands.AgentSplitTest do
           next_id: 2
         }
       },
-      shell_state: %MingaEditor.Shell.Traditional.State{agent: agent, tab_bar: tb}
+      shell_runtime:
+        Runtime.new(
+          Runtime.default_entry(),
+          %MingaEditor.Shell.Traditional.State{agent: agent, tab_bar: tb}
+        )
     }
   end
 
@@ -88,7 +92,7 @@ defmodule MingaEditor.Commands.AgentSplitTest do
       new_state = AgentCommands.toggle_agent_split(state)
 
       assert EditorState.active_tab_kind(new_state) == :agent
-      assert new_state.shell_state.tab_bar.active_id == 2
+      assert EditorState.tab_bar(new_state).active_id == 2
     end
 
     test "switches back to file tab when on agent tab" do
@@ -101,7 +105,7 @@ defmodule MingaEditor.Commands.AgentSplitTest do
       # Toggle off (switch to file)
       state = AgentCommands.toggle_agent_split(state)
       assert EditorState.active_tab_kind(state) == :file
-      assert state.shell_state.tab_bar.active_id == 1
+      assert EditorState.tab_bar(state).active_id == 1
     end
 
     test "agent tab has agent_chat window in context" do
@@ -118,12 +122,12 @@ defmodule MingaEditor.Commands.AgentSplitTest do
     test "round-trip toggle restores file state" do
       state = make_state()
       original_buf = state.workspace.buffers.active
-      original_active = state.shell_state.tab_bar.active_id
+      original_active = EditorState.tab_bar(state).active_id
 
       state = AgentCommands.toggle_agent_split(state)
       state = AgentCommands.toggle_agent_split(state)
 
-      assert state.shell_state.tab_bar.active_id == original_active
+      assert EditorState.tab_bar(state).active_id == original_active
       assert state.workspace.buffers.active == original_buf
     end
   end

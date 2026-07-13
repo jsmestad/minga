@@ -78,6 +78,13 @@ defmodule MingaEditor.Shell do
   @callback on_agent_event(shell_state(), workspace(), session_pid :: pid(), event :: term()) ::
               {shell_state(), workspace(), [MingaEditor.effect()]}
 
+  @doc "Returns whether shell state owns an agent session pid."
+  @callback owns_agent_session?(shell_state(), session_pid :: pid()) :: boolean()
+
+  @doc "Handles an agent session going down and reports whether the shell owned it."
+  @callback handle_agent_session_down(shell_state(), session_pid :: pid(), reason :: term()) ::
+              {shell_state(), boolean()}
+
   @doc "A managed agent session restarted and the shell should refresh pid references."
   @callback handle_agent_session_restarted(
               shell_state(),
@@ -85,6 +92,21 @@ defmodule MingaEditor.Shell do
               new_session_pid :: pid(),
               reason :: term()
             ) :: {shell_state(), boolean()}
+
+  @doc "Handles a remote session disconnect and reports whether the shell owned it."
+  @callback handle_remote_session_disconnected(shell_state(), session_pid :: pid()) ::
+              {shell_state(), boolean()}
+
+  @doc "Persists shell state outside the pure Runtime transition boundary."
+  @callback persist_shell_state(shell_state()) :: shell_state()
+
+  @doc "Synchronizes optional agent status held by a shell."
+  @callback sync_agent_status(shell_state(), session_pid :: pid(), status :: term()) ::
+              shell_state()
+
+  @doc "Tracks an agent-touched file in optional shell state."
+  @callback track_agent_file(shell_state(), session_pid :: pid(), path :: String.t()) ::
+              shell_state()
 
   @doc "Returns the currently active tab, or nil if the shell has no tabs."
   @callback active_tab(shell_state()) :: MingaEditor.State.Tab.t() | nil
@@ -101,5 +123,12 @@ defmodule MingaEditor.Shell do
   @doc "Returns the agent session pid for the user's current view."
   @callback active_session(shell_state()) :: pid() | nil
 
-  @optional_callbacks after_gui_action: 2
+  @optional_callbacks after_gui_action: 2,
+                      owns_agent_session?: 2,
+                      handle_agent_session_down: 3,
+                      handle_agent_session_restarted: 4,
+                      handle_remote_session_disconnected: 2,
+                      persist_shell_state: 1,
+                      sync_agent_status: 3,
+                      track_agent_file: 3
 end

@@ -95,7 +95,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceIconSource do
   @spec on_select(Item.t(), term()) :: term()
   def on_select(
         %Item{id: icon_name},
-        %{shell_state: %{tab_bar: %TabBar{} = tb}} = state
+        %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state
       ) do
     ws_id = TabBar.active_workspace_id(tb)
     tb = TabBar.update_workspace(tb, ws_id, &Workspace.set_icon(&1, icon_name))

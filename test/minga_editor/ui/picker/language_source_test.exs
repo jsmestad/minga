@@ -2,6 +2,7 @@ defmodule MingaEditor.UI.Picker.LanguageSourceTest do
   @moduledoc "Tests for the language picker source."
   use ExUnit.Case, async: true
 
+  alias MingaEditor.State, as: EditorState
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Search
@@ -86,17 +87,20 @@ defmodule MingaEditor.UI.Picker.LanguageSourceTest do
 
       new_state = BufferManagement.apply_filetype_change(state, :python)
       assert BufferProcess.filetype(buf) == :python
-      assert new_state.shell_state.status_msg =~ "python"
+      assert EditorState.status_msg(new_state) =~ "python"
     end
 
     test "returns error message when no active buffer" do
-      state = %{
-        workspace: %{buffers: %{active: nil}},
-        shell_state: %MingaEditor.Shell.Traditional.State{status_msg: nil}
+      state = %EditorState{
+        port_manager: nil,
+        workspace: %MingaEditor.Session.State{
+          viewport: Viewport.new(80, 24),
+          buffers: %Buffers{}
+        }
       }
 
       new_state = BufferManagement.apply_filetype_change(state, :python)
-      assert new_state.shell_state.status_msg =~ "No active buffer"
+      assert EditorState.status_msg(new_state) =~ "No active buffer"
     end
   end
 
@@ -122,9 +126,12 @@ defmodule MingaEditor.UI.Picker.LanguageSourceTest do
   defp state_with_buffer(content, filetype) do
     {:ok, buf} = BufferProcess.start_link(content: content, filetype: filetype)
 
-    %{
-      workspace: %{buffers: %{active: buf, list: [buf], active_index: 0}},
-      shell_state: %MingaEditor.Shell.Traditional.State{status_msg: nil}
+    %EditorState{
+      port_manager: nil,
+      workspace: %MingaEditor.Session.State{
+        viewport: Viewport.new(80, 24),
+        buffers: %Buffers{active: buf, list: [buf], active_index: 0}
+      }
     }
   end
 end

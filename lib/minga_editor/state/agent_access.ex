@@ -14,15 +14,15 @@ defmodule MingaEditor.State.AgentAccess do
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
-  alias MingaEditor.Shell.Traditional.State, as: ShellState
+  alias MingaEditor.Shell.Entry
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.Session.State, as: WorkspaceState
 
   # ── Readers ────────────────────────────────────────────────────────────────
 
   @doc "Returns the agent session lifecycle state."
   @spec agent(EditorState.t() | map()) :: AgentState.t()
-  def agent(%EditorState{shell_state: %{agent: a}}), do: a
-  def agent(%{shell_state: %{agent: a}}), do: a
+  def agent(%EditorState{shell_runtime: %Runtime{state: %{agent: a}}}), do: a
   def agent(%{agent: a}), do: a
   def agent(_), do: %AgentState{}
 
@@ -30,9 +30,6 @@ defmodule MingaEditor.State.AgentAccess do
   @spec agent_ui(EditorState.t() | map()) :: UIState.t()
   def agent_ui(%EditorState{} = state),
     do: active_workspace_agent_ui(state) || state.workspace.agent_ui
-
-  def agent_ui(%{shell_state: %{tab_bar: %TabBar{}}, workspace: %{agent_ui: agent_ui}} = state),
-    do: active_workspace_agent_ui(state) || agent_ui || UIState.new()
 
   def agent_ui(%{workspace: %{agent_ui: a}}), do: a || UIState.new()
   def agent_ui(%{agent_ui: a}), do: a || UIState.new()
@@ -52,23 +49,11 @@ defmodule MingaEditor.State.AgentAccess do
   Traditional reads the active workspace. Extension shells read through shell behaviours until they move onto the same workspace model.
   """
   @spec session(EditorState.t() | map()) :: pid() | nil
-  def session(%EditorState{} = state) do
-    state = EditorState.ensure_shell_available(state)
+  def session(%EditorState{shell_runtime: %Runtime{entry: %Entry{id: :traditional}}} = state),
+    do: active_workspace_session(state)
 
-    if EditorState.active_shell_id(state) == :traditional do
-      active_workspace_session(state)
-    else
-      EditorState.active_shell_module(state).active_session(state.shell_state)
-    end
-  end
-
-  def session(%{shell_state: shell_state} = state) do
-    if EditorState.active_shell_id(state) == :traditional do
-      active_workspace_session(state)
-    else
-      EditorState.active_shell_module(state).active_session(shell_state)
-    end
-  end
+  def session(%EditorState{shell_runtime: %Runtime{} = runtime}),
+    do: Runtime.active_session(runtime)
 
   def session(_), do: nil
 
@@ -85,12 +70,8 @@ defmodule MingaEditor.State.AgentAccess do
   @doc "Updates agent session lifecycle state via a transform function."
   @spec update_agent(EditorState.t() | map(), (AgentState.t() -> AgentState.t())) ::
           EditorState.t() | map()
-  def update_agent(%EditorState{shell_state: %{agent: a} = ss} = state, fun) do
-    %{state | shell_state: %{ss | agent: fun.(a)}}
-  end
-
-  def update_agent(%{shell_state: %{agent: a} = ss} = state, fun) do
-    %{state | shell_state: %{ss | agent: fun.(a)}}
+  def update_agent(%EditorState{} = state, fun) do
+    EditorState.set_agent(state, fun.(agent(state)))
   end
 
   def update_agent(%{agent: a} = state, fun) do
@@ -102,10 +83,6 @@ defmodule MingaEditor.State.AgentAccess do
   @spec update_agent_ui(EditorState.t() | map(), (UIState.t() -> UIState.t())) ::
           EditorState.t() | map()
   def update_agent_ui(%EditorState{} = state, fun) do
-    update_workspace_agent_ui(state, fun)
-  end
-
-  def update_agent_ui(%{shell_state: %{tab_bar: %TabBar{}}} = state, fun) do
     update_workspace_agent_ui(state, fun)
   end
 
@@ -140,7 +117,9 @@ defmodule MingaEditor.State.AgentAccess do
   end
 
   @spec active_workspace_agent_ui(EditorState.t() | map()) :: UIState.t() | nil
-  defp active_workspace_agent_ui(%{shell_state: %{tab_bar: %TabBar{} = tab_bar}}) do
+  defp active_workspace_agent_ui(%EditorState{
+         shell_runtime: %Runtime{state: %{tab_bar: %TabBar{} = tab_bar}}
+       }) do
     case TabBar.active_workspace(tab_bar) do
       %Workspace{agent_ui: %UIState{} = agent_ui} -> agent_ui
       _ -> nil
@@ -150,7 +129,9 @@ defmodule MingaEditor.State.AgentAccess do
   defp active_workspace_agent_ui(_state), do: nil
 
   @spec active_workspace_session(EditorState.t() | map()) :: pid() | nil
-  defp active_workspace_session(%{shell_state: %{tab_bar: %TabBar{} = tab_bar}}) do
+  defp active_workspace_session(%EditorState{
+         shell_runtime: %Runtime{state: %{tab_bar: %TabBar{} = tab_bar}}
+       }) do
     case TabBar.active_workspace(tab_bar) do
       %Workspace{session: session} when is_pid(session) -> session
       _ -> nil
@@ -162,7 +143,10 @@ defmodule MingaEditor.State.AgentAccess do
   @spec update_workspace_agent_ui(EditorState.t() | map(), (UIState.t() -> UIState.t())) ::
           EditorState.t() | map()
   defp update_workspace_agent_ui(
-         %{shell_state: %{tab_bar: %TabBar{} = tab_bar}, workspace: workspace} = state,
+         %EditorState{
+           shell_runtime: %Runtime{state: %{tab_bar: %TabBar{} = tab_bar}},
+           workspace: %WorkspaceState{} = workspace
+         } = state,
          fun
        ) do
     current_ui =
@@ -184,22 +168,6 @@ defmodule MingaEditor.State.AgentAccess do
     |> set_workspace(set_live_agent_ui(workspace, next_ui))
   end
 
-  defp update_workspace_agent_ui(%{shell_state: %{tab_bar: %TabBar{} = tab_bar}} = state, fun) do
-    current_ui = active_workspace_agent_ui(state) || UIState.new()
-    next_ui = fun.(current_ui)
-
-    tab_bar =
-      case TabBar.active_workspace(tab_bar) do
-        %Workspace{id: workspace_id} ->
-          TabBar.update_workspace(tab_bar, workspace_id, &Workspace.set_agent_ui(&1, next_ui))
-
-        _workspace ->
-          tab_bar
-      end
-
-    set_tab_bar(state, tab_bar)
-  end
-
   defp update_workspace_agent_ui(%{workspace: %{agent_ui: agent_ui} = workspace} = state, fun) do
     next_ui = fun.(agent_ui || UIState.new())
     %{state | workspace: set_live_agent_ui(workspace, next_ui)}
@@ -208,10 +176,6 @@ defmodule MingaEditor.State.AgentAccess do
   @spec set_tab_bar(EditorState.t() | map(), TabBar.t()) :: EditorState.t() | map()
   defp set_tab_bar(%EditorState{} = state, %TabBar{} = tab_bar) do
     EditorState.set_tab_bar(state, tab_bar)
-  end
-
-  defp set_tab_bar(%{shell_state: shell_state} = state, %TabBar{} = tab_bar) do
-    %{state | shell_state: ShellState.set_tab_bar(shell_state, tab_bar)}
   end
 
   @spec set_workspace(EditorState.t() | map(), WorkspaceState.t() | map()) ::

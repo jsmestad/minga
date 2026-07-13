@@ -12,6 +12,7 @@ defmodule MingaEditor.MinibufferData do
   """
 
   alias Minga.Command
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Prompt, as: PromptState
   alias Minga.Keymap
@@ -89,21 +90,27 @@ defmodule MingaEditor.MinibufferData do
   Returns a `t()` struct ready for protocol encoding via
   `MingaEditor.Frontend.Protocol.GUI.encode_gui_minibuffer/1`.
   """
-  @spec from_state(EditorState.t()) :: t()
+  @spec from_state(EditorState.t() | map()) :: t()
+
+  def from_state(%EditorState{pending_quit: kind, shell_runtime: %Runtime{state: shell_state}})
+      when kind in [:quit, :quit_all] do
+    confirmation_prompt(kind, shell_state)
+  end
 
   def from_state(%{pending_quit: kind, shell_state: shell_state})
       when kind in [:quit, :quit_all] do
-    %__MODULE__{
-      visible: true,
-      mode: @mode_extension_confirm,
-      cursor_pos: 0xFFFF,
-      prompt: quit_confirmation_prompt(kind, shell_state),
-      input: "",
-      context: "",
-      selected_index: 0,
-      candidates: [],
-      total_candidates: 0
-    }
+    confirmation_prompt(kind, shell_state)
+  end
+
+  def from_state(%EditorState{
+        shell_runtime: %Runtime{
+          state: %{
+            modal: {:prompt, %{prompt_ui: %PromptState{handler: handler} = prompt_state}}
+          }
+        }
+      })
+      when handler != nil do
+    text_prompt(prompt_state)
   end
 
   def from_state(%{
@@ -112,17 +119,7 @@ defmodule MingaEditor.MinibufferData do
         }
       })
       when handler != nil do
-    %__MODULE__{
-      visible: true,
-      mode: @mode_text_prompt,
-      cursor_pos: prompt_state.cursor,
-      prompt: prompt_state.label,
-      input: prompt_state.text,
-      context: "",
-      selected_index: 0,
-      candidates: [],
-      total_candidates: 0
-    }
+    text_prompt(prompt_state)
   end
 
   def from_state(%{workspace: %{editing: %{mode: :command, mode_state: ms}}} = state) do
@@ -277,6 +274,36 @@ defmodule MingaEditor.MinibufferData do
 
   # ── Private helpers ────────────────────────────────────────────────────────
 
+  @spec confirmation_prompt(:quit | :quit_all, term()) :: t()
+  defp confirmation_prompt(kind, shell_state) do
+    %__MODULE__{
+      visible: true,
+      mode: @mode_extension_confirm,
+      cursor_pos: 0xFFFF,
+      prompt: quit_confirmation_prompt(kind, shell_state),
+      input: "",
+      context: "",
+      selected_index: 0,
+      candidates: [],
+      total_candidates: 0
+    }
+  end
+
+  @spec text_prompt(PromptState.t()) :: t()
+  defp text_prompt(prompt_state) do
+    %__MODULE__{
+      visible: true,
+      mode: @mode_text_prompt,
+      cursor_pos: prompt_state.cursor,
+      prompt: prompt_state.label,
+      input: prompt_state.text,
+      context: "",
+      selected_index: 0,
+      candidates: [],
+      total_candidates: 0
+    }
+  end
+
   @spec search_mode_and_prefix(:forward | :backward) ::
           {non_neg_integer(), String.t()}
   defp search_mode_and_prefix(:forward), do: {@mode_search_forward, "/"}
@@ -349,6 +376,9 @@ defmodule MingaEditor.MinibufferData do
   # back to computing only when the overlay is absent or stale (e.g. the first
   # frame on entry, or a programmatic input change the dispatcher hasn't synced).
   @spec command_candidates(map(), String.t()) :: {[candidate()], non_neg_integer()}
+  defp command_candidates(%{shell_runtime: %{state: shell_state}}, input),
+    do: command_candidates(%{shell_state: shell_state}, input)
+
   defp command_candidates(
          %{
            shell_state: %{

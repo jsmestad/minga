@@ -88,9 +88,10 @@ defmodule MingaEditor.LayoutTest do
     tb = TabBar.update_context(tb, agent_tab.id, agent_ctx)
     tb = TabBar.switch_to(tb, file_tab.id)
 
-    state = put_in(state.workspace.agent_ui, agentic)
-    ss = state.shell_state
-    %{state | shell_state: %{ss | tab_bar: tb, agent: agent}}
+    state
+    |> EditorState.set_agent_ui(agentic)
+    |> EditorState.set_tab_bar(tb)
+    |> EditorState.set_agent(agent)
   end
 
   defp with_vsplit(state) do

@@ -259,17 +259,18 @@ defmodule MingaEditor.Commands do
 
   def execute(state, {:tool_confirm_decline, name}) do
     state =
-      EditorState.update_shell_state(
+      EditorState.set_tool_prompt_state(
         state,
-        &%{&1 | tool_declined: MapSet.put(state.shell_state.tool_declined, name)}
+        state.shell_runtime.state.tool_prompt_queue,
+        MapSet.put(state.shell_runtime.state.tool_declined, name)
       )
 
     drain_tool_prompt_queue(state)
   end
 
   def execute(state, {:tool_confirm_dismiss, declined_set}) do
-    declined = MapSet.union(state.shell_state.tool_declined, declined_set)
-    EditorState.update_shell_state(state, &%{&1 | tool_declined: declined, tool_prompt_queue: []})
+    declined = MapSet.union(state.shell_runtime.state.tool_declined, declined_set)
+    EditorState.set_tool_prompt_state(state, [], declined)
   end
 
   # ── File tree delete confirmation commands ─────────────────────────────────
@@ -877,8 +878,8 @@ defmodule MingaEditor.Commands do
   end
 
   defp drain_tool_prompt_queue(state) do
-    case state.shell_state.tool_prompt_queue do
-      [_current | rest] -> EditorState.update_shell_state(state, &%{&1 | tool_prompt_queue: rest})
+    case state.shell_runtime.state.tool_prompt_queue do
+      [_current | rest] -> EditorState.set_tool_prompt_queue(state, rest)
       [] -> state
     end
   end

@@ -138,7 +138,7 @@ defmodule MingaEditor.Handlers.ToolHandlerTest do
   describe "tool_missing (suppressed)" do
     test "returns log effect when prompts are suppressed" do
       state = base_state()
-      state = EditorState.update_shell_state(state, &%{&1 | suppress_tool_prompts: true})
+      state = EditorState.set_suppress_tool_prompts(state, true)
 
       event = {:minga_event, :tool_missing, %Minga.Events.ToolMissingEvent{command: "rg"}}
       {new_state, effects} = ToolHandler.handle(state, event)

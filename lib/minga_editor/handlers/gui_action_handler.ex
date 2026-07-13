@@ -219,7 +219,10 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     EditorState.reset_frontend_render_state(state)
   end
 
-  defp dispatch_action(%{shell_state: shell_state} = state, {:observatory_inspect, pid_string}) do
+  defp dispatch_action(
+         %{shell_runtime: %{state: shell_state}} = state,
+         {:observatory_inspect, pid_string}
+       ) do
     if Map.has_key?(shell_state, :observatory_inspection) do
       Observatory.inspect_process(state, pid_string)
     else
@@ -891,7 +894,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   @spec last_file_tab?(EditorState.t()) :: boolean()
-  defp last_file_tab?(%{shell_state: %{tab_bar: %MingaEditor.State.TabBar{} = tb}}) do
+  defp last_file_tab?(%{shell_runtime: %{state: %{tab_bar: %MingaEditor.State.TabBar{} = tb}}}) do
     match?([_single], MingaEditor.State.TabBar.visible_file_tabs(tb))
   end
 
@@ -899,29 +902,20 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   @spec dispatch_to_active_shell(EditorState.t(), term()) :: EditorState.t()
   defp dispatch_to_active_shell(state, action) do
-    state = EditorState.ensure_shell_available(state)
-    shell = EditorState.active_shell_module(state)
+    state = MingaEditor.Shell.Workflow.ensure_available(state)
+    shell = MingaEditor.Shell.Runtime.module(state.shell_runtime)
 
-    if function_exported?(shell, :handle_gui_action, 3) do
-      {shell_state, workspace} =
-        shell.handle_gui_action(
-          state.shell_state,
-          state.workspace,
-          action
-        )
-
-      state
-      |> EditorState.update_shell_state(fn _ -> shell_state end)
-      |> EditorState.set_workspace(workspace)
-      |> after_shell_gui_action(shell, action)
-    else
-      Minga.Log.warning(
-        :editor,
-        "GUI action ignored because active shell cannot handle it: #{inspect(action)}"
+    {runtime, workspace} =
+      MingaEditor.Shell.Runtime.route_gui_action(
+        state.shell_runtime,
+        state.workspace,
+        action
       )
 
-      EditorState.set_status(state, "GUI action is unavailable")
-    end
+    state
+    |> EditorState.apply_shell_runtime_transition(runtime)
+    |> EditorState.set_workspace(workspace)
+    |> after_shell_gui_action(shell, action)
   end
 
   @spec after_shell_gui_action(EditorState.t(), module(), term()) :: EditorState.t()
@@ -1408,17 +1402,17 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   @spec handle_shell_gui_action(EditorState.t(), term()) :: EditorState.t()
   defp handle_shell_gui_action(state, action) do
-    state = EditorState.ensure_shell_available(state)
+    state = MingaEditor.Shell.Workflow.ensure_available(state)
 
-    {shell_state, workspace} =
-      EditorState.active_shell_module(state).handle_gui_action(
-        state.shell_state,
+    {runtime, workspace} =
+      MingaEditor.Shell.Runtime.route_gui_action(
+        state.shell_runtime,
         state.workspace,
         action
       )
 
     state
-    |> EditorState.update_shell_state(fn _shell_state -> shell_state end)
+    |> EditorState.apply_shell_runtime_transition(runtime)
     |> EditorState.set_workspace(workspace)
   end
 
@@ -1431,7 +1425,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   @spec update_tab_bar(state(), (TabBar.t() -> TabBar.t())) :: state()
   defp update_tab_bar(state, fun) when is_function(fun, 1) do
-    state = EditorState.ensure_shell_available(state)
+    state = MingaEditor.Shell.Workflow.ensure_available(state)
 
     case EditorState.tab_bar(state) do
       %TabBar{} = tb -> EditorState.set_tab_bar(state, fun.(tb))
@@ -1443,7 +1437,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   @spec copy_tab_path(state(), Tab.id()) :: state()
   defp copy_tab_path(state, id) do
-    state = EditorState.ensure_shell_available(state)
+    state = MingaEditor.Shell.Workflow.ensure_available(state)
 
     case tab_file_path(state, id) do
       nil ->
@@ -1465,7 +1459,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   @spec tab_file_path(state(), Tab.id()) :: String.t() | nil
   defp tab_file_path(state, id) do
-    state = EditorState.ensure_shell_available(state)
+    state = MingaEditor.Shell.Workflow.ensure_available(state)
 
     case EditorState.tab_bar(state) do
       %TabBar{} = tb -> tab_file_path_from_tab(state, tb, TabBar.get(tb, id))
@@ -1726,7 +1720,9 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   # (the builder checks it first); otherwise close the :float popup window via
   # the popup lifecycle. Returns state unchanged when neither is present.
   @spec dismiss_float_popup(state()) :: state()
-  defp dismiss_float_popup(%{shell_state: %{observatory_inspection: %{visible: true}}} = state) do
+  defp dismiss_float_popup(
+         %{shell_runtime: %{state: %{observatory_inspection: %{visible: true}}}} = state
+       ) do
     Observatory.inspect_process(state, "")
   end
 

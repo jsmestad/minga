@@ -6,7 +6,7 @@ defmodule MingaEditor.Input.ConflictPrompt do
   responded yet, this handler intercepts all keys. `r` reloads the buffer
   from disk, `k` keeps the local version, and all other keys are swallowed.
 
-  The conflict prompt lives on `state.shell_state.modal` as
+  The conflict prompt lives on `state.shell_runtime.state.modal` as
   `{:conflict, %ModalOverlay.Conflict{}}`. While active, the gate's
   conflict-sticky rule prevents other modals from opening on top.
   """
@@ -23,7 +23,7 @@ defmodule MingaEditor.Input.ConflictPrompt do
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
   def handle_key(
-        %{shell_state: %{modal: {:conflict, %{buffer: buf}}}} = state,
+        %{shell_runtime: %{state: %{modal: {:conflict, %{buffer: buf}}}}} = state,
         ?r,
         _mods
       )
@@ -38,7 +38,7 @@ defmodule MingaEditor.Input.ConflictPrompt do
   end
 
   def handle_key(
-        %{shell_state: %{modal: {:conflict, %{buffer: buf}}}} = state,
+        %{shell_runtime: %{state: %{modal: {:conflict, %{buffer: buf}}}}} = state,
         ?k,
         _mods
       )
@@ -48,7 +48,7 @@ defmodule MingaEditor.Input.ConflictPrompt do
     {:handled, state |> ModalOverlay.dismiss() |> EditorState.clear_status()}
   end
 
-  def handle_key(%{shell_state: %{modal: {:conflict, _}}} = state, _cp, _mods) do
+  def handle_key(%{shell_runtime: %{state: %{modal: {:conflict, _}}}} = state, _cp, _mods) do
     # Swallow all other keys while conflict prompt is active
     {:handled, state}
   end

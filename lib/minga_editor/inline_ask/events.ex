@@ -41,7 +41,7 @@ defmodule MingaEditor.InlineAsk.Events do
   end
 
   @spec store(state()) :: InlineAsk.store() | nil
-  defp store(%{shell_state: %{inline_asks: asks}}) when is_map(asks), do: asks
+  defp store(%{shell_runtime: %{state: %{inline_asks: asks}}}) when is_map(asks), do: asks
   defp store(_state), do: nil
 
   @spec fail(InlineAsk.t(), term()) :: InlineAsk.t()

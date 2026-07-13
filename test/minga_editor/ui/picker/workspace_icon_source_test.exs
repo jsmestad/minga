@@ -1,6 +1,10 @@
 defmodule MingaEditor.UI.Picker.WorkspaceIconSourceTest do
   use ExUnit.Case, async: true
 
+  alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
+  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Search
   alias MingaEditor.State.Tab
@@ -89,18 +93,26 @@ defmodule MingaEditor.UI.Picker.WorkspaceIconSourceTest do
       tb = TabBar.move_tab_to_workspace(tb, 2, group.id)
       tb = TabBar.switch_to_workspace(tb, group.id)
 
-      state = %{shell_state: %{tab_bar: tb}}
+      state = state_with_tab_bar(tb)
       item = %Item{id: "brain", label: "brain"}
       new_state = WorkspaceIconSource.on_select(item, state)
-      g = TabBar.active_workspace(new_state.shell_state.tab_bar)
+      g = TabBar.active_workspace(new_state.shell_runtime.state.tab_bar)
       assert g.icon == "brain"
     end
   end
 
   describe "on_cancel/1" do
     test "returns state unchanged" do
-      state = %{shell_state: %{tab_bar: TabBar.new(Tab.new_file(1, "a.ex"))}}
+      state = state_with_tab_bar(TabBar.new(Tab.new_file(1, "a.ex")))
       assert WorkspaceIconSource.on_cancel(state) == state
     end
+  end
+
+  defp state_with_tab_bar(tab_bar) do
+    %EditorState{
+      port_manager: self(),
+      workspace: %SessionState{viewport: Viewport.new(24, 80)},
+      shell_runtime: Runtime.new(Runtime.default_entry(), %TraditionalState{tab_bar: tab_bar})
+    }
   end
 end

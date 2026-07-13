@@ -5,6 +5,7 @@ defmodule MingaEditor.Input.AgentNavTest do
   alias Minga.Editing.Scroll
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Input.AgentNav
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
@@ -52,7 +53,11 @@ defmodule MingaEditor.Input.AgentNavTest do
           next_id: 2
         }
       },
-      shell_state: %MingaEditor.Shell.Traditional.State{agent: %AgentState{}}
+      shell_runtime:
+        Runtime.new(
+          Runtime.default_entry(),
+          %MingaEditor.Shell.Traditional.State{agent: %AgentState{}}
+        )
     }
   end
 

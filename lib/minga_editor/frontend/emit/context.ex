@@ -26,6 +26,8 @@ defmodule MingaEditor.Frontend.Emit.Context do
   alias MingaEditor.UI.FontRegistry
   alias MingaEditor.UI.NotificationCenter
   alias MingaEditor.UI.Theme
+  alias MingaEditor.RenderPipeline.Input
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State
 
   @type t :: %__MODULE__{
@@ -107,10 +109,21 @@ defmodule MingaEditor.Frontend.Emit.Context do
             config_state: nil,
             link_cursor: false
 
-  @doc "Builds an emit context from render pipeline input."
-  @spec from_editor_state(map()) :: t()
-  def from_editor_state(state) do
-    title = compute_title(state)
+  @doc "Builds an emit context from editor state or its render-pipeline transfer value."
+  @spec from_editor_state(State.t() | Input.t()) :: t()
+  def from_editor_state(%State{shell_runtime: %Runtime{} = runtime} = state) do
+    build(state, Runtime.id(runtime), Runtime.module(runtime), Runtime.state(runtime))
+  end
+
+  def from_editor_state(
+        %Input{shell_id: shell_id, shell: shell, shell_state: shell_state} = input
+      ) do
+    build(input, shell_id, shell, shell_state)
+  end
+
+  @spec build(map(), atom(), module(), term()) :: t()
+  defp build(state, shell_id, shell, shell_state) do
+    title = compute_title(state, shell, shell_state)
     gui? = MingaEditor.Frontend.gui?(state.capabilities)
 
     %__MODULE__{
@@ -120,10 +133,10 @@ defmodule MingaEditor.Frontend.Emit.Context do
       font_registry: Map.get(state, :font_registry, FontRegistry.new()),
       windows: state.workspace.windows,
       layout: MingaEditor.Layout.get(state),
-      shell_id: State.active_shell_id(state),
-      shell: State.active_shell_module(state),
-      shell_state: state.shell_state,
-      tab_bar: Map.get(state.shell_state, :tab_bar),
+      shell_id: shell_id,
+      shell: shell,
+      shell_state: shell_state,
+      tab_bar: Map.get(shell_state, :tab_bar),
       buffers: state.workspace.buffers,
       viewport: state.terminal_viewport,
       file_tree: State.file_tree_state(state),
@@ -137,11 +150,12 @@ defmodule MingaEditor.Frontend.Emit.Context do
       editing: state.workspace.editing,
       message_store: state.message_store,
       notifications: state.notifications,
-      sidebar_registry: State.sidebar_registry(state),
+      sidebar_registry:
+        Map.get(state, :sidebar_registry, MingaEditor.Extension.Sidebar.default_table()),
       title: title,
       status_bar_data: MingaEditor.StatusBar.Data.from_state(state),
       git_syncing: Map.get(state, :git_remote_op) != nil or git_effect_active?(state),
-      git_toast: Map.get(state.shell_state, :git_toast),
+      git_toast: Map.get(shell_state, :git_toast),
       search: state.workspace.search,
       last_input_seq: Map.get(state, :last_input_seq, 0),
       frame_seq: Map.get(state, :frame_seq),
@@ -182,11 +196,11 @@ defmodule MingaEditor.Frontend.Emit.Context do
   defp gui_only(true, value), do: value
   defp gui_only(false, _value), do: nil
 
-  @spec compute_title(map()) :: String.t()
-  defp compute_title(%{shell: shell} = state) do
+  @spec compute_title(State.t() | Input.t(), module(), term()) :: String.t()
+  defp compute_title(state, shell, shell_state) do
     case shell.gui_payload(state) do
       nil ->
-        compute_standard_title(state)
+        compute_standard_title(state, shell_state)
 
       other ->
         Minga.Log.warning(
@@ -194,20 +208,18 @@ defmodule MingaEditor.Frontend.Emit.Context do
           "Unsupported GUI shell payload #{inspect(other)}; using standard title"
         )
 
-        compute_standard_title(state)
+        compute_standard_title(state, shell_state)
     end
   end
 
-  defp compute_title(state), do: compute_standard_title(state)
-
-  @spec compute_standard_title(map()) :: String.t()
-  defp compute_standard_title(state) do
+  @spec compute_standard_title(State.t() | Input.t(), term()) :: String.t()
+  defp compute_standard_title(state, shell_state) do
     if MingaEditor.Frontend.gui?(state.capabilities) do
       MingaEditor.Title.format_gui(state)
     else
       format = Minga.Config.get(:title_format) |> to_string()
       title = MingaEditor.Title.format(state, format)
-      tb = state.shell_state && Map.get(state.shell_state, :tab_bar)
+      tb = is_map(shell_state) && Map.get(shell_state, :tab_bar)
 
       if tb && TabBar.any_attention?(tb) do
         "[!] " <> title

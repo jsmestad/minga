@@ -29,8 +29,8 @@ defmodule MingaEditor.Commands.SearchAsyncTest do
       # already hold results (or the call would hang on a large repo).
       new_state = Search.execute(state, :confirm_project_search)
 
-      assert ModalOverlay.match(new_state.shell_state.modal, :picker)
-      {:picker, %{picker_ui: picker_ui}} = new_state.shell_state.modal
+      assert ModalOverlay.match(EditorState.modal(new_state), :picker)
+      {:picker, %{picker_ui: picker_ui}} = EditorState.modal(new_state)
       assert picker_ui.load_status == :loading
       assert picker_ui.source == MingaEditor.UI.Picker.ProjectSearchSource
 
@@ -70,7 +70,7 @@ defmodule MingaEditor.Commands.SearchAsyncTest do
         |> with_search_prompt("")
 
       new_state = Search.execute(state, :confirm_project_search)
-      refute ModalOverlay.match(new_state.shell_state.modal, :picker)
+      refute ModalOverlay.match(EditorState.modal(new_state), :picker)
     end
   end
 end

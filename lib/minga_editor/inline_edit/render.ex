@@ -80,6 +80,9 @@ defmodule MingaEditor.InlineEdit.Render do
   defp face(:help), do: Face.new(fg: 0x808080)
 
   @spec inline_edits(term()) :: InlineEdit.store()
+  defp inline_edits(%{shell_runtime: %{state: %{inline_edits: edits}}}) when is_map(edits),
+    do: edits
+
   defp inline_edits(%{shell_state: %{inline_edits: edits}}) when is_map(edits), do: edits
   defp inline_edits(_state), do: %{}
 end

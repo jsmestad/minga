@@ -18,7 +18,6 @@ defmodule MingaEditor.Agent.Events do
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.View.Preview
   alias MingaEditor.PickerUI
-  alias MingaEditor.Shell.StateStash
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
@@ -713,68 +712,35 @@ defmodule MingaEditor.Agent.Events do
   defp update_shell_for_session(state, _callback, [session | _args]) when not is_pid(session),
     do: state
 
-  defp update_shell_for_session(state, callback, args) do
-    state
-    |> update_active_shell_for_session(callback, args)
-    |> update_stashed_shells_for_session(callback, args)
+  defp update_shell_for_session(state, :sync_agent_status, [session, status]) do
+    runtime =
+      MingaEditor.Shell.Runtime.sync_agent_status(
+        state.shell_runtime,
+        MingaEditor.Shell.Workflow.resolved_entries(),
+        session,
+        status
+      )
+
+    EditorState.apply_shell_runtime_transition(state, runtime)
   end
 
-  @spec update_active_shell_for_session(EditorState.t(), atom(), [term()]) :: EditorState.t()
-  defp update_active_shell_for_session(state, callback, args) do
-    shell = EditorState.active_shell_module(state)
+  defp update_shell_for_session(state, :track_agent_file, [session, path]) do
+    runtime =
+      MingaEditor.Shell.Runtime.track_agent_file(
+        state.shell_runtime,
+        MingaEditor.Shell.Workflow.resolved_entries(),
+        session,
+        path
+      )
 
-    if function_exported?(shell, callback, Enum.count(args) + 1) do
-      EditorState.update_shell_state(state, fn shell_state ->
-        apply(shell, callback, [shell_state | args])
-      end)
-    else
-      state
-    end
-  end
-
-  @spec update_stashed_shells_for_session(EditorState.t(), atom(), [term()]) :: EditorState.t()
-  defp update_stashed_shells_for_session(state, callback, args) do
-    {state, _changed?} =
-      EditorState.transform_stashed_shell_states(state, fn module, shell_state, state_acc ->
-        transform_stashed_shell_for_session(module, shell_state, state_acc, callback, args)
-      end)
-
-    state
-  end
-
-  @spec transform_stashed_shell_for_session(
-          module(),
-          MingaEditor.Shell.shell_state(),
-          EditorState.t(),
-          atom(),
-          [term()]
-        ) :: {StateStash.transformation(), EditorState.t()}
-  defp transform_stashed_shell_for_session(module, shell_state, state, callback, args) do
-    if function_exported?(module, callback, Enum.count(args) + 1) do
-      transformed_shell_for_session(module, shell_state, state, callback, args)
-    else
-      {:unchanged, state}
-    end
-  end
-
-  @spec transformed_shell_for_session(
-          module(),
-          MingaEditor.Shell.shell_state(),
-          EditorState.t(),
-          atom(),
-          [term()]
-        ) :: {StateStash.transformation(), EditorState.t()}
-  defp transformed_shell_for_session(module, shell_state, state, callback, args) do
-    case apply(module, callback, [shell_state | args]) do
-      ^shell_state -> {:unchanged, state}
-      updated -> {{:updated, updated}, state}
-    end
+    EditorState.apply_shell_runtime_transition(state, runtime)
   end
 
   # Syncs the agent_status field on the current agent tab so the tab bar
   # can render status indicators without querying the Session process.
   @spec sync_tab_agent_status(EditorState.t(), Tab.agent_status()) :: EditorState.t()
-  defp sync_tab_agent_status(%{shell_state: %{tab_bar: nil}} = state, _status), do: state
+  defp sync_tab_agent_status(%{shell_runtime: %{state: %{tab_bar: nil}}} = state, _status),
+    do: state
 
   defp sync_tab_agent_status(state, status) do
     session = AgentAccess.session(state)
@@ -806,8 +772,11 @@ defmodule MingaEditor.Agent.Events do
   # Associates a file tab with the agent's workspace when the agent modifies the file.
   # Uses the tab's logical file ref so duplicate basenames route to the exact file.
   @spec associate_file_with_agent_workspace(EditorState.t(), String.t()) :: EditorState.t()
-  defp associate_file_with_agent_workspace(%{shell_state: %{tab_bar: nil}} = state, _path),
-    do: state
+  defp associate_file_with_agent_workspace(
+         %{shell_runtime: %{state: %{tab_bar: nil}}} = state,
+         _path
+       ),
+       do: state
 
   defp associate_file_with_agent_workspace(state, path) do
     session = AgentAccess.session(state)
@@ -833,7 +802,8 @@ defmodule MingaEditor.Agent.Events do
   # Auto-names the agent workspace from the prompt text (first line, 30 chars).
   # Skips if the workspace has a custom name set by the user.
   @spec maybe_auto_name_workspace(EditorState.t(), String.t()) :: EditorState.t()
-  defp maybe_auto_name_workspace(%{shell_state: %{tab_bar: nil}} = state, _), do: state
+  defp maybe_auto_name_workspace(%{shell_runtime: %{state: %{tab_bar: nil}}} = state, _),
+    do: state
 
   defp maybe_auto_name_workspace(state, prompt) do
     session = AgentAccess.session(state)

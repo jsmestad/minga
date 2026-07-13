@@ -379,7 +379,10 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
 
   @spec fetch_transfer_workspaces(term(), map()) ::
           {:ok, TabBar.t(), Workspace.t(), Workspace.t()} | {:error, String.t()}
-  defp fetch_transfer_workspaces(%{shell_state: %{tab_bar: %TabBar{} = tab_bar}}, context) do
+  defp fetch_transfer_workspaces(
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tab_bar}}},
+         context
+       ) do
     source_id = Map.fetch!(context, :source_workspace_id)
     destination_id = Map.fetch!(context, :destination_workspace_id)
 

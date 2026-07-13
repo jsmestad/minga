@@ -64,7 +64,7 @@ defmodule MingaEditor.Handlers.BufferRegistry do
 
   @spec file_tab_for_path_in_active_workspace(state(), String.t()) :: Tab.t() | nil
   def file_tab_for_path_in_active_workspace(
-        %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+        %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
         path
       ) do
     file_ref = FileRef.from_file_path(path)
@@ -133,7 +133,7 @@ defmodule MingaEditor.Handlers.BufferRegistry do
   # ── Private helpers ──────────────────────────────────────────────────
 
   @spec buffer_tracked_in_tabs?(state(), pid()) :: boolean()
-  defp buffer_tracked_in_tabs?(%{shell_state: %{tab_bar: %{tabs: tabs}}}, pid) do
+  defp buffer_tracked_in_tabs?(%{shell_runtime: %{state: %{tab_bar: %{tabs: tabs}}}}, pid) do
     Enum.any?(tabs, fn tab -> pid in tab_buffer_list(tab) end)
   end
 

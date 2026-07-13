@@ -6,6 +6,7 @@ defmodule MingaEditor.Input.AgentMouseTest do
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Layout
   alias MingaEditor.LayoutPreset
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
@@ -59,7 +60,11 @@ defmodule MingaEditor.Input.AgentMouseTest do
         }
       },
       focus_stack: [],
-      shell_state: %MingaEditor.Shell.Traditional.State{agent: agent, tab_bar: tab_bar}
+      shell_runtime:
+        Runtime.new(
+          Runtime.default_entry(),
+          %MingaEditor.Shell.Traditional.State{agent: agent, tab_bar: tab_bar}
+        )
     }
   end
 

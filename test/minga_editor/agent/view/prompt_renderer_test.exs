@@ -5,6 +5,7 @@ defmodule MingaEditor.Agent.View.PromptRendererTest do
   alias MingaEditor.Agent.View.PromptRenderer
   alias MingaEditor.Agent.ViewContext
   alias Minga.Buffer.Process, as: BufferProcess
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
@@ -57,7 +58,11 @@ defmodule MingaEditor.Agent.View.PromptRendererTest do
         agent_ui: agentic
       },
       focus_stack: Input.default_stack(),
-      shell_state: %MingaEditor.Shell.Traditional.State{agent: agent},
+      shell_runtime:
+        Runtime.new(
+          Runtime.default_entry(),
+          %MingaEditor.Shell.Traditional.State{agent: agent}
+        ),
       theme: Theme.get!(:doom_one)
     }
   end

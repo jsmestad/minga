@@ -5,6 +5,8 @@ defmodule MingaEditor.RenderPipeline.InputTest do
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.RenderPipeline.WindowIntent
+  alias MingaEditor.Shell.Entry
+  alias MingaEditor.Shell.Runtime
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
@@ -37,9 +39,10 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       assert input.port_manager == state.port_manager
       assert input.theme == state.theme
       assert input.capabilities == state.capabilities
-      assert input.shell_id == state.shell_id
-      assert input.shell == state.shell
-      assert input.shell_state == state.shell_state
+      assert input.shell_id == Runtime.id(state.shell_runtime)
+      assert input.shell == Runtime.module(state.shell_runtime)
+      assert input.shell_identity == Runtime.identity(state.shell_runtime)
+      assert input.shell_state == Runtime.state(state.shell_runtime)
       assert input.font_registry == MingaEditor.UI.FontRegistry.new()
       assert input.message_store == state.message_store
       assert input.editing_model == state.editing_model
@@ -63,7 +66,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
         :git_remote_op,
         :last_cursor_line,
         :buffer_add_context,
-        :shell_state_stash
+        :shell_runtime
       ]
 
       for field <- excluded do
@@ -201,8 +204,8 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       assert result.layout == :rendered_layout
       assert result.workspace.windows == windows
       refute Map.has_key?(Map.from_struct(result), :caches)
-      assert result.shell_state.modeline_click_regions == [{:modeline, 1}]
-      assert result.shell_state.tab_bar_click_regions == [{:tab, 2}]
+      assert Runtime.state(result.shell_runtime).modeline_click_regions == [{:modeline, 1}]
+      assert Runtime.state(result.shell_runtime).tab_bar_click_regions == [{:tab, 2}]
     end
 
     test "fresh receipt commits renderer-computed viewport observations", %{state: state} do
@@ -264,11 +267,24 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       input = Input.from_editor_state(state)
       stale = receipt(input, 10, false, layout: :rendered_layout)
 
+      fake_entry = %Entry{
+        id: :fake,
+        source: :config,
+        module: MingaEditor.Test.FakeShell,
+        display_name: "Fake",
+        description: "Fake shell",
+        capabilities: [:gui],
+        generation: 1
+      }
+
       switched = %{
         state
-        | shell_id: :fake,
-          shell: MingaEditor.Test.FakeShell,
-          shell_state: %{modeline_click_regions: [], tab_bar_click_regions: []}
+        | shell_runtime:
+            Runtime.activate(
+              state.shell_runtime,
+              fake_entry,
+              %{modeline_click_regions: [], tab_bar_click_regions: []}
+            )
       }
 
       assert EditorState.apply_renderer_writeback(switched, stale) == switched

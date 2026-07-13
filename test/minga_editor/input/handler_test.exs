@@ -49,8 +49,8 @@ defmodule MingaEditor.Input.HandlerTest do
       state = ModalOverlay.open(state, :conflict, ConflictPayload.new(buf, "/tmp/test.txt"))
 
       assert {:handled, new_state} = ConflictPrompt.handle_key(state, ?r, 0)
-      refute ModalOverlay.match(new_state.shell_state.modal, :conflict)
-      assert new_state.shell_state.status_msg =~ "reloaded"
+      refute ModalOverlay.match(EditorState.modal(new_state), :conflict)
+      assert EditorState.status_msg(new_state) =~ "reloaded"
     end
 
     test "handles 'k' key during conflict by keeping local", %{tmp_dir: tmp_dir} do
@@ -61,7 +61,7 @@ defmodule MingaEditor.Input.HandlerTest do
       state = ModalOverlay.open(state, :conflict, ConflictPayload.new(buf, path))
 
       assert {:handled, new_state} = ConflictPrompt.handle_key(state, ?k, 0)
-      refute ModalOverlay.match(new_state.shell_state.modal, :conflict)
+      refute ModalOverlay.match(EditorState.modal(new_state), :conflict)
     end
 
     test "swallows unrecognized keys during conflict" do
@@ -71,7 +71,7 @@ defmodule MingaEditor.Input.HandlerTest do
 
       assert {:handled, new_state} = ConflictPrompt.handle_key(state, ?x, 0)
       # State unchanged except for swallowing the key
-      assert new_state.shell_state.modal == state.shell_state.modal
+      assert EditorState.modal(new_state) == EditorState.modal(state)
     end
   end
 

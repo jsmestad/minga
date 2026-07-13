@@ -8,6 +8,7 @@ defmodule MingaEditor.UI.Prompt.WorkspaceRename do
 
   @behaviour MingaEditor.UI.Prompt.Handler
 
+  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.TabBar
 
@@ -17,17 +18,18 @@ defmodule MingaEditor.UI.Prompt.WorkspaceRename do
 
   @impl true
   @spec on_submit(String.t(), map()) :: map()
-  def on_submit(text, %{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+  def on_submit(text, %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     trimmed = String.trim(text)
 
     if trimmed == "" do
-      ss = state.shell_state
-      %{state | shell_state: %{ss | status_msg: "Workspace name cannot be empty"}}
+      EditorState.set_status(state, "Workspace name cannot be empty")
     else
       ws_id = TabBar.active_workspace_id(tb)
       tb = TabBar.update_workspace(tb, ws_id, &Workspace.rename(&1, trimmed))
-      ss = state.shell_state
-      %{state | shell_state: %{ss | tab_bar: tb, status_msg: "Renamed: #{trimmed}"}}
+
+      state
+      |> EditorState.set_tab_bar(tb)
+      |> EditorState.set_status("Renamed: #{trimmed}")
     end
   end
 

@@ -13,6 +13,8 @@ defmodule MingaEditor.Commands.AgentSession do
   alias MingaEditor.AgentLifecycle
   alias MingaEditor.Remote.EventReplay
   alias MingaEditor.Remote.SessionClient
+  alias MingaEditor.Shell.Entry
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
@@ -35,7 +37,10 @@ defmodule MingaEditor.Commands.AgentSession do
   Traditional-shell only: restart cycles the session pid on the active tab. Extension shells may own their own per-surface lifecycle, so a generic "restart" without shell-specific context is not meaningful there. Extension callers go through their active shell's session-start callback for new sessions and rely on `:agent_session_stopped` events for cleanup.
   """
   @spec restart_session(state(), String.t()) :: state()
-  def restart_session(%{shell_id: :traditional} = state, message) do
+  def restart_session(
+        %EditorState{shell_runtime: %Runtime{entry: %Entry{id: :traditional}}} = state,
+        message
+      ) do
     session = AgentAccess.session(state)
 
     if session do
@@ -58,7 +63,10 @@ defmodule MingaEditor.Commands.AgentSession do
   @spec clear_restart_session(state(), pid() | nil) :: state()
   defp clear_restart_session(state, nil), do: state
 
-  defp clear_restart_session(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, session) do
+  defp clear_restart_session(
+         %EditorState{shell_runtime: %Runtime{state: %{tab_bar: %TabBar{} = tb}}} = state,
+         session
+       ) do
     tb = tb |> clear_tab_sessions(session) |> clear_workspace_sessions(session)
     EditorState.set_tab_bar(state, tb)
   end
@@ -335,7 +343,7 @@ defmodule MingaEditor.Commands.AgentSession do
   # ── Private helpers ────────────────────────────────────────────────────────
 
   @spec assign_session_to_tab(state(), pid()) :: state()
-  defp assign_session_to_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, pid) do
+  defp assign_session_to_tab(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state, pid) do
     case TabBar.find_sessionless_agent(tb) do
       %Tab{id: agent_tab_id} -> EditorState.set_tab_session(state, agent_tab_id, pid)
       nil -> state
@@ -434,7 +442,10 @@ defmodule MingaEditor.Commands.AgentSession do
   end
 
   @spec create_remote_agent_tab(state(), String.t()) :: {state(), Tab.id()}
-  defp create_remote_agent_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, _server_name) do
+  defp create_remote_agent_tab(
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
+         _server_name
+       ) do
     rows = max(state.terminal_viewport.rows, 1)
     cols = max(state.terminal_viewport.cols, 1)
     win_id = 1
@@ -460,7 +471,7 @@ defmodule MingaEditor.Commands.AgentSession do
 
   @spec set_remote_tab(state(), Tab.id(), String.t(), String.t(), pid()) :: state()
   defp set_remote_tab(
-         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
          tab_id,
          server_name,
          session_id,
@@ -487,7 +498,7 @@ defmodule MingaEditor.Commands.AgentSession do
           non_neg_integer()
         ) :: state()
   defp set_remote_workspace(
-         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
          server_name,
          session_id,
          remote_pid,
@@ -523,7 +534,10 @@ defmodule MingaEditor.Commands.AgentSession do
        do: state
 
   @spec rebuild_agent_from_tab(state(), Tab.id()) :: state()
-  defp rebuild_agent_from_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, tab_id) do
+  defp rebuild_agent_from_tab(
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
+         tab_id
+       ) do
     case TabBar.get(tb, tab_id) do
       %Tab{} = tab -> EditorState.rebuild_agent_from_session(state, tab)
       nil -> state
@@ -553,7 +567,10 @@ defmodule MingaEditor.Commands.AgentSession do
   end
 
   @spec detach_remote_session(state(), pid()) :: state()
-  defp detach_remote_session(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, session) do
+  defp detach_remote_session(
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
+         session
+       ) do
     case TabBar.find_by_session(tb, session) do
       %Tab{remote_session_id: session_id} when is_binary(session_id) ->
         case detach_remote_session_by_id(node(session), session_id) do
@@ -581,7 +598,7 @@ defmodule MingaEditor.Commands.AgentSession do
 
   @spec mark_remote_session_disconnected(state(), String.t()) :: state()
   defp mark_remote_session_disconnected(
-         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
          session_id
        ) do
     tb =
@@ -603,7 +620,10 @@ defmodule MingaEditor.Commands.AgentSession do
   defp mark_remote_session_disconnected(state, _session_id), do: state
 
   @spec stop_remote_session(state(), pid()) :: state()
-  defp stop_remote_session(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, session) do
+  defp stop_remote_session(
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
+         session
+       ) do
     case TabBar.find_by_session(tb, session) do
       %Tab{remote_session_id: session_id} when is_binary(session_id) ->
         case stop_remote_session_by_id(node(session), session_id) do
@@ -687,7 +707,7 @@ defmodule MingaEditor.Commands.AgentSession do
   # a workspace (e.g., session restart).
   @spec ensure_agent_workspace(state(), pid(), ProjectView.t() | nil) :: state()
   defp ensure_agent_workspace(
-         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
          session_pid,
          project_view
        ) do
@@ -826,7 +846,7 @@ defmodule MingaEditor.Commands.AgentSession do
   @spec maybe_update_bound_workspace_project_view(state(), pid(), ProjectView.t() | nil) ::
           state()
   defp maybe_update_bound_workspace_project_view(
-         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
          session_pid,
          project_view
        ) do
@@ -842,7 +862,7 @@ defmodule MingaEditor.Commands.AgentSession do
   defp maybe_update_bound_workspace_project_view(state, _session_pid, _project_view), do: state
 
   @spec session_project_view(state()) :: {ProjectView.t() | nil, boolean()}
-  defp session_project_view(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+  defp session_project_view(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     case TabBar.active_workspace(tb) do
       %Workspace{kind: :agent} = workspace ->
         if Workspace.project_view_active?(workspace) do
@@ -901,7 +921,7 @@ defmodule MingaEditor.Commands.AgentSession do
   @spec update_workspace_project_view(state(), non_neg_integer(), ProjectView.t() | nil) ::
           state()
   defp update_workspace_project_view(
-         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
          workspace_id,
          project_view
        ) do

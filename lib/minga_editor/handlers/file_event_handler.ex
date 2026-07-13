@@ -9,6 +9,8 @@ defmodule MingaEditor.Handlers.FileEventHandler do
 
   alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
   alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
+  alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Workflow
   alias MingaEditor.State, as: EditorState
 
   @typedoc "Effects that the file event handler may return."
@@ -114,16 +116,19 @@ defmodule MingaEditor.Handlers.FileEventHandler do
         state =
           state
           |> EditorState.set_git_status_panel(GitStatusPanel.new(git_status_data))
-          |> EditorState.ensure_shell_available()
+          |> Workflow.ensure_available()
 
-        {shell_state, workspace} =
-          EditorState.active_shell_module(state).handle_event(
-            state.shell_state,
+        {runtime, workspace} =
+          Runtime.route_event(
+            state.shell_runtime,
             state.workspace,
             {:git_status_changed, entries}
           )
 
-        new_state = %{state | shell_state: shell_state, workspace: workspace}
+        new_state =
+          state
+          |> EditorState.apply_shell_runtime_transition(runtime)
+          |> EditorState.set_workspace(workspace)
 
         {new_state, [{:render, 16}]}
     end

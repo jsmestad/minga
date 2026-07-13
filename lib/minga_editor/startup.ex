@@ -18,7 +18,7 @@ defmodule MingaEditor.Startup do
   alias MingaEditor.Commands
   alias MingaEditor.FileTree.Feature, as: FileTreeFeature
   alias MingaEditor.FileWatcherHelpers
-  alias MingaEditor.Shell.Identity, as: ShellIdentity
+  alias MingaEditor.Shell.Runtime, as: ShellRuntime
   alias MingaEditor.Sidebar.BuiltinSurfaces
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Session, as: EditorSessionState
@@ -181,10 +181,7 @@ defmodule MingaEditor.Startup do
       effect_scheduler: Keyword.get(opts, :effect_scheduler),
       editing_model: editing_model,
       focus_stack: MingaEditor.Input.default_stack(),
-      shell_id: shell_entry.id,
-      shell: shell_entry.module,
-      shell_identity: ShellIdentity.new(shell_entry),
-      shell_state: init_shell_state(shell_entry.module, opts),
+      shell_runtime: ShellRuntime.new(shell_entry, init_shell_state(shell_entry.module, opts)),
       message_store: MessageStore.new(),
       session: EditorSessionState.new(Keyword.take(opts, [:swap_dir, :session_dir]))
     }

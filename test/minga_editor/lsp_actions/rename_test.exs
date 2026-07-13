@@ -18,12 +18,12 @@ defmodule MingaEditor.LspActions.RenameTest do
   describe "handle_prepare_rename_response/2" do
     test "error sets status message" do
       state = LspActions.handle_prepare_rename_response(stub_state(), {:error, "invalid"})
-      assert state.shell_state.status_msg == "Cannot rename at this position"
+      assert EditorState.status_msg(state) == "Cannot rename at this position"
     end
 
     test "nil result sets status message" do
       state = LspActions.handle_prepare_rename_response(stub_state(), {:ok, nil})
-      assert state.shell_state.status_msg == "Cannot rename at this position"
+      assert EditorState.status_msg(state) == "Cannot rename at this position"
     end
 
     test "successful prepare enters command mode with rename prompt" do
@@ -55,17 +55,17 @@ defmodule MingaEditor.LspActions.RenameTest do
   describe "handle_rename_response/2" do
     test "error sets status message" do
       state = LspActions.handle_rename_response(stub_state(), {:error, "failed"})
-      assert state.shell_state.status_msg == "Rename failed"
+      assert EditorState.status_msg(state) == "Rename failed"
     end
 
     test "nil result sets status message" do
       state = LspActions.handle_rename_response(stub_state(), {:ok, nil})
-      assert state.shell_state.status_msg == "Rename returned no edits"
+      assert EditorState.status_msg(state) == "Rename returned no edits"
     end
 
     test "empty workspace edit sets status message" do
       state = LspActions.handle_rename_response(stub_state(), {:ok, %{}})
-      assert state.shell_state.status_msg =~ "no edits to apply"
+      assert EditorState.status_msg(state) =~ "no edits to apply"
     end
   end
 

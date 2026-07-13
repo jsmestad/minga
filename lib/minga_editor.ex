@@ -585,7 +585,7 @@ defmodule MingaEditor do
   end
 
   def handle_info({:whichkey_timeout, ref}, state) do
-    if ref == state.shell_state.whichkey.timer do
+    if ref == state.shell_runtime.state.whichkey.timer do
       wk = EditorState.whichkey(state)
       new_state = EditorState.set_whichkey(state, %{wk | show: true})
       {:noreply, Renderer.render_or_async(new_state)}
@@ -923,7 +923,7 @@ defmodule MingaEditor do
   # here as stale and are discarded. Picker fetches retain this read-only
   # latest-wins path; #2805 migrates external formatting and git mutations.
   def handle_info({:picker_candidates_result, source_module, revision, result}, state) do
-    case state.shell_state.modal do
+    case state.shell_runtime.state.modal do
       {:picker, %{picker_ui: %{source: ^source_module} = picker_ui} = payload} ->
         if MingaEditor.State.Picker.current_fetch?(picker_ui, revision) do
           new_state = handle_picker_candidates(state, payload, result)
@@ -1044,7 +1044,11 @@ defmodule MingaEditor do
 
   @spec current_observatory_token?(state(), reference()) :: boolean()
   defp current_observatory_token?(
-         %{shell_state: %{observatory_visible: true, observatory_timer: {_timer, token}}},
+         %{
+           shell_runtime: %{
+             state: %{observatory_visible: true, observatory_timer: {_timer, token}}
+           }
+         },
          token
        ),
        do: true
@@ -1245,7 +1249,7 @@ defmodule MingaEditor do
   end
 
   defp route_agent_event(state, session_pid, event, :background) do
-    state = EditorState.ensure_shell_available(state)
+    state = MingaEditor.Shell.Workflow.ensure_available(state)
     state = route_active_shell_agent_event(state, session_pid, event)
     state = route_stashed_shell_agent_event(state, session_pid, event)
     {:noreply, schedule_render(state, 16)}
@@ -1253,85 +1257,58 @@ defmodule MingaEditor do
 
   @spec route_active_shell_agent_event(EditorState.t(), pid(), term()) :: EditorState.t()
   defp route_active_shell_agent_event(state, session_pid, event) do
-    {shell_state, workspace, shell_effects} =
-      EditorState.active_shell_module(state).on_agent_event(
-        state.shell_state,
+    {runtime, workspace, effects, persistence_change} =
+      MingaEditor.Shell.Runtime.route_agent_event(
+        state.shell_runtime,
         state.workspace,
         session_pid,
         event
       )
 
+    runtime = persist_shell_changes(runtime, List.wrap(persistence_change))
+
     state
-    |> EditorState.update_shell_state(fn _shell_state -> shell_state end)
+    |> EditorState.apply_shell_runtime_transition(runtime)
     |> EditorState.set_workspace(workspace)
-    |> EffectHandler.apply_effects(shell_effects)
+    |> EffectHandler.apply_effects(effects)
   end
 
   @spec route_stashed_shell_agent_event(EditorState.t(), pid(), term()) :: EditorState.t()
   defp route_stashed_shell_agent_event(state, session_pid, event) do
-    {state, _changed?} =
-      EditorState.transform_stashed_shell_states(state, fn module, shell_state, state_acc ->
-        transform_stashed_shell_agent_event(module, shell_state, state_acc, session_pid, event)
-      end)
+    {runtime, workspace, effects, persistence_changes} =
+      MingaEditor.Shell.Runtime.route_stashed_agent_event(
+        state.shell_runtime,
+        MingaEditor.Shell.Workflow.resolved_entries(),
+        state.workspace,
+        session_pid,
+        event
+      )
+
+    runtime = persist_shell_changes(runtime, persistence_changes)
 
     state
+    |> EditorState.apply_shell_runtime_transition(runtime)
+    |> EditorState.set_workspace(workspace)
+    |> EffectHandler.apply_effects(effects)
   end
 
-  @spec transform_stashed_shell_agent_event(
-          module(),
-          MingaEditor.Shell.shell_state(),
-          EditorState.t(),
-          pid(),
-          term()
-        ) :: {MingaEditor.Shell.StateStash.transformation(), EditorState.t()}
-  defp transform_stashed_shell_agent_event(module, shell_state, state, session_pid, event) do
-    if function_exported?(module, :on_agent_event, 4) do
-      apply_stashed_shell_agent_event(module, shell_state, state, session_pid, event)
-    else
-      {:unchanged, state}
-    end
+  @spec persist_shell_changes(
+          MingaEditor.Shell.Runtime.t(),
+          [MingaEditor.Shell.Runtime.persistence_change()]
+        ) :: MingaEditor.Shell.Runtime.t()
+  defp persist_shell_changes(runtime, changes) do
+    Enum.reduce(changes, runtime, fn {entry, _old_state, new_state}, runtime_acc ->
+      persisted_state = persist_shell_state(entry.module, new_state)
+      MingaEditor.Shell.Runtime.accept_persisted_state(runtime_acc, entry, persisted_state)
+    end)
   end
 
-  @spec apply_stashed_shell_agent_event(
-          module(),
-          MingaEditor.Shell.shell_state(),
-          EditorState.t(),
-          pid(),
-          term()
-        ) :: {MingaEditor.Shell.StateStash.transformation(), EditorState.t()}
-  defp apply_stashed_shell_agent_event(module, shell_state, state, session_pid, event) do
-    {updated_shell_state, workspace, effects} =
-      module.on_agent_event(shell_state, state.workspace, session_pid, event)
-
-    updated_shell_state =
-      maybe_persist_stashed_shell_state(module, shell_state, updated_shell_state)
-
-    state =
-      state
-      |> EditorState.set_workspace(workspace)
-      |> EffectHandler.apply_effects(effects)
-
-    stashed_shell_agent_transformation(shell_state, updated_shell_state, state)
-  end
-
-  @spec stashed_shell_agent_transformation(
-          MingaEditor.Shell.shell_state(),
-          MingaEditor.Shell.shell_state(),
-          EditorState.t()
-        ) :: {MingaEditor.Shell.StateStash.transformation(), EditorState.t()}
-  defp stashed_shell_agent_transformation(shell_state, shell_state, state),
-    do: {:unchanged, state}
-
-  defp stashed_shell_agent_transformation(_old_shell_state, updated_shell_state, state),
-    do: {{:updated, updated_shell_state}, state}
-
-  @spec maybe_persist_stashed_shell_state(module(), term(), term()) :: term()
-  defp maybe_persist_stashed_shell_state(module, old_state, new_state) do
-    if old_state != new_state and function_exported?(module, :persist_shell_state, 1) do
-      module.persist_shell_state(new_state)
-    else
-      new_state
-    end
+  @spec persist_shell_state(module(), MingaEditor.Shell.shell_state()) ::
+          MingaEditor.Shell.shell_state()
+  defp persist_shell_state(module, shell_state) do
+    if function_exported?(module, :persist_shell_state, 1),
+      do: module.persist_shell_state(shell_state),
+      else: shell_state
   end
 
   @spec agent_event_owner(EditorState.t(), pid()) ::
@@ -1454,7 +1431,7 @@ defmodule MingaEditor do
 
   # Cancels any active nav-flash. Called on every keypress.
   @spec cancel_nav_flash(state()) :: state()
-  def cancel_nav_flash(%{shell_state: %{nav_flash: nil}} = state), do: state
+  def cancel_nav_flash(%{shell_runtime: %{state: %{nav_flash: nil}}} = state), do: state
 
   def cancel_nav_flash(state) do
     effects = NavFlash.cancel_effects(EditorState.nav_flash(state))
@@ -1463,9 +1440,9 @@ defmodule MingaEditor do
   end
 
   @spec cancel_yank_flash(state()) :: state()
-  def cancel_yank_flash(%{shell_state: %{yank_flash: nil}} = state), do: state
+  def cancel_yank_flash(%{shell_runtime: %{state: %{yank_flash: nil}}} = state), do: state
 
-  def cancel_yank_flash(%{shell_state: %{yank_flash: flash}} = state) do
+  def cancel_yank_flash(%{shell_runtime: %{state: %{yank_flash: flash}}} = state) do
     effects = YankFlash.cancel_effects(flash)
     MingaEditor.FlashEffects.execute(state, effects)
 
@@ -1533,8 +1510,10 @@ defmodule MingaEditor do
   @spec maybe_refresh_tool_picker(state()) :: state()
   def maybe_refresh_tool_picker(
         %{
-          shell_state: %{
-            modal: {:picker, %{picker_ui: %{source: MingaEditor.UI.Picker.Sources.Tool}}}
+          shell_runtime: %{
+            state: %{
+              modal: {:picker, %{picker_ui: %{source: MingaEditor.UI.Picker.Sources.Tool}}}
+            }
           }
         } = state
       ) do
@@ -1566,7 +1545,9 @@ defmodule MingaEditor do
   @warning_popup_debounce_ms 200
 
   @spec maybe_schedule_warning_popup(state()) :: state()
-  def maybe_schedule_warning_popup(%{shell_state: %{warning_popup_timer: ref}} = state)
+  def maybe_schedule_warning_popup(
+        %{shell_runtime: %{state: %{warning_popup_timer: ref}}} = state
+      )
       when is_reference(ref) do
     # Timer already running; the pending timeout will open the popup.
     state
@@ -1576,7 +1557,7 @@ defmodule MingaEditor do
 
   def maybe_schedule_warning_popup(state) do
     ref = Process.send_after(self(), :warning_popup_timeout, @warning_popup_debounce_ms)
-    EditorState.update_shell_state(state, &%{&1 | warning_popup_timer: ref})
+    EditorState.set_warning_popup_timer(state, ref)
   end
 
   # buffer_visible_in_window? moved to HighlightHandler

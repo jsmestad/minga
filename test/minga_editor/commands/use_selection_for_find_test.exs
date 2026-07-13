@@ -7,6 +7,8 @@ defmodule MingaEditor.Commands.UseSelectionForFindTest do
 
   use ExUnit.Case, async: true
 
+  alias MingaEditor.State, as: EditorState
+
   import MingaEditor.CommandStateHelpers
 
   describe "Layer 0/1 command state: use_selection_for_find" do
@@ -16,7 +18,7 @@ defmodule MingaEditor.Commands.UseSelectionForFindTest do
       state = MingaEditor.Commands.execute(state, :use_selection_for_find)
 
       assert state.workspace.search.last_pattern == "hello"
-      assert state.shell_state.status_msg =~ "hello"
+      assert EditorState.status_msg(state) =~ "hello"
     end
 
     test "sets forward search direction" do

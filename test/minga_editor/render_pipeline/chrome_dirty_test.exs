@@ -6,7 +6,7 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.Session.State, as: SessionState
-  alias MingaEditor.Shell.Traditional.State, as: ShellState
+  alias MingaEditor.State, as: EditorState
 
   setup do
     table = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
@@ -169,8 +169,8 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
       input = Input.from_editor_state(state)
       fp1 = Input.chrome_fingerprint(input)
 
-      shell_state =
-        ShellState.set_git_status_panel(state.shell_state, %{
+      state =
+        EditorState.set_git_status_panel(state, %{
           repo_state: :normal,
           branch: "main",
           ahead: 0,
@@ -178,7 +178,7 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
           entries: []
         })
 
-      input2 = Input.from_editor_state(%{state | shell_state: shell_state})
+      input2 = Input.from_editor_state(state)
       fp2 = Input.chrome_fingerprint(input2)
 
       assert fp1 != fp2

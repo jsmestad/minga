@@ -95,7 +95,7 @@ defmodule MingaEditor.UI.Picker.Context do
       file_tree: State.file_tree_state(state),
       search: state.workspace.search,
       viewport: state.terminal_viewport,
-      tab_bar: state.shell_state.tab_bar,
+      tab_bar: state.shell_runtime.state.tab_bar,
       agent_session: agent_session,
       picker_ui: picker_ui,
       document_symbols: active_document_symbols(state),
@@ -123,7 +123,7 @@ defmodule MingaEditor.UI.Picker.Context do
   @spec picker_ui_from_modal(State.t(), map() | nil) :: PickerState.t()
   defp picker_ui_from_modal(state, extra_context) do
     base =
-      case state.shell_state.modal do
+      case state.shell_runtime.state.modal do
         {:picker, %{picker_ui: pui}} -> pui
         _ -> %PickerState{}
       end
