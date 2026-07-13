@@ -284,6 +284,7 @@ defmodule MingaEditor.Renderer.State do
     %{
       state
       | caches: Caches.reset_frontend_state(state.caches),
+        font_registry: FontRegistry.require_reregistration(state.font_registry),
         message_store: reset_message_cursor(state.message_store),
         resident_windows: residents
     }

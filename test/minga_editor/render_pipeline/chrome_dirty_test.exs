@@ -2,6 +2,7 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Test.RecordingFrontend
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.TestHelpers
@@ -11,12 +12,24 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
   setup do
     table = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
     start_supervised!({Sidebar, name: table, notify: false})
+
+    frontend =
+      start_supervised!(
+        {RecordingFrontend, owner: self()},
+        id: {:chrome_dirty_frontend, System.unique_integer([:positive])}
+      )
+
+    Process.put(:chrome_dirty_frontend, frontend)
     %{sidebar_registry: table}
+  end
+
+  defp base_state(opts \\ []) do
+    TestHelpers.base_state(Keyword.put(opts, :port_manager, Process.get(:chrome_dirty_frontend)))
   end
 
   describe "chrome_fingerprint/1" do
     test "same input produces same fingerprint" do
-      state = TestHelpers.base_state()
+      state = base_state()
       input = Input.from_editor_state(state)
 
       fp1 = Input.chrome_fingerprint(input)
@@ -26,7 +39,7 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
     end
 
     test "changing vim mode changes fingerprint" do
-      state = TestHelpers.base_state()
+      state = base_state()
       input = Input.from_editor_state(state)
       fp_normal = Input.chrome_fingerprint(input)
 
@@ -40,7 +53,7 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
     end
 
     test "changing theme changes fingerprint" do
-      state = TestHelpers.base_state()
+      state = base_state()
       input = Input.from_editor_state(state)
       fp_before = Input.chrome_fingerprint(input)
 
@@ -58,7 +71,7 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
       path = Path.join(dir, "saved.ex")
       File.write!(path, "defmodule Saved do\nend\n")
 
-      state = TestHelpers.base_state(content: File.read!(path))
+      state = base_state(content: File.read!(path))
       buf = state.workspace.buffers.active
       :ok = BufferProcess.save_as(buf, path)
       :ok = BufferProcess.insert_text(buf, "# dirty\n")
@@ -74,7 +87,7 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
     end
 
     test "moving cursor changes fingerprint" do
-      state = TestHelpers.base_state()
+      state = base_state()
       buf = state.workspace.buffers.active
 
       input1 = Input.from_editor_state(state)
@@ -90,7 +103,7 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
     end
 
     test "changing file tree changes fingerprint" do
-      state = TestHelpers.base_state()
+      state = base_state()
       input = Input.from_editor_state(state)
       fp1 = Input.chrome_fingerprint(input)
 
@@ -116,7 +129,7 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
                  snapshot: [rows: [%{id: "a", text: "alpha"}]]
                })
 
-      state = TestHelpers.base_state(sidebar_registry: table)
+      state = base_state(sidebar_registry: table)
       fp_visible = state |> Input.from_editor_state() |> Input.chrome_fingerprint()
 
       assert :ok = Sidebar.set_visible(table, {:extension, :outline}, "outline", false)
@@ -149,7 +162,7 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
                  snapshot: [rows: [%{id: "a", text: "alpha"}]]
                })
 
-      state = TestHelpers.base_state(sidebar_registry: table)
+      state = base_state(sidebar_registry: table)
       state1 = TestHelpers.run_pipeline(state)
       fingerprint1 = :sys.get_state(state1.renderer).caches.chrome_prev_fingerprint
 
@@ -165,7 +178,7 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
     end
 
     test "shell-owned chrome state changes fingerprint through shell hook" do
-      state = TestHelpers.base_state()
+      state = base_state()
       input = Input.from_editor_state(state)
       fp1 = Input.chrome_fingerprint(input)
 
@@ -185,7 +198,7 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
     end
 
     test "unchanged input between frames produces stable fingerprint" do
-      state = TestHelpers.base_state()
+      state = base_state()
       input = Input.from_editor_state(state)
 
       # Simulate two frames with no state changes
@@ -198,7 +211,7 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
 
   describe "chrome skip integration" do
     test "second render with unchanged state skips chrome rebuild" do
-      state = TestHelpers.base_state()
+      state = base_state()
 
       # First render: builds chrome fresh in renderer-owned state.
       state1 = TestHelpers.run_pipeline(state)
@@ -222,7 +235,7 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
     end
 
     test "render after cursor move rebuilds chrome" do
-      state = TestHelpers.base_state()
+      state = base_state()
       buf = state.workspace.buffers.active
 
       # First render.
@@ -249,7 +262,7 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
       File.write!(first_path, "defmodule First do\nend\n")
       File.write!(second_path, "defmodule Second do\nend\n")
 
-      state = TestHelpers.base_state(content: File.read!(first_path))
+      state = base_state(content: File.read!(first_path))
       first_buf = state.workspace.buffers.active
       :ok = BufferProcess.save_as(first_buf, first_path)
       {:ok, second_buf} = BufferProcess.start_link(content: File.read!(second_path))

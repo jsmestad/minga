@@ -3,6 +3,7 @@ defmodule MingaEditor.Input.RouterTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Test.InputRouterMouseProbe
+  alias Minga.Test.RecordingFrontend
   alias MingaEditor.BottomPanel
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.FocusTree
@@ -19,7 +20,15 @@ defmodule MingaEditor.Input.RouterTest do
   setup do
     table = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
     start_supervised!({Sidebar, name: table, notify: false})
+
+    frontend =
+      start_supervised!(
+        {RecordingFrontend, owner: self()},
+        id: {:router_recording_frontend, System.unique_integer([:positive])}
+      )
+
     Process.put(:sidebar_registry, table)
+    Process.put(:router_recording_frontend, frontend)
     :ok
   end
 
@@ -27,7 +36,7 @@ defmodule MingaEditor.Input.RouterTest do
     {:ok, buf} = BufferProcess.start_link(content: "hello\nworld\nthird")
 
     %EditorState{
-      port_manager: self(),
+      port_manager: Process.get(:router_recording_frontend),
       sidebar_registry: Process.get(:sidebar_registry),
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
@@ -240,7 +249,7 @@ defmodule MingaEditor.Input.RouterTest do
 
       %EditorState{
         backend: :tui,
-        port_manager: self(),
+        port_manager: Process.get(:router_recording_frontend),
         renderer: renderer_pid,
         sidebar_registry: Process.get(:sidebar_registry),
         terminal_viewport: Viewport.new(24, 80),
@@ -292,7 +301,7 @@ defmodule MingaEditor.Input.RouterTest do
       pending_state = Router.dispatch(state, ?d, 0)
       assert pending_state.workspace.editing.mode == :operator_pending
       assert_receive {:acknowledged_render, first_seq, 1, 0}, @async_render_timeout
-      refute_receive {:"$gen_cast", {:send_commands, _commands}}, 20
+      refute_receive {:frontend_commands, _frontend, _commands}, 20
 
       RendererServer.frame_status(renderer, {:frame_applied, 1, first_seq})
       assert_receive {:render_done, %{frame_seq: ^first_seq}}, @async_render_timeout

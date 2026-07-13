@@ -80,6 +80,13 @@ defmodule MingaEditor.UI.FontRegistry do
   @spec mark_registered(t()) :: t()
   def mark_registered(%__MODULE__{} = registry), do: %{registry | pending: %{}}
 
+  @doc "Requires every allocated fallback font to be emitted in the next recovery keyframe."
+  @spec require_reregistration(t()) :: t()
+  def require_reregistration(%__MODULE__{} = registry) do
+    pending = Map.new(registry.families, fn {family, id} -> {id, family} end)
+    %{registry | pending: pending}
+  end
+
   @doc "Runs a function with this registry installed for render-local font resolution."
   @spec with_process_registry(t(), (-> result)) :: result when result: term()
   def with_process_registry(%__MODULE__{} = font_registry, fun) when is_function(fun, 0) do

@@ -14,6 +14,7 @@ defmodule MingaEditor.Frontend.Emit.SurfaceLayoutEmitTest do
   use ExUnit.Case, async: true
 
   alias Minga.Protocol.Opcodes
+  alias Minga.Test.RecordingFrontend
   alias MingaEditor.Frontend.Emit
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.HoverPopup
@@ -27,12 +28,24 @@ defmodule MingaEditor.Frontend.Emit.SurfaceLayoutEmitTest do
   alias Minga.RenderModel.Cursor
   alias MingaEditor.RenderPipeline.ComposedFrame
 
+  @op_begin_frame Opcodes.begin_frame()
   @op_surface_layout Opcodes.gui_surface_layout()
+
+  setup do
+    frontend =
+      start_supervised!(
+        {RecordingFrontend, owner: self()},
+        id: {:surface_layout_frontend, System.unique_integer([:positive])}
+      )
+
+    Process.put(:surface_layout_frontend, frontend)
+    :ok
+  end
 
   # A base state with both promoted floating popups live in shell_state, so the
   # focus tree adds hover/signature-help overlay nodes and the registry places them.
   defp state_with_floating_popups do
-    state = base_state()
+    state = emit_state()
     hover = HoverPopup.new("Returns the **value**.", 2, 6)
 
     signature = %SignatureHelp{
@@ -52,8 +65,15 @@ defmodule MingaEditor.Frontend.Emit.SurfaceLayoutEmitTest do
     frame = ComposedFrame.new([], Cursor.new(0, 0, :block))
     ctx = Context.from_editor_state(state)
     Emit.emit(frame, ctx)
-    assert_receive {:"$gen_cast", {:send_commands, commands}}
+
+    assert_receive {:frontend_commands, _frontend,
+                    [<<@op_begin_frame, _::binary>> | _] = commands}
+
     commands
+  end
+
+  defp emit_state(opts \\ []) do
+    base_state(Keyword.put(opts, :port_manager, Process.get(:surface_layout_frontend)))
   end
 
   defp surface_layout_command(commands) do
@@ -100,7 +120,7 @@ defmodule MingaEditor.Frontend.Emit.SurfaceLayoutEmitTest do
   end
 
   test "every frame's transaction carries a gui_surface_layout command before commit" do
-    commands = emit_commands(base_state())
+    commands = emit_commands(emit_state())
 
     assert cmd = surface_layout_command(commands)
 
@@ -114,7 +134,7 @@ defmodule MingaEditor.Frontend.Emit.SurfaceLayoutEmitTest do
   end
 
   test "emitted placement bytes decode to the exact rects BEAM hit-testing uses (AC-1)" do
-    state = base_state()
+    state = emit_state()
     commands = emit_commands(state)
 
     decoded = commands |> surface_layout_command() |> decode_placements()
@@ -133,7 +153,7 @@ defmodule MingaEditor.Frontend.Emit.SurfaceLayoutEmitTest do
   end
 
   test "rect for each decoded surface_id equals the registry rect_for that surface" do
-    state = base_state()
+    state = emit_state()
     commands = emit_commands(state)
     decoded = commands |> surface_layout_command() |> decode_placements()
     placements = SurfaceRegistry.placements(state)
@@ -201,7 +221,7 @@ defmodule MingaEditor.Frontend.Emit.SurfaceLayoutEmitTest do
     center =
       MingaEditor.UI.NotificationCenter.upsert(MingaEditor.UI.NotificationCenter.new(), note)
 
-    state = %{base_state() | notifications: center}
+    state = %{emit_state() | notifications: center}
 
     commands = emit_commands(state)
     decoded = commands |> surface_layout_command() |> decode_placements()
@@ -230,7 +250,7 @@ defmodule MingaEditor.Frontend.Emit.SurfaceLayoutEmitTest do
     # A degenerate state with no focus tree surfaces still produces a valid,
     # decodable command: the transaction always carries the layout authority,
     # even when the authority is empty.
-    state = base_state()
+    state = emit_state()
     # Force an empty placement context directly through the encoder to prove the
     # zero-count framing round-trips (the live state always has chrome, so this
     # exercises the boundary the production encoder must handle).

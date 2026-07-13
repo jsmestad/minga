@@ -20,20 +20,34 @@ defmodule MingaEditor.Frontend.EmitTest do
   alias Minga.RenderModel.Window.IndentGuides
   alias Minga.RenderModel.Window.Row, as: RenderRow
   alias Minga.RenderModel.Window.Span, as: RenderSpan
+  alias Minga.Test.RecordingFrontend
   alias MingaEditor.Renderer.Caches
   alias MingaEditor.UI.FontRegistry
 
   import MingaEditor.RenderPipeline.TestHelpers
 
+  @op_begin_frame Opcodes.begin_frame()
+
+  setup do
+    frontend =
+      start_supervised!(
+        {RecordingFrontend, owner: self()},
+        id: {:emit_recording_frontend, System.unique_integer([:positive])}
+      )
+
+    Process.put(:emit_test_frontend, frontend)
+    :ok
+  end
+
   describe "emit/2 dispatching" do
     test "TUI path emits a semantic frame, not a leading cell-grid clear" do
       frame = ComposedFrame.new([], Cursor.new(0, 0, :block))
 
-      state = base_state()
+      state = emit_state()
       ctx = Context.from_editor_state(state)
       Emit.emit(frame, ctx)
 
-      assert_receive {:"$gen_cast", {:send_commands, commands}}
+      commands = assert_receive_frame_commands()
 
       # The TUI renders via the semantic GUI protocol, now bracketed as a frame
       # transaction (#2219): every frame opens with begin_frame (0x10) and closes
@@ -51,17 +65,17 @@ defmodule MingaEditor.Frontend.EmitTest do
     test "GUI path produces commands (no clear expected for GUI with to_commands)" do
       frame = ComposedFrame.new([], Cursor.new(0, 0, :block))
 
-      state = gui_state()
+      state = %{gui_state() | port_manager: Process.get(:emit_test_frontend)}
       ctx = Context.from_editor_state(state)
       Emit.emit(frame, ctx)
 
-      assert_receive {:"$gen_cast", {:send_commands, commands}}
+      commands = assert_receive_frame_commands()
       assert is_list(commands)
       assert Enum.all?(commands, &is_binary/1)
     end
 
     test "semantic TUI path emits semantic window commands instead of cell-grid clear" do
-      frame = build_frame_with_window(base_state(), viewport_top: 0)
+      frame = build_frame_with_window(emit_state(), viewport_top: 0)
 
       row = %RenderRow{
         row_id: RenderRow.stable_id(:normal, 0),
@@ -84,14 +98,14 @@ defmodule MingaEditor.Frontend.EmitTest do
       frame = %{frame | windows: [window_model]}
 
       state = %{
-        base_state()
+        emit_state()
         | capabilities: %Capabilities{frontend_type: :tui, semantic_ui: true}
       }
 
       ctx = Context.from_editor_state(state)
       Emit.emit(frame, ctx)
 
-      assert_receive {:"$gen_cast", {:send_commands, commands}}
+      commands = assert_receive_frame_commands()
       refute match?([<<0x12>> | _], commands)
 
       assert Enum.any?(commands, fn
@@ -181,7 +195,7 @@ defmodule MingaEditor.Frontend.EmitTest do
       {recovered_caches, _font_registry, _message_store} =
         Emit.emit(invalid_frame, ctx, nil, caches)
 
-      refute_receive {:"$gen_cast", {:send_commands, _}}
+      refute_receive {:frontend_commands, _frontend, [<<@op_begin_frame, _::binary>> | _]}
       assert recovered_caches.adapter_gui_caches == Minga.Frontend.Adapter.GUI.Caches.new()
       assert recovered_caches.last_emitted_frame_seq == 0
 
@@ -258,7 +272,7 @@ defmodule MingaEditor.Frontend.EmitTest do
     test "styled virtual text allocates a font id and emits a register_font command" do
       face = %Face{name: "vt", fg: 0xFFFFFF, bg: 0x000000, font_family: "Fira Code"}
 
-      state = base_state(content: "hello\nworld")
+      state = emit_state(content: "hello\nworld")
       buffer = state.workspace.buffers.active
 
       BufferProcess.add_virtual_text(buffer, {0, 0},
@@ -268,7 +282,7 @@ defmodule MingaEditor.Frontend.EmitTest do
       )
 
       run_pipeline(state)
-      assert_receive {:"$gen_cast", {:send_commands, commands}}
+      commands = assert_receive_frame_commands()
 
       # register_font (0x52) with the first allocated id (1), then the family
       # length and bytes. The window builder allocated the id during the content
@@ -285,10 +299,10 @@ defmodule MingaEditor.Frontend.EmitTest do
       frame = ComposedFrame.new([], Cursor.new(0, 0, :block))
 
       {_id, registry, true} = FontRegistry.get_or_register(FontRegistry.new(), "Fira Code")
-      ctx = %{Context.from_editor_state(base_state()) | font_registry: registry}
+      ctx = %{Context.from_editor_state(emit_state()) | font_registry: registry}
 
       {_caches, font_registry, _message_store} = Emit.emit(frame, ctx, nil, %Caches{})
-      assert_receive {:"$gen_cast", {:send_commands, commands}}
+      commands = assert_receive_frame_commands()
 
       assert FontRegistry.pending_registrations(font_registry) == []
 
@@ -301,13 +315,13 @@ defmodule MingaEditor.Frontend.EmitTest do
 
   describe "update_tracking (shared)" do
     test "writes viewport tracking state into returned caches" do
-      frame = build_frame_with_window(base_state(), viewport_top: 0)
-      state = base_state()
+      frame = build_frame_with_window(emit_state(), viewport_top: 0)
+      state = emit_state()
       _layout = Layout.put(state)
       ctx = Context.from_editor_state(state)
 
       {caches, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, %Caches{})
-      assert_receive {:"$gen_cast", {:send_commands, _}}
+      _ = assert_receive_frame_commands()
 
       assert is_map(caches.emit_prev_viewport_tops)
       assert is_map(caches.emit_prev_content_rects)
@@ -320,19 +334,19 @@ defmodule MingaEditor.Frontend.EmitTest do
     test "sends title command only when title changes" do
       frame = ComposedFrame.new([], Cursor.new(0, 0, :block))
 
-      state = base_state()
+      state = emit_state()
       ctx = Context.from_editor_state(state)
       caches0 = %Caches{}
 
       {caches1, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, caches0)
       # Flush first commands + title
-      assert_receive {:"$gen_cast", {:send_commands, _commands}}
+      _commands = assert_receive_frame_commands()
 
       assert is_binary(caches1.last_title)
 
       # Emit again with same ctx; title should not be re-sent (cache hit)
       {caches2, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, caches1)
-      assert_receive {:"$gen_cast", {:send_commands, _commands2}}
+      _commands2 = assert_receive_frame_commands()
 
       assert caches2.last_title == caches1.last_title
     end
@@ -342,18 +356,18 @@ defmodule MingaEditor.Frontend.EmitTest do
     test "sends background command only when theme changes" do
       frame = ComposedFrame.new([], Cursor.new(0, 0, :block))
 
-      state = base_state()
+      state = emit_state()
       ctx = Context.from_editor_state(state)
       caches0 = %Caches{}
 
       {caches1, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, caches0)
-      assert_receive {:"$gen_cast", {:send_commands, _}}
+      _ = assert_receive_frame_commands()
 
       assert caches1.last_window_bg == state.theme.editor.bg
 
       # Emit again, should not re-send
       {caches2, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, caches1)
-      assert_receive {:"$gen_cast", {:send_commands, _}}
+      _ = assert_receive_frame_commands()
       assert caches2.last_window_bg == caches1.last_window_bg
     end
   end
@@ -361,11 +375,11 @@ defmodule MingaEditor.Frontend.EmitTest do
   # ── Frame-transaction test helpers ───────────────────────────────────────
 
   defp semantic_state do
-    %{base_state() | capabilities: %Capabilities{frontend_type: :tui, semantic_ui: true}}
+    %{emit_state() | capabilities: %Capabilities{frontend_type: :tui, semantic_ui: true}}
   end
 
   defp window_frame_with_content do
-    frame = build_frame_with_window(base_state(), viewport_top: 0)
+    frame = build_frame_with_window(emit_state(), viewport_top: 0)
 
     row = %RenderRow{
       row_id: RenderRow.stable_id(:normal, 0),
@@ -403,7 +417,7 @@ defmodule MingaEditor.Frontend.EmitTest do
   end
 
   # Drives Emit.emit/4 with an explicit frame_seq and optional keyframe forcing,
-  # capturing the single send_commands cast (port_manager is self()).
+  # capturing the admitted frame batch from the recording frontend.
   defp acknowledge(caches, frame_seq) do
     Caches.acknowledge_frame(caches, frame_seq, caches.recovery_generation)
   end
@@ -417,7 +431,18 @@ defmodule MingaEditor.Frontend.EmitTest do
     }
 
     {new_caches, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, caches)
-    assert_receive {:"$gen_cast", {:send_commands, commands}}
+    commands = assert_receive_frame_commands()
     {commands, new_caches}
+  end
+
+  defp assert_receive_frame_commands do
+    assert_receive {:frontend_commands, _frontend,
+                    [<<@op_begin_frame, _::binary>> | _] = commands}
+
+    commands
+  end
+
+  defp emit_state(opts \\ []) do
+    base_state(Keyword.put(opts, :port_manager, Process.get(:emit_test_frontend)))
   end
 end

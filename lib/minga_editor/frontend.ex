@@ -29,7 +29,8 @@ defmodule MingaEditor.Frontend do
   # ── Manager operations ───────────────────────────────────────────────────
 
   @doc "Sends a list of pre-encoded commands to the frontend process."
-  @spec send_commands(GenServer.server(), [binary()]) :: :ok
+  @spec send_commands(GenServer.server() | nil, [binary()]) ::
+          MingaEditor.Frontend.Adapter.admission()
   def send_commands(server \\ MingaEditor.Frontend.Manager, commands),
     do: MingaEditor.Frontend.Manager.send_commands(server, commands)
 
@@ -38,7 +39,8 @@ defmodule MingaEditor.Frontend do
   frontend emits a `[:minga, :render, :hop_latency]` (`hop: :send_commands`)
   sample for the Renderer.Server → Port.Manager scheduling delay.
   """
-  @spec send_render_commands(GenServer.server(), [binary()]) :: :ok
+  @spec send_render_commands(GenServer.server() | nil, [binary()]) ::
+          MingaEditor.Frontend.Adapter.admission()
   def send_render_commands(server \\ MingaEditor.Frontend.Manager, commands),
     do: MingaEditor.Frontend.Manager.send_render_commands(server, commands)
 
@@ -90,7 +92,7 @@ defmodule MingaEditor.Frontend do
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer()
-        ) :: :ok
+        ) :: MingaEditor.Frontend.Adapter.admission()
   def send_frame_boundary(port, frame_seq, base_frame_seq, input_seq \\ 0) do
     send_commands(port, [
       Protocol.encode_begin_frame(frame_seq, base_frame_seq, 1),
@@ -101,13 +103,15 @@ defmodule MingaEditor.Frontend do
   # ── Configuration ────────────────────────────────────────────────────────
 
   @doc "Sets the window title."
-  @spec set_title(GenServer.server(), String.t()) :: :ok
+  @spec set_title(GenServer.server() | nil, String.t()) ::
+          MingaEditor.Frontend.Adapter.admission()
   def set_title(port \\ MingaEditor.Frontend.Manager, title) do
     send_commands(port, [Protocol.encode_set_title(title)])
   end
 
   @doc "Sets the window background color."
-  @spec set_window_bg(GenServer.server(), non_neg_integer()) :: :ok
+  @spec set_window_bg(GenServer.server() | nil, non_neg_integer()) ::
+          MingaEditor.Frontend.Adapter.admission()
   def set_window_bg(port \\ MingaEditor.Frontend.Manager, color) do
     send_commands(port, [Protocol.encode_set_window_bg(color)])
   end
@@ -118,7 +122,8 @@ defmodule MingaEditor.Frontend do
   Emitted out-of-band (post-commit) like `set_title`, so it joins the frontend
   out-of-band allowlist. The GUI shows `NSCursor.pointingHand` while `active`.
   """
-  @spec set_link_cursor(GenServer.server(), boolean()) :: :ok
+  @spec set_link_cursor(GenServer.server() | nil, boolean()) ::
+          MingaEditor.Frontend.Adapter.admission()
   def set_link_cursor(port \\ MingaEditor.Frontend.Manager, active) do
     send_commands(port, [Protocol.encode_set_link_cursor(active)])
   end
@@ -127,7 +132,7 @@ defmodule MingaEditor.Frontend do
   @spec configure_font(GenServer.server(), String.t(), pos_integer(), boolean(), atom(), [
           String.t()
         ]) ::
-          :ok
+          MingaEditor.Frontend.Adapter.admission()
   def configure_font(port, family, size, ligatures, weight, fallbacks \\ []) do
     cmds = [Protocol.encode_set_font(family, size, ligatures, weight)]
 
@@ -155,7 +160,8 @@ defmodule MingaEditor.Frontend do
   # ── GUI Chrome ───────────────────────────────────────────────────────────
 
   @doc "Sends a clipboard write command to the GUI frontend."
-  @spec clipboard_write(GenServer.server(), String.t(), atom()) :: :ok
+  @spec clipboard_write(GenServer.server(), String.t(), atom()) ::
+          MingaEditor.Frontend.Adapter.admission()
   def clipboard_write(port, text, pasteboard \\ :general) do
     send_commands(port, [ProtocolGUI.encode_clipboard_write(text, pasteboard)])
   end

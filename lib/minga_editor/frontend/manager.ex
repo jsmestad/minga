@@ -13,8 +13,9 @@ defmodule MingaEditor.Frontend.Manager do
     Port.Manager opens `{:fd, 0, 1}` as a Port instead of spawning a child.
     Used when launching from `Minga.app` (Finder, Spotlight, Dock).
 
-  Both modes use identical `{:packet, 4}` framing. The protocol layer
-  (event decoding, render commands, subscriber broadcasting) is the same.
+  Both modes use identical `{:packet, 4}` framing. The protocol layer (event decoding, render commands, subscriber broadcasting) is the same.
+
+  Output admission always uses `Port.command/3` with `:nosuspend`. If the transport is unwritable, the manager retains one current frame and one latest coalesced replacement, retries within a short budget, then requests correlated keyframe recovery. Synchronous admission calls keep frame binaries out of the manager mailbox while leaving the process free to receive frontend input between attempts.
 
   Subscribers register via `subscribe/1` and receive messages as:
 
@@ -29,11 +30,15 @@ defmodule MingaEditor.Frontend.Manager do
 
   alias Minga.Telemetry
   alias Minga.Telemetry.StartupTimer
-  alias MingaEditor.Frontend.FrameTransaction
+  alias MingaEditor.Frontend.Manager.OutputHandler
+  alias MingaEditor.Frontend.Manager.OutputPressure
   alias MingaEditor.Frontend.Protocol
 
   @typedoc "Renderer backend."
   @type backend :: :tui | :gui
+
+  @typedoc "Non-suspending frontend transport admission result."
+  @type admission :: :accepted | :unwritable
 
   @typedoc "Options for starting the port manager."
   @type start_opt ::
@@ -42,6 +47,9 @@ defmodule MingaEditor.Frontend.Manager do
           | {:backend, backend()}
           | {:port_mode, MingaEditor.Frontend.Manager.State.port_mode()}
           | {:port_opener, (term(), [term()] -> port())}
+          | {:port_commander, MingaEditor.Frontend.Manager.State.port_commander()}
+          | {:output_retry_ms, pos_integer()}
+          | {:output_failure_ms, non_neg_integer()}
           | {:tty_path, String.t() | nil}
 
   alias MingaEditor.Frontend.Manager.State, as: PortState
@@ -59,27 +67,31 @@ defmodule MingaEditor.Frontend.Manager do
     GenServer.start_link(__MODULE__, opts, name: name)
   end
 
-  @doc "Sends a list of encoded render command binaries to the renderer."
+  @doc "Attempts non-suspending admission of encoded commands to the renderer."
   @impl MingaEditor.Frontend.Adapter
-  @spec send_commands(GenServer.server(), [binary()]) :: :ok
-  def send_commands(server \\ __MODULE__, commands) when is_list(commands) do
-    GenServer.cast(server, {:send_commands, commands})
+  @spec send_commands(GenServer.server() | nil, [binary()]) :: admission()
+  def send_commands(server \\ __MODULE__, commands)
+  def send_commands(nil, commands) when is_list(commands), do: :unwritable
+
+  def send_commands(server, commands) when is_list(commands) do
+    GenServer.call(server, {:send_commands, commands}, :infinity)
   end
 
   @doc """
-  Like `send_commands/2` but precedes the frame batch with a `{:hop_mark, ...}`
-  probe cast stamped with a monotonic send time. The receiver emits a
-  `[:minga, :render, :hop_latency]` (`hop: :send_commands`) sample measuring
-  the Renderer.Server → Port.Manager scheduling delay. The probe is enqueued
-  immediately before the frame so its delay tracks the frame's delay, without
-  altering the `{:send_commands, commands}` message contract. Used only for the
-  per-frame render batch on the keystroke path.
+  Like `send_commands/2` but stamps the synchronous admission request with a monotonic send time. The receiver emits a `[:minga, :render, :hop_latency]` (`hop: :send_commands`) sample measuring the Renderer.Server to Port.Manager scheduling delay. Used only for the per-frame render batch on the keystroke path.
   """
-  @spec send_render_commands(GenServer.server(), [binary()]) :: :ok
-  def send_render_commands(server \\ __MODULE__, commands) when is_list(commands) do
-    GenServer.cast(server, {:hop_mark, :send_commands, System.monotonic_time(:microsecond)})
-    GenServer.cast(server, {:send_commands, commands})
+  @spec send_render_commands(GenServer.server() | nil, [binary()]) :: admission()
+  def send_render_commands(server \\ __MODULE__, commands)
+  def send_render_commands(nil, commands) when is_list(commands), do: :unwritable
+
+  def send_render_commands(server, commands) when is_list(commands) do
+    sent_at = System.monotonic_time(:microsecond)
+    GenServer.call(server, {:send_render_commands, commands, sent_at}, :infinity)
   end
+
+  @doc "Returns bounded output-pressure diagnostics."
+  @spec output_pressure(GenServer.server()) :: OutputPressure.stats()
+  def output_pressure(server \\ __MODULE__), do: GenServer.call(server, :output_pressure)
 
   @doc "Subscribes the calling process to receive input events."
   @impl MingaEditor.Frontend.Adapter
@@ -124,7 +136,17 @@ defmodule MingaEditor.Frontend.Manager do
     renderer_path = Keyword.fetch!(opts, :renderer_path)
     port_opener = Keyword.get(opts, :port_opener, &Port.open/2)
     tty_path = Keyword.get(opts, :tty_path)
-    state = %PortState{renderer_path: renderer_path, port_mode: port_mode, tty_path: tty_path}
+
+    state = %PortState{
+      renderer_path: renderer_path,
+      port_mode: port_mode,
+      tty_path: tty_path,
+      output_pressure: OutputPressure.new(),
+      port_commander: Keyword.get(opts, :port_commander, &Port.command/3),
+      output_retry_ms: Keyword.get(opts, :output_retry_ms, 2),
+      output_failure_ms: Keyword.get(opts, :output_failure_ms, 50)
+    }
+
     result = {:ok, start_port(state, port_opener)}
     StartupTimer.mark(:frontend_port_ready)
     result
@@ -166,27 +188,19 @@ defmodule MingaEditor.Frontend.Manager do
     {:reply, state.capabilities, state}
   end
 
-  @impl true
-  @spec handle_cast(term(), state()) :: {:noreply, state()}
-  def handle_cast({:send_commands, _commands}, %{port: nil} = state) do
-    {:noreply, state}
+  def handle_call(:output_pressure, _from, state) do
+    {:reply, OutputPressure.stats(state.output_pressure), state}
   end
 
-  def handle_cast({:hop_mark, hop, sent_at}, state) do
-    Telemetry.hop_latency(hop, sent_at)
-    {:noreply, state}
+  def handle_call({:send_commands, commands}, _from, state) do
+    {admission, state} = OutputHandler.admit_commands(state, commands)
+    {:reply, admission, state}
   end
 
-  def handle_cast({:send_commands, commands}, state) do
-    log_frame_transaction_violation(commands)
-
-    Telemetry.span_with_stop_metadata([:minga, :port, :write], %{}, fn ->
-      batch = IO.iodata_to_binary(commands)
-      Port.command(state.port, batch)
-      {:ok, %{byte_count: byte_size(batch)}}
-    end)
-
-    {:noreply, state}
+  def handle_call({:send_render_commands, commands, sent_at}, _from, state) do
+    Telemetry.hop_latency(:send_commands, sent_at)
+    {admission, state} = OutputHandler.admit_commands(state, commands)
+    {:reply, admission, state}
   end
 
   @impl true
@@ -211,6 +225,9 @@ defmodule MingaEditor.Frontend.Manager do
         broadcast(new_state.subscribers, {:minga_input, {:resize, width, height}})
         {:noreply, new_state}
 
+      {:ok, {:frame_applied, generation, frame_seq} = event} ->
+        {:noreply, OutputHandler.frame_applied(state, event, generation, frame_seq)}
+
       {:ok, {:log_message, level, text}} ->
         log_renderer_message(level, text)
         {:noreply, state}
@@ -229,16 +246,19 @@ defmodule MingaEditor.Frontend.Manager do
     end
   end
 
+  def handle_info({:retry_frontend_output, token}, state),
+    do: {:noreply, OutputHandler.retry(state, token)}
+
   def handle_info({port, {:exit_status, 0}}, %{port: port} = state) do
     Minga.Log.info(:port, "Renderer: exited normally")
     maybe_stop_system(0)
-    {:noreply, %{state | port: nil, ready: false}}
+    {:noreply, OutputHandler.disconnect(state)}
   end
 
   def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
     Minga.Log.error(:port, "Renderer: crashed (exit #{status})")
     maybe_stop_system(1)
-    {:noreply, %{state | port: nil, ready: false}}
+    {:noreply, OutputHandler.disconnect(state)}
   end
 
   # In connected mode ({:fd, 0, 1}), stdin EOF means the GUI parent exited.
@@ -246,7 +266,7 @@ defmodule MingaEditor.Frontend.Manager do
   def handle_info({port, :eof}, %{port: port} = state) do
     Minga.Log.info(:port, "GUI parent disconnected (stdin EOF)")
     maybe_stop_system(0)
-    {:noreply, %{state | port: nil, ready: false}}
+    {:noreply, OutputHandler.disconnect(state)}
   end
 
   def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
@@ -259,20 +279,6 @@ defmodule MingaEditor.Frontend.Manager do
   end
 
   # ── Private ──
-
-  @spec log_frame_transaction_violation([binary()]) :: :ok
-  defp log_frame_transaction_violation(commands) do
-    case FrameTransaction.validate(commands) do
-      :ok ->
-        :ok
-
-      {:error, reason} ->
-        Minga.Log.warning(
-          :port,
-          "Frontend command batch violates frame transaction: #{FrameTransaction.format_error(reason)}"
-        )
-    end
-  end
 
   @spec start_port(state(), fun()) :: state()
   defp start_port(%{port_mode: :connected} = state, port_opener) do
@@ -386,9 +392,15 @@ defmodule MingaEditor.Frontend.Manager do
 
     Minga.Log.error(:port, message)
 
-    if state.port do
-      Port.command(state.port, Protocol.encode_protocol_error(message))
-    end
+    state =
+      if state.port do
+        {_admission, state} =
+          OutputHandler.write_control(state, Protocol.encode_protocol_error(message))
+
+        state
+      else
+        state
+      end
 
     {:noreply, %{state | ready: false}}
   end

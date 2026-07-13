@@ -7,15 +7,13 @@ defmodule MingaEditor.Frontend.Emit.KeyframeSideChannelTest do
   channels (`last_title` / `last_window_bg`), so a frontend that lost its title or
   background mid-session gets them back on the keyframe.
 
-  `Frontend.set_title/2` and `set_window_bg/2` route to the named
-  `MingaEditor.Frontend.Manager` rather than the frame's `port_manager`, so this
-  test registers `self()` under that name to observe the side-channel sends. That
-  global registration is why this lives in its own `async: false` module.
+  Frame and side-channel writes share the frame context's frontend, so this test observes both through one recording adapter.
   """
 
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Minga.Protocol.Opcodes
+  alias Minga.Test.RecordingFrontend
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Frontend.Emit
   alias MingaEditor.Frontend.Emit.Context
@@ -26,10 +24,16 @@ defmodule MingaEditor.Frontend.Emit.KeyframeSideChannelTest do
 
   import MingaEditor.RenderPipeline.TestHelpers
 
+  @op_begin_frame Opcodes.begin_frame()
+
   setup do
-    # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
-    Process.register(self(), MingaEditor.Frontend.Manager)
-    on_exit(fn -> safe_unregister(MingaEditor.Frontend.Manager) end)
+    frontend =
+      start_supervised!(
+        {RecordingFrontend, owner: self()},
+        id: {:keyframe_side_channel_frontend, System.unique_integer([:positive])}
+      )
+
+    Process.put(:keyframe_side_channel_frontend, frontend)
     :ok
   end
 
@@ -52,8 +56,8 @@ defmodule MingaEditor.Frontend.Emit.KeyframeSideChannelTest do
 
     # A delta frame with the same title/bg sends neither side channel (cache hit).
     {_c3, caches} = emit_and_capture(frame, state, caches, frame_seq: 24)
-    refute_received {:"$gen_cast", {:send_commands, [<<^title_op, _::binary>>]}}
-    refute_received {:"$gen_cast", {:send_commands, [<<^bg_op, _::binary>>]}}
+    refute_received {:frontend_commands, _frontend, [<<^title_op, _::binary>>]}
+    refute_received {:frontend_commands, _frontend, [<<^bg_op, _::binary>>]}
 
     # The forced keyframe drops last_title/last_window_bg, so both re-send even though
     # the values are unchanged from the prior frame (mirrors reset_frontend_state/1).
@@ -61,18 +65,18 @@ defmodule MingaEditor.Frontend.Emit.KeyframeSideChannelTest do
       emit_and_capture(frame, state, caches, frame_seq: 33, force_keyframe?: true)
 
     assert key_caches.last_frame_keyframe?
-    assert_received {:"$gen_cast", {:send_commands, [<<^title_op, _::binary>>]}}
-    assert_received {:"$gen_cast", {:send_commands, [<<^bg_op, _::binary>>]}}
+    assert_received {:frontend_commands, _frontend, [<<^title_op, _::binary>>]}
+    assert_received {:frontend_commands, _frontend, [<<^bg_op, _::binary>>]}
   end
 
   # ── Helpers ──────────────────────────────────────────────────────────────────
 
   defp semantic_state do
-    %{base_state() | capabilities: %Capabilities{frontend_type: :tui, semantic_ui: true}}
+    %{emit_state() | capabilities: %Capabilities{frontend_type: :tui, semantic_ui: true}}
   end
 
   defp window_frame_with_content do
-    frame = build_frame_with_window(base_state(), viewport_top: 0)
+    frame = build_frame_with_window(emit_state(), viewport_top: 0)
 
     row = %RenderRow{
       row_id: RenderRow.stable_id(:normal, 0),
@@ -103,27 +107,26 @@ defmodule MingaEditor.Frontend.Emit.KeyframeSideChannelTest do
     }
 
     {new_caches, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, caches)
-    # The frame's render commands go to port_manager (self()); drain that cast so the
-    # side-channel assertions only see set_title/set_window_bg.
-    assert_receive {:"$gen_cast", {:send_commands, _commands}}
+
+    assert_receive {:frontend_commands, _frontend, [<<@op_begin_frame, _::binary>> | _]}
+
     {nil, new_caches}
   end
 
   defp flush_side_channels(title_op, bg_op) do
     receive do
-      {:"$gen_cast", {:send_commands, [<<^title_op, _::binary>>]}} ->
+      {:frontend_commands, _frontend, [<<^title_op, _::binary>>]} ->
         flush_side_channels(title_op, bg_op)
 
-      {:"$gen_cast", {:send_commands, [<<^bg_op, _::binary>>]}} ->
+      {:frontend_commands, _frontend, [<<^bg_op, _::binary>>]} ->
         flush_side_channels(title_op, bg_op)
     after
       0 -> :ok
     end
   end
 
-  defp safe_unregister(name) do
-    Process.unregister(name)
-  rescue
-    ArgumentError -> :ok
+  defp emit_state(opts \\ []) do
+    frontend = Process.get(:keyframe_side_channel_frontend)
+    base_state(Keyword.put(opts, :port_manager, frontend))
   end
 end
