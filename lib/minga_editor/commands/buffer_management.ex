@@ -28,7 +28,6 @@ defmodule MingaEditor.Commands.BufferManagement do
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
-  alias MingaEditor.State.Windows
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
@@ -774,13 +773,13 @@ defmodule MingaEditor.Commands.BufferManagement do
     target_buf = Enum.at(buffers, idx)
 
     case find_tab_for_buffer(tb, target_buf) do
-      nil -> EditorState.switch_buffer(state, idx)
-      tab_id when tab_id == tb.active_id -> EditorState.switch_buffer(state, idx)
+      nil -> MingaEditor.BufferActivation.activate(state, idx)
+      tab_id when tab_id == tb.active_id -> MingaEditor.BufferActivation.activate(state, idx)
       tab_id -> EditorState.switch_tab(state, tab_id)
     end
   end
 
-  defp switch_to_buffer(state, idx), do: EditorState.switch_buffer(state, idx)
+  defp switch_to_buffer(state, idx), do: MingaEditor.BufferActivation.activate(state, idx)
 
   @spec next_buffer(state()) :: state()
   defp next_buffer(%{workspace: %{buffers: %{active: active, list: buffers}}} = state) do
@@ -849,7 +848,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp switch_to_buffer_pid(%{workspace: %{buffers: %{list: buffers}}} = state, target_buf) do
     case Enum.find_index(buffers, &(&1 == target_buf)) do
       nil -> state
-      idx -> EditorState.switch_buffer(state, idx)
+      idx -> MingaEditor.BufferActivation.activate(state, idx)
     end
   end
 
@@ -1025,9 +1024,7 @@ defmodule MingaEditor.Commands.BufferManagement do
           new_idx = min(idx, Enum.count(new_buffers) - 1)
           new_bs = Buffers.replace_list(bs, new_buffers, new_idx)
 
-          state
-          |> EditorState.set_buffers(new_bs)
-          |> EditorState.sync_active_window_buffer()
+          MingaEditor.BufferActivation.activate(state, new_bs, notify_shell?: false)
       end
     end
   end
@@ -1973,7 +1970,7 @@ defmodule MingaEditor.Commands.BufferManagement do
     state = restore_active_tab_context(state)
 
     if state.workspace.buffers.active do
-      EditorState.sync_active_window_buffer(state)
+      MingaEditor.BufferActivation.activate(state, state.workspace.buffers, notify_shell?: false)
     else
       EditorState.enter_empty_state(state)
     end
@@ -2118,7 +2115,7 @@ defmodule MingaEditor.Commands.BufferManagement do
     case Buffer.save_as(buf, target) do
       :ok ->
         state
-        |> EditorState.refresh_active_buffer_presentation()
+        |> MingaEditor.BufferActivation.refresh_presentation()
         |> setup_highlight_or_defer()
         |> EditorState.set_status("Wrote #{Path.basename(target)}")
 
@@ -2404,7 +2401,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp focus_popup_window(state, buffer_pid) do
     case find_popup_for_buffer(state, buffer_pid) do
       {:ok, popup_window_id} ->
-        EditorState.update_windows(state, &Windows.set_active(&1, popup_window_id))
+        MingaEditor.WindowFocus.focus(state, popup_window_id)
 
       :none ->
         state

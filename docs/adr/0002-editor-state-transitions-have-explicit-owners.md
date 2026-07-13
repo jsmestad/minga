@@ -35,6 +35,8 @@ File-tree refresh is the first application of this rule. `MingaEditor.State.File
 
 Render correlation follows the same boundary. `MingaEditor.State.RenderCorrelation` owns the render timer token, semantic intent revisions, receipt ordering, and pending keyframe request. `MingaEditor.State` retains one atomic receipt integration transition because shell identity, workspace observations, layout, focus, and click regions must agree. Timer creation, renderer submission, frontend communication, and stale-receipt logging stay in Editor workflows. `MingaEditor.Renderer.Server` remains authoritative for resident rows, render caches, acknowledgement credit, and renderer-private state.
 
+Buffer activation and window focus use a session aggregate plus focused workflows. `MingaEditor.Session.State.activate_buffer/3` coordinates the leaf-owned buffer selection with the active window, keymap scope, launchpad, and hover observations. `MingaEditor.Session.State.focus_window/3` commits focus only after `MingaEditor.WindowFocus` successfully saves and restores process-owned cursors; the workflow then composes Traditional bottom-panel presentation through its shell owners. `MingaEditor.BufferActivation` coordinates shell callbacks and their external effects. No buffer call, monitor, log, render request, or shell presentation effect runs inside the pure session transitions.
+
 ## Migration ledger
 
 The epic assigns every broad ownership area to a committed convergence slice:

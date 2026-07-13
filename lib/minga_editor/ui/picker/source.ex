@@ -39,7 +39,6 @@ defmodule MingaEditor.UI.Picker.Source do
   """
 
   alias MingaEditor.Frontend.Emit.Context, as: EmitContext
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.UI.Picker
   alias MingaEditor.UI.Picker.Context
 
@@ -198,7 +197,7 @@ defmodule MingaEditor.UI.Picker.Source do
   def restore_or_keep(state) do
     case state.shell_runtime.state.modal do
       {:picker, %{picker_ui: %{restore: idx}}} when is_integer(idx) ->
-        EditorState.switch_buffer(state, idx)
+        MingaEditor.BufferActivation.activate(state, idx)
 
       _ ->
         state

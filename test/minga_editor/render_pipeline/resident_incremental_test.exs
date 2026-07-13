@@ -29,7 +29,7 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
   end
 
   defp build_frame(%{editor: editor, renderer: renderer}) do
-    editor = EditorState.sync_active_window_cursor(editor)
+    editor = MingaEditor.WindowFocus.remember_active_cursor(editor)
     intent = Intent.from_editor_state(editor)
     {renderer, input} = BufferChanges.prepare(renderer, intent)
     input = Content.reset_rows_rasterized(input)
@@ -150,7 +150,7 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
       BufferProcess.move_to(buffer, {32, 0})
       BufferProcess.insert_text(buffer, "A")
 
-      editor = EditorState.sync_active_window_cursor(state.editor)
+      editor = MingaEditor.WindowFocus.remember_active_cursor(state.editor)
       intent = Intent.from_editor_state(editor)
       {renderer, stale_input} = BufferChanges.prepare(state.renderer, intent)
 

@@ -68,7 +68,7 @@ defmodule MingaGitPorcelain.UI.Picker.GitChangedSource do
         if tab do
           EditorState.switch_tab(state, tab.id)
         else
-          EditorState.switch_buffer(state, idx)
+          MingaEditor.BufferActivation.activate(state, idx)
         end
     end
   end

@@ -48,7 +48,7 @@ defmodule MingaEditor.Extension.EditorAPI do
   @spec focus_buffer(state(), pid()) :: state()
   def focus_buffer(state, buffer_pid) when is_pid(buffer_pid) do
     case Windows.find_by_content(state.workspace.windows, &(&1.buffer == buffer_pid)) do
-      {window_id, _window} -> EditorState.focus_window(state, window_id)
+      {window_id, _window} -> MingaEditor.WindowFocus.focus(state, window_id)
       nil -> state
     end
   end

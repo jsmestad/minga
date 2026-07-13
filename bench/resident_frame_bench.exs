@@ -74,7 +74,7 @@ defmodule Minga.Bench.ResidentFrame do
 
   defp timed_frame(state) do
     state = Content.reset_rows_rasterized(state)
-    state = EditorState.sync_active_window_cursor(state)
+    state = MingaEditor.WindowFocus.remember_active_cursor(state)
     state = RenderPipeline.compute_layout(state)
     layout = Layout.get(state)
     {scrolls, state} = Scroll.scroll_windows(state, layout)

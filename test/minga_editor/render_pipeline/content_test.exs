@@ -23,13 +23,12 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
   alias MingaEditor.Renderer.State, as: RendererState
   alias MingaEditor.Viewport
   alias MingaEditor.Window
-  alias MingaEditor.State, as: EditorState
 
   import MingaEditor.RenderPipeline.TestHelpers
 
   # Helper to run through scroll and get {scrolls, state}
   defp run_through_scroll(state) do
-    state = EditorState.sync_active_window_cursor(state)
+    state = MingaEditor.WindowFocus.remember_active_cursor(state)
     state = RenderPipeline.compute_layout(state)
     layout = Layout.get(state)
     {scrolls, state} = Scroll.scroll_windows(state, layout)

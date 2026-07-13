@@ -91,7 +91,7 @@ defmodule MingaEditor.UI.Picker.BufferSource do
   end
 
   def on_select(%Item{id: idx}, state) when is_integer(idx) do
-    EditorState.switch_buffer(state, idx)
+    MingaEditor.BufferActivation.activate(state, idx)
   end
 
   @impl true
@@ -181,9 +181,7 @@ defmodule MingaEditor.UI.Picker.BufferSource do
   defp apply_kill_result(%Buffers{} = new_bs, pids, _bs, state) do
     Enum.each(pids, &stop_buffer/1)
 
-    state
-    |> EditorState.set_buffers(new_bs)
-    |> EditorState.sync_active_window_buffer()
+    MingaEditor.BufferActivation.activate(state, new_bs, notify_shell?: false)
   end
 
   @spec item_pid(Item.t(), [pid()]) :: pid() | nil

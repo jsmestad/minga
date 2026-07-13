@@ -10,13 +10,12 @@ defmodule MingaEditor.RenderPipeline.ChromeTest do
   alias MingaEditor.RenderPipeline.Chrome
   alias MingaEditor.RenderPipeline.Content
   alias MingaEditor.RenderPipeline.Scroll
-  alias MingaEditor.State, as: EditorState
 
   import MingaEditor.RenderPipeline.TestHelpers
 
   # Helper to run through scroll and content
   defp run_through_content(state) do
-    state = EditorState.sync_active_window_cursor(state)
+    state = MingaEditor.WindowFocus.remember_active_cursor(state)
     state = RenderPipeline.compute_layout(state)
     layout = Layout.get(state)
     {scrolls, state} = Scroll.scroll_windows(state, layout)

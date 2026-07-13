@@ -63,7 +63,7 @@ defmodule MingaEditor.Input.PopupTest do
     }
 
     if focus_popup do
-      EditorState.focus_window(state, 2)
+      MingaEditor.WindowFocus.focus(state, 2)
     else
       state
     end

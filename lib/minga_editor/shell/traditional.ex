@@ -40,7 +40,6 @@ defmodule MingaEditor.Shell.Traditional do
   alias MingaEditor.State.Windows
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
-  alias MingaEditor.Window.Content
   alias Minga.Log
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.Session.State, as: SessionState
@@ -258,7 +257,7 @@ defmodule MingaEditor.Shell.Traditional do
          _buffer_pid,
          _context
        ) do
-    workspace = SessionState.sync_active_window_buffer(workspace)
+    workspace = SessionState.activate_buffer(workspace, workspace.buffers)
     {shell_state, workspace, []}
   end
 
@@ -285,7 +284,7 @@ defmodule MingaEditor.Shell.Traditional do
             # Preview: sync window content only, leave tab bar unchanged.
             # The tab label stays as-is so confirm can detect "no tab for
             # this buffer" and create a new one.
-            workspace = SessionState.sync_active_window_buffer(workspace)
+            workspace = SessionState.activate_buffer(workspace, workspace.buffers)
             {shell_state, workspace, []}
 
           {_, :agent} ->
@@ -319,7 +318,7 @@ defmodule MingaEditor.Shell.Traditional do
        ) do
     {tb, tab} = TabBar.add(tb, :file, label)
     tb = TabBar.switch_to(tb, tab.id)
-    workspace = SessionState.sync_active_window_buffer(workspace)
+    workspace = SessionState.activate_buffer(workspace, workspace.buffers)
     {%{shell_state | tab_bar: tb}, workspace, []}
   end
 
@@ -356,7 +355,7 @@ defmodule MingaEditor.Shell.Traditional do
   @spec on_buffer_died(ShellState.t(), SessionState.t(), pid()) ::
           {ShellState.t(), SessionState.t(), [MingaEditor.effect()]}
   def on_buffer_died(shell_state, workspace, _dead_pid) do
-    workspace = SessionState.sync_active_window_buffer(workspace)
+    workspace = SessionState.activate_buffer(workspace, workspace.buffers)
     {shell_state, workspace, []}
   end
 
@@ -721,8 +720,8 @@ defmodule MingaEditor.Shell.Traditional do
       |> SessionState.set_agent_ui(UIState.new())
       |> SessionState.set_keymap_scope(:editor)
 
-    workspace = reset_active_window_to_buffer(workspace)
-    workspace = SessionState.sync_active_window_buffer(workspace)
+    workspace =
+      SessionState.activate_buffer(workspace, workspace.buffers, replace_window_content?: true)
 
     # Snapshot the new tab's context
     new_context = SessionState.to_tab_context(workspace)
@@ -761,7 +760,7 @@ defmodule MingaEditor.Shell.Traditional do
     # Create file tab (TabBar.add auto-activates it)
     {tb, new_tab} = TabBar.add(tb, :file, label)
     tb = TabBar.move_tab_to_workspace(tb, new_tab.id, workspace_id)
-    workspace = SessionState.sync_active_window_buffer(workspace)
+    workspace = SessionState.activate_buffer(workspace, workspace.buffers)
 
     # Snapshot the new tab's context
     new_context = SessionState.to_tab_context(workspace)
@@ -772,29 +771,6 @@ defmodule MingaEditor.Shell.Traditional do
       |> TabBar.update_context(new_tab.id, new_context)
 
     {%{shell_state | tab_bar: tb}, workspace, []}
-  end
-
-  # Resets the active window's content type from agent_chat back to buffer.
-  @spec reset_active_window_to_buffer(SessionState.t()) :: SessionState.t()
-  defp reset_active_window_to_buffer(workspace) do
-    %{windows: windows, buffers: buffers} = workspace
-    id = windows.active
-
-    case Windows.fetch(windows, id) do
-      {:ok, %Window{content: {:buffer, _}}} ->
-        workspace
-
-      {:ok, %Window{}} ->
-        windows =
-          Windows.update(windows, id, fn window ->
-            %{window | buffer: buffers.active, content: Content.buffer(buffers.active)}
-          end)
-
-        SessionState.set_windows(workspace, windows)
-
-      :error ->
-        workspace
-    end
   end
 
   @spec sync_file_tab_ref(TabBar.t(), Tab.id(), pid() | nil, SessionState.t()) :: TabBar.t()

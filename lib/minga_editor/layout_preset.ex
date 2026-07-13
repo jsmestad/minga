@@ -64,8 +64,20 @@ defmodule MingaEditor.LayoutPreset do
 
   @spec remove_agent_window(EditorState.t(), Window.id()) :: EditorState.t()
   defp remove_agent_window(state, agent_win_id) do
-    state = maybe_switch_focus_away(state, agent_win_id)
+    state
+    |> maybe_switch_focus_away(agent_win_id)
+    |> remove_inactive_agent_window(agent_win_id)
+  end
 
+  @spec remove_inactive_agent_window(EditorState.t(), Window.id()) :: EditorState.t()
+  defp remove_inactive_agent_window(
+         %{workspace: %{windows: %{active: active}}} = state,
+         agent_win_id
+       )
+       when active == agent_win_id,
+       do: state
+
+  defp remove_inactive_agent_window(state, agent_win_id) do
     case Windows.remove_window(state.workspace.windows, agent_win_id) do
       {:ok, windows} ->
         state = EditorState.set_windows(state, windows)
@@ -91,7 +103,7 @@ defmodule MingaEditor.LayoutPreset do
   defp maybe_switch_focus_away(state, _closing_id) do
     case find_non_agent_window(state) do
       {buf_win_id, _window} ->
-        EditorState.focus_window(state, buf_win_id)
+        MingaEditor.WindowFocus.focus(state, buf_win_id)
 
       nil ->
         state

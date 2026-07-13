@@ -104,15 +104,15 @@ defmodule MingaEditor.State.ShellCallbacksTest do
     state
   end
 
-  # ── on_buffer_switched via switch_buffer/2 ───────────────────────────────────
+  # ── on_buffer_switched via BufferActivation ─────────────────────────────────
 
-  describe "switch_buffer/2 dispatches on_buffer_switched" do
+  describe "BufferActivation.activate/2 dispatches on_buffer_switched" do
     test "Traditional: tab context.buffers.active tracks workspace after switch" do
       state = state_with_file_tab()
       buf2 = start_buffer("second.ex")
       state = EditorState.add_buffer(state, buf2)
 
-      new_state = EditorState.switch_buffer(state, 1)
+      new_state = MingaEditor.BufferActivation.activate(state, 1)
 
       assert new_state.workspace.buffers.active == buf2
 
@@ -133,7 +133,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
           %{buffers | active: buf1, list: [buf1, buf2], active_index: 0}
         end)
 
-      new_state = EditorState.switch_buffer(state, 1)
+      new_state = MingaEditor.BufferActivation.activate(state, 1)
 
       assert new_state.workspace.buffers.active == buf2
 
@@ -148,7 +148,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       buf2 = start_buffer("second.ex")
       state = EditorState.add_buffer(state, buf2)
 
-      new_state = EditorState.switch_buffer(state, 1)
+      new_state = MingaEditor.BufferActivation.activate(state, 1)
 
       tab = EditorState.find_tab_by_buffer(new_state, buf2)
       assert %Tab{kind: :file} = tab
@@ -165,7 +165,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       assert BufferProcess.dirty?(buf1)
       refute BufferProcess.dirty?(buf2)
 
-      new_state = EditorState.switch_buffer(state, 1)
+      new_state = MingaEditor.BufferActivation.activate(state, 1)
 
       active_tab = TabBar.active(EditorState.tab_bar(new_state))
       tab_buf = active_tab.context.buffers.active
@@ -180,13 +180,13 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       state = EditorState.add_buffer(state, buf2)
       state = EditorState.add_buffer(state, buf3)
 
-      state = EditorState.switch_buffer(state, 1)
+      state = MingaEditor.BufferActivation.activate(state, 1)
       assert TabBar.active(EditorState.tab_bar(state)).context.buffers.active == buf2
 
-      state = EditorState.switch_buffer(state, 2)
+      state = MingaEditor.BufferActivation.activate(state, 2)
       assert TabBar.active(EditorState.tab_bar(state)).context.buffers.active == buf3
 
-      state = EditorState.switch_buffer(state, 0)
+      state = MingaEditor.BufferActivation.activate(state, 0)
       buf1 = state.workspace.buffers.active
       assert TabBar.active(EditorState.tab_bar(state)).context.buffers.active == buf1
 
@@ -199,7 +199,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       state = EditorState.add_buffer(state, buf2)
 
       # Switch back to first buffer
-      new_state = EditorState.switch_buffer(state, 0)
+      new_state = MingaEditor.BufferActivation.activate(state, 0)
 
       # The active buffer changed without error
       refute new_state.workspace.buffers.active == buf2
@@ -218,7 +218,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       assert Content.agent_chat?(window.content)
 
       # Switch to the only file buffer. The agent window content stays semantic.
-      new_state = EditorState.switch_buffer(state, 0)
+      new_state = MingaEditor.BufferActivation.activate(state, 0)
       assert new_state.workspace.buffers.active == file_buf
 
       # Window content should still be agent_chat

@@ -21,7 +21,6 @@ defmodule MingaEditor.Commands.Movement do
   alias MingaEditor.FoldMap
   alias MingaEditor.Layout
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
@@ -596,7 +595,9 @@ defmodule MingaEditor.Commands.Movement do
 
       state
       |> EditorState.set_bottom_panel(panel)
-      |> EditorState.set_keymap_scope(EditorState.scope_for_active_window(state))
+      |> EditorState.set_keymap_scope(
+        MingaEditor.Session.State.scope_for_active_window(state.workspace)
+      )
     else
       navigate_window_to_neighbor(state, :up)
     end
@@ -607,7 +608,7 @@ defmodule MingaEditor.Commands.Movement do
   defp navigate_window(state, :right) do
     if EditorState.file_tree_state(state).focused do
       state = update_file_tree(state, &FileTreeState.unfocus/1)
-      scope = EditorState.scope_for_active_window(state)
+      scope = MingaEditor.Session.State.scope_for_active_window(state.workspace)
       EditorState.set_keymap_scope(state, scope)
     else
       navigate_window_to_neighbor(state, :right)
@@ -629,7 +630,7 @@ defmodule MingaEditor.Commands.Movement do
            screen
          ) do
       {:ok, neighbor_id} ->
-        EditorState.focus_window(state, neighbor_id)
+        MingaEditor.WindowFocus.focus(state, neighbor_id)
 
       :error ->
         # No neighbor in that direction; check if an edge panel is there.
@@ -645,7 +646,9 @@ defmodule MingaEditor.Commands.Movement do
       state
       |> EditorState.set_bottom_panel(BottomPanel.focus(panel))
       |> update_file_tree(&FileTreeState.unfocus/1)
-      |> EditorState.set_keymap_scope(EditorState.scope_for_active_window(state))
+      |> EditorState.set_keymap_scope(
+        MingaEditor.Session.State.scope_for_active_window(state.workspace)
+      )
     else
       state
     end
@@ -682,29 +685,8 @@ defmodule MingaEditor.Commands.Movement do
 
   @spec focus_remaining_window(state(), Windows.t()) :: state()
   defp focus_remaining_window(state, removed_windows) do
-    remaining = WindowTree.leaves(removed_windows.tree)
-    new_active = hd(remaining)
-
-    case Windows.fetch(removed_windows, new_active) do
-      {:ok, new_active_window} ->
-        apply_remaining_window_focus(state, removed_windows, new_active, new_active_window)
-
-      :error ->
-        state
-    end
-  end
-
-  @spec apply_remaining_window_focus(state(), Windows.t(), Window.id(), Window.t()) :: state()
-  defp apply_remaining_window_focus(state, removed_windows, new_active, new_active_window) do
-    # Restore the surviving window's cursor into the buffer
-    Buffer.move_to(new_active_window.buffer, new_active_window.cursor)
-
-    new_windows = Windows.set_active(removed_windows, new_active)
-    new_buffers = Buffers.set_active_override(state.workspace.buffers, new_active_window.buffer)
-
-    state
-    |> EditorState.set_windows(new_windows)
-    |> EditorState.set_buffers(new_buffers)
+    new_active = removed_windows.tree |> WindowTree.leaves() |> hd()
+    MingaEditor.WindowFocus.focus_surviving_window(state, removed_windows, new_active)
   end
 
   # ── Private helpers ──────────────────────────────────────────────────────

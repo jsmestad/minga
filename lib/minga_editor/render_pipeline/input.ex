@@ -360,7 +360,7 @@ defmodule MingaEditor.RenderPipeline.Input do
   @doc """
   Syncs the active window's cursor from the buffer process.
 
-  Equivalent to `EditorState.sync_active_window_cursor/1` but operates
+  Equivalent to `MingaEditor.WindowFocus.remember_active_cursor/1` but operates
   on the Input's workspace map.
   """
   @spec sync_active_window_cursor(t()) :: t()

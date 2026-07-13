@@ -772,7 +772,7 @@ defmodule MingaEditor.PickerUI do
          %{shell_runtime: %{state: %{modal: {:picker, %{picker_ui: %{restore: idx}}}}}} = state
        )
        when is_integer(idx) do
-    EditorState.switch_buffer(state, idx)
+    MingaEditor.BufferActivation.activate(state, idx)
   end
 
   defp restore_picker_origin(state), do: state

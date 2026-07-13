@@ -119,7 +119,7 @@ defmodule MingaEditor.UI.Picker.LocationSource do
         end
 
       i ->
-        EditorState.switch_buffer(state, i)
+        MingaEditor.BufferActivation.activate(state, i)
     end
   end
 

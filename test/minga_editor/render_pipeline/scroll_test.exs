@@ -22,7 +22,7 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
 
   # Helper to run through layout and scroll
   defp run_through_scroll(%EditorState{} = state) do
-    state = EditorState.sync_active_window_cursor(state)
+    state = MingaEditor.WindowFocus.remember_active_cursor(state)
     state = RenderPipeline.compute_layout(state)
     layout = Layout.get(state)
     {scrolls, input} = Scroll.scroll_windows(state, layout)

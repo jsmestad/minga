@@ -12,14 +12,16 @@ defmodule MingaEditor.Session.StateTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Language.Symbol
   alias MingaEditor.VimState
+  alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab.Context
+  alias MingaEditor.State.Windows
   alias MingaEditor.Window
   alias MingaEditor.Window.Content
   alias MingaEditor.Session.State, as: SessionState
 
   import MingaEditor.RenderPipeline.TestHelpers
 
-  describe "sync_active_window_buffer/1" do
+  describe "activate_buffer/2" do
     test "syncs buffer content when window shows a buffer" do
       state = base_state()
       ws = state.workspace
@@ -37,7 +39,7 @@ defmodule MingaEditor.Session.StateTest do
       assert window.content == {:buffer, original_buf}
 
       # sync should update the window to point at the new buffer
-      ws = SessionState.sync_active_window_buffer(ws)
+      ws = SessionState.activate_buffer(ws, ws.buffers)
 
       updated_window = Map.get(ws.windows.map, win_id)
       assert updated_window.buffer == new_buf
@@ -58,7 +60,7 @@ defmodule MingaEditor.Session.StateTest do
       ws = %{ws | buffers: %{ws.buffers | active: new_buf}}
 
       # sync should NOT touch the agent_chat window
-      ws = SessionState.sync_active_window_buffer(ws)
+      ws = SessionState.activate_buffer(ws, ws.buffers)
 
       result_window = Map.get(ws.windows.map, win_id)
       assert result_window.content == {:agent_chat, :semantic}
@@ -86,10 +88,88 @@ defmodule MingaEditor.Session.StateTest do
           }
         end)
 
-      synced = SessionState.sync_active_window_buffer(workspace)
+      synced = SessionState.activate_buffer(workspace, workspace.buffers)
       window = Map.fetch!(synced.windows.map, win_id)
 
       assert window.document_symbols == []
+    end
+
+    test "preserves window observations when the requested buffer is already active" do
+      state = base_state(content: "defmodule Same do\nend\n")
+      window_id = state.workspace.windows.active
+      symbols = [%Symbol{kind: :module, name: "Same", range: {0, 0, 1, 3}}]
+
+      workspace =
+        SessionState.update_window(
+          state.workspace,
+          window_id,
+          &Window.set_document_symbols(&1, symbols)
+        )
+
+      activated = SessionState.activate_buffer(workspace, workspace.buffers)
+      assert Map.fetch!(activated.windows.map, window_id).document_symbols == symbols
+    end
+
+    test "leaves the launchpad with editor scope and clears stale hover observations" do
+      workspace = SessionState.enter_empty_state(base_state().workspace)
+      {:ok, buffer} = BufferProcess.start_link(content: "opened")
+      buffers = Buffers.add(workspace.buffers, buffer)
+
+      workspace =
+        workspace
+        |> SessionState.set_keymap_scope(:agent)
+        |> SessionState.set_cmd_hover_link({{0, 0}, {0, 4}})
+        |> SessionState.set_cmd_hover_cell({3, 8})
+
+      activated = SessionState.activate_buffer(workspace, buffers)
+      window = Map.fetch!(activated.windows.map, activated.windows.active)
+
+      assert activated.buffers.active == buffer
+      assert activated.keymap_scope == :editor
+      assert activated.launchpad == nil
+      assert activated.cmd_hover_link == nil
+      assert activated.cmd_hover_cell == nil
+      assert window.content == {:buffer, buffer}
+    end
+  end
+
+  describe "focus_window/3" do
+    test "atomically focuses split buffer and agent windows from process observations" do
+      workspace = base_state().workspace
+      first_buffer = workspace.buffers.active
+      {:ok, second_buffer} = BufferProcess.start_link(content: "second")
+      buffers = workspace.buffers |> Buffers.add(second_buffer) |> Buffers.switch_to(0)
+
+      windows =
+        workspace.windows
+        |> Windows.add_window(Window.new(2, second_buffer, 24, 80, {1, 2}))
+        |> Windows.add_window(Window.new_agent_chat(3, 24, 80))
+
+      workspace =
+        workspace
+        |> SessionState.activate_buffer(buffers)
+        |> SessionState.set_windows(windows)
+        |> SessionState.set_keymap_scope(:file_tree)
+        |> SessionState.set_cmd_hover_link({{0, 0}, {0, 4}})
+        |> SessionState.set_cmd_hover_cell({3, 8})
+
+      focused = SessionState.focus_window(workspace, 2, {2, 3})
+
+      assert focused.windows.active == 2
+      assert Map.fetch!(focused.windows.map, 1).cursor == {2, 3}
+      assert focused.buffers.active == second_buffer
+      assert focused.buffers.active_index == 1
+      assert focused.keymap_scope == :file_tree
+      assert focused.cmd_hover_link == nil
+      assert focused.cmd_hover_cell == nil
+      assert focused.launchpad == nil
+
+      agent_focused = SessionState.focus_window(focused, 3, {1, 2})
+      assert agent_focused.windows.active == 3
+      assert agent_focused.buffers.active == nil
+      assert agent_focused.keymap_scope == :agent
+      assert SessionState.focus_window(agent_focused, 99, nil) == agent_focused
+      assert first_buffer in agent_focused.buffers.list
     end
   end
 

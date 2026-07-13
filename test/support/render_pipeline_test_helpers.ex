@@ -135,7 +135,7 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
   """
   @spec build_frame_with_window(EditorState.t(), keyword()) :: ComposedFrame.t()
   def build_frame_with_window(state, _opts) do
-    state = EditorState.sync_active_window_cursor(state)
+    state = MingaEditor.WindowFocus.remember_active_cursor(state)
     state = MingaEditor.RenderPipeline.compute_layout(state)
     layout = Layout.get(state)
     {scrolls, state} = Scroll.scroll_windows(state, layout)

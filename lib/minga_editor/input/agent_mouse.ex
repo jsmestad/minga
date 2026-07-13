@@ -238,7 +238,7 @@ defmodule MingaEditor.Input.AgentMouse do
   @spec maybe_focus_window(EditorState.t(), pos_integer()) :: EditorState.t()
   defp maybe_focus_window(state, win_id) do
     if state.workspace.windows.active != win_id do
-      EditorState.focus_window(state, win_id)
+      MingaEditor.WindowFocus.focus(state, win_id)
     else
       state
     end

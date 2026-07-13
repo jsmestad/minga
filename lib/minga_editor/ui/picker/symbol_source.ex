@@ -29,7 +29,7 @@ defmodule MingaEditor.UI.Picker.SymbolSource do
   def on_select(%Item{id: {row, col}}, %{workspace: %{buffers: %{active: buffer}}} = state)
       when is_integer(row) and is_integer(col) and is_pid(buffer) do
     Buffer.move_to(buffer, {row, col})
-    EditorState.sync_active_window_cursor(state)
+    MingaEditor.WindowFocus.remember_active_cursor(state)
   end
 
   def on_select(_item, state), do: state

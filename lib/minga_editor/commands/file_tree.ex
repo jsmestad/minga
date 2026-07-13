@@ -92,7 +92,8 @@ defmodule MingaEditor.Commands.FileTree do
   end
 
   @spec restore_scope(state()) :: atom()
-  defp restore_scope(state), do: EditorState.scope_for_active_window(state)
+  defp restore_scope(state),
+    do: MingaEditor.Session.State.scope_for_active_window(state.workspace)
 
   @spec file_tree_state(state()) :: FileTreeState.t()
   defp file_tree_state(state), do: EditorState.file_tree_state(state)
@@ -959,7 +960,7 @@ defmodule MingaEditor.Commands.FileTree do
           if tab do
             EditorState.switch_tab(state, tab.id)
           else
-            EditorState.switch_buffer(state, idx)
+            MingaEditor.BufferActivation.activate(state, idx)
           end
 
         update_file_tree(state, &FileTreeState.set_tree(&1, FileTree.reveal(tree, path)))

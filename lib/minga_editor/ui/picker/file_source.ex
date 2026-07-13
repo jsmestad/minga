@@ -162,7 +162,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
   @spec switch_existing_buffer_target(term(), non_neg_integer(), term()) :: term()
   defp switch_existing_buffer_target(state, idx, _tab)
        when state.buffer_add_context == :preview do
-    EditorState.switch_buffer(state, idx)
+    MingaEditor.BufferActivation.activate(state, idx)
   end
 
   defp switch_existing_buffer_target(state, _idx, %{id: tab_id}) do
@@ -170,7 +170,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
   end
 
   defp switch_existing_buffer_target(state, idx, _tab) do
-    EditorState.switch_buffer(state, idx)
+    MingaEditor.BufferActivation.activate(state, idx)
   end
 
   @impl true

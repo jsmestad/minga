@@ -635,7 +635,7 @@ defmodule MingaEditor.MouseTest do
       other_id =
         Enum.find(Map.keys(state.workspace.windows.map), &(&1 != state.workspace.windows.active))
 
-      state = EditorState.focus_window(state, other_id)
+      state = MingaEditor.WindowFocus.focus(state, other_id)
       assert state.workspace.cmd_hover_link == nil
       assert state.workspace.cmd_hover_cell == nil
     end
