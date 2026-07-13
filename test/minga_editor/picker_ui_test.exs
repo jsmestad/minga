@@ -328,7 +328,7 @@ defmodule MingaEditor.PickerUITest do
       source = :"Elixir.MingaEditor.PickerUITest.GitLogSource"
       picker = Picker.new([%Item{id: "abc123", label: "abc123"}], title: "Git Log")
       picker_state = %PickerState{picker: picker, source: source}
-      state = ModalOverlay.open(state, :picker, PickerPayload.new(picker_state))
+      state = ModalWorkflow.open(state, :picker, PickerPayload.new(picker_state))
 
       state = Enum.reduce(~c"fix", state, fn cp, acc -> PickerUI.handle_key(acc, cp, 0) end)
       {:picker, %{picker_ui: pui}} = state.shell_runtime.state.modal

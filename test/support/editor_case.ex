@@ -620,7 +620,7 @@ defmodule Minga.Test.EditorCase do
   @doc "Returns the bottom-panel lifecycle value after synchronizing with the editor process."
   @spec bottom_panel(editor_ctx()) :: MingaEditor.BottomPanel.t()
   def bottom_panel(%{editor: editor}) do
-    get_editor_state(editor).shell_state.bottom_panel
+    get_editor_state(editor).shell_runtime.state.bottom_panel
   end
 
   @doc "Returns the number of open buffers."

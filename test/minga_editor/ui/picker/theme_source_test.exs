@@ -2,7 +2,6 @@ defmodule MingaEditor.UI.Picker.ThemeSourceTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.ModalOverlay
   alias MingaEditor.Shell.Traditional.ModalWorkflow
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
   alias MingaEditor.State.Picker, as: PickerState
@@ -88,7 +87,7 @@ defmodule MingaEditor.UI.Picker.ThemeSourceTest do
       state =
         base_state()
         |> EditorState.apply_theme(Theme.get!(:one_dark))
-        |> ModalOverlay.open(
+        |> ModalWorkflow.open(
           :picker,
           PickerPayload.new(%PickerState{restore_theme: original})
         )
