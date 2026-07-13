@@ -69,6 +69,7 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.ToolCall
   alias MingaAgent.Tools
   alias MingaAgent.Tools.Notebook
+  alias MingaAgent.Tools.ProcessBackend.System, as: SystemProcessBackend
   alias MingaAgent.Tools.Shell
   alias MingaAgent.Tools.Todo
   alias Minga.Config
@@ -96,6 +97,7 @@ defmodule MingaAgent.Providers.Native do
       :config,
       :tools,
       :project_root,
+      :tool_metadata,
       :thinking_level,
       :max_tokens,
       :max_retries,
@@ -112,6 +114,7 @@ defmodule MingaAgent.Providers.Native do
       :project_root,
       :project_view,
       :fork_store,
+      :tool_metadata,
       :changeset,
       :thinking_level,
       :max_tokens,
@@ -133,6 +136,7 @@ defmodule MingaAgent.Providers.Native do
             project_root: String.t(),
             project_view: ProjectView.t() | nil,
             fork_store: pid() | nil,
+            tool_metadata: map(),
             changeset: pid() | nil,
             thinking_level: String.t(),
             max_tokens: pos_integer(),
@@ -185,6 +189,8 @@ defmodule MingaAgent.Providers.Native do
           base_tools: [term()],
           mcp_tools: [term()],
           internal_tools: [term()],
+          tool_metadata: map(),
+          custom_tool_declarations: [Tool.t() | ToolSpec.t()],
           custom_tools?: boolean(),
           configured_mcp_configs: [MCPServerConfig.t()],
           mcp_configs: [MCPServerConfig.t()],
@@ -341,16 +347,33 @@ defmodule MingaAgent.Providers.Native do
     {fork_store, changeset} =
       init_fork_store_and_changeset(project_view, project_root, opts)
 
+    tool_metadata = %{
+      parent_session: subscriber,
+      shell_output_callback: Keyword.get(opts, :shell_output_callback),
+      process_backend: Keyword.get(opts, :process_backend, SystemProcessBackend)
+    }
+
     tool_context =
-      native_tool_context(project_root, project_view, fork_store, changeset, subscriber)
-
-    base_tools =
-      Keyword.get(opts, :tools) ||
-        registry_tools(tool_context, config, hook_runner)
-
-    base_tools = filter_base_tools_for_read_only(base_tools, read_only?)
+      native_tool_context(project_root, project_view, fork_store, changeset, tool_metadata)
 
     custom_tools? = Keyword.has_key?(opts, :tools)
+
+    custom_tool_declarations =
+      if custom_tools?, do: Keyword.get(opts, :tools) || ToolRegistry.all(), else: []
+
+    base_tools =
+      if custom_tools? do
+        provider_tools(
+          custom_tool_declarations,
+          tool_context,
+          config,
+          hook_runner
+        )
+      else
+        registry_tools(tool_context, config, hook_runner)
+      end
+
+    base_tools = filter_base_tools_for_read_only(base_tools, read_only?)
     active_skills = load_active_skills(project_root, Keyword.get(opts, :active_skill_names, []))
     internal_tools = if read_only?, do: [], else: build_internal_tools(provider_pid)
 
@@ -412,6 +435,7 @@ defmodule MingaAgent.Providers.Native do
       mcp_tools: mcp_tools,
       internal_tools: internal_tools,
       custom_tools?: custom_tools?,
+      custom_tool_declarations: custom_tool_declarations,
       configured_mcp_configs: configured_mcp_configs,
       mcp_configs: mcp_configs,
       mcp_client_opts: mcp_client_opts,
@@ -420,7 +444,8 @@ defmodule MingaAgent.Providers.Native do
       mcp_registry: mcp_registry,
       read_only?: read_only?,
       tool_allowlist: tool_allowlist,
-      tool_workers: %{}
+      tool_workers: %{},
+      tool_metadata: tool_metadata
     }
 
     Minga.Events.subscribe(:agent_mcp_servers_changed)
@@ -435,40 +460,47 @@ defmodule MingaAgent.Providers.Native do
           ProjectView.t() | nil,
           pid() | nil,
           pid() | nil,
-          pid() | nil
+          map()
         ) :: ToolContext.t()
-  defp native_tool_context(project_root, project_view, fork_store, changeset, parent_session) do
+  defp native_tool_context(project_root, project_view, fork_store, changeset, metadata) do
     ToolContext.new(
       project_root: project_root,
       project_view: project_view,
       fork_store: fork_store,
       changeset: changeset,
-      metadata: %{parent_session: parent_session}
+      metadata: metadata
     )
   end
 
   @spec registry_tools(ToolContext.t(), AgentConfig.t(), hook_runner()) :: [Tool.t()]
   defp registry_tools(%ToolContext{} = tool_context, %AgentConfig{} = config, hook_runner) do
-    ToolRegistry.all()
-    |> Enum.map(&registry_tool(&1, tool_context, config, hook_runner))
+    provider_tools(ToolRegistry.all(), tool_context, config, hook_runner)
   end
 
-  @spec registry_tool(ToolSpec.t(), ToolContext.t(), AgentConfig.t(), hook_runner()) ::
+  @spec provider_tools([Tool.t() | ToolSpec.t()], ToolContext.t(), AgentConfig.t(), hook_runner()) ::
+          [Tool.t()]
+  defp provider_tools(tools, %ToolContext{} = tool_context, config, hook_runner) do
+    Enum.map(tools, &provider_tool(&1, tool_context, config, hook_runner))
+  end
+
+  @spec provider_tool(Tool.t() | ToolSpec.t(), ToolContext.t(), AgentConfig.t(), hook_runner()) ::
           Tool.t()
-  defp registry_tool(%ToolSpec{} = spec, %ToolContext{} = tool_context, config, hook_runner) do
-    Tool.new!(
-      name: spec.name,
-      description: spec.description,
-      parameter_schema: spec.parameter_schema,
-      provider_options: %{minga_registry_tool: true, source: inspect(spec.source)},
-      callback: fn args ->
-        ToolExecutor.execute_approved(spec, args || %{}, :exec,
-          config: config,
-          hook_runner: hook_runner,
-          tool_context: tool_context
-        )
-      end
-    )
+  defp provider_tool(%Tool{} = tool, _tool_context, _config, _hook_runner), do: tool
+
+  defp provider_tool(%ToolSpec{} = spec, %ToolContext{} = tool_context, config, hook_runner) do
+    callback = fn args ->
+      ToolExecutor.execute_approved(spec, args || %{}, :exec,
+        config: config,
+        hook_runner: hook_runner,
+        tool_context: tool_context
+      )
+    end
+
+    ReqLLMAdapter.tool(spec, callback, %{
+      minga_registry_tool: true,
+      minga_tool_spec: spec,
+      source: inspect(spec.source)
+    })
   end
 
   @spec disable_hooks_for_read_only(AgentConfig.t(), boolean()) :: AgentConfig.t()
@@ -658,6 +690,7 @@ defmodule MingaAgent.Providers.Native do
         project_view: state.project_view,
         fork_store: state.fork_store,
         changeset: state.changeset,
+        tool_metadata: state.tool_metadata,
         thinking_level: state.thinking_level,
         max_tokens: state.max_tokens,
         max_retries: state.max_retries,
@@ -724,6 +757,7 @@ defmodule MingaAgent.Providers.Native do
       project_view: state.project_view,
       fork_store: state.fork_store,
       changeset: state.changeset,
+      tool_metadata: state.tool_metadata,
       thinking_level: state.thinking_level,
       max_tokens: state.max_tokens,
       max_retries: state.max_retries,
@@ -1429,26 +1463,17 @@ defmodule MingaAgent.Providers.Native do
   @spec rebuild_tools(map()) :: map()
   defp rebuild_tools(state) do
     base_tools =
-      state.project_root
-      |> native_tool_context(
-        state.project_view,
-        state.fork_store,
-        state.changeset,
-        state.subscriber
-      )
-      |> registry_tools(state.config, state.hook_runner)
+      state
+      |> refresh_base_tools(state.project_view)
+      |> filter_base_tools_for_read_only(state.read_only?)
 
-    base_tool_names = MapSet.new(Enum.map(base_tools, & &1.name))
     internal_tools = build_internal_tools(self())
-    internal_tool_names = MapSet.new(Enum.map(internal_tools, & &1.name))
 
-    mcp_tools =
-      Enum.reject(state.tools, fn tool ->
-        MapSet.member?(base_tool_names, tool.name) or
-          MapSet.member?(internal_tool_names, tool.name)
-      end)
+    tools =
+      (base_tools ++ state.mcp_tools ++ internal_tools)
+      |> filter_tool_allowlist(state.tool_allowlist)
 
-    %{state | tools: base_tools ++ mcp_tools ++ internal_tools}
+    %{state | base_tools: base_tools, internal_tools: internal_tools, tools: tools}
   end
 
   # ── Terminate cleanup ──────────────────────────────────────────────────────
@@ -1785,7 +1810,7 @@ defmodule MingaAgent.Providers.Native do
 
     {approval_baselines, concurrent_baselines} =
       Enum.split_with(baselines, fn {_index, tool_call, _before_content} ->
-        tool_requires_approval?(tool_call, lctx.config, initial_mode)
+        tool_requires_approval?(tool_call, available_tools, lctx.config, initial_mode)
       end)
 
     concurrent_tasks =
@@ -2009,7 +2034,7 @@ defmodule MingaAgent.Providers.Native do
         lctx.project_view,
         lctx.fork_store,
         lctx.changeset,
-        lctx.session_pid
+        lctx.tool_metadata
       )
 
     {result_text, is_error, _new_mode, post_dispatched?} =
@@ -2128,7 +2153,7 @@ defmodule MingaAgent.Providers.Native do
 
         nil ->
           # No per-tool override; fall through to registry/default policy and global approval mode.
-          case registered_tool_approval(tool_call.name) do
+          case registered_tool_approval(tool_call.name, available_tools) do
             :deny ->
               {"Tool '#{tool_call.name}' is denied by registry policy", true, mode, false}
 
@@ -2215,7 +2240,7 @@ defmodule MingaAgent.Providers.Native do
          hook_runner,
          tool_context
        ) do
-    if global_mode_requires_approval?(tool_call, :ask) do
+    if global_mode_requires_approval?(tool_call, available_tools, :ask, config) do
       request_approval(
         provider_pid,
         session_pid,
@@ -2242,32 +2267,50 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
-  @spec tool_requires_approval?(map(), AgentConfig.t(), approval_mode()) :: boolean()
-  defp tool_requires_approval?(tool_call, config, mode) do
+  @spec tool_requires_approval?(map(), [Tool.t()], AgentConfig.t(), approval_mode()) :: boolean()
+  defp tool_requires_approval?(tool_call, available_tools, config, mode) do
     case tool_permission(tool_call.name, config) do
       :ask -> true
       :allow -> false
       :deny -> false
-      nil -> global_mode_requires_approval?(tool_call, mode)
+      nil -> global_mode_requires_approval?(tool_call, available_tools, mode, config)
     end
   end
 
-  @spec global_mode_requires_approval?(map(), approval_mode()) :: boolean()
-  defp global_mode_requires_approval?(_tool_call, :none), do: false
-  defp global_mode_requires_approval?(_tool_call, :ask_all), do: true
+  @spec global_mode_requires_approval?(map(), [Tool.t()], approval_mode(), AgentConfig.t()) ::
+          boolean()
+  defp global_mode_requires_approval?(_tool_call, _available_tools, :none, _config), do: false
+  defp global_mode_requires_approval?(_tool_call, _available_tools, :ask_all, _config), do: true
 
-  defp global_mode_requires_approval?(tool_call, :ask) do
-    registered_tool_approval(tool_call.name) == :ask or
-      Tools.destructive?(tool_call.name, tool_call.arguments || %{})
+  defp global_mode_requires_approval?(tool_call, available_tools, :ask, config) do
+    registered_tool_approval(tool_call.name, available_tools) == :ask or
+      Tools.destructive?(
+        tool_call.name,
+        tool_call.arguments || %{},
+        config.destructive_tools
+      )
   end
 
-  @spec registered_tool_approval(String.t()) :: ToolSpec.approval_level() | nil
-  defp registered_tool_approval(tool_name) do
+  @spec registered_tool_approval(String.t(), [Tool.t()]) :: ToolSpec.approval_level() | nil
+  defp registered_tool_approval(tool_name, available_tools) do
+    case Enum.find(available_tools, &(&1.name == tool_name)) do
+      %Tool{provider_options: %{minga_tool_spec: %ToolSpec{} = spec}} -> spec_approval(spec)
+      _tool -> registry_tool_approval(tool_name)
+    end
+  end
+
+  @spec registry_tool_approval(String.t()) :: ToolSpec.approval_level() | nil
+  defp registry_tool_approval(tool_name) do
     case ToolRegistry.lookup(tool_name) do
-      {:ok, %ToolSpec{approval_level: approval}} -> approval
+      {:ok, %ToolSpec{} = spec} -> spec_approval(spec)
       :error -> nil
     end
   end
+
+  @spec spec_approval(ToolSpec.t()) :: ToolSpec.approval_level() | nil
+  defp spec_approval(%ToolSpec{source: :builtin}), do: nil
+  defp spec_approval(%ToolSpec{source: {:bundle, _name}}), do: nil
+  defp spec_approval(%ToolSpec{approval_level: approval}), do: approval
 
   # Looks up per-tool permission from config. Returns :allow, :deny, :ask, or nil
   # (no override for this tool).
@@ -2561,7 +2604,7 @@ defmodule MingaAgent.Providers.Native do
 
       tool ->
         if registry_tool?(tool) do
-          execute_registry_tool(tool_call, provider_pid, config, hook_runner, tool_context)
+          execute_registry_tool(tool, tool_call, provider_pid, config, hook_runner, tool_context)
         else
           case dispatch_pre_tool_use(tool_call, config, hook_runner, provider_pid) do
             :ok -> tuple_with_post_flag(execute_found_tool(tool, tool_call, provider_pid), false)
@@ -2575,25 +2618,32 @@ defmodule MingaAgent.Providers.Native do
   defp registry_tool?(%Tool{provider_options: %{minga_registry_tool: true}}), do: true
   defp registry_tool?(_tool), do: false
 
-  @spec execute_registry_tool(map(), pid(), AgentConfig.t(), hook_runner(), ToolContext.t()) ::
-          {String.t(), boolean(), boolean()}
-  defp execute_registry_tool(tool_call, provider_pid, config, hook_runner, tool_context) do
+  @spec execute_registry_tool(
+          Tool.t(),
+          map(),
+          pid(),
+          AgentConfig.t(),
+          hook_runner(),
+          ToolContext.t()
+        ) :: {String.t(), boolean(), boolean()}
+  defp execute_registry_tool(
+         %Tool{provider_options: %{minga_tool_spec: %ToolSpec{} = spec}},
+         tool_call,
+         provider_pid,
+         config,
+         hook_runner,
+         tool_context
+       ) do
     args = tool_call.arguments || %{}
     tool_context = tool_context_with_call_metadata(tool_context, tool_call, provider_pid)
 
-    case ToolRegistry.lookup(tool_call.name) do
-      {:ok, spec} ->
-        spec
-        |> ToolExecutor.execute_approved(args, :exec,
-          config: config,
-          hook_runner: hook_runner,
-          tool_context: tool_context
-        )
-        |> format_executor_result()
-
-      :error ->
-        {"Tool '#{tool_call.name}' not found", true, true}
-    end
+    spec
+    |> ToolExecutor.execute_approved(args, :exec,
+      config: config,
+      hook_runner: hook_runner,
+      tool_context: tool_context
+    )
+    |> format_executor_result()
   end
 
   @spec tool_context_with_call_metadata(ToolContext.t(), map(), pid()) :: ToolContext.t()
@@ -2833,8 +2883,23 @@ defmodule MingaAgent.Providers.Native do
   end
 
   @spec refresh_base_tools(state(), ProjectView.t() | nil) :: [Tool.t()]
-  defp refresh_base_tools(%{custom_tools?: true, base_tools: base_tools}, _project_view) do
-    base_tools
+  defp refresh_base_tools(
+         %{
+           custom_tools?: true,
+           custom_tool_declarations: declarations,
+           project_root: project_root,
+           fork_store: fork_store,
+           changeset: changeset,
+           tool_metadata: tool_metadata,
+           config: config,
+           hook_runner: hook_runner
+         },
+         project_view
+       ) do
+    tool_context =
+      native_tool_context(project_root, project_view, fork_store, changeset, tool_metadata)
+
+    provider_tools(declarations, tool_context, config, hook_runner)
   end
 
   defp refresh_base_tools(
@@ -2842,14 +2907,14 @@ defmodule MingaAgent.Providers.Native do
            project_root: project_root,
            fork_store: fork_store,
            changeset: changeset,
-           subscriber: subscriber,
+           tool_metadata: tool_metadata,
            config: config,
            hook_runner: hook_runner
          },
          project_view
        ) do
     project_root
-    |> native_tool_context(project_view, fork_store, changeset, subscriber)
+    |> native_tool_context(project_view, fork_store, changeset, tool_metadata)
     |> registry_tools(config, hook_runner)
   end
 

@@ -7,8 +7,8 @@ defmodule MingaAgent.EphemeralSession do
 
   alias MingaAgent.Session
   alias MingaAgent.SessionManager
+  alias MingaAgent.Tool.Spec
   alias MingaAgent.Tools
-  alias ReqLLM.Tool
 
   @doc "Starts a read-only ephemeral ask session and sends its prompt."
   @spec ask(String.t(), String.t(), keyword()) :: {:ok, pid()} | {:error, term()}
@@ -49,19 +49,19 @@ defmodule MingaAgent.EphemeralSession do
   end
 
   @doc "Builds the final inline ask tool list. Inline asks use prompt-provided context only."
-  @spec read_only_tools(String.t()) :: [Tool.t()]
+  @spec read_only_tools(String.t()) :: [Spec.t()]
   def read_only_tools(project_root) when is_binary(project_root) do
     _project_root = project_root
     []
   end
 
   @doc "Builds the constrained tool list for inline edit rewrite sessions."
-  @spec rewrite_tools(String.t()) :: [Tool.t()]
+  @spec rewrite_tools(String.t()) :: [Spec.t()]
   def rewrite_tools(project_root) when is_binary(project_root) do
     Enum.concat(Tools.file_read(project_root: project_root), [produce_rewrite_tool()])
   end
 
-  @spec start(String.t(), String.t(), String.t(), [Tool.t()], atom(), keyword()) ::
+  @spec start(String.t(), String.t(), String.t(), [Spec.t()], atom(), keyword()) ::
           {:ok, pid()} | {:error, term()}
   defp start(prompt, project_root, prefix, tools, result_message, opts) do
     manager = Keyword.get(opts, :session_manager, SessionManager)
@@ -127,9 +127,10 @@ defmodule MingaAgent.EphemeralSession do
     :exit, _ -> :ok
   end
 
-  @spec produce_rewrite_tool() :: Tool.t()
+  @spec produce_rewrite_tool() :: Spec.t()
   defp produce_rewrite_tool do
-    Tool.new!(
+    Spec.new!(
+      source: :config,
       name: "produce_rewrite",
       description:
         "Return the single replacement text for the selected inline edit range. This must not edit files.",
@@ -143,7 +144,11 @@ defmodule MingaAgent.EphemeralSession do
         },
         "required" => ["replacement"]
       },
-      callback: fn args -> {:ok, args["replacement"] || ""} end
+      category: :agent,
+      approval_level: :auto,
+      capabilities: [],
+      context_requirements: [],
+      build: fn _context -> fn args -> {:ok, args["replacement"] || ""} end end
     )
   end
 

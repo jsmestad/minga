@@ -48,7 +48,6 @@ defmodule MingaAgent.Tool.Spec do
           name: String.t(),
           description: String.t(),
           parameter_schema: map(),
-          callback: callback() | nil,
           build: build_fun(),
           category: category(),
           approval_level: approval_level(),
@@ -71,7 +70,6 @@ defmodule MingaAgent.Tool.Spec do
             name: nil,
             description: nil,
             parameter_schema: %{},
-            callback: nil,
             build: nil,
             category: :custom,
             approval_level: :auto,
@@ -89,7 +87,7 @@ defmodule MingaAgent.Tool.Spec do
     description = Map.get(attrs, :description)
     parameter_schema = Map.get(attrs, :parameter_schema, %{})
     callback = Map.get(attrs, :callback)
-    build = Map.get(attrs, :build) || build_from_callback(callback)
+    build = resolve_build(Map.get(attrs, :build), callback)
     category = Map.get(attrs, :category, :custom)
     approval_level = Map.get(attrs, :approval_level, :auto)
     capabilities = Map.get(attrs, :capabilities, [])
@@ -100,7 +98,7 @@ defmodule MingaAgent.Tool.Spec do
          :ok <- validate_name(name),
          :ok <- validate_description(description),
          :ok <- validate_schema(parameter_schema),
-         :ok <- validate_callback(callback),
+         :ok <- validate_callback_declaration(Map.get(attrs, :build), callback),
          :ok <- validate_build(build),
          :ok <- validate_category(category),
          :ok <- validate_approval_level(approval_level),
@@ -114,7 +112,6 @@ defmodule MingaAgent.Tool.Spec do
          name: name,
          description: description,
          parameter_schema: parameter_schema,
-         callback: callback,
          build: build,
          category: category,
          approval_level: approval_level,
@@ -136,13 +133,28 @@ defmodule MingaAgent.Tool.Spec do
 
   @doc "Builds an executable callback for the given runtime context."
   @spec build_callback(t(), term()) :: callback()
-  def build_callback(%__MODULE__{build: build}, context), do: build.(context)
+  def build_callback(%__MODULE__{build: build, name: name, source: source}, context) do
+    callback = build.(context)
 
-  @spec build_from_callback(term()) :: build_fun() | nil
-  defp build_from_callback(callback) when is_function(callback, 1),
-    do: fn _context -> callback end
+    Minga.Telemetry.execute(
+      [:minga, :agent, :tool, :callback_built],
+      %{count: 1},
+      %{name: name, source: source}
+    )
 
-  defp build_from_callback(_callback), do: nil
+    callback
+  end
+
+  @spec resolve_build(term(), term()) :: build_fun() | nil
+  defp resolve_build(nil, callback) when is_function(callback, 1), do: fn _context -> callback end
+  defp resolve_build(build, _callback), do: build
+
+  @spec validate_callback_declaration(term(), term()) :: :ok | {:error, term()}
+  defp validate_callback_declaration(build, callback)
+       when is_function(build, 1) and is_function(callback, 1),
+       do: {:error, {:conflicting_execution_declarations, [:build, :callback]}}
+
+  defp validate_callback_declaration(_build, callback), do: validate_callback(callback)
 
   @spec validate_source(term()) :: :ok | {:error, term()}
   defp validate_source(:builtin), do: :ok

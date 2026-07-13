@@ -135,11 +135,12 @@ defmodule MingaAgent.ToolsTest do
       assert "code_actions" in names
     end
 
-    test "all tools have descriptions and callbacks", %{tmp_dir: dir} do
-      for tool <- Tools.all(project_root: dir) do
-        assert is_binary(tool.description)
-        assert String.length(tool.description) > 0
-        assert is_function(tool.callback, 1)
+    test "all tools remain provider-neutral source declarations", %{tmp_dir: dir} do
+      for spec <- Tools.all(project_root: dir) do
+        assert %MingaAgent.Tool.Spec{} = spec
+        assert is_binary(spec.description)
+        assert String.length(spec.description) > 0
+        assert is_function(spec.build, 1)
       end
     end
 

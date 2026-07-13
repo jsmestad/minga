@@ -2,8 +2,8 @@ defmodule MingaAgent.Tools do
   @moduledoc """
   Tool definitions for the native agent provider.
 
-  Each tool is a `ReqLLM.Tool` struct with a name, description, JSON Schema
-  parameters, and a callback that executes the operation. Tools are scoped
+  Each tool is declared once as a `MingaAgent.Tool.Spec` with a name, description,
+  JSON Schema parameters, and a context-bound callback factory. Tools are scoped
   to the project root directory for safety: file operations refuse to escape
   the project boundary.
 
@@ -43,7 +43,6 @@ defmodule MingaAgent.Tools do
   alias Minga.Buffer.Document
   alias Minga.Buffer.Replace
   alias MingaAgent.ProjectView
-  alias MingaAgent.Tool.Context, as: ToolContext
   alias MingaAgent.Tool.Spec
   alias MingaAgent.ToolRouter
   alias MingaAgent.Tools.DeleteFile
@@ -67,10 +66,8 @@ defmodule MingaAgent.Tools do
   alias MingaAgent.Tools.ReadFile
   alias MingaAgent.Tools.ProcessBackend.System, as: SystemProcessBackend
   alias MingaAgent.Tools.Subagent
-  alias MingaAgent.Tool.BundledSources
   alias MingaAgent.Tools.WriteFile
   alias Minga.Config
-  alias ReqLLM.Tool
 
   @typedoc "Options passed to `all/1`."
   @type tools_opts :: [
@@ -128,217 +125,76 @@ defmodule MingaAgent.Tools do
     _ -> @default_destructive_tools
   end
 
-  @doc """
-  Returns all available tools scoped to the given project root.
-
-  The `project_root` is baked into each tool's callback closure so that every
-  file operation is sandboxed to that directory tree.
-  """
-  @spec all(tools_opts()) :: [Tool.t()]
-  def all(opts \\ []) do
-    root = Keyword.get(opts, :project_root, File.cwd!())
-    project_view = Keyword.get(opts, :project_view)
-    cs = Keyword.get(opts, :changeset)
-    fs = Keyword.get(opts, :fork_store)
-    parent_session = Keyword.get(opts, :parent_session)
-    shell_output_callback = Keyword.get(opts, :shell_output_callback)
-    process_backend = Keyword.get(opts, :process_backend, SystemProcessBackend)
-    router_ctx = ToolRouter.context(project_view, fs, cs)
-
+  @doc "Returns every canonical built-in and bundled tool declaration."
+  @spec specs() :: [Spec.t()]
+  def specs do
     [
-      read_file(root, router_ctx),
-      write_file(root, router_ctx),
-      edit_file(root, router_ctx),
-      multi_edit_file(root, router_ctx),
-      apply_diff(root, router_ctx),
-      delete_file(root, router_ctx),
-      list_directory(root, router_ctx),
-      find(root, router_ctx, process_backend),
-      grep(root, router_ctx, process_backend),
+      read_file(),
+      write_file(),
+      edit_file(),
+      multi_edit_file(),
+      apply_diff(),
+      delete_file(),
+      list_directory(),
+      find(),
+      grep(),
       fetch_url(),
-      shell(root, router_ctx, shell_output_callback, process_backend),
-      subagent(root, parent_session),
-      git_status(root),
-      git_diff(root, router_ctx),
-      git_log(root),
-      git_stage(root),
-      git_commit(root),
+      shell(),
+      subagent(),
+      git_status(),
+      git_diff(),
+      git_log(),
+      git_stage(),
+      git_commit(),
       memory_write(),
-      lsp_diagnostics(root),
-      lsp_definition(root),
-      lsp_references(root),
-      lsp_hover(root),
-      lsp_document_symbols(root),
+      lsp_diagnostics(),
+      lsp_definition(),
+      lsp_references(),
+      lsp_hover(),
+      lsp_document_symbols(),
       lsp_workspace_symbols(),
-      lsp_rename(root),
-      lsp_code_actions(root),
+      lsp_rename(),
+      lsp_code_actions(),
       describe_runtime(),
       describe_tools()
     ]
   end
 
+  @doc "Returns every canonical tool declaration. Options are accepted for source compatibility."
+  @spec all(tools_opts()) :: [Spec.t()]
+  def all(_opts \\ []), do: specs()
+
   @doc "Returns source-owned built-in tool declarations."
   @spec builtin_specs() :: [Spec.t()]
-  def builtin_specs do
-    all(project_root: ".")
-    |> Enum.reject(&(&1.name in BundledSources.reserved_names()))
-    |> Enum.map(&builtin_spec_from_tool/1)
-  end
+  def builtin_specs, do: Enum.filter(specs(), &(&1.source == :builtin))
 
   @doc "Returns all core built-in tool names."
   @spec builtin_names() :: [String.t()]
-  def builtin_names do
-    builtin_specs()
-    |> Enum.map(& &1.name)
-  end
+  def builtin_names, do: Enum.map(builtin_specs(), & &1.name)
 
-  @spec builtin_spec_from_tool(Tool.t()) :: Spec.t()
-  defp builtin_spec_from_tool(%Tool{} = tool) do
-    name = tool.name
+  @doc "Returns the read-only tool declaration subset for ephemeral inline ask sessions."
+  @spec read_only(tools_opts()) :: [Spec.t()]
+  def read_only(_opts \\ []), do: Enum.filter(specs(), &read_only_name?/1)
 
-    Spec.new!(
-      source: :builtin,
-      name: name,
-      description: tool.description || "",
-      parameter_schema: tool.parameter_schema || %{},
-      category: category_for(name),
-      approval_level: approval_for(name),
-      capabilities: capabilities_for(name),
-      context_requirements: context_requirements_for(name),
-      build: fn context -> built_in_callback(name, context) end
-    )
-  end
-
-  @spec built_in_callback(String.t(), ToolContext.t() | nil) :: Spec.callback()
-  defp built_in_callback(name, nil) do
-    callback_from_tools(name, all(project_root: "."))
-  end
-
-  defp built_in_callback(name, %ToolContext{} = context) do
-    callback_from_tools(name, all(ToolContext.tools_opts(context)))
-  end
-
-  @spec callback_from_tools(String.t(), [Tool.t()]) :: Spec.callback()
-  defp callback_from_tools(name, tools) do
-    tools
-    |> Enum.find(&(&1.name == name))
-    |> case do
-      %Tool{callback: callback} -> callback
-      nil -> fn _args -> {:error, {:tool_not_found, name}} end
-    end
-  end
-
-  @doc "Returns the read-only tool subset for ephemeral inline ask sessions."
-  @spec read_only(tools_opts()) :: [Tool.t()]
-  def read_only(opts \\ []) do
-    opts
-    |> all()
-    |> Enum.filter(&read_only_name?/1)
-  end
-
-  @doc "Returns the file/project read tool subset for constrained rewrite sessions."
-  @spec file_read(tools_opts()) :: [Tool.t()]
-  def file_read(opts \\ []) do
-    opts
-    |> all()
-    |> Enum.filter(&file_read_name?/1)
-  end
+  @doc "Returns the file/project read declaration subset for constrained rewrite sessions."
+  @spec file_read(tools_opts()) :: [Spec.t()]
+  def file_read(_opts \\ []), do: Enum.filter(specs(), &file_read_name?/1)
 
   @doc "Returns true when the tool name is allowed in constrained file-read sessions."
-  @spec file_read_name?(Tool.t() | String.t()) :: boolean()
-  def file_read_name?(%Tool{name: name}), do: file_read_name?(name)
+  @spec file_read_name?(Spec.t() | %{required(:name) => String.t()} | String.t()) :: boolean()
+  def file_read_name?(%{name: name}), do: file_read_name?(name)
   def file_read_name?(name) when is_binary(name), do: name in @file_read_tools
 
   @doc "Returns true when the tool name is allowed in read-only sessions."
-  @spec read_only_name?(Tool.t() | String.t()) :: boolean()
-  def read_only_name?(%Tool{name: name}), do: read_only_name?(name)
+  @spec read_only_name?(Spec.t() | %{required(:name) => String.t()} | String.t()) :: boolean()
+  def read_only_name?(%{name: name}), do: read_only_name?(name)
   def read_only_name?(name) when is_binary(name), do: name in @read_only_tools
-
-  @spec category_for(String.t()) :: Spec.category()
-  defp category_for("read_file"), do: :filesystem
-  defp category_for("write_file"), do: :filesystem
-  defp category_for("edit_file"), do: :filesystem
-  defp category_for("multi_edit_file"), do: :filesystem
-  defp category_for("apply_diff"), do: :filesystem
-  defp category_for("delete_file"), do: :filesystem
-  defp category_for("list_directory"), do: :filesystem
-  defp category_for("find"), do: :filesystem
-  defp category_for("grep"), do: :filesystem
-  defp category_for("shell"), do: :shell
-  defp category_for("fetch_url"), do: :network
-  defp category_for("subagent"), do: :agent
-  defp category_for("describe_runtime"), do: :agent
-  defp category_for("describe_tools"), do: :agent
-  defp category_for("git_status"), do: :git
-  defp category_for("git_diff"), do: :git
-  defp category_for("git_log"), do: :git
-  defp category_for("git_stage"), do: :git
-  defp category_for("git_commit"), do: :git
-  defp category_for("memory_write"), do: :memory
-  defp category_for("diagnostics"), do: :lsp
-  defp category_for("definition"), do: :lsp
-  defp category_for("references"), do: :lsp
-  defp category_for("hover"), do: :lsp
-  defp category_for("document_symbols"), do: :lsp
-  defp category_for("workspace_symbols"), do: :lsp
-  defp category_for("rename"), do: :lsp
-  defp category_for("code_actions"), do: :lsp
-  defp category_for(_name), do: :custom
-
-  @spec approval_for(String.t()) :: Spec.approval_level()
-  defp approval_for(name) do
-    if destructive?(name), do: :ask, else: :auto
-  end
-
-  @spec capabilities_for(String.t()) :: [Spec.capability()]
-  defp capabilities_for(name)
-       when name in ["write_file", "edit_file", "multi_edit_file", "apply_diff", "delete_file"],
-       do: [:mutate_project]
-
-  defp capabilities_for(name) when name in ["read_file", "list_directory", "find", "grep"],
-    do: [:read_project]
-
-  defp capabilities_for("shell"), do: [:run_shell]
-  defp capabilities_for(name) when name in ["git_stage", "git_commit"], do: [:git_mutate]
-  defp capabilities_for(name) when name in ["git_status", "git_diff", "git_log"], do: [:git_read]
-  defp capabilities_for("fetch_url"), do: [:network]
-  defp capabilities_for("memory_write"), do: [:memory_write]
-  defp capabilities_for("subagent"), do: [:spawn_agent]
-  defp capabilities_for(name) when name in ["rename", "code_actions"], do: [:lsp_mutate]
-
-  defp capabilities_for(name)
-       when name in [
-              "diagnostics",
-              "definition",
-              "references",
-              "hover",
-              "document_symbols",
-              "workspace_symbols"
-            ],
-       do: [:lsp_read]
-
-  defp capabilities_for(_name), do: []
-
-  @spec context_requirements_for(String.t()) :: [Spec.context_requirement()]
-  defp context_requirements_for(name) when name in @read_only_tools,
-    do: context_requirements_for_read_only(name)
-
-  defp context_requirements_for("fetch_url"), do: []
-  defp context_requirements_for("describe_runtime"), do: []
-  defp context_requirements_for("describe_tools"), do: []
-  defp context_requirements_for(_name), do: [:tool_context]
-
-  @spec context_requirements_for_read_only(String.t()) :: [Spec.context_requirement()]
-  defp context_requirements_for_read_only("fetch_url"), do: []
-  defp context_requirements_for_read_only("describe_runtime"), do: []
-  defp context_requirements_for_read_only("describe_tools"), do: []
-  defp context_requirements_for_read_only(_name), do: [:tool_context]
 
   # ── Tool definitions ────────────────────────────────────────────────────────
 
-  @spec read_file(String.t(), MingaAgent.ToolRouter.context()) :: Tool.t()
-  defp read_file(root, router_ctx) do
-    Tool.new!(
+  @spec read_file() :: Spec.t()
+  defp read_file do
+    Spec.new!(
       name: "read_file",
       description: """
       Read the contents of a file. Returns the file content as a string.
@@ -364,16 +220,26 @@ defmodule MingaAgent.Tools do
         },
         "required" => ["path"]
       },
-      callback: fn args ->
-        path = resolve_and_validate_path!(root, args["path"])
+      source: :builtin,
+      category: :filesystem,
+      approval_level: :auto,
+      capabilities: [:read_project],
+      context_requirements: [:tool_context],
+      build: fn context ->
+        root = context.project_root
+        router_ctx = context.router_context
 
-        case ToolRouter.read_file(router_ctx, path) do
-          {:ok, content} ->
-            opts = build_read_opts(args)
-            routed_result(router_ctx, apply_read_slice(content, path, opts))
+        fn args ->
+          path = resolve_and_validate_path!(root, args["path"])
 
-          {:error, reason} ->
-            read_file_fallback(router_ctx, path, reason, args)
+          case ToolRouter.read_file(router_ctx, path) do
+            {:ok, content} ->
+              opts = build_read_opts(args)
+              routed_result(router_ctx, apply_read_slice(content, path, opts))
+
+            {:error, reason} ->
+              read_file_fallback(router_ctx, path, reason, args)
+          end
         end
       end
     )
@@ -387,9 +253,9 @@ defmodule MingaAgent.Tools do
     opts
   end
 
-  @spec fetch_url() :: Tool.t()
+  @spec fetch_url() :: Spec.t()
   defp fetch_url do
-    Tool.new!(
+    Spec.new!(
       name: "fetch_url",
       description: """
       Fetch a URL and return readable text content. HTML pages are converted to structured text with headings, lists, paragraphs, and code blocks preserved. Non-HTML text responses such as JSON, plain text, and XML are returned as-is. This is read-only and does not require approval.
@@ -413,13 +279,21 @@ defmodule MingaAgent.Tools do
         },
         "required" => ["url"]
       },
-      callback: &FetchUrl.execute/1
+      source: {:bundle, :read_only_tools},
+      category: :network,
+      approval_level: :auto,
+      capabilities: [:network],
+      context_requirements: [],
+      metadata: %{pack: :read_only_tools},
+      build: fn _context ->
+        &FetchUrl.execute/1
+      end
     )
   end
 
-  @spec write_file(String.t(), MingaAgent.ToolRouter.context()) :: Tool.t()
-  defp write_file(root, router_ctx) do
-    Tool.new!(
+  @spec write_file() :: Spec.t()
+  defp write_file do
+    Spec.new!(
       name: "write_file",
       description: """
       Write content to a file. Creates the file if it doesn't exist, overwrites
@@ -439,36 +313,46 @@ defmodule MingaAgent.Tools do
         },
         "required" => ["path", "content"]
       },
-      callback: fn args ->
-        path = resolve_and_validate_path!(root, args["path"])
+      source: :builtin,
+      category: :filesystem,
+      approval_level: :ask,
+      capabilities: [:mutate_project],
+      context_requirements: [:tool_context],
+      build: fn context ->
+        root = context.project_root
+        router_ctx = context.router_context
 
-        case ToolRouter.write_file(router_ctx, path, args["content"]) do
-          :passthrough ->
-            case WriteFile.execute(path, args["content"]) do
-              {:ok, msg} -> {:ok, maybe_append_diagnostics(path, msg)}
-              error -> error
-            end
+        fn args ->
+          path = resolve_and_validate_path!(root, args["path"])
 
-          :ok ->
-            {:ok,
-             maybe_append_diagnostics(
-               path,
-               append_workspace_context(
-                 router_ctx,
-                 "wrote #{byte_size(args["content"])} bytes to #{path} (via #{route_name(router_ctx)})"
-               )
-             )}
+          case ToolRouter.write_file(router_ctx, path, args["content"]) do
+            :passthrough ->
+              case WriteFile.execute(path, args["content"]) do
+                {:ok, msg} -> {:ok, maybe_append_diagnostics(path, msg)}
+                error -> error
+              end
 
-          {:error, reason} ->
-            {:error, inspect(reason)}
+            :ok ->
+              {:ok,
+               maybe_append_diagnostics(
+                 path,
+                 append_workspace_context(
+                   router_ctx,
+                   "wrote #{byte_size(args["content"])} bytes to #{path} (via #{route_name(router_ctx)})"
+                 )
+               )}
+
+            {:error, reason} ->
+              {:error, inspect(reason)}
+          end
         end
       end
     )
   end
 
-  @spec edit_file(String.t(), MingaAgent.ToolRouter.context()) :: Tool.t()
-  defp edit_file(root, router_ctx) do
-    Tool.new!(
+  @spec edit_file() :: Spec.t()
+  defp edit_file do
+    Spec.new!(
       name: "edit_file",
       description: """
       Replace exact text in a file. The old_text must match exactly (including
@@ -493,41 +377,51 @@ defmodule MingaAgent.Tools do
         },
         "required" => ["path", "old_text", "new_text"]
       },
-      callback: fn args ->
-        path = resolve_and_validate_path!(root, args["path"])
+      source: :builtin,
+      category: :filesystem,
+      approval_level: :ask,
+      capabilities: [:mutate_project],
+      context_requirements: [:tool_context],
+      build: fn context ->
+        root = context.project_root
+        router_ctx = context.router_context
 
-        case ToolRouter.edit_file(
-               router_ctx,
-               path,
-               args["old_text"],
-               args["new_text"]
-             ) do
-          :passthrough ->
-            case EditFile.execute(path, args["old_text"], args["new_text"]) do
-              {:ok, msg} -> {:ok, maybe_append_diagnostics(path, msg)}
-              error -> error
-            end
+        fn args ->
+          path = resolve_and_validate_path!(root, args["path"])
 
-          :ok ->
-            {:ok,
-             maybe_append_diagnostics(
-               path,
-               append_workspace_context(
+          case ToolRouter.edit_file(
                  router_ctx,
-                 "edited #{path} (via #{route_name(router_ctx)})"
-               )
-             )}
+                 path,
+                 args["old_text"],
+                 args["new_text"]
+               ) do
+            :passthrough ->
+              case EditFile.execute(path, args["old_text"], args["new_text"]) do
+                {:ok, msg} -> {:ok, maybe_append_diagnostics(path, msg)}
+                error -> error
+              end
 
-          {:error, reason} ->
-            {:error, inspect(reason)}
+            :ok ->
+              {:ok,
+               maybe_append_diagnostics(
+                 path,
+                 append_workspace_context(
+                   router_ctx,
+                   "edited #{path} (via #{route_name(router_ctx)})"
+                 )
+               )}
+
+            {:error, reason} ->
+              {:error, inspect(reason)}
+          end
         end
       end
     )
   end
 
-  @spec multi_edit_file(String.t(), MingaAgent.ToolRouter.context()) :: Tool.t()
-  defp multi_edit_file(root, router_ctx) do
-    Tool.new!(
+  @spec multi_edit_file() :: Spec.t()
+  defp multi_edit_file do
+    Spec.new!(
       name: "multi_edit_file",
       description: """
       Apply multiple edits to a single file in one call. Each edit is a
@@ -563,25 +457,35 @@ defmodule MingaAgent.Tools do
         },
         "required" => ["path", "edits"]
       },
-      callback: fn args ->
-        path = resolve_and_validate_path!(root, args["path"])
-        edits = args["edits"] || []
+      source: :builtin,
+      category: :filesystem,
+      approval_level: :ask,
+      capabilities: [:mutate_project],
+      context_requirements: [:tool_context],
+      build: fn context ->
+        root = context.project_root
+        router_ctx = context.router_context
 
-        if ToolRouter.routing_configured?(router_ctx) do
-          apply_multi_edit_via_router(router_ctx, path, edits)
-        else
-          case MultiEditFile.execute(path, edits) do
-            {:ok, msg} -> {:ok, maybe_append_diagnostics(path, msg)}
-            error -> error
+        fn args ->
+          path = resolve_and_validate_path!(root, args["path"])
+          edits = args["edits"] || []
+
+          if ToolRouter.routing_configured?(router_ctx) do
+            apply_multi_edit_via_router(router_ctx, path, edits)
+          else
+            case MultiEditFile.execute(path, edits) do
+              {:ok, msg} -> {:ok, maybe_append_diagnostics(path, msg)}
+              error -> error
+            end
           end
         end
       end
     )
   end
 
-  @spec apply_diff(String.t(), MingaAgent.ToolRouter.context()) :: Tool.t()
-  defp apply_diff(root, router_ctx) do
-    Tool.new!(
+  @spec apply_diff() :: Spec.t()
+  defp apply_diff do
+    Spec.new!(
       name: "apply_diff",
       description: """
       Apply a unified diff to a single file. The diff must use standard
@@ -603,25 +507,35 @@ defmodule MingaAgent.Tools do
         },
         "required" => ["path", "diff"]
       },
-      callback: fn args ->
-        path = resolve_and_validate_path!(root, args["path"])
-        diff = args["diff"] || ""
+      source: :builtin,
+      category: :filesystem,
+      approval_level: :ask,
+      capabilities: [:mutate_project],
+      context_requirements: [:tool_context],
+      build: fn context ->
+        root = context.project_root
+        router_ctx = context.router_context
 
-        if ToolRouter.routing_configured?(router_ctx) do
-          apply_diff_via_router(router_ctx, path, diff)
-        else
-          case ApplyDiff.execute(path, diff) do
-            {:ok, msg} -> {:ok, maybe_append_diagnostics(path, msg)}
-            error -> error
+        fn args ->
+          path = resolve_and_validate_path!(root, args["path"])
+          diff = args["diff"] || ""
+
+          if ToolRouter.routing_configured?(router_ctx) do
+            apply_diff_via_router(router_ctx, path, diff)
+          else
+            case ApplyDiff.execute(path, diff) do
+              {:ok, msg} -> {:ok, maybe_append_diagnostics(path, msg)}
+              error -> error
+            end
           end
         end
       end
     )
   end
 
-  @spec delete_file(String.t(), ToolRouter.context()) :: Tool.t()
-  defp delete_file(root, router_ctx) do
-    Tool.new!(
+  @spec delete_file() :: Spec.t()
+  defp delete_file do
+    Spec.new!(
       name: "delete_file",
       description: """
       Delete a file from the project. Destructive: requires approval.
@@ -636,30 +550,40 @@ defmodule MingaAgent.Tools do
         },
         "required" => ["path"]
       },
-      callback: fn args ->
-        path = resolve_and_validate_path!(root, args["path"])
+      source: :builtin,
+      category: :filesystem,
+      approval_level: :ask,
+      capabilities: [:mutate_project],
+      context_requirements: [:tool_context],
+      build: fn context ->
+        root = context.project_root
+        router_ctx = context.router_context
 
-        case ToolRouter.delete_file(router_ctx, path) do
-          :passthrough ->
-            DeleteFile.execute(path)
+        fn args ->
+          path = resolve_and_validate_path!(root, args["path"])
 
-          :ok ->
-            {:ok,
-             append_workspace_context(
-               router_ctx,
-               "deleted #{path} (via #{route_name(router_ctx)})"
-             )}
+          case ToolRouter.delete_file(router_ctx, path) do
+            :passthrough ->
+              DeleteFile.execute(path)
 
-          {:error, reason} ->
-            {:error, inspect(reason)}
+            :ok ->
+              {:ok,
+               append_workspace_context(
+                 router_ctx,
+                 "deleted #{path} (via #{route_name(router_ctx)})"
+               )}
+
+            {:error, reason} ->
+              {:error, inspect(reason)}
+          end
         end
       end
     )
   end
 
-  @spec list_directory(String.t(), ToolRouter.context()) :: Tool.t()
-  defp list_directory(root, router_ctx) do
-    Tool.new!(
+  @spec list_directory() :: Spec.t()
+  defp list_directory do
+    Spec.new!(
       name: "list_directory",
       description: """
       List files and directories at a known-small path. Returns at most 200 entries, one per line. Directories have a trailing slash. Generated, dependency, build, cache, and secret env files are omitted. Use find for broad file discovery instead of walking directories.
@@ -675,27 +599,38 @@ defmodule MingaAgent.Tools do
         },
         "required" => ["path"]
       },
-      callback: fn args ->
-        path = resolve_and_validate_path!(root, args["path"])
+      source: {:bundle, :read_only_tools},
+      category: :filesystem,
+      approval_level: :auto,
+      capabilities: [:read_project],
+      context_requirements: [:tool_context],
+      metadata: %{pack: :read_only_tools},
+      build: fn context ->
+        root = context.project_root
+        router_ctx = context.router_context
 
-        case ToolRouter.list_directory(router_ctx, path) do
-          :passthrough ->
-            ListDirectory.execute(path)
+        fn args ->
+          path = resolve_and_validate_path!(root, args["path"])
 
-          {:ok, entries} ->
-            {:ok,
-             append_workspace_context(router_ctx, format_project_view_entries(path, entries))}
+          case ToolRouter.list_directory(router_ctx, path) do
+            :passthrough ->
+              ListDirectory.execute(path)
 
-          {:error, reason} ->
-            {:error, inspect(reason)}
+            {:ok, entries} ->
+              {:ok,
+               append_workspace_context(router_ctx, format_project_view_entries(path, entries))}
+
+            {:error, reason} ->
+              {:error, inspect(reason)}
+          end
         end
       end
     )
   end
 
-  @spec find(String.t(), ToolRouter.context(), module()) :: Tool.t()
-  defp find(root, router_ctx, process_backend) do
-    Tool.new!(
+  @spec find() :: Spec.t()
+  defp find do
+    Spec.new!(
       name: "find",
       description: """
       Find files and directories by name pattern (glob). Returns at most 200
@@ -727,30 +662,42 @@ defmodule MingaAgent.Tools do
         },
         "required" => ["pattern"]
       },
-      callback: fn args ->
-        path = resolve_and_validate_path!(root, args["path"] || ".")
+      source: {:bundle, :read_only_tools},
+      category: :filesystem,
+      approval_level: :auto,
+      capabilities: [:read_project],
+      context_requirements: [:tool_context],
+      metadata: %{pack: :read_only_tools},
+      build: fn context ->
+        root = context.project_root
+        router_ctx = context.router_context
+        process_backend = Map.get(context.metadata, :process_backend, SystemProcessBackend)
 
-        case ToolRouter.search_context(router_ctx, path) do
-          {:ok, search} ->
-            public_args = Map.take(args, ["type", "max_depth"])
+        fn args ->
+          path = resolve_and_validate_path!(root, args["path"] || ".")
 
-            routed_result(
-              router_ctx,
-              process_backend.find(args["pattern"], search.exec_path, public_args,
-                filter_root: search.filter_root
+          case ToolRouter.search_context(router_ctx, path) do
+            {:ok, search} ->
+              public_args = Map.take(args, ["type", "max_depth"])
+
+              routed_result(
+                router_ctx,
+                process_backend.find(args["pattern"], search.exec_path, public_args,
+                  filter_root: search.filter_root
+                )
               )
-            )
 
-          {:error, reason} ->
-            {:error, inspect(reason)}
+            {:error, reason} ->
+              {:error, inspect(reason)}
+          end
         end
       end
     )
   end
 
-  @spec grep(String.t(), ToolRouter.context(), module()) :: Tool.t()
-  defp grep(root, router_ctx, process_backend) do
-    Tool.new!(
+  @spec grep() :: Spec.t()
+  defp grep do
+    Spec.new!(
       name: "grep",
       description: """
       Search file contents for a pattern. Returns at most 100 matching lines with
@@ -785,31 +732,42 @@ defmodule MingaAgent.Tools do
         },
         "required" => ["pattern"]
       },
-      callback: fn args ->
-        path = resolve_and_validate_path!(root, args["path"] || ".")
+      source: {:bundle, :read_only_tools},
+      category: :filesystem,
+      approval_level: :auto,
+      capabilities: [:read_project],
+      context_requirements: [:tool_context],
+      metadata: %{pack: :read_only_tools},
+      build: fn context ->
+        root = context.project_root
+        router_ctx = context.router_context
+        process_backend = Map.get(context.metadata, :process_backend, SystemProcessBackend)
 
-        case ToolRouter.search_context(router_ctx, path) do
-          {:ok, search} ->
-            public_args = Map.take(args, ["glob", "case_sensitive", "context_lines"])
+        fn args ->
+          path = resolve_and_validate_path!(root, args["path"] || ".")
 
-            routed_result(
-              router_ctx,
-              process_backend.grep(args["pattern"], search.exec_path, public_args,
-                filter_root: search.filter_root
+          case ToolRouter.search_context(router_ctx, path) do
+            {:ok, search} ->
+              public_args = Map.take(args, ["glob", "case_sensitive", "context_lines"])
+
+              routed_result(
+                router_ctx,
+                process_backend.grep(args["pattern"], search.exec_path, public_args,
+                  filter_root: search.filter_root
+                )
               )
-            )
 
-          {:error, reason} ->
-            {:error, inspect(reason)}
+            {:error, reason} ->
+              {:error, inspect(reason)}
+          end
         end
       end
     )
   end
 
-  @spec shell(String.t(), MingaAgent.ToolRouter.context(), (String.t() -> :ok) | nil, module()) ::
-          Tool.t()
-  defp shell(root, router_ctx, shell_output_callback, process_backend) do
-    Tool.new!(
+  @spec shell() :: Spec.t()
+  defp shell do
+    Spec.new!(
       name: "shell",
       description: """
       Run a shell command in the project root directory. Returns the combined
@@ -832,34 +790,46 @@ defmodule MingaAgent.Tools do
         },
         "required" => ["command"]
       },
-      callback: fn args ->
-        timeout_secs = min(args["timeout"] || 30, 300)
+      source: :builtin,
+      category: :shell,
+      approval_level: :ask,
+      capabilities: [:run_shell],
+      context_requirements: [:tool_context],
+      build: fn context ->
+        root = context.project_root
+        router_ctx = context.router_context
+        shell_output_callback = Map.get(context.metadata, :shell_output_callback)
+        process_backend = Map.get(context.metadata, :process_backend, SystemProcessBackend)
 
-        with {:ok, cwd} <- ToolRouter.working_dir_result(router_ctx),
-             {:ok, env} <- ToolRouter.command_env_result(router_ctx) do
-          shell_root = cwd || root
+        fn args ->
+          timeout_secs = min(args["timeout"] || 30, 300)
 
-          if is_nil(cwd) do
-            flush_before_shell()
-          end
+          with {:ok, cwd} <- ToolRouter.working_dir_result(router_ctx),
+               {:ok, env} <- ToolRouter.command_env_result(router_ctx) do
+            shell_root = cwd || root
 
-          routed_result(
-            router_ctx,
-            process_backend.shell(args["command"], shell_root, timeout_secs,
-              env: env,
-              on_output: shell_output_callback
+            if is_nil(cwd) do
+              flush_before_shell()
+            end
+
+            routed_result(
+              router_ctx,
+              process_backend.shell(args["command"], shell_root, timeout_secs,
+                env: env,
+                on_output: shell_output_callback
+              )
             )
-          )
-        else
-          {:error, reason} -> {:error, inspect(reason)}
+          else
+            {:error, reason} -> {:error, inspect(reason)}
+          end
         end
       end
     )
   end
 
-  @spec subagent(String.t(), GenServer.server() | nil) :: Tool.t()
-  defp subagent(root, parent_session) do
-    Tool.new!(
+  @spec subagent() :: Spec.t()
+  defp subagent do
+    Spec.new!(
       name: "subagent",
       description: """
       Spawn a child agent to work on a subtask. By default this is foreground:
@@ -900,24 +870,34 @@ defmodule MingaAgent.Tools do
         },
         "required" => ["task"]
       },
-      callback: fn args ->
-        Subagent.execute(args["task"],
-          project_root: root,
-          model: args["model"],
-          provider: args["provider"],
-          background: args["background"] == true,
-          isolation: args["isolation"],
-          parent_session: parent_session
-        )
+      source: :builtin,
+      category: :agent,
+      approval_level: :auto,
+      capabilities: [:spawn_agent],
+      context_requirements: [:tool_context],
+      build: fn context ->
+        root = context.project_root
+        parent_session = Map.get(context.metadata, :parent_session)
+
+        fn args ->
+          Subagent.execute(args["task"],
+            project_root: root,
+            model: args["model"],
+            provider: args["provider"],
+            background: args["background"] == true,
+            isolation: args["isolation"],
+            parent_session: parent_session
+          )
+        end
       end
     )
   end
 
   # ── Git tools ────────────────────────────────────────────────────────────────
 
-  @spec git_status(String.t()) :: Tool.t()
-  defp git_status(root) do
-    Tool.new!(
+  @spec git_status() :: Spec.t()
+  defp git_status do
+    Spec.new!(
       name: "git_status",
       description: """
       Show git status: staged, unstaged, and untracked files with their change type.
@@ -927,13 +907,21 @@ defmodule MingaAgent.Tools do
         "type" => "object",
         "properties" => %{}
       },
-      callback: fn _args -> GitTools.status(root) end
+      source: :builtin,
+      category: :git,
+      approval_level: :auto,
+      capabilities: [:git_read],
+      context_requirements: [:tool_context],
+      build: fn context ->
+        root = context.project_root
+        fn _args -> GitTools.status(root) end
+      end
     )
   end
 
-  @spec git_diff(String.t(), ToolRouter.context()) :: Tool.t()
-  defp git_diff(root, router_ctx) do
-    Tool.new!(
+  @spec git_diff() :: Spec.t()
+  defp git_diff do
+    Spec.new!(
       name: "git_diff",
       description: """
       Show git diff. Returns unified diff output. Read-only.
@@ -951,18 +939,28 @@ defmodule MingaAgent.Tools do
           }
         }
       },
-      callback: fn args ->
-        opts = []
-        opts = if args["path"], do: [{:path, args["path"]} | opts], else: opts
-        opts = if args["staged"], do: [{:staged, args["staged"]} | opts], else: opts
-        GitTools.diff(root, opts, router_ctx)
+      source: :builtin,
+      category: :git,
+      approval_level: :auto,
+      capabilities: [:git_read],
+      context_requirements: [:tool_context],
+      build: fn context ->
+        root = context.project_root
+        router_ctx = context.router_context
+
+        fn args ->
+          opts = []
+          opts = if args["path"], do: [{:path, args["path"]} | opts], else: opts
+          opts = if args["staged"], do: [{:staged, args["staged"]} | opts], else: opts
+          GitTools.diff(root, opts, router_ctx)
+        end
       end
     )
   end
 
-  @spec git_log(String.t()) :: Tool.t()
-  defp git_log(root) do
-    Tool.new!(
+  @spec git_log() :: Spec.t()
+  defp git_log do
+    Spec.new!(
       name: "git_log",
       description: """
       Show recent git commits with hash, author, date, and message. Read-only.
@@ -980,18 +978,27 @@ defmodule MingaAgent.Tools do
           }
         }
       },
-      callback: fn args ->
-        opts = []
-        opts = if args["count"], do: [{:count, args["count"]} | opts], else: opts
-        opts = if args["path"], do: [{:path, args["path"]} | opts], else: opts
-        GitTools.log(root, opts)
+      source: :builtin,
+      category: :git,
+      approval_level: :auto,
+      capabilities: [:git_read],
+      context_requirements: [:tool_context],
+      build: fn context ->
+        root = context.project_root
+
+        fn args ->
+          opts = []
+          opts = if args["count"], do: [{:count, args["count"]} | opts], else: opts
+          opts = if args["path"], do: [{:path, args["path"]} | opts], else: opts
+          GitTools.log(root, opts)
+        end
       end
     )
   end
 
-  @spec git_stage(String.t()) :: Tool.t()
-  defp git_stage(root) do
-    Tool.new!(
+  @spec git_stage() :: Spec.t()
+  defp git_stage do
+    Spec.new!(
       name: "git_stage",
       description: """
       Stage files for commit (equivalent to git add). Destructive: requires approval.
@@ -1007,16 +1014,25 @@ defmodule MingaAgent.Tools do
         },
         "required" => ["paths"]
       },
-      callback: fn args ->
-        paths = args["paths"] || []
-        GitTools.stage(root, paths)
+      source: :builtin,
+      category: :git,
+      approval_level: :ask,
+      capabilities: [:git_mutate],
+      context_requirements: [:tool_context],
+      build: fn context ->
+        root = context.project_root
+
+        fn args ->
+          paths = args["paths"] || []
+          GitTools.stage(root, paths)
+        end
       end
     )
   end
 
-  @spec git_commit(String.t()) :: Tool.t()
-  defp git_commit(root) do
-    Tool.new!(
+  @spec git_commit() :: Spec.t()
+  defp git_commit do
+    Spec.new!(
       name: "git_commit",
       description: """
       Create a git commit with a message. Stage files first with git_stage.
@@ -1032,17 +1048,26 @@ defmodule MingaAgent.Tools do
         },
         "required" => ["message"]
       },
-      callback: fn args ->
-        GitTools.commit(root, args["message"])
+      source: :builtin,
+      category: :git,
+      approval_level: :ask,
+      capabilities: [:git_mutate],
+      context_requirements: [:tool_context],
+      build: fn context ->
+        root = context.project_root
+
+        fn args ->
+          GitTools.commit(root, args["message"])
+        end
       end
     )
   end
 
   # ── Memory tools ──────────────────────────────────────────────────────────────
 
-  @spec memory_write() :: Tool.t()
+  @spec memory_write() :: Spec.t()
   defp memory_write do
-    Tool.new!(
+    Spec.new!(
       name: "memory_write",
       description: """
       Save a learning, preference, or project convention to persistent memory.
@@ -1061,17 +1086,24 @@ defmodule MingaAgent.Tools do
         },
         "required" => ["text"]
       },
-      callback: fn args ->
-        MemoryWrite.execute(args["text"] || "")
+      source: :builtin,
+      category: :memory,
+      approval_level: :auto,
+      capabilities: [:memory_write],
+      context_requirements: [:tool_context],
+      build: fn _context ->
+        fn args ->
+          MemoryWrite.execute(args["text"] || "")
+        end
       end
     )
   end
 
   # ── LSP tools ──────────────────────────────────────────────────────────────
 
-  @spec lsp_diagnostics(String.t()) :: Tool.t()
-  defp lsp_diagnostics(root) do
-    Tool.new!(
+  @spec lsp_diagnostics() :: Spec.t()
+  defp lsp_diagnostics do
+    Spec.new!(
       name: "diagnostics",
       description: """
       Get current LSP diagnostics (errors, warnings, hints) for a file.
@@ -1089,16 +1121,26 @@ defmodule MingaAgent.Tools do
         },
         "required" => ["path"]
       },
-      callback: fn args ->
-        path = resolve_and_validate_path!(root, args["path"])
-        LspDiagnostics.execute(path)
+      source: {:bundle, :lsp_tools},
+      category: :lsp,
+      approval_level: :auto,
+      capabilities: [:lsp_read],
+      context_requirements: [:tool_context],
+      metadata: %{pack: :lsp_tools, destructive: false},
+      build: fn context ->
+        root = context.project_root
+
+        fn args ->
+          path = resolve_and_validate_path!(root, args["path"])
+          LspDiagnostics.execute(path)
+        end
       end
     )
   end
 
-  @spec lsp_definition(String.t()) :: Tool.t()
-  defp lsp_definition(root) do
-    Tool.new!(
+  @spec lsp_definition() :: Spec.t()
+  defp lsp_definition do
+    Spec.new!(
       name: "definition",
       description: """
       Find where a symbol is defined. Returns the file path, line, and
@@ -1123,16 +1165,26 @@ defmodule MingaAgent.Tools do
         },
         "required" => ["path", "line", "column"]
       },
-      callback: fn args ->
-        path = resolve_and_validate_path!(root, args["path"])
-        LspDefinition.execute(path, args["line"], args["column"])
+      source: {:bundle, :lsp_tools},
+      category: :lsp,
+      approval_level: :auto,
+      capabilities: [:lsp_read],
+      context_requirements: [:tool_context],
+      metadata: %{pack: :lsp_tools, destructive: false},
+      build: fn context ->
+        root = context.project_root
+
+        fn args ->
+          path = resolve_and_validate_path!(root, args["path"])
+          LspDefinition.execute(path, args["line"], args["column"])
+        end
       end
     )
   end
 
-  @spec lsp_references(String.t()) :: Tool.t()
-  defp lsp_references(root) do
-    Tool.new!(
+  @spec lsp_references() :: Spec.t()
+  defp lsp_references do
+    Spec.new!(
       name: "references",
       description: """
       Find all usages of a symbol across the project. Returns file paths,
@@ -1158,16 +1210,26 @@ defmodule MingaAgent.Tools do
         },
         "required" => ["path", "line", "column"]
       },
-      callback: fn args ->
-        path = resolve_and_validate_path!(root, args["path"])
-        LspReferences.execute(path, args["line"], args["column"])
+      source: {:bundle, :lsp_tools},
+      category: :lsp,
+      approval_level: :auto,
+      capabilities: [:lsp_read],
+      context_requirements: [:tool_context],
+      metadata: %{pack: :lsp_tools, destructive: false},
+      build: fn context ->
+        root = context.project_root
+
+        fn args ->
+          path = resolve_and_validate_path!(root, args["path"])
+          LspReferences.execute(path, args["line"], args["column"])
+        end
       end
     )
   end
 
-  @spec lsp_hover(String.t()) :: Tool.t()
-  defp lsp_hover(root) do
-    Tool.new!(
+  @spec lsp_hover() :: Spec.t()
+  defp lsp_hover do
+    Spec.new!(
       name: "hover",
       description: """
       Get type signature and documentation for a symbol. Returns the same
@@ -1192,16 +1254,26 @@ defmodule MingaAgent.Tools do
         },
         "required" => ["path", "line", "column"]
       },
-      callback: fn args ->
-        path = resolve_and_validate_path!(root, args["path"])
-        LspHover.execute(path, args["line"], args["column"])
+      source: {:bundle, :lsp_tools},
+      category: :lsp,
+      approval_level: :auto,
+      capabilities: [:lsp_read],
+      context_requirements: [:tool_context],
+      metadata: %{pack: :lsp_tools, destructive: false},
+      build: fn context ->
+        root = context.project_root
+
+        fn args ->
+          path = resolve_and_validate_path!(root, args["path"])
+          LspHover.execute(path, args["line"], args["column"])
+        end
       end
     )
   end
 
-  @spec lsp_document_symbols(String.t()) :: Tool.t()
-  defp lsp_document_symbols(root) do
-    Tool.new!(
+  @spec lsp_document_symbols() :: Spec.t()
+  defp lsp_document_symbols do
+    Spec.new!(
       name: "document_symbols",
       description: """
       List all symbols (functions, types, modules) defined in a file.
@@ -1218,16 +1290,26 @@ defmodule MingaAgent.Tools do
         },
         "required" => ["path"]
       },
-      callback: fn args ->
-        path = resolve_and_validate_path!(root, args["path"])
-        LspDocumentSymbols.execute(path)
+      source: {:bundle, :lsp_tools},
+      category: :lsp,
+      approval_level: :auto,
+      capabilities: [:lsp_read],
+      context_requirements: [:tool_context],
+      metadata: %{pack: :lsp_tools, destructive: false},
+      build: fn context ->
+        root = context.project_root
+
+        fn args ->
+          path = resolve_and_validate_path!(root, args["path"])
+          LspDocumentSymbols.execute(path)
+        end
       end
     )
   end
 
-  @spec lsp_workspace_symbols() :: Tool.t()
+  @spec lsp_workspace_symbols() :: Spec.t()
   defp lsp_workspace_symbols do
-    Tool.new!(
+    Spec.new!(
       name: "workspace_symbols",
       description: """
       Search for symbols (modules, functions, types) across the entire project.
@@ -1244,15 +1326,23 @@ defmodule MingaAgent.Tools do
         },
         "required" => ["query"]
       },
-      callback: fn args ->
-        LspWorkspaceSymbols.execute(args["query"])
+      source: {:bundle, :lsp_tools},
+      category: :lsp,
+      approval_level: :auto,
+      capabilities: [:lsp_read],
+      context_requirements: [:tool_context],
+      metadata: %{pack: :lsp_tools, destructive: false},
+      build: fn _context ->
+        fn args ->
+          LspWorkspaceSymbols.execute(args["query"])
+        end
       end
     )
   end
 
-  @spec lsp_rename(String.t()) :: Tool.t()
-  defp lsp_rename(root) do
-    Tool.new!(
+  @spec lsp_rename() :: Spec.t()
+  defp lsp_rename do
+    Spec.new!(
       name: "rename",
       description: """
       Rename a symbol across the entire project using LSP semantic rename.
@@ -1282,16 +1372,26 @@ defmodule MingaAgent.Tools do
         },
         "required" => ["path", "line", "column", "new_name"]
       },
-      callback: fn args ->
-        path = resolve_and_validate_path!(root, args["path"])
-        LspRename.execute(path, args["line"], args["column"], args["new_name"])
+      source: {:bundle, :lsp_tools},
+      category: :lsp,
+      approval_level: :ask,
+      capabilities: [:lsp_mutate],
+      context_requirements: [:tool_context],
+      metadata: %{pack: :lsp_tools, destructive: true},
+      build: fn context ->
+        root = context.project_root
+
+        fn args ->
+          path = resolve_and_validate_path!(root, args["path"])
+          LspRename.execute(path, args["line"], args["column"], args["new_name"])
+        end
       end
     )
   end
 
-  @spec lsp_code_actions(String.t()) :: Tool.t()
-  defp lsp_code_actions(root) do
-    Tool.new!(
+  @spec lsp_code_actions() :: Spec.t()
+  defp lsp_code_actions do
+    Spec.new!(
       name: "code_actions",
       description: """
       List or apply LSP code actions (quickfixes, refactorings, source actions)
@@ -1322,21 +1422,31 @@ defmodule MingaAgent.Tools do
         },
         "required" => ["path", "line"]
       },
-      callback: fn args ->
-        path = resolve_and_validate_path!(root, args["path"])
-        opts = []
-        opts = if args["column"], do: [{:col, args["column"]} | opts], else: opts
-        opts = if args["apply"], do: [{:apply, args["apply"]} | opts], else: opts
-        LspCodeActions.execute(path, args["line"], opts)
+      source: {:bundle, :lsp_tools},
+      category: :lsp,
+      approval_level: :ask,
+      capabilities: [:lsp_read, :lsp_mutate],
+      context_requirements: [:tool_context],
+      metadata: %{pack: :lsp_tools, destructive: :conditional},
+      build: fn context ->
+        root = context.project_root
+
+        fn args ->
+          path = resolve_and_validate_path!(root, args["path"])
+          opts = []
+          opts = if args["column"], do: [{:col, args["column"]} | opts], else: opts
+          opts = if args["apply"], do: [{:apply, args["apply"]} | opts], else: opts
+          LspCodeActions.execute(path, args["line"], opts)
+        end
       end
     )
   end
 
   # ── Introspection tools ─────────────────────────────────────────────────────
 
-  @spec describe_runtime() :: Tool.t()
+  @spec describe_runtime() :: Spec.t()
   defp describe_runtime do
-    Tool.new!(
+    Spec.new!(
       name: "describe_runtime",
       description: """
       Describe the Minga runtime's capabilities: version, available tool
@@ -1347,13 +1457,20 @@ defmodule MingaAgent.Tools do
         "type" => "object",
         "properties" => %{}
       },
-      callback: &MingaAgent.Tools.Introspection.describe_runtime/1
+      source: :builtin,
+      category: :agent,
+      approval_level: :auto,
+      capabilities: [],
+      context_requirements: [],
+      build: fn _context ->
+        &MingaAgent.Tools.Introspection.describe_runtime/1
+      end
     )
   end
 
-  @spec describe_tools() :: Tool.t()
+  @spec describe_tools() :: Spec.t()
   defp describe_tools do
-    Tool.new!(
+    Spec.new!(
       name: "describe_tools",
       description: """
       List all available tools with their names, categories, and
@@ -1363,7 +1480,14 @@ defmodule MingaAgent.Tools do
         "type" => "object",
         "properties" => %{}
       },
-      callback: &MingaAgent.Tools.Introspection.describe_tools/1
+      source: :builtin,
+      category: :agent,
+      approval_level: :auto,
+      capabilities: [],
+      context_requirements: [],
+      build: fn _context ->
+        &MingaAgent.Tools.Introspection.describe_tools/1
+      end
     )
   end
 

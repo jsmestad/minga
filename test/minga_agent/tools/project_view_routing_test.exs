@@ -48,7 +48,7 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
         env: [{"PROJECT_VIEW_SENTINEL", "present"}]
       )
 
-    tools = Tools.all(project_root: root, project_view: view)
+    tools = build_tools(project_root: root, project_view: view)
     %{root: root, working_dir: working_dir, tools: tools}
   end
 
@@ -265,7 +265,7 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
         workspace_id: 99
       )
 
-    tools = Tools.all(project_root: root, project_view: view)
+    tools = build_tools(project_root: root, project_view: view)
 
     for {name, args, expected} <- [
           {"read_file", %{"path" => "lib/view_only.txt"}, ":read_failed"},
@@ -313,7 +313,7 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     File.write!(target_path, "one two one\n")
 
     {:ok, changeset} = start_supervised({Changeset.Server, project_root: root})
-    tools = Tools.all(project_root: root, changeset: changeset)
+    tools = build_tools(project_root: root, changeset: changeset)
 
     assert {:ok, result} =
              call_tool(tools, "multi_edit_file", %{
@@ -334,7 +334,7 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     File.write!(target_path, "one\ntwo\n")
 
     {:ok, changeset} = start_supervised({Changeset.Server, project_root: root})
-    tools = Tools.all(project_root: root, changeset: changeset)
+    tools = build_tools(project_root: root, changeset: changeset)
 
     diff = """
     @@ -1,2 +1,2 @@
@@ -361,7 +361,7 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     File.write!(Path.join(root, "lib/deleted.txt"), "delete me\n")
 
     {:ok, changeset} = start_supervised({Changeset.Server, project_root: root})
-    tools = Tools.all(project_root: root, changeset: changeset)
+    tools = build_tools(project_root: root, changeset: changeset)
 
     assert {:ok, write_result} =
              call_tool(tools, "write_file", %{
@@ -417,7 +417,7 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     File.write!(Path.join(root, "lib/delete.txt"), "root delete\n")
 
     {:ok, view} = MingaAgent.ProjectView.overlay(root)
-    tools = Tools.all(project_root: root, project_view: view)
+    tools = build_tools(project_root: root, project_view: view)
 
     assert {:ok, _} =
              call_tool(tools, "write_file", %{
@@ -472,7 +472,7 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     File.write!(Path.join(root, "node_modules/leaked.txt"), "shared_secret_token\n")
 
     {:ok, changeset} = start_supervised({Changeset.Server, project_root: root})
-    tools = Tools.all(project_root: root, changeset: changeset)
+    tools = build_tools(project_root: root, changeset: changeset)
 
     assert {:ok, write_result} =
              call_tool(tools, "write_file", %{
@@ -555,7 +555,7 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
       )
 
     {:ok, store} = start_supervised(BufferForkStore)
-    tools = Tools.all(project_root: root, fork_store: store)
+    tools = build_tools(project_root: root, fork_store: store)
 
     assert {:ok, write_result} =
              call_tool(tools, "write_file", %{
@@ -602,7 +602,7 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     on_exit(fn -> GitStub.clear(root) end)
 
     {:ok, changeset} = start_supervised({Changeset.Server, project_root: root})
-    tools = Tools.all(project_root: root, changeset: changeset)
+    tools = build_tools(project_root: root, changeset: changeset)
 
     assert {:error, message} = call_tool(tools, "git_diff", %{"staged" => true})
     assert message =~ "staged=true is unavailable"
@@ -620,7 +620,7 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     File.write!(Path.join(root, "old/file with space.txt"), "old spaced path\n")
 
     {:ok, changeset} = start_supervised({Changeset.Server, project_root: root})
-    tools = Tools.all(project_root: root, changeset: changeset)
+    tools = build_tools(project_root: root, changeset: changeset)
 
     assert {:ok, _result} =
              call_tool(tools, "write_file", %{
@@ -677,7 +677,7 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
       )
 
     assert {:ok, [%{path: "lib/link.txt"}]} = MingaAgent.ProjectView.diff(view)
-    tools = Tools.all(project_root: root, project_view: view)
+    tools = build_tools(project_root: root, project_view: view)
     assert {:error, message} = call_tool(tools, "git_diff", %{})
     assert message =~ "refusing to diff symlink path lib/link.txt"
     refute message =~ "outside secret token"
@@ -688,7 +688,7 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     {_out, 0} = System.cmd("git", ["init"], cd: root, stderr_to_stdout: true)
     {:ok, changeset} = start_supervised({Changeset.Server, project_root: root})
     big_content = String.duplicate("large diff line\n", 500)
-    tools = Tools.all(project_root: root, changeset: changeset)
+    tools = build_tools(project_root: root, changeset: changeset)
 
     assert {:ok, _result} =
              call_tool(tools, "write_file", %{"path" => "big.txt", "content" => big_content})
@@ -708,7 +708,7 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
 
     {:ok, changeset} = start_supervised({Changeset.Server, project_root: root})
     oversized = String.duplicate("oversized secret token\n", 20)
-    tools = Tools.all(project_root: root, changeset: changeset)
+    tools = build_tools(project_root: root, changeset: changeset)
 
     assert {:ok, _result} =
              call_tool(tools, "write_file", %{"path" => "big.txt", "content" => oversized})
@@ -735,7 +735,7 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
 
     {:ok, store} = start_supervised(BufferForkStore)
     {:ok, changeset} = start_supervised({Changeset.Server, project_root: root})
-    tools = Tools.all(project_root: root, fork_store: store, changeset: changeset)
+    tools = build_tools(project_root: root, fork_store: store, changeset: changeset)
     oversized = String.duplicate("combined fork secret\n", 20)
 
     assert {:ok, write_result} =
@@ -766,7 +766,7 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
       )
 
     {:ok, view} = MingaAgent.ProjectView.overlay(root)
-    tools = Tools.all(project_root: root, project_view: view)
+    tools = build_tools(project_root: root, project_view: view)
     oversized = String.duplicate("project view fork secret\n", 20)
 
     assert {:ok, write_result} =
@@ -802,7 +802,7 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
 
     {:ok, store} = start_supervised(BufferForkStore)
     {:ok, changeset} = start_supervised({Changeset.Server, project_root: root})
-    tools = Tools.all(project_root: root, fork_store: store, changeset: changeset)
+    tools = build_tools(project_root: root, fork_store: store, changeset: changeset)
 
     assert {:ok, write_result} =
              call_tool(tools, "write_file", %{
@@ -840,7 +840,7 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     on_exit(fn -> GitStub.clear(root) end)
 
     {:ok, changeset} = start_supervised({Changeset.Server, project_root: root})
-    tools = Tools.all(project_root: root, changeset: changeset)
+    tools = build_tools(project_root: root, changeset: changeset)
     ref = Process.monitor(changeset)
     Process.exit(changeset, :kill)
     assert_receive {:DOWN, ^ref, :process, ^changeset, _reason}
@@ -857,7 +857,7 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     File.write!(target_path, "one two one\n")
 
     {:ok, changeset} = start_supervised({Changeset.Server, project_root: root})
-    tools = Tools.all(project_root: root, changeset: changeset)
+    tools = build_tools(project_root: root, changeset: changeset)
     ref = Process.monitor(changeset)
     Process.exit(changeset, :kill)
     assert_receive {:DOWN, ^ref, :process, ^changeset, _reason}
@@ -894,12 +894,23 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
         workspace_id: 100
       )
 
-    tools = Tools.all(project_root: root, project_view: view)
+    tools = build_tools(project_root: root, project_view: view)
 
     assert {:error, message} = call_tool(tools, "shell", %{"command" => "cat lib/dirty.txt"})
     assert message =~ "project_view_unavailable"
     assert File.read!(file) == "original\n"
     assert Minga.Buffer.content(buffer) == "dirty\n"
+  end
+
+  defp build_tools(opts) do
+    context =
+      opts
+      |> Keyword.take([:project_root, :project_view, :fork_store, :changeset])
+      |> MingaAgent.Tool.Context.new()
+
+    Enum.map(Tools.all(), fn spec ->
+      %{name: spec.name, callback: MingaAgent.Tool.Spec.build_callback(spec, context)}
+    end)
   end
 
   defp call_tool(tools, name, args) do

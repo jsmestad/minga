@@ -10,6 +10,7 @@ defmodule MingaAgent.Providers.NativeTest do
   alias MingaAgent.TurnUsage
   alias MingaAgent.ProjectView.RecordingBackend
   alias MingaAgent.Providers.Native
+  alias MingaAgent.Tool.Spec
   alias MingaAgent.ToolCall
   alias MingaAgent.Tools
   alias ReqLLM.Context
@@ -365,6 +366,51 @@ defmodule MingaAgent.Providers.NativeTest do
       assert Minga.Buffer.content(buffer) == "direct\n"
     end
 
+    test "rebuilds only custom tool declarations after fork store down", %{tmp_dir: dir} do
+      test_pid = self()
+
+      spec =
+        Spec.new!(
+          source: :config,
+          name: "custom_restart",
+          description: "Reports the bound fork store",
+          parameter_schema: %{},
+          build: fn context ->
+            fn _args ->
+              send(test_pid, {:bound_fork_store, context.router_context.fork_store})
+              {:ok, "reported"}
+            end
+          end
+        )
+
+      {:ok, pid} = start_provider(tmp_dir: dir, tools: [spec])
+      fork_store = Native.fork_store(pid)
+      assert is_pid(fork_store)
+
+      custom_tool = pid |> Native.tools() |> Enum.find(&(&1.name == "custom_restart"))
+      assert {:ok, "reported"} = custom_tool.callback.(%{})
+      assert_receive {:bound_fork_store, ^fork_store}
+
+      ref = Process.monitor(fork_store)
+      Process.exit(fork_store, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^fork_store, _reason}
+      assert Native.fork_store(pid) == nil
+
+      rebuilt_tools = Native.tools(pid)
+
+      assert Enum.map(rebuilt_tools, & &1.name) == [
+               "custom_restart",
+               "todo_write",
+               "todo_read",
+               "notebook_write",
+               "notebook_read"
+             ]
+
+      rebuilt_custom_tool = Enum.find(rebuilt_tools, &(&1.name == "custom_restart"))
+      assert {:ok, "reported"} = rebuilt_custom_tool.callback.(%{})
+      assert_receive {:bound_fork_store, nil}
+    end
+
     test "project_view-backed tools reuse the workspace-owned draft machinery and survive provider exit",
          %{tmp_dir: dir} do
       path = Path.join(dir, "lib/view_draft.ex")
@@ -581,6 +627,82 @@ defmodule MingaAgent.Providers.NativeTest do
       # Should eventually get a text response and AgentEnd
       assert Enum.any?(events, &match?(%Event.TextDelta{}, &1))
       assert Enum.any?(events, &match?(%Event.AgentEnd{}, &1))
+    end
+
+    test "executes the supplied custom spec with refreshed project context", %{tmp_dir: dir} do
+      root = Path.join(dir, "root")
+      first_working_dir = Path.join(dir, "first")
+      second_working_dir = Path.join(dir, "second")
+      File.mkdir_p!(root)
+
+      {:ok, first_view} =
+        RecordingBackend.create(root,
+          parent: self(),
+          working_dir: first_working_dir,
+          workspace_id: 1
+        )
+
+      {:ok, second_view} =
+        RecordingBackend.create(root,
+          parent: self(),
+          working_dir: second_working_dir,
+          workspace_id: 2
+        )
+
+      spec =
+        Spec.new!(
+          source: :config,
+          name: "custom_context",
+          description: "Reports the bound project context",
+          parameter_schema: %{},
+          build: fn context ->
+            fn _args -> {:ok, ProjectView.working_dir(context.router_context.project_view)} end
+          end
+        )
+
+      call_count = :counters.new(1, [:atomics])
+
+      client = fn _model, _messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        chunks =
+          if count == 0 do
+            [
+              ReqLLM.StreamChunk.tool_call("custom_context", %{}, %{
+                id: "tc_custom_context",
+                index: 0
+              }),
+              ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+            ]
+          else
+            [ReqLLM.StreamChunk.text("done"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
+          end
+
+        build_stream_response(chunks)
+      end
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: root,
+          project_view: first_view,
+          llm_client: client,
+          tools: [spec],
+          config: agent_config(tool_approval: :none)
+        )
+
+      assert :ok = Native.refresh_project_view(pid, second_view)
+      assert :ok = Native.send_prompt(pid, "Report context")
+
+      events = collect_run_events()
+
+      assert Enum.any?(events, fn
+               %Event.ToolEnd{name: "custom_context", result: result, is_error: false} ->
+                 result == second_working_dir
+
+               _event ->
+                 false
+             end)
     end
 
     test "executes independent tool calls concurrently and appends results in call order", %{
@@ -944,6 +1066,176 @@ defmodule MingaAgent.Providers.NativeTest do
       after
         Process.flag(:trap_exit, previous_trap)
       end
+    end
+
+    test "empty destructive tool configuration allows formerly destructive builtins", %{
+      tmp_dir: dir
+    } do
+      call_count = :counters.new(1, [:atomics])
+
+      client = fn _model, _messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        chunks =
+          case count do
+            0 ->
+              [
+                ReqLLM.StreamChunk.tool_call(
+                  "write_file",
+                  %{"path" => "allowed.txt", "content" => "allowed\n"},
+                  %{id: "tc_write", index: 0}
+                ),
+                ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+              ]
+
+            _ ->
+              [ReqLLM.StreamChunk.text("done"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
+          end
+
+        build_stream_response(chunks)
+      end
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: client,
+          tools: nil,
+          config: agent_config(tool_approval: :destructive, destructive_tools: [])
+        )
+
+      assert :ok = Native.send_prompt(pid, "Write the file")
+      assert_receive {:agent_provider_event, %Event.AgentStart{}}, 1_000
+      events = collect_run_events()
+
+      refute Enum.any?(events, &match?(%Event.ToolApproval{}, &1))
+
+      assert Enum.any?(
+               events,
+               &match?(%Event.ToolEnd{name: "write_file", is_error: false}, &1)
+             )
+    end
+
+    test "destructive mode asks for names in the configured list", %{tmp_dir: dir} do
+      File.write!(Path.join(dir, "configured.txt"), "configured\n")
+      call_count = :counters.new(1, [:atomics])
+
+      client = fn _model, _messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        chunks =
+          case count do
+            0 ->
+              [
+                ReqLLM.StreamChunk.tool_call(
+                  "read_file",
+                  %{"path" => "configured.txt"},
+                  %{id: "tc_read_configured", index: 0}
+                ),
+                ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+              ]
+
+            _ ->
+              [ReqLLM.StreamChunk.text("done"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
+          end
+
+        build_stream_response(chunks)
+      end
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: client,
+          tools: nil,
+          config: agent_config(tool_approval: :destructive, destructive_tools: ["read_file"])
+        )
+
+      assert :ok = Native.send_prompt(pid, "Read the file")
+      assert_receive {:agent_provider_event, %Event.AgentStart{}}, 1_000
+
+      assert_receive {:agent_provider_event,
+                      %Event.ToolApproval{
+                        tool_call_id: "tc_read_configured",
+                        reply_to: reply_to
+                      }},
+                     1_000
+
+      send(reply_to, {:tool_approval_response, "tc_read_configured", :approve})
+      events = collect_run_events()
+
+      assert Enum.any?(
+               events,
+               &match?(%Event.ToolEnd{name: "read_file", is_error: false}, &1)
+             )
+    end
+
+    test "custom spec approval metadata is honored", %{tmp_dir: dir} do
+      test_pid = self()
+      call_count = :counters.new(1, [:atomics])
+
+      spec =
+        Spec.new!(
+          source: :config,
+          name: "custom_approval",
+          description: "Requires approval",
+          parameter_schema: %{},
+          approval_level: :ask,
+          build: fn _context ->
+            fn _args ->
+              send(test_pid, :custom_approval_ran)
+              {:ok, "approved"}
+            end
+          end
+        )
+
+      client = fn _model, _messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        chunks =
+          if count == 0 do
+            [
+              ReqLLM.StreamChunk.tool_call("custom_approval", %{}, %{
+                id: "tc_custom_approval",
+                index: 0
+              }),
+              ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+            ]
+          else
+            [ReqLLM.StreamChunk.text("done"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
+          end
+
+        build_stream_response(chunks)
+      end
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: client,
+          tools: [spec],
+          config: agent_config(tool_approval: :destructive, destructive_tools: [])
+        )
+
+      assert :ok = Native.send_prompt(pid, "Run custom tool")
+
+      assert_receive {:agent_provider_event,
+                      %Event.ToolApproval{
+                        tool_call_id: "tc_custom_approval",
+                        reply_to: reply_to
+                      }},
+                     1_000
+
+      refute_receive :custom_approval_ran, 50
+      send(reply_to, {:tool_approval_response, "tc_custom_approval", :approve})
+      events = collect_run_events()
+
+      assert_received :custom_approval_ran
+
+      assert Enum.any?(
+               events,
+               &match?(%Event.ToolEnd{name: "custom_approval", is_error: false}, &1)
+             )
     end
 
     test "approval-required tools wait while allowed tools continue", %{tmp_dir: dir} do

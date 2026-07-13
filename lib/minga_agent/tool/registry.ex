@@ -135,17 +135,30 @@ defmodule MingaAgent.Tool.Registry do
   @doc "Converts a `ReqLLM.Tool` struct to a config-owned `MingaAgent.Tool.Spec`."
   @spec from_req_tool(ReqLLM.Tool.t()) :: Spec.t()
   def from_req_tool(%ReqLLM.Tool{} = tool) do
+    metadata = canonical_metadata(tool.name)
+
     Spec.new!(
       source: :config,
       name: tool.name,
       description: tool.description || "",
       parameter_schema: tool.parameter_schema || %{},
       callback: tool.callback,
-      category: categorize(tool.name),
-      approval_level: approval_for(tool.name),
-      capabilities: capabilities_for(tool.name),
-      context_requirements: context_requirements_for(tool.name)
+      category: metadata.category,
+      approval_level: metadata.approval_level,
+      capabilities: metadata.capabilities,
+      context_requirements: metadata.context_requirements
     )
+  end
+
+  @spec canonical_metadata(String.t()) :: map()
+  defp canonical_metadata(name) do
+    case Enum.find(MingaAgent.Tools.specs(), &(&1.name == name)) do
+      %Spec{} = spec ->
+        Map.take(spec, [:category, :approval_level, :capabilities, :context_requirements])
+
+      nil ->
+        %{category: :custom, approval_level: :auto, capabilities: [], context_requirements: []}
+    end
   end
 
   @spec register_validated(atom(), Spec.t() | keyword() | map()) ::
@@ -275,101 +288,4 @@ defmodule MingaAgent.Tool.Registry do
       BundledSources.reserved_source_for(name)
     end
   end
-
-  @spec categorize(String.t()) :: Spec.category()
-  defp categorize("read_file"), do: :filesystem
-  defp categorize("write_file"), do: :filesystem
-  defp categorize("edit_file"), do: :filesystem
-  defp categorize("multi_edit_file"), do: :filesystem
-  defp categorize("apply_diff"), do: :filesystem
-  defp categorize("list_directory"), do: :filesystem
-  defp categorize("find"), do: :filesystem
-  defp categorize("grep"), do: :filesystem
-  defp categorize("shell"), do: :shell
-  defp categorize("fetch_url"), do: :network
-  defp categorize("subagent"), do: :agent
-  defp categorize("describe_runtime"), do: :agent
-  defp categorize("describe_tools"), do: :agent
-  defp categorize("git_status"), do: :git
-  defp categorize("git_diff"), do: :git
-  defp categorize("git_log"), do: :git
-  defp categorize("git_stage"), do: :git
-  defp categorize("git_commit"), do: :git
-  defp categorize("memory_write"), do: :memory
-  defp categorize("diagnostics"), do: :lsp
-  defp categorize("definition"), do: :lsp
-  defp categorize("references"), do: :lsp
-  defp categorize("hover"), do: :lsp
-  defp categorize("document_symbols"), do: :lsp
-  defp categorize("workspace_symbols"), do: :lsp
-  defp categorize("rename"), do: :lsp
-  defp categorize("code_actions"), do: :lsp
-  defp categorize(_), do: :custom
-
-  @spec approval_for(String.t()) :: Spec.approval_level()
-  defp approval_for(name) do
-    if MingaAgent.Tools.destructive?(name), do: :ask, else: :auto
-  end
-
-  @spec capabilities_for(String.t()) :: [Spec.capability()]
-  defp capabilities_for(name)
-       when name in ["write_file", "edit_file", "multi_edit_file", "apply_diff", "delete_file"],
-       do: [:mutate_project]
-
-  defp capabilities_for(name) when name in ["read_file", "list_directory", "find", "grep"],
-    do: [:read_project]
-
-  defp capabilities_for("shell"), do: [:run_shell]
-  defp capabilities_for(name) when name in ["git_stage", "git_commit"], do: [:git_mutate]
-  defp capabilities_for(name) when name in ["git_status", "git_diff", "git_log"], do: [:git_read]
-  defp capabilities_for("fetch_url"), do: [:network]
-  defp capabilities_for("memory_write"), do: [:memory_write]
-  defp capabilities_for("subagent"), do: [:spawn_agent]
-  defp capabilities_for(name) when name in ["rename", "code_actions"], do: [:lsp_mutate]
-
-  defp capabilities_for(name)
-       when name in [
-              "diagnostics",
-              "definition",
-              "references",
-              "hover",
-              "document_symbols",
-              "workspace_symbols"
-            ],
-       do: [:lsp_read]
-
-  defp capabilities_for(_name), do: []
-
-  @spec context_requirements_for(String.t()) :: [Spec.context_requirement()]
-  defp context_requirements_for(name)
-       when name in [
-              "read_file",
-              "write_file",
-              "edit_file",
-              "multi_edit_file",
-              "apply_diff",
-              "delete_file",
-              "list_directory",
-              "find",
-              "grep",
-              "shell",
-              "subagent",
-              "git_status",
-              "git_diff",
-              "git_log",
-              "git_stage",
-              "git_commit",
-              "memory_write",
-              "diagnostics",
-              "definition",
-              "references",
-              "hover",
-              "document_symbols",
-              "workspace_symbols",
-              "rename",
-              "code_actions"
-            ],
-       do: [:tool_context]
-
-  defp context_requirements_for(_name), do: []
 end

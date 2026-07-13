@@ -9,6 +9,7 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
   alias MingaAgent.Credentials
   alias MingaAgent.Providers.Native.ReqLLMAdapter.ToolCall
   alias MingaAgent.Providers.Native.ReqLLMAdapter.TurnResult
+  alias MingaAgent.Tool.Spec, as: ToolSpec
   alias ReqLLM.Response
   alias ReqLLM.StreamResponse
   alias ReqLLM.Tool
@@ -77,6 +78,19 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
 
         {:error, message, :invalid_format}
     end
+  end
+
+  @doc "Builds the provider-specific tool value for a canonical tool declaration."
+  @spec tool(ToolSpec.t(), ToolSpec.callback(), map()) :: Tool.t()
+  def tool(%ToolSpec{} = spec, callback, provider_options \\ %{})
+      when is_function(callback, 1) and is_map(provider_options) do
+    Tool.new!(
+      name: spec.name,
+      description: spec.description,
+      parameter_schema: spec.parameter_schema,
+      provider_options: provider_options,
+      callback: callback
+    )
   end
 
   @doc "Builds ReqLLM stream options for one native provider request."

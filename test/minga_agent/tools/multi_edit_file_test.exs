@@ -172,10 +172,10 @@ defmodule MingaAgent.Tools.MultiEditFileTest do
       {:ok, fork_store} = start_supervised(MingaAgent.BufferForkStore)
       Process.exit(fork_store, :kill)
 
-      tools = Tools.all(project_root: root, fork_store: fork_store)
+      context = MingaAgent.Tool.Context.new(project_root: root, fork_store: fork_store)
 
       assert {:error, message} =
-               call_tool(tools, "multi_edit_file", %{
+               call_tool(context, "multi_edit_file", %{
                  "path" => "lib/unopened.txt",
                  "edits" => [%{"old_text" => "old", "new_text" => "new"}]
                })
@@ -185,9 +185,10 @@ defmodule MingaAgent.Tools.MultiEditFileTest do
     end
   end
 
-  defp call_tool(tools, name, args) do
-    tool = Enum.find(tools, &(&1.name == name))
-    tool.callback.(args)
+  defp call_tool(context, name, args) do
+    spec = Enum.find(Tools.all(), &(&1.name == name))
+    callback = MingaAgent.Tool.Spec.build_callback(spec, context)
+    callback.(args)
   end
 
   defp buffer_content(path) do
