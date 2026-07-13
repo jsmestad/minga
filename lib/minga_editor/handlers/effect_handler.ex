@@ -151,7 +151,7 @@ defmodule MingaEditor.Handlers.EffectHandler do
   defp apply_effect(state, :render_now), do: Renderer.render_or_async(state)
 
   defp apply_effect(state, {:set_status, msg}) when is_binary(msg),
-    do: EditorState.set_status(state, msg)
+    do: MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, msg)
 
   defp apply_effect(state, {:open_file, path}) when is_binary(path),
     do: Commands.execute(state, {:edit_file, path})
@@ -216,7 +216,8 @@ defmodule MingaEditor.Handlers.EffectHandler do
   defp apply_effect(state, {:rebuild_agent_session, tab}),
     do: EditorState.rebuild_agent_from_session(state, tab)
 
-  defp apply_effect(state, :clear_status), do: EditorState.clear_status(state)
+  defp apply_effect(state, :clear_status),
+    do: MingaEditor.Shell.Traditional.NoticeWorkflow.dismiss(state)
 
   defp apply_effect(state, {:log, subsystem, level, msg})
        when is_atom(subsystem) and is_atom(level) and is_binary(msg) do

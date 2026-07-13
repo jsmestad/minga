@@ -37,7 +37,8 @@ defmodule MingaEditor.Commands.Formatting do
     end
   end
 
-  def format_buffer(state), do: EditorState.set_status(state, "No buffer to format")
+  def format_buffer(state),
+    do: MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No buffer to format")
 
   # ── LSP Formatting ────────────────────────────────────────────────────────
 
@@ -143,7 +144,10 @@ defmodule MingaEditor.Commands.Formatting do
 
     case spec do
       nil ->
-        EditorState.set_status(state, "No formatter configured for #{filetype}")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "No formatter configured for #{filetype}"
+        )
 
       _ ->
         command = spec |> String.split() |> List.first()
@@ -225,11 +229,17 @@ defmodule MingaEditor.Commands.Formatting do
   defp maybe_prompt_formatter_install(state, command) do
     case RecipeRegistry.for_command(command) do
       nil ->
-        EditorState.set_status(state, "Formatter not found: #{command}")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Formatter not found: #{command}"
+        )
 
       recipe ->
         if EditorState.skip_tool_prompt?(state, recipe.name) do
-          EditorState.set_status(state, "Formatter not found: #{command}")
+          MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+            state,
+            "Formatter not found: #{command}"
+          )
         else
           queue_and_show_prompt(state, recipe.name)
         end

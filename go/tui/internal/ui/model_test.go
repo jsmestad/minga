@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -312,6 +313,150 @@ func TestFooterRendersStatusMessageWithModelineSegments(t *testing.T) {
 	footer := ansi.Strip(strings.Join(model.footerLines(), "\n"))
 	if !strings.Contains(footer, "Modified buffers exist. Really quit? (y/n)") {
 		t.Fatalf("footer should render status message with modeline segments: %q", footer)
+	}
+}
+
+func TestOperationOnlyStatusIsDiscoverableAfterCommittedFrame(t *testing.T) {
+	model := New(80, 24, nil, nil)
+	model.now = func() time.Time { return feedbackTestStart }
+	operation := testOperation(42, generated.OperationStatusPending, "Formatting")
+	statusCommand := protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{
+		Opcode: generated.OPGuiStatusBar,
+		Status: protocol.StatusBar{Operation: &operation},
+	}}
+
+	updated, _ := model.Update(port.PacketMsg{Commands: []protocol.Command{
+		{Kind: protocol.CommandBeginFrame, FrameSeq: 1, BaseFrameSeq: 0},
+		testThemeCommand(),
+		statusCommand,
+	}})
+	model = updated.(Model)
+	if _, ok := model.statusBar(); ok || model.feedback.hasDisplay {
+		t.Fatal("operation must not be observed before its frame commits")
+	}
+
+	updated, _ = model.Update(port.PacketMsg{Commands: []protocol.Command{{Kind: protocol.CommandCommitFrame, FrameSeq: 1}}})
+	model = updated.(Model)
+	status, ok := model.statusBar()
+	if !ok || status.Operation == nil || status.Operation.OperationID != 42 {
+		t.Fatalf("operation-only status was not discoverable: %+v, %v", status, ok)
+	}
+	if got := ansi.Strip(strings.Join(model.footerLines(), "\n")); !strings.Contains(got, "Formatting") {
+		t.Fatalf("operation-only footer = %q", got)
+	}
+}
+
+func TestOperationFeedbackUsesOneOutstandingChromeTickAndTickTimestamp(t *testing.T) {
+	model := New(80, 24, nil, nil)
+	model.now = func() time.Time { return feedbackTestStart }
+	operation := testOperation(1, generated.OperationStatusRunning, "Formatting")
+	updated, firstTick := model.Update(port.PacketMsg{Commands: frame(protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{
+		Opcode: generated.OPGuiStatusBar,
+		Status: protocol.StatusBar{Operation: &operation},
+	}})})
+	model = updated.(Model)
+	if firstTick == nil || !model.feedback.ticking {
+		t.Fatal("running operation should schedule one chrome tick")
+	}
+
+	updated, duplicate := model.Update(struct{}{})
+	model = updated.(Model)
+	if duplicate != nil {
+		t.Fatal("an outstanding chrome tick must not be duplicated")
+	}
+
+	clockCalled := false
+	model.now = func() time.Time {
+		clockCalled = true
+		return feedbackTestStart.Add(time.Hour)
+	}
+	updated, rearmed := model.Update(feedbackTickMsg{at: feedbackTestStart.Add(spinnerDelay)})
+	model = updated.(Model)
+	if clockCalled {
+		t.Fatal("feedback tick consulted the wall clock instead of its message timestamp")
+	}
+	if rearmed == nil || !model.feedback.ticking || model.feedback.spinnerOnAt.IsZero() {
+		t.Fatalf("tick should use its timestamp and re-arm running animation: %+v", model.feedback)
+	}
+}
+
+func TestOperationFeedbackFinalTickDrainsWithoutRearming(t *testing.T) {
+	model := New(80, 24, nil, nil)
+	model.now = func() time.Time { return feedbackTestStart }
+	operation := testOperation(1, generated.OperationStatusCanceled, "Canceled")
+	updated, scheduled := model.Update(port.PacketMsg{Commands: frame(protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{
+		Opcode: generated.OPGuiStatusBar,
+		Status: protocol.StatusBar{Operation: &operation},
+	}})})
+	model = updated.(Model)
+	if scheduled == nil || !model.feedback.ticking {
+		t.Fatal("terminal dwell should schedule a chrome tick")
+	}
+
+	updated, rearmed := model.Update(feedbackTickMsg{at: feedbackTestStart.Add(terminalDwell)})
+	model = updated.(Model)
+	if rearmed != nil || model.feedback.ticking || model.feedback.hasDisplay {
+		t.Fatalf("final dwell tick should drain cleanly: cmd=%v feedback=%+v", rearmed, model.feedback)
+	}
+}
+
+func TestChromeTickCoexistsWithPickerLoadingWithoutDuplication(t *testing.T) {
+	model := New(80, 24, nil, nil)
+	model.now = func() time.Time { return feedbackTestStart }
+	model.chrome[generated.OPGuiPicker] = protocol.ChromePayload{Picker: protocol.Picker{LoadStatus: 1}}
+
+	updated, scheduled := model.Update(struct{}{})
+	model = updated.(Model)
+	if scheduled == nil || !model.feedback.ticking {
+		t.Fatal("picker loading should schedule the shared chrome tick")
+	}
+	updated, duplicate := model.Update(struct{}{})
+	model = updated.(Model)
+	if duplicate != nil {
+		t.Fatal("picker and feedback must share one outstanding tick")
+	}
+
+	updated, rearmed := model.Update(feedbackTickMsg{at: feedbackTestStart.Add(feedbackTickInterval)})
+	model = updated.(Model)
+	if rearmed == nil || !model.feedback.ticking || model.feedback.frame != 1 {
+		t.Fatalf("picker loading should re-arm shared tick: %+v", model.feedback)
+	}
+
+	model.chrome[generated.OPGuiPicker] = protocol.ChromePayload{Picker: protocol.Picker{LoadStatus: 2}}
+	updated, final := model.Update(feedbackTickMsg{at: feedbackTestStart.Add(2 * feedbackTickInterval)})
+	model = updated.(Model)
+	if final != nil || model.feedback.ticking {
+		t.Fatal("last picker tick should drain after loading finishes")
+	}
+}
+
+func TestTypedFeedbackNarrowWidthKeepsDecorationAndPlainEllipsisStaysPlain(t *testing.T) {
+	model := New(20, 8, nil, nil)
+	operation := testOperation(1, generated.OperationStatusError, "A very long formatting failure")
+	model.feedback.transition(&operation, feedbackTestStart)
+	status := protocol.StatusBar{
+		Left:  []protocol.StatusSegment{{Text: " N "}},
+		Right: []protocol.StatusSegment{{Text: "1:1"}},
+	}
+	line := model.renderStatusSegments(status)
+	plain := ansi.Strip(line)
+	if lipgloss.Width(line) > model.width {
+		t.Fatalf("narrow feedback width = %d, want <= %d: %q", lipgloss.Width(line), model.width, plain)
+	}
+	if !strings.Contains(plain, "✕") || strings.Contains(plain, "ordinary notice") {
+		t.Fatalf("narrow status discarded typed decoration: %q", plain)
+	}
+
+	model.feedback = feedbackState{}
+	status.Message = "ordinary notice…"
+	plain = ansi.Strip(model.renderStatusSegments(status))
+	if !strings.Contains(plain, "ordinary") {
+		t.Fatalf("plain ellipsis notice was not rendered independently: %q", plain)
+	}
+	for _, spinner := range spinnerFrames {
+		if strings.Contains(plain, spinner) {
+			t.Fatalf("ordinary ellipsis notice inferred spinner %q: %q", spinner, plain)
+		}
 	}
 }
 

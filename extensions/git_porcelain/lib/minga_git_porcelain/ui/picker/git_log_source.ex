@@ -68,7 +68,10 @@ defmodule MingaGitPorcelain.UI.Picker.GitLogSource do
   end
 
   def on_select(%Item{id: {:git_log_commit, _git_root, hash, _path}}, state) do
-    EditorState.set_status(state, "Git commit #{String.slice(hash, 0, 12)}")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      "Git commit #{String.slice(hash, 0, 12)}"
+    )
   end
 
   def on_select(_item, state), do: state

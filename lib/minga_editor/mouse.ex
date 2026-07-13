@@ -45,7 +45,6 @@ defmodule MingaEditor.Mouse do
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Mouse, as: MouseState
   alias MingaEditor.State.Windows
-  alias MingaEditor.State.WhichKey, as: WhichKeyState
   alias MingaEditor.UI.Highlight
   alias MingaEditor.Viewport
   alias MingaEditor.Window
@@ -515,7 +514,7 @@ defmodule MingaEditor.Mouse do
 
   defp keep_or_dismiss_hover(state, row, col, false) do
     state
-    |> EditorState.dismiss_hover_popup()
+    |> MingaEditor.Shell.Traditional.HoverPopupWorkflow.dismiss()
     |> update_mouse(&MouseState.set_hover(&1, row, col, backend: state.backend))
   end
 
@@ -1784,7 +1783,7 @@ defmodule MingaEditor.Mouse do
 
   @spec cancel_mode_for_mouse(state()) :: state()
   defp cancel_mode_for_mouse(%{workspace: %{editing: %{mode: :command}}} = state) do
-    EditorState.set_whichkey(state, WhichKeyState.clear(EditorState.whichkey(state)))
+    MingaEditor.Shell.Traditional.WhichKeyWorkflow.dismiss(state)
   end
 
   defp cancel_mode_for_mouse(state), do: state

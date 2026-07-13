@@ -3,7 +3,8 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
   Handler tests for `MingaEditor.Handlers.LspEventHandler`.
   """
 
-  # async: false because these tests register clients in the singleton LSP SyncServer ETS table.
+  # async: false because these tests register clients in the singleton LSP SyncServer ETS table
+  # and exercise shell switching through the global shell registry.
   use ExUnit.Case, async: false
 
   alias Minga.Buffer.Process, as: BufferProcess
@@ -11,22 +12,47 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
   alias MingaEditor.CompletionHandling
   alias MingaEditor.CompletionTrigger
   alias MingaEditor.Handlers.LspEventHandler
+  alias MingaEditor.Shell.Registry, as: ShellRegistry
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.ModalWorkflow
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
+  alias MingaEditor.Shell.Workflow, as: ShellWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.LSP.FormatOperation
   alias MingaEditor.State.Buffers
   alias MingaEditor.SignatureHelp
   alias MingaEditor.State.Highlighting
   alias MingaEditor.State.LSP, as: LSPState
-  alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.OperationFeedback
   alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
   alias MingaEditor.State.Windows
   alias MingaEditor.VimState
   alias MingaEditor.Viewport
   alias MingaEditor.UI.Highlight
+  alias MingaEditor.Test.FakeShell
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
+
+  setup do
+    ShellRegistry.reset_for_test()
+    ShellRegistry.seed_builtin()
+
+    :ok =
+      ShellRegistry.register({:extension, :lsp_handler_fake_shell}, %{
+        id: :fake,
+        module: FakeShell,
+        display_name: "Fake",
+        description: "Fake shell",
+        capabilities: [:tui]
+      })
+
+    on_exit(fn ->
+      ShellRegistry.reset_for_test()
+      ShellRegistry.seed_builtin()
+    end)
+
+    :ok
+  end
 
   describe "handle/2" do
     test "references uses one structured identity from request through no-result response" do
@@ -42,7 +68,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       assert {:references, operation_id, nil} = state.lsp.operation_requests[ref]
       assert OperationFeedback.selected(state.operation_feedback).id == operation_id
       assert OperationFeedback.selected(state.operation_feedback).status == :running
-      assert EditorState.status_msg(state) == nil
+      assert NoticeWorkflow.message(state) == nil
 
       {state, effects} = LspEventHandler.handle(state, {:lsp_response, ref, {:ok, []}})
 
@@ -66,7 +92,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       assert {:rename, operation_id, nil} = state.lsp.operation_requests[ref]
       assert OperationFeedback.selected(state.operation_feedback).id == operation_id
       assert OperationFeedback.selected(state.operation_feedback).status == :running
-      assert EditorState.status_msg(state) == nil
+      assert NoticeWorkflow.message(state) == nil
 
       {state, effects} = LspEventHandler.handle(state, {:lsp_response, ref, {:ok, nil}})
 
@@ -179,7 +205,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       timer = make_ref()
       trigger = %{CompletionTrigger.new() | debounce_timer: timer}
       payload = CompletionPayload.new(:tab1, trigger: trigger)
-      state = EditorState.set_modal(state, {:completion, payload})
+      state = ModalWorkflow.transition(state, :completion, payload)
       buffer = state.workspace.buffers.active
 
       {new_state, effects} =
@@ -189,7 +215,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       assert_receive {:lsp_request, "textDocument/completion", _params, caller, ref}
       assert caller == self()
 
-      new_trigger = ModalOverlay.completion_trigger(new_state)
+      new_trigger = ModalWorkflow.completion_trigger(new_state)
       assert new_trigger.pending_ref == ref
       assert MapSet.member?(new_trigger.pending_refs, ref)
       assert new_trigger.debounce_timer == timer
@@ -211,7 +237,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       completion = Completion.new(Completion.parse_response(%{"items" => [item]}), {0, 0})
       trigger = %{CompletionTrigger.new() | pending_ref: make_ref(), pending_refs: MapSet.new()}
       payload = CompletionPayload.new(:tab1, completion: completion, trigger: trigger)
-      state = EditorState.set_modal(state, {:completion, payload})
+      state = ModalWorkflow.transition(state, :completion, payload)
 
       {new_state, effects} = LspEventHandler.handle(state, {:completion_resolve, 0})
 
@@ -247,6 +273,137 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
                Runtime.state(new_state.shell_runtime).signature_help
     end
 
+    test "delayed hover response clears pending without touching or replaying a foreign shell" do
+      ref = make_ref()
+      state = base_state() |> put_lsp_pending(ref, :hover) |> ShellWorkflow.switch(:fake)
+      foreign_shell_state = Runtime.state(state.shell_runtime)
+      message_store = state.message_store
+      response = {:ok, %{"contents" => %{"kind" => "markdown", "value" => "**hover**"}}}
+
+      {new_state, effects} = LspEventHandler.handle(state, {:lsp_response, ref, response})
+
+      assert effects == [:render_now]
+      assert new_state.workspace.lsp_pending == %{}
+      assert Runtime.state(new_state.shell_runtime) == foreign_shell_state
+      assert new_state.message_store == message_store
+
+      restored = ShellWorkflow.switch(new_state, :traditional)
+      assert Runtime.state(restored.shell_runtime).hover_popup == nil
+      assert Runtime.state(restored.shell_runtime).notice.message == nil
+    end
+
+    test "delayed signature help clears pending without touching or replaying a foreign shell" do
+      ref = make_ref()
+
+      state =
+        base_state()
+        |> put_lsp_pending(ref, :signature_help)
+        |> ShellWorkflow.switch(:fake)
+
+      foreign_shell_state = Runtime.state(state.shell_runtime)
+      message_store = state.message_store
+
+      response =
+        {:ok,
+         %{
+           "signatures" => [
+             %{"label" => "foo(arg)", "parameters" => [%{"label" => "arg"}]}
+           ],
+           "activeSignature" => 0,
+           "activeParameter" => 0
+         }}
+
+      {new_state, effects} = LspEventHandler.handle(state, {:lsp_response, ref, response})
+
+      assert effects == [:render_now]
+      assert new_state.workspace.lsp_pending == %{}
+      assert Runtime.state(new_state.shell_runtime) == foreign_shell_state
+      assert new_state.message_store == message_store
+
+      restored = ShellWorkflow.switch(new_state, :traditional)
+      assert Runtime.state(restored.shell_runtime).signature_help == nil
+    end
+
+    test "delayed completion response does not spawn processing or replay after a shell switch" do
+      ref = make_ref()
+      trigger = %{CompletionTrigger.new() | pending_ref: ref, pending_refs: MapSet.new([ref])}
+      payload = CompletionPayload.new(:tab1, trigger: trigger)
+
+      state =
+        base_state()
+        |> ModalWorkflow.transition(:completion, payload)
+        |> ShellWorkflow.switch(:fake)
+
+      foreign_shell_state = Runtime.state(state.shell_runtime)
+
+      response =
+        {:ok,
+         %{
+           "items" => [
+             %{"label" => "hello", "kind" => 3, "sortText" => "hello"}
+           ]
+         }}
+
+      {new_state, effects} = LspEventHandler.handle(state, {:lsp_response, ref, response})
+
+      assert effects == [:render_now]
+      assert new_state == state
+      assert Runtime.state(new_state.shell_runtime) == foreign_shell_state
+      refute_receive {:completion_processed, _, _, _, _}, 50
+
+      restored = ShellWorkflow.switch(new_state, :traditional)
+      assert Runtime.state(restored.shell_runtime).modal == :none
+    end
+
+    test "delayed completion resolve clears pending without touching or replaying a foreign shell" do
+      ref = make_ref()
+      item = %{"label" => "resolved", "documentation" => "old", "sortText" => "resolved"}
+      completion = Completion.new(Completion.parse_response(%{"items" => [item]}), {0, 0})
+      payload = CompletionPayload.new(:tab1, completion: completion)
+
+      state =
+        base_state()
+        |> ModalWorkflow.transition(:completion, payload)
+        |> put_lsp_pending(ref, :completion_resolve)
+        |> ShellWorkflow.switch(:fake)
+
+      foreign_shell_state = Runtime.state(state.shell_runtime)
+      response = {:ok, %{"label" => "resolved", "documentation" => "new"}}
+
+      {new_state, effects} = LspEventHandler.handle(state, {:lsp_response, ref, response})
+
+      assert effects == [:render_now]
+      assert new_state.workspace.lsp_pending == %{}
+      assert Runtime.state(new_state.shell_runtime) == foreign_shell_state
+
+      restored = ShellWorkflow.switch(new_state, :traditional)
+      assert Runtime.state(restored.shell_runtime).modal == :none
+    end
+
+    test "delayed processed completion does not touch or replay a foreign shell" do
+      trigger = %{CompletionTrigger.new() | gen: 7}
+      payload = CompletionPayload.new(:tab1, trigger: trigger)
+
+      state =
+        base_state()
+        |> ModalWorkflow.transition(:completion, payload)
+        |> ShellWorkflow.switch(:fake)
+
+      processed =
+        Completion.new(
+          Completion.parse_response(%{
+            "items" => [%{"label" => "hello", "kind" => 3, "sortText" => "hello"}]
+          }),
+          {0, 0}
+        )
+
+      new_state = CompletionHandling.apply_processed(state, 7, :primary, processed, {0, 0})
+
+      assert new_state == state
+      restored = ShellWorkflow.switch(new_state, :traditional)
+      assert Runtime.state(restored.shell_runtime).modal == :none
+    end
+
     test "tracked semantic token response updates highlights and returns render_now" do
       state = file_buffer_state("hello\n")
       buffer = state.workspace.buffers.active
@@ -278,7 +435,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       ref = make_ref()
       trigger = %{CompletionTrigger.new() | pending_ref: ref, pending_refs: MapSet.new([ref])}
       payload = CompletionPayload.new(:tab1, trigger: trigger)
-      state = EditorState.set_modal(state, {:completion, payload})
+      state = ModalWorkflow.transition(state, :completion, payload)
 
       completion_result = %{
         "items" => [
@@ -299,9 +456,9 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       # The handler only does cheap ref bookkeeping: pending refs are cleared
       # synchronously, but the parse/sort/filter is deferred to a Task (#2633),
       # so the menu is not yet visible right after handle/2 returns.
-      assert ModalOverlay.completion(new_state) == nil
+      assert ModalWorkflow.completion(new_state) == nil
 
-      new_trigger = ModalOverlay.completion_trigger(new_state)
+      new_trigger = ModalWorkflow.completion_trigger(new_state)
       assert new_trigger.pending_ref == nil
       assert MapSet.new() == new_trigger.pending_refs
 
@@ -311,7 +468,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       assert_receive {:completion_processed, gen, mode, processed, trigger_pos}, 5_000
       applied = CompletionHandling.apply_processed(new_state, gen, mode, processed, trigger_pos)
 
-      completion = ModalOverlay.completion(applied)
+      completion = ModalWorkflow.completion(applied)
       assert %Completion{} = completion
       assert [%{label: "hello_world"}] = completion.filtered
       assert completion.selected == 0
@@ -373,7 +530,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
       assert effects == [:render_now]
       assert Minga.Buffer.content(buf) == "modified content\n"
-      assert EditorState.status_msg(new_state) =~ "Buffer changed"
+      assert NoticeWorkflow.message(new_state) =~ "Buffer changed"
     end
 
     test "a mutation queued after the LSP content read makes the commit stale" do
@@ -422,7 +579,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
       assert effects == [:render_now]
       assert Minga.Buffer.content(buf) == "!line one\nline two\nline three"
-      assert EditorState.status_msg(new_state) =~ "Buffer changed"
+      assert NoticeWorkflow.message(new_state) =~ "Buffer changed"
     end
 
     test "does not apply edits to a read-only buffer" do
@@ -448,7 +605,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
       assert effects == [:render_now]
       assert Minga.Buffer.content(buf) =~ "line one"
-      assert EditorState.status_msg(new_state) =~ "read-only"
+      assert NoticeWorkflow.message(new_state) =~ "read-only"
     end
 
     test "drops edits when the target buffer exited" do
@@ -475,7 +632,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
         LspEventHandler.handle(state, {:lsp_response, ref, {:ok, edits}})
 
       assert effects == [:render_now]
-      assert EditorState.status_msg(new_state) =~ "closed"
+      assert NoticeWorkflow.message(new_state) =~ "closed"
     end
 
     test "handles nil response (no formatting changes)" do
@@ -488,7 +645,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
         LspEventHandler.handle(state, {:lsp_response, ref, {:ok, nil}})
 
       assert effects == [:render_now]
-      assert EditorState.status_msg(new_state) =~ "No formatting changes"
+      assert NoticeWorkflow.message(new_state) =~ "No formatting changes"
     end
 
     test "empty edits release ownership without changing buffer state" do
@@ -512,7 +669,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       assert Minga.Buffer.cursor(buf) == cursor
       assert BufferProcess.last_undo_source(buf) == undo_source
       refute LSPState.format_active?(new_state.lsp, ref)
-      assert EditorState.status_msg(new_state) == "No formatting changes"
+      assert NoticeWorkflow.message(new_state) == "No formatting changes"
     end
 
     test "malformed successful response is skipped without crashing the handler" do
@@ -527,7 +684,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       assert effects == [:render_now]
       assert Minga.Buffer.content(buf) == "line one\nline two\nline three"
       refute LSPState.format_active?(new_state.lsp, ref)
-      assert EditorState.status_msg(new_state) == "Invalid LSP formatting response skipped"
+      assert NoticeWorkflow.message(new_state) == "Invalid LSP formatting response skipped"
     end
 
     test "handles error response" do
@@ -540,7 +697,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
         LspEventHandler.handle(state, {:lsp_response, ref, {:error, :timeout}})
 
       assert effects == [:render_now]
-      assert EditorState.status_msg(new_state) =~ "Format error"
+      assert NoticeWorkflow.message(new_state) =~ "Format error"
     end
 
     test "rejects invalid or overlapping server edits without changing content" do
@@ -571,7 +728,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
       assert effects == [:render_now]
       assert Minga.Buffer.content(buf) == "line one\nline two\nline three"
-      assert EditorState.status_msg(new_state) =~ "Invalid LSP"
+      assert NoticeWorkflow.message(new_state) =~ "Invalid LSP"
     end
   end
 
@@ -585,7 +742,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       {new_state, effects} = LspEventHandler.handle(state, {:lsp_format_spinner, ref})
 
       assert effects == [:render_now]
-      assert EditorState.status_msg(new_state) =~ "Formatting"
+      assert NoticeWorkflow.message(new_state) =~ "Formatting"
     end
 
     test "spinner is no-op when format already completed" do
@@ -607,7 +764,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       {new_state, effects} = LspEventHandler.handle(state, {:lsp_format_cancellable, ref})
 
       assert effects == [:render_now]
-      assert EditorState.status_msg(new_state) =~ "Esc to cancel"
+      assert NoticeWorkflow.message(new_state) =~ "Esc to cancel"
     end
 
     test "timeout drops pending and sets timeout status" do
@@ -620,7 +777,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
       assert effects == [:render_now]
       refute LSPState.format_active?(new_state.lsp, ref)
-      assert EditorState.status_msg(new_state) =~ "timed out"
+      assert NoticeWorkflow.message(new_state) =~ "timed out"
       assert_receive {:lsp_cancel, ^ref}
     end
 
@@ -650,7 +807,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
       assert effects == [:render_now]
       assert Minga.Buffer.content(buf) == "line one\nline two\nline three"
-      assert EditorState.status_msg(after_late) =~ "timed out"
+      assert NoticeWorkflow.message(after_late) =~ "timed out"
     end
 
     test "timeout is no-op when format already completed" do

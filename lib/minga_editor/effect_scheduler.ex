@@ -22,6 +22,7 @@ defmodule MingaEditor.EffectScheduler do
   @type handoff :: Engine.handoff()
   @type admission_error :: Engine.admission_error()
   @type claim :: Engine.claim()
+  @type cancel_error :: :not_found | :scheduler_unavailable
 
   @doc "Starts an effect scheduler."
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -46,6 +47,18 @@ defmodule MingaEditor.EffectScheduler do
   @spec cancel(server(), Request.id()) :: :ok | {:error, :not_found}
   def cancel(server, request_id) when is_reference(request_id),
     do: GenServer.call(server, {:cancel, request_id})
+
+  @doc "Cancels the admitted request correlated with a semantic operation."
+  @spec cancel_operation(server() | nil, MingaEditor.State.Operation.id()) ::
+          :ok | {:error, cancel_error()}
+  def cancel_operation(nil, operation_id) when is_integer(operation_id) and operation_id > 0,
+    do: {:error, :scheduler_unavailable}
+
+  def cancel_operation(server, operation_id) when is_integer(operation_id) and operation_id > 0 do
+    GenServer.call(server, {:cancel_operation, operation_id})
+  catch
+    :exit, _reason -> {:error, :scheduler_unavailable}
+  end
 
   @doc "Claims a still-current candidate before its domain handler applies it."
   @spec claim(server(), Outcome.t()) :: claim()
@@ -104,6 +117,9 @@ defmodule MingaEditor.EffectScheduler do
 
   def handle_call({:cancel, request_id}, _from, state),
     do: reply(Engine.cancel(state, request_id))
+
+  def handle_call({:cancel_operation, operation_id}, _from, state),
+    do: reply(Engine.cancel_operation(state, operation_id))
 
   def handle_call({:claim, outcome}, _from, state), do: reply(Engine.claim(state, outcome))
 

@@ -193,7 +193,7 @@ defmodule MingaEditor.Agent.SemanticUI.Registry do
         )
 
       {:ok, _entry, %Action{enabled?: false}} ->
-        EditorState.set_status(state, "Agent UI action unavailable")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Agent UI action unavailable")
 
       :error ->
         state

@@ -6,12 +6,12 @@ import SwiftUI
 
 /// Thin VS Code-style icon strip for sidebar panel discovery and switching.
 public struct ActivityBar: View {
-    public init(guiState: GUIState, sidebarHostState: SidebarHostState, encoder: InputEncoder? = nil) {
-        self.guiState = guiState
+    public init(input: ShellHostInput, sidebarHostState: SidebarHostState, encoder: InputEncoder? = nil) {
+        self.input = input
         self.sidebarHostState = sidebarHostState
         self.encoder = encoder
     }
-    public let guiState: GUIState
+    public let input: ShellHostInput
     public let sidebarHostState: SidebarHostState
     @Environment(\.themeColors) private var theme
     public let encoder: InputEncoder?
@@ -106,7 +106,7 @@ public struct ActivityBar: View {
 
     private func badgeText(for item: SidebarItem) -> String? {
         let context = NativeSidebarContext(
-            guiState: guiState,
+            input: input,
             theme: theme,
             encoder: encoder,
             projectName: "",

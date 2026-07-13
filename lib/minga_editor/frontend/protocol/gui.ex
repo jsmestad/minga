@@ -1909,7 +1909,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     icon_b = icon_color &&& 0xFF
     filename = :erlang.iolist_to_binary([d.file_name || ""])
     diag_hint = :erlang.iolist_to_binary([d.diagnostic_hint || ""])
-    message = :erlang.iolist_to_binary([d.status_msg || ""])
+    message = :erlang.iolist_to_binary([d.notice || ""])
 
     background_label =
       :erlang.iolist_to_binary([Map.get(d, :active_background_subagent_label) || ""])

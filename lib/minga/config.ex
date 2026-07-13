@@ -412,9 +412,9 @@ defmodule Minga.Config do
         if state.diagnostics_count == 0 do
           execute.(state)
         else
-          # In production, this state is the Editor's internal state.
-          # The advice callback can modify it to show a status message.
-          %{state | status_msg: "Skipping format: has errors"}
+          # In production, use a focused editor workflow to publish feedback;
+          # advice itself remains an opaque state transformation.
+          state
         end
       end
 

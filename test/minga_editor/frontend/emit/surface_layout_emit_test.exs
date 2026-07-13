@@ -22,7 +22,6 @@ defmodule MingaEditor.Frontend.Emit.SurfaceLayoutEmitTest do
   alias MingaEditor.Layout.SurfaceRegistry
   alias MingaEditor.Layout.SurfaceRegistry.Placement
   alias MingaEditor.SignatureHelp
-  alias MingaEditor.State, as: EditorState
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -58,8 +57,8 @@ defmodule MingaEditor.Frontend.Emit.SurfaceLayoutEmitTest do
     }
 
     state
-    |> EditorState.set_hover_popup(hover)
-    |> EditorState.set_signature_help(signature)
+    |> MingaEditor.Shell.Traditional.HoverPopupWorkflow.show(hover)
+    |> MingaEditor.Shell.Traditional.SignatureHelpWorkflow.show(signature)
     |> freeze_focus_tree()
   end
 

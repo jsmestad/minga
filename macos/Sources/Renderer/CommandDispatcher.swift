@@ -138,11 +138,19 @@ final class CommandDispatcher {
         return seq
     }
 
+    /// Returns the committed editor frame waiting for native Metal presentation.
+    func pendingPresentationFrameSeq() -> UInt32? {
+        guiState.presentationMetrics.pendingEditorFrameSeq()
+    }
+
     /// Discards an applied frame that cannot acquire a drawable/presentation path.
     func discardPendingPresentation(reason: LatencyRecorder.DiscardReason) {
-        guard pendingPresentationInputSeq != 0 else { return }
-        latency.discard(seq: pendingPresentationInputSeq, reason: reason)
-        pendingPresentationInputSeq = 0
+        if pendingPresentationInputSeq != 0 {
+            latency.discard(seq: pendingPresentationInputSeq, reason: reason)
+            pendingPresentationInputSeq = 0
+        }
+        let outcome: GUIFramePresentationMetrics.Outcome = reason == .hidden ? .hidden : .unavailable
+        guiState.presentationMetrics.discard(domain: .editor, outcome: outcome)
     }
 
     /// Window ids that arrived in the current frame batch. Used for input hit testing so stale
@@ -278,20 +286,15 @@ final class CommandDispatcher {
         //   config emitted before the first frame (equivalent to Go's CommandNoop
         //   for font commands, but Swift actually applies them).
         case .guiConfigState:
-            // Settings is an independently interactive scene. Its config stream
-            // is startup/out-of-band state and never participates in a render frame.
-            guiState.performOutOfBandPublication {
-                apply(command)
-            }
+            // Settings is an independently interactive scene and has no frame consumer.
+            apply(command)
 
         case .setTitle, .setWindowBg, .setLinkCursor, .protocolError,
              .setFont, .setFontFallback, .registerFont, .clipboardWrite:
             if openFrameSeq != nil {
                 transactionBuilder?.stage(command, resourceWeight: resourceWeight)
             } else {
-                guiState.performOutOfBandPublication {
-                    apply(command)
-                }
+                publishLocal(command)
             }
 
         default:
@@ -399,19 +402,19 @@ final class CommandDispatcher {
             reject(rejection, frameSeq: frameSeq, logReason: rejection.logDescription)
             return
         case .success(let transaction):
-            if openBaseFrameSeq == 0 && resyncRecoveryState == .keyframeInFlight {
-                resyncRecoveryState = .clean
-                guiState.resyncState.clear()
-            }
-            publish(transaction)
-        }
+            let clearsResync = openBaseFrameSeq == 0 && resyncRecoveryState == .keyframeInFlight
+            if clearsResync { resyncRecoveryState = .clean }
 
-        lastCommittedFrameSeq = frameSeq
-        lastCommittedGeneration = openGeneration
-        hasCommitted = true
-        lastTerminalRejection = nil
-        openFrameSeq = nil
-        self.transactionBuilder = nil
+            // Install committed identity before publication. Observation callbacks
+            // may run from channel assignment and must see this same transaction.
+            lastCommittedFrameSeq = frameSeq
+            lastCommittedGeneration = openGeneration
+            hasCommitted = true
+            lastTerminalRejection = nil
+            openFrameSeq = nil
+            self.transactionBuilder = nil
+            publish(transaction, clearsResync: clearsResync)
+        }
 
         os_signpost(.event, log: renderLog, name: "SemanticApply", "frame=%{public}u input=%{public}u", frameSeq, inputSeq)
         if pendingPresentationInputSeq != 0, pendingPresentationInputSeq != inputSeq {
@@ -429,8 +432,18 @@ final class CommandDispatcher {
     }
 
     /// The sole committed-GUI publication boundary.
-    private func publish(_ transaction: PreparedFrameTransaction) {
-        guiState.performFramePublication(frameSeq: transaction.frameSeq) {
+    private func publish(_ transaction: PreparedFrameTransaction, clearsResync: Bool) {
+        var finalImpact = transaction.impact
+        if clearsResync { finalImpact.formUnion(.windowOverlay) }
+        let committed = GUICommittedFrame(
+            generation: transaction.generation,
+            frameSeq: transaction.frameSeq
+        )
+        guiState.frameStore.publishCommitted(
+            generation: committed.generation,
+            frameSeq: committed.frameSeq,
+            impact: finalImpact
+        ) {
             if let theme = transaction.theme { apply(.guiTheme(slots: theme.slots)) }
             if let resources = transaction.resources { resources.commands.forEach(apply) }
             if let windows = transaction.windows { apply(windows) }
@@ -443,9 +456,22 @@ final class CommandDispatcher {
             }
             if let overlays = transaction.overlays { overlays.commands.forEach(apply) }
             if let focus = transaction.focus { focus.commands.forEach(apply) }
+            if clearsResync { guiState.resyncState.clear() }
         }
+        guiState.presentationMetrics.beginCommitted(frame: committed, impact: finalImpact)
         publicationCount += 1
         lastPublicationOperationCounts = transaction.operationCounts
+    }
+
+    private func publishLocal(_ command: RenderCommand) {
+        let impact = GUIFrameImpact.impact(for: command)
+        guard !impact.isEmpty else {
+            apply(command)
+            return
+        }
+        guiState.frameStore.publishLocal(impact: impact) {
+            apply(command)
+        }
     }
 
     private func apply(_ updates: PreparedWindowUpdates) {
@@ -527,7 +553,7 @@ final class CommandDispatcher {
         if terminal {
             resyncRecoveryState = .clean
             if guiState.resyncState.pending {
-                guiState.performOutOfBandPublication {
+                guiState.frameStore.publishLocal(impact: .windowOverlay) {
                     guiState.resyncState.clear()
                 }
             }
@@ -536,7 +562,7 @@ final class CommandDispatcher {
             let shouldRequestKeyframe = resyncRecoveryState != .awaitingKeyframe
             resyncRecoveryState = .awaitingKeyframe
             PortLogger.warn("Frame transaction rejected (\(logReason)\(opcodeContext)); awaiting BEAM recovery from \(lastCommittedFrameSeq)")
-            guiState.performOutOfBandPublication {
+            guiState.frameStore.publishLocal(impact: .windowOverlay) {
                 guiState.resyncState.markPending(
                     lastGoodFrameSeq: lastCommittedFrameSeq,
                     generation: openGeneration,
@@ -658,17 +684,18 @@ final class CommandDispatcher {
     func previewFileTreeNavigation(codepoint: UInt32, modifiers: UInt8) -> Bool {
         guard modifiers == 0 else { return false }
 
-        let changed: Bool
+        let delta: Int
         switch codepoint {
         case FileTreeNavigationCodepoints.downKey, FileTreeNavigationCodepoints.downArrow:
-            changed = guiState.fileTreeState.previewNavigation(delta: 1)
+            delta = 1
         case FileTreeNavigationCodepoints.upKey, FileTreeNavigationCodepoints.upArrow:
-            changed = guiState.fileTreeState.previewNavigation(delta: -1)
+            delta = -1
         default:
             return false
         }
-        if changed { guiState.performOutOfBandPublication {} }
-        return changed
+        return guiState.frameStore.publishLocalIfChanged(impact: .shell) {
+            guiState.fileTreeState.previewNavigation(delta: delta)
+        }
     }
 
     @discardableResult
@@ -695,26 +722,27 @@ final class CommandDispatcher {
         } else {
             return false
         }
-        let changed = guiState.completionState.previewNavigation(delta: delta)
-        if changed { guiState.performOutOfBandPublication {} }
-        return changed
+        return guiState.frameStore.publishLocalIfChanged(impact: .editorOverlay) {
+            guiState.completionState.previewNavigation(delta: delta)
+        }
     }
 
     @discardableResult
     func previewPickerNavigation(codepoint: UInt32, modifiers: UInt8) -> Bool {
         guard modifiers == 0 else { return false }
 
-        let changed: Bool
+        let delta: Int
         switch codepoint {
         case PickerNavigationCodepoints.downKey, PickerNavigationCodepoints.downArrow:
-            changed = guiState.pickerState.previewNavigation(delta: 1)
+            delta = 1
         case PickerNavigationCodepoints.upKey, PickerNavigationCodepoints.upArrow:
-            changed = guiState.pickerState.previewNavigation(delta: -1)
+            delta = -1
         default:
             return false
         }
-        if changed { guiState.performOutOfBandPublication {} }
-        return changed
+        return guiState.frameStore.publishLocalIfChanged(impact: .windowOverlay) {
+            guiState.pickerState.previewNavigation(delta: delta)
+        }
     }
 
     /// Apply one domain command to the presented FrameState/GUIState. This is

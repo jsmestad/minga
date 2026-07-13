@@ -640,7 +640,7 @@ defmodule MingaEditor.Agent.Events do
     if Buffer.dirty?(pid) do
       state =
         state
-        |> EditorState.set_status(
+        |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
           "Agent modified this file. Reload, keep editing, or show diff. Save will check for conflicts."
         )
         |> PickerUI.open(MingaEditor.UI.Picker.RemoteFileConflictSource, %{

@@ -14,7 +14,6 @@ defmodule MingaEditor.PickerAsyncStaleTest do
 
   use Minga.Test.EditorCase, async: true, rendering: :disabled
 
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.UI.Picker.Candidate
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.TodoSearchSource
@@ -33,7 +32,7 @@ defmodule MingaEditor.PickerAsyncStaleTest do
   defp picker_payload(ctx) do
     state = :sys.get_state(ctx.editor, @sync_timeout)
 
-    case EditorState.modal(state) do
+    case MingaEditor.Shell.Runtime.state(state.shell_runtime).modal do
       {:picker, payload} -> payload
       _ -> nil
     end

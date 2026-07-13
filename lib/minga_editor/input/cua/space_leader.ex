@@ -101,8 +101,7 @@ defmodule MingaEditor.Input.CUA.SpaceLeader do
     if node.command != nil do
       execute_command(state, node.command)
     else
-      {s, {:whichkey_update, wk}} = Commands.execute(state, {:leader_start, node})
-      EditorState.set_whichkey(s, wk)
+      Commands.execute(state, {:leader_start, node})
     end
   end
 
@@ -139,7 +138,6 @@ defmodule MingaEditor.Input.CUA.SpaceLeader do
   @spec execute_command(EditorState.t(), atom() | tuple()) :: EditorState.t()
   defp execute_command(state, cmd) do
     case Commands.execute(state, cmd) do
-      {s, {:whichkey_update, wk}} -> EditorState.set_whichkey(s, wk)
       s when is_map(s) -> s
       {s, _action} -> s
     end

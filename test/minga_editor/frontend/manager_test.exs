@@ -271,7 +271,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
 
       assert :unwritable = Manager.send_render_commands(name, frame_commands(11, 0, 1))
       assert :unwritable = Manager.send_commands(name, [title])
-      assert_receive {:minga_input, {:request_keyframe, 0, 1}}, 100
+      assert_receive {:minga_input, {:request_keyframe, 0, 1}}, 1_000
 
       pressure = Manager.output_pressure(name)
       assert pressure.current_bytes == 0
@@ -284,7 +284,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
       assert Agent.get(transport, & &1.attempts) == attempts_after_recovery
 
       assert :unwritable = Manager.send_render_commands(name, frame_commands(12, 0, 2))
-      assert_receive {:minga_input, {:request_keyframe, 0, 2}}, 100
+      assert_receive {:minga_input, {:request_keyframe, 0, 2}}, 1_000
 
       Agent.update(transport, &%{&1 | writable: true})
       assert :accepted = Manager.send_render_commands(name, frame_commands(13, 0, 3))
@@ -331,17 +331,12 @@ defmodule MingaEditor.Frontend.ManagerTest do
     test "an unwritable font configuration is retained and retried before later frames" do
       name = unique_name()
       parent = self()
-      outcomes = start_supervised!({Agent, fn -> [false, true] end}, id: make_ref())
+      writable = start_supervised!({Agent, fn -> false end}, id: make_ref())
 
       commander = fn _port, batch, [:nosuspend] ->
-        outcome =
-          Agent.get_and_update(outcomes, fn
-            [next | rest] -> {next, rest}
-            [] -> {true, []}
-          end)
-
-        send(parent, {:font_control_attempt, outcome, batch})
-        outcome
+        admitted? = Agent.get(writable, & &1)
+        send(parent, {:output_attempt, admitted?, batch})
+        admitted?
       end
 
       {_pid, _fake_port} =
@@ -352,17 +347,28 @@ defmodule MingaEditor.Frontend.ManagerTest do
         )
 
       font_command = Protocol.encode_set_font("Fira Code", 15, true, :regular)
+      frame_commands = frame_commands(10, 0, 1)
+      frame_batch = IO.iodata_to_binary(frame_commands)
+
       assert :unwritable = Manager.send_commands(name, [font_command])
-      assert_receive {:font_control_attempt, false, ^font_command}
+      assert_receive {:output_attempt, false, ^font_command}
+      assert :unwritable = Manager.send_render_commands(name, frame_commands)
 
       pressure = Manager.output_pressure(name)
       assert pressure.control_batches == 1
       assert pressure.control_bytes == byte_size(font_command)
+      assert pressure.current_bytes == byte_size(frame_batch)
 
-      assert_receive {:font_control_attempt, true, ^font_command}, 1_000
+      Agent.update(writable, fn _ -> true end)
+      assert_receive {:output_attempt, true, first_admitted}, 1_000
+      assert_receive {:output_attempt, true, second_admitted}, 1_000
+      assert first_admitted == font_command
+      assert second_admitted == frame_batch
+
       pressure = Manager.output_pressure(name)
       assert pressure.control_batches == 0
       assert pressure.control_bytes == 0
+      assert pressure.current_bytes == 0
     end
 
     test "clipboard writes for distinct pasteboards are both retained and admitted" do

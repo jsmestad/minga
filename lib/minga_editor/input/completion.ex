@@ -20,7 +20,6 @@ defmodule MingaEditor.Input.Completion do
   alias MingaEditor.FocusTree
   alias MingaEditor.FocusTree.Node, as: FocusNode
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.ModalOverlay
 
   @ctrl MingaEditor.Input.mod_ctrl()
   @escape 27
@@ -37,7 +36,7 @@ defmodule MingaEditor.Input.Completion do
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
   def handle_key(%{workspace: %{editing: %{mode: :insert}}} = state, cp, mods) do
-    case ModalOverlay.completion(state) do
+    case MingaEditor.Shell.Traditional.ModalWorkflow.completion(state) do
       %Completion{} = completion ->
         case do_handle(state, completion, cp, mods) do
           {:handled, new_state} -> {:handled, new_state}
@@ -97,7 +96,7 @@ defmodule MingaEditor.Input.Completion do
         :press,
         _cc
       ) do
-    case ModalOverlay.completion(state) do
+    case MingaEditor.Shell.Traditional.ModalWorkflow.completion(state) do
       %Completion{} = completion ->
         do_handle_mouse(state, node, completion, row, button)
 
@@ -113,11 +112,13 @@ defmodule MingaEditor.Input.Completion do
   @spec do_handle_mouse(EditorState.t(), FocusNode.t(), Completion.t(), integer(), atom()) ::
           MingaEditor.Input.Handler.result()
   defp do_handle_mouse(state, _node, _completion, _row, :wheel_down) do
-    {:handled, ModalOverlay.update_completion(state, &Completion.move_down/1)}
+    {:handled,
+     MingaEditor.Shell.Traditional.ModalWorkflow.update_completion(state, &Completion.move_down/1)}
   end
 
   defp do_handle_mouse(state, _node, _completion, _row, :wheel_up) do
-    {:handled, ModalOverlay.update_completion(state, &Completion.move_up/1)}
+    {:handled,
+     MingaEditor.Shell.Traditional.ModalWorkflow.update_completion(state, &Completion.move_up/1)}
   end
 
   defp do_handle_mouse(state, node, completion, row, :left) do
@@ -192,7 +193,12 @@ defmodule MingaEditor.Input.Completion do
   defp do_handle(state, _completion, cp, mods)
        when (cp == ?n and band(mods, @ctrl) != 0) or
               cp in [@arrow_down_legacy, @arrow_down_kitty, @arrow_down_mac] do
-    state = ModalOverlay.update_completion(state, &Completion.move_down/1)
+    state =
+      MingaEditor.Shell.Traditional.ModalWorkflow.update_completion(
+        state,
+        &Completion.move_down/1
+      )
+
     {:handled, CompletionHandling.maybe_resolve_selected(state)}
   end
 
@@ -200,7 +206,9 @@ defmodule MingaEditor.Input.Completion do
   defp do_handle(state, _completion, cp, mods)
        when (cp == ?p and band(mods, @ctrl) != 0) or
               cp in [@arrow_up_legacy, @arrow_up_kitty, @arrow_up_mac] do
-    state = ModalOverlay.update_completion(state, &Completion.move_up/1)
+    state =
+      MingaEditor.Shell.Traditional.ModalWorkflow.update_completion(state, &Completion.move_up/1)
+
     {:handled, CompletionHandling.maybe_resolve_selected(state)}
   end
 

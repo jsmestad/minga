@@ -27,7 +27,9 @@ defmodule MingaEditor.Commands.InlineEditTest do
 
     state = InlineEditCommand.open(state)
 
-    assert EditorState.status_msg(state) == "Inline edit requires a visual selection"
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) ==
+             "Inline edit requires a visual selection"
+
     assert state |> EditorState.inline_edits() |> InlineEdit.active(buffer) == nil
   end
 
@@ -152,7 +154,10 @@ defmodule MingaEditor.Commands.InlineEditTest do
       EditorState.set_inline_edits(state, InlineEdit.put(EditorState.inline_edits(state), edit))
 
     assert {:handled, state} = InlineEditInput.handle_key(state, ?y, 0)
-    assert EditorState.status_msg(state) == "Inline edit failed: :read_only"
+
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) ==
+             "Inline edit failed: :read_only"
+
     assert active_edit(state, buffer) != nil
     assert Buffer.content(buffer) == "one\ntwo"
   end

@@ -59,7 +59,7 @@ defmodule MingaEditor.UI.Picker.OptionScopeSourceTest do
         )
 
       assert BufferProcess.get_option(buf, :wrap) == true
-      assert result.shell_runtime.state.status_msg =~ "this buffer"
+      assert result.shell_runtime.state.notice.message =~ "this buffer"
     end
   end
 
@@ -78,7 +78,7 @@ defmodule MingaEditor.UI.Picker.OptionScopeSourceTest do
         )
 
       assert Options.get(:wrap) == !original
-      assert result.shell_runtime.state.status_msg =~ "all buffers"
+      assert result.shell_runtime.state.notice.message =~ "all buffers"
 
       Options.set(:wrap, original)
     end
@@ -112,7 +112,7 @@ defmodule MingaEditor.UI.Picker.OptionScopeSourceTest do
         )
 
       assert BufferProcess.get_option(buf, :wrap) == true
-      assert result.shell_runtime.state.status_msg =~ "this buffer"
+      assert result.shell_runtime.state.notice.message =~ "this buffer"
     end
 
     test "applies global-scoped option when modal is already :none" do
@@ -129,7 +129,7 @@ defmodule MingaEditor.UI.Picker.OptionScopeSourceTest do
         )
 
       assert Options.get(:wrap) == !original
-      assert result.shell_runtime.state.status_msg =~ "all buffers"
+      assert result.shell_runtime.state.notice.message =~ "all buffers"
 
       Options.set(:wrap, original)
     end

@@ -21,7 +21,10 @@ defmodule MingaGitPorcelain.UI.Prompt.GitCommit do
     message = String.trim(text)
 
     if message == "" do
-      EditorState.set_status(state, "Commit cancelled: empty message")
+      MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+        state,
+        "Commit cancelled: empty message"
+      )
     else
       commit_and_refresh(state, message)
     end
@@ -35,16 +38,19 @@ defmodule MingaGitPorcelain.UI.Prompt.GitCommit do
   defp commit_and_refresh(state, message) do
     case resolve_git_root() do
       nil ->
-        EditorState.set_status(state, "Not in a git repository")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Not in a git repository")
 
       git_root ->
         case Git.commit(git_root, message) do
           {:ok, short_hash} ->
             refresh_repo(git_root)
-            EditorState.set_status(state, "Committed #{short_hash}")
+            MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Committed #{short_hash}")
 
           {:error, reason} ->
-            EditorState.set_status(state, "Commit failed: #{reason}")
+            MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+              state,
+              "Commit failed: #{reason}"
+            )
         end
     end
   end

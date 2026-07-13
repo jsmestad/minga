@@ -10,6 +10,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
   @behaviour MingaEditor.UI.Picker.Source
 
   alias Minga.Project.FileRef
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaAgent.ProjectView
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
@@ -83,7 +84,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
   end
 
   def on_select(%Item{id: {:confirm, :cancel, _context}}, state) do
-    EditorState.set_status(state, "Cancelled")
+    NoticeWorkflow.publish(state, "Cancelled")
   end
 
   def on_select(_item, state), do: state
@@ -136,7 +137,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
         move_or_confirm(context, state, tab_bar, source, destination)
 
       {:error, message} ->
-        EditorState.set_status(state, message)
+        NoticeWorkflow.publish(state, message)
     end
   end
 
@@ -147,7 +148,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
         copy_to_destination(context, state, tab_bar, destination)
 
       {:error, message} ->
-        EditorState.set_status(state, message)
+        NoticeWorkflow.publish(state, message)
     end
   end
 
@@ -156,7 +157,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
     file_ref = Map.fetch!(context, :file_ref)
 
     if Workspace.has_file?(destination, file_ref) do
-      EditorState.set_status(
+      NoticeWorkflow.publish(
         state,
         "`#{FileRef.display_label(file_ref)}` is already in `#{destination.label}`"
       )
@@ -166,7 +167,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
 
       state
       |> EditorState.set_tab_bar(tab_bar)
-      |> EditorState.set_status(
+      |> NoticeWorkflow.publish(
         "Copied `#{FileRef.display_label(file_ref)}` to `#{destination.label}`"
       )
     end
@@ -176,7 +177,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
   defp move_or_confirm(_context, state, _tab_bar, %Workspace{kind: :agent}, %Workspace{
          kind: :agent
        }) do
-    EditorState.set_status(state, @agent_move_block)
+    NoticeWorkflow.publish(state, @agent_move_block)
   end
 
   defp move_or_confirm(context, state, tab_bar, %Workspace{kind: :agent} = source, _destination) do
@@ -188,7 +189,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
 
         if draft_for_file?(refreshed_source, file_ref) do
           PickerUI.open(refreshed_state, __MODULE__, Map.put(context, :confirm?, true))
-          |> EditorState.set_status(
+          |> NoticeWorkflow.publish(
             "Drafts for #{FileRef.display_label(file_ref)} will be discarded. Continue / Promote first / Cancel."
           )
         else
@@ -196,10 +197,16 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
         end
 
       {:error, :missing_project_view} ->
-        EditorState.set_status(state, "Workspace move failed: missing project view")
+        NoticeWorkflow.publish(
+          state,
+          "Workspace move failed: missing project view"
+        )
 
       {:error, reason} ->
-        EditorState.set_status(state, "Workspace move failed: #{inspect(reason)}")
+        NoticeWorkflow.publish(
+          state,
+          "Workspace move failed: #{inspect(reason)}"
+        )
     end
   end
 
@@ -227,15 +234,18 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
 
       state
       |> EditorState.set_tab_bar(tab_bar)
-      |> EditorState.set_status(
+      |> NoticeWorkflow.publish(
         "Moved `#{FileRef.display_label(file_ref)}` to `#{destination.label}`"
       )
     else
       {:error, message} when is_binary(message) ->
-        EditorState.set_status(state, message)
+        NoticeWorkflow.publish(state, message)
 
       {:error, reason} ->
-        EditorState.set_status(state, "Workspace move failed: #{inspect(reason)}")
+        NoticeWorkflow.publish(
+          state,
+          "Workspace move failed: #{inspect(reason)}"
+        )
     end
   end
 
@@ -256,13 +266,19 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
       |> do_move(EditorState.set_tab_bar(state, tab_bar))
     else
       nil ->
-        EditorState.set_status(state, "Workspace promote failed: missing project view")
+        NoticeWorkflow.publish(
+          state,
+          "Workspace promote failed: missing project view"
+        )
 
       {:conflict, details} ->
         record_promote_conflict(state, context, details)
 
       {:error, reason} ->
-        EditorState.set_status(state, "Workspace promote failed: #{inspect(reason)}")
+        NoticeWorkflow.publish(
+          state,
+          "Workspace promote failed: #{inspect(reason)}"
+        )
     end
   end
 
@@ -276,13 +292,19 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
 
       state
       |> EditorState.set_tab_bar(tab_bar)
-      |> EditorState.set_status("Workspace promote found conflicts: #{inspect(details)}")
+      |> NoticeWorkflow.publish("Workspace promote found conflicts: #{inspect(details)}")
     else
       {:error, reason} ->
-        EditorState.set_status(state, "Workspace promote failed: #{inspect(reason)}")
+        NoticeWorkflow.publish(
+          state,
+          "Workspace promote failed: #{inspect(reason)}"
+        )
 
       nil ->
-        EditorState.set_status(state, "Workspace promote failed: missing project view")
+        NoticeWorkflow.publish(
+          state,
+          "Workspace promote failed: missing project view"
+        )
     end
   end
 

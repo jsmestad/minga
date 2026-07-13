@@ -32,7 +32,7 @@ defmodule MingaEditor.Commands.Autobiography do
 
   @spec execute(EditorState.t(), :code_why | :code_autobiography) :: EditorState.t()
   def execute(%{workspace: %{buffers: %{active: nil}}} = state, _cmd) do
-    EditorState.set_status(state, "No active buffer")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No active buffer")
   end
 
   def execute(state, :code_why) do
@@ -42,13 +42,19 @@ defmodule MingaEditor.Commands.Autobiography do
 
       case Autobiography.for_line(path, needle, []) do
         {:ok, nil} ->
-          EditorState.set_status(state, "No agent history for this line")
+          MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+            state,
+            "No agent history for this line"
+          )
 
         {:ok, %Entry{} = entry} ->
           show_why_popup(state, entry, path)
 
         {:error, _reason} ->
-          EditorState.set_status(state, "Could not read agent history")
+          MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+            state,
+            "Could not read agent history"
+          )
       end
     end)
   end
@@ -57,13 +63,19 @@ defmodule MingaEditor.Commands.Autobiography do
     with_path(state, fn _buf, path ->
       case Autobiography.for_file(path, []) do
         {:ok, []} ->
-          EditorState.set_status(state, "No agent history for this file")
+          MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+            state,
+            "No agent history for this file"
+          )
 
         {:ok, entries} ->
           show_popup(state, autobiography_markdown(entries, path))
 
         {:error, _reason} ->
-          EditorState.set_status(state, "Could not read agent history")
+          MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+            state,
+            "Could not read agent history"
+          )
       end
     end)
   end
@@ -85,7 +97,7 @@ defmodule MingaEditor.Commands.Autobiography do
     buf = state.workspace.buffers.active
 
     case Buffer.file_path(buf) do
-      nil -> EditorState.set_status(state, "No file path")
+      nil -> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No file path")
       path -> fun.(buf, path)
     end
   end
@@ -97,10 +109,10 @@ defmodule MingaEditor.Commands.Autobiography do
     opts = Keyword.put(popup_opts, :theme, state.theme)
 
     markdown
-    |> HoverPopup.new(div(vp.rows, 2), div(vp.cols, 4), opts)
+    |> MingaEditor.HoverPopup.Builder.new(div(vp.rows, 2), div(vp.cols, 4), opts)
     |> HoverPopup.focus()
     |> maybe_open_action(open_action)
-    |> then(&EditorState.set_hover_popup(state, &1))
+    |> then(&MingaEditor.Shell.Traditional.HoverPopupWorkflow.show(state, &1))
   end
 
   @spec maybe_open_action(HoverPopup.t(), HoverPopup.open_action() | nil) :: HoverPopup.t()

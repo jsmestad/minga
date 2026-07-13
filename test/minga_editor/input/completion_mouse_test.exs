@@ -5,7 +5,6 @@ defmodule MingaEditor.Input.CompletionMouseTest do
   alias Minga.Editing.Completion
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
   alias MingaEditor.State.WhichKey
   alias MingaEditor.Viewport
@@ -50,14 +49,14 @@ defmodule MingaEditor.Input.CompletionMouseTest do
       {:handled, new_state} =
         CompletionInput.handle_mouse(state, 10, 10, :wheel_down, 0, :press, 1)
 
-      assert ModalOverlay.completion(new_state).selected == 1
+      assert MingaEditor.Shell.Traditional.ModalWorkflow.completion(new_state).selected == 1
     end
 
     test "wheel_up moves completion selection up" do
       state = completion_state(sample_items())
       {:handled, state} = CompletionInput.handle_mouse(state, 10, 10, :wheel_down, 0, :press, 1)
       {:handled, new_state} = CompletionInput.handle_mouse(state, 10, 10, :wheel_up, 0, :press, 1)
-      assert ModalOverlay.completion(new_state).selected == 0
+      assert MingaEditor.Shell.Traditional.ModalWorkflow.completion(new_state).selected == 0
     end
   end
 

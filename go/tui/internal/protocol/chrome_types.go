@@ -1,5 +1,7 @@
 package protocol
 
+import "github.com/jsmestad/minga/go/tui/internal/generated"
+
 type TabBar struct {
 	ActiveIndex byte
 	Tabs        []Tab
@@ -187,6 +189,7 @@ type StatusBar struct {
 	Filetype    string
 	Message     string
 	PendingKeys string
+	Operation   *generated.GuiStatusBarOperation
 	Left        []StatusSegment
 	Right       []StatusSegment
 }

@@ -234,7 +234,7 @@ struct LiveResizeWiringTests {
         ctRenderer.setupRenderers(fontManager: fm)
         let view = EditorNSView(encoder: spy, fontFace: face, dispatcher: disp,
                                 coreTextRenderer: ctRenderer, fontManager: fm)
-        view.guiState = guiState
+        view.editorInput = guiState.editorInput
         view.frame = NSRect(x: 0, y: 0,
                             width: CGFloat(face.cellWidth) * 80,
                             height: CGFloat(face.cellHeight) * 24)

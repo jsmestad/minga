@@ -3,6 +3,7 @@ defmodule MingaEditor.PromptUITest do
 
   alias MingaEditor.PromptUI
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Shell.Traditional.ModalWorkflow
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.Prompt, as: PromptState
   alias MingaEditor.Viewport
@@ -58,7 +59,7 @@ defmodule MingaEditor.PromptUITest do
   end
 
   defp prompt_state(state) do
-    case EditorState.modal(state) do
+    case MingaEditor.Shell.Runtime.state(state.shell_runtime).modal do
       {:prompt, %{prompt_ui: pui}} -> pui
       _ -> %PromptState{}
     end
@@ -109,11 +110,15 @@ defmodule MingaEditor.PromptUITest do
 
       state =
         base_state()
-        |> ModalOverlay.open(:picker, PickerPayload.new(picker_struct))
+        |> ModalWorkflow.open(:picker, PickerPayload.new(picker_struct))
         |> PromptUI.open(TestHandler)
 
       assert prompt_state(state).handler == TestHandler
-      refute ModalOverlay.match(EditorState.modal(state), :picker)
+
+      refute ModalOverlay.match(
+               MingaEditor.Shell.Runtime.state(state.shell_runtime).modal,
+               :picker
+             )
     end
   end
 
@@ -267,7 +272,7 @@ defmodule MingaEditor.PromptUITest do
         |> PromptUI.close()
 
       refute PromptUI.open?(state)
-      assert EditorState.modal(state) == :none
+      assert MingaEditor.Shell.Runtime.state(state.shell_runtime).modal == :none
     end
   end
 

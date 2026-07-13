@@ -26,7 +26,7 @@ defmodule MingaEditor.Commands.Tutor do
         {:ok, pid} = start_tutor_buffer(state, content)
         state = Commands.add_buffer(state, pid)
 
-        EditorState.set_status(
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
           state,
           "Welcome to the Minga Tutorial! Follow the instructions to learn."
         )
@@ -87,6 +87,9 @@ defmodule MingaEditor.Commands.Tutor do
         Commands.add_buffer(state, buffer)
       end
 
-    EditorState.set_status(state, "Tutorial reset. Follow the instructions to learn!")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      "Tutorial reset. Follow the instructions to learn!"
+    )
   end
 end

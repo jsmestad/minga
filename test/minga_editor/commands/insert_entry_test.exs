@@ -41,7 +41,7 @@ defmodule MingaEditor.Commands.InsertEntryTest do
       result = KeyDispatch.handle_key(state, ?i, 0)
 
       assert result.workspace.editing.mode == :normal
-      assert EditorState.status_msg(result) == "Buffer is read-only"
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) == "Buffer is read-only"
     end
 
     test "R (replace) keeps mode :normal and sets status" do
@@ -51,7 +51,7 @@ defmodule MingaEditor.Commands.InsertEntryTest do
       result = KeyDispatch.handle_key(state, ?R, 0)
 
       assert result.workspace.editing.mode == :normal
-      assert EditorState.status_msg(result) == "Buffer is read-only"
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) == "Buffer is read-only"
     end
 
     test "writable buffer transitions into :insert on i" do
@@ -61,7 +61,7 @@ defmodule MingaEditor.Commands.InsertEntryTest do
       result = KeyDispatch.handle_key(state, ?i, 0)
 
       assert result.workspace.editing.mode == :insert
-      assert EditorState.status_msg(result) == nil
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) == nil
     end
   end
 end

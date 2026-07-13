@@ -230,6 +230,7 @@ struct ResidentRowStoreTests {
     func batchReplacementCopyOnWriteAndCounters() throws {
         let committed = try ResidentRowStore(rows: rows(0..<65_536))
         var staged = committed
+        #expect(staged.sharesStorage(with: committed))
         let before = staged.counters
         let replacement = row(32_769, bufferLine: 32_768, text: "edited", hash: 900_001)
 
@@ -241,6 +242,7 @@ struct ResidentRowStoreTests {
 
         #expect(committed.row(at: 32_768)?.text == "row 32769")
         #expect(staged.row(at: 32_768) == replacement)
+        #expect(!staged.sharesStorage(with: committed))
         let work = staged.counters - before
         #expect(work.rowsVisited == 2)
         #expect(work.chunksTouched == 1)

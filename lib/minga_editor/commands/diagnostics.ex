@@ -9,6 +9,7 @@ defmodule MingaEditor.Commands.Diagnostics do
   use MingaEditor.Commands.Provider
 
   alias Minga.Buffer
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias Minga.Diagnostics
   alias Minga.Diagnostics.Diagnostic
   alias MingaEditor.UI.Picker.Sources.Diagnostics, as: DiagPickerSource
@@ -53,7 +54,7 @@ defmodule MingaEditor.Commands.Diagnostics do
 
     case clients do
       [] ->
-        EditorState.set_status(state, "No language servers running")
+        NoticeWorkflow.publish(state, "No language servers running")
 
       _ ->
         info =
@@ -68,7 +69,7 @@ defmodule MingaEditor.Commands.Diagnostics do
             end
           end)
 
-        EditorState.set_status(state, "LSP: #{info}")
+        NoticeWorkflow.publish(state, "LSP: #{info}")
     end
   end
 
@@ -79,7 +80,7 @@ defmodule MingaEditor.Commands.Diagnostics do
 
     case file_path do
       nil ->
-        EditorState.set_status(state, "No file — no diagnostics")
+        NoticeWorkflow.publish(state, "No file — no diagnostics")
 
       path ->
         uri = SyncServer.path_to_uri(path)
@@ -87,11 +88,11 @@ defmodule MingaEditor.Commands.Diagnostics do
 
         case find_fn.(uri, cursor_line) do
           nil ->
-            EditorState.set_status(state, "No diagnostics")
+            NoticeWorkflow.publish(state, "No diagnostics")
 
           diag ->
             Buffer.move_to(buf, start_position(diag, buf))
-            EditorState.set_status(state, diag.message)
+            NoticeWorkflow.publish(state, diag.message)
         end
     end
   end

@@ -9,13 +9,7 @@ defmodule MingaEditor.Shell.Traditional do
   Presentation fields live in `MingaEditor.Shell.Traditional.State`. The
   Editor GenServer stores this inside `state.shell_runtime` and dispatches presentation events through the `MingaEditor.Shell` behaviour callbacks.
 
-  ## Migration status
-
-  Fields are being migrated from `MingaEditor.State` into
-  `Shell.Traditional.State` in batches. See `BIG_REFACTOR_PLAN.md`
-  Phase F for the full plan.
-
-  Batch 1 (current): `nav_flash`, `hover_popup`, `status_msg`
+  Transient presentation state is coordinated through focused immutable owners in `Shell.Traditional.State`. Narrow workflow modules perform timers, logging, and other effects around those values.
 
   ## Rendering architecture
 

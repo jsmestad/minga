@@ -171,7 +171,7 @@ defmodule MingaEditor.Sidebar.BuiltinSurfaces do
   defp git_porcelain_unavailable(state) do
     message = "Git porcelain extension is disabled or failed to load"
     Minga.Log.warning(:editor, message)
-    EditorState.set_status(state, message)
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, message)
   end
 
   @spec git_porcelain_running?() :: boolean()

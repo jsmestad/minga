@@ -14,6 +14,7 @@ defmodule MingaEditor.Input.RouterTest do
   alias MingaEditor.VimState
   alias MingaEditor.Input
   alias MingaEditor.Input.Router
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
 
   @async_render_timeout 5_000
 
@@ -151,13 +152,29 @@ defmodule MingaEditor.Input.RouterTest do
       assert elem(cursor, 0) == 1
     end
 
+    test "ordinary keyboard input acknowledges a notice before dispatch" do
+      state = base_state() |> NoticeWorkflow.publish("clear me")
+
+      new_state = Router.dispatch(state, ?j, 0)
+
+      assert new_state.shell_runtime.state.notice.message == nil
+    end
+
+    test "keyboard acknowledgement cannot erase feedback produced by the dispatched command" do
+      state = base_state() |> NoticeWorkflow.publish("old notice")
+
+      new_state = Router.dispatch(state, ?s, MingaEditor.Frontend.Protocol.mod_ctrl())
+
+      assert new_state.shell_runtime.state.notice.message == "No file name — use :w <filename>"
+    end
+
     test "conflict prompt takes priority over mode FSM" do
-      alias MingaEditor.State.ModalOverlay
+      alias MingaEditor.Shell.Traditional.ModalWorkflow
       alias MingaEditor.State.ModalOverlay.Conflict, as: ConflictPayload
 
       state = base_state()
       buf = state.workspace.buffers.active
-      state = ModalOverlay.open(state, :conflict, ConflictPayload.new(buf, "/tmp/test.txt"))
+      state = ModalWorkflow.open(state, :conflict, ConflictPayload.new(buf, "/tmp/test.txt"))
 
       # 'j' is swallowed by conflict prompt, not forwarded to mode
       new_state = Router.dispatch(state, ?j, 0)
@@ -357,6 +374,17 @@ defmodule MingaEditor.Input.RouterTest do
 
       assert ^state = Router.dispatch_mouse(state, 3, 10, :left, 0, :press, 1)
       refute_receive {:mouse_probe, _type, _ref}, 20
+    end
+
+    test "handled mouse actions preserve an ordinary notice" do
+      state = base_state() |> NoticeWorkflow.publish("keep me")
+      state = %{state | focus_tree: bottom_panel_tree()}
+      state = EditorState.set_bottom_panel(state, %BottomPanel{visible: true})
+
+      new_state = Router.dispatch_mouse(state, 8, 10, :left, 0, :press, 1)
+
+      assert BottomPanel.focused?(new_state.shell_runtime.state.bottom_panel)
+      assert new_state.shell_runtime.state.notice == state.shell_runtime.state.notice
     end
   end
 

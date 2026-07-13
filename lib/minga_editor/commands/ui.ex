@@ -8,6 +8,7 @@ defmodule MingaEditor.Commands.UI do
   use MingaEditor.Commands.Provider
 
   alias MingaEditor.BottomPanel
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Frontend
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.PickerUI
@@ -180,15 +181,21 @@ defmodule MingaEditor.Commands.UI do
   defp execute_parser_restart(state) do
     case ParserManager.restart() do
       :ok ->
-        EditorState.set_status(state, "Parser restarted")
+        NoticeWorkflow.publish(state, "Parser restarted")
         |> then(&%{&1 | parser_status: :available})
 
       {:error, :binary_not_found} ->
-        EditorState.set_status(state, "Parser restart failed: binary not found")
+        NoticeWorkflow.publish(
+          state,
+          "Parser restart failed: binary not found"
+        )
         |> then(&%{&1 | parser_status: :unavailable})
     end
   catch
     :exit, _ ->
-      EditorState.set_status(state, "Parser restart failed: manager not available")
+      NoticeWorkflow.publish(
+        state,
+        "Parser restart failed: manager not available"
+      )
   end
 end

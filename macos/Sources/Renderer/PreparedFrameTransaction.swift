@@ -8,6 +8,51 @@ import Foundation
 import MingaProtocol
 import MingaUI
 
+extension GUIFrameImpact {
+    /// Exhaustive semantic dependency graph from protocol commands to consumer regions.
+    static func impact(for command: RenderCommand) -> GUIFrameImpact {
+        switch command {
+        case .guiTheme:
+            return .all
+
+        case .guiWindowContent, .guiWindowOverlayDelta, .guiWindowViewportDelta,
+             .guiWindowRowsDelta, .guiLineSpacing, .setFont, .setFontFallback,
+             .registerFont:
+            return [.editor, .editorOverlay]
+
+        case .setCursorShape, .setLinkCursor, .guiGutterSeparator, .guiCursorline,
+             .guiGutter, .guiIndentGuides, .guiCursorAnimation,
+             .guiSplitSeparators, .guiAgentTranscript:
+            return .editor
+
+        case .guiCompletion, .guiHoverPopup, .guiHoverAction, .guiSignatureHelp,
+             .guiExtensionOverlay:
+            return .editorOverlay
+
+        case .guiWhichKey, .guiPicker, .guiPickerPreview, .guiFloatPopup,
+             .guiToolManager, .guiNotifications, .guiExtensionRuntime,
+             .protocolError:
+            return .windowOverlay
+
+        case .guiTabBar, .guiFileTree, .guiFileTreeSelection, .guiObservatory,
+             .guiBreadcrumb, .guiGitStatus, .guiWorkspaces, .guiAgentContext,
+             .guiChangeSummary, .guiEditTimeline, .guiMinibuffer,
+             .guiSearchState, .guiSidebars:
+            return .shell
+
+        case .guiStatusBar, .guiAgentChat, .guiEmptyState:
+            return [.shell, .editor]
+
+        case .guiBottomPanel, .guiExtensionPanel:
+            return [.shell, .windowOverlay]
+
+        case .beginFrame, .commitFrame, .setTitle, .setWindowBg,
+             .clipboardWrite, .guiConfigState:
+            return []
+        }
+    }
+}
+
 /// The single typed result consumed by the frame-status protocol in #2739.
 enum FrameTransactionResult: Sendable, Equatable {
     case applied(generation: UInt32, frameSeq: UInt32)
@@ -147,6 +192,8 @@ struct PreparedFrameTransaction {
     let frameSeq: UInt32
     let baseFrameSeq: UInt32
     let generation: UInt32
+    /// Final consumer impact, including effects introduced while freezing the transaction.
+    let impact: GUIFrameImpact
     let theme: PreparedThemeUpdate?
     let windows: PreparedWindowUpdates?
     let chrome: PreparedChromeUpdates?
@@ -220,6 +267,7 @@ struct PreparedFrameTransactionBuilder {
     let generation: UInt32
 
     private var theme: PreparedThemeUpdate?
+    private var semanticImpact: GUIFrameImpact = []
     private var workingWindows: [UInt16: GUIWindowContent]
     private var changedWindows: [UInt16: GUIWindowContent] = [:]
     private var referencedWindowIds: Set<UInt16> = []
@@ -280,6 +328,7 @@ struct PreparedFrameTransactionBuilder {
         resourceWeight: FrameResourceWeight = FrameResourceWeight(commands: 1)
     ) {
         guard rejection == nil else { return }
+        semanticImpact.formUnion(GUIFrameImpact.impact(for: command))
         switch command {
         case .guiTheme(let slots):
             guard replaceStagingWeight(removing: themeWeight, adding: resourceWeight) else { return }
@@ -397,10 +446,17 @@ struct PreparedFrameTransactionBuilder {
         }
 
         let windowsChanged = !changedWindows.isEmpty || !windowCommands.isEmpty || baseFrameSeq == 0
+        var finalImpact = semanticImpact
+        if windowsChanged {
+            // Includes authoritative pruning, pane geometry, scroll reset, and
+            // local AppKit scroll-presentation discard performed during promotion.
+            finalImpact.formUnion([.editor, .editorOverlay])
+        }
         let transaction = PreparedFrameTransaction(
             frameSeq: frameSeq,
             baseFrameSeq: baseFrameSeq,
             generation: generation,
+            impact: finalImpact,
             theme: theme,
             windows: windowsChanged ? PreparedWindowUpdates(
                 replacements: changedWindows,
@@ -615,24 +671,19 @@ struct PreparedFrameTransactionBuilder {
     }
 
     private mutating func stageWindow(_ content: GUIWindowContent) -> Bool {
-        do {
-            let residentWeight = content.exactResourceWeight()
-            if residentWeight.firstExceeded(limit: residentLimit) != nil {
-                rejection = .resourcePolicy
-                return false
-            }
-            let previousWeight = try workingWindows[content.windowId]?.exactResourceWeight()
-                ?? FrameResourceWeight()
-            guard replaceStagingWeight(
-                removing: previousWeight, adding: residentWeight
-            ) else { return false }
-            workingWindows[content.windowId] = content
-            changedWindows[content.windowId] = content
-            return true
-        } catch {
+        let residentWeight = content.exactResourceWeight()
+        if residentWeight.firstExceeded(limit: residentLimit) != nil {
             rejection = .resourcePolicy
             return false
         }
+        let previousWeight = workingWindows[content.windowId]?.exactResourceWeight()
+            ?? FrameResourceWeight()
+        guard replaceStagingWeight(
+            removing: previousWeight, adding: residentWeight
+        ) else { return false }
+        workingWindows[content.windowId] = content
+        changedWindows[content.windowId] = content
+        return true
     }
 
     private func aggregatingOperationCounters(for content: GUIWindowContent) -> GUIWindowContent {

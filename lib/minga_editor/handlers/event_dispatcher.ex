@@ -101,14 +101,9 @@ defmodule MingaEditor.Handlers.EventDispatcher do
         %Events.LogMessageEvent{text: text, level: level},
         _msg
       ) do
-    state = MessageLog.append_to_store(state, text, level)
-    state = MingaEditor.schedule_render(state, 16)
-
-    if level == :error do
-      MingaEditor.maybe_schedule_warning_popup(state)
-    else
-      state
-    end
+    state
+    |> MessageLog.append_to_store(text, level)
+    |> MingaEditor.schedule_render(16)
   end
 
   def dispatch(
@@ -428,7 +423,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
     state = reconnect_remote_tabs(state, server_name, remote_node)
     count = Enum.count(sessions)
     status = remote_connected_status(server_name, count)
-    EditorState.set_status(state, status)
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, status)
   end
 
   @spec handle_node_disconnected(EditorState.t(), NodeDisconnectedEvent.t()) :: EditorState.t()
@@ -444,9 +439,14 @@ defmodule MingaEditor.Handlers.EventDispatcher do
       |> AgentAccess.update_agent(
         &AgentState.set_error(&1, "[#{server_name}] disconnected, reconnecting...")
       )
-      |> EditorState.set_status("[#{server_name}] disconnected, reconnecting...")
+      |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+        "[#{server_name}] disconnected, reconnecting..."
+      )
     else
-      EditorState.set_status(state, "[#{server_name}] disconnected, reconnecting...")
+      MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+        state,
+        "[#{server_name}] disconnected, reconnecting..."
+      )
     end
   end
 
@@ -550,7 +550,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
       state
       |> AgentLifecycle.cache_messages(messages)
       |> AgentAccess.update_agent(&AgentState.set_error(&1, "Remote session ended"))
-      |> EditorState.set_status("Remote session ended")
+      |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("Remote session ended")
     else
       state
     end

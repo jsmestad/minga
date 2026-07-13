@@ -26,7 +26,7 @@ defmodule MingaEditor.Input.GlobalBindingsTest do
     assert {:passthrough, new_state} = GlobalBindings.handle_key(state, 27, 0)
     assert_receive {:cancel_request, ^ref}
     refute LSPState.format_active?(new_state.lsp, ref)
-    assert EditorState.status_msg(new_state) == "Format canceled"
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state) == "Format canceled"
   end
 
   test "Esc remains a passthrough when no format is active" do

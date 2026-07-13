@@ -295,12 +295,16 @@ defmodule MingaEditor.Commands.AgentSubStates do
   defp apply_approval_response(state, {:error, :no_pending_approval}) do
     state
     |> update_agent(&AgentState.clear_pending_approval/1)
-    |> EditorState.set_status("Tool approval already resolved")
+    |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("Tool approval already resolved")
   end
 
   defp apply_approval_response(state, {:error, reason}) do
     Minga.Log.error(:agent, "[Agent] tool approval response failed: #{inspect(reason)}")
-    EditorState.set_status(state, "Tool approval failed: #{inspect(reason)}")
+
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      "Tool approval failed: #{inspect(reason)}"
+    )
   end
 
   # ── Private helpers ────────────────────────────────────────────────────────

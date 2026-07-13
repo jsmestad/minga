@@ -8,7 +8,7 @@ defmodule MingaEditor.PromptUI do
 
   Prompts and pickers are mutually exclusive: opening a prompt closes any
   active picker. The replacement is handled automatically by
-  `MingaEditor.State.ModalOverlay.open/3`.
+  `MingaEditor.Shell.Traditional.ModalWorkflow.open/3`.
 
   ## Usage
 
@@ -69,7 +69,11 @@ defmodule MingaEditor.PromptUI do
       context: context
     }
 
-    ModalOverlay.open(state, :prompt, PromptPayload.new(prompt_state))
+    MingaEditor.Shell.Traditional.ModalWorkflow.open(
+      state,
+      :prompt,
+      PromptPayload.new(prompt_state)
+    )
   end
 
   @doc """
@@ -77,7 +81,7 @@ defmodule MingaEditor.PromptUI do
   """
   @spec close(state()) :: state()
   def close(state) do
-    ModalOverlay.dismiss(state)
+    MingaEditor.Shell.Traditional.ModalWorkflow.dismiss(state)
   end
 
   @doc """
@@ -142,14 +146,19 @@ defmodule MingaEditor.PromptUI do
 
   @doc """
   Applies `fun` to the current PromptState inside the modal and writes
-  back via `ModalOverlay.transition`, keeping the modal sum type and
+  back via `MingaEditor.Shell.Traditional.ModalWorkflow.transition`, keeping the modal sum type and
   consistency check in sync.
   """
   @spec update_prompt(state(), (PromptState.t() -> PromptState.t())) :: state()
   def update_prompt(state, fun) do
     {:prompt, payload} = state.shell_runtime.state.modal
     new_pui = fun.(payload.prompt_ui)
-    ModalOverlay.transition(state, :prompt, PromptPayload.put_prompt_ui(payload, new_pui))
+
+    MingaEditor.Shell.Traditional.ModalWorkflow.transition(
+      state,
+      :prompt,
+      PromptPayload.put_prompt_ui(payload, new_pui)
+    )
   end
 
   # ── Private ────────────────────────────────────────────────────────────────

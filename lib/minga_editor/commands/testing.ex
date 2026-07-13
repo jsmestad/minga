@@ -19,7 +19,8 @@ defmodule MingaEditor.Commands.Testing do
     run_test_command(state, buf, :file)
   end
 
-  def test_file(state), do: EditorState.set_status(state, "No active buffer")
+  def test_file(state),
+    do: MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No active buffer")
 
   @spec test_all(state()) :: state()
   def test_all(state), do: run_test_command(state, nil, :all)
@@ -29,7 +30,8 @@ defmodule MingaEditor.Commands.Testing do
     run_test_command(state, buf, :at_point)
   end
 
-  def test_at_point(state), do: EditorState.set_status(state, "No active buffer")
+  def test_at_point(state),
+    do: MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No active buffer")
 
   @spec test_rerun(state()) :: state()
   def test_rerun(%{last_test_command: {command, project_root}} = state) do
@@ -43,7 +45,8 @@ defmodule MingaEditor.Commands.Testing do
     |> show_output()
   end
 
-  def test_rerun(state), do: EditorState.set_status(state, "No previous test command")
+  def test_rerun(state),
+    do: MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No previous test command")
 
   @spec test_output(state()) :: state()
   def test_output(state), do: show_output(state)
@@ -61,7 +64,10 @@ defmodule MingaEditor.Commands.Testing do
         execute_test(state, command, project_root)
 
       :none ->
-        EditorState.set_status(state, "No test runner configured for #{filetype}")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "No test runner configured for #{filetype}"
+        )
     end
   end
 
@@ -97,7 +103,7 @@ defmodule MingaEditor.Commands.Testing do
 
   @spec execute_test(state(), String.t() | nil, String.t()) :: state()
   defp execute_test(state, nil, _project_root) do
-    EditorState.set_status(state, "Cannot determine test command")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Cannot determine test command")
   end
 
   defp execute_test(state, command, project_root) do
@@ -135,7 +141,7 @@ defmodule MingaEditor.Commands.Testing do
   defp show_output(state) do
     case Minga.CommandOutput.buffer("*test*") do
       nil ->
-        EditorState.set_status(state, "No test output")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No test output")
 
       buf_pid ->
         BufferManagement.execute(state, {:open_special_buffer, "*test*", buf_pid})

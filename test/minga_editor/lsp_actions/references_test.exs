@@ -25,7 +25,7 @@ defmodule MingaEditor.LspActions.ReferencesTest do
       assert selected.id == operation.id
       assert selected.status == status
       assert selected.message == message
-      assert EditorState.status_msg(state) == nil
+      assert state.shell_runtime.state.notice.message == nil
     end
   end
 
@@ -42,7 +42,7 @@ defmodule MingaEditor.LspActions.ReferencesTest do
 
     assert OperationFeedback.selected(state.operation_feedback).status == :success
     assert OperationFeedback.selected(state.operation_feedback).message == "Found 2 references"
-    assert EditorState.status_msg(state) == nil
+    assert state.shell_runtime.state.notice.message == nil
   end
 
   test "a response for a replaced identity cannot mutate feedback or perform picker effects" do

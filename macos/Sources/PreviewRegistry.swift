@@ -296,7 +296,7 @@ enum PreviewRegistry {
         populateEditorFrame(dispatcher: dispatcher, guiState: appState.gui)
 
         let nsView = EditorNSView(encoder: encoder, fontFace: fontFace, dispatcher: dispatcher, coreTextRenderer: renderer, fontManager: fontManager)
-        nsView.guiState = appState.gui
+        nsView.editorInput = appState.gui.editorInput
         nsView.statusBarState = appState.gui.statusBarState
         nsView.renderFrame()
         return nsView
@@ -452,7 +452,7 @@ enum PreviewRegistry {
         populateDiagnosticsEditorFrame(dispatcher: dispatcher, guiState: appState.gui)
 
         let nsView = EditorNSView(encoder: encoder, fontFace: fontFace, dispatcher: dispatcher, coreTextRenderer: renderer, fontManager: fontManager)
-        nsView.guiState = appState.gui
+        nsView.editorInput = appState.gui.editorInput
         nsView.statusBarState = appState.gui.statusBarState
         nsView.renderFrame()
         return nsView

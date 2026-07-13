@@ -33,17 +33,23 @@ defmodule MingaEditor.Handlers.ToolHandler do
   @spec handle(EditorState.t(), term()) :: {EditorState.t(), [tool_effect()]}
 
   def handle(state, {:minga_event, :tool_install_started, %{name: name}}) do
-    new_state = EditorState.set_status(state, "Installing #{name}...")
+    new_state =
+      MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Installing #{name}...")
+
     {new_state, [{:refresh_tool_picker}, :render]}
   end
 
   def handle(state, {:minga_event, :tool_install_progress, %{name: name, message: msg}}) do
-    new_state = EditorState.set_status(state, "#{name}: #{msg}")
+    new_state = MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "#{name}: #{msg}")
     {new_state, [:render]}
   end
 
   def handle(state, {:minga_event, :tool_install_complete, %{name: name, version: version}}) do
-    new_state = EditorState.set_status(state, "\u2713 #{name} v#{version} installed")
+    new_state =
+      MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+        state,
+        "\u2713 #{name} v#{version} installed"
+      )
 
     effects = [
       {:log_message, "Tool installed: #{name} v#{version}"},
@@ -64,7 +70,12 @@ defmodule MingaEditor.Handlers.ToolHandler do
 
   def handle(state, {:minga_event, :tool_install_failed, %{name: name, reason: reason}}) do
     reason_str = if is_binary(reason), do: reason, else: inspect(reason)
-    new_state = EditorState.set_status(state, "\u2715 #{name} install failed: #{reason_str}")
+
+    new_state =
+      MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+        state,
+        "\u2715 #{name} install failed: #{reason_str}"
+      )
 
     {new_state,
      [
@@ -84,7 +95,7 @@ defmodule MingaEditor.Handlers.ToolHandler do
   end
 
   def handle(state, :clear_tool_status) do
-    current = EditorState.status_msg(state) || ""
+    current = MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) || ""
 
     new_state =
       if String.starts_with?(current, [
@@ -92,7 +103,7 @@ defmodule MingaEditor.Handlers.ToolHandler do
            "Installing ",
            "Updating "
          ]) do
-        EditorState.clear_status(state)
+        MingaEditor.Shell.Traditional.NoticeWorkflow.dismiss(state)
       else
         state
       end

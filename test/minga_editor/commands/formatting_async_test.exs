@@ -28,7 +28,7 @@ defmodule MingaEditor.Commands.FormattingAsyncTest do
     assert feedback(state).kind == :external_format
     assert feedback(state).status == :error
     assert feedback(state).message == "Formatter scheduler unavailable"
-    assert EditorState.status_msg(state) == nil
+    assert state.shell_runtime.state.notice.message == nil
   end
 
   test "request is latest-wins and keyed by Buffer process identity" do
@@ -53,7 +53,7 @@ defmodule MingaEditor.Commands.FormattingAsyncTest do
     assert Buffer.content(buffer) == "HELLO WORLD\n"
     assert feedback(new_state).message == "Formatted"
     assert feedback(new_state).status == :success
-    assert EditorState.status_msg(new_state) == nil
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state) == nil
     assert outcome.status == :completed
   end
 
@@ -76,7 +76,7 @@ defmodule MingaEditor.Commands.FormattingAsyncTest do
     assert_receive {:DOWN, ^monitor, :process, ^buffer, :normal}
     assert feedback(new_state).message == "Formatted"
     assert feedback(new_state).status == :success
-    assert EditorState.status_msg(new_state) == nil
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state) == nil
     assert outcome.status == :completed
   end
 
@@ -134,7 +134,7 @@ defmodule MingaEditor.Commands.FormattingAsyncTest do
     assert Buffer.content(buffer) == "!FORMATTED\n"
     assert feedback(new_state).message == "Formatted"
     assert feedback(new_state).status == :success
-    assert EditorState.status_msg(new_state) == nil
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state) == nil
     assert outcome.status == :completed
     assert :ok = Buffer.undo(buffer)
     assert Buffer.content(buffer) == "hello world\n"
@@ -231,7 +231,7 @@ defmodule MingaEditor.Commands.FormattingAsyncTest do
     assert Buffer.cursor(buffer) == {1, 3}
     assert feedback(new_state).message == "Formatted"
     assert feedback(new_state).status == :success
-    assert EditorState.status_msg(new_state) == nil
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state) == nil
     assert outcome.status == :completed
   end
 

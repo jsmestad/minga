@@ -50,7 +50,7 @@ defmodule MingaEditor.Commands.Dired do
         open_file(state, entry.path)
       end
     else
-      _ -> EditorState.set_status(state, "No entry at cursor")
+      _ -> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No entry at cursor")
     end
   end
 
@@ -97,9 +97,9 @@ defmodule MingaEditor.Commands.Dired do
          {cursor_line, _col} <- Buffer.cursor(buf),
          %{} = entry <- Dired.entry_at_line(dired, cursor_line) do
       spawn_external_open(entry.path)
-      EditorState.set_status(state, "Opened #{entry.name}")
+      MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Opened #{entry.name}")
     else
-      _ -> EditorState.set_status(state, "No entry at cursor")
+      _ -> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No entry at cursor")
     end
   end
 
@@ -135,7 +135,7 @@ defmodule MingaEditor.Commands.Dired do
 
   def execute(state, :dired_cancel_apply) do
     state = clear_confirming(state)
-    EditorState.set_status(state, "Cancelled")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Cancelled")
   end
 
   # ── Opening ──────────────────────────────────────────────────────────────
@@ -150,10 +150,13 @@ defmodule MingaEditor.Commands.Dired do
       |> Commands.add_buffer(pid)
       |> EditorState.set_dired(dired_state)
       |> EditorState.set_keymap_scope(:dired)
-      |> EditorState.set_status("Dired: #{dired.directory}")
+      |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("Dired: #{dired.directory}")
     else
       {:error, reason} ->
-        EditorState.set_status(state, "Cannot open directory: #{inspect(reason)}")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Cannot open directory: #{inspect(reason)}"
+        )
     end
   end
 
@@ -193,10 +196,15 @@ defmodule MingaEditor.Commands.Dired do
 
             state
             |> EditorState.set_dired(dired_state)
-            |> EditorState.set_status("Dired: #{new_dired.directory}")
+            |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+              "Dired: #{new_dired.directory}"
+            )
 
           {:error, reason} ->
-            EditorState.set_status(state, "Cannot open directory: #{inspect(reason)}")
+            MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+              state,
+              "Cannot open directory: #{inspect(reason)}"
+            )
         end
 
       _ ->
@@ -213,10 +221,13 @@ defmodule MingaEditor.Commands.Dired do
         Commands.add_buffer(state, pid)
 
       {:error, :binary_file} ->
-        EditorState.set_status(state, "Cannot open binary file: #{Path.basename(file_path)}")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Cannot open binary file: #{Path.basename(file_path)}"
+        )
 
       {:error, _} ->
-        EditorState.set_status(state, "Cannot open: #{file_path}")
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Cannot open: #{file_path}")
     end
   end
 
@@ -253,10 +264,13 @@ defmodule MingaEditor.Commands.Dired do
 
             state
             |> EditorState.set_dired(dired_state)
-            |> EditorState.set_status(status_for_dired(new_dired))
+            |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(status_for_dired(new_dired))
 
           {:error, reason} ->
-            EditorState.set_status(state, "Dired error: #{inspect(reason)}")
+            MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+              state,
+              "Dired error: #{inspect(reason)}"
+            )
         end
 
       _ ->
@@ -284,14 +298,14 @@ defmodule MingaEditor.Commands.Dired do
 
   @spec maybe_enter_confirmation(state(), [Dired.operation()]) :: state()
   defp maybe_enter_confirmation(state, []),
-    do: EditorState.set_status(state, "No changes to apply")
+    do: MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No changes to apply")
 
   defp maybe_enter_confirmation(state, ops) do
     summary = format_operations_summary(ops)
 
     state
     |> EditorState.update_dired(&DiredState.enter_confirmation(&1, ops))
-    |> EditorState.set_status("#{summary} — apply? (y/n)")
+    |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("#{summary} — apply? (y/n)")
   end
 
   @spec spawn_external_open(String.t()) :: {:ok, pid()}
@@ -309,7 +323,10 @@ defmodule MingaEditor.Commands.Dired do
 
   @spec report_apply_result(state(), non_neg_integer(), [{Dired.operation(), term()}]) :: state()
   defp report_apply_result(state, successes, []) do
-    EditorState.set_status(state, "Applied #{successes} operation(s)")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      "Applied #{successes} operation(s)"
+    )
   end
 
   defp report_apply_result(state, successes, errors) do
@@ -319,7 +336,7 @@ defmodule MingaEditor.Commands.Dired do
     {first_op, first_reason} = hd(errors)
     hint = "#{format_op_name(first_op)}: #{inspect(first_reason)}"
 
-    EditorState.set_status(
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
       state,
       "Applied #{successes}, #{Enum.count(errors)} error(s) — #{hint}"
     )

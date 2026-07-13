@@ -11,8 +11,8 @@ defmodule MingaEditor.Input.SignatureHelp do
 
   @type state :: MingaEditor.Input.Handler.handler_state()
 
+  alias MingaEditor.Shell.Traditional.SignatureHelpWorkflow
   alias MingaEditor.SignatureHelp, as: SigHelp
-  alias MingaEditor.State, as: EditorState
 
   import Bitwise
 
@@ -27,15 +27,15 @@ defmodule MingaEditor.Input.SignatureHelp do
   end
 
   # C-j: next signature overload
-  def handle_key(%{shell_runtime: %{state: %{signature_help: %SigHelp{} = sh}}} = state, ?j, mods)
+  def handle_key(%{shell_runtime: %{state: %{signature_help: %SigHelp{}}}} = state, ?j, mods)
       when band(mods, @ctrl) != 0 do
-    {:handled, EditorState.set_signature_help(state, SigHelp.next_signature(sh))}
+    {:handled, SignatureHelpWorkflow.next(state)}
   end
 
   # C-k: previous signature overload
-  def handle_key(%{shell_runtime: %{state: %{signature_help: %SigHelp{} = sh}}} = state, ?k, mods)
+  def handle_key(%{shell_runtime: %{state: %{signature_help: %SigHelp{}}}} = state, ?k, mods)
       when band(mods, @ctrl) != 0 do
-    {:handled, EditorState.set_signature_help(state, SigHelp.prev_signature(sh))}
+    {:handled, SignatureHelpWorkflow.previous(state)}
   end
 
   # Escape: dismiss signature help
@@ -44,7 +44,7 @@ defmodule MingaEditor.Input.SignatureHelp do
         @key_escape,
         _mods
       ) do
-    {:handled, EditorState.set_signature_help(state, nil)}
+    {:handled, SignatureHelpWorkflow.dismiss(state)}
   end
 
   # All other keys: pass through (signature help stays visible while typing)

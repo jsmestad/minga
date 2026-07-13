@@ -323,6 +323,13 @@ public struct ResidentRowStore: Sendable {
     /// Exact cached ownership of resident row strings, spans, and locators.
     public var resourceWeight: FrameResourceWeight { storage.resourceWeight }
 
+    #if DEBUG
+    /// Test-only identity seam for proving resident COW storage sharing.
+    public func sharesStorage(with other: ResidentRowStore) -> Bool {
+        storage === other.storage
+    }
+    #endif
+
     /// Replaces the complete sequence and records one explicit full reset.
     public mutating func replaceAll(
         with rows: [GUIVisualRow], limit: FrameResourceWeight? = nil

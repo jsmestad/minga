@@ -759,6 +759,42 @@ func TestDecodeStatusChrome(t *testing.T) {
 	}
 }
 
+func TestDecodeStatusOperationUsesGeneratedMappingAndKeepsNoticeSeparate(t *testing.T) {
+	operation := make([]byte, 8)
+	binary.BigEndian.PutUint64(operation, 4_294_967_297)
+	operation = append(operation,
+		byte(generated.OperationKindLspRename),
+		byte(generated.OperationStatusRunning),
+		0x07,
+	)
+	operation = append(operation, string16("Renaming...")...)
+	operation = append(operation, 0, 2, 0, 5)
+	operation = append(operation, 0, 0, 0, 7, 0, 0, 0, 10)
+
+	packet := []byte{generated.OPGuiStatusBar, 2}
+	packet = append(packet, section(0x07, string16("ordinary notice"))...)
+	packet = append(packet, section(0x0F, operation)...)
+
+	command, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	status := command.Chrome.Status
+	if status.Message != "ordinary notice" {
+		t.Fatalf("plain message was conflated with operation: %+v", status)
+	}
+	if status.Operation == nil {
+		t.Fatal("structured operation was not decoded")
+	}
+	got := *status.Operation
+	if got.OperationID != 4_294_967_297 || got.Kind != generated.OperationKindLspRename || got.Status != generated.OperationStatusRunning || got.Flags != 0x07 || got.Message != "Renaming..." {
+		t.Fatalf("operation identity/semantic mapping = %+v", got)
+	}
+	if got.QueuePosition != 2 || got.QueueTotal != 5 || got.ProgressCurrent != 7 || got.ProgressTotal != 10 {
+		t.Fatalf("operation metadata mapping = %+v", got)
+	}
+}
+
 func TestDecodeStatusModelineSegments(t *testing.T) {
 	left := []byte{2, 0, 1, 0, 1}
 	left = append(left, string8("mode")...)

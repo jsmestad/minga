@@ -2,6 +2,7 @@ defmodule MingaEditor.UI.Popup.LifecycleTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.Layout
+  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Windows
@@ -217,7 +218,43 @@ defmodule MingaEditor.UI.Popup.LifecycleTest do
       refute Map.has_key?(restored.workspace.windows.map, 2)
     end
 
-    test "focused popup stays open when its restore target process has died", %{
+    test "focused popup skips a dead restore target for another viable editor window", %{
+      state: state,
+      main_buf: main_buf,
+      popup_buf: popup_buf,
+      table: table
+    } do
+      other_buf = fake_pid()
+      on_exit(fn -> Process.exit(other_buf, :kill) end)
+      {:ok, tree} = WindowTree.split(state.workspace.windows.tree, 1, :vertical, 2)
+
+      windows =
+        state.workspace.windows
+        |> Windows.add_window(Window.new(2, other_buf, 24, 80))
+        |> Windows.set_tree(tree)
+        |> Windows.set_next_id(3)
+
+      workspace =
+        state.workspace
+        |> SessionState.set_windows(windows)
+        |> SessionState.set_buffers(Buffers.add_background(state.workspace.buffers, other_buf))
+
+      state = EditorState.set_workspace(state, workspace)
+      PopupRegistry.register(Rule.new("*Warnings*", focus: true), table)
+      {:ok, with_popup} = Lifecycle.open_popup(state, "*Warnings*", popup_buf, registry: table)
+      monitor = Process.monitor(main_buf)
+      Process.exit(main_buf, :kill)
+      assert_receive {:DOWN, ^monitor, :process, ^main_buf, :killed}
+
+      restored = Lifecycle.close_popup(with_popup, 3)
+
+      assert restored.workspace.windows.active == 2
+      assert restored.workspace.buffers.active == other_buf
+      assert Map.has_key?(restored.workspace.windows.map, 2)
+      refute Map.has_key?(restored.workspace.windows.map, 3)
+    end
+
+    test "focused popup repairs the remaining editor surface when every buffer target is dead", %{
       state: state,
       main_buf: main_buf,
       popup_buf: popup_buf,
@@ -229,10 +266,14 @@ defmodule MingaEditor.UI.Popup.LifecycleTest do
       Process.exit(main_buf, :kill)
       assert_receive {:DOWN, ^monitor, :process, ^main_buf, :killed}
 
-      unchanged = Lifecycle.close_popup(with_popup, 2)
+      restored = Lifecycle.close_popup(with_popup, 2)
 
-      assert unchanged.workspace.windows.active == 2
-      assert Map.has_key?(unchanged.workspace.windows.map, 2)
+      assert restored.workspace.windows.active == 1
+      assert Map.has_key?(restored.workspace.windows.map, restored.workspace.windows.active)
+      refute Map.has_key?(restored.workspace.windows.map, 2)
+      assert restored.workspace.buffers.active == nil
+      assert restored.workspace.buffers.list == []
+      assert Map.fetch!(restored.workspace.windows.map, 1).content == {:empty, :semantic}
     end
 
     test "falls back to a remaining editor window when previous_active is gone", %{

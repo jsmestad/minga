@@ -16,8 +16,6 @@ defmodule MingaEditor.Input.ConflictPrompt do
   @type state :: MingaEditor.Input.Handler.handler_state()
 
   alias Minga.Buffer
-  alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.ModalOverlay
 
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
@@ -33,8 +31,8 @@ defmodule MingaEditor.Input.ConflictPrompt do
 
     {:handled,
      state
-     |> ModalOverlay.dismiss()
-     |> EditorState.set_status("#{name} reloaded (changed on disk)")}
+     |> MingaEditor.Shell.Traditional.ModalWorkflow.dismiss()
+     |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("#{name} reloaded (changed on disk)")}
   end
 
   def handle_key(
@@ -45,7 +43,10 @@ defmodule MingaEditor.Input.ConflictPrompt do
       when is_pid(buf) do
     Buffer.acknowledge_disk_change(buf)
 
-    {:handled, state |> ModalOverlay.dismiss() |> EditorState.clear_status()}
+    {:handled,
+     state
+     |> MingaEditor.Shell.Traditional.ModalWorkflow.dismiss()
+     |> MingaEditor.Shell.Traditional.NoticeWorkflow.dismiss()}
   end
 
   def handle_key(%{shell_runtime: %{state: %{modal: {:conflict, _}}}} = state, _cp, _mods) do

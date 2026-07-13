@@ -5,15 +5,15 @@ import SwiftUI
 /// Context passed to native sidebar adapter builders.
 @MainActor
 public struct NativeSidebarContext {
-    public init(guiState: GUIState, theme: ThemeColors, encoder: InputEncoder? = nil, projectName: String, gitBranch: String, leadingPadding: CGFloat) {
-        self.guiState = guiState
+    public init(input: ShellHostInput, theme: ThemeColors, encoder: InputEncoder? = nil, projectName: String, gitBranch: String, leadingPadding: CGFloat) {
+        self.input = input
         self.theme = theme
         self.encoder = encoder
         self.projectName = projectName
         self.gitBranch = gitBranch
         self.leadingPadding = leadingPadding
     }
-    public let guiState: GUIState
+    public let input: ShellHostInput
     public let theme: ThemeColors
     public let encoder: InputEncoder?
     public let projectName: String
@@ -62,7 +62,7 @@ public enum NativeSidebarRegistry {
         fallbackIcon: "folder",
         makeHeader: { context, _ in
             AnyView(FileTreeHeaderView(
-                fileTreeState: context.guiState.fileTreeState,
+                fileTreeState: context.input.fileTreeState,
                 encoder: context.encoder,
                 branchName: context.gitBranch,
                 leadingPadding: context.leadingPadding
@@ -70,7 +70,7 @@ public enum NativeSidebarRegistry {
         },
         makeBody: { context, _ in
             AnyView(FileTreeView(
-                fileTreeState: context.guiState.fileTreeState,
+                fileTreeState: context.input.fileTreeState,
                 encoder: context.encoder
             ))
         },
@@ -85,14 +85,14 @@ public enum NativeSidebarRegistry {
         fallbackIcon: "point.3.filled.connected.trianglepath.dotted",
         makeHeader: { context, _ in
             AnyView(GitStatusHeaderView(
-                state: context.guiState.gitStatusState,
+                state: context.input.gitStatusState,
                 projectName: context.projectName,
                 leadingPadding: context.leadingPadding
             ))
         },
         makeBody: { context, _ in
             AnyView(GitStatusView(
-                state: context.guiState.gitStatusState,
+                state: context.input.gitStatusState,
                 encoder: context.encoder
             ))
         },
@@ -100,7 +100,7 @@ public enum NativeSidebarRegistry {
             encoder?.sendSidebarAction(sidebarId: item.id, kind: item.semanticKind, action: isActive ? "toggle" : "activate")
         },
         badgeText: { context, item in
-            let count = item.badgeCount.map(Int.init) ?? context.guiState.gitStatusState.totalCount
+            let count = item.badgeCount.map(Int.init) ?? context.input.gitStatusState.totalCount
             guard count > 0 else { return nil }
             return count > 99 ? "99+" : String(count)
         }
@@ -110,11 +110,11 @@ public enum NativeSidebarRegistry {
         kind: "observatory",
         fallbackIcon: "network",
         makeHeader: { context, item in
-            AnyView(ObservatorySidebarHeader(item: item, state: context.guiState.observatoryState, leadingPadding: context.leadingPadding))
+            AnyView(ObservatorySidebarHeader(item: item, state: context.input.observatoryState, leadingPadding: context.leadingPadding))
         },
         makeBody: { context, _ in
             AnyView(ObservatoryView(
-                state: context.guiState.observatoryState,
+                state: context.input.observatoryState,
                 encoder: context.encoder
             ))
         },

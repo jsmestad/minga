@@ -301,10 +301,9 @@ defmodule MingaEditor.RenderPipeline.Input do
       input.workspace.editing.mode_state,
       # Tab bar state
       input.shell_state |> Map.get(:tab_bar),
-      # Status message (flash messages in status bar)
-      input.shell_state |> Map.get(:status_msg),
-      # Nav flash overlay
-      input.shell_state |> Map.get(:nav_flash),
+      # Ordinary notice and independent flash owners
+      input.shell_state |> Map.get(:notice),
+      input.shell_state |> Map.get(:flashes),
       # Sidebar registry state drives sidebar chrome/layout rebuilds.
       Sidebar.all(input.sidebar_registry),
       # File tree

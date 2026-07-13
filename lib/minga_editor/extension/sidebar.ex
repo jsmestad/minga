@@ -11,7 +11,6 @@ defmodule MingaEditor.Extension.Sidebar do
   alias Minga.Extension.ContributionCleanup
   alias MingaEditor.Extension.Sidebar.Entry
   alias MingaEditor.Extension.Sidebar.Snapshot
-  alias MingaEditor.State, as: EditorState
 
   @table __MODULE__
   @reserved_builtin_ids MapSet.new(["file_tree", "git_status", "observatory"])
@@ -479,7 +478,10 @@ defmodule MingaEditor.Extension.Sidebar do
       "Ignored sidebar action #{inspect(action)} for #{inspect(sidebar_id)}: no action handler"
     )
 
-    EditorState.set_status(state, "Sidebar #{sidebar_id} has no action handler")
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      "Sidebar #{sidebar_id} has no action handler"
+    )
   end
 
   defp run_action_handler(fun, _source, state, action, context) when is_function(fun, 3),

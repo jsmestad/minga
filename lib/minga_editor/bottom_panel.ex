@@ -15,12 +15,11 @@ defmodule MingaEditor.BottomPanel do
 
   ## Visibility state machine
 
-  The panel has three independent visibility controls:
+  The panel opens only through explicit user actions. Logging a warning or error never changes its visibility or focus.
 
-  - `visible` - whether the panel is currently shown
-  - `dismissed` - set when user explicitly dismisses a warning auto-popup;
-    prevents auto-open until the user explicitly opens the panel
-  - `filter` - optional filter preset (`:warnings` for auto-open on warning)
+  - `visible` tracks whether the panel is shown.
+  - `dismissed` records an explicit dismissal until the next explicit open.
+  - `filter` records an optional user-selected preset, including `:warnings` for the View Warnings command.
   """
 
   @type tab :: :messages | :diagnostics | :terminal

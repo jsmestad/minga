@@ -30,7 +30,7 @@ struct MouseInputTests {
         ctRenderer.setupRenderers(fontManager: fm)
         let view = EditorNSView(encoder: spy, fontFace: face, dispatcher: disp,
                                 coreTextRenderer: ctRenderer, fontManager: fm)
-        view.guiState = guiState
+        view.editorInput = guiState.editorInput
         // Give the view a real frame so cellPosition math works.
         // Without a window, convert(_:from:) returns the point unchanged,
         // so locationInWindow IS the local point.
@@ -75,14 +75,14 @@ struct MouseInputTests {
             ]
         )
 
-        view.guiState?.windowContents[1] = try GUIWindowContent(
+        view.dispatcher.applyForTesting(.guiWindowContent(data: try GUIWindowContent(
             windowId: 1, fullRefresh: true,
             cursorRow: 0, cursorCol: 0, cursorShape: .block,
             rows: [], selection: nil,
             searchMatches: [], diagnosticUnderlines: [],
             documentHighlights: [],
             paneGeometry: geometry
-        )
+        )))
     }
 
     /// Creates a mouse event at the given pixel position.
@@ -354,7 +354,7 @@ struct MouseInputTests {
         )
         view.dispatcher.applyForTesting(.guiGutter(data: activeGutter))
         view.dispatcher.applyForTesting(.guiGutter(data: inactiveGutter))
-        view.guiState?.windowContents[7] = try GUIWindowContent(
+        view.dispatcher.applyForTesting(.guiWindowContent(data: try GUIWindowContent(
             windowId: 7, fullRefresh: true,
             cursorRow: 0, cursorCol: 0, cursorShape: .block,
             rows: [], selection: nil,
@@ -365,7 +365,7 @@ struct MouseInputTests {
                 visibleStartLine: 42, visibleEndLine: 43, overscanStartLine: 41, overscanEndLine: 43,
                 contentEpoch: 1, layoutGeneration: 1
             )
-        )
+        )))
 
         guard let event = mouseEvent(type: .leftMouseDown,
                                      location: NSPoint(x: cw * 22.2, y: ch * 0.5)) else { return }
@@ -404,7 +404,7 @@ struct MouseInputTests {
         )
 
         view.dispatcher.applyForTesting(.guiGutter(data: gutter))
-        view.guiState?.windowContents[7] = try GUIWindowContent(
+        view.dispatcher.applyForTesting(.guiWindowContent(data: try GUIWindowContent(
             windowId: 7, fullRefresh: true,
             cursorRow: 0, cursorCol: 0, cursorShape: .block,
             rows: [
@@ -419,7 +419,7 @@ struct MouseInputTests {
                 visibleStartLine: 10, visibleEndLine: 12, overscanStartLine: 10, overscanEndLine: 12,
                 contentEpoch: 1, layoutGeneration: 1
             )
-        )
+        )))
 
         guard let event = mouseEvent(type: .leftMouseDown,
                                      location: NSPoint(x: cw * 6.2, y: ch * 0.5)) else { return }

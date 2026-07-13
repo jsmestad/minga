@@ -46,12 +46,10 @@ defmodule MingaGitPorcelain.Input.GitStatusInputTest do
         viewport: Viewport.new(24, 80),
         keymap_scope: :git_status
       },
-      shell_state: %MingaEditor.Shell.Traditional.State{
-        git_status_panel: panel_data,
-        git_status_tui_state: TuiState.new()
-      },
       focus_stack: [MingaEditor.Input.Scoped, MingaEditor.Input.ModeFSM]
     }
+    |> EditorState.set_git_status_panel(panel_data)
+    |> EditorState.set_git_status_tui_state(TuiState.new())
   end
 
   test "git status panel keeps shared data separate from tui state" do

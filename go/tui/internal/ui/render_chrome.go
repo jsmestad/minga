@@ -5,9 +5,11 @@ import (
 	"image/color"
 	"sort"
 	"strings"
+	"unicode"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
 
@@ -226,9 +228,11 @@ func (m Model) footerLines() []string {
 				prefix = icon.glyph + " " + chromeStatus.Filename
 			}
 			status = fmt.Sprintf("%s  %d:%d", prefix, chromeStatus.Line, chromeStatus.Column)
-			if chromeStatus.Message != "" {
-				status += "  " + chromeStatus.Message
+			if message := m.renderStatusMessage(chromeStatus.Message); message != "" {
+				status += "  " + message
 			}
+		} else if message := m.renderStatusMessage(chromeStatus.Message); message != "" {
+			status = message
 		}
 	}
 	if m.lastError != "" {
@@ -297,7 +301,9 @@ func (m Model) renderStatusSegments(status protocol.StatusBar) string {
 	messageWidth := lipgloss.Width(message)
 	available := max(m.width-leftWidth-rightWidth, 1)
 	if messageWidth > available {
-		message = m.renderStatusMessage(fit(status.Message, available))
+		// Feedback decoration and metadata are already styled. Truncate that one
+		// finalized value so narrow widths cannot fall back to the raw notice.
+		message = fitStyled(message, available)
 		messageWidth = lipgloss.Width(message)
 	}
 	leftSpacer := strings.Repeat(" ", max((available-messageWidth)/2, 0))
@@ -325,11 +331,43 @@ func (m Model) extensionRuntimeStatus() string {
 }
 
 func (m Model) renderStatusMessage(message string) string {
-	if message == "" {
+	text, status, hasOperationPresentation := m.feedback.presentation()
+	operationOwnsLane := hasOperationPresentation && (activeOperation(status) || message == "")
+	foreground := m.palette().Warning()
+	if operationOwnsLane {
+		switch status {
+		case generated.OperationStatusPending, generated.OperationStatusQueued:
+			foreground = m.palette().ChromeText()
+		case generated.OperationStatusRunning:
+			foreground = m.palette().Accent()
+		case generated.OperationStatusSuccess:
+			foreground = m.palette().Hint()
+		case generated.OperationStatusError:
+			foreground = m.palette().Error()
+		case generated.OperationStatusTimeout:
+			foreground = m.palette().Warning()
+		case generated.OperationStatusCanceled:
+			foreground = m.palette().Muted()
+		case generated.OperationStatusStale:
+			foreground = m.palette().Info()
+		}
+	} else {
+		text = message
+	}
+	text = sanitizeTerminalText(text)
+	if text == "" {
 		return ""
 	}
-	displayed := m.feedback.formatMessage(message)
-	return lipgloss.NewStyle().Bold(true).Foreground(m.palette().Warning()).Background(m.palette().ChromeSurface()).Render(displayed)
+	return lipgloss.NewStyle().Bold(true).Foreground(foreground).Background(m.palette().ChromeSurface()).Render(text)
+}
+
+func sanitizeTerminalText(text string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, ansi.Strip(text))
 }
 
 func (m Model) renderSegmentList(segments []protocol.StatusSegment) string {
