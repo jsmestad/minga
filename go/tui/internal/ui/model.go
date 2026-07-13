@@ -65,6 +65,7 @@ type Model struct {
 	bottomPanelScrollback int
 	agent                 agentPanel
 	feedback              feedbackState
+	now                   func() time.Time
 	// latency records end-to-end keystroke-to-write samples (ticket #2215).
 	// It is a pointer so the recorder persists across value-copied Model
 	// updates. hudVisible toggles the on-screen p50/p99 overlay at runtime.
@@ -178,12 +179,20 @@ func New(width, height uint16, out chan<- []byte, filter *InputFilter) Model {
 		localPresentation: newLocalPresentation(),
 		inputFilter:       filter,
 		transcript:        newResidentTranscript(),
+		now:               time.Now,
 	}
 	// Seed the layout so the first mouse event lands in the correct
 	// region before the first BEAM frame arrives.
 	m.layout = m.computeLayout()
 	m.viewport.SetHeight(m.layout.body.Height)
 	return m
+}
+
+func (m Model) currentTime() time.Time {
+	if m.now != nil {
+		return m.now()
+	}
+	return time.Now()
 }
 
 // latencyHUDEnvEnabled reports whether MINGA_LATENCY_HUD requests the overlay on
@@ -212,6 +221,7 @@ func agentAnimationTick() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.pendingClipboard = ""
 	var cmd tea.Cmd
+	transitionNow := time.Time{}
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -291,19 +301,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.agent.animationRunning = false
 		}
 	case feedbackTickMsg:
-		m.feedback.tick()
-		if status, ok := m.statusBar(); ok {
-			m.feedback.updateStatus(status.Message)
-		}
-		pickerLoading := false
-		if picker, ok := m.chrome[generated.OPGuiPicker]; ok && picker.Picker.LoadStatus == 1 {
-			pickerLoading = true
-		}
-		if m.feedback.active() || pickerLoading {
-			cmd = feedbackTick()
-		} else {
-			m.feedback.ticking = false
-		}
+		// The command that produced this message owns the frame timestamp. Using
+		// it here keeps every threshold deterministic and lets a final late tick
+		// drain without consulting the wall clock.
+		transitionNow = msg.at
+		m.feedback.ticking = false
+		m.feedback.tick(msg.at)
 	case port.PacketMsg:
 		cmd = m.applyCommands(msg.Commands)
 		m.layout = m.computeLayout()
@@ -319,18 +322,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = tea.Batch(cmd, agentAnimationTick())
 	}
 
+	if transitionNow.IsZero() {
+		transitionNow = m.currentTime()
+	}
 	if status, ok := m.statusBar(); ok {
-		m.feedback.updateStatus(status.Message)
+		m.feedback.transition(status.Operation, transitionNow)
+	} else {
+		m.feedback.transition(nil, transitionNow)
 	}
-	needsTick := m.feedback.active()
-	if !needsTick {
-		if picker, ok := m.chrome[generated.OPGuiPicker]; ok && picker.Picker.LoadStatus == 1 {
-			needsTick = true
-		}
+	pickerLoading := false
+	if picker, ok := m.chrome[generated.OPGuiPicker]; ok && picker.Picker.LoadStatus == 1 {
+		pickerLoading = true
 	}
-	if needsTick && !m.feedback.ticking {
+	if delay, needsTick := m.feedback.nextTick(transitionNow, pickerLoading); needsTick && !m.feedback.ticking {
 		m.feedback.ticking = true
-		cmd = tea.Batch(cmd, feedbackTick())
+		cmd = tea.Batch(cmd, feedbackTick(delay))
 	}
 
 	m.viewport.SetWidth(max(m.width, 1))

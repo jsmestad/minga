@@ -3,6 +3,8 @@ package protocol
 import (
 	"fmt"
 	"strings"
+
+	"github.com/jsmestad/minga/go/tui/internal/generated"
 )
 
 func decodeTabBar(payload []byte) (TabBar, string, int) {
@@ -341,6 +343,11 @@ func decodeStatus(payload []byte) (StatusBar, string, int) {
 		case 0x0E:
 			if keys, _, ok := readString16(section, 0); ok {
 				status.PendingKeys = keys
+			}
+		case 0x0F:
+			operation, _, err := generated.DecodeGuiStatusBarOperation(section, 0, len(section))
+			if err == nil {
+				status.Operation = &operation
 			}
 		}
 	}
