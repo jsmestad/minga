@@ -74,7 +74,7 @@ targets:
         type: file
       - path: Sources/Views/Shared/GUIFramePresentationMetrics.swift
         type: file
-      - path: Sources/Views/Shared/GUIFrameStore.swift
+      - path: Sources/Views/Shared/GUIFrameCorrelation.swift
         type: file
       - path: Sources/Views/Shared/GUIState.swift
         type: file
@@ -147,7 +147,7 @@ targets:
           - "Views/Shared/EditTimelineState.swift"
           - "Views/Shared/EditTimelineView.swift"
           - "Views/Shared/GUIFramePresentationMetrics.swift"
-          - "Views/Shared/GUIFrameStore.swift"
+          - "Views/Shared/GUIFrameCorrelation.swift"
           - "Views/Shared/GUIState.swift"
           - "Views/Shared/SparklineView.swift"
           - "Views/Shared/TextHighlighting.swift"
@@ -275,7 +275,7 @@ targets:
           - "Views/Shared/EditTimelineState.swift"
           - "Views/Shared/EditTimelineView.swift"
           - "Views/Shared/GUIFramePresentationMetrics.swift"
-          - "Views/Shared/GUIFrameStore.swift"
+          - "Views/Shared/GUIFrameCorrelation.swift"
           - "Views/Shared/GUIState.swift"
           - "Views/Shared/SparklineView.swift"
           - "Views/Shared/TextHighlighting.swift"
@@ -353,7 +353,7 @@ targets:
           - "Views/Shared/EditTimelineState.swift"
           - "Views/Shared/EditTimelineView.swift"
           - "Views/Shared/GUIFramePresentationMetrics.swift"
-          - "Views/Shared/GUIFrameStore.swift"
+          - "Views/Shared/GUIFrameCorrelation.swift"
           - "Views/Shared/GUIState.swift"
           - "Views/Shared/SparklineView.swift"
           - "Views/Shared/TextHighlighting.swift"

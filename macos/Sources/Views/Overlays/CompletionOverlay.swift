@@ -14,7 +14,7 @@ public struct CompletionOverlay: View {
     }
     public let state: CompletionState
     @Environment(\.themeColors) private var theme
-    @Environment(\.guiFrameVersion) private var frameVersion
+
     @Environment(\.anchoredOverlayContext) private var overlayContext
     public let encoder: InputEncoder?
 
@@ -27,7 +27,6 @@ public struct CompletionOverlay: View {
     private let docPaneMaxHeight: CGFloat = 160
 
     public var body: some View {
-        let _ = frameVersion
         if state.visible && !state.items.isEmpty {
             VStack(spacing: 0) {
                 ScrollViewReader { proxy in

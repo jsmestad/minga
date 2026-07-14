@@ -19,7 +19,7 @@ public struct SearchToolbar: View {
     }
     public let searchState: SearchState
     @Environment(\.themeColors) private var theme
-    @Environment(\.guiFrameVersion) private var frameVersion
+
     public let encoder: (any InputEncoder)?
 
     @State private var searchText: String = ""
@@ -45,7 +45,6 @@ public struct SearchToolbar: View {
     }
 
     public var body: some View {
-        let _ = frameVersion
         VStack(spacing: 0) {
             // Top border
             Rectangle()

@@ -15,7 +15,7 @@ public struct FileTreeHeaderView: View {
     }
     public let fileTreeState: FileTreeState
     @Environment(\.themeColors) private var theme
-    @Environment(\.guiFrameVersion) private var frameVersion
+
     public let encoder: InputEncoder?
     public let branchName: String
     public let leadingPadding: CGFloat
@@ -29,7 +29,6 @@ public struct FileTreeHeaderView: View {
     }
 
     public var body: some View {
-        let _ = frameVersion
         HStack(spacing: 8) {
             projectContext
                 .layoutPriority(2)

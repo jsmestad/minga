@@ -17,11 +17,10 @@ public struct ResyncOverlay: View {
     public var state: ResyncState
     public var onRetry: ((UInt32, UInt32) -> Void)?
     @Environment(\.themeColors) private var theme
-    @Environment(\.guiFrameVersion) private var frameVersion
+
     @State private var retryVisible = false
 
     public var body: some View {
-        let _ = frameVersion
         if state.pending {
             VStack {
                 Spacer()

@@ -14,14 +14,13 @@ public struct ActivityBar: View {
     public let input: ShellHostInput
     public let sidebarHostState: SidebarHostState
     @Environment(\.themeColors) private var theme
-    @Environment(\.guiFrameVersion) private var frameVersion
+
     public let encoder: InputEncoder?
 
     private let width: CGFloat = 32
     private let buttonSize: CGFloat = 28
 
     public var body: some View {
-        let _ = frameVersion
         VStack(spacing: 4) {
             ForEach(sidebarHostState.visibleSidebars) { item in
                 activityButton(for: item)

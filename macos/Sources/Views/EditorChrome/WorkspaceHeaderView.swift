@@ -8,7 +8,7 @@ public struct WorkspaceHeaderView: View {
     }
     public let workspaceState: WorkspaceState
     @Environment(\.themeColors) private var theme
-    @Environment(\.guiFrameVersion) private var frameVersion
+
     public let encoder: InputEncoder?
 
     @State private var isRenaming = false
@@ -19,7 +19,6 @@ public struct WorkspaceHeaderView: View {
     private let rowHeight: CGFloat = 26
 
     public var body: some View {
-        let _ = frameVersion
         HStack(spacing: 8) {
             if let activeWorkspace = workspaceState.activeWorkspace {
                 activeWorkspacePill(activeWorkspace)

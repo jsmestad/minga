@@ -9,7 +9,7 @@ public struct AgentPromptView: View {
     }
     public let state: AgentChatState
     @Environment(\.themeColors) private var theme
-    @Environment(\.guiFrameVersion) private var frameVersion
+
     public let isInsertMode: Bool
     public let encoder: InputEncoder?
 
@@ -56,7 +56,6 @@ public struct AgentPromptView: View {
     }
 
     public var body: some View {
-        let _ = frameVersion
         VStack(spacing: 0) {
             // Prompt completion popup (floats above the prompt area)
             if let completion = state.promptCompletion {

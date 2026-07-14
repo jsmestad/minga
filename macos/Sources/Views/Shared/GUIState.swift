@@ -24,7 +24,6 @@ public final class GUIState {
     @ObservationIgnored private let themeBacking = GUIThemeBacking()
     @ObservationIgnored private let windowContentBacking: GUIWindowContentBacking
 
-    public let frameStore = GUIFrameStore()
     public let presentationMetrics = GUIFramePresentationMetrics()
 
     public init(windowContents: [UInt16: GUIWindowContent] = [:]) {

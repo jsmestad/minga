@@ -311,7 +311,7 @@ final class CommandDispatcher {
             if openFrameSeq != nil {
                 transactionBuilder?.stage(command, resourceWeight: resourceWeight)
             } else {
-                publishLocal(command)
+                applyLocal(command)
             }
 
         default:
@@ -422,8 +422,8 @@ final class CommandDispatcher {
             let clearsResync = openBaseFrameSeq == 0 && resyncRecoveryState == .keyframeInFlight
             if clearsResync { resyncRecoveryState = .clean }
 
-            // Install committed identity before publication. Observation callbacks
-            // may run from channel assignment and must see this same transaction.
+            // Install committed identity before semantic state. Any later callback
+            // must observe this same transaction.
             lastCommittedFrameSeq = frameSeq
             lastCommittedGeneration = openGeneration
             hasCommitted = true
@@ -457,52 +457,37 @@ final class CommandDispatcher {
             frameSeq: transaction.frameSeq
         )
         var effects: [CommitEffect] = []
-        guiState.frameStore.publishCommitted(
-            generation: committed.generation,
-            frameSeq: committed.frameSeq,
-            impact: finalImpact
-        ) {
-            if let theme = transaction.theme {
-                apply(.guiTheme(slots: theme.slots), effects: &effects)
-            }
-            if let resources = transaction.resources {
-                for command in resources.commands { apply(command, effects: &effects) }
-            }
-            if let windows = transaction.windows { apply(windows, effects: &effects) }
-            if let metadata = transaction.metadata {
-                for command in metadata.commands { apply(command, effects: &effects) }
-            }
-            if let chrome = transaction.chrome {
-                if let transcript = chrome.transcript {
-                    guiState.agentChatState.publishTranscript(transcript)
-                }
-                for command in chrome.commands { apply(command, effects: &effects) }
-            }
-            if let overlays = transaction.overlays {
-                for command in overlays.commands { apply(command, effects: &effects) }
-            }
-            if let focus = transaction.focus {
-                for command in focus.commands { apply(command, effects: &effects) }
-            }
-            if clearsResync { guiState.resyncState.clear() }
+        if let theme = transaction.theme {
+            apply(.guiTheme(slots: theme.slots), effects: &effects)
         }
+        if let resources = transaction.resources {
+            for command in resources.commands { apply(command, effects: &effects) }
+        }
+        if let windows = transaction.windows { apply(windows, effects: &effects) }
+        if let metadata = transaction.metadata {
+            for command in metadata.commands { apply(command, effects: &effects) }
+        }
+        if let chrome = transaction.chrome {
+            if let transcript = chrome.transcript {
+                guiState.agentChatState.publishTranscript(transcript)
+            }
+            for command in chrome.commands { apply(command, effects: &effects) }
+        }
+        if let overlays = transaction.overlays {
+            for command in overlays.commands { apply(command, effects: &effects) }
+        }
+        if let focus = transaction.focus {
+            for command in focus.commands { apply(command, effects: &effects) }
+        }
+        if clearsResync { guiState.resyncState.clear() }
         replay(effects)
         guiState.presentationMetrics.beginCommitted(frame: committed, impact: finalImpact)
         publicationCount += 1
         lastPublicationOperationCounts = transaction.operationCounts
     }
 
-    private func publishLocal(_ command: RenderCommand) {
-        let impact = GUIFrameImpact.impact(for: command)
-        guard !impact.isEmpty else {
-            applyImmediately(command)
-            return
-        }
-        var effects: [CommitEffect] = []
-        guiState.frameStore.publishLocal(impact: impact) {
-            apply(command, effects: &effects)
-        }
-        replay(effects)
+    private func applyLocal(_ command: RenderCommand) {
+        applyImmediately(command)
     }
 
     private func applyImmediately(_ command: RenderCommand) {
@@ -590,22 +575,18 @@ final class CommandDispatcher {
         if terminal {
             resyncRecoveryState = .clean
             if guiState.resyncState.pending {
-                guiState.frameStore.publishLocal(impact: .windowOverlay) {
-                    guiState.resyncState.clear()
-                }
+                guiState.resyncState.clear()
             }
             PortLogger.error("Frame transaction terminally rejected (\(logReason)\(opcodeContext)); preserving last-good frame \(lastCommittedFrameSeq)")
         } else {
             let shouldRequestKeyframe = resyncRecoveryState != .awaitingKeyframe
             resyncRecoveryState = .awaitingKeyframe
             PortLogger.warn("Frame transaction rejected (\(logReason)\(opcodeContext)); awaiting BEAM recovery from \(lastCommittedFrameSeq)")
-            guiState.frameStore.publishLocal(impact: .windowOverlay) {
-                guiState.resyncState.markPending(
-                    lastGoodFrameSeq: lastCommittedFrameSeq,
-                    generation: openGeneration,
-                    rejection: rejection.logDescription
-                )
-            }
+            guiState.resyncState.markPending(
+                lastGoodFrameSeq: lastCommittedFrameSeq,
+                generation: openGeneration,
+                rejection: rejection.logDescription
+            )
             if shouldRequestKeyframe {
                 // Compatibility/test seam only. Production recovery is driven by the
                 // typed onTransactionResult status wired in MingaApp.
@@ -757,9 +738,7 @@ final class CommandDispatcher {
         } else {
             return false
         }
-        return guiState.frameStore.publishLocalIfChanged(impact: .editorOverlay) {
-            guiState.completionState.previewNavigation(delta: delta)
-        }
+        return guiState.completionState.previewNavigation(delta: delta)
     }
 
     @discardableResult
@@ -775,9 +754,7 @@ final class CommandDispatcher {
         default:
             return false
         }
-        return guiState.frameStore.publishLocalIfChanged(impact: .windowOverlay) {
-            guiState.pickerState.previewNavigation(delta: delta)
-        }
+        return guiState.pickerState.previewNavigation(delta: delta)
     }
 
     /// Install one domain command into the presented FrameState/GUIState and

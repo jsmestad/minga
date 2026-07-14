@@ -5,6 +5,7 @@ import SwiftUI
 
 /// Release telemetry for commit-to-first-affected-native-presentation.
 @MainActor
+@Observable
 public final class GUIFramePresentationMetrics {
     public enum Outcome: String, CaseIterable, Sendable {
         case submitted
@@ -28,10 +29,10 @@ public final class GUIFramePresentationMetrics {
         var submitted: Bool
     }
 
-    private let log = OSLog(subsystem: "com.minga.editor", category: "GUIFramePresentation")
+    @ObservationIgnored private let log = OSLog(subsystem: "com.minga.editor", category: "GUIFramePresentation")
     private var pending: [GUIFrameImpact: Pending] = [:]
     #if DEBUG
-    private var samples: [Sample] = []
+    @ObservationIgnored private var samples: [Sample] = []
     #endif
 
     public init() {}
@@ -51,13 +52,28 @@ public final class GUIFramePresentationMetrics {
         pending[.editor]?.frame.frameSeq
     }
 
-    /// Resolves a native SwiftUI/AppKit consumer only from its NSView draw callback.
-    public func recordNativeDraw(domain: GUIFrameImpact, version: GUIFrameVersion) {
+    /// Returns the committed identity currently awaiting presentation in one domain.
+    func pendingFrame(domain: GUIFrameImpact) -> GUICommittedFrame? {
+        pending[domain]?.frame
+    }
+
+    /// Resolves a native SwiftUI/AppKit consumer only from the frame captured when its draw was scheduled.
+    func recordNativeDraw(domain: GUIFrameImpact, expectedFrame: GUICommittedFrame?) {
         guard domain != .editor,
-              let committed = version.lastCommitted,
-              let ticket = pending[domain], ticket.frame == committed else { return }
+              let expectedFrame,
+              let ticket = pending[domain], ticket.frame == expectedFrame else { return }
         pending.removeValue(forKey: domain)
-        record(frame: committed, domain: domain, outcome: .nativeDraw, started: ticket.started)
+        record(frame: expectedFrame, domain: domain, outcome: .nativeDraw, started: ticket.started)
+    }
+
+    /// Resolves a native probe's unavailable path only when its captured frame is still pending.
+    func discardNativeDraw(
+        domain: GUIFrameImpact,
+        outcome: Outcome,
+        expectedFrame: GUICommittedFrame?
+    ) {
+        guard let expectedFrame else { return }
+        discard(domain: domain, outcome: outcome, frame: expectedFrame)
     }
 
     /// Records native submission only after `MTLCommandBuffer.commit()` returned.
@@ -128,28 +144,32 @@ public final class GUIFramePresentationMetrics {
 /// Stable NSView bridge that treats only AppKit drawing as native presentation.
 private struct GUIFrameNativeDrawProbe: NSViewRepresentable {
     let domain: GUIFrameImpact
-    let version: GUIFrameVersion
+    let expectedFrame: GUICommittedFrame?
     let metrics: GUIFramePresentationMetrics
 
     func makeNSView(context: Context) -> GUIFrameDrawNSView {
-        GUIFrameDrawNSView(domain: domain, version: version, metrics: metrics)
+        GUIFrameDrawNSView(domain: domain, expectedFrame: expectedFrame, metrics: metrics)
     }
 
     func updateNSView(_ nsView: GUIFrameDrawNSView, context: Context) {
-        nsView.update(domain: domain, version: version, metrics: metrics)
+        nsView.update(domain: domain, expectedFrame: expectedFrame, metrics: metrics)
     }
 }
 
 @MainActor
 private final class GUIFrameDrawNSView: NSView {
     private var domain: GUIFrameImpact
-    private var version: GUIFrameVersion
+    private var expectedFrame: GUICommittedFrame?
     private weak var metrics: GUIFramePresentationMetrics?
     private var availabilityCheck: Task<Void, Never>?
 
-    init(domain: GUIFrameImpact, version: GUIFrameVersion, metrics: GUIFramePresentationMetrics) {
+    init(
+        domain: GUIFrameImpact,
+        expectedFrame: GUICommittedFrame?,
+        metrics: GUIFramePresentationMetrics
+    ) {
         self.domain = domain
-        self.version = version
+        self.expectedFrame = expectedFrame
         self.metrics = metrics
         super.init(frame: .zero)
     }
@@ -157,9 +177,13 @@ private final class GUIFrameDrawNSView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
 
-    func update(domain: GUIFrameImpact, version: GUIFrameVersion, metrics: GUIFramePresentationMetrics) {
+    func update(
+        domain: GUIFrameImpact,
+        expectedFrame: GUICommittedFrame?,
+        metrics: GUIFramePresentationMetrics
+    ) {
         self.domain = domain
-        self.version = version
+        self.expectedFrame = expectedFrame
         self.metrics = metrics
         schedulePresentation()
     }
@@ -172,19 +196,19 @@ private final class GUIFrameDrawNSView: NSView {
     override func viewDidHide() {
         super.viewDidHide()
         availabilityCheck?.cancel()
-        metrics?.discard(domain: domain, outcome: .hidden, frame: version.lastCommitted)
+        metrics?.discardNativeDraw(domain: domain, outcome: .hidden, expectedFrame: expectedFrame)
     }
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         availabilityCheck?.cancel()
-        metrics?.recordNativeDraw(domain: domain, version: version)
+        metrics?.recordNativeDraw(domain: domain, expectedFrame: expectedFrame)
     }
 
     private func schedulePresentation() {
         availabilityCheck?.cancel()
         if isHiddenOrHasHiddenAncestor {
-            metrics?.discard(domain: domain, outcome: .hidden, frame: version.lastCommitted)
+            metrics?.discardNativeDraw(domain: domain, outcome: .hidden, expectedFrame: expectedFrame)
             return
         }
         if window != nil {
@@ -192,14 +216,22 @@ private final class GUIFrameDrawNSView: NSView {
             return
         }
 
-        let expectedFrame = version.lastCommitted
+        let scheduledFrame = expectedFrame
         availabilityCheck = Task { @MainActor [weak self] in
             await Task.yield()
-            guard !Task.isCancelled, let self, self.version.lastCommitted == expectedFrame else { return }
+            guard !Task.isCancelled, let self, self.expectedFrame == scheduledFrame else { return }
             if self.isHiddenOrHasHiddenAncestor {
-                self.metrics?.discard(domain: self.domain, outcome: .hidden, frame: expectedFrame)
+                self.metrics?.discardNativeDraw(
+                    domain: self.domain,
+                    outcome: .hidden,
+                    expectedFrame: scheduledFrame
+                )
             } else if self.window == nil {
-                self.metrics?.discard(domain: self.domain, outcome: .unavailable, frame: expectedFrame)
+                self.metrics?.discardNativeDraw(
+                    domain: self.domain,
+                    outcome: .unavailable,
+                    expectedFrame: scheduledFrame
+                )
             } else {
                 self.needsDisplay = true
             }
@@ -211,13 +243,16 @@ extension View {
     /// Installs a zero-sized stable native draw probe for one focused host.
     func frameNativeDrawProbe(
         domain: GUIFrameImpact,
-        version: GUIFrameVersion,
         metrics: GUIFramePresentationMetrics
     ) -> some View {
         background {
-            GUIFrameNativeDrawProbe(domain: domain, version: version, metrics: metrics)
-                .frame(width: 1, height: 1)
-                .allowsHitTesting(false)
+            GUIFrameNativeDrawProbe(
+                domain: domain,
+                expectedFrame: metrics.pendingFrame(domain: domain),
+                metrics: metrics
+            )
+            .frame(width: 1, height: 1)
+            .allowsHitTesting(false)
         }
     }
 }

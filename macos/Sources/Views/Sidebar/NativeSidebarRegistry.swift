@@ -166,11 +166,10 @@ private struct ObservatorySidebarHeader: View {
     let item: SidebarItem
     let state: ObservatoryState
     @Environment(\.themeColors) private var theme
-    @Environment(\.guiFrameVersion) private var frameVersion
+
     let leadingPadding: CGFloat
 
     var body: some View {
-        let _ = frameVersion
         HStack(spacing: 8) {
             Image(systemName: item.icon.isEmpty ? "network" : item.icon)
                 .font(.system(size: 13, weight: .semibold))

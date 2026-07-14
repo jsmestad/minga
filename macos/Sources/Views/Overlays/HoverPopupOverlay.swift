@@ -15,7 +15,7 @@ public struct HoverPopupOverlay: View {
     }
     public let state: HoverPopupState
     @Environment(\.themeColors) private var theme
-    @Environment(\.guiFrameVersion) private var frameVersion
+
     @Environment(\.anchoredOverlayContext) private var overlayContext
     public let encoder: InputEncoder?
 
@@ -26,7 +26,6 @@ public struct HoverPopupOverlay: View {
     }
 
     public var body: some View {
-        let _ = frameVersion
         if state.visible && !state.lines.isEmpty {
             popupContent
                 .frame(maxWidth: maxWidth)

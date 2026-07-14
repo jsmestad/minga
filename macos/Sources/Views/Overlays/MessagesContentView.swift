@@ -19,7 +19,7 @@ public struct MessagesContentView: View {
     }
     @Bindable public var state: MessagesContentState
     @Environment(\.themeColors) private var theme
-    @Environment(\.guiFrameVersion) private var frameVersion
+
     public let encoder: InputEncoder?
     /// Snapshot-only: render the list as a plain, non-lazy stack so every row
     /// lays out for capture. The live lazy ScrollView path renders blank in the
@@ -27,7 +27,6 @@ public struct MessagesContentView: View {
     public var usesPreviewEagerLayout: Bool = false
 
     public var body: some View {
-        let _ = frameVersion
         VStack(spacing: 0) {
             MessagesFilterBar(state: state)
             entryList
@@ -125,10 +124,9 @@ public struct MessagesContentView: View {
 private struct MessagesFilterBar: View {
     @Bindable var state: MessagesContentState
     @Environment(\.themeColors) private var theme
-    @Environment(\.guiFrameVersion) private var frameVersion
+
 
     var body: some View {
-        let _ = frameVersion
         HStack(spacing: Spacing.sm) {
             levelDots
             subsystemMenu

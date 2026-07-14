@@ -7,11 +7,10 @@ public struct EditTimelineView: View {
     }
     public let state: EditTimelineState
     @Environment(\.themeColors) private var themeColors
-    @Environment(\.guiFrameVersion) private var frameVersion
+
     public let encoder: InputEncoder?
 
     public var body: some View {
-        let _ = frameVersion
         if state.visible && !state.files.isEmpty {
             HStack(spacing: 8) {
                 ForEach(state.files) { file in

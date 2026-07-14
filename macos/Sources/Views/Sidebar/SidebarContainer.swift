@@ -58,7 +58,7 @@ public struct SidebarContainer: View {
     public let input: ShellHostInput
     public let activeSidebar: SidebarItem
     @Environment(\.themeColors) private var theme
-    @Environment(\.guiFrameVersion) private var frameVersion
+
     public let encoder: InputEncoder?
     public let projectName: String
     public let gitBranch: String
@@ -70,7 +70,6 @@ public struct SidebarContainer: View {
     @State private var dragStartWidth: CGFloat = 0
 
     public var body: some View {
-        let _ = frameVersion
         HStack(spacing: 0) {
             VStack(spacing: 0) {
                 NativeSidebarRegistry
