@@ -6,7 +6,9 @@ defmodule MingaEditor.LspActions.ReferencesTest do
   alias MingaEditor.LspActions
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.OperationFeedback
+  alias MingaEditor.UI.Picker.LocationSource
   alias MingaEditor.Viewport
 
   test "error, nil, and empty responses finish the same correlated operation" do
@@ -35,7 +37,7 @@ defmodule MingaEditor.LspActions.ReferencesTest do
 
     File.write!(path, "first\nsecond\n")
     on_exit(fn -> File.rm(path) end)
-    {state, operation} = start_operation()
+    {state, operation} = start_operation(Path.dirname(path))
 
     locations = [location(path, 0), location(path, 1)]
     state = LspActions.handle_references_response(state, {:ok, locations}, operation.id)
@@ -43,6 +45,16 @@ defmodule MingaEditor.LspActions.ReferencesTest do
     assert OperationFeedback.selected(state.operation_feedback).status == :success
     assert OperationFeedback.selected(state.operation_feedback).message == "Found 2 references"
     assert state.shell_runtime.state.notice.message == nil
+
+    assert {:picker, %{picker_ui: %{source: LocationSource, picker: picker}}} =
+             state.shell_runtime.state.modal
+
+    assert Enum.map(picker.items, & &1.id) == [{path, 0, 0}, {path, 1, 0}]
+
+    assert Enum.map(picker.items, & &1.label) == [
+             "#{Path.basename(path)}:1:1",
+             "#{Path.basename(path)}:2:1"
+           ]
   end
 
   test "a response for a replaced identity cannot mutate feedback or perform picker effects" do
@@ -86,12 +98,12 @@ defmodule MingaEditor.LspActions.ReferencesTest do
     }
   end
 
-  @spec start_operation() :: {EditorState.t(), MingaEditor.State.Operation.t()}
-  defp start_operation do
-    state = %EditorState{
-      port_manager: nil,
-      workspace: %SessionState{viewport: Viewport.new(40, 120)}
-    }
+  @spec start_operation(String.t() | nil) ::
+          {EditorState.t(), MingaEditor.State.Operation.t()}
+  defp start_operation(project_root \\ nil) do
+    workspace = %SessionState{viewport: Viewport.new(40, 120)}
+    workspace = with_project_root(workspace, project_root)
+    state = %EditorState{port_manager: nil, workspace: workspace}
 
     OperationFeedback.start_in(
       state,
@@ -100,5 +112,13 @@ defmodule MingaEditor.LspActions.ReferencesTest do
       "Finding references...",
       cancelable?: false
     )
+  end
+
+  @spec with_project_root(SessionState.t(), String.t() | nil) :: SessionState.t()
+  defp with_project_root(workspace, nil), do: workspace
+
+  defp with_project_root(workspace, root) do
+    file_tree = FileTreeState.set_project_root(%FileTreeState{}, root)
+    SessionState.set_file_tree(workspace, file_tree)
   end
 end

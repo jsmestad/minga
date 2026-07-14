@@ -13,11 +13,13 @@ public struct SignatureHelpOverlay: View {
     }
     public let state: SignatureHelpState
     @Environment(\.themeColors) private var theme
+    @Environment(\.guiFrameVersion) private var frameVersion
     @Environment(\.anchoredOverlayContext) private var overlayContext
 
     private let maxWidth: CGFloat = 600
 
     public var body: some View {
+        let _ = frameVersion
         if state.visible && !state.signatures.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
                 signatureLabel

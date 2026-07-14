@@ -12,10 +12,12 @@ public struct NotificationCenterView: View {
     }
     public let state: NotificationCenterState
     @Environment(\.themeColors) private var theme
+    @Environment(\.guiFrameVersion) private var frameVersion
     public let encoder: InputEncoder?
     public let bottomInset: CGFloat
 
     public var body: some View {
+        let _ = frameVersion
         VStack(alignment: .trailing, spacing: 10) {
             ForEach(state.notifications) { notification in
                 NotificationCard(notification: notification, encoder: encoder)

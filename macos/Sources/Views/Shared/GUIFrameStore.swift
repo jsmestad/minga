@@ -1,4 +1,5 @@
 import Observation
+import SwiftUI
 
 /// Consumer regions invalidated by one atomic GUI publication.
 public struct GUIFrameImpact: OptionSet, Sendable, Equatable, Hashable {
@@ -41,6 +42,18 @@ public struct GUIFrameVersion: Equatable, Sendable {
         self.revision = revision
         self.lastCommitted = lastCommitted
         self.source = source
+    }
+}
+
+private struct GUIFrameVersionEnvironmentKey: EnvironmentKey {
+    static let defaultValue = GUIFrameVersion(revision: 0, lastCommitted: nil, source: .local)
+}
+
+extension EnvironmentValues {
+    /// Focused publication version for the nearest shell, editor, or overlay host.
+    public var guiFrameVersion: GUIFrameVersion {
+        get { self[GUIFrameVersionEnvironmentKey.self] }
+        set { self[GUIFrameVersionEnvironmentKey.self] = newValue }
     }
 }
 

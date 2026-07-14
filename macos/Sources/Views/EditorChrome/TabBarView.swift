@@ -40,6 +40,7 @@ public struct TabBarView: View {
     }
     public let tabBarState: TabBarState
     @Environment(\.themeColors) private var theme
+    @Environment(\.guiFrameVersion) private var frameVersion
     public let encoder: InputEncoder?
 
     @State private var hoverTabId: UInt32?
@@ -55,10 +56,11 @@ public struct TabBarView: View {
     private let swipeThreshold: CGFloat = 80
 
     public var body: some View {
+        let _ = frameVersion
         // Collapse the whole strip when there are no tabs (e.g. the launchpad
         // empty state). Otherwise the nav/new-tab/split controls render a
         // phantom bar over an editor with nothing open.
-        if displayTabs.isEmpty {
+        if tabBarState.displayTabs.isEmpty {
             EmptyView()
         } else {
             tabStrip
@@ -174,10 +176,6 @@ public struct TabBarView: View {
         )
     }
 
-    private var displayTabs: [TabEntry] {
-        tabBarState.displayTabs
-    }
-
     public func performTabContextMenuAction(_ action: TabContextMenuAction, for tab: TabEntry) {
         switch action {
         case .pin:
@@ -211,7 +209,7 @@ public struct TabBarView: View {
     /// Flat tab strip (no workspaces active, Tier 0).
     @ViewBuilder
     private var flatTabStrip: some View {
-        let tabs = displayTabs
+        let tabs = tabBarState.displayTabs
         let pinnedCount = tabs.filter(\.isPinned).count
 
         ForEach(Array(tabs.enumerated()), id: \.element.id) { index, tab in
@@ -538,7 +536,7 @@ public struct TabBarView: View {
     /// Group 0 (manual) always comes first; agent workspaces sorted by id.
     /// Within each group, tab order is preserved from the BEAM's tab list.
     private func groupedTabs() -> [TabGroup] {
-        Dictionary(grouping: displayTabs, by: \.groupId)
+        Dictionary(grouping: tabBarState.displayTabs, by: \.groupId)
             .sorted { $0.key < $1.key }
             .map { TabGroup(groupId: $0.key, tabs: $0.value) }
     }

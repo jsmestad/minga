@@ -8,11 +8,13 @@ public struct AgentChatHeaderView: View {
     public let state: AgentChatState
     public let encoder: InputEncoder?
     @Environment(\.themeColors) private var theme
+    @Environment(\.guiFrameVersion) private var frameVersion
     @State private var isModelHovered: Bool = false
     @State private var isThinkingHovered: Bool = false
     @State private var isHelpHovered: Bool = false
 
     public var body: some View {
+        let _ = frameVersion
         HStack(spacing: 8) {
             // Status indicator
             Circle()

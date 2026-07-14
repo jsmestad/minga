@@ -4,6 +4,7 @@ import MingaProtocol
 @testable import MingaUI
 import SwiftUI
 import Testing
+import ViewInspector
 
 @MainActor
 private final class MountedEditorRecorder {
@@ -99,6 +100,127 @@ struct ContentViewTests {
         #expect(view.encoder === first)
         current = second
         #expect(view.encoder === second)
+    }
+
+    @Test("toolbar mounting and rendering use canonical display tabs over legacy tabs")
+    func canonicalDisplayTabsMountToolbar() throws {
+        let gui = GUIState()
+        gui.tabBarState.update(activeIndex: 0, entries: [
+            Wire.TabEntry(
+                id: 1,
+                groupId: 0,
+                isActive: true,
+                isDirty: false,
+                isAgent: false,
+                hasAttention: false,
+                agentStatus: 0,
+                isPinned: false,
+                tintColorRGB: 0,
+                icon: "",
+                label: "legacy.ex"
+            )
+        ])
+        gui.tabBarState.updateWorkspaces(
+            activeWorkspaceId: 7,
+            mode: 1,
+            flags: 0,
+            entries: [Wire.WorkspaceEntry(
+                id: 7,
+                kind: 1,
+                status: 0,
+                flags: 0,
+                colorR: 0x11,
+                colorG: 0x22,
+                colorB: 0x33,
+                tabCount: 1,
+                draftCount: 0,
+                conflictCount: 0,
+                runningBackgroundCount: 0,
+                label: "Review",
+                icon: "cpu"
+            )],
+            visibleTabs: [Wire.WorkspaceTabEntry(
+                id: 42,
+                workspaceId: 7,
+                kind: 0,
+                flags: 0,
+                pathHash: 42,
+                tintColorRGB: 0,
+                icon: "",
+                label: "canonical.ex",
+                path: "/tmp/canonical.ex"
+            )]
+        )
+        let root = ContentView(
+            gui: gui,
+            encoder: { nil },
+            editorGeometry: { .preview },
+            chrome: .preview,
+            onAgentChatVisibleChange: { _ in }
+        ) {
+            Color.clear
+        }
+
+        let strings = try root.inspect().findAll(ViewType.Text.self).compactMap { try? $0.string() }
+
+        #expect(strings.contains("canonical.ex"))
+        #expect(!strings.contains("legacy.ex"))
+        #expect((try? root.inspect().find(viewWithAccessibilityIdentifier: "workspace-tabbar")) != nil)
+
+        gui.tabBarState.updateWorkspaces(
+            activeWorkspaceId: 7,
+            mode: 1,
+            flags: 0,
+            entries: [],
+            visibleTabs: []
+        )
+        let canonicalEmptyRoot = ContentView(
+            gui: gui,
+            encoder: { nil },
+            editorGeometry: { .preview },
+            chrome: .preview,
+            onAgentChatVisibleChange: { _ in }
+        ) {
+            Color.clear
+        }
+        let canonicalEmptyStrings = try canonicalEmptyRoot.inspect()
+            .findAll(ViewType.Text.self)
+            .compactMap { try? $0.string() }
+
+        #expect(!canonicalEmptyStrings.contains("legacy.ex"))
+        #expect((try? canonicalEmptyRoot.inspect().find(viewWithAccessibilityIdentifier: "workspace-tabbar")) == nil)
+
+        let legacyOnlyGUI = GUIState()
+        legacyOnlyGUI.tabBarState.update(activeIndex: 0, entries: [
+            Wire.TabEntry(
+                id: 9,
+                groupId: 0,
+                isActive: true,
+                isDirty: false,
+                isAgent: false,
+                hasAttention: false,
+                agentStatus: 0,
+                isPinned: false,
+                tintColorRGB: 0,
+                icon: "",
+                label: "fallback.ex"
+            )
+        ])
+        let legacyOnlyRoot = ContentView(
+            gui: legacyOnlyGUI,
+            encoder: { nil },
+            editorGeometry: { .preview },
+            chrome: .preview,
+            onAgentChatVisibleChange: { _ in }
+        ) {
+            Color.clear
+        }
+        let legacyOnlyStrings = try legacyOnlyRoot.inspect()
+            .findAll(ViewType.Text.self)
+            .compactMap { try? $0.string() }
+
+        #expect(legacyOnlyStrings.contains("fallback.ex"))
+        #expect((try? legacyOnlyRoot.inspect().find(viewWithAccessibilityIdentifier: "workspace-tabbar")) != nil)
     }
 
     @Test(

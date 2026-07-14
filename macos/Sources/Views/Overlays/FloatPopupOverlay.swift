@@ -14,6 +14,7 @@ public struct FloatPopupOverlay: View {
     }
     public let state: FloatPopupState
     @Environment(\.themeColors) private var theme
+    @Environment(\.guiFrameVersion) private var frameVersion
     public let cellWidth: CGFloat
     public let cellHeight: CGFloat
 
@@ -34,6 +35,7 @@ public struct FloatPopupOverlay: View {
     }
 
     public var body: some View {
+        let _ = frameVersion
         if state.visible && !state.lines.isEmpty {
             VStack(spacing: 0) {
                 // Title bar

@@ -37,9 +37,10 @@ defmodule MingaEditor.UI.Picker.LocationSource do
 
   @impl true
   @spec candidates(Context.t()) :: [Item.t()]
-  def candidates(%Context{picker_ui: %{context: %{locations: locations}}})
+  def candidates(%Context{picker_ui: %{context: %{locations: locations}}} = ctx)
       when is_list(locations) do
-    Enum.map(locations, &format_location/1)
+    root = project_root(ctx)
+    Enum.map(locations, &format_location(&1, root))
   end
 
   def candidates(_state), do: []
@@ -58,10 +59,12 @@ defmodule MingaEditor.UI.Picker.LocationSource do
 
   # ── Private ────────────────────────────────────────────────────────────────
 
-  @spec format_location({String.t(), non_neg_integer(), non_neg_integer(), String.t()}) ::
-          Item.t()
-  defp format_location({path, line, col, label}) do
-    display_path = shorten_path(path)
+  @spec format_location(
+          {String.t(), non_neg_integer(), non_neg_integer(), String.t()},
+          String.t() | nil
+        ) :: Item.t()
+  defp format_location({path, line, col, label}, root) do
+    display_path = shorten_path(path, root)
     line_num = line + 1
     col_num = col + 1
 
@@ -138,11 +141,15 @@ defmodule MingaEditor.UI.Picker.LocationSource do
 
   defp set_jump_mark(state), do: state
 
-  @spec shorten_path(String.t()) :: String.t()
-  defp shorten_path(path) do
-    case Minga.Project.root() do
-      nil -> path
-      root -> Path.relative_to(path, root)
-    end
-  end
+  @spec project_root(Context.t()) :: String.t() | nil
+  defp project_root(%Context{picker_ui: %{context: %{project_root: root}}})
+       when is_binary(root) or is_nil(root),
+       do: root
+
+  defp project_root(%Context{file_tree: %{project_root: root}}) when is_binary(root), do: root
+  defp project_root(_ctx), do: Minga.Project.root()
+
+  @spec shorten_path(String.t(), String.t() | nil) :: String.t()
+  defp shorten_path(path, nil), do: path
+  defp shorten_path(path, root), do: Path.relative_to(path, root)
 end

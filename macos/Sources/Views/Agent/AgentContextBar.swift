@@ -13,6 +13,7 @@ public struct AgentContextBar: View {
     }
     public let state: AgentContextBarState
     @Environment(\.themeColors) private var theme
+    @Environment(\.guiFrameVersion) private var frameVersion
     public let encoder: InputEncoder?
 
     private let barHeight: CGFloat = 28
@@ -22,6 +23,7 @@ public struct AgentContextBar: View {
     @State private var elapsedDisplay: String = "0s"
 
     public var body: some View {
+        let _ = frameVersion
         if state.visible {
             HStack(spacing: 12) {
                 // Task description (left-aligned)

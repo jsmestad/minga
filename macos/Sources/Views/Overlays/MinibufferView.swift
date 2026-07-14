@@ -18,6 +18,7 @@ public struct MinibufferView: View {
     }
     public let state: MinibufferState
     @Environment(\.themeColors) private var theme
+    @Environment(\.guiFrameVersion) private var frameVersion
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     public let encoder: InputEncoder?
 
@@ -28,6 +29,7 @@ public struct MinibufferView: View {
     private let maxCandidateCount: Int = 15
 
     public var body: some View {
+        let _ = frameVersion
         VStack(spacing: 0) {
             // Candidate list (expands upward above the input bar)
             if state.hasCandidates {

@@ -12,25 +12,28 @@ defmodule Minga.Buffer.DirtyFlagPropertyTest do
     check all(
             operations <- StreamData.list_of(operation_generator(), min_length: 1, max_length: 40)
           ) do
-      path = Path.join(dir, "dirty-property-#{System.unique_integer([:positive])}.txt")
+      case_id = System.unique_integer([:positive])
+      child_id = {BufferProcess, case_id}
+      path = Path.join(dir, "dirty-property-#{case_id}.txt")
       File.write!(path, "start")
 
-      buffer =
-        start_supervised!({BufferProcess, file_path: path},
-          id: {BufferProcess, System.unique_integer([:positive])}
-        )
+      buffer = start_supervised!({BufferProcess, file_path: path}, id: child_id)
 
-      initial = %{id: 0, content: "start", cursor: 0}
-      model = %{current: initial, saved_id: 0, undo: [], redo: [], next_id: 1}
+      try do
+        initial = %{id: 0, content: "start", cursor: 0}
+        model = %{current: initial, saved_id: 0, undo: [], redo: [], next_id: 1}
 
-      Enum.reduce(operations, model, fn operation, model ->
-        model = apply_operation(buffer, operation, model)
+        Enum.reduce(operations, model, fn operation, model ->
+          model = apply_operation(buffer, operation, model)
 
-        assert BufferProcess.content(buffer) == model.current.content
-        assert BufferProcess.dirty?(buffer) == (model.current.id != model.saved_id)
+          assert BufferProcess.content(buffer) == model.current.content
+          assert BufferProcess.dirty?(buffer) == (model.current.id != model.saved_id)
 
-        model
-      end)
+          model
+        end)
+      after
+        :ok = stop_supervised(child_id)
+      end
     end
   end
 

@@ -27,8 +27,10 @@ public struct ExtensionOverlayView: View {
     public var firstColumn: UInt16 = 0
     public var columnCount: UInt16 = 0
     public var rowCount: UInt16 = 0
+    @Environment(\.guiFrameVersion) private var frameVersion
 
     public var body: some View {
+        let _ = frameVersion
         let entries = overlayState.entries(forWindow: windowID).filter {
             ExtensionOverlayState.isVisible(
                 $0,

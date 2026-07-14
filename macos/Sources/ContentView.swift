@@ -97,15 +97,28 @@ private struct PaneWidthKey: PreferenceKey {
     }
 }
 
+enum ContentViewFrameProbePoint: Hashable {
+    case shell
+    case editor
+    case editorOverlay
+    case extensionOverlay
+    case windowOverlay
+}
+
+struct ContentViewFrameProbe {
+    let makeView: (ContentViewFrameProbePoint, AnyObject) -> AnyView
+}
+
 private struct ShellFramePresentationHost<Content: View>: View {
     let channel: GUIFrameChannel
     let metrics: GUIFramePresentationMetrics
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        _ = channel.value
+        let version = channel.value
         return content()
-            .frameNativeDrawProbe(domain: .shell, version: channel.value, metrics: metrics)
+            .environment(\.guiFrameVersion, version)
+            .frameNativeDrawProbe(domain: .shell, version: version, metrics: metrics)
     }
 }
 
@@ -115,8 +128,10 @@ private struct UnifiedToolbarHost<Content: View>: View {
     @ViewBuilder let content: (ShellHostInput) -> Content
 
     var body: some View {
-        _ = channel.value
-        return content(input).environment(\.themeColors, input.currentTheme)
+        let version = channel.value
+        return content(input)
+            .environment(\.themeColors, input.currentTheme)
+            .environment(\.guiFrameVersion, version)
     }
 }
 
@@ -126,8 +141,10 @@ private struct SidebarHost<Content: View>: View {
     @ViewBuilder let content: (ShellHostInput) -> Content
 
     var body: some View {
-        _ = channel.value
-        return content(input).environment(\.themeColors, input.currentTheme)
+        let version = channel.value
+        return content(input)
+            .environment(\.themeColors, input.currentTheme)
+            .environment(\.guiFrameVersion, version)
     }
 }
 
@@ -137,8 +154,10 @@ private struct EditorColumnHost<Content: View>: View {
     @ViewBuilder let content: (ShellHostInput) -> Content
 
     var body: some View {
-        _ = channel.value
-        return content(input).environment(\.themeColors, input.currentTheme)
+        let version = channel.value
+        return content(input)
+            .environment(\.themeColors, input.currentTheme)
+            .environment(\.guiFrameVersion, version)
     }
 }
 
@@ -148,8 +167,10 @@ private struct EditorSurfaceHost<Content: View>: View {
     @ViewBuilder let content: (EditorHostInput) -> Content
 
     var body: some View {
-        _ = channel.value
-        return content(input).environment(\.themeColors, input.currentTheme)
+        let version = channel.value
+        return content(input)
+            .environment(\.themeColors, input.currentTheme)
+            .environment(\.guiFrameVersion, version)
     }
 }
 
@@ -159,19 +180,10 @@ private struct StatusBarHost<Content: View>: View {
     @ViewBuilder let content: (ShellHostInput) -> Content
 
     var body: some View {
-        _ = channel.value
-        return content(input).environment(\.themeColors, input.currentTheme)
-    }
-}
-
-private struct FrontendExtensionRuntimeHost<Content: View>: View {
-    let channel: GUIFrameChannel
-    let input: WindowOverlayHostInput
-    @ViewBuilder let content: (WindowOverlayHostInput) -> Content
-
-    var body: some View {
-        _ = channel.value
-        return content(input).environment(\.themeColors, input.currentTheme)
+        let version = channel.value
+        return content(input)
+            .environment(\.themeColors, input.currentTheme)
+            .environment(\.guiFrameVersion, version)
     }
 }
 
@@ -182,23 +194,26 @@ private struct WindowOverlayHost<Content: View>: View {
     @ViewBuilder let content: (WindowOverlayHostInput) -> Content
 
     var body: some View {
-        _ = channel.value
+        let version = channel.value
         return content(input)
             .environment(\.themeColors, input.currentTheme)
-            .frameNativeDrawProbe(domain: .windowOverlay, version: channel.value, metrics: metrics)
+            .environment(\.guiFrameVersion, version)
+            .frameNativeDrawProbe(domain: .windowOverlay, version: version, metrics: metrics)
     }
 }
 
-private struct EditorOverlayHost: View {
+private struct EditorOverlayHost<ExtensionContent: View>: View {
     let channel: GUIFrameChannel
     let input: EditorOverlayHostInput
     let metrics: GUIFramePresentationMetrics
     let geometry: EditorGeometry
     let viewportHeight: CGFloat
     let encoder: InputEncoder?
+    let frameProbe: ContentViewFrameProbe?
+    @ViewBuilder let extensionContent: () -> ExtensionContent
 
     var body: some View {
-        _ = channel.value
+        let version = channel.value
         return ZStack(alignment: .topLeading) {
             if input.signatureHelpState.visible {
                 anchoredOverlay(row: input.signatureHelpState.anchorRow, col: input.signatureHelpState.anchorCol, preferredSide: .above, maxHeight: 220) { _ in
@@ -219,12 +234,25 @@ private struct EditorOverlayHost: View {
             if input.completionState.visible {
                 anchoredOverlay(row: input.completionState.anchorRow, col: input.completionState.anchorCol, preferredSide: .below, maxHeight: 420, gap: 2) { _ in
                     CompletionOverlay(state: input.completionState, encoder: encoder)
+                        .background {
+                            probe(.editorOverlay, stateObject: input.completionState)
+                        }
                 }
                 .zIndex(30)
             }
+
+            extensionContent()
         }
         .environment(\.themeColors, input.currentTheme)
-        .frameNativeDrawProbe(domain: .editorOverlay, version: channel.value, metrics: metrics)
+        .environment(\.guiFrameVersion, version)
+        .frameNativeDrawProbe(domain: .editorOverlay, version: version, metrics: metrics)
+    }
+
+    @ViewBuilder
+    private func probe(_ point: ContentViewFrameProbePoint, stateObject: AnyObject) -> some View {
+        if let frameProbe {
+            frameProbe.makeView(point, stateObject)
+        }
     }
 
     private func anchoredOverlay<Content: View>(
@@ -497,6 +525,8 @@ public struct ContentView<EditorSurface: View>: View {
     @State private var changeSummaryWidth: CGFloat = 280
     @Namespace private var frontendExtensionNamespace
 
+    let frameProbe: ContentViewFrameProbe?
+
     public init(
         gui: GUIState,
         encoder: @escaping () -> InputEncoder?,
@@ -511,6 +541,32 @@ public struct ContentView<EditorSurface: View>: View {
         self.chrome = chrome
         self.onAgentChatVisibleChange = onAgentChatVisibleChange
         self.makeEditorSurface = makeEditorSurface
+        frameProbe = nil
+    }
+
+    init(
+        gui: GUIState,
+        encoder: @escaping () -> InputEncoder?,
+        editorGeometry: @escaping () -> EditorGeometry,
+        chrome: WindowChrome,
+        onAgentChatVisibleChange: @escaping (Bool) -> Void,
+        frameProbe: ContentViewFrameProbe,
+        @ViewBuilder makeEditorSurface: @escaping () -> EditorSurface
+    ) {
+        self.gui = gui
+        self.encoderProvider = encoder
+        self.editorGeometry = editorGeometry
+        self.chrome = chrome
+        self.onAgentChatVisibleChange = onAgentChatVisibleChange
+        self.makeEditorSurface = makeEditorSurface
+        self.frameProbe = frameProbe
+    }
+
+    @ViewBuilder
+    private func frameProbeView(_ point: ContentViewFrameProbePoint, stateObject: AnyObject) -> some View {
+        if let frameProbe {
+            frameProbe.makeView(point, stateObject)
+        }
     }
 
     private let activityBarWidth: CGFloat = 32
@@ -582,14 +638,11 @@ public struct ContentView<EditorSurface: View>: View {
                     }
                 }
             }
-            FrontendExtensionRuntimeHost(
-                channel: frameStore.windowOverlay,
-                input: windowOverlayInput
-            ) { input in
-                frontendExtensionRuntimeLayer(input)
-            }
             WindowOverlayHost(channel: frameStore.windowOverlay, input: windowOverlayInput, metrics: metrics) { input in
-                windowOverlays(input)
+                ZStack {
+                    frontendExtensionRuntimeLayer(input)
+                    windowOverlays(input)
+                }
             }
         }
         .navigationTitle(chrome.title)
@@ -651,11 +704,14 @@ public struct ContentView<EditorSurface: View>: View {
                         )
                     }
 
-                    if !input.tabBarState.tabs.isEmpty || !input.workspaceState.visibleTabs.isEmpty {
+                    if !input.tabBarState.displayTabs.isEmpty {
                         TabBarView(
                             tabBarState: input.tabBarState,
                             encoder: encoder
                         )
+                        .background {
+                            frameProbeView(.shell, stateObject: input.tabBarState)
+                        }
                         .accessibilityIdentifier("workspace-tabbar")
                     } else {
                         Spacer()
@@ -897,6 +953,9 @@ public struct ContentView<EditorSurface: View>: View {
                     state: input.emptyStateState,
                     encoder: encoder
                 )
+                .background {
+                    frameProbeView(.editor, stateObject: input.emptyStateState)
+                }
             }
 
             EditorOverlayHost(
@@ -905,10 +964,11 @@ public struct ContentView<EditorSurface: View>: View {
                 metrics: metrics,
                 geometry: geo,
                 viewportHeight: rightPaneHeight,
-                encoder: encoder
-            )
-
-            extensionOverlayLayer(overlayInput)
+                encoder: encoder,
+                frameProbe: frameProbe
+            ) {
+                extensionOverlayLayer(overlayInput)
+            }
         }
     }
 
@@ -970,6 +1030,9 @@ public struct ContentView<EditorSurface: View>: View {
                     columnCount: geometry?.textRect.width ?? 0,
                     rowCount: geometry?.textRect.height ?? 0
                 )
+                .background {
+                    frameProbeView(.extensionOverlay, stateObject: input.extensionOverlayState)
+                }
             }
         }
     }
@@ -1148,6 +1211,9 @@ public struct ContentView<EditorSurface: View>: View {
             state: input.pickerState,
             encoder: encoder
         )
+        .background {
+            frameProbeView(.windowOverlay, stateObject: input.pickerState)
+        }
 
         ToolManagerView(
             state: input.toolManagerState,
