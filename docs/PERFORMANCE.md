@@ -1,6 +1,6 @@
 # Rendering performance gates
 
-Minga uses deterministic production work gates first and an optimized native process-CPU-time gate second. Stable operation counts catch algorithmic regressions without runner noise; Release percentiles diagnose the shipping Swift preparation path. Neither substitutes for the other.
+Minga uses deterministic production work gates first and an optimized native calling-thread-CPU-time gate second. Stable operation counts catch algorithmic regressions without runner noise; Release percentiles diagnose the shipping Swift preparation path. Neither substitutes for the other.
 
 ## Production conformance fixture
 
@@ -77,7 +77,7 @@ The harness prints raw JSON percentiles and environment metadata. `performance/b
 
 CI never generates a baseline. A change requires an explicit JSON diff and PR rationale naming the fixture/toolchain change and measured p95 values. Never change the 4 ms, 8 ms, 1.20x, or 0.05 ms policies merely to make a run pass. Measurements above the hybrid limit must be investigated instead of increasing the allowance.
 
-`resident-ordinary-edit-v2` replaces #2791's synthetic dictionary/tuple work with the production resident decode/apply and shared CoreText command preparation paths. Process-CPU runs `29360855703` and `29362531315` measured 0.185 ms and 0.547 ms combined p95 on unchanged renderer code while combined p50 stayed at 0.145 ms and 0.152 ms. Schema v3 therefore measures calling-thread CPU, which matches the synchronous work under test and excludes unrelated Foundation or runtime threads. The baseline file records the thread-clock calibration runs, exact macOS version, Swift version, and conservative checked reference. The hard 4 ms stage, 8 ms combined, 1.20x regression ratio, and 0.05 ms sub-millisecond measurement allowance remain code-owned policy.
+`resident-ordinary-edit-v2` replaces #2791's synthetic dictionary/tuple work with the production resident decode/apply and shared CoreText command preparation paths. Process-CPU runs `29360855703` and `29362531315` measured 0.185 ms and 0.547 ms combined p95 on unchanged renderer code while combined p50 stayed at 0.145 ms and 0.152 ms. Schema v3 therefore measures calling-thread CPU, which matches the synchronous work under test and excludes unrelated Foundation or runtime threads. Two thread-CPU calibrations in CI run `29363711962` (jobs `87189922733` and `87192352431`) measured 0.071/0.386/0.460 ms and 0.015/0.138/0.157 ms p95 for decode/apply, command preparation, and combined work. The checked references use the conservative first run, rounded upward to three decimals. The hard 4 ms stage, 8 ms combined, 1.20x regression ratio, and 0.05 ms sub-millisecond measurement allowance remain code-owned policy.
 
 ## Native latency milestones
 
