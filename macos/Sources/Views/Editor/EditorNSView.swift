@@ -1988,6 +1988,33 @@ final class EditorNSView: MTKView {
         hasMouseDownPoint && !isDividerDragActive && !isDraggingScrollIndicator
     }
 
+#if DEBUG
+    struct InteractionSnapshot {
+        let hasMarkedText: Bool
+        let markedRange: NSRange
+        let hoverRow: Int16
+        let hoverCol: Int16
+        let selectionDragActive: Bool
+        let selectionDragStarted: Bool
+        let scrollWindowId: UInt16?
+        let scrollOffset: CGPoint
+    }
+
+    /// Read-only test seam for native interaction ownership across SwiftUI publication.
+    var interactionSnapshot: InteractionSnapshot {
+        InteractionSnapshot(
+            hasMarkedText: imeComposition.hasMarkedText,
+            markedRange: imeComposition.markedRange,
+            hoverRow: lastMoveRow,
+            hoverCol: lastMoveCol,
+            selectionDragActive: isSelectionDragActive,
+            selectionDragStarted: leftMouseDragStarted,
+            scrollWindowId: localScrollPresentation?.windowId,
+            scrollOffset: localScrollPresentation?.offset ?? .zero
+        )
+    }
+#endif
+
     private func handleTrackpadScroll(event: NSEvent, row: Int16, col: Int16, mods: UInt8) {
         if event.phase == .began {
             cancelScrollAnimations()

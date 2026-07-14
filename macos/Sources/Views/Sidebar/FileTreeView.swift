@@ -12,7 +12,6 @@ import SwiftUI
 public struct FileTreeView: View {
     public let fileTreeState: FileTreeState
     @Environment(\.themeColors) private var theme
-    @Environment(\.guiFrameVersion) private var frameVersion
     public let encoder: InputEncoder?
     public let usesPreviewEagerLayout: Bool
 
@@ -63,7 +62,6 @@ public struct FileTreeView: View {
     }
 
     public var body: some View {
-        let _ = frameVersion
         VStack(spacing: 0) {
             entryList
         }

@@ -220,6 +220,7 @@ extension FileTreeEntry {
 
 /// Observable state for the file tree sidebar, driven by BEAM protocol messages.
 @MainActor
+@Observable
 public final class FileTreeState {
     public init(entries: [FileTreeEntry] = [], version: UInt8 = 1, selectedId: String = "", selectedIndex: Int = 0, treeWidth: Int = 30, visible: Bool = false, focused: Bool = false, localNavigationEnabled: Bool = false, treeState: FileTreeVisibilityState = .hidden, errorReason: String = "", projectRoot: String = "", editingIndex: Int? = nil) {
         self.entries = entries

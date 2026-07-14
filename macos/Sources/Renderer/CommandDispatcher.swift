@@ -730,9 +730,7 @@ final class CommandDispatcher {
         default:
             return false
         }
-        return guiState.frameStore.publishLocalIfChanged(impact: .shell) {
-            guiState.fileTreeState.previewNavigation(delta: delta)
-        }
+        return guiState.fileTreeState.previewNavigation(delta: delta)
     }
 
     @discardableResult
