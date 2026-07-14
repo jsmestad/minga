@@ -10,6 +10,7 @@ defmodule MingaEditor.UI.Picker.FileSourceAsyncTest do
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.FileSource
   alias MingaEditor.UI.Picker.Item
+  alias MingaEditor.UI.Picker.ProjectFileCandidate
 
   @moduletag :tmp_dir
 
@@ -20,6 +21,8 @@ defmodule MingaEditor.UI.Picker.FileSourceAsyncTest do
     File.write!(Path.join(lib, "one.ex"), "one")
     File.write!(Path.join(lib, "two.ex"), "two")
 
+    {:ok, root} = Root.directory(project)
+
     state =
       TestHelpers.base_state(content: "initial")
       |> set_file_tree(%FileTree{project_root: project})
@@ -28,7 +31,10 @@ defmodule MingaEditor.UI.Picker.FileSourceAsyncTest do
 
     state =
       FileSource.on_bulk_select(
-        [%Item{id: "lib/one.ex", label: "one.ex"}, %Item{id: "lib/two.ex", label: "two.ex"}],
+        [
+          %Item{id: candidate!(root, "lib/one.ex"), label: "one.ex"},
+          %Item{id: candidate!(root, "lib/two.ex"), label: "two.ex"}
+        ],
         state
       )
 
@@ -76,7 +82,7 @@ defmodule MingaEditor.UI.Picker.FileSourceAsyncTest do
       |> set_file_tree(%FileTree{project_root: current_tree_root})
 
     initial_pids = state.workspace.buffers.list
-    item = %Item{id: "same.txt", label: "same.txt", meta: %{workspace_root: root}}
+    item = %Item{id: candidate!(root, "same.txt"), label: "same.txt"}
     state = FileSource.on_select(item, state)
     new_pids = Enum.reject(state.workspace.buffers.list, &Enum.member?(initial_pids, &1))
     on_exit(fn -> Enum.each(new_pids, &stop_pid/1) end)
@@ -85,15 +91,24 @@ defmodule MingaEditor.UI.Picker.FileSourceAsyncTest do
              Path.join(original_root, "same.txt")
   end
 
-  test "bulk actions expose open all marked" do
-    assert FileSource.bulk_actions([%Item{id: "lib/one.ex", label: "one.ex"}]) ==
-             [{"Open all marked", :open_marked}]
+  test "bulk actions expose open all marked", %{tmp_dir: tmp_dir} do
+    File.mkdir_p!(tmp_dir)
+    {:ok, root} = Root.directory(tmp_dir)
+
+    assert FileSource.bulk_actions([
+             %Item{id: candidate!(root, "lib/one.ex"), label: "one.ex"}
+           ]) == [{"Open all marked", :open_marked}]
   end
 
   describe "enrich/1" do
-    test "builds icon, color, two-line description, and git annotation for winners" do
+    test "builds icon, color, two-line description, and git annotation for winners", %{
+      tmp_dir: tmp_dir
+    } do
+      {:ok, root} = Root.directory(tmp_dir)
+      candidate = candidate!(root, "lib/foo/bar.ex")
+
       lean = %Item{
-        id: "lib/foo/bar.ex",
+        id: candidate,
         label: "bar.ex",
         search_text: "lib/foo/bar.ex",
         meta: %{git: :modified}
@@ -101,7 +116,7 @@ defmodule MingaEditor.UI.Picker.FileSourceAsyncTest do
 
       [enriched] = FileSource.enrich([lean])
 
-      assert enriched.id == "lib/foo/bar.ex"
+      assert enriched.id == candidate
       assert String.ends_with?(enriched.label, " bar.ex")
       assert String.first(enriched.label) != "b"
       assert enriched.description == "lib/foo"
@@ -110,12 +125,28 @@ defmodule MingaEditor.UI.Picker.FileSourceAsyncTest do
       assert is_integer(enriched.icon_color)
     end
 
-    test "uses an empty description for root-level files and no git annotation" do
-      lean = %Item{id: "mix.exs", label: "mix.exs", search_text: "mix.exs", meta: %{git: nil}}
+    test "uses an empty description for root-level files and no git annotation", %{
+      tmp_dir: tmp_dir
+    } do
+      {:ok, root} = Root.directory(tmp_dir)
+
+      lean = %Item{
+        id: candidate!(root, "mix.exs"),
+        label: "mix.exs",
+        search_text: "mix.exs",
+        meta: %{git: nil}
+      }
+
       [enriched] = FileSource.enrich([lean])
       assert enriched.description == ""
       assert enriched.annotation == nil
     end
+  end
+
+  @spec candidate!(Root.t(), String.t()) :: ProjectFileCandidate.t()
+  defp candidate!(root, path) do
+    {:ok, candidate} = ProjectFileCandidate.new(root, path)
+    candidate
   end
 
   @spec set_file_tree(MingaEditor.State.t(), FileTree.t()) :: MingaEditor.State.t()

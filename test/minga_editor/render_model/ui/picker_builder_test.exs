@@ -7,6 +7,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
   alias MingaEditor.State.Buffers
   alias MingaEditor.UI.Picker, as: PickerState
   alias MingaEditor.UI.Picker.Item
+  alias MingaEditor.UI.Picker.ProjectFileCandidate
 
   describe "build/1" do
     test "returns hidden picker when modal is not a picker" do
@@ -116,7 +117,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
       path = temp_file!("alpha\nbeta")
       item = %Item{id: path, label: Path.basename(path)}
       picker = %PickerState{items: [item], filtered: [item], title: "Files", selected: 0}
-      modal = picker_modal(picker, MingaEditor.UI.Picker.FileSource, nil, "", :ready)
+      modal = picker_modal(picker, MingaEditor.UI.Picker.RecentFileSource, nil, "", :ready)
 
       model = PickerBuilder.build(build_context(modal))
 
@@ -133,11 +134,8 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
       on_exit(fn -> File.rm_rf!(root_path) end)
       {:ok, root} = Root.directory(root_path)
 
-      item = %Item{
-        id: "relative.txt",
-        label: "relative.txt",
-        meta: %{workspace_root: root}
-      }
+      {:ok, candidate} = ProjectFileCandidate.new(root, "relative.txt")
+      item = %Item{id: candidate, label: "relative.txt"}
 
       picker = %PickerState{items: [item], filtered: [item], title: "Files", selected: 0}
       modal = picker_modal(picker, MingaEditor.UI.Picker.FileSource, nil, "", :ready)
@@ -151,7 +149,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
       path = temp_file!(<<0, 1, 2, "BEAM">>)
       item = %Item{id: path, label: Path.basename(path)}
       picker = %PickerState{items: [item], filtered: [item], title: "Files", selected: 0}
-      modal = picker_modal(picker, MingaEditor.UI.Picker.FileSource, nil, "", :ready)
+      modal = picker_modal(picker, MingaEditor.UI.Picker.RecentFileSource, nil, "", :ready)
 
       model = PickerBuilder.build(build_context(modal))
 

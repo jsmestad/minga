@@ -17,6 +17,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
   alias Minga.Language.Devicon
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
+  alias MingaEditor.UI.Picker.ProjectFileCandidate
   alias MingaEditor.UI.Picker.Source
 
   @impl true
@@ -48,7 +49,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
         score_map = build_score_map(frecency_map, git_status_map)
 
         paths
-        |> Enum.map(&lean_candidate(&1, git_status_map, root))
+        |> Enum.flat_map(&lean_candidate(&1, git_status_map, root))
         |> sort_by_score(score_map)
 
       {:error, msg} ->
@@ -84,14 +85,27 @@ defmodule MingaEditor.UI.Picker.FileSource do
   # and to enrich later (git status stashed in `meta`). Icon, color, two-line
   # description, and the status annotation are built in `enrich/1` for the
   # bounded winners only, so a 50k-file repo never materializes 50k rich items.
-  @spec lean_candidate(String.t(), %{String.t() => atom()}, Root.t()) :: Item.t()
+  @spec lean_candidate(String.t(), %{String.t() => atom()}, Root.t()) :: [Item.t()]
   defp lean_candidate(path, git_status_map, root) do
-    %Item{
-      id: path,
-      label: Path.basename(path),
-      search_text: path,
-      meta: %{git: Map.get(git_status_map, path), workspace_root: root}
-    }
+    case ProjectFileCandidate.new(root, path) do
+      {:ok, candidate} ->
+        [
+          %Item{
+            id: candidate,
+            label: Path.basename(candidate.path),
+            search_text: candidate.path,
+            meta: %{git: Map.get(git_status_map, candidate.path)}
+          }
+        ]
+
+      {:error, reason} ->
+        Log.warning(
+          :editor,
+          "Ignoring invalid cached project path #{inspect(path)}: #{inspect(reason)}"
+        )
+
+        []
+    end
   end
 
   @impl true
@@ -99,7 +113,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
   def enrich(items), do: Enum.map(items, &enrich_item/1)
 
   @spec enrich_item(Item.t()) :: Item.t()
-  defp enrich_item(%Item{id: path, meta: meta} = item) do
+  defp enrich_item(%Item{id: %ProjectFileCandidate{path: path}, meta: meta} = item) do
     filename = Path.basename(path)
     dir = Path.dirname(path)
     ft = Language.detect_filetype(filename)
@@ -124,13 +138,19 @@ defmodule MingaEditor.UI.Picker.FileSource do
 
   @impl true
   @spec on_select(Item.t(), term()) :: term()
-  def on_select(%Item{id: rel_path} = item, state) do
-    Log.debug(:editor, "[file_picker] on_select path=#{rel_path}")
-    open_selected_file(absolute_path(item, state), state)
+  def on_select(%Item{id: %ProjectFileCandidate{} = candidate}, state) do
+    Log.debug(:editor, "[file_picker] on_select path=#{candidate.path}")
+    open_selected_file(ProjectFileCandidate.resolve(candidate), state)
   end
 
-  @spec open_selected_file({:ok, String.t()} | :error, term()) :: term()
-  defp open_selected_file(:error, state), do: state
+  @spec open_selected_file(
+          {:ok, String.t()} | {:error, ProjectFileCandidate.error()},
+          term()
+        ) :: term()
+  defp open_selected_file({:error, reason}, state) do
+    Log.error(:editor, "Failed to resolve project file candidate: #{inspect(reason)}")
+    state
+  end
 
   defp open_selected_file({:ok, abs_path}, state) do
     case MingaEditor.Handlers.BufferRegistry.find_buffer_by_path(state, abs_path) do
@@ -183,6 +203,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
   end
 
   @impl true
+  @spec on_cancel(term()) :: term()
   def on_cancel(state), do: Source.restore_or_keep(state)
 
   @impl true
@@ -195,14 +216,24 @@ defmodule MingaEditor.UI.Picker.FileSource do
   @spec on_action(term(), Item.t(), term()) :: term()
   def on_action(:open, item, state), do: on_select(item, state)
 
-  def on_action(:delete, %Item{} = item, state) do
-    delete_selected_file(absolute_path(item, state), state)
+  def on_action(
+        :delete,
+        %Item{id: %ProjectFileCandidate{} = candidate},
+        state
+      ) do
+    delete_selected_file(ProjectFileCandidate.resolve(candidate), state)
   end
 
   def on_action(_action, _item, state), do: state
 
-  @spec delete_selected_file({:ok, String.t()} | :error, term()) :: term()
-  defp delete_selected_file(:error, state), do: state
+  @spec delete_selected_file(
+          {:ok, String.t()} | {:error, ProjectFileCandidate.error()},
+          term()
+        ) :: term()
+  defp delete_selected_file({:error, reason}, state) do
+    Log.error(:editor, "Failed to resolve project file candidate: #{inspect(reason)}")
+    state
+  end
 
   defp delete_selected_file({:ok, abs_path}, state) do
     case File.rm(abs_path) do
@@ -235,31 +266,6 @@ defmodule MingaEditor.UI.Picker.FileSource do
   defp open_items(items, state) do
     Enum.reduce(items, state, fn item, acc -> on_select(item, acc) end)
   end
-
-  @spec absolute_path(Item.t(), term()) :: {:ok, String.t()} | :error
-  defp absolute_path(%Item{id: rel_path, meta: %{workspace_root: %Root{path: path}}}, _state),
-    do: {:ok, Path.expand(rel_path, path)}
-
-  defp absolute_path(%Item{id: rel_path}, state) do
-    case selection_root(state) do
-      path when is_binary(path) -> {:ok, Path.expand(rel_path, path)}
-      nil -> :error
-    end
-  end
-
-  @spec selection_root(term()) :: String.t() | nil
-  defp selection_root(%EditorState{} = state) do
-    case EditorState.file_tree_state(state).project_root do
-      path when is_binary(path) -> path
-      _other -> root_path(active_workspace_root())
-    end
-  end
-
-  defp selection_root(_state), do: root_path(active_workspace_root())
-
-  @spec root_path(Root.t() | nil) :: String.t() | nil
-  defp root_path(%Root{path: path}), do: path
-  defp root_path(nil), do: nil
 
   @spec record_selection(String.t(), term()) :: :ok
   defp record_selection(_abs_path, %{buffer_lifecycle: %{buffer_add_context: :preview}}),
@@ -313,7 +319,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
   defp sort_by_score(items, score_map) when map_size(score_map) == 0, do: items
 
   defp sort_by_score(items, score_map) do
-    Enum.sort_by(items, fn %Item{id: path} ->
+    Enum.sort_by(items, fn %Item{id: %ProjectFileCandidate{path: path}} ->
       score = Map.get(score_map, path, 0)
       depth = Enum.count(Path.split(path)) - 1
       {-score, depth, path}
@@ -351,9 +357,6 @@ defmodule MingaEditor.UI.Picker.FileSource do
   catch
     :exit, _ -> nil
   end
-
-  @spec active_workspace_root() :: Root.t() | nil
-  defp active_workspace_root, do: active_workspace() |> workspace_root()
 
   @spec workspace_root(WorkspaceSnapshot.t() | nil) :: Root.t() | nil
   defp workspace_root(nil), do: nil
