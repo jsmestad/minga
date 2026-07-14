@@ -43,7 +43,7 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
         }
   @type token_context :: %{
           project_files: MapSet.t(String.t()),
-          project_root: String.t()
+          project_root: String.t() | nil
         }
 
   @doc "Reserved window_id for the agent prompt RenderWindow."
@@ -387,7 +387,9 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
     MapSet.member?(project_files, normalize_project_file(path))
   end
 
-  @spec existing_project_file?(String.t(), String.t()) :: boolean()
+  @spec existing_project_file?(String.t(), String.t() | nil) :: boolean()
+  defp existing_project_file?(_path, nil), do: false
+
   defp existing_project_file?(path, project_root) do
     path
     |> Path.expand(project_root)
@@ -509,11 +511,11 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
     :exit, _ -> []
   end
 
-  @spec safe_project_root() :: String.t()
+  @spec safe_project_root() :: String.t() | nil
   defp safe_project_root do
     Minga.Project.resolve_root()
   catch
-    :exit, _ -> File.cwd!()
+    :exit, _ -> nil
   end
 
   @spec normalize_project_file(String.t()) :: String.t()

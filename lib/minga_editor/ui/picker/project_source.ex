@@ -15,6 +15,7 @@ defmodule MingaEditor.UI.Picker.ProjectSource do
   alias MingaEditor.UI.Picker.Item
 
   alias Minga.Project
+  alias Minga.Project.Root
 
   @impl true
   @spec title() :: String.t()
@@ -40,14 +41,22 @@ defmodule MingaEditor.UI.Picker.ProjectSource do
   @impl true
   @spec on_select(Item.t(), term()) :: term()
   def on_select(%Item{id: root_path}, state) do
-    expanded_root = Path.expand(root_path)
-    Project.switch(expanded_root)
-
-    state
-    |> FileTreeFreshness.update_project_root(expanded_root)
-    |> PickerUI.open(FileSource, %{project_root: expanded_root})
+    case Root.directory(root_path) do
+      {:ok, root} -> activate_project(root, state)
+      {:error, _reason} -> state
+    end
   catch
     :exit, _ -> state
+  end
+
+  @spec activate_project(Root.t(), term()) :: term()
+  defp activate_project(%Root{path: path} = root, state) do
+    Project.switch(root)
+    _ = Project.workspace_root()
+
+    state
+    |> FileTreeFreshness.update_project_root(path)
+    |> PickerUI.open(FileSource, %{project_root: root})
   end
 
   @impl true

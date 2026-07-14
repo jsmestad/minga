@@ -49,7 +49,17 @@ defmodule MingaEditor.UI.Picker.ProjectSearchSource do
           {:ok, [Item.t()], Source.fetch_meta()} | {:error, String.t()}
   def async_fetch(%Context{search: %{project_query: query}})
       when is_binary(query) and query != "" do
-    case ProjectSearch.search(query, Minga.Project.resolve_root()) do
+    search_project(query, Minga.Project.resolve_root())
+  end
+
+  def async_fetch(_ctx), do: {:ok, [], %{}}
+
+  @spec search_project(String.t(), String.t() | nil) ::
+          {:ok, [Item.t()], Source.fetch_meta()} | {:error, String.t()}
+  defp search_project(_query, nil), do: {:error, "No directory workspace active"}
+
+  defp search_project(query, root) do
+    case ProjectSearch.search(query, root) do
       {:ok, matches, truncated?} ->
         {:ok, build_items(matches), fetch_meta(truncated?)}
 
@@ -57,8 +67,6 @@ defmodule MingaEditor.UI.Picker.ProjectSearchSource do
         {:error, message}
     end
   end
-
-  def async_fetch(_ctx), do: {:ok, [], %{}}
 
   @impl true
   @spec on_select(Item.t(), term()) :: term()

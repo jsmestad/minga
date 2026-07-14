@@ -5,6 +5,17 @@ defmodule MingaAgent.FileMentionTest do
 
   @moduletag :tmp_dir
 
+  describe "resolve_prompt/3 without a workspace" do
+    test "keeps prompts without file mentions unchanged" do
+      assert FileMention.resolve_prompt("hello", nil, []) == {:ok, "hello"}
+    end
+
+    test "rejects relative file mentions instead of resolving them from cwd" do
+      assert FileMention.resolve_prompt("review @README.md", nil, []) ==
+               {:error, "Cannot resolve file mentions without an active directory workspace"}
+    end
+  end
+
   # ── Extraction ──────────────────────────────────────────────────────────────
 
   describe "extract_mentions/1" do
@@ -103,6 +114,36 @@ defmodule MingaAgent.FileMentionTest do
       assert {:error, msg} = FileMention.resolve_prompt("@nonexistent.ex read this", dir)
       assert msg =~ "nonexistent.ex"
       assert msg =~ "file not found"
+    end
+
+    test "rejects absolute paths even when the file exists", %{tmp_dir: dir} do
+      path = Path.join(dir, "absolute.ex")
+      File.write!(path, "secret")
+
+      assert {:error, msg} = FileMention.resolve_prompt("@#{path} read this", dir)
+      assert msg =~ "absolute paths are outside the active workspace"
+    end
+
+    test "rejects traversal outside the workspace", %{tmp_dir: dir} do
+      outside = Path.join(Path.dirname(dir), "outside-#{System.unique_integer([:positive])}.txt")
+      File.write!(outside, "secret")
+      on_exit(fn -> File.rm(outside) end)
+
+      assert {:error, msg} =
+               FileMention.resolve_prompt("@../#{Path.basename(outside)} read this", dir)
+
+      assert msg =~ "path is outside the active workspace"
+    end
+
+    test "rejects symlinks whose canonical target escapes the workspace", %{tmp_dir: dir} do
+      outside = Path.join(Path.dirname(dir), "secret-#{System.unique_integer([:positive])}.txt")
+      link = Path.join(dir, "linked-secret.txt")
+      File.write!(outside, "secret")
+      File.ln_s!(outside, link)
+      on_exit(fn -> File.rm(outside) end)
+
+      assert {:error, msg} = FileMention.resolve_prompt("@linked-secret.txt read this", dir)
+      assert msg =~ "path is outside the active workspace"
     end
 
     test "returns error for binary file", %{tmp_dir: dir} do

@@ -6,6 +6,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   alias Minga.Buffer
   alias Minga.RenderModel.UI.Picker, as: PickerModel
   alias Minga.RenderModel.UI.Picker.ActionMenu
+  alias Minga.Project.Root
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.UI.Picker
 
@@ -127,19 +128,43 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
       nil ->
         nil
 
-      %Picker.Item{id: id} = item ->
+      %Picker.Item{} = item ->
         case Picker.Source.preview(source, item, ctx) do
-          nil -> build_preview_for_item(ctx, id)
+          nil -> build_preview_for_item(ctx, item)
           lines -> lines
         end
     end
   end
 
   # Build preview lines for a file path item.
-  @spec build_preview_for_item(Context.t(), term()) :: [[PickerModel.preview_segment()]] | nil
-  defp build_preview_for_item(ctx, id) when is_binary(id) do
-    abs_path = resolve_preview_path(id)
+  @spec build_preview_for_item(Context.t(), Picker.Item.t()) ::
+          [[PickerModel.preview_segment()]] | nil
+  defp build_preview_for_item(
+         ctx,
+         %Picker.Item{id: id, meta: %{workspace_root: %Root{path: root}}}
+       )
+       when is_binary(id) do
+    build_file_preview(ctx, resolve_preview_path(id, root))
+  end
 
+  defp build_preview_for_item(ctx, %Picker.Item{id: id}) when is_binary(id) do
+    build_file_preview(ctx, resolve_preview_path(id, Minga.Project.resolve_root()))
+  end
+
+  defp build_preview_for_item(ctx, %Picker.Item{id: idx}) when is_integer(idx) do
+    case Enum.at(ctx.buffers.list, idx) do
+      nil -> nil
+      buf_pid -> preview_from_buffer(ctx, buf_pid)
+    end
+  end
+
+  defp build_preview_for_item(_ctx, _id), do: nil
+
+  @spec build_file_preview(Context.t(), String.t() | nil) ::
+          [[PickerModel.preview_segment()]] | nil
+  defp build_file_preview(_ctx, nil), do: nil
+
+  defp build_file_preview(ctx, abs_path) do
     case find_buffer_for_path(ctx, abs_path) do
       {buf_pid, highlight} when highlight != nil ->
         build_highlighted_preview(buf_pid, highlight, ctx)
@@ -148,15 +173,6 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
         read_file_preview(abs_path, ctx)
     end
   end
-
-  defp build_preview_for_item(ctx, idx) when is_integer(idx) do
-    case Enum.at(ctx.buffers.list, idx) do
-      nil -> nil
-      buf_pid -> preview_from_buffer(ctx, buf_pid)
-    end
-  end
-
-  defp build_preview_for_item(_ctx, _id), do: nil
 
   @spec preview_from_buffer(Context.t(), pid()) :: [[PickerModel.preview_segment()]] | nil
   defp preview_from_buffer(ctx, buf_pid) do
@@ -219,13 +235,20 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   defp face_to_rgb(%{fg: fg}, _default) when is_integer(fg), do: fg
   defp face_to_rgb(_, default), do: default
 
-  @spec resolve_preview_path(String.t()) :: String.t()
-  defp resolve_preview_path(path) do
-    case Path.type(path) do
-      :absolute -> path
-      _ -> Path.join(Minga.Project.resolve_root(), path)
-    end
+  @spec resolve_preview_path(String.t(), String.t() | nil) :: String.t() | nil
+  defp resolve_preview_path(path, root) do
+    resolve_preview_path(Path.type(path), path, root)
   end
+
+  @spec resolve_preview_path(
+          :absolute | :relative | :volumerelative,
+          String.t(),
+          String.t() | nil
+        ) ::
+          String.t() | nil
+  defp resolve_preview_path(:absolute, path, _root), do: path
+  defp resolve_preview_path(_path_type, _path, nil), do: nil
+  defp resolve_preview_path(_path_type, path, root), do: Path.join(root, path)
 
   @spec read_file_preview(String.t(), Context.t()) :: [[PickerModel.preview_segment()]] | nil
   defp read_file_preview(abs_path, ctx) do

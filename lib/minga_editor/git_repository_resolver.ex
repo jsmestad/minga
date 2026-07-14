@@ -14,11 +14,13 @@ defmodule MingaEditor.GitRepositoryResolver do
   @callback resolve(input()) :: {:ok, GitRepositoryIdentity.t()} | :not_git | {:error, term()}
 
   @doc "Resolves the current project root through the configured git backend."
-  @spec resolve(:current_project | String.t()) ::
+  @spec resolve(:current_project | String.t() | nil) ::
           {:ok, GitRepositoryIdentity.t()} | :not_git | {:error, term()}
   def resolve(:current_project) do
     resolve(Minga.Project.resolve_root())
   end
+
+  def resolve(nil), do: :not_git
 
   def resolve(source_root) when is_binary(source_root) do
     case Minga.Git.root_for(source_root) do

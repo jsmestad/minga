@@ -3,6 +3,7 @@ defmodule Minga.ProjectTest do
   use ExUnitProperties
 
   alias Minga.Project
+  alias Minga.Project.Root
 
   @moduletag :tmp_dir
 
@@ -25,13 +26,6 @@ defmodule Minga.ProjectTest do
   # casts in the GenServer mailbox, so when it returns we know all
   # prior casts have been handled.
   defp flush(name), do: :sys.get_state(name)
-
-  @spec write_sparse_checkout(String.t(), String.t()) :: :ok
-  defp write_sparse_checkout(dir, content) do
-    sparse_file = Path.join([dir, ".git", "info", "sparse-checkout"])
-    File.mkdir_p!(Path.dirname(sparse_file))
-    File.write!(sparse_file, content)
-  end
 
   # Waits for the async rebuild Task to complete.
   # Subscribes to :project_rebuilt and uses assert_receive if the
@@ -56,144 +50,39 @@ defmodule Minga.ProjectTest do
       {_pid, name} = start_project!()
       assert Project.root(name) == nil
     end
-
-    test "returns a valid path even when Project GenServer is not running" do
-      assert is_binary(Project.resolve_root())
-    end
   end
 
-  describe "detect_and_set/2" do
-    test "detects project root from a file inside a git repo", %{tmp_dir: tmp} do
-      project = Path.join(tmp, "myproject")
-      lib = Path.join(project, "lib")
-      File.mkdir_p!(lib)
-      File.mkdir_p!(Path.join(project, ".git"))
-      File.write!(Path.join(lib, "app.ex"), "")
+  describe "buffer-open isolation" do
+    test "opening loose files never promotes marker ancestors", %{tmp_dir: tmp} do
+      fake_home = Path.join(tmp, "home")
+      File.mkdir_p!(fake_home)
 
       {_pid, name} = start_project!()
-      Project.detect_and_set(name, Path.join(lib, "app.ex"))
-      flush(name)
 
-      assert Project.root(name) == project
-    end
+      for marker <- ["package.json", ".git", "mix.exs", ".minga"] do
+        ancestor = Path.join(fake_home, String.replace(marker, ".", "_"))
+        File.mkdir_p!(ancestor)
+        write_marker(ancestor, marker)
+        file = Path.join(ancestor, "notes.org")
+        File.write!(file, "notes")
 
-    test "roots a single-cone sparse checkout at the cone, not git-root", %{tmp_dir: tmp} do
-      project = Path.join(tmp, "sparse_repo")
-      cone = Path.join(project, "apps/web")
-      File.mkdir_p!(cone)
-      File.write!(Path.join(cone, "main.ex"), "")
+        send(
+          name,
+          {:minga_event, :buffer_opened, %Minga.Events.BufferEvent{buffer: self(), path: file}}
+        )
 
-      write_sparse_checkout(project, "/*\n!/*/\n/apps/\n!/apps/*/\n/apps/web/\n")
+        state = flush(name)
 
-      {_pid, name} = start_project!()
-      # A file in the cone with no nearer marker would otherwise resolve to git-root.
-      Project.detect_and_set(name, Path.join(cone, "main.ex"))
-      flush(name)
-
-      assert Project.root(name) == cone
-    end
-
-    test "keeps nearer markers ahead of sparse-cone fallback", %{tmp_dir: tmp} do
-      project = Path.join(tmp, "nearer_marker")
-      sparse_root = Path.join(project, "apps")
-      cone = Path.join(project, "apps/web")
-      lib = Path.join(cone, "lib")
-      File.mkdir_p!(lib)
-      File.write!(Path.join(cone, "mix.exs"), "")
-      File.write!(Path.join(lib, "main.ex"), "")
-
-      write_sparse_checkout(project, "/*\n!/*/\n/apps/\n")
-
-      {_pid, name} = start_project!()
-      Project.detect_and_set(name, Path.join(lib, "main.ex"))
-      flush(name)
-
-      assert Project.root(name) == cone
-      assert sparse_root != cone
-    end
-
-    test "keeps git-root for a multi-cone sparse checkout", %{tmp_dir: tmp} do
-      project = Path.join(tmp, "multi_cone")
-      web = Path.join(project, "apps/web")
-      File.mkdir_p!(web)
-      File.write!(Path.join(web, "main.ex"), "")
-
-      write_sparse_checkout(project, "/*\n!/*/\n/apps/\n!/apps/*/\n/apps/web/\n/apps/api/\n")
-
-      {_pid, name} = start_project!()
-      Project.detect_and_set(name, Path.join(web, "main.ex"))
-      flush(name)
-
-      assert Project.root(name) == project
-    end
-
-    test "detects mix project root", %{tmp_dir: tmp} do
-      project = Path.join(tmp, "mix_app")
-      lib = Path.join(project, "lib")
-      File.mkdir_p!(lib)
-      File.write!(Path.join(project, "mix.exs"), "")
-      File.write!(Path.join(lib, "foo.ex"), "")
-
-      {_pid, name} = start_project!()
-      Project.detect_and_set(name, Path.join(lib, "foo.ex"))
-      flush(name)
-
-      assert Project.root(name) == project
-    end
-
-    test "adds detected project to known projects", %{tmp_dir: tmp} do
-      project = Path.join(tmp, "known_test")
-      File.mkdir_p!(project)
-      File.write!(Path.join(project, "package.json"), "")
-      File.write!(Path.join(project, "index.js"), "")
-
-      {_pid, name} = start_project!()
-      Project.detect_and_set(name, Path.join(project, "index.js"))
-      flush(name)
-
-      known = Project.known_projects(name)
-      assert project in known
-    end
-
-    test "does not change root when detection finds the same project", %{tmp_dir: tmp} do
-      project = Path.join(tmp, "same_root")
-      File.mkdir_p!(project)
-      File.write!(Path.join(project, "mix.exs"), "")
-      File.write!(Path.join(project, "a.ex"), "")
-      File.write!(Path.join(project, "b.ex"), "")
-
-      {_pid, name} = start_project!()
-      Project.detect_and_set(name, Path.join(project, "a.ex"))
-      flush(name)
-      assert Project.root(name) == project
-
-      # Detecting from another file in the same project should not change root
-      Project.detect_and_set(name, Path.join(project, "b.ex"))
-      flush(name)
-      assert Project.root(name) == project
-    end
-
-    test "does not duplicate known projects on repeated detection", %{tmp_dir: tmp} do
-      project = Path.join(tmp, "dedup_test")
-      File.mkdir_p!(project)
-      File.write!(Path.join(project, "go.mod"), "")
-      File.write!(Path.join(project, "main.go"), "")
-
-      {_pid, name} = start_project!()
-      file = Path.join(project, "main.go")
-      Project.detect_and_set(name, file)
-      flush(name)
-      Project.detect_and_set(name, file)
-      flush(name)
-
-      known = Project.known_projects(name)
-      count = Enum.count(known, &(&1 == project))
-      assert count == 1
+        assert Project.root(name) == nil
+        assert Project.workspace_root(name) == nil
+        assert Project.known_projects(name) == []
+        assert state.rebuilding? == false
+      end
     end
   end
 
   describe "files/1" do
-    test "returns cached file list after detection", %{tmp_dir: tmp} do
+    test "returns cached file list after explicit folder activation", %{tmp_dir: tmp} do
       project = Path.join(tmp, "files_test")
       File.mkdir_p!(project)
       File.write!(Path.join(project, "mix.exs"), "")
@@ -203,7 +92,7 @@ defmodule Minga.ProjectTest do
       init_git_repo!(project)
 
       {_pid, name} = start_project!()
-      Project.detect_and_set(name, Path.join(project, "lib/app.ex"))
+      Project.switch(name, project)
       await_rebuild(name)
 
       files = Project.files(name)
@@ -227,13 +116,25 @@ defmodule Minga.ProjectTest do
       File.write!(Path.join(project_b, "Cargo.toml"), "")
 
       {_pid, name} = start_project!()
-      Project.detect_and_set(name, Path.join(project_a, "mix.exs"))
+      Project.switch(name, project_a)
       flush(name)
       assert Project.root(name) == project_a
 
       Project.switch(name, project_b)
       flush(name)
       assert Project.root(name) == project_b
+      assert %Root{kind: :directory, path: ^project_b} = Project.workspace_root(name)
+    end
+
+    test "rejects broad roots without explicit confirmation" do
+      {_pid, name} = start_project!()
+
+      Project.switch(name, Path.expand("~"))
+      state = flush(name)
+
+      assert Project.root(name) == nil
+      assert Project.workspace_root(name) == nil
+      assert state.rebuilding? == false
     end
 
     test "adds switched project to known projects", %{tmp_dir: tmp} do
@@ -268,6 +169,66 @@ defmodule Minga.ProjectTest do
     end
   end
 
+  describe "discovery lifecycle" do
+    test "switching roots and closing the workspace cancel in-flight discovery", %{tmp_dir: tmp} do
+      first = Path.join(tmp, "first")
+      second = Path.join(tmp, "second")
+      File.mkdir_p!(first)
+      File.mkdir_p!(second)
+      {_project_pid, name} = start_project!(file_find_module: Minga.Project.SlowFileFind)
+
+      Project.switch(name, first)
+      first_worker = flush(name).rebuild_pid
+      first_ref = Process.monitor(first_worker)
+
+      Project.switch(name, second)
+      second_worker = flush(name).rebuild_pid
+      second_ref = Process.monitor(second_worker)
+
+      assert_receive {:DOWN, ^first_ref, :process, ^first_worker, :normal}, 1_000
+      assert first_worker != second_worker
+
+      Project.close(name)
+      state = flush(name)
+
+      assert_receive {:DOWN, ^second_ref, :process, ^second_worker, :normal}, 1_000
+      assert state.current_root == nil
+      assert state.workspace_root == nil
+      assert state.rebuilding? == false
+    end
+
+    test "discovery timeout cancels the worker", %{tmp_dir: tmp} do
+      root = Path.join(tmp, "timeout")
+      File.mkdir_p!(root)
+
+      {_project_pid, name} =
+        start_project!(file_find_module: Minga.Project.SlowFileFind, rebuild_timeout_ms: 10)
+
+      Project.switch(name, root)
+      worker = flush(name).rebuild_pid
+      ref = Process.monitor(worker)
+
+      assert_receive {:DOWN, ^ref, :process, ^worker, :normal}, 1_000
+      state = flush(name)
+      assert state.rebuilding? == false
+      assert state.rebuild_pid == nil
+    end
+
+    test "project shutdown cancels the worker", %{tmp_dir: tmp} do
+      root = Path.join(tmp, "shutdown")
+      File.mkdir_p!(root)
+      {project_pid, name} = start_project!(file_find_module: Minga.Project.SlowFileFind)
+
+      Project.switch(name, root)
+      worker = flush(name).rebuild_pid
+      ref = Process.monitor(worker)
+
+      GenServer.stop(project_pid)
+
+      assert_receive {:DOWN, ^ref, :process, ^worker, :normal}, 1_000
+    end
+  end
+
   describe "invalidate/1" do
     test "clears cache and triggers rebuild", %{tmp_dir: tmp} do
       project = Path.join(tmp, "invalidate_test")
@@ -277,7 +238,7 @@ defmodule Minga.ProjectTest do
       init_git_repo!(project)
 
       {_pid, name} = start_project!()
-      Project.detect_and_set(name, Path.join(project, "file.ex"))
+      Project.switch(name, project)
       await_rebuild(name)
 
       # Should have files
@@ -347,7 +308,7 @@ defmodule Minga.ProjectTest do
       File.write!(Path.join(project, "lib/app.ex"), "")
 
       {_pid, name} = start_project!()
-      Project.detect_and_set(name, Path.join(project, "lib/app.ex"))
+      Project.switch(name, project)
       flush(name)
 
       Project.record_file(name, Path.join(project, "lib/app.ex"))
@@ -367,7 +328,7 @@ defmodule Minga.ProjectTest do
       File.write!(Path.join(lib, "c.ex"), "")
 
       {_pid, name} = start_project!()
-      Project.detect_and_set(name, Path.join(lib, "a.ex"))
+      Project.switch(name, project)
       flush(name)
 
       Project.record_file(name, Path.join(lib, "a.ex"))
@@ -390,7 +351,7 @@ defmodule Minga.ProjectTest do
       File.write!(Path.join(lib, "b.ex"), "")
 
       {_pid, name} = start_project!()
-      Project.detect_and_set(name, Path.join(lib, "a.ex"))
+      Project.switch(name, project)
       flush(name)
 
       Project.record_file(name, Path.join(lib, "a.ex"))
@@ -416,7 +377,7 @@ defmodule Minga.ProjectTest do
       File.write!(outside_file, "")
 
       {_pid, name} = start_project!()
-      Project.detect_and_set(name, Path.join(project, "mix.exs"))
+      Project.switch(name, project)
       flush(name)
 
       Project.record_file(name, outside_file)
@@ -452,7 +413,7 @@ defmodule Minga.ProjectTest do
       {_pid, name} = start_project!()
 
       # Record file in project A
-      Project.detect_and_set(name, Path.join(project_a, "a.ex"))
+      Project.switch(name, project_a)
       flush(name)
       Project.record_file(name, Path.join(project_a, "a.ex"))
       flush(name)
@@ -538,7 +499,7 @@ defmodule Minga.ProjectTest do
       File.write!(Path.join(lib, "cold.ex"), "")
 
       {_pid, name} = start_project!()
-      Project.detect_and_set(name, Path.join(lib, "hot.ex"))
+      Project.switch(name, project)
       flush(name)
 
       Enum.each(1..5, fn _ ->
@@ -552,6 +513,15 @@ defmodule Minga.ProjectTest do
       scores = Project.frecency_scores(name)
       assert scores["lib/hot.ex"] > scores["lib/cold.ex"]
     end
+  end
+
+  @spec write_marker(String.t(), String.t()) :: :ok
+  defp write_marker(ancestor, marker) when marker in [".git", ".minga"] do
+    File.mkdir_p!(Path.join(ancestor, marker))
+  end
+
+  defp write_marker(ancestor, marker) do
+    File.write!(Path.join(ancestor, marker), "")
   end
 
   # Makes a fixture directory a self-contained git repo so file discovery uses

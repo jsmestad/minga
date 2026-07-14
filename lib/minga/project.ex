@@ -1,15 +1,15 @@
 defmodule Minga.Project do
   @moduledoc """
-  Project awareness GenServer, modeled after Emacs projectile.
+  Owns the active explicit directory workspace and its project services.
 
-  Tracks the current project root, caches the file list, and persists a
+  Tracks the current workspace root, caches the file list, and persists a
   known-projects list to `~/.config/minga/known-projects` so that `SPC p p`
   works across editor sessions.
 
   ## State
 
-  * `current_root` — the active project root (detected from the first opened file)
-  * `project_type` — the type of project (`:git`, `:mix`, `:cargo`, etc.)
+  * `current_root` — the path of the active explicit directory workspace
+  * `workspace_root` — the typed root that authorizes recursive project behavior
   * `cached_files` — the file list for the current project (populated by a background Task)
   * `known_projects` — list of all project roots the user has visited, persisted to disk
   * `recent_files` — per-project list of recently opened files, most recent first, persisted to disk
@@ -29,18 +29,21 @@ defmodule Minga.Project do
 
   alias Minga.Command
   alias Minga.Config
-  alias Minga.Git.Repo.Profile
-  alias Minga.Project.Detector
+  alias Minga.Project.Root
 
   defstruct current_root: nil,
-            project_type: nil,
+            workspace_root: nil,
             cached_files: [],
             known_projects: [],
             recent_files: %{},
             frecency_events: %{},
             command_frecency: %{},
             rebuilding?: false,
+            rebuild_pid: nil,
             rebuild_ref: nil,
+            rebuild_timer_ref: nil,
+            rebuild_timeout_ms: 30_000,
+            file_find_module: Minga.Project.FileFind,
             events_registry: Minga.Events.default_registry()
 
   @typedoc "Per-project recent files map: project root => list of relative paths (most recent first)."
@@ -58,14 +61,18 @@ defmodule Minga.Project do
   @typedoc "Project GenServer state."
   @type t :: %__MODULE__{
           current_root: String.t() | nil,
-          project_type: Detector.project_type() | nil,
+          workspace_root: Root.t() | nil,
           cached_files: [String.t()],
           known_projects: [String.t()],
           recent_files: recent_files_map(),
           frecency_events: frecency_events_map(),
           command_frecency: command_frecency_map(),
           rebuilding?: boolean(),
+          rebuild_pid: pid() | nil,
           rebuild_ref: reference() | nil,
+          rebuild_timer_ref: reference() | nil,
+          rebuild_timeout_ms: pos_integer(),
+          file_find_module: module(),
           events_registry: Minga.Events.registry()
         }
 
@@ -85,38 +92,24 @@ defmodule Minga.Project do
     GenServer.start_link(__MODULE__, opts, name: name)
   end
 
-  @doc """
-  Detects the project root for a file and sets it as the current project.
-
-  Automatically adds the detected root to the known-projects list and triggers
-  a background cache rebuild. No-op if detection finds no project markers.
-  """
-  @spec detect_and_set(GenServer.server(), String.t()) :: :ok
-  def detect_and_set(server \\ __MODULE__, file_path) when is_binary(file_path) do
-    GenServer.cast(server, {:detect_and_set, file_path})
-  end
-
   @doc "Returns the current project root, or nil if none is detected."
   @spec root(GenServer.server()) :: String.t() | nil
   def root(server \\ __MODULE__) do
     GenServer.call(server, :root)
   end
 
-  @doc """
-  Returns the current project root, falling back to `File.cwd!()`.
-
-  Safe to call even when the Project GenServer is not running (e.g., during
-  early startup or in tests): catches `:exit` from the GenServer call and
-  falls back to the working directory.
-  """
-  @spec resolve_root() :: String.t()
+  @doc "Returns the active project root without inventing a cwd fallback."
+  @spec resolve_root() :: String.t() | nil
   def resolve_root do
-    case root() do
-      nil -> File.cwd!()
-      r -> r
-    end
+    root()
   catch
-    :exit, _ -> File.cwd!()
+    :exit, _ -> nil
+  end
+
+  @doc "Returns the explicit directory workspace root used by recursive project features."
+  @spec workspace_root(GenServer.server()) :: Root.t() | nil
+  def workspace_root(server \\ __MODULE__) do
+    GenServer.call(server, :workspace_root)
   end
 
   @doc """
@@ -147,10 +140,37 @@ defmodule Minga.Project do
     GenServer.call(server, :known_projects)
   end
 
-  @doc "Switches to a known project root, triggering a cache rebuild."
-  @spec switch(GenServer.server(), String.t()) :: :ok
-  def switch(server \\ __MODULE__, root_path) when is_binary(root_path) do
-    GenServer.cast(server, {:switch, root_path})
+  @doc "Switches to an explicit directory workspace, triggering one cache rebuild."
+  @spec switch(String.t() | Root.t()) :: :ok
+  def switch(root), do: switch(__MODULE__, root, [])
+
+  @spec switch(String.t(), keyword()) :: :ok
+  def switch(root_path, opts) when is_binary(root_path) and is_list(opts),
+    do: switch(__MODULE__, root_path, opts)
+
+  @spec switch(GenServer.server(), String.t() | Root.t()) :: :ok
+  def switch(server, root), do: switch(server, root, [])
+
+  @spec switch(GenServer.server(), String.t() | Root.t(), keyword()) :: :ok
+  def switch(server, %Root{kind: :directory} = root, _opts) do
+    GenServer.cast(server, {:switch, root})
+  end
+
+  def switch(server, %Root{} = root, _opts) do
+    GenServer.cast(server, {:switch_rejected, root.path, :not_a_directory_root})
+  end
+
+  def switch(server, root_path, opts) when is_binary(root_path) and is_list(opts) do
+    case Root.directory(root_path, opts) do
+      {:ok, root} -> GenServer.cast(server, {:switch, root})
+      {:error, reason} -> GenServer.cast(server, {:switch_rejected, root_path, reason})
+    end
+  end
+
+  @doc "Closes the active directory workspace and cancels file discovery."
+  @spec close(GenServer.server()) :: :ok
+  def close(server \\ __MODULE__) do
+    GenServer.cast(server, :close)
   end
 
   @doc "Invalidates the file cache and triggers a rebuild."
@@ -247,8 +267,7 @@ defmodule Minga.Project do
   @impl true
   @spec init(keyword()) :: {:ok, t()}
   def init(opts) do
-    # Subscribe to buffer-open events so we detect projects and record
-    # recent files automatically, without the Editor wiring it up.
+    # Buffer-open events record recency only when an explicit directory workspace is active.
     # Tests pass subscribe: false to avoid cross-test event contamination.
     events_registry = Keyword.get(opts, :events_registry, Minga.Events.default_registry())
 
@@ -267,6 +286,8 @@ defmodule Minga.Project do
        recent_files: recent,
        frecency_events: frecency,
        command_frecency: command_frecency,
+       rebuild_timeout_ms: Keyword.get(opts, :rebuild_timeout_ms, 30_000),
+       file_find_module: Keyword.get(opts, :file_find_module, Minga.Project.FileFind),
        events_registry: events_registry
      }}
   end
@@ -275,6 +296,10 @@ defmodule Minga.Project do
   @spec handle_call(term(), GenServer.from(), t()) :: {:reply, term(), t()}
   def handle_call(:root, _from, state) do
     {:reply, state.current_root, state}
+  end
+
+  def handle_call(:workspace_root, _from, state) do
+    {:reply, state.workspace_root, state}
   end
 
   def handle_call(:files, _from, state) do
@@ -333,30 +358,35 @@ defmodule Minga.Project do
 
   @impl true
   @spec handle_cast(term(), t()) :: {:noreply, t()}
-  def handle_cast({:detect_and_set, file_path}, state) do
-    {:noreply, do_detect_and_set(state, file_path)}
+  def handle_cast({:switch, %Root{kind: :directory} = root}, state) do
+    state =
+      state
+      |> cancel_rebuild()
+      |> set_project(root)
+      |> add_to_known(root.path)
+      |> start_rebuild()
+
+    {:noreply, state}
   end
 
-  def handle_cast({:switch, root_path}, state) do
-    expanded = Path.expand(root_path)
+  def handle_cast({:switch_rejected, root_path, reason}, state) do
+    Minga.Log.warning(
+      :editor,
+      "Project.switch rejected #{Path.expand(root_path)}: #{inspect(reason)}"
+    )
 
-    if File.dir?(expanded) do
-      state =
-        state
-        |> set_project(expanded, nil)
-        |> add_to_known(expanded)
-        |> start_rebuild()
+    {:noreply, state}
+  end
 
-      {:noreply, state}
-    else
-      Minga.Log.warning(:editor, "Project.switch: directory not found: #{expanded}")
-      {:noreply, state}
-    end
+  def handle_cast(:close, state) do
+    state = cancel_rebuild(state)
+    {:noreply, %{state | current_root: nil, workspace_root: nil, cached_files: []}}
   end
 
   def handle_cast(:invalidate, state) do
-    state = %{state | cached_files: []} |> start_rebuild()
-    {:noreply, state}
+    state = cancel_rebuild(state)
+    state = %{state | cached_files: []}
+    {:noreply, start_rebuild(state)}
   end
 
   def handle_cast({:add, root_path}, state) do
@@ -392,72 +422,53 @@ defmodule Minga.Project do
 
   @impl true
   @spec handle_info(term(), t()) :: {:noreply, t()}
-  def handle_info({ref, {:rebuild_done, root, files}}, %{rebuild_ref: ref} = state)
-      when is_reference(ref) do
-    # Task completed successfully
-    Process.demonitor(ref, [:flush])
+  def handle_info({:file_find_done, pid, result}, %{rebuild_pid: pid} = state) do
+    state = clear_rebuild(state)
+    files = discovery_files(result)
+    root = state.current_root
 
-    if root == state.current_root do
-      Minga.Events.broadcast(
-        :project_rebuilt,
-        %Minga.Events.ProjectRebuiltEvent{root: root},
-        state.events_registry
-      )
+    Minga.Events.broadcast(
+      :project_rebuilt,
+      %Minga.Events.ProjectRebuiltEvent{root: root},
+      state.events_registry
+    )
 
-      {:noreply, %{state | cached_files: files, rebuilding?: false, rebuild_ref: nil}}
-    else
-      # Root changed while rebuild was in progress; discard stale result
-      {:noreply, %{state | rebuilding?: false, rebuild_ref: nil}}
-    end
+    {:noreply, %{state | cached_files: files}}
   end
 
-  def handle_info({:DOWN, ref, :process, _pid, reason}, %{rebuild_ref: ref} = state) do
+  def handle_info(
+        {:DOWN, ref, :process, pid, reason},
+        %{rebuild_pid: pid, rebuild_ref: ref} = state
+      ) do
     if reason != :normal do
       Minga.Log.warning(:editor, "Project file cache rebuild failed: #{inspect(reason)}")
     end
 
-    {:noreply, %{state | rebuilding?: false, rebuild_ref: nil}}
+    {:noreply, clear_rebuild(state)}
+  end
+
+  def handle_info({:rebuild_timeout, pid}, %{rebuild_pid: pid} = state) do
+    cancel_discovery(state, pid)
+    Minga.Log.warning(:editor, "Project file cache rebuild timed out")
+    {:noreply, clear_rebuild(state)}
   end
 
   def handle_info({:minga_event, :buffer_opened, %Minga.Events.BufferEvent{path: path}}, state) do
-    state = do_detect_and_set(state, path)
-    state = do_record_file(state, path)
-    {:noreply, state}
+    {:noreply, do_record_file(state, path)}
   end
 
   def handle_info(_msg, state) do
     {:noreply, state}
   end
 
-  # ── Private ─────────────────────────────────────────────────────────────────
-
-  @spec do_detect_and_set(t(), String.t()) :: t()
-  defp do_detect_and_set(state, file_path) do
-    case Detector.detect(file_path) do
-      {:ok, detected_root, type} ->
-        root = sparse_cone_root(detected_root, type)
-
-        if root == state.current_root do
-          state
-        else
-          state
-          |> set_project(root, type)
-          |> add_to_known(root)
-          |> start_rebuild()
-        end
-
-      :none ->
-        state
-    end
+  @impl true
+  @spec terminate(term(), t()) :: :ok
+  def terminate(_reason, state) do
+    if is_pid(state.rebuild_pid), do: cancel_discovery(state, state.rebuild_pid)
+    :ok
   end
 
-  # When detection falls back to the git root (no nearer marker, so `type` is
-  # `:git`) and the repo is a single-cone sparse checkout, root the project at
-  # the cone directory instead of git-root. Non-`:git` matches and non-sparse or
-  # multi-cone repos are returned unchanged.
-  @spec sparse_cone_root(String.t(), Detector.project_type()) :: String.t()
-  defp sparse_cone_root(root, :git), do: Profile.single_cone_dir(root) || root
-  defp sparse_cone_root(root, _type), do: root
+  # ── Private ─────────────────────────────────────────────────────────────────
 
   @spec do_record_file(t(), String.t()) :: t()
   defp do_record_file(%{current_root: nil} = state, _file_path), do: state
@@ -512,9 +523,9 @@ defmodule Minga.Project do
     state
   end
 
-  @spec set_project(t(), String.t(), Detector.project_type() | nil) :: t()
-  defp set_project(state, root, type) do
-    %{state | current_root: root, project_type: type, cached_files: []}
+  @spec set_project(t(), Root.t()) :: t()
+  defp set_project(state, %Root{kind: :directory} = root) do
+    %{state | current_root: root.path, workspace_root: root, cached_files: []}
   end
 
   @spec add_to_known(t(), String.t()) :: t()
@@ -529,20 +540,66 @@ defmodule Minga.Project do
   end
 
   @spec start_rebuild(t()) :: t()
-  defp start_rebuild(%{current_root: nil} = state), do: state
+  defp start_rebuild(%{workspace_root: nil} = state), do: state
 
   defp start_rebuild(state) do
-    root = state.current_root
+    case state.file_find_module.start(state.workspace_root, self()) do
+      {:ok, pid} ->
+        ref = Process.monitor(pid)
+        timer_ref = Process.send_after(self(), {:rebuild_timeout, pid}, state.rebuild_timeout_ms)
 
-    task =
-      Task.async(fn ->
-        case Minga.Project.list_files(root) do
-          {:ok, files} -> {:rebuild_done, root, files}
-          {:error, _msg} -> {:rebuild_done, root, []}
-        end
-      end)
+        %{
+          state
+          | rebuilding?: true,
+            rebuild_pid: pid,
+            rebuild_ref: ref,
+            rebuild_timer_ref: timer_ref
+        }
 
-    %{state | rebuilding?: true, rebuild_ref: task.ref}
+      {:error, reason} ->
+        Minga.Log.warning(:editor, "Project file cache rebuild rejected: #{reason}")
+        state
+    end
+  end
+
+  @spec cancel_rebuild(t()) :: t()
+  defp cancel_rebuild(%{rebuild_pid: nil} = state), do: state
+
+  defp cancel_rebuild(state) do
+    cancel_discovery(state, state.rebuild_pid)
+    clear_rebuild(state)
+  end
+
+  @spec cancel_discovery(t(), pid()) :: :ok
+  defp cancel_discovery(state, pid) do
+    case state.file_find_module.cancel(pid) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Minga.Log.error(:editor, "Project file discovery cancellation failed: #{reason}")
+
+      other ->
+        Minga.Log.error(
+          :editor,
+          "Project file discovery cancellation returned: #{inspect(other)}"
+        )
+    end
+  end
+
+  @spec clear_rebuild(t()) :: t()
+  defp clear_rebuild(state) do
+    if is_reference(state.rebuild_ref), do: Process.demonitor(state.rebuild_ref, [:flush])
+    if is_reference(state.rebuild_timer_ref), do: Process.cancel_timer(state.rebuild_timer_ref)
+    %{state | rebuilding?: false, rebuild_pid: nil, rebuild_ref: nil, rebuild_timer_ref: nil}
+  end
+
+  @spec discovery_files(Minga.Project.FileFind.result()) :: [String.t()]
+  defp discovery_files({:ok, files}), do: files
+
+  defp discovery_files({:error, reason}) do
+    Minga.Log.warning(:editor, "Project file cache rebuild failed: #{reason}")
+    []
   end
 
   # ── Persistence ─────────────────────────────────────────────────────────────
@@ -924,8 +981,8 @@ defmodule Minga.Project do
 
   # ── Domain delegates ──────────────────────────────────────────────────────
 
-  @doc "Lists all files in the given directory, respecting .gitignore."
-  @spec list_files(String.t()) :: {:ok, [String.t()]} | {:error, String.t()}
+  @doc "Lists all files under an explicit directory workspace root."
+  @spec list_files(Root.t()) :: {:ok, [String.t()]} | {:error, String.t()}
   defdelegate list_files(root), to: Minga.Project.FileFind
 
   @doc "Finds alternate files (test <> implementation) for the given file."

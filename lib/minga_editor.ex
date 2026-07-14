@@ -1574,8 +1574,13 @@ defmodule MingaEditor do
 
   @spec resolve_git_root() :: String.t() | nil
   def resolve_git_root do
-    root = Minga.Project.resolve_root()
+    resolve_git_root(Minga.Project.resolve_root())
+  end
 
+  @spec resolve_git_root(String.t() | nil) :: String.t() | nil
+  defp resolve_git_root(nil), do: nil
+
+  defp resolve_git_root(root) do
     case Minga.Git.root_for(root) do
       {:ok, git_root} -> git_root
       :not_git -> nil

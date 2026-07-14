@@ -1,26 +1,14 @@
 defmodule Minga.Project.FileFind do
   @moduledoc """
-  Discovers project files for the `SPC f f` (find file) picker.
+  Discovers files for an explicit directory workspace.
 
-  Uses the cheapest available tool to list files in the project directory:
+  Recursive discovery accepts `Minga.Project.Root` values rather than path strings. This keeps opened files, detected ancestors, and cwd fallbacks from becoming authorization to inventory a directory.
 
-  1. `git ls-files` — preferred inside git repos, reads the index instead of
-     walking the filesystem, and respects `.gitignore`
-  2. `fd` — preferred outside git repos, fast, respects `.gitignore`
-  3. `find` — universally available fallback, slower, no gitignore support
-
-  In a large monorepo the git index is far cheaper than a full filesystem
-  walk, so git wins whenever the root is a git repository or worktree root
-  (it has a `.git` entry). `fd` no longer follows symlinks, so symlinked or
-  cyclic trees are never traversed.
-
-  Because `git ls-files` reads the index, files inside git **submodules** appear
-  only as their gitlink entry, not as individual files. This matches git's own
-  view of the worktree; open the submodule directly to browse its files. (The
-  previous `fd`-first behaviour walked into submodules.)
-
-  All paths are returned relative to the given root directory.
+  Uses the cheapest available tool: `git ls-files` for repository roots, `fd` elsewhere, and `find` as the universal fallback. Every command runs in a cancellable worker that owns and terminates the external process tree.
   """
+
+  alias Minga.Project.FileFind.Worker
+  alias Minga.Project.Root
 
   @typedoc "A file discovery strategy."
   @type strategy :: :fd | :git | :find | :none
@@ -28,46 +16,147 @@ defmodule Minga.Project.FileFind do
   @typedoc "Result of file discovery."
   @type result :: {:ok, [String.t()]} | {:error, String.t()}
 
-  @doc """
-  Lists all files under `root`, returning `{:ok, paths}` with paths relative
-  to `root`, sorted alphabetically.
+  @typedoc "Discovery options shared by synchronous and managed callers."
+  @type option ::
+          {:timeout, pos_integer()}
+          | {:max_output_bytes, pos_integer()}
+          | {:max_file_count, pos_integer()}
 
-  Detects the best available tool automatically. Returns an error tuple if
-  no suitable tool is found.
-  """
-  @spec list_files(String.t()) :: result()
-  def list_files(root \\ File.cwd!()) do
-    if File.dir?(root) do
-      case detect_strategy(root) do
-        :fd ->
-          list_with_fd(root)
+  @default_timeout_ms 30_000
 
-        :git ->
-          list_with_git(root)
+  @doc "Lists files under an explicit directory workspace root with bounded execution."
+  @spec list_files(Root.t(), [option()]) :: result()
+  def list_files(root, opts \\ [])
 
-        :find ->
-          list_with_find(root)
+  def list_files(%Root{} = root, opts) when is_list(opts) do
+    owner = self()
 
-        :none ->
-          {:error, "No file-finding tool available. Install `fd` or `git` for best results."}
-      end
-    else
-      {:error, "Directory not found: #{root}"}
+    case start(root, owner, opts) do
+      {:ok, worker} -> await_result(worker, Keyword.get(opts, :timeout, @default_timeout_ms))
+      {:error, reason} -> {:error, reason}
     end
   end
 
-  @doc """
-  Detects which file-finding strategy to use for the given root directory.
+  def list_files(_root, _opts),
+    do: {:error, "Project inventory requires an explicit directory workspace root"}
 
-  Git repos prefer `:git` whenever `git` is available and `root` is a git
-  repository or worktree root (it has a `.git` entry), since reading the index
-  avoids traversing the filesystem. Otherwise `fd` is preferred, falling back
-  to `find`.
-  """
+  @doc "Starts cancellable discovery for an explicit directory workspace root."
+  @spec start(Root.t(), pid(), [option()]) :: {:ok, pid()} | {:error, String.t()}
+  def start(root, owner, opts \\ [])
+
+  def start(%Root{} = root, owner, opts) when is_pid(owner) and is_list(opts) do
+    with {:ok, path} <- inventory_path(root),
+         {:ok, command, strategy} <- command(path) do
+      worker_opts = Keyword.take(opts, [:max_output_bytes, :max_file_count])
+
+      Worker.start(
+        owner,
+        command,
+        fn output, status -> parse_result(strategy, output, status) end,
+        worker_opts
+      )
+    else
+      {:error, reason} when is_atom(reason) -> {:error, root_error(reason, root.path)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc "Cancels an in-flight discovery worker and waits for process-tree termination."
+  @spec cancel(pid()) :: Worker.cancel_result()
+  defdelegate cancel(worker), to: Worker
+
+  @doc "Detects the file-finding strategy for a directory path without starting inventory."
   @spec detect_strategy(String.t()) :: strategy()
-  def detect_strategy(root) do
+  def detect_strategy(root) when is_binary(root) do
     detect_strategy(git_strategy_available?(root), root)
   end
+
+  @spec fd_args([String.t()]) :: [String.t()]
+  def fd_args(exclude_list \\ excludes()) do
+    exclude_args = Enum.flat_map(exclude_list, &["--exclude", &1])
+    ["--type", "f", "--hidden"] ++ Enum.concat(exclude_args, ["."])
+  end
+
+  @doc false
+  @spec await_result(pid(), pos_integer()) :: result()
+  def await_result(worker, timeout) when is_integer(timeout) and timeout > 0 do
+    ref = Process.monitor(worker)
+
+    receive do
+      {:file_find_done, ^worker, result} ->
+        Process.demonitor(ref, [:flush])
+        result
+
+      {:DOWN, ^ref, :process, ^worker, reason} ->
+        {:error, "Project file discovery stopped: #{inspect(reason)}"}
+    after
+      timeout ->
+        cancel_result = cancel(worker)
+        Process.demonitor(ref, [:flush])
+        flush_worker_result(worker)
+        timeout_error(cancel_result)
+    end
+  end
+
+  @spec flush_worker_result(pid()) :: :ok
+  defp flush_worker_result(worker) do
+    receive do
+      {:file_find_done, ^worker, _result} -> :ok
+    after
+      0 -> :ok
+    end
+  end
+
+  @spec timeout_error(Worker.cancel_result()) :: result()
+  defp timeout_error(:ok), do: {:error, "Project file discovery timed out"}
+
+  defp timeout_error({:error, reason}),
+    do: {:error, "Project file discovery timed out; #{reason}"}
+
+  @spec inventory_path(Root.t()) :: {:ok, String.t()} | {:error, Root.error()}
+  defp inventory_path(root), do: Root.inventory_path(root)
+
+  @spec command(String.t()) :: {:ok, Worker.command(), strategy()} | {:error, String.t()}
+  defp command(root) do
+    command(detect_strategy(root), root)
+  end
+
+  @spec command(strategy(), String.t()) ::
+          {:ok, Worker.command(), strategy()} | {:error, String.t()}
+  defp command(:git, root) do
+    args = ["ls-files", "--cached", "--others", "--exclude-standard"]
+    {:ok, {System.find_executable("git"), args, root}, :git}
+  end
+
+  defp command(:fd, root) do
+    {:ok, {fd_executable(), fd_args(), root}, :fd}
+  end
+
+  defp command(:find, root) do
+    exclude_args = Enum.flat_map(excludes(), &["-not", "-path", "*/#{&1}/*", "-not", "-name", &1])
+    args = [".", "-type", "f"] ++ exclude_args
+    {:ok, {System.find_executable("find"), args, root}, :find}
+  end
+
+  defp command(:none, _root) do
+    {:error, "No file-finding tool available. Install `fd` or `git` for best results."}
+  end
+
+  @spec parse_result(strategy(), String.t(), non_neg_integer()) :: result()
+  defp parse_result(:fd, output, 0), do: {:ok, parse_lines(output)}
+  defp parse_result(:fd, output, _status), do: {:error, "fd failed: #{String.trim(output)}"}
+
+  defp parse_result(:git, output, 0) do
+    {:ok, output |> parse_lines() |> filter_excludes()}
+  end
+
+  defp parse_result(:git, output, _status),
+    do: {:error, "git ls-files failed: #{String.trim(output)}"}
+
+  defp parse_result(:find, output, status) when status in [0, 1],
+    do: {:ok, parse_lines(output)}
+
+  defp parse_result(:find, output, _status), do: {:error, "find failed: #{output}"}
 
   @spec detect_strategy(boolean(), String.t()) :: strategy()
   defp detect_strategy(true, _root), do: :git
@@ -83,73 +172,11 @@ defmodule Minga.Project.FileFind do
 
   @spec detect_find_strategy() :: strategy()
   defp detect_find_strategy do
-    if executable_available?("find") do
-      :find
-    else
-      :none
-    end
+    if executable_available?("find"), do: :find, else: :none
   end
-
-  # ── Strategies ──────────────────────────────────────────────────────────────
 
   @spec excludes() :: [String.t()]
   defp excludes, do: Minga.Config.get(:file_find_excludes)
-
-  @doc """
-  Builds the argument list for the `fd` file-discovery command.
-
-  Symlinks are deliberately not followed (no `--follow`), so large or cyclic
-  symlinked trees are never traversed. Configured excludes are passed through
-  as `--exclude` pairs.
-  """
-  @spec fd_args([String.t()]) :: [String.t()]
-  def fd_args(exclude_list \\ excludes()) do
-    exclude_args = Enum.flat_map(exclude_list, &["--exclude", &1])
-    ["--type", "f", "--hidden"] ++ Enum.concat(exclude_args, ["."])
-  end
-
-  @spec list_with_fd(String.t()) :: result()
-  defp list_with_fd(root) do
-    case System.cmd(fd_executable(), fd_args(), cd: root, stderr_to_stdout: true) do
-      {output, 0} ->
-        {:ok, parse_lines(output)}
-
-      {error, _code} ->
-        {:error, "fd failed: #{String.trim(error)}"}
-    end
-  end
-
-  @spec list_with_git(String.t()) :: result()
-  defp list_with_git(root) do
-    args = ["ls-files", "--cached", "--others", "--exclude-standard"]
-
-    case System.cmd("git", args, cd: root, stderr_to_stdout: true) do
-      {output, 0} ->
-        {:ok, output |> parse_lines() |> filter_excludes()}
-
-      {error, _code} ->
-        {:error, "git ls-files failed: #{String.trim(error)}"}
-    end
-  end
-
-  @spec list_with_find(String.t()) :: result()
-  defp list_with_find(root) do
-    exclude_args =
-      Enum.flat_map(excludes(), &["-not", "-path", "*/#{&1}/*", "-not", "-name", &1])
-
-    args = [".", "-type", "f"] ++ exclude_args
-
-    case System.cmd("find", args, cd: root, stderr_to_stdout: true) do
-      {output, code} when code in [0, 1] ->
-        # find may exit 1 with permission errors but still produce output
-        {:ok, parse_lines(output)}
-
-      {error, _code} ->
-        {:error, "find failed: #{error}"}
-    end
-  end
-
-  # ── Helpers ─────────────────────────────────────────────────────────────────
 
   @spec filter_excludes([String.t()]) :: [String.t()]
   defp filter_excludes(paths) do
@@ -175,32 +202,31 @@ defmodule Minga.Project.FileFind do
   defp normalize_path(path), do: path
 
   @spec executable_available?(String.t()) :: boolean()
-  defp executable_available?(name) do
-    System.find_executable(name) != nil
-  end
+  defp executable_available?(name), do: System.find_executable(name) != nil
 
-  # Ubuntu's fd-find package installs the binary as `fdfind`.
   @spec fd_executable() :: String.t() | nil
-  defp fd_executable do
-    System.find_executable("fd") || System.find_executable("fdfind")
-  end
+  defp fd_executable, do: System.find_executable("fd") || System.find_executable("fdfind")
 
   @spec git_strategy_available?(String.t()) :: boolean()
   defp git_strategy_available?(root) do
     executable_available?("git") and git_repo_root?(root)
   end
 
-  # True when `root` is the top of a git repository or worktree, i.e. it has a
-  # `.git` entry. Uses `File.exists?` (not `File.dir?`) because git worktrees
-  # store `.git` as a *file* pointing at the real git dir.
-  #
-  # Deliberately does not walk up the tree (as `git rev-parse` would): the file
-  # picker's root is the project root, and a non-repo directory that merely sits
-  # *inside* a larger repo (e.g. an ignored build/tmp dir) should fall back to
-  # `fd` rather than run `git ls-files`, which would list nothing for an ignored
-  # subtree.
   @spec git_repo_root?(String.t()) :: boolean()
-  defp git_repo_root?(root) do
-    File.exists?(Path.join(root, ".git"))
-  end
+  defp git_repo_root?(root), do: File.exists?(Path.join(root, ".git"))
+
+  @spec root_error(Root.error(), String.t()) :: String.t()
+  defp root_error(:not_a_directory, path), do: "Directory not found: #{path}"
+
+  defp root_error(:broad_root_confirmation_required, path),
+    do: "Broad project root requires explicit confirmation: #{path}"
+
+  defp root_error(:not_a_directory_root, _path),
+    do: "Project inventory requires an explicit directory workspace root"
+
+  defp root_error(:invalid_broad_root_confirmation, path),
+    do: "Broad project root confirmation must be true or false: #{path}"
+
+  defp root_error(:root_changed, path),
+    do: "Project root changed after authorization: #{path}"
 end

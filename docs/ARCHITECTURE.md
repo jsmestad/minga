@@ -255,6 +255,7 @@ graph TD
     LSPSUP --> LSP2["LSP Client: lua-ls"]
     SVC --> SYNC["LSP.SyncServer"]
     SVC --> PROJ["Project"]
+    PROJ -. "one per active inventory" .-> DISC["Project.FileFind.Worker<br/><i>monitored, cancellable</i>"]
     SVC --> AGENTSUP["Agent.Supervisor<br/><i>DynamicSupervisor</i>"]
     AGENTSUP --> AS1["Agent.Session<br/><i>Claude (refactoring)</i>"]
     AGENTSUP --> AS2["Agent.Session<br/><i>Claude (tests)</i>"]
@@ -264,11 +265,14 @@ graph TD
     style LSPSUP fill:#1a5276,stroke:#154360,color:#fff
     style AGENTSUP fill:#1a5276,stroke:#154360,color:#fff
     style TASKSUP fill:#1a5276,stroke:#154360,color:#fff
+    style DISC fill:#1a5276,stroke:#154360,color:#fff
     style AS1 fill:#884ea0,stroke:#6c3483,color:#fff
     style AS2 fill:#884ea0,stroke:#6c3483,color:#fff
     style LSP1 fill:#2471a3,stroke:#1a5276,color:#fff
     style LSP2 fill:#2471a3,stroke:#1a5276,color:#fff
 ```
+
+`Minga.Project` only starts recursive file inventory for an explicit directory workspace root. Root paths are canonicalized before authorization so symlink aliases cannot bypass broad-root protection. Each inventory runs in a monitored `Minga.Project.FileFind.Worker` that owns the external `git`, `fd`, or `find` process, bounds command output, and enforces a timeout for synchronous callers. Switching or closing the workspace, timing out, or stopping the Project service waits for the worker to terminate the external process tree.
 
 ### Runtime tier
 

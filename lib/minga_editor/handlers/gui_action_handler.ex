@@ -28,6 +28,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaEditor.Effects.GitMutation
   alias MingaEditor.Effects.GitMutationAdmission
   alias MingaEditor.GitRepositoryResolver
+  alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
   alias MingaEditor.Commands
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Handlers.BufferRegistry
@@ -1427,8 +1428,13 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   @spec git_status_abs_path(String.t(), String.t()) :: String.t()
   defp git_status_abs_path(git_root, path) do
-    project_root = Minga.Project.resolve_root()
+    git_status_abs_path(git_root, path, Minga.Project.resolve_root())
+  end
 
+  @spec git_status_abs_path(String.t(), String.t(), String.t() | nil) :: String.t()
+  defp git_status_abs_path(git_root, path, nil), do: Path.join(git_root, path)
+
+  defp git_status_abs_path(git_root, path, project_root) do
     if String.starts_with?(Path.expand(project_root), Path.expand(git_root)) do
       Path.join(project_root, path)
     else
@@ -1567,8 +1573,18 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   # process guarantees the cast reaches Project before any subsequent call.
   @spec open_dropped_directory(state(), String.t()) :: state()
   defp open_dropped_directory(state, dir_path) do
-    Minga.Project.switch(dir_path)
-    PickerUI.open(state, MingaEditor.UI.Picker.FileSource)
+    case Minga.Project.Root.directory(dir_path) do
+      {:ok, root} ->
+        Minga.Project.switch(root)
+        _ = Minga.Project.workspace_root()
+
+        state
+        |> FileTreeFreshness.update_project_root(root.path)
+        |> PickerUI.open(MingaEditor.UI.Picker.FileSource, %{project_root: root})
+
+      {:error, _reason} ->
+        state
+    end
   end
 
   # Moves the tree cursor to a specific index (used by GUI context menu / header actions).
