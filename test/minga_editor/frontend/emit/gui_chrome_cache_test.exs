@@ -93,7 +93,7 @@ defmodule MingaEditor.Frontend.Emit.AdapterGUIChromeCacheTest do
       state =
         then(gui_state(), fn root ->
           shell_state =
-            MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Traditional.State.install_tab_bar(
               MingaEditor.Shell.Runtime.state(root.shell_runtime),
               TabBar.new(Tab.new_file(1, "test.ex"))
             )
@@ -137,7 +137,7 @@ defmodule MingaEditor.Frontend.Emit.AdapterGUIChromeCacheTest do
       state_with_agents =
         then(state, fn root ->
           shell_state =
-            MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Traditional.State.install_tab_bar(
               MingaEditor.Shell.Runtime.state(root.shell_runtime),
               tab_bar
             )

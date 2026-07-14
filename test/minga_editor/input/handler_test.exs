@@ -47,7 +47,7 @@ defmodule MingaEditor.Input.HandlerTest do
     test "handles 'r' key during conflict by reloading" do
       state = base_state()
       buf = state.workspace.buffers.active
-      state = ModalWorkflow.open(state, :conflict, ConflictPayload.new(buf, "/tmp/test.txt"))
+      state = ModalWorkflow.open(state, {:conflict, ConflictPayload.new(buf, "/tmp/test.txt")})
 
       assert {:handled, new_state} = ConflictPrompt.handle_key(state, ?r, 0)
       refute ModalOverlay.match(new_state.shell_runtime.state.modal, :conflict)
@@ -59,7 +59,7 @@ defmodule MingaEditor.Input.HandlerTest do
       File.write!(path, "hello\nworld")
       state = base_state(buffer_opts: [file_path: path])
       buf = state.workspace.buffers.active
-      state = ModalWorkflow.open(state, :conflict, ConflictPayload.new(buf, path))
+      state = ModalWorkflow.open(state, {:conflict, ConflictPayload.new(buf, path)})
 
       assert {:handled, new_state} = ConflictPrompt.handle_key(state, ?k, 0)
 
@@ -72,7 +72,7 @@ defmodule MingaEditor.Input.HandlerTest do
     test "swallows unrecognized keys during conflict" do
       state = base_state()
       buf = state.workspace.buffers.active
-      state = ModalWorkflow.open(state, :conflict, ConflictPayload.new(buf, "/tmp/test.txt"))
+      state = ModalWorkflow.open(state, {:conflict, ConflictPayload.new(buf, "/tmp/test.txt")})
 
       assert {:handled, new_state} = ConflictPrompt.handle_key(state, ?x, 0)
       # State unchanged except for swallowing the key

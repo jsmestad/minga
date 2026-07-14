@@ -56,11 +56,15 @@ defmodule MingaEditor.SignatureHelp do
 
   @doc "Replaces any prior signature-help value with a fresh response value."
   @spec replace(t() | nil, t()) :: t()
-  def replace(_current, %__MODULE__{} = signature_help), do: signature_help
+  def replace(nil, %__MODULE__{} = signature_help), do: signature_help
+
+  def replace(%__MODULE__{}, %__MODULE__{} = signature_help),
+    do: signature_help
 
   @doc "Dismisses signature help."
   @spec dismiss(t() | nil) :: nil
-  def dismiss(_signature_help), do: nil
+  def dismiss(nil), do: nil
+  def dismiss(%__MODULE__{}), do: nil
 
   @doc "Cycles to the next signature overload."
   @spec next_signature(t()) :: t()

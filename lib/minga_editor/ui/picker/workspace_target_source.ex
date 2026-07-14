@@ -166,7 +166,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
 
       then(state, fn root ->
         shell_state =
-          MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Traditional.State.install_tab_bar(
             MingaEditor.Shell.Runtime.state(root.shell_runtime),
             tab_bar
           )
@@ -198,7 +198,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
         refreshed_state =
           then(state, fn root ->
             shell_state =
-              MingaEditor.Shell.Traditional.State.set_tab_bar(
+              MingaEditor.Shell.Traditional.State.install_tab_bar(
                 MingaEditor.Shell.Runtime.state(root.shell_runtime),
                 refreshed_tab_bar
               )
@@ -260,7 +260,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
 
       then(state, fn root ->
         shell_state =
-          MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Traditional.State.install_tab_bar(
             MingaEditor.Shell.Runtime.state(root.shell_runtime),
             tab_bar
           )
@@ -303,7 +303,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
       |> do_move(
         then(state, fn root ->
           shell_state =
-            MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Traditional.State.install_tab_bar(
               MingaEditor.Shell.Runtime.state(root.shell_runtime),
               tab_bar
             )
@@ -346,7 +346,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
 
       then(state, fn root ->
         shell_state =
-          MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Traditional.State.install_tab_bar(
             MingaEditor.Shell.Runtime.state(root.shell_runtime),
             tab_bar
           )

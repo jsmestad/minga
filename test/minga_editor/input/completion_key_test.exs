@@ -21,7 +21,7 @@ defmodule MingaEditor.Input.CompletionKeyTest do
 
   defp completion_state do
     completion = Completion.new(sample_items(), {0, 0})
-    payload = CompletionPayload.new(:tab1, completion: completion)
+    payload = CompletionPayload.new(1, completion: completion)
 
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil, backend: :headless},

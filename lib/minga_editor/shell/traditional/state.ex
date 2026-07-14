@@ -9,6 +9,7 @@ defmodule MingaEditor.Shell.Traditional.State do
 
   alias MingaEditor.BottomPanel
   alias MingaEditor.HoverPopup
+  alias MingaEditor.SignatureHelp
   alias MingaEditor.Shell.Traditional.AgentSurfaces
   alias MingaEditor.Shell.Traditional.ClickRegions
   alias MingaEditor.Shell.Traditional.Flashes
@@ -19,13 +20,16 @@ defmodule MingaEditor.Shell.Traditional.State do
   alias MingaEditor.Shell.Traditional.Sidebars
   alias MingaEditor.Shell.Traditional.SpaceLeader
   alias MingaEditor.Shell.Traditional.ToolPrompts
+  alias MingaEditor.Shell.Traditional.YankFlash
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.InlineAsk
   alias MingaEditor.State.InlineEdit
   alias MingaEditor.State.ModalOverlay
+  alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.WhichKey
   alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
+  alias MingaEditor.GitStatus.TUIState
 
   @type git_status_panel :: GitStatusPanel.t()
   @type git_status_tui_state :: Sidebars.git_status_tui_state()
@@ -44,7 +48,7 @@ defmodule MingaEditor.Shell.Traditional.State do
           agent_surfaces: AgentSurfaces.t(),
           modal: ModalOverlay.t(),
           input: InputState.t(),
-          signature_help: MingaEditor.SignatureHelp.t() | nil,
+          signature_help: SignatureHelp.t() | nil,
           tool_prompts: ToolPrompts.t()
         }
 
@@ -62,9 +66,10 @@ defmodule MingaEditor.Shell.Traditional.State do
             signature_help: nil,
             tool_prompts: %ToolPrompts{}
 
-  @doc "Controls whether missing-tool prompts are suppressed."
-  @spec set_suppress_tool_prompts(t(), boolean()) :: t()
-  def set_suppress_tool_prompts(%__MODULE__{} = state, suppress?) when is_boolean(suppress?) do
+  @doc "Installs the configured missing-tool prompt suppression policy."
+  @spec install_tool_prompt_suppression(t(), boolean()) :: t()
+  def install_tool_prompt_suppression(%__MODULE__{} = state, suppress?)
+      when is_boolean(suppress?) do
     %{state | tool_prompts: ToolPrompts.suppress(state.tool_prompts, suppress?)}
   end
 
@@ -118,7 +123,13 @@ defmodule MingaEditor.Shell.Traditional.State do
     do: %{state | flashes: Flashes.cancel_nav(state.flashes)}
 
   @doc "Replaces only the yank flash."
-  @spec replace_yank_flash(t(), pid(), tuple(), tuple(), atom()) :: t()
+  @spec replace_yank_flash(
+          t(),
+          pid(),
+          YankFlash.position(),
+          YankFlash.position(),
+          YankFlash.range_type()
+        ) :: t()
   def replace_yank_flash(%__MODULE__{} = state, buf, start_pos, end_pos, range_type),
     do: %{
       state
@@ -172,7 +183,7 @@ defmodule MingaEditor.Shell.Traditional.State do
 
   @doc "Returns the hover popup state, or nil when not showing."
   @spec hover_popup(t()) :: HoverPopup.t() | nil
-  def hover_popup(%{hover_popup: popup}), do: popup
+  def hover_popup(%__MODULE__{hover_popup: popup}), do: popup
 
   @doc "Shows newly produced hover content, replacing prior content."
   @spec show_hover_popup(t(), HoverPopup.t()) :: t()
@@ -185,44 +196,30 @@ defmodule MingaEditor.Shell.Traditional.State do
     do: %{state | hover_popup: HoverPopup.dismiss(state.hover_popup)}
 
   @doc "Shows newly produced signature-help content."
-  @spec show_signature_help(t(), MingaEditor.SignatureHelp.t()) :: t()
-  def show_signature_help(%__MODULE__{} = state, signature_help),
-    do: %{
-      state
-      | signature_help: MingaEditor.SignatureHelp.replace(state.signature_help, signature_help)
-    }
+  @spec show_signature_help(t(), SignatureHelp.t()) :: t()
+  def show_signature_help(%__MODULE__{} = state, %SignatureHelp{} = signature_help),
+    do: %{state | signature_help: SignatureHelp.replace(state.signature_help, signature_help)}
 
   @doc "Cycles to the next signature through its value owner."
   @spec next_signature_help(t()) :: t()
-  def next_signature_help(
-        %__MODULE__{signature_help: %MingaEditor.SignatureHelp{} = signature_help} = state
-      ),
-      do: %{
-        state
-        | signature_help: MingaEditor.SignatureHelp.next_signature(signature_help)
-      }
+  def next_signature_help(%__MODULE__{signature_help: %SignatureHelp{} = signature_help} = state),
+    do: %{state | signature_help: SignatureHelp.next_signature(signature_help)}
 
   def next_signature_help(%__MODULE__{} = state), do: state
 
   @doc "Cycles to the previous signature through its value owner."
   @spec previous_signature_help(t()) :: t()
   def previous_signature_help(
-        %__MODULE__{signature_help: %MingaEditor.SignatureHelp{} = signature_help} = state
+        %__MODULE__{signature_help: %SignatureHelp{} = signature_help} = state
       ),
-      do: %{
-        state
-        | signature_help: MingaEditor.SignatureHelp.prev_signature(signature_help)
-      }
+      do: %{state | signature_help: SignatureHelp.prev_signature(signature_help)}
 
   def previous_signature_help(%__MODULE__{} = state), do: state
 
   @doc "Dismisses signature help through its value owner."
   @spec dismiss_signature_help(t()) :: t()
   def dismiss_signature_help(%__MODULE__{} = state),
-    do: %{
-      state
-      | signature_help: MingaEditor.SignatureHelp.dismiss(state.signature_help)
-    }
+    do: %{state | signature_help: SignatureHelp.dismiss(state.signature_help)}
 
   @doc "Suppresses hover and signature help below a higher interactive surface."
   @spec suppress_lower_transients(t()) :: t()
@@ -236,7 +233,7 @@ defmodule MingaEditor.Shell.Traditional.State do
 
   @doc "Returns the which-key popup state."
   @spec whichkey(t()) :: WhichKey.t()
-  def whichkey(%{whichkey: wk}), do: wk
+  def whichkey(%__MODULE__{whichkey: whichkey}), do: whichkey
 
   @doc "Begins a hidden which-key lifecycle generation."
   @spec begin_whichkey(t(), Minga.Keymap.Bindings.node_t(), [String.t()]) :: t()
@@ -277,18 +274,17 @@ defmodule MingaEditor.Shell.Traditional.State do
 
   @doc "Returns the bottom panel state."
   @spec bottom_panel(t()) :: BottomPanel.t()
-  def bottom_panel(%{bottom_panel: panel}), do: panel
+  def bottom_panel(%__MODULE__{bottom_panel: panel}), do: panel
 
   @doc "Blurs the shell-owned bottom panel."
   @spec blur_bottom_panel(t()) :: t()
   def blur_bottom_panel(%__MODULE__{} = state),
     do: %{state | bottom_panel: BottomPanel.blur(state.bottom_panel)}
 
-  @doc "Replaces the bottom panel state."
-  @spec set_bottom_panel(t(), BottomPanel.t()) :: t()
-  def set_bottom_panel(%{} = ss, panel) do
-    %{ss | bottom_panel: panel}
-  end
+  @doc "Installs an exact bottom-panel value."
+  @spec install_bottom_panel(t(), BottomPanel.t()) :: t()
+  def install_bottom_panel(%__MODULE__{} = state, %BottomPanel{} = panel),
+    do: %{state | bottom_panel: panel}
 
   # ── Sidebar and Observatory lifecycle ─────────────────────────────────────
 
@@ -301,8 +297,11 @@ defmodule MingaEditor.Shell.Traditional.State do
   def git_status_panel(%__MODULE__{sidebars: sidebars}), do: Sidebars.git_status_panel(sidebars)
 
   @doc "Replaces the Git status panel through the sidebar owner."
-  @spec replace_git_status_panel(t(), git_status_panel() | map() | nil) :: t()
-  def replace_git_status_panel(%__MODULE__{} = state, panel),
+  @spec replace_git_status_panel(t(), git_status_panel() | nil) :: t()
+  def replace_git_status_panel(%__MODULE__{} = state, nil),
+    do: %{state | sidebars: Sidebars.replace_git_status(state.sidebars, nil)}
+
+  def replace_git_status_panel(%__MODULE__{} = state, %GitStatusPanel{} = panel),
     do: %{state | sidebars: Sidebars.replace_git_status(state.sidebars, panel)}
 
   @doc "Returns the TUI-only git status view state, or nil."
@@ -312,7 +311,10 @@ defmodule MingaEditor.Shell.Traditional.State do
 
   @doc "Replaces the TUI-only Git status view state."
   @spec replace_git_status_tui_state(t(), git_status_tui_state() | nil) :: t()
-  def replace_git_status_tui_state(%__MODULE__{} = state, tui),
+  def replace_git_status_tui_state(%__MODULE__{} = state, nil),
+    do: %{state | sidebars: Sidebars.replace_git_status_tui(state.sidebars, nil)}
+
+  def replace_git_status_tui_state(%__MODULE__{} = state, %TUIState{} = tui),
     do: %{state | sidebars: Sidebars.replace_git_status_tui(state.sidebars, tui)}
 
   @doc "Closes the Git status sidebar and its paired TUI state."
@@ -383,13 +385,14 @@ defmodule MingaEditor.Shell.Traditional.State do
 
   @doc "Returns the tab bar state, or nil."
   @spec tab_bar(t()) :: TabBar.t() | nil
-  def tab_bar(%{tab_bar: tb}), do: tb
+  def tab_bar(%__MODULE__{tab_bar: tab_bar}), do: tab_bar
 
-  @doc "Replaces the tab bar state."
-  @spec set_tab_bar(t(), TabBar.t() | nil) :: t()
-  def set_tab_bar(%{} = ss, tb) do
-    %{ss | tab_bar: tb}
-  end
+  @doc "Installs an exact tab-bar value or clears it with nil."
+  @spec install_tab_bar(t(), TabBar.t() | nil) :: t()
+  def install_tab_bar(%__MODULE__{} = state, nil), do: %{state | tab_bar: nil}
+
+  def install_tab_bar(%__MODULE__{} = state, %TabBar{} = tab_bar),
+    do: %{state | tab_bar: tab_bar}
 
   # ── Agent presentation and inline surfaces ────────────────────────────────
 
@@ -404,24 +407,24 @@ defmodule MingaEditor.Shell.Traditional.State do
 
   @doc "Replaces the agent presentation cache."
   @spec replace_agent(t(), AgentState.t()) :: t()
-  def replace_agent(%__MODULE__{} = state, agent),
+  def replace_agent(%__MODULE__{} = state, %AgentState{} = agent),
     do: %{state | agent_surfaces: AgentSurfaces.replace_presentation(state.agent_surfaces, agent)}
 
   # ── Modal overlay ──────────────────────────────────────────────────────────
 
   @doc "Returns the active modal overlay value (`:none` when no modal is open)."
   @spec modal(t()) :: ModalOverlay.t()
-  def modal(%{modal: m}), do: m
+  def modal(%__MODULE__{modal: modal}), do: modal
 
-  @doc "Opens a modal through the conflict-sticky value transition."
-  @spec open_modal(t(), ModalOverlay.variant(), ModalOverlay.payload()) :: t()
-  def open_modal(%__MODULE__{} = state, variant, payload),
-    do: %{state | modal: ModalOverlay.open(state.modal, variant, payload)}
+  @doc "Opens an exact modal value through the conflict-sticky transition."
+  @spec open_modal(t(), ModalOverlay.active()) :: t()
+  def open_modal(%__MODULE__{} = state, modal),
+    do: %{state | modal: ModalOverlay.open(state.modal, modal)}
 
-  @doc "Transitions the modal value unconditionally."
-  @spec transition_modal(t(), ModalOverlay.variant(), ModalOverlay.payload()) :: t()
-  def transition_modal(%__MODULE__{} = state, variant, payload),
-    do: %{state | modal: ModalOverlay.transition(state.modal, variant, payload)}
+  @doc "Transitions to an exact modal value unconditionally."
+  @spec transition_modal(t(), ModalOverlay.active()) :: t()
+  def transition_modal(%__MODULE__{} = state, modal),
+    do: %{state | modal: ModalOverlay.transition(state.modal, modal)}
 
   @doc "Closes a completed modal."
   @spec close_modal(t()) :: t()
@@ -440,7 +443,8 @@ defmodule MingaEditor.Shell.Traditional.State do
     do: %{state | modal: ModalOverlay.update_completion(state.modal, update)}
 
   @doc "Records completion trigger lifecycle with explicit active-tab context."
-  @spec put_modal_completion_trigger(t(), MingaEditor.CompletionTrigger.t(), term() | nil) :: t()
+  @spec put_modal_completion_trigger(t(), MingaEditor.CompletionTrigger.t(), Tab.id() | nil) ::
+          t()
   def put_modal_completion_trigger(%__MODULE__{} = state, trigger, active_tab_id),
     do: %{
       state
@@ -448,7 +452,7 @@ defmodule MingaEditor.Shell.Traditional.State do
     }
 
   @doc "Dismisses stale completion using the now-active tab id."
-  @spec dismiss_stale_modal_completion(t(), term() | nil) :: t()
+  @spec dismiss_stale_modal_completion(t(), Tab.id() | nil) :: t()
   def dismiss_stale_modal_completion(%__MODULE__{} = state, active_tab_id),
     do: %{state | modal: ModalOverlay.dismiss_if_stale(state.modal, active_tab_id)}
 
@@ -460,12 +464,12 @@ defmodule MingaEditor.Shell.Traditional.State do
 
   @doc "Activates or replaces an inline ask."
   @spec activate_inline_ask(t(), InlineAsk.t()) :: t()
-  def activate_inline_ask(%__MODULE__{} = state, ask),
+  def activate_inline_ask(%__MODULE__{} = state, %InlineAsk{} = ask),
     do: %{state | agent_surfaces: AgentSurfaces.activate_ask(state.agent_surfaces, ask)}
 
   @doc "Replaces an inline ask after a leaf transition."
   @spec replace_inline_ask(t(), InlineAsk.t()) :: t()
-  def replace_inline_ask(%__MODULE__{} = state, ask),
+  def replace_inline_ask(%__MODULE__{} = state, %InlineAsk{} = ask),
     do: %{state | agent_surfaces: AgentSurfaces.replace_ask(state.agent_surfaces, ask)}
 
   @doc "Cancels an inline ask and returns its session pid."
@@ -481,12 +485,12 @@ defmodule MingaEditor.Shell.Traditional.State do
 
   @doc "Activates or replaces an inline edit."
   @spec activate_inline_edit(t(), InlineEdit.t()) :: t()
-  def activate_inline_edit(%__MODULE__{} = state, edit),
+  def activate_inline_edit(%__MODULE__{} = state, %InlineEdit{} = edit),
     do: %{state | agent_surfaces: AgentSurfaces.activate_edit(state.agent_surfaces, edit)}
 
   @doc "Replaces an inline edit after a leaf transition."
   @spec replace_inline_edit(t(), InlineEdit.t()) :: t()
-  def replace_inline_edit(%__MODULE__{} = state, edit),
+  def replace_inline_edit(%__MODULE__{} = state, %InlineEdit{} = edit),
     do: %{state | agent_surfaces: AgentSurfaces.replace_edit(state.agent_surfaces, edit)}
 
   @doc "Cancels an inline edit and returns its session pid."
@@ -514,8 +518,9 @@ defmodule MingaEditor.Shell.Traditional.State do
 
   @doc "Replaces tool-prompt decisions and pending queue atomically."
   @spec replace_tool_prompts(t(), [atom()], MapSet.t(atom())) :: t()
-  def replace_tool_prompts(%__MODULE__{} = state, queue, declined),
-    do: %{state | tool_prompts: ToolPrompts.replace(state.tool_prompts, queue, declined)}
+  def replace_tool_prompts(%__MODULE__{} = state, queue, %MapSet{} = declined)
+      when is_list(queue),
+      do: %{state | tool_prompts: ToolPrompts.replace(state.tool_prompts, queue, declined)}
 
   @doc "Advances to the next missing-tool prompt."
   @spec advance_tool_prompt(t()) :: t()

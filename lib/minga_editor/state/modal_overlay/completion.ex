@@ -19,14 +19,14 @@ defmodule MingaEditor.State.ModalOverlay.Completion do
 
   alias Minga.Editing.Completion
   alias MingaEditor.CompletionTrigger
+  alias MingaEditor.State.Tab
 
   @typedoc """
   Identifier of the tab that triggered completion.
 
-  Tab IDs are the keys of `MingaEditor.State.TabBar`'s tab map. We accept
-  any term so callers do not need to depend on TabBar's id type directly.
+  Tab IDs are the positive integer keys of `MingaEditor.State.TabBar`'s tab map. `nil` is valid while completion-trigger work starts before a tab is available.
   """
-  @type owner :: term()
+  @type owner :: Tab.id() | nil
 
   @typedoc """
   The user-visible completion menu, or `nil` while a request is pending.
@@ -61,7 +61,7 @@ defmodule MingaEditor.State.ModalOverlay.Completion do
   an LSP request is in flight.
   """
   @spec new(owner(), keyword()) :: t()
-  def new(owner, opts \\ []) do
+  def new(owner, opts \\ []) when (is_integer(owner) and owner > 0) or is_nil(owner) do
     %__MODULE__{
       completion: Keyword.get(opts, :completion),
       trigger: Keyword.get(opts, :trigger, CompletionTrigger.new()),

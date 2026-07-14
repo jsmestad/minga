@@ -170,7 +170,7 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
         |> build_state(Buffers.add(%Buffers{}, active_buffer))
         |> then(fn root ->
           shell_state =
-            MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Traditional.State.install_tab_bar(
               MingaEditor.Shell.Runtime.state(root.shell_runtime),
               tab_bar
             )
@@ -484,7 +484,7 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
 
     then(state, fn root ->
       shell_state =
-        MingaEditor.Shell.Traditional.State.set_tab_bar(
+        MingaEditor.Shell.Traditional.State.install_tab_bar(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
           tab_bar
         )

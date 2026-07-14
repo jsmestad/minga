@@ -1,16 +1,20 @@
 defmodule MingaEditor.Shell.Traditional.SidebarsTest do
   use ExUnit.Case, async: true
 
+  alias MingaEditor.GitStatus.Panel
+  alias MingaEditor.GitStatus.TUIState
   alias MingaEditor.Observatory.Data
   alias MingaEditor.Observatory.Inspection
   alias MingaEditor.Shell.Traditional.Observatory
+  alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.Shell.Traditional.Sidebars
+  alias MingaEditor.State, as: EditorState
 
   test "Git status close clears its selected surface and paired TUI state" do
     sidebars =
       %Sidebars{}
-      |> Sidebars.replace_git_status(%{entries: []})
-      |> Sidebars.replace_git_status_tui(%URI{path: "/status"})
+      |> Sidebars.replace_git_status(Panel.new(%{entries: []}))
+      |> Sidebars.replace_git_status_tui(TUIState.new())
       |> Sidebars.select("git_status")
 
     closed = Sidebars.close_git_status(sidebars)
@@ -18,6 +22,36 @@ defmodule MingaEditor.Shell.Traditional.SidebarsTest do
     assert Sidebars.active_id(closed) == nil
     assert Sidebars.git_status_panel(closed) == nil
     assert Sidebars.git_status_tui_state(closed) == nil
+  end
+
+  test "Git status replacement rejects legacy map-shaped panel and TUI state" do
+    editor_state = %EditorState{
+      workspace: %MingaEditor.Session.State{viewport: MingaEditor.Viewport.new(24, 80)}
+    }
+
+    assert_raise FunctionClauseError, fn ->
+      invoke(Sidebars, :replace_git_status, [%Sidebars{}, %{entries: []}])
+    end
+
+    assert_raise FunctionClauseError, fn ->
+      invoke(Sidebars, :replace_git_status_tui, [%Sidebars{}, %{cursor_index: 0}])
+    end
+
+    assert_raise FunctionClauseError, fn ->
+      invoke(Sidebars, :replace_git_status_tui, [%Sidebars{}, %URI{path: "/foreign"}])
+    end
+
+    assert_raise FunctionClauseError, fn ->
+      invoke(SidebarWorkflow, :replace_git_status, [editor_state, %{entries: []}])
+    end
+
+    assert_raise FunctionClauseError, fn ->
+      invoke(SidebarWorkflow, :replace_git_status_tui, [editor_state, %{cursor_index: 0}])
+    end
+
+    assert_raise FunctionClauseError, fn ->
+      invoke(SidebarWorkflow, :replace_git_status_tui, [editor_state, %URI{path: "/foreign"}])
+    end
   end
 
   test "closing Observatory clears every surface value and invalidates delayed work" do
@@ -84,4 +118,8 @@ defmodule MingaEditor.Shell.Traditional.SidebarsTest do
     assert Observatory.timer(observatory) == next_timer
     assert observatory.token == next_token
   end
+
+  # The indirection lets runtime boundary tests pass intentionally invalid typed values.
+  # credo:disable-for-next-line Credo.Check.Refactor.Apply
+  defp invoke(module, function, arguments), do: apply(module, function, arguments)
 end

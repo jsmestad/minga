@@ -963,7 +963,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp toggle_tab_pin(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     then(state, fn root ->
       shell_state =
-        MingaEditor.Shell.Traditional.State.set_tab_bar(
+        MingaEditor.Shell.Traditional.State.install_tab_bar(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
           MingaEditor.State.TabBar.toggle_active_pin(tb)
         )
@@ -983,7 +983,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp unpin_active_tab(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     then(state, fn root ->
       shell_state =
-        MingaEditor.Shell.Traditional.State.set_tab_bar(
+        MingaEditor.Shell.Traditional.State.install_tab_bar(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
           MingaEditor.State.TabBar.unpin_tab(tb, tb.active_id)
         )
@@ -1003,7 +1003,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp move_active_tab(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state, direction) do
     then(state, fn root ->
       shell_state =
-        MingaEditor.Shell.Traditional.State.set_tab_bar(
+        MingaEditor.Shell.Traditional.State.install_tab_bar(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
           move_tab_bar(tb, direction)
         )
@@ -1423,7 +1423,7 @@ defmodule MingaEditor.Commands.BufferManagement do
     state =
       then(state, fn root ->
         shell_state =
-          MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Traditional.State.install_tab_bar(
             MingaEditor.Shell.Runtime.state(root.shell_runtime),
             MingaEditor.State.TabBar.remove_workspace(
               state.shell_runtime.state.tab_bar,
@@ -1487,7 +1487,7 @@ defmodule MingaEditor.Commands.BufferManagement do
     state =
       then(state, fn root ->
         shell_state =
-          MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Traditional.State.install_tab_bar(
             MingaEditor.Shell.Runtime.state(root.shell_runtime),
             tb
           )
@@ -1584,7 +1584,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
         then(state, fn root ->
           shell_state =
-            MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Traditional.State.install_tab_bar(
               MingaEditor.Shell.Runtime.state(root.shell_runtime),
               tb
             )
@@ -1683,7 +1683,7 @@ defmodule MingaEditor.Commands.BufferManagement do
       %{id: workspace_id} ->
         then(state, fn root ->
           shell_state =
-            MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Traditional.State.install_tab_bar(
               MingaEditor.Shell.Runtime.state(root.shell_runtime),
               MingaEditor.State.TabBar.remove_workspace(
                 state.shell_runtime.state.tab_bar,
@@ -1727,7 +1727,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
     then(state, fn root ->
       shell_state =
-        MingaEditor.Shell.Traditional.State.set_tab_bar(
+        MingaEditor.Shell.Traditional.State.install_tab_bar(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
           updated_tb
         )
@@ -1759,7 +1759,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
     then(state, fn root ->
       shell_state =
-        MingaEditor.Shell.Traditional.State.set_tab_bar(
+        MingaEditor.Shell.Traditional.State.install_tab_bar(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
           updated_tb
         )
@@ -1830,7 +1830,7 @@ defmodule MingaEditor.Commands.BufferManagement do
           :ok ->
             then(state, fn root ->
               shell_state =
-                MingaEditor.Shell.Traditional.State.set_tab_bar(
+                MingaEditor.Shell.Traditional.State.install_tab_bar(
                   MingaEditor.Shell.Runtime.state(root.shell_runtime),
                   MingaEditor.State.TabBar.remove_workspace(tb, workspace.id)
                 )
@@ -2043,7 +2043,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
     then(state, fn root ->
       shell_state =
-        MingaEditor.Shell.Traditional.State.set_tab_bar(
+        MingaEditor.Shell.Traditional.State.install_tab_bar(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
           tb
         )
@@ -2081,7 +2081,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
           then(state, fn root ->
             shell_state =
-              MingaEditor.Shell.Traditional.State.set_tab_bar(
+              MingaEditor.Shell.Traditional.State.install_tab_bar(
                 MingaEditor.Shell.Runtime.state(root.shell_runtime),
                 tb
               )
@@ -2266,8 +2266,8 @@ defmodule MingaEditor.Commands.BufferManagement do
         tab_bar = maybe_switch_to_replacement(new_tb, replacement_id)
 
         shell_state =
-          MingaEditor.Shell.Traditional.State.set_tab_bar(
-            Runtime.state(state.shell_runtime),
+          MingaEditor.Shell.Traditional.State.install_tab_bar(
+            MingaEditor.Shell.Runtime.state(state.shell_runtime),
             tab_bar
           )
 
@@ -2807,7 +2807,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
     then(state, fn root ->
       shell_state =
-        MingaEditor.Shell.Traditional.State.set_bottom_panel(
+        MingaEditor.Shell.Traditional.State.install_bottom_panel(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
           new_panel
         )
@@ -2826,7 +2826,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
     then(state, fn root ->
       shell_state =
-        MingaEditor.Shell.Traditional.State.set_bottom_panel(
+        MingaEditor.Shell.Traditional.State.install_bottom_panel(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
           new_panel
         )

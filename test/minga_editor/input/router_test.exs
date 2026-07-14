@@ -181,7 +181,7 @@ defmodule MingaEditor.Input.RouterTest do
 
       state = base_state()
       buf = state.workspace.buffers.active
-      state = ModalWorkflow.open(state, :conflict, ConflictPayload.new(buf, "/tmp/test.txt"))
+      state = ModalWorkflow.open(state, {:conflict, ConflictPayload.new(buf, "/tmp/test.txt")})
 
       # 'j' is swallowed by conflict prompt, not forwarded to mode
       new_state = Router.dispatch(state, ?j, 0)
@@ -234,7 +234,7 @@ defmodule MingaEditor.Input.RouterTest do
       state =
         then(base_state(), fn root ->
           shell_state =
-            MingaEditor.Shell.Traditional.State.set_bottom_panel(
+            MingaEditor.Shell.Traditional.State.install_bottom_panel(
               MingaEditor.Shell.Runtime.state(root.shell_runtime),
               %BottomPanel{
                 visible: true,
@@ -261,7 +261,7 @@ defmodule MingaEditor.Input.RouterTest do
       state =
         then(base_state(editing_model: :cua), fn root ->
           shell_state =
-            MingaEditor.Shell.Traditional.State.set_bottom_panel(
+            MingaEditor.Shell.Traditional.State.install_bottom_panel(
               MingaEditor.Shell.Runtime.state(root.shell_runtime),
               %BottomPanel{
                 visible: true,
@@ -288,7 +288,7 @@ defmodule MingaEditor.Input.RouterTest do
       state =
         then(base_state(editing_model: :cua), fn root ->
           shell_state =
-            MingaEditor.Shell.Traditional.State.set_bottom_panel(
+            MingaEditor.Shell.Traditional.State.install_bottom_panel(
               MingaEditor.Shell.Runtime.state(root.shell_runtime),
               %BottomPanel{
                 visible: true,
@@ -426,7 +426,7 @@ defmodule MingaEditor.Input.RouterTest do
       state =
         then(state, fn root ->
           shell_state =
-            MingaEditor.Shell.Traditional.State.set_bottom_panel(
+            MingaEditor.Shell.Traditional.State.install_bottom_panel(
               MingaEditor.Shell.Runtime.state(root.shell_runtime),
               %BottomPanel{
                 visible: true
@@ -464,7 +464,7 @@ defmodule MingaEditor.Input.RouterTest do
       state =
         then(state, fn root ->
           shell_state =
-            MingaEditor.Shell.Traditional.State.set_bottom_panel(
+            MingaEditor.Shell.Traditional.State.install_bottom_panel(
               MingaEditor.Shell.Runtime.state(root.shell_runtime),
               %BottomPanel{
                 visible: true

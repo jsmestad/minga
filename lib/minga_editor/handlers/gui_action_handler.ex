@@ -440,7 +440,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp dispatch_action(state, {:toggle_panel, 1}) do
     then(state, fn root ->
       shell_state =
-        MingaEditor.Shell.Traditional.State.set_bottom_panel(
+        MingaEditor.Shell.Traditional.State.install_bottom_panel(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
           MingaEditor.BottomPanel.toggle(state.shell_runtime.state.bottom_panel)
         )
@@ -490,7 +490,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp dispatch_action(state, {:panel_switch_tab, tab_index}) do
     then(state, fn root ->
       shell_state =
-        MingaEditor.Shell.Traditional.State.set_bottom_panel(
+        MingaEditor.Shell.Traditional.State.install_bottom_panel(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
           MingaEditor.BottomPanel.switch_tab(
             state.shell_runtime.state.bottom_panel,
@@ -509,7 +509,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp dispatch_action(state, :panel_dismiss) do
     then(state, fn root ->
       shell_state =
-        MingaEditor.Shell.Traditional.State.set_bottom_panel(
+        MingaEditor.Shell.Traditional.State.install_bottom_panel(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
           MingaEditor.BottomPanel.dismiss(state.shell_runtime.state.bottom_panel)
         )
@@ -525,7 +525,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp dispatch_action(state, {:panel_resize, height_percent}) do
     then(state, fn root ->
       shell_state =
-        MingaEditor.Shell.Traditional.State.set_bottom_panel(
+        MingaEditor.Shell.Traditional.State.install_bottom_panel(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
           MingaEditor.BottomPanel.resize(
             state.shell_runtime.state.bottom_panel,
@@ -1700,7 +1700,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       %TabBar{} = tb ->
         then(state, fn root ->
           shell_state =
-            MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Traditional.State.install_tab_bar(
               MingaEditor.Shell.Runtime.state(root.shell_runtime),
               fun.(tb)
             )

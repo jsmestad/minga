@@ -23,6 +23,7 @@ defmodule MingaEditor.Shell.Traditional do
 
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Commands.AgentSession
+  alias MingaEditor.GitStatus.TUIState
   alias Minga.Buffer
   alias Minga.Project.FileRef
   alias MingaEditor.State.Agent, as: AgentState
@@ -82,7 +83,7 @@ defmodule MingaEditor.Shell.Traditional do
 
       context = background_agent_context(workspace)
       tb = TabBar.update_context(tb, tab.id, context)
-      {ShellState.set_tab_bar(shell_state, tb), workspace}
+      {ShellState.install_tab_bar(shell_state, tb), workspace}
     end
   end
 
@@ -90,52 +91,16 @@ defmodule MingaEditor.Shell.Traditional do
     {shell_state, workspace}
   end
 
-  @git_status_tui_state_module :"Elixir.MingaGitPorcelain.Shell.Traditional.GitStatus.TuiState"
-
   @spec refresh_git_status_tui_state(ShellState.t(), [Minga.Git.StatusEntry.t()]) ::
           ShellState.t()
   defp refresh_git_status_tui_state(%ShellState{} = shell_state, entries) do
     case ShellState.git_status_tui_state(shell_state) do
-      nil -> shell_state
-      tui -> maybe_refresh_git_status_tui_state(shell_state, tui, entries)
-    end
-  end
+      %TUIState{} = tui ->
+        ShellState.replace_git_status_tui_state(shell_state, TUIState.refresh(tui, entries))
 
-  @spec maybe_refresh_git_status_tui_state(ShellState.t(), struct(), [Minga.Git.StatusEntry.t()]) ::
-          ShellState.t()
-  defp maybe_refresh_git_status_tui_state(shell_state, tui, entries) do
-    if git_status_tui_refresh_available?() do
-      refreshed = :erlang.apply(@git_status_tui_state_module, :refresh, [tui, entries])
-      install_refreshed_git_status_tui_state(shell_state, refreshed)
-    else
-      shell_state
-    end
-  end
-
-  @spec install_refreshed_git_status_tui_state(ShellState.t(), term()) :: ShellState.t()
-  defp install_refreshed_git_status_tui_state(shell_state, refreshed) do
-    if is_struct(refreshed, @git_status_tui_state_module),
-      do: ShellState.replace_git_status_tui_state(shell_state, refreshed),
-      else: shell_state
-  end
-
-  @spec git_status_tui_refresh_available?() :: boolean()
-  defp git_status_tui_refresh_available? do
-    git_porcelain_running?() and Code.ensure_loaded?(@git_status_tui_state_module) and
-      function_exported?(@git_status_tui_state_module, :refresh, 2)
-  end
-
-  @spec git_porcelain_running?() :: boolean()
-  defp git_porcelain_running? do
-    case Process.whereis(Minga.Extension.Registry) do
       nil ->
-        false
-
-      _pid ->
-        match?({:ok, %{status: :running}}, Minga.Extension.Registry.get(:minga_git_porcelain))
+        shell_state
     end
-  catch
-    :exit, _reason -> false
   end
 
   @impl true
@@ -169,7 +134,7 @@ defmodule MingaEditor.Shell.Traditional do
       ) do
     stop_workspace_session(TabBar.get_workspace(tb, ws_id))
     tab_bar = TabBar.remove_workspace(tb, ws_id)
-    shell_state = ShellState.set_tab_bar(shell_state, tab_bar)
+    shell_state = ShellState.install_tab_bar(shell_state, tab_bar)
     workspace = sync_workspace_agent_ui(tab_bar, workspace)
     {shell_state, workspace}
   end
@@ -180,7 +145,7 @@ defmodule MingaEditor.Shell.Traditional do
         {:workspace_rename, ws_id, name}
       ) do
     tb = TabBar.update_workspace(tb, ws_id, &Workspace.rename(&1, name))
-    {ShellState.set_tab_bar(shell_state, tb), workspace}
+    {ShellState.install_tab_bar(shell_state, tb), workspace}
   end
 
   def handle_gui_action(
@@ -189,7 +154,7 @@ defmodule MingaEditor.Shell.Traditional do
         {:workspace_set_icon, ws_id, icon}
       ) do
     tb = TabBar.update_workspace(tb, ws_id, &Workspace.set_icon(&1, icon))
-    {ShellState.set_tab_bar(shell_state, tb), workspace}
+    {ShellState.install_tab_bar(shell_state, tb), workspace}
   end
 
   def handle_gui_action(shell_state, workspace, _action) do
@@ -367,7 +332,7 @@ defmodule MingaEditor.Shell.Traditional do
     {tb, tab} = TabBar.add(tb, :file, label)
     tb = TabBar.switch_to(tb, tab.id)
     workspace = SessionState.activate_buffer(workspace, workspace.buffers)
-    {ShellState.set_tab_bar(shell_state, tb), workspace}
+    {ShellState.install_tab_bar(shell_state, tb), workspace}
   end
 
   @impl true
@@ -388,11 +353,11 @@ defmodule MingaEditor.Shell.Traditional do
           |> sync_file_tab_ref(tb.active_id, workspace.buffers.active, workspace)
           |> TabBar.update_context(tb.active_id, SessionState.to_tab_context(workspace))
 
-        {ShellState.set_tab_bar(shell_state, tb), workspace}
+        {ShellState.install_tab_bar(shell_state, tb), workspace}
 
       %Tab{} ->
         tb = TabBar.update_context(tb, tb.active_id, SessionState.to_tab_context(workspace))
-        {ShellState.set_tab_bar(shell_state, tb), workspace}
+        {ShellState.install_tab_bar(shell_state, tb), workspace}
 
       nil ->
         {shell_state, workspace}
@@ -448,7 +413,7 @@ defmodule MingaEditor.Shell.Traditional do
         tb
       end
 
-    {ShellState.set_tab_bar(shell_state, tb), workspace}
+    {ShellState.install_tab_bar(shell_state, tb), workspace}
   end
 
   def on_agent_event(
@@ -458,7 +423,7 @@ defmodule MingaEditor.Shell.Traditional do
         {:approval_pending, _}
       ) do
     tb = TabBar.set_attention_by_session(tb, session_pid, true)
-    {ShellState.set_tab_bar(shell_state, tb), workspace}
+    {ShellState.install_tab_bar(shell_state, tb), workspace}
   end
 
   # A direct :error event raises attention so a background tab whose session
@@ -472,7 +437,7 @@ defmodule MingaEditor.Shell.Traditional do
         {:error, _message}
       ) do
     tb = TabBar.set_attention_by_session(tb, session_pid, true)
-    {ShellState.set_tab_bar(shell_state, tb), workspace}
+    {ShellState.install_tab_bar(shell_state, tb), workspace}
   end
 
   def on_agent_event(shell_state, workspace, _session_pid, _event) do
@@ -508,7 +473,7 @@ defmodule MingaEditor.Shell.Traditional do
       ) do
     status = restarted_session_status(new_pid)
     updated_tb = update_restarted_session_tab_bar(tb, old_pid, new_pid, status)
-    {ShellState.set_tab_bar(shell_state, updated_tb), updated_tb != tb}
+    {ShellState.install_tab_bar(shell_state, updated_tb), updated_tb != tb}
   end
 
   @spec update_restarted_session_tab_bar(TabBar.t(), pid(), pid(), Tab.agent_status()) ::
@@ -630,9 +595,13 @@ defmodule MingaEditor.Shell.Traditional do
           tb
       end
 
-    ShellState.set_tab_bar(
+    ShellState.install_tab_bar(
       shell_state,
-      TabBar.update_tab(tb, tab_id, &Tab.set_session(&1, session_pid))
+      MingaEditor.State.TabBar.update_tab(
+        tb,
+        tab_id,
+        &MingaEditor.State.Tab.set_session(&1, session_pid)
+      )
     )
   end
 
@@ -735,7 +704,7 @@ defmodule MingaEditor.Shell.Traditional do
       tb = TabBar.update_tab(tb, target_id, &Tab.set_attention(&1, false))
 
       workspace = SessionState.invalidate_all_windows(workspace)
-      {ShellState.set_tab_bar(shell_state, tb), workspace}
+      {ShellState.install_tab_bar(shell_state, tb), workspace}
     end
   end
 
@@ -784,8 +753,7 @@ defmodule MingaEditor.Shell.Traditional do
     Log.debug(:editor, fn -> "[tab] on_buffer_added new tab=#{new_tab.id} label=#{label}" end)
 
     shell_state =
-      shell_state
-      |> ShellState.set_tab_bar(tb)
+      ShellState.install_tab_bar(shell_state, tb)
       |> then(fn current ->
         ShellState.replace_agent(
           current,
@@ -830,7 +798,7 @@ defmodule MingaEditor.Shell.Traditional do
       |> sync_file_tab_ref(new_tab.id, workspace.buffers.active, workspace)
       |> TabBar.update_context(new_tab.id, new_context)
 
-    {ShellState.set_tab_bar(shell_state, tb), workspace}
+    {ShellState.install_tab_bar(shell_state, tb), workspace}
   end
 
   @spec sync_file_tab_ref(TabBar.t(), Tab.id(), pid() | nil, SessionState.t()) :: TabBar.t()

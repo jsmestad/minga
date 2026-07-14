@@ -8,6 +8,7 @@ defmodule MingaEditor.Frontend.EmitTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Editing.Completion
   alias Minga.RenderModel.Cursor
   alias MingaEditor.RenderPipeline.ComposedFrame
   alias MingaEditor.Layout
@@ -22,6 +23,10 @@ defmodule MingaEditor.Frontend.EmitTest do
   alias Minga.RenderModel.Window.Span, as: RenderSpan
   alias Minga.Test.RecordingFrontend
   alias MingaEditor.Renderer.Caches
+  alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.Shell.Traditional.ModalWorkflow
+  alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
+  alias MingaEditor.State.Windows
   alias MingaEditor.UI.FontRegistry
 
   import MingaEditor.RenderPipeline.TestHelpers
@@ -37,6 +42,26 @@ defmodule MingaEditor.Frontend.EmitTest do
 
     Process.put(:emit_test_frontend, frontend)
     :ok
+  end
+
+  describe "context projection" do
+    test "active completion survives the typed render-input projection" do
+      completion = Completion.new([], {0, 0})
+
+      state =
+        ModalWorkflow.open(
+          emit_state(),
+          {:completion, CompletionPayload.new(1, completion: completion)}
+        )
+
+      assert Context.from_editor_state(state).completion == completion
+
+      windows = Windows.set_active(state.workspace.windows, 999)
+      workspace = SessionState.set_windows(state.workspace, windows)
+      state = %{state | workspace: workspace}
+
+      assert Context.from_editor_state(state).completion == completion
+    end
   end
 
   describe "emit/2 dispatching" do

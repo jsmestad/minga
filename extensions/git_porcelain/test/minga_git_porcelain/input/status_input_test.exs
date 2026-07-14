@@ -10,7 +10,8 @@ defmodule MingaGitPorcelain.Input.GitStatusInputTest do
 
   alias Minga.Git
   alias MingaGitPorcelain.Input.GitStatus
-  alias MingaGitPorcelain.Shell.Traditional.GitStatus.TuiState
+  alias MingaEditor.GitStatus.TUIState, as: TuiState
+  alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.Shell.Traditional.State, as: ShellState
@@ -51,7 +52,7 @@ defmodule MingaGitPorcelain.Input.GitStatusInputTest do
         focus_stack: [MingaEditor.Input.Scoped, MingaEditor.Input.ModeFSM]
       }
     }
-    |> SidebarWorkflow.replace_git_status(panel_data)
+    |> SidebarWorkflow.replace_git_status(GitStatusPanel.new(panel_data))
     |> SidebarWorkflow.replace_git_status_tui(TuiState.new())
   end
 

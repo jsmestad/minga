@@ -41,7 +41,7 @@ defmodule MingaEditor.Commands.BufferManagement.FrontendTest do
       state =
         then(base_state(@gui), fn root ->
           shell_state =
-            MingaEditor.Shell.Traditional.State.set_bottom_panel(
+            MingaEditor.Shell.Traditional.State.install_bottom_panel(
               MingaEditor.Shell.Runtime.state(root.shell_runtime),
               %BottomPanel{
                 dismissed: true

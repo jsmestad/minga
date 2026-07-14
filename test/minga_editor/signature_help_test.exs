@@ -82,6 +82,24 @@ defmodule MingaEditor.SignatureHelpTest do
     end
   end
 
+  describe "exact lifecycle values" do
+    test "replacement and dismissal reject legacy values" do
+      signature_help = SignatureHelp.from_response(@sample_response, 10, 20)
+      assert SignatureHelp.replace(nil, signature_help) == signature_help
+      assert SignatureHelp.dismiss(signature_help) == nil
+
+      assert_raise FunctionClauseError, fn ->
+        invoke(SignatureHelp, :replace, [%{}, signature_help])
+      end
+
+      assert_raise FunctionClauseError, fn ->
+        invoke(SignatureHelp, :replace, [nil, %{}])
+      end
+
+      assert_raise FunctionClauseError, fn -> invoke(SignatureHelp, :dismiss, [%{}]) end
+    end
+  end
+
   describe "next_signature/1 and prev_signature/1" do
     test "cycles forward through signatures" do
       sh = SignatureHelp.from_response(@sample_response, 10, 20)
@@ -132,4 +150,8 @@ defmodule MingaEditor.SignatureHelpTest do
       assert row + h <= 15
     end
   end
+
+  # The indirection lets runtime boundary tests pass intentionally invalid typed values.
+  # credo:disable-for-next-line Credo.Check.Refactor.Apply
+  defp invoke(module, function, arguments), do: apply(module, function, arguments)
 end

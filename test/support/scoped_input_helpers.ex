@@ -79,7 +79,7 @@ defmodule Minga.Test.ScopedInputHelpers do
           Runtime.default_entry(),
           %TraditionalState{}
           |> TraditionalState.replace_agent(agent)
-          |> TraditionalState.set_tab_bar(tab_bar)
+          |> TraditionalState.install_tab_bar(tab_bar)
         )
     }
   end
@@ -125,7 +125,7 @@ defmodule Minga.Test.ScopedInputHelpers do
       state
       |> then(fn root ->
         shell_state =
-          MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Traditional.State.install_tab_bar(
             MingaEditor.Shell.Runtime.state(root.shell_runtime),
             tab_bar
           )

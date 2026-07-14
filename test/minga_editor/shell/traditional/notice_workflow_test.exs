@@ -7,6 +7,14 @@ defmodule MingaEditor.Shell.Traditional.NoticeWorkflowTest do
 
   import MingaEditor.RenderPipeline.TestHelpers
 
+  test "public notice workflows reject legacy map-shaped editor state" do
+    assert_raise FunctionClauseError, fn -> invoke(NoticeWorkflow, :publish, [%{}, "notice"]) end
+    assert_raise FunctionClauseError, fn -> invoke(NoticeWorkflow, :acknowledge, [%{}]) end
+    assert_raise FunctionClauseError, fn -> invoke(NoticeWorkflow, :dismiss, [%{}]) end
+    assert_raise FunctionClauseError, fn -> invoke(NoticeWorkflow, :timeout, [%{}, 1]) end
+    assert_raise FunctionClauseError, fn -> invoke(NoticeWorkflow, :message, [%{}]) end
+  end
+
   test "publishes, replaces, acknowledges, and rejects stale timeout delivery" do
     state = base_state()
     first = NoticeWorkflow.publish(state, "first")
@@ -121,4 +129,8 @@ defmodule MingaEditor.Shell.Traditional.NoticeWorkflowTest do
 
     assert retained_operation.message == "Formatting"
   end
+
+  # The indirection lets runtime boundary tests pass intentionally invalid typed values.
+  # credo:disable-for-next-line Credo.Check.Refactor.Apply
+  defp invoke(module, function, arguments), do: apply(module, function, arguments)
 end

@@ -29,7 +29,7 @@ defmodule MingaEditor.State.EventRoutingTest do
           |> TraditionalState.replace_agent(%AgentState{
             runtime: %RuntimeState{status: :idle}
           })
-          |> TraditionalState.set_tab_bar(tb)
+          |> TraditionalState.install_tab_bar(tb)
         )
     }
 
@@ -329,7 +329,7 @@ defmodule MingaEditor.State.EventRoutingTest do
       state =
         then(state, fn root ->
           shell_state =
-            MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Traditional.State.install_tab_bar(
               MingaEditor.Shell.Runtime.state(root.shell_runtime),
               tb
             )
@@ -363,7 +363,7 @@ defmodule MingaEditor.State.EventRoutingTest do
       state =
         then(state, fn root ->
           shell_state =
-            MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Traditional.State.install_tab_bar(
               MingaEditor.Shell.Runtime.state(root.shell_runtime),
               tb
             )

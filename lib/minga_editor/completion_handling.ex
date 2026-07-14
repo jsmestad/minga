@@ -12,12 +12,14 @@ defmodule MingaEditor.CompletionHandling do
   alias Minga.Config
   alias Minga.Editing.Completion
   alias MingaEditor.CompletionTrigger
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.ModalWorkflow
   alias MingaEditor.Shell.Traditional.SignatureHelpWorkflow
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.SignatureHelp
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.ModalOverlay
+  alias MingaEditor.State.Tab
   alias Minga.LSP.Client
   alias Minga.LSP.SyncServer
 
@@ -463,12 +465,16 @@ defmodule MingaEditor.CompletionHandling do
         trigger: ModalWorkflow.completion_trigger(state)
       )
 
-    ModalWorkflow.open(state, :completion, payload)
+    ModalWorkflow.open(state, {:completion, payload})
   end
 
-  @spec active_tab_id(EditorState.t()) :: term() | nil
-  defp active_tab_id(%{shell_runtime: %{state: %{tab_bar: %{active_id: id}}}}), do: id
-  defp active_tab_id(_), do: nil
+  @spec active_tab_id(EditorState.t()) :: Tab.id() | nil
+  defp active_tab_id(%EditorState{shell_runtime: %Runtime{} = runtime}) do
+    case Runtime.active_tab(runtime) do
+      %Tab{id: id} -> id
+      nil -> nil
+    end
+  end
 
   @typedoc "Config contexts that produce completion items (excludes :none)."
   @type active_config_context :: :option_name | {:option_value, atom()} | :filetype

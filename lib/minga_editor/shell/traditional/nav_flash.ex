@@ -20,7 +20,7 @@ defmodule MingaEditor.Shell.Traditional.NavFlash do
 
   @doc "Replaces the active flash and advances its monotonic generation."
   @spec replace(t(), non_neg_integer()) :: t()
-  def replace(%__MODULE__{} = flash, line) do
+  def replace(%__MODULE__{} = flash, line) when is_integer(line) and line >= 0 do
     %__MODULE__{generation: flash.generation + 1, line: line}
   end
 

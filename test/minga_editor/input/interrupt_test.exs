@@ -53,24 +53,23 @@ defmodule MingaEditor.Input.InterruptTest do
   @spec open_modal_variant(EditorState.t(), ModalOverlay.variant()) :: EditorState.t()
   defp open_modal_variant(state, :picker) do
     picker = MingaEditor.UI.Picker.new([%MingaEditor.UI.Picker.Item{id: "x", label: "x"}])
-    ModalWorkflow.open(state, :picker, PickerPayload.new(%Picker{picker: picker}))
+    ModalWorkflow.open(state, {:picker, PickerPayload.new(%Picker{picker: picker})})
   end
 
   defp open_modal_variant(state, :prompt) do
     prompt = %PromptState{handler: __MODULE__, text: "query", cursor: 5, label: "Find"}
-    ModalWorkflow.open(state, :prompt, PromptPayload.new(prompt))
+    ModalWorkflow.open(state, {:prompt, PromptPayload.new(prompt)})
   end
 
   defp open_modal_variant(state, :completion) do
     completion = %Completion{items: [], trigger_position: {0, 0}}
-    ModalWorkflow.open(state, :completion, CompletionPayload.new(:tab1, completion: completion))
+    ModalWorkflow.open(state, {:completion, CompletionPayload.new(1, completion: completion)})
   end
 
   defp open_modal_variant(state, :conflict) do
     ModalWorkflow.open(
       state,
-      :conflict,
-      ConflictPayload.new(state.workspace.buffers.active, "/tmp/test.txt")
+      {:conflict, ConflictPayload.new(state.workspace.buffers.active, "/tmp/test.txt")}
     )
   end
 
@@ -268,8 +267,7 @@ defmodule MingaEditor.Input.InterruptTest do
       state =
         ModalWorkflow.open(
           state,
-          :picker,
-          PickerPayload.new(%Picker{picker: picker, source: nil})
+          {:picker, PickerPayload.new(%Picker{picker: picker, source: nil})}
         )
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
@@ -288,7 +286,7 @@ defmodule MingaEditor.Input.InterruptTest do
     test "dismisses conflict prompt" do
       state = base_state()
       buf = state.workspace.buffers.active
-      state = ModalWorkflow.open(state, :conflict, ConflictPayload.new(buf, "/tmp/test.txt"))
+      state = ModalWorkflow.open(state, {:conflict, ConflictPayload.new(buf, "/tmp/test.txt")})
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
       refute ModalOverlay.match(Runtime.state(new_state.shell_runtime).modal, :conflict)
@@ -299,9 +297,9 @@ defmodule MingaEditor.Input.InterruptTest do
       completion = %Completion{items: [], trigger_position: {0, 0}}
 
       payload =
-        MingaEditor.State.ModalOverlay.Completion.new(:tab1, completion: completion)
+        MingaEditor.State.ModalOverlay.Completion.new(1, completion: completion)
 
-      state = ModalWorkflow.open(state, :completion, payload)
+      state = ModalWorkflow.open(state, {:completion, payload})
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
       assert MingaEditor.Shell.Traditional.ModalWorkflow.completion(new_state) == nil

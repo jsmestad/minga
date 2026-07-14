@@ -190,7 +190,7 @@ defmodule MingaEditor.StateTest do
       state =
         then(state, fn root ->
           shell_state =
-            MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Traditional.State.install_tab_bar(
               MingaEditor.Shell.Runtime.state(root.shell_runtime),
               TabBar.new(tab)
             )
@@ -571,7 +571,7 @@ defmodule MingaEditor.StateTest do
       end)
       |> then(fn root ->
         shell_state =
-          MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Traditional.State.install_tab_bar(
             MingaEditor.Shell.Runtime.state(root.shell_runtime),
             TabBar.new(Tab.new_agent(1, "Agent"))
           )

@@ -3,7 +3,8 @@ defmodule MingaGitPorcelain.Shell.Traditional.GitStatusRendererTest do
   use ExUnit.Case, async: true
 
   alias Minga.Git.StatusEntry
-  alias MingaGitPorcelain.Shell.Traditional.GitStatus.TuiState
+  alias MingaEditor.GitStatus.Panel
+  alias MingaEditor.GitStatus.TUIState, as: TuiState
   alias MingaGitPorcelain.Shell.Traditional.GitStatusRenderer
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
 
@@ -27,25 +28,23 @@ defmodule MingaGitPorcelain.Shell.Traditional.GitStatusRendererTest do
         keymap_scope: :git_status
       },
       shell_state: shell_state,
-      theme: theme
+      appearance: %{theme: theme}
     }
   end
 
   defp make_panel(entries) do
-    %{
+    Panel.new(%{
       repo_state: :normal,
       branch: "main",
       ahead: 0,
       behind: 0,
       entries: entries,
       stash_count: 0
-    }
+    })
   end
 
-  defp make_tui_state(overrides) do
-    TuiState.new()
-    |> Map.merge(overrides)
-  end
+  defp make_tui_state(collapsed),
+    do: %TuiState{cursor_index: 0, collapsed: collapsed}
 
   describe "render/2" do
     test "returns empty list when no panel is active" do
@@ -141,7 +140,7 @@ defmodule MingaGitPorcelain.Shell.Traditional.GitStatusRendererTest do
       ]
 
       panel = make_panel(entries)
-      state = base_state(panel, tui_state: make_tui_state(%{collapsed: %{changes: true}}))
+      state = base_state(panel, tui_state: make_tui_state(%{changes: true}))
       draws = GitStatusRenderer.render(state, @rect)
 
       texts = Enum.map(draws, fn d -> elem(d, 2) end)

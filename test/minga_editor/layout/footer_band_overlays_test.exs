@@ -28,6 +28,7 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
   alias MingaEditor.Layout.OverlayBand
   alias MingaEditor.Layout.SurfaceRegistry
   alias MingaEditor.Observatory.Data, as: ObservatoryData
+  alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State.Feedback
@@ -184,14 +185,9 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
       assert height == 4
       assert row + height == 24
 
-      transfer_state =
-        state
-        |> Map.from_struct()
-        |> Map.delete(:shell_runtime)
-        |> Map.put(:shell, state.shell_runtime.entry.module)
-        |> Map.put(:shell_state, state.shell_runtime.state)
+      render_input = Input.from_editor_state(state)
 
-      assert SurfaceRegistry.rect_for(transfer_state, :observatory) == {row, 0, 80, height}
+      assert SurfaceRegistry.rect_for(render_input, :observatory) == {row, 0, 80, height}
     end
 
     test "the edit timeline band height is one header plus one row per entry" do

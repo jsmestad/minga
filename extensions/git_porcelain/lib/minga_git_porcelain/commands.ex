@@ -12,8 +12,10 @@ defmodule MingaGitPorcelain.Commands do
   alias Minga.Core.Face
   alias MingaEditor.BufferLifecycle
   alias MingaEditor.Commands
+  alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
   alias MingaEditor.Layout
   alias MingaEditor.PickerUI
+  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.GitToast
   alias MingaEditor.Shell.Traditional.GitToastWorkflow
@@ -94,7 +96,7 @@ defmodule MingaGitPorcelain.Commands do
       end)
       |> SidebarWorkflow.close_git_status()
       |> Layout.invalidate()
-      |> EditorState.invalidate_all_windows()
+      |> invalidate_all_windows()
     else
       open_git_status_panel(state)
     end
@@ -1322,10 +1324,10 @@ defmodule MingaGitPorcelain.Commands do
           }
 
         state
-        |> SidebarWorkflow.replace_git_status(panel_data)
+        |> SidebarWorkflow.replace_git_status(GitStatusPanel.new(panel_data))
         |> SidebarWorkflow.select("git_status")
         |> Layout.invalidate()
-        |> EditorState.invalidate_all_windows()
+        |> invalidate_all_windows()
     end
   end
 
@@ -1351,11 +1353,15 @@ defmodule MingaGitPorcelain.Commands do
       }
 
     state
-    |> SidebarWorkflow.replace_git_status(panel_data)
+    |> SidebarWorkflow.replace_git_status(GitStatusPanel.new(panel_data))
     |> SidebarWorkflow.select("git_status")
     |> Layout.invalidate()
-    |> EditorState.invalidate_all_windows()
+    |> invalidate_all_windows()
   end
+
+  @spec invalidate_all_windows(state()) :: state()
+  defp invalidate_all_windows(%EditorState{} = state),
+    do: %{state | workspace: SessionState.invalidate_all_windows(state.workspace)}
 
   @spec git_status_last_commit_message(state()) :: String.t()
   defp git_status_last_commit_message(state) do

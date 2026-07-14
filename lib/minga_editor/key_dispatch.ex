@@ -262,7 +262,7 @@ defmodule MingaEditor.KeyDispatch do
         total: total
       )
 
-    MingaEditor.Shell.Traditional.ModalWorkflow.open(state, :command_completion, payload)
+    MingaEditor.Shell.Traditional.ModalWorkflow.open(state, {:command_completion, payload})
   end
 
   defp sync_command_completion_overlay(state, :command, new_mode) when new_mode != :command do

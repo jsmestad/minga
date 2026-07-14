@@ -221,8 +221,8 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       client = start_fake_lsp_client()
       timer = make_ref()
       trigger = %{CompletionTrigger.new() | debounce_timer: timer}
-      payload = CompletionPayload.new(:tab1, trigger: trigger)
-      state = ModalWorkflow.transition(state, :completion, payload)
+      payload = CompletionPayload.new(1, trigger: trigger)
+      state = ModalWorkflow.transition(state, {:completion, payload})
       buffer = state.workspace.buffers.active
 
       {new_state, effects} =
@@ -253,8 +253,8 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
       completion = Completion.new(Completion.parse_response(%{"items" => [item]}), {0, 0})
       trigger = %{CompletionTrigger.new() | pending_ref: make_ref(), pending_refs: MapSet.new()}
-      payload = CompletionPayload.new(:tab1, completion: completion, trigger: trigger)
-      state = ModalWorkflow.transition(state, :completion, payload)
+      payload = CompletionPayload.new(1, completion: completion, trigger: trigger)
+      state = ModalWorkflow.transition(state, {:completion, payload})
 
       {new_state, effects} = LspEventHandler.handle(state, {:completion_resolve, 0})
 
@@ -344,11 +344,11 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
     test "delayed completion response does not spawn processing or replay after a shell switch" do
       ref = make_ref()
       trigger = %{CompletionTrigger.new() | pending_ref: ref, pending_refs: MapSet.new([ref])}
-      payload = CompletionPayload.new(:tab1, trigger: trigger)
+      payload = CompletionPayload.new(1, trigger: trigger)
 
       state =
         base_state()
-        |> ModalWorkflow.transition(:completion, payload)
+        |> ModalWorkflow.transition({:completion, payload})
         |> ShellWorkflow.switch(:fake)
 
       foreign_shell_state = Runtime.state(state.shell_runtime)
@@ -376,11 +376,11 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       ref = make_ref()
       item = %{"label" => "resolved", "documentation" => "old", "sortText" => "resolved"}
       completion = Completion.new(Completion.parse_response(%{"items" => [item]}), {0, 0})
-      payload = CompletionPayload.new(:tab1, completion: completion)
+      payload = CompletionPayload.new(1, completion: completion)
 
       state =
         base_state()
-        |> ModalWorkflow.transition(:completion, payload)
+        |> ModalWorkflow.transition({:completion, payload})
         |> put_lsp_pending(ref, :completion_resolve)
         |> ShellWorkflow.switch(:fake)
 
@@ -399,11 +399,11 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
     test "delayed processed completion does not touch or replay a foreign shell" do
       trigger = %{CompletionTrigger.new() | gen: 7}
-      payload = CompletionPayload.new(:tab1, trigger: trigger)
+      payload = CompletionPayload.new(1, trigger: trigger)
 
       state =
         base_state()
-        |> ModalWorkflow.transition(:completion, payload)
+        |> ModalWorkflow.transition({:completion, payload})
         |> ShellWorkflow.switch(:fake)
 
       processed =
@@ -458,8 +458,8 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       state = buffer_state("hello\n")
       ref = make_ref()
       trigger = %{CompletionTrigger.new() | pending_ref: ref, pending_refs: MapSet.new([ref])}
-      payload = CompletionPayload.new(:tab1, trigger: trigger)
-      state = ModalWorkflow.transition(state, :completion, payload)
+      payload = CompletionPayload.new(1, trigger: trigger)
+      state = ModalWorkflow.transition(state, {:completion, payload})
 
       completion_result = %{
         "items" => [

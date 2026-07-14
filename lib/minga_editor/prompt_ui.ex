@@ -8,7 +8,7 @@ defmodule MingaEditor.PromptUI do
 
   Prompts and pickers are mutually exclusive: opening a prompt closes any
   active picker. The replacement is handled automatically by
-  `MingaEditor.Shell.Traditional.ModalWorkflow.open/3`.
+  `MingaEditor.Shell.Traditional.ModalWorkflow.open/2`.
 
   ## Usage
 
@@ -71,8 +71,7 @@ defmodule MingaEditor.PromptUI do
 
     MingaEditor.Shell.Traditional.ModalWorkflow.open(
       state,
-      :prompt,
-      PromptPayload.new(prompt_state)
+      {:prompt, PromptPayload.new(prompt_state)}
     )
   end
 
@@ -156,8 +155,7 @@ defmodule MingaEditor.PromptUI do
 
     MingaEditor.Shell.Traditional.ModalWorkflow.transition(
       state,
-      :prompt,
-      PromptPayload.put_prompt_ui(payload, new_pui)
+      {:prompt, PromptPayload.put_prompt_ui(payload, new_pui)}
     )
   end
 

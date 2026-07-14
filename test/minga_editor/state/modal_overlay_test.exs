@@ -53,21 +53,59 @@ defmodule MingaEditor.State.ModalOverlayTest do
   end
 
   test "open replaces ordinary modals but preserves an active conflict" do
-    picker = ModalOverlay.open(:none, :picker, picker_payload())
+    picker = ModalOverlay.open(:none, {:picker, picker_payload()})
     prompt = prompt_payload("hello")
-    assert ModalOverlay.open(picker, :prompt, prompt) == {:prompt, prompt}
+    assert ModalOverlay.open(picker, {:prompt, prompt}) == {:prompt, prompt}
 
     conflict = {:conflict, conflict_payload()}
-    assert ModalOverlay.open(conflict, :picker, picker_payload()) == conflict
+    assert ModalOverlay.open(conflict, {:picker, picker_payload()}) == conflict
 
     next_conflict = conflict_payload(self())
-    assert ModalOverlay.open(conflict, :conflict, next_conflict) == {:conflict, next_conflict}
+    assert ModalOverlay.open(conflict, {:conflict, next_conflict}) == {:conflict, next_conflict}
+  end
+
+  test "modal transitions reject mismatched payload and legacy split arguments" do
+    assert_raise FunctionClauseError, fn ->
+      invoke(ModalOverlay, :open, [:none, {:picker, prompt_payload()}])
+    end
+
+    assert_raise FunctionClauseError, fn ->
+      invoke(ModalOverlay, :open, [{:conflict, conflict_payload()}, {:picker, prompt_payload()}])
+    end
+
+    assert_raise FunctionClauseError, fn ->
+      invoke(ModalOverlay, :transition, [:none, {:prompt, picker_payload()}])
+    end
+
+    assert_raise UndefinedFunctionError, fn ->
+      invoke(ModalOverlay, :open, [:none, :picker, picker_payload()])
+    end
+
+    malformed = {:picker, prompt_payload()}
+
+    for function <- [
+          :tag,
+          :active?,
+          :close,
+          :dismiss,
+          :completion,
+          :completion_trigger,
+          :command_completion
+        ] do
+      assert_raise FunctionClauseError, fn -> invoke(ModalOverlay, function, [malformed]) end
+    end
+
+    assert_raise FunctionClauseError, fn -> invoke(ModalOverlay, :match, [malformed, :picker]) end
+
+    assert_raise FunctionClauseError, fn ->
+      invoke(CompletionPayload, :new, [:legacy_owner, []])
+    end
   end
 
   test "transition bypasses conflict stickiness and close or dismiss returns none" do
     conflict = {:conflict, conflict_payload()}
     picker = picker_payload()
-    assert ModalOverlay.transition(conflict, :picker, picker) == {:picker, picker}
+    assert ModalOverlay.transition(conflict, {:picker, picker}) == {:picker, picker}
     assert ModalOverlay.close({:picker, picker}) == :none
     assert ModalOverlay.dismiss(conflict) == :none
     assert ModalOverlay.close(:none) == :none
@@ -104,4 +142,8 @@ defmodule MingaEditor.State.ModalOverlayTest do
     picker = {:picker, picker_payload()}
     assert ModalOverlay.dismiss_if_stale(picker, 8) == picker
   end
+
+  # The indirection lets runtime boundary tests pass intentionally invalid typed values.
+  # credo:disable-for-next-line Credo.Check.Refactor.Apply
+  defp invoke(module, function, arguments), do: apply(module, function, arguments)
 end

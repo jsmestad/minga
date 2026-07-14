@@ -35,6 +35,34 @@ defmodule MingaEditor.Shell.Traditional.AgentSurfacesTest do
     assert InlineAsk.active(AgentSurfaces.asks(canceled), buffer) == nil
   end
 
+  test "session updates replace only the matching ask entry and ignore missing sessions" do
+    first_buffer = self()
+    second_buffer = spawn_session()
+    first_session = spawn_session()
+    second_session = spawn_session()
+    missing_session = spawn_session()
+
+    on_exit(fn ->
+      Enum.each([second_buffer, first_session, second_session, missing_session], fn pid ->
+        Process.exit(pid, :kill)
+      end)
+    end)
+
+    first_ask = first_buffer |> ask() |> InlineAsk.thinking(first_session)
+    second_ask = second_buffer |> ask() |> InlineAsk.thinking(second_session)
+
+    surfaces =
+      %AgentSurfaces{}
+      |> AgentSurfaces.activate_ask(first_ask)
+      |> AgentSurfaces.activate_ask(second_ask)
+
+    updated = AgentSurfaces.append_ask_response(surfaces, first_session, "first")
+
+    assert InlineAsk.active(AgentSurfaces.asks(updated), first_buffer).response == "first"
+    assert InlineAsk.active(AgentSurfaces.asks(updated), second_buffer) == second_ask
+    assert AgentSurfaces.append_ask_response(updated, missing_session, "missing") == updated
+  end
+
   test "replacement inline edit ignores stale completion and completes the current session" do
     buffer = self()
     old_session = spawn_session()
@@ -60,6 +88,36 @@ defmodule MingaEditor.Shell.Traditional.AgentSurfacesTest do
 
     assert %InlineEdit{status: :proposed, session_pid: nil} =
              InlineEdit.active(AgentSurfaces.edits(completed), buffer)
+  end
+
+  test "session updates replace only the matching edit entry and ignore missing sessions" do
+    first_buffer = self()
+    second_buffer = spawn_session()
+    first_session = spawn_session()
+    second_session = spawn_session()
+    missing_session = spawn_session()
+
+    on_exit(fn ->
+      Enum.each([second_buffer, first_session, second_session, missing_session], fn pid ->
+        Process.exit(pid, :kill)
+      end)
+    end)
+
+    first_edit = first_buffer |> edit() |> InlineEdit.thinking(first_session)
+    second_edit = second_buffer |> edit() |> InlineEdit.thinking(second_session)
+
+    surfaces =
+      %AgentSurfaces{}
+      |> AgentSurfaces.activate_edit(first_edit)
+      |> AgentSurfaces.activate_edit(second_edit)
+
+    updated = AgentSurfaces.append_edit_proposal(surfaces, first_session, "first")
+
+    assert InlineEdit.active(AgentSurfaces.edits(updated), first_buffer).proposed_rewrite ==
+             "first"
+
+    assert InlineEdit.active(AgentSurfaces.edits(updated), second_buffer) == second_edit
+    assert AgentSurfaces.append_edit_proposal(updated, missing_session, "missing") == updated
   end
 
   defp ask(buffer) do

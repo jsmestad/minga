@@ -860,7 +860,7 @@ defmodule MingaEditor.Agent.Events do
 
       then(state, fn root ->
         shell_state =
-          MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Traditional.State.install_tab_bar(
             MingaEditor.Shell.Runtime.state(root.shell_runtime),
             tb
           )
@@ -902,7 +902,7 @@ defmodule MingaEditor.Agent.Events do
 
       then(state, fn root ->
         shell_state =
-          MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Traditional.State.install_tab_bar(
             MingaEditor.Shell.Runtime.state(root.shell_runtime),
             tb
           )
@@ -952,7 +952,10 @@ defmodule MingaEditor.Agent.Events do
   @spec install_tab_bar(EditorState.t(), TabBar.t()) :: EditorState.t()
   defp install_tab_bar(%EditorState{} = state, %TabBar{} = tab_bar) do
     shell_state =
-      MingaEditor.Shell.Traditional.State.set_tab_bar(Runtime.state(state.shell_runtime), tab_bar)
+      MingaEditor.Shell.Traditional.State.install_tab_bar(
+        MingaEditor.Shell.Runtime.state(state.shell_runtime),
+        tab_bar
+      )
 
     %{state | shell_runtime: Runtime.install_traditional_state(state.shell_runtime, shell_state)}
   end

@@ -3,6 +3,9 @@ defmodule MingaEditor.Input.SignatureHelpTest do
 
   alias MingaEditor.SignatureHelp, as: SigHelp
   alias MingaEditor.Input.SignatureHelp, as: SigHelpInput
+  alias MingaEditor.Shell.Traditional.ModalWorkflow
+  alias MingaEditor.Shell.Traditional.SignatureHelpWorkflow
+  alias MingaEditor.State.ModalOverlay.Conflict, as: ConflictPayload
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -28,6 +31,18 @@ defmodule MingaEditor.Input.SignatureHelpTest do
     test "passes through" do
       state = base_state()
       assert {:passthrough, ^state} = SigHelpInput.handle_key(state, ?a, 0)
+    end
+  end
+
+  describe "exact workflow values" do
+    test "suppressed signature help rejects a legacy map" do
+      state = base_state()
+      buffer = state.workspace.buffers.active
+      state = ModalWorkflow.open(state, {:conflict, ConflictPayload.new(buffer, "/tmp/test.ex")})
+
+      assert_raise FunctionClauseError, fn ->
+        invoke(SignatureHelpWorkflow, :show, [state, %{signatures: []}])
+      end
     end
   end
 
@@ -58,4 +73,8 @@ defmodule MingaEditor.Input.SignatureHelpTest do
       assert new_state.shell_runtime.state.signature_help != nil
     end
   end
+
+  # The indirection lets runtime boundary tests pass intentionally invalid typed values.
+  # credo:disable-for-next-line Credo.Check.Refactor.Apply
+  defp invoke(module, function, arguments), do: apply(module, function, arguments)
 end

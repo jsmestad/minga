@@ -47,7 +47,7 @@ defmodule MingaEditor.CompletionAsyncTest do
     owner = EditorState.tab_bar(state).active_id
     trigger = %{CompletionTrigger.new() | gen: gen}
     payload = CompletionPayload.new(owner, completion: completion, trigger: trigger)
-    ModalWorkflow.open(state, :completion, payload)
+    ModalWorkflow.open(state, {:completion, payload})
   end
 
   defp labels(%Completion{filtered: filtered}), do: Enum.map(filtered, & &1.label)
@@ -204,7 +204,7 @@ defmodule MingaEditor.CompletionAsyncTest do
         }
 
         payload = CompletionPayload.new(owner, trigger: trigger)
-        ModalWorkflow.open(state, :completion, payload)
+        ModalWorkflow.open(state, {:completion, payload})
       end)
     end
 

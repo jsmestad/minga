@@ -21,6 +21,9 @@ defmodule MingaEditor.FocusTree do
   alias MingaEditor.Layout.OverlayBand
   alias MingaEditor.SignatureHelp
   alias MingaEditor.SignatureHelp.Presenter, as: SignatureHelpPresenter
+  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Frontend, as: FrontendState
+  alias MingaEditor.RenderPipeline.Input, as: RenderInput
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.UI.Picker, as: PickerData
   alias MingaEditor.Viewport
@@ -608,17 +611,25 @@ defmodule MingaEditor.FocusTree do
     {first_row, 0, cols, height}
   end
 
-  @spec completion_render_opts(map(), Layout.t()) :: CompletionUI.render_opts()
+  @spec completion_render_opts(EditorState.t() | RenderInput.t(), Layout.t()) ::
+          CompletionUI.render_opts()
   defp completion_render_opts(state, layout) do
     {cursor_row, cursor_col} = cursor_screen_pos(state, layout)
+    viewport = terminal_viewport(state)
 
     %{
       cursor_row: cursor_row,
       cursor_col: cursor_col,
-      viewport_rows: state.frontend.terminal_viewport.rows,
-      viewport_cols: state.frontend.terminal_viewport.cols
+      viewport_rows: viewport.rows,
+      viewport_cols: viewport.cols
     }
   end
+
+  @spec terminal_viewport(EditorState.t() | RenderInput.t()) :: Viewport.t()
+  defp terminal_viewport(%EditorState{frontend: %FrontendState{terminal_viewport: viewport}}),
+    do: viewport
+
+  defp terminal_viewport(%RenderInput{terminal_viewport: viewport}), do: viewport
 
   @spec cursor_screen_pos(map(), Layout.t()) :: {non_neg_integer(), non_neg_integer()}
   defp cursor_screen_pos(%{workspace: %{buffers: %{active: buf}}} = state, layout)
@@ -638,14 +649,16 @@ defmodule MingaEditor.FocusTree do
 
   defp cursor_screen_pos(_state, _layout), do: {0, 0}
 
-  @spec cursor_origin(map(), Layout.t()) ::
+  @spec cursor_origin(EditorState.t() | RenderInput.t(), Layout.t()) ::
           {integer(), integer(), non_neg_integer(), non_neg_integer()}
   defp cursor_origin(state, layout) do
     with %{content: {row, col, _width, _height}} <- active_window_layout(layout, state),
          %{viewport: viewport} <- active_window(state) do
       {row, col, viewport.top, viewport.left}
     else
-      _ -> {0, 0, state.frontend.terminal_viewport.top, state.frontend.terminal_viewport.left}
+      _ ->
+        viewport = terminal_viewport(state)
+        {0, 0, viewport.top, viewport.left}
     end
   end
 

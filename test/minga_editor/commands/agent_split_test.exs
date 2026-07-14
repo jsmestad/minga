@@ -79,7 +79,7 @@ defmodule MingaEditor.Commands.AgentSplitTest do
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),
-          MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Traditional.State.install_tab_bar(
             MingaEditor.Shell.Traditional.State.replace_agent(
               %MingaEditor.Shell.Traditional.State{},
               agent

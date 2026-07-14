@@ -110,7 +110,7 @@ defmodule MingaEditor.PromptUITest do
 
       state =
         base_state()
-        |> ModalWorkflow.open(:picker, PickerPayload.new(picker_struct))
+        |> ModalWorkflow.open({:picker, PickerPayload.new(picker_struct)})
         |> PromptUI.open(TestHandler)
 
       assert prompt_state(state).handler == TestHandler
