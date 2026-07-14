@@ -99,6 +99,7 @@ private struct PaneWidthKey: PreferenceKey {
 
 enum ContentViewFrameProbePoint: Hashable {
     case shell
+    case fileTree
     case editor
     case editorOverlay
     case extensionOverlay
@@ -106,7 +107,7 @@ enum ContentViewFrameProbePoint: Hashable {
 }
 
 struct ContentViewFrameProbe {
-    let makeView: (ContentViewFrameProbePoint, AnyObject) -> AnyView
+    let makeView: (ContentViewFrameProbePoint, String, AnyObject) -> AnyView
 }
 
 private struct ShellFramePresentationHost<Content: View>: View {
@@ -235,7 +236,11 @@ private struct EditorOverlayHost<ExtensionContent: View>: View {
                 anchoredOverlay(row: input.completionState.anchorRow, col: input.completionState.anchorCol, preferredSide: .below, maxHeight: 420, gap: 2) { _ in
                     CompletionOverlay(state: input.completionState, encoder: encoder)
                         .background {
-                            probe(.editorOverlay, stateObject: input.completionState)
+                            probe(
+                                .editorOverlay,
+                                value: input.completionState.items.map(\.label).joined(separator: ","),
+                                stateObject: input.completionState
+                            )
                         }
                 }
                 .zIndex(30)
@@ -249,9 +254,9 @@ private struct EditorOverlayHost<ExtensionContent: View>: View {
     }
 
     @ViewBuilder
-    private func probe(_ point: ContentViewFrameProbePoint, stateObject: AnyObject) -> some View {
+    private func probe(_ point: ContentViewFrameProbePoint, value: String, stateObject: AnyObject) -> some View {
         if let frameProbe {
-            frameProbe.makeView(point, stateObject)
+            frameProbe.makeView(point, value, stateObject)
         }
     }
 
@@ -563,9 +568,9 @@ public struct ContentView<EditorSurface: View>: View {
     }
 
     @ViewBuilder
-    private func frameProbeView(_ point: ContentViewFrameProbePoint, stateObject: AnyObject) -> some View {
+    private func frameProbeView(_ point: ContentViewFrameProbePoint, value: String, stateObject: AnyObject) -> some View {
         if let frameProbe {
-            frameProbe.makeView(point, stateObject)
+            frameProbe.makeView(point, value, stateObject)
         }
     }
 
@@ -710,7 +715,11 @@ public struct ContentView<EditorSurface: View>: View {
                             encoder: encoder
                         )
                         .background {
-                            frameProbeView(.shell, stateObject: input.tabBarState)
+                            frameProbeView(
+                                .shell,
+                                value: input.tabBarState.displayTabs.map(\.label).joined(separator: ","),
+                                stateObject: input.tabBarState
+                            )
                         }
                         .accessibilityIdentifier("workspace-tabbar")
                     } else {
@@ -806,7 +815,8 @@ public struct ContentView<EditorSurface: View>: View {
                     projectName: projectName(input),
                     gitBranch: input.statusBarState.gitBranch,
                     leadingPadding: titleBarLeadingPadding,
-                    sidebarWidth: $sidebarWidth
+                    sidebarWidth: $sidebarWidth,
+                    frameProbe: frameProbe
                 )
             }
         }
@@ -954,7 +964,11 @@ public struct ContentView<EditorSurface: View>: View {
                     encoder: encoder
                 )
                 .background {
-                    frameProbeView(.editor, stateObject: input.emptyStateState)
+                    frameProbeView(
+                        .editor,
+                        value: input.emptyStateState.sections.flatMap(\.items).map(\.label).joined(separator: ","),
+                        stateObject: input.emptyStateState
+                    )
                 }
             }
 
@@ -1031,7 +1045,11 @@ public struct ContentView<EditorSurface: View>: View {
                     rowCount: geometry?.textRect.height ?? 0
                 )
                 .background {
-                    frameProbeView(.extensionOverlay, stateObject: input.extensionOverlayState)
+                    frameProbeView(
+                        .extensionOverlay,
+                        value: input.extensionOverlayState.entries.map(\.content).joined(separator: ","),
+                        stateObject: input.extensionOverlayState
+                    )
                 }
             }
         }
@@ -1212,7 +1230,11 @@ public struct ContentView<EditorSurface: View>: View {
             encoder: encoder
         )
         .background {
-            frameProbeView(.windowOverlay, stateObject: input.pickerState)
+            frameProbeView(
+                .windowOverlay,
+                value: input.pickerState.items.map(\.label).joined(separator: ","),
+                stateObject: input.pickerState
+            )
         }
 
         ToolManagerView(

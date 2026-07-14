@@ -41,7 +41,20 @@ public struct SidebarContainer: View {
         self.gitBranch = gitBranch
         self.leadingPadding = leadingPadding
         self._sidebarWidth = sidebarWidth
+        frameProbe = nil
     }
+
+    init(input: ShellHostInput, activeSidebar: SidebarItem, encoder: InputEncoder? = nil, projectName: String, gitBranch: String, leadingPadding: CGFloat, sidebarWidth: Binding<CGFloat>, frameProbe: ContentViewFrameProbe?) {
+        self.input = input
+        self.activeSidebar = activeSidebar
+        self.encoder = encoder
+        self.projectName = projectName
+        self.gitBranch = gitBranch
+        self.leadingPadding = leadingPadding
+        self._sidebarWidth = sidebarWidth
+        self.frameProbe = frameProbe
+    }
+
     public let input: ShellHostInput
     public let activeSidebar: SidebarItem
     @Environment(\.themeColors) private var theme
@@ -51,6 +64,7 @@ public struct SidebarContainer: View {
     public let gitBranch: String
     public let leadingPadding: CGFloat
     @Binding public var sidebarWidth: CGFloat
+    let frameProbe: ContentViewFrameProbe?
 
     @State private var isDraggingResize: Bool = false
     @State private var dragStartWidth: CGFloat = 0
@@ -77,7 +91,8 @@ public struct SidebarContainer: View {
             encoder: encoder,
             projectName: projectName,
             gitBranch: gitBranch,
-            leadingPadding: leadingPadding
+            leadingPadding: leadingPadding,
+            frameProbe: frameProbe
         )
     }
 

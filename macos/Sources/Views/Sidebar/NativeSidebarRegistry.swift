@@ -12,13 +12,26 @@ public struct NativeSidebarContext {
         self.projectName = projectName
         self.gitBranch = gitBranch
         self.leadingPadding = leadingPadding
+        frameProbe = nil
     }
+
+    init(input: ShellHostInput, theme: ThemeColors, encoder: InputEncoder? = nil, projectName: String, gitBranch: String, leadingPadding: CGFloat, frameProbe: ContentViewFrameProbe?) {
+        self.input = input
+        self.theme = theme
+        self.encoder = encoder
+        self.projectName = projectName
+        self.gitBranch = gitBranch
+        self.leadingPadding = leadingPadding
+        self.frameProbe = frameProbe
+    }
+
     public let input: ShellHostInput
     public let theme: ThemeColors
     public let encoder: InputEncoder?
     public let projectName: String
     public let gitBranch: String
     public let leadingPadding: CGFloat
+    let frameProbe: ContentViewFrameProbe?
 }
 
 /// Compiled-in adapter for one semantic sidebar kind.
@@ -72,7 +85,16 @@ public enum NativeSidebarRegistry {
             AnyView(FileTreeView(
                 fileTreeState: context.input.fileTreeState,
                 encoder: context.encoder
-            ))
+            )
+            .background {
+                if let frameProbe = context.frameProbe {
+                    frameProbe.makeView(
+                        .fileTree,
+                        context.input.fileTreeState.entries.first(where: \.isSelected)?.name ?? "",
+                        context.input.fileTreeState
+                    )
+                }
+            })
         },
         sendPrimaryAction: { encoder, item, isActive in
             encoder?.sendSidebarAction(sidebarId: item.id, kind: item.semanticKind, action: isActive ? "toggle" : "activate")

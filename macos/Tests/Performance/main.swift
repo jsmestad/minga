@@ -136,6 +136,14 @@ private func processCPUTimeNanoseconds() -> UInt64 {
     clock_gettime_nsec_np(CLOCK_PROCESS_CPUTIME_ID)
 }
 
+private func requireInteractiveQoS() {
+    let result = pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0)
+    guard result == 0 else {
+        FileHandle.standardError.write(Data("error: unable to set interactive benchmark QoS (\(result))\n".utf8))
+        exit(2)
+    }
+}
+
 private func elapsedMs(_ body: () throws -> Void) rethrows -> Double {
     let start = processCPUTimeNanoseconds()
     try body()
@@ -201,6 +209,8 @@ guard CommandLine.arguments.count == 2 else {
     FileHandle.standardError.write(Data("usage: minga-render-performance <baseline.json>\n".utf8))
     exit(2)
 }
+
+requireInteractiveQoS()
 
 private let fixture = try Fixture.make()
 var sink: UInt64 = 0

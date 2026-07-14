@@ -6,9 +6,11 @@ defmodule Minga.MacOSLauncherTest do
   @tui_wrapper Path.expand("../../macos/Resources/bin/minga-tui", __DIR__)
 
   setup do
+    tmp_dir = File.cd!(System.tmp_dir!(), &File.cwd!/0)
+
     root =
       Path.join(
-        System.tmp_dir!(),
+        tmp_dir,
         "minga-macos-launcher-#{System.unique_integer([:positive, :monotonic])}"
       )
 

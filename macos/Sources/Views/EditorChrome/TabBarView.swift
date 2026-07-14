@@ -40,7 +40,6 @@ public struct TabBarView: View {
     }
     public let tabBarState: TabBarState
     @Environment(\.themeColors) private var theme
-    @Environment(\.guiFrameVersion) private var frameVersion
     public let encoder: InputEncoder?
 
     @State private var hoverTabId: UInt32?
@@ -56,7 +55,6 @@ public struct TabBarView: View {
     private let swipeThreshold: CGFloat = 80
 
     public var body: some View {
-        let _ = frameVersion
         // Collapse the whole strip when there are no tabs (e.g. the launchpad
         // empty state). Otherwise the nav/new-tab/split controls render a
         // phantom bar over an editor with nothing open.
