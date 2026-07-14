@@ -18,6 +18,7 @@ public struct EmptyStateView: View {
 
     public let state: EmptyStateState
     @Environment(\.themeColors) private var theme
+    @Environment(\.guiFrameVersion) private var frameVersion
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     public let encoder: InputEncoder?
 
@@ -32,6 +33,7 @@ public struct EmptyStateView: View {
     private let nerdFont = "Symbols Nerd Font Mono"
 
     public var body: some View {
+        let _ = frameVersion
         ZStack {
             // Solid backdrop so the hidden Metal surface never shows through.
             theme.editorBg

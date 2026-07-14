@@ -200,6 +200,89 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.tabBarState.activeIndex == 0)
     }
 
+    @Test("canonical chrome payloads keep compatibility mirrors in presentation parity")
+    @MainActor func canonicalChromeCompatibilityParity() {
+        let (dispatcher, gui) = makeDispatcher()
+        let workspaces = [
+            Wire.WorkspaceEntry(
+                id: 7, kind: 1, status: 0, flags: 0,
+                colorR: 0x11, colorG: 0x22, colorB: 0x33,
+                tabCount: 1, draftCount: 0, conflictCount: 0,
+                runningBackgroundCount: 0, label: "Review", icon: "cpu"
+            )
+        ]
+        let workspaceTabs = [
+            Wire.WorkspaceTabEntry(
+                id: 42, workspaceId: 7, kind: 0, flags: 0,
+                pathHash: 42, tintColorRGB: 0, icon: "", label: "review.ex",
+                path: "/tmp/review.ex"
+            )
+        ]
+
+        dispatcher.applyForTesting(.guiWorkspaces(
+            version: 1,
+            activeWorkspaceId: 7,
+            mode: 1,
+            flags: 0,
+            workspaces: workspaces,
+            visibleTabs: workspaceTabs
+        ))
+        dispatcher.applyForTesting(.guiSidebars(
+            version: 1,
+            activeId: "file_tree",
+            sidebars: [Wire.SidebarMetadata(
+                id: "file_tree",
+                displayName: "File Tree",
+                semanticKind: "file_tree",
+                icon: "folder",
+                order: 10,
+                visible: true,
+                focused: true,
+                preferredWidth: 30,
+                badgeCount: nil
+            )]
+        ))
+        dispatcher.applyForTesting(.guiFileTree(
+            version: 1,
+            treeFlags: 0x03,
+            treeState: FileTreeVisibilityState.ready.rawValue,
+            selectedId: "",
+            treeWidth: 30,
+            rootPath: "/tmp",
+            errorReason: "",
+            entries: []
+        ))
+        dispatcher.applyForTesting(.guiStatusBar(StatusBarUpdate(
+            contentKind: 0, mode: 0, cursorLine: 1, cursorCol: 1, lineCount: 1,
+            flags: 0x02, lspStatus: 0, gitBranch: "feature/publication",
+            message: "", filetype: "elixir", errorCount: 0, warningCount: 0,
+            modelName: "", messageCount: 0, sessionStatus: 0, infoCount: 0,
+            hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
+            gitAdded: 0, gitModified: 0, gitDeleted: 0, icon: "",
+            iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "",
+            diagnosticHint: "", backgroundSubagentCount: 0,
+            backgroundSubagentLabel: ""
+        )))
+        dispatcher.applyForTesting(.guiGitStatus(
+            repoState: 0,
+            syncing: false,
+            ahead: 0,
+            behind: 0,
+            branchName: "feature/publication",
+            entries: [],
+            toast: nil,
+            entryBasePath: "/tmp",
+            lastCommitMessage: "",
+            stashCount: 0
+        ))
+
+        #expect(gui.workspaceState.activeWorkspaceId == gui.tabBarState.activeWorkspaceId)
+        #expect(gui.workspaceState.visibleTabs.map(\.id) == gui.tabBarState.displayTabs.map(\.id))
+        #expect(gui.sidebarHostState.activeSidebar?.semanticKind == "file_tree")
+        #expect(gui.fileTreeState.visible)
+        #expect(gui.statusBarState.gitBranch == gui.gitStatusState.branchName)
+    }
+
     @Test("guiObservatory updates observatoryState")
     @MainActor func guiObservatoryRouting() throws {
         let (dispatcher, gui) = makeDispatcher()

@@ -26,6 +26,7 @@ public struct AgentChatView: View {
     }
     public let state: AgentChatState
     @Environment(\.themeColors) private var theme
+    @Environment(\.guiFrameVersion) private var frameVersion
     public let isInsertMode: Bool
     public let encoder: InputEncoder?
     /// Cell dimensions from the Metal renderer, used to size the prompt gap.
@@ -40,6 +41,7 @@ public struct AgentChatView: View {
     private var shouldAutoScroll: Bool { !userHasScrolledUp }
 
     public var body: some View {
+        let _ = frameVersion
         VStack(spacing: 0) {
             // Header bar
             AgentChatHeaderView(state: state, encoder: encoder)

@@ -9,6 +9,7 @@ public struct ObservatoryView: View {
     }
     public let state: ObservatoryState
     @Environment(\.themeColors) private var theme
+    @Environment(\.guiFrameVersion) private var frameVersion
     public let encoder: InputEncoder?
 
     @State private var expandedNodeIds: Set<String> = []
@@ -16,6 +17,7 @@ public struct ObservatoryView: View {
     @State private var hasInitializedExpansion = false
 
     public var body: some View {
+        let _ = frameVersion
         VStack(spacing: 0) {
             header
             Divider().overlay(theme.treeSeparatorFg.opacity(0.4))

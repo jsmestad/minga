@@ -2756,8 +2756,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   Parity oracle / future wiring (#2119): this opcode has no live BEAM emitter.
   The macOS frontend has a fully wired decode -> `ToolManagerState` -> `ToolManagerView`
   path designed to be BEAM-driven, but the BEAM half (a semantic tool-manager
-  model and emission) was never built, and building it is out of scope here and
-  blocked by the semantic-surface freeze. Rather than orphan the frontend decoder
+  model and emission) was never built. Rather than orphan the frontend decoder
   and break the GUI protocol round-trip tests, this encoder is retained as the
   byte-for-byte parity oracle until a tool-manager feature is built on the
   semantic path. The `gui_protocol_test.exs` round-trip suite exercises it.

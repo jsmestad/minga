@@ -46,6 +46,7 @@ public struct StatusBarView: View {
     public let state: StatusBarState
     public var feedbackState: FeedbackState?
     @Environment(\.themeColors) private var theme
+    @Environment(\.guiFrameVersion) private var frameVersion
     public let encoder: InputEncoder?
     public var isFileTreeVisible: Bool = false
     public var isGitStatusVisible: Bool = false
@@ -60,6 +61,7 @@ public struct StatusBarView: View {
     private let maxCenterStatusWidth: CGFloat = 320
 
     public var body: some View {
+        let _ = frameVersion
         GeometryReader { proxy in
             let layout = modelineLayout(totalWidth: proxy.size.width)
 

@@ -891,22 +891,6 @@ Render and command code selects the semantic path with `Capabilities.semantic_ui
 
 When adding chrome data (diagnostic counts, indent info, selection size, etc.), design the semantic model fields first, extend the wire format in `docs/PROTOCOL.md` / `docs/GUI_PROTOCOL.md`, update the adapter encoder and `gui_protocol_test.exs`, then ensure each frontend that should display it decodes and renders the new fields. Cross-frontend coverage (macOS SwiftUI, Charm/Go TUI) is tracked in the Semantic UI inventory (#2113); forgetting to update a frontend is a common mistake.
 
-### Semantic-surface freeze (in effect)
-
-The semantic UI protocol surface is frozen while the frontend remediation epics are in flight. Until [#2216](https://github.com/jsmestad/minga/issues/2216) (Go-only TUI), [#2218](https://github.com/jsmestad/minga/issues/2218) (semantic-only paradigm), and [#2219](https://github.com/jsmestad/minga/issues/2219) (transactional, layout-authoritative, fully generated protocol) are complete, do not add:
-
-- new semantic UI opcodes to `docs/protocol_schema.toml`,
-- new semantic surface payload types or `Minga.RenderModel.UI.*` chrome models,
-- new chrome message types for agent or extension features.
-
-Every new surface multiplies across every frontend decoder and renderer and expands the exact contract those epics are stabilizing.
-
-**Exemptions:** bug fixes to existing surfaces, and protocol changes required by #2218 or #2219 themselves (opcode retirement, frame transactions, rect/z fields, codegen).
-
-**Enforcement:** reviewers and ticket runners treat a PR that adds a new opcode or semantic surface during the freeze as a blocker unless the PR cites one of the exemptions. If a feature genuinely needs a new surface before the freeze lifts, it needs an explicit user decision on the ticket, not a reviewer waiver.
-
-The freeze lifts when all three linked epics are closed. Remove this section at that point.
-
 ### New command
 1. Add the command to the appropriate `Commands.*` sub-module's `__commands__/0` (implements `Minga.Command.Provider` behaviour). Include name, description, `requires_buffer` flag, and execute function. If no existing sub-module fits, create a new one and add it to the `@command_modules` list in `Minga.Command.Registry`.
 2. Add keybinding in `Minga.Keymap.Defaults`

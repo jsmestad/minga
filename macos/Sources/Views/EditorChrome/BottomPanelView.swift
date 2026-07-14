@@ -14,6 +14,7 @@ public struct BottomPanelView: View {
     }
     public let state: BottomPanelState
     @Environment(\.themeColors) private var theme
+    @Environment(\.guiFrameVersion) private var frameVersion
     public let encoder: InputEncoder?
     /// Total height of the right pane (tab bar + editor + panel + status bar).
     /// Used to cap the panel at 60% of available space. Measured by the parent
@@ -30,6 +31,7 @@ public struct BottomPanelView: View {
     @State private var hoveredTabId: Int? = nil
 
     public var body: some View {
+        let _ = frameVersion
         let maxH = availableHeight * maxHeightFraction
         let panelH = min(max(state.userHeight, minHeight), maxH)
 

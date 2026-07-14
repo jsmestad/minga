@@ -13,6 +13,7 @@ public struct WhichKeyOverlay: View {
     }
     public let state: WhichKeyState
     @Environment(\.themeColors) private var theme
+    @Environment(\.guiFrameVersion) private var frameVersion
 
     private let columnWidth: CGFloat = 220
     private let rowHeight: CGFloat = 22
@@ -25,6 +26,7 @@ public struct WhichKeyOverlay: View {
     }
 
     public var body: some View {
+        let _ = frameVersion
         if state.visible && !state.bindings.isEmpty {
             VStack(spacing: 0) {
                 // Prefix header
