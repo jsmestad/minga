@@ -51,7 +51,7 @@ public struct RenderPerformanceBaseline: Codable, Equatable, Sendable {
     }
 }
 
-/// Percentile measurements emitted by one optimized native harness run.
+/// Percentile measurements emitted by one optimized native harness batch or aggregate.
 public struct RenderPerformanceMeasurement: Codable, Equatable, Sendable {
     /// Median decode plus semantic-apply duration.
     public let decodeApplyP50Ms: Double
@@ -79,6 +79,14 @@ public struct RenderPerformanceMeasurement: Codable, Equatable, Sendable {
     }
 }
 
+/// Validation failures while aggregating independent optimized-harness batches.
+public enum RenderPerformanceAggregationError: Error, Equatable, Sendable {
+    /// The harness must provide exactly the configured odd batch count.
+    case invalidBatchCount(expected: Int, actual: Int)
+    /// Every percentile in every source batch must be finite and greater than zero.
+    case invalidBatchMeasurement(index: Int)
+}
+
 /// Fail-closed production policy for optimized native rendering measurements.
 public enum RenderPerformanceGate {
     /// Baseline schema version accepted by the gate.
@@ -93,6 +101,43 @@ public enum RenderPerformanceGate {
     public static let maximumRegressionRatio = 1.20
     /// Minimum absolute allowance for sub-millisecond host scheduling noise.
     public static let minimumRegressionAllowanceMs = 0.05
+    /// Number of independent batches required for the authoritative median aggregate.
+    public static let requiredBatchCount = 5
+
+    /// Aggregates independent batch percentiles by taking each metric's median.
+    public static func aggregate(
+        measurements: [RenderPerformanceMeasurement]
+    ) throws -> RenderPerformanceMeasurement {
+        guard measurements.count == requiredBatchCount else {
+            throw RenderPerformanceAggregationError.invalidBatchCount(
+                expected: requiredBatchCount,
+                actual: measurements.count
+            )
+        }
+
+        for (index, measurement) in measurements.enumerated() {
+            let values = [
+                measurement.decodeApplyP50Ms,
+                measurement.decodeApplyP95Ms,
+                measurement.commandPreparationP50Ms,
+                measurement.commandPreparationP95Ms,
+                measurement.combinedP50Ms,
+                measurement.combinedP95Ms
+            ]
+            guard values.allSatisfy({ $0.isFinite && $0 > 0 }) else {
+                throw RenderPerformanceAggregationError.invalidBatchMeasurement(index: index)
+            }
+        }
+
+        return RenderPerformanceMeasurement(
+            decodeApplyP50Ms: median(measurements.map(\.decodeApplyP50Ms)),
+            decodeApplyP95Ms: median(measurements.map(\.decodeApplyP95Ms)),
+            commandPreparationP50Ms: median(measurements.map(\.commandPreparationP50Ms)),
+            commandPreparationP95Ms: median(measurements.map(\.commandPreparationP95Ms)),
+            combinedP50Ms: median(measurements.map(\.combinedP50Ms)),
+            combinedP95Ms: median(measurements.map(\.combinedP95Ms))
+        )
+    }
 
     /// Returns every policy or baseline validation failure for one measurement.
     public static func failures(measurement: RenderPerformanceMeasurement,
@@ -148,6 +193,10 @@ public enum RenderPerformanceGate {
         if measured > relative {
             failures.append("\(stage) p95 \(format(measured))ms exceeds relative limit \(format(relative))ms (\(format(maximumRegressionRatio))x baseline or +\(format(minimumRegressionAllowanceMs))ms noise allowance)")
         }
+    }
+
+    private static func median(_ values: [Double]) -> Double {
+        values.sorted()[values.count / 2]
     }
 
     private static func format(_ value: Double) -> String { String(format: "%.2f", value) }

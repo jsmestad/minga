@@ -45,6 +45,66 @@ struct RenderPerformanceGateTests {
             .contains { $0.contains("noise allowance") })
     }
 
+    @Test("two noisy batches do not fail the median aggregate")
+    func minorityNoisyBatchesPass() throws {
+        let good = batch(decode: 1.0, command: 1.0, combined: 2.0)
+        let noisy = batch(decode: 2.0, command: 2.0, combined: 4.0)
+        let aggregate = try RenderPerformanceGate.aggregate(
+            measurements: [good, noisy, good, noisy, good]
+        )
+
+        #expect(RenderPerformanceGate.failures(measurement: aggregate, baseline: baseline).isEmpty)
+    }
+
+    @Test("three regressed batches fail the median aggregate")
+    func majorityRegressedBatchesFail() throws {
+        let good = batch(decode: 1.0, command: 1.0, combined: 2.0)
+        let regressed = batch(decode: 2.0, command: 2.0, combined: 4.0)
+        let aggregate = try RenderPerformanceGate.aggregate(
+            measurements: [regressed, good, regressed, good, regressed]
+        )
+        let failures = RenderPerformanceGate.failures(measurement: aggregate, baseline: baseline)
+
+        #expect(failures.contains { $0.contains("decode_apply") })
+        #expect(failures.contains { $0.contains("command_preparation") })
+        #expect(failures.contains { $0.contains("combined") })
+    }
+
+    @Test("each aggregate metric uses its own batch median")
+    func metricsAggregateIndependently() throws {
+        let aggregate = try RenderPerformanceGate.aggregate(measurements: [
+            batch(decode: 1, command: 50, combined: 200),
+            batch(decode: 5, command: 10, combined: 500),
+            batch(decode: 3, command: 40, combined: 100),
+            batch(decode: 2, command: 20, combined: 400),
+            batch(decode: 4, command: 30, combined: 300)
+        ])
+
+        #expect(aggregate.decodeApplyP95Ms == 3)
+        #expect(aggregate.commandPreparationP95Ms == 30)
+        #expect(aggregate.combinedP95Ms == 300)
+    }
+
+    @Test("invalid aggregate input fails closed")
+    func invalidAggregateInput() {
+        #expect(
+            throws: RenderPerformanceAggregationError.invalidBatchCount(expected: 5, actual: 0)
+        ) {
+            try RenderPerformanceGate.aggregate(measurements: [])
+        }
+
+        let invalid = batch(decode: 1, command: 1, combined: 2, decodeP50: .nan)
+        #expect(throws: RenderPerformanceAggregationError.invalidBatchMeasurement(index: 3)) {
+            try RenderPerformanceGate.aggregate(measurements: [
+                batch(decode: 1, command: 1, combined: 2),
+                batch(decode: 1, command: 1, combined: 2),
+                batch(decode: 1, command: 1, combined: 2),
+                invalid,
+                batch(decode: 1, command: 1, combined: 2)
+            ])
+        }
+    }
+
     @Test("exact absolute boundaries pass and the next representable values fail")
     func absoluteBoundaries() {
         let absoluteBaseline = RenderPerformanceBaseline(
@@ -123,6 +183,22 @@ struct RenderPerformanceGateTests {
             combinedP50Ms: 2, combinedP95Ms: 2)
         #expect(RenderPerformanceGate.failures(measurement: invalid, baseline: baseline)
             .contains { $0.contains("measurement command_preparation p95 must be finite and greater than zero") })
+    }
+
+    private func batch(
+        decode: Double,
+        command: Double,
+        combined: Double,
+        decodeP50: Double? = nil
+    ) -> RenderPerformanceMeasurement {
+        RenderPerformanceMeasurement(
+            decodeApplyP50Ms: decodeP50 ?? decode / 2,
+            decodeApplyP95Ms: decode,
+            commandPreparationP50Ms: command / 2,
+            commandPreparationP95Ms: command,
+            combinedP50Ms: combined / 2,
+            combinedP95Ms: combined
+        )
     }
 
     private func failures(stage: Double, combined: Double) -> [String] {
