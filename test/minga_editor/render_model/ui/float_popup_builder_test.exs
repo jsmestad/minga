@@ -3,7 +3,9 @@ defmodule MingaEditor.RenderModel.UI.FloatPopupBuilderTest do
 
   alias Minga.Popup.Rule
   alias Minga.RenderModel.UI.FloatPopup
+  alias MingaEditor.Observatory.Inspection
   alias MingaEditor.RenderModel.UI.FloatPopupBuilder
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.UI.Popup.Active
   alias MingaEditor.Window
 
@@ -21,7 +23,7 @@ defmodule MingaEditor.RenderModel.UI.FloatPopupBuilderTest do
     end
 
     test "builds observatory inspection float popup" do
-      inspection_data = %{
+      inspection_data = %Inspection{
         visible: true,
         title: "Inspect",
         lines: ["line1"],
@@ -29,7 +31,8 @@ defmodule MingaEditor.RenderModel.UI.FloatPopupBuilderTest do
         height: 20
       }
 
-      ctx = build_minimal_context(%{observatory_inspection: inspection_data})
+      shell_state = TraditionalState.inspect_observatory(%TraditionalState{}, inspection_data)
+      ctx = build_minimal_context(shell_state)
 
       model = FloatPopupBuilder.build(ctx)
 
@@ -42,8 +45,9 @@ defmodule MingaEditor.RenderModel.UI.FloatPopupBuilderTest do
     end
 
     test "hidden observatory inspection falls through to float window check" do
-      inspection_data = %{visible: false}
-      ctx = build_minimal_context(%{observatory_inspection: inspection_data})
+      inspection_data = %Inspection{visible: false, title: "", lines: [], width: 1, height: 1}
+      shell_state = TraditionalState.inspect_observatory(%TraditionalState{}, inspection_data)
+      ctx = build_minimal_context(shell_state)
 
       model = FloatPopupBuilder.build(ctx)
 

@@ -8,6 +8,8 @@ defmodule MingaEditor.RenderPipeline.InputTest do
   alias MingaEditor.RenderPipeline.WindowIntent
   alias MingaEditor.Shell.Entry
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.ClickRegions
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
@@ -149,8 +151,10 @@ defmodule MingaEditor.RenderPipeline.InputTest do
         receipt(input, 10, false,
           layout: :rendered_layout,
           focus_tree: focus_tree,
-          modeline_click_regions: [{:modeline, 1}],
-          tab_bar_click_regions: [{:tab, 2}]
+          click_regions: %ClickRegions{
+            modeline: [{0, 1, :modeline}],
+            tab_bar: [{0, 1, :tab}]
+          }
         )
 
       result = integrate_receipt(state, receipt)
@@ -159,8 +163,11 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       assert result.focus_tree == focus_tree
       assert result.workspace.windows == windows
       refute Map.has_key?(Map.from_struct(result), :caches)
-      assert Runtime.state(result.shell_runtime).modeline_click_regions == [{:modeline, 1}]
-      assert Runtime.state(result.shell_runtime).tab_bar_click_regions == [{:tab, 2}]
+
+      assert TraditionalState.click_regions(Runtime.state(result.shell_runtime)) == %ClickRegions{
+               modeline: [{0, 1, :modeline}],
+               tab_bar: [{0, 1, :tab}]
+             }
     end
 
     test "fresh receipt commits renderer-computed viewport observations", %{state: state} do
@@ -311,8 +318,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
           focus_tree: nil,
           shell_id: input.shell_id,
           shell_identity: input.shell_identity,
-          modeline_click_regions: [],
-          tab_bar_click_regions: [],
+          click_regions: %ClickRegions{},
           frame_seq: frame_seq,
           keyframe?: keyframe?,
           render_sent_at: 0,

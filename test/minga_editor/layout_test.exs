@@ -7,6 +7,7 @@ defmodule MingaEditor.LayoutTest do
   alias MingaEditor.Layout
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
+  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
@@ -91,7 +92,7 @@ defmodule MingaEditor.LayoutTest do
     state
     |> EditorState.set_agent_ui(agentic)
     |> EditorState.set_tab_bar(tb)
-    |> EditorState.set_agent(agent)
+    |> AgentAccess.update_agent(fn _current -> agent end)
   end
 
   defp with_vsplit(state) do

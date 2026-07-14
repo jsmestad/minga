@@ -55,11 +55,13 @@ defmodule MingaEditor.RenderPipeline.Input do
   alias MingaEditor.Viewport
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.State.RenderCorrelation
   alias MingaEditor.StatusBar.Data, as: StatusBarData
   alias MingaEditor.Renderer.Caches
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.UI.FontRegistry
   alias MingaEditor.UI.NotificationCenter
   alias MingaEditor.UI.Panel.MessageStore
@@ -317,7 +319,7 @@ defmodule MingaEditor.RenderPipeline.Input do
       # completion)
       input.shell_state |> Map.get(:modal),
       # Agent state (status, pending approval)
-      input.shell_state |> Map.get(:agent),
+      AgentAccess.agent(input),
       # Viewport dimensions (overlay positioning)
       input.terminal_viewport.rows,
       input.terminal_viewport.cols,
@@ -328,11 +330,17 @@ defmodule MingaEditor.RenderPipeline.Input do
       # GUI notification center
       input.notifications,
       # Git status panel
-      input.shell_state |> Map.get(:git_status_panel),
+      git_status_panel(input),
       # Shell-owned chrome state that does not belong in the generic pipeline contract
       input.shell.chrome_fingerprint(input)
     })
   end
+
+  @spec git_status_panel(t()) :: MingaEditor.GitStatus.Panel.t() | nil
+  defp git_status_panel(%__MODULE__{shell_state: %TraditionalState{} = shell_state}),
+    do: TraditionalState.git_status_panel(shell_state)
+
+  defp git_status_panel(%__MODULE__{}), do: nil
 
   @spec status_bar_fingerprint(t()) :: integer()
   defp status_bar_fingerprint(%__MODULE__{} = input) do

@@ -1,22 +1,31 @@
 defmodule MingaEditor.Agent.Events do
   @moduledoc """
-  Handles agent session events, updating EditorState directly.
+  Handles agent session events and owns their external actions.
 
-  Agent events (status changes, deltas, tool activity, errors) arrive
-  from the agent session process. Each handler reads and writes the
-  `agent` and `agentic` fields on EditorState through AgentAccess,
-  returning the updated state and a list of effects for the Editor
-  GenServer to apply.
+  Live events and durable replay both enter `dispatch/2`; coalesced live
+  streaming enters `dispatch_batch/2`. State transitions happen first and the
+  resulting focused actions are interpreted in list order by the Editor
+  process. Rendering, transcript synchronization, tab labels, styled caches,
+  logging, and compaction therefore share one workflow.
+
+  The caller correlates events to the active session before dispatch. Durable
+  replay is already ordered and bounded; stale live sessions are routed to the
+  background shell instead. Compaction is admitted to its session-keyed typed
+  effect, whose scheduler-supervised outcome applies transcript/toast state
+  only while that session remains current. Render and log failures retain their
+  existing subsystem policy.
   """
 
   alias Minga.Distribution.ConnectionManager
   alias Minga.Project.FileRef
   alias MingaEditor.Agent.Activity
+  alias MingaEditor.Agent.Compaction
   alias MingaEditor.Agent.DiffReview
   alias MingaEditor.Agent.EditTimeline
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.View.Preview
+  alias MingaEditor.AgentLifecycle
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
@@ -37,9 +46,24 @@ defmodule MingaEditor.Agent.Events do
           | {:render, pos_integer()}
           | {:log_message, String.t()}
           | {:log_warning, String.t()}
+          | {:log, atom(), :debug | :info | :warning | :error, String.t()}
           | :sync_agent_transcript
           | {:update_tab_label, String.t()}
           | {:compact_session, pid()}
+
+  @doc "Applies one agent event and its focused actions, returning final editor state."
+  @spec dispatch(EditorState.t(), term()) :: EditorState.t()
+  def dispatch(%EditorState{} = state, event) do
+    {state, effects} = handle(state, event)
+    apply_effects(state, effects)
+  end
+
+  @doc "Applies one coalesced agent stream batch and its focused actions."
+  @spec dispatch_batch(EditorState.t(), [term()]) :: EditorState.t()
+  def dispatch_batch(%EditorState{} = state, batch) when is_list(batch) do
+    {state, effects} = handle_batch(state, batch)
+    apply_effects(state, effects)
+  end
 
   @spec handle(EditorState.t(), term()) :: {EditorState.t(), [effect()]}
 
@@ -343,38 +367,6 @@ defmodule MingaEditor.Agent.Events do
     {state, [{:render, 16}]}
   end
 
-  def handle(state, {:compact_result, {:ok, summary}}) do
-    state =
-      AgentAccess.update_view(state, fn v -> %{v | compaction_in_progress: false} end)
-
-    case AgentAccess.session(state) do
-      pid when is_pid(pid) ->
-        Session.add_system_message(pid, "Context auto-compacted: #{summary}")
-
-      _ ->
-        :ok
-    end
-
-    state =
-      AgentAccess.update_agent_ui(state, fn ui ->
-        UIState.push_toast(ui, "Context compacted", :info)
-      end)
-
-    {state, [:render, :sync_agent_transcript]}
-  end
-
-  def handle(state, {:compact_result, {:error, reason}}) do
-    state =
-      AgentAccess.update_view(state, fn v -> %{v | compaction_in_progress: false} end)
-
-    state =
-      AgentAccess.update_agent_ui(state, fn ui ->
-        UIState.push_toast(ui, "Auto-compact failed: #{inspect(reason)}", :error)
-      end)
-
-    {state, [:render]}
-  end
-
   def handle(state, _unknown) do
     {state, []}
   end
@@ -407,6 +399,49 @@ defmodule MingaEditor.Agent.Events do
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
+
+  @spec apply_effects(EditorState.t(), [effect()]) :: EditorState.t()
+  defp apply_effects(state, []), do: state
+
+  defp apply_effects(state, [effect | rest]) do
+    state = apply_effect(state, effect)
+    apply_effects(state, rest)
+  end
+
+  @spec apply_effect(EditorState.t(), effect()) :: EditorState.t()
+  defp apply_effect(state, :render), do: MingaEditor.schedule_render(state, 16)
+
+  defp apply_effect(state, {:render, delay_ms}),
+    do: MingaEditor.schedule_render(state, delay_ms)
+
+  defp apply_effect(state, {:log_message, message}) do
+    Minga.Log.info(:editor, message)
+    state
+  end
+
+  defp apply_effect(state, {:log_warning, message}) do
+    Minga.Log.warning(:editor, message)
+    state
+  end
+
+  defp apply_effect(state, {:log, subsystem, level, message}) do
+    log(subsystem, level, message)
+    state
+  end
+
+  defp apply_effect(state, :sync_agent_transcript), do: AgentLifecycle.sync_transcript(state)
+
+  defp apply_effect(state, {:update_tab_label, _label}),
+    do: AgentLifecycle.maybe_update_tab_label(state)
+
+  defp apply_effect(state, {:compact_session, session_pid}),
+    do: Compaction.schedule(state, session_pid)
+
+  @spec log(atom(), :debug | :info | :warning | :error, String.t()) :: :ok
+  defp log(subsystem, :debug, message), do: Minga.Log.debug(subsystem, message)
+  defp log(subsystem, :info, message), do: Minga.Log.info(subsystem, message)
+  defp log(subsystem, :warning, message), do: Minga.Log.warning(subsystem, message)
+  defp log(subsystem, :error, message), do: Minga.Log.error(subsystem, message)
 
   @spec update_activity(EditorState.t(), (Activity.t() -> Activity.t())) :: EditorState.t()
   defp update_activity(state, fun) when is_function(fun, 1) do

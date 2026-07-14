@@ -63,8 +63,7 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
   defp get_activity_from_state(state), do: AgentAccess.view(state).activity
 
   @spec agent_status(Context.t()) :: atom()
-  defp agent_status(%{shell_state: %{agent: %{runtime: %{status: status}}}}), do: status
-  defp agent_status(_ctx), do: :idle
+  defp agent_status(%Context{} = ctx), do: AgentAccess.agent(ctx).runtime.status
 
   @spec agent_status_from_state(map()) :: atom()
   defp agent_status_from_state(state), do: AgentAccess.agent(state).runtime.status
@@ -97,8 +96,7 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
   defp context_status(_status, false), do: :idle
 
   @spec can_approve?(Context.t()) :: boolean()
-  defp can_approve?(%{shell_state: %{agent: %{pending_approval: approval}}}), do: approval != nil
-  defp can_approve?(_ctx), do: false
+  defp can_approve?(%Context{} = ctx), do: AgentAccess.agent(ctx).pending_approval != nil
 
   @spec progress(Activity.t()) :: Progress.t()
   defp progress(%Activity{} = activity) do

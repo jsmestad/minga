@@ -35,18 +35,17 @@ defmodule MingaEditor.Agent.View.PromptRendererTest do
       spinner_timer: nil
     }
 
-    agentic = %UIState{
-      panel: %UIState.Panel{
-        visible: true,
-        input_focused: Keyword.get(opts, :input_focused, false),
-        credentials_configured: Keyword.get(opts, :credentials_configured, true),
-        prompt_buffer: prompt_buf
-      },
-      view: %UIState.View{
-        active: true,
-        focus: Keyword.get(opts, :focus, :chat)
+    agentic =
+      %UIState{
+        panel: %UIState.Panel{
+          visible: true,
+          input_focused: Keyword.get(opts, :input_focused, false),
+          credentials_configured: Keyword.get(opts, :credentials_configured, true),
+          prompt_buffer: prompt_buf
+        }
       }
-    }
+      |> UIState.activate(nil, nil)
+      |> UIState.set_focus(Keyword.get(opts, :focus, :chat))
 
     %EditorState{
       port_manager: self(),
@@ -61,7 +60,10 @@ defmodule MingaEditor.Agent.View.PromptRendererTest do
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),
-          %MingaEditor.Shell.Traditional.State{agent: agent}
+          MingaEditor.Shell.Traditional.State.replace_agent(
+            %MingaEditor.Shell.Traditional.State{},
+            agent
+          )
         ),
       theme: Theme.get!(:doom_one)
     }

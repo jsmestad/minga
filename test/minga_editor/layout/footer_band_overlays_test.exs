@@ -29,7 +29,8 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
   alias MingaEditor.Layout
   alias MingaEditor.Layout.OverlayBand
   alias MingaEditor.Layout.SurfaceRegistry
-  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Observatory.Data, as: ObservatoryData
+  alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.UI.Notification
@@ -48,7 +49,7 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
     %{state | notifications: center}
   end
 
-  defp with_observatory(state), do: EditorState.open_observatory(state, nil)
+  defp with_observatory(state), do: SidebarWorkflow.open_observatory(state, nil)
 
   defp with_agent_context(state) do
     approval = %{tool_call_id: "tc1", name: "shell", args: %{}}
@@ -79,7 +80,7 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
 
     state
     |> with_observatory()
-    |> EditorState.set_observatory_data(%{tree: tree})
+    |> SidebarWorkflow.replace_observatory_data(ObservatoryData.visible(tree, []))
   end
 
   # Records `count` agent edits for the active buffer's path and wires the

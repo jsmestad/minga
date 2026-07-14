@@ -1,27 +1,56 @@
 defmodule MingaEditor.Handlers.FileEventHandler do
   @moduledoc """
-  Handler for file and git status events.
+  Owns file, file-tree, save follow-up, and Git boundary actions.
 
-  File-tree events enter their workflow directly so timer and scheduler
-  correlation stay in the Editor process. Unrelated generic editor effects are
-  still returned for the existing universal dispatcher.
+  `dispatch/2` performs state transitions first and interprets focused actions
+  in list order. File-tree refresh keeps its typed `Effect.Request` scheduler
+  contract, stable root identity, bounded coalescing, supervised workers, and
+  terminal outcomes. Save follow-ups run in the Editor process: LSP requests
+  are issued before deferred session persistence and rendering.
+
+  Git remote replies stay behind the existing dynamic extension boundary and
+  are correlated by task monitor reference before this workflow receives them.
+  Stale extension results are ignored, missing/stopped extensions are no-ops,
+  and file-tree or LSP failures retain their existing domain reporting policy.
   """
 
   alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
   alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
+  alias MingaEditor.LspActions
+  alias MingaEditor.Renderer
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.Shell.Workflow
   alias MingaEditor.State, as: EditorState
 
   @typedoc "Effects that the file event handler may return."
   @type file_effect ::
-          :render
-          | {:render, pos_integer()}
-          | {:log_message, String.t()}
+          {:render, pos_integer()}
           | {:request_code_lens}
           | {:request_inlay_hints}
           | {:save_session_deferred}
           | {:handle_git_remote_result, reference(), term()}
+
+  @doc "Applies one file/Git event and its focused actions."
+  @spec dispatch(EditorState.t(), term()) :: EditorState.t()
+  def dispatch(%EditorState{} = state, message) do
+    {state, effects} = handle(state, message)
+    apply_effects(state, effects)
+  end
+
+  @doc "Lets the active Git extension correlate a monitored remote task termination."
+  @spec handle_remote_task_down(EditorState.t(), reference(), term()) ::
+          :not_matched | EditorState.t()
+  def handle_remote_task_down(state, ref, reason) do
+    module = :"Elixir.MingaGitPorcelain.Commands"
+
+    if git_porcelain_running?() and Code.ensure_loaded?(module) and
+         function_exported?(module, :handle_remote_task_down, 3) do
+      :erlang.apply(module, :handle_remote_task_down, [state, ref, reason])
+    else
+      :not_matched
+    end
+  end
 
   @doc """
   Dispatches a file/git event to the appropriate handler.
@@ -83,6 +112,41 @@ defmodule MingaEditor.Handlers.FileEventHandler do
 
   # ── Private helpers ──────────────────────────────────────────────────────
 
+  @spec apply_effects(EditorState.t(), [file_effect()]) :: EditorState.t()
+  defp apply_effects(state, []), do: state
+
+  defp apply_effects(state, [effect | rest]) do
+    state = apply_effect(state, effect)
+    apply_effects(state, rest)
+  end
+
+  @spec apply_effect(EditorState.t(), file_effect()) :: EditorState.t()
+  defp apply_effect(state, {:render, delay_ms}),
+    do: MingaEditor.schedule_render(state, delay_ms)
+
+  defp apply_effect(state, {:request_code_lens}), do: LspActions.code_lens(state)
+  defp apply_effect(state, {:request_inlay_hints}), do: LspActions.inlay_hints(state)
+
+  defp apply_effect(state, {:save_session_deferred}) do
+    if state.backend != :headless, do: send(self(), :save_session)
+    state
+  end
+
+  defp apply_effect(state, {:handle_git_remote_result, ref, result}),
+    do: state |> handle_git_remote_result(ref, result) |> Renderer.render_or_async()
+
+  @spec handle_git_remote_result(EditorState.t(), reference(), term()) :: EditorState.t()
+  defp handle_git_remote_result(state, ref, result) do
+    module = :"Elixir.MingaGitPorcelain.Commands"
+
+    if git_porcelain_running?() and Code.ensure_loaded?(module) and
+         function_exported?(module, :handle_remote_result, 3) do
+      :erlang.apply(module, :handle_remote_result, [state, ref, result])
+    else
+      state
+    end
+  end
+
   @spec handle_git_status_changed(EditorState.t(), Minga.Events.GitStatusEvent.t()) ::
           {EditorState.t(), [file_effect()]}
   defp handle_git_status_changed(
@@ -97,7 +161,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
        ) do
     state = FileTreeFreshness.refresh_git_status(state, event)
 
-    case EditorState.git_status_panel(state) do
+    case SidebarWorkflow.git_status_panel(state) do
       nil ->
         if FileTreeFreshness.open?(state), do: {state, [{:render, 16}]}, else: {state, []}
 
@@ -115,7 +179,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
 
         state =
           state
-          |> EditorState.set_git_status_panel(GitStatusPanel.new(git_status_data))
+          |> SidebarWorkflow.replace_git_status(GitStatusPanel.new(git_status_data))
           |> Workflow.ensure_available()
 
         {runtime, workspace} =

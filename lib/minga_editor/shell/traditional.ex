@@ -25,6 +25,7 @@ defmodule MingaEditor.Shell.Traditional do
   alias MingaEditor.Commands.AgentSession
   alias Minga.Buffer
   alias Minga.Project.FileRef
+  alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
@@ -48,7 +49,7 @@ defmodule MingaEditor.Shell.Traditional do
   @spec handle_event(ShellState.t(), MingaEditor.Session.State.t(), term()) ::
           {ShellState.t(), MingaEditor.Session.State.t()}
   def handle_event(%ShellState{} = shell_state, workspace, {:git_status_changed, entries}) do
-    {ShellState.refresh_git_status_tui_state(shell_state, entries), workspace}
+    {refresh_git_status_tui_state(shell_state, entries), workspace}
   end
 
   def handle_event(%ShellState{tab_bar: nil} = shell_state, workspace, _event) do
@@ -89,6 +90,54 @@ defmodule MingaEditor.Shell.Traditional do
     {shell_state, workspace}
   end
 
+  @git_status_tui_state_module :"Elixir.MingaGitPorcelain.Shell.Traditional.GitStatus.TuiState"
+
+  @spec refresh_git_status_tui_state(ShellState.t(), [Minga.Git.StatusEntry.t()]) ::
+          ShellState.t()
+  defp refresh_git_status_tui_state(%ShellState{} = shell_state, entries) do
+    case ShellState.git_status_tui_state(shell_state) do
+      nil -> shell_state
+      tui -> maybe_refresh_git_status_tui_state(shell_state, tui, entries)
+    end
+  end
+
+  @spec maybe_refresh_git_status_tui_state(ShellState.t(), struct(), [Minga.Git.StatusEntry.t()]) ::
+          ShellState.t()
+  defp maybe_refresh_git_status_tui_state(shell_state, tui, entries) do
+    if git_status_tui_refresh_available?() do
+      refreshed = :erlang.apply(@git_status_tui_state_module, :refresh, [tui, entries])
+      install_refreshed_git_status_tui_state(shell_state, refreshed)
+    else
+      shell_state
+    end
+  end
+
+  @spec install_refreshed_git_status_tui_state(ShellState.t(), term()) :: ShellState.t()
+  defp install_refreshed_git_status_tui_state(shell_state, refreshed) do
+    if is_struct(refreshed, @git_status_tui_state_module),
+      do: ShellState.replace_git_status_tui_state(shell_state, refreshed),
+      else: shell_state
+  end
+
+  @spec git_status_tui_refresh_available?() :: boolean()
+  defp git_status_tui_refresh_available? do
+    git_porcelain_running?() and Code.ensure_loaded?(@git_status_tui_state_module) and
+      function_exported?(@git_status_tui_state_module, :refresh, 2)
+  end
+
+  @spec git_porcelain_running?() :: boolean()
+  defp git_porcelain_running? do
+    case Process.whereis(Minga.Extension.Registry) do
+      nil ->
+        false
+
+      _pid ->
+        match?({:ok, %{status: :running}}, Minga.Extension.Registry.get(:minga_git_porcelain))
+    end
+  catch
+    :exit, _reason -> false
+  end
+
   @impl true
   @spec handle_gui_action(ShellState.t(), MingaEditor.Session.State.t(), term()) ::
           {ShellState.t(), MingaEditor.Session.State.t()}
@@ -106,7 +155,7 @@ defmodule MingaEditor.Shell.Traditional do
         {:close_tab, id}
       ) do
     if tb.active_id != id do
-      {shell_state, workspace, _effects} = switch_to_buffer_tab(shell_state, workspace, id)
+      {shell_state, workspace} = switch_to_buffer_tab(shell_state, workspace, id)
       {shell_state, workspace}
     else
       {shell_state, workspace}
@@ -220,7 +269,7 @@ defmodule MingaEditor.Shell.Traditional do
           SessionState.t(),
           pid(),
           atom()
-        ) :: {ShellState.t(), SessionState.t(), [MingaEditor.effect()]}
+        ) :: {ShellState.t(), SessionState.t()}
   def on_buffer_added(shell_state, prev_workspace, workspace, buffer_pid, context) do
     do_on_buffer_added(
       shell_state,
@@ -232,7 +281,7 @@ defmodule MingaEditor.Shell.Traditional do
   end
 
   @spec on_buffer_added(ShellState.t(), SessionState.t(), pid(), atom()) ::
-          {ShellState.t(), SessionState.t(), [MingaEditor.effect()]}
+          {ShellState.t(), SessionState.t()}
   def on_buffer_added(shell_state, workspace, buffer_pid, context \\ :open) do
     on_buffer_added(shell_state, workspace, workspace, buffer_pid, context)
   end
@@ -243,7 +292,7 @@ defmodule MingaEditor.Shell.Traditional do
           SessionState.t(),
           pid(),
           atom()
-        ) :: {ShellState.t(), SessionState.t(), [MingaEditor.effect()]}
+        ) :: {ShellState.t(), SessionState.t()}
   defp do_on_buffer_added(
          %ShellState{tab_bar: nil} = shell_state,
          _prev_workspace,
@@ -252,7 +301,7 @@ defmodule MingaEditor.Shell.Traditional do
          _context
        ) do
     workspace = SessionState.activate_buffer(workspace, workspace.buffers)
-    {shell_state, workspace, []}
+    {shell_state, workspace}
   end
 
   defp do_on_buffer_added(
@@ -279,7 +328,7 @@ defmodule MingaEditor.Shell.Traditional do
             # The tab label stays as-is so confirm can detect "no tab for
             # this buffer" and create a new one.
             workspace = SessionState.activate_buffer(workspace, workspace.buffers)
-            {shell_state, workspace, []}
+            {shell_state, workspace}
 
           {_, :agent} ->
             open_buffer_from_agent_tab(shell_state, prev_workspace, workspace, label)
@@ -304,7 +353,7 @@ defmodule MingaEditor.Shell.Traditional do
   end
 
   @spec open_buffer_in_new_tab(ShellState.t(), SessionState.t(), String.t()) ::
-          {ShellState.t(), SessionState.t(), [MingaEditor.effect()]}
+          {ShellState.t(), SessionState.t()}
   defp open_buffer_in_new_tab(
          %ShellState{tab_bar: %TabBar{} = tb} = shell_state,
          workspace,
@@ -313,14 +362,14 @@ defmodule MingaEditor.Shell.Traditional do
     {tb, tab} = TabBar.add(tb, :file, label)
     tb = TabBar.switch_to(tb, tab.id)
     workspace = SessionState.activate_buffer(workspace, workspace.buffers)
-    {%{shell_state | tab_bar: tb}, workspace, []}
+    {%{shell_state | tab_bar: tb}, workspace}
   end
 
   @impl true
   @spec on_buffer_switched(ShellState.t(), SessionState.t()) ::
-          {ShellState.t(), SessionState.t(), [MingaEditor.effect()]}
+          {ShellState.t(), SessionState.t()}
   def on_buffer_switched(%ShellState{tab_bar: nil} = shell_state, workspace) do
-    {shell_state, workspace, []}
+    {shell_state, workspace}
   end
 
   def on_buffer_switched(%ShellState{tab_bar: %TabBar{} = tb} = shell_state, workspace) do
@@ -334,23 +383,23 @@ defmodule MingaEditor.Shell.Traditional do
           |> sync_file_tab_ref(tb.active_id, workspace.buffers.active, workspace)
           |> TabBar.update_context(tb.active_id, SessionState.to_tab_context(workspace))
 
-        {%{shell_state | tab_bar: tb}, workspace, []}
+        {%{shell_state | tab_bar: tb}, workspace}
 
       %Tab{} ->
         tb = TabBar.update_context(tb, tb.active_id, SessionState.to_tab_context(workspace))
-        {%{shell_state | tab_bar: tb}, workspace, []}
+        {%{shell_state | tab_bar: tb}, workspace}
 
       nil ->
-        {shell_state, workspace, []}
+        {shell_state, workspace}
     end
   end
 
   @impl true
   @spec on_buffer_died(ShellState.t(), SessionState.t(), pid()) ::
-          {ShellState.t(), SessionState.t(), [MingaEditor.effect()]}
+          {ShellState.t(), SessionState.t()}
   def on_buffer_died(shell_state, workspace, _dead_pid) do
     workspace = SessionState.activate_buffer(workspace, workspace.buffers)
-    {shell_state, workspace, []}
+    {shell_state, workspace}
   end
 
   # -------------------------------------------------------------------
@@ -359,9 +408,9 @@ defmodule MingaEditor.Shell.Traditional do
 
   @impl true
   @spec on_agent_event(ShellState.t(), SessionState.t(), pid(), term()) ::
-          {ShellState.t(), SessionState.t(), [MingaEditor.effect()]}
+          {ShellState.t(), SessionState.t()}
   def on_agent_event(%ShellState{tab_bar: nil} = shell_state, workspace, _session_pid, _event) do
-    {shell_state, workspace, []}
+    {shell_state, workspace}
   end
 
   def on_agent_event(
@@ -394,7 +443,7 @@ defmodule MingaEditor.Shell.Traditional do
         tb
       end
 
-    {%{shell_state | tab_bar: tb}, workspace, []}
+    {%{shell_state | tab_bar: tb}, workspace}
   end
 
   def on_agent_event(
@@ -404,7 +453,7 @@ defmodule MingaEditor.Shell.Traditional do
         {:approval_pending, _}
       ) do
     tb = TabBar.set_attention_by_session(tb, session_pid, true)
-    {%{shell_state | tab_bar: tb}, workspace, []}
+    {%{shell_state | tab_bar: tb}, workspace}
   end
 
   # A direct :error event raises attention so a background tab whose session
@@ -418,11 +467,11 @@ defmodule MingaEditor.Shell.Traditional do
         {:error, _message}
       ) do
     tb = TabBar.set_attention_by_session(tb, session_pid, true)
-    {%{shell_state | tab_bar: tb}, workspace, []}
+    {%{shell_state | tab_bar: tb}, workspace}
   end
 
   def on_agent_event(shell_state, workspace, _session_pid, _event) do
-    {shell_state, workspace, []}
+    {shell_state, workspace}
   end
 
   @impl true
@@ -647,13 +696,13 @@ defmodule MingaEditor.Shell.Traditional do
 
   # Switch to an existing file tab that matches the buffer being opened.
   @spec switch_to_buffer_tab(ShellState.t(), SessionState.t(), Tab.id()) ::
-          {ShellState.t(), SessionState.t(), [MingaEditor.effect()]}
+          {ShellState.t(), SessionState.t()}
   defp switch_to_buffer_tab(shell_state, workspace, target_id) do
     switch_to_buffer_tab(shell_state, workspace, workspace, target_id)
   end
 
   @spec switch_to_buffer_tab(ShellState.t(), SessionState.t(), SessionState.t(), Tab.id()) ::
-          {ShellState.t(), SessionState.t(), [MingaEditor.effect()]}
+          {ShellState.t(), SessionState.t()}
   defp switch_to_buffer_tab(
          %ShellState{tab_bar: tb} = shell_state,
          prev_workspace,
@@ -663,7 +712,7 @@ defmodule MingaEditor.Shell.Traditional do
     current_id = tb.active_id
 
     if current_id == target_id do
-      {shell_state, workspace, []}
+      {shell_state, workspace}
     else
       # Snapshot the outgoing tab before the buffer-pool mutation that triggered this switch.
       context = SessionState.to_tab_context(prev_workspace)
@@ -678,20 +727,19 @@ defmodule MingaEditor.Shell.Traditional do
       tb = TabBar.update_tab(tb, target_id, &Tab.set_attention(&1, false))
 
       workspace = SessionState.invalidate_all_windows(workspace)
-      {%{shell_state | tab_bar: tb}, workspace, []}
+      {%{shell_state | tab_bar: tb}, workspace}
     end
   end
 
   # Opens a file buffer when the active tab is an agent tab.
-  # Creates a new file tab, resets agent UI state, and syncs the window.
-  # Returns a :stop_spinner effect so the Editor cancels the outgoing
-  # agent spinner timer when leaving the agent context.
+  # Creates a new file tab, resets agent UI state, syncs the window, and stops
+  # the outgoing spinner through its owner API in the Editor process.
   @spec open_buffer_from_agent_tab(
           ShellState.t(),
           SessionState.t(),
           SessionState.t(),
           String.t()
-        ) :: {ShellState.t(), SessionState.t(), [MingaEditor.effect()]}
+        ) :: {ShellState.t(), SessionState.t()}
   defp open_buffer_from_agent_tab(
          %ShellState{tab_bar: tb} = shell_state,
          prev_workspace,
@@ -727,7 +775,17 @@ defmodule MingaEditor.Shell.Traditional do
 
     Log.debug(:editor, fn -> "[tab] on_buffer_added new tab=#{new_tab.id} label=#{label}" end)
 
-    {%{shell_state | tab_bar: tb}, workspace, [:stop_spinner]}
+    shell_state =
+      shell_state
+      |> ShellState.set_tab_bar(tb)
+      |> then(fn current ->
+        ShellState.replace_agent(
+          current,
+          current |> ShellState.agent() |> AgentState.stop_spinner_timer()
+        )
+      end)
+
+    {shell_state, workspace}
   end
 
   # Opens a file buffer when the active tab is already a file tab.
@@ -738,7 +796,7 @@ defmodule MingaEditor.Shell.Traditional do
           SessionState.t(),
           SessionState.t(),
           String.t()
-        ) :: {ShellState.t(), SessionState.t(), [MingaEditor.effect()]}
+        ) :: {ShellState.t(), SessionState.t()}
   defp open_buffer_in_file_tab(
          %ShellState{tab_bar: tb} = shell_state,
          prev_workspace,
@@ -764,7 +822,7 @@ defmodule MingaEditor.Shell.Traditional do
       |> sync_file_tab_ref(new_tab.id, workspace.buffers.active, workspace)
       |> TabBar.update_context(new_tab.id, new_context)
 
-    {%{shell_state | tab_bar: tb}, workspace, []}
+    {%{shell_state | tab_bar: tb}, workspace}
   end
 
   @spec sync_file_tab_ref(TabBar.t(), Tab.id(), pid() | nil, SessionState.t()) :: TabBar.t()

@@ -13,6 +13,7 @@ defmodule MingaEditor.Agent.UIState.View do
 
   alias MingaEditor.Agent.EditTimeline
   alias MingaEditor.Agent.Activity
+  alias MingaEditor.Agent.UIState.Presentation
   alias MingaEditor.Agent.UIState.ReturnTarget
   alias MingaEditor.Agent.View.Preview
   alias Minga.Config
@@ -20,10 +21,10 @@ defmodule MingaEditor.Agent.UIState.View do
   alias MingaEditor.State.Windows
 
   @typedoc "Which panel has keyboard focus inside the agentic view."
-  @type focus :: :chat | :file_viewer
+  @type focus :: Presentation.focus()
 
   @typedoc "Active prefix key awaiting a follow-up keystroke."
-  @type prefix :: nil | :g | :z | :bracket_next | :bracket_prev | Minga.Keymap.Bindings.Node.t()
+  @type prefix :: Presentation.prefix()
 
   @typedoc "A search match: message index, byte start, byte end."
   @type search_match ::
@@ -47,14 +48,9 @@ defmodule MingaEditor.Agent.UIState.View do
 
   @typedoc "Layout, search, preview, and toast state."
   @type t :: %__MODULE__{
-          active: boolean(),
-          focus: focus(),
+          presentation: Presentation.t(),
           preview: Preview.t(),
-          saved_windows: Windows.t() | nil,
-          pending_prefix: prefix(),
           chat_width_pct: non_neg_integer(),
-          saved_file_tree: FileTreeState.t() | nil,
-          return_target: return_target() | nil,
           help_visible: boolean(),
           search: search_state() | nil,
           toast: toast() | nil,
@@ -73,14 +69,9 @@ defmodule MingaEditor.Agent.UIState.View do
   @max_chat_pct 80
   @resize_step 5
 
-  defstruct active: false,
-            focus: :chat,
+  defstruct presentation: %Presentation{},
             preview: Preview.new(),
-            saved_windows: nil,
-            pending_prefix: nil,
             chat_width_pct: 65,
-            saved_file_tree: nil,
-            return_target: nil,
             help_visible: false,
             search: nil,
             toast: nil,
@@ -140,67 +131,75 @@ defmodule MingaEditor.Agent.UIState.View do
   end
 
   @doc "Activates the view, saving the current window layout."
-  @spec activate(t(), Windows.t(), FileTreeState.t()) :: t()
+  @spec activate(t(), Windows.t() | nil, FileTreeState.t() | nil) :: t()
   def activate(%__MODULE__{} = view, windows, file_tree) do
     activate(view, windows, file_tree, nil)
   end
 
   @doc "Activates the view with a recorded editor return target."
-  @spec activate(t(), Windows.t(), FileTreeState.t(), return_target() | nil) :: t()
-  def activate(%__MODULE__{} = view, windows, file_tree, return_target) do
-    %{
+  @spec activate(
+          t(),
+          Windows.t() | nil,
+          FileTreeState.t() | nil,
+          return_target() | nil
+        ) :: t()
+  def activate(%__MODULE__{} = view, windows, file_tree, return_target),
+    do: %{
       view
-      | active: true,
-        focus: :chat,
-        saved_windows: windows,
-        saved_file_tree: file_tree,
-        return_target: return_target,
-        pending_prefix: nil
+      | presentation: Presentation.activate(view.presentation, windows, file_tree, return_target)
     }
-  end
 
   @doc "Sets the editor return target."
   @spec set_return_target(t(), return_target() | nil) :: t()
-  def set_return_target(%__MODULE__{} = view, return_target) do
-    %{view | return_target: return_target}
-  end
+  def set_return_target(%__MODULE__{} = view, return_target),
+    do: %{
+      view
+      | presentation: Presentation.replace_return_target(view.presentation, return_target)
+    }
 
   @doc "Clears the editor return target."
   @spec clear_return_target(t()) :: t()
-  def clear_return_target(%__MODULE__{} = view), do: %{view | return_target: nil}
+  def clear_return_target(%__MODULE__{} = view), do: set_return_target(view, nil)
 
   @doc "Deactivates the view and returns the restored window layout."
   @spec deactivate(t()) :: {t(), Windows.t() | nil, FileTreeState.t() | nil}
-  def deactivate(
-        %__MODULE__{saved_windows: saved_windows, saved_file_tree: saved_file_tree} = view
-      ) do
-    {%{
-       view
-       | active: false,
-         focus: :chat,
-         saved_windows: nil,
-         saved_file_tree: nil,
-         return_target: nil,
-         pending_prefix: nil
-     }, saved_windows, saved_file_tree}
+  def deactivate(%__MODULE__{} = view) do
+    {presentation, saved_windows, saved_file_tree} = Presentation.complete(view.presentation)
+    {%{view | presentation: presentation}, saved_windows, saved_file_tree}
   end
+
+  @doc "Returns whether the full-screen agent presentation is active."
+  @spec active?(t()) :: boolean()
+  def active?(%__MODULE__{presentation: presentation}), do: Presentation.active?(presentation)
+
+  @doc "Returns the focused agent panel."
+  @spec focus(t()) :: focus()
+  def focus(%__MODULE__{presentation: presentation}), do: Presentation.current_focus(presentation)
+
+  @doc "Returns the editor target restored when presentation completes."
+  @spec return_target(t()) :: return_target() | nil
+  def return_target(%__MODULE__{presentation: presentation}),
+    do: Presentation.return_target(presentation)
+
+  @doc "Returns the pending multi-key prefix."
+  @spec pending_prefix(t()) :: prefix()
+  def pending_prefix(%__MODULE__{presentation: presentation}),
+    do: Presentation.pending_prefix(presentation)
 
   @doc "Switches focus to the given panel."
   @spec set_focus(t(), focus()) :: t()
-  def set_focus(%__MODULE__{} = view, focus) when focus in [:chat, :file_viewer] do
-    %{view | focus: focus}
-  end
+  def set_focus(%__MODULE__{} = view, focus) when focus in [:chat, :file_viewer],
+    do: %{view | presentation: Presentation.focus(view.presentation, focus)}
 
   @doc "Sets the pending prefix for multi-key sequences."
   @spec set_prefix(t(), prefix()) :: t()
-  def set_prefix(%__MODULE__{} = view, prefix)
-      when prefix in [nil, :g, :z, :bracket_next, :bracket_prev] or is_map(prefix) do
-    %{view | pending_prefix: prefix}
-  end
+  def set_prefix(%__MODULE__{} = view, prefix),
+    do: %{view | presentation: Presentation.install_prefix(view.presentation, prefix)}
 
   @doc "Clears any pending prefix."
   @spec clear_prefix(t()) :: t()
-  def clear_prefix(%__MODULE__{} = view), do: %{view | pending_prefix: nil}
+  def clear_prefix(%__MODULE__{} = view),
+    do: %{view | presentation: Presentation.reset_prefix(view.presentation)}
 
   @doc "Toggles the help overlay visibility."
   @spec toggle_help(t()) :: t()

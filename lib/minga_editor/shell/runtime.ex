@@ -141,32 +141,6 @@ defmodule MingaEditor.Shell.Runtime do
       else: runtime
   end
 
-  @doc "Merges renderer-owned click regions into a matching active shell state."
-  @spec merge_renderer_observation(t(), atom(), Identity.t(), map()) :: t()
-  def merge_renderer_observation(
-        %__MODULE__{} = runtime,
-        shell_id,
-        %Identity{} = identity,
-        fields
-      ) do
-    if runtime.entry.id == shell_id and Identity.matches?(identity, runtime.entry) do
-      state = Enum.reduce(fields, runtime.state, &merge_renderer_field/2)
-      %__MODULE__{runtime | state: state}
-    else
-      runtime
-    end
-  end
-
-  @spec merge_renderer_field({atom(), term()}, shell_state()) :: shell_state()
-  defp merge_renderer_field({field, value}, shell_state) when is_map(shell_state) do
-    case Map.fetch(shell_state, field) do
-      {:ok, _current} -> Map.put(shell_state, field, value)
-      :error -> shell_state
-    end
-  end
-
-  defp merge_renderer_field({_field, _value}, shell_state), do: shell_state
-
   @doc "Installs state returned by persistence for the exact active or stashed registration."
   @spec accept_persisted_state(t(), Entry.t(), shell_state()) :: t()
   def accept_persisted_state(%__MODULE__{} = runtime, %Entry{} = entry, persisted_state) do
@@ -195,34 +169,32 @@ defmodule MingaEditor.Shell.Runtime do
     {%__MODULE__{runtime | state: shell_state}, workspace}
   end
 
-  @doc "Routes an agent event through the active entry and returns effects as data."
+  @doc "Routes an agent event through the active entry."
   @spec route_agent_event(t(), MingaEditor.Shell.workspace(), pid(), term()) ::
-          {t(), MingaEditor.Shell.workspace(), [MingaEditor.effect()], persistence_change() | nil}
+          {t(), MingaEditor.Shell.workspace(), persistence_change() | nil}
   def route_agent_event(%__MODULE__{} = runtime, workspace, session_pid, event) do
     old_state = runtime.state
 
-    {shell_state, workspace, effects} =
+    {shell_state, workspace} =
       runtime.entry.module.on_agent_event(old_state, workspace, session_pid, event)
 
     change = persistence_change(runtime.entry, old_state, shell_state)
-    {%__MODULE__{runtime | state: shell_state}, workspace, effects, change}
+    {%__MODULE__{runtime | state: shell_state}, workspace, change}
   end
 
   @doc "Routes an agent event through exact-identity stashes using caller-resolved entries."
   @spec route_stashed_agent_event(t(), [Entry.t()], MingaEditor.Shell.workspace(), pid(), term()) ::
-          {t(), MingaEditor.Shell.workspace(), [MingaEditor.effect()], [persistence_change()]}
+          {t(), MingaEditor.Shell.workspace(), [persistence_change()]}
   def route_stashed_agent_event(%__MODULE__{} = runtime, entries, workspace, session_pid, event) do
     entries_by_id = Map.new(entries, &{&1.id, &1})
 
-    {stash, workspace, effects, changes} =
-      Enum.reduce(runtime.stash, {%{}, workspace, [], []}, fn {id, stashed},
-                                                              {stash_acc, workspace_acc,
-                                                               effects_acc, changes_acc} ->
+    {stash, workspace, changes} =
+      Enum.reduce(runtime.stash, {%{}, workspace, []}, fn {id, stashed},
+                                                          {stash_acc, workspace_acc, changes_acc} ->
         case Map.get(entries_by_id, id) do
           %Entry{} = entry ->
             route_stashed_agent_value(
               stash_acc,
-              effects_acc,
               changes_acc,
               stashed,
               entry,
@@ -232,21 +204,21 @@ defmodule MingaEditor.Shell.Runtime do
             )
 
           nil ->
-            {Map.put(stash_acc, id, stashed), workspace_acc, effects_acc, changes_acc}
+            {Map.put(stash_acc, id, stashed), workspace_acc, changes_acc}
         end
       end)
 
-    {%__MODULE__{runtime | stash: stash}, workspace, effects, changes}
+    {%__MODULE__{runtime | stash: stash}, workspace, changes}
   end
 
-  @doc "Routes buffer-added lifecycle through the active shell and returns effects as data."
+  @doc "Routes buffer-added lifecycle through the active shell."
   @spec route_buffer_added(
           t(),
           MingaEditor.Shell.workspace(),
           MingaEditor.Shell.workspace(),
           pid(),
           MingaEditor.Shell.buffer_add_context()
-        ) :: {t(), MingaEditor.Shell.workspace(), [MingaEditor.effect()]}
+        ) :: {t(), MingaEditor.Shell.workspace()}
   def route_buffer_added(
         %__MODULE__{} = runtime,
         previous_workspace,
@@ -254,7 +226,7 @@ defmodule MingaEditor.Shell.Runtime do
         buffer_pid,
         context
       ) do
-    {shell_state, workspace, effects} =
+    {shell_state, workspace} =
       runtime.entry.module.on_buffer_added(
         runtime.state,
         previous_workspace,
@@ -263,27 +235,25 @@ defmodule MingaEditor.Shell.Runtime do
         context
       )
 
-    {%__MODULE__{runtime | state: shell_state}, workspace, effects}
+    {%__MODULE__{runtime | state: shell_state}, workspace}
   end
 
-  @doc "Routes buffer-switch lifecycle through the active shell and returns effects as data."
+  @doc "Routes buffer-switch lifecycle through the active shell."
   @spec route_buffer_switched(t(), MingaEditor.Shell.workspace()) ::
-          {t(), MingaEditor.Shell.workspace(), [MingaEditor.effect()]}
+          {t(), MingaEditor.Shell.workspace()}
   def route_buffer_switched(%__MODULE__{} = runtime, workspace) do
-    {shell_state, workspace, effects} =
-      runtime.entry.module.on_buffer_switched(runtime.state, workspace)
-
-    {%__MODULE__{runtime | state: shell_state}, workspace, effects}
+    {shell_state, workspace} = runtime.entry.module.on_buffer_switched(runtime.state, workspace)
+    {%__MODULE__{runtime | state: shell_state}, workspace}
   end
 
-  @doc "Routes buffer-removal lifecycle through the active shell and returns effects as data."
+  @doc "Routes buffer-removal lifecycle through the active shell."
   @spec route_buffer_died(t(), MingaEditor.Shell.workspace(), pid()) ::
-          {t(), MingaEditor.Shell.workspace(), [MingaEditor.effect()]}
+          {t(), MingaEditor.Shell.workspace()}
   def route_buffer_died(%__MODULE__{} = runtime, workspace, dead_pid) do
-    {shell_state, workspace, effects} =
+    {shell_state, workspace} =
       runtime.entry.module.on_buffer_died(runtime.state, workspace, dead_pid)
 
-    {%__MODULE__{runtime | state: shell_state}, workspace, effects}
+    {%__MODULE__{runtime | state: shell_state}, workspace}
   end
 
   @doc "Routes an optional active session-down transition through the active entry."
@@ -426,18 +396,15 @@ defmodule MingaEditor.Shell.Runtime do
 
   @spec route_stashed_agent_value(
           stash(),
-          [MingaEditor.effect()],
           [persistence_change()],
           StateStash.t(),
           Entry.t(),
           MingaEditor.Shell.workspace(),
           pid(),
           term()
-        ) ::
-          {stash(), MingaEditor.Shell.workspace(), [MingaEditor.effect()], [persistence_change()]}
+        ) :: {stash(), MingaEditor.Shell.workspace(), [persistence_change()]}
   defp route_stashed_agent_value(
          stash,
-         effects,
          changes,
          %StateStash{} = stashed,
          %Entry{} = entry,
@@ -447,21 +414,15 @@ defmodule MingaEditor.Shell.Runtime do
        ) do
     case StateStash.restore(stashed, entry) do
       {:ok, old_state} ->
-        {new_state, workspace, new_effects} =
+        {new_state, workspace} =
           entry.module.on_agent_event(old_state, workspace, session_pid, event)
 
         updated = StateStash.new(entry, new_state)
         change = persistence_change(entry, old_state, new_state)
-
-        {
-          Map.put(stash, entry.id, updated),
-          workspace,
-          effects ++ new_effects,
-          prepend_change(change, changes)
-        }
+        {Map.put(stash, entry.id, updated), workspace, prepend_change(change, changes)}
 
       :mismatch ->
-        {Map.put(stash, entry.id, stashed), workspace, effects, changes}
+        {Map.put(stash, entry.id, stashed), workspace, changes}
     end
   end
 

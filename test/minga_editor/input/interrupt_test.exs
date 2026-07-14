@@ -5,6 +5,7 @@ defmodule MingaEditor.Input.InterruptTest do
   alias Minga.Editing.Completion
   alias Minga.Mode
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.UIState.View
   alias MingaEditor.HoverPopup
   alias MingaEditor.Input
   alias MingaEditor.Input.Interrupt
@@ -111,7 +112,7 @@ defmodule MingaEditor.Input.InterruptTest do
     assert Runtime.state(state.shell_runtime).modal == :none
     assert Runtime.state(state.shell_runtime).whichkey.node == nil
     assert Runtime.state(state.shell_runtime).whichkey.show == false
-    assert AgentAccess.view(state).pending_prefix == nil
+    assert state |> AgentAccess.view() |> View.pending_prefix() == nil
     assert state.shell_runtime.state.notice.message == nil
     assert state.shell_runtime.state.hover_popup == nil
   end

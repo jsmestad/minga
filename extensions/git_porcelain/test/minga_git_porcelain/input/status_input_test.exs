@@ -12,6 +12,7 @@ defmodule MingaGitPorcelain.Input.GitStatusInputTest do
   alias MingaGitPorcelain.Input.GitStatus
   alias MingaGitPorcelain.Shell.Traditional.GitStatus.TuiState
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Viewport
@@ -48,13 +49,13 @@ defmodule MingaGitPorcelain.Input.GitStatusInputTest do
       },
       focus_stack: [MingaEditor.Input.Scoped, MingaEditor.Input.ModeFSM]
     }
-    |> EditorState.set_git_status_panel(panel_data)
-    |> EditorState.set_git_status_tui_state(TuiState.new())
+    |> SidebarWorkflow.replace_git_status(panel_data)
+    |> SidebarWorkflow.replace_git_status_tui(TuiState.new())
   end
 
   test "git status panel keeps shared data separate from tui state" do
     state = make_state_with_git_panel()
-    panel = EditorState.git_status_panel(state)
+    panel = SidebarWorkflow.git_status_panel(state)
     assert panel != nil
     refute Map.has_key?(panel, :tui_state)
 

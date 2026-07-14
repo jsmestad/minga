@@ -37,6 +37,18 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
   defp workspace, do: %SessionState{viewport: Viewport.new(24, 80), editing: VimState.new()}
 
+  defp event_state(agent) do
+    %EditorState{
+      port_manager: nil,
+      workspace: %SessionState{viewport: Viewport.new(24, 80), agent_ui: UIState.new()},
+      shell_runtime:
+        Runtime.new(
+          Runtime.default_entry(),
+          TraditionalState.replace_agent(%TraditionalState{}, agent)
+        )
+    }
+  end
+
   defp fake_session_pid do
     pid =
       spawn(fn ->
@@ -75,17 +87,18 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         Tab.new_agent(2, "B") |> Tab.set_session(session_b)
       ]
 
-      shell_state = %TraditionalState{
-        agent: %AgentState{},
-        tab_bar: tab_bar(tabs, 1)
-      }
+      shell_state =
+        TraditionalState.set_tab_bar(
+          TraditionalState.replace_agent(%TraditionalState{}, %AgentState{}),
+          tab_bar(tabs, 1)
+        )
 
       %{shell_state: shell_state, session_a: session_a, session_b: session_b}
     end
 
     test "background :status_changed event sets the owning tab's badge without touching the active rendering cache",
          %{shell_state: ss, session_b: session_b} do
-      {ss2, ws2, effects} =
+      {ss2, ws2} =
         Traditional.on_agent_event(ss, workspace(), session_b, {:status_changed, :thinking})
 
       # Background tab's badge updates...
@@ -93,19 +106,18 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
       # ...but the active rendering cache is untouched (it routes through
       # Agent.Events for the foreground path, not through this callback).
-      assert ss2.agent == ss.agent
+      assert TraditionalState.agent(ss2) == TraditionalState.agent(ss)
 
       # Workspace is also untouched: background events must not nudge the
       # active tab's editing surface.
       assert ws2 == workspace()
-      assert effects == []
     end
 
     test "background :status_changed -> :idle raises attention on the owning tab", %{
       shell_state: ss,
       session_b: session_b
     } do
-      {ss2, _ws, _effects} =
+      {ss2, _ws} =
         Traditional.on_agent_event(ss, workspace(), session_b, {:status_changed, :idle})
 
       assert tab(ss2.tab_bar, 2).attention == true
@@ -118,7 +130,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
     } do
       approval = %{tool_call_id: "x", name: "shell", args: %{}}
 
-      {ss2, _ws, _effects} =
+      {ss2, _ws} =
         Traditional.on_agent_event(ss, workspace(), session_b, {:approval_pending, approval})
 
       assert tab(ss2.tab_bar, 2).attention == true
@@ -129,8 +141,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       shell_state: ss,
       session_b: session_b
     } do
-      {ss2, _ws, _effects} =
-        Traditional.on_agent_event(ss, workspace(), session_b, {:error, "boom"})
+      {ss2, _ws} = Traditional.on_agent_event(ss, workspace(), session_b, {:error, "boom"})
 
       assert tab(ss2.tab_bar, 2).attention == true
       assert tab(ss2.tab_bar, 1).attention == false
@@ -143,12 +154,10 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       # Streaming text from a background session must not reach this callback's
       # mutation path — the delta is purely a no-op so the active tab's UI
       # never re-renders for unrelated streaming.
-      {ss2, ws2, effects} =
-        Traditional.on_agent_event(ss, workspace(), session_b, {:text_delta, "hello"})
+      {ss2, ws2} = Traditional.on_agent_event(ss, workspace(), session_b, {:text_delta, "hello"})
 
       assert ss2 == ss
       assert ws2 == workspace()
-      assert effects == []
     end
 
     test "events from a session that no longer maps to any tab are silently dropped", %{
@@ -156,8 +165,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
     } do
       ghost = spawn(fn -> :ok end)
 
-      {ss2, _ws, _effects} =
-        Traditional.on_agent_event(ss, workspace(), ghost, {:status_changed, :error})
+      {ss2, _ws} = Traditional.on_agent_event(ss, workspace(), ghost, {:status_changed, :error})
 
       assert ss2.tab_bar == ss.tab_bar
     end
@@ -179,7 +187,10 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         shell_runtime:
           Runtime.new(
             Runtime.default_entry(),
-            %TraditionalState{agent: %AgentState{}, tab_bar: tab_bar}
+            TraditionalState.set_tab_bar(
+              TraditionalState.replace_agent(%TraditionalState{}, %AgentState{}),
+              tab_bar
+            )
           )
       }
 
@@ -226,26 +237,27 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       assert effects == [{:render, 16}]
     end
 
-    test "tool_started and tool_ended fall back for map states without a session" do
-      state = %{agent: %AgentState{}, agent_ui: UIState.new()}
+    test "tool_started and tool_ended update an editor without an agent session" do
+      state = event_state(%AgentState{})
 
       {state, effects} = Events.handle(state, {:tool_started, "read_file", %{}})
-      assert AgentState.active_tool_name(state.agent) == "read_file"
+      assert AgentState.active_tool_name(AgentAccess.agent(state)) == "read_file"
       assert effects == [{:render, 16}]
 
       {state, effects} = Events.handle(state, {:tool_ended, "read_file", "contents", :done})
-      assert AgentState.active_tool_name(state.agent) == nil
+      assert AgentState.active_tool_name(AgentAccess.agent(state)) == nil
       assert effects == [{:render, 16}]
     end
 
     test "status_changed clears active_tool_name outside tool execution" do
-      state = %{agent: %AgentState{} |> AgentState.set_active_tool_name("read_file")}
+      agent = %AgentState{} |> AgentState.set_active_tool_name("read_file")
+      state = event_state(agent)
 
       {state, _effects} = Events.handle(state, {:status_changed, :tool_executing})
-      assert AgentState.active_tool_name(state.agent) == "read_file"
+      assert AgentState.active_tool_name(AgentAccess.agent(state)) == "read_file"
 
       {state, effects} = Events.handle(state, {:status_changed, :idle})
-      assert AgentState.active_tool_name(state.agent) == nil
+      assert AgentState.active_tool_name(AgentAccess.agent(state)) == nil
       assert effects == [:render]
     end
 
@@ -262,7 +274,13 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         port_manager: self(),
         workspace: %SessionState{viewport: Viewport.new(24, 80), agent_ui: UIState.new()},
         shell_runtime:
-          Runtime.new(Runtime.default_entry(), %TraditionalState{agent: agent, tab_bar: tab_bar})
+          Runtime.new(
+            Runtime.default_entry(),
+            TraditionalState.set_tab_bar(
+              TraditionalState.replace_agent(%TraditionalState{}, agent),
+              tab_bar
+            )
+          )
       }
 
       {state, effects} = Events.handle(state, {:context_usage, 95, 100})
@@ -304,7 +322,10 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         shell_runtime:
           Runtime.new(
             Runtime.default_entry(),
-            %TraditionalState{agent: %AgentState{}, tab_bar: tb}
+            TraditionalState.set_tab_bar(
+              TraditionalState.replace_agent(%TraditionalState{}, %AgentState{}),
+              tb
+            )
           )
       }
 
@@ -355,7 +376,10 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         shell_runtime:
           Runtime.new(
             Runtime.default_entry(),
-            %TraditionalState{agent: %AgentState{}, tab_bar: tb}
+            TraditionalState.set_tab_bar(
+              TraditionalState.replace_agent(%TraditionalState{}, %AgentState{}),
+              tb
+            )
           )
       }
 
@@ -402,7 +426,10 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         shell_runtime:
           Runtime.new(
             Runtime.default_entry(),
-            %TraditionalState{agent: %AgentState{}, tab_bar: tb}
+            TraditionalState.set_tab_bar(
+              TraditionalState.replace_agent(%TraditionalState{}, %AgentState{}),
+              tb
+            )
           )
       }
 
@@ -435,7 +462,10 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         shell_runtime:
           Runtime.new(
             Runtime.default_entry(),
-            %TraditionalState{agent: %AgentState{}, tab_bar: tb}
+            TraditionalState.set_tab_bar(
+              TraditionalState.replace_agent(%TraditionalState{}, %AgentState{}),
+              tb
+            )
           )
       }
 

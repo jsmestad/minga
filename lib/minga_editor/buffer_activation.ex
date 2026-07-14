@@ -1,7 +1,6 @@
 defmodule MingaEditor.BufferActivation do
   @moduledoc "Focused workflow for activating a buffer and synchronizing shell presentation."
 
-  alias MingaEditor.Handlers.EffectHandler
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Workflow, as: ShellWorkflow
@@ -41,13 +40,11 @@ defmodule MingaEditor.BufferActivation do
         EditorState.set_buffer_add_context(state, :open)
 
       :open ->
-        {runtime, workspace, effects} =
-          Runtime.route_buffer_switched(state.shell_runtime, state.workspace)
+        {runtime, workspace} = Runtime.route_buffer_switched(state.shell_runtime, state.workspace)
 
         state
         |> EditorState.apply_shell_runtime_transition(runtime)
         |> EditorState.set_workspace(workspace)
-        |> EffectHandler.apply_buffer_activation_effects(effects)
     end
   end
 end

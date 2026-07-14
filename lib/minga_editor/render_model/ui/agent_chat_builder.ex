@@ -9,6 +9,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   alias MingaEditor.Agent.SemanticUI.Registry, as: SemanticUIRegistry
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
+  alias MingaEditor.State.AgentAccess
   alias MingaEditor.Agent.View.PromptRenderWindow
   alias MingaEditor.UI.Theme
   alias Minga.Buffer
@@ -59,7 +60,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     {messages_with_ids, styled_cache} =
       visible_message_slice(panel, full_pairs, full_styled_cache)
 
-    pending_approval = ctx.shell_state.agent.pending_approval
+    pending_approval = AgentAccess.agent(ctx).pending_approval
 
     gui_messages =
       messages_with_ids
@@ -81,7 +82,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
     help_groups =
       if help_visible do
-        Minga.Keymap.Scope.Agent.help_groups(view.focus)
+        Minga.Keymap.Scope.Agent.help_groups(UIState.View.focus(view))
       else
         []
       end
@@ -90,7 +91,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
     %AgentChat{
       visible?: true,
-      status: ctx.shell_state.agent.runtime.status || :idle,
+      status: AgentAccess.agent(ctx).runtime.status || :idle,
       model_name: display_model_name(panel.model_name),
       thinking_level: panel.thinking_level,
       prompt: prompt_text,

@@ -9,6 +9,7 @@ defmodule MingaEditor.Sidebar.BuiltinSurfaces do
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
   alias MingaEditor.Layout
+  alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
 
@@ -70,7 +71,7 @@ defmodule MingaEditor.Sidebar.BuiltinSurfaces do
   end
 
   def handle_git_status_action(%EditorState{} = state, "activate", _context) do
-    if EditorState.git_status_panel(state) do
+    if SidebarWorkflow.git_status_panel(state) do
       focus_git_status(state)
     else
       execute_git_porcelain_command(state, :git_status_toggle)
@@ -88,7 +89,7 @@ defmodule MingaEditor.Sidebar.BuiltinSurfaces do
   end
 
   def handle_observatory_action(%EditorState{} = state, "activate", _context) do
-    if EditorState.observatory_visible?(state) do
+    if SidebarWorkflow.observatory_visible?(state) do
       focus_observatory(state)
     else
       state
@@ -131,23 +132,19 @@ defmodule MingaEditor.Sidebar.BuiltinSurfaces do
 
   @spec focus_git_status(EditorState.t()) :: EditorState.t()
   defp focus_git_status(state) do
-    :ok = Sidebar.focus_left(EditorState.sidebar_registry(state), @git_status_id)
-
     state
     |> EditorState.set_keymap_scope(:git_status)
-    |> EditorState.set_sidebar_active_id(@git_status_id)
+    |> SidebarWorkflow.select(@git_status_id)
     |> Layout.invalidate()
     |> EditorState.invalidate_all_windows()
   end
 
   @spec focus_observatory(EditorState.t()) :: EditorState.t()
   defp focus_observatory(state) do
-    :ok = Sidebar.focus_left(EditorState.sidebar_registry(state), @observatory_id)
-
     state
     |> EditorState.update_file_tree(&FileTreeState.unfocus/1)
     |> EditorState.set_keymap_scope(:editor)
-    |> EditorState.set_sidebar_active_id(@observatory_id)
+    |> SidebarWorkflow.select(@observatory_id)
     |> Layout.invalidate()
     |> EditorState.invalidate_all_windows()
   end

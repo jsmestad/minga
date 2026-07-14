@@ -66,6 +66,19 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
     assert switched.injection_ranges == with_spans.injection_ranges
   end
 
+  test "already-read recovered contents are applied by the SessionRestore owner", %{tmp_dir: dir} do
+    path = Path.join(dir, "recovered.ex")
+    File.write!(path, "old\n")
+    state = initial_state(dir)
+    entry = %{path: path, swap_path: Path.join(dir, "recovered.swap"), swap_mtime: 0}
+
+    recovered = SessionRestore.apply_recovered_entries(state, [{entry, {:ok, path, "new\n"}}])
+    buffer = recovered.workspace.buffers.active
+
+    assert Minga.Buffer.file_path(buffer) == path
+    assert Minga.Buffer.content(buffer) == "new\n"
+  end
+
   test "a deleted saved active file is not reopened as an empty buffer", %{tmp_dir: dir} do
     existing_path = Path.join(dir, "existing.ex")
     missing_path = Path.join(dir, "deleted.ex")

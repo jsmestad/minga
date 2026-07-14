@@ -75,29 +75,29 @@ defmodule MingaEditor.Test.FakeShell do
           pid(),
           atom()
         ) ::
-          {map(), MingaEditor.Session.State.t(), [MingaEditor.effect()]}
+          {map(), MingaEditor.Session.State.t()}
   def on_buffer_added(shell_state, _prev_workspace, workspace, _buffer_pid, _context) do
-    {shell_state, workspace, []}
+    {shell_state, workspace}
   end
 
   @impl true
   @spec on_buffer_switched(map(), MingaEditor.Session.State.t()) ::
-          {map(), MingaEditor.Session.State.t(), [MingaEditor.effect()]}
-  def on_buffer_switched(shell_state, workspace), do: {shell_state, workspace, []}
+          {map(), MingaEditor.Session.State.t()}
+  def on_buffer_switched(shell_state, workspace), do: {shell_state, workspace}
 
   @impl true
   @spec on_buffer_died(map(), MingaEditor.Session.State.t(), pid()) ::
-          {map(), MingaEditor.Session.State.t(), [MingaEditor.effect()]}
-  def on_buffer_died(shell_state, workspace, _dead_pid), do: {shell_state, workspace, []}
+          {map(), MingaEditor.Session.State.t()}
+  def on_buffer_died(shell_state, workspace, _dead_pid), do: {shell_state, workspace}
 
   @impl true
   @spec on_agent_event(map(), MingaEditor.Session.State.t(), pid(), term()) ::
-          {map(), MingaEditor.Session.State.t(), [MingaEditor.effect()]}
+          {map(), MingaEditor.Session.State.t()}
   def on_agent_event(%{record_agent_events?: true} = shell_state, workspace, _session, event) do
-    {%{shell_state | events: [event | Map.get(shell_state, :events, [])]}, workspace, []}
+    {%{shell_state | events: [event | Map.get(shell_state, :events, [])]}, workspace}
   end
 
-  def on_agent_event(shell_state, workspace, _session, _event), do: {shell_state, workspace, []}
+  def on_agent_event(shell_state, workspace, _session, _event), do: {shell_state, workspace}
 
   @impl true
   @spec owns_agent_session?(map(), pid()) :: boolean()

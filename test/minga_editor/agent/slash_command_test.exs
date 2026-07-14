@@ -233,11 +233,13 @@ defmodule MingaEditor.Agent.SlashCommandTest do
         }
       }
       |> EditorState.set_tab_bar(tab_bar)
-      |> EditorState.set_agent(%AgentState{
-        runtime: %RuntimeState{status: :idle},
-        error: nil,
-        spinner_timer: nil
-      })
+      |> AgentAccess.update_agent(fn _current ->
+        %AgentState{
+          runtime: %RuntimeState{status: :idle},
+          error: nil,
+          spinner_timer: nil
+        }
+      end)
     end
 
     test "returns error for non-slash input" do
@@ -335,7 +337,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
 
       assert Session.status(session) == :plan
       assert state.shell_runtime.state.notice.message == "Plan mode enabled"
-      assert state.shell_runtime.state.agent.runtime.status == :plan
+      assert AgentAccess.agent(state).runtime.status == :plan
 
       assert Enum.any?(Session.messages(session), fn
                {:system, text, :info} -> text =~ "Plan mode" and text =~ "/exec"
@@ -350,7 +352,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
 
       assert Session.status(session) == :idle
       assert state.shell_runtime.state.notice.message == "Execution mode enabled"
-      assert state.shell_runtime.state.agent.runtime.status == :idle
+      assert AgentAccess.agent(state).runtime.status == :idle
 
       assert Enum.any?(Session.messages(session), fn
                {:system, text, :info} -> text =~ "Execution mode" and text =~ "/plan"

@@ -6,6 +6,7 @@ defmodule Minga.Test.ScopedInputHelpers do
   alias MingaEditor.Agent.UIState
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
@@ -37,12 +38,17 @@ defmodule Minga.Test.ScopedInputHelpers do
         visible: Keyword.get(opts, :panel_visible, false),
         input_focused: Keyword.get(opts, :input_focused, false),
         prompt_buffer: prompt_buf
-      },
-      view: %UIState.View{
-        active: Keyword.get(opts, :agentic_active, false),
-        focus: Keyword.get(opts, :focus, :chat)
       }
     }
+
+    agentic =
+      if Keyword.get(opts, :agentic_active, false) do
+        agentic
+        |> UIState.activate(nil, nil)
+        |> UIState.set_focus(Keyword.get(opts, :focus, :chat))
+      else
+        agentic
+      end
 
     tab_bar =
       if Keyword.get(opts, :agentic_active, false) do
@@ -69,7 +75,9 @@ defmodule Minga.Test.ScopedInputHelpers do
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),
-          %MingaEditor.Shell.Traditional.State{agent: agent, tab_bar: tab_bar}
+          %TraditionalState{}
+          |> TraditionalState.replace_agent(agent)
+          |> TraditionalState.set_tab_bar(tab_bar)
         )
     }
   end

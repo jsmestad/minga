@@ -9,6 +9,8 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Entry
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.Observatory, as: ObservatoryState
+  alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Viewport
 
@@ -92,8 +94,8 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
         state =
           Commands.execute(base_state(unquote(Macro.escape(caps))), :toggle_beam_observatory)
 
-        assert state.shell_runtime.state.observatory_visible == true
-        assert {timer, _token} = state.shell_runtime.state.observatory_timer
+        assert state |> observatory() |> ObservatoryState.visible?()
+        assert timer = state |> observatory() |> ObservatoryState.timer()
 
         Process.cancel_timer(timer)
       end
@@ -103,14 +105,16 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
       token = make_ref()
       timer = Process.send_after(self(), {:observatory_tick, token}, 60_000)
 
-      state = MingaEditor.State.open_observatory(base_state(@gui), {timer, token})
+      state = SidebarWorkflow.open_observatory(base_state(@gui), {timer, token})
 
-      state = MingaEditor.State.set_observatory_data(state, %{tree: :placeholder})
+      state =
+        SidebarWorkflow.replace_observatory_data(state, Observatory.Data.visible(nil, []))
+
       state = Commands.execute(state, :toggle_beam_observatory)
 
-      assert state.shell_runtime.state.observatory_visible == false
-      assert state.shell_runtime.state.observatory_timer == nil
-      assert state.shell_runtime.state.observatory_data == nil
+      refute state |> observatory() |> ObservatoryState.visible?()
+      assert state |> observatory() |> ObservatoryState.timer() == nil
+      assert state |> observatory() |> ObservatoryState.data() == nil
     end
 
     test "is a no-op for the legacy Zig cell-grid frontend (no semantic_ui)" do
@@ -138,7 +142,7 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
 
     test "ignores stale refresh ticks" do
       state = Commands.execute(base_state(@gui), :toggle_beam_observatory)
-      assert {timer, _token} = state.shell_runtime.state.observatory_timer
+      assert timer = state |> observatory() |> ObservatoryState.timer()
 
       assert {:noreply, ^state} = MingaEditor.handle_info({:observatory_tick, make_ref()}, state)
 
@@ -151,10 +155,13 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
       token = make_ref()
       state = observatory_state(@gui, token)
 
-      # The tick handler returns the *unchanged* state: collection does not run
-      # inline (no data set) and no next tick is scheduled here.
-      assert {:noreply, ^state} = MingaEditor.handle_info({:observatory_tick, token}, state)
-      assert state.shell_runtime.state.observatory_data == nil
+      # The tick handler only marks this token collecting: data remains unset
+      # and no next tick is scheduled until the async result lands.
+      assert {:noreply, collecting_state} =
+               MingaEditor.handle_info({:observatory_tick, token}, state)
+
+      assert collecting_state |> observatory() |> ObservatoryState.data() == nil
+      assert ObservatoryState.collecting?(observatory(collecting_state), token)
 
       # The collection ran in a supervised Task and reported back as a message,
       # exactly like a picker/async-action result.
@@ -174,13 +181,16 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
       token = make_ref()
       state = observatory_state(@gui, token)
       data = Observatory.Data.visible(nil, [])
+      {:noreply, collecting_state} = MingaEditor.handle_info({:observatory_tick, token}, state)
 
       assert {:noreply, new_state} =
-               MingaEditor.handle_info({:observatory_data_result, token, data}, state)
+               MingaEditor.handle_info({:observatory_data_result, token, data}, collecting_state)
 
-      assert new_state.shell_runtime.state.observatory_data == data
+      assert new_state |> observatory() |> ObservatoryState.data() == data
 
-      assert {next_timer, next_token} = new_state.shell_runtime.state.observatory_timer
+      next_observatory = observatory(new_state)
+      next_timer = ObservatoryState.timer(next_observatory)
+      next_token = next_observatory.token
       assert is_reference(next_timer)
       # A fresh token gates the next cycle; the prior token is now stale.
       assert next_token != token
@@ -199,13 +209,15 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
       assert {:noreply, ^state} =
                MingaEditor.handle_info({:observatory_data_result, make_ref(), data}, state)
 
-      assert state.shell_runtime.state.observatory_data == nil
+      assert state |> observatory() |> ObservatoryState.data() == nil
     end
   end
 
   # Builds editor state with the observatory open and a known refresh token, so
   # current_observatory_token?/2 matches without scheduling a real timer.
   defp observatory_state(caps, token) do
-    MingaEditor.State.open_observatory(base_state(caps), {make_ref(), token})
+    SidebarWorkflow.open_observatory(base_state(caps), {make_ref(), token})
   end
+
+  defp observatory(state), do: SidebarWorkflow.observatory(state)
 end

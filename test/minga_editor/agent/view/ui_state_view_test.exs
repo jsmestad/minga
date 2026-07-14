@@ -2,18 +2,19 @@ defmodule MingaEditor.Agent.UIState.ViewFunctionsTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.UIState.View
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Windows
 
   describe "new/0" do
     test "starts inactive" do
       ui = UIState.new()
-      refute ui.view.active
+      refute View.active?(ui.view)
     end
 
     test "starts with focus on :chat" do
       ui = UIState.new()
-      assert ui.view.focus == :chat
+      assert View.focus(ui.view) == :chat
     end
 
     test "starts with preview scroll at 0" do
@@ -23,17 +24,17 @@ defmodule MingaEditor.Agent.UIState.ViewFunctionsTest do
 
     test "starts with no saved windows" do
       ui = UIState.new()
-      assert ui.view.saved_windows == nil
+      assert ui.view.presentation.saved_windows == nil
     end
 
     test "starts with no pending prefix" do
       ui = UIState.new()
-      assert ui.view.pending_prefix == nil
+      assert View.pending_prefix(ui.view) == nil
     end
 
     test "starts with no saved file tree" do
       ui = UIState.new()
-      assert ui.view.saved_file_tree == nil
+      assert ui.view.presentation.saved_file_tree == nil
     end
 
     test "starts with chat_width_pct at 65" do
@@ -45,31 +46,31 @@ defmodule MingaEditor.Agent.UIState.ViewFunctionsTest do
   describe "activate/3" do
     test "sets active to true" do
       ui = UIState.new() |> UIState.activate(%Windows{}, %FileTreeState{})
-      assert ui.view.active
+      assert View.active?(ui.view)
     end
 
     test "saves the windows layout" do
       windows = %Windows{tree: nil, map: %{}, active: 1, next_id: 3}
       ui = UIState.new() |> UIState.activate(windows, %FileTreeState{})
-      assert ui.view.saved_windows == windows
+      assert ui.view.presentation.saved_windows == windows
     end
 
     test "saves the file tree state" do
       ft = %FileTreeState{focused: true}
       ui = UIState.new() |> UIState.activate(%Windows{}, ft)
-      assert ui.view.saved_file_tree == ft
+      assert ui.view.presentation.saved_file_tree == ft
     end
 
     test "resets focus to :chat" do
-      ui = put_in(UIState.new().view.focus, :file_viewer)
+      ui = UIState.new() |> UIState.set_focus(:file_viewer)
       ui = UIState.activate(ui, %Windows{}, %FileTreeState{})
-      assert ui.view.focus == :chat
+      assert View.focus(ui.view) == :chat
     end
 
     test "clears pending prefix" do
-      ui = put_in(UIState.new().view.pending_prefix, :z)
+      ui = UIState.new() |> UIState.set_prefix(:z)
       ui = UIState.activate(ui, %Windows{}, %FileTreeState{})
-      assert ui.view.pending_prefix == nil
+      assert View.pending_prefix(ui.view) == nil
     end
   end
 
@@ -83,7 +84,7 @@ defmodule MingaEditor.Agent.UIState.ViewFunctionsTest do
         |> UIState.activate(windows, ft)
 
       {new_ui, restored_win, restored_ft} = UIState.deactivate(ui)
-      refute new_ui.view.active
+      refute View.active?(new_ui.view)
       assert restored_win == windows
       assert restored_ft == ft
     end
@@ -94,8 +95,8 @@ defmodule MingaEditor.Agent.UIState.ViewFunctionsTest do
         |> UIState.activate(%Windows{}, %FileTreeState{})
 
       {new_ui, _, _} = UIState.deactivate(ui)
-      assert new_ui.view.saved_windows == nil
-      assert new_ui.view.saved_file_tree == nil
+      assert new_ui.view.presentation.saved_windows == nil
+      assert new_ui.view.presentation.saved_file_tree == nil
     end
 
     test "returns nil when no saved state exists" do
@@ -105,51 +106,50 @@ defmodule MingaEditor.Agent.UIState.ViewFunctionsTest do
     end
 
     test "resets focus to :chat" do
-      base = UIState.new()
-      ui = %{base | view: %{base.view | active: true, focus: :file_viewer}}
+      ui = UIState.new() |> UIState.activate(nil, nil) |> UIState.set_focus(:file_viewer)
       {new_ui, _, _} = UIState.deactivate(ui)
-      assert new_ui.view.focus == :chat
+      assert View.focus(new_ui.view) == :chat
     end
 
     test "clears pending prefix" do
-      base = UIState.new()
-      ui = %{base | view: %{base.view | active: true, pending_prefix: :bracket_next}}
+      ui = UIState.new() |> UIState.activate(nil, nil) |> UIState.set_prefix(:bracket_next)
       {new_ui, _, _} = UIState.deactivate(ui)
-      assert new_ui.view.pending_prefix == nil
+      assert View.pending_prefix(new_ui.view) == nil
     end
   end
 
   describe "set_focus/2" do
     test "switches focus to :file_viewer" do
       ui = UIState.new() |> UIState.set_focus(:file_viewer)
-      assert ui.view.focus == :file_viewer
+      assert View.focus(ui.view) == :file_viewer
     end
 
     test "switches focus to :chat" do
       ui =
-        put_in(UIState.new().view.focus, :file_viewer)
+        UIState.new()
+        |> UIState.set_focus(:file_viewer)
         |> UIState.set_focus(:chat)
 
-      assert ui.view.focus == :chat
+      assert View.focus(ui.view) == :chat
     end
   end
 
   describe "prefix state machine" do
     test "set_prefix/2 sets the pending prefix" do
       ui = UIState.new() |> UIState.set_prefix(:g)
-      assert ui.view.pending_prefix == :g
+      assert View.pending_prefix(ui.view) == :g
     end
 
     test "set_prefix/2 accepts all valid prefixes" do
       for prefix <- [:g, :z, :bracket_next, :bracket_prev, nil] do
         ui = UIState.new() |> UIState.set_prefix(prefix)
-        assert ui.view.pending_prefix == prefix
+        assert View.pending_prefix(ui.view) == prefix
       end
     end
 
     test "clear_prefix/1 resets to nil" do
-      ui = put_in(UIState.new().view.pending_prefix, :z) |> UIState.clear_prefix()
-      assert ui.view.pending_prefix == nil
+      ui = UIState.new() |> UIState.set_prefix(:z) |> UIState.clear_prefix()
+      assert View.pending_prefix(ui.view) == nil
     end
   end
 

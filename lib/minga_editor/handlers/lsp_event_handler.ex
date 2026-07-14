@@ -1,8 +1,14 @@
 defmodule MingaEditor.Handlers.LspEventHandler do
   @moduledoc """
-  Focused handler for Editor GenServer LSP and completion timer events.
+  Owns Editor-side LSP, completion, and formatting response actions.
 
-  Extracts LSP response dispatch, completion debounce flushing, completion resolve flushing, and LSP debounce timers from the Editor GenServer into `handle/2` callbacks that return `{state, effects}`.
+  `dispatch/2` applies tracked state and then renders in handler order. Request
+  references, operation ids, tab ids, and formatting refs reject stale replies
+  before mutation. LSP clients and format workers retain their existing OTP
+  supervision; debounce timers are created by the Editor-side request owners
+  and received here by the same Editor process. Timeouts cancel the tracked
+  format operation, unknown replies are ignored or logged, and terminal
+  rendering happens only after response handling completes.
   """
 
   alias MingaEditor.CompletionHandling
@@ -18,6 +24,13 @@ defmodule MingaEditor.Handlers.LspEventHandler do
 
   @typedoc "Effects that the LSP event handler may return."
   @type lsp_effect :: :render_now
+
+  @doc "Applies one LSP/completion message and its focused render action."
+  @spec dispatch(EditorState.t(), term()) :: EditorState.t()
+  def dispatch(%EditorState{} = state, message) do
+    {state, effects} = handle(state, message)
+    apply_effects(state, effects)
+  end
 
   @doc """
   Dispatches an LSP or completion event to the appropriate handler.
@@ -102,6 +115,14 @@ defmodule MingaEditor.Handlers.LspEventHandler do
   end
 
   def handle(state, _msg), do: {state, []}
+
+  @spec apply_effects(EditorState.t(), [lsp_effect()]) :: EditorState.t()
+  defp apply_effects(state, []), do: state
+
+  defp apply_effects(state, [:render_now | rest]) do
+    state = MingaEditor.Renderer.render_or_async(state)
+    apply_effects(state, rest)
+  end
 
   @spec dispatch_format_response(EditorState.t(), reference(), term()) ::
           {EditorState.t(), [lsp_effect()]}

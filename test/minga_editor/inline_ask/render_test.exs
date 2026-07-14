@@ -4,8 +4,10 @@ defmodule MingaEditor.InlineAsk.RenderTest do
   alias Minga.Core.Decorations
   alias Minga.Project.FileRef
   alias MingaEditor.InlineAsk.Render
+  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
+  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.InlineAsk
 
   test "merge_decorations adds one dynamic block for the active buffer" do
@@ -23,11 +25,13 @@ defmodule MingaEditor.InlineAsk.RenderTest do
 
     ask = InlineAsk.append_input(ask, "why?")
 
-    state = %{
+    state = %EditorState{
+      port_manager: nil,
+      workspace: %SessionState{viewport: MingaEditor.Viewport.new(24, 80)},
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),
-          %TraditionalState{inline_asks: %{buffer_pid => ask}}
+          TraditionalState.activate_inline_ask(%TraditionalState{}, ask)
         )
     }
 
@@ -62,7 +66,7 @@ defmodule MingaEditor.InlineAsk.RenderTest do
         0
       )
 
-    state = %{shell_state: %TraditionalState{inline_asks: %{buffer_pid => ask}}}
+    state = %{shell_state: TraditionalState.activate_inline_ask(%TraditionalState{}, ask)}
     decorations = Render.merge_decorations(Decorations.new(), state, buffer_pid)
 
     assert Decorations.has_block_decorations?(decorations)
@@ -82,11 +86,13 @@ defmodule MingaEditor.InlineAsk.RenderTest do
         0
       )
 
-    state = %{
+    state = %EditorState{
+      port_manager: nil,
+      workspace: %SessionState{viewport: MingaEditor.Viewport.new(24, 80)},
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),
-          %TraditionalState{inline_asks: %{active_buffer => ask}}
+          TraditionalState.activate_inline_ask(%TraditionalState{}, ask)
         )
     }
 

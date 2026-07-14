@@ -24,7 +24,8 @@ defmodule MingaEditor.Input.InlineOverlay do
   Variant behaviour for an inline overlay input handler.
 
   * `:store` reads the variant's per-buffer overlay store off editor state.
-  * `:set_store` writes an updated store back onto editor state.
+  * `:replace` replaces one overlay through the focused surface owner.
+  * `:cancel` removes one overlay through the focused surface owner.
   * `:state_module` is the variant state module (for `active/2`, `put/2`,
     `dismiss/2`, `thinking/2`, `fail/2`, `append_input/2`, `backspace/1`,
     `agent_prompt/1`).
@@ -34,7 +35,8 @@ defmodule MingaEditor.Input.InlineOverlay do
   """
   @type spec :: %{
           store: (EditorState.t() -> %{pid() => struct()}),
-          set_store: (EditorState.t(), %{pid() => struct()} -> EditorState.t()),
+          replace: (EditorState.t(), struct() -> EditorState.t()),
+          cancel: (EditorState.t(), pid() | nil -> {EditorState.t(), pid() | nil}),
           state_module: module(),
           session_starter: (String.t(), String.t(), keyword() -> {:ok, pid()} | {:error, term()}),
           fail_prefix: String.t()
@@ -59,22 +61,15 @@ defmodule MingaEditor.Input.InlineOverlay do
 
   @doc "Writes an updated overlay back into its store on editor state."
   @spec update(state(), struct(), spec()) :: state()
-  def update(state, overlay, spec) do
-    state
-    |> spec.store.()
-    |> spec.state_module.put(overlay)
-    |> then(&spec.set_store.(state, &1))
-  end
+  def update(state, overlay, spec), do: spec.replace.(state, overlay)
 
   @doc "Stops the overlay's session and removes it from its store."
   @spec dismiss(state(), struct(), spec()) :: state()
   def dismiss(state, overlay, spec) do
     MingaAgent.EphemeralSession.stop(overlay.session_pid)
 
-    {store, _session_pid} =
-      state |> spec.store.() |> spec.state_module.dismiss(overlay.buffer_pid)
-
-    spec.set_store.(state, store)
+    {state, _session_pid} = spec.cancel.(state, overlay.buffer_pid)
+    state
   end
 
   @doc "Appends a printable codepoint to the prompt, honouring modifier gating."

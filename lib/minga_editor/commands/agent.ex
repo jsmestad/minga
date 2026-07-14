@@ -288,7 +288,7 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Returns from the agent view to the recorded editor context without stopping the session."
   @spec return_to_editor(state()) :: state()
   def return_to_editor(state) do
-    return_target = AgentAccess.view(state).return_target
+    return_target = state |> AgentAccess.view() |> UIState.View.return_target()
 
     case target_file_tab_id(EditorState.tab_bar(state), return_target) do
       {:exact, id} ->
@@ -1518,7 +1518,7 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Switches focus between chat and file viewer panels."
   @spec scope_switch_focus(state()) :: state()
   def scope_switch_focus(state) do
-    if AgentAccess.view(state).focus == :chat do
+    if state |> AgentAccess.view() |> UIState.View.focus() == :chat do
       update_agent_ui(state, &UIState.set_focus(&1, :file_viewer))
     else
       update_agent_ui(state, &UIState.set_focus(&1, :chat))
@@ -1649,12 +1649,17 @@ defmodule MingaEditor.Commands.Agent do
   end
 
   @spec dismiss_agent_prefix_or_modal(state(), UIState.View.t()) :: state()
-  defp dismiss_agent_prefix_or_modal(state, %{pending_prefix: nil}) do
+  defp dismiss_agent_prefix_or_modal(state, view) do
+    dismiss_agent_prefix(state, UIState.View.pending_prefix(view))
+  end
+
+  @spec dismiss_agent_prefix(state(), UIState.View.prefix()) :: state()
+  defp dismiss_agent_prefix(state, nil) do
     panel = AgentAccess.panel(state)
     dismiss_agent_panel_or_modal(state, panel)
   end
 
-  defp dismiss_agent_prefix_or_modal(state, _view) do
+  defp dismiss_agent_prefix(state, _prefix) do
     update_agent_ui(state, &UIState.clear_prefix/1)
   end
 

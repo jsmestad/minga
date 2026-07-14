@@ -10,8 +10,12 @@ defmodule MingaEditor.State.AgentAccess do
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.UIState.View
+  alias MingaEditor.Shell.Traditional.AgentSurfaces
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
+  alias MingaEditor.State.InlineAsk
+  alias MingaEditor.State.InlineEdit
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
   alias MingaEditor.Shell.Entry
@@ -23,8 +27,15 @@ defmodule MingaEditor.State.AgentAccess do
 
   @doc "Returns the agent session lifecycle state."
   @spec agent(EditorState.t() | map()) :: AgentState.t()
-  def agent(%EditorState{shell_runtime: %Runtime{state: %{agent: a}}}), do: a
-  def agent(%{agent: a}), do: a
+  def agent(%EditorState{shell_runtime: %Runtime{state: %TraditionalState{} = shell_state}}),
+    do: TraditionalState.agent(shell_state)
+
+  def agent(%{shell_state: %TraditionalState{} = shell_state}),
+    do: TraditionalState.agent(shell_state)
+
+  def agent(%{agent_surfaces: %AgentSurfaces{} = surfaces}),
+    do: AgentSurfaces.presentation(surfaces)
+
   def agent(_), do: %AgentState{}
 
   @doc "Returns the full agent UI state (wrapping Panel and View)."
@@ -67,19 +78,83 @@ defmodule MingaEditor.State.AgentAccess do
 
   @doc "Returns the agent UI focus."
   @spec focus(EditorState.t() | map()) :: atom()
-  def focus(state), do: view(state).focus
+  def focus(state), do: state |> view() |> View.focus()
 
   # ── Writers ────────────────────────────────────────────────────────────────
 
-  @doc "Updates agent session lifecycle state via a transform function."
-  @spec update_agent(EditorState.t() | map(), (AgentState.t() -> AgentState.t())) ::
-          EditorState.t() | map()
+  @doc "Updates agent session lifecycle state via the Traditional surface owner."
+  @spec update_agent(EditorState.t(), (AgentState.t() -> AgentState.t())) :: EditorState.t()
   def update_agent(%EditorState{} = state, fun) do
-    EditorState.set_agent(state, fun.(agent(state)))
+    runtime =
+      Runtime.update_traditional_state(state.shell_runtime, fn shell_state ->
+        TraditionalState.replace_agent(shell_state, fun.(TraditionalState.agent(shell_state)))
+      end)
+
+    EditorState.apply_shell_runtime_transition(state, runtime)
   end
 
-  def update_agent(%{agent: a} = state, fun) do
-    %{state | agent: fun.(a)}
+  @doc "Returns the Traditional inline ask store."
+  @spec inline_asks(EditorState.t() | map()) :: InlineAsk.store()
+  def inline_asks(%EditorState{
+        shell_runtime: %Runtime{state: %TraditionalState{} = shell_state}
+      }),
+      do: TraditionalState.inline_asks(shell_state)
+
+  def inline_asks(%{shell_state: %TraditionalState{} = shell_state}),
+    do: TraditionalState.inline_asks(shell_state)
+
+  def inline_asks(%{agent_surfaces: %AgentSurfaces{} = surfaces}),
+    do: AgentSurfaces.asks(surfaces)
+
+  def inline_asks(_state), do: %{}
+
+  @doc "Returns the Traditional inline edit store."
+  @spec inline_edits(EditorState.t() | map()) :: InlineEdit.store()
+  def inline_edits(%EditorState{
+        shell_runtime: %Runtime{state: %TraditionalState{} = shell_state}
+      }),
+      do: TraditionalState.inline_edits(shell_state)
+
+  def inline_edits(%{shell_state: %TraditionalState{} = shell_state}),
+    do: TraditionalState.inline_edits(shell_state)
+
+  def inline_edits(%{agent_surfaces: %AgentSurfaces{} = surfaces}),
+    do: AgentSurfaces.edits(surfaces)
+
+  def inline_edits(_state), do: %{}
+
+  @doc "Activates or replaces one inline ask through its surface owner."
+  @spec replace_inline_ask(EditorState.t(), InlineAsk.t()) :: EditorState.t()
+  def replace_inline_ask(%EditorState{} = state, %InlineAsk{} = ask),
+    do: update_traditional(state, &TraditionalState.replace_inline_ask(&1, ask))
+
+  @doc "Cancels one inline ask and returns its session pid."
+  @spec cancel_inline_ask(EditorState.t(), pid() | nil) :: {EditorState.t(), pid() | nil}
+  def cancel_inline_ask(%EditorState{} = state, buffer_pid) do
+    shell_state = Runtime.state(state.shell_runtime)
+    {shell_state, session_pid} = TraditionalState.cancel_inline_ask(shell_state, buffer_pid)
+
+    runtime =
+      Runtime.update_traditional_state(state.shell_runtime, fn _current -> shell_state end)
+
+    {EditorState.apply_shell_runtime_transition(state, runtime), session_pid}
+  end
+
+  @doc "Activates or replaces one inline edit through its surface owner."
+  @spec replace_inline_edit(EditorState.t(), InlineEdit.t()) :: EditorState.t()
+  def replace_inline_edit(%EditorState{} = state, %InlineEdit{} = edit),
+    do: update_traditional(state, &TraditionalState.replace_inline_edit(&1, edit))
+
+  @doc "Cancels one inline edit and returns its session pid."
+  @spec cancel_inline_edit(EditorState.t(), pid() | nil) :: {EditorState.t(), pid() | nil}
+  def cancel_inline_edit(%EditorState{} = state, buffer_pid) do
+    shell_state = Runtime.state(state.shell_runtime)
+    {shell_state, session_pid} = TraditionalState.cancel_inline_edit(shell_state, buffer_pid)
+
+    runtime =
+      Runtime.update_traditional_state(state.shell_runtime, fn _current -> shell_state end)
+
+    {EditorState.apply_shell_runtime_transition(state, runtime), session_pid}
   end
 
   @doc deprecated: "Use update_panel/2 or update_view/2 for targeted sub-struct updates"
@@ -199,5 +274,12 @@ defmodule MingaEditor.State.AgentAccess do
 
   defp set_live_agent_ui(workspace, %UIState{} = agent_ui) when is_map(workspace) do
     Map.put(workspace, :agent_ui, agent_ui)
+  end
+
+  @spec update_traditional(EditorState.t(), (TraditionalState.t() -> TraditionalState.t())) ::
+          EditorState.t()
+  defp update_traditional(%EditorState{} = state, update) do
+    runtime = Runtime.update_traditional_state(state.shell_runtime, update)
+    EditorState.apply_shell_runtime_transition(state, runtime)
   end
 end

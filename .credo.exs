@@ -33,6 +33,7 @@
           {Minga.Credo.NoRawWorkspaceSnapshotCheck, []},
           {Minga.Credo.NoLossyGuiEncoderCheck, []},
           {Minga.Credo.CommandRegistrationCheck, []},
+          {Minga.Credo.EditorStateOwnershipCheck, []},
 
           # ── Editor responsiveness (epic #2445) ─────────────────────────────
           {Minga.Credo.NoBlockingEditorCallCheck, []},

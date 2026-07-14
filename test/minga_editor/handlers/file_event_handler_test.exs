@@ -16,6 +16,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
   alias Minga.Project.FileTree
   alias MingaEditor.Handlers.FileEventHandler
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
@@ -33,7 +34,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       state = base_state()
 
       state =
-        EditorState.set_git_status_panel(state, %{
+        SidebarWorkflow.replace_git_status(state, %{
           repo_state: :normal,
           branch: "main",
           ahead: 0,
@@ -55,7 +56,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
 
       {new_state, effects} = FileEventHandler.handle(state, event)
 
-      panel = EditorState.git_status_panel(new_state)
+      panel = SidebarWorkflow.git_status_panel(new_state)
       assert panel.branch == "develop"
       assert panel.ahead == 1
       assert panel.last_commit_message == "feat: previous subject"
@@ -66,7 +67,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
     test "does not create tui state during generic panel refresh" do
       state =
         base_state()
-        |> EditorState.set_git_status_panel(%{
+        |> SidebarWorkflow.replace_git_status(%{
           repo_state: :normal,
           branch: "main",
           ahead: 0,
@@ -86,7 +87,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
 
       {new_state, _effects} = FileEventHandler.handle(state, event)
 
-      panel = EditorState.git_status_panel(new_state)
+      panel = SidebarWorkflow.git_status_panel(new_state)
       refute Map.has_key?(panel, :tui_state)
       assert ShellState.git_status_tui_state(Runtime.state(new_state.shell_runtime)) == nil
     end

@@ -14,7 +14,7 @@ defmodule MingaEditor.Input.InlineAsk do
   alias MingaAgent.EphemeralSession
   alias MingaEditor.Commands.InlineAsk, as: InlineAskCommand
   alias MingaEditor.Input.InlineOverlay, as: Overlay
-  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.InlineAsk
 
   @type state :: MingaEditor.Input.Handler.handler_state()
@@ -82,8 +82,9 @@ defmodule MingaEditor.Input.InlineAsk do
   @spec spec(keyword()) :: Overlay.spec()
   defp spec(opts) do
     %{
-      store: &EditorState.inline_asks/1,
-      set_store: &EditorState.set_inline_asks/2,
+      store: &AgentAccess.inline_asks/1,
+      replace: &AgentAccess.replace_inline_ask/2,
+      cancel: &AgentAccess.cancel_inline_ask/2,
       state_module: InlineAsk,
       session_starter: Keyword.get(opts, :session_asker, &EphemeralSession.ask/3),
       fail_prefix: "Failed to start inline ask: "

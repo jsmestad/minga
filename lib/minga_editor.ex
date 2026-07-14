@@ -43,7 +43,6 @@ defmodule MingaEditor do
   alias MingaEditor.Viewport
 
   alias MingaEditor.Handlers.BufferRegistry
-  alias MingaEditor.Handlers.EffectHandler
   alias MingaEditor.Handlers.EventDispatcher
   alias MingaEditor.Handlers.FileEventHandler
   alias MingaEditor.Handlers.GuiActionHandler
@@ -87,6 +86,7 @@ defmodule MingaEditor do
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
+  alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.Shell.Traditional.State, as: TraditionalShellState
 
   alias MingaEditor.MouseHoverTooltip
@@ -508,13 +508,11 @@ defmodule MingaEditor do
   def handle_info({:file_changed_on_disk, path} = msg, state) do
     new_state = FileWatcherHelpers.handle_file_change(state, path)
     Log.info(:editor, "External change detected: #{path}")
-    {new_state, effects} = FileEventHandler.handle(new_state, msg)
-    {:noreply, EffectHandler.apply_effects(new_state, effects)}
+    {:noreply, FileEventHandler.dispatch(new_state, msg)}
   end
 
   def handle_info({:file_tree_filter_walk, _root, _filter, _entries} = msg, state) do
-    {new_state, effects} = FileEventHandler.handle(state, msg)
-    {:noreply, EffectHandler.apply_effects(new_state, effects)}
+    {:noreply, FileEventHandler.dispatch(state, msg)}
   end
 
   def handle_info(
@@ -613,8 +611,8 @@ defmodule MingaEditor do
 
   # ── TUI SPC leader timeout ──────────────────────────────────────────────
 
-  def handle_info(:space_leader_timeout, state) do
-    new_state = MingaEditor.Input.CUA.TUISpaceLeader.handle_timeout(state)
+  def handle_info({:space_leader_timeout, generation}, state) do
+    new_state = MingaEditor.Input.CUA.TUISpaceLeader.handle_timeout(state, generation)
     {:noreply, new_state}
   end
 
@@ -624,8 +622,14 @@ defmodule MingaEditor do
   # :observatory_data_result clause), not here, so a collection that takes
   # longer than the 1s interval is effectively skipped, never queued.
   def handle_info({:observatory_tick, token}, state) do
-    if current_observatory_token?(state, token), do: spawn_observatory_collection(token)
-    {:noreply, state}
+    case SidebarWorkflow.expire_observatory_refresh(state, token) do
+      {:collect, new_state} ->
+        spawn_observatory_collection(token)
+        {:noreply, new_state}
+
+      {:stale, new_state} ->
+        {:noreply, new_state}
+    end
   end
 
   def handle_info(:observatory_tick, state) do
@@ -638,16 +642,19 @@ defmodule MingaEditor do
   # A result carrying a stale token (panel closed, or a newer tick already
   # superseded this one) is dropped without scheduling anything.
   def handle_info({:observatory_data_result, token, data}, state) do
-    if current_observatory_token?(state, token) do
+    if SidebarWorkflow.observatory_collection_current?(state, token) do
       next_token = make_ref()
       timer = Process.send_after(self(), {:observatory_tick, next_token}, 1_000)
 
-      new_state =
-        state
-        |> EditorState.set_observatory_data(data)
-        |> EditorState.set_observatory_timer({timer, next_token})
-
-      {:noreply, Renderer.render_or_async(new_state)}
+      case SidebarWorkflow.complete_observatory_refresh(
+             state,
+             token,
+             data,
+             {timer, next_token}
+           ) do
+        {:accepted, new_state} -> {:noreply, Renderer.render_or_async(new_state)}
+        {:stale, new_state} -> {:noreply, new_state}
+      end
     else
       {:noreply, state}
     end
@@ -667,8 +674,7 @@ defmodule MingaEditor do
 
   def handle_info(msg, state) when is_map_key(@handler_atom_dispatch, msg) do
     handler = @handler_atom_dispatch[msg]
-    {state, effects} = handler.handle(state, msg)
-    {:noreply, EffectHandler.apply_effects(state, effects)}
+    {:noreply, handler.dispatch(state, msg)}
   end
 
   # ── Highlight events from Parser.Manager ──────────────────────────────────────
@@ -679,8 +685,7 @@ defmodule MingaEditor do
   # All {:minga_highlight, _} messages go straight to HighlightHandler.
 
   def handle_info({:minga_highlight, _} = msg, state) do
-    {state, effects} = HighlightHandler.handle(state, msg)
-    {:noreply, EffectHandler.apply_effects(state, effects)}
+    {:noreply, HighlightHandler.dispatch(state, msg)}
   end
 
   # Remaining {:minga_input, _} messages are highlight/parser events forwarded
@@ -688,43 +693,36 @@ defmodule MingaEditor do
   # resize, key_press, paste_event, mouse_event, gui_action,
   # capabilities_updated) are matched above, so this catch-all is safe.
   def handle_info({:minga_input, _} = msg, state) do
-    {state, effects} = HighlightHandler.handle(state, msg)
-    {:noreply, EffectHandler.apply_effects(state, effects)}
+    {:noreply, HighlightHandler.dispatch(state, msg)}
   end
 
   # LSP/completion timer events routed through a focused handler.
   def handle_info({:completion_debounce, _clients, _buffer_pid} = msg, state) do
-    {state, effects} = LspEventHandler.handle(state, msg)
-    {:noreply, EffectHandler.apply_effects(state, effects)}
+    {:noreply, LspEventHandler.dispatch(state, msg)}
   end
 
   def handle_info({:lsp_response, _ref, _result} = msg, state) do
-    {state, effects} = LspEventHandler.handle(state, msg)
-    {:noreply, EffectHandler.apply_effects(state, effects)}
+    {:noreply, LspEventHandler.dispatch(state, msg)}
   end
 
   @lsp_format_timer_tags [:lsp_format_spinner, :lsp_format_cancellable, :lsp_format_timeout]
 
   def handle_info({tag, _ref} = msg, state) when tag in @lsp_format_timer_tags do
-    {state, effects} = LspEventHandler.handle(state, msg)
-    {:noreply, EffectHandler.apply_effects(state, effects)}
+    {:noreply, LspEventHandler.dispatch(state, msg)}
   end
 
   @lsp_debounce_atoms [:inlay_hint_scroll_debounce, :document_highlight_debounce]
 
   def handle_info(msg, state) when msg in @lsp_debounce_atoms do
-    {state, effects} = LspEventHandler.handle(state, msg)
-    {:noreply, EffectHandler.apply_effects(state, effects)}
+    {:noreply, LspEventHandler.dispatch(state, msg)}
   end
 
   def handle_info({:completion_resolve, _index} = msg, state) do
-    {state, effects} = LspEventHandler.handle(state, msg)
-    {:noreply, EffectHandler.apply_effects(state, effects)}
+    {:noreply, LspEventHandler.dispatch(state, msg)}
   end
 
   def handle_info(:request_code_lens_and_inlay_hints = msg, state) do
-    {state, effects} = LspEventHandler.handle(state, msg)
-    {:noreply, EffectHandler.apply_effects(state, effects)}
+    {:noreply, LspEventHandler.dispatch(state, msg)}
   end
 
   # ── Event bus messages ────────────────────────────────────────────────────────
@@ -792,11 +790,6 @@ defmodule MingaEditor do
   def handle_info(:agent_spinner_tick, state) do
     state = dispatch_agent_event(state, :spinner_tick)
     {:noreply, state}
-  end
-
-  def handle_info({:compact_result, result}, state) do
-    state = dispatch_agent_event(state, {:compact_result, result})
-    {:noreply, Renderer.render_or_async(state)}
   end
 
   # Process died. Check buffer monitors and git remote tasks.
@@ -877,8 +870,7 @@ defmodule MingaEditor do
   # ── File/git events (delegated to FileEventHandler) ─────────────────────────
 
   def handle_info({:git_remote_result, ref, _result} = msg, state) when is_reference(ref) do
-    {state, effects} = FileEventHandler.handle(state, msg)
-    {:noreply, EffectHandler.apply_effects(state, effects)}
+    {:noreply, FileEventHandler.dispatch(state, msg)}
   end
 
   # ── Async picker candidate fetching ─────────────────────────────────────
@@ -1091,19 +1083,6 @@ defmodule MingaEditor do
 
   defp apply_fetch_status(state, _meta), do: state
 
-  @spec current_observatory_token?(state(), reference()) :: boolean()
-  defp current_observatory_token?(
-         %{
-           shell_runtime: %{
-             state: %{observatory_visible: true, observatory_timer: {_timer, token}}
-           }
-         },
-         token
-       ),
-       do: true
-
-  defp current_observatory_token?(_state, _token), do: false
-
   # Run the blocking SystemObserver collection in a supervised Task so the
   # Editor GenServer mailbox stays free. The token is echoed back with the
   # result so the receiving clause can drop stale collections. Observatory
@@ -1128,7 +1107,7 @@ defmodule MingaEditor do
     if Map.has_key?(state.buffer_monitors, pid) do
       :buffer
     else
-      case handle_git_remote_task_down(state, ref, reason) do
+      case FileEventHandler.handle_remote_task_down(state, ref, reason) do
         :not_matched -> :unknown
         updated_state -> {:git_remote_task, updated_state}
       end
@@ -1143,19 +1122,6 @@ defmodule MingaEditor do
       MingaEditor.PromptUI.open(state, prompt, opts)
     else
       state
-    end
-  end
-
-  @spec handle_git_remote_task_down(EditorState.t(), reference(), term()) ::
-          :not_matched | EditorState.t()
-  defp handle_git_remote_task_down(state, ref, reason) do
-    module = :"Elixir.MingaGitPorcelain.Commands"
-
-    if git_porcelain_running?() and Code.ensure_loaded?(module) and
-         function_exported?(module, :handle_remote_task_down, 3) do
-      :erlang.apply(module, :handle_remote_task_down, [state, ref, reason])
-    else
-      :not_matched
     end
   end
 
@@ -1273,8 +1239,7 @@ defmodule MingaEditor do
   @spec route_agent_stream_batch(EditorState.t(), pid(), [term()], atom()) ::
           {:noreply, EditorState.t()}
   defp route_agent_stream_batch(state, _session_pid, batch, :active_agent) do
-    {state, effects} = Events.handle_batch(state, batch)
-    {:noreply, EffectHandler.apply_effects(state, effects)}
+    {:noreply, Events.dispatch_batch(state, batch)}
   end
 
   defp route_agent_stream_batch(state, _session_pid, _batch, _owner) do
@@ -1306,7 +1271,7 @@ defmodule MingaEditor do
 
   @spec route_active_shell_agent_event(EditorState.t(), pid(), term()) :: EditorState.t()
   defp route_active_shell_agent_event(state, session_pid, event) do
-    {runtime, workspace, effects, persistence_change} =
+    {runtime, workspace, persistence_change} =
       MingaEditor.Shell.Runtime.route_agent_event(
         state.shell_runtime,
         state.workspace,
@@ -1319,12 +1284,11 @@ defmodule MingaEditor do
     state
     |> EditorState.apply_shell_runtime_transition(runtime)
     |> EditorState.set_workspace(workspace)
-    |> EffectHandler.apply_effects(effects)
   end
 
   @spec route_stashed_shell_agent_event(EditorState.t(), pid(), term()) :: EditorState.t()
   defp route_stashed_shell_agent_event(state, session_pid, event) do
-    {runtime, workspace, effects, persistence_changes} =
+    {runtime, workspace, persistence_changes} =
       MingaEditor.Shell.Runtime.route_stashed_agent_event(
         state.shell_runtime,
         MingaEditor.Shell.Workflow.resolved_entries(),
@@ -1338,7 +1302,6 @@ defmodule MingaEditor do
     state
     |> EditorState.apply_shell_runtime_transition(runtime)
     |> EditorState.set_workspace(workspace)
-    |> EffectHandler.apply_effects(effects)
   end
 
   @spec persist_shell_changes(
@@ -1386,14 +1349,9 @@ defmodule MingaEditor do
   end
 
   @spec dispatch_agent_event(EditorState.t(), term()) :: EditorState.t()
-  defp dispatch_agent_event(state, event) do
-    {state, effects} = Events.handle(state, event)
-    EffectHandler.apply_effects(state, effects)
-  end
+  defp dispatch_agent_event(state, event), do: Events.dispatch(state, event)
 
   # ── Agent lifecycle ──────────────────────────────────────────────────────
-
-  @type effect :: EffectHandler.effect()
 
   # Tab bar, view state, capabilities, parser subscription helpers
 

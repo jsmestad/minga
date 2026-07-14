@@ -4,8 +4,11 @@ defmodule MingaEditor.Input.ObservatoryTest do
   alias Minga.SystemObserver.ProcessSnapshot
   alias Minga.SystemObserver.TreeNode
   alias MingaEditor.Input.Observatory
+  alias MingaEditor.Observatory.Data, as: ObservatoryData
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.Observatory, as: ObservatoryState
+  alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Viewport
@@ -18,8 +21,7 @@ defmodule MingaEditor.Input.ObservatoryTest do
 
       state = Observatory.inspect_process(state, pid_string)
 
-      assert %{visible: true, title: title, lines: lines} =
-               state.shell_runtime.state.observatory_inspection
+      assert %{visible: true, title: title, lines: lines} = inspection(state)
 
       assert title == "Process #{pid_string}"
       assert "Class: agent session" in lines
@@ -30,14 +32,14 @@ defmodule MingaEditor.Input.ObservatoryTest do
       state = Observatory.inspect_process(base_state(), "not-a-pid")
 
       assert %{visible: true, title: "Process not-a-pid", lines: ["Invalid BEAM PID"]} =
-               state.shell_runtime.state.observatory_inspection
+               inspection(state)
     end
 
     test "empty PID dismisses the inspection popup" do
       state = Observatory.inspect_process(base_state(), "not-a-pid")
       state = Observatory.inspect_process(state, "")
 
-      assert state.shell_runtime.state.observatory_inspection == nil
+      assert inspection(state) == nil
     end
 
     test "falls back to process info when GenServer state is unavailable" do
@@ -47,7 +49,7 @@ defmodule MingaEditor.Input.ObservatoryTest do
 
       state = Observatory.inspect_process(base_state(), :erlang.pid_to_list(pid) |> to_string())
 
-      assert %{visible: true, lines: lines} = state.shell_runtime.state.observatory_inspection
+      assert %{visible: true, lines: lines} = inspection(state)
       assert Enum.any?(lines, &String.starts_with?(&1, "GenServer state unavailable:"))
       assert "Process info:" in lines
     end
@@ -63,7 +65,13 @@ defmodule MingaEditor.Input.ObservatoryTest do
 
   defp state_with_tree(pid, process_class) do
     tree = %TreeNode{pid: pid, snapshot: snapshot(process_class), children: [], depth: 0}
-    EditorState.set_observatory_data(base_state(), %{tree: tree})
+    SidebarWorkflow.replace_observatory_data(base_state(), ObservatoryData.visible(tree, []))
+  end
+
+  defp inspection(state) do
+    state
+    |> SidebarWorkflow.observatory()
+    |> ObservatoryState.inspection()
   end
 
   defp snapshot(process_class) do

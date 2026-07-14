@@ -7,6 +7,7 @@ defmodule MingaGitPorcelain.Input.GitStatusDiffOpenTest do
   alias Minga.Git
   alias Minga.Git.Stub, as: GitStub
   alias MingaGitPorcelain.Input.GitStatus
+  alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Viewport
 
@@ -117,8 +118,8 @@ defmodule MingaGitPorcelain.Input.GitStatusDiffOpenTest do
       },
       focus_stack: [MingaEditor.Input.Scoped, MingaEditor.Input.ModeFSM]
     }
-    |> EditorState.set_git_status_panel(panel_data)
-    |> EditorState.set_git_status_tui_state(tui)
+    |> SidebarWorkflow.replace_git_status(panel_data)
+    |> SidebarWorkflow.replace_git_status_tui(tui)
   end
 
   defp buffer_content(buf) do
