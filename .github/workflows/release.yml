@@ -541,9 +541,9 @@ jobs:
                   esac
                   RELEASE_COOKIE=$(sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$cookie_file")
                   [ -n "$RELEASE_COOKIE" ] || {{ echo "error: Erlang cookie file is empty: $cookie_file" >&2; exit 1; }}
-                elif [ -n "${{MINGA_COOKIE:-}}" ]; then
-                  RELEASE_COOKIE=$MINGA_COOKIE
-                elif [ -n "${{RELEASE_COOKIE:-}}" ]; then
+                elif MINGA_COOKIE_VALUE=$(printenv MINGA_COOKIE 2>/dev/null) && [ -n "$MINGA_COOKIE_VALUE" ]; then
+                  RELEASE_COOKIE=$MINGA_COOKIE_VALUE
+                elif RELEASE_COOKIE_VALUE=$(printenv RELEASE_COOKIE 2>/dev/null) && [ -n "$RELEASE_COOKIE_VALUE" ]; then
                   : # Preserve the inherited release cookie.
                 else
                   RELEASE_COOKIE=$(LC_ALL=C od -An -N32 -tx1 /dev/urandom | tr -d '[:space:]')

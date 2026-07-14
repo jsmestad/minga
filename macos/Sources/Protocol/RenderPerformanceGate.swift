@@ -41,7 +41,7 @@ public struct RenderPerformanceBaseline: Codable, Equatable, Sendable {
     public let provenance: RenderPerformanceProvenance
 
     /// Creates one versioned set of measured p95 references.
-    public init(version: Int, fixtureVersion: String, measurementClock: String = "process_cpu",
+    public init(version: Int, fixtureVersion: String, measurementClock: String = "thread_cpu",
                 decodeApplyP95Ms: Double, commandPreparationP95Ms: Double,
                 combinedP95Ms: Double, provenance: RenderPerformanceProvenance) {
         self.version = version
@@ -93,11 +93,11 @@ public enum RenderPerformanceAggregationError: Error, Equatable, Sendable {
 /// Fail-closed production policy for optimized native rendering measurements.
 public enum RenderPerformanceGate {
     /// Baseline schema version accepted by the gate.
-    public static let supportedBaselineVersion = 2
+    public static let supportedBaselineVersion = 3
     /// Fixture identity accepted by the gate.
     public static let supportedFixtureVersion = "resident-ordinary-edit-v2"
     /// Measurement clock accepted by the gate.
-    public static let supportedMeasurementClock = "process_cpu"
+    public static let supportedMeasurementClock = "thread_cpu"
     /// Absolute p95 ceiling for each measured stage.
     public static let stageAbsoluteBudgetMs = 4.0
     /// Absolute p95 ceiling for the combined native preparation path.

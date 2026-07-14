@@ -17,8 +17,12 @@ defmodule Minga.Scripts.HomebrewFormulaGenerationTest do
     workflow = File.read!(@workflow)
 
     cookie_file = position!(workflow, ~S(if [ -n "$cookie_file" ]))
-    minga_cookie = position!(workflow, ~S(elif [ -n "${{MINGA_COOKIE:-}}" ]))
-    release_cookie = position!(workflow, ~S(elif [ -n "${{RELEASE_COOKIE:-}}" ]))
+
+    minga_cookie =
+      position!(workflow, ~S|elif MINGA_COOKIE_VALUE=$(printenv MINGA_COOKIE 2>/dev/null)|)
+
+    release_cookie =
+      position!(workflow, ~S|elif RELEASE_COOKIE_VALUE=$(printenv RELEASE_COOKIE 2>/dev/null)|)
 
     random_cookie =
       position!(workflow, ~S(RELEASE_COOKIE=$(LC_ALL=C od -An -N32 -tx1 /dev/urandom))
@@ -38,6 +42,8 @@ defmodule Minga.Scripts.HomebrewFormulaGenerationTest do
     assert workflow =~ "export RELEASE_DISTRIBUTION=none"
     assert workflow =~ "export MINGA_EXPECT_DISTRIBUTION=0"
     assert workflow =~ "export MINGA_RANDOM_RELEASE_COOKIE=1"
+    refute workflow =~ ~S(${{MINGA_COOKIE:-}})
+    refute workflow =~ ~S(${{RELEASE_COOKIE:-}})
   end
 
   defp position!(text, needle) do
