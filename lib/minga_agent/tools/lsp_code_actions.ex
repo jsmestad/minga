@@ -182,8 +182,7 @@ defmodule MingaAgent.Tools.LspCodeActions do
             {:error, "Code action \"#{title}\" has no edit or command to apply"}
 
           command ->
-            execute_command(client, command)
-            {:ok, "Executed command: #{title}"}
+            apply_command_action(client, command, title)
         end
 
       workspace_edit ->
@@ -193,17 +192,32 @@ defmodule MingaAgent.Tools.LspCodeActions do
     end
   end
 
+  @spec apply_command_action(pid(), map(), String.t()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  defp apply_command_action(client, command, title) do
+    case execute_command(client, command) do
+      :ok -> {:ok, "Executed command: #{title}"}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   @spec finish_workspace_edit(pid(), map(), String.t(), non_neg_integer(), non_neg_integer(), [
           String.t()
         ]) ::
           {:ok, String.t()} | {:error, String.t()}
   defp finish_workspace_edit(client, action, title, file_count, edit_count, []) do
-    case Map.get(action, "command") do
-      nil -> :ok
-      command -> execute_command(client, command)
-    end
+    success = "Applied \"#{title}\": #{edit_count} edits across #{file_count} files"
 
-    {:ok, "Applied \"#{title}\": #{edit_count} edits across #{file_count} files"}
+    case Map.get(action, "command") do
+      nil ->
+        {:ok, success}
+
+      command ->
+        case execute_command(client, command) do
+          :ok -> {:ok, success}
+          {:error, reason} -> {:error, "#{success}, but #{reason}"}
+        end
+    end
   end
 
   defp finish_workspace_edit(_client, _action, title, file_count, edit_count, errors) do
@@ -220,20 +234,27 @@ defmodule MingaAgent.Tools.LspCodeActions do
     end
   end
 
-  @spec execute_command(pid(), map()) :: :ok
+  @spec execute_command(pid(), map()) :: :ok | {:error, String.t()}
   defp execute_command(client, %{"command" => cmd, "arguments" => args}) do
-    params = %{"command" => cmd, "arguments" => args}
-    LspBridge.request_sync(client, "workspace/executeCommand", params, 10_000)
-    :ok
+    request_execute_command(client, cmd, args)
   end
 
   defp execute_command(client, %{"command" => cmd}) do
-    params = %{"command" => cmd, "arguments" => []}
-    LspBridge.request_sync(client, "workspace/executeCommand", params, 10_000)
-    :ok
+    request_execute_command(client, cmd, [])
   end
 
-  defp execute_command(_client, _), do: :ok
+  defp execute_command(_client, _), do: {:error, "Code action command is invalid"}
+
+  @spec request_execute_command(pid(), String.t(), list()) :: :ok | {:error, String.t()}
+  defp request_execute_command(client, cmd, args) do
+    params = %{"command" => cmd, "arguments" => args}
+
+    case LspBridge.request_sync(client, "workspace/executeCommand", params, 10_000) do
+      {:ok, _result} -> :ok
+      {:error, :timeout} -> {:error, "command \"#{cmd}\" timed out"}
+      {:error, error} -> {:error, "command \"#{cmd}\" failed: #{inspect(error)}"}
+    end
+  end
 
   @spec apply_file_edits([WorkspaceEdit.file_edits()]) ::
           {non_neg_integer(), non_neg_integer(), [String.t()]}
@@ -276,13 +297,18 @@ defmodule MingaAgent.Tools.LspCodeActions do
             apply_text_edit(acc, sl, sc, el, ec, new_text)
           end)
 
-        File.write(path, Enum.join(new_lines, "\n"))
-        :ok
+        case File.write(path, Enum.join(new_lines, "\n")) do
+          :ok -> :ok
+          {:error, reason} -> {:error, "could not write: #{file_error(reason)}"}
+        end
 
       {:error, reason} ->
         {:error, "could not read: #{reason}"}
     end
   end
+
+  @spec file_error(File.posix()) :: String.t()
+  defp file_error(reason), do: reason |> :file.format_error() |> IO.chardata_to_string()
 
   @spec apply_text_edit(
           [String.t()],

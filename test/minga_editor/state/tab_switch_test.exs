@@ -426,6 +426,27 @@ defmodule MingaEditor.State.TabSwitchTest do
       assert closed_rename.status == :stale
     end
 
+    test "entering empty state retires operations for every removed file tab" do
+      {state, _buf1, _buf2} = state_with_two_file_tabs()
+      tab_bar = EditorState.tab_bar(state)
+      [first_tab, second_tab] = tab_bar.tabs
+
+      {state, first_references, first_rename} = track_tab_operations(state, first_tab.id)
+      {state, second_references, second_rename} = track_tab_operations(state, second_tab.id)
+
+      empty = EditorState.enter_empty_state(state)
+
+      assert EditorState.tab_bar(empty).tabs == []
+      assert empty.lsp.operation_requests == %{}
+
+      for operation <- [first_references, first_rename, second_references, second_rename] do
+        assert {:ok, retired} =
+                 OperationFeedback.fetch(empty.operation_feedback, operation.id)
+
+        assert retired.status == :stale
+      end
+    end
+
     test "tab switch preserves Editor-global formatting ownership" do
       {state, buf1, _buf2} = state_with_two_file_tabs()
       tb = EditorState.tab_bar(state)

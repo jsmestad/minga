@@ -1651,6 +1651,11 @@ defmodule MingaEditor.State do
            }
          } = state
        ) do
+    state =
+      tb.tabs
+      |> Enum.filter(&(&1.kind == :file))
+      |> Enum.reduce(state, fn tab, acc -> retire_lsp_operations_for_tab(acc, tab.id) end)
+
     set_tab_bar(state, TabBar.remove_file_tabs(tb))
   end
 

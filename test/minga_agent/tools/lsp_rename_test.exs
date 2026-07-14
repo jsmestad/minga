@@ -50,6 +50,35 @@ defmodule MingaAgent.Tools.LspRenameTest do
       assert result =~ "buffer is read-only"
       assert Buffer.content(buffer) == "old_name\n"
     end
+
+    @tag :tmp_dir
+    test "reports filesystem write failures", %{tmp_dir: tmp_dir} do
+      source_path = Path.join(tmp_dir, "source.ex")
+      target_path = Path.join(tmp_dir, "unwritable.ex")
+      File.write!(source_path, "source\n")
+      File.write!(target_path, "old_name\n")
+      File.chmod!(target_path, 0o400)
+      on_exit(fn -> File.chmod(target_path, 0o600) end)
+
+      source = start_supervised!({BufferProcess, file_path: source_path, content: "source\n"})
+
+      responses = %{
+        "textDocument/prepareRename" =>
+          {:ok,
+           %{
+             "start" => %{"line" => 0, "character" => 0},
+             "end" => %{"line" => 0, "character" => 6}
+           }},
+        "textDocument/rename" => {:ok, workspace_edit(target_path, "new_name")}
+      }
+
+      client = start_fake_client(responses)
+      SyncServer.put_clients(source, [client])
+
+      assert {:error, result} = LspRename.execute(source_path, 0, 0, "new_name")
+      assert result =~ "could not write"
+      assert File.read!(target_path) == "old_name\n"
+    end
   end
 
   @spec workspace_edit(String.t(), String.t()) :: map()

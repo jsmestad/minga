@@ -45,6 +45,76 @@ defmodule MingaAgent.Tools.LspCodeActionsTest do
       assert result =~ "buffer is read-only"
       assert Buffer.content(buffer) == "old_name\n"
     end
+
+    @tag :tmp_dir
+    test "does not execute a command after its workspace edit fails", %{tmp_dir: tmp_dir} do
+      path = Path.join(tmp_dir, "read_only_command.ex")
+      File.write!(path, "old_name\n")
+
+      buffer =
+        start_supervised!(
+          {BufferProcess, file_path: path, content: "old_name\n", read_only: true}
+        )
+
+      action = %{
+        "title" => "Replace and organize",
+        "edit" => workspace_edit(path, "new_name"),
+        "command" => %{"command" => "source.organizeImports"}
+      }
+
+      client = start_fake_client(%{"textDocument/codeAction" => {:ok, [action]}})
+      SyncServer.put_clients(buffer, [client])
+
+      assert {:error, result} = LspCodeActions.execute(path, 0, apply: 1)
+      assert result =~ "buffer is read-only"
+      refute_receive {:lsp_request, "workspace/executeCommand"}
+    end
+
+    @tag :tmp_dir
+    test "reports filesystem write failures", %{tmp_dir: tmp_dir} do
+      source_path = Path.join(tmp_dir, "source.ex")
+      target_path = Path.join(tmp_dir, "unwritable.ex")
+      File.write!(source_path, "source\n")
+      File.write!(target_path, "old_name\n")
+      File.chmod!(target_path, 0o400)
+      on_exit(fn -> File.chmod(target_path, 0o600) end)
+
+      source = start_supervised!({BufferProcess, file_path: source_path, content: "source\n"})
+      action = %{"title" => "Replace name", "edit" => workspace_edit(target_path, "new_name")}
+      client = start_fake_client(%{"textDocument/codeAction" => {:ok, [action]}})
+      SyncServer.put_clients(source, [client])
+
+      assert {:error, result} = LspCodeActions.execute(source_path, 0, apply: 1)
+      assert result =~ "could not write"
+      assert File.read!(target_path) == "old_name\n"
+    end
+
+    @tag :tmp_dir
+    test "propagates execute-command failures after applying workspace edits", %{tmp_dir: tmp_dir} do
+      path = Path.join(tmp_dir, "command.ex")
+      File.write!(path, "old_name\n")
+      buffer = start_supervised!({BufferProcess, file_path: path, content: "old_name\n"})
+
+      action = %{
+        "title" => "Replace and organize",
+        "edit" => workspace_edit(path, "new_name"),
+        "command" => %{"command" => "source.organizeImports"}
+      }
+
+      responses = %{
+        "textDocument/codeAction" => {:ok, [action]},
+        "workspace/executeCommand" => {:error, %{"message" => "command rejected"}}
+      }
+
+      client = start_fake_client(responses)
+      SyncServer.put_clients(buffer, [client])
+
+      assert {:error, result} = LspCodeActions.execute(path, 0, apply: 1)
+      assert result =~ "Applied \"Replace and organize\": 1 edits across 1 files"
+      assert result =~ "source.organizeImports"
+      assert result =~ "command rejected"
+      assert Buffer.content(buffer) == "new_name"
+    end
   end
 
   @spec workspace_edit(String.t(), String.t()) :: map()
@@ -66,17 +136,19 @@ defmodule MingaAgent.Tools.LspCodeActionsTest do
 
   @spec start_fake_client(%{String.t() => {:ok, term()} | {:error, term()}}) :: pid()
   defp start_fake_client(responses) do
-    client = spawn(fn -> fake_client_loop(responses) end)
+    owner = self()
+    client = spawn(fn -> fake_client_loop(responses, owner) end)
     on_exit(fn -> Process.exit(client, :kill) end)
     client
   end
 
-  @spec fake_client_loop(%{String.t() => {:ok, term()} | {:error, term()}}) :: no_return()
-  defp fake_client_loop(responses) do
+  @spec fake_client_loop(%{String.t() => {:ok, term()} | {:error, term()}}, pid()) :: no_return()
+  defp fake_client_loop(responses, owner) do
     receive do
       {:"$gen_cast", {:async_request, method, _params, caller, ref}} ->
+        send(owner, {:lsp_request, method})
         send(caller, {:lsp_response, ref, Map.fetch!(responses, method)})
-        fake_client_loop(responses)
+        fake_client_loop(responses, owner)
     end
   end
 end

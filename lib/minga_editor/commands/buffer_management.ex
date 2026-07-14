@@ -2023,7 +2023,7 @@ defmodule MingaEditor.Commands.BufferManagement do
         |> EditorState.set_tab_bar(maybe_switch_to_replacement(new_tb, replacement_id))
 
       :last_tab ->
-        state
+        EditorState.retire_lsp_operations_for_tab(state, tb.active_id)
     end
   end
 

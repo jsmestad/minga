@@ -163,13 +163,18 @@ defmodule MingaAgent.Tools.LspRename do
             apply_text_edit(acc, sl, sc, el, ec, new_text)
           end)
 
-        File.write(path, Enum.join(new_lines, "\n"))
-        :ok
+        case File.write(path, Enum.join(new_lines, "\n")) do
+          :ok -> :ok
+          {:error, reason} -> {:error, "could not write: #{file_error(reason)}"}
+        end
 
       {:error, reason} ->
         {:error, "could not read: #{reason}"}
     end
   end
+
+  @spec file_error(File.posix()) :: String.t()
+  defp file_error(reason), do: reason |> :file.format_error() |> IO.chardata_to_string()
 
   @spec apply_text_edit(
           [String.t()],
