@@ -6,9 +6,9 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   alias Minga.Buffer
   alias Minga.RenderModel.UI.Picker, as: PickerModel
   alias Minga.RenderModel.UI.Picker.ActionMenu
-  alias Minga.Project.Root
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.UI.Picker
+  alias MingaEditor.UI.Picker.ProjectFileCandidate
 
   @max_items 100
   @preview_max_lines 50
@@ -141,10 +141,15 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
           [[PickerModel.preview_segment()]] | nil
   defp build_preview_for_item(
          ctx,
-         %Picker.Item{id: id, meta: %{workspace_root: %Root{path: root}}}
-       )
-       when is_binary(id) do
-    build_file_preview(ctx, resolve_preview_path(id, root))
+         %Picker.Item{id: %ProjectFileCandidate{} = candidate}
+       ) do
+    abs_path =
+      case ProjectFileCandidate.resolve(candidate) do
+        {:ok, path} -> path
+        {:error, _reason} -> nil
+      end
+
+    build_file_preview(ctx, abs_path)
   end
 
   defp build_preview_for_item(ctx, %Picker.Item{id: id}) when is_binary(id) do
