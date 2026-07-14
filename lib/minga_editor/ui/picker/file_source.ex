@@ -2,14 +2,14 @@ defmodule MingaEditor.UI.Picker.FileSource do
   @moduledoc """
   Picker source for finding and opening files in the project.
 
-  Lists all files in the project directory using `Minga.Project.FileFind` and opens
-  the selected file in a new buffer (or switches to it if already open).
+  Reads workspace-relative files from one atomic `Minga.Project` snapshot and
+  opens the selected file in a new buffer (or switches to it if already open).
   """
 
   @behaviour MingaEditor.UI.Picker.Source
 
   alias Minga.Project.Root
-  alias MingaEditor.FileTree.ProjectCache
+  alias Minga.Project.WorkspaceSnapshot
   alias MingaEditor.State, as: EditorState
   alias Minga.Git
   alias Minga.Language
@@ -38,9 +38,10 @@ defmodule MingaEditor.UI.Picker.FileSource do
   @impl true
   @spec candidates(Context.t() | nil) :: [Item.t()]
   def candidates(ctx) do
-    root = project_root(ctx)
+    workspace = active_workspace()
+    root = project_root(ctx, workspace)
 
-    case resolve_paths(root) do
+    case resolve_paths(root, workspace) do
       {:ok, paths} ->
         frecency_map = build_frecency_map()
         git_status_map = build_git_status_map(root.path)
@@ -58,17 +59,26 @@ defmodule MingaEditor.UI.Picker.FileSource do
   # The picker reads only the Project-owned cache.
   # A managed `:project_rebuilt` event refreshes an open picker after an empty cache fills.
   # Picker tasks never start recursive inventory.
-  @spec resolve_paths(Root.t() | nil) :: {:ok, [String.t()]} | {:error, String.t()}
-  defp resolve_paths(nil),
+  @spec resolve_paths(Root.t() | nil, WorkspaceSnapshot.t() | nil) ::
+          {:ok, [String.t()]} | {:error, String.t()}
+  defp resolve_paths(nil, _workspace),
     do: {:error, "No directory workspace active. Open a folder or switch project."}
 
-  defp resolve_paths(%Root{} = root) do
-    if ProjectCache.active_root?(root.path) do
-      {:ok, ProjectCache.files()}
-    else
-      {:error, "Directory workspace is no longer active"}
-    end
+  defp resolve_paths(%Root{}, nil), do: {:error, "Directory workspace is no longer active"}
+
+  defp resolve_paths(
+         %Root{} = root,
+         %WorkspaceSnapshot{root: active_root, files: files}
+       ) do
+    resolve_matching_paths(files, Path.expand(root.path) == Path.expand(active_root.path))
   end
+
+  @spec resolve_matching_paths([String.t()], boolean()) ::
+          {:ok, [String.t()]} | {:error, String.t()}
+  defp resolve_matching_paths(files, true), do: {:ok, files}
+
+  defp resolve_matching_paths(_files, false),
+    do: {:error, "Directory workspace is no longer active"}
 
   # Lean candidate: just enough to match (filename label, full-path search text)
   # and to enrich later (git status stashed in `meta`). Icon, color, two-line
@@ -321,17 +331,31 @@ defmodule MingaEditor.UI.Picker.FileSource do
   defp git_status_annotation(:conflict), do: "!"
   defp git_status_annotation(_), do: nil
 
-  @spec project_root(Context.t() | EditorState.t() | nil) :: Root.t() | nil
-  defp project_root(%Context{picker_ui: %{context: %{project_root: nil}}}), do: nil
-  defp project_root(%Context{picker_ui: %{context: %{project_root: %Root{} = root}}}), do: root
-  defp project_root(%Context{file_tree: %{project_root: %Root{} = root}}), do: root
-  defp project_root(%EditorState{}), do: active_workspace_root()
-  defp project_root(_ctx), do: active_workspace_root()
+  @spec project_root(Context.t() | EditorState.t() | nil, WorkspaceSnapshot.t() | nil) ::
+          Root.t() | nil
+  defp project_root(%Context{picker_ui: %{context: %{project_root: nil}}}, _workspace), do: nil
 
-  @spec active_workspace_root() :: Root.t() | nil
-  defp active_workspace_root do
-    Minga.Project.workspace_root()
+  defp project_root(
+         %Context{picker_ui: %{context: %{project_root: %Root{} = root}}},
+         _workspace
+       ),
+       do: root
+
+  defp project_root(%Context{file_tree: %{project_root: %Root{} = root}}, _workspace), do: root
+  defp project_root(%EditorState{}, workspace), do: workspace_root(workspace)
+  defp project_root(_ctx, workspace), do: workspace_root(workspace)
+
+  @spec active_workspace() :: WorkspaceSnapshot.t() | nil
+  defp active_workspace do
+    Minga.Project.snapshot(Minga.Project)
   catch
     :exit, _ -> nil
   end
+
+  @spec active_workspace_root() :: Root.t() | nil
+  defp active_workspace_root, do: active_workspace() |> workspace_root()
+
+  @spec workspace_root(WorkspaceSnapshot.t() | nil) :: Root.t() | nil
+  defp workspace_root(nil), do: nil
+  defp workspace_root(%WorkspaceSnapshot{root: root}), do: root
 end

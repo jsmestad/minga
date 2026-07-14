@@ -16,6 +16,7 @@ defmodule MingaEditor.UI.Picker.ProjectSource do
 
   alias Minga.Project
   alias Minga.Project.Root
+  alias Minga.Project.WorkspaceSnapshot
 
   @impl true
   @spec title() :: String.t()
@@ -50,13 +51,16 @@ defmodule MingaEditor.UI.Picker.ProjectSource do
   end
 
   @spec activate_project(Root.t(), term()) :: term()
-  defp activate_project(%Root{path: path} = root, state) do
-    Project.switch(root)
-    _ = Project.workspace_root()
+  defp activate_project(%Root{} = root, state) do
+    case Project.activate(Project, root) do
+      {:ok, %WorkspaceSnapshot{root: installed_root}} ->
+        state
+        |> FileTreeFreshness.update_project_root(installed_root.path)
+        |> PickerUI.open(FileSource, %{project_root: installed_root})
 
-    state
-    |> FileTreeFreshness.update_project_root(path)
-    |> PickerUI.open(FileSource, %{project_root: root})
+      {:error, _reason} ->
+        state
+    end
   end
 
   @impl true

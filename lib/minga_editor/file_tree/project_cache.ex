@@ -3,62 +3,44 @@ defmodule MingaEditor.FileTree.ProjectCache do
   Bridges the editor file tree to the project's background-rebuilt file cache
   (#2377).
 
-  `Minga.Project` keeps a flat list of project-relative paths that it rebuilds in
-  the background. When a tree (or picker) root is the active project root, the
-  picker and the filtered tree read this cache instead of doing filesystem I/O on
-  the editor path. This module centralizes the "is this the active project root?"
-  decision and the cache reads, with `:exit` guards so callers work even when the
-  Project GenServer is unavailable (early startup, tests).
-
-  File-tree effects use `snapshot/1` in scheduler workers and pass the immutable
-  value into pure state transitions. The state owner never calls this service.
+  `Minga.Project` owns one atomic typed workspace snapshot. File-tree effects
+  read that value once in scheduler workers and derive an immutable tree-root
+  cache value before pure state transitions. The state owner never calls this
+  service, and no second discovery or scheduling workflow is introduced here.
   """
 
+  alias Minga.Project.Root
+  alias Minga.Project.WorkspaceSnapshot
   alias MingaEditor.FileTree.ProjectCache.Snapshot
 
-  @doc "Returns true when `root` expands to the active project root."
-  @spec active_root?(String.t()) :: boolean()
-  def active_root?(root) when is_binary(root) do
-    case active_root() do
-      active when is_binary(active) -> Path.expand(active) == Path.expand(root)
-      _ -> false
-    end
-  end
-
-  @doc "Returns the active project root, or nil when none is set or the process is down."
-  @spec active_root() :: String.t() | nil
-  def active_root do
-    Minga.Project.root()
-  catch
-    :exit, _ -> nil
-  end
-
-  @doc "Returns the project's cached relative-path list (empty while rebuilding or unavailable)."
-  @spec files() :: [String.t()]
-  def files do
-    Minga.Project.files()
-  catch
-    :exit, _ -> []
-  end
-
-  @doc "Returns true while the project's file cache is rebuilding."
-  @spec rebuilding?() :: boolean()
-  def rebuilding? do
-    Minga.Project.rebuilding?()
-  catch
-    :exit, _ -> false
-  end
-
-  @doc "Reads all project-cache inputs needed to filter one root as an immutable value."
-  @spec snapshot(String.t()) :: Snapshot.t()
-  def snapshot(root) when is_binary(root) do
+  @doc "Reads and derives all cache inputs for one tree root from one Project call."
+  @spec snapshot(String.t(), GenServer.server()) :: Snapshot.t()
+  def snapshot(root, project_server \\ Minga.Project) when is_binary(root) do
     expanded_root = Path.expand(root)
-    active? = active_root?(expanded_root)
-
-    if active? do
-      Snapshot.new(expanded_root, true, files(), rebuilding?())
-    else
-      Snapshot.new(expanded_root, false, [], false)
-    end
+    workspace = Minga.Project.snapshot(project_server)
+    tree_snapshot(expanded_root, workspace)
+  catch
+    :exit, _ -> Snapshot.new(Path.expand(root), false, [], false)
   end
+
+  @spec tree_snapshot(String.t(), WorkspaceSnapshot.t() | nil) :: Snapshot.t()
+  defp tree_snapshot(root, nil), do: Snapshot.new(root, false, [], false)
+
+  defp tree_snapshot(
+         root,
+         %WorkspaceSnapshot{
+           root: %Root{path: active_root},
+           files: files,
+           rebuilding?: rebuilding?
+         }
+       ) do
+    tree_snapshot(root, files, rebuilding?, Path.expand(active_root) == root)
+  end
+
+  @spec tree_snapshot(String.t(), [String.t()], boolean(), boolean()) :: Snapshot.t()
+  defp tree_snapshot(root, files, rebuilding?, true),
+    do: Snapshot.new(root, true, files, rebuilding?)
+
+  defp tree_snapshot(root, _files, _rebuilding?, false),
+    do: Snapshot.new(root, false, [], false)
 end

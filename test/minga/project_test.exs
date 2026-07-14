@@ -4,6 +4,7 @@ defmodule Minga.ProjectTest do
 
   alias Minga.Project
   alias Minga.Project.Root
+  alias Minga.Project.WorkspaceSnapshot
 
   @moduletag :tmp_dir
 
@@ -75,9 +76,113 @@ defmodule Minga.ProjectTest do
 
         assert Project.root(name) == nil
         assert Project.workspace_root(name) == nil
+        assert Project.snapshot(name) == nil
         assert Project.known_projects(name) == []
-        assert state.rebuilding? == false
+        assert state.workspace == nil
       end
+    end
+  end
+
+  describe "activate/2 and snapshot/1" do
+    test "activation synchronously returns the installed typed workspace while discovery runs", %{
+      tmp_dir: tmp
+    } do
+      project = Path.join(tmp, "immediate_activation")
+      File.mkdir_p!(project)
+      {:ok, root} = Root.directory(project)
+      {_pid, name} = start_project!(file_find_module: Minga.Project.SlowFileFind)
+
+      assert {:ok, %WorkspaceSnapshot{root: ^root, files: [], rebuilding?: true} = installed} =
+               Project.activate(name, root)
+
+      assert Project.snapshot(name) == installed
+      assert Project.root(name) == project
+      assert Project.workspace_root(name) == root
+    end
+
+    test "completion atomically installs relative files and the matching rebuild status", %{
+      tmp_dir: tmp
+    } do
+      project = Path.join(tmp, "atomic_completion")
+      File.mkdir_p!(project)
+      {:ok, root} = Root.directory(project)
+      {_pid, name} = start_project!(file_find_module: Minga.Project.SlowFileFind)
+      Minga.Events.subscribe(:project_rebuilt)
+
+      assert {:ok, %WorkspaceSnapshot{rebuilding?: true}} = Project.activate(name, root)
+      worker = flush(name).rebuild_pid
+      worker_ref = Process.monitor(worker)
+
+      :ok = Minga.Project.SlowFileFind.complete(worker, {:ok, ["lib/app.ex", "README.md"]})
+
+      assert_receive {:minga_event, :project_rebuilt,
+                      %Minga.Events.ProjectRebuiltEvent{root: ^project}},
+                     1_000
+
+      assert_receive {:DOWN, ^worker_ref, :process, ^worker, :normal}, 1_000
+
+      assert %WorkspaceSnapshot{
+               root: ^root,
+               files: ["lib/app.ex", "README.md"],
+               rebuilding?: false
+             } = Project.snapshot(name)
+    end
+
+    test "rapid rerooting cannot install a superseded worker result", %{tmp_dir: tmp} do
+      first = Path.join(tmp, "snapshot_first")
+      second = Path.join(tmp, "snapshot_second")
+      File.mkdir_p!(first)
+      File.mkdir_p!(second)
+      {:ok, first_root} = Root.directory(first)
+      {:ok, second_root} = Root.directory(second)
+      {_pid, name} = start_project!(file_find_module: Minga.Project.SlowFileFind)
+
+      assert {:ok, %WorkspaceSnapshot{root: ^first_root, rebuilding?: true}} =
+               Project.activate(name, first_root)
+
+      first_worker = flush(name).rebuild_pid
+      first_ref = Process.monitor(first_worker)
+
+      assert {:ok, %WorkspaceSnapshot{root: ^second_root, files: [], rebuilding?: true}} =
+               Project.activate(name, second_root)
+
+      second_worker = flush(name).rebuild_pid
+      assert_receive {:DOWN, ^first_ref, :process, ^first_worker, :normal}, 1_000
+
+      send(name, {:file_find_done, first_worker, {:ok, ["stale-first.txt"]}})
+      _ = flush(name)
+
+      assert %WorkspaceSnapshot{root: ^second_root, files: [], rebuilding?: true} =
+               Project.snapshot(name)
+
+      Minga.Events.subscribe(:project_rebuilt)
+      :ok = Minga.Project.SlowFileFind.complete(second_worker, {:ok, ["second.txt"]})
+
+      assert_receive {:minga_event, :project_rebuilt,
+                      %Minga.Events.ProjectRebuiltEvent{root: ^second}},
+                     1_000
+
+      assert %WorkspaceSnapshot{root: ^second_root, files: ["second.txt"], rebuilding?: false} =
+               Project.snapshot(name)
+    end
+
+    test "rejects a non-directory typed root without replacing the workspace", %{tmp_dir: tmp} do
+      project = Path.join(tmp, "directory")
+      file = Path.join(tmp, "loose.txt")
+      File.mkdir_p!(project)
+      File.write!(file, "loose")
+      {:ok, root} = Root.directory(project)
+      {_pid, name} = start_project!(file_find_module: Minga.Project.SlowFileFind)
+
+      assert {:ok, installed} = Project.activate(name, root)
+      assert {:error, :not_a_directory_root} = Project.activate(name, Root.file(file))
+
+      unconfirmed_home = %Root{kind: :directory, path: Path.expand("~")}
+
+      assert {:error, :broad_root_confirmation_required} =
+               Project.activate(name, unconfirmed_home)
+
+      assert Project.snapshot(name) == installed
     end
   end
 
@@ -134,7 +239,7 @@ defmodule Minga.ProjectTest do
 
       assert Project.root(name) == nil
       assert Project.workspace_root(name) == nil
-      assert state.rebuilding? == false
+      assert state.workspace == nil
     end
 
     test "adds switched project to known projects", %{tmp_dir: tmp} do
@@ -192,9 +297,8 @@ defmodule Minga.ProjectTest do
       state = flush(name)
 
       assert_receive {:DOWN, ^second_ref, :process, ^second_worker, :normal}, 1_000
-      assert state.current_root == nil
-      assert state.workspace_root == nil
-      assert state.rebuilding? == false
+      assert state.workspace == nil
+      assert Project.snapshot(name) == nil
     end
 
     test "discovery timeout cancels the worker", %{tmp_dir: tmp} do
@@ -210,7 +314,7 @@ defmodule Minga.ProjectTest do
 
       assert_receive {:DOWN, ^ref, :process, ^worker, :normal}, 1_000
       state = flush(name)
-      assert state.rebuilding? == false
+      assert %WorkspaceSnapshot{root: %Root{path: ^root}, rebuilding?: false} = state.workspace
       assert state.rebuild_pid == nil
     end
 

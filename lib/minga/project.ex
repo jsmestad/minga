@@ -8,13 +8,11 @@ defmodule Minga.Project do
 
   ## State
 
-  * `current_root` — the path of the active explicit directory workspace
-  * `workspace_root` — the typed root that authorizes recursive project behavior
-  * `cached_files` — the file list for the current project (populated by a background Task)
+  * `workspace` — one atomic typed root, relative file inventory, and rebuild status
   * `known_projects` — list of all project roots the user has visited, persisted to disk
   * `recent_files` — per-project list of recently opened files, most recent first, persisted to disk
   * `command_frecency` — command execution timestamps used to rank the empty command palette
-  * `rebuilding?` — true while a background Task is rebuilding the file cache
+  * rebuild PID, monitor, and timer fields — operational discovery lifecycle state
 
   ## File cache
 
@@ -30,15 +28,13 @@ defmodule Minga.Project do
   alias Minga.Command
   alias Minga.Config
   alias Minga.Project.Root
+  alias Minga.Project.WorkspaceSnapshot
 
-  defstruct current_root: nil,
-            workspace_root: nil,
-            cached_files: [],
+  defstruct workspace: nil,
             known_projects: [],
             recent_files: %{},
             frecency_events: %{},
             command_frecency: %{},
-            rebuilding?: false,
             rebuild_pid: nil,
             rebuild_ref: nil,
             rebuild_timer_ref: nil,
@@ -60,14 +56,11 @@ defmodule Minga.Project do
 
   @typedoc "Project GenServer state."
   @type t :: %__MODULE__{
-          current_root: String.t() | nil,
-          workspace_root: Root.t() | nil,
-          cached_files: [String.t()],
+          workspace: WorkspaceSnapshot.t() | nil,
           known_projects: [String.t()],
           recent_files: recent_files_map(),
           frecency_events: frecency_events_map(),
           command_frecency: command_frecency_map(),
-          rebuilding?: boolean(),
           rebuild_pid: pid() | nil,
           rebuild_ref: reference() | nil,
           rebuild_timer_ref: reference() | nil,
@@ -112,6 +105,12 @@ defmodule Minga.Project do
     GenServer.call(server, :workspace_root)
   end
 
+  @doc "Atomically returns the active typed workspace and its cached inventory state."
+  @spec snapshot(GenServer.server()) :: WorkspaceSnapshot.t() | nil
+  def snapshot(server \\ __MODULE__) do
+    GenServer.call(server, :snapshot)
+  end
+
   @doc """
   Replaces the home directory prefix with `~` for display.
 
@@ -139,6 +138,24 @@ defmodule Minga.Project do
   def known_projects(server \\ __MODULE__) do
     GenServer.call(server, :known_projects)
   end
+
+  @doc """
+  Synchronously installs an authorized directory workspace and starts discovery.
+
+  The returned snapshot is installed before this call returns. File discovery
+  continues asynchronously and later replaces the inventory in one atomic
+  snapshot transition.
+  """
+  @spec activate(Root.t()) :: {:ok, WorkspaceSnapshot.t()} | {:error, Root.error()}
+  def activate(%Root{} = root), do: activate(__MODULE__, root)
+
+  @spec activate(GenServer.server(), Root.t()) ::
+          {:ok, WorkspaceSnapshot.t()} | {:error, Root.error()}
+  def activate(server, %Root{kind: :directory} = root) do
+    GenServer.call(server, {:activate, root})
+  end
+
+  def activate(_server, %Root{}), do: {:error, :not_a_directory_root}
 
   @doc "Switches to an explicit directory workspace, triggering one cache rebuild."
   @spec switch(String.t() | Root.t()) :: :ok
@@ -294,37 +311,46 @@ defmodule Minga.Project do
 
   @impl true
   @spec handle_call(term(), GenServer.from(), t()) :: {:reply, term(), t()}
+  def handle_call({:activate, %Root{kind: :directory} = root}, _from, state) do
+    {reply, state} = activate_workspace(state, root)
+    {:reply, reply, state}
+  end
+
   def handle_call(:root, _from, state) do
-    {:reply, state.current_root, state}
+    {:reply, workspace_path(state.workspace), state}
   end
 
   def handle_call(:workspace_root, _from, state) do
-    {:reply, state.workspace_root, state}
+    {:reply, snapshot_root(state.workspace), state}
+  end
+
+  def handle_call(:snapshot, _from, state) do
+    {:reply, state.workspace, state}
   end
 
   def handle_call(:files, _from, state) do
-    {:reply, state.cached_files, state}
+    {:reply, workspace_files(state.workspace), state}
   end
 
   def handle_call(:known_projects, _from, state) do
     {:reply, state.known_projects, state}
   end
 
-  def handle_call(:recent_files, _from, %{current_root: nil} = state) do
+  def handle_call(:recent_files, _from, %{workspace: nil} = state) do
     {:reply, [], state}
   end
 
   def handle_call(:recent_files, _from, state) do
-    files = Map.get(state.recent_files, state.current_root, [])
+    files = Map.get(state.recent_files, workspace_path(state.workspace), [])
     {:reply, files, state}
   end
 
-  def handle_call(:frecency_scores, _from, %{current_root: nil} = state) do
+  def handle_call(:frecency_scores, _from, %{workspace: nil} = state) do
     {:reply, %{}, state}
   end
 
   def handle_call(:frecency_scores, _from, state) do
-    root = state.current_root
+    root = workspace_path(state.workspace)
     now_unix = System.system_time(:second)
 
     scores =
@@ -338,7 +364,7 @@ defmodule Minga.Project do
   end
 
   def handle_call(:rebuilding?, _from, state) do
-    {:reply, state.rebuilding?, state}
+    {:reply, workspace_rebuilding?(state.workspace), state}
   end
 
   def handle_call(:command_frecency, _from, state) do
@@ -359,14 +385,7 @@ defmodule Minga.Project do
   @impl true
   @spec handle_cast(term(), t()) :: {:noreply, t()}
   def handle_cast({:switch, %Root{kind: :directory} = root}, state) do
-    state =
-      state
-      |> cancel_rebuild()
-      |> set_project(root)
-      |> add_to_known(root.path)
-      |> start_rebuild()
-
-    {:noreply, state}
+    {:noreply, install_workspace(state, root)}
   end
 
   def handle_cast({:switch_rejected, root_path, reason}, state) do
@@ -380,12 +399,14 @@ defmodule Minga.Project do
 
   def handle_cast(:close, state) do
     state = cancel_rebuild(state)
-    {:noreply, %{state | current_root: nil, workspace_root: nil, cached_files: []}}
+    {:noreply, %{state | workspace: nil}}
   end
+
+  def handle_cast(:invalidate, %{workspace: nil} = state), do: {:noreply, state}
 
   def handle_cast(:invalidate, state) do
     state = cancel_rebuild(state)
-    state = %{state | cached_files: []}
+    state = %{state | workspace: WorkspaceSnapshot.invalidate(state.workspace)}
     {:noreply, start_rebuild(state)}
   end
 
@@ -401,7 +422,7 @@ defmodule Minga.Project do
     end
   end
 
-  def handle_cast({:record_file, _file_path}, %{current_root: nil} = state) do
+  def handle_cast({:record_file, _file_path}, %{workspace: nil} = state) do
     {:noreply, state}
   end
 
@@ -425,7 +446,8 @@ defmodule Minga.Project do
   def handle_info({:file_find_done, pid, result}, %{rebuild_pid: pid} = state) do
     state = clear_rebuild(state)
     files = discovery_files(result)
-    root = state.current_root
+    root = workspace_path(state.workspace)
+    workspace = WorkspaceSnapshot.complete_rebuild(state.workspace, files)
 
     Minga.Events.broadcast(
       :project_rebuilt,
@@ -433,7 +455,7 @@ defmodule Minga.Project do
       state.events_registry
     )
 
-    {:noreply, %{state | cached_files: files}}
+    {:noreply, %{state | workspace: workspace}}
   end
 
   def handle_info(
@@ -470,12 +492,34 @@ defmodule Minga.Project do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
+  @spec workspace_path(WorkspaceSnapshot.t() | nil) :: String.t() | nil
+  defp workspace_path(nil), do: nil
+  defp workspace_path(%WorkspaceSnapshot{root: %Root{path: path}}), do: path
+
+  @spec snapshot_root(WorkspaceSnapshot.t() | nil) :: Root.t() | nil
+  defp snapshot_root(nil), do: nil
+  defp snapshot_root(%WorkspaceSnapshot{root: root}), do: root
+
+  @spec workspace_files(WorkspaceSnapshot.t() | nil) :: [String.t()]
+  defp workspace_files(nil), do: []
+  defp workspace_files(%WorkspaceSnapshot{files: files}), do: files
+
+  @spec workspace_rebuilding?(WorkspaceSnapshot.t() | nil) :: boolean()
+  defp workspace_rebuilding?(nil), do: false
+  defp workspace_rebuilding?(%WorkspaceSnapshot{rebuilding?: rebuilding?}), do: rebuilding?
+
+  @spec stop_workspace_rebuild(WorkspaceSnapshot.t() | nil) :: WorkspaceSnapshot.t() | nil
+  defp stop_workspace_rebuild(nil), do: nil
+
+  defp stop_workspace_rebuild(%WorkspaceSnapshot{} = workspace),
+    do: WorkspaceSnapshot.stop_rebuild(workspace)
+
   @spec do_record_file(t(), String.t()) :: t()
-  defp do_record_file(%{current_root: nil} = state, _file_path), do: state
+  defp do_record_file(%{workspace: nil} = state, _file_path), do: state
 
   defp do_record_file(state, file_path) do
     expanded = Path.expand(file_path)
-    root = state.current_root
+    root = workspace_path(state.workspace)
 
     case make_relative(expanded, root) do
       nil ->
@@ -523,9 +567,26 @@ defmodule Minga.Project do
     state
   end
 
-  @spec set_project(t(), Root.t()) :: t()
-  defp set_project(state, %Root{kind: :directory} = root) do
-    %{state | current_root: root.path, workspace_root: root, cached_files: []}
+  @spec activate_workspace(t(), Root.t()) ::
+          {{:ok, WorkspaceSnapshot.t()} | {:error, Root.error()}, t()}
+  defp activate_workspace(state, %Root{kind: :directory} = root) do
+    case Root.inventory_path(root) do
+      {:ok, _path} ->
+        state = install_workspace(state, root)
+        {{:ok, state.workspace}, state}
+
+      {:error, reason} ->
+        {{:error, reason}, state}
+    end
+  end
+
+  @spec install_workspace(t(), Root.t()) :: t()
+  defp install_workspace(state, %Root{kind: :directory} = root) do
+    state
+    |> cancel_rebuild()
+    |> then(&%{&1 | workspace: WorkspaceSnapshot.activate(root)})
+    |> add_to_known(root.path)
+    |> start_rebuild()
   end
 
   @spec add_to_known(t(), String.t()) :: t()
@@ -540,17 +601,17 @@ defmodule Minga.Project do
   end
 
   @spec start_rebuild(t()) :: t()
-  defp start_rebuild(%{workspace_root: nil} = state), do: state
+  defp start_rebuild(%{workspace: nil} = state), do: state
 
   defp start_rebuild(state) do
-    case state.file_find_module.start(state.workspace_root, self()) do
+    case state.file_find_module.start(state.workspace.root, self()) do
       {:ok, pid} ->
         ref = Process.monitor(pid)
         timer_ref = Process.send_after(self(), {:rebuild_timeout, pid}, state.rebuild_timeout_ms)
 
         %{
           state
-          | rebuilding?: true,
+          | workspace: WorkspaceSnapshot.begin_rebuild(state.workspace),
             rebuild_pid: pid,
             rebuild_ref: ref,
             rebuild_timer_ref: timer_ref
@@ -591,7 +652,14 @@ defmodule Minga.Project do
   defp clear_rebuild(state) do
     if is_reference(state.rebuild_ref), do: Process.demonitor(state.rebuild_ref, [:flush])
     if is_reference(state.rebuild_timer_ref), do: Process.cancel_timer(state.rebuild_timer_ref)
-    %{state | rebuilding?: false, rebuild_pid: nil, rebuild_ref: nil, rebuild_timer_ref: nil}
+
+    %{
+      state
+      | workspace: stop_workspace_rebuild(state.workspace),
+        rebuild_pid: nil,
+        rebuild_ref: nil,
+        rebuild_timer_ref: nil
+    }
   end
 
   @spec discovery_files(Minga.Project.FileFind.result()) :: [String.t()]
