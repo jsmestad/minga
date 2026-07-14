@@ -1,10 +1,11 @@
 defmodule MingaEditor.Commands.FormattingSchedulerTest do
   @moduledoc "Integrated scheduler ownership regressions for external formatting."
 
-  # External formatting launches a real shell process, which must not run concurrently in ExUnit.
+  # External formatting launches a real shell process and this test sets global formatter options.
   use ExUnit.Case, async: false
 
   alias Minga.Buffer
+  alias Minga.Config.Options
   alias MingaEditor.Commands.Formatting
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.Effect.Request
@@ -17,6 +18,13 @@ defmodule MingaEditor.Commands.FormattingSchedulerTest do
   @effect_timeout 2_000
 
   test "origin creates feedback before scheduling and correlates the running lifecycle" do
+    Options.set_for_filetype(:elixir, :formatter, "cat")
+
+    on_exit(fn ->
+      Options.reset()
+      Options.set(:clipboard, :none)
+    end)
+
     task_supervisor = start_supervised!({Task.Supervisor, []})
 
     scheduler =

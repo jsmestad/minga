@@ -17,6 +17,11 @@ defmodule Minga.Editing.FormatterTest do
         Options.set(:clipboard, :none)
     end
 
+    on_exit(fn ->
+      Options.reset()
+      Options.set(:clipboard, :none)
+    end)
+
     :ok
   end
 
