@@ -14,6 +14,7 @@ public enum SearchFlags {
 }
 
 @MainActor
+@Observable
 public final class SearchState {
     public init(visible: Bool = false, matchCount: UInt16 = 0, currentIndex: UInt16 = 0, replaceMode: Bool = false, caseSensitive: Bool = false, wholeWord: Bool = false, regex: Bool = false) {
         self.visible = visible

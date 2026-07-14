@@ -17,6 +17,7 @@ public struct CompletionItem: Identifiable {
 }
 
 @MainActor
+@Observable
 public final class CompletionState {
     public init(visible: Bool = false, anchorRow: Int = 0, anchorCol: Int = 0, selectedIndex: Int = 0, previewSelectedIndex: Int? = nil, items: [CompletionItem] = [], documentation: String = "") {
         self.visible = visible

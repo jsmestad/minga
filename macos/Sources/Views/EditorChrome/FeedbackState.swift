@@ -8,12 +8,8 @@ public final class FeedbackState {
         self.holdTask = holdTask
         self.spinnerOnTime = spinnerOnTime
     }
-    @ObservationIgnored public private(set) var isPending = false
-    @ObservationIgnored public private(set) var showingSpinner = false
-
-    /// GUIState installs this to republish delayed local presentation changes
-    /// through its aggregate out-of-band token.
-    @ObservationIgnored public var onPresentationChanged: (() -> Void)?
+    public private(set) var isPending = false
+    public private(set) var showingSpinner = false
 
     @ObservationIgnored private var showTask: Task<Void, Never>?
     @ObservationIgnored private var holdTask: Task<Void, Never>?
@@ -40,7 +36,6 @@ public final class FeedbackState {
                 guard !Task.isCancelled, isPending else { return }
                 showingSpinner = true
                 spinnerOnTime = .now
-                notifyPresentationChanged()
             }
         } else {
             let wasSpinning = showingSpinner
@@ -58,12 +53,10 @@ public final class FeedbackState {
                         guard !Task.isCancelled else { return }
                         showingSpinner = false
                         spinnerOnTime = nil
-                        notifyPresentationChanged()
                     }
                 } else {
                     showingSpinner = false
                     spinnerOnTime = nil
-                    notifyPresentationChanged()
                 }
             }
         }
@@ -78,12 +71,6 @@ public final class FeedbackState {
         holdTask = nil
         spinnerOnTime = nil
         lastMessage = ""
-    }
-
-    private func notifyPresentationChanged() {
-        Task { @MainActor [weak self] in
-            self?.onPresentationChanged?()
-        }
     }
 
     nonisolated static func isInflight(_ message: String) -> Bool {

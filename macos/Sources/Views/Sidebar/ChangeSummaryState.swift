@@ -7,6 +7,7 @@ import MingaProtocol
 /// stats. Drives `ChangeSummaryView` which renders a list of changed files
 /// with their status and line counts.
 @MainActor
+@Observable
 public final class ChangeSummaryState {
     public init(visible: Bool = false, entries: [ChangeSummaryEntry] = [], selectedIndex: Int = 0) {
         self.visible = visible

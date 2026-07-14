@@ -42,6 +42,7 @@ public enum MinibufferMode: UInt8 {
 }
 
 @MainActor
+@Observable
 public final class MinibufferState {
     public init(visible: Bool = false, mode: UInt8 = 0, cursorPos: UInt16 = 0xFFFF, prompt: String = "", input: String = "", context: String = "", selectedIndex: UInt16 = 0, candidates: [MinibufferCandidate] = [], totalCandidates: UInt16 = 0, inputVersion: Int = 0) {
         self.visible = visible

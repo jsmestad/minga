@@ -129,6 +129,7 @@ public struct ToolEntry: Identifiable {
 // MARK: - Observable state
 
 @MainActor
+@Observable
 public final class ToolManagerState {
     public init(visible: Bool = false, filter: ToolFilter = .all, selectedIndex: Int = 0, tools: [ToolEntry] = []) {
         self.visible = visible

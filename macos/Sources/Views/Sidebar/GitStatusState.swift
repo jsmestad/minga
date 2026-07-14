@@ -105,41 +105,41 @@ public final class GitStatusState {
         self.amendMode = amendMode
         self.entriesRevision = entriesRevision
     }
-    @ObservationIgnored public var visible: Bool = false
-    @ObservationIgnored public var repoState: GitRepoState = .notARepo
-    @ObservationIgnored public var syncing: Bool = false
+    public var visible: Bool = false
+    public var repoState: GitRepoState = .notARepo
+    public var syncing: Bool = false
 
     // Branch info
-    @ObservationIgnored public var branchName: String = ""
-    @ObservationIgnored public var ahead: UInt16 = 0
-    @ObservationIgnored public var behind: UInt16 = 0
-    @ObservationIgnored public var entryBasePath: String = ""
-    @ObservationIgnored public var stashCount: UInt16 = 0
+    public var branchName: String = ""
+    public var ahead: UInt16 = 0
+    public var behind: UInt16 = 0
+    public var entryBasePath: String = ""
+    public var stashCount: UInt16 = 0
 
     // Toast notification (shown after remote operations)
-    @ObservationIgnored public var toastMessage: String? = nil
-    @ObservationIgnored public var toastLevel: ToastLevel = .success
-    @ObservationIgnored public var toastAction: ToastAction = .none
+    public var toastMessage: String? = nil
+    public var toastLevel: ToastLevel = .success
+    public var toastAction: ToastAction = .none
 
     // File entries grouped by section
-    @ObservationIgnored public var stagedEntries: [GitStatusEntry] = []
-    @ObservationIgnored public var changedEntries: [GitStatusEntry] = []
-    @ObservationIgnored public var untrackedEntries: [GitStatusEntry] = []
-    @ObservationIgnored public var conflictedEntries: [GitStatusEntry] = []
-    @ObservationIgnored public var duplicatePathHashes: Set<UInt32> = []
+    public var stagedEntries: [GitStatusEntry] = []
+    public var changedEntries: [GitStatusEntry] = []
+    public var untrackedEntries: [GitStatusEntry] = []
+    public var conflictedEntries: [GitStatusEntry] = []
+    public var duplicatePathHashes: Set<UInt32> = []
 
     // Section collapsed state (local UI state, not sent by BEAM)
     public var collapsedSections: Set<GitStatusSection> = []
 
     // Commit message (local UI state, typed by the user)
     public var commitMessage: String = ""
-    @ObservationIgnored public var previousCommitMessage: String = ""
+    public var previousCommitMessage: String = ""
 
     // Amend mode (local UI state, toggled by the user)
     public var amendMode: Bool = false
 
     // Changes whenever BEAM-provided entries update. Views use this to animate moves between sections.
-    @ObservationIgnored public var entriesRevision: UInt64 = 0
+    public var entriesRevision: UInt64 = 0
 
     /// Total number of entries across all sections.
     public var totalCount: Int {

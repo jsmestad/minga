@@ -8,6 +8,7 @@
 import SwiftUI
 
 @MainActor
+@Observable
 public final class FloatPopupState {
     public init(visible: Bool = false, title: String = "", width: Int = 0, height: Int = 0, lines: [String] = []) {
         self.visible = visible
