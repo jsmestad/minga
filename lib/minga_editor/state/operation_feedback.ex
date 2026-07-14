@@ -124,13 +124,39 @@ defmodule MingaEditor.State.OperationFeedback do
   @doc "Selects the newest active operation, otherwise the newest retained terminal operation."
   @spec selected(t()) :: Operation.t() | nil
   def selected(%__MODULE__{} = feedback) do
-    active = feedback.operations |> Map.values() |> Enum.filter(&Operation.active?/1)
-
-    case newest(active) do
-      nil -> feedback.operations |> Map.values() |> newest()
-      operation -> operation
-    end
+    feedback.operations
+    |> Map.values()
+    |> Enum.reduce(nil, &select_candidate/2)
   end
+
+  @spec select_candidate(Operation.t(), Operation.t() | nil) :: Operation.t()
+  defp select_candidate(operation, nil), do: operation
+
+  defp select_candidate(
+         %Operation{status: status} = operation,
+         %Operation{status: selected_status}
+       )
+       when status in [:pending, :queued, :running] and
+              selected_status not in [:pending, :queued, :running],
+       do: operation
+
+  defp select_candidate(
+         %Operation{status: status, order: order} = operation,
+         %Operation{status: selected_status, order: selected_order}
+       )
+       when status in [:pending, :queued, :running] and
+              selected_status in [:pending, :queued, :running] and order > selected_order,
+       do: operation
+
+  defp select_candidate(
+         %Operation{status: status, order: order} = operation,
+         %Operation{status: selected_status, order: selected_order}
+       )
+       when status not in [:pending, :queued, :running] and
+              selected_status not in [:pending, :queued, :running] and order > selected_order,
+       do: operation
+
+  defp select_candidate(_operation, selected), do: selected
 
   @spec replace_operations(%{Operation.id() => Operation.t()}, Operation.resource(), boolean()) ::
           %{Operation.id() => Operation.t()}
@@ -221,8 +247,4 @@ defmodule MingaEditor.State.OperationFeedback do
 
     %{feedback | operations: operations}
   end
-
-  @spec newest([Operation.t()]) :: Operation.t() | nil
-  defp newest([]), do: nil
-  defp newest(operations), do: Enum.max_by(operations, & &1.order)
 end

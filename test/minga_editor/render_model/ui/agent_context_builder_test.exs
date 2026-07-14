@@ -62,11 +62,11 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
       approval = %{tool_call_id: "tc-approval", name: "shell", args: %{}}
 
       state =
-        TestHelpers.base_state()
+        TestHelpers.base_state(backend: :gui)
         |> MingaEditor.Shell.Traditional.Workflow.install_agent_state(
           AgentState.set_pending_approval(%AgentState{}, approval)
         )
-        |> then(fn state -> elem(AgentEvents.handle(state, {:approval_pending, approval}), 0) end)
+        |> then(&AgentEvents.dispatch(&1, {:approval_pending, approval}))
 
       started_at = state.workspace.agent_ui.view.activity.started_at
       assert started_at != nil
