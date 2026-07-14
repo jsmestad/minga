@@ -93,7 +93,7 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
 
     assert Minga.Project.root() == nil
     assert Minga.Project.workspace_root() == nil
-    assert project_state.rebuilding? == false
+    assert project_state.workspace == nil
     assert Minga.Project.files() == []
     assert Minga.Project.known_projects() == known_before
     refute fake_home in Minga.Project.known_projects()

@@ -1534,19 +1534,21 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   # ── File tree helpers ──────────────────────────────────────────────
 
-  # Project.switch/1 is a cast; the picker opens against current state while the
-  # file cache rebuilds asynchronously. BEAM message ordering from the Editor
-  # process guarantees the cast reaches Project before any subsequent call.
   @spec open_dropped_directory(state(), String.t()) :: state()
   defp open_dropped_directory(state, dir_path) do
     case Minga.Project.Root.directory(dir_path) do
-      {:ok, root} ->
-        Minga.Project.switch(root)
-        _ = Minga.Project.workspace_root()
+      {:ok, root} -> activate_dropped_directory(state, root)
+      {:error, _reason} -> state
+    end
+  end
 
+  @spec activate_dropped_directory(state(), Minga.Project.Root.t()) :: state()
+  defp activate_dropped_directory(state, root) do
+    case Minga.Project.activate(Minga.Project, root) do
+      {:ok, %Minga.Project.WorkspaceSnapshot{root: installed_root}} ->
         state
-        |> FileTreeFreshness.update_project_root(root.path)
-        |> PickerUI.open(MingaEditor.UI.Picker.FileSource, %{project_root: root})
+        |> FileTreeFreshness.update_project_root(installed_root.path)
+        |> PickerUI.open(MingaEditor.UI.Picker.FileSource, %{project_root: installed_root})
 
       {:error, _reason} ->
         state
