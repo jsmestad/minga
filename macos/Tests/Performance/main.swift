@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import MingaProtocol
 
@@ -131,16 +132,67 @@ private func consumePreparedCommands(_ prepared: ResidentRenderPreparationResult
     }
 }
 
+private func processCPUTimeNanoseconds() -> UInt64 {
+    clock_gettime_nsec_np(CLOCK_PROCESS_CPUTIME_ID)
+}
+
 private func elapsedMs(_ body: () throws -> Void) rethrows -> Double {
-    let start = DispatchTime.now().uptimeNanoseconds
+    let start = processCPUTimeNanoseconds()
     try body()
-    return Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000.0
+    return Double(processCPUTimeNanoseconds() - start) / 1_000_000.0
 }
 
 private func percentile(_ samples: [Double], _ ratio: Double) -> Double {
     let sorted = samples.sorted()
     let index = min(max(Int((Double(sorted.count) * ratio).rounded(.up)) - 1, 0), sorted.count - 1)
     return sorted[index]
+}
+
+private func measureBatch(_ fixture: Fixture, sink: inout UInt64) throws -> RenderPerformanceMeasurement {
+    for _ in 0..<warmupIterations {
+        let content = try decodeAndApply(fixture)
+        _ = consumePreparedCommands(prepareVisibleCommands(content))
+    }
+
+    var decodeSamples: [Double] = []
+    var preparationSamples: [Double] = []
+    var combinedSamples: [Double] = []
+    decodeSamples.reserveCapacity(measuredIterations)
+    preparationSamples.reserveCapacity(measuredIterations)
+    combinedSamples.reserveCapacity(measuredIterations)
+
+    for _ in 0..<measuredIterations {
+        var content = fixture.base
+        decodeSamples.append(try elapsedMs { content = try decodeAndApply(fixture) })
+        preparationSamples.append(elapsedMs {
+            sink &+= consumePreparedCommands(prepareVisibleCommands(content))
+        })
+        combinedSamples.append(try elapsedMs {
+            let combinedContent = try decodeAndApply(fixture)
+            sink &+= consumePreparedCommands(prepareVisibleCommands(combinedContent))
+        })
+    }
+
+    return RenderPerformanceMeasurement(
+        decodeApplyP50Ms: percentile(decodeSamples, 0.50),
+        decodeApplyP95Ms: percentile(decodeSamples, 0.95),
+        commandPreparationP50Ms: percentile(preparationSamples, 0.50),
+        commandPreparationP95Ms: percentile(preparationSamples, 0.95),
+        combinedP50Ms: percentile(combinedSamples, 0.50),
+        combinedP95Ms: percentile(combinedSamples, 0.95)
+    )
+}
+
+private func summary(_ measurement: RenderPerformanceMeasurement) -> String {
+    String(
+        format: "decode+apply p50 %.3fms p95 %.3fms | command-prep p50 %.3fms p95 %.3fms | combined p50 %.3fms p95 %.3fms",
+        measurement.decodeApplyP50Ms,
+        measurement.decodeApplyP95Ms,
+        measurement.commandPreparationP50Ms,
+        measurement.commandPreparationP95Ms,
+        measurement.combinedP50Ms,
+        measurement.combinedP95Ms
+    )
 }
 
 enum BenchmarkError: Error { case invalidDelta }
@@ -151,48 +203,25 @@ guard CommandLine.arguments.count == 2 else {
 }
 
 private let fixture = try Fixture.make()
-for _ in 0..<warmupIterations {
-    let content = try decodeAndApply(fixture)
-    _ = consumePreparedCommands(prepareVisibleCommands(content))
-}
-
-var decodeSamples: [Double] = []
-var preparationSamples: [Double] = []
-var combinedSamples: [Double] = []
-decodeSamples.reserveCapacity(measuredIterations)
-preparationSamples.reserveCapacity(measuredIterations)
-combinedSamples.reserveCapacity(measuredIterations)
 var sink: UInt64 = 0
+var batches: [RenderPerformanceMeasurement] = []
+batches.reserveCapacity(RenderPerformanceGate.requiredBatchCount)
 
-for _ in 0..<measuredIterations {
-    var content = fixture.base
-    decodeSamples.append(try elapsedMs { content = try decodeAndApply(fixture) })
-    preparationSamples.append(elapsedMs {
-        sink &+= consumePreparedCommands(prepareVisibleCommands(content))
-    })
-    combinedSamples.append(try elapsedMs {
-        let combinedContent = try decodeAndApply(fixture)
-        sink &+= consumePreparedCommands(prepareVisibleCommands(combinedContent))
-    })
+for index in 0..<RenderPerformanceGate.requiredBatchCount {
+    let batch = try measureBatch(fixture, sink: &sink)
+    batches.append(batch)
+    let batchOutput = try JSONEncoder().encode(batch)
+    print("batch=\(index + 1) \(String(decoding: batchOutput, as: UTF8.self))")
+    print("batch=\(index + 1) \(summary(batch))")
 }
 
-let measurement = RenderPerformanceMeasurement(
-    decodeApplyP50Ms: percentile(decodeSamples, 0.50),
-    decodeApplyP95Ms: percentile(decodeSamples, 0.95),
-    commandPreparationP50Ms: percentile(preparationSamples, 0.50),
-    commandPreparationP95Ms: percentile(preparationSamples, 0.95),
-    combinedP50Ms: percentile(combinedSamples, 0.50),
-    combinedP95Ms: percentile(combinedSamples, 0.95)
-)
+let measurement = try RenderPerformanceGate.aggregate(measurements: batches)
 let baselineURL = URL(fileURLWithPath: CommandLine.arguments[1])
 let baseline = try JSONDecoder().decode(RenderPerformanceBaseline.self, from: Data(contentsOf: baselineURL))
 let output = try JSONEncoder().encode(measurement)
 print(String(decoding: output, as: UTF8.self))
-print(String(format: "decode+apply p50 %.3fms p95 %.3fms | command-prep p50 %.3fms p95 %.3fms | combined p50 %.3fms p95 %.3fms",
-             measurement.decodeApplyP50Ms, measurement.decodeApplyP95Ms,
-             measurement.commandPreparationP50Ms, measurement.commandPreparationP95Ms,
-             measurement.combinedP50Ms, measurement.combinedP95Ms))
-print("fixture=resident-ordinary-edit-v2 rows=\(fixtureRows) visible=\(visibleRows) overscan=\(overscanRows * 2) warmup=\(warmupIterations) iterations=\(measuredIterations) compiler=swiftc-O os=\(ProcessInfo.processInfo.operatingSystemVersionString) sink=\(sink)")
+print("aggregate \(summary(measurement))")
+print("fixture=resident-ordinary-edit-v2 rows=\(fixtureRows) visible=\(visibleRows) overscan=\(overscanRows * 2) batches=\(RenderPerformanceGate.requiredBatchCount) warmup_per_batch=\(warmupIterations) iterations_per_batch=\(measuredIterations) compiler=swiftc-O os=\(ProcessInfo.processInfo.operatingSystemVersionString) sink=\(sink)")
 
 let failures = RenderPerformanceGate.failures(measurement: measurement, baseline: baseline)
 for failure in failures { FileHandle.standardError.write(Data("error: \(failure)\n".utf8)) }

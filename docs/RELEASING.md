@@ -46,7 +46,9 @@ Tags with a hyphen (e.g., `v0.1.0-alpha.1` or `v0.1.0-rc.1`) are treated as pre-
 
 ### Homebrew Cask (macOS GUI)
 
-The release workflow also generates the `minga-mac` Homebrew cask for the macOS GUI app, but only if a `Minga.dmg` artifact exists in the release. Until the GUI ships `.dmg` builds, the cask step is skipped automatically.
+The release workflow generates the `minga-mac` Homebrew cask for the macOS GUI app whenever a `Minga.dmg` artifact exists. The cask exposes the app-bundled Launch Services-aware launcher as `minga`, so file and directory opens reuse Minga.app by default. It also exposes `minga-tui`, and the primary launcher accepts `--tui`/`--standalone`, as explicit terminal escape hatches.
+
+The standalone formula remains the default `minga` command on Linux. On macOS it installs the Burrito artifact as `minga-tui` so installing a standalone release cannot silently replace the GUI-aware primary command.
 
 ## Verifying a Release
 
@@ -58,12 +60,14 @@ gh release download v0.1.0 --pattern "minga_macos_aarch64"
 chmod +x minga_macos_aarch64
 ./minga_macos_aarch64 --version
 
-# Or install via Homebrew (stable releases only)
+# Install the standalone TUI on Linux (stable releases only)
 brew install jsmestad/minga/minga
 minga --version
 
-# Install the macOS app cask
+# Install the macOS app and GUI-aware primary launcher
 brew install --cask jsmestad/minga/minga-mac
+minga .
+minga --tui README.md
 ```
 
 ## Burrito

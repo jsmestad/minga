@@ -1,6 +1,6 @@
 # Rendering performance gates
 
-Minga uses deterministic production work gates first and an optimized native wall-clock gate second. Stable operation counts catch algorithmic regressions without runner noise; Release percentiles diagnose the shipping Swift preparation path. Neither substitutes for the other.
+Minga uses deterministic production work gates first and an optimized native process-CPU-time gate second. Stable operation counts catch algorithmic regressions without runner noise; Release percentiles diagnose the shipping Swift preparation path. Neither substitutes for the other.
 
 ## Production conformance fixture
 
@@ -65,19 +65,19 @@ Run:
 scripts/check_render_performance
 ```
 
-The script generates protocol artifacts, then compiles with `swiftc -O`. The `resident-ordinary-edit-v2` fixture warms for 200 iterations and measures 1,000 iterations at exactly 65,536 resident rows. It reports p50/p95 for:
+The script generates protocol artifacts, then compiles with `swiftc -O`. The `resident-ordinary-edit-v2` fixture runs five independent batches at exactly 65,536 resident rows; each batch warms for 200 iterations and measures 1,000 iterations using process CPU time so shared-runner scheduling pauses do not count as renderer work. The gate takes each metric's median batch percentile, so a regression must appear in at least three batches while isolated measurement noise cannot decide the result. It reports the per-batch and aggregate p50/p95 for:
 
 1. the shipping `ProtocolDecoder` decoding a real protocol-v11 A2 ordinary-edit splice plus `GUIWindowContent.applyingRowsDeltaChecked` / `ResidentRowStore` semantic apply;
 2. `ResidentRenderPreparation`, the same Metal-free CoreText preparation called by `CoreTextMetalRenderer`: resident visible traversal, horizontal clipping, style/span adjustment, gutter source rows, and rasterization-independent row commands (not a digest or precomputed shortcut);
 3. the combined path.
 
-The harness prints raw JSON percentiles and environment metadata. `performance/baselines/macos_render_release.json` contains versioned references and provenance. Policy remains hard-coded in `RenderPerformanceGate`: each stage must be at or below **4.00 ms p95**, combined preparation at or below **8.00 ms p95**, and every p95 at or below the larger of **1.20x** its checked reference or the reference plus a **0.05 ms** host-noise allowance. The fixed allowance matters only for sub-millisecond references where scheduler jitter is larger than the ratio margin. Exact boundaries pass; the next representable value fails.
+The harness prints raw JSON percentiles and environment metadata. `performance/baselines/macos_render_release.json` contains versioned references and provenance. Policy remains hard-coded in `RenderPerformanceGate`: each stage must be at or below **4.00 ms p95**, combined preparation at or below **8.00 ms p95**, and every p95 at or below the larger of **1.20x** its checked reference or the reference plus a **0.05 ms** measurement allowance. The fixed allowance matters only for sub-millisecond references where timer and allocator variance can be larger than the ratio margin. Exact boundaries pass; the next representable value fails.
 
 ### Baseline update policy and current rationale
 
-CI never generates a baseline. A change requires an explicit JSON diff and PR rationale naming the fixture/toolchain change and measured p95 values. Never change the 4 ms, 8 ms, 1.20x, or 0.05 ms policies merely to make a run pass. The noise allowance exists because identical `macos-15` code measured decode/apply p95 between 0.016 ms and 0.069 ms, which is host jitter rather than a user-visible regression. Measurements above the hybrid limit must be investigated instead of increasing the allowance.
+CI never generates a baseline. A change requires an explicit JSON diff and PR rationale naming the fixture/toolchain change and measured p95 values. Never change the 4 ms, 8 ms, 1.20x, or 0.05 ms policies merely to make a run pass. Measurements above the hybrid limit must be investigated instead of increasing the allowance.
 
-`resident-ordinary-edit-v2` replaces #2791's synthetic dictionary/tuple work with the production resident decode/apply and shared CoreText command preparation paths. Two GitHub-hosted `macos-15` arm64 calibrations from CI run `29197434526` measured p95 values of 0.030/0.342/0.384 ms and 0.030/0.348/0.392 ms for decode/apply, command preparation, and combined work. The checked reference uses the conservative second run from rerun job `86663882497`; the baseline file records the exact macOS and Swift versions. The hard 4 ms stage, 8 ms combined, 1.20x regression ratio, and 0.05 ms sub-millisecond noise allowance remain code-owned policy.
+`resident-ordinary-edit-v2` replaces #2791's synthetic dictionary/tuple work with the production resident decode/apply and shared CoreText command preparation paths. Two process-CPU calibrations on GitHub-hosted `macos-15` arm64 runners from CI runs `29314931937` and `29315752827` aggregated to p95 values of 0.014/0.137/0.155 ms and 0.032/0.264/0.272 ms for decode/apply, command preparation, and combined work. The checked reference uses the conservative second run; the baseline file records the exact clock, macOS version, Swift version, and calibration provenance. The hard 4 ms stage, 8 ms combined, 1.20x regression ratio, and 0.05 ms sub-millisecond measurement allowance remain code-owned policy.
 
 ## Native latency milestones
 

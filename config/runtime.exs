@@ -29,9 +29,12 @@ config :minga, port_mode: port_mode
 # This matches what LoggerHandler.install/0 does later during Editor.init, but
 # covers the startup window before the Editor is running. Headless and `mix`
 # invocations are intentionally excluded so they keep stdout/stderr logging.
+standalone_release? = System.get_env("MINGA_STANDALONE_TUI") == "1"
+
 standalone_tui? =
-  System.get_env("__BURRITO") != nil and
-    "--headless" not in Enum.map(:init.get_plain_arguments(), &to_string/1)
+  (System.get_env("__BURRITO") != nil and
+     "--headless" not in Enum.map(:init.get_plain_arguments(), &to_string/1)) or
+    (standalone_release? and System.get_env("MINGA_STANDALONE_EDITOR") == "1")
 
 if port_mode == :connected or standalone_tui? do
   log_dir = Path.expand("~/.local/share/minga")
@@ -52,4 +55,10 @@ if port_mode == :connected do
     end
 
   config :minga, start_editor: true, backend: connected_backend
+end
+
+if standalone_release? do
+  config :minga,
+    start_editor: System.get_env("MINGA_STANDALONE_EDITOR") == "1",
+    backend: :tui
 end

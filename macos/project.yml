@@ -205,16 +205,21 @@ targets:
           - $(SRCROOT)/.generated/protocol/ProtocolCommandSize.generated.swift
           - $(SRCROOT)/.generated/protocol/ProtocolSemanticDecode.generated.swift
     postCompileScripts:
-      - name: Copy CLI launcher
+      - name: Copy CLI launchers
         script: |
           mkdir -p "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/bin"
           cp "${SRCROOT}/Resources/bin/minga" "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/bin/minga"
-          chmod +x "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/bin/minga"
+          cp "${SRCROOT}/Resources/bin/minga-tui" "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/bin/minga-tui"
+          chmod +x \
+            "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/bin/minga" \
+            "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/bin/minga-tui"
         basedOnDependencyAnalysis: false
         inputFiles:
           - $(SRCROOT)/Resources/bin/minga
+          - $(SRCROOT)/Resources/bin/minga-tui
         outputFiles:
           - $(BUILT_PRODUCTS_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/bin/minga
+          - $(BUILT_PRODUCTS_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/bin/minga-tui
     postBuildScripts:
       - name: Codesign
         script: |

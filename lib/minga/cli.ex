@@ -136,11 +136,33 @@ defmodule Minga.CLI do
     :ok
   end
 
+  @doc "Returns CLI arguments from the app-local release transport or Burrito."
+  @spec argv() :: [String.t()]
+  def argv do
+    case System.get_env("MINGA_CLI_ARGS_B64") do
+      nil -> Args.argv()
+      encoded -> decode_transported_args(encoded)
+    end
+  end
+
   @doc "Entry point used by the OTP application in release/Burrito mode."
   @spec start_from_cli() :: :ok
   def start_from_cli do
-    args = Args.argv()
-    main(args)
+    main(argv())
+  end
+
+  @doc "Stores CLI startup flags before the supervision tree starts."
+  @spec prepare_startup([String.t()]) :: :ok
+  def prepare_startup(args) do
+    case parse_args(args) do
+      {:open, file, flags} -> store_startup_flags(flags, file)
+      {:attach, _url, flags} -> store_startup_flags(flags, nil)
+      {:sessions, _url, flags} -> store_startup_flags(flags, nil)
+      {:detach, flags} -> store_startup_flags(flags, nil)
+      {:kill_session, _url, flags} -> store_startup_flags(flags, nil)
+      {:login, flags} -> store_startup_flags(flags, nil)
+      {:error, _message} -> :ok
+    end
   end
 
   @doc "Parses CLI arguments into an action."
@@ -179,6 +201,24 @@ defmodule Minga.CLI do
   @spec terminal_command_args?([String.t()]) :: boolean()
   def terminal_command_args?(args) do
     terminal_command?(args)
+  end
+
+  @spec decode_transported_args(String.t()) :: [String.t()]
+  defp decode_transported_args(""), do: []
+
+  defp decode_transported_args(encoded) do
+    encoded
+    |> String.split(",", trim: false)
+    |> Enum.reduce_while({:ok, []}, fn part, {:ok, args} ->
+      case Base.url_decode64(part, padding: false) do
+        {:ok, arg} -> {:cont, {:ok, [arg | args]}}
+        :error -> {:halt, :error}
+      end
+    end)
+    |> case do
+      {:ok, args} -> Enum.reverse(args)
+      :error -> Args.argv()
+    end
   end
 
   @spec first_command_token([String.t()]) :: String.t() | nil
@@ -242,7 +282,7 @@ defmodule Minga.CLI do
   @doc "Returns the project root inferred from the current CLI argv before startup flags are stored."
   @spec argv_startup_project_root() :: String.t() | nil
   def argv_startup_project_root do
-    argv_startup_project_root(&Args.argv/0)
+    argv_startup_project_root(&argv/0)
   end
 
   @spec argv_startup_project_root((-> [String.t()])) :: String.t() | nil

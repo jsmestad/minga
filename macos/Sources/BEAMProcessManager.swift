@@ -185,14 +185,11 @@ final class BEAMProcessManager {
         beamExecutableURL() != nil
     }
 
-    /// Builds the BEAM argv from the macOS app argv.
+    /// Selects the Minga CLI arguments that the embedded BEAM should receive.
     ///
-    /// Only flags understood by `Minga.CLI` are forwarded, while positional
-    /// targets are preserved in their original order. The BEAM remains the
-    /// authority for interpreting those arguments (including its existing
-    /// last-positional-wins behavior).
-    static func forwardedLaunchArguments(from appArguments: [String]) -> [String] {
-        var beamArgs = ["start"]
+    /// Only flags understood by `Minga.CLI` are forwarded, while positional targets are preserved in their original order. The generated OTP release launcher does not forward arguments after its `start` command, so `start()` transports this array through `MINGA_CLI_ARGS_B64` instead.
+    static func forwardedCLIArguments(from appArguments: [String]) -> [String] {
+        var cliArguments: [String] = []
         let valueFlags: Set<String> = ["--config", "--debug-log", "-D"]
         let booleanFlags: Set<String> = [
             "--editor", "--no-context", "--minimal", "--safe", "-Q"
@@ -201,20 +198,31 @@ final class BEAMProcessManager {
 
         for arg in appArguments.dropFirst() {
             if expectsValue {
-                beamArgs.append(arg)
+                cliArguments.append(arg)
                 expectsValue = false
                 continue
             }
 
             if valueFlags.contains(arg) {
-                beamArgs.append(arg)
+                cliArguments.append(arg)
                 expectsValue = true
             } else if booleanFlags.contains(arg) || !arg.hasPrefix("-") {
-                beamArgs.append(arg)
+                cliArguments.append(arg)
             }
         }
 
-        return beamArgs
+        return cliArguments
+    }
+
+    /// Encodes CLI arguments for lossless transport through the release environment.
+    static func encodedCLIArguments(_ arguments: [String]) -> String {
+        arguments.map { argument in
+            Data(argument.utf8)
+                .base64EncodedString()
+                .replacingOccurrences(of: "+", with: "-")
+                .replacingOccurrences(of: "/", with: "_")
+                .replacingOccurrences(of: "=", with: "")
+        }.joined(separator: ",")
     }
 
     /// Returns the working directory the embedded BEAM should start in.
@@ -274,8 +282,8 @@ final class BEAMProcessManager {
         let proc = Process()
         proc.executableURL = execURL
 
-        let launchArguments = Self.forwardedLaunchArguments(from: ProcessInfo.processInfo.arguments)
-        proc.arguments = launchArguments
+        let cliArguments = Self.forwardedCLIArguments(from: ProcessInfo.processInfo.arguments)
+        proc.arguments = ["start"]
 
         // Set up pipes for the port protocol.
         let stdinPipe = Pipe()
@@ -291,12 +299,13 @@ final class BEAMProcessManager {
         // Tell the BEAM to use connected mode (don't spawn a GUI).
         var env = ProcessInfo.processInfo.environment
         env["MINGA_PORT_MODE"] = "connected"
+        env["MINGA_CLI_ARGS_B64"] = Self.encodedCLIArguments(cliArguments)
 
         let workingDirectoryURL = Self.defaultWorkingDirectoryURL(environment: env)
         proc.currentDirectoryURL = workingDirectoryURL
         env["PWD"] = workingDirectoryURL.path
 
-        if launchArguments.contains("--safe") || launchArguments.contains("-Q") {
+        if cliArguments.contains("--safe") || cliArguments.contains("-Q") {
             env["MINGA_SAFE_MODE"] = "1"
         }
 

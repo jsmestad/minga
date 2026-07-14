@@ -37,9 +37,12 @@ defmodule Mix.Tasks.App.Assemble do
           MacOS/
             Minga                    # Swift/Metal GUI executable
           Resources/
+            bin/
+              minga                  # Launch Services-aware primary CLI
+              minga-tui              # Explicit standalone/TUI wrapper
             release/                 # Self-contained BEAM release
               bin/minga_macos        # Release entry script
-              lib/                   # BEAM modules (includes minga-parser in priv/)
+              lib/                   # BEAM modules and native support/TUI binaries
               releases/              # Release metadata
               erts-*/                # Embedded Erlang runtime
             default.metallib         # Metal shaders (from Xcode)
@@ -62,8 +65,7 @@ defmodule Mix.Tasks.App.Assemble do
     app_bundle_path = build_xcode_project(no_build)
 
     embed_release(app_bundle_path, release_path)
-
-    strip_tui_binaries(app_bundle_path)
+    install_cli_launchers(app_bundle_path)
 
     codesign_bundle(app_bundle_path)
 
@@ -92,8 +94,8 @@ defmodule Mix.Tasks.App.Assemble do
   end
 
   defp build_beam_release(false) do
-    Mix.shell().info("Building native support binaries for the macOS release...")
-    Mix.Task.run("native.build.support", [])
+    Mix.shell().info("Building native support and TUI binaries for the macOS release...")
+    Mix.Task.run("native.build.tui", [])
     Mix.shell().info("Building BEAM release (minga_macos)...")
     Mix.Task.run("release", ["minga_macos", "--overwrite"])
     Path.join([Mix.Project.build_path(), "rel", "minga_macos"])
@@ -191,33 +193,20 @@ defmodule Mix.Tasks.App.Assemble do
     :ok
   end
 
-  @spec strip_tui_binaries(String.t()) :: :ok
-  defp strip_tui_binaries(app_bundle_path) do
-    # Find and remove TUI-only binaries from the embedded release's priv/
-    priv_glob =
-      Path.join([
-        app_bundle_path,
-        "Contents",
-        "Resources",
-        "release",
-        "lib",
-        "minga-*",
-        "priv"
-      ])
+  @spec install_cli_launchers(String.t()) :: :ok
+  defp install_cli_launchers(app_bundle_path) do
+    source_dir = Path.join([File.cwd!(), "macos", "Resources", "bin"])
+    target_dir = Path.join([app_bundle_path, "Contents", "Resources", "bin"])
+    File.mkdir_p!(target_dir)
 
-    priv_dirs = Path.wildcard(priv_glob)
+    Enum.each(["minga", "minga-tui"], fn launcher ->
+      source = Path.join(source_dir, launcher)
+      target = Path.join(target_dir, launcher)
+      File.cp!(source, target)
+      File.chmod!(target, 0o755)
+    end)
 
-    tui_binaries = ["minga-renderer-go"]
-
-    for priv_dir <- priv_dirs, binary_name <- tui_binaries do
-      path = Path.join(priv_dir, binary_name)
-
-      if File.exists?(path) do
-        File.rm!(path)
-        Mix.shell().info("Stripped TUI binary: #{binary_name}")
-      end
-    end
-
+    Mix.shell().info("Installed GUI and standalone CLI launchers")
     :ok
   end
 

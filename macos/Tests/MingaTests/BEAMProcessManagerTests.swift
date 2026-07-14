@@ -5,7 +5,7 @@ import Testing
 struct BEAMProcessManagerLaunchArgumentsTests {
     @Test("forwards safe mode, editor, minimal, and positional targets")
     @MainActor func forwardsBooleanFlagsAndPositionals() {
-        let forwarded = BEAMProcessManager.forwardedLaunchArguments(
+        let forwarded = BEAMProcessManager.forwardedCLIArguments(
             from: [
                 "/Applications/Minga.app/Contents/MacOS/Minga",
                 "--safe",
@@ -20,7 +20,6 @@ struct BEAMProcessManagerLaunchArgumentsTests {
         )
 
         #expect(forwarded == [
-            "start",
             "--safe",
             "-Q",
             "--editor",
@@ -33,7 +32,7 @@ struct BEAMProcessManagerLaunchArgumentsTests {
 
     @Test("forwards config and both debug log value flags with their values")
     @MainActor func forwardsValueFlags() {
-        let forwarded = BEAMProcessManager.forwardedLaunchArguments(
+        let forwarded = BEAMProcessManager.forwardedCLIArguments(
             from: [
                 "/Applications/Minga.app/Contents/MacOS/Minga",
                 "--config", "/tmp/minga.exs", "one.ex",
@@ -43,11 +42,18 @@ struct BEAMProcessManagerLaunchArgumentsTests {
         )
 
         #expect(forwarded == [
-            "start",
             "--config", "/tmp/minga.exs", "one.ex",
             "--debug-log", "/tmp/minga.log", "two.ex",
             "-D", "/tmp/minga-short.log", "three.ex"
         ])
+    }
+
+    @Test("encodes release CLI arguments without losing spaces")
+    @MainActor func encodesCLIArguments() {
+        #expect(
+            BEAMProcessManager.encodedCLIArguments(["--editor", "/tmp/path with space"])
+                == "LS1lZGl0b3I,L3RtcC9wYXRoIHdpdGggc3BhY2U"
+        )
     }
 
     @Test("uses HOME when launch services provides root as cwd")

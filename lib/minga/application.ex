@@ -53,8 +53,8 @@ defmodule Minga.Application do
       │       └── MingaEditor
       └── Minga.SystemObserver               (always-on process observer)
 
-  In standalone (Burrito) mode, automatically processes CLI arguments
-  after the supervision tree is up.
+  In standalone Burrito mode, or when the macOS app's bundled TUI wrapper is
+  used, automatically processes CLI arguments after the supervision tree is up.
   """
 
   use Application
@@ -73,6 +73,7 @@ defmodule Minga.Application do
     # Booting it spins up the event recorder, extensions, and watchdog just to
     # print a string, which can add seconds of startup. Short-circuit first.
     maybe_print_info_and_halt()
+    maybe_prepare_cli_startup()
 
     StartupTimer.start()
 
@@ -155,7 +156,7 @@ defmodule Minga.Application do
       StartupTimer.report()
     end
 
-    if Burrito.Util.running_standalone?() and match?({:ok, _}, result) do
+    if cli_boot?() and match?({:ok, _}, result) do
       if minimal? do
         Task.start_link(fn -> Minga.CLI.start_from_cli() end)
       else
@@ -202,8 +203,8 @@ defmodule Minga.Application do
 
   @spec maybe_print_info_and_halt() :: :ok
   defp maybe_print_info_and_halt do
-    if Burrito.Util.running_standalone?() do
-      case Minga.CLI.info_flag_output(Burrito.Util.Args.argv()) do
+    if standalone_cli?() do
+      case Minga.CLI.info_flag_output(Minga.CLI.argv()) do
         {:ok, message} ->
           IO.puts(message)
           System.halt(0)
@@ -229,6 +230,25 @@ defmodule Minga.Application do
          not standalone_terminal_command?())
   end
 
+  @spec maybe_prepare_cli_startup() :: :ok
+  defp maybe_prepare_cli_startup do
+    if cli_boot?() do
+      Minga.CLI.prepare_startup(Minga.CLI.argv())
+    else
+      :ok
+    end
+  end
+
+  @spec cli_boot?() :: boolean()
+  defp cli_boot? do
+    standalone_cli?() or System.get_env("MINGA_PORT_MODE") == "connected"
+  end
+
+  @spec standalone_cli?() :: boolean()
+  defp standalone_cli? do
+    Burrito.Util.running_standalone?() or System.get_env("MINGA_STANDALONE_TUI") == "1"
+  end
+
   @spec minimal_mode?() :: boolean()
   defp minimal_mode? do
     Application.get_env(:minga, :minimal_mode, false) or standalone_minimal?()
@@ -247,7 +267,7 @@ defmodule Minga.Application do
 
   @spec standalone_headless?() :: boolean()
   defp standalone_headless? do
-    Minga.CLI.headless_args?(Burrito.Util.Args.argv())
+    Minga.CLI.headless_args?(Minga.CLI.argv())
   rescue
     error ->
       Minga.Log.debug(:editor, "Could not inspect standalone CLI args: #{inspect(error)}")
@@ -256,7 +276,7 @@ defmodule Minga.Application do
 
   @spec standalone_terminal_command?() :: boolean()
   defp standalone_terminal_command? do
-    Minga.CLI.terminal_command?(Burrito.Util.Args.argv())
+    Minga.CLI.terminal_command?(Minga.CLI.argv())
   rescue
     error ->
       Minga.Log.debug(:editor, "Could not inspect standalone CLI args: #{inspect(error)}")
@@ -265,7 +285,7 @@ defmodule Minga.Application do
 
   @spec standalone_minimal?() :: boolean()
   defp standalone_minimal? do
-    Minga.CLI.minimal_args?(Burrito.Util.Args.argv())
+    Minga.CLI.minimal_args?(Minga.CLI.argv())
   rescue
     _ -> false
   end

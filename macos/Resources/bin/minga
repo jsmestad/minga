@@ -1,25 +1,96 @@
 #!/bin/bash
 #
-# CLI launcher for Minga.app. Homebrew Cask symlinks this script into PATH.
-# Finder/Open With remains a normal Launch Services file-open path; `--wait`
-# uses Minga's private app URL only to transport a target and result file.
+# Primary macOS CLI for Minga.app. GUI-appropriate opens go through Launch
+# Services so an existing app is reused. Terminal-only commands and --tui are
+# delegated to the bundled standalone runtime without recursively invoking this
+# launcher.
 
 set -euo pipefail
 
-resolve_app() {
-  local script_dir bundle_app
-  script_dir="$(cd "$(dirname "$0")" && pwd)"
-  bundle_app="$(cd "$script_dir/../../.." 2>/dev/null && pwd)" || true
+resolve_script_dir() {
+  local script_path="$0" link
+  while [ -L "$script_path" ]; do
+    link=$(readlink "$script_path")
+    case "$link" in
+      /*) script_path="$link" ;;
+      *) script_path="$(dirname "$script_path")/$link" ;;
+    esac
+  done
+  cd "$(dirname "$script_path")" && pwd
+}
 
-  if [ -n "$bundle_app" ] && [ -f "$bundle_app/Contents/MacOS/Minga" ]; then
-    echo "$bundle_app"
-  elif [ -d "/Applications/Minga.app" ]; then
-    echo "/Applications/Minga.app"
-  elif [ -d "$HOME/Applications/Minga.app" ]; then
-    echo "$HOME/Applications/Minga.app"
+SCRIPT_DIR=$(resolve_script_dir)
+
+bundle_app_from_script() {
+  local bundle_app
+  bundle_app="$(cd "$SCRIPT_DIR/../../.." 2>/dev/null && pwd)" || true
+
+  if [ -n "$bundle_app" ] && [ -d "$bundle_app/Contents" ]; then
+    printf '%s\n' "$bundle_app"
   else
     return 1
   fi
+}
+
+valid_app() {
+  [ -d "$1" ] && [ -x "$1/Contents/MacOS/Minga" ]
+}
+
+resolve_app() {
+  local bundle_app
+
+  if [ -n "${MINGA_APP_PATH:-}" ]; then
+    if valid_app "$MINGA_APP_PATH"; then
+      printf '%s\n' "$MINGA_APP_PATH"
+      return
+    fi
+    return 1
+  fi
+
+  bundle_app=$(bundle_app_from_script 2>/dev/null) || true
+  if [ -n "$bundle_app" ] && valid_app "$bundle_app"; then
+    printf '%s\n' "$bundle_app"
+  elif valid_app "/Applications/Minga.app"; then
+    printf '%s\n' "/Applications/Minga.app"
+  elif valid_app "$HOME/Applications/Minga.app"; then
+    printf '%s\n' "$HOME/Applications/Minga.app"
+  else
+    return 1
+  fi
+}
+
+resolve_standalone() {
+  local bundle_app candidate
+
+  if [ -n "${MINGA_STANDALONE_BIN:-}" ]; then
+    if [ -x "$MINGA_STANDALONE_BIN" ]; then
+      printf '%s\n' "$MINGA_STANDALONE_BIN"
+      return
+    fi
+    return 1
+  fi
+
+  bundle_app=$(bundle_app_from_script 2>/dev/null) || true
+  for candidate in \
+    "${MINGA_APP_PATH:+$MINGA_APP_PATH/Contents/Resources/bin/minga-tui}" \
+    "${bundle_app:+$bundle_app/Contents/Resources/bin/minga-tui}" \
+    "/Applications/Minga.app/Contents/Resources/bin/minga-tui" \
+    "$HOME/Applications/Minga.app/Contents/Resources/bin/minga-tui" \
+    "$SCRIPT_DIR/minga-tui"
+  do
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return
+    fi
+  done
+
+  candidate=$(command -v minga-tui 2>/dev/null || true)
+  if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+    printf '%s\n' "$candidate"
+    return
+  fi
+
+  return 1
 }
 
 show_help() {
@@ -27,10 +98,12 @@ show_help() {
 minga - BEAM-powered modal text editor
 
 Usage: minga [options] [file|directory]
+       minga --tui [options] [file|directory]
 
 Options:
   -h, --help             Show this help message
   -v, --version          Show version
+  --tui, --standalone    Run the standalone terminal UI instead of Minga.app
   --editor               Open files in the traditional editor view
   --minimal              Editor-only startup (recommended for GIT_EDITOR)
   --wait                 Wait for the target to be saved or cleanly closed
@@ -39,9 +112,15 @@ Options:
   --config <path>        Use a custom config file
   -D, --debug-log <path> Append messages and warnings to a debug log
 
+Terminal-only invocations (`--headless`, `attach`, `sessions`, `detach`,
+`kill-session`, and `login --manual`) automatically use the standalone runtime
+and never launch Minga.app.
+
 Examples:
+  minga .
   minga README.md
   minga --editor README.md
+  minga --tui README.md
   minga --wait --minimal .git/COMMIT_EDITMSG
   GIT_EDITOR='minga --wait --minimal' git commit
 
@@ -65,6 +144,11 @@ absolute_path() {
   local value="$1" parent
   if [[ "$value" == /* ]]; then
     printf '%s\n' "$value"
+    return
+  fi
+
+  if [ -d "$value" ]; then
+    (cd "$value" && pwd)
     return
   fi
 
@@ -98,6 +182,73 @@ read_wait_result() {
   return 1
 }
 
+force_standalone=false
+terminal_only=false
+after_double_dash=false
+expects_value=false
+first_command=""
+
+for arg in "$@"; do
+  if $after_double_dash; then
+    continue
+  fi
+  if $expects_value; then
+    expects_value=false
+    continue
+  fi
+
+  case "$arg" in
+    --)
+      after_double_dash=true
+      ;;
+    --tui|--standalone)
+      force_standalone=true
+      ;;
+    --headless)
+      terminal_only=true
+      ;;
+    --config|--debug-log|-D|--name|--sname|--cookie-file|--host|--port)
+      expects_value=true
+      ;;
+    --editor|--no-context|--minimal|--safe|-Q|--wait|-h|--help|-v|--version)
+      ;;
+    -* )
+      ;;
+    *)
+      if [ -z "$first_command" ]; then
+        first_command="$arg"
+      fi
+      ;;
+  esac
+done
+
+case "$first_command" in
+  attach|sessions|detach|kill-session|login)
+    terminal_only=true
+    ;;
+esac
+
+if $force_standalone || $terminal_only; then
+  standalone=$(resolve_standalone) || {
+    echo "error: Minga standalone/TUI runtime not found. Install Minga.app or install the standalone minga formula." >&2
+    exit 1
+  }
+
+  standalone_args=()
+  after_double_dash=false
+  for arg in "$@"; do
+    if ! $after_double_dash && { [ "$arg" = "--tui" ] || [ "$arg" = "--standalone" ]; }; then
+      continue
+    fi
+    standalone_args+=("$arg")
+    if [ "$arg" = "--" ]; then
+      after_double_dash=true
+    fi
+  done
+
+  exec "$standalone" "${standalone_args[@]}"
+fi
+
 case "${1:-}" in
   -h|--help)
     show_help
@@ -110,7 +261,12 @@ case "${1:-}" in
 esac
 
 APP_PATH=$(resolve_app) || {
-  echo "error: Minga.app not found in its bundle, /Applications, or ~/Applications." >&2
+  if [ -n "${MINGA_APP_PATH:-}" ]; then
+    echo "error: Minga.app is missing or damaged at $MINGA_APP_PATH (expected executable Contents/MacOS/Minga)." >&2
+  else
+    echo "error: Minga.app not found or damaged in its bundle, /Applications, or ~/Applications." >&2
+  fi
+  echo "Use 'minga --tui' for standalone terminal mode." >&2
   exit 1
 }
 
@@ -164,6 +320,12 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+OPEN_BIN="${MINGA_OPEN_BIN:-/usr/bin/open}"
+if [ ! -x "$OPEN_BIN" ]; then
+  echo "error: cannot launch Minga.app because the macOS 'open' command is unavailable at $OPEN_BIN." >&2
+  exit 1
+fi
+
 if ! $wait_mode; then
   open_args=(-a "$APP_PATH")
   if [ ${#files[@]} -gt 0 ]; then
@@ -172,7 +334,10 @@ if ! $wait_mode; then
   if [ ${#flags[@]} -gt 0 ]; then
     open_args+=(--args "${flags[@]}")
   fi
-  open "${open_args[@]}"
+  if ! "$OPEN_BIN" "${open_args[@]}"; then
+    echo "error: failed to launch or hand off to Minga.app at $APP_PATH." >&2
+    exit 1
+  fi
   exit 0
 fi
 
@@ -204,7 +369,7 @@ if [ ${#flags[@]} -gt 0 ]; then
   open_args+=(--args "${flags[@]}")
 fi
 
-if ! open "${open_args[@]}"; then
+if ! "$OPEN_BIN" "${open_args[@]}"; then
   echo "error: failed to launch Minga.app" >&2
   exit 1
 fi
@@ -222,10 +387,11 @@ while [ ! -e "$ack_path" ]; do
     echo "error: Minga.app did not accept the wait request within 15 seconds" >&2
     exit 1
   fi
-  sleep 0.1
+  "${MINGA_SLEEP_BIN:-/bin/sleep}" 0.1
 done
 
-app_pid=$(/usr/bin/pgrep -x Minga | /usr/bin/head -n 1 || true)
+PGREP_BIN="${MINGA_PGREP_BIN:-/usr/bin/pgrep}"
+app_pid=$("$PGREP_BIN" -x Minga | /usr/bin/head -n 1 || true)
 if [ -z "$app_pid" ]; then
   echo "error: Minga.app exited before the edit completed" >&2
   exit 1
@@ -236,7 +402,7 @@ while [ ! -e "$result_path" ]; do
     echo "error: Minga.app exited before the edit completed" >&2
     exit 1
   fi
-  sleep 0.1
+  "${MINGA_SLEEP_BIN:-/bin/sleep}" 0.1
 done
 
 read_wait_result "$result_path"

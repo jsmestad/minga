@@ -1,13 +1,14 @@
 {
-  "version": 1,
+  "version": 2,
   "fixtureVersion": "resident-ordinary-edit-v2",
-  "decodeApplyP95Ms": 0.029584,
-  "commandPreparationP95Ms": 0.347542,
-  "combinedP95Ms": 0.392416,
+  "measurementClock": "process_cpu",
+  "decodeApplyP95Ms": 0.032,
+  "commandPreparationP95Ms": 0.264,
+  "combinedP95Ms": 0.272,
   "provenance": {
-    "measuredAt": "2026-07-12",
+    "measuredAt": "2026-07-14",
     "environment": "GitHub-hosted macos-15 arm64 runner, macOS 15.7.7 (24G720)",
     "toolchain": "Apple Swift 6.1.2 (swiftlang-6.1.2.1.2 clang-1700.0.13.5), swiftc -O",
-    "rationale": "Recalibrated for resident-ordinary-edit-v2 from CI run 29197434526 rerun job 86663882497 after the harness moved to the shipping 65,536-row protocol decode, bounded resident replacement, and shared CoreText command-preparation paths. Two macos-15 runs measured 0.030/0.342/0.384 ms and 0.030/0.348/0.392 ms p95 for decode/apply, command preparation, and combined work; the conservative second run is checked in. Hard-coded 4 ms stage and 8 ms combined ceilings remain authoritative."
+    "rationale": "Recalibrated for process CPU timing after shared-runner wall-clock scheduling pauses made unchanged renderer code vary by more than 3x at p95. GitHub-hosted macos-15 arm64 runs 29314931937 job 87026663570 and 29315752827 job 87029274634 aggregated to 0.014/0.137/0.155 ms and 0.032/0.264/0.272 ms p95 for decode/apply, command preparation, and combined work. The conservative second run is checked in. Hard-coded 4 ms stage and 8 ms combined ceilings remain authoritative."
   }
 }
