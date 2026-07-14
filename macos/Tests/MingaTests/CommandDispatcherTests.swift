@@ -6,6 +6,7 @@
 
 import MingaUI
 import Observation
+import SwiftUI
 import Synchronization
 import Testing
 import Foundation
@@ -1560,7 +1561,12 @@ struct CommandDispatcherStagingTests {
                       icon: "", label: label)
     }
 
-    private func windowContent(windowId: UInt16 = 7, epoch: UInt32 = 42, fontId: UInt8 = 0) throws -> GUIWindowContent {
+    private func windowContent(
+        windowId: UInt16 = 7,
+        epoch: UInt32 = 42,
+        fontId: UInt8 = 0,
+        scrollPresentation: GUIScrollPresentation? = nil
+    ) throws -> GUIWindowContent {
         let span = GUIHighlightSpan(
             startCol: 0, endCol: 3, fg: 0xFFFFFF, bg: 0,
             attrs: 0, fontWeight: 0, fontId: fontId
@@ -1573,7 +1579,23 @@ struct CommandDispatcherStagingTests {
             windowId: windowId, fullRefresh: true, contentEpoch: epoch,
             cursorRow: 0, cursorCol: 0, cursorShape: .block,
             rows: [row], selection: nil, searchMatches: [],
-            diagnosticUnderlines: [], documentHighlights: []
+            diagnosticUnderlines: [], documentHighlights: [],
+            scrollPresentation: scrollPresentation
+        )
+    }
+
+    private func status(mode: UInt8 = 1) -> StatusBarUpdate {
+        StatusBarUpdate(
+            contentKind: 0, mode: mode, cursorLine: 4, cursorCol: 2,
+            lineCount: 12, flags: 0, lspStatus: 0, gitBranch: "",
+            message: "committed", filetype: "swift", errorCount: 0,
+            warningCount: 0, modelName: "", messageCount: 0,
+            sessionStatus: 0, infoCount: 0, hintCount: 0,
+            macroRecording: 0, parserStatus: 0, agentStatus: 0,
+            gitAdded: 0, gitModified: 0, gitDeleted: 0, icon: "",
+            iconColorR: 0, iconColorG: 0, iconColorB: 0,
+            filename: "Commit.swift", diagnosticHint: "",
+            backgroundSubagentCount: 0, backgroundSubagentLabel: ""
         )
     }
 
@@ -2035,6 +2057,100 @@ struct CommandDispatcherStagingTests {
         #expect(gui.agentChatState.model == "prepared-model")
     }
 
+    @Test("an early prepared callback observes all later semantic state")
+    @MainActor func preparedCallbackObservesCompleteState() throws {
+        let (dispatcher, gui) = makeDispatcher()
+        var observation: (Bool, String?, String, Set<UInt16>, Bool)?
+        dispatcher.onFontChanged = { _, _, _, _ in
+            observation = (
+                gui.themeColors.hasAppliedTheme,
+                gui.windowContents[7]?.rows.first?.text,
+                gui.statusBarState.modeName,
+                dispatcher.currentFrameWindowIds,
+                gui.completionState.visible
+            )
+        }
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.setFont(family: "Menlo", size: 14, ligatures: true, weight: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try windowContent()))
+        dispatcher.dispatch(.guiStatusBar(status()))
+        dispatcher.dispatch(.guiCompletion(
+            visible: true, anchorRow: 3, anchorCol: 4, selectedIndex: 0,
+            items: [Wire.CompletionItem(kind: 1, label: "commit", detail: "state")],
+            documentation: "installed after the resource domain"
+        ))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        #expect(observation?.0 == true)
+        #expect(observation?.1 == "old")
+        #expect(observation?.2 == "INSERT")
+        #expect(observation?.3 == Set([7]))
+        #expect(observation?.4 == true)
+    }
+
+    @Test("prepared effects replay once in canonical order before acknowledgement")
+    @MainActor func preparedEffectsReplayInCanonicalOrder() throws {
+        let (dispatcher, gui) = makeDispatcher()
+        var events: [String] = []
+        gui.frontendExtensions.register(
+            extensionID: "effects-test",
+            decoder: { _ in events.append("extension") },
+            view: { _ in AnyView(EmptyView()) }
+        )
+        dispatcher.onFontChanged = { _, _, _, _ in events.append("font") }
+        dispatcher.onScrollPresentationReset = { events.append("scroll") }
+        dispatcher.onTitleChanged = { _ in events.append("title") }
+        dispatcher.onWindowBgChanged = { _ in events.append("background") }
+        dispatcher.onModeChanged = { _ in events.append("mode") }
+        dispatcher.onLineSpacingChanged = { _ in events.append("spacing") }
+        dispatcher.onCursorAnimationChanged = { _ in events.append("cursor-animation") }
+        dispatcher.onAgentChatVisibilityChanged = { _ in events.append("agent-chat") }
+        dispatcher.onLinkCursorChanged = { _ in events.append("link") }
+        dispatcher.onTransactionResult = { _ in events.append("transaction") }
+        dispatcher.onFirstRender = { events.append("first-render") }
+        dispatcher.onFramePresented = { events.append("presented") }
+        dispatcher.onFrameReady = { events.append("ready") }
+
+        let reset = GUIScrollPresentation(
+            windowId: 7, resetRequired: true, anchorTop: 5, anchorLeft: 0,
+            anchorVisualRowOffset: 0, visibleStartLine: 5, visibleEndLine: 8,
+            overscanStartLine: 4, overscanEndLine: 9, contentEpoch: 42,
+            layoutGeneration: 1
+        )
+        let runtime = FrontendExtensionRuntimeMessage(
+            extensionID: "effects-test", channel: "commit", payload: Data([1])
+        )
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        // Deliberately scramble input order; prepared domains define replay order.
+        dispatcher.dispatch(.setLinkCursor(active: true))
+        dispatcher.dispatch(.guiAgentChat(
+            visible: true, status: 0, model: "model", thinkingLevel: "medium",
+            prompt: "", promptLineCount: 1, promptCursorLine: 0,
+            promptCursorCol: 0, promptVimMode: 1, promptVisibleRows: 1,
+            promptCompletion: nil, pendingToolName: nil, pendingToolSummary: "",
+            helpVisible: false, helpGroups: [], messages: []
+        ))
+        dispatcher.dispatch(.guiExtensionRuntime(runtime))
+        dispatcher.dispatch(.guiCursorAnimation(enabled: false))
+        dispatcher.dispatch(.guiLineSpacing(spacing: 1.5))
+        dispatcher.dispatch(.guiStatusBar(status()))
+        dispatcher.dispatch(.setWindowBg(r: 0x22, g: 0x33, b: 0x44))
+        dispatcher.dispatch(.setTitle("Committed"))
+        dispatcher.dispatch(.guiWindowContent(data: try windowContent(scrollPresentation: reset)))
+        dispatcher.dispatch(.setFont(family: "Menlo", size: 14, ligatures: true, weight: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        #expect(events == [
+            "font", "scroll", "cursor-animation", "spacing", "mode",
+            "background", "title", "extension", "agent-chat", "link",
+            "transaction", "first-render", "presented", "ready"
+        ])
+    }
+
     @Test("gutter and indent guide keys cannot collide across window ids")
     @MainActor func typedWindowCoalescingKeysDoNotCollide() throws {
         let (dispatcher, _) = makeDispatcher()
@@ -2323,6 +2439,41 @@ struct CommandDispatcherStagingTests {
         #expect(results == [.windowRefMiss(generation: 1, frameSeq: 1, lastAppliedFrameSeq: 0, windowId: 99)])
     }
 
+    @Test("incomplete, resource-rejected, and superseded frames replay no effects")
+    @MainActor func nonPublishedFramesReplayNoEffects() throws {
+        var effectCount = 0
+        func armEffects(_ dispatcher: CommandDispatcher) {
+            dispatcher.onTitleChanged = { _ in effectCount += 1 }
+            dispatcher.onFontChanged = { _, _, _, _ in effectCount += 1 }
+        }
+
+        let (incomplete, _) = makeDispatcher()
+        armEffects(incomplete)
+        incomplete.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        incomplete.dispatch(.setTitle("incomplete"))
+        incomplete.dispatch(.setFont(family: "Menlo", size: 14, ligatures: true, weight: 1))
+        incomplete.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        let (resourceRejected, _) = makeDispatcher()
+        armEffects(resourceRejected)
+        resourceRejected.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        resourceRejected.dispatch(.guiTheme(slots: completeThemeSlots()))
+        resourceRejected.dispatch(.setTitle("resource rejected"))
+        resourceRejected.resourcePolicyRejected()
+
+        let (superseded, _) = makeDispatcher()
+        superseded.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 2))
+        superseded.dispatch(.guiTheme(slots: completeThemeSlots()))
+        superseded.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        armEffects(superseded)
+        superseded.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        superseded.dispatch(.setTitle("superseded"))
+        superseded.dispatch(.setFont(family: "Menlo", size: 14, ligatures: true, weight: 1))
+        superseded.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+
+        #expect(effectCount == 0)
+    }
+
     @Test("invalid transcript operations reject without publishing sibling state")
     @MainActor func invalidTranscriptRejectsWholeTransaction() throws {
         let invalidCommands: [(RenderCommand, PreparedFrameRejection)] = [
@@ -2561,16 +2712,24 @@ struct CommandDispatcherStagingTests {
         #expect(requested.isEmpty) // out-of-band, not an invalidation
     }
 
-    @Test("set_window_bg applies immediately with no open transaction")
+    @Test("set_window_bg replays its local effect immediately after mutation")
     @MainActor func windowBgAppliesOutOfBand() throws {
         let (dispatcher, _) = makeDispatcher()
         var requested: [UInt32] = []
+        var callbackCount = 0
+        var callbackSawInstalledState = false
+        let expected: UInt32 = (0x28 << 16) | (0x2C << 8) | 0x34
         dispatcher.onRequestKeyframe = { requested.append($0) }
+        dispatcher.onWindowBgChanged = { _ in
+            callbackCount += 1
+            callbackSawInstalledState = dispatcher.frameState.defaultBg == expected
+        }
 
         dispatcher.dispatch(.setWindowBg(r: 0x28, g: 0x2C, b: 0x34))
 
-        let expected: UInt32 = (0x28 << 16) | (0x2C << 8) | 0x34
         #expect(dispatcher.frameState.defaultBg == expected)
+        #expect(callbackCount == 1)
+        #expect(callbackSawInstalledState)
         #expect(requested.isEmpty)
     }
 

@@ -54,6 +54,23 @@ private enum CompletionNavigationCodepoints {
     static let ctrlModifier: UInt8 = 0x02
 }
 
+private enum CommitEffect {
+    case fontChanged(family: String, size: UInt16, ligatures: Bool, weight: UInt8)
+    case scrollPresentationReset(windowID: UInt16)
+    case titleChanged(String)
+    case windowBackgroundChanged(red: UInt8, green: UInt8, blue: UInt8)
+    case linkCursorChanged(Bool)
+    case lineSpacingChanged(Float)
+    case cursorAnimationChanged(Bool)
+    case modeChanged(String)
+    case agentChatVisibilityChanged(Bool)
+    case clipboardWrite(target: UInt8, text: String)
+    case extensionRuntime(FrontendExtensionRuntimeMessage)
+    case infoLog(String)
+    case warningLog(String)
+    case errorLog(String)
+}
+
 /// Dispatches render commands to FrameState (metadata) and GUIState (chrome).
 @MainActor
 final class CommandDispatcher {
@@ -287,7 +304,7 @@ final class CommandDispatcher {
         //   for font commands, but Swift actually applies them).
         case .guiConfigState:
             // Settings is an independently interactive scene and has no frame consumer.
-            apply(command)
+            applyImmediately(command)
 
         case .setTitle, .setWindowBg, .setLinkCursor, .protocolError,
              .setFont, .setFontFallback, .registerFont, .clipboardWrite:
@@ -439,25 +456,37 @@ final class CommandDispatcher {
             generation: transaction.generation,
             frameSeq: transaction.frameSeq
         )
+        var effects: [CommitEffect] = []
         guiState.frameStore.publishCommitted(
             generation: committed.generation,
             frameSeq: committed.frameSeq,
             impact: finalImpact
         ) {
-            if let theme = transaction.theme { apply(.guiTheme(slots: theme.slots)) }
-            if let resources = transaction.resources { resources.commands.forEach(apply) }
-            if let windows = transaction.windows { apply(windows) }
-            if let metadata = transaction.metadata { metadata.commands.forEach(apply) }
+            if let theme = transaction.theme {
+                apply(.guiTheme(slots: theme.slots), effects: &effects)
+            }
+            if let resources = transaction.resources {
+                for command in resources.commands { apply(command, effects: &effects) }
+            }
+            if let windows = transaction.windows { apply(windows, effects: &effects) }
+            if let metadata = transaction.metadata {
+                for command in metadata.commands { apply(command, effects: &effects) }
+            }
             if let chrome = transaction.chrome {
                 if let transcript = chrome.transcript {
                     guiState.agentChatState.publishTranscript(transcript)
                 }
-                chrome.commands.forEach(apply)
+                for command in chrome.commands { apply(command, effects: &effects) }
             }
-            if let overlays = transaction.overlays { overlays.commands.forEach(apply) }
-            if let focus = transaction.focus { focus.commands.forEach(apply) }
+            if let overlays = transaction.overlays {
+                for command in overlays.commands { apply(command, effects: &effects) }
+            }
+            if let focus = transaction.focus {
+                for command in focus.commands { apply(command, effects: &effects) }
+            }
             if clearsResync { guiState.resyncState.clear() }
         }
+        replay(effects)
         guiState.presentationMetrics.beginCommitted(frame: committed, impact: finalImpact)
         publicationCount += 1
         lastPublicationOperationCounts = transaction.operationCounts
@@ -466,25 +495,33 @@ final class CommandDispatcher {
     private func publishLocal(_ command: RenderCommand) {
         let impact = GUIFrameImpact.impact(for: command)
         guard !impact.isEmpty else {
-            apply(command)
+            applyImmediately(command)
             return
         }
+        var effects: [CommitEffect] = []
         guiState.frameStore.publishLocal(impact: impact) {
-            apply(command)
+            apply(command, effects: &effects)
         }
+        replay(effects)
     }
 
-    private func apply(_ updates: PreparedWindowUpdates) {
+    private func applyImmediately(_ command: RenderCommand) {
+        var effects: [CommitEffect] = []
+        apply(command, effects: &effects)
+        replay(effects)
+    }
+
+    private func apply(_ updates: PreparedWindowUpdates, effects: inout [CommitEffect]) {
         for (windowId, content) in updates.replacements {
             let previousScroll = guiState.windowContents[windowId]?.scrollPresentation
             guiState.windowContents[windowId] = content
             if shouldResetScrollPresentation(previous: previousScroll, next: content.scrollPresentation) {
-                discardLocalPresentation(.offset, windowId: windowId)
+                effects.append(.scrollPresentationReset(windowID: windowId))
             }
             frameState.cursorVisible = content.cursorVisible
             frameState.dirty = true
         }
-        updates.commands.forEach(apply)
+        for command in updates.commands { apply(command, effects: &effects) }
         if let authoritativeWindowIds = updates.authoritativeWindowIds {
             pruneAuthoritativeFrameState(liveWindowIds: authoritativeWindowIds)
         } else {
@@ -654,7 +691,7 @@ final class CommandDispatcher {
             )
             return
         }
-        apply(command)
+        applyImmediately(command)
     }
 
     // MARK: - View-driven FrameState mutations
@@ -745,12 +782,11 @@ final class CommandDispatcher {
         }
     }
 
-    /// Apply one domain command to the presented FrameState/GUIState. This is
-    /// called directly for out-of-band commands and from the focused prepared
-    /// publication boundary for committed domain updates. It must NOT handle frame
-    /// markers (begin/commit) — those drive the transaction state machine in
-    /// `dispatch`/`commitTransaction`, not the presented state.
-    private func apply(_ command: RenderCommand) {
+    /// Install one domain command into the presented FrameState/GUIState and
+    /// append any externally observable work to `effects`. It must NOT handle
+    /// frame markers (begin/commit) — those drive the transaction state machine
+    /// in `dispatch`/`commitTransaction`, not the presented state.
+    private func apply(_ command: RenderCommand, effects: inout [CommitEffect]) {
         switch command {
         case .setCursorShape(let shape):
             frameState.cursorShape = shape
@@ -763,32 +799,28 @@ final class CommandDispatcher {
             PortLogger.warn("Frame marker reached apply(_:); transaction routing bug")
 
         case .setTitle(let title):
-            onTitleChanged?(title)
+            effects.append(.titleChanged(title))
 
         case .setWindowBg(let r, let g, let b):
             let rgb: UInt32 = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
             frameState.defaultBg = rgb
-            let color = NSColor(
-                red: CGFloat(r) / 255.0,
-                green: CGFloat(g) / 255.0,
-                blue: CGFloat(b) / 255.0,
-                alpha: 1.0
-            )
-            PortLogger.info("Window bg received: r=\(r) g=\(g) b=\(b)")
-            onWindowBgChanged?(color)
+            effects.append(.windowBackgroundChanged(red: r, green: g, blue: b))
+            effects.append(.infoLog("Window bg received: r=\(r) g=\(g) b=\(b)"))
 
         case .setLinkCursor(let active):
-            onLinkCursorChanged?(active)
+            effects.append(.linkCursorChanged(active))
 
         case .protocolError(let message):
             // The BEAM rejected this frontend's handshake protocol_version, so
-            // we will never reach ready. Log to the port log and latch a blocking
-            // error overlay instead of leaving a blank window (ticket #2237).
-            PortLogger.error("Protocol error from BEAM: \(message)")
+            // we will never reach ready. Latch the blocking overlay during state
+            // installation and defer the port log until the frame is complete.
             guiState.protocolErrorState.present(message: message)
+            effects.append(.errorLog("Protocol error from BEAM: \(message)"))
 
         case .setFont(let family, let size, let ligatures, let weight):
-            onFontChanged?(family, size, ligatures, weight)
+            effects.append(.fontChanged(
+                family: family, size: size, ligatures: ligatures, weight: weight
+            ))
 
         case .setFontFallback(let families):
             fontManager?.setFallbackFonts(families)
@@ -853,14 +885,14 @@ final class CommandDispatcher {
             frameState.lineSpacing = max(spacing, 1.0)
             frameState.dirty = true
             if oldSpacing != frameState.lineSpacing {
-                onLineSpacingChanged?(frameState.lineSpacing)
+                effects.append(.lineSpacingChanged(frameState.lineSpacing))
             }
 
         case .guiCursorAnimation(let enabled):
-            onCursorAnimationChanged?(enabled)
+            effects.append(.cursorAnimationChanged(enabled))
 
         case .clipboardWrite(let target, let text):
-            handleClipboardWrite(target: target, text: text)
+            effects.append(.clipboardWrite(target: target, text: text))
 
         case .guiObservatory(let visible, _, let nodes):
             if visible {
@@ -904,7 +936,7 @@ final class CommandDispatcher {
             frameState.totalLineCount = update.lineCount
             if update.mode != lastMode {
                 lastMode = update.mode
-                onModeChanged?(guiState.statusBarState.modeName)
+                effects.append(.modeChanged(guiState.statusBarState.modeName))
             }
 
         case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let query, let hasPreview, let items, let actionMenu, let modePrefix, let loadStatus):
@@ -935,7 +967,7 @@ final class CommandDispatcher {
                 guiState.agentChatState.hide()
             }
             if guiState.agentChatState.visible != wasVisible {
-                onAgentChatVisibilityChanged?(guiState.agentChatState.visible)
+                effects.append(.agentChatVisibilityChanged(guiState.agentChatState.visible))
             }
 
         case .guiAgentTranscript:
@@ -975,7 +1007,7 @@ final class CommandDispatcher {
             guiState.windowContents[data.windowId] = data
             currentFrameWindowIds.insert(data.windowId)
             if shouldResetScrollPresentation(previous: previousScroll, next: data.scrollPresentation) {
-                discardLocalPresentation(.offset, windowId: data.windowId)
+                effects.append(.scrollPresentationReset(windowID: data.windowId))
             }
             frameState.cursorVisible = data.cursorVisible
 
@@ -998,7 +1030,7 @@ final class CommandDispatcher {
             guiState.windowContents[delta.windowId] = updated
             currentFrameWindowIds.insert(delta.windowId)
             if shouldResetScrollPresentation(previous: previousScroll, next: updated.scrollPresentation) {
-                discardLocalPresentation(.offset, windowId: delta.windowId)
+                effects.append(.scrollPresentationReset(windowID: delta.windowId))
             }
             frameState.cursorVisible = delta.cursorVisible
             frameState.dirty = true
@@ -1123,7 +1155,9 @@ final class CommandDispatcher {
                 let parsedLevel = ToastLevel(rawValue: t.level)
                 let parsedAction = ToastAction(rawValue: t.action)
                 if parsedLevel == nil || parsedAction == nil {
-                    PortLogger.warn("Invalid git toast metadata: level=\(t.level) action=\(t.action)")
+                    effects.append(.warningLog(
+                        "Invalid git toast metadata: level=\(t.level) action=\(t.action)"
+                    ))
                 }
                 return (t.message, parsedLevel ?? .error, parsedAction ?? .none)
             }
@@ -1133,12 +1167,12 @@ final class CommandDispatcher {
             } else {
                 let entries = rawEntries.compactMap { raw -> GitStatusEntry? in
                     guard let section = GitStatusSection(rawValue: raw.section) else {
-                        PortLogger.warn("Invalid git status section: \(raw.section)")
+                        effects.append(.warningLog("Invalid git status section: \(raw.section)"))
                         return nil
                     }
                     let status = GitFileStatus(rawValue: raw.status) ?? .unknown
                     if status == .unknown && raw.status != GitFileStatus.unknown.rawValue {
-                        PortLogger.warn("Invalid git file status: \(raw.status)")
+                        effects.append(.warningLog("Invalid git file status: \(raw.status)"))
                     }
                     return GitStatusEntry(
                         pathHash: raw.pathHash,
@@ -1168,7 +1202,7 @@ final class CommandDispatcher {
             guiState.extensionPanelState.update(panels)
 
         case .guiExtensionRuntime(let message):
-            guiState.frontendExtensions.dispatch(message)
+            effects.append(.extensionRuntime(message))
 
         case .guiSearchState(let active, let matchCount, let currentIndex, let flags):
             if active {
@@ -1220,9 +1254,49 @@ final class CommandDispatcher {
     func discardLocalPresentation(_ kind: TransformKind, windowId: UInt16 = 0) {
         switch kind {
         case .offset:
-            onScrollPresentationReset?()
+            replay([.scrollPresentationReset(windowID: windowId)])
         case .identity:
             break
+        }
+    }
+
+    private func replay(_ effects: [CommitEffect]) {
+        for effect in effects {
+            switch effect {
+            case .fontChanged(let family, let size, let ligatures, let weight):
+                onFontChanged?(family, size, ligatures, weight)
+            case .scrollPresentationReset:
+                onScrollPresentationReset?()
+            case .titleChanged(let title):
+                onTitleChanged?(title)
+            case .windowBackgroundChanged(let red, let green, let blue):
+                onWindowBgChanged?(NSColor(
+                    red: CGFloat(red) / 255.0,
+                    green: CGFloat(green) / 255.0,
+                    blue: CGFloat(blue) / 255.0,
+                    alpha: 1.0
+                ))
+            case .linkCursorChanged(let active):
+                onLinkCursorChanged?(active)
+            case .lineSpacingChanged(let spacing):
+                onLineSpacingChanged?(spacing)
+            case .cursorAnimationChanged(let enabled):
+                onCursorAnimationChanged?(enabled)
+            case .modeChanged(let mode):
+                onModeChanged?(mode)
+            case .agentChatVisibilityChanged(let visible):
+                onAgentChatVisibilityChanged?(visible)
+            case .clipboardWrite(let target, let text):
+                handleClipboardWrite(target: target, text: text)
+            case .extensionRuntime(let message):
+                guiState.frontendExtensions.dispatch(message)
+            case .infoLog(let message):
+                PortLogger.info(message)
+            case .warningLog(let message):
+                PortLogger.warn(message)
+            case .errorLog(let message):
+                PortLogger.error(message)
+            }
         }
     }
 

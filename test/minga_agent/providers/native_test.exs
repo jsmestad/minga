@@ -2068,12 +2068,13 @@ defmodule MingaAgent.Providers.NativeTest do
 
   describe "concurrent prompt rejection" do
     test "rejects second prompt while streaming", %{tmp_dir: dir} do
-      {slow_stream, stream_ref} = blocking_text_stream()
+      {slow_stream, _stream_ref} = blocking_text_stream()
       client = fn _model, _messages, _opts -> build_stream_response(slow_stream) end
 
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client)
       :ok = Native.send_prompt(pid, "First prompt")
-      assert_streaming_started(pid, stream_ref)
+      assert_receive {:agent_provider_event, %Event.AgentStart{}}
+      assert {:ok, %{is_streaming: true}} = Native.get_state(pid)
 
       assert {:error, :already_streaming} = Native.send_prompt(pid, "Second prompt")
 
