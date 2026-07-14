@@ -1576,6 +1576,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     case Minga.Project.Root.directory(dir_path) do
       {:ok, root} ->
         Minga.Project.switch(root)
+        _ = Minga.Project.workspace_root()
 
         state
         |> FileTreeFreshness.update_project_root(root.path)

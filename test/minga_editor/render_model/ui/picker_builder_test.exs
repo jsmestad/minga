@@ -1,6 +1,7 @@
 defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Project.Root
   alias Minga.RenderModel.UI.Picker
   alias MingaEditor.RenderModel.UI.PickerBuilder
   alias MingaEditor.State.Buffers
@@ -121,6 +122,29 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
 
       assert model.has_preview?
       assert model.preview_lines == [[{"alpha", 0xCCCCCC, false}], [{"beta", 0xCCCCCC, false}]]
+    end
+
+    test "relative file preview uses the candidate workspace root" do
+      root_path =
+        Path.join(System.tmp_dir!(), "picker-preview-root-#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(root_path)
+      File.write!(Path.join(root_path, "relative.txt"), "captured root")
+      on_exit(fn -> File.rm_rf!(root_path) end)
+      {:ok, root} = Root.directory(root_path)
+
+      item = %Item{
+        id: "relative.txt",
+        label: "relative.txt",
+        meta: %{workspace_root: root}
+      }
+
+      picker = %PickerState{items: [item], filtered: [item], title: "Files", selected: 0}
+      modal = picker_modal(picker, MingaEditor.UI.Picker.FileSource, nil, "", :ready)
+
+      model = PickerBuilder.build(build_context(modal))
+
+      assert model.preview_lines == [[{"captured root", 0xCCCCCC, false}]]
     end
 
     test "binary file preview shows a safe placeholder" do

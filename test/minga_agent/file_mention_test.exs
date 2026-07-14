@@ -116,6 +116,36 @@ defmodule MingaAgent.FileMentionTest do
       assert msg =~ "file not found"
     end
 
+    test "rejects absolute paths even when the file exists", %{tmp_dir: dir} do
+      path = Path.join(dir, "absolute.ex")
+      File.write!(path, "secret")
+
+      assert {:error, msg} = FileMention.resolve_prompt("@#{path} read this", dir)
+      assert msg =~ "absolute paths are outside the active workspace"
+    end
+
+    test "rejects traversal outside the workspace", %{tmp_dir: dir} do
+      outside = Path.join(Path.dirname(dir), "outside-#{System.unique_integer([:positive])}.txt")
+      File.write!(outside, "secret")
+      on_exit(fn -> File.rm(outside) end)
+
+      assert {:error, msg} =
+               FileMention.resolve_prompt("@../#{Path.basename(outside)} read this", dir)
+
+      assert msg =~ "path is outside the active workspace"
+    end
+
+    test "rejects symlinks whose canonical target escapes the workspace", %{tmp_dir: dir} do
+      outside = Path.join(Path.dirname(dir), "secret-#{System.unique_integer([:positive])}.txt")
+      link = Path.join(dir, "linked-secret.txt")
+      File.write!(outside, "secret")
+      File.ln_s!(outside, link)
+      on_exit(fn -> File.rm(outside) end)
+
+      assert {:error, msg} = FileMention.resolve_prompt("@linked-secret.txt read this", dir)
+      assert msg =~ "path is outside the active workspace"
+    end
+
     test "returns error for binary file", %{tmp_dir: dir} do
       path = Path.join(dir, "binary.bin")
       File.write!(path, <<0, 1, 2, 255, 254, 253>>)

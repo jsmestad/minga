@@ -8,7 +8,9 @@ defmodule MingaEditor.Commands.Project do
 
   alias MingaEditor.PickerUI
   alias MingaEditor.PromptUI
+  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias Minga.Mode
   alias Minga.Project
 
@@ -50,7 +52,7 @@ defmodule MingaEditor.Commands.Project do
 
     state
     |> MingaEditor.Commands.FileTree.close()
-    |> EditorState.update_file_tree(&MingaEditor.State.FileTree.set_project_root(&1, nil))
+    |> clear_file_tree_root()
   end
 
   def execute(state, :project_add) do
@@ -60,6 +62,12 @@ defmodule MingaEditor.Commands.Project do
 
   def execute(state, :project_remove) do
     PickerUI.open(state, MingaEditor.UI.Picker.ProjectRemoveSource)
+  end
+
+  @spec clear_file_tree_root(state()) :: state()
+  defp clear_file_tree_root(state) do
+    file_tree = FileTreeState.set_project_root(state.workspace.file_tree, nil)
+    %{state | workspace: SessionState.set_file_tree(state.workspace, file_tree)}
   end
 
   @spec project_add_default() :: String.t()

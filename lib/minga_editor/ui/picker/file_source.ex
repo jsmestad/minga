@@ -47,7 +47,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
         score_map = build_score_map(frecency_map, git_status_map)
 
         paths
-        |> Enum.map(&lean_candidate(&1, git_status_map))
+        |> Enum.map(&lean_candidate(&1, git_status_map, root))
         |> sort_by_score(score_map)
 
       {:error, msg} ->
@@ -55,41 +55,32 @@ defmodule MingaEditor.UI.Picker.FileSource do
     end
   end
 
-  # Reads the project's background-rebuilt file cache when `root` is the active
-  # project root, so opening the picker never shells out for a known project
-  # (#2377 AC1). A populated mid-rebuild cache returns the stale list instantly,
-  # which is fine for a picker. When the active cache is still empty (e.g. the
-  # project was just switched and the first rebuild has not finished), the picker
-  # falls back to a one-shot `list_files/1` so it never opens empty. Roots that
-  # are not the active project always use the direct discovery.
+  # The picker reads only the Project-owned cache.
+  # A managed `:project_rebuilt` event refreshes an open picker after an empty cache fills.
+  # Picker tasks never start recursive inventory.
   @spec resolve_paths(Root.t() | nil) :: {:ok, [String.t()]} | {:error, String.t()}
   defp resolve_paths(nil),
     do: {:error, "No directory workspace active. Open a folder or switch project."}
 
   defp resolve_paths(%Root{} = root) do
     if ProjectCache.active_root?(root.path) do
-      resolve_active_paths(root, ProjectCache.files())
+      {:ok, ProjectCache.files()}
     else
-      Minga.Project.list_files(root)
+      {:error, "Directory workspace is no longer active"}
     end
   end
-
-  @spec resolve_active_paths(Root.t(), [String.t()]) ::
-          {:ok, [String.t()]} | {:error, String.t()}
-  defp resolve_active_paths(root, []), do: Minga.Project.list_files(root)
-  defp resolve_active_paths(_root, paths), do: {:ok, paths}
 
   # Lean candidate: just enough to match (filename label, full-path search text)
   # and to enrich later (git status stashed in `meta`). Icon, color, two-line
   # description, and the status annotation are built in `enrich/1` for the
   # bounded winners only, so a 50k-file repo never materializes 50k rich items.
-  @spec lean_candidate(String.t(), %{String.t() => atom()}) :: Item.t()
-  defp lean_candidate(path, git_status_map) do
+  @spec lean_candidate(String.t(), %{String.t() => atom()}, Root.t()) :: Item.t()
+  defp lean_candidate(path, git_status_map, root) do
     %Item{
       id: path,
       label: Path.basename(path),
       search_text: path,
-      meta: %{git: Map.get(git_status_map, path)}
+      meta: %{git: Map.get(git_status_map, path), workspace_root: root}
     }
   end
 
@@ -123,11 +114,15 @@ defmodule MingaEditor.UI.Picker.FileSource do
 
   @impl true
   @spec on_select(Item.t(), term()) :: term()
-  def on_select(%Item{id: rel_path}, state) do
-    abs_path = absolute_path(rel_path, state)
-
+  def on_select(%Item{id: rel_path} = item, state) do
     Log.debug(:editor, "[file_picker] on_select path=#{rel_path}")
+    open_selected_file(absolute_path(item, state), state)
+  end
 
+  @spec open_selected_file({:ok, String.t()} | :error, term()) :: term()
+  defp open_selected_file(:error, state), do: state
+
+  defp open_selected_file({:ok, abs_path}, state) do
     case MingaEditor.Handlers.BufferRegistry.find_buffer_by_path(state, abs_path) do
       nil ->
         case MingaEditor.Commands.start_buffer(abs_path, state.interaction.options_server) do
@@ -190,9 +185,16 @@ defmodule MingaEditor.UI.Picker.FileSource do
   @spec on_action(term(), Item.t(), term()) :: term()
   def on_action(:open, item, state), do: on_select(item, state)
 
-  def on_action(:delete, %Item{id: rel_path}, state) do
-    abs_path = absolute_path(rel_path, state)
+  def on_action(:delete, %Item{} = item, state) do
+    delete_selected_file(absolute_path(item, state), state)
+  end
 
+  def on_action(_action, _item, state), do: state
+
+  @spec delete_selected_file({:ok, String.t()} | :error, term()) :: term()
+  defp delete_selected_file(:error, state), do: state
+
+  defp delete_selected_file({:ok, abs_path}, state) do
     case File.rm(abs_path) do
       :ok ->
         Minga.Log.info(:editor, "Deleted file: #{abs_path}")
@@ -203,8 +205,6 @@ defmodule MingaEditor.UI.Picker.FileSource do
         state
     end
   end
-
-  def on_action(_action, _item, state), do: state
 
   @impl true
   @spec on_bulk_select([Item.t()], term()) :: term()
@@ -226,11 +226,14 @@ defmodule MingaEditor.UI.Picker.FileSource do
     Enum.reduce(items, state, fn item, acc -> on_select(item, acc) end)
   end
 
-  @spec absolute_path(String.t(), term()) :: String.t()
-  defp absolute_path(rel_path, state) do
+  @spec absolute_path(Item.t(), term()) :: {:ok, String.t()} | :error
+  defp absolute_path(%Item{id: rel_path, meta: %{workspace_root: %Root{path: path}}}, _state),
+    do: {:ok, Path.expand(rel_path, path)}
+
+  defp absolute_path(%Item{id: rel_path}, state) do
     case selection_root(state) do
-      path when is_binary(path) -> Path.expand(rel_path, path)
-      nil -> Path.expand(rel_path)
+      path when is_binary(path) -> {:ok, Path.expand(rel_path, path)}
+      nil -> :error
     end
   end
 

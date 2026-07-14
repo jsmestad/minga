@@ -16,34 +16,53 @@ defmodule Minga.Project.FileFind do
   @typedoc "Result of file discovery."
   @type result :: {:ok, [String.t()]} | {:error, String.t()}
 
-  @doc "Lists files under an explicit directory workspace root."
-  @spec list_files(Root.t()) :: result()
-  def list_files(%Root{} = root) do
+  @typedoc "Discovery options shared by synchronous and managed callers."
+  @type option ::
+          {:timeout, pos_integer()}
+          | {:max_output_bytes, pos_integer()}
+          | {:max_file_count, pos_integer()}
+
+  @default_timeout_ms 30_000
+
+  @doc "Lists files under an explicit directory workspace root with bounded execution."
+  @spec list_files(Root.t(), [option()]) :: result()
+  def list_files(root, opts \\ [])
+
+  def list_files(%Root{} = root, opts) when is_list(opts) do
     owner = self()
 
-    case start(root, owner) do
-      {:ok, worker} -> await_worker(worker)
+    case start(root, owner, opts) do
+      {:ok, worker} -> await_result(worker, Keyword.get(opts, :timeout, @default_timeout_ms))
       {:error, reason} -> {:error, reason}
     end
   end
 
-  def list_files(_root),
+  def list_files(_root, _opts),
     do: {:error, "Project inventory requires an explicit directory workspace root"}
 
   @doc "Starts cancellable discovery for an explicit directory workspace root."
-  @spec start(Root.t(), pid()) :: {:ok, pid()} | {:error, String.t()}
-  def start(%Root{} = root, owner) when is_pid(owner) do
+  @spec start(Root.t(), pid(), [option()]) :: {:ok, pid()} | {:error, String.t()}
+  def start(root, owner, opts \\ [])
+
+  def start(%Root{} = root, owner, opts) when is_pid(owner) and is_list(opts) do
     with {:ok, path} <- inventory_path(root),
          {:ok, command, strategy} <- command(path) do
-      Worker.start(owner, command, fn output, status -> parse_result(strategy, output, status) end)
+      worker_opts = Keyword.take(opts, [:max_output_bytes, :max_file_count])
+
+      Worker.start(
+        owner,
+        command,
+        fn output, status -> parse_result(strategy, output, status) end,
+        worker_opts
+      )
     else
       {:error, reason} when is_atom(reason) -> {:error, root_error(reason, root.path)}
       {:error, reason} -> {:error, reason}
     end
   end
 
-  @doc "Cancels an in-flight discovery worker."
-  @spec cancel(pid()) :: :ok
+  @doc "Cancels an in-flight discovery worker and waits for process-tree termination."
+  @spec cancel(pid()) :: Worker.cancel_result()
   defdelegate cancel(worker), to: Worker
 
   @doc "Detects the file-finding strategy for a directory path without starting inventory."
@@ -58,8 +77,9 @@ defmodule Minga.Project.FileFind do
     ["--type", "f", "--hidden"] ++ Enum.concat(exclude_args, ["."])
   end
 
-  @spec await_worker(pid()) :: result()
-  defp await_worker(worker) do
+  @doc false
+  @spec await_result(pid(), pos_integer()) :: result()
+  def await_result(worker, timeout) when is_integer(timeout) and timeout > 0 do
     ref = Process.monitor(worker)
 
     receive do
@@ -69,8 +89,29 @@ defmodule Minga.Project.FileFind do
 
       {:DOWN, ^ref, :process, ^worker, reason} ->
         {:error, "Project file discovery stopped: #{inspect(reason)}"}
+    after
+      timeout ->
+        cancel_result = cancel(worker)
+        Process.demonitor(ref, [:flush])
+        flush_worker_result(worker)
+        timeout_error(cancel_result)
     end
   end
+
+  @spec flush_worker_result(pid()) :: :ok
+  defp flush_worker_result(worker) do
+    receive do
+      {:file_find_done, ^worker, _result} -> :ok
+    after
+      0 -> :ok
+    end
+  end
+
+  @spec timeout_error(Worker.cancel_result()) :: result()
+  defp timeout_error(:ok), do: {:error, "Project file discovery timed out"}
+
+  defp timeout_error({:error, reason}),
+    do: {:error, "Project file discovery timed out; #{reason}"}
 
   @spec inventory_path(Root.t()) :: {:ok, String.t()} | {:error, Root.error()}
   defp inventory_path(root), do: Root.inventory_path(root)
@@ -182,4 +223,10 @@ defmodule Minga.Project.FileFind do
 
   defp root_error(:not_a_directory_root, _path),
     do: "Project inventory requires an explicit directory workspace root"
+
+  defp root_error(:invalid_broad_root_confirmation, path),
+    do: "Broad project root confirmation must be true or false: #{path}"
+
+  defp root_error(:root_changed, path),
+    do: "Project root changed after authorization: #{path}"
 end

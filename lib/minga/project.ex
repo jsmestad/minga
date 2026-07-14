@@ -448,7 +448,7 @@ defmodule Minga.Project do
   end
 
   def handle_info({:rebuild_timeout, pid}, %{rebuild_pid: pid} = state) do
-    state.file_find_module.cancel(pid)
+    cancel_discovery(state, pid)
     Minga.Log.warning(:editor, "Project file cache rebuild timed out")
     {:noreply, clear_rebuild(state)}
   end
@@ -464,7 +464,7 @@ defmodule Minga.Project do
   @impl true
   @spec terminate(term(), t()) :: :ok
   def terminate(_reason, state) do
-    if is_pid(state.rebuild_pid), do: state.file_find_module.cancel(state.rebuild_pid)
+    if is_pid(state.rebuild_pid), do: cancel_discovery(state, state.rebuild_pid)
     :ok
   end
 
@@ -566,8 +566,25 @@ defmodule Minga.Project do
   defp cancel_rebuild(%{rebuild_pid: nil} = state), do: state
 
   defp cancel_rebuild(state) do
-    state.file_find_module.cancel(state.rebuild_pid)
+    cancel_discovery(state, state.rebuild_pid)
     clear_rebuild(state)
+  end
+
+  @spec cancel_discovery(t(), pid()) :: :ok
+  defp cancel_discovery(state, pid) do
+    case state.file_find_module.cancel(pid) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Minga.Log.error(:editor, "Project file discovery cancellation failed: #{reason}")
+
+      other ->
+        Minga.Log.error(
+          :editor,
+          "Project file discovery cancellation returned: #{inspect(other)}"
+        )
+    end
   end
 
   @spec clear_rebuild(t()) :: t()

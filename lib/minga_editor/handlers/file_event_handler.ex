@@ -17,6 +17,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
   alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
   alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
   alias MingaEditor.LspActions
+  alias MingaEditor.PickerUI
   alias MingaEditor.Renderer
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
@@ -284,9 +285,28 @@ defmodule MingaEditor.Handlers.FileEventHandler do
 
   @spec handle_project_rebuilt(EditorState.t(), String.t()) :: {EditorState.t(), [file_effect()]}
   defp handle_project_rebuilt(state, root) do
-    state = FileTreeFreshness.update_project_root(state, root)
+    state =
+      state
+      |> FileTreeFreshness.update_project_root(root)
+      |> maybe_refresh_file_picker()
+
     {state, [{:render, 16}]}
   end
+
+  @spec maybe_refresh_file_picker(EditorState.t()) :: EditorState.t()
+  defp maybe_refresh_file_picker(
+         %{
+           shell_runtime: %{
+             state: %{
+               modal: {:picker, %{picker_ui: %{source: MingaEditor.UI.Picker.FileSource}}}
+             }
+           }
+         } = state
+       ) do
+    PickerUI.refresh_items(state)
+  end
+
+  defp maybe_refresh_file_picker(state), do: state
 
   @spec handle_filter_walk_result(EditorState.t(), String.t(), String.t(), [
           Minga.Project.FileTree.entry()

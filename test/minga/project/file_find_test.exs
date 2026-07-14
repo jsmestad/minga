@@ -109,13 +109,33 @@ defmodule Minga.Project.FileFindTest do
       assert file_error =~ "explicit directory workspace root"
     end
 
-    test "rejects broad roots without current-flow confirmation" do
+    test "rejects broad roots without literal current-flow confirmation", %{tmp_dir: tmp_dir} do
       assert {:error, :broad_root_confirmation_required} = Root.directory(Path.expand("~"))
       assert {:error, :broad_root_confirmation_required} = Root.directory("/")
+
+      assert {:error, :invalid_broad_root_confirmation} =
+               Root.directory(tmp_dir, broad_root_confirmed: nil)
+
+      unauthorized_root = %Root{kind: :directory, path: "/", broad_root_confirmed?: nil}
+      assert {:error, error} = FileFind.list_files(unauthorized_root)
+      assert error =~ "confirmation must be true or false"
+
       assert {:ok, confirmed_root} = Root.directory("/", broad_root_confirmed: true)
       assert Root.inventory_path(confirmed_root) == {:ok, "/"}
       assert Root.broad_path?("/Volumes/External")
       assert Root.broad_path?("/mnt/external")
+    end
+
+    test "canonicalizes directory symlinks before broad-root authorization", %{tmp_dir: tmp_dir} do
+      broad_alias = Path.join(tmp_dir, "broad-alias")
+      safe_target = Path.join(tmp_dir, "safe-target")
+      safe_alias = Path.join(tmp_dir, "safe-alias")
+      File.mkdir_p!(safe_target)
+      File.ln_s!("/", broad_alias)
+      File.ln_s!(safe_target, safe_alias)
+
+      assert {:error, :broad_root_confirmation_required} = Root.directory(broad_alias)
+      assert {:ok, %Root{path: ^safe_target}} = Root.directory(safe_alias)
     end
 
     test "excludes directories listed in file_find_excludes", %{

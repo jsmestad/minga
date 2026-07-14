@@ -52,6 +52,7 @@ defmodule MingaEditor.UI.Picker.ProjectSource do
   @spec activate_project(Root.t(), term()) :: term()
   defp activate_project(%Root{path: path} = root, state) do
     Project.switch(root)
+    _ = Project.workspace_root()
 
     state
     |> FileTreeFreshness.update_project_root(path)

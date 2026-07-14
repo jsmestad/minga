@@ -272,7 +272,7 @@ graph TD
     style LSP2 fill:#2471a3,stroke:#1a5276,color:#fff
 ```
 
-`Minga.Project` only starts recursive file inventory for an explicit directory workspace root. Each inventory runs in a monitored `Minga.Project.FileFind.Worker` that owns the external `git`, `fd`, or `find` process. Switching or closing the workspace, timing out, or stopping the Project service cancels the worker and terminates the external process tree.
+`Minga.Project` only starts recursive file inventory for an explicit directory workspace root. Root paths are canonicalized before authorization so symlink aliases cannot bypass broad-root protection. Each inventory runs in a monitored `Minga.Project.FileFind.Worker` that owns the external `git`, `fd`, or `find` process, bounds command output, and enforces a timeout for synchronous callers. Switching or closing the workspace, timing out, or stopping the Project service waits for the worker to terminate the external process tree.
 
 ### Runtime tier
 

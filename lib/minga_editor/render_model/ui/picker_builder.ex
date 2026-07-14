@@ -6,6 +6,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   alias Minga.Buffer
   alias Minga.RenderModel.UI.Picker, as: PickerModel
   alias Minga.RenderModel.UI.Picker.ActionMenu
+  alias Minga.Project.Root
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.UI.Picker
 
@@ -127,21 +128,30 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
       nil ->
         nil
 
-      %Picker.Item{id: id} = item ->
+      %Picker.Item{} = item ->
         case Picker.Source.preview(source, item, ctx) do
-          nil -> build_preview_for_item(ctx, id)
+          nil -> build_preview_for_item(ctx, item)
           lines -> lines
         end
     end
   end
 
   # Build preview lines for a file path item.
-  @spec build_preview_for_item(Context.t(), term()) :: [[PickerModel.preview_segment()]] | nil
-  defp build_preview_for_item(ctx, id) when is_binary(id) do
-    build_file_preview(ctx, resolve_preview_path(id))
+  @spec build_preview_for_item(Context.t(), Picker.Item.t()) ::
+          [[PickerModel.preview_segment()]] | nil
+  defp build_preview_for_item(
+         ctx,
+         %Picker.Item{id: id, meta: %{workspace_root: %Root{path: root}}}
+       )
+       when is_binary(id) do
+    build_file_preview(ctx, resolve_preview_path(id, root))
   end
 
-  defp build_preview_for_item(ctx, idx) when is_integer(idx) do
+  defp build_preview_for_item(ctx, %Picker.Item{id: id}) when is_binary(id) do
+    build_file_preview(ctx, resolve_preview_path(id, Minga.Project.resolve_root()))
+  end
+
+  defp build_preview_for_item(ctx, %Picker.Item{id: idx}) when is_integer(idx) do
     case Enum.at(ctx.buffers.list, idx) do
       nil -> nil
       buf_pid -> preview_from_buffer(ctx, buf_pid)
@@ -225,9 +235,9 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   defp face_to_rgb(%{fg: fg}, _default) when is_integer(fg), do: fg
   defp face_to_rgb(_, default), do: default
 
-  @spec resolve_preview_path(String.t()) :: String.t() | nil
-  defp resolve_preview_path(path) do
-    resolve_preview_path(Path.type(path), path, Minga.Project.resolve_root())
+  @spec resolve_preview_path(String.t(), String.t() | nil) :: String.t() | nil
+  defp resolve_preview_path(path, root) do
+    resolve_preview_path(Path.type(path), path, root)
   end
 
   @spec resolve_preview_path(

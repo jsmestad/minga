@@ -537,41 +537,13 @@ defmodule MingaEditor.Commands.AgentSubStates do
   end
 
   @spec list_project_files() :: [String.t()]
-  defp list_project_files do
-    case cached_project_files() do
-      [] -> list_project_files_from_disk()
-      files -> files
-    end
-  end
+  defp list_project_files, do: cached_project_files()
 
   @spec cached_project_files() :: [String.t()]
   defp cached_project_files do
     Minga.Project.files()
   catch
     :exit, _ -> []
-  end
-
-  @spec list_project_files_from_disk() :: [String.t()]
-  defp list_project_files_from_disk do
-    case active_workspace_root() do
-      nil -> []
-      root -> list_workspace_files(root)
-    end
-  end
-
-  @spec active_workspace_root() :: Minga.Project.Root.t() | nil
-  defp active_workspace_root do
-    Minga.Project.workspace_root()
-  catch
-    :exit, _ -> nil
-  end
-
-  @spec list_workspace_files(Minga.Project.Root.t()) :: [String.t()]
-  defp list_workspace_files(root) do
-    case Minga.Project.list_files(root) do
-      {:ok, paths} -> paths
-      {:error, _} -> []
-    end
   end
 
   @spec run_search(state(), String.t()) :: state()
