@@ -205,8 +205,9 @@ defmodule MingaEditor.Renderer.State do
   @spec reconcile_windows(t(), Intent.t()) :: t()
   def reconcile_windows(%__MODULE__{} = state, %Intent{windows: windows}) do
     wanted =
-      Map.new(windows, fn {window_id, window} ->
-        {window_id, window.buffer}
+      Map.new(windows, fn
+        {window_id, %{content: {:buffer, buffer}}} -> {window_id, buffer}
+        {window_id, _semantic_window} -> {window_id, nil}
       end)
 
     resident_windows =

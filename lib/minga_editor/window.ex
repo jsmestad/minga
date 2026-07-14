@@ -26,7 +26,6 @@ defmodule MingaEditor.Window do
   @type t :: %__MODULE__{
           id: id(),
           content: Content.t(),
-          buffer: pid() | nil,
           viewport: Viewport.t(),
           cursor: Buffer.position(),
           pinned: boolean(),
@@ -42,11 +41,10 @@ defmodule MingaEditor.Window do
           authoritative_scroll_seq: non_neg_integer()
         }
 
-  @enforce_keys [:id, :content, :buffer, :viewport]
+  @enforce_keys [:id, :content, :viewport]
   defstruct [
     :id,
     :content,
-    :buffer,
     :viewport,
     cursor: {0, 0},
     pinned: false,
@@ -68,14 +66,7 @@ defmodule MingaEditor.Window do
     authoritative_scroll_seq: 0
   ]
 
-  @doc """
-  Creates a new window with the given id, buffer, and viewport dimensions.
-
-  Sets both `content` (the polymorphic content reference) and `buffer`
-  (backward-compatible pid field). During the migration, callers access
-  `window.buffer` directly. Once all callers are updated to use
-  `Content.buffer_pid(window.content)`, the `buffer` field will be removed.
-  """
+  @doc "Creates a new window with the given id, buffer, and viewport dimensions."
   @spec new(id(), pid(), pos_integer(), pos_integer()) :: t()
   def new(id, buffer, rows, cols)
       when is_integer(id) and id > 0 and is_pid(buffer) and
@@ -83,7 +74,6 @@ defmodule MingaEditor.Window do
     %__MODULE__{
       id: id,
       content: Content.buffer(buffer),
-      buffer: buffer,
       viewport: Viewport.new(rows, cols)
     }
   end
@@ -98,7 +88,6 @@ defmodule MingaEditor.Window do
     %__MODULE__{
       id: id,
       content: Content.agent_chat(),
-      buffer: nil,
       viewport: Viewport.new(rows, cols),
       pinned: true
     }
@@ -112,7 +101,6 @@ defmodule MingaEditor.Window do
     %__MODULE__{
       id: id,
       content: Content.empty(),
-      buffer: nil,
       viewport: Viewport.new(rows, cols)
     }
   end
@@ -126,14 +114,14 @@ defmodule MingaEditor.Window do
   """
   @spec show_empty_state(t()) :: t()
   def show_empty_state(%__MODULE__{} = window) do
-    %{window | content: Content.empty(), buffer: nil}
+    %{window | content: Content.empty()}
     |> set_document_symbols([])
   end
 
   @doc "Switches the window from the launchpad back to a buffer."
   @spec show_buffer(t(), pid()) :: t()
   def show_buffer(%__MODULE__{} = window, buffer) when is_pid(buffer) do
-    %{window | content: Content.buffer(buffer), buffer: buffer}
+    %{window | content: Content.buffer(buffer)}
     |> set_document_symbols([])
   end
 
@@ -146,7 +134,6 @@ defmodule MingaEditor.Window do
     %__MODULE__{
       id: id,
       content: Content.buffer(buffer),
-      buffer: buffer,
       viewport: Viewport.new(rows, cols),
       cursor: cursor
     }

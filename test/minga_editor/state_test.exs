@@ -103,25 +103,29 @@ defmodule MingaEditor.StateTest do
       assert added.workspace.buffers.active == buf2
       assert added.workspace.buffers.active_index == 1
       assert added.workspace.buffers.list == [buf1, buf2]
-      assert active_window(added).buffer == buf2
+      assert Content.buffer_pid(active_window(added).content) == buf2
 
       switched = MingaEditor.BufferActivation.activate(added, 0)
       assert switched.workspace.buffers.active == buf1
       assert switched.workspace.buffers.active_index == 0
-      assert active_window(switched).buffer == buf1
+      assert Content.buffer_pid(active_window(switched).content) == buf1
 
       split_state = added |> with_split_window(2, buf2)
       split_switched = MingaEditor.BufferActivation.activate(split_state, 0)
-      assert Map.fetch!(split_switched.workspace.windows.map, 1).buffer == buf1
-      assert Map.fetch!(split_switched.workspace.windows.map, 2).buffer == buf2
+
+      assert Content.buffer_pid(Map.fetch!(split_switched.workspace.windows.map, 1).content) ==
+               buf1
+
+      assert Content.buffer_pid(Map.fetch!(split_switched.workspace.windows.map, 2).content) ==
+               buf2
 
       split_added =
         MingaEditor.Handlers.BufferRegistry.add_buffer(split_state, start_buffer("new file"))
 
-      assert Map.fetch!(split_added.workspace.windows.map, 1).buffer ==
+      assert Content.buffer_pid(Map.fetch!(split_added.workspace.windows.map, 1).content) ==
                split_added.workspace.buffers.active
 
-      assert Map.fetch!(split_added.workspace.windows.map, 2).buffer == buf2
+      assert Content.buffer_pid(Map.fetch!(split_added.workspace.windows.map, 2).content) == buf2
 
       no_window =
         MingaEditor.Handlers.BufferRegistry.add_buffer(new_state(), start_buffer("no window"))
@@ -164,7 +168,7 @@ defmodule MingaEditor.StateTest do
 
       synced = MingaEditor.WindowFocus.remember_active_cursor(state)
 
-      assert active_window(synced).buffer == files_buf
+      assert Content.buffer_pid(active_window(synced).content) == files_buf
       assert active_window(synced).cursor == active_window(state).cursor
     end
   end
@@ -204,7 +208,7 @@ defmodule MingaEditor.StateTest do
       restored = EditorState.restore_tab_context(state, context)
 
       assert restored.workspace.buffers.active == file_buf
-      assert active_window(restored).buffer == file_buf
+      assert Content.buffer_pid(active_window(restored).content) == file_buf
       assert Content.buffer_pid(active_window(restored).content) == file_buf
     end
   end
@@ -219,7 +223,7 @@ defmodule MingaEditor.StateTest do
           notify_shell?: false
         )
 
-      assert active_window(unchanged).buffer == buf1
+      assert Content.buffer_pid(active_window(unchanged).content) == buf1
       assert active_window(unchanged).content == active_window(state).content
 
       buf2 = start_buffer("world")
@@ -235,7 +239,7 @@ defmodule MingaEditor.StateTest do
           notify_shell?: false
         )
 
-      assert active_window(synced).buffer == buf2
+      assert Content.buffer_pid(active_window(synced).content) == buf2
       assert Content.buffer?(active_window(synced).content)
       assert Content.buffer_pid(active_window(synced).content) == buf2
 
@@ -256,7 +260,7 @@ defmodule MingaEditor.StateTest do
           notify_shell?: false
         )
 
-      assert active_window(synced_agent).buffer == nil
+      assert Content.buffer_pid(active_window(synced_agent).content) == nil
       assert Content.agent_chat?(active_window(synced_agent).content)
     end
 
@@ -270,7 +274,7 @@ defmodule MingaEditor.StateTest do
 
       assert active_tab.kind == :file
       assert new_state.workspace.keymap_scope == :editor
-      assert active_window.buffer == file_buf
+      assert Content.buffer_pid(active_window.content) == file_buf
       assert Content.buffer?(active_window.content)
       refute Content.agent_chat?(active_window.content)
       assert Content.buffer?(tab_window.content)

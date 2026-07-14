@@ -135,7 +135,8 @@ defmodule MingaEditor.Session.State do
       )
       when is_pid(buffer) and is_integer(version) and version >= 0 do
     case Windows.fetch(windows, id) do
-      {:ok, %Window{buffer: ^buffer, render_cache: %{buffer_version: current}} = window}
+      {:ok,
+       %Window{content: {:buffer, ^buffer}, render_cache: %{buffer_version: current}} = window}
       when current <= version ->
         replace_window(workspace, id, Window.observe_render(window, viewport, version))
 
@@ -275,7 +276,7 @@ defmodule MingaEditor.Session.State do
       )
       when is_pid(buffer) do
     case Windows.fetch(windows, windows.active) do
-      {:ok, %Window{buffer: ^buffer}} ->
+      {:ok, %Window{content: {:buffer, ^buffer}}} ->
         %{
           workspace
           | windows:
@@ -302,7 +303,7 @@ defmodule MingaEditor.Session.State do
          replace?
        ) do
     case Windows.fetch(windows, windows.active) do
-      {:ok, %Window{buffer: ^buffer, content: {:buffer, ^buffer}}} ->
+      {:ok, %Window{content: {:buffer, ^buffer}}} ->
         normalize_buffer_surface(workspace, buffer)
 
       {:ok, %Window{content: {:buffer, _}}} ->

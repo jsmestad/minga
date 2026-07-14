@@ -500,13 +500,18 @@ defmodule MingaEditor.Handlers.HighlightHandler do
   defp visible_window_buffers(state) do
     state.workspace.windows.map
     |> Map.values()
-    |> Enum.map(& &1.buffer)
-    |> Enum.filter(&is_pid/1)
+    |> Enum.flat_map(fn
+      %{content: {:buffer, buffer}} -> [buffer]
+      _semantic_window -> []
+    end)
   end
 
   # Returns true if the given buffer PID is visible in any window.
   @spec buffer_visible_in_window?(EditorState.t(), pid()) :: boolean()
   defp buffer_visible_in_window?(state, buf_pid) do
-    Enum.any?(state.workspace.windows.map, fn {_id, win} -> win.buffer == buf_pid end)
+    Enum.any?(state.workspace.windows.map, fn
+      {_id, %{content: {:buffer, ^buf_pid}}} -> true
+      _entry -> false
+    end)
   end
 end

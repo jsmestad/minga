@@ -46,7 +46,7 @@ defmodule MingaEditor.WindowTest do
 
       assert observed.viewport == viewport
       assert observed.render_cache == RenderCache.new(5, 3, 7, 11, 42)
-      assert observed.buffer == window.buffer
+      assert observed.content == window.content
       assert observed.fold_map == window.fold_map
     end
   end

@@ -3,6 +3,34 @@ defmodule MingaEditor.State.BuffersTest do
 
   alias MingaEditor.State.Buffers
 
+  describe "switch_to/2" do
+    test "wraps negative, zero, in-range, and positive indexes" do
+      buffers = %Buffers{list: [:a, :b, :c], active: :a, active_index: 0}
+
+      cases = [
+        {-1, 2, :c},
+        {0, 0, :a},
+        {1, 1, :b},
+        {3, 0, :a},
+        {4, 1, :b}
+      ]
+
+      for {requested, expected_index, expected_buffer} <- cases do
+        switched = Buffers.switch_to(buffers, requested)
+        assert switched.active_index == expected_index
+        assert switched.active == expected_buffer
+      end
+    end
+
+    test "keeps empty buffer state unchanged for any integer index" do
+      buffers = %Buffers{}
+
+      assert Buffers.switch_to(buffers, -1) == buffers
+      assert Buffers.switch_to(buffers, 0) == buffers
+      assert Buffers.switch_to(buffers, 1) == buffers
+    end
+  end
+
   describe "remove/2" do
     test "removes pid from list and selects neighbor" do
       bs = %Buffers{list: [:a, :b, :c], active: :b, active_index: 1}

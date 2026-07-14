@@ -286,7 +286,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       # Window should be synced to show buf1 (via on_buffer_died callback)
       win_id = new_state.workspace.windows.active
       window = Map.fetch!(new_state.workspace.windows.map, win_id)
-      assert window.buffer == buf1
+      assert window.content == {:buffer, buf1}
     end
 
     test "tab-less extension shell: preserves agent_chat window content on buffer death" do

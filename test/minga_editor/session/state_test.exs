@@ -35,14 +35,14 @@ defmodule MingaEditor.Session.StateTest do
 
       # Confirm the window still points at the old buffer
       window = Map.get(ws.windows.map, win_id)
-      assert window.buffer == original_buf
+      assert Content.buffer_pid(window.content) == original_buf
       assert window.content == {:buffer, original_buf}
 
       # sync should update the window to point at the new buffer
       ws = SessionState.activate_buffer(ws, ws.buffers)
 
       updated_window = Map.get(ws.windows.map, win_id)
-      assert updated_window.buffer == new_buf
+      assert Content.buffer_pid(updated_window.content) == new_buf
       assert updated_window.content == {:buffer, new_buf}
     end
 
@@ -52,7 +52,7 @@ defmodule MingaEditor.Session.StateTest do
       win_id = ws.windows.active
 
       window = Map.get(ws.windows.map, win_id)
-      agent_window = %{window | content: Content.agent_chat(), buffer: nil}
+      agent_window = %{window | content: Content.agent_chat()}
       ws = %{ws | windows: %{ws.windows | map: Map.put(ws.windows.map, win_id, agent_window)}}
 
       # Change the active buffer to something different
@@ -64,7 +64,7 @@ defmodule MingaEditor.Session.StateTest do
 
       result_window = Map.get(ws.windows.map, win_id)
       assert result_window.content == {:agent_chat, :semantic}
-      assert result_window.buffer == nil
+      assert Content.buffer_pid(result_window.content) == nil
     end
 
     test "clears document symbols when the active window switches buffers" do

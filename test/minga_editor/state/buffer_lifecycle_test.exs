@@ -258,7 +258,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       assert file_buf in new_state.workspace.buffers.list
       assert new_state.workspace.buffers.active == file_buf
       assert Content.agent_chat?(window.content)
-      assert window.buffer == nil
+      assert Content.buffer_pid(window.content) == nil
     end
   end
 

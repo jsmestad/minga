@@ -4,41 +4,52 @@ defmodule MingaEditor.WindowFocus do
   alias Minga.Buffer
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Runtime
-  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Windows
-  alias MingaEditor.BottomPanel
   alias MingaEditor.Window
 
   @type state :: EditorState.t()
+  @type focus_failure :: :window_not_found | :cursor_source_mismatch | :buffer_unavailable
+  @type focus_result :: {:ok, state()} | {:error, focus_failure()}
 
   @doc "Focuses a window after saving and restoring its buffer cursor state."
   @spec focus(state(), Window.id()) :: state()
-  def focus(%EditorState{workspace: %{windows: %{active: active}}} = state, target_id)
-      when target_id == active,
-      do: blur_bottom_panel(state)
-
   def focus(%EditorState{} = state, target_id) do
+    case focus_result(state, target_id) do
+      {:ok, focused} -> focused
+      {:error, _reason} -> state
+    end
+  end
+
+  @doc "Focuses a window and reports why an ownership-safe transition was rejected."
+  @spec focus_result(state(), Window.id()) :: focus_result()
+  def focus_result(
+        %EditorState{workspace: %{windows: %{active: active}}} = state,
+        target_id
+      )
+      when target_id == active,
+      do: {:ok, blur_bottom_panel(state)}
+
+  def focus_result(%EditorState{} = state, target_id) do
     windows = state.workspace.windows
 
-    with {:ok, old_window} <- Windows.fetch(windows, windows.active),
-         {:ok, target_window} <- Windows.fetch(windows, target_id),
+    with {:ok, old_window} <- fetch_window(windows, windows.active),
+         {:ok, target_window} <- fetch_window(windows, target_id),
          {:ok, outgoing_cursor} <- outgoing_cursor(old_window, state.workspace.buffers.active),
          :ok <- restore_target_cursor(target_window) do
-      state
-      |> then(fn state ->
-        %{
-          state
-          | workspace: SessionState.focus_window(state.workspace, target_id, outgoing_cursor)
-        }
-      end)
-      |> blur_bottom_panel()
-    else
-      :error -> state
+      focused =
+        state
+        |> then(fn state ->
+          %{
+            state
+            | workspace: SessionState.focus_window(state.workspace, target_id, outgoing_cursor)
+          }
+        end)
+        |> blur_bottom_panel()
+
+      {:ok, focused}
     end
-  catch
-    :exit, _reason -> state
   end
 
   @doc "Restores focus without reading the outgoing window's buffer, for popup dismissal."
@@ -54,6 +65,8 @@ defmodule MingaEditor.WindowFocus do
         |> blur_bottom_panel()
 
       {:ok, restored}
+    else
+      _failure -> :error
     end
   catch
     :exit, _reason -> :error
@@ -82,34 +95,71 @@ defmodule MingaEditor.WindowFocus do
       end)
       |> blur_bottom_panel()
     else
-      :error -> state
+      _failure -> state
     end
   catch
     :exit, _reason -> state
   end
 
-  @doc "Snapshots the active buffer cursor into its matching window."
+  @doc "Snapshots the active cursor only when the active window owns its buffer source."
   @spec remember_active_cursor(state()) :: state()
-  def remember_active_cursor(%EditorState{workspace: %{buffers: %{active: buffer}}} = state)
-      when is_pid(buffer) do
-    cursor = Buffer.cursor(buffer)
-    %{state | workspace: SessionState.remember_active_window_cursor(state.workspace, cursor)}
-  catch
-    :exit, _reason -> state
+  def remember_active_cursor(%EditorState{} = state) do
+    case remember_active_cursor_result(state) do
+      {:ok, remembered} -> remembered
+      {:error, _reason} -> state
+    end
   end
 
-  def remember_active_cursor(%EditorState{} = state), do: state
+  @doc "Snapshots the active cursor and reports ownership failures without changing state."
+  @spec remember_active_cursor_result(state()) :: focus_result()
+  def remember_active_cursor_result(%EditorState{} = state) do
+    windows = state.workspace.windows
 
-  @spec outgoing_cursor(Window.t(), pid() | nil) :: {:ok, SessionState.position() | nil}
-  defp outgoing_cursor(%Window{content: {:buffer, _}}, active_buffer) when is_pid(active_buffer),
-    do: {:ok, Buffer.cursor(active_buffer)}
+    with {:ok, outgoing_window} <- fetch_window(windows, windows.active),
+         {:ok, cursor} <- outgoing_cursor(outgoing_window, state.workspace.buffers.active) do
+      remember_cursor_result(state, cursor)
+    end
+  end
 
-  defp outgoing_cursor(%Window{}, _active_buffer), do: {:ok, nil}
+  @spec remember_cursor_result(state(), SessionState.position() | nil) :: {:ok, state()}
+  defp remember_cursor_result(state, {_, _} = cursor) do
+    {:ok,
+     %{
+       state
+       | workspace: SessionState.remember_active_window_cursor(state.workspace, cursor)
+     }}
+  end
 
-  @spec restore_target_cursor(Window.t()) :: :ok
+  defp remember_cursor_result(state, nil), do: {:ok, state}
+
+  @spec fetch_window(Windows.t(), Window.id()) :: {:ok, Window.t()} | {:error, :window_not_found}
+  defp fetch_window(windows, id) do
+    case Windows.fetch(windows, id) do
+      {:ok, window} -> {:ok, window}
+      :error -> {:error, :window_not_found}
+    end
+  end
+
+  @spec outgoing_cursor(Window.t(), pid() | nil) ::
+          {:ok, SessionState.position() | nil} | {:error, focus_failure()}
+  defp outgoing_cursor(%Window{content: {:buffer, buffer}}, buffer) when is_pid(buffer) do
+    {:ok, Buffer.cursor(buffer)}
+  catch
+    :exit, _reason -> {:error, :buffer_unavailable}
+  end
+
+  defp outgoing_cursor(%Window{content: {:buffer, _buffer}}, _active_buffer),
+    do: {:error, :cursor_source_mismatch}
+
+  defp outgoing_cursor(%Window{}, nil), do: {:ok, nil}
+  defp outgoing_cursor(%Window{}, _active_buffer), do: {:error, :cursor_source_mismatch}
+
+  @spec restore_target_cursor(Window.t()) :: :ok | {:error, :buffer_unavailable}
   defp restore_target_cursor(%Window{content: {:buffer, buffer}, cursor: cursor})
        when is_pid(buffer) do
     Buffer.move_to(buffer, cursor)
+  catch
+    :exit, _reason -> {:error, :buffer_unavailable}
   end
 
   defp restore_target_cursor(%Window{}), do: :ok
@@ -172,15 +222,6 @@ defmodule MingaEditor.WindowFocus do
   end
 
   @spec blur_bottom_panel(state()) :: state()
-  defp blur_bottom_panel(%EditorState{} = state) do
-    shell_state = Runtime.state(state.shell_runtime)
-    panel = shell_state |> TraditionalState.bottom_panel() |> BottomPanel.blur()
-    shell_state = TraditionalState.set_bottom_panel(shell_state, panel)
-
-    %{
-      state
-      | shell_runtime:
-          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
-    }
-  end
+  defp blur_bottom_panel(%EditorState{} = state),
+    do: %{state | shell_runtime: Runtime.blur_bottom_panel(state.shell_runtime)}
 end

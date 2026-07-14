@@ -7,7 +7,6 @@ defmodule MingaEditor.RenderPipeline.WindowIntent do
   @fields [
     :id,
     :content,
-    :buffer,
     :viewport,
     :cursor,
     :pinned,
@@ -21,13 +20,12 @@ defmodule MingaEditor.RenderPipeline.WindowIntent do
     :scroll_echo_top,
     :authoritative_scroll_seq
   ]
-  @enforce_keys [:id, :content, :buffer, :viewport]
+  @enforce_keys [:id, :content, :viewport]
   defstruct @fields
 
   @type t :: %__MODULE__{
           id: Window.id(),
-          content: term(),
-          buffer: pid() | nil,
+          content: MingaEditor.Window.Content.t(),
           viewport: MingaEditor.Viewport.t(),
           cursor: Minga.Buffer.position(),
           pinned: boolean(),
@@ -47,7 +45,6 @@ defmodule MingaEditor.RenderPipeline.WindowIntent do
     %__MODULE__{
       id: window.id,
       content: window.content,
-      buffer: window.buffer,
       viewport: window.viewport,
       cursor: window.cursor,
       pinned: window.pinned,

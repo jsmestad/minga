@@ -386,7 +386,7 @@ defmodule MingaEditor.RenderPipeline.Input do
         } = input
       ) do
     case Map.fetch(windows, id) do
-      {:ok, %{buffer: ^buf} = window} ->
+      {:ok, %{content: {:buffer, ^buf}} = window} ->
         cursor = Minga.Buffer.cursor(buf)
         new_map = Map.put(windows, id, %{window | cursor: cursor})
         %{input | workspace: %{ws | windows: %{ws.windows | map: new_map}}}

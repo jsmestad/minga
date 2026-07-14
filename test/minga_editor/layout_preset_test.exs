@@ -40,7 +40,7 @@ defmodule MingaEditor.LayoutPresetTest do
       # New window should have agent_chat content
       agent_win = new_state.workspace.windows.map[2]
       assert Content.agent_chat?(agent_win.content)
-      assert agent_win.buffer == nil
+      assert Content.buffer_pid(agent_win.content) == nil
 
       # Original window unchanged
       assert Content.buffer?(new_state.workspace.windows.map[1].content)

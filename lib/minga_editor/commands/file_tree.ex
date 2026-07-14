@@ -737,8 +737,8 @@ defmodule MingaEditor.Commands.FileTree do
   @spec active_editing_buffer(state()) :: pid() | nil
   defp active_editing_buffer(state) do
     case State.active_window_struct(state.workspace) do
-      %{buffer: buf} when is_pid(buf) -> buf
-      _ -> state.workspace.buffers.active
+      %{content: {:buffer, buf}} when is_pid(buf) -> buf
+      _other -> state.workspace.buffers.active
     end
   end
 

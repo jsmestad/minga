@@ -134,7 +134,7 @@ defmodule MingaEditor.Mouse do
   @spec apply_scroll_intent(state(), non_neg_integer(), integer(), :down | :up) :: state()
   defp apply_scroll_intent(state, window_id, delta_lines, _direction) do
     case Map.fetch(state.workspace.windows.map, window_id) do
-      {:ok, %Window{buffer: buf} = window} when is_pid(buf) ->
+      {:ok, %Window{content: {:buffer, buf}} = window} when is_pid(buf) ->
         now = System.monotonic_time(:millisecond)
         total_lines = Buffer.line_count(buf)
         cursor_pos = Buffer.cursor(buf)
@@ -1324,7 +1324,7 @@ defmodule MingaEditor.Mouse do
     case WindowTree.window_at(state.workspace.windows.tree, screen, row, col) do
       {:ok, id, _rect} ->
         case Map.fetch(state.workspace.windows.map, id) do
-          {:ok, %Window{buffer: ^active}} -> true
+          {:ok, %Window{content: {:buffer, ^active}}} -> true
           _ -> false
         end
 
@@ -1490,27 +1490,28 @@ defmodule MingaEditor.Mouse do
          win_h,
          content_w
        ) do
-    with %Window{} = window <- MingaEditor.Session.State.active_window_struct(state.workspace),
-         buf when is_pid(buf) <- window.buffer do
-      total_lines = Buffer.line_count(buf)
-      {cursor_line, _} = window.cursor
-      scroll_top = HitTest.scroll_top(window, win_h, content_w, cursor_line, buf)
+    case MingaEditor.Session.State.active_window_struct(state.workspace) do
+      %Window{content: {:buffer, buf}} = window ->
+        total_lines = Buffer.line_count(buf)
+        {cursor_line, _} = window.cursor
+        scroll_top = HitTest.scroll_top(window, win_h, content_w, cursor_line, buf)
 
-      case fold_target_line_at_row(
-             buf,
-             window,
-             local_row,
-             scroll_top,
-             win_h,
-             content_w,
-             total_lines
-           ) do
-        nil -> nil
-        {:window_fold, buf_line} -> {:window_fold, win_id, buf_line}
-        {:decoration_fold, fold_id} -> {:decoration_fold, buf, fold_id}
-      end
-    else
-      _ -> nil
+        case fold_target_line_at_row(
+               buf,
+               window,
+               local_row,
+               scroll_top,
+               win_h,
+               content_w,
+               total_lines
+             ) do
+          nil -> nil
+          {:window_fold, buf_line} -> {:window_fold, win_id, buf_line}
+          {:decoration_fold, fold_id} -> {:decoration_fold, buf, fold_id}
+        end
+
+      _other ->
+        nil
     end
   end
 
@@ -1686,10 +1687,10 @@ defmodule MingaEditor.Mouse do
     win_id = state.workspace.mouse.drag_origin_window || state.workspace.windows.active
 
     with id when is_integer(id) <- win_id,
-         %Window{} = window <- Map.get(state.workspace.windows.map, id),
+         %Window{content: {:buffer, buf}} = window <-
+           Map.get(state.workspace.windows.map, id),
          %{content: {content_row, content_col, content_w, content_h}} <-
-           Map.get(layout.window_layouts, id),
-         buf when is_pid(buf) <- window.buffer do
+           Map.get(layout.window_layouts, id) do
       {id, window, buf, content_row, content_col, content_w, max(content_h, 1)}
     else
       _ -> nil

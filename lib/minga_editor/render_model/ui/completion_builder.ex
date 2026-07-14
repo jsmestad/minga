@@ -113,7 +113,7 @@ defmodule MingaEditor.RenderModel.UI.CompletionBuilder do
     layout = ctx.layout
 
     case {Map.get(layout.window_layouts, active), Map.get(ctx.windows.map, active)} do
-      {%{content: {row, col, _w, _h}}, %{buffer: buf, viewport: viewport} = window}
+      {%{content: {row, col, _w, _h}}, %{content: {:buffer, buf}, viewport: viewport} = window}
       when is_pid(buf) ->
         {line, column} = Buffer.cursor(buf)
         total_lines = Buffer.line_count(buf)

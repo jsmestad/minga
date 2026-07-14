@@ -4,6 +4,8 @@ defmodule MingaEditor.WindowFocusTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.BottomPanel
   alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.Shell.Entry
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Windows
@@ -95,6 +97,25 @@ defmodule MingaEditor.WindowFocusTest do
     refute BottomPanel.focused?(EditorState.bottom_panel(focused))
   end
 
+  test "active-shell blur dispatches through an alternate shell contract" do
+    state = base_state()
+
+    entry =
+      Entry.builtin!(
+        :fake,
+        MingaEditor.Test.FakeShell,
+        "Fake",
+        "Focus contract test shell",
+        false
+      )
+
+    state = %{state | shell_runtime: Runtime.new(entry, %{events: []})}
+    focused = WindowFocus.focus(state, state.workspace.windows.active)
+
+    assert Runtime.state(focused.shell_runtime).events == [:bottom_panel_blurred]
+    assert focused.workspace == state.workspace
+  end
+
   test "focusing the active window only blurs Traditional bottom-panel presentation" do
     state = base_state()
     panel = %BottomPanel{} |> BottomPanel.show() |> BottomPanel.focus()
@@ -136,6 +157,26 @@ defmodule MingaEditor.WindowFocusTest do
     assert_receive {:DOWN, ^monitor, :process, ^first_buffer, :normal}
 
     assert WindowFocus.focus(state, 2) == state
+  end
+
+  test "cursor-source mismatch returns a focused failure and leaves state unchanged" do
+    {state, _first_buffer, second_buffer} = split_state()
+
+    mismatched = %{
+      state
+      | workspace:
+          SessionState.set_buffers(state.workspace, Buffers.switch_to(state.workspace.buffers, 1))
+    }
+
+    assert WindowFocus.focus_result(mismatched, 2) ==
+             {:error, :cursor_source_mismatch}
+
+    assert WindowFocus.focus(mismatched, 2) == mismatched
+
+    assert WindowFocus.remember_active_cursor_result(mismatched) ==
+             {:error, :cursor_source_mismatch}
+
+    assert BufferProcess.cursor(second_buffer) == {0, 1}
   end
 
   test "active cursor snapshots require a matching live buffer window" do

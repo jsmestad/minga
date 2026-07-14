@@ -11,20 +11,29 @@ defmodule MingaEditor.Handlers.RenderHandler do
 
   @type state :: EditorState.t()
 
-  @doc "Handles the debounced render timer and observes cursor movement."
-  @spec handle_debounced_render(state()) :: state()
-  def handle_debounced_render(state) do
-    state = maybe_trigger_nav_flash(state)
-    state = Renderer.render_or_async(state)
+  @doc "Handles a matching debounced render delivery and rejects stale timer identities."
+  @spec handle_debounced_render(
+          state(),
+          MingaEditor.State.RenderCorrelation.timer_identity()
+        ) :: state()
+  def handle_debounced_render(state, timer_identity) do
+    case MingaEditor.State.RenderCorrelation.deliver(
+           state.render.render_correlation,
+           timer_identity
+         ) do
+      {:current, correlation} ->
+        state = %{
+          state
+          | render: MingaEditor.State.Render.accept_correlation(state.render, correlation)
+        }
 
-    %{
-      state
-      | render:
-          MingaEditor.State.Render.accept_correlation(
-            state.render,
-            MingaEditor.State.RenderCorrelation.clear_timer(state.render.render_correlation)
-          )
-    }
+        state
+        |> maybe_trigger_nav_flash()
+        |> Renderer.render_or_async()
+
+      {:stale, _correlation} ->
+        state
+    end
   end
 
   @doc """

@@ -56,8 +56,8 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     |> Enum.reduce({%{}, input}, fn {win_id, win_layout}, {acc, st} ->
       window = Map.get(st.workspace.windows.map, win_id)
 
-      if window == nil or window.buffer == nil or match?({:agent_chat, _}, window.content) do
-        # Skip nil windows and agent chat windows (rendered by build_agent_chat_content)
+      if window == nil or not match?({:buffer, _}, window.content) do
+        # Skip nil and semantic windows; they have no buffer snapshot to prefetch.
         {acc, st}
       else
         scroll_and_invalidate(input, st, acc, win_id, window, win_layout)
@@ -180,9 +180,9 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     # This preserves the scroll position (viewport.top) across frames so that
     # Ctrl-e/y, zz/zt/zb, and mouse wheel scroll actually persist.
     # scroll_to_cursor only adjusts top when the cursor moves off-screen.
-    wrap_on = wrap_enabled?(window.buffer)
+    wrap_on = wrap_enabled?(buffer_pid(window))
     width_oracle = Capabilities.width_oracle(state.capabilities)
-    scroll_margin = scroll_margin(window.buffer)
+    scroll_margin = scroll_margin(buffer_pid(window))
     fold_map = window.fold_map
     %Viewport{} = win_vp = window.viewport
     viewport = %{win_vp | rows: content_height, cols: content_width, reserved: 0}
@@ -239,10 +239,10 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
 
     # Compute final gutter dimensions before building the DisplayMap.
     # Dynamic block decorations must see the same text width in scroll, content, and GUI gutter paths.
-    line_number_style = Buffer.get_option(window.buffer, :line_numbers)
+    line_number_style = Buffer.get_option(buffer_pid(window), :line_numbers)
 
     {has_sign_column, gutter_w} =
-      gutter_dimensions(state, window.buffer, line_number_style, line_count)
+      gutter_dimensions(state, buffer_pid(window), line_number_style, line_count)
 
     content_w = max(viewport.cols - gutter_w, 1)
 
@@ -250,7 +250,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     # The DisplayMap merges per-window folds, decoration folds, and virtual
     # lines into a unified mapping. Falls back to VisibleLines when there
     # are no decoration folds or virtual lines (pure window-fold case).
-    decorations = fetch_decorations(state, window.buffer)
+    decorations = fetch_decorations(state, buffer_pid(window))
 
     # Two-pass scroll: compute DisplayMap, then verify cursor is visible.
     # If decorations push the cursor off-screen, adjust first_line and recompute.
@@ -286,7 +286,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     # instead of blocking first paint. `residence_armed` resets on layout_generation
     # rebuilds (RenderCache.reset/1) so resize/font/wrap changes re-defer.
     residence_eligible? =
-      is_nil(visible_line_map) and full_residence?(window.buffer, wrap_on, line_count)
+      is_nil(visible_line_map) and full_residence?(buffer_pid(window), wrap_on, line_count)
 
     full_residence? = residence_eligible? and Window.residence_armed?(window)
 
@@ -304,7 +304,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
 
     snapshot =
       fetch_snapshot!(
-        window.buffer,
+        buffer_pid(window),
         expected_version,
         fetch_first,
         fetch_count,
@@ -316,7 +316,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     Minga.Telemetry.execute(
       [:minga, :render, :line_fetch],
       %{lines_fetched: length(lines)},
-      %{window_id: win_id, buffer: window.buffer, full_residence?: full_residence?}
+      %{window_id: win_id, buffer: buffer_pid(window), full_residence?: full_residence?}
     )
 
     # Cursor byte → display col
@@ -329,7 +329,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
         first_line: fetch_first,
         lines: lines,
         snapshot: snapshot,
-        buf: window.buffer,
+        buf: buffer_pid(window),
         cursor_line: cursor_line,
         cursor_byte_col: cursor_byte_col,
         content_w: content_w,
@@ -408,9 +408,14 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   @spec render_observation!(Window.t()) ::
           {non_neg_integer(), RenderSnapshot.t() | nil, RenderSnapshot.t()}
   defp render_observation!(window) do
-    expected_version = Window.expected_buffer_version(window) || Buffer.version(window.buffer)
+    expected_version =
+      Window.expected_buffer_version(window) || Buffer.version(buffer_pid(window))
+
     changed_snapshot = Window.changed_snapshot(window)
-    base_snapshot = changed_snapshot || fetch_at_version!(window.buffer, expected_version, 0, 0)
+
+    base_snapshot =
+      changed_snapshot || fetch_at_version!(buffer_pid(window), expected_version, 0, 0)
+
     {expected_version, changed_snapshot, base_snapshot}
   end
 
@@ -642,7 +647,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
 
       case Window.cached_total_visual_rows(window, key) do
         nil ->
-          total = visual_rows_to_eof(window.buffer, snapshot.version, 0, content_w, oracle)
+          total = visual_rows_to_eof(buffer_pid(window), snapshot.version, 0, content_w, oracle)
           {total, Window.put_total_visual_rows(window, key, total)}
 
         total ->
@@ -688,7 +693,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
 
     {
       scroll.win_id,
-      scroll.window.buffer,
+      buffer_pid(scroll.window),
       scroll.win_layout.total,
       scroll.win_layout.content,
       scroll.content_w,
@@ -1159,8 +1164,11 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     end
   end
 
+  @spec buffer_pid(Window.t()) :: pid()
+  defp buffer_pid(%Window{content: {:buffer, buffer}}), do: buffer
+
   @spec window_cursor(Window.t(), boolean()) :: {non_neg_integer(), non_neg_integer()}
-  defp window_cursor(window, true), do: Buffer.cursor(window.buffer)
+  defp window_cursor(window, true), do: Buffer.cursor(buffer_pid(window))
   defp window_cursor(window, false), do: window.cursor
 
   @spec scroll_horizontal(

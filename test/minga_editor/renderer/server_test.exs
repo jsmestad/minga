@@ -1024,7 +1024,8 @@ defmodule MingaEditor.Renderer.ServerTest do
     input_sequence = window.render_cache.applied_change_sequence
 
     expected_version = Window.expected_buffer_version(window)
-    {:ok, snapshot} = Minga.Buffer.render_lines(window.buffer, expected_version, 0, 0)
+    {:buffer, buffer} = window.content
+    {:ok, snapshot} = Minga.Buffer.render_lines(buffer, expected_version, 0, 0)
     updated_window = Window.sync_line_identity(window, snapshot)
     output_identity = Window.line_identity(updated_window)
 

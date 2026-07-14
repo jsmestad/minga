@@ -76,26 +76,26 @@ defmodule MingaEditor.Window.ContentTest do
     end
   end
 
-  describe "Window.new sets content field" do
-    test "new/4 sets both content and buffer" do
+  describe "Window content identity" do
+    test "new/4 stores the buffer only in content" do
       pid = self()
       window = Window.new(1, pid, 24, 80)
       assert window.content == {:buffer, pid}
-      assert window.buffer == pid
+      refute Map.has_key?(window, :buffer)
     end
 
-    test "new/5 sets both content and buffer" do
+    test "new/5 stores the buffer only in content" do
       pid = self()
       window = Window.new(1, pid, 24, 80, {5, 10})
       assert window.content == {:buffer, pid}
-      assert window.buffer == pid
+      refute Map.has_key?(window, :buffer)
       assert window.cursor == {5, 10}
     end
 
-    test "new_agent_chat/3 sets semantic agent chat content without a buffer" do
+    test "new_agent_chat/3 stores semantic agent chat content without a buffer field" do
       window = Window.new_agent_chat(1, 24, 80)
       assert window.content == {:agent_chat, :semantic}
-      assert window.buffer == nil
+      refute Map.has_key?(window, :buffer)
       assert Content.agent_chat?(window.content)
       refute Content.buffer?(window.content)
     end

@@ -2726,7 +2726,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp find_popup_for_buffer(state, buffer_pid) do
     result =
       Enum.find(state.workspace.windows.map, fn {_id, window} ->
-        Window.popup?(window) and window.buffer == buffer_pid
+        Window.popup?(window) and match?({:buffer, ^buffer_pid}, window.content)
       end)
 
     case result do

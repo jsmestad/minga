@@ -342,7 +342,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       synced = Input.sync_active_window_cursor(input)
 
       window = Map.fetch!(synced.workspace.windows.map, synced.workspace.windows.active)
-      assert window.buffer == original_window.buffer
+      assert window.content == original_window.content
       assert window.cursor == original_cursor
     end
 

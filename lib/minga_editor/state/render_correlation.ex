@@ -2,41 +2,88 @@ defmodule MingaEditor.State.RenderCorrelation do
   @moduledoc "Immutable Editor-owned render scheduling, keyframe, and receipt-ordering state."
 
   defstruct timer: nil,
+            timer_identity: nil,
+            timer_sequence: 0,
             keyframe_pending?: false,
             latest_intent_revision: 0,
             last_receipt_revision: 0,
             last_receipt_seq: 0
 
-  @type t :: %__MODULE__{
-          timer: reference() | nil,
-          keyframe_pending?: boolean(),
-          latest_intent_revision: non_neg_integer(),
-          last_receipt_revision: non_neg_integer(),
-          last_receipt_seq: non_neg_integer()
-        }
+  @opaque timer_identity :: {:render_window, pos_integer()}
+
+  @opaque t :: %__MODULE__{
+            timer: reference() | nil,
+            timer_identity: timer_identity() | nil,
+            timer_sequence: non_neg_integer(),
+            keyframe_pending?: boolean(),
+            latest_intent_revision: non_neg_integer(),
+            last_receipt_revision: non_neg_integer(),
+            last_receipt_seq: non_neg_integer()
+          }
 
   @type freshness_reason :: :superseded_intent | :stale_receipt_revision | :stale_sequence
   @type freshness :: {:fresh, non_neg_integer()} | {:stale, freshness_reason()}
+  @type timer_delivery :: {:current, t()} | {:stale, t()}
 
   @doc "Returns initial render correlation state."
   @spec new() :: t()
   def new, do: %__MODULE__{}
 
-  @doc "Admits one render timer or coalesces into the already scheduled timer."
-  @spec schedule(t(), reference()) :: {:scheduled | :coalesced, t()}
-  def schedule(%__MODULE__{timer: nil} = correlation, timer) when is_reference(timer),
-    do: {:scheduled, %{correlation | timer: timer}}
+  @doc "Returns the semantic identity for the next render window."
+  @spec next_timer_identity(t()) :: timer_identity()
+  def next_timer_identity(%__MODULE__{timer_sequence: sequence}),
+    do: {:render_window, sequence + 1}
 
-  def schedule(%__MODULE__{} = correlation, timer) when is_reference(timer),
-    do: {:coalesced, correlation}
+  @doc "Admits one render timer or coalesces into the already scheduled timer."
+  @spec schedule(t(), timer_identity(), reference()) :: {:scheduled | :coalesced, t()}
+  def schedule(
+        %__MODULE__{timer: nil, timer_sequence: sequence} = correlation,
+        {:render_window, next_sequence} = identity,
+        timer
+      )
+      when next_sequence == sequence + 1 and is_reference(timer) do
+    {:scheduled,
+     %{
+       correlation
+       | timer: timer,
+         timer_identity: identity,
+         timer_sequence: next_sequence
+     }}
+  end
+
+  def schedule(%__MODULE__{} = correlation, {:render_window, sequence}, timer)
+      when is_integer(sequence) and sequence > 0 and is_reference(timer),
+      do: {:coalesced, correlation}
 
   @doc "Returns whether a render timer currently owns the throttle window."
   @spec scheduled?(t()) :: boolean()
-  def scheduled?(%__MODULE__{timer: timer}), do: is_reference(timer)
+  def scheduled?(%__MODULE__{timer: timer, timer_identity: identity}),
+    do: is_reference(timer) and not is_nil(identity)
 
-  @doc "Clears the render timer after synchronous rendering or timer delivery."
+  @doc "Returns the current timer reference for cancellation at the Editor boundary."
+  @spec timer_reference(t()) :: reference() | nil
+  def timer_reference(%__MODULE__{timer: timer}), do: timer
+
+  @doc "Returns the identity of the currently scheduled render window."
+  @spec scheduled_identity(t()) :: timer_identity() | nil
+  def scheduled_identity(%__MODULE__{timer_identity: identity}), do: identity
+
+  @doc "Clears the scheduled render window while preserving its monotonic identity sequence."
   @spec clear_timer(t()) :: t()
-  def clear_timer(%__MODULE__{} = correlation), do: %{correlation | timer: nil}
+  def clear_timer(%__MODULE__{} = correlation),
+    do: %{correlation | timer: nil, timer_identity: nil}
+
+  @doc "Accepts only delivery for the currently scheduled render window."
+  @spec deliver(t(), timer_identity()) :: timer_delivery()
+  def deliver(
+        %__MODULE__{timer_identity: {:render_window, sequence}} = correlation,
+        {:render_window, sequence}
+      ),
+      do: {:current, clear_timer(correlation)}
+
+  def deliver(%__MODULE__{} = correlation, {:render_window, sequence})
+      when is_integer(sequence) and sequence > 0,
+      do: {:stale, correlation}
 
   @doc "Marks the next completed render as requiring a keyframe."
   @spec request_keyframe(t()) :: t()
@@ -61,6 +108,18 @@ defmodule MingaEditor.State.RenderCorrelation do
     revision = correlation.latest_intent_revision + 1
     {%{correlation | latest_intent_revision: revision}, revision}
   end
+
+  @doc "Returns the latest submitted render intent revision."
+  @spec latest_intent_revision(t()) :: non_neg_integer()
+  def latest_intent_revision(%__MODULE__{latest_intent_revision: revision}), do: revision
+
+  @doc "Returns the last accepted render receipt revision."
+  @spec last_receipt_revision(t()) :: non_neg_integer()
+  def last_receipt_revision(%__MODULE__{last_receipt_revision: revision}), do: revision
+
+  @doc "Returns the last accepted renderer frame sequence."
+  @spec last_receipt_sequence(t()) :: non_neg_integer()
+  def last_receipt_sequence(%__MODULE__{last_receipt_seq: sequence}), do: sequence
 
   @doc "Classifies asynchronous receipt ordering and normalizes legacy revision zero."
   @spec classify_receipt(t(), non_neg_integer(), non_neg_integer()) :: freshness()

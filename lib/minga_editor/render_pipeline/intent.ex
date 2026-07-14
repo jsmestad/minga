@@ -57,14 +57,14 @@ defmodule MingaEditor.RenderPipeline.Intent do
     Enum.reduce(windows, %{}, fn
       {_id,
        %Window{
-         buffer: buffer,
+         content: {:buffer, buffer},
          render_cache: %RenderCache{buffer_version: observed_version}
        }},
       acc
       when is_pid(buffer) and is_integer(observed_version) and observed_version >= 0 ->
         Map.update(acc, buffer, observed_version, &max(&1, observed_version))
 
-      {_id, %Window{buffer: buffer}}, acc when is_pid(buffer) ->
+      {_id, %Window{content: {:buffer, buffer}}}, acc when is_pid(buffer) ->
         Map.put_new(acc, buffer, 0)
 
       _, acc ->
