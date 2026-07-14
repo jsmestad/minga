@@ -31,12 +31,18 @@ The first build takes a few minutes (Zig compiles tree-sitter grammars for 24 la
 Once releases ship, installation will be simpler:
 
 ```bash
-# macOS (Homebrew)
+# macOS GUI (installs Minga.app plus the GUI-aware `minga` launcher)
+brew install --cask jsmestad/minga/minga-mac
+minga .
+
+# Linux standalone TUI
 brew install jsmestad/minga/minga
 
-# Or download a binary from GitHub Releases
+# Or download an artifact from GitHub Releases
 # https://github.com/jsmestad/minga/releases
 ```
+
+On macOS, `minga FILE_OR_DIRECTORY` opens or reuses Minga.app. Use `minga --tui FILE_OR_DIRECTORY` (or the installed `minga-tui` command) for an explicit standalone terminal session. Terminal-only commands such as `--headless`, `attach`, `sessions`, `detach`, `kill-session`, and `login --manual` select the standalone runtime automatically. If Minga.app is missing or damaged, normal GUI opens fail with an installation error rather than silently falling back to a new TUI editor.
 
 ## Launch
 

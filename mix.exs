@@ -293,7 +293,7 @@ defmodule Minga.MixProject do
       minga_macos: [
         include_erts: true,
         cookie: "minga_app_cookie",
-        steps: [:assemble, &ensure_support_release_artifacts/1],
+        steps: [:assemble, &ensure_macos_release_artifacts/1],
         rel_templates_path: "rel",
         strip_beams: Mix.env() == :prod
       ]
@@ -309,12 +309,12 @@ defmodule Minga.MixProject do
     )
   end
 
-  @spec ensure_support_release_artifacts(Mix.Release.t()) :: Mix.Release.t()
-  defp ensure_support_release_artifacts(release) do
+  @spec ensure_macos_release_artifacts(Mix.Release.t()) :: Mix.Release.t()
+  defp ensure_macos_release_artifacts(release) do
     ensure_release_artifacts!(
       release,
-      ["minga-parser", "minga-hook-runner"],
-      "Run `MIX_ENV=prod mix native.build.support` before `mix release minga_macos`."
+      ["minga-renderer-go", "minga-parser", "minga-hook-runner"],
+      "Run `MIX_ENV=prod mix native.build.tui` before `mix release minga_macos`."
     )
   end
 

@@ -441,6 +441,59 @@ defmodule Minga.CLITest do
     end
   end
 
+  describe "prepare_startup/1" do
+    test "decodes release-transported arguments without losing spaces" do
+      previous = System.get_env("MINGA_CLI_ARGS_B64")
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      System.put_env("MINGA_CLI_ARGS_B64", "LS1lZGl0b3I,L3RtcC9wYXRoIHdpdGggc3BhY2U")
+
+      on_exit(fn ->
+        case previous do
+          nil ->
+            # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+            System.delete_env("MINGA_CLI_ARGS_B64")
+
+          value ->
+            # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+            System.put_env("MINGA_CLI_ARGS_B64", value)
+        end
+      end)
+
+      assert CLI.argv() == ["--editor", "/tmp/path with space"]
+    end
+
+    test "stores GUI startup flags before application services start" do
+      assert :ok =
+               CLI.prepare_startup([
+                 "--editor",
+                 "--minimal",
+                 "--safe",
+                 "--config",
+                 "/tmp/minga-early.exs",
+                 "README.md"
+               ])
+
+      assert %{
+               view_mode: :editor,
+               minimal: true,
+               safe_mode: true,
+               config_file: "/tmp/minga-early.exs"
+             } = CLI.startup_flags()
+
+      assert Application.get_env(:minga, :minimal_mode) == true
+      assert Minga.SafeMode.active?()
+    after
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_startup_flags)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_startup_project_root)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :minimal_mode)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :safe_mode)
+    end
+  end
+
   describe "main/1" do
     test "no arguments returns :ok without crashing" do
       assert :ok = CLI.main([])

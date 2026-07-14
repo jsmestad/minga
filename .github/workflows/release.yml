@@ -345,7 +345,12 @@ jobs:
           hdiutil attach "$dmg_path" -mountpoint /tmp/minga-verify -nobrowse
           test -d "/tmp/minga-verify/Minga.app"
           test -f "/tmp/minga-verify/Minga.app/Contents/MacOS/Minga"
+          test -x "/tmp/minga-verify/Minga.app/Contents/Resources/bin/minga"
+          test -x "/tmp/minga-verify/Minga.app/Contents/Resources/bin/minga-tui"
           test -d "/tmp/minga-verify/Minga.app/Contents/Resources/release"
+          mkdir -p "$RUNNER_TEMP/minga-release-smoke"
+          version_output=$(MINGA_APP_PATH="/tmp/minga-verify/Minga.app" RELEASE_TMP="$RUNNER_TEMP/minga-release-smoke" "/tmp/minga-verify/Minga.app/Contents/Resources/bin/minga-tui" --version)
+          echo "$version_output" | grep -F "minga "
           echo "DMG smoke test passed"
 
       - name: Upload DMG
@@ -478,11 +483,16 @@ jobs:
 
             def install
               binary = Dir["minga_*"].first
-              bin.install binary => "minga"
+              if OS.mac?
+                bin.install binary => "minga-tui"
+              else
+                bin.install binary => "minga"
+              end
             end
 
             test do
-              assert_match version.to_s, shell_output("#{{bin}}/minga --version")
+              executable = OS.mac? ? bin/"minga-tui" : bin/"minga"
+              assert_match version.to_s, shell_output("#{{executable}} --version")
             end
           end
           '''
@@ -510,6 +520,7 @@ jobs:
 
             app "Minga.app"
             binary "#{{appdir}}/Minga.app/Contents/Resources/bin/minga"
+            binary "#{{appdir}}/Minga.app/Contents/Resources/bin/minga-tui"
 
             zap trash: [
               "~/Library/Application Support/minga",

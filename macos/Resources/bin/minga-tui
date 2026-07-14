@@ -1,0 +1,109 @@
+#!/bin/sh
+# Run the terminal frontend from the self-contained release embedded in Minga.app.
+
+set -eu
+
+resolve_script_dir() {
+  script_path=$0
+  while [ -L "$script_path" ]; do
+    link=$(readlink "$script_path")
+    case "$link" in
+      /*) script_path=$link ;;
+      *) script_path=$(dirname "$script_path")/$link ;;
+    esac
+  done
+  CDPATH='' cd "$(dirname "$script_path")" && pwd
+}
+
+script_dir=$(resolve_script_dir)
+
+resolve_release_bin() {
+  if [ -n "${MINGA_RELEASE_BIN:-}" ]; then
+    [ -x "$MINGA_RELEASE_BIN" ] || return 1
+    printf '%s\n' "$MINGA_RELEASE_BIN"
+    return
+  fi
+
+  if [ -n "${MINGA_APP_PATH:-}" ]; then
+    candidate="$MINGA_APP_PATH/Contents/Resources/release/bin/minga_macos"
+    [ -x "$candidate" ] || return 1
+    printf '%s\n' "$candidate"
+    return
+  fi
+
+  for candidate in \
+    "$script_dir/../release/bin/minga_macos" \
+    "/Applications/Minga.app/Contents/Resources/release/bin/minga_macos" \
+    "$HOME/Applications/Minga.app/Contents/Resources/release/bin/minga_macos"
+  do
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return
+    fi
+  done
+
+  return 1
+}
+
+release_bin=$(resolve_release_bin) || {
+  echo "error: Minga standalone runtime is missing or damaged. Reinstall Minga.app or set MINGA_RELEASE_BIN." >&2
+  exit 1
+}
+
+start_editor=1
+expects_value=0
+first_command=""
+
+for arg in "$@"; do
+  if [ "$expects_value" -eq 1 ]; then
+    expects_value=0
+    continue
+  fi
+
+  case "$arg" in
+    --headless)
+      start_editor=0
+      ;;
+    --config|--debug-log|-D|--name|--sname|--cookie-file|--host|--port)
+      expects_value=1
+      ;;
+    --editor|--no-context|--minimal|--safe|-Q|--help|-h|--version|-v)
+      ;;
+    --)
+      break
+      ;;
+    -*)
+      ;;
+    *)
+      if [ -z "$first_command" ]; then
+        first_command="$arg"
+      fi
+      ;;
+  esac
+done
+
+case "$first_command" in
+  sessions|detach|kill-session|login)
+    start_editor=0
+    ;;
+esac
+
+encode_cli_args() {
+  encoded=""
+  for arg in "$@"; do
+    part=$(printf '%s' "$arg" | base64 | tr -d '\n=' | tr '+/' '-_')
+    if [ -n "$encoded" ]; then
+      encoded="$encoded,$part"
+    else
+      encoded=$part
+    fi
+  done
+  printf '%s\n' "$encoded"
+}
+
+export MINGA_CLI_ARGS_B64=$(encode_cli_args "$@")
+export MINGA_STANDALONE_TUI=1
+export MINGA_STANDALONE_EDITOR=$start_editor
+export RELEASE_DISTRIBUTION=none
+
+exec "$release_bin" start

@@ -40,8 +40,10 @@ endif
 
 ifeq ($(OS),Darwin)
   BURRITO_TARGET := minga_macos_$(ARCH)
+  STANDALONE_INSTALL_NAME := minga-tui
 else
   BURRITO_TARGET := minga_linux_$(ARCH)
+  STANDALONE_INSTALL_NAME := minga
 endif
 
 # ── Install paths ───────────────────────────────────────────────────────
@@ -165,12 +167,12 @@ endif
 
 install-tui: release-tui
 	@mkdir -p "$(BINDIR)"
-	cp "burrito_out/$(BURRITO_TARGET)" "$(BINDIR)/minga"
-	chmod +x "$(BINDIR)/minga"
+	cp "burrito_out/$(BURRITO_TARGET)" "$(BINDIR)/$(STANDALONE_INSTALL_NAME)"
+	chmod +x "$(BINDIR)/$(STANDALONE_INSTALL_NAME)"
 	@# Force Burrito to re-extract the new payload (see BURRITO_INSTALL_DIR above).
 	@rm -rf "$(BURRITO_INSTALL_DIR)"/minga_erts-*
-	@echo "\033[32mInstalled minga to $(BINDIR)/minga\033[0m"
-	@"$(BINDIR)/minga" --version || true
+	@echo "\033[32mInstalled standalone TUI to $(BINDIR)/$(STANDALONE_INSTALL_NAME)\033[0m"
+	@"$(BINDIR)/$(STANDALONE_INSTALL_NAME)" --version || true
 
 install-mac: release-mac
 ifeq ($(OS),Darwin)
@@ -190,20 +192,25 @@ ifeq ($(OS),Darwin)
 	cp -R "$$APP_PATH" "$(APP_DIR)/Minga.app" || { \
 		echo "\033[33mPermission denied. Try: sudo make install-mac\033[0m"; exit 1; \
 	}; \
-	echo "\033[32mInstalled Minga.app to $(APP_DIR)/Minga.app\033[0m"
+	mkdir -p "$(BINDIR)"; \
+	ln -sf "$(APP_DIR)/Minga.app/Contents/Resources/bin/minga" "$(BINDIR)/minga"; \
+	ln -sf "$(APP_DIR)/Minga.app/Contents/Resources/bin/minga-tui" "$(BINDIR)/minga-tui"; \
+	echo "\033[32mInstalled Minga.app and launchers to $(BINDIR)\033[0m"
 else
 	@echo "\033[31mError: make install-mac is only available on macOS.\033[0m"; exit 1
 endif
 
-install: install-tui
 ifeq ($(OS),Darwin)
 install: install-mac
+else
+install: install-tui
 endif
 
 # ── Uninstall ───────────────────────────────────────────────────────────
 
 uninstall:
 	@rm -f "$(BINDIR)/minga" && echo "Removed $(BINDIR)/minga" || true
+	@rm -f "$(BINDIR)/minga-tui" && echo "Removed $(BINDIR)/minga-tui" || true
 ifeq ($(OS),Darwin)
 	@rm -rf "$(APP_DIR)/Minga.app" && echo "Removed $(APP_DIR)/Minga.app" || true
 endif
