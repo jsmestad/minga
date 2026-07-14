@@ -54,7 +54,13 @@ defmodule MingaEditor.UI.Picker.RecentFileSource do
   @impl true
   @spec on_select(Item.t(), term()) :: term()
   def on_select(%Item{id: rel_path}, state) do
-    root = project_root()
+    open_recent_file(project_root(), rel_path, state)
+  end
+
+  @spec open_recent_file(String.t() | nil, String.t(), term()) :: term()
+  defp open_recent_file(nil, _rel_path, state), do: state
+
+  defp open_recent_file(root, rel_path, state) do
     abs_path = Path.join(root, rel_path)
 
     case MingaEditor.Handlers.BufferRegistry.find_buffer_by_path(state, abs_path) do
@@ -78,6 +84,6 @@ defmodule MingaEditor.UI.Picker.RecentFileSource do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
-  @spec project_root() :: term()
+  @spec project_root() :: String.t() | nil
   def project_root, do: Minga.Project.resolve_root()
 end

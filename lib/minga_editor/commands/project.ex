@@ -17,6 +17,7 @@ defmodule MingaEditor.Commands.Project do
   @command_specs [
     {:project_find_file, "Find file in project", true},
     {:project_invalidate, "Invalidate project cache", true},
+    {:project_close, "Close project", false},
     {:project_add, "Add project", false},
     {:project_remove, "Remove project", false},
     {:project_switch, "Switch project", false},
@@ -44,13 +45,29 @@ defmodule MingaEditor.Commands.Project do
     :exit, _ -> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No project active")
   end
 
+  def execute(state, :project_close) do
+    Project.close()
+
+    state
+    |> MingaEditor.Commands.FileTree.close()
+    |> EditorState.update_file_tree(&MingaEditor.State.FileTree.set_project_root(&1, nil))
+  end
+
   def execute(state, :project_add) do
-    default = Project.resolve_root() |> Project.collapse_home()
+    default = project_add_default()
     PromptUI.open(state, MingaEditor.UI.Prompt.ProjectAdd, default: default)
   end
 
   def execute(state, :project_remove) do
     PickerUI.open(state, MingaEditor.UI.Picker.ProjectRemoveSource)
+  end
+
+  @spec project_add_default() :: String.t()
+  defp project_add_default do
+    case Project.resolve_root() do
+      root when is_binary(root) -> Project.collapse_home(root)
+      nil -> ""
+    end
   end
 
   commands(@command_specs)

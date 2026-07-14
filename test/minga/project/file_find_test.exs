@@ -2,6 +2,7 @@ defmodule Minga.Project.FileFindTest do
   use ExUnit.Case, async: true
 
   alias Minga.Project.FileFind
+  alias Minga.Project.Root
 
   describe "detect_strategy/1" do
     test "returns a known strategy atom" do
@@ -71,7 +72,7 @@ defmodule Minga.Project.FileFindTest do
     end
 
     test "returns a list of relative file paths", %{tmp_dir: tmp_dir} do
-      {:ok, files} = FileFind.list_files(tmp_dir)
+      {:ok, files} = FileFind.list_files(directory_root!(tmp_dir))
       assert is_list(files)
       assert Enum.count(files) >= 3
       assert "README.md" in files
@@ -80,31 +81,41 @@ defmodule Minga.Project.FileFindTest do
     end
 
     test "returns sorted results", %{tmp_dir: tmp_dir} do
-      {:ok, files} = FileFind.list_files(tmp_dir)
+      {:ok, files} = FileFind.list_files(directory_root!(tmp_dir))
       assert files == Enum.sort(files)
     end
 
     test "does not include directories", %{tmp_dir: tmp_dir} do
-      {:ok, files} = FileFind.list_files(tmp_dir)
+      {:ok, files} = FileFind.list_files(directory_root!(tmp_dir))
       refute "lib" in files
       refute "lib/sub" in files
     end
 
     test "paths are relative (no leading ./)", %{tmp_dir: tmp_dir} do
-      {:ok, files} = FileFind.list_files(tmp_dir)
+      {:ok, files} = FileFind.list_files(directory_root!(tmp_dir))
 
       for file <- files do
         refute String.starts_with?(file, "./"), "Path should not start with ./: #{file}"
       end
     end
 
-    test "returns error for nonexistent directory" do
-      result = FileFind.list_files("/nonexistent/path/#{System.unique_integer()}")
+    test "rejects raw paths and file roots at the inventory boundary", %{tmp_dir: tmp_dir} do
+      assert {:error, raw_error} = FileFind.list_files(tmp_dir)
+      assert raw_error =~ "explicit directory workspace root"
 
-      case result do
-        {:ok, files} -> assert is_list(files)
-        {:error, msg} -> assert is_binary(msg)
-      end
+      assert {:error, file_error} =
+               FileFind.list_files(Root.file(Path.join(tmp_dir, "README.md")))
+
+      assert file_error =~ "explicit directory workspace root"
+    end
+
+    test "rejects broad roots without current-flow confirmation" do
+      assert {:error, :broad_root_confirmation_required} = Root.directory(Path.expand("~"))
+      assert {:error, :broad_root_confirmation_required} = Root.directory("/")
+      assert {:ok, confirmed_root} = Root.directory("/", broad_root_confirmed: true)
+      assert Root.inventory_path(confirmed_root) == {:ok, "/"}
+      assert Root.broad_path?("/Volumes/External")
+      assert Root.broad_path?("/mnt/external")
     end
 
     test "excludes directories listed in file_find_excludes", %{
@@ -122,7 +133,7 @@ defmodule Minga.Project.FileFindTest do
         ["node_modules", "vendor"]
       )
 
-      {:ok, files} = FileFind.list_files(tmp_dir)
+      {:ok, files} = FileFind.list_files(directory_root!(tmp_dir))
 
       refute Enum.any?(files, &String.starts_with?(&1, "node_modules/"))
       refute Enum.any?(files, &String.starts_with?(&1, "vendor/"))
@@ -143,12 +154,18 @@ defmodule Minga.Project.FileFindTest do
         [".DS_Store"]
       )
 
-      {:ok, files} = FileFind.list_files(tmp_dir)
+      {:ok, files} = FileFind.list_files(directory_root!(tmp_dir))
 
       refute ".DS_Store" in files
       refute "lib/.DS_Store" in files
       assert "README.md" in files
     end
+  end
+
+  @spec directory_root!(String.t()) :: Root.t()
+  defp directory_root!(path) do
+    {:ok, root} = Root.directory(path)
+    root
   end
 
   defp make_tmp_dir(prefix) do

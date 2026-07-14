@@ -1351,7 +1351,7 @@ defmodule MingaEditor.Agent.SlashCommand do
     emit_system_message(state, summary)
   end
 
-  @spec detect_project_root() :: String.t()
+  @spec detect_project_root() :: String.t() | nil
   defp detect_project_root, do: Minga.Project.resolve_root()
 
   @spec emit_system_message(state(), String.t()) :: state()

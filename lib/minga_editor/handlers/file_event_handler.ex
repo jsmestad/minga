@@ -152,7 +152,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
   defp handle_git_status_changed(
          state,
          %Minga.Events.GitStatusEvent{
-           git_root: _git_root,
+           git_root: git_root,
            entries: entries,
            branch: branch,
            ahead: ahead,
@@ -172,7 +172,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
           ahead: ahead,
           behind: behind,
           entries: entries,
-          entry_base_path: Minga.Project.resolve_root(),
+          entry_base_path: git_root,
           last_commit_message: event.last_commit_message,
           stash_count: event.stash_count
         }

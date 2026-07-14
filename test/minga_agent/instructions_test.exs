@@ -6,6 +6,18 @@ defmodule MingaAgent.InstructionsTest do
   @moduletag :tmp_dir
 
   describe "discover/2" do
+    test "a missing workspace root does not inspect cwd" do
+      results = Instructions.discover(nil)
+
+      refute Enum.any?(
+               results,
+               &(&1.label in ["Project Instructions", "Project Config Instructions"])
+             )
+
+      assert Instructions.summary(nil) =~ "~/.config/minga/AGENTS.md"
+      refute Instructions.summary(nil) =~ "//AGENTS.md"
+    end
+
     test "finds project root AGENTS.md", %{tmp_dir: dir} do
       File.write!(Path.join(dir, "AGENTS.md"), "Project rules here")
 

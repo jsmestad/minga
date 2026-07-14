@@ -138,15 +138,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   # Build preview lines for a file path item.
   @spec build_preview_for_item(Context.t(), term()) :: [[PickerModel.preview_segment()]] | nil
   defp build_preview_for_item(ctx, id) when is_binary(id) do
-    abs_path = resolve_preview_path(id)
-
-    case find_buffer_for_path(ctx, abs_path) do
-      {buf_pid, highlight} when highlight != nil ->
-        build_highlighted_preview(buf_pid, highlight, ctx)
-
-      _ ->
-        read_file_preview(abs_path, ctx)
-    end
+    build_file_preview(ctx, resolve_preview_path(id))
   end
 
   defp build_preview_for_item(ctx, idx) when is_integer(idx) do
@@ -157,6 +149,20 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   end
 
   defp build_preview_for_item(_ctx, _id), do: nil
+
+  @spec build_file_preview(Context.t(), String.t() | nil) ::
+          [[PickerModel.preview_segment()]] | nil
+  defp build_file_preview(_ctx, nil), do: nil
+
+  defp build_file_preview(ctx, abs_path) do
+    case find_buffer_for_path(ctx, abs_path) do
+      {buf_pid, highlight} when highlight != nil ->
+        build_highlighted_preview(buf_pid, highlight, ctx)
+
+      _ ->
+        read_file_preview(abs_path, ctx)
+    end
+  end
 
   @spec preview_from_buffer(Context.t(), pid()) :: [[PickerModel.preview_segment()]] | nil
   defp preview_from_buffer(ctx, buf_pid) do
@@ -219,13 +225,20 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   defp face_to_rgb(%{fg: fg}, _default) when is_integer(fg), do: fg
   defp face_to_rgb(_, default), do: default
 
-  @spec resolve_preview_path(String.t()) :: String.t()
+  @spec resolve_preview_path(String.t()) :: String.t() | nil
   defp resolve_preview_path(path) do
-    case Path.type(path) do
-      :absolute -> path
-      _ -> Path.join(Minga.Project.resolve_root(), path)
-    end
+    resolve_preview_path(Path.type(path), path, Minga.Project.resolve_root())
   end
+
+  @spec resolve_preview_path(
+          :absolute | :relative | :volumerelative,
+          String.t(),
+          String.t() | nil
+        ) ::
+          String.t() | nil
+  defp resolve_preview_path(:absolute, path, _root), do: path
+  defp resolve_preview_path(_path_type, _path, nil), do: nil
+  defp resolve_preview_path(_path_type, path, root), do: Path.join(root, path)
 
   @spec read_file_preview(String.t(), Context.t()) :: [[PickerModel.preview_segment()]] | nil
   defp read_file_preview(abs_path, ctx) do

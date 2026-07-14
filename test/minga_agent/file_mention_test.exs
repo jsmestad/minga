@@ -5,6 +5,17 @@ defmodule MingaAgent.FileMentionTest do
 
   @moduletag :tmp_dir
 
+  describe "resolve_prompt/3 without a workspace" do
+    test "keeps prompts without file mentions unchanged" do
+      assert FileMention.resolve_prompt("hello", nil, []) == {:ok, "hello"}
+    end
+
+    test "rejects relative file mentions instead of resolving them from cwd" do
+      assert FileMention.resolve_prompt("review @README.md", nil, []) ==
+               {:error, "Cannot resolve file mentions without an active directory workspace"}
+    end
+  end
+
   # ── Extraction ──────────────────────────────────────────────────────────────
 
   describe "extract_mentions/1" do

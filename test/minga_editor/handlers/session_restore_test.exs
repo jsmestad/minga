@@ -66,6 +66,40 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
     assert switched.parser.injection_ranges == with_spans.parser.injection_ranges
   end
 
+  test "restoring loose files under a marker-bearing home keeps the workspace unset", %{
+    tmp_dir: dir
+  } do
+    fake_home = Path.join(dir, "home")
+    File.mkdir_p!(fake_home)
+    File.write!(Path.join(fake_home, "package.json"), "{}")
+    first_path = Path.join(fake_home, "notes.org")
+    second_path = Path.join(fake_home, "cacheless_design.org")
+    File.write!(first_path, "notes")
+    File.write!(second_path, "design")
+
+    snapshot = %Snapshot{
+      version: 1,
+      buffers: [%BufferEntry{file: first_path}, %BufferEntry{file: second_path}],
+      active_file: first_path
+    }
+
+    assert :ok = Session.save(snapshot, session_dir: dir)
+    Minga.Project.close()
+    _ = :sys.get_state(Minga.Project)
+    known_before = Minga.Project.known_projects()
+
+    restored = dir |> initial_state(project_root: nil) |> SessionRestore.restore_session()
+    project_state = :sys.get_state(Minga.Project)
+
+    assert Minga.Project.root() == nil
+    assert Minga.Project.workspace_root() == nil
+    assert project_state.rebuilding? == false
+    assert Minga.Project.files() == []
+    assert Minga.Project.known_projects() == known_before
+    refute fake_home in Minga.Project.known_projects()
+    assert EditorState.file_tree_state(restored).project_root == nil
+  end
+
   test "already-read recovered contents are applied by the SessionRestore owner", %{tmp_dir: dir} do
     path = Path.join(dir, "recovered.ex")
     File.write!(path, "old\n")
@@ -99,7 +133,8 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
     refute File.exists?(missing_path)
   end
 
-  defp initial_state(dir) do
+  @spec initial_state(String.t(), keyword()) :: EditorState.t()
+  defp initial_state(dir, opts \\ []) do
     manager_name = Module.concat(__MODULE__, "Parser#{System.unique_integer([:positive])}")
 
     manager =
@@ -114,7 +149,7 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
       parser_manager: manager,
       sidebar_registry: sidebar,
       session_dir: dir,
-      project_root: dir
+      project_root: Keyword.get(opts, :project_root, dir)
     )
   end
 end

@@ -5,6 +5,7 @@ defmodule MingaEditor.UI.Picker.FileSourceAsyncTest do
 
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.State.FileTree
+  alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.FileSource
   alias MingaEditor.UI.Picker.Item
 
@@ -45,6 +46,14 @@ defmodule MingaEditor.UI.Picker.FileSourceAsyncTest do
     assert Path.join(lib, "one.ex") in paths
     assert Path.join(lib, "two.ex") in paths
     assert Minga.Buffer.file_path(state.workspace.buffers.active) == Path.join(lib, "two.ex")
+  end
+
+  test "no-workspace picker returns no candidates without a cwd fallback" do
+    context =
+      TestHelpers.base_state(content: "loose file")
+      |> Context.from_editor_state(%{project_root: nil})
+
+    assert FileSource.candidates(context) == []
   end
 
   test "bulk actions expose open all marked" do

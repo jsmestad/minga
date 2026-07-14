@@ -8,6 +8,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
 
   @behaviour MingaEditor.UI.Picker.Source
 
+  alias Minga.Project.Root
   alias MingaEditor.FileTree.ProjectCache
   alias MingaEditor.State, as: EditorState
   alias Minga.Git
@@ -42,7 +43,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
     case resolve_paths(root) do
       {:ok, paths} ->
         frecency_map = build_frecency_map()
-        git_status_map = build_git_status_map(root)
+        git_status_map = build_git_status_map(root.path)
         score_map = build_score_map(frecency_map, git_status_map)
 
         paths
@@ -61,16 +62,19 @@ defmodule MingaEditor.UI.Picker.FileSource do
   # project was just switched and the first rebuild has not finished), the picker
   # falls back to a one-shot `list_files/1` so it never opens empty. Roots that
   # are not the active project always use the direct discovery.
-  @spec resolve_paths(String.t()) :: {:ok, [String.t()]} | {:error, String.t()}
-  defp resolve_paths(root) do
-    if ProjectCache.active_root?(root) do
+  @spec resolve_paths(Root.t() | nil) :: {:ok, [String.t()]} | {:error, String.t()}
+  defp resolve_paths(nil),
+    do: {:error, "No directory workspace active. Open a folder or switch project."}
+
+  defp resolve_paths(%Root{} = root) do
+    if ProjectCache.active_root?(root.path) do
       resolve_active_paths(root, ProjectCache.files())
     else
       Minga.Project.list_files(root)
     end
   end
 
-  @spec resolve_active_paths(String.t(), [String.t()]) ::
+  @spec resolve_active_paths(Root.t(), [String.t()]) ::
           {:ok, [String.t()]} | {:error, String.t()}
   defp resolve_active_paths(root, []), do: Minga.Project.list_files(root)
   defp resolve_active_paths(_root, paths), do: {:ok, paths}
@@ -223,7 +227,26 @@ defmodule MingaEditor.UI.Picker.FileSource do
   end
 
   @spec absolute_path(String.t(), term()) :: String.t()
-  defp absolute_path(rel_path, state), do: Path.expand(rel_path, project_root(state))
+  defp absolute_path(rel_path, state) do
+    case selection_root(state) do
+      path when is_binary(path) -> Path.expand(rel_path, path)
+      nil -> Path.expand(rel_path)
+    end
+  end
+
+  @spec selection_root(term()) :: String.t() | nil
+  defp selection_root(%EditorState{} = state) do
+    case EditorState.file_tree_state(state).project_root do
+      path when is_binary(path) -> path
+      _other -> root_path(active_workspace_root())
+    end
+  end
+
+  defp selection_root(_state), do: root_path(active_workspace_root())
+
+  @spec root_path(Root.t() | nil) :: String.t() | nil
+  defp root_path(%Root{path: path}), do: path
+  defp root_path(nil), do: nil
 
   @spec record_selection(String.t(), term()) :: :ok
   defp record_selection(_abs_path, %{buffer_lifecycle: %{buffer_add_context: :preview}}),
@@ -295,18 +318,17 @@ defmodule MingaEditor.UI.Picker.FileSource do
   defp git_status_annotation(:conflict), do: "!"
   defp git_status_annotation(_), do: nil
 
-  @spec project_root(Context.t() | EditorState.t() | nil) :: String.t()
-  defp project_root(%Context{picker_ui: %{context: %{project_root: root}}}) when is_binary(root),
-    do: root
+  @spec project_root(Context.t() | EditorState.t() | nil) :: Root.t() | nil
+  defp project_root(%Context{picker_ui: %{context: %{project_root: nil}}}), do: nil
+  defp project_root(%Context{picker_ui: %{context: %{project_root: %Root{} = root}}}), do: root
+  defp project_root(%Context{file_tree: %{project_root: %Root{} = root}}), do: root
+  defp project_root(%EditorState{}), do: active_workspace_root()
+  defp project_root(_ctx), do: active_workspace_root()
 
-  defp project_root(%Context{file_tree: %{project_root: root}}) when is_binary(root), do: root
-
-  defp project_root(%EditorState{} = state) do
-    case state.workspace.file_tree.project_root do
-      root when is_binary(root) -> root
-      _ -> Minga.Project.resolve_root()
-    end
+  @spec active_workspace_root() :: Root.t() | nil
+  defp active_workspace_root do
+    Minga.Project.workspace_root()
+  catch
+    :exit, _ -> nil
   end
-
-  defp project_root(_ctx), do: Minga.Project.resolve_root()
 end

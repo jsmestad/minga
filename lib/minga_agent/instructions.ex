@@ -30,8 +30,11 @@ defmodule MingaAgent.Instructions do
   path of the file the user is currently editing (optional, used for
   directory-scoped discovery in monorepos).
   """
-  @spec discover(String.t(), String.t() | nil) :: [instruction()]
-  def discover(project_root, current_file \\ nil) when is_binary(project_root) do
+  @spec discover(String.t() | nil, String.t() | nil) :: [instruction()]
+  def discover(project_root, current_file \\ nil)
+  def discover(nil, _current_file), do: global_instructions()
+
+  def discover(project_root, current_file) when is_binary(project_root) do
     global_instructions() ++
       project_instructions(project_root) ++
       directory_instructions(project_root, current_file)
@@ -42,7 +45,7 @@ defmodule MingaAgent.Instructions do
 
   Returns nil if no instruction files were found.
   """
-  @spec assemble(String.t(), String.t() | nil) :: String.t() | nil
+  @spec assemble(String.t() | nil, String.t() | nil) :: String.t() | nil
   def assemble(project_root, current_file \\ nil) do
     instructions = discover(project_root, current_file)
 
@@ -62,8 +65,17 @@ defmodule MingaAgent.Instructions do
 
   Useful for the `/instructions` slash command.
   """
-  @spec summary(String.t(), String.t() | nil) :: String.t()
-  def summary(project_root, current_file \\ nil) do
+  @spec summary(String.t() | nil, String.t() | nil) :: String.t()
+  def summary(project_root, current_file \\ nil)
+
+  def summary(nil, current_file) do
+    case discover(nil, current_file) do
+      [] -> "No instruction files found.\n\nSearched:\n  ~/.config/minga/AGENTS.md"
+      found -> instruction_summary(found)
+    end
+  end
+
+  def summary(project_root, current_file) when is_binary(project_root) do
     instructions = discover(project_root, current_file)
 
     case instructions do
@@ -74,16 +86,21 @@ defmodule MingaAgent.Instructions do
           "  #{project_root}/.minga/AGENTS.md"
 
       found ->
-        header = "Loaded #{Enum.count(found)} instruction file(s):\n"
-
-        lines =
-          Enum.map_join(found, "\n", fn %Instruction{label: label, path: path, content: content} ->
-            size = String.length(content)
-            "  ✓ #{label} (#{path}, #{size} chars)"
-          end)
-
-        header <> lines
+        instruction_summary(found)
     end
+  end
+
+  @spec instruction_summary([instruction()]) :: String.t()
+  defp instruction_summary(found) do
+    header = "Loaded #{Enum.count(found)} instruction file(s):\n"
+
+    lines =
+      Enum.map_join(found, "\n", fn %Instruction{label: label, path: path, content: content} ->
+        size = String.length(content)
+        "  ✓ #{label} (#{path}, #{size} chars)"
+      end)
+
+    header <> lines
   end
 
   # ── Private ─────────────────────────────────────────────────────────────────

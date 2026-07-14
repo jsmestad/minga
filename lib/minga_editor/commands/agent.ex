@@ -820,7 +820,7 @@ defmodule MingaEditor.Commands.Agent do
     FileMention.resolve_prompt(text, root, opts)
   end
 
-  @spec project_root() :: String.t()
+  @spec project_root() :: String.t() | nil
   defp project_root, do: Minga.Project.resolve_root()
 
   @doc "Clears the chat display without affecting conversation history."

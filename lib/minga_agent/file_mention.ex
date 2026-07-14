@@ -141,7 +141,7 @@ defmodule MingaAgent.FileMention do
   - `{:ok, [ContentPart.t()]}` when images are present (mixed text + image parts)
   - `{:error, message}` if any file doesn't exist or can't be read
   """
-  @spec resolve_prompt(String.t(), String.t()) ::
+  @spec resolve_prompt(String.t(), String.t() | nil) ::
           {:ok, String.t()} | {:ok, [ContentPart.t()]} | {:error, String.t()}
   def resolve_prompt(text, project_root) do
     resolve_prompt(text, project_root, [])
@@ -153,9 +153,16 @@ defmodule MingaAgent.FileMention do
   Options:
     - `:model` — the model string for vision capability checking
   """
-  @spec resolve_prompt(String.t(), String.t(), keyword()) ::
+  @spec resolve_prompt(String.t(), String.t() | nil, keyword()) ::
           {:ok, String.t()} | {:ok, [ContentPart.t()]} | {:error, String.t()}
-  def resolve_prompt(text, project_root, opts) do
+  def resolve_prompt(text, nil, _opts) do
+    case extract_mentions(text) do
+      [] -> {:ok, text}
+      _mentions -> {:error, "Cannot resolve file mentions without an active directory workspace"}
+    end
+  end
+
+  def resolve_prompt(text, project_root, opts) when is_binary(project_root) do
     mentions = extract_mentions(text)
 
     if mentions == [] do
