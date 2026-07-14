@@ -275,6 +275,46 @@ private struct ObservationOwnerProbeMatrix: View {
     }
 }
 
+private struct ObservedBackingProbe<Owner: AnyObject>: View {
+    let point: ContentViewFrameProbePoint
+    let owner: Owner
+    let materialize: (Owner) -> String
+    let recorder: FrameProbeRecorder
+
+    var body: some View {
+        ProductionFrameProbe(
+            point: point,
+            value: materialize(owner),
+            stateObject: owner,
+            recorder: recorder
+        )
+    }
+}
+
+private struct ObservedBackingProbePair<Owner: AnyObject>: View {
+    let owner: Owner
+    let materialize: (Owner) -> String
+    let unrelated: StatusBarState
+    let recorder: FrameProbeRecorder
+
+    var body: some View {
+        VStack {
+            ObservedBackingProbe(
+                point: .shell,
+                owner: owner,
+                materialize: materialize,
+                recorder: recorder
+            )
+            ObservedBackingProbe(
+                point: .editor,
+                owner: unrelated,
+                materialize: { $0.message },
+                recorder: recorder
+            )
+        }
+    }
+}
+
 @Suite("Persistent SwiftUI GUI frame invalidation")
 @MainActor
 struct GUIFrameSwiftUIInvalidationTests {
@@ -568,6 +608,65 @@ struct GUIFrameSwiftUIInvalidationTests {
         #expect(recorder.updateCount(for: .shell) - previewTabBaseline == 0)
         #expect(recorder.updateCount(for: .editor) - previewEditorBaseline == 0)
         #expect(gui.frameStore.shell.value.revision == shellRevision)
+    }
+
+    @Test(
+        "direct backing replacements update only mounted theme or resident-window consumers",
+        .timeLimit(.minutes(1))
+    )
+    func directObservationUpdatesThemeAndWindowBackings() async throws {
+        let initialWindow = try Self.windowContent(text: "initial", epoch: 1)
+        let unchangedWindow = try Self.windowContent(text: "unchanged", epoch: 40)
+        let editorReplacement = try Self.windowContent(text: "editor replacement", epoch: 2)
+        let overlayReplacement = try Self.windowContent(text: "overlay replacement", epoch: 3)
+        let gui = GUIState(windowContents: [1: initialWindow, 2: unchangedWindow])
+        let originalTheme = gui.shellInput.currentTheme
+        var publicationEvents: [GUIFrameStore.PublicationEvent] = []
+        gui.frameStore.onPublicationEvent = { publicationEvents.append($0) }
+
+        await expectOnlyObservedBackingProbeUpdate(
+            owner: gui.shellInput,
+            initialValue: String(originalTheme.editorFgRGB),
+            updatedValue: String(0x010203),
+            materialize: { String($0.currentTheme.editorFgRGB) }
+        ) {
+            gui.replaceTheme(slots: [(GUI_COLOR_EDITOR_FG, 1, 2, 3)])
+        }
+
+        #expect(gui.shellInput.currentTheme !== originalTheme)
+        #expect(originalTheme.editorFgRGB == 0xFFFFFF)
+        #expect(gui.shellInput.currentTheme.editorFgRGB == 0x010203)
+
+        await expectOnlyObservedBackingProbeUpdate(
+            owner: gui.editorInput,
+            initialValue: "1",
+            updatedValue: "2",
+            materialize: { String($0.windowContent(for: 1)?.contentEpoch ?? 0) }
+        ) {
+            gui.windowContents = [1: editorReplacement, 2: unchangedWindow]
+        }
+
+        let editorPreserved = try #require(gui.editorInput.windowContent(for: 2))
+        #expect(editorPreserved === unchangedWindow)
+        #expect(editorPreserved.rowStore.sharesStorage(with: unchangedWindow.rowStore))
+
+        await expectOnlyObservedBackingProbeUpdate(
+            owner: gui.editorOverlayInput,
+            initialValue: "2",
+            updatedValue: "3",
+            materialize: { String($0.windowContent(for: 1)?.contentEpoch ?? 0) }
+        ) {
+            gui.windowContents = [1: overlayReplacement, 2: unchangedWindow]
+        }
+
+        let overlayPreserved = try #require(gui.editorOverlayInput.windowContent(for: 2))
+        #expect(overlayPreserved === unchangedWindow)
+        #expect(overlayPreserved.rowStore.sharesStorage(with: unchangedWindow.rowStore))
+        #expect(publicationEvents.isEmpty)
+        #expect(gui.frameStore.shell.value.revision == 0)
+        #expect(gui.frameStore.editor.value.revision == 0)
+        #expect(gui.frameStore.editorOverlay.value.revision == 0)
+        #expect(gui.frameStore.windowOverlay.value.revision == 0)
     }
 
     @Test(
@@ -926,6 +1025,16 @@ struct GUIFrameSwiftUIInvalidationTests {
 
         let feedbackState = try #require(sources["Sources/Views/EditorChrome/FeedbackState.swift"])
         let guiState = try #require(sources["Sources/Views/Shared/GUIState.swift"])
+        let themeBackingDeclaration = "@MainActor\n@Observable\nfileprivate final class GUIThemeBacking"
+        let windowBackingDeclaration = "@MainActor\n@Observable\nfileprivate final class GUIWindowContentBacking"
+        let guiStateDeclaration = "@MainActor\n@Observable\npublic final class GUIState"
+        let themeBackingStart = try #require(guiState.range(of: themeBackingDeclaration))
+        let windowBackingStart = try #require(guiState.range(of: windowBackingDeclaration))
+        let guiStateStart = try #require(guiState.range(of: guiStateDeclaration))
+        let themeBackingSource = guiState[themeBackingStart.lowerBound..<windowBackingStart.lowerBound]
+        let windowBackingSource = guiState[windowBackingStart.lowerBound..<guiStateStart.lowerBound]
+        #expect(!themeBackingSource.contains("@ObservationIgnored"))
+        #expect(!windowBackingSource.contains("@ObservationIgnored"))
         #expect(!feedbackState.contains("onPresentationChanged"))
         #expect(!feedbackState.contains("notifyPresentationChanged"))
         #expect(!guiState.contains("feedbackState.onPresentationChanged"))
@@ -976,6 +1085,35 @@ struct GUIFrameSwiftUIInvalidationTests {
         )
         window.contentView = hostingView
         return (hostingView, window)
+    }
+
+    private func expectOnlyObservedBackingProbeUpdate<Owner: AnyObject>(
+        owner: Owner,
+        initialValue: String,
+        updatedValue: String,
+        materialize: @escaping (Owner) -> String,
+        mutation: @MainActor () -> Void
+    ) async {
+        let unrelated = StatusBarState()
+        let recorder = FrameProbeRecorder()
+        let root = ObservedBackingProbePair(
+            owner: owner,
+            materialize: materialize,
+            unrelated: unrelated,
+            recorder: recorder
+        )
+        let (hostingView, window) = mount(root)
+        defer { window.contentView = nil }
+        hostingView.layoutSubtreeIfNeeded()
+        await recorder.waitForValue(initialValue, point: .shell)
+        await recorder.waitForValue("", point: .editor)
+
+        let dependentBaseline = recorder.updateCount(for: .shell)
+        let unrelatedBaseline = recorder.updateCount(for: .editor)
+        mutation()
+        await recorder.waitForValue(updatedValue, point: .shell)
+        #expect(recorder.updateCount(for: .shell) > dependentBaseline)
+        #expect(recorder.updateCount(for: .editor) == unrelatedBaseline)
     }
 
     private func expectOnlyOwnerProbeUpdate(

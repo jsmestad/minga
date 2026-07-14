@@ -3,11 +3,13 @@ import MingaProtocol
 import Observation
 
 @MainActor
+@Observable
 fileprivate final class GUIThemeBacking {
     var current = ThemeColors()
 }
 
 @MainActor
+@Observable
 fileprivate final class GUIWindowContentBacking {
     var current: [UInt16: GUIWindowContent]
 
