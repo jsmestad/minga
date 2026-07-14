@@ -80,7 +80,7 @@ defmodule MingaEditor.Shell do
   @callback on_agent_event(shell_state(), workspace(), session_pid :: pid(), event :: term()) ::
               {shell_state(), workspace()}
 
-  @doc "Returns whether shell state owns an agent session pid."
+  @doc "Returns whether this shell state owns an agent session pid. Every shell must define ownership for its own state shape."
   @callback owns_agent_session?(shell_state(), session_pid :: pid()) :: boolean()
 
   @doc "Handles an agent session going down and reports whether the shell owned it."
@@ -126,7 +126,6 @@ defmodule MingaEditor.Shell do
   @callback active_session(shell_state()) :: pid() | nil
 
   @optional_callbacks after_gui_action: 2,
-                      owns_agent_session?: 2,
                       handle_agent_session_down: 3,
                       handle_agent_session_restarted: 4,
                       handle_remote_session_disconnected: 2,

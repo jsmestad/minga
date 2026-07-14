@@ -135,27 +135,11 @@ defmodule MingaEditor.Shell.Entry do
 
   @spec required_callbacks() :: [{atom(), non_neg_integer()}]
   defp required_callbacks do
-    [
-      init: 1,
-      compute_layout: 1,
-      build_chrome: 4,
-      chrome_fingerprint: 1,
-      async_render?: 1,
-      gui_payload: 1,
-      render: 1,
-      input_handlers: 1,
-      handle_event: 3,
-      handle_gui_action: 3,
-      on_buffer_added: 5,
-      on_buffer_switched: 2,
-      on_buffer_died: 3,
-      on_agent_event: 4,
-      active_tab: 1,
-      find_tab_by_buffer: 2,
-      active_tab_kind: 1,
-      set_tab_session: 3,
-      active_session: 1
-    ]
+    optional = MingaEditor.Shell.behaviour_info(:optional_callbacks) |> MapSet.new()
+
+    MingaEditor.Shell.behaviour_info(:callbacks)
+    |> Enum.reject(&MapSet.member?(optional, &1))
+    |> Enum.sort()
   end
 
   @spec fetch_binary(map(), atom()) :: {:ok, String.t()} | {:error, term()}

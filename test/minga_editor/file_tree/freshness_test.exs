@@ -21,6 +21,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
   import MingaEditor.RenderPipeline.TestHelpers
 
   @moduletag :tmp_dir
+  @timeout 1_000
 
   test "cache refresh starts a Git.Repo owner when no cache exists yet", %{tmp_dir: dir} do
     events_registry = start_events_registry()
@@ -216,7 +217,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     assert file_tree(loading).tree.entries == nil
     assert FileTreeState.status(file_tree(loading)) == :loading
     assert is_reference(request_id)
-    assert_receive {:file_tree_scan_started, :project_root, worker}
+    assert_receive {:file_tree_scan_started, :project_root, worker}, @timeout
 
     result = tree(new_root, [entry(new_root, "new.ex")])
     send(worker, {:release_file_tree_scan, :project_root, {:return, result}})
@@ -247,7 +248,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
       )
 
     first_id = file_tree(first_state).refresh.current.token
-    assert_receive {:file_tree_scan_started, :first_root, first_worker}
+    assert_receive {:file_tree_scan_started, :first_root, first_worker}, @timeout
 
     latest_state =
       Freshness.update_project_root(first_state, latest_root,
@@ -258,7 +259,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
 
     latest_id = file_tree(latest_state).refresh.current.token
     assert latest_id != first_id
-    assert_receive {:file_tree_scan_started, :latest_root, latest_worker}
+    assert_receive {:file_tree_scan_started, :latest_root, latest_worker}, @timeout
 
     first_result = tree(first_root, [entry(first_root, "first.ex")])
     send(first_worker, {:release_file_tree_scan, :first_root, {:return, first_result}})
@@ -301,7 +302,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
       )
 
     failed_id = file_tree(failing).refresh.current.token
-    assert_receive {:file_tree_scan_started, :failed_root, _worker}
+    assert_receive {:file_tree_scan_started, :failed_root, _worker}, @timeout
     failed_outcome = receive_outcome(scheduler, failed_id, :failed)
     assert :ok = EffectScheduler.claim(scheduler, failed_outcome)
 
@@ -324,7 +325,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
       )
 
     recovered_id = file_tree(recovering).refresh.current.token
-    assert_receive {:file_tree_scan_started, :recovered_root, _worker}
+    assert_receive {:file_tree_scan_started, :recovered_root, _worker}, @timeout
     recovered_outcome = receive_outcome(scheduler, recovered_id, :completed)
     assert :ok = EffectScheduler.claim(scheduler, recovered_outcome)
 

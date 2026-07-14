@@ -3,9 +3,8 @@ defmodule MingaEditor.Shell.RuntimeTest do
 
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Entry
+  alias MingaEditor.Shell.Identity
   alias MingaEditor.Shell.Runtime
-  alias MingaEditor.State.Tab
-  alias MingaEditor.State.TabBar
   alias MingaEditor.Test.FakeShell
   alias MingaEditor.Test.FakeShellAlt
   alias MingaEditor.Viewport
@@ -40,12 +39,12 @@ defmodule MingaEditor.Shell.RuntimeTest do
       |> Runtime.activate(alternate, %{marker: :alternate})
 
     assert Runtime.state(runtime) == %{marker: :alternate}
-    assert Runtime.stash(runtime).fake.state == %{marker: :fake}
+    assert stashed(runtime, fake).state == %{marker: :fake}
 
     restored = Runtime.activate(runtime, fake, %{marker: :new_default})
     assert Runtime.state(restored) == %{marker: :fake}
-    refute Map.has_key?(Runtime.stash(restored), :fake)
-    assert Runtime.stash(restored).alternate.state == %{marker: :alternate}
+    refute stashed_id?(restored, :fake)
+    assert stashed(restored, alternate).state == %{marker: :alternate}
   end
 
   test "reused ids with stale module, source, or generation never restore old state" do
@@ -64,7 +63,7 @@ defmodule MingaEditor.Shell.RuntimeTest do
         |> Runtime.activate(replacement, %{marker: :fresh})
 
       assert Runtime.state(runtime) == %{marker: :fresh}
-      refute Map.has_key?(Runtime.stash(runtime), :fake)
+      refute stashed_id?(runtime, :fake)
     end
   end
 
@@ -97,8 +96,8 @@ defmodule MingaEditor.Shell.RuntimeTest do
     fallback = Runtime.fallback_from_removed(runtime, default, %{marker: :new_default})
     assert Runtime.entry(fallback) == default
     assert Runtime.state(fallback) == %{marker: :default}
-    refute Map.has_key?(Runtime.stash(fallback), :traditional)
-    refute Map.has_key?(Runtime.stash(fallback), :fake)
+    refute stashed_id?(fallback, :traditional)
+    refute stashed_id?(fallback, :fake)
   end
 
   test "active events route through the active entry contract" do
@@ -136,7 +135,7 @@ defmodule MingaEditor.Shell.RuntimeTest do
 
     assert Runtime.entry(updated) == alternate
     assert Runtime.state(updated) == %{events: []}
-    assert Runtime.stash(updated).fake.state.events == [:background]
+    assert stashed(updated, fake).state.events == [:background]
     assert [{%Entry{module: FakeShell}, _old_state, _new_state}] = changes
 
     {unchanged, @workspace, []} =
@@ -159,30 +158,33 @@ defmodule MingaEditor.Shell.RuntimeTest do
     stashed = Runtime.activate(active, alternate, %{marker: :alternate})
     stashed = Runtime.accept_persisted_state(stashed, fake, %{marker: :persisted_stash})
     assert Runtime.state(stashed) == %{marker: :alternate}
-    assert Runtime.stash(stashed).fake.state == %{marker: :persisted_stash}
+    assert stashed(stashed, fake).state == %{marker: :persisted_stash}
   end
 
-  test "legacy shells without an ownership callback retain restart ownership" do
+  test "extension ownership uses its contract without Traditional state fields" do
     session = self()
-    legacy = entry(:legacy, FakeShellAlt, 1)
+    extension = entry(:extension, FakeShellAlt, 1)
+    shell_state = %{owned_sessions: [session], extension_only: :state}
+    runtime = Runtime.new(extension, shell_state)
 
-    tab_bar =
-      1
-      |> Tab.new_agent("Agent")
-      |> Tab.set_session(session)
-      |> TabBar.new()
+    assert Runtime.owns_agent_session?(runtime, [extension], session)
 
-    for shell_state <- [
-          %{session: session},
-          %{cards: %{one: %{session: session}}},
-          %{tab_bar: tab_bar}
-        ] do
-      runtime = Runtime.new(legacy, shell_state)
-      assert Runtime.owns_agent_session?(runtime, [legacy], session)
+    stashed_runtime = Runtime.activate(runtime, entry(:active, FakeShell, 2), %{})
+    assert Runtime.owns_agent_session?(stashed_runtime, [extension], session)
+    refute Runtime.owns_agent_session?(stashed_runtime, [extension], spawn(fn -> :ok end))
+  end
 
-      stashed = Runtime.activate(runtime, entry(:active, FakeShell, 2), %{})
-      assert Runtime.owns_agent_session?(stashed, [legacy], session)
-    end
+  test "session extraction and installation use an extension shell's state shape" do
+    extension = entry(:extension, FakeShellAlt, 1)
+    runtime = Runtime.new(extension, %{extension_only: :state})
+
+    assert Runtime.active_session(runtime) == nil
+
+    installed = Runtime.set_tab_session(runtime, :extension_slot, self())
+
+    assert Runtime.active_session(installed) == self()
+    assert Runtime.state(installed) == %{extension_only: :state, session_slot: self()}
+    assert Runtime.owns_agent_session?(installed, [extension], self())
   end
 
   test "rejected stashed callbacks leave runtime state unchanged" do
@@ -196,7 +198,7 @@ defmodule MingaEditor.Shell.RuntimeTest do
     assert {^runtime, false, []} =
              Runtime.route_stashed_session_down(runtime, [stashed_entry], self(), :foreign)
 
-    refute Map.has_key?(Runtime.stash(runtime).fake.state, :foreign_mutation)
+    refute Map.has_key?(stashed(runtime, stashed_entry).state, :foreign_mutation)
   end
 
   test "active and stashed session lifecycle routes through exact entry contracts" do
@@ -227,7 +229,7 @@ defmodule MingaEditor.Shell.RuntimeTest do
              Runtime.route_session_restarted(runtime, [fake], old_pid, new_pid, :restart)
 
     assert Runtime.state(restarted).session == new_pid
-    assert Runtime.stash(restarted).fake.state.session == new_pid
+    assert stashed(restarted, fake).state.session == new_pid
     assert [_, _] = changes
 
     stashed_runtime =
@@ -238,12 +240,24 @@ defmodule MingaEditor.Shell.RuntimeTest do
     assert {stashed_down, true, [_change]} =
              Runtime.route_stashed_session_down(stashed_runtime, [fake], old_pid, :boom)
 
-    assert Runtime.stash(stashed_down).fake.state.session_down?
+    assert stashed(stashed_down, fake).state.session_down?
 
     assert {disconnected, true, [_change]} =
              Runtime.route_stashed_remote_session_disconnected(stashed_runtime, [fake], old_pid)
 
-    assert Runtime.stash(disconnected).fake.state.remote_disconnected?
+    assert stashed(disconnected, fake).state.remote_disconnected?
+  end
+
+  @spec stashed(Runtime.t(), Entry.t()) :: MingaEditor.Shell.StateStash.t()
+  defp stashed(%Runtime{} = runtime, %Entry{} = entry) do
+    Map.fetch!(Runtime.stash(runtime), Identity.new(entry))
+  end
+
+  @spec stashed_id?(Runtime.t(), atom()) :: boolean()
+  defp stashed_id?(%Runtime{} = runtime, id) do
+    Enum.any?(Runtime.stash(runtime), fn {%Identity{id: stashed_id}, _state} ->
+      stashed_id == id
+    end)
   end
 
   defp entry(id, module, generation, source \\ {:extension, :runtime_test}) do
