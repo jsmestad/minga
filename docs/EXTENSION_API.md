@@ -59,7 +59,7 @@ end
 
 The `option` macro follows the same pattern as Ecto's `field`: you declare it at the module level, and `use Minga.Extension` generates a `__option_schema__/0` function from the accumulated declarations. You never write the introspection function yourself.
 
-**Lifecycle:** The user declares the extension in `config.exs`. Minga compiles it, introspects its manifest, validates config options against the schema, calls `init/1`, then starts `child_spec/1` under `Extension.Supervisor`. On config reload (`SPC h r`), all extensions stop and re-load from scratch.
+**Lifecycle:** The user declares the extension in `config.exs`. Minga compiles it, introspects its manifest, validates config options against the schema, calls `init/1`, then starts `child_spec/1` under `Extension.Supervisor`. Runtime lifecycle and code activation are separate: Minga can stop, disable, lazily start, or restart an extension in the current session, but changed extension code activates only after Minga starts a fresh BEAM OS process. See [ADR-0003](adr/0003-extension-code-updates-require-a-new-vm-generation.md) for the accepted contract and migration scope.
 
 `init/1` is setup-only. It may register runtime-dynamic source-owned contributions and return `{:ok, state}` to report success, but the default child process does not receive that returned state. The default child stores the validated config keyword list so existing extensions keep working. If your extension has runtime state, put that state in your own GenServer or supervision tree and return it from your custom `child_spec/1`.
 
@@ -78,7 +78,9 @@ The lifecycle contract is intentionally boring:
 
 Stop, failed start, and reload all run source-owned cleanup. Cleanup families are aggregated: a failure in one family is logged and returned, but later cleanup families still run. This prevents a bad command cleanup from leaving stale keymaps, themes, languages, tool recipes, or modeline segments behind.
 
-Reload is `stop -> cleanup -> load -> manifest -> options -> init -> child start -> DSL registration`. If stop cleanup reports an error, reload reports the error instead of pretending the extension restarted cleanly.
+Runtime disable closes new source-owned work, removes dispatch-visible contributions, cancels or settles source-owned effects, stops the runtime subtree, runs source cleanup, and removes Editor-owned presentation state. Loaded modules remain resident. A later start in the same session may use only the exact artifact admitted for that extension in the current VM generation; installing, updating, or editing extension code reports that a Minga restart is required.
+
+The #2925 migration is replacing the current same-VM stop, purge, compile, and restart path with this contract. Until that migration converges, some reload and update commands still perform the older behavior described by their command output.
 
 ### Load Policies
 
@@ -213,7 +215,7 @@ Missing state means inactive. Layout, input routing, render, GUI emit, and comma
 
 Feature state is not daemon-global runtime state. If your extension needs a long-lived process, cache, worker queue, connection, or subscription, keep that in your extension's own GenServer or supervision tree via `child_spec/1`. Use feature state only for UI state that belongs to a workspace or tab.
 
-Reload and cleanup are source-owned. When an extension stops, fails, or reloads, Minga removes only feature state owned by `{:extension, extension_name}` from the live workspace and saved workspace snapshots. State owned by other extensions, config, or built-in features remains intact. Config reload runs inside the editor command path, so it first cleans `:config` and all extension-owned feature state before loading replacement config and extensions.
+Disable and cleanup are source-owned. When an extension stops, fails, or is disabled, Minga removes only feature state owned by `{:extension, extension_name}` from the live workspace and saved workspace snapshots. State owned by other extensions, config, or built-in features remains intact. Config reload removes config-owned presentation when replacing config declarations; extension presentation follows the owning extension lifecycle rather than a competing reload path.
 
 ### Sidebar contributions
 
@@ -625,7 +627,7 @@ Annotations are line-anchored: they automatically shift when lines are inserted 
 
 ## Language Packs
 
-Language support is owned by language packs. A pack is a normal extension module that lists language definition modules and registers their `%Minga.Language{}` structs with a source tag. That source tag is what makes reload safe: unloading the pack removes the whole language record, so the language name, file extensions, exact filenames, shebang mappings, devicon, grammar metadata, formatter, and LSP defaults disappear together.
+Language support is owned by language packs. A pack is a normal extension module that lists language definition modules and registers their `%Minga.Language{}` structs with a source tag. That source tag is what makes disable safe: unloading the pack removes the whole language record, so the language name, file extensions, exact filenames, shebang mappings, devicon, grammar metadata, formatter, and LSP defaults disappear together.
 
 ```elixir
 defmodule MyLanguages do
