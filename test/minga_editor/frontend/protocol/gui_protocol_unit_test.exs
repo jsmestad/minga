@@ -406,6 +406,26 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
     end
   end
 
+  describe "decode_gui_action for native app wait requests" do
+    test "decodes target and result paths" do
+      path = "/tmp/project/COMMIT_EDITMSG"
+      result_path = "/tmp/minga-wait/request.abc/result"
+
+      payload =
+        <<byte_size(path)::16, path::binary, byte_size(result_path)::16, result_path::binary>>
+
+      opcode = Minga.Protocol.Opcodes.gui_action_open_file_wait()
+
+      assert {:ok, {:open_file_wait, ^path, ^result_path}} =
+               ProtocolGUI.decode_gui_action(opcode, payload)
+    end
+
+    test "rejects malformed target or result lengths" do
+      opcode = Minga.Protocol.Opcodes.gui_action_open_file_wait()
+      assert :error == ProtocolGUI.decode_gui_action(opcode, <<20::16, "short">>)
+    end
+  end
+
   describe "decode_gui_action for power and thermal state" do
     test "decodes low power and thermal tiers" do
       assert {:ok, {:power_thermal_state, false, :nominal}} ==

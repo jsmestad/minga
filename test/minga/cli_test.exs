@@ -214,6 +214,14 @@ defmodule Minga.CLITest do
       assert path == Path.expand("debug.log")
     end
 
+    test "debug log flags preserve a following file target" do
+      assert {:open, "one.ex", %{debug_log: "/tmp/minga.log"}} =
+               CLI.parse_args(["--debug-log", "/tmp/minga.log", "one.ex"])
+
+      assert {:open, "two.ex", %{debug_log: "/tmp/minga-short.log"}} =
+               CLI.parse_args(["-D", "/tmp/minga-short.log", "two.ex"])
+    end
+
     test "--debug-log without a following argument returns error" do
       assert {:error, message} = CLI.parse_args(["--debug-log"])
       assert message =~ "--debug-log requires a path argument"

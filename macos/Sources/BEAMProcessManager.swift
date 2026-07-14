@@ -17,6 +17,99 @@
 
 import Foundation
 
+/// A file-opening request delivered by macOS Launch Services.
+///
+/// Regular file URLs retain the normal Finder/Open With path. The private
+/// `minga://wait/...` URL is transport used by the bundled CLI shim so a
+/// terminal process can wait for BEAM-owned editor completion semantics.
+enum AppOpenRequest: Equatable {
+    case file(URL)
+    case wait(path: String, resultPath: String)
+
+    /// Parses a Launch Services URL into an app-open request.
+    static func parse(_ url: URL) -> AppOpenRequest? {
+        if url.isFileURL {
+            return .file(url.standardizedFileURL)
+        }
+
+        guard url.scheme == "minga", url.host == "wait" else { return nil }
+
+        let components = url.pathComponents.filter { $0 != "/" }
+        guard components.count == 2,
+              let resultPath = decodeBase64URL(components[0]),
+              let path = decodeBase64URL(components[1]),
+              !resultPath.isEmpty,
+              !path.isEmpty
+        else {
+            return nil
+        }
+
+        let standardizedResultPath = URL(fileURLWithPath: resultPath).standardizedFileURL.path
+        guard WaitResultFile.isAllowedResultPath(standardizedResultPath) else { return nil }
+
+        return .wait(
+            path: URL(fileURLWithPath: path).standardizedFileURL.path,
+            resultPath: standardizedResultPath
+        )
+    }
+
+    private static func decodeBase64URL(_ value: String) -> String? {
+        var base64 = value
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+
+        let padding = (4 - base64.count % 4) % 4
+        base64.append(String(repeating: "=", count: padding))
+
+        guard let data = Data(base64Encoded: base64) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+}
+
+/// Publishes an app-side failure only when the BEAM did not already complete a wait request.
+enum WaitResultFile {
+    static var allowedRootURL: URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("minga-wait", isDirectory: true)
+            .standardizedFileURL
+    }
+
+    static func isAllowedResultPath(_ resultPath: String) -> Bool {
+        let resultURL = URL(fileURLWithPath: resultPath).standardizedFileURL
+        let requestURL = resultURL.deletingLastPathComponent()
+        let requestName = requestURL.lastPathComponent
+
+        return resultURL.lastPathComponent == "result"
+            && requestName.hasPrefix("request.")
+            && requestName.count > "request.".count
+            && requestURL.deletingLastPathComponent().standardizedFileURL.path == allowedRootURL.path
+    }
+
+    /// Atomically creates a non-zero result without overwriting a BEAM-owned completion.
+    static func failIfPending(at resultPath: String, reason: String) -> Bool {
+        guard isAllowedResultPath(resultPath) else { return false }
+
+        let message = reason
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .prefix(500)
+        let contents = Data("1\t\(message)\n".utf8)
+        let resultURL = URL(fileURLWithPath: resultPath).standardizedFileURL
+        let tempURL = resultURL
+            .deletingLastPathComponent()
+            .appendingPathComponent(".result-tmp-\(UUID().uuidString)")
+
+        do {
+            try contents.write(to: tempURL, options: .withoutOverwriting)
+            defer { try? FileManager.default.removeItem(at: tempURL) }
+            try FileManager.default.linkItem(at: tempURL, to: resultURL)
+            return true
+        } catch {
+            return false
+        }
+    }
+}
+
 @MainActor
 final class BEAMProcessManager {
     /// File handle for reading protocol messages from the BEAM (BEAM's stdout).
@@ -33,6 +126,9 @@ final class BEAMProcessManager {
 
     /// Called when the BEAM exits normally (exit code 0).
     var onNormalExit: (@MainActor () -> Void)?
+
+    /// Called on every BEAM exit so app-local transports can fail pending requests.
+    var onTermination: (@MainActor (_ status: Int32) -> Void)?
 
     /// Called each time the BEAM process starts (initial or restart).
     /// Provides the new read/write handles for protocol communication.
@@ -89,22 +185,32 @@ final class BEAMProcessManager {
         beamExecutableURL() != nil
     }
 
-    /// Builds the BEAM argv from the macOS app argv, forwarding only supported Minga flags.
+    /// Builds the BEAM argv from the macOS app argv.
+    ///
+    /// Only flags understood by `Minga.CLI` are forwarded, while positional
+    /// targets are preserved in their original order. The BEAM remains the
+    /// authority for interpreting those arguments (including its existing
+    /// last-positional-wins behavior).
     static func forwardedLaunchArguments(from appArguments: [String]) -> [String] {
         var beamArgs = ["start"]
-        let mingaFlags: Set<String> = ["--editor", "--no-context", "--config", "--safe", "-Q"]
-        var skipNext = false
+        let valueFlags: Set<String> = ["--config", "--debug-log", "-D"]
+        let booleanFlags: Set<String> = [
+            "--editor", "--no-context", "--minimal", "--safe", "-Q"
+        ]
+        var expectsValue = false
 
         for arg in appArguments.dropFirst() {
-            if skipNext {
+            if expectsValue {
                 beamArgs.append(arg)
-                skipNext = false
+                expectsValue = false
                 continue
             }
 
-            if mingaFlags.contains(arg) {
+            if valueFlags.contains(arg) {
                 beamArgs.append(arg)
-                if arg == "--config" { skipNext = true }
+                expectsValue = true
+            } else if booleanFlags.contains(arg) || !arg.hasPrefix("-") {
+                beamArgs.append(arg)
             }
         }
 
@@ -332,6 +438,7 @@ final class BEAMProcessManager {
         self.process = nil
         self.readHandle = nil
         self.writeHandle = nil
+        onTermination?(status)
 
         // Prune old timestamps outside the restart window.
         let now = Date()
