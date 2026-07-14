@@ -91,7 +91,7 @@ defmodule MingaEditor.Commands.Workspace do
             state =
               then(state, fn root ->
                 shell_state =
-                  MingaEditor.Shell.Traditional.State.set_tab_bar(
+                  MingaEditor.Shell.Traditional.State.install_tab_bar(
                     MingaEditor.Shell.Runtime.state(root.shell_runtime),
                     MingaEditor.State.TabBar.update_workspace(tb, workspace_id, fn _ ->
                       updated
@@ -161,7 +161,7 @@ defmodule MingaEditor.Commands.Workspace do
               state =
                 then(state, fn root ->
                   shell_state =
-                    MingaEditor.Shell.Traditional.State.set_tab_bar(
+                    MingaEditor.Shell.Traditional.State.install_tab_bar(
                       MingaEditor.Shell.Runtime.state(root.shell_runtime),
                       MingaEditor.State.TabBar.update_workspace(tb, workspace_id, fn _ ->
                         updated
@@ -407,7 +407,7 @@ defmodule MingaEditor.Commands.Workspace do
   defp remove_workspace_and_sync_agent_ui(state, tb, workspace_id) do
     then(state, fn root ->
       shell_state =
-        MingaEditor.Shell.Traditional.State.set_tab_bar(
+        MingaEditor.Shell.Traditional.State.install_tab_bar(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
           MingaEditor.State.TabBar.remove_workspace(tb, workspace_id)
         )
@@ -479,7 +479,7 @@ defmodule MingaEditor.Commands.Workspace do
 
     then(state, fn root ->
       shell_state =
-        MingaEditor.Shell.Traditional.State.set_tab_bar(
+        MingaEditor.Shell.Traditional.State.install_tab_bar(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
           MingaEditor.State.TabBar.update_workspace(tb, workspace.id, fn _ ->
             updated_workspace
@@ -546,7 +546,7 @@ defmodule MingaEditor.Commands.Workspace do
   defp put_workspace_review_result({:ok, updated}, state, tb, workspace_id) do
     then(state, fn root ->
       shell_state =
-        MingaEditor.Shell.Traditional.State.set_tab_bar(
+        MingaEditor.Shell.Traditional.State.install_tab_bar(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
           MingaEditor.State.TabBar.update_workspace(tb, workspace_id, fn _ -> updated end)
         )

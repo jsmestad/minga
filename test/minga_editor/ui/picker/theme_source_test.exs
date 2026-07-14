@@ -87,10 +87,7 @@ defmodule MingaEditor.UI.Picker.ThemeSourceTest do
       state =
         base_state()
         |> EditorState.apply_theme(Theme.get!(:one_dark))
-        |> ModalWorkflow.open(
-          :picker,
-          PickerPayload.new(%PickerState{restore_theme: original})
-        )
+        |> ModalWorkflow.open({:picker, PickerPayload.new(%PickerState{restore_theme: original})})
 
       restored = ThemeSource.on_cancel(state)
       assert restored.appearance.theme.name == :doom_one
@@ -104,8 +101,7 @@ defmodule MingaEditor.UI.Picker.ThemeSourceTest do
       state =
         ModalWorkflow.open(
           state,
-          :picker,
-          PickerPayload.new(%PickerState{restore_theme: original})
+          {:picker, PickerPayload.new(%PickerState{restore_theme: original})}
         )
 
       restored = ThemeSource.on_cancel(state)

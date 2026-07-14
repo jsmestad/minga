@@ -13,7 +13,7 @@ defmodule MingaGitPorcelain.Shell.Traditional.GitStatusRenderer do
   alias Minga.Git.StatusEntry
   alias MingaEditor.DisplayList
   alias MingaEditor.Layout
-  alias MingaGitPorcelain.Shell.Traditional.GitStatus.TuiState
+  alias MingaEditor.GitStatus.TUIState, as: TuiState
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState

@@ -132,8 +132,7 @@ defmodule MingaEditor.FileWatcherHelpers do
     state =
       MingaEditor.Shell.Traditional.ModalWorkflow.open(
         state,
-        :conflict,
-        ConflictPayload.new(buf, path)
+        {:conflict, ConflictPayload.new(buf, path)}
       )
 
     MingaEditor.Shell.Traditional.NoticeWorkflow.publish(

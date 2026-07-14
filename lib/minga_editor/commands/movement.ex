@@ -651,7 +651,7 @@ defmodule MingaEditor.Commands.Movement do
 
       then(state, fn root ->
         shell_state =
-          MingaEditor.Shell.Traditional.State.set_bottom_panel(
+          MingaEditor.Shell.Traditional.State.install_bottom_panel(
             MingaEditor.Shell.Runtime.state(root.shell_runtime),
             panel
           )
@@ -719,7 +719,7 @@ defmodule MingaEditor.Commands.Movement do
     if panel.visible do
       then(state, fn root ->
         shell_state =
-          MingaEditor.Shell.Traditional.State.set_bottom_panel(
+          MingaEditor.Shell.Traditional.State.install_bottom_panel(
             MingaEditor.Shell.Runtime.state(root.shell_runtime),
             MingaEditor.BottomPanel.focus(panel)
           )

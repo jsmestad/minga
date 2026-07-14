@@ -399,7 +399,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
       layout: nil,
       shell: Traditional,
       shell_state:
-        TraditionalState.set_tab_bar(
+        TraditionalState.install_tab_bar(
           TraditionalState.replace_agent(%TraditionalState{}, %AgentState{}),
           tab_bar
         ),

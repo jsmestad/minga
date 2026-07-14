@@ -80,7 +80,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),
-          TraditionalState.set_tab_bar(
+          TraditionalState.install_tab_bar(
             TraditionalState.replace_agent(
               %MingaEditor.Shell.Traditional.State{},
               agent
@@ -119,7 +119,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
       state =
         then(state, fn root ->
           shell_state =
-            TraditionalState.set_tab_bar(
+            TraditionalState.install_tab_bar(
               MingaEditor.Shell.Runtime.state(root.shell_runtime),
               tb
             )
@@ -162,7 +162,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
 
       then(state, fn root ->
         shell_state =
-          TraditionalState.set_tab_bar(
+          TraditionalState.install_tab_bar(
             MingaEditor.Shell.Runtime.state(root.shell_runtime),
             tb
           )

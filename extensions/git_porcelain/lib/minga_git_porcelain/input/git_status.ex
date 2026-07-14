@@ -13,13 +13,14 @@ defmodule MingaGitPorcelain.Input.GitStatus do
 
   alias Minga.Buffer
   alias MingaEditor.Commands
+  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.State, as: EditorState
   alias Minga.Git
   alias Minga.Log
   alias MingaEditor.Input
   alias MingaEditor.Layout
-  alias MingaGitPorcelain.Shell.Traditional.GitStatus.TuiState
+  alias MingaEditor.GitStatus.TUIState, as: TuiState
   alias Minga.Keymap
   alias MingaEditor.PromptUI
   alias MingaGitPorcelain.UI.Prompt.GitCommit, as: CommitPrompt
@@ -40,7 +41,7 @@ defmodule MingaGitPorcelain.Input.GitStatus do
              :git_status,
              binding_state,
              key,
-             EditorState.keymap_context(state)
+             keymap_server: state.interaction.keymap_server
            ) do
         {:command, cmd} ->
           {:handled, execute_command(state, cmd)}
@@ -267,8 +268,12 @@ defmodule MingaGitPorcelain.Input.GitStatus do
     end)
     |> SidebarWorkflow.close_git_status()
     |> Layout.invalidate()
-    |> EditorState.invalidate_all_windows()
+    |> invalidate_all_windows()
   end
+
+  @spec invalidate_all_windows(EditorState.t()) :: EditorState.t()
+  defp invalidate_all_windows(%EditorState{} = state),
+    do: %{state | workspace: SessionState.invalidate_all_windows(state.workspace)}
 
   @spec open_diff_for_entry(EditorState.t(), String.t(), Git.StatusEntry.t()) :: EditorState.t()
   defp open_diff_for_entry(state, git_root, %Git.StatusEntry{} = entry) do

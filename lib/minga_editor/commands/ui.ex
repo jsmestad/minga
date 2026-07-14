@@ -84,7 +84,7 @@ defmodule MingaEditor.Commands.UI do
   defp toggle_bottom_panel(state) do
     then(state, fn root ->
       shell_state =
-        MingaEditor.Shell.Traditional.State.set_bottom_panel(
+        MingaEditor.Shell.Traditional.State.install_bottom_panel(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
           MingaEditor.BottomPanel.toggle(state.shell_runtime.state.bottom_panel)
         )
@@ -101,7 +101,7 @@ defmodule MingaEditor.Commands.UI do
   defp bottom_panel_next_tab(state) do
     then(state, fn root ->
       shell_state =
-        MingaEditor.Shell.Traditional.State.set_bottom_panel(
+        MingaEditor.Shell.Traditional.State.install_bottom_panel(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
           MingaEditor.BottomPanel.next_tab(state.shell_runtime.state.bottom_panel)
         )
@@ -118,7 +118,7 @@ defmodule MingaEditor.Commands.UI do
   defp bottom_panel_prev_tab(state) do
     then(state, fn root ->
       shell_state =
-        MingaEditor.Shell.Traditional.State.set_bottom_panel(
+        MingaEditor.Shell.Traditional.State.install_bottom_panel(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
           MingaEditor.BottomPanel.prev_tab(state.shell_runtime.state.bottom_panel)
         )

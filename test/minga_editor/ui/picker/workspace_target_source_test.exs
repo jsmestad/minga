@@ -124,7 +124,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
       state =
         then(state, fn root ->
           shell_state =
-            MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Traditional.State.install_tab_bar(
               MingaEditor.Shell.Runtime.state(root.shell_runtime),
               TabBar.update_workspace(
                 state.shell_runtime.state.tab_bar,
@@ -172,7 +172,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
       state =
         then(state, fn root ->
           shell_state =
-            MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Traditional.State.install_tab_bar(
               MingaEditor.Shell.Runtime.state(root.shell_runtime),
               TabBar.update_workspace(
                 state.shell_runtime.state.tab_bar,
@@ -611,7 +611,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
 
     then(state, fn root ->
       shell_state =
-        MingaEditor.Shell.Traditional.State.set_tab_bar(
+        MingaEditor.Shell.Traditional.State.install_tab_bar(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
           tb
         )
@@ -627,7 +627,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
   defp update_workspace(state, workspace_id, fun) do
     then(state, fn root ->
       shell_state =
-        MingaEditor.Shell.Traditional.State.set_tab_bar(
+        MingaEditor.Shell.Traditional.State.install_tab_bar(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
           TabBar.update_workspace(state.shell_runtime.state.tab_bar, workspace_id, fun)
         )

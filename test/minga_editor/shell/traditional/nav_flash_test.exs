@@ -14,6 +14,14 @@ defmodule MingaEditor.Shell.Traditional.NavFlashTest do
     assert %NavFlash{generation: 2, line: 9, step: 0, timer: nil} = second
   end
 
+  test "replacement rejects negative and legacy line values" do
+    assert_raise FunctionClauseError, fn -> invoke(NavFlash, :replace, [%NavFlash{}, -1]) end
+
+    assert_raise FunctionClauseError, fn ->
+      invoke(NavFlash, :replace, [%NavFlash{}, %{line: 1}])
+    end
+  end
+
   test "timer handles record only for the matching active generation" do
     flash = NavFlash.replace(%NavFlash{}, 10)
     timer = make_ref()
@@ -50,4 +58,8 @@ defmodule MingaEditor.Shell.Traditional.NavFlashTest do
     assert NavFlash.color_for_step(%NavFlash{step: 2, max_steps: 3}, 0xFF0000, 0x0000FF) ==
              0x0000FF
   end
+
+  # The indirection lets runtime boundary tests pass intentionally invalid typed values.
+  # credo:disable-for-next-line Credo.Check.Refactor.Apply
+  defp invoke(module, function, arguments), do: apply(module, function, arguments)
 end

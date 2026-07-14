@@ -66,7 +66,7 @@ defmodule MingaEditor.Input.BottomPanel do
   defp close_panel(state, panel) do
     then(state, fn root ->
       shell_state =
-        MingaEditor.Shell.Traditional.State.set_bottom_panel(
+        MingaEditor.Shell.Traditional.State.install_bottom_panel(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
           MingaEditor.BottomPanel.hide(panel)
         )
@@ -115,7 +115,7 @@ defmodule MingaEditor.Input.BottomPanel do
     state =
       then(state, fn root ->
         shell_state =
-          MingaEditor.Shell.Traditional.State.set_bottom_panel(
+          MingaEditor.Shell.Traditional.State.install_bottom_panel(
             MingaEditor.Shell.Runtime.state(root.shell_runtime),
             panel
           )

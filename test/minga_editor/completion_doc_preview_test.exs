@@ -21,7 +21,7 @@ defmodule MingaEditor.CompletionDocPreviewTest do
     modal =
       case completion do
         nil -> :none
-        %Completion{} -> {:completion, CompletionPayload.new(:tab1, completion: completion)}
+        %Completion{} -> {:completion, CompletionPayload.new(1, completion: completion)}
       end
 
     %EditorState{

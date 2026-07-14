@@ -117,7 +117,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),
-          MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Traditional.State.install_tab_bar(
             MingaEditor.Shell.Traditional.State.replace_agent(
               %MingaEditor.Shell.Traditional.State{},
               agent
@@ -149,7 +149,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
     then(state, fn root ->
       shell_state =
-        MingaEditor.Shell.Traditional.State.set_tab_bar(
+        MingaEditor.Shell.Traditional.State.install_tab_bar(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
           tab_bar
         )
@@ -168,7 +168,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
     then(state, fn root ->
       shell_state =
-        MingaEditor.Shell.Traditional.State.set_tab_bar(
+        MingaEditor.Shell.Traditional.State.install_tab_bar(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
           tab_bar
         )
@@ -1059,7 +1059,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
         new_state
         |> then(fn root ->
           shell_state =
-            MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Traditional.State.install_tab_bar(
               MingaEditor.Shell.Runtime.state(root.shell_runtime),
               tab_bar
             )

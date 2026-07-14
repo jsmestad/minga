@@ -14,6 +14,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
   alias Minga.Git.StatusEntry
   alias Minga.Project.FileRef
   alias Minga.Project.FileTree
+  alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
   alias MingaEditor.Handlers.FileEventHandler
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
@@ -34,13 +35,16 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       state = base_state()
 
       state =
-        SidebarWorkflow.replace_git_status(state, %{
-          repo_state: :normal,
-          branch: "main",
-          ahead: 0,
-          behind: 0,
-          entries: []
-        })
+        SidebarWorkflow.replace_git_status(
+          state,
+          GitStatusPanel.new(%{
+            repo_state: :normal,
+            branch: "main",
+            ahead: 0,
+            behind: 0,
+            entries: []
+          })
+        )
 
       event =
         {:minga_event, :git_status_changed,
@@ -67,13 +71,15 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
     test "does not create tui state during generic panel refresh" do
       state =
         base_state()
-        |> SidebarWorkflow.replace_git_status(%{
-          repo_state: :normal,
-          branch: "main",
-          ahead: 0,
-          behind: 0,
-          entries: []
-        })
+        |> SidebarWorkflow.replace_git_status(
+          GitStatusPanel.new(%{
+            repo_state: :normal,
+            branch: "main",
+            ahead: 0,
+            behind: 0,
+            entries: []
+          })
+        )
 
       event =
         {:minga_event, :git_status_changed,
@@ -323,7 +329,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       state =
         then(state, fn root ->
           shell_state =
-            MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Traditional.State.install_tab_bar(
               MingaEditor.Shell.Runtime.state(root.shell_runtime),
               tab_bar
             )
@@ -426,7 +432,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       state =
         then(state, fn root ->
           shell_state =
-            MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Traditional.State.install_tab_bar(
               MingaEditor.Shell.Runtime.state(root.shell_runtime),
               tab_bar
             )

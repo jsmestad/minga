@@ -15,7 +15,7 @@ defmodule MingaEditor.Input.CompletionMouseTest do
   defp completion_state(items, opts \\ []) do
     mode = Keyword.get(opts, :mode, :insert)
     completion = Completion.new(items, max_visible: 10)
-    payload = CompletionPayload.new(:tab1, completion: completion)
+    payload = CompletionPayload.new(1, completion: completion)
 
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: nil},

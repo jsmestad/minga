@@ -299,9 +299,9 @@ defmodule MingaEditor.State do
           | shell_runtime:
               ShellRuntime.install_traditional_state(
                 state.shell_runtime,
-                ShellState.set_tab_bar(
-                  ShellRuntime.state(state.shell_runtime),
-                  TabBar.drop_feature_state_source(tb, source)
+                ShellState.install_tab_bar(
+                  MingaEditor.Shell.Runtime.state(state.shell_runtime),
+                  MingaEditor.State.TabBar.drop_feature_state_source(tb, source)
                 )
               )
         }
@@ -324,9 +324,9 @@ defmodule MingaEditor.State do
           | shell_runtime:
               ShellRuntime.install_traditional_state(
                 state.shell_runtime,
-                ShellState.set_tab_bar(
-                  ShellRuntime.state(state.shell_runtime),
-                  TabBar.drop_extension_feature_state_sources(tb)
+                ShellState.install_tab_bar(
+                  MingaEditor.Shell.Runtime.state(state.shell_runtime),
+                  MingaEditor.State.TabBar.drop_extension_feature_state_sources(tb)
                 )
               )
         }
@@ -479,9 +479,9 @@ defmodule MingaEditor.State do
           | shell_runtime:
               ShellRuntime.install_traditional_state(
                 state.shell_runtime,
-                ShellState.set_tab_bar(
-                  ShellRuntime.state(state.shell_runtime),
-                  TabBar.scrub_dead_buffer(tb, pid)
+                ShellState.install_tab_bar(
+                  MingaEditor.Shell.Runtime.state(state.shell_runtime),
+                  MingaEditor.State.TabBar.scrub_dead_buffer(tb, pid)
                 )
               )
         }
@@ -643,8 +643,8 @@ defmodule MingaEditor.State do
           | shell_runtime:
               ShellRuntime.install_traditional_state(
                 state.shell_runtime,
-                ShellState.set_tab_bar(
-                  ShellRuntime.state(state.shell_runtime),
+                ShellState.install_tab_bar(
+                  MingaEditor.Shell.Runtime.state(state.shell_runtime),
                   rebind_tabs_to_file_ref(tab_bar, tabs, file_ref)
                 )
               )
@@ -822,9 +822,9 @@ defmodule MingaEditor.State do
       | shell_runtime:
           ShellRuntime.install_traditional_state(
             state.shell_runtime,
-            ShellState.set_tab_bar(
-              ShellRuntime.state(state.shell_runtime),
-              TabBar.remove_file_tabs(tb)
+            ShellState.install_tab_bar(
+              MingaEditor.Shell.Runtime.state(state.shell_runtime),
+              MingaEditor.State.TabBar.remove_file_tabs(tb)
             )
           )
     }
@@ -886,9 +886,9 @@ defmodule MingaEditor.State do
                 | shell_runtime:
                     ShellRuntime.install_traditional_state(
                       state.shell_runtime,
-                      ShellState.set_tab_bar(
-                        ShellRuntime.state(state.shell_runtime),
-                        TabBar.update_context(tb, id, synthesized)
+                      ShellState.install_tab_bar(
+                        MingaEditor.Shell.Runtime.state(state.shell_runtime),
+                        MingaEditor.State.TabBar.update_context(tb, id, synthesized)
                       )
                     )
               }
@@ -1121,7 +1121,8 @@ defmodule MingaEditor.State do
 
   @spec install_tab_bar(t(), TabBar.t()) :: t()
   defp install_tab_bar(%__MODULE__{} = state, %TabBar{} = tab_bar) do
-    shell_state = ShellState.set_tab_bar(ShellRuntime.state(state.shell_runtime), tab_bar)
+    shell_state =
+      ShellState.install_tab_bar(MingaEditor.Shell.Runtime.state(state.shell_runtime), tab_bar)
 
     %{
       state
@@ -1251,7 +1252,10 @@ defmodule MingaEditor.State do
           | shell_runtime:
               ShellRuntime.install_traditional_state(
                 state.shell_runtime,
-                ShellState.set_tab_bar(ShellRuntime.state(state.shell_runtime), tb)
+                ShellState.install_tab_bar(
+                  MingaEditor.Shell.Runtime.state(state.shell_runtime),
+                  tb
+                )
               )
         }
 

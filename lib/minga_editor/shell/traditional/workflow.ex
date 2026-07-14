@@ -50,7 +50,7 @@ defmodule MingaEditor.Shell.Traditional.Workflow do
                 tab_bar
             end
 
-          TraditionalState.set_tab_bar(shell_state, tab_bar)
+          TraditionalState.install_tab_bar(shell_state, tab_bar)
 
         _ ->
           shell_state

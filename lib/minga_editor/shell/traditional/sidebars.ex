@@ -8,9 +8,10 @@ defmodule MingaEditor.Shell.Traditional.Sidebars do
   """
 
   alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
+  alias MingaEditor.GitStatus.TUIState
   alias MingaEditor.Shell.Traditional.Observatory
 
-  @type git_status_tui_state :: struct()
+  @type git_status_tui_state :: TUIState.t()
   @type t :: %__MODULE__{
           active_id: String.t() | nil,
           git_status_panel: GitStatusPanel.t() | nil,
@@ -41,19 +42,19 @@ defmodule MingaEditor.Shell.Traditional.Sidebars do
   def git_status_tui_state(%__MODULE__{git_status_tui_state: state}), do: state
 
   @doc "Replaces the Git status panel while retaining its TUI view state."
-  @spec replace_git_status(t(), GitStatusPanel.t() | map() | nil) :: t()
+  @spec replace_git_status(t(), GitStatusPanel.t() | nil) :: t()
   def replace_git_status(%__MODULE__{} = sidebars, nil),
     do: %{sidebars | git_status_panel: nil}
 
   def replace_git_status(%__MODULE__{} = sidebars, %GitStatusPanel{} = panel),
     do: %{sidebars | git_status_panel: panel}
 
-  def replace_git_status(%__MODULE__{} = sidebars, %{} = panel),
-    do: %{sidebars | git_status_panel: GitStatusPanel.new(panel)}
-
   @doc "Replaces the TUI-specific Git status view state."
   @spec replace_git_status_tui(t(), git_status_tui_state() | nil) :: t()
-  def replace_git_status_tui(%__MODULE__{} = sidebars, state),
+  def replace_git_status_tui(%__MODULE__{} = sidebars, nil),
+    do: %{sidebars | git_status_tui_state: nil}
+
+  def replace_git_status_tui(%__MODULE__{} = sidebars, %TUIState{} = state),
     do: %{sidebars | git_status_tui_state: state}
 
   @doc "Closes Git status and clears both shared and TUI-specific state."

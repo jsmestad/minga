@@ -82,7 +82,7 @@ defmodule MingaGitPorcelain.PickerBranchDeleteShortcutTest do
       frontend: %MingaEditor.State.Frontend{port_manager: nil},
       workspace: %SessionState{viewport: Viewport.new(24, 80), editing: VimState.new()}
     }
-    |> ModalWorkflow.transition(:picker, PickerPayload.new(picker_state))
+    |> ModalWorkflow.transition({:picker, PickerPayload.new(picker_state)})
   end
 
   defp reset_global_project! do

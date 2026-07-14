@@ -42,7 +42,16 @@ defmodule MingaEditor.Shell.Traditional.YankFlash do
 
   @doc "Replaces the active yank flash and advances its monotonic generation."
   @spec replace(t(), pid(), position(), position(), range_type()) :: t()
-  def replace(%__MODULE__{} = flash, buf, start_pos, end_pos, range_type) do
+  def replace(
+        %__MODULE__{} = flash,
+        buf,
+        {start_line, start_col} = start_pos,
+        {end_line, end_col} = end_pos,
+        range_type
+      )
+      when is_pid(buf) and is_integer(start_line) and start_line >= 0 and is_integer(start_col) and
+             start_col >= 0 and is_integer(end_line) and end_line >= 0 and is_integer(end_col) and
+             end_col >= 0 and range_type in [:charwise, :linewise] do
     %__MODULE__{
       generation: flash.generation + 1,
       buf: buf,

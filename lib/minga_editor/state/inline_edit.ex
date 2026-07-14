@@ -135,9 +135,9 @@ defmodule MingaEditor.State.InlineEdit do
       when is_binary(delta),
       do: %{edit | proposed_rewrite: proposed <> delta, proposal_source: :stream}
 
-  @doc "Replaces the proposed replacement text from the constrained rewrite tool."
-  @spec set_proposal(t(), String.t()) :: t()
-  def set_proposal(%__MODULE__{} = edit, proposed) when is_binary(proposed),
+  @doc "Installs proposed replacement text from the constrained rewrite tool."
+  @spec install_proposal(t(), String.t()) :: t()
+  def install_proposal(%__MODULE__{} = edit, proposed) when is_binary(proposed),
     do: %{edit | proposed_rewrite: proposed, proposal_source: :tool}
 
   @doc "Marks the edit as proposed."

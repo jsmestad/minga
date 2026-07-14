@@ -15,6 +15,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.FileTree.Feature, as: FileTreeFeature
   alias MingaEditor.Frontend.Capabilities
+  alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
   alias MingaEditor.Handlers.GuiActionHandler
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.Shell.Entry
@@ -99,7 +100,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
       base_state(table)
       |> then(fn root ->
         shell_state =
-          MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Traditional.State.install_tab_bar(
             MingaEditor.Shell.Runtime.state(root.shell_runtime),
             tab_bar
           )
@@ -146,7 +147,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
       base_state(table)
       |> then(fn root ->
         shell_state =
-          MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Traditional.State.install_tab_bar(
             MingaEditor.Shell.Runtime.state(root.shell_runtime),
             tab_bar
           )
@@ -177,7 +178,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     assert file_tree_active.workspace.keymap_scope == :file_tree
     assert SidebarWorkflow.active_id(file_tree_active) == "file_tree"
 
-    git_state = SidebarWorkflow.replace_git_status(state, %{entries: []})
+    git_state = SidebarWorkflow.replace_git_status(state, GitStatusPanel.new(%{entries: []}))
 
     git_active =
       GuiActionHandler.dispatch(

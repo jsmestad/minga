@@ -558,7 +558,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
     state =
       then(state, fn root ->
         shell_state =
-          MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Traditional.State.install_tab_bar(
             MingaEditor.Shell.Runtime.state(root.shell_runtime),
             tb
           )
@@ -635,7 +635,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   @spec install_tab_bar(EditorState.t(), TabBar.t()) :: EditorState.t()
   defp install_tab_bar(%EditorState{} = state, %TabBar{} = tab_bar) do
     shell_state =
-      MingaEditor.Shell.Traditional.State.set_tab_bar(
+      MingaEditor.Shell.Traditional.State.install_tab_bar(
         MingaEditor.Shell.Runtime.state(state.shell_runtime),
         tab_bar
       )
@@ -655,7 +655,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
        ) do
     then(state, fn root ->
       shell_state =
-        MingaEditor.Shell.Traditional.State.set_tab_bar(
+        MingaEditor.Shell.Traditional.State.install_tab_bar(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
           MingaEditor.State.TabBar.set_remote_connection_status(tb, server_name, status)
         )
@@ -687,7 +687,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
        ) do
     then(state, fn root ->
       shell_state =
-        MingaEditor.Shell.Traditional.State.set_tab_bar(
+        MingaEditor.Shell.Traditional.State.install_tab_bar(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
           set_workspace_remote_state(tb, workspace, workspace.session, status)
         )
@@ -714,7 +714,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
        ) do
     then(state, fn root ->
       shell_state =
-        MingaEditor.Shell.Traditional.State.set_tab_bar(
+        MingaEditor.Shell.Traditional.State.install_tab_bar(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
           set_workspace_remote_state(tb, workspace, nil, status)
         )

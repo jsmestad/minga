@@ -221,7 +221,7 @@ defmodule MingaEditor.Startup do
     state =
       then(state, fn root ->
         shell_state =
-          MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Traditional.State.install_tab_bar(
             MingaEditor.Shell.Runtime.state(root.shell_runtime),
             initial_tab_bar(active_buf, keymap_scope, project_root)
           )
@@ -251,7 +251,7 @@ defmodule MingaEditor.Startup do
 
     then(state, fn root ->
       shell_state =
-        MingaEditor.Shell.Traditional.State.set_tab_bar(
+        MingaEditor.Shell.Traditional.State.install_tab_bar(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
           tb
         )
@@ -662,7 +662,7 @@ defmodule MingaEditor.Startup do
 
   @spec init_shell_state(module(), keyword()) :: term()
   defp init_shell_state(MingaEditor.Shell.Traditional, opts) do
-    MingaEditor.Shell.Traditional.State.set_suppress_tool_prompts(
+    MingaEditor.Shell.Traditional.State.install_tool_prompt_suppression(
       %MingaEditor.Shell.Traditional.State{},
       Keyword.get(opts, :suppress_tool_prompts, false)
     )

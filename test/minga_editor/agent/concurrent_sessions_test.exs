@@ -40,7 +40,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       shell_runtime:
         Runtime.new(
           Registry.get(:traditional),
-          MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Traditional.State.install_tab_bar(
             MingaEditor.Shell.Traditional.State.replace_agent(
               %MingaEditor.Shell.Traditional.State{},
               %AgentState{}
@@ -132,7 +132,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       switched =
         then(state, fn root ->
           shell_state =
-            MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Traditional.State.install_tab_bar(
               MingaEditor.Shell.Runtime.state(root.shell_runtime),
               %{
                 state.shell_runtime.state.tab_bar

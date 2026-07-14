@@ -8,6 +8,7 @@ defmodule MingaEditor.Shell.Traditional.SidebarWorkflow do
 
   alias Minga.Log
   alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
+  alias MingaEditor.GitStatus.TUIState
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.Observatory
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
@@ -39,16 +40,20 @@ defmodule MingaEditor.Shell.Traditional.SidebarWorkflow do
 
   def git_status_panel(%EditorState{}), do: nil
 
-  @doc "Replaces Git status and synchronizes its registered surface."
-  @spec replace_git_status(state(), GitStatusPanel.t() | map() | nil) :: state()
-  def replace_git_status(%EditorState{} = state, panel) do
-    panel = if is_nil(panel), do: nil, else: GitStatusPanel.new(panel)
+  @doc "Replaces Git status with an exact panel value and synchronizes its registered surface."
+  @spec replace_git_status(state(), GitStatusPanel.t() | nil) :: state()
+  def replace_git_status(%EditorState{} = state, nil) do
+    sync_git_status_sidebar(state, nil)
+    update(state, &TraditionalState.replace_git_status_panel(&1, nil))
+  end
+
+  def replace_git_status(%EditorState{} = state, %GitStatusPanel{} = panel) do
     sync_git_status_sidebar(state, panel)
     update(state, &TraditionalState.replace_git_status_panel(&1, panel))
   end
 
   @doc "Returns the TUI-specific Git status presentation value."
-  @spec git_status_tui_state(state()) :: struct() | nil
+  @spec git_status_tui_state(state()) :: TUIState.t() | nil
   def git_status_tui_state(%EditorState{
         shell_runtime: %Runtime{state: %TraditionalState{} = shell_state}
       }),
@@ -57,8 +62,11 @@ defmodule MingaEditor.Shell.Traditional.SidebarWorkflow do
   def git_status_tui_state(%EditorState{}), do: nil
 
   @doc "Replaces the TUI-specific Git status presentation value."
-  @spec replace_git_status_tui(state(), struct() | nil) :: state()
-  def replace_git_status_tui(%EditorState{} = state, tui),
+  @spec replace_git_status_tui(state(), TUIState.t() | nil) :: state()
+  def replace_git_status_tui(%EditorState{} = state, nil),
+    do: update(state, &TraditionalState.replace_git_status_tui_state(&1, nil))
+
+  def replace_git_status_tui(%EditorState{} = state, %TUIState{} = tui),
     do: update(state, &TraditionalState.replace_git_status_tui_state(&1, tui))
 
   @doc "Closes Git status and synchronizes its registered surface."

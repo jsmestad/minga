@@ -41,7 +41,9 @@ defmodule MingaEditor.Shell.Traditional.ToolPrompts do
   def enqueue(%__MODULE__{} = prompts, tool_name) when is_atom(tool_name) do
     if decided?(prompts, tool_name),
       do: prompts,
-      else: %{prompts | queue: List.insert_at(prompts.queue, -1, tool_name)}
+      # Small human-facing prompt queues preserve order directly.
+      # credo:disable-for-next-line Credo.Check.Refactor.AppendSingleItem
+      else: %{prompts | queue: prompts.queue ++ [tool_name]}
   end
 
   @doc "Replaces prompt decisions and queue atomically."

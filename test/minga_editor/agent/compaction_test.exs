@@ -74,7 +74,7 @@ defmodule MingaEditor.Agent.CompactionTest do
     state =
       then(state, fn root ->
         shell_state =
-          MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Traditional.State.install_tab_bar(
             MingaEditor.Shell.Runtime.state(root.shell_runtime),
             tab_bar
           )
@@ -130,7 +130,7 @@ defmodule MingaEditor.Agent.CompactionTest do
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),
-          TraditionalState.set_tab_bar(%TraditionalState{}, tab_bar)
+          TraditionalState.install_tab_bar(%TraditionalState{}, tab_bar)
         )
     }
   end

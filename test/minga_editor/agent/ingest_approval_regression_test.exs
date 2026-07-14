@@ -178,7 +178,7 @@ defmodule MingaEditor.Agent.IngestApprovalRegressionTest do
           Runtime.default_entry(),
           %TraditionalState{}
           |> TraditionalState.replace_agent(agent)
-          |> TraditionalState.set_tab_bar(tb)
+          |> TraditionalState.install_tab_bar(tb)
         )
     }
   end

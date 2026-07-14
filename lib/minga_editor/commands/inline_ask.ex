@@ -110,7 +110,7 @@ defmodule MingaEditor.Commands.InlineAsk do
 
     then(state, fn root ->
       shell_state =
-        MingaEditor.Shell.Traditional.State.set_tab_bar(
+        MingaEditor.Shell.Traditional.State.install_tab_bar(
           MingaEditor.Shell.Runtime.state(root.shell_runtime),
           tb
         )
@@ -165,7 +165,7 @@ defmodule MingaEditor.Commands.InlineAsk do
   @spec install_tab_bar(state(), TabBar.t()) :: state()
   defp install_tab_bar(state, tab_bar) do
     shell_state =
-      MingaEditor.Shell.Traditional.State.set_tab_bar(
+      MingaEditor.Shell.Traditional.State.install_tab_bar(
         MingaEditor.Shell.Runtime.state(state.shell_runtime),
         tab_bar
       )

@@ -1210,8 +1210,7 @@ defmodule MingaEditor do
 
     state
     |> MingaEditor.Shell.Traditional.ModalWorkflow.transition(
-      :picker,
-      PickerPayload.put_picker_ui(payload, new_picker_state)
+      {:picker, PickerPayload.put_picker_ui(payload, new_picker_state)}
     )
     |> apply_fetch_status(meta)
   end
@@ -1222,8 +1221,7 @@ defmodule MingaEditor do
 
     MingaEditor.Shell.Traditional.ModalWorkflow.transition(
       state,
-      :picker,
-      PickerPayload.put_picker_ui(payload, new_picker_state)
+      {:picker, PickerPayload.put_picker_ui(payload, new_picker_state)}
     )
   end
 

@@ -62,7 +62,7 @@ defmodule MingaEditor.PickerUITest do
             end)
       }
     end)
-    |> ModalWorkflow.open(:picker, PickerPayload.new(picker_state))
+    |> ModalWorkflow.open({:picker, PickerPayload.new(picker_state)})
   end
 
   defp preview_promotion_state do
@@ -178,7 +178,7 @@ defmodule MingaEditor.PickerUITest do
       restore: state.workspace.buffers.active_index
     }
 
-    ModalWorkflow.open(state, :picker, PickerPayload.new(picker_state))
+    ModalWorkflow.open(state, {:picker, PickerPayload.new(picker_state)})
   end
 
   defp mark_all_picker(%Picker{items: []} = picker), do: picker
@@ -336,7 +336,7 @@ defmodule MingaEditor.PickerUITest do
       source = :"Elixir.MingaEditor.PickerUITest.GitLogSource"
       picker = Picker.new([%Item{id: "abc123", label: "abc123"}], title: "Git Log")
       picker_state = %PickerState{picker: picker, source: source}
-      state = ModalWorkflow.open(state, :picker, PickerPayload.new(picker_state))
+      state = ModalWorkflow.open(state, {:picker, PickerPayload.new(picker_state)})
 
       state = Enum.reduce(~c"fix", state, fn cp, acc -> PickerUI.handle_key(acc, cp, 0) end)
       {:picker, %{picker_ui: pui}} = state.shell_runtime.state.modal
@@ -365,7 +365,7 @@ defmodule MingaEditor.PickerUITest do
         restore: state.workspace.buffers.active_index
       }
 
-      ModalWorkflow.open(state, :picker, PickerPayload.new(picker_state))
+      ModalWorkflow.open(state, {:picker, PickerPayload.new(picker_state)})
     end
 
     defp type_string(state, string) do
@@ -486,7 +486,7 @@ defmodule MingaEditor.PickerUITest do
         restore: state.workspace.buffers.active_index
       }
 
-      ModalWorkflow.open(state, :picker, PickerPayload.new(picker_state))
+      ModalWorkflow.open(state, {:picker, PickerPayload.new(picker_state)})
     end
   end
 end

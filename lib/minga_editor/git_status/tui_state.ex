@@ -1,6 +1,6 @@
-defmodule MingaGitPorcelain.Shell.Traditional.GitStatus.TuiState do
+defmodule MingaEditor.GitStatus.TUIState do
   @moduledoc """
-  TUI-only view state for the traditional git status sidebar.
+  TUI-only value owner for the Traditional Git-status sidebar.
 
   The shared git status panel data stays frontend-neutral. This struct tracks
   terminal presentation concerns such as cursor position, collapsed sections,

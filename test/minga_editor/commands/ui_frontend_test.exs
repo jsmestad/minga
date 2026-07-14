@@ -59,7 +59,7 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
         state =
           then(base_state(unquote(Macro.escape(caps))), fn root ->
             shell_state =
-              MingaEditor.Shell.Traditional.State.set_bottom_panel(
+              MingaEditor.Shell.Traditional.State.install_bottom_panel(
                 MingaEditor.Shell.Runtime.state(root.shell_runtime),
                 %BottomPanel{visible: true}
               )
@@ -82,7 +82,7 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
         state =
           then(base_state(unquote(Macro.escape(caps))), fn root ->
             shell_state =
-              MingaEditor.Shell.Traditional.State.set_bottom_panel(
+              MingaEditor.Shell.Traditional.State.install_bottom_panel(
                 MingaEditor.Shell.Runtime.state(root.shell_runtime),
                 %BottomPanel{tabs: [:messages, :diagnostics], active_tab: :messages}
               )
@@ -105,7 +105,7 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
         state =
           then(base_state(unquote(Macro.escape(caps))), fn root ->
             shell_state =
-              MingaEditor.Shell.Traditional.State.set_bottom_panel(
+              MingaEditor.Shell.Traditional.State.install_bottom_panel(
                 MingaEditor.Shell.Runtime.state(root.shell_runtime),
                 %BottomPanel{tabs: [:messages, :diagnostics], active_tab: :diagnostics}
               )

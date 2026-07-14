@@ -37,7 +37,7 @@ defmodule MingaEditor.Shell.Traditional.ToolPromptWorkflow do
   @doc "Controls whether missing-tool prompts are suppressed."
   @spec suppress(state(), boolean()) :: state()
   def suppress(%EditorState{} = state, suppressed?) when is_boolean(suppressed?),
-    do: update(state, &TraditionalState.set_suppress_tool_prompts(&1, suppressed?))
+    do: update(state, &TraditionalState.install_tool_prompt_suppression(&1, suppressed?))
 
   @doc "Queues a missing tool once."
   @spec enqueue(state(), atom()) :: state()

@@ -4,6 +4,7 @@ defmodule MingaEditor.FeatureStateCleanupTest do
   alias MingaEditor.FeatureState
 
   @source {:extension, :cleanup_sync}
+  @receive_timeout 1_000
 
   test "source cleanup waits for editor feature-state cleanup before returning" do
     pid = start_fake_editor()
@@ -22,7 +23,7 @@ defmodule MingaEditor.FeatureStateCleanupTest do
     try do
       send(pid, {:run_self_cleanup, self(), @source})
 
-      assert_receive {:self_cleanup_result, :ok}
+      assert_receive {:self_cleanup_result, :ok}, @receive_timeout
       refute_receive {:cleanup_finished, @source}
     after
       stop_fake_editor(pid)
@@ -35,7 +36,7 @@ defmodule MingaEditor.FeatureStateCleanupTest do
     try do
       send(pid, {:run_self_cleanup, self(), :config})
 
-      assert_receive {:self_cleanup_result, :ok}
+      assert_receive {:self_cleanup_result, :ok}, @receive_timeout
       refute_receive {:cleanup_finished, :config}
     after
       stop_fake_editor(pid)
@@ -46,7 +47,7 @@ defmodule MingaEditor.FeatureStateCleanupTest do
   defp start_fake_editor do
     test_pid = self()
     pid = spawn_link(fn -> fake_editor_loop(test_pid) end)
-    assert_receive :fake_editor_ready
+    assert_receive :fake_editor_ready, @receive_timeout
     pid
   end
 
@@ -54,7 +55,7 @@ defmodule MingaEditor.FeatureStateCleanupTest do
   defp stop_fake_editor(pid) do
     ref = Process.monitor(pid)
     send(pid, :stop)
-    assert_receive {:DOWN, ^ref, :process, ^pid, _reason}
+    assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, @receive_timeout
     :ok
   end
 

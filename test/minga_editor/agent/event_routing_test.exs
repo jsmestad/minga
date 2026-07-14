@@ -87,7 +87,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       ]
 
       shell_state =
-        TraditionalState.set_tab_bar(
+        TraditionalState.install_tab_bar(
           TraditionalState.replace_agent(%TraditionalState{}, %AgentState{}),
           tab_bar(tabs, 1)
         )
@@ -186,7 +186,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         shell_runtime:
           Runtime.new(
             Runtime.default_entry(),
-            TraditionalState.set_tab_bar(
+            TraditionalState.install_tab_bar(
               TraditionalState.replace_agent(%TraditionalState{}, %AgentState{}),
               tab_bar
             )
@@ -306,7 +306,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         shell_runtime:
           Runtime.new(
             Runtime.default_entry(),
-            TraditionalState.set_tab_bar(
+            TraditionalState.install_tab_bar(
               TraditionalState.replace_agent(%TraditionalState{}, agent),
               tab_bar
             )
@@ -352,7 +352,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         shell_runtime:
           Runtime.new(
             Runtime.default_entry(),
-            TraditionalState.set_tab_bar(
+            TraditionalState.install_tab_bar(
               TraditionalState.replace_agent(%TraditionalState{}, %AgentState{}),
               tb
             )
@@ -406,7 +406,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         shell_runtime:
           Runtime.new(
             Runtime.default_entry(),
-            TraditionalState.set_tab_bar(
+            TraditionalState.install_tab_bar(
               TraditionalState.replace_agent(%TraditionalState{}, %AgentState{}),
               tb
             )
@@ -456,7 +456,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         shell_runtime:
           Runtime.new(
             Runtime.default_entry(),
-            TraditionalState.set_tab_bar(
+            TraditionalState.install_tab_bar(
               TraditionalState.replace_agent(%TraditionalState{}, %AgentState{}),
               tb
             )
@@ -492,7 +492,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         shell_runtime:
           Runtime.new(
             Runtime.default_entry(),
-            TraditionalState.set_tab_bar(
+            TraditionalState.install_tab_bar(
               TraditionalState.replace_agent(%TraditionalState{}, %AgentState{}),
               tb
             )

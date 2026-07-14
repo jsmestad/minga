@@ -139,7 +139,7 @@ defmodule MingaEditor.Shell.Workflow do
           false
       end
 
-    TraditionalState.set_suppress_tool_prompts(%TraditionalState{}, suppressed?)
+    TraditionalState.install_tool_prompt_suppression(%TraditionalState{}, suppressed?)
   end
 
   defp initialize_shell_state(module, _previous_state), do: module.init([])

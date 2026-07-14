@@ -98,12 +98,6 @@ defmodule MingaEditor.Shell.Traditional.AgentSurfaces do
       when is_pid(session_pid) and is_binary(delta),
       do: update_edit_session(surfaces, session_pid, &InlineEdit.append_proposal(&1, delta))
 
-  @doc "Installs a tool-produced proposal only on the matching inline edit session."
-  @spec set_edit_proposal(t(), pid(), String.t()) :: t()
-  def set_edit_proposal(%__MODULE__{} = surfaces, session_pid, proposal)
-      when is_pid(session_pid) and is_binary(proposal),
-      do: update_edit_session(surfaces, session_pid, &InlineEdit.set_proposal(&1, proposal))
-
   @doc "Cancels the inline edit for a buffer and returns its session pid."
   @spec cancel_edit(t(), pid() | nil) :: {t(), pid() | nil}
   def cancel_edit(%__MODULE__{} = surfaces, buffer_pid) do
@@ -113,23 +107,36 @@ defmodule MingaEditor.Shell.Traditional.AgentSurfaces do
 
   @spec update_ask_session(t(), pid(), (InlineAsk.t() -> InlineAsk.t())) :: t()
   defp update_ask_session(%__MODULE__{} = surfaces, session_pid, update) do
-    asks =
-      Map.new(surfaces.asks, fn
-        {buffer_pid, %InlineAsk{session_pid: ^session_pid} = ask} -> {buffer_pid, update.(ask)}
-        entry -> entry
-      end)
-
-    %{surfaces | asks: asks}
+    case matching_ask(surfaces.asks, session_pid) do
+      {buffer_pid, ask} -> %{surfaces | asks: Map.put(surfaces.asks, buffer_pid, update.(ask))}
+      nil -> surfaces
+    end
   end
 
   @spec update_edit_session(t(), pid(), (InlineEdit.t() -> InlineEdit.t())) :: t()
   defp update_edit_session(%__MODULE__{} = surfaces, session_pid, update) do
-    edits =
-      Map.new(surfaces.edits, fn
-        {buffer_pid, %InlineEdit{session_pid: ^session_pid} = edit} -> {buffer_pid, update.(edit)}
-        entry -> entry
-      end)
+    case matching_edit(surfaces.edits, session_pid) do
+      {buffer_pid, edit} ->
+        %{surfaces | edits: Map.put(surfaces.edits, buffer_pid, update.(edit))}
 
-    %{surfaces | edits: edits}
+      nil ->
+        surfaces
+    end
+  end
+
+  @spec matching_ask(InlineAsk.store(), pid()) :: {pid(), InlineAsk.t()} | nil
+  defp matching_ask(asks, session_pid) do
+    Enum.find(asks, fn
+      {_buffer_pid, %InlineAsk{session_pid: ^session_pid}} -> true
+      _entry -> false
+    end)
+  end
+
+  @spec matching_edit(InlineEdit.store(), pid()) :: {pid(), InlineEdit.t()} | nil
+  defp matching_edit(edits, session_pid) do
+    Enum.find(edits, fn
+      {_buffer_pid, %InlineEdit{session_pid: ^session_pid}} -> true
+      _entry -> false
+    end)
   end
 end
