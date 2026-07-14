@@ -1,6 +1,6 @@
 # Rendering performance gates
 
-Minga uses deterministic production work gates first and an optimized native wall-clock gate second. Stable operation counts catch algorithmic regressions without runner noise; Release percentiles diagnose the shipping Swift preparation path. Neither substitutes for the other.
+Minga uses deterministic production work gates first and an optimized native process-CPU-time gate second. Stable operation counts catch algorithmic regressions without runner noise; Release percentiles diagnose the shipping Swift preparation path. Neither substitutes for the other.
 
 ## Production conformance fixture
 
@@ -65,7 +65,7 @@ Run:
 scripts/check_render_performance
 ```
 
-The script generates protocol artifacts, then compiles with `swiftc -O`. The `resident-ordinary-edit-v2` fixture runs five independent batches at exactly 65,536 resident rows; each batch warms for 200 iterations and measures 1,000 iterations. The gate takes each metric's median batch percentile, so a regression must appear in at least three batches while isolated runner-tail noise cannot decide the result. It reports the per-batch and aggregate p50/p95 for:
+The script generates protocol artifacts, then compiles with `swiftc -O`. The `resident-ordinary-edit-v2` fixture runs five independent batches at exactly 65,536 resident rows; each batch warms for 200 iterations and measures 1,000 iterations using process CPU time so shared-runner scheduling pauses do not count as renderer work. The gate takes each metric's median batch percentile, so a regression must appear in at least three batches while isolated measurement noise cannot decide the result. It reports the per-batch and aggregate p50/p95 for:
 
 1. the shipping `ProtocolDecoder` decoding a real protocol-v11 A2 ordinary-edit splice plus `GUIWindowContent.applyingRowsDeltaChecked` / `ResidentRowStore` semantic apply;
 2. `ResidentRenderPreparation`, the same Metal-free CoreText preparation called by `CoreTextMetalRenderer`: resident visible traversal, horizontal clipping, style/span adjustment, gutter source rows, and rasterization-independent row commands (not a digest or precomputed shortcut);

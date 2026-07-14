@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import MingaProtocol
 
@@ -131,10 +132,14 @@ private func consumePreparedCommands(_ prepared: ResidentRenderPreparationResult
     }
 }
 
+private func processCPUTimeNanoseconds() -> UInt64 {
+    clock_gettime_nsec_np(CLOCK_PROCESS_CPUTIME_ID)
+}
+
 private func elapsedMs(_ body: () throws -> Void) rethrows -> Double {
-    let start = DispatchTime.now().uptimeNanoseconds
+    let start = processCPUTimeNanoseconds()
     try body()
-    return Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000.0
+    return Double(processCPUTimeNanoseconds() - start) / 1_000_000.0
 }
 
 private func percentile(_ samples: [Double], _ ratio: Double) -> Double {
