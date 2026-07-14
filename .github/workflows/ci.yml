@@ -313,8 +313,8 @@ jobs:
           key: xcode-${{ runner.os }}-${{ hashFiles('macos/Sources/**/*.swift', 'macos/Sources/**/*.metal', 'macos/project.yml') }}
           restore-keys: xcode-${{ runner.os }}-
 
-      - name: Install XcodeGen
-        run: brew install xcodegen
+      - name: Install pinned XcodeGen
+        run: echo "$(scripts/install_xcodegen "$RUNNER_TEMP/xcodegen")" >> "$GITHUB_PATH"
 
       - name: Generate Xcode project
         run: cd macos && xcodegen generate
@@ -336,6 +336,16 @@ jobs:
             -configuration Debug \
             -derivedDataPath DerivedData \
             CODE_SIGNING_ALLOWED=NO
+
+      - name: Test real packaged IPC helper against BEAM server
+        run: |
+          set -euo pipefail
+          HELPER="$PWD/macos/DerivedData/Build/Products/Debug/Minga.app/Contents/Resources/bin/minga-ipc"
+          test -x "$HELPER"
+          "$HELPER" nonce | grep -E '^[0-9a-f-]{36}$'
+          MINGA_IPC_HELPER="$HELPER" mix test \
+            test/macos/native_ipc_helper_integration_test.exs \
+            --include macos_ipc_helper
 
       - name: Test
         run: |
@@ -363,8 +373,8 @@ jobs:
         with:
           version: 0.16.0
 
-      - name: Install XcodeGen
-        run: brew install xcodegen
+      - name: Install pinned XcodeGen
+        run: echo "$(scripts/install_xcodegen "$RUNNER_TEMP/xcodegen")" >> "$GITHUB_PATH"
 
       - name: Cache deps
         uses: actions/cache@v4

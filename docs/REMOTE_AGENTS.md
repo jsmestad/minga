@@ -8,7 +8,7 @@ Start the daemon with `minga --headless`. In headless mode Minga starts the runt
 
 ### Linux systemd user service
 
-Copy `rel/systemd/minga-headless.service` to `~/.config/systemd/user/minga-headless.service`, edit `ExecStart`, `WorkingDirectory`, `MINGA_COOKIE`, and provider environment variables, then run:
+Copy `rel/systemd/minga-headless.service` to `~/.config/systemd/user/minga-headless.service`, edit `ExecStart`, `WorkingDirectory`, `RELEASE_COOKIE`, and provider environment variables, then run:
 
 ```sh
 systemctl --user daemon-reload
@@ -32,7 +32,9 @@ Use `launchctl bootout gui/$(id -u)/com.minga.headless` to stop the agent.
 
 ## Network and trust boundary
 
-Remote control uses Erlang distribution. Set a long random `MINGA_COOKIE` on the daemon and every trusted client that needs to connect. Treat the cookie like a password: any node with the cookie can reach the trusted broker API.
+Remote control uses Erlang distribution. Set a long random `RELEASE_COOKIE` (at least 32 random bytes) on the daemon and every trusted client that needs to connect. The release launcher consumes this value before the VM boots; `MINGA_COOKIE` remains a supported CLI-facing alias only when a wrapper maps it to `RELEASE_COOKIE` before startup. Treat the cookie like a password: any node with the cookie can reach the trusted broker API.
+
+For the Burrito executable, environment variables are the only way to install a cookie before its embedded VM starts. Launch it as `RELEASE_COOKIE="$(openssl rand -hex 32)" minga --headless`; do not rely on `--cookie-file` unless a wrapper reads that file and exports `RELEASE_COOKIE` before invoking Burrito. The bundled `minga-tui` wrapper performs that mapping and gives `--cookie-file` precedence over inherited cookie variables.
 
 The attach command uses SSH as the bootstrap channel. It asks the remote host to start the user daemon with `systemctl --user start minga-headless.service`, falling back to the launchd agent command on macOS, then connects to the conventional distributed node `minga_server@host`. If bootstrap fails, the CLI prints the SSH command failure so you can install the service file, enable linger, or fix the cookie/node setup.
 

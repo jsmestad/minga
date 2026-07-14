@@ -191,7 +191,7 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
     :sys.get_state(session)
     :sys.get_state(log_pid)
 
-    {:ok, db} = EventLog.open_read_connection(db_dir: tmp_dir)
+    db = open_read_connection!(tmp_dir, log_pid)
     events = wait_for_event(db, "stable-session", :waiting_for_input, session, log_pid)
     event_types = Enum.map(events, & &1.event_type)
 
@@ -237,7 +237,7 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
     :sys.get_state(session)
     :sys.get_state(log_pid)
 
-    {:ok, db} = EventLog.open_read_connection(db_dir: tmp_dir)
+    db = open_read_connection!(tmp_dir, log_pid)
     events = wait_for_event(db, "todo-session", :todo_plan_updated, session, log_pid)
     todo_event = Enum.find(events, &(&1.event_type == :todo_plan_updated))
 
@@ -277,7 +277,7 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
     assert {:persisted, _event_id} = EventLog.await(receipt)
     assert :ok = EventLog.await_idle(log_pid)
 
-    {:ok, db} = EventLog.open_read_connection(db_dir: tmp_dir)
+    db = open_read_connection!(tmp_dir, log_pid)
     {:ok, [event]} = EventLog.events_after(db, "redaction-session", 0, 10)
     :ok = Store.close(db)
 
@@ -399,7 +399,7 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
     assert :ok = Session.unsubscribe(session, client)
     :sys.get_state(log_pid)
 
-    {:ok, db} = EventLog.open_read_connection(db_dir: tmp_dir)
+    db = open_read_connection!(tmp_dir, log_pid)
     events = wait_for_event(db, "disconnect-session", :user_disconnected, session, log_pid)
     disconnected = Enum.find(events, &(&1.event_type == :user_disconnected))
 
@@ -434,7 +434,7 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
     wait_for_status(session, :thinking)
     assert {:queued, :steering} = Session.send_prompt(session, "while busy")
     assert ["while busy"] = Session.dequeue_steering(session)
-    {:ok, db} = EventLog.open_read_connection(db_dir: tmp_dir)
+    db = open_read_connection!(tmp_dir, log_pid)
     user_texts = wait_for_user_texts(db, "steering-session", session, log_pid)
 
     assert "first" in user_texts
@@ -469,7 +469,7 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
     Process.exit(session, :kill)
     assert_receive {:DOWN, ^ref, :process, ^session, :killed}
 
-    {:ok, db} = EventLog.open_read_connection(db_dir: tmp_dir)
+    db = open_read_connection!(tmp_dir, log_pid)
     assert {:ok, events} = EventLog.events_after(db, "crash-session", 0, 50)
     assert Enum.any?(events, &(&1.event_type == :session_started))
     :ok = Store.close(db)
@@ -513,6 +513,13 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
   defp wait_for_user_texts(db, session_id, _session_pid, _log_pid, 0) do
     {:ok, events} = EventLog.events_after(db, session_id, 0, 50)
     events |> Enum.filter(&(&1.event_type == :user_message)) |> Enum.map(& &1.payload["text"])
+  end
+
+  @spec open_read_connection!(String.t(), pid()) :: Store.db()
+  defp open_read_connection!(tmp_dir, log_pid) do
+    assert :ok = EventLog.await_idle(log_pid)
+    assert {:ok, db} = EventLog.open_read_connection(db_dir: tmp_dir)
+    db
   end
 
   @spec wait_for_event(

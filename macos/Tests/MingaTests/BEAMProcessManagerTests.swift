@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Testing
 
@@ -54,6 +55,46 @@ struct BEAMProcessManagerLaunchArgumentsTests {
             BEAMProcessManager.encodedCLIArguments(["--editor", "/tmp/path with space"])
                 == "LS1lZGl0b3I,L3RtcC9wYXRoIHdpdGggc3BhY2U"
         )
+    }
+
+    @Test("extracts but does not forward the internal launch nonce")
+    @MainActor func isolatesLaunchNonce() {
+        let arguments = ["Minga", "--minimal", "--minga-launch-nonce", "nonce-123", "README.md"]
+        #expect(BEAMProcessManager.internalLaunchNonce(from: arguments) == "nonce-123")
+        #expect(BEAMProcessManager.forwardedCLIArguments(from: arguments) == ["--minimal", "README.md"])
+    }
+
+    @Test("clears every inherited pre-VM option and requires local preboot distribution")
+    @MainActor func sanitizesPreVMEnvironment() {
+        let environment = BEAMProcessManager.sanitizedPreVMEnvironment([
+            "ERL_AFLAGS": "-sname inherited",
+            "ERL_FLAGS": "-name inherited@example",
+            "ERL_ZFLAGS": "-sname inherited_zflags",
+            "ELIXIR_ERL_OPTIONS": "-sname inherited_elixir",
+            "RELEASE_VM_ARGS": "/tmp/inherited.vm.args",
+            "HOME": "/Users/alice"
+        ])
+
+        #expect(environment["ERL_AFLAGS"] == nil)
+        #expect(environment["ERL_FLAGS"] == nil)
+        #expect(environment["ERL_ZFLAGS"] == nil)
+        #expect(environment["ELIXIR_ERL_OPTIONS"] == nil)
+        #expect(environment["RELEASE_VM_ARGS"] == nil)
+        #expect(environment["MINGA_EXPECT_DISTRIBUTION"] == "0")
+        #expect(environment["RELEASE_DISTRIBUTION"] == "none")
+        #expect(environment["HOME"] == "/Users/alice")
+    }
+
+    @Test("uses the confstr Darwin per-user temporary directory for native IPC")
+    @MainActor func usesDarwinTemporaryDirectoryForIPC() {
+        let length = confstr(_CS_DARWIN_USER_TEMP_DIR, nil, 0)
+        #expect(length > 1)
+        var buffer = [CChar](repeating: 0, count: length)
+        #expect(confstr(_CS_DARWIN_USER_TEMP_DIR, &buffer, length) == length)
+
+        let expected = URL(fileURLWithPath: String(cString: buffer), isDirectory: true)
+            .standardizedFileURL
+        #expect(BEAMProcessManager.ipcRuntimeParentURL() == expected)
     }
 
     @Test("uses HOME when launch services provides root as cwd")
@@ -159,80 +200,6 @@ struct BEAMProcessManagerLaunchArgumentsTests {
         )
 
         #expect(workingDirectory.path == "/Applications")
-    }
-}
-
-@Suite("App Open Requests")
-struct AppOpenRequestTests {
-    @Test("keeps ordinary file URLs on the Finder open path")
-    func parsesFileURL() {
-        let url = URL(fileURLWithPath: "/tmp/example.ex")
-        #expect(AppOpenRequest.parse(url) == .file(url.standardizedFileURL))
-    }
-
-    @Test("decodes the app-local wait URL transport")
-    func parsesWaitURL() throws {
-        let target = "/tmp/project/COMMIT_EDITMSG"
-        let result = WaitResultFile.allowedRootURL
-            .appendingPathComponent("request.abc/result")
-            .path
-        let url = try #require(URL(string: "minga://wait/\(encode(result))/\(encode(target))"))
-
-        #expect(AppOpenRequest.parse(url) == .wait(path: target, resultPath: result))
-    }
-
-    @Test("rejects malformed, unrelated, or outside-root custom URLs")
-    func rejectsMalformedURL() throws {
-        #expect(AppOpenRequest.parse(try #require(URL(string: "https://example.com"))) == nil)
-        #expect(AppOpenRequest.parse(try #require(URL(string: "minga://wait/only-one-part"))) == nil)
-
-        let outsideResult = "/tmp/not-minga-wait/request.evil/result"
-        let target = "/tmp/COMMIT_EDITMSG"
-        let outsideURL = try #require(
-            URL(string: "minga://wait/\(encode(outsideResult))/\(encode(target))")
-        )
-        #expect(AppOpenRequest.parse(outsideURL) == nil)
-        #expect(!WaitResultFile.failIfPending(at: outsideResult, reason: "must not write"))
-        #expect(!FileManager.default.fileExists(atPath: outsideResult))
-    }
-
-    private func encode(_ value: String) -> String {
-        Data(value.utf8)
-            .base64EncodedString()
-            .replacingOccurrences(of: "+", with: "-")
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "=", with: "")
-    }
-}
-
-@Suite("Wait Result Files")
-struct WaitResultFileTests {
-    @Test("publishes a failure without overwriting a BEAM completion")
-    func publishesExclusiveFailure() throws {
-        let failedDirectory = WaitResultFile.allowedRootURL
-            .appendingPathComponent("request.\(UUID().uuidString)")
-        let successfulDirectory = WaitResultFile.allowedRootURL
-            .appendingPathComponent("request.\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: failedDirectory, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: successfulDirectory, withIntermediateDirectories: true)
-        defer {
-            try? FileManager.default.removeItem(at: failedDirectory)
-            try? FileManager.default.removeItem(at: successfulDirectory)
-        }
-
-        let failedResult = failedDirectory.appendingPathComponent("result")
-        #expect(
-            WaitResultFile.failIfPending(
-                at: failedResult.path,
-                reason: "editor core exited"
-            )
-        )
-        #expect(try String(contentsOf: failedResult, encoding: .utf8) == "1\teditor core exited\n")
-
-        let successfulResult = successfulDirectory.appendingPathComponent("result")
-        try Data("0\n".utf8).write(to: successfulResult)
-        #expect(!WaitResultFile.failIfPending(at: successfulResult.path, reason: "late failure"))
-        #expect(try String(contentsOf: successfulResult, encoding: .utf8) == "0\n")
     }
 }
 

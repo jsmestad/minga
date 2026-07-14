@@ -7,7 +7,7 @@ defmodule Minga.Runtime.Supervisor do
       Runtime.Supervisor (one_for_one)
       ├── MingaEditor.Watchdog          SIGUSR2 recovery (independent leaf)
       ├── Minga.FileWatcher             FSEvents/inotify watcher (independent leaf)
-      ├── Minga.Frontend.WaitRequests   CLI wait transport (independent leaf)
+      ├── Minga.Frontend.WaitRequests   target-aware wait tracker (independent leaf)
       └── MingaEditor.Supervisor        Parser → Port → Renderer → Editor (rest_for_one)
 
   A FileWatcher, Watchdog, or WaitRequests crash restarts only that process. None cascades into MingaEditor.Supervisor or another independent leaf. The tight Parser → Port → Renderer → Editor cascade is handled internally by MingaEditor.Supervisor's own `rest_for_one` strategy.
@@ -43,12 +43,10 @@ defmodule Minga.Runtime.Supervisor do
       # depend on it structurally. A filesystem watcher flake restarts only
       # FileWatcher, not the renderer.
       Minga.FileWatcher,
-      # CLI wait requests are app-local frontend transport state. Keeping them
-      # outside Editor.Supervisor preserves outstanding requests while the
-      # render/editor subtree restarts.
+      # Target-aware completion survives an Editor generation restart.
       Minga.Frontend.WaitRequests,
       # Editor.Supervisor groups the tightly-coupled render path with rest_for_one:
-      # Parser crash → Port + Renderer + Editor restart, Port crash → Renderer + Editor restart.
+      # Parser crash → Port + Renderer restart, Port crash → Renderer + Editor restart.
       {MingaEditor.Supervisor, [backend: backend]}
     ]
 

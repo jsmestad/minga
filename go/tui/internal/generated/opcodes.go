@@ -211,5 +211,4 @@ const (
 	GUIActionEmptyStateActivate         byte = 0x5B
 	GUIActionChatScrolledAwayFromBottom byte = 0x5C
 	GUIActionChatReturnedToBottom       byte = 0x5D
-	GUIActionOpenFileWait               byte = 0x5E
 )

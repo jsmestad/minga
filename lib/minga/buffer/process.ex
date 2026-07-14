@@ -1159,8 +1159,10 @@ defmodule Minga.Buffer.Process do
       case Persistence.write_content(state, state.file_path, content) do
         :ok ->
           {new_mtime, new_size} = Persistence.file_metadata(state, state.file_path)
+          new_state = mark_saved(state, {new_mtime, new_size}, content)
+          broadcast_buffer_saved(new_state, state.file_path)
 
-          {:reply, :ok, mark_saved(state, {new_mtime, new_size}, content)}
+          {:reply, :ok, new_state}
 
         {:error, reason} ->
           {:reply, {:error, reason}, state}
@@ -1183,8 +1185,10 @@ defmodule Minga.Buffer.Process do
     case Persistence.write_content(state, state.file_path, content) do
       :ok ->
         {new_mtime, new_size} = Persistence.file_metadata(state, state.file_path)
+        new_state = mark_saved(state, {new_mtime, new_size}, content)
+        broadcast_buffer_saved(new_state, state.file_path)
 
-        {:reply, :ok, mark_saved(state, {new_mtime, new_size}, content)}
+        {:reply, :ok, new_state}
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -1252,8 +1256,10 @@ defmodule Minga.Buffer.Process do
 
         new_state = BufState.adopt_saved_path(state, file_path, filetype)
         new_state = %{new_state | options: reseed_options(new_state, filetype)}
+        new_state = mark_saved(new_state, {new_mtime, new_size}, content)
+        broadcast_buffer_saved(new_state, file_path)
 
-        {:reply, :ok, mark_saved(new_state, {new_mtime, new_size}, content)}
+        {:reply, :ok, new_state}
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}

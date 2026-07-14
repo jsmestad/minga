@@ -1,60 +1,73 @@
 defmodule Minga.Frontend.WaitRequests do
   @moduledoc """
-  Tracks CLI wait requests for files opened in the native app.
+  Tracks native CLI wait requests against the exact buffer target they opened.
 
-  The macOS frontend transports a target path and a result-file path, but all
-  completion decisions stay on the BEAM. A successful save or accepted close
-  completes a request with status 0; explicit abort/discard paths complete it
-  with a non-zero status.
+  Requests are completed from source-owned buffer save events or explicit editor
+  close/abort paths. The tracker never owns transport files: completion is sent
+  directly to the authenticated native IPC connection that registered it.
   """
 
   use GenServer
 
+  alias Minga.Events
+  alias Minga.Frontend.WaitRequestCompletion
+  alias Minga.Frontend.WaitRequests.State
+
   @typedoc "Wait request completion status."
-  @type completion :: :accepted | {:cancelled, String.t()}
+  @type completion :: WaitRequestCompletion.outcome()
 
   @typedoc "Server option."
   @type start_opt ::
           {:name, GenServer.name() | nil}
-          | {:allowed_root, String.t()}
+          | {:events_registry, Events.registry()}
 
-  @typep request :: %{monitor: reference(), result_paths: MapSet.t(String.t())}
-  @typep state :: %{allowed_root: String.t(), requests: %{optional(pid()) => request()}}
+  @typep entry :: State.entry()
+  @typep request :: State.request()
 
   @doc "Starts the wait-request tracker."
   @spec start_link([start_opt()]) :: GenServer.on_start()
   def start_link(opts \\ []) do
-    name = Keyword.get(opts, :name, __MODULE__)
-
-    case name do
+    case Keyword.get(opts, :name, __MODULE__) do
       nil -> GenServer.start_link(__MODULE__, opts)
-      server_name -> GenServer.start_link(__MODULE__, opts, name: server_name)
+      name -> GenServer.start_link(__MODULE__, opts, name: name)
     end
   end
 
-  @doc "Registers a successfully opened target and acknowledges the CLI shim."
-  @spec register(pid(), String.t(), GenServer.server()) :: :ok | {:error, term()}
-  def register(buffer, result_path, server \\ __MODULE__)
-      when is_pid(buffer) and is_binary(result_path) do
-    call(server, {:register, buffer, result_path}, {:error, :wait_tracker_unavailable})
+  @doc "Registers an opened target for completion on the supplied IPC connection."
+  @spec register(pid(), String.t(), String.t(), pid(), GenServer.server()) ::
+          :ok | {:error, term()}
+  def register(buffer, target_path, request_id, waiter, server \\ __MODULE__)
+      when is_pid(buffer) and is_binary(target_path) and is_binary(request_id) and
+             is_pid(waiter) do
+    call(
+      server,
+      {:register, buffer, Path.expand(target_path), request_id, waiter},
+      {:error, :wait_tracker_unavailable}
+    )
   end
 
-  @doc "Completes all requests for a buffer successfully."
-  @spec accept(pid(), GenServer.server()) :: :ok
-  def accept(buffer, server \\ __MODULE__) when is_pid(buffer) do
-    call(server, {:complete, buffer, :accepted}, :ok)
+  @doc "Completes requests matching the buffer's current target successfully."
+  @spec accept(pid(), String.t(), GenServer.server()) :: :ok
+  def accept(buffer, path, server \\ __MODULE__) when is_pid(buffer) and is_binary(path) do
+    call(server, {:accept, buffer, path}, :ok)
+  end
+
+  @doc "Completes a clean close, accepting matching targets and cancelling stale ones."
+  @spec close(pid(), String.t(), GenServer.server()) :: :ok
+  def close(buffer, path, server \\ __MODULE__) when is_pid(buffer) and is_binary(path) do
+    call(server, {:close, buffer, path}, :ok)
   end
 
   @doc "Completes all requests for a buffer as cancelled."
   @spec cancel(pid(), String.t(), GenServer.server()) :: :ok
   def cancel(buffer, reason, server \\ __MODULE__)
       when is_pid(buffer) and is_binary(reason) do
-    call(server, {:complete, buffer, {:cancelled, reason}}, :ok)
+    call(server, {:cancel, buffer, reason}, :ok)
   end
 
-  @doc "Completes every outstanding request successfully."
+  @doc "Completes every clean matching request and cancels stale target requests."
   @spec accept_all(GenServer.server()) :: :ok
-  def accept_all(server \\ __MODULE__), do: call(server, {:complete_all, :accepted}, :ok)
+  def accept_all(server \\ __MODULE__), do: call(server, :accept_all, :ok)
 
   @doc "Completes every outstanding request as cancelled."
   @spec cancel_all(String.t(), GenServer.server()) :: :ok
@@ -62,10 +75,17 @@ defmodule Minga.Frontend.WaitRequests do
     call(server, {:complete_all, {:cancelled, reason}}, :ok)
   end
 
-  @doc "Reports a target-open failure before a buffer could be registered."
-  @spec fail_open(String.t(), term(), GenServer.server()) :: :ok | {:error, term()}
-  def fail_open(result_path, reason, server \\ __MODULE__) when is_binary(result_path) do
-    call(server, {:fail_open, result_path, reason}, {:error, :wait_tracker_unavailable})
+  @doc "Acknowledges that the native client received a terminal completion frame."
+  @spec acknowledge(String.t(), GenServer.server()) :: :ok
+  def acknowledge(request_id, server \\ __MODULE__) when is_binary(request_id) do
+    call(server, {:acknowledge, request_id}, :ok)
+  end
+
+  @doc "Waits until every emitted terminal completion frame is acknowledged."
+  @spec await_acknowledgements(timeout(), GenServer.server()) :: :ok | {:error, :timeout}
+  def await_acknowledgements(timeout \\ 2_000, server \\ __MODULE__)
+      when is_integer(timeout) and timeout >= 0 do
+    call(server, {:await_acknowledgements, timeout}, :ok)
   end
 
   @spec call(GenServer.server(), term(), term()) :: term()
@@ -77,162 +97,260 @@ defmodule Minga.Frontend.WaitRequests do
   end
 
   @impl true
-  @spec init([start_opt()]) :: {:ok, state()}
+  @spec init([start_opt()]) :: {:ok, State.t()}
   def init(opts) do
-    root =
-      opts
-      |> Keyword.get(:allowed_root, Path.join(System.tmp_dir!(), "minga-wait"))
-      |> Path.expand()
+    events_registry = Keyword.get(opts, :events_registry, Events.default_registry())
+    :ok = Events.subscribe(:buffer_saved, events_registry)
 
-    {:ok, %{allowed_root: root, requests: %{}}}
+    {:ok, State.new(events_registry)}
   end
 
   @impl true
-  @spec handle_call(term(), GenServer.from(), state()) :: {:reply, term(), state()}
-  def handle_call({:register, buffer, result_path}, _from, state) do
-    with :ok <- validate_result_path(result_path, state.allowed_root),
-         :ok <- write_ack(result_path) do
-      requests = put_request(state.requests, buffer, Path.expand(result_path))
-      {:reply, :ok, %{state | requests: requests}}
-    else
-      {:error, reason} = error ->
-        Minga.Log.warning(:editor, "Could not register CLI wait request: #{inspect(reason)}")
-        {:reply, error, state}
-    end
+  @spec handle_call(term(), GenServer.from(), State.t()) ::
+          {:reply, term(), State.t()} | {:noreply, State.t()}
+  def handle_call({:register, buffer, target, request_id, waiter}, _from, state) do
+    entry = %{target: target, waiter: waiter, waiter_monitor: Process.monitor(waiter)}
+    requests = put_request(state.requests, buffer, request_id, entry)
+    {:reply, :ok, State.requests_updated(state, requests)}
   end
 
-  def handle_call({:fail_open, result_path, reason}, _from, state) do
-    result =
-      with :ok <- validate_result_path(result_path, state.allowed_root) do
-        write_result(result_path, {:cancelled, "file open failed: #{inspect(reason)}"})
-      end
-
-    {:reply, result, state}
+  def handle_call({:accept, buffer, path}, _from, state) do
+    {:reply, :ok, complete_matching(state, buffer, path, :accepted)}
   end
 
-  def handle_call({:complete, buffer, completion}, _from, state) do
-    {:reply, :ok, complete_buffer(state, buffer, completion)}
+  def handle_call({:close, buffer, path}, _from, state) do
+    state = complete_matching(state, buffer, path, :accepted)
+    {:reply, :ok, complete_buffer(state, buffer, {:cancelled, "requested target was retargeted"})}
+  end
+
+  def handle_call({:cancel, buffer, reason}, _from, state) do
+    {:reply, :ok, complete_buffer(state, buffer, {:cancelled, reason})}
+  end
+
+  def handle_call(:accept_all, _from, state) do
+    state = Enum.reduce(Map.keys(state.requests), state, &complete_for_shutdown/2)
+    {:reply, :ok, state}
   end
 
   def handle_call({:complete_all, completion}, _from, state) do
-    Enum.each(state.requests, fn {_buffer, request} ->
-      complete_paths(request.result_paths, completion)
-      Process.demonitor(request.monitor, [:flush])
-    end)
+    state = Enum.reduce(Map.keys(state.requests), state, &complete_buffer(&2, &1, completion))
+    {:reply, :ok, state}
+  end
 
-    {:reply, :ok, %{state | requests: %{}}}
+  def handle_call({:acknowledge, request_id}, _from, state) do
+    {:reply, :ok, acknowledge_pending(state, request_id)}
+  end
+
+  def handle_call(
+        {:await_acknowledgements, _timeout},
+        _from,
+        %State{pending_acks: pending} = state
+      )
+      when map_size(pending) == 0 do
+    {:reply, :ok, state}
+  end
+
+  def handle_call({:await_acknowledgements, timeout}, from, state) do
+    timer = Process.send_after(self(), {:ack_timeout, from}, timeout)
+    {:noreply, State.drain_waiter_added(state, {from, timer})}
   end
 
   @impl true
-  @spec handle_info(term(), state()) :: {:noreply, state()}
-  def handle_info({:DOWN, monitor, :process, buffer, reason}, state) do
-    case Map.get(state.requests, buffer) do
-      %{monitor: ^monitor} ->
+  @spec handle_info(term(), State.t()) :: {:noreply, State.t()}
+  def handle_info(
+        {:minga_event, :buffer_saved, %Events.BufferEvent{buffer: buffer, path: path}},
+        state
+      ) do
+    {:noreply, complete_matching(state, buffer, path, :accepted)}
+  end
+
+  def handle_info({:DOWN, monitor, :process, pid, reason}, state) do
+    case buffer_for_monitor(state.requests, monitor, pid) do
+      {:ok, buffer} ->
         completion = {:cancelled, "buffer exited before wait completion: #{inspect(reason)}"}
         {:noreply, complete_buffer(state, buffer, completion)}
 
-      _other ->
+      :error ->
+        {:noreply, remove_waiter(state, monitor, pid)}
+    end
+  end
+
+  def handle_info({:ack_timeout, from}, state) do
+    case List.keytake(state.drain_waiters, from, 0) do
+      {{^from, _timer}, remaining} ->
+        GenServer.reply(from, {:error, :timeout})
+        {:noreply, State.drain_waiter_timed_out(state, remaining)}
+
+      nil ->
         {:noreply, state}
     end
   end
 
-  @spec put_request(%{optional(pid()) => request()}, pid(), String.t()) :: %{
+  @spec put_request(%{optional(pid()) => request()}, pid(), String.t(), entry()) :: %{
           optional(pid()) => request()
         }
-  defp put_request(requests, buffer, result_path) do
+  defp put_request(requests, buffer, request_id, entry) do
     case Map.get(requests, buffer) do
       nil ->
         Map.put(requests, buffer, %{
-          monitor: Process.monitor(buffer),
-          result_paths: MapSet.new([result_path])
+          buffer_monitor: Process.monitor(buffer),
+          entries: %{request_id => entry}
         })
 
       request ->
         Map.put(requests, buffer, %{
           request
-          | result_paths: MapSet.put(request.result_paths, result_path)
+          | entries: Map.put(request.entries, request_id, entry)
         })
     end
   end
 
-  @spec complete_buffer(state(), pid(), completion()) :: state()
+  @spec complete_for_shutdown(pid(), State.t()) :: State.t()
+  defp complete_for_shutdown(buffer, state) do
+    case current_buffer_status(buffer) do
+      {:ok, path, false} ->
+        state
+        |> complete_matching(buffer, path, :accepted)
+        |> complete_buffer(buffer, {:cancelled, "requested target was retargeted"})
+
+      {:ok, path, true} ->
+        state
+        |> complete_matching(
+          buffer,
+          path,
+          {:cancelled, "buffer has unsaved changes at editor shutdown"}
+        )
+        |> complete_buffer(buffer, {:cancelled, "requested target was retargeted"})
+
+      :error ->
+        complete_buffer(state, buffer, {:cancelled, "buffer unavailable at editor shutdown"})
+    end
+  end
+
+  @spec complete_matching(State.t(), pid(), String.t(), completion()) :: State.t()
+  defp complete_matching(state, buffer, path, completion) do
+    case Map.get(state.requests, buffer) do
+      nil ->
+        state
+
+      request ->
+        canonical_path = Path.expand(path)
+
+        {matching, remaining} =
+          Map.split_with(request.entries, fn {_id, entry} -> entry.target == canonical_path end)
+
+        state
+        |> update_request(buffer, request, remaining)
+        |> complete_entries(matching, completion)
+    end
+  end
+
+  @spec complete_buffer(State.t(), pid(), completion()) :: State.t()
   defp complete_buffer(state, buffer, completion) do
     case Map.pop(state.requests, buffer) do
       {nil, _requests} ->
         state
 
       {request, requests} ->
-        Process.demonitor(request.monitor, [:flush])
-        complete_paths(request.result_paths, completion)
-        %{state | requests: requests}
+        Process.demonitor(request.buffer_monitor, [:flush])
+
+        state
+        |> State.requests_updated(requests)
+        |> complete_entries(request.entries, completion)
     end
   end
 
-  @spec complete_paths(MapSet.t(String.t()), completion()) :: :ok
-  defp complete_paths(paths, completion) do
-    Enum.each(paths, fn path ->
-      case write_result(path, completion) do
-        :ok ->
-          :ok
+  @spec update_request(State.t(), pid(), request(), %{String.t() => entry()}) :: State.t()
+  defp update_request(state, buffer, request, entries) when map_size(entries) == 0 do
+    Process.demonitor(request.buffer_monitor, [:flush])
+    State.requests_updated(state, Map.delete(state.requests, buffer))
+  end
 
-        {:error, reason} ->
-          Minga.Log.warning(:editor, "Could not complete CLI wait request: #{inspect(reason)}")
-      end
+  defp update_request(state, buffer, request, entries) do
+    requests = Map.put(state.requests, buffer, %{request | entries: entries})
+    State.requests_updated(state, requests)
+  end
+
+  @spec complete_entries(State.t(), %{String.t() => entry()}, completion()) :: State.t()
+  defp complete_entries(state, entries, completion) do
+    pending_acks =
+      Enum.reduce(entries, state.pending_acks, fn {request_id, entry}, pending ->
+        send(entry.waiter, WaitRequestCompletion.new(request_id, completion))
+
+        Map.put(pending, request_id, %{
+          waiter: entry.waiter,
+          waiter_monitor: entry.waiter_monitor
+        })
+      end)
+
+    State.completions_emitted(state, pending_acks)
+  end
+
+  @spec buffer_for_monitor(%{optional(pid()) => request()}, reference(), pid()) ::
+          {:ok, pid()} | :error
+  defp buffer_for_monitor(requests, monitor, pid) do
+    case Enum.find(requests, fn {buffer, request} ->
+           buffer == pid and request.buffer_monitor == monitor
+         end) do
+      {buffer, _request} -> {:ok, buffer}
+      nil -> :error
+    end
+  end
+
+  @spec remove_waiter(State.t(), reference(), pid()) :: State.t()
+  defp remove_waiter(state, monitor, waiter) do
+    state =
+      Enum.reduce(state.requests, state, fn {buffer, request}, acc ->
+        entries =
+          Map.reject(request.entries, fn {_id, entry} ->
+            entry.waiter == waiter and entry.waiter_monitor == monitor
+          end)
+
+        update_request(acc, buffer, request, entries)
+      end)
+
+    pending_acks =
+      Map.reject(state.pending_acks, fn {_id, pending} ->
+        pending.waiter == waiter and pending.waiter_monitor == monitor
+      end)
+
+    state
+    |> State.waiter_removed(state.requests, pending_acks)
+    |> maybe_reply_drain_waiters()
+  end
+
+  @spec acknowledge_pending(State.t(), String.t()) :: State.t()
+  defp acknowledge_pending(state, request_id) do
+    case Map.pop(state.pending_acks, request_id) do
+      {nil, _pending} ->
+        state
+
+      {pending, remaining} ->
+        Process.demonitor(pending.waiter_monitor, [:flush])
+        state |> State.acknowledgement_received(remaining) |> maybe_reply_drain_waiters()
+    end
+  end
+
+  @spec maybe_reply_drain_waiters(State.t()) :: State.t()
+  defp maybe_reply_drain_waiters(%State{pending_acks: pending} = state)
+       when map_size(pending) == 0 do
+    Enum.each(state.drain_waiters, fn {from, timer} ->
+      _ = Process.cancel_timer(timer)
+      GenServer.reply(from, :ok)
     end)
 
-    :ok
+    State.drain_completed(state)
   end
 
-  @spec validate_result_path(String.t(), String.t()) :: :ok | {:error, term()}
-  defp validate_result_path(result_path, allowed_root) do
-    expanded = Path.expand(result_path)
-    parent = Path.dirname(expanded)
-    root_prefix = allowed_root <> "/"
+  defp maybe_reply_drain_waiters(state), do: state
 
-    with true <- String.starts_with?(parent <> "/", root_prefix),
-         true <- Path.basename(expanded) == "result",
-         {:ok, %{type: :directory}} <- File.stat(parent),
-         false <- File.exists?(expanded) do
-      :ok
-    else
-      false -> {:error, :invalid_result_path}
-      {:ok, %{type: type}} -> {:error, {:invalid_request_directory, type}}
-      {:error, reason} -> {:error, reason}
+  @spec current_buffer_status(pid()) :: {:ok, String.t(), boolean()} | :error
+  defp current_buffer_status(buffer) do
+    case Minga.Buffer.file_path(buffer) do
+      path when is_binary(path) -> {:ok, path, Minga.Buffer.dirty?(buffer)}
+      _other -> :error
     end
-  end
-
-  @spec write_ack(String.t()) :: :ok | {:error, term()}
-  defp write_ack(result_path) do
-    result_path
-    |> Path.dirname()
-    |> Path.join("ack")
-    |> write_exclusive("accepted\n")
-  end
-
-  @spec write_result(String.t(), completion()) :: :ok | {:error, term()}
-  defp write_result(path, :accepted), do: write_exclusive(path, "0\n")
-
-  defp write_result(path, {:cancelled, reason}) do
-    message =
-      reason
-      |> String.replace("\n", " ")
-      |> String.replace("\r", " ")
-      |> String.slice(0, 500)
-
-    write_exclusive(path, "1\t#{message}\n")
-  end
-
-  @spec write_exclusive(String.t(), iodata()) :: :ok | {:error, term()}
-  defp write_exclusive(path, contents) do
-    temp_path = path <> ".tmp-#{System.unique_integer([:positive])}"
-
-    result =
-      case File.write(temp_path, contents, [:exclusive]) do
-        :ok -> File.ln(temp_path, path)
-        {:error, _reason} = error -> error
-      end
-
-    _cleanup = File.rm(temp_path)
-    result
+  catch
+    :exit, _ -> :error
   end
 end

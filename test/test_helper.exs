@@ -33,12 +33,18 @@ end
 harness_path = Path.join(:code.priv_dir(:minga), "minga-test-harness")
 swift_exclude = if File.exists?(harness_path), do: [], else: [:swift_harness]
 
+# The packaged native IPC helper exists only after the macOS Xcode app build.
+macos_ipc_exclude = if System.get_env("MINGA_IPC_HELPER"), do: [], else: [:macos_ipc_helper]
+
 # `:distributed` tests boot a real peer node (Erlang distribution / epmd) and
 # are excluded by default. Run them with `mix test --include distributed`.
 # `:perf` tests drive timing-sensitive render-path benchmarks and print
 # percentile reports. They are excluded by default and run on demand with
 # `mix test --include perf`.
-ExUnit.start(capture_log: true, exclude: [:pi, :distributed, :perf | swift_exclude])
+ExUnit.start(
+  capture_log: true,
+  exclude: [:pi, :distributed, :perf] ++ swift_exclude ++ macos_ipc_exclude
+)
 
 # Disable clipboard sync during tests to avoid race conditions from
 # parallel tests sharing the system clipboard. Tests that specifically

@@ -8,10 +8,11 @@ defmodule MingaEditor.Supervisor do
       ├── Minga.Parser.Manager            Tree-sitter parser Port
       ├── MingaEditor.Frontend.Manager    Zig/Metal frontend Port
       ├── MingaEditor.Renderer.Server     Async render pipeline
-      └── MingaEditor.GenerationSupervisor (one_for_all)
-          ├── MingaEditor.EffectTaskSupervisor
-          ├── MingaEditor.EffectScheduler
-          └── MingaEditor                 Editor orchestration GenServer
+      ├── MingaEditor.GenerationSupervisor (one_for_all)
+      │   ├── MingaEditor.EffectTaskSupervisor
+      │   ├── MingaEditor.EffectScheduler
+      │   └── MingaEditor                 Editor orchestration GenServer
+      └── MingaEditor.NativeIPC.Supervisor bundled macOS control socket (GUI only)
 
   If Parser.Manager crashes, everything below restarts. If Frontend.Manager
   crashes, Renderer.Server and the Editor generation restart. If
@@ -53,22 +54,39 @@ defmodule MingaEditor.Supervisor do
          [backend: backend, renderer_path: renderer_path, tty_path: tty_path]}
       ]
       |> Enum.concat(renderer_children())
-      |> Enum.concat([
-        {MingaEditor.GenerationSupervisor,
-         [
-           editor:
-             {MingaEditor,
-              [
-                backend: backend,
-                swap_dir: Minga.Session.swap_dir(),
-                session_dir: Path.dirname(Minga.Session.session_file())
-              ]}
-         ]}
-      ])
+      |> Enum.concat(generation_children(backend))
+      |> Enum.concat(native_ipc_children(backend))
 
     Supervisor.init(children, strategy: :rest_for_one)
   end
 
   @spec renderer_children() :: [module()]
   defp renderer_children, do: [MingaEditor.Renderer.Server]
+
+  @spec generation_children(MingaEditor.Frontend.Manager.backend()) :: [{module(), keyword()}]
+  defp generation_children(backend) do
+    [
+      {MingaEditor.GenerationSupervisor,
+       [
+         editor:
+           {MingaEditor,
+            [
+              backend: backend,
+              swap_dir: Minga.Session.swap_dir(),
+              session_dir: Path.dirname(Minga.Session.session_file())
+            ]}
+       ]}
+    ]
+  end
+
+  @spec native_ipc_children(MingaEditor.Frontend.Manager.backend()) :: [module()]
+  defp native_ipc_children(:gui) do
+    if System.get_env("MINGA_PORT_MODE") == "connected" and :os.type() == {:unix, :darwin} do
+      [MingaEditor.NativeIPC.Supervisor]
+    else
+      []
+    end
+  end
+
+  defp native_ipc_children(_backend), do: []
 end

@@ -27,7 +27,7 @@ defmodule Mix.Tasks.App.Assemble do
   ## Prerequisites
 
   - Xcode command line tools installed (`xcode-select --install`)
-  - XcodeGen installed (`brew install xcodegen`)
+  - Repository-pinned XcodeGen installed (`scripts/install_xcodegen <dir>`)
   - Zig toolchain available (for the tree-sitter parser)
 
   ## What it produces
@@ -40,6 +40,7 @@ defmodule Mix.Tasks.App.Assemble do
             bin/
               minga                  # Launch Services-aware primary CLI
               minga-tui              # Explicit standalone/TUI wrapper
+              minga-ipc              # Authenticated AF_UNIX CLI helper
             release/                 # Self-contained BEAM release
               bin/minga_macos        # Release entry script
               lib/                   # BEAM modules and native support/TUI binaries
@@ -54,6 +55,7 @@ defmodule Mix.Tasks.App.Assemble do
   use Mix.Task
 
   @app_name "Minga"
+  @xcodegen_version_file ".xcodegen-version"
 
   @doc false
   @spec run([String.t()]) :: :ok
@@ -101,6 +103,26 @@ defmodule Mix.Tasks.App.Assemble do
     Path.join([Mix.Project.build_path(), "rel", "minga_macos"])
   end
 
+  @spec verify_xcodegen_version!() :: :ok
+  defp verify_xcodegen_version! do
+    expected = @xcodegen_version_file |> File.read!() |> String.trim()
+
+    case System.cmd("xcodegen", ["--version"], stderr_to_stdout: true) do
+      {output, 0} ->
+        if String.trim(output) == "Version: #{expected}" or String.trim(output) == expected do
+          :ok
+        else
+          Mix.raise("Expected XcodeGen #{expected}, got #{String.trim(output)}")
+        end
+
+      {_output, _status} ->
+        Mix.raise("XcodeGen #{expected} is required; run scripts/install_xcodegen <dir>")
+    end
+  rescue
+    ErlangError ->
+      Mix.raise("XcodeGen is required; run scripts/install_xcodegen <dir>")
+  end
+
   @spec build_xcode_project(boolean()) :: String.t()
   defp build_xcode_project(true) do
     app_path = find_xcode_app_bundle()
@@ -120,14 +142,14 @@ defmodule Mix.Tasks.App.Assemble do
     macos_dir = Path.join(File.cwd!(), "macos")
     project_path = Path.join(macos_dir, "#{@app_name}.xcodeproj")
 
-    # Generate the Xcode project from project.yml if needed
-    unless File.dir?(project_path) do
-      Mix.shell().info("Generating Xcode project with XcodeGen...")
+    # Always regenerate from project.yml with the repository-pinned generator.
+    # Reusing a checked-out project can silently omit newly declared targets.
+    verify_xcodegen_version!()
+    Mix.shell().info("Generating Xcode project with pinned XcodeGen...")
 
-      case System.cmd("xcodegen", ["generate"], cd: macos_dir, stderr_to_stdout: true) do
-        {_output, 0} -> :ok
-        {output, _} -> Mix.raise("XcodeGen failed:\n#{output}")
-      end
+    case System.cmd("xcodegen", ["generate"], cd: macos_dir, stderr_to_stdout: true) do
+      {_output, 0} -> :ok
+      {output, _} -> Mix.raise("XcodeGen failed:\n#{output}")
     end
 
     Mix.shell().info("Building Xcode project (Release configuration)...")

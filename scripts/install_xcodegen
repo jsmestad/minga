@@ -1,0 +1,27 @@
+#!/bin/sh
+# Install the repository-pinned XcodeGen release without Homebrew drift.
+set -eu
+
+repo_root=$(CDPATH='' cd "$(dirname "$0")/.." && pwd)
+version=$(cat "$repo_root/.xcodegen-version")
+destination=${1:?usage: scripts/install_xcodegen DESTINATION}
+archive=${TMPDIR:-/tmp}/xcodegen-$version.zip
+
+rm -rf "$destination"
+mkdir -p "$destination"
+curl -fsSL "https://github.com/yonaskolb/XcodeGen/releases/download/$version/xcodegen.zip" -o "$archive"
+ditto -x -k "$archive" "$destination"
+
+binary=$(find "$destination" -type f -name xcodegen -perm +111 | head -n 1)
+[ -n "$binary" ] || {
+  echo "error: pinned XcodeGen archive did not contain xcodegen" >&2
+  exit 1
+}
+
+actual=$($binary --version | awk '{print $NF}')
+[ "$actual" = "$version" ] || {
+  echo "error: expected XcodeGen $version, got $actual" >&2
+  exit 1
+}
+
+printf '%s\n' "$(dirname "$binary")"

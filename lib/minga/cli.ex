@@ -674,17 +674,84 @@ defmodule Minga.CLI do
     mode = if flags.short_name, do: :shortnames, else: :longnames
 
     with {:ok, cookie} <- distribution_cookie(flags) do
-      case start_node_if_needed(name, mode) do
+      case start_node_with_cookie(name, mode, cookie) do
         :ok ->
-          set_cookie_and_log(cookie, :ok, name)
+          log_distribution_result(:ok, name)
+          :ok
 
         {:ok, _pid} = result ->
-          set_cookie_and_log(cookie, result, name)
+          log_distribution_result(result, name)
+          :ok
 
         {:error, reason} = result ->
           log_distribution_result(result, name)
           {:error, inspect(reason)}
       end
+    end
+  end
+
+  @doc "Starts Erlang distribution after verifying that the strong cookie was installed before VM startup."
+  @spec start_node_with_cookie(atom(), :shortnames | :longnames, String.t()) ::
+          :ok | {:ok, pid()} | {:error, term()}
+  def start_node_with_cookie(name, mode, cookie) do
+    start_node_with_cookie(name, mode, cookie, &start_node_if_needed/2)
+  end
+
+  @doc "Starts Erlang distribution with an injected node starter after verifying the preloaded cookie."
+  @spec start_node_with_cookie(
+          atom(),
+          :shortnames | :longnames,
+          String.t(),
+          (atom(), :shortnames | :longnames -> :ok | {:ok, pid()} | {:error, term()})
+        ) :: :ok | {:ok, pid()} | {:error, term()}
+  def start_node_with_cookie(name, mode, cookie, starter) do
+    start_node_with_cookie(name, mode, cookie, starter, &distribution_cookie_preloaded/1)
+  end
+
+  @doc "Starts Erlang distribution with injected node-start and cookie-preflight functions."
+  @spec start_node_with_cookie(
+          atom(),
+          :shortnames | :longnames,
+          String.t(),
+          (atom(), :shortnames | :longnames -> :ok | {:ok, pid()} | {:error, term()}),
+          (atom() -> :ok | {:error, String.t()})
+        ) :: :ok | {:ok, pid()} | {:error, term()}
+  def start_node_with_cookie(name, mode, cookie, starter, cookie_preflight) do
+    with {:ok, cookie_atom} <- validate_distribution_cookie(cookie),
+         :ok <- cookie_preflight.(cookie_atom) do
+      starter.(name, mode)
+    end
+  end
+
+  @spec distribution_cookie_preloaded(atom()) :: :ok | {:error, String.t()}
+  defp distribution_cookie_preloaded(cookie) do
+    if Node.alive?() do
+      compare_distribution_cookie(Node.get_cookie(), cookie)
+    else
+      compare_distribution_cookie_argument(:init.get_argument(:setcookie), cookie)
+    end
+  end
+
+  @spec compare_distribution_cookie_argument(term(), atom()) :: :ok | {:error, String.t()}
+  defp compare_distribution_cookie_argument({:ok, [[value]]}, cookie) do
+    compare_distribution_cookie(List.to_string(value), cookie)
+  end
+
+  defp compare_distribution_cookie_argument(_argument, _cookie) do
+    {:error,
+     "Erlang distribution cookie was not installed before VM startup; set RELEASE_COOKIE or start the VM with -setcookie"}
+  end
+
+  @spec compare_distribution_cookie(atom() | String.t(), atom()) :: :ok | {:error, String.t()}
+  defp compare_distribution_cookie(actual, expected) when is_atom(actual) do
+    compare_distribution_cookie(Atom.to_string(actual), expected)
+  end
+
+  defp compare_distribution_cookie(actual, expected) do
+    if actual == Atom.to_string(expected) do
+      :ok
+    else
+      {:error, "Erlang distribution cookie does not match the cookie installed at VM startup"}
     end
   end
 
@@ -724,19 +791,45 @@ defmodule Minga.CLI do
   defp format_hostname(name, true), do: name |> List.to_string() |> String.split(".") |> hd()
   defp format_hostname(name, false), do: List.to_string(name)
 
-  @spec distribution_cookie(flags()) :: {:ok, String.t() | nil} | {:error, String.t()}
+  @spec distribution_cookie(flags()) :: {:ok, String.t()} | {:error, String.t()}
   def distribution_cookie(%{cookie_file: path}) when is_binary(path), do: read_cookie_file(path)
   def distribution_cookie(%{cookie: cookie}) when is_binary(cookie), do: {:ok, cookie}
-  def distribution_cookie(_flags), do: {:ok, System.get_env("MINGA_COOKIE")}
 
-  @spec set_cookie_if_present(String.t() | nil) :: :ok | {:error, String.t()}
-  defp set_cookie_if_present(nil), do: :ok
+  def distribution_cookie(_flags) do
+    case System.get_env("MINGA_COOKIE") do
+      cookie when is_binary(cookie) and cookie != "" -> {:ok, cookie}
+      _missing -> release_distribution_cookie()
+    end
+  end
 
-  defp set_cookie_if_present(cookie) do
+  @spec release_distribution_cookie() :: {:ok, String.t()} | {:error, String.t()}
+  defp release_distribution_cookie do
+    if System.get_env("MINGA_RANDOM_RELEASE_COOKIE") == "1" do
+      missing_distribution_cookie()
+    else
+      explicit_release_distribution_cookie()
+    end
+  end
+
+  @spec explicit_release_distribution_cookie() :: {:ok, String.t()} | {:error, String.t()}
+  defp explicit_release_distribution_cookie do
+    case System.get_env("RELEASE_COOKIE") do
+      cookie when is_binary(cookie) and cookie != "" -> {:ok, cookie}
+      _missing -> missing_distribution_cookie()
+    end
+  end
+
+  @spec missing_distribution_cookie() :: {:error, String.t()}
+  defp missing_distribution_cookie do
+    {:error,
+     "Erlang distribution requires an explicit strong MINGA_COOKIE, RELEASE_COOKIE, or --cookie-file"}
+  end
+
+  @spec validate_distribution_cookie(String.t()) :: {:ok, atom()} | {:error, String.t()}
+  defp validate_distribution_cookie(cookie) do
     case Cookie.to_atom(cookie) do
       {:ok, atom} ->
-        Node.set_cookie(atom)
-        :ok
+        {:ok, atom}
 
       {:error, :weak_or_invalid} ->
         {:error,
@@ -834,19 +927,6 @@ defmodule Minga.CLI do
     case Integer.parse(value) do
       {port, ""} when port in 1..65_535 -> {:ok, port}
       _ -> :error
-    end
-  end
-
-  @spec set_cookie_and_log(String.t() | nil, :ok | {:ok, pid()}, atom()) ::
-          :ok | {:error, String.t()}
-  defp set_cookie_and_log(cookie, result, name) do
-    case set_cookie_if_present(cookie) do
-      :ok ->
-        log_distribution_result(result, name)
-        :ok
-
-      {:error, message} ->
-        {:error, message}
     end
   end
 
@@ -1077,7 +1157,7 @@ defmodule Minga.CLI do
       minga sessions ssh://devbox         List remote sessions without launching the editor
       minga kill-session ssh://devbox/work/app  Stop the remote session for that checkout
       minga login --manual             Sign in on a headless server by pasting the browser redirect
-      MINGA_COOKIE=$(openssl rand -base64 32 | tr -d '/+=') minga --headless   Start detachable agent server
+      RELEASE_COOKIE=$(openssl rand -base64 32 | tr -d '/+=') minga --headless   Start detachable agent server
       minga --config ~/minimal.exs       Use a custom config profile
       minga --safe                       Start with defaults and no user config
       minga -D /tmp/minga-debug.log      Persist messages and warnings for crash forensics

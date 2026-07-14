@@ -10,8 +10,9 @@ WorkingDirectory=%h
 Restart=on-failure
 RestartSec=5
 Environment=MIX_ENV=prod
-# Set a stable cookie shared only with trusted clients. This placeholder is intentionally invalid so copied templates fail until you replace it.
-Environment=MINGA_COOKIE=__CHANGE_ME__
+# Set one stable cookie before the release VM boots. The same value is read by
+# the CLI distribution preflight. Prefer a mode-0600 EnvironmentFile in production.
+Environment=RELEASE_COOKIE=__CHANGE_ME_WITH_AT_LEAST_32_RANDOM_BYTES__
 # Optional provider credentials live on the server, not on attaching clients.
 # Environment=ANTHROPIC_API_KEY=...
 # Environment=OPENAI_API_KEY=...

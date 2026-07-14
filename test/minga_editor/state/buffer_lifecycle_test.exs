@@ -369,7 +369,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
     end
 
     @tag :tmp_dir
-    test "save lifecycle broadcasts the buffer that was saved, not the active buffer", %{
+    test "post-command lifecycle does not duplicate source-owned save events", %{
       tmp_dir: tmp_dir
     } do
       active_path = Path.join(tmp_dir, "active.ex")
@@ -386,7 +386,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
 
       assert %EditorState{} = BufferLifecycle.lsp_after_save(state, :save, saved_buf)
 
-      assert_receive {:minga_event, :buffer_saved,
+      refute_receive {:minga_event, :buffer_saved,
                       %Minga.Events.BufferEvent{buffer: ^saved_buf, path: ^saved_path}}
 
       refute_receive {:minga_event, :buffer_saved,

@@ -224,7 +224,7 @@ When adding or changing opcodes, edit the schema and regenerate instead of hand-
 - **Swift 6.0+** with strict concurrency
 - **Metal 3.1+** (MSL 3.1), macOS 15.0+ deployment target
 - **Xcode 16+** for building
-- Build via XcodeGen: `xcodegen generate && xcodebuild -project Minga.xcodeproj -scheme Minga build`
+- Install the version pinned in `.xcodegen-version` with `scripts/install_xcodegen <dir>`, then build via `xcodegen generate && xcodebuild -project Minga.xcodeproj -scheme Minga build`.
 
 ## Coding Standards
 
@@ -247,8 +247,9 @@ When adding or changing opcodes, edit the schema and regenerate instead of hand-
 ### Testing
 
 ```bash
-mix swift.build          # Build the macOS app
-mix swift.test           # Run protocol round-trip tests
+cd macos
+xcodebuild build -scheme Minga -configuration Debug -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO
+xcodebuild test -scheme Minga -configuration Debug -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO
 ```
 
 ### Swift 6 Concurrency Patterns

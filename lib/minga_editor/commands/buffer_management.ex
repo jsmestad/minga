@@ -63,7 +63,6 @@ defmodule MingaEditor.Commands.BufferManagement do
 
     case Buffer.save(buf) do
       :ok ->
-        :ok = WaitRequests.accept(buf)
         name = Helpers.buffer_display_name(buf)
 
         NoticeWorkflow.publish(state, "Wrote #{name}")
@@ -88,7 +87,6 @@ defmodule MingaEditor.Commands.BufferManagement do
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :force_save) do
     case Buffer.force_save(buf) do
       :ok ->
-        :ok = WaitRequests.accept(buf)
         name = Helpers.buffer_display_name(buf)
         NoticeWorkflow.publish(state, "Wrote #{name} (force)")
 
@@ -2128,11 +2126,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp save_all_buffers(state) do
     Enum.each(state.workspace.buffers.list, fn buf ->
       try do
-        if Buffer.dirty?(buf) do
-          if Buffer.save(buf) == :ok, do: WaitRequests.accept(buf)
-        else
-          WaitRequests.accept(buf)
-        end
+        if Buffer.dirty?(buf), do: Buffer.save(buf)
       catch
         :exit, _ -> :ok
       end
@@ -2163,7 +2157,10 @@ defmodule MingaEditor.Commands.BufferManagement do
     if Buffer.dirty?(buffer) do
       WaitRequests.cancel(buffer, "closed with unsaved changes")
     else
-      WaitRequests.accept(buffer)
+      case Buffer.file_path(buffer) do
+        path when is_binary(path) -> WaitRequests.close(buffer, path)
+        _other -> WaitRequests.cancel(buffer, "buffer closed without the requested target")
+      end
     end
   catch
     :exit, _ -> WaitRequests.cancel(buffer, "buffer closed unexpectedly")
