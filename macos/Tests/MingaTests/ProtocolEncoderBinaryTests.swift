@@ -545,34 +545,6 @@ struct EncoderGUIActionTests {
         #expect(decoded == path)
     }
 
-    @Test("open_file_wait encodes target and result paths")
-    func openFileWaitLayout() {
-        let path = "/tmp/project/COMMIT_EDITMSG"
-        let resultPath = "/tmp/minga-wait/request.abc/result"
-        let payload = captureFrame {
-            $0.sendOpenFileAndWait(path: path, resultPath: resultPath)
-        }
-
-        #expect(payload[0] == OP_GUI_ACTION)
-        #expect(payload[1] == GUI_ACTION_OPEN_FILE_WAIT)
-        let pathLen = readU16(payload, 2)
-        let pathStart = 4
-        let decodedPath = String(
-            data: payload[pathStart..<(pathStart + Int(pathLen))],
-            encoding: .utf8
-        )
-        #expect(decodedPath == path)
-
-        let resultLengthOffset = pathStart + Int(pathLen)
-        let resultLen = readU16(payload, resultLengthOffset)
-        let resultStart = resultLengthOffset + 2
-        let decodedResult = String(
-            data: payload[resultStart..<(resultStart + Int(resultLen))],
-            encoding: .utf8
-        )
-        #expect(decodedResult == resultPath)
-    }
-
     @Test("git_commit encodes amend flag, length, and message")
     func gitCommitLayout() {
         let message = "feat: polish git panel"

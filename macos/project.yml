@@ -1,5 +1,6 @@
 name: Minga
 options:
+  minimumXcodeGenVersion: "2.44.1"
   bundleIdPrefix: com.minga
   deploymentTarget:
     macOS: "15.0"
@@ -107,6 +108,18 @@ targets:
     dependencies:
       - target: MingaProtocol
 
+  MingaIPC:
+    type: tool
+    platform: macOS
+    sources:
+      - path: IPC/main.swift
+        type: file
+    settings:
+      base:
+        PRODUCT_NAME: minga-ipc
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: "YES"
+
   Minga:
     type: application
     platform: macOS
@@ -186,6 +199,7 @@ targets:
     dependencies:
       - target: MingaProtocol
       - target: MingaUI
+      - target: MingaIPC
     preBuildScripts:
       - name: Generate protocol opcodes
         script: |
@@ -210,9 +224,11 @@ targets:
           mkdir -p "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/bin"
           cp "${SRCROOT}/Resources/bin/minga" "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/bin/minga"
           cp "${SRCROOT}/Resources/bin/minga-tui" "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/bin/minga-tui"
+          cp "${BUILT_PRODUCTS_DIR}/minga-ipc" "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/bin/minga-ipc"
           chmod +x \
             "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/bin/minga" \
-            "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/bin/minga-tui"
+            "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/bin/minga-tui" \
+            "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/bin/minga-ipc"
         basedOnDependencyAnalysis: false
         inputFiles:
           - $(SRCROOT)/Resources/bin/minga
@@ -220,6 +236,7 @@ targets:
         outputFiles:
           - $(BUILT_PRODUCTS_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/bin/minga
           - $(BUILT_PRODUCTS_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/bin/minga-tui
+          - $(BUILT_PRODUCTS_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/bin/minga-ipc
     postBuildScripts:
       - name: Codesign
         script: |

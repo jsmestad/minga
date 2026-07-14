@@ -51,12 +51,16 @@ release_bin=$(resolve_release_bin) || {
 }
 
 start_editor=1
-expects_value=0
+expects_value=""
 first_command=""
+cookie_file=""
 
 for arg in "$@"; do
-  if [ "$expects_value" -eq 1 ]; then
-    expects_value=0
+  if [ -n "$expects_value" ]; then
+    if [ "$expects_value" = "--cookie-file" ]; then
+      cookie_file=$arg
+    fi
+    expects_value=""
     continue
   fi
 
@@ -64,8 +68,11 @@ for arg in "$@"; do
     --headless)
       start_editor=0
       ;;
-    --config|--debug-log|-D|--name|--sname|--cookie-file|--host|--port)
-      expects_value=1
+    --name|--sname)
+      expects_value=$arg
+      ;;
+    --config|--debug-log|-D|--cookie-file|--host|--port)
+      expects_value=$arg
       ;;
     --editor|--no-context|--minimal|--safe|-Q|--help|-h|--version|-v)
       ;;
@@ -105,5 +112,45 @@ export MINGA_CLI_ARGS_B64=$(encode_cli_args "$@")
 export MINGA_STANDALONE_TUI=1
 export MINGA_STANDALONE_EDITOR=$start_editor
 export RELEASE_DISTRIBUTION=none
+
+# Every bundled TUI VM starts local. Distribution requested by attach/session
+# commands is enabled dynamically after application boot, never by inherited VM
+# arguments or a caller-selected vm.args file.
+unset ERL_AFLAGS ERL_FLAGS ERL_ZFLAGS ELIXIR_ERL_OPTIONS RELEASE_VM_ARGS
+export MINGA_EXPECT_DISTRIBUTION=0
+
+# --cookie-file is the most explicit source and must win over inherited env.
+unset MINGA_RANDOM_RELEASE_COOKIE
+if [ -n "$cookie_file" ]; then
+  [ -f "$cookie_file" ] || {
+    echo "error: Erlang cookie file does not exist: $cookie_file" >&2
+    exit 1
+  }
+  cookie_mode=$(stat -c '%a' "$cookie_file" 2>/dev/null || stat -f '%Lp' "$cookie_file")
+  case "$cookie_mode" in
+    [0-7]00) ;;
+    *)
+      echo "error: Erlang cookie file must not be accessible by group or other users: $cookie_file" >&2
+      exit 1
+      ;;
+  esac
+  RELEASE_COOKIE=$(sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$cookie_file")
+  [ -n "$RELEASE_COOKIE" ] || {
+    echo "error: Erlang cookie file is empty: $cookie_file" >&2
+    exit 1
+  }
+  export RELEASE_COOKIE
+elif [ -n "${MINGA_COOKIE:-}" ]; then
+  RELEASE_COOKIE=$MINGA_COOKIE
+  export RELEASE_COOKIE
+elif [ -n "${RELEASE_COOKIE:-}" ]; then
+  export RELEASE_COOKIE
+else
+  # Never boot a release with its baked-in cookie, even when distribution is
+  # disabled. A future accidental distribution start then has no shared secret.
+  RELEASE_COOKIE=$(LC_ALL=C /usr/bin/od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
+  export RELEASE_COOKIE
+  export MINGA_RANDOM_RELEASE_COOKIE=1
+fi
 
 exec "$release_bin" start

@@ -69,6 +69,8 @@ defmodule Minga.Application do
   @impl true
   @spec start(Application.start_type(), term()) :: {:ok, pid()} | {:error, term()}
   def start(_type, _args) do
+    assert_expected_distribution_state!()
+
     # Info-only flags (--version/--help) must not boot the supervision tree.
     # Booting it spins up the event recorder, extensions, and watchdog just to
     # print a string, which can add seconds of startup. Short-circuit first.
@@ -170,6 +172,22 @@ defmodule Minga.Application do
   end
 
   @impl true
+  @spec prep_stop(term()) :: term()
+  def prep_stop(state) do
+    Minga.Frontend.WaitRequests.accept_all()
+
+    case Minga.Frontend.WaitRequests.await_acknowledgements(2_000) do
+      :ok ->
+        :ok
+
+      {:error, :timeout} ->
+        Minga.Log.warning(:editor, "Timed out waiting for native IPC completion acknowledgements")
+    end
+
+    state
+  end
+
+  @impl true
   @spec stop(term()) :: :ok
   def stop(_state) do
     # Mark the session as cleanly shut down so the next launch
@@ -200,6 +218,28 @@ defmodule Minga.Application do
 
     :ok
   end
+
+  @spec assert_expected_distribution_state!() :: :ok
+  defp assert_expected_distribution_state! do
+    case ensure_expected_distribution_state() do
+      :ok ->
+        :ok
+
+      {:error, :unexpected_distribution} ->
+        raise "refusing local GUI/TUI startup because Erlang distribution was enabled before application boot"
+    end
+  end
+
+  @doc "Rejects inherited distribution for launch modes that explicitly require a local VM."
+  @spec ensure_expected_distribution_state(boolean(), String.t() | nil) ::
+          :ok | {:error, :unexpected_distribution}
+  def ensure_expected_distribution_state(
+        node_alive? \\ Node.alive?(),
+        expectation \\ System.get_env("MINGA_EXPECT_DISTRIBUTION")
+      )
+
+  def ensure_expected_distribution_state(true, "0"), do: {:error, :unexpected_distribution}
+  def ensure_expected_distribution_state(_node_alive?, _expectation), do: :ok
 
   @spec maybe_print_info_and_halt() :: :ok
   defp maybe_print_info_and_halt do

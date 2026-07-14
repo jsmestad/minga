@@ -125,6 +125,39 @@ defmodule MingaEditor do
     GenServer.call(server, {:open_file, file_path})
   end
 
+  @doc "Opens a native IPC target and applies request-local editor mode."
+  @spec open_native(String.t(), boolean(), GenServer.server()) :: :ok | {:error, term()}
+  def open_native(path, editor_mode?, server \\ __MODULE__)
+      when is_binary(path) and is_boolean(editor_mode?) do
+    GenServer.call(server, {:open_native, path, editor_mode?}, 15_000)
+  end
+
+  @doc "Opens and target-binds a native IPC wait request."
+  @spec open_wait(
+          String.t(),
+          boolean(),
+          String.t(),
+          pid(),
+          GenServer.server(),
+          GenServer.server()
+        ) :: :ok | {:error, term()}
+  def open_wait(
+        path,
+        editor_mode?,
+        request_id,
+        waiter,
+        server \\ __MODULE__,
+        wait_tracker \\ Minga.Frontend.WaitRequests
+      )
+      when is_binary(path) and is_boolean(editor_mode?) and is_binary(request_id) and
+             is_pid(waiter) do
+    GenServer.call(
+      server,
+      {:open_wait, path, editor_mode?, request_id, waiter, wait_tracker},
+      15_000
+    )
+  end
+
   @doc "Triggers a full re-render of the current state."
   @spec render(GenServer.server()) :: :ok
   def render(server \\ __MODULE__) do
@@ -325,6 +358,18 @@ defmodule MingaEditor do
     end
   end
 
+  def handle_call({:open_native, path, editor_mode?}, _from, state) do
+    handle_open_native(state, path, editor_mode?)
+  end
+
+  def handle_call(
+        {:open_wait, path, editor_mode?, request_id, waiter, wait_tracker},
+        _from,
+        state
+      ) do
+    handle_open_wait(state, path, editor_mode?, request_id, waiter, wait_tracker)
+  end
+
   def handle_call({:ensure_buffer_for_path, path}, _from, state) do
     case Buffer.ensure_for_path(path, state.extension_surfaces.events_registry,
            options_server: state.interaction.options_server
@@ -401,6 +446,86 @@ defmodule MingaEditor do
   def handle_call({:cleanup_feature_state, source}, _from, state) do
     state = EditorState.drop_feature_state_source(state, source)
     {:reply, :ok, Renderer.render_or_async(state)}
+  end
+
+  @spec handle_open_native(state(), String.t(), boolean()) ::
+          {:reply, :ok | {:error, term()}, state()}
+  defp handle_open_native(state, path, editor_mode?) do
+    if File.dir?(path) do
+      new_state = GuiActionHandler.dispatch(state, {:open_file, path})
+      new_state = apply_native_editor_mode(new_state, editor_mode?)
+      {:reply, :ok, Renderer.render_or_async(new_state)}
+    else
+      case BufferRegistry.open_file_by_path_result(state, path) do
+        {:ok, new_state} ->
+          new_state = apply_native_editor_mode(new_state, editor_mode?)
+          {:reply, :ok, Renderer.render_or_async(new_state)}
+
+        {:error, reason} ->
+          {:reply, {:error, reason}, state}
+      end
+    end
+  end
+
+  @spec handle_open_wait(
+          state(),
+          String.t(),
+          boolean(),
+          String.t(),
+          pid(),
+          GenServer.server()
+        ) :: {:reply, :ok | {:error, term()}, state()}
+  defp handle_open_wait(state, path, editor_mode?, request_id, waiter, wait_tracker)
+       when is_binary(path) do
+    if File.dir?(path) do
+      {:reply, {:error, :target_is_directory}, state}
+    else
+      open_wait_target(state, path, editor_mode?, request_id, waiter, wait_tracker)
+    end
+  end
+
+  @spec open_wait_target(
+          state(),
+          String.t(),
+          boolean(),
+          String.t(),
+          pid(),
+          GenServer.server()
+        ) :: {:reply, :ok | {:error, term()}, state()}
+  defp open_wait_target(state, path, editor_mode?, request_id, waiter, wait_tracker) do
+    case BufferRegistry.open_file_by_path_result(state, path) do
+      {:ok, %{workspace: %{buffers: %{active: buffer}}} = new_state} when is_pid(buffer) ->
+        new_state = apply_native_editor_mode(new_state, editor_mode?)
+        register_open_wait(state, new_state, buffer, path, request_id, waiter, wait_tracker)
+
+      {:ok, _new_state} ->
+        {:reply, {:error, :opened_without_buffer}, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  @spec apply_native_editor_mode(state(), boolean()) :: state()
+  defp apply_native_editor_mode(%{workspace: %{keymap_scope: :agent}} = state, true),
+    do: MingaEditor.Commands.Agent.return_to_editor(state)
+
+  defp apply_native_editor_mode(state, _editor_mode?), do: state
+
+  @spec register_open_wait(
+          state(),
+          state(),
+          pid(),
+          String.t(),
+          String.t(),
+          pid(),
+          GenServer.server()
+        ) :: {:reply, :ok | {:error, term()}, state()}
+  defp register_open_wait(state, new_state, buffer, path, request_id, waiter, wait_tracker) do
+    case Minga.Frontend.WaitRequests.register(buffer, path, request_id, waiter, wait_tracker) do
+      :ok -> {:reply, :ok, Renderer.render_or_async(new_state)}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
   end
 
   @impl true
@@ -1630,6 +1755,7 @@ defmodule MingaEditor do
     to: CompletionHandling,
     as: :maybe_handle
 
+  @doc "Renders the supplied editor state immediately or through the async renderer."
   @spec do_render(state()) :: state()
   def do_render(state) do
     Renderer.render_or_async(state)

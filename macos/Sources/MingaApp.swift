@@ -202,8 +202,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var workspaceNotificationTasks: [Task<Void, Never>] = []
     private var protocolDeliveryTask: Task<Void, Never>?
     private var protocolEventHandoff: ProtocolEventHandoff?
-    private var pendingOpenRequests: [AppOpenRequest] = []
-    private var outstandingWaitResultPaths: Set<String> = []
+    private var pendingFileURLs: [URL] = []
     private var acceptsOpenRequests = false
     private let frameResourcePolicy = FrameResourcePolicy.default
 
@@ -262,11 +261,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // recovery surface instead of terminating, and keep the app
                 // responsive (clickable/quittable) while the user decides (#2698).
                 self?.presentEditorCoreStoppedRecovery()
-            }
-            manager.onTermination = { [weak self] status in
-                self?.failOutstandingWaitRequests(
-                    reason: "editor core exited before the edit completed (status \(status))"
-                )
             }
             manager.onNormalExit = {
                 NSApp.terminate(nil)
@@ -550,64 +544,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        failOutstandingWaitRequests(reason: "Minga.app exited before the edit completed")
         cancelWorkspaceLifecycleNotifications()
         protocolReader?.stop()
     }
 
-    /// Handles Finder/Open With, `open -a Minga file.ex`, and the private
-    /// wait URL used by the bundled CLI shim.
+    /// Handles Finder/Open With and `open -a Minga file.ex` file URLs.
     func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls {
-            guard let request = AppOpenRequest.parse(url) else { continue }
-            trackWaitRequest(request)
-
+        for url in urls where url.isFileURL {
+            let fileURL = url.standardizedFileURL
             if acceptsOpenRequests, let encoder {
-                sendOpenRequest(request, encoder: encoder)
+                encoder.sendOpenFile(path: fileURL.path)
             } else {
-                pendingOpenRequests.append(request)
+                pendingFileURLs.append(fileURL)
             }
         }
     }
 
     private func flushPendingOpenRequests() {
         guard let encoder else { return }
-        let requests = pendingOpenRequests
-        pendingOpenRequests.removeAll()
+        let urls = pendingFileURLs
+        pendingFileURLs.removeAll()
 
-        for request in requests {
-            sendOpenRequest(request, encoder: encoder)
-        }
-    }
-
-    private func sendOpenRequest(_ request: AppOpenRequest, encoder: ProtocolEncoder) {
-        switch request {
-        case .file(let url):
+        for url in urls {
             encoder.sendOpenFile(path: url.path)
-        case .wait(let path, let resultPath):
-            encoder.sendOpenFileAndWait(path: path, resultPath: resultPath)
         }
-    }
-
-    private func trackWaitRequest(_ request: AppOpenRequest) {
-        pruneCompletedWaitRequests()
-        guard case let .wait(_, resultPath) = request,
-              WaitResultFile.isAllowedResultPath(resultPath)
-        else { return }
-        outstandingWaitResultPaths.insert(resultPath)
-    }
-
-    private func failOutstandingWaitRequests(reason: String) {
-        for resultPath in outstandingWaitResultPaths {
-            _ = WaitResultFile.failIfPending(at: resultPath, reason: reason)
-        }
-        pruneCompletedWaitRequests()
-    }
-
-    private func pruneCompletedWaitRequests() {
-        outstandingWaitResultPaths = Set(
-            outstandingWaitResultPaths.filter { !FileManager.default.fileExists(atPath: $0) }
-        )
     }
 
     // MARK: - Workspace lifecycle notifications

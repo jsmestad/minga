@@ -15,8 +15,8 @@
   <dict>
     <key>MIX_ENV</key>
     <string>prod</string>
-    <key>MINGA_COOKIE</key>
-    <string>__CHANGE_ME__</string>
+    <key>RELEASE_COOKIE</key>
+    <string>__CHANGE_ME_WITH_AT_LEAST_32_RANDOM_BYTES__</string>
   </dict>
   <key>KeepAlive</key>
   <true/>

@@ -162,7 +162,7 @@ jobs:
         run: |
           binary="burrito_out/${{ matrix.artifact }}"
           chmod +x "$binary"
-          version=$("$binary" --version 2>&1 || true)
+          version=$(RELEASE_COOKIE="$(openssl rand -hex 32)" "$binary" --version 2>&1 || true)
           echo "Binary output: $version"
           echo "$version" | grep -q "minga"
 
@@ -190,8 +190,8 @@ jobs:
         with:
           version: ${{ env.ZIG_VERSION }}
 
-      - name: Install XcodeGen
-        run: brew install xcodegen
+      - name: Install pinned XcodeGen
+        run: echo "$(scripts/install_xcodegen "$RUNNER_TEMP/xcodegen")" >> "$GITHUB_PATH"
 
       - name: Cache deps
         uses: actions/cache@v4
@@ -291,10 +291,17 @@ jobs:
           find "$APP/Contents/Resources/release" -type f -perm /111 -print0 \
             | xargs -0 -I{} sh -c 'codesign --force --options runtime --entitlements "'"$ENTITLEMENTS"'" --sign "'"$IDENTITY"'" "$1" 2>&1 || true' _ {}
 
+          # Sign the native IPC helper explicitly with the Developer ID identity.
+          # Do not rely on --deep traversal to discover this security boundary.
+          IPC_HELPER="$APP/Contents/Resources/bin/minga-ipc"
+          codesign --force --options runtime --sign "$IDENTITY" "$IPC_HELPER"
+
           # Sign the main executable and the bundle itself
           codesign --force --options runtime --entitlements "$ENTITLEMENTS" --sign "$IDENTITY" "$APP"
 
           # Verify
+          codesign --verify --strict "$IPC_HELPER"
+          codesign -dv --verbose=4 "$IPC_HELPER" 2>&1 | grep -F "Authority=Developer ID Application"
           codesign --verify --deep --strict "$APP"
           echo "Codesign verification passed"
 
@@ -347,6 +354,19 @@ jobs:
           test -f "/tmp/minga-verify/Minga.app/Contents/MacOS/Minga"
           test -x "/tmp/minga-verify/Minga.app/Contents/Resources/bin/minga"
           test -x "/tmp/minga-verify/Minga.app/Contents/Resources/bin/minga-tui"
+          test -x "/tmp/minga-verify/Minga.app/Contents/Resources/bin/minga-ipc"
+          IPC_HELPER="/tmp/minga-verify/Minga.app/Contents/Resources/bin/minga-ipc"
+          codesign --verify --strict "$IPC_HELPER"
+          codesign -dv --verbose=4 "$IPC_HELPER" 2>&1 | grep -F "Authority=Developer ID Application"
+          nonce=$($IPC_HELPER nonce)
+          echo "$nonce" | grep -E '^[0-9a-f-]{36}$'
+          helper_tmp="$RUNNER_TEMP/minga-ipc-empty"
+          mkdir -m 700 "$helper_tmp"
+          set +e
+          TMPDIR="$helper_tmp/" "$IPC_HELPER" probe
+          probe_status=$?
+          set -e
+          test "$probe_status" -eq 3
           test -d "/tmp/minga-verify/Minga.app/Contents/Resources/release"
           mkdir -p "$RUNNER_TEMP/minga-release-smoke"
           version_output=$(MINGA_APP_PATH="/tmp/minga-verify/Minga.app" RELEASE_TMP="$RUNNER_TEMP/minga-release-smoke" "/tmp/minga-verify/Minga.app/Contents/Resources/bin/minga-tui" --version)
@@ -483,11 +503,57 @@ jobs:
 
             def install
               binary = Dir["minga_*"].first
-              if OS.mac?
-                bin.install binary => "minga-tui"
-              else
-                bin.install binary => "minga"
-              end
+              libexec.install binary => "minga-burrito"
+              executable_name = OS.mac? ? "minga-tui" : "minga"
+              wrapper = bin/executable_name
+              wrapper.write <<~SH
+                #!/bin/sh
+                set -eu
+
+                cookie_file=""
+                expects_value=""
+                for arg in "$@"; do
+                  if [ -n "$expects_value" ]; then
+                    if [ "$expects_value" = "--cookie-file" ]; then cookie_file=$arg; fi
+                    expects_value=""
+                    continue
+                  fi
+                  case "$arg" in
+                    --cookie-file) expects_value=$arg ;;
+                    --config|--debug-log|-D|--name|--sname|--host|--port) expects_value=$arg ;;
+                    --) break ;;
+                  esac
+                done
+
+                # A Homebrew-installed Burrito payload must never see inherited
+                # pre-VM distribution flags or its baked-in release cookie.
+                unset ERL_AFLAGS ERL_FLAGS ERL_ZFLAGS ELIXIR_ERL_OPTIONS RELEASE_VM_ARGS
+                export RELEASE_DISTRIBUTION=none
+                export MINGA_EXPECT_DISTRIBUTION=0
+                unset MINGA_RANDOM_RELEASE_COOKIE
+
+                if [ -n "$cookie_file" ]; then
+                  [ -f "$cookie_file" ] || {{ echo "error: Erlang cookie file does not exist: $cookie_file" >&2; exit 1; }}
+                  cookie_mode=$(stat -c '%a' "$cookie_file" 2>/dev/null || stat -f '%Lp' "$cookie_file")
+                  case "$cookie_mode" in
+                    [0-7]00) ;;
+                    *) echo "error: Erlang cookie file must not be accessible by group or other users: $cookie_file" >&2; exit 1 ;;
+                  esac
+                  RELEASE_COOKIE=$(sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$cookie_file")
+                  [ -n "$RELEASE_COOKIE" ] || {{ echo "error: Erlang cookie file is empty: $cookie_file" >&2; exit 1; }}
+                elif [ -n "${{MINGA_COOKIE:-}}" ]; then
+                  RELEASE_COOKIE=$MINGA_COOKIE
+                elif [ -n "${{RELEASE_COOKIE:-}}" ]; then
+                  : # Preserve the inherited release cookie.
+                else
+                  RELEASE_COOKIE=$(LC_ALL=C od -An -N32 -tx1 /dev/urandom | tr -d '[:space:]')
+                  export MINGA_RANDOM_RELEASE_COOKIE=1
+                fi
+                export RELEASE_COOKIE
+
+                exec "#{{libexec}}/minga-burrito" "$@"
+              SH
+              chmod 0755, wrapper
             end
 
             test do

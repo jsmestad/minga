@@ -18,6 +18,7 @@ defmodule Minga.MacOSLauncherTest do
     app = Path.join(root, "Minga.app")
     open_log = Path.join(root, "open.log")
     standalone_log = Path.join(root, "standalone.log")
+    ipc_log = Path.join(root, "ipc.log")
     File.mkdir_p!(Path.join(app, "Contents/MacOS"))
     File.mkdir_p!(workspace)
     File.write!(Path.join(app, "Contents/MacOS/Minga"), "#!/bin/sh\nexit 0\n")
@@ -37,12 +38,34 @@ defmodule Minga.MacOSLauncherTest do
       for arg in "$@"; do printf '[%s]\\n' "$arg" >> "$MINGA_TEST_STANDALONE_LOG"; done
       """)
 
+    ipc_bin =
+      write_script!(root, "minga-ipc", """
+      command="$1"
+      shift
+      case "$command" in
+        probe) exit "${MINGA_TEST_PROBE_STATUS:-3}" ;;
+        nonce) printf '%s\\n' "launch-nonce-test" ;;
+        open|wait)
+          : > "$MINGA_TEST_IPC_LOG"
+          for arg in "$@"; do printf '[%s]\\n' "$arg" >> "$MINGA_TEST_IPC_LOG"; done
+          if [ -n "${MINGA_TEST_RETRYABLE_ONCE_FILE:-}" ] && [ ! -e "$MINGA_TEST_RETRYABLE_ONCE_FILE" ]; then
+            : > "$MINGA_TEST_RETRYABLE_ONCE_FILE"
+            exit 5
+          fi
+          printf '%s' "${MINGA_TEST_WAIT_MESSAGE:-}"
+          exit "${MINGA_TEST_WAIT_STATUS:-0}"
+          ;;
+      esac
+      """)
+
     env = [
       {"MINGA_APP_PATH", app},
       {"MINGA_OPEN_BIN", open_bin},
       {"MINGA_STANDALONE_BIN", standalone_bin},
+      {"MINGA_IPC_BIN", ipc_bin},
       {"MINGA_TEST_OPEN_LOG", open_log},
-      {"MINGA_TEST_STANDALONE_LOG", standalone_log}
+      {"MINGA_TEST_STANDALONE_LOG", standalone_log},
+      {"MINGA_TEST_IPC_LOG", ipc_log}
     ]
 
     on_exit(fn -> File.rm_rf!(root) end)
@@ -53,6 +76,7 @@ defmodule Minga.MacOSLauncherTest do
      app: app,
      open_log: open_log,
      standalone_log: standalone_log,
+     ipc_log: ipc_log,
      env: env}
   end
 
@@ -61,6 +85,18 @@ defmodule Minga.MacOSLauncherTest do
 
     assert read_args(ctx.open_log) == ["-a", ctx.app, ctx.workspace]
     refute "-n" in read_args(ctx.open_log)
+  end
+
+  test "a probe that loses the app before acceptance falls back to a cold launch", ctx do
+    env = put_env(ctx.env, "MINGA_TEST_PROBE_STATUS", "5")
+
+    assert {_, 0} = run_launcher(["README.md"], %{ctx | env: env})
+
+    assert read_args(ctx.open_log) == [
+             "-a",
+             ctx.app,
+             Path.join(ctx.workspace, "README.md")
+           ]
   end
 
   test "a loose file target is handed to the running app as a file open", ctx do
@@ -73,7 +109,7 @@ defmodule Minga.MacOSLauncherTest do
            ]
   end
 
-  test "GUI flags and path-valued flags preserve the target", ctx do
+  test "cold startup flags launch without targets then deliver paths over IPC", ctx do
     args = [
       "--editor",
       "--minimal",
@@ -93,7 +129,6 @@ defmodule Minga.MacOSLauncherTest do
     assert read_args(ctx.open_log) == [
              "-a",
              ctx.app,
-             Path.join(ctx.workspace, "README.md"),
              "--args",
              "--editor",
              "--minimal",
@@ -104,7 +139,16 @@ defmodule Minga.MacOSLauncherTest do
              "--debug-log",
              Path.join(ctx.workspace, "debug.log"),
              "-D",
-             Path.join(ctx.workspace, "other.log")
+             Path.join(ctx.workspace, "other.log"),
+             "--minga-launch-nonce",
+             "launch-nonce-test"
+           ]
+
+    assert read_args(ctx.ipc_log) == [
+             "--expected-launch-nonce",
+             "launch-nonce-test",
+             "--editor",
+             Path.join(ctx.workspace, "README.md")
            ]
   end
 
@@ -173,40 +217,181 @@ defmodule Minga.MacOSLauncherTest do
     assert output =~ "failed to launch or hand off to Minga.app"
   end
 
-  test "--wait keeps the existing private wait handoff and forwards GUI flags", ctx do
-    wait_open =
-      write_script!(ctx.root, "wait-open", """
-      : > "$MINGA_TEST_OPEN_LOG"
-      for arg in "$@"; do printf '[%s]\\n' "$arg" >> "$MINGA_TEST_OPEN_LOG"; done
-      python3 - "$@" <<'PY'
-      import base64
-      import os
-      import sys
+  test "cold request-local editor opens launch without targets and safely reconnect on conflict",
+       ctx do
+    assert {_, 0} = run_launcher(["--editor", "README.md"], ctx)
 
-      for arg in sys.argv[1:]:
-          if not arg.startswith("minga://wait/"):
-              continue
-          encoded = arg.split("/")[3]
-          encoded += "=" * (-len(encoded) % 4)
-          result = base64.urlsafe_b64decode(encoded).decode()
-          open(os.path.join(os.path.dirname(result), "ack"), "w").close()
-          with open(result, "w") as handle:
-              handle.write("0\\tclosed\\n")
-      PY
-      """)
+    assert read_args(ctx.open_log) == [
+             "-a",
+             ctx.app,
+             "--args",
+             "--editor",
+             "--minga-launch-nonce",
+             "launch-nonce-test"
+           ]
 
-    pgrep = write_script!(ctx.root, "pgrep", "echo 1\n")
+    assert read_args(ctx.ipc_log) == [
+             "--expected-launch-nonce",
+             "launch-nonce-test",
+             "--allow-launch-conflict",
+             "--editor",
+             Path.join(ctx.workspace, "README.md")
+           ]
+  end
+
+  test "wait rejects directory targets before launching the app", ctx do
+    assert {output, 2} = run_launcher(["--wait", "."], ctx)
+    assert output =~ "--wait requires a file target, not a directory"
+    refute File.exists?(ctx.open_log)
+    refute File.exists?(ctx.ipc_log)
+  end
+
+  test "cold --wait launches with a nonce then delegates the lifecycle to native IPC", ctx do
+    assert {_, 0} = run_launcher(["--wait", "--minimal", "README.md"], ctx)
+
+    assert read_args(ctx.open_log) == [
+             "-a",
+             ctx.app,
+             "--args",
+             "--minimal",
+             "--minga-launch-nonce",
+             "launch-nonce-test"
+           ]
+
+    assert read_args(ctx.ipc_log) == [
+             "--expected-launch-nonce",
+             "launch-nonce-test",
+             Path.join(ctx.workspace, "README.md")
+           ]
+  end
+
+  test "cold wait without startup-only flags permits a nonce-conflict reconnect", ctx do
+    assert {_, 0} = run_launcher(["--wait", "--editor", "README.md"], ctx)
+
+    assert read_args(ctx.ipc_log) == [
+             "--expected-launch-nonce",
+             "launch-nonce-test",
+             "--allow-launch-conflict",
+             "--editor",
+             Path.join(ctx.workspace, "README.md")
+           ]
+  end
+
+  test "running app receives file opens and --editor through authenticated IPC", ctx do
+    env = put_env(ctx.env, "MINGA_TEST_PROBE_STATUS", "0")
+    assert {_, 0} = run_launcher(["--editor", "README.md"], %{ctx | env: env})
+    assert read_args(ctx.open_log) == ["-a", ctx.app]
+
+    assert read_args(ctx.ipc_log) == [
+             "--editor",
+             Path.join(ctx.workspace, "README.md")
+           ]
+  end
+
+  test "running app receives a directory through authenticated IPC", ctx do
+    env = put_env(ctx.env, "MINGA_TEST_PROBE_STATUS", "0")
+    assert {_, 0} = run_launcher(["."], %{ctx | env: env})
+    assert read_args(ctx.open_log) == ["-a", ctx.app]
+    assert read_args(ctx.ipc_log) == [ctx.workspace]
+  end
+
+  test "running app wait activates the exact instance and accepts --editor per request", ctx do
+    env = put_env(ctx.env, "MINGA_TEST_PROBE_STATUS", "0")
+    assert {_, 0} = run_launcher(["--wait", "--editor", "README.md"], %{ctx | env: env})
+    assert read_args(ctx.open_log) == ["-a", ctx.app]
+    assert read_args(ctx.ipc_log) == ["--editor", Path.join(ctx.workspace, "README.md")]
+  end
+
+  test "running open relaunches and retries once after pre-acceptance app loss", ctx do
+    retry_marker = Path.join(ctx.root, "open-retry.marker")
 
     env =
       ctx.env
-      |> put_env("MINGA_OPEN_BIN", wait_open)
-      |> put_env("MINGA_PGREP_BIN", pgrep)
+      |> put_env("MINGA_TEST_PROBE_STATUS", "0")
+      |> put_env("MINGA_TEST_RETRYABLE_ONCE_FILE", retry_marker)
 
-    assert {_, 0} = run_launcher(["--wait", "--minimal", "README.md"], %{ctx | env: env})
+    assert {_, 0} = run_launcher(["README.md"], %{ctx | env: env})
+    assert File.exists?(retry_marker)
 
-    app = ctx.app
-    assert ["-a", ^app, wait_url, "--args", "--minimal"] = read_args(ctx.open_log)
-    assert String.starts_with?(wait_url, "minga://wait/")
+    assert read_args(ctx.open_log) == [
+             "-a",
+             ctx.app,
+             "--args",
+             "--minga-launch-nonce",
+             "launch-nonce-test"
+           ]
+
+    assert read_args(ctx.ipc_log) == [
+             "--expected-launch-nonce",
+             "launch-nonce-test",
+             "--allow-launch-conflict",
+             Path.join(ctx.workspace, "README.md")
+           ]
+  end
+
+  test "running wait relaunches and retries once only before acceptance", ctx do
+    retry_marker = Path.join(ctx.root, "wait-retry.marker")
+
+    env =
+      ctx.env
+      |> put_env("MINGA_TEST_PROBE_STATUS", "0")
+      |> put_env("MINGA_TEST_RETRYABLE_ONCE_FILE", retry_marker)
+
+    assert {_, 0} = run_launcher(["--wait", "README.md"], %{ctx | env: env})
+    assert File.exists?(retry_marker)
+
+    assert read_args(ctx.open_log) == [
+             "-a",
+             ctx.app,
+             "--args",
+             "--minga-launch-nonce",
+             "launch-nonce-test"
+           ]
+
+    assert read_args(ctx.ipc_log) == [
+             "--expected-launch-nonce",
+             "launch-nonce-test",
+             "--allow-launch-conflict",
+             Path.join(ctx.workspace, "README.md")
+           ]
+  end
+
+  test "probe distinguishes insecure endpoints from inspection failures", ctx do
+    insecure = put_env(ctx.env, "MINGA_TEST_PROBE_STATUS", "4")
+    assert {insecure_output, 1} = run_launcher(["README.md"], %{ctx | env: insecure})
+    assert insecure_output =~ "failed security validation"
+
+    unavailable = put_env(ctx.env, "MINGA_TEST_PROBE_STATUS", "1")
+    assert {unavailable_output, 1} = run_launcher(["README.md"], %{ctx | env: unavailable})
+    assert unavailable_output =~ "could not inspect"
+  end
+
+  test "startup-only flags fail clearly when an authenticated endpoint exists", ctx do
+    env = put_env(ctx.env, "MINGA_TEST_PROBE_STATUS", "0")
+
+    assert {output, 2} =
+             run_launcher(["--minimal", "--config", "config.exs", "README.md"], %{
+               ctx
+               | env: env
+             })
+
+    assert output =~ "startup-only flag(s)"
+    assert output =~ "--minimal"
+    assert output =~ "--config"
+    assert output =~ "Quit Minga.app first"
+    refute File.exists?(ctx.open_log)
+  end
+
+  test "wait helper disconnect is returned without launcher polling or process guessing", ctx do
+    env =
+      ctx.env
+      |> put_env("MINGA_TEST_PROBE_STATUS", "0")
+      |> put_env("MINGA_TEST_WAIT_STATUS", "1")
+      |> put_env("MINGA_TEST_WAIT_MESSAGE", "endpoint disconnected")
+
+    assert {output, 1} = run_launcher(["--wait", "README.md"], %{ctx | env: env})
+    assert output =~ "endpoint disconnected"
+    assert read_args(ctx.open_log) == ["-a", ctx.app]
   end
 
   test "the bundled TUI wrapper classifies editor and terminal startup", ctx do
@@ -247,6 +432,78 @@ defmodule Minga.MacOSLauncherTest do
 
     assert File.read!(release_log) ==
              "editor=[0]\nmode=[1]\nargs=[#{encode_args(headless_args)}]\n[start]\n"
+  end
+
+  test "the TUI wrapper installs explicit cookies before the release VM starts", ctx do
+    release_log = Path.join(ctx.root, "cookie-release.log")
+
+    release_bin =
+      write_script!(ctx.root, "cookie-release", """
+      printf 'cookie=[%s]\n' "${RELEASE_COOKIE:-}" > "$MINGA_TEST_RELEASE_LOG"
+      """)
+
+    base_env = [
+      {"MINGA_RELEASE_BIN", release_bin},
+      {"MINGA_TEST_RELEASE_LOG", release_log}
+    ]
+
+    env_cookie = "abcdefghijklmnopqrstuvwxyz123456"
+
+    assert {_, 0} =
+             System.cmd(@tui_wrapper, ["--headless"],
+               env: [{"MINGA_COOKIE", env_cookie} | base_env],
+               stderr_to_stdout: true
+             )
+
+    assert File.read!(release_log) == "cookie=[#{env_cookie}]\n"
+
+    file_cookie = "zyxwvutsrqponmlkjihgfedcba654321"
+    cookie_file = Path.join(ctx.root, "distribution.cookie")
+    File.write!(cookie_file, file_cookie <> "\n")
+    File.chmod!(cookie_file, 0o600)
+
+    assert {_, 0} =
+             System.cmd(@tui_wrapper, ["--headless", "--cookie-file", cookie_file],
+               env: [{"MINGA_COOKIE", env_cookie} | base_env],
+               stderr_to_stdout: true
+             )
+
+    assert File.read!(release_log) == "cookie=[#{file_cookie}]\n"
+  end
+
+  test "all bundled TUI boots clear pre-VM flags and assert local preboot distribution", ctx do
+    release_log = Path.join(ctx.root, "local-release.log")
+
+    release_bin =
+      write_script!(ctx.root, "local-release", """
+      printf 'expected=[%s]\n' "${MINGA_EXPECT_DISTRIBUTION:-}" > "$MINGA_TEST_RELEASE_LOG"
+      printf 'erl_aflags=[%s]\n' "${ERL_AFLAGS:-}" >> "$MINGA_TEST_RELEASE_LOG"
+      printf 'erl_flags=[%s]\n' "${ERL_FLAGS:-}" >> "$MINGA_TEST_RELEASE_LOG"
+      printf 'erl_zflags=[%s]\n' "${ERL_ZFLAGS:-}" >> "$MINGA_TEST_RELEASE_LOG"
+      printf 'elixir_erl_options=[%s]\n' "${ELIXIR_ERL_OPTIONS:-}" >> "$MINGA_TEST_RELEASE_LOG"
+      printf 'release_vm_args=[%s]\n' "${RELEASE_VM_ARGS:-}" >> "$MINGA_TEST_RELEASE_LOG"
+      printf 'cookie_length=[%s]\n' "${#RELEASE_COOKIE}" >> "$MINGA_TEST_RELEASE_LOG"
+      """)
+
+    env = [
+      {"MINGA_RELEASE_BIN", release_bin},
+      {"MINGA_TEST_RELEASE_LOG", release_log},
+      {"ERL_AFLAGS", "-sname inherited"},
+      {"ERL_FLAGS", "-name inherited@example"},
+      {"ERL_ZFLAGS", "-sname inherited_zflags"},
+      {"ELIXIR_ERL_OPTIONS", "-sname inherited_elixir"},
+      {"RELEASE_VM_ARGS", "/tmp/inherited.vm.args"},
+      {"RELEASE_COOKIE", ""}
+    ]
+
+    expected =
+      "expected=[0]\nerl_aflags=[]\nerl_flags=[]\nerl_zflags=[]\n" <>
+        "elixir_erl_options=[]\nrelease_vm_args=[]\ncookie_length=[64]\n"
+
+    for args <- [["README.md"], ["--headless"], ["attach", "ssh://devbox/work/app"]] do
+      assert {_, 0} = System.cmd(@tui_wrapper, args, env: env, stderr_to_stdout: true)
+      assert File.read!(release_log) == expected
+    end
   end
 
   test "the TUI wrapper resolves the standalone runtime from an installed app", ctx do

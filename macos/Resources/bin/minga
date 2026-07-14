@@ -59,6 +59,28 @@ resolve_app() {
   fi
 }
 
+resolve_ipc() {
+  local candidate
+
+  if [ -n "${MINGA_IPC_BIN:-}" ]; then
+    [ -x "$MINGA_IPC_BIN" ] || return 1
+    printf '%s\n' "$MINGA_IPC_BIN"
+    return
+  fi
+
+  for candidate in \
+    "$APP_PATH/Contents/Resources/bin/minga-ipc" \
+    "$SCRIPT_DIR/minga-ipc"
+  do
+    if [ -x "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return
+    fi
+  done
+
+  return 1
+}
+
 resolve_standalone() {
   local bundle_app candidate
 
@@ -160,28 +182,6 @@ absolute_path() {
   fi
 }
 
-base64_url() {
-  printf '%s' "$1" | base64 | tr -d '\n=' | tr '+/' '-_'
-}
-
-read_wait_result() {
-  local result_path="$1" line status message
-  IFS= read -r line < "$result_path" || line="1\tinvalid wait response"
-  status="${line%%$'\t'*}"
-  message="${line#*$'\t'}"
-
-  if [ "$status" = "0" ]; then
-    return 0
-  fi
-
-  if [ "$message" != "$line" ] && [ -n "$message" ]; then
-    echo "minga: $message" >&2
-  else
-    echo "minga: editor request failed" >&2
-  fi
-  return 1
-}
-
 force_standalone=false
 terminal_only=false
 after_double_dash=false
@@ -271,8 +271,10 @@ APP_PATH=$(resolve_app) || {
 }
 
 flags=()
+startup_flags=()
 files=()
 wait_mode=false
+request_editor=false
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -296,10 +298,17 @@ while [ $# -gt 0 ]; do
         exit 2
       fi
       flags+=("$flag" "$(absolute_path "$1")")
+      startup_flags+=("$flag")
       shift
       ;;
-    --editor|--no-context|--minimal|--safe|-Q)
+    --editor)
       flags+=("$1")
+      request_editor=true
+      shift
+      ;;
+    --no-context|--minimal|--safe|-Q)
+      flags+=("$1")
+      startup_flags+=("$1")
       shift
       ;;
     --)
@@ -326,13 +335,105 @@ if [ ! -x "$OPEN_BIN" ]; then
   exit 1
 fi
 
+IPC_BIN=$(resolve_ipc) || {
+  echo "error: Minga.app is missing its authenticated native IPC helper." >&2
+  exit 1
+}
+
+endpoint_exists=false
+if "$IPC_BIN" probe >/dev/null 2>&1; then
+  endpoint_exists=true
+else
+  probe_status=$?
+  case "$probe_status" in
+    3|5) ;; # missing, stale, or lost-before-acceptance endpoint: start a fresh app
+    4)
+      echo "error: the existing Minga.app IPC endpoint failed security validation." >&2
+      exit 1
+      ;;
+    *)
+      echo "error: could not inspect the Minga.app IPC endpoint." >&2
+      exit 1
+      ;;
+  esac
+fi
+
+if $endpoint_exists && [ ${#startup_flags[@]} -gt 0 ]; then
+  rejected=$(IFS=', '; printf '%s' "${startup_flags[*]}")
+  echo "error: startup-only flag(s) cannot be applied to the running Minga.app: $rejected" >&2
+  echo "Quit Minga.app first, then retry." >&2
+  exit 2
+fi
+
+retry_after_endpoint_loss=false
+
 if ! $wait_mode; then
+  if $endpoint_exists; then
+    if ! "$OPEN_BIN" -a "$APP_PATH"; then
+      echo "error: failed to activate Minga.app" >&2
+      exit 1
+    fi
+    if [ ${#files[@]} -gt 0 ]; then
+      ipc_args=(open)
+      if $request_editor; then ipc_args+=(--editor); fi
+      if "$IPC_BIN" "${ipc_args[@]}" "${files[@]}"; then
+        exit 0
+      else
+        ipc_status=$?
+      fi
+      if [ "$ipc_status" -ne 5 ]; then
+        exit "$ipc_status"
+      fi
+      # The endpoint proven by probe died before accepting the request. Relaunch
+      # exactly once with a nonce; the retried helper is exec'd below, so a
+      # second pre-acceptance loss is terminal rather than recursive.
+      retry_after_endpoint_loss=true
+    else
+      exit 0
+    fi
+  fi
+
+  if [ ${#startup_flags[@]} -gt 0 ] || $request_editor || $retry_after_endpoint_loss; then
+    launch_nonce=$("$IPC_BIN" nonce) || {
+      echo "error: could not create a launch nonce" >&2
+      exit 1
+    }
+    open_args=(-a "$APP_PATH" --args)
+    if [ ${#flags[@]} -gt 0 ]; then
+      open_args+=("${flags[@]}")
+    fi
+    open_args+=(--minga-launch-nonce "$launch_nonce")
+
+    if ! "$OPEN_BIN" "${open_args[@]}"; then
+      echo "error: failed to launch Minga.app" >&2
+      exit 1
+    fi
+
+    ipc_identity_args=(--expected-launch-nonce "$launch_nonce")
+    if [ ${#startup_flags[@]} -eq 0 ]; then
+      ipc_identity_args+=(--allow-launch-conflict)
+    fi
+
+    if [ ${#files[@]} -gt 0 ]; then
+      ipc_args=(open "${ipc_identity_args[@]}")
+      if $request_editor; then ipc_args+=(--editor); fi
+      exec "$IPC_BIN" "${ipc_args[@]}" "${files[@]}"
+    fi
+
+    if ! "$IPC_BIN" probe "${ipc_identity_args[@]}"; then
+      if [ ${#startup_flags[@]} -gt 0 ]; then
+        echo "error: another Minga.app instance won startup; requested startup-only flags were not applied." >&2
+      else
+        echo "error: Minga.app did not publish an authenticated IPC endpoint." >&2
+      fi
+      exit 1
+    fi
+    exit 0
+  fi
+
   open_args=(-a "$APP_PATH")
   if [ ${#files[@]} -gt 0 ]; then
     open_args+=("${files[@]}")
-  fi
-  if [ ${#flags[@]} -gt 0 ]; then
-    open_args+=(--args "${flags[@]}")
   fi
   if ! "$OPEN_BIN" "${open_args[@]}"; then
     echo "error: failed to launch or hand off to Minga.app at $APP_PATH." >&2
@@ -351,58 +452,46 @@ if [ -d "${files[0]}" ]; then
   exit 2
 fi
 
-wait_root="${TMPDIR:-/tmp}"
-wait_root="${wait_root%/}/minga-wait"
-mkdir -p "$wait_root"
-chmod 700 "$wait_root"
-request_dir=$(mktemp -d "$wait_root/request.XXXXXX")
-chmod 700 "$request_dir"
-result_path="$request_dir/result"
-ack_path="$request_dir/ack"
-cleanup() { rm -rf "$request_dir"; }
-trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
 
-wait_url="minga://wait/$(base64_url "$result_path")/$(base64_url "${files[0]}")"
-open_args=(-a "$APP_PATH" "$wait_url")
-if [ ${#flags[@]} -gt 0 ]; then
-  open_args+=(--args "${flags[@]}")
+if $endpoint_exists; then
+  if ! "$OPEN_BIN" -a "$APP_PATH"; then
+    echo "error: failed to activate Minga.app" >&2
+    exit 1
+  fi
+  ipc_args=(wait)
+  if $request_editor; then ipc_args+=(--editor); fi
+  if "$IPC_BIN" "${ipc_args[@]}" "${files[0]}"; then
+    exit 0
+  else
+    ipc_status=$?
+  fi
+  if [ "$ipc_status" -ne 5 ]; then
+    exit "$ipc_status"
+  fi
+  # Exit 5 can only be emitted before the accepted frame. Once accepted, the
+  # helper maps exact app death to terminal exit 1 and this launcher never
+  # relaunches or transfers the wait request to a different app instance.
 fi
+
+launch_nonce=$("$IPC_BIN" nonce) || {
+  echo "error: could not create a launch nonce" >&2
+  exit 1
+}
+open_args=(-a "$APP_PATH" --args)
+if [ ${#flags[@]} -gt 0 ]; then
+  open_args+=("${flags[@]}")
+fi
+open_args+=(--minga-launch-nonce "$launch_nonce")
 
 if ! "$OPEN_BIN" "${open_args[@]}"; then
   echo "error: failed to launch Minga.app" >&2
   exit 1
 fi
 
-# Distinguish launch/open failures from a legitimate long editing session.
-# The BEAM writes ack only after the requested file is open and tracked.
-attempts=0
-while [ ! -e "$ack_path" ]; do
-  if [ -e "$result_path" ]; then
-    read_wait_result "$result_path"
-    exit $?
-  fi
-  attempts=$((attempts + 1))
-  if [ "$attempts" -ge 150 ]; then
-    echo "error: Minga.app did not accept the wait request within 15 seconds" >&2
-    exit 1
-  fi
-  "${MINGA_SLEEP_BIN:-/bin/sleep}" 0.1
-done
-
-PGREP_BIN="${MINGA_PGREP_BIN:-/usr/bin/pgrep}"
-app_pid=$("$PGREP_BIN" -x Minga | /usr/bin/head -n 1 || true)
-if [ -z "$app_pid" ]; then
-  echo "error: Minga.app exited before the edit completed" >&2
-  exit 1
+ipc_args=(wait --expected-launch-nonce "$launch_nonce")
+if [ ${#startup_flags[@]} -eq 0 ]; then
+  ipc_args+=(--allow-launch-conflict)
 fi
-
-while [ ! -e "$result_path" ]; do
-  if ! kill -0 "$app_pid" 2>/dev/null; then
-    echo "error: Minga.app exited before the edit completed" >&2
-    exit 1
-  fi
-  "${MINGA_SLEEP_BIN:-/bin/sleep}" 0.1
-done
-
-read_wait_result "$result_path"
+if $request_editor; then ipc_args+=(--editor); fi
+exec "$IPC_BIN" "${ipc_args[@]}" "${files[0]}"

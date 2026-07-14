@@ -269,8 +269,7 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       system_will_unmount: 0x5A,
       empty_state_activate: 0x5B,
       chat_scrolled_away_from_bottom: 0x5C,
-      chat_returned_to_bottom: 0x5D,
-      open_file_wait: 0x5E
+      chat_returned_to_bottom: 0x5D
     )
   end
 

@@ -294,10 +294,16 @@ defmodule Minga.Session.EventRecorderTest do
              db_dir: tmp_dir,
              subscribe: false,
              health_check: :quick,
-             health_check_delay_ms: 0},
+             health_check_delay_ms: :timer.minutes(1)},
             id: :"recorder_health_#{unique}"
           )
         )
+
+      :erlang.trace(recorder, true, [:receive])
+      send(recorder, {:run_health_check, :quick})
+
+      assert_receive {:trace, ^recorder, :receive, {:health_check_result, :healthy}}, 1_000
+      :erlang.trace(recorder, false, [:receive])
 
       send(
         recorder,

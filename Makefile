@@ -150,7 +150,8 @@ release-tui:
 release-mac:
 ifeq ($(OS),Darwin)
 	@command -v xcodebuild >/dev/null 2>&1 || { echo "\033[31mError: xcodebuild not found. Install Xcode from the App Store.\033[0m"; exit 1; }
-	@command -v xcodegen >/dev/null 2>&1 || { echo "\033[31mError: xcodegen not found. Install with: brew install xcodegen\033[0m"; exit 1; }
+	@command -v xcodegen >/dev/null 2>&1 || { echo "\033[31mError: pinned xcodegen not found. Run scripts/install_xcodegen <dir>.\033[0m"; exit 1; }
+	@test "$$(xcodegen --version | awk '{print $$NF}')" = "$$(cat .xcodegen-version)" || { echo "\033[31mError: XcodeGen version does not match .xcodegen-version.\033[0m"; exit 1; }
 	@echo "Building macOS GUI app..."
 	MIX_ENV=prod mix app.assemble
 	@echo "\033[32mMinga.app built successfully.\033[0m"

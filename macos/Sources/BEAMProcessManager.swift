@@ -16,102 +16,17 @@
 /// can show an error UI.
 
 import Foundation
-
-/// A file-opening request delivered by macOS Launch Services.
-///
-/// Regular file URLs retain the normal Finder/Open With path. The private
-/// `minga://wait/...` URL is transport used by the bundled CLI shim so a
-/// terminal process can wait for BEAM-owned editor completion semantics.
-enum AppOpenRequest: Equatable {
-    case file(URL)
-    case wait(path: String, resultPath: String)
-
-    /// Parses a Launch Services URL into an app-open request.
-    static func parse(_ url: URL) -> AppOpenRequest? {
-        if url.isFileURL {
-            return .file(url.standardizedFileURL)
-        }
-
-        guard url.scheme == "minga", url.host == "wait" else { return nil }
-
-        let components = url.pathComponents.filter { $0 != "/" }
-        guard components.count == 2,
-              let resultPath = decodeBase64URL(components[0]),
-              let path = decodeBase64URL(components[1]),
-              !resultPath.isEmpty,
-              !path.isEmpty
-        else {
-            return nil
-        }
-
-        let standardizedResultPath = URL(fileURLWithPath: resultPath).standardizedFileURL.path
-        guard WaitResultFile.isAllowedResultPath(standardizedResultPath) else { return nil }
-
-        return .wait(
-            path: URL(fileURLWithPath: path).standardizedFileURL.path,
-            resultPath: standardizedResultPath
-        )
-    }
-
-    private static func decodeBase64URL(_ value: String) -> String? {
-        var base64 = value
-            .replacingOccurrences(of: "-", with: "+")
-            .replacingOccurrences(of: "_", with: "/")
-
-        let padding = (4 - base64.count % 4) % 4
-        base64.append(String(repeating: "=", count: padding))
-
-        guard let data = Data(base64Encoded: base64) else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-}
-
-/// Publishes an app-side failure only when the BEAM did not already complete a wait request.
-enum WaitResultFile {
-    static var allowedRootURL: URL {
-        FileManager.default.temporaryDirectory
-            .appendingPathComponent("minga-wait", isDirectory: true)
-            .standardizedFileURL
-    }
-
-    static func isAllowedResultPath(_ resultPath: String) -> Bool {
-        let resultURL = URL(fileURLWithPath: resultPath).standardizedFileURL
-        let requestURL = resultURL.deletingLastPathComponent()
-        let requestName = requestURL.lastPathComponent
-
-        return resultURL.lastPathComponent == "result"
-            && requestName.hasPrefix("request.")
-            && requestName.count > "request.".count
-            && requestURL.deletingLastPathComponent().standardizedFileURL.path == allowedRootURL.path
-    }
-
-    /// Atomically creates a non-zero result without overwriting a BEAM-owned completion.
-    static func failIfPending(at resultPath: String, reason: String) -> Bool {
-        guard isAllowedResultPath(resultPath) else { return false }
-
-        let message = reason
-            .replacingOccurrences(of: "\n", with: " ")
-            .replacingOccurrences(of: "\r", with: " ")
-            .prefix(500)
-        let contents = Data("1\t\(message)\n".utf8)
-        let resultURL = URL(fileURLWithPath: resultPath).standardizedFileURL
-        let tempURL = resultURL
-            .deletingLastPathComponent()
-            .appendingPathComponent(".result-tmp-\(UUID().uuidString)")
-
-        do {
-            try contents.write(to: tempURL, options: .withoutOverwriting)
-            defer { try? FileManager.default.removeItem(at: tempURL) }
-            try FileManager.default.linkItem(at: tempURL, to: resultURL)
-            return true
-        } catch {
-            return false
-        }
-    }
-}
+import Darwin
 
 @MainActor
 final class BEAMProcessManager {
+    /// Stable identity retained across BEAM child restarts in this app process.
+    private let appInstanceID = UUID().uuidString.lowercased()
+
+    /// Optional nonce supplied only by the launcher that created this app instance.
+    private let launchNonce = BEAMProcessManager.internalLaunchNonce(
+        from: ProcessInfo.processInfo.arguments
+    )
     /// File handle for reading protocol messages from the BEAM (BEAM's stdout).
     private(set) var readHandle: FileHandle?
 
@@ -126,9 +41,6 @@ final class BEAMProcessManager {
 
     /// Called when the BEAM exits normally (exit code 0).
     var onNormalExit: (@MainActor () -> Void)?
-
-    /// Called on every BEAM exit so app-local transports can fail pending requests.
-    var onTermination: (@MainActor (_ status: Int32) -> Void)?
 
     /// Called each time the BEAM process starts (initial or restart).
     /// Provides the new read/write handles for protocol communication.
@@ -195,8 +107,17 @@ final class BEAMProcessManager {
             "--editor", "--no-context", "--minimal", "--safe", "-Q"
         ]
         var expectsValue = false
+        var skipsInternalValue = false
 
         for arg in appArguments.dropFirst() {
+            if skipsInternalValue {
+                skipsInternalValue = false
+                continue
+            }
+            if arg == "--minga-launch-nonce" {
+                skipsInternalValue = true
+                continue
+            }
             if expectsValue {
                 cliArguments.append(arg)
                 expectsValue = false
@@ -214,6 +135,17 @@ final class BEAMProcessManager {
         return cliArguments
     }
 
+    /// Extracts the launch nonce without forwarding this internal flag to Minga.CLI.
+    static func internalLaunchNonce(from appArguments: [String]) -> String? {
+        let arguments = Array(appArguments.dropFirst())
+        guard let index = arguments.firstIndex(of: "--minga-launch-nonce"),
+              arguments.indices.contains(index + 1)
+        else { return nil }
+
+        let value = arguments[index + 1]
+        return value.isEmpty ? nil : value
+    }
+
     /// Encodes CLI arguments for lossless transport through the release environment.
     static func encodedCLIArguments(_ arguments: [String]) -> String {
         arguments.map { argument in
@@ -223,6 +155,34 @@ final class BEAMProcessManager {
                 .replacingOccurrences(of: "/", with: "_")
                 .replacingOccurrences(of: "=", with: "")
         }.joined(separator: ",")
+    }
+
+    /// Removes VM arguments that could enable distribution before application boot.
+    static func sanitizedPreVMEnvironment(_ inherited: [String: String]) -> [String: String] {
+        var environment = inherited
+        environment.removeValue(forKey: "ERL_AFLAGS")
+        environment.removeValue(forKey: "ERL_FLAGS")
+        environment.removeValue(forKey: "ERL_ZFLAGS")
+        environment.removeValue(forKey: "ELIXIR_ERL_OPTIONS")
+        environment.removeValue(forKey: "RELEASE_VM_ARGS")
+        environment["MINGA_EXPECT_DISTRIBUTION"] = "0"
+        environment["RELEASE_DISTRIBUTION"] = "none"
+        return environment
+    }
+
+    /// Darwin's private per-user temporary directory used as the validated IPC parent.
+    static func ipcRuntimeParentURL() -> URL {
+        let length = confstr(_CS_DARWIN_USER_TEMP_DIR, nil, 0)
+        precondition(length > 1, "Darwin per-user temporary directory is unavailable")
+
+        var buffer = [CChar](repeating: 0, count: length)
+        precondition(
+            confstr(_CS_DARWIN_USER_TEMP_DIR, &buffer, length) == length,
+            "Darwin per-user temporary directory changed while reading it"
+        )
+
+        return URL(fileURLWithPath: String(cString: buffer), isDirectory: true)
+            .standardizedFileURL
     }
 
     /// Returns the working directory the embedded BEAM should start in.
@@ -297,9 +257,18 @@ final class BEAMProcessManager {
         proc.standardError = FileHandle.standardError
 
         // Tell the BEAM to use connected mode (don't spawn a GUI).
-        var env = ProcessInfo.processInfo.environment
+        var env = Self.sanitizedPreVMEnvironment(ProcessInfo.processInfo.environment)
         env["MINGA_PORT_MODE"] = "connected"
         env["MINGA_CLI_ARGS_B64"] = Self.encodedCLIArguments(cliArguments)
+        env["MINGA_APP_INSTANCE_ID"] = appInstanceID
+        env["MINGA_APP_PID"] = String(getpid())
+        env["MINGA_APP_EUID"] = String(geteuid())
+        env["MINGA_IPC_RUNTIME_PARENT"] = Self.ipcRuntimeParentURL().path
+        if let launchNonce {
+            env["MINGA_LAUNCH_NONCE"] = launchNonce
+        } else {
+            env.removeValue(forKey: "MINGA_LAUNCH_NONCE")
+        }
 
         let workingDirectoryURL = Self.defaultWorkingDirectoryURL(environment: env)
         proc.currentDirectoryURL = workingDirectoryURL
@@ -309,9 +278,11 @@ final class BEAMProcessManager {
             env["MINGA_SAFE_MODE"] = "1"
         }
 
-        // Set RELEASE_NODE to prevent the BEAM from trying to connect
-        // to other BEAM nodes (which would fail in a sandboxed app).
-        env["RELEASE_DISTRIBUTION"] = "none"
+        // This bundle boot is intentionally local. Strip inherited VM flags
+        // that could enable distribution before Elixir can reject it, and use
+        // a fresh cookie rather than the release's baked-in fallback.
+        env["RELEASE_COOKIE"] = Self.randomReleaseCookie()
+        env["MINGA_RANDOM_RELEASE_COOKIE"] = "1"
 
         proc.environment = env
 
@@ -406,6 +377,11 @@ final class BEAMProcessManager {
         }
     }
 
+    private static func randomReleaseCookie() -> String {
+        UUID().uuidString.replacingOccurrences(of: "-", with: "")
+            + UUID().uuidString.replacingOccurrences(of: "-", with: "")
+    }
+
     // MARK: - Termination decision (pure, testable)
 
     /// What to do when the BEAM child process exits.
@@ -447,7 +423,6 @@ final class BEAMProcessManager {
         self.process = nil
         self.readHandle = nil
         self.writeHandle = nil
-        onTermination?(status)
 
         // Prune old timestamps outside the restart window.
         let now = Date()
