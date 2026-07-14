@@ -83,7 +83,6 @@ defmodule MingaEditor do
 
   alias MingaEditor.State, as: EditorState
 
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
@@ -203,23 +202,31 @@ defmodule MingaEditor do
     state = Startup.build_initial_state(opts)
     :ok = attach_effect_scheduler(state.effect_scheduler)
 
-    renderer_pid = renderer_pid_for_backend(state.backend)
+    renderer_pid = renderer_pid_for_backend(state.frontend.backend)
 
-    if state.backend != :headless and is_nil(renderer_pid) do
+    if state.frontend.backend != :headless and is_nil(renderer_pid) do
       Log.warning(:editor, "Renderer.Server not found at init; rendering synchronously")
     end
 
-    state = EditorState.set_renderer(state, renderer_pid)
+    state = %{
+      state
+      | render: MingaEditor.State.Render.connect_renderer(state.render, renderer_pid)
+    }
 
     # Agent stream coalescer (#2289). Linked to the Editor so it shares the
     # Editor's lifecycle: it subscribes to agent sessions on the Editor's behalf
     # and forwards coalesced {:agent_stream_batch, ...} messages back here,
     # keeping per-delta traffic out of the Editor mailbox.
     {:ok, ingest} = MingaEditor.Agent.Ingest.start_link(editor: self())
-    state = EditorState.set_agent_ingest(state, ingest)
+
+    state = %{
+      state
+      | agent_connection:
+          MingaEditor.State.AgentConnection.connect_ingest(state.agent_connection, ingest)
+    }
 
     # Logger redirect and startup messages
-    if state.backend != :headless do
+    if state.frontend.backend != :headless do
       log_path = Minga.LoggerHandler.install()
       Log.info(:editor, "Editor started")
       Log.info(:editor, "Log file: #{log_path}")
@@ -228,7 +235,7 @@ defmodule MingaEditor do
     end
 
     state = Startup.apply_config_options(state)
-    events_registry = EditorState.events_registry(state)
+    events_registry = state.extension_surfaces.events_registry
     EventBus.subscribe(:diagnostics_updated, events_registry)
     EventBus.subscribe(:lsp_status_changed, events_registry)
 
@@ -266,10 +273,10 @@ defmodule MingaEditor do
           &is_pid/1
         )
 
-    state = EditorState.monitor_buffers(state, all_initial_pids)
+    state = MingaEditor.Handlers.BufferRegistry.monitor_buffers(state, all_initial_pids)
 
     # Schedule periodic eviction of inactive tree-sitter parse trees.
-    if state.backend != :headless do
+    if state.frontend.backend != :headless do
       Process.send_after(self(), :evict_parser_trees, HighlightSync.eviction_check_interval_ms())
     end
 
@@ -319,8 +326,8 @@ defmodule MingaEditor do
   end
 
   def handle_call({:ensure_buffer_for_path, path}, _from, state) do
-    case Buffer.ensure_for_path(path, EditorState.events_registry(state),
-           options_server: EditorState.options_server(state)
+    case Buffer.ensure_for_path(path, state.extension_surfaces.events_registry,
+           options_server: state.interaction.options_server
          ) do
       {:ok, pid} ->
         new_state =
@@ -372,12 +379,19 @@ defmodule MingaEditor do
 
   def handle_call({:api_set_fold_ranges, ranges}, _from, state) do
     new_state =
-      case EditorState.active_window_struct(state) do
+      case MingaEditor.Session.State.active_window_struct(state.workspace) do
         nil ->
           state
 
         %Window{id: id} ->
-          EditorState.update_window(state, id, &Window.set_fold_ranges(&1, ranges))
+          %{
+            state
+            | workspace:
+                MingaEditor.Session.State.set_windows(
+                  state.workspace,
+                  MingaEditor.State.Windows.set_fold_ranges(state.workspace.windows, id, ranges)
+                )
+          }
       end
 
     new_state = Renderer.render_or_async(new_state)
@@ -412,26 +426,25 @@ defmodule MingaEditor do
 
   @impl true
   @spec handle_info(term(), state()) :: {:noreply, state()}
-  def handle_info({:minga_input, {:ready, width, height}}, state) do
+  def handle_info({:minga_input, {:ready, width, height}}, %MingaEditor.State{} = state) do
     StartupTimer.mark(:frontend_ready_received)
 
     # Query capabilities from the frontend (may have been sent in extended ready).
-    caps = Startup.fetch_capabilities(state.port_manager)
-    Startup.apply_gui_defaults(caps, EditorState.options_server(state))
+    caps = Startup.fetch_capabilities(state.frontend.port_manager)
+    Startup.apply_gui_defaults(caps, state.interaction.options_server)
 
     # The frontend already floored content pixels into rows-that-fit at the
     # current presentation metrics (ADR-0001); the BEAM lays out in the rows it
     # is given and derives nothing from line spacing.
     vp = Viewport.new(height, width)
 
-    new_state = %{
-      (state
-       |> EditorState.set_terminal_viewport(vp)
-       |> EditorState.set_viewport(vp)
-       |> EditorState.reset_frontend_render_state())
-      | capabilities: caps,
-        layout: nil
-    }
+    new_state =
+      state
+      |> EditorState.accept_frontend_ready(vp, caps)
+      |> EditorState.reset_frontend_render_state()
+      |> then(fn state ->
+        %{state | render: MingaEditor.State.Render.invalidate_layout(state.render)}
+      end)
 
     Startup.send_font_config(new_state)
     new_state = refresh_gui_config_state(new_state)
@@ -451,18 +464,16 @@ defmodule MingaEditor do
       "Frontend capabilities updated: #{inspect(caps.frontend_type)}, color: #{inspect(caps.color_depth)}"
     )
 
-    {:noreply, %{state | capabilities: caps}}
+    {:noreply,
+     %{state | frontend: MingaEditor.State.Frontend.accept_capabilities(state.frontend, caps)}}
   end
 
-  def handle_info({:minga_input, {:resize, width, height}}, state) do
+  def handle_info({:minga_input, {:resize, width, height}}, %MingaEditor.State{} = state) do
     # `height` is content rows-that-fit as measured by the frontend at the
     # current presentation metrics (ADR-0001). No spacing arithmetic here.
     vp = Viewport.new(height, width)
 
-    new_state =
-      state
-      |> EditorState.set_terminal_viewport(vp)
-      |> EditorState.set_viewport(vp)
+    new_state = EditorState.resize_frontend(state, vp)
 
     # Invalidate the cached layout so resize_all_windows computes fresh
     # rectangles from the new viewport dimensions.
@@ -482,7 +493,7 @@ defmodule MingaEditor do
     state = MingaEditor.Shell.Traditional.FlashesWorkflow.cancel_yank(state)
     # Record the input correlation sequence (ticket #2215) so the render that
     # this keystroke triggers echoes it on commit_frame for latency resolution.
-    state = %{state | last_input_seq: seq}
+    state = %{state | frontend: MingaEditor.State.Frontend.correlate_input(state.frontend, seq)}
 
     new_state =
       Minga.Telemetry.span([:minga, :input, :dispatch], %{input_seq: seq}, fn ->
@@ -553,7 +564,7 @@ defmodule MingaEditor do
 
   def handle_info(
         {:minga_input, {:request_keyframe, last_good_frame_seq, failed_generation}},
-        %{renderer: renderer, backend: backend} = state
+        %{render: %{renderer: renderer}, frontend: %{backend: backend}} = state
       )
       when is_pid(renderer) and backend != :headless do
     Minga.Log.warning(
@@ -566,17 +577,31 @@ defmodule MingaEditor do
   end
 
   def handle_info({:minga_input, {:request_keyframe, _last_good, _generation}}, state) do
-    new_state = EditorState.request_render_keyframe(state)
+    new_state = %{
+      state
+      | render:
+          MingaEditor.State.Render.accept_correlation(
+            state.render,
+            MingaEditor.State.RenderCorrelation.request_keyframe(state.render.render_correlation)
+          )
+    }
+
     {:noreply, Renderer.render_or_async(new_state)}
   end
 
-  def handle_info({:minga_input, {kind, _, _} = status}, %{renderer: renderer} = state)
+  def handle_info(
+        {:minga_input, {kind, _, _} = status},
+        %{render: %{renderer: renderer}} = state
+      )
       when kind == :frame_applied and is_pid(renderer) do
     MingaEditor.Renderer.Server.frame_status(renderer, status)
     {:noreply, state}
   end
 
-  def handle_info({:minga_input, {kind, _, _, _, _} = status}, %{renderer: renderer} = state)
+  def handle_info(
+        {:minga_input, {kind, _, _, _, _} = status},
+        %{render: %{renderer: renderer}} = state
+      )
       when kind in [:frame_rejected, :window_ref_miss] and is_pid(renderer) do
     MingaEditor.Renderer.Server.frame_status(renderer, status)
     {:noreply, state}
@@ -802,7 +827,7 @@ defmodule MingaEditor do
         state =
           state
           |> HighlightSync.close_buffer(pid)
-          |> EditorState.remove_dead_buffer(pid)
+          |> EditorState.close_buffer_pure(pid)
 
         {:noreply, Renderer.render_or_async(state)}
 
@@ -825,7 +850,7 @@ defmodule MingaEditor do
   def handle_info(:dismiss_toast, state) do
     state = dispatch_agent_event(state, :dismiss_toast)
 
-    if UIState.toast_visible?(AgentAccess.agent_ui(state)) and state.backend != :headless do
+    if UIState.toast_visible?(state.workspace.agent_ui) and state.frontend.backend != :headless do
       Process.send_after(self(), :dismiss_toast, @toast_duration_ms)
     end
 
@@ -838,27 +863,31 @@ defmodule MingaEditor do
   end
 
   def handle_info({:dismiss_notification, id, dismiss_ref}, state) do
-    state = EditorState.dismiss_notification(state, id, dismiss_ref)
+    state = %{
+      state
+      | feedback: MingaEditor.State.Feedback.dismiss_notification(state.feedback, id, dismiss_ref)
+    }
+
     {:noreply, Renderer.render_or_async(state)}
   end
 
   # ── AI commit message generation ───────────────────────────────────────────
 
   def handle_info({:git_commit_message_generated, {:ok, message}}, state) do
-    state = %{state | git_commit_gen_ref: nil}
+    state = %{state | git: MingaEditor.State.Git.await_commit_generation(state.git, nil)}
     state = apply_git_commit_generation_result(state, {:ok, message})
     {:noreply, Renderer.render_or_async(state)}
   end
 
   def handle_info({:git_commit_message_generated, {:error, reason}}, state) do
-    state = %{state | git_commit_gen_ref: nil}
+    state = %{state | git: MingaEditor.State.Git.await_commit_generation(state.git, nil)}
     state = apply_git_commit_generation_result(state, {:error, reason})
     {:noreply, Renderer.render_or_async(state)}
   end
 
-  def handle_info(:git_generate_timeout, %{git_commit_gen_ref: ref} = state)
+  def handle_info(:git_generate_timeout, %{git: %{git_commit_gen_ref: ref}} = state)
       when ref != nil do
-    state = %{state | git_commit_gen_ref: nil}
+    state = %{state | git: MingaEditor.State.Git.await_commit_generation(state.git, nil)}
     state = apply_git_commit_generation_result(state, :timeout)
     {:noreply, Renderer.render_or_async(state)}
   end
@@ -1033,7 +1062,7 @@ defmodule MingaEditor do
   # deterministic highlights without timer races. In normal mode, defer
   # via a self-send so the first paint isn't blocked.
   @spec setup_highlight_or_defer(state()) :: state()
-  defp setup_highlight_or_defer(%{backend: :headless} = state) do
+  defp setup_highlight_or_defer(%{frontend: %{backend: :headless}} = state) do
     state = HighlightSync.setup_for_buffer(state)
     SemanticTokenSync.request_tokens(state)
   end
@@ -1104,7 +1133,7 @@ defmodule MingaEditor do
   @spec classify_down(EditorState.t(), reference(), pid(), term()) ::
           :buffer | {:git_remote_task, EditorState.t()} | :unknown
   defp classify_down(state, ref, pid, reason) do
-    if Map.has_key?(state.buffer_monitors, pid) do
+    if Map.has_key?(state.buffer_lifecycle.buffer_monitors, pid) do
       :buffer
     else
       case FileEventHandler.handle_remote_task_down(state, ref, reason) do
@@ -1152,16 +1181,21 @@ defmodule MingaEditor do
   frontends the snapshot stays nil and nothing is emitted.
   """
   @spec refresh_gui_config_state(EditorState.t()) :: EditorState.t()
-  def refresh_gui_config_state(%{capabilities: caps} = state) do
+  def refresh_gui_config_state(%MingaEditor.State{frontend: %{capabilities: caps}} = state) do
     if MingaEditor.Frontend.gui?(caps) do
       snapshot =
         MingaEditor.Frontend.Protocol.GUI.config_state(
-          EditorState.options_server(state),
-          state.keymap_server
+          state.interaction.options_server,
+          state.interaction.keymap_server
         )
         |> MingaEditor.RenderModel.UI.ConfigStateBuilder.from_wire()
 
-      EditorState.put_gui_config_state(state, snapshot)
+      then(state, fn %MingaEditor.State{} = state ->
+        %{
+          state
+          | appearance: MingaEditor.State.Appearance.cache_gui_config(state.appearance, snapshot)
+        }
+      end)
     else
       state
     end
@@ -1180,13 +1214,19 @@ defmodule MingaEditor do
     # MingaEditor.RuntimeThemePushTest for the proof.
     state
     |> EditorState.apply_theme(theme)
-    |> EditorState.invalidate_all_windows()
+    |> then(fn state ->
+      %{state | workspace: MingaEditor.Session.State.invalidate_all_windows(state.workspace)}
+    end)
     |> Layout.invalidate()
   end
 
   def apply_runtime_config_option(state, name, _value)
       when name in [:font_family, :font_size, :font_weight, :font_ligatures] do
-    state = %{state | font_size_override: nil}
+    state = %{
+      state
+      | appearance: MingaEditor.State.Appearance.override_font_size(state.appearance, nil)
+    }
+
     Startup.send_font_config(state)
     EditorState.reset_frontend_render_state(state)
   end
@@ -1198,13 +1238,17 @@ defmodule MingaEditor do
     end)
 
     state
-    |> EditorState.invalidate_all_windows()
+    |> then(fn state ->
+      %{state | workspace: MingaEditor.Session.State.invalidate_all_windows(state.workspace)}
+    end)
     |> Layout.invalidate()
   end
 
   def apply_runtime_config_option(state, :cursorline, _value) do
     state
-    |> EditorState.invalidate_all_windows()
+    |> then(fn state ->
+      %{state | workspace: MingaEditor.Session.State.invalidate_all_windows(state.workspace)}
+    end)
     |> Layout.invalidate()
   end
 
@@ -1282,8 +1326,8 @@ defmodule MingaEditor do
     runtime = persist_shell_changes(runtime, List.wrap(persistence_change))
 
     state
-    |> EditorState.apply_shell_runtime_transition(runtime)
-    |> EditorState.set_workspace(workspace)
+    |> then(fn state -> %{state | shell_runtime: runtime} end)
+    |> then(fn state -> %{state | workspace: workspace} end)
   end
 
   @spec route_stashed_shell_agent_event(EditorState.t(), pid(), term()) :: EditorState.t()
@@ -1300,8 +1344,8 @@ defmodule MingaEditor do
     runtime = persist_shell_changes(runtime, persistence_changes)
 
     state
-    |> EditorState.apply_shell_runtime_transition(runtime)
-    |> EditorState.set_workspace(workspace)
+    |> then(fn state -> %{state | shell_runtime: runtime} end)
+    |> then(fn state -> %{state | workspace: workspace} end)
   end
 
   @spec persist_shell_changes(
@@ -1345,7 +1389,9 @@ defmodule MingaEditor do
 
   @spec active_or_background_agent_event(EditorState.t(), pid()) :: :active_agent | :background
   defp active_or_background_agent_event(state, session_pid) do
-    if AgentAccess.session(state) == session_pid, do: :active_agent, else: :background
+    if MingaEditor.Shell.Runtime.active_session(state.shell_runtime) == session_pid,
+      do: :active_agent,
+      else: :background
   end
 
   @spec dispatch_agent_event(EditorState.t(), term()) :: EditorState.t()
@@ -1378,29 +1424,50 @@ defmodule MingaEditor do
   @spec schedule_render_delay_ms(state(), non_neg_integer()) :: non_neg_integer()
   def schedule_render_delay_ms(%EditorState{} = state, delay_ms)
       when is_integer(delay_ms) and delay_ms >= 0 do
-    max(delay_ms, ResourcePressure.render_delay_ms(state.resource_pressure))
+    max(delay_ms, ResourcePressure.render_delay_ms(state.frontend.resource_pressure))
   end
 
   @spec schedule_render(state(), non_neg_integer()) :: state()
   def schedule_render(%EditorState{} = state, delay_ms)
       when is_integer(delay_ms) and delay_ms >= 0 do
-    if EditorState.render_scheduled?(state), do: state, else: schedule_new_render(state, delay_ms)
+    if MingaEditor.State.RenderCorrelation.scheduled?(state.render.render_correlation),
+      do: state,
+      else: schedule_new_render(state, delay_ms)
   end
 
   # In test mode (headless backend), render synchronously to eliminate timer
   # races that cause CI flakiness. No debounce needed when there's no real
   # display to coalesce frames for.
   @spec schedule_new_render(state(), non_neg_integer()) :: state()
-  defp schedule_new_render(%{backend: :headless} = state, _delay_ms) do
+  defp schedule_new_render(%EditorState{frontend: %{backend: :headless}} = state, _delay_ms) do
     state = RenderHandler.maybe_trigger_nav_flash(state)
     state = Renderer.render_or_async(state)
-    EditorState.clear_render_timer(state)
+
+    %{
+      state
+      | render:
+          MingaEditor.State.Render.accept_correlation(
+            state.render,
+            MingaEditor.State.RenderCorrelation.clear_timer(state.render.render_correlation)
+          )
+    }
   end
 
   defp schedule_new_render(state, delay_ms) do
     effective_delay_ms = schedule_render_delay_ms(state, delay_ms)
     ref = Process.send_after(self(), :debounced_render, effective_delay_ms)
-    EditorState.schedule_render_timer(state, ref)
+
+    %{
+      state
+      | render:
+          MingaEditor.State.Render.accept_correlation(
+            state.render,
+            elem(
+              MingaEditor.State.RenderCorrelation.schedule(state.render.render_correlation, ref),
+              1
+            )
+          )
+    }
   end
 
   # LSP status aggregation moved to MingaEditor.State.LSP
@@ -1423,7 +1490,7 @@ defmodule MingaEditor do
       end)
 
     if buf_pid do
-      DiagDecorations.apply(buf_pid, uri, state.theme.gutter)
+      DiagDecorations.apply(buf_pid, uri, state.appearance.theme.gutter)
     end
 
     :ok
@@ -1434,7 +1501,7 @@ defmodule MingaEditor do
   @spec reset_nav_flash_tracking(state()) :: state()
   def reset_nav_flash_tracking(state) do
     state = MingaEditor.Shell.Traditional.FlashesWorkflow.cancel_nav(state)
-    %{state | last_cursor_line: nil}
+    %{state | render: MingaEditor.State.Render.observe_cursor_line(state.render, nil)}
   end
 
   # ── Key dispatch ─────────────────────────────────────────────────────────────
@@ -1463,7 +1530,7 @@ defmodule MingaEditor do
 
   @spec handle_paste_event(state(), String.t()) :: state()
   defp handle_paste_event(state, text) do
-    if AgentAccess.input_focused?(state) do
+    if state.workspace.agent_ui.panel.input_focused do
       # Agent input is focused (split panel or full-screen agentic view)
       Commands.Agent.input_paste(state, text)
     else
@@ -1535,9 +1602,14 @@ defmodule MingaEditor do
     Enum.reduce(layout.window_layouts, state, fn {id, wl}, acc ->
       {_r, _c, width, height} = wl.total
 
-      EditorState.update_window(acc, id, fn window ->
-        Window.resize(window, height, width)
-      end)
+      %{
+        acc
+        | workspace:
+            MingaEditor.Session.State.set_windows(
+              acc.workspace,
+              MingaEditor.State.Windows.resize(acc.workspace.windows, id, height, width)
+            )
+      }
     end)
   end
 

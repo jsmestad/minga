@@ -12,7 +12,6 @@ defmodule MingaEditor.Commands.RemoteFiles do
   alias Minga.Language
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Remote
 
   @type state :: EditorState.t()
@@ -76,12 +75,17 @@ defmodule MingaEditor.Commands.RemoteFiles do
            storage: {:remote, remote_node, remote_path},
            read_only: false,
            buffer_type: :file,
-           options_server: EditorState.options_server(state)
+           options_server: state.interaction.options_server
          ) do
       {:ok, buffer} ->
         state
-        |> EditorState.add_buffer(buffer)
-        |> EditorState.update_remote(&Remote.put_buffer(&1, server_name, remote_path, buffer))
+        |> MingaEditor.Handlers.BufferRegistry.add_buffer(buffer)
+        |> then(fn state ->
+          %{
+            state
+            | remote: (&Remote.put_buffer(&1, server_name, remote_path, buffer)).(state.remote)
+          }
+        end)
 
       {:error, reason} ->
         MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
@@ -93,7 +97,7 @@ defmodule MingaEditor.Commands.RemoteFiles do
 
   @spec remote_target(state()) :: {:ok, String.t(), node()} | {:error, String.t()}
   defp remote_target(state) do
-    case AgentAccess.session(state) do
+    case MingaEditor.Shell.Runtime.active_session(state.shell_runtime) do
       pid when is_pid(pid) and node(pid) != node() -> target_for_remote_pid(pid)
       _ -> target_for_connected_servers()
     end

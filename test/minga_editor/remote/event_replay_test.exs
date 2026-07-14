@@ -4,7 +4,6 @@ defmodule MingaEditor.Remote.EventReplayTest do
   alias MingaEditor.Agent.Events, as: AgentEvents
   alias MingaEditor.Remote.EventReplay
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.Session.State, as: WorkspaceState
   alias MingaEditor.Viewport
   alias MingaAgent.EventLog.EventRecord
@@ -121,7 +120,7 @@ defmodule MingaEditor.Remote.EventReplayTest do
 
   test "replays durable todo plans into editor activity on catch-up" do
     state = %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %WorkspaceState{viewport: Viewport.new(24, 80)}
     }
 
@@ -134,14 +133,14 @@ defmodule MingaEditor.Remote.EventReplayTest do
         })
       ])
 
-    assert AgentAccess.view(updated).activity.todos == [
+    assert updated.workspace.agent_ui.view.activity.todos == [
              %TodoItem{id: "1", description: "Inspect files", status: :in_progress}
            ]
   end
 
   test "replays durable shell tool lifecycle records into editor activity on catch-up" do
     state = %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %WorkspaceState{viewport: Viewport.new(24, 80)}
     }
 
@@ -160,14 +159,17 @@ defmodule MingaEditor.Remote.EventReplayTest do
         })
       ])
 
-    assert AgentAccess.view(updated).activity.active_action == "Thinking"
-    assert AgentAccess.agent(updated).runtime.active_tool_name == nil
-    assert AgentAccess.view(updated).preview.content == {:shell, "mix test", "ok", :done}
+    assert updated.workspace.agent_ui.view.activity.active_action == "Thinking"
+
+    assert MingaEditor.Shell.Traditional.State.agent(updated.shell_runtime.state).runtime.active_tool_name ==
+             nil
+
+    assert updated.workspace.agent_ui.view.preview.content == {:shell, "mix test", "ok", :done}
   end
 
   test "replays durable tool interruptions into editor activity on catch-up" do
     state = %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %WorkspaceState{viewport: Viewport.new(24, 80)}
     }
 
@@ -181,9 +183,12 @@ defmodule MingaEditor.Remote.EventReplayTest do
         record(:tool_call_interrupted, %{"tool_call_id" => "tc2"})
       ])
 
-    assert AgentAccess.view(updated).activity.active_action == "Thinking"
-    assert AgentAccess.agent(updated).runtime.active_tool_name == nil
-    assert AgentAccess.view(updated).preview.content == :empty
+    assert updated.workspace.agent_ui.view.activity.active_action == "Thinking"
+
+    assert MingaEditor.Shell.Traditional.State.agent(updated.shell_runtime.state).runtime.active_tool_name ==
+             nil
+
+    assert updated.workspace.agent_ui.view.preview.content == :empty
   end
 
   test "ignores durable events that have no foreground UI equivalent" do

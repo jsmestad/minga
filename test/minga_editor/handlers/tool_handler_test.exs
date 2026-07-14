@@ -60,8 +60,7 @@ defmodule MingaEditor.Handlers.ToolHandlerTest do
     end
 
     test "schedules clear_tool_status in non-headless mode" do
-      state = base_state()
-      state = %{state | backend: :tui}
+      state = base_state(backend: :tui)
       event = {:minga_event, :tool_install_complete, %{name: "ripgrep", version: "14.1"}}
       {_state, effects} = ToolHandler.handle(state, event)
 

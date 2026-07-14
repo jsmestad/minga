@@ -34,6 +34,7 @@ defmodule MingaEditor.FocusTree do
 
   @doc "Returns the cached focus tree from state, or builds one from the current state."
   @spec get(map()) :: t()
+  def get(%{render: %{focus_tree: %TreeNode{} = cached}}), do: cached
   def get(%{focus_tree: %TreeNode{} = cached}), do: cached
   def get(state), do: from_state(state)
 
@@ -407,6 +408,14 @@ defmodule MingaEditor.FocusTree do
   @spec maybe_add_hover_overlay(t(), map()) :: t()
   defp maybe_add_hover_overlay(%TreeNode{} = root, %{
          shell_runtime: %{state: shell_state},
+         frontend: %{terminal_viewport: vp},
+         appearance: %{theme: theme}
+       }) do
+    maybe_add_hover_overlay(root, %{shell_state: shell_state, terminal_viewport: vp, theme: theme})
+  end
+
+  defp maybe_add_hover_overlay(%TreeNode{} = root, %{
+         shell_runtime: %{state: shell_state},
          terminal_viewport: vp,
          theme: theme
        }) do
@@ -437,6 +446,18 @@ defmodule MingaEditor.FocusTree do
   defp maybe_add_hover_overlay(%TreeNode{} = root, _state), do: root
 
   @spec maybe_add_signature_overlay(t(), map()) :: t()
+  defp maybe_add_signature_overlay(%TreeNode{} = root, %{
+         shell_runtime: %{state: shell_state},
+         frontend: %{terminal_viewport: vp},
+         appearance: %{theme: theme}
+       }) do
+    maybe_add_signature_overlay(root, %{
+      shell_state: shell_state,
+      terminal_viewport: vp,
+      theme: theme
+    })
+  end
+
   defp maybe_add_signature_overlay(%TreeNode{} = root, %{
          shell_runtime: %{state: shell_state},
          terminal_viewport: vp,
@@ -594,8 +615,8 @@ defmodule MingaEditor.FocusTree do
     %{
       cursor_row: cursor_row,
       cursor_col: cursor_col,
-      viewport_rows: state.terminal_viewport.rows,
-      viewport_cols: state.terminal_viewport.cols
+      viewport_rows: state.frontend.terminal_viewport.rows,
+      viewport_cols: state.frontend.terminal_viewport.cols
     }
   end
 
@@ -624,7 +645,7 @@ defmodule MingaEditor.FocusTree do
          %{viewport: viewport} <- active_window(state) do
       {row, col, viewport.top, viewport.left}
     else
-      _ -> {0, 0, state.terminal_viewport.top, state.terminal_viewport.left}
+      _ -> {0, 0, state.frontend.terminal_viewport.top, state.frontend.terminal_viewport.left}
     end
   end
 

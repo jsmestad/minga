@@ -65,7 +65,7 @@ defmodule MingaEditor.Frontend.EmitTest do
     test "GUI path produces commands (no clear expected for GUI with to_commands)" do
       frame = ComposedFrame.new([], Cursor.new(0, 0, :block))
 
-      state = %{gui_state() | port_manager: Process.get(:emit_test_frontend)}
+      state = gui_state(port_manager: Process.get(:emit_test_frontend))
       ctx = Context.from_editor_state(state)
       Emit.emit(frame, ctx)
 
@@ -97,10 +97,7 @@ defmodule MingaEditor.Frontend.EmitTest do
 
       frame = %{frame | windows: [window_model]}
 
-      state = %{
-        emit_state()
-        | capabilities: %Capabilities{frontend_type: :tui, semantic_ui: true}
-      }
+      state = emit_state(capabilities: %Capabilities{frontend_type: :tui, semantic_ui: true})
 
       ctx = Context.from_editor_state(state)
       Emit.emit(frame, ctx)
@@ -363,7 +360,7 @@ defmodule MingaEditor.Frontend.EmitTest do
       {caches1, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, caches0)
       _ = assert_receive_frame_commands()
 
-      assert caches1.last_window_bg == state.theme.editor.bg
+      assert caches1.last_window_bg == state.appearance.theme.editor.bg
 
       # Emit again, should not re-send
       {caches2, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, caches1)
@@ -375,7 +372,7 @@ defmodule MingaEditor.Frontend.EmitTest do
   # ── Frame-transaction test helpers ───────────────────────────────────────
 
   defp semantic_state do
-    %{emit_state() | capabilities: %Capabilities{frontend_type: :tui, semantic_ui: true}}
+    emit_state(capabilities: %Capabilities{frontend_type: :tui, semantic_ui: true})
   end
 
   defp window_frame_with_content do

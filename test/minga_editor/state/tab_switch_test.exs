@@ -16,6 +16,7 @@ defmodule MingaEditor.State.TabSwitchTest do
   alias MingaEditor.Handlers.LspEventHandler
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.Feedback
   alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.State.LSP.FormatOperation
   alias MingaEditor.State.Operation
@@ -48,7 +49,7 @@ defmodule MingaEditor.State.TabSwitchTest do
     window1 = Window.new(win_id, buf1, 24, 80)
 
     state = %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %SessionState{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
@@ -94,7 +95,20 @@ defmodule MingaEditor.State.TabSwitchTest do
     # Switch back to tab 1 as active
     tb = TabBar.switch_to(tb, 1)
 
-    state = EditorState.set_tab_bar(state, tb)
+    state =
+      then(state, fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            tb
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
 
     {state, buf1, buf2}
   end
@@ -110,7 +124,7 @@ defmodule MingaEditor.State.TabSwitchTest do
     file_window = Window.new(win_id, file_buf, 24, 80)
 
     state = %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %SessionState{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
@@ -155,7 +169,20 @@ defmodule MingaEditor.State.TabSwitchTest do
     # Switch back to tab 1 (file tab active)
     tb = TabBar.switch_to(tb, 1)
 
-    state = EditorState.set_tab_bar(state, tb)
+    state =
+      then(state, fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            tb
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
 
     {state, file_tab.id, agent_tab.id, file_buf}
   end
@@ -163,9 +190,9 @@ defmodule MingaEditor.State.TabSwitchTest do
   @spec track_tab_operations(EditorState.t(), Tab.id()) ::
           {EditorState.t(), Operation.t(), Operation.t()}
   defp track_tab_operations(state, tab_id) do
-    {state, references} =
-      OperationFeedback.start_in(
-        state,
+    {references_feedback, references} =
+      OperationFeedback.start(
+        state.feedback.operation_feedback,
         :lsp_references,
         "lsp:references:one.ex",
         "Finding references…",
@@ -173,9 +200,14 @@ defmodule MingaEditor.State.TabSwitchTest do
         replace?: false
       )
 
-    {state, rename} =
-      OperationFeedback.start_in(
-        state,
+    state = %{
+      state
+      | feedback: Feedback.accept_operation_feedback(state.feedback, references_feedback)
+    }
+
+    {rename_feedback, rename} =
+      OperationFeedback.start(
+        state.feedback.operation_feedback,
         :lsp_rename,
         "lsp:rename:one.ex",
         "Renaming…",
@@ -183,15 +215,22 @@ defmodule MingaEditor.State.TabSwitchTest do
         replace?: false
       )
 
+    state = %{
+      state
+      | feedback: Feedback.accept_operation_feedback(state.feedback, rename_feedback)
+    }
+
     state =
-      EditorState.update_lsp(state, fn lsp ->
-        lsp
-        |> LSPState.track_operation_request(
-          make_ref(),
-          {:references, references.id, tab_id}
-        )
-        |> LSPState.track_operation_request(make_ref(), {:rename, rename.id, tab_id})
-      end)
+      %{
+        state
+        | lsp:
+            state.lsp
+            |> LSPState.track_operation_request(
+              make_ref(),
+              {:references, references.id, tab_id}
+            )
+            |> LSPState.track_operation_request(make_ref(), {:rename, rename.id, tab_id})
+      }
 
     {state, references, rename}
   end
@@ -232,12 +271,12 @@ defmodule MingaEditor.State.TabSwitchTest do
       assert unchanged.lsp.operation_requests == requests
 
       assert {:ok, pending_references} =
-               OperationFeedback.fetch(unchanged.operation_feedback, references.id)
+               OperationFeedback.fetch(unchanged.feedback.operation_feedback, references.id)
 
       assert pending_references.status == :pending
 
       assert {:ok, pending_rename} =
-               OperationFeedback.fetch(unchanged.operation_feedback, rename.id)
+               OperationFeedback.fetch(unchanged.feedback.operation_feedback, rename.id)
 
       assert pending_rename.status == :pending
     end
@@ -354,7 +393,7 @@ defmodule MingaEditor.State.TabSwitchTest do
       {new_state, _effects} = EditorState.switch_tab_pure(state, tab2_id)
 
       # Layout should be cleared after a tab switch
-      assert new_state.layout == nil
+      assert new_state.render.layout == nil
     end
 
     test "tab switch restores the target tab's pending LSP refs" do
@@ -366,10 +405,27 @@ defmodule MingaEditor.State.TabSwitchTest do
       pending_current = %{make_ref() => :completion_resolve}
       pending_target = %{make_ref() => {:semantic_tokens, buf2}}
 
-      state = put_in(state.workspace.lsp_pending, pending_current)
+      state = %{state | workspace: SessionState.set_lsp_pending(state.workspace, pending_current)}
       tab2 = TabBar.get(tb, target_id)
       tab2_context = Context.put_fields(tab2.context, lsp_pending: pending_target)
-      state = EditorState.set_tab_bar(state, TabBar.update_context(tb, target_id, tab2_context))
+
+      state =
+        then(state, fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.set_tab_bar(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              TabBar.update_context(tb, target_id, tab2_context)
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
 
       {switched, _effects} = EditorState.switch_tab_pure(state, target_id)
 
@@ -399,11 +455,17 @@ defmodule MingaEditor.State.TabSwitchTest do
       assert switched.lsp.operation_requests == %{}
 
       assert {:ok, references} =
-               OperationFeedback.fetch(switched.operation_feedback, references.id)
+               OperationFeedback.fetch(
+                 switched.feedback.operation_feedback,
+                 references.id
+               )
 
       assert references.status == :stale
       assert references.message == "References response ignored after tab switch"
-      assert {:ok, rename} = OperationFeedback.fetch(switched.operation_feedback, rename.id)
+
+      assert {:ok, rename} =
+               OperationFeedback.fetch(switched.feedback.operation_feedback, rename.id)
+
       assert rename.status == :stale
       assert rename.message == "Rename response ignored after tab switch"
     end
@@ -419,10 +481,13 @@ defmodule MingaEditor.State.TabSwitchTest do
       assert closed.lsp.operation_requests == %{}
 
       assert {:ok, closed_references} =
-               OperationFeedback.fetch(closed.operation_feedback, references.id)
+               OperationFeedback.fetch(closed.feedback.operation_feedback, references.id)
 
       assert closed_references.status == :stale
-      assert {:ok, closed_rename} = OperationFeedback.fetch(closed.operation_feedback, rename.id)
+
+      assert {:ok, closed_rename} =
+               OperationFeedback.fetch(closed.feedback.operation_feedback, rename.id)
+
       assert closed_rename.status == :stale
     end
 
@@ -441,7 +506,7 @@ defmodule MingaEditor.State.TabSwitchTest do
 
       for operation <- [first_references, first_rename, second_references, second_rename] do
         assert {:ok, retired} =
-                 OperationFeedback.fetch(empty.operation_feedback, operation.id)
+                 OperationFeedback.fetch(empty.feedback.operation_feedback, operation.id)
 
         assert retired.status == :stale
       end
@@ -465,7 +530,9 @@ defmodule MingaEditor.State.TabSwitchTest do
         timeout_timer: make_ref()
       }
 
-      state = EditorState.update_lsp(state, &LSPState.track_format(&1, operation))
+      state =
+        %{state | lsp: (&LSPState.track_format(&1, operation)).(state.lsp)}
+
       {switched, _effects} = EditorState.switch_tab_pure(state, target_id)
 
       assert {:ok, ^operation} = LSPState.fetch_format(switched.lsp, ref)
@@ -493,7 +560,9 @@ defmodule MingaEditor.State.TabSwitchTest do
         timeout_timer: make_ref()
       }
 
-      state = EditorState.update_lsp(state, &LSPState.track_format(&1, operation_a))
+      state =
+        %{state | lsp: (&LSPState.track_format(&1, operation_a)).(state.lsp)}
+
       {state, _effects} = EditorState.switch_tab_pure(state, target_id)
 
       operation_b = %FormatOperation{
@@ -507,7 +576,8 @@ defmodule MingaEditor.State.TabSwitchTest do
         timeout_timer: make_ref()
       }
 
-      state = EditorState.update_lsp(state, &LSPState.track_format(&1, operation_b))
+      state =
+        %{state | lsp: (&LSPState.track_format(&1, operation_b)).(state.lsp)}
 
       edits_a = [
         %{
@@ -551,7 +621,11 @@ defmodule MingaEditor.State.TabSwitchTest do
 
       stale_highlight = %Highlighting{highlights: %{buf2 => Highlight.new()}}
 
-      state = put_in(state.highlighting, live_highlight)
+      state = %{
+        state
+        | parser: MingaEditor.State.Parser.accept_highlighting(state.parser, live_highlight)
+      }
+
       target_tab = TabBar.get(tb, target_id)
 
       target_context =
@@ -559,17 +633,33 @@ defmodule MingaEditor.State.TabSwitchTest do
         |> Map.put(:highlight, stale_highlight)
         |> Map.update!(:present_fields, &[:highlight | &1])
 
-      state = EditorState.set_tab_bar(state, TabBar.update_context(tb, target_id, target_context))
+      state =
+        then(state, fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.set_tab_bar(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              TabBar.update_context(tb, target_id, target_context)
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
 
       {switched, _effects} = EditorState.switch_tab_pure(state, target_id)
 
-      assert switched.highlighting == live_highlight
+      assert switched.parser.highlighting == live_highlight
 
       refute :highlight in TabBar.get(EditorState.tab_bar(switched), current_id).context.present_fields
 
       {switched_back, _effects} = EditorState.switch_tab_pure(switched, current_id)
 
-      assert switched_back.highlighting == live_highlight
+      assert switched_back.parser.highlighting == live_highlight
     end
 
     test "tab switch preserves live injection ranges and ignores stale target ranges" do
@@ -581,7 +671,11 @@ defmodule MingaEditor.State.TabSwitchTest do
       live_ranges = %{buf1 => [:current_range], buf2 => [:parsed_after_restore]}
       stale_ranges = %{buf2 => [:stale_range]}
 
-      state = put_in(state.injection_ranges, live_ranges)
+      state = %{
+        state
+        | parser: MingaEditor.State.Parser.accept_injection_ranges(state.parser, live_ranges)
+      }
+
       target_tab = TabBar.get(tb, target_id)
 
       target_context =
@@ -589,17 +683,33 @@ defmodule MingaEditor.State.TabSwitchTest do
         |> Map.put(:injection_ranges, stale_ranges)
         |> Map.update!(:present_fields, &[:injection_ranges | &1])
 
-      state = EditorState.set_tab_bar(state, TabBar.update_context(tb, target_id, target_context))
+      state =
+        then(state, fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.set_tab_bar(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              TabBar.update_context(tb, target_id, target_context)
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
 
       {switched, _effects} = EditorState.switch_tab_pure(state, target_id)
 
-      assert switched.injection_ranges == live_ranges
+      assert switched.parser.injection_ranges == live_ranges
 
       refute :injection_ranges in TabBar.get(EditorState.tab_bar(switched), current_id).context.present_fields
 
       {switched_back, _effects} = EditorState.switch_tab_pure(switched, current_id)
 
-      assert switched_back.injection_ranges == live_ranges
+      assert switched_back.parser.injection_ranges == live_ranges
     end
   end
 end

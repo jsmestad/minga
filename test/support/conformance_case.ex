@@ -87,7 +87,8 @@ defmodule Minga.Test.ConformanceCase do
               MacroRecorder.put_macro(acc, name, keys)
             end)
 
-          put_in(st.workspace.editing.macro_recorder, populated)
+          editing = MingaEditor.VimState.set_macro_recorder(st.workspace.editing, populated)
+          %{st | workspace: MingaEditor.Session.State.set_editing(st.workspace, editing)}
         end)
 
       {_, setup} when is_map(setup) ->
@@ -100,7 +101,8 @@ defmodule Minga.Test.ConformanceCase do
           end)
 
         :sys.replace_state(ctx.editor, fn st ->
-          put_in(st.workspace.editing.reg, populated)
+          editing = MingaEditor.VimState.set_registers(st.workspace.editing, populated)
+          %{st | workspace: MingaEditor.Session.State.set_editing(st.workspace, editing)}
         end)
 
       _ ->

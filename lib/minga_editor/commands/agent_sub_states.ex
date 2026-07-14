@@ -21,7 +21,6 @@ defmodule MingaEditor.Commands.AgentSubStates do
   alias MingaEditor.Commands.AgentSession
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.TabBar
   alias Minga.Git
 
@@ -38,13 +37,13 @@ defmodule MingaEditor.Commands.AgentSubStates do
   end
 
   def handle_search_key(state, 27) do
-    saved = UIState.search_saved_scroll(AgentAccess.agent_ui(state))
+    saved = UIState.search_saved_scroll(state.workspace.agent_ui)
     state = update_agent_ui(state, &UIState.cancel_search/1)
     if saved, do: update_agent_ui(state, &UIState.set_scroll(&1, saved)), else: state
   end
 
   def handle_search_key(state, 127) do
-    query = UIState.search_query(AgentAccess.agent_ui(state)) || ""
+    query = UIState.search_query(state.workspace.agent_ui) || ""
 
     if query == "" do
       handle_search_key(state, 27)
@@ -57,7 +56,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
 
   def handle_search_key(state, cp) when cp >= 32 and cp <= 126 do
     char = <<cp::utf8>>
-    query = (UIState.search_query(AgentAccess.agent_ui(state)) || "") <> char
+    query = (UIState.search_query(state.workspace.agent_ui) || "") <> char
     state = update_agent_ui(state, &UIState.update_search_query(&1, query))
     run_search(state, query)
   end
@@ -67,14 +66,14 @@ defmodule MingaEditor.Commands.AgentSubStates do
   @doc "Starts search mode in the chat."
   @spec start_search(state()) :: state()
   def start_search(state) do
-    scroll = AgentAccess.panel(state).scroll.offset
+    scroll = state.workspace.agent_ui.panel.scroll.offset
     update_agent_ui(state, &UIState.start_search(&1, scroll))
   end
 
   @doc "Jumps to the next search match."
   @spec next_match(state()) :: state()
   def next_match(state) do
-    if AgentAccess.view(state).search.input_active do
+    if state.workspace.agent_ui.view.search.input_active do
       state
     else
       state = update_agent_ui(state, &UIState.next_search_match/1)
@@ -85,7 +84,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
   @doc "Jumps to the previous search match."
   @spec prev_match(state()) :: state()
   def prev_match(state) do
-    if AgentAccess.view(state).search.input_active do
+    if state.workspace.agent_ui.view.search.input_active do
       state
     else
       state = update_agent_ui(state, &UIState.prev_search_match/1)
@@ -118,7 +117,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
   end
 
   def handle_mention_key(state, 127, _mods) do
-    comp = AgentAccess.panel(state).mention_completion
+    comp = state.workspace.agent_ui.panel.mention_completion
 
     if slash_completion?(comp) do
       slash_backspace(state, comp)
@@ -129,7 +128,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
 
   def handle_mention_key(state, cp, mods)
       when cp >= 32 and band(mods, 0x02) == 0 and band(mods, 0x04) == 0 do
-    comp = AgentAccess.panel(state).mention_completion
+    comp = state.workspace.agent_ui.panel.mention_completion
 
     if slash_completion?(comp) do
       slash_insert_char(state, comp, <<cp::utf8>>)
@@ -173,7 +172,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
   @doc "Accepts the current diff hunk during review."
   @spec accept_hunk(state()) :: state()
   def accept_hunk(state) do
-    case AgentAccess.view(state).preview do
+    case state.workspace.agent_ui.view.preview do
       %Preview{content: {:diff, _review}} ->
         state =
           update_preview(
@@ -191,7 +190,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
   @doc "Rejects the current diff hunk during review."
   @spec reject_hunk(state()) :: state()
   def reject_hunk(state) do
-    case AgentAccess.view(state).preview do
+    case state.workspace.agent_ui.view.preview do
       %Preview{content: {:diff, review}} ->
         hunk = DiffReview.current_hunk(review)
         if hunk, do: revert_hunk(state, review, hunk)
@@ -212,7 +211,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
   @doc "Accepts all remaining diff hunks."
   @spec accept_all_hunks(state()) :: state()
   def accept_all_hunks(state) do
-    case AgentAccess.view(state).preview do
+    case state.workspace.agent_ui.view.preview do
       %Preview{content: {:diff, _}} ->
         state =
           update_preview(state, &Preview.update_diff(&1, fn r -> DiffReview.accept_all(r) end))
@@ -227,7 +226,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
   @doc "Rejects all remaining diff hunks."
   @spec reject_all_hunks(state()) :: state()
   def reject_all_hunks(state) do
-    case AgentAccess.view(state).preview do
+    case state.workspace.agent_ui.view.preview do
       %Preview{content: {:diff, review}} ->
         unresolved_hunks =
           review.hunks
@@ -268,8 +267,8 @@ defmodule MingaEditor.Commands.AgentSubStates do
 
   @spec respond_to_tool_approval(state(), Session.approval_decision()) :: state()
   defp respond_to_tool_approval(state, decision) do
-    agent = AgentAccess.agent(state)
-    session = AgentAccess.session(state)
+    agent = MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
+    session = MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
     approval = agent.pending_approval
 
     if is_pid(session) and is_map(approval) do
@@ -314,7 +313,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
 
   @spec accept_completion(state()) :: state()
   defp accept_completion(state) do
-    comp = AgentAccess.panel(state).mention_completion
+    comp = state.workspace.agent_ui.panel.mention_completion
 
     if slash_completion?(comp) do
       accept_slash_completion(state, comp)
@@ -406,11 +405,11 @@ defmodule MingaEditor.Commands.AgentSubStates do
   @spec slash_command_token_at_cursor(state()) ::
           {String.t(), non_neg_integer(), non_neg_integer()} | nil
   defp slash_command_token_at_cursor(state) do
-    panel = AgentAccess.panel(state)
+    panel = state.workspace.agent_ui.panel
 
-    case UIState.input_cursor(panel) do
+    case MingaEditor.Agent.PromptBuffer.input_cursor(panel) do
       {0, col} ->
-        current_line = Enum.at(UIState.input_lines(panel), 0, "")
+        current_line = Enum.at(MingaEditor.Agent.PromptBuffer.input_lines(panel), 0, "")
         before_cursor = String.slice(current_line, 0, col)
 
         if leading_slash_token?(before_cursor) do
@@ -447,9 +446,9 @@ defmodule MingaEditor.Commands.AgentSubStates do
 
   @spec replace_slash_input(state(), map(), String.t()) :: state()
   defp replace_slash_input(state, comp, insert) do
-    panel = AgentAccess.panel(state)
-    {line, _col} = UIState.input_cursor(panel)
-    lines = UIState.input_lines(panel)
+    panel = state.workspace.agent_ui.panel
+    {line, _col} = MingaEditor.Agent.PromptBuffer.input_cursor(panel)
+    lines = MingaEditor.Agent.PromptBuffer.input_lines(panel)
     current = Enum.at(lines, line, "")
     anchor_col = comp.anchor_col
 
@@ -479,7 +478,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
 
   defp mention_insert_char(state, char) do
     state = AgentCommands.input_char(state, char)
-    comp = AgentAccess.panel(state).mention_completion
+    comp = state.workspace.agent_ui.panel.mention_completion
     new_prefix = comp.prefix <> char
 
     update_panel(state, fn p ->
@@ -489,32 +488,32 @@ defmodule MingaEditor.Commands.AgentSubStates do
 
   @spec should_trigger_mention?(state()) :: boolean()
   defp should_trigger_mention?(state) do
-    panel = AgentAccess.panel(state)
-    {line, col} = UIState.input_cursor(panel)
-    current_line = Enum.at(UIState.input_lines(panel), line, "")
+    panel = state.workspace.agent_ui.panel
+    {line, col} = MingaEditor.Agent.PromptBuffer.input_cursor(panel)
+    current_line = Enum.at(MingaEditor.Agent.PromptBuffer.input_lines(panel), line, "")
     col == 0 or String.at(current_line, col - 1) in [" ", "\t", nil]
   end
 
   @spec start_mention_completion(state()) :: state()
   defp start_mention_completion(state) do
     files = list_project_files()
-    {line, col} = UIState.input_cursor(AgentAccess.panel(state))
+    {line, col} = MingaEditor.Agent.PromptBuffer.input_cursor(state.workspace.agent_ui.panel)
     completion = FileMention.new_completion(files, line, col - 1)
     update_panel(state, fn p -> %{p | mention_completion: completion} end)
   end
 
   @spec accept_mention_completion(state()) :: state()
   defp accept_mention_completion(state) do
-    comp = AgentAccess.panel(state).mention_completion
+    comp = state.workspace.agent_ui.panel.mention_completion
 
     case FileMention.selected_path(comp) do
       nil ->
         update_panel(state, fn p -> %{p | mention_completion: nil} end)
 
       path ->
-        panel = AgentAccess.panel(state)
-        {line, _col} = UIState.input_cursor(panel)
-        lines = UIState.input_lines(panel)
+        panel = state.workspace.agent_ui.panel
+        {line, _col} = MingaEditor.Agent.PromptBuffer.input_cursor(panel)
+        lines = MingaEditor.Agent.PromptBuffer.input_lines(panel)
         current = Enum.at(lines, line)
         anchor_col = comp.anchor_col
 
@@ -572,7 +571,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
 
   @spec run_search(state(), String.t()) :: state()
   defp run_search(state, query) do
-    session = AgentAccess.session(state)
+    session = MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
     messages = if session, do: safe_messages(session), else: []
     matches = ChatSearch.find_matches(messages, query)
     state = update_agent_ui(state, &UIState.set_search_matches(&1, matches))
@@ -581,7 +580,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
 
   @spec scroll_to_current_match(state()) :: state()
   defp scroll_to_current_match(state) do
-    case AgentAccess.view(state).search do
+    case state.workspace.agent_ui.view.search do
       nil ->
         state
 
@@ -595,7 +594,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
 
   @spec scroll_to_message(state(), non_neg_integer()) :: state()
   defp scroll_to_message(state, msg_idx) do
-    session = AgentAccess.session(state)
+    session = MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
     messages = if session, do: safe_messages(session), else: []
 
     case Transcript.message_start_line(messages, msg_idx) do
@@ -606,7 +605,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
 
   @spec maybe_finish_review(state()) :: state()
   defp maybe_finish_review(state) do
-    case Preview.diff_review(AgentAccess.view(state).preview) do
+    case Preview.diff_review(state.workspace.agent_ui.view.preview) do
       %DiffReview{} = review ->
         if DiffReview.resolved?(review), do: update_preview(state, &Preview.clear/1), else: state
 
@@ -761,22 +760,35 @@ defmodule MingaEditor.Commands.AgentSubStates do
   # ── State update helpers (delegated to AA) ─────────────────────────────────
 
   @spec update_agent(state(), (AgentState.t() -> AgentState.t())) :: state()
-  defp update_agent(state, fun), do: AgentAccess.update_agent(state, fun)
+  defp update_agent(state, fun),
+    do:
+      MingaEditor.Shell.Traditional.Workflow.install_agent_state(
+        state,
+        fun.(MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state))
+      )
 
   @spec update_agent_ui(state(), (UIState.t() -> UIState.t())) :: state()
-  defp update_agent_ui(state, fun), do: AgentAccess.update_agent_ui(state, fun)
+  defp update_agent_ui(state, fun),
+    do:
+      MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+        state,
+        fun.(state.workspace.agent_ui)
+      )
 
   @spec update_preview(state(), (Preview.t() -> Preview.t())) :: state()
   defp update_preview(state, fun) do
-    AgentAccess.update_view(state, fn v ->
-      %{v | preview: fun.(v.preview)}
-    end)
+    MingaEditor.Shell.Traditional.Workflow.install_agent_view(
+      state,
+      (fn v ->
+         %{v | preview: fun.(v.preview)}
+       end).(state.workspace.agent_ui.view)
+    )
   end
 
   @spec sync_mention_to_buffer(state(), String.t(), non_neg_integer(), non_neg_integer()) ::
           state()
   defp sync_mention_to_buffer(state, content, line, col) do
-    panel = AgentAccess.panel(state)
+    panel = state.workspace.agent_ui.panel
 
     if is_pid(panel.prompt_buffer) do
       Buffer.replace_content(panel.prompt_buffer, content)
@@ -788,6 +800,9 @@ defmodule MingaEditor.Commands.AgentSubStates do
 
   @spec update_panel(state(), (Panel.t() -> Panel.t())) :: state()
   defp update_panel(state, fun) do
-    AgentAccess.update_panel(state, fun)
+    MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
+      state,
+      fun.(state.workspace.agent_ui.panel)
+    )
   end
 end

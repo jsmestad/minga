@@ -87,8 +87,11 @@ defmodule MingaGitPorcelain.Keymap.ScopeTest do
     end
 
     test "Cmd+C and Ctrl+C start commit" do
-      assert {:command, :git_status_start_commit} = Scope.resolve_key(:git_status, :cua, {?c, @cmd})
-      assert {:command, :git_status_start_commit} = Scope.resolve_key(:git_status, :cua, {?c, @ctrl})
+      assert {:command, :git_status_start_commit} =
+               Scope.resolve_key(:git_status, :cua, {?c, @cmd})
+
+      assert {:command, :git_status_start_commit} =
+               Scope.resolve_key(:git_status, :cua, {?c, @ctrl})
     end
 
     test "Ctrl+S falls through to global save handler" do

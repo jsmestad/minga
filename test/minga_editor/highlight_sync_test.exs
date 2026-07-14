@@ -1,6 +1,8 @@
 defmodule MingaEditor.HighlightSyncTest do
   use ExUnit.Case, async: true
 
+  alias MingaEditor.State.Buffers
+  alias MingaEditor.Session.State, as: SessionState
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Parser.Manager
   alias Minga.Language.Symbol
@@ -23,14 +25,23 @@ defmodule MingaEditor.HighlightSyncTest do
     pid = self()
 
     %EditorState{
-      port_manager: nil,
-      parser_manager: manager(),
+      frontend: %MingaEditor.State.Frontend{port_manager: nil},
+      parser: %MingaEditor.State.Parser{parser_manager: manager()},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: VimState.new()
       }
     }
-    |> then(fn s -> put_in(s.workspace.buffers.active, pid) end)
+    |> then(fn s ->
+      %{
+        s
+        | workspace:
+            SessionState.set_buffers(
+              s.workspace,
+              Buffers.set_active_override(s.workspace.buffers, pid)
+            )
+      }
+    end)
   end
 
   defp manager, do: Process.get(:parser_manager)
@@ -102,7 +113,7 @@ defmodule MingaEditor.HighlightSyncTest do
   describe "setup_for_buffer/1" do
     test "returns state unchanged when no buffer" do
       state = %EditorState{
-        port_manager: nil,
+        frontend: %MingaEditor.State.Frontend{port_manager: nil},
         workspace: %MingaEditor.Session.State{
           viewport: Viewport.new(24, 80),
           editing: VimState.new()
@@ -123,7 +134,7 @@ defmodule MingaEditor.HighlightSyncTest do
       id = Manager.buffer_id(md_buf, manager())
       assert is_integer(id) and id > 0
       assert Manager.resolve_buffer(id, manager()) == md_buf
-      assert Map.has_key?(new_state.highlighting.highlights, md_buf)
+      assert Map.has_key?(new_state.parser.highlighting.highlights, md_buf)
     end
 
     test "registers parser metadata in Parser.Manager" do
@@ -215,7 +226,7 @@ defmodule MingaEditor.HighlightSyncTest do
   describe "request_reparse/1" do
     test "returns state unchanged when no buffer" do
       state = %EditorState{
-        port_manager: nil,
+        frontend: %MingaEditor.State.Frontend{port_manager: nil},
         workspace: %MingaEditor.Session.State{
           viewport: Viewport.new(24, 80),
           editing: VimState.new()
@@ -227,7 +238,15 @@ defmodule MingaEditor.HighlightSyncTest do
 
     test "does not register an unsupported buffer" do
       {:ok, buffer} = BufferProcess.start_link(content: "plain", filetype: :text)
-      state = put_in(base_state().workspace.buffers.active, buffer)
+
+      state = %{
+        base_state()
+        | workspace:
+            SessionState.set_buffers(
+              base_state().workspace,
+              Buffers.set_active_override(base_state().workspace.buffers, buffer)
+            )
+      }
 
       reparsed = HighlightSync.request_reparse(state)
       assert get_hl(reparsed).capture_names == {}
@@ -238,7 +257,15 @@ defmodule MingaEditor.HighlightSyncTest do
       {:ok, buffer} =
         BufferProcess.start_link(content: "defmodule Pending do\nend\n", filetype: :elixir)
 
-      state = put_in(base_state().workspace.buffers.active, buffer)
+      state = %{
+        base_state()
+        | workspace:
+            SessionState.set_buffers(
+              base_state().workspace,
+              Buffers.set_active_override(base_state().workspace.buffers, buffer)
+            )
+      }
+
       state = HighlightSync.setup_for_buffer(state)
       assert get_hl(state).capture_names == {}
 

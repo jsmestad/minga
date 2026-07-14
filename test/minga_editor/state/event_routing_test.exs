@@ -2,13 +2,11 @@ defmodule MingaEditor.State.EventRoutingTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.Agent.Events, as: AgentEvents
-  alias MingaEditor.Agent.UIState
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.{Tab, TabBar, Workspace}
   alias MingaEditor.Viewport
 
@@ -20,7 +18,7 @@ defmodule MingaEditor.State.EventRoutingTest do
     tb = TabBar.new(Tab.new_file(1, "main.ex"))
 
     state = %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80)
       },
@@ -44,7 +42,9 @@ defmodule MingaEditor.State.EventRoutingTest do
 
       {new_state, effects} = AgentEvents.handle(state, {:status_changed, :thinking})
 
-      assert AgentAccess.agent(new_state).runtime.status == :thinking
+      assert MingaEditor.Shell.Traditional.State.agent(new_state.shell_runtime.state).runtime.status ==
+               :thinking
+
       assert :render in effects
     end
 
@@ -53,7 +53,7 @@ defmodule MingaEditor.State.EventRoutingTest do
 
       {new_state, _effects} = AgentEvents.handle(state, {:status_changed, :thinking})
 
-      assert AgentAccess.panel(new_state).scroll.pinned == true
+      assert new_state.workspace.agent_ui.panel.scroll.pinned == true
     end
 
     test "status_changed to :error logs a message" do
@@ -66,11 +66,12 @@ defmodule MingaEditor.State.EventRoutingTest do
 
     test "status_changed to :idle stops spinner" do
       %{state: state} = make_state()
-      state = AgentAccess.update_agent(state, &AgentState.start_spinner_timer/1)
+      state = MingaEditor.Shell.Traditional.Workflow.install_agent_spinner_start(state)
 
       {new_state, _effects} = AgentEvents.handle(state, {:status_changed, :idle})
 
-      assert AgentAccess.agent(new_state).spinner_timer == nil
+      assert MingaEditor.Shell.Traditional.State.agent(new_state.shell_runtime.state).spinner_timer ==
+               nil
     end
   end
 
@@ -105,7 +106,7 @@ defmodule MingaEditor.State.EventRoutingTest do
       assert :sync_agent_transcript in effects
       assert {:update_tab_label, ""} in effects
       # message_version is bumped so the GUI fingerprint cache is invalidated
-      assert AgentAccess.panel(new_state).message_version == 1
+      assert new_state.workspace.agent_ui.panel.message_version == 1
     end
   end
 
@@ -126,7 +127,7 @@ defmodule MingaEditor.State.EventRoutingTest do
       assert Enum.count(effects, &(&1 == :sync_agent_transcript)) == 1
       assert Enum.count(effects, &match?({:render, _}, &1)) == 1
       # A single coalesced batch bumps the version exactly once.
-      assert AgentAccess.panel(new_state).message_version == 1
+      assert new_state.workspace.agent_ui.panel.message_version == 1
     end
 
     test "a tool-update-only batch renders without syncing the transcript" do
@@ -139,7 +140,7 @@ defmodule MingaEditor.State.EventRoutingTest do
       refute :sync_agent_transcript in effects
       assert {:render, 16} in effects
       # No assistant text, so the transcript version is untouched.
-      assert AgentAccess.panel(new_state).message_version == 0
+      assert new_state.workspace.agent_ui.panel.message_version == 0
     end
 
     test "an empty batch is a no-op" do
@@ -155,7 +156,9 @@ defmodule MingaEditor.State.EventRoutingTest do
 
       {new_state, effects} = AgentEvents.handle(state, {:error, "something broke"})
 
-      assert AgentAccess.agent(new_state).error == "something broke"
+      assert MingaEditor.Shell.Traditional.State.agent(new_state.shell_runtime.state).error ==
+               "something broke"
+
       assert :render in effects
       # The session already surfaced this in the transcript and the provider
       # logged the raw detail to the Messages panel; re-logging here would
@@ -167,27 +170,27 @@ defmodule MingaEditor.State.EventRoutingTest do
   describe "Agent.Events.handle/2 — credentials status" do
     test "credentials_status updates the panel flag and re-renders" do
       %{state: state} = make_state()
-      assert AgentAccess.panel(state).credentials_configured == false
+      assert state.workspace.agent_ui.panel.credentials_configured == false
 
       {new_state, effects} = AgentEvents.handle(state, {:credentials_status, true})
 
-      assert AgentAccess.panel(new_state).credentials_configured == true
+      assert new_state.workspace.agent_ui.panel.credentials_configured == true
       assert :render in effects
 
       {restored, _effects} = AgentEvents.handle(new_state, {:credentials_status, false})
-      assert AgentAccess.panel(restored).credentials_configured == false
+      assert restored.workspace.agent_ui.panel.credentials_configured == false
     end
   end
 
   describe "Agent.Events.handle/2 — spinner" do
     test "spinner_tick when busy ticks the spinner frame" do
       %{state: state} = make_state()
-      state = AgentAccess.update_agent(state, &AgentState.set_status(&1, :thinking))
-      state = AgentAccess.update_agent(state, &AgentState.start_spinner_timer/1)
+      state = MingaEditor.Shell.Traditional.Workflow.install_agent_status(state, :thinking)
+      state = MingaEditor.Shell.Traditional.Workflow.install_agent_spinner_start(state)
 
       {new_state, effects} = AgentEvents.handle(state, :spinner_tick)
 
-      assert AgentAccess.panel(new_state).spinner_frame == 1
+      assert new_state.workspace.agent_ui.panel.spinner_frame == 1
       assert {:render, 16} in effects
     end
 
@@ -196,7 +199,9 @@ defmodule MingaEditor.State.EventRoutingTest do
 
       {new_state, effects} = AgentEvents.handle(state, :spinner_tick)
 
-      assert AgentAccess.agent(new_state).spinner_timer == nil
+      assert MingaEditor.Shell.Traditional.State.agent(new_state.shell_runtime.state).spinner_timer ==
+               nil
+
       assert effects == []
     end
   end
@@ -208,11 +213,12 @@ defmodule MingaEditor.State.EventRoutingTest do
       approval = %{tool_call_id: "123", name: "shell", args: %{"command" => "ls"}}
       {new_state, effects} = AgentEvents.handle(state, {:approval_pending, approval})
 
-      assert AgentAccess.agent(new_state).pending_approval == %{
-               tool_call_id: "123",
-               name: "shell",
-               args: %{"command" => "ls"}
-             }
+      assert MingaEditor.Shell.Traditional.State.agent(new_state.shell_runtime.state).pending_approval ==
+               %{
+                 tool_call_id: "123",
+                 name: "shell",
+                 args: %{"command" => "ls"}
+               }
 
       assert :render in effects
       assert :sync_agent_transcript in effects
@@ -222,25 +228,32 @@ defmodule MingaEditor.State.EventRoutingTest do
       %{state: state} = make_state()
 
       # Simulate the user typing in the prompt (input focused)
-      state = AgentAccess.update_agent_ui(state, &UIState.set_input_focused(&1, true))
-      assert AgentAccess.input_focused?(state)
+      state =
+        MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+          state,
+          MingaEditor.Agent.PromptBuffer.set_input_focused(state.workspace.agent_ui, true)
+        )
+
+      assert state.workspace.agent_ui.panel.input_focused
 
       approval = %{tool_call_id: "456", name: "write_file", args: %{}}
       {new_state, _effects} = AgentEvents.handle(state, {:approval_pending, approval})
 
       # Input must be unfocused so the ToolApproval handler can intercept y/n
-      refute AgentAccess.input_focused?(new_state)
+      refute new_state.workspace.agent_ui.panel.input_focused
     end
 
     test "approval_resolved clears pending approval and syncs transcript" do
       %{state: state} = make_state()
 
       state =
-        AgentAccess.update_agent(state, &AgentState.set_pending_approval(&1, %{name: "shell"}))
+        MingaEditor.Shell.Traditional.Workflow.install_agent_approval(state, %{name: "shell"})
 
       {new_state, effects} = AgentEvents.handle(state, {:approval_resolved, :approved})
 
-      assert AgentAccess.agent(new_state).pending_approval == nil
+      assert MingaEditor.Shell.Traditional.State.agent(new_state.shell_runtime.state).pending_approval ==
+               nil
+
       assert :sync_agent_transcript in effects
     end
   end
@@ -262,7 +275,18 @@ defmodule MingaEditor.State.EventRoutingTest do
       tab = TabBar.active(state.shell_runtime.state.tab_bar)
       new_session = spawn(fn -> :timer.sleep(:infinity) end)
 
-      state = EditorState.set_tab_session(state, tab.id, new_session)
+      state =
+        then(state, fn state ->
+          %{
+            state
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.set_tab_session(
+                  state.shell_runtime,
+                  tab.id,
+                  new_session
+                )
+          }
+        end)
 
       tab = TabBar.get(state.shell_runtime.state.tab_bar, tab.id)
       workspace = TabBar.active_workspace(state.shell_runtime.state.tab_bar)
@@ -274,7 +298,13 @@ defmodule MingaEditor.State.EventRoutingTest do
   describe "tab context excludes shell agent runtime but includes workspace agent UI" do
     test "snapshot_tab_context keeps per-tab agent UI without shell runtime fields" do
       %{state: state} = make_state()
-      state = AgentAccess.update_agent_ui(state, &UIState.set_input_focused(&1, true))
+
+      state =
+        MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+          state,
+          MingaEditor.Agent.PromptBuffer.set_input_focused(state.workspace.agent_ui, true)
+        )
+
       ctx = EditorState.snapshot_tab_context(state)
 
       refute Map.has_key?(ctx, :agent)
@@ -296,7 +326,23 @@ defmodule MingaEditor.State.EventRoutingTest do
         |> TabBar.update_tab(agent_tab.id, &Tab.set_session(&1, session))
         |> TabBar.update_workspace(agent_tab.group_id, &Workspace.set_session(&1, session))
 
-      state = MingaEditor.State.set_tab_bar(state, tb)
+      state =
+        then(state, fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.set_tab_bar(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              tb
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
 
       {new_state, _effects} = AgentEvents.handle(state, {:status_changed, :thinking})
 
@@ -314,7 +360,23 @@ defmodule MingaEditor.State.EventRoutingTest do
         |> TabBar.update_tab(agent_tab.id, &Tab.set_session(&1, session))
         |> TabBar.update_workspace(agent_tab.group_id, &Workspace.set_session(&1, session))
 
-      state = MingaEditor.State.set_tab_bar(state, tb)
+      state =
+        then(state, fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.set_tab_bar(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              tb
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
 
       {state, _} = AgentEvents.handle(state, {:status_changed, :thinking})
       {new_state, _} = AgentEvents.handle(state, {:status_changed, :idle})

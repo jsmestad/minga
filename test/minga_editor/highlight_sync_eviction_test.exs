@@ -3,6 +3,8 @@ defmodule MingaEditor.HighlightSyncEvictionTest do
 
   use ExUnit.Case, async: true
 
+  alias MingaEditor.State.Buffers
+  alias MingaEditor.Session.State, as: SessionState
   alias Minga.Parser.BufferConfig
   alias Minga.Parser.Manager
   alias MingaEditor.HighlightSync
@@ -26,8 +28,24 @@ defmodule MingaEditor.HighlightSyncEvictionTest do
 
       state =
         base_state()
-        |> EditorState.set_highlight(%Highlighting{highlights: %{stale => Highlight.new()}})
-        |> EditorState.set_injection_ranges(%{stale => [:range]})
+        |> then(fn state ->
+          %{
+            state
+            | parser:
+                MingaEditor.State.Parser.accept_highlighting(state.parser, %Highlighting{
+                  highlights: %{stale => Highlight.new()}
+                })
+          }
+        end)
+        |> then(fn state ->
+          %{
+            state
+            | parser:
+                MingaEditor.State.Parser.accept_injection_ranges(state.parser, %{
+                  stale => [:range]
+                })
+          }
+        end)
 
       receive do
       after
@@ -38,8 +56,8 @@ defmodule MingaEditor.HighlightSyncEvictionTest do
 
       assert Manager.buffer_id(stale, manager()) == nil
       assert Manager.resolve_buffer(id, manager()) == nil
-      refute Map.has_key?(new_state.highlighting.highlights, stale)
-      refute Map.has_key?(new_state.injection_ranges, stale)
+      refute Map.has_key?(new_state.parser.highlighting.highlights, stale)
+      refute Map.has_key?(new_state.parser.injection_ranges, stale)
     end
 
     test "keeps active and explicitly protected registrations" do
@@ -74,7 +92,7 @@ defmodule MingaEditor.HighlightSyncEvictionTest do
 
       assert Manager.buffer_id(buffer, manager()) == id
 
-      assert state.highlighting |> Map.from_struct() |> Map.keys() |> Enum.sort() ==
+      assert state.parser.highlighting |> Map.from_struct() |> Map.keys() |> Enum.sort() ==
                [:highlights, :syntax_overrides]
     end
 
@@ -95,15 +113,31 @@ defmodule MingaEditor.HighlightSyncEvictionTest do
 
       state =
         base_state()
-        |> EditorState.set_highlight(%Highlighting{highlights: %{buffer_pid => Highlight.new()}})
-        |> EditorState.set_injection_ranges(%{buffer_pid => [:range]})
+        |> then(fn state ->
+          %{
+            state
+            | parser:
+                MingaEditor.State.Parser.accept_highlighting(state.parser, %Highlighting{
+                  highlights: %{buffer_pid => Highlight.new()}
+                })
+          }
+        end)
+        |> then(fn state ->
+          %{
+            state
+            | parser:
+                MingaEditor.State.Parser.accept_injection_ranges(state.parser, %{
+                  buffer_pid => [:range]
+                })
+          }
+        end)
 
       new_state = HighlightSync.close_buffer(state, buffer_pid)
 
       assert Manager.buffer_id(buffer_pid, manager()) == nil
       assert Manager.resolve_buffer(id, manager()) == nil
-      refute Map.has_key?(new_state.highlighting.highlights, buffer_pid)
-      refute Map.has_key?(new_state.injection_ranges, buffer_pid)
+      refute Map.has_key?(new_state.parser.highlighting.highlights, buffer_pid)
+      refute Map.has_key?(new_state.parser.injection_ranges, buffer_pid)
     end
 
     test "cleans presentation caches even without a parser registration" do
@@ -111,20 +145,36 @@ defmodule MingaEditor.HighlightSyncEvictionTest do
 
       state =
         base_state()
-        |> EditorState.set_highlight(%Highlighting{highlights: %{buffer_pid => Highlight.new()}})
-        |> EditorState.set_injection_ranges(%{buffer_pid => [:range]})
+        |> then(fn state ->
+          %{
+            state
+            | parser:
+                MingaEditor.State.Parser.accept_highlighting(state.parser, %Highlighting{
+                  highlights: %{buffer_pid => Highlight.new()}
+                })
+          }
+        end)
+        |> then(fn state ->
+          %{
+            state
+            | parser:
+                MingaEditor.State.Parser.accept_injection_ranges(state.parser, %{
+                  buffer_pid => [:range]
+                })
+          }
+        end)
 
       new_state = HighlightSync.close_buffer(state, buffer_pid)
 
-      refute Map.has_key?(new_state.highlighting.highlights, buffer_pid)
-      refute Map.has_key?(new_state.injection_ranges, buffer_pid)
+      refute Map.has_key?(new_state.parser.highlighting.highlights, buffer_pid)
+      refute Map.has_key?(new_state.parser.injection_ranges, buffer_pid)
     end
   end
 
   defp base_state do
     %EditorState{
-      port_manager: nil,
-      parser_manager: manager(),
+      frontend: %MingaEditor.State.Frontend{port_manager: nil},
+      parser: %MingaEditor.State.Parser{parser_manager: manager()},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: VimState.new()
@@ -144,5 +194,13 @@ defmodule MingaEditor.HighlightSyncEvictionTest do
     pid
   end
 
-  defp put_active(state, pid), do: put_in(state.workspace.buffers.active, pid)
+  defp put_active(state, pid),
+    do: %{
+      state
+      | workspace:
+          SessionState.set_buffers(
+            state.workspace,
+            Buffers.set_active_override(state.workspace.buffers, pid)
+          )
+    }
 end

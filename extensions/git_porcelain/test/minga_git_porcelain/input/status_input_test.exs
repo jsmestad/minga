@@ -42,12 +42,14 @@ defmodule MingaGitPorcelain.Input.GitStatusInputTest do
     }
 
     %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         keymap_scope: :git_status
       },
-      focus_stack: [MingaEditor.Input.Scoped, MingaEditor.Input.ModeFSM]
+      interaction: %MingaEditor.State.Interaction{
+        focus_stack: [MingaEditor.Input.Scoped, MingaEditor.Input.ModeFSM]
+      }
     }
     |> SidebarWorkflow.replace_git_status(panel_data)
     |> SidebarWorkflow.replace_git_status_tui(TuiState.new())
@@ -73,7 +75,11 @@ defmodule MingaGitPorcelain.Input.GitStatusInputTest do
 
   test "passthrough for non-git-status scope" do
     state = make_state_with_git_panel()
-    state = EditorState.set_keymap_scope(state, :editor)
+
+    state = %{
+      state
+      | workspace: MingaEditor.Session.State.set_keymap_scope(state.workspace, :editor)
+    }
 
     {:passthrough, _state} = GitStatus.handle_key(state, @j, @none)
   end

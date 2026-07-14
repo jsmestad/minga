@@ -174,6 +174,12 @@ defmodule MingaEditor.Window do
 
   # ── Scroll helpers ──────────────────────────────────────────────────────────
 
+  @doc "Sets the window cursor."
+  @spec set_cursor(t(), Buffer.position()) :: t()
+  def set_cursor(%__MODULE__{} = window, {line, col} = cursor)
+      when is_integer(line) and line >= 0 and is_integer(col) and col >= 0,
+      do: %{window | cursor: cursor}
+
   @doc "Stores the computed viewport for this window."
   @spec set_viewport(t(), Viewport.t()) :: t()
   def set_viewport(%__MODULE__{} = window, %Viewport{} = viewport) do
@@ -339,6 +345,12 @@ defmodule MingaEditor.Window do
   @spec set_document_symbols(t(), [Symbol.t()]) :: t()
   def set_document_symbols(%__MODULE__{} = window, symbols) when is_list(symbols) do
     %{window | document_symbols: symbols}
+  end
+
+  @doc "Updates textobject positions available for this window."
+  @spec set_textobject_positions(t(), map()) :: t()
+  def set_textobject_positions(%__MODULE__{} = window, positions) when is_map(positions) do
+    %{window | textobject_positions: positions}
   end
 
   @doc "Finds the next textobject position of the given type after (row, col)."

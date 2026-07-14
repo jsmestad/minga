@@ -15,7 +15,7 @@ defmodule MingaEditor.LspActions.NavigationTest do
 
   defp stub_state do
     %EditorState{
-      port_manager: nil,
+      frontend: %MingaEditor.State.Frontend{port_manager: nil},
       workspace: %SessionState{viewport: Viewport.new(40, 120)}
     }
   end

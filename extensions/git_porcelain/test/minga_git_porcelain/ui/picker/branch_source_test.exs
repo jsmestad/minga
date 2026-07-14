@@ -24,7 +24,7 @@ defmodule MingaGitPorcelain.UI.Picker.GitBranchSourceTest do
 
   test "delete action on current branch reports an error without entering confirmation" do
     state = %EditorState{
-      port_manager: nil,
+      frontend: %MingaEditor.State.Frontend{port_manager: nil},
       workspace: %SessionState{viewport: Viewport.new(24, 80)}
     }
 

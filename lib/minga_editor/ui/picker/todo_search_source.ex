@@ -5,22 +5,19 @@ defmodule MingaEditor.UI.Picker.TodoSearchSource do
   Uses `git grep` in repositories so ignored files stay ignored, and falls back to recursive `grep` outside git repositories.
 
   The scan is async: the picker opens immediately with a "Searching…" indicator
-  and the project-wide `git grep`/`grep` shell-out runs in a background task off
-  the editor input path, with latest-wins stale-result protection (a reopen or
-  project switch drops an older in-flight result).
+  and the project-wide `git grep`/`grep` effect runs through the generation-owned
+  scheduler off the editor input path, with latest-wins stale-result protection
+  (a reopen or project switch drops an older in-flight result).
   """
 
   @behaviour MingaEditor.UI.Picker.Source
 
   alias Minga.Buffer
   alias Minga.Language
-  alias MingaEditor.State, as: EditorState
   alias Minga.Language.Devicon
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.Source
-
-  @keyword_pattern "(^|[[:space:]])(#|//|/\\*|%|--)[[:space:]]*(TODO|FIXME|HACK|NOTE|REVIEW|DEPRECATED)([^[:alnum:]_]|$)"
 
   @type marker :: %{
           path: String.t(),
@@ -42,13 +39,7 @@ defmodule MingaEditor.UI.Picker.TodoSearchSource do
 
   @impl true
   @spec candidates(Context.t()) :: [Item.t()]
-  def candidates(_context) do
-    root = Minga.Project.resolve_root()
-
-    root
-    |> search_output()
-    |> build_candidates(root)
-  end
+  def candidates(_context), do: []
 
   @doc "Parses grep-style `path:line:text` output into marker maps."
   @spec parse_output(String.t()) :: [marker()]
@@ -85,46 +76,6 @@ defmodule MingaEditor.UI.Picker.TodoSearchSource do
   @spec on_cancel(term()) :: term()
   def on_cancel(state), do: Source.restore_or_keep(state)
 
-  @spec search_output(String.t()) :: {:ok, String.t()} | {:error, String.t()}
-  defp search_output(root) do
-    if git_repo?(root) do
-      run_git_grep(root)
-    else
-      run_grep(root)
-    end
-  end
-
-  @spec git_repo?(String.t()) :: boolean()
-  defp git_repo?(root) do
-    case System.cmd("git", ["-C", root, "rev-parse", "--is-inside-work-tree"],
-           stderr_to_stdout: true
-         ) do
-      {"true\n", 0} -> true
-      _ -> false
-    end
-  end
-
-  @spec run_git_grep(String.t()) :: {:ok, String.t()} | {:error, String.t()}
-  defp run_git_grep(root) do
-    run_search_command("git", ["-C", root, "grep", "-n", "-I", "-E", @keyword_pattern, "--", "."])
-  end
-
-  @spec run_grep(String.t()) :: {:ok, String.t()} | {:error, String.t()}
-  defp run_grep(root) do
-    run_search_command("grep", ["-rnEI", "--exclude-dir=.git", @keyword_pattern, root])
-  end
-
-  @spec run_search_command(String.t(), [String.t()]) :: {:ok, String.t()} | {:error, String.t()}
-  defp run_search_command(command, args) do
-    case System.cmd(command, args, stderr_to_stdout: true) do
-      {output, 0} -> {:ok, output}
-      {_output, 1} -> {:ok, ""}
-      {output, _status} -> {:error, output}
-    end
-  rescue
-    error -> {:error, Exception.message(error)}
-  end
-
   @spec parse_line(String.t()) :: [marker()]
   defp parse_line(line) do
     case String.split(line, ":", parts: 3) do
@@ -160,7 +111,7 @@ defmodule MingaEditor.UI.Picker.TodoSearchSource do
 
   @spec open_match(term(), String.t(), non_neg_integer(), non_neg_integer()) :: term()
   defp open_match(state, abs_path, line, col) do
-    case EditorState.find_buffer_by_path(state, abs_path) do
+    case MingaEditor.Handlers.BufferRegistry.find_buffer_by_path(state, abs_path) do
       nil -> open_new_buffer(state, abs_path, line, col)
       buf_idx -> jump_to_buffer(state, buf_idx, line, col)
     end
@@ -168,9 +119,9 @@ defmodule MingaEditor.UI.Picker.TodoSearchSource do
 
   @spec open_new_buffer(term(), String.t(), non_neg_integer(), non_neg_integer()) :: term()
   defp open_new_buffer(state, abs_path, line, col) do
-    case EditorState.start_buffer(abs_path) do
+    case MingaEditor.Commands.start_buffer(abs_path) do
       {:ok, pid} ->
-        new_state = EditorState.add_buffer(state, pid)
+        new_state = MingaEditor.Handlers.BufferRegistry.add_buffer(state, pid)
         Buffer.move_to(pid, {line, col})
         new_state
 

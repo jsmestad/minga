@@ -59,7 +59,15 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
         Buffers.add_background(acc, pid)
       end)
 
-    EditorState.set_buffers(state, buffers)
+    then(state, fn state ->
+      %{
+        state
+        | workspace:
+            then(state.workspace, fn workspace ->
+              MingaEditor.Session.State.set_buffers(workspace, buffers)
+            end)
+      }
+    end)
   end
 
   describe "special?/1" do

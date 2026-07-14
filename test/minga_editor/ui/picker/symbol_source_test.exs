@@ -11,7 +11,6 @@ defmodule MingaEditor.UI.Picker.SymbolSourceTest do
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.SymbolSource
-  alias MingaEditor.Window
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -46,7 +45,22 @@ defmodule MingaEditor.UI.Picker.SymbolSourceTest do
   @spec state_with_symbols([Symbol.t()]) :: EditorState.t()
   defp state_with_symbols(symbols) do
     state = base_state()
-    win_id = state.workspace.windows.active
-    EditorState.update_window(state, win_id, &Window.set_document_symbols(&1, symbols))
+
+    then(state, fn state ->
+      %{
+        state
+        | workspace:
+            then(state.workspace, fn workspace ->
+              MingaEditor.Session.State.set_windows(
+                workspace,
+                MingaEditor.State.Windows.set_document_symbols_for_buffer(
+                  state.workspace.windows,
+                  state.workspace.buffers.active,
+                  symbols
+                )
+              )
+            end)
+      }
+    end)
   end
 end

@@ -9,9 +9,10 @@ defmodule Minga.Test.ScopedInputHelpers do
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.ExtensionSurfaces
   alias MingaEditor.State.FileTree, as: FileTreeState
+  alias MingaEditor.State.Frontend
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
@@ -63,8 +64,9 @@ defmodule Minga.Test.ScopedInputHelpers do
     mode = if(Keyword.get(opts, :input_focused, false), do: :insert, else: :normal)
 
     %EditorState{
-      port_manager: self(),
-      sidebar_registry: Keyword.fetch!(opts, :sidebar_registry),
+      frontend: Frontend.new(port_manager: self()),
+      extension_surfaces:
+        ExtensionSurfaces.new(sidebar_registry: Keyword.fetch!(opts, :sidebar_registry)),
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: %VimState{mode: mode, mode_state: Mode.initial_state()},
@@ -121,19 +123,34 @@ defmodule Minga.Test.ScopedInputHelpers do
 
     state =
       state
-      |> EditorState.set_tab_bar(tab_bar)
-      |> EditorState.set_workspace(workspace_state)
+      |> then(fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            tab_bar
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
+      |> then(fn state -> %{state | workspace: workspace_state} end)
 
     {state, session, file_buffer}
   end
 
   @spec focus_prompt(EditorState.t(), String.t()) :: EditorState.t()
   def focus_prompt(state, text) do
-    AgentAccess.update_agent_ui(state, fn ui ->
-      ui
-      |> UIState.set_input_focused(true)
-      |> UIState.set_prompt_text(text)
-    end)
+    MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+      state,
+      (fn ui ->
+         ui
+         |> MingaEditor.Agent.PromptBuffer.set_input_focused(true)
+         |> MingaEditor.Agent.PromptBuffer.set_prompt_text(text)
+       end).(state.workspace.agent_ui)
+    )
   end
 
   @spec assert_passthrough_then_handled(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
@@ -199,7 +216,16 @@ defmodule Minga.Test.ScopedInputHelpers do
     buf = BufferSync.start_buffer(tree)
 
     state = base_state(keymap_scope: :file_tree)
-    EditorState.set_file_tree(state, %FileTreeState{tree: tree, focused: true, buffer: buf})
+
+    %{
+      state
+      | workspace:
+          MingaEditor.Session.State.set_file_tree(state.workspace, %FileTreeState{
+            tree: tree,
+            focused: true,
+            buffer: buf
+          })
+    }
   end
 
   defp private_sidebar_registry do

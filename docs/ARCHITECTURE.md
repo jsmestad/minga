@@ -124,6 +124,35 @@ end
 
 No locks. No mutexes. No "file changed on disk" dialogs. Just processes with private state communicating through well-defined messages.
 
+### One Editor mailbox, focused value owners
+
+`MingaEditor` is one GenServer and remains the single authority that serializes interactive editor state. Decomposing its state does not create a process per feature. Input ordering, shell changes, workspace transitions, renderer receipts, and lifecycle messages still pass through one mailbox, while immutable sub-structs give each behavior a narrow transition API.
+
+The root `MingaEditor.State` contains 16 cohesive values:
+
+| Root value | Owner | Responsibility |
+|---|---|---|
+| `workspace` | `MingaEditor.Session.State` | Active tab editing context: buffers, windows, mode state, search, file tree, mouse, hover, and agent UI. |
+| `shell_runtime` | `MingaEditor.Shell.Runtime` | Active shell identity, implementation state, and exact-identity stash. |
+| `frontend` | `MingaEditor.State.Frontend` | Transport, backend, capabilities, terminal viewport, pressure, and input correlation. |
+| `render` | `MingaEditor.State.Render` | Renderer connection, render correlation, messages, layout, focus, and cursor observations. |
+| `parser` | `MingaEditor.State.Parser` | Parser manager and status, highlighting, injections, and face registries. |
+| `agent_connection` | `MingaEditor.State.AgentConnection` | Agent provider configuration and ingest connection. |
+| `interaction` | `MingaEditor.State.Interaction` | Editing model, keymap and option servers, focus stack, and keystroke history. |
+| `extension_surfaces` | `MingaEditor.State.ExtensionSurfaces` | Event, sidebar, and semantic-agent registries. |
+| `buffer_lifecycle` | `MingaEditor.State.BufferLifecycle` | Buffer monitors and add context. |
+| `git` | `MingaEditor.State.Git` | Remote and commit-generation correlation plus diff views. |
+| `session` | `MingaEditor.State.Session` | Persistence, save timer, startup, pending quit, and test-command lifecycle. |
+| `effect_scheduler` | `MingaEditor.EffectScheduler` | Process handle for bounded asynchronous resource work. |
+| `feedback` | `MingaEditor.State.Feedback` | Notifications and operation feedback. |
+| `lsp` | `MingaEditor.State.LSP` | LSP status, presentation, debounce, and operation correlation. |
+| `remote` | `MingaEditor.State.Remote` | Remote sessions, status, and buffers. |
+| `appearance` | `MingaEditor.State.Appearance` | Theme, font override, and cached native settings. |
+
+A leaf transition goes directly to its owner. The calling workflow may install the owner-produced result into the matching top-level root field, but it may not compute the transition itself or pass through a root wrapper. `MingaEditor.State` keeps only atomic transitions that span owners, such as theme plus parser synchronization, renderer receipt integration, frontend render reset, buffer lifecycle changes, tab snapshot and restore, and extension feature cleanup. It must not become a forwarding facade for leaf setters, generic mappers, or deep updates. `Minga.Credo.EditorStateOwnershipCheck` verifies the owner call that produces each direct top-level installation and enforces these boundaries with an empty exception allowlist.
+
+External work stays in the workflow that requested it. Slow resource work uses typed `MingaEditor.Effect.Request` and `MingaEditor.Effect.Outcome` values through `MingaEditor.EffectScheduler`; the scheduler owns admission and worker lifecycle, while each originating workflow owns domain staleness, state application, feedback, and rendering. There is no universal effect dispatcher. See [ADR-0002](adr/0002-editor-state-transitions-have-explicit-owners.md) for the full ownership ledger and contributor rules.
+
 ### Per-process garbage collection
 
 Each BEAM process has its own heap and its own garbage collector. When a buffer process GCs, it doesn't pause the editor or the renderer. A large file's buffer can collect its garbage without affecting the responsiveness of a small file you're actively editing.

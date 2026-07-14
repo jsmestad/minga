@@ -8,6 +8,7 @@ defmodule MingaEditor.CommandStateHelpers do
   alias Minga.Mode.VisualState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.Frontend, as: FrontendState
   alias MingaEditor.State.Registers
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
@@ -33,8 +34,11 @@ defmodule MingaEditor.CommandStateHelpers do
     buffers = Buffers.add(%Buffers{}, buffer)
 
     %EditorState{
-      backend: Keyword.get(opts, :backend, :headless),
-      port_manager: Keyword.get(opts, :port_manager, nil),
+      frontend:
+        FrontendState.new(
+          backend: Keyword.get(opts, :backend, :headless),
+          port_manager: Keyword.get(opts, :port_manager, nil)
+        ),
       workspace: %SessionState{
         viewport: Viewport.new(24, 80),
         buffers: buffers,
@@ -45,7 +49,13 @@ defmodule MingaEditor.CommandStateHelpers do
 
   @spec with_mode(state(), Mode.mode(), Mode.state() | nil) :: state()
   def with_mode(%EditorState{} = state, mode, mode_state \\ nil) do
-    EditorState.transition_mode(state, mode, mode_state)
+    %{
+      state
+      | workspace:
+          then(state.workspace, fn workspace ->
+            MingaEditor.Session.State.transition_mode(workspace, mode, mode_state)
+          end)
+    }
   end
 
   @spec with_visual_selection(state(), {non_neg_integer(), non_neg_integer()}, :char | :line) ::
@@ -72,6 +82,12 @@ defmodule MingaEditor.CommandStateHelpers do
 
   @spec update_registers(state(), (Registers.t() -> Registers.t())) :: state()
   def update_registers(%EditorState{} = state, fun) when is_function(fun, 1) do
-    EditorState.set_registers(state, fun.(state.workspace.editing.reg))
+    updated_editing =
+      MingaEditor.VimState.set_registers(
+        state.workspace.editing,
+        fun.(state.workspace.editing.reg)
+      )
+
+    %{state | workspace: MingaEditor.Session.State.set_editing(state.workspace, updated_editing)}
   end
 end

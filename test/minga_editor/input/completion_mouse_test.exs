@@ -18,7 +18,7 @@ defmodule MingaEditor.Input.CompletionMouseTest do
     payload = CompletionPayload.new(:tab1, completion: completion)
 
     %EditorState{
-      port_manager: nil,
+      frontend: %MingaEditor.State.Frontend{port_manager: nil},
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),
@@ -63,7 +63,7 @@ defmodule MingaEditor.Input.CompletionMouseTest do
   describe "passthrough when inactive" do
     test "passes through when no completion is active" do
       state = %EditorState{
-        port_manager: nil,
+        frontend: %MingaEditor.State.Frontend{port_manager: nil},
         shell_runtime:
           Runtime.new(
             Runtime.default_entry(),

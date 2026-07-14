@@ -16,7 +16,6 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
@@ -31,7 +30,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
     tb = build_tab_bar(tabs, active_id)
 
     %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
@@ -96,7 +95,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
   end
 
   describe "two concurrent sessions in two tabs" do
-    test "AgentAccess.session/1 resolves to the active tab's session" do
+    test "Shell.Runtime.active_session/1 resolves to the active tab's session" do
       {:ok, session_a} = StubServer.start_link()
       {:ok, session_b} = StubServer.start_link()
 
@@ -108,8 +107,8 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       state_a = base_state(tabs, 1)
       state_b = base_state(tabs, 2)
 
-      assert AgentAccess.session(state_a) == session_a
-      assert AgentAccess.session(state_b) == session_b
+      assert MingaEditor.Shell.Runtime.active_session(state_a.shell_runtime) == session_a
+      assert MingaEditor.Shell.Runtime.active_session(state_b.shell_runtime) == session_b
     end
 
     test "switching tabs leaves both session pids alive" do
@@ -126,14 +125,32 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       # Sanity: both sessions respond before the switch.
       assert GenServer.call(session_a, :status) == :idle
       assert GenServer.call(session_b, :status) == :idle
-      assert AgentAccess.session(state) == session_a
+      assert MingaEditor.Shell.Runtime.active_session(state.shell_runtime) == session_a
 
       # Switching tabs only repoints the active_id; it does not stop or
       # restart either session process.
       switched =
-        EditorState.set_tab_bar(state, %{state.shell_runtime.state.tab_bar | active_id: 2})
+        then(state, fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.set_tab_bar(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              %{
+                state.shell_runtime.state.tab_bar
+                | active_id: 2
+              }
+            )
 
-      assert AgentAccess.session(switched) == session_b
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
+
+      assert MingaEditor.Shell.Runtime.active_session(switched.shell_runtime) == session_b
       assert GenServer.call(session_a, :status) == :idle
       assert GenServer.call(session_b, :status) == :idle
     end
@@ -141,8 +158,8 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
     test "two tabs with no session report nil regardless of which is active" do
       tabs = [Tab.new_agent(1, "Agent A"), Tab.new_agent(2, "Agent B")]
 
-      assert AgentAccess.session(base_state(tabs, 1)) == nil
-      assert AgentAccess.session(base_state(tabs, 2)) == nil
+      assert MingaEditor.Shell.Runtime.active_session(base_state(tabs, 1).shell_runtime) == nil
+      assert MingaEditor.Shell.Runtime.active_session(base_state(tabs, 2).shell_runtime) == nil
     end
   end
 
@@ -162,7 +179,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       ]
 
       state = base_state(tabs, 1)
-      assert AgentAccess.session(state) == streaming
+      assert MingaEditor.Shell.Runtime.active_session(state.shell_runtime) == streaming
 
       # Use the public switch_tab/2 aggregate transition so presentation state
       # refreshes from the target session as it does in production.
@@ -170,7 +187,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
 
       # Tab 2's session is now in scope; tab 1's session is still alive
       # and still owned by tab 1.
-      assert AgentAccess.session(switched) == idle
+      assert MingaEditor.Shell.Runtime.active_session(switched.shell_runtime) == idle
       assert GenServer.call(streaming, :status) == :idle
 
       tab_one = Enum.find(switched.shell_runtime.state.tab_bar.tabs, &(&1.id == 1))
@@ -178,7 +195,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
 
       # Switching back restores the streaming session as the active one.
       back = EditorState.switch_tab(switched, 1)
-      assert AgentAccess.session(back) == streaming
+      assert MingaEditor.Shell.Runtime.active_session(back.shell_runtime) == streaming
     end
 
     test "switch_tab repopulates the rendering cache from the incoming tab's session" do
@@ -202,12 +219,15 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       # should overwrite it from session_b's snapshot (StubServer returns
       # error: nil).
       state =
-        AgentAccess.update_agent(state, fn a ->
-          %{a | error: "stale error from previous render"}
-        end)
+        MingaEditor.Shell.Traditional.Workflow.install_agent_state(
+          state,
+          (fn a ->
+             %{a | error: "stale error from previous render"}
+           end).(MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state))
+        )
 
       switched = EditorState.switch_tab(state, 2)
-      cache = AgentAccess.agent(switched)
+      cache = MingaEditor.Shell.Traditional.State.agent(switched.shell_runtime.state)
 
       assert cache.error == nil
       assert cache.runtime.status == :tool_executing
@@ -225,15 +245,20 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       state =
         [tab]
         |> base_state(1)
-        |> AgentAccess.update_agent(fn agent ->
-          agent
-          |> AgentState.set_status(:tool_executing)
-          |> AgentState.set_active_tool_name("stale_tool")
+        |> then(fn state ->
+          agent =
+            state.shell_runtime.state
+            |> MingaEditor.Shell.Traditional.State.agent()
+            |> AgentState.set_status(:tool_executing)
+            |> AgentState.set_active_tool_name("stale_tool")
+
+          MingaEditor.Shell.Traditional.Workflow.install_agent_state(state, agent)
         end)
 
-      rebuilt = EditorState.rebuild_agent_from_session(state, tab)
+      rebuilt = MingaEditor.AgentLifecycle.rebuild_agent_from_session(state, tab)
 
-      assert AgentAccess.agent(rebuilt).runtime.active_tool_name == nil
+      assert MingaEditor.Shell.Traditional.State.agent(rebuilt.shell_runtime.state).runtime.active_tool_name ==
+               nil
     end
 
     test "sync_transcript preserves cached transcript when the session dies before cleanup" do
@@ -246,18 +271,23 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       state =
         [Tab.new_agent(1, "Agent") |> Tab.set_session(pid)]
         |> base_state(1)
-        |> AgentAccess.update_panel(fn panel ->
-          %{
-            panel
-            | cached_line_index: [{0, :text}],
-              cached_display_messages: [stale_message],
-              cached_display_message_pairs: [{7, stale_message}],
-              cached_styled_messages: [nil]
-          }
+        |> then(fn state ->
+          MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
+            state,
+            (fn panel ->
+               %{
+                 panel
+                 | cached_line_index: [{0, :text}],
+                   cached_display_messages: [stale_message],
+                   cached_display_message_pairs: [{7, stale_message}],
+                   cached_styled_messages: [nil]
+               }
+             end).(state.workspace.agent_ui.panel)
+          )
         end)
 
       preserved = AgentLifecycle.sync_transcript(state)
-      panel = AgentAccess.panel(preserved)
+      panel = preserved.workspace.agent_ui.panel
 
       assert panel.cached_line_index == [{0, :text}]
       assert panel.cached_display_messages == [stale_message]
@@ -268,20 +298,25 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
     test "cache_messages clears stale semantic transcript cache when the session has no messages" do
       stale_state =
         base_state([Tab.new_agent(1, "Agent")], 1)
-        |> AgentAccess.update_panel(fn panel ->
-          %{
-            panel
-            | cached_line_index: [{0, :text}],
-              cached_display_messages: [{:assistant, "stale answer"}],
-              cached_display_message_pairs: [{7, {:assistant, "stale answer"}}],
-              cached_styled_messages: [[[{"stale", 0, 0, 0}]]],
-              display_start_index: 3,
-              provenance_jump: MingaEditor.Agent.ProvenanceJump.request(7)
-          }
+        |> then(fn state ->
+          MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
+            state,
+            (fn panel ->
+               %{
+                 panel
+                 | cached_line_index: [{0, :text}],
+                   cached_display_messages: [{:assistant, "stale answer"}],
+                   cached_display_message_pairs: [{7, {:assistant, "stale answer"}}],
+                   cached_styled_messages: [[[{"stale", 0, 0, 0}]]],
+                   display_start_index: 3,
+                   provenance_jump: MingaEditor.Agent.ProvenanceJump.request(7)
+               }
+             end).(state.workspace.agent_ui.panel)
+          )
         end)
 
       cleared = AgentLifecycle.cache_messages(stale_state, [])
-      panel = AgentAccess.panel(cleared)
+      panel = cleared.workspace.agent_ui.panel
 
       assert panel.cached_line_index == []
       assert panel.cached_display_messages == []
@@ -301,22 +336,27 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
         [Tab.new_agent(1, "Agent") |> Tab.set_session(session)]
         |> base_state(1)
 
-      fingerprint = Panel.styled_cache_fingerprint(state.theme.syntax)
+      fingerprint = Panel.styled_cache_fingerprint(state.appearance.theme.syntax)
 
       state =
         state
-        |> AgentAccess.update_panel(fn panel ->
-          %{
-            panel
-            | cached_display_messages: [message],
-              cached_styled_messages: cached,
-              cached_styled_fingerprint: fingerprint
-          }
+        |> then(fn state ->
+          MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
+            state,
+            (fn panel ->
+               %{
+                 panel
+                 | cached_display_messages: [message],
+                   cached_styled_messages: cached,
+                   cached_styled_fingerprint: fingerprint
+               }
+             end).(state.workspace.agent_ui.panel)
+          )
         end)
 
       updated = AgentLifecycle.update_styled_cache(state)
 
-      assert AgentAccess.panel(updated).cached_styled_messages == cached
+      assert updated.workspace.agent_ui.panel.cached_styled_messages == cached
     end
 
     test "update_styled_cache invalidates stale styles when the theme syntax changes" do
@@ -329,26 +369,31 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
         [Tab.new_agent(1, "Agent") |> Tab.set_session(session)]
         |> base_state(1)
 
-      old_theme = state.theme
+      old_theme = state.appearance.theme
       new_theme = %{old_theme | syntax: Map.put(old_theme.syntax, "variable", fg: 0x123456)}
       fingerprint = Panel.styled_cache_fingerprint(old_theme.syntax)
 
       state =
         state
-        |> Map.put(:theme, new_theme)
-        |> AgentAccess.update_panel(fn panel ->
-          %{
-            panel
-            | cached_display_messages: [message],
-              cached_styled_messages: cached,
-              cached_styled_fingerprint: fingerprint
-          }
+        |> EditorState.apply_theme(new_theme)
+        |> then(fn state ->
+          MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
+            state,
+            (fn panel ->
+               %{
+                 panel
+                 | cached_display_messages: [message],
+                   cached_styled_messages: cached,
+                   cached_styled_fingerprint: fingerprint
+               }
+             end).(state.workspace.agent_ui.panel)
+          )
         end)
 
       updated = AgentLifecycle.update_styled_cache(state)
 
       assert [%{styled_lines: [[{"plain answer", fg, 0, 0}]], markdown_blocks: [block]}] =
-               AgentAccess.panel(updated).cached_styled_messages
+               updated.workspace.agent_ui.panel.cached_styled_messages
 
       assert fg == 0x123456
       assert [[{"plain answer", ^fg, 0, 0}]] = block.lines
@@ -362,18 +407,23 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       state =
         [Tab.new_agent(1, "Agent") |> Tab.set_session(session)]
         |> base_state(1)
-        |> AgentAccess.update_panel(fn panel ->
-          %{
-            panel
-            | cached_display_messages: [message],
-              cached_styled_messages: nil
-          }
+        |> then(fn state ->
+          MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
+            state,
+            (fn panel ->
+               %{
+                 panel
+                 | cached_display_messages: [message],
+                   cached_styled_messages: nil
+               }
+             end).(state.workspace.agent_ui.panel)
+          )
         end)
 
       updated = AgentLifecycle.update_styled_cache(state)
 
       assert [%{styled_lines: [[{"unchanged answer", _fg, 0, 0}]], markdown_blocks: [block]}] =
-               AgentAccess.panel(updated).cached_styled_messages
+               updated.workspace.agent_ui.panel.cached_styled_messages
 
       assert block.kind == :paragraph
     end
@@ -397,8 +447,13 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       state =
         tabs
         |> base_state(1)
-        |> AgentAccess.update_panel(fn panel ->
-          %{panel | cached_display_messages: [{:assistant, "stale answer"}]}
+        |> then(fn state ->
+          MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
+            state,
+            (fn panel ->
+               %{panel | cached_display_messages: [{:assistant, "stale answer"}]}
+             end).(state.workspace.agent_ui.panel)
+          )
         end)
 
       switched = EditorState.switch_tab(state, 2)
@@ -406,10 +461,12 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       active_window =
         Map.fetch!(switched.workspace.windows.map, switched.workspace.windows.active)
 
-      assert AgentAccess.session(switched) == background_session
+      assert MingaEditor.Shell.Runtime.active_session(switched.shell_runtime) ==
+               background_session
+
       assert {:agent_chat, :semantic} = active_window.content
 
-      assert AgentAccess.panel(switched).cached_display_messages == [
+      assert switched.workspace.agent_ui.panel.cached_display_messages == [
                {:user, "inspect background session"},
                {:assistant, "unique background answer"}
              ]

@@ -121,7 +121,14 @@ defmodule MingaEditor.Commands.Movement do
         non_wrapped_vertical_move(buf, state, :up, desired)
       end
 
-    EditorState.set_desired_col(state, desired)
+    %{
+      state
+      | workspace:
+          MingaEditor.Session.State.set_editing(
+            state.workspace,
+            MingaEditor.VimState.set_desired_col(state.workspace.editing, desired)
+          )
+    }
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}, editing: editing}} = state, :move_down) do
@@ -134,7 +141,14 @@ defmodule MingaEditor.Commands.Movement do
         non_wrapped_vertical_move(buf, state, :down, desired)
       end
 
-    EditorState.set_desired_col(state, desired)
+    %{
+      state
+      | workspace:
+          MingaEditor.Session.State.set_editing(
+            state.workspace,
+            MingaEditor.VimState.set_desired_col(state.workspace.editing, desired)
+          )
+    }
   end
 
   def execute(
@@ -143,7 +157,15 @@ defmodule MingaEditor.Commands.Movement do
       ) do
     desired = editing.desired_col || compute_desired_col(state, buf)
     state = non_wrapped_vertical_move(buf, state, :down, desired)
-    EditorState.set_desired_col(state, desired)
+
+    %{
+      state
+      | workspace:
+          MingaEditor.Session.State.set_editing(
+            state.workspace,
+            MingaEditor.VimState.set_desired_col(state.workspace.editing, desired)
+          )
+    }
   end
 
   def execute(
@@ -152,7 +174,15 @@ defmodule MingaEditor.Commands.Movement do
       ) do
     desired = editing.desired_col || compute_desired_col(state, buf)
     state = non_wrapped_vertical_move(buf, state, :up, desired)
-    EditorState.set_desired_col(state, desired)
+
+    %{
+      state
+      | workspace:
+          MingaEditor.Session.State.set_editing(
+            state.workspace,
+            MingaEditor.VimState.set_desired_col(state.workspace.editing, desired)
+          )
+    }
   end
 
   # ── Line start / end ──────────────────────────────────────────────────────
@@ -269,7 +299,15 @@ defmodule MingaEditor.Commands.Movement do
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:find_char, dir, char}) do
     Helpers.apply_find_char(buf, dir, char)
 
-    EditorState.set_last_find_char(state, {dir, char}) |> reset_desired_col()
+    %{
+      state
+      | workspace:
+          MingaEditor.Session.State.set_editing(
+            state.workspace,
+            MingaEditor.VimState.set_last_find_char(state.workspace.editing, {dir, char})
+          )
+    }
+    |> reset_desired_col()
   end
 
   def execute(
@@ -303,13 +341,17 @@ defmodule MingaEditor.Commands.Movement do
     # a match on the same committed top still discards a frontend-held local
     # offset; no matching bracket is a no-op and must not mark.
     state =
-      case ParserManager.request_match_item(buf, row, col, state.parser_manager) do
+      case ParserManager.request_match_item(buf, row, col, state.parser.parser_manager) do
         nil ->
           state
 
         target ->
           Buffer.move_to(buf, target)
-          EditorState.mark_authoritative_scroll(state)
+
+          %{
+            state
+            | workspace: MingaEditor.Session.State.mark_authoritative_scroll(state.workspace)
+          }
       end
 
     reset_desired_col(state)
@@ -560,11 +602,17 @@ defmodule MingaEditor.Commands.Movement do
         # Also snapshot the current cursor into the active window
         new_windows =
           ws
-          |> Windows.update(active_id, &%{&1 | cursor: cursor})
+          |> Windows.replace_window(
+            active_id,
+            Window.set_cursor(Map.fetch!(ws.map, active_id), cursor)
+          )
           |> Windows.set_tree(new_tree)
           |> Windows.add_window(new_window)
 
-        state = EditorState.set_windows(state, new_windows)
+        state = %{
+          state
+          | workspace: MingaEditor.Session.State.set_windows(state.workspace, new_windows)
+        }
 
         resize_windows_to_layout(state)
 
@@ -582,7 +630,15 @@ defmodule MingaEditor.Commands.Movement do
 
     Enum.reduce(layout.window_layouts, state, fn {id, wl}, acc ->
       {_r, _c, width, height} = wl.total
-      EditorState.update_window(acc, id, &Window.resize(&1, height, width))
+
+      %{
+        acc
+        | workspace:
+            MingaEditor.Session.State.set_windows(
+              acc.workspace,
+              MingaEditor.State.Windows.resize(acc.workspace.windows, id, height, width)
+            )
+      }
     end)
   end
 
@@ -590,14 +646,32 @@ defmodule MingaEditor.Commands.Movement do
   defp navigate_window(%{workspace: %{windows: %{tree: nil}}} = state, _direction), do: state
 
   defp navigate_window(state, :up) do
-    if BottomPanel.focused?(EditorState.bottom_panel(state)) do
-      panel = state |> EditorState.bottom_panel() |> BottomPanel.blur()
+    if BottomPanel.focused?(state.shell_runtime.state.bottom_panel) do
+      panel = state.shell_runtime.state.bottom_panel |> BottomPanel.blur()
 
-      state
-      |> EditorState.set_bottom_panel(panel)
-      |> EditorState.set_keymap_scope(
-        MingaEditor.Session.State.scope_for_active_window(state.workspace)
-      )
+      then(state, fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_bottom_panel(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            panel
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
+      |> then(fn state ->
+        %{
+          state
+          | workspace:
+              MingaEditor.Session.State.set_keymap_scope(
+                state.workspace,
+                MingaEditor.Session.State.scope_for_active_window(state.workspace)
+              )
+        }
+      end)
     else
       navigate_window_to_neighbor(state, :up)
     end
@@ -606,10 +680,10 @@ defmodule MingaEditor.Commands.Movement do
   # When file tree is focused, navigating right unfocuses the tree
   # and restores the scope based on the active window's content type.
   defp navigate_window(state, :right) do
-    if EditorState.file_tree_state(state).focused do
+    if state.workspace.file_tree.focused do
       state = update_file_tree(state, &FileTreeState.unfocus/1)
       scope = MingaEditor.Session.State.scope_for_active_window(state.workspace)
-      EditorState.set_keymap_scope(state, scope)
+      %{state | workspace: MingaEditor.Session.State.set_keymap_scope(state.workspace, scope)}
     else
       navigate_window_to_neighbor(state, :right)
     end
@@ -640,15 +714,33 @@ defmodule MingaEditor.Commands.Movement do
 
   @spec maybe_focus_edge_panel(state(), :left | :right | :up | :down) :: state()
   defp maybe_focus_edge_panel(state, :down) do
-    panel = EditorState.bottom_panel(state)
+    panel = state.shell_runtime.state.bottom_panel
 
     if panel.visible do
-      state
-      |> EditorState.set_bottom_panel(BottomPanel.focus(panel))
+      then(state, fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_bottom_panel(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            MingaEditor.BottomPanel.focus(panel)
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
       |> update_file_tree(&FileTreeState.unfocus/1)
-      |> EditorState.set_keymap_scope(
-        MingaEditor.Session.State.scope_for_active_window(state.workspace)
-      )
+      |> then(fn state ->
+        %{
+          state
+          | workspace:
+              MingaEditor.Session.State.set_keymap_scope(
+                state.workspace,
+                MingaEditor.Session.State.scope_for_active_window(state.workspace)
+              )
+        }
+      end)
     else
       state
     end
@@ -658,9 +750,13 @@ defmodule MingaEditor.Commands.Movement do
 
   @spec maybe_focus_file_tree(state(), :left | :right | :up | :down) :: state()
   defp maybe_focus_file_tree(state, :left) do
-    if match?(%Minga.Project.FileTree{}, EditorState.file_tree_state(state).tree) do
+    if match?(%Minga.Project.FileTree{}, state.workspace.file_tree.tree) do
       state = update_file_tree(state, &FileTreeState.focus/1)
-      EditorState.set_keymap_scope(state, :file_tree)
+
+      %{
+        state
+        | workspace: MingaEditor.Session.State.set_keymap_scope(state.workspace, :file_tree)
+      }
     else
       state
     end
@@ -706,7 +802,7 @@ defmodule MingaEditor.Commands.Movement do
            row,
            col,
            structural_nav_action_code(action),
-           state.parser_manager
+           state.parser.parser_manager
          ) do
       %StructuralNavResult{type_name: type_name} = result ->
         Buffer.move_to(buf, StructuralNavResult.start_position(result))
@@ -733,7 +829,14 @@ defmodule MingaEditor.Commands.Movement do
 
   @spec update_file_tree(state(), (FileTreeState.t() -> FileTreeState.t())) :: state()
   defp update_file_tree(state, fun) when is_function(fun, 1) do
-    EditorState.update_file_tree(state, fun)
+    %{
+      state
+      | workspace:
+          MingaEditor.Session.State.set_file_tree(
+            state.workspace,
+            fun.(state.workspace.file_tree)
+          )
+    }
   end
 
   @spec visual_line_move(GenServer.server(), state(), :up | :down, non_neg_integer()) :: state()
@@ -752,7 +855,15 @@ defmodule MingaEditor.Commands.Movement do
   end
 
   @spec reset_desired_col(state()) :: state()
-  defp reset_desired_col(state), do: EditorState.set_desired_col(state, nil)
+  defp reset_desired_col(state),
+    do: %{
+      state
+      | workspace:
+          MingaEditor.Session.State.set_editing(
+            state.workspace,
+            MingaEditor.VimState.set_desired_col(state.workspace.editing, nil)
+          )
+    }
 
   @spec compute_desired_col(state(), GenServer.server()) :: non_neg_integer()
   defp compute_desired_col(state, buf) do
@@ -1038,7 +1149,7 @@ defmodule MingaEditor.Commands.Movement do
 
   @spec width_oracle(state()) :: Minga.Core.WidthOracle.t()
   defp width_oracle(state) do
-    MingaEditor.Frontend.Capabilities.width_oracle(state.capabilities)
+    MingaEditor.Frontend.Capabilities.width_oracle(state.frontend.capabilities)
   end
 
   @spec wrap_enabled?(pid()) :: boolean()
@@ -1055,7 +1166,7 @@ defmodule MingaEditor.Commands.Movement do
 
   @spec wrap_disabled_by_active_window?(state(), pid()) :: boolean()
   defp wrap_disabled_by_active_window?(state, buf) do
-    case EditorState.active_window_struct(state) do
+    case MingaEditor.Session.State.active_window_struct(state.workspace) do
       nil ->
         false
 
@@ -1084,7 +1195,7 @@ defmodule MingaEditor.Commands.Movement do
 
   @spec active_fold_map(state()) :: FoldMap.t() | nil
   defp active_fold_map(state) do
-    case EditorState.active_window_struct(state) do
+    case MingaEditor.Session.State.active_window_struct(state.workspace) do
       nil -> nil
       %Window{fold_map: fm} -> if FoldMap.empty?(fm), do: nil, else: fm
     end
@@ -1112,7 +1223,10 @@ defmodule MingaEditor.Commands.Movement do
   defp active_viewport(state), do: EditorState.current_viewport(state)
 
   defp put_active_viewport(state, new_vp),
-    do: EditorState.update_current_viewport(state, new_vp)
+    do: %{
+      state
+      | workspace: MingaEditor.Session.State.update_current_viewport(state.workspace, new_vp)
+    }
 
   @spec scroll_margin(pid()) :: non_neg_integer()
   defp scroll_margin(buf) do
@@ -1138,9 +1252,16 @@ defmodule MingaEditor.Commands.Movement do
   # auto-follows again. For normal buffer windows this is a no-op.
   @spec maybe_repin_agent_chat(state()) :: state()
   defp maybe_repin_agent_chat(state) do
-    case EditorState.active_window_struct(state) do
+    case MingaEditor.Session.State.active_window_struct(state.workspace) do
       %Window{id: win_id, content: {:agent_chat, _}} ->
-        EditorState.update_window(state, win_id, &Window.set_pinned(&1, true))
+        %{
+          state
+          | workspace:
+              MingaEditor.Session.State.set_windows(
+                state.workspace,
+                MingaEditor.State.Windows.set_pinned(state.workspace.windows, win_id, true)
+              )
+        }
 
       _ ->
         state

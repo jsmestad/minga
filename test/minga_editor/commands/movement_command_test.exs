@@ -32,8 +32,10 @@ defmodule MingaEditor.Commands.MovementCommandTest do
     window = Window.new(1, buf, rows, cols)
 
     %EditorState{
-      port_manager: nil,
-      terminal_viewport: Viewport.new(rows, cols),
+      frontend: %MingaEditor.State.Frontend{
+        port_manager: nil,
+        terminal_viewport: Viewport.new(rows, cols)
+      },
       workspace: %SessionState{
         viewport: Viewport.new(rows, cols),
         buffers: %Buffers{active: buf, list: [buf]},
@@ -67,8 +69,26 @@ defmodule MingaEditor.Commands.MovementCommandTest do
     max(content_width - gutter_width, 1)
   end
 
-  defp update_active_window(state, fun) do
-    EditorState.update_window(state, state.workspace.windows.active, fun)
+  defp set_active_window_fold_ranges(state, ranges) do
+    windows =
+      MingaEditor.State.Windows.set_fold_ranges(
+        state.workspace.windows,
+        state.workspace.windows.active,
+        ranges
+      )
+
+    %{state | workspace: MingaEditor.Session.State.set_windows(state.workspace, windows)}
+  end
+
+  defp fold_active_window_at(state, line) do
+    windows =
+      MingaEditor.State.Windows.fold_at(
+        state.workspace.windows,
+        state.workspace.windows.active,
+        line
+      )
+
+    %{state | workspace: MingaEditor.Session.State.set_windows(state.workspace, windows)}
   end
 
   describe "Layer 1 command/state handler — basic movement" do
@@ -171,8 +191,8 @@ defmodule MingaEditor.Commands.MovementCommandTest do
 
       state =
         state
-        |> update_active_window(&Window.set_fold_ranges(&1, [FoldRange.new!(1, 3)]))
-        |> update_active_window(&Window.fold_at(&1, 1))
+        |> set_active_window_fold_ranges([FoldRange.new!(1, 3)])
+        |> fold_active_window_at(1)
 
       state = Movement.execute(state, :move_down)
       assert BufferProcess.cursor(buffer) == {1, 0}

@@ -256,7 +256,14 @@ defmodule MingaEditor.Commands.Editing do
     Buffer.insert_char(buf, char)
     new_ms = %{ms | original_chars: [original | ms.original_chars]}
 
-    EditorState.set_mode_state(state, new_ms)
+    %{
+      state
+      | workspace:
+          MingaEditor.Session.State.set_editing(
+            state.workspace,
+            MingaEditor.VimState.set_mode_state(state.workspace.editing, new_ms)
+          )
+    }
   end
 
   def execute(state, {:replace_overwrite, _char}), do: state
@@ -275,7 +282,14 @@ defmodule MingaEditor.Commands.Editing do
     Buffer.move(buf, :left)
     new_ms = %{ms | original_chars: rest}
 
-    EditorState.set_mode_state(state, new_ms)
+    %{
+      state
+      | workspace:
+          MingaEditor.Session.State.set_editing(
+            state.workspace,
+            MingaEditor.VimState.set_mode_state(state.workspace.editing, new_ms)
+          )
+    }
   end
 
   def execute(
@@ -475,7 +489,14 @@ defmodule MingaEditor.Commands.Editing do
     cursor = Document.cursor(gb)
 
     range =
-      Helpers.compute_text_object_range(gb, cursor, modifier, spec, buf, state.parser_manager)
+      Helpers.compute_text_object_range(
+        gb,
+        cursor,
+        modifier,
+        spec,
+        buf,
+        state.parser.parser_manager
+      )
 
     case range do
       nil ->
@@ -537,7 +558,7 @@ defmodule MingaEditor.Commands.Editing do
     {yanked, reg_type} = cmd_visual_yank_text(buf, ms, cursor)
     state = Helpers.put_register(state, yanked, :yank, reg_type)
     state = Helpers.force_clipboard_sync(state, yanked)
-    EditorState.transition_mode(state, :normal)
+    %{state | workspace: MingaEditor.Session.State.transition_mode(state.workspace, :normal)}
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :cmd_copy) when is_pid(buf) do
@@ -563,7 +584,7 @@ defmodule MingaEditor.Commands.Editing do
       {yanked, reg_type} = cmd_visual_delete_text(buf, ms, cursor)
       state = Helpers.put_register(state, yanked, :delete, reg_type)
       state = Helpers.force_clipboard_sync(state, yanked)
-      EditorState.transition_mode(state, :normal)
+      %{state | workspace: MingaEditor.Session.State.transition_mode(state.workspace, :normal)}
     end
   end
 
@@ -587,7 +608,7 @@ defmodule MingaEditor.Commands.Editing do
   @spec toggle_comment(pid(), non_neg_integer(), non_neg_integer(), state()) :: :ok
   defp toggle_comment(buf, start_line, end_line, state) do
     filetype = Buffer.filetype(buf)
-    injection_ranges = Map.get(state.injection_ranges, buf, [])
+    injection_ranges = Map.get(state.parser.injection_ranges, buf, [])
 
     prefix = resolve_comment_prefix(buf, start_line, filetype, injection_ranges)
     raw = Buffer.content_on_lines(buf, start_line, end_line)
@@ -794,7 +815,7 @@ defmodule MingaEditor.Commands.Editing do
   end
 
   @spec highlight_for_buffer(state(), pid()) :: Highlight.t() | nil
-  defp highlight_for_buffer(%{highlighting: %{highlights: highlights}}, buf)
+  defp highlight_for_buffer(%{parser: %{highlighting: %{highlights: highlights}}}, buf)
        when is_map(highlights) do
     Map.get(highlights, buf)
   end
@@ -883,7 +904,7 @@ defmodule MingaEditor.Commands.Editing do
     cursor = Document.cursor(gb)
 
     range =
-      case Helpers.resolve_motion_target(gb, cursor, motion, buf, state.parser_manager) do
+      case Helpers.resolve_motion_target(gb, cursor, motion, buf, state.parser.parser_manager) do
         nil ->
           nil
 
@@ -902,7 +923,7 @@ defmodule MingaEditor.Commands.Editing do
 
   @spec indent_opts(state(), pid()) :: [Indent.compute_opt()]
   defp indent_opts(state, _buf) do
-    parser_manager = state.parser_manager
+    parser_manager = state.parser.parser_manager
     [request_indent: &request_indent_on_keystroke(&1, &2, parser_manager)]
   end
 

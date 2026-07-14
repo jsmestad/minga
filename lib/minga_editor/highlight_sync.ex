@@ -13,7 +13,6 @@ defmodule MingaEditor.HighlightSync do
   alias Minga.Parser.Manager, as: ParserManager
   alias MingaEditor.UI.Highlight
   alias MingaEditor.UI.Highlight.Grammar
-  alias MingaEditor.Window
 
   @doc """
   Sets up highlighting for the current buffer.
@@ -35,7 +34,7 @@ defmodule MingaEditor.HighlightSync do
 
       :unsupported ->
         state
-        |> put_active_highlight(Highlight.from_theme(state.theme))
+        |> put_active_highlight(Highlight.from_theme(state.appearance.theme))
         |> clear_active_document_symbols()
     end
   end
@@ -74,7 +73,7 @@ defmodule MingaEditor.HighlightSync do
   """
   @spec request_reparse_buffer(EditorState.t(), pid()) :: EditorState.t()
   def request_reparse_buffer(%EditorState{} = state, buf_pid) when is_pid(buf_pid) do
-    ParserManager.request_parse(buf_pid, state.parser_manager)
+    ParserManager.request_parse(buf_pid, state.parser.parser_manager)
     state
   end
 
@@ -83,7 +82,18 @@ defmodule MingaEditor.HighlightSync do
          %EditorState{workspace: %{buffers: %{active: active_buf}}} = state
        )
        when is_pid(active_buf) do
-    EditorState.update_windows_for_buffer(state, active_buf, &Window.set_document_symbols(&1, []))
+    %{
+      state
+      | workspace:
+          MingaEditor.Session.State.set_windows(
+            state.workspace,
+            MingaEditor.State.Windows.set_document_symbols_for_buffer(
+              state.workspace.windows,
+              active_buf,
+              []
+            )
+          )
+    }
   end
 
   defp clear_active_document_symbols(%EditorState{} = state), do: state
@@ -94,7 +104,9 @@ defmodule MingaEditor.HighlightSync do
 
     try do
       correlation =
-        ParserManager.register_buffer_correlated(buf_pid, config, server: state.parser_manager)
+        ParserManager.register_buffer_correlated(buf_pid, config,
+          server: state.parser.parser_manager
+        )
 
       put_buffer_presentation(state, buf_pid, Keyword.get(opts, :syntax), correlation)
     catch
@@ -125,7 +137,7 @@ defmodule MingaEditor.HighlightSync do
   defp put_buffer_presentation(state, buf_pid, custom_syntax, correlation) do
     highlight =
       case custom_syntax do
-        nil -> Highlight.from_theme(state.theme)
+        nil -> Highlight.from_theme(state.appearance.theme)
         syntax -> Highlight.new(syntax)
       end
       |> Highlight.correlate(correlation)
@@ -137,10 +149,17 @@ defmodule MingaEditor.HighlightSync do
         state
 
       syntax ->
-        EditorState.update_highlight(state, fn presentation ->
-          overrides = Map.put(presentation.syntax_overrides, buf_pid, syntax)
-          Highlighting.set_syntax_overrides(presentation, overrides)
-        end)
+        %{
+          state
+          | parser:
+              MingaEditor.State.Parser.accept_highlighting(
+                state.parser,
+                Highlighting.set_syntax_overrides(
+                  state.parser.highlighting,
+                  Map.put(state.parser.highlighting.syntax_overrides, buf_pid, syntax)
+                )
+              )
+        }
     end
   end
 
@@ -154,9 +173,9 @@ defmodule MingaEditor.HighlightSync do
   """
   @spec close_buffer(EditorState.t(), pid()) :: EditorState.t()
   def close_buffer(%EditorState{} = state, buffer_pid) do
-    :ok = ParserManager.unregister_buffer(buffer_pid, state.parser_manager)
+    :ok = ParserManager.unregister_buffer(buffer_pid, state.parser.parser_manager)
 
-    EditorState.drop_parser_presentation(state, buffer_pid)
+    %{state | parser: MingaEditor.State.Parser.retire_buffer(state.parser, buffer_pid)}
   end
 
   @spec user_query_text(String.t(), (String.t() -> String.t() | nil)) :: String.t() | nil
@@ -224,7 +243,7 @@ defmodule MingaEditor.HighlightSync do
   def request_reparse(%EditorState{workspace: %{buffers: %{active: nil}}} = state), do: state
 
   def request_reparse(%EditorState{} = state) when state.workspace.buffers.active != nil do
-    ParserManager.request_parse(state.workspace.buffers.active, state.parser_manager)
+    ParserManager.request_parse(state.workspace.buffers.active, state.parser.parser_manager)
     state
   end
 
@@ -248,7 +267,7 @@ defmodule MingaEditor.HighlightSync do
   def touch_active(%EditorState{workspace: %{buffers: %{active: nil}}} = state), do: state
 
   def touch_active(%EditorState{} = state) do
-    ParserManager.touch_buffer(state.workspace.buffers.active, state.parser_manager)
+    ParserManager.touch_buffer(state.workspace.buffers.active, state.parser.parser_manager)
     state
   end
 
@@ -271,7 +290,7 @@ defmodule MingaEditor.HighlightSync do
     active = state.workspace.buffers.active
     protected = [active | protected_pids] |> Enum.reject(&is_nil/1) |> Enum.uniq()
 
-    case ParserManager.evict_inactive(protected, ttl_ms, state.parser_manager) do
+    case ParserManager.evict_inactive(protected, ttl_ms, state.parser.parser_manager) do
       {:ok, []} ->
         state
 
@@ -290,7 +309,7 @@ defmodule MingaEditor.HighlightSync do
 
   @spec remove_evicted_presentation(EditorState.t(), pid()) :: EditorState.t()
   defp remove_evicted_presentation(state, buffer_pid) do
-    EditorState.drop_parser_presentation(state, buffer_pid)
+    %{state | parser: MingaEditor.State.Parser.retire_buffer(state.parser, buffer_pid)}
   end
 
   @doc "Handles a highlight_names event for the active buffer."
@@ -316,7 +335,7 @@ defmodule MingaEditor.HighlightSync do
     do: Highlight.new()
 
   def get_active_highlight(%EditorState{
-        highlighting: highlighting,
+        parser: %{highlighting: highlighting},
         workspace: %{buffers: %{active: buf}}
       }) do
     Map.get(highlighting.highlights, buf, Highlight.new())
@@ -324,7 +343,7 @@ defmodule MingaEditor.HighlightSync do
 
   @doc "Returns the highlight data for a specific buffer PID."
   @spec get_highlight(EditorState.t(), pid()) :: Highlight.t()
-  def get_highlight(%EditorState{highlighting: highlighting}, buf_pid) do
+  def get_highlight(%EditorState{parser: %{highlighting: highlighting}}, buf_pid) do
     Map.get(highlighting.highlights, buf_pid, Highlight.new())
   end
 
@@ -337,13 +356,35 @@ defmodule MingaEditor.HighlightSync do
         %EditorState{workspace: %{buffers: %{active: buf}}} = state,
         hl_data
       ) do
-    EditorState.update_highlight(state, &Highlighting.put_highlight(&1, buf, hl_data))
+    %{
+      state
+      | parser:
+          MingaEditor.State.Parser.accept_highlighting(
+            state.parser,
+            MingaEditor.State.Highlighting.put_highlight(
+              state.parser.highlighting,
+              buf,
+              hl_data
+            )
+          )
+    }
   end
 
   @doc "Stores highlight data for a specific buffer PID."
   @spec put_highlight(EditorState.t(), pid(), Highlight.t()) :: EditorState.t()
   def put_highlight(%EditorState{} = state, buf_pid, hl_data) do
-    EditorState.update_highlight(state, &Highlighting.put_highlight(&1, buf_pid, hl_data))
+    %{
+      state
+      | parser:
+          MingaEditor.State.Parser.accept_highlighting(
+            state.parser,
+            MingaEditor.State.Highlighting.put_highlight(
+              state.parser.highlighting,
+              buf_pid,
+              hl_data
+            )
+          )
+    }
   end
 
   # Updates the active buffer's highlight via a function.

@@ -12,6 +12,7 @@ defmodule MingaEditor.Commands.FormattingAsyncTest do
   alias MingaEditor.Effects.ExternalFormatResult
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.Feedback
   alias MingaEditor.State.OperationFeedback
   alias MingaEditor.State.Windows
   alias MingaEditor.VimState
@@ -236,17 +237,22 @@ defmodule MingaEditor.Commands.FormattingAsyncTest do
   end
 
   @spec feedback(EditorState.t()) :: MingaEditor.State.Operation.t()
-  defp feedback(state), do: OperationFeedback.selected(state.operation_feedback)
+  defp feedback(state), do: OperationFeedback.selected(state.feedback.operation_feedback)
 
   @spec external_request(EditorState.t(), pid()) :: {EditorState.t(), Request.t()}
   defp external_request(state, buffer) do
-    {state, operation} =
-      OperationFeedback.start_in(
-        state,
+    {operation_feedback, operation} =
+      OperationFeedback.start(
+        state.feedback.operation_feedback,
         :external_format,
         "buffer:" <> inspect(buffer),
         "Formatting..."
       )
+
+    state = %{
+      state
+      | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)
+    }
 
     {state, ExternalFormat.request(buffer, "cat", operation.id)}
   end
@@ -268,6 +274,9 @@ defmodule MingaEditor.Commands.FormattingAsyncTest do
       }
     }
 
-    %EditorState{port_manager: self(), workspace: workspace}
+    %EditorState{
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
+      workspace: workspace
+    }
   end
 end

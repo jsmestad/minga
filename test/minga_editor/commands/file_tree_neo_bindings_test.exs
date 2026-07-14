@@ -168,7 +168,22 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
       state =
         tmp_dir
         |> build_state(Buffers.add(%Buffers{}, active_buffer))
-        |> EditorState.set_tab_bar(tab_bar)
+        |> then(fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.set_tab_bar(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              tab_bar
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
         |> select_entry("alpha.txt")
         |> FileTreeCommands.mark_move()
 
@@ -467,14 +482,26 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
       TabBar.new(tab, root)
       |> TabBar.update_workspace(0, fn ws -> WorkspaceModel.set_active_file(ws, file_ref) end)
 
-    EditorState.set_tab_bar(state, tab_bar)
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          tab_bar
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   defp build_state(root, buffers \\ %Buffers{}) do
     tree = root |> FileTree.new() |> FileTree.refresh()
 
     %EditorState{
-      port_manager: nil,
+      frontend: %MingaEditor.State.Frontend{port_manager: nil},
       workspace:
         %SessionState{buffers: buffers, viewport: Viewport.new(24, 80)}
         |> SessionState.set_file_tree(FileTreeState.open(%FileTreeState{}, tree, nil))
@@ -486,7 +513,16 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
   defp expand_path(state, path) do
     tree = FileTree.expand_path(ft(state).tree, path)
     file_tree = FileTreeState.replace_tree(ft(state), tree)
-    EditorState.set_file_tree(state, file_tree)
+
+    then(state, fn state ->
+      %{
+        state
+        | workspace:
+            then(state.workspace, fn workspace ->
+              MingaEditor.Session.State.set_file_tree(workspace, file_tree)
+            end)
+      }
+    end)
   end
 
   defp select_entry(state, name) do
@@ -496,6 +532,15 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
 
     tree = FileTree.select(ft(state).tree, index)
     file_tree = FileTreeState.replace_tree(ft(state), tree)
-    EditorState.set_file_tree(state, file_tree)
+
+    then(state, fn state ->
+      %{
+        state
+        | workspace:
+            then(state.workspace, fn workspace ->
+              MingaEditor.Session.State.set_file_tree(workspace, file_tree)
+            end)
+      }
+    end)
   end
 end

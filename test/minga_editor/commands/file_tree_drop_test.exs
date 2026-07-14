@@ -235,8 +235,8 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
     buffers = buffers_for_active_file(active_file, events_registry)
 
     %EditorState{
-      port_manager: self(),
-      events_registry: events_registry,
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
+      extension_surfaces: %MingaEditor.State.ExtensionSurfaces{events_registry: events_registry},
       workspace:
         %SessionState{viewport: Viewport.new(24, 80), buffers: buffers, keymap_scope: :file_tree}
         |> SessionState.set_file_tree(FileTreeState.open(%FileTreeState{}, tree, nil))

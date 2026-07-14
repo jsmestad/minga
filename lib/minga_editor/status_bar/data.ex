@@ -17,7 +17,6 @@ defmodule MingaEditor.StatusBar.Data do
   alias MingaEditor.Editing
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Operation
   alias MingaEditor.State.OperationFeedback
   alias MingaEditor.Window.Content
@@ -27,6 +26,7 @@ defmodule MingaEditor.StatusBar.Data do
   alias Minga.Git.Repo, as: GitRepo
   alias Minga.LSP.SyncServer
   alias MingaEditor.Shell.Traditional.Modeline
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.Shell.Traditional.Notice
   alias MingaAgent.StatusCommand
   alias MingaEditor.UI.Theme
@@ -216,18 +216,19 @@ defmodule MingaEditor.StatusBar.Data do
       indent_size: indent_size,
       selection_info: selection_info,
       lsp_status: state.lsp.status,
-      parser_status: state.parser_status,
+      parser_status: parser_status(state),
       buf_index: state.workspace.buffers.active_index + 1,
       buf_count: Enum.count(state.workspace.buffers.list),
       macro_recording: Minga.Editing.macro_recording_status(state),
       agent_status: agent.runtime.status,
       active_tool_name: agent.runtime.active_tool_name,
       agent_status_command: agent_status_command_content(state, agent),
-      agent_theme_colors: if(agent.runtime.status, do: Theme.agent_theme(state.theme), else: nil),
+      agent_theme_colors:
+        if(agent.runtime.status, do: Theme.agent_theme(theme(state)), else: nil),
       background_subagent_count: background.count,
       active_background_subagent_label: background.label,
       notice: notice_message(state),
-      selected_operation: OperationFeedback.selected_from(state),
+      selected_operation: OperationFeedback.selected(state.feedback.operation_feedback),
       pending_keys: pending_keys(state, mode, mode_state),
       workspace_label: workspace.label,
       workspace_draft_count: workspace.draft_count,
@@ -237,7 +238,7 @@ defmodule MingaEditor.StatusBar.Data do
   end
 
   @spec notice_message(EditorState.t() | map()) :: String.t() | nil
-  defp notice_message(%EditorState{
+  defp notice_message(%{
          shell_runtime: %{state: %{notice: %Notice{message: message}}}
        }),
        do: message
@@ -273,10 +274,17 @@ defmodule MingaEditor.StatusBar.Data do
   defp active_register_name(_state), do: ""
 
   @spec agent_state(EditorState.t() | map()) :: AgentState.t()
-  defp agent_state(state), do: AgentAccess.agent(state)
+  defp agent_state(%EditorState{shell_runtime: %{state: %TraditionalState{} = shell_state}}),
+    do: TraditionalState.agent(shell_state)
+
+  defp agent_state(%{shell_state: %TraditionalState{} = shell_state}),
+    do: TraditionalState.agent(shell_state)
+
+  defp agent_state(_state), do: %AgentState{}
 
   @spec agent_session(EditorState.t() | map()) :: pid() | nil
-  defp agent_session(%EditorState{} = state), do: AgentAccess.session(state)
+  defp agent_session(%EditorState{} = state),
+    do: MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
 
   defp agent_session(%{shell: shell, shell_state: shell_state}) when is_atom(shell),
     do: shell.active_session(shell_state)
@@ -340,9 +348,17 @@ defmodule MingaEditor.StatusBar.Data do
   end
 
   @spec options_server(EditorState.t() | map()) :: Options.server()
-  defp options_server(%EditorState{} = state), do: EditorState.options_server(state)
+  defp options_server(%EditorState{} = state), do: state.interaction.options_server
   defp options_server(%{options_server: server}), do: server
   defp options_server(_state), do: Options.default_server()
+
+  @spec parser_status(EditorState.t() | map()) :: parser_status()
+  defp parser_status(%EditorState{parser: %{parser_status: status}}), do: status
+  defp parser_status(%{parser_status: status}), do: status
+
+  @spec theme(EditorState.t() | map()) :: Theme.t()
+  defp theme(%EditorState{appearance: %{theme: theme}}), do: theme
+  defp theme(%{theme: theme}), do: theme
 
   @spec normalize_indent_type(term()) :: indent_type()
   defp normalize_indent_type(:tabs), do: :tabs
@@ -382,7 +398,7 @@ defmodule MingaEditor.StatusBar.Data do
   @spec build_agent_data(EditorState.t() | map()) :: agent_data()
   defp build_agent_data(state) do
     agent = agent_state(state)
-    panel = AgentAccess.panel(state)
+    panel = state.workspace.agent_ui.panel
     session = agent_session(state)
 
     message_count = agent_message_count(session)
@@ -420,7 +436,7 @@ defmodule MingaEditor.StatusBar.Data do
       agent_status: agent.runtime.status,
       active_tool_name: agent.runtime.active_tool_name,
       agent_status_command: agent_status_command_content(state, agent),
-      agent_theme_colors: Theme.agent_theme(state.theme),
+      agent_theme_colors: Theme.agent_theme(theme(state)),
       # Background buffer context
       cursor_line: line,
       cursor_col: col,
@@ -437,13 +453,13 @@ defmodule MingaEditor.StatusBar.Data do
       indent_size: indent_size,
       selection_info: selection_info,
       lsp_status: state.lsp.status,
-      parser_status: state.parser_status,
+      parser_status: parser_status(state),
       buf_index: state.workspace.buffers.active_index + 1,
       buf_count: Enum.count(state.workspace.buffers.list),
       background_subagent_count: background.count,
       active_background_subagent_label: background.label,
       notice: notice_message(state),
-      selected_operation: OperationFeedback.selected_from(state),
+      selected_operation: OperationFeedback.selected(state.feedback.operation_feedback),
       pending_keys: pending_keys(state, mode, mode_state),
       workspace_label: workspace.label,
       workspace_draft_count: workspace.draft_count,
@@ -473,9 +489,9 @@ defmodule MingaEditor.StatusBar.Data do
   @spec agent_status_command_context(EditorState.t() | map(), AgentState.t()) ::
           StatusCommand.context()
   defp agent_status_command_context(state, agent) do
-    session = AgentAccess.session(state)
+    session = MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
     {session_id, session_model, workdir} = session_context(session)
-    panel = AgentAccess.panel(state)
+    panel = state.workspace.agent_ui.panel
 
     %{
       session_id: session_id,

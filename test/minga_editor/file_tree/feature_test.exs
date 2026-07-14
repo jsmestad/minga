@@ -40,7 +40,18 @@ defmodule MingaEditor.FileTree.FeatureTest do
     tree = FileTree.new(File.cwd!(), width: 26)
     file_tree = %FileTreeState{} |> FileTreeState.open(tree, nil)
 
-    state = EditorState.set_file_tree(state, file_tree)
+    state =
+      then(state, fn state ->
+        %{
+          state
+          | workspace:
+              then(state.workspace, fn workspace ->
+                MingaEditor.Session.State.set_file_tree(workspace, file_tree)
+              end)
+        }
+      end)
+
+    :ok = MingaEditor.FileTree.Feature.sync_sidebar(file_tree, table)
 
     %{sidebars: sidebars, active_id: active_id} =
       SidebarsBuilder.build(Context.from_editor_state(state))
@@ -50,7 +61,19 @@ defmodule MingaEditor.FileTree.FeatureTest do
     assert entry.visible?
     assert entry.preferred_width == 26
 
-    state = EditorState.set_file_tree(state, FileTreeState.close(file_tree))
+    state =
+      then(state, fn state ->
+        %{
+          state
+          | workspace:
+              then(state.workspace, fn workspace ->
+                MingaEditor.Session.State.set_file_tree(workspace, FileTreeState.close(file_tree))
+              end)
+        }
+      end)
+
+    :ok = MingaEditor.FileTree.Feature.sync_sidebar(FileTreeState.close(file_tree), table)
+
     %{sidebars: sidebars} = SidebarsBuilder.build(Context.from_editor_state(state))
     entry = Enum.find(sidebars, &(&1.id == "file_tree"))
     refute entry.visible?
@@ -61,7 +84,8 @@ defmodule MingaEditor.FileTree.FeatureTest do
     open_tree = %FileTreeState{} |> FileTreeState.open(FileTree.new(File.cwd!(), width: 24), nil)
     open_workspace = MingaEditor.Session.State.set_file_tree(state.workspace, open_tree)
 
-    state = EditorState.set_workspace(state, open_workspace)
+    state = then(state, fn state -> %{state | workspace: open_workspace} end)
+    :ok = MingaEditor.FileTree.Feature.sync_sidebar(open_tree, table)
 
     assert %{id: "file_tree", visible?: true, preferred_width: 24} =
              Sidebar.get(table, "file_tree")
@@ -69,7 +93,8 @@ defmodule MingaEditor.FileTree.FeatureTest do
     closed_workspace =
       MingaEditor.Session.State.set_file_tree(state.workspace, FileTreeState.close(open_tree))
 
-    _state = EditorState.set_workspace(state, closed_workspace)
+    _state = then(state, fn state -> %{state | workspace: closed_workspace} end)
+    :ok = MingaEditor.FileTree.Feature.sync_sidebar(FileTreeState.close(open_tree), table)
     assert %{id: "file_tree", visible?: false} = Sidebar.get(table, "file_tree")
   end
 
@@ -80,7 +105,21 @@ defmodule MingaEditor.FileTree.FeatureTest do
       Path.join(System.tmp_dir!(), "minga-missing-tree-#{System.unique_integer([:positive])}")
 
     state = base_state(cols: 80, rows: 24, sidebar_registry: table)
-    state = EditorState.set_file_tree(state, %FileTreeState{project_root: missing_root})
+
+    state =
+      then(state, fn state ->
+        %{
+          state
+          | workspace:
+              then(
+                state.workspace,
+                &MingaEditor.Session.State.set_file_tree(&1, %FileTreeState{
+                  project_root: missing_root
+                })
+              )
+        }
+      end)
+
     state = MingaEditor.Commands.FileTree.toggle(state)
     file_tree = EditorState.file_tree_state(state)
 
@@ -93,8 +132,25 @@ defmodule MingaEditor.FileTree.FeatureTest do
     sidebar_registry: table
   } do
     state = base_state(cols: 80, rows: 24, sidebar_registry: table)
-    state = EditorState.set_file_tree(state, %FileTreeState{project_root: File.cwd!()})
-    state = EditorState.drop_file_tree(state)
+
+    state =
+      then(state, fn state ->
+        %{
+          state
+          | workspace:
+              then(
+                state.workspace,
+                &MingaEditor.Session.State.set_file_tree(&1, %FileTreeState{
+                  project_root: File.cwd!()
+                })
+              )
+        }
+      end)
+
+    state =
+      then(state, fn state ->
+        %{state | workspace: then(state.workspace, &MingaEditor.Session.State.drop_file_tree/1)}
+      end)
 
     assert EditorState.file_tree_state(state).tree == nil
 

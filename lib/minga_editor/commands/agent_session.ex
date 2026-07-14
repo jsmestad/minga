@@ -18,7 +18,6 @@ defmodule MingaEditor.Commands.AgentSession do
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.Workspace.RemoteSession
   alias MingaEditor.State.Tab
@@ -42,7 +41,7 @@ defmodule MingaEditor.Commands.AgentSession do
         %EditorState{shell_runtime: %Runtime{entry: %Entry{id: :traditional}}} = state,
         message
       ) do
-    session = AgentAccess.session(state)
+    session = MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
 
     if session do
       try do
@@ -54,7 +53,7 @@ defmodule MingaEditor.Commands.AgentSession do
 
     state = state |> clear_restart_session(session) |> reset_agent_cache()
     state = NoticeWorkflow.publish(state, message)
-    if AgentAccess.panel(state).visible, do: start_agent_session(state), else: state
+    if state.workspace.agent_ui.panel.visible, do: start_agent_session(state), else: state
   end
 
   def restart_session(state, _message) do
@@ -72,7 +71,20 @@ defmodule MingaEditor.Commands.AgentSession do
          session
        ) do
     tb = tb |> clear_tab_sessions(session) |> clear_workspace_sessions(session)
-    EditorState.set_tab_bar(state, tb)
+
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          tb
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   defp clear_restart_session(state, _session), do: state
@@ -101,7 +113,7 @@ defmodule MingaEditor.Commands.AgentSession do
 
   @spec reset_agent_cache(state()) :: state()
   defp reset_agent_cache(state) do
-    AgentAccess.update_agent(state, &AgentState.reset_cache/1)
+    MingaEditor.Shell.Traditional.Workflow.install_agent_cache_reset(state)
   end
 
   @doc "Starts a new agent session and subscribes to its events."
@@ -116,9 +128,15 @@ defmodule MingaEditor.Commands.AgentSession do
   @spec do_start_agent_session(state(), keyword()) :: state()
   defp do_start_agent_session(state, opts) do
     panel =
-      AgentAccess.panel(state) |> Panel.ensure_configured_model(EditorState.options_server(state))
+      state.workspace.agent_ui.panel
+      |> Panel.ensure_configured_model(state.interaction.options_server)
 
-    state = AgentAccess.update_panel(state, fn _panel -> panel end)
+    state =
+      MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
+        state,
+        (fn _panel -> panel end).(state.workspace.agent_ui.panel)
+      )
+
     {project_view, created_project_view?} = session_project_view(state)
 
     session_opts =
@@ -130,7 +148,7 @@ defmodule MingaEditor.Commands.AgentSession do
         recover_interrupted_work?: Keyword.get(opts, :recover_interrupted_work?, true),
         provider_opts: provider_opts(state, panel, project_view)
       ]
-      |> maybe_put_provider_module(state.agent_provider_module)
+      |> maybe_put_provider_module(state.agent_connection.agent_provider_module)
 
     case start_and_subscribe(state, session_opts) do
       {:ok, pid} ->
@@ -143,7 +161,7 @@ defmodule MingaEditor.Commands.AgentSession do
         maybe_discard_project_view(project_view, created_project_view?)
         msg = format_session_error(reason)
         Minga.Log.error(:agent, "[Agent] #{msg}")
-        AgentAccess.update_agent(state, &AgentState.set_error(&1, msg))
+        MingaEditor.Shell.Traditional.Workflow.install_agent_error(state, msg)
     end
   end
 
@@ -272,7 +290,7 @@ defmodule MingaEditor.Commands.AgentSession do
   @doc "Detaches from the current remote agent session without stopping it."
   @spec detach_current_remote_session(state()) :: state()
   def detach_current_remote_session(state) do
-    case AgentAccess.session(state) do
+    case MingaEditor.Shell.Runtime.active_session(state.shell_runtime) do
       session when is_pid(session) and node(session) != node() ->
         detach_remote_session(state, session)
 
@@ -290,7 +308,7 @@ defmodule MingaEditor.Commands.AgentSession do
   @doc "Stops the current agent session, routing remote sessions to their remote manager."
   @spec stop_current_session(state()) :: state()
   def stop_current_session(state) do
-    case AgentAccess.session(state) do
+    case MingaEditor.Shell.Runtime.active_session(state.shell_runtime) do
       nil ->
         state
 
@@ -326,11 +344,14 @@ defmodule MingaEditor.Commands.AgentSession do
            content: content,
            buffer_name: name,
            filetype: filetype,
-           options_server: EditorState.options_server(state)
+           options_server: state.interaction.options_server
          ) do
       {:ok, buf} ->
+        buffers = MingaEditor.State.Buffers.set_active_override(state.workspace.buffers, buf)
+        workspace = MingaEditor.Session.State.set_buffers(state.workspace, buffers)
+
         state
-        |> put_in([Access.key(:workspace), Access.key(:buffers), Access.key(:active)], buf)
+        |> then(&%{&1 | workspace: workspace})
         |> maybe_log_code_block_opened(language)
 
       {:error, reason} ->
@@ -343,7 +364,7 @@ defmodule MingaEditor.Commands.AgentSession do
 
   @spec maybe_log_code_block_opened(state(), String.t()) :: state()
   defp maybe_log_code_block_opened(state, language) do
-    case AgentAccess.session(state) do
+    case MingaEditor.Shell.Runtime.active_session(state.shell_runtime) do
       nil ->
         state
 
@@ -371,8 +392,13 @@ defmodule MingaEditor.Commands.AgentSession do
   @spec assign_session_to_tab(state(), pid()) :: state()
   defp assign_session_to_tab(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state, pid) do
     case TabBar.find_sessionless_agent(tb) do
-      %Tab{id: agent_tab_id} -> EditorState.set_tab_session(state, agent_tab_id, pid)
-      nil -> state
+      %Tab{id: agent_tab_id} ->
+        state = MingaEditor.Shell.Workflow.ensure_available(state)
+        runtime = Runtime.set_tab_session(state.shell_runtime, agent_tab_id, pid)
+        %{state | shell_runtime: runtime}
+
+      nil ->
+        state
     end
   end
 
@@ -410,7 +436,7 @@ defmodule MingaEditor.Commands.AgentSession do
   # Falls back to a direct Editor subscription when the coalescer is absent.
   @spec subscribe_active_session(state(), pid()) :: :ok | {:error, term()}
   defp subscribe_active_session(state, pid) do
-    case EditorState.agent_ingest(state) do
+    case state.agent_connection.agent_ingest do
       ingest when is_pid(ingest) -> MingaEditor.Agent.Ingest.subscribe_session(ingest, pid)
       _ -> Session.subscribe(pid)
     end
@@ -432,7 +458,7 @@ defmodule MingaEditor.Commands.AgentSession do
 
   @spec remote_session_opts(state()) :: keyword()
   defp remote_session_opts(state) do
-    panel = AgentAccess.panel(state)
+    panel = state.workspace.agent_ui.panel
     [thinking_level: panel.thinking_level]
   end
 
@@ -475,8 +501,8 @@ defmodule MingaEditor.Commands.AgentSession do
          %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
          _server_name
        ) do
-    rows = max(state.terminal_viewport.rows, 1)
-    cols = max(state.terminal_viewport.cols, 1)
+    rows = max(state.frontend.terminal_viewport.rows, 1)
+    cols = max(state.frontend.terminal_viewport.cols, 1)
     win_id = 1
     agent_window = Window.new_agent_chat(win_id, rows, cols)
 
@@ -490,7 +516,22 @@ defmodule MingaEditor.Commands.AgentSession do
     context = EditorState.build_agent_tab_defaults(state, windows)
     {tb, tab} = TabBar.add(tb, :agent, "Agent")
     tb = TabBar.update_context(tb, tab.id, context)
-    state = EditorState.set_tab_bar(state, tb)
+
+    state =
+      then(state, fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            tb
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
+
     {state, tab.id}
   end
 
@@ -513,7 +554,19 @@ defmodule MingaEditor.Commands.AgentSession do
         &Tab.set_remote_session(&1, server_name, session_id, remote_pid)
       )
 
-    EditorState.set_tab_bar(state, tb)
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          tb
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   defp set_remote_tab(state, _tab_id, _server_name, _session_id, _remote_pid), do: state
@@ -545,7 +598,22 @@ defmodule MingaEditor.Commands.AgentSession do
           end)
           |> TabBar.sync_workspace_agent_tab_projection(workspace_id)
 
-        EditorState.set_tab_bar(state, tb)
+        then(state, fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.set_tab_bar(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              tb
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
 
       nil ->
         state
@@ -568,7 +636,7 @@ defmodule MingaEditor.Commands.AgentSession do
          tab_id
        ) do
     case TabBar.get(tb, tab_id) do
-      %Tab{} = tab -> EditorState.rebuild_agent_from_session(state, tab)
+      %Tab{} = tab -> MingaEditor.AgentLifecycle.rebuild_agent_from_session(state, tab)
       nil -> state
     end
   end
@@ -584,15 +652,18 @@ defmodule MingaEditor.Commands.AgentSession do
            error: error
          } = snapshot
        ) do
-    AgentAccess.update_agent(state, fn agent ->
-      AgentState.apply_session_snapshot(
-        agent,
-        status,
-        pending_approval,
-        error,
-        Map.get(snapshot, :active_tool_name)
-      )
-    end)
+    MingaEditor.Shell.Traditional.Workflow.install_agent_state(
+      state,
+      (fn agent ->
+         AgentState.apply_session_snapshot(
+           agent,
+           status,
+           pending_approval,
+           error,
+           Map.get(snapshot, :active_tool_name)
+         )
+       end).(MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state))
+    )
   end
 
   @spec detach_remote_session(state(), pid()) :: state()
@@ -649,7 +720,19 @@ defmodule MingaEditor.Commands.AgentSession do
           acc
       end)
 
-    EditorState.set_tab_bar(state, tb)
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          tb
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   defp mark_remote_session_disconnected(state, _session_id), do: state
@@ -770,7 +853,7 @@ defmodule MingaEditor.Commands.AgentSession do
 
   @spec provider_opts(state(), Panel.t(), ProjectView.t() | nil) :: keyword()
   defp provider_opts(state, panel, project_view) do
-    Keyword.merge(state.agent_provider_opts,
+    Keyword.merge(state.agent_connection.agent_provider_opts,
       provider: panel.provider_name,
       model: panel.model_name,
       project_view: project_view
@@ -788,7 +871,7 @@ defmodule MingaEditor.Commands.AgentSession do
   defp bind_session_to_agent_workspace(state, %TabBar{} = tb, session_pid) do
     case reusable_agent_workspace(tb, session_pid) do
       %Workspace{id: workspace_id} ->
-        agent_ui = AgentAccess.agent_ui(state)
+        agent_ui = state.workspace.agent_ui
 
         tb =
           tb
@@ -851,7 +934,7 @@ defmodule MingaEditor.Commands.AgentSession do
   @spec create_agent_workspace(state(), TabBar.t(), pid()) :: state()
   defp create_agent_workspace(state, %TabBar{} = tb, session_pid) do
     {tb, ws} = TabBar.add_workspace(tb, "Agent", session_pid)
-    agent_ui = AgentAccess.agent_ui(state)
+    agent_ui = state.workspace.agent_ui
 
     tb =
       tb
@@ -882,9 +965,22 @@ defmodule MingaEditor.Commands.AgentSession do
         _ -> MingaEditor.Agent.UIState.new()
       end
 
-    state
-    |> EditorState.set_tab_bar(tb)
-    |> EditorState.set_agent_ui(agent_ui)
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          tb
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
+    |> then(fn state ->
+      %{state | workspace: MingaEditor.Session.State.set_agent_ui(state.workspace, agent_ui)}
+    end)
   end
 
   @spec maybe_update_bound_workspace_project_view(state(), pid(), ProjectView.t() | nil) ::
@@ -924,7 +1020,7 @@ defmodule MingaEditor.Commands.AgentSession do
 
   @spec project_view_from_root(state()) :: {ProjectView.t() | nil, boolean()}
   defp project_view_from_root(state) do
-    case EditorState.file_tree_state(state).project_root do
+    case state.workspace.file_tree.project_root do
       root when is_binary(root) -> measured_project_view_overlay(root)
       _ -> {nil, false}
     end
@@ -970,7 +1066,20 @@ defmodule MingaEditor.Commands.AgentSession do
          project_view
        ) do
     tb = TabBar.update_workspace(tb, workspace_id, &Workspace.set_project_view(&1, project_view))
-    EditorState.set_tab_bar(state, tb)
+
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          tb
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   defp update_workspace_project_view(state, _workspace_id, _project_view), do: state

@@ -72,9 +72,11 @@ defmodule MingaGitPorcelain.KeyDispatchGUIBindingsTest do
       )
 
     state = %EditorState{
-      port_manager: self(),
-      workspace: %SessionState{viewport: Viewport.new(24, 80)},
-      capabilities: %Capabilities{frontend_type: frontend_type}
+      frontend: %MingaEditor.State.Frontend{
+        port_manager: self(),
+        capabilities: %Capabilities{frontend_type: frontend_type}
+      },
+      workspace: %SessionState{viewport: Viewport.new(24, 80)}
     }
 
     state =
@@ -84,7 +86,7 @@ defmodule MingaGitPorcelain.KeyDispatchGUIBindingsTest do
         state
       end
 
-    EditorState.add_buffer(state, buf)
+    MingaEditor.Handlers.BufferRegistry.add_buffer(state, buf)
   end
 
   defp dispatch_keys(state, keys) do

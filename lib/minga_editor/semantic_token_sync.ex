@@ -26,7 +26,6 @@ defmodule MingaEditor.SemanticTokenSync do
 
   alias Minga.Buffer
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.Highlighting
   alias Minga.LSP.Client
   alias Minga.LSP.SyncServer
   alias Minga.LSP.SemanticTokens
@@ -52,7 +51,7 @@ defmodule MingaEditor.SemanticTokenSync do
       uri = "file://#{file_path}"
       ref = Client.request_semantic_tokens(client, uri)
       pending = Map.put(state.workspace.lsp_pending, ref, {:semantic_tokens, buf_pid})
-      EditorState.set_lsp_pending(state, pending)
+      %{state | workspace: MingaEditor.Session.State.set_lsp_pending(state.workspace, pending)}
     else
       _ -> state
     end
@@ -89,7 +88,7 @@ defmodule MingaEditor.SemanticTokenSync do
 
   @spec merge_tokens(EditorState.t(), pid(), [SemanticTokens.token()]) :: EditorState.t()
   defp merge_tokens(state, buf_pid, tokens) do
-    hl = Map.get(state.highlighting.highlights, buf_pid)
+    hl = Map.get(state.parser.highlighting.highlights, buf_pid)
 
     if hl == nil do
       state
@@ -127,9 +126,19 @@ defmodule MingaEditor.SemanticTokenSync do
 
       hl = %{hl | spans: List.to_tuple(merged)}
 
-      highlights = Map.put(state.highlighting.highlights, buf_pid, hl)
+      highlights = Map.put(state.parser.highlighting.highlights, buf_pid, hl)
 
-      EditorState.update_highlight(state, &Highlighting.set_highlights(&1, highlights))
+      %{
+        state
+        | parser:
+            MingaEditor.State.Parser.accept_highlighting(
+              state.parser,
+              MingaEditor.State.Highlighting.set_highlights(
+                state.parser.highlighting,
+                highlights
+              )
+            )
+      }
     end
   end
 

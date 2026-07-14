@@ -3,11 +3,10 @@ defmodule MingaEditor.State.Agent do
   Agent rendering cache: status, error, pending approval, and spinner timer.
 
   This struct is **not** the source of truth for the active agent session.
-  The session pid lives on the active `Tab` (Traditional shell) or the
-  shell-owned surface. `MingaEditor.State.AgentAccess.session/1`
-  reads it through the `Shell.active_session/1` callback.
+  The session pid lives on the active `Tab` in the Traditional shell and
+  is read through the active shell runtime.
 
-  After a tab switch, `MingaEditor.State.rebuild_agent_from_session/2`
+  After a tab switch, `MingaEditor.AgentLifecycle.rebuild_agent_from_session/2`
   repopulates the cache fields below from the incoming tab's session
   process via `MingaAgent.Session.editor_snapshot/1`.
 

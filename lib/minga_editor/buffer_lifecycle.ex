@@ -52,7 +52,7 @@ defmodule MingaEditor.BufferLifecycle do
           Minga.Events.broadcast(
             :buffer_saved,
             %Minga.Events.BufferEvent{buffer: buf, path: path},
-            EditorState.events_registry(state)
+            state.extension_surfaces.events_registry
           )
     end
 

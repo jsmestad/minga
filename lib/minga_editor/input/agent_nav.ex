@@ -30,19 +30,17 @@ defmodule MingaEditor.Input.AgentNav do
 
   alias MingaEditor.Agent.UIState
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.AgentAccess
-  alias MingaEditor.Window
 
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
   def handle_key(%{workspace: %{keymap_scope: :agent}} = state, cp, mods) do
-    panel = AgentAccess.panel(state)
+    panel = state.workspace.agent_ui.panel
 
     if panel.input_focused do
       {:passthrough, state}
     else
-      view = AgentAccess.view(state)
+      view = state.workspace.agent_ui.view
 
       case UIState.View.focus(view) do
         :chat -> handle_chat_nav(state, cp, mods)
@@ -62,7 +60,12 @@ defmodule MingaEditor.Input.AgentNav do
       {:scroll, fun} ->
         state =
           state
-          |> AgentAccess.update_agent_ui(fun)
+          |> then(fn state ->
+            MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+              state,
+              fun.(state.workspace.agent_ui)
+            )
+          end)
           |> unpin_agent_chat_window()
 
         {:handled, state}
@@ -79,7 +82,11 @@ defmodule MingaEditor.Input.AgentNav do
   defp handle_viewer_nav(state, cp, mods) do
     case viewer_nav_command(cp, mods) do
       {:scroll, fun} ->
-        {:handled, AgentAccess.update_agent_ui(state, fun)}
+        {:handled,
+         MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+           state,
+           fun.(state.workspace.agent_ui)
+         )}
 
       :passthrough ->
         {:passthrough, state}
@@ -123,7 +130,14 @@ defmodule MingaEditor.Input.AgentNav do
         state
 
       {win_id, _window} ->
-        EditorState.update_window(state, win_id, &Window.set_pinned(&1, false))
+        %{
+          state
+          | workspace:
+              MingaEditor.Session.State.set_windows(
+                state.workspace,
+                MingaEditor.State.Windows.set_pinned(state.workspace.windows, win_id, false)
+              )
+        }
     end
   end
 end

@@ -20,7 +20,6 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
@@ -66,7 +65,7 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
       end
 
     %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
@@ -74,7 +73,7 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
         keymap_scope: Keyword.get(opts, :keymap_scope, :editor),
         agent_ui: agentic
       },
-      focus_stack: [],
+      interaction: %MingaEditor.State.Interaction{focus_stack: []},
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),
@@ -113,7 +112,10 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
       state = base_state(keymap_scope: :agent, agentic_active: true, input_focused: true)
 
       state =
-        AgentAccess.update_panel(state, fn p -> %{p | mention_completion: comp} end)
+        MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
+          state,
+          (fn p -> %{p | mention_completion: comp} end).(state.workspace.agent_ui.panel)
+        )
 
       {:handled, _new_state} = MentionCompletion.handle_key(state, 27, 0)
     end
@@ -122,7 +124,10 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
       state = base_state(keymap_scope: :editor, panel_visible: true, input_focused: true)
 
       state =
-        AgentAccess.update_panel(state, fn p -> %{p | mention_completion: comp} end)
+        MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
+          state,
+          (fn p -> %{p | mention_completion: comp} end).(state.workspace.agent_ui.panel)
+        )
 
       {:handled, _new_state} = MentionCompletion.handle_key(state, 27, 0)
     end
@@ -181,7 +186,9 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
     test "passes unrelated keys through when approval is pending", %{approval: approval} do
       state = base_state(keymap_scope: :agent, agentic_active: true, pending_approval: approval)
       {:passthrough, new_state} = ToolApproval.handle_key(state, ?x, 0)
-      assert AgentAccess.agent(new_state).pending_approval != nil
+
+      assert MingaEditor.Shell.Traditional.State.agent(new_state.shell_runtime.state).pending_approval !=
+               nil
     end
 
     test "passes through when no approval pending" do
@@ -213,9 +220,12 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
       state = base_state(keymap_scope: :agent, agentic_active: true, focus: :file_viewer)
 
       state =
-        AgentAccess.update_view(state, fn v ->
-          %{v | preview: %Preview{content: {:diff, review}}}
-        end)
+        MingaEditor.Shell.Traditional.Workflow.install_agent_view(
+          state,
+          (fn v ->
+             %{v | preview: %Preview{content: {:diff, review}}}
+           end).(state.workspace.agent_ui.view)
+        )
 
       {:ok, state: state}
     end
@@ -248,7 +258,10 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
 
     test "passes through when input is focused", %{state: state} do
       state =
-        AgentAccess.update_panel(state, fn p -> %{p | input_focused: true} end)
+        MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
+          state,
+          (fn p -> %{p | input_focused: true} end).(state.workspace.agent_ui.panel)
+        )
 
       {:passthrough, _} = DiffReview.handle_key(state, ?y, 0)
     end

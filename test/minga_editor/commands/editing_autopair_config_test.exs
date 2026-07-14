@@ -14,8 +14,10 @@ defmodule MingaEditor.Commands.EditingAutopairConfigTest do
 
   defp command_state(buffer, highlight) do
     %MingaEditor.State{
-      port_manager: nil,
-      highlighting: %Highlighting{highlights: %{buffer => highlight}},
+      frontend: %MingaEditor.State.Frontend{port_manager: nil},
+      parser: %MingaEditor.State.Parser{
+        highlighting: %Highlighting{highlights: %{buffer => highlight}}
+      },
       workspace: %MingaEditor.Session.State{
         viewport: %MingaEditor.Viewport{top: 0, left: 0, rows: 10, cols: 40},
         buffers: %MingaEditor.State.Buffers{active: buffer, list: [buffer]},

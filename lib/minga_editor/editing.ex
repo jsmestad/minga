@@ -15,6 +15,7 @@ defmodule MingaEditor.Editing do
   alias MingaEditor.MacroRecorder
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Registers
+  alias MingaEditor.VimState
   alias Minga.Mode
 
   # ── Vim-specific reads ─────────────────────────────────────────────────────
@@ -54,32 +55,57 @@ defmodule MingaEditor.Editing do
 
   # ── Mutation functions ─────────────────────────────────────────────────────
 
+  @spec install_editing(EditorState.t(), VimState.t()) :: EditorState.t()
+  defp install_editing(%EditorState{} = state, vim),
+    do: %{state | workspace: MingaEditor.Session.State.set_editing(state.workspace, vim)}
+
   @doc "Sets the active register to `name`."
   @spec set_active_register(EditorState.t(), String.t()) :: EditorState.t()
   def set_active_register(%EditorState{} = state, name) do
-    EditorState.set_registers(state, Registers.set_active(state.workspace.editing.reg, name))
+    install_editing(
+      state,
+      MingaEditor.VimState.set_registers(
+        state.workspace.editing,
+        Registers.set_active(state.workspace.editing.reg, name)
+      )
+    )
   end
 
   @doc "Stores `text` in register `name` with the given type."
   @spec put_register(EditorState.t(), String.t(), String.t(), Registers.reg_type()) ::
           EditorState.t()
   def put_register(%EditorState{} = state, name, text, reg_type \\ :charwise) do
-    EditorState.set_registers(
+    install_editing(
       state,
-      Registers.put(state.workspace.editing.reg, name, text, reg_type)
+      MingaEditor.VimState.set_registers(
+        state.workspace.editing,
+        Registers.put(state.workspace.editing.reg, name, text, reg_type)
+      )
     )
   end
 
   @doc "Resets the active register back to unnamed."
   @spec reset_active_register(EditorState.t()) :: EditorState.t()
   def reset_active_register(%EditorState{} = state) do
-    EditorState.set_registers(state, Registers.reset_active(state.workspace.editing.reg))
+    install_editing(
+      state,
+      MingaEditor.VimState.set_registers(
+        state.workspace.editing,
+        Registers.reset_active(state.workspace.editing.reg)
+      )
+    )
   end
 
   @doc "Sets the leader_node on mode_state."
   @spec set_leader_node(EditorState.t(), term()) :: EditorState.t()
   def set_leader_node(%EditorState{} = state, node) do
-    EditorState.update_mode_state(state, &%{&1 | leader_node: node})
+    install_editing(
+      state,
+      MingaEditor.VimState.set_mode_state(
+        state.workspace.editing,
+        (&%{&1 | leader_node: node}).(state.workspace.editing.mode_state)
+      )
+    )
   end
 
   @doc """
@@ -92,29 +118,50 @@ defmodule MingaEditor.Editing do
   @spec update_mode_state(EditorState.t(), (Mode.state() -> Mode.state()) | map()) ::
           EditorState.t()
   def update_mode_state(%EditorState{} = state, fun) when is_function(fun, 1) do
-    EditorState.update_mode_state(state, fun)
+    install_editing(
+      state,
+      MingaEditor.VimState.set_mode_state(
+        state.workspace.editing,
+        fun.(state.workspace.editing.mode_state)
+      )
+    )
   end
 
   def update_mode_state(%EditorState{} = state, updates) when is_map(updates) do
-    EditorState.update_mode_state(state, &Map.merge(&1, updates))
+    install_editing(
+      state,
+      MingaEditor.VimState.set_mode_state(
+        state.workspace.editing,
+        (&Map.merge(&1, updates)).(state.workspace.editing.mode_state)
+      )
+    )
   end
 
   @doc "Replaces the macro recorder."
   @spec set_macro_recorder(EditorState.t(), MacroRecorder.t()) :: EditorState.t()
   def set_macro_recorder(%EditorState{} = state, rec) do
-    EditorState.set_macro_recorder(state, rec)
+    install_editing(
+      state,
+      MingaEditor.VimState.set_macro_recorder(state.workspace.editing, rec)
+    )
   end
 
   @doc "Replaces the change recorder."
   @spec set_change_recorder(EditorState.t(), term()) :: EditorState.t()
   def set_change_recorder(%EditorState{} = state, rec) do
-    EditorState.set_change_recorder(state, rec)
+    install_editing(
+      state,
+      MingaEditor.VimState.set_change_recorder(state.workspace.editing, rec)
+    )
   end
 
   @doc "Saves the jump position when the cursor crosses a line boundary."
   @spec save_jump_pos(EditorState.t(), {non_neg_integer(), non_neg_integer()}) ::
           EditorState.t()
   def save_jump_pos(%EditorState{} = state, pos) do
-    EditorState.set_last_jump_pos(state, pos)
+    install_editing(
+      state,
+      MingaEditor.VimState.set_last_jump_pos(state.workspace.editing, pos)
+    )
   end
 end

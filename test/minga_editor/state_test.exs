@@ -8,6 +8,7 @@ defmodule MingaEditor.StateTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
+  alias MingaEditor.State.Frontend, as: FrontendState
   alias MingaEditor.State.Workspace, as: WorkspaceModel
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
@@ -21,7 +22,6 @@ defmodule MingaEditor.StateTest do
 
   defp new_state do
     %EditorState{
-      port_manager: nil,
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: VimState.new()
@@ -38,7 +38,15 @@ defmodule MingaEditor.StateTest do
     buf = start_buffer(content)
 
     state =
-      put_in(new_state().workspace.buffers, %Buffers{list: [buf], active_index: 0, active: buf})
+      %{
+        new_state()
+        | workspace:
+            SessionState.set_buffers(new_state().workspace, %Buffers{
+              list: [buf],
+              active_index: 0,
+              active: buf
+            })
+      }
       |> setup_windows()
 
     {state, buf}
@@ -49,12 +57,41 @@ defmodule MingaEditor.StateTest do
     tree = WindowTree.new(1)
     window = Window.new(1, buf, 24, 80)
 
-    put_in(state.workspace.windows, %Windows{
-      tree: tree,
-      map: %{1 => window},
-      active: 1,
-      next_id: 2
-    })
+    %{
+      state
+      | workspace:
+          SessionState.set_windows(state.workspace, %Windows{
+            tree: tree,
+            map: %{1 => window},
+            active: 1,
+            next_id: 2
+          })
+    }
+  end
+
+  describe "root ownership shape" do
+    test "contains exactly the documented 16 owner fields" do
+      state = %EditorState{workspace: %SessionState{viewport: Viewport.new(24, 80)}}
+
+      assert state |> Map.keys() |> List.delete(:__struct__) |> Enum.sort() == [
+               :agent_connection,
+               :appearance,
+               :buffer_lifecycle,
+               :effect_scheduler,
+               :extension_surfaces,
+               :feedback,
+               :frontend,
+               :git,
+               :interaction,
+               :lsp,
+               :parser,
+               :remote,
+               :render,
+               :session,
+               :shell_runtime,
+               :workspace
+             ]
+    end
   end
 
   describe "buffer and window selection" do
@@ -62,7 +99,7 @@ defmodule MingaEditor.StateTest do
       {state, buf1} = state_with_buffer()
       buf2 = start_buffer("world")
 
-      added = EditorState.add_buffer(state, buf2)
+      added = MingaEditor.Handlers.BufferRegistry.add_buffer(state, buf2)
       assert added.workspace.buffers.active == buf2
       assert added.workspace.buffers.active_index == 1
       assert added.workspace.buffers.list == [buf1, buf2]
@@ -78,14 +115,17 @@ defmodule MingaEditor.StateTest do
       assert Map.fetch!(split_switched.workspace.windows.map, 1).buffer == buf1
       assert Map.fetch!(split_switched.workspace.windows.map, 2).buffer == buf2
 
-      split_added = EditorState.add_buffer(split_state, start_buffer("new file"))
+      split_added =
+        MingaEditor.Handlers.BufferRegistry.add_buffer(split_state, start_buffer("new file"))
 
       assert Map.fetch!(split_added.workspace.windows.map, 1).buffer ==
                split_added.workspace.buffers.active
 
       assert Map.fetch!(split_added.workspace.windows.map, 2).buffer == buf2
 
-      no_window = EditorState.add_buffer(new_state(), start_buffer("no window"))
+      no_window =
+        MingaEditor.Handlers.BufferRegistry.add_buffer(new_state(), start_buffer("no window"))
+
       assert is_pid(no_window.workspace.buffers.active)
     end
 
@@ -113,7 +153,15 @@ defmodule MingaEditor.StateTest do
       file_buf = start_buffer("typed text")
       BufferProcess.move_to(file_buf, {0, 5})
 
-      state = put_in(state.workspace.buffers, Buffers.add(state.workspace.buffers, file_buf))
+      state = %{
+        state
+        | workspace:
+            SessionState.set_buffers(
+              state.workspace,
+              Buffers.add(state.workspace.buffers, file_buf)
+            )
+      }
+
       synced = MingaEditor.WindowFocus.remember_active_cursor(state)
 
       assert active_window(synced).buffer == files_buf
@@ -134,7 +182,24 @@ defmodule MingaEditor.StateTest do
         |> SessionState.to_tab_context()
 
       tab = Tab.new_file(1, "Untitled-1") |> Tab.set_context(context)
-      state = EditorState.set_tab_bar(state, TabBar.new(tab))
+
+      state =
+        then(state, fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.set_tab_bar(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              TabBar.new(tab)
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
 
       restored = EditorState.restore_tab_context(state, context)
 
@@ -158,7 +223,12 @@ defmodule MingaEditor.StateTest do
       assert active_window(unchanged).content == active_window(state).content
 
       buf2 = start_buffer("world")
-      state = put_in(state.workspace.buffers, Buffers.add(state.workspace.buffers, buf2))
+
+      state = %{
+        state
+        | workspace:
+            SessionState.set_buffers(state.workspace, Buffers.add(state.workspace.buffers, buf2))
+      }
 
       synced =
         MingaEditor.BufferActivation.activate(state, state.workspace.buffers,
@@ -172,11 +242,14 @@ defmodule MingaEditor.StateTest do
       agent_state = state_with_agent_tab()
       file_buf = start_buffer("defmodule Foo, do: :ok")
 
-      agent_state =
-        put_in(
-          agent_state.workspace.buffers,
-          Buffers.add(agent_state.workspace.buffers, file_buf)
-        )
+      agent_state = %{
+        agent_state
+        | workspace:
+            SessionState.set_buffers(
+              agent_state.workspace,
+              Buffers.add(agent_state.workspace.buffers, file_buf)
+            )
+      }
 
       synced_agent =
         MingaEditor.BufferActivation.activate(agent_state, agent_state.workspace.buffers,
@@ -190,7 +263,7 @@ defmodule MingaEditor.StateTest do
     test "add_buffer from an agent tab creates an editor file tab and buffer content snapshot" do
       state = state_with_agent_tab()
       file_buf = start_buffer("file content")
-      new_state = EditorState.add_buffer(state, file_buf)
+      new_state = MingaEditor.Handlers.BufferRegistry.add_buffer(state, file_buf)
       active_tab = TabBar.active(new_state.shell_runtime.state.tab_bar)
       active_window = active_window(new_state)
       tab_window = active_tab.context.windows.map[active_tab.context.windows.active]
@@ -288,14 +361,16 @@ defmodule MingaEditor.StateTest do
         end)
 
       state = %EditorState{
-        port_manager: self(),
+        frontend: FrontendState.new(port_manager: self()),
         workspace:
           %SessionState{viewport: Viewport.new(24, 80)}
           |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
         shell_runtime: Runtime.new(Runtime.default_entry(), %ShellState{tab_bar: tab_bar})
       }
 
-      updated_state = EditorState.rebind_buffer_file_identity(state, target_buffer)
+      updated_state =
+        EditorState.rebind_buffer_file_identity(state, target_buffer, target_path)
+
       updated_tb = updated_state.shell_runtime.state.tab_bar
 
       assert TabBar.get(updated_tb, matching_tab.id).file_ref == target_ref
@@ -374,7 +449,7 @@ defmodule MingaEditor.StateTest do
         end)
 
       state = %EditorState{
-        port_manager: self(),
+        frontend: FrontendState.new(port_manager: self()),
         workspace:
           %SessionState{
             viewport: Viewport.new(24, 80),
@@ -384,7 +459,7 @@ defmodule MingaEditor.StateTest do
         shell_runtime: Runtime.new(Runtime.default_entry(), %ShellState{tab_bar: tab_bar})
       }
 
-      updated_state = EditorState.rebind_buffer_file_identity(state, target_buffer)
+      updated_state = EditorState.rebind_buffer_file_identity(state, target_buffer, path)
       updated_tb = updated_state.shell_runtime.state.tab_bar
 
       assert TabBar.get(updated_tb, inactive_tab.id).file_ref == new_ref
@@ -400,15 +475,20 @@ defmodule MingaEditor.StateTest do
       buf1 = start_buffer("one")
       buf2 = start_buffer("two")
 
-      state = new_state() |> EditorState.monitor_buffer(buf1)
-      assert is_reference(state.buffer_monitors[buf1])
+      state = new_state() |> MingaEditor.Handlers.BufferRegistry.monitor_buffer(buf1)
+      assert is_reference(state.buffer_lifecycle.buffer_monitors[buf1])
 
-      state2 = EditorState.monitor_buffer(state, buf1)
-      assert state2.buffer_monitors[buf1] == state.buffer_monitors[buf1]
-      assert map_size(state2.buffer_monitors) == 1
+      state2 = MingaEditor.Handlers.BufferRegistry.monitor_buffer(state, buf1)
 
-      state3 = new_state() |> EditorState.monitor_buffers([buf1, buf2])
-      assert Map.keys(state3.buffer_monitors) |> Enum.sort() == Enum.sort([buf1, buf2])
+      assert state2.buffer_lifecycle.buffer_monitors[buf1] ==
+               state.buffer_lifecycle.buffer_monitors[buf1]
+
+      assert map_size(state2.buffer_lifecycle.buffer_monitors) == 1
+
+      state3 = new_state() |> MingaEditor.Handlers.BufferRegistry.monitor_buffers([buf1, buf2])
+
+      assert Map.keys(state3.buffer_lifecycle.buffer_monitors) |> Enum.sort() ==
+               Enum.sort([buf1, buf2])
     end
 
     test "remove_dead_buffer cleans lists, active buffer, monitors, and special slots" do
@@ -417,18 +497,18 @@ defmodule MingaEditor.StateTest do
 
       state =
         new_state()
-        |> EditorState.add_buffer(buf1)
-        |> EditorState.add_buffer(buf2)
-        |> EditorState.monitor_buffer(buf1)
-        |> EditorState.monitor_buffer(buf2)
+        |> MingaEditor.Handlers.BufferRegistry.add_buffer(buf1)
+        |> MingaEditor.Handlers.BufferRegistry.add_buffer(buf2)
+        |> MingaEditor.Handlers.BufferRegistry.monitor_buffer(buf1)
+        |> MingaEditor.Handlers.BufferRegistry.monitor_buffer(buf2)
 
-      removed_inactive = EditorState.remove_dead_buffer(state, buf1)
+      removed_inactive = EditorState.close_buffer_pure(state, buf1)
       refute buf1 in removed_inactive.workspace.buffers.list
       assert buf2 in removed_inactive.workspace.buffers.list
-      refute Map.has_key?(removed_inactive.buffer_monitors, buf1)
-      assert Map.has_key?(removed_inactive.buffer_monitors, buf2)
+      refute Map.has_key?(removed_inactive.buffer_lifecycle.buffer_monitors, buf1)
+      assert Map.has_key?(removed_inactive.buffer_lifecycle.buffer_monitors, buf2)
 
-      removed_active = EditorState.remove_dead_buffer(state, buf2)
+      removed_active = EditorState.close_buffer_pure(state, buf2)
       assert removed_active.workspace.buffers.active == buf1
       assert removed_active.workspace.buffers.list == [buf1]
     end
@@ -444,33 +524,60 @@ defmodule MingaEditor.StateTest do
     win2 = Window.new(id, buffer, 24, 40, cursor)
     windows = state.workspace.windows
 
-    put_in(state.workspace.windows, %{
-      windows
-      | tree: tree,
-        map: Map.put(windows.map, id, win2),
-        next_id: id + 1
-    })
+    %{
+      state
+      | workspace:
+          SessionState.set_windows(state.workspace, %{
+            windows
+            | tree: tree,
+              map: Map.put(windows.map, id, win2),
+              next_id: id + 1
+          })
+    }
   end
 
   defp state_with_agent_tab do
-    state =
-      put_in(new_state().workspace.buffers, %Buffers{
-        list: [],
-        active_index: 0,
-        active: nil
-      })
+    root = new_state()
+
+    state = %{
+      root
+      | workspace:
+          SessionState.set_buffers(root.workspace, %Buffers{
+            list: [],
+            active_index: 0,
+            active: nil
+          })
+    }
 
     agent_window = Window.new_agent_chat(1, 24, 80)
 
     state =
-      put_in(state.workspace.windows, %Windows{
-        tree: WindowTree.new(1),
-        map: %{1 => agent_window},
-        active: 1,
-        next_id: 2
-      })
-      |> put_in([Access.key!(:workspace), Access.key!(:keymap_scope)], :agent)
-      |> EditorState.set_tab_bar(TabBar.new(Tab.new_agent(1, "Agent")))
+      %{
+        state
+        | workspace:
+            SessionState.set_windows(state.workspace, %Windows{
+              tree: WindowTree.new(1),
+              map: %{1 => agent_window},
+              active: 1,
+              next_id: 2
+            })
+      }
+      |> then(fn root ->
+        %{root | workspace: SessionState.set_keymap_scope(root.workspace, :agent)}
+      end)
+      |> then(fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            TabBar.new(Tab.new_agent(1, "Agent"))
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
 
     state
   end

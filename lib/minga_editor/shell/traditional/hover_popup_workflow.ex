@@ -21,11 +21,11 @@ defmodule MingaEditor.Shell.Traditional.HoverPopupWorkflow do
       ) do
     state
     |> SignatureHelpWorkflow.dismiss()
-    |> EditorState.update_shell_state(&ShellState.show_hover_popup(&1, popup))
+    |> update_shell_state(&ShellState.show_hover_popup(&1, popup))
   end
 
   def show(%{shell_runtime: %{state: %ShellState{}}} = state, popup),
-    do: EditorState.update_shell_state(state, &ShellState.show_hover_popup(&1, popup))
+    do: update_shell_state(state, &ShellState.show_hover_popup(&1, popup))
 
   def show(state, _popup), do: state
 
@@ -54,7 +54,7 @@ defmodule MingaEditor.Shell.Traditional.HoverPopupWorkflow do
   @doc "Dismisses the active hover popup."
   @spec dismiss(EditorState.t()) :: EditorState.t()
   def dismiss(%{shell_runtime: %{state: %ShellState{}}} = state),
-    do: EditorState.update_shell_state(state, &ShellState.dismiss_hover_popup/1)
+    do: update_shell_state(state, &ShellState.dismiss_hover_popup/1)
 
   def dismiss(state), do: state
 
@@ -64,8 +64,21 @@ defmodule MingaEditor.Shell.Traditional.HoverPopupWorkflow do
          transition
        ) do
     updated_popup = transition.(popup)
-    EditorState.update_shell_state(state, &ShellState.show_hover_popup(&1, updated_popup))
+    update_shell_state(state, &ShellState.show_hover_popup(&1, updated_popup))
   end
 
   defp update(state, _transition), do: state
+
+  @spec update_shell_state(EditorState.t(), (MingaEditor.Shell.Traditional.State.t() ->
+                                               MingaEditor.Shell.Traditional.State.t())) ::
+          EditorState.t()
+  defp update_shell_state(%EditorState{} = state, transition) when is_function(transition, 1) do
+    shell_state = state.shell_runtime |> MingaEditor.Shell.Runtime.state() |> transition.()
+
+    %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
+  end
 end

@@ -110,13 +110,14 @@ defmodule MingaGitPorcelain.Input.GitStatusDiffOpenTest do
     tui = %TuiState{cursor_index: 1, collapsed: %{}}
 
     %EditorState{
-      port_manager: self(),
-      rendering: :disabled,
+      frontend: %MingaEditor.State.Frontend{port_manager: self(), rendering: :disabled},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         keymap_scope: :git_status
       },
-      focus_stack: [MingaEditor.Input.Scoped, MingaEditor.Input.ModeFSM]
+      interaction: %MingaEditor.State.Interaction{
+        focus_stack: [MingaEditor.Input.Scoped, MingaEditor.Input.ModeFSM]
+      }
     }
     |> SidebarWorkflow.replace_git_status(panel_data)
     |> SidebarWorkflow.replace_git_status_tui(tui)

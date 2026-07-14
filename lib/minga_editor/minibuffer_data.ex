@@ -92,7 +92,10 @@ defmodule MingaEditor.MinibufferData do
   """
   @spec from_state(EditorState.t() | map()) :: t()
 
-  def from_state(%EditorState{pending_quit: kind, shell_runtime: %Runtime{state: shell_state}})
+  def from_state(%EditorState{
+        session: %{pending_quit: kind},
+        shell_runtime: %Runtime{state: shell_state}
+      })
       when kind in [:quit, :quit_all] do
     confirmation_prompt(kind, shell_state)
   end

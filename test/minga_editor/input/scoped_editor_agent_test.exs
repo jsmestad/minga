@@ -9,7 +9,6 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.View
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.TabBar
   alias MingaEditor.Input.AgentPanel
   alias MingaEditor.Input.Scoped
@@ -47,12 +46,12 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
 
     test "i focuses the input", %{state: state} do
       {:handled, new_state} = walk_surface_handlers(state, ?i, 0)
-      assert AgentAccess.input_focused?(new_state) == true
+      assert new_state.workspace.agent_ui.panel.input_focused == true
     end
 
     test "j scrolls the semantic transcript", %{state: state} do
       {:handled, new_state} = walk_surface_handlers(state, ?j, 0)
-      assert AgentAccess.panel(new_state).scroll.offset == 1
+      assert new_state.workspace.agent_ui.panel.scroll.offset == 1
     end
 
     test "passthrough when panel not visible" do
@@ -75,12 +74,12 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
 
     test "printable chars go to input", %{state: state} do
       {:handled, new_state} = walk_surface_handlers(state, ?x, 0)
-      assert UIState.input_text(AgentAccess.panel(new_state)) =~ "x"
+      assert MingaEditor.Agent.PromptBuffer.input_text(new_state.workspace.agent_ui.panel) =~ "x"
     end
 
     test "ESC switches to input normal mode (editor scope side panel)", %{state: state} do
       {:handled, new_state} = walk_surface_handlers(state, 27, 0)
-      assert AgentAccess.input_focused?(new_state)
+      assert new_state.workspace.agent_ui.panel.input_focused
       assert new_state.workspace.editing.mode == :normal
     end
 
@@ -92,13 +91,16 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
 
     test "Enter on empty prompt is no-op", %{state: state} do
       {:handled, new_state} = walk_surface_handlers(state, 13, 0)
-      assert AgentAccess.input_focused?(new_state) == true
+      assert new_state.workspace.agent_ui.panel.input_focused == true
     end
 
     test "modified Enter inserts newline", %{state: state} do
       for mods <- [0x01, 0x04] do
         {:handled, new_state} = walk_surface_handlers(state, 13, mods)
-        assert Enum.count(UIState.input_lines(AgentAccess.panel(new_state))) > 1
+
+        assert Enum.count(
+                 MingaEditor.Agent.PromptBuffer.input_lines(new_state.workspace.agent_ui.panel)
+               ) > 1
       end
     end
   end
@@ -125,7 +127,7 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
       file_buffer: file_buffer
     } do
       assert state.workspace.keymap_scope == :agent
-      return_target = state |> AgentAccess.view() |> View.return_target()
+      return_target = state.workspace.agent_ui.view |> View.return_target()
       assert return_target.active_tab_id == 1
       assert return_target.active_buffer == file_buffer
 
@@ -143,7 +145,7 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
     test "ESC returns to the recorded file tab when nothing transient is open", %{state: state} do
       assert state.workspace.keymap_scope == :agent
 
-      assert state |> AgentAccess.view() |> View.return_target() |> Map.fetch!(:active_tab_id) ==
+      assert state.workspace.agent_ui.view |> View.return_target() |> Map.fetch!(:active_tab_id) ==
                1
 
       {:handled, new_state} = Scoped.handle_key(state, 27, 0)
@@ -157,7 +159,24 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
     } do
       {tb, fallback_tab} = TabBar.insert(EditorState.tab_bar(state), :file, "fallback.ex")
       {:ok, tb} = TabBar.remove(tb, 1)
-      state = EditorState.set_tab_bar(state, tb)
+
+      state =
+        then(state, fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.set_tab_bar(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              tb
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
 
       {:handled, new_state} = Scoped.handle_key(state, ?q, 0)
       assert new_state.workspace.keymap_scope == :editor
@@ -169,7 +188,24 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
       file_buffer: file_buffer
     } do
       {:ok, tb} = TabBar.remove(EditorState.tab_bar(state), 1)
-      state = EditorState.set_tab_bar(state, tb)
+
+      state =
+        then(state, fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.set_tab_bar(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              tb
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
 
       {:handled, new_state} = Scoped.handle_key(state, ?q, 0)
       assert new_state.workspace.keymap_scope == :editor
@@ -181,23 +217,23 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
 
     test "? toggles help", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, ??, 0)
-      assert AgentAccess.view(new_state).help_visible
+      assert new_state.workspace.agent_ui.view.help_visible
     end
 
     test "Tab switches focus", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, 9, 0)
-      assert new_state |> AgentAccess.view() |> View.focus() == :file_viewer
+      assert new_state.workspace.agent_ui.view |> View.focus() == :file_viewer
     end
 
     test "i focuses input", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, ?i, 0)
-      assert AgentAccess.input_focused?(new_state)
+      assert new_state.workspace.agent_ui.panel.input_focused
     end
 
     test "prefix keys start a prefix sequence", %{state: state} do
       for key <- [?g, ?z, 93, 91] do
         {:handled, new_state} = Scoped.handle_key(state, key, 0)
-        assert new_state |> AgentAccess.view() |> View.pending_prefix() != nil
+        assert new_state.workspace.agent_ui.view |> View.pending_prefix() != nil
       end
     end
 
@@ -209,28 +245,32 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
     test "panel resize keys work", %{state: state} do
       {:handled, grow} = Scoped.handle_key(state, ?}, 0)
 
-      assert AgentAccess.view(grow).chat_width_pct >
-               AgentAccess.view(state).chat_width_pct
+      assert grow.workspace.agent_ui.view.chat_width_pct >
+               state.workspace.agent_ui.view.chat_width_pct
 
       {:handled, shrink} = Scoped.handle_key(state, ?{, 0)
 
-      assert AgentAccess.view(shrink).chat_width_pct <
-               AgentAccess.view(state).chat_width_pct
+      assert shrink.workspace.agent_ui.view.chat_width_pct <
+               state.workspace.agent_ui.view.chat_width_pct
     end
 
     test "= resets panel split", %{state: state} do
       {:handled, resized} = Scoped.handle_key(state, ?}, 0)
       {:handled, reset} = Scoped.handle_key(resized, ?=, 0)
 
-      assert AgentAccess.view(reset).chat_width_pct ==
-               AgentAccess.view(state).chat_width_pct
+      assert reset.workspace.agent_ui.view.chat_width_pct ==
+               state.workspace.agent_ui.view.chat_width_pct
     end
 
     test "ESC dismisses help before returning to the editor", %{state: state} do
-      state = AgentAccess.update_view(state, fn v -> %{v | help_visible: true} end)
+      state =
+        MingaEditor.Shell.Traditional.Workflow.install_agent_view(
+          state,
+          (fn v -> %{v | help_visible: true} end).(state.workspace.agent_ui.view)
+        )
 
       {:handled, new_state} = Scoped.handle_key(state, 27, 0)
-      refute AgentAccess.view(new_state).help_visible
+      refute new_state.workspace.agent_ui.view.help_visible
       assert new_state.workspace.keymap_scope == :agent
       assert EditorState.tab_bar(new_state).active_id == EditorState.tab_bar(state).active_id
     end
@@ -240,8 +280,11 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
       agent_tab_id = TabBar.find_by_kind(EditorState.tab_bar(state), :agent).id
 
       {:handled, unfocused_state} = Scoped.handle_key(state, 27, 0)
-      refute AgentAccess.input_focused?(unfocused_state)
-      assert UIState.prompt_text(AgentAccess.agent_ui(unfocused_state)) == "keep this"
+      refute unfocused_state.workspace.agent_ui.panel.input_focused
+
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(unfocused_state.workspace.agent_ui) ==
+               "keep this"
+
       assert unfocused_state.workspace.keymap_scope == :agent
 
       {:handled, returned_state} = Scoped.handle_key(unfocused_state, 27, 0)
@@ -249,7 +292,9 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
       assert EditorState.tab_bar(returned_state).active_id == 1
 
       reopened_state = EditorState.switch_tab(returned_state, agent_tab_id)
-      assert UIState.prompt_text(AgentAccess.agent_ui(reopened_state)) == "keep this"
+
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(reopened_state.workspace.agent_ui) ==
+               "keep this"
     end
 
     test "ESC keeps prompt focus when cancelling visual and operator-pending prompt states", %{
@@ -259,13 +304,15 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
         state = state |> focus_prompt("#{mode} draft")
 
         {:handled, mode_state} = Scoped.handle_key(state, enter_key, 0)
-        assert AgentAccess.input_focused?(mode_state)
+        assert mode_state.workspace.agent_ui.panel.input_focused
         assert Minga.Editing.mode(mode_state) == mode
 
         {:handled, new_state} = Scoped.handle_key(mode_state, 27, 0)
-        assert AgentAccess.input_focused?(new_state)
+        assert new_state.workspace.agent_ui.panel.input_focused
         assert new_state.workspace.editing.mode == :normal
-        assert UIState.prompt_text(AgentAccess.agent_ui(new_state)) == "#{mode} draft"
+
+        assert MingaEditor.Agent.PromptBuffer.prompt_text(new_state.workspace.agent_ui) ==
+                 "#{mode} draft"
       end
     end
   end
@@ -284,13 +331,13 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
 
     test "ESC switches to input normal mode", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, 27, 0)
-      assert AgentAccess.input_focused?(new_state)
+      assert new_state.workspace.agent_ui.panel.input_focused
       assert new_state.workspace.editing.mode == :normal
     end
 
     test "printable char self-inserts", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, ?x, 0)
-      assert UIState.input_text(AgentAccess.panel(new_state)) =~ "x"
+      assert MingaEditor.Agent.PromptBuffer.input_text(new_state.workspace.agent_ui.panel) =~ "x"
     end
 
     test "editing control keys are handled", %{state: state} do
@@ -301,7 +348,7 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
 
     test "SPC types a space when input is focused (not leader key)", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, ?\s, 0)
-      assert UIState.input_text(AgentAccess.panel(new_state)) =~ " "
+      assert MingaEditor.Agent.PromptBuffer.input_text(new_state.workspace.agent_ui.panel) =~ " "
     end
   end
 
@@ -323,16 +370,19 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
       state = base_state(keymap_scope: :agent, agentic_active: true)
 
       state =
-        AgentAccess.update_agent_ui(state, fn ui ->
-          UIState.push_toast(ui, "test", :info)
-        end)
+        MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+          state,
+          (fn ui ->
+             UIState.push_toast(ui, "test", :info)
+           end).(state.workspace.agent_ui)
+        )
 
-      assert UIState.toast_visible?(AgentAccess.agent_ui(state))
+      assert UIState.toast_visible?(state.workspace.agent_ui)
 
       # Toast dismissal is still handled by Scoped, but j itself returns passthrough
       {:passthrough, new_state} = Scoped.handle_key(state, ?j, 0)
       # Toast should be dismissed
-      refute UIState.toast_visible?(AgentAccess.agent_ui(new_state))
+      refute UIState.toast_visible?(new_state.workspace.agent_ui)
       # Full chain still handles the key (through AgentNav)
       {:handled, _} = walk_surface_handlers(state, ?j, 0)
     end
@@ -349,7 +399,7 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
     test "Tab switches back to chat from viewer" do
       state = base_state(keymap_scope: :agent, agentic_active: true, focus: :file_viewer)
       {:handled, new_state} = Scoped.handle_key(state, 9, 0)
-      assert new_state |> AgentAccess.view() |> View.focus() == :chat
+      assert new_state.workspace.agent_ui.view |> View.focus() == :chat
     end
   end
 end

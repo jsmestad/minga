@@ -26,7 +26,6 @@ defmodule MingaEditor.LayoutPreset do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Windows
   alias MingaEditor.Window
-  alias MingaEditor.Window.Content
   alias MingaEditor.WindowTree
 
   @type preset :: :default | :agent_right | :agent_bottom
@@ -80,12 +79,18 @@ defmodule MingaEditor.LayoutPreset do
   defp remove_inactive_agent_window(state, agent_win_id) do
     case Windows.remove_window(state.workspace.windows, agent_win_id) do
       {:ok, windows} ->
-        state = EditorState.set_windows(state, windows)
+        state = %{
+          state
+          | workspace: MingaEditor.Session.State.set_windows(state.workspace, windows)
+        }
 
         # If we were in agent scope, return to editor scope since the
         # agent pane is gone.
         if state.workspace.keymap_scope == :agent do
-          EditorState.set_keymap_scope(state, :editor)
+          %{
+            state
+            | workspace: MingaEditor.Session.State.set_keymap_scope(state.workspace, :editor)
+          }
         else
           state
         end
@@ -127,8 +132,8 @@ defmodule MingaEditor.LayoutPreset do
       state
     else
       {next_id, windows} = Windows.allocate_id(state.workspace.windows)
-      rows = state.terminal_viewport.rows
-      cols = state.terminal_viewport.cols
+      rows = state.frontend.terminal_viewport.rows
+      cols = state.frontend.terminal_viewport.cols
       agent_window = Window.new_agent_chat(next_id, rows, cols)
 
       # Split the active window to add the agent pane
@@ -141,7 +146,7 @@ defmodule MingaEditor.LayoutPreset do
             |> Windows.set_tree(new_tree)
             |> Windows.add_window(agent_window)
 
-          EditorState.set_windows(state, windows)
+          %{state | workspace: MingaEditor.Session.State.set_windows(state.workspace, windows)}
 
         :error ->
           state
@@ -151,15 +156,11 @@ defmodule MingaEditor.LayoutPreset do
 
   @spec find_agent_chat_window(EditorState.t()) :: {Window.id(), Window.t()} | nil
   defp find_agent_chat_window(state) do
-    Windows.find_by_content(state.workspace.windows, fn window ->
-      Content.agent_chat?(window.content)
-    end)
+    Windows.find_agent_chat(state.workspace.windows)
   end
 
   @spec find_non_agent_window(EditorState.t()) :: {Window.id(), Window.t()} | nil
   defp find_non_agent_window(state) do
-    Windows.find_by_content(state.workspace.windows, fn window ->
-      Content.buffer?(window.content)
-    end)
+    Windows.find_buffer_window(state.workspace.windows)
   end
 end

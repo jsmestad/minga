@@ -26,7 +26,6 @@ defmodule MingaEditor.Agent.Compaction do
   alias MingaEditor.Effect.Request
   alias MingaEditor.EffectScheduler
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
   alias MingaAgent.Session
@@ -77,7 +76,7 @@ defmodule MingaEditor.Agent.Compaction do
         %EditorState{} = state,
         %Outcome{request: %{effect: %__MODULE__{} = effect}} = outcome
       ) do
-    if AgentAccess.session(state) == effect.session do
+    if MingaEditor.Shell.Runtime.active_session(state.shell_runtime) == effect.session do
       apply_active(state, outcome)
     else
       apply_background(state, outcome, effect.session)
@@ -173,33 +172,48 @@ defmodule MingaEditor.Agent.Compaction do
   defp apply_background_outcome(state, _workspace_id, _session, %Outcome{}), do: state
 
   @spec update_active_ui(EditorState.t(), (UIState.t() -> UIState.t())) :: EditorState.t()
-  defp update_active_ui(state, fun), do: AgentAccess.update_agent_ui(state, fun)
+  defp update_active_ui(state, fun),
+    do:
+      MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+        state,
+        fun.(state.workspace.agent_ui)
+      )
 
   @spec update_background_ui(EditorState.t(), non_neg_integer(), (UIState.t() -> UIState.t())) ::
           EditorState.t()
   defp update_background_ui(state, workspace_id, fun) do
-    tab_bar = EditorState.tab_bar(state)
+    tab_bar = state.shell_runtime.state.tab_bar
 
     tab_bar =
       TabBar.update_workspace(tab_bar, workspace_id, fn workspace ->
         Workspace.set_agent_ui(workspace, fun.(workspace.agent_ui || UIState.new()))
       end)
 
-    EditorState.set_tab_bar(state, tab_bar)
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          tab_bar
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   @spec background_workspace(EditorState.t(), pid()) :: Workspace.t() | nil
   defp background_workspace(state, session) do
-    case EditorState.tab_bar(state) do
+    case state.shell_runtime.state.tab_bar do
       %TabBar{} = tab_bar -> TabBar.find_workspace_by_session(tab_bar, session)
       nil -> nil
     end
   end
 
   @spec clear_ui_progress(UIState.t()) :: UIState.t()
-  defp clear_ui_progress(%UIState{} = ui) do
-    %{ui | view: %{ui.view | compaction_in_progress: false}}
-  end
+  defp clear_ui_progress(%UIState{} = ui), do: UIState.finish_compaction(ui)
 
   @spec fail_admission(EditorState.t(), Request.t(), term()) :: EditorState.t()
   defp fail_admission(state, request, reason) do

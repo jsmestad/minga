@@ -159,8 +159,13 @@ defmodule MingaEditor.Shell.Traditional.SidebarWorkflow do
 
   @spec update(state(), (TraditionalState.t() -> TraditionalState.t())) :: state()
   defp update(%EditorState{} = state, transition) do
-    runtime = Runtime.update_traditional_state(state.shell_runtime, transition)
-    EditorState.apply_shell_runtime_transition(state, runtime)
+    shell_state = state.shell_runtime |> Runtime.state() |> transition.()
+
+    %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
   end
 
   @spec transition_with_result(
@@ -172,10 +177,15 @@ defmodule MingaEditor.Shell.Traditional.SidebarWorkflow do
       %TraditionalState{} = shell_state ->
         {result, shell_state} = transition.(shell_state)
 
-        runtime =
-          Runtime.update_traditional_state(state.shell_runtime, fn _current -> shell_state end)
-
-        {result, EditorState.apply_shell_runtime_transition(state, runtime)}
+        {result,
+         %{
+           state
+           | shell_runtime:
+               MingaEditor.Shell.Runtime.install_traditional_state(
+                 state.shell_runtime,
+                 shell_state
+               )
+         }}
 
       _extension_state ->
         {:stale, state}
@@ -184,7 +194,7 @@ defmodule MingaEditor.Shell.Traditional.SidebarWorkflow do
 
   @spec sync_active_sidebar(state(), String.t() | nil) :: :ok
   defp sync_active_sidebar(state, id) do
-    case MingaEditor.Extension.Sidebar.focus_left(EditorState.sidebar_registry(state), id) do
+    case MingaEditor.Extension.Sidebar.focus_left(state.extension_surfaces.sidebar_registry, id) do
       :ok -> :ok
       {:error, reason} -> Log.warning(:editor, "Sidebar focus sync failed: #{inspect(reason)}")
     end
@@ -192,7 +202,7 @@ defmodule MingaEditor.Shell.Traditional.SidebarWorkflow do
 
   @spec sync_git_status_sidebar(state(), GitStatusPanel.t() | nil) :: :ok
   defp sync_git_status_sidebar(state, panel) do
-    case BuiltinSurfaces.sync_git_status_panel(panel, EditorState.sidebar_registry(state)) do
+    case BuiltinSurfaces.sync_git_status_panel(panel, state.extension_surfaces.sidebar_registry) do
       :ok ->
         :ok
 
@@ -203,7 +213,7 @@ defmodule MingaEditor.Shell.Traditional.SidebarWorkflow do
 
   @spec sync_observatory_sidebar(state(), boolean()) :: :ok
   defp sync_observatory_sidebar(state, visible?) do
-    case BuiltinSurfaces.sync_observatory(visible?, EditorState.sidebar_registry(state)) do
+    case BuiltinSurfaces.sync_observatory(visible?, state.extension_surfaces.sidebar_registry) do
       :ok ->
         :ok
 

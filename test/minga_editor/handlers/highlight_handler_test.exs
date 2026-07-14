@@ -11,11 +11,12 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
   alias MingaEditor.HighlightSync
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Parser, as: ParserState
   alias MingaEditor.UI.Highlight
   alias MingaEditor.Window
 
-  @spec base_state() :: EditorState.t()
-  defp base_state do
+  @spec base_state(keyword()) :: EditorState.t()
+  defp base_state(opts \\ []) do
     manager = Module.concat(__MODULE__, "Parser#{System.unique_integer([:positive])}")
 
     start_supervised!(
@@ -23,13 +24,14 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
       id: {:parser_manager, manager}
     )
 
-    %{TestHelpers.base_state() | parser_manager: manager}
+    state = TestHelpers.base_state(opts)
+    %{state | parser: ParserState.new(manager)}
   end
 
   @spec with_highlight(EditorState.t(), pid()) :: EditorState.t()
   defp with_highlight(state, pid) do
-    hl = state.highlighting
-    theme = state.theme
+    hl = state.parser.highlighting
+    theme = state.appearance.theme
 
     buf_hl = %Highlight{
       version: 0,
@@ -40,7 +42,7 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
     }
 
     updated_hl = %{hl | highlights: Map.put(hl.highlights, pid, buf_hl)}
-    %{state | highlighting: updated_hl}
+    %{state | parser: ParserState.accept_highlighting(state.parser, updated_hl)}
   end
 
   describe "setup and parser lifecycle" do
@@ -51,7 +53,7 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
       {crashed, effects} =
         HighlightHandler.handle(base_state(), {:minga_highlight, :parser_crashed})
 
-      assert crashed.parser_status == :restarting
+      assert crashed.parser.parser_status == :restarting
       assert effects == []
 
       restart_base = base_state()
@@ -62,13 +64,13 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
       {restarted, effects} =
         HighlightHandler.handle(restarted_state, {:minga_highlight, :parser_restarted})
 
-      assert restarted.parser_status == :available
+      assert restarted.parser.parser_status == :available
 
       assert Enum.all?(Map.values(restarted.workspace.windows.map), fn %Window{} = window ->
                match?(%MingaEditor.Window.RenderCache{}, window.render_cache)
              end)
 
-      assert Enum.all?(restarted.highlighting.highlights, fn {_pid, hl} ->
+      assert Enum.all?(restarted.parser.highlighting.highlights, fn {_pid, hl} ->
                hl.version == 0
              end)
 
@@ -77,7 +79,7 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
       {unavailable, effects} =
         HighlightHandler.handle(base_state(), {:minga_highlight, :parser_gave_up})
 
-      assert unavailable.parser_status == :unavailable
+      assert unavailable.parser.parser_status == :unavailable
 
       assert Enum.any?(effects, fn
                {:log_message, msg} -> String.contains?(msg, "syntax highlighting disabled")
@@ -87,7 +89,7 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
       {_, headless_effects} = HighlightHandler.handle(base_state(), :evict_parser_trees)
       refute {:evict_parser_trees_timer} in headless_effects
 
-      tui_state = %{base_state() | backend: :tui}
+      tui_state = base_state(backend: :tui)
       {_, tui_effects} = HighlightHandler.handle(tui_state, :evict_parser_trees)
       assert {:evict_parser_trees_timer} in tui_effects
 
@@ -153,7 +155,7 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
           {:minga_highlight, {:highlight_names, other_buf, ["string"]}}
         )
 
-      assert new_state.highlighting.highlights[other_buf] != nil
+      assert new_state.parser.highlighting.highlights[other_buf] != nil
     end
 
     test "an old queued event is rejected after registration presentation replacement" do
@@ -229,7 +231,7 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
       {new_state, []} =
         HighlightHandler.handle(state, {:minga_highlight, {:injection_ranges, buf, ranges}})
 
-      assert new_state.injection_ranges[buf] == ranges
+      assert new_state.parser.injection_ranges[buf] == ranges
 
       assert {^new_state, []} =
                HighlightHandler.handle(
@@ -341,23 +343,40 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
 
   defp mark_parser_restarting(state) do
     buf = active_buffer(state)
-    hl = state.highlighting
+    hl = state.parser.highlighting
     buf_hl = Map.fetch!(hl.highlights, buf)
 
     updated_hl = %{hl | highlights: Map.put(hl.highlights, buf, %{buf_hl | version: 3})}
 
-    %{state | highlighting: updated_hl, parser_status: :restarting}
+    parser =
+      state.parser
+      |> ParserState.accept_highlighting(updated_hl)
+      |> ParserState.report_status(:restarting)
+
+    %{state | parser: parser}
   end
 
   defp state_with_visible_inactive_buffer_symbols(state) do
     {:ok, other_buf} = Minga.Buffer.Process.start_link(content: "other")
     stale_symbols = [%Minga.Language.Symbol{kind: :function, name: "old", range: {0, 0, 0, 3}}]
 
-    win_id = state.workspace.windows.active
-
     state =
-      EditorState.update_window(state, win_id, fn window ->
-        Window.set_document_symbols(window, stale_symbols)
+      then(state, fn state ->
+        %{
+          state
+          | workspace:
+              then(
+                state.workspace,
+                &MingaEditor.Session.State.set_windows(
+                  &1,
+                  MingaEditor.State.Windows.set_document_symbols_for_buffer(
+                    state.workspace.windows,
+                    state.workspace.buffers.active,
+                    stale_symbols
+                  )
+                )
+              )
+        }
       end)
 
     second_window = Window.new(2, other_buf, 24, 80)

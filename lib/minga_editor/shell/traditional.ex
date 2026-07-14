@@ -82,7 +82,7 @@ defmodule MingaEditor.Shell.Traditional do
 
       context = background_agent_context(workspace)
       tb = TabBar.update_context(tb, tab.id, context)
-      {%{shell_state | tab_bar: tb}, workspace}
+      {ShellState.set_tab_bar(shell_state, tb), workspace}
     end
   end
 
@@ -180,7 +180,7 @@ defmodule MingaEditor.Shell.Traditional do
         {:workspace_rename, ws_id, name}
       ) do
     tb = TabBar.update_workspace(tb, ws_id, &Workspace.rename(&1, name))
-    {%{shell_state | tab_bar: tb}, workspace}
+    {ShellState.set_tab_bar(shell_state, tb), workspace}
   end
 
   def handle_gui_action(
@@ -189,7 +189,7 @@ defmodule MingaEditor.Shell.Traditional do
         {:workspace_set_icon, ws_id, icon}
       ) do
     tb = TabBar.update_workspace(tb, ws_id, &Workspace.set_icon(&1, icon))
-    {%{shell_state | tab_bar: tb}, workspace}
+    {ShellState.set_tab_bar(shell_state, tb), workspace}
   end
 
   def handle_gui_action(shell_state, workspace, _action) do
@@ -362,7 +362,7 @@ defmodule MingaEditor.Shell.Traditional do
     {tb, tab} = TabBar.add(tb, :file, label)
     tb = TabBar.switch_to(tb, tab.id)
     workspace = SessionState.activate_buffer(workspace, workspace.buffers)
-    {%{shell_state | tab_bar: tb}, workspace}
+    {ShellState.set_tab_bar(shell_state, tb), workspace}
   end
 
   @impl true
@@ -383,11 +383,11 @@ defmodule MingaEditor.Shell.Traditional do
           |> sync_file_tab_ref(tb.active_id, workspace.buffers.active, workspace)
           |> TabBar.update_context(tb.active_id, SessionState.to_tab_context(workspace))
 
-        {%{shell_state | tab_bar: tb}, workspace}
+        {ShellState.set_tab_bar(shell_state, tb), workspace}
 
       %Tab{} ->
         tb = TabBar.update_context(tb, tb.active_id, SessionState.to_tab_context(workspace))
-        {%{shell_state | tab_bar: tb}, workspace}
+        {ShellState.set_tab_bar(shell_state, tb), workspace}
 
       nil ->
         {shell_state, workspace}
@@ -443,7 +443,7 @@ defmodule MingaEditor.Shell.Traditional do
         tb
       end
 
-    {%{shell_state | tab_bar: tb}, workspace}
+    {ShellState.set_tab_bar(shell_state, tb), workspace}
   end
 
   def on_agent_event(
@@ -453,7 +453,7 @@ defmodule MingaEditor.Shell.Traditional do
         {:approval_pending, _}
       ) do
     tb = TabBar.set_attention_by_session(tb, session_pid, true)
-    {%{shell_state | tab_bar: tb}, workspace}
+    {ShellState.set_tab_bar(shell_state, tb), workspace}
   end
 
   # A direct :error event raises attention so a background tab whose session
@@ -467,7 +467,7 @@ defmodule MingaEditor.Shell.Traditional do
         {:error, _message}
       ) do
     tb = TabBar.set_attention_by_session(tb, session_pid, true)
-    {%{shell_state | tab_bar: tb}, workspace}
+    {ShellState.set_tab_bar(shell_state, tb), workspace}
   end
 
   def on_agent_event(shell_state, workspace, _session_pid, _event) do
@@ -625,7 +625,10 @@ defmodule MingaEditor.Shell.Traditional do
           tb
       end
 
-    %{shell_state | tab_bar: TabBar.update_tab(tb, tab_id, &Tab.set_session(&1, session_pid))}
+    ShellState.set_tab_bar(
+      shell_state,
+      TabBar.update_tab(tb, tab_id, &Tab.set_session(&1, session_pid))
+    )
   end
 
   @impl true
@@ -727,7 +730,7 @@ defmodule MingaEditor.Shell.Traditional do
       tb = TabBar.update_tab(tb, target_id, &Tab.set_attention(&1, false))
 
       workspace = SessionState.invalidate_all_windows(workspace)
-      {%{shell_state | tab_bar: tb}, workspace}
+      {ShellState.set_tab_bar(shell_state, tb), workspace}
     end
   end
 
@@ -822,7 +825,7 @@ defmodule MingaEditor.Shell.Traditional do
       |> sync_file_tab_ref(new_tab.id, workspace.buffers.active, workspace)
       |> TabBar.update_context(new_tab.id, new_context)
 
-    {%{shell_state | tab_bar: tb}, workspace}
+    {ShellState.set_tab_bar(shell_state, tb), workspace}
   end
 
   @spec sync_file_tab_ref(TabBar.t(), Tab.id(), pid() | nil, SessionState.t()) :: TabBar.t()

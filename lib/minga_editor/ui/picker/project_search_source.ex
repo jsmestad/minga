@@ -17,7 +17,6 @@ defmodule MingaEditor.UI.Picker.ProjectSearchSource do
   alias Minga.Language
   alias Minga.Language.Devicon
   alias Minga.Project.ProjectSearch
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.Source
@@ -96,7 +95,7 @@ defmodule MingaEditor.UI.Picker.ProjectSearchSource do
     line = max(match.line - 1, 0)
     col = match.col
 
-    case EditorState.find_buffer_by_path(state, abs_path) do
+    case MingaEditor.Handlers.BufferRegistry.find_buffer_by_path(state, abs_path) do
       nil -> open_new_buffer(state, abs_path, line, col)
       buf_idx -> jump_to_buffer(state, buf_idx, line, col)
     end
@@ -104,9 +103,9 @@ defmodule MingaEditor.UI.Picker.ProjectSearchSource do
 
   @spec open_new_buffer(map(), String.t(), non_neg_integer(), non_neg_integer()) :: map()
   defp open_new_buffer(state, abs_path, line, col) do
-    case EditorState.start_buffer(abs_path, EditorState.options_server(state)) do
+    case MingaEditor.Commands.start_buffer(abs_path, state.interaction.options_server) do
       {:ok, pid} ->
-        new_state = EditorState.add_buffer(state, pid)
+        new_state = MingaEditor.Handlers.BufferRegistry.add_buffer(state, pid)
         Buffer.move_to(pid, {line, col})
         new_state
 

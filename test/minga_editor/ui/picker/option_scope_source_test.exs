@@ -137,7 +137,7 @@ defmodule MingaEditor.UI.Picker.OptionScopeSourceTest do
 
   defp state_with_buffer(buffer) do
     %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %SessionState{
         buffers: %Buffers{active: buffer, list: [buffer], active_index: 0},
         viewport: Viewport.new(24, 80)

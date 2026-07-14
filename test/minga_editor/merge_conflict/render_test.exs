@@ -158,7 +158,7 @@ defmodule MingaEditor.MergeConflict.RenderTest do
     window = %{window | viewport: %{window.viewport | left: viewport_left}}
 
     %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %SessionState{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{list: [buffer], active_index: 0, active: buffer},

@@ -11,7 +11,6 @@ defmodule MingaEditor.InlineAsk.Render do
   alias Minga.Core.Decorations
   alias Minga.Core.Face
   alias MingaEditor.InlineOverlay.Render, as: Overlay
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.InlineAsk
 
   @group :inline_ask
@@ -81,5 +80,11 @@ defmodule MingaEditor.InlineAsk.Render do
   defp face(:help), do: Face.new(fg: 0x808080)
 
   @spec inline_asks(term()) :: InlineAsk.store()
-  defp inline_asks(state), do: AgentAccess.inline_asks(state)
+  defp inline_asks(%{shell_state: shell_state}),
+    do: MingaEditor.Shell.Traditional.State.inline_asks(shell_state)
+
+  defp inline_asks(%{shell_runtime: %{state: shell_state}}),
+    do: MingaEditor.Shell.Traditional.State.inline_asks(shell_state)
+
+  defp inline_asks(_state), do: %{}
 end

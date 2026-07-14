@@ -29,8 +29,19 @@ defmodule MingaEditor.UI.Prompt.WorkspaceRename do
       ws_id = TabBar.active_workspace_id(tb)
       tb = TabBar.update_workspace(tb, ws_id, &Workspace.rename(&1, trimmed))
 
-      state
-      |> MingaEditor.State.set_tab_bar(tb)
+      then(state, fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            tb
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
       |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("Renamed: #{trimmed}")
     end
   end

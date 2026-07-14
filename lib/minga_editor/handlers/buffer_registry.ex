@@ -25,13 +25,29 @@ defmodule MingaEditor.Handlers.BufferRegistry do
 
   # ── Public functions ──────────────────────────────────────────────────
 
+  @doc "Applies the pure buffer-registration transition and creates its requested monitor."
+  @spec add_buffer(state(), pid(), keyword()) :: state()
+  def add_buffer(%EditorState{} = state, pid, opts \\ []) when is_pid(pid) and is_list(opts) do
+    case EditorState.add_buffer_pure(state, pid, opts) do
+      {next_state, :already_registered} -> next_state
+      {next_state, {:monitor, monitored_pid}} -> monitor_buffer(next_state, monitored_pid)
+    end
+  end
+
   @spec do_file_tree_open(state(), pid(), String.t(), FileTree.t()) :: state()
   def do_file_tree_open(state, pid, path, tree) do
     new_state = register_buffer(state, pid, path)
 
-    EditorState.update_file_tree(new_state, fn file_tree ->
-      FileTreeState.set_tree(file_tree, FileTree.reveal(tree, path))
-    end)
+    %{
+      new_state
+      | workspace:
+          MingaEditor.Session.State.set_file_tree(
+            new_state.workspace,
+            (fn file_tree ->
+               FileTreeState.set_tree(file_tree, FileTree.reveal(tree, path))
+             end).(new_state.workspace.file_tree)
+          )
+    }
   end
 
   @spec open_file_by_path(state(), String.t()) :: state()
@@ -55,7 +71,7 @@ defmodule MingaEditor.Handlers.BufferRegistry do
 
   @spec start_and_register_file(state(), String.t()) :: {:ok, state()} | {:error, term()}
   def start_and_register_file(state, abs_path) do
-    case Commands.start_buffer(abs_path, EditorState.options_server(state)) do
+    case Commands.start_buffer(abs_path, state.interaction.options_server) do
       {:ok, pid} ->
         new_state = register_buffer(state, pid, abs_path)
         {:ok, AgentLifecycle.maybe_set_auto_context(new_state, abs_path, pid)}
@@ -81,6 +97,38 @@ defmodule MingaEditor.Handlers.BufferRegistry do
 
   def file_tab_for_path_in_active_workspace(_state, _path), do: nil
 
+  @doc "Returns the index of the live buffer whose canonical path matches."
+  @spec find_buffer_by_path(state() | map(), String.t()) :: non_neg_integer() | nil
+  def find_buffer_by_path(%{workspace: %{buffers: %{list: buffers}}}, file_path) do
+    Enum.find_index(buffers, &buffer_path_matches?(&1, file_path))
+  end
+
+  @doc "Creates one Editor-owned monitor and records its correlation reference."
+  @spec monitor_buffer(state(), pid() | term()) :: state()
+  def monitor_buffer(%EditorState{} = state, pid) when is_pid(pid) do
+    if Map.has_key?(state.buffer_lifecycle.buffer_monitors, pid) do
+      state
+    else
+      %{
+        state
+        | buffer_lifecycle:
+            MingaEditor.State.BufferLifecycle.record_monitor(
+              state.buffer_lifecycle,
+              pid,
+              Process.monitor(pid)
+            )
+      }
+    end
+  end
+
+  def monitor_buffer(%EditorState{} = state, _pid), do: state
+
+  @doc "Creates Editor-owned monitors for every untracked buffer pid."
+  @spec monitor_buffers(state(), [pid()]) :: state()
+  def monitor_buffers(%EditorState{} = state, pids) when is_list(pids) do
+    Enum.reduce(pids, state, &monitor_buffer(&2, &1))
+  end
+
   @spec buffer_tracked?(state(), pid()) :: boolean()
   def buffer_tracked?(state, pid) when is_pid(pid) do
     pid in state.workspace.buffers.list or buffer_tracked_in_tabs?(state, pid)
@@ -94,9 +142,16 @@ defmodule MingaEditor.Handlers.BufferRegistry do
   @spec register_buffer_background(state(), pid(), String.t()) :: state()
   def register_buffer_background(state, buffer_pid, file_path) do
     state =
-      EditorState.update_buffers(state, &Buffers.add_background(&1, buffer_pid))
+      %{
+        state
+        | workspace:
+            MingaEditor.Session.State.set_buffers(
+              state.workspace,
+              (&Buffers.add_background(&1, buffer_pid)).(state.workspace.buffers)
+            )
+      }
 
-    state = EditorState.monitor_buffer(state, buffer_pid)
+    state = MingaEditor.Handlers.BufferRegistry.monitor_buffer(state, buffer_pid)
     Minga.Log.info(:editor, "Opened (agent): #{file_path}")
     state
   end
@@ -115,7 +170,7 @@ defmodule MingaEditor.Handlers.BufferRegistry do
         buffer: buffer_pid,
         path: file_path
       },
-      EditorState.events_registry(state)
+      state.extension_surfaces.events_registry
     )
 
     # Eagerly set up syntax highlighting for this specific buffer.
@@ -126,7 +181,7 @@ defmodule MingaEditor.Handlers.BufferRegistry do
     # Schedule code lens and inlay hint requests after LSP clients connect.
     # The SyncServer handles didOpen via the event bus; by the time 800ms
     # elapses the LSP client should be ready to serve requests.
-    if state.backend != :headless do
+    if state.frontend.backend != :headless do
       Process.send_after(self(), :request_code_lens_and_inlay_hints, 800)
     end
 
@@ -165,6 +220,13 @@ defmodule MingaEditor.Handlers.BufferRegistry do
   end
 
   defp active_buffer_matches_file_ref?(_state, _file_ref), do: false
+
+  @spec buffer_path_matches?(pid(), String.t()) :: boolean()
+  defp buffer_path_matches?(pid, path) do
+    Buffer.file_path(pid) == path
+  catch
+    :exit, _reason -> false
+  end
 
   @spec buffer_file_ref(pid()) :: FileRef.t() | nil
   defp buffer_file_ref(pid) when is_pid(pid) do

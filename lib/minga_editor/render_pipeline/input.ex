@@ -55,7 +55,6 @@ defmodule MingaEditor.RenderPipeline.Input do
   alias MingaEditor.Viewport
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.State.RenderCorrelation
   alias MingaEditor.StatusBar.Data, as: StatusBarData
@@ -88,6 +87,8 @@ defmodule MingaEditor.RenderPipeline.Input do
     :lsp,
     :parser_status,
     :diff_views,
+    :git_remote_op,
+    :effect_scheduler,
     :status_bar_data,
     :highlighting,
     # Workspace as a plain map (enables state.workspace.X pattern-matching)
@@ -164,6 +165,8 @@ defmodule MingaEditor.RenderPipeline.Input do
           lsp: LSPState.t(),
           parser_status: atom(),
           diff_views: %{pid() => EditorState.diff_view_info()},
+          git_remote_op: MingaEditor.State.Git.remote_op(),
+          effect_scheduler: GenServer.server() | nil,
           status_bar_data: StatusBarData.t() | nil,
           highlighting: Highlighting.t(),
           caches: Caches.t(),
@@ -186,32 +189,35 @@ defmodule MingaEditor.RenderPipeline.Input do
   @spec from_editor_state(EditorState.t()) :: t()
   def from_editor_state(%EditorState{workspace: ws} = state) do
     %__MODULE__{
-      port_manager: state.port_manager,
-      theme: state.theme,
-      capabilities: state.capabilities,
+      port_manager: state.frontend.port_manager,
+      theme: state.appearance.theme,
+      capabilities: state.frontend.capabilities,
       shell_id: Runtime.id(state.shell_runtime),
       shell: Runtime.module(state.shell_runtime),
       shell_identity: Runtime.identity(state.shell_runtime),
       shell_state: Runtime.state(state.shell_runtime),
-      message_store: state.message_store,
-      notifications: state.notifications,
-      sidebar_registry: state.sidebar_registry,
-      face_override_registries: state.face_override_registries,
-      editing_model: state.editing_model,
-      backend: state.backend,
-      layout: state.layout,
-      focus_tree: state.focus_tree,
+      message_store: state.render.message_store,
+      notifications: state.feedback.notifications,
+      sidebar_registry: state.extension_surfaces.sidebar_registry,
+      face_override_registries: state.parser.face_override_registries,
+      editing_model: state.interaction.editing_model,
+      backend: state.frontend.backend,
+      layout: state.render.layout,
+      focus_tree: state.render.focus_tree,
       lsp: state.lsp,
-      parser_status: state.parser_status,
-      diff_views: state.diff_views,
+      parser_status: state.parser.parser_status,
+      diff_views: state.git.diff_views,
+      git_remote_op: state.git.git_remote_op,
+      effect_scheduler: state.effect_scheduler,
       status_bar_data: safe_status_bar_data(state),
-      highlighting: state.highlighting,
-      terminal_viewport: state.terminal_viewport,
-      last_input_seq: state.last_input_seq,
-      force_keyframe?: RenderCorrelation.force_keyframe?(state.render_correlation),
-      line_spacing: Minga.Config.Options.get(state.options_server, :line_spacing) || 1.0,
-      cursor_animate: Minga.Config.Options.get(state.options_server, :cursor_animate),
-      gui_config_state: state.gui_config_state,
+      highlighting: state.parser.highlighting,
+      terminal_viewport: state.frontend.terminal_viewport,
+      last_input_seq: state.frontend.last_input_seq,
+      force_keyframe?: RenderCorrelation.force_keyframe?(state.render.render_correlation),
+      line_spacing:
+        Minga.Config.Options.get(state.interaction.options_server, :line_spacing) || 1.0,
+      cursor_animate: Minga.Config.Options.get(state.interaction.options_server, :cursor_animate),
+      gui_config_state: state.appearance.gui_config_state,
       workspace: %{
         windows: ws.windows,
         buffers: ws.buffers,
@@ -220,7 +226,7 @@ defmodule MingaEditor.RenderPipeline.Input do
         agent_ui: ws.agent_ui,
         editing: ws.editing,
         document_highlights: ws.document_highlights,
-        cmd_hover_link: ws.cmd_hover_link,
+        cmd_hover_link: ws.hover_observation.link,
         mouse: ws.mouse,
         search: ws.search,
         keymap_scope: ws.keymap_scope,
@@ -319,7 +325,7 @@ defmodule MingaEditor.RenderPipeline.Input do
       # completion)
       input.shell_state |> Map.get(:modal),
       # Agent state (status, pending approval)
-      AgentAccess.agent(input),
+      MingaEditor.Shell.Traditional.State.agent(input.shell_state),
       # Viewport dimensions (overlay positioning)
       input.terminal_viewport.rows,
       input.terminal_viewport.cols,

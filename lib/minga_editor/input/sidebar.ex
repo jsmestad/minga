@@ -21,10 +21,16 @@ defmodule MingaEditor.Input.Sidebar do
 
       %{id: sidebar_id} ->
         {:handled,
-         Sidebar.dispatch_action(EditorState.sidebar_registry(state), state, sidebar_id, "key", %{
-           codepoint: codepoint,
-           modifiers: modifiers
-         })}
+         Sidebar.dispatch_action(
+           state.extension_surfaces.sidebar_registry,
+           state,
+           sidebar_id,
+           "key",
+           %{
+             codepoint: codepoint,
+             modifiers: modifiers
+           }
+         )}
 
       nil ->
         {:passthrough, state}
@@ -64,7 +70,7 @@ defmodule MingaEditor.Input.Sidebar do
 
     {:handled,
      Sidebar.dispatch_action(
-       EditorState.sidebar_registry(state),
+       state.extension_surfaces.sidebar_registry,
        state,
        sidebar_id,
        "mouse",
@@ -78,8 +84,7 @@ defmodule MingaEditor.Input.Sidebar do
 
   @spec active_sidebar(EditorState.t()) :: Sidebar.entry() | nil
   defp active_sidebar(state) do
-    state
-    |> EditorState.sidebar_registry()
+    state.extension_surfaces.sidebar_registry
     |> Sidebar.active_left()
     |> focused_sidebar()
   end

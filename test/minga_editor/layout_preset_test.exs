@@ -14,7 +14,7 @@ defmodule MingaEditor.LayoutPresetTest do
     window = Window.new(1, buf, 24, 80)
 
     %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: buf, list: [buf]},

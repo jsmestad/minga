@@ -9,7 +9,6 @@ defmodule MingaEditor.FileTree.RowsTest do
   alias Minga.Project.FileTree
   alias MingaEditor.FileTree.Diagnostics, as: RowDiagnostics
   alias MingaEditor.FileTree.Rows
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
 
@@ -357,12 +356,29 @@ defmodule MingaEditor.FileTree.RowsTest do
     tree = root |> FileTree.new() |> FileTree.ensure_entries()
     file_tree = FileTreeState.open(%FileTreeState{}, tree, nil)
 
-    EditorState.set_file_tree(base_state(), file_tree)
+    then(base_state(), fn state ->
+      %{
+        state
+        | workspace:
+            then(state.workspace, fn workspace ->
+              MingaEditor.Session.State.set_file_tree(workspace, file_tree)
+            end)
+      }
+    end)
   end
 
   defp put_buffers(state, [active | _rest] = buffers) do
     buffer_state = %Buffers{active: active, list: buffers, active_index: 0}
-    EditorState.set_buffers(state, buffer_state)
+
+    then(state, fn state ->
+      %{
+        state
+        | workspace:
+            then(state.workspace, fn workspace ->
+              MingaEditor.Session.State.set_buffers(workspace, buffer_state)
+            end)
+      }
+    end)
   end
 
   defp active_row_name(state) do

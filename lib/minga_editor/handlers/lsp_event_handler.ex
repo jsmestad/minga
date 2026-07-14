@@ -19,6 +19,7 @@ defmodule MingaEditor.Handlers.LspEventHandler do
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Feedback
   alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.State.OperationFeedback
 
@@ -66,12 +67,12 @@ defmodule MingaEditor.Handlers.LspEventHandler do
   end
 
   def handle(state, :inlay_hint_scroll_debounce) do
-    state = EditorState.update_lsp(state, &LSPState.clear_inlay_hint_timer/1)
+    state = %{state | lsp: (&LSPState.clear_inlay_hint_timer/1).(state.lsp)}
     {LspActions.inlay_hints(state), []}
   end
 
   def handle(state, :document_highlight_debounce) do
-    state = EditorState.update_lsp(state, &LSPState.clear_highlight_timer/1)
+    state = %{state | lsp: (&LSPState.clear_highlight_timer/1).(state.lsp)}
     {LspActions.document_highlight(state), []}
   end
 
@@ -108,7 +109,7 @@ defmodule MingaEditor.Handlers.LspEventHandler do
         {state, []}
 
       {:ok, operation} ->
-        state = EditorState.update_lsp(state, &LSPState.drop_format(&1, ref))
+        state = %{state | lsp: (&LSPState.drop_format(&1, ref)).(state.lsp)}
         FormatLifecycle.cancel(operation)
         {NoticeWorkflow.publish(state, "Format timed out [r to retry]"), [:render_now]}
     end
@@ -132,7 +133,7 @@ defmodule MingaEditor.Handlers.LspEventHandler do
         {state, []}
 
       {:ok, operation} ->
-        state = EditorState.update_lsp(state, &LSPState.drop_format(&1, ref))
+        state = %{state | lsp: (&LSPState.drop_format(&1, ref)).(state.lsp)}
         FormatLifecycle.finish(operation)
 
         state =
@@ -153,7 +154,7 @@ defmodule MingaEditor.Handlers.LspEventHandler do
   defp dispatch_operation_response(state, ref, result) do
     case LSPState.take_operation_request(state.lsp, ref) do
       {:ok, request, lsp} ->
-        state = EditorState.update_lsp(state, fn _current -> lsp end)
+        state = %{state | lsp: (fn _current -> lsp end).(state.lsp)}
         {dispatch_lsp_response(request, state, result), [:render_now]}
 
       :error ->
@@ -239,7 +240,7 @@ defmodule MingaEditor.Handlers.LspEventHandler do
 
   @spec delete_lsp_pending(EditorState.t(), reference()) :: EditorState.t()
   defp delete_lsp_pending(state, ref) do
-    EditorState.delete_lsp_pending(state, ref)
+    %{state | workspace: MingaEditor.Session.State.delete_lsp_pending(state.workspace, ref)}
   end
 
   @spec dispatch_lsp_response(term(), EditorState.t(), term()) :: EditorState.t()
@@ -277,12 +278,19 @@ defmodule MingaEditor.Handlers.LspEventHandler do
     if active_tab_id(state) == origin_tab_id do
       dispatch_lsp_response({kind, operation_id}, state, result)
     else
-      OperationFeedback.finish_in(
-        state,
-        operation_id,
-        :stale,
-        operation_tab_changed_message(kind)
-      )
+      %{
+        state
+        | feedback:
+            Feedback.accept_operation_feedback(
+              state.feedback,
+              OperationFeedback.finish(
+                state.feedback.operation_feedback,
+                operation_id,
+                :stale,
+                operation_tab_changed_message(kind)
+              )
+            )
+      }
     end
   end
 

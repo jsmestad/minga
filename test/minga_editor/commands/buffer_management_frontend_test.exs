@@ -18,8 +18,7 @@ defmodule MingaEditor.Commands.BufferManagement.FrontendTest do
 
   defp base_state(caps) do
     %EditorState{
-      port_manager: nil,
-      capabilities: caps,
+      frontend: %MingaEditor.State.Frontend{port_manager: nil, capabilities: caps},
       workspace: %SessionState{
         viewport: Viewport.new(40, 120),
         buffers: %Buffers{}
@@ -39,7 +38,26 @@ defmodule MingaEditor.Commands.BufferManagement.FrontendTest do
     end
 
     test "clears dismissed state" do
-      state = MingaEditor.State.set_bottom_panel(base_state(@gui), %BottomPanel{dismissed: true})
+      state =
+        then(base_state(@gui), fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.set_bottom_panel(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              %BottomPanel{
+                dismissed: true
+              }
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
+
       state = BufferManagement.execute(state, :view_messages)
       assert EditorState.bottom_panel(state).dismissed == false
     end

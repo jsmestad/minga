@@ -65,13 +65,21 @@ defmodule MingaEditor.Extension.EditorAPITest do
       start_supervised!({Minga.Buffer.Process, content: "second file"}, id: {:buffer, make_ref()})
 
     windows =
-      MingaEditor.State.Windows.update(state.workspace.windows, new_window_id, fn window ->
-        %{window | buffer: second_buffer, content: {:buffer, second_buffer}}
-      end)
+      MingaEditor.State.Windows.replace_window(
+        state.workspace.windows,
+        new_window_id,
+        %{
+          Map.fetch!(state.workspace.windows.map, new_window_id)
+          | buffer: second_buffer,
+            content: {:buffer, second_buffer}
+        }
+      )
 
     state =
       state
-      |> put_in([Access.key!(:workspace), Access.key!(:windows)], windows)
+      |> then(fn state ->
+        %{state | workspace: MingaEditor.Session.State.set_windows(state.workspace, windows)}
+      end)
       |> MingaEditor.WindowFocus.focus(new_window_id)
 
     assert EditorAPI.focus_buffer(state, original_buffer).workspace.windows.active ==

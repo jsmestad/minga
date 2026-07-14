@@ -6,9 +6,7 @@ defmodule MingaEditor.Input.ScopedFileTreeTest do
 
   import Minga.Test.ScopedInputHelpers
 
-  alias MingaEditor.Agent.UIState
-  alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.AgentAccess
+  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Input.FileTreeHandler
   alias MingaEditor.Input.Scoped
   alias Minga.Project.FileTree
@@ -34,7 +32,17 @@ defmodule MingaEditor.Input.ScopedFileTreeTest do
       # calls Bindings.lookup on leader_node.
       leader_node = %Minga.Keymap.Bindings.Node{children: %{}, command: nil, description: nil}
 
-      leader_state = put_in(state.workspace.editing.mode_state.leader_node, leader_node)
+      leader_state = %{
+        state
+        | workspace:
+            SessionState.set_editing(
+              state.workspace,
+              MingaEditor.VimState.set_mode_state(state.workspace.editing, %{
+                state.workspace.editing.mode_state
+                | leader_node: leader_node
+              })
+            )
+      }
 
       {:handled, _new_state} = FileTreeHandler.handle_key(leader_state, ?f, 0)
     end
@@ -72,7 +80,19 @@ defmodule MingaEditor.Input.ScopedFileTreeTest do
 
     test "file_tree scope with tree not focused passes through", %{tmp_dir: tmp_dir} do
       state = make_tree_state(tmp_dir)
-      state = EditorState.set_file_tree(state, %{ft(state) | focused: false})
+
+      state =
+        then(state, fn state ->
+          %{
+            state
+            | workspace:
+                then(
+                  state.workspace,
+                  &MingaEditor.Session.State.set_file_tree(&1, %{ft(state) | focused: false})
+                )
+          }
+        end)
+
       assert {:passthrough, _} = FileTreeHandler.handle_key(state, ?q, 0)
     end
   end
@@ -84,7 +104,18 @@ defmodule MingaEditor.Input.ScopedFileTreeTest do
   describe "leader sequences work across all scopes" do
     test "SPC and pending leader pass through in non-input scopes" do
       agent_state = base_state(keymap_scope: :agent, agentic_active: true)
-      leader_state = put_in(agent_state.workspace.editing.mode_state.leader_node, %{})
+
+      leader_state = %{
+        agent_state
+        | workspace:
+            SessionState.set_editing(
+              agent_state.workspace,
+              MingaEditor.VimState.set_mode_state(agent_state.workspace.editing, %{
+                agent_state.workspace.editing.mode_state
+                | leader_node: %{}
+              })
+            )
+      }
 
       for {state, key} <- [
             {agent_state, ?\s},
@@ -105,7 +136,7 @@ defmodule MingaEditor.Input.ScopedFileTreeTest do
         )
 
       {:handled, new_state} = walk_surface_handlers(state, ?\s, 0)
-      assert UIState.input_text(AgentAccess.panel(new_state)) =~ " "
+      assert MingaEditor.Agent.PromptBuffer.input_text(new_state.workspace.agent_ui.panel) =~ " "
     end
   end
 end

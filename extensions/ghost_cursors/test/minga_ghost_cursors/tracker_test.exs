@@ -213,7 +213,10 @@ defmodule Minga.Extensions.GhostCursorsTrackerTest do
       Process.exit(session2, :kill)
     end
 
-    test "does not broadcast duplicate removal for same session", %{tracker: tracker, table: table} do
+    test "does not broadcast duplicate removal for same session", %{
+      tracker: tracker,
+      table: table
+    } do
       buffer_pid = spawn_waiting()
       session_pid = spawn_waiting()
 

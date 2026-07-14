@@ -33,7 +33,7 @@ defmodule MingaEditor.Commands.MarksTest do
     }
 
     %EditorState{
-      port_manager: nil,
+      frontend: %MingaEditor.State.Frontend{port_manager: nil},
       workspace: %SessionState{
         viewport: Viewport.new(24, 80),
         buffers: %MingaEditor.State.Buffers{active: buffer},

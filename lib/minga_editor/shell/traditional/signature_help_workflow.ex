@@ -19,28 +19,41 @@ defmodule MingaEditor.Shell.Traditional.SignatureHelpWorkflow do
     do: state
 
   def show(%{shell_runtime: %{state: %ShellState{}}} = state, signature_help),
-    do: EditorState.update_shell_state(state, &ShellState.show_signature_help(&1, signature_help))
+    do: update_shell_state(state, &ShellState.show_signature_help(&1, signature_help))
 
   def show(state, _signature_help), do: state
 
   @doc "Cycles to the next signature overload."
   @spec next(EditorState.t()) :: EditorState.t()
   def next(%{shell_runtime: %{state: %ShellState{}}} = state),
-    do: EditorState.update_shell_state(state, &ShellState.next_signature_help/1)
+    do: update_shell_state(state, &ShellState.next_signature_help/1)
 
   def next(state), do: state
 
   @doc "Cycles to the previous signature overload."
   @spec previous(EditorState.t()) :: EditorState.t()
   def previous(%{shell_runtime: %{state: %ShellState{}}} = state),
-    do: EditorState.update_shell_state(state, &ShellState.previous_signature_help/1)
+    do: update_shell_state(state, &ShellState.previous_signature_help/1)
 
   def previous(state), do: state
 
   @doc "Dismisses signature help."
   @spec dismiss(EditorState.t()) :: EditorState.t()
   def dismiss(%{shell_runtime: %{state: %ShellState{}}} = state),
-    do: EditorState.update_shell_state(state, &ShellState.dismiss_signature_help/1)
+    do: update_shell_state(state, &ShellState.dismiss_signature_help/1)
 
   def dismiss(state), do: state
+
+  @spec update_shell_state(EditorState.t(), (MingaEditor.Shell.Traditional.State.t() ->
+                                               MingaEditor.Shell.Traditional.State.t())) ::
+          EditorState.t()
+  defp update_shell_state(%EditorState{} = state, transition) when is_function(transition, 1) do
+    shell_state = state.shell_runtime |> MingaEditor.Shell.Runtime.state() |> transition.()
+
+    %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
+  end
 end

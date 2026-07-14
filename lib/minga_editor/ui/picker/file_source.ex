@@ -124,12 +124,12 @@ defmodule MingaEditor.UI.Picker.FileSource do
 
     Log.debug(:editor, "[file_picker] on_select path=#{rel_path}")
 
-    case EditorState.find_buffer_by_path(state, abs_path) do
+    case MingaEditor.Handlers.BufferRegistry.find_buffer_by_path(state, abs_path) do
       nil ->
-        case EditorState.start_buffer(abs_path, EditorState.options_server(state)) do
+        case MingaEditor.Commands.start_buffer(abs_path, state.interaction.options_server) do
           {:ok, pid} ->
             Log.debug(:editor, "[file_picker] new buffer pid=#{inspect(pid)}")
-            new_state = EditorState.add_buffer(state, pid)
+            new_state = MingaEditor.Handlers.BufferRegistry.add_buffer(state, pid)
             record_selection(abs_path, state)
             new_state
 
@@ -161,7 +161,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
 
   @spec switch_existing_buffer_target(term(), non_neg_integer(), term()) :: term()
   defp switch_existing_buffer_target(state, idx, _tab)
-       when state.buffer_add_context == :preview do
+       when state.buffer_lifecycle.buffer_add_context == :preview do
     MingaEditor.BufferActivation.activate(state, idx)
   end
 
@@ -226,7 +226,8 @@ defmodule MingaEditor.UI.Picker.FileSource do
   defp absolute_path(rel_path, state), do: Path.expand(rel_path, project_root(state))
 
   @spec record_selection(String.t(), term()) :: :ok
-  defp record_selection(_abs_path, %{buffer_add_context: :preview}), do: :ok
+  defp record_selection(_abs_path, %{buffer_lifecycle: %{buffer_add_context: :preview}}),
+    do: :ok
 
   defp record_selection(abs_path, _state) do
     Minga.Project.record_file(abs_path)
@@ -301,7 +302,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
   defp project_root(%Context{file_tree: %{project_root: root}}) when is_binary(root), do: root
 
   defp project_root(%EditorState{} = state) do
-    case EditorState.file_tree_state(state).project_root do
+    case state.workspace.file_tree.project_root do
       root when is_binary(root) -> root
       _ -> Minga.Project.resolve_root()
     end

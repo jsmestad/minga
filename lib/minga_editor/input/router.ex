@@ -73,7 +73,7 @@ defmodule MingaEditor.Input.Router do
 
     # Intercept keys when a quit confirmation prompt is active.
     # y/n/Escape are handled here; all other keys are ignored.
-    if state.pending_quit do
+    if state.session.pending_quit do
       return_dispatch_confirm_quit(state, codepoint)
     else
       dispatch_normal(state, codepoint, modifiers)
@@ -248,7 +248,7 @@ defmodule MingaEditor.Input.Router do
        )
        when old_mode == :visual and ranges != nil do
     if Editing.mode(state) != :visual do
-      EditorState.update_lsp(state, &MingaEditor.State.LSP.clear_selection_ranges/1)
+      %{state | lsp: MingaEditor.State.LSP.clear_selection_ranges(state.lsp)}
     else
       state
     end
@@ -469,7 +469,13 @@ defmodule MingaEditor.Input.Router do
       timestamp: :os.system_time(:millisecond)
     }
 
-    %{state | keystroke_history: KeystrokeHistory.record(state.keystroke_history, entry)}
+    history = MingaEditor.KeystrokeHistory.record(state.interaction.keystroke_history, entry)
+
+    %{
+      state
+      | interaction:
+          MingaEditor.State.Interaction.accept_keystroke_history(state.interaction, history)
+    }
   end
 
   @spec buffer_version(EditorState.t()) :: non_neg_integer()

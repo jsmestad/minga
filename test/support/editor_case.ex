@@ -527,7 +527,7 @@ defmodule Minga.Test.EditorCase do
     state = get_editor_state(editor)
     status_data = StatusBarData.from_state(state)
     modeline_data = StatusBarData.to_modeline_data(status_data)
-    %{left: left, right: right} = Modeline.gui_segments(modeline_data, state.theme)
+    %{left: left, right: right} = Modeline.gui_segments(modeline_data, state.appearance.theme)
 
     (left ++ right)
     |> Enum.map(fn {_name, text, _fg, _bg, _opts, _target} -> text end)
@@ -614,7 +614,7 @@ defmodule Minga.Test.EditorCase do
   @doc "Returns MessageStore entries after synchronizing with the editor process."
   @spec message_store_entries(editor_ctx()) :: [map()]
   def message_store_entries(%{editor: editor}) do
-    get_editor_state(editor).message_store.entries
+    get_editor_state(editor).render.message_store.entries
   end
 
   @doc "Returns the bottom-panel lifecycle value after synchronizing with the editor process."
@@ -732,7 +732,7 @@ defmodule Minga.Test.EditorCase do
   @doc "Returns the pending quit mode (:quit | :quit_all | nil)."
   @spec pending_quit(editor_ctx()) :: :quit | :quit_all | nil
   def pending_quit(%{editor: editor}) do
-    get_editor_state(editor).pending_quit
+    get_editor_state(editor).session.pending_quit
   end
 
   @doc "Returns the current ordinary notice message."

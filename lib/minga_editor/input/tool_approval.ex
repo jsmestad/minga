@@ -14,15 +14,14 @@ defmodule MingaEditor.Input.ToolApproval do
 
   alias MingaEditor.Commands
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.AgentAccess
 
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
   def handle_key(state, cp, _mods) do
-    agent = AgentAccess.agent(state)
+    agent = MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
 
-    if is_map(agent.pending_approval) and not AgentAccess.input_focused?(state) do
+    if is_map(agent.pending_approval) and not state.workspace.agent_ui.panel.input_focused do
       dispatch_approval(state, cp)
     else
       {:passthrough, state}

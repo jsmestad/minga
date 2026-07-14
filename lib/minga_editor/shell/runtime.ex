@@ -8,6 +8,7 @@ defmodule MingaEditor.Shell.Runtime do
   alias MingaEditor.Shell.Entry
   alias MingaEditor.Shell.Identity
   alias MingaEditor.Shell.StateStash
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State.TabBar
 
   @type shell_state :: MingaEditor.Shell.shell_state()
@@ -116,17 +117,16 @@ defmodule MingaEditor.Shell.Runtime do
     %__MODULE__{entry: default_entry, state: target_state, stash: stash}
   end
 
-  @doc "Updates Traditional presentation state and leaves extension runtimes untouched."
-  @spec update_traditional_state(t(), (shell_state() -> shell_state())) :: t()
-  def update_traditional_state(
+  @doc "Installs a value produced by a named Traditional.State transition when Traditional is active."
+  @spec install_traditional_state(t(), TraditionalState.t()) :: t()
+  def install_traditional_state(
         %__MODULE__{entry: %Entry{module: MingaEditor.Shell.Traditional}} = runtime,
-        fun
-      )
-      when is_function(fun, 1) do
-    %__MODULE__{runtime | state: fun.(runtime.state)}
+        %TraditionalState{} = state
+      ) do
+    %__MODULE__{runtime | state: state}
   end
 
-  def update_traditional_state(%__MODULE__{} = runtime, fun) when is_function(fun, 1), do: runtime
+  def install_traditional_state(%__MODULE__{} = runtime, %TraditionalState{}), do: runtime
 
   @doc "Installs shell state returned by a render for the exact active identity."
   @spec accept_rendered_state(t(), atom(), Identity.t(), shell_state()) :: t()

@@ -7,7 +7,7 @@ defmodule MingaEditor.Agent.UIStateTest do
   alias MingaEditor.Agent.UIState.Panel
 
   defp ui_with_input(lines, cursor \\ {0, 0}) do
-    ui = UIState.new() |> UIState.ensure_prompt_buffer()
+    ui = UIState.new() |> MingaEditor.Agent.PromptBuffer.ensure()
     BufferProcess.replace_content(ui.panel.prompt_buffer, Enum.join(lines, "\n"))
     BufferProcess.move_to(ui.panel.prompt_buffer, cursor)
     ui
@@ -27,11 +27,11 @@ defmodule MingaEditor.Agent.UIStateTest do
       refute ui.panel.input_focused
       assert ui.panel.prompt_history == []
       assert ui.panel.history_index == -1
-      assert UIState.input_text(ui) == ""
-      assert UIState.input_lines(ui) == [""]
-      assert UIState.input_cursor(ui) == {0, 0}
-      assert UIState.input_line_count(ui) == 1
-      assert UIState.input_empty?(ui)
+      assert MingaEditor.Agent.PromptBuffer.input_text(ui) == ""
+      assert MingaEditor.Agent.PromptBuffer.input_lines(ui) == [""]
+      assert MingaEditor.Agent.PromptBuffer.input_cursor(ui) == {0, 0}
+      assert MingaEditor.Agent.PromptBuffer.input_line_count(ui) == 1
+      assert MingaEditor.Agent.PromptBuffer.input_empty?(ui)
       assert ui.panel.model_name == AgentConfig.default_model()
       assert ui.panel.credentials_configured == false
     end
@@ -45,25 +45,30 @@ defmodule MingaEditor.Agent.UIStateTest do
   describe "prompt editing" do
     test "inserts characters, newlines, and deletes across line boundaries" do
       ui = ui_with_input([""])
-      ui = ui |> UIState.insert_char("h") |> UIState.insert_char("i")
-      assert UIState.input_lines(ui) == ["hi"]
+
+      ui =
+        ui
+        |> MingaEditor.Agent.PromptBuffer.insert_char("h")
+        |> MingaEditor.Agent.PromptBuffer.insert_char("i")
+
+      assert MingaEditor.Agent.PromptBuffer.input_lines(ui) == ["hi"]
 
       BufferProcess.move_to(ui.panel.prompt_buffer, {0, 1})
-      ui = UIState.insert_newline(ui)
-      assert UIState.input_lines(ui) == ["h", "i"]
+      ui = MingaEditor.Agent.PromptBuffer.insert_newline(ui)
+      assert MingaEditor.Agent.PromptBuffer.input_lines(ui) == ["h", "i"]
 
-      ui = ui_with_input(["ab", "cd"], {1, 0}) |> UIState.delete_char()
-      assert UIState.input_lines(ui) == ["abcd"]
+      ui = ui_with_input(["ab", "cd"], {1, 0}) |> MingaEditor.Agent.PromptBuffer.delete_char()
+      assert MingaEditor.Agent.PromptBuffer.input_lines(ui) == ["abcd"]
 
-      ui = ui_with_input(["hi"], {0, 0}) |> UIState.delete_char()
-      assert UIState.input_lines(ui) == ["hi"]
+      ui = ui_with_input(["hi"], {0, 0}) |> MingaEditor.Agent.PromptBuffer.delete_char()
+      assert MingaEditor.Agent.PromptBuffer.input_lines(ui) == ["hi"]
     end
 
     test "edit operations reset history index" do
       for operation <- [
-            &UIState.insert_char(&1, "x"),
-            &UIState.insert_newline/1,
-            &UIState.delete_char/1
+            &MingaEditor.Agent.PromptBuffer.insert_char(&1, "x"),
+            &MingaEditor.Agent.PromptBuffer.insert_newline/1,
+            &MingaEditor.Agent.PromptBuffer.delete_char/1
           ] do
         ui =
           ui_with_input(["abc"], {0, 1})
@@ -74,24 +79,31 @@ defmodule MingaEditor.Agent.UIStateTest do
     end
 
     test "cursor movement reports boundaries and moves within multiline input" do
-      assert UIState.move_cursor_up(ui_with_input(["hello"], {0, 0})) == :at_top
-      assert UIState.move_cursor_down(ui_with_input(["hello"], {0, 0})) == :at_bottom
-      refute UIState.move_cursor_up(ui_with_input(["ab", "cd"], {1, 0})) == :at_top
-      refute UIState.move_cursor_down(ui_with_input(["ab", "cd"], {0, 0})) == :at_bottom
+      assert MingaEditor.Agent.PromptBuffer.move_cursor_up(ui_with_input(["hello"], {0, 0})) ==
+               :at_top
+
+      assert MingaEditor.Agent.PromptBuffer.move_cursor_down(ui_with_input(["hello"], {0, 0})) ==
+               :at_bottom
+
+      refute MingaEditor.Agent.PromptBuffer.move_cursor_up(ui_with_input(["ab", "cd"], {1, 0})) ==
+               :at_top
+
+      refute MingaEditor.Agent.PromptBuffer.move_cursor_down(ui_with_input(["ab", "cd"], {0, 0})) ==
+               :at_bottom
     end
 
     test "focus starts the prompt buffer and unfocus preserves content" do
-      ui = UIState.new() |> UIState.set_input_focused(true)
+      ui = UIState.new() |> MingaEditor.Agent.PromptBuffer.set_input_focused(true)
       assert ui.panel.input_focused
       assert is_pid(ui.panel.prompt_buffer)
 
       ui =
         ui_with_input(["hello"])
-        |> UIState.set_input_focused(true)
-        |> UIState.set_input_focused(false)
+        |> MingaEditor.Agent.PromptBuffer.set_input_focused(true)
+        |> MingaEditor.Agent.PromptBuffer.set_input_focused(false)
 
       refute ui.panel.input_focused
-      assert UIState.input_lines(ui) == ["hello"]
+      assert MingaEditor.Agent.PromptBuffer.input_lines(ui) == ["hello"]
     end
   end
 
@@ -103,10 +115,10 @@ defmodule MingaEditor.Agent.UIStateTest do
         |> put_in([Access.key(:panel), Access.key(:pasted_blocks)], [
           %{text: "paste", expanded: false}
         ])
-        |> UIState.clear_input()
+        |> MingaEditor.Agent.PromptBuffer.clear_input()
 
-      assert UIState.input_lines(ui) == [""]
-      assert UIState.input_text(ui) == ""
+      assert MingaEditor.Agent.PromptBuffer.input_lines(ui) == [""]
+      assert MingaEditor.Agent.PromptBuffer.input_text(ui) == ""
       assert ui.panel.prompt_history == ["hello\nworld"]
       assert ui.panel.history_index == -1
       assert ui.panel.pasted_blocks == []
@@ -121,29 +133,31 @@ defmodule MingaEditor.Agent.UIStateTest do
           %{text: "line1\nline2\nline3", expanded: false}
         ])
 
-      assert UIState.input_text(ui) == "before\n#{placeholder}\nafter"
-      assert UIState.prompt_text(ui) == "before\nline1\nline2\nline3\nafter"
+      assert MingaEditor.Agent.PromptBuffer.input_text(ui) == "before\n#{placeholder}\nafter"
+
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(ui) ==
+               "before\nline1\nline2\nline3\nafter"
     end
 
     test "history navigation walks older and newer prompts with clamping" do
       ui = ui_with_input([""]) |> put_history(["first", "second"])
 
-      first = UIState.history_prev(ui)
-      assert UIState.input_text(first) == "first"
+      first = MingaEditor.Agent.PromptBuffer.history_prev(ui)
+      assert MingaEditor.Agent.PromptBuffer.input_text(first) == "first"
       assert first.panel.history_index == 0
 
-      second = UIState.history_prev(first)
-      assert UIState.input_text(second) == "second"
+      second = MingaEditor.Agent.PromptBuffer.history_prev(first)
+      assert MingaEditor.Agent.PromptBuffer.input_text(second) == "second"
       assert second.panel.history_index == 1
 
-      assert UIState.history_prev(second).panel.history_index == 1
+      assert MingaEditor.Agent.PromptBuffer.history_prev(second).panel.history_index == 1
 
-      newer = UIState.history_next(second)
-      assert UIState.input_text(newer) == "first"
+      newer = MingaEditor.Agent.PromptBuffer.history_next(second)
+      assert MingaEditor.Agent.PromptBuffer.input_text(newer) == "first"
       assert newer.panel.history_index == 0
 
-      current = UIState.history_next(newer)
-      assert UIState.input_text(current) == ""
+      current = MingaEditor.Agent.PromptBuffer.history_next(newer)
+      assert MingaEditor.Agent.PromptBuffer.input_text(current) == ""
       assert current.panel.history_index == -1
     end
 
@@ -152,12 +166,12 @@ defmodule MingaEditor.Agent.UIStateTest do
         assert text
                |> List.wrap()
                |> ui_with_input()
-               |> UIState.save_to_history()
+               |> MingaEditor.Agent.PromptBuffer.save_to_history()
                |> then(& &1.panel.prompt_history) == []
       end
 
       assert ui_with_input(["hello"])
-             |> UIState.save_to_history()
+             |> MingaEditor.Agent.PromptBuffer.save_to_history()
              |> then(& &1.panel.prompt_history) == ["hello"]
     end
   end
@@ -165,45 +179,54 @@ defmodule MingaEditor.Agent.UIStateTest do
   describe "paste handling" do
     test "insert_paste handles empty, direct, collapsed, sanitized, and multiple pastes" do
       ui = ui_with_input([""])
-      assert UIState.insert_paste(ui, "") == ui
+      assert MingaEditor.Agent.PromptBuffer.insert_paste(ui, "") == ui
 
-      assert ui_with_input([""]) |> UIState.insert_paste("hello") |> UIState.input_text() ==
+      assert ui_with_input([""])
+             |> MingaEditor.Agent.PromptBuffer.insert_paste("hello")
+             |> MingaEditor.Agent.PromptBuffer.input_text() ==
                "hello"
 
-      assert ui_with_input([""]) |> UIState.insert_paste("line1\nline2") |> UIState.input_text() ==
+      assert ui_with_input([""])
+             |> MingaEditor.Agent.PromptBuffer.insert_paste("line1\nline2")
+             |> MingaEditor.Agent.PromptBuffer.input_text() ==
                "line1\nline2"
 
       assert ui_with_input([""])
-             |> UIState.insert_paste("hello" <> <<0>> <> "world")
-             |> UIState.input_text() ==
+             |> MingaEditor.Agent.PromptBuffer.insert_paste("hello" <> <<0>> <> "world")
+             |> MingaEditor.Agent.PromptBuffer.input_text() ==
                "helloworld"
 
-      collapsed = ui_with_input([""]) |> UIState.insert_paste("a\nb\nc")
+      collapsed = ui_with_input([""]) |> MingaEditor.Agent.PromptBuffer.insert_paste("a\nb\nc")
       assert Enum.count(collapsed.panel.pasted_blocks) == 1
       assert hd(collapsed.panel.pasted_blocks).text == "a\nb\nc"
-      assert UIState.prompt_text(collapsed) == "a\nb\nc"
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(collapsed) == "a\nb\nc"
 
-      multi = collapsed |> UIState.insert_paste("d\ne\nf")
+      multi = collapsed |> MingaEditor.Agent.PromptBuffer.insert_paste("d\ne\nf")
       assert Enum.count(multi.panel.pasted_blocks) == 2
     end
 
     test "toggle_paste_expand expands, collapses, and no-ops outside paste blocks" do
       ui =
         ui_with_input([""])
-        |> UIState.insert_paste("line1\nline2\nline3")
+        |> MingaEditor.Agent.PromptBuffer.insert_paste("line1\nline2\nline3")
         |> move_to_placeholder()
 
-      expanded = UIState.toggle_paste_expand(ui)
+      expanded = MingaEditor.Agent.PromptBuffer.toggle_paste_expand(ui)
       assert hd(expanded.panel.pasted_blocks).expanded
-      assert UIState.input_line_count(expanded) >= 3
+      assert MingaEditor.Agent.PromptBuffer.input_line_count(expanded) >= 3
 
-      collapsed = expanded |> move_cursor_to_placeholder_line() |> UIState.toggle_paste_expand()
+      collapsed =
+        expanded
+        |> move_cursor_to_placeholder_line()
+        |> MingaEditor.Agent.PromptBuffer.toggle_paste_expand()
+
       refute hd(collapsed.panel.pasted_blocks).expanded
 
       plain = ui_with_input(["hello"])
 
-      assert UIState.toggle_paste_expand(plain) |> UIState.input_lines() ==
-               UIState.input_lines(plain)
+      assert MingaEditor.Agent.PromptBuffer.toggle_paste_expand(plain)
+             |> MingaEditor.Agent.PromptBuffer.input_lines() ==
+               MingaEditor.Agent.PromptBuffer.input_lines(plain)
     end
 
     test "placeholder helpers parse only paste placeholders" do
@@ -237,17 +260,17 @@ defmodule MingaEditor.Agent.UIStateTest do
 
   describe "prompt buffer lifecycle" do
     test "ensure_prompt_buffer starts, reuses, and restarts the prompt buffer" do
-      ui = UIState.new() |> UIState.ensure_prompt_buffer()
+      ui = UIState.new() |> MingaEditor.Agent.PromptBuffer.ensure()
       first_pid = ui.panel.prompt_buffer
       assert is_pid(first_pid)
 
-      assert UIState.ensure_prompt_buffer(ui).panel.prompt_buffer == first_pid
+      assert MingaEditor.Agent.PromptBuffer.ensure(ui).panel.prompt_buffer == first_pid
 
       ref = Process.monitor(first_pid)
       GenServer.stop(first_pid)
       assert_receive {:DOWN, ^ref, :process, ^first_pid, _reason}
 
-      restarted = UIState.ensure_prompt_buffer(ui)
+      restarted = MingaEditor.Agent.PromptBuffer.ensure(ui)
       assert is_pid(restarted.panel.prompt_buffer)
       refute restarted.panel.prompt_buffer == first_pid
     end
@@ -266,14 +289,19 @@ defmodule MingaEditor.Agent.UIStateTest do
   end
 
   defp move_to_placeholder(ui) do
-    line = Enum.find_index(UIState.input_lines(ui), &UIState.paste_placeholder?/1)
+    line =
+      Enum.find_index(
+        MingaEditor.Agent.PromptBuffer.input_lines(ui),
+        &UIState.paste_placeholder?/1
+      )
+
     BufferProcess.move_to(ui.panel.prompt_buffer, {line, 0})
     ui
   end
 
   defp move_cursor_to_placeholder_line(ui) do
     line =
-      UIState.input_lines(ui)
+      MingaEditor.Agent.PromptBuffer.input_lines(ui)
       |> Enum.find_index(&(String.contains?(&1, "line1") or UIState.paste_placeholder?(&1)))
 
     BufferProcess.move_to(ui.panel.prompt_buffer, {line || 0, 0})

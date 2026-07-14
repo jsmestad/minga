@@ -48,7 +48,7 @@ defmodule MingaEditor.Shell.Traditional.GitToastTest do
   test "Editor timeout messages cannot dismiss a replacement" do
     first =
       base_state()
-      |> Map.put(:rendering, :disabled)
+      |> then(&%{&1 | frontend: %{&1.frontend | rendering: :disabled}})
       |> GitToastWorkflow.publish("Fetched", :success)
 
     first_id = first.shell_runtime.state.git_toast.id
@@ -62,7 +62,8 @@ defmodule MingaEditor.Shell.Traditional.GitToastTest do
   end
 
   test "workflow cancels a replaced timer and ignores its stale timeout" do
-    state = Map.put(base_state(), :backend, :test)
+    base = base_state()
+    state = %{base | frontend: %{base.frontend | backend: :test}}
     first = GitToastWorkflow.publish(state, "Fetched", :success)
     first_id = first.shell_runtime.state.git_toast.id
     first_timer = first.shell_runtime.state.git_toast.timer

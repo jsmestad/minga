@@ -48,10 +48,19 @@ defmodule MingaEditor.Commands.DiredMutationTest do
     ]
 
     confirming =
-      EditorState.set_dired(
-        cancelled,
-        DiredState.enter_confirmation(cancelled.workspace.dired, operations)
-      )
+      then(cancelled, fn state ->
+        %{
+          state
+          | workspace:
+              then(
+                state.workspace,
+                &MingaEditor.Session.State.set_dired(
+                  &1,
+                  DiredState.enter_confirmation(cancelled.workspace.dired, operations)
+                )
+              )
+        }
+      end)
 
     applied = DiredCommands.execute(confirming, :dired_confirm_apply)
 
@@ -65,7 +74,7 @@ defmodule MingaEditor.Commands.DiredMutationTest do
 
   defp editor_state(buffer, dired_state) do
     %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %SessionState{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: buffer, list: [buffer]},

@@ -10,6 +10,7 @@ defmodule MingaEditor.Input.RouterTest do
   alias MingaEditor.FocusTree.Node, as: FocusNode
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.Render
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Input
@@ -33,12 +34,14 @@ defmodule MingaEditor.Input.RouterTest do
     :ok
   end
 
-  defp base_state do
+  defp base_state(opts \\ []) do
     {:ok, buf} = BufferProcess.start_link(content: "hello\nworld\nthird")
 
     %EditorState{
-      port_manager: Process.get(:router_recording_frontend),
-      sidebar_registry: Process.get(:sidebar_registry),
+      frontend: %MingaEditor.State.Frontend{port_manager: Process.get(:router_recording_frontend)},
+      extension_surfaces: %MingaEditor.State.ExtensionSurfaces{
+        sidebar_registry: Process.get(:sidebar_registry)
+      },
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
@@ -48,7 +51,11 @@ defmodule MingaEditor.Input.RouterTest do
           active_index: 0
         }
       },
-      focus_stack: Input.default_stack()
+      interaction:
+        MingaEditor.State.Interaction.new(
+          editing_model: Keyword.get(opts, :editing_model, :vim),
+          focus_stack: Input.default_stack()
+        )
     }
   end
 
@@ -225,7 +232,25 @@ defmodule MingaEditor.Input.RouterTest do
 
     test "focused bottom panel handles Vim normal q" do
       state =
-        EditorState.set_bottom_panel(base_state(), %BottomPanel{visible: true, focused: true})
+        then(base_state(), fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.set_bottom_panel(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              %BottomPanel{
+                visible: true,
+                focused: true
+              }
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
 
       new_state = Router.dispatch(state, ?q, 0)
 
@@ -233,10 +258,26 @@ defmodule MingaEditor.Input.RouterTest do
     end
 
     test "focused bottom panel handles CUA Escape" do
-      state = %{
-        EditorState.set_bottom_panel(base_state(), %BottomPanel{visible: true, focused: true})
-        | editing_model: :cua
-      }
+      state =
+        then(base_state(editing_model: :cua), fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.set_bottom_panel(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              %BottomPanel{
+                visible: true,
+                focused: true
+              }
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
 
       new_state = Router.dispatch(state, 27, 0)
 
@@ -244,10 +285,26 @@ defmodule MingaEditor.Input.RouterTest do
     end
 
     test "focused bottom panel consumes CUA q without closing or editing the buffer" do
-      state = %{
-        EditorState.set_bottom_panel(base_state(), %BottomPanel{visible: true, focused: true})
-        | editing_model: :cua
-      }
+      state =
+        then(base_state(editing_model: :cua), fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.set_bottom_panel(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              %BottomPanel{
+                visible: true,
+                focused: true
+              }
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
 
       before_content = BufferProcess.content(state.workspace.buffers.active)
       new_state = Router.dispatch(state, ?q, 0)
@@ -265,11 +322,15 @@ defmodule MingaEditor.Input.RouterTest do
       buf = start_supervised!({BufferProcess, content: "hello\nworld\nthird"})
 
       %EditorState{
-        backend: :tui,
-        port_manager: Process.get(:router_recording_frontend),
-        renderer: renderer_pid,
-        sidebar_registry: Process.get(:sidebar_registry),
-        terminal_viewport: Viewport.new(24, 80),
+        frontend: %MingaEditor.State.Frontend{
+          backend: :tui,
+          port_manager: Process.get(:router_recording_frontend),
+          terminal_viewport: Viewport.new(24, 80)
+        },
+        render: %MingaEditor.State.Render{renderer: renderer_pid},
+        extension_surfaces: %MingaEditor.State.ExtensionSurfaces{
+          sidebar_registry: Process.get(:sidebar_registry)
+        },
         workspace: %MingaEditor.Session.State{
           viewport: Viewport.new(24, 80),
           editing: VimState.new(),
@@ -281,7 +342,7 @@ defmodule MingaEditor.Input.RouterTest do
             next_id: 2
           }
         },
-        focus_stack: Input.default_stack()
+        interaction: %MingaEditor.State.Interaction{focus_stack: Input.default_stack()}
       }
     end
 
@@ -333,7 +394,7 @@ defmodule MingaEditor.Input.RouterTest do
 
   describe "dispatch_mouse/7" do
     test "calls the deepest hit node handler first" do
-      state = %{base_state() | focus_tree: probe_tree(:deep)}
+      state = state_with_focus_tree(probe_tree(:deep))
 
       _state = Router.dispatch_mouse(state, 5, 5, :left, 0, :press, 1)
 
@@ -342,7 +403,7 @@ defmodule MingaEditor.Input.RouterTest do
     end
 
     test "bubbles to ancestors when the child passes through" do
-      state = %{base_state() | focus_tree: probe_tree({:pass, :child})}
+      state = state_with_focus_tree(probe_tree({:pass, :child}))
 
       _state = Router.dispatch_mouse(state, 5, 5, :left, 0, :press, 1)
 
@@ -351,7 +412,7 @@ defmodule MingaEditor.Input.RouterTest do
     end
 
     test "wheel events start at the deepest scrollable node under the cursor" do
-      state = %{base_state() | focus_tree: overlapping_scroll_tree()}
+      state = state_with_focus_tree(overlapping_scroll_tree())
 
       _state = Router.dispatch_mouse(state, 3, 3, :wheel_down, 0, :press, 1)
 
@@ -360,8 +421,27 @@ defmodule MingaEditor.Input.RouterTest do
     end
 
     test "clicking the bottom panel focuses it instead of the underlying editor" do
-      state = %{base_state() | focus_tree: bottom_panel_tree()}
-      state = EditorState.set_bottom_panel(state, %BottomPanel{visible: true})
+      state = state_with_focus_tree(bottom_panel_tree())
+
+      state =
+        then(state, fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.set_bottom_panel(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              %BottomPanel{
+                visible: true
+              }
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
 
       new_state = Router.dispatch_mouse(state, 8, 10, :left, 0, :press, 1)
 
@@ -370,7 +450,7 @@ defmodule MingaEditor.Input.RouterTest do
     end
 
     test "clicking a separator gap without a handler is a no-op" do
-      state = %{base_state() | focus_tree: separator_gap_tree()}
+      state = state_with_focus_tree(separator_gap_tree())
 
       assert ^state = Router.dispatch_mouse(state, 3, 10, :left, 0, :press, 1)
       refute_receive {:mouse_probe, _type, _ref}, 20
@@ -378,8 +458,28 @@ defmodule MingaEditor.Input.RouterTest do
 
     test "handled mouse actions preserve an ordinary notice" do
       state = base_state() |> NoticeWorkflow.publish("keep me")
-      state = %{state | focus_tree: bottom_panel_tree()}
-      state = EditorState.set_bottom_panel(state, %BottomPanel{visible: true})
+      render = Render.cache_layout(state.render, state.render.layout, bottom_panel_tree())
+      state = %{state | render: render}
+
+      state =
+        then(state, fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.set_bottom_panel(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              %BottomPanel{
+                visible: true
+              }
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
 
       new_state = Router.dispatch_mouse(state, 8, 10, :left, 0, :press, 1)
 
@@ -440,17 +540,23 @@ defmodule MingaEditor.Input.RouterTest do
     end
   end
 
+  defp state_with_focus_tree(focus_tree) do
+    state = base_state()
+    render = Render.cache_layout(state.render, state.render.layout, focus_tree)
+    %{state | render: render}
+  end
+
   describe "keystroke recording" do
     alias MingaEditor.KeystrokeHistory
 
     test "dispatch records a keystroke in the history" do
       state = base_state()
-      assert KeystrokeHistory.size(state.keystroke_history) == 0
+      assert KeystrokeHistory.size(state.interaction.keystroke_history) == 0
 
       state = Router.dispatch(state, ?j, 0)
 
-      assert KeystrokeHistory.size(state.keystroke_history) == 1
-      [entry] = KeystrokeHistory.entries(state.keystroke_history)
+      assert KeystrokeHistory.size(state.interaction.keystroke_history) == 1
+      [entry] = KeystrokeHistory.entries(state.interaction.keystroke_history)
       assert entry.key == {?j, 0}
       assert entry.mode_before == :normal
     end
@@ -464,8 +570,8 @@ defmodule MingaEditor.Input.RouterTest do
         |> Router.dispatch(?k, 0)
         |> Router.dispatch(?l, 0)
 
-      assert KeystrokeHistory.size(state.keystroke_history) == 3
-      keys = Enum.map(KeystrokeHistory.entries(state.keystroke_history), & &1.key)
+      assert KeystrokeHistory.size(state.interaction.keystroke_history) == 3
+      keys = Enum.map(KeystrokeHistory.entries(state.interaction.keystroke_history), & &1.key)
       assert keys == [{?j, 0}, {?k, 0}, {?l, 0}]
     end
   end

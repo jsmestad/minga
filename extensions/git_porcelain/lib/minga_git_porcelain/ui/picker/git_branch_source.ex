@@ -11,6 +11,7 @@ defmodule MingaGitPorcelain.UI.Picker.GitBranchSource do
 
   alias Minga.Git
   alias Minga.Log
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
 
@@ -36,20 +37,20 @@ defmodule MingaGitPorcelain.UI.Picker.GitBranchSource do
   def on_select(%Item{id: {:create, name}}, state) do
     case resolve_git_root() do
       nil ->
-        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Not in a git repository")
+        NoticeWorkflow.publish(state, "Not in a git repository")
 
       git_root ->
         case Git.branch_create(git_root, name) do
           :ok ->
             refresh_repo(git_root)
 
-            MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+            NoticeWorkflow.publish(
               state,
               "Created and switched to #{name}"
             )
 
           {:error, reason} ->
-            MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Failed: #{reason}")
+            NoticeWorkflow.publish(state, "Failed: #{reason}")
         end
     end
   end
@@ -72,17 +73,26 @@ defmodule MingaGitPorcelain.UI.Picker.GitBranchSource do
   @impl true
   @spec on_action(atom(), Item.t(), term()) :: term()
   def on_action(:delete, %Item{id: {:branch, _name, true, false}}, state) do
-    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Cannot delete current branch")
+    NoticeWorkflow.publish(state, "Cannot delete current branch")
   end
 
   def on_action(:delete, %Item{id: {:branch, name, false, false}}, state) do
     case resolve_git_root() do
       nil ->
-        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Not in a git repository")
+        NoticeWorkflow.publish(state, "Not in a git repository")
 
       git_root ->
         mode_state = Minga.Mode.BranchDeleteConfirmState.new(git_root, name)
-        MingaEditor.State.transition_mode(state, :branch_delete_confirm, mode_state)
+
+        %{
+          state
+          | workspace:
+              MingaEditor.Session.State.transition_mode(
+                state.workspace,
+                :branch_delete_confirm,
+                mode_state
+              )
+        }
     end
   end
 
@@ -97,16 +107,16 @@ defmodule MingaGitPorcelain.UI.Picker.GitBranchSource do
   defp switch_branch(name, state) do
     case resolve_git_root() do
       nil ->
-        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Not in a git repository")
+        NoticeWorkflow.publish(state, "Not in a git repository")
 
       git_root ->
         case Git.branch_switch(git_root, name) do
           :ok ->
             refresh_repo(git_root)
-            MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Switched to #{name}")
+            NoticeWorkflow.publish(state, "Switched to #{name}")
 
           {:error, reason} ->
-            MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Failed: #{reason}")
+            NoticeWorkflow.publish(state, "Failed: #{reason}")
         end
     end
   end

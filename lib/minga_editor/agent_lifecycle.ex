@@ -23,7 +23,7 @@ defmodule MingaEditor.AgentLifecycle do
   alias MingaEditor.Commands
   alias MingaEditor.LayoutPreset
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.AgentAccess
+  alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.UI.Highlight
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
@@ -38,6 +38,39 @@ defmodule MingaEditor.AgentLifecycle do
   # Matches the truncation in Transcript.message_to_markdown/1.
   @max_styled_result_chars 500
 
+  @doc "Rebuilds the active agent presentation from its authoritative session snapshot."
+  @spec rebuild_agent_from_session(state(), Tab.t()) :: state()
+  def rebuild_agent_from_session(state, %Tab{kind: :agent, session: session_pid})
+      when is_pid(session_pid) do
+    case safe_editor_snapshot(session_pid) do
+      nil ->
+        MingaEditor.Shell.Traditional.Workflow.install_agent_tool_clear(state)
+
+      snapshot ->
+        MingaEditor.Shell.Traditional.Workflow.install_agent_state(
+          state,
+          (fn agent ->
+             AgentState.apply_session_snapshot(
+               agent,
+               snapshot.status,
+               snapshot.pending_approval,
+               snapshot.error,
+               Map.get(snapshot, :active_tool_name)
+             )
+           end).(MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state))
+        )
+    end
+  end
+
+  def rebuild_agent_from_session(state, %Tab{}), do: state
+
+  @spec safe_editor_snapshot(pid()) :: map() | nil
+  defp safe_editor_snapshot(session_pid) do
+    AgentSession.editor_snapshot(session_pid)
+  catch
+    :exit, _ -> nil
+  end
+
   @doc """
   Starts the agent session if the agent pane is visible during init.
 
@@ -45,7 +78,8 @@ defmodule MingaEditor.AgentLifecycle do
   """
   @spec maybe_start_session(state()) :: state()
   def maybe_start_session(state) do
-    if AgentAccess.session(state) == nil and LayoutPreset.has_agent_chat?(state) do
+    if MingaEditor.Shell.Runtime.active_session(state.shell_runtime) == nil and
+         LayoutPreset.has_agent_chat?(state) do
       state = Commands.Agent.ensure_agent_session(state)
       cli_flags = Minga.CLI.startup_flags()
       maybe_load_auto_context(state, cli_flags)
@@ -68,7 +102,7 @@ defmodule MingaEditor.AgentLifecycle do
     cli_flags = Minga.CLI.startup_flags()
     auto_context = Config.get(:agent_auto_context)
     agent_visible = LayoutPreset.has_agent_chat?(state)
-    preview_empty = AgentAccess.view(state).preview.content == :empty
+    preview_empty = state.workspace.agent_ui.view.preview.content == :empty
 
     if agent_visible and preview_empty and auto_context and not cli_flags.no_context do
       content = Buffer.content(buffer_pid)
@@ -93,7 +127,7 @@ defmodule MingaEditor.AgentLifecycle do
   """
   @spec sync_transcript(state()) :: state()
   def sync_transcript(state) do
-    session = AgentAccess.session(state)
+    session = MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
 
     if is_pid(session) do
       case safe_session_messages(session) do
@@ -131,10 +165,12 @@ defmodule MingaEditor.AgentLifecycle do
 
   @spec cache_display_transcript(state(), [term()], Transcript.empty_state()) :: state()
   defp cache_display_transcript(state, messages, empty_state) do
-    panel = AgentAccess.panel(state)
+    panel = state.workspace.agent_ui.panel
     jump = panel.provenance_jump
 
-    sync_opts = add_session_display_opts([], AgentAccess.session(state))
+    sync_opts =
+      add_session_display_opts([], MingaEditor.Shell.Runtime.active_session(state.shell_runtime))
+
     sync_opts = maybe_put_empty_state(sync_opts, empty_state)
 
     # A pending provenance jump may need an older, paged-out turn revealed so it
@@ -151,7 +187,7 @@ defmodule MingaEditor.AgentLifecycle do
     # Compute styled runs for GUI rendering against the displayed transcript.
     # Reuse unchanged entries only when the style context still matches the
     # cached fingerprint; theme changes must force a restyle.
-    styled_fingerprint = Panel.styled_cache_fingerprint(state.theme.syntax)
+    styled_fingerprint = Panel.styled_cache_fingerprint(state.appearance.theme.syntax)
 
     {previous_messages, previous_styled} =
       if panel.cached_styled_fingerprint == styled_fingerprint do
@@ -186,13 +222,16 @@ defmodule MingaEditor.AgentLifecycle do
     # callers can read them without recomputing. Persist the (possibly lowered)
     # display window and mark the jump landed so later re-syncs hold position
     # instead of re-pinning to the bottom.
-    AgentAccess.update_panel(state, fn p ->
-      Panel.cache_transcript_display(p, result, styled,
-        display_start_index: display_start,
-        provenance_jump: advance_jump(jump),
-        styled_fingerprint: styled_fingerprint
-      )
-    end)
+    MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
+      state,
+      (fn p ->
+         Panel.cache_transcript_display(p, result, styled,
+           display_start_index: display_start,
+           provenance_jump: advance_jump(jump),
+           styled_fingerprint: styled_fingerprint
+         )
+       end).(state.workspace.agent_ui.panel)
+    )
   end
 
   @spec cache_empty_transcript(state(), Transcript.empty_state()) :: state()
@@ -204,14 +243,17 @@ defmodule MingaEditor.AgentLifecycle do
 
   @spec clear_transcript_cache(state()) :: state()
   defp clear_transcript_cache(state) do
-    AgentAccess.update_panel(state, &Panel.clear_transcript_cache/1)
+    MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
+      state,
+      (&Panel.clear_transcript_cache/1).(state.workspace.agent_ui.panel)
+    )
   end
 
   @spec first_run_empty_state(state(), [term()]) :: Transcript.empty_state()
   defp first_run_empty_state(state, messages) do
     if Transcript.first_run_transcript?(messages) do
-      panel = AgentAccess.panel(state)
-      empty_state_for_panel(panel, AgentAccess.session(state))
+      panel = state.workspace.agent_ui.panel
+      empty_state_for_panel(panel, MingaEditor.Shell.Runtime.active_session(state.shell_runtime))
     end
   end
 
@@ -281,7 +323,7 @@ defmodule MingaEditor.AgentLifecycle do
   def maybe_update_tab_label(
         %{shell_runtime: %{state: %{tab_bar: %{active_id: active_id} = tb}}} = state
       ) do
-    session = AgentAccess.session(state)
+    session = MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
 
     with true <- is_pid(session),
          %{kind: :agent, label: label} when is_binary(label) <- TabBar.active(tb),
@@ -340,13 +382,34 @@ defmodule MingaEditor.AgentLifecycle do
 
       text ->
         label = truncate_label(text, 30)
-        EditorState.set_tab_bar(state, TabBar.update_label(tb, active_id, label))
+
+        then(state, fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.set_tab_bar(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              MingaEditor.State.TabBar.update_label(tb, active_id, label)
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
     end
   end
 
   @spec update_preview(state(), (Preview.t() -> Preview.t())) :: state()
   defp update_preview(state, fun) do
-    AgentAccess.update_agent_ui(state, &UIState.update_preview(&1, fun))
+    MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+      state,
+      (fn ui ->
+         UIState.replace_preview(ui, fun.(ui.view.preview))
+       end).(state.workspace.agent_ui)
+    )
   end
 
   @spec default_agent_label?(String.t()) :: boolean()
@@ -381,12 +444,12 @@ defmodule MingaEditor.AgentLifecycle do
   """
   @spec update_styled_cache(state()) :: state()
   def update_styled_cache(state) do
-    session = AgentAccess.session(state)
+    session = MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
 
     with true <- is_pid(session),
          messages when messages != [] <- displayed_messages_for_styling(state, session) do
-      panel = AgentAccess.panel(state)
-      styled_fingerprint = Panel.styled_cache_fingerprint(state.theme.syntax)
+      panel = state.workspace.agent_ui.panel
+      styled_fingerprint = Panel.styled_cache_fingerprint(state.appearance.theme.syntax)
 
       {previous_messages, previous_styled} =
         if panel.cached_styled_fingerprint == styled_fingerprint do
@@ -406,9 +469,12 @@ defmodule MingaEditor.AgentLifecycle do
           previous_styled
         )
 
-      AgentAccess.update_panel(state, fn p ->
-        Panel.cache_styled_messages(p, styled, styled_fingerprint)
-      end)
+      MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
+        state,
+        (fn p ->
+           Panel.cache_styled_messages(p, styled, styled_fingerprint)
+         end).(state.workspace.agent_ui.panel)
+      )
     else
       _ -> state
     end
@@ -423,7 +489,7 @@ defmodule MingaEditor.AgentLifecycle do
 
   @spec displayed_messages_for_styling(state(), pid()) :: [term()]
   defp displayed_messages_for_styling(state, session) do
-    case AgentAccess.panel(state).cached_display_messages do
+    case state.workspace.agent_ui.panel.cached_display_messages do
       [] -> safe_messages(session)
       messages -> messages
     end
@@ -431,7 +497,7 @@ defmodule MingaEditor.AgentLifecycle do
 
   @spec displayed_message_ids_for_styling(state(), pid()) :: [pos_integer()]
   defp displayed_message_ids_for_styling(state, session) do
-    panel = AgentAccess.panel(state)
+    panel = state.workspace.agent_ui.panel
 
     case panel.cached_display_message_pairs do
       [] -> session |> AgentSession.messages_with_ids() |> Enum.map(fn {id, _message} -> id end)
@@ -453,7 +519,7 @@ defmodule MingaEditor.AgentLifecycle do
           Panel.styled_cache()
   defp compute_styled_messages(state, messages, message_ids, previous_messages, previous_styled) do
     highlight = nil
-    theme_syntax = state.theme.syntax
+    theme_syntax = state.appearance.theme.syntax
 
     {full_text, line_offsets} = Transcript.messages_to_markdown_with_offsets(messages)
     full_lines = String.split(full_text, "\n")

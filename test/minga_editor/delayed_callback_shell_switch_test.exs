@@ -11,7 +11,6 @@ defmodule MingaEditor.DelayedCallbackShellSwitchTest do
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.Shell.Traditional.State, as: TraditionalShellState
   alias MingaEditor.Shell.Workflow, as: ShellWorkflow
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.Test.FakeShell
   alias MingaEditor.UI.Picker.Candidate
   alias MingaEditor.UI.Picker.Item
@@ -56,8 +55,7 @@ defmodule MingaEditor.DelayedCallbackShellSwitchTest do
 
   test "picker candidate delivery is dropped without touching or replaying a foreign shell" do
     traditional_state =
-      TestHelpers.base_state()
-      |> Map.put(:rendering, :disabled)
+      TestHelpers.base_state(rendering: :disabled)
       |> PickerUI.open(TodoSearchSource)
 
     assert_receive {:picker_fetch_candidates, TodoSearchSource, revision, _ctx}
@@ -65,7 +63,7 @@ defmodule MingaEditor.DelayedCallbackShellSwitchTest do
 
     state = ShellWorkflow.switch(traditional_state, :fake)
     foreign_shell_state = Runtime.state(state.shell_runtime)
-    message_store = state.message_store
+    message_store = state.render.message_store
     items = [%Item{id: %{path: "/tmp/stale.ex", line: 1}, label: "stale candidate"}]
     result = {:ok, items, Candidate.from_items(items), %{status: "stale status"}}
 
@@ -77,13 +75,13 @@ defmodule MingaEditor.DelayedCallbackShellSwitchTest do
 
     assert new_state == state
     assert Runtime.state(new_state.shell_runtime) == foreign_shell_state
-    assert new_state.message_store == message_store
+    assert new_state.render.message_store == message_store
 
     restored = ShellWorkflow.switch(new_state, :traditional)
     assert %TraditionalShellState{} = Runtime.state(restored.shell_runtime)
     assert Runtime.state(restored.shell_runtime).modal == :none
     assert Runtime.state(restored.shell_runtime).notice.message == nil
-    assert restored.message_store == message_store
+    assert restored.render.message_store == message_store
   end
 
   test "Observatory tick after a shell switch cannot touch the foreign shell" do
@@ -91,8 +89,7 @@ defmodule MingaEditor.DelayedCallbackShellSwitchTest do
     timer = Process.send_after(self(), {:observatory_tick, token}, 60_000)
 
     state =
-      TestHelpers.base_state()
-      |> Map.put(:rendering, :disabled)
+      TestHelpers.base_state(rendering: :disabled)
       |> SidebarWorkflow.open_observatory({timer, token})
       |> ShellWorkflow.switch(:fake)
 
@@ -110,7 +107,7 @@ defmodule MingaEditor.DelayedCallbackShellSwitchTest do
   end
 
   test "space-leader timeout after a shell switch cannot touch the foreign shell" do
-    state = TestHelpers.base_state() |> Map.put(:rendering, :disabled)
+    state = TestHelpers.base_state(rendering: :disabled)
 
     {generation, shell_state} =
       state.shell_runtime
@@ -124,12 +121,11 @@ defmodule MingaEditor.DelayedCallbackShellSwitchTest do
       |> TraditionalShellState.install_space_leader_timer(generation, timer)
       |> TraditionalShellState.install_click_regions([{0, 2, :modeline}], [{0, 2, :next_tab}])
 
-    runtime =
-      Runtime.update_traditional_state(state.shell_runtime, fn _current -> shell_state end)
+    runtime = Runtime.install_traditional_state(state.shell_runtime, shell_state)
 
     state =
       state
-      |> EditorState.apply_shell_runtime_transition(runtime)
+      |> then(fn state -> %{state | shell_runtime: runtime} end)
       |> ShellWorkflow.switch(:fake)
 
     foreign_shell_state = Runtime.state(state.shell_runtime)
@@ -152,24 +148,29 @@ defmodule MingaEditor.DelayedCallbackShellSwitchTest do
     generation_ref = make_ref()
 
     state =
-      TestHelpers.base_state()
-      |> Map.put(:rendering, :disabled)
-      |> Map.put(:git_commit_gen_ref, generation_ref)
+      TestHelpers.base_state(rendering: :disabled)
+      |> then(fn state ->
+        %{state | git: MingaEditor.State.Git.await_commit_generation(state.git, generation_ref)}
+      end)
       |> ShellWorkflow.switch(:fake)
 
     foreign_shell_state = Runtime.state(state.shell_runtime)
-    message_store = state.message_store
+    message_store = state.render.message_store
 
     assert {:noreply, new_state} = MingaEditor.handle_info(message, state)
-    assert new_state.git_commit_gen_ref == nil
+    assert new_state.git.git_commit_gen_ref == nil
     assert Runtime.state(new_state.shell_runtime) == foreign_shell_state
-    assert new_state.message_store == message_store
-    assert new_state == %{state | git_commit_gen_ref: nil}
+    assert new_state.render.message_store == message_store
+
+    assert new_state == %{
+             state
+             | git: MingaEditor.State.Git.await_commit_generation(state.git, nil)
+           }
 
     restored = ShellWorkflow.switch(new_state, :traditional)
     assert %TraditionalShellState{} = Runtime.state(restored.shell_runtime)
     assert Runtime.state(restored.shell_runtime).modal == :none
     assert Runtime.state(restored.shell_runtime).notice.message == nil
-    assert restored.message_store == message_store
+    assert restored.render.message_store == message_store
   end
 end

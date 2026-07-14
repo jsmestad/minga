@@ -146,7 +146,18 @@ defmodule MingaEditor.Mouse do
           |> Window.mark_scroll_echo(scrolled.viewport.top)
           |> Window.record_scroll_event(now, cursor_pos)
 
-        EditorState.update_window(state, window_id, fn _window -> updated end)
+        %{
+          state
+          | workspace:
+              MingaEditor.Session.State.set_windows(
+                state.workspace,
+                MingaEditor.State.Windows.replace_window(
+                  state.workspace.windows,
+                  window_id,
+                  updated
+                )
+              )
+        }
 
       _ ->
         state
@@ -154,7 +165,9 @@ defmodule MingaEditor.Mouse do
   end
 
   @spec native_gui?(state()) :: boolean()
-  defp native_gui?(%{capabilities: %Capabilities{frontend_type: :native_gui}}), do: true
+  defp native_gui?(%{frontend: %{capabilities: %Capabilities{frontend_type: :native_gui}}}),
+    do: true
+
   defp native_gui?(_state), do: false
 
   @doc "Dispatches a mouse event, returning updated state."
@@ -202,7 +215,14 @@ defmodule MingaEditor.Mouse do
         :release,
         _cc
       ) do
-    state = EditorState.update_mouse(state, &MouseState.stop_drag/1)
+    state = %{
+      state
+      | workspace:
+          MingaEditor.Session.State.set_mouse(
+            state.workspace,
+            (&MouseState.stop_drag/1).(state.workspace.mouse)
+          )
+    }
 
     # TUI keeps legacy selection auto-copy. Native GUI selection stays separate from the clipboard.
     auto_copy_selection(state)
@@ -217,7 +237,14 @@ defmodule MingaEditor.Mouse do
         :release,
         _cc
       ) do
-    EditorState.update_mouse(state, &MouseState.stop_drag/1)
+    %{
+      state
+      | workspace:
+          MingaEditor.Session.State.set_mouse(
+            state.workspace,
+            (&MouseState.stop_drag/1).(state.workspace.mouse)
+          )
+    }
   end
 
   # Ignore negative coordinates except active drags, which clamp to the originating window edge.
@@ -278,7 +305,12 @@ defmodule MingaEditor.Mouse do
           {target_line, target_col} ->
             Buffer.move_to(state.workspace.buffers.active, {target_line, target_col})
             state = cancel_mode_for_mouse(state)
-            state = EditorState.transition_mode(state, :normal)
+
+            state = %{
+              state
+              | workspace: MingaEditor.Session.State.transition_mode(state.workspace, :normal)
+            }
+
             MingaEditor.dispatch_command(state, :paste_after)
         end
     end
@@ -336,7 +368,14 @@ defmodule MingaEditor.Mouse do
         :release,
         _cc
       ) do
-    EditorState.update_mouse(state, &MouseState.stop_resize/1)
+    %{
+      state
+      | workspace:
+          MingaEditor.Session.State.set_mouse(
+            state.workspace,
+            (&MouseState.stop_resize/1).(state.workspace.mouse)
+          )
+    }
   end
 
   # ── Mouse motion (hover tracking + Cmd/Ctrl link preview) ──
@@ -362,7 +401,7 @@ defmodule MingaEditor.Mouse do
   # Ctrl on native GUI frontends follows platform context-menu semantics, so it
   # is not a link-preview modifier there; fall through to plain hover.
   defp handle_motion(
-         %{capabilities: %Capabilities{frontend_type: :native_gui}} = state,
+         %{frontend: %{capabilities: %Capabilities{frontend_type: :native_gui}}} = state,
          row,
          col,
          mods
@@ -392,22 +431,34 @@ defmodule MingaEditor.Mouse do
   # snapshot resolution is skipped. Transitions that change the active buffer
   # reset `cmd_hover_cell` to nil, so a same-cell motion re-resolves afterwards.
   @spec update_cmd_hover_link(state(), integer(), integer()) :: state()
-  defp update_cmd_hover_link(%{workspace: %{cmd_hover_cell: {row, col}}} = state, row, col) do
+  defp update_cmd_hover_link(
+         %{workspace: %{hover_observation: %{cell: {row, col}}}} = state,
+         row,
+         col
+       ) do
     state
   end
 
   defp update_cmd_hover_link(state, row, col) do
     state
     |> set_cmd_hover_link_if_changed(navigable_link_at(state, row, col))
-    |> EditorState.set_cmd_hover_cell({row, col})
+    |> then(fn state ->
+      %{
+        state
+        | workspace: MingaEditor.Session.State.set_cmd_hover_cell(state.workspace, {row, col})
+      }
+    end)
   end
 
   @spec set_cmd_hover_link_if_changed(state(), EditorState.cmd_hover_link()) :: state()
-  defp set_cmd_hover_link_if_changed(%{workspace: %{cmd_hover_link: link}} = state, link),
-    do: state
+  defp set_cmd_hover_link_if_changed(
+         %{workspace: %{hover_observation: %{link: link}}} = state,
+         link
+       ),
+       do: state
 
   defp set_cmd_hover_link_if_changed(state, link) do
-    EditorState.set_cmd_hover_link(state, link)
+    %{state | workspace: MingaEditor.Session.State.set_cmd_hover_link(state.workspace, link)}
   end
 
   # Clears any standing link decoration (modifier released, or pointer moved off a
@@ -415,7 +466,7 @@ defmodule MingaEditor.Mouse do
   # when there is nothing to clear so plain motion stays allocation-free.
   @spec clear_cmd_hover_link_then_hover(state(), integer(), integer()) :: state()
   defp clear_cmd_hover_link_then_hover(
-         %{workspace: %{cmd_hover_link: nil, cmd_hover_cell: nil}} = state,
+         %{workspace: %{hover_observation: %{link: nil, cell: nil}}} = state,
          row,
          col
        ) do
@@ -424,7 +475,9 @@ defmodule MingaEditor.Mouse do
 
   defp clear_cmd_hover_link_then_hover(state, row, col) do
     state
-    |> EditorState.clear_cmd_hover_link()
+    |> then(fn state ->
+      %{state | workspace: MingaEditor.Session.State.clear_cmd_hover_link(state.workspace)}
+    end)
     |> handle_hover_motion(row, col)
   end
 
@@ -483,7 +536,7 @@ defmodule MingaEditor.Mouse do
   # buffer) the scope degrades to `:code`, matching `Highlight.scope_at/2`.
   @spec navigable_scope?(state(), pid(), non_neg_integer(), non_neg_integer()) :: boolean()
   defp navigable_scope?(state, buf, line, col) do
-    case Map.fetch(state.highlighting.highlights, buf) do
+    case Map.fetch(state.parser.highlighting.highlights, buf) do
       {:ok, %Highlight{} = hl} ->
         offset = Buffer.byte_offset_for_line(buf, line) + col
         Highlight.scope_at(hl, offset) == :code
@@ -502,7 +555,7 @@ defmodule MingaEditor.Mouse do
   # (re)starts the hover debounce, dismissing a stale popup first.
   @spec handle_hover_motion(state(), integer(), integer()) :: state()
   defp handle_hover_motion(%{shell_runtime: %{state: %{hover_popup: nil}}} = state, row, col) do
-    update_mouse(state, &MouseState.set_hover(&1, row, col, backend: state.backend))
+    update_hover(state, row, col)
   end
 
   defp handle_hover_motion(state, row, col) do
@@ -515,12 +568,42 @@ defmodule MingaEditor.Mouse do
   defp keep_or_dismiss_hover(state, row, col, false) do
     state
     |> MingaEditor.Shell.Traditional.HoverPopupWorkflow.dismiss()
-    |> update_mouse(&MouseState.set_hover(&1, row, col, backend: state.backend))
+    |> update_hover(row, col)
   end
+
+  @spec update_hover(state(), integer(), integer()) :: state()
+  defp update_hover(state, row, col) do
+    {mouse, previous_timer, schedule?} =
+      MouseState.prepare_hover(
+        state.workspace.mouse,
+        row,
+        col,
+        backend: state.frontend.backend
+      )
+
+    cancel_timer(previous_timer)
+
+    mouse =
+      if schedule? do
+        timer = Process.send_after(self(), :mouse_hover_timeout, MouseState.hover_delay_ms())
+        MouseState.accept_hover_timer(mouse, timer)
+      else
+        mouse
+      end
+
+    update_mouse(state, fn _ -> mouse end)
+  end
+
+  defp cancel_timer(nil), do: :ok
+  defp cancel_timer(timer), do: Process.cancel_timer(timer)
 
   @spec update_mouse(state(), (MouseState.t() -> MouseState.t())) :: state()
   defp update_mouse(state, fun) when is_function(fun, 1) do
-    EditorState.update_mouse(state, fun)
+    %{
+      state
+      | workspace:
+          MingaEditor.Session.State.set_mouse(state.workspace, fun.(state.workspace.mouse))
+    }
   end
 
   @spec handle_left_drag(
@@ -648,7 +731,18 @@ defmodule MingaEditor.Mouse do
   defp scroll_window_horizontal(state, win_id, delta) do
     case Map.fetch(state.workspace.windows.map, win_id) do
       {:ok, %Window{}} ->
-        EditorState.update_window(state, win_id, &Window.scroll_horizontal(&1, delta))
+        %{
+          state
+          | workspace:
+              MingaEditor.Session.State.set_windows(
+                state.workspace,
+                MingaEditor.State.Windows.scroll_horizontal(
+                  state.workspace.windows,
+                  win_id,
+                  delta
+                )
+              )
+        }
 
       _ ->
         state
@@ -693,8 +787,16 @@ defmodule MingaEditor.Mouse do
           state()
   defp handle_left_press(state, row, col, mods, native_click_count) do
     # Record press for multi-click detection
-    mouse = MouseState.record_press(state.workspace.mouse, row, col, native_click_count)
-    state = EditorState.set_mouse(state, mouse)
+    mouse =
+      MouseState.record_press_at(
+        state.workspace.mouse,
+        row,
+        col,
+        native_click_count,
+        System.monotonic_time(:millisecond)
+      )
+
+    state = %{state | workspace: MingaEditor.Session.State.set_mouse(state.workspace, mouse)}
     click_count = mouse.click_count
 
     # Check modifier clicks first
@@ -721,7 +823,7 @@ defmodule MingaEditor.Mouse do
 
   # On native GUI frontends, Ctrl-click follows platform context-menu semantics.
   defp handle_left_press_modifiers(
-         %{capabilities: %Capabilities{frontend_type: :native_gui}} = state,
+         %{frontend: %{capabilities: %Capabilities{frontend_type: :native_gui}}} = state,
          row,
          col,
          mods,
@@ -783,7 +885,15 @@ defmodule MingaEditor.Mouse do
               visual_type: :char
             }
 
-            state = EditorState.transition_mode(state, :visual, visual_state)
+            state = %{
+              state
+              | workspace:
+                  MingaEditor.Session.State.transition_mode(
+                    state.workspace,
+                    :visual,
+                    visual_state
+                  )
+            }
 
             update_mouse(
               state,
@@ -824,7 +934,11 @@ defmodule MingaEditor.Mouse do
           visual_type: :line
         }
 
-        state = EditorState.transition_mode(state, :visual, visual_state)
+        state = %{
+          state
+          | workspace:
+              MingaEditor.Session.State.transition_mode(state.workspace, :visual, visual_state)
+        }
 
         update_mouse(state, &MouseState.start_drag(&1, {line, 0}, origin_window))
     end
@@ -858,7 +972,11 @@ defmodule MingaEditor.Mouse do
           visual_type: :char
         }
 
-        EditorState.transition_mode(state, :visual, visual_state)
+        %{
+          state
+          | workspace:
+              MingaEditor.Session.State.transition_mode(state.workspace, :visual, visual_state)
+        }
     end
   end
 
@@ -876,9 +994,18 @@ defmodule MingaEditor.Mouse do
         # Navigation may open or switch to a different buffer, so drop the link
         # preview now; otherwise its underline would draw against the new buffer
         # until the next mouse motion (#2630).
-        state = EditorState.clear_cmd_hover_link(state)
+        state = %{
+          state
+          | workspace: MingaEditor.Session.State.clear_cmd_hover_link(state.workspace)
+        }
+
         state = cancel_mode_for_mouse(state)
-        state = EditorState.transition_mode(state, :normal)
+
+        state = %{
+          state
+          | workspace: MingaEditor.Session.State.transition_mode(state.workspace, :normal)
+        }
+
         MingaEditor.dispatch_command(state, :goto_definition)
     end
   end
@@ -969,7 +1096,11 @@ defmodule MingaEditor.Mouse do
       visual_type: :line
     }
 
-    EditorState.transition_mode(state, :visual, visual_state)
+    %{
+      state
+      | workspace:
+          MingaEditor.Session.State.transition_mode(state.workspace, :visual, visual_state)
+    }
   end
 
   # ── Word boundary detection ────────────────────────────────────────────────
@@ -1047,7 +1178,7 @@ defmodule MingaEditor.Mouse do
       windows = Windows.set_tree(state.workspace.windows, new_tree)
 
       state =
-        EditorState.set_windows(state, windows)
+        %{state | workspace: MingaEditor.Session.State.set_windows(state.workspace, windows)}
 
       {:ok, resize_windows_to_layout(state)}
     end
@@ -1065,8 +1196,12 @@ defmodule MingaEditor.Mouse do
 
         state =
           state
-          |> EditorState.set_windows(windows)
-          |> EditorState.set_mouse(mouse)
+          |> then(fn state ->
+            %{state | workspace: MingaEditor.Session.State.set_windows(state.workspace, windows)}
+          end)
+          |> then(fn state ->
+            %{state | workspace: MingaEditor.Session.State.set_mouse(state.workspace, mouse)}
+          end)
 
         resize_windows_to_layout(state)
 
@@ -1081,7 +1216,15 @@ defmodule MingaEditor.Mouse do
 
     Enum.reduce(layout.window_layouts, state, fn {id, wl}, acc ->
       {_r, _c, width, height} = wl.total
-      EditorState.update_window(acc, id, &Window.resize(&1, height, width))
+
+      %{
+        acc
+        | workspace:
+            MingaEditor.Session.State.set_windows(
+              acc.workspace,
+              MingaEditor.State.Windows.resize(acc.workspace.windows, id, height, width)
+            )
+      }
     end)
   end
 
@@ -1161,7 +1304,9 @@ defmodule MingaEditor.Mouse do
 
     state
     |> cancel_mode_for_mouse()
-    |> EditorState.transition_mode(:normal)
+    |> then(fn state ->
+      %{state | workspace: MingaEditor.Session.State.transition_mode(state.workspace, :normal)}
+    end)
   end
 
   @spec context_click_targets_active_buffer?(state(), non_neg_integer(), non_neg_integer()) ::
@@ -1259,7 +1404,11 @@ defmodule MingaEditor.Mouse do
         Buffer.move_to(state.workspace.buffers.active, {target_line, target_col})
 
         state = cancel_mode_for_mouse(state)
-        state = EditorState.transition_mode(state, :normal)
+
+        state = %{
+          state
+          | workspace: MingaEditor.Session.State.transition_mode(state.workspace, :normal)
+        }
 
         origin_window = state.workspace.windows.active
         update_mouse(state, &MouseState.start_drag(&1, {target_line, target_col}, origin_window))
@@ -1274,7 +1423,15 @@ defmodule MingaEditor.Mouse do
         :miss
 
       {:window_fold, win_id, buf_line} ->
-        {:handled, EditorState.update_window(state, win_id, &Window.toggle_fold(&1, buf_line))}
+        {:handled,
+         %{
+           state
+           | workspace:
+               MingaEditor.Session.State.set_windows(
+                 state.workspace,
+                 MingaEditor.State.Windows.toggle_fold(state.workspace.windows, win_id, buf_line)
+               )
+         }}
 
       {:decoration_fold, buf, fold_id} ->
         toggle_decoration_fold(buf, fold_id)
@@ -1333,7 +1490,7 @@ defmodule MingaEditor.Mouse do
          win_h,
          content_w
        ) do
-    with %Window{} = window <- EditorState.active_window_struct(state),
+    with %Window{} = window <- MingaEditor.Session.State.active_window_struct(state.workspace),
          buf when is_pid(buf) <- window.buffer do
       total_lines = Buffer.line_count(buf)
       {cursor_line, _} = window.cursor
@@ -1424,8 +1581,19 @@ defmodule MingaEditor.Mouse do
          %{workspace: %{keymap_scope: :file_tree}} = state
        ) do
     state
-    |> EditorState.update_file_tree(&FileTreeState.unfocus/1)
-    |> EditorState.set_keymap_scope(:editor)
+    |> then(fn state ->
+      %{
+        state
+        | workspace:
+            MingaEditor.Session.State.set_file_tree(
+              state.workspace,
+              (&FileTreeState.unfocus/1).(state.workspace.file_tree)
+            )
+      }
+    end)
+    |> then(fn state ->
+      %{state | workspace: MingaEditor.Session.State.set_keymap_scope(state.workspace, :editor)}
+    end)
   end
 
   defp maybe_unfocus_file_tree_for_content_click(state), do: state
@@ -1477,7 +1645,7 @@ defmodule MingaEditor.Mouse do
 
     case Layout.active_window_layout(layout, state) do
       %{content: {win_row, _win_col, content_w, win_h}} ->
-        window = EditorState.active_window_struct(state)
+        window = MingaEditor.Session.State.active_window_struct(state.workspace)
         total_lines = Buffer.line_count(buf)
         {cursor_line, _} = Buffer.cursor(buf)
         scroll_top = HitTest.scroll_top(window, win_h, content_w, cursor_line, buf)
@@ -1596,8 +1764,10 @@ defmodule MingaEditor.Mouse do
   end
 
   @spec auto_copy_selection(EditorState.t()) :: EditorState.t()
-  defp auto_copy_selection(%{capabilities: %Capabilities{frontend_type: :native_gui}} = state),
-    do: state
+  defp auto_copy_selection(
+         %{frontend: %{capabilities: %Capabilities{frontend_type: :native_gui}}} = state
+       ),
+       do: state
 
   defp auto_copy_selection(
          %{workspace: %{editing: %{mode: :visual, mode_state: ms}, buffers: %{active: buf}}} =
@@ -1778,7 +1948,12 @@ defmodule MingaEditor.Mouse do
   @spec set_char_visual_selection(state(), {non_neg_integer(), non_neg_integer()}) :: state()
   defp set_char_visual_selection(state, anchor) do
     visual_state = %VisualState{visual_anchor: anchor, visual_type: :char}
-    EditorState.transition_mode(state, :visual, visual_state)
+
+    %{
+      state
+      | workspace:
+          MingaEditor.Session.State.transition_mode(state.workspace, :visual, visual_state)
+    }
   end
 
   @spec cancel_mode_for_mouse(state()) :: state()
@@ -1896,7 +2071,7 @@ defmodule MingaEditor.Mouse do
   # line height crossed, so each event = 1 line. TUI frontends send one
   # event per wheel tick, so each event = 3 lines for usable speed.
   @spec scroll_lines(state()) :: pos_integer()
-  defp scroll_lines(%{capabilities: %Capabilities{frontend_type: :native_gui}}),
+  defp scroll_lines(%{frontend: %{capabilities: %Capabilities{frontend_type: :native_gui}}}),
     do: @gui_scroll_lines
 
   defp scroll_lines(_state) do
@@ -1906,7 +2081,7 @@ defmodule MingaEditor.Mouse do
   end
 
   @spec scroll_cols(state()) :: pos_integer()
-  defp scroll_cols(%{capabilities: %Capabilities{frontend_type: :native_gui}}),
+  defp scroll_cols(%{frontend: %{capabilities: %Capabilities{frontend_type: :native_gui}}}),
     do: @gui_scroll_cols
 
   defp scroll_cols(_state), do: @scroll_cols
@@ -1915,7 +2090,10 @@ defmodule MingaEditor.Mouse do
   defp current_viewport(state), do: EditorState.current_viewport(state)
 
   defp update_current_viewport(state, new_vp),
-    do: EditorState.update_current_viewport(state, new_vp)
+    do: %{
+      state
+      | workspace: MingaEditor.Session.State.update_current_viewport(state.workspace, new_vp)
+    }
 
   @spec modeline_command_at(state(), non_neg_integer()) :: atom() | nil
   defp modeline_command_at(

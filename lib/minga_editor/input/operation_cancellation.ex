@@ -15,7 +15,7 @@ defmodule MingaEditor.Input.OperationCancellation do
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
   def handle_key(state, @key_escape, _modifiers) do
-    case OperationFeedback.selected_from(state) do
+    case OperationFeedback.selected(state.feedback.operation_feedback) do
       %Operation{id: id, cancelable?: true} -> cancel(state, id)
       _operation -> {:passthrough, state}
     end

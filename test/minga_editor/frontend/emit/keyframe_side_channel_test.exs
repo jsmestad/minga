@@ -18,6 +18,7 @@ defmodule MingaEditor.Frontend.Emit.KeyframeSideChannelTest do
   alias MingaEditor.Frontend.Emit
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.Renderer.Caches
+  alias MingaEditor.State.Frontend
   alias Minga.RenderModel.Window, as: RenderWindow
   alias Minga.RenderModel.Window.Row, as: RenderRow
   alias Minga.RenderModel.Window.Span, as: RenderSpan
@@ -72,7 +73,16 @@ defmodule MingaEditor.Frontend.Emit.KeyframeSideChannelTest do
   # ── Helpers ──────────────────────────────────────────────────────────────────
 
   defp semantic_state do
-    %{emit_state() | capabilities: %Capabilities{frontend_type: :tui, semantic_ui: true}}
+    state = emit_state()
+    %Frontend{} = frontend = state.frontend
+
+    %{
+      state
+      | frontend: %Frontend{
+          frontend
+          | capabilities: %Capabilities{frontend_type: :tui, semantic_ui: true}
+        }
+    }
   end
 
   defp window_frame_with_content do

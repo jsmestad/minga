@@ -45,7 +45,20 @@ defmodule MingaEditor.State.ShellCallbacksTest do
     tb = TabBar.new(tab)
     context = EditorState.snapshot_tab_context(state)
     tb = TabBar.update_context(tb, 1, context)
-    EditorState.set_tab_bar(state, tb)
+
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          tb
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   @spec state_with_agent_chat() :: EditorState.t()
@@ -54,7 +67,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
     agent_window = Window.new_agent_chat(win_id, 24, 80)
 
     state = %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       shell_runtime: Runtime.new(Registry.get(:traditional), %TraditionalState{}),
       workspace: %SessionState{
         viewport: Viewport.new(24, 80),
@@ -79,7 +92,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
     agent_window = Window.new_agent_chat(win_id, 24, 80)
 
     state = %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       shell_runtime: Runtime.new(Registry.get(:traditional), %TraditionalState{}),
       workspace: %SessionState{
         viewport: Viewport.new(24, 80),
@@ -99,7 +112,21 @@ defmodule MingaEditor.State.ShellCallbacksTest do
     tb = TabBar.new(agent_tab)
     context = EditorState.snapshot_tab_context(state)
     tb = TabBar.update_context(tb, 1, context)
-    state = EditorState.set_tab_bar(state, tb)
+
+    state =
+      then(state, fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            tb
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
 
     state
   end
@@ -110,7 +137,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
     test "Traditional: tab context.buffers.active tracks workspace after switch" do
       state = state_with_file_tab()
       buf2 = start_buffer("second.ex")
-      state = EditorState.add_buffer(state, buf2)
+      state = MingaEditor.Handlers.BufferRegistry.add_buffer(state, buf2)
 
       new_state = MingaEditor.BufferActivation.activate(state, 1)
 
@@ -129,8 +156,20 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       # Manually add buf2 to the buffer list without triggering tab creation
       # (EditorState.add_buffer from an agent tab would create a new file tab)
       state =
-        EditorState.update_buffers(state, fn buffers ->
-          %{buffers | active: buf1, list: [buf1, buf2], active_index: 0}
+        then(state, fn state ->
+          %{
+            state
+            | workspace:
+                then(
+                  state.workspace,
+                  &MingaEditor.Session.State.set_buffers(
+                    &1,
+                    (fn buffers ->
+                       %{buffers | active: buf1, list: [buf1, buf2], active_index: 0}
+                     end).(state.workspace.buffers)
+                  )
+                )
+          }
         end)
 
       new_state = MingaEditor.BufferActivation.activate(state, 1)
@@ -146,7 +185,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
     test "Traditional: find_tab_by_buffer returns active tab after switch" do
       state = state_with_file_tab()
       buf2 = start_buffer("second.ex")
-      state = EditorState.add_buffer(state, buf2)
+      state = MingaEditor.Handlers.BufferRegistry.add_buffer(state, buf2)
 
       new_state = MingaEditor.BufferActivation.activate(state, 1)
 
@@ -159,7 +198,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       state = state_with_file_tab()
       buf1 = state.workspace.buffers.active
       buf2 = start_buffer("clean.ex")
-      state = EditorState.add_buffer(state, buf2)
+      state = MingaEditor.Handlers.BufferRegistry.add_buffer(state, buf2)
 
       BufferProcess.insert_char(buf1, "x")
       assert BufferProcess.dirty?(buf1)
@@ -177,8 +216,8 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       state = state_with_file_tab()
       buf2 = start_buffer("second.ex")
       buf3 = start_buffer("third.ex")
-      state = EditorState.add_buffer(state, buf2)
-      state = EditorState.add_buffer(state, buf3)
+      state = MingaEditor.Handlers.BufferRegistry.add_buffer(state, buf2)
+      state = MingaEditor.Handlers.BufferRegistry.add_buffer(state, buf3)
 
       state = MingaEditor.BufferActivation.activate(state, 1)
       assert TabBar.active(EditorState.tab_bar(state)).context.buffers.active == buf2
@@ -196,7 +235,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
     test "no tab bar: switch_buffer still works" do
       state = base_state()
       buf2 = start_buffer("second")
-      state = EditorState.add_buffer(state, buf2)
+      state = MingaEditor.Handlers.BufferRegistry.add_buffer(state, buf2)
 
       # Switch back to first buffer
       new_state = MingaEditor.BufferActivation.activate(state, 0)
@@ -210,7 +249,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       file_buf = start_buffer("file content")
 
       # Add file buffer (the tab-less shell's on_buffer_added doesn't overwrite agent_chat)
-      state = EditorState.add_buffer(state, file_buf)
+      state = MingaEditor.Handlers.BufferRegistry.add_buffer(state, file_buf)
 
       # Verify window still shows agent_chat
       win_id = state.workspace.windows.active
@@ -234,9 +273,9 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       state = state_with_file_tab()
       buf1 = state.workspace.buffers.active
       buf2 = start_buffer("second")
-      state = EditorState.add_buffer(state, buf2)
-      state = EditorState.monitor_buffer(state, buf1)
-      state = EditorState.monitor_buffer(state, buf2)
+      state = MingaEditor.Handlers.BufferRegistry.add_buffer(state, buf2)
+      state = MingaEditor.Handlers.BufferRegistry.monitor_buffer(state, buf1)
+      state = MingaEditor.Handlers.BufferRegistry.monitor_buffer(state, buf2)
 
       # Close the active buffer (buf2)
       new_state = EditorState.close_buffer_pure(state, buf2)
@@ -255,8 +294,8 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       file_buf = start_buffer("file content")
 
       # Add and monitor the file buffer
-      state = EditorState.add_buffer(state, file_buf)
-      state = EditorState.monitor_buffer(state, file_buf)
+      state = MingaEditor.Handlers.BufferRegistry.add_buffer(state, file_buf)
+      state = MingaEditor.Handlers.BufferRegistry.monitor_buffer(state, file_buf)
 
       # Verify agent_chat window
       win_id = state.workspace.windows.active
@@ -329,7 +368,18 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       session_pid = spawn(fn -> :ok end)
       tab = EditorState.active_tab(state)
 
-      new_state = EditorState.set_tab_session(state, tab.id, session_pid)
+      new_state =
+        then(state, fn state ->
+          %{
+            state
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.set_tab_session(
+                  state.shell_runtime,
+                  tab.id,
+                  session_pid
+                )
+          }
+        end)
 
       updated_tab = EditorState.active_tab(new_state)
       assert updated_tab.session == session_pid
@@ -340,7 +390,15 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       session_pid = spawn(fn -> :ok end)
 
       # Should not crash
-      new_state = EditorState.set_tab_session(state, 1, session_pid)
+      new_state =
+        then(state, fn state ->
+          %{
+            state
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.set_tab_session(state.shell_runtime, 1, session_pid)
+          }
+        end)
+
       assert new_state.shell_runtime == state.shell_runtime
     end
   end

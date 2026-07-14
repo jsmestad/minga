@@ -26,11 +26,23 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
 
   defp build_state(tab_bar) do
     state = %EditorState{
-      port_manager: nil,
+      frontend: %MingaEditor.State.Frontend{port_manager: nil},
       workspace: %Session.State{viewport: Viewport.new(80, 24)}
     }
 
-    EditorState.set_tab_bar(state, tab_bar)
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          tab_bar
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   defp empty_tab_bar do

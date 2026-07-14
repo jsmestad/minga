@@ -1,6 +1,7 @@
 defmodule MingaEditor.Input.InterruptTest do
   use ExUnit.Case, async: true
 
+  alias MingaEditor.Session.State, as: SessionState
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Editing.Completion
   alias Minga.Mode
@@ -11,8 +12,8 @@ defmodule MingaEditor.Input.InterruptTest do
   alias MingaEditor.Input.Interrupt
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.Feedback
   alias MingaEditor.Shell.Traditional.HoverPopupWorkflow
   alias MingaEditor.Shell.Traditional.ModalWorkflow
   alias MingaEditor.Shell.Traditional.WhichKeyWorkflow
@@ -35,7 +36,7 @@ defmodule MingaEditor.Input.InterruptTest do
     buf = start_supervised!({BufferProcess, buf_opts})
 
     %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
@@ -45,7 +46,7 @@ defmodule MingaEditor.Input.InterruptTest do
           active_index: 0
         }
       },
-      focus_stack: Input.default_stack()
+      interaction: %MingaEditor.State.Interaction{focus_stack: Input.default_stack()}
     }
   end
 
@@ -99,7 +100,12 @@ defmodule MingaEditor.Input.InterruptTest do
       state
       |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("stale status")
       |> HoverPopupWorkflow.show(hover)
-      |> AgentAccess.update_agent_ui(&UIState.set_prefix(&1, :g))
+      |> then(fn state ->
+        MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+          state,
+          (&UIState.set_prefix(&1, :g)).(state.workspace.agent_ui)
+        )
+      end)
 
     {state, hover}
   end
@@ -112,7 +118,7 @@ defmodule MingaEditor.Input.InterruptTest do
     assert Runtime.state(state.shell_runtime).modal == :none
     assert Runtime.state(state.shell_runtime).whichkey.node == nil
     assert Runtime.state(state.shell_runtime).whichkey.show == false
-    assert state |> AgentAccess.view() |> View.pending_prefix() == nil
+    assert state.workspace.agent_ui.view |> View.pending_prefix() == nil
     assert state.shell_runtime.state.notice.message == nil
     assert state.shell_runtime.state.hover_popup == nil
   end
@@ -145,13 +151,17 @@ defmodule MingaEditor.Input.InterruptTest do
 
   describe "scope reset" do
     test "resets :agent scope to :editor" do
-      state = put_in(base_state().workspace.keymap_scope, :agent)
+      state = base_state()
+      state = %{state | workspace: SessionState.set_keymap_scope(state.workspace, :agent)}
+
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
       assert new_state.workspace.keymap_scope == :editor
     end
 
     test "resets :file_tree scope to :editor" do
-      state = put_in(base_state().workspace.keymap_scope, :file_tree)
+      state = base_state()
+      state = %{state | workspace: SessionState.set_keymap_scope(state.workspace, :file_tree)}
+
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
       assert new_state.workspace.keymap_scope == :editor
     end
@@ -299,16 +309,28 @@ defmodule MingaEditor.Input.InterruptTest do
     end
 
     test "clears the notice without mutating operation feedback" do
-      {state, _operation} =
+      state =
         base_state()
         |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("some message")
-        |> OperationFeedback.start_in(:external_format, "buffer:ctrl-g", "Formatting")
 
-      operation_feedback = state.operation_feedback
+      {operation_feedback, _operation} =
+        OperationFeedback.start(
+          state.feedback.operation_feedback,
+          :external_format,
+          "buffer:ctrl-g",
+          "Formatting"
+        )
+
+      state = %{
+        state
+        | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)
+      }
+
+      operation_feedback = state.feedback.operation_feedback
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
       assert new_state.shell_runtime.state.notice.message == nil
-      assert new_state.operation_feedback == operation_feedback
+      assert new_state.feedback.operation_feedback == operation_feedback
     end
   end
 

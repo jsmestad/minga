@@ -2,8 +2,8 @@ defmodule MingaEditor.Title do
   @moduledoc """
   Formats the terminal window title from the active window content.
 
-  Uses `EditorState.active_content_context/1` to derive display metadata
-  from the active window's content type. In agent mode the title shows
+  Derives display metadata from the active window and process-backed buffer
+  in this workflow boundary. In agent mode the title shows
   "Agent" instead of the buffer name. In buffer mode it shows the filename.
 
   The title format string supports these placeholders:
@@ -65,12 +65,21 @@ defmodule MingaEditor.Title do
     end
   end
 
-  # Builds a content context from either EditorState or a plain map (Input).
-  # EditorState has active_content_context/1; for plain maps we replicate
-  # the logic using the workspace fields directly.
   @spec build_content_context(state()) :: map()
   defp build_content_context(%EditorState{} = state) do
-    EditorState.active_content_context(state)
+    case MingaEditor.Session.State.active_window_struct(state.workspace) do
+      %MingaEditor.Window{content: {:agent_chat, _session}} ->
+        %{
+          type: :agent,
+          display_name: "Agent",
+          directory: project_directory(),
+          dirty: false,
+          filetype: :markdown
+        }
+
+      _window ->
+        buffer_content_context(state.workspace.buffers.active)
+    end
   end
 
   defp build_content_context(%{workspace: %{buffers: %{active: buf}}} = _state)
@@ -94,9 +103,37 @@ defmodule MingaEditor.Title do
     %{type: :buffer, display_name: "[no file]", directory: "", dirty: false, filetype: :text}
   end
 
+  @spec buffer_content_context(pid() | nil) :: map()
+  defp buffer_content_context(buffer) when is_pid(buffer) do
+    path = Buffer.file_path(buffer)
+    name = Buffer.buffer_name(buffer)
+
+    %{
+      type: :buffer,
+      display_name: if(path, do: Path.basename(path), else: name || "[no file]"),
+      directory: if(path, do: path |> Path.dirname() |> Path.basename(), else: ""),
+      dirty: Buffer.dirty?(buffer),
+      filetype: Buffer.filetype(buffer) || :text
+    }
+  end
+
+  defp buffer_content_context(_buffer) do
+    %{type: :buffer, display_name: "[no file]", directory: "", dirty: false, filetype: :text}
+  end
+
+  @spec project_directory() :: String.t()
+  defp project_directory do
+    case Minga.Project.root() do
+      nil -> ""
+      root -> Path.basename(root)
+    end
+  catch
+    :exit, _reason -> ""
+  end
+
   @spec build_vars(state()) :: [{String.t(), String.t()}]
   defp build_vars(%EditorState{} = state) do
-    ctx = EditorState.active_content_context(state)
+    ctx = build_content_context(state)
     mode_str = state |> Minga.Editing.mode() |> to_string() |> String.upcase()
 
     case ctx.type do

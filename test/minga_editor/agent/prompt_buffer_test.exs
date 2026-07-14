@@ -15,7 +15,7 @@ defmodule MingaEditor.Agent.PromptBufferTest do
 
   defp focused_panel(text \\ "") do
     panel = UIState.new()
-    panel = UIState.set_input_focused(panel, true)
+    panel = MingaEditor.Agent.PromptBuffer.set_input_focused(panel, true)
 
     if text != "" do
       BufferProcess.replace_content(panel.panel.prompt_buffer, text)
@@ -46,7 +46,7 @@ defmodule MingaEditor.Agent.PromptBufferTest do
     test "ensure_prompt_buffer is idempotent" do
       panel = focused_panel()
       pid1 = panel.panel.prompt_buffer
-      panel = UIState.ensure_prompt_buffer(panel)
+      panel = MingaEditor.Agent.PromptBuffer.ensure(panel)
       assert panel.panel.prompt_buffer == pid1
     end
 
@@ -62,7 +62,7 @@ defmodule MingaEditor.Agent.PromptBufferTest do
         100 -> flunk("expected EXIT signal")
       end
 
-      panel = UIState.ensure_prompt_buffer(panel)
+      panel = MingaEditor.Agent.PromptBuffer.ensure(panel)
       assert is_pid(panel.panel.prompt_buffer)
       assert panel.panel.prompt_buffer != old_pid
       assert Process.alive?(panel.panel.prompt_buffer)
@@ -74,57 +74,57 @@ defmodule MingaEditor.Agent.PromptBufferTest do
   describe "text operations" do
     test "insert_char writes to buffer" do
       panel = focused_panel()
-      panel = UIState.insert_char(panel, "h")
-      panel = UIState.insert_char(panel, "i")
+      panel = MingaEditor.Agent.PromptBuffer.insert_char(panel, "h")
+      panel = MingaEditor.Agent.PromptBuffer.insert_char(panel, "i")
       assert BufferProcess.content(panel.panel.prompt_buffer) == "hi"
     end
 
     test "insert_newline writes to buffer" do
       panel = focused_panel()
-      panel = UIState.insert_char(panel, "a")
-      panel = UIState.insert_newline(panel)
-      panel = UIState.insert_char(panel, "b")
+      panel = MingaEditor.Agent.PromptBuffer.insert_char(panel, "a")
+      panel = MingaEditor.Agent.PromptBuffer.insert_newline(panel)
+      panel = MingaEditor.Agent.PromptBuffer.insert_char(panel, "b")
       assert BufferProcess.content(panel.panel.prompt_buffer) == "a\nb"
     end
 
     test "delete_char writes to buffer" do
       panel = focused_panel("hello")
       BufferProcess.move_to(panel.panel.prompt_buffer, {0, 5})
-      panel = UIState.delete_char(panel)
+      panel = MingaEditor.Agent.PromptBuffer.delete_char(panel)
       assert BufferProcess.content(panel.panel.prompt_buffer) == "hell"
     end
 
     test "clear_input empties buffer" do
       panel = focused_panel()
-      panel = UIState.insert_char(panel, "x")
-      panel = UIState.clear_input(panel)
+      panel = MingaEditor.Agent.PromptBuffer.insert_char(panel, "x")
+      panel = MingaEditor.Agent.PromptBuffer.clear_input(panel)
       assert BufferProcess.content(panel.panel.prompt_buffer) == ""
     end
 
     test "short paste writes to buffer" do
       panel = focused_panel()
-      panel = UIState.insert_paste(panel, "pasted")
+      panel = MingaEditor.Agent.PromptBuffer.insert_paste(panel, "pasted")
       assert BufferProcess.content(panel.panel.prompt_buffer) == "pasted"
     end
 
     test "history_prev writes to buffer" do
       panel = focused_panel()
-      panel = UIState.insert_char(panel, "x")
-      panel = UIState.clear_input(panel)
-      panel = UIState.history_prev(panel)
+      panel = MingaEditor.Agent.PromptBuffer.insert_char(panel, "x")
+      panel = MingaEditor.Agent.PromptBuffer.clear_input(panel)
+      panel = MingaEditor.Agent.PromptBuffer.history_prev(panel)
       assert BufferProcess.content(panel.panel.prompt_buffer) == "x"
     end
 
     test "history_next writes to buffer" do
       panel = focused_panel()
-      panel = UIState.insert_char(panel, "a")
-      panel = UIState.clear_input(panel)
-      panel = UIState.insert_char(panel, "b")
-      panel = UIState.clear_input(panel)
+      panel = MingaEditor.Agent.PromptBuffer.insert_char(panel, "a")
+      panel = MingaEditor.Agent.PromptBuffer.clear_input(panel)
+      panel = MingaEditor.Agent.PromptBuffer.insert_char(panel, "b")
+      panel = MingaEditor.Agent.PromptBuffer.clear_input(panel)
 
-      panel = UIState.history_prev(panel)
-      panel = UIState.history_prev(panel)
-      panel = UIState.history_next(panel)
+      panel = MingaEditor.Agent.PromptBuffer.history_prev(panel)
+      panel = MingaEditor.Agent.PromptBuffer.history_prev(panel)
+      panel = MingaEditor.Agent.PromptBuffer.history_next(panel)
       assert BufferProcess.content(panel.panel.prompt_buffer) == "b"
     end
   end
@@ -134,25 +134,25 @@ defmodule MingaEditor.Agent.PromptBufferTest do
   describe "accessor consistency" do
     test "input_lines matches buffer content" do
       panel = focused_panel("hello\nworld")
-      assert UIState.input_lines(panel) == ["hello", "world"]
+      assert MingaEditor.Agent.PromptBuffer.input_lines(panel) == ["hello", "world"]
     end
 
     test "input_cursor matches buffer cursor" do
       panel = focused_panel("hello")
       BufferProcess.move_to(panel.panel.prompt_buffer, {0, 3})
-      assert UIState.input_cursor(panel) == {0, 3}
+      assert MingaEditor.Agent.PromptBuffer.input_cursor(panel) == {0, 3}
     end
 
     test "input_line_count matches buffer" do
       panel = focused_panel("a\nb\nc")
-      assert UIState.input_line_count(panel) == 3
+      assert MingaEditor.Agent.PromptBuffer.input_line_count(panel) == 3
     end
 
     test "input_empty? reflects buffer state" do
       panel = focused_panel()
-      assert UIState.input_empty?(panel)
-      panel = UIState.insert_char(panel, "x")
-      refute UIState.input_empty?(panel)
+      assert MingaEditor.Agent.PromptBuffer.input_empty?(panel)
+      panel = MingaEditor.Agent.PromptBuffer.insert_char(panel, "x")
+      refute MingaEditor.Agent.PromptBuffer.input_empty?(panel)
     end
   end
 end

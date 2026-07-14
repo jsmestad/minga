@@ -16,7 +16,6 @@ defmodule MingaEditor.Agent.View.PromptRenderer do
   those surfaces still depend on.
   """
 
-  alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.ViewContext
 
   alias MingaEditor.Input.Wrap, as: InputWrap
@@ -40,7 +39,7 @@ defmodule MingaEditor.Agent.View.PromptRenderer do
   """
   @spec prompt_height(ViewContext.t(), pos_integer()) :: pos_integer()
   def prompt_height(%ViewContext{} = ctx, chat_width) do
-    input_lines = UIState.input_lines(ctx.ui_state.panel)
+    input_lines = MingaEditor.Agent.PromptBuffer.input_lines(ctx.ui_state.panel)
     box_width = max(chat_width - 2 * @input_h_margin, 10)
     compute_input_height(input_lines, input_inner_width(box_width))
   end
@@ -67,8 +66,8 @@ defmodule MingaEditor.Agent.View.PromptRenderer do
       box_col = col_off + @input_h_margin
       inner_width = input_inner_width(box_width)
 
-      lines = UIState.input_lines(panel)
-      cursor = UIState.input_cursor(panel)
+      lines = MingaEditor.Agent.PromptBuffer.input_lines(panel)
+      cursor = MingaEditor.Agent.PromptBuffer.input_cursor(panel)
 
       total_visual = InputWrap.visual_line_count(lines, inner_width)
       visible_lines = max(min(total_visual, @max_input_lines), 1)

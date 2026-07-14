@@ -4,7 +4,6 @@ defmodule MingaEditor.BufferActivationTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.BufferActivation
   alias MingaEditor.Session.State, as: SessionState
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
 
   import MingaEditor.RenderPipeline.TestHelpers
@@ -16,7 +15,9 @@ defmodule MingaEditor.BufferActivationTest do
     buffers = Buffers.add(state.workspace.buffers, second_buffer)
 
     state =
-      EditorState.set_workspace(state, SessionState.activate_buffer(state.workspace, buffers))
+      then(state, fn state ->
+        %{state | workspace: SessionState.activate_buffer(state.workspace, buffers)}
+      end)
 
     activated = BufferActivation.activate(state, 0, notify_shell?: false)
 
@@ -30,7 +31,9 @@ defmodule MingaEditor.BufferActivationTest do
     buffers = Buffers.add(state.workspace.buffers, second_buffer)
 
     state =
-      EditorState.set_workspace(state, SessionState.activate_buffer(state.workspace, buffers))
+      then(state, fn state ->
+        %{state | workspace: SessionState.activate_buffer(state.workspace, buffers)}
+      end)
 
     activated = BufferActivation.activate(state, -2, notify_shell?: false)
 

@@ -21,7 +21,9 @@ defmodule MingaEditor.Input.GlobalBindingsTest do
     client = fake_client(self())
     ref = make_ref()
     operation = operation(client, ref, buffer)
-    state = EditorState.update_lsp(state, &LSPState.track_format(&1, operation))
+
+    state =
+      %{state | lsp: (&LSPState.track_format(&1, operation)).(state.lsp)}
 
     assert {:passthrough, new_state} = GlobalBindings.handle_key(state, 27, 0)
     assert_receive {:cancel_request, ^ref}
@@ -76,6 +78,9 @@ defmodule MingaEditor.Input.GlobalBindingsTest do
       }
     }
 
-    %EditorState{port_manager: self(), workspace: workspace}
+    %EditorState{
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
+      workspace: workspace
+    }
   end
 end

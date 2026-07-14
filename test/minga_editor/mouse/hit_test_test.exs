@@ -95,11 +95,22 @@ defmodule MingaEditor.Mouse.HitTestTest do
       {state, buffer} = start_mouse_state("abcdefghijklmnopqrstuvwxyz")
 
       state =
-        EditorState.update_window(
-          state,
-          state.workspace.windows.active,
-          &Window.scroll_horizontal(&1, 5)
-        )
+        then(state, fn state ->
+          %{
+            state
+            | workspace:
+                then(state.workspace, fn workspace ->
+                  MingaEditor.Session.State.set_windows(
+                    workspace,
+                    MingaEditor.State.Windows.scroll_horizontal(
+                      state.workspace.windows,
+                      state.workspace.windows.active,
+                      5
+                    )
+                  )
+                end)
+          }
+        end)
 
       %{content: {row, col, _width, _height}} = active_window_layout(state)
       gutter_width = HitTest.buffer_gutter_width(buffer, BufferProcess.line_count(buffer))
@@ -132,11 +143,22 @@ defmodule MingaEditor.Mouse.HitTestTest do
         end)
 
       state =
-        EditorState.update_window(
-          state,
-          state.workspace.windows.active,
-          &Window.scroll_horizontal(&1, 20)
-        )
+        then(state, fn state ->
+          %{
+            state
+            | workspace:
+                then(state.workspace, fn workspace ->
+                  MingaEditor.Session.State.set_windows(
+                    workspace,
+                    MingaEditor.State.Windows.scroll_horizontal(
+                      state.workspace.windows,
+                      state.workspace.windows.active,
+                      20
+                    )
+                  )
+                end)
+          }
+        end)
 
       %{content: {row, col, _width, _height}} = active_window_layout(state)
       gutter_width = HitTest.buffer_gutter_width(buffer, BufferProcess.line_count(buffer))
@@ -149,11 +171,25 @@ defmodule MingaEditor.Mouse.HitTestTest do
       {state, buffer} = start_mouse_state(lines(0..49))
 
       state =
-        EditorState.update_window(state, state.workspace.windows.active, fn window ->
-          window
-          |> Window.set_fold_ranges([FoldRange.new!(0, 2)])
-          |> Window.fold_at(0)
-          |> Window.scroll_viewport(1, BufferProcess.line_count(buffer))
+        then(state, fn state ->
+          %{
+            state
+            | workspace:
+                then(
+                  state.workspace,
+                  &MingaEditor.Session.State.set_windows(
+                    &1,
+                    MingaEditor.State.Windows.replace_window(
+                      state.workspace.windows,
+                      state.workspace.windows.active,
+                      Map.fetch!(state.workspace.windows.map, state.workspace.windows.active)
+                      |> Window.set_fold_ranges([FoldRange.new!(0, 2)])
+                      |> Window.fold_at(0)
+                      |> Window.scroll_viewport(1, BufferProcess.line_count(buffer))
+                    )
+                  )
+                )
+          }
         end)
 
       %{content: {row, col, _width, _height}} = active_window_layout(state)

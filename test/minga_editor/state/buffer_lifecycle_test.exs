@@ -30,7 +30,20 @@ defmodule MingaEditor.State.BufferLifecycleTest do
     state = base_state(opts)
     tab = Tab.new_file(1, "test.ex")
     tb = TabBar.new(tab) |> TabBar.update_context(1, EditorState.snapshot_tab_context(state))
-    EditorState.set_tab_bar(state, tb)
+
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          tb
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   @spec state_with_file_tab_for_path(String.t(), String.t()) :: {EditorState.t(), pid()}
@@ -39,7 +52,20 @@ defmodule MingaEditor.State.BufferLifecycleTest do
     state = state_for_buffer(buf)
     tab = Tab.new_file(1, Path.basename(path))
     tb = TabBar.new(tab) |> TabBar.update_context(1, EditorState.snapshot_tab_context(state))
-    {EditorState.set_tab_bar(state, tb), buf}
+
+    {then(state, fn root ->
+       shell_state =
+         MingaEditor.Shell.Traditional.State.set_tab_bar(
+           MingaEditor.Shell.Runtime.state(root.shell_runtime),
+           tb
+         )
+
+       %{
+         root
+         | shell_runtime:
+             MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+       }
+     end), buf}
   end
 
   @spec state_with_agent_tab() :: EditorState.t()
@@ -47,7 +73,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
     agent_window = Window.new_agent_chat(1, 24, 80)
 
     state = %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       shell_runtime: resolved_traditional_runtime(),
       workspace: %SessionState{
         viewport: Viewport.new(24, 80),
@@ -67,7 +93,19 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       TabBar.new(Tab.new_agent(1, "Agent"))
       |> TabBar.update_context(1, EditorState.snapshot_tab_context(state))
 
-    EditorState.set_tab_bar(state, tb)
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          tb
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   @spec start_buffer(String.t()) :: pid()
@@ -115,9 +153,9 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       assert %Buffers{active: ^original_buf} =
                TabBar.get(EditorState.tab_bar(previewed), 1).context.buffers
 
-      assert previewed.buffer_add_context == :open
+      assert previewed.buffer_lifecycle.buffer_add_context == :open
 
-      duplicate = EditorState.add_buffer(state, opened_buf)
+      duplicate = MingaEditor.Handlers.BufferRegistry.add_buffer(state, opened_buf)
 
       {switched_back, :already_registered} =
         EditorState.add_buffer_pure(duplicate, original_buf)
@@ -199,7 +237,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       agent_window = Window.new_agent_chat(1, 24, 80)
 
       state = %EditorState{
-        port_manager: self(),
+        frontend: %MingaEditor.State.Frontend{port_manager: self()},
         workspace: %SessionState{
           viewport: Viewport.new(24, 80),
           editing: VimState.new(),
@@ -242,11 +280,20 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       preview_state =
         state
         |> with_buffer_pool([original_buf, preview_buf])
-        |> EditorState.set_buffer_add_context(:preview)
+        |> then(fn state ->
+          %{
+            state
+            | buffer_lifecycle:
+                MingaEditor.State.BufferLifecycle.expect_buffer(
+                  state.buffer_lifecycle,
+                  :preview
+                )
+          }
+        end)
 
       previewed = MingaEditor.BufferActivation.activate(preview_state, 1)
       assert previewed.workspace.buffers.active == preview_buf
-      assert previewed.buffer_add_context == :open
+      assert previewed.buffer_lifecycle.buffer_add_context == :open
 
       assert %Buffers{active: ^original_buf} =
                TabBar.active(EditorState.tab_bar(previewed)).context.buffers
@@ -261,21 +308,21 @@ defmodule MingaEditor.State.BufferLifecycleTest do
 
       state =
         state
-        |> EditorState.add_buffer(buf2)
-        |> EditorState.monitor_buffer(buf1)
-        |> EditorState.monitor_buffer(buf2)
+        |> MingaEditor.Handlers.BufferRegistry.add_buffer(buf2)
+        |> MingaEditor.Handlers.BufferRegistry.monitor_buffer(buf1)
+        |> MingaEditor.Handlers.BufferRegistry.monitor_buffer(buf2)
 
       closed_active = EditorState.close_buffer_pure(state, buf2)
       refute buf2 in closed_active.workspace.buffers.list
       assert closed_active.workspace.buffers.active == buf1
-      refute Map.has_key?(closed_active.buffer_monitors, buf2)
+      refute Map.has_key?(closed_active.buffer_lifecycle.buffer_monitors, buf2)
 
       buf3 = start_buffer("third")
 
       inactive_state =
         state
-        |> EditorState.add_buffer(buf3)
-        |> EditorState.monitor_buffer(buf3)
+        |> MingaEditor.Handlers.BufferRegistry.add_buffer(buf3)
+        |> MingaEditor.Handlers.BufferRegistry.monitor_buffer(buf3)
 
       closed_inactive = EditorState.close_buffer_pure(inactive_state, buf1)
       assert closed_inactive.workspace.buffers.active == buf3
@@ -283,11 +330,11 @@ defmodule MingaEditor.State.BufferLifecycleTest do
 
       only_state = base_state()
       only_buf = only_state.workspace.buffers.active
-      only_state = EditorState.monitor_buffer(only_state, only_buf)
+      only_state = MingaEditor.Handlers.BufferRegistry.monitor_buffer(only_state, only_buf)
       closed_only = EditorState.close_buffer_pure(only_state, only_buf)
       assert closed_only.workspace.buffers.list == []
       assert closed_only.workspace.buffers.active == nil
-      refute Map.has_key?(closed_only.buffer_monitors, only_buf)
+      refute Map.has_key?(closed_only.buffer_lifecycle.buffer_monitors, only_buf)
     end
 
     test "closing buffers scrubs inactive tab snapshots, including tabs whose only buffer died" do
@@ -296,7 +343,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
 
       state =
         state_for_buffer(buf_a, list: [buf_a, buf_b])
-        |> EditorState.monitor_buffers([buf_a, buf_b])
+        |> MingaEditor.Handlers.BufferRegistry.monitor_buffers([buf_a, buf_b])
 
       {state, tab_b} = state_with_inactive_tab_buffer(state, buf_b)
 
@@ -310,7 +357,10 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       assert restored_ws.buffers.active != buf_b
 
       only = start_buffer("only buffer")
-      only_state = state_for_buffer(only) |> EditorState.monitor_buffer(only)
+
+      only_state =
+        state_for_buffer(only) |> MingaEditor.Handlers.BufferRegistry.monitor_buffer(only)
+
       {only_state, only_tab} = state_with_inactive_tab_buffer(only_state, only)
       closed_only = EditorState.close_buffer_pure(only_state, only)
       only_tab_after = TabBar.get(EditorState.tab_bar(closed_only), only_tab.id)
@@ -352,7 +402,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
     }
 
     %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       shell_runtime: resolved_traditional_runtime(),
       workspace: %SessionState{
         viewport: Viewport.new(24, 80),
@@ -373,8 +423,20 @@ defmodule MingaEditor.State.BufferLifecycleTest do
   end
 
   defp with_buffer_pool(state, buffers) do
-    EditorState.update_buffers(state, fn %Buffers{} = current ->
-      %{current | list: buffers}
+    then(state, fn state ->
+      %{
+        state
+        | workspace:
+            then(
+              state.workspace,
+              &MingaEditor.Session.State.set_buffers(
+                &1,
+                (fn %Buffers{} = current ->
+                   %{current | list: buffers}
+                 end).(state.workspace.buffers)
+              )
+            )
+      }
     end)
   end
 
@@ -392,8 +454,36 @@ defmodule MingaEditor.State.BufferLifecycleTest do
     }
 
     tb = TabBar.update_context(tb, tab_b.id, tab_b_context)
-    state_with_tb = EditorState.set_tab_bar(state, tb)
+
+    state_with_tb =
+      then(state, fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            tb
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
+
     tb = TabBar.update_context(tb, 1, EditorState.snapshot_tab_context(state_with_tb))
-    {EditorState.set_tab_bar(state, tb), tab_b}
+
+    {then(state, fn root ->
+       shell_state =
+         MingaEditor.Shell.Traditional.State.set_tab_bar(
+           MingaEditor.Shell.Runtime.state(root.shell_runtime),
+           tb
+         )
+
+       %{
+         root
+         | shell_runtime:
+             MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+       }
+     end), tab_b}
   end
 end

@@ -75,7 +75,10 @@ defmodule MingaEditor.Session.StateTest do
 
       workspace =
         state.workspace
-        |> SessionState.update_window(win_id, &Window.set_document_symbols(&1, symbols))
+        |> SessionState.replace_window(
+          win_id,
+          Window.set_document_symbols(Map.fetch!(state.workspace.windows.map, win_id), symbols)
+        )
         |> then(fn ws ->
           %{
             ws
@@ -100,10 +103,10 @@ defmodule MingaEditor.Session.StateTest do
       symbols = [%Symbol{kind: :module, name: "Same", range: {0, 0, 1, 3}}]
 
       workspace =
-        SessionState.update_window(
+        SessionState.replace_window(
           state.workspace,
           window_id,
-          &Window.set_document_symbols(&1, symbols)
+          Window.set_document_symbols(Map.fetch!(state.workspace.windows.map, window_id), symbols)
         )
 
       activated = SessionState.activate_buffer(workspace, workspace.buffers)
@@ -127,8 +130,8 @@ defmodule MingaEditor.Session.StateTest do
       assert activated.buffers.active == buffer
       assert activated.keymap_scope == :editor
       assert activated.launchpad == nil
-      assert activated.cmd_hover_link == nil
-      assert activated.cmd_hover_cell == nil
+      assert activated.hover_observation.link == nil
+      assert activated.hover_observation.cell == nil
       assert window.content == {:buffer, buffer}
     end
   end
@@ -160,8 +163,8 @@ defmodule MingaEditor.Session.StateTest do
       assert focused.buffers.active == second_buffer
       assert focused.buffers.active_index == 1
       assert focused.keymap_scope == :file_tree
-      assert focused.cmd_hover_link == nil
-      assert focused.cmd_hover_cell == nil
+      assert focused.hover_observation.link == nil
+      assert focused.hover_observation.cell == nil
       assert focused.launchpad == nil
 
       agent_focused = SessionState.focus_window(focused, 3, {1, 2})

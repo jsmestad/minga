@@ -24,7 +24,7 @@ defmodule MingaEditor.Input.HandlerTest do
     {:ok, buf} = BufferProcess.start_link(buf_opts)
 
     %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
@@ -34,7 +34,7 @@ defmodule MingaEditor.Input.HandlerTest do
           active_index: 0
         }
       },
-      focus_stack: Input.default_stack()
+      interaction: %MingaEditor.State.Interaction{focus_stack: Input.default_stack()}
     }
   end
 

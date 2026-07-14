@@ -85,7 +85,7 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
   """
   @spec visible_rows(Panel.t(), pos_integer()) :: pos_integer()
   def visible_rows(%Panel{} = panel, inner_width) do
-    lines = Panel.input_lines(panel)
+    lines = MingaEditor.Agent.PromptBuffer.input_lines(panel)
     total_visual = InputWrap.visual_line_count(lines, inner_width)
     max(min(total_visual, @max_input_lines), 1)
   end
@@ -95,8 +95,8 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
   @spec build_from_panel(ctx(), Panel.t(), pos_integer(), RenderWindow.rect() | nil, keyword()) ::
           RenderWindow.t()
   defp build_from_panel(ctx, panel, inner_width, rect, opts) do
-    lines = Panel.input_lines(panel)
-    cursor = Panel.input_cursor(panel)
+    lines = MingaEditor.Agent.PromptBuffer.input_lines(panel)
+    cursor = MingaEditor.Agent.PromptBuffer.input_cursor(panel)
     mode = ctx.editing.mode
     mode_state = ctx.editing.mode_state
     theme = ctx.theme

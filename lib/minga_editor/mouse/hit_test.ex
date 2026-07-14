@@ -379,7 +379,9 @@ defmodule MingaEditor.Mouse.HitTest do
   end
 
   @spec width_oracle(state() | nil) :: Minga.Core.WidthOracle.t()
-  defp width_oracle(%{capabilities: capabilities}), do: Capabilities.width_oracle(capabilities)
+  defp width_oracle(%{frontend: %{capabilities: capabilities}}),
+    do: Capabilities.width_oracle(capabilities)
+
   defp width_oracle(_state), do: %Minga.Core.WidthOracle.Monospace{}
 
   defp direct_position(_buffer, row, visible_rows, _line, _col, _total_lines)

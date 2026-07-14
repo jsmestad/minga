@@ -1,6 +1,7 @@
 defmodule MingaEditor.RenderPipeline.InputTest do
   use ExUnit.Case, async: true
 
+  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.FocusTree.Node, as: FocusNode
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.Intent
@@ -28,7 +29,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       assert input.workspace.buffers == state.workspace.buffers
       assert input.workspace.viewport == state.workspace.viewport
       assert input.workspace.editing == state.workspace.editing
-      assert input.highlighting == state.highlighting
+      assert input.highlighting == state.parser.highlighting
       assert input.workspace.file_tree == EditorState.file_tree_state(state)
       assert input.workspace.agent_ui == state.workspace.agent_ui
       assert input.workspace.document_highlights == state.workspace.document_highlights
@@ -39,19 +40,19 @@ defmodule MingaEditor.RenderPipeline.InputTest do
     test "extracts top-level state fields", %{state: state} do
       input = Input.from_editor_state(state)
 
-      assert input.port_manager == state.port_manager
-      assert input.theme == state.theme
-      assert input.capabilities == state.capabilities
+      assert input.port_manager == state.frontend.port_manager
+      assert input.theme == state.appearance.theme
+      assert input.capabilities == state.frontend.capabilities
       assert input.shell_id == Runtime.id(state.shell_runtime)
       assert input.shell == Runtime.module(state.shell_runtime)
       assert input.shell_identity == Runtime.identity(state.shell_runtime)
       assert input.shell_state == Runtime.state(state.shell_runtime)
       assert input.font_registry == MingaEditor.UI.FontRegistry.new()
-      assert input.message_store == state.message_store
-      assert input.editing_model == state.editing_model
-      assert input.backend == state.backend
-      assert input.layout == state.layout
-      assert input.face_override_registries == state.face_override_registries
+      assert input.message_store == state.render.message_store
+      assert input.editing_model == state.interaction.editing_model
+      assert input.backend == state.frontend.backend
+      assert input.layout == state.render.layout
+      assert input.face_override_registries == state.parser.face_override_registries
     end
 
     test "excludes GenServer-only fields", %{state: state} do
@@ -66,7 +67,6 @@ defmodule MingaEditor.RenderPipeline.InputTest do
         :pending_quit,
         :last_test_command,
         :session,
-        :git_remote_op,
         :last_cursor_line,
         :buffer_add_context,
         :shell_runtime
@@ -106,20 +106,31 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       state: state
     } do
       message_store =
-        state.message_store
+        state.render.message_store
         |> MessageStore.append("first", :info, :editor)
         |> MessageStore.mark_sent(1)
 
-      state = %{state | message_store: message_store}
-      {state, revision} = EditorState.submit_render_intent(state)
+      state =
+        %{
+          state
+          | render: MingaEditor.State.Render.accept_message_store(state.render, message_store)
+        }
+
+      {correlation, revision} =
+        MingaEditor.State.RenderCorrelation.submit(state.render.render_correlation)
+
+      state = %{
+        state
+        | render: MingaEditor.State.Render.accept_correlation(state.render, correlation)
+      }
 
       result = EditorState.reset_frontend_render_state(state)
 
-      assert result.message_store.last_sent_id == 0
-      assert result.message_store.stream_instance == message_store.stream_instance
-      assert Enum.map(result.message_store.entries, & &1.text) == ["first"]
-      assert result.render_correlation.keyframe_pending?
-      assert result.render_correlation.latest_intent_revision == revision
+      assert result.render.message_store.last_sent_id == 0
+      assert result.render.message_store.stream_instance == message_store.stream_instance
+      assert Enum.map(result.render.message_store.entries, & &1.text) == ["first"]
+      assert result.render.render_correlation.keyframe_pending?
+      assert result.render.render_correlation.latest_intent_revision == revision
     end
   end
 
@@ -128,7 +139,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       intent = Intent.from_editor_state(state, 7)
 
       assert intent.revision == 7
-      assert intent.frame.highlighting == state.highlighting
+      assert intent.frame.highlighting == state.parser.highlighting
       assert Enum.all?(intent.windows, fn {_id, window} -> match?(%WindowIntent{}, window) end)
 
       refute Enum.any?(intent.windows, fn {_id, window} ->
@@ -147,9 +158,11 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       windows = state.workspace.windows
       focus_tree = FocusNode.new(:editor_area, {0, 0, 80, 24})
 
+      layout = MingaEditor.Layout.compute(state)
+
       receipt =
         receipt(input, 10, false,
-          layout: :rendered_layout,
+          layout: layout,
           focus_tree: focus_tree,
           click_regions: %ClickRegions{
             modeline: [{0, 1, :modeline}],
@@ -159,8 +172,8 @@ defmodule MingaEditor.RenderPipeline.InputTest do
 
       result = integrate_receipt(state, receipt)
 
-      assert result.layout == :rendered_layout
-      assert result.focus_tree == focus_tree
+      assert result.render.layout == layout
+      assert result.render.focus_tree == focus_tree
       assert result.workspace.windows == windows
       refute Map.has_key?(Map.from_struct(result), :caches)
 
@@ -200,26 +213,46 @@ defmodule MingaEditor.RenderPipeline.InputTest do
 
     test "stale receipt cannot overwrite newer editor-owned transitions", %{state: state} do
       input = Input.from_editor_state(state)
-      newer = receipt(input, 20, false, layout: :newer)
-      older = receipt(input, 19, false, layout: :older)
+      newer_layout = MingaEditor.Layout.compute(state)
+      older_layout = %{newer_layout | terminal: {1, 1, 1, 1}}
+      newer = receipt(input, 20, false, layout: newer_layout)
+      older = receipt(input, 19, false, layout: older_layout)
 
       result =
         state
         |> integrate_receipt(newer)
         |> integrate_receipt(older)
 
-      assert result.layout == :newer
-      assert result.render_correlation.last_receipt_seq == 20
+      assert result.render.layout == newer_layout
+      assert result.render.render_correlation.last_receipt_seq == 20
     end
 
     test "pending acknowledgement is stale after a newer resize/focus/shell intent", %{
       state: state
     } do
       input = Input.from_editor_state(state)
-      {state, old_revision} = EditorState.submit_render_intent(state)
-      pending = receipt(input, 20, false, layout: :old_layout, intent_revision: old_revision)
-      {state, new_revision} = EditorState.submit_render_intent(state)
-      changed = %{state | layout: :resized_layout, focus_tree: :new_focus}
+
+      {correlation, old_revision} =
+        MingaEditor.State.RenderCorrelation.submit(state.render.render_correlation)
+
+      state = %{
+        state
+        | render: MingaEditor.State.Render.accept_correlation(state.render, correlation)
+      }
+
+      old_layout = MingaEditor.Layout.compute(state)
+      pending = receipt(input, 20, false, layout: old_layout, intent_revision: old_revision)
+
+      {correlation, new_revision} =
+        MingaEditor.State.RenderCorrelation.submit(state.render.render_correlation)
+
+      state = %{
+        state
+        | render: MingaEditor.State.Render.accept_correlation(state.render, correlation)
+      }
+
+      changed =
+        %{state | render: MingaEditor.State.Render.invalidate_layout(state.render)}
 
       assert new_revision == old_revision + 1
       assert integrate_receipt(changed, pending) == changed
@@ -227,7 +260,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
 
     test "receipt from a replaced shell identity is side-effect free", %{state: state} do
       input = Input.from_editor_state(state)
-      stale = receipt(input, 10, false, layout: :rendered_layout)
+      stale = receipt(input, 10, false, layout: MingaEditor.Layout.compute(state))
 
       fake_entry = %Entry{
         id: :fake,
@@ -254,13 +287,23 @@ defmodule MingaEditor.RenderPipeline.InputTest do
 
     test "only an applied keyframe receipt clears a pending keyframe request", %{state: state} do
       input = Input.from_editor_state(state)
-      state = EditorState.request_render_keyframe(state)
+
+      state = %{
+        state
+        | render:
+            MingaEditor.State.Render.accept_correlation(
+              state.render,
+              MingaEditor.State.RenderCorrelation.request_keyframe(
+                state.render.render_correlation
+              )
+            )
+      }
 
       state = integrate_receipt(state, receipt(input, 10, false))
-      assert state.render_correlation.keyframe_pending?
+      assert state.render.render_correlation.keyframe_pending?
 
       state = integrate_receipt(state, receipt(input, 11, true))
-      refute state.render_correlation.keyframe_pending?
+      refute state.render.render_correlation.keyframe_pending?
     end
   end
 
@@ -286,7 +329,15 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       {:ok, other_buf} = BufferProcess.start_link(content: "other buffer")
       :ok = Minga.Buffer.move_to(other_buf, {0, 5})
 
-      state = put_in(state.workspace.buffers, Buffers.add(state.workspace.buffers, other_buf))
+      state = %{
+        state
+        | workspace:
+            SessionState.set_buffers(
+              state.workspace,
+              Buffers.add(state.workspace.buffers, other_buf)
+            )
+      }
+
       input = Input.from_editor_state(state)
       synced = Input.sync_active_window_cursor(input)
 

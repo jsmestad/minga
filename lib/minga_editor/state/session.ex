@@ -10,15 +10,24 @@ defmodule MingaEditor.State.Session do
   All mutations go through functions on this module.
   """
 
+  @type pending_quit :: :quit | :quit_all | nil
+  @type last_test_command :: {String.t(), String.t()} | nil
+
   @type t :: %__MODULE__{
           timer: reference() | nil,
           swap_dir: String.t() | nil,
-          session_dir: String.t() | nil
+          session_dir: String.t() | nil,
+          session_started?: boolean(),
+          pending_quit: pending_quit(),
+          last_test_command: last_test_command()
         }
 
   defstruct timer: nil,
             swap_dir: nil,
-            session_dir: nil
+            session_dir: nil,
+            session_started?: false,
+            pending_quit: nil,
+            last_test_command: nil
 
   @doc "Creates a new session state from startup options."
   @spec new(keyword()) :: t()
@@ -28,6 +37,31 @@ defmodule MingaEditor.State.Session do
       session_dir: Keyword.get(opts, :session_dir)
     }
   end
+
+  @doc "Latches completion of the one-time editor startup workflow."
+  @spec complete_startup(t(), t()) :: t()
+  def complete_startup(%__MODULE__{} = current, %__MODULE__{} = started) do
+    %{
+      started
+      | session_started?: true,
+        pending_quit: current.pending_quit,
+        last_test_command: current.last_test_command
+    }
+  end
+
+  @doc "Requests quit confirmation for the editor or all editor instances."
+  @spec request_quit(t(), :quit | :quit_all) :: t()
+  def request_quit(%__MODULE__{} = session, request) when request in [:quit, :quit_all],
+    do: %{session | pending_quit: request}
+
+  @doc "Clears a completed or canceled quit request."
+  @spec clear_quit_request(t()) :: t()
+  def clear_quit_request(%__MODULE__{} = session), do: %{session | pending_quit: nil}
+
+  @doc "Remembers the command and project root used by the last test run."
+  @spec remember_test_command(t(), last_test_command()) :: t()
+  def remember_test_command(%__MODULE__{} = session, command),
+    do: %{session | last_test_command: command}
 
   @doc "Returns keyword options for `Minga.Session` functions."
   @spec session_opts(t()) :: keyword()
@@ -41,35 +75,38 @@ defmodule MingaEditor.State.Session do
     [swap_dir: dir]
   end
 
-  # ── Timer management ─────────────────────────────────────────────────────
+  # ── Timer intent ───────────────────────────────────────────────────────────
 
   @session_save_interval_ms 30_000
 
-  @doc "Starts the periodic session save timer. No-op if session_dir is nil."
-  @spec start_timer(t()) :: t()
-  def start_timer(%__MODULE__{session_dir: nil} = session), do: session
+  @doc "Returns the interval used by the session workflow's periodic save timer."
+  @spec timer_interval() :: pos_integer()
+  def timer_interval, do: @session_save_interval_ms
 
-  def start_timer(%__MODULE__{} = session) do
-    ref = Process.send_after(self(), :save_session, @session_save_interval_ms)
-    %{session | timer: ref}
-  end
+  @doc "Returns a pure instruction for starting the periodic save timer."
+  @spec start_timer(t()) :: {:start_timer, t()} | {:no_timer, t()}
+  def start_timer(%__MODULE__{session_dir: nil} = session), do: {:no_timer, session}
+  def start_timer(%__MODULE__{} = session), do: {:start_timer, session}
 
-  @doc "Cancels the session save timer and clears the reference."
-  @spec cancel_timer(t()) :: t()
-  def cancel_timer(%__MODULE__{timer: nil} = session), do: session
+  @doc "Returns a pure instruction for canceling the save timer."
+  @spec cancel_timer(t()) :: {:cancel_timer, t(), reference() | nil}
+  def cancel_timer(%__MODULE__{timer: nil} = session), do: {:cancel_timer, session, nil}
 
   def cancel_timer(%__MODULE__{timer: ref} = session) when is_reference(ref) do
-    Process.cancel_timer(ref)
-    %{session | timer: nil}
+    {:cancel_timer, %{session | timer: nil}, ref}
   end
 
-  @doc "Restarts the timer: cancels any existing timer and starts a new one."
-  @spec restart_timer(t()) :: t()
-  def restart_timer(%__MODULE__{} = session) do
-    session
-    |> cancel_timer()
-    |> start_timer()
-  end
+  @doc "Returns a pure instruction for restarting the save timer."
+  @spec restart_timer(t()) :: {:restart_timer, t(), reference() | nil}
+  def restart_timer(%__MODULE__{timer: ref} = session) when is_reference(ref),
+    do: {:restart_timer, %{session | timer: nil}, ref}
+
+  def restart_timer(%__MODULE__{} = session), do: {:restart_timer, session, nil}
+
+  @doc "Records a timer reference created by the session workflow."
+  @spec accept_timer(t(), reference()) :: t()
+  def accept_timer(%__MODULE__{} = session, ref) when is_reference(ref),
+    do: %{session | timer: ref}
 
   @doc "Returns true if session persistence is enabled (session_dir is set)."
   @spec enabled?(t()) :: boolean()

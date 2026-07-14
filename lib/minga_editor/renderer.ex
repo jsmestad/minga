@@ -35,7 +35,7 @@ defmodule MingaEditor.Renderer do
   Persistent render state remains in `Renderer.Server`. The returned editor state contains only editor-owned observations from the focused render receipt.
   """
   @spec render(state()) :: state()
-  def render(%EditorState{rendering: :disabled} = state), do: state
+  def render(%EditorState{frontend: %{rendering: :disabled}} = state), do: state
 
   def render(state) do
     state = MingaEditor.Shell.Workflow.ensure_available(state)
@@ -48,14 +48,21 @@ defmodule MingaEditor.Renderer do
   Headless and other synchronous paths use a persistent unnamed `Renderer.Server`, so they preserve the same renderer-owned state boundary without copying caches into the Editor.
   """
   @spec render_or_async(state()) :: state()
-  def render_or_async(%EditorState{rendering: :disabled} = state), do: state
-  def render_or_async(%{backend: :headless} = state), do: render(state)
+  def render_or_async(%EditorState{frontend: %{rendering: :disabled}} = state), do: state
+  def render_or_async(%EditorState{frontend: %{backend: :headless}} = state), do: render(state)
 
-  def render_or_async(%{renderer: pid} = state) when is_pid(pid) do
+  def render_or_async(%EditorState{render: %{renderer: pid}} = state) when is_pid(pid) do
     state = MingaEditor.Shell.Workflow.ensure_available(state)
 
     if async_render?(state) do
-      {state, revision} = EditorState.submit_render_intent(state)
+      {correlation, revision} =
+        MingaEditor.State.RenderCorrelation.submit(state.render.render_correlation)
+
+      state = %{
+        state
+        | render: MingaEditor.State.Render.accept_correlation(state.render, correlation)
+      }
+
       intent = Intent.from_editor_state(state, revision)
       seq = System.unique_integer([:positive, :monotonic])
       RendererServer.cast_snapshot(pid, intent, seq)
@@ -75,11 +82,19 @@ defmodule MingaEditor.Renderer do
   rendering paths keep their normal synchronous behavior.
   """
   @spec reset_connection(state()) :: state()
-  def reset_connection(%EditorState{rendering: :disabled} = state), do: state
+  def reset_connection(%EditorState{frontend: %{rendering: :disabled}} = state), do: state
 
-  def reset_connection(%{backend: :headless} = state) do
+  def reset_connection(%EditorState{frontend: %{backend: :headless}} = state) do
     {state, renderer} = ensure_synchronous_renderer(state)
-    {state, revision} = EditorState.submit_render_intent(state)
+
+    {correlation, revision} =
+      MingaEditor.State.RenderCorrelation.submit(state.render.render_correlation)
+
+    state = %{
+      state
+      | render: MingaEditor.State.Render.accept_correlation(state.render, correlation)
+    }
+
     intent = Intent.from_editor_state(state, revision)
     seq = System.unique_integer([:positive, :monotonic])
 
@@ -89,11 +104,18 @@ defmodule MingaEditor.Renderer do
     end
   end
 
-  def reset_connection(%{renderer: pid} = state) when is_pid(pid) do
+  def reset_connection(%EditorState{render: %{renderer: pid}} = state) when is_pid(pid) do
     state = MingaEditor.Shell.Workflow.ensure_available(state)
 
     if async_render?(state) do
-      {state, revision} = EditorState.submit_render_intent(state)
+      {correlation, revision} =
+        MingaEditor.State.RenderCorrelation.submit(state.render.render_correlation)
+
+      state = %{
+        state
+        | render: MingaEditor.State.Render.accept_correlation(state.render, correlation)
+      }
+
       intent = Intent.from_editor_state(state, revision)
       seq = System.unique_integer([:positive, :monotonic])
       :ok = RendererServer.reset_connection(pid, intent, seq)
@@ -127,7 +149,7 @@ defmodule MingaEditor.Renderer do
   end
 
   @spec ensure_synchronous_renderer(state()) :: {state(), pid()}
-  defp ensure_synchronous_renderer(%EditorState{renderer: renderer} = state)
+  defp ensure_synchronous_renderer(%EditorState{render: %{renderer: renderer}} = state)
        when is_pid(renderer),
        do: {state, renderer}
 
@@ -135,7 +157,8 @@ defmodule MingaEditor.Renderer do
     {:ok, renderer} =
       RendererServer.start_link(name: nil, editor_pid: nil, require_ack?: false)
 
-    {EditorState.set_renderer(state, renderer), renderer}
+    {%{state | render: MingaEditor.State.Render.connect_renderer(state.render, renderer)},
+     renderer}
   end
 
   @spec log_synchronous_error(state(), non_neg_integer(), Exception.t()) :: state()

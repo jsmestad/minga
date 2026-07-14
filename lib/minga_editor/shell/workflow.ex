@@ -56,8 +56,10 @@ defmodule MingaEditor.Shell.Workflow do
     )
 
     state
-    |> EditorState.apply_shell_runtime_transition(runtime)
-    |> EditorState.reset_shell_layout()
+    |> then(fn state -> %{state | shell_runtime: runtime} end)
+    |> then(fn state ->
+      %{state | render: MingaEditor.State.Render.invalidate_layout(state.render)}
+    end)
     |> NoticeWorkflow.publish("Shell #{resolved.display_name} reloaded")
   end
 
@@ -74,8 +76,10 @@ defmodule MingaEditor.Shell.Workflow do
     runtime = Runtime.fallback_from_removed(runtime, default, initialized_state)
 
     state
-    |> EditorState.apply_shell_runtime_transition(runtime)
-    |> EditorState.reset_shell_layout()
+    |> then(fn state -> %{state | shell_runtime: runtime} end)
+    |> then(fn state ->
+      %{state | render: MingaEditor.State.Render.invalidate_layout(state.render)}
+    end)
     |> NoticeWorkflow.publish("Shell unavailable, switched to #{default.display_name}")
   end
 
@@ -111,8 +115,10 @@ defmodule MingaEditor.Shell.Workflow do
     runtime = Runtime.activate(state.shell_runtime, target, initialized_state)
 
     state
-    |> EditorState.apply_shell_runtime_transition(runtime)
-    |> EditorState.reset_shell_layout()
+    |> then(fn state -> %{state | shell_runtime: runtime} end)
+    |> then(fn state ->
+      %{state | render: MingaEditor.State.Render.invalidate_layout(state.render)}
+    end)
   end
 
   @spec activation_default(Runtime.t(), Entry.t()) :: term()

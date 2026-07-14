@@ -10,7 +10,6 @@ defmodule MingaEditor.InlineAsk.EventsTest do
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.InlineAsk
   alias MingaEditor.Viewport
 
@@ -102,7 +101,7 @@ defmodule MingaEditor.InlineAsk.EventsTest do
       |> InlineAsk.thinking(session_pid)
 
     state = %EditorState{
-      port_manager: nil,
+      frontend: %MingaEditor.State.Frontend{port_manager: nil},
       workspace: %SessionState{viewport: Viewport.new(24, 80)},
       shell_runtime:
         Runtime.new(
@@ -115,6 +114,8 @@ defmodule MingaEditor.InlineAsk.EventsTest do
   end
 
   defp active_ask(state, buffer_pid) do
-    state |> AgentAccess.inline_asks() |> InlineAsk.active(buffer_pid)
+    state.shell_runtime.state
+    |> MingaEditor.Shell.Traditional.State.inline_asks()
+    |> InlineAsk.active(buffer_pid)
   end
 end

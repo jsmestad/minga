@@ -49,11 +49,25 @@ defmodule MingaEditor.Handlers.SessionHandler do
   defp apply_effect(state, {:save_session_async, snapshot, opts}),
     do: Save.schedule(state, snapshot, opts)
 
-  defp apply_effect(state, {:restart_session_timer}),
-    do: %{state | session: SessionState.restart_timer(state.session)}
+  defp apply_effect(state, {:restart_session_timer}) do
+    {:restart_timer, session, timer} = SessionState.restart_timer(state.session)
+    cancel_timer(timer)
 
-  defp apply_effect(state, {:cancel_session_timer}),
-    do: %{state | session: SessionState.cancel_timer(state.session)}
+    case SessionState.start_timer(session) do
+      {:no_timer, session} ->
+        %{state | session: session}
+
+      {:start_timer, session} ->
+        ref = Process.send_after(self(), :save_session, SessionState.timer_interval())
+        %{state | session: SessionState.accept_timer(session, ref)}
+    end
+  end
+
+  defp apply_effect(state, {:cancel_session_timer}) do
+    {:cancel_timer, session, timer} = SessionState.cancel_timer(state.session)
+    cancel_timer(timer)
+    %{state | session: session}
+  end
 
   defp apply_effect(
          state,
@@ -64,7 +78,11 @@ defmodule MingaEditor.Handlers.SessionHandler do
 
   @spec handle_check_swap_recovery(EditorState.t()) ::
           {EditorState.t(), [session_effect()]}
-  defp handle_check_swap_recovery(%EditorState{backend: :headless} = state), do: {state, []}
+  defp cancel_timer(nil), do: :ok
+  defp cancel_timer(timer), do: Process.cancel_timer(timer)
+
+  defp handle_check_swap_recovery(%EditorState{frontend: %{backend: :headless}} = state),
+    do: {state, []}
 
   defp handle_check_swap_recovery(state) do
     swap_enabled? = SessionState.swap_enabled?(state.session)
@@ -101,7 +119,7 @@ defmodule MingaEditor.Handlers.SessionHandler do
     opts = SessionState.session_opts(state.session)
 
     timer_effect =
-      case state.backend do
+      case state.frontend.backend do
         :headless -> {:cancel_session_timer}
         _backend -> {:restart_session_timer}
       end

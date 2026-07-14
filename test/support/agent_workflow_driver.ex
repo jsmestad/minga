@@ -15,7 +15,6 @@ defmodule Minga.Test.AgentWorkflowDriver do
   alias MingaAgent.Session
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.RenderModel.UI.AgentChatBuilder
-  alias MingaEditor.State.AgentAccess
 
   @ctrl MingaEditor.Input.mod_ctrl()
 
@@ -29,7 +28,7 @@ defmodule Minga.Test.AgentWorkflowDriver do
     EditorCase.wait_until(
       ctx,
       fn state ->
-        session = AgentAccess.session(state)
+        session = MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
 
         state.workspace.keymap_scope == :agent and is_pid(session) and
           is_pid(Session.get_provider(session))
@@ -44,13 +43,13 @@ defmodule Minga.Test.AgentWorkflowDriver do
     current = EditorCase.editor_state(ctx)
 
     state =
-      if AgentAccess.input_focused?(current) do
+      if current.workspace.agent_ui.panel.input_focused do
         current
       else
         EditorCase.send_key_sync(ctx, ?i, 0)
       end
 
-    assert AgentAccess.input_focused?(state)
+    assert state.workspace.agent_ui.panel.input_focused
     state
   end
 

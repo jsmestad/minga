@@ -8,7 +8,9 @@ defmodule MingaEditor.Handlers.SessionHandlerTest do
 
   use ExUnit.Case, async: true
 
+  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Handlers.SessionHandler
+  alias MingaEditor.State.Frontend
   alias MingaEditor.State.Session, as: SessionState
 
   import MingaEditor.RenderPipeline.TestHelpers
@@ -29,7 +31,9 @@ defmodule MingaEditor.Handlers.SessionHandlerTest do
 
     test "returns restart_session_timer in non-headless mode" do
       state = base_state()
-      state = %{state | backend: :tui, session: SessionState.new(session_dir: "/tmp/test")}
+      %Frontend{} = current_frontend = state.frontend
+      frontend = %Frontend{current_frontend | backend: :tui}
+      state = %{state | frontend: frontend, session: SessionState.new(session_dir: "/tmp/test")}
 
       {_state, effects} = SessionHandler.handle(state, :save_session)
 
@@ -64,11 +68,13 @@ defmodule MingaEditor.Handlers.SessionHandlerTest do
 
     test "non-headless mode emits immutable recovery input without reading files" do
       state = base_state()
+      %Frontend{} = current_frontend = state.frontend
+      frontend = %Frontend{current_frontend | backend: :tui}
 
       state =
         %{
           state
-          | backend: :tui,
+          | frontend: frontend,
             session: SessionState.new(swap_dir: "/missing/swaps", session_dir: "/missing/session")
         }
 

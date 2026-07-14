@@ -28,13 +28,12 @@ defmodule MingaEditor.Commands.BufferManagement do
   alias MingaEditor.PickerUI
   alias MingaEditor.SemanticTokenSync
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.Workflow, as: TraditionalWorkflow
   alias MingaEditor.Shell.Workflow
   alias MingaEditor.State.Workspace, as: WorkspaceModel
   alias MingaEditor.State.WorkspaceReview
@@ -147,9 +146,10 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   def execute(state, :abort_quit), do: abort_quit_editor(state)
 
-  def execute(%{pending_quit: kind} = state, :confirm_quit_yes) when kind != nil do
+  def execute(%MingaEditor.State{session: %{pending_quit: kind}} = state, :confirm_quit_yes)
+      when kind != nil do
     dirty? = any_buffer_dirty?(state)
-    state = EditorState.clear_pending_quit(state)
+    state = %{state | session: MingaEditor.State.Session.clear_quit_request(state.session)}
 
     case {kind, dirty?} do
       {:quit, true} ->
@@ -170,8 +170,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   end
 
   def execute(state, :confirm_quit_no) do
-    state
-    |> EditorState.clear_pending_quit()
+    %{state | session: MingaEditor.State.Session.clear_quit_request(state.session)}
     |> MingaEditor.Shell.Traditional.NoticeWorkflow.dismiss()
   end
 
@@ -208,7 +207,7 @@ defmodule MingaEditor.Commands.BufferManagement do
     case DynamicSupervisor.start_child(
            Minga.Buffer.Supervisor,
            {Minga.Buffer,
-            content: "", buffer_name: name, options_server: EditorState.options_server(state)}
+            content: "", buffer_name: name, options_server: state.interaction.options_server}
          ) do
       {:ok, pid} ->
         Commands.add_buffer(state, pid)
@@ -621,9 +620,9 @@ defmodule MingaEditor.Commands.BufferManagement do
       """)
     end
 
-    case Commands.start_buffer(config_path, EditorState.options_server(state)) do
+    case Commands.start_buffer(config_path, state.interaction.options_server) do
       {:ok, pid} ->
-        EditorState.add_buffer(state, pid)
+        MingaEditor.Handlers.BufferRegistry.add_buffer(state, pid)
 
       {:error, reason} ->
         Minga.Log.warning(:editor, "Failed to open config: #{inspect(reason)}")
@@ -801,7 +800,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec start_file_buffer(state(), String.t()) :: state()
   defp start_file_buffer(state, file_path) do
-    case Commands.start_buffer(file_path, EditorState.options_server(state)) do
+    case Commands.start_buffer(file_path, state.interaction.options_server) do
       {:ok, pid} ->
         Commands.add_buffer(state, pid)
 
@@ -964,8 +963,19 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec toggle_tab_pin(state()) :: state()
   defp toggle_tab_pin(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
-    state
-    |> EditorState.set_tab_bar(TabBar.toggle_active_pin(tb))
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          MingaEditor.State.TabBar.toggle_active_pin(tb)
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
     |> NoticeWorkflow.publish(tab_pin_status(tb))
   end
 
@@ -973,8 +983,19 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec unpin_active_tab(state()) :: state()
   defp unpin_active_tab(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
-    state
-    |> EditorState.set_tab_bar(TabBar.unpin_tab(tb, tb.active_id))
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          MingaEditor.State.TabBar.unpin_tab(tb, tb.active_id)
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
     |> NoticeWorkflow.publish("Tab unpinned")
   end
 
@@ -982,7 +1003,19 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec move_active_tab(state(), :left | :right) :: state()
   defp move_active_tab(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state, direction) do
-    EditorState.set_tab_bar(state, move_tab_bar(tb, direction))
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          move_tab_bar(tb, direction)
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   defp move_active_tab(state, _direction), do: state
@@ -1050,7 +1083,7 @@ defmodule MingaEditor.Commands.BufferManagement do
           Minga.Events.broadcast(
             :buffer_closed,
             %Minga.Events.BufferClosedEvent{buffer: buf, path: path},
-            EditorState.events_registry(state)
+            state.extension_surfaces.events_registry
           )
 
           GenServer.stop(buf, :normal)
@@ -1090,7 +1123,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   # close paths can decide whether to release or preserve the workspace first.
   @spec cleanup_agent_session(state()) :: state()
   defp cleanup_agent_session(%{shell_runtime: %{state: %{tab_bar: %TabBar{}}}} = state) do
-    session = AgentAccess.session(state)
+    session = Runtime.active_session(state.shell_runtime)
 
     if session do
       try do
@@ -1179,7 +1212,7 @@ defmodule MingaEditor.Commands.BufferManagement do
     runtime = persist_shell_changes(runtime, persistence_changes)
 
     state
-    |> EditorState.apply_shell_runtime_transition(runtime)
+    |> then(fn state -> %{state | shell_runtime: runtime} end)
     |> maybe_rebuild_active_agent_after_restart(new_pid)
   end
 
@@ -1189,14 +1222,14 @@ defmodule MingaEditor.Commands.BufferManagement do
       Runtime.route_session_down(state.shell_runtime, session_pid, reason)
 
     runtime = persist_shell_changes(runtime, List.wrap(persistence_change))
-    {EditorState.apply_shell_runtime_transition(state, runtime), owned?}
+    {%{state | shell_runtime: runtime}, owned?}
   end
 
   @spec maybe_rebuild_active_agent_after_restart(state(), pid()) :: state()
   defp maybe_rebuild_active_agent_after_restart(state, new_pid) do
     case Runtime.active_tab(state.shell_runtime) do
       %Tab{kind: :agent, session: ^new_pid} = tab ->
-        EditorState.rebuild_agent_from_session(state, tab)
+        MingaEditor.AgentLifecycle.rebuild_agent_from_session(state, tab)
 
       _ ->
         state
@@ -1220,8 +1253,8 @@ defmodule MingaEditor.Commands.BufferManagement do
       if reason in [:normal, :shutdown], do: "Agent session ended", else: "Agent session crashed"
 
     state
-    |> AgentAccess.update_agent(&AgentState.stop_spinner_timer/1)
-    |> AgentAccess.update_agent(&AgentState.reset_cache/1)
+    |> TraditionalWorkflow.install_agent_spinner_stop()
+    |> TraditionalWorkflow.install_agent_cache_reset()
     |> NoticeWorkflow.publish(msg)
   end
 
@@ -1241,7 +1274,7 @@ defmodule MingaEditor.Commands.BufferManagement do
       Minga.Log.info(:agent, "Agent session update applied to a stashed shell")
     end
 
-    {EditorState.apply_shell_runtime_transition(state, runtime), handled?}
+    {%{state | shell_runtime: runtime}, handled?}
   end
 
   @spec handle_agent_session_down_for_tabs(state(), pid(), term()) :: state()
@@ -1293,8 +1326,8 @@ defmodule MingaEditor.Commands.BufferManagement do
 
       state =
         state
-        |> AgentAccess.update_agent(&AgentState.stop_spinner_timer/1)
-        |> AgentAccess.update_agent(&AgentState.reset_cache/1)
+        |> TraditionalWorkflow.install_agent_spinner_stop()
+        |> TraditionalWorkflow.install_agent_cache_reset()
         |> clear_session_from_tabs(session_pid, tab_status)
         |> clear_session_from_workspace(workspace.id, tab_status)
 
@@ -1385,15 +1418,27 @@ defmodule MingaEditor.Commands.BufferManagement do
 
     state =
       state
-      |> AgentAccess.update_agent(&AgentState.stop_spinner_timer/1)
-      |> AgentAccess.update_agent(&AgentState.reset_cache/1)
+      |> TraditionalWorkflow.install_agent_spinner_stop()
+      |> TraditionalWorkflow.install_agent_cache_reset()
       |> clear_session_from_tabs(session_pid, tab_status)
 
     state =
-      state
-      |> EditorState.set_tab_bar(
-        TabBar.remove_workspace(state.shell_runtime.state.tab_bar, workspace.id)
-      )
+      then(state, fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            MingaEditor.State.TabBar.remove_workspace(
+              state.shell_runtime.state.tab_bar,
+              workspace.id
+            )
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
       |> EditorState.sync_agent_ui_from_active_workspace()
 
     msg =
@@ -1414,8 +1459,8 @@ defmodule MingaEditor.Commands.BufferManagement do
           term()
         ) :: state()
   defp keep_workspace_after_session_down(state, _tb, workspace, session_pid, files, error, reason) do
-    state = AgentAccess.update_agent(state, &AgentState.stop_spinner_timer/1)
-    state = AgentAccess.update_agent(state, &AgentState.reset_cache/1)
+    state = TraditionalWorkflow.install_agent_spinner_stop(state)
+    state = TraditionalWorkflow.install_agent_cache_reset(state)
 
     state =
       if is_pid(session_pid) do
@@ -1441,7 +1486,20 @@ defmodule MingaEditor.Commands.BufferManagement do
         updated_workspace
       end)
 
-    state = EditorState.set_tab_bar(state, tb)
+    state =
+      then(state, fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            tb
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
 
     msg =
       case {reason in [:normal, :shutdown], error} do
@@ -1526,10 +1584,24 @@ defmodule MingaEditor.Commands.BufferManagement do
       %Tab{id: tab_id, server_name: server_name} when is_binary(server_name) ->
         tb = TabBar.update_tab(tb, tab_id, &Tab.set_connection_status(&1, :disconnected))
 
-        state
-        |> EditorState.set_tab_bar(tb)
-        |> AgentAccess.update_agent(&AgentState.stop_spinner_timer/1)
-        |> AgentAccess.update_agent(&AgentState.set_error(&1, "Disconnected from #{server_name}"))
+        then(state, fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.set_tab_bar(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              tb
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
+        |> TraditionalWorkflow.install_agent_spinner_stop()
+        |> TraditionalWorkflow.install_agent_error("Disconnected from #{server_name}")
         |> NoticeWorkflow.publish("[#{server_name}] disconnected, reconnecting...")
 
       _ ->
@@ -1553,7 +1625,7 @@ defmodule MingaEditor.Commands.BufferManagement do
       Runtime.route_remote_session_disconnected(state.shell_runtime, session_pid)
 
     runtime = persist_shell_changes(runtime, List.wrap(persistence_change))
-    {EditorState.apply_shell_runtime_transition(state, runtime), handled?}
+    {%{state | shell_runtime: runtime}, handled?}
   end
 
   @spec handle_stashed_remote_session_disconnected(state(), pid()) :: state()
@@ -1566,7 +1638,7 @@ defmodule MingaEditor.Commands.BufferManagement do
       )
 
     runtime = persist_shell_changes(runtime, persistence_changes)
-    state = EditorState.apply_shell_runtime_transition(state, runtime)
+    state = %{state | shell_runtime: runtime}
 
     if handled? do
       Minga.Log.info(:agent, "Remote disconnect applied to a stashed shell")
@@ -1579,7 +1651,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   @spec finish_remote_session_disconnected(state()) :: state()
   defp finish_remote_session_disconnected(state) do
     state
-    |> AgentAccess.update_agent(&AgentState.stop_spinner_timer/1)
+    |> TraditionalWorkflow.install_agent_spinner_stop()
     |> NoticeWorkflow.publish("Remote agent disconnected, reconnecting...")
   end
 
@@ -1603,18 +1675,33 @@ defmodule MingaEditor.Commands.BufferManagement do
   # clears Tab.session/agent_status, and removes the agent workspace.
   @spec scrub_agent_tab_state(state(), pid(), Tab.agent_status()) :: state()
   defp scrub_agent_tab_state(state, session, tab_status) do
-    state = AgentAccess.update_agent(state, &AgentState.stop_spinner_timer/1)
-    state = AgentAccess.update_agent(state, &AgentState.reset_cache/1)
+    state = TraditionalWorkflow.install_agent_spinner_stop(state)
+    state = TraditionalWorkflow.install_agent_cache_reset(state)
 
     # Clear session and status on any tab that referenced this session.
     state = clear_session_from_tabs(state, session, tab_status)
 
     case TabBar.find_workspace_by_session(state.shell_runtime.state.tab_bar, session) do
       %{id: workspace_id} ->
-        EditorState.set_tab_bar(
-          state,
-          TabBar.remove_workspace(state.shell_runtime.state.tab_bar, workspace_id)
-        )
+        then(state, fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.set_tab_bar(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              MingaEditor.State.TabBar.remove_workspace(
+                state.shell_runtime.state.tab_bar,
+                workspace_id
+              )
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
 
       _ ->
         state
@@ -1640,7 +1727,19 @@ defmodule MingaEditor.Commands.BufferManagement do
         end
       end)
 
-    EditorState.set_tab_bar(state, updated_tb)
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          updated_tb
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   @spec clear_session_from_workspace(state(), non_neg_integer(), Tab.agent_status()) :: state()
@@ -1660,7 +1759,19 @@ defmodule MingaEditor.Commands.BufferManagement do
           workspace
       end)
 
-    EditorState.set_tab_bar(state, updated_tb)
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          updated_tb
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   # Closes the active agent tab. ProjectView-backed workspaces get a
@@ -1673,7 +1784,7 @@ defmodule MingaEditor.Commands.BufferManagement do
     session_pid =
       case workspace do
         %WorkspaceModel{session: workspace_session} -> workspace_session
-        _ -> AgentAccess.session(state)
+        _ -> Runtime.active_session(state.shell_runtime)
       end
 
     case {session_pid, workspace} do
@@ -1719,9 +1830,28 @@ defmodule MingaEditor.Commands.BufferManagement do
       {:ok, []} ->
         case WorkspaceModel.close_project_view(workspace) do
           :ok ->
-            state
-            |> EditorState.set_tab_bar(TabBar.remove_workspace(tb, workspace.id))
-            |> EditorState.set_keymap_scope(:editor)
+            then(state, fn root ->
+              shell_state =
+                MingaEditor.Shell.Traditional.State.set_tab_bar(
+                  MingaEditor.Shell.Runtime.state(root.shell_runtime),
+                  MingaEditor.State.TabBar.remove_workspace(tb, workspace.id)
+                )
+
+              %{
+                root
+                | shell_runtime:
+                    MingaEditor.Shell.Runtime.install_traditional_state(
+                      root.shell_runtime,
+                      shell_state
+                    )
+              }
+            end)
+            |> then(fn state ->
+              %{
+                state
+                | workspace: MingaEditor.Session.State.set_keymap_scope(state.workspace, :editor)
+              }
+            end)
             |> remove_current_tab()
             |> restore_active_tab_context()
 
@@ -1762,7 +1892,9 @@ defmodule MingaEditor.Commands.BufferManagement do
       Minga.Log.info(:editor, "Closed agent tab")
 
       state
-      |> EditorState.set_keymap_scope(:editor)
+      |> then(fn state ->
+        %{state | workspace: MingaEditor.Session.State.set_keymap_scope(state.workspace, :editor)}
+      end)
       |> remove_current_tab()
       |> restore_active_tab_context()
     else
@@ -1781,23 +1913,21 @@ defmodule MingaEditor.Commands.BufferManagement do
   # confirm_quit option; last-file `:q` always asks before exiting so Vim-style
   # close semantics do not surprise users by terminating the app.
   @spec maybe_confirm_quit(state(), :quit | :quit_all) :: state()
-  defp maybe_confirm_quit(state, :quit) do
+  defp maybe_confirm_quit(%MingaEditor.State{} = state, :quit) do
     dirty? = dirty_quit_confirmation_needed?(state)
 
     if dirty? or quit_would_exit_editor?(state) do
-      state
-      |> EditorState.set_pending_quit(:quit)
-      |> NoticeWorkflow.publish(quit_confirmation_message(dirty?))
+      state = %{state | session: MingaEditor.State.Session.request_quit(state.session, :quit)}
+      NoticeWorkflow.publish(state, quit_confirmation_message(dirty?))
     else
       close_tab_or_quit(state)
     end
   end
 
-  defp maybe_confirm_quit(state, :quit_all) do
+  defp maybe_confirm_quit(%MingaEditor.State{} = state, :quit_all) do
     if dirty_quit_confirmation_needed?(state) do
-      state
-      |> EditorState.set_pending_quit(:quit_all)
-      |> NoticeWorkflow.publish("Modified buffers exist. Really quit? (y/n)")
+      state = %{state | session: MingaEditor.State.Session.request_quit(state.session, :quit_all)}
+      NoticeWorkflow.publish(state, "Modified buffers exist. Really quit? (y/n)")
     else
       shutdown_editor(state)
     end
@@ -1825,7 +1955,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec confirm_quit_enabled?(state()) :: boolean()
   defp confirm_quit_enabled?(state) do
-    Minga.Config.Options.get(EditorState.options_server(state), :confirm_quit)
+    Minga.Config.Options.get(state.interaction.options_server, :confirm_quit)
   end
 
   # Validates a filetype name string against the Language registry.
@@ -1866,7 +1996,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec close_file_tab_or_quit(state(), Tab.id()) :: state()
   defp close_file_tab_or_quit(state, _active_id) do
-    tb = EditorState.tab_bar(state)
+    tb = state.shell_runtime.state.tab_bar
 
     if TabBar.count(tb) > 1 do
       close_file_tab(state)
@@ -1888,7 +2018,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec quit_last_tab_option(state()) :: :quit | :empty_state
   defp quit_last_tab_option(state) do
-    Minga.Config.Options.get(EditorState.options_server(state), :quit_last_tab)
+    Minga.Config.Options.get(state.interaction.options_server, :quit_last_tab)
   catch
     :exit, _ -> :quit
   end
@@ -1912,7 +2042,20 @@ defmodule MingaEditor.Commands.BufferManagement do
     tb = remove_tabs(tb, closed_tabs)
 
     Minga.Log.info(:editor, "Closed other tabs")
-    EditorState.set_tab_bar(state, tb)
+
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          tb
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   defp close_other_tabs(state), do: state
@@ -1937,7 +2080,23 @@ defmodule MingaEditor.Commands.BufferManagement do
           :ok = complete_wait_requests_for_tabs(right_tabs)
           tb = remove_tabs(tb, right_tabs)
           Minga.Log.info(:editor, "Closed tabs to the right")
-          EditorState.set_tab_bar(state, tb)
+
+          then(state, fn root ->
+            shell_state =
+              MingaEditor.Shell.Traditional.State.set_tab_bar(
+                MingaEditor.Shell.Runtime.state(root.shell_runtime),
+                tb
+              )
+
+            %{
+              root
+              | shell_runtime:
+                  MingaEditor.Shell.Runtime.install_traditional_state(
+                    root.shell_runtime,
+                    shell_state
+                  )
+            }
+          end)
         end
     end
   end
@@ -2106,9 +2265,19 @@ defmodule MingaEditor.Commands.BufferManagement do
        ) do
     case TabBar.remove(tb, tb.active_id) do
       {:ok, new_tb} ->
-        state
-        |> EditorState.retire_lsp_operations_for_tab(tb.active_id)
-        |> EditorState.set_tab_bar(maybe_switch_to_replacement(new_tb, replacement_id))
+        state = EditorState.retire_lsp_operations_for_tab(state, tb.active_id)
+        tab_bar = maybe_switch_to_replacement(new_tb, replacement_id)
+
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            Runtime.state(state.shell_runtime),
+            tab_bar
+          )
+
+        %{
+          state
+          | shell_runtime: Runtime.install_traditional_state(state.shell_runtime, shell_state)
+        }
 
       :last_tab ->
         EditorState.retire_lsp_operations_for_tab(state, tb.active_id)
@@ -2470,11 +2639,15 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp show_tool_prompt(state, [], _declined), do: state
 
   defp show_tool_prompt(state, pending, declined) do
-    EditorState.transition_mode(
-      state,
-      :tool_confirm,
-      %ToolConfirmState{pending: pending, declined: declined}
-    )
+    %{
+      state
+      | workspace:
+          MingaEditor.Session.State.transition_mode(
+            state.workspace,
+            :tool_confirm,
+            %ToolConfirmState{pending: pending, declined: declined}
+          )
+    }
   end
 
   @spec apply_whitespace_transforms(pid()) :: :ok
@@ -2633,19 +2806,45 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec view_messages(state()) :: state()
   defp view_messages(state) do
-    new_panel = state |> EditorState.bottom_panel() |> BottomPanel.show(:messages)
-    EditorState.set_bottom_panel(state, new_panel)
+    new_panel = state.shell_runtime.state.bottom_panel |> BottomPanel.show(:messages)
+
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_bottom_panel(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          new_panel
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   @spec view_warnings(state()) :: state()
   defp view_warnings(state) do
-    new_panel = state |> EditorState.bottom_panel() |> BottomPanel.show(:messages, :warnings)
-    EditorState.set_bottom_panel(state, new_panel)
+    new_panel = state.shell_runtime.state.bottom_panel |> BottomPanel.show(:messages, :warnings)
+
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_bottom_panel(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          new_panel
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   # In headless mode, apply highlight setup synchronously; otherwise defer.
   @spec setup_highlight_or_defer(state()) :: state()
-  defp setup_highlight_or_defer(%{backend: :headless} = state) do
+  defp setup_highlight_or_defer(%{frontend: %{backend: :headless}} = state) do
     state = HighlightSync.setup_for_buffer(state)
     SemanticTokenSync.request_tokens(state)
   end
@@ -2930,7 +3129,10 @@ defmodule MingaEditor.Commands.BufferManagement do
         {updated_vim, updated_state}
       end)
 
-    EditorState.set_editing(final_state, final_vim)
+    %{
+      final_state
+      | workspace: MingaEditor.Session.State.set_editing(final_state.workspace, final_vim)
+    }
   end
 
   @spec string_to_key_tuple(String.t()) :: Minga.Mode.key()

@@ -17,6 +17,7 @@ defmodule MingaEditor.Commands.Formatting do
   alias MingaEditor.Shell.Traditional.ToolPrompts
   alias MingaEditor.Shell.Traditional.ToolPromptWorkflow
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Feedback
   alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.State.OperationFeedback
   alias Minga.Mode.ToolConfirmState
@@ -88,7 +89,7 @@ defmodule MingaEditor.Commands.Formatting do
     version = Buffer.version(buf)
     ref = Client.request(client, "textDocument/formatting", params)
     operation = FormatLifecycle.arm(client, ref, buf, version, encoding)
-    EditorState.update_lsp(state, &LSPState.track_format(&1, operation))
+    %{state | lsp: (&LSPState.track_format(&1, operation)).(state.lsp)}
   end
 
   @doc "Cancels the newest active LSP formatting request, if one exists."
@@ -99,7 +100,9 @@ defmodule MingaEditor.Commands.Formatting do
         :none
 
       operation ->
-        state = EditorState.update_lsp(state, &LSPState.drop_format(&1, operation.ref))
+        state =
+          %{state | lsp: (&LSPState.drop_format(&1, operation.ref)).(state.lsp)}
+
         FormatLifecycle.cancel(operation)
         {:canceled, state}
     end
@@ -130,7 +133,9 @@ defmodule MingaEditor.Commands.Formatting do
         state
 
       operation ->
-        state = EditorState.update_lsp(state, &LSPState.drop_format(&1, operation.ref))
+        state =
+          %{state | lsp: (&LSPState.drop_format(&1, operation.ref)).(state.lsp)}
+
         FormatLifecycle.cancel(operation)
         state
     end
@@ -168,8 +173,18 @@ defmodule MingaEditor.Commands.Formatting do
   defp format_and_replace(state, buf, spec) do
     resource = "buffer:" <> inspect(buf)
 
-    {state, operation} =
-      OperationFeedback.start_in(state, :external_format, resource, "Formatting…")
+    {operation_feedback, operation} =
+      OperationFeedback.start(
+        state.feedback.operation_feedback,
+        :external_format,
+        resource,
+        "Formatting…"
+      )
+
+    state = %{
+      state
+      | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)
+    }
 
     schedule_external_format(state, buf, spec, operation.id)
   end
@@ -182,12 +197,19 @@ defmodule MingaEditor.Commands.Formatting do
         ) ::
           state()
   defp schedule_external_format(%{effect_scheduler: nil} = state, _buf, _spec, operation_id) do
-    OperationFeedback.finish_in(
-      state,
-      operation_id,
-      :error,
-      "Formatter scheduler unavailable"
-    )
+    %{
+      state
+      | feedback:
+          Feedback.accept_operation_feedback(
+            state.feedback,
+            OperationFeedback.finish(
+              state.feedback.operation_feedback,
+              operation_id,
+              :error,
+              "Formatter scheduler unavailable"
+            )
+          )
+    }
   end
 
   defp schedule_external_format(state, buf, spec, operation_id) do
@@ -198,12 +220,19 @@ defmodule MingaEditor.Commands.Formatting do
         state
 
       {:error, reason} ->
-        OperationFeedback.finish_in(
-          state,
-          operation_id,
-          :error,
-          "Format not scheduled: #{reason}"
-        )
+        %{
+          state
+          | feedback:
+              Feedback.accept_operation_feedback(
+                state.feedback,
+                OperationFeedback.finish(
+                  state.feedback.operation_feedback,
+                  operation_id,
+                  :error,
+                  "Format not scheduled: #{reason}"
+                )
+              )
+        }
     end
   end
 
@@ -258,7 +287,10 @@ defmodule MingaEditor.Commands.Formatting do
       declined: ToolPrompts.declined(prompts)
     }
 
-    EditorState.transition_mode(state, :tool_confirm, ms)
+    %{
+      state
+      | workspace: MingaEditor.Session.State.transition_mode(state.workspace, :tool_confirm, ms)
+    }
   end
 
   defp queue_and_show_prompt(state, tool_name), do: ToolPromptWorkflow.enqueue(state, tool_name)

@@ -24,8 +24,8 @@ defmodule MingaEditor.State.KeymapServerThreadingTest do
 
   defp build_state(keymap_server) do
     %EditorState{
-      port_manager: self(),
-      keymap_server: keymap_server,
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
+      interaction: %MingaEditor.State.Interaction{keymap_server: keymap_server},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
@@ -47,26 +47,30 @@ defmodule MingaEditor.State.KeymapServerThreadingTest do
     state_b = build_state(server_b)
 
     # The accessor returns the right server.
-    assert EditorState.keymap_server(state_a) == server_a
-    assert EditorState.keymap_server(state_b) == server_b
+    assert state_a.interaction.keymap_server == server_a
+    assert state_b.interaction.keymap_server == server_b
 
     # The keymap_context kw list carries the server.
-    assert EditorState.keymap_context(state_a) == [keymap_server: server_a]
-    assert EditorState.keymap_context(state_b) == [keymap_server: server_b]
+    assert [keymap_server: state_a.interaction.keymap_server] == [keymap_server: server_a]
+    assert [keymap_server: state_b.interaction.keymap_server] == [keymap_server: server_b]
 
     # End-to-end: scope resolution through the editor state's context honors
     # which server the state points at, even when both servers have a binding
     # for the same key.
     assert {:command, :cmd_from_a} =
-             Scope.resolve_key(:agent, :normal, {?~, 0}, EditorState.keymap_context(state_a))
+             Scope.resolve_key(:agent, :normal, {?~, 0},
+               keymap_server: state_a.interaction.keymap_server
+             )
 
     assert {:command, :cmd_from_b} =
-             Scope.resolve_key(:agent, :normal, {?~, 0}, EditorState.keymap_context(state_b))
+             Scope.resolve_key(:agent, :normal, {?~, 0},
+               keymap_server: state_b.interaction.keymap_server
+             )
   end
 
   test "EditorState defaults keymap_server to Minga.Keymap.default_server/0" do
     state = %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
@@ -74,6 +78,6 @@ defmodule MingaEditor.State.KeymapServerThreadingTest do
       }
     }
 
-    assert EditorState.keymap_server(state) == Minga.Keymap.default_server()
+    assert state.interaction.keymap_server == Minga.Keymap.default_server()
   end
 end

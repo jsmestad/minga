@@ -217,7 +217,7 @@ defmodule MingaEditor.Input.Picker do
   defp bottom_click_index(state, picker, row) do
     {visible, _} = PickerData.visible_items(picker, bottom_item_capacity(state))
     item_count = Enum.count(visible)
-    prompt_row = state.terminal_viewport.rows - 1
+    prompt_row = state.frontend.terminal_viewport.rows - 1
     first_item_row = prompt_row - item_count
     clicked_idx = row - first_item_row
 
@@ -243,7 +243,7 @@ defmodule MingaEditor.Input.Picker do
   end
 
   @spec bottom_item_capacity(EditorState.t()) :: pos_integer()
-  defp bottom_item_capacity(state), do: max(state.terminal_viewport.rows - 3, 1)
+  defp bottom_item_capacity(state), do: max(state.frontend.terminal_viewport.rows - 3, 1)
 
   # Centered: items start at the top of the FloatingWindow interior.
   @spec centered_click_index(FocusNode.t(), integer()) :: non_neg_integer() | nil

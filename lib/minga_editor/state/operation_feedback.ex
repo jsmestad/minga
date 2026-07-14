@@ -21,8 +21,6 @@ defmodule MingaEditor.State.OperationFeedback do
           next_id: pos_integer(),
           operations: %{optional(Operation.id()) => Operation.t()}
         }
-  @type editor_state :: %{required(:operation_feedback) => t(), optional(atom()) => term()}
-
   @doc "Builds an empty feedback store with an explicit positive retention bound."
   @spec new() :: t()
   @spec new(pos_integer()) :: t()
@@ -53,51 +51,20 @@ defmodule MingaEditor.State.OperationFeedback do
     {feedback, operation}
   end
 
-  @doc "Starts an operation in the Editor-global feedback field."
-  @spec start_in(editor_state(), Operation.kind(), Operation.resource(), String.t()) ::
-          {editor_state(), Operation.t()}
-  @spec start_in(editor_state(), Operation.kind(), Operation.resource(), String.t(), keyword()) ::
-          {editor_state(), Operation.t()}
-  def start_in(
-        %{operation_feedback: %__MODULE__{} = feedback} = state,
-        kind,
-        resource,
-        message,
-        opts \\ []
-      ) do
-    {feedback, operation} = start(feedback, kind, resource, message, opts)
-    {Map.put(state, :operation_feedback, feedback), operation}
-  end
-
   @doc "Applies a scheduler-authored queued transition if the identity is still active."
   @spec queued(t(), Operation.id(), String.t(), integer(), integer()) ::
           {:ok, t()} | {:error, OperationQueue.error()}
   def queued(%__MODULE__{} = feedback, id, message, position, total) do
     case OperationQueue.new(position, total) do
-      {:ok, queue} -> {:ok, update_active(feedback, id, &Operation.queued(&1, message, queue))}
+      {:ok, queue} -> {:ok, queue_active(feedback, id, message, queue)}
       {:error, reason} -> {:error, reason}
     end
-  end
-
-  @doc "Applies a valid queued transition in the Editor-global feedback field."
-  @spec queued_in(editor_state(), Operation.id(), String.t(), integer(), integer()) ::
-          editor_state()
-  def queued_in(%{operation_feedback: feedback} = state, id, message, position, total) do
-    queue = OperationQueue.new!(position, total)
-    feedback = update_active(feedback, id, &Operation.queued(&1, message, queue))
-    Map.put(state, :operation_feedback, feedback)
   end
 
   @doc "Applies a running transition if the identity is still active."
   @spec running(t(), Operation.id(), String.t()) :: t()
   def running(%__MODULE__{} = feedback, id, message) do
-    update_active(feedback, id, &Operation.running(&1, message))
-  end
-
-  @doc "Applies a running transition in the Editor-global feedback field."
-  @spec running_in(editor_state(), Operation.id(), String.t()) :: editor_state()
-  def running_in(%{operation_feedback: feedback} = state, id, message) do
-    Map.put(state, :operation_feedback, running(feedback, id, message))
+    run_active(feedback, id, message)
   end
 
   @doc "Records validated domain progress if the identity is still active."
@@ -106,32 +73,17 @@ defmodule MingaEditor.State.OperationFeedback do
   def report_progress(%__MODULE__{} = feedback, id, current, total) do
     case OperationProgress.new(current, total) do
       {:ok, progress} ->
-        {:ok, update_active(feedback, id, &Operation.report_progress(&1, progress))}
+        {:ok, progress_active(feedback, id, progress)}
 
       {:error, reason} ->
         {:error, reason}
     end
   end
 
-  @doc "Records valid domain progress in the Editor-global feedback field."
-  @spec report_progress_in(editor_state(), Operation.id(), integer(), integer()) :: editor_state()
-  def report_progress_in(%{operation_feedback: feedback} = state, id, current, total) do
-    progress = OperationProgress.new!(current, total)
-    feedback = update_active(feedback, id, &Operation.report_progress(&1, progress))
-    Map.put(state, :operation_feedback, feedback)
-  end
-
   @doc "Finishes an active identity with one of the semantic terminal statuses."
   @spec finish(t(), Operation.id(), Operation.terminal_status(), String.t()) :: t()
   def finish(%__MODULE__{} = feedback, id, status, message) do
-    update_active(feedback, id, &Operation.finish(&1, status, message))
-  end
-
-  @doc "Finishes an identity in the Editor-global feedback field."
-  @spec finish_in(editor_state(), Operation.id(), Operation.terminal_status(), String.t()) ::
-          editor_state()
-  def finish_in(%{operation_feedback: feedback} = state, id, status, message) do
-    Map.put(state, :operation_feedback, finish(feedback, id, status, message))
+    finish_active(feedback, id, status, message)
   end
 
   @doc "Marks an active identity timed out."
@@ -169,10 +121,6 @@ defmodule MingaEditor.State.OperationFeedback do
     end
   end
 
-  @doc "Returns whether the correlated operation in Editor state is still active."
-  @spec active_in?(map(), Operation.id()) :: boolean()
-  def active_in?(%{operation_feedback: %__MODULE__{} = feedback}, id), do: active?(feedback, id)
-
   @doc "Selects the newest active operation, otherwise the newest retained terminal operation."
   @spec selected(t()) :: Operation.t() | nil
   def selected(%__MODULE__{} = feedback) do
@@ -183,11 +131,6 @@ defmodule MingaEditor.State.OperationFeedback do
       operation -> operation
     end
   end
-
-  @doc "Selects the current operation from an Editor state or compatible render context."
-  @spec selected_from(map()) :: Operation.t() | nil
-  def selected_from(%{operation_feedback: %__MODULE__{} = feedback}), do: selected(feedback)
-  def selected_from(_state), do: nil
 
   @spec replace_operations(%{Operation.id() => Operation.t()}, Operation.resource(), boolean()) ::
           %{Operation.id() => Operation.t()}
@@ -206,16 +149,55 @@ defmodule MingaEditor.State.OperationFeedback do
 
   defp replace_matching(operation, _resource), do: operation
 
-  @spec update_active(t(), Operation.id(), (Operation.t() -> Operation.t())) :: t()
-  defp update_active(%__MODULE__{} = feedback, id, update) do
+  @spec queue_active(t(), Operation.id(), String.t(), OperationQueue.t()) :: t()
+  defp queue_active(%__MODULE__{} = feedback, id, message, %OperationQueue{} = queue) do
     case Map.fetch(feedback.operations, id) do
-      {:ok, %Operation{} = operation} ->
-        feedback
-        |> Map.put(:operations, Map.put(feedback.operations, id, update.(operation)))
-        |> enforce_limit()
+      {:ok, operation} ->
+        update_operation(feedback, id, Operation.queued(operation, message, queue))
 
       :error ->
         feedback
+    end
+  end
+
+  @spec run_active(t(), Operation.id(), String.t()) :: t()
+  defp run_active(%__MODULE__{} = feedback, id, message) do
+    case Map.fetch(feedback.operations, id) do
+      {:ok, operation} -> update_operation(feedback, id, Operation.running(operation, message))
+      :error -> feedback
+    end
+  end
+
+  @spec progress_active(t(), Operation.id(), OperationProgress.t()) :: t()
+  defp progress_active(%__MODULE__{} = feedback, id, %OperationProgress{} = progress) do
+    case Map.fetch(feedback.operations, id) do
+      {:ok, operation} ->
+        update_operation(feedback, id, Operation.report_progress(operation, progress))
+
+      :error ->
+        feedback
+    end
+  end
+
+  @spec finish_active(t(), Operation.id(), Operation.terminal_status(), String.t()) :: t()
+  defp finish_active(%__MODULE__{} = feedback, id, status, message) do
+    case Map.fetch(feedback.operations, id) do
+      {:ok, operation} ->
+        update_operation(feedback, id, Operation.finish(operation, status, message))
+
+      :error ->
+        feedback
+    end
+  end
+
+  @spec update_operation(t(), Operation.id(), Operation.t()) :: t()
+  defp update_operation(%__MODULE__{} = feedback, id, %Operation{} = operation) do
+    if Map.has_key?(feedback.operations, id) do
+      feedback
+      |> Map.put(:operations, Map.put(feedback.operations, id, operation))
+      |> enforce_limit()
+    else
+      feedback
     end
   end
 

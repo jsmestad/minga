@@ -109,9 +109,13 @@ defmodule MingaEditor.State.Mouse do
   Returns the updated mouse state with `click_count` set.
   """
   @spec record_press(t(), integer(), integer(), pos_integer()) :: t()
-  def record_press(%__MODULE__{} = mouse, row, col, native_click_count) do
-    now = System.monotonic_time(:millisecond)
+  def record_press(%__MODULE__{} = mouse, row, col, native_click_count),
+    do: record_press_at(mouse, row, col, native_click_count, 0)
 
+  @doc "Records a mouse press using a timestamp supplied by the input workflow."
+  @spec record_press_at(t(), integer(), integer(), pos_integer(), integer()) :: t()
+  def record_press_at(%__MODULE__{} = mouse, row, col, native_click_count, now)
+      when is_integer(now) do
     effective_count =
       if native_click_count > 1 do
         # GUI sends native click count; trust it
@@ -162,31 +166,34 @@ defmodule MingaEditor.State.Mouse do
 
   # ── Hover tracking ─────────────────────────────────────────────────────────
 
-  @doc "Sets the hover position and starts a debounce timer."
+  @doc "Records hover position and returns timer work for the owning workflow."
   @spec set_hover(t(), integer(), integer(), keyword()) :: t()
-  def set_hover(%__MODULE__{} = mouse, row, col, opts \\ []) do
-    cancel_hover_timer(mouse)
-
-    timer =
-      if Keyword.get(opts, :backend) != :headless do
-        Process.send_after(self(), :mouse_hover_timeout, @hover_delay_ms)
-      end
-
-    %{mouse | hover_pos: {row, col}, hover_timer: timer}
+  def set_hover(%__MODULE__{} = mouse, row, col, _opts \\ []) do
+    {mouse, _timer, _schedule?} = prepare_hover(mouse, row, col, backend: :headless)
+    mouse
   end
 
-  @doc "Clears hover state and cancels any pending timer."
+  @doc "Prepares hover state without touching the process timer API."
+  @spec prepare_hover(t(), integer(), integer(), keyword()) :: {t(), reference() | nil, boolean()}
+  def prepare_hover(%__MODULE__{} = mouse, row, col, opts \\ []) do
+    {
+      %{mouse | hover_pos: {row, col}, hover_timer: nil},
+      mouse.hover_timer,
+      Keyword.get(opts, :backend) != :headless
+    }
+  end
+
+  @doc "Records a timer reference created by the mouse workflow."
+  @spec accept_hover_timer(t(), reference()) :: t()
+  def accept_hover_timer(%__MODULE__{} = mouse, timer) when is_reference(timer),
+    do: %{mouse | hover_timer: timer}
+
+  @doc "Clears hover state and returns any timer for the owning workflow to cancel."
   @spec clear_hover(t()) :: t()
-  def clear_hover(%__MODULE__{} = mouse) do
-    cancel_hover_timer(mouse)
-    %{mouse | hover_pos: nil, hover_timer: nil}
-  end
+  def clear_hover(%__MODULE__{} = mouse), do: %{mouse | hover_pos: nil, hover_timer: nil}
 
-  @spec cancel_hover_timer(t()) :: :ok
-  defp cancel_hover_timer(%{hover_timer: nil}), do: :ok
-
-  defp cancel_hover_timer(%{hover_timer: ref}) do
-    Process.cancel_timer(ref)
-    :ok
-  end
+  @doc "Prepares hover clearing without touching the process timer API."
+  @spec prepare_clear_hover(t()) :: {t(), reference() | nil}
+  def prepare_clear_hover(%__MODULE__{} = mouse),
+    do: {%{mouse | hover_pos: nil, hover_timer: nil}, mouse.hover_timer}
 end

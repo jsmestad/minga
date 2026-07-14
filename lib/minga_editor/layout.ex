@@ -97,7 +97,7 @@ defmodule MingaEditor.Layout do
   def get(%EditorState{} = state) do
     state = MingaEditor.Shell.Workflow.ensure_available(state)
 
-    case state.layout do
+    case state.render.layout do
       %__MODULE__{} = cached -> cached
       _other -> MingaEditor.Shell.Runtime.module(state.shell_runtime).compute_layout(state)
     end
@@ -116,8 +116,8 @@ defmodule MingaEditor.Layout do
   def put(%EditorState{} = state) do
     state = MingaEditor.Shell.Workflow.ensure_available(state)
     layout = MingaEditor.Shell.Runtime.module(state.shell_runtime).compute_layout(state)
-    state = %{state | layout: layout}
-    %{state | focus_tree: FocusTree.from_state(state)}
+
+    %{state | render: MingaEditor.State.Render.cache_layout(state.render, layout, nil)}
   end
 
   def put(%{shell: shell} = state) when is_atom(shell) do
@@ -131,7 +131,8 @@ defmodule MingaEditor.Layout do
   (viewport resize, file tree toggle, agent panel toggle, window split/close).
   """
   @spec invalidate(EditorState.t()) :: EditorState.t()
-  def invalidate(state), do: %{state | layout: nil, focus_tree: nil}
+  def invalidate(%EditorState{} = state),
+    do: %{state | render: MingaEditor.State.Render.invalidate_layout(state.render)}
 
   @doc """
   Computes the complete layout for the current frame.

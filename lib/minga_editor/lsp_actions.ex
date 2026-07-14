@@ -32,7 +32,9 @@ defmodule MingaEditor.LspActions do
   alias MingaEditor.Mouse.HitTest
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Feedback
   alias MingaEditor.State.LSP, as: LSPState
+  alias MingaEditor.State.Operation
   alias MingaEditor.State.OperationFeedback
   alias MingaEditor.VimState
   alias Minga.Log
@@ -138,20 +140,25 @@ defmodule MingaEditor.LspActions do
               "context" => %{"includeDeclaration" => true}
             }
 
-            {state, operation} =
-              OperationFeedback.start_in(
-                state,
+            {operation_feedback, operation} =
+              OperationFeedback.start(
+                state.feedback.operation_feedback,
                 :lsp_references,
                 "lsp:references:" <> path,
                 "Finding references…",
                 cancelable?: false
               )
 
+            state = %{
+              state
+              | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)
+            }
+
             ref = Client.request(client, "textDocument/references", params)
 
             state
             |> track_operation_request(ref, {:references, operation.id, active_tab_id(state)})
-            |> OperationFeedback.running_in(operation.id, "Finding references…")
+            |> mark_operation_running(operation.id, "Finding references…")
         end
     end
   end
@@ -206,9 +213,10 @@ defmodule MingaEditor.LspActions do
         state
 
       _client ->
-        if state.backend != :headless do
+        if state.frontend.backend != :headless do
           timer = Process.send_after(self(), :document_highlight_debounce, @highlight_debounce_ms)
-          EditorState.update_lsp(state, &LSPState.set_highlight_timer(&1, timer))
+
+          %{state | lsp: (&LSPState.set_highlight_timer(&1, timer)).(state.lsp)}
         else
           state
         end
@@ -231,7 +239,9 @@ defmodule MingaEditor.LspActions do
 
   @spec cancel_highlight_timer(state()) :: state()
   defp cancel_highlight_timer(state) do
-    EditorState.update_lsp(state, &LSPState.cancel_highlight_timer/1)
+    {:cancel_timer, lsp, timer} = LSPState.cancel_highlight_timer(state.lsp)
+    cancel_timer(timer)
+    %{state | lsp: lsp}
   end
 
   # ── Code actions ──────────────────────────────────────────────────────────
@@ -324,20 +334,25 @@ defmodule MingaEditor.LspActions do
               "newName" => new_name
             }
 
-            {state, operation} =
-              OperationFeedback.start_in(
-                state,
+            {operation_feedback, operation} =
+              OperationFeedback.start(
+                state.feedback.operation_feedback,
                 :lsp_rename,
                 "lsp:rename:" <> path,
                 "Renaming…",
                 cancelable?: false
               )
 
+            state = %{
+              state
+              | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)
+            }
+
             ref = Client.request(client, "textDocument/rename", params)
 
             state
             |> track_operation_request(ref, {:rename, operation.id, active_tab_id(state)})
-            |> OperationFeedback.running_in(operation.id, "Renaming…")
+            |> mark_operation_running(operation.id, "Renaming…")
         end
     end
   end
@@ -480,7 +495,7 @@ defmodule MingaEditor.LspActions do
     if idx + 1 < Enum.count(ranges) do
       new_idx = idx + 1
       range = Enum.at(ranges, new_idx)
-      state = EditorState.update_lsp(state, &LSPState.expand_selection/1)
+      state = %{state | lsp: (&LSPState.expand_selection/1).(state.lsp)}
       apply_selection_range(state, range)
     else
       selection_range(state)
@@ -503,7 +518,7 @@ defmodule MingaEditor.LspActions do
       when is_list(ranges) and idx > 0 do
     new_idx = idx - 1
     range = Enum.at(ranges, new_idx)
-    state = EditorState.update_lsp(state, &LSPState.shrink_selection/1)
+    state = %{state | lsp: (&LSPState.shrink_selection/1).(state.lsp)}
     apply_selection_range(state, range)
   end
 
@@ -512,7 +527,7 @@ defmodule MingaEditor.LspActions do
     vim = VimState.transition(state.workspace.editing, :normal)
 
     %{
-      EditorState.set_editing(state, vim)
+      %{state | workspace: MingaEditor.Session.State.set_editing(state.workspace, vim)}
       | lsp: LSPState.clear_selection_ranges(state.lsp)
     }
   end
@@ -647,7 +662,7 @@ defmodule MingaEditor.LspActions do
 
   defp request_inlay_hints_for_path(state, client, path) do
     uri = SyncServer.path_to_uri(path)
-    vp = state.terminal_viewport
+    vp = state.frontend.terminal_viewport
 
     params = %{
       "textDocument" => %{"uri" => uri},
@@ -677,7 +692,7 @@ defmodule MingaEditor.LspActions do
   def schedule_inlay_hints_on_scroll(state) do
     vp_top = effective_viewport_top(state)
 
-    if vp_top == state.lsp.last_inlay_viewport_top or state.backend == :headless do
+    if vp_top == state.lsp.last_inlay_viewport_top or state.frontend.backend == :headless do
       state
     else
       # Cancel any pending timer
@@ -686,24 +701,28 @@ defmodule MingaEditor.LspActions do
       timer =
         Process.send_after(self(), :inlay_hint_scroll_debounce, @inlay_hint_scroll_debounce_ms)
 
-      EditorState.update_lsp(state, &LSPState.set_inlay_hint_timer(&1, timer, vp_top))
+      %{state | lsp: (&LSPState.set_inlay_hint_timer(&1, timer, vp_top)).(state.lsp)}
     end
   end
 
   @spec cancel_inlay_hint_timer(state()) :: state()
   defp cancel_inlay_hint_timer(state) do
-    EditorState.update_lsp(state, &LSPState.cancel_inlay_hint_timer/1)
+    {:cancel_timer, lsp, timer} = LSPState.cancel_inlay_hint_timer(state.lsp)
+    cancel_timer(timer)
+    %{state | lsp: lsp}
   end
 
-  # Returns the viewport top for the active window, falling back to
-  # state.terminal_viewport.top. Uses EditorState.current_viewport when
-  # the state is a proper struct, otherwise reads state.terminal_viewport directly.
+  defp cancel_timer(nil), do: :ok
+  defp cancel_timer(timer), do: Process.cancel_timer(timer)
+
+  # Returns the viewport top for the active window. Proper Editor state uses the
+  # active window transition boundary; render-shaped maps carry the frontend viewport directly.
   @spec effective_viewport_top(state()) :: non_neg_integer()
   defp effective_viewport_top(%EditorState{} = state) do
     EditorState.current_viewport(state).top
   end
 
-  defp effective_viewport_top(state), do: state.terminal_viewport.top
+  defp effective_viewport_top(state), do: state.frontend.terminal_viewport.top
 
   # ── Response handlers ──────────────────────────────────────────────────────
 
@@ -795,7 +814,9 @@ defmodule MingaEditor.LspActions do
         {cursor_row, cursor_col} = hover_cursor_screen_position(state)
 
         popup =
-          MingaEditor.HoverPopup.Builder.new(text, cursor_row, cursor_col, theme: state.theme)
+          MingaEditor.HoverPopup.Builder.new(text, cursor_row, cursor_col,
+            theme: state.appearance.theme
+          )
 
         MingaEditor.Shell.Traditional.HoverPopupWorkflow.show(state, popup)
     end
@@ -881,7 +902,7 @@ defmodule MingaEditor.LspActions do
         state
 
       text ->
-        popup = MingaEditor.HoverPopup.Builder.new(text, row, col, theme: state.theme)
+        popup = MingaEditor.HoverPopup.Builder.new(text, row, col, theme: state.appearance.theme)
         MingaEditor.Shell.Traditional.HoverPopupWorkflow.show(state, popup)
     end
   end
@@ -902,7 +923,7 @@ defmodule MingaEditor.LspActions do
           pos_integer()
         ) :: state()
   def handle_references_response(state, response, operation_id) do
-    if OperationFeedback.active_in?(state, operation_id) do
+    if OperationFeedback.active?(state.feedback.operation_feedback, operation_id) do
       do_handle_references_response(state, response, operation_id)
     else
       state
@@ -915,31 +936,106 @@ defmodule MingaEditor.LspActions do
           pos_integer()
         ) :: state()
   defp do_handle_references_response(state, {:error, :timeout}, operation_id) do
-    OperationFeedback.finish_in(state, operation_id, :timeout, "References request timed out")
+    %{
+      state
+      | feedback:
+          Feedback.accept_operation_feedback(
+            state.feedback,
+            OperationFeedback.finish(
+              state.feedback.operation_feedback,
+              operation_id,
+              :timeout,
+              "References request timed out"
+            )
+          )
+    }
   end
 
   defp do_handle_references_response(state, {:error, error}, operation_id) do
     Log.debug(:lsp, "References request failed: #{inspect(error)}")
-    OperationFeedback.finish_in(state, operation_id, :error, "References request failed")
+
+    %{
+      state
+      | feedback:
+          Feedback.accept_operation_feedback(
+            state.feedback,
+            OperationFeedback.finish(
+              state.feedback.operation_feedback,
+              operation_id,
+              :error,
+              "References request failed"
+            )
+          )
+    }
   end
 
   defp do_handle_references_response(state, {:ok, nil}, operation_id) do
-    OperationFeedback.finish_in(state, operation_id, :success, "No references found")
+    %{
+      state
+      | feedback:
+          Feedback.accept_operation_feedback(
+            state.feedback,
+            OperationFeedback.finish(
+              state.feedback.operation_feedback,
+              operation_id,
+              :success,
+              "No references found"
+            )
+          )
+    }
   end
 
   defp do_handle_references_response(state, {:ok, []}, operation_id) do
-    OperationFeedback.finish_in(state, operation_id, :success, "No references found")
+    %{
+      state
+      | feedback:
+          Feedback.accept_operation_feedback(
+            state.feedback,
+            OperationFeedback.finish(
+              state.feedback.operation_feedback,
+              operation_id,
+              :success,
+              "No references found"
+            )
+          )
+    }
   end
 
   defp do_handle_references_response(state, {:ok, [single]}, operation_id) do
     case parse_single_location(single) do
       nil ->
-        OperationFeedback.finish_in(state, operation_id, :success, "No references found")
+        %{
+          state
+          | feedback:
+              Feedback.accept_operation_feedback(
+                state.feedback,
+                OperationFeedback.finish(
+                  state.feedback.operation_feedback,
+                  operation_id,
+                  :success,
+                  "No references found"
+                )
+              )
+        }
 
       {uri, line, col} ->
         state
         |> jump_to_location(uri, line, col)
-        |> OperationFeedback.finish_in(operation_id, :success, "Reference found")
+        |> then(fn state ->
+          %{
+            state
+            | feedback:
+                Feedback.accept_operation_feedback(
+                  state.feedback,
+                  OperationFeedback.finish(
+                    state.feedback.operation_feedback,
+                    operation_id,
+                    :success,
+                    "Reference found"
+                  )
+                )
+          }
+        end)
     end
   end
 
@@ -951,7 +1047,19 @@ defmodule MingaEditor.LspActions do
 
   @spec finish_references_picker(state(), pos_integer(), [map()]) :: state()
   defp finish_references_picker(state, operation_id, []) do
-    OperationFeedback.finish_in(state, operation_id, :success, "No references found")
+    %{
+      state
+      | feedback:
+          Feedback.accept_operation_feedback(
+            state.feedback,
+            OperationFeedback.finish(
+              state.feedback.operation_feedback,
+              operation_id,
+              :success,
+              "No references found"
+            )
+          )
+    }
   end
 
   defp finish_references_picker(state, operation_id, items) do
@@ -959,7 +1067,21 @@ defmodule MingaEditor.LspActions do
 
     state
     |> PickerUI.open(LocationSource, %{locations: items, title: "References (#{count})"})
-    |> OperationFeedback.finish_in(operation_id, :success, "Found #{count} references")
+    |> then(fn state ->
+      %{
+        state
+        | feedback:
+            Feedback.accept_operation_feedback(
+              state.feedback,
+              OperationFeedback.finish(
+                state.feedback.operation_feedback,
+                operation_id,
+                :success,
+                "Found #{count} references"
+              )
+            )
+      }
+    end)
   end
 
   # ── Document highlight response ───────────────────────────────────────────
@@ -972,20 +1094,24 @@ defmodule MingaEditor.LspActions do
   """
   @spec handle_document_highlight_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_document_highlight_response(state, {:error, _error}) do
-    EditorState.set_document_highlights(state, nil)
+    %{state | workspace: MingaEditor.Session.State.set_document_highlights(state.workspace, nil)}
   end
 
   def handle_document_highlight_response(state, {:ok, nil}) do
-    EditorState.set_document_highlights(state, nil)
+    %{state | workspace: MingaEditor.Session.State.set_document_highlights(state.workspace, nil)}
   end
 
   def handle_document_highlight_response(state, {:ok, []}) do
-    EditorState.set_document_highlights(state, nil)
+    %{state | workspace: MingaEditor.Session.State.set_document_highlights(state.workspace, nil)}
   end
 
   def handle_document_highlight_response(state, {:ok, highlights}) when is_list(highlights) do
     parsed = Enum.map(highlights, &DocumentHighlight.from_lsp/1)
-    EditorState.set_document_highlights(state, parsed)
+
+    %{
+      state
+      | workspace: MingaEditor.Session.State.set_document_highlights(state.workspace, parsed)
+    }
   end
 
   # ── Code action response ──────────────────────────────────────────────────
@@ -1039,7 +1165,7 @@ defmodule MingaEditor.LspActions do
     # The ex-command parser handles "rename <new_name>" → {:rename, new_name}
     command_state = %CommandState{input: "rename #{placeholder}"}
     vim = VimState.transition(state.workspace.editing, :command, command_state)
-    EditorState.set_editing(state, vim)
+    %{state | workspace: MingaEditor.Session.State.set_editing(state.workspace, vim)}
   end
 
   @doc """
@@ -1051,7 +1177,7 @@ defmodule MingaEditor.LspActions do
   @spec handle_rename_response(state(), {:ok, term()} | {:error, term()}, pos_integer()) ::
           state()
   def handle_rename_response(state, response, operation_id) do
-    if OperationFeedback.active_in?(state, operation_id) do
+    if OperationFeedback.active?(state.feedback.operation_feedback, operation_id) do
       do_handle_rename_response(state, response, operation_id)
     else
       state
@@ -1061,25 +1187,86 @@ defmodule MingaEditor.LspActions do
   @spec do_handle_rename_response(state(), {:ok, term()} | {:error, term()}, pos_integer()) ::
           state()
   defp do_handle_rename_response(state, {:error, :timeout}, operation_id) do
-    OperationFeedback.finish_in(state, operation_id, :timeout, "Rename timed out")
+    %{
+      state
+      | feedback:
+          Feedback.accept_operation_feedback(
+            state.feedback,
+            OperationFeedback.finish(
+              state.feedback.operation_feedback,
+              operation_id,
+              :timeout,
+              "Rename timed out"
+            )
+          )
+    }
   end
 
   defp do_handle_rename_response(state, {:error, error}, operation_id) do
     Log.debug(:lsp, "Rename failed: #{inspect(error)}")
-    OperationFeedback.finish_in(state, operation_id, :error, "Rename failed")
+
+    %{
+      state
+      | feedback:
+          Feedback.accept_operation_feedback(
+            state.feedback,
+            OperationFeedback.finish(
+              state.feedback.operation_feedback,
+              operation_id,
+              :error,
+              "Rename failed"
+            )
+          )
+    }
   end
 
   defp do_handle_rename_response(state, {:ok, nil}, operation_id) do
-    OperationFeedback.finish_in(state, operation_id, :success, "Rename returned no edits")
+    %{
+      state
+      | feedback:
+          Feedback.accept_operation_feedback(
+            state.feedback,
+            OperationFeedback.finish(
+              state.feedback.operation_feedback,
+              operation_id,
+              :success,
+              "Rename returned no edits"
+            )
+          )
+    }
   end
 
   defp do_handle_rename_response(state, {:ok, workspace_edit}, operation_id) do
     case apply_workspace_edit_result(state, workspace_edit, "Rename") do
       {:ok, state, message} ->
-        OperationFeedback.finish_in(state, operation_id, :success, message)
+        %{
+          state
+          | feedback:
+              Feedback.accept_operation_feedback(
+                state.feedback,
+                OperationFeedback.finish(
+                  state.feedback.operation_feedback,
+                  operation_id,
+                  :success,
+                  message
+                )
+              )
+        }
 
       {:error, state, message} ->
-        OperationFeedback.finish_in(state, operation_id, :error, message)
+        %{
+          state
+          | feedback:
+              Feedback.accept_operation_feedback(
+                state.feedback,
+                OperationFeedback.finish(
+                  state.feedback.operation_feedback,
+                  operation_id,
+                  :error,
+                  message
+                )
+              )
+        }
     end
   end
 
@@ -1300,7 +1487,9 @@ defmodule MingaEditor.LspActions do
 
       [first | _] ->
         # Store the range chain for subsequent expand/shrink operations
-        state = EditorState.update_lsp(state, &LSPState.set_selection_ranges(&1, ranges))
+        state =
+          %{state | lsp: (&LSPState.set_selection_ranges(&1, ranges)).(state.lsp)}
+
         apply_selection_range(state, first)
     end
   end
@@ -1440,7 +1629,9 @@ defmodule MingaEditor.LspActions do
       end)
       |> Enum.filter(fn l -> l.title != nil end)
 
-    state = EditorState.update_lsp(state, &LSPState.set_code_lenses(&1, parsed))
+    state =
+      %{state | lsp: (&LSPState.set_code_lenses(&1, parsed)).(state.lsp)}
+
     LspDecorations.apply_code_lenses(state)
   end
 
@@ -1479,7 +1670,9 @@ defmodule MingaEditor.LspActions do
         }
       end)
 
-    state = EditorState.update_lsp(state, &LSPState.set_inlay_hints(&1, parsed))
+    state =
+      %{state | lsp: (&LSPState.set_inlay_hints(&1, parsed)).(state.lsp)}
+
     LspDecorations.apply_inlay_hints(state)
   end
 
@@ -1666,18 +1859,29 @@ defmodule MingaEditor.LspActions do
 
         ref = Client.request(client, method, params)
 
-        EditorState.put_lsp_pending(state, ref, kind)
+        %{
+          state
+          | workspace: MingaEditor.Session.State.put_lsp_pending(state.workspace, ref, kind)
+        }
     end
   end
 
   @spec put_lsp_pending(state(), reference(), atom() | tuple()) :: state()
   defp put_lsp_pending(state, ref, kind) do
-    EditorState.put_lsp_pending(state, ref, kind)
+    %{state | workspace: MingaEditor.Session.State.put_lsp_pending(state.workspace, ref, kind)}
   end
 
   @spec track_operation_request(state(), reference(), LSPState.operation_request()) :: state()
+  @spec mark_operation_running(state(), Operation.id(), String.t()) :: state()
+  defp mark_operation_running(state, operation_id, message) do
+    operation_feedback =
+      OperationFeedback.running(state.feedback.operation_feedback, operation_id, message)
+
+    %{state | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)}
+  end
+
   defp track_operation_request(state, ref, request) do
-    EditorState.update_lsp(state, &LSPState.track_operation_request(&1, ref, request))
+    %{state | lsp: (&LSPState.track_operation_request(&1, ref, request)).(state.lsp)}
   end
 
   @spec active_tab_id(state()) :: pos_integer() | nil
@@ -1690,7 +1894,10 @@ defmodule MingaEditor.LspActions do
 
   @spec set_document_highlights(state(), [DocumentHighlight.t()] | nil) :: state()
   defp set_document_highlights(state, highlights) do
-    EditorState.set_document_highlights(state, highlights)
+    %{
+      state
+      | workspace: MingaEditor.Session.State.set_document_highlights(state.workspace, highlights)
+    }
   end
 
   @spec parse_single_location(map()) ::
@@ -1730,12 +1937,12 @@ defmodule MingaEditor.LspActions do
     if target_path == current_path do
       # Same file: just move the cursor
       Buffer.move_to(state.workspace.buffers.active, {line, col})
-      EditorState.mark_authoritative_scroll(state)
+      %{state | workspace: MingaEditor.Session.State.mark_authoritative_scroll(state.workspace)}
     else
       # Different file: open it, then move cursor
       state = open_or_switch_to_file(state, target_path)
       Buffer.move_to(state.workspace.buffers.active, {line, col})
-      EditorState.mark_authoritative_scroll(state)
+      %{state | workspace: MingaEditor.Session.State.mark_authoritative_scroll(state.workspace)}
     end
   end
 
@@ -1804,7 +2011,7 @@ defmodule MingaEditor.LspActions do
 
     case idx do
       nil ->
-        case Commands.start_buffer(file_path, EditorState.options_server(state)) do
+        case Commands.start_buffer(file_path, state.interaction.options_server) do
           {:ok, pid} ->
             Commands.add_buffer(state, pid)
 
@@ -1824,7 +2031,14 @@ defmodule MingaEditor.LspActions do
   defp set_jump_mark(%{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
     pos = Buffer.cursor(buf)
 
-    EditorState.set_last_jump_pos(state, pos)
+    %{
+      state
+      | workspace:
+          MingaEditor.Session.State.set_editing(
+            state.workspace,
+            MingaEditor.VimState.set_last_jump_pos(state.workspace.editing, pos)
+          )
+    }
   end
 
   defp set_jump_mark(state), do: state
@@ -1875,12 +2089,13 @@ defmodule MingaEditor.LspActions do
     if buf do
       {line, col} = Buffer.cursor(buf)
       # Approximate screen position: line offset from viewport top + gutter
-      vp = state.terminal_viewport
+      vp = state.frontend.terminal_viewport
       screen_row = line - vp.top + 1
       screen_col = col + 4
       {clamp(screen_row, 1, vp.rows - 2), clamp(screen_col, 0, vp.cols - 1)}
     else
-      {div(state.terminal_viewport.rows, 2), div(state.terminal_viewport.cols, 2)}
+      {div(state.frontend.terminal_viewport.rows, 2),
+       div(state.frontend.terminal_viewport.cols, 2)}
     end
   end
 
@@ -2032,7 +2247,10 @@ defmodule MingaEditor.LspActions do
         range = lens["range"]
         {line, _col} = extract_position(range["start"])
         entry = %{line: line, title: title, data: lens}
-        state = EditorState.update_lsp(state, &LSPState.append_code_lens(&1, entry))
+
+        state =
+          %{state | lsp: (&LSPState.append_code_lens(&1, entry)).(state.lsp)}
+
         LspDecorations.apply_code_lenses(state)
     end
   end
@@ -2210,7 +2428,7 @@ defmodule MingaEditor.LspActions do
       }
 
       vim = VimState.transition(state.workspace.editing, :visual, visual_state)
-      EditorState.set_editing(state, vim)
+      %{state | workspace: MingaEditor.Session.State.set_editing(state.workspace, vim)}
     else
       state
     end
@@ -2265,7 +2483,7 @@ defmodule MingaEditor.LspActions do
   defp ensure_buffer_open(state, path) do
     case find_buffer_by_path(state, path) do
       nil ->
-        case Commands.start_buffer(path, EditorState.options_server(state)) do
+        case Commands.start_buffer(path, state.interaction.options_server) do
           {:ok, pid} -> Commands.add_buffer(state, pid)
           {:error, _} -> state
         end

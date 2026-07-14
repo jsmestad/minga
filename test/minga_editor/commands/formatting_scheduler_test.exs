@@ -11,6 +11,7 @@ defmodule MingaEditor.Commands.FormattingSchedulerTest do
   alias MingaEditor.EffectScheduler
   alias MingaEditor.Effects.ExternalFormat
   alias MingaEditor.RenderPipeline.TestHelpers
+  alias MingaEditor.State.Feedback
   alias MingaEditor.State.OperationFeedback
 
   @effect_timeout 2_000
@@ -24,11 +25,14 @@ defmodule MingaEditor.Commands.FormattingSchedulerTest do
     :ok = EffectScheduler.attach(scheduler, self())
 
     state =
-      TestHelpers.base_state(content: "defmodule Example, do: nil\n", effect_scheduler: scheduler)
-      |> Map.put(:rendering, :disabled)
+      TestHelpers.base_state(
+        content: "defmodule Example, do: nil\n",
+        effect_scheduler: scheduler,
+        rendering: :disabled
+      )
 
     state = Formatting.format_buffer(state)
-    operation = OperationFeedback.selected(state.operation_feedback)
+    operation = OperationFeedback.selected(state.feedback.operation_feedback)
 
     assert operation.status == :pending
     assert is_integer(operation.id)
@@ -45,7 +49,7 @@ defmodule MingaEditor.Commands.FormattingSchedulerTest do
 
     assert operation_id == operation.id
     {:noreply, state} = MingaEditor.handle_info({:effect_lifecycle, lifecycle}, state)
-    assert OperationFeedback.selected(state.operation_feedback).status == :running
+    assert OperationFeedback.selected(state.feedback.operation_feedback).status == :running
   end
 
   test "superseded mailbox candidate cannot apply an old external format" do
@@ -60,8 +64,15 @@ defmodule MingaEditor.Commands.FormattingSchedulerTest do
     state = TestHelpers.base_state(content: "old content\n", effect_scheduler: scheduler)
     buffer = state.workspace.buffers.active
 
-    {state, old_operation} =
-      OperationFeedback.start_in(state, :external_format, "buffer", "Formatting old")
+    {old_feedback, old_operation} =
+      OperationFeedback.start(
+        state.feedback.operation_feedback,
+        :external_format,
+        "buffer",
+        "Formatting old"
+      )
+
+    state = %{state | feedback: Feedback.accept_operation_feedback(state.feedback, old_feedback)}
 
     old_request =
       ExternalFormat.request(buffer, "tr '[:lower:]' '[:upper:]'", old_operation.id)
@@ -75,8 +86,18 @@ defmodule MingaEditor.Commands.FormattingSchedulerTest do
                     } = old_candidate},
                    @effect_timeout
 
-    {state, replacement_operation} =
-      OperationFeedback.start_in(state, :external_format, "buffer", "Formatting replacement")
+    {replacement_feedback, replacement_operation} =
+      OperationFeedback.start(
+        state.feedback.operation_feedback,
+        :external_format,
+        "buffer",
+        "Formatting replacement"
+      )
+
+    state = %{
+      state
+      | feedback: Feedback.accept_operation_feedback(state.feedback, replacement_feedback)
+    }
 
     replacement = ExternalFormat.request(buffer, "cat", replacement_operation.id)
     assert {:ok, _replacement_id, :running} = EffectScheduler.schedule(scheduler, replacement)

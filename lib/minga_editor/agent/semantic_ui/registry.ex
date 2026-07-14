@@ -63,6 +63,10 @@ defmodule MingaEditor.Agent.SemanticUI.Registry do
 
   @doc "Returns the semantic UI registry table for a state-like value."
   @spec table_for(map() | nil) :: table()
+  def table_for(%{extension_surfaces: %{agent_semantic_ui_registry: table}})
+      when is_atom(table),
+      do: table
+
   def table_for(%{agent_semantic_ui_registry: table}) when is_atom(table), do: table
   def table_for(_state), do: @table
 

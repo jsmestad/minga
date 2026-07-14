@@ -26,13 +26,17 @@ defmodule MingaEditor.MessageLog do
     {parsed_level, subsystem, _clean_text} = MessageStore.parse_prefix(text)
     level = level_override || parsed_level
 
-    %{state | message_store: MessageStore.append(state.message_store, text, level, subsystem)}
+    %{
+      state
+      | render: MingaEditor.State.Render.append_message(state.render, text, level, subsystem)
+    }
   end
 
   @doc """
   Returns the appropriate log prefix for the frontend type.
   """
   @spec frontend_prefix(EditorState.t()) :: String.t()
+  def frontend_prefix(%{frontend: %{capabilities: %{frontend_type: :native_gui}}}), do: "GUI"
   def frontend_prefix(%{capabilities: %{frontend_type: :native_gui}}), do: "GUI"
   def frontend_prefix(_state), do: "ZIG"
 end

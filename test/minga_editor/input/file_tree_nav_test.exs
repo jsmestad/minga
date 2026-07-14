@@ -35,10 +35,12 @@ defmodule MingaEditor.Input.FileTreeNavTest do
       |> SessionState.set_file_tree(%FileTreeState{tree: tree, focused: true, buffer: buf})
 
     %EditorState{
-      port_manager: self(),
-      sidebar_registry: sidebar_registry,
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
+      extension_surfaces: %MingaEditor.State.ExtensionSurfaces{sidebar_registry: sidebar_registry},
       workspace: workspace,
-      focus_stack: [Scoped, MingaEditor.Input.ModeFSM]
+      interaction: %MingaEditor.State.Interaction{
+        focus_stack: [Scoped, MingaEditor.Input.ModeFSM]
+      }
     }
   end
 
@@ -84,7 +86,19 @@ defmodule MingaEditor.Input.FileTreeNavTest do
 
     test "passthrough when tree not focused", %{tmp_dir: tmp_dir, sidebar_registry: table} do
       state = make_state(tmp_dir, table)
-      state = EditorState.set_file_tree(state, %{ft(state) | focused: false})
+
+      state =
+        then(state, fn state ->
+          %{
+            state
+            | workspace:
+                then(
+                  state.workspace,
+                  &MingaEditor.Session.State.set_file_tree(&1, %{ft(state) | focused: false})
+                )
+          }
+        end)
+
       {:passthrough, _state} = FileTreeHandler.handle_key(state, ?j, 0)
     end
 

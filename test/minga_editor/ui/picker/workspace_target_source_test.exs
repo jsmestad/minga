@@ -46,7 +46,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
       |> TabBar.switch_to(1)
 
     {%EditorState{
-       port_manager: self(),
+       frontend: %MingaEditor.State.Frontend{port_manager: self()},
        workspace: %SessionState{viewport: Viewport.new(24, 80)},
        shell_runtime: Runtime.new(Runtime.default_entry(), %ShellState{tab_bar: tb})
      }, ref, agent_a, agent_b}
@@ -122,14 +122,26 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
       {state, ref, agent_a, _agent_b} = state_with_workspaces(root)
 
       state =
-        EditorState.set_tab_bar(
-          state,
-          TabBar.update_workspace(
-            state.shell_runtime.state.tab_bar,
-            agent_a.id,
-            &Workspace.remove_file(&1, ref)
-          )
-        )
+        then(state, fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.set_tab_bar(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              TabBar.update_workspace(
+                state.shell_runtime.state.tab_bar,
+                agent_a.id,
+                &Workspace.remove_file(&1, ref)
+              )
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
 
       result = WorkspaceTargetSource.on_select(transfer_item(:copy, 0, agent_a.id, ref), state)
 
@@ -158,14 +170,26 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
       {state, ref, agent_a, _agent_b} = state_with_workspaces(root)
 
       state =
-        EditorState.set_tab_bar(
-          state,
-          TabBar.update_workspace(
-            state.shell_runtime.state.tab_bar,
-            agent_a.id,
-            &Workspace.remove_file(&1, ref)
-          )
-        )
+        then(state, fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.set_tab_bar(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              TabBar.update_workspace(
+                state.shell_runtime.state.tab_bar,
+                agent_a.id,
+                &Workspace.remove_file(&1, ref)
+              )
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
 
       result = WorkspaceTargetSource.on_select(transfer_item(:move, 0, agent_a.id, ref), state)
 
@@ -585,13 +609,34 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
         |> Tab.set_file_ref(file_ref)
       end)
 
-    EditorState.set_tab_bar(state, tb)
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          tb
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   defp update_workspace(state, workspace_id, fun) do
-    EditorState.set_tab_bar(
-      state,
-      TabBar.update_workspace(state.shell_runtime.state.tab_bar, workspace_id, fun)
-    )
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          TabBar.update_workspace(state.shell_runtime.state.tab_bar, workspace_id, fun)
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 end

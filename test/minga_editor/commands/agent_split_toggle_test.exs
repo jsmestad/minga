@@ -1,14 +1,15 @@
 defmodule MingaEditor.Commands.AgentSplitToggleTest do
   use ExUnit.Case, async: true
 
+  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
@@ -62,7 +63,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
     window = Window.new(1, buf, 24, 80)
 
     state = %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
@@ -75,12 +76,12 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
           next_id: 2
         }
       },
-      focus_stack: Input.default_stack(),
+      interaction: %MingaEditor.State.Interaction{focus_stack: Input.default_stack()},
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),
-          MingaEditor.Shell.Traditional.State.set_tab_bar(
-            MingaEditor.Shell.Traditional.State.replace_agent(
+          TraditionalState.set_tab_bar(
+            TraditionalState.replace_agent(
               %MingaEditor.Shell.Traditional.State{},
               agent
             ),
@@ -113,9 +114,25 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
         |> TabBar.update_context(at.id, agent_ctx)
         |> TabBar.switch_to(file_tab.id)
 
-      state = put_in(state.workspace.agent_ui, agentic)
+      state = %{state | workspace: SessionState.set_agent_ui(state.workspace, agentic)}
 
-      state = MingaEditor.State.set_tab_bar(state, tb)
+      state =
+        then(state, fn root ->
+          shell_state =
+            TraditionalState.set_tab_bar(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              tb
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
 
       EditorState.switch_tab(state, at.id)
     else
@@ -143,7 +160,19 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
         |> TabBar.update_context(at.id, agent_ctx)
         |> TabBar.switch_to(file_tab.id)
 
-      MingaEditor.State.set_tab_bar(state, tb)
+      then(state, fn root ->
+        shell_state =
+          TraditionalState.set_tab_bar(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            tb
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
     end
   end
 
@@ -181,7 +210,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
       state = base_state(session: fake_session)
       new_state = AgentCommands.toggle_agentic_view(state)
 
-      assert AgentAccess.session(new_state) == fake_session
+      assert MingaEditor.Shell.Runtime.active_session(new_state.shell_runtime) == fake_session
     end
 
     test "agent tab exists after toggle" do
@@ -310,7 +339,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
 
       new_state = AgentCommands.open_session(state, "sess-42", "tc_auth")
 
-      jump = AgentAccess.panel(new_state).provenance_jump
+      jump = new_state.workspace.agent_ui.panel.provenance_jump
       assert jump != nil
       # default ids zip with index+1, so the :user message is id 1.
       assert jump.target_message_id == 1
@@ -324,7 +353,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
 
       new_state = AgentCommands.open_session(state, "sess-1")
 
-      assert AgentAccess.panel(new_state).provenance_jump == nil
+      assert new_state.workspace.agent_ui.panel.provenance_jump == nil
     end
   end
 
@@ -338,18 +367,23 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
       jump =
         ProvenanceJump.request(1, {"/tmp/no_such_file.ex", 5}) |> ProvenanceJump.mark_landed()
 
-      state = AgentAccess.update_panel(state, &Panel.set_provenance_jump(&1, jump))
+      state =
+        MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
+          state,
+          (&Panel.set_provenance_jump(&1, jump)).(state.workspace.agent_ui.panel)
+        )
+
       assert EditorState.active_tab_kind(state) == :agent
 
       new_state = AgentCommands.scope_provenance_return(state)
 
       assert EditorState.active_tab_kind(new_state) == :file
-      assert AgentAccess.panel(new_state).provenance_jump == nil
+      assert new_state.workspace.agent_ui.panel.provenance_jump == nil
     end
 
     test "is a no-op with a status message when there is no active jump" do
       state = base_state(active: true)
-      assert AgentAccess.panel(state).provenance_jump == nil
+      assert state.workspace.agent_ui.panel.provenance_jump == nil
 
       new_state = AgentCommands.scope_provenance_return(state)
 

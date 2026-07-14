@@ -13,6 +13,7 @@ defmodule MingaEditor.RenderPipeline.ViewportRowAccountingTest do
 
   use ExUnit.Case, async: true
 
+  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline
@@ -78,7 +79,15 @@ defmodule MingaEditor.RenderPipeline.ViewportRowAccountingTest do
       # the TUI stays byte-identical; only native GUI reclaims the row.
       rows = 24
       base = gui_state(rows: rows, cols: 108, content: long_content(rows * 3))
-      tui_state = %{base | capabilities: %Capabilities{frontend_type: :tui, semantic_ui: true}}
+
+      tui_state = %{
+        base
+        | frontend:
+            MingaEditor.State.Frontend.accept_capabilities(
+              base.frontend,
+              %Capabilities{frontend_type: :tui, semantic_ui: true}
+            )
+      }
 
       {models, layout} = emitted_models(tui_state)
       [model] = Map.values(models)
@@ -166,6 +175,6 @@ defmodule MingaEditor.RenderPipeline.ViewportRowAccountingTest do
         next_id: new_id + 1
     }
 
-    put_in(state.workspace.windows, updated)
+    %{state | workspace: SessionState.set_windows(state.workspace, updated)}
   end
 end

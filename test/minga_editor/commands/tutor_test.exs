@@ -22,9 +22,8 @@ defmodule MingaEditor.Commands.TutorTest do
     {:ok, options} = Minga.Config.Options.start_link(name: nil)
 
     %EditorState{
-      port_manager: nil,
-      keymap_server: keymap,
-      options_server: options,
+      frontend: %MingaEditor.State.Frontend{port_manager: nil},
+      interaction: %MingaEditor.State.Interaction{keymap_server: keymap, options_server: options},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: buf, list: [buf]}
@@ -37,7 +36,12 @@ defmodule MingaEditor.Commands.TutorTest do
       state = build_state()
 
       assert {:ok, false} =
-               Options.set_for_filetype(state.options_server, :text, :autopair_block, false)
+               Options.set_for_filetype(
+                 state.interaction.options_server,
+                 :text,
+                 :autopair_block,
+                 false
+               )
 
       result = Tutor.execute(state, :tutor)
 

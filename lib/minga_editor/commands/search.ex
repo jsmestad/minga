@@ -19,6 +19,7 @@ defmodule MingaEditor.Commands.Search do
   alias Minga.Core.Decorations
   alias Minga.Core.Unicode
   alias MingaEditor.PickerUI
+  alias MingaEditor.Shell.Traditional.TodoSearchWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Search, as: SearchData
   alias MingaEditor.Window
@@ -61,7 +62,11 @@ defmodule MingaEditor.Commands.Search do
 
         {line, col} ->
           Buffer.move_to(buf, {line, col})
-          EditorState.mark_authoritative_scroll(state)
+
+          %{
+            state
+            | workspace: MingaEditor.Session.State.mark_authoritative_scroll(state.workspace)
+          }
       end
     end
   end
@@ -89,7 +94,12 @@ defmodule MingaEditor.Commands.Search do
         Buffer.move_to(buf, {line, col})
 
         state
-        |> EditorState.mark_authoritative_scroll()
+        |> then(fn state ->
+          %{
+            state
+            | workspace: MingaEditor.Session.State.mark_authoritative_scroll(state.workspace)
+          }
+        end)
         |> auto_unfold_at(line)
         |> put_in_search(:last_pattern, ms.input)
         |> put_in_search(:last_direction, ms.direction)
@@ -129,7 +139,12 @@ defmodule MingaEditor.Commands.Search do
         Buffer.move_to(buf, {line, col})
 
         state
-        |> EditorState.mark_authoritative_scroll()
+        |> then(fn state ->
+          %{
+            state
+            | workspace: MingaEditor.Session.State.mark_authoritative_scroll(state.workspace)
+          }
+        end)
         |> auto_unfold_at(line)
     end
   end
@@ -163,7 +178,12 @@ defmodule MingaEditor.Commands.Search do
         Buffer.move_to(buf, {line, col})
 
         state
-        |> EditorState.mark_authoritative_scroll()
+        |> then(fn state ->
+          %{
+            state
+            | workspace: MingaEditor.Session.State.mark_authoritative_scroll(state.workspace)
+          }
+        end)
         |> auto_unfold_at(line)
     end
   end
@@ -172,72 +192,18 @@ defmodule MingaEditor.Commands.Search do
     MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No previous search pattern")
   end
 
-  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :search_word_under_cursor_forward) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, direction)
+      when direction in [:search_word_under_cursor_forward, :search_word_under_cursor_backward] do
     {content, cursor} = Buffer.content_and_cursor(buf)
     tmp_buf = Document.new(content)
+    direction = if direction == :search_word_under_cursor_forward, do: :forward, else: :backward
 
     case Minga.Editing.word_under_cursor(tmp_buf, cursor) do
       nil ->
         MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No word under cursor")
 
       word ->
-        case Minga.Editing.search_next(content, word, cursor, :forward) do
-          nil ->
-            state
-            |> put_in_search(:last_pattern, word)
-            |> put_in_search(:last_direction, :forward)
-            |> then(
-              &MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
-                &1,
-                "Pattern not found: #{word}"
-              )
-            )
-
-          {line, col} ->
-            Buffer.move_to(buf, {line, col})
-
-            state
-            |> EditorState.mark_authoritative_scroll()
-            |> auto_unfold_at(line)
-            |> put_in_search(:last_pattern, word)
-            |> put_in_search(:last_direction, :forward)
-        end
-    end
-  end
-
-  def execute(
-        %{workspace: %{buffers: %{active: buf}}} = state,
-        :search_word_under_cursor_backward
-      ) do
-    {content, cursor} = Buffer.content_and_cursor(buf)
-    tmp_buf = Document.new(content)
-
-    case Minga.Editing.word_under_cursor(tmp_buf, cursor) do
-      nil ->
-        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No word under cursor")
-
-      word ->
-        case Minga.Editing.search_next(content, word, cursor, :backward) do
-          nil ->
-            state
-            |> put_in_search(:last_pattern, word)
-            |> put_in_search(:last_direction, :backward)
-            |> then(
-              &MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
-                &1,
-                "Pattern not found: #{word}"
-              )
-            )
-
-          {line, col} ->
-            Buffer.move_to(buf, {line, col})
-
-            state
-            |> EditorState.mark_authoritative_scroll()
-            |> auto_unfold_at(line)
-            |> put_in_search(:last_pattern, word)
-            |> put_in_search(:last_direction, :backward)
-        end
+        execute_word_search(state, buf, content, cursor, word, direction)
     end
   end
 
@@ -249,8 +215,14 @@ defmodule MingaEditor.Commands.Search do
     # Stash the query, then open the picker asynchronously. The actual `rg`/`grep`
     # scan runs off the editor input path inside ProjectSearchSource.async_fetch/1,
     # so confirming a search never blocks the editor on a large repository.
-    state
-    |> EditorState.update_search(&SearchData.set_project_query(&1, query))
+    %{
+      state
+      | workspace:
+          MingaEditor.Session.State.set_search(
+            state.workspace,
+            SearchData.set_project_query(state.workspace.search, query)
+          )
+    }
     |> PickerUI.open(MingaEditor.UI.Picker.ProjectSearchSource)
   end
 
@@ -341,10 +313,17 @@ defmodule MingaEditor.Commands.Search do
 
     if text != "" do
       state =
-        EditorState.update_search(state, &SearchData.record(&1, text, :forward))
+        %{
+          state
+          | workspace:
+              MingaEditor.Session.State.set_search(
+                state.workspace,
+                (&SearchData.record(&1, text, :forward)).(state.workspace.search)
+              )
+        }
 
-      if state.backend in [:gui, :native_gui] and state.port_manager do
-        MingaEditor.Frontend.clipboard_write(state.port_manager, text, :find)
+      if state.frontend.backend in [:gui, :native_gui] and state.frontend.port_manager do
+        MingaEditor.Frontend.clipboard_write(state.frontend.port_manager, text, :find)
       end
 
       MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Using \"#{text}\" for Find")
@@ -391,7 +370,17 @@ defmodule MingaEditor.Commands.Search do
 
         state
         |> put_in_search(:last_pattern, pattern)
-        |> then(&EditorState.transition_mode(&1, :substitute_confirm, ms))
+        |> then(fn state ->
+          %{
+            state
+            | workspace:
+                MingaEditor.Session.State.transition_mode(
+                  state.workspace,
+                  :substitute_confirm,
+                  ms
+                )
+          }
+        end)
     end
   end
 
@@ -429,15 +418,65 @@ defmodule MingaEditor.Commands.Search do
     end
   end
 
+  defp execute_word_search(state, buf, content, cursor, word, direction) do
+    content
+    |> Minga.Editing.search_next(word, cursor, direction)
+    |> apply_word_search(state, buf, word, direction)
+  end
+
+  defp apply_word_search(nil, state, _buf, word, direction),
+    do: word_search_not_found(state, word, direction)
+
+  defp apply_word_search({line, col}, state, buf, word, direction),
+    do: word_search_found(state, buf, word, direction, line, col)
+
+  defp word_search_not_found(state, word, direction) do
+    state
+    |> put_in_search(:last_pattern, word)
+    |> put_in_search(:last_direction, direction)
+    |> then(
+      &MingaEditor.Shell.Traditional.NoticeWorkflow.publish(&1, "Pattern not found: #{word}")
+    )
+  end
+
+  defp word_search_found(state, buf, word, direction, line, col) do
+    Buffer.move_to(buf, {line, col})
+
+    state
+    |> then(fn state ->
+      %{
+        state
+        | workspace: MingaEditor.Session.State.mark_authoritative_scroll(state.workspace)
+      }
+    end)
+    |> auto_unfold_at(line)
+    |> put_in_search(:last_pattern, word)
+    |> put_in_search(:last_direction, direction)
+  end
+
   # ── Private helpers ────────────────────────────────────────────────────────
 
   @spec put_in_search(state(), atom(), term()) :: state()
   defp put_in_search(state, :last_pattern, value) do
-    EditorState.update_search(state, &SearchData.record_pattern(&1, value))
+    %{
+      state
+      | workspace:
+          MingaEditor.Session.State.set_search(
+            state.workspace,
+            (&SearchData.record_pattern(&1, value)).(state.workspace.search)
+          )
+    }
   end
 
   defp put_in_search(state, :last_direction, value) do
-    EditorState.update_search(state, &SearchData.set_last_direction(&1, value))
+    %{
+      state
+      | workspace:
+          MingaEditor.Session.State.set_search(
+            state.workspace,
+            (&SearchData.set_last_direction(&1, value)).(state.workspace.search)
+          )
+    }
   end
 
   # Replace a match at a specific line/col/length in content string.
@@ -475,8 +514,20 @@ defmodule MingaEditor.Commands.Search do
     # Unfold per-window folds
     state =
       case active_foldable_window(state) do
-        nil -> state
-        win -> EditorState.update_window(state, win.id, &Window.unfold_containing(&1, [line]))
+        nil ->
+          state
+
+        win ->
+          %{
+            state
+            | workspace:
+                MingaEditor.Session.State.set_windows(
+                  state.workspace,
+                  MingaEditor.State.Windows.unfold_containing(state.workspace.windows, win.id, [
+                    line
+                  ])
+                )
+          }
       end
 
     # Unfold decoration folds
@@ -516,7 +567,7 @@ defmodule MingaEditor.Commands.Search do
   end
 
   defp active_foldable_window(state) do
-    case EditorState.active_window_struct(state) do
+    case MingaEditor.Session.State.active_window_struct(state.workspace) do
       %Window{} = win -> if Window.has_folds?(win), do: win
       nil -> nil
     end
@@ -527,26 +578,46 @@ defmodule MingaEditor.Commands.Search do
   command(:search_project, "Search across project files",
     requires_buffer: false,
     execute: fn state ->
-      EditorState.transition_mode(state, :search_prompt, %Minga.Mode.SearchPromptState{})
+      %{
+        state
+        | workspace:
+            MingaEditor.Session.State.transition_mode(
+              state.workspace,
+              :search_prompt,
+              %Minga.Mode.SearchPromptState{}
+            )
+      }
     end
   )
 
   command(:search_todos, "Search TODO markers",
     requires_buffer: false,
-    execute: fn state -> PickerUI.open(state, MingaEditor.UI.Picker.TodoSearchSource) end
+    execute: &TodoSearchWorkflow.open/1
   )
 
   command(:search_buffer, "Search in buffer",
     requires_buffer: true,
     execute: fn state ->
-      EditorState.transition_mode(state, :search, %SearchState{direction: :forward})
+      %{
+        state
+        | workspace:
+            MingaEditor.Session.State.transition_mode(state.workspace, :search, %SearchState{
+              direction: :forward
+            })
+      }
     end
   )
 
   command(:search_and_replace, "Search and replace",
     requires_buffer: true,
     execute: fn state ->
-      EditorState.transition_mode(state, :command, %CommandState{input: "%s/"})
+      %{
+        state
+        | workspace:
+            MingaEditor.Session.State.transition_mode(state.workspace, :command, %CommandState{
+              input: "%s/"
+            })
+      }
     end
   )
 end

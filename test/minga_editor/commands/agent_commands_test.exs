@@ -26,8 +26,9 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.Frontend
+  alias MingaEditor.State.Interaction
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
@@ -100,7 +101,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       end)
 
     %EditorState{
-      port_manager: nil,
+      frontend: %Frontend{port_manager: nil},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
@@ -124,7 +125,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
             tb
           )
         ),
-      focus_stack: Input.default_stack()
+      interaction: %Interaction{focus_stack: Input.default_stack()}
     }
   end
 
@@ -146,27 +147,55 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
         |> WorkspaceModel.set_active_file(source_ref)
       end)
 
-    EditorState.set_tab_bar(state, tab_bar)
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          tab_bar
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   defp source_workspace_with_background_agent_tab do
     state = source_workspace_state()
     {tab_bar, _agent_tab} = TabBar.insert(state.shell_runtime.state.tab_bar, :agent, "Agent")
-    EditorState.set_tab_bar(state, tab_bar)
+
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          tab_bar
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   defp active_agent_workspace_state do
     state = base_state()
     windows = agent_windows()
 
-    state
-    |> EditorState.set_buffers(%Buffers{
-      active: nil,
-      list: [],
-      active_index: 0
-    })
-    |> EditorState.set_windows(windows)
-    |> EditorState.set_agent_ui(UIState.new())
+    workspace =
+      state.workspace
+      |> MingaEditor.Session.State.set_buffers(%Buffers{
+        active: nil,
+        list: [],
+        active_index: 0
+      })
+      |> MingaEditor.Session.State.set_windows(windows)
+      |> MingaEditor.Session.State.set_agent_ui(UIState.new())
+
+    %{state | workspace: workspace}
   end
 
   defp agent_windows do
@@ -269,12 +298,19 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     test "sensitive slash commands do not enter history" do
       state =
         base_state()
-        |> AgentAccess.update_agent_ui(&UIState.set_prompt_text(&1, "/login --COMPLETE ref code"))
+        |> then(fn state ->
+          MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+            state,
+            (&MingaEditor.Agent.PromptBuffer.set_prompt_text(&1, "/login --COMPLETE ref code")).(
+              state.workspace.agent_ui
+            )
+          )
+        end)
 
       new_state = AgentCommands.submit_prompt(state)
 
-      assert AgentAccess.panel(new_state).prompt_history == []
-      assert UIState.prompt_text(AgentAccess.panel(new_state)) == ""
+      assert new_state.workspace.agent_ui.panel.prompt_history == []
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(new_state.workspace.agent_ui.panel) == ""
     end
 
     test "unknown slash command preserves draft and reports the error in chat" do
@@ -286,7 +322,8 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       new_state = AgentCommands.submit_prompt(state)
 
-      assert UIState.prompt_text(AgentAccess.panel(new_state)) == "/modle"
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(new_state.workspace.agent_ui.panel) ==
+               "/modle"
 
       assert new_state.shell_runtime.state.notice.message ==
                "Unknown command: /modle. Did you mean /model?"
@@ -298,12 +335,17 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     test "blocks submit and preserves draft when no model is configured" do
       state =
         base_state(session: nil)
-        |> AgentAccess.update_agent_ui(fn ui ->
-          ui = UIState.ensure_prompt_buffer(ui)
-          BufferProcess.replace_content(ui.panel.prompt_buffer, "hello agent")
-          ui
+        |> then(fn state ->
+          MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+            state,
+            (fn ui ->
+               ui = MingaEditor.Agent.PromptBuffer.ensure(ui)
+               BufferProcess.replace_content(ui.panel.prompt_buffer, "hello agent")
+               ui
+             end).(state.workspace.agent_ui)
+          )
         end)
-        |> AgentAccess.update_panel(fn panel ->
+        |> replace_panel(fn panel ->
           panel
           |> Panel.set_credentials_configured(false)
           |> Panel.set_model_name(AgentConfig.unconfigured_model())
@@ -313,7 +355,9 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       new_state = AgentCommands.submit_prompt(state)
 
       assert new_state.shell_runtime.state.notice.message =~ "No model configured"
-      assert UIState.prompt_text(AgentAccess.panel(new_state)) == "hello agent"
+
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(new_state.workspace.agent_ui.panel) ==
+               "hello agent"
     end
 
     test "sets error status when model is configured but no session exists" do
@@ -321,12 +365,17 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       state =
         state
-        |> AgentAccess.update_agent_ui(fn ui ->
-          ui = UIState.ensure_prompt_buffer(ui)
-          BufferProcess.replace_content(ui.panel.prompt_buffer, "hello agent")
-          ui
+        |> then(fn state ->
+          MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+            state,
+            (fn ui ->
+               ui = MingaEditor.Agent.PromptBuffer.ensure(ui)
+               BufferProcess.replace_content(ui.panel.prompt_buffer, "hello agent")
+               ui
+             end).(state.workspace.agent_ui)
+          )
         end)
-        |> AgentAccess.update_panel(fn panel ->
+        |> replace_panel(fn panel ->
           panel
           |> Panel.set_credentials_configured(true)
           |> Panel.set_model_name("openai:gpt-5")
@@ -336,7 +385,9 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       new_state = AgentCommands.submit_prompt(state)
 
       assert new_state.shell_runtime.state.notice.message =~ "No agent session"
-      assert UIState.prompt_text(AgentAccess.panel(new_state)) == "hello agent"
+
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(new_state.workspace.agent_ui.panel) ==
+               "hello agent"
     end
 
     test "blocks submit as credentials missing when the local session reports credentials are not configured" do
@@ -344,12 +395,17 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       state =
         base_state(session: session)
-        |> AgentAccess.update_agent_ui(fn ui ->
-          ui = UIState.ensure_prompt_buffer(ui)
-          BufferProcess.replace_content(ui.panel.prompt_buffer, "draft prompt")
-          ui
+        |> then(fn state ->
+          MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+            state,
+            (fn ui ->
+               ui = MingaEditor.Agent.PromptBuffer.ensure(ui)
+               BufferProcess.replace_content(ui.panel.prompt_buffer, "draft prompt")
+               ui
+             end).(state.workspace.agent_ui)
+          )
         end)
-        |> AgentAccess.update_panel(fn panel ->
+        |> replace_panel(fn panel ->
           panel
           |> Panel.set_credentials_configured(true)
           |> Panel.set_model_name("anthropic:claude-sonnet-4-20250514")
@@ -361,7 +417,8 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert new_state.shell_runtime.state.notice.message =~
                "No provider credentials are configured for this model"
 
-      assert UIState.prompt_text(AgentAccess.panel(new_state)) == "draft prompt"
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(new_state.workspace.agent_ui.panel) ==
+               "draft prompt"
     end
 
     test "blocks submit as starting when credentials exist but no provider is attached yet" do
@@ -369,12 +426,17 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       state =
         base_state(session: session)
-        |> AgentAccess.update_agent_ui(fn ui ->
-          ui = UIState.ensure_prompt_buffer(ui)
-          BufferProcess.replace_content(ui.panel.prompt_buffer, "draft prompt")
-          ui
+        |> then(fn state ->
+          MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+            state,
+            (fn ui ->
+               ui = MingaEditor.Agent.PromptBuffer.ensure(ui)
+               BufferProcess.replace_content(ui.panel.prompt_buffer, "draft prompt")
+               ui
+             end).(state.workspace.agent_ui)
+          )
         end)
-        |> AgentAccess.update_panel(fn panel ->
+        |> replace_panel(fn panel ->
           panel
           |> Panel.set_credentials_configured(true)
           |> Panel.set_model_name("anthropic:claude-sonnet-4-20250514")
@@ -384,7 +446,9 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       new_state = AgentCommands.submit_prompt(state)
 
       assert new_state.shell_runtime.state.notice.message =~ "Agent provider still starting"
-      assert UIState.prompt_text(AgentAccess.panel(new_state)) == "draft prompt"
+
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(new_state.workspace.agent_ui.panel) ==
+               "draft prompt"
     end
 
     test "blocks submit with concrete startup failure when provider startup failed" do
@@ -392,12 +456,17 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       state =
         base_state(session: session)
-        |> AgentAccess.update_agent_ui(fn ui ->
-          ui = UIState.ensure_prompt_buffer(ui)
-          BufferProcess.replace_content(ui.panel.prompt_buffer, "draft prompt")
-          ui
+        |> then(fn state ->
+          MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+            state,
+            (fn ui ->
+               ui = MingaEditor.Agent.PromptBuffer.ensure(ui)
+               BufferProcess.replace_content(ui.panel.prompt_buffer, "draft prompt")
+               ui
+             end).(state.workspace.agent_ui)
+          )
         end)
-        |> AgentAccess.update_panel(fn panel ->
+        |> replace_panel(fn panel ->
           panel
           |> Panel.set_credentials_configured(true)
           |> Panel.set_model_name("anthropic:claude-sonnet-4-20250514")
@@ -409,7 +478,8 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert new_state.shell_runtime.state.notice.message ==
                "Failed to start agent: boom. Your prompt was preserved."
 
-      assert UIState.prompt_text(AgentAccess.panel(new_state)) == "draft prompt"
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(new_state.workspace.agent_ui.panel) ==
+               "draft prompt"
     end
 
     test "ready provider still sends and clears a normal prompt" do
@@ -417,12 +487,17 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       state =
         base_state(session: session)
-        |> AgentAccess.update_agent_ui(fn ui ->
-          ui = UIState.ensure_prompt_buffer(ui)
-          BufferProcess.replace_content(ui.panel.prompt_buffer, "ready prompt")
-          ui
+        |> then(fn state ->
+          MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+            state,
+            (fn ui ->
+               ui = MingaEditor.Agent.PromptBuffer.ensure(ui)
+               BufferProcess.replace_content(ui.panel.prompt_buffer, "ready prompt")
+               ui
+             end).(state.workspace.agent_ui)
+          )
         end)
-        |> AgentAccess.update_panel(fn panel ->
+        |> replace_panel(fn panel ->
           panel
           |> Panel.set_credentials_configured(true)
           |> Panel.set_model_name("anthropic:claude-sonnet-4-20250514")
@@ -432,7 +507,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       new_state = AgentCommands.submit_prompt(state)
 
       assert_receive {:readiness_session_prompt, "ready prompt"}
-      assert UIState.prompt_text(AgentAccess.panel(new_state)) == ""
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(new_state.workspace.agent_ui.panel) == ""
     end
 
     test "unresolved file mention preserves the prompt and does not send" do
@@ -441,7 +516,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       state =
         base_state(session: session)
         |> AgentCommands.input_paste("@missing.ex explain")
-        |> AgentAccess.update_panel(fn panel ->
+        |> replace_panel(fn panel ->
           panel
           |> Panel.set_credentials_configured(true)
           |> Panel.set_model_name("anthropic:claude-sonnet-4-20250514")
@@ -451,7 +526,10 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       new_state = AgentCommands.submit_prompt(state)
 
       assert new_state.shell_runtime.state.notice.message =~ "Cannot resolve file mentions"
-      assert UIState.prompt_text(AgentAccess.panel(new_state)) == "@missing.ex explain"
+
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(new_state.workspace.agent_ui.panel) ==
+               "@missing.ex explain"
+
       refute_receive {:readiness_session_prompt, _prompt}
     end
 
@@ -465,12 +543,17 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       state =
         base_state(session: session)
-        |> AgentAccess.update_agent_ui(fn ui ->
-          ui = UIState.ensure_prompt_buffer(ui)
-          BufferProcess.replace_content(ui.panel.prompt_buffer, "stale panel prompt")
-          ui
+        |> then(fn state ->
+          MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+            state,
+            (fn ui ->
+               ui = MingaEditor.Agent.PromptBuffer.ensure(ui)
+               BufferProcess.replace_content(ui.panel.prompt_buffer, "stale panel prompt")
+               ui
+             end).(state.workspace.agent_ui)
+          )
         end)
-        |> AgentAccess.update_panel(fn panel ->
+        |> replace_panel(fn panel ->
           panel
           |> Panel.set_credentials_configured(false)
           |> Panel.set_model_name("anthropic:claude-sonnet-4-20250514")
@@ -481,7 +564,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       assert_receive {:readiness_session_prompt, "stale panel prompt"}
       assert is_nil(new_state.shell_runtime.state.notice.message)
-      assert UIState.prompt_text(AgentAccess.panel(new_state)) == ""
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(new_state.workspace.agent_ui.panel) == ""
     end
 
     test "preserves the prompt when an attached session rejects locally" do
@@ -501,22 +584,29 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
         state =
           base_state(session: session)
-          |> AgentAccess.update_panel(fn panel ->
+          |> replace_panel(fn panel ->
             panel
             |> Panel.set_credentials_configured(true)
             |> Panel.set_model_name("anthropic:test")
             |> Panel.set_provider_name("test")
           end)
-          |> AgentAccess.update_agent_ui(fn ui ->
-            ui = UIState.ensure_prompt_buffer(ui)
-            BufferProcess.replace_content(ui.panel.prompt_buffer, "draft prompt")
-            ui
+          |> then(fn state ->
+            MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+              state,
+              (fn ui ->
+                 ui = MingaEditor.Agent.PromptBuffer.ensure(ui)
+                 BufferProcess.replace_content(ui.panel.prompt_buffer, "draft prompt")
+                 ui
+               end).(state.workspace.agent_ui)
+            )
           end)
 
         new_state = AgentCommands.submit_prompt(state)
 
         assert new_state.shell_runtime.state.notice.message =~ expected_message
-        assert UIState.prompt_text(AgentAccess.panel(new_state)) == "draft prompt"
+
+        assert MingaEditor.Agent.PromptBuffer.prompt_text(new_state.workspace.agent_ui.panel) ==
+                 "draft prompt"
       end
     end
   end
@@ -527,15 +617,28 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       state =
         state
-        |> AgentAccess.update_agent(&AgentState.set_status(&1, :thinking))
-        |> AgentAccess.update_agent_ui(
-          &UIState.set_prompt_text(&1, "/login openai --complete ref code")
-        )
+        |> then(fn state ->
+          MingaEditor.Shell.Traditional.Workflow.install_agent_state(
+            state,
+            (&AgentState.set_status(&1, :thinking)).(
+              MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
+            )
+          )
+        end)
+        |> then(fn state ->
+          MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+            state,
+            (&MingaEditor.Agent.PromptBuffer.set_prompt_text(
+               &1,
+               "/login openai --complete ref code"
+             )).(state.workspace.agent_ui)
+          )
+        end)
 
       new_state = AgentCommands.scope_queue_follow_up(state)
 
-      assert AgentAccess.panel(new_state).prompt_history == []
-      assert UIState.prompt_text(AgentAccess.panel(new_state)) == ""
+      assert new_state.workspace.agent_ui.panel.prompt_history == []
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(new_state.workspace.agent_ui.panel) == ""
     end
   end
 
@@ -547,7 +650,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       new_state = AgentCommands.scroll_chat_up(state)
 
       # Scroll offset should change (exact value depends on panel height)
-      assert AgentAccess.panel(new_state).scroll != AgentAccess.panel(state).scroll
+      assert new_state.workspace.agent_ui.panel.scroll != state.workspace.agent_ui.panel.scroll
     end
   end
 
@@ -581,16 +684,21 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       state =
         base_state(session: session)
-        |> AgentAccess.update_agent_ui(fn ui ->
-          panel = %{
-            ui.panel
-            | cached_line_index: line_index,
-              cached_display_messages: display_messages,
-              cached_display_message_pairs: display_pairs,
-              scroll: Scroll.new(6)
-          }
+        |> then(fn state ->
+          MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+            state,
+            (fn ui ->
+               panel = %{
+                 ui.panel
+                 | cached_line_index: line_index,
+                   cached_display_messages: display_messages,
+                   cached_display_message_pairs: display_pairs,
+                   scroll: Scroll.new(6)
+               }
 
-          %{ui | panel: panel}
+               %{ui | panel: panel}
+             end).(state.workspace.agent_ui)
+          )
         end)
 
       AgentCommands.scope_pin_message(state)
@@ -606,7 +714,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       state = base_state(panel_visible: true, input_focused: true)
       new_state = AgentCommands.input_char(state, "a")
 
-      assert UIState.input_text(AgentAccess.panel(new_state)) == "a"
+      assert MingaEditor.Agent.PromptBuffer.input_text(new_state.workspace.agent_ui.panel) == "a"
     end
 
     test "inserts multiple characters sequentially" do
@@ -617,7 +725,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
         |> AgentCommands.input_char("h")
         |> AgentCommands.input_char("i")
 
-      assert UIState.input_text(AgentAccess.panel(state)) == "hi"
+      assert MingaEditor.Agent.PromptBuffer.input_text(state.workspace.agent_ui.panel) == "hi"
     end
   end
 
@@ -631,7 +739,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
         |> AgentCommands.input_char("b")
         |> AgentCommands.input_backspace()
 
-      assert UIState.input_text(AgentAccess.panel(state)) == "a"
+      assert MingaEditor.Agent.PromptBuffer.input_text(state.workspace.agent_ui.panel) == "a"
     end
   end
 
@@ -640,7 +748,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       state = base_state(panel_visible: true, input_focused: true)
       new_state = AgentCommands.input_paste(state, "pasted")
 
-      text = UIState.input_text(AgentAccess.panel(new_state))
+      text = MingaEditor.Agent.PromptBuffer.input_text(new_state.workspace.agent_ui.panel)
       assert text =~ "pasted"
     end
   end
@@ -671,12 +779,19 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       state =
         base_state(session: session)
-        |> AgentAccess.update_agent(&AgentState.set_status(&1, :thinking))
+        |> then(fn state ->
+          MingaEditor.Shell.Traditional.Workflow.install_agent_state(
+            state,
+            (&AgentState.set_status(&1, :thinking)).(
+              MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
+            )
+          )
+        end)
 
       new_state = AgentCommands.scope_ctrl_c(state)
 
       assert_receive :provider_abort_called, 1_000
-      prompt = UIState.input_text(AgentAccess.panel(new_state))
+      prompt = MingaEditor.Agent.PromptBuffer.input_text(new_state.workspace.agent_ui.panel)
       assert prompt =~ "steering note"
       assert prompt =~ "follow-up note"
     end
@@ -686,7 +801,14 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       state =
         base_state(session: session)
-        |> AgentAccess.update_agent(&AgentState.set_error(&1, "provider failed"))
+        |> then(fn state ->
+          MingaEditor.Shell.Traditional.Workflow.install_agent_state(
+            state,
+            (&AgentState.set_error(&1, "provider failed")).(
+              MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
+            )
+          )
+        end)
 
       new_state = AgentCommands.scope_ctrl_c(state)
 
@@ -721,7 +843,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       state = base_state()
       new_state = AgentCommands.set_thinking_level(state, "high")
 
-      assert AgentAccess.panel(new_state).thinking_level == "high"
+      assert new_state.workspace.agent_ui.panel.thinking_level == "high"
       assert new_state.shell_runtime.state.notice.message == "Thinking: high"
     end
 
@@ -736,7 +858,13 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   describe "thinking command surface" do
     test "agent_pick_thinking opens the thinking picker with the current level" do
       state = base_state()
-      state = AgentAccess.update_agent_ui(state, &UIState.set_thinking_level(&1, "low"))
+
+      state =
+        MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+          state,
+          (&UIState.set_thinking_level(&1, "low")).(state.workspace.agent_ui)
+        )
+
       command = command!(:agent_pick_thinking)
 
       new_state = command.execute.(state)
@@ -764,7 +892,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
           ] do
         new_state = command!(command_name).execute.(base_state())
 
-        assert AgentAccess.panel(new_state).thinking_level == expected_level
+        assert new_state.workspace.agent_ui.panel.thinking_level == expected_level
         assert new_state.shell_runtime.state.notice.message == "Thinking: #{expected_level}"
       end
     end
@@ -785,12 +913,17 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
         )
 
       state = base_state(session: session)
-      state = AgentAccess.update_agent_ui(state, &UIState.set_thinking_level(&1, "medium"))
+
+      state =
+        MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+          state,
+          (&UIState.set_thinking_level(&1, "medium")).(state.workspace.agent_ui)
+        )
 
       new_state = AgentCommands.cycle_model(state)
 
-      assert AgentAccess.panel(new_state).model_name == "openai:o4-mini"
-      assert AgentAccess.panel(new_state).thinking_level == "high"
+      assert new_state.workspace.agent_ui.panel.model_name == "openai:o4-mini"
+      assert new_state.workspace.agent_ui.panel.thinking_level == "high"
       assert new_state.shell_runtime.state.notice.message == "Model: openai:o4-mini [2/3]"
     end
   end
@@ -803,7 +936,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       state = base_state(panel_visible: true, input_focused: false)
       new_state = AgentCommands.scope_focus_input(state)
 
-      assert AgentAccess.input_focused?(new_state) == true
+      assert new_state.workspace.agent_ui.panel.input_focused == true
     end
   end
 
@@ -811,31 +944,25 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     test "switches from chat to file_viewer" do
       state = base_state(panel_visible: true)
 
-      state =
-        AgentAccess.update_view(state, fn view ->
-          view
-          |> View.activate(nil, nil)
-          |> View.set_focus(:chat)
-        end)
+      view = state.workspace.agent_ui.view |> View.activate(nil, nil) |> View.set_focus(:chat)
+      state = MingaEditor.Shell.Traditional.Workflow.install_agent_view(state, view)
 
       new_state = AgentCommands.scope_switch_focus(state)
 
-      assert new_state |> AgentAccess.view() |> View.focus() == :file_viewer
+      assert new_state.workspace.agent_ui.view |> View.focus() == :file_viewer
     end
 
     test "switches from non-chat back to chat" do
       state = base_state(panel_visible: true)
 
-      state =
-        AgentAccess.update_view(state, fn view ->
-          view
-          |> View.activate(nil, nil)
-          |> View.set_focus(:file_viewer)
-        end)
+      view =
+        state.workspace.agent_ui.view |> View.activate(nil, nil) |> View.set_focus(:file_viewer)
+
+      state = MingaEditor.Shell.Traditional.Workflow.install_agent_view(state, view)
 
       new_state = AgentCommands.scope_switch_focus(state)
 
-      assert new_state |> AgentAccess.view() |> View.focus() == :chat
+      assert new_state.workspace.agent_ui.view |> View.focus() == :chat
     end
   end
 
@@ -847,7 +974,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       new_state = AgentCommands.toggle_paste_expand(state)
 
       # Should not crash, input stays the same
-      assert UIState.input_text(AgentAccess.panel(new_state)) == ""
+      assert MingaEditor.Agent.PromptBuffer.input_text(new_state.workspace.agent_ui.panel) == ""
     end
   end
 
@@ -857,12 +984,18 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     test "resets agent state for a fresh session" do
       state = base_state()
       # Set some agent state
-      state = AgentAccess.update_agent(state, fn a -> %{a | error: "old error"} end)
+      state =
+        MingaEditor.Shell.Traditional.Workflow.install_agent_state(
+          state,
+          (fn a -> %{a | error: "old error"} end).(
+            MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
+          )
+        )
 
       new_state = AgentCommands.new_agent_session(state)
 
       # Error should be cleared
-      assert AgentAccess.agent(new_state).error == nil
+      assert MingaEditor.Shell.Traditional.State.agent(new_state.shell_runtime.state).error == nil
     end
 
     test "creates a fresh semantic agent workspace for the new session" do
@@ -924,7 +1057,22 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       switched =
         new_state
-        |> EditorState.set_tab_bar(tab_bar)
+        |> then(fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.set_tab_bar(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              tab_bar
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
         |> EditorState.switch_tab(file_tab_id)
 
       active_window = switched.workspace.windows.map[switched.workspace.windows.active]
@@ -986,5 +1134,12 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       agent_tabs = TabBar.filter_by_kind(new_state.shell_runtime.state.tab_bar, :agent)
       assert agent_tabs != []
     end
+  end
+
+  defp replace_panel(state, transition) do
+    MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
+      state,
+      transition.(state.workspace.agent_ui.panel)
+    )
   end
 end

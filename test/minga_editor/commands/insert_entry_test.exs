@@ -24,7 +24,7 @@ defmodule MingaEditor.Commands.InsertEntryTest do
 
   defp build_state(buffer) do
     %EditorState{
-      port_manager: nil,
+      frontend: %MingaEditor.State.Frontend{port_manager: nil},
       workspace: %SessionState{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: buffer, list: [buffer]},

@@ -82,7 +82,7 @@ defmodule MingaEditor.Frontend.Emit.AdapterGUIChromeCacheTest do
       state = gui_state(content: long_content(50))
       {_ctx, caches, _cmds} = encode_via_adapter(state)
 
-      changed_state = %{state | theme: MingaEditor.UI.Theme.get!(:one_dark)}
+      changed_state = EditorState.apply_theme(state, MingaEditor.UI.Theme.get!(:one_dark))
       {_ctx, _caches2, cmds} = encode_via_adapter(changed_state, caches)
 
       assert opcode_count(cmds, 0x74) == 1,
@@ -90,7 +90,24 @@ defmodule MingaEditor.Frontend.Emit.AdapterGUIChromeCacheTest do
     end
 
     test "tab bar is emitted through adapter" do
-      state = EditorState.set_tab_bar(gui_state(), TabBar.new(Tab.new_file(1, "test.ex")))
+      state =
+        then(gui_state(), fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.set_tab_bar(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              TabBar.new(Tab.new_file(1, "test.ex"))
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
+
       {_ctx, _caches, cmds} = encode_via_adapter(state)
 
       assert opcode_count(cmds, 0x71) == 1,
@@ -116,7 +133,25 @@ defmodule MingaEditor.Frontend.Emit.AdapterGUIChromeCacheTest do
     test "workspaces are emitted through adapter" do
       state = gui_state()
       tab_bar = tab_bar_with_two_workspaces()
-      state_with_agents = EditorState.set_tab_bar(state, tab_bar)
+
+      state_with_agents =
+        then(state, fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.set_tab_bar(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              tab_bar
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
+
       {_ctx, _caches, first_cmds} = encode_via_adapter(state_with_agents)
 
       assert opcode_count(first_cmds, 0x98) == 1,

@@ -12,7 +12,6 @@ defmodule MingaEditor.UI.Picker.RecentFileSource do
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
 
-  alias MingaEditor.State, as: EditorState
   alias Minga.Project
   alias Minga.Language.Devicon
   alias MingaEditor.UI.Picker.Source
@@ -58,11 +57,11 @@ defmodule MingaEditor.UI.Picker.RecentFileSource do
     root = project_root()
     abs_path = Path.join(root, rel_path)
 
-    case EditorState.find_buffer_by_path(state, abs_path) do
+    case MingaEditor.Handlers.BufferRegistry.find_buffer_by_path(state, abs_path) do
       nil ->
-        case EditorState.start_buffer(abs_path, EditorState.options_server(state)) do
+        case MingaEditor.Commands.start_buffer(abs_path, state.interaction.options_server) do
           {:ok, pid} ->
-            EditorState.add_buffer(state, pid)
+            MingaEditor.Handlers.BufferRegistry.add_buffer(state, pid)
 
           {:error, reason} ->
             Minga.Log.error(:editor, "Failed to open file: #{inspect(reason)}")

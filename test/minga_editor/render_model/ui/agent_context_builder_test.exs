@@ -12,7 +12,6 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.State.AgentAccess
 
   describe "build/1" do
     test "projects activity, todos, and review vocabulary into agent context" do
@@ -25,7 +24,7 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
         |> Activity.start_tool("shell")
         |> Activity.record_file("lib/a.ex")
 
-      agent_ui = UIState.update_activity(UIState.new(), fn _ -> activity end)
+      agent_ui = UIState.replace_activity(UIState.new(), activity)
 
       agent =
         %AgentState{}
@@ -64,12 +63,12 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
 
       state =
         TestHelpers.base_state()
-        |> AgentAccess.update_agent(fn _agent ->
+        |> MingaEditor.Shell.Traditional.Workflow.install_agent_state(
           AgentState.set_pending_approval(%AgentState{}, approval)
-        end)
+        )
         |> then(fn state -> elem(AgentEvents.handle(state, {:approval_pending, approval}), 0) end)
 
-      started_at = AgentAccess.view(state).activity.started_at
+      started_at = state.workspace.agent_ui.view.activity.started_at
       assert started_at != nil
 
       ctx = %Context{
@@ -81,8 +80,11 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
         layout: nil,
         shell: MingaEditor.Shell.Traditional,
         shell_state:
-          TraditionalState.replace_agent(%TraditionalState{}, AgentAccess.agent(state)),
-        agent_ui: AgentAccess.agent_ui(state)
+          TraditionalState.replace_agent(
+            %TraditionalState{},
+            MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
+          ),
+        agent_ui: state.workspace.agent_ui
       }
 
       first = AgentContextBuilder.build(ctx)

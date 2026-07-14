@@ -13,11 +13,17 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
   alias MingaEditor.RenderPipeline.ComposedFrame
   alias MingaEditor.RenderPipeline.Content
   alias MingaEditor.RenderPipeline.Scroll
+  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Registry, as: ShellRegistry
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.{Buffers, Highlighting, Windows}
+  alias MingaEditor.State.Appearance
+  alias MingaEditor.State.ExtensionSurfaces
+  alias MingaEditor.State.Frontend, as: FrontendState
+  alias MingaEditor.State.Interaction
+  alias MingaEditor.State.Parser, as: ParserState
+  alias MingaEditor.State.{Buffers, Windows}
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Window
@@ -54,12 +60,18 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
     shell_entry = ShellRegistry.get(:traditional)
 
     %EditorState{
-      port_manager: Keyword.get(opts, :port_manager, self()),
-      parser_manager: Keyword.get(opts, :parser_manager, Minga.Parser.Manager),
+      frontend:
+        FrontendState.new(
+          backend: Keyword.get(opts, :backend, :headless),
+          rendering: Keyword.get(opts, :rendering, :enabled),
+          port_manager: Keyword.get(opts, :port_manager, self()),
+          terminal_viewport: vp,
+          capabilities: Keyword.get(opts, :capabilities, %Capabilities{})
+        ),
+      parser: ParserState.new(Keyword.get(opts, :parser_manager, Minga.Parser.Manager)),
       effect_scheduler: Keyword.get(opts, :effect_scheduler),
-      terminal_viewport: vp,
-      sidebar_registry: sidebar_registry,
-      highlighting: %Highlighting{},
+      session: Keyword.get(opts, :session, %MingaEditor.State.Session{}),
+      extension_surfaces: ExtensionSurfaces.new(sidebar_registry: sidebar_registry),
       workspace: %MingaEditor.Session.State{
         viewport: vp,
         editing: VimState.new(),
@@ -71,9 +83,9 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
           next_id: win_id + 1
         }
       },
-      focus_stack: Input.default_stack(),
+      interaction: Interaction.new(focus_stack: Input.default_stack()),
       shell_runtime: Runtime.new(shell_entry, %ShellState{}),
-      theme: Theme.get!(:doom_one)
+      appearance: Appearance.select_theme(%Appearance{}, Theme.get!(:doom_one))
     }
   end
 
@@ -91,8 +103,8 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
   """
   @spec gui_state(keyword()) :: EditorState.t()
   def gui_state(opts \\ []) do
-    state = base_state(opts)
-    %{state | capabilities: %Capabilities{frontend_type: :native_gui, semantic_ui: true}}
+    capabilities = %Capabilities{frontend_type: :native_gui, semantic_ui: true}
+    base_state(Keyword.put(opts, :capabilities, capabilities))
   end
 
   @doc """
@@ -116,7 +128,12 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
     updated_window = Window.observe_render(window, viewport, 1)
 
     new_map = Map.put(state.workspace.windows.map, win_id, updated_window)
-    put_in(state.workspace.windows.map, new_map)
+
+    %{
+      state
+      | workspace:
+          SessionState.set_windows(state.workspace, %{state.workspace.windows | map: new_map})
+    }
   end
 
   @doc """

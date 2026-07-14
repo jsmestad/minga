@@ -24,7 +24,6 @@ defmodule MingaEditor.Input.AgentPanel do
   alias MingaEditor.LayoutPreset
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.Input.AgentNav
   alias Minga.Keymap
 
@@ -33,7 +32,7 @@ defmodule MingaEditor.Input.AgentPanel do
           MingaEditor.Input.Handler.result()
 
   def handle_key(state, cp, mods) do
-    state |> AgentAccess.panel() |> route_panel_key(state, cp, mods)
+    state.workspace.agent_ui.panel |> route_panel_key(state, cp, mods)
   end
 
   @spec route_panel_key(UIState.Panel.t(), EditorState.t(), non_neg_integer(), non_neg_integer()) ::
@@ -67,7 +66,7 @@ defmodule MingaEditor.Input.AgentPanel do
              :agent,
              binding_state,
              key,
-             EditorState.keymap_context(state)
+             keymap_server: state.interaction.keymap_server
            ) do
         {:command, command} ->
           Commands.execute(state, command)
@@ -125,7 +124,14 @@ defmodule MingaEditor.Input.AgentPanel do
 
   @spec set_active_buffer_override(EditorState.t(), pid() | nil) :: EditorState.t()
   defp set_active_buffer_override(state, pid) do
-    EditorState.update_buffers(state, &Buffers.set_active_override(&1, pid))
+    %{
+      state
+      | workspace:
+          MingaEditor.Session.State.set_buffers(
+            state.workspace,
+            (&Buffers.set_active_override(&1, pid)).(state.workspace.buffers)
+          )
+    }
   end
 
   # ── Panel navigation mode ──────────────────────────────────────────────
@@ -160,15 +166,24 @@ defmodule MingaEditor.Input.AgentPanel do
       if LayoutPreset.has_agent_chat?(state) do
         AgentCommands.toggle_agent_split(state)
       else
-        AgentAccess.update_agent_ui(state, &UIState.set_input_focused(&1, false))
+        MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+          state,
+          MingaEditor.Agent.PromptBuffer.set_input_focused(state.workspace.agent_ui, false)
+        )
       end
 
     {:panel, state}
   end
 
   defp panel_nav_key(state, ?i, _mods) do
-    state = AgentAccess.update_agent_ui(state, &UIState.set_input_focused(&1, true))
-    {:panel, EditorState.transition_mode(state, :insert)}
+    state =
+      MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+        state,
+        MingaEditor.Agent.PromptBuffer.set_input_focused(state.workspace.agent_ui, true)
+      )
+
+    {:panel,
+     %{state | workspace: MingaEditor.Session.State.transition_mode(state.workspace, :insert)}}
   end
 
   defp panel_nav_key(_state, _cp, _mods), do: :delegate
@@ -189,7 +204,7 @@ defmodule MingaEditor.Input.AgentPanel do
   @spec dispatch_prompt_via_mode_fsm(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()
   def dispatch_prompt_via_mode_fsm(state, cp, mods) do
-    panel = AgentAccess.panel(state)
+    panel = state.workspace.agent_ui.panel
     prompt_pid = panel.prompt_buffer
 
     if is_pid(prompt_pid) do
@@ -219,7 +234,7 @@ defmodule MingaEditor.Input.AgentPanel do
              :agent,
              :input_normal,
              key,
-             EditorState.keymap_context(state)
+             keymap_server: state.interaction.keymap_server
            ) do
         {:command, command} -> Commands.execute(state, command)
         {:prefix, _node} -> state

@@ -10,7 +10,6 @@ defmodule MingaEditor.Agent.SlashCommandTest do
   alias MingaEditor.State, as: EditorState
   alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
 
@@ -225,21 +224,31 @@ defmodule MingaEditor.Agent.SlashCommandTest do
         )
 
       %EditorState{
-        port_manager: nil,
+        frontend: %MingaEditor.State.Frontend{port_manager: nil},
         workspace: %MingaEditor.Session.State{
           viewport: Viewport.new(24, 80),
           editing: VimState.new(),
           agent_ui: UIState.new()
         }
       }
-      |> EditorState.set_tab_bar(tab_bar)
-      |> AgentAccess.update_agent(fn _current ->
-        %AgentState{
-          runtime: %RuntimeState{status: :idle},
-          error: nil,
-          spinner_timer: nil
+      |> then(fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            tab_bar
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
         }
       end)
+      |> MingaEditor.Shell.Traditional.Workflow.install_agent_state(%AgentState{
+        runtime: %RuntimeState{status: :idle},
+        error: nil,
+        spinner_timer: nil
+      })
     end
 
     test "returns error for non-slash input" do
@@ -287,7 +296,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
 
     test "/model with name sets model (triggers restart)" do
       {:ok, state} = SlashCommand.execute(mock_state(), "/model gpt-4o")
-      assert AgentAccess.panel(state).model_name == "gpt-4o"
+      assert state.workspace.agent_ui.panel.model_name == "gpt-4o"
     end
 
     test "command parsing is case-insensitive" do
@@ -337,7 +346,9 @@ defmodule MingaEditor.Agent.SlashCommandTest do
 
       assert Session.status(session) == :plan
       assert state.shell_runtime.state.notice.message == "Plan mode enabled"
-      assert AgentAccess.agent(state).runtime.status == :plan
+
+      assert MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state).runtime.status ==
+               :plan
 
       assert Enum.any?(Session.messages(session), fn
                {:system, text, :info} -> text =~ "Plan mode" and text =~ "/exec"
@@ -352,7 +363,9 @@ defmodule MingaEditor.Agent.SlashCommandTest do
 
       assert Session.status(session) == :idle
       assert state.shell_runtime.state.notice.message == "Execution mode enabled"
-      assert AgentAccess.agent(state).runtime.status == :idle
+
+      assert MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state).runtime.status ==
+               :idle
 
       assert Enum.any?(Session.messages(session), fn
                {:system, text, :info} -> text =~ "Execution mode" and text =~ "/plan"

@@ -8,7 +8,6 @@ defmodule MingaEditor.UI.Picker.RemoteFileConflictSource do
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.Preview
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
 
@@ -106,7 +105,12 @@ defmodule MingaEditor.UI.Picker.RemoteFileConflictSource do
   @spec show_diff(EditorState.t(), String.t(), DiffReview.t()) :: EditorState.t()
   defp show_diff(state, path, review) do
     state
-    |> AgentAccess.update_agent_ui(&set_diff_preview(&1, review))
+    |> then(fn state ->
+      MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+        state,
+        (&set_diff_preview(&1, review)).(state.workspace.agent_ui)
+      )
+    end)
     |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
       "Showing diff for #{Path.basename(path)}"
     )
@@ -115,7 +119,7 @@ defmodule MingaEditor.UI.Picker.RemoteFileConflictSource do
   @spec set_diff_preview(UIState.t(), DiffReview.t()) :: UIState.t()
   defp set_diff_preview(ui, review) do
     ui
-    |> UIState.update_preview(fn _ -> Preview.set_diff(Preview.new(), review) end)
+    |> UIState.replace_preview(Preview.set_diff(Preview.new(), review))
     |> UIState.set_focus(:file_viewer)
   end
 

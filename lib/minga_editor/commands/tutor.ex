@@ -54,7 +54,7 @@ defmodule MingaEditor.Commands.Tutor do
        buffer_type: :nofile,
        read_only: false,
        filetype: :text,
-       options_server: EditorState.options_server(state)}
+       options_server: state.interaction.options_server}
     )
   end
 

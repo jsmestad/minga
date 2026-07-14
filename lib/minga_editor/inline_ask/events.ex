@@ -11,7 +11,6 @@ defmodule MingaEditor.InlineAsk.Events do
   alias MingaAgent.EphemeralSession
   alias MingaEditor.InlineOverlay.Events, as: Overlay
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.InlineAsk
 
   @type state :: EditorState.t()
@@ -35,11 +34,21 @@ defmodule MingaEditor.InlineAsk.Events do
   @spec spec() :: Overlay.spec()
   defp spec do
     %{
-      store: &AgentAccess.inline_asks/1,
-      replace: &AgentAccess.replace_inline_ask/2,
+      store: &inline_asks/1,
+      replace: &MingaEditor.Shell.Traditional.Workflow.install_inline_ask/2,
       session?: &InlineAsk.session?/2
     }
   end
+
+  @spec inline_asks(state()) :: InlineAsk.store()
+  defp inline_asks(%{
+         shell_runtime: %MingaEditor.Shell.Runtime{
+           state: %MingaEditor.Shell.Traditional.State{} = shell_state
+         }
+       }),
+       do: MingaEditor.Shell.Traditional.State.inline_asks(shell_state)
+
+  defp inline_asks(%EditorState{}), do: %{}
 
   @spec fail(InlineAsk.t(), term()) :: InlineAsk.t()
   defp fail(%InlineAsk{} = ask, reason),

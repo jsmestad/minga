@@ -29,7 +29,6 @@ defmodule MingaEditor.Agent.Events do
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.State.AgentAccess
   alias MingaAgent.Session
   alias Minga.Buffer
   alias MingaEditor.State.Buffers
@@ -39,6 +38,7 @@ defmodule MingaEditor.Agent.Events do
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.Workflow, as: TraditionalWorkflow
   alias MingaEditor.Shell.Workflow
 
   @type effect ::
@@ -68,7 +68,7 @@ defmodule MingaEditor.Agent.Events do
   @spec handle(EditorState.t(), term()) :: {EditorState.t(), [effect()]}
 
   def handle(state, {:status_changed, status}) do
-    state = AgentAccess.update_agent(state, &AgentState.set_status(&1, status))
+    state = TraditionalWorkflow.install_agent_status(state, status)
 
     {state, effects} =
       case status do
@@ -76,7 +76,7 @@ defmodule MingaEditor.Agent.Events do
           {state, [{:log_message, "Agent: error"}]}
 
         :thinking ->
-          {AgentAccess.update_agent_ui(state, &UIState.engage_auto_scroll/1), []}
+          {TraditionalWorkflow.engage_agent_scroll(state), []}
 
         _ ->
           {state, []}
@@ -97,10 +97,10 @@ defmodule MingaEditor.Agent.Events do
     state =
       case status do
         s when s in [:thinking, :tool_executing] ->
-          AgentAccess.update_agent(state, &AgentState.start_spinner_timer/1)
+          TraditionalWorkflow.install_agent_spinner_start(state)
 
         _ ->
-          AgentAccess.update_agent(state, &AgentState.stop_spinner_timer/1)
+          TraditionalWorkflow.install_agent_spinner_stop(state)
       end
 
     state =
@@ -131,8 +131,14 @@ defmodule MingaEditor.Agent.Events do
   def handle(state, {:thinking_delta, _delta} = delta), do: handle_batch(state, [delta])
 
   def handle(state, :messages_changed) do
-    state = AgentAccess.update_agent_ui(state, &UIState.maybe_auto_scroll/1)
-    state = AgentAccess.update_panel(state, &Panel.bump_message_version/1)
+    state = TraditionalWorkflow.maybe_agent_auto_scroll(state)
+
+    state =
+      TraditionalWorkflow.install_agent_panel(
+        state,
+        (&Panel.bump_message_version/1).(state.workspace.agent_ui.panel)
+      )
+
     state = maybe_rename_workspace_from_assistant(state)
     {state, [{:render, 16}, :sync_agent_transcript, {:update_tab_label, ""}]}
   end
@@ -149,13 +155,13 @@ defmodule MingaEditor.Agent.Events do
   end
 
   def handle(state, {:tool_update, _id, "shell", partial}) do
-    state = AgentAccess.update_agent_ui(state, &UIState.maybe_auto_scroll/1)
+    state = TraditionalWorkflow.maybe_agent_auto_scroll(state)
     state = update_preview(state, &Preview.update_shell_output(&1, partial))
     {state, [{:render, 50}]}
   end
 
   def handle(state, {:tool_update, _id, _name, _partial}) do
-    state = AgentAccess.update_agent_ui(state, &UIState.maybe_auto_scroll/1)
+    state = TraditionalWorkflow.maybe_agent_auto_scroll(state)
     {state, [{:render, 50}]}
   end
 
@@ -189,7 +195,7 @@ defmodule MingaEditor.Agent.Events do
     state = update_activity(state, &Activity.finish_tool/1)
     state = sync_active_tool_name(state, nil)
 
-    case AgentAccess.view(state).preview.content do
+    case state.workspace.agent_ui.view.preview.content do
       {:file, path, _} ->
         state = update_preview(state, &Preview.set_file(&1, path, result))
         {state, [{:render, 16}]}
@@ -215,7 +221,7 @@ defmodule MingaEditor.Agent.Events do
     state = update_activity(state, &Activity.finish_tool/1)
     state = sync_active_tool_name(state, nil)
 
-    case AgentAccess.view(state).preview.content do
+    case state.workspace.agent_ui.view.preview.content do
       {:directory, path, _} ->
         state = update_preview(state, &Preview.set_directory(&1, path, entries))
         {state, [{:render, 16}]}
@@ -241,24 +247,31 @@ defmodule MingaEditor.Agent.Events do
     {state, remote_effects} = reload_remote_buffer_if_open(state, path, after_content)
 
     state =
-      AgentAccess.update_agent_ui(state, &UIState.record_baseline(&1, path, before_content))
+      TraditionalWorkflow.install_agent_ui(
+        state,
+        (&UIState.record_baseline(&1, path, before_content)).(state.workspace.agent_ui)
+      )
 
     state =
       update_activity(state, &Activity.record_file(&1, path))
 
     state =
-      AgentAccess.update_agent_ui(state, fn ui ->
-        UIState.update_edit_timeline(ui, fn timeline ->
-          EditTimeline.record_edit(
-            timeline,
-            path,
-            tool_call_id,
-            tool_name,
-            before_content,
-            after_content
-          )
-        end)
-      end)
+      TraditionalWorkflow.install_agent_ui(
+        state,
+        (fn ui ->
+           timeline =
+             EditTimeline.record_edit(
+               ui.view.edit_timeline,
+               path,
+               tool_call_id,
+               tool_name,
+               before_content,
+               after_content
+             )
+
+           UIState.replace_edit_timeline(ui, timeline)
+         end).(state.workspace.agent_ui)
+      )
 
     # Let the active shell track touched files for any shell-owned agent surface.
     state = track_active_shell_agent_file(state, path)
@@ -269,7 +282,7 @@ defmodule MingaEditor.Agent.Events do
     # Add a chat-visible system message so the transcript records what was modified
     state = add_file_changed_message(state, path, tool_name)
 
-    baseline = UIState.get_baseline(AgentAccess.agent_ui(state), path)
+    baseline = UIState.get_baseline(state.workspace.agent_ui, path)
     existing_review = existing_diff_for_path(state, path)
 
     review =
@@ -284,14 +297,20 @@ defmodule MingaEditor.Agent.Events do
 
       _ ->
         state = update_preview(state, &Preview.set_diff(&1, review))
-        state = AgentAccess.update_agent_ui(state, &UIState.set_focus(&1, :file_viewer))
+
+        state =
+          TraditionalWorkflow.install_agent_ui(
+            state,
+            UIState.set_focus(state.workspace.agent_ui, :file_viewer)
+          )
+
         {state, [:render | remote_effects]}
     end
   end
 
   def handle(state, {:approval_pending, approval}) do
     cached = Map.take(approval, [:tool_call_id, :name, :args, :preview])
-    state = AgentAccess.update_agent(state, &AgentState.set_pending_approval(&1, cached))
+    state = TraditionalWorkflow.install_agent_approval(state, cached)
 
     # Seed the visible activity timestamp once so approval-only agent context
     # remains stable across renders without falling back to "now" every frame.
@@ -300,13 +319,17 @@ defmodule MingaEditor.Agent.Events do
     # Unfocus the prompt input so the ToolApproval input handler can
     # intercept y/n keys. The user needs to see and respond to the
     # approval prompt, not keep typing in the input field.
-    state = AgentAccess.update_agent_ui(state, &UIState.set_input_focused(&1, false))
+    state =
+      TraditionalWorkflow.install_agent_ui(
+        state,
+        MingaEditor.Agent.PromptBuffer.set_input_focused(state.workspace.agent_ui, false)
+      )
 
     {state, [:render, :sync_agent_transcript]}
   end
 
   def handle(state, {:approval_resolved, _decision}) do
-    state = AgentAccess.update_agent(state, &AgentState.clear_pending_approval/1)
+    state = TraditionalWorkflow.clear_agent_approval(state)
     {state, [{:render, 16}, :sync_agent_transcript]}
   end
 
@@ -315,12 +338,17 @@ defmodule MingaEditor.Agent.Events do
     # logged the raw detail to the Messages panel, so we only update status
     # here. Re-logging would double the Messages entry and force-open the panel.
     state = restore_queued_prompts_after_error(state)
-    state = AgentAccess.update_agent(state, &AgentState.set_error(&1, message))
+    state = TraditionalWorkflow.install_agent_error(state, message)
     {state, [:render]}
   end
 
   def handle(state, {:credentials_status, configured?}) do
-    state = AgentAccess.update_panel(state, &Panel.set_credentials_configured(&1, configured?))
+    state =
+      TraditionalWorkflow.install_agent_panel(
+        state,
+        (&Panel.set_credentials_configured(&1, configured?)).(state.workspace.agent_ui.panel)
+      )
+
     {state, [:render]}
   end
 
@@ -330,23 +358,36 @@ defmodule MingaEditor.Agent.Events do
   end
 
   def handle(state, :spinner_tick) do
-    if AgentState.busy?(AgentAccess.agent(state)) do
-      state = AgentAccess.update_agent_ui(state, &UIState.tick_spinner/1)
+    if AgentState.busy?(MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)) do
+      state =
+        TraditionalWorkflow.install_agent_ui(
+          state,
+          UIState.tick_spinner(state.workspace.agent_ui)
+        )
+
       {state, [{:render, 16}]}
     else
-      state = AgentAccess.update_agent(state, &AgentState.stop_spinner_timer/1)
+      state = TraditionalWorkflow.install_agent_spinner_stop(state)
       {state, []}
     end
   end
 
   def handle(state, :dismiss_toast) do
-    state = AgentAccess.update_agent_ui(state, &UIState.dismiss_toast/1)
+    state =
+      TraditionalWorkflow.install_agent_ui(
+        state,
+        UIState.dismiss_toast(state.workspace.agent_ui)
+      )
+
     {state, [{:render, 16}]}
   end
 
   def handle(state, {:context_usage, estimated_tokens, context_limit}) do
     state =
-      AgentAccess.update_view(state, fn v -> %{v | context_estimate: estimated_tokens} end)
+      TraditionalWorkflow.install_agent_view(
+        state,
+        (fn v -> %{v | context_estimate: estimated_tokens} end).(state.workspace.agent_ui.view)
+      )
 
     {state, effects} = maybe_auto_compact(state, estimated_tokens, context_limit)
     {state, [{:render, 16} | effects]}
@@ -387,11 +428,16 @@ defmodule MingaEditor.Agent.Events do
   def handle_batch(state, []), do: {state, []}
 
   def handle_batch(state, batch) do
-    state = AgentAccess.update_agent_ui(state, &UIState.maybe_auto_scroll/1)
+    state = TraditionalWorkflow.maybe_agent_auto_scroll(state)
     state = Enum.reduce(batch, state, &apply_batched_delta/2)
 
     if transcript_affecting_batch?(batch) do
-      state = AgentAccess.update_panel(state, &Panel.bump_message_version/1)
+      state =
+        TraditionalWorkflow.install_agent_panel(
+          state,
+          (&Panel.bump_message_version/1).(state.workspace.agent_ui.panel)
+        )
+
       {state, [{:render, 16}, :sync_agent_transcript]}
     else
       {state, [{:render, 16}]}
@@ -445,9 +491,12 @@ defmodule MingaEditor.Agent.Events do
 
   @spec update_activity(EditorState.t(), (Activity.t() -> Activity.t())) :: EditorState.t()
   defp update_activity(state, fun) when is_function(fun, 1) do
-    AgentAccess.update_agent_ui(state, fn ui ->
-      UIState.update_activity(ui, fun)
-    end)
+    TraditionalWorkflow.install_agent_ui(
+      state,
+      (fn ui ->
+         UIState.replace_activity(ui, fun.(ui.view.activity))
+       end).(state.workspace.agent_ui)
+    )
   end
 
   # Folds a single delta's preview-side mutation into state. Text and thinking
@@ -473,14 +522,11 @@ defmodule MingaEditor.Agent.Events do
 
   @spec sync_active_tool_name(EditorState.t(), String.t() | nil) :: EditorState.t()
   defp sync_active_tool_name(state, fallback_name) do
-    case AgentAccess.session(state) do
+    case Runtime.active_session(state.shell_runtime) do
       pid when is_pid(pid) ->
         case session_active_tool_name(pid) do
           {:ok, active_tool_name} ->
-            AgentAccess.update_agent(
-              state,
-              &AgentState.set_active_tool_name(&1, active_tool_name)
-            )
+            TraditionalWorkflow.install_agent_tool(state, active_tool_name)
 
           :error ->
             apply_active_tool_name_fallback(state, fallback_name)
@@ -493,16 +539,16 @@ defmodule MingaEditor.Agent.Events do
 
   @spec apply_active_tool_name_fallback(EditorState.t(), String.t() | nil) :: EditorState.t()
   defp apply_active_tool_name_fallback(state, name) when is_binary(name) do
-    AgentAccess.update_agent(state, &AgentState.set_active_tool_name(&1, name))
+    TraditionalWorkflow.install_agent_tool(state, name)
   end
 
   defp apply_active_tool_name_fallback(state, _name) do
-    AgentAccess.update_agent(state, &AgentState.clear_active_tool_name/1)
+    TraditionalWorkflow.install_agent_tool_clear(state)
   end
 
   @spec restore_queued_prompts_after_error(EditorState.t()) :: EditorState.t()
   defp restore_queued_prompts_after_error(state) do
-    case AgentAccess.session(state) do
+    case Runtime.active_session(state.shell_runtime) do
       session when is_pid(session) ->
         {steering, follow_up} = safe_recall_queues(session)
         restore_queued_to_prompt(state, steering ++ follow_up)
@@ -528,7 +574,7 @@ defmodule MingaEditor.Agent.Events do
   defp restore_queued_to_prompt(state, []), do: state
 
   defp restore_queued_to_prompt(state, all_queued) do
-    current_text = UIState.prompt_text(AgentAccess.agent_ui(state))
+    current_text = MingaEditor.Agent.PromptBuffer.prompt_text(state.workspace.agent_ui)
     combined = Session.combine_queue_entries_to_text(all_queued)
 
     restored =
@@ -536,7 +582,10 @@ defmodule MingaEditor.Agent.Events do
         do: combined <> "\n\n" <> current_text,
         else: combined
 
-    AgentAccess.update_agent_ui(state, &UIState.set_prompt_text(&1, restored))
+    TraditionalWorkflow.install_agent_ui(
+      state,
+      MingaEditor.Agent.PromptBuffer.set_prompt_text(state.workspace.agent_ui, restored)
+    )
   end
 
   @spec session_active_tool_name(pid()) :: {:ok, String.t() | nil} | :error
@@ -565,7 +614,7 @@ defmodule MingaEditor.Agent.Events do
 
   @spec current_remote_target(EditorState.t()) :: {:ok, String.t(), node()} | :error
   defp current_remote_target(state) do
-    case AgentAccess.session(state) do
+    case Runtime.active_session(state.shell_runtime) do
       pid when is_pid(pid) and node(pid) != node() ->
         remote_node = node(pid)
 
@@ -693,7 +742,7 @@ defmodule MingaEditor.Agent.Events do
 
   @spec add_file_changed_message(EditorState.t(), String.t(), String.t()) :: EditorState.t()
   defp add_file_changed_message(state, path, tool_name) do
-    case AgentAccess.session(state) do
+    case Runtime.active_session(state.shell_runtime) do
       pid when is_pid(pid) ->
         short_path = shorten_to_relative(state, path)
         verb = file_change_verb(tool_name)
@@ -722,12 +771,17 @@ defmodule MingaEditor.Agent.Events do
 
   @spec update_preview(EditorState.t(), (Preview.t() -> Preview.t())) :: EditorState.t()
   defp update_preview(state, fun) do
-    AgentAccess.update_agent_ui(state, &UIState.update_preview(&1, fun))
+    TraditionalWorkflow.install_agent_ui(
+      state,
+      (fn ui ->
+         UIState.replace_preview(ui, fun.(ui.view.preview))
+       end).(state.workspace.agent_ui)
+    )
   end
 
   @spec existing_diff_for_path(EditorState.t(), String.t()) :: DiffReview.t() | nil
   defp existing_diff_for_path(state, path) do
-    case Preview.diff_review(AgentAccess.view(state).preview) do
+    case Preview.diff_review(state.workspace.agent_ui.view.preview) do
       %DiffReview{path: ^path} = review -> review
       _ -> nil
     end
@@ -741,15 +795,12 @@ defmodule MingaEditor.Agent.Events do
   defp track_active_shell_agent_file(state, path),
     do: update_shell_for_active_session(state, :track_agent_file, [path])
 
-  @spec update_shell_for_active_session(EditorState.t() | map(), atom(), [term()]) ::
-          EditorState.t() | map()
+  @spec update_shell_for_active_session(EditorState.t(), atom(), [term()]) :: EditorState.t()
   defp update_shell_for_active_session(%EditorState{} = state, callback, args) do
     state = Workflow.ensure_available(state)
     session = Runtime.active_session(state.shell_runtime)
     update_shell_for_session(state, callback, session, args)
   end
-
-  defp update_shell_for_active_session(state, _callback, _args), do: state
 
   @spec update_shell_for_session(EditorState.t(), atom(), pid() | nil, [term()]) ::
           EditorState.t()
@@ -765,7 +816,7 @@ defmodule MingaEditor.Agent.Events do
         status
       )
 
-    EditorState.apply_shell_runtime_transition(state, runtime)
+    %{state | shell_runtime: runtime}
   end
 
   defp update_shell_for_session(state, :track_agent_file, session, [path]) do
@@ -777,7 +828,7 @@ defmodule MingaEditor.Agent.Events do
         path
       )
 
-    EditorState.apply_shell_runtime_transition(state, runtime)
+    %{state | shell_runtime: runtime}
   end
 
   # Syncs the agent_status field on the current agent tab so the tab bar
@@ -787,10 +838,10 @@ defmodule MingaEditor.Agent.Events do
     do: state
 
   defp sync_tab_agent_status(state, status) do
-    session = AgentAccess.session(state)
+    session = Runtime.active_session(state.shell_runtime)
 
     if is_pid(session) do
-      tb = EditorState.tab_bar(state)
+      tb = state.shell_runtime.state.tab_bar
 
       tb =
         case TabBar.find_workspace_by_session(tb, session) do
@@ -807,7 +858,19 @@ defmodule MingaEditor.Agent.Events do
           nil -> tb
         end
 
-      EditorState.set_tab_bar(state, tb)
+      then(state, fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            tb
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
     else
       state
     end
@@ -823,8 +886,8 @@ defmodule MingaEditor.Agent.Events do
        do: state
 
   defp associate_file_with_agent_workspace(state, path) do
-    session = AgentAccess.session(state)
-    tb = EditorState.tab_bar(state)
+    session = Runtime.active_session(state.shell_runtime)
+    tb = state.shell_runtime.state.tab_bar
 
     with pid when is_pid(pid) <- session,
          {:ok, file_ref} <- file_ref_for_path(state, path),
@@ -837,7 +900,19 @@ defmodule MingaEditor.Agent.Events do
           Workspace.retarget_file(workspace, nil, file_ref, tab_id == tb.active_id)
         end)
 
-      EditorState.set_tab_bar(state, tb)
+      then(state, fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            tb
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
     else
       _ -> state
     end
@@ -850,8 +925,8 @@ defmodule MingaEditor.Agent.Events do
     do: state
 
   defp maybe_auto_name_workspace(state, prompt) do
-    session = AgentAccess.session(state)
-    tb = EditorState.tab_bar(state)
+    session = Runtime.active_session(state.shell_runtime)
+    tb = state.shell_runtime.state.tab_bar
 
     with pid when is_pid(pid) <- session,
          %Workspace{} = ws <- TabBar.find_workspace_by_session(tb, pid) do
@@ -866,11 +941,20 @@ defmodule MingaEditor.Agent.Events do
     updated_ws = Workspace.auto_name(ws, prompt)
 
     if updated_ws.label != ws.label do
-      tb = EditorState.tab_bar(state)
-      EditorState.set_tab_bar(state, TabBar.update_workspace(tb, ws.id, fn _ -> updated_ws end))
+      tb = state.shell_runtime.state.tab_bar
+
+      install_tab_bar(state, TabBar.update_workspace(tb, ws.id, fn _ -> updated_ws end))
     else
       state
     end
+  end
+
+  @spec install_tab_bar(EditorState.t(), TabBar.t()) :: EditorState.t()
+  defp install_tab_bar(%EditorState{} = state, %TabBar{} = tab_bar) do
+    shell_state =
+      MingaEditor.Shell.Traditional.State.set_tab_bar(Runtime.state(state.shell_runtime), tab_bar)
+
+    %{state | shell_runtime: Runtime.install_traditional_state(state.shell_runtime, shell_state)}
   end
 
   @spec file_ref_for_path(EditorState.t(), String.t()) :: {:ok, FileRef.t()} | {:error, term()}
@@ -882,7 +966,7 @@ defmodule MingaEditor.Agent.Events do
   end
 
   @spec project_root(EditorState.t()) :: String.t() | nil
-  defp project_root(state), do: EditorState.file_tree_state(state).project_root
+  defp project_root(state), do: state.workspace.file_tree.project_root
 
   @spec find_unassociated_file_tab(TabBar.t(), FileRef.t(), non_neg_integer(), EditorState.t()) ::
           Tab.t() | nil
@@ -910,9 +994,9 @@ defmodule MingaEditor.Agent.Events do
 
   @spec maybe_rename_workspace_from_assistant(EditorState.t()) :: EditorState.t()
   defp maybe_rename_workspace_from_assistant(state) do
-    with pid when is_pid(pid) <- AgentAccess.session(state),
+    with pid when is_pid(pid) <- Runtime.active_session(state.shell_runtime),
          %Workspace{custom_name: nil} = ws <-
-           TabBar.find_workspace_by_session(EditorState.tab_bar(state), pid),
+           TabBar.find_workspace_by_session(state.shell_runtime.state.tab_bar, pid),
          text when is_binary(text) <- first_assistant_opening(safe_messages(pid)),
          candidate = String.slice(text, 0, 30) |> String.trim(),
          true <- candidate != "" and candidate != ws.label do
@@ -944,9 +1028,12 @@ defmodule MingaEditor.Agent.Events do
 
   @spec reset_compact_state(EditorState.t()) :: EditorState.t()
   defp reset_compact_state(state) do
-    AgentAccess.update_view(state, fn v ->
-      %{v | compact_warned: false, compact_triggered: false}
-    end)
+    TraditionalWorkflow.install_agent_view(
+      state,
+      (fn v ->
+         %{v | compact_warned: false, compact_triggered: false}
+       end).(state.workspace.agent_ui.view)
+    )
   rescue
     _ -> state
   end
@@ -958,8 +1045,11 @@ defmodule MingaEditor.Agent.Events do
 
   defp maybe_auto_compact(state, estimated_tokens, context_limit) do
     fill_pct = min(round(estimated_tokens / context_limit * 100), 100)
-    view = AgentAccess.view(state)
-    agent_status = AgentAccess.agent(state).runtime.status
+    view = state.workspace.agent_ui.view
+
+    agent_status =
+      MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state).runtime.status
+
     compact_when_ready(state, view, agent_status, fill_pct)
   end
 
@@ -967,7 +1057,12 @@ defmodule MingaEditor.Agent.Events do
           {EditorState.t(), [effect()]}
   defp compact_when_ready(state, _view, status, fill_pct)
        when status in [:thinking, :tool_executing] do
-    state = AgentAccess.update_view(state, &%{&1 | compact_pending_fill_pct: fill_pct})
+    state =
+      TraditionalWorkflow.install_agent_view(
+        state,
+        (&%{&1 | compact_pending_fill_pct: fill_pct}).(state.workspace.agent_ui.view)
+      )
+
     {state, []}
   end
 
@@ -980,15 +1075,19 @@ defmodule MingaEditor.Agent.Events do
   @spec maybe_apply_pending_auto_compact(EditorState.t(), term(), [effect()]) ::
           {EditorState.t(), [effect()]}
   defp maybe_apply_pending_auto_compact(state, :idle, effects) do
-    case AgentAccess.view(state).compact_pending_fill_pct do
+    case state.workspace.agent_ui.view.compact_pending_fill_pct do
       nil ->
         {state, effects}
 
       fill_pct ->
-        state = AgentAccess.update_view(state, &%{&1 | compact_pending_fill_pct: nil})
+        state =
+          TraditionalWorkflow.install_agent_view(
+            state,
+            (&%{&1 | compact_pending_fill_pct: nil}).(state.workspace.agent_ui.view)
+          )
 
         {state, compact_effects} =
-          apply_compact_threshold(state, AgentAccess.view(state), fill_pct)
+          apply_compact_threshold(state, state.workspace.agent_ui.view, fill_pct)
 
         {state, effects ++ compact_effects}
     end
@@ -1028,13 +1127,16 @@ defmodule MingaEditor.Agent.Events do
 
   @spec trigger_auto_compact(EditorState.t()) :: {EditorState.t(), [effect()]}
   defp trigger_auto_compact(state) do
-    session = AgentAccess.session(state)
+    session = Runtime.active_session(state.shell_runtime)
 
     if is_pid(session) do
       state =
-        AgentAccess.update_view(state, fn v ->
-          %{v | compact_triggered: true, compaction_in_progress: true}
-        end)
+        TraditionalWorkflow.install_agent_view(
+          state,
+          (fn v ->
+             %{v | compact_triggered: true, compaction_in_progress: true}
+           end).(state.workspace.agent_ui.view)
+        )
 
       {state, [{:compact_session, session}]}
     else
@@ -1045,12 +1147,23 @@ defmodule MingaEditor.Agent.Events do
   @spec warn_context_pressure(EditorState.t(), non_neg_integer()) ::
           {EditorState.t(), [effect()]}
   defp warn_context_pressure(state, fill_pct) do
-    state = AgentAccess.update_view(state, fn v -> %{v | compact_warned: true} end)
+    state =
+      TraditionalWorkflow.install_agent_view(
+        state,
+        (fn v -> %{v | compact_warned: true} end).(state.workspace.agent_ui.view)
+      )
 
     state =
-      AgentAccess.update_agent_ui(state, fn ui ->
-        UIState.push_toast(ui, "Context at #{fill_pct}%. Run /compact to free space.", :warning)
-      end)
+      TraditionalWorkflow.install_agent_ui(
+        state,
+        (fn ui ->
+           UIState.push_toast(
+             ui,
+             "Context at #{fill_pct}%. Run /compact to free space.",
+             :warning
+           )
+         end).(state.workspace.agent_ui)
+      )
 
     {state, []}
   end
@@ -1097,8 +1210,7 @@ defmodule MingaEditor.Agent.Events do
 
   @spec catchup_already_applied?(EditorState.t(), String.t(), String.t()) :: boolean()
   defp catchup_already_applied?(state, path, tool_call_id) do
-    state
-    |> AgentAccess.view()
+    state.workspace.agent_ui.view
     |> Map.get(:edit_timeline)
     |> EditTimeline.entries_for(path)
     |> Enum.any?(&(&1.tool_call_id == tool_call_id))

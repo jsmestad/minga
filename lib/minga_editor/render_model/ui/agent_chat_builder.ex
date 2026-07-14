@@ -9,8 +9,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   alias MingaEditor.Agent.SemanticUI.Registry, as: SemanticUIRegistry
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.Agent.View.PromptRenderWindow
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.UI.Theme
   alias Minga.Buffer
   alias Minga.Editing.Scroll
@@ -51,7 +51,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     view = ctx.agent_ui.view
 
     prompt_text = safe_prompt_content(panel.prompt_buffer)
-    {cursor_line, cursor_col} = UIState.input_cursor(panel)
+    {cursor_line, cursor_col} = MingaEditor.Agent.PromptBuffer.input_cursor(panel)
     inner_width = max(ctx.viewport.cols - 10, 20)
     visible_rows = PromptRenderWindow.visible_rows(panel, inner_width)
 
@@ -60,7 +60,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     {messages_with_ids, styled_cache} =
       visible_message_slice(panel, full_pairs, full_styled_cache)
 
-    pending_approval = AgentAccess.agent(ctx).pending_approval
+    pending_approval = TraditionalState.agent(ctx.shell_state).pending_approval
 
     gui_messages =
       messages_with_ids
@@ -91,11 +91,11 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
     %AgentChat{
       visible?: true,
-      status: AgentAccess.agent(ctx).runtime.status || :idle,
+      status: TraditionalState.agent(ctx.shell_state).runtime.status || :idle,
       model_name: display_model_name(panel.model_name),
       thinking_level: panel.thinking_level,
       prompt: prompt_text,
-      prompt_line_count: UIState.input_line_count(panel),
+      prompt_line_count: MingaEditor.Agent.PromptBuffer.input_line_count(panel),
       prompt_cursor_line: cursor_line,
       prompt_cursor_col: cursor_col,
       prompt_vim_mode: ctx.editing.mode,

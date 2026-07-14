@@ -127,6 +127,11 @@ defmodule MingaEditor.Layout.FooterOverlays do
   #     count `1 + entry_count` matches the trimmed output.
 
   @spec content_height_notifications(map()) :: non_neg_integer()
+  defp content_height_notifications(%{feedback: %{notifications: %{items: items}}})
+       when is_list(items) do
+    1 + 2 * Enum.count(items) + Enum.count(items, &notification_actions?/1)
+  end
+
   defp content_height_notifications(%{notifications: %{items: items}}) when is_list(items) do
     1 + 2 * Enum.count(items) + Enum.count(items, &notification_actions?/1)
   end
@@ -297,6 +302,7 @@ defmodule MingaEditor.Layout.FooterOverlays do
   # Notifications: any active notification item.
   # Mirrors MingaEditor.RenderModel.UI.NotificationsBuilder (visible when items present).
   @spec notifications_visible?(map()) :: boolean()
+  defp notifications_visible?(%{feedback: %{notifications: %{items: [_ | _]}}}), do: true
   defp notifications_visible?(%{notifications: %{items: [_ | _]}}), do: true
   defp notifications_visible?(_state), do: false
 

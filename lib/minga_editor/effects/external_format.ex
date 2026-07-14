@@ -15,6 +15,7 @@ defmodule MingaEditor.Effects.ExternalFormat do
   alias MingaEditor.Effect.Request
   alias MingaEditor.Effects.ExternalFormatResult
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Feedback
   alias MingaEditor.State.Operation
   alias MingaEditor.State.OperationFeedback
 
@@ -67,11 +68,33 @@ defmodule MingaEditor.Effects.ExternalFormat do
           queue_total: total
         } = outcome
       ) do
-    {OperationFeedback.queued_in(state, id, "Format queued", position, total), outcome}
+    {:ok, operation_feedback} =
+      OperationFeedback.queued(
+        state.feedback.operation_feedback,
+        id,
+        "Format queued",
+        position,
+        total
+      )
+
+    state = %{
+      state
+      | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)
+    }
+
+    {state, outcome}
   end
 
   def apply(state, %Outcome{status: :running, request: %{operation_id: id}} = outcome) do
-    {OperationFeedback.running_in(state, id, "Formatting…"), outcome}
+    operation_feedback =
+      OperationFeedback.running(state.feedback.operation_feedback, id, "Formatting…")
+
+    state = %{
+      state
+      | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)
+    }
+
+    {state, outcome}
   end
 
   def apply(
@@ -85,7 +108,19 @@ defmodule MingaEditor.Effects.ExternalFormat do
         state,
         %Outcome{status: :failed, request: %{operation_id: id}, reason: :timeout} = outcome
       ) do
-    {OperationFeedback.finish_in(state, id, :timeout, "Format timed out"), outcome}
+    {%{
+       state
+       | feedback:
+           Feedback.accept_operation_feedback(
+             state.feedback,
+             OperationFeedback.finish(
+               state.feedback.operation_feedback,
+               id,
+               :timeout,
+               "Format timed out"
+             )
+           )
+     }, outcome}
   end
 
   def apply(
@@ -94,22 +129,66 @@ defmodule MingaEditor.Effects.ExternalFormat do
       ) do
     message = format_failure_message(reason)
     Minga.Log.warning(:editor, message)
-    {OperationFeedback.finish_in(state, id, :error, message), outcome}
+
+    {%{
+       state
+       | feedback:
+           Feedback.accept_operation_feedback(
+             state.feedback,
+             OperationFeedback.finish(state.feedback.operation_feedback, id, :error, message)
+           )
+     }, outcome}
   end
 
   def apply(
         state,
         %Outcome{status: :canceled, request: %{operation_id: id}, reason: :superseded} = outcome
       ) do
-    {OperationFeedback.finish_in(state, id, :stale, "Format replaced"), outcome}
+    {%{
+       state
+       | feedback:
+           Feedback.accept_operation_feedback(
+             state.feedback,
+             OperationFeedback.finish(
+               state.feedback.operation_feedback,
+               id,
+               :stale,
+               "Format replaced"
+             )
+           )
+     }, outcome}
   end
 
   def apply(state, %Outcome{status: :canceled, request: %{operation_id: id}} = outcome) do
-    {OperationFeedback.finish_in(state, id, :canceled, "Format canceled"), outcome}
+    {%{
+       state
+       | feedback:
+           Feedback.accept_operation_feedback(
+             state.feedback,
+             OperationFeedback.finish(
+               state.feedback.operation_feedback,
+               id,
+               :canceled,
+               "Format canceled"
+             )
+           )
+     }, outcome}
   end
 
   def apply(state, %Outcome{status: :stale, request: %{operation_id: id}} = outcome) do
-    {OperationFeedback.finish_in(state, id, :stale, "Buffer changed, format skipped"), outcome}
+    {%{
+       state
+       | feedback:
+           Feedback.accept_operation_feedback(
+             state.feedback,
+             OperationFeedback.finish(
+               state.feedback.operation_feedback,
+               id,
+               :stale,
+               "Buffer changed, format skipped"
+             )
+           )
+     }, outcome}
   end
 
   @impl true
@@ -141,7 +220,19 @@ defmodule MingaEditor.Effects.ExternalFormat do
   @spec finish(EditorState.t(), Outcome.t(), Operation.terminal_status(), String.t()) ::
           EditorState.t()
   defp finish(state, outcome, status, message) do
-    OperationFeedback.finish_in(state, outcome.request.operation_id, status, message)
+    %{
+      state
+      | feedback:
+          Feedback.accept_operation_feedback(
+            state.feedback,
+            OperationFeedback.finish(
+              state.feedback.operation_feedback,
+              outcome.request.operation_id,
+              status,
+              message
+            )
+          )
+    }
   end
 
   @spec replace_if_current(ExternalFormatResult.t()) ::

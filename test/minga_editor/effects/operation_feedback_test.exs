@@ -7,6 +7,7 @@ defmodule MingaEditor.Effects.OperationFeedbackTest do
   alias MingaEditor.Effects.GitMutation
   alias MingaEditor.Effects.GitMutationAdmission
   alias MingaEditor.RenderPipeline.TestHelpers
+  alias MingaEditor.State.Feedback
   alias MingaEditor.State.OperationFeedback
 
   test "GitMutation translates queued, running, canceled, and stale outcomes" do
@@ -70,13 +71,23 @@ defmodule MingaEditor.Effects.OperationFeedbackTest do
   @spec start_operation(MingaEditor.State.Operation.kind(), String.t()) ::
           {MingaEditor.State.t(), MingaEditor.State.Operation.t()}
   defp start_operation(kind, message) do
-    TestHelpers.base_state()
-    |> OperationFeedback.start_in(kind, Atom.to_string(kind), message)
+    state = TestHelpers.base_state()
+
+    {operation_feedback, operation} =
+      OperationFeedback.start(
+        state.feedback.operation_feedback,
+        kind,
+        Atom.to_string(kind),
+        message
+      )
+
+    {%{state | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)},
+     operation}
   end
 
   @spec feedback(MingaEditor.State.t(), pos_integer()) :: MingaEditor.State.Operation.t()
   defp feedback(state, operation_id) do
-    {:ok, operation} = OperationFeedback.fetch(state.operation_feedback, operation_id)
+    {:ok, operation} = OperationFeedback.fetch(state.feedback.operation_feedback, operation_id)
     operation
   end
 end

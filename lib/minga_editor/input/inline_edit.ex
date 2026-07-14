@@ -15,7 +15,6 @@ defmodule MingaEditor.Input.InlineEdit do
   alias MingaAgent.EphemeralSession
   alias MingaEditor.Commands.InlineEdit, as: InlineEditCommand
   alias MingaEditor.Input.InlineOverlay, as: Overlay
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.InlineEdit
 
   @type state :: MingaEditor.Input.Handler.handler_state()
@@ -78,9 +77,11 @@ defmodule MingaEditor.Input.InlineEdit do
   @spec spec() :: Overlay.spec()
   defp spec do
     %{
-      store: &AgentAccess.inline_edits/1,
-      replace: &AgentAccess.replace_inline_edit/2,
-      cancel: &AgentAccess.cancel_inline_edit/2,
+      store: fn state ->
+        MingaEditor.Shell.Traditional.State.inline_edits(state.shell_runtime.state)
+      end,
+      replace: &MingaEditor.Shell.Traditional.Workflow.install_inline_edit/2,
+      cancel: &MingaEditor.Shell.Traditional.Workflow.cancel_inline_edit/2,
       state_module: InlineEdit,
       session_starter: &EphemeralSession.rewrite/3,
       fail_prefix: "Failed to start inline edit: "

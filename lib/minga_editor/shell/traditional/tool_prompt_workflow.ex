@@ -56,7 +56,12 @@ defmodule MingaEditor.Shell.Traditional.ToolPromptWorkflow do
 
   @spec update(state(), (TraditionalState.t() -> TraditionalState.t())) :: state()
   defp update(%EditorState{} = state, transition) do
-    runtime = Runtime.update_traditional_state(state.shell_runtime, transition)
-    EditorState.apply_shell_runtime_transition(state, runtime)
+    shell_state = state.shell_runtime |> Runtime.state() |> transition.()
+
+    %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
   end
 end

@@ -87,7 +87,7 @@ defmodule MingaEditor.UI.Picker.BufferSource do
   @spec on_select(Item.t(), term()) :: term()
   def on_select(%Item{id: {:pid, pid}}, state) do
     # Special buffer not yet in the list: add it (which also switches to it)
-    EditorState.add_buffer(state, pid)
+    MingaEditor.Handlers.BufferRegistry.add_buffer(state, pid)
   end
 
   def on_select(%Item{id: idx}, state) when is_integer(idx) do

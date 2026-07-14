@@ -59,7 +59,7 @@ defmodule MingaEditor.CompletionHandling do
       end
 
       timer =
-        if state.backend != :headless do
+        if state.frontend.backend != :headless do
           Process.send_after(self(), {:completion_resolve, selected_idx}, @resolve_debounce_ms)
         end
 
@@ -215,7 +215,7 @@ defmodule MingaEditor.CompletionHandling do
 
   @spec put_lsp_pending(EditorState.t(), reference(), atom() | tuple()) :: EditorState.t()
   defp put_lsp_pending(state, ref, kind) do
-    EditorState.put_lsp_pending(state, ref, kind)
+    %{state | workspace: MingaEditor.Session.State.put_lsp_pending(state.workspace, ref, kind)}
   end
 
   @spec accept_text(EditorState.t(), Completion.t(), String.t()) :: EditorState.t()
@@ -923,12 +923,13 @@ defmodule MingaEditor.CompletionHandling do
 
     if buf do
       {line, col} = Buffer.cursor(buf)
-      vp = state.terminal_viewport
+      vp = state.frontend.terminal_viewport
       screen_row = max(line - vp.top + 1, 1)
       screen_col = min(col + 4, vp.cols - 1)
       {screen_row, screen_col}
     else
-      {div(state.terminal_viewport.rows, 2), div(state.terminal_viewport.cols, 2)}
+      {div(state.frontend.terminal_viewport.rows, 2),
+       div(state.frontend.terminal_viewport.cols, 2)}
     end
   end
 

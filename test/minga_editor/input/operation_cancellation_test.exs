@@ -16,6 +16,7 @@ defmodule MingaEditor.Input.OperationCancellationTest do
   alias MingaEditor.Shell.Traditional.SignatureHelpWorkflow
   alias MingaEditor.Shell.Traditional.WhichKeyWorkflow
   alias MingaEditor.SignatureHelp
+  alias MingaEditor.State.Feedback
   alias MingaEditor.State.OperationFeedback
 
   import MingaEditor.RenderPipeline.TestHelpers
@@ -44,8 +45,7 @@ defmodule MingaEditor.Input.OperationCancellationTest do
 
   test "Editor reveal messages cannot reveal a replacement which-key generation" do
     first =
-      base_state()
-      |> Map.put(:rendering, :disabled)
+      base_state(rendering: :disabled)
       |> WhichKeyWorkflow.begin(%{?a => :first}, ["SPC"])
 
     first_generation = first.shell_runtime.state.whichkey.generation
@@ -98,13 +98,20 @@ defmodule MingaEditor.Input.OperationCancellationTest do
   end
 
   test "a missing scheduler reports and consumes the operation Escape" do
-    {state, _operation} =
-      OperationFeedback.start_in(
-        base_state(),
+    state = base_state()
+
+    {operation_feedback, _operation} =
+      OperationFeedback.start(
+        state.feedback.operation_feedback,
         :external_format,
         "buffer:missing-scheduler",
         "Formatting"
       )
+
+    state = %{
+      state
+      | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)
+    }
 
     assert {:handled, ^state} = OperationCancellation.handle_key(state, 27, 0)
   end
@@ -117,15 +124,21 @@ defmodule MingaEditor.Input.OperationCancellationTest do
 
     assert :ok = EffectScheduler.attach(scheduler, self())
 
-    state =
-      base_state()
-      |> Map.put(:rendering, :disabled)
-      |> Map.put(:effect_scheduler, scheduler)
+    state = base_state(rendering: :disabled, effect_scheduler: scheduler)
 
-    {state, operation} =
-      OperationFeedback.start_in(state, :external_format, "buffer:escape", "Formatting",
+    {operation_feedback, operation} =
+      OperationFeedback.start(
+        state.feedback.operation_feedback,
+        :external_format,
+        "buffer:escape",
+        "Formatting",
         cancelable?: true
       )
+
+    state = %{
+      state
+      | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)
+    }
 
     effect = %EffectProbe{
       test_pid: self(),

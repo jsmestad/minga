@@ -34,10 +34,10 @@ defmodule MingaEditor.Commands.Testing do
     do: MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No active buffer")
 
   @spec test_rerun(state()) :: state()
-  def test_rerun(%{last_test_command: {command, project_root}} = state) do
+  def test_rerun(%{session: %{last_test_command: {command, project_root}}} = state) do
     Minga.CommandOutput.run("*test*", command,
       cwd: project_root,
-      events_registry: EditorState.events_registry(state)
+      events_registry: state.extension_surfaces.events_registry
     )
 
     state
@@ -102,16 +102,20 @@ defmodule MingaEditor.Commands.Testing do
   defp build_test_command(_runner, _buf, _kind), do: nil
 
   @spec execute_test(state(), String.t() | nil, String.t()) :: state()
-  defp execute_test(state, nil, _project_root) do
+  defp execute_test(%MingaEditor.State{} = state, nil, _project_root) do
     MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Cannot determine test command")
   end
 
-  defp execute_test(state, command, project_root) do
-    state = EditorState.set_last_test_command(state, {command, project_root})
+  defp execute_test(%MingaEditor.State{} = state, command, project_root) do
+    state = %{
+      state
+      | session:
+          MingaEditor.State.Session.remember_test_command(state.session, {command, project_root})
+    }
 
     Minga.CommandOutput.run("*test*", command,
       cwd: project_root,
-      events_registry: EditorState.events_registry(state)
+      events_registry: state.extension_surfaces.events_registry
     )
 
     state
@@ -134,7 +138,12 @@ defmodule MingaEditor.Commands.Testing do
     Minga.Log.info(:editor, "[Build] Building Minga: #{command}")
 
     state
-    |> EditorState.upsert_notification(notification)
+    |> then(fn state ->
+      %{
+        state
+        | feedback: MingaEditor.State.Feedback.upsert_notification(state.feedback, notification)
+      }
+    end)
   end
 
   @spec show_output(state()) :: state()

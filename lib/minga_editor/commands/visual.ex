@@ -140,7 +140,14 @@ defmodule MingaEditor.Commands.Visual do
     cursor = Document.cursor(gb)
 
     range =
-      Helpers.compute_text_object_range(gb, cursor, modifier, spec, buf, state.parser_manager)
+      Helpers.compute_text_object_range(
+        gb,
+        cursor,
+        modifier,
+        spec,
+        buf,
+        state.parser.parser_manager
+      )
 
     case range do
       nil ->
@@ -151,7 +158,14 @@ defmodule MingaEditor.Commands.Visual do
         new_ms = %{ms | visual_anchor: start_pos, visual_type: visual_type_for_text_object(spec)}
         Buffer.move_to(buf, end_pos)
 
-        EditorState.set_editing(state, VimState.set_mode_state(vim, new_ms))
+        %{
+          state
+          | workspace:
+              MingaEditor.Session.State.set_editing(
+                state.workspace,
+                VimState.set_mode_state(vim, new_ms)
+              )
+        }
     end
   end
 
@@ -175,7 +189,11 @@ defmodule MingaEditor.Commands.Visual do
       visual_type: :line
     }
 
-    EditorState.transition_mode(state, :visual, visual_state)
+    %{
+      state
+      | workspace:
+          MingaEditor.Session.State.transition_mode(state.workspace, :visual, visual_state)
+    }
   end
 
   @spec visual_type_for_text_object(term()) :: :char | :line
@@ -187,7 +205,7 @@ defmodule MingaEditor.Commands.Visual do
   # Checks if the active window is an agent chat window by inspecting
   # the window's content field (structural check, no GenServer call).
   defp agent_chat_window?(state) do
-    case EditorState.active_window_struct(state) do
+    case MingaEditor.Session.State.active_window_struct(state.workspace) do
       %{content: {:agent_chat, _}} -> true
       _ -> false
     end

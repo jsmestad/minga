@@ -12,6 +12,7 @@ defmodule MingaEditor.Commands.FileTree do
   alias MingaEditor.Handlers.BufferRegistry
   alias MingaEditor.Layout
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
+  alias MingaEditor.Session.State
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias Minga.Mode.DeleteConfirmState
@@ -58,11 +59,27 @@ defmodule MingaEditor.Commands.FileTree do
   @spec focus_visible_tree(state()) :: state()
   defp focus_visible_tree(state) do
     state
-    |> EditorState.update_file_tree(&FileTreeState.focus/1)
-    |> EditorState.set_keymap_scope(:file_tree)
+    |> then(fn state ->
+      %{
+        state
+        | workspace:
+            State.set_file_tree(
+              state.workspace,
+              (&FileTreeState.focus/1).(state.workspace.file_tree)
+            )
+      }
+    end)
+    |> then(fn state ->
+      %{
+        state
+        | workspace: State.set_keymap_scope(state.workspace, :file_tree)
+      }
+    end)
     |> SidebarWorkflow.select("file_tree")
     |> Layout.invalidate()
-    |> EditorState.invalidate_all_windows()
+    |> then(fn state ->
+      %{state | workspace: State.invalidate_all_windows(state.workspace)}
+    end)
   end
 
   # Reveals a hidden-but-loaded tree. The data, buffer, and watchers are still
@@ -70,11 +87,27 @@ defmodule MingaEditor.Commands.FileTree do
   @spec show_tree(state()) :: state()
   defp show_tree(state) do
     state
-    |> EditorState.update_file_tree(&FileTreeState.show/1)
-    |> EditorState.set_keymap_scope(:file_tree)
+    |> then(fn state ->
+      %{
+        state
+        | workspace:
+            State.set_file_tree(
+              state.workspace,
+              (&FileTreeState.show/1).(state.workspace.file_tree)
+            )
+      }
+    end)
+    |> then(fn state ->
+      %{
+        state
+        | workspace: State.set_keymap_scope(state.workspace, :file_tree)
+      }
+    end)
     |> SidebarWorkflow.select("file_tree")
     |> Layout.invalidate()
-    |> EditorState.invalidate_all_windows()
+    |> then(fn state ->
+      %{state | workspace: State.invalidate_all_windows(state.workspace)}
+    end)
   end
 
   # Hides the sidebar without tearing down the tree. The backing buffer keeps
@@ -85,28 +118,48 @@ defmodule MingaEditor.Commands.FileTree do
     scope = restore_scope(state)
 
     state
-    |> EditorState.update_file_tree(&FileTreeState.hide/1)
-    |> EditorState.set_keymap_scope(scope)
+    |> then(fn state ->
+      %{
+        state
+        | workspace:
+            State.set_file_tree(
+              state.workspace,
+              (&FileTreeState.hide/1).(state.workspace.file_tree)
+            )
+      }
+    end)
+    |> then(fn state ->
+      %{state | workspace: State.set_keymap_scope(state.workspace, scope)}
+    end)
     |> SidebarWorkflow.select(nil)
     |> Layout.invalidate()
-    |> EditorState.invalidate_all_windows()
+    |> then(fn state ->
+      %{state | workspace: State.invalidate_all_windows(state.workspace)}
+    end)
   end
 
   @spec restore_scope(state()) :: atom()
   defp restore_scope(state),
-    do: MingaEditor.Session.State.scope_for_active_window(state.workspace)
+    do: State.scope_for_active_window(state.workspace)
 
   @spec file_tree_state(state()) :: FileTreeState.t()
-  defp file_tree_state(state), do: EditorState.file_tree_state(state)
+  defp file_tree_state(state), do: state.workspace.file_tree
 
   @spec set_file_tree(state(), FileTreeState.t()) :: state()
   defp set_file_tree(state, file_tree) do
-    EditorState.set_file_tree(state, file_tree)
+    %{state | workspace: State.set_file_tree(state.workspace, file_tree)}
   end
 
   @spec update_file_tree(state(), (FileTreeState.t() -> FileTreeState.t())) :: state()
   defp update_file_tree(state, fun) when is_function(fun, 1) do
-    EditorState.update_file_tree(state, fun)
+    %{
+      state
+      | workspace:
+          State.set_file_tree(
+            state.workspace,
+            fun.(state.workspace.file_tree)
+          )
+    }
   end
 
   @spec project_browse(state()) :: state()
@@ -148,7 +201,11 @@ defmodule MingaEditor.Commands.FileTree do
     state = update_file_tree(state, &FileTreeState.unfocus/1)
     # Opening a file buffer always uses :editor scope (not restore_scope)
     # because the new buffer becomes the active window content.
-    state = EditorState.set_keymap_scope(state, :editor)
+    state = %{
+      state
+      | workspace: State.set_keymap_scope(state.workspace, :editor)
+    }
+
     open_file_from_tree(state, path, tree)
   end
 
@@ -451,7 +508,7 @@ defmodule MingaEditor.Commands.FileTree do
 
     state = clear_editing_and_refresh(state)
 
-    case Commands.start_buffer(full_path, EditorState.options_server(state)) do
+    case Commands.start_buffer(full_path, state.interaction.options_server) do
       {:ok, pid} ->
         BufferRegistry.do_file_tree_open(state, pid, full_path, file_tree_state(state).tree)
 
@@ -505,7 +562,11 @@ defmodule MingaEditor.Commands.FileTree do
          %{} = entry <- FileTree.selected_entry(tree) do
       child_count = if entry.dir?, do: count_children(entry.path), else: 0
       ms = DeleteConfirmState.new(entry.path, entry.name, entry.dir?, child_count)
-      EditorState.transition_mode(state, :delete_confirm, ms)
+
+      %{
+        state
+        | workspace: State.transition_mode(state.workspace, :delete_confirm, ms)
+      }
     else
       _ -> state
     end
@@ -659,16 +720,23 @@ defmodule MingaEditor.Commands.FileTree do
         state = update_file_tree(state, &FileTreeState.show/1)
 
         state
-        |> EditorState.set_keymap_scope(:file_tree)
+        |> then(fn state ->
+          %{
+            state
+            | workspace: State.set_keymap_scope(state.workspace, :file_tree)
+          }
+        end)
         |> SidebarWorkflow.select("file_tree")
         |> Layout.invalidate()
-        |> EditorState.invalidate_all_windows()
+        |> then(fn state ->
+          %{state | workspace: State.invalidate_all_windows(state.workspace)}
+        end)
     end
   end
 
   @spec active_editing_buffer(state()) :: pid() | nil
   defp active_editing_buffer(state) do
-    case EditorState.active_window_struct(state) do
+    case State.active_window_struct(state.workspace) do
       %{buffer: buf} when is_pid(buf) -> buf
       _ -> state.workspace.buffers.active
     end
@@ -689,8 +757,19 @@ defmodule MingaEditor.Commands.FileTree do
     scope = restore_scope(state)
 
     state
-    |> EditorState.update_file_tree(&FileTreeState.close/1)
-    |> EditorState.set_keymap_scope(scope)
+    |> then(fn state ->
+      %{
+        state
+        | workspace:
+            State.set_file_tree(
+              state.workspace,
+              (&FileTreeState.close/1).(state.workspace.file_tree)
+            )
+      }
+    end)
+    |> then(fn state ->
+      %{state | workspace: State.set_keymap_scope(state.workspace, scope)}
+    end)
     |> SidebarWorkflow.select(nil)
   end
 
@@ -909,7 +988,7 @@ defmodule MingaEditor.Commands.FileTree do
             new_tree =
               FileTreeRefresh.with_cached_git_status(
                 new_tree,
-                EditorState.events_registry(state)
+                state.extension_surfaces.events_registry
               )
 
             FileTreeFreshness.watch_expanded_dirs(new_tree)
@@ -935,7 +1014,12 @@ defmodule MingaEditor.Commands.FileTree do
 
       _panel ->
         state
-        |> EditorState.set_keymap_scope(:editor)
+        |> then(fn state ->
+          %{
+            state
+            | workspace: State.set_keymap_scope(state.workspace, :editor)
+          }
+        end)
         |> SidebarWorkflow.close_git_status()
     end
   end
@@ -947,9 +1031,9 @@ defmodule MingaEditor.Commands.FileTree do
   # to the new buffer (garbled text on first render).
   @spec open_file_from_tree(state(), String.t(), FileTree.t()) :: state()
   defp open_file_from_tree(state, path, tree) do
-    case EditorState.find_buffer_by_path(state, path) do
+    case MingaEditor.Handlers.BufferRegistry.find_buffer_by_path(state, path) do
       nil ->
-        case Commands.start_buffer(path, EditorState.options_server(state)) do
+        case Commands.start_buffer(path, state.interaction.options_server) do
           {:ok, pid} ->
             BufferRegistry.do_file_tree_open(state, pid, path, tree)
 
@@ -1001,7 +1085,9 @@ defmodule MingaEditor.Commands.FileTree do
 
     case resolve_tree_entries(tree) do
       {:ok, tree} ->
-        tree = FileTreeRefresh.with_cached_git_status(tree, EditorState.events_registry(state))
+        tree =
+          FileTreeRefresh.with_cached_git_status(tree, state.extension_surfaces.events_registry)
+
         tree = reveal_active(tree, state.workspace.buffers.active)
         FileTreeFreshness.watch_expanded_dirs(tree)
         install_open_tree(state, tree, nil)
@@ -1047,17 +1133,36 @@ defmodule MingaEditor.Commands.FileTree do
 
   @spec install_open_tree(state(), FileTree.t(), File.posix() | nil) :: state()
   defp install_open_tree(state, tree, error_reason) do
-    buf = BufferSync.start_buffer(tree, EditorState.options_server(state))
+    buf = BufferSync.start_buffer(tree, state.interaction.options_server)
 
     state
-    |> EditorState.update_file_tree(fn file_tree ->
-      file_tree = FileTreeState.open(file_tree, tree, buf)
-      if error_reason, do: FileTreeState.refresh_failed(file_tree, error_reason), else: file_tree
+    |> then(fn state ->
+      %{
+        state
+        | workspace:
+            State.set_file_tree(
+              state.workspace,
+              (fn file_tree ->
+                 file_tree = FileTreeState.open(file_tree, tree, buf)
+
+                 if error_reason,
+                   do: FileTreeState.refresh_failed(file_tree, error_reason),
+                   else: file_tree
+               end).(state.workspace.file_tree)
+            )
+      }
     end)
-    |> EditorState.set_keymap_scope(:file_tree)
+    |> then(fn state ->
+      %{
+        state
+        | workspace: State.set_keymap_scope(state.workspace, :file_tree)
+      }
+    end)
     |> SidebarWorkflow.select("file_tree")
     |> Layout.invalidate()
-    |> EditorState.invalidate_all_windows()
+    |> then(fn state ->
+      %{state | workspace: State.invalidate_all_windows(state.workspace)}
+    end)
   end
 
   @spec install_tree_error(state(), FileTree.t(), File.posix()) :: state()
@@ -1492,7 +1597,7 @@ defmodule MingaEditor.Commands.FileTree do
 
   defp retarget_moved_buffer(pid, state, errors, path, moved_path) do
     case safe_retarget_path(pid, moved_path) do
-      :ok -> {EditorState.rebind_buffer_file_identity(state, pid), errors}
+      :ok -> {EditorState.rebind_buffer_file_identity(state, pid, moved_path), errors}
       {:error, reason} -> {state, [{path, reason} | errors]}
     end
   end

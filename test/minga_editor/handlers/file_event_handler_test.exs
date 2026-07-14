@@ -319,8 +319,28 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
         TabBar.new(tab, root)
         |> TabBar.update_workspace(0, fn ws -> WorkspaceModel.set_active_file(ws, old_ref) end)
 
-      state = %EditorState{port_manager: self(), workspace: workspace}
-      state = EditorState.set_tab_bar(state, tab_bar)
+      state = %EditorState{
+        frontend: %MingaEditor.State.Frontend{port_manager: self()},
+        workspace: workspace
+      }
+
+      state =
+        then(state, fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.set_tab_bar(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              tab_bar
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
 
       :ok = BufferProcess.save_as(buffer, path)
 
@@ -398,7 +418,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
         end)
 
       state = %EditorState{
-        port_manager: self(),
+        frontend: %MingaEditor.State.Frontend{port_manager: self()},
         workspace:
           %SessionState{
             viewport: Viewport.new(24, 80),
@@ -407,7 +427,23 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
           |> SessionState.set_file_tree(%FileTreeState{project_root: root})
       }
 
-      state = EditorState.set_tab_bar(state, tab_bar)
+      state =
+        then(state, fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.set_tab_bar(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              tab_bar
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
 
       :ok = BufferProcess.save_as(target_buffer, path)
 
@@ -429,7 +465,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
 
       event =
         {:minga_event, :buffer_saved,
-         %Minga.Events.BufferEvent{buffer: self(), path: "/tmp/test.ex"}}
+         %Minga.Events.BufferEvent{buffer: state.workspace.buffers.active, path: "/tmp/test.ex"}}
 
       {_state, effects} = FileEventHandler.handle(state, event)
 
@@ -439,11 +475,11 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
 
     test "returns save_session_deferred in non-headless mode" do
       state = base_state()
-      state = %{state | backend: :tui}
+      state = %{state | frontend: %{state.frontend | backend: :tui}}
 
       event =
         {:minga_event, :buffer_saved,
-         %Minga.Events.BufferEvent{buffer: self(), path: "/tmp/test.ex"}}
+         %Minga.Events.BufferEvent{buffer: state.workspace.buffers.active, path: "/tmp/test.ex"}}
 
       {_state, effects} = FileEventHandler.handle(state, event)
 
@@ -455,7 +491,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
 
       event =
         {:minga_event, :buffer_saved,
-         %Minga.Events.BufferEvent{buffer: self(), path: "/tmp/test.ex"}}
+         %Minga.Events.BufferEvent{buffer: state.workspace.buffers.active, path: "/tmp/test.ex"}}
 
       {_state, effects} = FileEventHandler.handle(state, event)
 
@@ -491,11 +527,28 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
     tree = FileTree.new(root)
     file_tree = FileTreeState.open(%FileTreeState{}, tree, nil)
 
-    EditorState.set_file_tree(base_state(), file_tree)
+    then(base_state(), fn state ->
+      %{
+        state
+        | workspace:
+            then(state.workspace, fn workspace ->
+              MingaEditor.Session.State.set_file_tree(workspace, file_tree)
+            end)
+      }
+    end)
   end
 
   defp put_active_buffer(state, buffer) do
     buffers = %Buffers{active: buffer, list: [buffer], active_index: 0}
-    EditorState.set_buffers(state, buffers)
+
+    then(state, fn state ->
+      %{
+        state
+        | workspace:
+            then(state.workspace, fn workspace ->
+              MingaEditor.Session.State.set_buffers(workspace, buffers)
+            end)
+      }
+    end)
   end
 end

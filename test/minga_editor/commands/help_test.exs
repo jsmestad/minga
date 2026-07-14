@@ -27,9 +27,8 @@ defmodule MingaEditor.Commands.HelpTest do
     {:ok, options} = Options.start_link(name: nil)
 
     %EditorState{
-      port_manager: nil,
-      keymap_server: keymap,
-      options_server: options,
+      frontend: %MingaEditor.State.Frontend{port_manager: nil},
+      interaction: %MingaEditor.State.Interaction{keymap_server: keymap, options_server: options},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: buf, list: [buf]}
@@ -46,7 +45,12 @@ defmodule MingaEditor.Commands.HelpTest do
         )
 
       assert {:ok, false} =
-               Options.set_for_filetype(state.options_server, :text, :autopair_block, false)
+               Options.set_for_filetype(
+                 state.interaction.options_server,
+                 :text,
+                 :autopair_block,
+                 false
+               )
 
       result = Help.execute(state, {:describe_key_result, "j", :move_down, "Move cursor down"})
       help = result.workspace.buffers.help
@@ -83,7 +87,7 @@ defmodule MingaEditor.Commands.HelpTest do
       BufferProcess.set_filetype(state.workspace.buffers.active, :elixir)
 
       ActiveKeymap.bind(
-        state.keymap_server,
+        state.interaction.keymap_server,
         :normal,
         "SPC x y",
         :custom_command,
@@ -133,14 +137,21 @@ defmodule MingaEditor.Commands.HelpTest do
       assert default =~ "Set by: default"
       assert default =~ "Description:"
 
-      Options.set(state.options_server, :agent_model, "test-model")
+      Options.set(state.interaction.options_server, :agent_model, "test-model")
       configured = Help.describe_option(state, :agent_model) |> help_content()
       assert configured =~ "Current value: \"test-model\""
       assert configured =~ "Set by: default → config.exs"
 
       filetype_state = build_state()
       BufferProcess.set_filetype(filetype_state.workspace.buffers.active, :go)
-      Options.set_for_filetype(filetype_state.options_server, :go, :agent_model, "go-model")
+
+      Options.set_for_filetype(
+        filetype_state.interaction.options_server,
+        :go,
+        :agent_model,
+        "go-model"
+      )
+
       filetype = Help.describe_option(filetype_state, :agent_model) |> help_content()
       assert filetype =~ "Current value: \"go-model\""
       assert filetype =~ "Set by: default → filetype :go"
@@ -151,7 +162,7 @@ defmodule MingaEditor.Commands.HelpTest do
       assert local =~ "Set by: default → buffer-local"
 
       Options.register_extension_schema(
-        state.options_server,
+        state.interaction.options_server,
         :minga_org,
         [{:conceal, :boolean, true, "Hide markup syntax."}],
         conceal: false
@@ -166,7 +177,7 @@ defmodule MingaEditor.Commands.HelpTest do
 
     test "option picker uses editor options even when the active buffer is dead" do
       state = build_state()
-      Options.set(state.options_server, :agent_model, "test-model")
+      Options.set(state.interaction.options_server, :agent_model, "test-model")
 
       item = option_item(state, :agent_model)
       assert item.description =~ "\"test-model\""
@@ -380,6 +391,7 @@ defmodule MingaEditor.Commands.HelpTest do
 
   defp history_state(entries) do
     history = Enum.reduce(entries, KeystrokeHistory.new(), &KeystrokeHistory.record(&2, &1))
-    %{build_state() | keystroke_history: history}
+    state = build_state()
+    %{state | interaction: %{state.interaction | keystroke_history: history}}
   end
 end

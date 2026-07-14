@@ -7,6 +7,7 @@ defmodule MingaEditor.LspActions.ReferencesTest do
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
+  alias MingaEditor.State.Feedback
   alias MingaEditor.State.OperationFeedback
   alias MingaEditor.UI.Picker.LocationSource
   alias MingaEditor.Viewport
@@ -22,7 +23,7 @@ defmodule MingaEditor.LspActions.ReferencesTest do
     for {response, status, message} <- cases do
       {state, operation} = start_operation()
       state = LspActions.handle_references_response(state, response, operation.id)
-      selected = OperationFeedback.selected(state.operation_feedback)
+      selected = OperationFeedback.selected(state.feedback.operation_feedback)
 
       assert selected.id == operation.id
       assert selected.status == status
@@ -42,8 +43,11 @@ defmodule MingaEditor.LspActions.ReferencesTest do
     locations = [location(path, 0), location(path, 1)]
     state = LspActions.handle_references_response(state, {:ok, locations}, operation.id)
 
-    assert OperationFeedback.selected(state.operation_feedback).status == :success
-    assert OperationFeedback.selected(state.operation_feedback).message == "Found 2 references"
+    assert OperationFeedback.selected(state.feedback.operation_feedback).status == :success
+
+    assert OperationFeedback.selected(state.feedback.operation_feedback).message ==
+             "Found 2 references"
+
     assert state.shell_runtime.state.notice.message == nil
 
     assert {:picker, %{picker_ui: %{source: LocationSource, picker: picker}}} =
@@ -60,14 +64,19 @@ defmodule MingaEditor.LspActions.ReferencesTest do
   test "a response for a replaced identity cannot mutate feedback or perform picker effects" do
     {state, old} = start_operation()
 
-    {state, current} =
-      OperationFeedback.start_in(
-        state,
+    {current_feedback, current} =
+      OperationFeedback.start(
+        state.feedback.operation_feedback,
         :lsp_references,
         "lsp:references:file.ex",
         "Finding current references",
         cancelable?: false
       )
+
+    state = %{
+      state
+      | feedback: Feedback.accept_operation_feedback(state.feedback, current_feedback)
+    }
 
     path =
       Path.join(System.tmp_dir!(), "stale-references-#{System.unique_integer([:positive])}.ex")
@@ -83,8 +92,8 @@ defmodule MingaEditor.LspActions.ReferencesTest do
       )
 
     assert result == state
-    assert OperationFeedback.selected(result.operation_feedback).id == current.id
-    assert OperationFeedback.selected(result.operation_feedback).status == :pending
+    assert OperationFeedback.selected(result.feedback.operation_feedback).id == current.id
+    assert OperationFeedback.selected(result.feedback.operation_feedback).status == :pending
   end
 
   @spec location(String.t(), non_neg_integer()) :: map()
@@ -103,15 +112,23 @@ defmodule MingaEditor.LspActions.ReferencesTest do
   defp start_operation(project_root \\ nil) do
     workspace = %SessionState{viewport: Viewport.new(40, 120)}
     workspace = with_project_root(workspace, project_root)
-    state = %EditorState{port_manager: nil, workspace: workspace}
 
-    OperationFeedback.start_in(
-      state,
-      :lsp_references,
-      "lsp:references:file.ex",
-      "Finding references...",
-      cancelable?: false
-    )
+    state = %EditorState{
+      frontend: %MingaEditor.State.Frontend{port_manager: nil},
+      workspace: workspace
+    }
+
+    {operation_feedback, operation} =
+      OperationFeedback.start(
+        state.feedback.operation_feedback,
+        :lsp_references,
+        "lsp:references:file.ex",
+        "Finding references...",
+        cancelable?: false
+      )
+
+    {%{state | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)},
+     operation}
   end
 
   @spec with_project_root(SessionState.t(), String.t() | nil) :: SessionState.t()

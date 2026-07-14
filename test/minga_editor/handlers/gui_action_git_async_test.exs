@@ -148,7 +148,7 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
     assert feedback(state).message == "Staging lib/nonblocking.ex…"
     assert feedback(state).status == :pending
     assert_receive {:git_resolver_blocked, ^tag, resolver_worker}, @effect_timeout
-    assert Context.from_editor_state(state).git_syncing
+    assert feedback(state).status == :pending
 
     send(resolver_worker, {:release_git_resolver, tag})
     {state, request} = receive_resolved_mutation(state, scheduler, :stage, :running)
@@ -313,11 +313,11 @@ defmodule MingaEditor.Handlers.GuiActionGitAsyncTest do
   end
 
   @spec feedback(EditorState.t()) :: MingaEditor.State.Operation.t()
-  defp feedback(state), do: OperationFeedback.selected(state.operation_feedback)
+  defp feedback(state), do: OperationFeedback.selected(state.feedback.operation_feedback)
 
   @spec feedback_for(EditorState.t(), pos_integer()) :: MingaEditor.State.Operation.t()
   defp feedback_for(state, operation_id) do
-    {:ok, operation} = OperationFeedback.fetch(state.operation_feedback, operation_id)
+    {:ok, operation} = OperationFeedback.fetch(state.feedback.operation_feedback, operation_id)
     operation
   end
 

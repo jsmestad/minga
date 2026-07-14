@@ -7,6 +7,7 @@ defmodule MingaEditor.LspActions.RenameTest do
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.Feedback
   alias MingaEditor.State.OperationFeedback
   alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
@@ -15,9 +16,9 @@ defmodule MingaEditor.LspActions.RenameTest do
 
   defp stub_state do
     %EditorState{
-      port_manager: nil,
+      frontend: %MingaEditor.State.Frontend{port_manager: nil},
       workspace: %SessionState{viewport: Viewport.new(40, 120)},
-      theme: MingaEditor.UI.Theme.get!(:doom_one)
+      appearance: %MingaEditor.State.Appearance{theme: MingaEditor.UI.Theme.get!(:doom_one)}
     }
   end
 
@@ -66,14 +67,19 @@ defmodule MingaEditor.LspActions.RenameTest do
 
       state = file_state(path)
 
-      {state, operation} =
-        OperationFeedback.start_in(
-          state,
+      {operation_feedback, operation} =
+        OperationFeedback.start(
+          state.feedback.operation_feedback,
           :lsp_rename,
           "lsp:rename:" <> path,
           "Renaming...",
           cancelable?: false
         )
+
+      state = %{
+        state
+        | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)
+      }
 
       edit = %{
         "changes" => %{
@@ -92,9 +98,9 @@ defmodule MingaEditor.LspActions.RenameTest do
       state = LspActions.handle_rename_response(state, {:ok, edit}, operation.id)
 
       assert Minga.Buffer.content(state.workspace.buffers.active) == "new_name"
-      assert OperationFeedback.selected(state.operation_feedback).status == :success
+      assert OperationFeedback.selected(state.feedback.operation_feedback).status == :success
 
-      assert OperationFeedback.selected(state.operation_feedback).message ==
+      assert OperationFeedback.selected(state.feedback.operation_feedback).message ==
                "Rename: applied 1 edits across 1 files"
     end
 
@@ -109,7 +115,7 @@ defmodule MingaEditor.LspActions.RenameTest do
       for {response, status, message} <- cases do
         {state, operation} = start_operation()
         state = LspActions.handle_rename_response(state, response, operation.id)
-        selected = OperationFeedback.selected(state.operation_feedback)
+        selected = OperationFeedback.selected(state.feedback.operation_feedback)
 
         assert selected.id == operation.id
         assert selected.status == status
@@ -124,30 +130,40 @@ defmodule MingaEditor.LspActions.RenameTest do
       on_exit(fn -> File.rm(path) end)
       state = file_state(path)
 
-      {state, old} =
-        OperationFeedback.start_in(
-          state,
+      {old_feedback, old} =
+        OperationFeedback.start(
+          state.feedback.operation_feedback,
           :lsp_rename,
           "lsp:rename:" <> path,
           "Renaming...",
           cancelable?: false
         )
 
-      {state, current} =
-        OperationFeedback.start_in(
-          state,
+      state = %{
+        state
+        | feedback: Feedback.accept_operation_feedback(state.feedback, old_feedback)
+      }
+
+      {current_feedback, current} =
+        OperationFeedback.start(
+          state.feedback.operation_feedback,
           :lsp_rename,
           "lsp:rename:" <> path,
           "Renaming again...",
           cancelable?: false
         )
 
+      state = %{
+        state
+        | feedback: Feedback.accept_operation_feedback(state.feedback, current_feedback)
+      }
+
       result = LspActions.handle_rename_response(state, {:ok, rename_edit(path)}, old.id)
 
       assert result == state
       assert Minga.Buffer.content(result.workspace.buffers.active) == "old_name\n"
-      assert OperationFeedback.selected(result.operation_feedback).id == current.id
-      assert OperationFeedback.selected(result.operation_feedback).status == :pending
+      assert OperationFeedback.selected(result.feedback.operation_feedback).id == current.id
+      assert OperationFeedback.selected(result.feedback.operation_feedback).status == :pending
     end
 
     test "partial workspace edit application reports an error with applied and requested counts" do
@@ -161,21 +177,26 @@ defmodule MingaEditor.LspActions.RenameTest do
       on_exit(fn -> File.rm(path) end)
       state = file_state(path)
 
-      {state, operation} =
-        OperationFeedback.start_in(
-          state,
+      {operation_feedback, operation} =
+        OperationFeedback.start(
+          state.feedback.operation_feedback,
           :lsp_rename,
           "lsp:rename:" <> path,
           "Renaming...",
           cancelable?: false
         )
 
+      state = %{
+        state
+        | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)
+      }
+
       edit =
         rename_edit(path)
         |> put_in(["changes", "file://#{missing}"], rename_edit_for_range())
 
       result = LspActions.handle_rename_response(state, {:ok, edit}, operation.id)
-      selected = OperationFeedback.selected(result.operation_feedback)
+      selected = OperationFeedback.selected(result.feedback.operation_feedback)
 
       assert Minga.Buffer.content(result.workspace.buffers.active) == "new_name"
       assert selected.status == :error
@@ -226,17 +247,26 @@ defmodule MingaEditor.LspActions.RenameTest do
       }
     }
 
-    %EditorState{port_manager: self(), workspace: workspace}
+    %EditorState{
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
+      workspace: workspace
+    }
   end
 
   @spec start_operation() :: {EditorState.t(), MingaEditor.State.Operation.t()}
   defp start_operation do
-    OperationFeedback.start_in(
-      stub_state(),
-      :lsp_rename,
-      "lsp:rename:file.ex",
-      "Renaming...",
-      cancelable?: false
-    )
+    state = stub_state()
+
+    {operation_feedback, operation} =
+      OperationFeedback.start(
+        state.feedback.operation_feedback,
+        :lsp_rename,
+        "lsp:rename:file.ex",
+        "Renaming...",
+        cancelable?: false
+      )
+
+    {%{state | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)},
+     operation}
   end
 end

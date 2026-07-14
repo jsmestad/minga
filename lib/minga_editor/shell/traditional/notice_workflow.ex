@@ -23,7 +23,7 @@ defmodule MingaEditor.Shell.Traditional.NoticeWorkflow do
       when is_binary(message) do
     state = cancel_current_timer(state)
 
-    case OperationFeedback.selected_from(state) do
+    case OperationFeedback.selected(state.feedback.operation_feedback) do
       %Operation{status: status} when status in [:pending, :queued, :running] ->
         log_hidden(state, message)
 
@@ -46,7 +46,7 @@ defmodule MingaEditor.Shell.Traditional.NoticeWorkflow do
   def acknowledge(%{shell_runtime: %{state: %MingaEditor.Shell.Traditional.State{}}} = state) do
     state
     |> cancel_current_timer()
-    |> EditorState.update_shell_state(&ShellState.acknowledge_notice/1)
+    |> update_shell_state(&ShellState.acknowledge_notice/1)
   end
 
   def acknowledge(state), do: state
@@ -56,7 +56,7 @@ defmodule MingaEditor.Shell.Traditional.NoticeWorkflow do
   def dismiss(%{shell_runtime: %{state: %MingaEditor.Shell.Traditional.State{}}} = state) do
     state
     |> cancel_current_timer()
-    |> EditorState.update_shell_state(&ShellState.dismiss_notice/1)
+    |> update_shell_state(&ShellState.dismiss_notice/1)
   end
 
   def dismiss(state), do: state
@@ -64,7 +64,7 @@ defmodule MingaEditor.Shell.Traditional.NoticeWorkflow do
   @doc "Handles one identity-tagged timeout; stale delivery is a no-op."
   @spec timeout(EditorState.t() | map(), Notice.id()) :: EditorState.t() | map()
   def timeout(%{shell_runtime: %{state: %MingaEditor.Shell.Traditional.State{}}} = state, id) do
-    EditorState.update_shell_state(state, &ShellState.timeout_notice(&1, id))
+    update_shell_state(state, &ShellState.timeout_notice(&1, id))
   end
 
   def timeout(state, _id), do: state
@@ -82,25 +82,25 @@ defmodule MingaEditor.Shell.Traditional.NoticeWorkflow do
 
   @spec publish_visible(EditorState.t() | map(), String.t()) :: EditorState.t() | map()
   defp publish_visible(state, message) do
-    state = EditorState.update_shell_state(state, &ShellState.publish_notice(&1, message))
+    state = update_shell_state(state, &ShellState.publish_notice(&1, message))
     %Notice{id: id} = state.shell_runtime.state.notice
 
-    if Map.get(state, :backend) == :headless do
+    if match?(%{frontend: %{backend: :headless}}, state) do
       state
     else
       timer = Process.send_after(self(), {:notice_timeout, id}, @timeout_ms)
-      EditorState.update_shell_state(state, &ShellState.record_notice_timer(&1, id, timer))
+      update_shell_state(state, &ShellState.record_notice_timer(&1, id, timer))
     end
   end
 
   @spec log_hidden(EditorState.t() | map(), String.t()) :: EditorState.t() | map()
   defp log_hidden(state, message) do
-    state = EditorState.update_shell_state(state, &ShellState.dismiss_notice/1)
+    state = update_shell_state(state, &ShellState.dismiss_notice/1)
 
     Events.broadcast(
       :log_message,
       %Events.LogMessageEvent{text: message, level: :info},
-      state.events_registry
+      state.extension_surfaces.events_registry
     )
 
     state
@@ -124,5 +124,18 @@ defmodule MingaEditor.Shell.Traditional.NoticeWorkflow do
   defp cancel_timer(timer) do
     Process.cancel_timer(timer)
     :ok
+  end
+
+  @spec update_shell_state(EditorState.t(), (MingaEditor.Shell.Traditional.State.t() ->
+                                               MingaEditor.Shell.Traditional.State.t())) ::
+          EditorState.t()
+  defp update_shell_state(%EditorState{} = state, transition) when is_function(transition, 1) do
+    shell_state = state.shell_runtime |> MingaEditor.Shell.Runtime.state() |> transition.()
+
+    %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
   end
 end

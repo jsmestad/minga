@@ -104,7 +104,7 @@ defmodule MingaEditor.Commands.Help do
   @spec describe_extension_option(state(), atom(), atom()) :: state()
   def describe_extension_option(state, extension, name)
       when is_atom(extension) and is_atom(name) do
-    options_server = EditorState.options_server(state)
+    options_server = state.interaction.options_server
 
     case Options.describe_extension_option(options_server, extension, name) do
       nil -> show_in_help_buffer(state, "Unknown option: #{extension}.#{name}\n")
@@ -156,7 +156,7 @@ defmodule MingaEditor.Commands.Help do
         description: description
       }) do
     filetype = current_filetype(state)
-    options_server = EditorState.options_server(state)
+    options_server = state.interaction.options_server
     current = Options.get_extension_option_for_filetype(options_server, extension, name, filetype)
     provenance = Options.extension_provenance(options_server, extension, name, filetype)
 
@@ -217,7 +217,7 @@ defmodule MingaEditor.Commands.Help do
           binding_entry()
         ]
   defp active_leader_entries(state, default_map) do
-    trie = Keymap.leader_trie(EditorState.keymap_server(state))
+    trie = Keymap.leader_trie(state.interaction.keymap_server)
 
     trie
     |> flatten_trie([])
@@ -243,7 +243,7 @@ defmodule MingaEditor.Commands.Help do
 
   defp active_filetype_entries(state, filetype) do
     default_map = default_filetype_map(filetype)
-    trie = Keymap.filetype_trie(EditorState.keymap_server(state), filetype)
+    trie = Keymap.filetype_trie(state.interaction.keymap_server, filetype)
 
     trie
     |> flatten_trie([])
@@ -272,7 +272,7 @@ defmodule MingaEditor.Commands.Help do
 
   @spec normal_bindings_for_state(state()) :: %{Bindings.key() => {atom(), String.t()}}
   defp normal_bindings_for_state(state) do
-    Keymap.normal_bindings(EditorState.keymap_server(state))
+    Keymap.normal_bindings(state.interaction.keymap_server)
   catch
     :exit, _ -> Defaults.normal_bindings()
   end
@@ -579,7 +579,7 @@ defmodule MingaEditor.Commands.Help do
   @spec extension_option_name_from_string(state(), String.t()) ::
           {:extension, atom(), atom()} | nil
   defp extension_option_name_from_string(state, normalized) do
-    options_server = EditorState.options_server(state)
+    options_server = state.interaction.options_server
 
     Options.extension_option_specs(options_server)
     |> Enum.find_value(fn %{extension: extension, name: name} ->
@@ -589,26 +589,25 @@ defmodule MingaEditor.Commands.Help do
 
   @spec current_option_value(state(), Options.option_name(), atom() | nil, pid() | nil) :: term()
   defp current_option_value(state, name, filetype, buffer) when is_pid(buffer) do
-    options_server = EditorState.options_server(state)
+    options_server = state.interaction.options_server
 
     case Map.fetch(Buffer.local_options(buffer), name) do
       {:ok, value} -> value
       :error -> Options.get_for_filetype(options_server, name, filetype)
     end
   catch
-    :exit, _ -> Options.get_for_filetype(EditorState.options_server(state), name, filetype)
+    :exit, _ -> Options.get_for_filetype(state.interaction.options_server, name, filetype)
   end
 
   defp current_option_value(state, name, filetype, _buffer) do
-    Options.get_for_filetype(EditorState.options_server(state), name, filetype)
+    Options.get_for_filetype(state.interaction.options_server, name, filetype)
   end
 
   @spec option_provenance(state(), Options.option_name(), atom() | nil, pid() | nil) :: [
           String.t()
         ]
   defp option_provenance(state, name, filetype, buffer) do
-    state
-    |> EditorState.options_server()
+    state.interaction.options_server
     |> Options.provenance(name, filetype)
     |> maybe_append_buffer_local(buffer_local_override?(buffer, name))
   end
@@ -648,7 +647,7 @@ defmodule MingaEditor.Commands.Help do
 
   @spec lossage_content(state()) :: String.t()
   defp lossage_content(state) do
-    entries = KeystrokeHistory.entries(state.keystroke_history)
+    entries = KeystrokeHistory.entries(state.interaction.keystroke_history)
 
     case entries do
       [] ->
@@ -896,7 +895,14 @@ defmodule MingaEditor.Commands.Help do
     {:ok, pid} = start_special_buffer(state, "*Help*")
 
     state =
-      EditorState.update_buffers(state, &Buffers.set_help(&1, pid))
+      %{
+        state
+        | workspace:
+            MingaEditor.Session.State.set_buffers(
+              state.workspace,
+              (&Buffers.set_help(&1, pid)).(state.workspace.buffers)
+            )
+      }
 
     {state, pid}
   end
@@ -917,7 +923,7 @@ defmodule MingaEditor.Commands.Help do
        read_only: true,
        unlisted: true,
        persistent: true,
-       options_server: EditorState.options_server(state)}
+       options_server: state.interaction.options_server}
     )
   end
 
@@ -950,7 +956,7 @@ defmodule MingaEditor.Commands.Help do
   end
 
   @spec setup_highlight_or_defer(state()) :: state()
-  defp setup_highlight_or_defer(%{backend: :headless} = state) do
+  defp setup_highlight_or_defer(%{frontend: %{backend: :headless}} = state) do
     HighlightSync.setup_for_buffer(state)
   end
 

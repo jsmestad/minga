@@ -26,7 +26,7 @@ defmodule MingaEditor.FeatureStateTest do
     assert FeatureState.get(state, @source, @feature) == %{visible?: true, row: 1}
     assert FeatureState.member?(state, @source, @feature)
 
-    state = FeatureState.update(state, @source, @feature, %{}, &Map.put(&1, :row, 2))
+    state = FeatureState.put(state, @source, @feature, %{visible?: true, row: 2})
     assert FeatureState.get(state, @source, @feature) == %{visible?: true, row: 2}
 
     state = FeatureState.drop(state, @source, @feature)
@@ -108,15 +108,18 @@ defmodule MingaEditor.FeatureStateTest do
     shell_state = %ShellState{tab_bar: tab_bar}
 
     state = %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: live_workspace,
       shell_runtime: Runtime.new(Runtime.default_entry(), shell_state)
     }
 
     cleaned = EditorState.drop_feature_state_source(state, @source)
 
-    assert EditorState.get_feature_state(cleaned, @source, @feature) == nil
-    assert EditorState.get_feature_state(cleaned, @other_source, @feature) == :live_other
+    assert MingaEditor.Session.State.get_feature_state(cleaned.workspace, @source, @feature) ==
+             nil
+
+    assert MingaEditor.Session.State.get_feature_state(cleaned.workspace, @other_source, @feature) ==
+             :live_other
 
     cleaned_tab = TabBar.get(EditorState.tab_bar(cleaned), 1)
     restored = SessionState.restore_tab_context(workspace(), cleaned_tab.context)
@@ -143,17 +146,36 @@ defmodule MingaEditor.FeatureStateTest do
     tab = Tab.new_file(1, "one") |> Tab.set_context(tab_context)
 
     state = %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: live_workspace,
       shell_runtime: Runtime.new(Runtime.default_entry(), %ShellState{tab_bar: TabBar.new(tab)})
     }
 
     reloaded =
       BufferManagement.reload_config(state, fn cleaned_state ->
-        assert EditorState.get_feature_state(cleaned_state, :config, @feature) == nil
-        assert EditorState.get_feature_state(cleaned_state, @source, @feature) == nil
-        assert EditorState.get_feature_state(cleaned_state, @other_source, @feature) == nil
-        assert EditorState.get_feature_state(cleaned_state, :builtin, @feature) == :builtin
+        assert MingaEditor.Session.State.get_feature_state(
+                 cleaned_state.workspace,
+                 :config,
+                 @feature
+               ) == nil
+
+        assert MingaEditor.Session.State.get_feature_state(
+                 cleaned_state.workspace,
+                 @source,
+                 @feature
+               ) == nil
+
+        assert MingaEditor.Session.State.get_feature_state(
+                 cleaned_state.workspace,
+                 @other_source,
+                 @feature
+               ) == nil
+
+        assert MingaEditor.Session.State.get_feature_state(
+                 cleaned_state.workspace,
+                 :builtin,
+                 @feature
+               ) == :builtin
 
         cleaned_tab = TabBar.get(cleaned_state.shell_runtime.state.tab_bar, 1)
 
@@ -164,15 +186,54 @@ defmodule MingaEditor.FeatureStateTest do
         )
 
         cleaned_state =
-          EditorState.put_feature_state(cleaned_state, :config, @feature, :new_config)
+          then(cleaned_state, fn state ->
+            %{
+              state
+              | workspace:
+                  then(
+                    state.workspace,
+                    &MingaEditor.Session.State.put_feature_state(
+                      &1,
+                      :config,
+                      @feature,
+                      :new_config
+                    )
+                  )
+            }
+          end)
 
-        {:ok, EditorState.put_feature_state(cleaned_state, @source, @feature, :new_extension)}
+        {:ok,
+         then(cleaned_state, fn state ->
+           %{
+             state
+             | workspace:
+                 then(
+                   state.workspace,
+                   &MingaEditor.Session.State.put_feature_state(
+                     &1,
+                     @source,
+                     @feature,
+                     :new_extension
+                   )
+                 )
+           }
+         end)}
       end)
 
-    assert EditorState.get_feature_state(reloaded, :config, @feature) == :new_config
-    assert EditorState.get_feature_state(reloaded, @source, @feature) == :new_extension
-    assert EditorState.get_feature_state(reloaded, @other_source, @feature) == nil
-    assert EditorState.get_feature_state(reloaded, :builtin, @feature) == :builtin
+    assert MingaEditor.Session.State.get_feature_state(reloaded.workspace, :config, @feature) ==
+             :new_config
+
+    assert MingaEditor.Session.State.get_feature_state(reloaded.workspace, @source, @feature) ==
+             :new_extension
+
+    assert MingaEditor.Session.State.get_feature_state(
+             reloaded.workspace,
+             @other_source,
+             @feature
+           ) == nil
+
+    assert MingaEditor.Session.State.get_feature_state(reloaded.workspace, :builtin, @feature) ==
+             :builtin
 
     reloaded_tab = TabBar.get(reloaded.shell_runtime.state.tab_bar, 1)
 
@@ -189,14 +250,15 @@ defmodule MingaEditor.FeatureStateTest do
     shell_state = %ShellState{tab_bar: tab_bar}
 
     state = %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: live_workspace,
       shell_runtime: Runtime.new(Runtime.default_entry(), shell_state)
     }
 
     restored = EditorState.restore_tab_context(state, TabContext.empty())
 
-    assert EditorState.get_feature_state(restored, @source, @feature) == nil
+    assert MingaEditor.Session.State.get_feature_state(restored.workspace, @source, @feature) ==
+             nil
   end
 
   test "agent tab defaults do not inherit outgoing feature state" do
@@ -205,7 +267,7 @@ defmodule MingaEditor.FeatureStateTest do
     shell_state = %ShellState{tab_bar: tab_bar}
 
     state = %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: live_workspace,
       shell_runtime: Runtime.new(Runtime.default_entry(), shell_state)
     }

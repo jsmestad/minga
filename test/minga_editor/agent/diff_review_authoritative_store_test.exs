@@ -92,7 +92,7 @@ defmodule MingaEditor.Agent.DiffReviewAuthoritativeStoreTest do
 
   defp state_with_diff_review(root, project_view, %DiffReview{} = review) do
     preview = Preview.set_diff(Preview.new(), review)
-    agent_ui = UIState.update_preview(UIState.new(), fn _ -> preview end)
+    agent_ui = UIState.replace_preview(UIState.new(), preview)
 
     agent_tab = Tab.set_group(Tab.new_agent(1, "Agent"), 1)
 
@@ -108,7 +108,7 @@ defmodule MingaEditor.Agent.DiffReviewAuthoritativeStoreTest do
     }
 
     %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %SessionState{agent_ui: agent_ui, viewport: Viewport.new(24, 80)},
       shell_runtime: Runtime.new(Runtime.default_entry(), %TraditionalState{tab_bar: tab_bar})
     }

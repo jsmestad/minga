@@ -5,7 +5,6 @@ defmodule MingaEditor.SystemWakeTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.LSP.SyncServer
   alias MingaEditor.GenerationSupervisor
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
@@ -49,7 +48,20 @@ defmodule MingaEditor.SystemWakeTest do
         |> Tab.set_context(%{buffers: %Buffers{active: inactive_buffer, list: [inactive_buffer]}})
 
       tab_bar = %TabBar{tabs: [active_tab, inactive_tab], active_id: 1, next_id: 3}
-      EditorState.set_tab_bar(state, tab_bar)
+
+      then(state, fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            tab_bar
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
     end)
 
     send(editor, {:minga_input, {:gui_action, :system_did_wake}})

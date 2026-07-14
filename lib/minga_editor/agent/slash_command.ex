@@ -22,8 +22,8 @@ defmodule MingaEditor.Agent.SlashCommand do
   alias Minga.Config
   alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.PickerUI
-  alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.State.AgentAccess
+  alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.Workflow, as: TraditionalWorkflow
 
   @typedoc "Editor state (same as EditorState.t())."
   @type state :: map()
@@ -248,7 +248,7 @@ defmodule MingaEditor.Agent.SlashCommand do
     current_model = current_model(state)
 
     session_models =
-      case AgentAccess.session(state) do
+      case Runtime.active_session(state.shell_runtime) do
         session when is_pid(session) -> safe_session_models(session)
         _ -> []
       end
@@ -294,7 +294,7 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   @spec current_model(state()) :: String.t()
   defp current_model(state) do
-    AgentAccess.panel(state).model_name
+    state.workspace.agent_ui.panel.model_name
   end
 
   @spec provider_label(String.t()) :: String.t()
@@ -472,11 +472,23 @@ defmodule MingaEditor.Agent.SlashCommand do
   defp do_thinking(state, level) do
     level = String.trim(level)
 
-    if AgentAccess.session(state) do
-      case Session.set_thinking_level(AgentAccess.session(state), level) do
+    if Runtime.active_session(state.shell_runtime) do
+      case Session.set_thinking_level(
+             Runtime.active_session(state.shell_runtime),
+             level
+           ) do
         :ok ->
-          state = AgentAccess.update_agent_ui(state, &UIState.set_thinking_level(&1, level))
-          Session.add_system_message(AgentAccess.session(state), "Thinking: #{level}")
+          state =
+            TraditionalWorkflow.install_agent_ui(
+              state,
+              (&UIState.set_thinking_level(&1, level)).(state.workspace.agent_ui)
+            )
+
+          Session.add_system_message(
+            Runtime.active_session(state.shell_runtime),
+            "Thinking: #{level}"
+          )
+
           NoticeWorkflow.publish(state, "Thinking: #{level}")
 
         {:error, reason} ->
@@ -660,8 +672,11 @@ defmodule MingaEditor.Agent.SlashCommand do
       commands()
       |> Enum.map_join("\n", fn cmd -> "  /#{cmd.name} — #{cmd.description}" end)
 
-    if AgentAccess.session(state) do
-      Session.add_system_message(AgentAccess.session(state), "Available commands:\n#{help_text}")
+    if Runtime.active_session(state.shell_runtime) do
+      Session.add_system_message(
+        Runtime.active_session(state.shell_runtime),
+        "Available commands:\n#{help_text}"
+      )
     end
 
     NoticeWorkflow.publish(state, "Commands listed in chat")
@@ -674,7 +689,7 @@ defmodule MingaEditor.Agent.SlashCommand do
 
       state =
         state
-        |> AgentAccess.update_agent(&AgentState.set_status(&1, :plan))
+        |> TraditionalWorkflow.install_agent_status(:plan)
         |> NoticeWorkflow.publish("Plan mode enabled")
 
       {:ok, state}
@@ -688,7 +703,7 @@ defmodule MingaEditor.Agent.SlashCommand do
 
       state =
         state
-        |> AgentAccess.update_agent(&AgentState.set_status(&1, :idle))
+        |> TraditionalWorkflow.install_agent_status(:idle)
         |> NoticeWorkflow.publish("Execution mode enabled")
 
       {:ok, state}
@@ -771,7 +786,7 @@ defmodule MingaEditor.Agent.SlashCommand do
   defp do_auth_store(state, provider, key) do
     case validate_and_store(provider, key) do
       :ok ->
-        Session.refresh_credentials(AgentAccess.session(state))
+        Session.refresh_credentials(Runtime.active_session(state.shell_runtime))
 
         emit_system_message(
           state,
@@ -886,7 +901,7 @@ defmodule MingaEditor.Agent.SlashCommand do
   defp start_oauth_flow(state) do
     state = emit_system_message(state, "Opening browser for ChatGPT sign-in...")
 
-    session = AgentAccess.session(state)
+    session = Runtime.active_session(state.shell_runtime)
 
     Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
       result = MingaAgent.OAuth.Flow.run()
@@ -918,7 +933,7 @@ defmodule MingaEditor.Agent.SlashCommand do
         "Starting manual ChatGPT sign-in..."
       )
 
-    session = AgentAccess.session(state)
+    session = Runtime.active_session(state.shell_runtime)
     client_pid = self()
 
     Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
@@ -942,7 +957,7 @@ defmodule MingaEditor.Agent.SlashCommand do
         "Completing manual ChatGPT sign-in..."
       )
 
-    session = AgentAccess.session(state)
+    session = Runtime.active_session(state.shell_runtime)
     client_pid = self()
 
     Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
@@ -1067,7 +1082,7 @@ defmodule MingaEditor.Agent.SlashCommand do
   @spec do_compact(state()) :: {:ok, state()} | {:error, String.t()}
   @spec do_continue(state()) :: {:ok, state()} | {:error, String.t()}
   defp do_continue(state) do
-    session = AgentAccess.session(state)
+    session = Runtime.active_session(state.shell_runtime)
 
     if is_pid(session) do
       case Session.continue(session) do
@@ -1084,7 +1099,7 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   @spec do_export(state(), :markdown | :html) :: {:ok, state()} | {:error, String.t()}
   defp do_export(state, format) do
-    session = AgentAccess.session(state)
+    session = Runtime.active_session(state.shell_runtime)
 
     if is_pid(session) do
       messages = Session.messages(session)
@@ -1129,7 +1144,7 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   @spec do_activate_skill(state(), String.t()) :: {:ok, state()} | {:error, String.t()}
   defp do_activate_skill(state, name) do
-    session = AgentAccess.session(state)
+    session = Runtime.active_session(state.shell_runtime)
 
     if is_pid(session) do
       case Session.activate_skill(session, name) do
@@ -1146,7 +1161,7 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   @spec do_deactivate_skill(state(), String.t()) :: {:ok, state()} | {:error, String.t()}
   defp do_deactivate_skill(state, name) do
-    session = AgentAccess.session(state)
+    session = Runtime.active_session(state.shell_runtime)
 
     if is_pid(session) do
       case Session.deactivate_skill(session, name) do
@@ -1191,7 +1206,7 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   @spec require_provider(state()) :: {:ok, pid()} | {:error, String.t()}
   defp require_provider(state) do
-    session = AgentAccess.session(state)
+    session = Runtime.active_session(state.shell_runtime)
 
     if is_pid(session) do
       {:ok, get_provider(session)}
@@ -1230,7 +1245,7 @@ defmodule MingaEditor.Agent.SlashCommand do
   end
 
   defp do_compact(state) do
-    session = AgentAccess.session(state)
+    session = Runtime.active_session(state.shell_runtime)
 
     if is_pid(session) do
       case Session.compact(session) do
@@ -1288,7 +1303,7 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   @spec do_branches(state()) :: {:ok, state()}
   defp do_branches(state) do
-    session = AgentAccess.session(state)
+    session = Runtime.active_session(state.shell_runtime)
 
     if is_pid(session) do
       {:ok, listing} = Session.list_branches(session)
@@ -1313,7 +1328,7 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   @spec require_session(state()) :: {:ok, pid()} | {:error, String.t()}
   defp require_session(state) do
-    session = AgentAccess.session(state)
+    session = Runtime.active_session(state.shell_runtime)
 
     if is_pid(session) do
       {:ok, session}
@@ -1341,8 +1356,11 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   @spec emit_system_message(state(), String.t()) :: state()
   defp emit_system_message(state, message) do
-    if AgentAccess.session(state) do
-      Session.add_system_message(AgentAccess.session(state), message)
+    if Runtime.active_session(state.shell_runtime) do
+      Session.add_system_message(
+        Runtime.active_session(state.shell_runtime),
+        message
+      )
     end
 
     # Take only the first line for the single-line minibuffer status bar.
@@ -1382,7 +1400,7 @@ defmodule MingaEditor.Agent.SlashCommand do
       cmd,
       command_path,
       command_args,
-      AgentAccess.session(state)
+      Runtime.active_session(state.shell_runtime)
     )
   end
 

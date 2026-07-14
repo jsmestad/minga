@@ -18,7 +18,21 @@ defmodule MingaEditor.WindowFocusTest do
     :ok = BufferProcess.move_to(first_buffer, {2, 0})
 
     panel = %BottomPanel{} |> BottomPanel.show() |> BottomPanel.focus()
-    state = EditorState.set_bottom_panel(state, panel)
+
+    state =
+      then(state, fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_bottom_panel(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            panel
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
 
     focused = WindowFocus.focus(state, 2)
 
@@ -37,17 +51,46 @@ defmodule MingaEditor.WindowFocusTest do
 
     state =
       state
-      |> EditorState.set_bottom_panel(panel)
-      |> EditorState.set_cmd_hover_link({{0, 0}, {0, 3}})
-      |> EditorState.set_cmd_hover_cell({4, 7})
+      |> then(fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_bottom_panel(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            panel
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
+      |> then(fn state ->
+        %{
+          state
+          | workspace:
+              then(
+                state.workspace,
+                &MingaEditor.Session.State.set_cmd_hover_link(&1, {{0, 0}, {0, 3}})
+              )
+        }
+      end)
+      |> then(fn state ->
+        %{
+          state
+          | workspace:
+              then(state.workspace, fn workspace ->
+                MingaEditor.Session.State.set_cmd_hover_cell(workspace, {4, 7})
+              end)
+        }
+      end)
 
     focused = WindowFocus.focus_surviving_window(state, remaining_windows, 2)
 
     assert focused.workspace.windows.active == 2
     assert focused.workspace.buffers.active == second_buffer
     assert focused.workspace.buffers.active_index == 1
-    assert focused.workspace.cmd_hover_link == nil
-    assert focused.workspace.cmd_hover_cell == nil
+    assert focused.workspace.hover_observation.link == nil
+    assert focused.workspace.hover_observation.cell == nil
     assert BufferProcess.cursor(second_buffer) == {0, 1}
     refute BottomPanel.focused?(EditorState.bottom_panel(focused))
   end
@@ -55,7 +98,21 @@ defmodule MingaEditor.WindowFocusTest do
   test "focusing the active window only blurs Traditional bottom-panel presentation" do
     state = base_state()
     panel = %BottomPanel{} |> BottomPanel.show() |> BottomPanel.focus()
-    state = EditorState.set_bottom_panel(state, panel)
+
+    state =
+      then(state, fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_bottom_panel(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            panel
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
 
     focused = WindowFocus.focus(state, state.workspace.windows.active)
 
@@ -89,10 +146,16 @@ defmodule MingaEditor.WindowFocusTest do
     assert Map.fetch!(remembered.workspace.windows.map, 1).cursor == {1, 2}
 
     mismatched =
-      EditorState.set_workspace(
-        state,
-        SessionState.set_buffers(state.workspace, Buffers.switch_to(state.workspace.buffers, 1))
-      )
+      then(state, fn state ->
+        %{
+          state
+          | workspace:
+              SessionState.set_buffers(
+                state.workspace,
+                Buffers.switch_to(state.workspace.buffers, 1)
+              )
+        }
+      end)
 
     assert WindowFocus.remember_active_cursor(mismatched) == mismatched
   end
@@ -126,6 +189,6 @@ defmodule MingaEditor.WindowFocusTest do
       |> SessionState.activate_buffer(buffers)
       |> SessionState.set_windows(windows)
 
-    {EditorState.set_workspace(state, workspace), first_buffer, second_buffer}
+    {then(state, fn state -> %{state | workspace: workspace} end), first_buffer, second_buffer}
   end
 end

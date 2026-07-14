@@ -119,7 +119,7 @@ defmodule MingaEditor.Input.InlineOverlay do
   @doc "Returns the project root for the active session."
   @spec project_root(state()) :: String.t()
   def project_root(state) do
-    file_tree = EditorState.file_tree_state(state)
+    file_tree = state.workspace.file_tree
     file_tree.project_root || file_tree.original_root || File.cwd!()
   end
 

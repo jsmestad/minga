@@ -53,7 +53,15 @@ defmodule MingaEditor.PickerUITest do
     }
 
     state
-    |> EditorState.set_buffers(buffers)
+    |> then(fn state ->
+      %{
+        state
+        | workspace:
+            then(state.workspace, fn workspace ->
+              MingaEditor.Session.State.set_buffers(workspace, buffers)
+            end)
+      }
+    end)
     |> ModalWorkflow.open(:picker, PickerPayload.new(picker_state))
   end
 
@@ -95,7 +103,7 @@ defmodule MingaEditor.PickerUITest do
     }
 
     state = %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: preview_workspace,
       shell_runtime:
         Runtime.new(
@@ -217,7 +225,7 @@ defmodule MingaEditor.PickerUITest do
       }
 
       state = %EditorState{
-        port_manager: nil,
+        frontend: %MingaEditor.State.Frontend{port_manager: nil},
         workspace: %SessionState{viewport: Viewport.new(24, 80), editing: VimState.new()},
         shell_runtime:
           Runtime.new(

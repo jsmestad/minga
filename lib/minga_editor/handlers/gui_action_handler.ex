@@ -24,7 +24,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   alias MingaEditor.Agent.SemanticUI.Registry, as: SemanticUIRegistry
   alias MingaEditor.Agent.UIState
-  alias MingaEditor.BottomPanel
   alias MingaEditor.EffectScheduler
   alias MingaEditor.Effects.GitMutation
   alias MingaEditor.Effects.GitMutationAdmission
@@ -40,15 +39,16 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaEditor.UI.Popup.Lifecycle, as: PopupLifecycle
   alias MingaEditor.PickerUI
   alias MingaEditor.Renderer
+  alias MingaEditor.Session.State
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias Minga.Frontend.WaitRequests
   alias MingaEditor.Window
 
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Feedback
   alias MingaEditor.State.Operation
   alias MingaEditor.State.OperationFeedback
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Search, as: SearchData
@@ -117,7 +117,9 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     LspSyncServer.resync_buffers(buffers_for_lsp_resync(state))
 
     state
-    |> EditorState.invalidate_all_windows()
+    |> then(fn state ->
+      %{state | workspace: State.invalidate_all_windows(state.workspace)}
+    end)
     |> Layout.invalidate()
     |> Renderer.render_or_async()
   end
@@ -132,7 +134,15 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       "Power/thermal state: low_power=#{low_power?}, thermal=#{inspect(thermal_state)}"
     )
 
-    state = EditorState.set_resource_pressure(state, low_power?, thermal_state)
+    state = %{
+      state
+      | frontend:
+          MingaEditor.State.Frontend.report_resource_pressure(
+            state.frontend,
+            low_power?,
+            thermal_state
+          )
+    }
 
     Minga.Events.broadcast(
       :power_thermal_state_changed,
@@ -140,7 +150,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
         low_power?: low_power?,
         thermal_state: thermal_state
       },
-      EditorState.events_registry(state)
+      state.extension_surfaces.events_registry
     )
 
     state
@@ -161,9 +171,9 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   defp dispatch_action(state, {:config_update, name, value}) do
     if MingaEditor.Frontend.Protocol.GUI.settings_option?(name) do
-      case Minga.Config.Options.set(EditorState.options_server(state), name, value) do
+      case Minga.Config.Options.set(state.interaction.options_server, name, value) do
         {:ok, persisted_value} ->
-          Minga.Config.Options.mark_explicit(EditorState.options_server(state), name)
+          Minga.Config.Options.mark_explicit(state.interaction.options_server, name)
           Minga.Config.Writer.persist(name, persisted_value)
 
           state
@@ -186,19 +196,26 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, {:notification_dismiss, id}) do
-    EditorState.dismiss_notification(state, id)
+    %{state | feedback: MingaEditor.State.Feedback.dismiss_notification(state.feedback, id)}
   end
 
   defp dispatch_action(state, {:notification_action, notification_id, action_id}) do
-    case EditorState.notification_action(state, notification_id, action_id) do
+    case MingaEditor.UI.NotificationCenter.action(
+           state.feedback.notifications,
+           notification_id,
+           action_id
+         ) do
       %{dispatch: {:command, command}} ->
-        state
-        |> EditorState.dismiss_notification(notification_id)
+        %{
+          state
+          | feedback:
+              MingaEditor.State.Feedback.dismiss_notification(state.feedback, notification_id)
+        }
         |> Commands.execute(command)
         |> normalize_command_result()
 
       %{dispatch: {:event, event, payload}} ->
-        Minga.Events.broadcast(event, payload, EditorState.events_registry(state))
+        Minga.Events.broadcast(event, payload, state.extension_surfaces.events_registry)
         state
 
       _ ->
@@ -209,18 +226,22 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   @min_font_size 8
   @max_font_size 72
 
-  defp dispatch_action(state, {:font_size_adjust, direction}) do
-    options_server = EditorState.options_server(state)
+  defp dispatch_action(%MingaEditor.State{} = state, {:font_size_adjust, direction}) do
+    options_server = state.interaction.options_server
     config_size = Minga.Config.Options.get(options_server, :font_size)
 
     new_size =
       case direction do
-        :increase -> min((state.font_size_override || config_size) + 1, @max_font_size)
-        :decrease -> max((state.font_size_override || config_size) - 1, @min_font_size)
+        :increase -> min((state.appearance.font_size_override || config_size) + 1, @max_font_size)
+        :decrease -> max((state.appearance.font_size_override || config_size) - 1, @min_font_size)
         :reset -> nil
       end
 
-    state = %{state | font_size_override: new_size}
+    state = %{
+      state
+      | appearance: MingaEditor.State.Appearance.override_font_size(state.appearance, new_size)
+    }
+
     Startup.send_font_config(state)
     EditorState.reset_frontend_render_state(state)
   end
@@ -255,11 +276,17 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   # reporting frontend already reflects the change locally, and the flag only
   # affects the auto-follow decision on the next streaming frame.
   defp dispatch_action(state, :chat_scrolled_away_from_bottom) do
-    AgentAccess.update_agent_ui(state, &UIState.set_pinned(&1, false))
+    MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+      state,
+      (&UIState.set_pinned(&1, false)).(state.workspace.agent_ui)
+    )
   end
 
   defp dispatch_action(state, :chat_returned_to_bottom) do
-    AgentAccess.update_agent_ui(state, &UIState.set_pinned(&1, true))
+    MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+      state,
+      (&UIState.set_pinned(&1, true)).(state.workspace.agent_ui)
+    )
   end
 
   defp dispatch_action(state, {:select_tab, id}) do
@@ -345,13 +372,13 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, {:file_tree_edit_confirm, text}) do
-    case EditorState.file_tree_state(state).editing do
+    case state.workspace.file_tree.editing do
       nil ->
         state
 
       %{} ->
-        ft = FileTreeState.update_editing_text(EditorState.file_tree_state(state), text)
-        state = EditorState.set_file_tree(state, ft)
+        ft = FileTreeState.update_editing_text(state.workspace.file_tree, text)
+        state = %{state | workspace: State.set_file_tree(state.workspace, ft)}
         Commands.FileTree.confirm_editing(state)
     end
   end
@@ -411,7 +438,19 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, {:toggle_panel, 1}) do
-    EditorState.set_bottom_panel(state, BottomPanel.toggle(EditorState.bottom_panel(state)))
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_bottom_panel(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          MingaEditor.BottomPanel.toggle(state.shell_runtime.state.bottom_panel)
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   defp dispatch_action(state, {:toggle_panel, 2}) do
@@ -433,7 +472,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, {:sidebar_action, sidebar_id, kind, action}) do
-    sidebar_registry = EditorState.sidebar_registry(state)
+    sidebar_registry = state.extension_surfaces.sidebar_registry
 
     case Sidebar.get(sidebar_registry, sidebar_id) do
       nil ->
@@ -449,21 +488,57 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, {:panel_switch_tab, tab_index}) do
-    EditorState.set_bottom_panel(
-      state,
-      BottomPanel.switch_tab(EditorState.bottom_panel(state), tab_index)
-    )
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_bottom_panel(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          MingaEditor.BottomPanel.switch_tab(
+            state.shell_runtime.state.bottom_panel,
+            tab_index
+          )
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   defp dispatch_action(state, :panel_dismiss) do
-    EditorState.set_bottom_panel(state, BottomPanel.dismiss(EditorState.bottom_panel(state)))
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_bottom_panel(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          MingaEditor.BottomPanel.dismiss(state.shell_runtime.state.bottom_panel)
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   defp dispatch_action(state, {:panel_resize, height_percent}) do
-    EditorState.set_bottom_panel(
-      state,
-      BottomPanel.resize(EditorState.bottom_panel(state), height_percent)
-    )
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_bottom_panel(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          MingaEditor.BottomPanel.resize(
+            state.shell_runtime.state.bottom_panel,
+            height_percent
+          )
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   defp dispatch_action(state, {:open_file, path}) do
@@ -546,7 +621,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, {:agent_tool_toggle, message_index}) do
-    session = AgentAccess.session(state)
+    session = MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
 
     if session do
       try do
@@ -683,7 +758,14 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
        )
        when is_pid(buf) do
     state =
-      EditorState.update_search(state, &SearchData.record(&1, text, :forward))
+      %{
+        state
+        | workspace:
+            State.set_search(
+              state.workspace,
+              (&SearchData.record(&1, text, :forward)).(state.workspace.search)
+            )
+      }
 
     cmd = if direction == 1, do: :search_prev, else: :search_next
     MingaEditor.Commands.execute(state, cmd)
@@ -718,7 +800,14 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
         new_map = Map.put(win_map, active_win_id, new_win)
 
         new_state =
-          EditorState.update_windows(state, &Windows.set_map(&1, new_map))
+          %{
+            state
+            | workspace:
+                State.set_windows(
+                  state.workspace,
+                  (&Windows.set_map(&1, new_map)).(state.workspace.windows)
+                )
+          }
 
         Renderer.render_or_async(new_state)
     end
@@ -777,12 +866,19 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     regex = decoded[:regex]
 
     state =
-      EditorState.update_search(state, fn search ->
-        search
-        |> SearchData.update_gui_search_flags(case_sensitive, whole_word, regex)
-        |> SearchData.set_gui_replace_mode(replace_mode)
-        |> SearchData.record(query, :forward)
-      end)
+      %{
+        state
+        | workspace:
+            State.set_search(
+              state.workspace,
+              (fn search ->
+                 search
+                 |> SearchData.update_gui_search_flags(case_sensitive, whole_word, regex)
+                 |> SearchData.set_gui_replace_mode(replace_mode)
+                 |> SearchData.record(query, :forward)
+               end).(state.workspace.search)
+            )
+      }
 
     if query != "" do
       content = Buffer.content(buf)
@@ -903,7 +999,14 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp dispatch_action(state, {:search_replace_all, _}), do: state
 
   defp dispatch_action(state, :search_dismiss) do
-    EditorState.update_search(state, &SearchData.dismiss_gui_search/1)
+    %{
+      state
+      | workspace:
+          State.set_search(
+            state.workspace,
+            (&SearchData.dismiss_gui_search/1).(state.workspace.search)
+          )
+    }
   end
 
   defp dispatch_action(state, {:extension_action, _extension_id, _action, _payload} = action) do
@@ -970,8 +1073,8 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       )
 
     state
-    |> EditorState.apply_shell_runtime_transition(runtime)
-    |> EditorState.set_workspace(workspace)
+    |> then(fn state -> %{state | shell_runtime: runtime} end)
+    |> then(fn state -> %{state | workspace: workspace} end)
     |> after_shell_gui_action(shell, action)
   end
 
@@ -1067,25 +1170,61 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   @spec focus_visible_sidebar(EditorState.t(), String.t()) :: EditorState.t()
   defp focus_visible_sidebar(state, "file_tree") do
     state
-    |> EditorState.update_file_tree(&FileTreeState.focus/1)
-    |> EditorState.set_keymap_scope(:file_tree)
+    |> then(fn state ->
+      %{
+        state
+        | workspace:
+            State.set_file_tree(
+              state.workspace,
+              (&FileTreeState.focus/1).(state.workspace.file_tree)
+            )
+      }
+    end)
+    |> then(fn state ->
+      %{
+        state
+        | workspace: State.set_keymap_scope(state.workspace, :file_tree)
+      }
+    end)
     |> Layout.invalidate()
-    |> EditorState.invalidate_all_windows()
+    |> then(fn state ->
+      %{state | workspace: State.invalidate_all_windows(state.workspace)}
+    end)
   end
 
   defp focus_visible_sidebar(state, "git_status") do
     state
-    |> EditorState.set_keymap_scope(:git_status)
+    |> then(fn state ->
+      %{
+        state
+        | workspace: State.set_keymap_scope(state.workspace, :git_status)
+      }
+    end)
     |> Layout.invalidate()
-    |> EditorState.invalidate_all_windows()
+    |> then(fn state ->
+      %{state | workspace: State.invalidate_all_windows(state.workspace)}
+    end)
   end
 
   defp focus_visible_sidebar(state, "observatory") do
     state
-    |> EditorState.update_file_tree(&FileTreeState.unfocus/1)
-    |> EditorState.set_keymap_scope(:editor)
+    |> then(fn state ->
+      %{
+        state
+        | workspace:
+            State.set_file_tree(
+              state.workspace,
+              (&FileTreeState.unfocus/1).(state.workspace.file_tree)
+            )
+      }
+    end)
+    |> then(fn state ->
+      %{state | workspace: State.set_keymap_scope(state.workspace, :editor)}
+    end)
     |> Layout.invalidate()
-    |> EditorState.invalidate_all_windows()
+    |> then(fn state ->
+      %{state | workspace: State.invalidate_all_windows(state.workspace)}
+    end)
   end
 
   @spec remember_visible_sidebar(EditorState.t(), String.t()) :: EditorState.t()
@@ -1323,14 +1462,19 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       "git:" <>
         Atom.to_string(operation) <> ":" <> to_string(Keyword.get(opts, :path, "repository"))
 
-    {state, feedback_operation} =
-      OperationFeedback.start_in(
-        state,
+    {operation_feedback, feedback_operation} =
+      OperationFeedback.start(
+        state.feedback.operation_feedback,
         git_operation_kind(operation),
         resource,
         pending_msg,
         replace?: false
       )
+
+    state = %{
+      state
+      | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)
+    }
 
     schedule_git_action(state, operation, feedback_operation.id, request_opts)
   end
@@ -1338,7 +1482,19 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   @spec schedule_git_action(state(), GitMutation.operation(), Operation.id(), keyword()) ::
           state()
   defp schedule_git_action(%{effect_scheduler: nil} = state, _operation, operation_id, _opts) do
-    OperationFeedback.finish_in(state, operation_id, :error, "Git scheduler unavailable")
+    %{
+      state
+      | feedback:
+          Feedback.accept_operation_feedback(
+            state.feedback,
+            OperationFeedback.finish(
+              state.feedback.operation_feedback,
+              operation_id,
+              :error,
+              "Git scheduler unavailable"
+            )
+          )
+    }
   end
 
   defp schedule_git_action(state, operation, operation_id, request_opts) do
@@ -1355,12 +1511,19 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
         state
 
       {:error, reason} ->
-        OperationFeedback.finish_in(
-          state,
-          operation_id,
-          :error,
-          git_admission_error_message(reason)
-        )
+        %{
+          state
+          | feedback:
+              Feedback.accept_operation_feedback(
+                state.feedback,
+                OperationFeedback.finish(
+                  state.feedback.operation_feedback,
+                  operation_id,
+                  :error,
+                  git_admission_error_message(reason)
+                )
+              )
+        }
     end
   end
 
@@ -1411,21 +1574,28 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   # Moves the tree cursor to a specific index (used by GUI context menu / header actions).
   @spec move_tree_cursor(state(), non_neg_integer()) :: state()
   defp move_tree_cursor(state, index) do
-    case EditorState.file_tree_state(state).tree do
+    case state.workspace.file_tree.tree do
       nil ->
         state
 
       tree ->
-        EditorState.update_file_tree(state, fn file_tree ->
-          FileTreeState.set_tree(file_tree, FileTree.select(tree, index))
-        end)
+        %{
+          state
+          | workspace:
+              State.set_file_tree(
+                state.workspace,
+                (fn file_tree ->
+                   FileTreeState.set_tree(file_tree, FileTree.select(tree, index))
+                 end).(state.workspace.file_tree)
+              )
+        }
     end
   end
 
   # Moves the file tree cursor to the given index and performs the action.
   @spec gui_tree_action(state(), non_neg_integer(), :click | :toggle) :: state()
   defp gui_tree_action(state, index, action) do
-    if EditorState.file_tree_state(state).tree == nil do
+    if state.workspace.file_tree.tree == nil do
       state
     else
       do_gui_tree_action(state, index, action)
@@ -1444,7 +1614,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   @spec open_file_tree_entry_in_split(state(), non_neg_integer()) :: state()
   defp open_file_tree_entry_in_split(state, index) do
-    if EditorState.file_tree_state(state).tree == nil do
+    if state.workspace.file_tree.tree == nil do
       state
     else
       do_open_file_tree_entry_in_split(state, index)
@@ -1458,7 +1628,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       |> move_tree_cursor(index)
       |> unfocus_file_tree_for_split()
 
-    case FileTree.selected_entry(EditorState.file_tree_state(state).tree) do
+    case FileTree.selected_entry(state.workspace.file_tree.tree) do
       %{dir?: false, path: path} ->
         state
         |> Commands.Movement.execute(:split_vertical)
@@ -1476,8 +1646,19 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   @spec unfocus_file_tree_for_split(state()) :: state()
   defp unfocus_file_tree_for_split(state) do
     state
-    |> EditorState.update_file_tree(&MingaEditor.State.FileTree.unfocus/1)
-    |> EditorState.set_keymap_scope(:editor)
+    |> then(fn state ->
+      %{
+        state
+        | workspace:
+            State.set_file_tree(
+              state.workspace,
+              (&MingaEditor.State.FileTree.unfocus/1).(state.workspace.file_tree)
+            )
+      }
+    end)
+    |> then(fn state ->
+      %{state | workspace: State.set_keymap_scope(state.workspace, :editor)}
+    end)
   end
 
   # ── Hover open action ──────────────────────────────────────────────
@@ -1518,8 +1699,8 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       )
 
     state
-    |> EditorState.apply_shell_runtime_transition(runtime)
-    |> EditorState.set_workspace(workspace)
+    |> then(fn state -> %{state | shell_runtime: runtime} end)
+    |> then(fn state -> %{state | workspace: workspace} end)
   end
 
   # ── Tab helpers ───────────────────────────────────────────────────
@@ -1533,9 +1714,27 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp update_tab_bar(state, fun) when is_function(fun, 1) do
     state = MingaEditor.Shell.Workflow.ensure_available(state)
 
-    case EditorState.tab_bar(state) do
-      %TabBar{} = tb -> EditorState.set_tab_bar(state, fun.(tb))
-      nil -> state
+    case state.shell_runtime.state.tab_bar do
+      %TabBar{} = tb ->
+        then(state, fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.set_tab_bar(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              fun.(tb)
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
+
+      nil ->
+        state
     end
   end
 
@@ -1557,17 +1756,17 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   @spec maybe_send_gui_clipboard_write(state(), String.t()) :: :ok
-  defp maybe_send_gui_clipboard_write(%{port_manager: nil}, _path), do: :ok
+  defp maybe_send_gui_clipboard_write(%{frontend: %{port_manager: nil}}, _path), do: :ok
 
   defp maybe_send_gui_clipboard_write(state, path) do
-    MingaEditor.Frontend.clipboard_write(state.port_manager, path)
+    MingaEditor.Frontend.clipboard_write(state.frontend.port_manager, path)
   end
 
   @spec tab_file_path(state(), Tab.id()) :: String.t() | nil
   defp tab_file_path(state, id) do
     state = MingaEditor.Shell.Workflow.ensure_available(state)
 
-    case EditorState.tab_bar(state) do
+    case state.shell_runtime.state.tab_bar do
       %TabBar{} = tb -> tab_file_path_from_tab(state, tb, TabBar.get(tb, id))
       nil -> nil
     end
@@ -1609,7 +1808,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     active_buffers = Enum.filter(state.workspace.buffers.list, &is_pid/1)
 
     tab_buffers =
-      case EditorState.tab_bar(state) do
+      case state.shell_runtime.state.tab_bar do
         %MingaEditor.State.TabBar{tabs: tabs} -> Enum.flat_map(tabs, &tab_buffer_list/1)
         _ -> []
       end
@@ -1744,7 +1943,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
         open_tab_buffer_in_active_window(state, tab, abs_path)
 
       nil ->
-        case Commands.start_buffer(abs_path, EditorState.options_server(state)) do
+        case Commands.start_buffer(abs_path, state.interaction.options_server) do
           {:ok, pid} ->
             register_buffer_in_active_window(state, pid, abs_path)
 
@@ -1800,19 +1999,19 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     state =
       state
       |> MingaEditor.BufferActivation.activate(buffers, notify_shell?: false)
-      |> EditorState.monitor_buffer(buffer_pid)
+      |> MingaEditor.Handlers.BufferRegistry.monitor_buffer(buffer_pid)
 
     Minga.Log.info(:editor, "Opened: #{file_path}")
 
     Minga.Events.broadcast(
       :buffer_opened,
       %Minga.Events.BufferEvent{buffer: buffer_pid, path: file_path},
-      EditorState.events_registry(state)
+      state.extension_surfaces.events_registry
     )
 
     state = HighlightSync.setup_for_buffer_pid(state, buffer_pid)
 
-    if state.backend != :headless do
+    if state.frontend.backend != :headless do
       Process.send_after(self(), :request_code_lens_and_inlay_hints, 800)
     end
 
@@ -1823,7 +2022,14 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   @spec set_vim_mode_state(state(), term()) :: state()
   defp set_vim_mode_state(state, new_ms) do
-    EditorState.update_editing(state, &VimState.set_mode_state(&1, new_ms))
+    %{
+      state
+      | workspace:
+          State.set_editing(
+            state.workspace,
+            (&VimState.set_mode_state(&1, new_ms)).(state.workspace.editing)
+          )
+    }
   end
 
   @spec normalize_command_result(state() | {state(), term()}) :: state()

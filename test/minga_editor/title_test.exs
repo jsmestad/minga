@@ -104,7 +104,7 @@ defmodule MingaEditor.TitleTest do
       agent_window = Window.new_agent_chat(1, 24, 80)
 
       state = %EditorState{
-        port_manager: self(),
+        frontend: %MingaEditor.State.Frontend{port_manager: self()},
         workspace: %MingaEditor.Session.State{
           viewport: Viewport.new(24, 80),
           editing: VimState.new(),
@@ -116,7 +116,9 @@ defmodule MingaEditor.TitleTest do
             next_id: 2
           }
         },
-        focus_stack: MingaEditor.Input.default_stack()
+        interaction: %MingaEditor.State.Interaction{
+          focus_stack: MingaEditor.Input.default_stack()
+        }
       }
 
       result = Title.format(state, "{filename} ({directory}) - Minga")
@@ -134,7 +136,7 @@ defmodule MingaEditor.TitleTest do
       window = Window.new(1, buf, 24, 80)
 
       state = %EditorState{
-        port_manager: self(),
+        frontend: %MingaEditor.State.Frontend{port_manager: self()},
         workspace: %MingaEditor.Session.State{
           viewport: Viewport.new(24, 80),
           editing: VimState.new(),
@@ -146,7 +148,9 @@ defmodule MingaEditor.TitleTest do
             next_id: 2
           }
         },
-        focus_stack: MingaEditor.Input.default_stack()
+        interaction: %MingaEditor.State.Interaction{
+          focus_stack: MingaEditor.Input.default_stack()
+        }
       }
 
       result = Title.format(state, "{filename} ({directory}) - Minga")
@@ -166,7 +170,7 @@ defmodule MingaEditor.TitleTest do
       window = Window.new(1, buf, 24, 80)
 
       state = %EditorState{
-        port_manager: self(),
+        frontend: %MingaEditor.State.Frontend{port_manager: self()},
         workspace: %MingaEditor.Session.State{
           viewport: Viewport.new(24, 80),
           editing: VimState.new(),
@@ -178,7 +182,9 @@ defmodule MingaEditor.TitleTest do
             next_id: 2
           }
         },
-        focus_stack: MingaEditor.Input.default_stack()
+        interaction: %MingaEditor.State.Interaction{
+          focus_stack: MingaEditor.Input.default_stack()
+        }
       }
 
       result = Title.format_gui(state)
@@ -196,7 +202,7 @@ defmodule MingaEditor.TitleTest do
       window = Window.new(1, buf, 24, 80)
 
       state = %EditorState{
-        port_manager: self(),
+        frontend: %MingaEditor.State.Frontend{port_manager: self()},
         workspace: %MingaEditor.Session.State{
           viewport: Viewport.new(24, 80),
           editing: VimState.new(),
@@ -208,7 +214,9 @@ defmodule MingaEditor.TitleTest do
             next_id: 2
           }
         },
-        focus_stack: MingaEditor.Input.default_stack()
+        interaction: %MingaEditor.State.Interaction{
+          focus_stack: MingaEditor.Input.default_stack()
+        }
       }
 
       result = Title.format_gui(state)
@@ -225,7 +233,7 @@ defmodule MingaEditor.TitleTest do
       window = Window.new(1, buf, 24, 80)
 
       state = %EditorState{
-        port_manager: self(),
+        frontend: %MingaEditor.State.Frontend{port_manager: self()},
         workspace: %MingaEditor.Session.State{
           viewport: Viewport.new(24, 80),
           editing: VimState.new(),
@@ -237,7 +245,9 @@ defmodule MingaEditor.TitleTest do
             next_id: 2
           }
         },
-        focus_stack: MingaEditor.Input.default_stack()
+        interaction: %MingaEditor.State.Interaction{
+          focus_stack: MingaEditor.Input.default_stack()
+        }
       }
 
       result = Title.format_gui(state)
@@ -249,7 +259,7 @@ defmodule MingaEditor.TitleTest do
       agent_window = Window.new_agent_chat(1, 24, 80)
 
       state = %EditorState{
-        port_manager: self(),
+        frontend: %MingaEditor.State.Frontend{port_manager: self()},
         workspace: %MingaEditor.Session.State{
           viewport: Viewport.new(24, 80),
           editing: VimState.new(),
@@ -261,7 +271,9 @@ defmodule MingaEditor.TitleTest do
             next_id: 2
           }
         },
-        focus_stack: MingaEditor.Input.default_stack()
+        interaction: %MingaEditor.State.Interaction{
+          focus_stack: MingaEditor.Input.default_stack()
+        }
       }
 
       result = Title.format_gui(state)

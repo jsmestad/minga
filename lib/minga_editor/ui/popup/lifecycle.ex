@@ -148,7 +148,7 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
   @spec inside_float_box?(state(), Window.t(), integer(), integer()) :: boolean()
   defp inside_float_box?(state, window, row, col) do
     rule = window.popup_meta.rule
-    vp = state.terminal_viewport
+    vp = state.frontend.terminal_viewport
 
     box_w = resolve_float_dim(float_width(rule), vp.cols)
     box_h = resolve_float_dim(float_height(rule), vp.rows)
@@ -240,12 +240,14 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
   @spec update_popup_windows(state(), Windows.t(), Window.id(), boolean()) :: state()
   defp update_popup_windows(state, windows, next_id, true) do
     state
-    |> EditorState.set_windows(windows)
+    |> then(fn state ->
+      %{state | workspace: MingaEditor.Session.State.set_windows(state.workspace, windows)}
+    end)
     |> MingaEditor.WindowFocus.focus(next_id)
   end
 
   defp update_popup_windows(state, windows, _next_id, false) do
-    EditorState.set_windows(state, windows)
+    %{state | workspace: MingaEditor.Session.State.set_windows(state.workspace, windows)}
   end
 
   @spec do_close(state(), Window.id(), PopupActive.t()) :: state()
@@ -329,7 +331,9 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
     new_windows = remove_popup_window(state.workspace.windows, window_id, meta)
 
     state
-    |> EditorState.set_windows(new_windows)
+    |> then(fn state ->
+      %{state | workspace: MingaEditor.Session.State.set_windows(state.workspace, new_windows)}
+    end)
     |> Layout.invalidate()
   end
 
