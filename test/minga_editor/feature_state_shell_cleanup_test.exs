@@ -58,7 +58,7 @@ defmodule MingaEditor.FeatureStateShellCleanupTest do
       |> Runtime.activate(entry, %{contexts: [active_context]})
 
     state = %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: workspace(),
       shell_runtime: runtime
     }
@@ -91,7 +91,7 @@ defmodule MingaEditor.FeatureStateShellCleanupTest do
       |> Runtime.activate(Runtime.default_entry(), %MingaEditor.Shell.Traditional.State{})
 
     state = %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: workspace(),
       shell_runtime: runtime
     }

@@ -126,7 +126,7 @@ defmodule MingaGitPorcelain.CommandsConflictTest do
 
   defp state_with_buffer(buffer) do
     %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %SessionState{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{list: [buffer], active_index: 0, active: buffer},

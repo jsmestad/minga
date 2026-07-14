@@ -5,7 +5,6 @@ defmodule MingaEditor.Shell.Traditional.InputStateTest do
   alias MingaEditor.Shell.Traditional.ClickRegions
   alias MingaEditor.Shell.Traditional.InputState
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
-  alias MingaEditor.State, as: EditorState
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -62,9 +61,8 @@ defmodule MingaEditor.Shell.Traditional.InputStateTest do
   end
 
   defp install_shell_state(state, shell_state) do
-    runtime =
-      Runtime.update_traditional_state(state.shell_runtime, fn _current -> shell_state end)
+    runtime = Runtime.install_traditional_state(state.shell_runtime, shell_state)
 
-    EditorState.apply_shell_runtime_transition(state, runtime)
+    then(state, fn state -> %{state | shell_runtime: runtime} end)
   end
 end

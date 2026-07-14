@@ -122,8 +122,8 @@ defmodule MingaEditor.Agent.SemanticUI.BundledStatusNoteTest do
 
   defp base_state(table) do
     %EditorState{
-      port_manager: self(),
-      agent_semantic_ui_registry: table,
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
+      extension_surfaces: %MingaEditor.State.ExtensionSurfaces{agent_semantic_ui_registry: table},
       workspace: %SessionState{viewport: Viewport.new(24, 80)}
     }
   end

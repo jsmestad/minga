@@ -5,6 +5,7 @@ defmodule MingaEditor.BufferActivation do
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Workflow, as: ShellWorkflow
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.BufferLifecycle
 
   @type state :: EditorState.t()
   @type option :: {:notify_shell?, boolean()} | {:replace_window_content?, boolean()}
@@ -13,12 +14,13 @@ defmodule MingaEditor.BufferActivation do
   @spec activate(state(), SessionState.buffer_activation()) :: state()
   @spec activate(state(), SessionState.buffer_activation(), [option()]) :: state()
   def activate(%EditorState{} = state, activation, opts \\ []) when is_list(opts) do
-    workspace =
-      SessionState.activate_buffer(state.workspace, activation,
-        replace_window_content?: Keyword.get(opts, :replace_window_content?, false)
-      )
-
-    state = EditorState.set_workspace(state, workspace)
+    state = %{
+      state
+      | workspace:
+          SessionState.activate_buffer(state.workspace, activation,
+            replace_window_content?: Keyword.get(opts, :replace_window_content?, false)
+          )
+    }
 
     if Keyword.get(opts, :notify_shell?, true) do
       synchronize_shell(state)
@@ -35,16 +37,16 @@ defmodule MingaEditor.BufferActivation do
   defp synchronize_shell(%EditorState{} = state) do
     state = ShellWorkflow.ensure_available(state)
 
-    case state.buffer_add_context do
+    case state.buffer_lifecycle.buffer_add_context do
       :preview ->
-        EditorState.set_buffer_add_context(state, :open)
+        %{state | buffer_lifecycle: BufferLifecycle.expect_buffer(state.buffer_lifecycle, :open)}
 
       :open ->
         {runtime, workspace} = Runtime.route_buffer_switched(state.shell_runtime, state.workspace)
 
         state
-        |> EditorState.apply_shell_runtime_transition(runtime)
-        |> EditorState.set_workspace(workspace)
+        |> then(fn state -> %{state | shell_runtime: runtime} end)
+        |> then(fn state -> %{state | workspace: workspace} end)
     end
   end
 end

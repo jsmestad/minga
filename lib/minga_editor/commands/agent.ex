@@ -17,6 +17,7 @@ defmodule MingaEditor.Commands.Agent do
   alias MingaAgent.Message
   alias MingaAgent.Session
   alias MingaAgent.SessionStore
+  alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.ProvenanceJump
   alias MingaEditor.Agent.SlashCommand
   alias MingaEditor.Agent.Transcript
@@ -33,13 +34,14 @@ defmodule MingaEditor.Commands.Agent do
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
   alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.Workflow, as: TraditionalWorkflow
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
   alias MingaEditor.Input.AgentPanel
@@ -78,7 +80,7 @@ defmodule MingaEditor.Commands.Agent do
 
         case find_agent_tab(state) do
           %Tab{id: agent_id} ->
-            # Switch first, then ensure a session exists. AgentAccess.session/1
+            # Switch first, then ensure a session exists. Shell.Runtime.active_session/1
             # is per-tab, so the start-if-missing check must run after the
             # switch — otherwise it would always see nil from the file tab.
             state
@@ -114,7 +116,7 @@ defmodule MingaEditor.Commands.Agent do
       %Tab{id: agent_id} ->
         state = state |> EditorState.switch_tab(agent_id) |> maybe_start_session()
 
-        case AgentAccess.session(state) do
+        case Runtime.active_session(state.shell_runtime) do
           nil ->
             NoticeWorkflow.publish(
               state,
@@ -162,7 +164,11 @@ defmodule MingaEditor.Commands.Agent do
          target_id when is_integer(target_id) <-
            Transcript.turn_anchor_id(pairs, tool_call_id) do
       jump = ProvenanceJump.request(target_id, origin)
-      AgentAccess.update_panel(state, &Panel.set_provenance_jump(&1, jump))
+
+      TraditionalWorkflow.install_agent_panel(
+        state,
+        (&Panel.set_provenance_jump(&1, jump)).(state.workspace.agent_ui.panel)
+      )
     else
       # Dead session (nil pairs) or tool call not in the transcript (nil anchor):
       # skip the jump and open at the bottom. A non-nil unexpected shape should
@@ -200,8 +206,8 @@ defmodule MingaEditor.Commands.Agent do
     case find_agent_tab(state) do
       nil ->
         win_id = 1
-        rows = max(state.terminal_viewport.rows, 1)
-        cols = max(state.terminal_viewport.cols, 1)
+        rows = max(state.frontend.terminal_viewport.rows, 1)
+        cols = max(state.frontend.terminal_viewport.cols, 1)
         agent_window = Window.new_agent_chat(win_id, rows, cols)
 
         windows = %Windows{
@@ -216,14 +222,30 @@ defmodule MingaEditor.Commands.Agent do
 
         # Create agent tab in the background (don't switch to it).
         # Group creation happens later in start_agent_session when the session pid is available.
-        tab_bar = EditorState.tab_bar(state) || TabBar.new(Tab.new_file(1, "File"))
+        tab_bar = state.shell_runtime.state.tab_bar || TabBar.new(Tab.new_file(1, "File"))
         original_active_id = tab_bar.active_id
         {tb, new_tab} = TabBar.add(tab_bar, :agent, "Agent")
         tb = TabBar.update_context(tb, new_tab.id, context)
 
         # Switch back to the original active tab
         tb = TabBar.switch_to(tb, original_active_id)
-        EditorState.set_tab_bar(state, tb)
+
+        then(state, fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.set_tab_bar(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              tb
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
 
       _existing ->
         state
@@ -245,10 +267,10 @@ defmodule MingaEditor.Commands.Agent do
     do: TabBar.find_by_kind(tb, :agent)
 
   # Starts an agent session after switching into the agent tab.
-  # Called only after the tab switch so AgentAccess.session/1 sees the tab's pid.
+  # Called only after the tab switch so Shell.Runtime.active_session/1 sees the tab's pid.
   @spec maybe_start_session(state()) :: state()
   defp maybe_start_session(state) do
-    if AgentAccess.session(state) == nil do
+    if Runtime.active_session(state.shell_runtime) == nil do
       AgentSession.start_agent_session(state)
     else
       state
@@ -263,9 +285,9 @@ defmodule MingaEditor.Commands.Agent do
       active_tab_id,
       state.workspace.buffers.active,
       state.workspace.windows,
-      EditorState.file_tree_state(state),
+      state.workspace.file_tree,
       state.workspace.keymap_scope,
-      AgentAccess.input_focused?(state)
+      state.workspace.agent_ui.panel.input_focused
     )
   end
 
@@ -288,9 +310,9 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Returns from the agent view to the recorded editor context without stopping the session."
   @spec return_to_editor(state()) :: state()
   def return_to_editor(state) do
-    return_target = state |> AgentAccess.view() |> UIState.View.return_target()
+    return_target = state.workspace.agent_ui.view |> UIState.View.return_target()
 
-    case target_file_tab_id(EditorState.tab_bar(state), return_target) do
+    case target_file_tab_id(state.shell_runtime.state.tab_bar, return_target) do
       {:exact, id} ->
         state
         |> mark_agent_view_inactive()
@@ -329,18 +351,23 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec restore_return_keymap_scope(state(), UIState.View.return_target() | nil) :: state()
   defp restore_return_keymap_scope(state, %{keymap_scope: keymap_scope}) do
-    EditorState.set_keymap_scope(state, keymap_scope)
+    %{
+      state
+      | workspace: MingaEditor.Session.State.set_keymap_scope(state.workspace, keymap_scope)
+    }
   end
 
   defp restore_return_keymap_scope(state, _return_target) do
-    EditorState.set_keymap_scope(state, :editor)
+    %{state | workspace: MingaEditor.Session.State.set_keymap_scope(state.workspace, :editor)}
   end
 
   @spec restore_return_target_without_tab(state(), UIState.View.return_target() | nil) :: state()
   defp restore_return_target_without_tab(state, nil) do
     state
     |> mark_agent_view_inactive()
-    |> EditorState.set_keymap_scope(:editor)
+    |> then(fn state ->
+      %{state | workspace: MingaEditor.Session.State.set_keymap_scope(state.workspace, :editor)}
+    end)
     |> NoticeWorkflow.publish("No file tabs in this workspace")
   end
 
@@ -361,7 +388,7 @@ defmodule MingaEditor.Commands.Agent do
       |> SessionState.set_file_tree(return_target.file_tree)
       |> restore_return_target_buffer(return_target.active_buffer)
 
-    EditorState.set_workspace(state, workspace)
+    %{state | workspace: workspace}
   end
 
   @spec restore_return_target_buffer(SessionState.t(), pid() | nil) :: SessionState.t()
@@ -382,16 +409,16 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec restore_prompt_focus(state(), boolean()) :: state()
   defp restore_prompt_focus(state, true),
-    do: update_agent_ui(state, &UIState.set_input_focused(&1, true))
+    do: update_agent_ui(state, &PromptBuffer.set_input_focused(&1, true))
 
   defp restore_prompt_focus(state, false),
-    do: update_agent_ui(state, &UIState.set_input_focused(&1, false))
+    do: update_agent_ui(state, &PromptBuffer.set_input_focused(&1, false))
 
   @spec mark_agent_view_inactive(state()) :: state()
   defp mark_agent_view_inactive(state) do
     update_agent_ui(state, fn ui ->
       {ui, _windows, _file_tree} = UIState.deactivate(ui)
-      UIState.set_input_focused(ui, false)
+      PromptBuffer.set_input_focused(ui, false)
     end)
   end
 
@@ -412,8 +439,14 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Submits the current input text as a prompt."
   @spec submit_prompt(state()) :: state()
   def submit_prompt(state) do
-    panel = AgentAccess.panel(state)
-    submit_prompt(state, panel, UIState.input_empty?(panel), AgentAccess.session(state))
+    panel = state.workspace.agent_ui.panel
+
+    submit_prompt(
+      state,
+      panel,
+      PromptBuffer.input_empty?(panel),
+      Runtime.active_session(state.shell_runtime)
+    )
   end
 
   @spec submit_prompt(state(), Panel.t(), boolean(), pid() | nil) :: state()
@@ -433,7 +466,7 @@ defmodule MingaEditor.Commands.Agent do
   end
 
   defp submit_prompt(state, panel, false, _session) do
-    text = UIState.prompt_text(panel)
+    text = PromptBuffer.prompt_text(panel)
     submit_prompt_text(state, text, SlashCommand.slash_command?(text))
   end
 
@@ -458,11 +491,14 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec clear_submitted_slash_input_for_sensitivity(state(), boolean()) :: state()
   defp clear_submitted_slash_input_for_sensitivity(state, true) do
-    update_agent_ui(state, &UIState.clear_input_without_history_and_scroll/1)
+    update_agent_ui(
+      state,
+      &PromptBuffer.clear_input_without_history_and_scroll/1
+    )
   end
 
   defp clear_submitted_slash_input_for_sensitivity(state, false) do
-    update_agent_ui(state, &UIState.clear_input_and_scroll/1)
+    update_agent_ui(state, &PromptBuffer.clear_input_and_scroll/1)
   end
 
   @spec execute_slash_command(state(), String.t()) :: state()
@@ -477,8 +513,12 @@ defmodule MingaEditor.Commands.Agent do
   defp report_unknown_slash_command(state, text) do
     message = SlashCommand.unknown_command_message(text)
 
-    if AgentAccess.session(state) do
-      Session.add_system_message(AgentAccess.session(state), message, :error)
+    if Runtime.active_session(state.shell_runtime) do
+      Session.add_system_message(
+        Runtime.active_session(state.shell_runtime),
+        message,
+        :error
+      )
     end
 
     NoticeWorkflow.publish(state, message)
@@ -492,17 +532,7 @@ defmodule MingaEditor.Commands.Agent do
         "Session disconnected. Your prompt will be preserved."
       )
     else
-      panel = AgentAccess.panel(state)
-
-      case prompt_submit_status(state, panel) do
-        :ready ->
-          state
-          |> AgentAccess.update_panel(&Panel.clear_provenance_jump/1)
-          |> resolve_and_deliver_prompt(text, panel.model_name)
-
-        {:blocked, msg} ->
-          NoticeWorkflow.publish(state, msg)
-      end
+      submit_connected_prompt(state, text, state.workspace.agent_ui.panel)
     end
   catch
     :exit, _ ->
@@ -510,6 +540,24 @@ defmodule MingaEditor.Commands.Agent do
         state,
         "Agent session unavailable. Your prompt was preserved."
       )
+  end
+
+  @spec submit_connected_prompt(state(), String.t(), Panel.t()) :: state()
+  defp submit_connected_prompt(state, text, panel) do
+    case prompt_submit_status(state, panel) do
+      :ready ->
+        state
+        |> then(fn state ->
+          TraditionalWorkflow.install_agent_panel(
+            state,
+            (&Panel.clear_provenance_jump/1).(state.workspace.agent_ui.panel)
+          )
+        end)
+        |> resolve_and_deliver_prompt(text, panel.model_name)
+
+      {:blocked, msg} ->
+        NoticeWorkflow.publish(state, msg)
+    end
   end
 
   @spec resolve_and_deliver_prompt(state(), String.t(), String.t()) :: state()
@@ -526,17 +574,23 @@ defmodule MingaEditor.Commands.Agent do
   # Clears the input and resets diff baselines after a prompt is submitted.
   @spec clear_input_after_submit(state()) :: state()
   defp clear_input_after_submit(state) do
-    state = update_agent_ui(state, &UIState.clear_input_and_scroll/1)
+    state = update_agent_ui(state, &PromptBuffer.clear_input_and_scroll/1)
 
-    AgentAccess.update_agent_ui(state, fn _ ->
-      UIState.clear_baselines(AgentAccess.agent_ui(state))
-    end)
+    TraditionalWorkflow.install_agent_ui(
+      state,
+      (fn _ ->
+         UIState.clear_baselines(state.workspace.agent_ui)
+       end).(state.workspace.agent_ui)
+    )
   end
 
   # Sends the resolved content to the LLM and handles steering queue feedback.
   @spec deliver_prompt(state(), String.t() | [ReqLLM.Message.ContentPart.t()]) :: state()
   defp deliver_prompt(state, resolved) do
-    case AgentSession.send_prompt_pid(AgentAccess.session(state), resolved) do
+    case AgentSession.send_prompt_pid(
+           Runtime.active_session(state.shell_runtime),
+           resolved
+         ) do
       :ok ->
         clear_input_after_submit(state)
 
@@ -570,7 +624,7 @@ defmodule MingaEditor.Commands.Agent do
         "Session disconnected. Your prompt will be preserved."
       )
     else
-      panel = AgentAccess.panel(state)
+      panel = state.workspace.agent_ui.panel
 
       case prompt_submit_status(state, panel) do
         :ready -> resolve_and_deliver_follow_up(state, text, panel.model_name)
@@ -602,7 +656,7 @@ defmodule MingaEditor.Commands.Agent do
       :ready
     else
       state
-      |> prompt_readiness(panel, AgentAccess.session(state))
+      |> prompt_readiness(panel, Runtime.active_session(state.shell_runtime))
       |> prompt_readiness_submit_status()
     end
   end
@@ -704,7 +758,7 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec remote_session?(state()) :: boolean()
   defp remote_session?(state) do
-    case AgentAccess.session(state) do
+    case Runtime.active_session(state.shell_runtime) do
       pid when is_pid(pid) -> node(pid) != node()
       _ -> false
     end
@@ -712,7 +766,7 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec remote_session_disconnected?(state()) :: boolean()
   defp remote_session_disconnected?(state) do
-    case AgentAccess.session(state) do
+    case Runtime.active_session(state.shell_runtime) do
       pid when is_pid(pid) and node(pid) != node() -> remote_node_disconnected?(node(pid))
       _ -> false
     end
@@ -728,13 +782,16 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec deliver_follow_up(state(), String.t() | [ReqLLM.Message.ContentPart.t()]) :: state()
   defp deliver_follow_up(state, resolved) do
-    case Session.queue_follow_up(AgentAccess.session(state), resolved) do
+    case Session.queue_follow_up(
+           Runtime.active_session(state.shell_runtime),
+           resolved
+         ) do
       :ok ->
-        update_agent_ui(state, &UIState.clear_input_and_scroll/1)
+        update_agent_ui(state, &PromptBuffer.clear_input_and_scroll/1)
 
       {:queued, :follow_up} ->
         state
-        |> update_agent_ui(&UIState.clear_input_and_scroll/1)
+        |> update_agent_ui(&PromptBuffer.clear_input_and_scroll/1)
         |> update_agent_ui(
           &UIState.push_toast(&1, "⏳ Queued (follow-up). Ctrl-C to cancel.", :info)
         )
@@ -770,9 +827,9 @@ defmodule MingaEditor.Commands.Agent do
   @spec clear_chat_display(state()) :: state()
   def clear_chat_display(state) do
     msg_count =
-      if AgentAccess.session(state) do
+      if Runtime.active_session(state.shell_runtime) do
         try do
-          Enum.count(Session.messages(AgentAccess.session(state)))
+          Enum.count(Session.messages(Runtime.active_session(state.shell_runtime)))
         catch
           :exit, _ -> 0
         end
@@ -782,8 +839,11 @@ defmodule MingaEditor.Commands.Agent do
 
     state = update_agent_ui(state, &UIState.clear_display(&1, msg_count))
 
-    if AgentAccess.session(state) do
-      Session.add_system_message(AgentAccess.session(state), "Display cleared")
+    if Runtime.active_session(state.shell_runtime) do
+      Session.add_system_message(
+        Runtime.active_session(state.shell_runtime),
+        "Display cleared"
+      )
     end
 
     state
@@ -797,7 +857,7 @@ defmodule MingaEditor.Commands.Agent do
   """
   @spec abort_agent(state()) :: state()
   def abort_agent(state) do
-    case AgentAccess.session(state) do
+    case Runtime.active_session(state.shell_runtime) do
       nil ->
         state
 
@@ -817,7 +877,7 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Retries the current agent provider after a startup or crash error."
   @spec restart_agent_provider(state()) :: state()
   def restart_agent_provider(state) do
-    case AgentAccess.session(state) do
+    case Runtime.active_session(state.shell_runtime) do
       nil ->
         NoticeWorkflow.publish(state, "No agent session to restart")
 
@@ -848,7 +908,7 @@ defmodule MingaEditor.Commands.Agent do
   """
   @spec dequeue_to_editor(state()) :: state()
   def dequeue_to_editor(state) do
-    case AgentAccess.session(state) do
+    case Runtime.active_session(state.shell_runtime) do
       nil ->
         state
 
@@ -861,20 +921,23 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Queues the current input as a follow-up; submits normally when agent is idle."
   @spec scope_queue_follow_up(state()) :: state()
   def scope_queue_follow_up(state) do
-    panel = AgentAccess.panel(state)
+    panel = state.workspace.agent_ui.panel
 
     cond do
-      UIState.input_empty?(panel) ->
+      PromptBuffer.input_empty?(panel) ->
         state
 
-      AgentAccess.session(state) == nil ->
+      Runtime.active_session(state.shell_runtime) == nil ->
         NoticeWorkflow.publish(
           state,
           "No agent session, try closing and reopening the panel"
         )
 
-      AgentAccess.agent(state).runtime.status in [:thinking, :tool_executing] ->
-        text = UIState.prompt_text(panel)
+      MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state).runtime.status in [
+        :thinking,
+        :tool_executing
+      ] ->
+        text = PromptBuffer.prompt_text(panel)
 
         if SlashCommand.slash_command?(text) do
           state = clear_submitted_slash_input(state, text)
@@ -902,7 +965,7 @@ defmodule MingaEditor.Commands.Agent do
   """
   @spec scope_ctrl_c(state()) :: state()
   def scope_ctrl_c(state) do
-    case AgentAccess.agent(state).runtime.status do
+    case MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state).runtime.status do
       status when status in [:thinking, :tool_executing] -> abort_agent(state)
       :error -> restart_agent_provider(state)
       _status -> input_to_normal(state)
@@ -912,7 +975,7 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Starts an agent session if one isn't already running. No-op otherwise."
   @spec ensure_agent_session(state()) :: state()
   def ensure_agent_session(state) do
-    if AgentAccess.session(state) == nil do
+    if Runtime.active_session(state.shell_runtime) == nil do
       AgentSession.start_agent_session(state)
     else
       state
@@ -935,27 +998,39 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec reset_agent_state_for_new_session(state()) :: state()
   defp reset_agent_state_for_new_session(state) do
-    old_panel = AgentAccess.panel(state)
+    old_panel = state.workspace.agent_ui.panel
 
-    state
-    |> AgentAccess.update_agent(fn _a -> %AgentState{} end)
-    |> AgentAccess.update_agent_ui(fn _a ->
+    state = TraditionalWorkflow.install_agent_state(state, %AgentState{})
+
+    agent_ui =
       UIState.new()
       |> UIState.set_thinking_level(old_panel.thinking_level)
-    end)
+
+    TraditionalWorkflow.install_agent_ui(state, agent_ui)
   end
 
   @spec create_active_agent_tab(state()) :: state()
   defp create_active_agent_tab(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
-    rows = max(state.terminal_viewport.rows, 1)
-    cols = max(state.terminal_viewport.cols, 1)
+    rows = max(state.frontend.terminal_viewport.rows, 1)
+    cols = max(state.frontend.terminal_viewport.cols, 1)
     windows = agent_tab_windows(rows, cols)
     context = EditorState.build_agent_tab_defaults(state, windows)
     {tb, tab} = TabBar.insert(tb, :agent, "Agent")
     tb = TabBar.update_context(tb, tab.id, context)
 
-    state
-    |> EditorState.set_tab_bar(tb)
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          tb
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
     |> EditorState.switch_tab(tab.id)
   end
 
@@ -1013,31 +1088,31 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Handles a character input in the agent prompt."
   @spec input_char(state(), String.t()) :: state()
   def input_char(state, char) do
-    update_agent_ui(state, &UIState.insert_char(&1, char))
+    update_agent_ui(state, &PromptBuffer.insert_char(&1, char))
   end
 
   @doc "Inserts pasted text into the agent prompt. Collapses multi-line pastes into a compact indicator."
   @spec input_paste(state(), String.t()) :: state()
   def input_paste(state, text) do
-    update_agent_ui(state, &UIState.insert_paste(&1, text))
+    update_agent_ui(state, &PromptBuffer.insert_paste(&1, text))
   end
 
   @doc "Toggles expand/collapse on the paste block at the cursor."
   @spec toggle_paste_expand(state()) :: state()
   def toggle_paste_expand(state) do
-    update_agent_ui(state, &UIState.toggle_paste_expand/1)
+    update_agent_ui(state, &PromptBuffer.toggle_paste_expand/1)
   end
 
   @doc "Deletes the last character from the agent prompt."
   @spec input_backspace(state()) :: state()
   def input_backspace(state) do
-    update_agent_ui(state, &UIState.delete_char/1)
+    update_agent_ui(state, &PromptBuffer.delete_char/1)
   end
 
   @doc "Cycles the thinking level (off → low → medium → high)."
   @spec cycle_thinking_level(state()) :: state()
   def cycle_thinking_level(state) do
-    case AgentAccess.session(state) do
+    case Runtime.active_session(state.shell_runtime) do
       nil ->
         NoticeWorkflow.publish(state, "No agent session")
 
@@ -1080,7 +1155,7 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Sets the thinking level to the given provider-supported value."
   @spec set_thinking_level(state(), String.t()) :: state()
   def set_thinking_level(state, level) when is_binary(level) do
-    case AgentAccess.session(state) do
+    case Runtime.active_session(state.shell_runtime) do
       nil ->
         NoticeWorkflow.publish(state, "No agent session")
 
@@ -1101,10 +1176,10 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Opens a picker for selecting the agent thinking level."
   @spec pick_thinking_level(state()) :: state()
   def pick_thinking_level(state) do
-    if AgentAccess.session(state) == nil do
+    if Runtime.active_session(state.shell_runtime) == nil do
       NoticeWorkflow.publish(state, "No agent session")
     else
-      current_level = AgentAccess.panel(state).thinking_level
+      current_level = state.workspace.agent_ui.panel.thinking_level
 
       PickerUI.open(state, MingaEditor.UI.Picker.ThinkingLevelSource, %{
         current_level: current_level
@@ -1122,16 +1197,16 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Cycles to the next model in the configured rotation."
   @spec cycle_model(state()) :: state()
   def cycle_model(state) do
-    if AgentAccess.session(state) == nil do
+    if Runtime.active_session(state.shell_runtime) == nil do
       NoticeWorkflow.publish(state, "No agent session")
     else
-      case Session.cycle_model(AgentAccess.session(state)) do
+      case Session.cycle_model(Runtime.active_session(state.shell_runtime)) do
         {:ok, %{"model" => model, "index" => index, "total" => total} = result} ->
           state = apply_model_and_provider(state, model)
           state = maybe_update_thinking_level(state, Map.get(result, "thinking_level"))
 
           Session.add_system_message(
-            AgentAccess.session(state),
+            Runtime.active_session(state.shell_runtime),
             "Model: #{model} [#{index}/#{total}]"
           )
 
@@ -1170,7 +1245,7 @@ defmodule MingaEditor.Commands.Agent do
   def set_model(state, model) do
     state = apply_model_and_provider(state, model)
 
-    case AgentAccess.session(state) do
+    case Runtime.active_session(state.shell_runtime) do
       nil ->
         NoticeWorkflow.publish(state, "Model: #{model}")
 
@@ -1233,7 +1308,7 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Jumps to next code block or diff hunk."
   @spec scope_next_code_block(state()) :: state()
   def scope_next_code_block(state) do
-    case AgentAccess.view(state).preview do
+    case state.workspace.agent_ui.view.preview do
       %Preview{content: {:diff, review}} ->
         update_preview(state, &Preview.update_diff(&1, fn _ -> DiffReview.next_hunk(review) end))
 
@@ -1253,7 +1328,7 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Jumps to previous code block or diff hunk."
   @spec scope_prev_code_block(state()) :: state()
   def scope_prev_code_block(state) do
-    case AgentAccess.view(state).preview do
+    case state.workspace.agent_ui.view.preview do
       %Preview{content: {:diff, review}} ->
         update_preview(state, &Preview.update_diff(&1, fn _ -> DiffReview.prev_hunk(review) end))
 
@@ -1425,7 +1500,7 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec log_system_message(state(), String.t()) :: :ok
   defp log_system_message(state, text) do
-    case AgentAccess.session(state) do
+    case Runtime.active_session(state.shell_runtime) do
       pid when is_pid(pid) -> Session.add_system_message(pid, text)
       _ -> :ok
     end
@@ -1436,7 +1511,8 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Toggles the pinned state of the message at the cursor."
   @spec scope_pin_message(state()) :: state()
   def scope_pin_message(state) do
-    with session when is_pid(session) <- AgentAccess.session(state),
+    with session when is_pid(session) <-
+           Runtime.active_session(state.shell_runtime),
          {msg_idx, _msg, _line_type} <- scroll_context(state),
          {id, msg} <- display_pair_at(state, session, msg_idx),
          false <- synthetic_display_message?(msg) do
@@ -1451,7 +1527,7 @@ defmodule MingaEditor.Commands.Agent do
   @spec display_pair_at(state(), pid(), non_neg_integer()) :: {pos_integer(), Message.t()} | nil
   defp display_pair_at(state, session, msg_idx) do
     pairs =
-      case AgentAccess.panel(state).cached_display_message_pairs do
+      case state.workspace.agent_ui.panel.cached_display_message_pairs do
         [] -> Session.messages_with_ids(session)
         cached -> cached
       end
@@ -1469,21 +1545,21 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Focuses the input field and transitions to insert mode."
   @spec scope_focus_input(state()) :: state()
   def scope_focus_input(state) do
-    state = update_agent_ui(state, &UIState.set_input_focused(&1, true))
-    EditorState.transition_mode(state, :insert)
+    state = update_agent_ui(state, &PromptBuffer.set_input_focused(&1, true))
+    %{state | workspace: MingaEditor.Session.State.transition_mode(state.workspace, :insert)}
   end
 
   @doc "Unfocuses the input field and transitions to normal mode."
   @spec scope_unfocus_input(state()) :: state()
   def scope_unfocus_input(state) do
-    state = update_agent_ui(state, &UIState.set_input_focused(&1, false))
-    EditorState.transition_mode(state, :normal)
+    state = update_agent_ui(state, &PromptBuffer.set_input_focused(&1, false))
+    %{state | workspace: MingaEditor.Session.State.transition_mode(state.workspace, :normal)}
   end
 
   @doc "Unfocuses the input field and closes the agent split pane."
   @spec scope_unfocus_and_quit(state()) :: state()
   def scope_unfocus_and_quit(state) do
-    state = update_agent_ui(state, &UIState.set_input_focused(&1, false))
+    state = update_agent_ui(state, &PromptBuffer.set_input_focused(&1, false))
     toggle_agent_split(state)
   end
 
@@ -1518,7 +1594,7 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Switches focus between chat and file viewer panels."
   @spec scope_switch_focus(state()) :: state()
   def scope_switch_focus(state) do
-    if state |> AgentAccess.view() |> UIState.View.focus() == :chat do
+    if state.workspace.agent_ui.view |> UIState.View.focus() == :chat do
       update_agent_ui(state, &UIState.set_focus(&1, :file_viewer))
     else
       update_agent_ui(state, &UIState.set_focus(&1, :chat))
@@ -1565,10 +1641,15 @@ defmodule MingaEditor.Commands.Agent do
   """
   @spec scope_provenance_return(state()) :: state()
   def scope_provenance_return(state) do
-    case AgentAccess.panel(state).provenance_jump do
+    case state.workspace.agent_ui.panel.provenance_jump do
       %ProvenanceJump{origin: {path, line}} ->
         state
-        |> AgentAccess.update_panel(&Panel.clear_provenance_jump/1)
+        |> then(fn state ->
+          TraditionalWorkflow.install_agent_panel(
+            state,
+            (&Panel.clear_provenance_jump/1).(state.workspace.agent_ui.panel)
+          )
+        end)
         |> return_to_editor()
         |> return_to_origin(path, line)
 
@@ -1595,7 +1676,7 @@ defmodule MingaEditor.Commands.Agent do
   defp open_origin_buffer(state, path, line) do
     case Enum.find_index(state.workspace.buffers.list, &(safe_file_path(&1) == path)) do
       nil ->
-        case Commands.start_buffer(path, EditorState.options_server(state)) do
+        case Commands.start_buffer(path, state.interaction.options_server) do
           {:ok, pid} ->
             state = Commands.add_buffer(state, pid)
             safe_move_to(pid, {line, 0})
@@ -1629,8 +1710,8 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec dismiss_agent_transient_or_return(state()) :: state()
   defp dismiss_agent_transient_or_return(state) do
-    view = AgentAccess.view(state)
-    panel = AgentAccess.panel(state)
+    view = state.workspace.agent_ui.view
+    panel = state.workspace.agent_ui.panel
 
     dismiss_agent_transient_or_return(state, view, panel)
   end
@@ -1655,7 +1736,7 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec dismiss_agent_prefix(state(), UIState.View.prefix()) :: state()
   defp dismiss_agent_prefix(state, nil) do
-    panel = AgentAccess.panel(state)
+    panel = state.workspace.agent_ui.panel
     dismiss_agent_panel_or_modal(state, panel)
   end
 
@@ -1688,7 +1769,7 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec dismiss_agent_input_or_return(state()) :: state()
   defp dismiss_agent_input_or_return(state) do
-    if AgentAccess.input_focused?(state) do
+    if state.workspace.agent_ui.panel.input_focused do
       scope_unfocus_input(state)
     else
       return_to_editor(state)
@@ -1718,7 +1799,7 @@ defmodule MingaEditor.Commands.Agent do
   """
   @spec scope_focus_or_submit(state()) :: state()
   def scope_focus_or_submit(state) do
-    panel = AgentAccess.panel(state)
+    panel = state.workspace.agent_ui.panel
 
     if panel.input_focused do
       submit_prompt(state)
@@ -1730,13 +1811,13 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Inserts a newline in the input field."
   @spec scope_insert_newline(state()) :: state()
   def scope_insert_newline(state) do
-    update_agent_ui(state, &UIState.insert_newline/1)
+    update_agent_ui(state, &PromptBuffer.insert_newline/1)
   end
 
   @doc "Submits if input has text, aborts if agent is active."
   @spec scope_submit_or_abort(state()) :: state()
   def scope_submit_or_abort(state) do
-    if UIState.prompt_text(AgentAccess.panel(state)) != "" do
+    if PromptBuffer.prompt_text(state.workspace.agent_ui.panel) != "" do
       submit_prompt(state)
     else
       abort_if_active(state)
@@ -1746,27 +1827,27 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Moves cursor up in input or recalls history."
   @spec scope_input_up(state()) :: state()
   def scope_input_up(state) do
-    panel = AgentAccess.panel(state)
-    {line, _col} = UIState.input_cursor(panel)
+    panel = state.workspace.agent_ui.panel
+    {line, _col} = PromptBuffer.input_cursor(panel)
 
     if line == 0 do
-      update_agent_ui(state, &UIState.history_prev/1)
+      update_agent_ui(state, &PromptBuffer.history_prev/1)
     else
-      update_agent_ui(state, &UIState.move_cursor_up/1)
+      update_agent_ui(state, &PromptBuffer.move_cursor_up/1)
     end
   end
 
   @doc "Moves cursor down in input or advances history."
   @spec scope_input_down(state()) :: state()
   def scope_input_down(state) do
-    panel = AgentAccess.panel(state)
-    {line, _col} = UIState.input_cursor(panel)
-    max_line = UIState.input_line_count(panel) - 1
+    panel = state.workspace.agent_ui.panel
+    {line, _col} = PromptBuffer.input_cursor(panel)
+    max_line = PromptBuffer.input_line_count(panel) - 1
 
     if line >= max_line do
-      update_agent_ui(state, &UIState.history_next/1)
+      update_agent_ui(state, &PromptBuffer.history_next/1)
     else
-      update_agent_ui(state, &UIState.move_cursor_down/1)
+      update_agent_ui(state, &PromptBuffer.move_cursor_down/1)
     end
   end
 
@@ -1786,7 +1867,10 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Aborts agent operation if one is active."
   @spec scope_abort_if_active(state()) :: state()
   def scope_abort_if_active(state) do
-    if AgentAccess.agent(state).runtime.status in [:thinking, :tool_executing] do
+    if MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state).runtime.status in [
+         :thinking,
+         :tool_executing
+       ] do
       abort_agent(state)
     else
       state
@@ -1859,7 +1943,7 @@ defmodule MingaEditor.Commands.Agent do
   defp restore_queued_to_prompt(state, []), do: state
 
   defp restore_queued_to_prompt(state, all_queued) do
-    current_text = UIState.prompt_text(AgentAccess.panel(state))
+    current_text = PromptBuffer.prompt_text(state.workspace.agent_ui.panel)
     combined = Session.combine_queue_entries_to_text(all_queued)
 
     restored =
@@ -1867,7 +1951,7 @@ defmodule MingaEditor.Commands.Agent do
         do: combined <> "\n\n" <> current_text,
         else: combined
 
-    update_agent_ui(state, &UIState.set_prompt_text(&1, restored))
+    update_agent_ui(state, &PromptBuffer.set_prompt_text(&1, restored))
   end
 
   @spec do_dequeue_to_editor(state(), [String.t() | [ReqLLM.Message.ContentPart.t()]]) ::
@@ -1887,21 +1971,31 @@ defmodule MingaEditor.Commands.Agent do
   end
 
   @spec update_agent_ui(state(), (UIState.t() -> UIState.t())) :: state()
-  defp update_agent_ui(state, fun), do: AgentAccess.update_agent_ui(state, fun)
+  defp update_agent_ui(state, fun),
+    do:
+      TraditionalWorkflow.install_agent_ui(
+        state,
+        fun.(state.workspace.agent_ui)
+      )
 
   @spec update_preview(state(), (Preview.t() -> Preview.t())) :: state()
   defp update_preview(state, fun) do
-    AgentAccess.update_agent_ui(state, &UIState.update_preview(&1, fun))
+    view = state.workspace.agent_ui.view
+    updated_view = MingaEditor.Agent.UIState.View.replace_preview(view, fun.(view.preview))
+    TraditionalWorkflow.install_agent_view(state, updated_view)
   end
 
   @spec panel_height(state()) :: non_neg_integer()
   defp panel_height(state) do
-    div(state.terminal_viewport.rows * 35, 100)
+    div(state.frontend.terminal_viewport.rows * 35, 100)
   end
 
   @spec abort_if_active(state()) :: state()
   defp abort_if_active(state) do
-    if AgentAccess.agent(state).runtime.status in [:thinking, :tool_executing] do
+    if MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state).runtime.status in [
+         :thinking,
+         :tool_executing
+       ] do
       abort_agent(state)
     else
       state
@@ -1910,8 +2004,8 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec toggle_all_collapses(state()) :: state()
   defp toggle_all_collapses(state) do
-    if AgentAccess.session(state) do
-      Session.toggle_all_tool_collapses(AgentAccess.session(state))
+    if Runtime.active_session(state.shell_runtime) do
+      Session.toggle_all_tool_collapses(Runtime.active_session(state.shell_runtime))
     end
 
     state
@@ -1920,8 +2014,8 @@ defmodule MingaEditor.Commands.Agent do
   @spec scroll_context(state()) ::
           {non_neg_integer(), Message.t(), Transcript.line_type()} | nil
   defp scroll_context(state) do
-    session = AgentAccess.session(state)
-    panel = AgentAccess.panel(state)
+    session = Runtime.active_session(state.shell_runtime)
+    panel = state.workspace.agent_ui.panel
 
     if session do
       messages = safe_messages(session)
@@ -1949,15 +2043,22 @@ defmodule MingaEditor.Commands.Agent do
   defp copy_to_clipboard(state, text, label) do
     case Clipboard.write(text) do
       :ok ->
-        if AgentAccess.session(state) do
-          Session.add_system_message(AgentAccess.session(state), "Copied #{label} to clipboard")
+        if Runtime.active_session(state.shell_runtime) do
+          Session.add_system_message(
+            Runtime.active_session(state.shell_runtime),
+            "Copied #{label} to clipboard"
+          )
         end
 
         update_agent_ui(state, &UIState.push_toast(&1, "Copied #{label}", :info))
 
       _error ->
-        if AgentAccess.session(state) do
-          Session.add_system_message(AgentAccess.session(state), "Clipboard write failed", :error)
+        if Runtime.active_session(state.shell_runtime) do
+          Session.add_system_message(
+            Runtime.active_session(state.shell_runtime),
+            "Clipboard write failed",
+            :error
+          )
         end
 
         update_agent_ui(state, &UIState.push_toast(&1, "Clipboard write failed", :error))
@@ -1984,8 +2085,8 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec code_block_index_for_scroll(state(), [Markdown.code_block()]) :: non_neg_integer()
   defp code_block_index_for_scroll(state, blocks) do
-    session = AgentAccess.session(state)
-    panel = AgentAccess.panel(state)
+    session = Runtime.active_session(state.shell_runtime)
+    panel = state.workspace.agent_ui.panel
     messages = safe_messages(session)
 
     line_map = cached_or_compute_line_index(panel, messages)
@@ -2052,7 +2153,10 @@ defmodule MingaEditor.Commands.Agent do
 
   # Delegates to EditorState shared helper.
   defp scroll_agent_chat_window(state, delta),
-    do: EditorState.scroll_agent_chat_window(state, delta)
+    do: %{
+      state
+      | workspace: MingaEditor.Session.State.scroll_agent_chat_window(state.workspace, delta)
+    }
 
   # Commands callable from any keymap scope. This includes:
   # - Toggle/lifecycle/session management (invoked from editor scope leader keys)

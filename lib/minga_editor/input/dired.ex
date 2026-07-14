@@ -16,7 +16,6 @@ defmodule MingaEditor.Input.Dired do
   @type state :: MingaEditor.Input.Handler.handler_state()
 
   alias MingaEditor.Commands
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Dired, as: DiredState
   alias Minga.Keymap
   alias Minga.Keymap.Scope
@@ -52,7 +51,7 @@ defmodule MingaEditor.Input.Dired do
            :dired,
            binding_state,
            key,
-           EditorState.keymap_context(state)
+           keymap_server: state.interaction.keymap_server
          ) do
       {:command, command} ->
         {:handled, Commands.execute(state, command)}
@@ -138,6 +137,13 @@ defmodule MingaEditor.Input.Dired do
 
   @spec update_pending_prefix(state(), Minga.Keymap.Bindings.node_t() | nil) :: state()
   defp update_pending_prefix(state, prefix) do
-    EditorState.update_dired(state, &DiredState.set_pending_prefix(&1, prefix))
+    %{
+      state
+      | workspace:
+          MingaEditor.Session.State.set_dired(
+            state.workspace,
+            (&DiredState.set_pending_prefix(&1, prefix)).(state.workspace.dired)
+          )
+    }
   end
 end

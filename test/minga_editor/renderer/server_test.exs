@@ -124,7 +124,7 @@ defmodule MingaEditor.Renderer.ServerTest do
     renderer = start_renderer(self(), pipeline: &emit_commit_frame/1)
     state = build_editor_state(:tui, nil)
     snapshot = Input.from_editor_state(state)
-    frame_ref = Minga.Test.HeadlessPort.prepare_await(state.port_manager)
+    frame_ref = Minga.Test.HeadlessPort.prepare_await(state.frontend.port_manager)
 
     RendererServer.cast_snapshot(renderer, snapshot, 123)
 
@@ -741,10 +741,10 @@ defmodule MingaEditor.Renderer.ServerTest do
 
       result = MingaEditor.Renderer.render_or_async(state)
 
-      assert result.render_correlation.latest_intent_revision ==
-               state.render_correlation.latest_intent_revision + 1
+      assert result.render.render_correlation.latest_intent_revision ==
+               state.render.render_correlation.latest_intent_revision + 1
 
-      assert %{result | render_correlation: state.render_correlation} == state
+      assert %{result | render: state.render} == state
 
       assert_receive {:render_done, %RenderReceipt{}},
                      @async_render_timeout
@@ -753,23 +753,22 @@ defmodule MingaEditor.Renderer.ServerTest do
     test "consecutive headless renders reuse renderer-process cache and consume targeted deltas" do
       state = build_editor_state(:headless, nil)
 
-      state = %{
-        state
-        | capabilities: %{
-            state.capabilities
-            | frontend_type: :native_gui,
-              float_support: :native,
-              text_rendering: :proportional,
-              semantic_ui: true
-          }
+      capabilities = %{
+        state.frontend.capabilities
+        | frontend_type: :native_gui,
+          float_support: :native,
+          text_rendering: :proportional,
+          semantic_ui: true
       }
 
-      assert Minga.Test.HeadlessPort.frame_count(state.port_manager) == 0
+      state = %{state | frontend: %{state.frontend | capabilities: capabilities}}
+
+      assert Minga.Test.HeadlessPort.frame_count(state.frontend.port_manager) == 0
 
       result = MingaEditor.Renderer.render_or_async(state)
 
-      assert result.layout != nil
-      assert Minga.Test.HeadlessPort.frame_count(state.port_manager) > 0
+      assert result.render.layout != nil
+      assert Minga.Test.HeadlessPort.frame_count(state.frontend.port_manager) > 0
 
       editor_window = Map.fetch!(result.workspace.windows.map, result.workspace.windows.active)
       assert %MingaEditor.Window{} = editor_window
@@ -778,10 +777,10 @@ defmodule MingaEditor.Renderer.ServerTest do
 
       repeated = MingaEditor.Renderer.render_or_async(result)
       assert repeated.workspace.windows.map == result.workspace.windows.map
-      assert repeated.renderer == result.renderer
+      assert repeated.render.renderer == result.render.renderer
       refute Map.has_key?(Map.from_struct(repeated), :caches)
 
-      resident_before = :sys.get_state(repeated.renderer).resident_windows[1]
+      resident_before = :sys.get_state(repeated.render.renderer).resident_windows[1]
 
       identity_before =
         MingaEditor.Renderer.WindowCache.line_identity(resident_before.render_cache)
@@ -793,23 +792,23 @@ defmodule MingaEditor.Renderer.ServerTest do
       :ok = Minga.Buffer.insert_text(buffer, "Z")
 
       edited = MingaEditor.Renderer.render_or_async(repeated)
-      resident_after = :sys.get_state(edited.renderer).resident_windows[1]
+      resident_after = :sys.get_state(edited.render.renderer).resident_windows[1]
       identity_after = MingaEditor.Renderer.WindowCache.line_identity(resident_after.render_cache)
 
-      assert edited.renderer == repeated.renderer
+      assert edited.render.renderer == repeated.render.renderer
       assert LineIdentity.source_ids(identity_after) == ids_before
       assert resident_after.render_cache.content_epoch == epoch_before
 
-      assert :sys.get_state(edited.renderer).buffer_versions[buffer] ==
+      assert :sys.get_state(edited.render.renderer).buffer_versions[buffer] ==
                Minga.Buffer.version(buffer)
 
       assert resident_after.render_cache.pending_edit_deltas == []
       assert {:ok, []} = Minga.Buffer.consume_edit_deltas(buffer, :renderer)
 
       confirmed = MingaEditor.Renderer.render_or_async(edited)
-      frontend_window = :sys.get_state(confirmed.port_manager).windows[1]
+      frontend_window = :sys.get_state(confirmed.frontend.port_manager).windows[1]
 
-      assert confirmed.renderer == edited.renderer
+      assert confirmed.render.renderer == edited.render.renderer
       assert [row] = frontend_window.rows
       assert row.text == "Ztest"
     end
@@ -832,14 +831,15 @@ defmodule MingaEditor.Renderer.ServerTest do
     {:ok, false} = Minga.Buffer.Process.set_option(buffer, :wrap, false)
 
     capabilities = %{
-      state.capabilities
+      state.frontend.capabilities
       | frontend_type: :native_gui,
         float_support: :native,
         text_rendering: :proportional,
         semantic_ui: true
     }
 
-    snapshot = Input.from_editor_state(%{state | capabilities: capabilities})
+    state = %{state | frontend: %{state.frontend | capabilities: capabilities}}
+    snapshot = Input.from_editor_state(state)
     renderer = start_ack_renderer(self(), pipeline: pipeline || resident_probe_pipeline(self()))
 
     RendererServer.cast_snapshot(renderer, snapshot, 1)
@@ -1188,10 +1188,9 @@ defmodule MingaEditor.Renderer.ServerTest do
     port = start_supervised!({Minga.Test.HeadlessPort, width: 80, height: 24})
 
     %MingaEditor.State{
-      backend: backend,
-      port_manager: port,
+      frontend: %MingaEditor.State.Frontend{backend: backend, port_manager: port},
       workspace: workspace,
-      renderer: renderer_pid,
+      render: %MingaEditor.State.Render{renderer: renderer_pid},
       shell_runtime:
         MingaEditor.Shell.Runtime.new(
           MingaEditor.Shell.Registry.get(:traditional),

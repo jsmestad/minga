@@ -34,7 +34,6 @@ defmodule MingaEditor.Agent.IngestApprovalRegressionTest do
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
@@ -127,7 +126,9 @@ defmodule MingaEditor.Agent.IngestApprovalRegressionTest do
       # The session advanced (blocked task unblocked) and the UI cleared because
       # the session accepted the decision.
       assert_receive {:tool_approval_response, "tc1", :approve}, @event_timeout
-      assert AgentAccess.agent(new_state).pending_approval == nil
+
+      assert MingaEditor.Shell.Traditional.State.agent(new_state.shell_runtime.state).pending_approval ==
+               nil
     end
   end
 
@@ -143,7 +144,9 @@ defmodule MingaEditor.Agent.IngestApprovalRegressionTest do
 
       new_state = AgentSubStates.approve_tool(state)
 
-      assert AgentAccess.agent(new_state).pending_approval == nil
+      assert MingaEditor.Shell.Traditional.State.agent(new_state.shell_runtime.state).pending_approval ==
+               nil
+
       assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(new_state) =~ "already resolved"
       refute_receive {:tool_approval_response, _, _}, 200
     end
@@ -166,7 +169,7 @@ defmodule MingaEditor.Agent.IngestApprovalRegressionTest do
     }
 
     %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80)
       },

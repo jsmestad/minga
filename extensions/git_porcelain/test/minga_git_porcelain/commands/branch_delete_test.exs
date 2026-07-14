@@ -76,7 +76,10 @@ defmodule MingaGitPorcelain.CommandsBranchDeleteTest do
   end
 
   defp build_state do
-    %EditorState{port_manager: nil, workspace: %SessionState{viewport: Viewport.new(24, 80)}}
+    %EditorState{
+      frontend: %MingaEditor.State.Frontend{port_manager: nil},
+      workspace: %SessionState{viewport: Viewport.new(24, 80)}
+    }
   end
 
   defp reset_global_project! do

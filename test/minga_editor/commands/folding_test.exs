@@ -64,7 +64,7 @@ defmodule MingaEditor.Commands.FoldingTest do
       %SessionState{viewport: Viewport.new(24, 80)}
       |> SessionState.set_windows(windows)
 
-    %EditorState{port_manager: nil, workspace: workspace}
+    %EditorState{frontend: %MingaEditor.State.Frontend{port_manager: nil}, workspace: workspace}
   end
 
   defp editor_state_with_two_windows(range) do
@@ -90,6 +90,6 @@ defmodule MingaEditor.Commands.FoldingTest do
       %SessionState{viewport: Viewport.new(24, 80)}
       |> SessionState.set_windows(windows)
 
-    %EditorState{port_manager: nil, workspace: workspace}
+    %EditorState{frontend: %MingaEditor.State.Frontend{port_manager: nil}, workspace: workspace}
   end
 end

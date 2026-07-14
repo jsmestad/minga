@@ -28,9 +28,9 @@ defmodule MingaEditor.Layout.GUI do
     terminal grid, so the minibuffer genuinely consumes the last row and must be
     reserved.
   """
-  @spec compute(EditorState.t()) :: Layout.t()
+  @spec compute(EditorState.t() | map()) :: Layout.t()
   def compute(state) do
-    vp = state.terminal_viewport
+    vp = terminal_viewport(state)
     terminal = {0, 0, vp.cols, vp.rows}
 
     native_gui? = Capabilities.gui?(capabilities(state))
@@ -73,10 +73,15 @@ defmodule MingaEditor.Layout.GUI do
     }
   end
 
+  @spec terminal_viewport(EditorState.t() | map()) :: MingaEditor.Viewport.t()
+  defp terminal_viewport(%{frontend: %{terminal_viewport: viewport}}), do: viewport
+  defp terminal_viewport(%{terminal_viewport: viewport}), do: viewport
+
   # Reads frontend capabilities, defaulting to the terminal profile (reserve the
   # minibuffer row) when they are absent so pre-ready frames and non-struct
   # callers keep the conservative TUI-compatible geometry.
   @spec capabilities(EditorState.t() | map()) :: Capabilities.t()
+  defp capabilities(%{frontend: %{capabilities: %Capabilities{} = caps}}), do: caps
   defp capabilities(%{capabilities: %Capabilities{} = caps}), do: caps
   defp capabilities(_state), do: Capabilities.default()
 end

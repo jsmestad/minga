@@ -6,7 +6,7 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
   alias Minga.RenderModel.UI.AgentContext.Todo
   alias MingaEditor.Agent.Activity
   alias MingaEditor.Frontend.Emit.Context
-  alias MingaEditor.State.AgentAccess
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
 
   @spec build(Context.t() | term()) :: AgentContext.t()
   def build(%Context{} = ctx) do
@@ -60,16 +60,26 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
   defp get_activity(_ctx), do: Activity.new()
 
   @spec get_activity_from_state(map()) :: Activity.t()
-  defp get_activity_from_state(state), do: AgentAccess.view(state).activity
+  defp get_activity_from_state(state), do: state.workspace.agent_ui.view.activity
 
   @spec agent_status(Context.t()) :: atom()
-  defp agent_status(%Context{} = ctx), do: AgentAccess.agent(ctx).runtime.status
+  defp agent_status(%Context{shell_state: %TraditionalState{} = shell_state}),
+    do: TraditionalState.agent(shell_state).runtime.status
+
+  defp agent_status(%Context{}), do: :idle
 
   @spec agent_status_from_state(map()) :: atom()
-  defp agent_status_from_state(state), do: AgentAccess.agent(state).runtime.status
+  defp agent_status_from_state(state),
+    do: TraditionalState.agent(shell_state(state)).runtime.status
 
   @spec can_approve_from_state(map()) :: boolean()
-  defp can_approve_from_state(state), do: AgentAccess.agent(state).pending_approval != nil
+  defp can_approve_from_state(state),
+    do: TraditionalState.agent(shell_state(state)).pending_approval != nil
+
+  @spec shell_state(map()) :: TraditionalState.t()
+  defp shell_state(%{shell_state: %TraditionalState{} = shell_state}), do: shell_state
+
+  defp shell_state(%{shell_runtime: %{state: %TraditionalState{} = shell_state}}), do: shell_state
 
   @spec visible?(Activity.t(), atom(), boolean()) :: boolean()
   defp visible?(%Activity{}, _status, true), do: true
@@ -96,7 +106,10 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
   defp context_status(_status, false), do: :idle
 
   @spec can_approve?(Context.t()) :: boolean()
-  defp can_approve?(%Context{} = ctx), do: AgentAccess.agent(ctx).pending_approval != nil
+  defp can_approve?(%Context{shell_state: %TraditionalState{} = shell_state}),
+    do: TraditionalState.agent(shell_state).pending_approval != nil
+
+  defp can_approve?(%Context{}), do: false
 
   @spec progress(Activity.t()) :: Progress.t()
   defp progress(%Activity{} = activity) do

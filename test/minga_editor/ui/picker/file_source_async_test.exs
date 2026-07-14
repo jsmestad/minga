@@ -4,7 +4,6 @@ defmodule MingaEditor.UI.Picker.FileSourceAsyncTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.RenderPipeline.TestHelpers
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree
   alias MingaEditor.UI.Picker.FileSource
   alias MingaEditor.UI.Picker.Item
@@ -20,7 +19,16 @@ defmodule MingaEditor.UI.Picker.FileSourceAsyncTest do
 
     state =
       TestHelpers.base_state(content: "initial")
-      |> EditorState.set_file_tree(%FileTree{project_root: project})
+      |> then(fn state ->
+        %{
+          state
+          | workspace:
+              then(
+                state.workspace,
+                &MingaEditor.Session.State.set_file_tree(&1, %FileTree{project_root: project})
+              )
+        }
+      end)
 
     initial_pids = state.workspace.buffers.list
 

@@ -150,6 +150,9 @@ defmodule MingaEditor.Commands.FormattingLSPTest do
       }
     }
 
-    %EditorState{port_manager: self(), workspace: workspace}
+    %EditorState{
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
+      workspace: workspace
+    }
   end
 end

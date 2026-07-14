@@ -14,17 +14,25 @@ defmodule MingaEditor.Commands.VisualTextObjectTest do
 
   defp build_state(buf, anchor \\ {0, 0}) do
     state = %EditorState{
-      port_manager: nil,
+      frontend: %MingaEditor.State.Frontend{port_manager: nil},
       workspace: %SessionState{
         viewport: Viewport.new(24, 80),
         buffers: %MingaEditor.State.Buffers{active: buf, list: [buf]}
       }
     }
 
-    EditorState.transition_mode(state, :visual, %VisualState{
-      visual_anchor: anchor,
-      visual_type: :char
-    })
+    then(state, fn state ->
+      %{
+        state
+        | workspace:
+            then(state.workspace, fn workspace ->
+              MingaEditor.Session.State.transition_mode(workspace, :visual, %VisualState{
+                visual_anchor: anchor,
+                visual_type: :char
+              })
+            end)
+      }
+    end)
   end
 
   describe "visual paragraph and sentence text objects" do

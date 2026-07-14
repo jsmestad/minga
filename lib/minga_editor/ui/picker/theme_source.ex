@@ -34,14 +34,14 @@ defmodule MingaEditor.UI.Picker.ThemeSource do
   end
 
   @impl true
-  @spec on_select(Item.t(), term()) :: term()
-  def on_select(%Item{id: name}, state) when is_atom(name) do
+  @spec on_select(Item.t(), EditorState.t()) :: EditorState.t()
+  def on_select(%Item{id: name}, %EditorState{} = state) when is_atom(name) do
     put_theme(state, Theme.get!(name))
   end
 
   @impl true
-  @spec on_cancel(term()) :: term()
-  def on_cancel(state) do
+  @spec on_cancel(EditorState.t()) :: EditorState.t()
+  def on_cancel(%EditorState{} = state) do
     case state.shell_runtime.state.modal do
       {:picker, %{picker_ui: %{restore_theme: %Theme{} = theme}}} ->
         put_theme(state, theme)
@@ -53,14 +53,12 @@ defmodule MingaEditor.UI.Picker.ThemeSource do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
-  @spec put_theme(term(), Theme.t()) :: term()
+  @spec put_theme(EditorState.t(), Theme.t()) :: EditorState.t()
   defp put_theme(%EditorState{} = state, %Theme{} = theme) do
     state
     |> EditorState.apply_theme(theme)
     |> EditorState.reset_frontend_render_state()
   end
-
-  defp put_theme(state, %Theme{} = theme), do: Map.put(state, :theme, theme)
 
   @spec display_name(atom()) :: String.t()
   defp display_name(name) do

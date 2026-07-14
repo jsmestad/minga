@@ -15,7 +15,7 @@ defmodule MingaEditor.CompletionDocPreviewTest do
   alias MingaEditor.Viewport
   alias MingaEditor.Session.State, as: SessionState
 
-  defp make_state(completion) do
+  defp make_state(completion, opts \\ []) do
     ws = %SessionState{viewport: %Viewport{top: 0, left: 0, rows: 24, cols: 80}}
 
     modal =
@@ -25,7 +25,11 @@ defmodule MingaEditor.CompletionDocPreviewTest do
       end
 
     %EditorState{
-      port_manager: self(),
+      frontend:
+        MingaEditor.State.Frontend.new(
+          backend: Keyword.get(opts, :backend, :headless),
+          port_manager: self()
+        ),
       workspace: ws,
       shell_runtime:
         Runtime.new(Runtime.default_entry(), %MingaEditor.Shell.Traditional.State{modal: modal})
@@ -109,7 +113,7 @@ defmodule MingaEditor.CompletionDocPreviewTest do
     test "sets a resolve timer when documentation is empty" do
       items = [Completion.parse_item(%{"label" => "a"})]
       completion = Completion.new(items, {0, 0})
-      state = %{make_state(completion) | backend: :zig}
+      state = make_state(completion, backend: :tui)
       result = CompletionHandling.maybe_resolve_selected(state)
       assert completion_from(result).resolve_timer != nil
     end

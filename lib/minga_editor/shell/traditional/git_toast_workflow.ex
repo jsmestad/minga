@@ -21,7 +21,7 @@ defmodule MingaEditor.Shell.Traditional.GitToastWorkflow do
     cancel_timer(toast.timer)
 
     state =
-      EditorState.update_shell_state(
+      update_shell_state(
         state,
         &ShellState.publish_git_toast(&1, message, level, action)
       )
@@ -36,7 +36,7 @@ defmodule MingaEditor.Shell.Traditional.GitToastWorkflow do
   @spec dismiss(EditorState.t()) :: EditorState.t()
   def dismiss(%{shell_runtime: %{state: %ShellState{git_toast: toast}}} = state) do
     cancel_timer(toast.timer)
-    EditorState.update_shell_state(state, &ShellState.dismiss_git_toast/1)
+    update_shell_state(state, &ShellState.dismiss_git_toast/1)
   end
 
   def dismiss(state), do: state
@@ -45,7 +45,7 @@ defmodule MingaEditor.Shell.Traditional.GitToastWorkflow do
   @spec dismiss(EditorState.t(), GitToast.id()) :: EditorState.t()
   def dismiss(%{shell_runtime: %{state: %ShellState{git_toast: toast}}} = state, id) do
     if toast.id == id, do: cancel_timer(toast.timer)
-    EditorState.update_shell_state(state, &ShellState.dismiss_git_toast(&1, id))
+    update_shell_state(state, &ShellState.dismiss_git_toast(&1, id))
   end
 
   def dismiss(state, _id), do: state
@@ -53,16 +53,16 @@ defmodule MingaEditor.Shell.Traditional.GitToastWorkflow do
   @doc "Handles a tagged auto-dismiss timeout; stale and sticky delivery are no-ops."
   @spec timeout(EditorState.t(), GitToast.id()) :: EditorState.t()
   def timeout(%{shell_runtime: %{state: %MingaEditor.Shell.Traditional.State{}}} = state, id),
-    do: EditorState.update_shell_state(state, &ShellState.timeout_git_toast(&1, id))
+    do: update_shell_state(state, &ShellState.timeout_git_toast(&1, id))
 
   def timeout(state, _id), do: state
 
   @spec schedule(EditorState.t(), GitToast.id()) :: EditorState.t()
-  defp schedule(%{backend: :headless} = state, _id), do: state
+  defp schedule(%{frontend: %{backend: :headless}} = state, _id), do: state
 
   defp schedule(state, id) do
     timer = Process.send_after(self(), {:git_toast_timeout, id}, @dismiss_ms)
-    EditorState.update_shell_state(state, &ShellState.record_git_toast_timer(&1, id, timer))
+    update_shell_state(state, &ShellState.record_git_toast_timer(&1, id, timer))
   end
 
   @spec cancel_timer(reference() | nil) :: :ok
@@ -71,5 +71,18 @@ defmodule MingaEditor.Shell.Traditional.GitToastWorkflow do
   defp cancel_timer(timer) do
     Process.cancel_timer(timer)
     :ok
+  end
+
+  @spec update_shell_state(EditorState.t(), (MingaEditor.Shell.Traditional.State.t() ->
+                                               MingaEditor.Shell.Traditional.State.t())) ::
+          EditorState.t()
+  defp update_shell_state(%EditorState{} = state, transition) when is_function(transition, 1) do
+    shell_state = state.shell_runtime |> MingaEditor.Shell.Runtime.state() |> transition.()
+
+    %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
   end
 end

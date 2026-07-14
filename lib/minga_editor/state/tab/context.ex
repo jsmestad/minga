@@ -50,7 +50,7 @@ defmodule MingaEditor.State.Tab.Context do
   # :launchpad (#2689) is also transient: it exists only while the workspace
   # has zero buffers, and entering the empty state removes all file tabs, so
   # no tab snapshot could meaningfully carry it.
-  @transient_fields [:cmd_hover_link, :cmd_hover_cell, :launchpad]
+  @transient_fields [:hover_observation, :launchpad]
 
   @typedoc "Workspace fields carried by a tab context."
   @type field_name ::

@@ -16,7 +16,15 @@ defmodule MingaEditor.Handlers.RenderHandler do
   def handle_debounced_render(state) do
     state = maybe_trigger_nav_flash(state)
     state = Renderer.render_or_async(state)
-    EditorState.clear_render_timer(state)
+
+    %{
+      state
+      | render:
+          MingaEditor.State.Render.accept_correlation(
+            state.render,
+            MingaEditor.State.RenderCorrelation.clear_timer(state.render.render_correlation)
+          )
+    }
   end
 
   @doc """
@@ -53,7 +61,7 @@ defmodule MingaEditor.Handlers.RenderHandler do
   def maybe_trigger_nav_flash(state) do
     {current_line, _col} = Buffer.cursor(state.workspace.buffers.active)
     state = detect_jump(state, current_line)
-    %{state | last_cursor_line: current_line}
+    %{state | render: MingaEditor.State.Render.observe_cursor_line(state.render, current_line)}
   end
 
   @spec emit_render_done_hop(map()) :: :ok
@@ -63,10 +71,10 @@ defmodule MingaEditor.Handlers.RenderHandler do
   defp emit_render_done_hop(_writeback), do: :ok
 
   @spec detect_jump(state(), non_neg_integer()) :: state()
-  defp detect_jump(%{last_cursor_line: nil} = state, _current_line), do: state
+  defp detect_jump(%{render: %{last_cursor_line: nil}} = state, _current_line), do: state
 
   defp detect_jump(state, current_line) do
-    delta = abs(current_line - state.last_cursor_line)
+    delta = abs(current_line - state.render.last_cursor_line)
 
     if delta >= Config.get(:nav_flash_threshold) and Config.get(:nav_flash) do
       FlashesWorkflow.replace_nav(state, current_line)

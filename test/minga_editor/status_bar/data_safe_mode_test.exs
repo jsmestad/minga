@@ -18,8 +18,8 @@ defmodule MingaEditor.StatusBar.DataSafeModeTest do
     options = start_supervised!({Options, name: nil})
 
     state = %EditorState{
-      port_manager: self(),
-      options_server: options,
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
+      interaction: %MingaEditor.State.Interaction{options_server: options},
       workspace: %SessionState{viewport: Viewport.new(24, 80)},
       shell_runtime: Runtime.new(Runtime.default_entry(), %MingaEditor.Shell.Traditional.State{})
     }

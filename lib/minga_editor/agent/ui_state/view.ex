@@ -89,16 +89,20 @@ defmodule MingaEditor.Agent.UIState.View do
   @spec new() :: t()
   def new, do: %__MODULE__{}
 
-  @doc "Updates the turn activity projection."
-  @spec update_activity(t(), (Activity.t() -> Activity.t())) :: t()
-  def update_activity(%__MODULE__{} = view, fun) when is_function(fun, 1) do
-    %{view | activity: fun.(view.activity)}
+  @doc "Marks compaction as no longer running."
+  @spec finish_compaction(t()) :: t()
+  def finish_compaction(%__MODULE__{} = view), do: %{view | compaction_in_progress: false}
+
+  @doc "Installs the activity value produced by an Activity transition."
+  @spec replace_activity(t(), Activity.t()) :: t()
+  def replace_activity(%__MODULE__{} = view, %Activity{} = activity) do
+    %{view | activity: activity}
   end
 
-  @doc "Updates the edit timeline projection."
-  @spec update_edit_timeline(t(), (EditTimeline.t() -> EditTimeline.t())) :: t()
-  def update_edit_timeline(%__MODULE__{} = view, fun) when is_function(fun, 1) do
-    %{view | edit_timeline: fun.(view.edit_timeline)}
+  @doc "Installs the edit timeline produced by an EditTimeline transition."
+  @spec replace_edit_timeline(t(), EditTimeline.t()) :: t()
+  def replace_edit_timeline(%__MODULE__{} = view, %EditTimeline{} = timeline) do
+    %{view | edit_timeline: timeline}
   end
 
   # ── Layout ──────────────────────────────────────────────────────────────────
@@ -255,10 +259,10 @@ defmodule MingaEditor.Agent.UIState.View do
     %{view | preview: Preview.scroll_to_bottom(view.preview)}
   end
 
-  @doc "Updates the preview state with the given function."
-  @spec update_preview(t(), (Preview.t() -> Preview.t())) :: t()
-  def update_preview(%__MODULE__{} = view, fun) when is_function(fun, 1) do
-    %{view | preview: fun.(view.preview)}
+  @doc "Installs the preview produced by a Preview transition."
+  @spec replace_preview(t(), Preview.t()) :: t()
+  def replace_preview(%__MODULE__{} = view, %Preview{} = preview) do
+    %{view | preview: preview}
   end
 
   # ── Search ──────────────────────────────────────────────────────────────────

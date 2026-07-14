@@ -17,8 +17,8 @@ defmodule MingaEditor.Test.FakeShellInput do
 
     state =
       state
-      |> EditorState.apply_shell_runtime_transition(runtime)
-      |> EditorState.set_workspace(workspace)
+      |> then(fn state -> %{state | shell_runtime: runtime} end)
+      |> then(fn state -> %{state | workspace: workspace} end)
 
     {:handled, state}
   end

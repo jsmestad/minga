@@ -105,8 +105,8 @@ defmodule MingaEditor.Commands.Autobiography do
   @spec show_popup(EditorState.t(), String.t(), HoverPopup.open_action() | nil, keyword()) ::
           EditorState.t()
   defp show_popup(state, markdown, open_action \\ nil, popup_opts \\ []) do
-    vp = state.terminal_viewport
-    opts = Keyword.put(popup_opts, :theme, state.theme)
+    vp = state.frontend.terminal_viewport
+    opts = Keyword.put(popup_opts, :theme, state.appearance.theme)
 
     markdown
     |> MingaEditor.HoverPopup.Builder.new(div(vp.rows, 2), div(vp.cols, 4), opts)

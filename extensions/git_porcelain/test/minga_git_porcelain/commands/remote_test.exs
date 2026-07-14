@@ -65,7 +65,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
       result = GitCommands.handle_remote_result(state, ref, :ok)
 
       assert result.shell_runtime.state.notice.message == "Pushed"
-      assert result.git_remote_op == nil
+      assert result.git.git_remote_op == nil
     end
 
     test "non-fast-forward push failures offer pull-and-retry" do
@@ -76,7 +76,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
 
       result = GitCommands.handle_remote_result(state, ref, {:error, "non-fast-forward rejected"})
 
-      assert result.git_remote_op == nil
+      assert result.git.git_remote_op == nil
 
       assert %{
                message: "Push failed: non-fast-forward rejected",
@@ -93,7 +93,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
       result = GitCommands.handle_remote_result(state, make_ref(), :ok)
 
       assert result.shell_runtime.state.notice.message == "Pushing…"
-      assert result.git_remote_op == op
+      assert result.git.git_remote_op == op
     end
 
     test "delayed result clears the operation without touching or replaying a foreign shell" do
@@ -104,13 +104,13 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
         |> MingaEditor.Shell.Workflow.switch(:fake)
 
       foreign_shell_state = Runtime.state(state.shell_runtime)
-      message_store = state.message_store
+      message_store = state.render.message_store
 
       result = GitCommands.handle_remote_result(state, ref, :ok)
 
-      assert result.git_remote_op == nil
+      assert result.git.git_remote_op == nil
       assert Runtime.state(result.shell_runtime) == foreign_shell_state
-      assert result.message_store == message_store
+      assert result.render.message_store == message_store
 
       restored = MingaEditor.Shell.Workflow.switch(result, :traditional)
       assert Runtime.state(restored.shell_runtime).notice.message == nil
@@ -129,7 +129,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
 
       result = GitCommands.handle_remote_task_down(state, task_monitor, :killed)
 
-      assert result.git_remote_op == nil
+      assert result.git.git_remote_op == nil
 
       assert result.shell_runtime.state.notice.message ==
                "Git operation failed unexpectedly: killed"
@@ -145,7 +145,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
 
       result = GitCommands.handle_remote_task_down(state, task_monitor, :normal)
 
-      assert result.git_remote_op == op
+      assert result.git.git_remote_op == op
       assert result.shell_runtime.state.notice.message == "Pushing…"
       refute GitToast.present?(result.shell_runtime.state.git_toast)
     end
@@ -161,7 +161,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
       state = get_state(editor)
 
       assert state.shell_runtime.state.notice.message == "Fetched"
-      assert state.git_remote_op == nil
+      assert state.git.git_remote_op == nil
     end
 
     test "task crash DOWN messages are applied" do
@@ -173,7 +173,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
       send(editor, {:DOWN, task_monitor, :process, fake_pid, :killed})
       state = get_state(editor)
 
-      assert state.git_remote_op == nil
+      assert state.git.git_remote_op == nil
 
       assert state.shell_runtime.state.notice.message ==
                "Git operation failed unexpectedly: killed"
@@ -190,7 +190,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
       result = GitCommands.execute(state, :git_pull)
 
       assert result.shell_runtime.state.notice.message == "Git operation already in progress"
-      assert result.git_remote_op == op
+      assert result.git.git_remote_op == op
     end
   end
 
@@ -200,7 +200,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
     state =
       Map.merge(
         %EditorState{
-          port_manager: nil,
+          frontend: %MingaEditor.State.Frontend{port_manager: nil},
           workspace: %MingaEditor.Session.State{viewport: Viewport.new(80, 24)}
         },
         overrides

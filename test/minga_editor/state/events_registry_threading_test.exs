@@ -13,8 +13,8 @@ defmodule MingaEditor.State.EventsRegistryThreadingTest do
 
   defp build_state(events_registry) do
     %EditorState{
-      port_manager: self(),
-      events_registry: events_registry,
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
+      extension_surfaces: %MingaEditor.State.ExtensionSurfaces{events_registry: events_registry},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
@@ -31,15 +31,15 @@ defmodule MingaEditor.State.EventsRegistryThreadingTest do
 
     state_a = build_state(registry_a)
     state_b = build_state(registry_b)
-    assert EditorState.events_registry(state_a) == registry_a
-    assert EditorState.events_registry(state_b) == registry_b
+    assert state_a.extension_surfaces.events_registry == registry_a
+    assert state_b.extension_surfaces.events_registry == registry_b
 
-    Events.subscribe(:log_message, EditorState.events_registry(state_a))
+    Events.subscribe(:log_message, state_a.extension_surfaces.events_registry)
 
     Events.broadcast(
       :log_message,
       %Events.LogMessageEvent{text: "wrong registry", level: :info},
-      EditorState.events_registry(state_b)
+      state_b.extension_surfaces.events_registry
     )
 
     refute_receive {:minga_event, :log_message, _}, 50
@@ -47,7 +47,7 @@ defmodule MingaEditor.State.EventsRegistryThreadingTest do
     Events.broadcast(
       :log_message,
       %Events.LogMessageEvent{text: "right registry", level: :info},
-      EditorState.events_registry(state_a)
+      state_a.extension_surfaces.events_registry
     )
 
     assert_receive {:minga_event, :log_message, %Events.LogMessageEvent{text: "right registry"}}
@@ -55,7 +55,7 @@ defmodule MingaEditor.State.EventsRegistryThreadingTest do
 
   test "EditorState defaults events_registry to Minga.Events.default_registry/0" do
     state = %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
@@ -63,6 +63,6 @@ defmodule MingaEditor.State.EventsRegistryThreadingTest do
       }
     }
 
-    assert EditorState.events_registry(state) == Events.default_registry()
+    assert state.extension_surfaces.events_registry == Events.default_registry()
   end
 end

@@ -190,13 +190,13 @@ defmodule MingaEditor.State.LSP do
     %{lsp | highlight_debounce_timer: timer}
   end
 
-  @doc "Cancels the highlight debounce timer and clears the reference."
-  @spec cancel_highlight_timer(t()) :: t()
-  def cancel_highlight_timer(%__MODULE__{highlight_debounce_timer: nil} = lsp), do: lsp
+  @doc "Returns a pure instruction for canceling the highlight debounce timer."
+  @spec cancel_highlight_timer(t()) :: {:cancel_timer, t(), reference() | nil}
+  def cancel_highlight_timer(%__MODULE__{highlight_debounce_timer: nil} = lsp),
+    do: {:cancel_timer, lsp, nil}
 
   def cancel_highlight_timer(%__MODULE__{highlight_debounce_timer: timer} = lsp) do
-    Process.cancel_timer(timer)
-    %{lsp | highlight_debounce_timer: nil}
+    {:cancel_timer, %{lsp | highlight_debounce_timer: nil}, timer}
   end
 
   # ── Inlay hint debounce timer ────────────────────────────────────────────
@@ -208,13 +208,19 @@ defmodule MingaEditor.State.LSP do
     %{lsp | inlay_hint_debounce_timer: timer, last_inlay_viewport_top: viewport_top}
   end
 
-  @doc "Cancels the inlay hint debounce timer and clears the reference."
-  @spec cancel_inlay_hint_timer(t()) :: t()
-  def cancel_inlay_hint_timer(%__MODULE__{inlay_hint_debounce_timer: nil} = lsp), do: lsp
+  @doc "Records the viewport top used by the latest inlay-hint request."
+  @spec remember_inlay_viewport(t(), non_neg_integer()) :: t()
+  def remember_inlay_viewport(%__MODULE__{} = lsp, viewport_top) do
+    %{lsp | last_inlay_viewport_top: viewport_top}
+  end
+
+  @doc "Returns a pure instruction for canceling the inlay hint debounce timer."
+  @spec cancel_inlay_hint_timer(t()) :: {:cancel_timer, t(), reference() | nil}
+  def cancel_inlay_hint_timer(%__MODULE__{inlay_hint_debounce_timer: nil} = lsp),
+    do: {:cancel_timer, lsp, nil}
 
   def cancel_inlay_hint_timer(%__MODULE__{inlay_hint_debounce_timer: timer} = lsp) do
-    Process.cancel_timer(timer)
-    %{lsp | inlay_hint_debounce_timer: nil}
+    {:cancel_timer, %{lsp | inlay_hint_debounce_timer: nil}, timer}
   end
 
   @doc "Clears the inlay hint debounce timer reference without cancelling it."

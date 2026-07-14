@@ -27,7 +27,6 @@ defmodule MingaEditor.Frontend.Emit.Context do
   alias MingaEditor.UI.NotificationCenter
   alias MingaEditor.UI.Theme
   alias MingaEditor.RenderPipeline.Input
-  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State
 
   @type t :: %__MODULE__{
@@ -111,8 +110,8 @@ defmodule MingaEditor.Frontend.Emit.Context do
 
   @doc "Builds an emit context from editor state or its render-pipeline transfer value."
   @spec from_editor_state(State.t() | Input.t()) :: t()
-  def from_editor_state(%State{shell_runtime: %Runtime{} = runtime} = state) do
-    build(state, Runtime.id(runtime), Runtime.module(runtime), Runtime.state(runtime))
+  def from_editor_state(%State{} = state) do
+    state |> Input.from_editor_state() |> from_editor_state()
   end
 
   def from_editor_state(
@@ -121,7 +120,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
     build(input, shell_id, shell, shell_state)
   end
 
-  @spec build(map(), atom(), module(), term()) :: t()
+  @spec build(Input.t(), atom(), module(), term()) :: t()
   defp build(state, shell_id, shell, shell_state) do
     title = compute_title(state, shell, shell_state)
     gui? = MingaEditor.Frontend.gui?(state.capabilities)
@@ -139,7 +138,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
       tab_bar: Map.get(shell_state, :tab_bar),
       buffers: state.workspace.buffers,
       viewport: state.terminal_viewport,
-      file_tree: State.file_tree_state(state),
+      file_tree: state.workspace.file_tree,
       highlight: state.highlighting,
       agent_ui: state.workspace.agent_ui,
       # Strict like every sibling field: a snapshot path that drops the
@@ -153,15 +152,14 @@ defmodule MingaEditor.Frontend.Emit.Context do
       sidebar_registry:
         Map.get(state, :sidebar_registry, MingaEditor.Extension.Sidebar.default_table()),
       title: title,
-      status_bar_data: MingaEditor.StatusBar.Data.from_state(state),
+      status_bar_data: state.status_bar_data,
       git_syncing: Map.get(state, :git_remote_op) != nil or git_effect_active?(state),
       git_toast: Map.get(shell_state, :git_toast),
       search: state.workspace.search,
       last_input_seq: Map.get(state, :last_input_seq, 0),
       frame_seq: Map.get(state, :frame_seq),
       force_keyframe?: Map.get(state, :force_keyframe?, false),
-      acknowledgement_required?:
-        Map.get(state, :backend) != :headless and not is_nil(state.port_manager),
+      acknowledgement_required?: state.backend != :headless and not is_nil(state.port_manager),
       # The single per-frame surface layout authority (#2268), already projected
       # to wire shape by the registry. Derived from the same focus tree mouse
       # routing hit-tests against, so the emitted placement rect for every surface

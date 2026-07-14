@@ -14,6 +14,7 @@ defmodule MingaEditor.Session.State do
 
   alias MingaEditor.Agent.UIState
   alias MingaEditor.FeatureState
+  alias MingaEditor.Session.HoverObservation
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Dired, as: DiredState
   alias MingaEditor.State.FileTree, as: FileTreeState
@@ -31,22 +32,10 @@ defmodule MingaEditor.Session.State do
   @typedoc "A buffer position as `{line, byte_col}`."
   @type position :: {non_neg_integer(), non_neg_integer()}
 
-  @typedoc """
-  Transient Cmd/Ctrl-hover go-to-definition link range.
+  @typedoc "Transient Cmd/Ctrl-hover go-to-definition link range."
+  @type cmd_hover_link :: HoverObservation.link()
 
-  `{start_pos, end_pos}` in buffer coordinates (end exclusive), or `nil` when no
-  navigable symbol is under the pointer. Set on the mouse-motion path while the
-  super/ctrl modifier is held and cleared otherwise; never persisted across tabs.
-  """
-  @type cmd_hover_link :: {position(), position()} | nil
-
-  @typedoc """
-  The pointer cell `{row, col}` the Cmd/Ctrl-hover link was last resolved at.
-
-  A motion-path dedup key: while the modifier is held, resolution (word
-  boundaries + tree-sitter scope) is skipped when the pointer cell has not moved
-  since the previous motion. Cleared together with `cmd_hover_link`.
-  """
+  @typedoc "The pointer cell used to deduplicate Cmd/Ctrl-hover resolution."
   @type cmd_hover_cell :: position() | nil
 
   @type t :: %__MODULE__{
@@ -62,8 +51,7 @@ defmodule MingaEditor.Session.State do
           editing: VimState.t(),
           feature_state: FeatureState.t(),
           document_highlights: [document_highlight()] | nil,
-          cmd_hover_link: cmd_hover_link(),
-          cmd_hover_cell: cmd_hover_cell(),
+          hover_observation: HoverObservation.t(),
           agent_ui: UIState.t(),
           launchpad: MingaEditor.State.Launchpad.t() | nil
         }
@@ -81,8 +69,7 @@ defmodule MingaEditor.Session.State do
             editing: VimState.new(),
             feature_state: FeatureState.new(),
             document_highlights: nil,
-            cmd_hover_link: nil,
-            cmd_hover_cell: nil,
+            hover_observation: %HoverObservation{},
             agent_ui: UIState.new(),
             launchpad: nil
 
@@ -131,28 +118,78 @@ defmodule MingaEditor.Session.State do
   @spec split?(t()) :: boolean()
   def split?(%__MODULE__{windows: ws}), do: Windows.split?(ws)
 
-  @doc "Updates the window struct for the given window id via a mapper function."
-  @spec update_window(t(), Window.id(), (Window.t() -> Window.t())) :: t()
-  def update_window(%__MODULE__{windows: ws} = wspace, id, fun) do
-    %{wspace | windows: Windows.update(ws, id, fun)}
+  @doc "Replaces one session-owned window with a concrete value."
+  @spec replace_window(t(), Window.id(), Window.t()) :: t()
+  def replace_window(%__MODULE__{windows: windows} = workspace, id, %Window{} = window) do
+    %{workspace | windows: Windows.replace_window(windows, id, window)}
   end
 
-  @doc "Updates one window in a render-pipeline workspace snapshot."
-  @spec update_snapshot_window(map(), Window.id(), (Window.t() -> Window.t())) ::
-          {:ok, map()} | :error
-  def update_snapshot_window(%{windows: %Windows{} = windows} = snapshot, id, fun)
-      when is_function(fun, 1) do
+  @doc "Records a renderer observation for one session-owned window."
+  @spec observe_window(t(), Window.id(), pid(), Viewport.t(), non_neg_integer()) :: t()
+  def observe_window(
+        %__MODULE__{windows: windows} = workspace,
+        id,
+        buffer,
+        %Viewport{} = viewport,
+        version
+      )
+      when is_pid(buffer) and is_integer(version) and version >= 0 do
     case Windows.fetch(windows, id) do
-      {:ok, _window} -> {:ok, %{snapshot | windows: Windows.update(windows, id, fun)}}
-      :error -> :error
+      {:ok, %Window{buffer: ^buffer, render_cache: %{buffer_version: current}} = window}
+      when current <= version ->
+        replace_window(workspace, id, Window.observe_render(window, viewport, version))
+
+      _stale_or_missing ->
+        workspace
     end
   end
 
-  @doc "Updates every window that shows the given buffer via a mapper function."
-  @spec update_windows_for_buffer(t(), pid(), (Window.t() -> Window.t())) :: t()
-  def update_windows_for_buffer(%__MODULE__{windows: ws} = wspace, buffer, fun)
-      when is_pid(buffer) and is_function(fun, 1) do
-    %{wspace | windows: Windows.update_by_buffer(ws, buffer, fun)}
+  @doc "Replaces every window showing a buffer with concrete values."
+  @spec replace_buffer_windows(t(), pid(), %{Window.id() => Window.t()}) :: t()
+  def replace_buffer_windows(%__MODULE__{windows: windows} = workspace, buffer, replacements)
+      when is_pid(buffer) and is_map(replacements) do
+    %{workspace | windows: Windows.replace_buffer_windows(windows, buffer, replacements)}
+  end
+
+  @doc "Updates the active window viewport, when a window is active."
+  @spec update_current_viewport(t(), Viewport.t()) :: t()
+  def update_current_viewport(%__MODULE__{} = workspace, %Viewport{} = viewport) do
+    case active_window_struct(workspace) do
+      nil ->
+        workspace
+
+      %Window{id: id} = window ->
+        replace_window(workspace, id, Window.set_viewport(window, viewport))
+    end
+  end
+
+  @doc "Marks the active window for authoritative scroll receipt handling."
+  @spec mark_authoritative_scroll(t()) :: t()
+  def mark_authoritative_scroll(%__MODULE__{} = workspace) do
+    case active_window_struct(workspace) do
+      nil ->
+        workspace
+
+      %Window{id: id} = window ->
+        replace_window(workspace, id, Window.mark_authoritative_scroll(window))
+    end
+  end
+
+  @doc "Scrolls the agent chat window viewport when one exists."
+  @spec scroll_agent_chat_window(t(), integer()) :: t()
+  def scroll_agent_chat_window(%__MODULE__{} = workspace, delta) do
+    case Enum.find_value(workspace.windows.map, fn
+           {id, %Window{content: {:agent_chat, _}} = window} -> {id, window}
+           _other -> nil
+         end) do
+      nil ->
+        workspace
+
+      {id, window} ->
+        total_lines = Enum.count(workspace.agent_ui.panel.cached_line_index)
+        updated = Window.scroll_viewport(window, delta, total_lines)
+        replace_window(workspace, id, updated)
+    end
   end
 
   @doc """
@@ -190,8 +227,7 @@ defmodule MingaEditor.Session.State do
     workspace = %{
       workspace
       | buffers: buffers,
-        cmd_hover_link: nil,
-        cmd_hover_cell: nil
+        hover_observation: HoverObservation.clear(workspace.hover_observation)
     }
 
     synchronize_activated_window(
@@ -202,6 +238,7 @@ defmodule MingaEditor.Session.State do
 
   @doc "Commits a pure window-focus transition after its required buffer calls succeed."
   @spec focus_window(t(), Window.id(), position() | nil) :: t()
+
   def focus_window(%__MODULE__{windows: %{active: active}} = workspace, target_id, _cursor)
       when target_id == active,
       do: workspace
@@ -218,6 +255,7 @@ defmodule MingaEditor.Session.State do
 
   @doc "Commits focus to a surviving window after the active split was removed."
   @spec focus_surviving_window(t(), Windows.t(), Window.id()) :: t()
+
   def focus_surviving_window(%__MODULE__{} = workspace, %Windows{} = windows, target_id) do
     case Windows.fetch(windows, target_id) do
       {:ok, target_window} ->
@@ -230,6 +268,7 @@ defmodule MingaEditor.Session.State do
 
   @doc "Stores the active buffer cursor in its matching active window."
   @spec remember_active_window_cursor(t(), position()) :: t()
+
   def remember_active_window_cursor(
         %__MODULE__{windows: windows, buffers: %{active: buffer}} = workspace,
         cursor
@@ -239,7 +278,12 @@ defmodule MingaEditor.Session.State do
       {:ok, %Window{buffer: ^buffer}} ->
         %{
           workspace
-          | windows: Windows.update(windows, windows.active, &Window.remember_cursor(&1, cursor))
+          | windows:
+              Windows.replace_window(
+                windows,
+                windows.active,
+                Window.remember_cursor(Map.fetch!(windows.map, windows.active), cursor)
+              )
         }
 
       _ ->
@@ -279,7 +323,12 @@ defmodule MingaEditor.Session.State do
   defp activate_buffer_surface(workspace, windows, buffer) do
     workspace = %{
       workspace
-      | windows: Windows.update(windows, windows.active, &Window.show_buffer(&1, buffer))
+      | windows:
+          Windows.replace_window(
+            windows,
+            windows.active,
+            Window.show_buffer(Map.fetch!(windows.map, windows.active), buffer)
+          )
     }
 
     normalize_buffer_surface(workspace, buffer)
@@ -296,7 +345,12 @@ defmodule MingaEditor.Session.State do
 
   @spec remember_outgoing_cursor(Windows.t(), Window.t(), position() | nil) :: Windows.t()
   defp remember_outgoing_cursor(windows, %Window{content: {:buffer, _}}, {_, _} = cursor),
-    do: Windows.update(windows, windows.active, &Window.remember_cursor(&1, cursor))
+    do:
+      Windows.replace_window(
+        windows,
+        windows.active,
+        Window.remember_cursor(Map.fetch!(windows.map, windows.active), cursor)
+      )
 
   defp remember_outgoing_cursor(windows, _window, _cursor), do: windows
 
@@ -310,8 +364,7 @@ defmodule MingaEditor.Session.State do
         buffers: buffers,
         keymap_scope: scope_for_content(target_window.content, workspace.keymap_scope),
         launchpad: launchpad_after_focus(workspace.launchpad, target_window),
-        cmd_hover_link: nil,
-        cmd_hover_cell: nil
+        hover_observation: HoverObservation.clear(workspace.hover_observation)
     }
   end
 
@@ -338,8 +391,15 @@ defmodule MingaEditor.Session.State do
   """
   @spec enter_empty_state(t()) :: t()
   @spec enter_empty_state(t(), keyword()) :: t()
-  def enter_empty_state(%__MODULE__{} = wspace, launchpad_opts \\ []) do
-    windows = Windows.update(wspace.windows, wspace.windows.active, &Window.show_empty_state/1)
+  def enter_empty_state(wspace, launchpad_opts \\ [])
+
+  def enter_empty_state(%__MODULE__{} = wspace, launchpad_opts) do
+    windows =
+      Windows.replace_window(
+        wspace.windows,
+        wspace.windows.active,
+        Window.show_empty_state(Map.fetch!(wspace.windows.map, wspace.windows.active))
+      )
 
     %{
       wspace
@@ -383,12 +443,6 @@ defmodule MingaEditor.Session.State do
 
   # ── Field mutation functions (Rule 2 enforcement) ──────────────────────
 
-  @doc "Updates the editing (VimState) sub-struct."
-  @spec update_editing(t(), (VimState.t() -> VimState.t())) :: t()
-  def update_editing(%__MODULE__{editing: vim} = wspace, fun) when is_function(fun, 1) do
-    %{wspace | editing: fun.(vim)}
-  end
-
   @doc "Replaces the editing (VimState) sub-struct."
   @spec set_editing(t(), VimState.t()) :: t()
   def set_editing(%__MODULE__{} = wspace, vim) do
@@ -409,12 +463,6 @@ defmodule MingaEditor.Session.State do
   @spec set_file_tree(t(), FileTreeState.t()) :: t()
   def set_file_tree(%__MODULE__{} = wspace, %FileTreeState{} = file_tree) do
     %{wspace | file_tree: file_tree}
-  end
-
-  @doc "Updates the FileTree UI state."
-  @spec update_file_tree(t(), (FileTreeState.t() -> FileTreeState.t())) :: t()
-  def update_file_tree(%__MODULE__{} = wspace, fun) when is_function(fun, 1) do
-    set_file_tree(wspace, fun.(file_tree_state(wspace)))
   end
 
   @doc "Resets FileTree UI state."
@@ -441,28 +489,28 @@ defmodule MingaEditor.Session.State do
     %{wspace | document_highlights: highlights}
   end
 
-  @doc "Updates the transient Cmd/Ctrl-hover go-to-definition link range."
+  @doc "Records the transient Cmd/Ctrl-hover link range."
   @spec set_cmd_hover_link(t(), cmd_hover_link()) :: t()
-  def set_cmd_hover_link(%__MODULE__{} = wspace, link) do
-    %{wspace | cmd_hover_link: link}
+  def set_cmd_hover_link(%__MODULE__{} = workspace, link) do
+    %{
+      workspace
+      | hover_observation: HoverObservation.observe_link(workspace.hover_observation, link)
+    }
   end
 
-  @doc "Records the pointer cell the Cmd/Ctrl-hover link was last resolved at."
+  @doc "Records the pointer cell that produced the hover observation."
   @spec set_cmd_hover_cell(t(), cmd_hover_cell()) :: t()
-  def set_cmd_hover_cell(%__MODULE__{} = wspace, cell) do
-    %{wspace | cmd_hover_cell: cell}
+  def set_cmd_hover_cell(%__MODULE__{} = workspace, cell) do
+    %{
+      workspace
+      | hover_observation: HoverObservation.observe_cell(workspace.hover_observation, cell)
+    }
   end
 
-  @doc """
-  Clears the Cmd/Ctrl-hover link preview and its dedup cell.
-
-  Called on transitions that change the active buffer without a mouse motion (tab
-  switch, window focus, go-to-definition navigation) so a stale underline never
-  lingers against the new buffer's coordinates.
-  """
+  @doc "Clears the complete transient Cmd/Ctrl-hover observation."
   @spec clear_cmd_hover_link(t()) :: t()
-  def clear_cmd_hover_link(%__MODULE__{} = wspace) do
-    %{wspace | cmd_hover_link: nil, cmd_hover_cell: nil}
+  def clear_cmd_hover_link(%__MODULE__{} = workspace) do
+    %{workspace | hover_observation: HoverObservation.clear(workspace.hover_observation)}
   end
 
   @doc "Updates the search sub-struct."
@@ -471,16 +519,23 @@ defmodule MingaEditor.Session.State do
     %{wspace | search: search}
   end
 
-  @doc "Updates the search sub-struct via a mapper function."
-  @spec update_search(t(), (Search.t() -> Search.t())) :: t()
-  def update_search(%__MODULE__{search: s} = wspace, fun) when is_function(fun, 1) do
-    %{wspace | search: fun.(s)}
-  end
-
   @doc "Updates the LSP pending requests map."
   @spec set_lsp_pending(t(), %{reference() => atom() | tuple()}) :: t()
+
   def set_lsp_pending(%__MODULE__{} = wspace, pending) do
     %{wspace | lsp_pending: pending}
+  end
+
+  @doc "Adds one pending LSP request to the workspace correlation table."
+  @spec put_lsp_pending(t(), reference(), atom() | tuple()) :: t()
+  def put_lsp_pending(%__MODULE__{} = workspace, ref, kind) when is_reference(ref) do
+    set_lsp_pending(workspace, Map.put(workspace.lsp_pending, ref, kind))
+  end
+
+  @doc "Removes one pending LSP request from the workspace correlation table."
+  @spec delete_lsp_pending(t(), reference()) :: t()
+  def delete_lsp_pending(%__MODULE__{} = workspace, ref) when is_reference(ref) do
+    set_lsp_pending(workspace, Map.delete(workspace.lsp_pending, ref))
   end
 
   @doc "Sets the viewport dimensions."
@@ -497,6 +552,7 @@ defmodule MingaEditor.Session.State do
 
   @doc "Replaces the buffers sub-struct."
   @spec set_buffers(t(), Buffers.t()) :: t()
+
   def set_buffers(%__MODULE__{} = wspace, buffers) do
     %{wspace | buffers: buffers}
   end
@@ -526,26 +582,20 @@ defmodule MingaEditor.Session.State do
     %{wspace | feature_state: FeatureState.put(feature_state, source, feature_id, value)}
   end
 
-  @doc "Updates source-owned feature state. Missing values are initialized with `default`."
-  @spec update_feature_state(
+  @doc "Records a concrete source-owned feature value."
+  @spec record_feature_value(
           t(),
           FeatureState.source(),
           FeatureState.feature_id(),
-          term(),
-          (term() -> term())
+          term()
         ) :: t()
-  def update_feature_state(
-        %__MODULE__{feature_state: feature_state} = wspace,
+  def record_feature_value(
+        %__MODULE__{} = wspace,
         source,
         feature_id,
-        default,
-        fun
-      )
-      when is_function(fun, 1) do
-    %{
-      wspace
-      | feature_state: FeatureState.update(feature_state, source, feature_id, default, fun)
-    }
+        value
+      ) do
+    put_feature_state(wspace, source, feature_id, value)
   end
 
   @doc "Drops one source-owned feature state entry. Missing state is treated as inactive."
@@ -556,12 +606,14 @@ defmodule MingaEditor.Session.State do
 
   @doc "Drops all feature state owned by a source."
   @spec drop_feature_state_source(t(), FeatureState.source()) :: t()
+
   def drop_feature_state_source(%__MODULE__{feature_state: feature_state} = wspace, source) do
     %{wspace | feature_state: FeatureState.drop_source(feature_state, source)}
   end
 
   @doc "Drops every extension-owned feature state entry."
   @spec drop_extension_feature_state_sources(t()) :: t()
+
   def drop_extension_feature_state_sources(%__MODULE__{feature_state: feature_state} = wspace) do
     %{wspace | feature_state: FeatureState.drop_extension_sources(feature_state)}
   end

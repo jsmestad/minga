@@ -40,7 +40,7 @@ defmodule MingaEditor.Commands.AgentSplitTest do
     file_tab = Tab.set_context(file_tab, file_context)
 
     # Agent tab with context containing an agent_chat window. The session
-    # pid lives on the tab; AgentAccess.session/1 reads it through the
+    # pid lives on the tab; Shell.Runtime.active_session/1 reads it through the
     # shell's active_session callback when this tab is active.
     agent_tab = Tab.new_agent(2, "Agent") |> Tab.set_session(fake_session)
 
@@ -65,7 +65,7 @@ defmodule MingaEditor.Commands.AgentSplitTest do
     }
 
     %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: buf, list: [buf]},

@@ -10,7 +10,6 @@ defmodule MingaEditor.Commands.InlineEdit do
   alias Minga.Mode.VisualState
   alias Minga.Project.FileRef
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.InlineEdit
 
   @type state :: EditorState.t()
@@ -45,7 +44,7 @@ defmodule MingaEditor.Commands.InlineEdit do
     edit = InlineEdit.new(buffer_pid, file_ref, label, {first, last}, original)
 
     state
-    |> AgentAccess.replace_inline_edit(edit)
+    |> MingaEditor.Shell.Traditional.Workflow.install_inline_edit(edit)
     |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
       "Inline edit: type rewrite instruction"
     )
@@ -89,10 +88,13 @@ defmodule MingaEditor.Commands.InlineEdit do
 
   @spec accept_success(state(), InlineEdit.t()) :: state()
   defp accept_success(state, %InlineEdit{} = edit) do
-    {state, _session_pid} = AgentAccess.cancel_inline_edit(state, edit.buffer_pid)
+    {state, _session_pid} =
+      MingaEditor.Shell.Traditional.Workflow.cancel_inline_edit(state, edit.buffer_pid)
 
     state
-    |> EditorState.transition_mode(:normal)
+    |> then(fn state ->
+      %{state | workspace: MingaEditor.Session.State.transition_mode(state.workspace, :normal)}
+    end)
     |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("Inline edit accepted")
   end
 
@@ -101,7 +103,9 @@ defmodule MingaEditor.Commands.InlineEdit do
   def reject(state, %InlineEdit{} = edit) do
     MingaAgent.EphemeralSession.stop(edit.session_pid)
 
-    {state, _session_pid} = AgentAccess.cancel_inline_edit(state, edit.buffer_pid)
+    {state, _session_pid} =
+      MingaEditor.Shell.Traditional.Workflow.cancel_inline_edit(state, edit.buffer_pid)
+
     state
   end
 
@@ -136,7 +140,7 @@ defmodule MingaEditor.Commands.InlineEdit do
 
   @spec project_root(state()) :: String.t()
   defp project_root(state) do
-    file_tree = EditorState.file_tree_state(state)
+    file_tree = state.workspace.file_tree
     file_tree.project_root || file_tree.original_root || File.cwd!()
   end
 

@@ -143,7 +143,7 @@ defmodule MingaEditor.FileTree.RefreshTest do
              Refresh.apply(state, latest_outcome)
 
     EffectScheduler.finalize(scheduler, accepted_latest)
-    Process.cancel_timer(state.render_correlation.timer)
+    Process.cancel_timer(state.render.render_correlation.timer)
     assert state |> file_tree() |> then(& &1.tree) == latest_tree
     refute state |> file_tree() |> then(& &1.tree) == second_tree
     assert EffectScheduler.stats(scheduler).admitted == 0
@@ -239,25 +239,59 @@ defmodule MingaEditor.FileTree.RefreshTest do
   defp state_with_tree(tree, scheduler) do
     file_tree = FileTreeState.open(%FileTreeState{}, tree, nil)
 
-    state = base_state()
-    state = %{state | backend: :tui, effect_scheduler: scheduler}
-    EditorState.set_file_tree(state, file_tree)
+    state = base_state(backend: :tui)
+    state = %{state | effect_scheduler: scheduler}
+
+    then(state, fn state ->
+      %{
+        state
+        | workspace:
+            then(state.workspace, fn workspace ->
+              MingaEditor.Session.State.set_file_tree(workspace, file_tree)
+            end)
+      }
+    end)
   end
 
   defp track(state, request) do
-    EditorState.update_file_tree(
-      state,
-      &FileTreeState.track_refresh_request(&1, request.effect.root, request.id)
-    )
+    then(state, fn state ->
+      %{
+        state
+        | workspace:
+            then(state.workspace, fn workspace ->
+              MingaEditor.Session.State.set_file_tree(
+                workspace,
+                FileTreeState.track_refresh_request(
+                  EditorState.file_tree_state(state),
+                  request.effect.root,
+                  request.id
+                )
+              )
+            end)
+      }
+    end)
   end
 
   defp invalidate_current(state) do
     state = Freshness.request_refresh(state, 60_000)
     token = file_tree(state).refresh.debounce
 
-    EditorState.update_file_tree(state, fn file_tree ->
-      {:ready, _tree, elapsed} = FileTreeState.refresh_debounce_elapsed(file_tree, token)
-      elapsed
+    then(state, fn state ->
+      %{
+        state
+        | workspace:
+            then(state.workspace, fn workspace ->
+              MingaEditor.Session.State.set_file_tree(
+                workspace,
+                (fn file_tree ->
+                   {:ready, _tree, elapsed} =
+                     FileTreeState.refresh_debounce_elapsed(file_tree, token)
+
+                   elapsed
+                 end).(EditorState.file_tree_state(state))
+              )
+            end)
+      }
     end)
   end
 

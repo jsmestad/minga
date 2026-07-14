@@ -84,7 +84,7 @@ defmodule MingaEditor.State.MouseMultiClickTest do
 
     test "stores last_press_time and last_press_pos" do
       mouse = %Mouse{} |> Mouse.record_press(5, 10, 1)
-      assert mouse.last_press_time != nil
+      assert is_integer(mouse.last_press_time)
       assert mouse.last_press_pos == {5, 10}
     end
   end
@@ -110,10 +110,10 @@ defmodule MingaEditor.State.MouseMultiClickTest do
   end
 
   describe "hover tracking" do
-    test "set_hover stores position" do
+    test "set_hover stores position without creating a process timer" do
       mouse = %Mouse{} |> Mouse.set_hover(5, 10)
       assert mouse.hover_pos == {5, 10}
-      assert mouse.hover_timer != nil
+      assert mouse.hover_timer == nil
     end
 
     test "clear_hover removes position and timer" do
@@ -126,16 +126,17 @@ defmodule MingaEditor.State.MouseMultiClickTest do
       assert mouse.hover_timer == nil
     end
 
-    test "set_hover cancels previous timer" do
-      mouse =
-        %Mouse{}
-        |> Mouse.set_hover(5, 10)
+    test "prepare_hover returns previous timer for workflow cancellation" do
+      old_timer = Process.send_after(self(), :old_hover, 10_000)
+      mouse = %Mouse{hover_timer: old_timer}
 
-      old_timer = mouse.hover_timer
+      {mouse, returned_timer, schedule?} = Mouse.prepare_hover(mouse, 6, 11)
 
-      mouse = Mouse.set_hover(mouse, 6, 11)
-      assert mouse.hover_timer != old_timer
+      assert returned_timer == old_timer
+      assert schedule?
+      assert mouse.hover_timer == nil
       assert mouse.hover_pos == {6, 11}
+      Process.cancel_timer(old_timer)
     end
   end
 end

@@ -5,6 +5,7 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
 
   use ExUnit.Case, async: true
 
+  alias MingaEditor.Session.State, as: SessionState
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Editing.Fold.Range, as: FoldRange
   alias Minga.Core.WrapMap
@@ -117,7 +118,15 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
       win_id = state.workspace.windows.active
       window = Map.fetch!(state.workspace.windows.map, win_id)
       window = Window.set_viewport(window, Viewport.put_top(window.viewport, 250))
-      state = put_in(state.workspace.windows.map[win_id], window)
+
+      state = %{
+        state
+        | workspace:
+            SessionState.set_windows(state.workspace, %{
+              state.workspace.windows
+              | map: Map.put(state.workspace.windows.map, win_id, window)
+            })
+      }
 
       # First-paint-then-promote (#2679): the first frame renders windowed (arming
       # promotion), the second promotes to full residence.
@@ -138,7 +147,15 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
       window = Map.fetch!(state.workspace.windows.map, win_id)
       window = Window.set_fold_ranges(window, [FoldRange.new!(1, 3)])
       window = Window.fold_at(window, 1)
-      state = put_in(state.workspace.windows.map[win_id], window)
+
+      state = %{
+        state
+        | workspace:
+            SessionState.set_windows(state.workspace, %{
+              state.workspace.windows
+              | map: Map.put(state.workspace.windows.map, win_id, window)
+            })
+      }
 
       {scrolls, _state, _layout} = run_through_scroll(state)
       [{_win_id, scroll}] = Map.to_list(scrolls)
@@ -208,7 +225,15 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
       window = Map.fetch!(state.workspace.windows.map, win_id)
       viewport = Viewport.put_top_visual(window.viewport, 0, 1, Enum.count(head_entry))
       window = Window.set_viewport(window, viewport)
-      state = put_in(state.workspace.windows.map[win_id], window)
+
+      state = %{
+        state
+        | workspace:
+            SessionState.set_windows(state.workspace, %{
+              state.workspace.windows
+              | map: Map.put(state.workspace.windows.map, win_id, window)
+            })
+      }
 
       BufferProcess.move_to(buffer, {0, Enum.at(head_entry, -1).byte_offset})
 
@@ -298,7 +323,12 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
       scrolled_vp = %{window.viewport | left: 40}
       updated_window = %{window | viewport: scrolled_vp}
       new_map = Map.put(state.workspace.windows.map, win_id, updated_window)
-      state = put_in(state.workspace.windows.map, new_map)
+
+      state = %{
+        state
+        | workspace:
+            SessionState.set_windows(state.workspace, %{state.workspace.windows | map: new_map})
+      }
 
       {scrolls, _state, _layout} = run_through_scroll(state)
       [{_win_id, scroll}] = Map.to_list(scrolls)

@@ -34,11 +34,13 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
     buf = BufferSync.start_buffer(tree)
 
     %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace:
         %SessionState{viewport: Viewport.new(24, 80), keymap_scope: :file_tree}
         |> SessionState.set_file_tree(%FileTreeState{} |> FileTreeState.open(tree, buf)),
-      focus_stack: [MingaEditor.Input.Scoped, MingaEditor.Input.ModeFSM]
+      interaction: %MingaEditor.State.Interaction{
+        focus_stack: [MingaEditor.Input.Scoped, MingaEditor.Input.ModeFSM]
+      }
     }
   end
 
@@ -51,7 +53,16 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
     index = ft(state).tree.cursor
 
     file_tree = FileTreeState.start_editing(ft(state), index, type, text)
-    EditorState.set_file_tree(state, file_tree)
+
+    then(state, fn state ->
+      %{
+        state
+        | workspace:
+            then(state.workspace, fn workspace ->
+              MingaEditor.Session.State.set_file_tree(workspace, file_tree)
+            end)
+      }
+    end)
   end
 
   describe "printable character input" do
@@ -152,7 +163,15 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
       file_tree = FileTreeState.replace_tree(ft(state), tree)
 
       state =
-        EditorState.set_file_tree(state, file_tree)
+        then(state, fn state ->
+          %{
+            state
+            | workspace:
+                then(state.workspace, fn workspace ->
+                  MingaEditor.Session.State.set_file_tree(workspace, file_tree)
+                end)
+          }
+        end)
 
       {:handled, state} = FileTreeHandler.handle_key(state, ?/, 0)
       assert ft(state).filtering == true
@@ -177,7 +196,15 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
       file_tree = FileTreeState.start_filtering(ft(state))
 
       state =
-        EditorState.set_file_tree(state, file_tree)
+        then(state, fn state ->
+          %{
+            state
+            | workspace:
+                then(state.workspace, fn workspace ->
+                  MingaEditor.Session.State.set_file_tree(workspace, file_tree)
+                end)
+          }
+        end)
 
       {:handled, state} = FileTreeHandler.handle_key(state, @escape, 0)
       assert ft(state).filtering == false
@@ -188,13 +215,37 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
       state = make_state(dir)
       File.write!(Path.join(dir, "visible.txt"), "visible")
       tree = FileTree.refresh(ft(state).tree)
-      state = EditorState.update_file_tree(state, &FileTreeState.replace_tree(&1, tree))
+
+      state =
+        then(state, fn state ->
+          %{
+            state
+            | workspace:
+                then(state.workspace, fn workspace ->
+                  MingaEditor.Session.State.set_file_tree(
+                    workspace,
+                    FileTreeState.replace_tree(EditorState.file_tree_state(state), tree)
+                  )
+                end)
+          }
+        end)
 
       {:handled, state} = FileTreeHandler.handle_key(state, ?/, 0)
       {:handled, state} = FileTreeHandler.handle_key(state, ?z, 0)
 
       no_matches = FileTreeState.apply_filter_walk(ft(state), tree.root, "z", [])
-      state = EditorState.set_file_tree(state, no_matches)
+
+      state =
+        then(state, fn state ->
+          %{
+            state
+            | workspace:
+                then(state.workspace, fn workspace ->
+                  MingaEditor.Session.State.set_file_tree(workspace, no_matches)
+                end)
+          }
+        end)
+
       assert FileTreeState.status(ft(state)) == :empty
 
       {:handled, state} = FileTreeHandler.handle_key(state, @escape, 0)
@@ -251,7 +302,15 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
     tree = FileTree.select(ft(state).tree, index)
     file_tree = FileTreeState.replace_tree(ft(state), tree)
 
-    EditorState.set_file_tree(state, file_tree)
+    then(state, fn state ->
+      %{
+        state
+        | workspace:
+            then(state.workspace, fn workspace ->
+              MingaEditor.Session.State.set_file_tree(workspace, file_tree)
+            end)
+      }
+    end)
   end
 
   describe "key swallowing (no leaking to mode FSM)" do

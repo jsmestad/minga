@@ -8,13 +8,11 @@ defmodule MingaEditor.Agent.UIState.Panel do
   concerns in `UIState.View`.
 
   Most callers interact through `UIState` functions rather than accessing
-  this struct directly. `AgentAccess.panel/1` returns this struct for
-  read-only field access in input handlers and renderers.
+  this struct directly.
   """
 
   alias MingaAgent.Config, as: AgentConfig
   alias MingaEditor.Agent.Transcript
-  alias Minga.Buffer
   alias Minga.Editing.Scroll
 
   @typedoc "A collapsed paste block. Stores the original text and whether the block is currently expanded for editing."
@@ -206,48 +204,6 @@ defmodule MingaEditor.Agent.UIState.Panel do
   def clear_mention_completion(%__MODULE__{} = panel) do
     %{panel | mention_completion: nil}
   end
-
-  # ── Buffer readers ──────────────────────────────────────────────────────
-
-  @doc "Returns the input lines as a list of strings."
-  @spec input_lines(t()) :: [String.t()]
-  def input_lines(%__MODULE__{prompt_buffer: pid}) when is_pid(pid) do
-    Buffer.content(pid) |> String.split("\n")
-  end
-
-  def input_lines(%__MODULE__{}), do: [""]
-
-  @doc "Returns the input cursor position as `{line, col}`."
-  @spec input_cursor(t()) :: {non_neg_integer(), non_neg_integer()}
-  def input_cursor(%__MODULE__{prompt_buffer: pid}) when is_pid(pid) do
-    Buffer.cursor(pid)
-  end
-
-  def input_cursor(%__MODULE__{}), do: {0, 0}
-
-  @doc "Returns the number of input lines."
-  @spec input_line_count(t()) :: pos_integer()
-  def input_line_count(%__MODULE__{prompt_buffer: pid}) when is_pid(pid) do
-    Buffer.line_count(pid)
-  end
-
-  def input_line_count(%__MODULE__{}), do: 1
-
-  @doc "Returns true if the input is empty (single empty line)."
-  @spec input_empty?(t()) :: boolean()
-  def input_empty?(%__MODULE__{prompt_buffer: pid}) when is_pid(pid) do
-    Buffer.content(pid) == ""
-  end
-
-  def input_empty?(%__MODULE__{}), do: true
-
-  @doc "Returns the raw input text (with placeholders, not substituted)."
-  @spec input_text(t()) :: String.t()
-  def input_text(%__MODULE__{prompt_buffer: pid}) when is_pid(pid) do
-    Buffer.content(pid)
-  end
-
-  def input_text(%__MODULE__{}), do: ""
 
   @doc "Increments the message version counter. Used to invalidate the GUI fingerprint cache when message content changes (collapse toggles, new messages, etc.)."
   @spec bump_message_version(t()) :: t()

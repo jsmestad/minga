@@ -11,11 +11,24 @@ defmodule MingaEditor.Commands.SearchAsyncTest do
 
   alias Minga.Mode.SearchPromptState
   alias MingaEditor.Commands.Search
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.ModalOverlay
 
   defp with_search_prompt(state, input) do
-    EditorState.transition_mode(state, :search_prompt, %SearchPromptState{input: input})
+    then(state, fn state ->
+      %{
+        state
+        | workspace:
+            then(state.workspace, fn workspace ->
+              MingaEditor.Session.State.transition_mode(
+                workspace,
+                :search_prompt,
+                %SearchPromptState{
+                  input: input
+                }
+              )
+            end)
+      }
+    end)
   end
 
   describe ":confirm_project_search" do

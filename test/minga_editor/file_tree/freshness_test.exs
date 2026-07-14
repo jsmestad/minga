@@ -16,6 +16,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
   alias MingaEditor.FileTree.Refresh
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
+  alias MingaEditor.State.Frontend
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -115,8 +116,9 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     buffer = BufferSync.start_buffer(original)
 
     state = state_with_tree(root, nil, buffer)
-    state = %{state | backend: :tui}
-    request = Refresh.request(original, EditorState.events_registry(state))
+    %Frontend{} = frontend = state.frontend
+    state = %{state | frontend: %Frontend{frontend | backend: :tui}}
+    request = Refresh.request(original, state.extension_surfaces.events_registry)
     tracked = track(state, request)
     refreshed = tree(root, [entry(root, "fresh.ex")])
 
@@ -125,31 +127,32 @@ defmodule MingaEditor.FileTree.FreshnessTest do
 
     assert file_tree(accepted).tree == refreshed
     assert Minga.Buffer.content(buffer) =~ "fresh.ex"
-    assert is_reference(accepted.render_correlation.timer)
-    Process.cancel_timer(accepted.render_correlation.timer)
+    assert is_reference(accepted.render.render_correlation.timer)
+    Process.cancel_timer(accepted.render.render_correlation.timer)
   end
 
   test "failed and canceled outcomes clear current correlation without requesting rendering", %{
     tmp_dir: root
   } do
     state = state_with_tree(root)
-    state = %{state | backend: :tui}
-    request = Refresh.request(file_tree(state).tree, EditorState.events_registry(state))
+    %Frontend{} = frontend = state.frontend
+    state = %{state | frontend: %Frontend{frontend | backend: :tui}}
+    request = Refresh.request(file_tree(state).tree, state.extension_surfaces.events_registry)
     tracked = track(state, request)
 
     assert {failed, %Outcome{status: :failed}} =
              Refresh.apply(tracked, Outcome.failed(request, :unreadable))
 
-    assert failed.render_correlation.timer == nil
+    assert failed.render.render_correlation.timer == nil
     assert failed |> file_tree() |> then(& &1.refresh.current) == nil
 
-    retry = Refresh.request(file_tree(failed).tree, EditorState.events_registry(failed))
+    retry = Refresh.request(file_tree(failed).tree, failed.extension_surfaces.events_registry)
     retracked = track(failed, retry)
 
     assert {canceled, %Outcome{status: :canceled}} =
              Refresh.apply(retracked, Outcome.canceled(retry, :requested))
 
-    assert canceled.render_correlation.timer == nil
+    assert canceled.render.render_correlation.timer == nil
     assert canceled |> file_tree() |> then(& &1.refresh.current) == nil
   end
 
@@ -165,18 +168,31 @@ defmodule MingaEditor.FileTree.FreshnessTest do
              Refresh.apply(closed, Outcome.completed(request, refreshed))
 
     assert file_tree(closed_state).tree == nil
-    assert closed_state.render_correlation.timer == nil
+    assert closed_state.render.render_correlation.timer == nil
 
     rerooted =
-      state_with_tree(old_root)
+      old_root
+      |> state_with_tree()
       |> track(request)
-      |> EditorState.update_file_tree(&FileTreeState.replace_tree(&1, tree(new_root, [])))
+      |> then(fn state ->
+        file_tree = state |> file_tree() |> FileTreeState.replace_tree(tree(new_root, []))
+
+        then(state, fn state ->
+          %{
+            state
+            | workspace:
+                then(state.workspace, fn workspace ->
+                  MingaEditor.Session.State.set_file_tree(workspace, file_tree)
+                end)
+          }
+        end)
+      end)
 
     assert {rerooted_state, %Outcome{status: :stale, reason: :stale}} =
              Refresh.apply(rerooted, Outcome.completed(request, refreshed))
 
     assert file_tree(rerooted_state).tree.root == Path.expand(new_root)
-    assert rerooted_state.render_correlation.timer == nil
+    assert rerooted_state.render.render_correlation.timer == nil
   end
 
   test "project-root replacement exposes unavailable roots as errors", %{tmp_dir: root} do
@@ -192,10 +208,19 @@ defmodule MingaEditor.FileTree.FreshnessTest do
   end
 
   test "git metadata updates preserve an unavailable-root error", %{tmp_dir: root} do
+    state = state_with_tree(root)
+    file_tree = state |> file_tree() |> FileTreeState.refresh_failed(:enoent)
+
     state =
-      root
-      |> state_with_tree()
-      |> EditorState.update_file_tree(&FileTreeState.refresh_failed(&1, :enoent))
+      then(state, fn state ->
+        %{
+          state
+          | workspace:
+              then(state.workspace, fn workspace ->
+                MingaEditor.Session.State.set_file_tree(workspace, file_tree)
+              end)
+        }
+      end)
 
     event = %Events.GitStatusEvent{
       git_root: root,
@@ -213,8 +238,10 @@ defmodule MingaEditor.FileTree.FreshnessTest do
   end
 
   test "current root failures preserve the tree and expose an error state", %{tmp_dir: root} do
-    state = %{state_with_tree(root) | backend: :tui}
-    request = Refresh.request(file_tree(state).tree, EditorState.events_registry(state))
+    state = state_with_tree(root)
+    %Frontend{} = frontend = state.frontend
+    state = %{state | frontend: %Frontend{frontend | backend: :tui}}
+    request = Refresh.request(file_tree(state).tree, state.extension_surfaces.events_registry)
     tracked = track(state, request)
 
     assert {failed, %Outcome{status: :failed}} =
@@ -224,13 +251,24 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     assert {:error, reason} = FileTreeState.status(file_tree(failed))
     assert reason != ""
     assert file_tree(failed).refresh.current == nil
-    assert is_reference(failed.render_correlation.timer)
-    Process.cancel_timer(failed.render_correlation.timer)
+    assert is_reference(failed.render.render_correlation.timer)
+    Process.cancel_timer(failed.render.render_correlation.timer)
   end
 
   defp state_with_tree(root, scheduler \\ nil, buffer \\ nil) do
     file_tree = FileTreeState.open(%FileTreeState{}, tree(root, []), buffer)
-    state = EditorState.set_file_tree(base_state(), file_tree)
+
+    state =
+      then(base_state(), fn state ->
+        %{
+          state
+          | workspace:
+              then(state.workspace, fn workspace ->
+                MingaEditor.Session.State.set_file_tree(workspace, file_tree)
+              end)
+        }
+      end)
+
     %{state | effect_scheduler: scheduler}
   end
 
@@ -248,13 +286,39 @@ defmodule MingaEditor.FileTree.FreshnessTest do
   end
 
   defp track(state, request) do
-    EditorState.update_file_tree(
-      state,
-      &FileTreeState.track_refresh_request(&1, request.effect.root, request.id)
-    )
+    then(state, fn state ->
+      %{
+        state
+        | workspace:
+            then(state.workspace, fn workspace ->
+              MingaEditor.Session.State.set_file_tree(
+                workspace,
+                FileTreeState.track_refresh_request(
+                  EditorState.file_tree_state(state),
+                  request.effect.root,
+                  request.id
+                )
+              )
+            end)
+      }
+    end)
   end
 
-  defp close_tree(state), do: EditorState.update_file_tree(state, &FileTreeState.close/1)
+  defp close_tree(state),
+    do:
+      then(state, fn state ->
+        %{
+          state
+          | workspace:
+              then(state.workspace, fn workspace ->
+                MingaEditor.Session.State.set_file_tree(
+                  workspace,
+                  FileTreeState.close(EditorState.file_tree_state(state))
+                )
+              end)
+        }
+      end)
+
   defp file_tree(state), do: EditorState.file_tree_state(state)
 
   defp start_scheduler(opts \\ []) do

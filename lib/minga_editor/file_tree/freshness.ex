@@ -135,7 +135,7 @@ defmodule MingaEditor.FileTree.Freshness do
   end
 
   defp schedule_refresh(state, %FileTree{} = tree) do
-    request = Refresh.request(tree, EditorState.events_registry(state))
+    request = Refresh.request(tree, state.extension_surfaces.events_registry)
 
     case EffectScheduler.schedule(state.effect_scheduler, request) do
       {:ok, _request_id, _disposition} ->
@@ -246,7 +246,8 @@ defmodule MingaEditor.FileTree.Freshness do
         state
 
       %FileTreeState{tree: %FileTree{} = tree} = file_tree ->
-        updated_tree = Refresh.with_cached_git_status(tree, EditorState.events_registry(state))
+        updated_tree =
+          Refresh.with_cached_git_status(tree, state.extension_surfaces.events_registry)
 
         file_tree = FileTreeState.replace_tree_metadata(file_tree, updated_tree)
 
@@ -276,7 +277,7 @@ defmodule MingaEditor.FileTree.Freshness do
         case FilesystemScanner.scan(new_tree, nil) do
           %FileTree{} = new_tree ->
             new_tree =
-              Refresh.with_cached_git_status(new_tree, EditorState.events_registry(state))
+              Refresh.with_cached_git_status(new_tree, state.extension_surfaces.events_registry)
 
             watch_expanded_dirs(new_tree)
 
@@ -352,11 +353,11 @@ defmodule MingaEditor.FileTree.Freshness do
   end
 
   @spec file_tree_state(state()) :: FileTreeState.t()
-  defp file_tree_state(state), do: EditorState.file_tree_state(state)
+  defp file_tree_state(state), do: state.workspace.file_tree
 
   @spec set_file_tree(state(), FileTreeState.t()) :: state()
   defp set_file_tree(%EditorState{} = state, %FileTreeState{} = file_tree) do
-    EditorState.set_file_tree(state, file_tree)
+    %{state | workspace: MingaEditor.Session.State.set_file_tree(state.workspace, file_tree)}
   end
 
   @spec safe_watch_directory(String.t()) :: :ok

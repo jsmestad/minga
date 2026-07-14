@@ -3,6 +3,8 @@ defmodule Minga.Extension.JsonLoaderTest do
 
   alias Minga.Extension.JsonLoader
 
+  @moduletag :tmp_dir
+
   _ = :session_start
 
   @valid_manifest Jason.encode!(%{
@@ -32,12 +34,7 @@ defmodule Minga.Extension.JsonLoaderTest do
                     ]
                   })
 
-  setup do
-    dir = Path.join(System.tmp_dir!(), "json_loader_test_#{:erlang.unique_integer([:positive])}")
-    File.mkdir_p!(dir)
-    on_exit(fn -> File.rm_rf!(dir) end)
-    %{dir: dir}
-  end
+  setup %{tmp_dir: dir}, do: %{dir: dir}
 
   test "loads a complete manifest into a working extension", %{dir: dir} do
     write_manifest(dir, @valid_manifest)

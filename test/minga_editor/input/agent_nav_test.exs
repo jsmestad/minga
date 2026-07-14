@@ -8,7 +8,6 @@ defmodule MingaEditor.Input.AgentNavTest do
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
@@ -39,7 +38,7 @@ defmodule MingaEditor.Input.AgentNavTest do
     window = Window.new_agent_chat(1, 24, 80)
 
     %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         agent_ui: agent_ui,
@@ -69,8 +68,8 @@ defmodule MingaEditor.Input.AgentNavTest do
 
       {:handled, new_state} = AgentNav.handle_key(state, ?j, 0)
 
-      assert AgentAccess.panel(new_state).scroll.offset == 6
-      refute AgentAccess.panel(new_state).scroll.pinned
+      assert new_state.workspace.agent_ui.panel.scroll.offset == 6
+      refute new_state.workspace.agent_ui.panel.scroll.pinned
     end
 
     test "k scrolls the semantic transcript up" do
@@ -78,16 +77,16 @@ defmodule MingaEditor.Input.AgentNavTest do
 
       {:handled, new_state} = AgentNav.handle_key(state, ?k, 0)
 
-      assert AgentAccess.panel(new_state).scroll.offset == 4
-      refute AgentAccess.panel(new_state).scroll.pinned
+      assert new_state.workspace.agent_ui.panel.scroll.offset == 4
+      refute new_state.workspace.agent_ui.panel.scroll.pinned
     end
 
     test "Ctrl-D and Ctrl-U page the semantic transcript" do
       {:handled, down_state} = AgentNav.handle_key(make_state(offset: 5), ?d, @ctrl)
-      assert AgentAccess.panel(down_state).scroll.offset == 15
+      assert down_state.workspace.agent_ui.panel.scroll.offset == 15
 
       {:handled, up_state} = AgentNav.handle_key(make_state(offset: 15), ?u, @ctrl)
-      assert AgentAccess.panel(up_state).scroll.offset == 5
+      assert up_state.workspace.agent_ui.panel.scroll.offset == 5
     end
 
     test "G pins the semantic transcript to the bottom" do
@@ -95,7 +94,7 @@ defmodule MingaEditor.Input.AgentNavTest do
 
       {:handled, new_state} = AgentNav.handle_key(state, ?G, 0)
 
-      assert AgentAccess.panel(new_state).scroll.pinned
+      assert new_state.workspace.agent_ui.panel.scroll.pinned
     end
 
     test "unpins the agent chat window when user navigates" do

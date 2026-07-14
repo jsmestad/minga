@@ -23,6 +23,7 @@ defmodule MingaEditor.PickerUI do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
   alias MingaEditor.State.Picker, as: PickerState
+  alias MingaEditor.State.BufferLifecycle
   alias MingaEditor.UI.Picker
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
@@ -95,7 +96,21 @@ defmodule MingaEditor.PickerUI do
 
   @spec open_async(state(), module(), map() | nil) :: state()
   defp open_async(state, source_module, context) do
-    max_vis = max(state.terminal_viewport.rows - 3, 5)
+    {new_state, revision} = open_loading(state, source_module, context)
+
+    send(
+      self(),
+      {:picker_fetch_candidates, source_module, revision,
+       Context.from_editor_state(state, context)}
+    )
+
+    new_state
+  end
+
+  @doc "Opens an async picker in its loading state without starting a fetch."
+  @spec open_loading(state(), module(), map() | nil) :: {state(), reference()}
+  def open_loading(state, source_module, context \\ nil) do
+    max_vis = max(state.frontend.terminal_viewport.rows - 3, 5)
     picker = Picker.new([], title: source_module.title(), max_visible: max_vis)
 
     new_state = clear_whichkey(state)
@@ -105,7 +120,7 @@ defmodule MingaEditor.PickerUI do
       picker: picker,
       source: source_module,
       restore: state.workspace.buffers.active_index,
-      restore_theme: state.theme,
+      restore_theme: state.appearance.theme,
       context: context,
       layout: layout,
       load_status: :loading
@@ -120,18 +135,71 @@ defmodule MingaEditor.PickerUI do
         PickerPayload.new(picker_state)
       )
 
-    send(
-      self(),
-      {:picker_fetch_candidates, source_module, revision,
-       Context.from_editor_state(state, context)}
-    )
-
-    new_state
+    {new_state, revision}
   end
+
+  @doc "Applies a scheduler-owned candidate result when its picker revision is live."
+  @spec apply_fetch_result(state(), module(), reference(), tuple()) ::
+          {:ok, state()} | :stale
+  def apply_fetch_result(state, source_module, revision, {:ok, items, candidates, meta}) do
+    case live_picker(state, source_module, revision) do
+      {:ok, payload} ->
+        picker_state = payload.picker_ui
+        picker = Picker.put_candidates(picker_state.picker, items, candidates)
+        new_picker_state = %{picker_state | picker: picker, load_status: :ready}
+
+        new_state =
+          state
+          |> MingaEditor.Shell.Traditional.ModalWorkflow.transition(
+            :picker,
+            PickerPayload.put_picker_ui(payload, new_picker_state)
+          )
+          |> apply_fetch_status(meta)
+
+        {:ok, new_state}
+
+      :stale ->
+        :stale
+    end
+  end
+
+  def apply_fetch_result(state, source_module, revision, {:error, reason}) do
+    case live_picker(state, source_module, revision) do
+      {:ok, payload} ->
+        picker_state = payload.picker_ui
+        new_picker_state = %{picker_state | load_status: {:error, reason}}
+
+        {:ok,
+         MingaEditor.Shell.Traditional.ModalWorkflow.transition(
+           state,
+           :picker,
+           PickerPayload.put_picker_ui(payload, new_picker_state)
+         )}
+
+      :stale ->
+        :stale
+    end
+  end
+
+  defp live_picker(state, source_module, revision) do
+    case state.shell_runtime.state.modal do
+      {:picker, %PickerPayload{picker_ui: %{source: ^source_module} = picker_ui} = payload} ->
+        if PickerState.current_fetch?(picker_ui, revision), do: {:ok, payload}, else: :stale
+
+      _ ->
+        :stale
+    end
+  end
+
+  defp apply_fetch_status(state, %{status: status}) when is_binary(status) do
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, status)
+  end
+
+  defp apply_fetch_status(state, _meta), do: state
 
   @spec open_with_items(state(), module(), [Picker.item()], map() | nil) :: state()
   defp open_with_items(state, source_module, items, context) do
-    max_vis = max(state.terminal_viewport.rows - 3, 5)
+    max_vis = max(state.frontend.terminal_viewport.rows - 3, 5)
     picker = Picker.new(items, title: source_module.title(), max_visible: max_vis)
 
     new_state = clear_whichkey(state)
@@ -141,7 +209,7 @@ defmodule MingaEditor.PickerUI do
       picker: picker,
       source: source_module,
       restore: state.workspace.buffers.active_index,
-      restore_theme: state.theme,
+      restore_theme: state.appearance.theme,
       context: context,
       layout: layout
     }
@@ -542,7 +610,7 @@ defmodule MingaEditor.PickerUI do
       state
       |> restore_picker_origin()
       |> close()
-      |> EditorState.add_buffer(previewed_pid, context: :open)
+      |> MingaEditor.Handlers.BufferRegistry.add_buffer(previewed_pid, context: :open)
 
     record_previewed_buffer_access(previewed_pid)
     state
@@ -634,7 +702,9 @@ defmodule MingaEditor.PickerUI do
   @spec close(state()) :: state()
   def close(state) do
     state
-    |> EditorState.set_buffer_add_context(:open)
+    |> then(fn state ->
+      %{state | buffer_lifecycle: BufferLifecycle.expect_buffer(state.buffer_lifecycle, :open)}
+    end)
     |> MingaEditor.Shell.Traditional.ModalWorkflow.dismiss()
   end
 
@@ -726,7 +796,7 @@ defmodule MingaEditor.PickerUI do
        ) do
     ctx = Context.from_editor_state(state)
     items = new_source.candidates(ctx)
-    max_vis = max(state.terminal_viewport.rows - 3, 5)
+    max_vis = max(state.frontend.terminal_viewport.rows - 3, 5)
     picker = Picker.new(items, title: new_source.title(), max_visible: max_vis)
     layout = MingaEditor.UI.Picker.Source.layout(new_source)
     original = orig_src || current_source
@@ -752,7 +822,7 @@ defmodule MingaEditor.PickerUI do
        ) do
     ctx = Context.from_editor_state(state)
     items = orig.candidates(ctx)
-    max_vis = max(state.terminal_viewport.rows - 3, 5)
+    max_vis = max(state.frontend.terminal_viewport.rows - 3, 5)
     picker = Picker.new(items, title: orig.title(), max_visible: max_vis)
     layout = MingaEditor.UI.Picker.Source.layout(orig)
 
@@ -815,7 +885,11 @@ defmodule MingaEditor.PickerUI do
           state
 
         item ->
-          state = EditorState.set_buffer_add_context(state, :preview)
+          state = %{
+            state
+            | buffer_lifecycle: BufferLifecycle.expect_buffer(state.buffer_lifecycle, :preview)
+          }
+
           source.on_select(item, state)
       end
     else

@@ -70,8 +70,22 @@ defmodule MingaEditor.UI.Picker.PendingReviewsSource do
         {tab_bar, tab} = TabBar.insert(tab_bar, :agent, workspace.label)
         tab_bar = TabBar.move_tab_to_workspace(tab_bar, tab.id, workspace_id)
 
-        state
-        |> EditorState.set_tab_bar(tab_bar)
+        then(state, fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.set_tab_bar(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              tab_bar
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
         |> EditorState.switch_tab(tab.id)
 
       nil ->

@@ -180,9 +180,9 @@ defmodule MingaEditor.FocusTreeTest do
   describe "bottom panel" do
     test "visible bottom panel is a focusable frontmost hit target" do
       state = %MingaEditor.State{
-        port_manager: self(),
+        frontend: %MingaEditor.State.Frontend{port_manager: self()},
         workspace: %SessionState{viewport: Viewport.new(24, 80), editing: VimState.new()},
-        layout: single_window_layout(),
+        render: %MingaEditor.State.Render{layout: single_window_layout()},
         shell_runtime:
           Runtime.new(
             Registry.get(:traditional),

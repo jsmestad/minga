@@ -23,8 +23,11 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Window
+  alias MingaEditor.State.ExtensionSurfaces
   alias MingaEditor.State.FileTree, as: FileTreeState
+  alias MingaEditor.State.Frontend, as: FrontendState
   alias MingaEditor.State.ResourcePressure
+  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
@@ -47,27 +50,41 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     state =
       table
       |> base_state()
-      |> EditorState.upsert_notification(
-        Notification.new(
-          id: "build:test",
-          level: :progress,
-          title: "Building Minga",
-          created_at: 1_715_000_000
-        )
-      )
-      |> EditorState.upsert_notification(
-        Notification.new(
-          id: "other",
-          level: :info,
-          title: "Still here",
-          created_at: 1_715_000_010
-        )
-      )
+      |> then(fn state ->
+        %{
+          state
+          | feedback:
+              MingaEditor.State.Feedback.upsert_notification(
+                state.feedback,
+                Notification.new(
+                  id: "build:test",
+                  level: :progress,
+                  title: "Building Minga",
+                  created_at: 1_715_000_000
+                )
+              )
+        }
+      end)
+      |> then(fn state ->
+        %{
+          state
+          | feedback:
+              MingaEditor.State.Feedback.upsert_notification(
+                state.feedback,
+                Notification.new(
+                  id: "other",
+                  level: :info,
+                  title: "Still here",
+                  created_at: 1_715_000_010
+                )
+              )
+        }
+      end)
 
     state = GuiActionHandler.dispatch(state, {:notification_dismiss, "build:test"})
 
-    assert NotificationCenter.find(state.notifications, "build:test") == nil
-    assert [%{id: "other"}] = NotificationCenter.list(state.notifications)
+    assert NotificationCenter.find(state.feedback.notifications, "build:test") == nil
+    assert [%{id: "other"}] = NotificationCenter.list(state.feedback.notifications)
   end
 
   test "tab context actions target the requested tab without selecting it", %{
@@ -77,7 +94,22 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     tab2 = Tab.new_file(2, "b.ex")
     tab3 = Tab.new_file(3, "c.ex")
     tab_bar = %TabBar{tabs: [tab1, tab2, tab3], active_id: 1, next_id: 4}
-    state = base_state(table) |> EditorState.set_tab_bar(tab_bar)
+
+    state =
+      base_state(table)
+      |> then(fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            tab_bar
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
 
     pinned = GuiActionHandler.dispatch(state, {:tab_pin, 3})
     pinned_tab_bar = EditorState.tab_bar(pinned)
@@ -110,7 +142,21 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
       workspaces: [Workspace.new_manual(nil), Workspace.new_agent(7, "Agent")]
     }
 
-    state = base_state(table) |> EditorState.set_tab_bar(tab_bar)
+    state =
+      base_state(table)
+      |> then(fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            tab_bar
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
 
     switched = GuiActionHandler.dispatch(state, {:execute_command, "workspace_goto_id:7"})
 
@@ -121,14 +167,13 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   test "activating visible sidebars updates focus and keyboard scope", %{sidebar_registry: table} do
     file_tree_state = %FileTreeState{tree_status: :loading, focused: false}
 
-    state =
-      base_state(table)
-      |> EditorState.update_file_tree(fn _file_tree -> file_tree_state end)
+    state = base_state(table)
+    state = %{state | workspace: SessionState.set_file_tree(state.workspace, file_tree_state)}
 
     file_tree_active =
       GuiActionHandler.dispatch(state, {:sidebar_action, "file_tree", "renamed_kind", "activate"})
 
-    assert EditorState.file_tree_state(file_tree_active).focused
+    assert file_tree_active.workspace.file_tree.focused
     assert file_tree_active.workspace.keymap_scope == :file_tree
     assert SidebarWorkflow.active_id(file_tree_active) == "file_tree"
 
@@ -146,7 +191,9 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     observatory_state =
       state
       |> SidebarWorkflow.open_observatory(nil)
-      |> EditorState.set_keymap_scope(:file_tree)
+      |> then(fn current ->
+        %{current | workspace: SessionState.set_keymap_scope(current.workspace, :file_tree)}
+      end)
 
     observatory_active =
       GuiActionHandler.dispatch(
@@ -154,7 +201,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
         {:sidebar_action, "observatory", "observatory", "activate"}
       )
 
-    refute EditorState.file_tree_state(observatory_active).focused
+    refute observatory_active.workspace.file_tree.focused
     assert observatory_active.workspace.keymap_scope == :editor
     assert SidebarWorkflow.active_id(observatory_active) == "observatory"
   end
@@ -166,18 +213,21 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   } do
     assert :ok = FileTreeFeature.sync_sidebar(%FileTreeState{}, table)
 
-    state =
-      table
-      |> base_state()
-      |> EditorState.update_file_tree(fn _file_tree ->
-        %FileTreeState{tree: ProjectFileTree.new(tmp_dir), tree_status: :ready, hidden: true}
-      end)
+    state = base_state(table)
+
+    file_tree = %FileTreeState{
+      tree: ProjectFileTree.new(tmp_dir),
+      tree_status: :ready,
+      hidden: true
+    }
+
+    state = %{state | workspace: SessionState.set_file_tree(state.workspace, file_tree)}
 
     opened =
       GuiActionHandler.dispatch(state, {:sidebar_action, "file_tree", "file_tree", "toggle"})
 
-    assert EditorState.file_tree_state(opened).tree != nil
-    assert EditorState.file_tree_state(opened).focused
+    assert opened.workspace.file_tree.tree != nil
+    assert opened.workspace.file_tree.focused
     assert SidebarWorkflow.active_id(opened) == "file_tree"
 
     focused =
@@ -279,7 +329,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
     new_state = GuiActionHandler.dispatch(state, {:font_size_adjust, :increase})
 
-    assert new_state.font_size_override != nil
+    assert new_state.appearance.font_size_override != nil
 
     assert Enum.all?(Map.values(new_state.workspace.windows.map), fn %Window{} = window ->
              match?(%MingaEditor.Window.RenderCache{}, window.render_cache)
@@ -297,7 +347,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
     new_state = GuiActionHandler.dispatch(state, {:font_size_adjust, :reset})
 
-    assert new_state.font_size_override == nil
+    assert new_state.appearance.font_size_override == nil
 
     assert Enum.all?(Map.values(new_state.workspace.windows.map), fn %Window{} = window ->
              match?(%MingaEditor.Window.RenderCache{}, window.render_cache)
@@ -345,20 +395,30 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   end
 
   test "command-opened observatory replaces stale active sidebar id", %{sidebar_registry: table} do
+    state = base_state(table)
+
+    frontend =
+      FrontendState.accept_capabilities(
+        state.frontend,
+        %Capabilities{frontend_type: :native_gui, semantic_ui: true}
+      )
+
+    file_tree = state.workspace.file_tree |> FileTreeState.loading() |> FileTreeState.focus()
+
+    workspace =
+      state.workspace
+      |> SessionState.set_file_tree(file_tree)
+      |> SessionState.set_keymap_scope(:file_tree)
+
     state =
-      base_state(table)
-      |> Map.put(:capabilities, %Capabilities{frontend_type: :native_gui, semantic_ui: true})
-      |> EditorState.update_file_tree(fn _file_tree ->
-        %FileTreeState{tree_status: :loading, focused: true}
-      end)
-      |> EditorState.set_keymap_scope(:file_tree)
+      %{state | frontend: frontend, workspace: workspace}
       |> SidebarWorkflow.select("git_status")
 
     new_state = Commands.execute(state, :toggle_beam_observatory)
 
     assert SidebarWorkflow.active_id(new_state) == "observatory"
     assert SidebarWorkflow.observatory_visible?(new_state)
-    refute EditorState.file_tree_state(new_state).focused
+    refute new_state.workspace.file_tree.focused
     assert new_state.workspace.keymap_scope == :editor
   end
 
@@ -424,14 +484,21 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
       }
 
     state =
-      update_in(state.workspace.windows, fn windows ->
-        %{
-          windows
-          | map: Map.put(windows.map, popup_id, popup_window),
-            active: popup_id,
-            next_id: popup_id + 1
-        }
-      end)
+      %{
+        state
+        | workspace:
+            MingaEditor.Session.State.set_windows(
+              state.workspace,
+              then(state.workspace.windows, fn windows ->
+                %{
+                  windows
+                  | map: Map.put(windows.map, popup_id, popup_window),
+                    active: popup_id,
+                    next_id: popup_id + 1
+                }
+              end)
+            )
+      }
 
     assert Map.has_key?(state.workspace.windows.map, popup_id)
 
@@ -455,14 +522,20 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     start_supervised!({Events, name: registry})
     Events.subscribe(:power_thermal_state_changed, registry: registry)
 
-    state = %{base_state(table) | events_registry: registry}
+    state = base_state(table)
+
+    state = %{
+      state
+      | extension_surfaces:
+          ExtensionSurfaces.install_events_registry(state.extension_surfaces, registry)
+    }
 
     assert {:ok, {:power_thermal_state, true, {:unknown, 255}}} =
              ProtocolGUI.decode_gui_action(0x47, <<1, 255>>)
 
     new_state = GuiActionHandler.dispatch(state, {:power_thermal_state, true, {:unknown, 255}})
 
-    assert new_state.resource_pressure ==
+    assert new_state.frontend.resource_pressure ==
              ResourcePressure.update(ResourcePressure.new(), true, {:unknown, 255})
 
     assert_receive {:minga_event, :power_thermal_state_changed,
@@ -474,7 +547,6 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
   describe "agent chat pin intents (#2654)" do
     alias MingaEditor.Agent.UIState
-    alias MingaEditor.State.AgentAccess
 
     test "chat_scrolled_away_from_bottom unpins without moving the offset", %{
       sidebar_registry: table
@@ -483,36 +555,48 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
       # the offset a round-trip frontend relies on is left untouched.
       seeded =
         base_state(table)
-        |> AgentAccess.update_agent_ui(fn ui ->
-          %{
-            ui
-            | panel: %{
-                ui.panel
-                | scroll: Minga.Editing.set_pinned(Minga.Editing.Scroll.new(5), true)
-              }
-          }
+        |> then(fn state ->
+          MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+            state,
+            (fn ui ->
+               %{
+                 ui
+                 | panel: %{
+                     ui.panel
+                     | scroll: Minga.Editing.set_pinned(Minga.Editing.Scroll.new(5), true)
+                   }
+               }
+             end).(state.workspace.agent_ui)
+          )
         end)
 
-      assert AgentAccess.agent_ui(seeded).panel.scroll.pinned == true
+      assert seeded.workspace.agent_ui.panel.scroll.pinned == true
 
       scrolled = GuiActionHandler.dispatch(seeded, :chat_scrolled_away_from_bottom)
-      scroll = AgentAccess.agent_ui(scrolled).panel.scroll
+      scroll = scrolled.workspace.agent_ui.panel.scroll
 
       assert scroll.pinned == false
       assert scroll.offset == 5
     end
 
-    test "chat_returned_to_bottom re-pins without moving the offset", %{sidebar_registry: table} do
+    test "chat_returned_to_bottom re-pins without moving the offset", %{
+      sidebar_registry: table
+    } do
       seeded =
         base_state(table)
-        |> AgentAccess.update_agent_ui(fn ui ->
-          %{ui | panel: %{ui.panel | scroll: Minga.Editing.Scroll.new(9)}}
+        |> then(fn state ->
+          MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+            state,
+            (fn ui -> %{ui | panel: %{ui.panel | scroll: Minga.Editing.Scroll.new(9)}} end).(
+              state.workspace.agent_ui
+            )
+          )
         end)
 
-      assert AgentAccess.agent_ui(seeded).panel.scroll.pinned == false
+      assert seeded.workspace.agent_ui.panel.scroll.pinned == false
 
       returned = GuiActionHandler.dispatch(seeded, :chat_returned_to_bottom)
-      scroll = AgentAccess.agent_ui(returned).panel.scroll
+      scroll = returned.workspace.agent_ui.panel.scroll
 
       assert scroll.pinned == true
       assert scroll.offset == 9
@@ -536,8 +620,18 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     state = TestHelpers.base_state(opts)
 
     case Keyword.fetch(opts, :agent_semantic_ui_registry) do
-      {:ok, registry} -> EditorState.put_agent_semantic_ui_registry(state, registry)
-      :error -> state
+      {:ok, registry} ->
+        %{
+          state
+          | extension_surfaces:
+              MingaEditor.State.ExtensionSurfaces.install_agent_semantic_ui_registry(
+                state.extension_surfaces,
+                registry
+              )
+        }
+
+      :error ->
+        state
     end
   end
 

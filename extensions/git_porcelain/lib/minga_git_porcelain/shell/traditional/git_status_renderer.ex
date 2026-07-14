@@ -46,7 +46,7 @@ defmodule MingaGitPorcelain.Shell.Traditional.GitStatusRenderer do
   def render(state, rect) do
     case git_status_panel(state) do
       nil -> []
-      panel -> do_render(panel, tui_state(state), rect, state.theme)
+      panel -> do_render(panel, tui_state(state), rect, state.appearance.theme)
     end
   end
 

@@ -41,7 +41,7 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
     second_buffer = second_tab.context.buffers.active
     assert Minga.Buffer.file_path(second_buffer) == second_path
 
-    assert Manager.buffer_id(second_buffer, restored.parser_manager) > 0
+    assert Manager.buffer_id(second_buffer, restored.parser.parser_manager) > 0
 
     {with_names, []} =
       HighlightHandler.handle(
@@ -62,8 +62,8 @@ defmodule MingaEditor.Handlers.SessionRestoreTest do
 
     assert highlight.capture_names == {"keyword"}
     assert highlight.spans == List.to_tuple(spans)
-    assert switched.highlighting == with_spans.highlighting
-    assert switched.injection_ranges == with_spans.injection_ranges
+    assert switched.parser.highlighting == with_spans.parser.highlighting
+    assert switched.parser.injection_ranges == with_spans.parser.injection_ranges
   end
 
   test "already-read recovered contents are applied by the SessionRestore owner", %{tmp_dir: dir} do

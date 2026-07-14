@@ -112,37 +112,23 @@ defmodule MingaEditor.State.WindowsTest do
     end
   end
 
-  describe "find_by_content/2" do
-    test "returns the first matching window" do
-      ws = split_windows()
-
-      assert {2, %Window{id: 2}} = Windows.find_by_content(ws, fn window -> window.id == 2 end)
-    end
-
-    test "returns nil when no window matches" do
-      ws = split_windows()
-
-      assert Windows.find_by_content(ws, fn window -> window.id == 99 end) == nil
-    end
-  end
-
-  # ── update/3 ─────────────────────────────────────────────────────────────────
-
-  describe "update/3" do
-    test "applies function to matching window" do
+  describe "concrete window transitions" do
+    test "replaces a matching window" do
       ws = new_windows()
-      ws = Windows.update(ws, 1, fn w -> %{w | cursor: {5, 10}} end)
+      window = Window.set_cursor(Map.fetch!(ws.map, 1), {5, 10})
+      ws = Windows.replace_window(ws, 1, window)
       assert Map.fetch!(ws.map, 1).cursor == {5, 10}
     end
 
     test "no-op for unknown id" do
       ws = new_windows()
-      assert Windows.update(ws, 999, fn w -> %{w | cursor: {42, 0}} end) == ws
+      assert Windows.replace_window(ws, 999, Map.fetch!(ws.map, 1)) == ws
     end
 
     test "updates only the targeted window in a split" do
       ws = split_windows()
-      ws = Windows.update(ws, 2, fn w -> %{w | cursor: {10, 5}} end)
+      window = Window.set_cursor(Map.fetch!(ws.map, 2), {10, 5})
+      ws = Windows.replace_window(ws, 2, window)
       assert Map.fetch!(ws.map, 2).cursor == {10, 5}
       assert Map.fetch!(ws.map, 1).cursor == {0, 0}
     end
@@ -200,7 +186,7 @@ defmodule MingaEditor.State.WindowsTest do
 
     test "update on new active window works after focus switch" do
       ws = %{split_windows() | active: 2}
-      ws = Windows.update(ws, 2, fn w -> %{w | cursor: {7, 3}} end)
+      ws = Windows.set_cursor(ws, 2, {7, 3})
       assert Windows.active_struct(ws).cursor == {7, 3}
     end
   end

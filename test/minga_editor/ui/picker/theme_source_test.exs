@@ -51,7 +51,7 @@ defmodule MingaEditor.UI.Picker.ThemeSourceTest do
 
   describe "on_select/2" do
     test "changes state.theme to the selected theme" do
-      state = %{theme: Theme.get!(:doom_one)}
+      state = base_state() |> EditorState.apply_theme(Theme.get!(:doom_one))
 
       new_state =
         ThemeSource.on_select(
@@ -59,7 +59,7 @@ defmodule MingaEditor.UI.Picker.ThemeSourceTest do
           state
         )
 
-      assert new_state.theme.name == :one_dark
+      assert new_state.appearance.theme.name == :one_dark
     end
 
     test "does not write renderer state into editor windows" do
@@ -93,15 +93,13 @@ defmodule MingaEditor.UI.Picker.ThemeSourceTest do
         )
 
       restored = ThemeSource.on_cancel(state)
-      assert restored.theme.name == :doom_one
+      assert restored.appearance.theme.name == :doom_one
     end
 
     test "cancel restore marks editor window retained state reset-pending" do
       original = Theme.get!(:doom_one)
 
-      state =
-        base_state()
-        |> Map.put(:theme, Theme.get!(:one_dark))
+      state = base_state() |> EditorState.apply_theme(Theme.get!(:one_dark))
 
       state =
         ModalWorkflow.open(
@@ -112,7 +110,7 @@ defmodule MingaEditor.UI.Picker.ThemeSourceTest do
 
       restored = ThemeSource.on_cancel(state)
 
-      assert restored.theme.name == :doom_one
+      assert restored.appearance.theme.name == :doom_one
 
       assert Enum.all?(Map.values(restored.workspace.windows.map), fn %Window{} = window ->
                match?(%MingaEditor.Window.RenderCache{}, window.render_cache)

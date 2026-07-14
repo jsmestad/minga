@@ -51,7 +51,7 @@ defmodule MingaEditor.UI.Popup.LifecycleTest do
     main_window = Window.new(1, main_buf, 24, 80)
 
     state = %EditorState{
-      port_manager: nil,
+      frontend: %MingaEditor.State.Frontend{port_manager: nil},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
@@ -137,11 +137,15 @@ defmodule MingaEditor.UI.Popup.LifecycleTest do
       PopupRegistry.register(Rule.new("*Warnings*"), t)
 
       # Pre-compute layout
-      state = %{state | layout: Layout.compute(state)}
-      assert %Layout{} = state.layout
+      state = %{
+        state
+        | render: MingaEditor.State.Render.stage_layout(state.render, Layout.compute(state))
+      }
+
+      assert %Layout{} = state.render.layout
 
       assert {:ok, new_state} = Lifecycle.open_popup(state, "*Warnings*", popup_buf, registry: t)
-      assert is_nil(new_state.layout)
+      assert is_nil(new_state.render.layout)
     end
   end
 
@@ -186,7 +190,7 @@ defmodule MingaEditor.UI.Popup.LifecycleTest do
       table: table
     } do
       workspace = MingaEditor.Session.State.enter_empty_state(state.workspace)
-      state = EditorState.set_workspace(state, workspace)
+      state = then(state, fn state -> %{state | workspace: workspace} end)
       PopupRegistry.register(Rule.new("*Warnings*", focus: true), table)
 
       {:ok, with_popup} = Lifecycle.open_popup(state, "*Warnings*", popup_buf, registry: table)
@@ -239,7 +243,7 @@ defmodule MingaEditor.UI.Popup.LifecycleTest do
         |> SessionState.set_windows(windows)
         |> SessionState.set_buffers(Buffers.add_background(state.workspace.buffers, other_buf))
 
-      state = EditorState.set_workspace(state, workspace)
+      state = then(state, fn state -> %{state | workspace: workspace} end)
       PopupRegistry.register(Rule.new("*Warnings*", focus: true), table)
       {:ok, with_popup} = Lifecycle.open_popup(state, "*Warnings*", popup_buf, registry: table)
       monitor = Process.monitor(main_buf)
@@ -287,12 +291,16 @@ defmodule MingaEditor.UI.Popup.LifecycleTest do
       {:ok, tree} = WindowTree.split(WindowTree.new(1), 1, :vertical, 3)
 
       state =
-        put_in(state.workspace.windows, %Windows{
-          tree: tree,
-          map: %{1 => state.workspace.windows.map[1], 3 => popup_window},
-          active: 3,
-          next_id: 4
-        })
+        %{
+          state
+          | workspace:
+              SessionState.set_windows(state.workspace, %Windows{
+                tree: tree,
+                map: %{1 => state.workspace.windows.map[1], 3 => popup_window},
+                active: 3,
+                next_id: 4
+              })
+        }
 
       restored = Lifecycle.close_popup(state, 3)
 
@@ -315,11 +323,17 @@ defmodule MingaEditor.UI.Popup.LifecycleTest do
       PopupRegistry.register(Rule.new("*Warnings*"), t)
       {:ok, with_popup} = Lifecycle.open_popup(state, "*Warnings*", popup_buf, registry: t)
 
-      with_popup = %{with_popup | layout: Layout.compute(with_popup)}
-      assert %Layout{} = with_popup.layout
+      with_popup =
+        %{
+          with_popup
+          | render:
+              MingaEditor.State.Render.stage_layout(with_popup.render, Layout.compute(with_popup))
+        }
+
+      assert %Layout{} = with_popup.render.layout
 
       restored = Lifecycle.close_popup(with_popup, 2)
-      assert is_nil(restored.layout)
+      assert is_nil(restored.render.layout)
     end
   end
 

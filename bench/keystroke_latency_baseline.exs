@@ -38,6 +38,8 @@ defmodule Minga.Bench.KeystrokeLatencyBaseline do
   alias Minga.Test.HeadlessPort
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Frontend.Capabilities
+  alias MingaEditor.State
+  alias MingaEditor.State.AgentConnection
 
   Code.require_file("fixtures/agent_stream_replay.exs", __DIR__)
 
@@ -158,16 +160,8 @@ defmodule Minga.Bench.KeystrokeLatencyBaseline do
   end
 
   @spec ingest_pid(term()) :: pid() | nil
-  defp ingest_pid(state) do
-    if Code.ensure_loaded?(MingaEditor.State) and
-         function_exported?(MingaEditor.State, :agent_ingest, 1) do
-      MingaEditor.State.agent_ingest(state)
-    end
-  rescue
-    _ -> nil
-  catch
-    _, _ -> nil
-  end
+  defp ingest_pid(%State{agent_connection: %AgentConnection{agent_ingest: ingest}}), do: ingest
+  defp ingest_pid(_state), do: nil
 
   @spec stream_agent_deltas(pid(), pid(), [String.t()]) :: no_return()
   defp stream_agent_deltas(target, session, chunks) do

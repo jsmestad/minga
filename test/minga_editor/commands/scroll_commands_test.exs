@@ -29,8 +29,10 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
     window = Window.new(1, buf, rows, cols)
 
     %EditorState{
-      port_manager: nil,
-      terminal_viewport: Viewport.new(rows, cols),
+      frontend: %MingaEditor.State.Frontend{
+        port_manager: nil,
+        terminal_viewport: Viewport.new(rows, cols)
+      },
       workspace: %SessionState{
         viewport: Viewport.new(rows, cols),
         buffers: %Buffers{active: buf, list: [buf]},

@@ -45,7 +45,7 @@ defmodule MingaEditor.UI.Picker.PendingReviewsSourceTest do
 
   defp editor_state(tab_bar, buffer, mode \\ :normal) do
     %EditorState{
-      port_manager: nil,
+      frontend: %MingaEditor.State.Frontend{port_manager: nil},
       workspace: %SessionState{
         viewport: Viewport.new(80, 24),
         editing: %VimState{mode: mode, mode_state: Minga.Mode.initial_state()},

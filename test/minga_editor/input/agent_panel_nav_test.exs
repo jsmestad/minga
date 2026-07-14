@@ -10,7 +10,6 @@ defmodule MingaEditor.Input.AgentPanelNavTest do
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.Viewport
 
   defp walk_surface_handlers(state, cp, mods) do
@@ -44,7 +43,7 @@ defmodule MingaEditor.Input.AgentPanelNavTest do
     }
 
     %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         agent_ui: agent_ui
@@ -57,27 +56,34 @@ defmodule MingaEditor.Input.AgentPanelNavTest do
             %AgentState{}
           )
         ),
-      focus_stack: [Scoped, MingaEditor.Input.ModeFSM]
+      interaction: %MingaEditor.State.Interaction{
+        focus_stack: [Scoped, MingaEditor.Input.ModeFSM]
+      }
     }
   end
 
   describe "agent panel navigation mode" do
     test "j and k scroll the semantic transcript" do
       {:handled, down_state} = walk_surface_handlers(make_state(), ?j, 0)
-      assert AgentAccess.panel(down_state).scroll.offset == 6
+      assert down_state.workspace.agent_ui.panel.scroll.offset == 6
 
       {:handled, up_state} = walk_surface_handlers(down_state, ?k, 0)
-      assert AgentAccess.panel(up_state).scroll.offset == 5
+      assert up_state.workspace.agent_ui.panel.scroll.offset == 5
     end
 
     test "i focuses the input" do
       {:handled, new_state} = walk_surface_handlers(make_state(), ?i, 0)
-      assert AgentAccess.input_focused?(new_state)
+      assert new_state.workspace.agent_ui.panel.input_focused
     end
 
     test "passthrough when panel not visible" do
       state = make_state()
-      state = AgentAccess.update_agent_ui(state, fn ui -> put_in(ui.panel.visible, false) end)
+
+      state =
+        MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+          state,
+          %{state.workspace.agent_ui | panel: %{state.workspace.agent_ui.panel | visible: false}}
+        )
 
       assert {:passthrough, _state} = AgentPanel.handle_key(state, ?j, 0)
     end
@@ -110,31 +116,47 @@ defmodule MingaEditor.Input.AgentPanelNavTest do
     test "Escape unfocuses a normal-mode input without clearing the draft" do
       state =
         make_state()
-        |> AgentAccess.update_agent_ui(fn ui ->
-          ui
-          |> UIState.set_input_focused(true)
-          |> UIState.set_prompt_text("draft")
+        |> then(fn state ->
+          ui =
+            state.workspace.agent_ui
+            |> MingaEditor.Agent.PromptBuffer.set_input_focused(true)
+            |> MingaEditor.Agent.PromptBuffer.set_prompt_text("draft")
+
+          MingaEditor.Shell.Traditional.Workflow.install_agent_ui(state, ui)
         end)
 
       {:handled, new_state} = walk_surface_handlers(state, 27, 0)
 
-      refute AgentAccess.input_focused?(new_state)
-      assert UIState.input_text(AgentAccess.panel(new_state)) == "draft"
+      refute new_state.workspace.agent_ui.panel.input_focused
+
+      assert MingaEditor.Agent.PromptBuffer.input_text(new_state.workspace.agent_ui.panel) ==
+               "draft"
+
       assert new_state.workspace.editing.mode == :normal
     end
 
     test "input mode intercepts printable chars" do
-      state =
-        make_state()
-        |> AgentAccess.update_agent_ui(fn ui -> put_in(ui.panel.input_focused, true) end)
+      state = make_state()
 
-      state = %{
-        state
-        | workspace: %{state.workspace | editing: %{state.workspace.editing | mode: :insert}}
-      }
+      agent_ui =
+        UIState.replace_panel(
+          state.workspace.agent_ui,
+          %{state.workspace.agent_ui.panel | input_focused: true}
+        )
+
+      state = MingaEditor.Shell.Traditional.Workflow.install_agent_ui(state, agent_ui)
+
+      workspace =
+        MingaEditor.Session.State.transition_mode(
+          state.workspace,
+          :insert,
+          state.workspace.editing.mode_state
+        )
+
+      state = %{state | workspace: workspace}
 
       {:handled, new_state} = walk_surface_handlers(state, ?a, 0)
-      assert UIState.input_text(AgentAccess.panel(new_state)) =~ "a"
+      assert MingaEditor.Agent.PromptBuffer.input_text(new_state.workspace.agent_ui.panel) =~ "a"
     end
   end
 end

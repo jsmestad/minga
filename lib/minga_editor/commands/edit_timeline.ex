@@ -14,7 +14,6 @@ defmodule MingaEditor.Commands.EditTimeline do
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Handlers.BufferRegistry
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.AgentAccess
 
   @command_specs [
     {:timeline_next_edit, "Next agent edit", true},
@@ -113,14 +112,14 @@ defmodule MingaEditor.Commands.EditTimeline do
         NoticeWorkflow.publish(state, "No file path")
 
       path ->
-        timeline = AgentAccess.view(state).edit_timeline
+        timeline = state.workspace.agent_ui.view.edit_timeline
         fun.(path, timeline)
     end
   end
 
   @spec navigate_file(EditorState.t(), 1 | -1) :: EditorState.t()
   defp navigate_file(state, direction) do
-    timeline = AgentAccess.view(state).edit_timeline
+    timeline = state.workspace.agent_ui.view.edit_timeline
     paths = timeline |> EditTimeline.file_summaries() |> Enum.map(& &1.path)
 
     case paths do
@@ -170,9 +169,12 @@ defmodule MingaEditor.Commands.EditTimeline do
   end
 
   defp set_timeline(state, timeline) do
-    AgentAccess.update_agent_ui(state, fn ui ->
-      UIState.update_edit_timeline(ui, fn _ -> timeline end)
-    end)
+    MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+      state,
+      (fn ui ->
+         UIState.replace_edit_timeline(ui, timeline)
+       end).(state.workspace.agent_ui)
+    )
   end
 
   commands(@command_specs)

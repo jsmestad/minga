@@ -8,9 +8,9 @@ defmodule MingaEditor.LspActions.CodeActionTest do
 
   defp stub_state do
     %EditorState{
-      port_manager: nil,
+      frontend: %MingaEditor.State.Frontend{port_manager: nil},
       workspace: %SessionState{viewport: Viewport.new(40, 120)},
-      theme: MingaEditor.UI.Theme.get!(:doom_one)
+      appearance: %MingaEditor.State.Appearance{theme: MingaEditor.UI.Theme.get!(:doom_one)}
     }
   end
 

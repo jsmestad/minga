@@ -25,8 +25,8 @@ defmodule MingaEditor.State.OptionsServerThreadingTest do
 
   defp build_state(options_server) do
     %EditorState{
-      port_manager: self(),
-      options_server: options_server,
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
+      interaction: %MingaEditor.State.Interaction{options_server: options_server},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
@@ -48,13 +48,13 @@ defmodule MingaEditor.State.OptionsServerThreadingTest do
     state_b = build_state(server_b)
 
     # The accessor returns the right server.
-    assert EditorState.options_server(state_a) == server_a
-    assert EditorState.options_server(state_b) == server_b
+    assert state_a.interaction.options_server == server_a
+    assert state_b.interaction.options_server == server_b
 
     # End-to-end: option reads through the editor state's server honor which
     # server the state points at, even when both have written to the same key.
-    assert Options.get(EditorState.options_server(state_a), :tab_width) == 4
-    assert Options.get(EditorState.options_server(state_b), :tab_width) == 8
+    assert Options.get(state_a.interaction.options_server, :tab_width) == 4
+    assert Options.get(state_b.interaction.options_server, :tab_width) == 8
   end
 
   test "Startup.apply_gui_defaults writes through EditorState.options_server" do
@@ -66,7 +66,7 @@ defmodule MingaEditor.State.OptionsServerThreadingTest do
     state_a = build_state(server_a)
     gui_caps = %Capabilities{frontend_type: :native_gui}
 
-    Startup.apply_gui_defaults(gui_caps, EditorState.options_server(state_a))
+    Startup.apply_gui_defaults(gui_caps, state_a.interaction.options_server)
 
     assert Options.get(server_a, :line_numbers) == :absolute
     assert Options.get(server_a, :line_spacing) == 1.2
@@ -77,7 +77,7 @@ defmodule MingaEditor.State.OptionsServerThreadingTest do
 
   test "EditorState defaults options_server to Minga.Config.Options.default_server/0" do
     state = %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
@@ -85,6 +85,6 @@ defmodule MingaEditor.State.OptionsServerThreadingTest do
       }
     }
 
-    assert EditorState.options_server(state) == Options.default_server()
+    assert state.interaction.options_server == Options.default_server()
   end
 end

@@ -122,7 +122,14 @@ defmodule MingaEditor.UI.Picker.WorkspaceSymbolSource do
   defp set_jump_mark(%{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
     pos = Buffer.cursor(buf)
 
-    EditorState.set_last_jump_pos(state, pos)
+    %{
+      state
+      | workspace:
+          MingaEditor.Session.State.set_editing(
+            state.workspace,
+            MingaEditor.VimState.set_last_jump_pos(state.workspace.editing, pos)
+          )
+    }
   end
 
   defp set_jump_mark(state), do: state
@@ -140,7 +147,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceSymbolSource do
 
     case idx do
       nil ->
-        case Commands.start_buffer(file_path, EditorState.options_server(state)) do
+        case Commands.start_buffer(file_path, state.interaction.options_server) do
           {:ok, pid} ->
             Commands.add_buffer(state, pid)
 

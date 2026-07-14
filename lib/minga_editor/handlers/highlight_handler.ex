@@ -166,7 +166,7 @@ defmodule MingaEditor.Handlers.HighlightHandler do
   # ── parser_crashed ───────────────────────────────────────────────────────
 
   def handle(state, {:minga_highlight, :parser_crashed}) do
-    {%{state | parser_status: :restarting}, []}
+    {%{state | parser: MingaEditor.State.Parser.report_status(state.parser, :restarting)}, []}
   end
 
   # ── parser_restarted ─────────────────────────────────────────────────────
@@ -178,7 +178,10 @@ defmodule MingaEditor.Handlers.HighlightHandler do
   # ── parser_gave_up ───────────────────────────────────────────────────────
 
   def handle(state, {:minga_highlight, :parser_gave_up}) do
-    new_state = %{state | parser_status: :unavailable}
+    new_state = %{
+      state
+      | parser: MingaEditor.State.Parser.report_status(state.parser, :unavailable)
+    }
 
     {new_state,
      [
@@ -237,7 +240,7 @@ defmodule MingaEditor.Handlers.HighlightHandler do
     do: PrettifySymbolsEffect.schedule(state, pid)
 
   defp apply_effect(state, {:evict_parser_trees_timer}) do
-    if state.backend != :headless do
+    if state.frontend.backend != :headless do
       Process.send_after(self(), :evict_parser_trees, HighlightSync.eviction_check_interval_ms())
     end
 
@@ -265,7 +268,11 @@ defmodule MingaEditor.Handlers.HighlightHandler do
 
   @spec handle_highlight_names(EditorState.t(), pid(), [String.t()]) ::
           {EditorState.t(), [highlight_effect()]}
-  defp handle_highlight_names(%{highlighting: %{highlights: highlights}} = state, pid, _names)
+  defp handle_highlight_names(
+         %{parser: %{highlighting: %{highlights: highlights}}} = state,
+         pid,
+         _names
+       )
        when not is_map_key(highlights, pid),
        do: {state, []}
 
@@ -283,19 +290,32 @@ defmodule MingaEditor.Handlers.HighlightHandler do
 
   @spec handle_injection_ranges(EditorState.t(), pid(), term()) ::
           {EditorState.t(), [highlight_effect()]}
-  defp handle_injection_ranges(%{highlighting: %{highlights: highlights}} = state, pid, _ranges)
+  defp handle_injection_ranges(
+         %{parser: %{highlighting: %{highlights: highlights}}} = state,
+         pid,
+         _ranges
+       )
        when not is_map_key(highlights, pid),
        do: {state, []}
 
   defp handle_injection_ranges(state, pid, ranges) do
-    new_state = EditorState.update_injection_ranges(state, &Map.put(&1, pid, ranges))
+    new_state =
+      %{
+        state
+        | parser:
+            MingaEditor.State.Parser.accept_injection_ranges(
+              state.parser,
+              (&Map.put(&1, pid, ranges)).(state.parser.injection_ranges)
+            )
+      }
+
     {new_state, []}
   end
 
   @spec handle_highlight_spans(EditorState.t(), pid(), non_neg_integer(), term()) ::
           {EditorState.t(), [highlight_effect()]}
   defp handle_highlight_spans(
-         %{highlighting: %{highlights: highlights}} = state,
+         %{parser: %{highlighting: %{highlights: highlights}}} = state,
          pid,
          _version,
          _spans
@@ -320,7 +340,11 @@ defmodule MingaEditor.Handlers.HighlightHandler do
 
   @spec handle_conceal_spans(EditorState.t(), pid(), [map()]) ::
           {EditorState.t(), [highlight_effect()]}
-  defp handle_conceal_spans(%{highlighting: %{highlights: highlights}} = state, pid, _spans)
+  defp handle_conceal_spans(
+         %{parser: %{highlighting: %{highlights: highlights}}} = state,
+         pid,
+         _spans
+       )
        when not is_map_key(highlights, pid),
        do: {state, []}
 
@@ -336,12 +360,23 @@ defmodule MingaEditor.Handlers.HighlightHandler do
       end)
 
     new_state =
-      case EditorState.active_window_struct(state) do
+      case MingaEditor.Session.State.active_window_struct(state.workspace) do
         nil ->
           state
 
         %Window{id: id} ->
-          EditorState.update_window(state, id, &Window.set_fold_ranges(&1, fold_ranges))
+          %{
+            state
+            | workspace:
+                MingaEditor.Session.State.set_windows(
+                  state.workspace,
+                  MingaEditor.State.Windows.set_fold_ranges(
+                    state.workspace.windows,
+                    id,
+                    fold_ranges
+                  )
+                )
+          }
       end
 
     effects = [
@@ -359,12 +394,23 @@ defmodule MingaEditor.Handlers.HighlightHandler do
   defp handle_textobject_positions(state, pid, positions)
        when pid == state.workspace.buffers.active do
     new_state =
-      case EditorState.active_window_struct(state) do
+      case MingaEditor.Session.State.active_window_struct(state.workspace) do
         nil ->
           state
 
         %Window{id: id} ->
-          EditorState.update_window(state, id, &%{&1 | textobject_positions: positions})
+          %{
+            state
+            | workspace:
+                MingaEditor.Session.State.set_windows(
+                  state.workspace,
+                  MingaEditor.State.Windows.set_textobject_positions(
+                    state.workspace.windows,
+                    id,
+                    positions
+                  )
+                )
+          }
       end
 
     {new_state, []}
@@ -376,7 +422,18 @@ defmodule MingaEditor.Handlers.HighlightHandler do
           {EditorState.t(), [highlight_effect()]}
   defp handle_document_symbols(state, pid, symbols) do
     new_state =
-      EditorState.update_windows_for_buffer(state, pid, &Window.set_document_symbols(&1, symbols))
+      %{
+        state
+        | workspace:
+            MingaEditor.Session.State.set_windows(
+              state.workspace,
+              MingaEditor.State.Windows.set_document_symbols_for_buffer(
+                state.workspace.windows,
+                pid,
+                symbols
+              )
+            )
+      }
 
     {new_state, []}
   end
@@ -384,7 +441,7 @@ defmodule MingaEditor.Handlers.HighlightHandler do
   @spec handle_parser_restarted(EditorState.t()) :: {EditorState.t(), [highlight_effect()]}
   defp handle_parser_restarted(state) do
     reset_highlights =
-      Map.new(state.highlighting.highlights, fn {pid, buffer_highlight} ->
+      Map.new(state.parser.highlighting.highlights, fn {pid, buffer_highlight} ->
         reset =
           buffer_highlight
           |> Map.put(:version, 0)
@@ -395,8 +452,17 @@ defmodule MingaEditor.Handlers.HighlightHandler do
 
     new_state =
       state
-      |> EditorState.update_highlight(&Highlighting.set_highlights(&1, reset_highlights))
-      |> Map.put(:parser_status, :available)
+      |> then(fn state ->
+        highlighting = Highlighting.set_highlights(state.parser.highlighting, reset_highlights)
+
+        %{
+          state
+          | parser: MingaEditor.State.Parser.accept_highlighting(state.parser, highlighting)
+        }
+      end)
+      |> then(fn state ->
+        %{state | parser: MingaEditor.State.Parser.report_status(state.parser, :available)}
+      end)
       |> EditorState.reset_frontend_render_state()
 
     {new_state, [{:log_message, "Parser restarted, syntax highlighting recovered"}]}
@@ -413,7 +479,7 @@ defmodule MingaEditor.Handlers.HighlightHandler do
       )
 
     effects =
-      if state.backend != :headless do
+      if state.frontend.backend != :headless do
         [{:evict_parser_trees_timer}]
       else
         []

@@ -21,6 +21,7 @@ defmodule MingaEditor.Input.AgentMouse do
 
   @type state :: MingaEditor.Input.Handler.handler_state()
 
+  alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.PromptRenderer
   alias MingaEditor.Agent.ViewContext
@@ -29,8 +30,6 @@ defmodule MingaEditor.Input.AgentMouse do
   alias MingaEditor.FocusTree.Node, as: FocusNode
   alias MingaEditor.Layout
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.AgentAccess
-  alias MingaEditor.Window
 
   # Mouse event fields grouped for dispatch without exceeding max arity.
   @typep mouse_event :: %{
@@ -146,7 +145,7 @@ defmodule MingaEditor.Input.AgentMouse do
        })
        when button in [:wheel_down, :wheel_up] do
     {_cr, cc, cw, _ch} = window_content_rect(layout, win_id)
-    view = AgentAccess.view(state)
+    view = state.workspace.agent_ui.view
     chat_width = max(div(cw * view.chat_width_pct, 100), 20)
 
     if col < cc + chat_width do
@@ -204,8 +203,8 @@ defmodule MingaEditor.Input.AgentMouse do
   @spec handle_prompt_click(EditorState.t(), Layout.rect(), integer(), integer()) ::
           EditorState.t()
   defp handle_prompt_click(state, {cr, _cc, cw, ch}, row, _col) do
-    panel = AgentAccess.panel(state)
-    input_lines = UIState.input_lines(panel)
+    panel = state.workspace.agent_ui.panel
+    input_lines = PromptBuffer.input_lines(panel)
     box_width = PromptRenderer.input_box_width(cw)
     inner_width = PromptRenderer.input_inner_width(box_width)
     input_height = PromptRenderer.compute_input_height(input_lines, inner_width)
@@ -213,10 +212,18 @@ defmodule MingaEditor.Input.AgentMouse do
     input_start_row = cr + ch - input_height - PromptRenderer.input_v_gap()
 
     if row >= input_start_row do
-      state = AgentAccess.update_agent_ui(state, &UIState.set_input_focused(&1, true))
-      EditorState.transition_mode(state, :insert)
+      state =
+        MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+          state,
+          PromptBuffer.set_input_focused(state.workspace.agent_ui, true)
+        )
+
+      %{state | workspace: MingaEditor.Session.State.transition_mode(state.workspace, :insert)}
     else
-      AgentAccess.update_agent_ui(state, &UIState.set_input_focused(&1, false))
+      MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+        state,
+        PromptBuffer.set_input_focused(state.workspace.agent_ui, false)
+      )
     end
   end
 
@@ -224,7 +231,10 @@ defmodule MingaEditor.Input.AgentMouse do
 
   @spec unfocus_input(EditorState.t()) :: EditorState.t()
   defp unfocus_input(state) do
-    AgentAccess.update_agent_ui(state, &UIState.set_input_focused(&1, false))
+    MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+      state,
+      PromptBuffer.set_input_focused(state.workspace.agent_ui, false)
+    )
   end
 
   @spec click_in_prompt?(Layout.rect(), non_neg_integer(), EditorState.t()) :: boolean()
@@ -252,7 +262,14 @@ defmodule MingaEditor.Input.AgentMouse do
 
   @spec unpin_agent_chat_window(EditorState.t(), pos_integer()) :: EditorState.t()
   defp unpin_agent_chat_window(state, win_id) do
-    EditorState.update_window(state, win_id, &Window.set_pinned(&1, false))
+    %{
+      state
+      | workspace:
+          MingaEditor.Session.State.set_windows(
+            state.workspace,
+            MingaEditor.State.Windows.set_pinned(state.workspace.windows, win_id, false)
+          )
+    }
   end
 
   @spec scroll_chat(EditorState.t(), pos_integer() | neg_integer(), pos_integer()) ::
@@ -260,14 +277,25 @@ defmodule MingaEditor.Input.AgentMouse do
   defp scroll_chat(state, delta, win_id) do
     state =
       if delta > 0 do
-        AgentAccess.update_agent_ui(state, &UIState.scroll_down(&1, delta))
+        MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+          state,
+          (&UIState.scroll_down(&1, delta)).(state.workspace.agent_ui)
+        )
       else
-        AgentAccess.update_agent_ui(state, &UIState.scroll_up(&1, abs(delta)))
+        MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+          state,
+          (&UIState.scroll_up(&1, abs(delta))).(state.workspace.agent_ui)
+        )
       end
 
     state
     |> unpin_agent_chat_window(win_id)
-    |> EditorState.scroll_agent_chat_window(delta)
+    |> then(fn state ->
+      %{
+        state
+        | workspace: MingaEditor.Session.State.scroll_agent_chat_window(state.workspace, delta)
+      }
+    end)
   end
 
   # Side panel chat scroll: updates UIState.scroll (used by the panel
@@ -276,21 +304,36 @@ defmodule MingaEditor.Input.AgentMouse do
   defp scroll_panel_chat(state, delta) do
     state =
       if delta > 0 do
-        AgentAccess.update_agent_ui(state, &UIState.scroll_down(&1, delta))
+        MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+          state,
+          (&UIState.scroll_down(&1, delta)).(state.workspace.agent_ui)
+        )
       else
-        AgentAccess.update_agent_ui(state, &UIState.scroll_up(&1, abs(delta)))
+        MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+          state,
+          (&UIState.scroll_up(&1, abs(delta))).(state.workspace.agent_ui)
+        )
       end
 
-    EditorState.scroll_agent_chat_window(state, delta)
+    %{
+      state
+      | workspace: MingaEditor.Session.State.scroll_agent_chat_window(state.workspace, delta)
+    }
   end
 
   @spec scroll_preview(EditorState.t(), pos_integer() | neg_integer()) :: EditorState.t()
   defp scroll_preview(state, delta) when delta > 0 do
-    AgentAccess.update_agent_ui(state, &UIState.scroll_viewer_down(&1, delta))
+    MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+      state,
+      (&UIState.scroll_viewer_down(&1, delta)).(state.workspace.agent_ui)
+    )
   end
 
   defp scroll_preview(state, delta) when delta < 0 do
-    AgentAccess.update_agent_ui(state, &UIState.scroll_viewer_up(&1, abs(delta)))
+    MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+      state,
+      (&UIState.scroll_viewer_up(&1, abs(delta))).(state.workspace.agent_ui)
+    )
   end
 
   @spec scroll_lines() :: pos_integer()

@@ -198,10 +198,9 @@ defmodule Minga.Perf.KeystrokeLatencyTest do
     }
 
     state = %MingaEditor.State{
-      backend: :tui,
-      port_manager: port,
+      frontend: %MingaEditor.State.Frontend{backend: :tui, port_manager: port},
       workspace: workspace,
-      renderer: renderer_pid,
+      render: %MingaEditor.State.Render{renderer: renderer_pid},
       shell_runtime:
         MingaEditor.Shell.Runtime.new(
           MingaEditor.Shell.Runtime.default_entry(),

@@ -12,8 +12,8 @@ defmodule MingaEditor.Agent.ViewContext do
   """
 
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.VimState
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.UI.Theme
@@ -60,22 +60,44 @@ defmodule MingaEditor.Agent.ViewContext do
     build_context(state)
   end
 
+  def from_editor_state(%Input{} = input) do
+    build_pipeline_context(input)
+  end
+
   def from_editor_state(%{workspace: %{agent_ui: _}} = state) do
     build_context(state)
   end
 
   @spec build_context(map()) :: t()
   defp build_context(state) do
-    agent = AgentAccess.agent(state)
+    agent = MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
 
     %__MODULE__{
-      session: AgentAccess.session(state),
+      session: MingaEditor.Shell.Runtime.active_session(state.shell_runtime),
       ui_state: state.workspace.agent_ui,
-      capabilities: state.capabilities,
-      theme: state.theme,
+      capabilities: state.frontend.capabilities,
+      theme: state.appearance.theme,
       layout_rect: nil,
       editing: state.workspace.editing,
       buffers: state.workspace.buffers,
+      agent_status: agent.runtime.status,
+      active_tool_name: agent.runtime.active_tool_name,
+      pending_approval: agent.pending_approval
+    }
+  end
+
+  @spec build_pipeline_context(Input.t()) :: t()
+  defp build_pipeline_context(input) do
+    agent = MingaEditor.Shell.Traditional.State.agent(input.shell_state)
+
+    %__MODULE__{
+      session: input.shell.active_session(input.shell_state),
+      ui_state: input.workspace.agent_ui,
+      capabilities: input.capabilities,
+      theme: input.theme,
+      layout_rect: nil,
+      editing: input.workspace.editing,
+      buffers: input.workspace.buffers,
       agent_status: agent.runtime.status,
       active_tool_name: agent.runtime.active_tool_name,
       pending_approval: agent.pending_approval

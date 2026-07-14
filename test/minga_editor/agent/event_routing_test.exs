@@ -3,7 +3,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
   Verifies the foreground/background split for agent events.
 
   The runtime split lives in `MingaEditor.handle_info/2` for `:agent_event`
-  messages: events whose `session_pid` matches `AgentAccess.session/1` go
+  messages: events whose `session_pid` matches `Shell.Runtime.active_session/1` go
   through `Agent.Events.handle/2` (rendering cache + tab status); the
   rest go through `Shell.on_agent_event/4` (presentation only — never
   the active tab's rendering cache).
@@ -25,7 +25,6 @@ defmodule MingaEditor.Agent.EventRoutingTest do
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Tab
@@ -39,7 +38,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
   defp event_state(agent) do
     %EditorState{
-      port_manager: nil,
+      frontend: %MingaEditor.State.Frontend{port_manager: nil},
       workspace: %SessionState{viewport: Viewport.new(24, 80), agent_ui: UIState.new()},
       shell_runtime:
         Runtime.new(
@@ -182,7 +181,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       tab_bar = TabBar.move_tab_to_workspace(tab_bar, 1, workspace.id)
 
       state = %EditorState{
-        port_manager: nil,
+        frontend: %MingaEditor.State.Frontend{port_manager: nil},
         workspace: workspace(),
         shell_runtime:
           Runtime.new(
@@ -201,7 +200,11 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
       :sys.get_state(session)
       {state, effects} = Events.handle(state, {:tool_started, "alpha", %{}})
-      assert AgentState.active_tool_name(AgentAccess.agent(state)) == "alpha"
+
+      assert AgentState.active_tool_name(
+               MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
+             ) == "alpha"
+
       assert effects == [{:render, 16}]
 
       send(
@@ -211,7 +214,11 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
       :sys.get_state(session)
       {state, effects} = Events.handle(state, {:tool_started, "beta", %{}})
-      assert AgentState.active_tool_name(AgentAccess.agent(state)) == "beta"
+
+      assert AgentState.active_tool_name(
+               MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
+             ) == "beta"
+
       assert effects == [{:render, 16}]
 
       send(
@@ -222,7 +229,11 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
       :sys.get_state(session)
       {state, effects} = Events.handle(state, {:tool_ended, "alpha", "contents", :done})
-      assert AgentState.active_tool_name(AgentAccess.agent(state)) == "beta"
+
+      assert AgentState.active_tool_name(
+               MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
+             ) == "beta"
+
       assert effects == [{:render, 16}]
 
       send(
@@ -233,7 +244,11 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
       :sys.get_state(session)
       {state, effects} = Events.handle(state, {:tool_ended, "beta", "output", :done})
-      assert AgentState.active_tool_name(AgentAccess.agent(state)) == nil
+
+      assert AgentState.active_tool_name(
+               MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
+             ) == nil
+
       assert effects == [{:render, 16}]
     end
 
@@ -241,11 +256,19 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       state = event_state(%AgentState{})
 
       {state, effects} = Events.handle(state, {:tool_started, "read_file", %{}})
-      assert AgentState.active_tool_name(AgentAccess.agent(state)) == "read_file"
+
+      assert AgentState.active_tool_name(
+               MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
+             ) == "read_file"
+
       assert effects == [{:render, 16}]
 
       {state, effects} = Events.handle(state, {:tool_ended, "read_file", "contents", :done})
-      assert AgentState.active_tool_name(AgentAccess.agent(state)) == nil
+
+      assert AgentState.active_tool_name(
+               MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
+             ) == nil
+
       assert effects == [{:render, 16}]
     end
 
@@ -254,10 +277,17 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       state = event_state(agent)
 
       {state, _effects} = Events.handle(state, {:status_changed, :tool_executing})
-      assert AgentState.active_tool_name(AgentAccess.agent(state)) == "read_file"
+
+      assert AgentState.active_tool_name(
+               MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
+             ) == "read_file"
 
       {state, effects} = Events.handle(state, {:status_changed, :idle})
-      assert AgentState.active_tool_name(AgentAccess.agent(state)) == nil
+
+      assert AgentState.active_tool_name(
+               MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
+             ) == nil
+
       assert effects == [:render]
     end
 
@@ -271,7 +301,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       tab_bar = TabBar.move_tab_to_workspace(tab_bar, 1, workspace.id)
 
       state = %EditorState{
-        port_manager: self(),
+        frontend: %MingaEditor.State.Frontend{port_manager: self()},
         workspace: %SessionState{viewport: Viewport.new(24, 80), agent_ui: UIState.new()},
         shell_runtime:
           Runtime.new(
@@ -285,14 +315,14 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
       {state, effects} = Events.handle(state, {:context_usage, 95, 100})
       assert effects == [{:render, 16}]
-      assert AgentAccess.view(state).compact_pending_fill_pct == 95
-      refute AgentAccess.view(state).compaction_in_progress
+      assert state.workspace.agent_ui.view.compact_pending_fill_pct == 95
+      refute state.workspace.agent_ui.view.compaction_in_progress
 
       {state, effects} = Events.handle(state, {:status_changed, :idle})
       assert :render in effects
       assert {:compact_session, session} in effects
-      assert AgentAccess.view(state).compact_pending_fill_pct == nil
-      assert AgentAccess.view(state).compaction_in_progress
+      assert state.workspace.agent_ui.view.compact_pending_fill_pct == nil
+      assert state.workspace.agent_ui.view.compaction_in_progress
     end
   end
 
@@ -315,7 +345,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       tb = TabBar.move_tab_to_workspace(tb, agent_tab.id, workspace.id)
 
       state = %EditorState{
-        port_manager: self(),
+        frontend: %MingaEditor.State.Frontend{port_manager: self()},
         workspace:
           %SessionState{viewport: Viewport.new(24, 80)}
           |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
@@ -369,7 +399,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         end)
 
       state = %EditorState{
-        port_manager: self(),
+        frontend: %MingaEditor.State.Frontend{port_manager: self()},
         workspace:
           %SessionState{viewport: Viewport.new(24, 80)}
           |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
@@ -419,7 +449,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       tb = TabBar.move_tab_to_workspace(tb, agent_tab.id, workspace.id)
 
       state = %EditorState{
-        port_manager: self(),
+        frontend: %MingaEditor.State.Frontend{port_manager: self()},
         workspace:
           %SessionState{viewport: Viewport.new(24, 80)}
           |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
@@ -455,7 +485,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       tb = TabBar.move_tab_to_workspace(tb, agent_tab.id, workspace.id)
 
       state = %EditorState{
-        port_manager: self(),
+        frontend: %MingaEditor.State.Frontend{port_manager: self()},
         workspace:
           %SessionState{viewport: Viewport.new(24, 80)}
           |> SessionState.set_file_tree(%FileTreeState{project_root: root}),

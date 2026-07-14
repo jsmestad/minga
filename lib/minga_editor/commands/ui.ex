@@ -7,12 +7,10 @@ defmodule MingaEditor.Commands.UI do
 
   use MingaEditor.Commands.Provider
 
-  alias MingaEditor.BottomPanel
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.Frontend
-  alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
@@ -84,17 +82,53 @@ defmodule MingaEditor.Commands.UI do
 
   @spec toggle_bottom_panel(EditorState.t()) :: EditorState.t()
   defp toggle_bottom_panel(state) do
-    EditorState.set_bottom_panel(state, BottomPanel.toggle(EditorState.bottom_panel(state)))
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_bottom_panel(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          MingaEditor.BottomPanel.toggle(state.shell_runtime.state.bottom_panel)
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   @spec bottom_panel_next_tab(EditorState.t()) :: EditorState.t()
   defp bottom_panel_next_tab(state) do
-    EditorState.set_bottom_panel(state, BottomPanel.next_tab(EditorState.bottom_panel(state)))
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_bottom_panel(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          MingaEditor.BottomPanel.next_tab(state.shell_runtime.state.bottom_panel)
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   @spec bottom_panel_prev_tab(EditorState.t()) :: EditorState.t()
   defp bottom_panel_prev_tab(state) do
-    EditorState.set_bottom_panel(state, BottomPanel.prev_tab(EditorState.bottom_panel(state)))
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_bottom_panel(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          MingaEditor.BottomPanel.prev_tab(state.shell_runtime.state.bottom_panel)
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   @spec toggle_beam_observatory(EditorState.t()) :: EditorState.t()
@@ -126,8 +160,19 @@ defmodule MingaEditor.Commands.UI do
   @spec focus_observatory_sidebar(EditorState.t()) :: EditorState.t()
   defp focus_observatory_sidebar(%EditorState{} = state) do
     state
-    |> EditorState.update_file_tree(&FileTreeState.unfocus/1)
-    |> EditorState.set_keymap_scope(:editor)
+    |> then(fn state ->
+      %{
+        state
+        | workspace:
+            MingaEditor.Session.State.set_file_tree(
+              state.workspace,
+              (&FileTreeState.unfocus/1).(state.workspace.file_tree)
+            )
+      }
+    end)
+    |> then(fn state ->
+      %{state | workspace: MingaEditor.Session.State.set_keymap_scope(state.workspace, :editor)}
+    end)
   end
 
   @spec close_beam_observatory(EditorState.t()) :: EditorState.t()
@@ -153,9 +198,7 @@ defmodule MingaEditor.Commands.UI do
   @spec observatory_supported?(EditorState.t()) :: boolean()
   defp observatory_supported?(state) do
     observatory_shell_supported?(state) and
-      state
-      |> Map.get(:capabilities, %Capabilities{})
-      |> Frontend.semantic_ui?()
+      Frontend.semantic_ui?(state.frontend.capabilities)
   end
 
   @spec observatory_shell_supported?(EditorState.t()) :: boolean()
@@ -166,15 +209,18 @@ defmodule MingaEditor.Commands.UI do
   defp execute_parser_restart(state) do
     case ParserManager.restart() do
       :ok ->
-        NoticeWorkflow.publish(state, "Parser restarted")
-        |> then(&%{&1 | parser_status: :available})
+        state
+        |> NoticeWorkflow.publish("Parser restarted")
+        |> then(fn state ->
+          %{state | parser: MingaEditor.State.Parser.report_status(state.parser, :available)}
+        end)
 
       {:error, :binary_not_found} ->
-        NoticeWorkflow.publish(
-          state,
-          "Parser restart failed: binary not found"
-        )
-        |> then(&%{&1 | parser_status: :unavailable})
+        state
+        |> NoticeWorkflow.publish("Parser restart failed: binary not found")
+        |> then(fn state ->
+          %{state | parser: MingaEditor.State.Parser.report_status(state.parser, :unavailable)}
+        end)
     end
   catch
     :exit, _ ->

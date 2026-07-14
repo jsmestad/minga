@@ -92,7 +92,7 @@ defmodule MingaEditor.UI.Picker.LanguageSourceTest do
 
     test "returns error message when no active buffer" do
       state = %EditorState{
-        port_manager: nil,
+        frontend: %MingaEditor.State.Frontend{port_manager: nil},
         workspace: %MingaEditor.Session.State{
           viewport: Viewport.new(80, 24),
           buffers: %Buffers{}
@@ -127,7 +127,7 @@ defmodule MingaEditor.UI.Picker.LanguageSourceTest do
     {:ok, buf} = BufferProcess.start_link(content: content, filetype: filetype)
 
     %EditorState{
-      port_manager: nil,
+      frontend: %MingaEditor.State.Frontend{port_manager: nil},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(80, 24),
         buffers: %Buffers{active: buf, list: [buf], active_index: 0}

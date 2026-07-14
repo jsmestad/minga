@@ -145,8 +145,22 @@ defmodule MingaEditor.Input.FileTreeHandler do
   @spec focus_file_tree_for_mouse(EditorState.t(), atom()) :: EditorState.t()
   defp focus_file_tree_for_mouse(state, :left) do
     state
-    |> EditorState.update_file_tree(&FileTreeState.focus/1)
-    |> EditorState.set_keymap_scope(:file_tree)
+    |> then(fn state ->
+      %{
+        state
+        | workspace:
+            MingaEditor.Session.State.set_file_tree(
+              state.workspace,
+              (&FileTreeState.focus/1).(state.workspace.file_tree)
+            )
+      }
+    end)
+    |> then(fn state ->
+      %{
+        state
+        | workspace: MingaEditor.Session.State.set_keymap_scope(state.workspace, :file_tree)
+      }
+    end)
   end
 
   defp focus_file_tree_for_mouse(state, _button), do: state
@@ -178,7 +192,7 @@ defmodule MingaEditor.Input.FileTreeHandler do
              :file_tree,
              vim_state,
              key,
-             EditorState.keymap_context(state)
+             keymap_server: state.interaction.keymap_server
            ) do
         {:command, command} ->
           {:handled, Commands.execute(state, command)}
@@ -201,7 +215,9 @@ defmodule MingaEditor.Input.FileTreeHandler do
     if state.workspace.buffers.active != real_active do
       state
       |> update_file_tree(&FileTreeState.unfocus/1)
-      |> EditorState.set_keymap_scope(:editor)
+      |> then(fn state ->
+        %{state | workspace: MingaEditor.Session.State.set_keymap_scope(state.workspace, :editor)}
+      end)
     else
       state
     end
@@ -224,7 +240,10 @@ defmodule MingaEditor.Input.FileTreeHandler do
 
         state =
           if Minga.Editing.mode(state) != :normal do
-            EditorState.transition_mode(state, :normal)
+            %{
+              state
+              | workspace: MingaEditor.Session.State.transition_mode(state.workspace, :normal)
+            }
           else
             state
           end
@@ -434,17 +453,24 @@ defmodule MingaEditor.Input.FileTreeHandler do
   # ── Shared helpers ──────────────────────────────────────────────────────
 
   @spec file_tree_state(EditorState.t()) :: FileTreeState.t()
-  defp file_tree_state(state), do: EditorState.file_tree_state(state)
+  defp file_tree_state(state), do: state.workspace.file_tree
 
   @spec set_active_buffer_override(EditorState.t(), pid() | nil) :: EditorState.t()
   defp set_active_buffer_override(state, pid) do
-    EditorState.update_buffers(state, &Buffers.set_active_override(&1, pid))
+    %{
+      state
+      | workspace:
+          MingaEditor.Session.State.set_buffers(
+            state.workspace,
+            (&Buffers.set_active_override(&1, pid)).(state.workspace.buffers)
+          )
+    }
   end
 
   @spec set_file_tree(EditorState.t(), FileTreeState.t()) :: EditorState.t()
   defp set_file_tree(state, file_tree) do
     sync_buffer(file_tree)
-    EditorState.set_file_tree(state, file_tree)
+    %{state | workspace: MingaEditor.Session.State.set_file_tree(state.workspace, file_tree)}
   end
 
   @spec sync_buffer(FileTreeState.t()) :: :ok
@@ -460,6 +486,13 @@ defmodule MingaEditor.Input.FileTreeHandler do
   @spec update_file_tree(EditorState.t(), (FileTreeState.t() -> FileTreeState.t())) ::
           EditorState.t()
   defp update_file_tree(state, fun) when is_function(fun, 1) do
-    EditorState.update_file_tree(state, fun)
+    %{
+      state
+      | workspace:
+          MingaEditor.Session.State.set_file_tree(
+            state.workspace,
+            fun.(state.workspace.file_tree)
+          )
+    }
   end
 end

@@ -33,7 +33,6 @@ defmodule MingaEditor.Input.Interrupt do
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Shell.Traditional.WhichKeyWorkflow
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.WhichKey
   alias MingaEditor.VimState
@@ -79,13 +78,15 @@ defmodule MingaEditor.Input.Interrupt do
     do: {state, resets}
 
   defp maybe_reset_scope(%{workspace: %{keymap_scope: scope}} = state, resets) do
-    {EditorState.set_keymap_scope(state, :editor), ["scope #{scope} → :editor" | resets]}
+    {%{state | workspace: MingaEditor.Session.State.set_keymap_scope(state.workspace, :editor)},
+     ["scope #{scope} → :editor" | resets]}
   end
 
   @spec maybe_reset_mode(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
   defp maybe_reset_mode(%{workspace: %{editing: %{mode: mode}}} = state, resets)
        when mode != :normal do
-    {EditorState.transition_mode(state, :normal), ["mode #{mode} → :normal" | resets]}
+    {%{state | workspace: MingaEditor.Session.State.transition_mode(state.workspace, :normal)},
+     ["mode #{mode} → :normal" | resets]}
   end
 
   defp maybe_reset_mode(%{workspace: %{editing: vim}} = state, resets) do
@@ -94,7 +95,7 @@ defmodule MingaEditor.Input.Interrupt do
     if mode_state_dirty?(vim.mode_state, fresh_state) do
       new_vim = VimState.set_mode_state(vim, fresh_state)
 
-      {EditorState.set_editing(state, new_vim),
+      {%{state | workspace: MingaEditor.Session.State.set_editing(state.workspace, new_vim)},
        ["mode state reset (pending sequence cleared)" | resets]}
     else
       {state, resets}
@@ -137,12 +138,17 @@ defmodule MingaEditor.Input.Interrupt do
 
   @spec maybe_clear_agent_prefix(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
   defp maybe_clear_agent_prefix(state, resets) do
-    case state |> AgentAccess.view() |> UIState.View.pending_prefix() do
+    case state.workspace.agent_ui.view |> UIState.View.pending_prefix() do
       nil ->
         {state, resets}
 
       _prefix ->
-        new_state = AgentAccess.update_agent_ui(state, &UIState.clear_prefix/1)
+        new_state =
+          MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+            state,
+            UIState.clear_prefix(state.workspace.agent_ui)
+          )
+
         {new_state, ["agent prefix cleared" | resets]}
     end
   end

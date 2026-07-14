@@ -35,12 +35,12 @@ defmodule MingaEditor.Shell.Traditional.DeactivationWorkflow do
 
   @spec reset_click_regions(EditorState.t()) :: EditorState.t()
   defp reset_click_regions(%EditorState{} = state) do
-    runtime =
-      Runtime.update_traditional_state(
-        state.shell_runtime,
-        &TraditionalState.reset_click_regions/1
-      )
+    shell_state = state.shell_runtime |> Runtime.state() |> TraditionalState.reset_click_regions()
 
-    EditorState.apply_shell_runtime_transition(state, runtime)
+    %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
   end
 end

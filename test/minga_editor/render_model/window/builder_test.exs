@@ -1,6 +1,7 @@
 defmodule MingaEditor.RenderModel.Window.BuilderTest do
   use ExUnit.Case, async: true
 
+  alias MingaEditor.Session.State, as: SessionState
   alias Minga.Buffer
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Core.Decorations
@@ -398,10 +399,14 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       window = EditorWindow.fold_at(window, 5)
 
       state =
-        put_in(
-          state.workspace.windows.map,
-          Map.put(state.workspace.windows.map, win_id, window)
-        )
+        %{
+          state
+          | workspace:
+              SessionState.set_windows(state.workspace, %{
+                state.workspace.windows
+                | map: Map.put(state.workspace.windows.map, win_id, window)
+              })
+        }
 
       model = build_window_model(detach_scroll(state, 25), cursorline_bg: 0x223344)
 
@@ -421,10 +426,14 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       window = EditorWindow.fold_at(window, 5)
 
       state =
-        put_in(
-          state.workspace.windows.map,
-          Map.put(state.workspace.windows.map, win_id, window)
-        )
+        %{
+          state
+          | workspace:
+              SessionState.set_windows(state.workspace, %{
+                state.workspace.windows
+                | map: Map.put(state.workspace.windows.map, win_id, window)
+              })
+        }
 
       off = build_window_model(detach_scroll(state, 25), cursorline_bg: 0x223344)
       assert off.cursor_visible == false
@@ -696,7 +705,7 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       buffer = state.workspace.buffers.active
 
       highlight =
-        state.theme
+        state.appearance.theme
         |> Highlight.from_theme()
         |> Highlight.put_names(["keyword"])
         |> Highlight.put_spans(1, [
@@ -705,7 +714,13 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
         ])
 
       state =
-        EditorState.set_highlight(state, %Highlighting{highlights: %{buffer => highlight}})
+        %{
+          state
+          | parser:
+              MingaEditor.State.Parser.accept_highlighting(state.parser, %Highlighting{
+                highlights: %{buffer => highlight}
+              })
+        }
 
       window = Map.fetch!(state.workspace.windows.map, state.workspace.windows.active)
       window = EditorWindow.set_fold_ranges(window, [FoldRange.new!(0, 2)])

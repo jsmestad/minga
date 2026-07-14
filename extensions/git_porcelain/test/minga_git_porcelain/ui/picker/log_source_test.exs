@@ -225,7 +225,7 @@ defmodule MingaGitPorcelain.UI.Picker.GitLogSourceTest do
 
   defp file_log_state(active_buf) do
     %State{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %SessionState{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: active_buf, list: [active_buf], active_index: 0}

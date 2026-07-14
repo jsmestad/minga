@@ -194,7 +194,7 @@ defmodule MingaEditor.Session.Recovery do
 
   @spec startup_identity(EditorState.t()) :: startup_identity()
   defp startup_identity(state) do
-    tab_bar = EditorState.tab_bar(state)
+    tab_bar = state.shell_runtime.state.tab_bar
 
     workspace_id =
       if match?(%TabBar{}, tab_bar), do: TabBar.active_workspace_id(tab_bar), else: nil

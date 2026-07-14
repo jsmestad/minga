@@ -16,15 +16,14 @@ defmodule MingaEditor.Input.DiffReview do
   alias MingaEditor.Agent.View.Preview
   alias MingaEditor.Commands
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.AgentAccess
   alias Minga.Keymap
 
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
   def handle_key(state, cp, _mods) do
-    view = AgentAccess.view(state)
-    panel = AgentAccess.panel(state)
+    view = state.workspace.agent_ui.view
+    panel = state.workspace.agent_ui.panel
 
     if View.focus(view) == :file_viewer and
          match?(%Preview{content: {:diff, _}}, view.preview) and
@@ -50,7 +49,9 @@ defmodule MingaEditor.Input.DiffReview do
   defp dispatch_diff_key(state, cp) do
     key = {cp, 0}
 
-    case Keymap.resolve_scoped_key(:agent, :normal, key, EditorState.keymap_context(state)) do
+    case Keymap.resolve_scoped_key(:agent, :normal, key,
+           keymap_server: state.interaction.keymap_server
+         ) do
       {:command, command} -> {:handled, Commands.execute(state, command)}
       {:prefix, _node} -> {:handled, state}
       :not_found -> {:handled, state}

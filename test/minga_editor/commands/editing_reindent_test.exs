@@ -12,6 +12,7 @@ defmodule MingaEditor.Commands.EditingReindentTest do
   alias Minga.Mode.OperatorPending
   alias Minga.Mode.OperatorPendingState
   alias MingaEditor.Commands.Editing
+  alias MingaEditor.State.Parser, as: ParserState
 
   describe "Layer 0 Mode FSM: = operator dispatch" do
     test "first = enters operator-pending with :reindent" do
@@ -70,7 +71,8 @@ defmodule MingaEditor.Commands.EditingReindentTest do
       on_exit(fn -> send(manager, :stop) end)
       buffer = start_buffer("def foo do")
       BufferProcess.move_to(buffer, {0, 10})
-      state = %{command_state(buffer) | parser_manager: manager}
+      state = command_state(buffer)
+      state = %{state | parser: ParserState.new(manager)}
 
       _state = Editing.execute(state, :insert_newline)
 

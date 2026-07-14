@@ -8,7 +8,6 @@ defmodule MingaEditor.Input.NotificationActionsTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.CommandOutput
   alias Minga.Events
-  alias MingaEditor.State, as: EditorState
 
   setup do
     on_exit(fn ->
@@ -53,7 +52,11 @@ defmodule MingaEditor.Input.NotificationActionsTest do
     await_command_done("*test*", 1)
 
     :sys.replace_state(ctx.editor, fn state ->
-      EditorState.set_last_test_command(state, {"echo rerun", "."})
+      %{
+        state
+        | session:
+            MingaEditor.State.Session.remember_test_command(state.session, {"echo rerun", "."})
+      }
     end)
 
     send(ctx.editor, {:minga_input, {:gui_action, {:notification_action, "build:test", "retry"}}})

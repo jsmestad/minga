@@ -45,9 +45,34 @@ defmodule Minga.Credo.NoDirectStateMachineWriteCheck do
       gated_fields: [:mode],
       guarded_struct_fields: [
         # VimState fields: must use VimState.set_*/transition instead of direct writes
-        {:editing, [:mode_state, :marks, :last_jump_pos, :last_find_char, :macro_recorder, :change_recorder, :reg]},
+        {:editing,
+         [
+           :mode_state,
+           :marks,
+           :last_jump_pos,
+           :last_find_char,
+           :macro_recorder,
+           :change_recorder,
+           :reg
+         ]},
         # Session.State fields: must use SessionState.set_* instead of direct writes
-        {:workspace, [:keymap_scope, :completion, :completion_trigger, :highlight, :mouse, :document_highlights, :search, :lsp_pending, :viewport, :windows, :buffers, :agent_ui, :injection_ranges, :editing]}
+        {:workspace,
+         [
+           :keymap_scope,
+           :completion,
+           :completion_trigger,
+           :highlight,
+           :mouse,
+           :document_highlights,
+           :search,
+           :lsp_pending,
+           :viewport,
+           :windows,
+           :buffers,
+           :agent_ui,
+           :injection_ranges,
+           :editing
+         ]}
       ],
       allowed_files: ["vim_state.ex", "state.ex", "session/state.ex"]
     ],
@@ -66,8 +91,10 @@ defmodule Minga.Credo.NoDirectStateMachineWriteCheck do
       """,
       params: [
         gated_fields: "List of field atoms to flag when set in map updates.",
-        guarded_struct_fields: "List of {parent_field, [child_fields]} tuples for nested struct checks.",
-        allowed_files: "Filename suffixes where direct writes are permitted (gate function homes)."
+        guarded_struct_fields:
+          "List of {parent_field, [child_fields]} tuples for nested struct checks.",
+        allowed_files:
+          "Filename suffixes where direct writes are permitted (gate function homes)."
       ]
     ]
 
@@ -158,7 +185,8 @@ defmodule Minga.Credo.NoDirectStateMachineWriteCheck do
     end)
   end
 
-  @spec guarded_map_update_issues(term(), term(), keyword(), IssueMeta.t(), keyword([atom()])) :: [Credo.Issue.t()]
+  @spec guarded_map_update_issues(term(), term(), keyword(), IssueMeta.t(), keyword([atom()])) ::
+          [Credo.Issue.t()]
   defp guarded_map_update_issues(ast, map, updates, issue_meta, guarded_struct_fields) do
     map_path = extract_dot_path(map)
     map_match = guarded_path_match(map_path, guarded_struct_fields)
@@ -174,7 +202,9 @@ defmodule Minga.Credo.NoDirectStateMachineWriteCheck do
     end)
   end
 
-  @spec guarded_issue(term(), term(), IssueMeta.t(), {atom(), atom()} | nil, atom()) :: [Credo.Issue.t()]
+  @spec guarded_issue(term(), term(), IssueMeta.t(), {atom(), atom()} | nil, atom()) :: [
+          Credo.Issue.t()
+        ]
   defp guarded_issue(_ast, _value, _issue_meta, nil, _field), do: []
 
   defp guarded_issue(ast, value, issue_meta, {parent, child}, field) do

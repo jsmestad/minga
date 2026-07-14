@@ -259,8 +259,8 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
         end)
 
       state = %EditorState{
-        port_manager: self(),
-        events_registry: events_registry,
+        frontend: %MingaEditor.State.Frontend{port_manager: self()},
+        extension_surfaces: %MingaEditor.State.ExtensionSurfaces{events_registry: events_registry},
         workspace:
           %SessionState{
             viewport: Viewport.new(24, 80),
@@ -270,7 +270,9 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
             FileTreeState.open(%FileTreeState{}, FileTree.new(dir) |> FileTree.refresh(), nil)
           ),
         shell_runtime: Runtime.new(Runtime.default_entry(), %ShellState{tab_bar: tab_bar}),
-        focus_stack: [MingaEditor.Input.Scoped, MingaEditor.Input.ModeFSM]
+        interaction: %MingaEditor.State.Interaction{
+          focus_stack: [MingaEditor.Input.Scoped, MingaEditor.Input.ModeFSM]
+        }
       }
 
       state =
@@ -310,11 +312,20 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       state =
         dir
         |> make_state(events_registry)
-        |> EditorState.set_buffers(%Buffers{
-          active: buffer,
-          list: [buffer],
-          active_index: 0
-        })
+        |> then(fn state ->
+          %{
+            state
+            | workspace:
+                then(
+                  state.workspace,
+                  &MingaEditor.Session.State.set_buffers(&1, %Buffers{
+                    active: buffer,
+                    list: [buffer],
+                    active_index: 0
+                  })
+                )
+          }
+        end)
         |> select_entry("target.txt")
         |> Commands.FileTree.rename()
         |> replace_editing_text("renamed.txt")
@@ -450,11 +461,13 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       end
 
     %EditorState{
-      port_manager: self(),
-      events_registry: events_registry,
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
+      extension_surfaces: %MingaEditor.State.ExtensionSurfaces{events_registry: events_registry},
       workspace: workspace,
       shell_runtime: Runtime.new(Runtime.default_entry(), shell_state),
-      focus_stack: [MingaEditor.Input.Scoped, MingaEditor.Input.ModeFSM]
+      interaction: %MingaEditor.State.Interaction{
+        focus_stack: [MingaEditor.Input.Scoped, MingaEditor.Input.ModeFSM]
+      }
     }
   end
 
@@ -491,7 +504,16 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
 
   defp replace_editing_text(%EditorState{} = state, text) when is_binary(text) do
     ft = FileTreeState.update_editing_text(ft(state), text)
-    EditorState.set_file_tree(state, ft)
+
+    then(state, fn state ->
+      %{
+        state
+        | workspace:
+            then(state.workspace, fn workspace ->
+              MingaEditor.Session.State.set_file_tree(workspace, ft)
+            end)
+      }
+    end)
   end
 
   defp select_entry(%EditorState{} = state, name) when is_binary(name) do
@@ -505,6 +527,15 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
 
   defp replace_tree(%EditorState{} = state, %FileTree{} = tree) do
     ft = FileTreeState.replace_tree(ft(state), tree)
-    EditorState.set_file_tree(state, ft)
+
+    then(state, fn state ->
+      %{
+        state
+        | workspace:
+            then(state.workspace, fn workspace ->
+              MingaEditor.Session.State.set_file_tree(workspace, ft)
+            end)
+      }
+    end)
   end
 end

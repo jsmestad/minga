@@ -2,12 +2,12 @@ defmodule MingaEditor.LayoutTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
+  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Layout
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
@@ -36,12 +36,16 @@ defmodule MingaEditor.LayoutTest do
     vp = Viewport.new(rows, cols)
 
     %EditorState{
-      port_manager: nil,
-      sidebar_registry: Process.get(:sidebar_registry),
-      terminal_viewport: vp,
-      capabilities: %MingaEditor.Frontend.Capabilities{
-        frontend_type: :native_gui,
-        semantic_ui: true
+      frontend: %MingaEditor.State.Frontend{
+        port_manager: nil,
+        terminal_viewport: vp,
+        capabilities: %MingaEditor.Frontend.Capabilities{
+          frontend_type: :native_gui,
+          semantic_ui: true
+        }
+      },
+      extension_surfaces: %MingaEditor.State.ExtensionSurfaces{
+        sidebar_registry: Process.get(:sidebar_registry)
       },
       workspace: %MingaEditor.Session.State{
         viewport: vp,
@@ -58,12 +62,16 @@ defmodule MingaEditor.LayoutTest do
       viewport: Viewport.new(24, 80)
     }
 
-    put_in(state.workspace.windows, %Windows{
-      tree: {:leaf, win_id},
-      map: %{win_id => window},
-      active: win_id,
-      next_id: win_id + 1
-    })
+    %{
+      state
+      | workspace:
+          SessionState.set_windows(state.workspace, %Windows{
+            tree: {:leaf, win_id},
+            map: %{win_id => window},
+            active: win_id,
+            next_id: win_id + 1
+          })
+    }
   end
 
   defp with_file_tree(state, width) do
@@ -74,7 +82,15 @@ defmodule MingaEditor.LayoutTest do
         nil
       )
 
-    EditorState.set_file_tree(state, file_tree)
+    then(state, fn state ->
+      %{
+        state
+        | workspace:
+            then(state.workspace, fn workspace ->
+              MingaEditor.Session.State.set_file_tree(workspace, file_tree)
+            end)
+      }
+    end)
   end
 
   defp with_agent_panel(state) do
@@ -90,9 +106,29 @@ defmodule MingaEditor.LayoutTest do
     tb = TabBar.switch_to(tb, file_tab.id)
 
     state
-    |> EditorState.set_agent_ui(agentic)
-    |> EditorState.set_tab_bar(tb)
-    |> AgentAccess.update_agent(fn _current -> agent end)
+    |> then(fn state ->
+      %{
+        state
+        | workspace:
+            then(state.workspace, fn workspace ->
+              MingaEditor.Session.State.set_agent_ui(workspace, agentic)
+            end)
+      }
+    end)
+    |> then(fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          tb
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
+    |> MingaEditor.Shell.Traditional.Workflow.install_agent_state(agent)
   end
 
   defp with_vsplit(state) do
@@ -110,12 +146,16 @@ defmodule MingaEditor.LayoutTest do
       viewport: Viewport.new(24, 40)
     }
 
-    put_in(state.workspace.windows, %Windows{
-      tree: {:split, :vertical, {:leaf, 1}, {:leaf, 2}, 0},
-      map: %{1 => win1, 2 => win2},
-      active: 1,
-      next_id: 3
-    })
+    %{
+      state
+      | workspace:
+          SessionState.set_windows(state.workspace, %Windows{
+            tree: {:split, :vertical, {:leaf, 1}, {:leaf, 2}, 0},
+            map: %{1 => win1, 2 => win2},
+            active: 1,
+            next_id: 3
+          })
+    }
   end
 
   defp with_hsplit(state) do
@@ -133,12 +173,16 @@ defmodule MingaEditor.LayoutTest do
       viewport: Viewport.new(12, 80)
     }
 
-    put_in(state.workspace.windows, %Windows{
-      tree: {:split, :horizontal, {:leaf, 1}, {:leaf, 2}, 0},
-      map: %{1 => win1, 2 => win2},
-      active: 1,
-      next_id: 3
-    })
+    %{
+      state
+      | workspace:
+          SessionState.set_windows(state.workspace, %Windows{
+            tree: {:split, :horizontal, {:leaf, 1}, {:leaf, 2}, 0},
+            map: %{1 => win1, 2 => win2},
+            active: 1,
+            next_id: 3
+          })
+    }
   end
 
   # ── Single window ────────────────────────────────────────────────────────────
@@ -266,7 +310,16 @@ defmodule MingaEditor.LayoutTest do
       layout1 = Layout.compute(state)
 
       vp = Viewport.new(40, 120)
-      state2 = %{state | workspace: %{state.workspace | viewport: vp}, terminal_viewport: vp}
+
+      state2 =
+        state
+        |> then(fn state ->
+          %{state | workspace: SessionState.set_viewport(state.workspace, vp)}
+        end)
+        |> then(fn state ->
+          %{state | frontend: MingaEditor.State.Frontend.resize_terminal(state.frontend, vp)}
+        end)
+
       layout2 = Layout.compute(state2)
 
       assert layout2.terminal == {0, 0, 120, 40}

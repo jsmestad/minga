@@ -48,15 +48,15 @@ defmodule MingaEditor.Agent.View.PromptRendererTest do
       |> UIState.set_focus(Keyword.get(opts, :focus, :chat))
 
     %EditorState{
-      port_manager: self(),
-      highlighting: %Highlighting{},
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
+      parser: %MingaEditor.State.Parser{highlighting: %Highlighting{}},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(rows, cols),
         editing: VimState.new(),
         buffers: %Buffers{active: buf, list: [buf], active_index: 0},
         agent_ui: agentic
       },
-      focus_stack: Input.default_stack(),
+      interaction: %MingaEditor.State.Interaction{focus_stack: Input.default_stack()},
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),
@@ -65,7 +65,7 @@ defmodule MingaEditor.Agent.View.PromptRendererTest do
             agent
           )
         ),
-      theme: Theme.get!(:doom_one)
+      appearance: %MingaEditor.State.Appearance{theme: Theme.get!(:doom_one)}
     }
   end
 

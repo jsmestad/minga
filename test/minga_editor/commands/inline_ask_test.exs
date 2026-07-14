@@ -13,7 +13,6 @@ defmodule MingaEditor.Commands.InlineAskTest do
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.InlineAsk
@@ -61,7 +60,7 @@ defmodule MingaEditor.Commands.InlineAskTest do
 
     state = InlineAskCommand.open(state)
     ask = active_ask(state, buffer) |> InlineAsk.thinking(session_pid)
-    state = AgentAccess.replace_inline_ask(state, ask)
+    state = MingaEditor.Shell.Traditional.Workflow.install_inline_ask(state, ask)
 
     state = InlineAskEvents.handle_prompt_result(state, session_pid, {:error, :provider_down})
 
@@ -186,7 +185,7 @@ defmodule MingaEditor.Commands.InlineAskTest do
     {:ok, buffer} = start_supervised({BufferProcess, content: content, file_path: path})
 
     state = %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace:
         %SessionState{
           viewport: Viewport.new(24, 80),
@@ -212,7 +211,9 @@ defmodule MingaEditor.Commands.InlineAskTest do
   end
 
   defp active_ask(state, buffer) do
-    state |> AgentAccess.inline_asks() |> InlineAsk.active(buffer)
+    state.shell_runtime.state
+    |> MingaEditor.Shell.Traditional.State.inline_asks()
+    |> InlineAsk.active(buffer)
   end
 
   defp put_active_buffer(state, buffer) do
@@ -238,7 +239,19 @@ defmodule MingaEditor.Commands.InlineAskTest do
       |> TabBar.update_tab(active_tab.id, &Tab.set_session(&1, session_pid))
       |> TabBar.move_tab_to_workspace(active_tab.id, workspace.id)
 
-    EditorState.set_tab_bar(state, tb)
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          tb
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   defp put_visual_selection(state, anchor) do

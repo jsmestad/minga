@@ -52,7 +52,8 @@ defmodule Minga.Credo.NoEventBusBroadcastInTestCheck do
 
   defp make_issue(issue_meta, trigger, line_no) do
     format_issue(issue_meta,
-      message: "#{trigger} in tests causes flaky assert_receive matches. Use Minga.Events.subscribers/1 or an isolated registry instead.",
+      message:
+        "#{trigger} in tests causes flaky assert_receive matches. Use Minga.Events.subscribers/1 or an isolated registry instead.",
       trigger: trigger,
       line_no: line_no
     )

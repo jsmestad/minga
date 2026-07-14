@@ -42,11 +42,11 @@ defmodule MingaEditor.Commands.Lsp do
 
       _ ->
         markdown = build_lsp_info_markdown(clients)
-        vp = state.terminal_viewport
+        vp = state.frontend.terminal_viewport
 
         popup =
           MingaEditor.HoverPopup.Builder.new(markdown, div(vp.rows, 2), div(vp.cols, 4),
-            theme: state.theme
+            theme: state.appearance.theme
           )
 
         popup = HoverPopup.focus(popup)
@@ -175,7 +175,7 @@ defmodule MingaEditor.Commands.Lsp do
       Minga.Events.broadcast(
         :buffer_opened,
         %Minga.Events.BufferEvent{buffer: buf, path: path},
-        EditorState.events_registry(state)
+        state.extension_surfaces.events_registry
       )
     end
 

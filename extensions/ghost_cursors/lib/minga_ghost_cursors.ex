@@ -12,10 +12,11 @@ defmodule MingaGhostCursors do
 
   use Minga.Extension.Editor
 
-  command :ghost_cursor_follow, "Jump to the file the agent is editing",
+  command(:ghost_cursor_follow, "Jump to the file the agent is editing",
     execute: {MingaGhostCursors.Commands, :follow}
+  )
 
-  keybind :normal, "SPC a F", :ghost_cursor_follow, "Follow agent's file"
+  keybind(:normal, "SPC a F", :ghost_cursor_follow, "Follow agent's file")
 
   @impl true
   def name, do: :minga_ghost_cursors

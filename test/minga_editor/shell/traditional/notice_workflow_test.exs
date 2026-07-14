@@ -2,6 +2,7 @@ defmodule MingaEditor.Shell.Traditional.NoticeWorkflowTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
+  alias MingaEditor.State.Feedback
   alias MingaEditor.State.OperationFeedback
 
   import MingaEditor.RenderPipeline.TestHelpers
@@ -19,7 +20,7 @@ defmodule MingaEditor.Shell.Traditional.NoticeWorkflowTest do
   end
 
   test "visible notices use the two-second policy and acknowledgement cancels the timer" do
-    state = %{base_state() | backend: :port}
+    state = base_state(backend: :tui)
     published = NoticeWorkflow.publish(state, "timed notice")
     timer = published.shell_runtime.state.notice.timer
 
@@ -34,8 +35,8 @@ defmodule MingaEditor.Shell.Traditional.NoticeWorkflowTest do
 
   test "Editor timer messages expire only the matching notice identity" do
     first =
-      base_state()
-      |> Map.put(:rendering, :disabled)
+      [rendering: :disabled]
+      |> base_state()
       |> NoticeWorkflow.publish("first")
 
     first_id = first.shell_runtime.state.notice.id
@@ -54,10 +55,34 @@ defmodule MingaEditor.Shell.Traditional.NoticeWorkflowTest do
   end
 
   test "terminal operation dwell does not suppress a newer notice" do
-    {state, operation} =
-      OperationFeedback.start_in(base_state(), :external_format, "buffer:terminal", "Formatting")
+    state = base_state()
 
-    state = OperationFeedback.finish_in(state, operation.id, :success, "Formatted")
+    {operation_feedback, operation} =
+      OperationFeedback.start(
+        state.feedback.operation_feedback,
+        :external_format,
+        "buffer:terminal",
+        "Formatting"
+      )
+
+    state = %{
+      state
+      | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)
+    }
+
+    operation_feedback =
+      OperationFeedback.finish(
+        state.feedback.operation_feedback,
+        operation.id,
+        :success,
+        "Formatted"
+      )
+
+    state = %{
+      state
+      | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)
+    }
+
     state = NoticeWorkflow.publish(state, "Saved")
 
     assert state.shell_runtime.state.notice.message == "Saved"
@@ -65,25 +90,34 @@ defmodule MingaEditor.Shell.Traditional.NoticeWorkflowTest do
 
   test "active operation feedback owns the lane and hidden notices are not retained" do
     state = base_state()
-    assert :ok = Minga.Events.subscribe(:log_message, state.events_registry)
+    assert :ok = Minga.Events.subscribe(:log_message, state.extension_surfaces.events_registry)
     state = NoticeWorkflow.publish(state, "old notice")
 
-    {state, operation} =
-      OperationFeedback.start_in(state, :external_format, "buffer:notice-test", "Formatting",
+    {operation_feedback, operation} =
+      OperationFeedback.start(
+        state.feedback.operation_feedback,
+        :external_format,
+        "buffer:notice-test",
+        "Formatting",
         cancelable?: true
       )
 
-    operation_feedback = state.operation_feedback
+    state = %{
+      state
+      | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)
+    }
+
+    operation_feedback = state.feedback.operation_feedback
     state = NoticeWorkflow.publish(state, "hidden notice")
 
     assert state.shell_runtime.state.notice.message == nil
-    assert state.operation_feedback == operation_feedback
+    assert state.feedback.operation_feedback == operation_feedback
 
     assert_receive {:minga_event, :log_message,
                     %Minga.Events.LogMessageEvent{text: "hidden notice", level: :info}}
 
     assert {:ok, retained_operation} =
-             OperationFeedback.fetch(state.operation_feedback, operation.id)
+             OperationFeedback.fetch(state.feedback.operation_feedback, operation.id)
 
     assert retained_operation.message == "Formatting"
   end

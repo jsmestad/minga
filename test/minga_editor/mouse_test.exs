@@ -20,7 +20,6 @@ defmodule MingaEditor.MouseTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
-  alias MingaEditor.Window
   alias MingaEditor.WindowTree
 
   @ctrl 0x02
@@ -256,9 +255,27 @@ defmodule MingaEditor.MouseTest do
       assert {:ok, false} = BufferProcess.set_option(buffer, :linebreak, false)
 
       state =
-        EditorState.update_window(state, state.workspace.windows.active, fn window ->
-          viewport = MingaEditor.Viewport.put_top_visual(window.viewport, 0, 1, 3)
-          Window.set_viewport(window, viewport)
+        then(state, fn state ->
+          %{
+            state
+            | workspace:
+                then(
+                  state.workspace,
+                  &MingaEditor.Session.State.set_windows(
+                    &1,
+                    MingaEditor.State.Windows.set_viewport(
+                      state.workspace.windows,
+                      state.workspace.windows.active,
+                      MingaEditor.Viewport.put_top_visual(
+                        Map.fetch!(state.workspace.windows.map, state.workspace.windows.active).viewport,
+                        0,
+                        1,
+                        3
+                      )
+                    )
+                  )
+                )
+          }
         end)
 
       {content_row, content_col} = active_content_origin(state)
@@ -447,7 +464,18 @@ defmodule MingaEditor.MouseTest do
         Enum.find(layout.window_layouts, fn {id, _layout} -> id != origin_id end)
 
       other_state =
-        EditorState.update_windows(state, &Windows.set_active(&1, other_id))
+        then(state, fn state ->
+          %{
+            state
+            | workspace:
+                then(state.workspace, fn workspace ->
+                  MingaEditor.Session.State.set_windows(
+                    workspace,
+                    Windows.set_active(state.workspace.windows, other_id)
+                  )
+                end)
+          }
+        end)
 
       {origin_press_row, origin_press_col} = buffer_screen_pos(state, 0, 0)
       {other_drag_row, other_drag_col} = buffer_screen_pos(other_state, 0, 0)
@@ -539,7 +567,7 @@ defmodule MingaEditor.MouseTest do
       state = mouse(state, row, col, :none, :motion, @super)
 
       # "world" spans bytes 6..10 inclusive; the decoration range is end-exclusive.
-      assert state.workspace.cmd_hover_link == {{0, 6}, {0, 11}}
+      assert state.workspace.hover_observation.link == {{0, 6}, {0, 11}}
     end
 
     test "releasing the modifier clears the link decoration" do
@@ -547,11 +575,11 @@ defmodule MingaEditor.MouseTest do
       {row, col} = buffer_screen_pos(state, 0, 8)
 
       state = mouse(state, row, col, :none, :motion, @super)
-      assert state.workspace.cmd_hover_link != nil
+      assert state.workspace.hover_observation.link != nil
 
       # Same position, modifier released: the preview clears immediately.
       state = mouse(state, row, col, :none, :motion, 0)
-      assert state.workspace.cmd_hover_link == nil
+      assert state.workspace.hover_observation.link == nil
     end
 
     test "moving onto whitespace while Cmd is held clears the link decoration" do
@@ -560,10 +588,10 @@ defmodule MingaEditor.MouseTest do
       {space_row, space_col} = buffer_screen_pos(state, 0, 5)
 
       state = mouse(state, word_row, word_col, :none, :motion, @super)
-      assert state.workspace.cmd_hover_link != nil
+      assert state.workspace.hover_observation.link != nil
 
       state = mouse(state, space_row, space_col, :none, :motion, @super)
-      assert state.workspace.cmd_hover_link == nil
+      assert state.workspace.hover_observation.link == nil
     end
 
     test "Cmd+motion over whitespace sets no link decoration" do
@@ -572,7 +600,7 @@ defmodule MingaEditor.MouseTest do
 
       state = mouse(state, row, col, :none, :motion, @super)
 
-      assert state.workspace.cmd_hover_link == nil
+      assert state.workspace.hover_observation.link == nil
     end
 
     test "Ctrl+motion previews the link on the TUI" do
@@ -582,7 +610,7 @@ defmodule MingaEditor.MouseTest do
 
       state = mouse(state, row, col, :none, :motion, @ctrl)
 
-      assert state.workspace.cmd_hover_link == {{0, 6}, {0, 11}}
+      assert state.workspace.hover_observation.link == {{0, 6}, {0, 11}}
     end
 
     test "Ctrl+motion does not preview on native GUI (context-menu modifier)" do
@@ -592,7 +620,7 @@ defmodule MingaEditor.MouseTest do
 
       state = mouse(state, row, col, :none, :motion, @ctrl)
 
-      assert state.workspace.cmd_hover_link == nil
+      assert state.workspace.hover_observation.link == nil
     end
 
     test "Cmd+click go-to-definition clears the link preview before navigating" do
@@ -600,13 +628,13 @@ defmodule MingaEditor.MouseTest do
       {row, col} = buffer_screen_pos(state, 0, 8)
 
       state = mouse(state, row, col, :none, :motion, @super)
-      assert state.workspace.cmd_hover_link != nil
+      assert state.workspace.hover_observation.link != nil
 
       # Cmd+click navigates (possibly to another buffer); the stale underline and
       # GUI hand cursor (derived from cmd_hover_link != nil) must clear.
       state = mouse(state, row, col, :left, :press, @super)
-      assert state.workspace.cmd_hover_link == nil
-      assert state.workspace.cmd_hover_cell == nil
+      assert state.workspace.hover_observation.link == nil
+      assert state.workspace.hover_observation.cell == nil
     end
 
     test "switching tabs clears a standing link preview" do
@@ -615,13 +643,13 @@ defmodule MingaEditor.MouseTest do
       {row, col} = buffer_screen_pos(state, 0, 2)
 
       state = mouse(state, row, col, :none, :motion, @super)
-      assert state.workspace.cmd_hover_link != nil
+      assert state.workspace.hover_observation.link != nil
 
       # A keyboard tab switch swaps the active buffer with no intervening motion;
       # the link preview must not carry over to the new buffer's coordinates.
       state = EditorState.switch_tab(state, first_tab_id)
-      assert state.workspace.cmd_hover_link == nil
-      assert state.workspace.cmd_hover_cell == nil
+      assert state.workspace.hover_observation.link == nil
+      assert state.workspace.hover_observation.cell == nil
     end
 
     test "focusing another window clears a standing link preview" do
@@ -630,14 +658,14 @@ defmodule MingaEditor.MouseTest do
       {row, col} = buffer_screen_pos(state, 0, 8)
 
       state = mouse(state, row, col, :none, :motion, @super)
-      assert state.workspace.cmd_hover_link != nil
+      assert state.workspace.hover_observation.link != nil
 
       other_id =
         Enum.find(Map.keys(state.workspace.windows.map), &(&1 != state.workspace.windows.active))
 
       state = MingaEditor.WindowFocus.focus(state, other_id)
-      assert state.workspace.cmd_hover_link == nil
-      assert state.workspace.cmd_hover_cell == nil
+      assert state.workspace.hover_observation.link == nil
+      assert state.workspace.hover_observation.cell == nil
     end
 
     test "a repeated motion at the same cell preserves the link without re-resolving" do
@@ -645,13 +673,13 @@ defmodule MingaEditor.MouseTest do
       {row, col} = buffer_screen_pos(state, 0, 8)
 
       state = mouse(state, row, col, :none, :motion, @super)
-      assert state.workspace.cmd_hover_link == {{0, 6}, {0, 11}}
-      assert state.workspace.cmd_hover_cell == {row, col}
+      assert state.workspace.hover_observation.link == {{0, 6}, {0, 11}}
+      assert state.workspace.hover_observation.cell == {row, col}
 
       # Same cell again: the dedup short-circuit returns unchanged state.
       again = mouse(state, row, col, :none, :motion, @super)
-      assert again.workspace.cmd_hover_link == state.workspace.cmd_hover_link
-      assert again.workspace.cmd_hover_cell == {row, col}
+      assert again.workspace.hover_observation.link == state.workspace.hover_observation.link
+      assert again.workspace.hover_observation.cell == {row, col}
     end
   end
 
@@ -706,7 +734,7 @@ defmodule MingaEditor.MouseTest do
   defp start_two_tab_state do
     {state, buf1} = start_mouse_state("hello", width: 80)
     buf2 = start_test_buffer(state, "world", :two_tab)
-    state = EditorState.add_buffer(state, buf2, context: :open)
+    state = MingaEditor.Handlers.BufferRegistry.add_buffer(state, buf2, context: :open)
     {state, buf1, buf2}
   end
 
@@ -719,8 +747,8 @@ defmodule MingaEditor.MouseTest do
       {BufferProcess,
        [
          content: content,
-         events_registry: state.events_registry,
-         options_server: state.options_server
+         events_registry: state.extension_surfaces.events_registry,
+         options_server: state.interaction.options_server
        ]},
       id: {id_prefix, System.unique_integer([:positive])}
     )
@@ -731,14 +759,35 @@ defmodule MingaEditor.MouseTest do
   defp window_viewport(state, window_id),
     do: Map.fetch!(state.workspace.windows.map, window_id).viewport
 
-  defp native_gui_state(state),
-    do: %{state | capabilities: %Capabilities{frontend_type: :native_gui}}
+  defp native_gui_state(state) do
+    frontend =
+      MingaEditor.State.Frontend.accept_capabilities(
+        state.frontend,
+        %Capabilities{frontend_type: :native_gui}
+      )
+
+    %{state | frontend: frontend}
+  end
 
   defp mark_resident(state, _window_id), do: state
 
   defp set_window_top(state, window_id, top) do
-    EditorState.update_window(state, window_id, fn window ->
-      %{window | viewport: %{window.viewport | top: top}}
+    then(state, fn state ->
+      %{
+        state
+        | workspace:
+            then(
+              state.workspace,
+              &MingaEditor.Session.State.set_windows(
+                &1,
+                MingaEditor.State.Windows.set_viewport(
+                  state.workspace.windows,
+                  window_id,
+                  %{Map.fetch!(state.workspace.windows.map, window_id).viewport | top: top}
+                )
+              )
+            )
+      }
     end)
   end
 
@@ -763,30 +812,79 @@ defmodule MingaEditor.MouseTest do
   defp set_visual_selection(state, buffer, anchor, cursor, visual_type) do
     BufferProcess.move_to(buffer, cursor)
 
-    EditorState.transition_mode(state, :visual, %VisualState{
-      visual_anchor: anchor,
-      visual_type: visual_type
-    })
+    then(state, fn state ->
+      %{
+        state
+        | workspace:
+            then(state.workspace, fn workspace ->
+              MingaEditor.Session.State.transition_mode(workspace, :visual, %VisualState{
+                visual_anchor: anchor,
+                visual_type: visual_type
+              })
+            end)
+      }
+    end)
   end
 
   defp set_capabilities(state, frontend_type) do
-    %{state | capabilities: %Capabilities{frontend_type: frontend_type}}
+    frontend =
+      MingaEditor.State.Frontend.accept_capabilities(
+        state.frontend,
+        %Capabilities{frontend_type: frontend_type}
+      )
+
+    %{state | frontend: frontend}
   end
 
   defp set_window_tree(state, tree) do
     windows = Windows.set_tree(state.workspace.windows, tree)
-    EditorState.set_windows(state, windows)
+
+    then(state, fn state ->
+      %{
+        state
+        | workspace:
+            then(state.workspace, fn workspace ->
+              MingaEditor.Session.State.set_windows(workspace, windows)
+            end)
+      }
+    end)
   end
 
   defp set_active_fold_ranges(state, ranges) do
-    EditorState.update_window(
-      state,
-      state.workspace.windows.active,
-      &Window.set_fold_ranges(&1, ranges)
-    )
+    then(state, fn state ->
+      %{
+        state
+        | workspace:
+            then(state.workspace, fn workspace ->
+              MingaEditor.Session.State.set_windows(
+                workspace,
+                MingaEditor.State.Windows.set_fold_ranges(
+                  state.workspace.windows,
+                  state.workspace.windows.active,
+                  ranges
+                )
+              )
+            end)
+      }
+    end)
   end
 
   defp fold_active_window_at(state, line) do
-    EditorState.update_window(state, state.workspace.windows.active, &Window.fold_at(&1, line))
+    then(state, fn state ->
+      %{
+        state
+        | workspace:
+            then(state.workspace, fn workspace ->
+              MingaEditor.Session.State.set_windows(
+                workspace,
+                MingaEditor.State.Windows.fold_at(
+                  state.workspace.windows,
+                  state.workspace.windows.active,
+                  line
+                )
+              )
+            end)
+      }
+    end)
   end
 end

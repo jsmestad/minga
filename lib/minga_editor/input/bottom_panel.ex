@@ -9,6 +9,7 @@ defmodule MingaEditor.Input.BottomPanel do
 
   alias MingaEditor.BottomPanel
   alias MingaEditor.FocusTree.Node, as: FocusNode
+  alias MingaEditor.Session.State
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
 
@@ -16,7 +17,7 @@ defmodule MingaEditor.Input.BottomPanel do
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
   def handle_key(state, codepoint, modifiers) do
-    panel = EditorState.bottom_panel(state)
+    panel = state.shell_runtime.state.bottom_panel
 
     if BottomPanel.focused?(panel) do
       handle_focused_key(state, panel, codepoint, modifiers)
@@ -63,11 +64,29 @@ defmodule MingaEditor.Input.BottomPanel do
 
   @spec close_panel(EditorState.t(), BottomPanel.t()) :: EditorState.t()
   defp close_panel(state, panel) do
-    state
-    |> EditorState.set_bottom_panel(BottomPanel.hide(panel))
-    |> EditorState.set_keymap_scope(
-      MingaEditor.Session.State.scope_for_active_window(state.workspace)
-    )
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_bottom_panel(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          MingaEditor.BottomPanel.hide(panel)
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
+    |> then(fn state ->
+      %{
+        state
+        | workspace:
+            State.set_keymap_scope(
+              state.workspace,
+              State.scope_for_active_window(state.workspace)
+            )
+      }
+    end)
   end
 
   @impl true
@@ -91,15 +110,42 @@ defmodule MingaEditor.Input.BottomPanel do
         :press,
         _click_count
       ) do
-    panel = state |> EditorState.bottom_panel() |> BottomPanel.focus()
+    panel = state.shell_runtime.state.bottom_panel |> BottomPanel.focus()
 
     state =
-      state
-      |> EditorState.set_bottom_panel(panel)
-      |> EditorState.update_file_tree(&FileTreeState.unfocus/1)
-      |> EditorState.set_keymap_scope(
-        MingaEditor.Session.State.scope_for_active_window(state.workspace)
-      )
+      then(state, fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_bottom_panel(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            panel
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
+      |> then(fn state ->
+        %{
+          state
+          | workspace:
+              State.set_file_tree(
+                state.workspace,
+                (&FileTreeState.unfocus/1).(state.workspace.file_tree)
+              )
+        }
+      end)
+      |> then(fn state ->
+        %{
+          state
+          | workspace:
+              State.set_keymap_scope(
+                state.workspace,
+                State.scope_for_active_window(state.workspace)
+              )
+        }
+      end)
 
     {:handled, state}
   end

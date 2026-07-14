@@ -34,7 +34,9 @@ defmodule MingaEditor.MouseHoverTooltip do
             send_hover_request(state, target.buffer, target.line, target.col, row, col)
 
           message ->
-            popup = MingaEditor.HoverPopup.Builder.new(message, row, col, theme: state.theme)
+            popup =
+              MingaEditor.HoverPopup.Builder.new(message, row, col, theme: state.appearance.theme)
+
             MingaEditor.Shell.Traditional.HoverPopupWorkflow.show(state, popup)
         end
 
@@ -102,6 +104,6 @@ defmodule MingaEditor.MouseHoverTooltip do
 
   @spec put_lsp_pending(state(), reference(), atom() | tuple()) :: state()
   defp put_lsp_pending(state, ref, kind) do
-    EditorState.put_lsp_pending(state, ref, kind)
+    %{state | workspace: MingaEditor.Session.State.put_lsp_pending(state.workspace, ref, kind)}
   end
 end

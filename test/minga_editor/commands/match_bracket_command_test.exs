@@ -49,7 +49,7 @@ defmodule MingaEditor.Commands.MatchBracketCommandTest do
       on_exit(fn -> send(manager, :stop) end)
       state = TestHelpers.base_state(content: "(x)", filetype: :elixir)
       buffer = state.workspace.buffers.active
-      state = %{state | parser_manager: manager}
+      state = %{state | parser: MingaEditor.State.Parser.connect_manager(state.parser, manager)}
 
       _updated = Movement.execute(state, :match_bracket)
 
@@ -63,7 +63,7 @@ defmodule MingaEditor.Commands.MatchBracketCommandTest do
       on_exit(fn -> send(manager, :stop) end)
       state = TestHelpers.base_state(content: "(x)", filetype: :elixir)
       buffer = state.workspace.buffers.active
-      state = %{state | parser_manager: manager}
+      state = %{state | parser: MingaEditor.State.Parser.connect_manager(state.parser, manager)}
 
       _updated = Helpers.apply_operator_motion(buffer, state, :match_bracket, :delete)
 

@@ -19,7 +19,10 @@ defmodule MingaEditor.InlineEdit.RenderTest do
         "old text"
       )
 
-    state = %{shell_state: TraditionalState.activate_inline_edit(%TraditionalState{}, edit)}
+    state = %{
+      shell_runtime: %{state: TraditionalState.activate_inline_edit(%TraditionalState{}, edit)}
+    }
+
     decorations = Render.merge_decorations(Decorations.new(), state, buffer_pid)
 
     assert Decorations.has_block_decorations?(decorations)

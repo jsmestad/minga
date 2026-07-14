@@ -9,7 +9,6 @@ defmodule MingaEditor.Input.AgentMouseTest do
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
@@ -44,8 +43,10 @@ defmodule MingaEditor.Input.AgentMouseTest do
     win = Window.new(win_id, buf, 24, 80)
 
     %EditorState{
-      port_manager: self(),
-      sidebar_registry: Process.get(:sidebar_registry),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
+      extension_surfaces: %MingaEditor.State.ExtensionSurfaces{
+        sidebar_registry: Process.get(:sidebar_registry)
+      },
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
@@ -59,7 +60,7 @@ defmodule MingaEditor.Input.AgentMouseTest do
           next_id: win_id + 1
         }
       },
-      focus_stack: [],
+      interaction: %MingaEditor.State.Interaction{focus_stack: []},
       shell_runtime:
         Runtime.new(
           Runtime.default_entry(),
@@ -91,19 +92,27 @@ defmodule MingaEditor.Input.AgentMouseTest do
 
     total_lines = Enum.count(line_index)
 
-    AgentAccess.update_panel(state, fn panel ->
-      %{
-        panel
-        | cached_line_index: line_index,
-          scroll: Minga.Editing.Scroll.update_metrics(panel.scroll, total_lines, 8)
-      }
-    end)
+    MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
+      state,
+      (fn panel ->
+         %{
+           panel
+           | cached_line_index: line_index,
+             scroll: Minga.Editing.Scroll.update_metrics(panel.scroll, total_lines, 8)
+         }
+       end).(state.workspace.agent_ui.panel)
+    )
   end
 
   defp with_agent_panel(state) do
     state
-    |> AgentAccess.update_panel(fn p ->
-      %{p | visible: true, input_focused: true}
+    |> then(fn state ->
+      MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
+        state,
+        (fn p ->
+           %{p | visible: true, input_focused: true}
+         end).(state.workspace.agent_ui.panel)
+      )
     end)
     |> Layout.invalidate()
   end
@@ -116,7 +125,8 @@ defmodule MingaEditor.Input.AgentMouseTest do
   defp with_agent_panel_rect(state, rect \\ {16, 0, 80, 8}) do
     %Layout{} = base_layout = Layout.compute(state)
     layout = %Layout{base_layout | agent_panel: rect}
-    {%{state | layout: layout}, rect}
+    render = MingaEditor.State.Render.stage_layout(state.render, layout)
+    {%{state | render: render}, rect}
   end
 
   defp agent_chat_window_rect(state) do
@@ -243,8 +253,13 @@ defmodule MingaEditor.Input.AgentMouseTest do
       {_row, col, _w, h} = rect
 
       # Make sure input is not focused
-      state = AgentAccess.update_agent_ui(state, &UIState.set_input_focused(&1, false))
-      refute AgentAccess.input_focused?(state)
+      state =
+        MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+          state,
+          MingaEditor.Agent.PromptBuffer.set_input_focused(state.workspace.agent_ui, false)
+        )
+
+      refute state.workspace.agent_ui.panel.input_focused
 
       # Click near the bottom of the agent window (where input lives)
       input_row = rect |> elem(0) |> Kernel.+(h - 2)
@@ -252,7 +267,7 @@ defmodule MingaEditor.Input.AgentMouseTest do
       {:handled, new_state} =
         AgentMouse.handle_mouse(state, input_row, col + 2, :left, 0, :press, 1)
 
-      assert AgentAccess.input_focused?(new_state)
+      assert new_state.workspace.agent_ui.panel.input_focused
     end
 
     test "click in agent window focuses it when not active", %{state: state} do
@@ -292,7 +307,7 @@ defmodule MingaEditor.Input.AgentMouseTest do
         AgentMouse.handle_mouse(state, row + 1, col + 2, :wheel_down, 0, :press, 1)
 
       # Chat scroll offset should change
-      panel = AgentAccess.panel(new_state)
+      panel = new_state.workspace.agent_ui.panel
       assert panel.scroll.offset > 0 or panel.scroll.pinned == false
 
       # Editor viewport should be untouched
@@ -324,21 +339,26 @@ defmodule MingaEditor.Input.AgentMouseTest do
       {row, col, _w, _h} = panel_rect
 
       # Input should be focused initially
-      assert AgentAccess.input_focused?(state)
+      assert state.workspace.agent_ui.panel.input_focused
 
       # Click near the top of the panel (chat area)
       {:handled, new_state} =
         AgentMouse.handle_mouse(state, row + 1, col + 2, :left, 0, :press, 1)
 
-      refute AgentAccess.input_focused?(new_state)
+      refute new_state.workspace.agent_ui.panel.input_focused
     end
 
     test "click in panel input area focuses input", %{state: state, panel_rect: panel_rect} do
       {_row, col, _w, h} = panel_rect
 
       # Unfocus first
-      state = AgentAccess.update_agent_ui(state, &UIState.set_input_focused(&1, false))
-      refute AgentAccess.input_focused?(state)
+      state =
+        MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+          state,
+          MingaEditor.Agent.PromptBuffer.set_input_focused(state.workspace.agent_ui, false)
+        )
+
+      refute state.workspace.agent_ui.panel.input_focused
 
       # Click near the bottom of the panel (input area)
       input_row = elem(panel_rect, 0) + h - 2
@@ -346,7 +366,7 @@ defmodule MingaEditor.Input.AgentMouseTest do
       {:handled, new_state} =
         AgentMouse.handle_mouse(state, input_row, col + 2, :left, 0, :press, 1)
 
-      assert AgentAccess.input_focused?(new_state)
+      assert new_state.workspace.agent_ui.panel.input_focused
     end
   end
 

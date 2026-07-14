@@ -52,7 +52,7 @@ defmodule MingaEditor.FileTree.Rows do
   @doc "Builds semantic rows from editor state when the file tree is open."
   @spec from_state(EditorState.t() | map()) :: [Row.t()]
   def from_state(state) do
-    case EditorState.file_tree_state(state) do
+    case state.workspace.file_tree do
       %FileTreeState{tree: %FileTree{} = tree} = file_tree ->
         from_tree(tree,
           active_path: active_buffer_path(state),

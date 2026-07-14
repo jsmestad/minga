@@ -164,7 +164,7 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
 
       state = base_state(sidebar_registry: table)
       state1 = TestHelpers.run_pipeline(state)
-      fingerprint1 = :sys.get_state(state1.renderer).caches.chrome_prev_fingerprint
+      fingerprint1 = :sys.get_state(state1.render.renderer).caches.chrome_prev_fingerprint
 
       assert :ok =
                Sidebar.publish_snapshot(table, {:extension, :outline}, "outline",
@@ -172,7 +172,7 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
                )
 
       state2 = TestHelpers.run_pipeline(state1)
-      fingerprint2 = :sys.get_state(state2.renderer).caches.chrome_prev_fingerprint
+      fingerprint2 = :sys.get_state(state2.render.renderer).caches.chrome_prev_fingerprint
 
       assert fingerprint2 != fingerprint1
     end
@@ -215,7 +215,7 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
 
       # First render: builds chrome fresh in renderer-owned state.
       state1 = TestHelpers.run_pipeline(state)
-      cache1 = :sys.get_state(state1.renderer).caches
+      cache1 = :sys.get_state(state1.render.renderer).caches
       fp_after_first = cache1.chrome_prev_fingerprint
       chrome_after_first = cache1.chrome_prev_result
 
@@ -224,7 +224,7 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
 
       # Second render: must thread state1 so caches survive between frames.
       state2 = TestHelpers.run_pipeline(state1)
-      cache2 = :sys.get_state(state2.renderer).caches
+      cache2 = :sys.get_state(state2.render.renderer).caches
       fp_after_second = cache2.chrome_prev_fingerprint
       chrome_after_second = cache2.chrome_prev_result
 
@@ -240,14 +240,14 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
 
       # First render.
       state1 = TestHelpers.run_pipeline(state)
-      fp_before = :sys.get_state(state1.renderer).caches.chrome_prev_fingerprint
+      fp_before = :sys.get_state(state1.render.renderer).caches.chrome_prev_fingerprint
 
       # Move cursor (changes status bar data).
       Minga.Buffer.move_to(buf, {1, 0})
 
       # Second render with caches from first frame so fingerprint comparison works.
       state2 = TestHelpers.run_pipeline(state1)
-      fp_after = :sys.get_state(state2.renderer).caches.chrome_prev_fingerprint
+      fp_after = :sys.get_state(state2.render.renderer).caches.chrome_prev_fingerprint
 
       assert fp_before != fp_after, "cursor move should change chrome fingerprint"
     end
@@ -269,21 +269,26 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
       :ok = BufferProcess.save_as(second_buf, second_path)
 
       state1 = TestHelpers.run_pipeline(state)
-      fp_before = :sys.get_state(state1.renderer).caches.chrome_prev_fingerprint
+      fp_before = :sys.get_state(state1.render.renderer).caches.chrome_prev_fingerprint
 
-      switched =
-        put_in(state1.workspace.buffers, %{
-          state1.workspace.buffers
-          | active: second_buf,
-            list: [first_buf, second_buf],
-            active_index: 1
-        })
-        |> update_in([Access.key!(:workspace)], fn workspace ->
-          SessionState.activate_buffer(workspace, workspace.buffers)
-        end)
+      switched = %{
+        state1
+        | workspace:
+            SessionState.set_buffers(state1.workspace, %{
+              state1.workspace.buffers
+              | active: second_buf,
+                list: [first_buf, second_buf],
+                active_index: 1
+            })
+      }
+
+      switched = %{
+        switched
+        | workspace: SessionState.activate_buffer(switched.workspace, switched.workspace.buffers)
+      }
 
       state2 = TestHelpers.run_pipeline(switched)
-      renderer_cache = :sys.get_state(state2.renderer).caches
+      renderer_cache = :sys.get_state(state2.render.renderer).caches
       fp_after = renderer_cache.chrome_prev_fingerprint
       {:buffer, status_bar_data} = renderer_cache.chrome_prev_result.status_bar_data
 

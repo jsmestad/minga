@@ -150,8 +150,8 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
 
       assert buffer_content(diff_one) =~ "new"
       assert buffer_content(diff_two) =~ "new"
-      assert state.diff_views[diff_one].line_metadata != []
-      assert state.diff_views[diff_two].line_metadata != []
+      assert state.git.diff_views[diff_one].line_metadata != []
+      assert state.git.diff_views[diff_two].line_metadata != []
     end
 
     test "diff_hunk_position reports the hunk containing the cursor" do
@@ -159,14 +159,20 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
 
       state =
         build_state()
-        |> EditorState.register_diff_view(diff_buf, %{
-          source_buf: nil,
-          git_root: "/tmp/repo",
-          rel_path: "file.txt",
-          staged: false,
-          line_metadata: [],
-          hunk_lines: [1, 5]
-        })
+        |> then(fn state ->
+          %{
+            state
+            | git:
+                MingaEditor.State.Git.register_diff_view(state.git, diff_buf, %{
+                  source_buf: nil,
+                  git_root: "/tmp/repo",
+                  rel_path: "file.txt",
+                  staged: false,
+                  line_metadata: [],
+                  hunk_lines: [1, 5]
+                })
+          }
+        end)
 
       assert GitCommands.diff_hunk_position(state, diff_buf, 0) == {1, 2}
       assert GitCommands.diff_hunk_position(state, diff_buf, 3) == {2, 2}
@@ -195,16 +201,22 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
 
       state =
         build_state()
-        |> EditorState.add_buffer(source_buf)
-        |> EditorState.add_buffer(diff_buf)
-        |> EditorState.register_diff_view(diff_buf, %{
-          source_buf: source_buf,
-          git_root: git_root,
-          rel_path: rel_path,
-          staged: false,
-          line_metadata: diff_result.line_metadata,
-          hunk_lines: diff_result.hunk_lines
-        })
+        |> MingaEditor.Handlers.BufferRegistry.add_buffer(source_buf)
+        |> MingaEditor.Handlers.BufferRegistry.add_buffer(diff_buf)
+        |> then(fn state ->
+          %{
+            state
+            | git:
+                MingaEditor.State.Git.register_diff_view(state.git, diff_buf, %{
+                  source_buf: source_buf,
+                  git_root: git_root,
+                  rel_path: rel_path,
+                  staged: false,
+                  line_metadata: diff_result.line_metadata,
+                  hunk_lines: diff_result.hunk_lines
+                })
+          }
+        end)
 
       _state = GitCommands.execute(state, :git_revert_hunk)
 
@@ -226,25 +238,31 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
 
       state =
         build_state()
-        |> EditorState.add_buffer(source_buf)
-        |> EditorState.add_buffer(diff_buf)
-        |> EditorState.register_diff_view(diff_buf, %{
-          source_buf: source_buf,
-          git_root: git_root,
-          rel_path: rel_path,
-          staged: false,
-          line_metadata: diff_result.line_metadata,
-          hunk_lines: diff_result.hunk_lines,
-          view_mode: :unified,
-          pane_width: 20
-        })
+        |> MingaEditor.Handlers.BufferRegistry.add_buffer(source_buf)
+        |> MingaEditor.Handlers.BufferRegistry.add_buffer(diff_buf)
+        |> then(fn state ->
+          %{
+            state
+            | git:
+                MingaEditor.State.Git.register_diff_view(state.git, diff_buf, %{
+                  source_buf: source_buf,
+                  git_root: git_root,
+                  rel_path: rel_path,
+                  staged: false,
+                  line_metadata: diff_result.line_metadata,
+                  hunk_lines: diff_result.hunk_lines,
+                  view_mode: :unified,
+                  pane_width: 20
+                })
+          }
+        end)
 
       state = GitCommands.execute(state, :git_diff_toggle_layout)
 
       assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) ==
                "Side-by-side diff is only available in GUI"
 
-      assert state.diff_views[diff_buf].view_mode == :unified
+      assert state.git.diff_views[diff_buf].view_mode == :unified
       refute buffer_content(diff_buf) =~ " │ "
     end
 
@@ -270,25 +288,35 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
 
       state =
         build_state()
-        |> EditorState.set_viewport(Viewport.new(24, 40))
+        |> then(fn state ->
+          %{state | workspace: then(state.workspace, fn workspace ->
+            MingaEditor.Session.State.set_viewport(workspace, Viewport.new(24, 40))
+          end)}
+        end)
         |> Map.put(:capabilities, %Capabilities{frontend_type: :native_gui})
-        |> EditorState.add_buffer(source_buf)
-        |> EditorState.add_buffer(diff_buf)
-        |> EditorState.register_diff_view(diff_buf, %{
-          source_buf: source_buf,
-          git_root: git_root,
-          rel_path: rel_path,
-          staged: false,
-          line_metadata: diff_result.line_metadata,
-          hunk_lines: diff_result.hunk_lines,
-          view_mode: :side_by_side,
-          pane_width: 20
-        })
+        |> MingaEditor.Handlers.BufferRegistry.add_buffer(source_buf)
+        |> MingaEditor.Handlers.BufferRegistry.add_buffer(diff_buf)
+        |> then(fn state ->
+          %{
+            state
+            | git:
+                MingaEditor.State.Git.register_diff_view(state.git, diff_buf, %{
+                  source_buf: source_buf,
+                  git_root: git_root,
+                  rel_path: rel_path,
+                  staged: false,
+                  line_metadata: diff_result.line_metadata,
+                  hunk_lines: diff_result.hunk_lines,
+                  view_mode: :side_by_side,
+                  pane_width: 20
+                })
+          }
+        end)
 
       state = GitCommands.execute(state, :git_stage_hunk)
 
       assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) == "Hunk 1/1 staged"
-      assert state.diff_views[diff_buf].view_mode == :side_by_side
+      assert state.git.diff_views[diff_buf].view_mode == :side_by_side
     end
 
     test "revert hunk from side-by-side diff preserves the side-by-side layout" do
@@ -313,25 +341,35 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
 
       state =
         build_state()
-        |> EditorState.set_viewport(Viewport.new(24, 40))
+        |> then(fn state ->
+          %{state | workspace: then(state.workspace, fn workspace ->
+            MingaEditor.Session.State.set_viewport(workspace, Viewport.new(24, 40))
+          end)}
+        end)
         |> Map.put(:capabilities, %Capabilities{frontend_type: :native_gui})
-        |> EditorState.add_buffer(source_buf)
-        |> EditorState.add_buffer(diff_buf)
-        |> EditorState.register_diff_view(diff_buf, %{
-          source_buf: source_buf,
-          git_root: git_root,
-          rel_path: rel_path,
-          staged: false,
-          line_metadata: diff_result.line_metadata,
-          hunk_lines: diff_result.hunk_lines,
-          view_mode: :side_by_side,
-          pane_width: 20
-        })
+        |> MingaEditor.Handlers.BufferRegistry.add_buffer(source_buf)
+        |> MingaEditor.Handlers.BufferRegistry.add_buffer(diff_buf)
+        |> then(fn state ->
+          %{
+            state
+            | git:
+                MingaEditor.State.Git.register_diff_view(state.git, diff_buf, %{
+                  source_buf: source_buf,
+                  git_root: git_root,
+                  rel_path: rel_path,
+                  staged: false,
+                  line_metadata: diff_result.line_metadata,
+                  hunk_lines: diff_result.hunk_lines,
+                  view_mode: :side_by_side,
+                  pane_width: 20
+                })
+          }
+        end)
 
       state = GitCommands.execute(state, :git_revert_hunk)
 
       assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) == "Hunk 1/1 reverted"
-      assert state.diff_views[diff_buf].view_mode == :side_by_side
+      assert state.git.diff_views[diff_buf].view_mode == :side_by_side
       assert buffer_content(source_buf) == base
     end
 
@@ -350,20 +388,30 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
 
       state =
         build_state()
-        |> EditorState.set_viewport(Viewport.new(24, 40))
+        |> then(fn state ->
+          %{state | workspace: then(state.workspace, fn workspace ->
+            MingaEditor.Session.State.set_viewport(workspace, Viewport.new(24, 40))
+          end)}
+        end)
         |> Map.put(:capabilities, %Capabilities{frontend_type: :native_gui})
-        |> EditorState.add_buffer(source_buf)
-        |> EditorState.add_buffer(diff_buf)
-        |> EditorState.register_diff_view(diff_buf, %{
-          source_buf: source_buf,
-          git_root: git_root,
-          rel_path: rel_path,
-          staged: false,
-          line_metadata: diff_result.line_metadata,
-          hunk_lines: diff_result.hunk_lines,
-          view_mode: :unified,
-          pane_width: 20
-        })
+        |> MingaEditor.Handlers.BufferRegistry.add_buffer(source_buf)
+        |> MingaEditor.Handlers.BufferRegistry.add_buffer(diff_buf)
+        |> then(fn state ->
+          %{
+            state
+            | git:
+                MingaEditor.State.Git.register_diff_view(state.git, diff_buf, %{
+                  source_buf: source_buf,
+                  git_root: git_root,
+                  rel_path: rel_path,
+                  staged: false,
+                  line_metadata: diff_result.line_metadata,
+                  hunk_lines: diff_result.hunk_lines,
+                  view_mode: :unified,
+                  pane_width: 20
+                })
+          }
+        end)
 
       state = GitCommands.execute(state, :git_diff_toggle_layout)
 
@@ -378,7 +426,7 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
                {{0, 29}, {0, 32}}
              ]
 
-      assert state.diff_views[diff_buf].view_mode == :side_by_side
+      assert state.git.diff_views[diff_buf].view_mode == :side_by_side
     end
 
     test "stage hunk from diff view refreshes stale views instead of staging by index" do
@@ -405,16 +453,22 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
 
       state =
         build_state()
-        |> EditorState.add_buffer(source_buf)
-        |> EditorState.add_buffer(diff_buf)
-        |> EditorState.register_diff_view(diff_buf, %{
-          source_buf: source_buf,
-          git_root: git_root,
-          rel_path: rel_path,
-          staged: false,
-          line_metadata: diff_result.line_metadata,
-          hunk_lines: diff_result.hunk_lines
-        })
+        |> MingaEditor.Handlers.BufferRegistry.add_buffer(source_buf)
+        |> MingaEditor.Handlers.BufferRegistry.add_buffer(diff_buf)
+        |> then(fn state ->
+          %{
+            state
+            | git:
+                MingaEditor.State.Git.register_diff_view(state.git, diff_buf, %{
+                  source_buf: source_buf,
+                  git_root: git_root,
+                  rel_path: rel_path,
+                  staged: false,
+                  line_metadata: diff_result.line_metadata,
+                  hunk_lines: diff_result.hunk_lines
+                })
+          }
+        end)
 
       state = GitCommands.execute(state, :git_stage_hunk)
 
@@ -447,16 +501,22 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
 
       state =
         build_state()
-        |> EditorState.add_buffer(source_buf)
-        |> EditorState.add_buffer(diff_buf)
-        |> EditorState.register_diff_view(diff_buf, %{
-          source_buf: source_buf,
-          git_root: git_root,
-          rel_path: rel_path,
-          staged: true,
-          line_metadata: diff_result.line_metadata,
-          hunk_lines: diff_result.hunk_lines
-        })
+        |> MingaEditor.Handlers.BufferRegistry.add_buffer(source_buf)
+        |> MingaEditor.Handlers.BufferRegistry.add_buffer(diff_buf)
+        |> then(fn state ->
+          %{
+            state
+            | git:
+                MingaEditor.State.Git.register_diff_view(state.git, diff_buf, %{
+                  source_buf: source_buf,
+                  git_root: git_root,
+                  rel_path: rel_path,
+                  staged: true,
+                  line_metadata: diff_result.line_metadata,
+                  hunk_lines: diff_result.hunk_lines
+                })
+          }
+        end)
 
       state = GitCommands.execute(state, :git_revert_hunk)
 
@@ -482,23 +542,29 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
       state =
         build_state()
         |> Map.put(:capabilities, %MingaEditor.Frontend.Capabilities{frontend_type: :native_gui})
-        |> EditorState.add_buffer(source_buf)
-        |> EditorState.add_buffer(diff_buf)
-        |> EditorState.register_diff_view(diff_buf, %{
-          source_buf: source_buf,
-          git_root: git_root,
-          rel_path: rel_path,
-          staged: false,
-          line_metadata: diff_result.line_metadata,
-          hunk_lines: diff_result.hunk_lines,
-          view_mode: :unified,
-          pane_width: 20
-        })
+        |> MingaEditor.Handlers.BufferRegistry.add_buffer(source_buf)
+        |> MingaEditor.Handlers.BufferRegistry.add_buffer(diff_buf)
+        |> then(fn state ->
+          %{
+            state
+            | git:
+                MingaEditor.State.Git.register_diff_view(state.git, diff_buf, %{
+                  source_buf: source_buf,
+                  git_root: git_root,
+                  rel_path: rel_path,
+                  staged: false,
+                  line_metadata: diff_result.line_metadata,
+                  hunk_lines: diff_result.hunk_lines,
+                  view_mode: :unified,
+                  pane_width: 20
+                })
+          }
+        end)
 
       state = GitCommands.execute(state, :git_diff_toggle_layout)
 
       assert buffer_content(diff_buf) =~ " │ "
-      assert state.diff_views[diff_buf].view_mode == :side_by_side
+      assert state.git.diff_views[diff_buf].view_mode == :side_by_side
 
       assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) ==
                "Diff layout: side-by-side"
@@ -531,15 +597,21 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
 
       state =
         build_state()
-        |> EditorState.add_buffer(diff_buf)
-        |> EditorState.register_diff_view(diff_buf, %{
-          source_buf: source_buf,
-          git_root: git_root,
-          rel_path: rel_path,
-          staged: false,
-          line_metadata: [],
-          hunk_lines: []
-        })
+        |> MingaEditor.Handlers.BufferRegistry.add_buffer(diff_buf)
+        |> then(fn state ->
+          %{
+            state
+            | git:
+                MingaEditor.State.Git.register_diff_view(state.git, diff_buf, %{
+                  source_buf: source_buf,
+                  git_root: git_root,
+                  rel_path: rel_path,
+                  staged: false,
+                  line_metadata: [],
+                  hunk_lines: []
+                })
+          }
+        end)
 
       state = GitCommands.execute(state, :git_diff_toggle_staged)
       active_buf = state.workspace.buffers.active
@@ -547,13 +619,13 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
       assert active_buf != diff_buf
       assert buffer_content(active_buf) =~ "old contents"
       refute buffer_content(active_buf) =~ "No changes"
-      assert state.diff_views[active_buf].staged == true
+      assert state.git.diff_views[active_buf].staged == true
     end
   end
 
   defp build_state do
     %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)}
     }
   end

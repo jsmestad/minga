@@ -19,6 +19,7 @@ defmodule MingaEditor.Frontend.Emit.SurfaceLayoutEmitTest do
   alias MingaEditor.Frontend.Emit
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.HoverPopup
+  alias MingaEditor.Layout
   alias MingaEditor.Layout.SurfaceRegistry
   alias MingaEditor.Layout.SurfaceRegistry.Placement
   alias MingaEditor.SignatureHelp
@@ -80,7 +81,16 @@ defmodule MingaEditor.Frontend.Emit.SurfaceLayoutEmitTest do
     |> freeze_focus_tree()
   end
 
-  defp freeze_focus_tree(state), do: %{state | focus_tree: FocusTree.from_state(state)}
+  defp freeze_focus_tree(state) do
+    render =
+      MingaEditor.State.Render.cache_layout(
+        state.render,
+        Layout.compute(state),
+        FocusTree.from_state(state)
+      )
+
+    %{state | render: render}
+  end
 
   defp surface_layout_command(commands) do
     Enum.find(commands, &match?(<<@op_surface_layout, _::binary>>, &1))

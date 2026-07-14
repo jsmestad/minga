@@ -1,39 +1,29 @@
 defmodule MingaEditor.State do
   @moduledoc """
-  Internal state for the Editor GenServer.
+  Narrow root state for the single Editor GenServer.
 
-  ## Field categories
+  The root stores 16 cohesive owner values. Per-tab editing context lives in `workspace`; active shell identity and stashed implementation state live in `shell_runtime`; focused global values own frontend, render, parser, agent connection, interaction, extension surfaces, buffer lifecycle, Git, session, feedback, LSP, remote, and appearance state. `effect_scheduler` is the process handle for bounded resource work.
 
-  EditorState fields fall into three categories:
+  Leaf and aggregate transitions belong to those owner modules. This module retains only atomic operations that coordinate multiple top-level owners, including renderer receipt integration, theme and parser synchronization, frontend render reset, buffer lifecycle changes, tab snapshot and restore, and extension feature cleanup. It is not a forwarding facade for leaf setters or generic mappers.
 
-  **Workspace fields** live in `state.workspace` (`MingaEditor.Session.State`)
-  and are saved/restored when switching tabs. Each tab carries a snapshot
-  of the workspace so switching tabs restores the full editing context.
-
-  **Shell runtime** lives in `state.shell_runtime` and owns the resolved active entry, shell-specific presentation state, and exact-identity state stash. See `MingaEditor.Shell.Runtime`.
-
-  **Global fields** are shared across all tabs and never snapshotted:
-  `port_manager`, `parser_manager`, `highlighting`, `injection_ranges`, `theme`, `render_correlation`, `focus_stack`, `lsp`, and `capabilities`.
-
-  ## Composed sub-structs
-
-  * `MingaEditor.Session.State`           — per-tab editing context (buffers, windows, vim, etc.)
-  * `MingaEditor.Shell.Traditional.State` — default presentation aggregate with focused notice, flash, toast, modal, hover, signature-help, and which-key owners
-  * `MingaEditor.State.WhichKey` — which-key popup node, timer, visibility
-  * `MingaEditor.State.Registers`    — named registers and active register selection
-  * `MingaEditor.State.Highlighting` — live per-buffer highlight presentation caches
+  State decomposition does not add processes. Ordered input and every root transition still pass through the one `MingaEditor` mailbox. See `docs/adr/0002-editor-state-transitions-have-explicit-owners.md` for the complete ownership ledger.
   """
 
-  alias MingaAgent.Session, as: AgentSession
   alias MingaEditor.Agent.UIState
   alias MingaEditor.FeatureState
-  alias Minga.Buffer
 
   alias MingaEditor.BottomPanel
-  alias MingaEditor.KeystrokeHistory
-  alias MingaEditor.FileTree.Feature, as: FileTreeFeature
   alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.State.AgentAccess
+  alias MingaEditor.State.AgentConnection
+  alias MingaEditor.State.Appearance
+  alias MingaEditor.State.BufferLifecycle
+  alias MingaEditor.State.ExtensionSurfaces
+  alias MingaEditor.State.Feedback
+  alias MingaEditor.State.Frontend, as: FrontendState
+  alias MingaEditor.State.Git, as: GitState
+  alias MingaEditor.State.Interaction
+  alias MingaEditor.State.Parser, as: ParserState
+  alias MingaEditor.State.Render, as: RenderState
   alias MingaEditor.State.Dired, as: DiredState
   alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.Shell.Identity, as: ShellIdentity
@@ -47,7 +37,6 @@ defmodule MingaEditor.State do
   alias MingaEditor.State.OperationFeedback
   alias MingaEditor.State.Remote
   alias MingaEditor.State.RenderCorrelation
-  alias MingaEditor.State.ResourcePressure
   alias MingaEditor.State.Search
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
@@ -58,14 +47,9 @@ defmodule MingaEditor.State do
   alias MingaEditor.VimState
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
-  alias MingaEditor.Frontend.Capabilities
-  alias Minga.Log
-  alias Minga.Mode
   alias Minga.Project.FileRef
   alias Minga.Project.FileTree
 
-  alias MingaEditor.UI.Notification
-  alias MingaEditor.UI.NotificationCenter
   alias MingaEditor.UI.Panel.MessageStore
   alias MingaEditor.UI.Theme
   alias MingaEditor.Session.State, as: SessionState
@@ -89,75 +73,29 @@ defmodule MingaEditor.State do
   @typedoc "Event bus registry used by this editor instance."
   @type events_registry :: Minga.Events.registry()
 
-  @default_keymap_server Minga.Keymap.default_server()
-  @default_options_server Minga.Config.Options.default_server()
-  @default_events_registry Minga.Events.default_registry()
-
   alias MingaEditor.Shell.Traditional.ClickRegions
   alias MingaEditor.Shell.Traditional.State, as: ShellState
 
-  @enforce_keys [:port_manager, :workspace]
-  defstruct backend: :headless,
-            rendering: :enabled,
-            port_manager: nil,
-            parser_manager: Minga.Parser.Manager,
-            renderer: nil,
-            agent_ingest: nil,
-            agent_provider_module: nil,
-            agent_provider_opts: [],
-            keymap_server: @default_keymap_server,
-            options_server: @default_options_server,
-            events_registry: @default_events_registry,
-            sidebar_registry: MingaEditor.Extension.Sidebar.default_table(),
-            agent_semantic_ui_registry: MingaEditor.Agent.SemanticUI.Registry.default_table(),
-            workspace: nil,
-            highlighting: %Highlighting{},
-            injection_ranges: %{},
-            terminal_viewport: Viewport.new(24, 80),
-            editing_model: :vim,
+  @enforce_keys [:workspace]
+  defstruct workspace: nil,
             shell_runtime: ShellRuntime.new(ShellRuntime.default_entry(), %ShellState{}),
-            theme: MingaEditor.UI.Theme.Fallback.theme(),
-            render_correlation: RenderCorrelation.new(),
-            message_store: %MessageStore{},
-            notifications: NotificationCenter.new(),
-            git_remote_op: nil,
-            effect_scheduler: nil,
-            operation_feedback: OperationFeedback.new(),
-            lsp: %LSPState{},
-            parser_status: :available,
-            focus_stack: [],
-            capabilities: %Capabilities{},
-            layout: nil,
-            focus_tree: nil,
-            last_cursor_line: nil,
-            last_test_command: nil,
-            pending_quit: nil,
-            buffer_monitors: %{},
-            diff_views: %{},
-            face_override_registries: %{},
+            frontend: %FrontendState{},
+            render: %RenderState{},
+            parser: %ParserState{},
+            agent_connection: %AgentConnection{},
+            interaction: %Interaction{},
+            extension_surfaces: %ExtensionSurfaces{},
+            buffer_lifecycle: %BufferLifecycle{},
+            git: %GitState{},
             session: %EditorSessionState{},
-            buffer_add_context: :open,
+            effect_scheduler: nil,
+            feedback: %Feedback{},
+            lsp: %LSPState{},
             remote: %Remote{},
-            resource_pressure: ResourcePressure.new(),
-            keystroke_history: KeystrokeHistory.new(),
-            git_commit_gen_ref: nil,
-            font_size_override: nil,
-            # Latest frontend-originated input correlation sequence (ticket #2215).
-            # Echoed back on commit_frame so the frontend can resolve a
-            # keystroke-to-write latency sample. 0 means "no correlation".
-            last_input_seq: 0,
-            # Cached native settings snapshot emitted in-frame as the config_state
-            # semantic model (#2119). Rebuilt only when a settings option changes
-            # (see MingaEditor.refresh_gui_config_state/1), so the render pipeline
-            # reads it for free each frame. nil until the first GUI frontend attaches.
-            gui_config_state: nil,
-            # Latched once the first `ready` runs the one-time startup work, so a
-            # renderer reconnect (dev hot-reload) re-runs the idempotent ready path
-            # without re-triggering it. See `Startup.ensure_session_started/1`.
-            session_started?: false
+            appearance: %Appearance{}
 
-  @type backend :: :tui | :gui | :native_gui | :headless
-  @type rendering_policy :: :enabled | :disabled
+  @type backend :: FrontendState.backend()
+  @type rendering_policy :: FrontendState.rendering_policy()
 
   @type shell_state :: MingaEditor.Shell.shell_state()
 
@@ -168,211 +106,32 @@ defmodule MingaEditor.State do
   @type tab_switch_result :: :unchanged | {:switched, Tab.t()}
 
   @type t :: %__MODULE__{
-          backend: backend(),
-          rendering: rendering_policy(),
-          port_manager: GenServer.server() | nil,
-          parser_manager: GenServer.server(),
-          renderer: pid() | nil,
-          agent_ingest: pid() | nil,
-          agent_provider_module: module() | nil,
-          agent_provider_opts: keyword(),
-          keymap_server: keymap_server(),
-          options_server: options_server(),
-          events_registry: events_registry(),
-          sidebar_registry: MingaEditor.Extension.Sidebar.table(),
-          agent_semantic_ui_registry: MingaEditor.Agent.SemanticUI.Registry.table(),
           workspace: SessionState.t(),
-          highlighting: Highlighting.t(),
-          injection_ranges: %{pid() => [Minga.Language.Highlight.InjectionRange.t()]},
-          terminal_viewport: Viewport.t(),
-          editing_model: :vim | :cua,
           shell_runtime: ShellRuntime.t(),
-          theme: Theme.t(),
-          render_correlation: RenderCorrelation.t(),
-          message_store: MessageStore.t(),
-          notifications: NotificationCenter.t(),
-          git_remote_op: git_remote_op(),
-          effect_scheduler: GenServer.server() | nil,
-          operation_feedback: OperationFeedback.t(),
-          lsp: LSPState.t(),
-          parser_status: MingaEditor.Shell.Traditional.Modeline.parser_status(),
-          focus_stack: [module()],
-          capabilities: Capabilities.t(),
-          layout: MingaEditor.Layout.t() | nil,
-          focus_tree: MingaEditor.FocusTree.t() | nil,
-          last_cursor_line: non_neg_integer() | nil,
-          last_test_command: {String.t(), String.t()} | nil,
-          pending_quit: :quit | :quit_all | nil,
-          buffer_monitors: %{pid() => reference()},
-          diff_views: %{pid() => diff_view_info()},
-          face_override_registries: %{pid() => MingaEditor.UI.Face.Registry.t()},
-          buffer_add_context: MingaEditor.Shell.buffer_add_context(),
-          remote: Remote.t(),
-          resource_pressure: ResourcePressure.t(),
+          frontend: FrontendState.t(),
+          render: RenderState.t(),
+          parser: ParserState.t(),
+          agent_connection: AgentConnection.t(),
+          interaction: Interaction.t(),
+          extension_surfaces: ExtensionSurfaces.t(),
+          buffer_lifecycle: BufferLifecycle.t(),
+          git: GitState.t(),
           session: EditorSessionState.t(),
-          keystroke_history: KeystrokeHistory.t(),
-          git_commit_gen_ref: reference() | nil,
-          font_size_override: pos_integer() | nil,
-          last_input_seq: non_neg_integer(),
-          gui_config_state: Minga.RenderModel.UI.ConfigState.t() | nil,
-          session_started?: boolean()
+          effect_scheduler: GenServer.server() | nil,
+          feedback: Feedback.t(),
+          lsp: LSPState.t(),
+          remote: Remote.t(),
+          appearance: Appearance.t()
         }
 
-  @doc "Returns whether this editor instance emits rendered frames."
-  @spec rendering_enabled?(t()) :: boolean()
-  def rendering_enabled?(%__MODULE__{rendering: :enabled}), do: true
-  def rendering_enabled?(%__MODULE__{rendering: :disabled}), do: false
-
-  @doc "Returns the cached native settings snapshot emitted in-frame (#2119)."
-  @spec gui_config_state(t()) :: Minga.RenderModel.UI.ConfigState.t() | nil
-  def gui_config_state(%__MODULE__{gui_config_state: snapshot}), do: snapshot
-
-  @doc "Stores the cached native settings snapshot emitted in-frame (#2119)."
-  @spec put_gui_config_state(t(), Minga.RenderModel.UI.ConfigState.t() | nil) :: t()
-  def put_gui_config_state(%__MODULE__{} = state, snapshot),
-    do: %{state | gui_config_state: snapshot}
-
-  @doc "Returns the active sidebar registry table for this state."
-  @spec sidebar_registry(t() | map()) :: MingaEditor.Extension.Sidebar.table()
-  def sidebar_registry(state), do: MingaEditor.Extension.Sidebar.table_for(state)
-
-  @doc "Stores the semantic agent UI registry table for this editor state."
-  @spec put_agent_semantic_ui_registry(t(), MingaEditor.Agent.SemanticUI.Registry.table()) :: t()
-  def put_agent_semantic_ui_registry(%__MODULE__{} = state, table) when is_atom(table) do
-    %{state | agent_semantic_ui_registry: table}
-  end
-
-  @spec set_renderer(t(), pid() | nil) :: t()
-  def set_renderer(%__MODULE__{} = state, pid) when is_pid(pid) or is_nil(pid),
-    do: %{state | renderer: pid}
-
-  @doc "Stores the agent stream-ingest coalescer pid (see `MingaEditor.Agent.Ingest`)."
-  @spec set_agent_ingest(t(), pid() | nil) :: t()
-  def set_agent_ingest(%__MODULE__{} = state, pid) when is_pid(pid) or is_nil(pid),
-    do: %{state | agent_ingest: pid}
-
-  @doc "Returns the agent stream-ingest coalescer pid, or nil if not started."
-  @spec agent_ingest(t()) :: pid() | nil
-  def agent_ingest(%__MODULE__{agent_ingest: pid}), do: pid
-
-  @doc "Updates the current frontend-reported resource pressure."
-  @spec set_resource_pressure(
-          t(),
-          boolean(),
-          ResourcePressure.thermal_state()
-        ) :: t()
-  def set_resource_pressure(%__MODULE__{} = state, low_power?, thermal_state)
-      when is_boolean(low_power?) do
-    %{
-      state
-      | resource_pressure:
-          ResourcePressure.update(state.resource_pressure, low_power?, thermal_state)
-    }
-  end
-
-  @doc "Adds or updates a GUI notification."
-  @spec upsert_notification(t(), Notification.t()) :: t()
-  def upsert_notification(%__MODULE__{} = state, %Notification{} = notification) do
-    %{state | notifications: NotificationCenter.upsert(state.notifications, notification)}
-  end
-
-  @doc "Dismisses a GUI notification by id."
-  @spec dismiss_notification(t(), String.t()) :: t()
-  def dismiss_notification(%__MODULE__{} = state, id) when is_binary(id) do
-    %{state | notifications: NotificationCenter.dismiss(state.notifications, id)}
-  end
-
-  @doc "Dismisses a GUI notification only when the auto-dismiss ref still matches."
-  @spec dismiss_notification(t(), String.t(), reference()) :: t()
-  def dismiss_notification(%__MODULE__{} = state, id, dismiss_ref) when is_binary(id) do
-    %{state | notifications: NotificationCenter.dismiss(state.notifications, id, dismiss_ref)}
-  end
-
-  @doc "Looks up an inline notification action."
-  @spec notification_action(t(), String.t(), String.t()) :: Notification.Action.t() | nil
-  def notification_action(%__MODULE__{} = state, notification_id, action_id) do
-    NotificationCenter.action(state.notifications, notification_id, action_id)
-  end
-
-  @doc "Returns the keymap server used for scope and binding lookups."
-  @spec keymap_server(t()) :: keymap_server()
-  def keymap_server(%__MODULE__{keymap_server: keymap_server}), do: keymap_server
-
-  @doc "Returns the keymap context keyword list passed to scoped key resolution."
-  @spec keymap_context(t()) :: [{:keymap_server, keymap_server()}]
-  def keymap_context(%__MODULE__{} = state),
-    do: [keymap_server: keymap_server(state)]
-
-  @doc "Returns the options server used for typed option lookups."
-  @spec options_server(t()) :: options_server()
-  def options_server(%__MODULE__{options_server: options_server}), do: options_server
-
-  @doc "Returns the event bus registry used by this editor instance."
-  @spec events_registry(t()) :: events_registry()
-  def events_registry(%__MODULE__{events_registry: events_registry}), do: events_registry
-
   # ── Workspace helpers ──────────────────────────────────────────────────────
-
-  @doc "Applies a function to the workspace and returns the updated state."
-  @spec update_workspace(t(), (SessionState.t() -> SessionState.t())) :: t()
-  def update_workspace(%__MODULE__{workspace: ws} = state, fun) when is_function(fun, 1) do
-    %{state | workspace: fun.(ws)}
-  end
-
-  @doc "Replaces the active workspace."
-  @spec set_workspace(t(), SessionState.t()) :: t()
-  def set_workspace(%__MODULE__{} = state, %SessionState{} = workspace) do
-    workspace |> SessionState.file_tree_state() |> sync_file_tree_sidebar(sidebar_registry(state))
-    %{state | workspace: workspace}
-  end
-
-  @spec sync_file_tree_sidebar(FileTreeState.t(), MingaEditor.Extension.Sidebar.table()) :: :ok
-  defp sync_file_tree_sidebar(%FileTreeState{} = file_tree, sidebar_registry) do
-    case FileTreeFeature.sync_sidebar(file_tree, sidebar_registry) do
-      :ok -> :ok
-      {:error, reason} -> Log.warning(:editor, "FileTree sidebar sync failed: #{inspect(reason)}")
-    end
-  end
-
-  @doc "Returns source-owned feature state from the active workspace, or nil when inactive."
-  @spec get_feature_state(t(), FeatureState.source(), FeatureState.feature_id()) :: term() | nil
-  def get_feature_state(%__MODULE__{workspace: workspace}, source, feature_id) do
-    SessionState.get_feature_state(workspace, source, feature_id)
-  end
-
-  @doc "Stores source-owned feature state on the active workspace."
-  @spec put_feature_state(t(), FeatureState.source(), FeatureState.feature_id(), term()) :: t()
-  def put_feature_state(%__MODULE__{} = state, source, feature_id, value) do
-    update_workspace(state, &SessionState.put_feature_state(&1, source, feature_id, value))
-  end
-
-  @doc "Updates source-owned feature state on the active workspace."
-  @spec update_feature_state(
-          t(),
-          FeatureState.source(),
-          FeatureState.feature_id(),
-          term(),
-          (term() -> term())
-        ) :: t()
-  def update_feature_state(%__MODULE__{} = state, source, feature_id, default, fun)
-      when is_function(fun, 1) do
-    update_workspace(
-      state,
-      &SessionState.update_feature_state(&1, source, feature_id, default, fun)
-    )
-  end
-
-  @doc "Drops one source-owned feature state entry from the active workspace."
-  @spec drop_feature_state(t(), FeatureState.source(), FeatureState.feature_id()) :: t()
-  def drop_feature_state(%__MODULE__{} = state, source, feature_id) do
-    update_workspace(state, &SessionState.drop_feature_state(&1, source, feature_id))
-  end
 
   @doc "Drops all feature state owned by a source from live and snapshotted workspaces."
   @spec drop_feature_state_source(t(), FeatureState.source()) :: t()
   def drop_feature_state_source(%__MODULE__{} = state, source) do
+    state = %{state | workspace: SessionState.drop_feature_state_source(state.workspace, source)}
+
     state
-    |> update_workspace(&SessionState.drop_feature_state_source(&1, source))
     |> drop_tab_context_feature_state_source(source)
     |> drop_shell_feature_state_source(source)
   end
@@ -380,346 +139,34 @@ defmodule MingaEditor.State do
   @doc "Drops extension-owned feature state from live and snapshotted workspaces."
   @spec drop_extension_feature_state_sources(t()) :: t()
   def drop_extension_feature_state_sources(%__MODULE__{} = state) do
+    state = %{
+      state
+      | workspace: SessionState.drop_extension_feature_state_sources(state.workspace)
+    }
+
     state
-    |> update_workspace(&SessionState.drop_extension_feature_state_sources/1)
     |> drop_tab_context_extension_feature_state_sources()
     |> drop_shell_extension_feature_state_sources()
-  end
-
-  @doc "Sets the active workspace viewport."
-  @spec set_viewport(t(), Viewport.t()) :: t()
-  def set_viewport(%__MODULE__{} = state, %Viewport{} = viewport) do
-    update_workspace(state, &SessionState.set_viewport(&1, viewport))
-  end
-
-  @doc "Sets the active workspace keymap scope."
-  @spec set_keymap_scope(t(), Minga.Keymap.Scope.scope_name()) :: t()
-  def set_keymap_scope(%__MODULE__{} = state, scope) do
-    update_workspace(state, &SessionState.set_keymap_scope(&1, scope))
-  end
-
-  @doc "Returns the active workspace FileTree feature state."
-  @spec file_tree_state(t() | map()) :: FileTreeState.t()
-  def file_tree_state(%__MODULE__{workspace: workspace}) do
-    SessionState.file_tree_state(workspace)
-  end
-
-  def file_tree_state(%{workspace: %SessionState{} = workspace}) do
-    SessionState.file_tree_state(workspace)
-  end
-
-  def file_tree_state(%{__struct__: MingaEditor.RenderPipeline.Input} = input) do
-    MingaEditor.RenderPipeline.Input.file_tree_state(input)
-  end
-
-  def file_tree_state(_state), do: %FileTreeState{}
-
-  @doc "Replaces the active workspace FileTree feature state."
-  @spec set_file_tree(t(), FileTreeState.t()) :: t()
-  def set_file_tree(%__MODULE__{} = state, %FileTreeState{} = file_tree) do
-    sync_file_tree_sidebar(file_tree, sidebar_registry(state))
-    update_workspace(state, &SessionState.set_file_tree(&1, file_tree))
-  end
-
-  @doc "Updates the active workspace FileTree feature state."
-  @spec update_file_tree(t(), (FileTreeState.t() -> FileTreeState.t())) :: t()
-  def update_file_tree(%__MODULE__{} = state, fun) when is_function(fun, 1) do
-    set_file_tree(state, fun.(file_tree_state(state)))
-  end
-
-  @doc "Drops the active workspace FileTree feature state."
-  @spec drop_file_tree(t()) :: t()
-  def drop_file_tree(%__MODULE__{} = state) do
-    sync_file_tree_sidebar(%FileTreeState{}, sidebar_registry(state))
-    update_workspace(state, &SessionState.drop_file_tree/1)
-  end
-
-  @doc "Replaces the active workspace buffer state."
-  @spec set_buffers(t(), Buffers.t()) :: t()
-  def set_buffers(%__MODULE__{} = state, %Buffers{} = buffers) do
-    update_workspace(state, &SessionState.set_buffers(&1, buffers))
-  end
-
-  @doc "Updates the active workspace buffer state."
-  @spec update_buffers(t(), (Buffers.t() -> Buffers.t())) :: t()
-  def update_buffers(%__MODULE__{} = state, fun) when is_function(fun, 1) do
-    update_workspace(state, fn workspace ->
-      SessionState.set_buffers(workspace, fun.(workspace.buffers))
-    end)
-  end
-
-  @doc "Replaces the active workspace window state."
-  @spec set_windows(t(), Windows.t()) :: t()
-  def set_windows(%__MODULE__{} = state, %Windows{} = windows) do
-    update_workspace(state, &SessionState.set_windows(&1, windows))
-  end
-
-  @doc "Updates the active workspace window state."
-  @spec update_windows(t(), (Windows.t() -> Windows.t())) :: t()
-  def update_windows(%__MODULE__{} = state, fun) when is_function(fun, 1) do
-    update_workspace(state, fn workspace ->
-      SessionState.set_windows(workspace, fun.(workspace.windows))
-    end)
-  end
-
-  @doc "Replaces the active workspace dired state."
-  @spec set_dired(t(), DiredState.t()) :: t()
-  def set_dired(%__MODULE__{} = state, %DiredState{} = dired) do
-    update_workspace(state, &SessionState.set_dired(&1, dired))
-  end
-
-  @doc "Updates the active workspace dired state."
-  @spec update_dired(t(), (DiredState.t() -> DiredState.t())) :: t()
-  def update_dired(%__MODULE__{} = state, fun) when is_function(fun, 1) do
-    update_workspace(state, fn workspace ->
-      SessionState.set_dired(workspace, fun.(workspace.dired))
-    end)
-  end
-
-  @doc "Replaces the active workspace mouse state."
-  @spec set_mouse(t(), Mouse.t()) :: t()
-  def set_mouse(%__MODULE__{} = state, %Mouse{} = mouse) do
-    update_workspace(state, &SessionState.set_mouse(&1, mouse))
-  end
-
-  @doc "Updates the active workspace mouse state."
-  @spec update_mouse(t(), (Mouse.t() -> Mouse.t())) :: t()
-  def update_mouse(%__MODULE__{} = state, fun) when is_function(fun, 1) do
-    update_workspace(state, fn workspace ->
-      SessionState.set_mouse(workspace, fun.(workspace.mouse))
-    end)
-  end
-
-  @doc "Replaces the active workspace search state."
-  @spec set_search(t(), Search.t()) :: t()
-  def set_search(%__MODULE__{} = state, %Search{} = search) do
-    update_workspace(state, &SessionState.set_search(&1, search))
-  end
-
-  @doc "Updates the active workspace search state."
-  @spec update_search(t(), (Search.t() -> Search.t())) :: t()
-  def update_search(%__MODULE__{} = state, fun) when is_function(fun, 1) do
-    update_workspace(state, fn workspace -> SessionState.update_search(workspace, fun) end)
-  end
-
-  @doc "Replaces the live syntax-highlight presentation caches."
-  @spec set_highlight(t(), Highlighting.t()) :: t()
-  def set_highlight(%__MODULE__{} = state, %Highlighting{} = highlighting) do
-    %{state | highlighting: highlighting}
-  end
-
-  @doc "Updates the live syntax-highlight presentation caches."
-  @spec update_highlight(t(), (Highlighting.t() -> Highlighting.t())) :: t()
-  def update_highlight(%__MODULE__{} = state, fun) when is_function(fun, 1) do
-    set_highlight(state, fun.(state.highlighting))
   end
 
   @doc """
   Switches the active editor theme and re-colors existing syntax highlights.
 
-  Sets `state.theme` and rebuilds each buffer's highlight `face_registry`
-  from the new theme so tree-sitter colors update immediately. Buffers with
-  a syntax override keep their custom palette.
+  The root owns this transition because appearance selection and parser-derived
+  face registries must change atomically for the next rendered frame.
   """
   @spec apply_theme(t(), Theme.t()) :: t()
   def apply_theme(%__MODULE__{} = state, %Theme{} = theme) do
-    state
-    |> Map.put(:theme, theme)
-    |> update_highlight(&Highlighting.retheme_all(&1, theme))
-  end
-
-  @doc "Replaces the active workspace editing state."
-  @spec set_editing(t(), VimState.t()) :: t()
-  def set_editing(%__MODULE__{} = state, %VimState{} = editing) do
-    update_workspace(state, &SessionState.set_editing(&1, editing))
-  end
-
-  @doc "Updates the active workspace editing state."
-  @spec update_editing(t(), (VimState.t() -> VimState.t())) :: t()
-  def update_editing(%__MODULE__{} = state, fun) when is_function(fun, 1) do
-    update_workspace(state, fn workspace -> SessionState.update_editing(workspace, fun) end)
-  end
-
-  @doc """
-  Replaces the current vim mode state without changing the mode.
-
-  Use this only for same-mode state updates where the replacement has the shape expected by the current mode. Use `transition_mode/3` when changing modes so `VimState` can keep `mode` and `mode_state` aligned.
-  """
-  @spec set_mode_state(t(), Mode.state()) :: t()
-  def set_mode_state(%__MODULE__{} = state, mode_state) do
-    update_editing(state, &VimState.set_mode_state(&1, mode_state))
-  end
-
-  @doc """
-  Updates the current vim mode state without changing the mode.
-
-  Use this only for same-mode state updates where the mapper preserves the state shape expected by the current mode. Use `transition_mode/3` when changing modes so `VimState` can keep `mode` and `mode_state` aligned.
-  """
-  @spec update_mode_state(t(), (Mode.state() -> Mode.state())) :: t()
-  def update_mode_state(%__MODULE__{} = state, fun) when is_function(fun, 1) do
-    update_editing(state, fn vim -> VimState.set_mode_state(vim, fun.(vim.mode_state)) end)
-  end
-
-  @doc "Replaces the vim register state."
-  @spec set_registers(t(), MingaEditor.State.Registers.t()) :: t()
-  def set_registers(%__MODULE__{} = state, %MingaEditor.State.Registers{} = registers) do
-    update_editing(state, &VimState.set_registers(&1, registers))
-  end
-
-  @doc "Replaces the vim marks map."
-  @spec set_marks(t(), VimState.marks()) :: t()
-  def set_marks(%__MODULE__{} = state, marks) when is_map(marks) do
-    update_editing(state, &VimState.set_marks(&1, marks))
-  end
-
-  @doc "Records the cursor position before a jump."
-  @spec set_last_jump_pos(t(), Buffer.position() | nil) :: t()
-  def set_last_jump_pos(%__MODULE__{} = state, pos) do
-    update_editing(state, &VimState.set_last_jump_pos(&1, pos))
-  end
-
-  @doc "Records the last find-char motion."
-  @spec set_last_find_char(t(), VimState.last_find_char()) :: t()
-  def set_last_find_char(%__MODULE__{} = state, find_char) do
-    update_editing(state, &VimState.set_last_find_char(&1, find_char))
-  end
-
-  @doc "Sets the desired screen column for vertical movement (Vim's curswant)."
-  @spec set_desired_col(t(), non_neg_integer() | nil) :: t()
-  def set_desired_col(%__MODULE__{} = state, col) do
-    update_editing(state, &VimState.set_desired_col(&1, col))
-  end
-
-  @doc "Replaces the vim macro recorder."
-  @spec set_macro_recorder(t(), MingaEditor.MacroRecorder.t()) :: t()
-  def set_macro_recorder(%__MODULE__{} = state, recorder) do
-    update_editing(state, &VimState.set_macro_recorder(&1, recorder))
-  end
-
-  @doc "Replaces the vim change recorder."
-  @spec set_change_recorder(t(), MingaEditor.ChangeRecorder.t()) :: t()
-  def set_change_recorder(%__MODULE__{} = state, recorder) do
-    update_editing(state, &VimState.set_change_recorder(&1, recorder))
-  end
-
-  @doc "Replaces the active workspace document highlights."
-  @spec set_document_highlights(t(), [document_highlight()] | nil) :: t()
-  def set_document_highlights(%__MODULE__{} = state, highlights) do
-    update_workspace(state, &SessionState.set_document_highlights(&1, highlights))
-  end
-
-  @doc "Replaces the transient Cmd/Ctrl-hover go-to-definition link range."
-  @spec set_cmd_hover_link(t(), cmd_hover_link()) :: t()
-  def set_cmd_hover_link(%__MODULE__{} = state, link) do
-    update_workspace(state, &SessionState.set_cmd_hover_link(&1, link))
-  end
-
-  @doc "Records the pointer cell the Cmd/Ctrl-hover link was last resolved at."
-  @spec set_cmd_hover_cell(t(), SessionState.cmd_hover_cell()) :: t()
-  def set_cmd_hover_cell(%__MODULE__{} = state, cell) do
-    update_workspace(state, &SessionState.set_cmd_hover_cell(&1, cell))
-  end
-
-  @doc "Clears the Cmd/Ctrl-hover link preview and its dedup cell."
-  @spec clear_cmd_hover_link(t()) :: t()
-  def clear_cmd_hover_link(%__MODULE__{} = state) do
-    update_workspace(state, &SessionState.clear_cmd_hover_link/1)
-  end
-
-  @doc "Replaces the active workspace LSP pending request map."
-  @spec set_lsp_pending(t(), %{reference() => atom() | tuple()}) :: t()
-  def set_lsp_pending(%__MODULE__{} = state, pending) when is_map(pending) do
-    update_workspace(state, &SessionState.set_lsp_pending(&1, pending))
-  end
-
-  @doc "Adds or replaces an active workspace LSP pending request."
-  @spec put_lsp_pending(t(), reference(), atom() | tuple()) :: t()
-  def put_lsp_pending(%__MODULE__{} = state, ref, kind) when is_reference(ref) do
-    update_workspace(state, fn workspace ->
-      SessionState.set_lsp_pending(workspace, Map.put(workspace.lsp_pending, ref, kind))
-    end)
-  end
-
-  @doc "Deletes an active workspace LSP pending request."
-  @spec delete_lsp_pending(t(), reference()) :: t()
-  def delete_lsp_pending(%__MODULE__{} = state, ref) when is_reference(ref) do
-    update_workspace(state, fn workspace ->
-      SessionState.set_lsp_pending(workspace, Map.delete(workspace.lsp_pending, ref))
-    end)
-  end
-
-  @doc "Replaces the active workspace agent UI state."
-  @spec set_agent_ui(t(), UIState.t()) :: t()
-  def set_agent_ui(%__MODULE__{} = state, %UIState{} = agent_ui) do
-    update_workspace(state, &SessionState.set_agent_ui(&1, agent_ui))
-  end
-
-  @doc "Replaces the live parser injection ranges map."
-  @spec set_injection_ranges(t(), %{pid() => [Minga.Language.Highlight.InjectionRange.t()]}) ::
-          t()
-  def set_injection_ranges(%__MODULE__{} = state, ranges) when is_map(ranges) do
-    %{state | injection_ranges: ranges}
-  end
-
-  @doc "Updates the live parser injection ranges map."
-  @spec update_injection_ranges(t(), (%{pid() => [Minga.Language.Highlight.InjectionRange.t()]} ->
-                                        %{pid() => [Minga.Language.Highlight.InjectionRange.t()]})) ::
-          t()
-  def update_injection_ranges(%__MODULE__{} = state, fun) when is_function(fun, 1) do
-    set_injection_ranges(state, fun.(state.injection_ranges))
-  end
-
-  @doc "Drops all parser-derived presentation caches for a buffer."
-  @spec drop_parser_presentation(t(), pid()) :: t()
-  def drop_parser_presentation(%__MODULE__{} = state, buffer_pid) when is_pid(buffer_pid) do
-    %{
-      state
-      | highlighting: Highlighting.remove_buffer(state.highlighting, buffer_pid),
-        injection_ranges: Map.delete(state.injection_ranges, buffer_pid)
-    }
+    appearance = Appearance.select_theme(state.appearance, theme)
+    highlighting = Highlighting.retheme_all(state.parser.highlighting, theme)
+    parser = ParserState.accept_highlighting(state.parser, highlighting)
+    %{state | appearance: appearance, parser: parser}
   end
 
   # ── Render pipeline write-back ─────────────────────────────────────────────
 
   @type render_receipt_result ::
           :applied | {:stale, RenderCorrelation.freshness_reason() | :shell_identity}
-
-  @doc "Returns whether the Editor already owns a scheduled render timer."
-  @spec render_scheduled?(t()) :: boolean()
-  def render_scheduled?(%__MODULE__{render_correlation: correlation}),
-    do: RenderCorrelation.scheduled?(correlation)
-
-  @doc "Stores one externally created render timer in the correlation owner."
-  @spec schedule_render_timer(t(), reference()) :: t()
-  def schedule_render_timer(%__MODULE__{} = state, timer) when is_reference(timer) do
-    {:scheduled, correlation} = RenderCorrelation.schedule(state.render_correlation, timer)
-    %{state | render_correlation: correlation}
-  end
-
-  @doc "Clears the active render timer after delivery or synchronous rendering."
-  @spec clear_render_timer(t()) :: t()
-  def clear_render_timer(%__MODULE__{} = state) do
-    %{state | render_correlation: RenderCorrelation.clear_timer(state.render_correlation)}
-  end
-
-  @doc "Marks the next completed frame as a required keyframe."
-  @spec request_render_keyframe(t()) :: t()
-  def request_render_keyframe(%__MODULE__{} = state) do
-    %{state | render_correlation: RenderCorrelation.request_keyframe(state.render_correlation)}
-  end
-
-  @doc "Marks a newly ready frontend for correlated keyframe recovery."
-  @spec frontend_render_ready(t()) :: t()
-  def frontend_render_ready(%__MODULE__{} = state) do
-    %{state | render_correlation: RenderCorrelation.frontend_ready(state.render_correlation)}
-  end
-
-  @doc "Advances editor-owned correlation before submitting a render intent."
-  @spec submit_render_intent(t()) :: {t(), pos_integer()}
-  def submit_render_intent(%__MODULE__{} = state) do
-    {correlation, revision} = RenderCorrelation.submit(state.render_correlation)
-    {%{state | render_correlation: correlation}, revision}
-  end
 
   @doc "Atomically integrates a synchronous focused renderer receipt."
   @spec integrate_synchronous_renderer_receipt(t(), MingaEditor.Renderer.RenderReceipt.t()) :: t()
@@ -729,7 +176,7 @@ defmodule MingaEditor.State do
       ) do
     correlation =
       RenderCorrelation.accept_synchronous_receipt(
-        state.render_correlation,
+        state.render.render_correlation,
         receipt.intent_revision,
         receipt.frame_seq,
         receipt.keyframe?
@@ -746,7 +193,7 @@ defmodule MingaEditor.State do
         %MingaEditor.Renderer.RenderReceipt{} = receipt
       ) do
     case RenderCorrelation.classify_receipt(
-           state.render_correlation,
+           state.render.render_correlation,
            receipt.intent_revision,
            receipt.frame_seq
          ) do
@@ -765,7 +212,7 @@ defmodule MingaEditor.State do
     if renderer_receipt_shell_current?(state, receipt) do
       correlation =
         RenderCorrelation.accept_receipt(
-          state.render_correlation,
+          state.render.render_correlation,
           receipt.intent_revision,
           receipt.frame_seq,
           receipt.keyframe?
@@ -786,14 +233,12 @@ defmodule MingaEditor.State do
     shell_runtime = merge_renderer_receipt(state.shell_runtime, receipt)
     workspace = apply_window_observations(state.workspace, receipt.window_observations)
 
-    %{
-      state
-      | layout: receipt.layout,
-        focus_tree: receipt.focus_tree,
-        shell_runtime: shell_runtime,
-        workspace: workspace,
-        render_correlation: correlation
-    }
+    render =
+      state.render
+      |> RenderState.accept_correlation(correlation)
+      |> RenderState.cache_layout(receipt.layout, receipt.focus_tree)
+
+    %{state | render: render, shell_runtime: shell_runtime, workspace: workspace}
   end
 
   @spec apply_window_observations(SessionState.t(), map()) :: SessionState.t()
@@ -806,23 +251,9 @@ defmodule MingaEditor.State do
          viewport: %Viewport{} = viewport
        }},
       acc ->
-        SessionState.update_window(acc, id, fn window ->
-          observe_renderer_window(window, buffer, viewport, version)
-        end)
+        SessionState.observe_window(acc, id, buffer, viewport, version)
     end)
   end
-
-  @spec observe_renderer_window(Window.t(), pid(), Viewport.t(), non_neg_integer()) :: Window.t()
-  defp observe_renderer_window(
-         %Window{buffer: buffer, render_cache: %{buffer_version: current_version}} = window,
-         buffer,
-         viewport,
-         version
-       )
-       when current_version <= version,
-       do: Window.observe_render(window, viewport, version)
-
-  defp observe_renderer_window(window, _buffer, _viewport, _version), do: window
 
   @spec renderer_receipt_shell_current?(t(), MingaEditor.Renderer.RenderReceipt.t()) :: boolean()
   defp renderer_receipt_shell_current?(%__MODULE__{} = state, receipt) do
@@ -843,10 +274,10 @@ defmodule MingaEditor.State do
       {%ShellIdentity{} = identity, %ClickRegions{} = regions} ->
         if receipt.shell_id == ShellRuntime.id(runtime) and
              ShellRuntime.matches_identity?(runtime, identity) do
-          ShellRuntime.update_traditional_state(
-            runtime,
-            &ShellState.install_click_regions(&1, regions)
-          )
+          shell_state =
+            runtime |> ShellRuntime.state() |> ShellState.install_click_regions(regions)
+
+          ShellRuntime.install_traditional_state(runtime, shell_state)
         else
           runtime
         end
@@ -856,50 +287,27 @@ defmodule MingaEditor.State do
     end
   end
 
-  @doc "Installs a pure shell Runtime transition into the Editor root."
-  @spec apply_shell_runtime_transition(t(), ShellRuntime.t()) :: t()
-  def apply_shell_runtime_transition(%__MODULE__{} = state, %ShellRuntime{} = runtime) do
-    %{state | shell_runtime: runtime}
-  end
-
-  @doc "Invalidates shell-owned layout values after an activation transition."
-  @spec reset_shell_layout(t()) :: t()
-  def reset_shell_layout(%__MODULE__{} = state), do: %{state | layout: nil, focus_tree: nil}
-
-  # ── Traditional shell forwarding helpers ────────────────────────────────
-  # These transitional helpers move in later shell-state work.
-  # The resolved Traditional entry guards extension state.
-
-  @doc "Applies a Traditional shell-state transition without mutating extension shell state."
-  @spec update_shell_state(t(), (shell_state() -> shell_state())) :: t()
-  def update_shell_state(%__MODULE__{} = state, fun) when is_function(fun, 1) do
-    runtime = ShellRuntime.update_traditional_state(state.shell_runtime, fun)
-    apply_shell_runtime_transition(state, runtime)
-  end
-
-  @spec update_traditional_shell_state(t(), (shell_state() -> shell_state())) :: t()
-  defp update_traditional_shell_state(%__MODULE__{} = state, fun),
-    do: update_shell_state(state, fun)
-
-  @spec bottom_panel(t()) :: BottomPanel.t()
-  def bottom_panel(%{shell_runtime: %ShellRuntime{state: ss}}), do: ShellState.bottom_panel(ss)
-  @spec set_bottom_panel(t(), BottomPanel.t()) :: t()
-  def set_bottom_panel(s, panel),
-    do: update_traditional_shell_state(s, &ShellState.set_bottom_panel(&1, panel))
-
-  @spec tab_bar(t()) :: TabBar.t() | nil
-  def tab_bar(%{shell_runtime: %ShellRuntime{state: ss}}), do: ShellState.tab_bar(ss)
-  @spec set_tab_bar(t(), TabBar.t() | nil) :: t()
-  def set_tab_bar(s, tb), do: update_traditional_shell_state(s, &ShellState.set_tab_bar(&1, tb))
-
   @spec drop_tab_context_feature_state_source(t(), FeatureState.source()) :: t()
   defp drop_tab_context_feature_state_source(
          %__MODULE__{shell_runtime: %ShellRuntime{state: %ShellState{}}} = state,
          source
        ) do
     case tab_bar(state) do
-      %TabBar{} = tb -> set_tab_bar(state, TabBar.drop_feature_state_source(tb, source))
-      _other -> state
+      %TabBar{} = tb ->
+        %{
+          state
+          | shell_runtime:
+              ShellRuntime.install_traditional_state(
+                state.shell_runtime,
+                ShellState.set_tab_bar(
+                  ShellRuntime.state(state.shell_runtime),
+                  TabBar.drop_feature_state_source(tb, source)
+                )
+              )
+        }
+
+      _other ->
+        state
     end
   end
 
@@ -910,8 +318,21 @@ defmodule MingaEditor.State do
          %__MODULE__{shell_runtime: %ShellRuntime{state: %ShellState{}}} = state
        ) do
     case tab_bar(state) do
-      %TabBar{} = tb -> set_tab_bar(state, TabBar.drop_extension_feature_state_sources(tb))
-      _other -> state
+      %TabBar{} = tb ->
+        %{
+          state
+          | shell_runtime:
+              ShellRuntime.install_traditional_state(
+                state.shell_runtime,
+                ShellState.set_tab_bar(
+                  ShellRuntime.state(state.shell_runtime),
+                  TabBar.drop_extension_feature_state_sources(tb)
+                )
+              )
+        }
+
+      _other ->
+        state
     end
   end
 
@@ -926,7 +347,7 @@ defmodule MingaEditor.State do
         source
       )
 
-    apply_shell_runtime_transition(state, runtime)
+    %{state | shell_runtime: runtime}
   end
 
   @spec drop_shell_extension_feature_state_sources(t()) :: t()
@@ -937,8 +358,23 @@ defmodule MingaEditor.State do
         MingaEditor.Shell.Workflow.resolved_entries()
       )
 
-    apply_shell_runtime_transition(state, runtime)
+    %{state | shell_runtime: runtime}
   end
+
+  @doc "Returns the active workspace FileTree feature state."
+  @spec file_tree_state(t()) :: FileTreeState.t()
+  def file_tree_state(%__MODULE__{workspace: workspace}),
+    do: SessionState.file_tree_state(workspace)
+
+  @doc "Returns the active shell tab bar, when the active shell exposes one."
+  @spec tab_bar(t()) :: TabBar.t() | nil
+  def tab_bar(%__MODULE__{shell_runtime: runtime}),
+    do: ShellState.tab_bar(ShellRuntime.state(runtime))
+
+  @doc "Returns the active shell bottom panel."
+  @spec bottom_panel(t()) :: BottomPanel.t()
+  def bottom_panel(%__MODULE__{shell_runtime: runtime}),
+    do: ShellState.bottom_panel(ShellRuntime.state(runtime))
 
   # ── Global field accessors ─────────────────────────────────────────────────
 
@@ -960,56 +396,21 @@ defmodule MingaEditor.State do
            {git_root :: String.t(), success_msg :: String.t(), error_prefix :: String.t()}}
           | nil
 
-  @spec set_git_remote_op(t(), git_remote_op()) :: t()
-  def set_git_remote_op(%__MODULE__{} = state, op), do: %{state | git_remote_op: op}
-
-  @spec clear_git_remote_op(t()) :: t()
-  def clear_git_remote_op(%__MODULE__{} = state), do: %{state | git_remote_op: nil}
-
-  @spec register_diff_view(t(), pid(), diff_view_info()) :: t()
-  def register_diff_view(%__MODULE__{} = state, diff_buf, info) when is_pid(diff_buf),
-    do: %{state | diff_views: Map.put(state.diff_views, diff_buf, info)}
-
-  @spec unregister_diff_view(t(), pid()) :: t()
-  def unregister_diff_view(%__MODULE__{} = state, diff_buf) when is_pid(diff_buf),
-    do: %{state | diff_views: Map.delete(state.diff_views, diff_buf)}
-
   @spec diff_view_info(t(), pid() | nil) :: diff_view_info() | nil
   def diff_view_info(%__MODULE__{}, nil), do: nil
 
   def diff_view_info(%__MODULE__{} = state, diff_buf) when is_pid(diff_buf),
-    do: Map.get(state.diff_views, diff_buf)
+    do: Map.get(state.git.diff_views, diff_buf)
 
   @spec diff_view_for_source(t(), pid()) :: {pid(), diff_view_info()} | nil
   def diff_view_for_source(%__MODULE__{} = state, source_buf) when is_pid(source_buf) do
-    Enum.find(state.diff_views, fn {_diff_buf, info} -> info.source_buf == source_buf end)
+    Enum.find(state.git.diff_views, fn {_diff_buf, info} -> info.source_buf == source_buf end)
   end
 
   @spec diff_views_for_source(t(), pid()) :: [{pid(), diff_view_info()}]
   def diff_views_for_source(%__MODULE__{} = state, source_buf) when is_pid(source_buf) do
-    Enum.filter(state.diff_views, fn {_diff_buf, info} -> info.source_buf == source_buf end)
+    Enum.filter(state.git.diff_views, fn {_diff_buf, info} -> info.source_buf == source_buf end)
   end
-
-  @spec set_pending_quit(t(), :quit | :quit_all) :: t()
-  def set_pending_quit(%__MODULE__{} = state, kind) when kind in [:quit, :quit_all],
-    do: %{state | pending_quit: kind}
-
-  @spec clear_pending_quit(t()) :: t()
-  def clear_pending_quit(%__MODULE__{} = state), do: %{state | pending_quit: nil}
-
-  @spec set_last_test_command(t(), {String.t(), String.t()}) :: t()
-  def set_last_test_command(%__MODULE__{} = state, {_cmd, _root} = val),
-    do: %{state | last_test_command: val}
-
-  @doc "Applies a function to remote session state."
-  @spec update_remote(t(), (Remote.t() -> Remote.t())) :: t()
-  def update_remote(%__MODULE__{remote: remote} = state, fun) when is_function(fun, 1) do
-    %{state | remote: fun.(remote)}
-  end
-
-  @spec update_lsp(t(), (LSPState.t() -> LSPState.t())) :: t()
-  def update_lsp(%__MODULE__{lsp: lsp} = state, fun) when is_function(fun, 1),
-    do: %{state | lsp: fun.(lsp)}
 
   # ── Convenience accessors ─────────────────────────────────────────────────
 
@@ -1026,75 +427,6 @@ defmodule MingaEditor.State do
   def active_buffer(%__MODULE__{workspace: %{buffers: %{active_index: idx}}}), do: idx
 
   @doc """
-  Returns the index of the buffer whose file path matches `file_path`, or nil.
-
-  Catches `:exit` for each buffer in case a process has died but not yet been
-  removed from the buffer list.
-  """
-  @spec find_buffer_by_path(t() | map(), String.t()) :: non_neg_integer() | nil
-  def find_buffer_by_path(%{workspace: %{buffers: %{list: buffers}}}, file_path) do
-    Enum.find_index(buffers, fn buf ->
-      try do
-        Buffer.file_path(buf) == file_path
-      catch
-        :exit, _ -> false
-      end
-    end)
-  end
-
-  @doc "Starts a new buffer under the buffer supervisor for the given file path."
-  @spec start_buffer(String.t()) :: {:ok, pid()} | {:error, term()}
-  @spec start_buffer(String.t(), Minga.Config.Options.server() | nil) ::
-          {:ok, pid()} | {:error, term()}
-  def start_buffer(file_path, options_server \\ Minga.Config.Options.default_server()) do
-    options_server = normalize_options_server(options_server)
-
-    MingaEditor.HugeFile.guard(file_path, options_server, fn ->
-      DynamicSupervisor.start_child(
-        Minga.Buffer.Supervisor,
-        {Minga.Buffer, file_path: file_path, options_server: options_server}
-      )
-    end)
-  end
-
-  # ── Buffer monitoring ──────────────────────────────────────────────────────
-
-  @doc """
-  Monitors a buffer pid so the Editor receives `:DOWN` when it dies.
-
-  Production callers invoke this while applying a buffer lifecycle transition
-  in the Editor process, making that process both monitor creator and `:DOWN`
-  recipient. Buffers remain supervised by `Minga.Buffer.Supervisor`; the monitor
-  only correlates cleanup by the stored pid/ref pair. Duplicate requests are
-  ignored, unknown `:DOWN` messages are ignored by the Editor, and a terminal
-  buffer death removes its state before rendering.
-  """
-  @spec monitor_buffer(t(), pid()) :: t()
-  def monitor_buffer(%__MODULE__{buffer_monitors: monitors} = state, pid)
-      when is_pid(pid) do
-    if Map.has_key?(monitors, pid) do
-      state
-    else
-      ref = Process.monitor(pid)
-      %{state | buffer_monitors: Map.put(monitors, pid, ref)}
-    end
-  end
-
-  def monitor_buffer(state, _), do: state
-
-  @spec normalize_options_server(term() | nil) :: Minga.Config.Options.server()
-  defp normalize_options_server(nil), do: Minga.Config.Options.default_server()
-  defp normalize_options_server(server), do: Minga.Config.Options.validate_server!(server)
-
-  @doc """
-  Monitors a list of buffer pids. Convenience wrapper around `monitor_buffer/2`.
-  """
-  @spec monitor_buffers(t(), [pid()]) :: t()
-  def monitor_buffers(state, pids) when is_list(pids) do
-    Enum.reduce(pids, state, &monitor_buffer(&2, &1))
-  end
-
-  @doc """
   Purely removes a dead buffer from editor and shell lifecycle state.
 
   The process monitor has already delivered its terminal `:DOWN` message, so
@@ -1107,133 +439,53 @@ defmodule MingaEditor.State do
     {runtime, workspace} =
       ShellRuntime.route_buffer_died(state.shell_runtime, state.workspace, pid)
 
-    state
-    |> apply_shell_runtime_transition(runtime)
-    |> set_workspace(workspace)
+    %{state | shell_runtime: runtime, workspace: workspace}
   end
-
-  @doc """
-  Removes a dead buffer pid from all state locations.
-
-  Called from the Editor's `:DOWN` handler. Removes the pid from the buffer
-  list, clears it from special buffer slots (messages, warnings, help), and
-  switches to another buffer if the active one died. Also cleans up the
-  monitor ref.
-
-  Delegates to the pure lifecycle transition.
-  """
-  @spec remove_dead_buffer(t(), pid()) :: t()
-  def remove_dead_buffer(%__MODULE__{} = state, pid), do: close_buffer_pure(state, pid)
 
   @spec do_remove_dead_buffer(t(), pid()) :: t()
   defp do_remove_dead_buffer(
-         %__MODULE__{workspace: %{buffers: %Buffers{} = bs}, buffer_monitors: monitors} = state,
+         %__MODULE__{workspace: %{buffers: %Buffers{} = buffers}} = state,
          pid
        ) do
-    state = drop_parser_presentation(state, pid)
-    monitors = Map.delete(monitors, pid)
-    new_bs = Buffers.remove(bs, pid)
+    state = %{state | parser: ParserState.retire_buffer(state.parser, pid)}
+    lifecycle = BufferLifecycle.retire_monitor(state.buffer_lifecycle, pid)
+    new_buffers = Buffers.remove(buffers, pid)
 
-    state = %{
-      update_workspace(state, &SessionState.set_buffers(&1, new_bs))
-      | buffer_monitors: monitors
-    }
+    state =
+      %{state | workspace: SessionState.set_buffers(state.workspace, new_buffers)}
+      |> then(&%{&1 | buffer_lifecycle: lifecycle})
 
     ws = state.workspace
 
     state =
       if ws.agent_ui.panel.prompt_buffer == pid do
-        AgentAccess.update_panel(state, fn p -> %{p | prompt_buffer: nil} end)
+        MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
+          state,
+          (fn p -> %{p | prompt_buffer: nil} end).(state.workspace.agent_ui.panel)
+        )
       else
         state
       end
 
-    state = unregister_diff_view(state, pid)
+    state = %{state | git: GitState.retire_diff_view(state.git, pid)}
 
     case tab_bar(state) do
-      nil -> state
-      tb -> set_tab_bar(state, TabBar.scrub_dead_buffer(tb, pid))
-    end
-  end
+      nil ->
+        state
 
-  # ── Active content context ───────────────────────────────────────────────────
-
-  @typedoc """
-  Display metadata derived from the active window's content type.
-
-  Used by title, modeline, and any other subsystem that needs to answer
-  "what is the user looking at?" without assuming a buffer is active.
-  """
-  @type content_context :: %{
-          type: :buffer | :agent,
-          display_name: String.t(),
-          directory: String.t(),
-          dirty: boolean(),
-          filetype: atom()
-        }
-
-  @doc """
-  Returns display metadata for the active window's content.
-
-  Buffer windows return file/buffer metadata. Agent chat windows return
-  agent-specific display info. Falls back to buffer metadata when the
-  active window is nil or unrecognized.
-  """
-  @spec active_content_context(t()) :: content_context()
-  def active_content_context(%__MODULE__{} = state) do
-    case active_window_struct(state) do
-      %Window{content: {:agent_chat, _}} ->
+      tb ->
         %{
-          type: :agent,
-          display_name: "Agent",
-          directory: project_directory(),
-          dirty: false,
-          filetype: :markdown
+          state
+          | shell_runtime:
+              ShellRuntime.install_traditional_state(
+                state.shell_runtime,
+                ShellState.set_tab_bar(
+                  ShellRuntime.state(state.shell_runtime),
+                  TabBar.scrub_dead_buffer(tb, pid)
+                )
+              )
         }
-
-      _ ->
-        buffer_content_context(state)
     end
-  end
-
-  @spec buffer_content_context(t()) :: content_context()
-  defp buffer_content_context(%__MODULE__{workspace: %{buffers: %{active: buf}}})
-       when is_pid(buf) do
-    path = Buffer.file_path(buf)
-    name = Buffer.buffer_name(buf)
-    dirty = Buffer.dirty?(buf)
-    filetype = Buffer.filetype(buf)
-
-    display_name = if path, do: Path.basename(path), else: name || "[no file]"
-    directory = if path, do: path |> Path.dirname() |> Path.basename(), else: ""
-
-    %{
-      type: :buffer,
-      display_name: display_name,
-      directory: directory,
-      dirty: dirty,
-      filetype: filetype || :text
-    }
-  end
-
-  defp buffer_content_context(_state) do
-    %{
-      type: :buffer,
-      display_name: "[no file]",
-      directory: "",
-      dirty: false,
-      filetype: :text
-    }
-  end
-
-  @spec project_directory() :: String.t()
-  defp project_directory do
-    case Minga.Project.root() do
-      nil -> ""
-      root -> Path.basename(root)
-    end
-  catch
-    :exit, _ -> ""
   end
 
   # ── Window delegates ────────────────────────────────────────────────────────
@@ -1249,40 +501,38 @@ defmodule MingaEditor.State do
   @spec split?(t()) :: boolean()
   def split?(%__MODULE__{workspace: ws}), do: SessionState.split?(ws)
 
-  @doc "Updates the window struct for the given window id via a mapper function."
-  @spec update_window(t(), Window.id(), (Window.t() -> Window.t())) :: t()
-  def update_window(%__MODULE__{} = state, id, fun) do
-    update_workspace(state, &SessionState.update_window(&1, id, fun))
+  @doc "Commits a frontend-ready viewport and capability negotiation atomically."
+  @spec accept_frontend_ready(t(), Viewport.t(), MingaEditor.Frontend.Capabilities.t()) :: t()
+  def accept_frontend_ready(%__MODULE__{} = state, %Viewport{} = viewport, capabilities) do
+    state = %{state | workspace: SessionState.set_viewport(state.workspace, viewport)}
+
+    frontend =
+      state.frontend
+      |> FrontendState.resize_terminal(viewport)
+      |> FrontendState.accept_capabilities(capabilities)
+
+    %{state | frontend: frontend}
   end
 
-  @doc "Updates every window showing a buffer via a mapper function."
-  @spec update_windows_for_buffer(t(), pid(), (Window.t() -> Window.t())) :: t()
-  def update_windows_for_buffer(%__MODULE__{} = state, buffer, fun)
-      when is_pid(buffer) and is_function(fun, 1) do
-    update_workspace(state, &SessionState.update_windows_for_buffer(&1, buffer, fun))
-  end
-
-  @doc """
-  Invalidates render caches for all windows.
-
-  Call when the screen layout changes (file tree toggle, agent panel toggle)
-  because cached draws contain baked-in absolute coordinates that become
-  wrong when column offsets shift.
-  """
-  @spec invalidate_all_windows(t()) :: t()
-  def invalidate_all_windows(%__MODULE__{} = state) do
-    update_workspace(state, &SessionState.invalidate_all_windows/1)
+  @doc "Commits a frontend resize to both the workspace and frontend owners."
+  @spec resize_frontend(t(), Viewport.t()) :: t()
+  def resize_frontend(%__MODULE__{} = state, %Viewport{} = viewport) do
+    state = %{state | workspace: SessionState.set_viewport(state.workspace, viewport)}
+    %{state | frontend: FrontendState.resize_terminal(state.frontend, viewport)}
   end
 
   @doc "Clears frontend-retained render state after a frontend ready/recovery event."
   @spec reset_frontend_render_state(t()) :: t()
   def reset_frontend_render_state(%__MODULE__{} = state) do
+    state = %{state | workspace: SessionState.mark_frontend_reset_pending(state.workspace)}
+
     state
-    |> update_workspace(&SessionState.mark_frontend_reset_pending/1)
     |> then(fn state ->
-      %{state | message_store: MessageStore.reset_sent_cursor(state.message_store)}
+      message_store = MessageStore.reset_sent_cursor(state.render.message_store)
+      render = RenderState.accept_message_store(state.render, message_store)
+      correlation = RenderCorrelation.frontend_ready(render.render_correlation)
+      %{state | render: RenderState.accept_correlation(render, correlation)}
     end)
-    |> frontend_render_ready()
   end
 
   @doc """
@@ -1295,16 +545,7 @@ defmodule MingaEditor.State do
   active window's viewport.
   """
   @spec terminal_viewport(t()) :: Viewport.t()
-  def terminal_viewport(%__MODULE__{terminal_viewport: vp}), do: vp
-
-  @doc """
-  Stores a new terminal viewport. Called by the editor's resize handler
-  when the frontend reports a new screen size.
-  """
-  @spec set_terminal_viewport(t(), Viewport.t()) :: t()
-  def set_terminal_viewport(%__MODULE__{} = state, %Viewport{} = vp) do
-    %{state | terminal_viewport: vp}
-  end
+  def terminal_viewport(%__MODULE__{frontend: frontend}), do: frontend.terminal_viewport
 
   @doc """
   Returns the viewport for the user's current focus: the active window's
@@ -1324,39 +565,6 @@ defmodule MingaEditor.State do
   end
 
   @doc """
-  Updates the active window's viewport. No-op when no window is active
-  (the no-window fallback case has no per-window viewport to write).
-
-  Replaces the older `put_active_window_viewport/2`.
-  """
-  @spec update_current_viewport(t(), Viewport.t()) :: t()
-  def update_current_viewport(%__MODULE__{} = state, %Viewport{} = new_vp) do
-    case active_window_struct(state) do
-      nil -> state
-      %Window{id: win_id} -> update_window(state, win_id, &Window.set_viewport(&1, new_vp))
-    end
-  end
-
-  @doc """
-  Marks the active window's next rendered frame as an authoritative BEAM scroll
-  that must discard any frontend-held local offset (#2652).
-
-  Called at dispatch for the always-authoritative viewport commands (the
-  `MingaEditor.Commands` `@authoritative_scroll_commands` set and `goto_line`)
-  and from the success branches of failable jumps (search hits, mark jumps,
-  bracket match, LSP goto) — see that MapSet's comment for the policy. No-op
-  when no window is active. See `MingaEditor.Window.mark_authoritative_scroll/1`
-  for the marker lifecycle.
-  """
-  @spec mark_authoritative_scroll(t()) :: t()
-  def mark_authoritative_scroll(%__MODULE__{} = state) do
-    case active_window_struct(state) do
-      nil -> state
-      %Window{id: win_id} -> update_window(state, win_id, &Window.mark_authoritative_scroll/1)
-    end
-  end
-
-  @doc """
   Finds the agent chat window in the windows map.
 
   Returns `{win_id, window}` or `nil` if no agent chat window exists.
@@ -1369,25 +577,6 @@ defmodule MingaEditor.State do
     end)
   end
 
-  @doc """
-  Scrolls the agent chat window's viewport by `delta` lines and updates
-  pinned state. Delegates to `Window.scroll_viewport/3`.
-
-  Returns the state unchanged if no agent chat window exists.
-  """
-  @spec scroll_agent_chat_window(t(), integer()) :: t()
-  def scroll_agent_chat_window(%__MODULE__{} = state, delta) do
-    case find_agent_chat_window(state) do
-      nil ->
-        state
-
-      {win_id, window} ->
-        total_lines = Enum.count(state.workspace.agent_ui.panel.cached_line_index)
-        updated = Window.scroll_viewport(window, delta, total_lines)
-        update_window(state, win_id, fn _ -> updated end)
-    end
-  end
-
   # ── Other accessors ───────────────────────────────────────────────────────
 
   @doc """
@@ -1395,27 +584,27 @@ defmodule MingaEditor.State do
   minibuffer row and reserving space for the file tree panel when open.
   """
   @spec screen_rect(t()) :: WindowTree.rect()
-  def screen_rect(%__MODULE__{terminal_viewport: vp} = state) do
+  def screen_rect(%__MODULE__{frontend: %{terminal_viewport: viewport}} = state) do
     case file_tree_state(state).tree do
       %FileTree{width: tw} ->
         # Tree occupies columns 0..tw-1, separator at column tw,
         # editor content starts at column tw+1.
         editor_col = tw + 1
-        editor_width = max(vp.cols - editor_col, 1)
-        {0, editor_col, editor_width, vp.rows - 1}
+        editor_width = max(viewport.cols - editor_col, 1)
+        {0, editor_col, editor_width, viewport.rows - 1}
 
       nil ->
-        {0, 0, vp.cols, vp.rows - 1}
+        {0, 0, viewport.cols, viewport.rows - 1}
     end
   end
 
   @doc "Returns the screen rect for the file tree panel, or nil if closed."
   @spec tree_rect(t()) :: WindowTree.rect() | nil
-  def tree_rect(%__MODULE__{terminal_viewport: vp} = state) do
+  def tree_rect(%__MODULE__{frontend: %{terminal_viewport: viewport}} = state) do
     case file_tree_state(state).tree do
       %FileTree{width: tw} ->
         # Row 0 is the tab bar; file tree starts at row 1.
-        {1, 0, tw, vp.rows - 2}
+        {1, 0, tw, viewport.rows - 2}
 
       nil ->
         nil
@@ -1438,19 +627,28 @@ defmodule MingaEditor.State do
   Use this after a buffer save, save-as, or path retarget so the live tab and its workspace
   stop pointing at stale buffer refs and start pointing at the new path ref.
   """
-  @spec rebind_buffer_file_identity(t(), pid()) :: t()
-  def rebind_buffer_file_identity(%__MODULE__{} = state, buffer_pid) when is_pid(buffer_pid) do
+  @spec rebind_buffer_file_identity(t(), pid(), String.t() | nil) :: t()
+  def rebind_buffer_file_identity(%__MODULE__{} = state, buffer_pid, path)
+      when is_pid(buffer_pid) and (is_binary(path) or is_nil(path)) do
     tab_bar = tab_bar(state)
 
-    case {matching_file_tabs(tab_bar, buffer_pid), buffer_file_ref(buffer_pid, state.workspace)} do
+    case {matching_file_tabs(tab_bar, buffer_pid),
+          buffer_file_ref(buffer_pid, path, state.workspace)} do
       {[], _} ->
         state
 
-      {_, nil} ->
-        state
-
       {tabs, %FileRef{} = file_ref} ->
-        set_tab_bar(state, rebind_tabs_to_file_ref(tab_bar, tabs, file_ref))
+        %{
+          state
+          | shell_runtime:
+              ShellRuntime.install_traditional_state(
+                state.shell_runtime,
+                ShellState.set_tab_bar(
+                  ShellRuntime.state(state.shell_runtime),
+                  rebind_tabs_to_file_ref(tab_bar, tabs, file_ref)
+                )
+              )
+        }
     end
   end
 
@@ -1527,9 +725,9 @@ defmodule MingaEditor.State do
   @spec tab_bar_active_id(TabBar.t()) :: Tab.id()
   defp tab_bar_active_id(%TabBar{active_id: active_id}), do: active_id
 
-  @spec buffer_file_ref(pid(), SessionState.t()) :: FileRef.t() | nil
-  defp buffer_file_ref(buffer_pid, %SessionState{} = workspace) do
-    case {buffer_path(buffer_pid), SessionState.file_tree_state(workspace).project_root} do
+  @spec buffer_file_ref(pid(), String.t() | nil, SessionState.t()) :: FileRef.t()
+  defp buffer_file_ref(buffer_pid, path, %SessionState{} = workspace) do
+    case {path, SessionState.file_tree_state(workspace).project_root} do
       {path, root} when is_binary(path) and is_binary(root) ->
         case FileRef.from_path(root, path) do
           {:ok, file_ref} -> file_ref
@@ -1539,28 +737,6 @@ defmodule MingaEditor.State do
       _ ->
         FileRef.from_buffer(buffer_pid)
     end
-  catch
-    :exit, _ -> nil
-  end
-
-  @spec buffer_path(pid()) :: String.t() | nil
-  defp buffer_path(pid) when is_pid(pid) do
-    Buffer.file_path(pid)
-  catch
-    :exit, _ -> nil
-  end
-
-  @doc """
-  Sets the context for the next `add_buffer` call.
-
-  Used by picker preview to mark buffer additions as transient previews
-  rather than permanent opens. The context is consumed and reset to
-  `:open` by `add_buffer_pure/3`.
-  """
-  @spec set_buffer_add_context(t(), MingaEditor.Shell.buffer_add_context()) :: t()
-  def set_buffer_add_context(%__MODULE__{} = state, context)
-      when context in [:open, :preview] do
-    %{state | buffer_add_context: context}
   end
 
   @doc """
@@ -1572,7 +748,8 @@ defmodule MingaEditor.State do
   """
   @spec add_buffer_pure(t(), pid(), keyword()) :: {t(), buffer_registration_result()}
   def add_buffer_pure(%__MODULE__{workspace: %{buffers: bs}} = state, pid, opts \\ []) do
-    context = Keyword.get_lazy(opts, :context, fn -> state.buffer_add_context end)
+    context =
+      Keyword.get_lazy(opts, :context, fn -> state.buffer_lifecycle.buffer_add_context end)
 
     # Idempotent: if the buffer is already in the pool, just activate it
     # instead of appending a duplicate. This lets confirm call add_buffer
@@ -1589,8 +766,7 @@ defmodule MingaEditor.State do
     prev_workspace = state.workspace
 
     state =
-      state
-      |> update_workspace(&SessionState.set_buffers(&1, new_bs))
+      %{state | workspace: SessionState.set_buffers(state.workspace, new_bs)}
       |> MingaEditor.Shell.Workflow.ensure_available()
 
     {runtime, workspace} =
@@ -1602,28 +778,14 @@ defmodule MingaEditor.State do
         context
       )
 
+    {_context, lifecycle} = BufferLifecycle.consume_buffer_context(state.buffer_lifecycle)
+
     state =
-      state
-      |> apply_shell_runtime_transition(runtime)
-      |> set_workspace(workspace)
-      |> Map.put(:buffer_add_context, :open)
+      %{state | shell_runtime: runtime, workspace: workspace}
+      |> then(&%{&1 | buffer_lifecycle: lifecycle})
 
     result = if already_pooled, do: :already_registered, else: {:monitor, pid}
     {state, result}
-  end
-
-  @doc """
-  Adds a new buffer and makes it the active buffer for the current window.
-
-  The wrapper creates the process monitor in the Editor process that receives
-  the resulting `:DOWN` message.
-  """
-  @spec add_buffer(t(), pid(), keyword()) :: t()
-  def add_buffer(%__MODULE__{} = state, pid, opts \\ []) do
-    case add_buffer_pure(state, pid, opts) do
-      {state, :already_registered} -> state
-      {state, {:monitor, monitored_pid}} -> monitor_buffer(state, monitored_pid)
-    end
   end
 
   @doc """
@@ -1637,9 +799,8 @@ defmodule MingaEditor.State do
   def enter_empty_state(%__MODULE__{} = state) do
     launchpad_opts = EditorSessionState.session_opts(state.session)
 
-    state
-    |> clear_file_tabs()
-    |> update_workspace(&SessionState.enter_empty_state(&1, launchpad_opts))
+    state = clear_file_tabs(state)
+    %{state | workspace: SessionState.enter_empty_state(state.workspace, launchpad_opts)}
   end
 
   @spec clear_file_tabs(t()) :: t()
@@ -1656,7 +817,17 @@ defmodule MingaEditor.State do
       |> Enum.filter(&(&1.kind == :file))
       |> Enum.reduce(state, fn tab, acc -> retire_lsp_operations_for_tab(acc, tab.id) end)
 
-    set_tab_bar(state, TabBar.remove_file_tabs(tb))
+    %{
+      state
+      | shell_runtime:
+          ShellRuntime.install_traditional_state(
+            state.shell_runtime,
+            ShellState.set_tab_bar(
+              ShellRuntime.state(state.shell_runtime),
+              TabBar.remove_file_tabs(tb)
+            )
+          )
+    }
   end
 
   defp clear_file_tabs(%__MODULE__{} = state), do: state
@@ -1710,7 +881,17 @@ defmodule MingaEditor.State do
         state =
           case tab_bar(state) do
             %TabBar{active_id: id} = tb ->
-              set_tab_bar(state, TabBar.update_context(tb, id, synthesized))
+              %{
+                state
+                | shell_runtime:
+                    ShellRuntime.install_traditional_state(
+                      state.shell_runtime,
+                      ShellState.set_tab_bar(
+                        ShellRuntime.state(state.shell_runtime),
+                        TabBar.update_context(tb, id, synthesized)
+                      )
+                    )
+              }
 
             _ ->
               state
@@ -1722,7 +903,9 @@ defmodule MingaEditor.State do
       end
 
     state
-    |> set_workspace(SessionState.restore_tab_context(state.workspace, context))
+    |> then(fn state ->
+      %{state | workspace: SessionState.restore_tab_context(state.workspace, context)}
+    end)
     |> sync_file_tab_active_window_buffer()
     |> sync_agent_ui_from_active_workspace()
   end
@@ -1741,7 +924,7 @@ defmodule MingaEditor.State do
   @spec sync_file_tab_active_window_buffer(t(), Tab.t() | nil) :: t()
   defp sync_file_tab_active_window_buffer(%__MODULE__{} = state, %Tab{kind: :file}) do
     workspace = SessionState.activate_buffer(state.workspace, state.workspace.buffers)
-    set_workspace(state, workspace)
+    %{state | workspace: workspace}
   end
 
   defp sync_file_tab_active_window_buffer(%__MODULE__{} = state, _tab), do: state
@@ -1765,8 +948,8 @@ defmodule MingaEditor.State do
 
   @spec build_empty_agent_tab_defaults(t()) :: Tab.context()
   defp build_empty_agent_tab_defaults(state) do
-    rows = max(state.terminal_viewport.rows, 1)
-    cols = max(state.terminal_viewport.cols, 1)
+    rows = max(state.frontend.terminal_viewport.rows, 1)
+    cols = max(state.frontend.terminal_viewport.cols, 1)
     windows = build_agent_chat_windows(rows, cols)
     build_agent_tab_defaults(state, windows)
   end
@@ -1774,8 +957,8 @@ defmodule MingaEditor.State do
   @spec build_file_tab_defaults(t()) :: Tab.context()
   defp build_file_tab_defaults(state) do
     win_id = state.workspace.windows.next_id
-    rows = state.terminal_viewport.rows
-    cols = state.terminal_viewport.cols
+    rows = state.frontend.terminal_viewport.rows
+    cols = state.frontend.terminal_viewport.cols
     buf = state.workspace.buffers.active
 
     windows =
@@ -1805,7 +988,7 @@ defmodule MingaEditor.State do
       },
       windows: windows,
       dired: %DiredState{},
-      viewport: state.terminal_viewport,
+      viewport: state.frontend.terminal_viewport,
       mouse: %Mouse{},
       lsp_pending: %{},
       search: %Search{},
@@ -1833,7 +1016,7 @@ defmodule MingaEditor.State do
       },
       windows: windows,
       dired: %DiredState{},
-      viewport: state.terminal_viewport,
+      viewport: state.frontend.terminal_viewport,
       mouse: %Mouse{},
       lsp_pending: %{},
       search: %Search{},
@@ -1876,26 +1059,6 @@ defmodule MingaEditor.State do
     %FileTreeState{project_root: file_tree_state(state).project_root}
   end
 
-  @spec log_switch_tab(TabBar.t(), Tab.id(), Tab.id()) :: :ok
-  defp log_switch_tab(tb, current_id, target_id) do
-    Log.debug(:editor, fn ->
-      from = format_tab_ref(TabBar.active(tb))
-      to = format_tab_ref(TabBar.get(tb, target_id))
-      "[tab] switch_tab #{current_id}(#{from}) -> #{target_id}(#{to})"
-    end)
-  end
-
-  @spec format_tab_ref(Tab.t() | nil) :: String.t()
-  defp format_tab_ref(%{kind: kind, label: label}), do: "#{kind}:#{label}"
-  defp format_tab_ref(nil), do: "nil"
-
-  @spec log_switch_tab_result(t()) :: :ok
-  defp log_switch_tab_result(state) do
-    Log.debug(:editor, fn ->
-      "[tab] switch_tab restored: scope=#{state.workspace.keymap_scope} buf=#{inspect(state.workspace.buffers.active)}"
-    end)
-  end
-
   @doc """
   Purely switches tab-owned editor state and returns the selected tab as a
   focused result. The aggregate `switch_tab/2` transition uses that result to
@@ -1913,48 +1076,57 @@ defmodule MingaEditor.State do
         {state, :unchanged}
 
       %TabBar{active_id: current_id} = tb ->
-        case TabBar.get(tb, target_id) do
-          nil ->
-            {state, :unchanged}
-
-          %Tab{} = target ->
-            log_switch_tab(tb, current_id, target_id)
-            state = retire_lsp_operations_for_tab(state, current_id)
-
-            # Snapshot current tab (spinner stop is deferred as effect)
-            context = snapshot_tab_context_no_sync(state)
-            tb = TabBar.update_context(tb, current_id, context)
-
-            # Switch pointer
-            tb = TabBar.switch_to(tb, target_id)
-
-            # Restore target tab's context
-            state = set_tab_bar(state, tb)
-
-            state = restore_tab_context(state, target.context)
-            state = sync_agent_ui_from_active_workspace(state)
-
-            # If the active modal is completion belonging to the leaving tab,
-            # dismiss it so it doesn't follow us to the new tab.
-            state = MingaEditor.Shell.Traditional.ModalWorkflow.dismiss_if_stale(state)
-
-            # Clear attention flag on the tab we're switching to.
-            state =
-              set_tab_bar(
-                state,
-                TabBar.update_tab(tab_bar(state), target_id, &Tab.set_attention(&1, false))
-              )
-
-            log_switch_tab_result(state)
-
-            state =
-              state
-              |> invalidate_all_windows()
-              |> Map.put(:layout, nil)
-
-            {state, {:switched, target}}
-        end
+        switch_to_existing_tab(state, tb, current_id, target_id, TabBar.get(tb, target_id))
     end
+  end
+
+  @spec switch_to_existing_tab(t(), TabBar.t(), Tab.id(), Tab.id(), Tab.t() | nil) ::
+          {t(), tab_switch_result()}
+  defp switch_to_existing_tab(%__MODULE__{} = state, _tb, _current_id, _target_id, nil),
+    do: {state, :unchanged}
+
+  defp switch_to_existing_tab(
+         %__MODULE__{} = state,
+         %TabBar{} = tb,
+         current_id,
+         target_id,
+         %Tab{} = target
+       ) do
+    state = retire_lsp_operations_for_tab(state, current_id)
+
+    context = snapshot_tab_context_no_sync(state)
+
+    tb =
+      tb
+      |> TabBar.update_context(current_id, context)
+      |> TabBar.switch_to(target_id)
+
+    state = install_tab_bar(state, tb)
+    state = restore_tab_context(state, target.context)
+    state = sync_agent_ui_from_active_workspace(state)
+    state = MingaEditor.Shell.Traditional.ModalWorkflow.dismiss_if_stale(state)
+
+    state =
+      install_tab_bar(
+        state,
+        TabBar.update_tab(tab_bar(state), target_id, &Tab.set_attention(&1, false))
+      )
+
+    workspace = SessionState.invalidate_all_windows(state.workspace)
+    render = RenderState.invalidate_layout(state.render)
+    state = %{state | workspace: workspace, render: render}
+
+    {state, {:switched, target}}
+  end
+
+  @spec install_tab_bar(t(), TabBar.t()) :: t()
+  defp install_tab_bar(%__MODULE__{} = state, %TabBar{} = tab_bar) do
+    shell_state = ShellState.set_tab_bar(ShellRuntime.state(state.shell_runtime), tab_bar)
+
+    %{
+      state
+      | shell_runtime: ShellRuntime.install_traditional_state(state.shell_runtime, shell_state)
+    }
   end
 
   @doc """
@@ -1980,7 +1152,7 @@ defmodule MingaEditor.State do
 
   defp finish_tab_switch({state, {:switched, %Tab{} = target}}) do
     state
-    |> AgentAccess.update_agent(&AgentState.stop_spinner_timer/1)
+    |> MingaEditor.Shell.Traditional.Workflow.install_agent_spinner_stop()
     |> rebuild_switched_agent(target)
     |> maybe_restart_incoming_spinner()
   end
@@ -1988,25 +1160,33 @@ defmodule MingaEditor.State do
   @spec rebuild_switched_agent(t(), Tab.t()) :: t()
   defp rebuild_switched_agent(state, %Tab{kind: :agent} = tab) do
     state
-    |> rebuild_agent_from_session(tab)
+    |> MingaEditor.AgentLifecycle.rebuild_agent_from_session(tab)
     |> sync_active_agent_transcript()
   end
 
-  defp rebuild_switched_agent(state, %Tab{} = tab), do: rebuild_agent_from_session(state, tab)
+  defp rebuild_switched_agent(state, %Tab{} = tab),
+    do: MingaEditor.AgentLifecycle.rebuild_agent_from_session(state, tab)
 
   @doc "Retires correlated references and rename requests owned by a departing tab."
   @spec retire_lsp_operations_for_tab(t(), Tab.id()) :: t()
   def retire_lsp_operations_for_tab(%__MODULE__{} = state, tab_id) do
     {requests, lsp} = LSPState.take_operation_requests_for_tab(state.lsp, tab_id)
-    state = update_lsp(state, fn _current -> lsp end)
+    state = %{state | lsp: lsp}
 
     Enum.reduce(requests, state, fn {kind, operation_id, ^tab_id}, state ->
-      OperationFeedback.finish_in(
-        state,
-        operation_id,
-        :stale,
-        lsp_operation_tab_departure_message(kind)
-      )
+      %{
+        state
+        | feedback:
+            Feedback.accept_operation_feedback(
+              state.feedback,
+              OperationFeedback.finish(
+                state.feedback.operation_feedback,
+                operation_id,
+                :stale,
+                lsp_operation_tab_departure_message(kind)
+              )
+            )
+      }
     end)
   end
 
@@ -2035,7 +1215,7 @@ defmodule MingaEditor.State do
 
     agent_ui = maybe_activate_synced_agent_ui(state, agent_ui)
 
-    state = update_workspace(state, &SessionState.set_agent_ui(&1, agent_ui))
+    state = %{state | workspace: SessionState.set_agent_ui(state.workspace, agent_ui)}
     drain_pending_catchup_events(state, tab_bar)
   end
 
@@ -2066,7 +1246,14 @@ defmodule MingaEditor.State do
             &WorkspaceModel.clear_pending_catchup_events/1
           )
 
-        set_tab_bar(state, tb)
+        %{
+          state
+          | shell_runtime:
+              ShellRuntime.install_traditional_state(
+                state.shell_runtime,
+                ShellState.set_tab_bar(ShellRuntime.state(state.shell_runtime), tb)
+              )
+        }
 
       _ ->
         state
@@ -2095,83 +1282,13 @@ defmodule MingaEditor.State do
 
   @spec maybe_restart_incoming_spinner(t()) :: t()
   defp maybe_restart_incoming_spinner(state) do
-    agent = AgentAccess.agent(state)
+    agent = MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
 
     if AgentState.busy?(agent) and agent.spinner_timer == nil do
-      AgentAccess.update_agent(state, &AgentState.start_spinner_timer/1)
+      MingaEditor.Shell.Traditional.Workflow.install_agent_spinner_start(state)
     else
       state
     end
-  end
-
-  @spec set_tab_session(t(), Tab.id(), pid() | nil) :: t()
-  def set_tab_session(%__MODULE__{} = state, tab_id, session_pid) do
-    state = ShellWorkflow.ensure_available(state)
-    runtime = ShellRuntime.set_tab_session(state.shell_runtime, tab_id, session_pid)
-    apply_shell_runtime_transition(state, runtime)
-  end
-
-  @doc """
-  Rebuilds the agent rendering cache from the Session process when
-  switching to an agent tab. The Session is the source of truth for
-  status, pending approval, and error; the cache lives on
-  the Traditional agent-surface owner and is repopulated from the Tab's session
-  pid on every tab switch.
-
-  The session pid itself lives on `Tab.session` (see `set_tab_session/3`),
-  not on the agent cache. `AgentAccess.session/1` reads it through the
-  shell behaviour.
-  """
-  @spec rebuild_agent_from_session(t(), Tab.t()) :: t()
-  def rebuild_agent_from_session(state, %Tab{kind: :agent, session: session_pid})
-      when is_pid(session_pid) do
-    case agent_snapshot(session_pid) do
-      nil ->
-        AgentAccess.update_agent(state, &AgentState.clear_active_tool_name/1)
-
-      snapshot ->
-        AgentAccess.update_agent(state, fn agent ->
-          AgentState.apply_session_snapshot(
-            agent,
-            snapshot.status,
-            snapshot.pending_approval,
-            snapshot.error,
-            Map.get(snapshot, :active_tool_name)
-          )
-        end)
-    end
-  end
-
-  def rebuild_agent_from_session(state, _tab), do: state
-
-  @spec agent_snapshot(pid()) :: map() | nil
-  defp agent_snapshot(session_pid) do
-    AgentSession.editor_snapshot(session_pid)
-  catch
-    :exit, _ -> nil
-  end
-
-  # ── Mode transitions ────────────────────────────────────────────────────────
-
-  @doc """
-  Transitions the editor to a new vim mode.
-
-  Convenience wrapper around `VimState.transition/3` that operates on
-  the full EditorState. This is the preferred API for call sites that
-  already have an EditorState.
-
-  ## Examples
-
-      # Simple transition (uses default mode_state):
-      EditorState.transition_mode(state, :normal)
-      EditorState.transition_mode(state, :insert)
-
-      # With explicit mode_state (required for visual, search, etc.):
-      EditorState.transition_mode(state, :visual, %VisualState{...})
-  """
-  @spec transition_mode(t(), Mode.mode(), Mode.state() | nil) :: t()
-  def transition_mode(%__MODULE__{} = state, mode, mode_state \\ nil) do
-    update_workspace(state, &SessionState.transition_mode(&1, mode, mode_state))
   end
 
   # Agent events queued during the blocking editor snapshot call cannot
@@ -2180,7 +1297,7 @@ defmodule MingaEditor.State do
   # unchanged session pid. See #1401 for the full analysis.
   @spec sync_active_agent_transcript(t()) :: t()
   defp sync_active_agent_transcript(state) do
-    session = AgentAccess.session(state)
+    session = MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
 
     if is_pid(session) do
       MingaEditor.AgentLifecycle.sync_transcript(state)

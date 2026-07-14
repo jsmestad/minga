@@ -7,9 +7,7 @@ defmodule MingaEditor.Input.ScopedAgentSubStatesTest do
   import Minga.Test.ScopedInputHelpers
 
   alias MingaEditor.Agent.DiffReview
-  alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.Preview
-  alias MingaEditor.State.AgentAccess
 
   describe "agent scope — tool approval sub-state" do
     setup do
@@ -22,7 +20,12 @@ defmodule MingaEditor.Input.ScopedAgentSubStatesTest do
       }
 
       state =
-        AgentAccess.update_agent(state, fn agent -> %{agent | pending_approval: approval} end)
+        MingaEditor.Shell.Traditional.Workflow.install_agent_state(
+          state,
+          (fn agent -> %{agent | pending_approval: approval} end).(
+            MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
+          )
+        )
 
       {:ok, state: state}
     end
@@ -36,15 +39,19 @@ defmodule MingaEditor.Input.ScopedAgentSubStatesTest do
     test "unrelated key passes through approval routing", %{state: state} do
       {:handled, new_state} = walk_surface_handlers(state, ?x, 0)
       # The approval handler passes it through, and downstream routing still handles the key.
-      assert AgentAccess.agent(new_state).pending_approval != nil
+      assert MingaEditor.Shell.Traditional.State.agent(new_state.shell_runtime.state).pending_approval !=
+               nil
     end
 
     test "only triggers when input is not focused", %{state: state} do
       # If input is focused in insert mode, approval keys should not be intercepted
       state =
-        AgentAccess.update_panel(state, fn p ->
-          %{p | input_focused: true, visible: true}
-        end)
+        MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
+          state,
+          (fn p ->
+             %{p | input_focused: true, visible: true}
+           end).(state.workspace.agent_ui.panel)
+        )
 
       state = %{
         state
@@ -53,7 +60,7 @@ defmodule MingaEditor.Input.ScopedAgentSubStatesTest do
 
       {:handled, new_state} = walk_surface_handlers(state, ?y, 0)
       # Should have typed 'y' into input, not approved
-      assert UIState.input_text(AgentAccess.panel(new_state)) =~ "y"
+      assert MingaEditor.Agent.PromptBuffer.input_text(new_state.workspace.agent_ui.panel) =~ "y"
     end
   end
 
@@ -65,9 +72,12 @@ defmodule MingaEditor.Input.ScopedAgentSubStatesTest do
       review = DiffReview.new("test.ex", "old line\n", "new line\n")
 
       state =
-        AgentAccess.update_view(state, fn v ->
-          %{v | preview: %Preview{content: {:diff, review}}}
-        end)
+        MingaEditor.Shell.Traditional.Workflow.install_agent_view(
+          state,
+          (fn v ->
+             %{v | preview: %Preview{content: {:diff, review}}}
+           end).(state.workspace.agent_ui.view)
+        )
 
       {:ok, state: state}
     end
@@ -84,9 +94,12 @@ defmodule MingaEditor.Input.ScopedAgentSubStatesTest do
       review = DiffReview.new("test.ex", "old line\n", "new line\n")
 
       state =
-        AgentAccess.update_view(state, fn v ->
-          %{v | preview: %Preview{content: {:diff, review}}}
-        end)
+        MingaEditor.Shell.Traditional.Workflow.install_agent_view(
+          state,
+          (fn v ->
+             %{v | preview: %Preview{content: {:diff, review}}}
+           end).(state.workspace.agent_ui.view)
+        )
 
       # In :chat focus, y should resolve through the scope trie, not diff review
       {:handled, _new_state} = walk_surface_handlers(state, ?y, 0)
@@ -107,36 +120,42 @@ defmodule MingaEditor.Input.ScopedAgentSubStatesTest do
       }
 
       state =
-        AgentAccess.update_panel(state, fn p -> %{p | mention_completion: completion} end)
+        MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
+          state,
+          (fn p -> %{p | mention_completion: completion} end).(state.workspace.agent_ui.panel)
+        )
 
       {:ok, state: state}
     end
 
     test "Tab moves to next candidate", %{state: state} do
       {:handled, new_state} = walk_surface_handlers(state, 9, 0)
-      assert AgentAccess.panel(new_state).mention_completion.selected == 1
+      assert new_state.workspace.agent_ui.panel.mention_completion.selected == 1
     end
 
     test "Enter and Escape clear mention completion", %{state: state} do
       for key <- [13, 27] do
         {:handled, new_state} = walk_surface_handlers(state, key, 0)
-        assert AgentAccess.panel(new_state).mention_completion == nil
+        assert new_state.workspace.agent_ui.panel.mention_completion == nil
       end
     end
 
     test "printable char narrows candidates", %{state: state} do
       {:handled, new_state} = walk_surface_handlers(state, ?t, 0)
-      comp = AgentAccess.panel(new_state).mention_completion
+      comp = new_state.workspace.agent_ui.panel.mention_completion
 
       if comp != nil do
         assert Enum.count(comp.candidates) <=
-                 Enum.count(AgentAccess.panel(state).mention_completion.candidates)
+                 Enum.count(state.workspace.agent_ui.panel.mention_completion.candidates)
       end
     end
 
     test "mention only intercepts in insert mode", %{state: state} do
       state =
-        AgentAccess.update_panel(state, fn p -> %{p | input_focused: false} end)
+        MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
+          state,
+          (fn p -> %{p | input_focused: false} end).(state.workspace.agent_ui.panel)
+        )
 
       {:handled, _new_state} = walk_surface_handlers(state, ?j, 0)
     end
@@ -149,12 +168,12 @@ defmodule MingaEditor.Input.ScopedAgentSubStatesTest do
       {:handled, state} = walk_surface_handlers(state, ?/, 0)
       {:handled, state} = walk_surface_handlers(state, ?m, 0)
       {:handled, state} = walk_surface_handlers(state, ?o, 0)
-      comp = AgentAccess.panel(state).mention_completion
+      comp = state.workspace.agent_ui.panel.mention_completion
       assert comp.slash_candidates == [{"model", "Set the model: /model <name>"}]
 
       {:handled, state} = walk_surface_handlers(state, 13, 0)
-      assert Minga.Buffer.content(AgentAccess.panel(state).prompt_buffer) == "/model "
-      assert AgentAccess.panel(state).mention_completion == nil
+      assert Minga.Buffer.content(state.workspace.agent_ui.panel.prompt_buffer) == "/model "
+      assert state.workspace.agent_ui.panel.mention_completion == nil
     end
 
     test "re-summons slash completion after the first command character" do
@@ -164,12 +183,12 @@ defmodule MingaEditor.Input.ScopedAgentSubStatesTest do
       {:handled, state} = walk_surface_handlers(state, ?m, 0)
       {:handled, state} = walk_surface_handlers(state, ?o, 0)
       {:handled, state} = walk_surface_handlers(state, 27, 0)
-      assert AgentAccess.panel(state).mention_completion == nil
+      assert state.workspace.agent_ui.panel.mention_completion == nil
 
       {:handled, state} = walk_surface_handlers(state, ?/, 0)
-      comp = AgentAccess.panel(state).mention_completion
+      comp = state.workspace.agent_ui.panel.mention_completion
 
-      assert Minga.Buffer.content(AgentAccess.panel(state).prompt_buffer) == "/mo"
+      assert Minga.Buffer.content(state.workspace.agent_ui.panel.prompt_buffer) == "/mo"
       assert comp.prefix == "mo"
       assert comp.slash_candidates == [{"model", "Set the model: /model <name>"}]
     end
@@ -183,12 +202,12 @@ defmodule MingaEditor.Input.ScopedAgentSubStatesTest do
       {:handled, state} = walk_surface_handlers(state, ?m, 0)
       {:handled, state} = walk_surface_handlers(state, ?o, 0)
       {:handled, state} = walk_surface_handlers(state, 27, 0)
-      assert AgentAccess.panel(state).mention_completion == nil
+      assert state.workspace.agent_ui.panel.mention_completion == nil
 
       {:handled, state} = walk_surface_handlers(state, ?/, 0)
-      comp = AgentAccess.panel(state).mention_completion
+      comp = state.workspace.agent_ui.panel.mention_completion
 
-      assert Minga.Buffer.content(AgentAccess.panel(state).prompt_buffer) == "/mo"
+      assert Minga.Buffer.content(state.workspace.agent_ui.panel.prompt_buffer) == "/mo"
       assert comp.prefix == "mo"
       assert comp.slash_candidates == [{"model", "Set the model: /model <name>"}]
     end
@@ -213,14 +232,17 @@ defmodule MingaEditor.Input.ScopedAgentSubStatesTest do
       }
 
       state =
-        AgentAccess.update_panel(state, fn p -> %{p | mention_completion: completion} end)
+        MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
+          state,
+          (fn p -> %{p | mention_completion: completion} end).(state.workspace.agent_ui.panel)
+        )
 
       {:ok, state: state}
     end
 
     test "mention completion intercepts keys in editor panel too", %{state: state} do
       {:handled, new_state} = walk_surface_handlers(state, 27, 0)
-      assert AgentAccess.panel(new_state).mention_completion == nil
+      assert new_state.workspace.agent_ui.panel.mention_completion == nil
     end
   end
 end

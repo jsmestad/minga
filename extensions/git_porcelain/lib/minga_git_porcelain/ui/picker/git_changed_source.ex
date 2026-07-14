@@ -50,11 +50,11 @@ defmodule MingaGitPorcelain.UI.Picker.GitChangedSource do
 
     Log.debug(:editor, "[git_changed_picker] on_select path=#{rel_path}")
 
-    case EditorState.find_buffer_by_path(state, abs_path) do
+    case MingaEditor.Handlers.BufferRegistry.find_buffer_by_path(state, abs_path) do
       nil ->
-        case EditorState.start_buffer(abs_path, EditorState.options_server(state)) do
+        case MingaEditor.Commands.start_buffer(abs_path, state.interaction.options_server) do
           {:ok, pid} ->
-            EditorState.add_buffer(state, pid)
+            MingaEditor.Handlers.BufferRegistry.add_buffer(state, pid)
 
           {:error, reason} ->
             Log.error(:editor, "Failed to open file: #{inspect(reason)}")

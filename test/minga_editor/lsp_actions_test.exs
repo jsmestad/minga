@@ -8,6 +8,7 @@ defmodule MingaEditor.LspActionsTest do
   alias MingaEditor.LspActions
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.Frontend, as: FrontendState
   alias MingaEditor.State.Highlighting
   alias MingaEditor.State.Mouse
   alias MingaEditor.UI.Picker.CodeActionSource
@@ -259,14 +260,15 @@ defmodule MingaEditor.LspActionsTest do
     test "leaves existing hints unchanged for empty or failed responses" do
       for response <- [{:error, "fail"}, {:ok, nil}, {:ok, []}] do
         state = fake_state()
-        state = put_in(state.lsp, MingaEditor.State.LSP.set_inlay_hints(state.lsp, [%{line: 0}]))
+        lsp = MingaEditor.State.LSP.set_inlay_hints(state.lsp, [%{line: 0}])
+        state = %{state | lsp: lsp}
         assert LspActions.handle_inlay_hint_response(state, response) == state
       end
     end
 
     test "schedules hints only when a Zig viewport changes, replacing existing timers" do
       state = fake_state()
-      state = put_in(state.lsp, %{state.lsp | last_inlay_viewport_top: 0})
+      state = %{state | lsp: MingaEditor.State.LSP.remember_inlay_viewport(state.lsp, 0)}
       assert LspActions.schedule_inlay_hints_on_scroll(state).lsp.inlay_hint_debounce_timer == nil
 
       headless_state = state_with_active_buffer(fake_state(), start_buffer!("hello"), top: 10)
@@ -274,20 +276,24 @@ defmodule MingaEditor.LspActionsTest do
       assert LspActions.schedule_inlay_hints_on_scroll(headless_state).lsp.inlay_hint_debounce_timer ==
                nil
 
-      zig_state = %{
+      tui_state =
         state_with_active_buffer(fake_state(), start_buffer!("hello"), top: 5)
-        | backend: :zig
-      }
+        |> then(fn state ->
+          %FrontendState{} = frontend = state.frontend
+          %{state | frontend: %{frontend | backend: :tui}}
+        end)
 
-      scheduled = LspActions.schedule_inlay_hints_on_scroll(zig_state)
+      scheduled = LspActions.schedule_inlay_hints_on_scroll(tui_state)
       first_timer = scheduled.lsp.inlay_hint_debounce_timer
       assert first_timer != nil
       assert scheduled.lsp.last_inlay_viewport_top == 5
 
+      viewport = %{scheduled.frontend.terminal_viewport | top: 15}
+
       rescheduled =
         LspActions.schedule_inlay_hints_on_scroll(%{
           scheduled
-          | terminal_viewport: %{scheduled.terminal_viewport | top: 15}
+          | frontend: FrontendState.resize_terminal(scheduled.frontend, viewport)
         })
 
       assert rescheduled.lsp.inlay_hint_debounce_timer != first_timer
@@ -386,7 +392,14 @@ defmodule MingaEditor.LspActionsTest do
   defp state_with_active_buffer(state, buf, opts) do
     top = Keyword.fetch!(opts, :top)
     state = %{state | workspace: %{state.workspace | buffers: %Buffers{active: buf, list: [buf]}}}
-    %{state | terminal_viewport: %{state.terminal_viewport | top: top}}
+
+    frontend =
+      FrontendState.resize_terminal(
+        state.frontend,
+        %{state.frontend.terminal_viewport | top: top}
+      )
+
+    %{state | frontend: frontend}
   end
 
   defp picker_context(actions) do
@@ -408,9 +421,8 @@ defmodule MingaEditor.LspActionsTest do
     viewport = Viewport.new(24, 80)
 
     %EditorState{
-      port_manager: nil,
-      terminal_viewport: viewport,
-      highlighting: %Highlighting{},
+      frontend: %MingaEditor.State.Frontend{port_manager: nil, terminal_viewport: viewport},
+      parser: %MingaEditor.State.Parser{highlighting: %Highlighting{}},
       workspace: %SessionState{viewport: viewport}
     }
   end

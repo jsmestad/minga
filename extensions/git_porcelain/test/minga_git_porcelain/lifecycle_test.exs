@@ -77,7 +77,11 @@ defmodule MingaGitPorcelain.LifecycleTest do
     {:ok, entry} = ExtRegistry.get(ctx.registry, :minga_git_porcelain)
 
     assert {:ok, pid} =
-             ExtSupervisor.start_extension(ctx.supervisor, ctx.registry, :minga_git_porcelain, entry,
+             ExtSupervisor.start_extension(
+               ctx.supervisor,
+               ctx.registry,
+               :minga_git_porcelain,
+               entry,
                command_registry: ctx.command_registry,
                keymap: ctx.keymap
              )
@@ -89,7 +93,11 @@ defmodule MingaGitPorcelain.LifecycleTest do
     {:ok, entry} = ExtRegistry.get(ctx.registry, :minga_git_porcelain)
 
     assert :ok =
-             ExtSupervisor.stop_extension(ctx.supervisor, ctx.registry, :minga_git_porcelain, entry,
+             ExtSupervisor.stop_extension(
+               ctx.supervisor,
+               ctx.registry,
+               :minga_git_porcelain,
+               entry,
                command_registry: ctx.command_registry,
                keymap: ctx.keymap
              )

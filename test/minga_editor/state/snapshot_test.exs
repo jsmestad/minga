@@ -1,6 +1,7 @@
 defmodule MingaEditor.State.SnapshotTest do
   use ExUnit.Case, async: true
 
+  alias MingaEditor.Session.State, as: SessionState
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.FeatureState
   alias MingaEditor.Shell.Runtime
@@ -21,15 +22,21 @@ defmodule MingaEditor.State.SnapshotTest do
     mode = Keyword.get(opts, :mode, :normal)
 
     %EditorState{
-      port_manager: nil,
+      frontend: %MingaEditor.State.Frontend{port_manager: nil},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: %VimState{mode: mode, mode_state: Mode.initial_state()},
         buffers: %Buffers{
           active: buf,
-          list: if(buf, do: [buf], else: [])
+          list:
+            if buf do
+              [buf]
+            else
+              []
+            end
         },
-        keymap_scope: Keyword.get(opts, :keymap_scope, :editor)
+        keymap_scope: Keyword.get(opts, :keymap_scope, :editor),
+        file_tree: Keyword.get(opts, :file_tree, %FileTreeState{})
       },
       shell_runtime:
         Runtime.new(
@@ -61,12 +68,20 @@ defmodule MingaEditor.State.SnapshotTest do
       {:ok, buf} = BufferProcess.start_link(content: "hello")
       pending = %{make_ref() => :signature_help}
       state = make_state(buffer: buf, mode: :insert, keymap_scope: :editor)
-      state = put_in(state.workspace.lsp_pending, pending)
+      state = %{state | workspace: SessionState.set_lsp_pending(state.workspace, pending)}
 
       highlighting = %Highlighting{highlights: %{buf => Highlight.new()}}
 
-      state = put_in(state.highlighting, highlighting)
-      state = put_in(state.injection_ranges, %{buf => [:range]})
+      state = %{
+        state
+        | parser: MingaEditor.State.Parser.accept_highlighting(state.parser, highlighting)
+      }
+
+      state = %{
+        state
+        | parser:
+            MingaEditor.State.Parser.accept_injection_ranges(state.parser, %{buf => [:range]})
+      }
 
       ctx = EditorState.snapshot_tab_context(state)
 
@@ -87,7 +102,15 @@ defmodule MingaEditor.State.SnapshotTest do
     test "normalises transient editing state before snapshotting" do
       state = make_state(mode: :normal)
       command_state = %Mode.CommandState{input: ""}
-      state = put_in(state.workspace.editing, %VimState{mode: :normal, mode_state: command_state})
+
+      state = %{
+        state
+        | workspace:
+            SessionState.set_editing(state.workspace, %VimState{
+              mode: :normal,
+              mode_state: command_state
+            })
+      }
 
       ctx = EditorState.snapshot_tab_context(state)
 
@@ -191,8 +214,10 @@ defmodule MingaEditor.State.SnapshotTest do
       file_tree = %FileTreeState{project_root: "/tmp/project"}
 
       file_state =
-        make_state(tab_bar: TabBar.new(Tab.new_file(1, "new.ex")))
-        |> EditorState.update_workspace(&MingaEditor.Session.State.set_file_tree(&1, file_tree))
+        make_state(
+          tab_bar: TabBar.new(Tab.new_file(1, "new.ex")),
+          file_tree: file_tree
+        )
 
       file_restored = EditorState.restore_tab_context(file_state, %{})
       file_ctx = TabBar.active(EditorState.tab_bar(file_restored)).context
@@ -203,8 +228,10 @@ defmodule MingaEditor.State.SnapshotTest do
       assert FeatureState.empty?(file_ctx.feature_state)
 
       agent_state =
-        make_state(tab_bar: TabBar.new(Tab.new_agent(1, "Agent")))
-        |> EditorState.update_workspace(&MingaEditor.Session.State.set_file_tree(&1, file_tree))
+        make_state(
+          tab_bar: TabBar.new(Tab.new_agent(1, "Agent")),
+          file_tree: file_tree
+        )
 
       agent_restored = EditorState.restore_tab_context(agent_state, %{})
       agent_ctx = TabBar.active(EditorState.tab_bar(agent_restored)).context
@@ -298,10 +325,17 @@ defmodule MingaEditor.State.SnapshotTest do
       # Build state with two buffers, buf_a active
       state_with_both =
         make_state(buffer: buf_a)
-        |> put_in(
-          [Access.key(:workspace), Access.key(:buffers)],
-          %Buffers{active: buf_a, list: [buf_a, buf_b], active_index: 0}
-        )
+        |> then(fn state ->
+          %{
+            state
+            | workspace:
+                SessionState.set_buffers(state.workspace, %Buffers{
+                  active: buf_a,
+                  list: [buf_a, buf_b],
+                  active_index: 0
+                })
+          }
+        end)
 
       # Snapshot the context
       ctx = EditorState.snapshot_tab_context(state_with_both)

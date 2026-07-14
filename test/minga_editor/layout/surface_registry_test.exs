@@ -229,9 +229,9 @@ defmodule MingaEditor.Layout.SurfaceRegistryTest do
   describe "single active overlay (AC-4)" do
     test "with a bottom panel visible, the panel is placed as floating chrome above the editor" do
       state = %MingaEditor.State{
-        port_manager: self(),
+        frontend: %MingaEditor.State.Frontend{port_manager: self()},
         workspace: %SessionState{viewport: Viewport.new(24, 80), editing: VimState.new()},
-        layout: single_window_layout(),
+        render: %MingaEditor.State.Render{layout: single_window_layout()},
         shell_runtime:
           Runtime.new(
             Runtime.default_entry(),

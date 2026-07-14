@@ -31,9 +31,9 @@ defmodule MingaEditor.Input.Scoped do
   alias MingaEditor.Commands
   alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.Input.AgentPanel
   alias MingaEditor.Commands.AgentSubStates
+  alias MingaEditor.Shell.Traditional.Workflow, as: TraditionalWorkflow
   alias Minga.Keymap
 
   alias Minga.Keymap.Scope
@@ -59,7 +59,9 @@ defmodule MingaEditor.Input.Scoped do
     if Minga.Editing.active_model(state) == Minga.Editing.Model.CUA do
       key = {cp, mods}
 
-      case Keymap.resolve_scoped_key(:editor, :cua, key, EditorState.keymap_context(state)) do
+      case Keymap.resolve_scoped_key(:editor, :cua, key,
+             keymap_server: state.interaction.keymap_server
+           ) do
         {:command, command} ->
           {:handled, Commands.execute(state, command)}
 
@@ -97,8 +99,13 @@ defmodule MingaEditor.Input.Scoped do
 
   # Dismiss toast on any key (then re-process)
   defp handle_agent_key(state, cp, mods) do
-    if AgentAccess.view(state).toast != nil do
-      state = AgentAccess.update_agent_ui(state, &UIState.dismiss_toast/1)
+    if state.workspace.agent_ui.view.toast != nil do
+      state =
+        TraditionalWorkflow.install_agent_ui(
+          state,
+          UIState.dismiss_toast(state.workspace.agent_ui)
+        )
+
       handle_agent_key(state, cp, mods)
     else
       do_handle_agent_key(state, cp, mods)
@@ -106,7 +113,7 @@ defmodule MingaEditor.Input.Scoped do
   end
 
   defp do_handle_agent_key(state, cp, mods) do
-    panel = AgentAccess.panel(state)
+    panel = state.workspace.agent_ui.panel
 
     # SPC when not in insert mode: passthrough to leader/which-key
     if cp == @space and not panel.input_focused and band(mods, @ctrl) == 0 do
@@ -122,7 +129,7 @@ defmodule MingaEditor.Input.Scoped do
   end
 
   defp dispatch_agent_key_inner(state, cp, mods) do
-    panel = AgentAccess.panel(state)
+    panel = state.workspace.agent_ui.panel
 
     # Sub-state handlers (search, mention, approval, diff review) are now
     # separate Input.Handler modules in the surface handler list. They run
@@ -142,8 +149,8 @@ defmodule MingaEditor.Input.Scoped do
   defp dispatch_agent_key_vim(state, panel, cp, mods) do
     # Tab on a paste placeholder line: toggle expand/collapse
     if cp == @tab and mods == 0 and panel.input_focused do
-      {cursor_line, _} = UIState.input_cursor(panel)
-      current_line = Enum.at(UIState.input_lines(panel), cursor_line)
+      {cursor_line, _} = MingaEditor.Agent.PromptBuffer.input_cursor(panel)
+      current_line = Enum.at(MingaEditor.Agent.PromptBuffer.input_lines(panel), cursor_line)
 
       if UIState.paste_placeholder?(current_line) or cursor_on_expanded_block?(panel) do
         {:handled, AgentCommands.toggle_paste_expand(state)}
@@ -202,14 +209,18 @@ defmodule MingaEditor.Input.Scoped do
     key = {cp, mods}
 
     # Check if we're continuing a prefix sequence
-    case state |> AgentAccess.view() |> UIState.View.pending_prefix() do
+    case state.workspace.agent_ui.view |> UIState.View.pending_prefix() do
       nil ->
         # Fresh lookup
         resolve_scope_key(state, :agent, vim_state, key, cp, mods)
 
       prefix_node when is_map(prefix_node) ->
         # Continuing a prefix sequence stored as a trie node
-        state = AgentAccess.update_agent_ui(state, &UIState.clear_prefix/1)
+        state =
+          TraditionalWorkflow.install_agent_ui(
+            state,
+            UIState.clear_prefix(state.workspace.agent_ui)
+          )
 
         case Keymap.Bindings.lookup(prefix_node, key) do
           {:command, command} ->
@@ -217,7 +228,11 @@ defmodule MingaEditor.Input.Scoped do
 
           {:prefix, sub_node} ->
             # Another prefix level (rare)
-            {:handled, AgentAccess.update_agent_ui(state, &UIState.set_prefix(&1, sub_node))}
+            {:handled,
+             TraditionalWorkflow.install_agent_ui(
+               state,
+               (&UIState.set_prefix(&1, sub_node)).(state.workspace.agent_ui)
+             )}
 
           :not_found ->
             # Invalid prefix continuation, re-process the key normally
@@ -226,7 +241,12 @@ defmodule MingaEditor.Input.Scoped do
 
       _atom_prefix ->
         # Legacy atom prefix (shouldn't happen in new system, but handle gracefully)
-        state = AgentAccess.update_agent_ui(state, &UIState.clear_prefix/1)
+        state =
+          TraditionalWorkflow.install_agent_ui(
+            state,
+            UIState.clear_prefix(state.workspace.agent_ui)
+          )
+
         resolve_scope_key(state, :agent, vim_state, key, cp, mods)
     end
   end
@@ -241,12 +261,18 @@ defmodule MingaEditor.Input.Scoped do
         ) ::
           MingaEditor.Input.Handler.result()
   defp resolve_scope_key(state, scope_name, vim_state, key, cp, mods) do
-    case Keymap.resolve_scoped_key(scope_name, vim_state, key, EditorState.keymap_context(state)) do
+    case Keymap.resolve_scoped_key(scope_name, vim_state, key,
+           keymap_server: state.interaction.keymap_server
+         ) do
       {:command, command} ->
         {:handled, Commands.execute(state, command)}
 
       {:prefix, prefix_node} ->
-        {:handled, AgentAccess.update_agent_ui(state, &UIState.set_prefix(&1, prefix_node))}
+        {:handled,
+         TraditionalWorkflow.install_agent_ui(
+           state,
+           (&UIState.set_prefix(&1, prefix_node)).(state.workspace.agent_ui)
+         )}
 
       :not_found ->
         # No scope binding. In insert mode or CUA mode, self-insert printable chars.
@@ -305,8 +331,8 @@ defmodule MingaEditor.Input.Scoped do
   # Used by handle_agent_key for Tab handling on paste placeholder lines.
   @spec cursor_on_expanded_block?(Panel.t()) :: boolean()
   defp cursor_on_expanded_block?(%Panel{pasted_blocks: blocks} = panel) do
-    {cursor_line, _} = Panel.input_cursor(panel)
-    lines = Panel.input_lines(panel)
+    {cursor_line, _} = MingaEditor.Agent.PromptBuffer.input_cursor(panel)
+    lines = MingaEditor.Agent.PromptBuffer.input_lines(panel)
 
     blocks
     |> Enum.filter(& &1.expanded)

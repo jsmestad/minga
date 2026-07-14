@@ -21,13 +21,18 @@ defmodule MingaEditor.Startup do
   alias MingaEditor.Shell.Runtime, as: ShellRuntime
   alias MingaEditor.Sidebar.BuiltinSurfaces
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.AgentConnection
+  alias MingaEditor.State.ExtensionSurfaces
+  alias MingaEditor.State.Frontend, as: FrontendState
+  alias MingaEditor.State.Interaction
+  alias MingaEditor.State.Parser, as: ParserState
+  alias MingaEditor.State.Render, as: RenderState
   alias MingaEditor.State.Session, as: EditorSessionState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace.Persistence, as: WorkspacePersistence
   alias MingaEditor.State.Windows
-  alias MingaEditor.UI.Panel.MessageStore
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Window
@@ -36,24 +41,39 @@ defmodule MingaEditor.Startup do
 
   @doc "Runs the one-time startup work (swap recovery, agent session, save timer) exactly once per session."
   @spec ensure_session_started(EditorState.t()) :: EditorState.t()
-  def ensure_session_started(%EditorState{session_started?: true} = state), do: state
+  def ensure_session_started(
+        %EditorState{session: %EditorSessionState{session_started?: true}} = state
+      ),
+      do: state
 
   def ensure_session_started(%EditorState{} = state) do
     SessionRestore.maybe_check_swap_recovery(state)
 
-    state =
-      state
-      |> AgentLifecycle.maybe_start_session()
-      |> maybe_start_save_timer()
+    state = AgentLifecycle.maybe_start_session(state)
 
-    %{state | session_started?: true}
+    %{
+      state
+      | session:
+          MingaEditor.State.Session.complete_startup(state.session, maybe_start_save_timer(state))
+    }
   end
 
-  @spec maybe_start_save_timer(EditorState.t()) :: EditorState.t()
-  defp maybe_start_save_timer(%EditorState{backend: :headless} = state), do: state
+  @spec maybe_start_save_timer(EditorState.t()) :: EditorSessionState.t()
+  defp maybe_start_save_timer(%EditorState{
+         frontend: %FrontendState{backend: :headless},
+         session: session
+       }),
+       do: session
 
-  defp maybe_start_save_timer(%EditorState{} = state) do
-    %{state | session: EditorSessionState.start_timer(state.session)}
+  defp maybe_start_save_timer(%EditorState{session: session}) do
+    case EditorSessionState.start_timer(session) do
+      {:no_timer, session} ->
+        session
+
+      {:start_timer, session} ->
+        ref = Process.send_after(self(), :save_session, EditorSessionState.timer_interval())
+        EditorSessionState.accept_timer(session, ref)
+    end
   end
 
   @doc """
@@ -167,27 +187,51 @@ defmodule MingaEditor.Startup do
     shell_entry = resolve_shell(opts)
 
     state = %EditorState{
-      backend: backend,
-      rendering: rendering,
       workspace: workspace,
-      port_manager: port_manager,
-      parser_manager: parser_manager,
-      agent_provider_module: Keyword.get(opts, :agent_provider_module),
-      agent_provider_opts: Keyword.get(opts, :agent_provider_opts, []),
-      keymap_server: keymap_server,
-      options_server: options_server,
-      events_registry: events_registry,
-      sidebar_registry: sidebar_registry,
-      effect_scheduler: Keyword.get(opts, :effect_scheduler),
-      editing_model: editing_model,
-      focus_stack: MingaEditor.Input.default_stack(),
       shell_runtime: ShellRuntime.new(shell_entry, init_shell_state(shell_entry.module, opts)),
-      message_store: MessageStore.new(),
+      frontend:
+        FrontendState.new(
+          backend: backend,
+          rendering: rendering,
+          port_manager: port_manager
+        ),
+      render: RenderState.new(),
+      parser: ParserState.new(parser_manager),
+      agent_connection:
+        AgentConnection.new(
+          Keyword.get(opts, :agent_provider_module),
+          Keyword.get(opts, :agent_provider_opts, [])
+        ),
+      interaction:
+        Interaction.new(
+          editing_model: editing_model,
+          keymap_server: keymap_server,
+          options_server: options_server,
+          focus_stack: MingaEditor.Input.default_stack()
+        ),
+      extension_surfaces:
+        ExtensionSurfaces.new(
+          events_registry: events_registry,
+          sidebar_registry: sidebar_registry
+        ),
+      effect_scheduler: Keyword.get(opts, :effect_scheduler),
       session: EditorSessionState.new(Keyword.take(opts, [:swap_dir, :session_dir]))
     }
 
     state =
-      EditorState.set_tab_bar(state, initial_tab_bar(active_buf, keymap_scope, project_root))
+      then(state, fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            initial_tab_bar(active_buf, keymap_scope, project_root)
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
 
     state =
       case agent_state_update do
@@ -202,9 +246,22 @@ defmodule MingaEditor.Startup do
     # Without this, the first tab starts with an empty context, and
     # restore_tab_context falls back to file defaults (wrong for agent tabs).
     context = EditorState.snapshot_tab_context(state)
-    current_tb = EditorState.tab_bar(state)
+    current_tb = state.shell_runtime.state.tab_bar
     tb = TabBar.update_context(current_tb, current_tb.active_id, context)
-    EditorState.set_tab_bar(state, tb)
+
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          tb
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   @spec rendering_policy(keyword()) :: EditorState.rendering_policy()
@@ -428,9 +485,9 @@ defmodule MingaEditor.Startup do
 
   @spec agent_view_state() :: {atom(), UIState.t()}
   defp agent_view_state do
-    base = UIState.new()
-    av = %UIState{base | view: MingaEditor.Agent.UIState.View.activate(base.view, nil, nil)}
-    {:agent, av}
+    ui = UIState.new()
+    view = MingaEditor.Agent.UIState.View.activate(ui.view, nil, nil)
+    {:agent, UIState.replace_view(ui, view)}
   end
 
   @spec editor_view_state() :: {atom(), UIState.t()}
@@ -469,7 +526,7 @@ defmodule MingaEditor.Startup do
   """
   @spec apply_config_options(MingaEditor.State.t()) :: MingaEditor.State.t()
   def apply_config_options(state) do
-    theme_name = Options.get(EditorState.options_server(state), :theme)
+    theme_name = Options.get(state.interaction.options_server, :theme)
     theme = MingaEditor.UI.Theme.get!(theme_name)
     state = EditorState.apply_theme(state, theme)
 
@@ -525,13 +582,13 @@ defmodule MingaEditor.Startup do
   ligatures/fallback configuration, which remains an out-of-band font setup push.
   """
   @spec send_font_config(MingaEditor.State.t()) :: :ok
-  def send_font_config(%{port_manager: nil}), do: :ok
+  def send_font_config(%EditorState{frontend: %{port_manager: nil}}), do: :ok
 
-  def send_font_config(%{port_manager: port} = state) do
-    options_server = EditorState.options_server(state)
+  def send_font_config(%EditorState{frontend: %{port_manager: port}} = state) do
+    options_server = state.interaction.options_server
     family = Options.get(options_server, :font_family)
     config_size = Options.get(options_server, :font_size)
-    size = state.font_size_override || config_size
+    size = state.appearance.font_size_override || config_size
     ligatures = Options.get(options_server, :font_ligatures)
     weight = Options.get(options_server, :font_weight)
     fallback = Options.get(options_server, :font_fallback)

@@ -90,41 +90,205 @@ defmodule MingaEditor.State.Windows do
   @spec fetch(t(), Window.id()) :: {:ok, Window.t()} | :error
   def fetch(%__MODULE__{map: map}, id), do: Map.fetch(map, id)
 
-  @doc "Finds the first window matching the given predicate."
-  @spec find_by_content(t(), (Window.t() -> boolean())) :: {Window.id(), Window.t()} | nil
-  def find_by_content(%__MODULE__{map: map}, predicate) when is_function(predicate, 1) do
-    Enum.find(map, fn {_id, window} -> predicate.(window) end)
-  end
-
-  @doc """
-  Updates the window struct for the given window id.
-
-  Applies the given function to the window and stores the result.
-  Returns the struct unchanged if the id is not found.
-  """
-  @spec update(t(), Window.id(), (Window.t() -> Window.t())) :: t()
-  def update(%__MODULE__{map: windows} = win, id, fun) when is_function(fun, 1) do
-    case Map.fetch(windows, id) do
-      {:ok, window} -> %{win | map: Map.put(windows, id, fun.(window))}
-      :error -> win
+  @doc "Replaces one window with a concrete owner-produced value."
+  @spec replace_window(t(), Window.id(), Window.t()) :: t()
+  def replace_window(%__MODULE__{map: windows} = state, id, %Window{} = window) do
+    if Map.has_key?(windows, id) do
+      set_map(state, Map.put(windows, id, window))
+    else
+      state
     end
   end
 
-  @doc "Updates every window that shows the given buffer pid via a mapper function."
-  @spec update_by_buffer(t(), pid(), (Window.t() -> Window.t())) :: t()
-  def update_by_buffer(%__MODULE__{map: windows} = win, buffer, fun)
-      when is_pid(buffer) and is_function(fun, 1) do
-    %{win | map: Enum.reduce(windows, windows, &update_by_buffer(buffer, fun, &1, &2))}
+  @doc "Replaces every window showing a buffer with concrete owner-produced values."
+  @spec replace_buffer_windows(t(), pid(), %{Window.id() => Window.t()}) :: t()
+  def replace_buffer_windows(%__MODULE__{map: windows} = state, buffer, replacements)
+      when is_pid(buffer) and is_map(replacements) do
+    map =
+      Enum.reduce(windows, windows, fn
+        {id, %Window{buffer: ^buffer}}, acc ->
+          case Map.fetch(replacements, id) do
+            {:ok, %Window{} = window} -> Map.put(acc, id, window)
+            :error -> acc
+          end
+
+        _entry, acc ->
+          acc
+      end)
+
+    set_map(state, map)
   end
 
-  defp update_by_buffer(buffer, fun, {id, %Window{buffer: buffer}}, acc) do
-    case Map.fetch(acc, id) do
-      {:ok, current} -> Map.put(acc, id, fun.(current))
-      :error -> acc
+  @doc "Sets a window's pinned state."
+  @spec set_pinned(t(), Window.id(), boolean()) :: t()
+  def set_pinned(%__MODULE__{} = state, id, pinned?) when is_boolean(pinned?) do
+    case fetch(state, id) do
+      {:ok, window} -> replace_window(state, id, Window.set_pinned(window, pinned?))
+      :error -> state
     end
   end
 
-  defp update_by_buffer(_buffer, _fun, _entry, acc), do: acc
+  @doc "Resizes one window."
+  @spec resize(t(), Window.id(), non_neg_integer(), non_neg_integer()) :: t()
+  def resize(%__MODULE__{} = state, id, rows, cols) do
+    case fetch(state, id) do
+      {:ok, window} -> replace_window(state, id, Window.resize(window, rows, cols))
+      :error -> state
+    end
+  end
+
+  @doc "Sets one window's viewport."
+  @spec set_viewport(t(), Window.id(), MingaEditor.Viewport.t()) :: t()
+  def set_viewport(%__MODULE__{} = state, id, viewport) do
+    case fetch(state, id) do
+      {:ok, window} -> replace_window(state, id, Window.set_viewport(window, viewport))
+      :error -> state
+    end
+  end
+
+  @doc "Sets one window's cursor."
+  @spec set_cursor(t(), Window.id(), {non_neg_integer(), non_neg_integer()}) :: t()
+  def set_cursor(%__MODULE__{} = state, id, cursor) do
+    case fetch(state, id) do
+      {:ok, window} -> replace_window(state, id, Window.set_cursor(window, cursor))
+      :error -> state
+    end
+  end
+
+  @doc "Scrolls one window horizontally."
+  @spec scroll_horizontal(t(), Window.id(), integer()) :: t()
+  def scroll_horizontal(%__MODULE__{} = state, id, delta) do
+    case fetch(state, id) do
+      {:ok, window} -> replace_window(state, id, Window.scroll_horizontal(window, delta))
+      :error -> state
+    end
+  end
+
+  @doc "Replaces fold ranges in one window."
+  @spec set_fold_ranges(t(), Window.id(), list()) :: t()
+  def set_fold_ranges(%__MODULE__{} = state, id, ranges) when is_list(ranges) do
+    case fetch(state, id) do
+      {:ok, window} -> replace_window(state, id, Window.set_fold_ranges(window, ranges))
+      :error -> state
+    end
+  end
+
+  @doc "Replaces text-object positions in one window."
+  @spec set_textobject_positions(t(), Window.id(), map()) :: t()
+  def set_textobject_positions(%__MODULE__{} = state, id, positions) when is_map(positions) do
+    case fetch(state, id) do
+      {:ok, window} ->
+        replace_window(state, id, Window.set_textobject_positions(window, positions))
+
+      :error ->
+        state
+    end
+  end
+
+  @doc "Updates one window's fold state."
+  @spec toggle_fold(t(), Window.id(), non_neg_integer()) :: t()
+  def toggle_fold(%__MODULE__{} = state, id, line) do
+    case fetch(state, id) do
+      {:ok, window} -> replace_window(state, id, Window.toggle_fold(window, line))
+      :error -> state
+    end
+  end
+
+  @spec fold_at(t(), Window.id(), non_neg_integer()) :: t()
+  def fold_at(%__MODULE__{} = state, id, line) do
+    case fetch(state, id) do
+      {:ok, window} -> replace_window(state, id, Window.fold_at(window, line))
+      :error -> state
+    end
+  end
+
+  @spec unfold_at(t(), Window.id(), non_neg_integer()) :: t()
+  def unfold_at(%__MODULE__{} = state, id, line) do
+    case fetch(state, id) do
+      {:ok, window} -> replace_window(state, id, Window.unfold_at(window, line))
+      :error -> state
+    end
+  end
+
+  @spec fold_recursive_at(t(), Window.id(), non_neg_integer()) :: t()
+  def fold_recursive_at(%__MODULE__{} = state, id, line) do
+    case fetch(state, id) do
+      {:ok, window} -> replace_window(state, id, Window.fold_recursive_at(window, line))
+      :error -> state
+    end
+  end
+
+  @spec unfold_recursive_at(t(), Window.id(), non_neg_integer()) :: t()
+  def unfold_recursive_at(%__MODULE__{} = state, id, line) do
+    case fetch(state, id) do
+      {:ok, window} -> replace_window(state, id, Window.unfold_recursive_at(window, line))
+      :error -> state
+    end
+  end
+
+  @spec fold_all(t(), Window.id()) :: t()
+  def fold_all(%__MODULE__{} = state, id) do
+    case fetch(state, id) do
+      {:ok, window} -> replace_window(state, id, Window.fold_all(window))
+      :error -> state
+    end
+  end
+
+  @spec unfold_all(t(), Window.id()) :: t()
+  def unfold_all(%__MODULE__{} = state, id) do
+    case fetch(state, id) do
+      {:ok, window} -> replace_window(state, id, Window.unfold_all(window))
+      :error -> state
+    end
+  end
+
+  @spec unfold_containing(t(), Window.id(), [non_neg_integer()]) :: t()
+  def unfold_containing(%__MODULE__{} = state, id, lines) do
+    case fetch(state, id) do
+      {:ok, window} -> replace_window(state, id, Window.unfold_containing(window, lines))
+      :error -> state
+    end
+  end
+
+  @doc "Sets document symbols in every window showing a buffer."
+  @spec set_document_symbols_for_buffer(t(), pid(), list()) :: t()
+  def set_document_symbols_for_buffer(%__MODULE__{} = state, buffer, symbols)
+      when is_pid(buffer) and is_list(symbols) do
+    replacements =
+      Map.new(state.map, fn
+        {id, %Window{buffer: ^buffer} = window} ->
+          {id, Window.set_document_symbols(window, symbols)}
+
+        {id, window} ->
+          {id, window}
+      end)
+
+    replace_buffer_windows(state, buffer, replacements)
+  end
+
+  @doc "Finds the first window showing a buffer."
+  @spec find_by_buffer(t(), pid()) :: {Window.id(), Window.t()} | nil
+  def find_by_buffer(%__MODULE__{map: map}, buffer) when is_pid(buffer) do
+    Enum.find(map, fn {_id, %Window{buffer: window_buffer}} -> window_buffer == buffer end)
+  end
+
+  @doc "Finds the first agent chat window."
+  @spec find_agent_chat(t()) :: {Window.id(), Window.t()} | nil
+  def find_agent_chat(%__MODULE__{map: map}) do
+    Enum.find(map, fn
+      {_id, %Window{content: {:agent_chat, _}}} -> true
+      _entry -> false
+    end)
+  end
+
+  @doc "Finds the first buffer window."
+  @spec find_buffer_window(t()) :: {Window.id(), Window.t()} | nil
+  def find_buffer_window(%__MODULE__{map: map}) do
+    Enum.find(map, fn
+      {_id, %Window{content: {:buffer, _}}} -> true
+      _entry -> false
+    end)
+  end
 
   @doc """
   Returns all popup windows as a list of `{window_id, window}` tuples.

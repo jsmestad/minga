@@ -33,7 +33,8 @@ defmodule Minga.Credo.NoDelegateInEditorCheck do
   defp find_defdelegate({:defdelegate, meta, _args} = ast, issues, issue_meta) do
     issue =
       format_issue(issue_meta,
-        message: "defdelegate creates a forwarding stub. Update callers directly instead of maintaining indirection.",
+        message:
+          "defdelegate creates a forwarding stub. Update callers directly instead of maintaining indirection.",
         trigger: "defdelegate",
         line_no: meta[:line]
       )

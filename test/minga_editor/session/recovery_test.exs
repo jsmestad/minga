@@ -3,11 +3,11 @@ defmodule MingaEditor.Session.RecoveryTest do
 
   use ExUnit.Case, async: true
 
+  alias MingaEditor.Session.State, as: SessionState
   alias Minga.Session
   alias Minga.Session.Snapshot
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.Session.Recovery
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Session, as: SessionState
 
@@ -16,11 +16,11 @@ defmodule MingaEditor.Session.RecoveryTest do
   @moduletag :tmp_dir
 
   test "request has stable directory identity and bounded latest-wins policy", %{tmp_dir: dir} do
-    state = %{
-      base_state()
-      | backend: :tui,
+    state =
+      base_state(
+        backend: :tui,
         session: SessionState.new(swap_dir: dir, session_dir: dir)
-    }
+      )
 
     request = Recovery.request(state, [swap_dir: dir], [session_dir: dir], true, true)
 
@@ -35,7 +35,7 @@ defmodule MingaEditor.Session.RecoveryTest do
     unclean = snapshot(false)
     assert :ok = Session.save(unclean, session_dir: dir)
 
-    state = %{base_state() | backend: :tui, session: SessionState.new(session_dir: dir)}
+    state = base_state(backend: :tui, session: SessionState.new(session_dir: dir))
     request = Recovery.request(state, [swap_dir: nil], [session_dir: dir], false, true)
     assert Recovery.run(request.effect) == {:ok, {:restore, unclean}}
 
@@ -47,7 +47,7 @@ defmodule MingaEditor.Session.RecoveryTest do
     tmp_dir: dir
   } do
     session = SessionState.new(session_dir: dir)
-    state = %{base_state() | backend: :tui, session: session}
+    state = base_state(backend: :tui, session: session)
     request = Recovery.request(state, [swap_dir: nil], [session_dir: dir], false, true)
 
     completed = Outcome.completed(request, {:restore, snapshot(false)})
@@ -73,14 +73,14 @@ defmodule MingaEditor.Session.RecoveryTest do
         active_index: 0
       })
 
-    workspace_changed = EditorState.set_workspace(state, workspace)
+    workspace_changed = then(state, fn state -> %{state | workspace: workspace} end)
 
     assert {^workspace_changed, %Outcome{status: :stale, reason: :workspace_changed}} =
              Recovery.apply(workspace_changed, completed)
   end
 
   test "scheduler unavailable keeps safe state" do
-    state = %{base_state() | backend: :tui, session: SessionState.new(session_dir: "/tmp/x")}
+    state = base_state(backend: :tui, session: SessionState.new(session_dir: "/tmp/x"))
 
     assert Recovery.schedule(state, [swap_dir: nil], [session_dir: "/tmp/x"], false, true) ==
              state

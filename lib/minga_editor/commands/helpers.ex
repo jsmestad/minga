@@ -223,8 +223,8 @@ defmodule MingaEditor.Commands.Helpers do
 
     # Also send the clipboard write opcode to native GUI frontends.
     # This writes to NSPasteboard directly, avoiding the pbcopy subprocess.
-    if state.backend in [:gui, :native_gui] and state.port_manager do
-      MingaEditor.Frontend.clipboard_write(state.port_manager, text)
+    if state.frontend.backend in [:gui, :native_gui] and state.frontend.port_manager do
+      MingaEditor.Frontend.clipboard_write(state.frontend.port_manager, text)
     end
 
     state
@@ -241,8 +241,8 @@ defmodule MingaEditor.Commands.Helpers do
   def force_clipboard_sync(state, text) do
     Clipboard.write_async(text)
 
-    if state.backend in [:gui, :native_gui] and state.port_manager do
-      MingaEditor.Frontend.clipboard_write(state.port_manager, text)
+    if state.frontend.backend in [:gui, :native_gui] and state.frontend.port_manager do
+      MingaEditor.Frontend.clipboard_write(state.frontend.port_manager, text)
     end
 
     state
@@ -284,7 +284,7 @@ defmodule MingaEditor.Commands.Helpers do
           YankFlash.range_type()
         ) :: state()
   def maybe_start_yank_flash(state, buf, start_pos, end_pos, range_type) do
-    if state.backend != :headless and Config.get(:yank_flash) do
+    if state.frontend.backend != :headless and Config.get(:yank_flash) do
       do_start_yank_flash(state, buf, start_pos, end_pos, range_type)
     else
       state
@@ -450,7 +450,7 @@ defmodule MingaEditor.Commands.Helpers do
     gb = Buffer.snapshot(buf)
     cursor = Document.cursor(gb)
 
-    case resolve_motion_target(gb, cursor, motion, buf, state.parser_manager) do
+    case resolve_motion_target(gb, cursor, motion, buf, state.parser.parser_manager) do
       nil ->
         state
 
@@ -514,7 +514,9 @@ defmodule MingaEditor.Commands.Helpers do
   def apply_text_object(%{workspace: %{buffers: %{active: buf}}} = state, modifier, spec, action) do
     gb = Buffer.snapshot(buf)
     cursor = Document.cursor(gb)
-    range = compute_text_object_range(gb, cursor, modifier, spec, buf, state.parser_manager)
+
+    range =
+      compute_text_object_range(gb, cursor, modifier, spec, buf, state.parser.parser_manager)
 
     case {linewise_spec?(spec), action, range} do
       {_, _, nil} ->

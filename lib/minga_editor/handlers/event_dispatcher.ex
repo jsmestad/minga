@@ -26,7 +26,6 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   alias MingaEditor.Shell.Workflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.State.Remote
   alias MingaEditor.State.Workspace.RemoteSession
@@ -125,7 +124,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
       when is_boolean(enabled) do
     # cursor_animate rides in-frame as the CursorAnimation semantic model (#2119),
     # so a re-render delivers the new value (no out-of-band push).
-    if option_source_matches?(source, EditorState.options_server(state)) do
+    if option_source_matches?(source, state.interaction.options_server) do
       Renderer.render_or_async(state)
     else
       state
@@ -138,7 +137,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
         %Events.OptionChangedEvent{source: source, name: name, value: value},
         _msg
       ) do
-    if option_source_matches?(source, EditorState.options_server(state)) and
+    if option_source_matches?(source, state.interaction.options_server) and
          Protocol.GUI.settings_option?(name) do
       # The config_state semantic model is emitted in-frame (#2119): rebuild the
       # cached settings snapshot, apply the runtime change, then re-render so the
@@ -160,24 +159,25 @@ defmodule MingaEditor.Handlers.EventDispatcher do
       ) do
     # Pre-compute the merged face registry so the render pipeline reads from
     # editor state with zero GenServer calls back into the buffer.
-    registries =
+    registry =
       if overrides == %{} do
-        Map.delete(state.face_override_registries, buf_pid)
+        nil
       else
-        hl = Map.get(state.highlighting.highlights, buf_pid)
+        highlight = Map.get(state.parser.highlighting.highlights, buf_pid)
 
-        merged =
-          if hl do
-            Face.Registry.with_overrides(hl.face_registry, overrides)
-          else
-            base = Face.Registry.from_theme(state.theme)
-            Face.Registry.with_overrides(base, overrides)
-          end
-
-        Map.put(state.face_override_registries, buf_pid, merged)
+        if highlight do
+          Face.Registry.with_overrides(highlight.face_registry, overrides)
+        else
+          state.appearance.theme
+          |> Face.Registry.from_theme()
+          |> Face.Registry.with_overrides(overrides)
+        end
       end
 
-    %{state | face_override_registries: registries}
+    %{
+      state
+      | parser: MingaEditor.State.Parser.reconcile_face_overrides(state.parser, buf_pid, registry)
+    }
   end
 
   def dispatch(
@@ -217,8 +217,8 @@ defmodule MingaEditor.Handlers.EventDispatcher do
 
         state =
           state
-          |> EditorState.apply_shell_runtime_transition(runtime)
-          |> EditorState.set_workspace(workspace)
+          |> then(fn state -> %{state | shell_runtime: runtime} end)
+          |> then(fn state -> %{state | workspace: workspace} end)
 
         MingaEditor.schedule_render(state, 16)
 
@@ -287,7 +287,12 @@ defmodule MingaEditor.Handlers.EventDispatcher do
         _msg
       ) do
     ms = %ExtensionConfirmState{updates: updates}
-    EditorState.transition_mode(state, :extension_confirm, ms)
+
+    %{
+      state
+      | workspace:
+          MingaEditor.Session.State.transition_mode(state.workspace, :extension_confirm, ms)
+    }
   end
 
   def dispatch(state, _event, _payload, _msg), do: state
@@ -363,7 +368,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   # boot races); correctness is unaffected, only mailbox pressure.
   @spec subscribe_to_session(EditorState.t(), pid()) :: :ok | {:error, term()}
   defp subscribe_to_session(state, pid) do
-    subscribe_through_ingest(EditorState.agent_ingest(state), pid)
+    subscribe_through_ingest(state.agent_connection.agent_ingest, pid)
   catch
     :exit, reason -> {:error, reason}
   end
@@ -407,11 +412,15 @@ defmodule MingaEditor.Handlers.EventDispatcher do
     sessions = discover_remote_sessions(remote_node, server_name)
 
     state =
-      EditorState.update_remote(state, fn remote ->
-        remote
-        |> Remote.put_sessions(server_name, sessions)
-        |> Remote.put_server_status(server_name, :connected)
-      end)
+      %{
+        state
+        | remote:
+            (fn remote ->
+               remote
+               |> Remote.put_sessions(server_name, sessions)
+               |> Remote.put_server_status(server_name, :connected)
+             end).(state.remote)
+      }
 
     state = reconnect_remote_tabs(state, server_name, remote_node)
     count = Enum.count(sessions)
@@ -422,16 +431,24 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   @spec handle_node_disconnected(EditorState.t(), NodeDisconnectedEvent.t()) :: EditorState.t()
   defp handle_node_disconnected(state, %{server_name: server_name}) do
     state =
-      EditorState.update_remote(state, &Remote.put_server_status(&1, server_name, :disconnected))
+      %{
+        state
+        | remote: (&Remote.put_server_status(&1, server_name, :disconnected)).(state.remote)
+      }
 
     state = mark_remote_tabs(state, server_name, :disconnected)
 
     if active_remote_server?(state, server_name) do
       state
-      |> AgentAccess.update_agent(&AgentState.stop_spinner_timer/1)
-      |> AgentAccess.update_agent(
-        &AgentState.set_error(&1, "[#{server_name}] disconnected, reconnecting...")
-      )
+      |> MingaEditor.Shell.Traditional.Workflow.install_agent_spinner_stop()
+      |> then(fn state ->
+        MingaEditor.Shell.Traditional.Workflow.install_agent_state(
+          state,
+          (&AgentState.set_error(&1, "[#{server_name}] disconnected, reconnecting...")).(
+            MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
+          )
+        )
+      end)
       |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
         "[#{server_name}] disconnected, reconnecting..."
       )
@@ -537,12 +554,26 @@ defmodule MingaEditor.Handlers.EventDispatcher do
          messages
        ) do
     tb = set_workspace_remote_state(tb, workspace, nil, :ended)
-    state = EditorState.set_tab_bar(state, tb)
+
+    state =
+      then(state, fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            tb
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
 
     if active_workspace?(tb, workspace_id) do
       state
       |> AgentLifecycle.cache_messages(messages)
-      |> AgentAccess.update_agent(&AgentState.set_error(&1, "Remote session ended"))
+      |> MingaEditor.Shell.Traditional.Workflow.install_agent_error("Remote session ended")
       |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("Remote session ended")
     else
       state
@@ -572,7 +603,8 @@ defmodule MingaEditor.Handlers.EventDispatcher do
        }} ->
         if active_workspace?(tb, workspace_id) do
           tb = set_workspace_remote_state(tb, workspace, pid, :connected, latest_event_id)
-          state = EditorState.set_tab_bar(state, tb)
+
+          state = install_tab_bar(state, tb)
 
           state
           |> maybe_rebuild_agent_from_workspace(workspace_id)
@@ -588,7 +620,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
               &Workspace.set_pending_catchup_events(&1, events)
             )
 
-          EditorState.set_tab_bar(state, tb)
+          install_tab_bar(state, tb)
         end
 
       {:error, _reason} ->
@@ -600,13 +632,40 @@ defmodule MingaEditor.Handlers.EventDispatcher do
 
   defp restore_remote_workspace(state, %Workspace{}, _remote_node, _pid), do: state
 
+  @spec install_tab_bar(EditorState.t(), TabBar.t()) :: EditorState.t()
+  defp install_tab_bar(%EditorState{} = state, %TabBar{} = tab_bar) do
+    shell_state =
+      MingaEditor.Shell.Traditional.State.set_tab_bar(
+        MingaEditor.Shell.Runtime.state(state.shell_runtime),
+        tab_bar
+      )
+
+    %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
+  end
+
   @spec mark_remote_tabs(EditorState.t(), String.t(), Tab.connection_status()) :: EditorState.t()
   defp mark_remote_tabs(
          %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
          server_name,
          status
        ) do
-    EditorState.set_tab_bar(state, TabBar.set_remote_connection_status(tb, server_name, status))
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          MingaEditor.State.TabBar.set_remote_connection_status(tb, server_name, status)
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   defp mark_remote_tabs(state, _server_name, _status), do: state
@@ -626,10 +685,19 @@ defmodule MingaEditor.Handlers.EventDispatcher do
          %Workspace{} = workspace,
          status
        ) do
-    EditorState.set_tab_bar(
-      state,
-      set_workspace_remote_state(tb, workspace, workspace.session, status)
-    )
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          set_workspace_remote_state(tb, workspace, workspace.session, status)
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   defp mark_remote_workspace_status(state, %Workspace{}, _status), do: state
@@ -644,7 +712,19 @@ defmodule MingaEditor.Handlers.EventDispatcher do
          %Workspace{} = workspace,
          status
        ) do
-    EditorState.set_tab_bar(state, set_workspace_remote_state(tb, workspace, nil, status))
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          set_workspace_remote_state(tb, workspace, nil, status)
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   defp mark_remote_workspace_without_live_session(state, %Workspace{}, _status), do: state
@@ -705,7 +785,9 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   @spec apply_reconnected_snapshot(EditorState.t(), MingaAgent.Session.editor_snapshot()) ::
           EditorState.t()
   defp apply_reconnected_snapshot(state, snapshot) do
-    AgentAccess.update_agent(state, fn agent ->
+    agent = MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
+
+    updated_agent =
       AgentState.apply_session_snapshot(
         agent,
         Map.get(snapshot, :status, :idle),
@@ -713,7 +795,8 @@ defmodule MingaEditor.Handlers.EventDispatcher do
         Map.get(snapshot, :error),
         Map.get(snapshot, :active_tool_name)
       )
-    end)
+
+    MingaEditor.Shell.Traditional.Workflow.install_agent_state(state, updated_agent)
   end
 
   @spec maybe_rebuild_agent_from_workspace(EditorState.t(), non_neg_integer()) :: EditorState.t()
@@ -722,7 +805,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
          workspace_id
        ) do
     case workspace_agent_tab(tb, workspace_id) do
-      %Tab{} = tab -> EditorState.rebuild_agent_from_session(state, tab)
+      %Tab{} = tab -> MingaEditor.AgentLifecycle.rebuild_agent_from_session(state, tab)
       nil -> state
     end
   end

@@ -13,7 +13,7 @@ defmodule MingaEditor.Commands.AgentCodeBlockTest do
 
   defp base_state do
     %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),

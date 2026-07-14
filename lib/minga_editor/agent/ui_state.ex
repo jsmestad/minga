@@ -8,10 +8,8 @@ defmodule MingaEditor.Agent.UIState do
   each under 16 fields while providing a single access point on
   `EditorState.agent_ui`.
 
-  Most callers use the functions on this module (routed through
-  `AgentAccess.update_agent_ui/2`). Input handlers and renderers that
-  need read-only field access use `AgentAccess.panel/1` to get the
-  `Panel` sub-struct directly.
+  Most callers use the functions on this module. Input handlers and
+  renderers read the focused UI value from the editor workspace.
   """
 
   alias MingaEditor.Agent.UIState.Panel
@@ -19,7 +17,6 @@ defmodule MingaEditor.Agent.UIState do
   alias MingaEditor.Agent.Activity
   alias MingaEditor.Agent.EditTimeline
   alias MingaEditor.Agent.View.Preview
-  alias Minga.Buffer
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Windows
 
@@ -41,83 +38,75 @@ defmodule MingaEditor.Agent.UIState do
   # Placeholder prefix used in input lines to represent a collapsed paste block.
   @paste_placeholder_prefix "\0PASTE:"
 
-  # Minimum number of lines for a paste to be collapsed.
-  @paste_collapse_threshold 3
-
   @doc "Creates a new UIState with credential-aware panel defaults."
   @spec new() :: t()
   def new, do: %__MODULE__{panel: Panel.new()}
 
-  # ── Prompt buffer lifecycle ─────────────────────────────────────────────
-
-  @doc """
-  Ensures a prompt Buffer.Process is running. Starts one if `prompt_buffer`
-  is nil or the process is dead.
-  """
-  @spec ensure_prompt_buffer(t()) :: t()
-  def ensure_prompt_buffer(%__MODULE__{panel: %Panel{prompt_buffer: pid} = panel} = state)
-      when is_pid(pid) do
-    Buffer.buffer_name(pid)
-    state
-  catch
-    # Liveness probe: prompt buffer may die between pid check and this call.
-    # Targeted catch per AGENTS.md rule 4.
-    :exit, _ ->
-      %{state | panel: start_prompt_buffer(panel, "")}
+  @doc "Attaches the process-backed prompt buffer to this UI value."
+  @spec attach_prompt_buffer(t(), pid()) :: t()
+  def attach_prompt_buffer(%__MODULE__{panel: panel} = state, pid) when is_pid(pid) do
+    %{state | panel: %{panel | prompt_buffer: pid}}
   end
 
-  def ensure_prompt_buffer(%__MODULE__{panel: panel} = state) do
-    %{state | panel: start_prompt_buffer(panel, "")}
+  @doc "Forgets a dead prompt buffer while preserving prompt metadata."
+  @spec detach_prompt_buffer(t()) :: t()
+  def detach_prompt_buffer(%__MODULE__{panel: panel} = state) do
+    %{state | panel: %{panel | prompt_buffer: nil}}
   end
 
-  defp start_prompt_buffer(%Panel{} = panel, content) do
-    {:ok, pid} = Buffer.start_link(content: content)
-    %{panel | prompt_buffer: pid}
+  @doc "Records metadata shared by ordinary prompt edits."
+  @spec record_prompt_edit(t()) :: t()
+  def record_prompt_edit(%__MODULE__{panel: panel} = state) do
+    %{state | panel: %{panel | history_index: -1}}
   end
 
-  # ── Accessors (delegate to Panel for buffer reads) ──────────────────────
-
-  @doc """
-  Returns the prompt text with paste placeholders substituted.
-
-  This is the text submitted to the LLM. Placeholder tokens are replaced
-  with the full paste content from `pasted_blocks`.
-  """
-  @spec prompt_text(t() | Panel.t()) :: String.t()
-  def prompt_text(%__MODULE__{panel: panel}), do: prompt_text(panel)
-
-  def prompt_text(%Panel{prompt_buffer: pid, pasted_blocks: blocks})
-      when is_pid(pid) do
-    content = Buffer.content(pid)
-    substitute_placeholders(content, blocks)
+  @doc "Resets prompt history selection and collapsed-paste metadata."
+  @spec reset_prompt_metadata(t()) :: t()
+  def reset_prompt_metadata(%__MODULE__{panel: panel} = state) do
+    %{state | panel: %{panel | history_index: -1, pasted_blocks: []}}
   end
 
-  def prompt_text(%Panel{}), do: ""
+  @doc "Clears collapsed-paste metadata after complete prompt replacement."
+  @spec reset_paste_metadata(t()) :: t()
+  def reset_paste_metadata(%__MODULE__{panel: panel} = state) do
+    %{state | panel: %{panel | pasted_blocks: []}}
+  end
 
-  @doc "Returns the raw input text (with placeholders, not substituted)."
-  @spec input_text(t() | Panel.t()) :: String.t()
-  def input_text(%__MODULE__{panel: panel}), do: Panel.input_text(panel)
-  def input_text(%Panel{} = panel), do: Panel.input_text(panel)
+  @doc "Records a submitted prompt in newest-first history order."
+  @spec remember_prompt(t(), String.t()) :: t()
+  def remember_prompt(%__MODULE__{panel: panel} = state, text) when is_binary(text) do
+    %{state | panel: %{panel | prompt_history: [text | panel.prompt_history]}}
+  end
 
-  @doc "Returns the input lines as a list of strings."
-  @spec input_lines(t() | Panel.t()) :: [String.t()]
-  def input_lines(%__MODULE__{panel: panel}), do: Panel.input_lines(panel)
-  def input_lines(%Panel{} = panel), do: Panel.input_lines(panel)
+  @doc "Selects one prompt-history position after the workflow replaces text."
+  @spec select_prompt_history(t(), integer()) :: t()
+  def select_prompt_history(%__MODULE__{panel: panel} = state, index) when is_integer(index) do
+    %{state | panel: %{panel | history_index: index}}
+  end
 
-  @doc "Returns the input cursor position as `{line, col}`."
-  @spec input_cursor(t() | Panel.t()) :: {non_neg_integer(), non_neg_integer()}
-  def input_cursor(%__MODULE__{panel: panel}), do: Panel.input_cursor(panel)
-  def input_cursor(%Panel{} = panel), do: Panel.input_cursor(panel)
+  @doc "Appends one collapsed paste block and marks the prompt as freshly edited."
+  @spec append_paste_block(t(), String.t()) :: t()
+  def append_paste_block(%__MODULE__{panel: panel} = state, text) when is_binary(text) do
+    block = %{text: text, expanded: false}
+    blocks = Enum.concat(panel.pasted_blocks, [block])
+    %{state | panel: %{panel | pasted_blocks: blocks, history_index: -1}}
+  end
 
-  @doc "Returns the number of input lines."
-  @spec input_line_count(t() | Panel.t()) :: pos_integer()
-  def input_line_count(%__MODULE__{panel: panel}), do: Panel.input_line_count(panel)
-  def input_line_count(%Panel{} = panel), do: Panel.input_line_count(panel)
+  @doc "Records whether a paste block is expanded in the process-backed prompt."
+  @spec mark_paste_expanded(t(), non_neg_integer(), boolean()) :: t()
+  def mark_paste_expanded(%__MODULE__{panel: panel} = state, index, expanded?)
+      when is_integer(index) and index >= 0 and is_boolean(expanded?) do
+    blocks = List.update_at(panel.pasted_blocks, index, &%{&1 | expanded: expanded?})
+    %{state | panel: %{panel | pasted_blocks: blocks}}
+  end
 
-  @doc "Returns true if the input is empty (single empty line)."
-  @spec input_empty?(t() | Panel.t()) :: boolean()
-  def input_empty?(%__MODULE__{panel: panel}), do: Panel.input_empty?(panel)
-  def input_empty?(%Panel{} = panel), do: Panel.input_empty?(panel)
+  @doc "Installs a complete panel projection produced by a named Panel transition."
+  @spec replace_panel(t(), Panel.t()) :: t()
+  def replace_panel(%__MODULE__{} = state, %Panel{} = panel), do: %{state | panel: panel}
+
+  @doc "Installs a complete view projection produced by a named View transition."
+  @spec replace_view(t(), View.t()) :: t()
+  def replace_view(%__MODULE__{} = state, %View{} = view), do: %{state | view: view}
 
   @doc "Toggles panel visibility."
   @spec toggle(t()) :: t()
@@ -131,16 +120,22 @@ defmodule MingaEditor.Agent.UIState do
     %{state | panel: Panel.clear_mention_completion(panel)}
   end
 
-  @doc "Updates the turn activity projection."
-  @spec update_activity(t(), (Activity.t() -> Activity.t())) :: t()
-  def update_activity(%__MODULE__{view: view} = state, fun) when is_function(fun, 1) do
-    %{state | view: View.update_activity(view, fun)}
+  @doc "Installs the activity produced by an Activity transition."
+  @spec replace_activity(t(), Activity.t()) :: t()
+  def replace_activity(%__MODULE__{view: view} = state, %Activity{} = activity) do
+    %{state | view: View.replace_activity(view, activity)}
   end
 
-  @doc "Updates the edit timeline projection."
-  @spec update_edit_timeline(t(), (EditTimeline.t() -> EditTimeline.t())) :: t()
-  def update_edit_timeline(%__MODULE__{view: view} = state, fun) when is_function(fun, 1) do
-    %{state | view: View.update_edit_timeline(view, fun)}
+  @doc "Installs the timeline produced by an EditTimeline transition."
+  @spec replace_edit_timeline(t(), EditTimeline.t()) :: t()
+  def replace_edit_timeline(%__MODULE__{view: view} = state, %EditTimeline{} = timeline) do
+    %{state | view: View.replace_edit_timeline(view, timeline)}
+  end
+
+  @doc "Marks compaction as no longer running."
+  @spec finish_compaction(t()) :: t()
+  def finish_compaction(%__MODULE__{view: view} = state) do
+    %{state | view: View.finish_compaction(view)}
   end
 
   @doc "Advances the spinner animation frame."
@@ -148,181 +143,6 @@ defmodule MingaEditor.Agent.UIState do
   def tick_spinner(%__MODULE__{panel: panel} = state) do
     %{state | panel: %{panel | spinner_frame: panel.spinner_frame + 1}}
   end
-
-  # ── Input editing (delegates to Buffer.Process) ──────────────────────────
-
-  @doc "Inserts a character at the cursor position."
-  @spec insert_char(t(), String.t()) :: t()
-  def insert_char(%__MODULE__{panel: %Panel{prompt_buffer: pid}} = state, char)
-      when is_pid(pid) do
-    Buffer.insert_text(pid, char)
-    %{state | panel: %{state.panel | history_index: -1}}
-  end
-
-  def insert_char(%__MODULE__{} = state, char) do
-    state = ensure_prompt_buffer(state)
-    insert_char(state, char)
-  end
-
-  @doc "Inserts a newline at the cursor, splitting the current line."
-  @spec insert_newline(t()) :: t()
-  def insert_newline(%__MODULE__{panel: %Panel{prompt_buffer: pid}} = state) when is_pid(pid) do
-    Buffer.insert_text(pid, "\n")
-    %{state | panel: %{state.panel | history_index: -1}}
-  end
-
-  def insert_newline(%__MODULE__{} = state) do
-    state = ensure_prompt_buffer(state)
-    insert_newline(state)
-  end
-
-  @doc """
-  Deletes the character before the cursor.
-
-  At the start of a line (col 0), joins with the previous line.
-  At the start of the first line, no-op.
-  """
-  @spec delete_char(t()) :: t()
-  def delete_char(%__MODULE__{panel: %Panel{prompt_buffer: pid}} = state) when is_pid(pid) do
-    {line, col} = Buffer.cursor(pid)
-
-    if line == 0 and col == 0 do
-      state
-    else
-      Buffer.delete_before(pid)
-    end
-
-    %{state | panel: %{state.panel | history_index: -1}}
-  end
-
-  def delete_char(%__MODULE__{} = state) do
-    state = ensure_prompt_buffer(state)
-    delete_char(state)
-  end
-
-  @doc "Replaces the input content with the given text. Does not save to history."
-  @spec set_prompt_text(t(), String.t()) :: t()
-  def set_prompt_text(%__MODULE__{panel: %Panel{prompt_buffer: pid}} = state, text)
-      when is_pid(pid) do
-    Buffer.replace_content(pid, text)
-    %{state | panel: %{state.panel | pasted_blocks: []}}
-  end
-
-  def set_prompt_text(%__MODULE__{} = state, _text), do: state
-
-  @doc "Clears the input without saving it to history. Use this for sensitive slash-command values."
-  @spec clear_input_without_history(t()) :: t()
-  def clear_input_without_history(%__MODULE__{} = state) do
-    if is_pid(state.panel.prompt_buffer) do
-      Buffer.replace_content(state.panel.prompt_buffer, "")
-    end
-
-    %{state | panel: %{state.panel | history_index: -1, pasted_blocks: []}}
-  end
-
-  @doc "Clears the input (after submission). Saves current text to history first."
-  @spec clear_input(t()) :: t()
-  def clear_input(%__MODULE__{} = state) do
-    state = save_to_history(state)
-
-    if is_pid(state.panel.prompt_buffer) do
-      Buffer.replace_content(state.panel.prompt_buffer, "")
-    end
-
-    %{state | panel: %{state.panel | history_index: -1, pasted_blocks: []}}
-  end
-
-  # ── Cursor movement ────────────────────────────────────────────────────
-
-  @doc "Moves cursor up within the input. Returns `:at_top` if already on the first line."
-  @spec move_cursor_up(t()) :: t() | :at_top
-  def move_cursor_up(%__MODULE__{panel: %Panel{prompt_buffer: pid}} = state) when is_pid(pid) do
-    {line, _col} = Buffer.cursor(pid)
-
-    if line == 0 do
-      :at_top
-    else
-      Buffer.move(pid, :up)
-      state
-    end
-  end
-
-  def move_cursor_up(%__MODULE__{}), do: :at_top
-
-  @doc "Moves cursor down within the input. Returns `:at_bottom` if already on the last line."
-  @spec move_cursor_down(t()) :: t() | :at_bottom
-  def move_cursor_down(%__MODULE__{panel: %Panel{prompt_buffer: pid}} = state) when is_pid(pid) do
-    {line, _col} = Buffer.cursor(pid)
-    total = Buffer.line_count(pid)
-
-    if line >= total - 1 do
-      :at_bottom
-    else
-      Buffer.move(pid, :down)
-      state
-    end
-  end
-
-  def move_cursor_down(%__MODULE__{}), do: :at_bottom
-
-  # ── Paste handling ────────────────────────────────────────────────────────
-
-  @doc """
-  Inserts pasted text into the input.
-
-  For short pastes (fewer than #{@paste_collapse_threshold} lines), the text is
-  inserted directly into the buffer. For longer pastes, the text is
-  stored in `pasted_blocks` and a placeholder token is inserted at the cursor
-  position. The placeholder renders as a compact indicator (e.g. "󰆏 [pasted 23 lines]")
-  but `prompt_text/1` substitutes the full content when the prompt is submitted.
-  """
-  @spec insert_paste(t(), String.t()) :: t()
-  def insert_paste(%__MODULE__{} = state, ""), do: state
-
-  def insert_paste(%__MODULE__{panel: %Panel{prompt_buffer: pid}} = state, text)
-      when is_pid(pid) do
-    # Strip NUL bytes from paste to prevent fake placeholder injection
-    clean_text = String.replace(text, "\0", "")
-    lines = String.split(clean_text, "\n")
-    line_count = Enum.count(lines)
-
-    if line_count < @paste_collapse_threshold do
-      Buffer.insert_text(pid, clean_text)
-      %{state | panel: %{state.panel | history_index: -1}}
-    else
-      insert_collapsed_paste(state, clean_text)
-    end
-  end
-
-  def insert_paste(%__MODULE__{} = state, text) do
-    state = ensure_prompt_buffer(state)
-    insert_paste(state, text)
-  end
-
-  @doc """
-  Toggles expand/collapse on the paste block at the current cursor line.
-  """
-  @spec toggle_paste_expand(t()) :: t()
-  def toggle_paste_expand(%__MODULE__{panel: %Panel{prompt_buffer: pid}} = state)
-      when is_pid(pid) do
-    {cursor_line, _} = Buffer.cursor(pid)
-    lines = input_lines(state)
-    current_line = Enum.at(lines, cursor_line)
-
-    case parse_placeholder(current_line) do
-      {:ok, block_index} ->
-        block = Enum.at(state.panel.pasted_blocks, block_index)
-        if block, do: expand_block(state, block_index), else: state
-
-      :not_placeholder ->
-        case find_expanded_block_at_cursor(state, cursor_line) do
-          {:ok, block_index} -> collapse_block(state, block_index)
-          :not_found -> state
-        end
-    end
-  end
-
-  def toggle_paste_expand(%__MODULE__{} = state), do: state
 
   @doc "Returns true if the given line is a paste placeholder token."
   @spec paste_placeholder?(String.t()) :: boolean()
@@ -332,12 +152,14 @@ defmodule MingaEditor.Agent.UIState do
 
   @doc "Returns the paste block index for a placeholder line, or nil if not a placeholder."
   @spec paste_block_index(String.t()) :: non_neg_integer() | nil
-  def paste_block_index(line) do
-    case parse_placeholder(line) do
-      {:ok, index} -> index
-      :not_placeholder -> nil
+  def paste_block_index(<<@paste_placeholder_prefix, rest::binary>>) when byte_size(rest) > 0 do
+    case Integer.parse(rest) do
+      {index, ""} when index >= 0 -> index
+      _other -> nil
     end
   end
+
+  def paste_block_index(_line), do: nil
 
   @doc "Returns the line count for a paste block at the given index."
   @spec paste_block_line_count(t() | [Panel.paste_block()], non_neg_integer()) ::
@@ -353,55 +175,14 @@ defmodule MingaEditor.Agent.UIState do
     end
   end
 
-  # ── Prompt history ──────────────────────────────────────────────────────────
-
-  @doc "Saves the current input to prompt history (if non-empty)."
-  @spec save_to_history(t()) :: t()
-  def save_to_history(%__MODULE__{} = state) do
-    text = prompt_text(state)
-
-    if String.trim(text) == "" do
-      state
-    else
-      %{state | panel: %{state.panel | prompt_history: [text | state.panel.prompt_history]}}
-    end
-  end
-
-  @doc "Recalls the previous prompt from history."
-  @spec history_prev(t()) :: t()
-  def history_prev(%__MODULE__{panel: %Panel{prompt_history: []}} = state), do: state
-
-  def history_prev(%__MODULE__{panel: panel} = state) when is_pid(panel.prompt_buffer) do
-    new_idx = min(panel.history_index + 1, Enum.count(panel.prompt_history) - 1)
-    text = Enum.at(panel.prompt_history, new_idx)
-    Buffer.replace_content(panel.prompt_buffer, text)
-    %{state | panel: %{panel | history_index: new_idx}}
-  end
-
-  def history_prev(%__MODULE__{} = state), do: state
-
-  @doc "Recalls the next (more recent) prompt from history."
-  @spec history_next(t()) :: t()
-  def history_next(%__MODULE__{panel: %Panel{history_index: -1}} = state), do: state
-
-  def history_next(
-        %__MODULE__{panel: %Panel{history_index: 0, prompt_buffer: pid} = panel} = state
-      )
-      when is_pid(pid) do
-    Buffer.replace_content(pid, "")
-    %{state | panel: %{panel | history_index: -1}}
-  end
-
-  def history_next(%__MODULE__{panel: panel} = state) when is_pid(panel.prompt_buffer) do
-    new_idx = panel.history_index - 1
-    text = Enum.at(panel.prompt_history, new_idx)
-    Buffer.replace_content(panel.prompt_buffer, text)
-    %{state | panel: %{panel | history_index: new_idx}}
-  end
-
-  def history_next(%__MODULE__{} = state), do: state
-
   # ── Scrolling (delegates to Minga.Editing.Scroll) ────────────────────────────────
+
+  @doc "Records transcript scroll metrics observed during rendering."
+  @spec record_scroll_metrics(t(), non_neg_integer(), pos_integer()) :: t()
+  def record_scroll_metrics(%__MODULE__{panel: panel} = state, total_lines, visible_height) do
+    scroll = Minga.Editing.Scroll.update_metrics(panel.scroll, total_lines, visible_height)
+    %{state | panel: Panel.set_scroll(panel, scroll)}
+  end
 
   @doc "Scrolls the content up. Delegates to `Minga.Editing.scroll_up/2`."
   @spec scroll_up(t(), non_neg_integer()) :: t()
@@ -450,15 +231,10 @@ defmodule MingaEditor.Agent.UIState do
     %{state | panel: %{panel | scroll: Minga.Editing.pin_to_bottom(panel.scroll)}}
   end
 
-  @doc "Sets the input focus state. Entering focus ensures the prompt buffer exists."
+  @doc "Records whether prompt input owns focus; buffer attachment belongs to PromptBuffer."
   @spec set_input_focused(t(), boolean()) :: t()
-  def set_input_focused(%__MODULE__{} = state, true) do
-    state = ensure_prompt_buffer(state)
-    %{state | panel: %{state.panel | input_focused: true}}
-  end
-
-  def set_input_focused(%__MODULE__{} = state, false) do
-    %{state | panel: %{state.panel | input_focused: false}}
+  def set_input_focused(%__MODULE__{panel: panel} = state, focused?) when is_boolean(focused?) do
+    %{state | panel: %{panel | input_focused: focused?}}
   end
 
   @doc """
@@ -473,18 +249,6 @@ defmodule MingaEditor.Agent.UIState do
       state
       | panel: %{panel | display_start_index: message_count, scroll: Minga.Editing.new_scroll()}
     }
-  end
-
-  @doc "Clears the input and scrolls to the bottom."
-  @spec clear_input_and_scroll(t()) :: t()
-  def clear_input_and_scroll(%__MODULE__{} = state) do
-    state |> clear_input() |> scroll_to_bottom()
-  end
-
-  @doc "Clears the input without history and scrolls to the latest agent message."
-  @spec clear_input_without_history_and_scroll(t()) :: t()
-  def clear_input_without_history_and_scroll(%__MODULE__{} = state) do
-    state |> clear_input_without_history() |> scroll_to_bottom()
   end
 
   # ── Model/provider config ──────────────────────────────────────────────────
@@ -611,10 +375,10 @@ defmodule MingaEditor.Agent.UIState do
     %{state | view: View.scroll_viewer_to_bottom(view)}
   end
 
-  @doc "Updates the preview state with the given function."
-  @spec update_preview(t(), (Preview.t() -> Preview.t())) :: t()
-  def update_preview(%__MODULE__{view: view} = state, fun) do
-    %{state | view: View.update_preview(view, fun)}
+  @doc "Installs the preview produced by a Preview transition."
+  @spec replace_preview(t(), Preview.t()) :: t()
+  def replace_preview(%__MODULE__{view: view} = state, %Preview{} = preview) do
+    %{state | view: View.replace_preview(view, preview)}
   end
 
   @doc "Sets the pending prefix for multi-key sequences."
@@ -765,229 +529,5 @@ defmodule MingaEditor.Agent.UIState do
   @spec clear_baselines(t()) :: t()
   def clear_baselines(%__MODULE__{view: view} = state) do
     %{state | view: View.clear_baselines(view)}
-  end
-
-  # ── Private: paste helpers ───────────────────────────────────────────────
-
-  @spec insert_collapsed_paste(t(), String.t()) :: t()
-  defp insert_collapsed_paste(%__MODULE__{panel: panel} = state, text) do
-    pid = panel.prompt_buffer
-    {cursor_line, cursor_col} = Buffer.cursor(pid)
-    lines = input_lines(state)
-
-    block_index = Enum.count(panel.pasted_blocks)
-    new_block = %{text: text, expanded: false}
-    placeholder = @paste_placeholder_prefix <> Integer.to_string(block_index)
-
-    current = Enum.at(lines, cursor_line)
-    {before, after_cursor} = String.split_at(current, cursor_col)
-
-    new_lines = insert_placeholder_lines(lines, cursor_line, before, after_cursor, placeholder)
-    new_content = Enum.join(new_lines, "\n")
-
-    placeholder_line_idx = Enum.find_index(new_lines, &(&1 == placeholder))
-    new_cursor_line = min(placeholder_line_idx + 1, Enum.count(new_lines) - 1)
-
-    new_cursor_col =
-      if new_cursor_line > placeholder_line_idx, do: 0, else: String.length(placeholder)
-
-    Buffer.replace_content(pid, new_content)
-    Buffer.move_to(pid, {new_cursor_line, new_cursor_col})
-
-    new_panel = %{
-      panel
-      | pasted_blocks: Enum.concat(panel.pasted_blocks, [new_block]),
-        history_index: -1
-    }
-
-    %{state | panel: new_panel}
-  end
-
-  @spec insert_placeholder_lines(
-          [String.t()],
-          non_neg_integer(),
-          String.t(),
-          String.t(),
-          String.t()
-        ) :: [String.t()]
-  defp insert_placeholder_lines(lines, cursor_line, "", "", placeholder) do
-    List.replace_at(lines, cursor_line, placeholder)
-  end
-
-  defp insert_placeholder_lines(lines, cursor_line, "", after_cursor, placeholder) do
-    pre = Enum.take(lines, cursor_line)
-    post = Enum.drop(lines, cursor_line + 1)
-    pre ++ [placeholder, after_cursor] ++ post
-  end
-
-  defp insert_placeholder_lines(lines, cursor_line, _before, "", placeholder) do
-    pre = Enum.take(lines, cursor_line + 1)
-    post = Enum.drop(lines, cursor_line + 1)
-    pre ++ [placeholder] ++ post
-  end
-
-  defp insert_placeholder_lines(lines, cursor_line, before, after_cursor, placeholder) do
-    pre = Enum.take(lines, cursor_line)
-    post = Enum.drop(lines, cursor_line + 1)
-    pre ++ [before, placeholder, after_cursor] ++ post
-  end
-
-  @spec expand_block(t(), non_neg_integer()) :: t()
-  defp expand_block(%__MODULE__{panel: panel} = state, block_index) do
-    pid = panel.prompt_buffer
-    {cursor_line, _} = Buffer.cursor(pid)
-    lines = input_lines(state)
-    block = Enum.at(panel.pasted_blocks, block_index)
-    placeholder = @paste_placeholder_prefix <> Integer.to_string(block_index)
-    placeholder_line_idx = Enum.find_index(lines, &(&1 == placeholder))
-
-    if placeholder_line_idx do
-      text_lines = String.split(block.text, "\n")
-
-      new_lines =
-        Enum.take(lines, placeholder_line_idx) ++
-          text_lines ++
-          Enum.drop(lines, placeholder_line_idx + 1)
-
-      new_blocks = List.update_at(panel.pasted_blocks, block_index, &%{&1 | expanded: true})
-      expansion = Enum.count(text_lines) - 1
-
-      new_cursor_line =
-        if cursor_line > placeholder_line_idx, do: cursor_line + expansion, else: cursor_line
-
-      Buffer.replace_content(pid, Enum.join(new_lines, "\n"))
-      Buffer.move_to(pid, {new_cursor_line, 0})
-
-      %{state | panel: %{panel | pasted_blocks: new_blocks}}
-    else
-      state
-    end
-  end
-
-  @spec collapse_block(t(), non_neg_integer()) :: t()
-  defp collapse_block(%__MODULE__{panel: panel} = state, block_index) do
-    pid = panel.prompt_buffer
-    {cursor_line, _} = Buffer.cursor(pid)
-    lines = input_lines(state)
-    block = Enum.at(panel.pasted_blocks, block_index)
-    text_lines = String.split(block.text, "\n")
-    text_line_count = Enum.count(text_lines)
-
-    start_idx = find_expanded_block_start(lines, text_lines)
-
-    if start_idx do
-      placeholder = @paste_placeholder_prefix <> Integer.to_string(block_index)
-
-      new_lines =
-        Enum.take(lines, start_idx) ++
-          [placeholder] ++
-          Enum.drop(lines, start_idx + text_line_count)
-
-      new_blocks = List.update_at(panel.pasted_blocks, block_index, &%{&1 | expanded: false})
-      contraction = text_line_count - 1
-      new_cursor_line = collapse_cursor_line(cursor_line, start_idx, text_line_count, contraction)
-
-      Buffer.replace_content(pid, Enum.join(new_lines, "\n"))
-      Buffer.move_to(pid, {new_cursor_line, 0})
-
-      %{state | panel: %{panel | pasted_blocks: new_blocks}}
-    else
-      state
-    end
-  end
-
-  @spec collapse_cursor_line(
-          non_neg_integer(),
-          non_neg_integer(),
-          pos_integer(),
-          non_neg_integer()
-        ) :: non_neg_integer()
-  defp collapse_cursor_line(cursor_line, start_idx, text_line_count, _contraction)
-       when cursor_line >= start_idx and cursor_line < start_idx + text_line_count,
-       do: start_idx
-
-  defp collapse_cursor_line(cursor_line, start_idx, text_line_count, contraction)
-       when cursor_line >= start_idx + text_line_count,
-       do: cursor_line - contraction
-
-  defp collapse_cursor_line(cursor_line, _start_idx, _text_line_count, _contraction),
-    do: cursor_line
-
-  @spec find_expanded_block_at_cursor(t(), non_neg_integer()) ::
-          {:ok, non_neg_integer()} | :not_found
-  defp find_expanded_block_at_cursor(%__MODULE__{} = state, cursor_line) do
-    lines = input_lines(state)
-
-    state.panel.pasted_blocks
-    |> Enum.with_index()
-    |> Enum.find_value(:not_found, fn {block, index} ->
-      if block.expanded do
-        expanded_block_contains_cursor?(lines, block, index, cursor_line)
-      end
-    end)
-  end
-
-  @spec expanded_block_contains_cursor?(
-          [String.t()],
-          Panel.paste_block(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: {:ok, non_neg_integer()} | nil
-  defp expanded_block_contains_cursor?(lines, block, index, cursor_line) do
-    text_lines = String.split(block.text, "\n")
-    start_idx = find_expanded_block_start(lines, text_lines)
-
-    if start_idx do
-      end_idx = start_idx + Enum.count(text_lines) - 1
-      if cursor_line >= start_idx and cursor_line <= end_idx, do: {:ok, index}
-    end
-  end
-
-  @spec find_expanded_block_start([String.t()], [String.t()]) :: non_neg_integer() | nil
-  defp find_expanded_block_start(input_lines_list, text_lines) do
-    text_len = Enum.count(text_lines)
-    max_start = Enum.count(input_lines_list) - text_len
-
-    if max_start < 0 do
-      nil
-    else
-      Enum.find(0..max_start, fn start ->
-        Enum.slice(input_lines_list, start, text_len) == text_lines
-      end)
-    end
-  end
-
-  @spec parse_placeholder(String.t()) :: {:ok, non_neg_integer()} | :not_placeholder
-  defp parse_placeholder(line) do
-    case line do
-      <<@paste_placeholder_prefix, rest::binary>> when byte_size(rest) > 0 ->
-        case Integer.parse(rest) do
-          {index, ""} when index >= 0 -> {:ok, index}
-          _ -> :not_placeholder
-        end
-
-      _ ->
-        :not_placeholder
-    end
-  end
-
-  @spec substitute_placeholders(String.t(), [Panel.paste_block()]) :: String.t()
-  defp substitute_placeholders(content, blocks) do
-    String.split(content, "\n")
-    |> Enum.map_join("\n", fn line -> substitute_placeholder(line, blocks) end)
-  end
-
-  @spec substitute_placeholder(String.t(), [Panel.paste_block()]) :: String.t()
-  defp substitute_placeholder(line, blocks) do
-    case parse_placeholder(line) do
-      {:ok, index} ->
-        case Enum.at(blocks, index) do
-          %{text: text} -> text
-          nil -> line
-        end
-
-      :not_placeholder ->
-        line
-    end
   end
 end

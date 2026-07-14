@@ -13,7 +13,6 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaAgent.ProjectView
   alias MingaEditor.PickerUI
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.WorkspaceReview
@@ -165,8 +164,19 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
       tab_bar =
         TabBar.update_workspace(tab_bar, destination.id, &Workspace.add_file(&1, file_ref))
 
-      state
-      |> EditorState.set_tab_bar(tab_bar)
+      then(state, fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            tab_bar
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
       |> NoticeWorkflow.publish(
         "Copied `#{FileRef.display_label(file_ref)}` to `#{destination.label}`"
       )
@@ -185,7 +195,23 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
 
     case refresh_agent_source_review(tab_bar, source) do
       {:ok, refreshed_tab_bar, refreshed_source, _fresh_files} ->
-        refreshed_state = EditorState.set_tab_bar(state, refreshed_tab_bar)
+        refreshed_state =
+          then(state, fn root ->
+            shell_state =
+              MingaEditor.Shell.Traditional.State.set_tab_bar(
+                MingaEditor.Shell.Runtime.state(root.shell_runtime),
+                refreshed_tab_bar
+              )
+
+            %{
+              root
+              | shell_runtime:
+                  MingaEditor.Shell.Runtime.install_traditional_state(
+                    root.shell_runtime,
+                    shell_state
+                  )
+            }
+          end)
 
         if draft_for_file?(refreshed_source, file_ref) do
           PickerUI.open(refreshed_state, __MODULE__, Map.put(context, :confirm?, true))
@@ -232,8 +258,19 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
         )
         |> TabBar.update_workspace(destination.id, &Workspace.add_file(&1, file_ref))
 
-      state
-      |> EditorState.set_tab_bar(tab_bar)
+      then(state, fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            tab_bar
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
       |> NoticeWorkflow.publish(
         "Moved `#{FileRef.display_label(file_ref)}` to `#{destination.label}`"
       )
@@ -263,7 +300,24 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
 
       context
       |> Map.delete(:confirm?)
-      |> do_move(EditorState.set_tab_bar(state, tab_bar))
+      |> do_move(
+        then(state, fn root ->
+          shell_state =
+            MingaEditor.Shell.Traditional.State.set_tab_bar(
+              MingaEditor.Shell.Runtime.state(root.shell_runtime),
+              tab_bar
+            )
+
+          %{
+            root
+            | shell_runtime:
+                MingaEditor.Shell.Runtime.install_traditional_state(
+                  root.shell_runtime,
+                  shell_state
+                )
+          }
+        end)
+      )
     else
       nil ->
         NoticeWorkflow.publish(
@@ -290,8 +344,19 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
          {:ok, review} <- promote_conflict_review(source, view, details) do
       tab_bar = TabBar.update_workspace(tab_bar, source.id, &Workspace.set_review(&1, review))
 
-      state
-      |> EditorState.set_tab_bar(tab_bar)
+      then(state, fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            tab_bar
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
       |> NoticeWorkflow.publish("Workspace promote found conflicts: #{inspect(details)}")
     else
       {:error, reason} ->

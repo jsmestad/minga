@@ -24,7 +24,7 @@ defmodule MingaEditor.Commands.HelpersRegisterTest do
 
   defp make_state(active_register) do
     %EditorState{
-      port_manager: nil,
+      frontend: %MingaEditor.State.Frontend{port_manager: nil},
       workspace: %SessionState{
         viewport: Viewport.new(24, 80),
         editing: %MingaEditor.VimState{
@@ -94,7 +94,17 @@ defmodule MingaEditor.Commands.HelpersRegisterTest do
         make_state("a")
         |> put_reg("alpha\n", :yank, :linewise)
 
-      state = put_in(state.workspace.editing.reg.active, "b")
+      state = %{
+        state
+        | workspace:
+            SessionState.set_editing(
+              state.workspace,
+              MingaEditor.VimState.set_registers(
+                state.workspace.editing,
+                MingaEditor.State.Registers.set_active(state.workspace.editing.reg, "b")
+              )
+            )
+      }
 
       state = put_reg(state, "beta\n", :yank, :linewise)
 
@@ -117,7 +127,18 @@ defmodule MingaEditor.Commands.HelpersRegisterTest do
         make_state("")
         |> seed_register("a", "hello\n", :linewise)
 
-      state = put_in(state.workspace.editing.reg.active, "A")
+      state = %{
+        state
+        | workspace:
+            SessionState.set_editing(
+              state.workspace,
+              MingaEditor.VimState.set_registers(
+                state.workspace.editing,
+                MingaEditor.State.Registers.set_active(state.workspace.editing.reg, "A")
+              )
+            )
+      }
+
       state = put_reg(state, "world\n", :yank, :linewise)
 
       assert get_reg(state, "a") == {"hello\nworld\n", :linewise}
@@ -152,7 +173,18 @@ defmodule MingaEditor.Commands.HelpersRegisterTest do
         |> seed_register("", "original", :charwise)
         |> seed_register("0", "yanked", :charwise)
 
-      state = put_in(state.workspace.editing.reg.active, "_")
+      state = %{
+        state
+        | workspace:
+            SessionState.set_editing(
+              state.workspace,
+              MingaEditor.VimState.set_registers(
+                state.workspace.editing,
+                MingaEditor.State.Registers.set_active(state.workspace.editing.reg, "_")
+              )
+            )
+      }
+
       state = put_reg(state, "should vanish", :delete)
 
       assert get_reg(state, "") == {"original", :charwise}

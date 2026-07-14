@@ -24,7 +24,6 @@ defmodule MingaEditor.KeyDispatch do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Shell.Traditional.ToolPrompts
   alias MingaEditor.Shell.Traditional.ToolPromptWorkflow
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.ModalOverlay.CommandCompletion, as: CommandCompletionPayload
   alias Minga.Keymap
   alias Minga.Keymap.Bindings
@@ -73,7 +72,11 @@ defmodule MingaEditor.KeyDispatch do
     # can resolve filetype-scoped bindings without a side-channel lookup.
     new_mode_state = set_mode_filetype(new_mode_state, state)
 
-    base_state = EditorState.transition_mode(state, new_mode, new_mode_state)
+    base_state = %{
+      state
+      | workspace:
+          MingaEditor.Session.State.transition_mode(state.workspace, new_mode, new_mode_state)
+    }
 
     # Fire mode change hook and break undo coalescing.
     if old_mode != new_mode do
@@ -83,7 +86,7 @@ defmodule MingaEditor.KeyDispatch do
       Minga.Events.broadcast(
         :mode_changed,
         %Minga.Events.ModeEvent{old: old_mode, new: new_mode},
-        EditorState.events_registry(base_state)
+        base_state.extension_surfaces.events_registry
       )
     end
 
@@ -118,7 +121,11 @@ defmodule MingaEditor.KeyDispatch do
         declined: ToolPrompts.declined(prompts)
       }
 
-      EditorState.transition_mode(result, :tool_confirm, ms)
+      %{
+        result
+        | workspace:
+            MingaEditor.Session.State.transition_mode(result.workspace, :tool_confirm, ms)
+      }
     else
       result
     end
@@ -159,7 +166,7 @@ defmodule MingaEditor.KeyDispatch do
   defp active_buffer_read_only?(state) do
     # When the agent input is focused, the target buffer is the prompt
     # buffer (which is writable), not the read-only chat buffer.
-    if AgentAccess.input_focused?(state) do
+    if state.workspace.agent_ui.panel.input_focused do
       false
     else
       check_window_buffer_read_only(state)
@@ -289,8 +296,7 @@ defmodule MingaEditor.KeyDispatch do
 
   @spec fetch_leader_trie(EditorState.t()) :: Minga.Keymap.Bindings.node_t()
   defp fetch_leader_trie(state) do
-    state
-    |> EditorState.keymap_server()
+    state.interaction.keymap_server
     |> Keymap.leader_trie()
     |> add_gui_only_leader_bindings(state)
   catch
@@ -301,7 +307,7 @@ defmodule MingaEditor.KeyDispatch do
 
   @spec add_gui_only_leader_bindings(Bindings.node_t(), EditorState.t()) :: Bindings.node_t()
   defp add_gui_only_leader_bindings(trie, state) do
-    if MingaEditor.Frontend.gui?(state.capabilities) do
+    if MingaEditor.Frontend.gui?(state.frontend.capabilities) do
       trie
       |> promote_default_diff_binding_for_gui()
       |> bind_gui_side_by_side_if_missing()
@@ -344,7 +350,7 @@ defmodule MingaEditor.KeyDispatch do
           Minga.Keymap.Bindings.key() => {atom(), String.t()}
         }
   defp fetch_normal_bindings(state) do
-    Keymap.normal_bindings(EditorState.keymap_server(state))
+    Keymap.normal_bindings(state.interaction.keymap_server)
   catch
     :exit, _ ->
       Minga.Log.warning(:config, "normal_bindings unavailable; falling back to defaults")
@@ -354,7 +360,7 @@ defmodule MingaEditor.KeyDispatch do
   @spec fetch_mode_trie(EditorState.t(), Mode.mode(), atom()) ::
           Minga.Keymap.Bindings.node_t() | nil
   defp fetch_mode_trie(state, mode, filetype) when mode in [:insert, :visual] do
-    keymap_server = EditorState.keymap_server(state)
+    keymap_server = state.interaction.keymap_server
     global = Keymap.mode_trie(keymap_server, mode)
     ft = Minga.Keymap.Active.filetype_mode_trie(keymap_server, filetype, mode)
     merge_tries(global, ft)

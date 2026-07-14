@@ -260,11 +260,15 @@ defmodule MingaEditor.Commands do
         Minga.Log.warning(:editor, "[file-tree] Trash failed: #{reason}")
         ms = state.workspace.editing.mode_state
 
-        EditorState.transition_mode(
-          state,
-          :delete_confirm,
-          Minga.Mode.DeleteConfirmState.to_permanent(ms)
-        )
+        %{
+          state
+          | workspace:
+              MingaEditor.Session.State.transition_mode(
+                state.workspace,
+                :delete_confirm,
+                Minga.Mode.DeleteConfirmState.to_permanent(ms)
+              )
+        }
     end
   end
 
@@ -336,7 +340,9 @@ defmodule MingaEditor.Commands do
     # to a line already on screen still discards a frontend-held local offset.
     guard_buffer(state, fn ->
       state
-      |> EditorState.mark_authoritative_scroll()
+      |> then(fn state ->
+        %{state | workspace: MingaEditor.Session.State.mark_authoritative_scroll(state.workspace)}
+      end)
       |> Movement.execute(cmd)
     end)
   end
@@ -480,7 +486,7 @@ defmodule MingaEditor.Commands do
       when is_pid(buf) do
     {row, col} = Buffer.cursor(buf)
 
-    case EditorState.active_window_struct(state) do
+    case MingaEditor.Session.State.active_window_struct(state.workspace) do
       nil ->
         state
 
@@ -500,7 +506,7 @@ defmodule MingaEditor.Commands do
       when is_pid(buf) do
     {row, col} = Buffer.cursor(buf)
 
-    case EditorState.active_window_struct(state) do
+    case MingaEditor.Session.State.active_window_struct(state.workspace) do
       nil ->
         state
 
@@ -719,7 +725,7 @@ defmodule MingaEditor.Commands do
   @spec maybe_mark_authoritative_scroll(state(), atom()) :: state()
   defp maybe_mark_authoritative_scroll(state, cmd) do
     if MapSet.member?(@authoritative_scroll_commands, cmd) do
-      EditorState.mark_authoritative_scroll(state)
+      %{state | workspace: MingaEditor.Session.State.mark_authoritative_scroll(state.workspace)}
     else
       state
     end
@@ -743,7 +749,8 @@ defmodule MingaEditor.Commands do
 
   @doc "Adds a new buffer to the list and makes it active."
   @spec add_buffer(state(), pid(), keyword()) :: state()
-  def add_buffer(state, pid, opts \\ []), do: EditorState.add_buffer(state, pid, opts)
+  def add_buffer(state, pid, opts \\ []),
+    do: MingaEditor.Handlers.BufferRegistry.add_buffer(state, pid, opts)
 
   # ── Private helpers ───────────────────────────────────────────────────────
 
@@ -816,7 +823,17 @@ defmodule MingaEditor.Commands do
 
       state
       |> NoticeWorkflow.publish("Delete failed: #{reason}")
-      |> EditorState.transition_mode(:branch_delete_confirm, mode_state)
+      |> then(fn state ->
+        %{
+          state
+          | workspace:
+              MingaEditor.Session.State.transition_mode(
+                state.workspace,
+                :branch_delete_confirm,
+                mode_state
+              )
+        }
+      end)
     else
       NoticeWorkflow.publish(state, "Delete failed: #{reason}")
     end
@@ -849,8 +866,11 @@ defmodule MingaEditor.Commands do
   # is back in the file tree, not stuck in editor scope.
   @spec restore_file_tree_scope(EditorState.t()) :: EditorState.t()
   defp restore_file_tree_scope(state) do
-    if EditorState.file_tree_state(state).tree != nil do
-      EditorState.set_keymap_scope(state, :file_tree)
+    if state.workspace.file_tree.tree != nil do
+      %{
+        state
+        | workspace: MingaEditor.Session.State.set_keymap_scope(state.workspace, :file_tree)
+      }
     else
       state
     end
@@ -932,7 +952,7 @@ defmodule MingaEditor.Commands do
 
   @spec filetype_trie_for(EditorState.t(), atom()) :: Bindings.node_t()
   defp filetype_trie_for(state, filetype) do
-    Keymap.filetype_trie(EditorState.keymap_server(state), filetype)
+    Keymap.filetype_trie(state.interaction.keymap_server, filetype)
   catch
     :exit, _ ->
       Minga.Log.warning(

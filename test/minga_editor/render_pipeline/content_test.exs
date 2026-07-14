@@ -5,6 +5,7 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
 
   use ExUnit.Case, async: true
 
+  alias MingaEditor.Session.State, as: SessionState
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Core.WrapMap
   alias Minga.RenderModel.Cursor
@@ -97,7 +98,15 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
       window = Map.fetch!(state.workspace.windows.map, win_id)
       window = Window.set_fold_ranges(window, [Minga.Editing.Fold.Range.new!(3, 4)])
       window = Window.fold_at(window, 3)
-      state = put_in(state.workspace.windows.map[win_id], window)
+
+      state = %{
+        state
+        | workspace:
+            SessionState.set_windows(state.workspace, %{
+              state.workspace.windows
+              | map: Map.put(state.workspace.windows.map, win_id, window)
+            })
+      }
 
       {scrolls, state, _layout} = run_through_scroll(state)
       [{_scroll_win_id, scroll}] = Map.to_list(scrolls)
@@ -132,7 +141,7 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
       win_id = state.workspace.windows.active
       window = Window.new_agent_chat(win_id, 24, 80)
       windows = %{state.workspace.windows | map: %{win_id => window}}
-      agent_ui = UIState.new() |> UIState.ensure_prompt_buffer()
+      agent_ui = UIState.new() |> MingaEditor.Agent.PromptBuffer.ensure()
       state = %{state | workspace: %{state.workspace | windows: windows, agent_ui: agent_ui}}
       intent = Intent.from_editor_state(state)
       renderer = RendererState.new(editor_pid: nil, pipeline: &RenderPipeline.run/1)

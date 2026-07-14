@@ -54,7 +54,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
     {tb, _} = TabBar.add_workspace(tb, "Agent 2")
 
     %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %SessionState{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: buf, list: [buf]},
@@ -103,34 +103,61 @@ defmodule MingaEditor.Commands.WorkspaceTest do
     tb = state.shell_runtime.state.tab_bar
     workspace_id = TabBar.active_workspace_id(tb)
 
-    EditorState.set_tab_bar(
-      state,
-      TabBar.update_workspace(
-        tb,
-        workspace_id,
-        &WorkspaceModel.set_project_view(&1, project_view)
-      )
-    )
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          TabBar.update_workspace(
+            tb,
+            workspace_id,
+            &WorkspaceModel.set_project_view(&1, project_view)
+          )
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   defp put_active_workspace_session(state, session_pid) do
     tb = state.shell_runtime.state.tab_bar
     workspace_id = TabBar.active_workspace_id(tb)
 
-    EditorState.set_tab_bar(
-      state,
-      TabBar.update_workspace(tb, workspace_id, &WorkspaceModel.set_session(&1, session_pid))
-    )
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          TabBar.update_workspace(tb, workspace_id, &WorkspaceModel.set_session(&1, session_pid))
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   defp put_active_workspace_review(state, review) do
     tb = state.shell_runtime.state.tab_bar
     workspace_id = TabBar.active_workspace_id(tb)
 
-    EditorState.set_tab_bar(
-      state,
-      TabBar.update_workspace(tb, workspace_id, &WorkspaceModel.set_review(&1, review))
-    )
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          TabBar.update_workspace(tb, workspace_id, &WorkspaceModel.set_review(&1, review))
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   defp file_ref do
@@ -173,7 +200,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
     tb = %{tb | tabs: [manual_tab, agent_tab], active_id: 1, next_id: 3}
 
     state = %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: manual_workspace_state(manual_live_buf, :insert),
       shell_runtime: Runtime.new(Runtime.default_entry(), %TraditionalState{tab_bar: tb})
     }
@@ -680,7 +707,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
       tb = TabBar.new(file_tab)
 
       state = %EditorState{
-        port_manager: self(),
+        frontend: %MingaEditor.State.Frontend{port_manager: self()},
         workspace: %SessionState{viewport: Viewport.new(24, 80)},
         shell_runtime: Runtime.new(Runtime.default_entry(), %TraditionalState{tab_bar: tb})
       }

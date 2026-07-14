@@ -26,10 +26,13 @@ defmodule MingaEditor.WindowFocus do
          {:ok, target_window} <- Windows.fetch(windows, target_id),
          {:ok, outgoing_cursor} <- outgoing_cursor(old_window, state.workspace.buffers.active),
          :ok <- restore_target_cursor(target_window) do
-      workspace = SessionState.focus_window(state.workspace, target_id, outgoing_cursor)
-
       state
-      |> EditorState.set_workspace(workspace)
+      |> then(fn state ->
+        %{
+          state
+          | workspace: SessionState.focus_window(state.workspace, target_id, outgoing_cursor)
+        }
+      end)
       |> blur_bottom_panel()
     else
       :error -> state
@@ -43,11 +46,11 @@ defmodule MingaEditor.WindowFocus do
   def restore_focus(%EditorState{} = state, target_id) do
     with {:ok, target_window} <- Windows.fetch(state.workspace.windows, target_id),
          :ok <- restore_target_cursor(target_window) do
-      workspace = SessionState.focus_window(state.workspace, target_id, nil)
-
       restored =
         state
-        |> EditorState.set_workspace(workspace)
+        |> then(fn state ->
+          %{state | workspace: SessionState.focus_window(state.workspace, target_id, nil)}
+        end)
         |> blur_bottom_panel()
 
       {:ok, restored}
@@ -70,10 +73,13 @@ defmodule MingaEditor.WindowFocus do
   def focus_surviving_window(%EditorState{} = state, %Windows{} = windows, target_id) do
     with {:ok, target_window} <- Windows.fetch(windows, target_id),
          :ok <- restore_target_cursor(target_window) do
-      workspace = SessionState.focus_surviving_window(state.workspace, windows, target_id)
-
       state
-      |> EditorState.set_workspace(workspace)
+      |> then(fn state ->
+        %{
+          state
+          | workspace: SessionState.focus_surviving_window(state.workspace, windows, target_id)
+        }
+      end)
       |> blur_bottom_panel()
     else
       :error -> state
@@ -87,8 +93,7 @@ defmodule MingaEditor.WindowFocus do
   def remember_active_cursor(%EditorState{workspace: %{buffers: %{active: buffer}}} = state)
       when is_pid(buffer) do
     cursor = Buffer.cursor(buffer)
-    workspace = SessionState.remember_active_window_cursor(state.workspace, cursor)
-    EditorState.set_workspace(state, workspace)
+    %{state | workspace: SessionState.remember_active_window_cursor(state.workspace, cursor)}
   catch
     :exit, _reason -> state
   end
@@ -136,13 +141,16 @@ defmodule MingaEditor.WindowFocus do
 
   @spec repair_focus_with_buffer(state(), Window.id(), pid()) :: {:ok, state()}
   defp repair_focus_with_buffer(%EditorState{} = state, target_id, buffer) do
-    workspace = SessionState.focus_window(state.workspace, target_id, nil)
-    buffers = Buffers.switch_to_pid(workspace.buffers, buffer)
-    workspace = SessionState.activate_buffer(workspace, buffers)
+    buffers = Buffers.switch_to_pid(state.workspace.buffers, buffer)
 
     repaired =
       state
-      |> EditorState.set_workspace(workspace)
+      |> then(fn state ->
+        %{state | workspace: SessionState.focus_window(state.workspace, target_id, nil)}
+      end)
+      |> then(fn state ->
+        %{state | workspace: SessionState.activate_buffer(state.workspace, buffers)}
+      end)
       |> blur_bottom_panel()
 
     {:ok, repaired}
@@ -150,14 +158,14 @@ defmodule MingaEditor.WindowFocus do
 
   @spec repair_focus_with_empty_surface(state(), Window.id()) :: {:ok, state()}
   defp repair_focus_with_empty_surface(%EditorState{} = state, target_id) do
-    workspace =
-      state.workspace
-      |> SessionState.focus_window(target_id, nil)
-      |> SessionState.enter_empty_state()
-
     repaired =
       state
-      |> EditorState.set_workspace(workspace)
+      |> then(fn state ->
+        %{state | workspace: SessionState.focus_window(state.workspace, target_id, nil)}
+      end)
+      |> then(fn state ->
+        %{state | workspace: SessionState.enter_empty_state(state.workspace)}
+      end)
       |> blur_bottom_panel()
 
     {:ok, repaired}
@@ -165,12 +173,14 @@ defmodule MingaEditor.WindowFocus do
 
   @spec blur_bottom_panel(state()) :: state()
   defp blur_bottom_panel(%EditorState{} = state) do
-    runtime =
-      Runtime.update_traditional_state(state.shell_runtime, fn shell_state ->
-        panel = shell_state |> TraditionalState.bottom_panel() |> BottomPanel.blur()
-        TraditionalState.set_bottom_panel(shell_state, panel)
-      end)
+    shell_state = Runtime.state(state.shell_runtime)
+    panel = shell_state |> TraditionalState.bottom_panel() |> BottomPanel.blur()
+    shell_state = TraditionalState.set_bottom_panel(shell_state, panel)
 
-    EditorState.apply_shell_runtime_transition(state, runtime)
+    %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
   end
 end

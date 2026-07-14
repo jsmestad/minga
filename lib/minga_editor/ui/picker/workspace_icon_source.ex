@@ -99,7 +99,20 @@ defmodule MingaEditor.UI.Picker.WorkspaceIconSource do
       ) do
     ws_id = TabBar.active_workspace_id(tb)
     tb = TabBar.update_workspace(tb, ws_id, &Workspace.set_icon(&1, icon_name))
-    MingaEditor.State.set_tab_bar(state, tb)
+
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          tb
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   def on_select(_, state), do: state

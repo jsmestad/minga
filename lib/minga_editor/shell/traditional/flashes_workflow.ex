@@ -16,7 +16,7 @@ defmodule MingaEditor.Shell.Traditional.FlashesWorkflow do
         line
       ) do
     cancel_timer(state.shell_runtime.state.flashes.nav.timer)
-    state = EditorState.update_shell_state(state, &ShellState.replace_nav_flash(&1, line))
+    state = update_shell_state(state, &ShellState.replace_nav_flash(&1, line))
     generation = state.shell_runtime.state.flashes.nav.generation
     schedule_nav(state, generation)
   end
@@ -27,7 +27,7 @@ defmodule MingaEditor.Shell.Traditional.FlashesWorkflow do
   @spec cancel_nav(EditorState.t()) :: EditorState.t()
   def cancel_nav(%{shell_runtime: %{state: %MingaEditor.Shell.Traditional.State{}}} = state) do
     cancel_timer(state.shell_runtime.state.flashes.nav.timer)
-    EditorState.update_shell_state(state, &ShellState.cancel_nav_flash/1)
+    update_shell_state(state, &ShellState.cancel_nav_flash/1)
   end
 
   def cancel_nav(state), do: state
@@ -39,7 +39,7 @@ defmodule MingaEditor.Shell.Traditional.FlashesWorkflow do
         generation
       ) do
     {result, shell_state} = ShellState.advance_nav_flash(state.shell_runtime.state, generation)
-    state = EditorState.update_shell_state(state, fn _ -> shell_state end)
+    state = update_shell_state(state, fn _ -> shell_state end)
 
     case result do
       :continue -> state |> schedule_nav(generation) |> Renderer.render_or_async()
@@ -70,7 +70,7 @@ defmodule MingaEditor.Shell.Traditional.FlashesWorkflow do
     clear_yank_highlight(old.buf)
 
     state =
-      EditorState.update_shell_state(
+      update_shell_state(
         state,
         &ShellState.replace_yank_flash(&1, buf, start_pos, end_pos, range_type)
       )
@@ -88,7 +88,7 @@ defmodule MingaEditor.Shell.Traditional.FlashesWorkflow do
     flash = state.shell_runtime.state.flashes.yank
     cancel_timer(flash.timer)
     clear_yank_highlight(flash.buf)
-    EditorState.update_shell_state(state, &ShellState.cancel_yank_flash/1)
+    update_shell_state(state, &ShellState.cancel_yank_flash/1)
   end
 
   def cancel_yank(state), do: state
@@ -101,7 +101,7 @@ defmodule MingaEditor.Shell.Traditional.FlashesWorkflow do
       ) do
     previous = state.shell_runtime.state.flashes.yank
     {result, shell_state} = ShellState.advance_yank_flash(state.shell_runtime.state, generation)
-    state = EditorState.update_shell_state(state, fn _ -> shell_state end)
+    state = update_shell_state(state, fn _ -> shell_state end)
 
     case result do
       :continue ->
@@ -120,25 +120,25 @@ defmodule MingaEditor.Shell.Traditional.FlashesWorkflow do
   def advance_yank(state, _generation), do: state
 
   @spec schedule_nav(EditorState.t(), NavFlash.generation()) :: EditorState.t()
-  defp schedule_nav(%{backend: :headless} = state, _generation), do: state
+  defp schedule_nav(%{frontend: %{backend: :headless}} = state, _generation), do: state
 
   defp schedule_nav(state, generation) do
     timer = Process.send_after(self(), {:nav_flash_step, generation}, NavFlash.step_interval_ms())
 
-    EditorState.update_shell_state(
+    update_shell_state(
       state,
       &ShellState.record_nav_flash_timer(&1, generation, timer)
     )
   end
 
   @spec schedule_yank(EditorState.t(), YankFlash.generation()) :: EditorState.t()
-  defp schedule_yank(%{backend: :headless} = state, _generation), do: state
+  defp schedule_yank(%{frontend: %{backend: :headless}} = state, _generation), do: state
 
   defp schedule_yank(state, generation) do
     timer =
       Process.send_after(self(), {:yank_flash_step, generation}, YankFlash.step_interval_ms())
 
-    EditorState.update_shell_state(
+    update_shell_state(
       state,
       &ShellState.record_yank_flash_timer(&1, generation, timer)
     )
@@ -146,8 +146,8 @@ defmodule MingaEditor.Shell.Traditional.FlashesWorkflow do
 
   @spec update_yank_decoration(YankFlash.t(), EditorState.t()) :: :ok
   defp update_yank_decoration(%YankFlash{buf: buf} = flash, state) when is_pid(buf) do
-    flash_bg = state.theme.editor.yank_flash_bg || YankFlash.default_flash_bg()
-    color = YankFlash.color_for_step(flash, flash_bg, state.theme.editor.bg)
+    flash_bg = state.appearance.theme.editor.yank_flash_bg || YankFlash.default_flash_bg()
+    color = YankFlash.color_for_step(flash, flash_bg, state.appearance.theme.editor.bg)
 
     end_line_length = yank_end_line_length(buf, flash.end_pos, flash.range_type)
 
@@ -208,5 +208,18 @@ defmodule MingaEditor.Shell.Traditional.FlashesWorkflow do
   defp cancel_timer(timer) do
     Process.cancel_timer(timer)
     :ok
+  end
+
+  @spec update_shell_state(EditorState.t(), (MingaEditor.Shell.Traditional.State.t() ->
+                                               MingaEditor.Shell.Traditional.State.t())) ::
+          EditorState.t()
+  defp update_shell_state(%EditorState{} = state, transition) when is_function(transition, 1) do
+    shell_state = state.shell_runtime |> MingaEditor.Shell.Runtime.state() |> transition.()
+
+    %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
   end
 end

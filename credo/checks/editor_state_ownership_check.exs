@@ -7,155 +7,6 @@ defmodule Minga.Credo.EditorStateOwnershipCheck do
   Temporary exceptions are exact module, function, violation, and target tuples. Every exception must include a migration ticket, reason, and preserved invariant. Wildcards and path-based exceptions are rejected.
   """
 
-  @new_direct_and_generic_allowlist_specs [
-    {"MingaEditor.Shell.Traditional", "handle_event/3", "direct_write",
-     "MingaEditor.Shell.Traditional.State",
-     "Existing typed shell event write awaiting final ownership convergence",
-     "Shell events change only the active Traditional tab-bar state"},
-    {"MingaEditor.Shell.Traditional", "handle_gui_action/3", "direct_write",
-     "MingaEditor.Shell.Traditional.State",
-     "Existing typed GUI action write awaiting final ownership convergence",
-     "Workspace GUI actions change only the active Traditional tab-bar state"},
-    {"MingaEditor.Shell.Traditional", "open_buffer_in_new_tab/3", "direct_write",
-     "MingaEditor.Shell.Traditional.State",
-     "Existing typed new-tab write awaiting final ownership convergence",
-     "Opening a buffer installs only the resulting Traditional tab-bar state"},
-    {"MingaEditor.Shell.Traditional", "on_buffer_switched/2", "direct_write",
-     "MingaEditor.Shell.Traditional.State",
-     "Existing typed buffer-switch write awaiting final ownership convergence",
-     "Buffer switching synchronizes only the active Traditional tab selection"},
-    {"MingaEditor.Shell.Traditional", "on_agent_event/4", "direct_write",
-     "MingaEditor.Shell.Traditional.State",
-     "Existing typed agent-event write awaiting final ownership convergence",
-     "Agent events change only status and attention in the Traditional tab bar"},
-    {"MingaEditor.Shell.Traditional", "set_tab_session/3", "direct_write",
-     "MingaEditor.Shell.Traditional.State",
-     "Existing typed tab-session write awaiting final ownership convergence",
-     "Session assignment changes only the identified Traditional tab"},
-    {"MingaEditor.Shell.Traditional", "switch_to_buffer_tab/4", "direct_write",
-     "MingaEditor.Shell.Traditional.State",
-     "Existing typed tab-switch write awaiting final ownership convergence",
-     "Buffer-tab switching preserves the selected tab and workspace pairing"},
-    {"MingaEditor.Shell.Traditional", "open_buffer_in_file_tab/4", "direct_write",
-     "MingaEditor.Shell.Traditional.State",
-     "Existing typed file-tab write awaiting final ownership convergence",
-     "Opening a file preserves the selected file tab and workspace pairing"},
-    {"MingaEditor.Shell.StateStash", "transform/3", "generic_api",
-     "MingaEditor.Shell.StateStash.transform/3",
-     "Existing stash mapper awaiting final ownership convergence",
-     "A stash transforms only after its complete registry identity matches"},
-    {"MingaEditor.Shell.StateStash", "transform/4", "generic_api",
-     "MingaEditor.Shell.StateStash.transform/4",
-     "Existing contextual stash mapper awaiting final ownership convergence",
-     "A contextual stash transform preserves registry identity and caller context"},
-    {"MingaEditor.State.AgentAccess", "update_panel/2", "direct_write",
-     "MingaEditor.Agent.UIState",
-     "Existing agent panel projection write awaiting final ownership convergence",
-     "Panel transforms replace only the panel projection of agent UI state"},
-    {"MingaEditor.State.AgentAccess", "update_view/2", "direct_write",
-     "MingaEditor.Agent.UIState",
-     "Existing agent view projection write awaiting final ownership convergence",
-     "View transforms replace only the view projection of agent UI state"},
-    {"MingaEditor.Startup", "ensure_session_started/1", "direct_write", "MingaEditor.State",
-     "Existing startup session write awaiting final ownership convergence",
-     "Startup marks the Editor session started only after session initialization"},
-    {"MingaEditor.Startup", "maybe_start_save_timer/1", "direct_write", "MingaEditor.State",
-     "Existing startup timer write awaiting final ownership convergence",
-     "Startup records only the save timer created for the active Editor generation"},
-    {"MingaEditor.Layout", "put/1", "direct_write", "MingaEditor.State",
-     "Existing layout cache write awaiting final ownership convergence",
-     "Layout installation keeps the cached layout and derived focus tree consistent"},
-    {"MingaEditor.Agent.Compaction", "clear_ui_progress/1", "direct_write",
-     "MingaEditor.Agent.UIState",
-     "Existing compaction projection write awaiting final ownership convergence",
-     "Compaction completion clears only progress fields in the agent UI projection"}
-  ]
-
-  @new_pure_allowlist_specs [
-    {"ensure_prompt_buffer/1", "Minga.Buffer.buffer_name",
-     "Prompt-buffer reuse accepts only the designated agent prompt buffer"},
-    {"start_prompt_buffer/2", "Minga.Buffer.start_link",
-     "Prompt-buffer creation installs one process-backed input buffer"},
-    {"prompt_text/1", "Minga.Buffer.content",
-     "Prompt text reflects only the current prompt buffer content"},
-    {"insert_char/2", "Minga.Buffer.insert_text",
-     "Character insertion changes only the prompt buffer at its cursor"},
-    {"insert_newline/1", "Minga.Buffer.insert_text",
-     "Newline insertion changes only the prompt buffer at its cursor"},
-    {"delete_char/1", "Minga.Buffer.cursor",
-     "Prompt deletion preserves the prompt buffer cursor boundary"},
-    {"delete_char/1", "Minga.Buffer.delete_before",
-     "Prompt deletion removes only content before the prompt cursor"},
-    {"set_prompt_text/2", "Minga.Buffer.replace_content",
-     "Prompt replacement changes only the complete prompt buffer content"},
-    {"clear_input_without_history/1", "Minga.Buffer.replace_content",
-     "History-free clearing empties only the prompt buffer content"},
-    {"clear_input/1", "Minga.Buffer.replace_content",
-     "Input clearing records history before emptying prompt buffer content"},
-    {"move_cursor_up/1", "Minga.Buffer.cursor",
-     "Upward prompt movement starts from the current prompt cursor"},
-    {"move_cursor_up/1", "Minga.Buffer.move",
-     "Upward prompt movement changes only the prompt buffer cursor"},
-    {"move_cursor_down/1", "Minga.Buffer.cursor",
-     "Downward prompt movement starts from the current prompt cursor"},
-    {"move_cursor_down/1", "Minga.Buffer.line_count",
-     "Downward prompt movement remains bounded by prompt content lines"},
-    {"move_cursor_down/1", "Minga.Buffer.move",
-     "Downward prompt movement changes only the prompt buffer cursor"},
-    {"insert_paste/2", "Minga.Buffer.insert_text",
-     "Small paste insertion changes only the prompt buffer at its cursor"},
-    {"toggle_paste_expand/1", "Minga.Buffer.cursor",
-     "Paste expansion selects only the block at the current prompt cursor"},
-    {"history_prev/1", "Minga.Buffer.replace_content",
-     "Previous history selection replaces only the prompt buffer content"},
-    {"history_next/1", "Minga.Buffer.replace_content",
-     "Next history selection replaces only the prompt buffer content"},
-    {"insert_collapsed_paste/2", "Minga.Buffer.cursor",
-     "Collapsed paste placement derives from the current prompt cursor"},
-    {"insert_collapsed_paste/2", "Minga.Buffer.replace_content",
-     "Collapsed paste insertion preserves placeholder and source-text correspondence"},
-    {"insert_collapsed_paste/2", "Minga.Buffer.move_to",
-     "Collapsed paste insertion restores the cursor beside its placeholder"},
-    {"expand_block/2", "Minga.Buffer.cursor",
-     "Paste expansion derives its replacement from the current prompt cursor"},
-    {"expand_block/2", "Minga.Buffer.replace_content",
-     "Paste expansion preserves the selected block and source-text correspondence"},
-    {"expand_block/2", "Minga.Buffer.move_to",
-     "Paste expansion restores the cursor within the expanded block"},
-    {"collapse_block/2", "Minga.Buffer.cursor",
-     "Paste collapse derives its replacement from the current prompt cursor"},
-    {"collapse_block/2", "Minga.Buffer.replace_content",
-     "Paste collapse preserves the selected block and placeholder correspondence"},
-    {"collapse_block/2", "Minga.Buffer.move_to",
-     "Paste collapse restores the cursor beside the collapsed placeholder"}
-  ]
-
-  @new_allowlist Enum.map(
-                   @new_direct_and_generic_allowlist_specs,
-                   fn {module, function, violation, target, reason, invariant} ->
-                     [
-                       module: module,
-                       function: function,
-                       violation: violation,
-                       target: target,
-                       ticket: "#2870",
-                       reason: reason,
-                       invariant: invariant
-                     ]
-                   end
-                 ) ++
-                   Enum.map(@new_pure_allowlist_specs, fn {function, target, invariant} ->
-                     [
-                       module: "MingaEditor.Agent.UIState",
-                       function: function,
-                       violation: "pure_call",
-                       target: target,
-                       ticket: "#2870",
-                       reason: "Existing prompt buffer process call awaiting workflow extraction",
-                       invariant: invariant
-                     ]
-                   end)
-
   use Credo.Check,
     id: "EX9012",
     base_priority: :high,
@@ -184,11 +35,122 @@ defmodule Minga.Credo.EditorStateOwnershipCheck do
           workflow: "MingaEditor.RenderPipeline or MingaEditor.Handlers.RenderHandler"
         ],
         [
+          struct: "MingaEditor.State.Frontend",
+          owners: ["MingaEditor.State.Frontend"],
+          paths: [[:frontend]],
+          boundary:
+            "MingaEditor.State.Frontend transition API for frontend capability, viewport, and input correlation",
+          workflow: "the focused frontend connection or render workflow"
+        ],
+        [
+          struct: "MingaEditor.State.Render",
+          owners: ["MingaEditor.State.Render"],
+          paths: [[:render]],
+          boundary:
+            "MingaEditor.State.Render transition API for renderer connection, layout observations, and message storage",
+          workflow: "MingaEditor.RenderPipeline or a focused render workflow"
+        ],
+        [
+          struct: "MingaEditor.State.Parser",
+          owners: ["MingaEditor.State.Parser"],
+          paths: [[:parser]],
+          boundary:
+            "MingaEditor.State.Parser transition API for parser availability and derived highlight caches",
+          workflow: "the focused parser or highlighting workflow"
+        ],
+        [
+          struct: "MingaEditor.State.AgentConnection",
+          owners: ["MingaEditor.State.AgentConnection"],
+          paths: [[:agent_connection]],
+          boundary:
+            "MingaEditor.State.AgentConnection transition API for agent transport and session connection state",
+          workflow: "the focused agent connection workflow"
+        ],
+        [
+          struct: "MingaEditor.State.Interaction",
+          owners: ["MingaEditor.State.Interaction"],
+          paths: [[:interaction]],
+          boundary:
+            "MingaEditor.State.Interaction transition API for input model, focus routing, and keystroke history",
+          workflow: "the focused input workflow"
+        ],
+        [
+          struct: "MingaEditor.State.ExtensionSurfaces",
+          owners: ["MingaEditor.State.ExtensionSurfaces"],
+          paths: [[:extension_surfaces]],
+          boundary:
+            "MingaEditor.State.ExtensionSurfaces transition API for per-editor extension registry identities",
+          workflow: "the focused extension lifecycle workflow"
+        ],
+        [
+          struct: "MingaEditor.State.BufferLifecycle",
+          owners: ["MingaEditor.State.BufferLifecycle"],
+          paths: [[:buffer_lifecycle]],
+          boundary:
+            "MingaEditor.State.BufferLifecycle transition API for buffer registration and retirement metadata",
+          workflow: "the focused buffer lifecycle workflow"
+        ],
+        [
+          struct: "MingaEditor.State.Git",
+          owners: ["MingaEditor.State.Git"],
+          paths: [[:git]],
+          boundary:
+            "MingaEditor.State.Git transition API for Git status and diff presentation state",
+          workflow: "the focused Git workflow"
+        ],
+        [
+          struct: "MingaEditor.State.Session",
+          owners: ["MingaEditor.State.Session"],
+          paths: [[:session]],
+          boundary:
+            "MingaEditor.State.Session transition API for session persistence configuration and timer intent",
+          workflow: "MingaEditor.Handlers.SessionHandler or MingaEditor.Startup"
+        ],
+        [
+          struct: "MingaEditor.State.Feedback",
+          owners: ["MingaEditor.State.Feedback"],
+          paths: [[:feedback]],
+          boundary:
+            "MingaEditor.State.Feedback transition API for operation progress and user-facing feedback values",
+          workflow: "the focused operation feedback workflow"
+        ],
+        [
+          struct: "MingaEditor.State.LSP",
+          owners: ["MingaEditor.State.LSP"],
+          paths: [[:lsp]],
+          boundary:
+            "MingaEditor.State.LSP transition API for server status, responses, requests, and timer intent",
+          workflow: "MingaEditor.LSPActions or the focused LSP event workflow"
+        ],
+        [
+          struct: "MingaEditor.State.Remote",
+          owners: ["MingaEditor.State.Remote"],
+          paths: [[:remote]],
+          boundary: "MingaEditor.State.Remote transition API for remote session and file state",
+          workflow: "the focused remote session workflow"
+        ],
+        [
+          struct: "MingaEditor.State.Appearance",
+          owners: ["MingaEditor.State.Appearance"],
+          paths: [[:appearance]],
+          boundary:
+            "MingaEditor.State.Appearance transition API for theme and display preference state",
+          workflow: "the focused appearance workflow"
+        ],
+        [
           struct: "MingaEditor.State",
           owners: ["MingaEditor.State"],
           paths: [],
           boundary: "MingaEditor.State root transition API for a documented root-wide invariant",
           workflow: "the focused Editor workflow that owns the external action"
+        ],
+        [
+          struct: "MingaEditor.State.Mouse",
+          owners: ["MingaEditor.State.Mouse"],
+          paths: [[:workspace, :mouse]],
+          boundary:
+            "MingaEditor.State.Mouse transition API for drag, click, and hover presentation values",
+          workflow: "MingaEditor.Mouse"
         ],
         [
           struct: "MingaEditor.Session.State",
@@ -197,6 +159,13 @@ defmodule Minga.Credo.EditorStateOwnershipCheck do
           boundary: "MingaEditor.Session.State aggregate transition API",
           workflow:
             "a focused Editor workflow or MingaEditor.State for a documented root-wide invariant"
+        ],
+        [
+          struct: "MingaEditor.Session.HoverObservation",
+          owners: ["MingaEditor.Session.HoverObservation"],
+          paths: [[:workspace, :hover_observation]],
+          boundary: "MingaEditor.Session.HoverObservation transition API",
+          workflow: "a focused Editor hover workflow"
         ],
         [
           struct: "MingaEditor.Shell.Runtime",
@@ -320,388 +289,7 @@ defmodule Minga.Credo.EditorStateOwnershipCheck do
         ]
       ],
       pure_modules: :owners,
-      allowlist:
-        [
-          [
-            module: "MingaEditor.Session.State",
-            function: "update_window/3",
-            violation: "generic_api",
-            target: "MingaEditor.Session.State.update_window/3",
-            ticket: "#2870",
-            reason: "Existing window mapper awaiting final ownership convergence",
-            invariant: "The Windows aggregate retains window identity and membership authority"
-          ],
-          [
-            module: "MingaEditor.Session.State",
-            function: "update_snapshot_window/3",
-            violation: "generic_api",
-            target: "MingaEditor.Session.State.update_snapshot_window/3",
-            ticket: "#2870",
-            reason: "Existing render snapshot mapper awaiting final ownership convergence",
-            invariant: "Render snapshots preserve the Windows aggregate membership contract"
-          ],
-          [
-            module: "MingaEditor.Session.State",
-            function: "update_windows_for_buffer/3",
-            violation: "generic_api",
-            target: "MingaEditor.Session.State.update_windows_for_buffer/3",
-            ticket: "#2870",
-            reason: "Existing buffer window mapper awaiting final ownership convergence",
-            invariant: "Only windows displaying the identified buffer may be transformed"
-          ],
-          [
-            module: "MingaEditor.Session.State",
-            function: "update_editing/2",
-            violation: "generic_api",
-            target: "MingaEditor.Session.State.update_editing/2",
-            ticket: "#2870",
-            reason: "Existing editing mapper awaiting final ownership convergence",
-            invariant: "Editing transitions remain scoped to the active session value"
-          ],
-          [
-            module: "MingaEditor.Session.State",
-            function: "update_file_tree/2",
-            violation: "generic_api",
-            target: "MingaEditor.Session.State.update_file_tree/2",
-            ticket: "#2870",
-            reason: "Existing file-tree mapper awaiting final ownership convergence",
-            invariant: "File-tree transitions remain scoped to the session file-tree value"
-          ],
-          [
-            module: "MingaEditor.Session.State",
-            function: "update_search/2",
-            violation: "generic_api",
-            target: "MingaEditor.Session.State.update_search/2",
-            ticket: "#2870",
-            reason: "Existing search mapper awaiting final ownership convergence",
-            invariant: "Search transitions remain scoped to the session search value"
-          ],
-          [
-            module: "MingaEditor.Session.State",
-            function: "update_feature_state/5",
-            violation: "generic_api",
-            target: "MingaEditor.Session.State.update_feature_state/5",
-            ticket: "#2870",
-            reason: "Existing extension-state mapper awaiting final ownership convergence",
-            invariant: "Extension state remains namespaced by source and feature identifier"
-          ],
-          [
-            module: "MingaEditor.Shell.Runtime",
-            function: "update_traditional_state/2",
-            violation: "generic_api",
-            target: "MingaEditor.Shell.Runtime.update_traditional_state/2",
-            ticket: "#2870",
-            reason: "Existing shell mapper awaiting final ownership convergence",
-            invariant: "Only an active Traditional shell runtime may transform Traditional state"
-          ],
-          [
-            module: "MingaEditor.Agent.UIState",
-            function: "update_activity/2",
-            violation: "generic_api",
-            target: "MingaEditor.Agent.UIState.update_activity/2",
-            ticket: "#2870",
-            reason: "Existing agent activity mapper awaiting final ownership convergence",
-            invariant: "Activity changes remain scoped to the agent view projection"
-          ],
-          [
-            module: "MingaEditor.Agent.UIState",
-            function: "update_edit_timeline/2",
-            violation: "generic_api",
-            target: "MingaEditor.Agent.UIState.update_edit_timeline/2",
-            ticket: "#2870",
-            reason: "Existing edit timeline mapper awaiting final ownership convergence",
-            invariant: "Timeline changes remain scoped to the agent view projection"
-          ],
-          [
-            module: "MingaEditor.Agent.UIState",
-            function: "update_preview/2",
-            violation: "generic_api",
-            target: "MingaEditor.Agent.UIState.update_preview/2",
-            ticket: "#2870",
-            reason: "Existing agent preview mapper awaiting final ownership convergence",
-            invariant: "Preview changes remain scoped to the agent preview projection"
-          ],
-          [
-            module: "MingaEditor.RenderPipeline.Content",
-            function: "update_agent_scroll_metrics/3",
-            violation: "direct_write",
-            target: "MingaEditor.Agent.UIState",
-            ticket: "#2870",
-            reason: "Existing render metric projection awaiting final ownership convergence",
-            invariant: "Render metrics may update only the active agent panel scroll projection"
-          ],
-          [
-            module: "MingaEditor.Startup",
-            function: "agent_view_state/0",
-            violation: "direct_write",
-            target: "MingaEditor.Agent.UIState",
-            ticket: "#2870",
-            reason:
-              "Existing startup projection construction awaiting final ownership convergence",
-            invariant: "Startup activates only the initial agent view projection"
-          ],
-          [
-            module: "MingaEditor.State",
-            function: "update_workspace/2",
-            violation: "generic_api",
-            target: "MingaEditor.State.update_workspace/2",
-            ticket: "#2870",
-            reason: "Existing root workspace mapper awaiting final ownership convergence",
-            invariant: "The root continues to replace one complete session value"
-          ],
-          [
-            module: "MingaEditor.State",
-            function: "update_file_tree/2",
-            violation: "generic_api",
-            target: "MingaEditor.State.update_file_tree/2",
-            ticket: "#2870",
-            reason: "Existing root file-tree mapper awaiting final ownership convergence",
-            invariant: "File-tree changes remain scoped to the session aggregate"
-          ],
-          [
-            module: "MingaEditor.State",
-            function: "update_buffers/2",
-            violation: "generic_api",
-            target: "MingaEditor.State.update_buffers/2",
-            ticket: "#2870",
-            reason: "Existing root buffer mapper awaiting final ownership convergence",
-            invariant: "Buffer changes remain scoped to the session buffer aggregate"
-          ],
-          [
-            module: "MingaEditor.State",
-            function: "update_windows/2",
-            violation: "generic_api",
-            target: "MingaEditor.State.update_windows/2",
-            ticket: "#2870",
-            reason: "Existing root windows mapper awaiting final ownership convergence",
-            invariant: "Window changes remain scoped to the session window aggregate"
-          ],
-          [
-            module: "MingaEditor.State",
-            function: "update_dired/2",
-            violation: "generic_api",
-            target: "MingaEditor.State.update_dired/2",
-            ticket: "#2870",
-            reason: "Existing root dired mapper awaiting final ownership convergence",
-            invariant: "Dired changes remain scoped to the active session value"
-          ],
-          [
-            module: "MingaEditor.State",
-            function: "update_mouse/2",
-            violation: "generic_api",
-            target: "MingaEditor.State.update_mouse/2",
-            ticket: "#2870",
-            reason: "Existing root mouse mapper awaiting final ownership convergence",
-            invariant: "Mouse changes remain scoped to the active session value"
-          ],
-          [
-            module: "MingaEditor.State",
-            function: "update_search/2",
-            violation: "generic_api",
-            target: "MingaEditor.State.update_search/2",
-            ticket: "#2870",
-            reason: "Existing root search mapper awaiting final ownership convergence",
-            invariant: "Search changes remain scoped to the active session value"
-          ],
-          [
-            module: "MingaEditor.State",
-            function: "update_highlight/2",
-            violation: "generic_api",
-            target: "MingaEditor.State.update_highlight/2",
-            ticket: "#2870",
-            reason: "Existing root highlight mapper awaiting final ownership convergence",
-            invariant: "Highlight changes remain scoped to the active session value"
-          ],
-          [
-            module: "MingaEditor.State",
-            function: "update_editing/2",
-            violation: "generic_api",
-            target: "MingaEditor.State.update_editing/2",
-            ticket: "#2870",
-            reason: "Existing root editing mapper awaiting final ownership convergence",
-            invariant: "Editing changes remain scoped to the active session value"
-          ],
-          [
-            module: "MingaEditor.State",
-            function: "update_mode_state/2",
-            violation: "generic_api",
-            target: "MingaEditor.State.update_mode_state/2",
-            ticket: "#2870",
-            reason: "Existing root mode mapper awaiting final ownership convergence",
-            invariant: "Mode-state changes remain scoped to the active editing value"
-          ],
-          [
-            module: "MingaEditor.State",
-            function: "update_injection_ranges/2",
-            violation: "generic_api",
-            target: "MingaEditor.State.update_injection_ranges/2",
-            ticket: "#2870",
-            reason: "Existing injection mapper awaiting final ownership convergence",
-            invariant: "Injection ranges remain scoped to the active session value"
-          ],
-          [
-            module: "MingaEditor.State",
-            function: "update_shell_state/2",
-            violation: "generic_api",
-            target: "MingaEditor.State.update_shell_state/2",
-            ticket: "#2870",
-            reason: "Existing root shell mapper awaiting final ownership convergence",
-            invariant: "Shell changes remain scoped to the active shell runtime"
-          ],
-          [
-            module: "MingaEditor.State",
-            function: "update_remote/2",
-            violation: "generic_api",
-            target: "MingaEditor.State.update_remote/2",
-            ticket: "#2870",
-            reason: "Existing root remote mapper awaiting final ownership convergence",
-            invariant: "Remote changes remain scoped to the root remote value"
-          ],
-          [
-            module: "MingaEditor.State",
-            function: "update_lsp/2",
-            violation: "generic_api",
-            target: "MingaEditor.State.update_lsp/2",
-            ticket: "#2870",
-            reason: "Existing root LSP mapper awaiting final ownership convergence",
-            invariant: "LSP changes remain scoped to the root LSP value"
-          ],
-          [
-            module: "MingaEditor.State",
-            function: "update_window/3",
-            violation: "generic_api",
-            target: "MingaEditor.State.update_window/3",
-            ticket: "#2870",
-            reason: "Existing root window mapper awaiting final ownership convergence",
-            invariant: "The Windows aggregate retains window identity authority"
-          ],
-          [
-            module: "MingaEditor.State",
-            function: "update_windows_for_buffer/3",
-            violation: "generic_api",
-            target: "MingaEditor.State.update_windows_for_buffer/3",
-            ticket: "#2870",
-            reason: "Existing root buffer-window mapper awaiting final ownership convergence",
-            invariant: "Only windows displaying the identified buffer may change"
-          ],
-          [
-            module: "MingaEditor.State",
-            function: "update_feature_state/5",
-            violation: "generic_api",
-            target: "MingaEditor.State.update_feature_state/5",
-            ticket: "#2870",
-            reason: "Existing root extension-state mapper awaiting final ownership convergence",
-            invariant: "Extension state remains namespaced by source and feature identifier"
-          ],
-          [
-            module: "MingaEditor.State",
-            function: "sync_file_tree_sidebar/2",
-            violation: "pure_call",
-            target: "Minga.Log.warning",
-            ticket: "#2870",
-            reason: "Existing file-tree sidebar logging awaiting workflow extraction",
-            invariant: "A missing sidebar registration leaves file-tree state unchanged"
-          ],
-          [
-            module: "MingaEditor.State",
-            function: "file_tree_state/1",
-            violation: "pure_call",
-            target: "MingaEditor.RenderPipeline.Input.file_tree_state",
-            ticket: "#2870",
-            reason: "Existing render-input compatibility call awaiting convergence",
-            invariant: "Render input exposes the same file-tree value as root state"
-          ],
-          [
-            module: "MingaEditor.State",
-            function: "find_buffer_by_path/2",
-            violation: "pure_call",
-            target: "Minga.Buffer.file_path",
-            ticket: "#2870",
-            reason: "Existing buffer lookup awaiting workflow extraction",
-            invariant: "Lookup returns only a buffer whose canonical path matches"
-          ],
-          [
-            module: "MingaEditor.State",
-            function: "monitor_buffer/2",
-            violation: "pure_call",
-            target: "Process.monitor",
-            ticket: "#2870",
-            reason: "Existing root monitor creation awaiting workflow extraction",
-            invariant: "Each tracked buffer has at most one root monitor reference"
-          ],
-          [
-            module: "MingaEditor.State",
-            function: "buffer_content_context/1",
-            violation: "pure_call",
-            target: "Minga.Buffer.file_path",
-            ticket: "#2870",
-            reason: "Existing buffer context read awaiting workflow extraction",
-            invariant: "Context describes only the active session buffer"
-          ],
-          [
-            module: "MingaEditor.State",
-            function: "buffer_content_context/1",
-            violation: "pure_call",
-            target: "Minga.Buffer.buffer_name",
-            ticket: "#2870",
-            reason: "Existing buffer context read awaiting workflow extraction",
-            invariant: "Context describes only the active session buffer"
-          ],
-          [
-            module: "MingaEditor.State",
-            function: "buffer_content_context/1",
-            violation: "pure_call",
-            target: "Minga.Buffer.dirty?",
-            ticket: "#2870",
-            reason: "Existing buffer context read awaiting workflow extraction",
-            invariant: "Context describes only the active session buffer"
-          ],
-          [
-            module: "MingaEditor.State",
-            function: "buffer_content_context/1",
-            violation: "pure_call",
-            target: "Minga.Buffer.filetype",
-            ticket: "#2870",
-            reason: "Existing buffer context read awaiting workflow extraction",
-            invariant: "Context describes only the active session buffer"
-          ],
-          [
-            module: "MingaEditor.State",
-            function: "buffer_path/1",
-            violation: "pure_call",
-            target: "Minga.Buffer.file_path",
-            ticket: "#2870",
-            reason: "Existing buffer path read awaiting workflow extraction",
-            invariant: "Only a live buffer PID may be queried for its path"
-          ],
-          [
-            module: "MingaEditor.State",
-            function: "log_switch_tab/3",
-            violation: "pure_call",
-            target: "Minga.Log.debug",
-            ticket: "#2870",
-            reason: "Existing tab switch logging awaiting workflow extraction",
-            invariant: "Logging does not alter the selected tab transition"
-          ],
-          [
-            module: "MingaEditor.State",
-            function: "log_switch_tab_result/1",
-            violation: "pure_call",
-            target: "Minga.Log.debug",
-            ticket: "#2870",
-            reason: "Existing tab switch result logging awaiting workflow extraction",
-            invariant: "Logging observes but does not alter the selected tab"
-          ],
-          [
-            module: "MingaEditor.State",
-            function: "agent_snapshot/1",
-            violation: "pure_call",
-            target: "MingaAgent.Session.editor_snapshot",
-            ticket: "#2870",
-            reason: "Existing agent snapshot read awaiting workflow extraction",
-            invariant: "Snapshot failure falls back without mutating root state"
-          ]
-        ] ++ @new_allowlist
+      allowlist: []
     ],
     explanations: [
       check: """
@@ -736,7 +324,11 @@ defmodule Minga.Credo.EditorStateOwnershipCheck do
     "Minga.Session",
     "Minga.LSP",
     "Minga.Git",
+    "Minga.Keymap",
+    "Minga.Config.Options",
     "MingaAgent",
+    "MingaEditor.Extension.Sidebar",
+    "MingaEditor.Agent.SemanticUI.Registry",
     "MingaEditor.Renderer",
     "MingaEditor.RenderPipeline",
     "MingaEditor.Session",
@@ -812,15 +404,13 @@ defmodule Minga.Credo.EditorStateOwnershipCheck do
          config
        ) do
     struct = module_name(module_ast, context, config.aliases)
-    issues = direct_write_issues(struct, meta, context, config)
+    issues = direct_update_issues(struct, updates, meta, context, config)
     issues ++ scan(receiver, context, config) ++ scan(updates, context, config)
   end
 
   defp scan({:%{}, meta, [{:|, _, [receiver, updates]}]}, context, config) do
-    issues =
-      receiver
-      |> receiver_ownership(context, config.ownerships)
-      |> direct_write_issues(meta, context, config)
+    ownership = receiver_ownership(receiver, context, config.ownerships)
+    issues = direct_update_issues(ownership, updates, meta, context, config)
 
     issues ++ scan(receiver, context, config) ++ scan(updates, context, config)
   end
@@ -922,6 +512,50 @@ defmodule Minga.Credo.EditorStateOwnershipCheck do
     match_bindings = explicit_struct_bindings(patterns, context, aliases)
     %{context | bindings: Map.merge(bindings, match_bindings)}
   end
+
+  defp direct_update_issues(ownership, updates, meta, context, config) do
+    if owner_produced_root_installation?(ownership, updates, context, config) do
+      []
+    else
+      direct_write_issues(ownership, meta, context, config)
+    end
+  end
+
+  defp owner_produced_root_installation?(ownership, updates, context, config)
+       when is_binary(ownership) do
+    config.ownerships
+    |> ownership_by_struct(ownership)
+    |> owner_produced_root_installation?(updates, context, config)
+  end
+
+  defp owner_produced_root_installation?(ownership, updates, context, config)
+       when is_list(ownership) and is_list(updates) do
+    Keyword.fetch!(ownership, :struct) == "MingaEditor.State" and updates != [] and
+      Enum.all?(updates, &owner_produced_root_field?(&1, context, config))
+  end
+
+  defp owner_produced_root_installation?(_ownership, _updates, _context, _config), do: false
+
+  defp owner_produced_root_field?({field, value}, context, config) when is_atom(field) do
+    case ownership_for_path([field], config.ownerships) do
+      nil -> false
+      ownership -> owner_call?(value, Keyword.fetch!(ownership, :owners), context, config.aliases)
+    end
+  end
+
+  defp owner_produced_root_field?(_update, _context, _config), do: false
+
+  defp owner_call?(
+         {{:., _, [module_ast, function]}, _, args},
+         owners,
+         context,
+         aliases
+       )
+       when is_atom(function) and is_list(args) do
+    module_name(module_ast, context, aliases) in owners
+  end
+
+  defp owner_call?(_value, _owners, _context, _aliases), do: false
 
   defp direct_write_issues(nil, _meta, _context, _config), do: []
 

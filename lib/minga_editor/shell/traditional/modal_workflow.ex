@@ -23,7 +23,7 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
     else
       state
       |> suppress_lower_surfaces()
-      |> EditorState.update_shell_state(&ShellState.open_modal(&1, variant, payload))
+      |> update_shell_state(&ShellState.open_modal(&1, variant, payload))
     end
   end
 
@@ -35,7 +35,7 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
   def transition(%{shell_runtime: %{state: %ShellState{}}} = state, variant, payload) do
     state
     |> suppress_lower_surfaces()
-    |> EditorState.update_shell_state(&ShellState.transition_modal(&1, variant, payload))
+    |> update_shell_state(&ShellState.transition_modal(&1, variant, payload))
   end
 
   def transition(state, _variant, _payload), do: state
@@ -43,7 +43,7 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
   @doc "Closes a completed modal."
   @spec close(EditorState.t()) :: EditorState.t()
   def close(%{shell_runtime: %{state: %ShellState{}}} = state),
-    do: EditorState.update_shell_state(state, &ShellState.close_modal/1)
+    do: update_shell_state(state, &ShellState.close_modal/1)
 
   def close(state), do: state
 
@@ -51,7 +51,7 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
   @spec dismiss(EditorState.t()) :: EditorState.t()
   def dismiss(%{shell_runtime: %{state: %ShellState{modal: modal}}} = state) do
     cancel_completion_timers(modal)
-    EditorState.update_shell_state(state, &ShellState.dismiss_modal/1)
+    update_shell_state(state, &ShellState.dismiss_modal/1)
   end
 
   def dismiss(state), do: state
@@ -77,7 +77,7 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
                                               Minga.Editing.Completion.t())) ::
           EditorState.t()
   def update_completion(%{shell_runtime: %{state: %ShellState{}}} = state, update),
-    do: EditorState.update_shell_state(state, &ShellState.update_modal_completion(&1, update))
+    do: update_shell_state(state, &ShellState.update_modal_completion(&1, update))
 
   def update_completion(state, _update), do: state
 
@@ -87,7 +87,7 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
   def put_completion_trigger(%{shell_runtime: %{state: %ShellState{}}} = state, trigger) do
     active_tab_id = active_tab_id(state)
 
-    EditorState.update_shell_state(
+    update_shell_state(
       state,
       &ShellState.put_modal_completion_trigger(&1, trigger, active_tab_id)
     )
@@ -111,7 +111,7 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
   def dismiss_if_stale(%{shell_runtime: %{state: %ShellState{}}} = state) do
     active_tab_id = active_tab_id(state)
 
-    EditorState.update_shell_state(
+    update_shell_state(
       state,
       &ShellState.dismiss_stale_modal_completion(&1, active_tab_id)
     )
@@ -123,7 +123,7 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
   defp suppress_lower_surfaces(state) do
     state
     |> WhichKeyWorkflow.dismiss()
-    |> EditorState.update_shell_state(&ShellState.suppress_lower_transients/1)
+    |> update_shell_state(&ShellState.suppress_lower_transients/1)
   end
 
   @spec cancel_completion_timers(ModalOverlay.t()) :: :ok
@@ -140,4 +140,17 @@ defmodule MingaEditor.Shell.Traditional.ModalWorkflow do
   @spec active_tab_id(EditorState.t()) :: term() | nil
   defp active_tab_id(%{shell_runtime: %{state: %{tab_bar: %{active_id: id}}}}), do: id
   defp active_tab_id(_state), do: nil
+
+  @spec update_shell_state(EditorState.t(), (MingaEditor.Shell.Traditional.State.t() ->
+                                               MingaEditor.Shell.Traditional.State.t())) ::
+          EditorState.t()
+  defp update_shell_state(%EditorState{} = state, transition) when is_function(transition, 1) do
+    shell_state = state.shell_runtime |> MingaEditor.Shell.Runtime.state() |> transition.()
+
+    %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
+  end
 end

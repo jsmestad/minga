@@ -59,7 +59,7 @@ defmodule MingaEditor.HighlightEvents do
     new_buffer = state.workspace.buffers.active
 
     if new_buffer != old_buffer and new_buffer != nil do
-      hl = state.highlighting
+      hl = state.parser.highlighting
 
       case Map.get(hl.highlights, new_buffer) do
         nil ->
@@ -153,7 +153,7 @@ defmodule MingaEditor.HighlightEvents do
 
   # In headless mode, apply highlight setup synchronously; otherwise defer.
   @spec setup_highlight_or_defer(EditorState.t()) :: EditorState.t()
-  defp setup_highlight_or_defer(%{backend: :headless} = state) do
+  defp setup_highlight_or_defer(%{frontend: %{backend: :headless}} = state) do
     state = HighlightSync.setup_for_buffer(state)
     SemanticTokenSync.request_tokens(state)
   end

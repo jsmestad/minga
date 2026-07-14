@@ -14,9 +14,8 @@ defmodule MingaEditor.StatusBar.DataTest do
   alias MingaEditor.Shell.Registry
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.Feedback
   alias MingaEditor.State.OperationFeedback
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
@@ -56,8 +55,18 @@ defmodule MingaEditor.StatusBar.DataTest do
   test "from_state carries the selected global operation separately from plain messages" do
     state = state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
 
-    {state, operation} =
-      OperationFeedback.start_in(state, :lsp_references, "main.ex", "Finding references...")
+    {operation_feedback, operation} =
+      OperationFeedback.start(
+        state.feedback.operation_feedback,
+        :lsp_references,
+        "main.ex",
+        "Finding references..."
+      )
+
+    state = %{
+      state
+      | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)
+    }
 
     assert {:buffer, data} = Data.from_state(state)
     assert data.selected_operation == operation
@@ -82,7 +91,24 @@ defmodule MingaEditor.StatusBar.DataTest do
     test "echoes an accumulated count from FSM state" do
       state =
         state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
-        |> EditorState.update_mode_state(&%{&1 | count: 2})
+        |> then(fn state ->
+          then(state, fn state ->
+            %{
+              state
+              | workspace:
+                  then(
+                    state.workspace,
+                    &MingaEditor.Session.State.set_editing(
+                      &1,
+                      MingaEditor.VimState.set_mode_state(&1.editing, %{
+                        state.workspace.editing.mode_state
+                        | count: 2
+                      })
+                    )
+                  )
+            }
+          end)
+        end)
 
       {:buffer, data} = Data.from_state(state)
       assert data.pending_keys == "2"
@@ -102,7 +128,19 @@ defmodule MingaEditor.StatusBar.DataTest do
 
       state =
         state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
-        |> EditorState.transition_mode(:operator_pending, op_state)
+        |> then(fn state ->
+          %{
+            state
+            | workspace:
+                then(state.workspace, fn workspace ->
+                  MingaEditor.Session.State.transition_mode(
+                    workspace,
+                    :operator_pending,
+                    op_state
+                  )
+                end)
+          }
+        end)
 
       {:buffer, data} = Data.from_state(state)
       assert data.pending_keys == "d"
@@ -114,7 +152,19 @@ defmodule MingaEditor.StatusBar.DataTest do
       state =
         state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
         |> MingaEditor.Editing.set_active_register("a")
-        |> EditorState.transition_mode(:operator_pending, op_state)
+        |> then(fn state ->
+          %{
+            state
+            | workspace:
+                then(state.workspace, fn workspace ->
+                  MingaEditor.Session.State.transition_mode(
+                    workspace,
+                    :operator_pending,
+                    op_state
+                  )
+                end)
+          }
+        end)
 
       {:buffer, data} = Data.from_state(state)
       assert data.pending_keys == "\"a2d"
@@ -123,7 +173,24 @@ defmodule MingaEditor.StatusBar.DataTest do
     test "clears when the which-key popup is showing" do
       state =
         state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
-        |> EditorState.update_mode_state(&%{&1 | count: 2})
+        |> then(fn state ->
+          then(state, fn state ->
+            %{
+              state
+              | workspace:
+                  then(
+                    state.workspace,
+                    &MingaEditor.Session.State.set_editing(
+                      &1,
+                      MingaEditor.VimState.set_mode_state(&1.editing, %{
+                        state.workspace.editing.mode_state
+                        | count: 2
+                      })
+                    )
+                  )
+            }
+          end)
+        end)
         |> WhichKeyWorkflow.begin(%{}, [])
 
       state = WhichKeyWorkflow.reveal(state, state.shell_runtime.state.whichkey.generation)
@@ -134,11 +201,13 @@ defmodule MingaEditor.StatusBar.DataTest do
 
   test "with_modeline_segments preserves agent status command output" do
     state = state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
-    state = AgentAccess.update_agent(state, &AgentState.set_status(&1, :thinking))
+    state = MingaEditor.Shell.Traditional.Workflow.install_agent_status(state, :thinking)
     {:buffer, data} = Data.from_state(state)
     data = Map.put(data, :agent_status_command, "sonnet | thinking")
 
-    assert {:buffer, buffer_data} = Data.with_modeline_segments({:buffer, data}, state.theme)
+    assert {:buffer, buffer_data} =
+             Data.with_modeline_segments({:buffer, data}, state.appearance.theme)
+
     text = modeline_text(buffer_data.modeline_segments)
 
     assert String.contains?(text, "sonnet | thinking")
@@ -161,7 +230,9 @@ defmodule MingaEditor.StatusBar.DataTest do
     state = state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
     data = Data.from_state(state)
 
-    assert {:buffer, buffer_data} = Data.with_modeline_segments(data, state.theme, table)
+    assert {:buffer, buffer_data} =
+             Data.with_modeline_segments(data, state.appearance.theme, table)
+
     assert %{left: left, right: right} = buffer_data.modeline_segments
 
     assert Enum.any?(left ++ right, fn {_name, text, _fg, _bg, _opts, _target} ->
@@ -226,15 +297,15 @@ defmodule MingaEditor.StatusBar.DataTest do
 
     state =
       state
-      |> AgentAccess.update_agent(&AgentState.set_status(&1, :tool_executing))
-      |> AgentAccess.update_agent(&AgentState.set_active_tool_name(&1, "read_file"))
+      |> MingaEditor.Shell.Traditional.Workflow.install_agent_status(:tool_executing)
+      |> MingaEditor.Shell.Traditional.Workflow.install_agent_tool("read_file")
 
     data = Data.from_state(state) |> Data.to_modeline_data()
 
     assert data.agent_status == :tool_executing
     assert data.active_tool_name == "read_file"
 
-    state = AgentAccess.update_agent(state, &AgentState.set_status(&1, :idle))
+    state = MingaEditor.Shell.Traditional.Workflow.install_agent_status(state, :idle)
     idle_data = Data.from_state(state) |> Data.to_modeline_data()
 
     assert idle_data.agent_status == :idle
@@ -247,8 +318,8 @@ defmodule MingaEditor.StatusBar.DataTest do
     {:ok, _} = Options.set_for_filetype(options, :text, :tab_width, 4)
 
     state = %EditorState{
-      port_manager: self(),
-      options_server: options,
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
+      interaction: %MingaEditor.State.Interaction{options_server: options},
       workspace: %SessionState{viewport: Viewport.new(24, 80)},
       shell_runtime:
         Runtime.new(Registry.get(:traditional), %MingaEditor.Shell.Traditional.State{})
@@ -311,10 +382,18 @@ defmodule MingaEditor.StatusBar.DataTest do
     {state, _buf} = state_with_buffer("héllo", nil, :text)
 
     state =
-      EditorState.transition_mode(state, :visual, %VisualState{
-        visual_type: :char,
-        visual_anchor: {0, 0}
-      })
+      then(state, fn state ->
+        %{
+          state
+          | workspace:
+              then(state.workspace, fn workspace ->
+                MingaEditor.Session.State.transition_mode(workspace, :visual, %VisualState{
+                  visual_type: :char,
+                  visual_anchor: {0, 0}
+                })
+              end)
+        }
+      end)
 
     {:buffer, data} = Data.from_state(state)
 
@@ -325,10 +404,18 @@ defmodule MingaEditor.StatusBar.DataTest do
     {state, _buf} = state_with_buffer("one\ntwo\nthree", nil, :text)
 
     state =
-      EditorState.transition_mode(state, :visual, %VisualState{
-        visual_type: :line,
-        visual_anchor: {0, 0}
-      })
+      then(state, fn state ->
+        %{
+          state
+          | workspace:
+              then(state.workspace, fn workspace ->
+                MingaEditor.Session.State.transition_mode(workspace, :visual, %VisualState{
+                  visual_type: :line,
+                  visual_anchor: {0, 0}
+                })
+              end)
+        }
+      end)
 
     {:buffer, data} = Data.from_state(state)
 
@@ -337,7 +424,7 @@ defmodule MingaEditor.StatusBar.DataTest do
 
   defp state_with_tab_bar(tab_bar) do
     %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %SessionState{viewport: Viewport.new(24, 80)},
       shell_runtime:
         Runtime.new(
@@ -349,7 +436,7 @@ defmodule MingaEditor.StatusBar.DataTest do
 
   defp state_with_agent_window(tab_bar) do
     %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %SessionState{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{list: [], active_index: 0, active: nil},
@@ -375,8 +462,8 @@ defmodule MingaEditor.StatusBar.DataTest do
 
     state =
       %EditorState{
-        port_manager: self(),
-        options_server: options_server,
+        frontend: %MingaEditor.State.Frontend{port_manager: self()},
+        interaction: %MingaEditor.State.Interaction{options_server: options_server},
         workspace: workspace,
         shell_runtime:
           Runtime.new(Registry.get(:traditional), %MingaEditor.Shell.Traditional.State{})

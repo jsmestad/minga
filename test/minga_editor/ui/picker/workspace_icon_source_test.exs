@@ -110,7 +110,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceIconSourceTest do
 
   defp state_with_tab_bar(tab_bar) do
     %EditorState{
-      port_manager: self(),
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %SessionState{viewport: Viewport.new(24, 80)},
       shell_runtime: Runtime.new(Runtime.default_entry(), %TraditionalState{tab_bar: tab_bar})
     }

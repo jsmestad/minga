@@ -139,7 +139,7 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
     match?(%TraditionalState{}, Runtime.state(state.shell_runtime)) and
       Minga.Editing.active_model(state) == Minga.Editing.Model.CUA and
       Minga.Config.get(:space_leader) == :chord and
-      state.backend == :tui
+      state.frontend.backend == :tui
   catch
     :exit, _ -> false
   end
@@ -176,10 +176,11 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
 
   @spec install_shell_state(EditorState.t(), TraditionalState.t()) :: EditorState.t()
   defp install_shell_state(%EditorState{} = state, %TraditionalState{} = shell_state) do
-    runtime =
-      Runtime.update_traditional_state(state.shell_runtime, fn _current -> shell_state end)
-
-    EditorState.apply_shell_runtime_transition(state, runtime)
+    %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
   end
 
   @spec cancel_timer(reference() | nil) :: :ok
@@ -250,7 +251,7 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
 
   @spec leader_trie(EditorState.t()) :: Bindings.node_t()
   defp leader_trie(state) do
-    Keymap.leader_trie(EditorState.keymap_server(state))
+    Keymap.leader_trie(state.interaction.keymap_server)
   catch
     :exit, _ ->
       Minga.Log.warning(:config, "leader_trie unavailable; SPC bindings disabled this frame")

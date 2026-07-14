@@ -14,6 +14,7 @@ defmodule MingaEditor.Effects.GitMutation do
   alias MingaEditor.Effect.Request
   alias MingaEditor.Effects.GitMutationResult
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Feedback
   alias MingaEditor.State.Operation
   alias MingaEditor.State.OperationFeedback
 
@@ -94,14 +95,31 @@ defmodule MingaEditor.Effects.GitMutation do
         } = outcome
       ) do
     message = "Queued: #{effect.pending_message}"
-    {OperationFeedback.queued_in(state, id, message, position, total), outcome}
+
+    {:ok, operation_feedback} =
+      OperationFeedback.queued(state.feedback.operation_feedback, id, message, position, total)
+
+    state = %{
+      state
+      | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)
+    }
+
+    {state, outcome}
   end
 
   def apply(
         state,
         %Outcome{status: :running, request: %{operation_id: id, effect: effect}} = outcome
       ) do
-    {OperationFeedback.running_in(state, id, effect.pending_message), outcome}
+    operation_feedback =
+      OperationFeedback.running(state.feedback.operation_feedback, id, effect.pending_message)
+
+    state = %{
+      state
+      | feedback: Feedback.accept_operation_feedback(state.feedback, operation_feedback)
+    }
+
+    {state, outcome}
   end
 
   def apply(
@@ -114,7 +132,20 @@ defmodule MingaEditor.Effects.GitMutation do
           outcome
       ) do
     MingaEditor.refresh_git_repo(result.git_root)
-    {OperationFeedback.finish_in(state, id, :success, result.message), outcome}
+
+    {%{
+       state
+       | feedback:
+           Feedback.accept_operation_feedback(
+             state.feedback,
+             OperationFeedback.finish(
+               state.feedback.operation_feedback,
+               id,
+               :success,
+               result.message
+             )
+           )
+     }, outcome}
   end
 
   def apply(
@@ -123,7 +154,20 @@ defmodule MingaEditor.Effects.GitMutation do
           outcome
       ) do
     MingaEditor.refresh_git_repo(effect.git_root)
-    {OperationFeedback.finish_in(state, id, :timeout, "Git action timed out"), outcome}
+
+    {%{
+       state
+       | feedback:
+           Feedback.accept_operation_feedback(
+             state.feedback,
+             OperationFeedback.finish(
+               state.feedback.operation_feedback,
+               id,
+               :timeout,
+               "Git action timed out"
+             )
+           )
+     }, outcome}
   end
 
   def apply(
@@ -134,7 +178,15 @@ defmodule MingaEditor.Effects.GitMutation do
     MingaEditor.refresh_git_repo(effect.git_root)
     message = failure_message(reason)
     Minga.Log.error(:editor, message)
-    {OperationFeedback.finish_in(state, id, :error, message), outcome}
+
+    {%{
+       state
+       | feedback:
+           Feedback.accept_operation_feedback(
+             state.feedback,
+             OperationFeedback.finish(state.feedback.operation_feedback, id, :error, message)
+           )
+     }, outcome}
   end
 
   def apply(
@@ -142,15 +194,51 @@ defmodule MingaEditor.Effects.GitMutation do
         %Outcome{status: :canceled, request: %{operation_id: id}, reason: reason} = outcome
       )
       when reason in [:superseded, :coalesced] do
-    {OperationFeedback.finish_in(state, id, :stale, "Git action skipped"), outcome}
+    {%{
+       state
+       | feedback:
+           Feedback.accept_operation_feedback(
+             state.feedback,
+             OperationFeedback.finish(
+               state.feedback.operation_feedback,
+               id,
+               :stale,
+               "Git action skipped"
+             )
+           )
+     }, outcome}
   end
 
   def apply(state, %Outcome{status: :canceled, request: %{operation_id: id}} = outcome) do
-    {OperationFeedback.finish_in(state, id, :canceled, "Git action canceled"), outcome}
+    {%{
+       state
+       | feedback:
+           Feedback.accept_operation_feedback(
+             state.feedback,
+             OperationFeedback.finish(
+               state.feedback.operation_feedback,
+               id,
+               :canceled,
+               "Git action canceled"
+             )
+           )
+     }, outcome}
   end
 
   def apply(state, %Outcome{status: :stale, request: %{operation_id: id}} = outcome) do
-    {OperationFeedback.finish_in(state, id, :stale, "Git action skipped"), outcome}
+    {%{
+       state
+       | feedback:
+           Feedback.accept_operation_feedback(
+             state.feedback,
+             OperationFeedback.finish(
+               state.feedback.operation_feedback,
+               id,
+               :stale,
+               "Git action skipped"
+             )
+           )
+     }, outcome}
   end
 
   @impl true

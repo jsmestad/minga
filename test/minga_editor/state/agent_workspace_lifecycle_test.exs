@@ -26,7 +26,12 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
 
   test "switching file tabs in a workspace preserves workspace agent UI" do
     state = state_with_agent_workspace_tabs()
-    state = MingaEditor.State.AgentAccess.update_agent_ui(state, &put_prompt(&1, "draft one"))
+
+    state =
+      MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+        state,
+        (&put_prompt(&1, "draft one")).(state.workspace.agent_ui)
+      )
 
     state = EditorState.switch_tab(state, 2)
 
@@ -49,8 +54,28 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
 
     state =
       state
-      |> EditorState.set_tab_bar(tab_bar)
-      |> EditorState.set_agent_ui(ui_two)
+      |> then(fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            tab_bar
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
+      |> then(fn state ->
+        %{
+          state
+          | workspace:
+              then(state.workspace, fn workspace ->
+                MingaEditor.Session.State.set_agent_ui(workspace, ui_two)
+              end)
+        }
+      end)
 
     state = EditorState.switch_tab(state, 1)
 
@@ -70,8 +95,28 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
 
     state =
       state
-      |> EditorState.set_tab_bar(tab_bar)
-      |> EditorState.set_agent_ui(ui_two)
+      |> then(fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            tab_bar
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
+      |> then(fn state ->
+        %{
+          state
+          | workspace:
+              then(state.workspace, fn workspace ->
+                MingaEditor.Session.State.set_agent_ui(workspace, ui_two)
+              end)
+        }
+      end)
 
     state = MingaEditor.Commands.Workspace.workspace_close(state)
 
@@ -97,7 +142,21 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
       end)
       |> TabBar.switch_to(initial_tab_id)
 
-    state = EditorState.set_tab_bar(state, tab_bar)
+    state =
+      then(state, fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            tab_bar
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
+
     initial_version = panel_message_version(state)
 
     {state, _effects} = EditorState.switch_tab_pure(state, agent_tab.id)
@@ -156,13 +215,35 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
 
     state =
       state
-      |> EditorState.set_tab_bar(tab_bar)
-      |> EditorState.set_agent_ui(ui_one)
+      |> then(fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            tab_bar
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
+      |> then(fn state ->
+        %{
+          state
+          | workspace:
+              then(state.workspace, fn workspace ->
+                MingaEditor.Session.State.set_agent_ui(workspace, ui_one)
+              end)
+        }
+      end)
 
     state = EditorState.switch_tab(state, 2)
 
     assert prompt_text(state.workspace.agent_ui) == "workspace two"
-    assert MingaEditor.State.AgentAccess.session(state) == session_two
+
+    assert MingaEditor.Shell.Runtime.active_session(state.shell_runtime) ==
+             session_two
   end
 
   test "restarting an active agent workspace reuses the workspace and preserves files and UI" do
@@ -172,7 +253,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     {state, workspace_id, file_ref} = state_with_active_agent_workspace(old_session)
 
     state = AgentSession.restart_session(state, "Restarting agent")
-    new_session = MingaEditor.State.AgentAccess.session(state)
+    new_session = MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
     on_exit(fn -> stop_session(new_session) end)
 
     assert_receive {:DOWN, ^old_ref, :process, ^old_session, _reason}
@@ -202,7 +283,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     assert TabBar.active_workspace_id(state.shell_runtime.state.tab_bar) == workspace_id
 
     state = AgentSession.restart_session(state, "Restarting agent")
-    new_session = MingaEditor.State.AgentAccess.session(state)
+    new_session = MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
     on_exit(fn -> stop_session(new_session) end)
 
     assert_receive {:DOWN, ^old_ref, :process, ^old_session, _reason}
@@ -396,7 +477,19 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
       |> TabBar.move_tab_to_workspace(2, workspace.id)
       |> TabBar.update_workspace(workspace.id, &Workspace.set_agent_ui(&1, UIState.new()))
 
-    EditorState.set_tab_bar(state, tab_bar)
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          tab_bar
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
   end
 
   defp state_with_active_agent_workspace(session) when is_pid(session) do
@@ -421,8 +514,28 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
 
     state =
       state
-      |> EditorState.set_tab_bar(tab_bar)
-      |> EditorState.set_agent_ui(ui)
+      |> then(fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            tab_bar
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
+      |> then(fn state ->
+        %{
+          state
+          | workspace:
+              then(state.workspace, fn workspace ->
+                MingaEditor.Session.State.set_agent_ui(workspace, ui)
+              end)
+        }
+      end)
 
     {state, workspace.id, file_ref}
   end
@@ -439,7 +552,21 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
       end)
       |> TabBar.sync_workspace_agent_tab_projection(workspace_id)
 
-    state = EditorState.set_tab_bar(state, tab_bar)
+    state =
+      then(state, fn root ->
+        shell_state =
+          MingaEditor.Shell.Traditional.State.set_tab_bar(
+            MingaEditor.Shell.Runtime.state(root.shell_runtime),
+            tab_bar
+          )
+
+        %{
+          root
+          | shell_runtime:
+              MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+        }
+      end)
+
     {state, workspace_id, file_ref, agent_tab_id}
   end
 
@@ -459,7 +586,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     }
 
     %EditorState{
-      port_manager: nil,
+      frontend: %MingaEditor.State.Frontend{port_manager: nil},
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
@@ -481,7 +608,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
   end
 
   defp put_prompt(%UIState{} = ui, text) do
-    ui = UIState.ensure_prompt_buffer(ui)
+    ui = MingaEditor.Agent.PromptBuffer.ensure(ui)
     BufferProcess.replace_content(ui.panel.prompt_buffer, text)
     ui
   end
@@ -498,5 +625,5 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
 
   defp stop_session(_pid), do: :ok
 
-  defp prompt_text(%UIState{} = ui), do: UIState.input_text(ui.panel)
+  defp prompt_text(%UIState{} = ui), do: MingaEditor.Agent.PromptBuffer.input_text(ui.panel)
 end

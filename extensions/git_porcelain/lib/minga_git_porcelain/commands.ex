@@ -89,7 +89,9 @@ defmodule MingaGitPorcelain.Commands do
   def execute(state, :git_status_toggle) do
     if state.workspace.keymap_scope == :git_status do
       state
-      |> EditorState.set_keymap_scope(:editor)
+      |> then(fn state ->
+        %{state | workspace: MingaEditor.Session.State.set_keymap_scope(state.workspace, :editor)}
+      end)
       |> SidebarWorkflow.close_git_status()
       |> Layout.invalidate()
       |> EditorState.invalidate_all_windows()
@@ -193,7 +195,7 @@ defmodule MingaGitPorcelain.Commands do
   end
 
   def execute(state, :git_diff_toggle_layout) do
-    if MingaEditor.Frontend.gui?(state.capabilities) do
+    if MingaEditor.Frontend.gui?(state.frontend.capabilities) do
       active_buf = state.workspace.buffers.active
       toggle_diff_layout(state, active_buf)
     else
@@ -508,10 +510,7 @@ defmodule MingaGitPorcelain.Commands do
 
   @spec git_root_for_file(String.t()) :: {:ok, String.t()} | :not_git | {:error, String.t()}
   defp git_root_for_file(file_path) do
-    case Git.root_for(file_path) do
-      {:ok, git_root} -> {:ok, git_root}
-      :not_git -> :not_git
-    end
+    Git.root_for(file_path)
   end
 
   @spec current_conflicts(pid()) :: [Region.t()]
@@ -560,10 +559,10 @@ defmodule MingaGitPorcelain.Commands do
            read_only: true,
            buffer_name: "#{filename} [diff:#{label}]",
            filetype: filetype,
-           options_server: EditorState.options_server(state)
+           options_server: state.interaction.options_server
          ) do
       {:ok, diff_buf} ->
-        apply_diff_decorations(diff_buf, diff_result.line_metadata, state.theme)
+        apply_diff_decorations(diff_buf, diff_result.line_metadata, state.appearance.theme)
 
         diff_info = %{
           source_buf: nil,
@@ -577,7 +576,9 @@ defmodule MingaGitPorcelain.Commands do
         }
 
         state
-        |> EditorState.register_diff_view(diff_buf, diff_info)
+        |> then(fn state ->
+          %{state | git: MingaEditor.State.Git.register_diff_view(state.git, diff_buf, diff_info)}
+        end)
         |> Commands.add_buffer(diff_buf)
         |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
           "Diff (#{label}): #{filename} (#{length(diff_result.hunk_lines)} hunks)"
@@ -619,10 +620,10 @@ defmodule MingaGitPorcelain.Commands do
            read_only: true,
            buffer_name: "#{filename} [diff:#{label}]",
            filetype: filetype,
-           options_server: EditorState.options_server(state)
+           options_server: state.interaction.options_server
          ) do
       {:ok, diff_buf} ->
-        apply_diff_decorations(diff_buf, diff_result.line_metadata, state.theme)
+        apply_diff_decorations(diff_buf, diff_result.line_metadata, state.appearance.theme)
 
         diff_info = %{
           source_buf: buf,
@@ -636,7 +637,9 @@ defmodule MingaGitPorcelain.Commands do
         }
 
         state
-        |> EditorState.register_diff_view(diff_buf, diff_info)
+        |> then(fn state ->
+          %{state | git: MingaEditor.State.Git.register_diff_view(state.git, diff_buf, diff_info)}
+        end)
         |> Commands.add_buffer(diff_buf)
         |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
           "Diff (#{label}): #{filename} (#{length(diff_result.hunk_lines)} hunks)"
@@ -983,7 +986,7 @@ defmodule MingaGitPorcelain.Commands do
 
         if git_pid do
           GenServer.stop(active_buf, :normal)
-          state = EditorState.unregister_diff_view(state, active_buf)
+          state = %{state | git: MingaEditor.State.Git.retire_diff_view(state.git, active_buf)}
           open_diff_view(state, git_pid, source_buf, new_staged, view_mode)
         else
           MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
@@ -1040,7 +1043,7 @@ defmodule MingaGitPorcelain.Commands do
       diff_result.text,
       fn _decs ->
         decs = Minga.Core.Decorations.new()
-        apply_diff_decorations_to(decs, diff_result.line_metadata, state.theme)
+        apply_diff_decorations_to(decs, diff_result.line_metadata, state.appearance.theme)
       end
     )
 
@@ -1055,7 +1058,7 @@ defmodule MingaGitPorcelain.Commands do
       pane_width: diff_pane_width(state)
     }
 
-    EditorState.register_diff_view(state, diff_buf, diff_info)
+    %{state | git: MingaEditor.State.Git.register_diff_view(state.git, diff_buf, diff_info)}
   end
 
   @spec apply_diff_decorations_to(
@@ -1095,7 +1098,7 @@ defmodule MingaGitPorcelain.Commands do
   """
   @spec handle_remote_result(state(), reference(), :ok | {:error, String.t()}) :: state()
   def handle_remote_result(state, ref, result) do
-    case state.git_remote_op do
+    case state.git.git_remote_op do
       {^ref, task_monitor, {git_root, success_msg, error_prefix}} ->
         Process.demonitor(task_monitor, [:flush])
 
@@ -1104,7 +1107,7 @@ defmodule MingaGitPorcelain.Commands do
         {notice_message, toast_level, toast_action} =
           remote_result_feedback(result, success_msg, error_prefix)
 
-        state = EditorState.clear_git_remote_op(state)
+        state = %{state | git: MingaEditor.State.Git.clear_remote_operation(state.git)}
 
         case Runtime.state(state.shell_runtime) do
           %TraditionalState{} ->
@@ -1163,20 +1166,20 @@ defmodule MingaGitPorcelain.Commands do
   """
   @spec handle_remote_task_down(state(), reference(), term()) :: state() | :not_matched
   def handle_remote_task_down(state, monitor_ref, :normal) do
-    case state.git_remote_op do
+    case state.git.git_remote_op do
       {_, ^monitor_ref, _} -> state
       _ -> :not_matched
     end
   end
 
   def handle_remote_task_down(state, monitor_ref, reason) do
-    case state.git_remote_op do
+    case state.git.git_remote_op do
       {_, ^monitor_ref, {git_root, _, _}} ->
         refresh_repo(git_root)
         message = "Git operation failed unexpectedly: #{format_down_reason(reason)}"
         Minga.Log.warning(:editor, "Git remote task failed: #{inspect(reason)}")
 
-        state = EditorState.clear_git_remote_op(state)
+        state = %{state | git: MingaEditor.State.Git.clear_remote_operation(state.git)}
 
         case Runtime.state(state.shell_runtime) do
           %TraditionalState{} ->
@@ -1209,7 +1212,7 @@ defmodule MingaGitPorcelain.Commands do
         ) ::
           state()
   defp git_remote_action(state, _operation, _progress_msg, _success_msg, _error_prefix)
-       when state.git_remote_op != nil do
+       when state.git.git_remote_op != nil do
     MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
       state,
       "Git operation already in progress"
@@ -1230,9 +1233,16 @@ defmodule MingaGitPorcelain.Commands do
 
         state
         |> GitToastWorkflow.dismiss()
-        |> EditorState.set_git_remote_op(
-          {ref, monitor_ref, {git_root, success_msg, error_prefix}}
-        )
+        |> then(fn state ->
+          %{
+            state
+            | git:
+                MingaEditor.State.Git.report_remote_operation(
+                  state.git,
+                  {ref, monitor_ref, {git_root, success_msg, error_prefix}}
+                )
+          }
+        end)
         |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(progress_msg)
 
       :not_git ->
@@ -1306,7 +1316,10 @@ defmodule MingaGitPorcelain.Commands do
         state = close_file_tree_if_open(state)
 
         state =
-          EditorState.set_keymap_scope(state, :git_status)
+          %{
+            state
+            | workspace: MingaEditor.Session.State.set_keymap_scope(state.workspace, :git_status)
+          }
 
         state
         |> SidebarWorkflow.replace_git_status(panel_data)
@@ -1332,7 +1345,10 @@ defmodule MingaGitPorcelain.Commands do
     state = close_file_tree_if_open(state)
 
     state =
-      EditorState.set_keymap_scope(state, :git_status)
+      %{
+        state
+        | workspace: MingaEditor.Session.State.set_keymap_scope(state.workspace, :git_status)
+      }
 
     state
     |> SidebarWorkflow.replace_git_status(panel_data)
@@ -1356,13 +1372,13 @@ defmodule MingaGitPorcelain.Commands do
 
   defp format_hunk_preview(%{type: :deleted, old_lines: old_lines}) do
     preview = old_lines |> Enum.take(3) |> Enum.join(" | ")
-    truncated = if length(old_lines) > 3, do: " ...", else: ""
+    truncated = if match?([_, _, _, _ | _], old_lines), do: " ...", else: ""
     "-#{length(old_lines)} deleted: #{preview}#{truncated}"
   end
 
   defp format_hunk_preview(%{type: :modified, old_lines: old_lines, count: count}) do
     preview = old_lines |> Enum.take(3) |> Enum.join(" | ")
-    truncated = if length(old_lines) > 3, do: " ...", else: ""
+    truncated = if match?([_, _, _, _ | _], old_lines), do: " ...", else: ""
     "~#{count} modified (was #{length(old_lines)} lines): #{preview}#{truncated}"
   end
 
@@ -1717,7 +1733,7 @@ defmodule MingaGitPorcelain.Commands do
       diff_result.text,
       fn _decs ->
         decs = Minga.Core.Decorations.new()
-        apply_diff_decorations_to(decs, diff_result.line_metadata, state.theme)
+        apply_diff_decorations_to(decs, diff_result.line_metadata, state.appearance.theme)
       end
     )
 
@@ -1729,7 +1745,7 @@ defmodule MingaGitPorcelain.Commands do
         pane_width: diff_pane_width(state)
       })
 
-    EditorState.register_diff_view(state, diff_buf, updated_info)
+    %{state | git: MingaEditor.State.Git.register_diff_view(state.git, diff_buf, updated_info)}
   end
 
   @spec diff_view_current_content(EditorState.diff_view_info(), String.t(), String.t(), boolean()) ::
@@ -1777,7 +1793,7 @@ defmodule MingaGitPorcelain.Commands do
   end
 
   @spec generate_commit_message(state()) :: state()
-  defp generate_commit_message(%{git_commit_gen_ref: ref} = state)
+  defp generate_commit_message(%{git: %{git_commit_gen_ref: ref}} = state)
        when ref != nil do
     MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
       state,
@@ -1824,7 +1840,9 @@ defmodule MingaGitPorcelain.Commands do
         Process.send_after(self(), :git_generate_timeout, timeout)
 
         state
-        |> Map.put(:git_commit_gen_ref, ref)
+        |> then(fn state ->
+          %{state | git: MingaEditor.State.Git.await_commit_generation(state.git, ref)}
+        end)
         |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("Generating commit message…")
 
       {:error, reason} ->

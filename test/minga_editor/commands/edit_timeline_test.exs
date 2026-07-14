@@ -5,7 +5,6 @@ defmodule MingaEditor.Commands.EditTimelineTest do
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Commands.EditTimeline, as: EditTimelineCommands
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.Session.State, as: WorkspaceState
   alias MingaEditor.Viewport
 
@@ -41,9 +40,15 @@ defmodule MingaEditor.Commands.EditTimelineTest do
       |> EditTimeline.record_edit("/tmp/a-missing.ex", "tc1", "write_file", "old", "new")
       |> EditTimeline.record_edit("/tmp/b-missing.ex", "tc2", "write_file", "old", "new")
 
-    %EditorState{port_manager: self(), workspace: %WorkspaceState{viewport: Viewport.new(24, 80)}}
-    |> AgentAccess.update_agent_ui(fn ui ->
-      UIState.update_edit_timeline(ui, fn _ -> timeline end)
+    %EditorState{
+      frontend: %MingaEditor.State.Frontend{port_manager: self()},
+      workspace: %WorkspaceState{viewport: Viewport.new(24, 80)}
+    }
+    |> then(fn state ->
+      MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+        state,
+        (&UIState.replace_edit_timeline(&1, timeline)).(state.workspace.agent_ui)
+      )
     end)
   end
 end

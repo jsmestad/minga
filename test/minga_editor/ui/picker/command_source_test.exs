@@ -31,7 +31,7 @@ defmodule MingaEditor.UI.Picker.CommandSourceTest do
       {:ok, buf} = BufferProcess.start_link(content: "hello")
 
       state = %EditorState{
-        port_manager: nil,
+        frontend: %MingaEditor.State.Frontend{port_manager: nil},
         workspace: %MingaEditor.Session.State{
           viewport: Viewport.new(24, 80),
           buffers: %Buffers{active: buf, list: [buf], active_index: 0},

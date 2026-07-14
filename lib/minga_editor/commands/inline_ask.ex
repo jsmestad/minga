@@ -12,7 +12,6 @@ defmodule MingaEditor.Commands.InlineAsk do
   alias MingaEditor.AgentLifecycle
   alias MingaEditor.Commands.AgentSession
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.InlineAsk
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
@@ -55,7 +54,7 @@ defmodule MingaEditor.Commands.InlineAsk do
       )
 
     state
-    |> AgentAccess.replace_inline_ask(ask)
+    |> MingaEditor.Shell.Traditional.Workflow.install_inline_ask(ask)
     |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("Inline ask: type a question")
   end
 
@@ -94,8 +93,8 @@ defmodule MingaEditor.Commands.InlineAsk do
   @spec create_agent_tab(state()) :: state()
   defp create_agent_tab(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     win_id = 1
-    rows = max(state.terminal_viewport.rows, 1)
-    cols = max(state.terminal_viewport.cols, 1)
+    rows = max(state.frontend.terminal_viewport.rows, 1)
+    cols = max(state.frontend.terminal_viewport.cols, 1)
     agent_window = Window.new_agent_chat(win_id, rows, cols)
 
     windows = %Windows{
@@ -109,8 +108,19 @@ defmodule MingaEditor.Commands.InlineAsk do
     {tb, tab} = TabBar.insert(tb, :agent, "Inline Ask")
     tb = TabBar.update_context(tb, tab.id, context)
 
-    state
-    |> EditorState.set_tab_bar(tb)
+    then(state, fn root ->
+      shell_state =
+        MingaEditor.Shell.Traditional.State.set_tab_bar(
+          MingaEditor.Shell.Runtime.state(root.shell_runtime),
+          tb
+        )
+
+      %{
+        root
+        | shell_runtime:
+            MingaEditor.Shell.Runtime.install_traditional_state(root.shell_runtime, shell_state)
+      }
+    end)
     |> EditorState.switch_tab(tab.id)
   end
 
@@ -118,7 +128,7 @@ defmodule MingaEditor.Commands.InlineAsk do
 
   @spec seed_agent_session(state(), InlineAsk.t()) :: state()
   defp seed_agent_session(state, %InlineAsk{} = ask) do
-    case AgentAccess.session(state) do
+    case MingaEditor.Shell.Runtime.active_session(state.shell_runtime) do
       session_pid when is_pid(session_pid) ->
         messages = [{:user, ask.prompt}, {:assistant, ask.response}]
         MingaAgent.Session.seed_messages(session_pid, messages)
@@ -140,9 +150,9 @@ defmodule MingaEditor.Commands.InlineAsk do
       %Workspace{id: workspace_id} = workspace ->
         workspace = Workspace.add_file(workspace, file_ref)
 
-        EditorState.set_tab_bar(
+        install_tab_bar(
           state,
-          TabBar.update_workspace(tb, workspace_id, fn _ -> workspace end)
+          MingaEditor.State.TabBar.update_workspace(tb, workspace_id, fn _ -> workspace end)
         )
 
       nil ->
@@ -152,9 +162,26 @@ defmodule MingaEditor.Commands.InlineAsk do
 
   defp add_file_to_active_workspace(state, _file_ref), do: state
 
+  @spec install_tab_bar(state(), TabBar.t()) :: state()
+  defp install_tab_bar(state, tab_bar) do
+    shell_state =
+      MingaEditor.Shell.Traditional.State.set_tab_bar(
+        MingaEditor.Shell.Runtime.state(state.shell_runtime),
+        tab_bar
+      )
+
+    %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
+  end
+
   @spec dismiss_without_stop(state(), pid()) :: state()
   defp dismiss_without_stop(state, buffer_pid) when is_pid(buffer_pid) do
-    {state, _session_pid} = AgentAccess.cancel_inline_ask(state, buffer_pid)
+    {state, _session_pid} =
+      MingaEditor.Shell.Traditional.Workflow.cancel_inline_ask(state, buffer_pid)
+
     state
   end
 
@@ -181,7 +208,7 @@ defmodule MingaEditor.Commands.InlineAsk do
 
   @spec project_root(state()) :: String.t()
   defp project_root(state) do
-    file_tree = EditorState.file_tree_state(state)
+    file_tree = state.workspace.file_tree
     file_tree.project_root || file_tree.original_root || File.cwd!()
   end
 

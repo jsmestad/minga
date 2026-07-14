@@ -18,8 +18,8 @@ defmodule MingaEditor.Shell.Traditional.WhichKeyWorkflow do
 
     state =
       state
-      |> EditorState.update_shell_state(&ShellState.suppress_lower_transients/1)
-      |> EditorState.update_shell_state(&ShellState.begin_whichkey(&1, node, prefix_keys))
+      |> update_shell_state(&ShellState.suppress_lower_transients/1)
+      |> update_shell_state(&ShellState.begin_whichkey(&1, node, prefix_keys))
 
     schedule(state)
   end
@@ -35,8 +35,8 @@ defmodule MingaEditor.Shell.Traditional.WhichKeyWorkflow do
 
     state =
       state
-      |> EditorState.update_shell_state(&ShellState.suppress_lower_transients/1)
-      |> EditorState.update_shell_state(&ShellState.progress_whichkey(&1, node, prefix_keys))
+      |> update_shell_state(&ShellState.suppress_lower_transients/1)
+      |> update_shell_state(&ShellState.progress_whichkey(&1, node, prefix_keys))
 
     schedule(state)
   end
@@ -45,7 +45,7 @@ defmodule MingaEditor.Shell.Traditional.WhichKeyWorkflow do
   @spec dismiss(EditorState.t()) :: EditorState.t()
   def dismiss(state) do
     cancel_timer(state.shell_runtime.state.whichkey.timer)
-    EditorState.update_shell_state(state, &ShellState.dismiss_whichkey/1)
+    update_shell_state(state, &ShellState.dismiss_whichkey/1)
   end
 
   @doc "Reveals only a matching active which-key generation."
@@ -54,19 +54,19 @@ defmodule MingaEditor.Shell.Traditional.WhichKeyWorkflow do
         %{shell_runtime: %{state: %MingaEditor.Shell.Traditional.State{}}} = state,
         generation
       ),
-      do: EditorState.update_shell_state(state, &ShellState.reveal_whichkey(&1, generation))
+      do: update_shell_state(state, &ShellState.reveal_whichkey(&1, generation))
 
   def reveal(state, _generation), do: state
 
   @doc "Moves which-key to the next page."
   @spec next_page(EditorState.t()) :: EditorState.t()
   def next_page(state),
-    do: EditorState.update_shell_state(state, &ShellState.next_whichkey_page/1)
+    do: update_shell_state(state, &ShellState.next_whichkey_page/1)
 
   @doc "Moves which-key to the previous page."
   @spec previous_page(EditorState.t()) :: EditorState.t()
   def previous_page(state),
-    do: EditorState.update_shell_state(state, &ShellState.previous_whichkey_page/1)
+    do: update_shell_state(state, &ShellState.previous_whichkey_page/1)
 
   @spec schedule(EditorState.t()) :: EditorState.t()
   defp schedule(state) do
@@ -79,7 +79,7 @@ defmodule MingaEditor.Shell.Traditional.WhichKeyWorkflow do
       timeout when is_integer(timeout) and timeout >= 0 ->
         timer = Process.send_after(self(), {:whichkey_reveal, generation}, timeout)
 
-        EditorState.update_shell_state(
+        update_shell_state(
           state,
           &ShellState.record_whichkey_timer(&1, generation, timer)
         )
@@ -96,5 +96,18 @@ defmodule MingaEditor.Shell.Traditional.WhichKeyWorkflow do
   defp cancel_timer(timer) do
     Process.cancel_timer(timer)
     :ok
+  end
+
+  @spec update_shell_state(EditorState.t(), (MingaEditor.Shell.Traditional.State.t() ->
+                                               MingaEditor.Shell.Traditional.State.t())) ::
+          EditorState.t()
+  defp update_shell_state(%EditorState{} = state, transition) when is_function(transition, 1) do
+    shell_state = state.shell_runtime |> MingaEditor.Shell.Runtime.state() |> transition.()
+
+    %{
+      state
+      | shell_runtime:
+          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
+    }
   end
 end

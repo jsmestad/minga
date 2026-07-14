@@ -48,7 +48,7 @@ defmodule MingaEditor.Commands.Launchpad do
     state = Commands.execute(state, :new_buffer)
 
     if state.workspace.buffers.active do
-      EditorState.transition_mode(state, :insert)
+      %{state | workspace: MingaEditor.Session.State.transition_mode(state.workspace, :insert)}
     else
       state
     end

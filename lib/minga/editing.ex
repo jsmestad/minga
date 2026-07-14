@@ -298,6 +298,8 @@ defmodule Minga.Editing do
 
   @doc "Returns the active editing model module from editor state."
   @spec active_model(map()) :: module()
+  def active_model(%{interaction: %{editing_model: :cua}}), do: CUAModel
+  def active_model(%{interaction: %{editing_model: :vim}}), do: VimModel
   def active_model(%{editing_model: :cua}), do: CUAModel
   def active_model(%{editing_model: :vim}), do: VimModel
   def active_model(_state), do: VimModel

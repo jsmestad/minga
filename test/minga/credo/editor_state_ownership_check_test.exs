@@ -109,6 +109,51 @@ defmodule Minga.Credo.EditorStateOwnershipCheckTest do
     end)
   end
 
+  test "allows a workflow to install a value produced by the focused root-field owner" do
+    """
+    defmodule MingaEditor.RenderWorkflow do
+      def invalidate(%MingaEditor.State{} = state) do
+        %{state | render: MingaEditor.State.Render.invalidate_layout(state.render)}
+      end
+    end
+    """
+    |> check()
+    |> refute_issues()
+  end
+
+  test "flags raw and wrong-owner root-field replacements" do
+    source =
+      """
+      defmodule MingaEditor.BadRootInstallation do
+        def replace_raw(%MingaEditor.State{} = state, render), do: %{state | render: render}
+
+        def replace_from_wrong_owner(%MingaEditor.State{} = state) do
+          %{state | render: MingaEditor.State.Parser.retire_buffer(state.parser, self())}
+        end
+      end
+      """
+
+    issues = check(source)
+
+    assert Enum.count(issues, &(&1.trigger == "MingaEditor.State")) == 2
+  end
+
+  test "requires every field in a root update to be produced by its focused owner" do
+    """
+    defmodule MingaEditor.BadMixedRootInstallation do
+      def replace(%MingaEditor.State{} = state, parser) do
+        %{
+          state
+          | render: MingaEditor.State.Render.invalidate_layout(state.render),
+            parser: parser
+        }
+      end
+    end
+    """
+    |> check()
+    |> assert_issue(fn issue -> assert issue.trigger == "MingaEditor.State" end)
+  end
+
   test "flags foreign writes from workflow and root callers" do
     workflow =
       """
@@ -301,6 +346,107 @@ defmodule Minga.Credo.EditorStateOwnershipCheckTest do
     end)
   end
 
+  test "enforces every converged top-level owner path" do
+    owners = [
+      {"MingaEditor.State.Frontend", "frontend"},
+      {"MingaEditor.State.Render", "render"},
+      {"MingaEditor.State.Parser", "parser"},
+      {"MingaEditor.State.AgentConnection", "agent_connection"},
+      {"MingaEditor.State.Interaction", "interaction"},
+      {"MingaEditor.State.ExtensionSurfaces", "extension_surfaces"},
+      {"MingaEditor.State.BufferLifecycle", "buffer_lifecycle"},
+      {"MingaEditor.State.Git", "git"},
+      {"MingaEditor.State.Session", "session"},
+      {"MingaEditor.State.Feedback", "feedback"},
+      {"MingaEditor.State.LSP", "lsp"},
+      {"MingaEditor.State.Remote", "remote"},
+      {"MingaEditor.State.Appearance", "appearance"}
+    ]
+
+    Enum.each(owners, fn {owner, path} ->
+      foreign = """
+      defmodule MingaEditor.ForeignOwnerWriter do
+        def write(state, value), do: %{state.#{path} | value: value}
+      end
+      """
+
+      foreign
+      |> check("lib/minga_editor/foreign_owner_writer.ex")
+      |> assert_issue(fn issue ->
+        assert issue.trigger == owner
+        assert issue.message =~ "outside its owner"
+      end)
+
+      generic = """
+      defmodule #{owner} do
+        def update(value, fun) when is_function(fun, 1), do: fun.(value)
+      end
+      """
+
+      generic
+      |> check("lib/minga_editor/state/owner.ex")
+      |> assert_issue(fn issue ->
+        assert issue.trigger == "#{owner}.update/2"
+        assert issue.message =~ "Generic mutation API"
+      end)
+    end)
+  end
+
+  test "rejects external boundary calls in every converged pure owner" do
+    owners = [
+      "MingaEditor.State.Frontend",
+      "MingaEditor.State.Render",
+      "MingaEditor.State.Parser",
+      "MingaEditor.State.AgentConnection",
+      "MingaEditor.State.Interaction",
+      "MingaEditor.State.ExtensionSurfaces",
+      "MingaEditor.State.BufferLifecycle",
+      "MingaEditor.State.Git",
+      "MingaEditor.State.Session",
+      "MingaEditor.State.Feedback",
+      "MingaEditor.State.LSP",
+      "MingaEditor.State.Remote",
+      "MingaEditor.State.Appearance"
+    ]
+
+    Enum.each(owners, fn owner ->
+      source = """
+      defmodule #{owner} do
+        def schedule(value), do: {Process.send_after(self(), :tick, 10), value}
+      end
+      """
+
+      source
+      |> check("lib/minga_editor/state/owner.ex")
+      |> assert_issue(fn issue ->
+        assert issue.trigger == "Process.send_after"
+        assert issue.message =~ "Pure owner #{owner}"
+      end)
+    end)
+  end
+
+  test "allows converged owner writes and focused workflow effects" do
+    owner_source = """
+    defmodule MingaEditor.State.Frontend do
+      def accept(value, next), do: %__MODULE__{value | backend: next}
+    end
+    """
+
+    owner_source
+    |> check("lib/minga_editor/state/frontend.ex")
+    |> refute_issues()
+
+    """
+    defmodule MingaEditor.FrontendWorkflow do
+      def schedule do
+        Process.send_after(self(), :frame, 10)
+      end
+    end
+    """
+    |> check("lib/minga_editor/frontend_workflow.ex")
+    |> refute_issues()
+  end
+
   test "allows pure constructors and owner-to-owner value calls" do
     """
     defmodule MingaEditor.State.RenderCorrelation do
@@ -314,17 +460,17 @@ defmodule Minga.Credo.EditorStateOwnershipCheckTest do
     |> refute_issues()
   end
 
-  test "flags calls to owner functions with exact pure-call legacy exceptions" do
+  test "flags external boundary calls from pure owners without exceptions" do
     """
     defmodule MingaEditor.State.RenderCorrelation do
-      def create_prompt(value, opts) do
-        MingaEditor.Agent.UIState.start_prompt_buffer(value, opts)
+      def start_buffer(value, opts) do
+        {value, Minga.Buffer.start_link(opts)}
       end
     end
     """
     |> check("lib/minga_editor/state/render_correlation.ex")
     |> assert_issue(fn issue ->
-      assert issue.trigger == "MingaEditor.Agent.UIState.start_prompt_buffer"
+      assert issue.trigger == "Minga.Buffer.start_link"
       assert issue.message =~ "prohibited external boundary"
     end)
   end

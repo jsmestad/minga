@@ -470,14 +470,11 @@ defmodule MingaEditor.RenderPipeline.Content do
   @spec update_agent_scroll_metrics(state(), non_neg_integer(), pos_integer()) :: state()
   defp update_agent_scroll_metrics(state, total_lines, visible_height) do
     ws = state.workspace
-    panel = ws.agent_ui.panel
 
-    updated_scroll =
-      Minga.Editing.Scroll.update_metrics(panel.scroll, total_lines, visible_height)
+    agent_ui =
+      MingaEditor.Agent.UIState.record_scroll_metrics(ws.agent_ui, total_lines, visible_height)
 
-    updated_panel = %{panel | scroll: updated_scroll}
-    updated_ui = %{ws.agent_ui | panel: updated_panel}
-    %{state | workspace: %{ws | agent_ui: updated_ui}}
+    %{state | workspace: %{ws | agent_ui: agent_ui}}
   end
 
   @spec prompt_cursor(

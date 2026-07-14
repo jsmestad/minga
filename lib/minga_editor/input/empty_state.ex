@@ -100,6 +100,6 @@ defmodule MingaEditor.Input.EmptyState do
 
   @spec put_launchpad(EditorState.t(), Launchpad.t()) :: EditorState.t()
   defp put_launchpad(state, lp) do
-    EditorState.update_workspace(state, &MingaEditor.Session.State.set_launchpad(&1, lp))
+    %{state | workspace: MingaEditor.Session.State.set_launchpad(state.workspace, lp)}
   end
 end

@@ -26,7 +26,7 @@ defmodule MingaEditor.InlineAsk.RenderTest do
     ask = InlineAsk.append_input(ask, "why?")
 
     state = %EditorState{
-      port_manager: nil,
+      frontend: %MingaEditor.State.Frontend{port_manager: nil},
       workspace: %SessionState{viewport: MingaEditor.Viewport.new(24, 80)},
       shell_runtime:
         Runtime.new(
@@ -66,7 +66,10 @@ defmodule MingaEditor.InlineAsk.RenderTest do
         0
       )
 
-    state = %{shell_state: TraditionalState.activate_inline_ask(%TraditionalState{}, ask)}
+    state = %{
+      shell_runtime: %{state: TraditionalState.activate_inline_ask(%TraditionalState{}, ask)}
+    }
+
     decorations = Render.merge_decorations(Decorations.new(), state, buffer_pid)
 
     assert Decorations.has_block_decorations?(decorations)
@@ -87,7 +90,7 @@ defmodule MingaEditor.InlineAsk.RenderTest do
       )
 
     state = %EditorState{
-      port_manager: nil,
+      frontend: %MingaEditor.State.Frontend{port_manager: nil},
       workspace: %SessionState{viewport: MingaEditor.Viewport.new(24, 80)},
       shell_runtime:
         Runtime.new(

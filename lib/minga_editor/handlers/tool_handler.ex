@@ -64,7 +64,7 @@ defmodule MingaEditor.Handlers.ToolHandler do
 
     # Schedule status clear after 5 seconds (skip in headless)
     effects =
-      if state.backend != :headless do
+      if state.frontend.backend != :headless do
         Enum.concat(effects, [{:send_after, :clear_tool_status, 5_000}])
       else
         effects
@@ -159,7 +159,7 @@ defmodule MingaEditor.Handlers.ToolHandler do
     do: MingaEditor.maybe_refresh_tool_picker(state)
 
   defp apply_effect(state, {:send_after, message, delay_ms}) do
-    if state.backend != :headless, do: Process.send_after(self(), message, delay_ms)
+    if state.frontend.backend != :headless, do: Process.send_after(self(), message, delay_ms)
     state
   end
 
@@ -205,10 +205,14 @@ defmodule MingaEditor.Handlers.ToolHandler do
   defp show_tool_prompt(state, [], _declined), do: state
 
   defp show_tool_prompt(state, pending, declined) do
-    EditorState.transition_mode(
-      state,
-      :tool_confirm,
-      %Minga.Mode.ToolConfirmState{pending: pending, declined: declined}
-    )
+    %{
+      state
+      | workspace:
+          MingaEditor.Session.State.transition_mode(
+            state.workspace,
+            :tool_confirm,
+            %Minga.Mode.ToolConfirmState{pending: pending, declined: declined}
+          )
+    }
   end
 end

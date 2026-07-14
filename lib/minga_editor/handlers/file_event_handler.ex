@@ -128,7 +128,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
   defp apply_effect(state, {:request_inlay_hints}), do: LspActions.inlay_hints(state)
 
   defp apply_effect(state, {:save_session_deferred}) do
-    if state.backend != :headless, do: send(self(), :save_session)
+    if state.frontend.backend != :headless, do: send(self(), :save_session)
     state
   end
 
@@ -191,8 +191,8 @@ defmodule MingaEditor.Handlers.FileEventHandler do
 
         new_state =
           state
-          |> EditorState.apply_shell_runtime_transition(runtime)
-          |> EditorState.set_workspace(workspace)
+          |> then(fn state -> %{state | shell_runtime: runtime} end)
+          |> then(fn state -> %{state | workspace: workspace} end)
 
         {new_state, [{:render, 16}]}
     end
@@ -200,11 +200,13 @@ defmodule MingaEditor.Handlers.FileEventHandler do
 
   @spec handle_buffer_saved(EditorState.t(), pid()) :: {EditorState.t(), [file_effect()]}
   defp handle_buffer_saved(state, saved_buf) do
+    saved_path = Minga.Buffer.file_path(saved_buf)
+
     new_state =
       state
       |> FileTreeFreshness.refresh_git_status_from_cache()
       |> refresh_git_diff_views_for_buffer(saved_buf)
-      |> EditorState.rebind_buffer_file_identity(saved_buf)
+      |> EditorState.rebind_buffer_file_identity(saved_buf, saved_path)
 
     effects = [
       {:request_code_lens},
@@ -213,7 +215,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
     ]
 
     effects =
-      if state.backend != :headless do
+      if state.frontend.backend != :headless do
         Enum.concat(effects, [{:save_session_deferred}])
       else
         effects
@@ -291,9 +293,10 @@ defmodule MingaEditor.Handlers.FileEventHandler do
         ]) :: {EditorState.t(), [file_effect()]}
   defp handle_filter_walk_result(state, root, filter, entries) do
     file_tree =
-      EditorState.file_tree_state(state)
+      state.workspace.file_tree
       |> MingaEditor.State.FileTree.apply_filter_walk(root, filter, entries)
 
-    {EditorState.set_file_tree(state, file_tree), [{:render, 16}]}
+    {%{state | workspace: MingaEditor.Session.State.set_file_tree(state.workspace, file_tree)},
+     [{:render, 16}]}
   end
 end

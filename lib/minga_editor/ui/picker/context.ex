@@ -86,23 +86,23 @@ defmodule MingaEditor.UI.Picker.Context do
   """
   @spec from_editor_state(State.t(), map() | nil) :: t()
   def from_editor_state(%State{} = state, extra_context \\ nil) do
-    agent_session = MingaEditor.State.AgentAccess.session(state)
+    agent_session = MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
     picker_ui = picker_ui_from_modal(state, extra_context)
 
     %__MODULE__{
       buffers: state.workspace.buffers,
       editing: state.workspace.editing,
-      file_tree: State.file_tree_state(state),
+      file_tree: state.workspace.file_tree,
       search: state.workspace.search,
-      viewport: state.terminal_viewport,
+      viewport: state.frontend.terminal_viewport,
       tab_bar: state.shell_runtime.state.tab_bar,
       agent_session: agent_session,
       picker_ui: picker_ui,
       document_symbols: active_document_symbols(state),
-      capabilities: state.capabilities,
-      keymap_server: State.keymap_server(state),
-      options_server: State.options_server(state),
-      theme: state.theme
+      capabilities: state.frontend.capabilities,
+      keymap_server: state.interaction.keymap_server,
+      options_server: state.interaction.options_server,
+      theme: state.appearance.theme
     }
   end
 
@@ -114,7 +114,7 @@ defmodule MingaEditor.UI.Picker.Context do
 
   @spec active_document_symbols(State.t()) :: [Minga.Language.Symbol.t()]
   defp active_document_symbols(%State{} = state) do
-    case State.active_window_struct(state) do
+    case MingaEditor.Session.State.active_window_struct(state.workspace) do
       %{document_symbols: symbols} when is_list(symbols) -> symbols
       _ -> []
     end

@@ -79,13 +79,6 @@ defmodule MingaEditor.FeatureState do
     end
   end
 
-  @doc "Updates a source-owned feature value. Missing values are initialized with `default`."
-  @spec update(t(), source(), feature_id(), value(), (value() -> value())) :: t()
-  def update(%__MODULE__{} = state, source, feature_id, default, fun) when is_function(fun, 1) do
-    value = state |> get(source, feature_id, default) |> fun.()
-    put(state, source, feature_id, value)
-  end
-
   @doc "Drops one source-owned feature value."
   @spec drop(t(), source(), feature_id()) :: t()
   def drop(%__MODULE__{entries: entries} = state, source, feature_id) do

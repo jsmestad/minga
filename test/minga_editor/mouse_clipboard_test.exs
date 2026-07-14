@@ -58,8 +58,10 @@ defmodule MingaEditor.MouseClipboardTest do
     editing = VimState.transition(VimState.new(), :visual, visual_state)
 
     %EditorState{
-      port_manager: nil,
-      capabilities: %Capabilities{frontend_type: frontend_type},
+      frontend: %MingaEditor.State.Frontend{
+        port_manager: nil,
+        capabilities: %Capabilities{frontend_type: frontend_type}
+      },
       workspace: %SessionState{
         viewport: Viewport.new(10, 40),
         buffers: %Buffers{active: buffer, list: [buffer]},

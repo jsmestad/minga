@@ -8,6 +8,7 @@ defmodule MingaEditor.Shell.RegistryTest do
   alias MingaEditor.Agent.Events
   alias MingaEditor.Commands.BufferManagement
   alias MingaEditor.Handlers.EventDispatcher
+  alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.Shell.Entry
@@ -22,7 +23,7 @@ defmodule MingaEditor.Shell.RegistryTest do
   alias MingaEditor.Shell.Traditional.WhichKeyWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.State.AgentAccess
+  alias MingaEditor.State.Frontend
   alias Minga.Test.RecordingFrontend
   alias MingaEditor.Test.FakeShell
   alias MingaEditor.Test.FakeShellAlt
@@ -551,7 +552,7 @@ defmodule MingaEditor.Shell.RegistryTest do
     fake = TestHelpers.base_state() |> Workflow.switch(:fake)
     updated = NoticeWorkflow.publish(fake, "durable notice")
 
-    assert [%{text: "durable notice"}] = updated.message_store.entries
+    assert [%{text: "durable notice"}] = updated.render.message_store.entries
     assert updated.shell_runtime.state == fake.shell_runtime.state
   end
 
@@ -567,19 +568,17 @@ defmodule MingaEditor.Shell.RegistryTest do
                capabilities: [:tui]
              })
 
-    switched =
-      %{TestHelpers.base_state() | layout: :layout, focus_tree: :focus}
-      |> Workflow.switch(:fake)
+    cached_state = TestHelpers.base_state() |> Layout.put()
+    switched = Workflow.switch(cached_state, :fake)
 
-    assert switched.layout == nil
-    assert switched.focus_tree == nil
+    assert switched.render.layout == nil
+    assert switched.render.focus_tree == nil
 
-    unchanged =
-      %{TestHelpers.base_state() | layout: :layout, focus_tree: :focus}
-      |> Workflow.switch(:traditional)
+    unchanged_state = TestHelpers.base_state() |> Layout.put()
+    unchanged = Workflow.switch(unchanged_state, :traditional)
 
-    assert unchanged.layout == :layout
-    assert unchanged.focus_tree == :focus
+    assert unchanged.render.layout == unchanged_state.render.layout
+    assert unchanged.render.focus_tree == unchanged_state.render.focus_tree
 
     assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(unchanged) ==
              "Already using Traditional"
@@ -612,8 +611,8 @@ defmodule MingaEditor.Shell.RegistryTest do
     assert Runtime.identity(result.shell_runtime) == Identity.new(default)
     refute Map.has_key?(result.shell_runtime.state, :obsolete)
     refute Map.has_key?(Runtime.stash(result.shell_runtime), :fake)
-    assert result.layout == nil
-    assert result.focus_tree == nil
+    assert result.render.layout == nil
+    assert result.render.focus_tree == nil
   end
 
   test "background agent events update a matching stash but not a replaced registration" do
@@ -642,7 +641,7 @@ defmodule MingaEditor.Shell.RegistryTest do
       |> Workflow.switch(:fake)
       |> put_active_shell_fields(%{record_agent_events?: true})
       |> Workflow.switch(:fake_alt)
-      |> Map.put(:backend, :gui)
+      |> with_frontend_backend(:gui)
 
     event = {:status_changed, :error}
     {:noreply, matching} = MingaEditor.handle_info({:agent_event, self(), event}, state)
@@ -663,7 +662,7 @@ defmodule MingaEditor.Shell.RegistryTest do
       MingaEditor.handle_info({:agent_event, self(), {:status_changed, :idle}}, matching)
 
     assert Runtime.stash(stale.shell_runtime).fake.state.events == [event]
-    Process.cancel_timer(stale.render_correlation.timer)
+    Process.cancel_timer(stale.render.render_correlation.timer)
   end
 
   test "active agent event retains state returned by shell persistence" do
@@ -679,13 +678,13 @@ defmodule MingaEditor.Shell.RegistryTest do
         record_agent_events?: true,
         persist_as: persisted_state
       })
-      |> Map.put(:backend, :gui)
+      |> with_frontend_backend(:gui)
 
     {:noreply, updated} =
       MingaEditor.handle_info({:agent_event, self(), {:status_changed, :error}}, state)
 
     assert Runtime.state(updated.shell_runtime) == persisted_state
-    Process.cancel_timer(updated.render_correlation.timer)
+    Process.cancel_timer(updated.render.render_correlation.timer)
   end
 
   test "Agent.Events updates matching stashes but skips a replaced registration" do
@@ -880,7 +879,16 @@ defmodule MingaEditor.Shell.RegistryTest do
       TestHelpers.base_state()
       |> Workflow.switch(:fake)
       |> put_active_shell_fields(%{session: old_pid})
-      |> Map.put(:agent_ingest, dead_ingest)
+      |> then(fn state ->
+        %{
+          state
+          | agent_connection:
+              MingaEditor.State.AgentConnection.connect_ingest(
+                state.agent_connection,
+                dead_ingest
+              )
+        }
+      end)
       |> stash_shell_state(valid_entry, %{session: old_pid})
 
     assert :ok = Registry.unregister_source({:extension, :fake})
@@ -1111,8 +1119,8 @@ defmodule MingaEditor.Shell.RegistryTest do
 
     state =
       state
-      |> EditorState.set_workspace(workspace)
-      |> EditorState.apply_shell_runtime_transition(runtime)
+      |> then(fn state -> %{state | workspace: workspace} end)
+      |> then(fn state -> %{state | shell_runtime: runtime} end)
 
     assert :ok = Registry.unregister_source(source)
 
@@ -1125,12 +1133,19 @@ defmodule MingaEditor.Shell.RegistryTest do
     replacement = Registry.get(:fake)
     refute Runtime.active_entry?(state.shell_runtime, replacement)
 
-    assert AgentAccess.session(state) == nil
+    active_session =
+      if Runtime.active_entry?(state.shell_runtime, replacement),
+        do: Runtime.active_session(state.shell_runtime),
+        else: nil
+
+    assert active_session == nil
     assert EditorState.active_tab(state) == nil
     assert EditorState.find_tab_by_buffer(state, self()) == nil
     assert EditorState.active_tab_kind(state) == :none
 
-    updated = EditorState.set_tab_session(state, 1, self())
+    state = MingaEditor.Shell.Workflow.ensure_available(state)
+    runtime = MingaEditor.Shell.Runtime.set_tab_session(state.shell_runtime, 1, self())
+    updated = %{state | shell_runtime: runtime}
     assert Runtime.active_entry?(updated.shell_runtime, replacement)
 
     {event_state, _effects} = Events.handle(state, {:status_changed, :thinking})
@@ -1183,8 +1198,8 @@ defmodule MingaEditor.Shell.RegistryTest do
     available = Workflow.ensure_available(state)
     {result, _receipt_result} = EditorState.integrate_renderer_receipt(available, writeback)
 
-    assert result.layout == nil
-    assert result.focus_tree == nil
+    assert result.render.layout == nil
+    assert result.render.focus_tree == nil
     assert Runtime.id(result.shell_runtime) == :fake
     refute Map.has_key?(result.shell_runtime.state, :modeline_click_regions)
   end
@@ -1207,7 +1222,7 @@ defmodule MingaEditor.Shell.RegistryTest do
              MingaEditor.handle_info({:minga_input, {:key_press, ?j, 0, 42}}, state)
 
     assert Runtime.id(updated.shell_runtime) == :fake
-    assert updated.last_input_seq == 42
+    assert updated.frontend.last_input_seq == 42
   end
 
   test "input dispatch falls back when the active shell has been unregistered" do
@@ -1249,8 +1264,8 @@ defmodule MingaEditor.Shell.RegistryTest do
       )
 
     state
-    |> EditorState.apply_shell_runtime_transition(runtime)
-    |> EditorState.set_workspace(workspace)
+    |> then(fn state -> %{state | shell_runtime: runtime} end)
+    |> then(fn state -> %{state | workspace: workspace} end)
   end
 
   @spec stash_shell_states(EditorState.t(), [{Entry.t(), term()}]) :: EditorState.t()
@@ -1270,7 +1285,13 @@ defmodule MingaEditor.Shell.RegistryTest do
       |> Runtime.activate(entry, shell_state)
       |> Runtime.activate(active_entry, active_state)
 
-    EditorState.apply_shell_runtime_transition(state, runtime)
+    %{state | shell_runtime: runtime}
+  end
+
+  @spec with_frontend_backend(EditorState.t(), Frontend.backend()) :: EditorState.t()
+  defp with_frontend_backend(%EditorState{} = state, backend) do
+    %Frontend{} = frontend = state.frontend
+    %{state | frontend: %Frontend{frontend | backend: backend}}
   end
 
   defp shell_attrs(id, module, label) do

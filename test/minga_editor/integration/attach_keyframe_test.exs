@@ -54,6 +54,7 @@ defmodule Minga.Integration.AttachKeyframeTest do
   alias Minga.Protocol.Opcodes
   alias Minga.Test.HeadlessPort
   alias Minga.Test.RecordingFrontend
+  alias MingaEditor.State.Frontend
 
   @op_begin_frame Opcodes.begin_frame()
   @op_commit_frame Opcodes.commit_frame()
@@ -85,7 +86,7 @@ defmodule Minga.Integration.AttachKeyframeTest do
     editor = editor_state(ctx)
     refute Map.has_key?(Map.from_struct(editor), :caches)
 
-    assert :sys.get_state(editor.renderer).caches.last_emitted_frame_seq > 0,
+    assert :sys.get_state(editor.render.renderer).caches.last_emitted_frame_seq > 0,
            "expected the renderer to have a non-zero committed frame base"
 
     # ── Second client connects mid-session ────────────────────────────────────
@@ -138,7 +139,10 @@ defmodule Minga.Integration.AttachKeyframeTest do
   # fresh adapter the editor now emits to. :sys.replace_state is the standard
   # test technique in this suite (see EditorCase.ensure_test_buffer_id/1).
   defp attach_client!(editor, client) do
-    :sys.replace_state(editor, fn state -> %{state | port_manager: client} end)
+    :sys.replace_state(editor, fn state ->
+      %Frontend{} = frontend = state.frontend
+      %{state | frontend: %Frontend{frontend | port_manager: client}}
+    end)
   end
 
   # Waits for the keyframe command batch the editor cast to the newly-attached
