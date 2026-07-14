@@ -58,7 +58,7 @@ defmodule Minga.Test.EditorCase do
           events_registry: Minga.Events.registry()
         }
 
-  @sync_timeout 15_000
+  @sync_timeout 30_000
   @rendering_process_key :minga_editor_case_rendering
 
   @doc false

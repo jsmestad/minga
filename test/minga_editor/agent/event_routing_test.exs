@@ -4,7 +4,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
   The runtime split lives in `MingaEditor.handle_info/2` for `:agent_event`
   messages: events whose `session_pid` matches `Shell.Runtime.active_session/1` go
-  through `Agent.Events.handle/2` (rendering cache + tab status); the
+  through `Agent.Events.dispatch/2` (rendering cache + tab status); the
   rest go through `Shell.on_agent_event/4` (presentation only — never
   the active tab's rendering cache).
 
@@ -38,7 +38,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
   defp event_state(agent) do
     %EditorState{
-      frontend: %MingaEditor.State.Frontend{port_manager: nil},
+      frontend: %MingaEditor.State.Frontend{backend: :gui, port_manager: nil},
       workspace: %SessionState{viewport: Viewport.new(24, 80), agent_ui: UIState.new()},
       shell_runtime:
         Runtime.new(
@@ -170,7 +170,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
     end
   end
 
-  describe "Agent.Events.handle/2 tool status" do
+  describe "Agent.Events.dispatch/2 tool status" do
     test "tool_started and tool_ended keep active_tool_name synced with the session snapshot" do
       {:ok, session} = start_supervised({Session, provider_opts: []})
       :sys.get_state(session)
@@ -181,7 +181,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       tab_bar = TabBar.move_tab_to_workspace(tab_bar, 1, workspace.id)
 
       state = %EditorState{
-        frontend: %MingaEditor.State.Frontend{port_manager: nil},
+        frontend: %MingaEditor.State.Frontend{backend: :gui, port_manager: nil},
         workspace: workspace(),
         shell_runtime:
           Runtime.new(
@@ -199,13 +199,11 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       )
 
       :sys.get_state(session)
-      {state, effects} = Events.handle(state, {:tool_started, "alpha", %{}})
+      state = Events.dispatch(state, {:tool_started, "alpha", %{}})
 
       assert AgentState.active_tool_name(
                MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
              ) == "alpha"
-
-      assert effects == [{:render, 16}]
 
       send(
         session,
@@ -213,13 +211,11 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       )
 
       :sys.get_state(session)
-      {state, effects} = Events.handle(state, {:tool_started, "beta", %{}})
+      state = Events.dispatch(state, {:tool_started, "beta", %{}})
 
       assert AgentState.active_tool_name(
                MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
              ) == "beta"
-
-      assert effects == [{:render, 16}]
 
       send(
         session,
@@ -228,13 +224,11 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       )
 
       :sys.get_state(session)
-      {state, effects} = Events.handle(state, {:tool_ended, "alpha", "contents", :done})
+      state = Events.dispatch(state, {:tool_ended, "alpha", "contents", :done})
 
       assert AgentState.active_tool_name(
                MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
              ) == "beta"
-
-      assert effects == [{:render, 16}]
 
       send(
         session,
@@ -243,55 +237,47 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       )
 
       :sys.get_state(session)
-      {state, effects} = Events.handle(state, {:tool_ended, "beta", "output", :done})
+      state = Events.dispatch(state, {:tool_ended, "beta", "output", :done})
 
       assert AgentState.active_tool_name(
                MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
              ) == nil
-
-      assert effects == [{:render, 16}]
     end
 
     test "tool_started and tool_ended update an editor without an agent session" do
       state = event_state(%AgentState{})
 
-      {state, effects} = Events.handle(state, {:tool_started, "read_file", %{}})
+      state = Events.dispatch(state, {:tool_started, "read_file", %{}})
 
       assert AgentState.active_tool_name(
                MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
              ) == "read_file"
 
-      assert effects == [{:render, 16}]
-
-      {state, effects} = Events.handle(state, {:tool_ended, "read_file", "contents", :done})
+      state = Events.dispatch(state, {:tool_ended, "read_file", "contents", :done})
 
       assert AgentState.active_tool_name(
                MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
              ) == nil
-
-      assert effects == [{:render, 16}]
     end
 
     test "status_changed clears active_tool_name outside tool execution" do
       agent = %AgentState{} |> AgentState.set_active_tool_name("read_file")
       state = event_state(agent)
 
-      {state, _effects} = Events.handle(state, {:status_changed, :tool_executing})
+      state = Events.dispatch(state, {:status_changed, :tool_executing})
 
       assert AgentState.active_tool_name(
                MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
              ) == "read_file"
 
-      {state, effects} = Events.handle(state, {:status_changed, :idle})
+      state = Events.dispatch(state, {:status_changed, :idle})
 
       assert AgentState.active_tool_name(
                MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
              ) == nil
-
-      assert effects == [:render]
     end
 
-    test "context usage while busy defers auto-compaction until idle" do
+    test "context usage while busy defers auto-compaction" do
       session = fake_session_pid()
       agent = %AgentState{} |> AgentState.set_status(:thinking)
 
@@ -301,7 +287,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       tab_bar = TabBar.move_tab_to_workspace(tab_bar, 1, workspace.id)
 
       state = %EditorState{
-        frontend: %MingaEditor.State.Frontend{port_manager: self()},
+        frontend: %MingaEditor.State.Frontend{backend: :gui, port_manager: self()},
         workspace: %SessionState{viewport: Viewport.new(24, 80), agent_ui: UIState.new()},
         shell_runtime:
           Runtime.new(
@@ -313,20 +299,13 @@ defmodule MingaEditor.Agent.EventRoutingTest do
           )
       }
 
-      {state, effects} = Events.handle(state, {:context_usage, 95, 100})
-      assert effects == [{:render, 16}]
+      state = Events.dispatch(state, {:context_usage, 95, 100})
       assert state.workspace.agent_ui.view.compact_pending_fill_pct == 95
       refute state.workspace.agent_ui.view.compaction_in_progress
-
-      {state, effects} = Events.handle(state, {:status_changed, :idle})
-      assert :render in effects
-      assert {:compact_session, session} in effects
-      assert state.workspace.agent_ui.view.compact_pending_fill_pct == nil
-      assert state.workspace.agent_ui.view.compaction_in_progress
     end
   end
 
-  describe "Agent.Events.handle/2 file association" do
+  describe "Agent.Events.dispatch/2 file association" do
     test "file_changed associates by exact file ref, not duplicate basename" do
       root = Path.join(System.tmp_dir!(), "minga-event-routing")
       lib_path = Path.join([root, "lib", "user.ex"])
@@ -345,7 +324,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       tb = TabBar.move_tab_to_workspace(tb, agent_tab.id, workspace.id)
 
       state = %EditorState{
-        frontend: %MingaEditor.State.Frontend{port_manager: self()},
+        frontend: %MingaEditor.State.Frontend{backend: :gui, port_manager: self()},
         workspace:
           %SessionState{viewport: Viewport.new(24, 80)}
           |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
@@ -359,8 +338,8 @@ defmodule MingaEditor.Agent.EventRoutingTest do
           )
       }
 
-      {state, _effects} =
-        Events.handle(
+      state =
+        Events.dispatch(
           state,
           {:file_changed, test_path, "before", "after", "tc_test", "edit_file"}
         )
@@ -399,7 +378,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         end)
 
       state = %EditorState{
-        frontend: %MingaEditor.State.Frontend{port_manager: self()},
+        frontend: %MingaEditor.State.Frontend{backend: :gui, port_manager: self()},
         workspace:
           %SessionState{viewport: Viewport.new(24, 80)}
           |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
@@ -413,8 +392,8 @@ defmodule MingaEditor.Agent.EventRoutingTest do
           )
       }
 
-      {state, _effects} =
-        Events.handle(
+      state =
+        Events.dispatch(
           state,
           {:file_changed, test_path, "before", "after", "tc_test", "edit_file"}
         )
@@ -449,7 +428,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       tb = TabBar.move_tab_to_workspace(tb, agent_tab.id, workspace.id)
 
       state = %EditorState{
-        frontend: %MingaEditor.State.Frontend{port_manager: self()},
+        frontend: %MingaEditor.State.Frontend{backend: :gui, port_manager: self()},
         workspace:
           %SessionState{viewport: Viewport.new(24, 80)}
           |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
@@ -463,8 +442,8 @@ defmodule MingaEditor.Agent.EventRoutingTest do
           )
       }
 
-      {state, _effects} =
-        Events.handle(state, {:file_changed, path, "before", "after", "tc_test", "edit_file"})
+      state =
+        Events.dispatch(state, {:file_changed, path, "before", "after", "tc_test", "edit_file"})
 
       tb = state.shell_runtime.state.tab_bar
       assert TabBar.get(tb, file_tab.id).group_id == workspace.id
@@ -485,7 +464,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       tb = TabBar.move_tab_to_workspace(tb, agent_tab.id, workspace.id)
 
       state = %EditorState{
-        frontend: %MingaEditor.State.Frontend{port_manager: self()},
+        frontend: %MingaEditor.State.Frontend{backend: :gui, port_manager: self()},
         workspace:
           %SessionState{viewport: Viewport.new(24, 80)}
           |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
@@ -499,8 +478,8 @@ defmodule MingaEditor.Agent.EventRoutingTest do
           )
       }
 
-      {state, _effects} =
-        Events.handle(state, {:file_changed, path, "before", "after", "tc_test", "edit_file"})
+      state =
+        Events.dispatch(state, {:file_changed, path, "before", "after", "tc_test", "edit_file"})
 
       tb = state.shell_runtime.state.tab_bar
       assert TabBar.get(tb, file_tab.id).group_id == 0

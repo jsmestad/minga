@@ -50,11 +50,12 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
 
   defp with_agent_context(state) do
     approval = %{tool_call_id: "tc1", name: "shell", args: %{}}
+    frontend = %{state.frontend | backend: :gui}
 
-    state = MingaEditor.Shell.Traditional.Workflow.install_agent_approval(state, approval)
-
-    {state, _effects} = AgentEvents.handle(state, {:approval_pending, approval})
     state
+    |> Map.put(:frontend, frontend)
+    |> MingaEditor.Shell.Traditional.Workflow.install_agent_approval(approval)
+    |> AgentEvents.dispatch({:approval_pending, approval})
   end
 
   # Builds an observatory tree with `count` nodes (one root plus count-1 direct

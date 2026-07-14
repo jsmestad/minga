@@ -728,12 +728,12 @@ defmodule MingaEditor.Shell.RegistryTest do
     fake_entry = Registry.get(:fake)
 
     state =
-      TestHelpers.base_state()
+      TestHelpers.base_state(backend: :gui)
       |> Workflow.switch(:fake_alt)
       |> put_active_shell_fields(%{agent: %AgentState{}, session: session, tab_bar: nil})
       |> stash_shell_state(fake_entry, %{session: session})
 
-    {matching, _effects} = Events.handle(state, {:status_changed, :thinking})
+    matching = Events.dispatch(state, {:status_changed, :thinking})
     assert stashed(matching.shell_runtime, fake_entry).state.synced_agent_status == :thinking
 
     assert :ok = Registry.unregister_source({:extension, :fake})
@@ -747,7 +747,7 @@ defmodule MingaEditor.Shell.RegistryTest do
                capabilities: [:tui]
              })
 
-    {stale, _effects} = Events.handle(matching, {:status_changed, :idle})
+    stale = Events.dispatch(matching, {:status_changed, :idle})
     assert stashed(stale.shell_runtime, fake_entry).state.synced_agent_status == :thinking
   end
 
@@ -1126,7 +1126,7 @@ defmodule MingaEditor.Shell.RegistryTest do
     source = {:extension, :fake}
     assert :ok = Registry.register(source, shell_attrs(:fake, FakeShell, "Fake"))
 
-    state = TestHelpers.base_state() |> Workflow.switch(:fake)
+    state = TestHelpers.base_state(backend: :gui) |> Workflow.switch(:fake)
 
     {runtime, workspace} =
       Runtime.route_event(
@@ -1166,7 +1166,7 @@ defmodule MingaEditor.Shell.RegistryTest do
     updated = %{state | shell_runtime: runtime}
     assert Runtime.active_entry?(updated.shell_runtime, replacement)
 
-    {event_state, _effects} = Events.handle(state, {:status_changed, :thinking})
+    event_state = Events.dispatch(state, {:status_changed, :thinking})
     assert Runtime.active_entry?(event_state.shell_runtime, replacement)
 
     refute_received :fake_shell_active_session

@@ -64,6 +64,39 @@ defmodule MingaEditor.State.OperationFeedbackTest do
     assert OperationFeedback.selected(feedback).status == :error
   end
 
+  test "full retained collection preserves active precedence and cancellation fallback" do
+    {feedback, first} =
+      OperationFeedback.start(
+        OperationFeedback.new(4),
+        :git_stage,
+        "one",
+        "One",
+        replace?: false
+      )
+
+    feedback = OperationFeedback.finish(feedback, first.id, :success, "One done")
+
+    {feedback, active} =
+      OperationFeedback.start(feedback, :git_commit, "two", "Two", replace?: false)
+
+    {feedback, canceled} =
+      OperationFeedback.start(feedback, :lsp_rename, "three", "Three", replace?: false)
+
+    feedback = OperationFeedback.cancel(feedback, canceled.id, "Canceled")
+
+    {feedback, newest_terminal} =
+      OperationFeedback.start(feedback, :external_format, "four", "Four", replace?: false)
+
+    feedback = OperationFeedback.finish(feedback, newest_terminal.id, :error, "Four failed")
+
+    assert OperationFeedback.size(feedback) == 4
+    assert OperationFeedback.selected(feedback).id == active.id
+
+    feedback = OperationFeedback.finish(feedback, active.id, :success, "Two done")
+    assert OperationFeedback.selected(feedback).id == newest_terminal.id
+    assert {:ok, %{status: :canceled}} = OperationFeedback.fetch(feedback, canceled.id)
+  end
+
   test "bounded retention evicts the oldest terminal operation first" do
     {feedback, first} =
       OperationFeedback.start(OperationFeedback.new(2), :git_stage, "one", "One")
