@@ -10,7 +10,7 @@ struct RenderPerformanceGateTests {
 
     private var baseline: RenderPerformanceBaseline {
         RenderPerformanceBaseline(
-            version: 1,
+            version: 2,
             fixtureVersion: "resident-ordinary-edit-v2",
             decodeApplyP95Ms: 1.0,
             commandPreparationP95Ms: 1.0,
@@ -28,7 +28,7 @@ struct RenderPerformanceGateTests {
     @Test("sub-millisecond references include a fixed host-noise allowance")
     func subMillisecondNoiseAllowance() {
         let tinyBaseline = RenderPerformanceBaseline(
-            version: 1, fixtureVersion: "resident-ordinary-edit-v2", decodeApplyP95Ms: 0.03,
+            version: 2, fixtureVersion: "resident-ordinary-edit-v2", decodeApplyP95Ms: 0.03,
             commandPreparationP95Ms: 0.35, combinedP95Ms: 0.39, provenance: provenance)
         let boundary = 0.08
         let pass = RenderPerformanceMeasurement(
@@ -108,7 +108,7 @@ struct RenderPerformanceGateTests {
     @Test("exact absolute boundaries pass and the next representable values fail")
     func absoluteBoundaries() {
         let absoluteBaseline = RenderPerformanceBaseline(
-            version: 1, fixtureVersion: "resident-ordinary-edit-v2", decodeApplyP95Ms: 4.0,
+            version: 2, fixtureVersion: "resident-ordinary-edit-v2", decodeApplyP95Ms: 4.0,
             commandPreparationP95Ms: 4.0, combinedP95Ms: 8.0, provenance: provenance)
 
         let pass = measurement(stage: 4.0, combined: 8.0)
@@ -127,8 +127,9 @@ struct RenderPerformanceGateTests {
     func baselineCannotRedefinePolicy() throws {
         let json = """
         {
-          "version": 1,
+          "version": 2,
           "fixtureVersion": "resident-ordinary-edit-v2",
+          "measurementClock": "process_cpu",
           "decodeApplyP95Ms": 4.0,
           "commandPreparationP95Ms": 4.0,
           "combinedP95Ms": 8.0,
@@ -150,15 +151,17 @@ struct RenderPerformanceGateTests {
         #expect(failures.contains { $0.contains("absolute 8.00ms") })
     }
 
-    @Test("unsupported baseline versions and fixtures fail closed")
+    @Test("unsupported baseline identities fail closed")
     func unsupportedBaselineIdentity() {
         let unsupported = RenderPerformanceBaseline(
-            version: 2, fixtureVersion: "other-fixture", decodeApplyP95Ms: 1,
-            commandPreparationP95Ms: 1, combinedP95Ms: 2, provenance: provenance)
+            version: 3, fixtureVersion: "other-fixture", measurementClock: "wall",
+            decodeApplyP95Ms: 1, commandPreparationP95Ms: 1, combinedP95Ms: 2,
+            provenance: provenance)
         let failures = RenderPerformanceGate.failures(
             measurement: measurement(stage: 1, combined: 2), baseline: unsupported)
         #expect(failures.contains { $0.contains("unsupported baseline version") })
         #expect(failures.contains { $0.contains("unsupported fixture") })
+        #expect(failures.contains { $0.contains("unsupported measurement clock") })
     }
 
     @Test("non-finite, zero, and negative references fail closed", arguments: [
@@ -166,7 +169,7 @@ struct RenderPerformanceGateTests {
     ])
     func invalidReference(value: Double) {
         let invalid = RenderPerformanceBaseline(
-            version: 1, fixtureVersion: "resident-ordinary-edit-v2", decodeApplyP95Ms: value,
+            version: 2, fixtureVersion: "resident-ordinary-edit-v2", decodeApplyP95Ms: value,
             commandPreparationP95Ms: 1, combinedP95Ms: 2, provenance: provenance)
         #expect(RenderPerformanceGate.failures(
             measurement: measurement(stage: 1, combined: 2), baseline: invalid

@@ -29,6 +29,8 @@ public struct RenderPerformanceBaseline: Codable, Equatable, Sendable {
     public let version: Int
     /// Fixed benchmark fixture identity.
     public let fixtureVersion: String
+    /// Clock used to collect the reference percentiles.
+    public let measurementClock: String
     /// Reference p95 for decode plus semantic apply.
     public let decodeApplyP95Ms: Double
     /// Reference p95 for visible-range command preparation.
@@ -39,11 +41,12 @@ public struct RenderPerformanceBaseline: Codable, Equatable, Sendable {
     public let provenance: RenderPerformanceProvenance
 
     /// Creates one versioned set of measured p95 references.
-    public init(version: Int, fixtureVersion: String, decodeApplyP95Ms: Double,
-                commandPreparationP95Ms: Double, combinedP95Ms: Double,
-                provenance: RenderPerformanceProvenance) {
+    public init(version: Int, fixtureVersion: String, measurementClock: String = "process_cpu",
+                decodeApplyP95Ms: Double, commandPreparationP95Ms: Double,
+                combinedP95Ms: Double, provenance: RenderPerformanceProvenance) {
         self.version = version
         self.fixtureVersion = fixtureVersion
+        self.measurementClock = measurementClock
         self.decodeApplyP95Ms = decodeApplyP95Ms
         self.commandPreparationP95Ms = commandPreparationP95Ms
         self.combinedP95Ms = combinedP95Ms
@@ -90,9 +93,11 @@ public enum RenderPerformanceAggregationError: Error, Equatable, Sendable {
 /// Fail-closed production policy for optimized native rendering measurements.
 public enum RenderPerformanceGate {
     /// Baseline schema version accepted by the gate.
-    public static let supportedBaselineVersion = 1
+    public static let supportedBaselineVersion = 2
     /// Fixture identity accepted by the gate.
     public static let supportedFixtureVersion = "resident-ordinary-edit-v2"
+    /// Measurement clock accepted by the gate.
+    public static let supportedMeasurementClock = "process_cpu"
     /// Absolute p95 ceiling for each measured stage.
     public static let stageAbsoluteBudgetMs = 4.0
     /// Absolute p95 ceiling for the combined native preparation path.
@@ -162,6 +167,9 @@ public enum RenderPerformanceGate {
         }
         if baseline.fixtureVersion != supportedFixtureVersion {
             failures.append("unsupported fixture \(baseline.fixtureVersion); expected \(supportedFixtureVersion)")
+        }
+        if baseline.measurementClock != supportedMeasurementClock {
+            failures.append("unsupported measurement clock \(baseline.measurementClock); expected \(supportedMeasurementClock)")
         }
 
         validate("baseline decode_apply p95", baseline.decodeApplyP95Ms, &failures)
