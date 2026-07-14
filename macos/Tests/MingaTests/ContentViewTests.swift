@@ -165,6 +165,62 @@ struct ContentViewTests {
 
         #expect(strings.contains("canonical.ex"))
         #expect(!strings.contains("legacy.ex"))
+        #expect((try? root.inspect().find(viewWithAccessibilityIdentifier: "workspace-tabbar")) != nil)
+
+        gui.tabBarState.updateWorkspaces(
+            activeWorkspaceId: 7,
+            mode: 1,
+            flags: 0,
+            entries: [],
+            visibleTabs: []
+        )
+        let canonicalEmptyRoot = ContentView(
+            gui: gui,
+            encoder: { nil },
+            editorGeometry: { .preview },
+            chrome: .preview,
+            onAgentChatVisibleChange: { _ in }
+        ) {
+            Color.clear
+        }
+        let canonicalEmptyStrings = try canonicalEmptyRoot.inspect()
+            .findAll(ViewType.Text.self)
+            .compactMap { try? $0.string() }
+
+        #expect(!canonicalEmptyStrings.contains("legacy.ex"))
+        #expect((try? canonicalEmptyRoot.inspect().find(viewWithAccessibilityIdentifier: "workspace-tabbar")) == nil)
+
+        let legacyOnlyGUI = GUIState()
+        legacyOnlyGUI.tabBarState.update(activeIndex: 0, entries: [
+            Wire.TabEntry(
+                id: 9,
+                groupId: 0,
+                isActive: true,
+                isDirty: false,
+                isAgent: false,
+                hasAttention: false,
+                agentStatus: 0,
+                isPinned: false,
+                tintColorRGB: 0,
+                icon: "",
+                label: "fallback.ex"
+            )
+        ])
+        let legacyOnlyRoot = ContentView(
+            gui: legacyOnlyGUI,
+            encoder: { nil },
+            editorGeometry: { .preview },
+            chrome: .preview,
+            onAgentChatVisibleChange: { _ in }
+        ) {
+            Color.clear
+        }
+        let legacyOnlyStrings = try legacyOnlyRoot.inspect()
+            .findAll(ViewType.Text.self)
+            .compactMap { try? $0.string() }
+
+        #expect(legacyOnlyStrings.contains("fallback.ex"))
+        #expect((try? legacyOnlyRoot.inspect().find(viewWithAccessibilityIdentifier: "workspace-tabbar")) != nil)
     }
 
     @Test(

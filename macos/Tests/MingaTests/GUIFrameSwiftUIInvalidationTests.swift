@@ -22,6 +22,7 @@ private final class FrameProbeRecorder {
     }
 
     private var entries: [ContentViewFrameProbePoint: Entry] = [:]
+    private var presentationSnapshots: [String] = []
     private let updates: AsyncStream<ContentViewFrameProbePoint>
     private let continuation: AsyncStream<ContentViewFrameProbePoint>.Continuation
 
@@ -37,6 +38,7 @@ private final class FrameProbeRecorder {
     func record(
         point: ContentViewFrameProbePoint,
         stateObject: AnyObject,
+        presentationSnapshot: String,
         view: FrameProbeNSView
     ) {
         let prior = entries[point]
@@ -47,6 +49,7 @@ private final class FrameProbeRecorder {
             updateCount: (prior?.updateCount ?? 0) + 1,
             stateObjectIDs: stateObjectIDs
         )
+        presentationSnapshots.append(presentationSnapshot)
         continuation.yield(point)
     }
 
@@ -60,6 +63,10 @@ private final class FrameProbeRecorder {
 
     func stateObjectIDs(for point: ContentViewFrameProbePoint) -> Set<ObjectIdentifier> {
         entries[point]?.stateObjectIDs ?? []
+    }
+
+    func snapshots() -> [String] {
+        presentationSnapshots
     }
 
     func waitForValue(_ value: String, point: ContentViewFrameProbePoint) async {
@@ -78,6 +85,7 @@ private final class FrameProbeRecorder {
 private struct FrameProbeRepresentable: NSViewRepresentable {
     let point: ContentViewFrameProbePoint
     let value: String
+    let presentationSnapshot: String
     let stateObject: AnyObject
     let swiftUILocalIdentity: UUID
     let recorder: FrameProbeRecorder
@@ -95,7 +103,55 @@ private struct FrameProbeRepresentable: NSViewRepresentable {
     private func update(_ view: FrameProbeNSView) {
         view.publishedValue = value
         view.swiftUILocalIdentity = swiftUILocalIdentity
-        recorder.record(point: point, stateObject: stateObject, view: view)
+        recorder.record(
+            point: point,
+            stateObject: stateObject,
+            presentationSnapshot: presentationSnapshot,
+            view: view
+        )
+    }
+}
+
+@MainActor
+private func productionPresentationSnapshot(_ gui: GUIState) -> String {
+    let tabs = gui.tabBarState.displayTabs.map { tab in
+        "\(tab.id):\(tab.label):\(tab.isActive)"
+    }.joined(separator: ",")
+    let editor = gui.windowContents.values
+        .sorted { $0.windowId < $1.windowId }
+        .flatMap(\.rows)
+        .map(\.text)
+        .joined(separator: "\n")
+    let selectedFile = gui.fileTreeState.entries
+        .first(where: \.isSelected)?
+        .name ?? ""
+    let overlays = [
+        gui.emptyStateState.sections.flatMap(\.items).map(\.label).joined(separator: ","),
+        gui.completionState.items.map(\.label).joined(separator: ","),
+        gui.extensionOverlayState.entries.map(\.content).joined(separator: ","),
+        gui.pickerState.items.map(\.label).joined(separator: ","),
+    ].joined(separator: "|")
+    return "\(tabs)|\(editor)|\(selectedFile)|\(overlays)"
+}
+
+private struct ProductionEditorSurface: View {
+    let gui: GUIState
+    let recorder: FrameProbeRecorder
+    @State private var localIdentity = UUID()
+
+    var body: some View {
+        FrameProbeRepresentable(
+            point: .editor,
+            value: gui.windowContents.values
+                .sorted { $0.windowId < $1.windowId }
+                .flatMap(\.rows)
+                .map(\.text)
+                .joined(separator: "\n"),
+            presentationSnapshot: productionPresentationSnapshot(gui),
+            stateObject: gui,
+            swiftUILocalIdentity: localIdentity,
+            recorder: recorder
+        )
     }
 }
 
@@ -104,18 +160,21 @@ private struct ProductionFrameProbe: View {
     let gui: GUIState
     let stateObject: AnyObject
     let recorder: FrameProbeRecorder
-    @Environment(\.guiFrameVersion) private var frameVersion
     @State private var localIdentity = UUID()
 
     var body: some View {
-        let _ = frameVersion
         FrameProbeRepresentable(
             point: point,
             value: publishedValue,
+            presentationSnapshot: presentationSnapshot,
             stateObject: stateObject,
             swiftUILocalIdentity: localIdentity,
             recorder: recorder
         )
+    }
+
+    private var presentationSnapshot: String {
+        productionPresentationSnapshot(gui)
     }
 
     private var publishedValue: String {
@@ -204,6 +263,7 @@ struct GUIFrameSwiftUIInvalidationTests {
         await waitForValues(baseline, recorder: recorder)
         hostingView.layoutSubtreeIfNeeded()
         await Task.yield()
+        let baselinePresentation = productionPresentationSnapshot(gui)
 
         let shellInput = gui.shellInput
         let editorInput = gui.editorInput
@@ -274,25 +334,32 @@ struct GUIFrameSwiftUIInvalidationTests {
         hostingView.layoutSubtreeIfNeeded()
         await Task.yield()
 
-        var counts = updateCounts(recorder)
+        let committedPresentation = productionPresentationSnapshot(gui)
+        let coherentSnapshots = Set([baselinePresentation, committedPresentation])
+        #expect(recorder.snapshots().allSatisfy { coherentSnapshots.contains($0) })
+
         gui.frameStore.publishLocal(impact: .shell) {
             gui.tabBarState.update(activeIndex: 0, entries: [Self.tab(label: "local.ex")])
         }
         await recorder.waitForValue("local.ex", point: .shell)
         hostingView.layoutSubtreeIfNeeded()
         await Task.yield()
-        expectOnly([.shell], changedSince: counts, recorder: recorder)
+        expectValues(
+            ("local.ex", committed.editor, committed.editorOverlay, committed.extensionOverlay, committed.windowOverlay),
+            recorder: recorder
+        )
 
-        counts = updateCounts(recorder)
         gui.frameStore.publishLocal(impact: .editor) {
             Self.updateEmptyState(gui, label: "Local launchpad")
         }
         await recorder.waitForValue("Local launchpad", point: .editor)
         hostingView.layoutSubtreeIfNeeded()
         await Task.yield()
-        expectOnly([.editor], changedSince: counts, recorder: recorder)
+        expectValues(
+            ("local.ex", "Local launchpad", committed.editorOverlay, committed.extensionOverlay, committed.windowOverlay),
+            recorder: recorder
+        )
 
-        counts = updateCounts(recorder)
         gui.frameStore.publishLocal(impact: .editorOverlay) {
             Self.updateCompletion(gui, label: "localCompletion")
             gui.extensionOverlayState.update([Self.extensionOverlay(content: "localExtension")])
@@ -301,16 +368,21 @@ struct GUIFrameSwiftUIInvalidationTests {
         await recorder.waitForValue("localExtension", point: .extensionOverlay)
         hostingView.layoutSubtreeIfNeeded()
         await Task.yield()
-        expectOnly([.editorOverlay, .extensionOverlay], changedSince: counts, recorder: recorder)
+        expectValues(
+            ("local.ex", "Local launchpad", "localCompletion", "localExtension", committed.windowOverlay),
+            recorder: recorder
+        )
 
-        counts = updateCounts(recorder)
         gui.frameStore.publishLocal(impact: .windowOverlay) {
             Self.updatePicker(gui, label: "localPicker")
         }
         await recorder.waitForValue("localPicker", point: .windowOverlay)
         hostingView.layoutSubtreeIfNeeded()
         await Task.yield()
-        expectOnly([.windowOverlay], changedSince: counts, recorder: recorder)
+        expectValues(
+            ("local.ex", "Local launchpad", "localCompletion", "localExtension", "localPicker"),
+            recorder: recorder
+        )
 
         #expect(gui.shellInput === shellInput)
         #expect(gui.editorInput === editorInput)
@@ -325,6 +397,173 @@ struct GUIFrameSwiftUIInvalidationTests {
             #expect(recorder.stateObjectIDs(for: point) == [ObjectIdentifier(expectedStateObject)])
         }
         #expect(window.firstResponder === shellView)
+    }
+
+    @Test(
+        "persistent ContentView keeps canonical tabs, editor content, and file tree selection coherent",
+        .timeLimit(.minutes(1))
+    )
+    func persistentContentViewPublishesCanonicalPresentationCoherently() async throws {
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
+        try publishCanonicalFrame(
+            dispatcher,
+            frameSeq: 1,
+            baseFrameSeq: 0,
+            tabs: [Self.workspaceTab(id: 1, label: "old.ex", path: "/tmp/old.ex")],
+            activeIndex: 0,
+            editorText: "old editor content",
+            selectedFile: "old.ex"
+        )
+
+        let recorder = FrameProbeRecorder()
+        let root = ContentView(
+            gui: gui,
+            encoder: { nil },
+            editorGeometry: { .preview },
+            chrome: .preview,
+            onAgentChatVisibleChange: { _ in },
+            frameProbe: ContentViewFrameProbe { point, stateObject in
+                AnyView(ProductionFrameProbe(
+                    point: point,
+                    gui: gui,
+                    stateObject: stateObject,
+                    recorder: recorder
+                ))
+            }
+        ) {
+            ProductionEditorSurface(gui: gui, recorder: recorder)
+        }
+
+        let frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        let hostingView = NSHostingView(rootView: root)
+        hostingView.frame = frame
+        let window = NSWindow(
+            contentRect: frame,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hostingView
+        defer { window.contentView = nil }
+        hostingView.layoutSubtreeIfNeeded()
+
+        await recorder.waitForValue("old.ex", point: .shell)
+        await recorder.waitForValue("old editor content", point: .editor)
+        let baseline = productionPresentationSnapshot(gui)
+        #expect(gui.tabBarState.displayTabs.map(\.label) == ["old.ex"])
+        #expect(gui.tabBarState.displayTabs.map(\.isActive) == [true])
+        #expect(gui.fileTreeState.entries.first(where: \.isSelected)?.name == "old.ex")
+
+        let shellView = try #require(recorder.view(for: .shell))
+        shellView.nativeLocalValue = "hover-old-tab"
+
+        try publishCanonicalFrame(
+            dispatcher,
+            frameSeq: 2,
+            baseFrameSeq: 1,
+            tabs: [
+                Self.workspaceTab(id: 1, label: "old.ex", path: "/tmp/old.ex"),
+                Self.workspaceTab(id: 2, label: "new.ex", path: "/tmp/new.ex"),
+            ],
+            activeIndex: 1,
+            editorText: "new editor content",
+            selectedFile: "new.ex"
+        )
+        await recorder.waitForValue("old.ex,new.ex", point: .shell)
+        await recorder.waitForValue("new editor content", point: .editor)
+        hostingView.layoutSubtreeIfNeeded()
+        await Task.yield()
+
+        let committed = productionPresentationSnapshot(gui)
+        #expect(gui.tabBarState.displayTabs.map(\.label) == ["old.ex", "new.ex"])
+        #expect(gui.tabBarState.displayTabs.map(\.isActive) == [false, true])
+        #expect(gui.fileTreeState.entries.first(where: \.isSelected)?.name == "new.ex")
+        #expect(recorder.snapshots().allSatisfy { $0 == baseline || $0 == committed })
+        #expect(recorder.view(for: .shell) === shellView)
+        #expect(shellView.nativeLocalValue == "hover-old-tab")
+
+        try publishCanonicalFrame(
+            dispatcher,
+            frameSeq: 3,
+            baseFrameSeq: 2,
+            tabs: [
+                Self.workspaceTab(id: 1, label: "old.ex", path: "/tmp/old.ex"),
+                Self.workspaceTab(id: 2, label: "new.ex", path: "/tmp/new.ex"),
+            ],
+            activeIndex: 0,
+            editorText: "old editor content reopened",
+            selectedFile: "old.ex"
+        )
+        await recorder.waitForValue("old editor content reopened", point: .editor)
+
+        #expect(gui.tabBarState.displayTabs.count == 2)
+        #expect(gui.tabBarState.displayTabs.map(\.label) == ["old.ex", "new.ex"])
+        #expect(gui.tabBarState.displayTabs.map(\.isActive) == [true, false])
+        #expect(gui.fileTreeState.entries.first(where: \.isSelected)?.name == "old.ex")
+        #expect(recorder.view(for: .shell) === shellView)
+        #expect(shellView.nativeLocalValue == "hover-old-tab")
+    }
+
+    private func publishCanonicalFrame(
+        _ dispatcher: CommandDispatcher,
+        frameSeq: UInt32,
+        baseFrameSeq: UInt32,
+        tabs: [Wire.WorkspaceTabEntry],
+        activeIndex: UInt8,
+        editorText: String,
+        selectedFile: String
+    ) throws {
+        dispatcher.dispatch(.beginFrame(frameSeq: frameSeq, baseFrameSeq: baseFrameSeq, generation: 1))
+        if baseFrameSeq == 0 {
+            dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        }
+        dispatcher.dispatch(.guiTabBar(activeIndex: activeIndex, tabs: []))
+        dispatcher.dispatch(.guiWorkspaces(
+            version: UInt8(clamping: frameSeq),
+            activeWorkspaceId: 0,
+            mode: 0,
+            flags: 0,
+            workspaces: [],
+            visibleTabs: tabs
+        ))
+        dispatcher.dispatch(.guiSidebars(
+            version: UInt8(clamping: frameSeq),
+            activeId: "file_tree",
+            sidebars: [Wire.SidebarMetadata(
+                id: "file_tree",
+                displayName: "File Tree",
+                semanticKind: "file_tree",
+                icon: "folder",
+                order: 0,
+                visible: true,
+                focused: true,
+                preferredWidth: 30,
+                badgeCount: nil
+            )]
+        ))
+        dispatcher.dispatch(.guiFileTree(
+            version: UInt8(clamping: frameSeq),
+            treeFlags: 0x03,
+            treeState: FileTreeVisibilityState.ready.rawValue,
+            selectedId: selectedFile,
+            treeWidth: 30,
+            rootPath: "/tmp",
+            errorReason: "",
+            entries: tabs.enumerated().map { index, tab in
+                Self.fileTreeEntry(
+                    index: index,
+                    id: tab.label,
+                    path: tab.path,
+                    selected: tab.label == selectedFile
+                )
+            }
+        ))
+        dispatcher.dispatch(.guiWindowContent(data: try Self.windowContent(
+            text: editorText,
+            epoch: frameSeq
+        )))
+        dispatcher.dispatch(.commitFrame(frameSeq: frameSeq, seq: 0))
     }
 
     private func publishFrame(
@@ -386,20 +625,6 @@ struct GUIFrameSwiftUIInvalidationTests {
     ) {
         for point in points {
             #expect(recorder.updateCount(for: point) == expected[point])
-        }
-    }
-
-    private func expectOnly(
-        _ changed: Set<ContentViewFrameProbePoint>,
-        changedSince prior: [ContentViewFrameProbePoint: Int],
-        recorder: FrameProbeRecorder
-    ) {
-        for point in points {
-            if changed.contains(point) {
-                #expect(recorder.updateCount(for: point) > (prior[point] ?? 0))
-            } else {
-                #expect(recorder.updateCount(for: point) == prior[point])
-            }
         }
     }
 
@@ -514,6 +739,89 @@ struct GUIFrameSwiftUIInvalidationTests {
             colorB: 50,
             opacity: 255,
             content: content
+        )
+    }
+
+    private static func workspaceTab(id: UInt32, label: String, path: String) -> Wire.WorkspaceTabEntry {
+        Wire.WorkspaceTabEntry(
+            id: id,
+            workspaceId: 0,
+            kind: 0,
+            flags: 0,
+            pathHash: id,
+            tintColorRGB: 0,
+            icon: "",
+            label: label,
+            path: path
+        )
+    }
+
+    private static func fileTreeEntry(
+        index: Int,
+        id: String,
+        path: String,
+        selected: Bool
+    ) -> Wire.FileTreeEntry {
+        Wire.FileTreeEntry(
+            pathHash: UInt32(index + 1),
+            id: id,
+            path: path,
+            isDir: false,
+            isExpanded: false,
+            isSelected: selected,
+            isFocused: selected,
+            isActive: selected,
+            isDirty: false,
+            isEditing: false,
+            isLastChild: index > 0,
+            depth: 0,
+            gitStatus: 0,
+            diagnosticErrorCount: 0,
+            diagnosticWarningCount: 0,
+            diagnosticInfoCount: 0,
+            diagnosticHintCount: 0,
+            guides: [],
+            icon: "",
+            iconColorR: 0,
+            iconColorG: 0,
+            iconColorB: 0,
+            name: id,
+            relPath: id,
+            editingType: 0xFF,
+            editingText: ""
+        )
+    }
+
+    private static func windowContent(text: String, epoch: UInt32) throws -> GUIWindowContent {
+        let span = GUIHighlightSpan(
+            startCol: 0,
+            endCol: UInt16(clamping: text.count),
+            fg: 0xFFFFFF,
+            bg: 0,
+            attrs: 0,
+            fontWeight: 0,
+            fontId: 0
+        )
+        let row = GUIVisualRow(
+            rowType: .normal,
+            rowId: UInt64(epoch),
+            bufLine: 0,
+            contentHash: epoch,
+            text: text,
+            spans: [span]
+        )
+        return try GUIWindowContent(
+            windowId: 1,
+            fullRefresh: true,
+            contentEpoch: epoch,
+            cursorRow: 0,
+            cursorCol: 0,
+            cursorShape: .block,
+            rows: [row],
+            selection: nil,
+            searchMatches: [],
+            diagnosticUnderlines: [],
+            documentHighlights: []
         )
     }
 

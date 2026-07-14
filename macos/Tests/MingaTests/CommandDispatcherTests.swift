@@ -213,12 +213,18 @@ struct CommandDispatcherRoutingTests {
         ]
         let workspaceTabs = [
             Wire.WorkspaceTabEntry(
-                id: 42, workspaceId: 7, kind: 0, flags: 0,
-                pathHash: 42, tintColorRGB: 0, icon: "", label: "review.ex",
+                id: 41, workspaceId: 7, kind: 0, flags: 0x0023,
+                pathHash: 41, tintColorRGB: 0x112233, icon: "file-code", label: "first.ex",
+                path: "/tmp/first.ex"
+            ),
+            Wire.WorkspaceTabEntry(
+                id: 42, workspaceId: 7, kind: 0, flags: 0x0040,
+                pathHash: 42, tintColorRGB: 0, icon: "file", label: "review.ex",
                 path: "/tmp/review.ex"
-            )
+            ),
         ]
 
+        dispatcher.applyForTesting(.guiTabBar(activeIndex: 1, tabs: []))
         dispatcher.applyForTesting(.guiWorkspaces(
             version: 1,
             activeWorkspaceId: 7,
@@ -276,11 +282,33 @@ struct CommandDispatcherRoutingTests {
             stashCount: 0
         ))
 
-        #expect(gui.workspaceState.activeWorkspaceId == gui.tabBarState.activeWorkspaceId)
-        #expect(gui.workspaceState.visibleTabs.map(\.id) == gui.tabBarState.displayTabs.map(\.id))
+        #expect(gui.workspaceState.activeWorkspaceId == 7)
+        #expect(gui.tabBarState.activeWorkspaceId == 7)
+        #expect(gui.workspaceState.visibleTabs.map(\.id) == [41, 42])
+        #expect(gui.tabBarState.workspaceTabs.map(\.id) == [41, 42])
+        #expect(gui.workspaceState.visibleTabs.map(\.workspaceId) == [7, 7])
+        #expect(gui.tabBarState.workspaceTabs.map(\.workspaceId) == [7, 7])
+        #expect(gui.workspaceState.visibleTabs.map(\.label) == ["first.ex", "review.ex"])
+        #expect(gui.tabBarState.workspaceTabs.map(\.label) == ["first.ex", "review.ex"])
+        #expect(gui.workspaceState.visibleTabs.map(\.path) == ["/tmp/first.ex", "/tmp/review.ex"])
+        #expect(gui.tabBarState.workspaceTabs.map(\.path) == ["/tmp/first.ex", "/tmp/review.ex"])
+        #expect(gui.workspaceState.visibleTabs.map(\.flags) == [0x0023, 0x0040])
+        #expect(gui.tabBarState.workspaceTabs.map(\.flags) == [0x0023, 0x0040])
+
+        let displayedTabs = gui.tabBarState.displayTabs
+        #expect(displayedTabs.map(\.id) == [41, 42])
+        #expect(displayedTabs.map(\.label) == ["first.ex", "review.ex"])
+        #expect(displayedTabs.map(\.groupId) == [7, 7])
+        #expect(displayedTabs.map(\.isActive) == [false, true])
+        #expect(displayedTabs.map(\.isDirty) == [true, false])
+        #expect(displayedTabs.map(\.hasAttention) == [true, false])
+        #expect(displayedTabs.map(\.isPinned) == [true, false])
+        #expect(displayedTabs.map(\.isEphemeral) == [false, true])
+
         #expect(gui.sidebarHostState.activeSidebar?.semanticKind == "file_tree")
         #expect(gui.fileTreeState.visible)
-        #expect(gui.statusBarState.gitBranch == gui.gitStatusState.branchName)
+        #expect(gui.statusBarState.gitBranch == "feature/publication")
+        #expect(gui.gitStatusState.branchName == "feature/publication")
     }
 
     @Test("guiObservatory updates observatoryState")
