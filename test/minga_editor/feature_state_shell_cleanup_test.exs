@@ -4,6 +4,7 @@ defmodule MingaEditor.FeatureStateShellCleanupTest do
 
   alias MingaEditor.FeatureState
   alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.Shell.Identity
   alias MingaEditor.Shell.Registry
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.StateStash
@@ -67,8 +68,10 @@ defmodule MingaEditor.FeatureStateShellCleanupTest do
 
     [cleaned_context] = Runtime.state(cleaned.shell_runtime).contexts
 
-    assert %StateStash{module: MingaEditor.Test.FakeShellAlt, state: stashed_shell_state} =
-             Runtime.stash(cleaned.shell_runtime).fake_shell_alt
+    assert %StateStash{
+             identity: %Identity{module: MingaEditor.Test.FakeShellAlt},
+             state: stashed_shell_state
+           } = Map.fetch!(Runtime.stash(cleaned.shell_runtime), Identity.new(stashed_entry))
 
     [cleaned_stashed_context] = stashed_shell_state.contexts
     restored = SessionState.restore_tab_context(workspace(), cleaned_context)
@@ -111,7 +114,7 @@ defmodule MingaEditor.FeatureStateShellCleanupTest do
     cleaned = EditorState.drop_feature_state_source(state, @source)
 
     %StateStash{state: %{contexts: [unchanged_context]}} =
-      Runtime.stash(cleaned.shell_runtime).fake_shell
+      Map.fetch!(Runtime.stash(cleaned.shell_runtime), Identity.new(stale_entry))
 
     restored = SessionState.restore_tab_context(workspace(), unchanged_context)
 

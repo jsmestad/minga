@@ -95,6 +95,17 @@ defmodule MingaEditor.Test.FakeShellAlt do
   def on_agent_event(shell_state, workspace, _session, _event), do: {shell_state, workspace}
 
   @impl true
+  @spec owns_agent_session?(map(), pid()) :: boolean()
+  def owns_agent_session?(%{owned_sessions: sessions}, session_pid)
+      when is_list(sessions) do
+    session_pid in sessions
+  end
+
+  def owns_agent_session?(%{session_slot: session_pid}, session_pid), do: true
+  def owns_agent_session?(%{session: session_pid}, session_pid), do: true
+  def owns_agent_session?(_shell_state, _session_pid), do: false
+
+  @impl true
   @spec handle_agent_session_restarted(map(), pid(), pid(), term()) :: {map(), boolean()}
   def handle_agent_session_restarted(%{session: old_pid} = shell_state, old_pid, new_pid, _reason) do
     {Map.put(shell_state, :session, new_pid), true}
@@ -147,10 +158,12 @@ defmodule MingaEditor.Test.FakeShellAlt do
 
   @impl true
   @spec set_tab_session(map(), term(), pid() | nil) :: map()
-  def set_tab_session(shell_state, _tab_id, _session_pid), do: shell_state
+  def set_tab_session(shell_state, _tab_id, session_pid),
+    do: Map.put(shell_state, :session_slot, session_pid)
 
   @impl true
   @spec active_session(map()) :: pid() | nil
+  def active_session(%{session_slot: session}) when is_pid(session), do: session
   def active_session(%{session: session}) when is_pid(session), do: session
   def active_session(_shell_state), do: nil
 

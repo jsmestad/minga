@@ -27,6 +27,7 @@ defmodule MingaEditor.Shell.RegistryTest do
   alias Minga.Test.RecordingFrontend
   alias MingaEditor.Test.FakeShell
   alias MingaEditor.Test.FakeShellAlt
+  alias MingaEditor.Test.UnknownGuiPayloadShell
 
   setup do
     Registry.reset_for_test()
@@ -56,6 +57,17 @@ defmodule MingaEditor.Shell.RegistryTest do
     snapshot = Registry.snapshot()
     assert Registry.resolve(:fake) == snapshot.entries.fake
     assert Registry.resolve(FakeShell) == snapshot.entries.fake
+  end
+
+  test "registration reports a missing session-ownership callback with its required arity" do
+    assert {:error,
+            {:invalid_entry, {:missing_callbacks, UnknownGuiPayloadShell, missing_callbacks}}} =
+             Registry.register(
+               {:extension, :incomplete},
+               shell_attrs(:incomplete, UnknownGuiPayloadShell, "Incomplete")
+             )
+
+    assert {:owns_agent_session?, 2} in missing_callbacks
   end
 
   test "input dispatch uses the active extension shell contract" do
@@ -432,12 +444,14 @@ defmodule MingaEditor.Shell.RegistryTest do
                capabilities: [:tui]
              })
 
+    fake_entry = Registry.get(:fake)
+
     state =
       TestHelpers.base_state()
       |> Workflow.switch(:fake)
       |> Workflow.switch(:traditional)
 
-    assert Runtime.stash(state.shell_runtime).fake.state == %{name: :fake, events: []}
+    assert stashed(state.shell_runtime, fake_entry).state == %{name: :fake, events: []}
 
     assert :ok = Registry.unregister_source({:extension, :fake})
 
@@ -610,7 +624,7 @@ defmodule MingaEditor.Shell.RegistryTest do
     assert Runtime.module(result.shell_runtime) == default.module
     assert Runtime.identity(result.shell_runtime) == Identity.new(default)
     refute Map.has_key?(result.shell_runtime.state, :obsolete)
-    refute Map.has_key?(Runtime.stash(result.shell_runtime), :fake)
+    assert Runtime.stash(result.shell_runtime) == %{}
     assert result.render.layout == nil
     assert result.render.focus_tree == nil
   end
@@ -636,6 +650,8 @@ defmodule MingaEditor.Shell.RegistryTest do
                capabilities: [:tui]
              })
 
+    fake_entry = Registry.get(:fake)
+
     state =
       TestHelpers.base_state()
       |> Workflow.switch(:fake)
@@ -645,7 +661,7 @@ defmodule MingaEditor.Shell.RegistryTest do
 
     event = {:status_changed, :error}
     {:noreply, matching} = MingaEditor.handle_info({:agent_event, self(), event}, state)
-    assert Runtime.stash(matching.shell_runtime).fake.state.events == [event]
+    assert stashed(matching.shell_runtime, fake_entry).state.events == [event]
 
     assert :ok = Registry.unregister_source({:extension, :fake})
 
@@ -661,7 +677,7 @@ defmodule MingaEditor.Shell.RegistryTest do
     {:noreply, stale} =
       MingaEditor.handle_info({:agent_event, self(), {:status_changed, :idle}}, matching)
 
-    assert Runtime.stash(stale.shell_runtime).fake.state.events == [event]
+    assert stashed(stale.shell_runtime, fake_entry).state.events == [event]
     Process.cancel_timer(stale.render.render_correlation.timer)
   end
 
@@ -718,7 +734,7 @@ defmodule MingaEditor.Shell.RegistryTest do
       |> stash_shell_state(fake_entry, %{session: session})
 
     {matching, _effects} = Events.handle(state, {:status_changed, :thinking})
-    assert Runtime.stash(matching.shell_runtime).fake.state.synced_agent_status == :thinking
+    assert stashed(matching.shell_runtime, fake_entry).state.synced_agent_status == :thinking
 
     assert :ok = Registry.unregister_source({:extension, :fake})
 
@@ -732,7 +748,7 @@ defmodule MingaEditor.Shell.RegistryTest do
              })
 
     {stale, _effects} = Events.handle(matching, {:status_changed, :idle})
-    assert Runtime.stash(stale.shell_runtime).fake.state.synced_agent_status == :thinking
+    assert stashed(stale.shell_runtime, fake_entry).state.synced_agent_status == :thinking
   end
 
   test "buffer session restart updates a matching stash but not a replaced registration" do
@@ -765,7 +781,7 @@ defmodule MingaEditor.Shell.RegistryTest do
         :restarted
       )
 
-    assert Runtime.stash(matching.shell_runtime).fake.state.session == new_pid
+    assert stashed(matching.shell_runtime, entry).state.session == new_pid
 
     stale_state = state
 
@@ -789,7 +805,7 @@ defmodule MingaEditor.Shell.RegistryTest do
         :restarted
       )
 
-    assert Runtime.stash(stale.shell_runtime).fake.state.session == old_pid
+    assert stashed(stale.shell_runtime, entry).state.session == old_pid
     assert {:stale, _normalized} = BufferManagement.prepare_agent_session_restart(stale, old_pid)
   end
 
@@ -919,7 +935,7 @@ defmodule MingaEditor.Shell.RegistryTest do
 
     assert Runtime.identity(normalized.shell_runtime) == Identity.new(current_entry)
     refute Map.has_key?(normalized.shell_runtime.state, :session)
-    assert Runtime.stash(normalized.shell_runtime).valid.state.session == old_pid
+    assert stashed(normalized.shell_runtime, valid_entry).state.session == old_pid
   end
 
   test "session down and disconnect reset obsolete active shell state before callbacks" do
@@ -1063,8 +1079,8 @@ defmodule MingaEditor.Shell.RegistryTest do
         :restarted
       )
 
-    assert Runtime.stash(restarted.shell_runtime).a_stale.state.session == old_pid
-    assert Runtime.stash(restarted.shell_runtime).z_valid.state.session == new_pid
+    assert stashed(restarted.shell_runtime, stale_entry).state.session == old_pid
+    assert stashed(restarted.shell_runtime, valid_entry).state.session == new_pid
   end
 
   test "agent status synchronization updates every exact-identity stash" do
@@ -1089,18 +1105,20 @@ defmodule MingaEditor.Shell.RegistryTest do
                capabilities: [:tui]
              })
 
+    first = Registry.get(:first)
+    second = Registry.get(:second)
+
     state =
       TestHelpers.base_state()
       |> stash_shell_states([
-        {Registry.get(:first), %{session: session}},
-        {Registry.get(:second), %{session: session}}
+        {first, %{session: session}},
+        {second, %{session: session}}
       ])
 
     runtime = Runtime.sync_agent_status(state.shell_runtime, Registry.list(), session, :thinking)
-    stash = Runtime.stash(runtime)
 
-    assert stash.first.state.synced_agent_status == :thinking
-    assert stash.second.state.synced_agent_status == :thinking
+    assert stashed(runtime, first).state.synced_agent_status == :thinking
+    assert stashed(runtime, second).state.synced_agent_status == :thinking
   end
 
   test "active shell callbacks normalize a stale registration before dispatch" do
@@ -1286,6 +1304,11 @@ defmodule MingaEditor.Shell.RegistryTest do
       |> Runtime.activate(active_entry, active_state)
 
     %{state | shell_runtime: runtime}
+  end
+
+  @spec stashed(Runtime.t(), Entry.t()) :: MingaEditor.Shell.StateStash.t()
+  defp stashed(%Runtime{} = runtime, %Entry{} = entry) do
+    Map.fetch!(Runtime.stash(runtime), Identity.new(entry))
   end
 
   @spec with_frontend_backend(EditorState.t(), Frontend.backend()) :: EditorState.t()
