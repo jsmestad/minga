@@ -574,7 +574,7 @@ final class EditorNSView: MTKView {
         let validMouseInGutter = isMouseInGutter && validGutterHoverWindowId != nil
         let cursorAnimationGeneration = coreTextRenderer.cursorAnimationGeneration
         let presentationInputSeq = dispatcher.takePresentationInputSeq()
-        let presentationFrameSeq = dispatcher.pendingPresentationFrameSeq()
+        let presentationFrame = dispatcher.pendingPresentationFrame()
         let localScrollPresentation = localScrollPresentation
         coreTextRenderer.render(frameState: fs, fontManager: fontManager,
                                 cursorBlinkVisible: cursorBlinkVisible,
@@ -598,7 +598,7 @@ final class EditorNSView: MTKView {
                                 ),
                                 presentationWindowId: localScrollPresentation?.windowId,
                                 presentationInputSeq: presentationInputSeq,
-                                presentationFrameSeq: presentationFrameSeq,
+                                presentationFrame: presentationFrame,
                                 latencyRecorder: dispatcher.latency)
         if coreTextRenderer.cursorAnimationGeneration != cursorAnimationGeneration {
             resetCursorBlink()

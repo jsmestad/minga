@@ -48,8 +48,8 @@ public final class GUIFramePresentationMetrics {
     }
 
     /// Returns the committed editor frame currently waiting for Metal submission.
-    public func pendingEditorFrameSeq() -> UInt32? {
-        pending[.editor]?.frame.frameSeq
+    public func pendingEditorFrame() -> GUICommittedFrame? {
+        pending[.editor]?.frame
     }
 
     /// Returns the committed identity currently awaiting presentation in one domain.
@@ -78,8 +78,8 @@ public final class GUIFramePresentationMetrics {
 
     /// Records native submission only after `MTLCommandBuffer.commit()` returned.
     /// The ticket stays pending until drawable presentation succeeds or is discarded.
-    public func recordMetalSubmission(frameSeq: UInt32) {
-        guard var ticket = pending[.editor], ticket.frame.frameSeq == frameSeq,
+    public func recordMetalSubmission(presentationFrame: GUICommittedFrame) {
+        guard var ticket = pending[.editor], ticket.frame == presentationFrame,
               !ticket.submitted else { return }
         ticket.submitted = true
         pending[.editor] = ticket
@@ -87,8 +87,8 @@ public final class GUIFramePresentationMetrics {
     }
 
     /// Resolves the resident editor after its drawable was presented successfully.
-    public func recordMetalPresented(frameSeq: UInt32) {
-        guard let ticket = pending[.editor], ticket.frame.frameSeq == frameSeq else { return }
+    public func recordMetalPresented(presentationFrame: GUICommittedFrame) {
+        guard let ticket = pending[.editor], ticket.frame == presentationFrame else { return }
         pending.removeValue(forKey: .editor)
         record(frame: ticket.frame, domain: .editor, outcome: .presented, started: ticket.started)
     }
@@ -97,12 +97,6 @@ public final class GUIFramePresentationMetrics {
     public func discard(domain: GUIFrameImpact, outcome: Outcome, frame: GUICommittedFrame? = nil) {
         guard outcome == .superseded || outcome == .hidden || outcome == .unavailable || outcome == .failed,
               let ticket = pending[domain], frame == nil || ticket.frame == frame else { return }
-        resolveDiscard(domain: domain, ticket: ticket, outcome: outcome)
-    }
-
-    /// Resolves an editor ticket from renderer code that carries the committed frame sequence.
-    public func discard(domain: GUIFrameImpact, outcome: Outcome, frameSeq: UInt32) {
-        guard let ticket = pending[domain], ticket.frame.frameSeq == frameSeq else { return }
         resolveDiscard(domain: domain, ticket: ticket, outcome: outcome)
     }
 

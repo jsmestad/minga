@@ -171,8 +171,66 @@ struct GUIFramePresentationMetricsTests {
         ])
     }
 
+    @Test("reused frame sequences cannot resolve across BEAM generations")
+    @MainActor func reusedFrameSequencesStayGenerationCorrelated() throws {
+        let metrics = GUIFramePresentationMetrics()
+        let stale = GUICommittedFrame(generation: 1, frameSeq: 30)
+        let current = GUICommittedFrame(generation: 2, frameSeq: 30)
+
+        metrics.beginCommitted(frame: stale, impact: .editor)
+        let capturedStale = try #require(metrics.pendingEditorFrame())
+        metrics.beginCommitted(frame: current, impact: .editor)
+        let capturedCurrent = try #require(metrics.pendingEditorFrame())
+
+        metrics.recordMetalSubmission(presentationFrame: capturedStale)
+        metrics.recordMetalPresented(presentationFrame: capturedStale)
+        metrics.discard(domain: .editor, outcome: .failed, frame: capturedStale)
+        #expect(metrics.snapshot() == [
+            .init(frame: stale, domain: .editor, outcome: .superseded)
+        ])
+
+        metrics.recordMetalSubmission(presentationFrame: capturedCurrent)
+        metrics.recordMetalPresented(presentationFrame: capturedCurrent)
+        #expect(metrics.snapshot() == [
+            .init(frame: stale, domain: .editor, outcome: .superseded),
+            .init(frame: current, domain: .editor, outcome: .submitted),
+            .init(frame: current, domain: .editor, outcome: .presented)
+        ])
+    }
+
     @Test("successful native draw and Metal milestones keep committed frame identity")
     @MainActor func successfulOutcomes() throws {
+        let frame = GUICommittedFrame(generation: 2, frameSeq: 8)
+        #expect(try successfulOutcomeSamples() == [
+            .init(frame: frame, domain: .shell, outcome: .nativeDraw),
+            .init(frame: frame, domain: .editorOverlay, outcome: .nativeDraw),
+            .init(frame: frame, domain: .windowOverlay, outcome: .nativeDraw),
+            .init(frame: frame, domain: .editor, outcome: .submitted),
+            .init(frame: frame, domain: .editor, outcome: .presented)
+        ])
+    }
+
+    @Test("superseded hidden unavailable and failed samples remain distinct")
+    @MainActor func discardedOutcomes() {
+        let first = GUICommittedFrame(generation: 1, frameSeq: 1)
+        let second = GUICommittedFrame(generation: 1, frameSeq: 2)
+        #expect(discardedOutcomeSamples() == [
+            .init(frame: first, domain: .shell, outcome: .superseded),
+            .init(frame: second, domain: .shell, outcome: .hidden),
+            .init(frame: first, domain: .editor, outcome: .unavailable),
+            .init(frame: first, domain: .editorOverlay, outcome: .failed),
+            .init(frame: first, domain: .windowOverlay, outcome: .superseded)
+        ])
+    }
+
+    @Test("exercised metrics outcomes exactly match the declared outcome cases")
+    @MainActor func outcomeCoverageIsExhaustive() throws {
+        let exercised = Set((try successfulOutcomeSamples() + discardedOutcomeSamples()).map(\.outcome))
+        #expect(exercised == Set(GUIFramePresentationMetrics.Outcome.allCases))
+    }
+
+    @MainActor
+    private func successfulOutcomeSamples() throws -> [GUIFramePresentationMetrics.Sample] {
         let metrics = GUIFramePresentationMetrics()
         let frame = GUICommittedFrame(generation: 2, frameSeq: 8)
 
@@ -185,40 +243,28 @@ struct GUIFramePresentationMetricsTests {
         metrics.recordNativeDraw(domain: .shell, expectedFrame: shell)
         metrics.recordNativeDraw(domain: .editorOverlay, expectedFrame: editorOverlay)
         metrics.recordNativeDraw(domain: .windowOverlay, expectedFrame: windowOverlay)
-        metrics.recordMetalSubmission(frameSeq: 7)
+        metrics.recordMetalSubmission(
+            presentationFrame: GUICommittedFrame(generation: 1, frameSeq: frame.frameSeq)
+        )
         #expect(metrics.snapshot().count == 3)
 
-        metrics.recordMetalSubmission(frameSeq: 8)
-        metrics.recordMetalPresented(frameSeq: 8)
-
-        #expect(metrics.snapshot() == [
-            .init(frame: frame, domain: .shell, outcome: .nativeDraw),
-            .init(frame: frame, domain: .editorOverlay, outcome: .nativeDraw),
-            .init(frame: frame, domain: .windowOverlay, outcome: .nativeDraw),
-            .init(frame: frame, domain: .editor, outcome: .submitted),
-            .init(frame: frame, domain: .editor, outcome: .presented)
-        ])
+        metrics.recordMetalSubmission(presentationFrame: frame)
+        metrics.recordMetalPresented(presentationFrame: frame)
+        return metrics.snapshot()
     }
 
-    @Test("superseded hidden unavailable and failed samples remain distinct")
-    @MainActor func discardedOutcomes() {
+    @MainActor
+    private func discardedOutcomeSamples() -> [GUIFramePresentationMetrics.Sample] {
         let metrics = GUIFramePresentationMetrics()
         let first = GUICommittedFrame(generation: 1, frameSeq: 1)
         let second = GUICommittedFrame(generation: 1, frameSeq: 2)
 
         metrics.beginCommitted(frame: first, impact: .all)
         metrics.beginCommitted(frame: second, impact: .shell)
-        metrics.discard(domain: .shell, outcome: .hidden, frameSeq: 2)
-        metrics.discard(domain: .editor, outcome: .unavailable, frameSeq: 1)
-        metrics.discard(domain: .editorOverlay, outcome: .failed, frameSeq: 1)
-        metrics.discard(domain: .windowOverlay, outcome: .superseded, frameSeq: 1)
-
-        #expect(metrics.snapshot() == [
-            .init(frame: first, domain: .shell, outcome: .superseded),
-            .init(frame: second, domain: .shell, outcome: .hidden),
-            .init(frame: first, domain: .editor, outcome: .unavailable),
-            .init(frame: first, domain: .editorOverlay, outcome: .failed),
-            .init(frame: first, domain: .windowOverlay, outcome: .superseded)
-        ])
+        metrics.discard(domain: .shell, outcome: .hidden, frame: second)
+        metrics.discard(domain: .editor, outcome: .unavailable, frame: first)
+        metrics.discard(domain: .editorOverlay, outcome: .failed, frame: first)
+        metrics.discard(domain: .windowOverlay, outcome: .superseded, frame: first)
+        return metrics.snapshot()
     }
 }

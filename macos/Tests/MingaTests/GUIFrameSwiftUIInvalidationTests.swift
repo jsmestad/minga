@@ -980,7 +980,8 @@ struct GUIFrameSwiftUIInvalidationTests {
             "@ObservationIgnored private var decoders: [String: Decoder] = [:]": "decoder",
             "@ObservationIgnored private var viewBuilders: [String: ViewBuilder] = [:]": "builder",
         ]
-        let allowedIgnoredReasons: Set<String> = ["task", "callback", "clock", "cache", "decoder", "builder", "metrics"]
+        let allowedIgnoredReasons: Set<String> = ["task", "callback", "clock", "cache", "decoder", "builder"]
+        #expect(owners.count == 31)
         #expect(Set(owners.flatMap(\.ignored)) == Set(ignoredReasons.keys))
         #expect(Set(ignoredReasons.values).isSubset(of: allowedIgnoredReasons))
 
@@ -1016,6 +1017,8 @@ struct GUIFrameSwiftUIInvalidationTests {
         let guiStateStart = try #require(guiState.range(of: guiStateDeclaration))
         let themeBackingSource = guiState[themeBackingStart.lowerBound..<windowBackingStart.lowerBound]
         let windowBackingSource = guiState[windowBackingStart.lowerBound..<guiStateStart.lowerBound]
+        #expect(themeBackingSource.contains("var current = ThemeColors()"))
+        #expect(windowBackingSource.contains("var current: [UInt16: GUIWindowContent]"))
         #expect(!themeBackingSource.contains("@ObservationIgnored"))
         #expect(!windowBackingSource.contains("@ObservationIgnored"))
         #expect(!feedbackState.contains("onPresentationChanged"))
