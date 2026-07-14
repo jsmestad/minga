@@ -156,8 +156,8 @@ final class CommandDispatcher {
     }
 
     /// Returns the committed editor frame waiting for native Metal presentation.
-    func pendingPresentationFrameSeq() -> UInt32? {
-        guiState.presentationMetrics.pendingEditorFrameSeq()
+    func pendingPresentationFrame() -> GUICommittedFrame? {
+        guiState.presentationMetrics.pendingEditorFrame()
     }
 
     /// Discards an applied frame that cannot acquire a drawable/presentation path.

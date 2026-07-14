@@ -688,7 +688,7 @@ struct NativeRenderResourcesTests {
             frameState: FrameState(cols: 4, rows: 4), fontManager: fontManager,
             drawableProvider: { NativeTestDrawable(texture: texture) },
             viewportSize: CGSize(width: 64, height: 64), contentScale: 1,
-            presentationInputSeq: 302, presentationFrameSeq: 42
+            presentationInputSeq: 302, presentationFrame: committedFrame
         )
         #expect(completions.count == 1)
         #expect(presentCalls == 0)

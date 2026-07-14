@@ -17,7 +17,7 @@ public struct MessagesContentView: View {
         self.encoder = encoder
         self.usesPreviewEagerLayout = usesPreviewEagerLayout
     }
-    @Bindable public var state: MessagesContentState
+    public let state: MessagesContentState
     @Environment(\.themeColors) private var theme
 
     public let encoder: InputEncoder?
