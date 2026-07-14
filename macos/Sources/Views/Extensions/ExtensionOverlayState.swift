@@ -6,6 +6,7 @@ import MingaProtocol
 /// Updated by `CommandDispatcher` from `gui_extension_overlay` (0x9C) opcode.
 /// Read by `ExtensionOverlayView` to render positioned overlays.
 @MainActor
+@Observable
 public final class ExtensionOverlayState {
     public init() {}
     /// Active overlay entries from all extensions.

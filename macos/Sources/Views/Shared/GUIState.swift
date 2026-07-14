@@ -27,9 +27,6 @@ public final class GUIState {
 
     public init(windowContents: [UInt16: GUIWindowContent] = [:]) {
         windowContentBacking = GUIWindowContentBacking(windowContents)
-        feedbackState.onPresentationChanged = { [weak frameStore] in
-            frameStore?.publishLocal(impact: .shell) {}
-        }
     }
 
     /// Stable shell-scoped input created and owned by this GUI state.

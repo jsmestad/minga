@@ -143,6 +143,138 @@ private struct ProductionFrameProbe: View {
     }
 }
 
+private enum ObservationOwnerProbePoint: CaseIterable {
+    case shellChrome
+    case bottomPanel
+    case sidebar
+    case editorOverlay
+    case windowOverlay
+    case agent
+    case extensionOverlay
+    case extensionRuntime
+    case gitStatus
+    case messages
+    case feedbackPending
+    case feedbackSpinner
+}
+
+@MainActor
+private final class ObservationOwnerProbeRecorder {
+    private struct Entry {
+        weak var view: FrameProbeNSView?
+        var updateCount: Int
+    }
+
+    private var entries: [ObservationOwnerProbePoint: Entry] = [:]
+    private let updates: AsyncStream<ObservationOwnerProbePoint>
+    private let continuation: AsyncStream<ObservationOwnerProbePoint>.Continuation
+
+    init() {
+        let stream = AsyncStream.makeStream(
+            of: ObservationOwnerProbePoint.self,
+            bufferingPolicy: .bufferingNewest(64)
+        )
+        updates = stream.stream
+        continuation = stream.continuation
+    }
+
+    func record(point: ObservationOwnerProbePoint, value: String, view: FrameProbeNSView) {
+        view.publishedValue = value
+        entries[point] = Entry(
+            view: view,
+            updateCount: (entries[point]?.updateCount ?? 0) + 1
+        )
+        continuation.yield(point)
+    }
+
+    func value(for point: ObservationOwnerProbePoint) -> String? {
+        entries[point]?.view?.publishedValue
+    }
+
+    func updateCounts() -> [ObservationOwnerProbePoint: Int] {
+        Dictionary(uniqueKeysWithValues: ObservationOwnerProbePoint.allCases.map { point in
+            (point, entries[point]?.updateCount ?? 0)
+        })
+    }
+
+    func waitForValue(_ value: String, point: ObservationOwnerProbePoint) async {
+        if self.value(for: point) == value {
+            return
+        }
+
+        for await updatedPoint in updates where updatedPoint == point {
+            if self.value(for: point) == value {
+                return
+            }
+        }
+    }
+}
+
+private struct ObservationOwnerProbeRepresentable: NSViewRepresentable {
+    let point: ObservationOwnerProbePoint
+    let value: String
+    let recorder: ObservationOwnerProbeRecorder
+
+    func makeNSView(context: Context) -> FrameProbeNSView {
+        let view = FrameProbeNSView(frame: .zero)
+        recorder.record(point: point, value: value, view: view)
+        return view
+    }
+
+    func updateNSView(_ nsView: FrameProbeNSView, context: Context) {
+        recorder.record(point: point, value: value, view: nsView)
+    }
+}
+
+private struct ObservationOwnerProbe<Owner: AnyObject>: View {
+    let point: ObservationOwnerProbePoint
+    let owner: Owner
+    let materialize: (Owner) -> String
+    let recorder: ObservationOwnerProbeRecorder
+
+    var body: some View {
+        ObservationOwnerProbeRepresentable(
+            point: point,
+            value: materialize(owner),
+            recorder: recorder
+        )
+    }
+}
+
+private struct ObservationOwnerProbeMatrix: View {
+    let statusBar: StatusBarState
+    let bottomPanel: BottomPanelState
+    let sidebar: SidebarHostState
+    let completion: CompletionState
+    let picker: PickerState
+    let agentContext: AgentContextBarState
+    let extensionOverlay: ExtensionOverlayState
+    let extensionRuntime: FrontendExtensionRuntimeRegistry
+    let gitStatus: GitStatusState
+    let messages: MessagesContentState
+    let feedback: FeedbackState
+    let recorder: ObservationOwnerProbeRecorder
+
+    var body: some View {
+        VStack {
+            ObservationOwnerProbe(point: .shellChrome, owner: statusBar, materialize: { $0.message }, recorder: recorder)
+            ObservationOwnerProbe(point: .bottomPanel, owner: bottomPanel, materialize: { "\($0.userHeight)" }, recorder: recorder)
+            ObservationOwnerProbe(point: .sidebar, owner: sidebar, materialize: { $0.activeId }, recorder: recorder)
+            ObservationOwnerProbe(point: .editorOverlay, owner: completion, materialize: { $0.items.first?.label ?? "" }, recorder: recorder)
+            ObservationOwnerProbe(point: .windowOverlay, owner: picker, materialize: { $0.items.first?.label ?? "" }, recorder: recorder)
+            ObservationOwnerProbe(point: .agent, owner: agentContext, materialize: { $0.task }, recorder: recorder)
+            ObservationOwnerProbe(point: .extensionOverlay, owner: extensionOverlay, materialize: { $0.entries.first?.content ?? "" }, recorder: recorder)
+            ObservationOwnerProbe(point: .extensionRuntime, owner: extensionRuntime, materialize: { $0.activeExtensionIDs.joined(separator: ",") }, recorder: recorder)
+            ObservationOwnerProbe(point: .gitStatus, owner: gitStatus, materialize: { "\($0.branchName)|\($0.totalCount)" }, recorder: recorder)
+            ObservationOwnerProbe(point: .messages, owner: messages, materialize: {
+                "\($0.filteredEntries.last?.text ?? "")|\($0.isAutoScrolling)|\($0.hasNewEntries)"
+            }, recorder: recorder)
+            ObservationOwnerProbe(point: .feedbackPending, owner: feedback, materialize: { String($0.isPending) }, recorder: recorder)
+            ObservationOwnerProbe(point: .feedbackSpinner, owner: feedback, materialize: { String($0.showingSpinner) }, recorder: recorder)
+        }
+    }
+}
+
 @Suite("Persistent SwiftUI GUI frame invalidation")
 @MainActor
 struct GUIFrameSwiftUIInvalidationTests {
@@ -439,6 +571,164 @@ struct GUIFrameSwiftUIInvalidationTests {
     }
 
     @Test(
+        "direct owner updates render representative presentation leaves without frame publication",
+        .timeLimit(.minutes(1))
+    )
+    func directObservationUpdatesPresentationOwnerMatrix() async throws {
+        let bottomPanelHeightKey = "bottomPanelHeight"
+        let persistedBottomPanelHeight = UserDefaults.standard.object(forKey: bottomPanelHeightKey)
+        defer {
+            if let persistedBottomPanelHeight {
+                UserDefaults.standard.set(persistedBottomPanelHeight, forKey: bottomPanelHeightKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: bottomPanelHeightKey)
+            }
+        }
+
+        let statusBar = StatusBarState()
+        let bottomPanel = BottomPanelState()
+        let sidebar = SidebarHostState()
+        let completion = CompletionState()
+        let picker = PickerState()
+        let agentContext = AgentContextBarState()
+        let extensionOverlay = ExtensionOverlayState()
+        let extensionRuntime = FrontendExtensionRuntimeRegistry()
+        let gitStatus = GitStatusState()
+        let messages = MessagesContentState()
+        let feedback = FeedbackState()
+        defer { feedback.cancel() }
+
+        let recorder = ObservationOwnerProbeRecorder()
+        let root = ObservationOwnerProbeMatrix(
+            statusBar: statusBar,
+            bottomPanel: bottomPanel,
+            sidebar: sidebar,
+            completion: completion,
+            picker: picker,
+            agentContext: agentContext,
+            extensionOverlay: extensionOverlay,
+            extensionRuntime: extensionRuntime,
+            gitStatus: gitStatus,
+            messages: messages,
+            feedback: feedback,
+            recorder: recorder
+        )
+        let (hostingView, window) = mount(root)
+        defer { window.contentView = nil }
+        hostingView.layoutSubtreeIfNeeded()
+
+        let initialValues: [ObservationOwnerProbePoint: String] = [
+            .shellChrome: "",
+            .bottomPanel: "\(bottomPanel.userHeight)",
+            .sidebar: "file_tree",
+            .editorOverlay: "",
+            .windowOverlay: "",
+            .agent: "",
+            .extensionOverlay: "",
+            .extensionRuntime: "",
+            .gitStatus: "|0",
+            .messages: "|true|false",
+            .feedbackPending: "false",
+            .feedbackSpinner: "false",
+        ]
+        for point in ObservationOwnerProbePoint.allCases {
+            await recorder.waitForValue(try #require(initialValues[point]), point: point)
+        }
+
+        await expectOnlyOwnerProbeUpdate(.shellChrome, value: "Formatting…", recorder: recorder) {
+            statusBar.update(from: Self.statusBarUpdate(message: "Formatting…"))
+        }
+        let nextBottomPanelHeight: CGFloat = bottomPanel.userHeight == 321 ? 322 : 321
+        await expectOnlyOwnerProbeUpdate(.bottomPanel, value: "\(nextBottomPanelHeight)", recorder: recorder) {
+            bottomPanel.userHeight = nextBottomPanelHeight
+        }
+        await expectOnlyOwnerProbeUpdate(.sidebar, value: "git_status", recorder: recorder) {
+            sidebar.update(activeId: "git_status", sidebars: [Self.sidebarMetadata(id: "git_status", kind: "git_status")])
+        }
+        await expectOnlyOwnerProbeUpdate(.editorOverlay, value: "complete-me", recorder: recorder) {
+            completion.update(
+                visible: true,
+                anchorRow: 0,
+                anchorCol: 0,
+                selectedIndex: 0,
+                rawItems: [Wire.CompletionItem(kind: 1, label: "complete-me", detail: "")],
+                documentation: ""
+            )
+        }
+        await expectOnlyOwnerProbeUpdate(.windowOverlay, value: "pick-me", recorder: recorder) {
+            picker.update(
+                visible: true,
+                selectedIndex: 0,
+                filteredCount: 1,
+                totalCount: 1,
+                markedCount: 0,
+                title: "Files",
+                query: "",
+                hasPreview: false,
+                rawItems: [Self.pickerItem(label: "pick-me")],
+                actionMenu: nil
+            )
+        }
+        await expectOnlyOwnerProbeUpdate(.agent, value: "review the diff", recorder: recorder) {
+            agentContext.update(
+                visible: true,
+                task: "review the diff",
+                dispatchTimestamp: Date(),
+                status: .idle,
+                canApprove: false,
+                progress: .init(activeAction: "", toolCount: 0, fileCount: 0, reviewHint: ""),
+                todos: []
+            )
+        }
+        await expectOnlyOwnerProbeUpdate(.extensionOverlay, value: "extension-content", recorder: recorder) {
+            extensionOverlay.update([Self.extensionOverlay(content: "extension-content")])
+        }
+        await expectOnlyOwnerProbeUpdate(.extensionRuntime, value: "mounted-extension", recorder: recorder) {
+            extensionRuntime.register(extensionID: "mounted-extension", decoder: { _ in }) { _ in
+                AnyView(EmptyView())
+            }
+        }
+        await expectOnlyOwnerProbeUpdate(.gitStatus, value: "feature/observation|1", recorder: recorder) {
+            gitStatus.update(
+                repoState: .normal,
+                branchName: "feature/observation",
+                ahead: 0,
+                behind: 0,
+                syncing: false,
+                entries: [GitStatusEntry(pathHash: 1, section: .changed, status: .modified, path: "lib/minga.ex")],
+                toast: nil,
+                entryBasePath: "/repo",
+                lastCommitMessage: "prior",
+                stashCount: 0
+            )
+        }
+        await expectOnlyOwnerProbeUpdate(.messages, value: "message-entry|false|true", recorder: recorder) {
+            messages.scrolledUp()
+            messages.appendEntries([
+                Wire.MessageEntry(
+                    streamInstance: 1,
+                    id: 1,
+                    level: 1,
+                    subsystem: 0,
+                    timestampSecs: 0,
+                    filePath: "",
+                    text: "message-entry"
+                ),
+            ])
+        }
+        let feedbackBaseline = recorder.updateCounts()
+        feedback.update(message: "Formatting…")
+        await recorder.waitForValue("true", point: .feedbackPending)
+        await recorder.waitForValue("true", point: .feedbackSpinner)
+        let feedbackCounts = recorder.updateCounts()
+        #expect(feedbackCounts[.feedbackPending, default: 0] > feedbackBaseline[.feedbackPending, default: 0])
+        #expect(feedbackCounts[.feedbackSpinner, default: 0] > feedbackBaseline[.feedbackSpinner, default: 0])
+        for point in ObservationOwnerProbePoint.allCases where point != .feedbackPending && point != .feedbackSpinner {
+            #expect(feedbackCounts[point, default: 0] == feedbackBaseline[point, default: 0])
+        }
+    }
+
+    @Test(
         "1,000 dispatcher commits mount only coherent tab and FileTree pairs",
         .timeLimit(.minutes(2))
     )
@@ -547,36 +837,108 @@ struct GUIFrameSwiftUIInvalidationTests {
         #expect(recorder.stateObjectIDs(for: .fileTree) == [ObjectIdentifier(gui.fileTreeState)])
     }
 
-    @Test("tab and FileTree leaves use Observation without token or replacement hooks")
+    @Test("protocol presentation owner inventory uses Observation with only allowlisted infrastructure ignored")
     func observationLeafSourceGuard() throws {
         let macosRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        let relativePaths = [
-            "Sources/Views/EditorChrome/TabBarState.swift",
-            "Sources/Views/EditorChrome/TabBarView.swift",
-            "Sources/Views/Sidebar/FileTreeState.swift",
-            "Sources/Views/Sidebar/FileTreeView.swift",
+        let owners: [(name: String, path: String, ignored: Set<String>)] = [
+            ("AgentChatState", "Sources/Views/Agent/AgentChatState.swift", [
+                "@ObservationIgnored private var hasTranscript: Bool = false",
+            ]),
+            ("AgentContextBarState", "Sources/Views/Agent/AgentContextBarState.swift", []),
+            ("BottomPanelState", "Sources/Views/EditorChrome/BottomPanelState.swift", []),
+            ("EmptyStateState", "Sources/Views/EditorChrome/EmptyStateState.swift", []),
+            ("SearchState", "Sources/Views/EditorChrome/SearchState.swift", []),
+            ("StatusBarState", "Sources/Views/EditorChrome/StatusBarState.swift", []),
+            ("TabBarState", "Sources/Views/EditorChrome/TabBarState.swift", []),
+            ("WorkspaceState", "Sources/Views/EditorChrome/WorkspaceState.swift", []),
+            ("BreadcrumbState", "Sources/Views/EditorChrome/BreadcrumbBar.swift", []),
+            ("FileTreeState", "Sources/Views/Sidebar/FileTreeState.swift", []),
+            ("SidebarHostState", "Sources/Views/Sidebar/SidebarHostState.swift", [
+                "@ObservationIgnored private var warnedUnknownKinds: Set<String> = []",
+            ]),
+            ("ObservatoryState", "Sources/Views/Sidebar/ObservatoryState.swift", []),
+            ("ChangeSummaryState", "Sources/Views/Sidebar/ChangeSummaryState.swift", []),
+            ("GitStatusState", "Sources/Views/Sidebar/GitStatusState.swift", []),
+            ("EditTimelineState", "Sources/Views/Shared/EditTimelineState.swift", []),
+            ("CompletionState", "Sources/Views/Overlays/CompletionState.swift", []),
+            ("HoverPopupState", "Sources/Views/Overlays/HoverPopupState.swift", []),
+            ("SignatureHelpState", "Sources/Views/Overlays/SignatureHelpState.swift", []),
+            ("MinibufferState", "Sources/Views/Overlays/MinibufferState.swift", []),
+            ("PickerState", "Sources/Views/Overlays/PickerState.swift", []),
+            ("WhichKeyState", "Sources/Views/Overlays/WhichKeyState.swift", []),
+            ("FloatPopupState", "Sources/Views/Overlays/FloatPopupState.swift", []),
+            ("NotificationCenterState", "Sources/Views/Overlays/NotificationCenterState.swift", []),
+            ("ProtocolErrorState", "Sources/Views/Overlays/ProtocolErrorState.swift", []),
+            ("ResyncState", "Sources/Views/Overlays/ResyncState.swift", []),
+            ("MessagesContentState", "Sources/Views/Overlays/MessagesContentState.swift", []),
+            ("ToolManagerState", "Sources/Views/Extensions/ToolManagerState.swift", []),
+            ("ExtensionOverlayState", "Sources/Views/Extensions/ExtensionOverlayState.swift", []),
+            ("ExtensionPanelState", "Sources/Views/Extensions/ExtensionPanelState.swift", []),
+            ("FeedbackState", "Sources/Views/EditorChrome/FeedbackState.swift", [
+                "@ObservationIgnored private var showTask: Task<Void, Never>?",
+                "@ObservationIgnored private var holdTask: Task<Void, Never>?",
+                "@ObservationIgnored private var spinnerOnTime: ContinuousClock.Instant?",
+                "@ObservationIgnored private var lastMessage = \"\"",
+            ]),
+            ("FrontendExtensionRuntimeRegistry", "Sources/Extensions/FrontendExtensionRuntime.swift", [
+                "@ObservationIgnored private var decoders: [String: Decoder] = [:]",
+                "@ObservationIgnored private var viewBuilders: [String: ViewBuilder] = [:]",
+            ]),
         ]
-        let sources = try Dictionary(uniqueKeysWithValues: relativePaths.map { path in
+        let ignoredReasons = [
+            "@ObservationIgnored private var hasTranscript: Bool = false": "cache",
+            "@ObservationIgnored private var warnedUnknownKinds: Set<String> = []": "cache",
+            "@ObservationIgnored private var showTask: Task<Void, Never>?": "task",
+            "@ObservationIgnored private var holdTask: Task<Void, Never>?": "task",
+            "@ObservationIgnored private var spinnerOnTime: ContinuousClock.Instant?": "clock",
+            "@ObservationIgnored private var lastMessage = \"\"": "cache",
+            "@ObservationIgnored private var decoders: [String: Decoder] = [:]": "decoder",
+            "@ObservationIgnored private var viewBuilders: [String: ViewBuilder] = [:]": "builder",
+        ]
+        let allowedIgnoredReasons: Set<String> = ["task", "callback", "clock", "cache", "decoder", "builder", "metrics"]
+        #expect(Set(owners.flatMap(\.ignored)) == Set(ignoredReasons.keys))
+        #expect(Set(ignoredReasons.values).isSubset(of: allowedIgnoredReasons))
+
+        let sourcePaths = Set(owners.map(\.path)).union([
+            "Sources/Views/EditorChrome/TabBarView.swift",
+            "Sources/Views/Sidebar/FileTreeView.swift",
+            "Sources/Views/Shared/GUIState.swift",
+        ])
+        let sources = try Dictionary(uniqueKeysWithValues: sourcePaths.map { path in
             (path, try String(contentsOf: macosRoot.appendingPathComponent(path), encoding: .utf8))
         })
-        let tabState = try #require(sources[relativePaths[0]])
-        let tabView = try #require(sources[relativePaths[1]])
-        let treeState = try #require(sources[relativePaths[2]])
-        let treeView = try #require(sources[relativePaths[3]])
 
+        for owner in owners {
+            let source = try #require(sources[owner.path])
+            #expect(source.contains("@MainActor\n@Observable\npublic final class \(owner.name)"))
+            let ignoredLines = Set(source.split(separator: "\n").compactMap { line -> String? in
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                return trimmed.contains("@ObservationIgnored") ? trimmed : nil
+            })
+            #expect(ignoredLines == owner.ignored)
+            #expect(!source.contains("ObservableObject"))
+            #expect(!source.contains("objectWillChange"))
+            #expect(!source.contains("ObservationRegistrar"))
+        }
+
+        let feedbackState = try #require(sources["Sources/Views/EditorChrome/FeedbackState.swift"])
+        let guiState = try #require(sources["Sources/Views/Shared/GUIState.swift"])
+        #expect(!feedbackState.contains("onPresentationChanged"))
+        #expect(!feedbackState.contains("notifyPresentationChanged"))
+        #expect(!guiState.contains("feedbackState.onPresentationChanged"))
+
+        let tabState = try #require(sources["Sources/Views/EditorChrome/TabBarState.swift"])
+        let tabView = try #require(sources["Sources/Views/EditorChrome/TabBarView.swift"])
+        let treeState = try #require(sources["Sources/Views/Sidebar/FileTreeState.swift"])
+        let treeView = try #require(sources["Sources/Views/Sidebar/FileTreeView.swift"])
         #expect(tabState.contains("@MainActor\n@Observable\npublic final class TabBarState"))
         #expect(treeState.contains("@MainActor\n@Observable\npublic final class FileTreeState"))
         for leafView in [tabView, treeView] {
             #expect(!leafView.contains("@Environment(\\.guiFrameVersion)"))
             #expect(!leafView.contains("let _ = frameVersion"))
-        }
-        for owner in [tabState, treeState] {
-            #expect(!owner.contains("ObservableObject"))
-            #expect(!owner.contains("objectWillChange"))
-            #expect(!owner.contains("ObservationRegistrar"))
         }
         #expect(!tabView.contains(".id(tabBarState"))
         #expect(!treeView.contains(".id(fileTreeState"))
@@ -614,6 +976,22 @@ struct GUIFrameSwiftUIInvalidationTests {
         )
         window.contentView = hostingView
         return (hostingView, window)
+    }
+
+    private func expectOnlyOwnerProbeUpdate(
+        _ point: ObservationOwnerProbePoint,
+        value: String,
+        recorder: ObservationOwnerProbeRecorder,
+        mutation: @MainActor () -> Void
+    ) async {
+        let baseline = recorder.updateCounts()
+        mutation()
+        await recorder.waitForValue(value, point: point)
+        let updated = recorder.updateCounts()
+        #expect(updated[point, default: 0] > baseline[point, default: 0])
+        for unrelatedPoint in ObservationOwnerProbePoint.allCases where unrelatedPoint != point {
+            #expect(updated[unrelatedPoint, default: 0] == baseline[unrelatedPoint, default: 0])
+        }
     }
 
     private func stageCanonicalShellFrame(
@@ -781,6 +1159,56 @@ struct GUIFrameSwiftUIInvalidationTests {
         CommandDispatcher.requiredThemeSlots.map { slot in
             (slot, slot, slot, slot)
         }
+    }
+
+    private static func statusBarUpdate(message: String) -> StatusBarUpdate {
+        StatusBarUpdate(
+            contentKind: 0,
+            mode: 0,
+            cursorLine: 1,
+            cursorCol: 1,
+            lineCount: 1,
+            flags: 0,
+            lspStatus: 0,
+            gitBranch: "",
+            message: message,
+            filetype: "",
+            errorCount: 0,
+            warningCount: 0,
+            modelName: "",
+            messageCount: 0,
+            sessionStatus: 0,
+            infoCount: 0,
+            hintCount: 0,
+            macroRecording: 0,
+            parserStatus: 0,
+            agentStatus: 0,
+            gitAdded: 0,
+            gitModified: 0,
+            gitDeleted: 0,
+            icon: "",
+            iconColorR: 0,
+            iconColorG: 0,
+            iconColorB: 0,
+            filename: "",
+            diagnosticHint: "",
+            backgroundSubagentCount: 0,
+            backgroundSubagentLabel: ""
+        )
+    }
+
+    private static func sidebarMetadata(id: String, kind: String) -> Wire.SidebarMetadata {
+        Wire.SidebarMetadata(
+            id: id,
+            displayName: id,
+            semanticKind: kind,
+            icon: "",
+            order: 0,
+            visible: true,
+            focused: true,
+            preferredWidth: 30,
+            badgeCount: nil
+        )
     }
 
     private static func updateEmptyState(_ gui: GUIState, label: String) {

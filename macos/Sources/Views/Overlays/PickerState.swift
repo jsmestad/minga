@@ -94,6 +94,7 @@ public struct PreviewSegment: Identifiable {
 }
 
 @MainActor
+@Observable
 public final class PickerState {
     public init(visible: Bool = false, selectedIndex: Int = 0, previewSelectedIndex: Int? = nil, filteredCount: Int = 0, totalCount: Int = 0, markedCount: Int = 0, title: String = "", query: String = "", modePrefix: String = "", hasPreview: Bool = false, loadStatus: Wire.PickerLoadStatus = .ready, items: [PickerItem] = [], previewLines: [PreviewLine] = [], actionMenu: PickerActionMenu? = nil) {
         self.visible = visible

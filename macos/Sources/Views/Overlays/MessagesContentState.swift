@@ -150,11 +150,11 @@ public final class MessagesContentState {
         self.activeSubsystems = activeSubsystems
         self.searchText = searchText
     }
-    @ObservationIgnored public var entries: [MessageEntry] = []
+    public var entries: [MessageEntry] = []
     /// Whether the view should auto-scroll to the latest entry.
-    @ObservationIgnored public var isAutoScrolling: Bool = true
+    public var isAutoScrolling: Bool = true
     /// Set to true when new entries arrive while scrolled up (shows "jump to latest").
-    @ObservationIgnored public var hasNewEntries: Bool = false
+    public var hasNewEntries: Bool = false
 
     // MARK: - Filters
 

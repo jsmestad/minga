@@ -19,6 +19,7 @@ public struct BottomPanelTab: Identifiable, Equatable {
 }
 
 @MainActor
+@Observable
 public final class BottomPanelState {
     public init(visible: Bool = false, activeTabIndex: Int = 0, heightPercent: Int = 30, filterPreset: UInt8 = 0, tabs: [BottomPanelTab] = []) {
         self.visible = visible
@@ -26,6 +27,7 @@ public final class BottomPanelState {
         self.heightPercent = heightPercent
         self.filterPreset = filterPreset
         self.tabs = tabs
+        self.userHeight = UserDefaults.standard.double(forKey: "bottomPanelHeight").clamped(to: 100...800, fallback: 200)
     }
     public var visible: Bool = false
     public var activeTabIndex: Int = 0
@@ -40,8 +42,7 @@ public final class BottomPanelState {
     /// This is the user's drag-resized height; the BEAM's heightPercent is
     /// the initial/default value.
     public var userHeight: CGFloat {
-        get { UserDefaults.standard.double(forKey: "bottomPanelHeight").clamped(to: 100...800, fallback: 200) }
-        set { UserDefaults.standard.set(newValue, forKey: "bottomPanelHeight") }
+        didSet { UserDefaults.standard.set(userHeight, forKey: "bottomPanelHeight") }
     }
 
     public func update(visible: Bool, activeTabIndex: Int, heightPercent: Int,

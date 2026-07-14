@@ -98,6 +98,7 @@ public enum AgentTranscriptPreparationFailure: Error, Equatable {
 }
 
 @MainActor
+@Observable
 public final class AgentChatState {
     public init(visible: Bool = false, status: UInt8 = 0, model: String = "", thinkingLevel: String = "medium", prompt: String = "", messages: [ChatMessageEntry] = [], helpVisible: Bool = false, helpGroups: [HelpGroup] = [], promptVersion: Int = 0, promptLineCount: UInt8 = 1, promptCursorLine: UInt16 = 0, promptCursorCol: UInt16 = 0, promptVimMode: UInt8 = 0, promptVisibleRows: UInt8 = 1, promptCompletion: Wire.PromptCompletion? = nil) {
         self.visible = visible
@@ -139,7 +140,7 @@ public final class AgentChatState {
 
     /// Whether a `full_replace` has seeded the resident transcript. Appends before
     /// the first full_replace are dropped until a full_replace arrives.
-    private var hasTranscript: Bool = false
+    @ObservationIgnored private var hasTranscript: Bool = false
 
     /// True when older messages sit outside the resident byte-cap window (0x86
     /// `truncated` flag). A UI hint that the visible history is not the full session.

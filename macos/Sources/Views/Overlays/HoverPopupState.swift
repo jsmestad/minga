@@ -32,6 +32,7 @@ public struct HoverLine: Identifiable {
 }
 
 @MainActor
+@Observable
 public final class HoverPopupState {
     public init(visible: Bool = false, anchorRow: Int = 0, anchorCol: Int = 0, focused: Bool = false, scrollOffset: Int = 0, lines: [HoverLine] = [], openActionName: String? = nil) {
         self.visible = visible

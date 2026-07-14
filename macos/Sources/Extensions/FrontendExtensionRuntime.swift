@@ -14,12 +14,13 @@ public struct FrontendExtensionViewContext {
 }
 
 @MainActor
+@Observable
 public final class FrontendExtensionRuntimeRegistry {
     public typealias Decoder = (FrontendExtensionRuntimeMessage) -> Void
     public typealias ViewBuilder = (FrontendExtensionViewContext) -> AnyView
 
-    private var decoders: [String: Decoder] = [:]
-    private var viewBuilders: [String: ViewBuilder] = [:]
+    @ObservationIgnored private var decoders: [String: Decoder] = [:]
+    @ObservationIgnored private var viewBuilders: [String: ViewBuilder] = [:]
     public private(set) var activeExtensionIDs: [String] = []
 
     public init() {}

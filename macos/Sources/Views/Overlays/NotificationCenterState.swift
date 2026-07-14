@@ -42,6 +42,7 @@ public struct EditorNotification: Identifiable, Equatable {
 
 /// Stores the current notification stack sent by the BEAM.
 @MainActor
+@Observable
 public final class NotificationCenterState {
     public init(notifications: [EditorNotification] = []) {
         self.notifications = notifications

@@ -64,6 +64,7 @@ public struct WorkspaceFileTabEntry: Identifiable {
 
 /// Observable state for the workspace header and active-workspace file tabs.
 @MainActor
+@Observable
 public final class WorkspaceState {
     public init(workspaces: [WorkspaceSummaryEntry] = [], visibleTabs: [WorkspaceFileTabEntry] = [], activeWorkspaceId: UInt16 = 0, viewMode: UInt8 = 0, flags: UInt8 = 0, hasCanonicalPayload: Bool = false) {
         self.workspaces = workspaces
