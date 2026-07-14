@@ -1,5 +1,6 @@
 defmodule Minga.Project.FileFindTest do
-  use ExUnit.Case, async: true
+  # This suite spawns git and file-discovery OS processes, which cannot run concurrently safely.
+  use ExUnit.Case, async: false
 
   alias Minga.Project.FileFind
   alias Minga.Project.Root
@@ -179,6 +180,104 @@ defmodule Minga.Project.FileFindTest do
       refute ".DS_Store" in files
       refute "lib/.DS_Store" in files
       assert "README.md" in files
+    end
+  end
+
+  describe "Root.resolve_file/2" do
+    setup do
+      tmp_dir = make_tmp_dir("minga_root_resolve_file")
+      File.write!(Path.join(tmp_dir, "inside.txt"), "inside")
+      on_exit(fn -> File.rm_rf!(tmp_dir) end)
+
+      %{tmp_dir: tmp_dir, root: directory_root!(tmp_dir)}
+    end
+
+    test "returns the canonical target for an authorized workspace-relative file", %{
+      tmp_dir: tmp_dir,
+      root: root
+    } do
+      assert Root.resolve_file(root, "inside.txt") ==
+               {:ok, Path.join(tmp_dir, "inside.txt")}
+    end
+
+    test "returns the canonical target of an in-workspace symlink", %{
+      tmp_dir: tmp_dir,
+      root: root
+    } do
+      File.ln_s!("inside.txt", Path.join(tmp_dir, "inside-link.txt"))
+
+      assert Root.resolve_file(root, "inside-link.txt") ==
+               {:ok, Path.join(tmp_dir, "inside.txt")}
+    end
+
+    test "returns the filesystem error when the target is missing", %{root: root} do
+      assert Root.resolve_file(root, "missing.txt") == {:error, :enoent}
+    end
+
+    test "accepts an existing file beneath a literally confirmed broad root", %{tmp_dir: tmp_dir} do
+      {:ok, root} = Root.directory("/", broad_root_confirmed: true)
+      relative_path = Path.relative_to(tmp_dir, "/") |> Path.join("inside.txt")
+      {:ok, canonical_target} = Root.canonical_path(Path.join(tmp_dir, "inside.txt"))
+
+      assert Root.resolve_file(root, relative_path) == {:ok, canonical_target}
+    end
+
+    test "rejects absolute paths and parent traversal before joining", %{
+      tmp_dir: tmp_dir,
+      root: root
+    } do
+      assert Root.resolve_file(root, Path.join(tmp_dir, "inside.txt")) ==
+               {:error, :absolute_path}
+
+      assert Root.resolve_file(root, "../outside.txt") == {:error, :parent_traversal}
+    end
+
+    test "rejects a symlink whose canonical target escapes the workspace", %{
+      tmp_dir: tmp_dir,
+      root: root
+    } do
+      outside = Path.join(Path.dirname(tmp_dir), "outside-#{System.unique_integer([:positive])}")
+      File.write!(outside, "outside")
+      File.ln_s!(outside, Path.join(tmp_dir, "escape.txt"))
+      on_exit(fn -> File.rm(outside) end)
+
+      assert Root.resolve_file(root, "escape.txt") == {:error, :outside_workspace}
+    end
+
+    test "reuses inventory authorization for broad and non-directory roots", %{tmp_dir: tmp_dir} do
+      {:ok, confirmed_home} = Root.directory(Path.expand("~"), broad_root_confirmed: true)
+
+      unauthorized_home = %Root{
+        kind: :directory,
+        path: confirmed_home.path,
+        broad_root_confirmed?: false
+      }
+
+      assert Root.resolve_file(unauthorized_home, "anything") ==
+               {:error, :broad_root_confirmation_required}
+
+      assert Root.resolve_file(Root.file(Path.join(tmp_dir, "inside.txt")), "inside.txt") ==
+               {:error, :not_a_directory_root}
+    end
+
+    test "rejects a root whose canonical target changed after authorization", %{
+      tmp_dir: tmp_dir,
+      root: root
+    } do
+      original_workspace = Path.join(Path.dirname(tmp_dir), "original-#{Path.basename(tmp_dir)}")
+      replacement = Path.join(Path.dirname(tmp_dir), "replacement-#{Path.basename(tmp_dir)}")
+
+      File.rename!(tmp_dir, original_workspace)
+      File.mkdir_p!(replacement)
+      File.ln_s!(replacement, tmp_dir)
+
+      on_exit(fn ->
+        File.rm(tmp_dir)
+        File.rm_rf!(original_workspace)
+        File.rm_rf!(replacement)
+      end)
+
+      assert Root.resolve_file(root, "inside.txt") == {:error, :root_changed}
     end
   end
 

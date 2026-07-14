@@ -816,8 +816,7 @@ defmodule MingaEditor.Commands.Agent do
   @spec resolve_mentions(String.t(), keyword()) ::
           {:ok, String.t()} | {:ok, [ReqLLM.Message.ContentPart.t()]} | {:error, String.t()}
   defp resolve_mentions(text, opts) do
-    root = project_root()
-    FileMention.resolve_prompt(text, root, opts)
+    FileMention.resolve_prompt(text, Minga.Project.workspace_root(), opts)
   end
 
   @spec project_root() :: String.t() | nil

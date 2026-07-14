@@ -142,10 +142,10 @@ defmodule MingaAgent.FileMention do
   - `{:ok, [ContentPart.t()]}` when images are present (mixed text + image parts)
   - `{:error, message}` if any file doesn't exist or can't be read
   """
-  @spec resolve_prompt(String.t(), String.t() | nil) ::
+  @spec resolve_prompt(String.t(), Root.t() | nil) ::
           {:ok, String.t()} | {:ok, [ContentPart.t()]} | {:error, String.t()}
-  def resolve_prompt(text, project_root) do
-    resolve_prompt(text, project_root, [])
+  def resolve_prompt(text, workspace_root) do
+    resolve_prompt(text, workspace_root, [])
   end
 
   @doc """
@@ -154,7 +154,7 @@ defmodule MingaAgent.FileMention do
   Options:
     - `:model` — the model string for vision capability checking
   """
-  @spec resolve_prompt(String.t(), String.t() | nil, keyword()) ::
+  @spec resolve_prompt(String.t(), Root.t() | nil, keyword()) ::
           {:ok, String.t()} | {:ok, [ContentPart.t()]} | {:error, String.t()}
   def resolve_prompt(text, nil, _opts) do
     case extract_mentions(text) do
@@ -163,19 +163,19 @@ defmodule MingaAgent.FileMention do
     end
   end
 
-  def resolve_prompt(text, project_root, opts) when is_binary(project_root) do
+  def resolve_prompt(text, %Root{} = workspace_root, opts) do
     mentions = extract_mentions(text)
 
     if mentions == [] do
       {:ok, text}
     else
-      maybe_check_vision(mentions, text, project_root, opts)
+      maybe_check_vision(mentions, text, workspace_root, opts)
     end
   end
 
-  @spec maybe_check_vision([mention()], String.t(), String.t(), keyword()) ::
+  @spec maybe_check_vision([mention()], String.t(), Root.t(), keyword()) ::
           {:ok, String.t()} | {:ok, [ContentPart.t()]} | {:error, String.t()}
-  defp maybe_check_vision(mentions, text, project_root, opts) do
+  defp maybe_check_vision(mentions, text, workspace_root, opts) do
     has_images = Enum.any?(mentions, fn %{path: path} -> image_path?(path) end)
     model = Keyword.get(opts, :model)
 
@@ -185,7 +185,7 @@ defmodule MingaAgent.FileMention do
       {:error,
        "Model #{model} does not support image input. Use a vision-capable model (Claude, GPT-4o, Gemini)."}
     else
-      resolve_all(mentions, text, project_root)
+      resolve_all(mentions, text, workspace_root)
     end
   end
 
@@ -196,7 +196,7 @@ defmodule MingaAgent.FileMention do
     ext in @image_extensions
   end
 
-  @spec resolve_all([mention()], String.t(), String.t()) ::
+  @spec resolve_all([mention()], String.t(), Root.t()) ::
           {:ok, String.t()} | {:ok, [ContentPart.t()]} | {:error, String.t()}
   defp resolve_all(mentions, text, root) do
     results = Enum.map(mentions, &resolve_mention(&1, root))
@@ -220,15 +220,15 @@ defmodule MingaAgent.FileMention do
     end
   end
 
-  @spec resolve_mention(mention(), String.t()) ::
+  @spec resolve_mention(mention(), Root.t()) ::
           {String.t(),
            {:ok, String.t()}
            | {:ok, {:image, binary(), String.t(), non_neg_integer()}}
            | {:error, String.t()}}
   defp resolve_mention(%{path: path}, root) do
-    case contained_path(path, root) do
+    case Root.resolve_file(root, path) do
       {:ok, abs_path} -> {path, read_mention(path, abs_path)}
-      {:error, reason} -> {path, {:error, reason}}
+      {:error, reason} -> {path, {:error, resolution_error(reason)}}
     end
   end
 
@@ -240,34 +240,31 @@ defmodule MingaAgent.FileMention do
     if image_path?(path), do: read_image_safe(abs_path), else: read_file_safe(abs_path)
   end
 
-  @spec contained_path(String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
-  defp contained_path(path, root) do
-    contained_path(Path.type(path), path, root)
-  end
+  @spec resolution_error(Root.file_error()) :: String.t()
+  defp resolution_error(:absolute_path),
+    do: "absolute paths are outside the active workspace"
 
-  @spec contained_path(:absolute | :relative | :volumerelative, String.t(), String.t()) ::
-          {:ok, String.t()} | {:error, String.t()}
-  defp contained_path(:absolute, _path, _root),
-    do: {:error, "absolute paths are outside the active workspace"}
+  defp resolution_error(:parent_traversal),
+    do: "path is outside the active workspace (parent traversal is not allowed)"
 
-  defp contained_path(_path_type, path, root) do
-    with {:ok, canonical_root} <- Root.canonical_path(root),
-         {:ok, canonical_target} <- Root.canonical_path(Path.expand(path, canonical_root)),
-         true <- path_within_root?(canonical_target, canonical_root) do
-      {:ok, canonical_target}
-    else
-      false -> {:error, "path is outside the active workspace"}
-      {:error, :enoent} -> {:error, "file not found"}
-      {:error, reason} -> {:error, "cannot resolve path (#{reason})"}
-    end
-  end
+  defp resolution_error(:outside_workspace),
+    do: "path is outside the active workspace"
 
-  @spec path_within_root?(String.t(), String.t()) :: boolean()
-  defp path_within_root?(_path, "/"), do: true
+  defp resolution_error(:enoent), do: "file not found"
 
-  defp path_within_root?(path, root) do
-    path == root or String.starts_with?(path, root <> "/")
-  end
+  defp resolution_error(:not_a_directory_root),
+    do: "active workspace root is not an authorized directory"
+
+  defp resolution_error(:broad_root_confirmation_required),
+    do: "active workspace root requires broad-root confirmation"
+
+  defp resolution_error(:invalid_broad_root_confirmation),
+    do: "active workspace root has invalid broad-root confirmation"
+
+  defp resolution_error(:root_changed),
+    do: "active workspace root changed after authorization"
+
+  defp resolution_error(reason), do: "cannot resolve path (#{reason})"
 
   @spec build_text_prompt([{String.t(), {:ok, String.t()}}], String.t()) :: {:ok, String.t()}
   defp build_text_prompt(results, body) do
