@@ -93,7 +93,10 @@ defmodule Minga.CLIDistributionCookieTest do
                starter
              )
 
-    assert message =~ "installed before VM startup"
+    assert message in [
+             "Erlang distribution cookie was not installed before VM startup; set RELEASE_COOKIE or start the VM with -setcookie",
+             "Erlang distribution cookie does not match the cookie installed at VM startup"
+           ]
   end
 
   # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck

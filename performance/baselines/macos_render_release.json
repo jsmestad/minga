@@ -1,7 +1,7 @@
 {
-  "version": 2,
+  "version": 3,
   "fixtureVersion": "resident-ordinary-edit-v2",
-  "measurementClock": "process_cpu",
+  "measurementClock": "thread_cpu",
   "decodeApplyP95Ms": 0.040,
   "commandPreparationP95Ms": 0.360,
   "combinedP95Ms": 0.415,
@@ -9,6 +9,6 @@
     "measuredAt": "2026-07-14",
     "environment": "GitHub-hosted macos-15 arm64 runner, macOS 15.7.7 (24G720)",
     "toolchain": "Apple Swift 6.1.2 (swiftlang-6.1.2.1.2 clang-1700.0.13.5), swiftc -O",
-    "rationale": "Recalibrated process CPU p95 references after unchanged renderer code exceeded the prior relative reference on current GitHub-hosted macos-15 arm64 runners while p50 remained stable. Runs 29330680759 job 87077604582 and 29331719084 job 87080991960 aggregated to 0.035/0.339/0.393 ms and 0.040/0.360/0.415 ms p95 for decode/apply, command preparation, and combined work. The conservative second run is checked in. The five-batch median, 1.20x regression ratio, 0.05 ms noise allowance, and hard-coded 4 ms stage and 8 ms combined ceilings remain authoritative."
+    "rationale": "Switched the synchronous single-thread harness from process CPU to calling-thread CPU after unchanged renderer code produced 0.185 ms and 0.547 ms combined p95 in consecutive runs while p50 stayed stable, demonstrating contamination from unrelated process threads. Thread-CPU calibration is recorded in the final PR validation. The five-batch median, 1.20x regression ratio, 0.05 ms noise allowance, and hard-coded 4 ms stage and 8 ms combined ceilings remain authoritative."
   }
 }

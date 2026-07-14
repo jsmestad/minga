@@ -132,8 +132,8 @@ private func consumePreparedCommands(_ prepared: ResidentRenderPreparationResult
     }
 }
 
-private func processCPUTimeNanoseconds() -> UInt64 {
-    clock_gettime_nsec_np(CLOCK_PROCESS_CPUTIME_ID)
+private func threadCPUTimeNanoseconds() -> UInt64 {
+    clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
 }
 
 private func requireInteractiveQoS() {
@@ -145,9 +145,9 @@ private func requireInteractiveQoS() {
 }
 
 private func elapsedMs(_ body: () throws -> Void) rethrows -> Double {
-    let start = processCPUTimeNanoseconds()
+    let start = threadCPUTimeNanoseconds()
     try body()
-    return Double(processCPUTimeNanoseconds() - start) / 1_000_000.0
+    return Double(threadCPUTimeNanoseconds() - start) / 1_000_000.0
 }
 
 private func percentile(_ samples: [Double], _ ratio: Double) -> Double {
@@ -231,7 +231,7 @@ let baseline = try JSONDecoder().decode(RenderPerformanceBaseline.self, from: Da
 let output = try JSONEncoder().encode(measurement)
 print(String(decoding: output, as: UTF8.self))
 print("aggregate \(summary(measurement))")
-print("fixture=resident-ordinary-edit-v2 rows=\(fixtureRows) visible=\(visibleRows) overscan=\(overscanRows * 2) batches=\(RenderPerformanceGate.requiredBatchCount) warmup_per_batch=\(warmupIterations) iterations_per_batch=\(measuredIterations) compiler=swiftc-O os=\(ProcessInfo.processInfo.operatingSystemVersionString) sink=\(sink)")
+print("fixture=resident-ordinary-edit-v2 clock=thread_cpu rows=\(fixtureRows) visible=\(visibleRows) overscan=\(overscanRows * 2) batches=\(RenderPerformanceGate.requiredBatchCount) warmup_per_batch=\(warmupIterations) iterations_per_batch=\(measuredIterations) compiler=swiftc-O os=\(ProcessInfo.processInfo.operatingSystemVersionString) sink=\(sink)")
 
 let failures = RenderPerformanceGate.failures(measurement: measurement, baseline: baseline)
 for failure in failures { FileHandle.standardError.write(Data("error: \(failure)\n".utf8)) }
