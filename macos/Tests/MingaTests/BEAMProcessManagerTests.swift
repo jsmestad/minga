@@ -49,7 +49,7 @@ struct BEAMProcessManagerLaunchArgumentsTests {
     }
 
     @Test("encodes release CLI arguments without losing spaces")
-    func encodesCLIArguments() {
+    @MainActor func encodesCLIArguments() {
         #expect(
             BEAMProcessManager.encodedCLIArguments(["--editor", "/tmp/path with space"])
                 == "LS1lZGl0b3I,L3RtcC9wYXRoIHdpdGggc3BhY2U"
