@@ -3,15 +3,34 @@ defmodule MingaEditor.EffectSchedulerTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.Project.Root
   alias Minga.Test.EffectOwner
   alias Minga.Test.EffectProbe
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.Effect.Policy
   alias MingaEditor.Effect.Request
   alias MingaEditor.EffectScheduler
+  alias MingaEditor.Effects.TodoSearch
   alias MingaEditor.GenerationSupervisor
 
   @effect_timeout 15_000
+
+  test "TODO requests retain their typed Root through scheduler failure outcomes" do
+    root = %Root{kind: :directory, path: "/missing/todo-search-root"}
+    request = TodoSearch.request(root, make_ref())
+    scheduler = start_scheduler()
+
+    assert request.resource == {:todo_search, root}
+    assert request.effect.root == root
+    assert EffectScheduler.schedule(scheduler, request) == {:ok, request.id, :running}
+
+    outcome = receive_candidate(scheduler, request.id, :failed)
+
+    assert outcome.request.resource == {:todo_search, root}
+    assert outcome.request.effect.root == root
+    assert outcome.reason == "TODO search root rejected: not_a_directory"
+    finalize_once(scheduler, outcome)
+  end
 
   test "normal completion produces exactly one completed terminal outcome" do
     scheduler = start_scheduler()

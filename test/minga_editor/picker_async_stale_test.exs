@@ -12,8 +12,13 @@ defmodule MingaEditor.PickerAsyncStaleTest do
   never appear, regardless of whether the real fetch has landed.
   """
 
-  use Minga.Test.EditorCase, async: true, rendering: :disabled
+  # TODO fetches spawn git/grep Ports and read the process-global Project workspace.
+  use Minga.Test.EditorCase, async: false, rendering: :disabled
 
+  alias Minga.Project
+  alias Minga.Project.Root
+  alias MingaEditor.Effect.Outcome
+  alias MingaEditor.Effects.TodoSearch
   alias MingaEditor.UI.Picker.Candidate
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.TodoSearchSource
@@ -21,12 +26,23 @@ defmodule MingaEditor.PickerAsyncStaleTest do
   @sync_timeout 15_000
 
   setup do
-    root =
-      Path.join(System.tmp_dir!(), "minga-async-picker-#{System.unique_integer([:positive])}")
+    original_workspace = Project.snapshot()
+    id = System.unique_integer([:positive])
+    root = Path.join(System.tmp_dir!(), "minga-async-picker-#{id}")
+    reroot = Path.join(System.tmp_dir!(), "minga-async-picker-reroot-#{id}")
 
     File.mkdir_p!(root)
-    on_exit(fn -> File.rm_rf(root) end)
-    %{project_root: root}
+    File.mkdir_p!(reroot)
+    {:ok, active_root} = Root.directory(root)
+    activate_project!(active_root)
+
+    on_exit(fn ->
+      restore_project(original_workspace)
+      File.rm_rf(root)
+      File.rm_rf(reroot)
+    end)
+
+    %{project_root: root, reroot: reroot}
   end
 
   defp picker_payload(ctx) do
@@ -83,6 +99,31 @@ defmodule MingaEditor.PickerAsyncStaleTest do
     refute "stale-sentinel" in labels
   end
 
+  test "rejects a live-revision result captured before workspace rerooting",
+       %{project_root: root_path, reroot: reroot_path} do
+    ctx = start_editor("scratch", project_root: root_path)
+    :ok = GenServer.call(ctx.editor, {:api_execute_command, :search_todos}, @sync_timeout)
+
+    revision = picker_payload(ctx).picker_ui.fetch_revision
+    state = :sys.get_state(ctx.editor, @sync_timeout)
+    {:ok, captured_root} = Root.directory(root_path)
+    {:ok, reroot} = Root.directory(reroot_path)
+    assert Project.workspace_root() == captured_root
+    assert {:ok, _snapshot} = Project.activate(reroot)
+
+    request = TodoSearch.request(captured_root, revision)
+
+    result = %TodoSearch.Result{
+      revision: revision,
+      items: [],
+      candidates: [],
+      meta: %{}
+    }
+
+    assert {^state, %Outcome{status: :stale, reason: :workspace_rerooted}} =
+             TodoSearch.apply(state, Outcome.completed(request, result))
+  end
+
   test "applies a live-revision result carrying candidates pre-built off the editor",
        %{project_root: root} do
     ctx = start_editor("scratch", project_root: root)
@@ -113,5 +154,33 @@ defmodule MingaEditor.PickerAsyncStaleTest do
     # The same candidates flow straight through; the picker keeps the pre-built set.
     assert payload.picker_ui.picker.candidates == candidates
     assert payload.picker_ui.load_status == :ready
+  end
+
+  @spec activate_project!(Root.t()) :: :ok
+  defp activate_project!(%Root{path: path} = root) do
+    Minga.Events.subscribe(:project_rebuilt)
+    assert {:ok, snapshot} = Project.activate(root)
+
+    if snapshot.rebuilding? do
+      assert_receive {:minga_event, :project_rebuilt,
+                      %Minga.Events.ProjectRebuiltEvent{root: ^path}},
+                     @sync_timeout
+    end
+
+    :ok
+  end
+
+  @spec restore_project(Minga.Project.WorkspaceSnapshot.t() | nil) :: :ok
+  defp restore_project(nil) do
+    Project.close()
+    _ = :sys.get_state(Project)
+    :ok
+  end
+
+  defp restore_project(%Minga.Project.WorkspaceSnapshot{root: root}) do
+    Project.close()
+    _ = :sys.get_state(Project)
+    _ = Project.activate(root)
+    :ok
   end
 end

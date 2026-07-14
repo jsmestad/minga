@@ -3,11 +3,10 @@ defmodule MingaEditor.Effects.TodoSearch.Result do
 
   alias MingaEditor.UI.Picker.Candidate
 
-  @enforce_keys [:root, :revision, :items, :candidates, :meta]
-  defstruct [:root, :revision, :items, :candidates, :meta]
+  @enforce_keys [:revision, :items, :candidates, :meta]
+  defstruct [:revision, :items, :candidates, :meta]
 
   @type t :: %__MODULE__{
-          root: String.t(),
           revision: reference(),
           items: [MingaEditor.UI.Picker.Item.t()],
           candidates: [Candidate.t()],

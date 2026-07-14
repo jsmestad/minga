@@ -1,15 +1,26 @@
 defmodule MingaEditor.UI.Picker.TodoSearchSourceTest do
-  use ExUnit.Case, async: true
+  # This suite spawns git/grep OS Ports and mutates the process-global Project workspace.
+  use ExUnit.Case, async: false
 
   import MingaEditor.RenderPipeline.TestHelpers, only: [base_state: 1]
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Project
+  alias Minga.Project.Root
+  alias Minga.Test.TodoSearchPortProbe
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.Effects.TodoSearch
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.UI.Picker.FileSource
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.TodoSearchSource
+
+  setup do
+    original_workspace = Project.snapshot()
+    on_exit(fn -> restore_project(original_workspace) end)
+    :ok
+  end
 
   describe "parse_output/1" do
     test "parses grep path, line, and match text" do
@@ -50,62 +61,171 @@ defmodule MingaEditor.UI.Picker.TodoSearchSourceTest do
 
   describe "scheduled search" do
     test "finds TODOs in a git repository" do
-      root = temporary_root()
-      File.mkdir_p!(Path.join(root, "lib"))
-      file = Path.join(root, "lib/example.ex")
+      root_path = temporary_root()
+      File.mkdir_p!(Path.join(root_path, "lib"))
+      file = Path.join(root_path, "lib/example.ex")
       File.write!(file, "# TODO ship it\n")
-      {"", 0} = System.cmd("git", ["-C", root, "init", "-q"])
-      {"", 0} = System.cmd("git", ["-C", root, "add", "."])
+      {"", 0} = System.cmd("git", ["-C", root_path, "init", "-q"])
+      {"", 0} = System.cmd("git", ["-C", root_path, "add", "."])
 
-      assert {:ok, %TodoSearch.Result{items: [item]}} = TodoSearch.run(effect(root))
+      assert {:ok, %TodoSearch.Result{items: [item]}} = TodoSearch.run(effect(root_path))
       assert item.description == "# TODO ship it"
     end
 
     test "falls back to grep outside a git repository" do
-      root = temporary_root()
-      file = Path.join(root, "example.ex")
+      root_path = temporary_root()
+      file = Path.join(root_path, "example.ex")
       File.write!(file, "# FIXME outside git\n")
 
-      assert {:ok, %TodoSearch.Result{items: [item]}} = TodoSearch.run(effect(root))
+      assert {:ok, %TodoSearch.Result{items: [item]}} = TodoSearch.run(effect(root_path))
       assert item.description == "# FIXME outside git"
     end
 
-    test "reports a command failure" do
-      root =
-        Path.join(System.tmp_dir!(), "minga-missing-todo-#{System.unique_integer([:positive])}")
+    test "preserves command failure presentation" do
+      root_path = temporary_root()
+      :ok = TodoSearchPortProbe.configure(:failure)
 
-      assert {:error, message} = TodoSearch.run(effect(root))
-      assert message =~ "exited with status"
+      assert {:error, message} = TodoSearch.run(effect(root_path, impl: TodoSearchPortProbe))
+
+      assert message == "grep exited with status 2: probe failure"
     end
 
-    test "marks a result stale after the picker revision changes" do
+    test "marks a result stale when its revision differs from the request" do
+      root = directory_root!(temporary_root())
+      assert {:ok, _snapshot} = Project.activate(root)
       state = base_state(content: "scratch")
-      {state, old_revision} = PickerUI.open_loading(state, TodoSearchSource)
-      {state, _new_revision} = PickerUI.open_loading(state, TodoSearchSource)
-      request = TodoSearch.request(System.tmp_dir!(), old_revision)
+      {state, revision} = PickerUI.open_loading(state, TodoSearchSource)
+      request = TodoSearch.request(root, revision)
 
       result = %TodoSearch.Result{
-        root: System.tmp_dir!(),
-        revision: old_revision,
+        revision: make_ref(),
         items: [],
         candidates: [],
         meta: %{}
       }
 
-      {new_state, outcome} = TodoSearch.apply(state, Outcome.completed(request, result))
+      assert {^state, %Outcome{status: :stale, reason: :revision_mismatch}} =
+               TodoSearch.apply(state, Outcome.completed(request, result))
+    end
 
-      assert outcome.status == :stale
-      assert new_state == state
+    test "marks a result stale after another picker source replaces TODO search" do
+      root = directory_root!(temporary_root())
+      assert {:ok, _snapshot} = Project.activate(root)
+      state = base_state(content: "scratch")
+      {state, revision} = PickerUI.open_loading(state, TodoSearchSource)
+      {state, _replacement_revision} = PickerUI.open_loading(state, FileSource)
+      request = TodoSearch.request(root, revision)
+
+      result = %TodoSearch.Result{
+        revision: revision,
+        items: [],
+        candidates: [],
+        meta: %{}
+      }
+
+      assert {^state, %Outcome{status: :stale, reason: :picker_closed_or_replaced}} =
+               TodoSearch.apply(state, Outcome.completed(request, result))
+    end
+
+    test "rejects a result after the active workspace reroots" do
+      root_a = directory_root!(temporary_root())
+      root_b = directory_root!(temporary_root())
+      assert {:ok, _snapshot} = Project.activate(root_a)
+
+      state = base_state(content: "scratch")
+      {state, revision} = PickerUI.open_loading(state, TodoSearchSource)
+      request = TodoSearch.request(root_a, revision)
+      assert {:ok, _snapshot} = Project.activate(root_b)
+
+      result = %TodoSearch.Result{
+        revision: revision,
+        items: [],
+        candidates: [],
+        meta: %{}
+      }
+
+      assert {^state, %Outcome{status: :stale, reason: :workspace_rerooted}} =
+               TodoSearch.apply(state, Outcome.completed(request, result))
     end
   end
 
-  defp effect(root), do: %TodoSearch{root: root, revision: make_ref()}
+  describe "root authorization boundary" do
+    test "passes only the canonical path into Port arguments and candidate expansion" do
+      container = temporary_root()
+      canonical = Path.join(container, "canonical")
+      alias_path = Path.join(container, "alias")
+      File.mkdir_p!(canonical)
+      File.ln_s!(canonical, alias_path)
+      root = directory_root!(alias_path)
 
-  defp temporary_root do
-    root = Path.join(System.tmp_dir!(), "minga-todo-effect-#{System.unique_integer([:positive])}")
-    File.mkdir_p!(root)
-    on_exit(fn -> File.rm_rf(root) end)
-    root
+      assert {:ok, %TodoSearch.Result{items: [item]}} =
+               TodoSearch.run(%TodoSearch{
+                 root: root,
+                 revision: make_ref(),
+                 impl: TodoSearchPortProbe
+               })
+
+      assert_received {:todo_search_port_opened, "git",
+                       ["-C", ^canonical, "rev-parse", "--is-inside-work-tree"]}
+
+      assert item.id.path == Path.join(canonical, "lib/example.ex")
+    end
+
+    test "accepts a confirmed broad root before opening the probe Port" do
+      root = %Root{kind: :directory, path: "/", broad_root_confirmed?: true}
+
+      assert {:ok, %TodoSearch.Result{}} =
+               TodoSearch.run(%TodoSearch{
+                 root: root,
+                 revision: make_ref(),
+                 impl: TodoSearchPortProbe
+               })
+
+      assert_received {:todo_search_port_opened, "git",
+                       ["-C", "/", "rev-parse", "--is-inside-work-tree"]}
+    end
+
+    test "rejects broad roots without confirmation before a Port opens" do
+      root = %Root{kind: :directory, path: "/", broad_root_confirmed?: false}
+
+      assert_rejected_before_port(root, :broad_root_confirmation_required)
+    end
+
+    test "rejects invalid broad-root confirmation before a Port opens" do
+      root_path = temporary_root()
+      root = %Root{kind: :directory, path: root_path, broad_root_confirmed?: :invalid}
+
+      assert_rejected_before_port(root, :invalid_broad_root_confirmation)
+    end
+
+    test "rejects file-scoped roots before a Port opens" do
+      file = Path.join(temporary_root(), "file.ex")
+      File.write!(file, "# TODO not recursive\n")
+
+      assert_rejected_before_port(Root.file(file), :not_a_directory_root)
+    end
+
+    test "rejects roots that stop being directories before a Port opens" do
+      root_path = temporary_root()
+      root = directory_root!(root_path)
+      File.rm_rf!(root_path)
+      File.write!(root_path, "not a directory")
+
+      assert_rejected_before_port(root, :not_a_directory)
+    end
+
+    test "rejects roots whose canonical target changed before a Port opens" do
+      container = temporary_root()
+      root_path = Path.join(container, "captured")
+      replacement = Path.join(container, "replacement")
+      File.mkdir_p!(root_path)
+      File.mkdir_p!(replacement)
+      root = directory_root!(root_path)
+      File.rm_rf!(root_path)
+      File.ln_s!(replacement, root_path)
+
+      assert_rejected_before_port(root, :root_changed)
+    end
   end
 
   describe "on_select/2" do
@@ -127,5 +247,56 @@ defmodule MingaEditor.UI.Picker.TodoSearchSourceTest do
       assert EditorState.active_buffer(new_state) == 1
       assert BufferProcess.cursor(path_buffer) == {2, 0}
     end
+  end
+
+  @spec effect(String.t(), keyword()) :: TodoSearch.t()
+  defp effect(root_path, opts \\ []) do
+    %TodoSearch{
+      root: directory_root!(root_path),
+      revision: make_ref(),
+      impl: Keyword.get(opts, :impl, MingaEditor.Effects.TodoSearch.Port)
+    }
+  end
+
+  @spec directory_root!(String.t()) :: Root.t()
+  defp directory_root!(path) do
+    {:ok, root} = Root.directory(path)
+    root
+  end
+
+  @spec assert_rejected_before_port(Root.t(), Root.error()) :: :ok
+  defp assert_rejected_before_port(root, reason) do
+    assert TodoSearch.run(%TodoSearch{
+             root: root,
+             revision: make_ref(),
+             impl: TodoSearchPortProbe
+           }) == {:error, "TODO search root rejected: #{reason}"}
+
+    refute_received {:todo_search_port_opened, _command, _args}
+    :ok
+  end
+
+  @spec temporary_root() :: String.t()
+  defp temporary_root do
+    root_path =
+      Path.join(System.tmp_dir!(), "minga-todo-effect-#{System.unique_integer([:positive])}")
+
+    File.mkdir_p!(root_path)
+    on_exit(fn -> File.rm_rf(root_path) end)
+    root_path
+  end
+
+  @spec restore_project(Minga.Project.WorkspaceSnapshot.t() | nil) :: :ok
+  defp restore_project(nil) do
+    Project.close()
+    _ = :sys.get_state(Project)
+    :ok
+  end
+
+  defp restore_project(%Minga.Project.WorkspaceSnapshot{root: root}) do
+    Project.close()
+    _ = :sys.get_state(Project)
+    _ = Project.activate(root)
+    :ok
   end
 end
