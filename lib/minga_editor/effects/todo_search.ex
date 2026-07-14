@@ -4,34 +4,35 @@ defmodule MingaEditor.Effects.TodoSearch do
 
   Repository probing and grep execution run in the generation-owned effect
   scheduler. The editor only applies the correlated picker result when its
-  source and fetch revision are still live.
+  source, workspace root, and fetch revision are still live.
   """
 
   @behaviour MingaEditor.Effect
 
+  alias Minga.Project.Root
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.Effect.Policy
   alias MingaEditor.Effect.Request
+  alias MingaEditor.Effects.TodoSearch.Port, as: TodoSearchPort
+  alias MingaEditor.Effects.TodoSearch.Result
+  alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.UI.Picker.Candidate
   alias MingaEditor.UI.Picker.TodoSearchSource
-  alias MingaEditor.PickerUI
 
   @keyword_pattern "(^|[[:space:]])(#|//|/\\*|%|--)[[:space:]]*(TODO|FIXME|HACK|NOTE|REVIEW|DEPRECATED)([^[:alnum:]_]|$)"
-  @command_timeout_ms 5_000
 
   @enforce_keys [:root, :revision]
-  defstruct [:root, :revision]
+  defstruct [:root, :revision, impl: TodoSearchPort]
 
-  @type t :: %__MODULE__{root: String.t(), revision: reference()}
-
-  alias MingaEditor.Effects.TodoSearch.Result
+  @type impl :: module()
+  @type t :: %__MODULE__{root: Root.t(), revision: reference(), impl: impl()}
 
   @doc "Builds a latest-wins TODO search request for one project root."
-  @spec request(String.t(), reference()) :: Request.t()
-  def request(root, revision) when is_binary(root) and is_reference(revision) do
+  @spec request(Root.t(), reference()) :: Request.t()
+  def request(%Root{} = root, revision) when is_reference(revision) do
     Request.new(
-      %__MODULE__{root: root, revision: revision},
+      %__MODULE__{root: root, revision: revision, impl: impl()},
       {:todo_search, root},
       Policy.latest_wins()
     )
@@ -39,21 +40,10 @@ defmodule MingaEditor.Effects.TodoSearch do
 
   @impl true
   @spec run(t()) :: {:ok, Result.t()} | {:error, String.t()}
-  def run(%__MODULE__{root: root, revision: revision}) do
-    with {:ok, output} <- search_output(root) do
-      items =
-        output
-        |> TodoSearchSource.parse_output()
-        |> TodoSearchSource.build_candidates(root)
-
-      {:ok,
-       %Result{
-         root: root,
-         revision: revision,
-         items: items,
-         candidates: Candidate.from_items(items),
-         meta: %{}
-       }}
+  def run(%__MODULE__{root: root} = effect) do
+    case Root.inventory_path(root) do
+      {:ok, canonical_root} -> run_authorized(effect, canonical_root)
+      {:error, reason} -> {:error, authorization_failure(reason)}
     end
   end
 
@@ -69,21 +59,22 @@ defmodule MingaEditor.Effects.TodoSearch do
           status: :completed,
           request: %Request{effect: effect},
           result: %Result{} = result
-        } =
-          outcome
+        } = outcome
       ) do
-    if result.revision == effect.revision do
-      apply_completed_result(state, effect, result, outcome)
-    else
-      {state, Outcome.stale(outcome, :revision_mismatch)}
-    end
+    apply_matching_revision(state, effect, result, outcome, result.revision == effect.revision)
   end
 
   def apply(
         state,
         %Outcome{status: :failed, request: %Request{effect: effect}, reason: reason} = outcome
       ) do
-    apply_failed_result(state, effect, failure_message(reason), outcome)
+    apply_failed_for_workspace(
+      state,
+      effect,
+      failure_message(reason),
+      outcome,
+      active_workspace_root()
+    )
   end
 
   def apply(state, %Outcome{} = outcome), do: {state, outcome}
@@ -91,6 +82,70 @@ defmodule MingaEditor.Effects.TodoSearch do
   @impl true
   @spec render?(Outcome.t()) :: boolean()
   def render?(%Outcome{}), do: true
+
+  @spec run_authorized(t(), String.t()) :: {:ok, Result.t()} | {:error, String.t()}
+  defp run_authorized(%__MODULE__{revision: revision, impl: impl}, canonical_root) do
+    with {:ok, output} <- search_output(canonical_root, impl) do
+      items =
+        output
+        |> TodoSearchSource.parse_output()
+        |> TodoSearchSource.build_candidates(canonical_root)
+
+      {:ok,
+       %Result{
+         revision: revision,
+         items: items,
+         candidates: Candidate.from_items(items),
+         meta: %{}
+       }}
+    end
+  end
+
+  @spec apply_matching_revision(EditorState.t(), t(), Result.t(), Outcome.t(), boolean()) ::
+          {EditorState.t(), Outcome.t()}
+  defp apply_matching_revision(state, effect, result, outcome, true) do
+    apply_completed_for_workspace(state, effect, result, outcome, active_workspace_root())
+  end
+
+  defp apply_matching_revision(state, _effect, _result, outcome, false) do
+    {state, Outcome.stale(outcome, :revision_mismatch)}
+  end
+
+  @spec apply_completed_for_workspace(
+          EditorState.t(),
+          t(),
+          Result.t(),
+          Outcome.t(),
+          Root.t() | nil
+        ) :: {EditorState.t(), Outcome.t()}
+  defp apply_completed_for_workspace(
+         state,
+         %__MODULE__{root: root} = effect,
+         result,
+         outcome,
+         root
+       ) do
+    apply_completed_result(state, effect, result, outcome)
+  end
+
+  defp apply_completed_for_workspace(state, _effect, _result, outcome, _active_root) do
+    {state, Outcome.stale(outcome, :workspace_rerooted)}
+  end
+
+  @spec apply_failed_for_workspace(
+          EditorState.t(),
+          t(),
+          String.t(),
+          Outcome.t(),
+          Root.t() | nil
+        ) :: {EditorState.t(), Outcome.t()}
+  defp apply_failed_for_workspace(state, %__MODULE__{root: root} = effect, reason, outcome, root) do
+    apply_failed_result(state, effect, reason, outcome)
+  end
+
+  defp apply_failed_for_workspace(state, _effect, _reason, outcome, _active_root) do
+    {state, Outcome.stale(outcome, :workspace_rerooted)}
+  end
 
   @spec apply_completed_result(EditorState.t(), t(), Result.t(), Outcome.t()) ::
           {EditorState.t(), Outcome.t()}
@@ -115,74 +170,58 @@ defmodule MingaEditor.Effects.TodoSearch do
     end
   end
 
-  defp search_output(root) do
-    if git_repo?(root) do
-      run_search_command("git", [
-        "-C",
-        root,
-        "grep",
-        "-n",
-        "-I",
-        "-E",
-        @keyword_pattern,
-        "--",
-        "."
-      ])
+  @spec active_workspace_root() :: Root.t() | nil
+  defp active_workspace_root do
+    Minga.Project.workspace_root()
+  catch
+    :exit, _reason -> nil
+  end
+
+  @spec impl() :: impl()
+  defp impl do
+    Application.get_env(:minga, :todo_search_port_module, TodoSearchPort)
+  end
+
+  @spec search_output(String.t(), impl()) :: {:ok, String.t()} | {:error, String.t()}
+  defp search_output(canonical_root, port_backend) do
+    if git_repo?(canonical_root, port_backend) do
+      run_search_command(
+        port_backend,
+        "git",
+        ["-C", canonical_root, "grep", "-n", "-I", "-E", @keyword_pattern, "--", "."]
+      )
     else
-      run_search_command("grep", ["-rnEI", "--exclude-dir=.git", @keyword_pattern, root])
+      run_search_command(port_backend, "grep", [
+        "-rnEI",
+        "--exclude-dir=.git",
+        @keyword_pattern,
+        canonical_root
+      ])
     end
   end
 
-  defp git_repo?(root) do
-    case run_port("git", ["-C", root, "rev-parse", "--is-inside-work-tree"]) do
+  @spec git_repo?(String.t(), impl()) :: boolean()
+  defp git_repo?(canonical_root, port_backend) do
+    case port_backend.run("git", ["-C", canonical_root, "rev-parse", "--is-inside-work-tree"]) do
       {output, 0} -> String.trim(output) == "true"
       _ -> false
     end
   end
 
-  defp run_search_command(command, args) do
-    case run_port(command, args) do
+  @spec run_search_command(impl(), String.t(), [String.t()]) ::
+          {:ok, String.t()} | {:error, String.t()}
+  defp run_search_command(port_backend, command, args) do
+    case port_backend.run(command, args) do
       {output, 0} -> {:ok, output}
       {_output, 1} -> {:ok, ""}
       {output, status} -> {:error, "#{command} exited with status #{status}: #{output}"}
     end
   end
 
-  defp run_port(command, args) do
-    case System.find_executable(command) do
-      nil -> {"#{command} executable not found", 127}
-      executable -> open_port(executable, args)
-    end
-  rescue
-    error -> {Exception.message(error), 1}
-  end
+  @spec authorization_failure(Root.error()) :: String.t()
+  defp authorization_failure(reason), do: "TODO search root rejected: #{reason}"
 
-  defp open_port(executable, args) do
-    port =
-      Port.open({:spawn_executable, executable}, [
-        :binary,
-        :exit_status,
-        :hide,
-        :stderr_to_stdout,
-        {:args, args},
-        {:line, 65_536}
-      ])
-
-    collect_port_output(port, [])
-  end
-
-  defp collect_port_output(port, acc) do
-    receive do
-      {^port, {:data, {:eol, chunk}}} -> collect_port_output(port, ["\n", chunk | acc])
-      {^port, {:data, {:noeol, chunk}}} -> collect_port_output(port, [chunk | acc])
-      {^port, {:exit_status, status}} -> {acc |> Enum.reverse() |> IO.iodata_to_binary(), status}
-    after
-      @command_timeout_ms ->
-        Port.close(port)
-        {"command timed out", 124}
-    end
-  end
-
+  @spec failure_message(term()) :: String.t()
   defp failure_message({:worker_exit, reason}),
     do: "TODO search worker failed: #{inspect(reason)}"
 

@@ -49,19 +49,19 @@ defmodule MingaEditor.UI.Picker.TodoSearchSource do
     |> Enum.flat_map(&parse_line/1)
   end
 
-  @doc "Builds picker items from parsed marker maps."
+  @doc "Builds picker items using the canonical root authorized by TODO search."
   @spec build_candidates([marker()] | {:ok, String.t()} | {:error, String.t()}, String.t()) :: [
           Item.t()
         ]
-  def build_candidates({:ok, output}, root),
-    do: output |> parse_output() |> build_candidates(root)
+  def build_candidates({:ok, output}, canonical_root),
+    do: output |> parse_output() |> build_candidates(canonical_root)
 
-  def build_candidates({:error, _message}, _root), do: []
+  def build_candidates({:error, _message}, _canonical_root), do: []
 
-  def build_candidates(markers, root) when is_list(markers) do
+  def build_candidates(markers, canonical_root) when is_list(markers) do
     markers
     |> Enum.with_index()
-    |> Enum.map(fn {marker, idx} -> marker_item(marker, idx, root) end)
+    |> Enum.map(fn {marker, idx} -> marker_item(marker, idx, canonical_root) end)
   end
 
   @impl true
@@ -93,9 +93,9 @@ defmodule MingaEditor.UI.Picker.TodoSearchSource do
   end
 
   @spec marker_item(marker(), non_neg_integer(), String.t()) :: Item.t()
-  defp marker_item(marker, idx, root) do
-    path = Path.expand(marker.path, root)
-    rel_path = Path.relative_to(path, root)
+  defp marker_item(marker, idx, canonical_root) do
+    path = Path.expand(marker.path, canonical_root)
+    rel_path = Path.relative_to(path, canonical_root)
     filename = Path.basename(path)
     filetype = Language.detect_filetype(filename)
     {icon, color} = Devicon.icon_and_color(filetype)
