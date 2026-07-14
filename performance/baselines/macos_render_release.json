@@ -2,13 +2,13 @@
   "version": 3,
   "fixtureVersion": "resident-ordinary-edit-v2",
   "measurementClock": "thread_cpu",
-  "decodeApplyP95Ms": 0.040,
-  "commandPreparationP95Ms": 0.360,
-  "combinedP95Ms": 0.415,
+  "decodeApplyP95Ms": 0.071,
+  "commandPreparationP95Ms": 0.387,
+  "combinedP95Ms": 0.460,
   "provenance": {
     "measuredAt": "2026-07-14",
     "environment": "GitHub-hosted macos-15 arm64 runner, macOS 15.7.7 (24G720)",
     "toolchain": "Apple Swift 6.1.2 (swiftlang-6.1.2.1.2 clang-1700.0.13.5), swiftc -O",
-    "rationale": "Switched the synchronous single-thread harness from process CPU to calling-thread CPU after unchanged renderer code produced 0.185 ms and 0.547 ms combined p95 in consecutive runs while p50 stayed stable, demonstrating contamination from unrelated process threads. Thread-CPU calibration is recorded in the final PR validation. The five-batch median, 1.20x regression ratio, 0.05 ms noise allowance, and hard-coded 4 ms stage and 8 ms combined ceilings remain authoritative."
+    "rationale": "Switched the synchronous single-thread harness from process CPU to calling-thread CPU after unchanged renderer code produced 0.185 ms and 0.547 ms combined p95 in consecutive process-clock runs while p50 stayed stable. Thread-CPU calibrations from CI run 29363711962 jobs 87189922733 and 87192352431 aggregated to 0.071/0.386/0.460 ms and 0.015/0.138/0.157 ms p95 for decode/apply, command preparation, and combined work. The conservative first run is checked in, rounded upward to three decimals. The five-batch median, 1.20x regression ratio, 0.05 ms noise allowance, and hard-coded 4 ms stage and 8 ms combined ceilings remain authoritative."
   }
 }
