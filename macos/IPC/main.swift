@@ -101,8 +101,8 @@ private func runtimeParentDirectory() -> String {
         fail("cannot read Darwin's per-user temporary directory")
     }
 
-    return URL(fileURLWithPath: String(cString: buffer), isDirectory: true)
-        .standardizedFileURL.path
+    let path = String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+    return URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL.path
 }
 
 private func runtimeDirectory() -> String {
@@ -243,7 +243,7 @@ private final class VnodeWatcher {
             data: 0,
             udata: nil
         )
-        guard Darwin.kevent(queue, &change, 1, nil, 0, nil) == 0 else {
+        guard kevent(queue, &change, 1, nil, 0, nil) == 0 else {
             throw IPCError.operational("cannot register startup directory watch")
         }
     }
@@ -257,7 +257,7 @@ private final class VnodeWatcher {
             data: 0,
             udata: nil
         )
-        guard Darwin.kevent(queue, &change, 1, nil, 0, nil) == 0 else {
+        guard kevent(queue, &change, 1, nil, 0, nil) == 0 else {
             throw IPCError.endpointLostBeforeAcceptance("Minga.app exited before accepting the request")
         }
     }
@@ -266,7 +266,7 @@ private final class VnodeWatcher {
         while true {
             var event = kevent()
             var timeout = try deadline.remainingTimespec()
-            let count = Darwin.kevent(queue, nil, 0, &event, 1, &timeout)
+            let count = kevent(queue, nil, 0, &event, 1, &timeout)
             if count == 0 { throw IPCError.transient("Minga.app did not publish its IPC endpoint within 15 seconds") }
             if count < 0 && errno == EINTR { continue }
             guard count > 0 else { throw IPCError.operational("IPC startup watch failed") }
@@ -365,7 +365,7 @@ private func connect(to path: String) throws -> Int32 {
 
     withUnsafeMutableBytes(of: &address.sun_path) { destination in
         destination.initializeMemory(as: UInt8.self, repeating: 0)
-        _ = bytes.withUnsafeBytes { source in destination.copyBytes(from: source) }
+        bytes.withUnsafeBytes { source in destination.copyBytes(from: source) }
     }
 
     let length = socklen_t(MemoryLayout<sa_family_t>.size + bytes.count)
@@ -400,7 +400,7 @@ private final class AppExitMonitor {
             data: 0,
             udata: nil
         )
-        guard Darwin.kevent(queue, &change, 1, nil, 0, nil) == 0 else {
+        guard kevent(queue, &change, 1, nil, 0, nil) == 0 else {
             close(queue)
             throw IPCError.appExited("Minga.app process exited")
         }
@@ -424,14 +424,14 @@ private final class AppExitMonitor {
             ident: UInt(fd), filter: Int16(EVFILT_READ), flags: UInt16(EV_ADD | EV_ENABLE | EV_ONESHOT),
             fflags: 0, data: 0, udata: nil
         )
-        guard Darwin.kevent(queue, &socketChange, 1, nil, 0, nil) == 0 else {
+        guard kevent(queue, &socketChange, 1, nil, 0, nil) == 0 else {
             throw IPCError.operational("cannot monitor IPC socket")
         }
 
         while true {
             var event = kevent()
             var timeout = try deadline?.remainingTimespec() ?? timespec(tv_sec: 3600, tv_nsec: 0)
-            let count = Darwin.kevent(queue, nil, 0, &event, 1, &timeout)
+            let count = kevent(queue, nil, 0, &event, 1, &timeout)
             if count == 0 {
                 if deadline != nil { throw IPCError.transient("Minga.app did not accept the request within 15 seconds") }
                 continue
