@@ -195,16 +195,146 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     assert rerooted_state.render.render_correlation.timer == nil
   end
 
-  test "project-root replacement exposes unavailable roots as errors", %{tmp_dir: root} do
+  test "project-root replacement immediately publishes loading before its scan finishes", %{
+    tmp_dir: root
+  } do
     old_root = Path.join(root, "old")
-    missing_root = Path.join(root, "missing")
-    File.mkdir_p!(old_root)
+    new_root = Path.join(root, "new")
+    Enum.each([old_root, new_root], &File.mkdir_p!/1)
+    scheduler = start_scheduler()
+    state = tui_state_with_tree(old_root, scheduler)
 
-    updated = old_root |> state_with_tree() |> Freshness.update_project_root(missing_root)
+    loading =
+      Freshness.update_project_root(state, new_root,
+        scanner: FileTreeRefreshScanner,
+        scanner_context: {self(), :project_root, :wait},
+        synchronize_watchers?: false
+      )
 
-    assert file_tree(updated).tree.root == Path.expand(missing_root)
-    assert {:error, reason} = FileTreeState.status(file_tree(updated))
+    request_id = file_tree(loading).refresh.current.token
+    assert file_tree(loading).tree.root == Path.expand(new_root)
+    assert file_tree(loading).tree.entries == nil
+    assert FileTreeState.status(file_tree(loading)) == :loading
+    assert is_reference(request_id)
+    assert_receive {:file_tree_scan_started, :project_root, worker}
+
+    result = tree(new_root, [entry(new_root, "new.ex")])
+    send(worker, {:release_file_tree_scan, :project_root, {:return, result}})
+    outcome = receive_outcome(scheduler, request_id, :completed)
+    assert :ok = EffectScheduler.claim(scheduler, outcome)
+    assert {loaded, %Outcome{status: :completed} = applied} = Refresh.apply(loading, outcome)
+    EffectScheduler.finalize(scheduler, applied)
+
+    assert file_tree(loaded).tree == result
+    Process.cancel_timer(loaded.render.render_correlation.timer)
+  end
+
+  test "rerooted project results are stale and only the exact latest root installs", %{
+    tmp_dir: root
+  } do
+    old_root = Path.join(root, "old")
+    first_root = Path.join(root, "first")
+    latest_root = Path.join(root, "latest")
+    Enum.each([old_root, first_root, latest_root], &File.mkdir_p!/1)
+    scheduler = start_scheduler()
+    state = tui_state_with_tree(old_root, scheduler)
+
+    first_state =
+      Freshness.update_project_root(state, first_root,
+        scanner: FileTreeRefreshScanner,
+        scanner_context: {self(), :first_root, :wait},
+        synchronize_watchers?: false
+      )
+
+    first_id = file_tree(first_state).refresh.current.token
+    assert_receive {:file_tree_scan_started, :first_root, first_worker}
+
+    latest_state =
+      Freshness.update_project_root(first_state, latest_root,
+        scanner: FileTreeRefreshScanner,
+        scanner_context: {self(), :latest_root, :wait},
+        synchronize_watchers?: false
+      )
+
+    latest_id = file_tree(latest_state).refresh.current.token
+    assert latest_id != first_id
+    assert_receive {:file_tree_scan_started, :latest_root, latest_worker}
+
+    first_result = tree(first_root, [entry(first_root, "first.ex")])
+    send(first_worker, {:release_file_tree_scan, :first_root, {:return, first_result}})
+    first_outcome = receive_outcome(scheduler, first_id, :completed)
+    assert :ok = EffectScheduler.claim(scheduler, first_outcome)
+
+    assert {latest_state, %Outcome{status: :stale, reason: :stale} = stale} =
+             Refresh.apply(latest_state, first_outcome)
+
+    EffectScheduler.finalize(scheduler, stale)
+
+    latest_result = tree(latest_root, [entry(latest_root, "latest.ex")])
+    send(latest_worker, {:release_file_tree_scan, :latest_root, {:return, latest_result}})
+    latest_outcome = receive_outcome(scheduler, latest_id, :completed)
+    assert :ok = EffectScheduler.claim(scheduler, latest_outcome)
+
+    assert {loaded, %Outcome{status: :completed} = applied} =
+             Refresh.apply(latest_state, latest_outcome)
+
+    EffectScheduler.finalize(scheduler, applied)
+    assert file_tree(loaded).tree == latest_result
+    Process.cancel_timer(loaded.render.render_correlation.timer)
+  end
+
+  test "project-root scan failure installs the requested root error and a later scan recovers", %{
+    tmp_dir: root
+  } do
+    old_root = Path.join(root, "old")
+    failed_root = Path.join(root, "failed")
+    recovered_root = Path.join(root, "recovered")
+    Enum.each([old_root, recovered_root], &File.mkdir_p!/1)
+    scheduler = start_scheduler()
+    state = tui_state_with_tree(old_root, scheduler)
+
+    failing =
+      Freshness.update_project_root(state, failed_root,
+        scanner: FileTreeRefreshScanner,
+        scanner_context: {self(), :failed_root, {:error, {:root_unavailable, :enoent}}},
+        synchronize_watchers?: false
+      )
+
+    failed_id = file_tree(failing).refresh.current.token
+    assert_receive {:file_tree_scan_started, :failed_root, _worker}
+    failed_outcome = receive_outcome(scheduler, failed_id, :failed)
+    assert :ok = EffectScheduler.claim(scheduler, failed_outcome)
+
+    assert {failed, %Outcome{status: :failed} = finalized_failure} =
+             Refresh.apply(failing, failed_outcome)
+
+    EffectScheduler.finalize(scheduler, finalized_failure)
+    assert file_tree(failed).tree.root == Path.expand(failed_root)
+    assert {:error, reason} = FileTreeState.status(file_tree(failed))
     assert reason != ""
+    Process.cancel_timer(failed.render.render_correlation.timer)
+
+    recovered_result = tree(recovered_root, [entry(recovered_root, "ok.ex")])
+
+    recovering =
+      Freshness.update_project_root(failed, recovered_root,
+        scanner: FileTreeRefreshScanner,
+        scanner_context: {self(), :recovered_root, {:return, recovered_result}},
+        synchronize_watchers?: false
+      )
+
+    recovered_id = file_tree(recovering).refresh.current.token
+    assert_receive {:file_tree_scan_started, :recovered_root, _worker}
+    recovered_outcome = receive_outcome(scheduler, recovered_id, :completed)
+    assert :ok = EffectScheduler.claim(scheduler, recovered_outcome)
+
+    assert {recovered, %Outcome{status: :completed} = finalized_recovery} =
+             Refresh.apply(recovering, recovered_outcome)
+
+    EffectScheduler.finalize(scheduler, finalized_recovery)
+    assert file_tree(recovered).tree == recovered_result
+    assert FileTreeState.status(file_tree(recovered)) == :ready
+    Process.cancel_timer(recovered.render.render_correlation.timer)
   end
 
   test "git metadata updates preserve an unavailable-root error", %{tmp_dir: root} do
@@ -253,6 +383,12 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     assert file_tree(failed).refresh.current == nil
     assert is_reference(failed.render.render_correlation.timer)
     Process.cancel_timer(failed.render.render_correlation.timer)
+  end
+
+  defp tui_state_with_tree(root, scheduler) do
+    state = state_with_tree(root, scheduler)
+    %Frontend{} = frontend = state.frontend
+    %{state | frontend: %Frontend{frontend | backend: :tui}}
   end
 
   defp state_with_tree(root, scheduler \\ nil, buffer \\ nil) do
@@ -318,6 +454,14 @@ defmodule MingaEditor.FileTree.FreshnessTest do
               end)
         }
       end)
+
+  defp receive_outcome(scheduler, request_id, status) do
+    assert_receive {:effect_result, ^scheduler,
+                    %Outcome{request: %{id: ^request_id}, status: ^status} = outcome},
+                   2_000
+
+    outcome
+  end
 
   defp file_tree(state), do: EditorState.file_tree_state(state)
 

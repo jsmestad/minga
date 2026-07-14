@@ -9,7 +9,12 @@ defmodule MingaEditor.FileTree.ProjectCache do
   the editor path. This module centralizes the "is this the active project root?"
   decision and the cache reads, with `:exit` guards so callers work even when the
   Project GenServer is unavailable (early startup, tests).
+
+  File-tree effects use `snapshot/1` in scheduler workers and pass the immutable
+  value into pure state transitions. The state owner never calls this service.
   """
+
+  alias MingaEditor.FileTree.ProjectCache.Snapshot
 
   @doc "Returns true when `root` expands to the active project root."
   @spec active_root?(String.t()) :: boolean()
@@ -42,5 +47,18 @@ defmodule MingaEditor.FileTree.ProjectCache do
     Minga.Project.rebuilding?()
   catch
     :exit, _ -> false
+  end
+
+  @doc "Reads all project-cache inputs needed to filter one root as an immutable value."
+  @spec snapshot(String.t()) :: Snapshot.t()
+  def snapshot(root) when is_binary(root) do
+    expanded_root = Path.expand(root)
+    active? = active_root?(expanded_root)
+
+    if active? do
+      Snapshot.new(expanded_root, true, files(), rebuilding?())
+    else
+      Snapshot.new(expanded_root, false, [], false)
+    end
   end
 end

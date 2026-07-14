@@ -98,11 +98,6 @@ defmodule MingaEditor.Handlers.FileEventHandler do
     handle_file_changed(state, path)
   end
 
-  def handle(state, {:file_tree_filter_walk, root, filter, entries})
-      when is_binary(root) and is_binary(filter) and is_list(entries) do
-    handle_filter_walk_result(state, root, filter, entries)
-  end
-
   def handle(state, {:git_remote_result, ref, result}) when is_reference(ref) do
     {state, [{:handle_git_remote_result, ref, result}]}
   end
@@ -307,16 +302,4 @@ defmodule MingaEditor.Handlers.FileEventHandler do
   end
 
   defp maybe_refresh_file_picker(state), do: state
-
-  @spec handle_filter_walk_result(EditorState.t(), String.t(), String.t(), [
-          Minga.Project.FileTree.entry()
-        ]) :: {EditorState.t(), [file_effect()]}
-  defp handle_filter_walk_result(state, root, filter, entries) do
-    file_tree =
-      state.workspace.file_tree
-      |> MingaEditor.State.FileTree.apply_filter_walk(root, filter, entries)
-
-    {%{state | workspace: MingaEditor.Session.State.set_file_tree(state.workspace, file_tree)},
-     [{:render, 16}]}
-  end
 end

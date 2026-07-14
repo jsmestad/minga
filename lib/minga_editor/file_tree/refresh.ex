@@ -20,7 +20,17 @@ defmodule MingaEditor.FileTree.Refresh do
   alias MingaEditor.State, as: EditorState
 
   @enforce_keys [:root, :tree, :events_registry, :scanner, :scanner_context]
-  defstruct [:root, :tree, :events_registry, :scanner, :scanner_context]
+  defstruct [
+    :root,
+    :tree,
+    :events_registry,
+    :scanner,
+    :scanner_context,
+    :previous_root,
+    :watcher_backend,
+    :watcher_context,
+    synchronize_watchers?: true
+  ]
 
   @typedoc "Scanner module input kept as data in the scheduler request."
   @type scanner_context :: term()
@@ -30,7 +40,11 @@ defmodule MingaEditor.FileTree.Refresh do
           tree: FileTree.t(),
           events_registry: Minga.Events.registry(),
           scanner: module(),
-          scanner_context: scanner_context()
+          scanner_context: scanner_context(),
+          previous_root: String.t() | nil,
+          watcher_backend: module() | nil,
+          watcher_context: term(),
+          synchronize_watchers?: boolean()
         }
 
   @doc "Builds a coalescing request keyed by the expanded file-tree root."
@@ -43,7 +57,11 @@ defmodule MingaEditor.FileTree.Refresh do
       tree: tree,
       events_registry: events_registry,
       scanner: Keyword.get(opts, :scanner, MingaEditor.FileTree.Refresh.FilesystemScanner),
-      scanner_context: Keyword.get(opts, :scanner_context)
+      scanner_context: Keyword.get(opts, :scanner_context),
+      previous_root: expanded_optional_root(Keyword.get(opts, :previous_root)),
+      watcher_backend: Keyword.get(opts, :watcher_backend),
+      watcher_context: Keyword.get(opts, :watcher_context),
+      synchronize_watchers?: Keyword.get(opts, :synchronize_watchers?, true)
     }
 
     Request.new(effect, {:file_tree_root, expanded_root}, Policy.coalescing(1))
@@ -66,7 +84,9 @@ defmodule MingaEditor.FileTree.Refresh do
 
   @impl true
   @spec coalesce(t(), t()) :: t()
-  def coalesce(%__MODULE__{}, %__MODULE__{} = newer), do: newer
+  def coalesce(%__MODULE__{previous_root: previous_root}, %__MODULE__{} = newer) do
+    %{newer | previous_root: newer.previous_root || previous_root}
+  end
 
   @impl true
   @spec apply(EditorState.t(), Outcome.t()) :: {EditorState.t(), Outcome.t()}
@@ -109,6 +129,10 @@ defmodule MingaEditor.FileTree.Refresh do
 
       :ok
   end
+
+  @spec expanded_optional_root(String.t() | nil) :: String.t() | nil
+  defp expanded_optional_root(nil), do: nil
+  defp expanded_optional_root(root) when is_binary(root), do: Path.expand(root)
 
   @spec start_repo(String.t(), String.t(), Minga.Events.registry()) :: :ok
   defp start_repo(git_root, root, events_registry) do

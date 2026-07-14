@@ -88,6 +88,26 @@ defmodule MingaEditor.State.FileTree.RefreshTest do
     assert accepted.tree == refreshed
   end
 
+  test "a matching request and tree root still require the current project root" do
+    root = "/tmp/minga-refresh-project-root"
+    other_root = "/tmp/minga-refresh-other-project"
+    request = make_ref()
+
+    file_tree =
+      root
+      |> open_tree()
+      |> FileTreeState.track_refresh_request(root, request)
+      |> FileTreeState.set_project_root(other_root)
+
+    result = tree(root, [entry(root, "stale.ex")])
+
+    assert {:rerooted, unchanged} =
+             FileTreeState.accept_refresh_result(file_tree, root, request, result)
+
+    assert unchanged.tree == file_tree.tree
+    assert unchanged.project_root == Path.expand(other_root)
+  end
+
   test "closing and reopening the same root invalidates the old result" do
     root = "/tmp/minga-refresh-closed"
     request = make_ref()

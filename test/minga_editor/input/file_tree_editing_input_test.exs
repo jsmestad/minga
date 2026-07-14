@@ -14,6 +14,10 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
   @moduletag :tmp_dir
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias MingaEditor.Effect.Outcome
+  alias MingaEditor.EffectScheduler
+  alias MingaEditor.FileTree.FilterWalk
+  alias MingaEditor.FileTree.Refresh
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
@@ -32,9 +36,11 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
 
     tree = FileTree.new(tmp_dir)
     buf = BufferSync.start_buffer(tree)
+    scheduler = start_scheduler()
 
     %EditorState{
-      frontend: %MingaEditor.State.Frontend{port_manager: self()},
+      frontend: %MingaEditor.State.Frontend{port_manager: self(), backend: :tui},
+      effect_scheduler: scheduler,
       workspace:
         %SessionState{viewport: Viewport.new(24, 80), keymap_scope: :file_tree}
         |> SessionState.set_file_tree(%FileTreeState{} |> FileTreeState.open(tree, buf)),
@@ -45,6 +51,57 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
   end
 
   defp ft(state), do: EditorState.file_tree_state(state)
+
+  defp complete_current_filter(state) do
+    request_id = ft(state).filter_request.token
+    outcome = receive_outcome(state.effect_scheduler, request_id, :completed)
+    assert :ok = EffectScheduler.claim(state.effect_scheduler, outcome)
+    assert {state, %Outcome{status: :completed} = applied} = FilterWalk.apply(state, outcome)
+    EffectScheduler.finalize(state.effect_scheduler, applied)
+    cancel_render_timer(state)
+  end
+
+  defp complete_current_refresh(state) do
+    request_id = ft(state).refresh.current.token
+    outcome = receive_outcome(state.effect_scheduler, request_id, :completed)
+    assert :ok = EffectScheduler.claim(state.effect_scheduler, outcome)
+    assert {state, %Outcome{status: :completed} = applied} = Refresh.apply(state, outcome)
+    EffectScheduler.finalize(state.effect_scheduler, applied)
+    cancel_render_timer(state)
+  end
+
+  defp receive_outcome(scheduler, request_id, status) do
+    assert_receive {:effect_result, ^scheduler,
+                    %Outcome{request: %{id: ^request_id}, status: ^status} = outcome},
+                   2_000
+
+    outcome
+  end
+
+  defp cancel_render_timer(state) do
+    case state.render.render_correlation.timer do
+      timer when is_reference(timer) -> Process.cancel_timer(timer)
+      nil -> :ok
+    end
+
+    state
+  end
+
+  defp start_scheduler do
+    task_supervisor =
+      start_supervised!(Supervisor.child_spec({Task.Supervisor, []}, id: make_ref()))
+
+    scheduler =
+      start_supervised!(
+        Supervisor.child_spec(
+          {EffectScheduler, task_supervisor: task_supervisor},
+          id: make_ref()
+        )
+      )
+
+    :ok = EffectScheduler.attach(scheduler, self())
+    scheduler
+  end
 
   defp make_editing_state(tmp_dir, opts \\ []) do
     state = make_state(tmp_dir)
@@ -178,6 +235,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
 
       {:handled, state} = FileTreeHandler.handle_key(state, ?a, 0)
       {:handled, state} = FileTreeHandler.handle_key(state, ?l, 0)
+      state = complete_current_filter(state)
       assert ft(state).tree.filter == "al"
       assert BufferProcess.content(ft(state).buffer) =~ "alpha.txt"
       refute BufferProcess.content(ft(state).buffer) =~ "beta.txt"
@@ -207,6 +265,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
         end)
 
       {:handled, state} = FileTreeHandler.handle_key(state, @escape, 0)
+      state = complete_current_refresh(state)
       assert ft(state).filtering == false
       assert ft(state).tree.filter == nil
     end
@@ -232,23 +291,12 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
 
       {:handled, state} = FileTreeHandler.handle_key(state, ?/, 0)
       {:handled, state} = FileTreeHandler.handle_key(state, ?z, 0)
-
-      no_matches = FileTreeState.apply_filter_walk(ft(state), tree.root, "z", [])
-
-      state =
-        then(state, fn state ->
-          %{
-            state
-            | workspace:
-                then(state.workspace, fn workspace ->
-                  MingaEditor.Session.State.set_file_tree(workspace, no_matches)
-                end)
-          }
-        end)
+      state = complete_current_filter(state)
 
       assert FileTreeState.status(ft(state)) == :empty
 
       {:handled, state} = FileTreeHandler.handle_key(state, @escape, 0)
+      state = complete_current_refresh(state)
 
       assert ft(state).filtering == false
       assert ft(state).tree.filter == nil

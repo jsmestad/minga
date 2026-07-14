@@ -258,13 +258,11 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       assert effects == []
     end
 
-    test "project rebuild changes the visible tree root", %{tmp_dir: tmp_dir} do
+    test "project rebuild immediately publishes the new root loading state", %{tmp_dir: tmp_dir} do
       old_root = Path.join(tmp_dir, "old")
       new_root = Path.join(tmp_dir, "new")
       File.mkdir_p!(old_root)
       File.mkdir_p!(new_root)
-      File.write!(Path.join(old_root, "old.ex"), "")
-      File.write!(Path.join(new_root, "new.ex"), "")
 
       state = state_with_tree(old_root)
 
@@ -275,12 +273,10 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
           %Minga.Events.ProjectRebuiltEvent{root: new_root}
         })
 
-      names =
-        ft(new_state).tree |> FileTree.visible_entries() |> Enum.map(& &1.name)
-
       assert ft(new_state).project_root == Path.expand(new_root)
-      assert "new.ex" in names
-      refute "old.ex" in names
+      assert ft(new_state).tree.root == Path.expand(new_root)
+      assert ft(new_state).tree.entries == nil
+      assert FileTreeState.status(ft(new_state)) == :loading
       assert {:render, 16} in effects
     end
   end

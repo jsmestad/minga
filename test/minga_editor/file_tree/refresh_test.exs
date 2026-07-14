@@ -216,7 +216,8 @@ defmodule MingaEditor.FileTree.RefreshTest do
   defp request(tree, label, action) do
     Refresh.request(tree, Minga.Events.default_registry(),
       scanner: FileTreeRefreshScanner,
-      scanner_context: {self(), label, action}
+      scanner_context: {self(), label, action},
+      synchronize_watchers?: false
     )
   end
 

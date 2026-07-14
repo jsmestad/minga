@@ -8,10 +8,11 @@ defmodule MingaEditor.State.FileTree do
   """
 
   alias Minga.Project.FileTree
-  alias MingaEditor.FileTree.FilterWalk
-  alias MingaEditor.FileTree.ProjectCache
+  alias MingaEditor.FileTree.FilterWalk.Result, as: FilterResult
+  alias MingaEditor.FileTree.ProjectCache.Snapshot, as: ProjectCacheSnapshot
   alias MingaEditor.State.FileTree.ClipboardMark
   alias MingaEditor.State.FileTree.Refresh
+  alias MingaEditor.State.FileTree.Watchers
 
   @typedoc """
   Inline editing state for creating files/folders or renaming entries.
@@ -33,6 +34,13 @@ defmodule MingaEditor.State.FileTree do
   @type clipboard_operation :: ClipboardMark.operation()
   @type clipboard_mark :: ClipboardMark.t()
 
+  @typedoc "Identity of the latest admitted filter request."
+  @type filter_request :: %{
+          root: String.t(),
+          filter: String.t(),
+          token: reference()
+        }
+
   @typedoc "Explicit presentation state for the file tree sidebar."
   @type tree_status :: :hidden | :loading | :empty | :ready | {:error, String.t()}
 
@@ -50,6 +58,8 @@ defmodule MingaEditor.State.FileTree do
           refresh: Refresh.t(),
           clipboard_mark: clipboard_mark() | nil,
           filtering: boolean(),
+          filter_request: filter_request() | nil,
+          watchers: Watchers.t(),
           help_visible: boolean()
         }
 
@@ -65,6 +75,8 @@ defmodule MingaEditor.State.FileTree do
             refresh: %Refresh{},
             clipboard_mark: nil,
             filtering: false,
+            filter_request: nil,
+            watchers: %Watchers{},
             help_visible: false
 
   @doc """
@@ -147,6 +159,8 @@ defmodule MingaEditor.State.FileTree do
   @doc "Opens the tree with the given data, buffer, and focused state."
   @spec open(t(), FileTree.t(), pid() | nil) :: t()
   def open(%__MODULE__{} = ft, tree, buffer) do
+    watchers = Watchers.retarget(ft.watchers, current_tree_roots(ft), tree)
+
     %{
       ft
       | tree: tree,
@@ -157,7 +171,9 @@ defmodule MingaEditor.State.FileTree do
         original_root: ft.original_root || tree.root,
         tree_status: classify_tree(tree),
         tree_width: tree.width,
-        refresh: refresh_for_tree(ft, tree.root)
+        refresh: refresh_for_tree(ft, tree.root),
+        filter_request: nil,
+        watchers: watchers
     }
   end
 
@@ -165,6 +181,7 @@ defmodule MingaEditor.State.FileTree do
   @spec replace_tree(t(), FileTree.t()) :: t()
   def replace_tree(%__MODULE__{} = ft, %FileTree{} = tree) do
     refresh = refresh_for_tree(ft, tree.root)
+    watchers = Watchers.retarget(ft.watchers, current_tree_roots(ft), tree)
 
     %{
       ft
@@ -172,7 +189,9 @@ defmodule MingaEditor.State.FileTree do
         project_root: tree.root,
         tree_status: replacement_status(ft, tree),
         tree_width: tree.width,
-        refresh: refresh
+        refresh: refresh,
+        filter_request: nil,
+        watchers: watchers
     }
   end
 
@@ -188,6 +207,7 @@ defmodule MingaEditor.State.FileTree do
       | focused: false,
         editing: nil,
         filtering: false,
+        filter_request: nil,
         help_visible: false,
         tree_status: :loading
     }
@@ -200,6 +220,62 @@ defmodule MingaEditor.State.FileTree do
   def set_project_root(%__MODULE__{} = ft, root) when is_binary(root) do
     expanded = Path.expand(root)
     %{ft | project_root: expanded, original_root: expanded}
+  end
+
+  @doc "Publishes an immediate loading tree for a root scan without resolving entries."
+  @spec begin_root_scan(t(), FileTree.t(), :project | :reroot) :: t()
+  def begin_root_scan(%__MODULE__{} = ft, %FileTree{} = tree, kind)
+      when kind in [:project, :reroot] do
+    expanded_root = Path.expand(tree.root)
+    original_root = if kind == :project, do: expanded_root, else: ft.original_root
+    watchers = Watchers.retarget(ft.watchers, current_tree_roots(ft), tree)
+
+    %{
+      ft
+      | tree: tree,
+        project_root: expanded_root,
+        original_root: original_root,
+        tree_status: :loading,
+        tree_width: tree.width,
+        editing: nil,
+        filtering: false,
+        filter_request: nil,
+        help_visible: false,
+        refresh: Refresh.invalidate(ft.refresh),
+        watchers: watchers
+    }
+  end
+
+  @doc "Returns the immutable watcher intent owned by this file tree."
+  @spec watcher_intent(t()) :: Watchers.t()
+  def watcher_intent(%__MODULE__{} = ft), do: ft.watchers
+
+  @doc "Correlates the latest admitted watcher synchronization request."
+  @spec track_watcher_request(t(), reference()) :: t()
+  def track_watcher_request(%__MODULE__{} = ft, token) when is_reference(token) do
+    %{ft | watchers: Watchers.request_admitted(ft.watchers, token)}
+  end
+
+  @doc "Collapses watcher lineage only for the latest exact successful request."
+  @spec accept_watcher_result(t(), reference(), String.t() | nil) :: {:current | :stale, t()}
+  def accept_watcher_result(%__MODULE__{} = ft, token, target) when is_reference(token) do
+    case Watchers.synchronized(ft.watchers, token, target) do
+      {status, watchers} -> {status, %{ft | watchers: watchers}}
+    end
+  end
+
+  @doc "Finishes watcher work without discarding cleanup candidates."
+  @spec finish_watcher_request(t(), reference()) :: {:current | :stale, t()}
+  def finish_watcher_request(%__MODULE__{} = ft, token) when is_reference(token) do
+    case Watchers.request_finished(ft.watchers, token) do
+      {status, watchers} -> {status, %{ft | watchers: watchers}}
+    end
+  end
+
+  @doc "Changes the watcher target to cleanup-only while retaining all known roots."
+  @spec cleanup_watchers(t()) :: t()
+  def cleanup_watchers(%__MODULE__{} = ft) do
+    %{ft | watchers: Watchers.cleanup(ft.watchers, current_tree_roots(ft))}
   end
 
   @doc "Records one debounced request to refresh the open tree."
@@ -274,9 +350,21 @@ defmodule MingaEditor.State.FileTree do
     %{ft | tree_status: {:error, format_error_reason(reason)}}
   end
 
+  @doc "Installs an empty failed root scan while retaining the requested root."
+  @spec root_scan_failed(t(), term()) :: t()
+  def root_scan_failed(%__MODULE__{tree: %FileTree{} = tree} = ft, reason) do
+    ft
+    |> replace_tree(FileTree.put_entries(tree, []))
+    |> refresh_failed(reason)
+  end
+
+  def root_scan_failed(%__MODULE__{} = ft, reason), do: refresh_failed(ft, reason)
+
   @doc "Closes the tree and clears the buffer."
   @spec close(t()) :: t()
   def close(%__MODULE__{} = ft) do
+    watchers = Watchers.cleanup(ft.watchers, current_tree_roots(ft))
+
     %{
       ft
       | tree: nil,
@@ -287,6 +375,8 @@ defmodule MingaEditor.State.FileTree do
         tree_status: :hidden,
         clipboard_mark: nil,
         filtering: false,
+        filter_request: nil,
+        watchers: watchers,
         help_visible: false,
         refresh: Refresh.invalidate(ft.refresh)
     }
@@ -332,117 +422,87 @@ defmodule MingaEditor.State.FileTree do
   @spec clear_clipboard(t()) :: t()
   def clear_clipboard(%__MODULE__{} = ft), do: %{ft | clipboard_mark: nil}
 
-  @doc "Starts inline file tree filtering."
+  @doc "Starts inline file tree filtering without resolving any rows."
   @spec start_filtering(t()) :: t()
   def start_filtering(%__MODULE__{tree: %FileTree{filter: filter} = tree} = ft)
       when filter in [nil, ""] do
     %{ft | tree: FileTree.begin_filter(tree), filtering: true, editing: nil, help_visible: false}
   end
 
-  def start_filtering(%__MODULE__{tree: %FileTree{} = tree} = ft) do
-    {tree, status} = filtered_tree(tree, tree.filter)
-
-    %{
-      ft
-      | tree: tree,
-        tree_status: status,
-        filtering: true,
-        editing: nil,
-        help_visible: false
-    }
+  def start_filtering(%__MODULE__{tree: %FileTree{filter: filter}} = ft)
+      when is_binary(filter) and filter != "" do
+    ft
+    |> update_filter(filter)
+    |> then(&%{&1 | filtering: true, editing: nil, help_visible: false})
   end
 
   def start_filtering(%__MODULE__{} = ft), do: ft
 
-  @doc """
-  Updates the active file tree filter.
-
-  When the tree root matches the active project root, the matching entries are
-  filtered in memory from the project's cached file list (`Minga.Project.files/0`)
-  rather than walking the filesystem. Roots not covered by the active cache fall
-  back to the filesystem walk.
-
-  While the active project's cache is still rebuilding (empty list), the tree
-  reports a `:loading` pending state instead of silently re-shelling out.
-  """
+  @doc "Publishes a loading filter transition without cache or filesystem calls."
   @spec update_filter(t(), String.t()) :: t()
   def update_filter(%__MODULE__{tree: %FileTree{} = tree} = ft, filter)
       when is_binary(filter) and filter != "" do
-    {tree, status} = filtered_tree(tree, filter)
-    %{ft | tree: tree, tree_status: status}
+    tree = tree |> FileTree.put_cached_files(nil) |> FileTree.set_filter(filter)
+    %{ft | tree: tree, tree_status: :loading, filter_request: nil}
   end
 
   def update_filter(%__MODULE__{} = ft, _filter), do: ft
 
-  @doc """
-  Returns true when filtering the tree requires the async no-cache filesystem
-  walk (#2377 AC4): a filter is active and the tree root is not the active
-  project root, so in-memory cache filtering does not cover it.
-  """
-  @spec needs_filter_walk?(t()) :: boolean()
-  def needs_filter_walk?(%__MODULE__{tree: %FileTree{filter: filter, root: root}})
-      when is_binary(filter) and filter != "" do
-    not ProjectCache.active_root?(root)
-  end
+  @doc "Publishes an unfiltered loading tree while preserving filter-input disposition."
+  @spec clear_filter_loading(t(), :keep_open | :dismiss) :: t()
+  def clear_filter_loading(%__MODULE__{tree: %FileTree{} = tree} = ft, disposition) do
+    tree = tree |> FileTree.put_cached_files(nil) |> FileTree.clear_filter()
 
-  def needs_filter_walk?(%__MODULE__{}), do: false
-
-  @doc """
-  Applies an async no-cache filter walk result, dropping it if stale.
-
-  The result is keyed by the `(root, filter)` it was computed for; if the user
-  has since changed the filter or re-rooted the tree it is discarded so a slow
-  walk never clobbers newer state (#2377 AC4 stale-result dropping).
-  """
-  @spec apply_filter_walk(t(), String.t(), String.t(), [FileTree.entry()]) :: t()
-  def apply_filter_walk(%__MODULE__{tree: %FileTree{} = tree} = ft, root, filter, entries) do
-    if FilterWalk.fresh?(tree, root, filter) do
-      tree = FileTree.put_entries(tree, entries)
-      %{ft | tree: tree, tree_status: classify_entries(entries)}
-    else
+    %{
       ft
+      | tree: tree,
+        tree_status: :loading,
+        filtering: disposition == :keep_open,
+        filter_request: nil
+    }
+  end
+
+  def clear_filter_loading(%__MODULE__{} = ft, _disposition), do: ft
+
+  @doc "Correlates the latest admitted filter request with its exact root and query."
+  @spec track_filter_request(t(), String.t(), String.t(), reference()) :: t()
+  def track_filter_request(%__MODULE__{} = ft, root, filter, token)
+      when is_binary(root) and is_binary(filter) and is_reference(token) do
+    request = %{root: Path.expand(root), filter: filter, token: token}
+    %{ft | filter_request: request, refresh: Refresh.invalidate(ft.refresh)}
+  end
+
+  @doc "Installs a current filter result prepared by a scheduler worker."
+  @spec accept_filter_result(t(), String.t(), String.t(), reference(), FilterResult.t()) ::
+          {:accepted | :closed | :rerooted | :stale, t()}
+  def accept_filter_result(
+        %__MODULE__{} = ft,
+        root,
+        filter,
+        token,
+        %FilterResult{} = result
+      )
+      when is_binary(root) and is_binary(filter) and is_reference(token) do
+    case classify_filter_request(ft, root, filter, token) do
+      :current -> install_filter_result(%{ft | filter_request: nil}, result)
+      reason -> {reason, ft}
     end
   end
 
-  def apply_filter_walk(%__MODULE__{} = ft, _root, _filter, _entries), do: ft
-
-  # Resolves the filtered tree plus its presentation status. An empty filter is
-  # the full unfiltered tree (always classified from the walk). With an active
-  # filter, the active project root filters in memory from the cache; a
-  # rebuilding (empty) cache reports `:loading`; other roots defer to an async
-  # filesystem walk (`:loading` until the walk result arrives).
-  @spec filtered_tree(FileTree.t(), String.t()) :: {FileTree.t(), tree_status()}
-  defp filtered_tree(%FileTree{root: root} = tree, filter) do
-    if ProjectCache.active_root?(root) do
-      filtered_from_cache(tree, filter, ProjectCache.files())
-    else
-      # No-cache root: clear the cache and mark loading; the editor spawns an
-      # async walk (see needs_filter_walk?/1) and applies the result later.
-      tree = tree |> FileTree.put_cached_files(nil) |> FileTree.set_filter(filter)
-      {tree, :loading}
+  @doc "Finishes a current failed or canceled filter request without installing rows."
+  @spec finish_filter(t(), String.t(), String.t(), reference()) ::
+          {:current | :closed | :rerooted | :stale, t()}
+  def finish_filter(%__MODULE__{} = ft, root, filter, token)
+      when is_binary(root) and is_binary(filter) and is_reference(token) do
+    case classify_filter_request(ft, root, filter, token) do
+      :current -> {:current, %{ft | filter_request: nil}}
+      reason -> {reason, ft}
     end
   end
 
-  @spec filtered_from_cache(FileTree.t(), String.t(), [String.t()]) ::
-          {FileTree.t(), tree_status()}
-  defp filtered_from_cache(tree, filter, []) do
-    # Active root but the cache is empty: a rebuild is in progress (or the
-    # project has no files). Show a pending state rather than re-shelling out.
-    tree = tree |> FileTree.put_cached_files([]) |> FileTree.set_filter(filter)
-    {tree, cache_pending_status(tree)}
-  end
-
-  defp filtered_from_cache(tree, filter, files) do
-    tree = tree |> FileTree.put_cached_files(files) |> FileTree.set_filter(filter)
-    {tree, classify_entries(FileTree.visible_entries(tree))}
-  end
-
-  @spec cache_pending_status(FileTree.t()) :: tree_status()
-  defp cache_pending_status(tree) do
-    if ProjectCache.rebuilding?(),
-      do: :loading,
-      else: classify_entries(FileTree.visible_entries(tree))
-  end
+  @doc "Reports a current filter failure while preserving recovery on the next query."
+  @spec filter_failed(t(), term()) :: t()
+  def filter_failed(%__MODULE__{} = ft, reason), do: refresh_failed(ft, reason)
 
   @doc "Accepts the current filter and leaves the narrowed tree visible."
   @spec accept_filter(t()) :: t()
@@ -466,7 +526,14 @@ defmodule MingaEditor.State.FileTree do
   @doc "Replaces the tree data."
   @spec set_tree(t(), FileTree.t() | nil) :: t()
   def set_tree(%__MODULE__{} = ft, nil) do
-    %{ft | tree: nil, tree_status: :hidden, refresh: Refresh.invalidate(ft.refresh)}
+    %{
+      ft
+      | tree: nil,
+        tree_status: :hidden,
+        refresh: Refresh.invalidate(ft.refresh),
+        filter_request: nil,
+        watchers: Watchers.cleanup(ft.watchers, current_tree_roots(ft))
+    }
   end
 
   def set_tree(%__MODULE__{} = ft, %FileTree{} = tree), do: replace_tree(ft, tree)
@@ -480,24 +547,121 @@ defmodule MingaEditor.State.FileTree do
   defp accept_current_refresh(%__MODULE__{tree: nil} = ft, _root, _tree), do: {:closed, ft}
 
   defp accept_current_refresh(
-         %__MODULE__{tree: %FileTree{root: live_root}} = ft,
+         %__MODULE__{
+           tree: %FileTree{root: live_root},
+           project_root: project_root,
+           filter_request: filter_request
+         } = ft,
          root,
          %FileTree{root: result_root} = refreshed_tree
        ) do
-    case {Path.expand(live_root) == Path.expand(root),
-          Path.expand(result_root) == Path.expand(root)} do
-      {false, _result_matches?} -> {:rerooted, ft}
-      {true, false} -> {:stale, ft}
-      {true, true} -> {:accepted, replace_tree(ft, refreshed_tree)}
+    expanded_root = Path.expand(root)
+
+    case {Path.expand(live_root) == expanded_root,
+          is_binary(project_root) and Path.expand(project_root) == expanded_root,
+          Path.expand(result_root) == expanded_root, is_nil(filter_request)} do
+      {false, _project_matches?, _result_matches?, _filter_idle?} -> {:rerooted, ft}
+      {true, false, _result_matches?, _filter_idle?} -> {:rerooted, ft}
+      {true, true, false, _filter_idle?} -> {:stale, ft}
+      {true, true, true, false} -> {:stale, ft}
+      {true, true, true, true} -> {:accepted, replace_tree(ft, refreshed_tree)}
     end
   end
 
   @spec classify_current_tree(t(), String.t()) :: {:current | :closed | :rerooted, t()}
   defp classify_current_tree(%__MODULE__{tree: nil} = ft, _root), do: {:closed, ft}
 
-  defp classify_current_tree(%__MODULE__{tree: %FileTree{root: live_root}} = ft, root) do
-    if Path.expand(live_root) == Path.expand(root), do: {:current, ft}, else: {:rerooted, ft}
+  defp classify_current_tree(
+         %__MODULE__{tree: %FileTree{root: live_root}, project_root: project_root} = ft,
+         root
+       ) do
+    expanded_root = Path.expand(root)
+
+    if Path.expand(live_root) == expanded_root and is_binary(project_root) and
+         Path.expand(project_root) == expanded_root do
+      {:current, ft}
+    else
+      {:rerooted, ft}
+    end
   end
+
+  @spec classify_filter_request(t(), String.t(), String.t(), reference()) ::
+          :current | :closed | :rerooted | :stale
+  defp classify_filter_request(%__MODULE__{tree: nil}, _root, _filter, _token), do: :closed
+
+  defp classify_filter_request(
+         %__MODULE__{
+           tree: %FileTree{root: live_root, filter: live_filter},
+           project_root: project_root,
+           filter_request: request
+         },
+         root,
+         filter,
+         token
+       ) do
+    expanded_root = Path.expand(root)
+
+    case request do
+      %{root: ^expanded_root, filter: ^filter, token: ^token} ->
+        if Path.expand(live_root) == expanded_root and live_filter == filter and
+             is_binary(project_root) and Path.expand(project_root) == expanded_root do
+          :current
+        else
+          :rerooted
+        end
+
+      _request ->
+        :stale
+    end
+  end
+
+  @spec install_filter_result(t(), FilterResult.t()) ::
+          {:accepted | :stale, t()}
+  defp install_filter_result(
+         %__MODULE__{tree: %FileTree{} = tree} = ft,
+         %FilterResult{root: root, filter: filter, source: :filesystem, entries: entries}
+       )
+       when is_list(entries) do
+    if Path.expand(tree.root) == Path.expand(root) and tree.filter == filter do
+      tree = FileTree.put_entries(tree, entries)
+      watchers = Watchers.retarget(ft.watchers, [tree.root], tree)
+      {:accepted, %{ft | tree: tree, tree_status: classify_entries(entries), watchers: watchers}}
+    else
+      {:stale, ft}
+    end
+  end
+
+  defp install_filter_result(
+         %__MODULE__{tree: %FileTree{} = tree} = ft,
+         %FilterResult{
+           root: root,
+           filter: filter,
+           source: :project_cache,
+           entries: entries,
+           project_cache: %ProjectCacheSnapshot{} = snapshot
+         }
+       )
+       when is_list(entries) do
+    if Path.expand(tree.root) == Path.expand(root) and tree.filter == filter and
+         snapshot.active? and Path.expand(snapshot.root) == Path.expand(root) do
+      tree = tree |> FileTree.put_cached_files(snapshot.files) |> FileTree.put_entries(entries)
+      status = cache_result_status(entries, snapshot)
+      watchers = Watchers.retarget(ft.watchers, [tree.root], tree)
+      {:accepted, %{ft | tree: tree, tree_status: status, watchers: watchers}}
+    else
+      {:stale, ft}
+    end
+  end
+
+  @spec cache_result_status([FileTree.entry()], ProjectCacheSnapshot.t()) :: tree_status()
+  defp cache_result_status(_entries, %ProjectCacheSnapshot{files: [], rebuilding?: true}),
+    do: :loading
+
+  defp cache_result_status(entries, %ProjectCacheSnapshot{}), do: classify_entries(entries)
+
+  @spec current_tree_roots(t()) :: [String.t()]
+  defp current_tree_roots(%__MODULE__{tree: %FileTree{root: root}}), do: [root]
+  defp current_tree_roots(%__MODULE__{}), do: []
 
   @spec refresh_for_tree(t(), String.t()) :: Refresh.t()
   defp refresh_for_tree(

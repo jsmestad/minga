@@ -13,8 +13,11 @@ defmodule MingaEditor.FileTree.Freshness do
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.Effect.Request
   alias MingaEditor.EffectScheduler
+  alias MingaEditor.FileTree.FilterWalk
+  alias MingaEditor.FileTree.FilterWalk.Result, as: FilterResult
   alias MingaEditor.FileTree.Refresh
-  alias MingaEditor.FileTree.Refresh.FilesystemScanner
+  alias MingaEditor.FileTree.WatcherSync
+  alias MingaEditor.FileTree.WatcherSync.Result, as: WatcherResult
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
 
@@ -128,14 +131,131 @@ defmodule MingaEditor.FileTree.Freshness do
 
   def apply_refresh_outcome(state, %Outcome{} = outcome), do: {state, outcome}
 
-  @spec schedule_refresh(state(), FileTree.t()) :: state()
-  defp schedule_refresh(%EditorState{effect_scheduler: nil} = state, _tree) do
+  @doc "Applies one typed filter outcome with request, root, and query correlation."
+  @spec apply_filter_outcome(state(), Outcome.t()) :: {state(), Outcome.t()}
+  def apply_filter_outcome(
+        state,
+        %Outcome{
+          status: :completed,
+          request: %Request{effect: %FilterWalk{} = effect} = request,
+          result: %FilterResult{} = result
+        } = outcome
+      ) do
+    case FileTreeState.accept_filter_result(
+           file_tree_state(state),
+           effect.root,
+           effect.filter,
+           request.id,
+           result
+         ) do
+      {:accepted, file_tree} ->
+        state = set_file_tree(state, file_tree)
+
+        state =
+          state
+          |> maybe_synchronize_watchers(effect)
+          |> sync_buffer(file_tree.tree)
+          |> MingaEditor.schedule_render(16)
+
+        {state, outcome}
+
+      {reason, file_tree} ->
+        {set_file_tree(state, file_tree), Outcome.stale(outcome, reason)}
+    end
+  end
+
+  def apply_filter_outcome(
+        state,
+        %Outcome{
+          status: :failed,
+          request: %Request{effect: %FilterWalk{} = effect} = request,
+          reason: reason
+        } = outcome
+      ) do
+    case FileTreeState.finish_filter(
+           file_tree_state(state),
+           effect.root,
+           effect.filter,
+           request.id
+         ) do
+      {:current, file_tree} ->
+        file_tree = FileTreeState.filter_failed(file_tree, reason)
+
+        state =
+          state
+          |> set_file_tree(file_tree)
+          |> MingaEditor.schedule_render(16)
+
+        {state, outcome}
+
+      {stale_reason, file_tree} ->
+        {set_file_tree(state, file_tree), Outcome.stale(outcome, stale_reason)}
+    end
+  end
+
+  def apply_filter_outcome(
+        state,
+        %Outcome{
+          status: status,
+          request: %Request{effect: %FilterWalk{} = effect} = request
+        } = outcome
+      )
+      when status in [:canceled, :stale] do
+    case FileTreeState.finish_filter(
+           file_tree_state(state),
+           effect.root,
+           effect.filter,
+           request.id
+         ) do
+      {:current, file_tree} -> {set_file_tree(state, file_tree), outcome}
+      {reason, file_tree} -> {set_file_tree(state, file_tree), Outcome.stale(outcome, reason)}
+    end
+  end
+
+  def apply_filter_outcome(state, %Outcome{} = outcome), do: {state, outcome}
+
+  @doc "Applies watcher synchronization outcomes without calling watcher services."
+  @spec apply_watcher_outcome(state(), Outcome.t()) :: {state(), Outcome.t()}
+  def apply_watcher_outcome(
+        state,
+        %Outcome{
+          status: :completed,
+          request: %Request{effect: %WatcherSync{}} = request,
+          result: %WatcherResult{target: target}
+        } = outcome
+      ) do
+    case FileTreeState.accept_watcher_result(file_tree_state(state), request.id, target) do
+      {:current, file_tree} -> {set_file_tree(state, file_tree), outcome}
+      {:stale, file_tree} -> {set_file_tree(state, file_tree), Outcome.stale(outcome, :stale)}
+    end
+  end
+
+  def apply_watcher_outcome(
+        state,
+        %Outcome{
+          status: status,
+          request: %Request{effect: %WatcherSync{}} = request
+        } = outcome
+      )
+      when status in [:failed, :canceled, :stale] do
+    case FileTreeState.finish_watcher_request(file_tree_state(state), request.id) do
+      {:current, file_tree} -> {set_file_tree(state, file_tree), outcome}
+      {:stale, file_tree} -> {set_file_tree(state, file_tree), Outcome.stale(outcome, :stale)}
+    end
+  end
+
+  def apply_watcher_outcome(state, %Outcome{} = outcome), do: {state, outcome}
+
+  @spec schedule_refresh(state(), FileTree.t(), keyword()) :: state()
+  defp schedule_refresh(state, tree, opts \\ [])
+
+  defp schedule_refresh(%EditorState{effect_scheduler: nil} = state, _tree, _opts) do
     Minga.Log.warning(:editor, "File tree refresh scheduler unavailable")
     state
   end
 
-  defp schedule_refresh(state, %FileTree{} = tree) do
-    request = Refresh.request(tree, state.extension_surfaces.events_registry)
+  defp schedule_refresh(state, %FileTree{} = tree, opts) do
+    request = Refresh.request(tree, state.extension_surfaces.events_registry, opts)
 
     case EffectScheduler.schedule(state.effect_scheduler, request) do
       {:ok, _request_id, _disposition} ->
@@ -179,10 +299,10 @@ defmodule MingaEditor.FileTree.Freshness do
          ) do
       {:accepted, file_tree} ->
         state = set_file_tree(state, file_tree)
-        watch_expanded_dirs(refreshed_tree)
 
         state =
           state
+          |> maybe_synchronize_watchers(effect)
           |> sync_buffer(refreshed_tree)
           |> MingaEditor.schedule_render(16)
 
@@ -207,14 +327,56 @@ defmodule MingaEditor.FileTree.Freshness do
   defp finish_failed_refresh(state, effect, request_token, reason) do
     case FileTreeState.finish_refresh(file_tree_state(state), effect.root, request_token) do
       {:current, file_tree} ->
-        state
-        |> set_file_tree(FileTreeState.refresh_failed(file_tree, reason))
-        |> MingaEditor.schedule_render(16)
+        file_tree = failed_file_tree(file_tree, effect, reason)
+        file_tree = prepare_failed_watcher_cleanup(file_tree, effect)
+        state = set_file_tree(state, file_tree)
+        state = maybe_synchronize_failed_watchers(state, effect)
+        state = maybe_sync_failed_root(state, file_tree, effect)
+        MingaEditor.schedule_render(state, 16)
 
       {_status, file_tree} ->
         set_file_tree(state, file_tree)
     end
   end
+
+  @spec maybe_synchronize_failed_watchers(state(), Refresh.t()) :: state()
+  defp maybe_synchronize_failed_watchers(
+         state,
+         %Refresh{previous_root: previous_root} = effect
+       )
+       when is_binary(previous_root),
+       do: maybe_synchronize_watchers(state, effect)
+
+  defp maybe_synchronize_failed_watchers(state, %Refresh{}), do: state
+
+  @spec prepare_failed_watcher_cleanup(FileTreeState.t(), Refresh.t()) :: FileTreeState.t()
+  defp prepare_failed_watcher_cleanup(
+         %FileTreeState{} = file_tree,
+         %Refresh{previous_root: previous_root}
+       )
+       when is_binary(previous_root),
+       do: FileTreeState.cleanup_watchers(file_tree)
+
+  defp prepare_failed_watcher_cleanup(%FileTreeState{} = file_tree, %Refresh{}), do: file_tree
+
+  @spec failed_file_tree(FileTreeState.t(), Refresh.t(), term()) :: FileTreeState.t()
+  defp failed_file_tree(file_tree, %Refresh{previous_root: previous_root}, reason)
+       when is_binary(previous_root),
+       do: FileTreeState.root_scan_failed(file_tree, reason)
+
+  defp failed_file_tree(file_tree, %Refresh{}, reason),
+    do: FileTreeState.refresh_failed(file_tree, reason)
+
+  @spec maybe_sync_failed_root(state(), FileTreeState.t(), Refresh.t()) :: state()
+  defp maybe_sync_failed_root(
+         state,
+         %FileTreeState{tree: %FileTree{} = tree},
+         %Refresh{previous_root: previous_root}
+       )
+       when is_binary(previous_root),
+       do: sync_buffer(state, tree)
+
+  defp maybe_sync_failed_root(state, %FileTreeState{}, %Refresh{}), do: state
 
   @doc "Updates tree git badges from an already-fetched git status event."
   @spec refresh_git_status(state(), Minga.Events.GitStatusEvent.t()) :: state()
@@ -257,80 +419,174 @@ defmodule MingaEditor.FileTree.Freshness do
     end
   end
 
-  @doc "Updates the remembered project root and replaces visible stale tree entries when the project changes."
-  @spec update_project_root(state(), String.t()) :: state()
-  def update_project_root(state, root) when is_binary(root) do
+  @doc "Publishes a project-root loading state and schedules its typed root scan."
+  @spec update_project_root(state(), String.t(), keyword()) :: state()
+  def update_project_root(state, root, opts \\ []) when is_binary(root) do
     expanded_root = Path.expand(root)
     file_tree = file_tree_state(state)
 
     case file_tree.tree do
       %FileTree{root: ^expanded_root} ->
-        file_tree
-        |> FileTreeState.set_project_root(expanded_root)
-        |> refilter_active_tree()
-        |> then(&set_file_tree(state, &1))
+        state = set_file_tree(state, FileTreeState.set_project_root(file_tree, expanded_root))
+        refilter_active_tree(state, opts)
 
       %FileTree{} = old_tree ->
-        unwatch_expanded_dirs(old_tree)
         new_tree = FileTree.new(expanded_root, width: old_tree.width)
+        file_tree = FileTreeState.begin_root_scan(file_tree, new_tree, :project)
 
-        case FilesystemScanner.scan(new_tree, nil) do
-          %FileTree{} = new_tree ->
-            new_tree =
-              Refresh.with_cached_git_status(new_tree, state.extension_surfaces.events_registry)
-
-            watch_expanded_dirs(new_tree)
-
-            file_tree =
-              file_tree
-              |> FileTreeState.set_project_root(expanded_root)
-              |> FileTreeState.replace_tree(new_tree)
-
-            state
-            |> set_file_tree(file_tree)
-            |> sync_buffer(new_tree)
-
-          {:error, {:root_unavailable, reason}} ->
-            failed_tree = FileTree.put_entries(new_tree, [])
-
-            file_tree =
-              file_tree
-              |> FileTreeState.set_project_root(expanded_root)
-              |> FileTreeState.replace_tree(failed_tree)
-              |> FileTreeState.refresh_failed(reason)
-
-            state
-            |> set_file_tree(file_tree)
-            |> sync_buffer(failed_tree)
-        end
+        state
+        |> set_file_tree(file_tree)
+        |> schedule_refresh(new_tree, Keyword.put(opts, :previous_root, old_tree.root))
 
       nil ->
         set_file_tree(state, FileTreeState.set_project_root(file_tree, expanded_root))
     end
   end
 
-  # Re-applies the active filter so an open filtered tree picks up the freshly
-  # rebuilt project cache (#2377 AC3). No-op when no filter is active, so normal
-  # expanded browsing keeps its lazy-walked entries untouched.
-  @spec refilter_active_tree(FileTreeState.t()) :: FileTreeState.t()
-  defp refilter_active_tree(%FileTreeState{tree: %FileTree{filter: filter}} = file_tree)
-       when is_binary(filter) and filter != "" do
-    FileTreeState.update_filter(file_tree, filter)
+  @doc "Publishes a browsing-root loading state and schedules its typed root scan."
+  @spec reroot(state(), String.t(), keyword()) :: state()
+  def reroot(state, root, opts \\ []) when is_binary(root) do
+    expanded_root = Path.expand(root)
+
+    case file_tree_state(state) do
+      %FileTreeState{tree: %FileTree{root: current_root}} when current_root == expanded_root ->
+        state
+
+      %FileTreeState{tree: %FileTree{} = old_tree} = file_tree ->
+        new_tree = FileTree.reroot(old_tree, expanded_root)
+        file_tree = FileTreeState.begin_root_scan(file_tree, new_tree, :reroot)
+
+        state
+        |> set_file_tree(file_tree)
+        |> schedule_refresh(new_tree, Keyword.put(opts, :previous_root, old_tree.root))
+
+      %FileTreeState{} ->
+        state
+    end
   end
 
-  defp refilter_active_tree(%FileTreeState{} = file_tree), do: file_tree
+  @doc "Publishes a loading filter query and schedules its typed cache/filesystem scan."
+  @spec update_filter(state(), String.t(), keyword()) :: state()
+  def update_filter(state, filter, opts \\ []) when is_binary(filter) and filter != "" do
+    file_tree = FileTreeState.update_filter(file_tree_state(state), filter)
 
-  @doc "Registers expanded tree directories with the external file watcher when it is running."
-  @spec watch_expanded_dirs(FileTree.t()) :: :ok
-  def watch_expanded_dirs(%FileTree{expanded: expanded}) do
-    Enum.each(expanded, &safe_watch_directory/1)
+    state
+    |> set_file_tree(file_tree)
+    |> schedule_filter(file_tree.tree, opts)
   end
 
-  @doc "Unregisters every watched project directory under the tree root when the file tree closes or changes root."
-  @spec unwatch_expanded_dirs(FileTree.t()) :: :ok
-  def unwatch_expanded_dirs(%FileTree{root: root}) do
-    safe_unwatch_directory_tree(root)
+  @doc "Starts filter input and reschedules any existing non-empty query."
+  @spec start_filtering(state(), keyword()) :: state()
+  def start_filtering(state, opts \\ []) do
+    file_tree = FileTreeState.start_filtering(file_tree_state(state))
+    state = set_file_tree(state, file_tree)
+
+    case file_tree.tree do
+      %FileTree{filter: filter} = tree when is_binary(filter) and filter != "" ->
+        schedule_filter(state, tree, opts)
+
+      _tree ->
+        state
+    end
   end
+
+  @doc "Publishes unfiltered loading rows and schedules their root scan."
+  @spec clear_filter(state(), :keep_open | :dismiss, keyword()) :: state()
+  def clear_filter(state, disposition, opts \\ [])
+      when disposition in [:keep_open, :dismiss] do
+    file_tree = FileTreeState.clear_filter_loading(file_tree_state(state), disposition)
+    state = set_file_tree(state, file_tree)
+
+    case file_tree.tree do
+      %FileTree{} = tree -> schedule_refresh(state, tree, opts)
+      nil -> state
+    end
+  end
+
+  @spec refilter_active_tree(state(), keyword()) :: state()
+  defp refilter_active_tree(state, opts) do
+    case file_tree_state(state).tree do
+      %FileTree{filter: filter} when is_binary(filter) and filter != "" ->
+        update_filter(state, filter, opts)
+
+      _tree ->
+        state
+    end
+  end
+
+  @spec schedule_filter(state(), FileTree.t() | nil, keyword()) :: state()
+  defp schedule_filter(state, nil, _opts), do: state
+
+  defp schedule_filter(%EditorState{effect_scheduler: nil} = state, %FileTree{}, _opts) do
+    Minga.Log.warning(:editor, "File tree filter scheduler unavailable")
+    state
+  end
+
+  defp schedule_filter(state, %FileTree{} = tree, opts) do
+    request = FilterWalk.request(tree, opts)
+
+    case EffectScheduler.schedule(state.effect_scheduler, request) do
+      {:ok, _request_id, _disposition} ->
+        file_tree =
+          state
+          |> file_tree_state()
+          |> FileTreeState.track_filter_request(tree.root, tree.filter, request.id)
+
+        set_file_tree(state, file_tree)
+
+      {:error, reason} ->
+        Minga.Log.warning(:editor, "File tree filter not scheduled: #{inspect(reason)}")
+        set_file_tree(state, FileTreeState.filter_failed(file_tree_state(state), reason))
+    end
+  end
+
+  @doc "Schedules the current file-tree watcher intent on the serialized watcher resource."
+  @spec synchronize_watchers(state(), keyword()) :: state()
+  def synchronize_watchers(state, opts \\ []) do
+    intent = FileTreeState.watcher_intent(file_tree_state(state))
+    schedule_watcher_sync(state, intent, opts)
+  end
+
+  @spec maybe_synchronize_watchers(state(), Refresh.t() | FilterWalk.t()) :: state()
+  defp maybe_synchronize_watchers(state, %Refresh{synchronize_watchers?: false}), do: state
+  defp maybe_synchronize_watchers(state, %FilterWalk{synchronize_watchers?: false}), do: state
+
+  defp maybe_synchronize_watchers(state, %Refresh{} = effect) do
+    synchronize_watchers(state, watcher_options(effect.watcher_backend, effect.watcher_context))
+  end
+
+  defp maybe_synchronize_watchers(state, %FilterWalk{} = effect) do
+    synchronize_watchers(state, watcher_options(effect.watcher_backend, effect.watcher_context))
+  end
+
+  @spec schedule_watcher_sync(state(), MingaEditor.State.FileTree.Watchers.t(), keyword()) ::
+          state()
+  defp schedule_watcher_sync(%EditorState{effect_scheduler: nil} = state, _intent, _opts) do
+    Minga.Log.warning(:editor, "File tree watcher scheduler unavailable")
+    state
+  end
+
+  defp schedule_watcher_sync(state, intent, opts) do
+    request = WatcherSync.request(intent.candidates, intent.target, intent.expanded_dirs, opts)
+
+    case EffectScheduler.schedule(state.effect_scheduler, request) do
+      {:ok, _request_id, _disposition} ->
+        file_tree =
+          state
+          |> file_tree_state()
+          |> FileTreeState.track_watcher_request(request.id)
+
+        set_file_tree(state, file_tree)
+
+      {:error, reason} ->
+        Minga.Log.warning(:editor, "File tree watcher sync not scheduled: #{inspect(reason)}")
+        state
+    end
+  end
+
+  @spec watcher_options(module() | nil, term()) :: keyword()
+  defp watcher_options(nil, context), do: [watcher_context: context]
+  defp watcher_options(backend, context), do: [watcher_backend: backend, watcher_context: context]
 
   @spec sync_buffer(state(), FileTree.t()) :: state()
   defp sync_buffer(state, tree) do
@@ -358,28 +614,6 @@ defmodule MingaEditor.FileTree.Freshness do
   @spec set_file_tree(state(), FileTreeState.t()) :: state()
   defp set_file_tree(%EditorState{} = state, %FileTreeState{} = file_tree) do
     %{state | workspace: MingaEditor.Session.State.set_file_tree(state.workspace, file_tree)}
-  end
-
-  @spec safe_watch_directory(String.t()) :: :ok
-  defp safe_watch_directory(path) when is_binary(path) do
-    Minga.FileWatcher.watch_directory(path)
-  catch
-    :exit, reason ->
-      Minga.Log.warning(
-        :editor,
-        "File tree watch registration failed for #{path}: #{inspect(reason)}"
-      )
-
-      :ok
-  end
-
-  @spec safe_unwatch_directory_tree(String.t()) :: :ok
-  defp safe_unwatch_directory_tree(path) when is_binary(path) do
-    Minga.FileWatcher.unwatch_directory_tree(path)
-  catch
-    :exit, reason ->
-      Minga.Log.warning(:editor, "File tree watch cleanup failed for #{path}: #{inspect(reason)}")
-      :ok
   end
 
   @spec path_under_root?(String.t(), String.t()) :: boolean()
