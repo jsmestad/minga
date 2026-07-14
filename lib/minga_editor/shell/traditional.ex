@@ -258,6 +258,11 @@ defmodule MingaEditor.Shell.Traditional do
     }
   end
 
+  @impl true
+  @spec blur_bottom_panel(ShellState.t()) :: ShellState.t()
+  def blur_bottom_panel(%ShellState{} = shell_state),
+    do: ShellState.blur_bottom_panel(shell_state)
+
   # -------------------------------------------------------------------
   # Buffer lifecycle callbacks
   # -------------------------------------------------------------------

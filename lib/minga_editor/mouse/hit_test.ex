@@ -242,7 +242,8 @@ defmodule MingaEditor.Mouse.HitTest do
   defp context_from_window(state, layout, id, row, col) do
     with %{content: content} <- Map.get(layout.window_layouts, id),
          true <- point_in_rect?(row, col, content),
-         %Window{buffer: buffer} = window <- Map.get(state.workspace.windows.map, id),
+         %Window{content: {:buffer, buffer}} = window <-
+           Map.get(state.workspace.windows.map, id),
          true <- is_pid(buffer) do
       %{id: id, window: window, buffer: buffer, content: content}
     else

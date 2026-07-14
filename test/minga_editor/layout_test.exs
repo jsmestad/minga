@@ -58,7 +58,6 @@ defmodule MingaEditor.LayoutTest do
     window = %Window{
       id: win_id,
       content: {:buffer, self()},
-      buffer: self(),
       viewport: Viewport.new(24, 80)
     }
 
@@ -135,14 +134,12 @@ defmodule MingaEditor.LayoutTest do
     win1 = %Window{
       id: 1,
       content: {:buffer, self()},
-      buffer: self(),
       viewport: Viewport.new(24, 40)
     }
 
     win2 = %Window{
       id: 2,
       content: {:buffer, self()},
-      buffer: self(),
       viewport: Viewport.new(24, 40)
     }
 
@@ -162,14 +159,12 @@ defmodule MingaEditor.LayoutTest do
     win1 = %Window{
       id: 1,
       content: {:buffer, self()},
-      buffer: self(),
       viewport: Viewport.new(12, 80)
     }
 
     win2 = %Window{
       id: 2,
       content: {:buffer, self()},
-      buffer: self(),
       viewport: Viewport.new(12, 80)
     }
 

@@ -70,7 +70,7 @@ defmodule MingaEditor.PickerUITest do
     {:ok, preview_buf} = BufferProcess.start_link(content: "preview")
     win_id = 1
     original_window = Window.new(win_id, original_buf, 24, 80)
-    preview_window = %{original_window | buffer: preview_buf, content: {:buffer, preview_buf}}
+    preview_window = Window.show_buffer(original_window, preview_buf)
 
     original_workspace = %SessionState{
       viewport: Viewport.new(24, 80),

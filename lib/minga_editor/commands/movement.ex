@@ -593,11 +593,11 @@ defmodule MingaEditor.Commands.Movement do
   @spec apply_split(state(), Windows.t(), WindowTree.t(), Window.id(), Window.id()) :: state()
   defp apply_split(state, ws, new_tree, active_id, new_id) do
     case Windows.fetch(ws, active_id) do
-      {:ok, active_window} ->
-        cursor = Buffer.cursor(active_window.buffer)
+      {:ok, %Window{content: {:buffer, buffer}}} ->
+        cursor = Buffer.cursor(buffer)
 
         # New window gets a copy of the current cursor position
-        new_window = Window.new(new_id, active_window.buffer, 24, 80, cursor)
+        new_window = Window.new(new_id, buffer, 24, 80, cursor)
 
         # Also snapshot the current cursor into the active window
         new_windows =

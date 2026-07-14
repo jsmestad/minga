@@ -16,6 +16,7 @@ defmodule MingaEditor.Mouse.HitTestTest do
   alias MingaEditor.Mouse.Target.Buffer, as: BufferTarget
   alias MingaEditor.Startup
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Window.Content
   alias MingaEditor.Window
 
   describe "resolve_buffer/3" do
@@ -74,10 +75,12 @@ defmodule MingaEditor.Mouse.HitTestTest do
       {target_id, %{content: {row, col, _width, _height}}} = rightmost_window_layout(layout)
       target_window = Map.fetch!(state.workspace.windows.map, target_id)
 
+      target_buffer = Content.buffer_pid(target_window.content)
+
       gutter_width =
         HitTest.buffer_gutter_width(
-          target_window.buffer,
-          BufferProcess.line_count(target_window.buffer)
+          target_buffer,
+          BufferProcess.line_count(target_buffer)
         )
 
       assert target_id != active_id
@@ -86,7 +89,7 @@ defmodule MingaEditor.Mouse.HitTestTest do
                HitTest.resolve_buffer(state, row + 2, col + gutter_width + 1)
 
       assert target.window_id == target_id
-      assert target.buffer == target_window.buffer
+      assert target.buffer == target_buffer
       assert BufferTarget.position(target) == {2, 1}
       assert state.workspace.windows.active == active_id
     end

@@ -179,7 +179,8 @@ defmodule MingaEditor.KeyDispatch do
        ) do
     buf =
       case Map.fetch(map, active_id) do
-        {:ok, window} -> window.buffer
+        {:ok, %{content: {:buffer, buffer}}} -> buffer
+        {:ok, _semantic_window} -> nil
         :error -> state.workspace.buffers.active
       end
 

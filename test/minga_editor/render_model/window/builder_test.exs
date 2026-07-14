@@ -73,7 +73,11 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
     end
   end
 
-  defp update_renderer_window({id, %{buffer: buffer} = window}, buffer, consumed) do
+  defp update_renderer_window(
+         {id, %{content: {:buffer, buffer}} = window},
+         buffer,
+         consumed
+       ) do
     cache = update_renderer_cache(window.render_cache, buffer, consumed)
     {id, %{window | render_cache: cache}}
   end

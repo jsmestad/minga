@@ -106,7 +106,7 @@ defmodule MingaEditor.State.Windows do
       when is_pid(buffer) and is_map(replacements) do
     map =
       Enum.reduce(windows, windows, fn
-        {id, %Window{buffer: ^buffer}}, acc ->
+        {id, %Window{content: {:buffer, ^buffer}}}, acc ->
           case Map.fetch(replacements, id) do
             {:ok, %Window{} = window} -> Map.put(acc, id, window)
             :error -> acc
@@ -256,7 +256,7 @@ defmodule MingaEditor.State.Windows do
       when is_pid(buffer) and is_list(symbols) do
     replacements =
       Map.new(state.map, fn
-        {id, %Window{buffer: ^buffer} = window} ->
+        {id, %Window{content: {:buffer, ^buffer}} = window} ->
           {id, Window.set_document_symbols(window, symbols)}
 
         {id, window} ->
@@ -269,7 +269,10 @@ defmodule MingaEditor.State.Windows do
   @doc "Finds the first window showing a buffer."
   @spec find_by_buffer(t(), pid()) :: {Window.id(), Window.t()} | nil
   def find_by_buffer(%__MODULE__{map: map}, buffer) when is_pid(buffer) do
-    Enum.find(map, fn {_id, %Window{buffer: window_buffer}} -> window_buffer == buffer end)
+    Enum.find(map, fn
+      {_id, %Window{content: {:buffer, ^buffer}}} -> true
+      _entry -> false
+    end)
   end
 
   @doc "Finds the first agent chat window."

@@ -1919,7 +1919,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   # `record_scroll_event/3`; without one there is nothing to detach from, so only the
   # echo mark is recorded.
   @spec scroll_to_line_commit(Window.t(), Viewport.t()) :: Window.t()
-  defp scroll_to_line_commit(%Window{buffer: buf} = window, new_vp)
+  defp scroll_to_line_commit(%Window{content: {:buffer, buf}} = window, new_vp)
        when is_pid(buf) do
     now = System.monotonic_time(:millisecond)
     cursor_pos = Buffer.cursor(buf)

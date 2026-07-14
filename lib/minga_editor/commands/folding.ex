@@ -156,14 +156,19 @@ defmodule MingaEditor.Commands.Folding do
           non_neg_integer(),
           :toggle | :close | :open | :close_recursive | :open_recursive
         ) :: state()
-  defp dispatch_fold_command_at_line(state, window, buffer_line, action) do
+  defp dispatch_fold_command_at_line(
+         state,
+         %Window{content: {:buffer, buffer}} = window,
+         buffer_line,
+         action
+       ) do
     has_active_fold = FoldMap.fold_at(window.fold_map, buffer_line) != :none
     has_available_range = Enum.any?(window.fold_ranges, &FoldRange.contains?(&1, buffer_line))
 
     if has_active_fold or has_available_range do
       apply_window_fold(state, window, buffer_line, action)
     else
-      apply_decoration_fold(state, window.buffer, buffer_line, action)
+      apply_decoration_fold(state, buffer, buffer_line, action)
     end
   end
 

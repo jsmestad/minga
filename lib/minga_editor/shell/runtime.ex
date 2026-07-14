@@ -151,6 +151,13 @@ defmodule MingaEditor.Shell.Runtime do
     end
   end
 
+  @doc "Routes bottom-panel blur through the active shell contract."
+  @spec blur_bottom_panel(t()) :: t()
+  def blur_bottom_panel(%__MODULE__{} = runtime) do
+    shell_state = runtime.entry.module.blur_bottom_panel(runtime.state)
+    %__MODULE__{runtime | state: shell_state}
+  end
+
   @doc "Routes a shell event through the active entry's contract."
   @spec route_event(t(), MingaEditor.Shell.workspace(), term()) ::
           {t(), MingaEditor.Shell.workspace()}

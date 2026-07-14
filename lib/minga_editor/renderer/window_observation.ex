@@ -16,7 +16,7 @@ defmodule MingaEditor.Renderer.WindowObservation do
   @doc "Captures the editor-owned fields observed while rendering one buffer window."
   @spec from_window(RenderWindow.t()) :: t() | nil
   def from_window(%RenderWindow{
-        buffer: buffer,
+        content: {:buffer, buffer},
         render_cache: cache,
         viewport: %Viewport{} = viewport
       })

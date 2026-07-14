@@ -1,21 +1,94 @@
 defmodule MingaEditor.State.RenderCorrelationTest do
   use ExUnit.Case, async: true
 
+  alias MingaEditor.State.Render
   alias MingaEditor.State.RenderCorrelation
+
+  import MingaEditor.RenderPipeline.TestHelpers
 
   test "render timer admission coalesces until the timer is cleared" do
     first = make_ref()
     second = make_ref()
+    correlation = RenderCorrelation.new()
+    first_identity = RenderCorrelation.next_timer_identity(correlation)
 
-    assert {:scheduled, correlation} = RenderCorrelation.schedule(RenderCorrelation.new(), first)
+    assert {:scheduled, correlation} =
+             RenderCorrelation.schedule(correlation, first_identity, first)
+
     assert RenderCorrelation.scheduled?(correlation)
-    assert correlation.timer == first
-    assert {:coalesced, unchanged} = RenderCorrelation.schedule(correlation, second)
+    assert RenderCorrelation.timer_reference(correlation) == first
+    assert RenderCorrelation.scheduled_identity(correlation) == first_identity
+
+    second_identity = RenderCorrelation.next_timer_identity(correlation)
+
+    assert {:coalesced, unchanged} =
+             RenderCorrelation.schedule(correlation, second_identity, second)
+
     assert unchanged == correlation
 
     cleared = RenderCorrelation.clear_timer(correlation)
     refute RenderCorrelation.scheduled?(cleared)
-    assert cleared.timer == nil
+    assert RenderCorrelation.timer_reference(cleared) == nil
+    assert RenderCorrelation.scheduled_identity(cleared) == nil
+  end
+
+  test "timer replacement gives the new window a distinct identity and rejects stale delivery" do
+    correlation = RenderCorrelation.new()
+    old_identity = RenderCorrelation.next_timer_identity(correlation)
+    {:scheduled, correlation} = RenderCorrelation.schedule(correlation, old_identity, make_ref())
+
+    cleared = RenderCorrelation.clear_timer(correlation)
+    new_identity = RenderCorrelation.next_timer_identity(cleared)
+    refute new_identity == old_identity
+
+    {:scheduled, replacement} =
+      RenderCorrelation.schedule(cleared, new_identity, make_ref())
+
+    assert {:stale, unchanged} = RenderCorrelation.deliver(replacement, old_identity)
+    assert unchanged == replacement
+    assert RenderCorrelation.scheduled?(unchanged)
+
+    assert {:current, delivered} = RenderCorrelation.deliver(replacement, new_identity)
+    refute RenderCorrelation.scheduled?(delivered)
+  end
+
+  test "Editor callback changes state only for the current timer identity" do
+    state = base_state(backend: :tui, rendering: :disabled)
+    first = MingaEditor.schedule_render(state, 60_000)
+    first_correlation = first.render.render_correlation
+    first_identity = RenderCorrelation.scheduled_identity(first_correlation)
+    first_timer = RenderCorrelation.timer_reference(first_correlation)
+
+    cleared = %{
+      first
+      | render:
+          Render.accept_correlation(
+            first.render,
+            RenderCorrelation.clear_timer(first_correlation)
+          )
+    }
+
+    replacement = MingaEditor.schedule_render(cleared, 60_000)
+    replacement_correlation = replacement.render.render_correlation
+    replacement_identity = RenderCorrelation.scheduled_identity(replacement_correlation)
+    replacement_timer = RenderCorrelation.timer_reference(replacement_correlation)
+
+    on_exit(fn ->
+      Process.cancel_timer(first_timer)
+      Process.cancel_timer(replacement_timer)
+    end)
+
+    stale_message = {:debounced_render, first_identity}
+    send(self(), stale_message)
+    assert_receive ^stale_message
+    assert {:noreply, unchanged} = MingaEditor.handle_info(stale_message, replacement)
+    assert unchanged == replacement
+
+    current_message = {:debounced_render, replacement_identity}
+    send(self(), current_message)
+    assert_receive ^current_message
+    assert {:noreply, delivered} = MingaEditor.handle_info(current_message, replacement)
+    refute RenderCorrelation.scheduled?(delivered.render.render_correlation)
   end
 
   test "frontend readiness and reset require a keyframe without resetting ordering evidence" do
@@ -27,9 +100,9 @@ defmodule MingaEditor.State.RenderCorrelationTest do
 
     ready = RenderCorrelation.frontend_ready(correlation)
     assert RenderCorrelation.force_keyframe?(ready)
-    assert ready.latest_intent_revision == 8
-    assert ready.last_receipt_revision == 7
-    assert ready.last_receipt_seq == 41
+    assert RenderCorrelation.latest_intent_revision(ready) == 8
+    assert RenderCorrelation.last_receipt_revision(ready) == 7
+    assert RenderCorrelation.last_receipt_sequence(ready) == 41
 
     reset = RenderCorrelation.reset(correlation)
     assert reset == ready
@@ -41,8 +114,8 @@ defmodule MingaEditor.State.RenderCorrelationTest do
 
     assert first == 1
     assert second == 2
-    assert correlation.latest_intent_revision == 2
-    assert correlation.last_receipt_revision == 0
+    assert RenderCorrelation.latest_intent_revision(correlation) == 2
+    assert RenderCorrelation.last_receipt_revision(correlation) == 0
   end
 
   test "receipt freshness rejects superseded, duplicate, and out-of-order evidence" do
@@ -94,7 +167,7 @@ defmodule MingaEditor.State.RenderCorrelationTest do
     correlation = %RenderCorrelation{last_receipt_revision: 10, last_receipt_seq: 20}
     correlation = RenderCorrelation.accept_synchronous_receipt(correlation, 8, 19, false)
 
-    assert correlation.last_receipt_revision == 10
-    assert correlation.last_receipt_seq == 20
+    assert RenderCorrelation.last_receipt_revision(correlation) == 10
+    assert RenderCorrelation.last_receipt_sequence(correlation) == 20
   end
 end

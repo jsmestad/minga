@@ -279,6 +279,11 @@ defmodule MingaEditor.Shell.Traditional.State do
   @spec bottom_panel(t()) :: BottomPanel.t()
   def bottom_panel(%{bottom_panel: panel}), do: panel
 
+  @doc "Blurs the shell-owned bottom panel."
+  @spec blur_bottom_panel(t()) :: t()
+  def blur_bottom_panel(%__MODULE__{} = state),
+    do: %{state | bottom_panel: BottomPanel.blur(state.bottom_panel)}
+
   @doc "Replaces the bottom panel state."
   @spec set_bottom_panel(t(), BottomPanel.t()) :: t()
   def set_bottom_panel(%{} = ss, panel) do

@@ -406,7 +406,8 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
 
   @doc "Returns the decorations for a window's buffer."
   @spec window_decorations(term(), window(), Decorations.t() | nil) :: Decorations.t()
-  def window_decorations(state, %{buffer: buf}, %Decorations{} = decorations) when is_pid(buf) do
+  def window_decorations(state, %{content: {:buffer, buf}}, %Decorations{} = decorations)
+      when is_pid(buf) do
     decorations
     |> InlineAskRender.merge_decorations(state, buf)
     |> InlineEditRender.merge_decorations(state, buf)
@@ -423,9 +424,9 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
 
   @doc "Returns the highlight state for a window's buffer."
   @spec window_highlight(state(), window()) :: MingaEditor.UI.Highlight.t() | nil
-  def window_highlight(state, window) do
+  def window_highlight(state, %{content: {:buffer, buffer}}) do
     hl =
-      case Map.fetch(state.highlighting.highlights, window.buffer) do
+      case Map.fetch(state.highlighting.highlights, buffer) do
         {:ok, highlight} -> highlight
         :error -> MingaEditor.UI.Highlight.from_theme(state.theme)
       end
@@ -433,7 +434,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
     if hl.capture_names == {} do
       nil
     else
-      apply_buffer_face_overrides(hl, window.buffer, state)
+      apply_buffer_face_overrides(hl, buffer, state)
     end
   end
 
@@ -451,7 +452,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
 
   @doc "Returns diff-view signs when a diff view is active, otherwise git signs for a window's buffer."
   @spec signs_for_window(state(), window()) :: %{non_neg_integer() => atom()}
-  def signs_for_window(%{diff_views: diff_views}, %{buffer: buf} = window)
+  def signs_for_window(%{diff_views: diff_views}, %{content: {:buffer, buf}} = window)
       when is_pid(buf) and is_map(diff_views) do
     case Map.get(diff_views, buf) do
       nil -> git_signs_for_window(window)
@@ -479,7 +480,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
 
   @doc "Returns git signs for a window's buffer."
   @spec git_signs_for_window(window()) :: %{non_neg_integer() => atom()}
-  def git_signs_for_window(%{buffer: buf}) when is_pid(buf) do
+  def git_signs_for_window(%{content: {:buffer, buf}}) when is_pid(buf) do
     case Git.tracking_pid(buf) do
       nil ->
         %{}
@@ -495,7 +496,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
 
   @doc "Returns diagnostic signs for a window's buffer."
   @spec diagnostic_signs_for_window(window()) :: %{non_neg_integer() => atom()}
-  def diagnostic_signs_for_window(%{buffer: buf}) when is_pid(buf) do
+  def diagnostic_signs_for_window(%{content: {:buffer, buf}}) when is_pid(buf) do
     case Buffer.file_path(buf) do
       nil -> %{}
       path -> diagnostic_signs_for_path(path)

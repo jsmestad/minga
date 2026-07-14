@@ -14,7 +14,7 @@ defmodule MingaEditor.State.Render do
 
   @type t :: %__MODULE__{
           renderer: pid() | nil,
-          render_correlation: RenderCorrelation.t(),
+          render_correlation: term(),
           message_store: MessageStore.t(),
           layout: Layout.t() | nil,
           focus_tree: FocusTree.t() | nil,
@@ -40,7 +40,7 @@ defmodule MingaEditor.State.Render do
 
   @doc "Commits correlation state produced by a render scheduling transition."
   @spec accept_correlation(t(), RenderCorrelation.t()) :: t()
-  def accept_correlation(%__MODULE__{} = render, %RenderCorrelation{} = correlation),
+  def accept_correlation(%__MODULE__{} = render, correlation),
     do: %{render | render_correlation: correlation}
 
   @doc "Appends a structured editor log message to the semantic message store."

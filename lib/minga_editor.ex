@@ -758,9 +758,10 @@ defmodule MingaEditor do
     {:noreply, EventDispatcher.dispatch(state, event, payload, msg)}
   end
 
-  # Debounced render timer fired — perform the actual render.
-  def handle_info(:debounced_render, state) do
-    {:noreply, RenderHandler.handle_debounced_render(state)}
+  # Debounced render timer fired — perform the actual render only for the
+  # semantic identity that still owns the scheduled window.
+  def handle_info({:debounced_render, timer_identity}, state) do
+    {:noreply, RenderHandler.handle_debounced_render(state, timer_identity)}
   end
 
   # Correlated file-tree debounce timers enter the domain workflow directly.
@@ -1455,18 +1456,18 @@ defmodule MingaEditor do
 
   defp schedule_new_render(state, delay_ms) do
     effective_delay_ms = schedule_render_delay_ms(state, delay_ms)
-    ref = Process.send_after(self(), :debounced_render, effective_delay_ms)
+    correlation = state.render.render_correlation
+    timer_identity = MingaEditor.State.RenderCorrelation.next_timer_identity(correlation)
+
+    timer =
+      Process.send_after(self(), {:debounced_render, timer_identity}, effective_delay_ms)
+
+    {:scheduled, correlation} =
+      MingaEditor.State.RenderCorrelation.schedule(correlation, timer_identity, timer)
 
     %{
       state
-      | render:
-          MingaEditor.State.Render.accept_correlation(
-            state.render,
-            elem(
-              MingaEditor.State.RenderCorrelation.schedule(state.render.render_correlation, ref),
-              1
-            )
-          )
+      | render: MingaEditor.State.Render.accept_correlation(state.render, correlation)
     }
   end
 

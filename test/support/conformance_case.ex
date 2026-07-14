@@ -459,16 +459,16 @@ defmodule Minga.Test.ConformanceCase do
           MingaEditor.Window.id(),
           {non_neg_integer(), non_neg_integer()} | WindowTree.rect()
         ) :: minga_window_info()
-  defp window_to_info(win, active_id, position) do
+  defp window_to_info(%{content: {:buffer, buffer}} = win, active_id, position) do
     first_line =
-      win.buffer
+      buffer
       |> BufferProcess.content()
       |> String.split("\n", parts: 2)
       |> hd()
 
     cursor =
       if win.id == active_id do
-        BufferProcess.cursor(win.buffer)
+        BufferProcess.cursor(buffer)
       else
         win.cursor
       end

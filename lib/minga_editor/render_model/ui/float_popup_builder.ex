@@ -45,7 +45,7 @@ defmodule MingaEditor.RenderModel.UI.FloatPopupBuilder do
   end
 
   @spec build_float_popup_model(Context.t(), MingaEditor.Window.t()) :: FloatPopup.t()
-  defp build_float_popup_model(ctx, window) do
+  defp build_float_popup_model(ctx, %{content: {:buffer, buffer}} = window) do
     rule = window.popup_meta.rule
     vp = ctx.viewport
 
@@ -54,11 +54,10 @@ defmodule MingaEditor.RenderModel.UI.FloatPopupBuilder do
 
     {title, lines} =
       try do
-        name = Buffer.buffer_name(window.buffer)
-        line_count = Buffer.line_count(window.buffer)
+        name = Buffer.buffer_name(buffer)
+        line_count = Buffer.line_count(buffer)
 
-        snapshot =
-          Buffer.render_snapshot(window.buffer, 0, min(line_count, @max_native_popup_lines))
+        snapshot = Buffer.render_snapshot(buffer, 0, min(line_count, @max_native_popup_lines))
 
         {name, snapshot.lines}
       catch

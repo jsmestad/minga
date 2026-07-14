@@ -34,17 +34,15 @@ defmodule MingaEditor.State.Buffers do
     %{bs | list: bs.list ++ [pid]}
   end
 
-  @doc "Switches to the buffer at `idx`, wrapping around."
-  @spec switch_to(t(), non_neg_integer()) :: t()
-  def switch_to(%__MODULE__{list: [_ | _] = buffers} = bs, idx) do
-    len = Enum.count(buffers)
-    idx = rem(idx, len)
-    idx = if idx < 0, do: idx + len, else: idx
-    pid = Enum.at(buffers, idx)
-    %{bs | active_index: idx, active: pid}
+  @doc "Switches to the buffer at `idx`, wrapping negative and positive indexes."
+  @spec switch_to(t(), integer()) :: t()
+  def switch_to(%__MODULE__{list: [_ | _] = buffers} = bs, idx) when is_integer(idx) do
+    wrapped_index = Integer.mod(idx, Enum.count(buffers))
+    pid = Enum.at(buffers, wrapped_index)
+    %{bs | active_index: wrapped_index, active: pid}
   end
 
-  def switch_to(%__MODULE__{} = bs, _idx), do: bs
+  def switch_to(%__MODULE__{} = bs, idx) when is_integer(idx), do: bs
 
   @doc "Switches to the buffer with the given pid, if it exists in the list."
   @spec switch_to_pid(t(), pid()) :: t()

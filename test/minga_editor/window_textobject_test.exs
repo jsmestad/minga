@@ -14,7 +14,6 @@ defmodule MingaEditor.WindowTextobjectTest do
     %Window{
       id: 1,
       content: Content.buffer(pid),
-      buffer: pid,
       viewport: Viewport.new(24, 80),
       textobject_positions: positions
     }

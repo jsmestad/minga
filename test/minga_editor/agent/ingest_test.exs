@@ -260,6 +260,7 @@ defmodule MingaEditor.Agent.IngestTest do
       session = fake_session()
 
       send(ingest, {:agent_event, session, {:text_delta, "lead"}})
+      sync(ingest)
       assert_receive {:agent_stream_batch, ^session, [{:text_delta, "lead"}]}
 
       # Each delta is 6 bytes ("chunk1", "chunk2", "chunk3"). Cap is 10 bytes,

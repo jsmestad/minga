@@ -3,8 +3,8 @@ defmodule MingaEditor.Window.Content do
   Polymorphic content reference for window panes.
 
   A window can host any content type: a file buffer, an agent chat session,
-  a terminal, etc. This module defines the tagged union that replaces the
-  old `buffer: pid()` field on `Window.t()`.
+  a terminal, etc. This module defines the authoritative tagged union for
+  window content identity.
 
   ## Why a tagged tuple instead of a protocol?
 

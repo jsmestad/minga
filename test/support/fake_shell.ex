@@ -46,6 +46,12 @@ defmodule MingaEditor.Test.FakeShell do
     do: %{overlay: [], surface: [MingaEditor.Test.FakeShellInput]}
 
   @impl true
+  @spec blur_bottom_panel(map()) :: map()
+  def blur_bottom_panel(shell_state) do
+    Map.update(shell_state, :events, [:bottom_panel_blurred], &[:bottom_panel_blurred | &1])
+  end
+
+  @impl true
   @spec handle_event(map(), MingaEditor.Session.State.t(), term()) ::
           {map(), MingaEditor.Session.State.t()}
   def handle_event(_shell_state, workspace, {:replace_test_state, replacement})

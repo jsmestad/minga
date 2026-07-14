@@ -68,11 +68,9 @@ defmodule MingaEditor.Extension.EditorAPITest do
       MingaEditor.State.Windows.replace_window(
         state.workspace.windows,
         new_window_id,
-        %{
-          Map.fetch!(state.workspace.windows.map, new_window_id)
-          | buffer: second_buffer,
-            content: {:buffer, second_buffer}
-        }
+        state.workspace.windows.map
+        |> Map.fetch!(new_window_id)
+        |> MingaEditor.Window.show_buffer(second_buffer)
       )
 
     state =
