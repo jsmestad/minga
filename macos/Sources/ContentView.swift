@@ -111,100 +111,78 @@ struct ContentViewFrameProbe {
 }
 
 private struct ShellFramePresentationHost<Content: View>: View {
-    let channel: GUIFrameChannel
     let metrics: GUIFramePresentationMetrics
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        let version = channel.value
-        return content()
-            .environment(\.guiFrameVersion, version)
-            .frameNativeDrawProbe(domain: .shell, version: version, metrics: metrics)
+        content()
+            .frameNativeDrawProbe(domain: .shell, metrics: metrics)
     }
 }
 
 private struct UnifiedToolbarHost<Content: View>: View {
-    let channel: GUIFrameChannel
     let input: ShellHostInput
     @ViewBuilder let content: (ShellHostInput) -> Content
 
     var body: some View {
-        let version = channel.value
-        return content(input)
+        content(input)
             .environment(\.themeColors, input.currentTheme)
-            .environment(\.guiFrameVersion, version)
     }
 }
 
 private struct SidebarHost<Content: View>: View {
-    let channel: GUIFrameChannel
     let input: ShellHostInput
     @ViewBuilder let content: (ShellHostInput) -> Content
 
     var body: some View {
-        let version = channel.value
-        return content(input)
+        content(input)
             .environment(\.themeColors, input.currentTheme)
-            .environment(\.guiFrameVersion, version)
     }
 }
 
 private struct EditorColumnHost<Content: View>: View {
-    let channel: GUIFrameChannel
     let input: ShellHostInput
     @ViewBuilder let content: (ShellHostInput) -> Content
 
     var body: some View {
-        let version = channel.value
-        return content(input)
+        content(input)
             .environment(\.themeColors, input.currentTheme)
-            .environment(\.guiFrameVersion, version)
     }
 }
 
 private struct EditorSurfaceHost<Content: View>: View {
-    let channel: GUIFrameChannel
     let input: EditorHostInput
     @ViewBuilder let content: (EditorHostInput) -> Content
 
     var body: some View {
-        let version = channel.value
-        return content(input)
+        content(input)
             .environment(\.themeColors, input.currentTheme)
-            .environment(\.guiFrameVersion, version)
     }
 }
 
 private struct StatusBarHost<Content: View>: View {
-    let channel: GUIFrameChannel
     let input: ShellHostInput
     @ViewBuilder let content: (ShellHostInput) -> Content
 
     var body: some View {
-        let version = channel.value
-        return content(input)
+        content(input)
             .environment(\.themeColors, input.currentTheme)
-            .environment(\.guiFrameVersion, version)
     }
 }
 
 private struct WindowOverlayHost<Content: View>: View {
-    let channel: GUIFrameChannel
     let input: WindowOverlayHostInput
     let metrics: GUIFramePresentationMetrics
     @ViewBuilder let content: (WindowOverlayHostInput) -> Content
 
     var body: some View {
-        let version = channel.value
-        return content(input)
+        content(input)
             .environment(\.themeColors, input.currentTheme)
-            .environment(\.guiFrameVersion, version)
-            .frameNativeDrawProbe(domain: .windowOverlay, version: version, metrics: metrics)
+            .frameNativeDrawProbe(domain: .windowOverlay, metrics: metrics)
     }
 }
 
 private struct EditorOverlayHost<ExtensionContent: View>: View {
-    let channel: GUIFrameChannel
     let input: EditorOverlayHostInput
     let metrics: GUIFramePresentationMetrics
     let geometry: EditorGeometry
@@ -214,8 +192,7 @@ private struct EditorOverlayHost<ExtensionContent: View>: View {
     @ViewBuilder let extensionContent: () -> ExtensionContent
 
     var body: some View {
-        let version = channel.value
-        return ZStack(alignment: .topLeading) {
+        ZStack(alignment: .topLeading) {
             if input.signatureHelpState.visible {
                 anchoredOverlay(row: input.signatureHelpState.anchorRow, col: input.signatureHelpState.anchorCol, preferredSide: .above, maxHeight: 220) { _ in
                     SignatureHelpOverlay(state: input.signatureHelpState)
@@ -249,8 +226,7 @@ private struct EditorOverlayHost<ExtensionContent: View>: View {
             extensionContent()
         }
         .environment(\.themeColors, input.currentTheme)
-        .environment(\.guiFrameVersion, version)
-        .frameNativeDrawProbe(domain: .editorOverlay, version: version, metrics: metrics)
+        .frameNativeDrawProbe(domain: .editorOverlay, metrics: metrics)
     }
 
     @ViewBuilder
@@ -606,7 +582,6 @@ public struct ContentView<EditorSurface: View>: View {
     }
 
     public var body: some View {
-        let frameStore = gui.frameStore
         let metrics = gui.presentationMetrics
         let shellInput = gui.shellInput
         let editorInput = gui.editorInput
@@ -614,36 +589,34 @@ public struct ContentView<EditorSurface: View>: View {
         let windowOverlayInput = gui.windowOverlayInput
 
         return ZStack {
-            ShellFramePresentationHost(channel: frameStore.shell, metrics: metrics) {
+            ShellFramePresentationHost(metrics: metrics) {
                 VStack(spacing: 0) {
-                    UnifiedToolbarHost(channel: frameStore.shell, input: shellInput) { input in
+                    UnifiedToolbarHost(input: shellInput) { input in
                         unifiedToolbar(input)
                     }
                     HStack(spacing: 0) {
-                        SidebarHost(channel: frameStore.shell, input: shellInput) { input in
+                        SidebarHost(input: shellInput) { input in
                             sidebarBody(input)
                                 .onAppear { applyActiveSidebarPreferredWidth(input) }
                                 .onChange(of: input.sidebarHostState.activeSidebar) { _, _ in
                                     applyActiveSidebarPreferredWidth(input)
                                 }
                         }
-                        EditorColumnHost(channel: frameStore.shell, input: shellInput) { input in
+                        EditorColumnHost(input: shellInput) { input in
                             editorBody(
                                 input,
                                 editorInput: editorInput,
-                                editorChannel: frameStore.editor,
                                 editorOverlayInput: editorOverlayInput,
-                                editorOverlayChannel: frameStore.editorOverlay,
                                 metrics: metrics
                             )
                         }
                     }
-                    StatusBarHost(channel: frameStore.shell, input: shellInput) { input in
+                    StatusBarHost(input: shellInput) { input in
                         statusBar(input)
                     }
                 }
             }
-            WindowOverlayHost(channel: frameStore.windowOverlay, input: windowOverlayInput, metrics: metrics) { input in
+            WindowOverlayHost(input: windowOverlayInput, metrics: metrics) { input in
                 ZStack {
                     frontendExtensionRuntimeLayer(input)
                     windowOverlays(input)
@@ -839,9 +812,7 @@ public struct ContentView<EditorSurface: View>: View {
     private func editorBody(
         _ input: ShellHostInput,
         editorInput: EditorHostInput,
-        editorChannel: GUIFrameChannel,
         editorOverlayInput: EditorOverlayHostInput,
-        editorOverlayChannel: GUIFrameChannel,
         metrics: GUIFramePresentationMetrics
     ) -> some View {
         VStack(spacing: 0) {
@@ -876,11 +847,10 @@ public struct ContentView<EditorSurface: View>: View {
                     changeSummarySidebar(input)
                 }
 
-                EditorSurfaceHost(channel: editorChannel, input: editorInput) { focusedInput in
+                EditorSurfaceHost(input: editorInput) { focusedInput in
                     editorSurface(
                         focusedInput,
                         overlayInput: editorOverlayInput,
-                        overlayChannel: editorOverlayChannel,
                         metrics: metrics
                     )
                 }
@@ -940,7 +910,6 @@ public struct ContentView<EditorSurface: View>: View {
     private func editorSurface(
         _ input: EditorHostInput,
         overlayInput: EditorOverlayHostInput,
-        overlayChannel: GUIFrameChannel,
         metrics: GUIFramePresentationMetrics
     ) -> some View {
         let geo = editorGeometry()
@@ -973,7 +942,6 @@ public struct ContentView<EditorSurface: View>: View {
             }
 
             EditorOverlayHost(
-                channel: overlayChannel,
                 input: overlayInput,
                 metrics: metrics,
                 geometry: geo,

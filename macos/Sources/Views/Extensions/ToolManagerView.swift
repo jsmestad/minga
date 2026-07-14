@@ -15,7 +15,7 @@ public struct ToolManagerView: View {
     }
     public let state: ToolManagerState
     @Environment(\.themeColors) private var theme
-    @Environment(\.guiFrameVersion) private var frameVersion
+
     public let encoder: InputEncoder?
 
     private let panelWidth: CGFloat = 680
@@ -30,7 +30,6 @@ public struct ToolManagerView: View {
     }
 
     public var body: some View {
-        let _ = frameVersion
         if state.visible {
             ZStack {
                 // Dimmed background scrim

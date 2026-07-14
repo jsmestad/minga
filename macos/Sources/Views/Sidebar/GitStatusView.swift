@@ -9,7 +9,7 @@ import SwiftUI
 public struct GitStatusView: View {
     public let state: GitStatusState
     @Environment(\.themeColors) private var theme
-    @Environment(\.guiFrameVersion) private var frameVersion
+
     public let encoder: InputEncoder?
     public let usesPreviewEagerLayout: Bool
 
@@ -40,7 +40,6 @@ public struct GitStatusView: View {
     @State private var fileToDiscard: GitStatusEntry? = nil
 
     public var body: some View {
-        let _ = frameVersion
         VStack(spacing: 0) {
             // Toast banner
             if let toast = state.toastMessage {

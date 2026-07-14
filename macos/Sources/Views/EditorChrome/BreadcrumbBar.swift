@@ -31,13 +31,12 @@ public struct BreadcrumbBar: View {
     }
     public let state: BreadcrumbState
     @Environment(\.themeColors) private var theme
-    @Environment(\.guiFrameVersion) private var frameVersion
+
     public let encoder: InputEncoder?
 
     private let barHeight: CGFloat = 26
 
     public var body: some View {
-        let _ = frameVersion
         if !state.segments.isEmpty {
             HStack(spacing: 0) {
                 // Path segments with chevron separators

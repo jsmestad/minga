@@ -10,14 +10,13 @@ public struct ChangeSummarySidebarView: View {
     public let encoder: InputEncoder?
     @Binding public var width: CGFloat
     @Environment(\.themeColors) private var theme
-    @Environment(\.guiFrameVersion) private var frameVersion
+
 
     @State private var minWidth: CGFloat = 200
     @State private var maxWidth: CGFloat = 400
     @State private var isDraggingResize: Bool = false
 
     public var body: some View {
-        let _ = frameVersion
         HStack(spacing: 0) {
             VStack(spacing: 0) {
                 ChangeSummaryView(

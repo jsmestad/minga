@@ -2027,13 +2027,13 @@ struct CommandDispatcherStagingTests {
         #expect(readyCount == 1)
     }
 
-    @Test("focused channel callback sees the complete installed transaction")
+    @Test("focused direct owner observes one committed update")
     @MainActor func focusedObservationIsAtomic() throws {
         let (dispatcher, gui) = makeDispatcher()
         let notificationCount = Mutex(0)
 
         withObservationTracking {
-            _ = gui.frameStore.shell.value
+            _ = gui.tabBarState.tabs
         } onChange: {
             notificationCount.withLock { $0 += 1 }
         }
@@ -2052,7 +2052,6 @@ struct CommandDispatcherStagingTests {
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
 
         #expect(notificationCount.withLock { $0 } == 1)
-        #expect(gui.frameStore.installed.shell.lastCommitted?.frameSeq == 1)
         #expect(gui.tabBarState.tabs.first?.label == "atomic.ex")
         #expect(gui.agentChatState.model == "prepared-model")
     }

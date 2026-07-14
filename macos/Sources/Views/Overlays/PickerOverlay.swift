@@ -14,7 +14,7 @@ public struct PickerOverlay: View {
     }
     public let state: PickerState
     @Environment(\.themeColors) private var theme
-    @Environment(\.guiFrameVersion) private var frameVersion
+
     public let encoder: InputEncoder?
 
     private let panelWidth: CGFloat = 600
@@ -27,7 +27,6 @@ public struct PickerOverlay: View {
     }
 
     public var body: some View {
-        let _ = frameVersion
         if state.visible {
             GeometryReader { geo in
                 VStack(spacing: 0) {

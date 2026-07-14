@@ -13,12 +13,11 @@ public struct GitStatusHeaderView: View {
     }
     public let state: GitStatusState
     @Environment(\.themeColors) private var theme
-    @Environment(\.guiFrameVersion) private var frameVersion
+
     public let projectName: String
     public let leadingPadding: CGFloat
 
     public var body: some View {
-        let _ = frameVersion
         HStack(spacing: 6) {
             Text("\u{F0256}")
                 .font(.custom("Symbols Nerd Font Mono", size: 12))

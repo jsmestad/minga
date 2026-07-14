@@ -33,7 +33,6 @@
 		1631D7B76B33CD897C48F263 /* IMECompositionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6C3196976BC934B3112EF96 /* IMECompositionTests.swift */; };
 		172D7B7EC516CC0CA76797AC /* WorkspaceHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0D4C9BE8CA9DC30BCE6ED49 /* WorkspaceHeaderView.swift */; };
 		18F0DDA03D08C0B4302DCCF4 /* BitmapRasterizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42375D2D8B25AF31BEB11AB5 /* BitmapRasterizer.swift */; };
-		19117A3BA17ACBBD58E55A9E /* GUIFrameStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6577A488A042D7974A1EA661 /* GUIFrameStoreTests.swift */; };
 		1936219891B87FD4AB49795B /* StatusBarState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 575815EBAD4E1DFE0BE3DE57 /* StatusBarState.swift */; };
 		19E561E5F7841B2CF1ABB085 /* BEAMProcessManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0EFEC421284D11AD2177113 /* BEAMProcessManager.swift */; };
 		1A2DA0CD8DD4B1C1F30C9098 /* MingaProtocol.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 848E04E4F242C861887769F3 /* MingaProtocol.framework */; };
@@ -264,12 +263,14 @@
 		C9EE9DC782AEA94BAA0FC538 /* TabBarState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A2CBCDF99282365E723D45A /* TabBarState.swift */; };
 		CA07A054C4AD25FADA35DAF7 /* MinibufferState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7DCE12924B5A58CA615BA58 /* MinibufferState.swift */; };
 		CCE118FC3021E69BB08F98BE /* EditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13E89640A29C207B9040DC67 /* EditorView.swift */; };
+		CD0AC714E46D3F95FE9AAE6F /* GUIFrameRoutingAndMetricsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 485DB41F09E703BBC203DBD0 /* GUIFrameRoutingAndMetricsTests.swift */; };
 		CD2952CCEB2FD594B269A75D /* GUIActionEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2C629D58FF3305F579BA5E2 /* GUIActionEncoderTests.swift */; };
 		CE2F1915565DB90F4A7FC04C /* SlotAllocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 371C61E78D4BB39467516BA7 /* SlotAllocator.swift */; };
 		CE65FF332E03ED47ADFBA48E /* EditorScrollTrack.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44800E8F274B5EC453CAE7EB /* EditorScrollTrack.swift */; };
 		CE8489B606217C3889536EBD /* PreviewRegistry+AgentChat.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6904499C06BDDEDCECC5D364 /* PreviewRegistry+AgentChat.swift */; };
 		CED32F817C08FC30D21E09AC /* ProtocolSemanticDecode.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = B639BCE7660087F70778E839 /* ProtocolSemanticDecode.generated.swift */; };
 		CF72EFC1EF2109055E2CE9F0 /* SearchToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7740BB367B27DD4B53FFB853 /* SearchToolbar.swift */; };
+		CF8B7220F4ECE08DAD597CD7 /* GUIFrameCorrelation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A9C41D4B8B3DCF4A06CDF44 /* GUIFrameCorrelation.swift */; };
 		D016856873812B1D5433960E /* FloatPopupState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07B59F66E6260DE4B09FB563 /* FloatPopupState.swift */; };
 		D394B6B62354CC4ADD76DB74 /* LatencyRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 749F7E4A3595F1289002943E /* LatencyRecorder.swift */; };
 		D42695D627BD38405475ECFF /* ScrollAccumulatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 211424F30BBE8A57852D5630 /* ScrollAccumulatorTests.swift */; };
@@ -305,7 +306,6 @@
 		E8DAC5BD5013095E550BF4E8 /* CompletionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 124E376C3B8F6EC62765F5C1 /* CompletionState.swift */; };
 		E986DB2DA0989A52D16B1E69 /* PickerState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60980E90FDD864409144BA5B /* PickerState.swift */; };
 		EA49ADC46692D8613D80EA2D /* NativeSidebarRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA2269E199608D475AB34F10 /* NativeSidebarRegistryTests.swift */; };
-		EC052D491677191783FF978E /* GUIFrameStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5066C470DAA195F0DA9FE491 /* GUIFrameStore.swift */; };
 		ED8592B57E8A2A3EAAE24295 /* EditorNSView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98DB822E0C8D06C7B45D329F /* EditorNSView.swift */; };
 		EE84DA1BF4952359DD0DC343 /* LineTextureAtlas.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4742DDE225F256A140177301 /* LineTextureAtlas.swift */; };
 		EFB02B33864584C42AD0038E /* MingaUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7D941F158B53B4D4CF4AAA4F /* MingaUI.framework */; };
@@ -486,15 +486,16 @@
 		47BD56B7D6D195D236F9BF40 /* ProtocolEncoderBinaryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolEncoderBinaryTests.swift; sourceTree = "<group>"; };
 		4819FED95BD6D1746F538DED /* NativeRenderResourcesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRenderResourcesTests.swift; sourceTree = "<group>"; };
 		483AA21EF140F07296D1E16A /* AgentSurfaceTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSurfaceTypes.swift; sourceTree = "<group>"; };
+		485DB41F09E703BBC203DBD0 /* GUIFrameRoutingAndMetricsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GUIFrameRoutingAndMetricsTests.swift; sourceTree = "<group>"; };
 		48E21C30D142028698027567 /* CoreTextShaders.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = CoreTextShaders.metal; sourceTree = "<group>"; };
 		492285F3371798B69478BF13 /* AgentApprovalCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentApprovalCard.swift; sourceTree = "<group>"; };
 		4A647814918768E62822D4A1 /* MingaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MingaApp.swift; sourceTree = "<group>"; };
+		4A9C41D4B8B3DCF4A06CDF44 /* GUIFrameCorrelation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GUIFrameCorrelation.swift; sourceTree = "<group>"; };
 		4AF6BEBA233BA1169CF8C642 /* ProtocolReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolReader.swift; sourceTree = "<group>"; };
 		4B3DDF1EB804D4E31EDFA519 /* NonBlockingEncoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NonBlockingEncoderTests.swift; sourceTree = "<group>"; };
 		4BB5DAD0EAB1AE583E45AF5C /* PreviewRegistry+GitStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PreviewRegistry+GitStatus.swift"; sourceTree = "<group>"; };
 		4BC98120D82BD7548347875E /* FontFace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontFace.swift; sourceTree = "<group>"; };
 		4CDC572B6F7D2CD90E07CA61 /* TabBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabBarView.swift; sourceTree = "<group>"; };
-		5066C470DAA195F0DA9FE491 /* GUIFrameStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GUIFrameStore.swift; sourceTree = "<group>"; };
 		510D1033E87B077777E8FD64 /* GUIFrameSwiftUIInvalidationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GUIFrameSwiftUIInvalidationTests.swift; sourceTree = "<group>"; };
 		51E88C12915EC4EBE96165AF /* FileTreeHeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTreeHeaderView.swift; sourceTree = "<group>"; };
 		53CEDDFB3856C44BA51C8A7B /* Instrumentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Instrumentation.swift; sourceTree = "<group>"; };
@@ -519,7 +520,6 @@
 		63D118F59FBCA463A52B84FA /* AgentContextBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentContextBar.swift; sourceTree = "<group>"; };
 		644384B6B8FE5F11CD0DB713 /* GUIState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GUIState.swift; sourceTree = "<group>"; };
 		64CEFB02A774E5E8EF19029F /* MingaTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MingaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		6577A488A042D7974A1EA661 /* GUIFrameStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GUIFrameStoreTests.swift; sourceTree = "<group>"; };
 		65B982679577E3DBD4E7A69D /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		671A222860B90E08D7975099 /* WorkspaceIconPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceIconPicker.swift; sourceTree = "<group>"; };
 		67B23834E6FEB75E891AAFE2 /* ObservatoryState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObservatoryState.swift; sourceTree = "<group>"; };
@@ -893,8 +893,8 @@
 				13C8650724242FD0A50EC3CA /* EditorGeometry.swift */,
 				1BB45C5B630FDEDFD0BD6BE0 /* EditTimelineState.swift */,
 				EE173FAAAC37ACFF47EE03B8 /* EditTimelineView.swift */,
+				4A9C41D4B8B3DCF4A06CDF44 /* GUIFrameCorrelation.swift */,
 				18683C638D0F417500DAF924 /* GUIFramePresentationMetrics.swift */,
-				5066C470DAA195F0DA9FE491 /* GUIFrameStore.swift */,
 				644384B6B8FE5F11CD0DB713 /* GUIState.swift */,
 				8A733EF649EF21A761608D75 /* MingaWindow.swift */,
 				9D721181E284AD8BA34F0354 /* SparklineView.swift */,
@@ -1060,7 +1060,7 @@
 				BD2DE335B00721CBB29329F9 /* FontTests.swift */,
 				E2C629D58FF3305F579BA5E2 /* GUIActionEncoderTests.swift */,
 				754C68BAFE0C4DB553BFD06A /* GUIChromeDecoderTests.swift */,
-				6577A488A042D7974A1EA661 /* GUIFrameStoreTests.swift */,
+				485DB41F09E703BBC203DBD0 /* GUIFrameRoutingAndMetricsTests.swift */,
 				510D1033E87B077777E8FD64 /* GUIFrameSwiftUIInvalidationTests.swift */,
 				F6C3196976BC934B3112EF96 /* IMECompositionTests.swift */,
 				7E4E980D53CCCE228BA59BD5 /* KeyboardInputTests.swift */,
@@ -1550,8 +1550,8 @@
 				C6BCAF6C4605DD682B8BC442 /* FloatPopupOverlay.swift in Sources */,
 				D016856873812B1D5433960E /* FloatPopupState.swift in Sources */,
 				FCC1D0710DF8573446AA5EAB /* FrontendExtensionRuntime.swift in Sources */,
+				CF8B7220F4ECE08DAD597CD7 /* GUIFrameCorrelation.swift in Sources */,
 				021E5E13E2F6CA9FEEA6D175 /* GUIFramePresentationMetrics.swift in Sources */,
-				EC052D491677191783FF978E /* GUIFrameStore.swift in Sources */,
 				94C474B5B4938F72E9A5070B /* GUIState.swift in Sources */,
 				45B4C421739CB97B638B385C /* GitStatusHeaderView.swift in Sources */,
 				BA87497E73BB694BE1FCE77E /* GitStatusState.swift in Sources */,
@@ -1646,7 +1646,7 @@
 				63F3CF3A4746901FDF1C3356 /* FrameState.swift in Sources */,
 				CD2952CCEB2FD594B269A75D /* GUIActionEncoderTests.swift in Sources */,
 				30E31170A79F30413D15D858 /* GUIChromeDecoderTests.swift in Sources */,
-				19117A3BA17ACBBD58E55A9E /* GUIFrameStoreTests.swift in Sources */,
+				CD0AC714E46D3F95FE9AAE6F /* GUIFrameRoutingAndMetricsTests.swift in Sources */,
 				4D276F4F3C0C19A3E184D09B /* GUIFrameSwiftUIInvalidationTests.swift in Sources */,
 				312DC4940992B35ED9EE7648 /* IMEComposition.swift in Sources */,
 				1631D7B76B33CD897C48F263 /* IMECompositionTests.swift in Sources */,

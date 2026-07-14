@@ -470,9 +470,7 @@ struct GUIFrameSwiftUIInvalidationTests {
         hostingView.layoutSubtreeIfNeeded()
         await Task.yield()
 
-        gui.frameStore.publishLocal(impact: .shell) {
-            gui.tabBarState.update(activeIndex: 0, entries: [Self.tab(label: "local.ex")])
-        }
+        gui.tabBarState.update(activeIndex: 0, entries: [Self.tab(label: "local.ex")])
         await recorder.waitForValue("local.ex", point: .shell)
         hostingView.layoutSubtreeIfNeeded()
         await Task.yield()
@@ -481,9 +479,7 @@ struct GUIFrameSwiftUIInvalidationTests {
             recorder: recorder
         )
 
-        gui.frameStore.publishLocal(impact: .editor) {
-            Self.updateEmptyState(gui, label: "Local launchpad")
-        }
+        Self.updateEmptyState(gui, label: "Local launchpad")
         await recorder.waitForValue("Local launchpad", point: .editor)
         hostingView.layoutSubtreeIfNeeded()
         await Task.yield()
@@ -492,10 +488,8 @@ struct GUIFrameSwiftUIInvalidationTests {
             recorder: recorder
         )
 
-        gui.frameStore.publishLocal(impact: .editorOverlay) {
-            Self.updateCompletion(gui, label: "localCompletion")
-            gui.extensionOverlayState.update([Self.extensionOverlay(content: "localExtension")])
-        }
+        Self.updateCompletion(gui, label: "localCompletion")
+        gui.extensionOverlayState.update([Self.extensionOverlay(content: "localExtension")])
         await recorder.waitForValue("localCompletion", point: .editorOverlay)
         await recorder.waitForValue("localExtension", point: .extensionOverlay)
         hostingView.layoutSubtreeIfNeeded()
@@ -505,9 +499,7 @@ struct GUIFrameSwiftUIInvalidationTests {
             recorder: recorder
         )
 
-        gui.frameStore.publishLocal(impact: .windowOverlay) {
-            Self.updatePicker(gui, label: "localPicker")
-        }
+        Self.updatePicker(gui, label: "localPicker")
         await recorder.waitForValue("localPicker", point: .windowOverlay)
         hostingView.layoutSubtreeIfNeeded()
         await Task.yield()
@@ -599,7 +591,6 @@ struct GUIFrameSwiftUIInvalidationTests {
         let previewTabBaseline = recorder.updateCount(for: .shell)
         let previewTreeBaseline = recorder.updateCount(for: .fileTree)
         let previewEditorBaseline = recorder.updateCount(for: .editor)
-        let shellRevision = gui.frameStore.shell.value.revision
 
         #expect(dispatcher.previewFileTreeNavigation(codepoint: 106, modifiers: 0))
         await recorder.waitForValue("new.ex", point: .fileTree)
@@ -607,7 +598,6 @@ struct GUIFrameSwiftUIInvalidationTests {
         #expect(recorder.updateCount(for: .fileTree) - previewTreeBaseline == 1)
         #expect(recorder.updateCount(for: .shell) - previewTabBaseline == 0)
         #expect(recorder.updateCount(for: .editor) - previewEditorBaseline == 0)
-        #expect(gui.frameStore.shell.value.revision == shellRevision)
     }
 
     @Test(
@@ -621,8 +611,6 @@ struct GUIFrameSwiftUIInvalidationTests {
         let overlayReplacement = try Self.windowContent(text: "overlay replacement", epoch: 3)
         let gui = GUIState(windowContents: [1: initialWindow, 2: unchangedWindow])
         let originalTheme = gui.shellInput.currentTheme
-        var publicationEvents: [GUIFrameStore.PublicationEvent] = []
-        gui.frameStore.onPublicationEvent = { publicationEvents.append($0) }
 
         await expectOnlyObservedBackingProbeUpdate(
             owner: gui.shellInput,
@@ -662,11 +650,6 @@ struct GUIFrameSwiftUIInvalidationTests {
         let overlayPreserved = try #require(gui.editorOverlayInput.windowContent(for: 2))
         #expect(overlayPreserved === unchangedWindow)
         #expect(overlayPreserved.rowStore.sharesStorage(with: unchangedWindow.rowStore))
-        #expect(publicationEvents.isEmpty)
-        #expect(gui.frameStore.shell.value.revision == 0)
-        #expect(gui.frameStore.editor.value.revision == 0)
-        #expect(gui.frameStore.editorOverlay.value.revision == 0)
-        #expect(gui.frameStore.windowOverlay.value.revision == 0)
     }
 
     @Test(
@@ -1045,10 +1028,6 @@ struct GUIFrameSwiftUIInvalidationTests {
         let treeView = try #require(sources["Sources/Views/Sidebar/FileTreeView.swift"])
         #expect(tabState.contains("@MainActor\n@Observable\npublic final class TabBarState"))
         #expect(treeState.contains("@MainActor\n@Observable\npublic final class FileTreeState"))
-        for leafView in [tabView, treeView] {
-            #expect(!leafView.contains("@Environment(\\.guiFrameVersion)"))
-            #expect(!leafView.contains("let _ = frameVersion"))
-        }
         #expect(!tabView.contains(".id(tabBarState"))
         #expect(!treeView.contains(".id(fileTreeState"))
     }

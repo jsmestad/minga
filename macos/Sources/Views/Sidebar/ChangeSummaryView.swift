@@ -16,11 +16,10 @@ public struct ChangeSummaryView: View {
     }
     public let state: ChangeSummaryState
     @Environment(\.themeColors) private var theme
-    @Environment(\.guiFrameVersion) private var frameVersion
+
     public let encoder: InputEncoder?
 
     public var body: some View {
-        let _ = frameVersion
         VStack(spacing: 0) {
             // Header
             HStack(spacing: 8) {

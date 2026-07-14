@@ -13,10 +13,9 @@ public struct ProtocolErrorOverlay: View {
     }
     public var state: ProtocolErrorState
     @Environment(\.themeColors) private var theme
-    @Environment(\.guiFrameVersion) private var frameVersion
+
 
     public var body: some View {
-        let _ = frameVersion
         if let message = state.message {
             ZStack {
                 theme.editorBg
