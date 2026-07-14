@@ -14,7 +14,7 @@ defmodule MingaEditor.Input.FileTreeHandler do
 
   alias Minga.Buffer
   alias MingaEditor.Commands
-  alias MingaEditor.FileTree.FilterWalk
+  alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
   alias MingaEditor.FocusTree
   alias MingaEditor.FocusTree.Node, as: FocusNode
   alias MingaEditor.State, as: EditorState
@@ -425,30 +425,11 @@ defmodule MingaEditor.Input.FileTreeHandler do
     end
   end
 
-  # Updates the active filter, then kicks off the async no-cache filesystem walk
-  # when the tree root is not covered by the project cache (#2377 AC4). The
-  # active project root filters in memory inside update_filter/2, so the walk is
-  # only spawned for other roots. The walk result arrives as a
-  # {:file_tree_filter_walk, ...} message handled by the editor.
   @spec apply_filter_update(EditorState.t(), String.t()) :: EditorState.t()
   defp apply_filter_update(state, ""), do: Commands.FileTree.reset_filter_query(state)
 
-  defp apply_filter_update(state, filter_text) do
-    file_tree = FileTreeState.update_filter(file_tree_state(state), filter_text)
-    maybe_spawn_filter_walk(file_tree)
-    set_file_tree(state, file_tree)
-  end
-
-  @spec maybe_spawn_filter_walk(FileTreeState.t()) :: :ok
-  defp maybe_spawn_filter_walk(%FileTreeState{tree: %FileTree{} = tree} = file_tree) do
-    if FileTreeState.needs_filter_walk?(file_tree) do
-      FilterWalk.start(tree, self())
-    end
-
-    :ok
-  end
-
-  defp maybe_spawn_filter_walk(%FileTreeState{}), do: :ok
+  defp apply_filter_update(state, filter_text),
+    do: FileTreeFreshness.update_filter(state, filter_text)
 
   # ── Shared helpers ──────────────────────────────────────────────────────
 

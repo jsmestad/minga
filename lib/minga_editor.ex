@@ -522,10 +522,6 @@ defmodule MingaEditor do
     {:noreply, FileEventHandler.dispatch(new_state, msg)}
   end
 
-  def handle_info({:file_tree_filter_walk, _root, _filter, _entries} = msg, state) do
-    {:noreply, FileEventHandler.dispatch(state, msg)}
-  end
-
   def handle_info(
         {:minga_input, {:mouse_event, row, col, button, mods, event_type, click_count}},
         state

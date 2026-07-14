@@ -320,61 +320,15 @@ defmodule MingaEditor.Commands.FileTree do
 
   @doc "Starts inline file tree filtering."
   @spec filter(state()) :: state()
-  def filter(state) do
-    file_tree = FileTreeState.start_filtering(file_tree_state(state))
-    maybe_spawn_filter_walk(file_tree)
-    update_file_tree(state, fn _ -> file_tree end)
-  end
+  def filter(state), do: FileTreeFreshness.start_filtering(state)
 
   @doc "Restores unfiltered rows while keeping the filter input active."
   @spec reset_filter_query(state()) :: state()
-  def reset_filter_query(state), do: restore_unfiltered_filter(state, :keep_open)
+  def reset_filter_query(state), do: FileTreeFreshness.clear_filter(state, :keep_open)
 
   @doc "Restores unfiltered rows and dismisses filter input."
   @spec clear_filter(state()) :: state()
-  def clear_filter(state), do: restore_unfiltered_filter(state, :dismiss)
-
-  @spec restore_unfiltered_filter(state(), :keep_open | :dismiss) :: state()
-  defp restore_unfiltered_filter(state, disposition) do
-    case file_tree_state(state).tree do
-      %FileTree{} = tree ->
-        tree = tree |> FileTree.put_cached_files(nil) |> FileTree.clear_filter()
-        restore_resolved_filter(resolve_tree_entries(tree), state, disposition)
-
-      nil ->
-        state
-    end
-  end
-
-  @spec restore_resolved_filter(tree_resolution(), state(), :keep_open | :dismiss) :: state()
-  defp restore_resolved_filter({:error, reason}, state, _disposition) do
-    update_file_tree(state, &FileTreeState.refresh_failed(&1, reason))
-  end
-
-  defp restore_resolved_filter({:ok, tree}, state, disposition) do
-    tree = if disposition == :keep_open, do: FileTree.begin_filter(tree), else: tree
-    file_tree = FileTreeState.replace_tree(file_tree_state(state), tree)
-    file_tree = dismiss_filter(file_tree, disposition)
-    state = set_file_tree(state, file_tree)
-    sync_buffer(state)
-  end
-
-  @spec dismiss_filter(FileTreeState.t(), :keep_open | :dismiss) :: FileTreeState.t()
-  defp dismiss_filter(file_tree, :keep_open), do: file_tree
-  defp dismiss_filter(file_tree, :dismiss), do: FileTreeState.accept_filter(file_tree)
-
-  # Spawns the async no-cache filesystem walk when re-entering filtering carries
-  # a pre-existing filter on a root the project cache does not cover (#2377 AC4).
-  @spec maybe_spawn_filter_walk(FileTreeState.t()) :: :ok
-  defp maybe_spawn_filter_walk(%FileTreeState{tree: %FileTree{} = tree} = file_tree) do
-    if FileTreeState.needs_filter_walk?(file_tree) do
-      MingaEditor.FileTree.FilterWalk.start(tree, self())
-    end
-
-    :ok
-  end
-
-  defp maybe_spawn_filter_walk(%FileTreeState{}), do: :ok
+  def clear_filter(state), do: FileTreeFreshness.clear_filter(state, :dismiss)
 
   @doc "Toggles the file tree help overlay."
   @spec toggle_help(state()) :: state()
@@ -744,11 +698,6 @@ defmodule MingaEditor.Commands.FileTree do
 
   @spec close(state()) :: state()
   def close(state) do
-    case file_tree_state(state).tree do
-      %FileTree{} = tree -> FileTreeFreshness.unwatch_expanded_dirs(tree)
-      nil -> :ok
-    end
-
     case file_tree_state(state).buffer do
       buf when is_pid(buf) -> GenServer.stop(buf, :normal)
       _ -> :ok
@@ -767,6 +716,7 @@ defmodule MingaEditor.Commands.FileTree do
             )
       }
     end)
+    |> FileTreeFreshness.synchronize_watchers()
     |> then(fn state ->
       %{state | workspace: State.set_keymap_scope(state.workspace, scope)}
     end)
@@ -977,31 +927,7 @@ defmodule MingaEditor.Commands.FileTree do
   end
 
   @spec reroot(state(), String.t()) :: state()
-  defp reroot(state, root) do
-    case file_tree_state(state).tree do
-      %FileTree{} = tree ->
-        FileTreeFreshness.unwatch_expanded_dirs(tree)
-        new_tree = FileTree.reroot(tree, root)
-
-        case resolve_tree_entries(new_tree) do
-          {:ok, new_tree} ->
-            new_tree =
-              FileTreeRefresh.with_cached_git_status(
-                new_tree,
-                state.extension_surfaces.events_registry
-              )
-
-            FileTreeFreshness.watch_expanded_dirs(new_tree)
-            sync_and_update(state, new_tree)
-
-          {:error, reason} ->
-            install_tree_error(state, new_tree, reason)
-        end
-
-      nil ->
-        state
-    end
-  end
+  defp reroot(state, root), do: FileTreeFreshness.reroot(state, root)
 
   # Mutual exclusivity: close git status panel when opening file tree.
   # Explicitly resets keymap_scope to :editor so we don't leave orphaned
@@ -1089,8 +1015,10 @@ defmodule MingaEditor.Commands.FileTree do
           FileTreeRefresh.with_cached_git_status(tree, state.extension_surfaces.events_registry)
 
         tree = reveal_active(tree, state.workspace.buffers.active)
-        FileTreeFreshness.watch_expanded_dirs(tree)
-        install_open_tree(state, tree, nil)
+
+        state
+        |> install_open_tree(tree, nil)
+        |> FileTreeFreshness.synchronize_watchers()
 
       {:error, reason} ->
         install_open_tree(state, FileTree.put_entries(tree, []), reason)
@@ -1111,9 +1039,11 @@ defmodule MingaEditor.Commands.FileTree do
   defp sync_and_update(state, new_tree) do
     case resolve_tree_entries(new_tree) do
       {:ok, new_tree} ->
-        FileTreeFreshness.watch_expanded_dirs(new_tree)
         sync_tree_buffer(state, new_tree)
-        update_file_tree(state, &FileTreeState.set_tree(&1, new_tree))
+
+        state
+        |> update_file_tree(&FileTreeState.set_tree(&1, new_tree))
+        |> FileTreeFreshness.synchronize_watchers()
 
       {:error, reason} ->
         install_tree_error(state, new_tree, reason)
