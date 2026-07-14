@@ -1,9 +1,15 @@
 defmodule MingaAgent.FileMentionTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Project.Root
   alias MingaAgent.FileMention
 
   @moduletag :tmp_dir
+
+  setup %{tmp_dir: dir} do
+    {:ok, root} = Root.directory(dir)
+    %{root: root}
+  end
 
   describe "resolve_prompt/3 without a workspace" do
     test "keeps prompts without file mentions unchanged" do
@@ -84,25 +90,25 @@ defmodule MingaAgent.FileMentionTest do
   # ── Resolution ──────────────────────────────────────────────────────────────
 
   describe "resolve_prompt/2" do
-    test "returns text unchanged when no mentions", %{tmp_dir: dir} do
-      assert {:ok, "hello world"} = FileMention.resolve_prompt("hello world", dir)
+    test "returns text unchanged when no mentions", %{root: root} do
+      assert {:ok, "hello world"} = FileMention.resolve_prompt("hello world", root)
     end
 
-    test "prepends file content for a valid mention", %{tmp_dir: dir} do
+    test "prepends file content for a valid mention", %{tmp_dir: dir, root: root} do
       path = Path.join(dir, "test.ex")
       File.write!(path, "defmodule Test do\nend")
 
-      {:ok, result} = FileMention.resolve_prompt("@test.ex explain this", dir)
+      {:ok, result} = FileMention.resolve_prompt("@test.ex explain this", root)
       assert result =~ "Contents of test.ex:"
       assert result =~ "defmodule Test do"
       assert result =~ "explain this"
     end
 
-    test "handles multiple mentions", %{tmp_dir: dir} do
+    test "handles multiple mentions", %{tmp_dir: dir, root: root} do
       File.write!(Path.join(dir, "a.ex"), "module_a")
       File.write!(Path.join(dir, "b.ex"), "module_b")
 
-      {:ok, result} = FileMention.resolve_prompt("@a.ex @b.ex compare these", dir)
+      {:ok, result} = FileMention.resolve_prompt("@a.ex @b.ex compare these", root)
       assert result =~ "Contents of a.ex:"
       assert result =~ "Contents of b.ex:"
       assert result =~ "module_a"
@@ -110,64 +116,67 @@ defmodule MingaAgent.FileMentionTest do
       assert result =~ "compare these"
     end
 
-    test "returns error for missing file", %{tmp_dir: dir} do
-      assert {:error, msg} = FileMention.resolve_prompt("@nonexistent.ex read this", dir)
+    test "returns error for missing file", %{root: root} do
+      assert {:error, msg} = FileMention.resolve_prompt("@nonexistent.ex read this", root)
       assert msg =~ "nonexistent.ex"
       assert msg =~ "file not found"
     end
 
-    test "rejects absolute paths even when the file exists", %{tmp_dir: dir} do
+    test "rejects absolute paths even when the file exists", %{tmp_dir: dir, root: root} do
       path = Path.join(dir, "absolute.ex")
       File.write!(path, "secret")
 
-      assert {:error, msg} = FileMention.resolve_prompt("@#{path} read this", dir)
+      assert {:error, msg} = FileMention.resolve_prompt("@#{path} read this", root)
       assert msg =~ "absolute paths are outside the active workspace"
     end
 
-    test "rejects traversal outside the workspace", %{tmp_dir: dir} do
+    test "rejects traversal outside the workspace", %{tmp_dir: dir, root: root} do
       outside = Path.join(Path.dirname(dir), "outside-#{System.unique_integer([:positive])}.txt")
       File.write!(outside, "secret")
       on_exit(fn -> File.rm(outside) end)
 
       assert {:error, msg} =
-               FileMention.resolve_prompt("@../#{Path.basename(outside)} read this", dir)
+               FileMention.resolve_prompt("@../#{Path.basename(outside)} read this", root)
 
       assert msg =~ "path is outside the active workspace"
     end
 
-    test "rejects symlinks whose canonical target escapes the workspace", %{tmp_dir: dir} do
+    test "rejects symlinks whose canonical target escapes the workspace", %{
+      tmp_dir: dir,
+      root: root
+    } do
       outside = Path.join(Path.dirname(dir), "secret-#{System.unique_integer([:positive])}.txt")
       link = Path.join(dir, "linked-secret.txt")
       File.write!(outside, "secret")
       File.ln_s!(outside, link)
       on_exit(fn -> File.rm(outside) end)
 
-      assert {:error, msg} = FileMention.resolve_prompt("@linked-secret.txt read this", dir)
+      assert {:error, msg} = FileMention.resolve_prompt("@linked-secret.txt read this", root)
       assert msg =~ "path is outside the active workspace"
     end
 
-    test "returns error for binary file", %{tmp_dir: dir} do
+    test "returns error for binary file", %{tmp_dir: dir, root: root} do
       path = Path.join(dir, "binary.bin")
       File.write!(path, <<0, 1, 2, 255, 254, 253>>)
 
-      assert {:error, msg} = FileMention.resolve_prompt("@binary.bin read this", dir)
+      assert {:error, msg} = FileMention.resolve_prompt("@binary.bin read this", root)
       assert msg =~ "binary file"
     end
 
-    test "removes @mention from body text", %{tmp_dir: dir} do
+    test "removes @mention from body text", %{tmp_dir: dir, root: root} do
       File.write!(Path.join(dir, "x.ex"), "content")
 
-      {:ok, result} = FileMention.resolve_prompt("@x.ex explain", dir)
+      {:ok, result} = FileMention.resolve_prompt("@x.ex explain", root)
       # The body should just say "explain", not "@x.ex explain"
       lines = String.split(result, "\n")
       last_line = Enum.at(lines, -1)
       assert last_line == "explain"
     end
 
-    test "uses file extension for code fence language", %{tmp_dir: dir} do
+    test "uses file extension for code fence language", %{tmp_dir: dir, root: root} do
       File.write!(Path.join(dir, "app.py"), "print('hello')")
 
-      {:ok, result} = FileMention.resolve_prompt("@app.py what does this do?", dir)
+      {:ok, result} = FileMention.resolve_prompt("@app.py what does this do?", root)
       assert result =~ "```py"
     end
   end
@@ -196,13 +205,13 @@ defmodule MingaAgent.FileMentionTest do
   end
 
   describe "resolve_prompt/2 with images" do
-    test "returns ContentPart list when image is mentioned", %{tmp_dir: dir} do
+    test "returns ContentPart list when image is mentioned", %{tmp_dir: dir, root: root} do
       # Create a minimal 1x1 red PNG (67 bytes)
       png_data = create_minimal_png()
       path = Path.join(dir, "screenshot.png")
       File.write!(path, png_data)
 
-      {:ok, parts} = FileMention.resolve_prompt("@screenshot.png what is this?", dir)
+      {:ok, parts} = FileMention.resolve_prompt("@screenshot.png what is this?", root)
 
       assert is_list(parts)
       assert Enum.count(parts) == 2
@@ -216,11 +225,11 @@ defmodule MingaAgent.FileMentionTest do
       assert is_binary(image_part.data)
     end
 
-    test "mixes text files and images as content parts", %{tmp_dir: dir} do
+    test "mixes text files and images as content parts", %{tmp_dir: dir, root: root} do
       File.write!(Path.join(dir, "code.ex"), "defmodule Foo do\nend")
       File.write!(Path.join(dir, "design.png"), create_minimal_png())
 
-      {:ok, parts} = FileMention.resolve_prompt("@code.ex @design.png compare", dir)
+      {:ok, parts} = FileMention.resolve_prompt("@code.ex @design.png compare", root)
 
       assert is_list(parts)
       text_parts = Enum.filter(parts, &(&1.type == :text))
@@ -233,24 +242,24 @@ defmodule MingaAgent.FileMentionTest do
       assert hd(text_parts).text =~ "compare"
     end
 
-    test "rejects oversized images", %{tmp_dir: dir} do
+    test "rejects oversized images", %{tmp_dir: dir, root: root} do
       # Create a file that exceeds the 5MB limit
       path = Path.join(dir, "huge.png")
       File.write!(path, :binary.copy(<<0>>, 6 * 1024 * 1024))
 
-      assert {:error, msg} = FileMention.resolve_prompt("@huge.png look", dir)
+      assert {:error, msg} = FileMention.resolve_prompt("@huge.png look", root)
       assert msg =~ "image too large"
     end
 
-    test "returns error for missing image file", %{tmp_dir: dir} do
-      assert {:error, msg} = FileMention.resolve_prompt("@missing.png look", dir)
+    test "returns error for missing image file", %{root: root} do
+      assert {:error, msg} = FileMention.resolve_prompt("@missing.png look", root)
       assert msg =~ "file not found"
     end
 
-    test "text-only mentions still return a string", %{tmp_dir: dir} do
+    test "text-only mentions still return a string", %{tmp_dir: dir, root: root} do
       File.write!(Path.join(dir, "test.ex"), "code")
 
-      {:ok, result} = FileMention.resolve_prompt("@test.ex explain", dir)
+      {:ok, result} = FileMention.resolve_prompt("@test.ex explain", root)
       assert is_binary(result)
     end
   end

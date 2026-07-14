@@ -31,6 +31,14 @@ defmodule Minga.Project.Root do
   @typedoc "Why a filesystem path could not be canonicalized."
   @type canonical_error :: File.posix() | :too_many_symlinks
 
+  @typedoc "Why a workspace-relative file path could not be authorized."
+  @type file_error ::
+          error()
+          | canonical_error()
+          | :absolute_path
+          | :parent_traversal
+          | :outside_workspace
+
   @doc "Builds a file-scoped root that cannot authorize recursive inventory."
   @spec file(String.t()) :: t()
   def file(path) when is_binary(path) do
@@ -82,6 +90,18 @@ defmodule Minga.Project.Root do
 
   def inventory_path(%__MODULE__{}), do: {:error, :not_a_directory_root}
 
+  @doc "Resolves an existing workspace-relative path inside an authorized directory root."
+  @spec resolve_file(t(), String.t()) :: {:ok, String.t()} | {:error, file_error()}
+  def resolve_file(%__MODULE__{} = root, relative_path) when is_binary(relative_path) do
+    with {:ok, canonical_root} <- inventory_path(root),
+         :ok <- require_relative_path(relative_path),
+         {:ok, safe_relative} <- safe_relative_path(relative_path, canonical_root),
+         {:ok, canonical_target} <- canonical_path(Path.join(canonical_root, safe_relative)),
+         :ok <- authorize_contained_target(canonical_target, canonical_root) do
+      {:ok, canonical_target}
+    end
+  end
+
   @doc "Returns the canonical target of an existing filesystem path."
   @spec canonical_path(String.t()) :: {:ok, String.t()} | {:error, canonical_error()}
   def canonical_path(path) when is_binary(path) do
@@ -119,6 +139,37 @@ defmodule Minga.Project.Root do
           {:ok, String.t()} | {:error, :enotdir}
   defp existing_directory(path, true), do: {:ok, path}
   defp existing_directory(_path, false), do: {:error, :enotdir}
+
+  @spec require_relative_path(String.t()) :: :ok | {:error, :absolute_path}
+  defp require_relative_path(path) do
+    case Path.type(path) do
+      :relative -> :ok
+      _absolute_or_volume_relative -> {:error, :absolute_path}
+    end
+  end
+
+  @spec safe_relative_path(String.t(), String.t()) ::
+          {:ok, String.t()} | {:error, :parent_traversal}
+  defp safe_relative_path(path, canonical_root) do
+    lexical_target = Path.expand(path, canonical_root)
+    relative_target = Path.relative_to(lexical_target, canonical_root)
+
+    case Path.type(relative_target) do
+      :relative -> {:ok, relative_target}
+      _outside -> {:error, :parent_traversal}
+    end
+  end
+
+  @spec authorize_contained_target(String.t(), String.t()) ::
+          :ok | {:error, :outside_workspace}
+  defp authorize_contained_target(canonical_target, canonical_root) do
+    relative_target = Path.relative_to(canonical_target, canonical_root)
+
+    case Path.safe_relative(relative_target, canonical_root) do
+      {:ok, _relative} -> :ok
+      :error -> {:error, :outside_workspace}
+    end
+  end
 
   @spec confirmation(term()) :: {:ok, boolean()} | {:error, :invalid_broad_root_confirmation}
   defp confirmation(true), do: {:ok, true}
