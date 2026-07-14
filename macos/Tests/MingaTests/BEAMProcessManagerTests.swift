@@ -3,19 +3,19 @@ import Testing
 
 @Suite("BEAMProcessManager Launch Arguments")
 struct BEAMProcessManagerLaunchArgumentsTests {
-    @Test("forwards safe mode and config flags to the BEAM child")
-    @MainActor func forwardsSafeModeFlags() {
+    @Test("forwards safe mode, editor, minimal, and positional targets")
+    @MainActor func forwardsBooleanFlagsAndPositionals() {
         let forwarded = BEAMProcessManager.forwardedLaunchArguments(
             from: [
                 "/Applications/Minga.app/Contents/MacOS/Minga",
                 "--safe",
                 "-Q",
-                "--config",
-                "/tmp/minga.safe.exs",
                 "--editor",
                 "--no-context",
+                "--minimal",
                 "--ignored",
-                "README.md"
+                "README.md",
+                "COMMIT_EDITMSG"
             ]
         )
 
@@ -23,10 +23,30 @@ struct BEAMProcessManagerLaunchArgumentsTests {
             "start",
             "--safe",
             "-Q",
-            "--config",
-            "/tmp/minga.safe.exs",
             "--editor",
-            "--no-context"
+            "--no-context",
+            "--minimal",
+            "README.md",
+            "COMMIT_EDITMSG"
+        ])
+    }
+
+    @Test("forwards config and both debug log value flags with their values")
+    @MainActor func forwardsValueFlags() {
+        let forwarded = BEAMProcessManager.forwardedLaunchArguments(
+            from: [
+                "/Applications/Minga.app/Contents/MacOS/Minga",
+                "--config", "/tmp/minga.exs", "one.ex",
+                "--debug-log", "/tmp/minga.log", "two.ex",
+                "-D", "/tmp/minga-short.log", "three.ex"
+            ]
+        )
+
+        #expect(forwarded == [
+            "start",
+            "--config", "/tmp/minga.exs", "one.ex",
+            "--debug-log", "/tmp/minga.log", "two.ex",
+            "-D", "/tmp/minga-short.log", "three.ex"
         ])
     }
 
@@ -133,6 +153,80 @@ struct BEAMProcessManagerLaunchArgumentsTests {
         )
 
         #expect(workingDirectory.path == "/Applications")
+    }
+}
+
+@Suite("App Open Requests")
+struct AppOpenRequestTests {
+    @Test("keeps ordinary file URLs on the Finder open path")
+    func parsesFileURL() {
+        let url = URL(fileURLWithPath: "/tmp/example.ex")
+        #expect(AppOpenRequest.parse(url) == .file(url.standardizedFileURL))
+    }
+
+    @Test("decodes the app-local wait URL transport")
+    func parsesWaitURL() throws {
+        let target = "/tmp/project/COMMIT_EDITMSG"
+        let result = WaitResultFile.allowedRootURL
+            .appendingPathComponent("request.abc/result")
+            .path
+        let url = try #require(URL(string: "minga://wait/\(encode(result))/\(encode(target))"))
+
+        #expect(AppOpenRequest.parse(url) == .wait(path: target, resultPath: result))
+    }
+
+    @Test("rejects malformed, unrelated, or outside-root custom URLs")
+    func rejectsMalformedURL() throws {
+        #expect(AppOpenRequest.parse(try #require(URL(string: "https://example.com"))) == nil)
+        #expect(AppOpenRequest.parse(try #require(URL(string: "minga://wait/only-one-part"))) == nil)
+
+        let outsideResult = "/tmp/not-minga-wait/request.evil/result"
+        let target = "/tmp/COMMIT_EDITMSG"
+        let outsideURL = try #require(
+            URL(string: "minga://wait/\(encode(outsideResult))/\(encode(target))")
+        )
+        #expect(AppOpenRequest.parse(outsideURL) == nil)
+        #expect(!WaitResultFile.failIfPending(at: outsideResult, reason: "must not write"))
+        #expect(!FileManager.default.fileExists(atPath: outsideResult))
+    }
+
+    private func encode(_ value: String) -> String {
+        Data(value.utf8)
+            .base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+}
+
+@Suite("Wait Result Files")
+struct WaitResultFileTests {
+    @Test("publishes a failure without overwriting a BEAM completion")
+    func publishesExclusiveFailure() throws {
+        let failedDirectory = WaitResultFile.allowedRootURL
+            .appendingPathComponent("request.\(UUID().uuidString)")
+        let successfulDirectory = WaitResultFile.allowedRootURL
+            .appendingPathComponent("request.\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: failedDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: successfulDirectory, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: failedDirectory)
+            try? FileManager.default.removeItem(at: successfulDirectory)
+        }
+
+        let failedResult = failedDirectory.appendingPathComponent("result")
+        #expect(
+            WaitResultFile.failIfPending(
+                at: failedResult.path,
+                reason: "editor core exited"
+            )
+        )
+        #expect(try String(contentsOf: failedResult, encoding: .utf8) == "1\teditor core exited\n")
+
+        let successfulResult = successfulDirectory.appendingPathComponent("result")
+        try Data("0\n".utf8).write(to: successfulResult)
+        #expect(!WaitResultFile.failIfPending(at: successfulResult.path, reason: "late failure"))
+        #expect(try String(contentsOf: successfulResult, encoding: .utf8) == "0\n")
     }
 }
 

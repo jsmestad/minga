@@ -72,6 +72,7 @@ public protocol InputEncoder: AnyObject, Sendable {
 
     // File actions
     func sendOpenFile(path: String)
+    func sendOpenFileAndWait(path: String, resultPath: String)
 
     // Tool manager actions
     func sendToolInstall(name: String)
@@ -214,6 +215,9 @@ public extension InputEncoder {
     func sendSearchReplace(replacement: String) {}
     func sendSearchReplaceAll(replacement: String) {}
     func sendSearchDismiss() {}
+
+    /// Default no-op so existing test spies do not need to implement wait transport.
+    func sendOpenFileAndWait(path: String, resultPath: String) {}
 
     /// Default no-op so existing test spies do not need to implement launchpad activation.
     func sendEmptyStateActivate(id: String) {}

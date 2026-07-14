@@ -1,60 +1,29 @@
 #!/bin/bash
 #
-# CLI launcher for Minga.app
-#
-# Opens files in the Minga GUI editor from the terminal. Homebrew Cask
-# symlinks this to /usr/local/bin/minga so users can run:
-#
-#   minga file.ex           Open file in Minga
-#   minga .                 Open current directory as project
-#   minga --help            Show help
-#   minga --version         Show version
-#
-# Limitations (v1, shell script):
-#   - --wait / $EDITOR semantics not supported (the script returns
-#     immediately after launching the app; planned for a compiled
-#     Swift CLI binary in a follow-up)
-#
-# The script resolves Minga.app from these locations (in order):
-#   1. Relative to the script itself (inside the .app bundle)
-#   2. /Applications/Minga.app
-#   3. ~/Applications/Minga.app
+# CLI launcher for Minga.app. Homebrew Cask symlinks this script into PATH.
+# Finder/Open With remains a normal Launch Services file-open path; `--wait`
+# uses Minga's private app URL only to transport a target and result file.
 
 set -euo pipefail
 
-# ── Resolve the app bundle ──────────────────────────────────────────────
-
 resolve_app() {
-  # If this script is inside a .app bundle (Contents/Resources/bin/minga),
-  # the app is 3 levels up.
-  local script_dir
+  local script_dir bundle_app
   script_dir="$(cd "$(dirname "$0")" && pwd)"
-  local bundle_app
   bundle_app="$(cd "$script_dir/../../.." 2>/dev/null && pwd)" || true
 
   if [ -n "$bundle_app" ] && [ -f "$bundle_app/Contents/MacOS/Minga" ]; then
     echo "$bundle_app"
-    return
-  fi
-
-  # Standard install locations
-  if [ -d "/Applications/Minga.app" ]; then
+  elif [ -d "/Applications/Minga.app" ]; then
     echo "/Applications/Minga.app"
-    return
-  fi
-
-  if [ -d "$HOME/Applications/Minga.app" ]; then
+  elif [ -d "$HOME/Applications/Minga.app" ]; then
     echo "$HOME/Applications/Minga.app"
-    return
+  else
+    return 1
   fi
-
-  return 1
 }
 
-# ── Help and version (handled locally, no app needed) ───────────────────
-
 show_help() {
-  cat << 'EOF'
+  cat <<'EOF'
 minga - BEAM-powered modal text editor
 
 Usage: minga [options] [file|directory]
@@ -62,33 +31,73 @@ Usage: minga [options] [file|directory]
 Options:
   -h, --help             Show this help message
   -v, --version          Show version
-  --editor               Start in editor mode (skip agentic view)
+  --editor               Open files in the traditional editor view
+  --minimal              Editor-only startup (recommended for GIT_EDITOR)
+  --wait                 Wait for the target to be saved or cleanly closed
   --no-context           Don't load the file as agent context
   --safe, -Q             Start in safe mode before config loading
   --config <path>        Use a custom config file
+  -D, --debug-log <path> Append messages and warnings to a debug log
 
 Examples:
-  minga                          Launch Minga
-  minga README.md                Open file in Minga
-  minga .                        Open current directory as project
-  minga ~/code/myproject         Open directory as project
+  minga README.md
+  minga --editor README.md
+  minga --wait --minimal .git/COMMIT_EDITMSG
+  GIT_EDITOR='minga --wait --minimal' git commit
+
+Wait mode accepts exactly one file. It exits 0 after a successful save or clean
+close. `:cq`/`:cquit`, a discard (`:q!`), launch failure, or file-open failure
+exits non-zero. The same contract works when Minga.app is already running.
 EOF
 }
 
 show_version() {
-  local app_path
+  local app_path version
   app_path=$(resolve_app 2>/dev/null) || {
     echo "minga (version unknown, Minga.app not found)"
     return
   }
-  local version
   version=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$app_path/Contents/Info.plist" 2>/dev/null || echo "unknown")
   echo "minga $version"
 }
 
-# ── Main ────────────────────────────────────────────────────────────────
+absolute_path() {
+  local value="$1" parent
+  if [[ "$value" == /* ]]; then
+    printf '%s\n' "$value"
+    return
+  fi
 
-# Handle flags that don't need the app
+  parent=$(dirname "$value")
+  if [ -d "$parent" ]; then
+    printf '%s/%s\n' "$(cd "$parent" && pwd)" "$(basename "$value")"
+  else
+    printf '%s/%s\n' "$(pwd)" "$value"
+  fi
+}
+
+base64_url() {
+  printf '%s' "$1" | base64 | tr -d '\n=' | tr '+/' '-_'
+}
+
+read_wait_result() {
+  local result_path="$1" line status message
+  IFS= read -r line < "$result_path" || line="1\tinvalid wait response"
+  status="${line%%$'\t'*}"
+  message="${line#*$'\t'}"
+
+  if [ "$status" = "0" ]; then
+    return 0
+  fi
+
+  if [ "$message" != "$line" ] && [ -n "$message" ]; then
+    echo "minga: $message" >&2
+  else
+    echo "minga: editor request failed" >&2
+  fi
+  return 1
+}
+
 case "${1:-}" in
   -h|--help)
     show_help
@@ -100,78 +109,134 @@ case "${1:-}" in
     ;;
 esac
 
-# Find the app bundle
 APP_PATH=$(resolve_app) || {
-  echo "error: Minga.app not found." >&2
-  echo "" >&2
-  echo "Looked in:" >&2
-  echo "  - Relative to this script (inside .app bundle)" >&2
-  echo "  - /Applications/Minga.app" >&2
-  echo "  - ~/Applications/Minga.app" >&2
-  echo "" >&2
-  echo "Install Minga.app or set the path manually:" >&2
-  echo "  open -a /path/to/Minga.app" >&2
+  echo "error: Minga.app not found in its bundle, /Applications, or ~/Applications." >&2
   exit 1
 }
 
-# No arguments: just launch the app
-if [ $# -eq 0 ]; then
-  open -a "$APP_PATH"
-  exit 0
-fi
-
-# Separate flags from file/directory arguments
 flags=()
 files=()
-skip_next=false
+wait_mode=false
 
-for arg in "$@"; do
-  if $skip_next; then
-    flags+=("$arg")
-    skip_next=false
-    continue
-  fi
-
-  case "$arg" in
-    --config)
-      # --config takes a path argument
-      flags+=("$arg")
-      skip_next=true
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help)
+      show_help
+      exit 0
       ;;
-    --editor|--no-context|--safe|-Q)
-      flags+=("$arg")
+    -v|--version)
+      show_version
+      exit 0
+      ;;
+    --wait)
+      wait_mode=true
+      shift
+      ;;
+    --config|--debug-log|-D)
+      flag="$1"
+      shift
+      if [ $# -eq 0 ] || [[ "$1" == -* ]]; then
+        echo "error: $flag requires a path argument" >&2
+        exit 2
+      fi
+      flags+=("$flag" "$(absolute_path "$1")")
+      shift
+      ;;
+    --editor|--no-context|--minimal|--safe|-Q)
+      flags+=("$1")
+      shift
+      ;;
+    --)
+      shift
+      while [ $# -gt 0 ]; do
+        files+=("$(absolute_path "$1")")
+        shift
+      done
       ;;
     -*)
-      echo "warning: unknown flag '$arg' (ignored)" >&2
+      echo "error: unknown flag '$1'" >&2
+      exit 2
       ;;
     *)
-      # Convert to absolute path
-      if [ -e "$arg" ]; then
-        files+=("$(cd "$(dirname "$arg")" && pwd)/$(basename "$arg")")
-      else
-        local_dir="$(dirname "$arg")"
-        if [ -d "$local_dir" ]; then
-          files+=("$(cd "$local_dir" && pwd)/$(basename "$arg")")
-        else
-          files+=("$(pwd)/$arg")
-        fi
-      fi
+      files+=("$(absolute_path "$1")")
+      shift
       ;;
   esac
 done
 
-# Build the open command.
-# File arguments go as positional args (macOS delivers them via application(_:open:)).
-# Flags go via --args (delivered to ProcessInfo.processInfo.arguments, forwarded
-# to the BEAM child process by BEAMProcessManager).
-open_args=(-a "$APP_PATH")
-
-if [ ${#files[@]} -gt 0 ]; then
-  open_args+=("${files[@]}")
+if ! $wait_mode; then
+  open_args=(-a "$APP_PATH")
+  if [ ${#files[@]} -gt 0 ]; then
+    open_args+=("${files[@]}")
+  fi
+  if [ ${#flags[@]} -gt 0 ]; then
+    open_args+=(--args "${flags[@]}")
+  fi
+  open "${open_args[@]}"
+  exit 0
 fi
 
+if [ ${#files[@]} -ne 1 ]; then
+  echo "error: --wait requires exactly one file target" >&2
+  exit 2
+fi
+
+if [ -d "${files[0]}" ]; then
+  echo "error: --wait requires a file target, not a directory" >&2
+  exit 2
+fi
+
+wait_root="${TMPDIR:-/tmp}"
+wait_root="${wait_root%/}/minga-wait"
+mkdir -p "$wait_root"
+chmod 700 "$wait_root"
+request_dir=$(mktemp -d "$wait_root/request.XXXXXX")
+chmod 700 "$request_dir"
+result_path="$request_dir/result"
+ack_path="$request_dir/ack"
+cleanup() { rm -rf "$request_dir"; }
+trap cleanup EXIT
+trap 'exit 130' HUP INT TERM
+
+wait_url="minga://wait/$(base64_url "$result_path")/$(base64_url "${files[0]}")"
+open_args=(-a "$APP_PATH" "$wait_url")
 if [ ${#flags[@]} -gt 0 ]; then
   open_args+=(--args "${flags[@]}")
 fi
 
-open "${open_args[@]}"
+if ! open "${open_args[@]}"; then
+  echo "error: failed to launch Minga.app" >&2
+  exit 1
+fi
+
+# Distinguish launch/open failures from a legitimate long editing session.
+# The BEAM writes ack only after the requested file is open and tracked.
+attempts=0
+while [ ! -e "$ack_path" ]; do
+  if [ -e "$result_path" ]; then
+    read_wait_result "$result_path"
+    exit $?
+  fi
+  attempts=$((attempts + 1))
+  if [ "$attempts" -ge 150 ]; then
+    echo "error: Minga.app did not accept the wait request within 15 seconds" >&2
+    exit 1
+  fi
+  sleep 0.1
+done
+
+app_pid=$(/usr/bin/pgrep -x Minga | /usr/bin/head -n 1 || true)
+if [ -z "$app_pid" ]; then
+  echo "error: Minga.app exited before the edit completed" >&2
+  exit 1
+fi
+
+while [ ! -e "$result_path" ]; do
+  if ! kill -0 "$app_pid" 2>/dev/null; then
+    echo "error: Minga.app exited before the edit completed" >&2
+    exit 1
+  fi
+  sleep 0.1
+done
+
+read_wait_result "$result_path"

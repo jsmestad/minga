@@ -1179,6 +1179,12 @@ value = 0x5C
 name = "chat_returned_to_bottom"
 value = 0x5D
 
+# App-local CLI wait transport. Payload: target string16 followed by the
+# result-file path string16. The BEAM owns open/accept/cancel semantics.
+[[gui_actions]]
+name = "open_file_wait"
+value = 0x5E
+
 # ── Versioned frontend resource policy (#2801) ─────────────────────────────
 #
 # Capability payload version 2 appends these fields after the original seven

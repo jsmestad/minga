@@ -31,6 +31,20 @@
 	<key>NSSupportsSuddenTermination</key>
 	<false/>
 
+	<!-- Private app-local transport used by the bundled `minga --wait` shim.
+	     File associations continue to use application(_:open:). -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.minga.editor.wait</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>minga</string>
+			</array>
+		</dict>
+	</array>
+
 	<!-- TCC usage descriptions: macOS shows these when the app first
 	     accesses a protected directory (Desktop, Documents, etc.).
 	     Without them, sandboxed apps receive silent denial or

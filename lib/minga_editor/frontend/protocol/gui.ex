@@ -113,6 +113,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x5A       | system_will_unmount     |
   | 0x5C       | chat_scrolled_away_from_bottom |
   | 0x5D       | chat_returned_to_bottom |
+  | 0x5E       | open_file_wait          |
 
   """
 
@@ -181,6 +182,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_panel_dismiss Opcodes.gui_action_panel_dismiss()
   @gui_action_panel_resize Opcodes.gui_action_panel_resize()
   @gui_action_open_file Opcodes.gui_action_open_file()
+  @gui_action_open_file_wait Opcodes.gui_action_open_file_wait()
   @gui_action_file_tree_new_file Opcodes.gui_action_file_tree_new_file()
   @gui_action_file_tree_new_folder Opcodes.gui_action_file_tree_new_folder()
   @gui_action_file_tree_collapse_all Opcodes.gui_action_file_tree_collapse_all()
@@ -334,6 +336,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | :panel_dismiss
           | {:panel_resize, height_percent :: non_neg_integer()}
           | {:open_file, path :: String.t()}
+          | {:open_file_wait, path :: String.t(), result_path :: String.t()}
           | {:file_tree_new_file, index :: non_neg_integer()}
           | {:file_tree_new_folder, index :: non_neg_integer()}
           | {:file_tree_edit_confirm, text :: String.t()}
@@ -2315,6 +2318,13 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   def decode_gui_action(@gui_action_open_file, <<path_len::16, path::binary-size(path_len)>>),
     do: {:ok, {:open_file, path}}
+
+  def decode_gui_action(
+        @gui_action_open_file_wait,
+        <<path_len::16, path::binary-size(path_len), result_len::16,
+          result_path::binary-size(result_len)>>
+      ),
+      do: {:ok, {:open_file_wait, path, result_path}}
 
   def decode_gui_action(@gui_action_file_tree_new_file, <<parent_index::16>>),
     do: {:ok, {:file_tree_new_file, parent_index}}

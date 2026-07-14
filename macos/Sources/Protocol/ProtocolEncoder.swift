@@ -727,6 +727,31 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
+    /// Sends an app-local wait request. The BEAM opens the file and owns
+    /// completion semantics; Swift only transports the target and result path.
+    func sendOpenFileAndWait(path: String, resultPath: String) {
+        let pathBytes = Array(path.utf8)
+        let resultBytes = Array(resultPath.utf8)
+        let pathLen = min(pathBytes.count, Int(UInt16.max))
+        let resultLen = min(resultBytes.count, Int(UInt16.max))
+        var buf = Data(count: 6 + pathLen + resultLen)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_OPEN_FILE_WAIT
+        writeU16(&buf, 2, UInt16(pathLen))
+        if pathLen > 0 {
+            buf.replaceSubrange(4..<(4 + pathLen), with: pathBytes[0..<pathLen])
+        }
+        let resultOffset = 4 + pathLen
+        writeU16(&buf, resultOffset, UInt16(resultLen))
+        if resultLen > 0 {
+            buf.replaceSubrange(
+                (resultOffset + 2)..<(resultOffset + 2 + resultLen),
+                with: resultBytes[0..<resultLen]
+            )
+        }
+        writeFrame(buf)
+    }
+
     // MARK: - Git Status Actions
 
     func sendGitStageFile(path: String) {

@@ -42,6 +42,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaEditor.Renderer
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
+  alias Minga.Frontend.WaitRequests
   alias MingaEditor.Window
 
   alias MingaEditor.State, as: EditorState
@@ -470,6 +471,17 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       open_dropped_directory(state, path)
     else
       BufferRegistry.open_file_by_path(state, path)
+    end
+  end
+
+  defp dispatch_action(state, {:open_file_wait, path, result_path}) do
+    expanded_path = Path.expand(path)
+
+    if File.dir?(expanded_path) do
+      _result = WaitRequests.fail_open(result_path, :target_is_directory)
+      NoticeWorkflow.publish(state, "Wait mode requires a file target")
+    else
+      open_file_wait_request(state, expanded_path, result_path)
     end
   end
 
@@ -914,6 +926,28 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp dispatch_action(state, action) do
     Minga.Log.warning(:editor, "[gui_action] unrecognized action: #{inspect(action)}")
     state
+  end
+
+  @spec open_file_wait_request(EditorState.t(), String.t(), String.t()) :: EditorState.t()
+  defp open_file_wait_request(state, path, result_path) do
+    case BufferRegistry.open_file_by_path_result(state, path) do
+      {:ok, %{workspace: %{buffers: %{active: buffer}}} = new_state} when is_pid(buffer) ->
+        case WaitRequests.register(buffer, result_path) do
+          :ok ->
+            new_state
+
+          {:error, reason} ->
+            NoticeWorkflow.publish(new_state, "Could not start wait request: #{inspect(reason)}")
+        end
+
+      {:ok, new_state} ->
+        _result = WaitRequests.fail_open(result_path, :opened_without_buffer)
+        NoticeWorkflow.publish(new_state, "Could not track wait request for #{path}")
+
+      {:error, reason} ->
+        _result = WaitRequests.fail_open(result_path, reason)
+        NoticeWorkflow.publish(state, "Could not open #{path}")
+    end
   end
 
   @spec last_file_tab?(EditorState.t()) :: boolean()

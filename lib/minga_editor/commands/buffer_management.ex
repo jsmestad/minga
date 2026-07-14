@@ -38,6 +38,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   alias MingaEditor.Shell.Workflow
   alias MingaEditor.State.Workspace, as: WorkspaceModel
   alias MingaEditor.State.WorkspaceReview
+  alias Minga.Frontend.WaitRequests
   alias MingaEditor.Window
   alias Minga.Mode
   alias Minga.Mode.ToolConfirmState
@@ -63,6 +64,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
     case Buffer.save(buf) do
       :ok ->
+        :ok = WaitRequests.accept(buf)
         name = Helpers.buffer_display_name(buf)
 
         NoticeWorkflow.publish(state, "Wrote #{name}")
@@ -87,6 +89,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :force_save) do
     case Buffer.force_save(buf) do
       :ok ->
+        :ok = WaitRequests.accept(buf)
         name = Helpers.buffer_display_name(buf)
         NoticeWorkflow.publish(state, "Wrote #{name} (force)")
 
@@ -125,21 +128,44 @@ defmodule MingaEditor.Commands.BufferManagement do
     maybe_confirm_quit(state, :quit)
   end
 
-  def execute(state, :force_quit), do: close_tab_or_quit(state)
+  def execute(state, :force_quit) do
+    state
+    |> cancel_active_wait_request("discarded without saving")
+    |> close_tab_or_quit()
+  end
+
   def execute(state, :close_other_tabs), do: close_other_tabs(state)
   def execute(state, :kill_other_buffers), do: close_other_tabs(state)
   def execute(state, :close_tabs_to_right), do: close_tabs_to_right(state)
   def execute(state, :kill_all_buffers), do: close_all_file_tabs(state)
   def execute(state, :quit_all), do: maybe_confirm_quit(state, :quit_all)
-  def execute(state, :force_quit_all), do: shutdown_editor(state)
+
+  def execute(state, :force_quit_all) do
+    if any_buffer_dirty?(state), do: WaitRequests.cancel_all("discarded without saving")
+    shutdown_editor(state)
+  end
+
   def execute(state, :abort_quit), do: abort_quit_editor(state)
 
   def execute(%{pending_quit: kind} = state, :confirm_quit_yes) when kind != nil do
+    dirty? = any_buffer_dirty?(state)
     state = EditorState.clear_pending_quit(state)
 
-    case kind do
-      :quit -> close_tab_or_quit(state)
-      :quit_all -> shutdown_editor(state)
+    case {kind, dirty?} do
+      {:quit, true} ->
+        state
+        |> cancel_active_wait_request("discarded after quit confirmation")
+        |> close_tab_or_quit()
+
+      {:quit, false} ->
+        close_tab_or_quit(state)
+
+      {:quit_all, true} ->
+        :ok = WaitRequests.cancel_all("discarded after quit confirmation")
+        shutdown_editor(state)
+
+      {:quit_all, false} ->
+        shutdown_editor(state)
     end
   end
 
@@ -1015,6 +1041,8 @@ defmodule MingaEditor.Commands.BufferManagement do
           "[unknown]"
         end
 
+      :ok = complete_active_wait_on_close(state)
+
       if buf do
         try do
           path = Buffer.file_path(buf) || :scratch
@@ -1880,6 +1908,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp close_other_tabs(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     active_id = tb.active_id
     closed_tabs = Enum.reject(TabBar.visible_file_tabs(tb), &(&1.id == active_id))
+    :ok = complete_wait_requests_for_tabs(closed_tabs)
     tb = remove_tabs(tb, closed_tabs)
 
     Minga.Log.info(:editor, "Closed other tabs")
@@ -1905,6 +1934,7 @@ defmodule MingaEditor.Commands.BufferManagement do
         if right_tabs == [] do
           NoticeWorkflow.publish(state, "No tabs to the right")
         else
+          :ok = complete_wait_requests_for_tabs(right_tabs)
           tb = remove_tabs(tb, right_tabs)
           Minga.Log.info(:editor, "Closed tabs to the right")
           EditorState.set_tab_bar(state, tb)
@@ -1939,7 +1969,11 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp save_all_buffers(state) do
     Enum.each(state.workspace.buffers.list, fn buf ->
       try do
-        if Buffer.dirty?(buf), do: Buffer.save(buf)
+        if Buffer.dirty?(buf) do
+          if Buffer.save(buf) == :ok, do: WaitRequests.accept(buf)
+        else
+          WaitRequests.accept(buf)
+        end
       catch
         :exit, _ -> :ok
       end
@@ -1948,6 +1982,52 @@ defmodule MingaEditor.Commands.BufferManagement do
     state
   end
 
+  @spec complete_wait_requests_for_tabs([Tab.t()]) :: :ok
+  defp complete_wait_requests_for_tabs(tabs) do
+    Enum.each(tabs, fn %Tab{context: context} ->
+      case TabContext.to_workspace_map(context) do
+        %{buffers: %Buffers{active: buffer}} -> complete_wait_on_close(buffer)
+        _other -> :ok
+      end
+    end)
+  end
+
+  @spec complete_active_wait_on_close(state()) :: :ok
+  defp complete_active_wait_on_close(%{workspace: %{buffers: %{active: buffer}}}) do
+    complete_wait_on_close(buffer)
+  end
+
+  defp complete_active_wait_on_close(_state), do: :ok
+
+  @spec complete_wait_on_close(pid() | nil) :: :ok
+  defp complete_wait_on_close(buffer) when is_pid(buffer) do
+    if Buffer.dirty?(buffer) do
+      WaitRequests.cancel(buffer, "closed with unsaved changes")
+    else
+      WaitRequests.accept(buffer)
+    end
+  catch
+    :exit, _ -> WaitRequests.cancel(buffer, "buffer closed unexpectedly")
+  end
+
+  defp complete_wait_on_close(_buffer), do: :ok
+
+  @spec cancel_active_wait_request(state(), String.t()) :: state()
+  defp cancel_active_wait_request(
+         %{workspace: %{buffers: %{active: buffer}}} = state,
+         reason
+       )
+       when is_pid(buffer) do
+    if Buffer.dirty?(buffer), do: WaitRequests.cancel(buffer, reason)
+    state
+  catch
+    :exit, _ ->
+      :ok = WaitRequests.cancel(buffer, reason)
+      state
+  end
+
+  defp cancel_active_wait_request(state, _reason), do: state
+
   # Exits the editor. Single exit point so shutdown cleanup (flush buffers,
   # save session, etc.) can be added in one place.
   #
@@ -1955,6 +2035,12 @@ defmodule MingaEditor.Commands.BufferManagement do
   # fuzzer can prevent `System.stop/1` from killing the VM mid-test.
   @spec shutdown_editor(state()) :: state()
   defp shutdown_editor(state) do
+    if any_buffer_dirty?(state) do
+      :ok = WaitRequests.cancel_all("editor closed with unsaved changes")
+    else
+      :ok = WaitRequests.accept_all()
+    end
+
     shutdown_fn = Application.get_env(:minga, :shutdown_fn, &System.stop/1)
     shutdown_fn.(0)
     state
@@ -1964,6 +2050,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   # so external tools (like `git commit`) can detect the user cancelled.
   @spec abort_quit_editor(state()) :: state()
   defp abort_quit_editor(state) do
+    :ok = WaitRequests.cancel_all("editor aborted")
     shutdown_fn = Application.get_env(:minga, :shutdown_fn, &System.stop/1)
     shutdown_fn.(1)
     state
@@ -1977,6 +2064,7 @@ defmodule MingaEditor.Commands.BufferManagement do
     active_tab = EditorState.active_tab(state)
     label = if active_tab, do: active_tab.label, else: "tab"
     replacement_id = active_tab && replacement_tab_id(tb, active_tab)
+    :ok = complete_active_wait_on_close(state)
     Minga.Log.info(:editor, "Closed: #{label}")
 
     state

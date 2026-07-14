@@ -5,14 +5,12 @@ defmodule Minga.Runtime.Supervisor do
   Uses `one_for_one` so that each child restarts independently:
 
       Runtime.Supervisor (one_for_one)
-      ├── MingaEditor.Watchdog      SIGUSR2 recovery (independent leaf)
-      ├── Minga.FileWatcher          FSEvents/inotify watcher (independent leaf)
-      └── MingaEditor.Supervisor    Parser → Port → Renderer → Editor (rest_for_one)
+      ├── MingaEditor.Watchdog          SIGUSR2 recovery (independent leaf)
+      ├── Minga.FileWatcher             FSEvents/inotify watcher (independent leaf)
+      ├── Minga.Frontend.WaitRequests   CLI wait transport (independent leaf)
+      └── MingaEditor.Supervisor        Parser → Port → Renderer → Editor (rest_for_one)
 
-  A FileWatcher crash restarts only FileWatcher. A Watchdog crash restarts
-  only Watchdog. Neither cascades into the MingaEditor.Supervisor or each other.
-  The tight Parser → Port → Renderer → Editor cascade is handled internally by
-  MingaEditor.Supervisor's own `rest_for_one` strategy.
+  A FileWatcher, Watchdog, or WaitRequests crash restarts only that process. None cascades into MingaEditor.Supervisor or another independent leaf. The tight Parser → Port → Renderer → Editor cascade is handled internally by MingaEditor.Supervisor's own `rest_for_one` strategy.
 
   This supervisor is conditionally started: it only appears in the tree
   when the editor UI is active (not in test mode or headless operation).
@@ -45,6 +43,10 @@ defmodule Minga.Runtime.Supervisor do
       # depend on it structurally. A filesystem watcher flake restarts only
       # FileWatcher, not the renderer.
       Minga.FileWatcher,
+      # CLI wait requests are app-local frontend transport state. Keeping them
+      # outside Editor.Supervisor preserves outstanding requests while the
+      # render/editor subtree restarts.
+      Minga.Frontend.WaitRequests,
       # Editor.Supervisor groups the tightly-coupled render path with rest_for_one:
       # Parser crash → Port + Renderer + Editor restart, Port crash → Renderer + Editor restart.
       {MingaEditor.Supervisor, [backend: backend]}
