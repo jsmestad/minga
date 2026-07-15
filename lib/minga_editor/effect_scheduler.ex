@@ -23,6 +23,7 @@ defmodule MingaEditor.EffectScheduler do
   @type admission_error :: Engine.admission_error()
   @type claim :: Engine.claim()
   @type cancel_error :: :not_found | :scheduler_unavailable
+  @type source :: Minga.Extension.ContributionCleanup.contribution_source()
 
   @doc "Starts an effect scheduler."
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -58,6 +59,47 @@ defmodule MingaEditor.EffectScheduler do
     GenServer.call(server, {:cancel_operation, operation_id})
   catch
     :exit, _reason -> {:error, :scheduler_unavailable}
+  end
+
+  @doc "Cancels queued, running, and pending work attributed to a source."
+  @spec cancel_source(server() | nil, source()) :: :ok | {:error, :scheduler_unavailable}
+  def cancel_source(nil, _source), do: {:error, :scheduler_unavailable}
+
+  def cancel_source(server, source) do
+    GenServer.call(server, {:cancel_source, source})
+  catch
+    :exit, _reason -> {:error, :scheduler_unavailable}
+  end
+
+  @doc "Cancels queued, running, and pending work for a semantic resource."
+  @spec cancel_resource(server() | nil, Request.resource()) ::
+          :ok | {:error, :scheduler_unavailable}
+  def cancel_resource(nil, _resource), do: {:error, :scheduler_unavailable}
+
+  def cancel_resource(server, resource) do
+    GenServer.call(server, {:cancel_resource, resource})
+  catch
+    :exit, _reason -> {:error, :scheduler_unavailable}
+  end
+
+  @doc "Returns whether a source has queued, running, or pending work."
+  @spec active_source?(server() | nil, source()) :: boolean()
+  def active_source?(nil, _source), do: false
+
+  def active_source?(server, source) do
+    GenServer.call(server, {:active_source?, source})
+  catch
+    :exit, _reason -> false
+  end
+
+  @doc "Returns whether an exact request still holds scheduler admission."
+  @spec admitted?(server() | nil, Request.id()) :: boolean()
+  def admitted?(nil, _request_id), do: false
+
+  def admitted?(server, request_id) when is_reference(request_id) do
+    GenServer.call(server, {:admitted?, request_id})
+  catch
+    :exit, _reason -> false
   end
 
   @doc "Claims a still-current candidate before its domain handler applies it."
@@ -120,6 +162,18 @@ defmodule MingaEditor.EffectScheduler do
 
   def handle_call({:cancel_operation, operation_id}, _from, state),
     do: reply(Engine.cancel_operation(state, operation_id))
+
+  def handle_call({:cancel_source, source}, _from, state),
+    do: reply(Engine.cancel_source(state, source))
+
+  def handle_call({:cancel_resource, resource}, _from, state),
+    do: reply(Engine.cancel_resource(state, resource))
+
+  def handle_call({:active_source?, source}, _from, state),
+    do: {:reply, Engine.active_source?(state, source), state}
+
+  def handle_call({:admitted?, request_id}, _from, state),
+    do: {:reply, Engine.admitted?(state, request_id), state}
 
   def handle_call({:claim, outcome}, _from, state), do: reply(Engine.claim(state, outcome))
 

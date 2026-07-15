@@ -19,11 +19,46 @@ defmodule MingaEditor.PickerAsyncStaleTest do
   alias Minga.Project.Root
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.Effects.TodoSearch
+  alias MingaEditor.EffectScheduler
+  alias MingaEditor.PickerUI
   alias MingaEditor.UI.Picker.Candidate
+  alias MingaEditor.UI.Picker.Context
+  alias MingaEditor.UI.Picker.FetchEffect
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.TodoSearchSource
 
   @sync_timeout 15_000
+
+  defmodule SuccessfulSource do
+    @behaviour MingaEditor.UI.Picker.Source
+
+    alias MingaEditor.UI.Picker.Item
+
+    @impl true
+    def title, do: "Successful scheduler source"
+
+    @impl true
+    def candidates(_context), do: []
+
+    @impl true
+    def async?, do: true
+
+    @impl true
+    def async_fetch(%{picker_ui: %{context: %{test_pid: test_pid}}}) do
+      send(test_pid, {:successful_picker_started, self()})
+
+      receive do
+        :complete_successful_picker ->
+          {:ok, [%Item{id: :scheduled_success, label: "Scheduled success"}], %{}}
+      end
+    end
+
+    @impl true
+    def on_select(_item, state), do: state
+
+    @impl true
+    def on_cancel(state), do: state
+  end
 
   setup do
     original_workspace = Project.snapshot()
@@ -68,6 +103,29 @@ defmodule MingaEditor.PickerAsyncStaleTest do
     assert is_reference(payload.picker_ui.fetch_revision)
   end
 
+  test "successful fetch traverses scheduler claim, Editor apply, and finalization",
+       %{project_root: root} do
+    ctx = start_editor("scratch", project_root: root)
+    test_pid = self()
+
+    :sys.replace_state(ctx.editor, fn state ->
+      PickerUI.open(state, SuccessfulSource, %{test_pid: test_pid})
+    end)
+
+    assert_receive {:successful_picker_started, worker}
+    worker_monitor = Process.monitor(worker)
+    send(worker, :complete_successful_picker)
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, _reason}
+
+    payload = await_ready_picker(ctx.editor, SuccessfulSource)
+    assert payload.picker_ui.load_status == :ready
+    assert Enum.map(payload.picker_ui.picker.items, & &1.label) == ["Scheduled success"]
+
+    scheduler = :sys.get_state(ctx.editor).effect_scheduler
+    await_scheduler_finalized(scheduler, FetchEffect)
+    refute EffectScheduler.active?(scheduler, FetchEffect)
+  end
+
   test "drops a stale (non-live-revision) result and never lets it overwrite the picker",
        %{project_root: root} do
     ctx = start_editor("scratch", project_root: root)
@@ -79,21 +137,75 @@ defmodule MingaEditor.PickerAsyncStaleTest do
     stale_revision = make_ref()
     stale_items = [item("stale-sentinel")]
 
-    send(
-      ctx.editor,
-      {:picker_candidates_result, TodoSearchSource, stale_revision,
-       {:ok, stale_items, Candidate.from_items(stale_items), %{}}}
-    )
+    state = :sys.get_state(ctx.editor, @sync_timeout)
 
-    _ = :sys.get_state(ctx.editor, @sync_timeout)
+    request =
+      FetchEffect.request(
+        TodoSearchSource,
+        nil,
+        Context.from_editor_state(state),
+        stale_revision
+      )
 
-    labels =
-      case picker_payload(ctx) do
-        %{picker_ui: %{picker: %{items: items}}} -> Enum.map(items, & &1.label)
-        _ -> []
+    outcome =
+      Outcome.completed(
+        request,
+        {:ok, stale_items, Candidate.from_items(stale_items), %{}}
+      )
+
+    assert {^state, %Outcome{status: :stale, reason: :picker_closed_or_replaced}} =
+             FetchEffect.apply(state, outcome)
+  end
+
+  @spec await_ready_picker(pid(), module()) :: MingaEditor.State.ModalOverlay.Picker.t()
+  defp await_ready_picker(editor, source) do
+    deadline = System.monotonic_time(:millisecond) + @sync_timeout
+    do_await_ready_picker(editor, source, deadline)
+  end
+
+  @spec do_await_ready_picker(pid(), module(), integer()) ::
+          MingaEditor.State.ModalOverlay.Picker.t()
+  defp do_await_ready_picker(editor, source, deadline) do
+    state = :sys.get_state(editor)
+
+    case MingaEditor.Shell.Runtime.state(state.shell_runtime).modal do
+      {:picker, %{picker_ui: %{source: ^source, load_status: :ready}} = payload} ->
+        payload
+
+      _modal ->
+        if System.monotonic_time(:millisecond) < deadline do
+          receive do
+          after
+            1 -> do_await_ready_picker(editor, source, deadline)
+          end
+        else
+          flunk(
+            "picker did not reach ready state: modal=#{inspect(state.shell_runtime.state.modal)} stats=#{inspect(EffectScheduler.stats(state.effect_scheduler))}"
+          )
+        end
+    end
+  end
+
+  @spec await_scheduler_finalized(pid(), module()) :: :ok
+  defp await_scheduler_finalized(scheduler, handler) do
+    deadline = System.monotonic_time(:millisecond) + @sync_timeout
+    do_await_scheduler_finalized(scheduler, handler, deadline)
+  end
+
+  @spec do_await_scheduler_finalized(pid(), module(), integer()) :: :ok
+  defp do_await_scheduler_finalized(scheduler, handler, deadline) do
+    if EffectScheduler.active?(scheduler, handler) do
+      if System.monotonic_time(:millisecond) < deadline do
+        receive do
+        after
+          1 -> do_await_scheduler_finalized(scheduler, handler, deadline)
+        end
+      else
+        flunk("effect did not finalize")
       end
-
-    refute "stale-sentinel" in labels
+    else
+      :ok
+    end
   end
 
   test "rejects a live-revision result captured before workspace rerooting",
@@ -138,13 +250,19 @@ defmodule MingaEditor.PickerAsyncStaleTest do
     candidates = Candidate.from_items(items)
     assert [%Candidate{}] = candidates
 
-    send(
-      ctx.editor,
-      {:picker_candidates_result, TodoSearchSource, live_revision, {:ok, items, candidates, %{}}}
-    )
+    state = :sys.get_state(ctx.editor, @sync_timeout)
 
-    _ = :sys.get_state(ctx.editor, @sync_timeout)
-    payload = picker_payload(ctx)
+    request =
+      FetchEffect.request(
+        TodoSearchSource,
+        nil,
+        Context.from_editor_state(state),
+        live_revision
+      )
+
+    outcome = Outcome.completed(request, {:ok, items, candidates, %{}})
+    assert {new_state, ^outcome} = FetchEffect.apply(state, outcome)
+    {:picker, payload} = new_state.shell_runtime.state.modal
 
     labels = Enum.map(payload.picker_ui.picker.items, & &1.label)
     assert "prebuilt-sentinel" in labels

@@ -26,9 +26,43 @@ defmodule MingaEditor.State.PickerTest do
       assert PickerState.current_fetch?(ps, second)
     end
 
-    test "a nil revision never matches a picker that has a live fetch" do
+    test "nil revisions never match, including a picker with no active fetch" do
+      refute PickerState.current_fetch?(%PickerState{}, nil)
       {ps, _revision} = PickerState.begin_fetch(%PickerState{})
       refute PickerState.current_fetch?(ps, nil)
+    end
+  end
+
+  describe "source ownership and fetch completion" do
+    test "loading state retains only semantic source and revision correlation" do
+      source = {:extension, :picker_owner}
+      picker = MingaEditor.UI.Picker.new([], title: "Owned")
+
+      state = PickerState.loading(picker, __MODULE__, source, 0, nil, %{query: "x"}, :bottom)
+      {state, revision} = PickerState.begin_fetch(state)
+
+      assert PickerState.owned_by?(state, source)
+      refute PickerState.owned_by?(state, {:extension, :other})
+      assert state.fetch_revision == revision
+      refute Map.has_key?(Map.from_struct(state), :fetch_worker)
+    end
+
+    test "success and failure update loading status without replacing correlation" do
+      source = {:extension, :picker_owner}
+      picker = MingaEditor.UI.Picker.new([], title: "Owned")
+      state = PickerState.loading(picker, __MODULE__, source, nil, nil, nil, :bottom)
+      {state, revision} = PickerState.begin_fetch(state)
+      populated = MingaEditor.UI.Picker.new([], title: "Populated")
+
+      completed = PickerState.complete_fetch(state, populated)
+      assert completed.load_status == :ready
+      assert completed.fetch_revision == revision
+      assert completed.callback_source == source
+
+      failed = PickerState.fail_fetch(state, "unavailable")
+      assert failed.load_status == {:error, "unavailable"}
+      assert failed.fetch_revision == revision
+      assert failed.callback_source == source
     end
   end
 end

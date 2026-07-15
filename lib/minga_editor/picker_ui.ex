@@ -20,13 +20,17 @@ defmodule MingaEditor.PickerUI do
   The caller (`Editor`) is responsible for dispatching that action.
   """
 
+  alias MingaEditor.Effect.Request
+  alias MingaEditor.EffectScheduler
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
   alias MingaEditor.State.Picker, as: PickerState
   alias MingaEditor.State.BufferLifecycle
   alias MingaEditor.UI.Picker
   alias MingaEditor.UI.Picker.Context
+  alias MingaEditor.UI.Picker.FetchEffect
   alias MingaEditor.UI.Picker.Item
+  alias MingaEditor.UI.Picker.Source
 
   import Bitwise
 
@@ -43,6 +47,11 @@ defmodule MingaEditor.PickerUI do
 
   @typedoc "Action the GenServer should dispatch after handle_key/3."
   @type action :: {:execute_command, term()}
+
+  @typedoc "Normalized asynchronous candidate result returned by a picker effect."
+  @type fetch_result ::
+          {:ok, [Picker.item()], [MingaEditor.UI.Picker.Candidate.t()], Source.fetch_meta()}
+          | {:error, String.t()}
 
   # Mode-switching prefix map: first character → source module.
   # When a prefix character is typed as the first query char in a switchable
@@ -73,7 +82,9 @@ defmodule MingaEditor.PickerUI do
   """
   @spec open(state(), module(), map() | nil) :: state()
   def open(state, source_module, context \\ nil) do
-    if MingaEditor.UI.Picker.Source.async?(source_module) do
+    state = cancel_current_fetch(state)
+
+    if Source.async?(source_module) do
       open_async(state, source_module, context)
     else
       open_sync(state, source_module, context)
@@ -97,34 +108,39 @@ defmodule MingaEditor.PickerUI do
   @spec open_async(state(), module(), map() | nil) :: state()
   defp open_async(state, source_module, context) do
     {new_state, revision} = open_loading(state, source_module, context)
+    picker_state = picker_state(new_state)
 
-    send(
-      self(),
-      {:picker_fetch_candidates, source_module, revision,
-       Context.from_editor_state(state, context)}
-    )
+    request =
+      FetchEffect.request(
+        source_module,
+        picker_state.callback_source,
+        Context.from_editor_state(state, context),
+        revision
+      )
 
-    new_state
+    schedule_fetch(new_state, request, source_module, revision)
   end
 
   @doc "Opens an async picker in its loading state without starting a fetch."
   @spec open_loading(state(), module(), map() | nil) :: {state(), reference()}
   def open_loading(state, source_module, context \\ nil) do
+    state = cancel_current_fetch(state)
     max_vis = max(state.frontend.terminal_viewport.rows - 3, 5)
     picker = Picker.new([], title: source_module.title(), max_visible: max_vis)
 
     new_state = clear_whichkey(state)
     layout = MingaEditor.UI.Picker.Source.layout(source_module)
 
-    picker_state = %PickerState{
-      picker: picker,
-      source: source_module,
-      restore: state.workspace.buffers.active_index,
-      restore_theme: state.appearance.theme,
-      context: context,
-      layout: layout,
-      load_status: :loading
-    }
+    picker_state =
+      PickerState.loading(
+        picker,
+        source_module,
+        Source.source_identity(source_module),
+        state.workspace.buffers.active_index,
+        state.appearance.theme,
+        context,
+        layout
+      )
 
     {picker_state, revision} = PickerState.begin_fetch(picker_state)
 
@@ -137,15 +153,40 @@ defmodule MingaEditor.PickerUI do
     {new_state, revision}
   end
 
+  @spec schedule_fetch(state(), Request.t(), module(), reference()) :: state()
+  defp schedule_fetch(%{effect_scheduler: nil} = state, _request, source, revision) do
+    fetch_admission_failure(state, source, revision, :scheduler_unavailable)
+  end
+
+  defp schedule_fetch(state, request, source, revision) do
+    case EffectScheduler.schedule(state.effect_scheduler, request) do
+      {:ok, _request_id, _disposition} -> state
+      {:error, reason} -> fetch_admission_failure(state, source, revision, reason)
+    end
+  catch
+    :exit, reason -> fetch_admission_failure(state, source, revision, reason)
+  end
+
+  @spec fetch_admission_failure(state(), module(), reference(), term()) :: state()
+  defp fetch_admission_failure(state, source, revision, reason) do
+    message = "Picker fetch not scheduled: #{inspect(reason)}"
+    {:ok, state} = apply_fetch_result(state, source, revision, {:error, message})
+    state
+  end
+
+  @spec picker_state(state()) :: PickerState.t()
+  defp picker_state(%{shell_runtime: %{state: %{modal: {:picker, %PickerPayload{} = payload}}}}),
+    do: payload.picker_ui
+
   @doc "Applies a scheduler-owned candidate result when its picker revision is live."
-  @spec apply_fetch_result(state(), module(), reference(), tuple()) ::
+  @spec apply_fetch_result(state(), module(), reference(), fetch_result()) ::
           {:ok, state()} | :stale
   def apply_fetch_result(state, source_module, revision, {:ok, items, candidates, meta}) do
     case live_picker(state, source_module, revision) do
       {:ok, payload} ->
         picker_state = payload.picker_ui
         picker = Picker.put_candidates(picker_state.picker, items, candidates)
-        new_picker_state = %{picker_state | picker: picker, load_status: :ready}
+        new_picker_state = PickerState.complete_fetch(picker_state, picker)
 
         new_state =
           state
@@ -165,7 +206,7 @@ defmodule MingaEditor.PickerUI do
     case live_picker(state, source_module, revision) do
       {:ok, payload} ->
         picker_state = payload.picker_ui
-        new_picker_state = %{picker_state | load_status: {:error, reason}}
+        new_picker_state = PickerState.fail_fetch(picker_state, reason)
 
         {:ok,
          MingaEditor.Shell.Traditional.ModalWorkflow.transition(
@@ -178,8 +219,13 @@ defmodule MingaEditor.PickerUI do
     end
   end
 
-  defp live_picker(state, source_module, revision) do
-    case state.shell_runtime.state.modal do
+  @spec live_picker(state(), module(), reference()) :: {:ok, PickerPayload.t()} | :stale
+  defp live_picker(
+         %{shell_runtime: %{state: %{modal: modal}}},
+         source_module,
+         revision
+       ) do
+    case modal do
       {:picker, %PickerPayload{picker_ui: %{source: ^source_module} = picker_ui} = payload} ->
         if PickerState.current_fetch?(picker_ui, revision), do: {:ok, payload}, else: :stale
 
@@ -187,6 +233,8 @@ defmodule MingaEditor.PickerUI do
         :stale
     end
   end
+
+  defp live_picker(_state, _source_module, _revision), do: :stale
 
   defp apply_fetch_status(state, %{status: status}) when is_binary(status) do
     MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, status)
@@ -694,9 +742,42 @@ defmodule MingaEditor.PickerUI do
 
   defp record_command_execution(_source, _command_name), do: :ok
 
+  @spec cancel_current_fetch(state()) :: state()
+  defp cancel_current_fetch(
+         %{
+           effect_scheduler: scheduler,
+           shell_runtime: %{state: %{modal: {:picker, %{picker_ui: %{source: source}}}}}
+         } = state
+       )
+       when is_atom(source) do
+    _result = EffectScheduler.cancel_resource(scheduler, {:picker_fetch, source})
+    state
+  end
+
+  defp cancel_current_fetch(state), do: state
+
   @doc "Closes the picker and resets picker-related state."
   @spec close(state()) :: state()
   def close(state) do
+    state
+    |> cancel_current_fetch()
+    |> dismiss()
+  end
+
+  @doc "Removes a live picker owned by a finalized contribution source."
+  @spec remove_source(state(), PickerState.callback_source()) :: state()
+  def remove_source(
+        %{shell_runtime: %{state: %{modal: {:picker, %{picker_ui: %PickerState{} = picker}}}}} =
+          state,
+        source
+      ) do
+    if PickerState.owned_by?(picker, source), do: dismiss(state), else: state
+  end
+
+  def remove_source(state, _source), do: state
+
+  @spec dismiss(state()) :: state()
+  defp dismiss(state) do
     state
     |> then(fn state ->
       %{state | buffer_lifecycle: BufferLifecycle.expect_buffer(state.buffer_lifecycle, :open)}

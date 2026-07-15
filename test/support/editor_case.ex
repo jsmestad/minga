@@ -97,6 +97,7 @@ defmodule Minga.Test.EditorCase do
     - `:width` — terminal width (default 80)
     - `:height` — terminal height (default 24)
     - `:file_path` — optional file path for the buffer
+    - `:name` — optional Editor registration name (defaults to a unique test name)
   """
   @spec start_editor(String.t(), keyword()) :: editor_ctx()
   def start_editor(content, opts \\ []) do
@@ -142,9 +143,10 @@ defmodule Minga.Test.EditorCase do
     backend = Keyword.get(opts, :backend, :headless)
     # Shell defaults to nil (uses config); override in tests that need a custom shell.
     shell = Keyword.get(opts, :shell)
+    editor_name = Keyword.get(opts, :name, :"headless_editor_#{id}")
 
     editor_opts = [
-      name: :"headless_editor_#{id}",
+      name: editor_name,
       backend: backend,
       rendering: rendering,
       port_manager: port,

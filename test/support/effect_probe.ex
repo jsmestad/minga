@@ -24,9 +24,21 @@ defmodule Minga.Test.EffectProbe do
   @doc "Builds a deterministic scheduler request with data-only work instructions."
   @spec request(pid(), term(), term(), Policy.t(), action()) :: Request.t()
   def request(test_pid, label, resource, policy, action \\ :wait) when is_pid(test_pid) do
-    effect = %__MODULE__{test_pid: test_pid, label: label, payloads: [label], action: action}
-    operation_id = System.unique_integer([:positive, :monotonic])
-    Request.new(effect, resource, policy, operation_id)
+    build_request(test_pid, label, resource, policy, action, [])
+  end
+
+  @doc "Builds a deterministic request attributed to a contribution source."
+  @spec source_request(
+          pid(),
+          term(),
+          term(),
+          Policy.t(),
+          Minga.Extension.ContributionCleanup.contribution_source(),
+          action()
+        ) :: Request.t()
+  def source_request(test_pid, label, resource, policy, source, action \\ :wait)
+      when is_pid(test_pid) do
+    build_request(test_pid, label, resource, policy, action, source: source)
   end
 
   @impl true
@@ -58,6 +70,13 @@ defmodule Minga.Test.EffectProbe do
   @impl true
   @spec render?(Outcome.t()) :: boolean()
   def render?(%Outcome{}), do: false
+
+  @spec build_request(pid(), term(), term(), Policy.t(), action(), keyword()) :: Request.t()
+  defp build_request(test_pid, label, resource, policy, action, opts) do
+    effect = %__MODULE__{test_pid: test_pid, label: label, payloads: [label], action: action}
+    operation_id = System.unique_integer([:positive, :monotonic])
+    Request.new(effect, resource, policy, Keyword.put(opts, :operation_id, operation_id))
+  end
 
   @spec perform(t()) :: {:ok, term()} | {:error, term()}
   defp perform(%__MODULE__{action: :wait} = effect) do

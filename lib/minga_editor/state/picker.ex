@@ -13,6 +13,9 @@ defmodule MingaEditor.State.Picker do
   @typedoc "Async loading status for sources that fetch candidates in the background."
   @type load_status :: :ready | :loading | {:error, String.t()}
 
+  @typedoc "Contribution source semantically authorized to provide picker candidates."
+  @type callback_source :: Minga.Extension.ContributionCleanup.contribution_source() | nil
+
   @typedoc """
   Latest-wins guard for async candidate fetches. Each `open_async` mints a fresh
   reference; a result whose revision doesn't match the live picker's is stale and
@@ -24,6 +27,7 @@ defmodule MingaEditor.State.Picker do
   @type t :: %__MODULE__{
           picker: MingaEditor.UI.Picker.t() | nil,
           source: module() | nil,
+          callback_source: callback_source(),
           restore: non_neg_integer() | nil,
           restore_theme: MingaEditor.UI.Theme.t() | nil,
           action_menu: action_menu(),
@@ -37,6 +41,7 @@ defmodule MingaEditor.State.Picker do
 
   defstruct picker: nil,
             source: nil,
+            callback_source: nil,
             restore: nil,
             restore_theme: nil,
             action_menu: nil,
@@ -47,10 +52,40 @@ defmodule MingaEditor.State.Picker do
             load_status: :ready,
             fetch_revision: nil
 
+  @doc "Builds the semantic state for an asynchronous picker before fetching starts."
+  @spec loading(
+          MingaEditor.UI.Picker.t(),
+          module(),
+          callback_source(),
+          non_neg_integer() | nil,
+          MingaEditor.UI.Theme.t() | nil,
+          map() | nil,
+          MingaEditor.UI.Picker.Source.layout()
+        ) :: t()
+  def loading(picker, source, callback_source, restore, restore_theme, context, layout)
+      when is_atom(source) do
+    %__MODULE__{
+      picker: picker,
+      source: source,
+      callback_source: callback_source,
+      restore: restore,
+      restore_theme: restore_theme,
+      context: context,
+      layout: layout,
+      load_status: :loading
+    }
+  end
+
   @doc "Returns true if a picker is currently open."
   @spec open?(t()) :: boolean()
   def open?(%__MODULE__{picker: nil}), do: false
   def open?(%__MODULE__{}), do: true
+
+  @doc "Returns whether this picker is semantically owned by a contribution source."
+  @spec owned_by?(t(), callback_source()) :: boolean()
+  def owned_by?(%__MODULE__{callback_source: nil}, _source), do: false
+  def owned_by?(%__MODULE__{callback_source: source}, source), do: true
+  def owned_by?(%__MODULE__{}, _source), do: false
 
   @doc "Returns a picker state with updated source context."
   @spec put_context(t(), map() | nil) :: t()
@@ -77,8 +112,23 @@ defmodule MingaEditor.State.Picker do
     {%{ps | fetch_revision: revision, load_status: :loading}, revision}
   end
 
+  @doc "Accepts normalized candidates for the current asynchronous fetch."
+  @spec complete_fetch(t(), MingaEditor.UI.Picker.t()) :: t()
+  def complete_fetch(%__MODULE__{} = ps, picker) do
+    %{ps | picker: picker, load_status: :ready}
+  end
+
+  @doc "Records a user-visible failure for the current asynchronous fetch."
+  @spec fail_fetch(t(), String.t()) :: t()
+  def fail_fetch(%__MODULE__{} = ps, reason) when is_binary(reason) do
+    %{ps | load_status: {:error, reason}}
+  end
+
   @doc "Returns whether `revision` is the picker's current (live) fetch revision."
   @spec current_fetch?(t(), fetch_revision()) :: boolean()
-  def current_fetch?(%__MODULE__{fetch_revision: revision}, revision), do: true
+  def current_fetch?(%__MODULE__{fetch_revision: revision}, revision)
+      when is_reference(revision),
+      do: true
+
   def current_fetch?(%__MODULE__{}, _revision), do: false
 end

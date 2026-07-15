@@ -215,11 +215,14 @@ defmodule MingaEditor.Shell.Traditional do
   def render(editor_state), do: MingaEditor.Renderer.render_buffer(editor_state)
 
   @impl true
-  @spec input_handlers(term()) :: %{overlay: [module()], surface: [module()]}
+  @spec input_handlers(term()) :: %{
+          overlay: [MingaEditor.Input.dispatch_handler()],
+          surface: [MingaEditor.Input.dispatch_handler()]
+        }
   def input_handlers(editor_state) do
     %{
       overlay: MingaEditor.Input.overlay_handlers(),
-      surface: MingaEditor.Input.surface_handlers(editor_state)
+      surface: MingaEditor.Input.surface_handler_entries(editor_state)
     }
   end
 

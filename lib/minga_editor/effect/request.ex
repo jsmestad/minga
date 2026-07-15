@@ -6,11 +6,12 @@ defmodule MingaEditor.Effect.Request do
   enter scheduler queues; the domain module named by `handler` owns execution.
   """
 
+  alias Minga.Extension.ContributionCleanup
   alias MingaEditor.Effect.Policy
   alias MingaEditor.State.Operation
 
   @enforce_keys [:id, :operation_id, :resource, :policy, :handler, :effect]
-  defstruct [:id, :operation_id, :resource, :policy, :handler, :effect]
+  defstruct [:id, :operation_id, :resource, :policy, :handler, :effect, :source]
 
   @typedoc "Scheduler-local request identity."
   @type id :: reference()
@@ -24,31 +25,53 @@ defmodule MingaEditor.Effect.Request do
           resource: resource(),
           policy: Policy.t(),
           handler: module(),
-          effect: struct()
+          effect: struct(),
+          source: ContributionCleanup.contribution_source() | nil
         }
 
-  @doc "Builds a scheduler request for an effect without user-visible operation feedback."
-  @spec new(struct(), resource(), Policy.t()) :: t()
-  def new(%module{} = effect, resource, %Policy{} = policy) do
-    build(module, effect, resource, policy, nil)
+  @typedoc "Optional request metadata supplied to the scheduler."
+  @type option ::
+          {:operation_id, Operation.id()}
+          | {:source, ContributionCleanup.contribution_source()}
+
+  @doc "Builds a scheduler request for a typed effect and optional metadata."
+  @spec new(struct(), resource(), Policy.t(), [option()]) :: t()
+  @spec new(struct(), resource(), Policy.t(), Operation.id()) :: t()
+  def new(effect, resource, policy, opts \\ [])
+
+  def new(%module{} = effect, resource, %Policy{} = policy, opts) when is_list(opts) do
+    build(
+      module,
+      effect,
+      resource,
+      policy,
+      Keyword.get(opts, :operation_id),
+      Keyword.get(opts, :source)
+    )
   end
 
-  @doc "Builds a scheduler request from a typed domain effect and operation identity."
-  @spec new(struct(), resource(), Policy.t(), Operation.id()) :: t()
   def new(%module{} = effect, resource, %Policy{} = policy, operation_id)
       when is_integer(operation_id) and operation_id > 0 do
-    build(module, effect, resource, policy, operation_id)
+    build(module, effect, resource, policy, operation_id, nil)
   end
 
-  @spec build(module(), struct(), resource(), Policy.t(), Operation.id() | nil) :: t()
-  defp build(module, effect, resource, policy, operation_id) do
+  @spec build(
+          module(),
+          struct(),
+          resource(),
+          Policy.t(),
+          Operation.id() | nil,
+          ContributionCleanup.contribution_source() | nil
+        ) :: t()
+  defp build(module, effect, resource, policy, operation_id, source) do
     %__MODULE__{
       id: make_ref(),
       operation_id: operation_id,
       resource: resource,
       policy: policy,
       handler: module,
-      effect: effect
+      effect: effect,
+      source: source
     }
   end
 

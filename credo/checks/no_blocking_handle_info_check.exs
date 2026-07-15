@@ -86,9 +86,7 @@ defmodule Minga.Credo.NoBlockingHandleInfoCheck do
     # allowlisted: fix in flight on #2631 (observatory tick → blocking GenServer.call every 1s)
     :observatory_tick,
     # allowlisted: fix in flight on #2632 (file-tree refresh → sync filesystem I/O)
-    :file_tree_refresh_timer,
-    # allowlisted: fix in flight on #2628 (picker candidates → O(n) Candidate.from_items)
-    :picker_candidates_result
+    :file_tree_refresh_timer
   ]
 
   @impl Credo.Check
