@@ -497,22 +497,61 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
       end
     end
 
-    test "custom segment exceptions are dropped without raising" do
-      segment_name = :raising_modeline_test
+    test "extension callback failures are observable fallbacks" do
+      segment_name = :failed_extension_modeline_test
+      source = {:extension, :failed_modeline}
+      failure = {:callback_failed, source, __MODULE__, :render, :throw, :failed}
       ModelineSegments.unregister(segment_name)
 
       try do
         assert :ok =
-                 ModelineSegments.register(segment_name, [side: :left], fn _ctx ->
-                   raise "boom"
-                 end)
+                 ModelineSegments.register(
+                   segment_name,
+                   [side: :left],
+                   fn _ctx ->
+                     {:extension_callback, source, __MODULE__, :render, {:error, failure}}
+                   end,
+                   source
+                 )
 
-        assert %{left: left, right: right} = Modeline.gui_segments(@base_data)
-        refute String.contains?(segment_text(left), "boom")
-        refute String.contains?(segment_text(right), "boom")
+        segments = Modeline.gui_segments(@base_data)
+        refute String.contains?(segment_text(segments.left ++ segments.right), "failed")
       after
         ModelineSegments.unregister(segment_name)
       end
+    end
+
+    test "core custom segment raise, throw, and exit failures propagate" do
+      failures = [
+        {:raise, fn -> raise "boom" end},
+        {:throw, fn -> throw(:boom) end},
+        {:exit, fn -> exit(:boom) end}
+      ]
+
+      Enum.each(failures, fn {kind, callback} ->
+        segment_name = String.to_atom("#{kind}_modeline_test")
+        ModelineSegments.unregister(segment_name)
+
+        try do
+          assert :ok =
+                   ModelineSegments.register(segment_name, [side: :left], fn _ctx ->
+                     callback.()
+                   end)
+
+          case kind do
+            :raise ->
+              assert_raise RuntimeError, "boom", fn -> Modeline.gui_segments(@base_data) end
+
+            :throw ->
+              assert catch_throw(Modeline.gui_segments(@base_data)) == :boom
+
+            :exit ->
+              assert catch_exit(Modeline.gui_segments(@base_data)) == :boom
+          end
+        after
+          ModelineSegments.unregister(segment_name)
+        end
+      end)
     end
   end
 

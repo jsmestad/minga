@@ -3,7 +3,8 @@ defmodule MingaGitPorcelain.Effects.RemoteOperation do
 
   @behaviour MingaEditor.Effect
 
-  alias Minga.Extension.ContributionCleanup
+  alias Minga.Extension.CallbackInvoker
+  alias Minga.Extension.CodeLease
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.Effect.Policy
   alias MingaEditor.Effect.Request
@@ -23,7 +24,7 @@ defmodule MingaGitPorcelain.Effects.RemoteOperation do
   ]
 
   @type operation :: :push | :pull | :fetch | :pull_and_retry
-  @type source :: ContributionCleanup.contribution_source() | nil
+  @type source :: CallbackInvoker.source()
 
   @enforce_keys [:operation, :git_root, :source, :git, :admission, :refresher]
   defstruct [:operation, :git_root, :source, :git, :admission, :refresher]
@@ -33,7 +34,7 @@ defmodule MingaGitPorcelain.Effects.RemoteOperation do
           git_root: String.t(),
           source: source(),
           git: module(),
-          admission: module(),
+          admission: GenServer.server(),
           refresher: module()
         }
 
@@ -41,14 +42,14 @@ defmodule MingaGitPorcelain.Effects.RemoteOperation do
   @spec request(String.t(), operation(), keyword()) :: Request.t()
   def request(git_root, operation, opts \\ [])
       when is_binary(git_root) and operation in [:push, :pull, :fetch, :pull_and_retry] do
-    source = Keyword.get(opts, :source, @source)
+    {:extension, _name} = source = Keyword.get(opts, :source, @source)
 
     effect = %__MODULE__{
       operation: operation,
       git_root: Path.expand(git_root),
       source: source,
       git: Keyword.get(opts, :git, Git),
-      admission: Keyword.get(opts, :admission, MingaEditor.UI.Picker.Source),
+      admission: Keyword.get(opts, :admission, CodeLease),
       refresher: Keyword.get(opts, :refresher, MingaEditor)
     }
 
@@ -59,14 +60,35 @@ defmodule MingaGitPorcelain.Effects.RemoteOperation do
     )
   end
 
-  @doc "Runs a data-only remote operation after checking source admission."
+  @doc "Runs remote work through the extension callback trust boundary."
   @impl true
   @spec run(t()) :: :ok | {:error, term()}
   def run(%__MODULE__{source: source, admission: admission} = effect) do
-    with :ok <- admission.verify_admission(source) do
-      perform(effect)
+    case CallbackInvoker.invoke(
+           source,
+           __MODULE__,
+           :execute,
+           [effect],
+           :effect_execution,
+           admission
+         ) do
+      {:ok, :ok} ->
+        :ok
+
+      {:ok, {:error, _reason} = error} ->
+        error
+
+      {:ok, returned} ->
+        {:error, CallbackInvoker.invalid_return(source, __MODULE__, :execute, returned)}
+
+      {:error, failure} ->
+        {:error, failure}
     end
   end
+
+  @doc false
+  @spec execute(t()) :: :ok | {:error, term()}
+  def execute(%__MODULE__{} = effect), do: perform(effect)
 
   @impl true
   @spec coalesce(t(), t()) :: t()
@@ -175,11 +197,23 @@ defmodule MingaGitPorcelain.Effects.RemoteOperation do
   defp format_down_reason(reason), do: inspect(reason, charlists: :as_lists, limit: 5)
 
   @spec format_reason(term()) :: String.t()
-  defp format_reason({:source_admission_denied, source}),
-    do: "source unavailable (#{inspect(source)})"
+  defp format_reason({:source_unavailable, source, _module, _function, reason}),
+    do: "source unavailable (#{inspect(source)}: #{inspect(reason)})"
+
+  defp format_reason({:callback_failed, _source, _module, _function, kind, reason}),
+    do: "extension callback #{kind}: #{format_callback_reason(reason)}"
+
+  defp format_reason({:invalid_return, _source, _module, _function, returned}),
+    do: "extension callback returned invalid value: #{inspect(returned)}"
 
   defp format_reason(reason) when is_binary(reason), do: reason
   defp format_reason(reason), do: inspect(reason)
+
+  @spec format_callback_reason(term()) :: String.t()
+  defp format_callback_reason(%{__exception__: true} = exception),
+    do: Exception.message(exception)
+
+  defp format_callback_reason(reason), do: inspect(reason)
 
   @spec retry_action(operation(), term()) :: :pull_and_retry | nil
   defp retry_action(:push, reason) do

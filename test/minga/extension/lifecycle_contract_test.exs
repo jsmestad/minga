@@ -4,9 +4,13 @@ defmodule Minga.Extension.LifecycleContractTest do
   import ExUnit.CaptureLog
 
   alias Minga.Command.Registry, as: CommandRegistry
+  alias Minga.Extension.CallbackInvoker
+  alias Minga.Extension.CallbackRegistry
+  alias Minga.Extension.CodeLease
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Extension.Supervisor, as: ExtSupervisor
   alias Minga.Keymap.Active, as: KeymapActive
+  alias MingaEditor.Extension.Sidebar
 
   setup do
     reg_name = :"ext_lifecycle_reg_#{System.unique_integer([:positive])}"
@@ -1016,6 +1020,11 @@ defmodule Minga.Extension.LifecycleContractTest do
       defmodule Minga.TestExtensions.CrashWithoutReplacement do
         use Minga.Extension
 
+        command :crash_without_replacement_cmd, "Crash cleanup command",
+          execute: {__MODULE__, :return_state}
+
+        editor_event_handler __MODULE__, [:editor_action]
+
         @impl true
         def name, do: :crash_without_replacement
 
@@ -1037,6 +1046,24 @@ defmodule Minga.Extension.LifecycleContractTest do
             type: :worker
           }
         end
+
+        @spec return_state(term()) :: term()
+        def return_state(state), do: state
+
+        @spec block(pid()) :: :settled
+        def block(test_pid) do
+          send(test_pid, {:crash_callback_running, self()})
+
+          receive do
+            :settle_crash_callback -> :settled
+          end
+        end
+
+        @spec handle_editor_event(term(), term()) :: :not_matched
+        def handle_editor_event(_state, _event), do: :not_matched
+
+        @spec handle_sidebar_action(term(), String.t(), map()) :: term()
+        def handle_sidebar_action(state, _action, _context), do: state
       end
       """)
 
@@ -1054,8 +1081,37 @@ defmodule Minga.Extension.LifecycleContractTest do
                ctx.supervisor,
                ctx.registry,
                :crash_without_replacement,
-               entry
+               entry,
+               command_registry: ctx.command_registry,
+               keymap: ctx.keymap
              )
+
+    source = {:extension, :crash_without_replacement}
+    callback = Minga.TestExtensions.CrashWithoutReplacement
+    sidebar_id = "crash_cleanup_#{System.unique_integer([:positive])}"
+
+    assert :ok =
+             Sidebar.register(source, %{
+               id: sidebar_id,
+               display_name: "Crash cleanup",
+               description: "Removed after terminal crash",
+               action_handler: {callback, :handle_sidebar_action}
+             })
+
+    assert {:ok, _command} =
+             CommandRegistry.lookup(ctx.command_registry, :crash_without_replacement_cmd)
+
+    assert {source, callback} in CallbackRegistry.callbacks(:editor_action)
+    assert %Sidebar.Entry{} = Sidebar.get(sidebar_id)
+
+    test_pid = self()
+
+    callback_task =
+      Task.async(fn ->
+        CallbackInvoker.invoke(source, callback, :block, [test_pid], :command)
+      end)
+
+    assert_receive {:crash_callback_running, callback_owner}
 
     assert_receive {:telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
                     %{count: 0},
@@ -1063,14 +1119,509 @@ defmodule Minga.Extension.LifecycleContractTest do
 
     Process.exit(pid, :kill)
 
+    assert wait_for_admission_denial(source, callback) == :denied
+
+    assert {:ok, _command} =
+             CommandRegistry.lookup(ctx.command_registry, :crash_without_replacement_cmd)
+
+    assert %Sidebar.Entry{} = Sidebar.get(sidebar_id)
+    assert {source, callback} in CallbackRegistry.callbacks(:editor_action)
+
+    send(callback_owner, :settle_crash_callback)
+    assert {:ok, :settled} = Task.await(callback_task)
+
     refute_receive {:telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
                     %{count: 1},
                     %{extension: :crash_without_replacement, phase: :crash_restart_count}},
                    150
 
-    {:ok, crashed_entry} = ExtRegistry.get(ctx.registry, :crash_without_replacement)
-    assert crashed_entry.status == :crashed
+    crashed_entry = wait_for_entry_status(ctx.registry, :crash_without_replacement, :crashed)
     assert crashed_entry.pid == nil
+    assert crashed_entry.lifecycle_ref == nil
+    assert :error = CommandRegistry.lookup(ctx.command_registry, :crash_without_replacement_cmd)
+    assert Sidebar.get(sidebar_id) == nil
+    refute {source, callback} in CallbackRegistry.callbacks(:editor_action)
+
+    assert {:error, {:source_unavailable, ^source, ^callback, :return_state, _reason}} =
+             CallbackInvoker.invoke(source, callback, :return_state, [:not_run], :command)
+
+    unrelated_source =
+      {:extension,
+       String.to_atom("crash_cleanup_unrelated_#{System.unique_integer([:positive])}")}
+
+    assert :ok = CodeLease.activate_source(unrelated_source, [callback])
+
+    assert {:ok, :unrelated} =
+             CallbackInvoker.invoke(
+               unrelated_source,
+               callback,
+               :return_state,
+               [:unrelated],
+               :command
+             )
+
+    assert {:ok, unrelated_token} = CodeLease.quiesce_source(unrelated_source)
+    assert :ok = CodeLease.complete_unload(unrelated_token)
+  end
+
+  test "terminal crash finalizer failure drains callbacks without reopening admission", ctx do
+    test_pid = self()
+    name = :crash_finalizer_failure
+    source = {:extension, name}
+
+    {path, cleanup} =
+      make_extension("CrashFinalizerFailure", """
+      defmodule Minga.TestExtensions.CrashFinalizerFailure do
+        use Minga.Extension
+
+        command :crash_finalizer_failure_cmd, "Crash finalizer failure command",
+          execute: {__MODULE__, :return_state}
+
+        editor_event_handler __MODULE__, [:editor_action]
+
+        @impl true
+        def name, do: :crash_finalizer_failure
+
+        @impl true
+        def description, do: "Crash finalizer failure"
+
+        @impl true
+        def version, do: "1.0.0"
+
+        @impl true
+        def init(_config), do: {:ok, %{}}
+
+        @impl true
+        def child_spec(_config) do
+          %{
+            id: __MODULE__,
+            start: {Agent, :start_link, [fn -> :crash_finalizer_failure end]},
+            restart: :temporary,
+            type: :worker
+          }
+        end
+
+        @spec return_state(term()) :: term()
+        def return_state(state), do: state
+
+        @spec block(pid()) :: :settled
+        def block(test_pid) do
+          send(test_pid, {:failed_finalizer_callback_running, self()})
+
+          receive do
+            :settle_failed_finalizer_callback -> :settled
+          end
+        end
+
+        @spec handle_editor_event(term(), term()) :: :not_matched
+        def handle_editor_event(_state, _event), do: :not_matched
+
+        @spec handle_sidebar_action(term(), String.t(), map()) :: term()
+        def handle_sidebar_action(state, _action, _context), do: state
+      end
+      """)
+
+    callback = Minga.TestExtensions.CrashFinalizerFailure
+
+    on_exit(fn ->
+      cleanup.()
+      :code.purge(callback)
+      :code.delete(callback)
+    end)
+
+    callbacks = %{
+      editor_effects: fn ^source, context ->
+        send(test_pid, {:terminal_crash_finalizer_failed, self(), context})
+        {:error, :editor_effects_unavailable}
+      end,
+      editor_sidebars: fn cleaned_source -> Sidebar.unregister_source(cleaned_source) end,
+      extension_callbacks: fn cleaned_source ->
+        CallbackRegistry.unregister_source(cleaned_source)
+      end,
+      zz_cleanup_observer: fn cleaned_source ->
+        send(test_pid, {:terminal_crash_cleanup_waiting, self(), cleaned_source})
+
+        receive do
+          :finish_terminal_crash_cleanup -> :ok
+        end
+      end
+    }
+
+    opts = [
+      command_registry: ctx.command_registry,
+      keymap: ctx.keymap,
+      callbacks: callbacks
+    ]
+
+    :ok = ExtRegistry.register(ctx.registry, name, path, [])
+    {:ok, entry} = ExtRegistry.get(ctx.registry, name)
+
+    assert {:ok, runtime} =
+             ExtSupervisor.start_extension(ctx.supervisor, ctx.registry, name, entry, opts)
+
+    sidebar_id = "crash_finalizer_failure_#{System.unique_integer([:positive])}"
+
+    assert :ok =
+             Sidebar.register(source, %{
+               id: sidebar_id,
+               display_name: "Crash finalizer failure",
+               description: "Removed after terminal crash",
+               action_handler: {callback, :handle_sidebar_action}
+             })
+
+    unrelated_name =
+      String.to_atom("crash_finalizer_unrelated_#{System.unique_integer([:positive])}")
+
+    unrelated_source = {:extension, unrelated_name}
+    unrelated_sidebar_id = "#{sidebar_id}_unrelated"
+
+    unrelated_command_name =
+      String.to_atom("crash_finalizer_unrelated_cmd_#{System.unique_integer([:positive])}")
+
+    unrelated_command = %Minga.Command{
+      name: unrelated_command_name,
+      description: "Unrelated crash cleanup command",
+      execute: fn state -> state end
+    }
+
+    assert :ok = CodeLease.activate_source(unrelated_source, [callback])
+
+    assert :ok =
+             CommandRegistry.register_command(
+               ctx.command_registry,
+               unrelated_source,
+               unrelated_command
+             )
+
+    assert :ok =
+             Sidebar.register(unrelated_source, %{
+               id: unrelated_sidebar_id,
+               display_name: "Unrelated crash cleanup",
+               description: "Must survive another source's crash",
+               action_handler: {callback, :handle_sidebar_action}
+             })
+
+    assert {:ok, _command} =
+             CommandRegistry.lookup(ctx.command_registry, :crash_finalizer_failure_cmd)
+
+    assert {:ok, _command} =
+             CommandRegistry.lookup(ctx.command_registry, unrelated_command_name)
+
+    assert {source, callback} in CallbackRegistry.callbacks(:editor_action)
+    assert %Sidebar.Entry{} = Sidebar.get(sidebar_id)
+    assert %Sidebar.Entry{} = Sidebar.get(unrelated_sidebar_id)
+
+    callback_task =
+      Task.async(fn ->
+        CallbackInvoker.invoke(source, callback, :block, [test_pid], :command)
+      end)
+
+    assert_receive {:failed_finalizer_callback_running, callback_owner}
+    Process.exit(runtime, :kill)
+
+    assert_receive {:terminal_crash_finalizer_failed, cleanup_owner,
+                    %{
+                      callback_admission: callback_admission,
+                      callback_registry: callback_registry,
+                      token: token
+                    }}
+
+    assert callback_admission == CodeLease
+    assert callback_registry == CallbackRegistry.default_table()
+    assert is_reference(token)
+
+    assert {:error,
+            {:source_unavailable, ^source, ^callback, :return_state, {:source_quiescing, ^source}}} =
+             CallbackInvoker.invoke(source, callback, :return_state, [:not_run], :command)
+
+    refute_receive {:terminal_crash_cleanup_waiting, _, ^source}
+
+    assert {:ok, _command} =
+             CommandRegistry.lookup(ctx.command_registry, :crash_finalizer_failure_cmd)
+
+    assert %Sidebar.Entry{} = Sidebar.get(sidebar_id)
+    assert {source, callback} in CallbackRegistry.callbacks(:editor_action)
+
+    send(callback_owner, :settle_failed_finalizer_callback)
+    assert {:ok, :settled} = Task.await(callback_task)
+
+    assert_receive {:terminal_crash_cleanup_waiting, ^cleanup_owner, ^source}
+
+    assert {:error,
+            {:source_unavailable, ^source, ^callback, :return_state, {:source_inactive, ^source}}} =
+             CallbackInvoker.invoke(source, callback, :return_state, [:not_run], :command)
+
+    assert :error = CommandRegistry.lookup(ctx.command_registry, :crash_finalizer_failure_cmd)
+    assert Sidebar.get(sidebar_id) == nil
+    refute {source, callback} in CallbackRegistry.callbacks(:editor_action)
+
+    assert {:ok, _command} =
+             CommandRegistry.lookup(ctx.command_registry, unrelated_command_name)
+
+    assert %Sidebar.Entry{} = Sidebar.get(unrelated_sidebar_id)
+
+    assert {:ok, :unrelated} =
+             CallbackInvoker.invoke(
+               unrelated_source,
+               callback,
+               :return_state,
+               [:unrelated],
+               :command
+             )
+
+    send(cleanup_owner, :finish_terminal_crash_cleanup)
+
+    failed_entry = wait_for_entry_status(ctx.registry, name, :load_error)
+    assert failed_entry.pid == nil
+    assert failed_entry.lifecycle_ref == nil
+
+    assert {:terminal_crash_cleanup_failed,
+            [
+              quiesce:
+                {:source_quiesce_failed,
+                 {:terminal_crash_quiesce_failed,
+                  [
+                    finalizers:
+                      {:terminal_finalizers_failed,
+                       [editor_effects: %{reason: :editor_effects_unavailable}]}
+                  ]}}
+            ]} = failed_entry.last_error
+
+    assert {:error,
+            {:source_unavailable, ^source, ^callback, :return_state, {:source_inactive, ^source}}} =
+             CallbackInvoker.invoke(source, callback, :return_state, [:not_run], :command)
+
+    assert :ok = CommandRegistry.unregister_source(ctx.command_registry, unrelated_source)
+    assert :ok = Sidebar.unregister_source(unrelated_source)
+    assert {:ok, unrelated_token} = CodeLease.quiesce_source(unrelated_source)
+    assert :ok = CodeLease.complete_unload(unrelated_token)
+  end
+
+  test "normal terminal finalizer failure drains callbacks without reopening admission", ctx do
+    test_pid = self()
+    name = :normal_exit_finalizer_failure
+    source = {:extension, name}
+
+    {path, cleanup} =
+      make_extension("NormalExitFinalizerFailure", """
+      defmodule Minga.TestExtensions.NormalExitFinalizerFailure do
+        use Minga.Extension
+
+        command :normal_exit_finalizer_failure_cmd, "Normal exit finalizer failure command",
+          execute: {__MODULE__, :return_state}
+
+        editor_event_handler __MODULE__, [:editor_action]
+
+        @impl true
+        def name, do: :normal_exit_finalizer_failure
+
+        @impl true
+        def description, do: "Normal exit finalizer failure"
+
+        @impl true
+        def version, do: "1.0.0"
+
+        @impl true
+        def init(_config), do: {:ok, %{}}
+
+        @impl true
+        def child_spec(_config) do
+          %{
+            id: __MODULE__,
+            start: {Agent, :start_link, [fn -> :normal_exit_finalizer_failure end]},
+            restart: :temporary,
+            type: :worker
+          }
+        end
+
+        @spec return_state(term()) :: term()
+        def return_state(state), do: state
+
+        @spec block(pid()) :: :settled
+        def block(test_pid) do
+          send(test_pid, {:normal_exit_callback_running, self()})
+
+          receive do
+            :settle_normal_exit_callback -> :settled
+          end
+        end
+
+        @spec handle_editor_event(term(), term()) :: :not_matched
+        def handle_editor_event(_state, _event), do: :not_matched
+
+        @spec handle_sidebar_action(term(), String.t(), map()) :: term()
+        def handle_sidebar_action(state, _action, _context), do: state
+      end
+      """)
+
+    callback = Minga.TestExtensions.NormalExitFinalizerFailure
+
+    on_exit(fn ->
+      cleanup.()
+      :code.purge(callback)
+      :code.delete(callback)
+    end)
+
+    callbacks = %{
+      editor_effects: fn ^source, context ->
+        send(test_pid, {:normal_exit_finalizer_failed, self(), context})
+        {:error, :editor_effects_unavailable}
+      end,
+      editor_sidebars: fn cleaned_source -> Sidebar.unregister_source(cleaned_source) end,
+      extension_callbacks: fn cleaned_source ->
+        CallbackRegistry.unregister_source(cleaned_source)
+      end,
+      zz_cleanup_observer: fn cleaned_source ->
+        send(test_pid, {:normal_exit_cleanup_waiting, self(), cleaned_source})
+
+        receive do
+          :finish_normal_exit_cleanup -> :ok
+        end
+      end
+    }
+
+    opts = [
+      command_registry: ctx.command_registry,
+      keymap: ctx.keymap,
+      callbacks: callbacks
+    ]
+
+    :ok = ExtRegistry.register(ctx.registry, name, path, [])
+    {:ok, entry} = ExtRegistry.get(ctx.registry, name)
+
+    assert {:ok, runtime} =
+             ExtSupervisor.start_extension(ctx.supervisor, ctx.registry, name, entry, opts)
+
+    sidebar_id = "normal_exit_finalizer_failure_#{System.unique_integer([:positive])}"
+
+    assert :ok =
+             Sidebar.register(source, %{
+               id: sidebar_id,
+               display_name: "Normal exit finalizer failure",
+               description: "Removed after terminal normal exit",
+               action_handler: {callback, :handle_sidebar_action}
+             })
+
+    unrelated_name =
+      String.to_atom("normal_exit_unrelated_#{System.unique_integer([:positive])}")
+
+    unrelated_source = {:extension, unrelated_name}
+    unrelated_sidebar_id = "#{sidebar_id}_unrelated"
+
+    unrelated_command_name =
+      String.to_atom("normal_exit_unrelated_cmd_#{System.unique_integer([:positive])}")
+
+    unrelated_command = %Minga.Command{
+      name: unrelated_command_name,
+      description: "Unrelated normal exit cleanup command",
+      execute: fn state -> state end
+    }
+
+    assert :ok = CodeLease.activate_source(unrelated_source, [callback])
+
+    assert :ok =
+             CommandRegistry.register_command(
+               ctx.command_registry,
+               unrelated_source,
+               unrelated_command
+             )
+
+    assert :ok =
+             Sidebar.register(unrelated_source, %{
+               id: unrelated_sidebar_id,
+               display_name: "Unrelated normal exit cleanup",
+               description: "Must survive another source's normal exit",
+               action_handler: {callback, :handle_sidebar_action}
+             })
+
+    callback_task =
+      Task.async(fn ->
+        CallbackInvoker.invoke(source, callback, :block, [test_pid], :command)
+      end)
+
+    assert_receive {:normal_exit_callback_running, callback_owner}
+    runtime_monitor = Process.monitor(runtime)
+    assert :ok = Agent.stop(runtime, :normal)
+    assert_receive {:DOWN, ^runtime_monitor, :process, ^runtime, :normal}
+
+    assert_receive {:normal_exit_finalizer_failed, cleanup_owner,
+                    %{
+                      callback_admission: callback_admission,
+                      callback_registry: callback_registry,
+                      token: token
+                    }}
+
+    assert callback_admission == CodeLease
+    assert callback_registry == CallbackRegistry.default_table()
+    assert is_reference(token)
+
+    assert {:error,
+            {:source_unavailable, ^source, ^callback, :return_state, {:source_quiescing, ^source}}} =
+             CallbackInvoker.invoke(source, callback, :return_state, [%{}], :command)
+
+    refute_receive {:normal_exit_cleanup_waiting, _, ^source}
+
+    assert {:ok, _command} =
+             CommandRegistry.lookup(ctx.command_registry, :normal_exit_finalizer_failure_cmd)
+
+    assert %Sidebar.Entry{} = Sidebar.get(sidebar_id)
+    assert {source, callback} in CallbackRegistry.callbacks(:editor_action)
+
+    send(callback_owner, :settle_normal_exit_callback)
+    assert {:ok, :settled} = Task.await(callback_task)
+
+    assert_receive {:normal_exit_cleanup_waiting, ^cleanup_owner, ^source}
+
+    assert {:error,
+            {:source_unavailable, ^source, ^callback, :return_state, {:source_inactive, ^source}}} =
+             CallbackInvoker.invoke(source, callback, :return_state, [%{}], :command)
+
+    assert :error =
+             CommandRegistry.lookup(ctx.command_registry, :normal_exit_finalizer_failure_cmd)
+
+    assert Sidebar.get(sidebar_id) == nil
+    refute {source, callback} in CallbackRegistry.callbacks(:editor_action)
+
+    assert {:ok, _command} =
+             CommandRegistry.lookup(ctx.command_registry, unrelated_command_name)
+
+    assert %Sidebar.Entry{} = Sidebar.get(unrelated_sidebar_id)
+
+    assert {:ok, :unrelated} =
+             CallbackInvoker.invoke(
+               unrelated_source,
+               callback,
+               :return_state,
+               [:unrelated],
+               :command
+             )
+
+    send(cleanup_owner, :finish_normal_exit_cleanup)
+
+    failed_entry = wait_for_entry_status(ctx.registry, name, :load_error)
+    assert failed_entry.pid == nil
+    assert failed_entry.lifecycle_ref == nil
+
+    assert {:terminal_exit_cleanup_failed,
+            [
+              quiesce:
+                {:source_quiesce_failed,
+                 {:terminal_exit_quiesce_failed,
+                  [
+                    finalizers:
+                      {:terminal_finalizers_failed,
+                       [editor_effects: %{reason: :editor_effects_unavailable}]}
+                  ]}}
+            ]} = failed_entry.last_error
+
+    assert {:error,
+            {:source_unavailable, ^source, ^callback, :return_state, {:source_inactive, ^source}}} =
+             CallbackInvoker.invoke(source, callback, :return_state, [%{}], :command)
+
+    assert :ok = CommandRegistry.unregister_source(ctx.command_registry, unrelated_source)
+    assert :ok = Sidebar.unregister_source(unrelated_source)
+    assert {:ok, unrelated_token} = CodeLease.quiesce_source(unrelated_source)
+    assert :ok = CodeLease.complete_unload(unrelated_token)
   end
 
   test "delayed crash restart does not mark the lifecycle crashed before replacement starts",
@@ -1457,6 +2008,27 @@ defmodule Minga.Extension.LifecycleContractTest do
       {_id, pid, _type, [^module]} when is_pid(pid) -> true
       _child -> false
     end)
+  end
+
+  @spec wait_for_admission_denial(CallbackInvoker.source(), module(), non_neg_integer()) ::
+          :denied
+  defp wait_for_admission_denial(source, callback, attempts \\ 100)
+
+  defp wait_for_admission_denial(source, callback, attempts) when attempts > 0 do
+    case CallbackInvoker.invoke(source, callback, :return_state, [:still_active], :command) do
+      {:error, {:source_unavailable, ^source, ^callback, :return_state, _reason}} ->
+        :denied
+
+      {:ok, :still_active} ->
+        receive do
+        after
+          5 -> wait_for_admission_denial(source, callback, attempts - 1)
+        end
+    end
+  end
+
+  defp wait_for_admission_denial(source, callback, 0) do
+    flunk("expected callback admission denial for #{inspect(source)} #{inspect(callback)}")
   end
 
   @spec wait_for_entry_status(GenServer.server(), atom(), Minga.Extension.extension_status()) ::

@@ -248,24 +248,12 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   end
 
   @spec render_custom(ModelineSegment.t(), context()) :: term()
-  defp render_custom(%ModelineSegment{name: name, render: render}, ctx) do
-    render.(ctx)
-  rescue
-    e ->
-      ModelineSegments.warn_once(
-        {:custom_segment_exception, name},
-        "Modeline segment #{inspect(name)} failed: #{Exception.message(e)}"
-      )
-
-      []
-  catch
-    kind, reason ->
-      ModelineSegments.warn_once(
-        {:custom_segment_throw, name},
-        "Modeline segment #{inspect(name)} crashed: #{inspect(kind)} #{inspect(reason)}"
-      )
-
-      []
+  defp render_custom(%ModelineSegment{render: render}, ctx) do
+    case render.(ctx) do
+      {:extension_callback, _source, _module, _function, {:ok, returned}} -> returned
+      {:extension_callback, _source, _module, _function, {:error, _failure}} -> []
+      returned -> returned
+    end
   end
 
   @spec normalize_segments(atom(), term()) :: [render_segment()]

@@ -11,6 +11,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
   File-tree or LSP failures retain their existing domain reporting policy.
   """
 
+  alias MingaEditor.Extension.EventDispatcher
   alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
   alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
   alias MingaEditor.LspActions
@@ -159,8 +160,8 @@ defmodule MingaEditor.Handlers.FileEventHandler do
     new_state =
       state
       |> FileTreeFreshness.refresh_git_status_from_cache()
-      |> refresh_git_diff_views_for_buffer(saved_buf)
       |> MingaEditor.BufferFileIdentity.rebind(saved_buf, saved_path)
+      |> dispatch_extension_buffer_saved(saved_buf)
 
     effects = [
       {:request_code_lens},
@@ -178,33 +179,12 @@ defmodule MingaEditor.Handlers.FileEventHandler do
     {new_state, effects}
   end
 
-  @spec refresh_git_diff_views_for_buffer(EditorState.t(), pid()) :: EditorState.t()
-  defp refresh_git_diff_views_for_buffer(state, saved_buf) do
-    module = :"Elixir.MingaGitPorcelain.Commands"
-
-    if git_porcelain_running?() and Code.ensure_loaded?(module) and
-         function_exported?(module, :refresh_diff_views_for_buffer, 2) do
-      :erlang.apply(module, :refresh_diff_views_for_buffer, [state, saved_buf])
-    else
-      state
-    end
-  end
-
-  @spec git_porcelain_running?() :: boolean()
-  defp git_porcelain_running? do
-    case Process.whereis(Minga.Extension.Registry) do
-      nil -> false
-      _pid -> git_porcelain_running_in_registry?()
-    end
-  catch
-    :exit, _reason -> false
-  end
-
-  @spec git_porcelain_running_in_registry?() :: boolean()
-  defp git_porcelain_running_in_registry? do
-    case Minga.Extension.Registry.get(:minga_git_porcelain) do
-      {:ok, %{status: :running}} -> true
-      _ -> false
+  @spec dispatch_extension_buffer_saved(EditorState.t(), pid()) :: EditorState.t()
+  defp dispatch_extension_buffer_saved(state, saved_buf) do
+    case EventDispatcher.dispatch(state, {:buffer_saved, saved_buf}) do
+      {:handled, updated_state} -> updated_state
+      :not_matched -> state
+      {:callback_failed, _failures, preserved_state} -> preserved_state
     end
   end
 

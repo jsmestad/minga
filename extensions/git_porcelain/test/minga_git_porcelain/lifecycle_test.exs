@@ -7,6 +7,7 @@ defmodule MingaGitPorcelain.LifecycleTest do
   use ExUnit.Case, async: false
 
   alias Minga.Command.Registry, as: CommandRegistry
+  alias Minga.Extension.CodeLease
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Extension.Supervisor, as: ExtSupervisor
   alias Minga.Keymap.Active, as: ActiveKeymap
@@ -22,10 +23,21 @@ defmodule MingaGitPorcelain.LifecycleTest do
 
   @source {:extension, :minga_git_porcelain}
   @other_source {:extension, :unrelated_extension}
+  @admission Module.concat(__MODULE__, Admission)
   @timeout 2_000
 
   setup do
     Dependencies.reset(self())
+    start_supervised!({CodeLease, name: @admission})
+
+    :ok =
+      CodeLease.activate_source(
+        @source,
+        [RemoteOperation, CommitMessageGeneration],
+        server: @admission
+      )
+
+    :ok = CodeLease.activate_source(@other_source, [RemoteOperation], server: @admission)
     cleanup_git_porcelain_contributions()
 
     on_exit(fn ->
@@ -33,6 +45,12 @@ defmodule MingaGitPorcelain.LifecycleTest do
     end)
 
     :ok
+  end
+
+  test "declares only retained runtime editor event families" do
+    assert MingaGitPorcelain.__editor_event_handler_schema__() == [
+             {MingaGitPorcelain.Commands, [:buffer_saved, :editor_action, :source_unload], []}
+           ]
   end
 
   test "disable cancels only Git Porcelain work before runtime termination and rejects late delivery" do
@@ -47,7 +65,7 @@ defmodule MingaGitPorcelain.LifecycleTest do
       RemoteOperation.request("/tmp/git-owned", :push,
         source: @source,
         git: Dependencies,
-        admission: Dependencies,
+        admission: @admission,
         refresher: Dependencies,
         timeout_ms: 60_000
       )
@@ -56,7 +74,7 @@ defmodule MingaGitPorcelain.LifecycleTest do
       RemoteOperation.request("/tmp/unrelated", :pull,
         source: @other_source,
         git: Dependencies,
-        admission: Dependencies,
+        admission: @admission,
         refresher: Dependencies,
         timeout_ms: 60_000
       )
@@ -117,7 +135,7 @@ defmodule MingaGitPorcelain.LifecycleTest do
         git: Dependencies,
         project: Dependencies,
         generator: Dependencies,
-        admission: Dependencies,
+        admission: @admission,
         timeout_ms: 60_000
       )
 
@@ -196,7 +214,8 @@ defmodule MingaGitPorcelain.LifecycleTest do
                :minga_git_porcelain,
                entry,
                command_registry: ctx.command_registry,
-               keymap: ctx.keymap
+               keymap: ctx.keymap,
+               code_lease: @admission
              )
 
     pid
@@ -205,7 +224,12 @@ defmodule MingaGitPorcelain.LifecycleTest do
   defp stop_git_porcelain!(ctx, callbacks \\ nil) do
     {:ok, entry} = ExtRegistry.get(ctx.registry, :minga_git_porcelain)
 
-    opts = [command_registry: ctx.command_registry, keymap: ctx.keymap]
+    opts = [
+      command_registry: ctx.command_registry,
+      keymap: ctx.keymap,
+      code_lease: @admission
+    ]
+
     opts = if callbacks == nil, do: opts, else: Keyword.put(opts, :callbacks, callbacks)
 
     assert :ok =

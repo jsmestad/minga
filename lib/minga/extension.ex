@@ -175,6 +175,16 @@ defmodule Minga.Extension do
   @typedoc "A declared runtime or UI capability: `{family, value}`."
   @type capability_spec :: {atom(), term()}
 
+  @typedoc "Runtime editor event families available to extensions."
+  @type editor_event_family :: :buffer_saved | :editor_action | :source_unload
+
+  @typedoc "Options for a declarative runtime editor event callback."
+  @type editor_event_handler_opts :: [priority: integer()]
+
+  @typedoc "A declarative runtime editor event callback."
+  @type editor_event_handler_spec ::
+          {module(), [editor_event_family()], editor_event_handler_opts()}
+
   @doc """
   Builds a public manifest for a loaded extension module.
 

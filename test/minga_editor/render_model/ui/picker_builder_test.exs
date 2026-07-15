@@ -165,6 +165,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
        picker_ui: %{
          picker: picker,
          source: source,
+         callback_source: nil,
          action_menu: action_menu,
          mode_prefix: mode_prefix,
          load_status: load_status

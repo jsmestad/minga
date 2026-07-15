@@ -20,28 +20,14 @@ defmodule MingaEditor.Extension.SourceFinalizerEditorTest do
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.FetchEffect
 
-  defmodule ReloadExtension do
-    use Minga.Extension
-
-    @impl true
-    def name, do: :finalized_picker
-
-    @impl true
-    def description, do: "Config reload source finalizer fixture"
-
-    @impl true
-    def version, do: "0.1.0"
-
-    @impl true
-    def init(_config), do: {:ok, %{}}
-  end
-
   defmodule RootPickerExtension do
     use Minga.Extension
 
     command(:open_differently_nested_picker, "Open extension picker",
       execute: {__MODULE__, :open_picker}
     )
+
+    editor_event_handler(__MODULE__, [:source_unload])
 
     @impl true
     def name, do: :finalized_picker
@@ -62,6 +48,17 @@ defmodule MingaEditor.Extension.SourceFinalizerEditorTest do
         MingaEditor.Extension.SourceFinalizerEditorTest.Remote.Picker
       )
     end
+
+    @spec handle_editor_event(
+            MingaEditor.State.t(),
+            MingaEditor.Extension.EventHandler.event()
+          ) :: MingaEditor.Extension.EventHandler.callback_result()
+    def handle_editor_event(state, {:source_unload, {:extension, :finalized_picker}}) do
+      theme = MingaEditor.UI.Theme.get!(:doom_one)
+      {:handled, MingaEditor.State.apply_theme(state, theme)}
+    end
+
+    def handle_editor_event(_state, _event), do: :not_matched
   end
 
   defmodule Remote.Picker do
@@ -152,7 +149,37 @@ defmodule MingaEditor.Extension.SourceFinalizerEditorTest do
     def on_cancel(state), do: state
   end
 
+  setup_all do
+    application = :minga_source_finalizer_editor_test
+
+    spec =
+      {:application, application,
+       [
+         description: ~c"Source finalizer editor test application",
+         vsn: ~c"1.0.0",
+         modules: callback_modules(),
+         registered: [],
+         applications: [:kernel, :stdlib]
+       ]}
+
+    assert :ok = :application.load(spec)
+    assert {:ok, _started} = Application.ensure_all_started(application)
+
+    on_exit(fn ->
+      _result = Application.stop(application)
+      assert :ok = Application.unload(application)
+    end)
+
+    :ok
+  end
+
   setup do
+    :ok =
+      Minga.Extension.CodeLease.activate_source(
+        {:extension, :finalized_picker},
+        callback_modules()
+      )
+
     :ok = ExtensionRegistry.register_module(:finalized_picker, BlockingSource, [])
     :ok = ExtensionRegistry.update(:finalized_picker, status: :running)
     on_exit(fn -> ExtensionRegistry.unregister(:finalized_picker) end)
@@ -169,11 +196,16 @@ defmodule MingaEditor.Extension.SourceFinalizerEditorTest do
                ExtensionSupervisor,
                ExtensionRegistry,
                :finalized_picker,
-               entry
+               entry,
+               runtime_owned_modules: callback_modules()
              )
 
     runtime_monitor = Process.monitor(runtime)
     ctx = start_editor("scratch", name: MingaEditor)
+
+    :sys.replace_state(ctx.editor, fn state ->
+      MingaEditor.State.apply_theme(state, MingaEditor.UI.Theme.get!(:catppuccin_mocha))
+    end)
 
     assert :ok =
              GenServer.call(ctx.editor, {:api_execute_command, :open_differently_nested_picker})
@@ -221,7 +253,14 @@ defmodule MingaEditor.Extension.SourceFinalizerEditorTest do
     assert_receive {:DOWN, ^runtime_monitor, :process, ^runtime, _reason}
     refute EffectScheduler.active_source?(scheduler, source)
     assert EffectScheduler.active_source?(scheduler, unrelated_source)
-    assert :sys.get_state(ctx.editor).shell_runtime.state.modal == :none
+
+    finalized_state = :sys.get_state(ctx.editor)
+    assert finalized_state.shell_runtime.state.modal == :none
+    assert finalized_state.appearance.theme.name == :doom_one
+    assert Minga.Extension.CallbackRegistry.callbacks_for_source(:source_unload, source) == []
+
+    assert {:error, {:source_inactive, ^source}} =
+             Minga.Extension.CodeLease.admit_callback(source, RootPickerExtension, :editor_event)
 
     unrelated_monitor = Process.monitor(unrelated_worker)
     assert :ok = EffectScheduler.cancel_source(scheduler, unrelated_source)
@@ -271,9 +310,10 @@ defmodule MingaEditor.Extension.SourceFinalizerEditorTest do
            end)
   end
 
-  test "stopped registry projection denies picker admission before callback entry" do
+  test "quiescing source denies picker admission before callback entry" do
     source = {:extension, :finalized_picker}
-    :ok = ExtensionRegistry.update(:finalized_picker, status: :stopped)
+    {:ok, token} = Minga.Extension.CodeLease.quiesce_source(source)
+    on_exit(fn -> Minga.Extension.CodeLease.complete_unload(token) end)
     state = MingaEditor.RenderPipeline.TestHelpers.base_state(rendering: :disabled)
 
     effect = %FetchEffect{
@@ -283,14 +323,26 @@ defmodule MingaEditor.Extension.SourceFinalizerEditorTest do
       revision: make_ref()
     }
 
-    assert {:error, {:source_admission_denied, ^source}} = FetchEffect.run(effect)
+    assert {:error, "Extension picker fetch failed"} = FetchEffect.run(effect)
     refute_received {:extension_picker_started, _worker}
+  end
+
+  @spec callback_modules() :: [module()]
+  defp callback_modules do
+    [
+      RootPickerExtension,
+      Remote.Picker,
+      BlockingSource,
+      SidebarCallback,
+      InputEventCallback,
+      NestedPickerOpen
+    ]
   end
 
   @spec start_picker_extension() :: {pid(), reference()}
   defp start_picker_extension do
     :ok = ExtensionRegistry.unregister(:finalized_picker)
-    :ok = ExtensionRegistry.register_module(:finalized_picker, ReloadExtension, [])
+    :ok = ExtensionRegistry.register_module(:finalized_picker, RootPickerExtension, [])
     {:ok, entry} = ExtensionRegistry.get(:finalized_picker)
 
     assert {:ok, runtime} =
@@ -298,7 +350,8 @@ defmodule MingaEditor.Extension.SourceFinalizerEditorTest do
                ExtensionSupervisor,
                ExtensionRegistry,
                :finalized_picker,
-               entry
+               entry,
+               runtime_owned_modules: callback_modules()
              )
 
     {runtime, Process.monitor(runtime)}
@@ -357,7 +410,7 @@ defmodule MingaEditor.Extension.SourceFinalizerEditorTest do
   test "config reload command finalizes extension picker work through the real loader boundary" do
     test_pid = self()
     :ok = ExtensionRegistry.unregister(:finalized_picker)
-    :ok = ExtensionRegistry.register_module(:finalized_picker, ReloadExtension, [])
+    :ok = ExtensionRegistry.register_module(:finalized_picker, RootPickerExtension, [])
     {:ok, entry} = ExtensionRegistry.get(:finalized_picker)
 
     {:ok, _extension} =
@@ -365,7 +418,8 @@ defmodule MingaEditor.Extension.SourceFinalizerEditorTest do
         ExtensionSupervisor,
         ExtensionRegistry,
         :finalized_picker,
-        entry
+        entry,
+        runtime_owned_modules: callback_modules()
       )
 
     :ok =

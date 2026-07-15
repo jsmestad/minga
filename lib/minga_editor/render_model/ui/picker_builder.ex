@@ -18,11 +18,19 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   def build(ctx) do
     case get_in_modal(ctx) do
       {:picker,
-       %{picker_ui: picker_ui = %{picker: picker, source: source, action_menu: action_menu}}}
+       %{
+         picker_ui:
+           picker_ui = %{
+             picker: picker,
+             source: source,
+             callback_source: callback_source,
+             action_menu: action_menu
+           }
+       }}
       when picker != nil ->
         mode_prefix = Map.get(picker_ui, :mode_prefix, "")
         load_status = Map.get(picker_ui, :load_status, :ready)
-        build_open(ctx, picker, source, action_menu, mode_prefix, load_status)
+        build_open(ctx, picker, source, callback_source, action_menu, mode_prefix, load_status)
 
       _ ->
         %PickerModel{}
@@ -37,18 +45,19 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
           Context.t(),
           Picker.t(),
           module() | nil,
+          MingaEditor.State.Picker.callback_source(),
           term(),
           String.t(),
           PickerModel.load_status()
         ) ::
           PickerModel.t()
-  defp build_open(ctx, picker, source, action_menu, mode_prefix, load_status) do
-    has_preview = source != nil and Picker.Source.gui_preview?(source)
+  defp build_open(ctx, picker, source, callback_source, action_menu, mode_prefix, load_status) do
+    has_preview = source != nil and Picker.Source.gui_preview?(source, callback_source)
 
     items =
       picker.filtered
       |> Enum.take(@max_items)
-      |> enrich_for_display(source, picker.query)
+      |> enrich_for_display(source, callback_source, picker.query)
       |> Enum.map(&item_model(picker, &1))
 
     preview_lines = if has_preview, do: build_picker_preview(ctx)
@@ -75,11 +84,16 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   # against the enriched label. Sources that already return fully-built items
   # (no `enrich/1`) pass through unchanged. This keeps display derivation in the
   # render model (ruling 4) while filtering stays bounded and lean.
-  @spec enrich_for_display([Picker.Item.t()], module() | nil, String.t()) :: [Picker.Item.t()]
-  defp enrich_for_display(items, source, query) do
+  @spec enrich_for_display(
+          [Picker.Item.t()],
+          module() | nil,
+          MingaEditor.State.Picker.callback_source(),
+          String.t()
+        ) :: [Picker.Item.t()]
+  defp enrich_for_display(items, source, callback_source, query) do
     if source != nil and Picker.Source.enriches?(source) do
       source
-      |> Picker.Source.enrich(items)
+      |> Picker.Source.enrich(items, callback_source)
       |> Enum.map(&%{&1 | match_positions: Picker.match_positions(&1.label, query)})
     else
       items
@@ -121,15 +135,26 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   # Build preview content for the currently selected picker item.
   @spec build_picker_preview(Context.t()) :: [[PickerModel.preview_segment()]] | nil
   defp build_picker_preview(
-         %{shell_state: %{modal: {:picker, %{picker_ui: %{picker: picker, source: source}}}}} =
-           ctx
+         %{
+           shell_state: %{
+             modal:
+               {:picker,
+                %{
+                  picker_ui: %{
+                    picker: picker,
+                    source: source,
+                    callback_source: callback_source
+                  }
+                }}
+           }
+         } = ctx
        ) do
     case Picker.selected_item(picker) do
       nil ->
         nil
 
       %Picker.Item{} = item ->
-        case Picker.Source.preview(source, item, ctx) do
+        case Picker.Source.preview(source, item, ctx, callback_source) do
           nil -> build_preview_for_item(ctx, item)
           lines -> lines
         end

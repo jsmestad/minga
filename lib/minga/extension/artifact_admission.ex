@@ -58,6 +58,7 @@ defmodule Minga.Extension.ArtifactAdmission do
            modules: [module()],
            load_modules: [module()],
            adopted_modules: [module()],
+           owned_modules: [module()],
            status: source_status()
          }
 
@@ -108,11 +109,12 @@ defmodule Minga.Extension.ArtifactAdmission do
     if valid_module_set?(modules, fingerprint, source_fingerprint) do
       server = Keyword.get(opts, :server, __MODULE__)
       trusted_application = Keyword.get(opts, :trusted_application)
+      exclusive_adoption? = Keyword.get(opts, :exclusive_adoption, false)
 
       safe_call(
         server,
         {:claim_source_modules, source, Enum.sort(Enum.uniq(modules)), fingerprint,
-         source_fingerprint, trusted_application},
+         source_fingerprint, trusted_application, exclusive_adoption?},
         {:error, {:artifact_admission_unavailable, server}},
         :infinity
       )
@@ -213,7 +215,7 @@ defmodule Minga.Extension.ArtifactAdmission do
           {:reply, term(), state()} | {:noreply, state()}
   def handle_call(
         {:claim_source_modules, source, _modules, _fingerprint, _source_fingerprint,
-         _trusted_application},
+         _trusted_application, _exclusive_adoption?},
         _from,
         %{failed?: true} = state
       ) do
@@ -222,7 +224,7 @@ defmodule Minga.Extension.ArtifactAdmission do
 
   def handle_call(
         {:claim_source_modules, source, modules, fingerprint, source_fingerprint,
-         trusted_application},
+         trusted_application, exclusive_adoption?},
         from,
         state
       ) do
@@ -241,7 +243,8 @@ defmodule Minga.Extension.ArtifactAdmission do
           modules,
           fingerprint,
           source_fingerprint,
-          trusted_application
+          trusted_application,
+          exclusive_adoption?
         )
     end
   end
@@ -402,7 +405,8 @@ defmodule Minga.Extension.ArtifactAdmission do
           [module()],
           binary(),
           binary(),
-          atom() | nil
+          atom() | nil,
+          boolean()
         ) :: {:reply, term(), state()}
   defp begin_claim(
          state,
@@ -411,7 +415,8 @@ defmodule Minga.Extension.ArtifactAdmission do
          modules,
          fingerprint,
          source_fingerprint,
-         trusted_application
+         trusted_application,
+         exclusive_adoption?
        ) do
     case build_source_record(
            state,
@@ -420,13 +425,14 @@ defmodule Minga.Extension.ArtifactAdmission do
            modules,
            fingerprint,
            source_fingerprint,
-           trusted_application
+           trusted_application,
+           exclusive_adoption?
          ) do
       {:ok, record} ->
         sources = Map.put(state.sources, source, record)
 
         module_sources =
-          Enum.reduce(record.load_modules, state.module_sources, &Map.put(&2, &1, source))
+          Enum.reduce(record.owned_modules, state.module_sources, &Map.put(&2, &1, source))
 
         next_state = persist!(%{state | sources: sources, module_sources: module_sources})
         {:reply, {:ok, claim_from_record(source, record, true)}, next_state}
@@ -443,7 +449,8 @@ defmodule Minga.Extension.ArtifactAdmission do
           [module()],
           binary(),
           binary(),
-          atom() | nil
+          atom() | nil,
+          boolean()
         ) :: {:ok, source_record()} | {:error, collision()}
   defp build_source_record(
          state,
@@ -452,7 +459,8 @@ defmodule Minga.Extension.ArtifactAdmission do
          modules,
          fingerprint,
          source_fingerprint,
-         trusted_application
+         trusted_application,
+         exclusive_adoption?
        ) do
     with {:ok, trusted_modules} <- trusted_modules(trusted_application),
          :ok <- validate_module_collisions(state, source, modules, trusted_modules) do
@@ -460,6 +468,7 @@ defmodule Minga.Extension.ArtifactAdmission do
         Enum.split_with(modules, &MapSet.member?(trusted_modules, &1))
 
       owner = elem(from, 0)
+      owned_modules = if exclusive_adoption?, do: modules, else: load_modules
 
       {:ok,
        %{
@@ -468,6 +477,7 @@ defmodule Minga.Extension.ArtifactAdmission do
          modules: modules,
          load_modules: load_modules,
          adopted_modules: adopted_modules,
+         owned_modules: owned_modules,
          status:
            {:pending,
             %{
@@ -675,7 +685,7 @@ defmodule Minga.Extension.ArtifactAdmission do
 
       :none ->
         sources = Map.delete(state.sources, source)
-        module_sources = Map.drop(state.module_sources, record.load_modules)
+        module_sources = Map.drop(state.module_sources, record.owned_modules)
         persist!(%{state | sources: sources, module_sources: module_sources})
     end
   end

@@ -290,8 +290,10 @@ defmodule Minga.Extension.LazyTest do
 
       # Real command should be registered (replacing the stub)
       assert {:ok, cmd} = CommandRegistry.lookup(ctx.command_registry, :autoload_cmd)
-      result = cmd.execute.(%{})
-      assert result == %{autoload_ran: true}
+
+      assert {:extension_callback, {:extension, :autoload_ext}, Minga.TestExtensions.AutoloadExt,
+              :run, {:ok, %{autoload_ran: true}}} =
+               cmd.execute.(%{})
     end
 
     test "autoload ignores changed disk source and uses the admitted VM generation", ctx do
@@ -350,7 +352,9 @@ defmodule Minga.Extension.LazyTest do
                )
 
       assert {:ok, command} = CommandRegistry.lookup(ctx.command_registry, :lazy_generation_cmd)
-      assert command.execute.(%{}) == %{generation: :v1}
+
+      assert {:extension_callback, {:extension, :lazy_generation_pinned}, ^module, :run,
+              {:ok, %{generation: :v1}}} = command.execute.(%{})
 
       assert_receive {:minga_event, :extension_restart_required,
                       %Minga.Events.ExtensionRestartRequiredEvent{

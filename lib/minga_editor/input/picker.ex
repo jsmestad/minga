@@ -18,6 +18,7 @@ defmodule MingaEditor.Input.Picker do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.UI.Picker, as: PickerData
+  alias MingaEditor.UI.Picker.Source
 
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
@@ -151,11 +152,12 @@ defmodule MingaEditor.Input.Picker do
   @spec handle_picker_click(EditorState.t(), FocusNode.t(), PickerData.t(), module(), integer()) ::
           EditorState.t()
   defp handle_picker_click(state, node, picker, source, row) do
-    {:picker, %{picker_ui: %{layout: layout}}} = state.shell_runtime.state.modal
+    {:picker, %{picker_ui: %{layout: layout, callback_source: callback_source}}} =
+      state.shell_runtime.state.modal
 
     case clicked_item(layout, state, node, picker, row) do
       nil -> state
-      item -> confirm_clicked_item(state, source, item)
+      item -> confirm_clicked_item(state, source, item, callback_source)
     end
   end
 
@@ -187,10 +189,15 @@ defmodule MingaEditor.Input.Picker do
   defp click_index(:centered, _state, node, _picker, row), do: centered_click_index(node, row)
   defp click_index(_bottom, state, _node, picker, row), do: bottom_click_index(state, picker, row)
 
-  @spec confirm_clicked_item(EditorState.t(), module(), PickerData.item()) :: EditorState.t()
-  defp confirm_clicked_item(state, source, item) do
+  @spec confirm_clicked_item(
+          EditorState.t(),
+          module(),
+          PickerData.item(),
+          MingaEditor.State.Picker.callback_source()
+        ) :: EditorState.t()
+  defp confirm_clicked_item(state, source, item, callback_source) do
     new_state = PickerUI.close(state)
-    new_state = source.on_select(item, new_state)
+    new_state = Source.on_select(source, item, new_state, callback_source)
 
     case Map.get(new_state, :pending_command) do
       nil ->

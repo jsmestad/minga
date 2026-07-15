@@ -83,25 +83,26 @@ defmodule MingaEditor.PickerUI do
   @spec open(state(), module(), map() | nil) :: state()
   def open(state, source_module, context \\ nil) do
     state = cancel_current_fetch(state)
+    callback_source = Source.source_identity(source_module)
 
-    if Source.async?(source_module) do
+    if Source.async?(source_module, callback_source) do
       open_async(state, source_module, context)
     else
-      open_sync(state, source_module, context)
+      open_sync(state, source_module, context, callback_source)
     end
   end
 
-  @spec open_sync(state(), module(), map() | nil) :: state()
-  defp open_sync(state, source_module, context) do
+  @spec open_sync(state(), module(), map() | nil, PickerState.callback_source()) :: state()
+  defp open_sync(state, source_module, context, callback_source) do
     ctx = Context.from_editor_state(state, context)
-    items = source_module.candidates(ctx)
+    items = Source.candidates(source_module, ctx, callback_source)
 
     case items do
       [] ->
         state
 
       _ ->
-        open_with_items(state, source_module, items, context)
+        open_with_items(state, source_module, items, context, callback_source)
     end
   end
 
@@ -126,16 +127,19 @@ defmodule MingaEditor.PickerUI do
   def open_loading(state, source_module, context \\ nil) do
     state = cancel_current_fetch(state)
     max_vis = max(state.frontend.terminal_viewport.rows - 3, 5)
-    picker = Picker.new([], title: source_module.title(), max_visible: max_vis)
+    callback_source = Source.source_identity(source_module)
+
+    picker =
+      Picker.new([], title: Source.title(source_module, callback_source), max_visible: max_vis)
 
     new_state = clear_whichkey(state)
-    layout = MingaEditor.UI.Picker.Source.layout(source_module)
+    layout = MingaEditor.UI.Picker.Source.layout(source_module, callback_source)
 
     picker_state =
       PickerState.loading(
         picker,
         source_module,
-        Source.source_identity(source_module),
+        callback_source,
         state.workspace.buffers.active_index,
         state.appearance.theme,
         context,
@@ -177,6 +181,9 @@ defmodule MingaEditor.PickerUI do
   @spec picker_state(state()) :: PickerState.t()
   defp picker_state(%{shell_runtime: %{state: %{modal: {:picker, %PickerPayload{} = payload}}}}),
     do: payload.picker_ui
+
+  @spec current_callback_source(state()) :: PickerState.callback_source()
+  defp current_callback_source(state), do: picker_state(state).callback_source
 
   @doc "Applies a scheduler-owned candidate result when its picker revision is live."
   @spec apply_fetch_result(state(), module(), reference(), fetch_result()) ::
@@ -242,17 +249,26 @@ defmodule MingaEditor.PickerUI do
 
   defp apply_fetch_status(state, _meta), do: state
 
-  @spec open_with_items(state(), module(), [Picker.item()], map() | nil) :: state()
-  defp open_with_items(state, source_module, items, context) do
+  @spec open_with_items(
+          state(),
+          module(),
+          [Picker.item()],
+          map() | nil,
+          PickerState.callback_source()
+        ) :: state()
+  defp open_with_items(state, source_module, items, context, callback_source) do
     max_vis = max(state.frontend.terminal_viewport.rows - 3, 5)
-    picker = Picker.new(items, title: source_module.title(), max_visible: max_vis)
+
+    picker =
+      Picker.new(items, title: Source.title(source_module, callback_source), max_visible: max_vis)
 
     new_state = clear_whichkey(state)
-    layout = MingaEditor.UI.Picker.Source.layout(source_module)
+    layout = MingaEditor.UI.Picker.Source.layout(source_module, callback_source)
 
     picker_state = %PickerState{
       picker: picker,
       source: source_module,
+      callback_source: callback_source,
       restore: state.workspace.buffers.active_index,
       restore_theme: state.appearance.theme,
       context: context,
@@ -386,38 +402,59 @@ defmodule MingaEditor.PickerUI do
   # ── Normal picker handlers ─────────────────────────────────────────────────
 
   def handle_key(
-        %{shell_runtime: %{state: %{modal: {:picker, %{picker_ui: %{source: source}}}}}} = state,
+        %{
+          shell_runtime: %{
+            state: %{
+              modal: {:picker, %{picker_ui: %{source: source, callback_source: callback_source}}}
+            }
+          }
+        } = state,
         @escape,
         _mods
       ) do
-    new_state = source.on_cancel(state)
+    new_state = Source.on_cancel(source, state, callback_source)
     close(new_state)
   end
 
   # C-g → cancel (Emacs-style)
   def handle_key(
-        %{shell_runtime: %{state: %{modal: {:picker, %{picker_ui: %{source: source}}}}}} = state,
+        %{
+          shell_runtime: %{
+            state: %{
+              modal: {:picker, %{picker_ui: %{source: source, callback_source: callback_source}}}
+            }
+          }
+        } = state,
         ?g,
         mods
       )
       when band(mods, @ctrl) != 0 do
-    new_state = source.on_cancel(state)
+    new_state = Source.on_cancel(source, state, callback_source)
     close(new_state)
   end
 
   def handle_key(
         %{
           shell_runtime: %{
-            state: %{modal: {:picker, %{picker_ui: %{picker: picker, source: source}}}}
+            state: %{
+              modal:
+                {:picker,
+                 %{
+                   picker_ui: %{
+                     picker: picker,
+                     source: source,
+                     callback_source: callback_source
+                   }
+                 }}
+            }
           }
-        } =
-          state,
+        } = state,
         @enter,
         _mods
       ) do
     case Picker.selected_item(picker) do
       nil -> close(state)
-      item -> select_item(state, picker, item, source)
+      item -> select_item(state, picker, item, source, callback_source)
     end
   end
 
@@ -487,10 +524,19 @@ defmodule MingaEditor.PickerUI do
   def handle_key(
         %{
           shell_runtime: %{
-            state: %{modal: {:picker, %{picker_ui: %{picker: picker, source: source}}}}
+            state: %{
+              modal:
+                {:picker,
+                 %{
+                   picker_ui: %{
+                     picker: picker,
+                     source: source,
+                     callback_source: callback_source
+                   }
+                 }}
+            }
           }
-        } =
-          state,
+        } = state,
         ?o,
         mods
       )
@@ -500,7 +546,7 @@ defmodule MingaEditor.PickerUI do
         state
 
       item ->
-        actions = action_menu_actions(source, picker, item)
+        actions = action_menu_actions(source, picker, item, callback_source)
 
         case actions do
           [] -> state
@@ -594,8 +640,9 @@ defmodule MingaEditor.PickerUI do
   @spec run_source_action_and_close(EditorState.t(), module(), term(), Picker.item()) ::
           EditorState.t()
   defp run_source_action_and_close(state, source, action_id, item) do
+    callback_source = current_callback_source(state)
     new_state = close(state)
-    run_action(source, action_id, item, new_state)
+    run_action(source, action_id, item, new_state, callback_source)
   end
 
   @spec type_printable_char(EditorState.t(), Picker.t(), String.t()) :: EditorState.t()
@@ -611,34 +658,47 @@ defmodule MingaEditor.PickerUI do
     end
   end
 
-  @spec select_item(EditorState.t(), Picker.t(), Picker.item(), module()) ::
-          EditorState.t() | {EditorState.t(), {:execute_command, atom()}}
-  defp select_item(state, picker, item, source) do
+  @spec select_item(
+          EditorState.t(),
+          Picker.t(),
+          Picker.item(),
+          module(),
+          PickerState.callback_source()
+        ) :: EditorState.t() | {EditorState.t(), {:execute_command, atom()}}
+  defp select_item(state, picker, item, source, callback_source) do
     if bulk_select?(source, picker) do
-      run_bulk_select_and_close(state, picker, source)
+      run_bulk_select_and_close(state, picker, source, callback_source)
     else
-      select_single_item(state, item, source)
+      select_single_item(state, item, source, callback_source)
     end
   end
 
-  @spec select_single_item(EditorState.t(), Picker.item(), module()) ::
-          EditorState.t() | {EditorState.t(), {:execute_command, atom()}}
-  defp select_single_item(state, item, source) do
-    if Picker.Source.keep_open_on_select?(source) do
-      new_state = source.on_select(item, state)
+  @spec select_single_item(
+          EditorState.t(),
+          Picker.item(),
+          module(),
+          PickerState.callback_source()
+        ) :: EditorState.t() | {EditorState.t(), {:execute_command, atom()}}
+  defp select_single_item(state, item, source, callback_source) do
+    if Picker.Source.keep_open_on_select?(source, callback_source) do
+      new_state = Source.on_select(source, item, state, callback_source)
       refresh_items(new_state)
     else
-      select_item_and_close(state, item, source)
+      select_item_and_close(state, item, source, callback_source)
     end
   end
 
-  @spec select_item_and_close(EditorState.t(), Picker.item(), module()) ::
-          EditorState.t() | {EditorState.t(), {:execute_command, atom()}}
-  defp select_item_and_close(state, item, source) do
-    if Picker.Source.live_preview?(source) and previewed?(state) do
+  @spec select_item_and_close(
+          EditorState.t(),
+          Picker.item(),
+          module(),
+          PickerState.callback_source()
+        ) :: EditorState.t() | {EditorState.t(), {:execute_command, atom()}}
+  defp select_item_and_close(state, item, source, callback_source) do
+    if Picker.Source.live_preview?(source, callback_source) and previewed?(state) do
       promote_previewed_buffer(state)
     else
-      run_select_and_close(state, item, source)
+      run_select_and_close(state, item, source, callback_source)
     end
   end
 
@@ -670,11 +730,15 @@ defmodule MingaEditor.PickerUI do
     :exit, _ -> :ok
   end
 
-  @spec run_select_and_close(EditorState.t(), Picker.item(), module()) ::
-          EditorState.t() | {EditorState.t(), {:execute_command, atom()}}
-  defp run_select_and_close(state, item, source) do
+  @spec run_select_and_close(
+          EditorState.t(),
+          Picker.item(),
+          module(),
+          PickerState.callback_source()
+        ) :: EditorState.t() | {EditorState.t(), {:execute_command, atom()}}
+  defp run_select_and_close(state, item, source, callback_source) do
     new_state = close(state)
-    new_state = source.on_select(item, new_state)
+    new_state = Source.on_select(source, item, new_state, callback_source)
 
     case Map.get(new_state, :pending_command) do
       nil ->
@@ -686,14 +750,19 @@ defmodule MingaEditor.PickerUI do
     end
   end
 
-  @spec run_bulk_select_and_close(EditorState.t(), Picker.t(), module()) :: EditorState.t()
-  defp run_bulk_select_and_close(state, picker, source) do
+  @spec run_bulk_select_and_close(
+          EditorState.t(),
+          Picker.t(),
+          module(),
+          PickerState.callback_source()
+        ) :: EditorState.t()
+  defp run_bulk_select_and_close(state, picker, source, callback_source) do
     items = Picker.marked_items(picker)
 
     state
     |> restore_picker_origin()
     |> close()
-    |> then(&Picker.Source.bulk_select(source, items, &1))
+    |> then(&Picker.Source.bulk_select(source, items, &1, callback_source))
   end
 
   @spec bulk_select?(module(), Picker.t()) :: boolean()
@@ -701,35 +770,49 @@ defmodule MingaEditor.PickerUI do
     Picker.has_marks?(picker) and Picker.Source.has_bulk_select?(source)
   end
 
-  @spec action_menu_actions(module(), Picker.t(), Picker.item()) :: [Picker.Source.action_entry()]
-  defp action_menu_actions(source, picker, item) do
+  @spec action_menu_actions(
+          module(),
+          Picker.t(),
+          Picker.item(),
+          PickerState.callback_source()
+        ) :: [Picker.Source.action_entry()]
+  defp action_menu_actions(source, picker, item, callback_source) do
     if Picker.has_marks?(picker) do
-      bulk_action_menu_actions(source, Picker.marked_items(picker), item)
+      bulk_action_menu_actions(source, Picker.marked_items(picker), item, callback_source)
     else
-      Picker.Source.actions(source, item)
+      Picker.Source.actions(source, item, callback_source)
     end
   end
 
-  @spec bulk_action_menu_actions(module(), [Picker.item()], Picker.item()) :: [
-          Picker.Source.action_entry()
-        ]
-  defp bulk_action_menu_actions(source, items, item) do
-    case Picker.Source.bulk_actions(source, items) do
+  @spec bulk_action_menu_actions(
+          module(),
+          [Picker.item()],
+          Picker.item(),
+          PickerState.callback_source()
+        ) :: [Picker.Source.action_entry()]
+  defp bulk_action_menu_actions(source, items, item, callback_source) do
+    case Picker.Source.bulk_actions(source, items, callback_source) do
       [] ->
-        Picker.Source.actions(source, item)
+        Picker.Source.actions(source, item, callback_source)
 
       actions ->
         Enum.map(actions, fn {name, action_id} -> {name, {:bulk, action_id, items}} end)
     end
   end
 
-  @spec run_action(module(), term(), Picker.item(), EditorState.t()) :: EditorState.t()
-  defp run_action(source, {:bulk, action_id, items}, _item, state) do
-    Picker.Source.on_bulk_action(source, action_id, items, state)
+  @spec run_action(
+          module(),
+          term(),
+          Picker.item(),
+          EditorState.t(),
+          PickerState.callback_source()
+        ) :: EditorState.t()
+  defp run_action(source, {:bulk, action_id, items}, _item, state, callback_source) do
+    Picker.Source.on_bulk_action(source, action_id, items, state, callback_source)
   end
 
-  defp run_action(source, action_id, item, state) do
-    source.on_action(action_id, item, state)
+  defp run_action(source, action_id, item, state, callback_source) do
+    Source.on_action(source, action_id, item, state, callback_source)
   end
 
   @spec record_command_execution(module(), term()) :: :ok
@@ -800,13 +883,22 @@ defmodule MingaEditor.PickerUI do
   def refresh_items(
         %{
           shell_runtime: %{
-            state: %{modal: {:picker, %{picker_ui: %{picker: picker, source: source}}}}
+            state: %{
+              modal:
+                {:picker,
+                 %{
+                   picker_ui: %{
+                     picker: picker,
+                     source: source,
+                     callback_source: callback_source
+                   }
+                 }}
+            }
           }
-        } =
-          state
+        } = state
       ) do
     ctx = Context.from_editor_state(state)
-    items = source.candidates(ctx)
+    items = Source.candidates(source, ctx, callback_source)
     refreshed = %{picker | items: items}
     refreshed = Picker.filter(refreshed, picker.query)
 
@@ -864,7 +956,14 @@ defmodule MingaEditor.PickerUI do
            shell_runtime: %{
              state: %{
                modal:
-                 {:picker, %{picker_ui: %{source: current_source, original_source: orig_src}}}
+                 {:picker,
+                  %{
+                    picker_ui: %{
+                      source: current_source,
+                      original_source: orig_src,
+                      callback_source: callback_source
+                    }
+                  }}
              }
            }
          } = state,
@@ -872,10 +971,13 @@ defmodule MingaEditor.PickerUI do
          prefix
        ) do
     ctx = Context.from_editor_state(state)
-    items = new_source.candidates(ctx)
+    items = Source.candidates(new_source, ctx, callback_source)
     max_vis = max(state.frontend.terminal_viewport.rows - 3, 5)
-    picker = Picker.new(items, title: new_source.title(), max_visible: max_vis)
-    layout = MingaEditor.UI.Picker.Source.layout(new_source)
+
+    picker =
+      Picker.new(items, title: Source.title(new_source, callback_source), max_visible: max_vis)
+
+    layout = MingaEditor.UI.Picker.Source.layout(new_source, callback_source)
     original = orig_src || current_source
 
     update_picker(
@@ -894,14 +996,21 @@ defmodule MingaEditor.PickerUI do
   # Switch back to the original source after the prefix is deleted.
   @spec switch_back_to_original(state()) :: state()
   defp switch_back_to_original(
-         %{shell_runtime: %{state: %{modal: {:picker, %{picker_ui: %{original_source: orig}}}}}} =
-           state
+         %{
+           shell_runtime: %{
+             state: %{
+               modal:
+                 {:picker,
+                  %{picker_ui: %{original_source: orig, callback_source: callback_source}}}
+             }
+           }
+         } = state
        ) do
     ctx = Context.from_editor_state(state)
-    items = orig.candidates(ctx)
+    items = Source.candidates(orig, ctx, callback_source)
     max_vis = max(state.frontend.terminal_viewport.rows - 3, 5)
-    picker = Picker.new(items, title: orig.title(), max_visible: max_vis)
-    layout = MingaEditor.UI.Picker.Source.layout(orig)
+    picker = Picker.new(items, title: Source.title(orig, callback_source), max_visible: max_vis)
+    layout = MingaEditor.UI.Picker.Source.layout(orig, callback_source)
 
     update_picker(
       state,
@@ -951,12 +1060,21 @@ defmodule MingaEditor.PickerUI do
   defp maybe_preview_selection(
          %{
            shell_runtime: %{
-             state: %{modal: {:picker, %{picker_ui: %{picker: picker, source: source}}}}
+             state: %{
+               modal:
+                 {:picker,
+                  %{
+                    picker_ui: %{
+                      picker: picker,
+                      source: source,
+                      callback_source: callback_source
+                    }
+                  }}
+             }
            }
-         } =
-           state
+         } = state
        ) do
-    if Picker.Source.live_preview?(source) do
+    if Picker.Source.live_preview?(source, callback_source) do
       case Picker.selected_item(picker) do
         nil ->
           state
@@ -967,7 +1085,7 @@ defmodule MingaEditor.PickerUI do
             | buffer_lifecycle: BufferLifecycle.expect_buffer(state.buffer_lifecycle, :preview)
           }
 
-          source.on_select(item, state)
+          Source.on_select(source, item, state, callback_source)
       end
     else
       state

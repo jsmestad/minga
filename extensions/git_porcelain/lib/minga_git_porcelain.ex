@@ -7,6 +7,11 @@ defmodule MingaGitPorcelain do
 
   use Minga.Extension.Editor
 
+  editor_event_handler(
+    MingaGitPorcelain.Commands,
+    [:buffer_saved, :editor_action, :source_unload]
+  )
+
   command(:git_status_toggle, "Git status",
     requires_buffer: false,
     execute: {MingaGitPorcelain.Commands, :git_status_toggle}

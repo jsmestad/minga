@@ -7,6 +7,7 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGenerationTest do
   # Uses the global shell registry while checking foreign-shell delivery.
   use ExUnit.Case, async: false
 
+  alias Minga.Extension.CodeLease
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.Effect.Policy
   alias MingaEditor.EffectScheduler
@@ -20,10 +21,13 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGenerationTest do
   alias MingaGitPorcelain.Test.EffectDependencies, as: Dependencies
 
   @source {:extension, :minga_git_porcelain}
+  @admission Module.concat(__MODULE__, Admission)
   @timeout 2_000
 
   setup do
     Dependencies.reset(self())
+    start_supervised!({CodeLease, name: @admission})
+    :ok = CodeLease.activate_source(@source, [CommitMessageGeneration], server: @admission)
     ShellRegistry.reset_for_test()
     ShellRegistry.seed_builtin()
 
@@ -59,9 +63,8 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGenerationTest do
     assert request.source == @source
     refute contains_runtime_authority?(request.effect)
 
-    assert_receive {:dependency_called, :admission, worker, @source}, @timeout
+    assert_receive {:dependency_called, :project_root, worker, nil}, @timeout
     assert worker != self()
-    assert_receive {:dependency_called, :project_root, ^worker, nil}, @timeout
     assert_receive {:dependency_called, :git_root, ^worker, "/tmp/project"}, @timeout
 
     assert_receive {:dependency_called, :staged_diff, ^worker, {"/tmp/repo", [staged: true]}},
@@ -100,11 +103,11 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGenerationTest do
     end
   end
 
-  test "generator error, raise, and exit produce complete failure feedback" do
+  test "generator error, raise, and exit remain explicit at the callback boundary" do
     cases = [
       {{:return, {:error, "provider unavailable"}}, "provider unavailable"},
-      {{:raise, "generator boom"}, "Commit message generation failed unexpectedly:"},
-      {{:exit, :generator_exit}, "Commit message generation failed unexpectedly:"}
+      {{:raise, "generator boom"}, "Commit message generation callback exception:"},
+      {{:exit, :generator_exit}, "Commit message generation callback exit:"}
     ]
 
     for {action, expected_prefix} <- cases do
@@ -113,6 +116,7 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGenerationTest do
       {state, scheduler} = build_state()
       returned = Commands.schedule_commit_generation(state, dependency_opts())
       _running = receive_running()
+      assert_receive {:dependency_called, :generator, _worker, "diff --git"}, @timeout
       {result, outcome} = receive_and_apply(returned, scheduler, :failed)
       assert String.starts_with?(result.shell_runtime.state.notice.message, expected_prefix)
 
@@ -120,10 +124,37 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGenerationTest do
         {:return, _result} ->
           assert outcome.reason == {:generation_failed, "provider unavailable"}
 
-        _crash ->
-          assert match?({:worker_exit, _reason}, outcome.reason)
+        _contained_failure ->
+          assert match?(
+                   {:callback_failed, @source, CommitMessageGeneration, :execute, _, _},
+                   outcome.reason
+                 )
       end
+
+      refute match?({:worker_exit, _reason}, outcome.reason)
+      assert CodeLease.active_leases(server: @admission) == []
     end
+  end
+
+  test "source unavailability is explicit and prevents generation work" do
+    {:ok, _token} = CodeLease.quiesce_source(@source, server: @admission)
+    {state, scheduler} = build_state()
+    returned = Commands.schedule_commit_generation(state, dependency_opts())
+    _running = receive_running()
+    {result, outcome} = receive_and_apply(returned, scheduler, :failed)
+
+    assert match?(
+             {:source_unavailable, @source, CommitMessageGeneration, :execute, _},
+             outcome.reason
+           )
+
+    assert String.starts_with?(
+             result.shell_runtime.state.notice.message,
+             "Commit message source unavailable:"
+           )
+
+    refute_received {:dependency_called, :project_root, _worker, nil}
+    assert CodeLease.active_leases(server: @admission) == []
   end
 
   test "timeout kills the generator, rejects duplicates, and releases admission" do
@@ -241,7 +272,7 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGenerationTest do
       git: Dependencies,
       project: Dependencies,
       generator: Dependencies,
-      admission: Dependencies,
+      admission: @admission,
       timeout_ms: 60_000
     ]
   end

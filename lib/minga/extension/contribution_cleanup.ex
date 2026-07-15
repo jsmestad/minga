@@ -11,6 +11,12 @@ defmodule Minga.Extension.ContributionCleanup do
   @typedoc "Cleanup callback invoked with a source identifier."
   @type cleanup_fun :: (contribution_source() -> :ok | {:error, term()})
 
+  @typedoc "Targeted lifecycle callback invoked with source-specific authority."
+  @type contextual_cleanup_fun ::
+          (contribution_source(), context :: term() -> :ok | {:error, term()})
+
+  @typep registered_cleanup_fun :: cleanup_fun() | contextual_cleanup_fun()
+
   @typedoc "Cleanup failure reported for one family."
   @type cleanup_failure :: %{
           family: atom(),
@@ -22,7 +28,8 @@ defmodule Minga.Extension.ContributionCleanup do
   @type cleanup_opts :: [
           command_registry: GenServer.server(),
           keymap: GenServer.server(),
-          callbacks: %{atom() => cleanup_fun()}
+          callbacks: %{atom() => registered_cleanup_fun()},
+          context: term()
         ]
 
   @callbacks_key {__MODULE__, :callbacks}
@@ -30,9 +37,13 @@ defmodule Minga.Extension.ContributionCleanup do
   @doc "Registers a cleanup callback for a contribution family."
   @spec register(atom(), cleanup_fun()) :: :ok
   def register(name, fun) when is_atom(name) and is_function(fun, 1) do
-    callbacks = Map.put(callbacks(), name, fun)
-    :persistent_term.put(@callbacks_key, callbacks)
-    :ok
+    put_callback(name, fun)
+  end
+
+  @doc "Registers a targeted lifecycle callback that requires explicit authority context."
+  @spec register_contextual(atom(), contextual_cleanup_fun()) :: :ok
+  def register_contextual(name, fun) when is_atom(name) and is_function(fun, 2) do
+    put_callback(name, fun)
   end
 
   @doc "Unregisters a cleanup callback. Mostly useful for tests."
@@ -49,9 +60,14 @@ defmodule Minga.Extension.ContributionCleanup do
   def finalize_source(source, family, opts \\ []) when is_atom(family) do
     cbs = Keyword.get(opts, :callbacks, callbacks())
 
+    context = Keyword.get(opts, :context)
+
     case Map.fetch(cbs, family) do
-      {:ok, fun} -> run_cleanup_family(family, source, fn -> fun.(source) end)
-      :error -> :ok
+      {:ok, fun} ->
+        run_cleanup_family(family, source, fn -> invoke_targeted(fun, source, context) end)
+
+      :error ->
+        :ok
     end
   end
 
@@ -95,12 +111,25 @@ defmodule Minga.Extension.ContributionCleanup do
     ]
     |> Kernel.++(
       cbs
+      |> Enum.filter(fn {_family, fun} -> is_function(fun, 1) end)
       |> Enum.sort_by(fn {family, _fun} -> Atom.to_string(family) end)
       |> Enum.map(fn {family, fun} -> {family, fn -> fun.(source) end} end)
     )
   end
 
-  @spec callbacks() :: %{atom() => cleanup_fun()}
+  @spec put_callback(atom(), registered_cleanup_fun()) :: :ok
+  defp put_callback(name, fun) do
+    updated = Map.put(callbacks(), name, fun)
+    :persistent_term.put(@callbacks_key, updated)
+    :ok
+  end
+
+  @spec invoke_targeted(registered_cleanup_fun(), contribution_source(), term()) ::
+          :ok | {:error, term()}
+  defp invoke_targeted(fun, source, _context) when is_function(fun, 1), do: fun.(source)
+  defp invoke_targeted(fun, source, context) when is_function(fun, 2), do: fun.(source, context)
+
+  @spec callbacks() :: %{atom() => registered_cleanup_fun()}
   defp callbacks, do: :persistent_term.get(@callbacks_key, %{})
 
   @spec run_cleanup_family(atom(), contribution_source(), (-> term())) ::

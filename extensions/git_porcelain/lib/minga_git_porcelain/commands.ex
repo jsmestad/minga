@@ -6,6 +6,8 @@ defmodule MingaGitPorcelain.Commands do
 
   use MingaEditor.Commands.Provider
 
+  @behaviour MingaEditor.Extension.EventHandler
+
   alias Minga.Buffer
   alias Minga.Core.Diff
   alias Minga.Core.DiffView
@@ -34,6 +36,32 @@ defmodule MingaGitPorcelain.Commands do
   alias MingaGitPorcelain.UI.Picker.GitStashSource
 
   @type state :: EditorState.t()
+
+  @source {:extension, :minga_git_porcelain}
+
+  @impl MingaEditor.Extension.EventHandler
+  @spec handle_editor_event(state(), MingaEditor.Extension.EventHandler.event()) ::
+          MingaEditor.Extension.EventHandler.callback_result()
+  def handle_editor_event(state, {:buffer_saved, saved_buf}) do
+    {:handled, refresh_diff_views_for_buffer(state, saved_buf)}
+  end
+
+  def handle_editor_event(
+        state,
+        {:editor_action, :open_git_diff_for_path,
+         {git_root, rel_path, abs_path, current_content, opts}}
+      )
+      when is_binary(git_root) and is_binary(rel_path) and is_binary(abs_path) and
+             is_binary(current_content) and is_list(opts) do
+    {:handled, open_diff_for_path(state, git_root, rel_path, abs_path, current_content, opts)}
+  end
+
+  def handle_editor_event(state, {:editor_action, :execute_git_command, command}) do
+    {:handled, execute(state, command)}
+  end
+
+  def handle_editor_event(state, {:source_unload, @source}), do: {:handled, state}
+  def handle_editor_event(_state, _event), do: :not_matched
 
   @command_specs [
     {:git_status_toggle, "Git status", false},

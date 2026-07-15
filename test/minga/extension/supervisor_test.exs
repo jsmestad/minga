@@ -7,8 +7,14 @@ defmodule Minga.Extension.SupervisorTest do
   @moduletag :heavy
 
   alias Minga.Command.Registry, as: CommandRegistry
+  alias Minga.Extension.ArtifactAdmission
+  alias Minga.Extension.ArtifactGenerationState
+  alias Minga.Extension.CallbackInvoker
+  alias Minga.Extension.CallbackRegistry
+  alias Minga.Extension.CodeLease
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Extension.Supervisor, as: ExtSupervisor
+  alias Minga.Keymap.Active, as: KeymapActive
 
   setup do
     reg_name = :"ext_reg_#{System.unique_integer([:positive])}"
@@ -309,6 +315,301 @@ defmodule Minga.Extension.SupervisorTest do
       assert updated.pid == nil
     end
 
+    test "Hex sources adopt complete application inventories before empty or event registration",
+         ctx do
+      authorities = start_runtime_authorities(ctx)
+
+      empty_root = unique_runtime_module("HexEmptyRoot")
+      event_root = unique_runtime_module("HexEventRoot")
+      event_handler = unique_runtime_module("HexEventHandler")
+      empty_app = unique_runtime_name(:hex_empty_app)
+      event_app = unique_runtime_name(:hex_event_app)
+
+      compile_runtime_module("""
+      defmodule #{inspect(empty_root)} do
+        use Minga.Extension
+        @impl true
+        def name, do: :hex_empty_inventory
+        @impl true
+        def description, do: "Hex empty inventory"
+        @impl true
+        def version, do: "1.0.0"
+        @impl true
+        def init(_config), do: {:ok, %{}}
+      end
+      """)
+
+      compile_runtime_module("""
+      defmodule #{inspect(event_handler)} do
+        @spec handle_editor_event(term(), term()) :: :not_matched
+        def handle_editor_event(_state, _event), do: :not_matched
+      end
+      """)
+
+      compile_runtime_module("""
+      defmodule #{inspect(event_root)} do
+        use Minga.Extension
+        editor_event_handler #{inspect(event_handler)}, [:editor_action]
+        @impl true
+        def name, do: :hex_event_inventory
+        @impl true
+        def description, do: "Hex event inventory"
+        @impl true
+        def version, do: "1.0.0"
+        @impl true
+        def init(_config), do: {:ok, %{}}
+      end
+      """)
+
+      load_test_application(empty_app, [empty_root])
+      load_test_application(event_app, [event_root, event_handler])
+      empty_md5 = empty_root.module_info(:md5)
+      event_md5 = event_handler.module_info(:md5)
+
+      :ok =
+        ExtRegistry.register_hex(ctx.registry, :hex_empty_inventory, "hex-empty-inventory",
+          app: empty_app
+        )
+
+      {:ok, empty_entry} = ExtRegistry.get(ctx.registry, :hex_empty_inventory)
+
+      assert {:ok, _pid} =
+               ExtSupervisor.start_extension(
+                 ctx.supervisor,
+                 ctx.registry,
+                 :hex_empty_inventory,
+                 empty_entry,
+                 authorities.opts
+               )
+
+      assert {:ok, [^empty_root]} =
+               ArtifactAdmission.source_modules({:extension, :hex_empty_inventory},
+                 server: authorities.admission
+               )
+
+      assert CallbackRegistry.callbacks(:editor_action, authorities.callback_registry) == []
+      assert empty_root.module_info(:md5) == empty_md5
+
+      :ok =
+        ExtRegistry.register_hex(ctx.registry, :hex_event_inventory, "hex-event-inventory",
+          app: event_app
+        )
+
+      {:ok, event_entry} = ExtRegistry.get(ctx.registry, :hex_event_inventory)
+
+      assert {:ok, _pid} =
+               ExtSupervisor.start_extension(
+                 ctx.supervisor,
+                 ctx.registry,
+                 :hex_event_inventory,
+                 event_entry,
+                 authorities.opts
+               )
+
+      assert {:ok, event_modules} =
+               ArtifactAdmission.source_modules({:extension, :hex_event_inventory},
+                 server: authorities.admission
+               )
+
+      assert event_modules == Enum.sort([event_root, event_handler])
+
+      assert [{{:extension, :hex_event_inventory}, ^event_handler}] =
+               CallbackRegistry.callbacks(:editor_action, authorities.callback_registry)
+
+      assert {:ok, :not_matched} =
+               CallbackInvoker.invoke(
+                 {:extension, :hex_event_inventory},
+                 event_handler,
+                 :handle_editor_event,
+                 [:state, :event],
+                 :editor_event,
+                 authorities.code_lease
+               )
+
+      assert event_handler.module_info(:md5) == event_md5
+    end
+
+    test "module sources admit declared and explicit helper MFAs and reject foreign ownership",
+         ctx do
+      authorities = start_runtime_authorities(ctx)
+      app = unique_runtime_name(:module_inventory_app)
+      first_root = unique_runtime_module("ModuleInventoryRoot")
+      collision_root = unique_runtime_module("ModuleInventoryCollision")
+      unowned_root = unique_runtime_module("ModuleInventoryUnowned")
+      command_helper = unique_runtime_module("ModuleCommandHelper")
+      picker_helper = unique_runtime_module("ModulePickerHelper")
+      sidebar_helper = unique_runtime_module("ModuleSidebarHelper")
+      event_helper = unique_runtime_module("ModuleEventHelper")
+
+      compile_runtime_module("""
+      defmodule #{inspect(command_helper)} do
+        @spec run(term()) :: :command_helper
+        def run(_state), do: :command_helper
+      end
+      """)
+
+      compile_runtime_module("""
+      defmodule #{inspect(picker_helper)} do
+        @spec title() :: String.t()
+        def title, do: "Runtime picker"
+      end
+      """)
+
+      compile_runtime_module("""
+      defmodule #{inspect(sidebar_helper)} do
+        @spec handle(term(), String.t(), map()) :: :sidebar_helper
+        def handle(_state, _action, _context), do: :sidebar_helper
+      end
+      """)
+
+      compile_runtime_module("""
+      defmodule #{inspect(event_helper)} do
+        @spec handle_editor_event(term(), term()) :: :not_matched
+        def handle_editor_event(_state, _event), do: :not_matched
+      end
+      """)
+
+      compile_runtime_module(
+        module_inventory_root_source(
+          first_root,
+          :module_inventory,
+          command_helper,
+          event_helper
+        )
+      )
+
+      compile_runtime_module(
+        module_inventory_root_source(
+          collision_root,
+          :module_inventory_collision,
+          command_helper,
+          event_helper
+        )
+      )
+
+      compile_runtime_module(
+        module_inventory_root_source(
+          unowned_root,
+          :module_inventory_unowned,
+          command_helper,
+          event_helper
+        )
+      )
+
+      owned_modules = [
+        first_root,
+        collision_root,
+        unowned_root,
+        command_helper,
+        picker_helper,
+        sidebar_helper,
+        event_helper
+      ]
+
+      load_test_application(app, owned_modules)
+
+      :ok = ExtRegistry.register_module(ctx.registry, :module_inventory, first_root, [])
+      {:ok, first_entry} = ExtRegistry.get(ctx.registry, :module_inventory)
+
+      opts =
+        Keyword.put(authorities.opts, :runtime_owned_modules, [picker_helper, sidebar_helper])
+
+      assert {:ok, _pid} =
+               ExtSupervisor.start_extension(
+                 ctx.supervisor,
+                 ctx.registry,
+                 :module_inventory,
+                 first_entry,
+                 opts
+               )
+
+      source = {:extension, :module_inventory}
+
+      expected =
+        Enum.sort([first_root, command_helper, picker_helper, sidebar_helper, event_helper])
+
+      assert {:ok, ^expected} =
+               ArtifactAdmission.source_modules(source, server: authorities.admission)
+
+      assert {:ok, :command_helper} =
+               CallbackInvoker.invoke(
+                 source,
+                 command_helper,
+                 :run,
+                 [:state],
+                 :command,
+                 authorities.code_lease
+               )
+
+      assert {:ok, "Runtime picker"} =
+               CallbackInvoker.invoke(
+                 source,
+                 picker_helper,
+                 :title,
+                 [],
+                 :picker_title,
+                 authorities.code_lease
+               )
+
+      assert {:ok, :sidebar_helper} =
+               CallbackInvoker.invoke(
+                 source,
+                 sidebar_helper,
+                 :handle,
+                 [:state, "toggle", %{}],
+                 :sidebar_action,
+                 authorities.code_lease
+               )
+
+      assert {:ok, :not_matched} =
+               CallbackInvoker.invoke(
+                 source,
+                 event_helper,
+                 :handle_editor_event,
+                 [:state, :event],
+                 :editor_event,
+                 authorities.code_lease
+               )
+
+      :ok =
+        ExtRegistry.register_module(
+          ctx.registry,
+          :module_inventory_collision,
+          collision_root,
+          []
+        )
+
+      {:ok, collision_entry} = ExtRegistry.get(ctx.registry, :module_inventory_collision)
+
+      collision_result =
+        ExtSupervisor.start_extension(
+          ctx.supervisor,
+          ctx.registry,
+          :module_inventory_collision,
+          collision_entry,
+          opts
+        )
+
+      assert {:error,
+              {:module_owned_by_source, ^command_helper, ^source,
+               {:extension, :module_inventory_collision}}} = collision_result
+
+      :ok =
+        ExtRegistry.register_module(ctx.registry, :module_inventory_unowned, unowned_root, [])
+
+      {:ok, unowned_entry} = ExtRegistry.get(ctx.registry, :module_inventory_unowned)
+      unowned_opts = Keyword.put(authorities.opts, :runtime_owned_modules, [Minga.Buffer])
+
+      assert {:error, {:module_conflicts_with_host, Minga.Buffer}} =
+               ExtSupervisor.start_extension(
+                 ctx.supervisor,
+                 ctx.registry,
+                 :module_inventory_unowned,
+                 unowned_entry,
+                 unowned_opts
+               )
+    end
+
     test "passes config to init/1", ctx do
       {path, cleanup} =
         make_extension("ConfigExt", """
@@ -544,13 +845,20 @@ defmodule Minga.Extension.SupervisorTest do
     end
 
     test "quiesces source work after admission closes and before runtime termination", ctx do
+      authorities = start_runtime_authorities(ctx)
       name = :ordered_source_stop
       source = {:extension, name}
       :ok = ExtRegistry.register_module(ctx.registry, name, Minga.Extensions.MCP, [])
       {:ok, entry} = ExtRegistry.get(ctx.registry, name)
 
       assert {:ok, runtime} =
-               ExtSupervisor.start_extension(ctx.supervisor, ctx.registry, name, entry)
+               ExtSupervisor.start_extension(
+                 ctx.supervisor,
+                 ctx.registry,
+                 name,
+                 entry,
+                 authorities.opts
+               )
 
       runtime_monitor = Process.monitor(runtime)
 
@@ -575,7 +883,7 @@ defmodule Minga.Extension.SupervisorTest do
                  ctx.registry,
                  name,
                  running_entry,
-                 callbacks: %{editor_effects: finalizer}
+                 Keyword.put(authorities.opts, :callbacks, %{editor_effects: finalizer})
                )
 
       assert_receive {:source_finalized, ^source, :stopped, true}
@@ -584,13 +892,20 @@ defmodule Minga.Extension.SupervisorTest do
     end
 
     test "source finalizer failure keeps runtime alive and allows stop retry", ctx do
+      authorities = start_runtime_authorities(ctx)
       name = :failed_source_quiesce
       source = {:extension, name}
       :ok = ExtRegistry.register_module(ctx.registry, name, Minga.Extensions.MCP, [])
       {:ok, entry} = ExtRegistry.get(ctx.registry, name)
 
       assert {:ok, runtime} =
-               ExtSupervisor.start_extension(ctx.supervisor, ctx.registry, name, entry)
+               ExtSupervisor.start_extension(
+                 ctx.supervisor,
+                 ctx.registry,
+                 name,
+                 entry,
+                 authorities.opts
+               )
 
       runtime_monitor = Process.monitor(runtime)
 
@@ -620,7 +935,10 @@ defmodule Minga.Extension.SupervisorTest do
                  ctx.registry,
                  name,
                  running_entry,
-                 callbacks: %{editor_effects: finalizer, later_cleanup: later_cleanup}
+                 Keyword.put(authorities.opts, :callbacks, %{
+                   editor_effects: finalizer,
+                   later_cleanup: later_cleanup
+                 })
                )
 
       assert_receive {:source_finalizer_called, ^source, 0}
@@ -642,7 +960,8 @@ defmodule Minga.Extension.SupervisorTest do
                  ctx.supervisor,
                  ctx.registry,
                  name,
-                 quiescing_entry
+                 quiescing_entry,
+                 authorities.opts
                )
 
       assert Enum.count(DynamicSupervisor.which_children(ctx.supervisor), fn
@@ -656,7 +975,10 @@ defmodule Minga.Extension.SupervisorTest do
                  ctx.registry,
                  name,
                  quiescing_entry,
-                 callbacks: %{editor_effects: finalizer, later_cleanup: later_cleanup}
+                 Keyword.put(authorities.opts, :callbacks, %{
+                   editor_effects: finalizer,
+                   later_cleanup: later_cleanup
+                 })
                )
 
       assert_receive {:source_finalizer_called, ^source, 1}
@@ -666,17 +988,32 @@ defmodule Minga.Extension.SupervisorTest do
     end
 
     test "stops a module-sourced extension without purging its module", ctx do
+      authorities = start_runtime_authorities(ctx)
       :ok = ExtRegistry.register_module(ctx.registry, :minga_mcp, Minga.Extensions.MCP, [])
       {:ok, entry} = ExtRegistry.get(ctx.registry, :minga_mcp)
 
       assert {:ok, pid} =
-               ExtSupervisor.start_extension(ctx.supervisor, ctx.registry, :minga_mcp, entry)
+               ExtSupervisor.start_extension(
+                 ctx.supervisor,
+                 ctx.registry,
+                 :minga_mcp,
+                 entry,
+                 authorities.opts
+               )
 
       assert Process.alive?(pid)
       assert :code.is_loaded(Minga.Extensions.MCP) != false
 
       {:ok, running_entry} = ExtRegistry.get(ctx.registry, :minga_mcp)
-      :ok = ExtSupervisor.stop_extension(ctx.supervisor, ctx.registry, :minga_mcp, running_entry)
+
+      :ok =
+        ExtSupervisor.stop_extension(
+          ctx.supervisor,
+          ctx.registry,
+          :minga_mcp,
+          running_entry,
+          authorities.opts
+        )
 
       refute Process.alive?(pid)
 
@@ -687,7 +1024,13 @@ defmodule Minga.Extension.SupervisorTest do
       assert :code.is_loaded(Minga.Extensions.MCP) != false
 
       assert {:ok, restarted_pid} =
-               ExtSupervisor.start_extension(ctx.supervisor, ctx.registry, :minga_mcp, stopped)
+               ExtSupervisor.start_extension(
+                 ctx.supervisor,
+                 ctx.registry,
+                 :minga_mcp,
+                 stopped,
+                 authorities.opts
+               )
 
       assert restarted_pid != pid
       refute restarted_pid == nil
@@ -1079,6 +1422,115 @@ defmodule Minga.Extension.SupervisorTest do
   end
 
   defp wait_until(fun, 0), do: flunk("condition was not met, last result: #{inspect(fun.())}")
+
+  @spec start_runtime_authorities(map()) :: map()
+  defp start_runtime_authorities(ctx) do
+    owner_name = unique_runtime_name(:runtime_inventory_owner)
+    persistence_key = {__MODULE__, :runtime_inventory, make_ref()}
+
+    start_supervised!(
+      {ArtifactGenerationState, name: owner_name, persistence_key: persistence_key},
+      id: unique_runtime_name(:runtime_inventory_owner_child)
+    )
+
+    on_exit(fn ->
+      assert :ok = ArtifactGenerationState.reset_for_test(persistence_key)
+    end)
+
+    admission =
+      start_supervised!(
+        {ArtifactAdmission, name: nil, state_owner: owner_name},
+        id: unique_runtime_name(:runtime_inventory_admission)
+      )
+
+    code_lease =
+      start_supervised!(
+        {CodeLease, name: nil},
+        id: unique_runtime_name(:runtime_inventory_code_lease)
+      )
+
+    callback_registry = unique_runtime_name(:runtime_inventory_callback_registry)
+    start_supervised!({CallbackRegistry, name: callback_registry})
+    keymap = unique_runtime_name(:runtime_inventory_keymap)
+    start_supervised!({KeymapActive, name: keymap})
+
+    opts = [
+      command_registry: ctx.command_registry,
+      keymap: keymap,
+      artifact_admission: admission,
+      code_lease: code_lease,
+      callback_registry: callback_registry
+    ]
+
+    %{
+      admission: admission,
+      code_lease: code_lease,
+      callback_registry: callback_registry,
+      opts: opts
+    }
+  end
+
+  @spec module_inventory_root_source(module(), atom(), module(), module()) :: String.t()
+  defp module_inventory_root_source(root, name, command_helper, event_helper) do
+    """
+    defmodule #{inspect(root)} do
+      use Minga.Extension
+      command :#{name}_command, "Runtime inventory command",
+        execute: {#{inspect(command_helper)}, :run}
+      editor_event_handler #{inspect(event_helper)}, [:editor_action]
+      @impl true
+      def name, do: #{inspect(name)}
+      @impl true
+      def description, do: "Runtime module inventory"
+      @impl true
+      def version, do: "1.0.0"
+      @impl true
+      def init(_config), do: {:ok, %{}}
+    end
+    """
+  end
+
+  @spec compile_runtime_module(String.t()) :: module()
+  defp compile_runtime_module(source) do
+    [{module, _beam}] = Code.compile_string(source, "runtime_inventory_test.ex")
+    module
+  end
+
+  @spec load_test_application(atom(), [module()]) :: :ok
+  defp load_test_application(application, modules) do
+    spec =
+      {:application, application,
+       [
+         description: ~c"Runtime inventory test application",
+         vsn: ~c"1.0.0",
+         modules: modules,
+         registered: [],
+         applications: [:kernel, :stdlib]
+       ]}
+
+    assert :ok = :application.load(spec)
+    assert {:ok, _started} = Application.ensure_all_started(application)
+
+    on_exit(fn ->
+      _result = Application.stop(application)
+      assert :ok = Application.unload(application)
+
+      Enum.each(modules, fn module ->
+        :code.purge(module)
+        :code.delete(module)
+      end)
+    end)
+
+    :ok
+  end
+
+  @spec unique_runtime_name(atom()) :: atom()
+  defp unique_runtime_name(prefix),
+    do: String.to_atom("#{prefix}_#{System.unique_integer([:positive])}")
+
+  @spec unique_runtime_module(String.t()) :: module()
+  defp unique_runtime_module(suffix),
+    do: Module.concat(["RuntimeInventory#{suffix}#{System.unique_integer([:positive])}"])
 
   @spec make_extension(String.t(), String.t()) :: {String.t(), (-> :ok)}
   defp make_extension(dir_name, source) do

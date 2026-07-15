@@ -65,15 +65,10 @@ defmodule MingaEditor.UI.Picker.FetchEffect do
   @impl true
   @spec run(t()) :: {:ok, result()} | {:error, term()}
   def run(%__MODULE__{} = effect) do
-    with :ok <- Source.verify_admission(effect.callback_source),
-         {:ok, items, meta} <- Source.fetch(effect.source, effect.context) do
-      {:ok, {:ok, items, Candidate.from_items(items), meta}}
+    case Source.fetch(effect.source, effect.context, effect.callback_source) do
+      {:ok, items, meta} -> {:ok, {:ok, items, Candidate.from_items(items), meta}}
+      {:error, _reason} = error -> error
     end
-  rescue
-    exception -> {:error, {:picker_source_exception, Exception.message(exception)}}
-  catch
-    :exit, reason -> {:error, {:picker_source_exit, reason}}
-    :throw, value -> {:error, {:picker_source_throw, value}}
   end
 
   @impl true

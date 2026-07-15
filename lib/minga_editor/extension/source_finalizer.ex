@@ -7,15 +7,25 @@ defmodule MingaEditor.Extension.SourceFinalizer do
   first; only then may the live picker owned by that source be dismissed.
   """
 
+  alias Minga.Extension.CallbackInvoker
+  alias Minga.Extension.CallbackRegistry
+  alias Minga.Extension.CodeLease
   alias Minga.Extension.ContributionCleanup
   alias MingaEditor.EffectScheduler
+  alias MingaEditor.Extension.EventDispatcher
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
 
   @cleanup_family :editor_effects
+  @unload_family :editor_extension_unload
 
   @type source :: ContributionCleanup.contribution_source()
   @type result :: :ok | {:error, term()}
+  @type unload_context :: %{
+          required(:token) => CodeLease.unload_token(),
+          optional(:callback_registry) => CallbackRegistry.registry(),
+          optional(:callback_admission) => GenServer.server()
+        }
 
   @doc "Registers the Editor finalizer with source-owned contribution cleanup."
   @spec ensure_cleanup_registered() :: :ok
@@ -23,7 +33,8 @@ defmodule MingaEditor.Extension.SourceFinalizer do
     # Register a module capture, not an Editor or scheduler closure. Re-registering
     # on every Editor generation is idempotent and guarantees a restarted Editor
     # repairs a callback that tests or lifecycle code may have removed.
-    ContributionCleanup.register(@cleanup_family, &__MODULE__.unregister_source/1)
+    :ok = ContributionCleanup.register(@cleanup_family, &__MODULE__.unregister_source/1)
+    ContributionCleanup.register_contextual(@unload_family, &__MODULE__.unload_source/2)
   end
 
   @doc "Finalizes a source against the production Editor, if it is running."
@@ -49,6 +60,30 @@ defmodule MingaEditor.Extension.SourceFinalizer do
     end
   end
 
+  @doc "Runs token-scoped unload callbacks against the production Editor, if it is running."
+  @spec unload_source(CallbackInvoker.source(), unload_context()) :: result()
+  def unload_source({:extension, name} = source, context)
+      when is_atom(name) and is_map(context) do
+    case Process.whereis(MingaEditor) do
+      nil -> :ok
+      pid -> call_editor_unload(pid, source, context)
+    end
+  end
+
+  @doc "Runs source-filtered unload callbacks and preserves their last successful state."
+  @spec finalize_unload(EditorState.t(), CallbackInvoker.source(), unload_context()) ::
+          {:ok, EditorState.t()}
+  def finalize_unload(%EditorState{} = state, {:extension, _name} = source, context) do
+    token = Map.fetch!(context, :token)
+    registry = Map.get(context, :callback_registry, CallbackRegistry.default_table())
+    admission = Map.get(context, :callback_admission, CodeLease)
+
+    case EventDispatcher.dispatch_source_unload(state, source, token, registry, admission) do
+      {:ok, updated_state} -> {:ok, updated_state}
+      {:error, _failures, updated_state} -> {:ok, updated_state}
+    end
+  end
+
   @doc "Cancels source work before removing its live picker presentation."
   @spec finalize(EditorState.t(), source()) :: {result(), EditorState.t()}
   def finalize(%EditorState{} = state, source) do
@@ -61,6 +96,13 @@ defmodule MingaEditor.Extension.SourceFinalizer do
   @spec call_editor(pid(), source()) :: result()
   defp call_editor(pid, source) do
     GenServer.call(pid, {:finalize_extension_source, source}, :infinity)
+  catch
+    :exit, reason -> {:error, {:editor_unavailable, reason}}
+  end
+
+  @spec call_editor_unload(pid(), source(), unload_context()) :: result()
+  defp call_editor_unload(pid, source, context) do
+    GenServer.call(pid, {:unload_extension_source, source, context}, :infinity)
   catch
     :exit, reason -> {:error, {:editor_unavailable, reason}}
   end

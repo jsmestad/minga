@@ -9,6 +9,7 @@ defmodule MingaSdkTest do
         option(:enabled, :boolean, default: true, description: "Enable")
         command(:test_cmd, "Test command", execute: {__MODULE__, :noop})
         keybind(:normal, "SPC m t", :test_cmd, "Test")
+        editor_event_handler(__MODULE__, [:buffer_saved, :editor_action, :source_unload])
 
         @impl true
         def name, do: :test_ext
@@ -32,6 +33,27 @@ defmodule MingaSdkTest do
       assert elem(cmd, 0) == :test_cmd
       assert [kb] = TestExtension.__keybind_schema__()
       assert elem(kb, 2) == :test_cmd
+
+      assert TestExtension.__editor_event_handler_schema__() == [
+               {TestExtension, [:buffer_saved, :editor_action, :source_unload], []}
+             ]
+    end
+  end
+
+  describe "runtime callback family contract" do
+    test "family type contains only retained events" do
+      {:ok, types} = Code.Typespec.fetch_types(Minga.Extension)
+
+      assert {:type, {:editor_event_family, family_type, []}} =
+               Enum.find(types, fn
+                 {:type, {:editor_event_family, _type, []}} -> true
+                 _other -> false
+               end)
+
+      assert {:editor_event_family, family_type, []}
+             |> Code.Typespec.type_to_quoted()
+             |> Macro.to_string() ==
+               "editor_event_family() :: :buffer_saved | :editor_action | :source_unload"
     end
   end
 

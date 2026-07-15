@@ -63,6 +63,11 @@ defmodule Minga.Extension.Editor do
       Module.register_attribute(__MODULE__, :__extension_keybinds__, accumulate: true)
       Module.register_attribute(__MODULE__, :__extension_modeline_segments__, accumulate: true)
       Module.register_attribute(__MODULE__, :__extension_capabilities__, accumulate: true)
+
+      Module.register_attribute(__MODULE__, :__extension_editor_event_handlers__,
+        accumulate: true
+      )
+
       Module.put_attribute(__MODULE__, :__extension_load_policy__, :eager)
       @before_compile Minga.Extension.Editor
 
@@ -91,6 +96,8 @@ defmodule Minga.Extension.Editor do
           modeline_segment: 2,
           modeline_segment: 3,
           capability: 2,
+          editor_event_handler: 2,
+          editor_event_handler: 3,
           load_policy: 1
         ]
     end
@@ -191,6 +198,19 @@ defmodule Minga.Extension.Editor do
   end
 
   @doc """
+  Declares a synchronous runtime editor callback owned by this extension.
+
+  Supported families are `:buffer_saved`, `:editor_action`, and `:source_unload`.
+  The framework derives source ownership during lifecycle registration. Options
+  support an integer `:priority` (default `100`).
+  """
+  defmacro editor_event_handler(callback, families, opts \\ []) do
+    quote do
+      @__extension_editor_event_handlers__ {unquote(callback), unquote(families), unquote(opts)}
+    end
+  end
+
+  @doc """
   Sets the extension's load policy.
 
   See `Minga.Extension` for supported policies and examples.
@@ -203,7 +223,7 @@ defmodule Minga.Extension.Editor do
 
   @doc false
   defmacro __before_compile__(env) do
-    {options, commands, keybinds, modeline_segments, capabilities, load_policy} =
+    {options, commands, keybinds, modeline_segments, capabilities, event_handlers, load_policy} =
       read_editor_attributes(env.module)
 
     quote do
@@ -222,12 +242,16 @@ defmodule Minga.Extension.Editor do
       @spec __capability_schema__() :: [Minga.Extension.capability_spec()]
       def __capability_schema__, do: unquote(Macro.escape(capabilities))
 
+      @spec __editor_event_handler_schema__() :: [Minga.Extension.editor_event_handler_spec()]
+      def __editor_event_handler_schema__, do: unquote(Macro.escape(event_handlers))
+
       @spec __load_policy__() :: Minga.Extension.load_policy()
       def __load_policy__, do: unquote(Macro.escape(load_policy))
     end
   end
 
-  @spec read_editor_attributes(module()) :: {list(), list(), list(), list(), list(), term()}
+  @spec read_editor_attributes(module()) ::
+          {list(), list(), list(), list(), list(), list(), term()}
   defp read_editor_attributes(mod) do
     options = mod |> Module.get_attribute(:__extension_options__, []) |> Enum.reverse()
     commands = mod |> Module.get_attribute(:__extension_commands__, []) |> Enum.reverse()
@@ -237,7 +261,11 @@ defmodule Minga.Extension.Editor do
       mod |> Module.get_attribute(:__extension_modeline_segments__, []) |> Enum.reverse()
 
     capabilities = mod |> Module.get_attribute(:__extension_capabilities__, []) |> Enum.reverse()
+
+    event_handlers =
+      mod |> Module.get_attribute(:__extension_editor_event_handlers__, []) |> Enum.reverse()
+
     load_policy = Module.get_attribute(mod, :__extension_load_policy__) || :eager
-    {options, commands, keybinds, modeline_segments, capabilities, load_policy}
+    {options, commands, keybinds, modeline_segments, capabilities, event_handlers, load_policy}
   end
 end

@@ -17,11 +17,12 @@ defmodule Minga.Extension.Supervisor do
 
   alias Minga.Extension.ArtifactAdmission
   alias Minga.Extension.BundledApplications
+  alias Minga.Extension.CallbackInvoker
+  alias Minga.Extension.CallbackRegistry
   alias Minga.Extension.CodeLease
   alias Minga.Extension.CompileCache
   alias Minga.Extension.Git, as: ExtGit
   alias Minga.Extension.Hex, as: ExtHex
-  alias Minga.Extension.InvocationContext
   alias Minga.Extension.Lazy
   alias Minga.Extension.Manifest
   alias Minga.Extension.Registry, as: ExtRegistry
@@ -360,14 +361,18 @@ defmodule Minga.Extension.Supervisor do
   * `:callbacks` — cleanup callbacks map, injected for test isolation
     (default: reads from `ContributionCleanup` persistent_term)
   * `:code_lease` — the `Minga.Extension.CodeLease` server used by active callbacks
+  * `:callback_registry` — the extension-only runtime callback registry
   * `:artifact_admission` — the VM-generation module provenance authority
   """
   @type start_opts :: [
           command_registry: GenServer.server(),
           keymap: GenServer.server(),
-          callbacks: %{atom() => Minga.Extension.ContributionCleanup.cleanup_fun()},
+          callbacks: %{atom() => function()},
           code_lease: GenServer.server(),
+          callback_registry: CallbackRegistry.registry(),
           artifact_admission: GenServer.server(),
+          runtime_application: atom(),
+          runtime_owned_modules: [module()],
           slow_lifecycle_threshold_ms: non_neg_integer(),
           test_hooks: map()
         ]
@@ -449,10 +454,12 @@ defmodule Minga.Extension.Supervisor do
     cmd_registry = Keyword.get(opts, :command_registry, Minga.Command.Registry)
     keymap = Keyword.get(opts, :keymap, Minga.Keymap.Active)
     module = entry.module
+    opts = Keyword.put_new(opts, :runtime_owned_modules, [module])
     mark_start_attempt(registry, name)
 
     with {:module, ^module} <- Code.ensure_loaded(module),
          :ok <- validate_behaviour(module, name),
+         :ok <- ensure_runtime_source_inventory(name, module, opts),
          :ok <- record_extension_manifest(registry, name, module, entry.source_type),
          :ok <- register_and_validate_options(name, module, entry.config),
          {:ok, _state} <-
@@ -501,6 +508,7 @@ defmodule Minga.Extension.Supervisor do
              compile_extension(name, entry.path, opts)
            end),
          :ok <- validate_behaviour(module, name),
+         :ok <- ensure_runtime_source_inventory(name, module, opts),
          :ok <- record_extension_manifest(registry, name, module, entry.source_type),
          :ok <- register_and_validate_options(name, module, entry.config),
          {:ok, _state} <-
@@ -609,10 +617,199 @@ defmodule Minga.Extension.Supervisor do
         ) :: {:ok, pid()} | {:error, term()}
   defp register_dsl_for_started_child(supervisor, pid, module, name, cmd_registry, keymap, opts) do
     with :ok <- register_extension_commands(module, name, cmd_registry, opts),
-         :ok <- register_extension_keybinds(module, name, keymap) do
+         :ok <- register_extension_keybinds(module, name, keymap),
+         :ok <- register_extension_event_handlers(module, name, opts),
+         :ok <- activate_runtime_source(name, opts) do
       {:ok, pid}
     else
       {:error, reason} -> handle_dsl_registration_failure(supervisor, pid, reason)
+    end
+  end
+
+  @spec register_extension_event_handlers(module(), atom(), start_opts()) ::
+          :ok | {:error, term()}
+  defp register_extension_event_handlers(module, name, opts) do
+    schema =
+      if function_exported?(module, :__editor_event_handler_schema__, 0) do
+        module.__editor_event_handler_schema__()
+      else
+        []
+      end
+
+    CallbackRegistry.register_extension(name, schema,
+      registry: callback_registry_server(opts),
+      artifact_admission: artifact_admission_server(opts)
+    )
+  end
+
+  @spec activate_runtime_source(atom(), start_opts()) :: :ok | {:error, term()}
+  defp activate_runtime_source(name, opts) do
+    source = {:extension, name}
+
+    case ArtifactAdmission.source_modules(source, server: artifact_admission_server(opts)) do
+      {:ok, [_module | _rest] = modules} ->
+        CodeLease.activate_source(source, modules, server: code_lease_server(opts))
+
+      {:ok, []} ->
+        {:error, {:source_artifact_unavailable, source}}
+
+      :error ->
+        {:error, {:source_artifact_unavailable, source}}
+    end
+  end
+
+  @spec ensure_runtime_source_inventory(atom(), module(), start_opts()) ::
+          :ok | {:error, term()}
+  defp ensure_runtime_source_inventory(name, module, opts) do
+    source = {:extension, name}
+    admission = artifact_admission_server(opts)
+
+    case ArtifactAdmission.source_modules(source, server: admission) do
+      {:ok, [_module | _rest]} ->
+        :ok
+
+      {:ok, []} ->
+        {:error, {:source_artifact_unavailable, source}}
+
+      :error ->
+        admit_loaded_runtime_inventory(source, module, admission, opts)
+    end
+  end
+
+  @spec admit_loaded_runtime_inventory(
+          CallbackInvoker.source(),
+          module(),
+          GenServer.server(),
+          start_opts()
+        ) :: :ok | {:error, term()}
+  defp admit_loaded_runtime_inventory(source, module, admission, opts) do
+    with {:ok, application} <- runtime_application(module, opts),
+         {:ok, modules} <- runtime_inventory_modules(module, application, opts),
+         :ok <- ensure_runtime_modules_loaded(modules),
+         fingerprint <- runtime_inventory_fingerprint(application, modules),
+         {:ok, claim} <-
+           ArtifactAdmission.claim_source_modules(source, modules, fingerprint,
+             server: admission,
+             trusted_application: application,
+             exclusive_adoption: true,
+             source_fingerprint: fingerprint
+           ),
+         :ok <- verify_adopted_runtime_inventory(claim, modules, admission) do
+      ArtifactAdmission.commit_attempt(claim, server: admission)
+    end
+  rescue
+    exception -> {:error, {:runtime_inventory_failed, Exception.message(exception)}}
+  catch
+    kind, reason -> {:error, {:runtime_inventory_failed, kind, reason}}
+  end
+
+  @spec runtime_application(module(), start_opts()) :: {:ok, atom()} | {:error, term()}
+  defp runtime_application(module, opts) do
+    case Keyword.fetch(opts, :runtime_application) do
+      {:ok, application} when is_atom(application) ->
+        {:ok, application}
+
+      {:ok, invalid} ->
+        {:error, {:invalid_runtime_application, invalid}}
+
+      :error ->
+        case :application.get_application(module) do
+          {:ok, application} -> {:ok, application}
+          :undefined -> {:error, {:runtime_application_unavailable, module}}
+        end
+    end
+  end
+
+  @spec runtime_inventory_modules(module(), atom(), start_opts()) ::
+          {:ok, [module()]} | {:error, term()}
+  defp runtime_inventory_modules(module, application, opts) do
+    if Keyword.has_key?(opts, :runtime_application) do
+      application_modules(application)
+    else
+      modules =
+        [
+          module
+          | declared_runtime_modules(module) ++ Keyword.get(opts, :runtime_owned_modules, [])
+        ]
+        |> Enum.uniq()
+        |> Enum.sort()
+
+      {:ok, modules}
+    end
+  end
+
+  @spec application_modules(atom()) :: {:ok, [module()]} | {:error, term()}
+  defp application_modules(application) do
+    case :application.get_key(application, :modules) do
+      {:ok, [_module | _rest] = modules} -> {:ok, Enum.sort(Enum.uniq(modules))}
+      {:ok, []} -> {:error, {:runtime_application_has_no_modules, application}}
+      :undefined -> {:error, {:invalid_runtime_application, application}}
+    end
+  end
+
+  @spec declared_runtime_modules(module()) :: [module()]
+  defp declared_runtime_modules(module) do
+    command_modules =
+      for {_name, _description, command_opts} <- extension_schema(module, :__command_schema__),
+          is_list(command_opts),
+          Keyword.keyword?(command_opts),
+          {callback_module, callback_function} <- [Keyword.get(command_opts, :execute)],
+          is_atom(callback_module) and is_atom(callback_function),
+          do: callback_module
+
+    modeline_modules =
+      for {_name, _segment_opts, {callback_module, callback_function}} <-
+            extension_schema(module, :__modeline_segment_schema__),
+          is_atom(callback_module) and is_atom(callback_function),
+          do: callback_module
+
+    event_modules =
+      for {callback_module, _families, _handler_opts} <-
+            extension_schema(module, :__editor_event_handler_schema__),
+          is_atom(callback_module),
+          do: callback_module
+
+    command_modules ++ modeline_modules ++ event_modules
+  end
+
+  @spec extension_schema(module(), atom()) :: [term()]
+  defp extension_schema(module, function) do
+    if function_exported?(module, function, 0), do: apply(module, function, []), else: []
+  end
+
+  @spec ensure_runtime_modules_loaded([module()]) :: :ok | {:error, term()}
+  defp ensure_runtime_modules_loaded(modules) do
+    Enum.reduce_while(modules, :ok, fn module, :ok ->
+      case Code.ensure_loaded(module) do
+        {:module, ^module} -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, {:runtime_module_unavailable, module, reason}}}
+      end
+    end)
+  end
+
+  @spec runtime_inventory_fingerprint(atom(), [module()]) :: binary()
+  defp runtime_inventory_fingerprint(application, modules) do
+    module_digests = Enum.map(modules, &{&1, &1.module_info(:md5)})
+
+    :crypto.hash(
+      :sha256,
+      :erlang.term_to_binary({:runtime_inventory_v1, application, module_digests})
+    )
+  end
+
+  @spec verify_adopted_runtime_inventory(
+          ArtifactAdmission.claim(),
+          [module()],
+          GenServer.server()
+        ) :: :ok | {:error, term()}
+  defp verify_adopted_runtime_inventory(claim, modules, admission) do
+    if claim.load_modules == [] and claim.adopted_modules == Enum.sort(modules) do
+      :ok
+    else
+      _result = ArtifactAdmission.abort_attempt(claim, server: admission)
+
+      {:error,
+       {:runtime_inventory_not_adopted, claim.source, claim.load_modules, claim.adopted_modules}}
     end
   end
 
@@ -699,7 +896,8 @@ defmodule Minga.Extension.Supervisor do
           module: module,
           status: :running,
           pid: pid,
-          lifecycle_ref: lifecycle_ref
+          lifecycle_ref: lifecycle_ref,
+          last_error: nil
         )
 
         emit_restart_count(name, 0)
@@ -913,25 +1111,28 @@ defmodule Minga.Extension.Supervisor do
   @spec code_lease_server(start_opts()) :: GenServer.server()
   defp code_lease_server(opts), do: Keyword.get(opts, :code_lease, CodeLease)
 
+  @spec callback_registry_server(start_opts()) :: CallbackRegistry.registry()
+  defp callback_registry_server(opts),
+    do: Keyword.get(opts, :callback_registry, CallbackRegistry.default_table())
+
   @spec artifact_admission_server(start_opts()) :: GenServer.server()
   defp artifact_admission_server(opts),
     do: Keyword.get(opts, :artifact_admission, ArtifactAdmission)
 
-  @spec leased_callback(atom(), module(), CodeLease.reason(), GenServer.server(), (-> result)) ::
-          result
-        when result: var
-  defp leased_callback(ext_name, module, reason, code_lease, fun) when is_function(fun, 0) do
-    case CodeLease.lease({:extension, ext_name}, module, reason, server: code_lease) do
-      {:ok, lease} ->
-        try do
-          InvocationContext.with_source({:extension, ext_name}, fun)
-        after
-          CodeLease.release(lease)
-        end
-
-      {:error, reason} ->
-        raise "extension #{ext_name} callback module #{inspect(module)} unavailable: #{inspect(reason)}"
-    end
+  @spec extension_callback_result(
+          atom(),
+          module(),
+          atom(),
+          [term()],
+          CallbackInvoker.semantics(),
+          GenServer.server()
+        ) ::
+          {:extension_callback, CallbackInvoker.source(), module(), atom(),
+           CallbackInvoker.result(term())}
+  defp extension_callback_result(ext_name, module, function, args, semantics, admission) do
+    source = {:extension, ext_name}
+    result = CallbackInvoker.invoke(source, module, function, args, semantics, admission)
+    {:extension_callback, source, module, function, result}
   end
 
   @spec mark_start_load_error(GenServer.server(), atom()) :: :ok
@@ -1451,7 +1652,14 @@ defmodule Minga.Extension.Supervisor do
   defp mark_terminal_child_exit(registry, name, lifecycle_ref, cmd_registry, keymap, opts, reason) do
     with_lifecycle_lock(registry, name, fn ->
       if crash_reason?(reason) do
-        mark_crashed_without_replacement(registry, name, lifecycle_ref)
+        mark_crashed_without_replacement(
+          registry,
+          name,
+          lifecycle_ref,
+          cmd_registry,
+          keymap,
+          opts
+        )
       else
         mark_stopped_without_replacement(
           registry,
@@ -1465,14 +1673,95 @@ defmodule Minga.Extension.Supervisor do
     end)
   end
 
-  @spec mark_crashed_without_replacement(GenServer.server(), atom(), reference()) :: :ok
-  defp mark_crashed_without_replacement(registry, name, lifecycle_ref) do
+  @spec mark_crashed_without_replacement(
+          GenServer.server(),
+          atom(),
+          reference(),
+          GenServer.server(),
+          GenServer.server(),
+          start_opts()
+        ) :: :ok
+  defp mark_crashed_without_replacement(
+         registry,
+         name,
+         lifecycle_ref,
+         cmd_registry,
+         keymap,
+         opts
+       ) do
     if lifecycle_monitor_active?(registry, name, lifecycle_ref) do
-      ExtRegistry.update(registry, name, status: :crashed, pid: nil, lifecycle_ref: nil)
+      ExtRegistry.update(registry, name, status: :stopped)
+      quiesce_result = quiesce_terminal_source(name, :crash, opts)
+      cleanup_result = cleanup_extension_contributions(name, cmd_registry, keymap, opts)
+
+      finalize_crashed_source_result(
+        quiesce_result,
+        cleanup_result,
+        registry,
+        name,
+        lifecycle_ref
+      )
     end
 
     :ok
   end
+
+  @spec finalize_crashed_source_result(
+          :ok | {:error, term()},
+          :ok | {:error, [map()]},
+          GenServer.server(),
+          atom(),
+          reference()
+        ) :: :ok
+  defp finalize_crashed_source_result(:ok, :ok, registry, name, lifecycle_ref) do
+    if lifecycle_monitor_active?(registry, name, lifecycle_ref) do
+      ExtRegistry.update(registry, name,
+        status: :crashed,
+        pid: nil,
+        lifecycle_ref: nil,
+        last_error: nil
+      )
+    end
+
+    :ok
+  end
+
+  defp finalize_crashed_source_result(
+         quiesce_result,
+         cleanup_result,
+         registry,
+         name,
+         lifecycle_ref
+       ) do
+    if lifecycle_monitor_active?(registry, name, lifecycle_ref) do
+      ExtRegistry.update(registry, name,
+        status: :load_error,
+        pid: nil,
+        lifecycle_ref: nil,
+        last_error: terminal_crash_cleanup_error(quiesce_result, cleanup_result)
+      )
+    end
+
+    :ok
+  end
+
+  @spec terminal_crash_cleanup_error(
+          :ok | {:error, term()},
+          :ok | {:error, [map()]}
+        ) :: {:terminal_crash_cleanup_failed, keyword()}
+  defp terminal_crash_cleanup_error(quiesce_result, cleanup_result) do
+    failures =
+      []
+      |> prepend_result_failure(:quiesce, quiesce_result)
+      |> prepend_result_failure(:cleanup, cleanup_result)
+      |> Enum.reverse()
+
+    {:terminal_crash_cleanup_failed, failures}
+  end
+
+  @spec prepend_result_failure(keyword(), atom(), :ok | {:error, term()}) :: keyword()
+  defp prepend_result_failure(failures, _phase, :ok), do: failures
+  defp prepend_result_failure(failures, phase, {:error, reason}), do: [{phase, reason} | failures]
 
   @spec mark_stopped_without_replacement(
           GenServer.server(),
@@ -1500,9 +1789,11 @@ defmodule Minga.Extension.Supervisor do
       case ExtRegistry.get(registry, name) do
         {:ok, entry} ->
           ExtRegistry.update(registry, name, status: :stopped)
+          quiesce_result = quiesce_terminal_source(name, :normal, opts)
           cleanup_result = cleanup_extension_contributions(name, cmd_registry, keymap, opts)
 
-          finalize_terminal_cleanup_result(
+          finalize_terminal_source_result(
+            quiesce_result,
             cleanup_result,
             registry,
             name,
@@ -1519,7 +1810,8 @@ defmodule Minga.Extension.Supervisor do
     :ok
   end
 
-  @spec finalize_terminal_cleanup_result(
+  @spec finalize_terminal_source_result(
+          :ok | {:error, term()},
           :ok | {:error, [map()]},
           GenServer.server(),
           atom(),
@@ -1527,7 +1819,15 @@ defmodule Minga.Extension.Supervisor do
           ExtRegistry.entry(),
           start_opts()
         ) :: :ok
-  defp finalize_terminal_cleanup_result(:ok, registry, name, lifecycle_ref, entry, opts) do
+  defp finalize_terminal_source_result(
+         :ok,
+         :ok,
+         registry,
+         name,
+         lifecycle_ref,
+         entry,
+         opts
+       ) do
     if lifecycle_monitor_active?(registry, name, lifecycle_ref) do
       _result = finalize_stopped_extension(registry, name, entry, opts)
     end
@@ -1535,8 +1835,9 @@ defmodule Minga.Extension.Supervisor do
     :ok
   end
 
-  defp finalize_terminal_cleanup_result(
-         {:error, _failures},
+  defp finalize_terminal_source_result(
+         quiesce_result,
+         cleanup_result,
          registry,
          name,
          lifecycle_ref,
@@ -1544,10 +1845,29 @@ defmodule Minga.Extension.Supervisor do
          _opts
        ) do
     if lifecycle_monitor_active?(registry, name, lifecycle_ref) do
-      ExtRegistry.update(registry, name, status: :load_error, pid: nil, lifecycle_ref: nil)
+      ExtRegistry.update(registry, name,
+        status: :load_error,
+        pid: nil,
+        lifecycle_ref: nil,
+        last_error: terminal_exit_cleanup_error(quiesce_result, cleanup_result)
+      )
     end
 
     :ok
+  end
+
+  @spec terminal_exit_cleanup_error(
+          :ok | {:error, term()},
+          :ok | {:error, [map()]}
+        ) :: {:terminal_exit_cleanup_failed, keyword()}
+  defp terminal_exit_cleanup_error(quiesce_result, cleanup_result) do
+    failures =
+      []
+      |> prepend_result_failure(:quiesce, quiesce_result)
+      |> prepend_result_failure(:cleanup, cleanup_result)
+      |> Enum.reverse()
+
+    {:terminal_exit_cleanup_failed, failures}
   end
 
   @spec extension_child_pid_by_pid(GenServer.server(), pid()) ::
@@ -1625,6 +1945,8 @@ defmodule Minga.Extension.Supervisor do
            end),
          {:ok, module} <- find_extension_module(app_atom),
          :ok <- validate_behaviour(module, name),
+         runtime_opts = Keyword.put(opts, :runtime_application, app_atom),
+         :ok <- ensure_runtime_source_inventory(name, module, runtime_opts),
          :ok <- record_extension_manifest(registry, name, module, entry.source_type),
          :ok <- register_and_validate_options(name, module, entry.config),
          {:ok, _state} <-
@@ -1638,13 +1960,13 @@ defmodule Minga.Extension.Supervisor do
           entry.config,
           cmd_registry,
           keymap,
-          opts
+          runtime_opts
         ),
         registry,
         name,
         cmd_registry,
         keymap,
-        opts
+        runtime_opts
       )
     else
       {:error, reason} ->
@@ -1820,31 +2142,226 @@ defmodule Minga.Extension.Supervisor do
   end
 
   @spec quiesce_extension_source(atom(), start_opts()) ::
-          :ok
-          | {:error,
-             {:source_quiesce_failed, Minga.Extension.ContributionCleanup.cleanup_failure()}}
+          :ok | {:error, {:source_quiesce_failed, term()}}
   defp quiesce_extension_source(name, opts) do
     source = {:extension, name}
+    admission = code_lease_server(opts)
+
+    case CodeLease.quiesce_source(source, server: admission) do
+      {:ok, token} ->
+        finalize_quiescing_source(name, source, token, admission, opts)
+
+      {:error, {:source_not_active, ^source}} ->
+        finalize_source_effects(name, source, opts)
+
+      {:error, {:source_inactive, ^source}} ->
+        finalize_source_effects(name, source, opts)
+
+      {:error, reason} ->
+        source_quiesce_failed(name, reason)
+    end
+  end
+
+  @typep terminal_exit_kind :: :crash | :normal
+
+  @spec quiesce_terminal_source(atom(), terminal_exit_kind(), start_opts()) ::
+          :ok | {:error, {:source_quiesce_failed, term()}}
+  defp quiesce_terminal_source(name, exit_kind, opts) do
+    source = {:extension, name}
+    admission = code_lease_server(opts)
+
+    case CodeLease.quiesce_source(source, server: admission) do
+      {:ok, token} ->
+        finalize_terminal_source(name, source, token, admission, exit_kind, opts)
+
+      {:error, {:source_not_active, ^source}} ->
+        finalize_source_effects(name, source, opts)
+
+      {:error, {:source_inactive, ^source}} ->
+        finalize_source_effects(name, source, opts)
+
+      {:error, reason} ->
+        source_quiesce_failed(name, reason)
+    end
+  end
+
+  @spec finalize_terminal_source(
+          atom(),
+          CallbackInvoker.source(),
+          CodeLease.unload_token(),
+          GenServer.server(),
+          terminal_exit_kind(),
+          start_opts()
+        ) :: :ok | {:error, {:source_quiesce_failed, term()}}
+  defp finalize_terminal_source(name, source, token, admission, exit_kind, opts) do
+    context = %{
+      token: token,
+      callback_registry: callback_registry_server(opts),
+      callback_admission: admission
+    }
+
+    cleanup_opts =
+      opts
+      |> Keyword.take([:callbacks])
+      |> Keyword.put(:context, context)
+
+    finalizer_result =
+      run_lifecycle_phase(name, :quiesce, opts, fn ->
+        editor_effects_result =
+          Minga.Extension.ContributionCleanup.finalize_source(
+            source,
+            :editor_effects,
+            cleanup_opts
+          )
+
+        :ok = await_source_callbacks(source, admission)
+
+        extension_unload_result =
+          Minga.Extension.ContributionCleanup.finalize_source(
+            source,
+            :editor_extension_unload,
+            cleanup_opts
+          )
+
+        combine_terminal_finalizer_results(editor_effects_result, extension_unload_result)
+      end)
+
+    unload_result = CodeLease.complete_unload(token, server: admission)
+    finalize_terminal_admission(name, exit_kind, finalizer_result, unload_result)
+  end
+
+  @spec combine_terminal_finalizer_results(
+          :ok | {:error, term()},
+          :ok | {:error, term()}
+        ) :: :ok | {:error, {:terminal_finalizers_failed, [term()]}}
+  defp combine_terminal_finalizer_results(:ok, :ok), do: :ok
+
+  defp combine_terminal_finalizer_results(editor_effects_result, extension_unload_result) do
+    failures =
+      []
+      |> prepend_result_failure(:editor_effects, editor_effects_result)
+      |> prepend_result_failure(:editor_extension_unload, extension_unload_result)
+      |> Enum.reverse()
+
+    {:error, {:terminal_finalizers_failed, failures}}
+  end
+
+  @spec finalize_terminal_admission(
+          atom(),
+          terminal_exit_kind(),
+          :ok | {:error, term()},
+          :ok | {:error, term()}
+        ) :: :ok | {:error, {:source_quiesce_failed, term()}}
+  defp finalize_terminal_admission(_name, _exit_kind, :ok, :ok), do: :ok
+
+  defp finalize_terminal_admission(name, exit_kind, finalizer_result, unload_result) do
+    failures =
+      []
+      |> prepend_result_failure(:finalizers, finalizer_result)
+      |> prepend_result_failure(:complete_unload, unload_result)
+      |> Enum.reverse()
+
+    source_quiesce_failed(name, terminal_quiesce_error(exit_kind, failures))
+  end
+
+  @spec terminal_quiesce_error(terminal_exit_kind(), keyword()) ::
+          {:terminal_crash_quiesce_failed | :terminal_exit_quiesce_failed, keyword()}
+  defp terminal_quiesce_error(:crash, failures),
+    do: {:terminal_crash_quiesce_failed, failures}
+
+  defp terminal_quiesce_error(:normal, failures),
+    do: {:terminal_exit_quiesce_failed, failures}
+
+  @spec finalize_source_effects(atom(), CallbackInvoker.source(), start_opts()) ::
+          :ok | {:error, term()}
+  defp finalize_source_effects(name, source, opts) do
     cleanup_opts = Keyword.take(opts, [:callbacks])
 
-    case run_lifecycle_phase(name, :quiesce, opts, fn ->
-           Minga.Extension.ContributionCleanup.finalize_source(
-             source,
-             :editor_effects,
-             cleanup_opts
-           )
-         end) do
-      :ok ->
+    run_lifecycle_phase(name, :quiesce, opts, fn ->
+      Minga.Extension.ContributionCleanup.finalize_source(
+        source,
+        :editor_effects,
+        cleanup_opts
+      )
+    end)
+  end
+
+  @spec finalize_quiescing_source(
+          atom(),
+          CallbackInvoker.source(),
+          CodeLease.unload_token(),
+          GenServer.server(),
+          start_opts()
+        ) :: :ok | {:error, {:source_quiesce_failed, term()}}
+  defp finalize_quiescing_source(name, source, token, admission, opts) do
+    context = %{
+      token: token,
+      callback_registry: callback_registry_server(opts),
+      callback_admission: admission
+    }
+
+    cleanup_opts =
+      opts
+      |> Keyword.take([:callbacks])
+      |> Keyword.put(:context, context)
+
+    result =
+      run_lifecycle_phase(name, :quiesce, opts, fn ->
+        with :ok <-
+               Minga.Extension.ContributionCleanup.finalize_source(
+                 source,
+                 :editor_effects,
+                 cleanup_opts
+               ),
+             :ok <- await_source_callbacks(source, admission) do
+          Minga.Extension.ContributionCleanup.finalize_source(
+            source,
+            :editor_extension_unload,
+            cleanup_opts
+          )
+        end
+      end)
+
+    finalize_quiescing_admission(name, token, admission, result)
+  end
+
+  @spec await_source_callbacks(CallbackInvoker.source(), GenServer.server()) :: :ok
+  defp await_source_callbacks(source, admission) do
+    case CodeLease.active_leases(server: admission, source: source) do
+      [] ->
         :ok
 
-      {:error, failure} ->
-        Log.warning(
-          :config,
-          "Extension #{name} source quiescence failed: #{format_cleanup_failure(failure)}"
-        )
-
-        {:error, {:source_quiesce_failed, failure}}
+      [_lease | _rest] ->
+        receive do
+        after
+          5 -> await_source_callbacks(source, admission)
+        end
     end
+  end
+
+  @spec finalize_quiescing_admission(
+          atom(),
+          CodeLease.unload_token(),
+          GenServer.server(),
+          :ok | {:error, term()}
+        ) :: :ok | {:error, {:source_quiesce_failed, term()}}
+  defp finalize_quiescing_admission(name, token, admission, :ok) do
+    case CodeLease.complete_unload(token, server: admission) do
+      :ok -> :ok
+      {:error, reason} -> source_quiesce_failed(name, reason)
+    end
+  end
+
+  defp finalize_quiescing_admission(name, token, admission, {:error, failure}) do
+    _result = CodeLease.abort_unload(token, server: admission)
+    source_quiesce_failed(name, failure)
+  end
+
+  @spec source_quiesce_failed(atom(), term()) ::
+          {:error, {:source_quiesce_failed, term()}}
+  defp source_quiesce_failed(name, failure) do
+    Log.warning(:config, "Extension #{name} source quiescence failed: #{inspect(failure)}")
+    {:error, {:source_quiesce_failed, failure}}
   end
 
   @spec cleanup_extension_contributions(
@@ -2046,13 +2563,13 @@ defmodule Minga.Extension.Supervisor do
   defp build_command_from_spec({name, description, command_opts}, ext_name, opts) do
     {mod, fun} = Keyword.fetch!(command_opts, :execute)
     requires_buffer = Keyword.get(command_opts, :requires_buffer, false)
-    code_lease = code_lease_server(opts)
+    admission = code_lease_server(opts)
 
     %Minga.Command{
       name: name,
       description: description,
       execute: fn state ->
-        leased_callback(ext_name, mod, :ui_action, code_lease, fn -> apply(mod, fun, [state]) end)
+        extension_callback_result(ext_name, mod, fun, [state], :command, admission)
       end,
       requires_buffer: requires_buffer
     }
@@ -2102,12 +2619,12 @@ defmodule Minga.Extension.Supervisor do
           start_opts()
         ) :: :ok | {:error, term()}
   defp register_extension_modeline_segment({name, segment_opts, {mod, fun}}, ext_name, opts) do
-    code_lease = code_lease_server(opts)
+    admission = code_lease_server(opts)
 
     case Minga.Config.ModelineSegments.register(
            name,
            segment_opts,
-           modeline_segment_callback(ext_name, mod, fun, code_lease),
+           modeline_segment_callback(ext_name, mod, fun, admission),
            {:extension, ext_name}
          ) do
       :ok ->
@@ -2122,9 +2639,9 @@ defmodule Minga.Extension.Supervisor do
 
   @spec modeline_segment_callback(atom(), module(), atom(), GenServer.server()) ::
           (map() -> term())
-  defp modeline_segment_callback(ext_name, mod, fun, code_lease) do
+  defp modeline_segment_callback(ext_name, mod, fun, admission) do
     fn ctx ->
-      leased_callback(ext_name, mod, :ui_action, code_lease, fn -> apply(mod, fun, [ctx]) end)
+      extension_callback_result(ext_name, mod, fun, [ctx], :modeline_segment, admission)
     end
   end
 

@@ -38,9 +38,9 @@ defmodule MingaEditor.UI.Picker.Source do
       end
   """
 
+  alias Minga.Extension.CallbackInvoker
   alias Minga.Extension.ContributionCleanup
   alias Minga.Extension.InvocationContext
-  alias Minga.Extension.Registry, as: ExtensionRegistry
   alias MingaEditor.Frontend.Emit.Context, as: EmitContext
   alias MingaEditor.UI.Picker
   alias MingaEditor.UI.Picker.Context
@@ -59,7 +59,7 @@ defmodule MingaEditor.UI.Picker.Source do
   callback needs must travel with the `Picker.item()` (typically embedded
   in `Item.id`). Reading `state.shell_runtime.state.modal` here will see `:none`.
   """
-  @callback on_select(Picker.item(), state :: term()) :: term()
+  @callback on_select(Picker.item(), MingaEditor.State.t()) :: MingaEditor.State.t()
 
   @doc """
   Called when the user confirms explicitly marked items. Returns the new editor state.
@@ -67,10 +67,10 @@ defmodule MingaEditor.UI.Picker.Source do
   Sources that do not implement this callback ignore picker marks and keep the
   single-selection behavior from `on_select/2`.
   """
-  @callback on_bulk_select([Picker.item()], state :: term()) :: term()
+  @callback on_bulk_select([Picker.item()], MingaEditor.State.t()) :: MingaEditor.State.t()
 
   @doc "Called when the user cancels the picker. Returns the new editor state."
-  @callback on_cancel(state :: term()) :: term()
+  @callback on_cancel(MingaEditor.State.t()) :: MingaEditor.State.t()
 
   @doc "Legacy live-navigation preview flag."
   @callback preview?() :: boolean()
@@ -107,13 +107,14 @@ defmodule MingaEditor.UI.Picker.Source do
   context required must travel with the `Picker.item()`; do not read
   `state.shell_runtime.state.modal` here.
   """
-  @callback on_action(term(), Picker.item(), state :: term()) :: term()
+  @callback on_action(term(), Picker.item(), MingaEditor.State.t()) :: MingaEditor.State.t()
 
   @doc "Returns the list of alternative actions available for a marked item batch."
   @callback bulk_actions([Picker.item()]) :: [action_entry()]
 
   @doc "Executes an alternative action on a marked item batch."
-  @callback on_bulk_action(term(), [Picker.item()], state :: term()) :: term()
+  @callback on_bulk_action(term(), [Picker.item()], MingaEditor.State.t()) ::
+              MingaEditor.State.t()
 
   @typedoc "Picker layout: bottom-anchored (default) or centered floating window."
   @type layout :: :bottom | :centered
@@ -196,8 +197,8 @@ defmodule MingaEditor.UI.Picker.Source do
   when the picker opened (stored in the picker payload's `restore` field),
   or returns state unchanged if no restore index was saved.
   """
-  @spec restore_or_keep(term()) :: term()
-  def restore_or_keep(state) do
+  @spec restore_or_keep(MingaEditor.State.t()) :: MingaEditor.State.t()
+  def restore_or_keep(%MingaEditor.State{} = state) do
     case state.shell_runtime.state.modal do
       {:picker, %{picker_ui: %{restore: idx}}} when is_integer(idx) ->
         MingaEditor.BufferActivation.activate(state, idx)
@@ -209,104 +210,137 @@ defmodule MingaEditor.UI.Picker.Source do
 
   @doc "Returns the authoritative contribution source installed at callback invocation."
   @spec source_identity(module()) :: ContributionCleanup.contribution_source() | nil
-  def source_identity(module) when is_atom(module) do
+  def source_identity(_module) do
     case InvocationContext.current_source() do
       {:ok, source} -> source
       :none -> nil
     end
   end
 
-  @doc "Verifies that a contribution source still admits picker callback work."
-  @spec verify_admission(ContributionCleanup.contribution_source() | nil) ::
-          :ok | {:error, {:source_admission_denied, term()}}
-  def verify_admission(nil), do: :ok
-  def verify_admission(:builtin), do: :ok
-  def verify_admission(:config), do: :ok
-  def verify_admission({:bundle, name}) when is_atom(name), do: :ok
-
-  def verify_admission({:extension, name} = source) when is_atom(name) do
-    case ExtensionRegistry.get(name) do
-      {:ok, %{status: :running}} -> :ok
-      _entry -> {:error, {:source_admission_denied, source}}
-    end
-  catch
-    :exit, _reason -> {:error, {:source_admission_denied, source}}
+  @doc "Returns a validated picker title."
+  @spec title(module(), ContributionCleanup.contribution_source() | nil) :: String.t()
+  def title(module, source \\ nil) do
+    invoke_value(module, :title, [], source, &is_binary/1, "")
   end
 
-  @doc """
-  Returns whether a source module should live-preview the highlighted item.
-  Falls back to `false` if the callback is not implemented.
-  """
-  @spec preview?(module()) :: boolean()
-  def preview?(module) do
+  @doc "Returns a validated picker candidate collection."
+  @spec candidates(module(), Context.t(), ContributionCleanup.contribution_source() | nil) ::
+          [Picker.item()]
+  def candidates(module, context, source \\ nil) do
+    invoke_value(module, :candidates, [context], source, &is_list/1, [])
+  end
+
+  @doc "Runs a validated picker selection callback."
+  @spec on_select(
+          module(),
+          Picker.item(),
+          MingaEditor.State.t(),
+          ContributionCleanup.contribution_source() | nil
+        ) ::
+          MingaEditor.State.t()
+  def on_select(module, item, state, source \\ nil) do
+    invoke_state(module, :on_select, [item, state], source, state)
+  end
+
+  @doc "Runs a validated picker cancellation callback."
+  @spec on_cancel(
+          module(),
+          MingaEditor.State.t(),
+          ContributionCleanup.contribution_source() | nil
+        ) ::
+          MingaEditor.State.t()
+  def on_cancel(module, state, source \\ nil) do
+    invoke_state(module, :on_cancel, [state], source, state)
+  end
+
+  @doc "Returns whether a source module should live-preview the highlighted item."
+  @spec preview?(module(), ContributionCleanup.contribution_source() | nil) :: boolean()
+  def preview?(module, source \\ nil) do
     if exported?(module, :preview?, 0) do
-      module.preview?()
+      invoke_value(module, :preview?, [], source, &is_boolean/1, false)
     else
       false
     end
   end
 
-  @doc """
-  Returns source-provided preview content, or nil when no preview callback exists.
-  """
-  @spec preview(module(), Picker.item(), preview_context()) :: [[preview_segment()]] | nil
-  def preview(module, item, context) do
+  @doc "Returns source-provided preview content, or nil when no preview callback exists."
+  @spec preview(
+          module(),
+          Picker.item(),
+          preview_context(),
+          ContributionCleanup.contribution_source() | nil
+        ) :: [[preview_segment()]] | nil
+  def preview(module, item, context, source \\ nil) do
     if exported?(module, :preview, 2) do
-      module.preview(item, context)
+      invoke_value(module, :preview, [item, context], source, &valid_preview?/1, nil)
     else
       nil
     end
   end
 
   @doc "Returns whether navigating the picker should live-preview the selection."
-  @spec live_preview?(module()) :: boolean()
-  def live_preview?(module) do
+  @spec live_preview?(module(), ContributionCleanup.contribution_source() | nil) :: boolean()
+  def live_preview?(module, source \\ nil) do
     if exported?(module, :live_preview?, 0) do
-      module.live_preview?()
+      invoke_value(module, :live_preview?, [], source, &is_boolean/1, false)
     else
-      preview?(module)
+      preview?(module, source)
     end
   end
 
   @doc "Whether the GUI preview pane should be shown for the source."
-  @spec gui_preview?(module()) :: boolean()
-  def gui_preview?(module) do
+  @spec gui_preview?(module(), ContributionCleanup.contribution_source() | nil) :: boolean()
+  def gui_preview?(module, source \\ nil) do
     if exported?(module, :gui_preview?, 0) do
-      module.gui_preview?()
+      invoke_value(module, :gui_preview?, [], source, &is_boolean/1, false)
     else
       false
     end
   end
 
-  @doc """
-  Returns whether a source module supports alternative actions (C-o menu).
-  """
+  @doc "Returns whether a source module supports alternative actions."
   @spec has_actions?(module()) :: boolean()
   def has_actions?(module) do
     exported?(module, :actions, 1) and exported?(module, :on_action, 3)
   end
 
-  @doc """
-  Returns the actions for an item, or an empty list if the source doesn't support actions.
-  """
-  @spec actions(module(), Picker.item()) :: [action_entry()]
-  def actions(module, item) do
+  @doc "Returns a validated action collection, or an empty list when unsupported."
+  @spec actions(module(), Picker.item(), ContributionCleanup.contribution_source() | nil) ::
+          [action_entry()]
+  def actions(module, item, source \\ nil) do
     if has_actions?(module) do
-      module.actions(item)
+      invoke_value(module, :actions, [item], source, &is_list/1, [])
     else
       []
     end
+  end
+
+  @doc "Runs a validated alternative action."
+  @spec on_action(
+          module(),
+          term(),
+          Picker.item(),
+          MingaEditor.State.t(),
+          ContributionCleanup.contribution_source() | nil
+        ) :: MingaEditor.State.t()
+  def on_action(module, action, item, state, source \\ nil) do
+    invoke_state(module, :on_action, [action, item, state], source, state)
   end
 
   @doc "Returns whether a source module supports bulk select."
   @spec has_bulk_select?(module()) :: boolean()
   def has_bulk_select?(module), do: exported?(module, :on_bulk_select, 2)
 
-  @doc "Runs bulk select for a source, returning state unchanged if unsupported."
-  @spec bulk_select(module(), [Picker.item()], term()) :: term()
-  def bulk_select(module, items, state) do
+  @doc "Runs bulk select, returning state unchanged when unsupported."
+  @spec bulk_select(
+          module(),
+          [Picker.item()],
+          MingaEditor.State.t(),
+          ContributionCleanup.contribution_source() | nil
+        ) :: MingaEditor.State.t()
+  def bulk_select(module, items, state, source \\ nil) do
     if has_bulk_select?(module) do
-      module.on_bulk_select(items, state)
+      invoke_state(module, :on_bulk_select, [items, state], source, state)
     else
       state
     end
@@ -318,95 +352,218 @@ defmodule MingaEditor.UI.Picker.Source do
     exported?(module, :bulk_actions, 1) and exported?(module, :on_bulk_action, 3)
   end
 
-  @doc "Returns bulk actions for marked items, or an empty list if unsupported."
-  @spec bulk_actions(module(), [Picker.item()]) :: [action_entry()]
-  def bulk_actions(module, items) do
+  @doc "Returns validated bulk actions, or an empty list when unsupported."
+  @spec bulk_actions(
+          module(),
+          [Picker.item()],
+          ContributionCleanup.contribution_source() | nil
+        ) :: [action_entry()]
+  def bulk_actions(module, items, source \\ nil) do
     if has_bulk_actions?(module) do
-      module.bulk_actions(items)
+      invoke_value(module, :bulk_actions, [items], source, &is_list/1, [])
     else
       []
     end
   end
 
-  @doc "Runs a bulk action for a source, returning state unchanged if unsupported."
-  @spec on_bulk_action(module(), term(), [Picker.item()], term()) :: term()
-  def on_bulk_action(module, action, items, state) do
+  @doc "Runs a validated bulk action, returning state unchanged when unsupported."
+  @spec on_bulk_action(
+          module(),
+          term(),
+          [Picker.item()],
+          MingaEditor.State.t(),
+          ContributionCleanup.contribution_source() | nil
+        ) :: MingaEditor.State.t()
+  def on_bulk_action(module, action, items, state, source \\ nil) do
     if has_bulk_actions?(module) do
-      module.on_bulk_action(action, items, state)
+      invoke_state(module, :on_bulk_action, [action, items, state], source, state)
     else
       state
     end
   end
 
-  @doc """
-  Returns the preferred layout for a source, defaulting to `:bottom`.
-  """
-  @spec layout(module()) :: layout()
-  def layout(module) do
+  @doc "Returns the validated preferred picker layout."
+  @spec layout(module(), ContributionCleanup.contribution_source() | nil) :: layout()
+  def layout(module, source \\ nil) do
     if exported?(module, :layout, 0) do
-      module.layout()
+      invoke_value(module, :layout, [], source, &(&1 in [:bottom, :centered]), :bottom)
     else
       :bottom
     end
   end
 
-  @doc """
-  Returns whether the picker should stay open after selecting an item.
-  """
-  @spec keep_open_on_select?(module()) :: boolean()
-  def keep_open_on_select?(module) do
+  @doc "Returns whether the picker should stay open after selection."
+  @spec keep_open_on_select?(module(), ContributionCleanup.contribution_source() | nil) ::
+          boolean()
+  def keep_open_on_select?(module, source \\ nil) do
     if exported?(module, :keep_open_on_select?, 0) do
-      module.keep_open_on_select?()
+      invoke_value(module, :keep_open_on_select?, [], source, &is_boolean/1, false)
     else
       false
     end
   end
 
-  @doc """
-  Returns whether a source fetches candidates asynchronously.
-  """
-  @spec async?(module()) :: boolean()
-  def async?(module) do
+  @doc "Returns whether a source fetches candidates asynchronously."
+  @spec async?(module(), ContributionCleanup.contribution_source() | nil) :: boolean()
+  def async?(module, source \\ nil) do
     if exported?(module, :async?, 0) do
-      module.async?()
+      invoke_value(module, :async?, [], source, &is_boolean/1, false)
     else
       false
     end
   end
 
-  @doc """
-  Runs an async source's candidate fetch, returning `{:ok, items, meta}`.
-
-  Prefers the source's own `async_fetch/1` (so it can report status metadata such
-  as truncation); otherwise falls back to `candidates/1` with empty metadata. Used
-  by the editor's background fetch task, off the input path.
-  """
-  @spec fetch(module(), Context.t()) ::
+  @doc "Runs and validates an asynchronous candidate fetch."
+  @spec fetch(module(), Context.t(), ContributionCleanup.contribution_source() | nil) ::
           {:ok, [Picker.item()], fetch_meta()} | {:error, String.t()}
-  def fetch(module, context) do
+  def fetch(module, context, source \\ nil) do
     if exported?(module, :async_fetch, 1) do
-      module.async_fetch(context)
+      invoke_value(
+        module,
+        :async_fetch,
+        [context],
+        source,
+        &valid_fetch_result?/1,
+        {:error, "Extension picker fetch failed"}
+      )
     else
-      {:ok, module.candidates(context), %{}}
+      case candidates(module, context, source) do
+        items when is_list(items) -> {:ok, items, %{}}
+      end
     end
   end
 
-  @doc "Returns whether a source defers display enrichment to `enrich/1`."
+  @doc "Returns whether a source defers display enrichment."
   @spec enriches?(module()) :: boolean()
   def enriches?(module), do: exported?(module, :enrich, 1)
 
-  @doc """
-  Enriches the bounded display items for a source, returning them unchanged
-  when the source does not implement `enrich/1`.
-  """
-  @spec enrich(module(), [Picker.item()]) :: [Picker.item()]
-  def enrich(module, items) do
+  @doc "Returns a validated enriched candidate collection."
+  @spec enrich(
+          module(),
+          [Picker.item()],
+          ContributionCleanup.contribution_source() | nil
+        ) :: [Picker.item()]
+  def enrich(module, items, source \\ nil) do
     if enriches?(module) do
-      module.enrich(items)
+      invoke_value(module, :enrich, [items], source, &is_list/1, items)
     else
       items
     end
   end
+
+  @spec invoke_state(
+          module(),
+          atom(),
+          [term()],
+          ContributionCleanup.contribution_source() | nil,
+          MingaEditor.State.t()
+        ) :: MingaEditor.State.t()
+  defp invoke_state(module, function, args, {:extension, _name} = source, original_state) do
+    case CallbackInvoker.invoke(source, module, function, args, :picker_callback) do
+      {:ok, %MingaEditor.State{} = state} ->
+        state
+
+      {:ok, returned} ->
+        invalid_extension_value(source, module, function, returned, original_state)
+
+      {:error, _failure} ->
+        original_state
+    end
+  end
+
+  defp invoke_state(module, function, args, _source, _original_state) do
+    case apply(module, function, args) do
+      %MingaEditor.State{} = state -> state
+      returned -> raise ArgumentError, invalid_core_return(module, function, returned)
+    end
+  end
+
+  @spec invoke_value(
+          module(),
+          atom(),
+          [term()],
+          ContributionCleanup.contribution_source() | nil,
+          (term() -> boolean()),
+          result
+        ) :: result
+        when result: var
+  defp invoke_value(module, function, args, {:extension, _name} = source, validator, fallback) do
+    case CallbackInvoker.invoke(source, module, function, args, :picker_callback) do
+      {:ok, returned} ->
+        validate_extension_value(source, module, function, returned, validator, fallback)
+
+      {:error, _failure} ->
+        fallback
+    end
+  end
+
+  defp invoke_value(module, function, args, _source, validator, _fallback) do
+    returned = apply(module, function, args)
+
+    if validator.(returned) do
+      returned
+    else
+      raise ArgumentError, invalid_core_return(module, function, returned)
+    end
+  end
+
+  @spec validate_extension_value(
+          CallbackInvoker.source(),
+          module(),
+          atom(),
+          term(),
+          (term() -> boolean()),
+          result
+        ) :: result
+        when result: var
+  defp validate_extension_value(source, module, function, returned, validator, fallback) do
+    if validator.(returned) do
+      returned
+    else
+      invalid_extension_value(source, module, function, returned, fallback)
+    end
+  end
+
+  @spec invalid_extension_value(CallbackInvoker.source(), module(), atom(), term(), result) ::
+          result
+        when result: var
+  defp invalid_extension_value(source, module, function, returned, fallback) do
+    _failure = CallbackInvoker.invalid_return(source, module, function, returned)
+    fallback
+  end
+
+  @spec invalid_core_return(module(), atom(), term()) :: String.t()
+  defp invalid_core_return(module, function, returned) do
+    "core picker callback #{inspect(module)}.#{function} returned invalid value: #{inspect(returned, limit: 20)}"
+  end
+
+  @spec valid_preview?(term()) :: boolean()
+  defp valid_preview?(nil), do: true
+  defp valid_preview?(lines) when is_list(lines), do: Enum.all?(lines, &valid_preview_line?/1)
+  defp valid_preview?(_returned), do: false
+
+  @spec valid_preview_line?(term()) :: boolean()
+  defp valid_preview_line?(line) when is_list(line),
+    do: Enum.all?(line, &valid_preview_segment?/1)
+
+  defp valid_preview_line?(_line), do: false
+
+  @spec valid_preview_segment?(term()) :: boolean()
+  defp valid_preview_segment?({text, color, bold?}),
+    do: is_binary(text) and is_integer(color) and is_boolean(bold?)
+
+  defp valid_preview_segment?(_segment), do: false
+
+  @spec valid_fetch_result?(term()) :: boolean()
+  defp valid_fetch_result?({:ok, items, meta}) when is_list(items) and is_map(meta) do
+    case Map.get(meta, :status) do
+      nil -> true
+      status -> is_binary(status)
+    end
+  end
+
+  defp valid_fetch_result?({:error, message}), do: is_binary(message)
+  defp valid_fetch_result?(_result), do: false
 
   @spec exported?(module(), atom(), non_neg_integer()) :: boolean()
   defp exported?(module, function, arity) do

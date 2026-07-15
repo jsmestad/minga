@@ -100,6 +100,43 @@ defmodule Minga.Extension.ArtifactAdmissionTest do
     assert other_claim.load_modules == [other_generated]
   end
 
+  test "exclusive trusted adoption preserves source collisions and releases aborted claims", %{
+    admission: admission
+  } do
+    owner = {:extension, unique_name(:exclusive_owner)}
+    candidate = {:extension, unique_name(:exclusive_candidate)}
+    fingerprint = :crypto.hash(:sha256, "exclusive-owner")
+
+    assert {:ok, owner_claim} =
+             ArtifactAdmission.claim_source_modules(owner, [Minga.Buffer], fingerprint,
+               server: admission,
+               trusted_application: :minga,
+               exclusive_adoption: true
+             )
+
+    assert {:error, {:module_owned_by_source, Minga.Buffer, ^owner, ^candidate}} =
+             ArtifactAdmission.claim_source_modules(
+               candidate,
+               [Minga.Buffer],
+               :crypto.hash(:sha256, "exclusive-candidate"),
+               server: admission,
+               trusted_application: :minga,
+               exclusive_adoption: true
+             )
+
+    assert :ok = ArtifactAdmission.abort_attempt(owner_claim, server: admission)
+
+    assert {:ok, _candidate_claim} =
+             ArtifactAdmission.claim_source_modules(
+               candidate,
+               [Minga.Buffer],
+               :crypto.hash(:sha256, "exclusive-candidate"),
+               server: admission,
+               trusted_application: :minga,
+               exclusive_adoption: true
+             )
+  end
+
   test "mixed trusted adoption collision is atomic", %{admission: admission} do
     owner = {:extension, unique_name(:mixed_owner)}
     candidate = {:extension, unique_name(:mixed_candidate)}

@@ -447,6 +447,11 @@ defmodule MingaEditor do
     {:reply, :ok, Renderer.render_or_async(state)}
   end
 
+  def handle_call({:unload_extension_source, source, context}, _from, state) do
+    {:ok, new_state} = SourceFinalizer.finalize_unload(state, source, context)
+    {:reply, :ok, Renderer.render_or_async(new_state)}
+  end
+
   def handle_call({:finalize_extension_source, source}, _from, state) do
     case SourceFinalizer.finalize(state, source) do
       {:ok, new_state} -> {:reply, :ok, Renderer.render_or_async(new_state)}

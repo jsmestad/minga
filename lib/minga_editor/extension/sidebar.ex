@@ -7,7 +7,7 @@ defmodule MingaEditor.Extension.Sidebar do
 
   use GenServer
 
-  alias Minga.Extension.CodeLease
+  alias Minga.Extension.CallbackInvoker
   alias Minga.Extension.ContributionCleanup
   alias Minga.Extension.InvocationContext
   alias MingaEditor.Extension.Sidebar.Entry
@@ -303,7 +303,8 @@ defmodule MingaEditor.Extension.Sidebar do
          {:ok, display_name} <- required_string(attrs, :display_name),
          {:ok, preferred_width} <- preferred_width(attrs),
          {:ok, placement} <- placement(attrs),
-         {:ok, semantic_kind} <- semantic_kind(attrs, id) do
+         {:ok, semantic_kind} <- semantic_kind(attrs, id),
+         :ok <- validate_action_handler(source, Map.get(attrs, :action_handler)) do
       {:ok,
        %Entry{
          source: source,
@@ -357,6 +358,32 @@ defmodule MingaEditor.Extension.Sidebar do
       _ -> {:error, {:invalid, :semantic_kind}}
     end
   end
+
+  @spec validate_action_handler(source(), term()) :: :ok | {:error, term()}
+  defp validate_action_handler(_source, nil), do: :ok
+
+  defp validate_action_handler({:extension, _name}, {module, function})
+       when is_atom(module) and is_atom(function),
+       do: :ok
+
+  defp validate_action_handler({:extension, _name}, {module, function, extra})
+       when is_atom(module) and is_atom(function) and is_list(extra),
+       do: :ok
+
+  defp validate_action_handler({:extension, _name}, handler),
+    do: {:error, {:extension_action_handler_requires_mfa, handler}}
+
+  defp validate_action_handler(_source, handler) when is_function(handler, 3), do: :ok
+
+  defp validate_action_handler(_source, {module, function})
+       when is_atom(module) and is_atom(function),
+       do: :ok
+
+  defp validate_action_handler(_source, {module, function, extra})
+       when is_atom(module) and is_atom(function) and is_list(extra),
+       do: :ok
+
+  defp validate_action_handler(_source, handler), do: {:error, {:invalid_action_handler, handler}}
 
   @spec normalize_snapshot(Snapshot.t() | keyword() | map()) :: Snapshot.t()
   defp normalize_snapshot(%Snapshot{} = snapshot), do: snapshot
@@ -486,41 +513,46 @@ defmodule MingaEditor.Extension.Sidebar do
   end
 
   defp run_action_handler(fun, source, state, action, context) when is_function(fun, 3) do
-    InvocationContext.with_source(source, fn -> fun.(state, action, context) end)
+    returned = InvocationContext.with_source(source, fn -> fun.(state, action, context) end)
+    validate_core_action_result(returned)
   end
 
   defp run_action_handler({module, function}, source, state, action, context) do
-    with_action_lease(source, module, fn ->
-      InvocationContext.with_source(source, fn ->
-        apply(module, function, [state, action, context])
-      end)
-    end)
+    invoke_action_mfa(source, module, function, [state, action, context], state)
   end
 
   defp run_action_handler({module, function, extra}, source, state, action, context) do
-    with_action_lease(source, module, fn ->
-      InvocationContext.with_source(source, fn ->
-        apply(module, function, [state, action, context | extra])
-      end)
-    end)
+    invoke_action_mfa(source, module, function, [state, action, context | extra], state)
   end
 
-  @spec with_action_lease(source(), module(), (-> MingaEditor.State.t())) :: MingaEditor.State.t()
-  defp with_action_lease({:extension, ext_name}, module, fun) do
-    case CodeLease.lease({:extension, ext_name}, module, :ui_action) do
-      {:ok, lease} ->
-        try do
-          fun.()
-        after
-          CodeLease.release(lease)
-        end
+  @spec invoke_action_mfa(source(), module(), atom(), [term()], MingaEditor.State.t()) ::
+          MingaEditor.State.t()
+  defp invoke_action_mfa({:extension, _name} = source, module, function, args, original_state) do
+    case CallbackInvoker.invoke(source, module, function, args, :sidebar_action) do
+      {:ok, %MingaEditor.State{} = updated_state} ->
+        updated_state
 
-      {:error, reason} ->
-        raise "extension #{ext_name} sidebar action module #{inspect(module)} unavailable: #{inspect(reason)}"
+      {:ok, returned} ->
+        _failure = CallbackInvoker.invalid_return(source, module, function, returned)
+        original_state
+
+      {:error, _failure} ->
+        original_state
     end
   end
 
-  defp with_action_lease(_source, _module, fun), do: fun.()
+  defp invoke_action_mfa(source, module, function, args, _original_state) do
+    source
+    |> InvocationContext.with_source(fn -> apply(module, function, args) end)
+    |> validate_core_action_result()
+  end
+
+  @spec validate_core_action_result(term()) :: MingaEditor.State.t()
+  defp validate_core_action_result(%MingaEditor.State{} = updated_state), do: updated_state
+
+  defp validate_core_action_result(returned) do
+    raise ArgumentError, "sidebar action returned invalid state: #{inspect(returned)}"
+  end
 
   @spec call_table(table(), term()) :: term()
   defp call_table(table, message) do
