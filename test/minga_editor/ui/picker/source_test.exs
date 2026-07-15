@@ -3,6 +3,10 @@ defmodule MingaEditor.UI.Picker.SourceTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.Extension.CodeLease
+  alias MingaEditor.Test.PickerCallbackProbe, as: CallbackProbe
+  alias MingaEditor.UI.Picker.Context
+  alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.ProjectSource
   alias MingaEditor.UI.Picker.Source
 
@@ -119,13 +123,20 @@ defmodule MingaEditor.UI.Picker.SourceTest do
     def on_cancel(state), do: state
 
     @impl true
-    def on_bulk_select(items, state), do: Map.put(state, :bulk_selected, items)
+    def on_bulk_select(items, state) do
+      send(self(), {:bulk_selected, items})
+      state
+    end
 
     @impl true
     def bulk_actions(_items), do: [{"Apply all", :apply_all}]
 
     @impl true
-    def on_bulk_action(:apply_all, items, state), do: Map.put(state, :bulk_action_items, items)
+    def on_bulk_action(:apply_all, items, state) do
+      send(self(), {:bulk_action_items, items})
+      state
+    end
+
     def on_bulk_action(_action, _items, state), do: state
   end
 
@@ -152,11 +163,14 @@ defmodule MingaEditor.UI.Picker.SourceTest do
 
   describe "bulk select helpers" do
     test "bulk_select returns unchanged state for source without bulk callback" do
-      assert Source.bulk_select(NoActionsSource, [:a], %{untouched: true}) == %{untouched: true}
+      state = base_state()
+      assert Source.bulk_select(NoActionsSource, [:a], state) == state
     end
 
     test "bulk_select delegates to source with bulk callback" do
-      assert Source.bulk_select(WithBulkSource, [:a, :b], %{}) == %{bulk_selected: [:a, :b]}
+      state = base_state()
+      assert Source.bulk_select(WithBulkSource, [:a, :b], state) == state
+      assert_receive {:bulk_selected, [:a, :b]}
     end
   end
 
@@ -170,15 +184,14 @@ defmodule MingaEditor.UI.Picker.SourceTest do
     end
 
     test "on_bulk_action returns unchanged state for source without bulk callbacks" do
-      assert Source.on_bulk_action(NoActionsSource, :apply_all, [:a], %{untouched: true}) == %{
-               untouched: true
-             }
+      state = base_state()
+      assert Source.on_bulk_action(NoActionsSource, :apply_all, [:a], state) == state
     end
 
     test "on_bulk_action delegates to source with bulk callbacks" do
-      assert Source.on_bulk_action(WithBulkSource, :apply_all, [:a, :b], %{}) == %{
-               bulk_action_items: [:a, :b]
-             }
+      state = base_state()
+      assert Source.on_bulk_action(WithBulkSource, :apply_all, [:a, :b], state) == state
+      assert_receive {:bulk_action_items, [:a, :b]}
     end
   end
 
@@ -224,4 +237,101 @@ defmodule MingaEditor.UI.Picker.SourceTest do
       assert Source.layout(ProjectSource) == :centered
     end
   end
+
+  describe "callback boundary validation" do
+    test "every extension picker shape reports invalid values and uses its domain fallback" do
+      source = activate_source(CallbackProbe)
+      state = base_state()
+      context = Context.from_editor_state(state)
+      item = %Item{id: :probe, label: "Probe"}
+      items = [item]
+
+      cases = [
+        {:title, fn -> Source.title(CallbackProbe, source) end, ""},
+        {:candidates, fn -> Source.candidates(CallbackProbe, context, source) end, []},
+        {:on_select, fn -> Source.on_select(CallbackProbe, item, state, source) end, state},
+        {:on_cancel, fn -> Source.on_cancel(CallbackProbe, state, source) end, state},
+        {:preview?, fn -> Source.preview?(CallbackProbe, source) end, false},
+        {:live_preview?, fn -> Source.live_preview?(CallbackProbe, source) end, false},
+        {:gui_preview?, fn -> Source.gui_preview?(CallbackProbe, source) end, false},
+        {:preview, fn -> Source.preview(CallbackProbe, item, %{}, source) end, nil},
+        {:actions, fn -> Source.actions(CallbackProbe, item, source) end, []},
+        {:on_action, fn -> Source.on_action(CallbackProbe, :open, item, state, source) end,
+         state},
+        {:on_bulk_select, fn -> Source.bulk_select(CallbackProbe, items, state, source) end,
+         state},
+        {:bulk_actions, fn -> Source.bulk_actions(CallbackProbe, items, source) end, []},
+        {:on_bulk_action,
+         fn -> Source.on_bulk_action(CallbackProbe, :open, items, state, source) end, state},
+        {:layout, fn -> Source.layout(CallbackProbe, source) end, :bottom},
+        {:keep_open_on_select?, fn -> Source.keep_open_on_select?(CallbackProbe, source) end,
+         false},
+        {:async?, fn -> Source.async?(CallbackProbe, source) end, false},
+        {:async_fetch, fn -> Source.fetch(CallbackProbe, context, source) end,
+         {:error, "Extension picker fetch failed"}},
+        {:enrich, fn -> Source.enrich(CallbackProbe, items, source) end, items}
+      ]
+
+      Enum.each(cases, fn {function, invoke, fallback} ->
+        Process.put({CallbackProbe, function}, :invalid_picker_return)
+        assert invoke.() === fallback, "expected fallback for #{function}"
+        Process.delete({CallbackProbe, function})
+      end)
+    end
+
+    test "core picker invalid values propagate for every callback shape" do
+      state = base_state()
+      context = Context.from_editor_state(state)
+      item = %Item{id: :probe, label: "Probe"}
+      items = [item]
+
+      cases = [
+        {:title, fn -> Source.title(CallbackProbe) end},
+        {:candidates, fn -> Source.candidates(CallbackProbe, context) end},
+        {:on_select, fn -> Source.on_select(CallbackProbe, item, state) end},
+        {:on_cancel, fn -> Source.on_cancel(CallbackProbe, state) end},
+        {:preview?, fn -> Source.preview?(CallbackProbe) end},
+        {:live_preview?, fn -> Source.live_preview?(CallbackProbe) end},
+        {:gui_preview?, fn -> Source.gui_preview?(CallbackProbe) end},
+        {:preview, fn -> Source.preview(CallbackProbe, item, %{}) end},
+        {:actions, fn -> Source.actions(CallbackProbe, item) end},
+        {:on_action, fn -> Source.on_action(CallbackProbe, :open, item, state) end},
+        {:on_bulk_select, fn -> Source.bulk_select(CallbackProbe, items, state) end},
+        {:bulk_actions, fn -> Source.bulk_actions(CallbackProbe, items) end},
+        {:on_bulk_action, fn -> Source.on_bulk_action(CallbackProbe, :open, items, state) end},
+        {:layout, fn -> Source.layout(CallbackProbe) end},
+        {:keep_open_on_select?, fn -> Source.keep_open_on_select?(CallbackProbe) end},
+        {:async?, fn -> Source.async?(CallbackProbe) end},
+        {:async_fetch, fn -> Source.fetch(CallbackProbe, context) end},
+        {:enrich, fn -> Source.enrich(CallbackProbe, items) end}
+      ]
+
+      Enum.each(cases, fn {function, invoke} ->
+        Process.put({CallbackProbe, function}, :invalid_picker_return)
+        assert_raise ArgumentError, ~r/core picker callback/, fn -> invoke.() end
+        Process.delete({CallbackProbe, function})
+      end)
+    end
+  end
+
+  defp activate_source(module) do
+    source = {:extension, unique_name(:picker_source)}
+    :ok = CodeLease.activate_source(source, [module])
+
+    on_exit(fn ->
+      case CodeLease.quiesce_source(source) do
+        {:ok, token} -> CodeLease.complete_unload(token)
+        {:error, _reason} -> :ok
+      end
+    end)
+
+    source
+  end
+
+  defp base_state do
+    MingaEditor.RenderPipeline.TestHelpers.base_state(rendering: :disabled)
+  end
+
+  defp unique_name(prefix),
+    do: String.to_atom("#{prefix}_#{System.unique_integer([:positive])}")
 end

@@ -3,7 +3,8 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGeneration do
 
   @behaviour MingaEditor.Effect
 
-  alias Minga.Extension.ContributionCleanup
+  alias Minga.Extension.CallbackInvoker
+  alias Minga.Extension.CodeLease
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.Effect.Policy
   alias MingaEditor.Effect.Request
@@ -17,7 +18,7 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGeneration do
   @timeout_ms 15_000
   @generator MingaGitPorcelain.Git.CommitMessageGenerator
 
-  @type source :: ContributionCleanup.contribution_source() | nil
+  @type source :: CallbackInvoker.source()
 
   @enforce_keys [:source, :git, :generator, :project, :admission]
   defstruct [:source, :git, :generator, :project, :admission]
@@ -27,20 +28,20 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGeneration do
           git: module(),
           generator: module(),
           project: module(),
-          admission: module()
+          admission: GenServer.server()
         }
 
   @doc "Builds a single-slot commit-generation request."
   @spec request(keyword()) :: Request.t()
   def request(opts \\ []) when is_list(opts) do
-    source = Keyword.get(opts, :source, @source)
+    {:extension, _name} = source = Keyword.get(opts, :source, @source)
 
     effect = %__MODULE__{
       source: source,
       git: Keyword.get(opts, :git, Git),
       generator: Keyword.get(opts, :generator, @generator),
       project: Keyword.get(opts, :project, Minga.Project),
-      admission: Keyword.get(opts, :admission, MingaEditor.UI.Picker.Source)
+      admission: Keyword.get(opts, :admission, CodeLease)
     }
 
     Request.new(effect, {:git_porcelain_commit_generation, source}, Policy.fifo(0),
@@ -49,12 +50,36 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGeneration do
     )
   end
 
-  @doc "Resolves the repository and staged diff before invoking the generator."
+  @doc "Runs generation work through the extension callback trust boundary."
   @impl true
   @spec run(t()) :: {:ok, {:generated, String.t()}} | {:error, term()}
   def run(%__MODULE__{source: source, admission: admission} = effect) do
-    with :ok <- admission.verify_admission(source),
-         {:ok, root} <- resolve_root(effect),
+    case CallbackInvoker.invoke(
+           source,
+           __MODULE__,
+           :execute,
+           [effect],
+           :effect_execution,
+           admission
+         ) do
+      {:ok, {:ok, {:generated, message}} = result} when is_binary(message) ->
+        result
+
+      {:ok, {:error, _reason} = error} ->
+        error
+
+      {:ok, returned} ->
+        {:error, CallbackInvoker.invalid_return(source, __MODULE__, :execute, returned)}
+
+      {:error, failure} ->
+        {:error, failure}
+    end
+  end
+
+  @doc false
+  @spec execute(t()) :: {:ok, {:generated, String.t()}} | {:error, term()}
+  def execute(%__MODULE__{} = effect) do
+    with {:ok, root} <- resolve_root(effect),
          {:ok, diff} <- staged_diff(effect.git, root),
          {:non_empty, true} <- {:non_empty, diff != ""},
          {:ok, message} <- generate(effect.generator, diff) do
@@ -159,14 +184,26 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGeneration do
   defp failure_message({:start_failed, reason}),
     do: "Commit message generation failed to start: #{inspect(reason)}"
 
-  defp failure_message({:source_admission_denied, _source}),
-    do: "Commit message generation canceled"
+  defp failure_message({:source_unavailable, source, _module, _function, reason}),
+    do: "Commit message source unavailable: #{inspect(source)} (#{inspect(reason)})"
+
+  defp failure_message({:callback_failed, _source, _module, _function, kind, reason}),
+    do: "Commit message generation callback #{kind}: #{format_callback_reason(reason)}"
+
+  defp failure_message({:invalid_return, _source, _module, _function, returned}),
+    do: "Commit message generation callback returned invalid value: #{inspect(returned)}"
 
   defp failure_message(reason), do: "Commit message generation failed: #{inspect(reason)}"
 
   @spec generation_failure_message(term()) :: String.t()
   defp generation_failure_message(reason) when is_binary(reason), do: reason
   defp generation_failure_message(reason), do: "AI generation failed: #{inspect(reason)}"
+
+  @spec format_callback_reason(term()) :: String.t()
+  defp format_callback_reason(%{__exception__: true} = exception),
+    do: Exception.message(exception)
+
+  defp format_callback_reason(reason), do: inspect(reason)
 
   @spec format_reason(term()) :: String.t()
   defp format_reason(reason) when is_binary(reason), do: reason

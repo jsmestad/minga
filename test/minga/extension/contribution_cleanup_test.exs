@@ -52,6 +52,38 @@ defmodule Minga.Extension.ContributionCleanupTest do
     assert_receive {:later_family_cleaned, ^source}
   end
 
+  test "contextual finalizers receive authority only during targeted finalization", %{
+    keymap: keymap
+  } do
+    source = {:extension, :cleanup_test}
+    token = make_ref()
+    test_pid = self()
+
+    callbacks = %{
+      editor_extension_unload: fn callback_source, context ->
+        send(test_pid, {:extension_unload, callback_source, context})
+        :ok
+      end
+    }
+
+    assert :ok =
+             ContributionCleanup.finalize_source(source, :editor_extension_unload,
+               callbacks: callbacks,
+               context: %{token: token}
+             )
+
+    assert_receive {:extension_unload, ^source, %{token: ^token}}
+
+    assert :ok =
+             ContributionCleanup.unregister_source(source,
+               command_registry: Minga.Command.Registry,
+               keymap: keymap,
+               callbacks: callbacks
+             )
+
+    refute_receive {:extension_unload, ^source, _context}
+  end
+
   test "continues cleanup after one family fails and reports the failure", %{keymap: keymap} do
     source = {:extension, :cleanup_test}
     test_pid = self()

@@ -163,10 +163,8 @@ defmodule MingaEditor.Sidebar.BuiltinSurfaces do
 
   @spec execute_git_porcelain_command(EditorState.t(), atom()) :: EditorState.t()
   defp execute_git_porcelain_command(state, command) do
-    module = :"Elixir.MingaGitPorcelain.Commands"
-
-    if git_porcelain_running?() and Code.ensure_loaded?(module) do
-      :erlang.apply(module, :execute, [state, command])
+    if git_porcelain_running?() do
+      Commands.execute(state, command)
     else
       git_porcelain_unavailable(state)
     end

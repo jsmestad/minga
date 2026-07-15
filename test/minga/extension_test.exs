@@ -145,6 +145,47 @@ defmodule Minga.ExtensionTest do
     end
   end
 
+  describe "editor_event_handler/3 DSL macro" do
+    defmodule EventExtension do
+      use Minga.Extension
+
+      editor_event_handler(__MODULE__, [:buffer_saved, :editor_action, :source_unload],
+        priority: 42
+      )
+
+      @impl true
+      def name, do: :event_ext
+
+      @impl true
+      def description, do: "Runtime event extension"
+
+      @impl true
+      def version, do: "0.1.0"
+
+      @impl true
+      def init(_config), do: {:ok, %{}}
+    end
+
+    test "retains only the public runtime event families in declaration order" do
+      assert EventExtension.__editor_event_handler_schema__() == [
+               {EventExtension, [:buffer_saved, :editor_action, :source_unload], [priority: 42]}
+             ]
+
+      {:ok, types} = Code.Typespec.fetch_types(Minga.Extension)
+
+      assert {:type, {:editor_event_family, family_type, []}} =
+               Enum.find(types, fn
+                 {:type, {:editor_event_family, _type, []}} -> true
+                 _other -> false
+               end)
+
+      assert {:editor_event_family, family_type, []}
+             |> Code.Typespec.type_to_quoted()
+             |> Macro.to_string() ==
+               "editor_event_family() :: :buffer_saved | :editor_action | :source_unload"
+    end
+  end
+
   describe "extension without options, commands, or keybindings" do
     defmodule BareExtension do
       use Minga.Extension

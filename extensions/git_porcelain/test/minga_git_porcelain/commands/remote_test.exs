@@ -7,6 +7,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
   # Uses the global shell/scope registries and the shared Git stub table.
   use ExUnit.Case, async: false
 
+  alias Minga.Extension.CodeLease
   alias Minga.Extension.InvocationContext
   alias Minga.Git.Stub
   alias Minga.Keymap.Scope
@@ -29,10 +30,13 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
   alias MingaGitPorcelain.Test.EffectDependencies, as: Dependencies
 
   @source {:extension, :minga_git_porcelain}
+  @admission Module.concat(__MODULE__, Admission)
   @timeout 2_000
 
   setup do
     Dependencies.reset(self())
+    start_supervised!({CodeLease, name: @admission})
+    :ok = CodeLease.activate_source(@source, [RemoteOperation], server: @admission)
     MingaGitPorcelain.Feature.register_contributions()
     previous_root = Minga.Project.workspace_root()
     git_root = Path.join(System.tmp_dir!(), "git_remote_#{System.unique_integer([:positive])}")
@@ -121,7 +125,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
         with_source(fn ->
           Commands.schedule_remote(state, operation,
             git: Dependencies,
-            admission: Dependencies,
+            admission: @admission,
             refresher: Dependencies
           )
         end)
@@ -164,7 +168,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
       with_source(fn ->
         Commands.schedule_remote(state, :push,
           git: Dependencies,
-          admission: Dependencies,
+          admission: @admission,
           refresher: Dependencies
         )
       end)
@@ -183,6 +187,36 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
     assert_receive {:dependency_called, :refresh, _apply_pid, ^git_root}, @timeout
   end
 
+  test "source unavailability is explicit and prevents remote work", %{git_root: git_root} do
+    {:ok, _token} = CodeLease.quiesce_source(@source, server: @admission)
+    {state, scheduler} = build_state()
+
+    returned =
+      with_source(fn ->
+        Commands.schedule_remote(state, :push,
+          git: Dependencies,
+          admission: @admission,
+          refresher: Dependencies
+        )
+      end)
+
+    _running = receive_running(scheduler, :push)
+    {result, outcome} = receive_and_apply(returned, scheduler, :failed)
+
+    assert match?(
+             {:source_unavailable, @source, RemoteOperation, :execute, _},
+             outcome.reason
+           )
+
+    assert String.starts_with?(
+             result.shell_runtime.state.notice.message,
+             "Push failed: source unavailable"
+           )
+
+    refute_received {:dependency_called, {:remote, :push}, _worker, ^git_root}
+    assert CodeLease.active_leases(server: @admission) == []
+  end
+
   test "pull-and-retry stops after pull failure and reports retry push failure", %{
     git_root: git_root
   } do
@@ -194,7 +228,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
       returned =
         Commands.schedule_remote(state, :pull_and_retry,
           git: Dependencies,
-          admission: Dependencies,
+          admission: @admission,
           refresher: Dependencies
         )
 
@@ -223,9 +257,11 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
     end
   end
 
-  test "worker crash and timeout settle once, report failure, and refresh", %{git_root: git_root} do
+  test "callback failure and timeout settle once, report failure, and refresh", %{
+    git_root: git_root
+  } do
     for {action, expected_message} <- [
-          {{:raise, "remote boom"}, "Git operation failed unexpectedly:"},
+          {{:raise, "remote boom"}, "Fetch failed: extension callback exception: remote boom"},
           {{:block, :ok}, "Git operation timed out"}
         ] do
       Dependencies.reset(self())
@@ -236,7 +272,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
         with_source(fn ->
           Commands.schedule_remote(state, :fetch,
             git: Dependencies,
-            admission: Dependencies,
+            admission: @admission,
             refresher: Dependencies,
             timeout_ms: 60_000
           )
@@ -251,8 +287,16 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
         assert_receive {:DOWN, ^worker_monitor, :process, ^worker, _reason}, @timeout
       end
 
-      {result, _outcome} = receive_and_apply(returned, scheduler, :failed)
+      {result, outcome} = receive_and_apply(returned, scheduler, :failed)
       assert String.starts_with?(result.shell_runtime.state.notice.message, expected_message)
+
+      if match?({:raise, _}, action) do
+        assert match?(
+                 {:callback_failed, @source, RemoteOperation, :execute, :exception, _},
+                 outcome.reason
+               )
+      end
+
       assert %{level: :error, action: nil} = Runtime.state(result.shell_runtime).git_toast
       assert_receive {:dependency_called, :refresh, _apply_pid, ^git_root}, @timeout
       assert EffectScheduler.stats(scheduler).admitted == 0
@@ -269,7 +313,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
       with_source(fn ->
         Commands.schedule_remote(state, :pull,
           git: Dependencies,
-          admission: Dependencies,
+          admission: @admission,
           refresher: Dependencies,
           timeout_ms: 60_000
         )
@@ -306,7 +350,7 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
       with_source(fn ->
         Commands.schedule_remote(state, :push,
           git: Dependencies,
-          admission: Dependencies,
+          admission: @admission,
           refresher: Dependencies
         )
       end)

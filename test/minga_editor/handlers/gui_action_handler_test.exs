@@ -8,6 +8,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   import ExUnit.CaptureLog
 
   alias Minga.Events
+  alias Minga.Extension.CodeLease
   alias Minga.RenderModel.UI.ExtensionPanel.Content.Text
   alias MingaEditor.Agent.SemanticUI.Registry, as: SemanticUIRegistry
   alias MingaEditor.Commands
@@ -19,6 +20,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   alias MingaEditor.Handlers.GuiActionHandler
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.Shell.Entry
+  alias MingaEditor.Test.SidebarActionProbe
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.Observatory
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
@@ -357,16 +359,19 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   end
 
   test "native GUI sidebar actions route to extension-owned sidebars", %{sidebar_registry: table} do
+    source = {:extension, :gui_action_test}
+    :ok = CodeLease.activate_source(source, [SidebarActionProbe])
+
+    on_exit(fn ->
+      {:ok, token} = CodeLease.quiesce_source(source)
+      CodeLease.complete_unload(token)
+    end)
+
     assert :ok =
-             Sidebar.register(table, {:extension, :gui_action_test}, %{
+             Sidebar.register(table, source, %{
                id: "outline",
                display_name: "Outline",
-               action_handler: fn state, action, context ->
-                 MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
-                   state,
-                   "#{action}:#{context.kind}"
-                 )
-               end
+               action_handler: {SidebarActionProbe, :publish_notice}
              })
 
     state = base_state(table)

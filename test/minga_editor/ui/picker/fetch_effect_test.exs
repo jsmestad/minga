@@ -3,6 +3,7 @@ defmodule MingaEditor.UI.Picker.FetchEffectTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.Extension.CodeLease
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.Effect.Policy
   alias MingaEditor.PickerUI
@@ -96,17 +97,29 @@ defmodule MingaEditor.UI.Picker.FetchEffectTest do
     assert_receive {:picker_source_called, :success}
   end
 
-  test "run normalizes callback raise, throw, and exit failures" do
-    assert {:error, {:picker_source_exception, "raised fetch"}} = FetchEffect.run(effect(:raise))
-    assert {:error, {:picker_source_throw, :thrown_fetch}} = FetchEffect.run(effect(:throw))
-    assert {:error, {:picker_source_exit, :exited_fetch}} = FetchEffect.run(effect(:exit))
+  test "core callback raise, throw, and exit failures propagate" do
+    assert_raise RuntimeError, "raised fetch", fn -> FetchEffect.run(effect(:raise)) end
+    assert catch_throw(FetchEffect.run(effect(:throw))) == :thrown_fetch
+    assert catch_exit(FetchEffect.run(effect(:exit))) == :exited_fetch
+  end
+
+  test "extension callback failures are contained with the documented fetch fallback" do
+    source = activate_source(Source)
+
+    for action <- [:raise, :throw, :exit] do
+      extension_effect = %{effect(action) | callback_source: source}
+      assert {:error, "Extension picker fetch failed"} = FetchEffect.run(extension_effect)
+      assert_receive {:picker_source_called, ^action}
+    end
+
+    assert CodeLease.active_leases(source: source) == []
   end
 
   test "source admission denial prevents the extension callback from running" do
     denied_source = {:extension, :missing_picker_extension}
     effect = %{effect(:success) | callback_source: denied_source}
 
-    assert {:error, {:source_admission_denied, ^denied_source}} = FetchEffect.run(effect)
+    assert {:error, "Extension picker fetch failed"} = FetchEffect.run(effect)
     refute_received {:picker_source_called, :success}
   end
 
@@ -197,6 +210,20 @@ defmodule MingaEditor.UI.Picker.FetchEffectTest do
     |> Context.from_editor_state(%{test_pid: self(), action: action})
   end
 
+  defp activate_source(module) do
+    source = {:extension, unique_name(:fetch_source)}
+    :ok = CodeLease.activate_source(source, [module])
+
+    on_exit(fn ->
+      case CodeLease.quiesce_source(source) do
+        {:ok, token} -> CodeLease.complete_unload(token)
+        {:error, _reason} -> :ok
+      end
+    end)
+
+    source
+  end
+
   defp effect(action) do
     %FetchEffect{
       source: Source,
@@ -205,4 +232,7 @@ defmodule MingaEditor.UI.Picker.FetchEffectTest do
       revision: make_ref()
     }
   end
+
+  defp unique_name(prefix),
+    do: String.to_atom("#{prefix}_#{System.unique_integer([:positive])}")
 end

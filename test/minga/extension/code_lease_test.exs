@@ -131,25 +131,33 @@ defmodule Minga.Extension.CodeLeaseTest do
     assert_receive {:callback_entered, callback_pid}, 5_000
     assert_eventually_lease_count(running_entry.module, ctx.code_lease, 1, 20)
 
-    assert :ok =
-             ExtSupervisor.stop_extension(
-               ext_ctx.supervisor,
-               ext_ctx.registry,
-               :leased_command,
-               running_entry,
-               command_registry: ext_ctx.command_registry,
-               keymap: ext_ctx.keymap,
-               code_lease: ctx.code_lease,
-               artifact_admission: ext_ctx.artifact_admission
-             )
+    stop_task =
+      Task.async(fn ->
+        ExtSupervisor.stop_extension(
+          ext_ctx.supervisor,
+          ext_ctx.registry,
+          :leased_command,
+          running_entry,
+          command_registry: ext_ctx.command_registry,
+          keymap: ext_ctx.keymap,
+          code_lease: ctx.code_lease,
+          artifact_admission: ext_ctx.artifact_admission
+        )
+      end)
 
+    assert Task.yield(stop_task, 20) == nil
+    send(callback_pid, :continue)
+    callback_module = running_entry.module
+
+    assert {:extension_callback, {:extension, :leased_command}, ^callback_module, :run,
+            {:ok, %{}}} =
+             Task.await(task)
+
+    assert :ok = Task.await(stop_task)
     assert Code.ensure_loaded?(running_entry.module)
     {:ok, stopped_entry} = ExtRegistry.get(ext_ctx.registry, :leased_command)
     assert stopped_entry.status == :stopped
     assert stopped_entry.module == running_entry.module
-
-    send(callback_pid, :continue)
-    assert %{} = Task.await(task)
     assert_eventually_no_leases(running_entry.module, ctx.code_lease, 20)
   end
 
@@ -203,27 +211,33 @@ defmodule Minga.Extension.CodeLeaseTest do
                server: ctx.code_lease
              )
 
-    assert :ok =
-             ExtSupervisor.stop_extension(
-               ext_ctx.supervisor,
-               ext_ctx.registry,
-               :leased_stop,
-               running_entry,
-               command_registry: ext_ctx.command_registry,
-               keymap: ext_ctx.keymap,
-               code_lease: ctx.code_lease,
-               artifact_admission: ext_ctx.artifact_admission
-             )
+    stop_task =
+      Task.async(fn ->
+        ExtSupervisor.stop_extension(
+          ext_ctx.supervisor,
+          ext_ctx.registry,
+          :leased_stop,
+          running_entry,
+          command_registry: ext_ctx.command_registry,
+          keymap: ext_ctx.keymap,
+          code_lease: ctx.code_lease,
+          artifact_admission: ext_ctx.artifact_admission
+        )
+      end)
 
-    {:ok, stopped} = ExtRegistry.get(ext_ctx.registry, :leased_stop)
-    assert stopped.status == :stopped
-    assert stopped.module == running_entry.module
+    assert Task.yield(stop_task, 20) == nil
     assert Code.ensure_loaded?(running_entry.module)
 
     assert [_summary] =
              CodeLease.active_leases(module: running_entry.module, server: ctx.code_lease)
 
     assert :ok = CodeLease.release(lease)
+    assert :ok = Task.await(stop_task)
+
+    {:ok, stopped} = ExtRegistry.get(ext_ctx.registry, :leased_stop)
+    assert stopped.status == :stopped
+    assert stopped.module == running_entry.module
+    assert Code.ensure_loaded?(running_entry.module)
   end
 
   @spec start_extension_context() :: map()

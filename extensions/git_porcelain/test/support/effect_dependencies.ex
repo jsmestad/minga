@@ -25,10 +25,6 @@ defmodule MingaGitPorcelain.Test.EffectDependencies do
     :ok
   end
 
-  @doc "Accepts scheduler work without consulting the global extension registry."
-  @spec verify_admission(term()) :: :ok | {:error, term()}
-  def verify_admission(source), do: call(:admission, source, {:return, :ok})
-
   @doc "Returns the configured project root."
   @spec resolve_root() :: String.t()
   def resolve_root, do: call(:project_root, nil, {:return, "/tmp/project"})

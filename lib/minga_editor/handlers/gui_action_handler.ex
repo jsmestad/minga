@@ -30,6 +30,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaEditor.GitRepositoryResolver
   alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
   alias MingaEditor.Commands
+  alias MingaEditor.Extension.EventDispatcher, as: ExtensionEventDispatcher
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Handlers.BufferRegistry
   alias MingaEditor.HighlightSync
@@ -1269,10 +1270,8 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   @spec execute_git_porcelain_command(state(), atom()) :: state()
   defp execute_git_porcelain_command(state, command) do
-    module = :"Elixir.MingaGitPorcelain.Commands"
-
-    if git_porcelain_running?() and Code.ensure_loaded?(module) do
-      :erlang.apply(module, :execute, [state, command])
+    if git_porcelain_running?() do
+      Commands.execute(state, command)
     else
       git_porcelain_unavailable(state)
     end
@@ -1281,21 +1280,24 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   @spec open_git_diff_for_path(state(), String.t(), String.t(), String.t(), String.t(), keyword()) ::
           state()
   defp open_git_diff_for_path(state, git_root, git_path, abs_path, current_content, opts) do
-    module = :"Elixir.MingaGitPorcelain.Commands"
+    arguments = {git_root, git_path, abs_path, current_content, opts}
 
-    if git_porcelain_running?() and Code.ensure_loaded?(module) and
-         function_exported?(module, :open_diff_for_path, 6) do
-      :erlang.apply(module, :open_diff_for_path, [
-        state,
-        git_root,
-        git_path,
-        abs_path,
-        current_content,
-        opts
-      ])
-    else
-      git_porcelain_unavailable(state)
+    case ExtensionEventDispatcher.dispatch_editor_action(
+           state,
+           :open_git_diff_for_path,
+           arguments
+         ) do
+      {:handled, updated_state} -> updated_state
+      :not_matched -> git_porcelain_unavailable(state)
+      {:callback_failed, _failure} -> git_porcelain_callback_failed(state)
     end
+  end
+
+  @spec git_porcelain_callback_failed(state()) :: state()
+  defp git_porcelain_callback_failed(state) do
+    message = "Git porcelain extension callback failed"
+    Minga.Log.warning(:editor, message)
+    NoticeWorkflow.publish(state, message)
   end
 
   @spec git_porcelain_unavailable(state()) :: state()

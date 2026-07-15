@@ -111,6 +111,7 @@ defmodule Minga.Application do
     base_children =
       [
         MingaEditor.Shell.Registry,
+        Minga.Extension.CallbackRegistry,
         Minga.Foundation.Supervisor,
         {Registry, keys: :unique, name: Minga.Buffer.Registry},
         {DynamicSupervisor, name: Minga.Buffer.Supervisor, strategy: :one_for_one},

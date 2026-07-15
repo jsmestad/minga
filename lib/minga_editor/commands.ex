@@ -25,6 +25,9 @@ defmodule MingaEditor.Commands do
   """
 
   alias Minga.Buffer
+  alias Minga.Extension.CallbackInvoker
+  alias Minga.Extension.InvocationContext
+  alias MingaEditor.Extension.EventDispatcher, as: ExtensionEventDispatcher
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Shell.Traditional.ToolPrompts
   alias MingaEditor.Shell.Traditional.ToolPromptWorkflow
@@ -710,9 +713,47 @@ defmodule MingaEditor.Commands do
   defp execute_checked(state, cmd, %Command{execute: fun}) do
     state = maybe_mark_authoritative_scroll(state, cmd)
 
-    Minga.Telemetry.span([:minga, :command, :execute], %{command: cmd}, fn ->
-      fun.(state)
-    end)
+    result =
+      Minga.Telemetry.span([:minga, :command, :execute], %{command: cmd}, fn ->
+        fun.(state)
+      end)
+
+    normalize_registered_command_result(result, state)
+  end
+
+  @spec normalize_registered_command_result(term(), state()) :: state() | {state(), action()}
+  defp normalize_registered_command_result(
+         {:extension_callback, _source, _module, _function,
+          {:ok, %EditorState{} = updated_state}},
+         _original_state
+       ),
+       do: updated_state
+
+  defp normalize_registered_command_result(
+         {:extension_callback, source, module, function, {:ok, returned}},
+         original_state
+       ) do
+    _failure = CallbackInvoker.invalid_return(source, module, function, returned)
+    original_state
+  end
+
+  defp normalize_registered_command_result(
+         {:extension_callback, _source, _module, _function, {:error, _failure}},
+         original_state
+       ),
+       do: original_state
+
+  defp normalize_registered_command_result(%EditorState{} = state, _original_state), do: state
+
+  defp normalize_registered_command_result(
+         {%EditorState{} = state, action},
+         _original_state
+       ),
+       do: {state, action}
+
+  defp normalize_registered_command_result(returned, _original_state) do
+    raise ArgumentError,
+          "registered core command returned invalid state: #{inspect(returned, limit: 20)}"
   end
 
   # Bumps the active window's authoritative-scroll marker before an
@@ -775,7 +816,9 @@ defmodule MingaEditor.Commands do
     source = :"Elixir.MingaGitPorcelain.UI.Picker.GitBranchSource"
 
     if git_porcelain_running?() and Code.ensure_loaded?(source) do
-      MingaEditor.PickerUI.open(state, source)
+      InvocationContext.with_source({:extension, :minga_git_porcelain}, fn ->
+        MingaEditor.PickerUI.open(state, source)
+      end)
     else
       state
     end
@@ -783,10 +826,16 @@ defmodule MingaEditor.Commands do
 
   @spec execute_git_porcelain_command(state(), atom() | tuple()) :: state()
   defp execute_git_porcelain_command(state, command) do
-    module = :"Elixir.MingaGitPorcelain.Commands"
-
-    if git_porcelain_running?() and Code.ensure_loaded?(module) do
-      :erlang.apply(module, :execute, [state, command])
+    if git_porcelain_running?() do
+      case ExtensionEventDispatcher.dispatch_editor_action(
+             state,
+             :execute_git_command,
+             command
+           ) do
+        {:handled, updated_state} -> updated_state
+        :not_matched -> state
+        {:callback_failed, _failure} -> state
+      end
     else
       state
     end
