@@ -103,6 +103,7 @@ defmodule MingaEditor.Agent.IngestTest do
 
       # First delta arms the window via the leading-edge flush.
       send(ingest, {:agent_event, session, {:text_delta, "0"}})
+      sync(ingest)
       assert_receive {:agent_stream_batch, ^session, [{:text_delta, "0"}]}
 
       # These three accumulate while the window is open.
@@ -288,6 +289,7 @@ defmodule MingaEditor.Agent.IngestTest do
       session = fake_session()
 
       send(ingest, {:agent_event, session, {:text_delta, "lead"}})
+      sync(ingest)
       assert_receive {:agent_stream_batch, ^session, [{:text_delta, "lead"}]}
 
       send(ingest, {:agent_event, session, {:text_delta, "a"}})
@@ -308,6 +310,7 @@ defmodule MingaEditor.Agent.IngestTest do
       session = fake_session()
 
       send(ingest, {:agent_event, session, {:text_delta, "lead"}})
+      sync(ingest)
       assert_receive {:agent_stream_batch, ^session, [{:text_delta, "lead"}]}
 
       # "hello" is 5 bytes, exceeding the 3-byte cap. The count > 0 guard in
@@ -355,6 +358,7 @@ defmodule MingaEditor.Agent.IngestTest do
       # Open a window and accumulate so there is a live per-session entry (with an
       # armed timer) to clean up.
       send(ingest, {:agent_event, session, {:text_delta, "lead"}})
+      sync(ingest)
       assert_receive {:agent_stream_batch, ^session, [{:text_delta, "lead"}]}
       send(ingest, {:agent_event, session, {:text_delta, "trailing"}})
       sync(ingest)

@@ -211,7 +211,8 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
   test "session error cancellation path tolerates a session that exited before queue recall" do
     session = spawn(fn -> :ok end)
     monitor = Process.monitor(session)
-    assert_receive {:DOWN, ^monitor, :process, ^session, :normal}
+    assert_receive {:DOWN, ^monitor, :process, ^session, reason}
+    assert reason in [:normal, :noproc]
     state = event_state(session)
 
     state = SessionEventWorkflow.error(state, "provider failed")

@@ -10,6 +10,7 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
   alias Minga.Core.WrapMap
   alias Minga.RenderModel.Cursor
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.View.PromptRenderWindow
   alias MingaEditor.Agent.ViewContext
   alias MingaEditor.RenderPipeline.WindowContent
@@ -142,6 +143,17 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
       window = Window.new_agent_chat(win_id, 24, 80)
       windows = %{state.workspace.windows | map: %{win_id => window}}
       agent_ui = UIState.new() |> MingaEditor.Agent.PromptBuffer.ensure()
+
+      transcript = %{
+        line_index: [{0, :text}, {0, :code}, {1, :tool}],
+        display_messages: [],
+        display_message_pairs: [],
+        markdown: "",
+        line_offsets: []
+      }
+
+      panel = Panel.cache_transcript_display(agent_ui.panel, transcript, nil)
+      agent_ui = UIState.replace_panel(agent_ui, panel)
       state = %{state | workspace: %{state.workspace | windows: windows, agent_ui: agent_ui}}
       intent = Intent.from_editor_state(state)
       renderer = RendererState.new(editor_pid: nil, pipeline: &RenderPipeline.run/1)
@@ -162,6 +174,11 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
       assert updated_window.viewport.rows == prompt_row - content_row - 1
       assert updated_window.viewport.cols == prompt_width
       assert updated_window.viewport.reserved == 0
+
+      assert output.workspace.agent_ui.panel.scroll.metrics == %{
+               total_lines: 3,
+               visible_height: updated_window.viewport.rows
+             }
 
       default_prompt =
         PromptRenderWindow.build(
