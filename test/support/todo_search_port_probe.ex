@@ -5,9 +5,16 @@ defmodule Minga.Test.TodoSearchPortProbe do
 
   @mode_key {__MODULE__, :mode}
 
+  @type mode :: :success | :failure | {:search_output, String.t()}
+
   @doc "Configures the probe response mode for the calling test process."
-  @spec configure(:success | :failure) :: :ok
+  @spec configure(mode()) :: :ok
   def configure(mode) when mode in [:success, :failure] do
+    Process.put(@mode_key, mode)
+    :ok
+  end
+
+  def configure({:search_output, output} = mode) when is_binary(output) do
     Process.put(@mode_key, mode)
     :ok
   end
@@ -20,11 +27,15 @@ defmodule Minga.Test.TodoSearchPortProbe do
     response(Process.get(@mode_key, :success), command, args)
   end
 
-  @spec response(:success | :failure, String.t(), [String.t()]) ::
-          {String.t(), non_neg_integer()}
+  @spec response(mode(), String.t(), [String.t()]) :: {String.t(), non_neg_integer()}
   defp response(:success, "git", [_flag, _root, "rev-parse" | _rest]), do: {"true\n", 0}
-  defp response(:success, "git", _args), do: {"lib/example.ex:1:# TODO probe\n", 0}
-  defp response(:success, _command, _args), do: {"example.ex:1:# TODO probe\n", 0}
+  defp response(:success, "git", _args), do: {"lib/example.ex\0" <> "1\0# TODO probe\n", 0}
+  defp response(:success, _command, _args), do: {"example.ex\0" <> "1:# TODO probe\n", 0}
   defp response(:failure, "git", [_flag, _root, "rev-parse" | _rest]), do: {"", 1}
   defp response(:failure, _command, _args), do: {"probe failure", 2}
+
+  defp response({:search_output, _output}, "git", [_flag, _root, "rev-parse" | _rest]),
+    do: {"true\n", 0}
+
+  defp response({:search_output, output}, _command, _args), do: {output, 0}
 end

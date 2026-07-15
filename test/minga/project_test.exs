@@ -109,7 +109,10 @@ defmodule Minga.ProjectTest do
       {_pid, name} = start_project!(file_find_module: Minga.Project.SlowFileFind)
       Minga.Events.subscribe(:project_rebuilt)
 
-      assert {:ok, %WorkspaceSnapshot{rebuilding?: true}} = Project.activate(name, root)
+      assert {:ok, %WorkspaceSnapshot{rebuilding?: true} = activated} =
+               Project.activate(name, root)
+
+      activation_id = activated.activation_id
       worker = flush(name).rebuild_pid
       worker_ref = Process.monitor(worker)
 
@@ -123,6 +126,7 @@ defmodule Minga.ProjectTest do
 
       assert %WorkspaceSnapshot{
                root: ^root,
+               activation_id: ^activation_id,
                files: ["lib/app.ex", "README.md"],
                rebuilding?: false
              } = Project.snapshot(name)

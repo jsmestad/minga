@@ -4,6 +4,7 @@ defmodule MingaEditor.EffectSchedulerTest do
   use ExUnit.Case, async: true
 
   alias Minga.Project.Root
+  alias Minga.Project.WorkspaceSnapshot
   alias Minga.Test.EffectOwner
   alias Minga.Test.EffectProbe
   alias MingaEditor.Effect.Outcome
@@ -17,11 +18,13 @@ defmodule MingaEditor.EffectSchedulerTest do
 
   test "TODO requests retain their typed Root through scheduler failure outcomes" do
     root = %Root{kind: :directory, path: "/missing/todo-search-root"}
-    request = TodoSearch.request(root, make_ref())
+    snapshot = WorkspaceSnapshot.activate(root)
+    request = TodoSearch.request(snapshot, make_ref())
     scheduler = start_scheduler()
 
     assert request.resource == {:todo_search, root}
     assert request.effect.root == root
+    assert request.effect.activation_id == snapshot.activation_id
     assert EffectScheduler.schedule(scheduler, request) == {:ok, request.id, :running}
 
     outcome = receive_candidate(scheduler, request.id, :failed)

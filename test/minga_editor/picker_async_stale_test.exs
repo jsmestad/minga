@@ -217,10 +217,11 @@ defmodule MingaEditor.PickerAsyncStaleTest do
     state = :sys.get_state(ctx.editor, @sync_timeout)
     {:ok, captured_root} = Root.directory(root_path)
     {:ok, reroot} = Root.directory(reroot_path)
-    assert Project.workspace_root() == captured_root
+    captured_snapshot = Project.snapshot()
+    assert captured_snapshot.root == captured_root
     assert {:ok, _snapshot} = Project.activate(reroot)
 
-    request = TodoSearch.request(captured_root, revision)
+    request = TodoSearch.request(captured_snapshot, revision)
 
     result = %TodoSearch.Result{
       revision: revision,

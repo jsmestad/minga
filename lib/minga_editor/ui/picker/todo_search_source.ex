@@ -15,15 +15,19 @@ defmodule MingaEditor.UI.Picker.TodoSearchSource do
   alias Minga.Buffer
   alias Minga.Language
   alias Minga.Language.Devicon
+  alias Minga.Project.Root
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.Source
+
+  @max_results 1_000
 
   @type marker :: %{
           path: String.t(),
           line: pos_integer(),
           text: String.t()
         }
+  @type output_format :: :git | :grep
 
   @impl true
   @spec title() :: String.t()
@@ -41,27 +45,24 @@ defmodule MingaEditor.UI.Picker.TodoSearchSource do
   @spec candidates(Context.t()) :: [Item.t()]
   def candidates(_context), do: []
 
-  @doc "Parses grep-style `path:line:text` output into marker maps."
-  @spec parse_output(String.t()) :: [marker()]
-  def parse_output(output) when is_binary(output) do
-    output
-    |> String.split("\n", trim: true)
-    |> Enum.flat_map(&parse_line/1)
+  @doc "Maximum number of parsed TODO matches returned by one search."
+  @spec max_results() :: pos_integer()
+  def max_results, do: @max_results
+
+  @doc "Parses NUL-framed grep output and reports whether matches were truncated."
+  @spec parse_output(String.t(), output_format()) :: {[marker()], boolean()}
+  def parse_output(output, format) when is_binary(output) and format in [:git, :grep] do
+    markers = parse_records(output, format, @max_results + 1, [])
+    truncated? = length(markers) > @max_results
+    {Enum.take(markers, @max_results), truncated?}
   end
 
-  @doc "Builds picker items using the canonical root authorized by TODO search."
-  @spec build_candidates([marker()] | {:ok, String.t()} | {:error, String.t()}, String.t()) :: [
-          Item.t()
-        ]
-  def build_candidates({:ok, output}, canonical_root),
-    do: output |> parse_output() |> build_candidates(canonical_root)
-
-  def build_candidates({:error, _message}, _canonical_root), do: []
-
-  def build_candidates(markers, canonical_root) when is_list(markers) do
+  @doc "Builds picker items only for candidates authorized by the captured workspace Root."
+  @spec build_candidates([marker()], Root.t()) :: [Item.t()]
+  def build_candidates(markers, %Root{} = root) when is_list(markers) do
     markers
     |> Enum.with_index()
-    |> Enum.map(fn {marker, idx} -> marker_item(marker, idx, canonical_root) end)
+    |> Enum.flat_map(fn {marker, idx} -> marker_item(marker, idx, root) end)
   end
 
   @impl true
@@ -76,25 +77,83 @@ defmodule MingaEditor.UI.Picker.TodoSearchSource do
   @spec on_cancel(term()) :: term()
   def on_cancel(state), do: Source.restore_or_keep(state)
 
-  @spec parse_line(String.t()) :: [marker()]
-  defp parse_line(line) do
-    case String.split(line, ":", parts: 3) do
-      [path, line_number, text] -> parse_match(path, line_number, text)
-      _ -> []
+  @spec parse_records(binary(), output_format(), non_neg_integer(), [marker()]) :: [marker()]
+  defp parse_records(_output, _format, 0, acc), do: Enum.reverse(acc)
+  defp parse_records("", _format, _remaining, acc), do: Enum.reverse(acc)
+
+  defp parse_records(output, :git, remaining, acc) do
+    with {:ok, path, after_path} <- split_once(output, <<0>>),
+         {:ok, line_number, after_line} <- split_once(after_path, <<0>>),
+         {:ok, text, rest} <- take_record_line(after_line) do
+      parse_records(rest, :git, remaining - 1, add_match(acc, path, line_number, text))
+    else
+      :error -> Enum.reverse(acc)
     end
   end
 
-  @spec parse_match(String.t(), String.t(), String.t()) :: [marker()]
-  defp parse_match(path, line_number, text) do
+  defp parse_records(output, :grep, remaining, acc) do
+    with {:ok, path, after_path} <- split_once(output, <<0>>),
+         {:ok, record, rest} <- take_record_line(after_path),
+         [line_number, text] <- String.split(record, ":", parts: 2) do
+      parse_records(rest, :grep, remaining - 1, add_match(acc, path, line_number, text))
+    else
+      _ -> Enum.reverse(acc)
+    end
+  end
+
+  @spec add_match([marker()], String.t(), String.t(), String.t()) :: [marker()]
+  defp add_match(acc, path, line_number, text) do
     case Integer.parse(line_number) do
-      {line, ""} when line > 0 -> [%{path: path, line: line, text: text}]
-      _ -> []
+      {line, ""} when line > 0 -> [%{path: path, line: line, text: text} | acc]
+      _ -> acc
     end
   end
 
-  @spec marker_item(marker(), non_neg_integer(), String.t()) :: Item.t()
-  defp marker_item(marker, idx, canonical_root) do
-    path = Path.expand(marker.path, canonical_root)
+  @spec split_once(binary(), binary()) :: {:ok, binary(), binary()} | :error
+  defp split_once(binary, delimiter) do
+    case :binary.match(binary, delimiter) do
+      {offset, length} ->
+        before = binary_part(binary, 0, offset)
+        rest_offset = offset + length
+        rest = binary_part(binary, rest_offset, byte_size(binary) - rest_offset)
+        {:ok, before, rest}
+
+      :nomatch ->
+        :error
+    end
+  end
+
+  @spec take_record_line(binary()) :: {:ok, binary(), binary()} | :error
+  defp take_record_line(""), do: :error
+
+  defp take_record_line(binary) do
+    case split_once(binary, "\n") do
+      {:ok, line, rest} -> {:ok, line, rest}
+      :error -> {:ok, binary, ""}
+    end
+  end
+
+  @spec marker_item(marker(), non_neg_integer(), Root.t()) :: [Item.t()]
+  defp marker_item(marker, idx, %Root{} = root) do
+    relative_path = candidate_relative_path(marker.path, root.path)
+
+    case Root.resolve_file(root, relative_path) do
+      {:ok, path} -> [authorized_item(marker, idx, path, root.path)]
+      {:error, _reason} -> []
+    end
+  end
+
+  @spec candidate_relative_path(String.t(), String.t()) :: String.t()
+  defp candidate_relative_path(path, canonical_root) do
+    case Path.type(path) do
+      :absolute -> Path.relative_to(path, canonical_root)
+      :relative -> path
+      :volumerelative -> path
+    end
+  end
+
+  @spec authorized_item(marker(), non_neg_integer(), String.t(), String.t()) :: Item.t()
+  defp authorized_item(marker, idx, path, canonical_root) do
     rel_path = Path.relative_to(path, canonical_root)
     filename = Path.basename(path)
     filetype = Language.detect_filetype(filename)
