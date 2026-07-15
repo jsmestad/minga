@@ -169,6 +169,8 @@ defmodule MingaEditor.UI.Picker.FileSourceProjectSwitchTest do
     {:ok, root_b} = Root.directory(project_b)
     {:ok, stale_candidate} = ProjectFileCandidate.new(root_a, relative_path)
 
+    activate_project!(root_a)
+    existing_score = Map.get(Project.frecency_scores(), relative_path, 0)
     activate_project!(root_b)
 
     initial_state =
@@ -190,7 +192,7 @@ defmodule MingaEditor.UI.Picker.FileSourceProjectSwitchTest do
 
     activate_project!(root_a)
     assert Project.recent_files() == [relative_path]
-    assert Project.frecency_scores() == %{relative_path => 100}
+    assert Project.frecency_scores()[relative_path] == existing_score + 100
   end
 
   @spec activate_project!(Root.t()) :: :ok
