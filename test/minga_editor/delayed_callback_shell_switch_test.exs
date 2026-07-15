@@ -40,22 +40,6 @@ defmodule MingaEditor.DelayedCallbackShellSwitchTest do
     :ok
   end
 
-  test "commit generation success clears ownership without touching or replaying a foreign shell" do
-    assert_commit_generation_result_is_dropped(
-      {:git_commit_message_generated, {:ok, "Generated subject"}}
-    )
-  end
-
-  test "commit generation error clears ownership without touching or replaying a foreign shell" do
-    assert_commit_generation_result_is_dropped(
-      {:git_commit_message_generated, {:error, "generation failed"}}
-    )
-  end
-
-  test "commit generation timeout clears ownership without touching or replaying a foreign shell" do
-    assert_commit_generation_result_is_dropped(:git_generate_timeout)
-  end
-
   test "picker candidate delivery is dropped without touching or replaying a foreign shell" do
     {traditional_state, revision} =
       TestHelpers.base_state(rendering: :disabled)
@@ -145,35 +129,5 @@ defmodule MingaEditor.DelayedCallbackShellSwitchTest do
     refute TraditionalShellState.space_leader_pending?(restored_shell_state)
     assert TraditionalShellState.space_leader_timer(restored_shell_state) == nil
     assert TraditionalShellState.click_regions(restored_shell_state) == %ClickRegions{}
-  end
-
-  defp assert_commit_generation_result_is_dropped(message) do
-    generation_ref = make_ref()
-
-    state =
-      TestHelpers.base_state(rendering: :disabled)
-      |> then(fn state ->
-        %{state | git: MingaEditor.State.Git.await_commit_generation(state.git, generation_ref)}
-      end)
-      |> ShellWorkflow.switch(:fake)
-
-    foreign_shell_state = Runtime.state(state.shell_runtime)
-    message_store = state.render.message_store
-
-    assert {:noreply, new_state} = MingaEditor.handle_info(message, state)
-    assert new_state.git.git_commit_gen_ref == nil
-    assert Runtime.state(new_state.shell_runtime) == foreign_shell_state
-    assert new_state.render.message_store == message_store
-
-    assert new_state == %{
-             state
-             | git: MingaEditor.State.Git.await_commit_generation(state.git, nil)
-           }
-
-    restored = ShellWorkflow.switch(new_state, :traditional)
-    assert %TraditionalShellState{} = Runtime.state(restored.shell_runtime)
-    assert Runtime.state(restored.shell_runtime).modal == :none
-    assert Runtime.state(restored.shell_runtime).notice.message == nil
-    assert restored.render.message_store == message_store
   end
 end

@@ -34,7 +34,7 @@ defmodule MingaEditor.Effects.ExternalFormat do
       %__MODULE__{buffer: buffer, formatter: formatter},
       {:buffer, buffer},
       Policy.latest_wins(),
-      operation_id
+      operation_id: operation_id
     )
   end
 

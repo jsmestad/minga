@@ -6,7 +6,7 @@ defmodule MingaEditor.EffectScheduler.State do
   alias MingaEditor.Effect.Request
 
   @typedoc "A running request and its supervised worker, if the worker started."
-  @type running :: %{task: Task.t() | nil, request: Request.t()}
+  @type running :: %{task: Task.t() | nil, request: Request.t(), timer: reference() | nil}
 
   @typedoc "One resource lane with a stable scheduling policy."
   @type lane :: %{
@@ -24,6 +24,7 @@ defmodule MingaEditor.EffectScheduler.State do
     :admitted,
     :lanes,
     :tasks,
+    :timers,
     :pending,
     :claimed
   ]
@@ -36,6 +37,7 @@ defmodule MingaEditor.EffectScheduler.State do
     :admitted,
     :lanes,
     :tasks,
+    :timers,
     :pending,
     :claimed
   ]
@@ -49,6 +51,7 @@ defmodule MingaEditor.EffectScheduler.State do
           admitted: MapSet.t(Request.id()),
           lanes: %{optional(Request.resource()) => lane()},
           tasks: %{optional(reference()) => Request.resource()},
+          timers: %{optional(reference()) => Request.id()},
           pending: %{optional(Request.id()) => Outcome.t()},
           claimed: MapSet.t(Request.id())
         }
@@ -65,6 +68,7 @@ defmodule MingaEditor.EffectScheduler.State do
       admitted: MapSet.new(),
       lanes: %{},
       tasks: %{},
+      timers: %{},
       pending: %{},
       claimed: MapSet.new()
     }

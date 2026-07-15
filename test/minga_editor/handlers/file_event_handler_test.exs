@@ -498,19 +498,6 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
     end
   end
 
-  describe "git_remote_result" do
-    test "returns handle_git_remote_result effect" do
-      state = base_state()
-      ref = make_ref()
-      event = {:git_remote_result, ref, :ok}
-
-      {_state, effects} = FileEventHandler.handle(state, event)
-
-      assert {:handle_git_remote_result, ^ref, :ok} =
-               Enum.find(effects, &match?({:handle_git_remote_result, _, _}, &1))
-    end
-  end
-
   describe "catch-all" do
     test "unknown messages return no-op" do
       state = base_state()

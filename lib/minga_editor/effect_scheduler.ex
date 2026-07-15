@@ -92,6 +92,16 @@ defmodule MingaEditor.EffectScheduler do
     :exit, _reason -> false
   end
 
+  @doc "Returns whether any queued, running, or pending request advertises an activity."
+  @spec active_activity?(server() | nil, atom()) :: boolean()
+  def active_activity?(nil, _activity), do: false
+
+  def active_activity?(server, activity) when is_atom(activity) do
+    GenServer.call(server, {:active_activity?, activity})
+  catch
+    :exit, _reason -> false
+  end
+
   @doc "Returns whether an exact request still holds scheduler admission."
   @spec admitted?(server() | nil, Request.id()) :: boolean()
   def admitted?(nil, _request_id), do: false
@@ -172,6 +182,9 @@ defmodule MingaEditor.EffectScheduler do
   def handle_call({:active_source?, source}, _from, state),
     do: {:reply, Engine.active_source?(state, source), state}
 
+  def handle_call({:active_activity?, activity}, _from, state),
+    do: {:reply, Engine.active_activity?(state, activity), state}
+
   def handle_call({:admitted?, request_id}, _from, state),
     do: {:reply, Engine.admitted?(state, request_id), state}
 
@@ -191,6 +204,10 @@ defmodule MingaEditor.EffectScheduler do
   @impl true
   def handle_info({task_ref, result}, state) when is_reference(task_ref),
     do: {:noreply, Engine.task_result(state, task_ref, result)}
+
+  def handle_info({:effect_timeout, request_id}, state) when is_reference(request_id) do
+    {:noreply, Engine.timeout(state, request_id)}
+  end
 
   def handle_info({:DOWN, ref, :process, pid, reason}, state),
     do: {:noreply, Engine.process_down(state, ref, pid, reason)}

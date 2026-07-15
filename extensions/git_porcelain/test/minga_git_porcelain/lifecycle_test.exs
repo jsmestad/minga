@@ -13,11 +13,19 @@ defmodule MingaGitPorcelain.LifecycleTest do
   alias Minga.Keymap.Bindings
   alias Minga.Keymap.KeyParser
   alias Minga.Keymap.Scope
+  alias MingaEditor.Effect.Outcome
+  alias MingaEditor.EffectScheduler
   alias MingaEditor.Input
+  alias MingaGitPorcelain.Effects.CommitMessageGeneration
+  alias MingaGitPorcelain.Effects.RemoteOperation
+  alias MingaGitPorcelain.Test.EffectDependencies, as: Dependencies
 
   @source {:extension, :minga_git_porcelain}
+  @other_source {:extension, :unrelated_extension}
+  @timeout 2_000
 
   setup do
+    Dependencies.reset(self())
     cleanup_git_porcelain_contributions()
 
     on_exit(fn ->
@@ -25,6 +33,111 @@ defmodule MingaGitPorcelain.LifecycleTest do
     end)
 
     :ok
+  end
+
+  test "disable cancels only Git Porcelain work before runtime termination and rejects late delivery" do
+    ctx = start_lifecycle_context()
+    runtime = start_git_porcelain!(ctx)
+    {scheduler, _task_supervisor} = start_scheduler()
+
+    Dependencies.put({:remote, :push}, {:block, :ok})
+    Dependencies.put({:remote, :pull}, {:block, :ok})
+
+    git_request =
+      RemoteOperation.request("/tmp/git-owned", :push,
+        source: @source,
+        git: Dependencies,
+        admission: Dependencies,
+        refresher: Dependencies,
+        timeout_ms: 60_000
+      )
+
+    unrelated_request =
+      RemoteOperation.request("/tmp/unrelated", :pull,
+        source: @other_source,
+        git: Dependencies,
+        admission: Dependencies,
+        refresher: Dependencies,
+        timeout_ms: 60_000
+      )
+
+    assert {:ok, _, :running} = EffectScheduler.schedule(scheduler, git_request)
+    assert {:ok, _, :running} = EffectScheduler.schedule(scheduler, unrelated_request)
+    assert_receive {:dependency_called, {:remote, :push}, git_worker, "/tmp/git-owned"}, @timeout
+
+    assert_receive {:dependency_called, {:remote, :pull}, unrelated_worker, "/tmp/unrelated"},
+                   @timeout
+
+    git_worker_monitor = Process.monitor(git_worker)
+    unrelated_worker_monitor = Process.monitor(unrelated_worker)
+    runtime_monitor = Process.monitor(runtime)
+
+    task_ref = running_task_ref(scheduler, git_request.id)
+    stop_git_porcelain!(ctx, callbacks(scheduler))
+
+    assert_receive {:DOWN, ^git_worker_monitor, :process, ^git_worker, _reason}, @timeout
+    assert_receive {:DOWN, ^runtime_monitor, :process, ^runtime, _reason}, @timeout
+    refute EffectScheduler.active_source?(scheduler, @source)
+    assert EffectScheduler.active_source?(scheduler, @other_source)
+    refute_received {:DOWN, ^unrelated_worker_monitor, :process, ^unrelated_worker, _reason}
+
+    assert_receive {:effect_terminal,
+                    %Outcome{
+                      status: :canceled,
+                      reason: :source_canceled,
+                      request: %{id: git_request_id}
+                    }},
+                   @timeout
+
+    assert git_request_id == git_request.id
+
+    send(scheduler, {task_ref, {:ok, :late}})
+    send(scheduler, {:effect_timeout, git_request.id})
+    _barrier = EffectScheduler.stats(scheduler)
+    refute_received {:effect_result, ^scheduler, %Outcome{request: %{id: ^git_request_id}}}
+
+    send(unrelated_worker, {:release_dependency, {:remote, :pull}})
+    unrelated_outcome = receive_candidate(scheduler, unrelated_request.id, :completed)
+    assert :ok = EffectScheduler.claim(scheduler, unrelated_outcome)
+    EffectScheduler.finalize(scheduler, unrelated_outcome)
+    _barrier = EffectScheduler.stats(scheduler)
+
+    assert_receive {:DOWN, ^unrelated_worker_monitor, :process, ^unrelated_worker, :normal},
+                   @timeout
+  end
+
+  test "disable terminalizes a pending commit result before extension code is removed" do
+    ctx = start_lifecycle_context()
+    _runtime = start_git_porcelain!(ctx)
+    {scheduler, _task_supervisor} = start_scheduler()
+
+    request =
+      CommitMessageGeneration.request(
+        source: @source,
+        git: Dependencies,
+        project: Dependencies,
+        generator: Dependencies,
+        admission: Dependencies,
+        timeout_ms: 60_000
+      )
+
+    assert {:ok, _, :running} = EffectScheduler.schedule(scheduler, request)
+    delayed = receive_candidate(scheduler, request.id, :completed)
+    assert EffectScheduler.active_source?(scheduler, @source)
+
+    stop_git_porcelain!(ctx, callbacks(scheduler))
+
+    assert_receive {:effect_terminal,
+                    %Outcome{
+                      status: :canceled,
+                      reason: :source_canceled,
+                      request: %{id: request_id}
+                    }},
+                   @timeout
+
+    assert request_id == request.id
+    assert EffectScheduler.claim(scheduler, delayed) == {:error, :not_pending}
+    refute EffectScheduler.active_source?(scheduler, @source)
   end
 
   test "reload terminates the old child and replaces source-owned contributions without duplicates" do
@@ -89,8 +202,11 @@ defmodule MingaGitPorcelain.LifecycleTest do
     pid
   end
 
-  defp stop_git_porcelain!(ctx) do
+  defp stop_git_porcelain!(ctx, callbacks \\ nil) do
     {:ok, entry} = ExtRegistry.get(ctx.registry, :minga_git_porcelain)
+
+    opts = [command_registry: ctx.command_registry, keymap: ctx.keymap]
+    opts = if callbacks == nil, do: opts, else: Keyword.put(opts, :callbacks, callbacks)
 
     assert :ok =
              ExtSupervisor.stop_extension(
@@ -98,8 +214,7 @@ defmodule MingaGitPorcelain.LifecycleTest do
                ctx.registry,
                :minga_git_porcelain,
                entry,
-               command_registry: ctx.command_registry,
-               keymap: ctx.keymap
+               opts
              )
   end
 
@@ -124,6 +239,50 @@ defmodule MingaGitPorcelain.LifecycleTest do
     keymap
     |> ActiveKeymap.leader_trie()
     |> Bindings.lookup_sequence(keys)
+  end
+
+  defp start_scheduler do
+    task_supervisor =
+      start_supervised!(Supervisor.child_spec({Task.Supervisor, []}, id: make_ref()))
+
+    scheduler =
+      start_supervised!(
+        Supervisor.child_spec(
+          {EffectScheduler, task_supervisor: task_supervisor, observer: self()},
+          id: make_ref()
+        )
+      )
+
+    :ok = EffectScheduler.attach(scheduler, self())
+    {scheduler, task_supervisor}
+  end
+
+  defp callbacks(scheduler) do
+    %{
+      editor_effects: &EffectScheduler.cancel_source(scheduler, &1),
+      input_handlers: &Input.unregister_source/1,
+      keymap_scopes: &Scope.unregister_source/1
+    }
+  end
+
+  defp running_task_ref(scheduler, request_id) do
+    scheduler
+    |> :sys.get_state()
+    |> Map.fetch!(:lanes)
+    |> Map.values()
+    |> Enum.find_value(fn
+      %{running: %{request: %{id: ^request_id}, task: task}} -> task.ref
+      _lane -> nil
+    end)
+  end
+
+  defp receive_candidate(scheduler, request_id, status) do
+    assert_receive {:effect_result, ^scheduler,
+                    %Outcome{status: ^status, request: %{id: id}} = outcome}
+                   when id == request_id,
+                   @timeout
+
+    outcome
   end
 
   defp cleanup_git_porcelain_contributions do

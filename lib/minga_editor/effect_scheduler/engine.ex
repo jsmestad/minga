@@ -70,6 +70,12 @@ defmodule MingaEditor.EffectScheduler.Engine do
           boolean()
   def active_source?(%State{} = state, source), do: request_active?(state, &(&1.source == source))
 
+  @doc "Returns whether any active request advertises a semantic activity."
+  @spec active_activity?(State.t(), atom()) :: boolean()
+  def active_activity?(%State{} = state, activity) when is_atom(activity) do
+    request_active?(state, &(&1.activity == activity))
+  end
+
   @doc "Returns whether an exact request still holds scheduler admission."
   @spec admitted?(State.t(), Request.id()) :: boolean()
   def admitted?(%State{} = state, request_id) when is_reference(request_id) do
@@ -141,6 +147,30 @@ defmodule MingaEditor.EffectScheduler.Engine do
     end
   end
 
+  @doc "Processes a scheduler-owned request timeout."
+  @spec timeout(State.t(), Request.id()) :: State.t()
+  def timeout(%State{} = state, request_id) do
+    case Enum.find_value(state.timers, fn
+           {timer_ref, ^request_id} -> timer_ref
+           {_timer_ref, _other_request_id} -> nil
+         end) do
+      nil -> state
+      timer_ref -> timeout(state, timer_ref, request_id)
+    end
+  end
+
+  @spec timeout(State.t(), reference(), Request.id()) :: State.t()
+  defp timeout(%State{} = state, timer_ref, request_id) do
+    case Map.pop(state.timers, timer_ref) do
+      {^request_id, timers} ->
+        state = %{state | timers: timers}
+        timeout_running(state, request_id)
+
+      {_other, _timers} ->
+        state
+    end
+  end
+
   @doc "Processes a successful worker reply."
   @spec task_result(State.t(), reference(), term()) :: State.t()
   def task_result(%State{} = state, task_ref, result) do
@@ -150,7 +180,7 @@ defmodule MingaEditor.EffectScheduler.Engine do
 
       {resource, tasks} ->
         Process.demonitor(task_ref, [:flush])
-        state = %{state | tasks: tasks}
+        state = %{state | tasks: tasks} |> clear_running_timer(resource)
         finish_running(state, resource, outcome_from_result(state, resource, result))
     end
   end
@@ -173,7 +203,7 @@ defmodule MingaEditor.EffectScheduler.Engine do
         state
 
       {resource, tasks} ->
-        state = %{state | tasks: tasks}
+        state = %{state | tasks: tasks} |> clear_running_timer(resource)
         request = running_request(state, resource)
         finish_running(state, resource, Outcome.failed(request, {:worker_exit, reason}))
     end
@@ -315,16 +345,19 @@ defmodule MingaEditor.EffectScheduler.Engine do
   defp start_request(state, resource, request) do
     notify_lifecycle(state.owner, Outcome.running(request))
     lane = Map.fetch!(state.lanes, resource)
-    state = put_lane(state, resource, %{lane | running: %{task: nil, request: request}})
+
+    state =
+      put_lane(state, resource, %{lane | running: %{task: nil, request: request, timer: nil}})
 
     case start_task(state.task_supervisor, request) do
       {:ok, task} ->
         lane = Map.fetch!(state.lanes, resource)
-        lane = %{lane | running: %{task: task, request: request}}
+        lane = %{lane | running: %{task: task, request: request, timer: nil}}
 
         state
         |> put_lane(resource, lane)
         |> put_in([Access.key(:tasks), task.ref], resource)
+        |> arm_timeout(resource, request, task.ref)
 
       {:error, reason} ->
         deliver_result(state, Outcome.failed(request, {:start_failed, reason}))
@@ -351,13 +384,60 @@ defmodule MingaEditor.EffectScheduler.Engine do
     Outcome.completed(running_request(state, resource), result)
   end
 
+  @spec timeout_running(State.t(), Request.id()) :: State.t()
+  defp timeout_running(state, request_id) do
+    case Enum.find(state.lanes, fn {_resource, lane} ->
+           match?(%{request: %{id: ^request_id}}, lane.running)
+         end) do
+      {resource, %{running: running} = lane} ->
+        state = stop_running_task(state, running)
+        state = put_lane(state, resource, %{lane | running: %{running | task: nil, timer: nil}})
+        finish_running(state, resource, Outcome.failed(running.request, :timeout))
+
+      nil ->
+        state
+    end
+  end
+
+  @spec arm_timeout(State.t(), Request.resource(), Request.t(), reference()) :: State.t()
+  defp arm_timeout(state, _resource, %Request{timeout_ms: nil}, _task_ref), do: state
+
+  defp arm_timeout(state, resource, %Request{timeout_ms: timeout_ms, id: request_id}, _task_ref) do
+    timer_ref = Process.send_after(self(), {:effect_timeout, request_id}, timeout_ms)
+    lane = Map.fetch!(state.lanes, resource)
+    running = Map.fetch!(lane, :running)
+
+    put_lane(state, resource, %{lane | running: %{running | timer: timer_ref}})
+    |> Map.update!(:timers, &Map.put(&1, timer_ref, request_id))
+  end
+
+  @spec clear_running_timer(State.t(), Request.resource()) :: State.t()
+  defp clear_running_timer(state, resource) do
+    case Map.get(state.lanes, resource) do
+      %{running: %{timer: timer}} = lane when is_reference(timer) ->
+        cancel_timer(state, timer)
+        |> put_lane(resource, %{lane | running: %{lane.running | timer: nil}})
+
+      _lane ->
+        state
+    end
+  end
+
+  @spec cancel_timer(State.t(), reference() | nil) :: State.t()
+  defp cancel_timer(state, nil), do: state
+
+  defp cancel_timer(state, timer_ref) do
+    _ = Process.cancel_timer(timer_ref)
+    %{state | timers: Map.delete(state.timers, timer_ref)}
+  end
+
   @spec finish_running(State.t(), Request.resource(), Outcome.t()) :: State.t()
   defp finish_running(state, resource, outcome) do
     lane = Map.fetch!(state.lanes, resource)
     running = Map.fetch!(lane, :running)
 
     state
-    |> put_lane(resource, %{lane | running: %{running | task: nil}})
+    |> put_lane(resource, %{lane | running: %{running | task: nil, timer: nil}})
     |> deliver_result(outcome)
   end
 
@@ -396,12 +476,14 @@ defmodule MingaEditor.EffectScheduler.Engine do
   end
 
   @spec stop_running_task(State.t(), State.running() | nil) :: State.t()
-  defp stop_running_task(state, %{task: %Task{} = task}) do
+  defp stop_running_task(state, %{task: %Task{} = task, timer: timer}) do
     _shutdown_result = Task.shutdown(task, :brutal_kill)
     Process.demonitor(task.ref, [:flush])
-    %{state | tasks: Map.delete(state.tasks, task.ref)}
+    state = %{state | tasks: Map.delete(state.tasks, task.ref)}
+    cancel_timer(state, timer)
   end
 
+  defp stop_running_task(state, %{timer: timer}), do: cancel_timer(state, timer)
   defp stop_running_task(state, _running), do: state
 
   @spec current_request(State.running() | nil) :: [Request.t()]
@@ -413,15 +495,13 @@ defmodule MingaEditor.EffectScheduler.Engine do
   defp cancel_running_without_advance(
          state,
          resource,
-         %{running: %{task: %Task{} = task} = running} = lane,
+         %{running: %{task: %Task{} = _task} = running} = lane,
          reason
        ) do
-    _shutdown_result = Task.shutdown(task, :brutal_kill)
-    Process.demonitor(task.ref, [:flush])
+    state = stop_running_task(state, running)
 
     state
-    |> Map.put(:tasks, Map.delete(state.tasks, task.ref))
-    |> put_lane(resource, %{lane | running: %{running | task: nil}})
+    |> put_lane(resource, %{lane | running: %{running | task: nil, timer: nil}})
     |> deliver_result(Outcome.canceled(running.request, reason))
   end
 
@@ -716,9 +796,13 @@ defmodule MingaEditor.EffectScheduler.Engine do
       |> Map.new(fn request -> {request.id, request} end)
 
     Enum.each(state.lanes, fn
-      {_resource, %{running: %{task: %Task{} = task}}} ->
+      {_resource, %{running: %{task: %Task{} = task, timer: timer}}} ->
         _shutdown_result = Task.shutdown(task, :brutal_kill)
         Process.demonitor(task.ref, [:flush])
+        cancel_timer_ref(timer)
+
+      {_resource, %{running: %{timer: timer}}} ->
+        cancel_timer_ref(timer)
 
       _lane ->
         :ok
@@ -737,7 +821,16 @@ defmodule MingaEditor.EffectScheduler.Engine do
         tasks: %{},
         pending: %{},
         admitted: MapSet.new(),
-        claimed: MapSet.new()
+        claimed: MapSet.new(),
+        timers: %{}
     }
+  end
+
+  @spec cancel_timer_ref(reference() | nil) :: :ok
+  defp cancel_timer_ref(nil), do: :ok
+
+  defp cancel_timer_ref(timer_ref) do
+    _ = Process.cancel_timer(timer_ref)
+    :ok
   end
 end

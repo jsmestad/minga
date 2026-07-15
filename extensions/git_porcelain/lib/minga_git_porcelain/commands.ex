@@ -11,19 +11,19 @@ defmodule MingaGitPorcelain.Commands do
   alias Minga.Core.DiffView
   alias Minga.Core.Face
   alias MingaEditor.BufferLifecycle
+  alias MingaEditor.EffectScheduler
   alias MingaEditor.Commands
   alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
   alias MingaEditor.Layout
   alias MingaEditor.PickerUI
   alias MingaEditor.Session.State, as: SessionState
-  alias MingaEditor.Shell.Runtime
-  alias MingaEditor.Shell.Traditional.GitToast
   alias MingaEditor.Shell.Traditional.GitToastWorkflow
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
-  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Git, as: GitState
+  alias MingaGitPorcelain.Effects.CommitMessageGeneration
+  alias MingaGitPorcelain.Effects.RemoteOperation
   alias Minga.Git
   alias Minga.Git.MergeConflict
   alias Minga.Git.MergeConflict.Region
@@ -34,13 +34,6 @@ defmodule MingaGitPorcelain.Commands do
   alias MingaGitPorcelain.UI.Picker.GitStashSource
 
   @type state :: EditorState.t()
-
-  @pull_retry_markers [
-    "non-fast-forward",
-    "fetch first",
-    "remote contains work",
-    "tip of your current branch is behind"
-  ]
 
   @command_specs [
     {:git_status_toggle, "Git status", false},
@@ -162,27 +155,10 @@ defmodule MingaGitPorcelain.Commands do
     end)
   end
 
-  def execute(state, :git_push) do
-    git_remote_action(state, &Git.push/1, "Pushing…", "Pushed", "Push failed")
-  end
-
-  def execute(state, :git_pull) do
-    git_remote_action(state, &Git.pull/1, "Pulling…", "Pulled", "Pull failed")
-  end
-
-  def execute(state, :git_fetch) do
-    git_remote_action(state, &Git.fetch_remotes/1, "Fetching…", "Fetched", "Fetch failed")
-  end
-
-  def execute(state, :git_pull_and_retry) do
-    git_remote_action(
-      state,
-      &pull_then_push/1,
-      "Pulling and retrying…",
-      "Pushed",
-      "Pull and retry failed"
-    )
-  end
+  def execute(state, :git_push), do: schedule_remote(state, :push)
+  def execute(state, :git_pull), do: schedule_remote(state, :pull)
+  def execute(state, :git_fetch), do: schedule_remote(state, :fetch)
+  def execute(state, :git_pull_and_retry), do: schedule_remote(state, :pull_and_retry)
 
   # ── Diff view ──────────────────────────────────────────────────────────────
 
@@ -367,6 +343,44 @@ defmodule MingaGitPorcelain.Commands do
           MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Blame unavailable")
       end
     end)
+  end
+
+  @doc "Schedules a remote operation for both command and Git-status entry points."
+  @spec schedule_remote(state(), RemoteOperation.operation(), keyword()) :: state()
+  def schedule_remote(state, operation, opts \\ []) when is_list(opts) do
+    with_git_root(state, fn git_root ->
+      request = RemoteOperation.request(git_root, operation, opts)
+
+      case EffectScheduler.schedule(state.effect_scheduler, request) do
+        {:ok, _request_id, _disposition} ->
+          state
+          |> GitToastWorkflow.dismiss()
+          |> NoticeWorkflow.publish(progress_message(operation))
+
+        {:error, reason} when reason in [:already_admitted, :queue_full] ->
+          NoticeWorkflow.publish(state, "Git operation already in progress")
+
+        {:error, reason} ->
+          NoticeWorkflow.publish(state, "Git operation not scheduled: #{inspect(reason)}")
+      end
+    end)
+  end
+
+  @doc "Schedules staged-diff commit-message generation."
+  @spec schedule_commit_generation(state(), keyword()) :: state()
+  def schedule_commit_generation(state, opts \\ []) when is_list(opts) do
+    request = CommitMessageGeneration.request(opts)
+
+    case EffectScheduler.schedule(state.effect_scheduler, request) do
+      {:ok, _request_id, _disposition} ->
+        NoticeWorkflow.publish(state, "Generating commit message…")
+
+      {:error, reason} when reason in [:already_admitted, :queue_full] ->
+        NoticeWorkflow.publish(state, "Commit message generation already in progress")
+
+      {:error, reason} ->
+        NoticeWorkflow.publish(state, "AI generation failed: #{inspect(reason)}")
+    end
   end
 
   @spec navigate_merge_conflict(state(), :next | :prev) :: state()
@@ -1092,163 +1106,11 @@ defmodule MingaGitPorcelain.Commands do
     end)
   end
 
-  @doc """
-  Handles the result of an async git remote operation.
-
-  Called by `MingaEditor.handle_info/2` when a `{:git_remote_result, ref, result}`
-  message arrives. Matches the ref against the in-flight operation to ignore stale
-  results, then updates the status bar, toast banner, and cached git repo.
-  """
-  @spec handle_remote_result(state(), reference(), :ok | {:error, String.t()}) :: state()
-  def handle_remote_result(state, ref, result) do
-    case state.git.git_remote_op do
-      {^ref, task_monitor, {git_root, success_msg, error_prefix}} ->
-        Process.demonitor(task_monitor, [:flush])
-
-        refresh_repo(git_root)
-
-        {notice_message, toast_level, toast_action} =
-          remote_result_feedback(result, success_msg, error_prefix)
-
-        state = %{state | git: MingaEditor.State.Git.clear_remote_operation(state.git)}
-
-        case Runtime.state(state.shell_runtime) do
-          %TraditionalState{} ->
-            state
-            |> NoticeWorkflow.publish(notice_message)
-            |> GitToastWorkflow.publish(notice_message, toast_level, toast_action)
-
-          _foreign_shell_state ->
-            state
-        end
-
-      _ ->
-        # Stale result from a superseded operation; ignore
-        state
-    end
-  end
-
-  @spec remote_result_feedback(:ok | {:error, String.t()}, String.t(), String.t()) ::
-          {String.t(), GitToast.level(), GitToast.action()}
-  defp remote_result_feedback(:ok, success_msg, _error_prefix),
-    do: {success_msg, :success, nil}
-
-  defp remote_result_feedback({:error, reason}, _success_msg, error_prefix) do
-    error_message = "#{error_prefix}: #{reason}"
-    {error_message, :error, push_rejection_action(error_prefix, reason)}
-  end
-
-  @spec push_rejection_action(String.t(), String.t()) :: :pull_and_retry | nil
-  defp push_rejection_action("Push failed", reason) do
-    lowered = String.downcase(reason)
-
-    if Enum.any?(@pull_retry_markers, &String.contains?(lowered, &1)) do
-      :pull_and_retry
-    else
-      nil
-    end
-  end
-
-  defp push_rejection_action(_error_prefix, _reason), do: nil
-
-  @spec pull_then_push(String.t()) :: :ok | {:error, String.t()}
-  defp pull_then_push(git_root) do
-    case Git.pull(git_root) do
-      :ok -> Git.push(git_root)
-      {:error, reason} -> {:error, "pull failed: #{reason}"}
-    end
-  end
-
-  @doc """
-  Handles the `:DOWN` message for an async git remote process.
-
-  A normal exit can arrive before the explicit remote-result message, so it
-  leaves the operation in flight. Abnormal exits clear the operation and show an
-  error so future remote operations are not permanently blocked. Called by the
-  Editor's `:DOWN` handler.
-  """
-  @spec handle_remote_task_down(state(), reference(), term()) :: state() | :not_matched
-  def handle_remote_task_down(state, monitor_ref, :normal) do
-    case state.git.git_remote_op do
-      {_, ^monitor_ref, _} -> state
-      _ -> :not_matched
-    end
-  end
-
-  def handle_remote_task_down(state, monitor_ref, reason) do
-    case state.git.git_remote_op do
-      {_, ^monitor_ref, {git_root, _, _}} ->
-        refresh_repo(git_root)
-        message = "Git operation failed unexpectedly: #{format_down_reason(reason)}"
-        Minga.Log.warning(:editor, "Git remote task failed: #{inspect(reason)}")
-
-        state = %{state | git: MingaEditor.State.Git.clear_remote_operation(state.git)}
-
-        case Runtime.state(state.shell_runtime) do
-          %TraditionalState{} ->
-            state
-            |> NoticeWorkflow.publish(message)
-            |> GitToastWorkflow.publish(message, :error)
-
-          _foreign_shell_state ->
-            state
-        end
-
-      _ ->
-        :not_matched
-    end
-  end
-
-  @spec format_down_reason(term()) :: String.t()
-  defp format_down_reason(reason) when is_atom(reason), do: Atom.to_string(reason)
-
-  defp format_down_reason(reason) do
-    inspect(reason, charlists: :as_lists, limit: 5)
-  end
-
-  @spec git_remote_action(
-          state(),
-          (String.t() -> :ok | {:error, String.t()}),
-          String.t(),
-          String.t(),
-          String.t()
-        ) ::
-          state()
-  defp git_remote_action(state, _operation, _progress_msg, _success_msg, _error_prefix)
-       when state.git.git_remote_op != nil do
-    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
-      state,
-      "Git operation already in progress"
-    )
-  end
-
-  defp git_remote_action(state, operation, progress_msg, success_msg, error_prefix) do
-    case Git.root_for(Minga.Project.resolve_root()) do
-      {:ok, git_root} ->
-        ref = make_ref()
-        editor_pid = self()
-
-        {_, monitor_ref} =
-          spawn_monitor(fn ->
-            result = operation.(git_root)
-            send(editor_pid, {:git_remote_result, ref, result})
-          end)
-
-        state = GitToastWorkflow.dismiss(state)
-
-        git =
-          MingaEditor.State.Git.report_remote_operation(
-            state.git,
-            {ref, monitor_ref, {git_root, success_msg, error_prefix}}
-          )
-
-        state = %{state | git: git}
-        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, progress_msg)
-
-      :not_git ->
-        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Not in a git repository")
-    end
-  end
+  @spec progress_message(RemoteOperation.operation()) :: String.t()
+  defp progress_message(:push), do: "Pushing…"
+  defp progress_message(:pull), do: "Pulling…"
+  defp progress_message(:fetch), do: "Fetching…"
+  defp progress_message(:pull_and_retry), do: "Pulling and retrying…"
 
   @spec stash_save_status(state(), String.t()) :: state()
   defp stash_save_status(state, "No changes to stash"),
@@ -1797,74 +1659,7 @@ defmodule MingaGitPorcelain.Commands do
   end
 
   @spec generate_commit_message(state()) :: state()
-  defp generate_commit_message(%{git: %{git_commit_gen_ref: ref}} = state)
-       when ref != nil do
-    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
-      state,
-      "Commit message generation already in progress"
-    )
-  end
-
-  defp generate_commit_message(state) do
-    case resolve_git_root() do
-      nil ->
-        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Not in a git repository")
-
-      git_root ->
-        generate_from_staged_diff(state, git_root)
-    end
-  end
-
-  @spec generate_from_staged_diff(state(), String.t()) :: state()
-  defp generate_from_staged_diff(state, git_root) do
-    case Git.diff(git_root, staged: true) do
-      {:ok, ""} ->
-        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
-          state,
-          "Nothing staged to generate a message for"
-        )
-
-      {:ok, diff} ->
-        spawn_commit_message_task(state, diff)
-
-      {:error, reason} ->
-        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
-          state,
-          "Failed to read staged diff: #{reason}"
-        )
-    end
-  end
-
-  @spec spawn_commit_message_task(state(), String.t()) :: state()
-  defp spawn_commit_message_task(state, diff) do
-    case MingaGitPorcelain.Git.CommitMessageGenerator.generate(diff, self()) do
-      {:ok, _pid} ->
-        ref = make_ref()
-        timeout = MingaGitPorcelain.Git.CommitMessageGenerator.timeout_ms()
-        Process.send_after(self(), :git_generate_timeout, timeout)
-
-        git = MingaEditor.State.Git.await_commit_generation(state.git, ref)
-        state = %{state | git: git}
-
-        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Generating commit message…")
-
-      {:error, reason} ->
-        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
-          state,
-          "AI generation failed: #{inspect(reason)}"
-        )
-    end
-  end
-
-  @spec resolve_git_root() :: String.t() | nil
-  defp resolve_git_root do
-    root = Minga.Project.resolve_root()
-
-    case Git.root_for(root) do
-      {:ok, git_root} -> git_root
-      :not_git -> nil
-    end
-  end
+  defp generate_commit_message(state), do: schedule_commit_generation(state)
 
   commands(@command_specs)
 end

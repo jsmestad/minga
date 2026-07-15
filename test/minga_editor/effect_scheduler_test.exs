@@ -34,13 +34,18 @@ defmodule MingaEditor.EffectSchedulerTest do
 
   test "normal completion produces exactly one completed terminal outcome" do
     scheduler = start_scheduler()
-    request = EffectProbe.request(self(), :normal, :resource, Policy.fifo(1), {:return, :done})
+
+    request =
+      EffectProbe.request(self(), :normal, :resource, Policy.fifo(1), {:return, :done})
+      |> with_timeout()
 
     assert EffectScheduler.schedule(scheduler, request) == {:ok, request.id, :running}
     assert_receive {:effect_started, :normal, _worker, [:normal]}
     outcome = receive_candidate(scheduler, request.id, :completed)
     assert outcome.result == :done
+    assert :sys.get_state(scheduler).timers == %{}
 
+    send(scheduler, {:effect_timeout, request.id})
     finalize_once(scheduler, outcome)
     assert EffectScheduler.cancel(scheduler, request.id) == {:error, :not_found}
   end
@@ -70,21 +75,82 @@ defmodule MingaEditor.EffectSchedulerTest do
 
     raised =
       EffectProbe.request(self(), :raised, :raised_resource, Policy.fifo(0), {:raise, "boom"})
+      |> with_timeout()
 
     assert EffectScheduler.schedule(scheduler, raised) == {:ok, raised.id, :running}
     assert_receive {:effect_started, :raised, _raised_worker, [:raised]}
     raised_outcome = receive_candidate(scheduler, raised.id, :failed)
     assert match?({:worker_exit, {%RuntimeError{message: "boom"}, _stack}}, raised_outcome.reason)
+    assert :sys.get_state(scheduler).timers == %{}
     finalize_once(scheduler, raised_outcome)
 
-    killed = EffectProbe.request(self(), :killed, :killed_resource, Policy.fifo(0))
+    killed =
+      EffectProbe.request(self(), :killed, :killed_resource, Policy.fifo(0)) |> with_timeout()
+
     assert EffectScheduler.schedule(scheduler, killed) == {:ok, killed.id, :running}
     assert_receive {:effect_started, :killed, killed_worker, [:killed]}
     Process.exit(killed_worker, :kill)
 
     killed_outcome = receive_candidate(scheduler, killed.id, :failed)
     assert killed_outcome.reason == {:worker_exit, :killed}
+    assert :sys.get_state(scheduler).timers == %{}
     finalize_once(scheduler, killed_outcome)
+  end
+
+  test "request timeout terminates the worker, cleans timer, and releases admission" do
+    scheduler = start_scheduler()
+
+    request = %{
+      EffectProbe.request(self(), :timeout, :timeout_resource, Policy.fifo(0))
+      | timeout_ms: 10
+    }
+
+    assert EffectScheduler.schedule(scheduler, request) == {:ok, request.id, :running}
+    assert_receive {:effect_started, :timeout, worker, [:timeout]}, 1_000
+    worker_monitor = Process.monitor(worker)
+
+    outcome = receive_candidate(scheduler, request.id, :failed)
+    assert outcome.reason == :timeout
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, _reason}, 1_000
+
+    finalize_once(scheduler, outcome)
+    assert EffectScheduler.stats(scheduler) == stats(0, 0, 0, 0, 0)
+  end
+
+  test "timeout holds admission until apply, then advances the lane and cannot affect its successor" do
+    scheduler = start_scheduler()
+    policy = Policy.fifo(1)
+    first = EffectProbe.request(self(), :timed_out, :shared_timeout, policy) |> with_timeout()
+    second = EffectProbe.request(self(), :successor, :shared_timeout, policy) |> with_timeout()
+
+    assert {:ok, _, :running} = EffectScheduler.schedule(scheduler, first)
+    assert_receive {:effect_started, :timed_out, _worker, [:timed_out]}
+
+    [%{running: %{task: first_task}}] =
+      scheduler |> :sys.get_state() |> Map.fetch!(:lanes) |> Map.values()
+
+    assert {:ok, _, :queued} = EffectScheduler.schedule(scheduler, second)
+    send(scheduler, {:effect_timeout, first.id})
+
+    outcome = receive_candidate(scheduler, first.id, :failed)
+    assert outcome.reason == :timeout
+    assert EffectScheduler.stats(scheduler) == stats(1, 0, 1, 1, 2)
+    refute_received {:effect_started, :successor, _worker, _payloads}
+
+    finalize_once(scheduler, outcome)
+    assert_receive {:effect_started, :successor, second_worker, [:successor]}
+
+    send(scheduler, {first_task.ref, {:ok, :late_first_reply}})
+    send(scheduler, {:effect_timeout, first.id})
+    _barrier = EffectScheduler.stats(scheduler)
+    first_id = first.id
+    second_id = second.id
+    refute_received {:effect_result, ^scheduler, %Outcome{request: %{id: ^first_id}}}
+    refute_received {:effect_result, ^scheduler, %Outcome{request: %{id: ^second_id}}}
+
+    send(second_worker, {:release_effect, :successor})
+    finalize_once(scheduler, receive_candidate(scheduler, second.id, :completed))
+    assert EffectScheduler.stats(scheduler) == stats(0, 0, 0, 0, 0)
   end
 
   test "failed task start produces one failed outcome and does not wedge the resource" do
@@ -110,7 +176,7 @@ defmodule MingaEditor.EffectSchedulerTest do
 
   test "explicit cancellation wins before completion and ignores the later task exit" do
     scheduler = start_scheduler()
-    request = EffectProbe.request(self(), :cancel, :resource, Policy.fifo(0))
+    request = EffectProbe.request(self(), :cancel, :resource, Policy.fifo(0)) |> with_timeout()
 
     assert EffectScheduler.schedule(scheduler, request) == {:ok, request.id, :running}
     assert_receive {:effect_started, :cancel, worker, [:cancel]}
@@ -120,8 +186,10 @@ defmodule MingaEditor.EffectSchedulerTest do
     outcome = receive_candidate(scheduler, request.id, :canceled)
     assert outcome.reason == :requested
     assert_receive {:DOWN, ^worker_monitor, :process, ^worker, _reason}
+    assert :sys.get_state(scheduler).timers == %{}
     finalize_once(scheduler, outcome)
 
+    send(scheduler, {:effect_timeout, request.id})
     assert EffectScheduler.stats(scheduler) == stats(0, 0, 0, 0, 0)
 
     request_id = request.id
@@ -134,7 +202,10 @@ defmodule MingaEditor.EffectSchedulerTest do
     source = {:extension, :source_alpha}
     other_source = {:extension, :source_beta}
 
-    running = EffectProbe.source_request(self(), :source_running, :shared, policy, source)
+    running =
+      EffectProbe.source_request(self(), :source_running, :shared, policy, source)
+      |> with_timeout()
+
     queued = EffectProbe.source_request(self(), :source_queued, :shared, policy, source)
     retained = EffectProbe.source_request(self(), :retained, :shared, policy, other_source)
     core = EffectProbe.request(self(), :core, :core_resource, Policy.fifo(0))
@@ -152,6 +223,7 @@ defmodule MingaEditor.EffectSchedulerTest do
     refute EffectScheduler.active_source?(scheduler, source)
     assert EffectScheduler.active_source?(scheduler, other_source)
     assert_receive {:DOWN, ^worker_monitor, :process, ^worker, _reason}
+    refute Enum.any?(:sys.get_state(scheduler).timers, fn {_timer, id} -> id == running.id end)
     assert_terminal_direct(running.id, :canceled, :source_canceled)
     assert_terminal_direct(queued.id, :canceled, :source_canceled)
     assert_receive {:effect_started, :retained, retained_worker, [:retained]}
@@ -689,7 +761,7 @@ defmodule MingaEditor.EffectSchedulerTest do
     :ok = EffectScheduler.attach(scheduler, owner)
 
     policy = Policy.fifo(1)
-    running = EffectProbe.request(self(), :running, :resource, policy)
+    running = EffectProbe.request(self(), :running, :resource, policy) |> with_timeout()
     queued = EffectProbe.request(self(), :queued, :resource, policy)
     assert EffectScheduler.schedule(scheduler, running) == {:ok, running.id, :running}
     assert_receive {:effect_started, :running, worker, [:running]}
@@ -701,6 +773,7 @@ defmodule MingaEditor.EffectSchedulerTest do
     assert_terminal_direct(running.id, :canceled, :owner_shutdown)
     assert_terminal_direct(queued.id, :canceled, :owner_shutdown)
     assert_receive {:DOWN, ^worker_monitor, :process, ^worker, _reason}
+    assert :sys.get_state(scheduler).timers == %{}
     assert EffectScheduler.stats(scheduler) == stats(0, 0, 0, 0, 0)
     assert {:error, :owner_unavailable} = EffectScheduler.schedule(scheduler, running)
 
@@ -835,6 +908,9 @@ defmodule MingaEditor.EffectSchedulerTest do
     assert Supervisor.count_children(generation).active == 3
     refute_received {:effect_terminal, %Outcome{request: %{id: ^request_id}}}
   end
+
+  @spec with_timeout(Request.t()) :: Request.t()
+  defp with_timeout(%Request{} = request), do: %{request | timeout_ms: 60_000}
 
   @spec generation_child!(Supervisor.supervisor(), term()) :: pid()
   defp generation_child!(generation, child_id) do

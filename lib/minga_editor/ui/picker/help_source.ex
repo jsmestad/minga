@@ -80,7 +80,7 @@ defmodule MingaEditor.UI.Picker.HelpSource do
     |> Enum.uniq()
     |> Enum.filter(fn module -> public_elixir_module?(module) and Code.ensure_loaded?(module) end)
     |> Enum.sort_by(&Atom.to_string/1)
-    |> Enum.map(fn module -> {module, public_functions(module)} end)
+    |> Enum.flat_map(&module_export/1)
   end
 
   @spec public_elixir_module?(module()) :: boolean()
@@ -115,11 +115,16 @@ defmodule MingaEditor.UI.Picker.HelpSource do
     }
   end
 
-  @spec public_functions(module()) :: [{atom(), arity_t()}]
-  defp public_functions(module) do
-    module.__info__(:functions)
-    |> Enum.reject(&internal_function?/1)
-    |> Enum.sort()
+  @spec module_export(module()) :: [module_exports()]
+  defp module_export(module) do
+    functions =
+      module.__info__(:functions)
+      |> Enum.reject(&internal_function?/1)
+      |> Enum.sort()
+
+    [{module, functions}]
+  rescue
+    UndefinedFunctionError -> []
   end
 
   @spec function_items(module(), [{atom(), arity_t()}]) :: [Item.t()]

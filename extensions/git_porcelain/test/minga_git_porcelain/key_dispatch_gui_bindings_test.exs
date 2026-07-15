@@ -81,7 +81,8 @@ defmodule MingaGitPorcelain.KeyDispatchGUIBindingsTest do
 
     state =
       if keymap_server do
-        %{state | keymap_server: keymap_server}
+        interaction = %{state.interaction | keymap_server: keymap_server}
+        %{state | interaction: interaction}
       else
         state
       end

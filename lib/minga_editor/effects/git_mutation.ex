@@ -62,7 +62,8 @@ defmodule MingaEditor.Effects.GitMutation do
       effect,
       {:git_repository, effect.git_root},
       Policy.fifo(@max_queued),
-      operation_id
+      operation_id: operation_id,
+      activity: :git_syncing
     )
   end
 
